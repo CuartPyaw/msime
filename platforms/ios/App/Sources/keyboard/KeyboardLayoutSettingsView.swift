@@ -4,11 +4,14 @@ struct KeyboardLayoutSettingsView: View {
   @State private var keySpacing = KeyboardLayoutPreference.keySpacing
   @State private var rowSpacing = KeyboardLayoutPreference.rowSpacing
   @State private var height = KeyboardLayoutPreference.heightAdjustment
-  @State private var skin = KeyboardSkinPreference.selected
+  @State private var skin = KeyboardTheme.current
   @State private var nineKey = InputSchemePreference.scheme == .nineKey
   @State private var voice = KeyboardLayoutPreference.voiceShortcutEnabled
+  @State private var tabletFullKeys = KeyboardLayoutPreference.tabletFullKeys
+  @State private var tabOpensCandidates = true
   @State private var dragBase: (height: Double, keySpacing: Double, rowSpacing: Double)?
   @State private var dragAxis: Axis?
+  @State private var saveFailed = false
 
   private enum Axis { case vertical, horizontal }
   private static let spacingDragScale: Double = 18
@@ -19,7 +22,7 @@ struct KeyboardLayoutSettingsView: View {
       form
     }
     .tint(MetasequoiaTheme.accent)
-    .navigationTitle("键盘设置").navigationBarTitleDisplayMode(.inline)
+    .navigationTitle("键盘").navigationBarTitleDisplayMode(.inline)
     .onAppear { readPreferences() }
   }
 
@@ -48,10 +51,10 @@ struct KeyboardLayoutSettingsView: View {
       .gesture(heightDrag)
       .accessibilityIdentifier("keyboardHeightGrip")
       .accessibilityLabel("键盘高度")
-      .accessibilityValue(format(height))
+      .accessibilityValue(KeyboardGeometry.formattedHeightAdjustment(height))
       .accessibilityAdjustableAction { direction in
-        height = clamp(height + (direction == .increment ? 2 : -2), -12, 48)
-        KeyboardLayoutPreference.heightAdjustment = height
+        height = KeyboardGeometry.clamped(height + (direction == .increment ? 2 : -2), -12, 48)
+        save()
       }
   }
 
@@ -68,10 +71,12 @@ struct KeyboardLayoutSettingsView: View {
       .onChanged { value in
         let base = dragBase ?? snapshot()
         if dragBase == nil { dragBase = base }
-        height = clamp(base.height - Double(value.translation.height), -12, 48)
-        KeyboardLayoutPreference.heightAdjustment = height
+        height = KeyboardGeometry.clamped(base.height - Double(value.translation.height), -12, 48)
       }
-      .onEnded { _ in dragBase = nil }
+      .onEnded { _ in
+        dragBase = nil
+        save()
+      }
   }
 
   private var spacingDrag: some Gesture {
@@ -84,16 +89,15 @@ struct KeyboardLayoutSettingsView: View {
         dragAxis = axis
         switch axis {
         case .vertical:
-          rowSpacing = clamp(base.rowSpacing + Double(value.translation.height) / Self.spacingDragScale, 4, 10)
-          KeyboardLayoutPreference.rowSpacing = rowSpacing
+          rowSpacing = KeyboardGeometry.clamped(base.rowSpacing + Double(value.translation.height) / Self.spacingDragScale, 4, 10)
         case .horizontal:
-          keySpacing = clamp(base.keySpacing + Double(value.translation.width) / Self.spacingDragScale, 3, 6)
-          KeyboardLayoutPreference.keySpacing = keySpacing
+          keySpacing = KeyboardGeometry.clamped(base.keySpacing + Double(value.translation.width) / Self.spacingDragScale, 3, 6)
         }
       }
       .onEnded { _ in
         dragBase = nil
         dragAxis = nil
+        save()
       }
   }
 
@@ -101,33 +105,19 @@ struct KeyboardLayoutSettingsView: View {
     (height, keySpacing, rowSpacing)
   }
 
-  private func clamp(_ value: Double, _ lower: Double, _ upper: Double) -> Double {
-    min(upper, max(lower, value))
-  }
-
-  private func format(_ value: Double) -> String {
-    value > 0 ? "+\(Int(value))" : "\(Int(value))"
-  }
-
   private var form: some View {
     Form {
       Section {
         spacingRow("键盘高度", value: $height, range: -12...48, identifier: "appKeyboardHeightSlider",
-                   format: { $0 > 0 ? "+\(Int($0))" : "\(Int($0))" }) {
-          KeyboardLayoutPreference.heightAdjustment = $0
-        }
+                   format: KeyboardGeometry.formattedHeightAdjustment)
       } header: {
         Text("键盘高度")
       } footer: {
-        Text("在系统键盘高度的基础上增减，按键会跟着变高。上面的预览实时跟着走；已经打开的键盘要重新唤出才生效。")
+        Text(saveFailed ? "设置没有保存，键盘可能正在写入同一份设置，请再试一次。" : "在系统键盘高度的基础上增减，按键会跟着变高。上面的预览实时跟着走；已经打开的键盘要重新唤出才生效。")
       }
       Section {
-        spacingRow("按键间距", value: $keySpacing, range: 3...6, identifier: "appKeySpacingSlider") {
-          KeyboardLayoutPreference.keySpacing = $0
-        }
-        spacingRow("行间距", value: $rowSpacing, range: 4...10, identifier: "appRowSpacingSlider") {
-          KeyboardLayoutPreference.rowSpacing = $0
-        }
+        spacingRow("按键间距", value: $keySpacing, range: 3...6, identifier: "appKeySpacingSlider")
+        spacingRow("行间距", value: $rowSpacing, range: 4...10, identifier: "appRowSpacingSlider")
       } header: {
         Text("按键间距")
       } footer: {
@@ -136,18 +126,32 @@ struct KeyboardLayoutSettingsView: View {
       Section {
         Toggle("顶部语音入口", isOn: $voice)
           .accessibilityIdentifier("appVoiceShortcutSwitch")
-          .onChange(of: voice) { KeyboardLayoutPreference.voiceShortcutEnabled = $0 }
-        NavigationLink(destination: ServiceSettingsView(kind: .voice)) {
-          Label("语音设置", systemImage: "waveform")
-        }.accessibilityIdentifier("voiceSettingsLink")
+          .onChange(of: voice) { _ in save() }
       } header: {
         Text("快捷入口")
       } footer: {
-        Text("语音入口用于打开已识别的语音结果。")
+        Text("语音入口用于打开已识别的语音结果。识别服务在「设置 → 语音输入」里配置，工具栏上的其他按钮在「设置 → 键盘工具栏」里。")
+      }
+      if UIDevice.current.userInterfaceIdiom == .pad {
+        Section {
+          Toggle("数字行与 Tab 键", isOn: $tabletFullKeys)
+            .accessibilityIdentifier("appTabletFullKeysSwitch")
+            .onChange(of: tabletFullKeys) { KeyboardLayoutPreference.tabletFullKeys = $0 }
+          if tabletFullKeys {
+            Toggle("组字时 Tab 打开全部候选", isOn: Binding(
+              get: { tabOpensCandidates },
+              set: { saveTab($0) }))
+            .accessibilityIdentifier("appTabletTabCandidatesSwitch")
+          }
+        } header: {
+          Text("iPad")
+        } footer: {
+          Text("全尺寸键盘在字母上方多一排数字、Q 左边多一个 Tab 键。组字时数字键选候选，Tab 打开全部候选（桌面端的 Tab 翻页）；没有组字时照常输入。浮动键盘和分屏的窄窗口用 iPhone 布局，不显示这两样。\n\n外接实体键盘（妙控键盘、蓝牙键盘）时，iOS 不会把实体按键交给任何第三方键盘，实体键盘打出的是系统输入法的结果。要用水杉的拼音、候选和皮肤，请在屏幕键盘上输入。")
+        }
       }
       Section {
         Button("恢复默认", role: .destructive) {
-          KeyboardLayoutPreference.resetToDefaults()
+          saveFailed = !KeyboardLayoutPreference.resetGeometry()
           readPreferences()
         }
         .accessibilityIdentifier("appResetKeyboardSettings")
@@ -157,13 +161,41 @@ struct KeyboardLayoutSettingsView: View {
     }
   }
 
+  /// The drags and sliders only move the preview while they run; the settled value is saved here, into the shared document the keyboard reloads. A save the document refuses puts the page back to what is stored.
+  private func save() {
+    saveFailed = !KeyboardLayoutPreference.saveGeometry(
+      keySpacing: keySpacing, rowSpacing: rowSpacing, heightAdjustment: height, voiceShortcut: voice)
+    if saveFailed { readPreferences() }
+  }
+
+  private func saveTab(_ enabled: Bool) {
+    saveFailed = !KeyboardLayoutPreference.saveTabShowsMoreCandidates(enabled)
+    tabOpensCandidates = saveFailed
+      ? KeyboardLayoutPreference.tabShowsMoreCandidates(MetasequoiaInputSessionBridge.loadSharedPreferences()) : enabled
+  }
+
   private func readPreferences() {
     keySpacing = KeyboardLayoutPreference.keySpacing
     rowSpacing = KeyboardLayoutPreference.rowSpacing
     height = KeyboardLayoutPreference.heightAdjustment
-    skin = KeyboardSkinPreference.selected
+    skin = KeyboardTheme.reload(MetasequoiaInputSessionBridge.loadSharedPreferences())
     nineKey = InputSchemePreference.scheme == .nineKey
     voice = KeyboardLayoutPreference.voiceShortcutEnabled
+    tabletFullKeys = KeyboardLayoutPreference.tabletFullKeys
+    // The document is what the keyboard will use, including a value synced from another device that no keyboard has mirrored into the App Group yet.
+    guard let preferences = MetasequoiaInputSessionBridge.loadSharedPreferences() else { return }
+    tabOpensCandidates = KeyboardLayoutPreference.tabShowsMoreCandidates(preferences)
+    if let tenths = (preferences["touch_key_spacing_tenths"] as? NSNumber)?.doubleValue {
+      keySpacing = KeyboardGeometry.clamped(tenths / 10, 3, 6)
+    }
+    if let tenths = (preferences["touch_row_spacing_tenths"] as? NSNumber)?.doubleValue {
+      rowSpacing = KeyboardGeometry.clamped(tenths / 10, 4, 10)
+    }
+    if let adjustment = (preferences["touch_keyboard_height_adjustment"] as? NSNumber)?.doubleValue,
+       adjustment.isFinite {
+      height = KeyboardGeometry.clamped(adjustment, -12, 48)
+    }
+    voice = preferences["touch_voice_shortcut"] as? Bool ?? voice
   }
 
   private func spacingRow(
@@ -171,20 +203,19 @@ struct KeyboardLayoutSettingsView: View {
     value: Binding<Double>,
     range: ClosedRange<Double>,
     identifier: String,
-    format: @escaping (Double) -> String = { String(format: "%.1f", $0) },
-    store: @escaping (Double) -> Void
+    format: @escaping (Double) -> String = { String(format: "%.1f", $0) }
   ) -> some View {
     VStack(alignment: .leading, spacing: 4) {
       HStack {
         Text(title)
         Spacer()
-        Text(format(value.wrappedValue)).font(.callout).monospacedDigit()
+        Text(KeyboardGeometry.formattedHeightAdjustment(value.wrappedValue)).font(.callout).monospacedDigit()
           .foregroundStyle(.secondary)
       }
-      Slider(
-        value: Binding(get: { value.wrappedValue }, set: { value.wrappedValue = $0; store($0) }),
-        in: range
-      ).accessibilityIdentifier(identifier).accessibilityLabel(title)
+      // Written once the thumb is let go: the slider reports every frame, and each write takes the shared document's lock.
+      Slider(value: value, in: range) { editing in
+        if !editing { save() }
+      }.accessibilityIdentifier(identifier).accessibilityLabel(title)
     }
   }
 }

@@ -1,3 +1,5 @@
+import { TextPolicy } from "../TextPolicy";
+
 /** One model row returned by an OpenAI-compatible or Anthropic catalog. */
 export interface AiCatalogModel {
   id?: string;
@@ -17,7 +19,9 @@ export interface AiCatalogPage {
 export class AiModelCatalogPolicy {
   static modelsUrl(endpoint: string): string | null {
     const trimmed: string = endpoint.trim();
-    if (!this.validHttpsEndpoint(trimmed)) return null;
+    if (!TextPolicy.validAuthority(trimmed, ["https://"])) {
+      return null;
+    }
     const queryIndex: number = trimmed.indexOf("?");
     const query: string = queryIndex >= 0 ? trimmed.substring(queryIndex) : "";
     let path: string = queryIndex >= 0 ? trimmed.substring(0, queryIndex) : trimmed;
@@ -37,14 +41,32 @@ export class AiModelCatalogPolicy {
 
   static pageUrl(modelsUrl: string, anthropic: boolean, cursor: string): string {
     if (!anthropic) return modelsUrl;
-    const separator: string = modelsUrl.includes("?") ? "&" : "?";
+    const queryIndex: number = modelsUrl.indexOf("?");
+    const path: string = queryIndex >= 0 ? modelsUrl.substring(0, queryIndex) : modelsUrl;
+    const rawQuery: string = queryIndex >= 0 ? modelsUrl.substring(queryIndex + 1) : "";
+    const preserved: string[] = [];
+    for (const part of rawQuery.split("&")) {
+      if (part.length === 0) continue;
+      const equals: number = part.indexOf("=");
+      const rawName: string = equals >= 0 ? part.substring(0, equals) : part;
+      let name: string = rawName;
+      try {
+        name = decodeURIComponent(rawName.replace(/\+/g, " "));
+      } catch (_) {
+        // Keep malformed provider query names unchanged; endpoint validation has already
+        // rejected controls, and dropping an unrelated name would change its meaning.
+      }
+      if (name !== "limit" && name !== "after_id") preserved.push(part);
+    }
+    const base: string = path + (preserved.length > 0 ? `?${preserved.join("&")}` : "");
+    const separator: string = base.includes("?") ? "&" : "?";
     const after: string = cursor.length > 0 ? `&after_id=${encodeURIComponent(cursor)}` : "";
-    return `${modelsUrl}${separator}limit=1000${after}`;
+    return `${base}${separator}limit=1000${after}`;
   }
 
   static accepts(model: AiCatalogModel): boolean {
     const id: string = model.id ?? "";
-    if (model.active === false || id.length === 0 || id.length > 256 || this.hasControl(id)) {
+    if (model.active === false || id.length === 0 || id.length > 256 || TextPolicy.hasControl(id)) {
       return false;
     }
     const endpoints: string[] | undefined = model.supported_endpoint_types;
@@ -70,30 +92,10 @@ export class AiModelCatalogPolicy {
       !anthropic ||
       cursor.length === 0 ||
       cursor.length > 256 ||
-      this.hasControl(cursor) ||
+      TextPolicy.hasControl(cursor) ||
       previous.includes(cursor)
     )
       return null;
     return cursor;
-  }
-
-  private static validHttpsEndpoint(value: string): boolean {
-    if (
-      !value.startsWith("https://") ||
-      value.length > 2048 ||
-      value.includes("@") ||
-      value.includes("#") ||
-      this.hasControl(value)
-    )
-      return false;
-    const authority: string = value.substring(8).split("/")[0].split("?")[0];
-    return authority.length > 0;
-  }
-
-  private static hasControl(value: string): boolean {
-    return Array.from(value).some((character: string): boolean => {
-      const code: number = character.codePointAt(0) ?? 0;
-      return code <= 0x1f || (code >= 0x7f && code <= 0x9f);
-    });
   }
 }

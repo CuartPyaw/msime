@@ -1,4 +1,5 @@
 //! Pure descriptors and response parsing for the host-owned NiuTrans v2 API.
+use msime_client_core::cloud::dictionary::percent_encode;
 use msime_client_core::translation;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -23,24 +24,8 @@ struct Request {
     timestamp: String,
 }
 
-fn encode(value: &str) -> String {
-    let mut output = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-            output.push(byte as char);
-        } else {
-            output.push('%');
-            output.push(char::from(b"0123456789ABCDEF"[(byte >> 4) as usize]));
-            output.push(char::from(b"0123456789ABCDEF"[(byte & 0x0f) as usize]));
-        }
-    }
-    output
-}
-
 fn valid_credential(value: &str) -> bool {
-    translation::usable_niutrans_credential(value)
-        && value.len() <= 4096
-        && !value.chars().any(char::is_control)
+    translation::is_valid_credential(value)
 }
 
 pub fn descriptor(bytes: &[u8]) -> Result<Value, &'static str> {
@@ -54,14 +39,11 @@ pub fn descriptor(bytes: &[u8]) -> Result<Value, &'static str> {
     let target = request.target_language.as_str();
     if !valid_credential(app_id)
         || !valid_credential(apikey)
-        || request.text.is_empty()
-        || request.text.chars().count() > 40
-        || request.text.chars().any(char::is_control)
+        || !translation::is_valid_source_text(&request.text)
         || request.timestamp.is_empty()
         || request.timestamp.len() > 20
-        || !request.timestamp.bytes().all(|byte| byte.is_ascii_digit())
-        || !["zh", "en", "fr", "ja", "es", "ru", "de", "ko"].contains(&source)
-        || !["zh", "en", "fr", "ja", "es", "ru", "de", "ko"].contains(&target)
+        || !msime_client_core::is_ascii_digits(&request.timestamp)
+        || !translation::is_supported_translation_pair(source, target)
     {
         return Err("invalid NiuTrans parameters");
     }
@@ -75,11 +57,11 @@ pub fn descriptor(bytes: &[u8]) -> Result<Value, &'static str> {
     );
     let body = format!(
         "from={}&to={}&appId={}&timestamp={}&srcText={}&authStr={auth}",
-        encode(source),
-        encode(target),
-        encode(app_id),
-        encode(&request.timestamp),
-        encode(&request.text),
+        percent_encode(source),
+        percent_encode(target),
+        percent_encode(app_id),
+        percent_encode(&request.timestamp),
+        percent_encode(&request.text),
     );
     Ok(json!({
         "url": URL,
@@ -89,6 +71,20 @@ pub fn descriptor(bytes: &[u8]) -> Result<Value, &'static str> {
         "timeout_ms": 2500,
         "max_response_bytes": 1048576
     }))
+}
+
+/// Whether a NiuTrans reply reports a failure (a body that is not a JSON object, or one carrying `errorCode`/`errorMsg`, which is how NiuTrans reports rate limits and credential errors) rather than an answer. `parse` returns `None` for both a failure and an answer with no text; only answers are negative-cached.
+pub fn failed(bytes: &[u8]) -> bool {
+    if bytes.len() > 1048576 {
+        return true;
+    }
+    let Some(root) = std::str::from_utf8(bytes)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(text).ok())
+    else {
+        return true;
+    };
+    !root.is_object() || root.get("errorCode").is_some() || root.get("errorMsg").is_some()
 }
 
 pub fn parse(bytes: &[u8]) -> Option<Value> {
@@ -127,6 +123,18 @@ mod tests {
         let body = value["body_utf8"].as_str().unwrap();
         assert!(body.contains("srcText=hello"));
         assert!(body.contains("authStr=6da3515e010ef871b66e4e31ff5ba580"));
+    }
+
+    #[test]
+    fn an_empty_answer_is_not_a_failed_reply() {
+        assert!(!failed(br#"{"tgtText":""}"#));
+        assert!(!failed(br#"{"tgtText":"hello"}"#));
+        assert!(failed(
+            br#"{"errorCode":"13001","errorMsg":"rate limited"}"#
+        ));
+        assert!(failed(br#"{"errorMsg":"bad apikey"}"#));
+        assert!(failed(b"not json"));
+        assert!(failed(br#"[1]"#));
     }
 
     #[test]

@@ -60,6 +60,9 @@ struct FeedbackView: View {
   @State private var kind = "功能异常"
   @State private var detail = ""
   @State private var copied = false
+  @State private var copiedGroup = false
+
+  static let qqGroup = "829919142"
 
   private let kinds = ["功能异常", "候选词不对", "功能建议", "其他"]
 
@@ -77,6 +80,13 @@ struct FeedbackView: View {
 
   var body: some View {
     Form {
+      // 帮助 moved here from 关于 in the mobile design, so the answers people look for come before the report they would otherwise write.
+      Section {
+        NavigationLink(destination: HelpView()) {
+          SettingsRowLabel(title: "使用帮助", detail: "启用键盘、输入方案、常见问题",
+                           symbol: "questionmark.circle.fill")
+        }.accessibilityIdentifier("feedbackHelpLink")
+      }
       Section("类型") {
         Picker("类型", selection: $kind) {
           ForEach(kinds, id: \.self) { Text($0).tag($0) }
@@ -111,8 +121,28 @@ struct FeedbackView: View {
       } footer: {
         Text("提交会打开 GitHub 并预填这份报告。网址长度有限，过长的描述会被截断，完整内容请用“复制报告”。")
       }
+      Section {
+        NavigationLink(destination: DiagnosticLogSettingsView()) {
+          SettingsRowLabel(title: "诊断日志", detail: "键盘出现问题时，开启后复现一次再分享",
+                           symbol: "list.bullet.rectangle.fill")
+        }.accessibilityIdentifier("feedbackDiagnosticLogLink")
+      } footer: {
+        Text("提交问题时建议附上：系统版本、输入方案、复现步骤、相关截图，以及诊断日志。")
+      }
+      // The same channels the Windows and macOS feedback pages list.
+      Section("交流") {
+        SettingsActionRow(title: copiedGroup ? "已复制群号" : "QQ 交流群", detail: "群号：\(Self.qqGroup)，日常交流与测试反馈",
+                          symbol: copiedGroup ? "checkmark.circle.fill" : "person.3.fill") {
+          UIPasteboard.general.string = Self.qqGroup
+          copiedGroup = true
+        }.accessibilityIdentifier("feedbackQQGroup")
+        Link(destination: URL(string: "https://t.me/msimegroup")!) {
+          SettingsRowLabel(title: "Telegram 群组", detail: "t.me/msimegroup，面向国际用户和开发者",
+                           symbol: "paperplane.fill")
+        }.accessibilityIdentifier("feedbackTelegram")
+      }
     }
-    .navigationTitle("反馈")
+    .navigationTitle("帮助与反馈")
     .navigationBarTitleDisplayMode(.inline)
   }
 

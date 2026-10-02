@@ -1,17 +1,18 @@
 [workspace]
-members = ["crates/client-core", "crates/engine-bridge", "crates/input-runtime", "crates/host-api", "crates/host-windows", "crates/host-macos", "crates/tauri-mobile-platform", "crates/ios-native-ffi", "apps/desktop/src-tauri"]
+members = ["crates/client-core", "crates/engine", "crates/input-runtime", "crates/host-api", "crates/host-windows", "crates/host-macos", "crates/tauri-mobile-platform", "crates/ios-native-ffi", "crates/mcp-server", "crates/dict-builder", "crates/pack-tool", "apps/desktop/src-tauri"]
 # Everything except the desktop app: a bare `cargo test` should cover the
 # libraries, and msime-desktop needs a built frontend and a packaged platform
 # bundle before its build script will run.
 default-members = [
     "crates/client-core",
-    "crates/engine-bridge",
+    "crates/engine",
     "crates/input-runtime",
     "crates/host-api",
     "crates/host-windows",
     "crates/host-macos",
     "crates/tauri-mobile-platform",
     "crates/ios-native-ffi",
+    "crates/mcp-server",
 ]
 resolver = "2"
 
@@ -30,6 +31,14 @@ thiserror = "2"
 tempfile = "3"
 unicode-general-category = "1.1"
 unicode-segmentation = "1.13"
+sha2 = "0.11"
+rusqlite = "0.40"
+time = "0.3"
+tokio = "1"
+rustix = "1.1"
+libc = "0.2"
+uuid = "1"
+tauri = "2"
 
 # Inherited by every member through `[lints] workspace = true`. `deny` rather
 # than `forbid` on purpose: the five FFI crates cannot honour an unoverridable
@@ -40,6 +49,36 @@ unicode-segmentation = "1.13"
 [workspace.lints.rust]
 unsafe_code = "deny"
 
+# Smallest dev build tree rather than fastest rebuild: the repo is developed through many parallel worktrees, each with its own target/, and together they fill the disk. No debug info (backtraces keep symbol names but lose file and line) and no incremental cache (about a fifth of target/debug per worktree; edits recompile the whole crate instead). Raise either locally when you need a debugger or faster iteration.
 [profile.dev]
 debug = 0
-incremental = true
+incremental = false
+
+# Local installs of an input method are dev builds (the macOS CMake default links target/debug), and two dependencies sit on the path of every keystroke: the sentence reranker runs on the main thread per key, and every view crosses the host ABI as JSON. Unoptimised, the reranker's integer dot products alone took most of the main thread while typing and stalled the candidate window for seconds. Optimising just these keeps workspace crates quick to rebuild.
+[profile.dev.package.chinese-ime-lm]
+opt-level = 3
+
+[profile.dev.package.serde_json]
+opt-level = 3
+
+# The key-sound mixer renders in the audio callback and decodes music as it plays, so an unoptimised build glitches audibly; kira's documentation asks for these. Local macOS installs are dev builds (above).
+[profile.dev.package.kira]
+opt-level = 3
+
+[profile.dev.package.cpal]
+opt-level = 3
+
+[profile.dev.package.symphonia-core]
+opt-level = 3
+
+[profile.dev.package.symphonia-format-riff]
+opt-level = 3
+
+[profile.dev.package.symphonia-format-ogg]
+opt-level = 3
+
+[profile.dev.package.symphonia-codec-pcm]
+opt-level = 3
+
+[profile.dev.package.symphonia-codec-vorbis]
+opt-level = 3

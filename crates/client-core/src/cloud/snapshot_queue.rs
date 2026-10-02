@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, File},
     io::{Read, Write},
     path::{Path, PathBuf},
 };
@@ -80,11 +80,12 @@ impl SnapshotQueueState {
                 .as_deref()
                 .is_some_and(|value| !valid_local_version(value))
             || self.request.as_ref().is_some_and(|request| {
-                request.account_id.is_empty()
+                request.id.is_nil()
+                    || request.account_id.is_empty()
                     || request.account_id.len() > 128
                     || request.cloud_revision < 0
                     || !valid_local_version(&request.expected_local_version)
-                    || !valid_digest(&request.file_sha256)
+                    || !crate::is_lower_hex(&request.file_sha256, 64)
             })
         {
             return Err(SnapshotQueueError::Invalid);
@@ -93,14 +94,7 @@ impl SnapshotQueueState {
     }
 }
 
-pub fn valid_digest(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
-pub fn valid_local_version(value: &str) -> bool {
+fn valid_local_version(value: &str) -> bool {
     let mut fields = value.split(':');
     if fields.next() != Some("local-v1") {
         return false;
@@ -111,7 +105,7 @@ pub fn valid_local_version(value: &str) -> bool {
     let Some(digest) = fields.next() else {
         return false;
     };
-    if fields.next().is_some() || !valid_digest(digest) {
+    if fields.next().is_some() || !crate::is_lower_hex(digest, 64) {
         return false;
     }
     owner == "legacy" || Uuid::parse_str(owner).is_ok_and(|id| id.to_string() == owner)
@@ -151,6 +145,9 @@ impl DictionarySnapshotQueue {
     }
 
     fn existing_root(&self) -> Result<Option<PathBuf>, SnapshotQueueError> {
+        if let Some(parent) = self.directory.parent() {
+            crate::storage::reject_symlink(parent).map_err(|_| SnapshotQueueError::Unavailable)?;
+        }
         let metadata = match fs::symlink_metadata(&self.directory) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -166,7 +163,14 @@ impl DictionarySnapshotQueue {
     }
 
     fn root(&self) -> Result<PathBuf, SnapshotQueueError> {
-        fs::create_dir_all(&self.directory).map_err(|_| SnapshotQueueError::Unavailable)?;
+        if let Some(parent) = self.directory.parent() {
+            crate::storage::reject_symlink(parent).map_err(|_| SnapshotQueueError::Unavailable)?;
+        }
+        if !crate::storage::create_directory_and_check(&self.directory)
+            .map_err(|_| SnapshotQueueError::Unavailable)?
+        {
+            return Err(SnapshotQueueError::Invalid);
+        }
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -182,12 +186,7 @@ impl DictionarySnapshotQueue {
 
     fn lock(&self, name: &str) -> Result<(File, PathBuf), SnapshotQueueError> {
         let root = self.root()?;
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(root.join(name))
+        let file = crate::file_lock::open_lock_file(root.join(name))
             .map_err(|_| SnapshotQueueError::Unavailable)?;
         match crate::file_lock::try_exclusive_with_grace(&file) {
             Ok(true) => Ok((file, root)),
@@ -214,7 +213,12 @@ impl DictionarySnapshotQueue {
         {
             return Err(SnapshotQueueError::Invalid);
         }
-        let bytes = fs::read(path).map_err(|_| SnapshotQueueError::Unavailable)?;
+        let bytes = crate::bounded_io::read_bounded_file_with(
+            File::open(path).map_err(|_| SnapshotQueueError::Unavailable)?,
+            MAXIMUM_STATE_BYTES,
+            || SnapshotQueueError::Invalid,
+            |_| SnapshotQueueError::Unavailable,
+        )?;
         let state: SnapshotQueueState =
             serde_json::from_slice(&bytes).map_err(|_| SnapshotQueueError::Invalid)?;
         state.validate()?;
@@ -255,12 +259,7 @@ impl DictionarySnapshotQueue {
         action: impl FnOnce(&Path, &mut SnapshotQueueState) -> Result<T, SnapshotQueueError>,
     ) -> Result<T, SnapshotQueueError> {
         let root = self.root()?;
-        let lock = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(root.join(STATE_LOCK_NAME))
+        let lock = crate::file_lock::open_lock_file(root.join(STATE_LOCK_NAME))
             .map_err(|_| SnapshotQueueError::Unavailable)?;
         crate::file_lock::exclusive(&lock).map_err(|_| SnapshotQueueError::Unavailable)?;
         let mut state = Self::read_from(&root)?;
@@ -297,7 +296,11 @@ impl DictionarySnapshotQueue {
             if let Some(request) = state
                 .request
                 .as_mut()
-                .filter(|request| request.id.to_string() == owner)
+                // A receipt can arrive after logout or another terminal
+                // transition. Do not resurrect a cancelled/failed/conflicted
+                // request merely because its generation id appears in the
+                // version string.
+                .filter(|request| request.status.active() && request.id.to_string() == owner)
             {
                 request.status = SnapshotRequestStatus::Applied;
                 return Ok(Some(request.id));
@@ -326,10 +329,11 @@ impl DictionarySnapshotQueue {
             || account_id.len() > 128
             || cloud_revision < 0
             || !valid_local_version(expected_local_version)
-            || !valid_digest(file_sha256)
+            || !crate::is_lower_hex(file_sha256, 64)
         {
             return Err(SnapshotQueueError::Invalid);
         }
+        crate::storage::reject_symlink(source).map_err(|_| SnapshotQueueError::Invalid)?;
         let root = self.root()?;
         let mut incoming =
             tempfile::NamedTempFile::new_in(&root).map_err(|_| SnapshotQueueError::Unavailable)?;
@@ -355,7 +359,7 @@ impl DictionarySnapshotQueue {
                 .write_all(&buffer[..count])
                 .map_err(|_| SnapshotQueueError::Unavailable)?;
         }
-        if total == 0 || format!("{:x}", hash.finalize()) != file_sha256 {
+        if total == 0 || hex::encode(hash.finalize()) != file_sha256 {
             return Err(SnapshotQueueError::Invalid);
         }
         incoming
@@ -571,7 +575,7 @@ mod tests {
         let root = parent.path().join("queue");
         let source = parent.path().join("snapshot.ndjson");
         fs::write(&source, b"synthetic snapshot\n").unwrap();
-        let digest = format!("{:x}", Sha256::digest(fs::read(&source).unwrap()));
+        let digest = hex::encode(Sha256::digest(fs::read(&source).unwrap()));
         let initial = version("legacy", 'a');
         let queue = DictionarySnapshotQueue::new(root.clone()).unwrap();
         assert_eq!(queue.read().unwrap().request, None);
@@ -598,13 +602,74 @@ mod tests {
         assert!(restored.read().unwrap().request.is_none());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_queue_root_before_changing_target_permissions() {
+        use std::os::unix::fs::symlink;
+
+        let target = tempfile::tempdir().unwrap();
+        let parent = tempfile::tempdir().unwrap();
+        let linked_root = parent.path().join("queue");
+        symlink(target.path(), &linked_root).unwrap();
+        let queue = DictionarySnapshotQueue::new(&linked_root).unwrap();
+        assert!(matches!(
+            queue.file_path(Uuid::new_v4()),
+            Err(SnapshotQueueError::Unavailable | SnapshotQueueError::Invalid)
+        ));
+        assert!(!target.path().join(STATE_NAME).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_a_symlinked_queue_ancestor_when_reading_existing_state() {
+        use std::os::unix::fs::symlink;
+
+        let target = tempfile::tempdir().unwrap();
+        let queue_root = target.path().join("queue");
+        fs::create_dir(&queue_root).unwrap();
+        fs::write(queue_root.join(STATE_NAME), br#"{"version":1}"#).unwrap();
+        let parent = tempfile::tempdir().unwrap();
+        let linked_parent = parent.path().join("state");
+        symlink(target.path(), &linked_parent).unwrap();
+
+        let queue = DictionarySnapshotQueue::new(linked_parent.join("queue")).unwrap();
+        assert!(matches!(queue.read(), Err(SnapshotQueueError::Unavailable)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn enqueue_rejects_a_snapshot_below_a_symlinked_parent() {
+        use std::os::unix::fs::symlink;
+
+        let parent = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let linked_parent = parent.path().join("linked");
+        symlink(outside.path(), &linked_parent).unwrap();
+        let source = linked_parent.join("snapshot.ndjson");
+        fs::write(
+            outside.path().join("snapshot.ndjson"),
+            b"synthetic snapshot\n",
+        )
+        .unwrap();
+        let digest = hex::encode(Sha256::digest(b"synthetic snapshot\n"));
+        let queue = DictionarySnapshotQueue::new(parent.path().join("queue")).unwrap();
+        let initial = version("legacy", 'a');
+        queue.publish_local_version(&initial).unwrap();
+
+        assert!(matches!(
+            queue.enqueue(&source, "fixture", 1, &initial, &digest),
+            Err(SnapshotQueueError::Invalid)
+        ));
+        assert_eq!(queue.read().unwrap().request, None);
+    }
+
     #[test]
     fn queue_checks_hash_conflict_account_and_corrupt_state() {
         let parent = tempfile::tempdir().unwrap();
         let root = parent.path().join("queue");
         let source = parent.path().join("snapshot.ndjson");
         fs::write(&source, b"synthetic snapshot\n").unwrap();
-        let digest = format!("{:x}", Sha256::digest(fs::read(&source).unwrap()));
+        let digest = hex::encode(Sha256::digest(fs::read(&source).unwrap()));
         let initial = version("legacy", 'a');
         let queue = DictionarySnapshotQueue::new(root.clone()).unwrap();
         queue.publish_local_version(&initial).unwrap();
@@ -632,12 +697,50 @@ mod tests {
     }
 
     #[test]
+    fn queue_rejects_oversized_state_without_reading_it_unboundedly() {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("queue");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join(STATE_NAME),
+            vec![b' '; MAXIMUM_STATE_BYTES as usize + 1],
+        )
+        .unwrap();
+        let queue = DictionarySnapshotQueue::new(root).unwrap();
+        assert!(matches!(queue.read(), Err(SnapshotQueueError::Invalid)));
+    }
+
+    #[test]
+    fn queue_rejects_a_persisted_request_with_a_nil_id() {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("queue");
+        let initial = version("legacy", 'a');
+        let queue = DictionarySnapshotQueue::new(root.clone()).unwrap();
+        queue.publish_local_version(&initial).unwrap();
+        let state = SnapshotQueueState {
+            version: 1,
+            local_version: Some(initial.clone()),
+            request: Some(SnapshotRequest {
+                id: Uuid::nil(),
+                account_id: "fixture".into(),
+                cloud_revision: 1,
+                expected_local_version: initial,
+                file_sha256: "a".repeat(64),
+                status: SnapshotRequestStatus::Queued,
+            }),
+        };
+        fs::write(root.join(STATE_NAME), serde_json::to_vec(&state).unwrap()).unwrap();
+
+        assert!(matches!(queue.read(), Err(SnapshotQueueError::Invalid)));
+    }
+
+    #[test]
     fn queue_marks_source_version_conflicts_without_activation() {
         let parent = tempfile::tempdir().unwrap();
         let root = parent.path().join("queue");
         let source = parent.path().join("snapshot.ndjson");
         fs::write(&source, b"synthetic snapshot\n").unwrap();
-        let digest = format!("{:x}", Sha256::digest(fs::read(&source).unwrap()));
+        let digest = hex::encode(Sha256::digest(fs::read(&source).unwrap()));
         let initial = version("legacy", 'a');
         let changed = version("legacy", 'b');
         let queue = DictionarySnapshotQueue::new(root).unwrap();
@@ -662,12 +765,37 @@ mod tests {
     }
 
     #[test]
+    fn a_late_activation_receipt_does_not_resurrect_cancelled_request() {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("queue");
+        let source = parent.path().join("snapshot.ndjson");
+        fs::write(&source, b"synthetic snapshot\n").unwrap();
+        let digest = hex::encode(Sha256::digest(fs::read(&source).unwrap()));
+        let initial = version("legacy", 'a');
+        let queue = DictionarySnapshotQueue::new(root).unwrap();
+        queue.publish_local_version(&initial).unwrap();
+        let id = queue
+            .enqueue(&source, "fixture", 1, &initial, &digest)
+            .unwrap();
+        queue.cancel("fixture").unwrap();
+
+        // The worker's activation receipt may be delivered after cancellation.
+        queue
+            .publish_local_version(&version(&id.to_string(), 'b'))
+            .unwrap();
+        assert_eq!(
+            queue.read().unwrap().request.unwrap().status,
+            SnapshotRequestStatus::Cancelled
+        );
+    }
+
+    #[test]
     fn account_cancellation_orders_against_activation() {
         let parent = tempfile::tempdir().unwrap();
         let root = parent.path().join("queue");
         let source = parent.path().join("snapshot.ndjson");
         fs::write(&source, b"synthetic snapshot\n").unwrap();
-        let digest = format!("{:x}", Sha256::digest(fs::read(&source).unwrap()));
+        let digest = hex::encode(Sha256::digest(fs::read(&source).unwrap()));
         let initial = version("legacy", 'a');
         let queue = DictionarySnapshotQueue::new(root.clone()).unwrap();
         queue.publish_local_version(&initial).unwrap();

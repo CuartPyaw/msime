@@ -1,27 +1,28 @@
 //! Native-only snapshot preparation. Staged paths stay private until a future
 //! activation transaction can own publication and session coordination.
-use super::{response, DictionaryAccess, HostOptions};
+use super::{response, DictionaryAccess, HostOptions, HOST_OPTIONS_DOCUMENT_LIMIT};
 use msime_client_core::account::{
     AccountDictionarySnapshotRestore, AccountError, BackendAccountClient,
 };
 use msime_client_core::cloud::snapshot_queue::{
     local_version, local_version_digest, DictionarySnapshotQueue, SnapshotQueueError,
 };
+use msime_client_core::cloud::snapshot_validation::{
+    has_keys as snapshot_has_keys, parse_strict_object, required_integer as snapshot_integer,
+    required_text as snapshot_text, valid_timestamp as snapshot_timestamp,
+};
 use msime_client_core::resources::{ResourceSet, ResourceStore};
-use msime_engine_bridge::{
+use msime_engine::host::{
     dictionary_state_revision, stage_dictionary_state, EngineOptions, Session, SnapshotReadError,
 };
-use serde::{
-    de::{DeserializeSeed, MapAccess, Visitor},
-    Deserialize, Serialize,
-};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
     ffi::{c_char, c_void},
     io::{BufRead, BufReader, Write},
-    path::Path,
+    path::{Component, Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
         Mutex, OnceLock,
@@ -31,8 +32,10 @@ use std::{
 mod record;
 
 const BUFFER_LIMIT: usize = 65536;
+const REQUEST_LIMIT: usize = HOST_OPTIONS_DOCUMENT_LIMIT;
 const HANDLE_LIMIT: usize = 8;
 const ACTIVATION_RECEIPT_NAME: &str = ".msime-snapshot-activation";
+const MAX_ACTIVATION_RECEIPT_BYTES: u64 = 36;
 const MAX_SNAPSHOT_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_SNAPSHOT_LINE_BYTES: usize = 65_536;
 const MAX_SNAPSHOT_RECORDS: usize = 500_000;
@@ -113,231 +116,6 @@ struct SnapshotMetadata {
     engine_records: usize,
 }
 
-struct StrictSnapshotValue {
-    depth: usize,
-}
-
-impl<'de> DeserializeSeed<'de> for StrictSnapshotValue {
-    type Value = Value;
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        struct SnapshotValueVisitor {
-            depth: usize,
-        }
-
-        impl<'de> Visitor<'de> for SnapshotValueVisitor {
-            type Value = Value;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                formatter.write_str("a strict JSON object value")
-            }
-
-            fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
-                Ok(Value::Bool(value))
-            }
-
-            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
-                Ok(Value::Number(value.into()))
-            }
-
-            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
-                Ok(Value::Number(value.into()))
-            }
-
-            fn visit_f64<E>(self, _value: f64) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                Err(E::custom("floating point values are not allowed"))
-            }
-
-            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E> {
-                Ok(Value::String(value.to_owned()))
-            }
-
-            fn visit_string<E>(self, value: String) -> Result<Self::Value, E> {
-                Ok(Value::String(value))
-            }
-
-            fn visit_none<E>(self) -> Result<Self::Value, E> {
-                Ok(Value::Null)
-            }
-
-            fn visit_unit<E>(self) -> Result<Self::Value, E> {
-                Ok(Value::Null)
-            }
-
-            fn visit_seq<A>(self, _sequence: A) -> Result<Self::Value, A::Error>
-            where
-                A: serde::de::SeqAccess<'de>,
-            {
-                Err(serde::de::Error::custom("arrays are not allowed"))
-            }
-
-            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-            where
-                A: MapAccess<'de>,
-            {
-                if self.depth > 1 {
-                    return Err(serde::de::Error::custom("nested objects are not allowed"));
-                }
-                let mut object = serde_json::Map::new();
-                while let Some(key) = map.next_key::<String>()? {
-                    if object.contains_key(&key) {
-                        return Err(serde::de::Error::custom("duplicate JSON key"));
-                    }
-                    let value = map.next_value_seed(StrictSnapshotValue {
-                        depth: self.depth + 1,
-                    })?;
-                    object.insert(key, value);
-                }
-                Ok(Value::Object(object))
-            }
-        }
-
-        deserializer.deserialize_any(SnapshotValueVisitor { depth: self.depth })
-    }
-}
-
-fn parse_snapshot_object(bytes: &[u8]) -> Result<serde_json::Map<String, Value>, &'static str> {
-    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
-    let value = StrictSnapshotValue { depth: 0 }
-        .deserialize(&mut deserializer)
-        .map_err(|_| "invalid snapshot document")?;
-    deserializer
-        .end()
-        .map_err(|_| "invalid snapshot document")?;
-    value
-        .as_object()
-        .cloned()
-        .ok_or("invalid snapshot document")
-}
-
-fn snapshot_has_keys(map: &serde_json::Map<String, Value>, keys: &[&str]) -> bool {
-    map.len() == keys.len() && keys.iter().all(|key| map.contains_key(*key))
-}
-
-fn snapshot_text<'a>(
-    data: &'a serde_json::Map<String, Value>,
-    key: &str,
-    maximum: usize,
-) -> Result<&'a str, &'static str> {
-    data.get(key)
-        .and_then(Value::as_str)
-        .filter(|value| {
-            !value.is_empty()
-                && value.len() <= maximum
-                && !value
-                    .bytes()
-                    .any(|byte| matches!(byte, 0 | b'\t' | b'\n' | b'\r'))
-        })
-        .ok_or("invalid snapshot document")
-}
-
-fn snapshot_integer(data: &serde_json::Map<String, Value>, key: &str) -> Result<i64, &'static str> {
-    data.get(key)
-        .and_then(Value::as_i64)
-        .ok_or("invalid snapshot document")
-}
-
-fn snapshot_timestamp(value: &str) -> bool {
-    fn digits(bytes: &[u8], start: usize, end: usize) -> Option<u32> {
-        (end <= bytes.len() && bytes[start..end].iter().all(u8::is_ascii_digit)).then(|| {
-            bytes[start..end]
-                .iter()
-                .fold(0, |value, byte| value * 10 + u32::from(byte - b'0'))
-        })
-    }
-    let bytes = value.as_bytes();
-    if bytes.len() < 20
-        || digits(bytes, 0, 4).is_none()
-        || bytes.get(4) != Some(&b'-')
-        || bytes.get(7) != Some(&b'-')
-        || bytes.get(10) != Some(&b'T')
-        || bytes.get(13) != Some(&b':')
-        || bytes.get(16) != Some(&b':')
-    {
-        return false;
-    }
-    let year = digits(bytes, 0, 4).unwrap();
-    let month = match digits(bytes, 5, 7) {
-        Some(value) => value,
-        None => return false,
-    };
-    let day = match digits(bytes, 8, 10) {
-        Some(value) => value,
-        None => return false,
-    };
-    let hour = match digits(bytes, 11, 13) {
-        Some(value) => value,
-        None => return false,
-    };
-    let minute = match digits(bytes, 14, 16) {
-        Some(value) => value,
-        None => return false,
-    };
-    let second = match digits(bytes, 17, 19) {
-        Some(value) => value,
-        None => return false,
-    };
-    let leap = year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
-    let days = [
-        31,
-        if leap { 29 } else { 28 },
-        31,
-        30,
-        31,
-        30,
-        31,
-        31,
-        30,
-        31,
-        30,
-        31,
-    ];
-    if year == 0
-        || !(1..=12).contains(&month)
-        || day == 0
-        || day > days[month as usize - 1]
-        || hour >= 24
-        || minute >= 60
-        || second >= 60
-    {
-        return false;
-    }
-    let mut offset = 19;
-    if matches!(bytes.get(offset), Some(b'.' | b',')) {
-        offset += 1;
-        let start = offset;
-        while bytes.get(offset).is_some_and(u8::is_ascii_digit) {
-            offset += 1;
-        }
-        if offset == start {
-            return false;
-        }
-    }
-    let zone = &bytes[offset..];
-    if zone == b"Z" {
-        return true;
-    }
-    if zone.len() != 6
-        || !matches!(zone[0], b'+' | b'-')
-        || !zone[1].is_ascii_digit()
-        || !zone[2].is_ascii_digit()
-        || zone[3] != b':'
-        || !zone[4].is_ascii_digit()
-        || !zone[5].is_ascii_digit()
-    {
-        return false;
-    }
-    let zone_hour = u32::from(zone[1] - b'0') * 10 + u32::from(zone[2] - b'0');
-    let zone_minute = u32::from(zone[4] - b'0') * 10 + u32::from(zone[5] - b'0');
-    zone_hour < 24 && zone_minute < 60
-}
-
 #[derive(Default)]
 struct SnapshotIdentities {
     entry_keys: HashMap<(String, String, String), i64>,
@@ -361,8 +139,8 @@ fn inspect_snapshot_record(
         .get("data")
         .and_then(Value::as_object)
         .ok_or("invalid snapshot document")?;
-    let code = snapshot_text(data, "code", 512)?.to_owned();
-    let word = snapshot_text(data, "word", 2048)?.to_owned();
+    let code = snapshot_text(data, "code", 512, "invalid snapshot document")?.to_owned();
+    let word = snapshot_text(data, "word", 2048, "invalid snapshot document")?.to_owned();
     match kind {
         "entry" | "overlay" => {
             let outer_keys_valid = if kind == "overlay" {
@@ -424,8 +202,8 @@ fn inspect_snapshot_record(
             {
                 return Err("invalid snapshot document");
             }
-            let weight = snapshot_integer(data, "weight")?;
-            let record_revision = snapshot_integer(data, "revision")?;
+            let weight = snapshot_integer(data, "weight", "invalid snapshot document")?;
+            let record_revision = snapshot_integer(data, "revision", "invalid snapshot document")?;
             if !(0..=100_000_000).contains(&weight)
                 || (weight == 0 && !deleted)
                 || !(1..=revision).contains(&record_revision)
@@ -471,13 +249,14 @@ fn inspect_snapshot_record(
             if !snapshot_has_keys(data, &["context", "code", "word", value_key]) {
                 return Err("invalid snapshot document");
             }
-            let context = snapshot_text(data, "context", 512)?.to_owned();
+            let context =
+                snapshot_text(data, "context", 512, "invalid snapshot document")?.to_owned();
             if context.len() + code.len() + word.len() > 2048 {
                 return Err("invalid snapshot document");
             }
             let identity = (context.clone(), code, word);
             if kind == "position" {
-                let position = snapshot_integer(data, "position")?;
+                let position = snapshot_integer(data, "position", "invalid snapshot document")?;
                 if !(1..=5).contains(&position)
                     || !identities.positions.insert(identity)
                     || !identities.position_slots.insert((context, position))
@@ -486,7 +265,7 @@ fn inspect_snapshot_record(
                 }
                 Ok(3)
             } else {
-                let count = snapshot_integer(data, "count")?;
+                let count = snapshot_integer(data, "count", "invalid snapshot document")?;
                 if !(0..=10).contains(&count) || !identities.selections.insert(identity) {
                     return Err("invalid snapshot document");
                 }
@@ -497,10 +276,48 @@ fn inspect_snapshot_record(
     }
 }
 
+fn reject_symlinked_snapshot_path(path: &Path) -> Result<(), &'static str> {
+    let mut current = PathBuf::new();
+    let mut saw_prefix_alias = false;
+    let mut saw_real_component = false;
+    let components: Vec<_> = path.components().collect();
+    for (index, component) in components.iter().enumerate() {
+        match component {
+            Component::Prefix(_) | Component::RootDir => current.push(component),
+            Component::CurDir => {}
+            Component::ParentDir => current.push(component),
+            Component::Normal(_) => {
+                current.push(component);
+                match std::fs::symlink_metadata(&current) {
+                    Ok(metadata) if metadata.file_type().is_symlink() => {
+                        let system_alias = path.is_absolute()
+                            && !saw_real_component
+                            && !saw_prefix_alias
+                            && matches!(component, Component::Normal(name) if *name == std::ffi::OsStr::new("tmp") || *name == std::ffi::OsStr::new("var"));
+                        if index + 1 == components.len()
+                            || saw_real_component
+                            || saw_prefix_alias
+                            || !system_alias
+                        {
+                            return Err("snapshot file unavailable");
+                        }
+                        saw_prefix_alias = true;
+                    }
+                    Ok(_) => saw_real_component = true,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(_) => return Err("snapshot file unavailable"),
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Validate the complete NDJSON envelope before a host calls the expensive Engine staging path.
 /// Header/footer order, exact body checksum, category order and record bounds are all part of the
 /// cloud format. Engine records receive their deeper scheme-specific validation during prepare.
 fn inspect_snapshot(path: &Path) -> Result<SnapshotMetadata, &'static str> {
+    reject_symlinked_snapshot_path(path)?;
     let metadata = std::fs::symlink_metadata(path).map_err(|_| "snapshot file unavailable")?;
     if !metadata.file_type().is_file() || metadata.len() == 0 || metadata.len() > MAX_SNAPSHOT_BYTES
     {
@@ -556,7 +373,7 @@ fn inspect_snapshot(path: &Path) -> Result<SnapshotMetadata, &'static str> {
         if total_bytes > MAX_SNAPSHOT_BYTES || line.is_empty() {
             return Err("invalid snapshot document");
         }
-        let map = parse_snapshot_object(&line)?;
+        let map = parse_strict_object(&line).map_err(|_| "invalid snapshot document")?;
         let kind = map
             .get("type")
             .and_then(Value::as_str)
@@ -617,11 +434,9 @@ fn inspect_snapshot(path: &Path) -> Result<SnapshotMetadata, &'static str> {
                 let expected_sha = map
                     .get("sha256")
                     .and_then(Value::as_str)
-                    .filter(|value| {
-                        value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
-                    })
+                    .filter(|value| crate::valid_sha256(value))
                     .ok_or("invalid snapshot document")?;
-                let actual = format!("{:x}", body_digest.clone().finalize());
+                let actual = hex::encode(body_digest.clone().finalize());
                 if expected_records != records || expected_sha != actual {
                     return Err("invalid snapshot document");
                 }
@@ -656,7 +471,7 @@ fn inspect_snapshot(path: &Path) -> Result<SnapshotMetadata, &'static str> {
     Ok(SnapshotMetadata {
         cloud_revision,
         sha256,
-        file_sha256: format!("{:x}", file_digest.finalize()),
+        file_sha256: hex::encode(file_digest.finalize()),
         bytes: total_bytes,
         records,
         entries: counts[0],
@@ -672,13 +487,7 @@ fn restore_snapshot_with(
     path: &Path,
     upload: impl FnOnce(&Path, i64, &str) -> Result<AccountDictionarySnapshotRestore, AccountError>,
 ) -> Result<Value, String> {
-    if request.revision < 0
-        || request.expected_sha256.len() != 64
-        || !request
-            .expected_sha256
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
+    if request.revision < 0 || !msime_client_core::is_lower_hex(&request.expected_sha256, 64) {
         return Err("account_invalid".to_owned());
     }
     let metadata = inspect_snapshot(path).map_err(|_| "account_invalid".to_owned())?;
@@ -695,11 +504,13 @@ fn restore_snapshot_with(
 pub type SnapshotNext = unsafe extern "C" fn(*mut c_void, *mut u8, usize) -> isize;
 
 fn parse_options(bytes: &[u8]) -> Result<EngineOptions, &'static str> {
-    if bytes.len() > BUFFER_LIMIT {
+    if bytes.len() > REQUEST_LIMIT {
         return Err("invalid snapshot options");
     }
-    let options: HostOptions =
-        serde_json::from_slice(bytes).map_err(|_| "invalid snapshot options")?;
+    let options = serde_json::from_slice(bytes)
+        .ok()
+        .and_then(HostOptions::from_document)
+        .ok_or("invalid snapshot options")?;
     validate_options(options)
 }
 fn validate_options(options: HostOptions) -> Result<EngineOptions, &'static str> {
@@ -735,28 +546,25 @@ fn version(options: &EngineOptions) -> Result<String, &'static str> {
         hash.update(text.as_bytes());
     }
     hash.update(dictionary_state_revision(options).map_err(|_| "snapshot revision unavailable")?);
-    Ok(format!("{:x}", hash.finalize()))
-}
-
-fn valid_activation_id(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    bytes.len() == 36
-        && [8, 13, 18, 23].iter().all(|&index| bytes[index] == b'-')
-        && bytes
-            .iter()
-            .enumerate()
-            .all(|(index, byte)| [8, 13, 18, 23].contains(&index) || byte.is_ascii_hexdigit())
+    Ok(hex::encode(hash.finalize()))
 }
 
 fn activation_receipt(options: &EngineOptions) -> Result<Option<String>, &'static str> {
     let path = Path::new(&options.user_data).join(ACTIVATION_RECEIPT_NAME);
-    let value = match std::fs::read(path) {
-        Ok(value) => value,
+    let file = match std::fs::File::open(path) {
+        Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => return Err("snapshot activation receipt unavailable"),
     };
+    let value = crate::bounded_file::read(file, MAX_ACTIVATION_RECEIPT_BYTES).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::InvalidData {
+            "invalid snapshot activation receipt"
+        } else {
+            "snapshot activation receipt unavailable"
+        }
+    })?;
     let value = std::str::from_utf8(&value).map_err(|_| "invalid snapshot activation receipt")?;
-    if !valid_activation_id(value) {
+    if !crate::valid_uuid_string(value) {
         return Err("invalid snapshot activation receipt");
     }
     Ok(Some(value.to_owned()))
@@ -767,24 +575,32 @@ fn write_activation_receipt(
     activation_id: &str,
 ) -> Result<(), &'static str> {
     let directory = Path::new(&options.user_data);
-    let temporary = directory.join(format!("{ACTIVATION_RECEIPT_NAME}.tmp"));
     let path = directory.join(ACTIVATION_RECEIPT_NAME);
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(&temporary)
+    write_activation_receipt_at(directory, &path, activation_id)
+}
+
+fn write_activation_receipt_at(
+    directory: &Path,
+    path: &Path,
+    activation_id: &str,
+) -> Result<(), &'static str> {
+    let mut temporary = tempfile::NamedTempFile::new_in(directory)
         .map_err(|_| "snapshot activation receipt unavailable")?;
-    file.write_all(activation_id.as_bytes())
-        .and_then(|_| file.sync_all())
+    temporary
+        .write_all(activation_id.as_bytes())
+        .and_then(|_| temporary.as_file().sync_all())
         .map_err(|_| "snapshot activation receipt unavailable")?;
-    std::fs::rename(temporary, path).map_err(|_| "snapshot activation receipt unavailable")
+    temporary
+        .persist(path)
+        .map(|_| ())
+        .map_err(|_| "snapshot activation receipt unavailable")
 }
 
 fn prepare(
     request: PrepareRequest,
     specification: &ResourceSet,
-    stream: impl Iterator<Item = Result<msime_engine_bridge::DictionaryStateRecord, SnapshotReadError>>
+    on_demand: &[&str],
+    stream: impl Iterator<Item = Result<msime_engine::host::DictionaryStateRecord, SnapshotReadError>>
         + 'static,
 ) -> Result<Prepared, &'static str> {
     if request.records > 500_000 || request.expected_version.len() != 64 {
@@ -793,7 +609,7 @@ fn prepare(
     if request
         .activation_id
         .as_deref()
-        .is_some_and(|value| !valid_activation_id(value))
+        .is_some_and(|value| !crate::valid_uuid_string(value))
     {
         return Err("invalid snapshot activation id");
     }
@@ -822,8 +638,11 @@ fn prepare(
             return Err("snapshot staging overlaps active paths");
         }
     }
+    // 与 `prepare_host_configuration` 相同的发货规则；内容标识仍按完整清单计算。
+    let shipped =
+        crate::shipped_specification(specification, Path::new(&options.resources), on_demand);
     ResourceStore::new(&options.resources)
-        .verify(Path::new(&options.resources), specification)
+        .verify(Path::new(&options.resources), &shipped)
         .map_err(|_| "snapshot resources rejected")?;
     let content_id = specification
         .generation()
@@ -893,26 +712,26 @@ fn activate(handle: u64, expected: &str) -> Result<Value, &'static str> {
     let replacement_session = Session::new(staged).map_err(|_| "snapshot engine unavailable")?;
     // Windows cannot rename SQLite files while the probe keeps them open.
     drop(replacement_session);
+    // The same step `reset_learned_data` takes before it replaces files in place: write the queued personal context into the journal that is about to become the backup, then close every cached journal, personal-context and local-mode connection, so nothing in this process keeps reading or writing the files being moved out (Windows would also refuse to move them).
+    msime_engine::close_cached_databases();
     let suffix = format!(".msime-snapshot-old-{handle}");
     let pairs = [
         (&active.user_data, &staged.user_data),
         (&active.cache, &staged.cache),
         (&active.dictionaries, &staged.dictionaries),
     ];
-    let backups: Vec<std::path::PathBuf> = pairs
-        .iter()
-        .map(|(current, _)| {
-            let current = Path::new(current.as_str());
-            current.with_file_name(format!(
-                "{}{}",
-                current
-                    .file_name()
-                    .and_then(|x| x.to_str())
-                    .unwrap_or("state"),
-                suffix
-            ))
-        })
-        .collect();
+    let mut backups = Vec::with_capacity(pairs.len());
+    backups.extend(pairs.iter().map(|(current, _)| {
+        let current = Path::new(current.as_str());
+        current.with_file_name(format!(
+            "{}{}",
+            current
+                .file_name()
+                .and_then(|x| x.to_str())
+                .unwrap_or("state"),
+            suffix
+        ))
+    }));
     // Swap each root's contents rather than the root itself.
     //
     // Renaming the roots cannot work on Windows: the maintenance guard holds
@@ -922,16 +741,18 @@ fn activate(handle: u64, expected: &str) -> Result<Value, &'static str> {
     // files exactly where they are, which is also what they are documented to
     // require: they are stable coordination objects, and renaming a root moved
     // one out from under every other process using it.
-    let roots: Vec<&Path> = pairs
-        .iter()
-        .map(|(current, _)| Path::new(current.as_str()))
-        .collect();
-    let staged_roots: Vec<&Path> = pairs
-        .iter()
-        .map(|(_, replacement)| Path::new(replacement.as_str()))
-        .collect();
-    let mut moved: Vec<(std::path::PathBuf, std::path::PathBuf)> = Vec::new();
+    let mut roots = Vec::with_capacity(pairs.len());
+    roots.extend(pairs.iter().map(|(current, _)| Path::new(current.as_str())));
+    let mut staged_roots = Vec::with_capacity(pairs.len());
+    staged_roots.extend(
+        pairs
+            .iter()
+            .map(|(_, replacement)| Path::new(replacement.as_str())),
+    );
+    let mut moved: Vec<(std::path::PathBuf, std::path::PathBuf)> = Vec::with_capacity(pairs.len());
     let rollback = |moved: &[(std::path::PathBuf, std::path::PathBuf)]| {
+        // Anything opened on a moved file while the swap ran would outlive its move back.
+        msime_engine::close_cached_databases();
         for (from, to) in moved.iter().rev() {
             let _ = std::fs::rename(to, from);
         }
@@ -949,7 +770,7 @@ fn activate(handle: u64, expected: &str) -> Result<Value, &'static str> {
         let current = Path::new(current.as_str());
         let replacement = Path::new(replacement.as_str());
         let backup = &backups[index];
-        if std::fs::create_dir_all(backup).is_err() {
+        if prepare_snapshot_backup(backup).is_err() {
             rollback(&moved);
             return Err("snapshot activation failed");
         }
@@ -1006,6 +827,8 @@ fn activate(handle: u64, expected: &str) -> Result<Value, &'static str> {
             moved.push((path, destination));
         }
     }
+    // A reader that opened a file while the swap ran holds the old one; the next access opens the restored files.
+    msime_engine::close_cached_databases();
     for backup in &backups {
         let _ = std::fs::remove_dir_all(backup);
     }
@@ -1022,6 +845,32 @@ fn activate(handle: u64, expected: &str) -> Result<Value, &'static str> {
 /// Leaving the directory on disk costs some space and keeps the data.
 fn discard_recovered_backup(backup: &Path) {
     let _ = std::fs::remove_dir(backup);
+}
+
+/// Create or reuse only an empty, real backup directory. A backup path is derived from a
+/// process-local handle but lives beside user state, so a pre-existing symlink must never be
+/// accepted as the destination for the old generation's files.
+fn prepare_snapshot_backup(path: &Path) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            let kind = metadata.file_type();
+            if !kind.is_dir() || kind.is_symlink() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "snapshot backup is not a real directory",
+                ));
+            }
+            if std::fs::read_dir(path)?.next().is_some() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "snapshot backup is not empty",
+                ));
+            }
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => std::fs::create_dir(path),
+        Err(error) => Err(error),
+    }
 }
 
 fn version_without_access(options: &EngineOptions) -> Result<String, &'static str> {
@@ -1041,7 +890,7 @@ fn version_without_access(options: &EngineOptions) -> Result<String, &'static st
         hash.update(text.as_bytes());
     }
     hash.update(dictionary_state_revision(options).map_err(|_| "snapshot revision unavailable")?);
-    Ok(format!("{:x}", hash.finalize()))
+    Ok(hex::encode(hash.finalize()))
 }
 
 fn register(prepared: Prepared) -> Result<Value, &'static str> {
@@ -1090,6 +939,7 @@ struct SnapshotFileRecords {
 
 impl SnapshotFileRecords {
     fn open(path: &Path) -> Result<Self, &'static str> {
+        reject_symlinked_snapshot_path(path)?;
         let file = std::fs::File::open(path).map_err(|_| "snapshot file unavailable")?;
         Ok(Self {
             reader: BufReader::with_capacity(MAX_SNAPSHOT_LINE_BYTES, file),
@@ -1126,7 +976,7 @@ impl SnapshotFileRecords {
 }
 
 impl Iterator for SnapshotFileRecords {
-    type Item = Result<msime_engine_bridge::DictionaryStateRecord, SnapshotReadError>;
+    type Item = Result<msime_engine::host::DictionaryStateRecord, SnapshotReadError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.failed {
@@ -1141,7 +991,7 @@ impl Iterator for SnapshotFileRecords {
                 }
                 Ok(true) => {}
             }
-            let kind = match parse_snapshot_object(&self.line)
+            let kind = match parse_strict_object(&self.line)
                 .ok()
                 .and_then(|map| map.get("type").and_then(Value::as_str).map(str::to_owned))
             {
@@ -1243,6 +1093,7 @@ fn snapshot_queue_process(
             activation_id: Some(request.id.to_string()),
         },
         &specification,
+        crate::ON_DEMAND_ARTIFACTS,
         stream,
     );
     let prepared = match prepared {
@@ -1337,7 +1188,7 @@ pub unsafe extern "C" fn msime_client_snapshot_queue(
     length: usize,
 ) -> *mut c_char {
     response(|| {
-        if request.is_null() || length == 0 || length > BUFFER_LIMIT {
+        if request.is_null() || length == 0 || length > REQUEST_LIMIT {
             return Err("snapshot_invalid".to_owned());
         }
         let action: SnapshotQueueAction =
@@ -1417,7 +1268,7 @@ pub unsafe extern "C" fn msime_client_snapshot_version(
     length: usize,
 ) -> *mut c_char {
     response(|| {
-        if options.is_null() || length > BUFFER_LIMIT {
+        if options.is_null() || length > REQUEST_LIMIT {
             return Err("invalid snapshot buffer".into());
         }
         let options = parse_options(unsafe { std::slice::from_raw_parts(options, length) })?;
@@ -1439,7 +1290,7 @@ pub unsafe extern "C" fn msime_client_snapshot_prepare(
     context: *mut c_void,
 ) -> *mut c_char {
     response(|| {
-        if request.is_null() || length > BUFFER_LIMIT {
+        if request.is_null() || length > REQUEST_LIMIT {
             return Err("invalid snapshot buffer".into());
         }
         let next = next.ok_or("missing snapshot reader")?;
@@ -1461,7 +1312,7 @@ pub unsafe extern "C" fn msime_client_snapshot_prepare(
             }
             Some(record::decode(&buffer[..length as usize]))
         });
-        let prepared = prepare(request, &specification, stream)?;
+        let prepared = prepare(request, &specification, crate::ON_DEMAND_ARTIFACTS, stream)?;
         register(prepared).map_err(Into::into)
     })
 }

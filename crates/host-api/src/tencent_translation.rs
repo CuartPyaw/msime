@@ -31,30 +31,22 @@ pub fn descriptor(bytes: &[u8]) -> Result<Value, &'static str> {
     let id = trim(request.config.secret_id);
     let key = trim(request.config.secret_key);
     let region = trim(request.config.region);
-    let valid_token = |value: &str| {
-        !value.is_empty()
-            && value.len() <= 4096
-            && !value.chars().any(char::is_control)
-            && translation::usable_tencent_secret(value)
-    };
-    let languages = ["zh", "en", "fr", "ja", "es", "ru", "de", "ko"];
+    let valid_token = translation::is_valid_credential;
     if !valid_token(&id)
         || !valid_token(&key)
-        || !id
-            .bytes()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == b'_' || ch == b'-')
+        || !msime_client_core::is_bounded_ascii_identifier(&id, 4096)
         || region.len() > 64
-        || !region
-            .bytes()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == b'-')
-        || !languages.contains(&request.source_language.as_str())
-        || !languages.contains(&request.target_language.as_str())
+        || !msime_client_core::is_ascii_alphanumeric_dash(&region)
+        || !translation::is_supported_translation_pair(
+            &request.source_language,
+            &request.target_language,
+        )
         || request.texts.is_empty()
         || request.texts.len() > 9
         || request
             .texts
             .iter()
-            .any(|text| text.is_empty() || text.chars().count() > 40)
+            .any(|text| !translation::is_valid_source_text(text))
         || request.timestamp < 0
     {
         return Err("invalid Tencent parameters");
@@ -107,10 +99,13 @@ pub fn parse(bytes: &[u8], expected: usize) -> Option<Value> {
         return None;
     }
     let values = translation::parse_tencent_tmt_response(text, expected)?;
-    Some(json!(values
-        .iter()
-        .map(|text| translation::format_translation_gloss(text).filter(|text| text.len() <= 4096))
-        .collect::<Vec<_>>()))
+    let mut glosses = Vec::with_capacity(values.len());
+    glosses.extend(
+        values.iter().map(|text| {
+            translation::format_translation_gloss(text).filter(|text| text.len() <= 4096)
+        }),
+    );
+    Some(json!(glosses))
 }
 
 #[cfg(test)]

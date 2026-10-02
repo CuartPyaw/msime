@@ -18,12 +18,10 @@ CHUNK_BYTES = 6400  # 200ms of 16kHz signed 16-bit mono PCM.
 MAX_RESPONSE = 1024 * 1024
 
 
-def normalize_doubao_auth_mode(mode, app_key):
-    """Resolve explicit console mode, retaining pre-mode config compatibility."""
+def normalize_doubao_auth_mode(mode):
+    """Doubao's console generation: "legacy" (App ID plus Access Token) only when named, otherwise "api_key"."""
     normalized = mode.lower() if isinstance(mode, str) and mode.isascii() else ""
-    if normalized in ("api_key", "legacy"):
-        return normalized
-    return "legacy" if isinstance(app_key, str) and app_key else "api_key"
+    return "legacy" if normalized == "legacy" else "api_key"
 
 
 def doubao_headers(config, request_id):
@@ -35,7 +33,7 @@ def doubao_headers(config, request_id):
     app_key = app_key.strip(" \t\r\n")
     token = token.strip(" \t\r\n")
     resource_id = resource_id.strip(" \t\r\n")
-    mode = normalize_doubao_auth_mode(config.get("doubao_auth_mode"), app_key)
+    mode = normalize_doubao_auth_mode(config.get("doubao_auth_mode"))
     headers = {"X-Api-Resource-Id": resource_id,
                "X-Api-Request-Id": request_id}
     if mode == "legacy":
@@ -48,11 +46,28 @@ def doubao_headers(config, request_id):
     return headers
 
 
+# websockets 15.0 is the first release whose synchronous client takes ping_interval and ping_timeout; 13.x and 14.x forward unknown keywords to socket.create_connection, so an older package would only fail once a recording is already connecting.
+WEBSOCKETS_MIN_MAJOR = 15
+WEBSOCKETS_REQUIRED = "websockets>=%d with sync client required" % WEBSOCKETS_MIN_MAJOR
+# Every keyword DoubaoStream.run passes to connect().
+CONNECT_ARGUMENTS = frozenset((
+    "additional_headers", "user_agent_header", "open_timeout", "close_timeout", "ping_interval",
+    "ping_timeout", "max_size", "max_queue", "compression", "logger", "create_connection"))
+
+
 def websocket_dependency():
+    """Return the synchronous client, or raise RuntimeError when the installed websockets cannot run the Doubao transport."""
+    import inspect
     from importlib.metadata import version
-    if version("websockets").split(".")[0] != "15":
-        raise ValueError("Doubao requires websockets 15.x")
-    from websockets.sync.client import ClientConnection, connect
+    try:
+        major = int(version("websockets").split(".")[0])
+        from websockets.sync.client import ClientConnection, connect
+        accepted = inspect.signature(connect).parameters
+        receive = inspect.signature(ClientConnection.recv).parameters
+    except Exception as error:
+        raise RuntimeError(WEBSOCKETS_REQUIRED) from error
+    if major < WEBSOCKETS_MIN_MAJOR or not CONNECT_ARGUMENTS <= accepted.keys() or "timeout" not in receive:
+        raise RuntimeError(WEBSOCKETS_REQUIRED)
     return ClientConnection, connect
 
 
@@ -129,13 +144,7 @@ def doubao_auth_headers(config, options):
     mode = options.get("doubao_auth_mode", "")
     if not isinstance(mode, str) or not isinstance(app_key, str) or not isinstance(token, str):
         raise ValueError("invalid Doubao authentication configuration")
-    mode = mode.lower()
-    if mode not in ("api_key", "legacy"):
-        # Older preferences had no mode and inferred the console generation
-        # from App ID presence. Keep that behavior, but never treat a shipped
-        # placeholder as an App ID.
-        mode = "api_key" if _placeholder(app_key) else "legacy"
-    if mode == "legacy":
+    if normalize_doubao_auth_mode(mode) == "legacy":
         if _placeholder(app_key):
             raise ValueError("Doubao legacy authentication requires an App ID")
         return {"X-Api-App-Key": app_key, "X-Api-Access-Key": token}

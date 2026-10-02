@@ -12,29 +12,19 @@ on:
     paths-ignore:
       - CHANGELOG.md
       - PRIVACY.md
-      - README.en.md
       - README.md
-      - docs/apple-platform-architecture.md
-      - docs/backend-integration.md
-      - docs/ios-distribution.md
-      - docs/plans/**
   pull_request:
     paths-ignore:
       - CHANGELOG.md
       - PRIVACY.md
-      - README.en.md
       - README.md
-      - docs/apple-platform-architecture.md
-      - docs/backend-integration.md
-      - docs/ios-distribution.md
-      - docs/plans/**
   workflow_dispatch:
 
   merge_group:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.ref || github.ref_name }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -66,15 +56,28 @@ jobs:
           if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || ! git cat-file -e "$BASE_SHA" 2>/dev/null; then
             echo "build=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          # PR 要比的是它自己从分叉点起改了什么（三个点）。base.sha 是事件发生时目标分支的最新提交，PR 分支往往从更早的 develop 切出；两个点的 diff 比的是两棵树，会把分叉之后 develop 合进来的改动也算成本 PR 的，于是只改一个 workflow 的 PR 也被判成要编译全部平台（2026-10-02 #2902）。push 的 BASE_SHA 是推送前的提交，两个点正好是这次推送带来的改动。
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA")
+          else
+            changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          fi
           printf '改动文件:\n%s\n' "$changed"
           while IFS= read -r path; do
             [[ -z "$path" ]] && continue
             case "$path" in
               platforms/ios/*)
                 echo "build=true" >> "$GITHUB_OUTPUT"; echo "iOS 改动: $path"; exit 0 ;;
-              shared/*|vendor/*|engine-lock.json|scripts/*|cmake/*|CMakeLists.txt|.github/workflows/*|product-lock.json)
+              shared/*|.github/workflows/ci-ios.yml)
                 echo "build=true" >> "$GITHUB_OUTPUT"; echo "共享输入改动: $path"; exit 0 ;;
+              # 同 ci-macos.yml:工作区清单与工具链,以及 build-native.sh 的 cargo build -p msime-host-api
+              # 和它依赖的三个 crate(client-core 的 example 也由本工作流运行)。
+              Cargo.toml|Cargo.lock|rust-toolchain.toml|.cargo/*|crates/host-api/*|crates/client-core/*|crates/engine/*|crates/input-runtime/*)
+                echo "build=true" >> "$GITHUB_OUTPUT"; echo "Rust 输入改动: $path"; exit 0 ;;
+              # 同 ci-macos.yml:scripts/ 下只有真正进得了这条构建的才触发。run_ui_tests.sh 在 platforms/ios/scripts/ 下,已由 platforms/ios/* 覆盖。
+              # fetch_voice_runtime.py 与它读的 lock 决定 MSIMEApp 嵌入的 sherpa-onnx 运行时。
+              scripts/fetch_voice_runtime.py|resources/voice-runtime.lock.json)
+                echo "build=true" >> "$GITHUB_OUTPUT"; echo "构建脚本改动: $path"; exit 0 ;;
             esac
           done <<< "$changed"
           echo "build=false" >> "$GITHUB_OUTPUT"
@@ -99,18 +102,16 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: {persist-credentials: false}
       - name: Install project generator
         run: |
-          brew install boost fmt spdlog nlohmann-json xcodegen
+          brew install xcodegen
           if ! command -v pod >/dev/null 2>&1; then
             brew install cocoapods
           fi
           pod --version
       - name: Test shared account transport and session lifecycle
         run: swift test --package-path shared/backend
-      # CMake prepares the Engine on configure, but the checks below read it first. The fetch is a no-op once the tree matches the lock, so the later configure pays nothing.
-      - name: Prepare the locked Engine archive
-        run: python3 scripts/fetch_engine.py
       - name: Validate keyboard configuration
         run: |
           python3 platforms/ios/tests/settings/ProjectConfigurationTests.py
@@ -122,9 +123,18 @@ jobs:
           mkdir -p target/resources
           resource_dir="$(cargo run --quiet -p msime-client-core --example install_resources -- target/resources)"
           bash platforms/ios/stage-resources.sh "$resource_dir"
+      # project.yml gives the unit targets `LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]: $(SRCROOT)/../../target/ios/simulator` and `-lmsime_host_api`, and nothing in this job produced that directory, so the test build reached the linker and stopped at "library 'msime_host_api' not found". build-native.sh is what fills it; it needs only the Rust simulator target installed. Not added to the Intel handwriting job: that simulator is x86_64 and build-native.sh's simulator variant is aarch64-apple-ios-sim.
+      - name: Build the iOS host library
+        run: |
+          set -euo pipefail
+          rustup target add aarch64-apple-ios-sim
+          bash platforms/ios/build-native.sh simulator
+          test -f target/ios/simulator/libmsime_host_api.a
       - name: Generate Xcode project
         run: |
           mkdir -p build/ios
+          # MSIMEApp embeds the sherpa-onnx runtime for on-device dictation; it is fetched and verified against resources/voice-runtime.lock.json, never committed.
+          python3 scripts/fetch_voice_runtime.py --platform ios
           xcodegen generate --spec platforms/ios/project.yml --project build/ios --project-root platforms/ios
           if [ "${MSIME_IOS_SKIP_HANDWRITING}" != "1" ]; then
             pod install --deployment --project-directory=platforms/ios
@@ -154,12 +164,7 @@ jobs:
           MSIME_TEST_SCOPE: ${{ github.base_ref == 'main' && 'all' || 'pr' }}
           MSIME_TEST_SHARD: ${{ github.base_ref == 'main' && 'rest' || '' }}
         timeout-minutes: 90
-        run: |
-          if [[ -x platforms/ios/scripts/run_ui_tests.sh ]]; then
-            bash platforms/ios/scripts/run_ui_tests.sh
-          else
-            echo 'iOS UI test runner is not present in this branch; native UI suite skipped.'
-          fi
+        run: bash platforms/ios/scripts/run_ui_tests.sh
       - name: Upload iOS test results
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -192,18 +197,16 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: {persist-credentials: false}
       - name: Install project generator
         run: |
-          brew install boost fmt spdlog nlohmann-json xcodegen
+          brew install xcodegen
           if ! command -v pod >/dev/null 2>&1; then
             brew install cocoapods
           fi
           pod --version
       - name: Test shared account transport and session lifecycle
         run: swift test --package-path shared/backend
-      # CMake prepares the Engine on configure, but the checks below read it first. The fetch is a no-op once the tree matches the lock, so the later configure pays nothing.
-      - name: Prepare the locked Engine archive
-        run: python3 scripts/fetch_engine.py
       - name: Validate keyboard configuration
         run: |
           python3 platforms/ios/tests/settings/ProjectConfigurationTests.py
@@ -215,9 +218,18 @@ jobs:
           mkdir -p target/resources
           resource_dir="$(cargo run --quiet -p msime-client-core --example install_resources -- target/resources)"
           bash platforms/ios/stage-resources.sh "$resource_dir"
+      # project.yml gives the unit targets `LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]: $(SRCROOT)/../../target/ios/simulator` and `-lmsime_host_api`, and nothing in this job produced that directory, so the test build reached the linker and stopped at "library 'msime_host_api' not found". build-native.sh is what fills it; it needs only the Rust simulator target installed. Not added to the Intel handwriting job: that simulator is x86_64 and build-native.sh's simulator variant is aarch64-apple-ios-sim.
+      - name: Build the iOS host library
+        run: |
+          set -euo pipefail
+          rustup target add aarch64-apple-ios-sim
+          bash platforms/ios/build-native.sh simulator
+          test -f target/ios/simulator/libmsime_host_api.a
       - name: Generate Xcode project
         run: |
           mkdir -p build/ios
+          # MSIMEApp embeds the sherpa-onnx runtime for on-device dictation; it is fetched and verified against resources/voice-runtime.lock.json, never committed.
+          python3 scripts/fetch_voice_runtime.py --platform ios
           xcodegen generate --spec platforms/ios/project.yml --project build/ios --project-root platforms/ios
           if [ "${MSIME_IOS_SKIP_HANDWRITING}" != "1" ]; then
             pod install --deployment --project-directory=platforms/ios
@@ -247,12 +259,7 @@ jobs:
           MSIME_TEST_SCOPE: ${{ github.base_ref == 'main' && 'all' || 'pr' }}
           MSIME_TEST_SHARD: ${{ github.base_ref == 'main' && 'heavy' || '' }}
         timeout-minutes: 90
-        run: |
-          if [[ -x platforms/ios/scripts/run_ui_tests.sh ]]; then
-            bash platforms/ios/scripts/run_ui_tests.sh
-          else
-            echo 'iOS UI test runner is not present in this branch; native UI suite skipped.'
-          fi
+        run: bash platforms/ios/scripts/run_ui_tests.sh
       - name: Upload iOS test results
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -279,15 +286,14 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: {persist-credentials: false}
       - name: Install project generator
         run: |
-          brew install boost fmt spdlog nlohmann-json xcodegen
+          brew install xcodegen
           if ! command -v pod >/dev/null 2>&1; then
             brew install cocoapods
           fi
           pod --version
-      - name: Prepare the locked Engine archive
-        run: python3 scripts/fetch_engine.py
       - name: Package iOS dictionary
         run: |
           mkdir -p target/resources
@@ -296,15 +302,12 @@ jobs:
       - name: Generate Xcode project
         run: |
           mkdir -p build/ios
+          # MSIMEApp embeds the sherpa-onnx runtime for on-device dictation; it is fetched and verified against resources/voice-runtime.lock.json, never committed.
+          python3 scripts/fetch_voice_runtime.py --platform ios
           xcodegen generate --spec platforms/ios/project.yml --project build/ios --project-root platforms/ios
           pod install --deployment --project-directory=platforms/ios
       - name: Test handwriting recognition
-        run: |
-          if [[ -x platforms/ios/scripts/run_ui_tests.sh ]]; then
-            bash platforms/ios/scripts/run_ui_tests.sh
-          else
-            echo 'iOS UI test runner is not present in this branch; native UI suite skipped.'
-          fi
+        run: bash platforms/ios/scripts/run_ui_tests.sh
       - name: Upload handwriting test results
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

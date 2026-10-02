@@ -1,3 +1,7 @@
+use msime_client_core::{
+    has_disallowed_control_with_options, is_bounded_ascii_identifier, is_bounded_text,
+    is_bounded_utf16,
+};
 use serde_json::Value;
 
 pub fn validate_request(request: &Value) -> Result<(), &'static str> {
@@ -8,7 +12,7 @@ pub fn validate_request(request: &Value) -> Result<(), &'static str> {
     match operation {
         "list" => {
             let search = request.get("search").and_then(Value::as_str).unwrap_or("");
-            if search.len() > 1024 || search.chars().any(char::is_control) {
+            if !is_bounded_text(search, 1024) {
                 return Err("invalid cloud clipboard request");
             }
         }
@@ -18,11 +22,8 @@ pub fn validate_request(request: &Value) -> Result<(), &'static str> {
                 .and_then(Value::as_str)
                 .ok_or("invalid cloud clipboard request")?;
             if text.is_empty()
-                || text.encode_utf16().count() > 4000
-                || text.contains('\0')
-                || text.chars().any(|character| {
-                    character.is_control() && !matches!(character, '\n' | '\r' | '\t')
-                })
+                || !is_bounded_utf16(text, 4000)
+                || has_disallowed_control_with_options(text, true)
             {
                 return Err("invalid cloud clipboard request");
             }
@@ -32,12 +33,7 @@ pub fn validate_request(request: &Value) -> Result<(), &'static str> {
                 .get("id")
                 .and_then(Value::as_str)
                 .ok_or("invalid cloud clipboard request")?;
-            if id.is_empty()
-                || id.len() > 256
-                || !id
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || b"-_".contains(&byte))
-            {
+            if !is_bounded_ascii_identifier(id, 256) {
                 return Err("invalid cloud clipboard request");
             }
         }

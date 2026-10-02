@@ -40,7 +40,7 @@ OSStatus Set(AudioObjectID object, const AudioObjectPropertyAddress *address,
     // Both mute and restore must retain a valid recovery record until completion.
     NSDictionary *record = [NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfURL:Journal()]
         options:0 error:nil];
-    assert([record[@"uid"] isEqual:@"synthetic-recovery-output"] && [record[@"previous"] isEqual:@0]);
+    assert([record[@"version"] isEqual:@2] && [record[@"uids"] isEqual:@[@"synthetic-recovery-output"]]);
     if (crashBeforeWrite) _exit(78);
     ++writes;
     if (failWrite) return kAudioHardwareUnspecifiedError;
@@ -48,7 +48,7 @@ OSStatus Set(AudioObjectID object, const AudioObjectPropertyAddress *address,
     return noErr;
 }
 __attribute__((ns_returns_retained)) MSIMEVoiceAudioMuter *NewMuter() {
-    return [[MSIMEVoiceAudioMuter alloc] initWithAudioAPI:{Get, Set} recoveryDirectory:directory];
+    return [[MSIMEVoiceAudioMuter alloc] initWithAudioAPI:{Get, Set, nullptr, nullptr} recoveryDirectory:directory];
 }
 void Crash(NSString *executable, NSString *mode, int expected) {
     NSTask *task = [[NSTask alloc] init];
@@ -113,12 +113,20 @@ int main(int argc, const char *argv[]) {
         assert([muter mute:nil]); [muter restore]; assert(muted == 1 && writes == before && JournalSize() == 0);
         muted = 0;
         for (id invalid in @[@{}, @{@"version":@2, @"uid":@"synthetic-recovery-output", @"previous":@0},
-                            @{@"version":@1, @"uid":@"", @"previous":@0},
-                            @{@"version":@1, @"uid":@"synthetic-recovery-output", @"previous":@1}]) {
+                            @{@"version":@1, @"uid":@"synthetic-recovery-output", @"previous":@0},
+                            @{@"version":@2, @"uids":@[]}, @{@"version":@2, @"uids":@[@""]},
+                            @{@"version":@2, @"uids":@[@"synthetic-recovery-output", @3]},
+                            @{@"version":@2, @"uids":@[@"a", @"b", @"c", @"d", @"e", @"f", @"g", @"h", @"i"]}]) {
             NSData *data = [NSJSONSerialization dataWithJSONObject:invalid options:0 error:nil];
             assert([data writeToURL:Journal() options:0 error:nil]);
             [muter restore]; assert(![muter mute:nil] && writes == before && JournalSize() == data.length);
         }
+        // A valid record is recovered.
+        NSData *multiple = [NSJSONSerialization dataWithJSONObject:@{@"version":@2, @"uids":@[@"synthetic-recovery-output"]}
+            options:0 error:nil];
+        assert([multiple writeToURL:Journal() options:0 error:nil]);
+        muted = 1; [muter restore]; assert(muted == 0 && writes == before + 1 && JournalSize() == 0);
+        before = writes;
         assert([[NSData data] writeToURL:Journal() options:0 error:nil]);
         assert([[NSMutableData dataWithLength:32769] writeToURL:Journal() options:0 error:nil]);
         assert(![muter mute:nil] && writes == before && JournalSize() == 32769);

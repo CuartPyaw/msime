@@ -1,6 +1,9 @@
 #pragma once
 
+#include "../../../../shared/input/GlossSenses.h"
+
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -8,32 +11,9 @@
 
 namespace msime::windows {
 
-// English dictionary glosses use ';' while Chinese glosses use the full-width
-// semicolon. Ctrl+Enter commits the first non-empty sense, matching the
-// Windows candidate translation policy without leaking joined display text.
+// English dictionary glosses use ';' while Chinese glosses use the full-width semicolon. Ctrl+Enter commits the first non-empty sense, without leaking joined display text. The rule is shared with every other host - see shared/input/GlossSenses.h.
 inline std::vector<std::string> translation_senses(std::string_view value) {
-  static constexpr std::string_view fullwidth = "\xEF\xBC\x9B";
-  std::vector<std::string> senses;
-  size_t start = 0;
-  while (start <= value.size()) {
-    const auto ascii = value.find(';', start);
-    const auto wide = value.find(fullwidth, start);
-    const auto cut = ascii == std::string_view::npos
-                         ? wide
-                         : (wide == std::string_view::npos
-                                ? ascii
-                                : (std::min)(ascii, wide));
-    const auto end = cut == std::string_view::npos ? value.size() : cut;
-    const auto first = value.find_first_not_of(" \t\r\n", start);
-    if (first != std::string_view::npos && first < end) {
-      const auto last = value.find_last_not_of(" \t\r\n", end - 1);
-      senses.emplace_back(value.substr(first, last - first + 1));
-    }
-    if (cut == std::string_view::npos)
-      break;
-    start = cut + (cut == wide ? fullwidth.size() : 1);
-  }
-  return senses;
+  return msime::input::gloss_senses(value);
 }
 
 inline std::string first_translation_sense(std::string value) {
@@ -60,6 +40,7 @@ inline std::vector<std::string> untranslated_texts(
     const std::vector<std::pair<std::string, std::string>> &answered,
     const std::vector<std::string> &planned) {
   std::vector<std::string> pending;
+  pending.reserve(planned.size());
   for (const auto &text : planned) {
     if (text.empty())
       continue;
@@ -72,6 +53,43 @@ inline std::vector<std::string> untranslated_texts(
     pending.push_back(text);
   }
   return pending;
+}
+
+// Adds a non-English offline dictionary's glosses to what the user's own translator answered for the same target.
+//
+// The precedence is the reverse of the English path above, and deliberately so: the shared translation query documents that an online answer outranks an installed dictionary for these targets, so the dictionary only fills the candidates left without a gloss. A text already answered keeps its online gloss and gets no second one, an entry with an empty gloss takes the dictionary's in place, and the dictionary's other texts follow the answers in its own order.
+inline void fill_offline_glosses(
+    std::vector<std::pair<std::string, std::string>> &answered,
+    const std::vector<std::pair<std::string, std::string>> &offline) {
+  for (const auto &entry : offline) {
+    if (entry.first.empty() || entry.second.empty())
+      continue;
+    const auto existing = std::find_if(
+        answered.begin(), answered.end(),
+        [&](const auto &item) { return item.first == entry.first; });
+    if (existing == answered.end())
+      answered.push_back(entry);
+    else if (existing->second.empty())
+      existing->second = entry.second;
+  }
+}
+
+// The one item a `/fy` request (command mode) asks the translator about.
+struct CommandTranslationItem {
+  std::string text;
+  std::string source_language;
+  std::string target_language;
+};
+
+// Whether a translation query is the `/fy` command's, and if so what to ask. The shared query marks it with `sentence` and carries exactly one candidate, the English typed after the command, and its own target language (Chinese). It goes to the service the user selected whatever the gloss switches say, and its answer becomes the command's first row rather than a gloss. The candidate plan cannot carry it - it refuses a Chinese target and judges single words, not sentences - so the worker asks this item directly, with no packaged gloss in front of it and no gloss cache behind it. Anything else, including a malformed sentence query, is not a command request.
+inline std::optional<CommandTranslationItem>
+command_translation_item(bool sentence, const std::vector<std::string> &texts,
+                         std::string_view target_language) {
+  if (!sentence || texts.size() != 1 || texts.front().empty() ||
+      target_language.empty())
+    return std::nullopt;
+  return CommandTranslationItem{texts.front(), "en",
+                                std::string(target_language)};
 }
 
 } // namespace msime::windows

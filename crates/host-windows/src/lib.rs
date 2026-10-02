@@ -16,6 +16,8 @@
 #![allow(unsafe_code)]
 #![cfg(windows)]
 
+use msime_client_core::{is_bounded_text, is_bounded_utf16};
+
 pub mod ink;
 pub mod voice_controller;
 
@@ -79,101 +81,6 @@ pub struct InputTarget(isize);
 /// Longest text a panel may inject in one call, matching the shared contract.
 pub const MAX_TEXT_BYTES: usize = 4096;
 
-const ACCOUNT_SESSION_TARGET: &[u16] = &[
-    'M' as u16, 'S' as u16, 'I' as u16, 'M' as u16, 'E' as u16, '-' as u16, 'C' as u16, 'l' as u16,
-    'i' as u16, 'e' as u16, 'n' as u16, 't' as u16, '.' as u16, 'A' as u16, 'c' as u16, 'c' as u16,
-    'o' as u16, 'u' as u16, 'n' as u16, 't' as u16, 'S' as u16, 'e' as u16, 's' as u16, 's' as u16,
-    'i' as u16, 'o' as u16, 'n' as u16, 0,
-];
-
-const MAX_ACCOUNT_SESSION_BYTES: usize = 16 * 1024;
-
-/// Load the desktop account session from the per-user Windows Credential
-/// Manager. The shell never writes session JSON to a normal preferences file.
-pub fn load_account_session() -> Result<Option<String>, ()> {
-    use windows_sys::Win32::Foundation::{GetLastError, ERROR_NOT_FOUND};
-    use windows_sys::Win32::Security::Credentials::{
-        CredFree, CredReadW, CREDENTIALW, CRED_TYPE_GENERIC,
-    };
-    let mut credential: *mut CREDENTIALW = std::ptr::null_mut();
-    let ok = unsafe {
-        CredReadW(
-            ACCOUNT_SESSION_TARGET.as_ptr(),
-            CRED_TYPE_GENERIC,
-            0,
-            &mut credential,
-        )
-    };
-    if ok == 0 {
-        return if unsafe { GetLastError() } == ERROR_NOT_FOUND {
-            Ok(None)
-        } else {
-            Err(())
-        };
-    }
-    if credential.is_null() {
-        return Err(());
-    }
-    let result = unsafe {
-        let value = &*credential;
-        if value.CredentialBlob.is_null()
-            || value.CredentialBlobSize as usize > MAX_ACCOUNT_SESSION_BYTES
-        {
-            Err(())
-        } else {
-            let bytes =
-                std::slice::from_raw_parts(value.CredentialBlob, value.CredentialBlobSize as usize);
-            String::from_utf8(bytes.to_vec()).map_err(|_| ())
-        }
-    };
-    unsafe { CredFree(credential.cast()) };
-    result.map(Some)
-}
-
-/// Save or clear the desktop account session using Windows Credential Manager.
-pub fn save_account_session(value: Option<&str>) -> Result<(), ()> {
-    use windows_sys::Win32::Foundation::{GetLastError, ERROR_NOT_FOUND};
-    use windows_sys::Win32::Security::Credentials::{
-        CredDeleteW, CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
-    };
-    if let Some(value) = value {
-        if value.is_empty() || value.len() > MAX_ACCOUNT_SESSION_BYTES {
-            return Err(());
-        }
-        let mut bytes = value.as_bytes().to_vec();
-        let mut credential = CREDENTIALW {
-            Flags: 0,
-            Type: CRED_TYPE_GENERIC,
-            TargetName: ACCOUNT_SESSION_TARGET.as_ptr() as *mut u16,
-            Comment: std::ptr::null_mut(),
-            LastWritten: windows_sys::Win32::Foundation::FILETIME {
-                dwLowDateTime: 0,
-                dwHighDateTime: 0,
-            },
-            CredentialBlobSize: bytes.len() as u32,
-            CredentialBlob: bytes.as_mut_ptr(),
-            Persist: CRED_PERSIST_LOCAL_MACHINE,
-            AttributeCount: 0,
-            Attributes: std::ptr::null_mut(),
-            TargetAlias: std::ptr::null_mut(),
-            UserName: std::ptr::null_mut(),
-        };
-        let ok = unsafe { CredWriteW(&mut credential, 0) };
-        if ok == 0 {
-            Err(())
-        } else {
-            Ok(())
-        }
-    } else {
-        let ok = unsafe { CredDeleteW(ACCOUNT_SESSION_TARGET.as_ptr(), CRED_TYPE_GENERIC, 0) };
-        if ok != 0 || unsafe { GetLastError() } == ERROR_NOT_FOUND {
-            Ok(())
-        } else {
-            Err(())
-        }
-    }
-}
-
 const CLIPBOARD_CAPTURE_TIMER_ID: usize = 1;
 const CLIPBOARD_CAPTURE_MESSAGE: u32 = windows_sys::Win32::UI::WindowsAndMessaging::WM_APP + 1;
 const CLIPBOARD_CAPTURE_DEBOUNCE_MS: u32 = 80;
@@ -203,6 +110,13 @@ impl WorkArea {
         let available = self.right - self.left;
         let x = self.left + ((available - width) / 2.0).max(0.0);
         let y = (self.bottom - height - 12.0).max(self.top);
+        (x, y)
+    }
+
+    /// Placement centred on the work area, where the shipped emoji and handwriting panels opened. Oversized panels stay pinned to the work area origin.
+    pub fn center(&self, width: f64, height: f64) -> (f64, f64) {
+        let x = self.left + ((self.right - self.left - width) / 2.0).max(0.0);
+        let y = self.top + ((self.bottom - self.top - height) / 2.0).max(0.0);
         (x, y)
     }
 }
@@ -279,14 +193,6 @@ pub fn wait_for_clipboard_history_change(timeout: Duration) -> bool {
 const CF_UNICODETEXT: u32 = 13;
 const MAX_CLIPBOARD_UNITS: usize = 1_000_000;
 
-// windows-sys 0.59 exposes GlobalAlloc/GlobalLock but omits the matching
-// GlobalFree declaration. Keep the ownership cleanup in this small, local
-// binding rather than leaking a movable block when SetClipboardData rejects it.
-#[link(name = "kernel32")]
-extern "system" {
-    fn GlobalFree(memory: *mut core::ffi::c_void) -> *mut core::ffi::c_void;
-}
-
 struct ClipboardGuard;
 
 impl Drop for ClipboardGuard {
@@ -356,68 +262,16 @@ pub fn read_clipboard_text() -> Result<String, ()> {
 
 /// Replace the Windows Unicode clipboard without relying on PowerShell.
 ///
-/// `SetClipboardData` takes ownership of the movable global allocation on
-/// success, so the allocation is freed only on failure. Interior NULs are
-/// rejected instead of being silently truncated by the Win32 string format.
+/// Interior NULs are rejected instead of being silently truncated by the
+/// Win32 string format. The transfer itself goes through the voice output
+/// path, which owns the clipboard with a message-only window (a NULL owner
+/// makes SetClipboardData fail after EmptyClipboard) and retries a clipboard
+/// another process is briefly holding.
 pub fn write_clipboard_text(text: &str) -> bool {
-    use windows_sys::Win32::System::DataExchange::{
-        EmptyClipboard, OpenClipboard, SetClipboardData,
-    };
-    use windows_sys::Win32::System::Memory::{
-        GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE,
-    };
-    if text.contains('\0') {
+    if text.contains('\0') || !is_bounded_utf16(text, MAX_CLIPBOARD_UNITS - 1) {
         return false;
     }
-    let mut value: Vec<u16> = text.encode_utf16().collect();
-    if value.len() >= MAX_CLIPBOARD_UNITS {
-        return false;
-    }
-    value.push(0);
-    let bytes = value.len().saturating_mul(std::mem::size_of::<u16>());
-    let memory = unsafe { GlobalAlloc(GMEM_MOVEABLE, bytes) };
-    if memory.is_null() {
-        return false;
-    }
-    let pointer = unsafe { GlobalLock(memory) } as *mut u16;
-    if pointer.is_null() {
-        unsafe {
-            GlobalFree(memory);
-        }
-        return false;
-    }
-    // SAFETY: the allocation is exactly `value.len()` UTF-16 units and is
-    // locked for this copy.
-    unsafe {
-        std::ptr::copy_nonoverlapping(value.as_ptr(), pointer, value.len());
-        GlobalUnlock(memory);
-    }
-    // Allocate and fill before opening/emptying the clipboard, so an
-    // allocation failure leaves the user's existing clipboard untouched.
-    // SAFETY: a null owner is documented; the guard closes the clipboard on
-    // every path after a successful open.
-    if unsafe { OpenClipboard(std::ptr::null_mut()) } == 0 {
-        unsafe {
-            GlobalFree(memory);
-        }
-        return false;
-    }
-    let _clipboard = ClipboardGuard;
-    if unsafe { EmptyClipboard() } == 0 {
-        unsafe {
-            GlobalFree(memory);
-        }
-        return false;
-    }
-    // SAFETY: ownership transfers to the clipboard only when the handle is
-    // accepted; failure leaves us responsible for freeing it.
-    if unsafe { SetClipboardData(CF_UNICODETEXT, memory) }.is_null() {
-        unsafe {
-            GlobalFree(memory);
-        }
-        return false;
-    }
-    true
+    voice_output::write_unicode_clipboard(text).is_some()
 }
 
 /// Keys that must carry `KEYEVENTF_EXTENDEDKEY`.
@@ -529,7 +383,7 @@ pub fn send_key(virtual_key: u16, modifiers: Modifiers) -> bool {
     if virtual_key == 0 {
         return false;
     }
-    let mut held: Vec<u16> = Vec::new();
+    let mut held = Vec::with_capacity(4);
     if modifiers.ctrl {
         held.push(VK_CONTROL);
     }
@@ -557,14 +411,14 @@ pub fn send_key(virtual_key: u16, modifiers: Modifiers) -> bool {
 /// Type text the panel already holds. Surrogate pairs are delivered as the two
 /// code units the receiving control expects.
 pub fn valid_text(text: &str) -> bool {
-    !text.is_empty() && text.len() <= MAX_TEXT_BYTES && !text.chars().any(char::is_control)
+    !text.is_empty() && is_bounded_text(text, MAX_TEXT_BYTES)
 }
 
 pub fn send_text(text: &str) -> bool {
     if !valid_text(text) {
         return false;
     }
-    let mut inputs = Vec::new();
+    let mut inputs = Vec::with_capacity(text.encode_utf16().count() * 2);
     for unit in text.encode_utf16() {
         inputs.push(unicode_input(unit, false));
         inputs.push(unicode_input(unit, true));
@@ -747,19 +601,32 @@ pub fn work_area() -> Option<WorkArea> {
     (read != 0).then(|| to_work_area(rect)).flatten()
 }
 
-/// Reveal an existing directory in the shell. The caller owns the path; a
-/// missing or relative path is refused rather than handed to the shell.
+/// Reveal an existing directory in the shell. The caller owns the path; a missing or relative path is refused rather than handed to the shell.
 pub fn open_directory(path: &Path) -> bool {
-    use windows_sys::Win32::System::Com::{
-        CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED,
-    };
-    use windows_sys::Win32::UI::Shell::ShellExecuteW;
-    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     if !path.is_absolute() || !path.is_dir() {
         return false;
     }
     let mut target: Vec<u16> = path.as_os_str().encode_wide().collect();
     target.push(0);
+    shell_open(&target)
+}
+
+/// Open an https URL in the default browser. ShellExecuteW hands the URL to its registered handler directly, so unlike `cmd /C start` no console window flashes up from the GUI process and no shell parses the text. Anything other than an https URL is refused.
+pub fn open_url(url: &str) -> bool {
+    if !url.starts_with("https://") || url.contains('\0') {
+        return false;
+    }
+    let mut target: Vec<u16> = url.encode_utf16().collect();
+    target.push(0);
+    shell_open(&target)
+}
+
+fn shell_open(target: &[u16]) -> bool {
+    use windows_sys::Win32::System::Com::{
+        CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED,
+    };
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     let mut operation: Vec<u16> = "open".encode_utf16().collect();
     operation.push(0);
     // SAFETY: the apartment is released below, including on the failure path.
@@ -785,6 +652,74 @@ pub fn open_directory(path: &Path) -> bool {
 
 use std::os::windows::ffi::OsStrExt;
 
+/// The state directory the managed Server uses, resolved the same way `production_state_directory` in `server_main.cpp` does: an absolute `METASEQUOIA_IME_DATA_DIR`, then the `DataDir` the installer records in the 64-bit machine view, then `%LOCALAPPDATA%\MSIME-Client`. The Server hands this directory to the shell it launches; a shell started any other way, such as from the Start Menu, needs it to find the same runtime options and preferences.
+pub fn server_state_directory() -> Option<std::path::PathBuf> {
+    use std::path::PathBuf;
+    if let Some(value) = std::env::var_os("METASEQUOIA_IME_DATA_DIR") {
+        let path = PathBuf::from(value);
+        if path.is_absolute() {
+            return Some(path);
+        }
+    }
+    if let Some(path) = installed_data_directory().filter(|path| path.is_absolute()) {
+        return Some(path);
+    }
+    std::env::var_os("LOCALAPPDATA")
+        .map(|local| PathBuf::from(local).join("MSIME-Client"))
+        .filter(|path| path.is_absolute())
+}
+
+fn installed_data_directory() -> Option<std::path::PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::Foundation::ERROR_SUCCESS;
+    use windows_sys::Win32::System::Registry::{
+        RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY,
+    };
+    let key: Vec<u16> = "Software\\Metasequoia\\MetasequoiaIME\0"
+        .encode_utf16()
+        .collect();
+    let name: Vec<u16> = "DataDir\0".encode_utf16().collect();
+    let flags = RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY;
+    let mut bytes = 0u32;
+    // SAFETY: both names are NUL terminated; a null buffer asks only for the size.
+    let sized = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            key.as_ptr(),
+            name.as_ptr(),
+            flags,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut bytes,
+        )
+    };
+    if sized != ERROR_SUCCESS || (bytes as usize) < std::mem::size_of::<u16>() {
+        return None;
+    }
+    let mut value = vec![0u16; (bytes as usize).div_ceil(std::mem::size_of::<u16>())];
+    // SAFETY: the buffer holds `bytes` bytes, the size the first call reported.
+    let read = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            key.as_ptr(),
+            name.as_ptr(),
+            flags,
+            std::ptr::null_mut(),
+            value.as_mut_ptr().cast(),
+            &mut bytes,
+        )
+    };
+    if read != ERROR_SUCCESS {
+        return None;
+    }
+    // RRF_RT_REG_SZ guarantees a terminator; keep only what precedes it.
+    let length = value
+        .iter()
+        .position(|&unit| unit == 0)
+        .unwrap_or(value.len());
+    (length > 0).then(|| std::ffi::OsString::from_wide(&value[..length]).into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -807,6 +742,9 @@ mod tests {
             bottom: 980.0,
         };
         assert_eq!(offset.bottom_center(1100.0, 400.0), (-1510.0, 568.0));
+        assert_eq!(area.center(550.0, 610.0), (685.0, 215.0));
+        assert_eq!(area.center(3000.0, 2000.0), (0.0, 0.0));
+        assert_eq!(offset.center(980.0, 650.0), (-1450.0, 115.0));
     }
 
     #[test]
@@ -829,6 +767,14 @@ mod tests {
         assert!(!open_directory(Path::new(
             "C:\\definitely-missing-msime-path"
         )));
+    }
+
+    #[test]
+    fn urls_must_be_https() {
+        assert!(!open_url("http://example.com"));
+        assert!(!open_url("file:///C:/Windows/System32/calc.exe"));
+        assert!(!open_url("calc.exe"));
+        assert!(!open_url("https://example.com/\0calc"));
     }
 
     #[test]

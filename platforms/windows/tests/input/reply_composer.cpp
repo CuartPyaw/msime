@@ -135,15 +135,31 @@ int main() {
     automatic.transition["commit_context"] = {{"scheme", 2}, {"local_mode", "none"}};
     const auto &continued =
         auto_commit.stage(automatic, ReplyPath::AutoCommitAndContinue);
-    require(continued.worker && !continued.encoded &&
+    // The worker frame commits and restarts the composition; the key that triggered it still expects its own reply, so an empty preedit reply follows.
+    require(continued.worker && continued.encoded && *continued.encoded &&
+            continued.encoded->packet.request_id == 2 &&
+            payload(continued).empty() &&
             continued.committed_text == "合成候选" &&
             continued.worker->at(0) ==
                 FanyImeWorkerReplyType::CommitCandidateAndContinue &&
             continued.worker->at(4) == '4' && continued.worker->at(6) == '\t');
     confirm(auto_commit);
-    automatic.transition["view"]["editing_text"] = "x";
+    // A letter after a complete code (顶字) commits the first candidate and leaves that letter composing: the same worker frame, and the key reply shows the new composition.
+    auto topped = result(3, "x", "x", "合成甲");
+    topped.transition["commit_context"] = {{"scheme", 2}, {"local_mode", "none"}};
+    const auto &top_commit =
+        auto_commit.stage(topped, ReplyPath::AutoCommitAndContinue);
+    require(top_commit.worker && top_commit.encoded && *top_commit.encoded &&
+            top_commit.encoded->packet.request_id == 3 &&
+            payload(top_commit) == u"x" &&
+            top_commit.committed_text == "合成甲" &&
+            top_commit.next_prefix.empty() &&
+            top_commit.worker->at(4) == '4' && top_commit.worker->at(6) == '\t');
+    confirm(auto_commit);
+    // The commit must still be a Wubi one.
+    topped.transition["commit_context"] = {{"scheme", 0}, {"local_mode", "none"}};
     const auto &invalid_continue =
-        auto_commit.stage(automatic, ReplyPath::AutoCommitAndContinue);
+        auto_commit.stage(topped, ReplyPath::AutoCommitAndContinue);
     require(invalid_continue.encoded && !*invalid_continue.encoded &&
             !invalid_continue.worker);
     auto_commit.cancel();

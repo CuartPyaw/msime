@@ -14,15 +14,20 @@ int main(int argc, char **argv) {
     assert(!msime_client_key_dispatch_allows_fallback(MSIME_CLIENT_KEY_SENT));
     assert(!msime_client_key_dispatch_allows_fallback(MSIME_CLIENT_KEY_DELIVERY_AMBIGUOUS));
     assert(argc == 2);
-    assert(msime_client_abi_version() == 2);
+    assert(msime_client_abi_version() == 3);
+    char *themes = msime_client_theme_catalog();
+    assert(themes && strstr(themes, "\"ok\":true") && strstr(themes, "\"default\":\"system\""));
+    msime_client_string_free(themes);
+    const char *theme_request = "{\"global_theme\":\"night\",\"dark\":true,\"layout\":\"vertical\"}";
+    char *theme = msime_client_resolve_theme((const uint8_t *)theme_request, strlen(theme_request));
+    assert(theme && strstr(theme, "\"ok\":true") && strstr(theme, "\"source\":\"builtin\""));
+    msime_client_string_free(theme);
     msime_client_key_event event = {{1, 2, 3}, 0x41, 30, 0x0f, 'a', false};
     assert(msime_client_key_event_valid(&event));
     event.lease.token = 0;
     assert(!msime_client_key_event_valid(&event));
     char options[4096];
-    // default_ime_mode is stated rather than defaulted: DefaultImeMode::default() is English, which
-    // makes host-api call set_dedicated_english(true) on the fresh session, and the Engine gives
-    // dedicated English precedence over local modes. The Unicode entry below would then never fire.
+    // default_ime_mode is stated rather than defaulted: DefaultImeMode::default() is English on Windows, where this smoke also runs, and the Unicode entry below is Chinese-mode input.
     int length = snprintf(options, sizeof(options),
         "{\"api_version\":1,\"resources\":\"%s/resources\",\"user_data\":\"%s/user\",\"cache\":\"%s/cache\",\"dictionaries\":\"%s/dictionaries\",\"preferences\":{\"default_ime_mode\":\"chinese\",\"scheme\":\"quanpin\",\"candidate_page_size\":5,\"learning\":false,\"chinese_punctuation\":true}}",
         argv[1], argv[1], argv[1], argv[1]);

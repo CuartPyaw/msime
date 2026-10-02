@@ -2,7 +2,9 @@
 #include "CandidateActionAvailability.h"
 #include "ChineseTextConversion.h"
 #include "FocusGate.h"
+#include "InputSchemeTraits.h"
 #include "ReplyComposer.h"
+#include "WubiCodeHintPolicy.h"
 
 namespace msime::windows {
 // TSF can report the candidate show event before it has a usable text extent.
@@ -20,7 +22,34 @@ struct PresentationCandidate {
   uint8_t fixed_position = 0;
   std::string translation;
   bool actions_available = true;
+  // The Wubi code left after the typed prefix; shown only when the `wubi_code_hint` preference is on, see with_wubi_code_hints.
+  std::string wubi_code_hint{};
+  // A Korean Hanja's 훈음 (나라 이름 한), which the Engine sends as the row's annotation. It is drawn on the smaller secondary line whatever the translation preferences say, above the translation when there is one, and it is display only: nothing commits it, and `translation` keeps only what the Engine applied as a translation.
+  std::string gloss{};
 };
+// Whether this view's candidates are a Korean Hanja list: the Korean scheme under its own rules, outside the dedicated English mode and every local mode, where the Engine lists candidates only after MSIME_CONVERT_HANJA. ReplyComposer::korean_hanja reads the same three fields.
+inline bool korean_hanja_view(const nlohmann::json &view) {
+  return view.value("scheme", 0u) == candidate_scheme_korean &&
+         !view.value("dedicated_english", false) &&
+         view.value("local_mode", std::string("none")) == "none";
+}
+// Move a Hanja row's 훈음 out of the annotation run, which follows the Hanja at full size, into `gloss`, so the main text is the Hanja alone.
+inline void move_korean_hanja_gloss(PresentationCandidate &candidate) {
+  candidate.gloss = std::move(candidate.annotation);
+  candidate.annotation.clear();
+}
+// The smaller secondary run of a row: the 훈음 alone, the translation alone, or the 훈음 with the translation on the line under it.
+inline std::string candidate_secondary_text(const PresentationCandidate &candidate) {
+  if (candidate.gloss.empty())
+    return candidate.translation;
+  if (candidate.translation.empty())
+    return candidate.gloss;
+  return candidate.gloss + "\n" + candidate.translation;
+}
+// How many lines candidate_secondary_text starts with before any wrapping. The Engine refuses control characters in a translation, and the 훈음 table has none, so the only line break is the one joining them.
+inline size_t candidate_secondary_lines(const PresentationCandidate &candidate) {
+  return !candidate.gloss.empty() && !candidate.translation.empty() ? 2 : 1;
+}
 struct CandidatePresentation {
   FocusLease lease;
   uint64_t session;
@@ -40,7 +69,22 @@ struct CandidatePresentation {
   size_t preedit_caret = std::string::npos;
   std::vector<PresentationCandidate> candidates;
   bool traditional_output = false;
+  // The 0-based page on show and how many pages the Engine has so far, for the pager in the preedit row. Both zero draw no pager. The count grows as the user pages, because the Engine fetches candidates lazily.
+  size_t page = 0;
+  size_t page_count = 0;
+  // Whether the mouse may pick a row, page the list or open a row's menu. False for a list driven from the keyboard only (scheme::KeyboardOnlyCandidateList).
+  bool pointer_input = true;
 };
+// Copy the view's page position into `output`, dropping one that is not a page of the count rather than drawing "4 / 3".
+inline void candidate_presentation_page(CandidatePresentation &output,
+                                        const nlohmann::json &view) {
+  const auto page = view.value("page", size_t{0});
+  const auto count = view.value("page_count", size_t{0});
+  if (page < count) {
+    output.page = page;
+    output.page_count = count;
+  }
+}
 inline CandidatePresentation
 candidate_presentation_from_view(const FocusLease &lease,
                                  const nlohmann::json &view, int x, int y,
@@ -74,9 +118,10 @@ candidate_presentation_from_view(const FocusLease &lease,
       output.preedit_caret = prefix.size() + caret;
   }
   size_t highlighted = 0;
+  const bool hanja = korean_hanja_view(view);
   for (const auto &candidate : view.at("candidates")) {
     const auto &id = candidate.at("id");
-    const auto source = candidate.value("source", uint8_t{});
+    const auto candidate_source = candidate.value("source", uint8_t{});
     PresentationCandidate item{
         id.at("session").get<uint64_t>(), id.at("generation").get<uint64_t>(),
         id.at("index").get<size_t>(),
@@ -84,20 +129,27 @@ candidate_presentation_from_view(const FocusLease &lease,
                                   traditional_output),
         candidate.at("highlighted").get<bool>(),
         candidate.value("annotation", std::string{}),
-        source == 2 ? " ☁️" : source == 3 ? " 🤖" : "",
+        candidate_source == 2 ? " ☁️" : candidate_source == 3 ? " 🤖" : "",
         candidate.value("fixed_position", uint8_t{}),
         candidate.value("translation", std::string{}),
-        candidate_actions_available(view.value("scheme", 0u), source)};
+        candidate_actions_available(view.value("scheme", 0u), candidate_source)};
+    if (hanja)
+      move_korean_hanja_gloss(item);
     if (item.session != output.session ||
         item.generation != output.generation || item.text.size() > 4096 ||
-        item.annotation.size() > 4096 || item.badge.size() > 4096 ||
+        item.annotation.size() > 4096 || item.gloss.size() > 4096 ||
+        item.badge.size() > 4096 ||
         item.translation.size() > 4096)
       throw std::invalid_argument("Invalid presented candidate");
+    item.wubi_code_hint = wubi_code_hint(view, candidate);
     highlighted += item.highlighted;
     output.candidates.push_back(std::move(item));
   }
   if (!output.candidates.empty() && highlighted != 1)
     throw std::invalid_argument("Invalid candidate highlight");
+  candidate_presentation_page(output, view);
+  output.pointer_input = !scheme::KeyboardOnlyCandidateList(
+      static_cast<int>(view.value("scheme", 0u)));
   output.visible = true;
   return output;
 }
@@ -132,9 +184,10 @@ candidate_presentation(const FocusLease &lease, const PendingReply &reply,
   output.traditional_output = reply.traditional_output;
   output.preedit = reply.next_prefix + text;
   size_t highlighted = 0;
+  const bool hanja = korean_hanja_view(view);
   for (const auto &candidate : view.at("candidates")) {
     const auto &id = candidate.at("id");
-    const auto source = candidate.value("source", uint8_t{});
+    const auto candidate_source = candidate.value("source", uint8_t{});
     PresentationCandidate item{
         id.at("session").get<uint64_t>(), id.at("generation").get<uint64_t>(),
         id.at("index").get<size_t>(),
@@ -142,20 +195,27 @@ candidate_presentation(const FocusLease &lease, const PendingReply &reply,
                                   reply.traditional_output),
         candidate.at("highlighted").get<bool>(),
         candidate.value("annotation", std::string{}),
-        source == 2 ? " ☁️" : source == 3 ? " 🤖" : "",
+        candidate_source == 2 ? " ☁️" : candidate_source == 3 ? " 🤖" : "",
         candidate.value("fixed_position", uint8_t{}),
         candidate.value("translation", std::string{}),
-        candidate_actions_available(view.value("scheme", 0u), source)};
+        candidate_actions_available(view.value("scheme", 0u), candidate_source)};
+    if (hanja)
+      move_korean_hanja_gloss(item);
     if (item.session != output.session ||
         item.generation != output.generation || item.text.size() > 4096 ||
-        item.annotation.size() > 4096 || item.badge.size() > 4096 ||
+        item.annotation.size() > 4096 || item.gloss.size() > 4096 ||
+        item.badge.size() > 4096 ||
         item.translation.size() > 4096)
       throw std::invalid_argument("Invalid presented candidate");
+    item.wubi_code_hint = wubi_code_hint(view, candidate);
     highlighted += item.highlighted;
     output.candidates.push_back(std::move(item));
   }
   if (!output.candidates.empty() && highlighted != 1)
     throw std::invalid_argument("Invalid candidate highlight");
+  candidate_presentation_page(output, view);
+  output.pointer_input = !scheme::KeyboardOnlyCandidateList(
+      static_cast<int>(view.value("scheme", 0u)));
   output.visible = true;
   return output;
 }

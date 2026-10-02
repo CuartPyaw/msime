@@ -14,7 +14,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 loader = importlib.machinery.SourceFileLoader(
-    "translation_cache_provider", str(ROOT / "scripts" / "msime-client-online-provider"))
+    "translation_cache_provider", str(ROOT / "scripts" / "msime-linux-online-provider"))
 spec = importlib.util.spec_from_loader(loader.name, loader)
 provider = importlib.util.module_from_spec(spec)
 loader.exec_module(provider)
@@ -28,6 +28,7 @@ class TranslationCacheParity(unittest.TestCase):
         self.query = {
             "candidates": ["hello"],
             "target_language": "en",
+            "provider": "custom",
             "custom_translation": {
                 "enabled": True,
                 "endpoint": "https://translation.invalid/",

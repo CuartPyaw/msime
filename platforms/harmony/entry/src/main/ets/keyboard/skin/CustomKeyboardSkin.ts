@@ -1,11 +1,13 @@
 /**
  * Bounded view of the user's custom touch-keyboard design, ported from
- * platforms/android/java/app/msime/client/CustomKeyboardSkin.java.
+ * platforms/android/java/app/msime/android/CustomKeyboardSkin.java.
  *
  * Every field arrives from a shared preference document that the host does not control, so each one
  * is clamped or rejected rather than trusted. Photos are decoded here with a small runtime-neutral
  * Base64 reader, keeping the size and magic-number checks testable without a device image decoder.
  */
+import { KeyboardGeometry } from "../KeyboardGeometry";
+
 const MAX_PHOTO_BYTES: number = 512000;
 const KEY_SHAPES: string[] = ["rounded", "capsule", "ticket", "pebble"];
 const KEY_MATERIALS: string[] = ["flat", "raised", "glass", "paper"];
@@ -28,7 +30,7 @@ export interface CustomSkinDocument {
   readonly gradientHorizontal?: boolean;
   readonly patternOpacity?: number;
   readonly customBorderColor?: number | null;
-  readonly photo?: string;
+  readonly photo?: string | null;
   readonly photoShade?: number;
   readonly photoPosition?: number;
 }
@@ -42,7 +44,7 @@ function bounded(
   if (value === undefined || !Number.isFinite(value)) {
     return fallback;
   }
-  return Math.max(minimum, Math.min(maximum, value));
+  return KeyboardGeometry.bounded(value, minimum, maximum);
 }
 
 function oneOf(value: string | undefined, allowed: string[]): string {
@@ -69,9 +71,10 @@ function startsWith(bytes: Uint8Array, prefix: number[]): boolean {
   return true;
 }
 
-function decodePhoto(value: string | undefined): Uint8Array | null {
+function decodePhoto(value: string | null | undefined): Uint8Array | null {
   if (
     value === undefined ||
+    value === null ||
     value.length === 0 ||
     value.length > 682668 ||
     value.length % 4 !== 0 ||
@@ -212,7 +215,7 @@ export class CustomKeyboardSkin {
     value.cornerRadiusValue = bounded(document.cornerRadius, 0, 20, 8);
     value.borderWidthValue = bounded(document.borderWidth, 0, 2, 0);
     value.shadowValue = bounded(document.shadow, 0, 0.4, 0);
-    value.patternValue = Math.max(0, Math.min(3, document.pattern ?? 0));
+    value.patternValue = KeyboardGeometry.bounded(document.pattern ?? 0, 0, 3);
     value.monospacedValue = document.monospaced ?? false;
     value.keyShapeValue = oneOf(document.keyShape, KEY_SHAPES);
     value.keyMaterialValue = oneOf(document.keyMaterial, KEY_MATERIALS);
@@ -235,7 +238,12 @@ export class CustomKeyboardSkin {
         ? decoded
         : null;
     const mime: string | null = value.photoBytes === null ? null : photoType(value.photoBytes);
-    if (mime !== null && document.photo !== undefined && decoded !== null) {
+    if (
+      mime !== null &&
+      document.photo !== undefined &&
+      document.photo !== null &&
+      decoded !== null
+    ) {
       value.photoSourceValue = `data:${mime};base64,${document.photo}`;
     }
     return value;
@@ -260,6 +268,11 @@ export class CustomKeyboardSkin {
   /** Black on a light action key, white on a dark one, decided by relative luminance. */
   actionForeground(): string {
     return luminance(this.actionBackgroundColor) > 0.179 ? "#000000" : "#FFFFFF";
+  }
+
+  /** The shared `on_accent`: text on anything filled with the accent, by the same luminance rule. */
+  accentForeground(): string {
+    return luminance(this.accentColor) > 0.179 ? "#000000" : "#FFFFFF";
   }
 
   cornerRadius(): number {

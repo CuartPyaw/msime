@@ -134,6 +134,24 @@ static void TestEngineMaintenance() {
     error = nil;
     assert(![MSIMEClientSession candidateGlossRequest:@{@"padding":[@"x" stringByPaddingToLength:262145 withString:@"x" startingAtIndex:0]} resources:options[@"dictionaries"] error:&error] && error);
     error = nil;
+    // Non-English glosses come from an offline dictionary installed beside the resource directory, one file per target language.
+    NSString *offlineGlosses = [[options[@"dictionaries"] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"offline-glosses"];
+    assert([NSFileManager.defaultManager createDirectoryAtPath:offlineGlosses withIntermediateDirectories:YES attributes:nil error:nil]);
+    assert(sqlite3_open([[offlineGlosses stringByAppendingPathComponent:@"zh-fr.db"] fileSystemRepresentation], &database) == SQLITE_OK);
+    assert(sqlite3_exec(database, "PRAGMA user_version=1;"
+        "CREATE TABLE zh_glosses(chinese TEXT PRIMARY KEY,gloss TEXT NOT NULL,source TEXT NOT NULL) WITHOUT ROWID;"
+        "CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);"
+        "INSERT INTO meta VALUES('target_language','fr');"
+        "INSERT INTO zh_glosses VALUES('你好','bonjour','hello');", nullptr, nullptr, nullptr) == SQLITE_OK);
+    assert(sqlite3_close(database) == SQLITE_OK);
+    NSDictionary *frenchRequest = @{@"generation":@7, @"target_language":@"fr", @"candidates":@[@{@"text":@"你好", @"source":@0}, @{@"text":@"hello", @"source":@4}]};
+    NSDictionary *french = [MSIMEClientSession candidateGlossRequest:frenchRequest resources:options[@"dictionaries"] error:&error];
+    assert(french && !error && [french[@"generation"] isEqual:@7]);
+    assert(([french[@"translations"] isEqual:@[@{@"text":@"你好", @"translation":@"bonjour"}]]));
+    NSMutableDictionary *germanRequest = [frenchRequest mutableCopy];
+    germanRequest[@"target_language"] = @"de";
+    NSDictionary *german = [MSIMEClientSession candidateGlossRequest:germanRequest resources:options[@"dictionaries"] error:&error];
+    assert(german && !error && [german[@"translations"] isEqual:@[]]);
     assert((![session applyTranslations:@[@{@"text":@"hello", @"translation":[@"x" stringByPaddingToLength:4097 withString:@"x" startingAtIndex:0]}] generation:translationGeneration error:&error] && error));
     error = nil;
     assert([[session setCharacterWidthFull:YES error:&error][@"character_width"] isEqual:@"Fullwidth"]);
@@ -247,6 +265,13 @@ static void TestEngineEdges(FakeTextClient *client) {
             if ([code isEqual:@"41"]) {
                 assert(![result[@"handled"] boolValue]);
                 assert([result[@"view"][@"editing_text"] isEqual:view[@"editing_text"]]);
+                // The host then falls back to punctuation, as Windows does for a Normal reply: the highlighted candidate is committed followed by the key's punctuation.
+                client.committed = nil;
+                NSDictionary *fallback = [session punctuation:edge ? ']' : '[' error:&error];
+                assert(fallback && !error && [fallback[@"handled"] boolValue]);
+                MSIMEApplyTransition(fallback, client);
+                assert([client.committed isEqual:edge ? @"A】" : @"A【"]);
+                assert([[[session viewWithError:&error] objectForKey:@"editing_text"] length] == 0);
             } else {
                 MSIMEApplyTransition(result, client);
                 assert([client.committed isEqual:[code isEqual:@"4e2d"] ? @"中" : @"𠀀"]);
@@ -414,8 +439,42 @@ static void TestEnginePreedit(FakeTextClient *client) {
     assert([NSFileManager.defaultManager removeItemAtPath:root error:nil]);
 }
 
+// A focus change applies an empty composition to a client that is blocked waiting for this input method, so clearing marked text that was never set must not call the client at all.
+static void TestTrackedMarkedText() {
+    FakeTextClient *client = [FakeTextClient new];
+    client.events = [NSMutableArray array];
+    NSDictionary *idle = @{@"commit": NSNull.null, @"view": @{@"editing_text": @"", @"caret_position": @0}};
+    BOOL hasMarked = NO;
+    MSIMEApplyTransitionTrackingMarkedText(idle, client, MSIMEInlinePreeditStylePinyin, nil, &hasMarked);
+    assert(client.events.count == 0 && !hasMarked);
+    // A composition is written and remembered, and the clear that ends it still goes out.
+    MSIMEApplyTransitionTrackingMarkedText(@{@"view": @{@"editing_text": @"ni", @"caret_position": @2}}, client,
+                                           MSIMEInlinePreeditStylePinyin, nil, &hasMarked);
+    assert([client.markedString isEqual:@"ni"] && hasMarked);
+    MSIMEApplyTransitionTrackingMarkedText(idle, client, MSIMEInlinePreeditStylePinyin, nil, &hasMarked);
+    assert([client.events isEqual:(@[@"marked", @"marked"])] && client.markedString.length == 0 && !hasMarked);
+    MSIMEApplyTransitionTrackingMarkedText(idle, client, MSIMEInlinePreeditStylePinyin, nil, &hasMarked);
+    assert(client.events.count == 2);
+    // A closing mark with no composition is still marked text, and must reach the client.
+    MSIMEApplyTransitionTrackingMarkedText(idle, client, MSIMEInlinePreeditStyleEmpty, @"）", &hasMarked);
+    assert([client.markedString isEqual:@"）"] && hasMarked);
+    hasMarked = NO;
+    // A commit keeps the clear after it, whatever the client was believed to hold.
+    MSIMEApplyTransitionTrackingMarkedText(@{@"commit": @"你好", @"view": @{@"editing_text": @"", @"caret_position": @0}},
+                                           client, MSIMEInlinePreeditStylePinyin, nil, &hasMarked);
+    assert([client.events isEqual:(@[@"marked", @"marked", @"marked", @"commit", @"marked"])] && !hasMarked);
+    // The empty inline style never marks anything, so it never needs to clear.
+    MSIMEApplyTransitionTrackingMarkedText(@{@"view": @{@"editing_text": @"ni", @"caret_position": @2}}, client,
+                                           MSIMEInlinePreeditStyleEmpty, nil, &hasMarked);
+    assert(client.events.count == 5 && !hasMarked);
+    // Without tracking nothing is known about the client, and the clear is always sent.
+    MSIMEApplyTransitionWithPendingClosing(idle, client, MSIMEInlinePreeditStylePinyin, nil);
+    assert(client.events.count == 6);
+}
+
 int main() {
     @autoreleasepool {
+        TestTrackedMarkedText();
         FakeTextClient *client = [FakeTextClient new];
         client.events = [NSMutableArray array];
         TestEnginePreedit(client);

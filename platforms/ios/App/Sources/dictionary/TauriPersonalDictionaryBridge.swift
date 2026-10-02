@@ -17,15 +17,34 @@ enum TauriPersonalDictionaryBridge {
     case "list":
       let offset = try boundedInteger(action["offset"], range: 0...1_000_000)
       _ = try boundedInteger(action["limit"], range: 1...1_000)
-      try store.requestPage(offset: offset)
+      // The kind and code prefix go to the keyboard with the page, which answers them from the user's whole store.
+      let kind = try (action["kind"] as? String).map {
+        guard let kind = PersonalWordKind(bridgeName: $0) else { throw Failure.invalid }
+        return kind
+      }
+      let query = action["query"] as? String ?? ""
+      guard query.utf8.count <= PersonalDictionaryStore.maximumQueryBytes else { throw Failure.invalid }
+      try store.requestPage(offset: offset, kind: kind, query: query)
       return response(try store.read())
     case "edit":
       let requestID = try requestID(action)
-      let previous = try word(action["previous"])
+      // The previous entry is a stored row that only names what to edit or delete; it may carry a quick phrase code with a digit that new input may no longer use, so it skips the new-entry validation.
+      let previous = try storedWord(action["previous"])
       let replacement = try word(action["replacement"])
       guard previous != nil || replacement != nil else { throw Failure.invalid }
       _ = try store.enqueue(previous: previous, replacement: replacement, requestID: requestID)
       return ["queued": true, "pending_count": try store.read().pendingCount]
+    case "import":
+      // A file in one of the shared formats. The Engine route would need the maintenance lock the keyboard holds while typing, so the words are parsed here and queued like any other import.
+      let requestID = try requestID(action)
+      guard let kind = action["kind"] as? String, let format = action["format"] as? String,
+            let text = action["text"] as? String else { throw Failure.invalid }
+      let parsed = try PersonalDictionaryBridge.importEntries(kind: kind, format: format, text: text)
+      try store.enqueueImport(parsed.entries, requestID: requestID)
+      var result = parsed.report
+      result["queued"] = true
+      result["pending_count"] = try store.read().pendingCount
+      return result
     case "import_personal":
       let requestID = try requestID(action)
       guard let text = action["text"] as? String,
@@ -64,6 +83,8 @@ enum TauriPersonalDictionaryBridge {
       "snapshot_error": state.snapshotError ?? NSNull(),
       "page_offset": state.pageOffset,
       "requested_page_offset": state.requestedPageOffset,
+      "page_kind": state.pageKind?.bridgeName ?? NSNull(),
+      "page_query": state.pageQuery,
     ]
   }
 
@@ -74,7 +95,8 @@ enum TauriPersonalDictionaryBridge {
           format == "standard" || format == "windows" else { throw Failure.invalid }
     let offset = try boundedInteger(action["offset"], range: 0...1_000_000)
     let limit = try boundedInteger(action["limit"], range: 1...1_000)
-    let matching = state.entries.filter { $0.kind == kind }
+    // The export holds the user's own words; a code search may have left bundled rows on the page.
+    let matching = state.entries.filter { $0.kind == kind && !$0.isBundled }
     let page = matching.dropFirst(min(offset, matching.count)).prefix(limit)
     var text = page.map { word in
       format == "windows"
@@ -86,9 +108,15 @@ enum TauriPersonalDictionaryBridge {
   }
 
   private static func word(_ value: Any?) throws -> PersonalWord? {
+    guard let word = try storedWord(value) else { return nil }
+    // A bundled row goes back as listed; the keyboard's Engine refuses anything but a new weight for it.
+    return word.isBundled ? word : try word.validated()
+  }
+
+  private static func storedWord(_ value: Any?) throws -> PersonalWord? {
     if value == nil || value is NSNull { return nil }
     guard let fields = value as? [String: Any] else { throw Failure.invalid }
-    return try PersonalWord(bridgeValue: fields).validated()
+    return try PersonalWord(bridgeValue: fields)
   }
 
   private static func requestID(_ action: [String: Any]) throws -> String {
@@ -116,7 +144,8 @@ private func tauriPersonalDictionaryError(_ error: Error) -> String {
   case PersonalDictionaryStore.StoreError.busy: return "dictionary_busy"
   case PersonalDictionaryStore.StoreError.tooManyRequests: return "dictionary_too_many"
   case PersonalDictionaryStore.StoreError.conflict: return "dictionary_conflict"
-  case PersonalDictionaryStore.StoreError.invalidState, PersonalDictionaryStore.StoreError.unavailable:
+  case PersonalDictionaryStore.StoreError.invalidState, PersonalDictionaryStore.StoreError.unavailable,
+       DictionaryFileImportFailure.unavailable:
     return "dictionary_unavailable"
   default: return "dictionary_import_rejected"
   }

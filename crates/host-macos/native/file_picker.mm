@@ -2,13 +2,9 @@
 #include <cstdlib>
 #include <cstring>
 
-// Choosing a local Whisper model by typing its absolute path is not a real option on macOS: the path is
-// long, Finder does not show it, and a typo surfaces as a recognizer that fails at the moment the user
-// speaks. The reference host puts an NSOpenPanel behind a 选择… button; so does this, exposed as a host
-// capability the shared settings page can ask for when the platform offers one.
+// Choosing a local speech model by typing its absolute path is not a real option on macOS: the path is long, Finder does not show it, and a typo surfaces as a recognizer that fails at the moment the user speaks. The reference host puts an NSOpenPanel behind a 选择… button; so does this, exposed as a host capability the shared settings page can ask for when the platform offers one. The model is an installed directory holding msime-model.json, so that button opens MSIMEDefaultVoiceModelDirectoryPicker.
 //
-// The panel itself cannot run headless, so the choice is injectable: tests drive the same path handling
-// with their own picker, the way input source registration is tested.
+// The panel itself cannot run headless, so the choice is injectable: tests drive the same path handling with their own picker, the way input source registration is tested.
 extern "C" const char *MSIMEDefaultFilePicker(void) {
     NSOpenPanel *panel = [NSOpenPanel openPanel];
     panel.canChooseDirectories = NO;
@@ -33,6 +29,18 @@ extern "C" const char *MSIMEDefaultDirectoryPicker(void) {
     return panel.URL.path.UTF8String;
 }
 
+// An installed voice model is an existing directory, so the panel neither offers files nor creates folders, and it carries none of the data-directory panel's wording.
+extern "C" const char *MSIMEDefaultVoiceModelDirectoryPicker(void) {
+    NSOpenPanel *panel = [NSOpenPanel openPanel];
+    panel.canChooseDirectories = YES;
+    panel.canChooseFiles = NO;
+    panel.canCreateDirectories = NO;
+    panel.allowsMultipleSelection = NO;
+    panel.resolvesAliases = YES;
+    if ([panel runModal] != NSModalResponseOK) return nullptr;
+    return panel.URL.path.UTF8String;
+}
+
 extern "C" char *msime_macos_pick_file_with(const char *(*picker)(void)) {
     if (picker == nullptr) return nullptr;
     @autoreleasepool {
@@ -51,6 +59,11 @@ extern "C" char *msime_macos_pick_file(void) {
 extern "C" char *msime_macos_pick_directory(void) {
     if (!NSThread.isMainThread) return nullptr;
     return msime_macos_pick_file_with(MSIMEDefaultDirectoryPicker);
+}
+
+extern "C" char *msime_macos_pick_voice_model_directory(void) {
+    if (!NSThread.isMainThread) return nullptr;
+    return msime_macos_pick_file_with(MSIMEDefaultVoiceModelDirectoryPicker);
 }
 
 extern "C" void msime_macos_free_picked_path(char *path) { free(path); }

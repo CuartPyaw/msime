@@ -10,10 +10,10 @@ Usage: bundle_contents.py <path/to/App.app> [--languages zh-Hans,en]
 """
 
 import argparse
+import os
 import plistlib
 import re
 import struct
-import subprocess
 import sys
 from pathlib import Path
 
@@ -123,6 +123,18 @@ def main() -> int:
             if not localised.get(identifier, "").strip():
                 failures.append(f"{identifier} has no name in {lproj.name}; the input menu shows the identifier there")
 
+    # The voice cues are the product's start.mp3/end.mp3. Missing from the bundle, VoiceCuePlayer quietly falls back to the system Glass/Pop sounds, so only the bundle can say the product sound actually shipped.
+    for cue in ("start.mp3", "end.mp3"):
+        staged = resources / "audios" / cue
+        if not staged.is_file() or staged.stat().st_size == 0:
+            failures.append(f"audios/{cue} was not staged; the voice cue falls back to a system sound")
+
+    # The built-in sound packs are what a fresh profile selects; without them key sounds have nothing to play. Every folder in the repository's resources/sound-packs has to arrive, since client-core lists each one as built in.
+    packs = Path(__file__).resolve().parents[4] / "resources/sound-packs"
+    for pack in sorted(path.name for path in packs.iterdir() if path.is_dir()):
+        if not (resources / "sound-packs" / pack / "plugin.toml").is_file():
+            failures.append(f"sound-packs/{pack} was not staged; the built-in sound pack is missing")
+
     # A macOS framework is mostly symlinks - Headers, Resources and the binary all point into
     # Versions/Current. A copy that follows them produces a directory codesign calls ambiguous and refuses
     # to seal, and an input method that cannot be signed cannot be registered as an input source at all.
@@ -139,20 +151,40 @@ def main() -> int:
                     f"codesign will call the bundle format ambiguous"
                 )
 
-    # The on-device recogniser is a build option. Compiled into a library the executable never links, the
-    # host accepts the provider in its settings and then recognises somewhere else - which is the state this
-    # bundle shipped in before the provider was wired up.
-    if executable.is_file():
-        symbols = subprocess.run(["nm", "-a", str(executable)], capture_output=True, text=True).stdout
-        if "whisper" not in symbols:
-            failures.append("the executable carries no local Whisper recogniser; the 本地 Whisper provider would fall back silently")
+    # Installed on-device models run in the msime-voice-local helper, which loads the sherpa-onnx runtime from ../Frameworks. The input method spawns it from beside its own executable, so a bundle missing either one accepts a model directory in settings and then fails every recognition.
+    helper = contents / "MacOS" / "msime-voice-local"
+    if not helper.is_file() or not os.access(helper, os.X_OK):
+        failures.append("Contents/MacOS/msime-voice-local is missing or not executable; installed voice models cannot run")
+    runtime = contents / "Frameworks" / "libsherpa-onnx-c-api.dylib"
+    if not runtime.is_file() or runtime.stat().st_size == 0:
+        failures.append("Contents/Frameworks/libsherpa-onnx-c-api.dylib was not staged; the voice helper has no runtime to load")
+    # The runtime is redistributed third-party code, so its licences travel with it.
+    for notice in ("sherpa-onnx-Apache-2.0.txt", "onnxruntime-MIT.txt", "onnxruntime-ThirdPartyNotices.txt"):
+        if not (contents / "Resources" / "Licenses" / notice).is_file():
+            failures.append(f"Contents/Resources/Licenses/{notice} is missing; the bundled speech runtime ships without its licence")
+    # The sound player links MPL-2.0 crates (symphonia, triple_buffer) into the input method, and the engine links rink-core.
+    if not (contents / "Resources" / "Licenses" / "MPL-2.0.txt").is_file():
+        failures.append("Contents/Resources/Licenses/MPL-2.0.txt is missing; the MPL-2.0 crates of the sound player and unit conversion ship without their licence")
+    # The engine embeds the place names `@` mode offers from modood/Administrative-divisions-of-China.
+    if not (contents / "Resources" / "Licenses" / "Administrative-divisions-of-China-WTFPL.txt").is_file():
+        failures.append("Contents/Resources/Licenses/Administrative-divisions-of-China-WTFPL.txt is missing; the built-in place names ship without their licence")
+    # The engine embeds the Korean Hanja table from libhangul, whose BSD-3-Clause licence requires the notice in binary distributions.
+    if not (contents / "Resources" / "Licenses" / "libhangul-hanja-BSD-3-Clause.txt").is_file():
+        failures.append("Contents/Resources/Licenses/libhangul-hanja-BSD-3-Clause.txt is missing; the built-in Korean Hanja table ships without its licence")
+    # Cantonese and Zhuyin read dictionaries built from rime-cantonese (CC BY 4.0) and libchewing-data (LGPL-2.1-or-later). The notices ship unconditionally, so a build that later gains the dictionaries is never without them.
+    for notice in ("rime-cantonese-CC-BY-4.0.txt", "libchewing-data-LGPL-2.1.txt"):
+        if not (contents / "Resources" / "Licenses" / notice).is_file():
+            failures.append(f"Contents/Resources/Licenses/{notice} is missing; Cantonese and Zhuyin ship without the licence of their data")
+    # Vietnamese links the MIT-licensed vi crate, whose copyright and permission notice has to travel with the binary.
+    if not (contents / "Resources" / "Licenses" / "vi-MIT.txt").is_file():
+        failures.append("Contents/Resources/Licenses/vi-MIT.txt is missing; the vi crate Vietnamese mode links ships without its licence")
 
     if failures:
         for failure in failures:
             print(failure, file=sys.stderr)
         return 1
     print(f"{bundle.name}: icons staged, {len(usage)} usage descriptions and {len(identifiers)} input source names "
-          f"localised in {len(lprojs)} languages, local recogniser linked.")
+          f"localised in {len(lprojs)} languages, voice cues and sound packs staged, local voice helper, runtime and its licences staged.")
     return 0
 
 

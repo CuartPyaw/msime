@@ -3,14 +3,17 @@ import SwiftUI
 @main
 struct MetasequoiaImeApp: App {
   @StateObject private var onboardingNavigation = AppNavigation()
+  @Environment(\.scenePhase) private var scenePhase
   @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
   init() {
-    Task { await BackendTelemetryClient.shared.recordFirstLaunch() }
-    NSSetUncaughtExceptionHandler { exception in
-      BackendTelemetryClient.persistCrash(message: exception.reason ?? exception.name.rawValue,
-                                          stack: exception.callStackSymbols.joined(separator: "\n"))
+    // The device's anonymous MSIME account is registered on first launch, before the keyboard needs it. The identity and session live in the app group, so the keyboard reuses them. A saved signed-in or anonymous session, even an expired one, skips the request rather than refreshing it on every launch; a failure is retried on the next launch.
+    Task.detached(priority: .utility) {
+      if (try? BackendKeychain().load()) != nil { return }
+      if (try? BackendAnonymousAccount.sessionStorage().load()) != nil { return }
+      _ = try? await BackendAnonymousAccount.ensureSignedIn(session: BackendAnonymousAccount.session, client: BackendAccountClient())
     }
+    CrashDiagnostics.shared.start()
     try? KeyboardSkinTrialStore().restorePending()
     #if DEBUG
     let arguments = ProcessInfo.processInfo.arguments
@@ -58,6 +61,20 @@ struct MetasequoiaImeApp: App {
       applicationContent
       #endif
     }
+    .onChange(of: scenePhase) { phase in
+      guard phase == .active else { return }
+      applyAppearance()
+      // Sends what the keyboard queued, which it cannot send itself without Full Access.
+      Task.detached(priority: .utility) { UsageReporting.flush() }
+    }
+  }
+
+  /// 设置界面主题 (see AppAppearancePreference) on every window. A window override rather than `preferredColorScheme`, so going back to 跟随系统 hands the style back to the device reliably and sheets follow too.
+  private func applyAppearance() {
+    let style = AppAppearancePreference.style(in: MetasequoiaInputSessionBridge.loadSharedPreferences())
+    for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+      for window in scene.windows { window.overrideUserInterfaceStyle = style }
+    }
   }
 
   #if DEBUG && targetEnvironment(simulator)
@@ -74,13 +91,12 @@ struct MetasequoiaImeApp: App {
   }
   #endif
 
-  @ViewBuilder private var applicationContent: some View {
-      if hasCompletedOnboarding {
-        MainTabView()
-      } else {
-        NavigationView { WelcomeFlowView(onFinish: { hasCompletedOnboarding = true }) }
-          .navigationViewStyle(.stack).environmentObject(onboardingNavigation)
-      }
+  private var applicationContent: some View {
+    FirstRunContainer(hasCompletedOnboarding: $hasCompletedOnboarding)
+      .environmentObject(onboardingNavigation)
+      .toggleStyle(GreenSwitchToggleStyle())
+      .onAppear(perform: applyAppearance)
+    .onReceive(NotificationCenter.default.publisher(for: AppAppearancePreference.didChange)) { _ in applyAppearance() }
   }
 }
 
@@ -101,18 +117,44 @@ private struct KeyboardVoicePreviewFixture: View {
 }
 #endif
 
+/// The splash and the onboarding sit in front of the tabs until onboarding is done. A phone shows the onboarding full screen; an iPad at regular width shows the tabs with the onboarding as a modal card over them, as the design does.
+private struct FirstRunContainer: View {
+  @Binding var hasCompletedOnboarding: Bool
+  @State private var showsSplash = true
+  @Environment(\.horizontalSizeClass) private var widthClass
+
+  private var isTablet: Bool { UIDevice.current.userInterfaceIdiom == .pad && widthClass == .regular }
+
+  var body: some View {
+    if !hasCompletedOnboarding && showsSplash {
+      SplashView { showsSplash = false }
+    } else if hasCompletedOnboarding || isTablet {
+      // Hidden before the overlay is attached, so only the tabs leave the accessibility tree and the card stays in it.
+      MainTabView()
+        .accessibilityHidden(!hasCompletedOnboarding)
+        .overlay {
+          if !hasCompletedOnboarding { OnboardingModalCard { hasCompletedOnboarding = true } }
+        }
+    } else {
+      WelcomeFlowView(onFinish: { hasCompletedOnboarding = true })
+    }
+  }
+}
+
 private struct MainTabView: View {
   @StateObject private var navigation = AppNavigation()
+  @Environment(\.horizontalSizeClass) private var widthClass
   var body: some View {
+    // On iOS 26 and later the system draws this as the floating glass pill; earlier releases keep the classic bar.
     TabView(selection: $navigation.tab) {
-      NavigationView { SettingsView() }.navigationViewStyle(.stack)
-        .tabItem { Label("键盘", systemImage: "keyboard") }.tag(AppNavigation.Tab.keyboard)
-      NavigationView { CommunityHomeView() }.navigationViewStyle(.stack).id(navigation.communityRoot)
-        .tabItem { Label("社区", systemImage: "square.grid.2x2.fill") }.tag(AppNavigation.Tab.community)
-      NavigationView { TypingStatisticsView() }.navigationViewStyle(.stack)
-        .tabItem { Label("统计", systemImage: "chart.bar.xaxis") }.tag(AppNavigation.Tab.statistics)
-      NavigationView { AccountSettingsView() }.navigationViewStyle(.stack)
-        .tabItem { Label("我的", systemImage: "person.crop.circle") }.tag(AppNavigation.Tab.account)
+      settingsTab
+        .tabItem { Label("设置", systemImage: "gearshape.fill") }.tag(AppNavigation.Tab.settings)
+      NavigationStack { CommunityHomeView() }.id(navigation.communityRoot)
+        .tabItem { Label("社区", systemImage: "person.2.fill") }.tag(AppNavigation.Tab.community)
+      NavigationStack { TypingStatisticsView() }
+        .tabItem { Label("统计", systemImage: "chart.bar.fill") }.tag(AppNavigation.Tab.statistics)
+      NavigationStack { AccountSettingsView() }
+        .tabItem { Label("我的", systemImage: "person.crop.circle.fill") }.tag(AppNavigation.Tab.account)
     }
     .environmentObject(navigation)
     .tint(MetasequoiaTheme.accent)
@@ -120,8 +162,23 @@ private struct MainTabView: View {
     // 用户是从键盘的设置面板点过来的,落点应该是设置。
     .onOpenURL { url in
       guard url.scheme == "msime" else { return }
-      navigation.tab = .keyboard
+      navigation.tab = .settings
+      if url.host == "voice" { navigation.recordsVoice = true }
     }
+    .sheet(isPresented: $navigation.recordsVoice) {
+      NavigationView {
+        ServiceSettingsView(kind: .voice)
+          .toolbar {
+            ToolbarItem(placement: .confirmationAction) { Button("完成") { navigation.recordsVoice = false } }
+          }
+      }.navigationViewStyle(.stack).tint(MetasequoiaTheme.accent)
+    }
+  }
+
+  // Both idiom and width class: a Max-size iPhone turned sideways is regular width but stays a phone, and an iPad in a narrow Split View or Slide Over pane gets the phone's stack.
+  @ViewBuilder private var settingsTab: some View {
+    if UIDevice.current.userInterfaceIdiom == .pad && widthClass == .regular { TabletSettingsView() }
+    else { NavigationStack { SettingsView() } }
   }
 }
 

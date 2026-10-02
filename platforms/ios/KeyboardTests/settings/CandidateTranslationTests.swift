@@ -27,6 +27,43 @@ private struct TruncatingTranslationService: CandidateTranslationService {
   }
 }
 
+private final class BlockingTranslationService: CandidateTranslationService, @unchecked Sendable {
+  private let lock = NSLock()
+  private var count = 0
+
+  var callCount: Int {
+    lock.lock(); defer { lock.unlock() }
+    return count
+  }
+
+  func translate(words: [String], target: String) async throws -> [String] {
+    lock.lock()
+    count += 1
+    lock.unlock()
+    try await Task.sleep(nanoseconds: 5_000_000_000)
+    return words.map { _ in "hello" }
+  }
+}
+
+private final class FlakyTranslationService: CandidateTranslationService, @unchecked Sendable {
+  private let lock = NSLock()
+  private var count = 0
+
+  var callCount: Int {
+    lock.lock(); defer { lock.unlock() }
+    return count
+  }
+
+  func translate(words: [String], target: String) async throws -> [String] {
+    lock.lock()
+    count += 1
+    let call = count
+    lock.unlock()
+    if call == 1 { throw NSError(domain: "CandidateTranslationTests", code: 1) }
+    return words.map { _ in "hello" }
+  }
+}
+
 @MainActor
 final class CandidateTranslationTests: XCTestCase {
   func testOnlyCandidatesWithHanCharactersGoOutToTheNetwork() {
@@ -58,12 +95,47 @@ final class CandidateTranslationTests: XCTestCase {
     XCTAssertEqual(service.calls.count, 2)
   }
 
+  func testCacheIsBoundedAndThePageOnScreenIsAskedAgain() async throws {
+    let service = StubTranslationService(
+      answers: ["EN": ["你好": "hello", "中国": "China", "水杉": "dawn redwood"]])
+    let store = CandidateTranslationStore(service: service, cacheLimit: 2)
+    var arrived = expectation(description: "first page")
+    store.onArrival = { arrived.fulfill() }
+    store.refresh(words: ["你好", "中国", "水杉"], codes: ["EN"])
+    await fulfillment(of: [arrived], timeout: 5)
+
+    arrived = expectation(description: "page asked again")
+    store.refresh(words: ["你好"], codes: ["EN"])
+    await fulfillment(of: [arrived], timeout: 5)
+    XCTAssertEqual(store.gloss(word: "你好", code: "EN"), "hello")
+    XCTAssertNil(store.gloss(word: "水杉", code: "EN"))
+    XCTAssertEqual(service.calls.count, 2)
+  }
+
   func testAResponseWithTheWrongCountIsDropped() async throws {
     let store = CandidateTranslationStore(service: TruncatingTranslationService())
     store.refresh(words: ["你好", "中国"], codes: ["EN"])
     try await Task.sleep(nanoseconds: 900_000_000)
     XCTAssertNil(store.gloss(word: "你好", code: "EN"))
     XCTAssertNil(store.gloss(word: "中国", code: "EN"))
+  }
+
+  func testWordSeparatorsCannotCollideInRequestSignature() async throws {
+    let service = StubTranslationService(
+      answers: ["EN": ["甲|乙": "combined", "甲": "a", "乙": "b"]])
+    let store = CandidateTranslationStore(service: service)
+    let firstArrived = expectation(description: "first page arrived")
+    store.onArrival = { firstArrived.fulfill() }
+
+    store.refresh(words: ["甲|乙"], codes: ["EN"])
+    await fulfillment(of: [firstArrived], timeout: 5)
+    let secondArrived = expectation(description: "second page arrived")
+    store.onArrival = { secondArrived.fulfill() }
+    store.refresh(words: ["甲", "乙"], codes: ["EN"])
+    await fulfillment(of: [secondArrived], timeout: 5)
+    XCTAssertEqual(service.calls.count, 2)
+    XCTAssertEqual(store.gloss(word: "甲", code: "EN"), "a")
+    XCTAssertEqual(store.gloss(word: "乙", code: "EN"), "b")
   }
 
   func testQueuedRequestIsCancelledWhenCompositionEnds() async throws {
@@ -73,6 +145,34 @@ final class CandidateTranslationTests: XCTestCase {
     store.cancel()
     try await Task.sleep(nanoseconds: 900_000_000)
     XCTAssertTrue(service.calls.isEmpty)
+  }
+
+  func testCancelledRequestCanBeRetriedForTheSameCandidates() async throws {
+    let service = BlockingTranslationService()
+    let store = CandidateTranslationStore(service: service)
+    store.refresh(words: ["你好"], codes: ["EN"])
+    try await Task.sleep(nanoseconds: 900_000_000)
+    XCTAssertEqual(service.callCount, 1)
+
+    store.cancel()
+    store.refresh(words: ["你好"], codes: ["EN"])
+    try await Task.sleep(nanoseconds: 900_000_000)
+    XCTAssertEqual(service.callCount, 2)
+    store.cancel()
+  }
+
+  func testFailedRequestCanBeRetriedForTheSameCandidates() async throws {
+    let service = FlakyTranslationService()
+    let store = CandidateTranslationStore(service: service)
+    store.refresh(words: ["你好"], codes: ["EN"])
+    try await Task.sleep(nanoseconds: 900_000_000)
+    XCTAssertEqual(service.callCount, 1)
+
+    store.refresh(words: ["你好"], codes: ["EN"])
+    try await Task.sleep(nanoseconds: 900_000_000)
+    XCTAssertEqual(service.callCount, 2)
+    XCTAssertEqual(store.gloss(word: "你好", code: "EN"), "hello")
+    store.cancel()
   }
 
   func testExpandedPanelRendersAnnotationsAndDeferredMenus() throws {
@@ -180,22 +280,39 @@ final class CandidateTranslationTests: XCTestCase {
     CandidateTranslationPreference.onlineEnabled = true
     CandidateGlossPreference.enabled = false
     CandidateTranslationPreference.secondaryIndex = -1
-    XCTAssertEqual(KeyboardViewController.configuredGlossLines(fullAccess: true), 0,
+    XCTAssertEqual(KeyboardViewController.configuredGlossLines(fullAccess: true, onlineRoute: true), 0,
                    "the switch is off, so nothing is reserved")
 
     CandidateGlossPreference.enabled = true
-    XCTAssertEqual(KeyboardViewController.configuredGlossLines(fullAccess: false), 1,
+    XCTAssertEqual(KeyboardViewController.configuredGlossLines(fullAccess: false, onlineRoute: true), 1,
                    "English comes from the dictionary in the bundle, with or without a network")
 
     // 日语 - the second entry of the table, and one that has to be fetched.
     CandidateTranslationPreference.secondaryIndex = 1
-    XCTAssertEqual(KeyboardViewController.configuredGlossLines(fullAccess: false), 1,
+    XCTAssertEqual(KeyboardViewController.configuredGlossLines(fullAccess: false, onlineRoute: true), 1,
                    "no full access means no network, so that row could never be filled")
-    XCTAssertEqual(KeyboardViewController.configuredGlossLines(fullAccess: true), 2,
+    XCTAssertEqual(KeyboardViewController.configuredGlossLines(fullAccess: true, onlineRoute: true), 2,
                    "the row appears once the gloss can be reached")
+    XCTAssertEqual(KeyboardViewController.configuredGlossLines(fullAccess: true, onlineRoute: false), 1,
+                   "no translation service is chosen, so the Japanese row could never be filled")
     CandidateTranslationPreference.onlineEnabled = false
-    XCTAssertEqual(KeyboardViewController.configuredGlossLines(fullAccess: true), 1,
+    XCTAssertEqual(KeyboardViewController.configuredGlossLines(fullAccess: true, onlineRoute: true), 1,
                    "the user turned the network off, which is the same answer as not having one")
+    XCTAssertEqual(KeyboardViewController.configuredGlossLines(fullAccess: false, onlineRoute: false, offline: ["JA"]), 2,
+                   "an installed Japanese dictionary fills that row without any network")
+    XCTAssertEqual(KeyboardViewController.configuredGlossLines(fullAccess: false, onlineRoute: false, offline: ["FR"]), 1,
+                   "a dictionary for a language nobody picked reserves nothing")
+  }
+
+  func testTheUsersOwnServiceOutranksTheOfflineDictionaryWhichOutranksTheAccount() {
+    let custom = TranslationRoute.custom(endpoint: "https://example.invalid", apiKey: "k")
+    XCTAssertEqual(KeyboardViewController.preferredGloss(offline: "essai", online: "test", route: custom), "test")
+    XCTAssertEqual(KeyboardViewController.preferredGloss(offline: "essai", online: nil, route: custom), "essai",
+                   "the dictionary answers while the service is still on its way")
+    XCTAssertEqual(KeyboardViewController.preferredGloss(offline: "essai", online: "test", route: .account), "essai")
+    XCTAssertEqual(KeyboardViewController.preferredGloss(offline: nil, online: "test", route: .account), "test")
+    XCTAssertEqual(KeyboardViewController.preferredGloss(offline: "essai", online: nil, route: .none), "essai")
+    XCTAssertNil(KeyboardViewController.preferredGloss(offline: nil, online: nil, route: .none))
   }
 
   /// The reserved rows come out of the keyboard's own height, not out of the keys.

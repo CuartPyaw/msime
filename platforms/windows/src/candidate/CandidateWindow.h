@@ -3,9 +3,13 @@
 #include "CandidateClickWorker.h"
 #include "CandidateFontSettings.h"
 #include "CandidateLayoutSettings.h"
+#include "CandidateMenuLayout.h"
 #include "CandidatePalette.h"
 #include "CandidatePresentation.h"
 #include "CandidateShadow.h"
+#include "CandidateSkin.h"
+#include "TypingEffectPolicy.h"
+#include "CandidateWindowStyle.h"
 #include <functional>
 #include <memory>
 // windows.h first: its DrawText macro has to reach the Direct2D declarations,
@@ -32,7 +36,6 @@ public:
   using Rendered = std::function<void(const CandidatePresentation &)>;
   explicit CandidateWindow(Reader reader, Click click = {}, unsigned font_size = 16,
                            unsigned preedit_font_size = 16,
-                           std::optional<COLORREF> text_color = std::nullopt,
                            std::string font_family = "Segoe UI",
                            std::vector<std::string> fallback_fonts = {},
                            std::optional<bool> dark_theme = std::nullopt,
@@ -59,11 +62,22 @@ public:
   // anchor is only forgotten when the card hides.
   void set_follow_cursor(bool enabled) { follow_cursor_ = enabled; }
   // The mascot a package draws above the card. Empty image means none.
-  void set_skin_decoration(std::wstring image, double top_dip, double width_dip) {
-    decoration_image_ = std::move(image);
-    decoration_top_ = top_dip;
-    decoration_width_ = width_dip;
+  void set_skin_decoration(const CandidateSkinDecoration &decoration) {
+    decoration_image_ = decoration.image;
+    decoration_top_ = decoration.top_dip;
+    decoration_width_ = decoration.width_dip;
+    decoration_align_ = decoration.align;
   }
+  // The image a package draws over the card surface. Empty image means none.
+  void set_skin_background(CandidateSkinBackground background) {
+    background_ = std::move(background);
+  }
+  // The card radius a package asks for; none keeps the theme's.
+  void set_skin_corner_radius(std::optional<float> radius) { skin_radius_ = radius; }
+  // preferences.plugins.effect_intensity, 0-100: how bright the typing flash is until a session publishes its resolved effect settings. The style, the combo and those settings come with each key from the input thread (TypingEffectSignal).
+  void set_effect_intensity(uint32_t intensity) { effect_intensity_ = (std::min)(intensity, 100u); }
+  // The user's scale, opacity and corner radius. Scale changes the card's size, so the next refresh lays it out again. Invalid values leave the previous style intact.
+  bool set_style(const CandidateWindowStyle &style);
   void hide();
   bool failed() const { return failed_; }
   HWND handle() const { return window_; }
@@ -74,8 +88,23 @@ private:
   void invalidate_geometry();
   CandidateBounds card_bounds(const CandidatePresentation &value,
                               const RECT &work, unsigned dpi);
+  // Each candidate's runs measured the way paint() draws them, and their wrapped heights. card_bounds and paint share both, so the card is sized for exactly the rows that get drawn.
+  std::vector<CandidateItemWidths> measure_items(const CandidatePresentation &value);
+  CandidateWrapMeasure wrap_measure(const CandidatePresentation &value);
   void paint();
+  // UI thread: adopt the waiting typing effect and start its flash and combo timers.
+  void take_typing_effect();
+  // Repaint for the next flash frame, and stop the timer once the flash has faded.
+  void typing_effect_tick(UINT_PTR timer);
+  // Device pixels per DIP for a window DPI, including the user's scale. Layout, rendering, the logo and hit testing all read this one factor.
+  double layout_scale(unsigned dpi) const {
+    return static_cast<double>(dpi ? dpi : 96) / 96.0 * style_.scale();
+  }
+  // The brand mark leading the preedit row, loaded at `pixels` square. Null when the icon will not load, and the row then draws no mark.
+  ID2D1Bitmap *logo_bitmap(int pixels);
   std::optional<CandidateClick> hit(int x, int y);
+  // The pager arrow under a client point: true for the previous page, false for the next. None over anything else, over the previous arrow on the first page, or without a page callback.
+  std::optional<bool> pager_hit(int x, int y);
   void show_context_menu(const CandidateClick &click, POINT client_point);
   Reader reader_;
   Click click_;
@@ -85,13 +114,18 @@ private:
   std::optional<CandidatePresentation> shown_;
   unsigned shown_dpi_ = 0;
   std::optional<CandidatePresentation> painted_;
+  // Rows as last drawn, set together with painted_. Hit testing reads these rather than recomputing, because row heights depend on text the click path should not measure again.
+  std::vector<CandidateRowLayout> painted_rows_;
+  // The pager as last drawn, in card coordinates, set together with painted_. None when the preedit row drew no pager.
+  std::optional<CandidatePagerLayout> painted_pager_;
   std::optional<CandidateClick> pressed_;
+  // The pager arrow a press started on; the page turns when the release lands on the same arrow.
+  std::optional<bool> pressed_page_;
   std::optional<size_t> hovered_;
   unsigned painted_dpi_ = 0;
   bool failed_ = false;
   unsigned font_size_ = 16;
   unsigned preedit_font_size_ = 16;
-  std::optional<COLORREF> text_color_;
   // Direct2D's imaging factory is a COM server, and this thread is the Server's
   // own UI thread, which otherwise never enters an apartment.
   struct Apartment {
@@ -103,12 +137,15 @@ private:
   } apartment_;
   // Direct2D through the shared UI stack; no second renderer in this tree.
   msimeui::DeviceResources device_;
+  HICON logo_ = nullptr;
+  int logo_pixels_ = 0;
   CandidatePalette palette_;
   std::wstring font_family_;
   std::optional<CandidateFontSettings> font_settings_;
   std::optional<bool> dark_theme_;
   bool horizontal_ = false;
   bool show_preedit_ = true;
+  bool wubi_code_hint_ = true;
   // Configured supplementary faces, in order, for the per-glyph fallback chain.
   // Minimum card width asked for by the active skin package, in DIPs.
   double skin_min_width_ = 0.0;
@@ -120,15 +157,19 @@ private:
   std::wstring decoration_image_;
   double decoration_top_ = 0.0;
   double decoration_width_ = 0.0;
+  CandidateSkinAlign decoration_align_ = CandidateSkinAlign::right;
+  CandidateSkinBackground background_;
+  std::optional<float> skin_radius_;
+  CandidateWindowStyle style_;
   // Pixels reserved above the card for the artwork, computed when the card is
   // sized and reused when it is painted so the two cannot disagree.
   float decoration_offset_ = 0.0f;
   CandidateShadowInsets shadow_insets_{};
-  // Owner-drawn menu labels, kept alive for the duration of the popup: the
-  // draw messages carry pointers into this list.
-  // Built on first use: most sessions never open the right-click menu, and
-  // the flyout owns two windows and two Direct2D devices.
+  // Owner-drawn menu labels, kept alive for the duration of the popup: the draw messages carry pointers into this list.
+  // Built on first use: most sessions never open the right-click menu, and the flyout owns two windows and two Direct2D devices.
   std::unique_ptr<CandidateFlyoutWindow> flyout_;
+  // The candidate the open flyout acts on, recorded afresh on every right click because the flyout itself outlives any one opening.
+  CandidateMenuTarget<CandidateClick> menu_target_;
   std::vector<std::wstring> fallback_families_;
   Microsoft::WRL::ComPtr<IDWriteFontFallback> font_fallback_;
   // Tallest this vertical list has been since the last hide(), in physical
@@ -138,5 +179,12 @@ private:
   // than being swallowed by this NOACTIVATE window.
   bool mouse_wheel_ = false;
   int wheel_accumulator_ = 0;
+  // The typing effect last taken from the input thread, when it arrived (GetTickCount64), and whether its flash is still fading. The combo count outlives the flash: it stays on the card until the library's idle window ends it.
+  uint32_t effect_intensity_ = 50;
+  TypingEffect effect_{};
+  // The settings the current flash is drawn with, adopted with it so a flash keeps its length and colour while it fades.
+  TypingEffectSettings effect_settings_{};
+  uint64_t effect_started_ = 0;
+  bool effect_flashing_ = false;
 };
 } // namespace msime::windows

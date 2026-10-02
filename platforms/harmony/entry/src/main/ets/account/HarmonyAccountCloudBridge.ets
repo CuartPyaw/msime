@@ -5,9 +5,8 @@ import picker from '@ohos.file.picker';
 import util from '@ohos.util';
 import client from 'libmsimeclient.so';
 import {
-  AccountCloudBridge, AccountDownloadResponse, AccountSessionStore, AccountTransport,
-  AccountTransportResponse, MAX_DICTIONARY_EXPORT_BYTES, MAX_SNAPSHOT_DOWNLOAD_BYTES,
-  dictionaryChangePageChanged
+  AccountCloudBridge, AccountDownloadResponse, AccountTransportResponse,
+  MAX_DICTIONARY_EXPORT_BYTES, MAX_SNAPSHOT_DOWNLOAD_BYTES, dictionaryChangePageChanged
 } from './AccountCloudBridge';
 import { KeyboardSession } from '../keyboard/KeyboardSession';
 import { KeyboardFeedbackBridge } from '../keyboard/KeyboardFeedbackBridge';
@@ -23,41 +22,9 @@ import {
   localAccountPreferences,
   mergeAccountPreferences
 } from './AccountPreferencePlan';
-
-const ACCOUNT_ORIGIN: string = 'https://api.msime.app';
-
-class FileSessionStore implements AccountSessionStore {
-  private readonly file: string;
-
-  constructor(directory: string) {
-    this.file = `${directory}/account-session.json`;
-  }
-
-  load(): string | null {
-    try {
-      return fs.accessSync(this.file) ? fs.readTextSync(this.file) : null;
-    } catch {
-      return null;
-    }
-  }
-
-  save(value: string): void {
-    const handle = fs.openSync(this.file, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
-    try {
-      fs.writeSync(handle.fd, value);
-    } finally {
-      fs.closeSync(handle);
-    }
-  }
-
-  clear(): void {
-    try {
-      if (fs.accessSync(this.file)) fs.unlinkSync(this.file);
-    } catch {
-      // Clearing an already absent session is idempotent.
-    }
-  }
-}
+import {
+  ACCOUNT_ORIGIN, FileSessionStore, HarmonyAccountTransport, responseContentLength, responseContentType
+} from './HarmonyAccountTransport';
 
 interface SnapshotAction {
   operation: string;
@@ -146,68 +113,20 @@ interface SnapshotReply {
   error?: string;
 }
 
-interface HttpHeaders {
-  Accept: string;
-  Authorization?: string;
-  'Content-Type': string;
-}
-
 interface DownloadHeaders {
   Accept: string;
   Authorization: string;
   'Accept-Encoding': string;
 }
 
-function responseHeader(headers: Object, name: string): string | undefined {
-  const values: Record<string, Object> = headers as Record<string, Object>;
-  const keys: string[] = Object.keys(values);
-  for (const key of keys) {
-    if (key.toLowerCase() !== name) continue;
-    const raw: Object = values[key];
-    return typeof raw === 'string' ? raw : undefined;
-  }
-  return undefined;
-}
+/** The settings application's transport: the shared JSON requests plus the snapshot and export file transfers. */
+class HarmonyTransport extends HarmonyAccountTransport {
+  private readonly activeDownloads: Set<http.HttpRequest> = new Set<http.HttpRequest>();
 
-/** A declared response size lets native downloads reject a connection that ended early. */
-function responseContentLength(headers: Object): number | undefined {
-  const raw: string | undefined = responseHeader(headers, 'content-length');
-  if (raw === undefined) return undefined;
-  const parsed: number = Number(raw);
-  return Number.isInteger(parsed) && parsed >= 0 ? parsed : -1;
-}
-
-function responseContentType(headers: Object): string | undefined {
-  const raw: string | undefined = responseHeader(headers, 'content-type');
-  return raw === undefined ? undefined : raw.split(';')[0].trim().toLowerCase();
-}
-
-class HarmonyTransport implements AccountTransport {
-  async request(method: string, path: string, token?: string, body?: Object,
-    timeoutMs?: number): Promise<AccountTransportResponse> {
-    if (!path.startsWith('/v1/') || path.includes('\\')) throw new Error('account_invalid');
-    const request = http.createHttp();
-    const headers: HttpHeaders = { Accept: 'application/json', 'Content-Type': 'application/json' };
-    if (token !== undefined) headers.Authorization = `Bearer ${token}`;
-    // Only the read side takes the caller's budget. Connecting is connecting on every endpoint, and
-    // a chat request to an unreachable host should still fail in seconds rather than in two minutes.
-    const options: http.HttpRequestOptions = {
-      method: this.method(method),
-      header: headers,
-      connectTimeout: 30000,
-      readTimeout: timeoutMs === undefined ? 30000 : timeoutMs,
-      extraData: body === undefined ? undefined : JSON.stringify(body)
-    };
-    try {
-      const response = await request.request(`${ACCOUNT_ORIGIN}${path}`, options);
-      return {
-        status: response.responseCode,
-        body: typeof response.result === 'string' ? response.result : '',
-        contentLength: responseContentLength(response.header)
-      };
-    } finally {
-      request.destroy();
-    }
+  /** Abort large file transfers when the account session is invalidated. */
+  cancelDownloads(): void {
+    for (const request of this.activeDownloads) request.destroy();
+    this.activeDownloads.clear();
   }
 
   async download(path: string, token: string, destination: string, maximumBytes: number,
@@ -217,6 +136,7 @@ class HarmonyTransport implements AccountTransport {
       throw new Error('account_invalid');
     }
     const request = http.createHttp();
+    this.activeDownloads.add(request);
     const headers: DownloadHeaders = {
       Accept: mediaType,
       Authorization: `Bearer ${token}`,
@@ -228,8 +148,7 @@ class HarmonyTransport implements AccountTransport {
       connectTimeout: 30000,
       readTimeout: 600000
     };
-    const handle = fs.openSync(destination,
-      fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+    let handle: fs.File | undefined = undefined;
     let bytes: number = 0;
     let failed: boolean = false;
     let contentLength: number | undefined = undefined;
@@ -248,7 +167,8 @@ class HarmonyTransport implements AccountTransport {
     });
     request.on('dataReceive', (chunk: ArrayBuffer): void => {
       const view: Uint8Array = new Uint8Array(chunk);
-      if (failed || bytes + view.byteLength > maximumBytes || view.includes(0)) {
+      // The file is opened before the request starts streaming, but the closure cannot see that narrowing.
+      if (failed || handle === undefined || bytes + view.byteLength > maximumBytes || view.includes(0)) {
         failed = true;
         return;
       }
@@ -264,6 +184,10 @@ class HarmonyTransport implements AccountTransport {
       }
     });
     try {
+      // Open the destination inside the guarded region: if the picker URI or parent directory is
+      // unavailable, the request created above still needs to be destroyed.
+      handle = fs.openSync(destination,
+        fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
       const status: number = await request.requestInStream(`${ACCOUNT_ORIGIN}${path}`, options);
       await ended;
       if (status < 200 || status >= 300) {
@@ -275,7 +199,8 @@ class HarmonyTransport implements AccountTransport {
       }
       return { status: status, bytes: bytes, contentLength: contentLength, contentType: contentType };
     } finally {
-      fs.closeSync(handle);
+      this.activeDownloads.delete(request);
+      if (handle !== undefined) fs.closeSync(handle);
       request.destroy();
     }
   }
@@ -297,17 +222,6 @@ class HarmonyTransport implements AccountTransport {
       }
     } catch {
       return { status: 503, body: '' };
-    }
-  }
-
-  private method(value: string): http.RequestMethod {
-    switch (value) {
-      case 'POST': return http.RequestMethod.POST;
-      case 'PUT': return http.RequestMethod.PUT;
-      // The current SDK enum omits PATCH, but the HTTP stack accepts the wire method.
-      case 'PATCH': return 'PATCH' as http.RequestMethod;
-      case 'DELETE': return http.RequestMethod.DELETE;
-      default: return http.RequestMethod.GET;
     }
   }
 }
@@ -333,6 +247,7 @@ interface SnapshotInspectReply {
 
 /** Account and cloud clipboard state stays in the host; WebView receives only bounded DTOs. */
 export class HarmonyAccountCloudBridge {
+  private readonly transport: HarmonyTransport;
   private readonly bridge: AccountCloudBridge;
   private readonly context: common.UIAbilityContext;
   private snapshotFile: string = '';
@@ -354,7 +269,8 @@ export class HarmonyAccountCloudBridge {
     } catch {
       // The store reports an unavailable session if the sandbox cannot be prepared.
     }
-    this.bridge = new AccountCloudBridge(new HarmonyTransport(), new FileSessionStore(directory));
+    this.transport = new HarmonyTransport();
+    this.bridge = new AccountCloudBridge(this.transport, new FileSessionStore(directory));
   }
 
   async request(action: string): Promise<string> {
@@ -369,6 +285,7 @@ export class HarmonyAccountCloudBridge {
     }
     if (operation === 'logout' || operation === 'delete_account'
       || operation === 'login' || operation === 'clear_expired') {
+      this.transport.cancelDownloads();
       this.clearSnapshotPreview();
       this.clearRestorePreview();
       if (accountId !== null && !this.cancelQueueForAccount(accountId)) {

@@ -1,23 +1,112 @@
 #include "ClipboardHistory.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <array>
 #include <fstream>
 #ifdef _WIN32
+#include "StateRootLease.h"
 #include <windows.h>
 #endif
 
 namespace msime::windows {
 namespace {
+constexpr size_t max_store_bytes = 1024 * 1024;
+
+bool store_parent_is_safe(const std::filesystem::path &store) {
+#ifdef _WIN32
+  try {
+    auto parent = store.parent_path();
+    if (parent.empty())
+      parent = L".";
+    if (!parent.is_absolute())
+      parent = std::filesystem::absolute(parent);
+    reject_reparse_ancestors(parent);
+  } catch (...) {
+    return false;
+  }
+#else
+  (void)store;
+#endif
+  return true;
+}
+
+bool store_leaf_is_safe(const std::filesystem::path &store) {
+#ifdef _WIN32
+  HANDLE handle = CreateFileW(
+      store.c_str(), FILE_READ_ATTRIBUTES,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+      nullptr);
+  if (handle == INVALID_HANDLE_VALUE) {
+    const auto error = GetLastError();
+    return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
+  }
+  BY_HANDLE_FILE_INFORMATION info{};
+  const bool safe = GetFileInformationByHandle(handle, &info) &&
+                    (info.dwFileAttributes &
+                     (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) ==
+                        0;
+  CloseHandle(handle);
+  return safe;
+#else
+  (void)store;
+  return true;
+#endif
+}
+
+#ifndef _WIN32
+bool read_store_payload(std::ifstream &input, std::string &payload) {
+  std::array<char, 8192> buffer{};
+  while (input) {
+    input.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+    const auto count = input.gcount();
+    if (count <= 0) continue;
+    const auto bytes = static_cast<size_t>(count);
+    if (payload.size() > max_store_bytes - bytes) return false;
+    payload.append(buffer.data(), bytes);
+  }
+  return input.eof();
+}
+#else
+bool read_store_payload(HANDLE input, std::string &payload) {
+  std::array<char, 8192> buffer{};
+  for (;;) {
+    DWORD count = 0;
+    if (!ReadFile(input, buffer.data(), static_cast<DWORD>(buffer.size()),
+                  &count, nullptr))
+      return false;
+    if (count == 0)
+      return true;
+    const auto bytes = static_cast<size_t>(count);
+    if (payload.size() > max_store_bytes - bytes)
+      return false;
+    payload.append(buffer.data(), bytes);
+  }
+}
+#endif
+
 class StoreLock final {
 public:
   explicit StoreLock(const std::filesystem::path &store) {
 #ifdef _WIN32
+    if (!store_parent_is_safe(store))
+      return;
     auto lock_path = store;
     lock_path += ".lock";
     handle_ = CreateFileW(lock_path.c_str(), GENERIC_READ | GENERIC_WRITE,
-                          FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                          nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+                          FILE_SHARE_READ | FILE_SHARE_WRITE,
+                          nullptr, OPEN_ALWAYS,
+                          FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+                          nullptr);
     if (handle_ == INVALID_HANDLE_VALUE) {
+      handle_ = nullptr;
+      return;
+    }
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (!GetFileInformationByHandle(handle_, &info) ||
+        (info.dwFileAttributes &
+         (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY))) {
+      CloseHandle(handle_);
       handle_ = nullptr;
       return;
     }
@@ -53,28 +142,68 @@ private:
 #endif
 };
 std::vector<std::string> read_store(const std::filesystem::path &path) {
-  std::ifstream input(path); if (!input) return {};
-  try { const auto value = nlohmann::json::parse(input); if (!value.is_array()) return {}; std::vector<std::string> result; for (const auto &item : value) { if (!item.is_string()) continue; auto text = normalize_clipboard_text(item.get<std::string>()); if (!text.empty() && result.size() < ClipboardHistory::max_items) result.push_back(std::move(text)); } return result; } catch (...) { return {}; }
+#ifdef _WIN32
+  HANDLE input = CreateFileW(
+      path.c_str(), GENERIC_READ,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+      nullptr);
+  if (input == INVALID_HANDLE_VALUE)
+    return {};
+  BY_HANDLE_FILE_INFORMATION info{};
+  LARGE_INTEGER size{};
+  if (!GetFileInformationByHandle(input, &info) ||
+      (info.dwFileAttributes &
+       (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) ||
+      !GetFileSizeEx(input, &size) || size.QuadPart < 0 ||
+      static_cast<ULONGLONG>(size.QuadPart) > max_store_bytes) {
+    CloseHandle(input);
+    return {};
+  }
+#else
+  std::ifstream input(path, std::ios::binary);
+  if (!input)
+    return {};
+#endif
+  std::string payload;
+#ifdef _WIN32
+  const bool read = read_store_payload(input, payload);
+  CloseHandle(input);
+#else
+  const bool read = read_store_payload(input, payload);
+#endif
+  if (!read) return {};
+  try { const auto value = nlohmann::json::parse(payload); if (!value.is_array()) return {}; std::vector<std::string> result; result.reserve(ClipboardHistory::max_items); for (const auto &item : value) { if (!item.is_string()) continue; auto text = normalize_clipboard_text(item.get<std::string>()); if (!text.empty() && result.size() < ClipboardHistory::max_items) result.push_back(std::move(text)); } return result; } catch (...) { return {}; }
 }
 bool write_store(const std::filesystem::path &path, const std::vector<std::string> &items) {
+  if (!store_parent_is_safe(path) || !store_leaf_is_safe(path)) return false;
   std::error_code error;
   std::filesystem::create_directories(path.parent_path(), error);
   if (error) return false;
   const auto payload = nlohmann::json(items).dump();
 #ifdef _WIN32
   auto temporary = path;
-  temporary += ".tmp";
-  temporary += std::to_string(GetCurrentProcessId());
-  std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-  if (!output) return false;
-  output.write(payload.data(), static_cast<std::streamsize>(payload.size()));
-  output.close();
-  if (!output) {
+  wchar_t temporary_name[MAX_PATH] = {};
+  if (!GetTempFileNameW(path.parent_path().c_str(), L"msi", 0, temporary_name))
+    return false;
+  temporary = temporary_name;
+  HANDLE handle = CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr,
+                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (handle == INVALID_HANDLE_VALUE) {
     std::filesystem::remove(temporary, error);
     return false;
   }
-  if (!MoveFileExW(temporary.c_str(), path.c_str(),
-                   MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+  DWORD written = 0;
+  const bool complete = payload.size() <= MAXDWORD &&
+                        WriteFile(handle, payload.data(),
+                                  static_cast<DWORD>(payload.size()), &written,
+                                  nullptr) &&
+                        written == static_cast<DWORD>(payload.size()) &&
+                        FlushFileBuffers(handle);
+  CloseHandle(handle);
+  if (!complete || !MoveFileExW(temporary.c_str(), path.c_str(),
+                                MOVEFILE_REPLACE_EXISTING |
+                                    MOVEFILE_WRITE_THROUGH)) {
     std::filesystem::remove(temporary, error);
     return false;
   }

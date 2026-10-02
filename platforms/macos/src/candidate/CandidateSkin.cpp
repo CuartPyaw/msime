@@ -6,7 +6,6 @@
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
-#include <map>
 #include <sstream>
 #include <system_error>
 #include <unordered_map>
@@ -42,129 +41,6 @@ Rgba ContrastingText(Rgba fill, Rgba fallback)
     return RelativeLuminance(fill) < 0.45f ? Rgba{1.0f, 1.0f, 1.0f, 1.0f} : Rgba{0.1f, 0.1f, 0.1f, 1.0f};
 }
 
-SkinTokens FluentTokens(bool dark)
-{
-    SkinTokens tokens;
-    if (dark)
-    {
-        tokens.surface = Rgb(0x202020);
-        tokens.border = Rgb(0x9B9B9B, 0x2E / 255.0f);
-        tokens.text = Rgb(0xE9E8E8);
-        tokens.number = Rgb(0xE9E8E8, 0.616f);
-        tokens.selected = Rgb(0x3E3E3E, 0.725f);
-        tokens.hover = Rgb(0x414141);
-    }
-    else
-    {
-        tokens.surface = Rgb(0xFFFFFF);
-        tokens.border = Rgba{0.0f, 0.0f, 0.0f, 0.12f};
-        tokens.text = Rgb(0x1A1A1A);
-        tokens.number = Rgb(0x1A1A1A, 0.55f);
-        tokens.selected = Rgb(0xE8E8E8);
-        tokens.hover = Rgb(0xECECEC);
-    }
-    tokens.selectedText = tokens.text;
-    tokens.selectedHover = tokens.hover;
-    tokens.accent = Rgb(0x6B69D6);
-    tokens.radius = 6.0f;
-    tokens.candidateRadius = 4.0f;
-    tokens.selectedRadius = 4.0f;
-    tokens.borderWidth = 1.5f;
-    tokens.pad = 5.0f;
-    tokens.showSelectedBar = true;
-    return tokens;
-}
-
-SkinTokens WeChatTokens(bool dark)
-{
-    SkinTokens tokens = FluentTokens(dark);
-    tokens.surface = dark ? Rgb(0x151515) : Rgb(0xF7F7F7);
-    tokens.border = dark ? Rgb(0x292929) : Rgb(0xDEDEDE);
-    tokens.text = dark ? Rgb(0xB7B7B7) : Rgb(0x333333);
-    tokens.number = dark ? Rgb(0x858585) : Rgb(0x757575);
-    tokens.accent = Rgb(0x07C160);
-    tokens.selected = Rgb(0x07C160);
-    tokens.selectedText = Rgb(0xFFFFFF);
-    tokens.hover = Rgb(0x07C160, dark ? 0.32f : 0.14f);
-    tokens.selectedHover = tokens.selected;
-    tokens.radius = 5.0f;
-    tokens.candidateRadius = 4.0f;
-    tokens.selectedRadius = 5.0f;
-    tokens.borderWidth = 1.0f;
-    tokens.pad = 2.0f;
-    tokens.showSelectedBar = false;
-    return tokens;
-}
-
-SkinTokens GraphiteTokens(bool dark)
-{
-    SkinTokens tokens = FluentTokens(dark);
-    if (dark)
-    {
-        tokens.surface = Rgb(0x1C1F23);
-        tokens.border = Rgb(0x30353B);
-        tokens.text = Rgb(0xAEB6C2);
-        tokens.number = Rgb(0x707987);
-        tokens.selected = Rgba{0.0f, 0.0f, 0.0f, 0.0f};
-        tokens.selectedText = Rgb(0xF1F3F5);
-        tokens.hover = Rgba{1.0f, 1.0f, 1.0f, 0.055f};
-        tokens.selectedHover = tokens.hover;
-        tokens.accent = Rgb(0x8993A0);
-    }
-    else
-    {
-        tokens.surface = Rgb(0xFBFBFC);
-        tokens.border = Rgb(0xE2E5E9);
-        tokens.text = Rgb(0x586476);
-        tokens.number = Rgb(0x8993A1);
-        tokens.selected = Rgba{0.0f, 0.0f, 0.0f, 0.0f};
-        tokens.selectedText = Rgb(0x111827);
-        tokens.hover = Rgba{31.0f / 255.0f, 41.0f / 255.0f, 55.0f / 255.0f, 0.055f};
-        tokens.selectedHover = tokens.hover;
-        tokens.accent = Rgb(0x5F6B7A);
-    }
-    tokens.radius = 3.0f;
-    tokens.candidateRadius = 2.0f;
-    tokens.selectedRadius = 2.0f;
-    tokens.borderWidth = 1.0f;
-    tokens.pad = 5.0f;
-    tokens.showSelectedBar = false;
-    return tokens;
-}
-
-SkinTokens WillowGreenTokens(bool dark)
-{
-    SkinTokens tokens = FluentTokens(dark);
-    if (dark)
-    {
-        tokens.surface = Rgb(0x2D2F2E);
-        tokens.text = Rgb(0xD8DBD8);
-        tokens.number = Rgb(0xA6ABA7);
-        tokens.accent = Rgb(0x65C98D);
-        tokens.selected = Rgb(0x65C98D);
-        tokens.hover = Rgb(0x65C98D, 0.22f);
-    }
-    else
-    {
-        tokens.surface = Rgb(0xF4F5F3);
-        tokens.text = Rgb(0x333333);
-        tokens.number = Rgb(0x757575);
-        tokens.accent = Rgb(0x58B980);
-        tokens.selected = Rgb(0x58B980);
-        tokens.hover = Rgb(0x58B980, 0.16f);
-    }
-    tokens.selectedHover = tokens.selected;
-    tokens.selectedText = Rgb(0xFFFFFF);
-    tokens.border = Rgba{0.0f, 0.0f, 0.0f, 0.0f};
-    tokens.radius = 9.0f;
-    tokens.candidateRadius = 0.0f;
-    tokens.selectedRadius = 0.0f;
-    tokens.borderWidth = 0.0f;
-    tokens.pad = 0.0f;
-    tokens.showSelectedBar = false;
-    return tokens;
-}
-
 std::string Trim(std::string text)
 {
     while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())))
@@ -176,418 +52,6 @@ std::string Trim(std::string text)
         text.pop_back();
     }
     return text;
-}
-
-std::string StripComment(const std::string &line)
-{
-    bool inString = false;
-    bool escape = false;
-    for (std::size_t index = 0; index < line.size(); ++index)
-    {
-        const char ch = line[index];
-        if (escape)
-        {
-            escape = false;
-            continue;
-        }
-        if (inString && ch == '\\')
-        {
-            escape = true;
-            continue;
-        }
-        if (ch == '"')
-        {
-            inString = !inString;
-            continue;
-        }
-        if (!inString && ch == '#')
-        {
-            return line.substr(0, index);
-        }
-    }
-    return line;
-}
-
-bool IsSafeFileName(const std::string &name, const std::string &extension)
-{
-    if (name.empty() || name.size() > 128 || name.size() <= extension.size() ||
-        name.substr(name.size() - extension.size()) != extension)
-    {
-        return false;
-    }
-    return std::all_of(name.begin(), name.end(),
-                       [](unsigned char ch) { return std::isalnum(ch) || ch == '.' || ch == '_' || ch == '-'; });
-}
-
-bool IsSafeRelativeResource(const std::string &name)
-{
-    if (name.empty() || name.size() > 256 || name.front() == '/' || name.find('\\') != std::string::npos)
-    {
-        return false;
-    }
-    if (!std::all_of(name.begin(), name.end(), [](unsigned char ch) {
-            return std::isalnum(ch) || ch == '/' || ch == '.' || ch == '_' || ch == '-';
-        }))
-    {
-        return false;
-    }
-    const std::filesystem::path path(name);
-    if (path.is_absolute())
-    {
-        return false;
-    }
-    for (const auto &part : path)
-    {
-        if (part == ".." || part == "." || part.empty())
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-struct TomlTable
-{
-    std::map<std::string, std::string> scalars;
-    std::map<std::string, std::vector<std::string>> arrays;
-    std::map<std::string, TomlTable> children;
-};
-
-bool DecodeString(const std::string &raw, std::string &out)
-{
-    if (raw.size() < 2 || raw.front() != '"' || raw.back() != '"')
-    {
-        return false;
-    }
-    out.clear();
-    bool escape = false;
-    for (std::size_t index = 1; index + 1 < raw.size(); ++index)
-    {
-        const char ch = raw[index];
-        if (escape)
-        {
-            if (ch == 'n')
-            {
-                out.push_back('\n');
-            }
-            else
-            {
-                out.push_back(ch);
-            }
-            escape = false;
-            continue;
-        }
-        if (ch == '\\')
-        {
-            escape = true;
-            continue;
-        }
-        out.push_back(ch);
-    }
-    return !escape;
-}
-
-bool ParseScalar(const std::string &raw, std::string &out)
-{
-    const std::string value = Trim(raw);
-    if (value.empty())
-    {
-        return false;
-    }
-    if (value.front() == '"')
-    {
-        return DecodeString(value, out);
-    }
-    out = value;
-    return true;
-}
-
-bool ParseStringArray(const std::string &raw, std::vector<std::string> &out)
-{
-    const std::string value = Trim(raw);
-    if (value.size() < 2 || value.front() != '[' || value.back() != ']')
-    {
-        return false;
-    }
-    out.clear();
-    std::string inner = Trim(value.substr(1, value.size() - 2));
-    if (inner.empty())
-    {
-        return true;
-    }
-    std::string current;
-    bool inString = false;
-    bool escape = false;
-    for (char ch : inner)
-    {
-        if (escape)
-        {
-            current.push_back(ch);
-            escape = false;
-            continue;
-        }
-        if (inString && ch == '\\')
-        {
-            current.push_back(ch);
-            escape = true;
-            continue;
-        }
-        if (ch == '"')
-        {
-            current.push_back(ch);
-            inString = !inString;
-            continue;
-        }
-        if (!inString && ch == ',')
-        {
-            std::string item;
-            if (!ParseScalar(current, item))
-            {
-                return false;
-            }
-            out.push_back(std::move(item));
-            current.clear();
-            continue;
-        }
-        current.push_back(ch);
-    }
-    if (inString)
-    {
-        return false;
-    }
-    std::string item;
-    if (!ParseScalar(current, item))
-    {
-        return false;
-    }
-    out.push_back(std::move(item));
-    return true;
-}
-
-TomlTable *EnsureTable(TomlTable &root, const std::vector<std::string> &path)
-{
-    TomlTable *current = &root;
-    for (const std::string &part : path)
-    {
-        current = &current->children[part];
-    }
-    return current;
-}
-
-std::vector<std::string> SplitDotted(const std::string &path)
-{
-    std::vector<std::string> parts;
-    std::string current;
-    for (char ch : path)
-    {
-        if (ch == '.')
-        {
-            if (current.empty())
-            {
-                return {};
-            }
-            parts.push_back(current);
-            current.clear();
-        }
-        else
-        {
-            current.push_back(ch);
-        }
-    }
-    if (!current.empty())
-    {
-        parts.push_back(current);
-    }
-    return parts;
-}
-
-bool ParseToml(const std::string &text, TomlTable &root)
-{
-    root = {};
-    std::vector<std::string> currentPath;
-    std::istringstream stream(text);
-    std::string rawLine;
-    while (std::getline(stream, rawLine))
-    {
-        if (!rawLine.empty() && rawLine.back() == '\r')
-        {
-            rawLine.pop_back();
-        }
-        const std::string line = Trim(StripComment(rawLine));
-        if (line.empty())
-        {
-            continue;
-        }
-        if (line.front() == '[' && line.back() == ']')
-        {
-            const std::string header = Trim(line.substr(1, line.size() - 2));
-            currentPath = SplitDotted(header);
-            if (currentPath.empty())
-            {
-                return false;
-            }
-            EnsureTable(root, currentPath);
-            continue;
-        }
-        const auto equal = line.find('=');
-        if (equal == std::string::npos)
-        {
-            return false;
-        }
-        const std::string key = Trim(line.substr(0, equal));
-        const std::string rawValue = Trim(line.substr(equal + 1));
-        if (key.empty())
-        {
-            return false;
-        }
-        TomlTable *table = EnsureTable(root, currentPath);
-        if (!rawValue.empty() && rawValue.front() == '[')
-        {
-            std::vector<std::string> items;
-            if (!ParseStringArray(rawValue, items))
-            {
-                return false;
-            }
-            table->arrays[key] = std::move(items);
-        }
-        else
-        {
-            std::string scalar;
-            if (!ParseScalar(rawValue, scalar))
-            {
-                return false;
-            }
-            table->scalars[key] = std::move(scalar);
-        }
-    }
-    return true;
-}
-
-const TomlTable *Child(const TomlTable &table, const char *key)
-{
-    const auto found = table.children.find(key);
-    return found == table.children.end() ? nullptr : &found->second;
-}
-
-bool ReadString(const TomlTable &table, const char *key, std::string &out, std::size_t maximum, bool required)
-{
-    const auto found = table.scalars.find(key);
-    if (found == table.scalars.end())
-    {
-        return !required;
-    }
-    out = found->second;
-    return (!required || !out.empty()) && out.size() <= maximum;
-}
-
-bool ReadEnumArray(const TomlTable &table, const char *key, const std::vector<std::string> &allowed,
-                   std::vector<std::string> &out)
-{
-    const auto found = table.arrays.find(key);
-    if (found == table.arrays.end() || found->second.empty())
-    {
-        return false;
-    }
-    for (const std::string &text : found->second)
-    {
-        if (std::find(allowed.begin(), allowed.end(), text) == allowed.end() ||
-            std::find(out.begin(), out.end(), text) != out.end())
-        {
-            return false;
-        }
-        out.push_back(text);
-    }
-    return true;
-}
-
-double BoundedNumber(const TomlTable &table, const char *key, double maximum)
-{
-    const auto found = table.scalars.find(key);
-    if (found == table.scalars.end())
-    {
-        return 0.0;
-    }
-    char *end = nullptr;
-    const double value = std::strtod(found->second.c_str(), &end);
-    if (end == found->second.c_str() || (end != nullptr && *end != '\0') || !std::isfinite(value) || value < 0.0 ||
-        value > maximum)
-    {
-        return -1.0;
-    }
-    return value;
-}
-
-bool ReadColors(const TomlTable *table, SkinColors &out)
-{
-    if (table == nullptr)
-    {
-        return true;
-    }
-    if ((table->scalars.count("accent") && !ReadString(*table, "accent", out.accent, 80, false)) ||
-        (table->scalars.count("selected") && !ReadString(*table, "selected", out.selected, 80, false)) ||
-        (table->scalars.count("hover") && !ReadString(*table, "hover", out.hover, 80, false)) ||
-        (table->scalars.count("surface") && !ReadString(*table, "surface", out.surface, 80, false)) ||
-        (table->scalars.count("border") && !ReadString(*table, "border", out.border, 80, false)) ||
-        (table->scalars.count("text") && !ReadString(*table, "text", out.text, 80, false)) ||
-        (table->scalars.count("number") && !ReadString(*table, "number", out.number, 80, false)))
-    {
-        return false;
-    }
-    const auto bar = table->scalars.find("show_selected_bar");
-    if (bar != table->scalars.end())
-    {
-        if (bar->second != "true" && bar->second != "false")
-        {
-            return false;
-        }
-        out.showSelectedBar = bar->second == "true";
-    }
-    return true;
-}
-
-void ApplyPackageColors(const SkinColors &colors, SkinTokens &tokens)
-{
-    if (const auto parsed = ParseCssColor(colors.accent))
-    {
-        tokens.accent = *parsed;
-    }
-    if (const auto parsed = ParseCssColor(colors.selected))
-    {
-        tokens.selected = *parsed;
-    }
-    if (const auto parsed = ParseCssColor(colors.hover))
-    {
-        tokens.hover = *parsed;
-    }
-    if (const auto parsed = ParseCssColor(colors.surface))
-    {
-        tokens.surface = *parsed;
-    }
-    if (const auto parsed = ParseCssColor(colors.border))
-    {
-        tokens.border = *parsed;
-    }
-    if (const auto parsed = ParseCssColor(colors.text))
-    {
-        tokens.text = *parsed;
-    }
-    if (const auto parsed = ParseCssColor(colors.number))
-    {
-        tokens.number = *parsed;
-    }
-    if (colors.showSelectedBar.has_value())
-    {
-        tokens.showSelectedBar = *colors.showSelectedBar;
-    }
-    tokens.selectedText = ContrastingText(tokens.selected, tokens.text);
-}
-
-void SetError(std::string *error, const std::string &message)
-{
-    if (error != nullptr)
-    {
-        *error = message;
-    }
 }
 
 bool IsContained(const std::filesystem::path &root, const std::filesystem::path &resource)
@@ -607,11 +71,6 @@ void ApplyToolbarStylesheet(const std::filesystem::path &skinsRoot, const SkinPa
                             SkinTokens &tokens);
 } // namespace
 
-bool IsBuiltInSkinId(std::string_view id)
-{
-    return id == "fluent" || id == "wechat" || id == "graphite" || id == "willow_green";
-}
-
 bool IsSafeSkinId(std::string_view id)
 {
     if (id.empty() || id.size() > 64 || !std::isalnum(static_cast<unsigned char>(id.front())))
@@ -623,43 +82,71 @@ bool IsSafeSkinId(std::string_view id)
     });
 }
 
-std::string NormalizeSkinId(std::string_view id)
+SkinTokens NativeCandidateTokens(bool dark)
 {
-    if (id.empty()) return "willow_green";
-    return IsSafeSkinId(id) ? std::string(id) : std::string("fluent");
+    // design-tokens-desktop §1.2, the macOS column: a translucent system card, the brand accent as a solid selection with white text, and hairline borders and hovers drawn in the text colour's alpha.
+    SkinTokens tokens;
+    if (dark)
+    {
+        tokens.surface = Rgb(0x28282A, 0.97f);
+        tokens.border = Rgba{1.0f, 1.0f, 1.0f, 0.12f};
+        tokens.text = Rgb(0xF5F5F7);
+        tokens.number = Rgb(0x98989D);
+        tokens.accent = Rgb(0x5FBF84);
+        tokens.hover = Rgba{1.0f, 1.0f, 1.0f, 0.10f};
+    }
+    else
+    {
+        tokens.surface = Rgb(0xFFFFFF, 0.97f);
+        tokens.border = Rgba{0.0f, 0.0f, 0.0f, 0.12f};
+        tokens.text = Rgb(0x1D1D1F);
+        tokens.number = Rgb(0x6E6E73);
+        tokens.accent = Rgb(0x2C7A4B);
+        tokens.hover = Rgba{0.0f, 0.0f, 0.0f, 0.06f};
+    }
+    tokens.selected = tokens.accent;
+    tokens.selectedHover = tokens.selected;
+    tokens.selectedText = Rgb(0xFFFFFF);
+    tokens.selectedNumber = Rgb(0xFFFFFF, 0.82f);
+    return tokens;
 }
 
-const std::vector<SkinListEntry> &BuiltInSkinEntries()
+void DeriveSelectedForegrounds(SkinTokens &tokens, bool text, bool number)
 {
-    static const std::vector<SkinListEntry> entries = {
-        {"fluent", "Fluent", true},
-        {"wechat", "微信绿", true},
-        {"graphite", "石墨 Graphite", true},
-        {"willow_green", "杨柳青", true},
-    };
-    return entries;
+    if (text)
+    {
+        tokens.selectedText = ContrastingText(tokens.selected, tokens.text);
+    }
+    if (number)
+    {
+        const Rgba contrast = ContrastingText(tokens.selected, tokens.number);
+        tokens.selectedNumber = tokens.selected.a < 0.85f ? tokens.number : Rgba{contrast.r, contrast.g, contrast.b, 0.82f};
+    }
 }
 
-SkinTokens BuiltInSkinTokens(std::string_view id, bool dark)
+ResolvedSkin StyledCandidateSkin(ResolvedSkin skin, const CandidateWindowStyle &style)
 {
-    if (id == "wechat")
+    SkinTokens &tokens = skin.tokens;
+    // Only a radius the user chose rounds the rows down with the card; a skin package's own radius keeps the host row radius it has always drawn.
+    if (style.cornerRadius)
     {
-        return WeChatTokens(dark);
+        tokens.radius = static_cast<float>(std::clamp(*style.cornerRadius, 0.0, 32.0));
+        tokens.candidateRadius = std::min(tokens.candidateRadius, tokens.radius);
+        tokens.selectedRadius = std::min(tokens.selectedRadius, tokens.radius);
     }
-    if (id == "graphite")
-    {
-        return GraphiteTokens(dark);
-    }
-    if (id == "willow_green")
-    {
-        return WillowGreenTokens(dark);
-    }
-    return FluentTokens(dark);
-}
-
-SkinTokens ToolbarSkinTokens(std::string_view id, bool dark)
-{
-    return ToolbarSkinTokens(id, dark, DefaultSkinsRoot());
+    const float opacity = static_cast<float>(std::clamp(style.opacity, 0.0, 1.0));
+    tokens.surface.a *= opacity;
+    tokens.border.a *= opacity;
+    skin.backgroundOpacity *= opacity;
+    const double scale = style.scale > 0.0 ? style.scale : 1.0;
+    tokens.radius = static_cast<float>(tokens.radius * scale);
+    tokens.candidateRadius = static_cast<float>(tokens.candidateRadius * scale);
+    tokens.selectedRadius = static_cast<float>(tokens.selectedRadius * scale);
+    tokens.pad = static_cast<float>(tokens.pad * scale);
+    skin.decorationTopDip *= scale;
+    skin.decorationWidthDip *= scale;
+    skin.minWidthDip *= scale;
+    return skin;
 }
 
 std::optional<Rgba> ParseCssColor(std::string_view text)
@@ -930,6 +417,7 @@ void ApplyToolbarCssProperty(std::string property, std::string value, const std:
 void ApplyToolbarStylesheet(const std::filesystem::path &skinsRoot, const SkinPackage &package, bool dark,
                             SkinTokens &tokens)
 {
+    constexpr std::size_t kMaxToolbarStylesheetBytes = 65536;
     if (package.toolbarStylesheet.empty()) return;
     const std::filesystem::path stylesheet = skinsRoot / package.id / package.toolbarStylesheet;
     std::error_code ec;
@@ -937,11 +425,11 @@ void ApplyToolbarStylesheet(const std::filesystem::path &skinsRoot, const SkinPa
         return;
     std::ifstream stream(stylesheet);
     if (!stream) return;
-    stream.seekg(0, std::ios::end);
-    const std::streamoff size = stream.tellg();
-    if (size < 0 || static_cast<std::size_t>(size) > 65536) return;
-    stream.seekg(0);
-    const std::string css = StripCssComments(std::string((std::istreambuf_iterator<char>(stream)), {}));
+    std::string stylesheetBytes(kMaxToolbarStylesheetBytes + 1, '\0');
+    stream.read(stylesheetBytes.data(), static_cast<std::streamsize>(stylesheetBytes.size()));
+    if (stream.bad() || stream.gcount() > static_cast<std::streamsize>(kMaxToolbarStylesheetBytes)) return;
+    stylesheetBytes.resize(static_cast<std::size_t>(stream.gcount()));
+    const std::string css = StripCssComments(std::move(stylesheetBytes));
     std::unordered_map<std::string, std::string> variables;
     std::size_t cursor = 0;
     while (cursor < css.size())
@@ -980,140 +468,38 @@ void ApplyToolbarStylesheet(const std::filesystem::path &skinsRoot, const SkinPa
 }
 } // namespace
 
-SkinTokens ToolbarSkinTokens(std::string_view id, bool dark, const std::filesystem::path &skinsRoot)
+SkinTokens ToolbarSkinTokens(const ResolvedSkin &skin, const std::filesystem::path &skinsRoot)
 {
-    const bool builtin = IsBuiltInSkinId(id);
-    SkinTokens tokens = BuiltInSkinTokens(builtin ? id : "fluent", dark);
-    // The default toolbar accent is intentionally lighter than the Fluent
-    // candidate-card accent. External packages may override this native
-    // palette only through the primitive properties understood above; CSS
-    // layout, scripts, images and effects never enter the AppKit view.
-    if (!builtin || id == "fluent") tokens.accent = Rgb(0x8E8CD8);
-    if (!builtin)
+    // The toolbar and the menus derive from the candidate palette (THEME_CONTRACT §3). A drawn package may still restyle its toolbar through its manifest `[toolbar]` table and the primitive stylesheet properties understood above; CSS layout, scripts, images and effects never enter the AppKit view.
+    SkinTokens tokens = skin.tokens;
+    // A package's card radius is in skin.tokens.radius; the toolbar starts from the native radius instead and takes only the package's toolbar radius.
+    tokens.radius = NativeCandidateTokens(skin.dark).radius;
+    tokens.translation.reset();
+    tokens.divider.reset();
+    if (!skin.candidateSkin.empty())
     {
         std::string error;
-        if (const auto package = LoadSkinPackage(skinsRoot, std::string(id), &error))
-            ApplyToolbarStylesheet(skinsRoot, *package, dark, tokens);
+        if (const auto package = LoadSkinPackage(skinsRoot, skin.candidateSkin, &error))
+        {
+            // The manifest's `[toolbar]` first, so the stylesheet below still wins over it.
+            const SkinToolbarColors &colors = skin.dark ? package->toolbar.dark : package->toolbar.light;
+            const auto apply = [](const std::string &value, Rgba &slot) {
+                if (const auto color = ParseCssColor(value)) slot = *color;
+            };
+            apply(colors.background, tokens.surface);
+            apply(colors.border, tokens.border);
+            apply(colors.icon, tokens.text);
+            apply(colors.hover, tokens.hover);
+            if (const auto divider = ParseCssColor(colors.divider)) tokens.divider = *divider;
+            // colors.handle has no target: the macOS toolbar's drag handle is the logo, which keeps the brand mark's colours.
+            if (package->toolbar.cornerRadiusDip) tokens.radius = static_cast<float>(*package->toolbar.cornerRadiusDip);
+            ApplyToolbarStylesheet(skinsRoot, *package, skin.dark, tokens);
+        }
     }
     return tokens;
 }
 
-std::optional<SkinPackage> LoadSkinPackage(const std::filesystem::path &skinsRoot, const std::string &id,
-                                           std::string *error)
-{
-    if (!IsSafeSkinId(id) || IsBuiltInSkinId(id))
-    {
-        SetError(error, "目录名不是有效的外部皮肤 ID");
-        return std::nullopt;
-    }
-    const std::filesystem::path directory = skinsRoot / id;
-    const std::filesystem::path manifest = directory / "skin.toml";
-    std::error_code ec;
-    if (!IsContained(skinsRoot, directory) || !IsContained(directory, manifest) ||
-        !std::filesystem::is_regular_file(manifest, ec) || ec)
-    {
-        SetError(error, "皮肤 manifest 不在有效包目录内");
-        return std::nullopt;
-    }
-    std::ifstream stream(manifest);
-    if (!stream)
-    {
-        SetError(error, "缺少或无法解析 skin.toml");
-        return std::nullopt;
-    }
-    stream.seekg(0, std::ios::end);
-    const std::streamoff size = stream.tellg();
-    if (size < 0 || static_cast<std::size_t>(size) > 65536)
-    {
-        SetError(error, "skin.toml 过大");
-        return std::nullopt;
-    }
-    stream.seekg(0);
-    const std::string text((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
-    TomlTable root;
-    if (!ParseToml(text, root))
-    {
-        SetError(error, "skin.toml 不是有效的 TOML manifest");
-        return std::nullopt;
-    }
-    if (root.scalars["schema_version"] != "1")
-    {
-        SetError(error, "仅支持 schema_version 1");
-        return std::nullopt;
-    }
-    SkinPackage package;
-    if (!ReadString(root, "id", package.id, 64, true) || package.id != id ||
-        !ReadString(root, "name", package.name, 80, true) || !ReadString(root, "version", package.version, 32, true) ||
-        !ReadString(root, "author", package.author, 120, false) ||
-        !ReadString(root, "description", package.description, 500, false) ||
-        !ReadString(root, "base", package.base, 32, true) || !IsBuiltInSkinId(package.base))
-    {
-        SetError(error, "manifest 的基本信息无效");
-        return std::nullopt;
-    }
-    if (root.scalars.count("toolbar_stylesheet") &&
-        (!ReadString(root, "toolbar_stylesheet", package.toolbarStylesheet, 128, true) ||
-         !IsSafeFileName(package.toolbarStylesheet, ".css") ||
-         !IsContained(directory, directory / package.toolbarStylesheet)))
-    {
-        SetError(error, "toolbar_stylesheet 文件名无效");
-        return std::nullopt;
-    }
-    if (!package.toolbarStylesheet.empty() &&
-        !std::filesystem::is_regular_file(directory / package.toolbarStylesheet, ec))
-    {
-        SetError(error, "找不到 toolbar_stylesheet 文件");
-        return std::nullopt;
-    }
-    if (root.scalars.count("preview") &&
-        (!ReadString(root, "preview", package.preview, 256, false) || !IsSafeRelativeResource(package.preview) ||
-         !IsContained(directory, directory / package.preview)))
-    {
-        SetError(error, "preview 必须是皮肤目录内的相对路径");
-        return std::nullopt;
-    }
-    const TomlTable *supports = Child(root, "supports");
-    if (supports == nullptr || !ReadEnumArray(*supports, "layouts", {"horizontal", "vertical"}, package.layouts) ||
-        !ReadEnumArray(*supports, "themes", {"dark", "light"}, package.themes))
-    {
-        SetError(error, "supports.layouts 或 supports.themes 无效");
-        return std::nullopt;
-    }
-    const TomlTable *window = Child(root, "candidate_window");
-    if (window == nullptr)
-    {
-        SetError(error, "缺少 candidate_window");
-        return std::nullopt;
-    }
-    package.minWidthDip = BoundedNumber(*window, "min_width_dip", 1000.0);
-    if (package.minWidthDip < 0.0)
-    {
-        SetError(error, "candidate_window.min_width_dip 超出范围");
-        return std::nullopt;
-    }
-    const TomlTable *decoration = Child(*window, "decoration");
-    if (decoration == nullptr)
-    {
-        SetError(error, "缺少 candidate_window.decoration");
-        return std::nullopt;
-    }
-    package.decorationTopDip = BoundedNumber(*decoration, "top_inset_dip", 500.0);
-    package.decorationWidthDip = BoundedNumber(*decoration, "width_dip", 1000.0);
-    if (package.decorationTopDip < 0.0 || package.decorationWidthDip < 0.0 ||
-        ((package.decorationTopDip == 0.0) != (package.decorationWidthDip == 0.0)))
-    {
-        SetError(error, "decoration 尺寸无效");
-        return std::nullopt;
-    }
-    const TomlTable *candidate = Child(root, "candidate");
-    if (candidate != nullptr && (!ReadColors(Child(*candidate, "dark"), package.dark) ||
-                                 !ReadColors(Child(*candidate, "light"), package.light)))
-    {
-        SetError(error, "candidate 配色无效");
-        return std::nullopt;
-    }
-    return package;
-}
+// LoadSkinPackage and ScanSkinCatalog live in SkinManifestBridge.mm: manifests are validated by the shared client-core loader over the host C ABI.
 
 bool SupportsSkin(const SkinPackage &package, std::string_view layout, std::string_view theme)
 {
@@ -1123,46 +509,10 @@ bool SupportsSkin(const SkinPackage &package, std::string_view layout, std::stri
     return contains(package.layouts, layout) && contains(package.themes, theme);
 }
 
-SkinCatalog ScanSkinCatalog(const std::filesystem::path &skinsRoot)
-{
-    SkinCatalog result;
-    std::error_code ec;
-    if (skinsRoot.empty() || !std::filesystem::exists(skinsRoot, ec))
-    {
-        return result;
-    }
-    for (std::filesystem::directory_iterator it(skinsRoot, ec), end; !ec && it != end; it.increment(ec))
-    {
-        if (!it->is_directory(ec))
-        {
-            continue;
-        }
-        const std::string folder = it->path().filename().string();
-        std::string error;
-        auto package = LoadSkinPackage(skinsRoot, folder, &error);
-        if (package)
-        {
-            result.packages.push_back(std::move(*package));
-        }
-        else
-        {
-            result.issues.push_back({folder, error});
-        }
-    }
-    if (ec)
-    {
-        result.issues.push_back({"skins", "无法完整读取皮肤目录"});
-    }
-    std::sort(result.packages.begin(), result.packages.end(),
-              [](const SkinPackage &a, const SkinPackage &b) { return a.name < b.name; });
-    std::sort(result.issues.begin(), result.issues.end(),
-              [](const SkinIssue &a, const SkinIssue &b) { return a.folder < b.folder; });
-    return result;
-}
-
+// Only external packages: the built-in looks are global themes now, listed by ThemeCatalog().
 std::vector<SkinListEntry> ListSkins(const std::filesystem::path &skinsRoot)
 {
-    std::vector<SkinListEntry> entries = BuiltInSkinEntries();
+    std::vector<SkinListEntry> entries;
     const SkinCatalog catalog = ScanSkinCatalog(skinsRoot);
     for (const SkinPackage &package : catalog.packages)
     {
@@ -1171,56 +521,7 @@ std::vector<SkinListEntry> ListSkins(const std::filesystem::path &skinsRoot)
     return entries;
 }
 
-ResolvedSkin ResolveSkin(std::string_view id, bool dark, const std::filesystem::path &skinsRoot)
-{
-    return ResolveSkin(id, dark, skinsRoot, {}, {});
-}
-
-ResolvedSkin ResolveSkin(std::string_view id, bool dark, const std::filesystem::path &skinsRoot,
-                         std::string_view layout, std::string_view theme)
-{
-    const bool defaultRequested = id.empty();
-    const std::string normalized = NormalizeSkinId(id);
-    ResolvedSkin resolved;
-    resolved.id = defaultRequested ? "willow_green" : "fluent";
-    resolved.name = defaultRequested ? "杨柳青" : "Fluent";
-    resolved.tokens = BuiltInSkinTokens(defaultRequested ? "willow_green" : "fluent", dark);
-    if (IsBuiltInSkinId(normalized))
-    {
-        resolved.id = normalized;
-        for (const SkinListEntry &entry : BuiltInSkinEntries())
-        {
-            if (entry.id == normalized)
-            {
-                resolved.name = entry.name;
-                break;
-            }
-        }
-        resolved.tokens = BuiltInSkinTokens(normalized, dark);
-        return resolved;
-    }
-    std::optional<SkinPackage> package = LoadSkinPackage(skinsRoot, normalized);
-    if (!package)
-    {
-        return resolved;
-    }
-    if ((!layout.empty() || !theme.empty()) && !SupportsSkin(*package, layout, theme))
-    {
-        return resolved;
-    }
-    resolved.id = package->id;
-    resolved.name = package->name;
-    resolved.tokens = BuiltInSkinTokens(package->base, dark);
-    ApplyPackageColors(dark ? package->dark : package->light, resolved.tokens);
-    resolved.decorationTopDip = package->decorationTopDip;
-    resolved.decorationWidthDip = package->decorationWidthDip;
-    resolved.minWidthDip = package->minWidthDip;
-    if (!package->preview.empty())
-    {
-        resolved.decorationPath = (skinsRoot / package->id / package->preview).string();
-    }
-    return resolved;
-}
+// ThemeCatalog and ResolveSkin live in SkinManifestBridge.mm as well: both are answered by the shared client-core theme module over the host C ABI.
 
 std::filesystem::path DefaultSkinsRoot()
 {
@@ -1233,7 +534,8 @@ std::filesystem::path DefaultSkinsRoot()
     {
         return {};
     }
-    return std::filesystem::path(home) / "Library" / "Application Support" / "app.msime.client" / "skins";
+    // The same directory as MSIMEDefaultClientStateDirectory in RuntimeOptions.h.
+    return std::filesystem::path(home) / "Library" / "Application Support" / "app.msime.macos" / "skins";
 }
 
 void SetDefaultSkinsRoot(std::filesystem::path root)

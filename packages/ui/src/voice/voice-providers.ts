@@ -13,6 +13,8 @@
  * endpoint and how to obtain an API key. Both are presentation only -- the model
  * a request actually sends is still whatever is stored in preferences.
  */
+import { fillIfDefault, known, swapTokenSlot, type TokenMap } from "./provider-helpers";
+
 export type ProviderDefaults = {
   endpoint: string;
   model: string;
@@ -20,14 +22,35 @@ export type ProviderDefaults = {
   documentation?: string;
 };
 
+/** ASR providers that use the shared service credential and test configuration. */
+export const ASR_SERVICE_PROVIDER_IDS: readonly string[] = [
+  "openai",
+  "siliconflow",
+  "groq",
+  "everyapi",
+  "mistral",
+  "doubao",
+];
+
+/** Returns whether an ASR provider uses the shared service credential flow. */
+export function isAsrServiceProvider(provider: string): boolean {
+  return ASR_SERVICE_PROVIDER_IDS.includes(provider);
+}
+
+/** Resolve an editable provider setting, falling back to its shipped default. */
+export function providerSettingValue(
+  value: string | undefined,
+  provider: string | undefined,
+  defaults: Record<string, ProviderDefaults>,
+  field: "endpoint" | "model",
+): string {
+  return value?.trim() || defaults[provider ?? ""]?.[field] || "";
+}
+
 export const ASR_PROVIDER_DEFAULTS: Record<string, ProviderDefaults> = {
   system: { endpoint: "", model: "" },
-  // On-device Whisper. The model is a file the user points at, not a name a service resolves, so it lives in `asr_model_path` and there is no endpoint, token or model list to offer here.
-  local: {
-    endpoint: "",
-    model: "",
-    documentation: "https://huggingface.co/ggerganov/whisper.cpp/tree/main",
-  },
+  // On-device recognition. The model is an installed model directory (one holding msime-model.json) the user points at, not a name a service resolves, so it lives in `asr_model_path` and there is no endpoint, token or model list to offer here.
+  local: { endpoint: "", model: "" },
   doubao: {
     endpoint: "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async",
     model: "",
@@ -92,49 +115,6 @@ export const POLISH_PROVIDER_DEFAULTS: Record<string, ProviderDefaults> = {
   },
 };
 
-/** An older SiliconFlow default that should still be treated as untouched. */
-const LEGACY_ASR_MODELS = ["TeleAI/TeleSpeechASR"];
-
-function known(table: Record<string, ProviderDefaults>, field: "endpoint" | "model"): string[] {
-  return Object.values(table)
-    .map((entry) => entry[field])
-    .filter(Boolean);
-}
-
-/**
- * Replace `current` with the new provider's default, but only when the user has
- * not put something of their own there. An empty value or one of the shipped
- * defaults counts as untouched; anything else is kept.
- */
-function fillIfDefault(
-  current: string | undefined,
-  next: string,
-  defaults: string[],
-): string | undefined {
-  const value = (current ?? "").trim();
-  if (value && !defaults.includes(value)) return undefined;
-  return next;
-}
-
-type TokenMap = Record<string, string>;
-
-/**
- * Move the token box from one provider's slot to another's.
- *
- * A single flat token meant switching provider left the previous provider's key
- * in the box, so it was sent to the new endpoint until the user noticed, and
- * the old key was gone the moment they retyped.
- */
-function swapTokenSlot(from: string, to: string, box: string, slots: TokenMap | undefined) {
-  const next: TokenMap = { ...slots };
-  // Stash whatever is in the box under the provider being left.
-  if (from) {
-    if (box) next[from] = box;
-    else delete next[from];
-  }
-  return { tokens: next, token: next[to] ?? "" };
-}
-
 /** The voice fields to update when the recognition provider changes. */
 export function asrProviderUpdate(
   provider: string,
@@ -176,10 +156,11 @@ export function asrProviderUpdate(
     known(ASR_PROVIDER_DEFAULTS, "endpoint"),
   );
   if (endpoint !== undefined) update.asr_endpoint = endpoint;
-  const model = fillIfDefault(current.asr_model, defaults.model, [
-    ...known(ASR_PROVIDER_DEFAULTS, "model"),
-    ...LEGACY_ASR_MODELS,
-  ]);
+  const model = fillIfDefault(
+    current.asr_model,
+    defaults.model,
+    known(ASR_PROVIDER_DEFAULTS, "model"),
+  );
   if (model !== undefined) update.asr_model = model;
   return update;
 }
@@ -238,7 +219,9 @@ export function polishProviderUpdate(
  * which is what the service documents as the more accurate option and
  * recommends for input methods; bidirectional streaming answers incrementally,
  * so an inline preedit updates far more often. */
-export const DOUBAO_STREAM_ENDPOINTS: readonly { id: string; endpoint: string; title: string }[] = [
+export type DoubaoStreamEndpoint = { id: string; endpoint: string; title: string };
+
+export const DOUBAO_STREAM_ENDPOINTS: readonly DoubaoStreamEndpoint[] = [
   {
     id: "nostream",
     endpoint: "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream",
@@ -250,3 +233,11 @@ export const DOUBAO_STREAM_ENDPOINTS: readonly { id: string; endpoint: string; t
     title: "双向流式（增量结果）",
   },
 ];
+
+export function findDoubaoStreamEndpoint(id: string): DoubaoStreamEndpoint | undefined {
+  return DOUBAO_STREAM_ENDPOINTS.find((option) => option.id === id);
+}
+
+export function doubaoStreamEndpointId(endpoint: string): string {
+  return DOUBAO_STREAM_ENDPOINTS.find((option) => option.endpoint === endpoint)?.id ?? "custom";
+}

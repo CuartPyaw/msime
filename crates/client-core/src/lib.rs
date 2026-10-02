@@ -17,19 +17,41 @@ pub use uuid;
 
 pub mod account;
 pub mod ai;
+mod bounded_io;
+pub mod calendar;
 pub mod candidate_document;
+pub mod chinese_conversion;
 pub mod clipboard;
 pub mod cloud;
 pub mod community;
 pub mod credential;
 pub mod dictionary;
-mod file_lock;
+pub mod file_lock;
+pub mod helpcode;
 pub mod host_surface;
+pub mod notices;
 pub mod panels;
+pub mod plugins;
 pub mod preferences;
 pub mod punctuation;
+pub mod resource_packs;
 pub mod resources;
 pub mod skin;
+mod storage;
+pub mod telemetry;
+mod text;
+
+/// Shared text and hexadecimal validation predicates used by host boundaries.
+pub use text::{
+    has_disallowed_control_with_allowed, has_disallowed_control_with_line_breaks,
+    has_disallowed_control_with_options, is_ascii_alphabetic, is_ascii_alphanumeric_dash,
+    is_ascii_digits, is_ascii_graphic, is_ascii_hex, is_ascii_identifier,
+    is_ascii_identifier_with_dots, is_ascii_lowercase, is_ascii_lowercase_identifier_with_dots,
+    is_bounded_ascii_identifier, is_bounded_chars, is_bounded_chars_with_options,
+    is_bounded_chars_without_nul, is_bounded_text, is_bounded_text_with_chars,
+    is_bounded_text_with_options, is_bounded_utf16, is_hex_color, is_lower_hex,
+};
 pub mod translation;
 pub mod typing_statistics;
+pub mod vocabulary;
 pub mod voice;

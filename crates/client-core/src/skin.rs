@@ -3,7 +3,12 @@
 //! an AI proposes.
 
 pub mod ai;
+pub mod candidate_community;
+pub mod candidate_sync;
 pub mod catalog;
+pub mod category;
 pub mod community;
 pub mod custom_library;
+pub mod folder_import;
 pub mod keyboard_trial;
+pub mod theme;

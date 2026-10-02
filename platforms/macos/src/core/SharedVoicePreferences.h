@@ -7,6 +7,17 @@ static inline BOOL MSIMEVoiceInputEnabled(NSUserDefaults *defaults) {
         [defaults boolForKey:@"MSIMEClientVoiceEnabled"];
 }
 
+// Muting other audio is on out of the box, like the source and the shared macOS default.
+static inline BOOL MSIMEVoiceMuteSystemAudioEnabled(NSUserDefaults *defaults) {
+    return [defaults objectForKey:@"MSIMEClientVoiceMuteSystemAudio"] == nil ||
+        [defaults boolForKey:@"MSIMEClientVoiceMuteSystemAudio"];
+}
+
+// Native fallbacks for an unset polish service. They match the shared macOS first-run default (`default_polish_service` in crates/client-core/src/preferences.rs), which follows the source template: DeepSeek with `deepseek-v4-flash`.
+static NSString *const MSIMEVoicePolishDefaultProvider = @"deepseek";
+static NSString *const MSIMEVoicePolishDefaultEndpoint = @"https://api.deepseek.com/chat/completions";
+static NSString *const MSIMEVoicePolishDefaultModel = @"deepseek-v4-flash";
+
 static inline BOOL MSIMEVoiceCueEnabled(NSUserDefaults *defaults, BOOL start) {
     NSString *key = start ? @"MSIMEClientVoiceStartSound" : @"MSIMEClientVoiceEndSound";
     return ([defaults objectForKey:@"MSIMEClientVoiceSoundEnabled"] == nil ||
@@ -99,7 +110,6 @@ static inline NSDictionary *MSIMEVoicePreferencesFromDefaults(NSUserDefaults *de
         @"polish_model": @"MSIMEClientVoicePolishModel",
         @"polish_token": @"MSIMEClientVoicePolishToken",
         @"polish_prompt_id": @"MSIMEClientVoicePolishPromptID",
-        @"polish_prompt": @"MSIMEClientVoicePolishPrompt",
         @"polish_prompt_custom_1": @"MSIMEClientVoicePolishPromptCustom1",
         @"polish_prompt_custom_2": @"MSIMEClientVoicePolishPromptCustom2",
         @"polish_prompt_custom_3": @"MSIMEClientVoicePolishPromptCustom3"
@@ -152,7 +162,7 @@ static inline BOOL MSIMEApplySharedVoicePreferences(id voice, NSUserDefaults *de
     NSDictionary *strings = @{
         @"language": @"Language",
         @"asr_provider": @"ASRProvider", @"asr_endpoint": @"ASREndpoint",
-        @"asr_model": @"ASRModel", @"asr_token": @"ASRToken",
+        @"asr_model": @"ASRModel", @"asr_model_path": @"ASRModelPath", @"asr_token": @"ASRToken",
         @"capture_backend": @"CaptureBackend", @"capture_device": @"CaptureDevice",
         @"commit_mode": @"CommitMode",
         @"asr_app_key": @"DoubaoAppKey", @"asr_resource_id": @"DoubaoResourceID",
@@ -160,7 +170,7 @@ static inline BOOL MSIMEApplySharedVoicePreferences(id voice, NSUserDefaults *de
         @"doubao_boosting_table_id": @"DoubaoBoostingTableID",
         @"polish_provider": @"PolishProvider", @"polish_endpoint": @"PolishEndpoint",
         @"polish_model": @"PolishModel", @"polish_token": @"PolishToken",
-        @"polish_prompt_id": @"PolishPromptID", @"polish_prompt": @"PolishPrompt",
+        @"polish_prompt_id": @"PolishPromptID",
         @"polish_prompt_custom_1": @"PolishPromptCustom1",
         @"polish_prompt_custom_2": @"PolishPromptCustom2",
         @"polish_prompt_custom_3": @"PolishPromptCustom3"

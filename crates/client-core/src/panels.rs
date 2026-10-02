@@ -109,10 +109,6 @@ impl<R> LeasedClientKeyRouter<R> {
         self.lease = Some(lease);
     }
 
-    pub fn clear_lease(&mut self) {
-        self.lease = None;
-    }
-
     pub fn into_inner(self) -> R {
         self.router
     }
@@ -259,10 +255,7 @@ pub trait HandwritingPlatform {
 }
 
 pub fn validate_candidate(candidate: &str) -> Result<(), PanelContractError> {
-    if candidate.is_empty()
-        || candidate.len() > MAX_CANDIDATE_BYTES
-        || candidate.chars().any(char::is_control)
-    {
+    if candidate.is_empty() || !crate::text::is_bounded_text(candidate, MAX_CANDIDATE_BYTES) {
         Err(PanelContractError::InvalidCandidate)
     } else {
         Ok(())

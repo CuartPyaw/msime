@@ -1,5 +1,16 @@
 // Fixed source: MSIME-Apple@11c950a63ec57656cd78b3f75aa621c293bfe453,
 // platforms/ios/SharedUI/CustomKeyboardSkin.swift and KeyboardSkinCollection.swift.
+import { boundedGraphemes } from "../core/text";
+import { clamp as clampNumber } from "../core/number";
+
+export function skinColorNumber(value: string): number {
+  return Number.parseInt(value.slice(1), 16);
+}
+
+export function boundedSkinName(value: string): string {
+  return boundedGraphemes(value, 32);
+}
+
 export type TouchSkinKeyShape = "rounded" | "capsule" | "ticket" | "pebble";
 export type TouchSkinKeyMaterial = "flat" | "raised" | "glass" | "paper";
 
@@ -32,6 +43,13 @@ export type SavedTouchKeyboardSkin = {
   name: string;
   design: TouchKeyboardSkinDesign;
 };
+
+export function updateSavedTouchKeyboardSkinName(
+  current: SavedTouchKeyboardSkin,
+  name: string,
+): SavedTouchKeyboardSkin {
+  return { ...current, name };
+}
 
 export type CustomSkinLibraryAction =
   | { operation: "create"; name: string; design: TouchKeyboardSkinDesign }
@@ -84,6 +102,22 @@ const skin = (patch: Partial<TouchKeyboardSkinDesign>): TouchKeyboardSkinDesign 
 });
 
 export const touchKeyboardSkinTemplates: { title: string; design: TouchKeyboardSkinDesign }[] = [
+  // The touch keyboards' default (TouchKeyboardSkinDesign::mint_morning in client-core), first so it can be picked again after trying another.
+  {
+    title: "薄荷晨光",
+    design: skin({
+      background: 0xd8f0e4,
+      keyBackground: 0xfafff9,
+      keyForeground: 0x173d30,
+      accent: 0x245a43,
+      actionBackground: 0x245a43,
+      cornerRadius: 14,
+      borderWidth: 0.5,
+      shadow: 0.08,
+      gradientEnd: 0xeef6dd,
+      customBorderColor: 0xb6d8c5,
+    }),
+  },
   {
     title: "苔庭晨雾",
     design: skin({
@@ -320,9 +354,7 @@ export const touchKeyboardBackgroundPresets: { start: number; end?: number; titl
 ];
 
 export function skinColor(value: number): string {
-  return `#${Math.max(0, Math.min(0xffffff, Math.round(value)))
-    .toString(16)
-    .padStart(6, "0")}`;
+  return `#${clampNumber(Math.round(value), 0, 0xffffff).toString(16).padStart(6, "0")}`;
 }
 
 export function skinLuminance(rgb: number): number {
@@ -357,7 +389,7 @@ export function normalizeTouchKeyboardSkinDesign(
 ): TouchKeyboardSkinDesign {
   const color = (entry: number) => Math.round(entry) & 0xffffff;
   const clamp = (entry: number, min: number, max: number, fallback: number) =>
-    Number.isFinite(entry) ? Math.min(max, Math.max(min, entry)) : fallback;
+    Number.isFinite(entry) ? clampNumber(entry, min, max) : fallback;
   return {
     ...value,
     background: color(value.background),

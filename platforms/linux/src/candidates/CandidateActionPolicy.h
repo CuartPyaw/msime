@@ -1,8 +1,11 @@
 #pragma once
 
+#include "../core/InputSchemeTraits.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
 
 namespace msime::linux_host {
@@ -59,10 +62,16 @@ inline bool candidate_removal_available(std::string_view text) {
   return candidate_utf8_codepoint_count(text).value_or(0) > 1;
 }
 
+// Only the base Chinese schemes keep their candidates in the user dictionary (`learns_into_main_dictionary`): Japanese, Korean, Cantonese, Zhuyin and Vietnamese candidates have no user-dictionary identity to pin, fix or remove.
+inline bool candidate_dictionary_actions_available(std::uint64_t scheme, std::uint64_t source) {
+  return scheme <= 255 && scheme::LearnsIntoMainDictionary(static_cast<int>(scheme)) &&
+         (source == 0 || source == 1 || source == 4);
+}
+
 inline bool candidate_dictionary_removal_available(std::uint64_t scheme,
                                                    std::uint64_t source,
                                                    std::string_view text) {
-  if (scheme == 3 || (source != 0 && source != 1 && source != 4))
+  if (!candidate_dictionary_actions_available(scheme, source))
     return false;
   const auto count = candidate_utf8_codepoint_count(text);
   // Windows permits deleting one-character English dictionary entries, while
@@ -81,6 +90,13 @@ candidate_removal_slot(std::uint32_t key, std::uint32_t keycode) {
       key <= static_cast<std::uint32_t>('8'))
     return static_cast<std::size_t>(key - static_cast<std::uint32_t>('1'));
   return std::nullopt;
+}
+
+// Candidate action labels shared by the IBus property menu and the Fcitx5 candidate/status actions, worded like the Windows candidate menu (candidate_presenter.cpp: 置顶, 第 N 位 under 固定排位). Linux keeps the list flat, so the slot entries spell out the whole action.
+inline constexpr const char *candidate_pin_label = "置顶";
+
+inline std::string candidate_fix_label(int slot) {
+  return "固定到第 " + std::to_string(slot) + " 位";
 }
 
 } // namespace msime::linux_host

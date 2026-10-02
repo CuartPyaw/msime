@@ -1,3 +1,4 @@
+use msime_client_core::{has_disallowed_control_with_options, is_bounded_text, is_bounded_utf16};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -16,6 +17,7 @@ pub enum CloudDictionaryRequest {
     SnapshotRestoreNative {
         token: String,
     },
+    SnapshotRestoreCancel,
     SnapshotEnqueue {
         token: String,
     },
@@ -125,46 +127,33 @@ pub struct CloudDictionaryValue {
 
 pub fn validate_cloud_request(request: &CloudDictionaryRequest) -> Result<(), &'static str> {
     let valid_kind = |kind: &str| matches!(kind, "pinyin" | "wubi" | "quick" | "english");
-    let valid_token = |token: &str| {
-        (1..=96).contains(&token.len())
-            && token
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-    };
+    let valid_token = |token: &str| msime_client_core::is_bounded_ascii_identifier(token, 96);
     let valid_value = |kind: &str, code: &str, word: &str, weight: i64| {
+        let max_code_bytes = match kind {
+            "wubi" => 4,
+            "quick" => 32,
+            "english" => 64,
+            _ => 256,
+        };
         let code_alphabet_ok = match kind {
-            "quick" => code
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()),
-            "wubi" => code.bytes().all(|b| b.is_ascii_lowercase()),
-            "english" => code.bytes().all(|b| b.is_ascii_alphabetic()),
-            _ => code
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || b == b'\'' || b == b' '),
+            "quick" => {
+                msime_client_core::dictionary::quick_phrase_transport_code_is_well_formed(code)
+            }
+            "wubi" => msime_client_core::dictionary::wubi_code_is_well_formed(code),
+            "english" => msime_client_core::is_ascii_alphabetic(code),
+            _ => msime_client_core::dictionary::pinyin_code_is_well_formed(code, true),
         };
         code_alphabet_ok
             && !code.is_empty()
-            && code.len()
-                <= match kind {
-                    "wubi" => 4,
-                    "quick" => 32,
-                    "english" => 64,
-                    _ => 256,
-                }
-            && !code.chars().any(char::is_control)
+            && is_bounded_text(code, max_code_bytes)
             && !word.is_empty()
-            && word.len() <= 1024
-            && !word.chars().any(char::is_control)
+            && is_bounded_text(word, 1024)
             && weight >= 0
             && (kind != "quick"
-                || word.encode_utf16().count()
-                    <= msime_client_core::dictionary::import::MAX_QUICK_PHRASE_UTF16)
-    };
-    let valid_id = |id: &str| {
-        id.len() == 64
-            && id
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                || is_bounded_utf16(
+                    word,
+                    msime_client_core::dictionary::import::MAX_QUICK_PHRASE_UTF16,
+                ))
     };
     let valid_format = |kind: &str, format: &str| {
         matches!(format, "standard" | "windows") || (kind == "pinyin" && format == "hans")
@@ -173,6 +162,7 @@ pub fn validate_cloud_request(request: &CloudDictionaryRequest) -> Result<(), &'
         CloudDictionaryRequest::SnapshotPreview
         | CloudDictionaryRequest::SnapshotExport
         | CloudDictionaryRequest::SnapshotStatus
+        | CloudDictionaryRequest::SnapshotRestoreCancel
         | CloudDictionaryRequest::SnapshotCancel => Ok(()),
         CloudDictionaryRequest::SnapshotRestorePreview { text } => {
             if valid_snapshot_text(text) {
@@ -186,7 +176,7 @@ pub fn validate_cloud_request(request: &CloudDictionaryRequest) -> Result<(), &'
             expected_sha256,
             revision,
         } => {
-            if valid_snapshot_text(text) && valid_sha256(expected_sha256) && *revision >= 0 {
+            if valid_snapshot_text(text) && crate::valid_sha256(expected_sha256) && *revision >= 0 {
                 Ok(())
             } else {
                 Err("invalid cloud dictionary request")
@@ -211,11 +201,7 @@ pub fn validate_cloud_request(request: &CloudDictionaryRequest) -> Result<(), &'
             offset,
             search,
         } => {
-            if valid_kind(kind)
-                && *offset <= 1_000_000
-                && search.len() <= 1024
-                && !search.chars().any(char::is_control)
-            {
+            if valid_kind(kind) && *offset <= 1_000_000 && is_bounded_text(search, 1024) {
                 Ok(())
             } else {
                 Err("invalid cloud dictionary request")
@@ -233,11 +219,9 @@ pub fn validate_cloud_request(request: &CloudDictionaryRequest) -> Result<(), &'
                 && code.len() <= 256
                 && !code.contains('\0')
                 && !scheme.is_empty()
-                && scheme.len() <= 64
                 && !profile.is_empty()
-                && profile.len() <= 64
-                && !scheme.chars().any(char::is_control)
-                && !profile.chars().any(char::is_control)
+                && is_bounded_text(scheme, 64)
+                && is_bounded_text(profile, 64)
             {
                 Ok(())
             } else {
@@ -272,7 +256,7 @@ pub fn validate_cloud_request(request: &CloudDictionaryRequest) -> Result<(), &'
             revision,
         } => {
             if valid_kind(kind)
-                && valid_id(id)
+                && msime_client_core::is_lower_hex(id, 64)
                 && valid_value(kind, code, word, *weight)
                 && *revision > 0
             {
@@ -282,7 +266,7 @@ pub fn validate_cloud_request(request: &CloudDictionaryRequest) -> Result<(), &'
             }
         }
         CloudDictionaryRequest::Delete { kind, id, revision } => {
-            if valid_kind(kind) && valid_id(id) && *revision > 0 {
+            if valid_kind(kind) && msime_client_core::is_lower_hex(id, 64) && *revision > 0 {
                 Ok(())
             } else {
                 Err("invalid cloud dictionary request")
@@ -297,11 +281,9 @@ pub fn validate_cloud_request(request: &CloudDictionaryRequest) -> Result<(), &'
         } => {
             let identity_ok = valid_kind(kind)
                 && !code.is_empty()
-                && code.len() <= 256
-                && !code.chars().any(char::is_control)
+                && is_bounded_text(code, 256)
                 && !word.is_empty()
-                && word.len() <= 1024
-                && !word.chars().any(char::is_control)
+                && is_bounded_text(word, 1024)
                 && *revision >= 0;
             let replacement_ok = replacement
                 .as_ref()
@@ -319,7 +301,9 @@ pub fn validate_cloud_request(request: &CloudDictionaryRequest) -> Result<(), &'
             profile,
             limit,
         } => {
-            if valid_candidate_query(text, kind, scheme, profile, *limit) {
+            if msime_client_core::cloud::dictionary::valid_candidate_query(
+                text, kind, scheme, profile, *limit,
+            ) {
                 Ok(())
             } else {
                 Err("invalid cloud dictionary request")
@@ -339,8 +323,9 @@ pub fn validate_cloud_request(request: &CloudDictionaryRequest) -> Result<(), &'
             trigger_count,
             ..
         } => {
-            if valid_candidate_query(text, kind, scheme, profile, *limit)
-                && valid_candidate_value(code, word)
+            if msime_client_core::cloud::dictionary::valid_candidate_query(
+                text, kind, scheme, profile, *limit,
+            ) && msime_client_core::cloud::dictionary::valid_candidate_value(code, word)
                 && *revision >= 0
                 && kind != "quick"
                 && matches!(
@@ -365,8 +350,9 @@ pub fn validate_cloud_request(request: &CloudDictionaryRequest) -> Result<(), &'
             word,
             revision,
         } => {
-            if valid_candidate_query(text, kind, scheme, profile, *limit)
-                && valid_candidate_value(code, word)
+            if msime_client_core::cloud::dictionary::valid_candidate_query(
+                text, kind, scheme, profile, *limit,
+            ) && msime_client_core::cloud::dictionary::valid_candidate_value(code, word)
                 && *revision >= 0
                 && kind != "quick"
             {
@@ -376,7 +362,7 @@ pub fn validate_cloud_request(request: &CloudDictionaryRequest) -> Result<(), &'
             }
         }
         CloudDictionaryRequest::FixedPositions { context, offset } => {
-            if valid_text(context, 1024) && *offset <= 1_000_000 {
+            if is_bounded_text(context, 1024) && *offset <= 1_000_000 {
                 Ok(())
             } else {
                 Err("invalid cloud dictionary request")
@@ -389,9 +375,9 @@ pub fn validate_cloud_request(request: &CloudDictionaryRequest) -> Result<(), &'
             position,
             revision,
         } => {
-            if valid_text(context, 1024)
-                && valid_text(code, 256)
-                && valid_text(word, 1024)
+            if is_bounded_text(context, 1024)
+                && is_bounded_text(code, 256)
+                && is_bounded_text(word, 1024)
                 && !code.is_empty()
                 && !word.is_empty()
                 && *revision >= 0
@@ -407,10 +393,7 @@ pub fn validate_cloud_request(request: &CloudDictionaryRequest) -> Result<(), &'
                 && valid_format(kind, format)
                 && !text.is_empty()
                 && text.len() <= msime_client_core::cloud::dictionary::MAX_IMPORT_BYTES
-                && !text.contains('\0')
-                && text.chars().all(|character| {
-                    !character.is_control() || matches!(character, '\n' | '\r' | '\t')
-                })
+                && !has_disallowed_control_with_options(text, true)
             {
                 Ok(())
             } else {
@@ -427,41 +410,11 @@ pub fn validate_cloud_request(request: &CloudDictionaryRequest) -> Result<(), &'
     }
 }
 
-fn valid_text(value: &str, maximum_bytes: usize) -> bool {
-    value.len() <= maximum_bytes && !value.chars().any(char::is_control)
-}
-
 fn valid_snapshot_text(value: &str) -> bool {
     const MAX_SNAPSHOT_BYTES: usize = 512 * 1024 * 1024;
     !value.is_empty()
         && value.len() <= MAX_SNAPSHOT_BYTES
-        && !value.contains('\0')
-        && value
-            .chars()
-            .all(|character| !character.is_control() || matches!(character, '\n' | '\r' | '\t'))
-}
-
-fn valid_sha256(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
-}
-
-fn valid_candidate_query(
-    text: &str,
-    kind: &str,
-    scheme: &str,
-    profile: &str,
-    limit: usize,
-) -> bool {
-    !text.is_empty()
-        && valid_text(text, 256)
-        && matches!(kind, "pinyin" | "jianpin" | "wubi" | "quick" | "english")
-        && matches!(scheme, "pinyin" | "shuangpin")
-        && matches!(profile, "xiaohe" | "ziranma" | "microsoft" | "shoudao")
-        && (1..=100).contains(&limit)
-}
-
-fn valid_candidate_value(code: &str, word: &str) -> bool {
-    !code.is_empty() && !word.is_empty() && valid_text(code, 256) && valid_text(word, 1024)
+        && !has_disallowed_control_with_options(value, true)
 }
 
 #[cfg(test)]
@@ -469,9 +422,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn deserializes_snapshot_restore_cancel_operation() {
+        let request: CloudDictionaryRequest = serde_json::from_value(serde_json::json!({
+            "operation": "snapshot_restore_cancel"
+        }))
+        .expect("snapshot restore cancellation is part of the host protocol");
+        assert!(matches!(
+            request,
+            CloudDictionaryRequest::SnapshotRestoreCancel
+        ));
+    }
+
+    #[test]
     fn validates_dictionary_values_and_entry_identity() {
         assert!(validate_cloud_request(&CloudDictionaryRequest::SnapshotPreview).is_ok());
         assert!(validate_cloud_request(&CloudDictionaryRequest::SnapshotStatus).is_ok());
+        assert!(validate_cloud_request(&CloudDictionaryRequest::SnapshotRestoreCancel).is_ok());
         assert!(validate_cloud_request(&CloudDictionaryRequest::SnapshotCancel).is_ok());
         assert!(validate_cloud_request(&CloudDictionaryRequest::SnapshotExport).is_ok());
         assert!(

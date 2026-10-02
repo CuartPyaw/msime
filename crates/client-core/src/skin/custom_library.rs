@@ -4,8 +4,8 @@ use crate::file_lock;
 use crate::preferences::TouchKeyboardSkinDesign;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::fs::{self, File};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use unicode_segmentation::UnicodeSegmentation;
@@ -140,6 +140,9 @@ impl CustomSkinLibraryStore {
         name: &str,
         design: TouchKeyboardSkinDesign,
     ) -> Result<SavedTouchKeyboardSkin, CustomSkinLibraryError> {
+        if id.is_nil() {
+            return Err(CustomSkinLibraryError::Invalid);
+        }
         let _lock = self.lock()?;
         let mut items = self.read_locked()?;
         if let Some(item) = items.iter_mut().find(|item| item.id == id) {
@@ -163,16 +166,10 @@ impl CustomSkinLibraryStore {
     }
 
     fn lock(&self) -> Result<File, CustomSkinLibraryError> {
-        fs::create_dir_all(&self.directory)?;
-        if !fs::symlink_metadata(&self.directory)?.file_type().is_dir() {
+        if !crate::storage::create_directory_and_check(&self.directory)? {
             return Err(CustomSkinLibraryError::Invalid);
         }
-        let lock = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(self.directory.join("library.lock"))?;
+        let lock = file_lock::open_lock_file(self.directory.join("library.lock"))?;
         file_lock::exclusive(&lock)?;
         Ok(lock)
     }
@@ -187,13 +184,9 @@ impl CustomSkinLibraryStore {
         if !metadata.file_type().is_file() || metadata.len() > MAXIMUM_BYTES {
             return Err(CustomSkinLibraryError::Invalid);
         }
-        let mut bytes = Vec::with_capacity(metadata.len() as usize);
-        File::open(path)?
-            .take(MAXIMUM_BYTES + 1)
-            .read_to_end(&mut bytes)?;
-        if bytes.len() as u64 > MAXIMUM_BYTES {
-            return Err(CustomSkinLibraryError::Invalid);
-        }
+        let bytes = crate::bounded_io::read_bounded_file(File::open(path)?, MAXIMUM_BYTES, || {
+            CustomSkinLibraryError::Invalid
+        })?;
         let mut items: Vec<SavedTouchKeyboardSkin> = serde_json::from_slice(&bytes)?;
         if items.len() > MAXIMUM_ITEMS {
             return Err(CustomSkinLibraryError::Invalid);
@@ -201,6 +194,9 @@ impl CustomSkinLibraryStore {
         let mut ids = BTreeSet::new();
         let mut names = BTreeSet::new();
         for item in &mut items {
+            if item.id.is_nil() {
+                return Err(CustomSkinLibraryError::Invalid);
+            }
             item.name = normalized_name(&item.name)?;
             item.design = item.design.clone().normalized();
             if !ids.insert(item.id) || !names.insert(item.name.clone()) {
@@ -247,11 +243,15 @@ fn reject_duplicate_name(
     Ok(())
 }
 
+fn contains_name(items: &[SavedTouchKeyboardSkin], name: &str) -> bool {
+    items.iter().any(|item| item.name == name)
+}
+
 fn unique_import_name(
     items: &[SavedTouchKeyboardSkin],
     name: String,
 ) -> Result<String, CustomSkinLibraryError> {
-    if !items.iter().any(|item| item.name == name) {
+    if !contains_name(items, &name) {
         return Ok(name);
     }
     for index in 2..=MAXIMUM_ITEMS + 1 {
@@ -262,7 +262,7 @@ fn unique_import_name(
             name.graphemes(true).take(prefix_length).collect::<String>(),
             suffix
         );
-        if !items.iter().any(|item| item.name == candidate) {
+        if !contains_name(items, &candidate) {
             return Ok(candidate);
         }
     }
@@ -370,6 +370,10 @@ mod tests {
         assert_eq!(refreshed.name, "星空 (2)");
         assert_eq!(refreshed.design.background, 0x445566);
         assert_eq!(store.load().unwrap().len(), 2);
+        assert!(matches!(
+            store.import_download(Uuid::nil(), "无效作品", TouchKeyboardSkinDesign::default()),
+            Err(CustomSkinLibraryError::Invalid)
+        ));
     }
 
     #[test]
@@ -419,6 +423,14 @@ mod tests {
             })
             .is_err());
         assert_eq!(fs::read(store.path()).unwrap(), before);
+
+        let nil_id = vec![SavedTouchKeyboardSkin {
+            id: Uuid::nil(),
+            name: "损坏皮肤".into(),
+            design: TouchKeyboardSkinDesign::default(),
+        }];
+        fs::write(store.path(), serde_json::to_vec(&nil_id).unwrap()).unwrap();
+        assert!(matches!(store.load(), Err(CustomSkinLibraryError::Invalid)));
     }
 
     #[test]

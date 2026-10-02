@@ -5,6 +5,7 @@
 //! from injected capabilities instead of sniffing the user agent. Both sides of
 //! that agreement live here so no host re-implements the strings.
 
+use crate::preferences::InputScheme;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -71,6 +72,34 @@ impl HostPlatform {
     }
 }
 
+/// Why a Linux desktop's candidate panel ignores the candidate font, colour and skin settings. The Linux hosts do not draw the candidate list: IBus hands it to whichever panel the desktop runs and Fcitx5 to whichever user interface it loaded, and some of those draw it their own way.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CandidatePanelLimit {
+    /// GNOME Shell starts IBus with its panel disabled and draws the candidate popup itself, styled by the shell theme: it reads neither the IBus panel font nor the text attributes that carry the colours.
+    GnomeShell,
+    /// Fcitx5's classic UI is drawing a theme the user picked, which the host never replaces, so the colours and skin do not reach it. The font still does.
+    FcitxTheme,
+    /// Fcitx5 hands the list to the desktop's Kimpanel, which draws it with the desktop's own font and theme.
+    Kimpanel,
+}
+
+impl CandidatePanelLimit {
+    /// The file the running Linux host writes its finding to: `candidate-panel.json` under `$XDG_RUNTIME_DIR/msime-client`, the per-session directory that goes away with the session the finding describes. A relative or missing runtime directory yields nothing.
+    pub fn status_file(runtime_directory: Option<&std::ffi::OsStr>) -> Option<std::path::PathBuf> {
+        let directory = std::path::PathBuf::from(runtime_directory?);
+        directory
+            .is_absolute()
+            .then(|| directory.join("msime-client").join("candidate-panel.json"))
+    }
+
+    /// Reads the host's report, `{"host": "ibus" | "fcitx5", "limit": <name> | null}`. Anything else - no file, a panel that honours the settings, a name this build does not know - reads as no limit, so the page never warns on a guess.
+    pub fn from_host_status(document: &str) -> Option<Self> {
+        let value: serde_json::Value = serde_json::from_str(document).ok()?;
+        serde_json::from_value(value.get("limit")?.clone()).ok()
+    }
+}
+
 /// What the surrounding host can actually do. The shared UI renders from this
 /// rather than guessing from `navigator.userAgent`, which previously hid working
 /// controls on Windows and macOS and left 打字统计 dead on every desktop.
@@ -110,12 +139,12 @@ pub struct HostCapabilities {
     /// The toolbar carries a button that opens the handwriting panel. The
     /// reference's toolbar has six components and this is not one of them, so
     /// only the host that draws the button offers the switch for it.
-    #[serde(default)]
     pub floating_toolbar_handwriting: bool,
     /// The toolbar carries a button that starts and stops voice input, for the
     /// same reason as `floating_toolbar_handwriting`.
-    #[serde(default)]
     pub floating_toolbar_voice: bool,
+    /// 工具栏带切换输入方案的按钮。目前只有 macOS 的工具栏画它，其它宿主不提供这个开关。
+    pub floating_toolbar_input_scheme: bool,
     /// The host consumes the shared `keybindings` preferences to switch
     /// Chinese/English and simplified/traditional mode.
     pub mode_switch_shortcuts: bool,
@@ -123,18 +152,31 @@ pub struct HostCapabilities {
     pub panel_shortcuts: bool,
     /// The host can let the user release number-row candidate selection back
     /// to the focused application.
-    #[serde(default)]
     pub number_row_selection: bool,
     /// The host can enumerate audio capture devices for voice input.
     pub voice_capture_devices: bool,
     /// The host can apply candidate font family, fallback family and size preferences.
     pub candidate_font_controls: bool,
+    /// The composition drawn beside the candidates has its own size. Linux reads the family and
+    /// candidate size into the desktop panel's single font, but the composition itself is drawn by
+    /// the focused application, so a separate preedit size would have nothing to change there.
+    pub candidate_preedit_font: bool,
+    /// The host can hide the candidate panel's page indicator without changing pagination.
+    pub candidate_page_number: bool,
     /// The host can apply candidate foreground/background RGB row colors.
     /// Linux exposes these through IBusText attributes even though it cannot
     /// draw the native card geometry or hover state.
     pub candidate_row_colors: bool,
     /// The host can apply candidate accent, selection, hover and border appearance.
     pub candidate_selection_appearance: bool,
+    /// The host outlines the candidate panel in the border colour. Separate from `candidate_selection_appearance` because Linux draws the border (the Fcitx5 classic UI theme carries it) while neither Linux panel has a hover state.
+    pub candidate_border_color: bool,
+    /// The host draws its own floating candidate window and multiplies its font and geometry by `candidate_scale_percent`. A host whose list lives in a desktop panel, or in a strip on the keyboard that already follows the font size, has nothing else to scale.
+    pub candidate_window_scale: bool,
+    /// The host can lower the alpha of its candidate card fill, border and skin background by `candidate_opacity_percent` while keeping text opaque. A panel the desktop draws, or a strip that is part of an opaque keyboard, cannot.
+    pub candidate_window_opacity: bool,
+    /// The host rounds its candidate card by `candidate_corner_radius`, ahead of the skin package's radius and its own constant.
+    pub candidate_corner_radius: bool,
     /// The host places its own candidate window and can therefore pin it where
     /// it first appeared. A host whose desktop owns the placement - IBus draws
     /// and positions the candidate list itself - cannot honour the choice, so
@@ -144,7 +186,6 @@ pub struct HostCapabilities {
     /// focused editor, so choosing between them is a real choice. A host with a
     /// single commit path does not offer it: a control with one outcome reads
     /// as a setting that is being ignored.
-    #[serde(default)]
     pub voice_commit_mode: bool,
     /// The host renders the Engine's composition text itself, so the choice
     /// between the raw shuangpin keys and the expanded pinyin is visible there.
@@ -152,13 +193,41 @@ pub struct HostCapabilities {
     /// the result where a user would see the difference. A host that hands the
     /// snapshot's `preedit` to a desktop panel still decides which string goes
     /// there, so the difference is its to show.
-    #[serde(default)]
     pub shuangpin_preedit: bool,
+    /// The host tells the runtime which character width it is in, so the Engine
+    /// widens what it commits. The preference is the width a session starts at;
+    /// the host's own toolbar, menu or chord moves it from there. A host that
+    /// never makes that call cannot honour the preference at all, and offering
+    /// the switch there would be a control with nothing behind it.
+    pub character_width: bool,
+    /// The host runs the configured transcription provider itself, so the provider, model and
+    /// credential controls have something behind them.
+    ///
+    /// Was a platform name on the settings page, and it read `!android` because that host once had
+    /// only the platform recogniser. It runs the configured provider now — the OpenAI-compatible
+    /// uploads and the streaming socket both — and a page keyed on the name would still be hiding
+    /// the controls.
+    /// The host routes the Ctrl+Shift+Alt maintenance chords: delete the candidate in a numbered
+    /// slot, and drop the cached candidate list.
+    ///
+    /// Touch reaches both by gesture — a long press on the candidate, and nothing at all for the
+    /// cache — so a keyboard needs the chords or cannot reach them. Declared rather than inferred
+    /// from "draws desktop panels", which is what it used to be read off and is a different fact.
+    pub maintenance_shortcuts: bool,
+    /// The host reserves the Option/Alt+Shift+H chord for the character width, so the switch that
+    /// gives it back to the application belongs on its settings page.
+    pub fullwidth_chord: bool,
+    pub voice_provider_settings: bool,
+    /// The host draws the recogniser's interim text while the user is still speaking.
+    ///
+    /// Every host can ask a streaming provider for partial results; this says which of them has
+    /// somewhere to put one. A host without that surface would be offering a switch whose only
+    /// effect is on a display it does not have.
+    pub voice_stream_preedit: bool,
     /// The host shows read-only English word completions while typing directly
     /// in English, governed by the shared `english_suggestions` preference. iOS
     /// offers the same surface but keeps its switch in the native App Group
     /// store, so it reads this as false and shows its own control.
-    #[serde(default)]
     pub english_suggestions: bool,
     /// A letter becomes a helper code because the user held Shift for it, rather
     /// than because of where it sits in the spelling. Windows appends helper
@@ -166,34 +235,52 @@ pub struct HostCapabilities {
     /// does, or the letter would be eaten as more pinyin. The hosts that mark
     /// them this way are the ones running the ported ChineseHelpcodePolicy, and
     /// the settings page explains the gesture only where it applies.
-    #[serde(default)]
     pub helpcode_shift_entry: bool,
     /// A skin arrives by being picked rather than by being dropped into a
     /// folder. The source opens its skin folder so the user can put one there;
     /// a host whose folder is inside an application sandbox has nothing to
     /// open, so it asks the user to point at the skin instead. The page needs
     /// to know which of the two it is, because the button says so.
-    #[serde(default)]
     pub skin_directory_import: bool,
+    /// The one candidate page size the host draws, when it offers no choice. The iOS keyboard numbers its strip's chips 1-9 to match the digits on its symbol layer and lays the expanded panel out in nines, so it holds the Engine to nine whatever the shared setting says; the page shows the count instead of a selector that would do nothing. Absent on a host that pages by the setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixed_candidate_page_size: Option<u8>,
+    /// The one candidate layout the host draws, when it offers no choice. The iOS candidate strip is a horizontal row above the keys, so an external skin is adopted there only for its horizontal layout; the skin page has to judge compatibility by that rather than by the shared setting, which defaults to vertical. Absent on a host that follows the setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixed_candidate_layout: Option<crate::preferences::CandidateLayout>,
+    /// The touch keyboard reads `touch_toolbar` to choose the buttons on the row above its keys. Only the iOS keyboard does so far; elsewhere the switches would hide nothing.
+    pub touch_toolbar_components: bool,
     /// The host applies a separate family for Latin text in the candidate panel.
     /// A host whose renderer resolves one family list per glyph, or which draws
     /// Latin from its own font, can honour this; one with a single typeface for
     /// the whole row cannot, and does not offer the choice.
-    #[serde(default)]
     pub candidate_english_font: bool,
     /// The AI service's credential lives with the host's provider rather than in
     /// the settings document, so the settings page must not ask for a token and
     /// must not gate the service controls on having one. The host still reaches
     /// the service - through that provider - so the model listing and the polish
     /// test are offered; what it cannot do is hold the secret.
-    #[serde(default)]
     pub ai_provider_credentials: bool,
     /// The host draws a short, non-activating badge near the caret after the
     /// Chinese/English mode changes. A host with no way to put a window beside
     /// the caret, or one whose keyboard already shows the mode on its own key
     /// faces, has nothing to switch on and does not offer the choice.
-    #[serde(default)]
     pub input_mode_hud: bool,
+    /// The host can run a 背单词 review session — that is, it has wired the shared vocabulary
+    /// entry point and can reach the review store.
+    pub vocabulary_review: bool,
+    /// 背单词书目里列出单词本插件（`pack-<插件 id>` 词书）：宿主把插件目录交给背单词的入口。
+    pub wordbook_packs: bool,
+    /// 宿主的符号面板显示已安装的符号集插件。没打开时插件详情说明本机的符号面板不显示插件符号集。
+    pub symbol_set_packs: bool,
+    /// The host plays the sound packs in `plugins`: a sample per key class, the melody, the commit sound and the achievement jingle. Only an input process that sees the keys can, and only where it has somewhere to play them; a host without the player keeps the settings but offers no switches for them.
+    pub key_sound: bool,
+    /// The host routes the `/` command and `@` mention modes: it hands `/` and `@` to the runtime, stops treating digits as candidate numbers while a mode spells with them, and loads the enabled command tables and the name list into the Engine. The `V` mode needs only the digit routing and is covered by the same flag.
+    pub plugin_triggers: bool,
+    /// The host streams the selected music pack while it is the active input method.
+    pub music: bool,
+    /// The host draws the typing effects and the combo count that `msime_client_typing_effect` answers with. Each host flips this only in the change that wires the call, as with the flags above.
+    pub typing_effects: bool,
     /// The operating system release, as the machine reports it, for the feedback
     /// page to attach. Not a platform assumption like the flags above -- the host
     /// fills it in after `for_platform`, the way `system_fonts` is filled in --
@@ -201,6 +288,28 @@ pub struct HostCapabilities {
     /// falls back to what the web view knows about itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub os_version: Option<String>,
+    /// Why the desktop's candidate panel on this machine ignores the candidate font, colour and skin settings, when the running Linux host has found that it does. Filled in at runtime from what the host reports, the way `os_version` is; absent when the panel honours them or nothing has been reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidate_panel_limit: Option<CandidatePanelLimit>,
+    /// The input schemes this host offers; the settings page shows the others disabled. A host may narrow the list at runtime the way it fills `os_version`, for instance when the Cantonese or Zhuyin dictionary is not installed.
+    pub input_schemes: Vec<InputScheme>,
+}
+
+/// The base schemes plus Cantonese, Zhuyin and Vietnamese, which every host offers.
+const ALL_INPUT_SCHEMES: [InputScheme; 8] = [
+    InputScheme::Quanpin,
+    InputScheme::Shuangpin,
+    InputScheme::Wubi,
+    InputScheme::Japanese,
+    InputScheme::Korean,
+    InputScheme::Cantonese,
+    InputScheme::Zhuyin,
+    InputScheme::Vietnamese,
+];
+
+/// The schemes this build hands to its Engine: all eight on every host, since each one routes the Cantonese, Zhuyin and Vietnamese keys and stages their dictionaries. host-api falls back from any other scheme a preferences document names, and Cantonese and Zhuyin still fall back when their dictionary is not installed.
+pub fn compiled_input_schemes() -> &'static [InputScheme] {
+    &ALL_INPUT_SCHEMES
 }
 
 impl HostCapabilities {
@@ -273,11 +382,8 @@ impl HostCapabilities {
             // Only this client's macOS toolbar draws these two.
             floating_toolbar_handwriting: platform == HostPlatform::Macos,
             floating_toolbar_voice: platform == HostPlatform::Macos,
-            // The IBus host consumes these directly. The Windows Server now
-            // mirrors them into the shared config.toml the TIP reads at
-            // activation, so the toggles take effect there too. The HarmonyOS
-            // host reads all four in its hardware key router, which only a
-            // machine with a physical keyboard has anything to route.
+            floating_toolbar_input_scheme: platform == HostPlatform::Macos,
+            // The IBus host consumes these directly, and the Windows TIP reads them from the shared preferences document at activation. The HarmonyOS host reads all four in its hardware key router, which only a machine with a physical keyboard has anything to route.
             mode_switch_shortcuts: matches!(
                 platform,
                 HostPlatform::Linux
@@ -301,9 +407,7 @@ impl HostCapabilities {
                     | HostPlatform::Macos
                     | HostPlatform::Harmony
             ),
-            // Harmony 2-in-1 hardware keyboards use the same candidate number
-            // row as Windows; the ArkTS router releases digits when this
-            // preference is enabled, so the focused editor can consume them.
+            // Harmony 2-in-1 hardware keyboards use the same candidate number row as Windows: the ArkTS router picks with 1 through 9 while this preference is on and gives the digits to the focused editor once it is turned off.
             number_row_selection: matches!(
                 platform,
                 HostPlatform::Linux | HostPlatform::Android | HostPlatform::Harmony
@@ -320,18 +424,24 @@ impl HostCapabilities {
                     | HostPlatform::Harmony
             ),
             // Native Windows/macOS candidate windows consume the shared font
-            // controls. Harmony's desktop candidate panel and Android's
-            // native candidate bar also apply the family chain and both
-            // candidate/preedit sizes; iOS remains touch-only here.
-            candidate_font_controls: matches!(
+            // controls. Harmony's desktop candidate panel and Android's and
+            // iOS's native candidate bars also apply the family chain and both
+            // candidate/preedit sizes. Linux writes the family chain and
+            // candidate size into the panel's font: the IBus panel settings or
+            // the Fcitx5 classic UI.
+            candidate_font_controls: true,
+            candidate_page_number: matches!(platform, HostPlatform::Linux),
+            // The iOS strip scales its composition line by `candidate_preedit_font_size`.
+            candidate_preedit_font: matches!(
                 platform,
                 HostPlatform::Windows
                     | HostPlatform::Macos
                     | HostPlatform::Harmony
                     | HostPlatform::Android
+                    | HostPlatform::Ios
             ),
             // IBus exposes candidate and label foreground/background RGB
-            // attributes, but not native hover state or card borders.
+            // attributes, but not native hover state or card borders. The iOS strip resolves every candidate colour once the keyboard's 「候选栏使用主题配色」 switch is on, which the shared skin page now carries.
             candidate_row_colors: matches!(
                 platform,
                 HostPlatform::Windows
@@ -339,6 +449,7 @@ impl HostCapabilities {
                     | HostPlatform::Linux
                     | HostPlatform::Harmony
                     | HostPlatform::Android
+                    | HostPlatform::Ios
             ),
             candidate_selection_appearance: matches!(
                 platform,
@@ -346,6 +457,29 @@ impl HostCapabilities {
                     | HostPlatform::Macos
                     | HostPlatform::Harmony
                     | HostPlatform::Android
+                    | HostPlatform::Ios
+            ),
+            candidate_border_color: matches!(
+                platform,
+                HostPlatform::Windows
+                    | HostPlatform::Macos
+                    | HostPlatform::Harmony
+                    | HostPlatform::Android
+                    | HostPlatform::Ios
+                    | HostPlatform::Linux
+            ),
+            // The Windows and macOS candidate windows are drawn by the host, so every style control reaches them. The Fcitx5 classic UI theme carries a corner radius but no scale, and on X11 without a compositor a translucent fill shows as black, so Linux offers only the radius. The HarmonyOS 2in1 candidate card takes a radius and a fill alpha but its size follows the font size alone. The iOS and Android candidate strips sit on the keyboard rather than float, so none of the three applies there.
+            candidate_window_scale: matches!(platform, HostPlatform::Windows | HostPlatform::Macos),
+            candidate_window_opacity: matches!(
+                platform,
+                HostPlatform::Windows | HostPlatform::Macos | HostPlatform::Harmony
+            ),
+            candidate_corner_radius: matches!(
+                platform,
+                HostPlatform::Windows
+                    | HostPlatform::Macos
+                    | HostPlatform::Linux
+                    | HostPlatform::Harmony
             ),
             // macOS CandidatePanel and the HarmonyOS candidate panel track the current insertion
             // rect themselves; expose the shared toggle on both hosts.
@@ -364,19 +498,9 @@ impl HostCapabilities {
                 platform,
                 HostPlatform::Macos | HostPlatform::Harmony | HostPlatform::Linux
             ),
-            // Windows draws Latin from its own family, macOS and Android name it ahead of the
-            // primary one, and ArkUI resolves a family list per glyph, so HarmonyOS reaches the
-            // same result the same way. Linux leaves the panel's typeface to the desktop.
-            // macOS draws its own composition, and the HarmonyOS keyboard draws the Engine's
-            // editing text on its composition row, so both show the difference. The other hosts
-            // hand the text to the application or to the desktop, which decides how it looks.
-            // Windows chooses between TSF, SendInput and a paste; macOS between system events and
-            // its input session; Linux hands the choice to the user's provider service. A keyboard
-            // extension commits through its input client and has nothing to choose between.
-            voice_commit_mode: matches!(
-                platform,
-                HostPlatform::Windows | HostPlatform::Macos | HostPlatform::Linux
-            ),
+            // macOS draws its own composition, and the HarmonyOS keyboard draws the Engine's editing text on its composition row, so both show the difference. The other hosts hand the text to the application or to the desktop, which decides how it looks.
+            // Windows chooses between TSF, SendInput and a paste; macOS between system events and its input session. The Linux hosts commit through the IBus or Fcitx5 input context, the desktop voice panel hands its text to the active host the way every panel does, and the voice provider only recognizes, so a stored mode would change nothing there. A keyboard extension commits through its input client and has nothing to choose between either.
+            voice_commit_mode: matches!(platform, HostPlatform::Windows | HostPlatform::Macos),
             // The Linux hosts write the snapshot's `preedit` into the IBus and
             // Fcitx5 preedit themselves, and both already carry their own
             // toggle for this in the native status menu - a setting the shared
@@ -384,30 +508,61 @@ impl HostCapabilities {
             // the shuangpin scheme was active.
             shuangpin_preedit: matches!(
                 platform,
-                HostPlatform::Macos | HostPlatform::Harmony | HostPlatform::Linux
+                HostPlatform::Macos
+                    | HostPlatform::Harmony
+                    | HostPlatform::Linux
+                    | HostPlatform::Ios
             ),
+            // Every host calls `msime_client_set_character_width` when its session starts and
+            // from its own width switch, so the preference always has something to act on.
+            character_width: true,
+            // The Android recognition window shows the transcript once it is settled and has no row for a partial one; putting half-written text there that the final result may contradict is worse than waiting for it. iOS records in the app, because a keyboard extension cannot use the microphone, and hands the keyboard only the final transcript, so it has no row for one either. Every other host draws its own composition.
+            // Every host reaches its provider one way or another: the desktops and both mobile
+            // hosts call it themselves, and Linux hands the same configuration to its provider
+            // service. None of them wants these controls hidden.
+            // Harmony reaches this through its form-factor projection of `panel_windows`, which
+            // the page still consults, so it is not named here and its behaviour is unchanged.
+            maintenance_shortcuts: platform.is_desktop() || platform == HostPlatform::Android,
+            // macOS has reserved it since it shipped; the Android host reads the same preference
+            // for its own Alt+Shift+H. No other host binds that chord.
+            fullwidth_chord: matches!(platform, HostPlatform::Macos | HostPlatform::Android),
+            voice_provider_settings: true,
+            voice_stream_preedit: !matches!(platform, HostPlatform::Android | HostPlatform::Ios),
             english_suggestions: matches!(platform, HostPlatform::Android | HostPlatform::Harmony),
-            // Android and HarmonyOS run the same ported ChineseHelpcodePolicy:
-            // Shift during a quanpin or shuangpin composition hands the next
-            // letter to the Engine as a helper code. iOS has no helper-code
-            // input at all, and the desktop hosts append the code to a finished
-            // spelling instead of marking it.
-            helpcode_shift_entry: matches!(platform, HostPlatform::Android | HostPlatform::Harmony),
-            // The skin folder is inside the sandbox on HarmonyOS, where no file
-            // manager reaches it, so the skin is picked and copied in instead.
-            skin_directory_import: platform == HostPlatform::Harmony,
+            // Android, HarmonyOS and the iOS keyboard extension share one gesture: Shift during a quanpin or shuangpin composition hands the next letter to the Engine as a helper code. The desktop hosts append the code to a finished spelling instead of marking it.
+            helpcode_shift_entry: matches!(
+                platform,
+                HostPlatform::Android | HostPlatform::Harmony | HostPlatform::Ios
+            ),
+            // The skin folder is inside the sandbox on HarmonyOS and in the App Group container on iOS, where no file manager reaches it, so the skin is picked and copied in instead.
+            skin_directory_import: matches!(platform, HostPlatform::Harmony | HostPlatform::Ios),
+            fixed_candidate_page_size: (platform == HostPlatform::Ios).then_some(9),
+            fixed_candidate_layout: (platform == HostPlatform::Ios)
+                .then_some(crate::preferences::CandidateLayout::Horizontal),
+            // The iOS shortcut bar is the touch counterpart of the Windows floating toolbar, and its buttons follow the same kind of per-component switches.
+            touch_toolbar_components: platform == HostPlatform::Ios,
             // Linux keeps AI credentials in the provider service's owner-only
             // configuration file and passes only non-sensitive options over its
             // socket. Every other host holds the token itself.
             ai_provider_credentials: platform == HostPlatform::Linux,
-            candidate_english_font: matches!(
-                platform,
-                HostPlatform::Windows
-                    | HostPlatform::Macos
-                    | HostPlatform::Android
-                    | HostPlatform::Harmony
-            ),
+            // Windows draws Latin from its own family, macOS and Android name it ahead of the primary one, and ArkUI resolves a family list per glyph, so HarmonyOS reaches the same result the same way. Both Linux hosts write one Pango font description for the desktop panel, and Pango resolves its family list per glyph too, so they name it first there.
+            candidate_english_font: true,
+            // Every host reaches the same shared store through the same entry point, so there is no platform here that can and one that cannot.
+            vocabulary_review: true,
+            // 桌面宿主的背单词由 Tauri 层传入插件目录；HarmonyOS 在自己的设置投影里按形态打开；Android 和 iOS 不传插件目录。
+            wordbook_packs: platform.is_desktop(),
+            // Windows 和 Linux 桌面的符号面板是 Tauri 层的表情面板（`load_emoji_catalog`），Linux 的 Fcitx5 菜单和 macOS 的原生表情与符号面板另外读同一批插件组。HarmonyOS 在自己的设置投影里按形态打开；Android 和 iOS 没有接入。
+            symbol_set_packs: platform.is_desktop(),
+            // The three desktop hosts play the packs, route V, / and @ by the Engine's spelling symbols and stream music while they are the active input method. HarmonyOS claims key sounds, music and the triggers per form factor in its own settings projection (2in1 only); the phone and tablet hosts wire none of them. A switch with nothing behind it reads as a setting being ignored, so each host flips here only in the change that wires it.
+            key_sound: platform.is_desktop(),
+            plugin_triggers: platform.is_desktop(),
+            music: platform.is_desktop(),
+            // macOS draws the sparks, the card flash and the combo badge (TypingEffectPanel.mm), Windows the flash and the badge on its candidate window (CandidateWindow.cpp), both Linux hosts the combo count in the candidate aux line (KeySound.h), and HarmonyOS the flash and the combo badge on its KeyboardView. Linux draws no style, only the count; the settings page hides the style controls there itself (`showTypingEffectStyles`). HarmonyOS still narrows this per form factor in its own settings projection; Android and iOS wire none.
+            typing_effects: platform.is_desktop() || platform == HostPlatform::Harmony,
             os_version: None,
+            candidate_panel_limit: None,
+            // Every host routes the Cantonese, Zhuyin and Vietnamese keys and ships their dictionaries.
+            input_schemes: ALL_INPUT_SCHEMES.to_vec(),
         }
     }
 }
@@ -423,17 +578,26 @@ pub enum SettingsCategory {
     Community,
     Appearance,
     Input,
+    /// 标点与翻译.
+    Expression,
     TypingStatistics,
-    Helpcode,
     Shortcuts,
     Dictionary,
+    /// 背单词. Next to the dictionary because both are word lists the user manages, and away from
+    /// the input pages because nothing on it changes how typing behaves.
+    Vocabulary,
     Skin,
     ScreenKeyboard,
     Handwriting,
     Voice,
+    /// AI 辅助, a page of the 工具 group and the parent of the AI conversation page.
     Ai,
     Tools,
+    /// 插件: sound packs, background music, command tables and the @ name list.
+    Plugins,
     FloatingToolbar,
+    /// 开发者选项, which holds the local MCP server.
+    Developer,
     Help,
     About,
     Feedback,
@@ -448,17 +612,20 @@ impl SettingsCategory {
             SettingsCategory::Community => "community",
             SettingsCategory::Appearance => "appearance",
             SettingsCategory::Input => "input",
+            SettingsCategory::Expression => "expression",
             SettingsCategory::TypingStatistics => "typing-statistics",
-            SettingsCategory::Helpcode => "helpcode",
             SettingsCategory::Shortcuts => "shortcuts",
             SettingsCategory::Dictionary => "dictionary",
+            SettingsCategory::Vocabulary => "vocabulary",
             SettingsCategory::Skin => "skin",
             SettingsCategory::ScreenKeyboard => "screen-keyboard",
             SettingsCategory::Handwriting => "handwriting",
             SettingsCategory::Voice => "voice",
             SettingsCategory::Ai => "ai",
             SettingsCategory::Tools => "tools",
+            SettingsCategory::Plugins => "plugins",
             SettingsCategory::FloatingToolbar => "floating-toolbar",
+            SettingsCategory::Developer => "developer",
             SettingsCategory::Help => "help",
             SettingsCategory::About => "about",
             SettingsCategory::Feedback => "feedback",
@@ -472,17 +639,20 @@ impl SettingsCategory {
             "community" => Ok(SettingsCategory::Community),
             "appearance" => Ok(SettingsCategory::Appearance),
             "input" => Ok(SettingsCategory::Input),
+            "expression" => Ok(SettingsCategory::Expression),
             "typing-statistics" => Ok(SettingsCategory::TypingStatistics),
-            "helpcode" => Ok(SettingsCategory::Helpcode),
             "shortcuts" => Ok(SettingsCategory::Shortcuts),
             "dictionary" => Ok(SettingsCategory::Dictionary),
+            "vocabulary" => Ok(SettingsCategory::Vocabulary),
             "skin" => Ok(SettingsCategory::Skin),
             "screen-keyboard" => Ok(SettingsCategory::ScreenKeyboard),
             "handwriting" => Ok(SettingsCategory::Handwriting),
             "voice" => Ok(SettingsCategory::Voice),
             "ai" => Ok(SettingsCategory::Ai),
             "tools" => Ok(SettingsCategory::Tools),
+            "plugins" => Ok(SettingsCategory::Plugins),
             "floating-toolbar" => Ok(SettingsCategory::FloatingToolbar),
+            "developer" => Ok(SettingsCategory::Developer),
             "help" => Ok(SettingsCategory::Help),
             "about" => Ok(SettingsCategory::About),
             "feedback" => Ok(SettingsCategory::Feedback),
@@ -491,23 +661,26 @@ impl SettingsCategory {
         }
     }
 
-    pub const ALL: [SettingsCategory; 19] = [
+    pub const ALL: [SettingsCategory; 22] = [
         SettingsCategory::Account,
         SettingsCategory::Chat,
         SettingsCategory::Community,
         SettingsCategory::Appearance,
         SettingsCategory::Input,
+        SettingsCategory::Expression,
         SettingsCategory::TypingStatistics,
-        SettingsCategory::Helpcode,
         SettingsCategory::Shortcuts,
         SettingsCategory::Dictionary,
+        SettingsCategory::Vocabulary,
         SettingsCategory::Skin,
         SettingsCategory::ScreenKeyboard,
         SettingsCategory::Handwriting,
         SettingsCategory::Voice,
         SettingsCategory::Ai,
         SettingsCategory::Tools,
+        SettingsCategory::Plugins,
         SettingsCategory::FloatingToolbar,
+        SettingsCategory::Developer,
         SettingsCategory::Help,
         SettingsCategory::About,
         SettingsCategory::Feedback,
@@ -528,6 +701,15 @@ pub enum SurfaceRoute {
     CloudDictionary,
 }
 
+/// Where a panel window opens on the work area, for hosts that place panels themselves.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PanelPlacement {
+    /// Centred horizontally, 12 pixels above the bottom of the work area.
+    BottomCenter,
+    /// Centred on the work area.
+    Center,
+}
+
 /// Geometry and identity of a panel surface, so the window size lives beside the
 /// route instead of being repeated per host.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -537,6 +719,7 @@ pub struct PanelSurface {
     pub title: &'static str,
     pub width: u32,
     pub height: u32,
+    pub placement: PanelPlacement,
 }
 
 impl SurfaceRoute {
@@ -610,6 +793,7 @@ impl SurfaceRoute {
                 title: "水杉屏幕键盘",
                 width: 1100,
                 height: 400,
+                placement: PanelPlacement::BottomCenter,
             }),
             SurfaceRoute::Handwriting => Some(PanelSurface {
                 label: "handwriting-panel",
@@ -617,6 +801,7 @@ impl SurfaceRoute {
                 title: "水杉手写识别板",
                 width: 980,
                 height: 650,
+                placement: PanelPlacement::BottomCenter,
             }),
             SurfaceRoute::Emoji => Some(PanelSurface {
                 label: "emoji-panel",
@@ -624,6 +809,7 @@ impl SurfaceRoute {
                 title: "Emoji and more",
                 width: 720,
                 height: 720,
+                placement: PanelPlacement::BottomCenter,
             }),
             SurfaceRoute::Voice => Some(PanelSurface {
                 label: "voice-panel",
@@ -631,6 +817,7 @@ impl SurfaceRoute {
                 title: "水杉语音输入",
                 width: 620,
                 height: 520,
+                placement: PanelPlacement::BottomCenter,
             }),
             SurfaceRoute::Clipboard => Some(PanelSurface {
                 label: "clipboard-panel",
@@ -638,6 +825,7 @@ impl SurfaceRoute {
                 title: "水杉本地剪贴板",
                 width: 560,
                 height: 620,
+                placement: PanelPlacement::BottomCenter,
             }),
             SurfaceRoute::CloudClipboard => Some(PanelSurface {
                 label: "cloud-clipboard-panel",
@@ -645,15 +833,38 @@ impl SurfaceRoute {
                 title: "水杉云剪贴板",
                 width: 560,
                 height: 560,
+                placement: PanelPlacement::BottomCenter,
             }),
             SurfaceRoute::CloudDictionary => Some(PanelSurface {
                 label: "cloud-dictionary-panel",
                 query: "cloud-dictionary",
-                title: "水杉云词典",
+                title: "水杉云词库",
                 width: 760,
                 height: 700,
+                placement: PanelPlacement::BottomCenter,
             }),
         }
+    }
+
+    /// The panel window this route opens on the given host. Every host opens [`SurfaceRoute::panel`] except Windows, which follows the shipped native panels: the emoji panel opens at 550 by 610 and the handwriting panel at its shared size, both centred on the work area, while the keyboard and the rest stay bottom-centred.
+    pub fn panel_for(self, platform: HostPlatform) -> Option<PanelSurface> {
+        let panel = self.panel()?;
+        if platform != HostPlatform::Windows {
+            return Some(panel);
+        }
+        Some(match self {
+            SurfaceRoute::Emoji => PanelSurface {
+                width: 550,
+                height: 610,
+                placement: PanelPlacement::Center,
+                ..panel
+            },
+            SurfaceRoute::Handwriting => PanelSurface {
+                placement: PanelPlacement::Center,
+                ..panel
+            },
+            _ => panel,
+        })
     }
 
     pub const ALL: [SurfaceRoute; 8] = [
@@ -669,338 +880,4 @@ impl SurfaceRoute {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_route_round_trips_through_its_argument() {
-        for route in SurfaceRoute::ALL {
-            assert_eq!(SurfaceRoute::parse(&route.as_arg()), Ok(route));
-        }
-        for category in SettingsCategory::ALL {
-            let route = SurfaceRoute::Settings(Some(category));
-            assert_eq!(SurfaceRoute::parse(&route.as_arg()), Ok(route));
-        }
-    }
-
-    #[test]
-    fn settings_deep_link_names_a_category() {
-        assert_eq!(
-            SurfaceRoute::parse("settings:voice"),
-            Ok(SurfaceRoute::Settings(Some(SettingsCategory::Voice)))
-        );
-        assert_eq!(
-            SurfaceRoute::parse("settings:floating-toolbar"),
-            Ok(SurfaceRoute::Settings(Some(
-                SettingsCategory::FloatingToolbar
-            )))
-        );
-        assert_eq!(
-            SurfaceRoute::parse("settings"),
-            Ok(SurfaceRoute::Settings(None))
-        );
-    }
-
-    #[test]
-    fn malformed_routes_are_rejected_rather_than_guessed() {
-        assert_eq!(SurfaceRoute::parse(""), Err(RouteError::Empty));
-        assert_eq!(
-            SurfaceRoute::parse(&"a".repeat(MAX_ROUTE_BYTES + 1)),
-            Err(RouteError::TooLong)
-        );
-        assert_eq!(
-            SurfaceRoute::parse("Settings"),
-            Err(RouteError::IllegalCharacter)
-        );
-        assert_eq!(
-            SurfaceRoute::parse("emoji\n"),
-            Err(RouteError::IllegalCharacter)
-        );
-        assert_eq!(
-            SurfaceRoute::parse("emoji panel"),
-            Err(RouteError::IllegalCharacter)
-        );
-        assert_eq!(
-            SurfaceRoute::parse("settings:voice:extra"),
-            Err(RouteError::Unknown)
-        );
-        assert_eq!(
-            SurfaceRoute::parse("settings:unknown"),
-            Err(RouteError::Unknown)
-        );
-        assert_eq!(SurfaceRoute::parse("emoji:input"), Err(RouteError::Unknown));
-        assert_eq!(SurfaceRoute::parse("account"), Err(RouteError::Unknown));
-    }
-
-    #[test]
-    fn settings_routes_name_the_section_to_open() {
-        assert_eq!(
-            SurfaceRoute::parse("settings:about")
-                .unwrap()
-                .settings_category(),
-            Some(SettingsCategory::About)
-        );
-        assert_eq!(
-            SurfaceRoute::parse("settings:dictionary")
-                .unwrap()
-                .settings_category(),
-            Some(SettingsCategory::Dictionary)
-        );
-        // A bare settings route keeps whichever page the shared UI defaults to.
-        assert_eq!(SurfaceRoute::Settings(None).settings_category(), None);
-        // A panel route never selects a settings section.
-        assert_eq!(SurfaceRoute::Emoji.settings_category(), None);
-        assert_eq!(SurfaceRoute::Clipboard.settings_category(), None);
-
-        // Every category round-trips through the route a launcher would emit.
-        for category in SettingsCategory::ALL {
-            let argument = SurfaceRoute::Settings(Some(category)).as_arg();
-            assert_eq!(
-                SurfaceRoute::parse(&argument).unwrap().settings_category(),
-                Some(category)
-            );
-        }
-    }
-
-    #[test]
-    fn panel_routes_keep_the_labels_the_hosts_already_use() {
-        assert_eq!(SurfaceRoute::Settings(None).panel(), None);
-        assert_eq!(
-            SurfaceRoute::Settings(Some(SettingsCategory::Input)).panel(),
-            None
-        );
-        let keyboard = SurfaceRoute::Keyboard.panel().expect("keyboard is a panel");
-        assert_eq!(keyboard.label, "keyboard-panel");
-        assert_eq!(keyboard.query, "keyboard");
-        for route in SurfaceRoute::ALL {
-            let Some(panel) = route.panel() else { continue };
-            // The window label is the query with the shared panel suffix.
-            assert_eq!(panel.label, format!("{}-panel", panel.query));
-            assert!(panel.width > 0 && panel.height > 0);
-        }
-    }
-
-    #[test]
-    fn capabilities_describe_each_host() {
-        let linux = HostCapabilities::for_platform(HostPlatform::Linux);
-        assert!(!linux.mobile_settings);
-        assert!(linux.restart_input_method);
-        assert!(linux.ime_mode_scope);
-        assert!(linux.panel_windows);
-        assert!(linux.mode_switch_shortcuts);
-        // Linux stands the toolbar up as an IBus property menu: the switch and
-        // component visibility work, but scale and icon size have no surface.
-        assert!(linux.floating_toolbar);
-        assert!(!linux.floating_toolbar_appearance);
-        assert!(linux.floating_toolbar_components);
-        assert!(linux.panel_shortcuts);
-        assert!(linux.number_row_selection);
-        assert!(linux.voice_capture_devices);
-        assert!(!linux.candidate_font_controls);
-        assert!(linux.candidate_row_colors);
-        assert!(!linux.candidate_selection_appearance);
-        // IBus owns the candidate list's placement, so the host cannot pin it.
-        assert!(!linux.candidate_follow_cursor);
-        // The host chooses the preedit string the panel draws, so the raw keys
-        // and the expanded pinyin are both reachable from the shared page.
-        assert!(linux.shuangpin_preedit);
-        // The AI token is the provider's, so the page neither asks for one nor
-        // withholds the service controls for want of it. Every other host holds
-        // the token itself and must keep asking.
-        assert!(linux.ai_provider_credentials);
-        for platform in [
-            HostPlatform::Windows,
-            HostPlatform::Macos,
-            HostPlatform::Android,
-            HostPlatform::Ios,
-            HostPlatform::Harmony,
-        ] {
-            assert!(!HostCapabilities::for_platform(platform).ai_provider_credentials);
-        }
-
-        let windows = HostCapabilities::for_platform(HostPlatform::Windows);
-        assert!(!windows.number_row_selection);
-        assert!(windows.restart_input_method);
-        // Windows keeps a cross-application CN/EN authority, so the scope
-        // choice is real there.
-        assert!(windows.ime_mode_scope);
-        assert!(windows.panel_windows);
-        // The source appends a helper code to a finished spelling; no gesture marks it, so the
-        // explanation of the gesture would be describing something that does not happen here.
-        assert!(!windows.helpcode_shift_entry);
-        assert!(!windows.skin_directory_import);
-        // The Server mirrors these into the shared config.toml the TIP reads,
-        // so the controls offer settings that actually take effect.
-        assert!(windows.mode_switch_shortcuts);
-        assert!(
-            windows.floating_toolbar
-                && windows.floating_toolbar_appearance
-                && windows.floating_toolbar_components
-        );
-        assert!(windows.candidate_font_controls);
-        assert!(windows.candidate_row_colors);
-        assert!(windows.candidate_selection_appearance);
-        // Windows positions its own card, so pinning it is a real choice there.
-        assert!(windows.candidate_follow_cursor);
-        let macos = HostCapabilities::for_platform(HostPlatform::Macos);
-        assert!(macos.restart_input_method);
-        // InputMethodKit controllers identify the active application; the
-        // native preference owner selects either that map or its global mode.
-        assert!(macos.ime_mode_scope);
-        assert!(macos.voice_capture_devices);
-        assert!(
-            macos.floating_toolbar
-                && macos.floating_toolbar_appearance
-                && macos.floating_toolbar_components
-        );
-        assert!(macos.fuzzy_pinyin);
-        assert!(macos.candidate_font_controls);
-        assert!(macos.candidate_row_colors);
-        assert!(macos.candidate_selection_appearance);
-        assert!(macos.candidate_follow_cursor);
-        assert!(macos.panel_shortcuts);
-        // Only the two hosts that can put a badge beside the caret claim it; a touch keyboard says
-        // the mode on its own key faces, and Windows/Linux draw nothing of the kind.
-        assert!(macos.input_mode_hud);
-        assert!(!windows.input_mode_hud);
-        assert!(linux.input_mode_hud);
-        assert!(!HostCapabilities::for_platform(HostPlatform::Android).input_mode_hud);
-        assert!(!HostCapabilities::for_platform(HostPlatform::Ios).input_mode_hud);
-        // Mobile hosts draw no toolbar at all.
-        let android = HostCapabilities::for_platform(HostPlatform::Android);
-        assert!(android.mobile_settings);
-        // Android's InputMethodService keys the persisted mode by the focused
-        // editor package when the shared scope is set to app.
-        assert!(android.ime_mode_scope);
-        assert!(
-            !android.floating_toolbar
-                && !android.floating_toolbar_appearance
-                && !android.floating_toolbar_components
-        );
-        assert!(android.candidate_font_controls);
-        assert!(android.candidate_row_colors);
-        assert!(android.candidate_selection_appearance);
-        let ios = HostCapabilities::for_platform(HostPlatform::Ios);
-        assert!(ios.mobile_settings);
-        assert!(ios.fuzzy_pinyin);
-        assert!(ios.typing_statistics);
-        assert!(!ios.panel_windows);
-        // Windows handles Ctrl+Shift+Win+K on its maintenance hook, so the
-        // panel shortcut row is real there now.
-        assert!(windows.panel_shortcuts);
-        // The CN/EN and 简繁 hotkeys are editable now: the Server mirrors them
-        // into the config.toml the TIP reads, so the toggles take effect.
-        assert!(windows.mode_switch_shortcuts);
-        assert!(windows.system_fonts);
-
-        let android = HostCapabilities::for_platform(HostPlatform::Android);
-        assert!(!android.panel_windows);
-        assert!(!android.window_chrome);
-        // Typing statistics were previously gated on a user-agent match.
-        assert!(android.typing_statistics);
-        assert!(HostCapabilities::for_platform(HostPlatform::Windows).typing_statistics);
-        assert!(HostCapabilities::for_platform(HostPlatform::Macos).mode_switch_shortcuts);
-        assert!(HostCapabilities::for_platform(HostPlatform::Macos).voice_capture_devices);
-        assert!(HostCapabilities::for_platform(HostPlatform::Macos).typing_statistics);
-        assert!(linux.fuzzy_pinyin);
-        assert!(android.fuzzy_pinyin);
-        assert!(android.mode_switch_shortcuts);
-        assert!(HostCapabilities::for_platform(HostPlatform::Windows).fuzzy_pinyin);
-    }
-
-    #[test]
-    fn capabilities_round_trip_and_reject_unknown_keys() {
-        let capabilities = HostCapabilities::for_platform(HostPlatform::Macos);
-        let text = serde_json::to_string(&capabilities).expect("serializes");
-        assert_eq!(
-            serde_json::from_str::<HostCapabilities>(&text).expect("deserializes"),
-            capabilities
-        );
-        let mut document: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
-        document["unexpected"] = serde_json::Value::Bool(true);
-        assert!(serde_json::from_value::<HostCapabilities>(document).is_err());
-    }
-
-    #[test]
-    fn platform_names_round_trip() {
-        for platform in [
-            HostPlatform::Windows,
-            HostPlatform::Macos,
-            HostPlatform::Linux,
-            HostPlatform::Android,
-            HostPlatform::Ios,
-            HostPlatform::Harmony,
-        ] {
-            assert_eq!(HostPlatform::parse(platform.as_str()), Ok(platform));
-        }
-        assert_eq!(HostPlatform::parse(""), Err(RouteError::Empty));
-        assert_eq!(HostPlatform::parse("bsd"), Err(RouteError::Unknown));
-    }
-
-    /// A newly named host must not claim a surface nobody has written. Every
-    /// capability here stays false until a HarmonyOS host actually consumes it,
-    /// so the shared UI never renders a control that saves and does nothing.
-    #[test]
-    fn harmony_groups_with_mobile_hosts_and_claims_nothing_unwritten() {
-        assert!(!HostPlatform::Harmony.is_desktop());
-        let harmony = HostCapabilities::for_platform(HostPlatform::Harmony);
-        assert!(harmony.mobile_settings);
-        assert!(!harmony.panel_windows);
-        assert!(!harmony.window_chrome);
-        // ArkUI enumerates the installed families, so the page can offer them.
-        assert!(harmony.system_fonts);
-        // ArkUI resolves a family list per glyph, which is how a separate Latin family is honoured.
-        assert!(harmony.candidate_english_font);
-        // The completions are drawn from the packaged dictionary on the candidate strip, and the
-        // switch that governs them is the shared preference rather than a native store.
-        assert!(harmony.english_suggestions);
-        // The composition row draws the Engine's editing text, so raw versus expanded is visible.
-        assert!(harmony.shuangpin_preedit);
-        // One commit path, so there is nothing to choose between and no control for it.
-        assert!(!harmony.voice_commit_mode);
-        assert!(HostCapabilities::for_platform(HostPlatform::Windows).voice_commit_mode);
-        assert!(HostCapabilities::for_platform(HostPlatform::Macos).shuangpin_preedit);
-        assert!(!HostCapabilities::for_platform(HostPlatform::Windows).shuangpin_preedit);
-        assert!(!HostCapabilities::for_platform(HostPlatform::Ios).english_suggestions);
-        assert!(!HostCapabilities::for_platform(HostPlatform::Windows).english_suggestions);
-        assert!(!HostCapabilities::for_platform(HostPlatform::Linux).candidate_english_font);
-        // Drawn from the input method's status-bar panel, which scales itself by the shared
-        // scale and font size, hides the buttons the user turned off, and opens the emoji panel
-        // and the screen keyboard in the window its candidates otherwise occupy.
-        assert!(
-            harmony.floating_toolbar
-                && harmony.floating_toolbar_appearance
-                && harmony.floating_toolbar_components
-        );
-        assert!(!harmony.restart_input_method);
-        // The editor attribute carries the client's bundle name, so a per-application map is real.
-        assert!(harmony.ime_mode_scope);
-        // Harmony's Engine consumes the shared fuzzy-pinyin rules on every prepared session, so
-        // the settings page may expose the same rule picker as the other mobile hosts.
-        assert!(harmony.fuzzy_pinyin);
-        // Consumed: the hardware key router reads all four bindings, so the page may offer them.
-        assert!(harmony.mode_switch_shortcuts);
-        // Consumed since the panel chord was bound: the extension sees Ctrl+Shift+Super+K while it
-        // is attached to an editor, which is the only state in which a panel that inserts into that
-        // editor is useful anyway.
-        assert!(harmony.panel_shortcuts);
-        // Shift marks a helper code here exactly as it does on Android; the page explains that
-        // gesture and would otherwise have explained it to nobody on this host.
-        assert!(harmony.helpcode_shift_entry);
-        // Its skin folder is inside the sandbox, so the page asks the user to point at a skin
-        // rather than offering to open a folder that nothing can browse.
-        assert!(harmony.skin_directory_import);
-        assert!(harmony.number_row_selection);
-        // The two network providers create their own capturer, so a chosen microphone is routable.
-        assert!(harmony.voice_capture_devices);
-        assert!(harmony.candidate_font_controls);
-        assert!(harmony.candidate_row_colors);
-        assert!(harmony.candidate_selection_appearance);
-        assert!(harmony.candidate_follow_cursor);
-        // The 2in1 status-bar badge is the only mode readout a machine with a hardware keyboard
-        // gets when the toolbar is off, so the switch that governs it belongs on this host too.
-        assert!(harmony.input_mode_hud);
-        // Typing statistics are unconditional across every host.
-        assert!(harmony.typing_statistics);
-    }
-}
+mod tests;

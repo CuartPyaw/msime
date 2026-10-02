@@ -44,24 +44,49 @@ final class VoiceTextHandoffStore: @unchecked Sendable {
     self.directory = directory?.appendingPathComponent("VoiceHandoff", isDirectory: true)
   }
 
+  private func rejectSymlinkAncestors(_ path: URL) throws {
+    var current = path.standardizedFileURL
+    while current.path != "/" {
+      if current.path == "/var" || current.path == "/tmp" { break }
+      var status = stat()
+      if lstat(current.path, &status) == 0 {
+        guard status.st_mode & S_IFMT != S_IFLNK else { throw Failure.unavailable }
+      } else if errno != ENOENT {
+        throw Failure.unavailable
+      }
+      current = current.deletingLastPathComponent()
+    }
+  }
+
+  private func rejectSymlinkFile(_ path: URL) throws {
+    var status = stat()
+    if lstat(path.standardizedFileURL.path, &status) == 0 {
+      guard status.st_mode & S_IFMT != S_IFLNK else { throw Failure.unavailable }
+    } else if errno != ENOENT {
+      throw Failure.unavailable
+    }
+  }
+
   private func locked<T>(_ action: (URL) throws -> T) throws -> T {
     guard let directory else { throw Failure.unavailable }
     Self.lock.lock()
     defer { Self.lock.unlock() }
+    try rejectSymlinkAncestors(directory)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    let descriptor = open(directory.appendingPathComponent("transfer.lock").path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+    let descriptor = open(directory.appendingPathComponent("transfer.lock").path,
+                          O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, S_IRUSR | S_IWUSR)
     guard descriptor >= 0 else { throw Failure.unavailable }
     defer { close(descriptor) }
     guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else { throw Failure.busy }
     defer { flock(descriptor, LOCK_UN) }
-    return try action(directory.appendingPathComponent("result.json"))
+    let result = directory.appendingPathComponent("result.json")
+    try rejectSymlinkFile(result)
+    return try action(result)
   }
 
   private func readFile(_ file: URL, now: Date) throws -> VoiceTextHandoff? {
     guard FileManager.default.fileExists(atPath: file.path) else { return nil }
-    let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-    guard size <= Self.maximumBytes else { throw Failure.invalid }
-    let data = try Data(contentsOf: file)
+    let data = try Self.readBounded(file)
     guard data.count <= Self.maximumBytes,
           let entry = try? JSONDecoder().decode(VoiceTextHandoff.self, from: data), entry.version == 1,
           !entry.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, entry.text.count <= 10_000,
@@ -71,6 +96,20 @@ final class VoiceTextHandoffStore: @unchecked Sendable {
       return nil
     }
     return entry
+  }
+
+  static func readBounded(_ file: URL) throws -> Data {
+    let handle = try FileHandle(forReadingFrom: file)
+    defer { try? handle.close() }
+    var data = Data()
+    data.reserveCapacity(min(Self.maximumBytes, 64 * 1024))
+    while true {
+      let remaining = Self.maximumBytes - data.count
+      let chunk = try handle.read(upToCount: min(64 * 1024, remaining + 1)) ?? Data()
+      if chunk.isEmpty { return data }
+      guard chunk.count <= remaining else { throw Failure.invalid }
+      data.append(chunk)
+    }
   }
 
   func read(now: Date = Date()) throws -> VoiceTextHandoff? {

@@ -1,77 +1,56 @@
+use crate::platform::mobile::mobile_account_preferences::{
+    frequency_account_preferences, insert_bool, insert_string, valid_mobile_haptic_strength,
+};
 use msime_client_core::account::{
     validate_account_preferences, AccountError, AccountPreferenceValue, AccountPreferences,
 };
 use msime_client_core::preferences::{
-    ChineseScheme, FrequencyMode, FrequencyPreferences, InputScheme, Preferences, ShuangpinProfile,
-    TouchKeyboardLayout, TouchKeyboardScheme, TouchKeyboardSkin, TouchKeyboardSkinDesign,
+    ChineseScheme, FrequencyMode, InputScheme, Preferences, ShuangpinProfile, TouchKeyboardLayout,
+    TouchKeyboardScheme, TouchKeyboardSkinDesign,
 };
+use msime_client_core::skin::theme::GlobalTheme;
 use msime_tauri_mobile_platform::IosKeyboardPreferences;
 use std::collections::BTreeMap;
 
-fn insert_string(settings: &mut BTreeMap<String, AccountPreferenceValue>, key: &str, value: &str) {
-    settings.insert(
-        key.to_owned(),
-        AccountPreferenceValue::String(value.to_owned()),
-    );
-}
-
-fn insert_bool(settings: &mut BTreeMap<String, AccountPreferenceValue>, key: &str, value: bool) {
-    settings.insert(key.to_owned(), AccountPreferenceValue::Boolean(value));
-}
-
-fn frequency_account_preferences(
-    frequency: &FrequencyPreferences,
-) -> BTreeMap<String, AccountPreferenceValue> {
-    BTreeMap::from([
-        (
-            "input.frequency_mode".into(),
-            AccountPreferenceValue::String(frequency.mode.as_str().into()),
-        ),
-        (
-            "input.frequency_trigger_count".into(),
-            AccountPreferenceValue::Integer(i64::from(frequency.trigger_count)),
-        ),
-        (
-            "input.frequency_linear_step".into(),
-            AccountPreferenceValue::Integer(i64::from(frequency.linear_step)),
-        ),
-    ])
-}
-
 fn decoded_custom_skin(
     value: Option<&str>,
-    fallback: &TouchKeyboardSkinDesign,
-) -> TouchKeyboardSkinDesign {
+    fallback: Option<&TouchKeyboardSkinDesign>,
+) -> Option<TouchKeyboardSkinDesign> {
     value
         .and_then(|value| serde_json::from_str::<TouchKeyboardSkinDesign>(value).ok())
         .map(TouchKeyboardSkinDesign::normalized)
-        .unwrap_or_else(|| fallback.clone())
+        .or_else(|| fallback.cloned())
 }
 
 pub(crate) fn local_account_preferences(
     native: &IosKeyboardPreferences,
     shared: &Preferences,
-    fallback_custom_skin: &TouchKeyboardSkinDesign,
+    fallback_custom_skin: Option<&TouchKeyboardSkinDesign>,
 ) -> Result<BTreeMap<String, AccountPreferenceValue>, AccountError> {
     if !native.is_valid() {
         return Err(AccountError::Storage);
     }
     let mut settings = BTreeMap::new();
-    let (schema, profile, nine_key) = match native.input_scheme.as_str() {
-        "quanpin" | "handwriting" | "thoughtfulReply" => ("quanpin", None, false),
-        "nineKey" => ("quanpin", None, true),
-        "shuangpin" => ("shuangpin", Some("xiaohe"), false),
-        "ziranma" => ("shuangpin", Some("ziranma"), false),
-        "microsoft" => ("shuangpin", Some("microsoft"), false),
-        "shoudao" => ("shuangpin", Some("shoudao"), false),
-        "wubi" => ("wubi", None, false),
-        "japanese" => ("japanese", None, false),
-        "japaneseNineKey" => ("japanese", None, true),
+    // The cloud `input.schema` cannot carry Cantonese, Zhuyin or Vietnamese (an older device would refuse the whole document), so those leave the scheme and the nine-key switch out and the cloud keeps what it has.
+    let scheme = match native.input_scheme.as_str() {
+        "quanpin" | "handwriting" | "thoughtfulReply" => Some(("quanpin", None, false)),
+        "nineKey" => Some(("quanpin", None, true)),
+        "shuangpin" => Some(("shuangpin", Some("xiaohe"), false)),
+        "ziranma" => Some(("shuangpin", Some("ziranma"), false)),
+        "microsoft" => Some(("shuangpin", Some("microsoft"), false)),
+        "shoudao" => Some(("shuangpin", Some("shoudao"), false)),
+        "wubi" => Some(("wubi", None, false)),
+        "japanese" => Some(("japanese", None, false)),
+        "japaneseNineKey" => Some(("japanese", None, true)),
+        "korean" => Some(("korean", None, false)),
+        "cantonese" | "zhuyin" | "vietnamese" => None,
         _ => return Err(AccountError::Storage),
     };
-    insert_string(&mut settings, "input.schema", schema);
-    if let Some(profile) = profile {
-        insert_string(&mut settings, "input.shuangpin_schema", profile);
+    if let Some((schema, profile, _)) = scheme {
+        insert_string(&mut settings, "input.schema", schema);
+        if let Some(profile) = profile {
+            insert_string(&mut settings, "input.shuangpin_schema", profile);
+        }
     }
     insert_string(
         &mut settings,
@@ -82,7 +61,9 @@ pub(crate) fn local_account_preferences(
             "simplified"
         },
     );
-    insert_bool(&mut settings, "platform.ios.nine_key", nine_key);
+    if let Some((_, _, nine_key)) = scheme {
+        insert_bool(&mut settings, "platform.ios.nine_key", nine_key);
+    }
     insert_bool(
         &mut settings,
         "platform.ios.sound_enabled",
@@ -106,12 +87,21 @@ pub(crate) fn local_account_preferences(
     settings.extend(frequency_account_preferences(&shared.frequency));
     insert_string(
         &mut settings,
-        "platform.ios.keyboard_skin",
-        &native.keyboard_skin,
+        "platform.ios.global_theme",
+        &native.global_theme,
     );
-    let custom = decoded_custom_skin(native.custom_keyboard_skin.as_deref(), fallback_custom_skin);
-    let custom = serde_json::to_string(&custom).map_err(|_| AccountError::Invalid)?;
-    insert_string(&mut settings, "platform.ios.custom_keyboard_skin", &custom);
+    insert_string(
+        &mut settings,
+        "platform.ios.custom_theme_base",
+        shared.custom_theme.base.id(),
+    );
+    // A custom theme without a keyboard design draws its base's keyboard; there is no design to upload then, and the cloud keeps whatever design it has.
+    if let Some(custom) =
+        decoded_custom_skin(native.custom_keyboard_skin.as_deref(), fallback_custom_skin)
+    {
+        let custom = serde_json::to_string(&custom).map_err(|_| AccountError::Invalid)?;
+        insert_string(&mut settings, "platform.ios.custom_keyboard_skin", &custom);
+    }
     Ok(settings)
 }
 
@@ -164,7 +154,8 @@ pub(crate) struct IosPreferencePlan {
     frequency_mode: Option<FrequencyMode>,
     frequency_trigger_count: Option<u8>,
     frequency_linear_step: Option<u8>,
-    keyboard_skin: Option<String>,
+    global_theme: Option<String>,
+    custom_theme_base: Option<GlobalTheme>,
     custom_keyboard_skin: Option<TouchKeyboardSkinDesign>,
 }
 
@@ -212,7 +203,9 @@ impl IosPreferencePlan {
                     .into(),
                 )
             }
-            Some(_) => return Err(AccountError::Invalid),
+            Some("korean") => Some("korean".into()),
+            // A scheme this host does not offer (a newer device's Cantonese, Zhuyin or Vietnamese) keeps the local one rather than refusing the whole sync, so the rest of the document still applies.
+            Some(_) => None,
         };
         let traditional_chinese_output =
             match string_setting(values, "input.character_set")?.as_deref() {
@@ -224,27 +217,24 @@ impl IosPreferencePlan {
         let haptic_strength = string_setting(values, "platform.ios.haptic_strength")?;
         if haptic_strength
             .as_deref()
-            .is_some_and(|value| !matches!(value, "light" | "medium" | "strong"))
+            .is_some_and(|value| !valid_mobile_haptic_strength(value))
         {
             return Err(AccountError::Invalid);
         }
-        let keyboard_skin = string_setting(values, "platform.ios.keyboard_skin")?;
-        if keyboard_skin.as_deref().is_some_and(|value| {
-            !matches!(
-                value,
-                "forest"
-                    | "ocean"
-                    | "rose"
-                    | "porcelain"
-                    | "typewriter"
-                    | "candy"
-                    | "midnight"
-                    | "blueprint"
-                    | "custom"
-            )
-        }) {
+        let global_theme = string_setting(values, "platform.ios.global_theme")?;
+        if global_theme
+            .as_deref()
+            .is_some_and(|value| GlobalTheme::from_id(value).is_none())
+        {
             return Err(AccountError::Invalid);
         }
+        let custom_theme_base = string_setting(values, "platform.ios.custom_theme_base")?
+            .map(|value| {
+                GlobalTheme::from_id(&value)
+                    .filter(|base| base.is_base())
+                    .ok_or(AccountError::Invalid)
+            })
+            .transpose()?;
         let custom_keyboard_skin = string_setting(values, "platform.ios.custom_keyboard_skin")?
             .map(|value| {
                 serde_json::from_str::<TouchKeyboardSkinDesign>(&value)
@@ -278,7 +268,8 @@ impl IosPreferencePlan {
             frequency_mode,
             frequency_trigger_count,
             frequency_linear_step,
-            keyboard_skin,
+            global_theme,
+            custom_theme_base,
             custom_keyboard_skin,
         })
     }
@@ -309,8 +300,8 @@ impl IosPreferencePlan {
         if let Some(value) = self.dictionary_learning {
             requested.dictionary_learning = value;
         }
-        if let Some(value) = &self.keyboard_skin {
-            requested.keyboard_skin.clone_from(value);
+        if let Some(value) = &self.global_theme {
+            requested.global_theme.clone_from(value);
         }
         if let Some(value) = &self.custom_keyboard_skin {
             requested.custom_keyboard_skin =
@@ -339,11 +330,15 @@ impl IosPreferencePlan {
         if self.dictionary_learning.is_some() {
             preferences.learning = native.dictionary_learning;
         }
-        if self.keyboard_skin.is_some() {
-            preferences.touch_keyboard_skin = touch_skin(&native.keyboard_skin)?;
+        if self.global_theme.is_some() {
+            preferences.global_theme =
+                GlobalTheme::from_id(&native.global_theme).ok_or(AccountError::Invalid)?;
+        }
+        if let Some(value) = self.custom_theme_base {
+            preferences.custom_theme.base = value;
         }
         if let Some(value) = &self.custom_keyboard_skin {
-            preferences.custom_touch_keyboard_skin = value.clone();
+            preferences.custom_theme.keyboard = Some(value.clone());
         }
         if let Some(value) = self.frequency_mode {
             preferences.frequency.mode = value;
@@ -371,23 +366,25 @@ fn touch_scheme(value: &str) -> Result<TouchKeyboardScheme, AccountError> {
         "japanese" => Ok(TouchKeyboardScheme::Japanese),
         "handwriting" => Ok(TouchKeyboardScheme::Handwriting),
         "thoughtfulReply" => Ok(TouchKeyboardScheme::ThoughtfulReply),
+        "korean" => Ok(TouchKeyboardScheme::Korean),
+        "cantonese" => Ok(TouchKeyboardScheme::Cantonese),
+        "zhuyin" => Ok(TouchKeyboardScheme::Zhuyin),
+        "vietnamese" => Ok(TouchKeyboardScheme::Vietnamese),
         _ => Err(AccountError::Invalid),
     }
 }
 
-fn touch_skin(value: &str) -> Result<TouchKeyboardSkin, AccountError> {
-    match value {
-        "forest" => Ok(TouchKeyboardSkin::Forest),
-        "ocean" => Ok(TouchKeyboardSkin::Ocean),
-        "rose" => Ok(TouchKeyboardSkin::Rose),
-        "porcelain" => Ok(TouchKeyboardSkin::Porcelain),
-        "typewriter" => Ok(TouchKeyboardSkin::Typewriter),
-        "candy" => Ok(TouchKeyboardSkin::Candy),
-        "midnight" => Ok(TouchKeyboardSkin::Midnight),
-        "blueprint" => Ok(TouchKeyboardSkin::Blueprint),
-        "custom" => Ok(TouchKeyboardSkin::Custom),
-        _ => Err(AccountError::Invalid),
-    }
+/// Keep the Chinese scheme a Japanese or Korean selection returns to; switching away from Japanese, Korean or Vietnamese keeps the one already remembered.
+fn remember_chinese_scheme(preferences: &mut Preferences) {
+    let chinese = match preferences.scheme {
+        InputScheme::Quanpin => ChineseScheme::Quanpin,
+        InputScheme::Shuangpin => ChineseScheme::Shuangpin,
+        InputScheme::Wubi => ChineseScheme::Wubi,
+        InputScheme::Cantonese => ChineseScheme::Cantonese,
+        InputScheme::Zhuyin => ChineseScheme::Zhuyin,
+        InputScheme::Japanese | InputScheme::Korean | InputScheme::Vietnamese => return,
+    };
+    preferences.last_chinese_scheme = Some(chinese);
 }
 
 fn select_touch_scheme(preferences: &mut Preferences, requested: TouchKeyboardScheme) {
@@ -421,14 +418,7 @@ fn select_touch_scheme(preferences: &mut Preferences, requested: TouchKeyboardSc
             preferences.touch_keyboard_layout = TouchKeyboardLayout::TwentySixKey;
         }
         TouchKeyboardScheme::Japanese | TouchKeyboardScheme::JapaneseNineKey => {
-            if preferences.scheme != InputScheme::Japanese {
-                preferences.last_chinese_scheme = Some(match preferences.scheme {
-                    InputScheme::Quanpin => ChineseScheme::Quanpin,
-                    InputScheme::Shuangpin => ChineseScheme::Shuangpin,
-                    InputScheme::Wubi => ChineseScheme::Wubi,
-                    InputScheme::Japanese => unreachable!(),
-                });
-            }
+            remember_chinese_scheme(preferences);
             preferences.scheme = InputScheme::Japanese;
             preferences.touch_keyboard_layout = if selected == TouchKeyboardScheme::JapaneseNineKey
             {
@@ -436,6 +426,26 @@ fn select_touch_scheme(preferences: &mut Preferences, requested: TouchKeyboardSc
             } else {
                 TouchKeyboardLayout::TwentySixKey
             };
+        }
+        TouchKeyboardScheme::Korean => {
+            remember_chinese_scheme(preferences);
+            preferences.scheme = InputScheme::Korean;
+            preferences.touch_keyboard_layout = TouchKeyboardLayout::TwentySixKey;
+        }
+        TouchKeyboardScheme::Vietnamese => {
+            remember_chinese_scheme(preferences);
+            preferences.scheme = InputScheme::Vietnamese;
+            preferences.touch_keyboard_layout = TouchKeyboardLayout::TwentySixKey;
+        }
+        TouchKeyboardScheme::Cantonese => {
+            preferences.scheme = InputScheme::Cantonese;
+            preferences.last_chinese_scheme = Some(ChineseScheme::Cantonese);
+            preferences.touch_keyboard_layout = TouchKeyboardLayout::TwentySixKey;
+        }
+        TouchKeyboardScheme::Zhuyin => {
+            preferences.scheme = InputScheme::Zhuyin;
+            preferences.last_chinese_scheme = Some(ChineseScheme::Zhuyin);
+            preferences.touch_keyboard_layout = TouchKeyboardLayout::TwentySixKey;
         }
         TouchKeyboardScheme::Wubi => {
             preferences.scheme = InputScheme::Wubi;
@@ -463,8 +473,8 @@ mod tests {
     use msime_client_core::account::{AccountError, AccountPreferenceValue, AccountPreferences};
     use msime_client_core::preferences::{
         InputScheme, Preferences, ShuangpinProfile, TouchKeyboardLayout, TouchKeyboardScheme,
-        TouchKeyboardSkin,
     };
+    use msime_client_core::skin::theme::GlobalTheme;
     use msime_tauri_mobile_platform::IosKeyboardPreferences;
     use std::collections::BTreeMap;
 
@@ -476,17 +486,129 @@ mod tests {
             haptics_enabled: true,
             haptic_strength: "strong".into(),
             english_suggestions: true,
+            candidate_palette_follows_desktop: false,
+            inline_preedit: false,
+            haptics_available: true,
+            tablet_full_keys: None,
             dictionary_learning: false,
-            keyboard_skin: "custom".into(),
+            global_theme: "custom".into(),
             custom_keyboard_skin: None,
         }
     }
 
     #[test]
+    fn cantonese_and_zhuyin_are_remembered_and_vietnamese_keeps_the_last_chinese_scheme() {
+        use msime_client_core::preferences::ChineseScheme;
+        for (scheme, remembered) in [
+            (InputScheme::Cantonese, Some(ChineseScheme::Cantonese)),
+            (InputScheme::Zhuyin, Some(ChineseScheme::Zhuyin)),
+            (InputScheme::Vietnamese, Some(ChineseScheme::Wubi)),
+        ] {
+            let mut preferences = Preferences {
+                scheme,
+                last_chinese_scheme: Some(ChineseScheme::Wubi),
+                ..Preferences::default()
+            };
+            super::remember_chinese_scheme(&mut preferences);
+            assert_eq!(preferences.last_chinese_scheme, remembered, "{scheme:?}");
+        }
+    }
+
+    #[test]
+    fn upload_leaves_out_the_schemes_the_cloud_cannot_carry() {
+        for scheme in ["cantonese", "zhuyin", "vietnamese"] {
+            let mut native = native();
+            native.input_scheme = scheme.into();
+            let settings =
+                local_account_preferences(&native, &Preferences::default(), None).unwrap();
+            assert!(!settings.contains_key("input.schema"), "{scheme}");
+            assert!(!settings.contains_key("input.shuangpin_schema"), "{scheme}");
+            assert!(!settings.contains_key("platform.ios.nine_key"), "{scheme}");
+            assert_eq!(
+                settings["input.character_set"],
+                AccountPreferenceValue::String("traditional".into()),
+                "{scheme}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_cantonese_zhuyin_and_vietnamese_touch_schemes_select_their_input_schemes() {
+        use msime_client_core::preferences::ChineseScheme;
+        for (native, touch, scheme, remembered) in [
+            (
+                "cantonese",
+                TouchKeyboardScheme::Cantonese,
+                InputScheme::Cantonese,
+                ChineseScheme::Cantonese,
+            ),
+            (
+                "zhuyin",
+                TouchKeyboardScheme::Zhuyin,
+                InputScheme::Zhuyin,
+                ChineseScheme::Zhuyin,
+            ),
+            (
+                "vietnamese",
+                TouchKeyboardScheme::Vietnamese,
+                InputScheme::Vietnamese,
+                ChineseScheme::Wubi,
+            ),
+        ] {
+            assert_eq!(super::touch_scheme(native), Ok(touch));
+            let mut preferences = Preferences {
+                scheme: InputScheme::Wubi,
+                last_chinese_scheme: Some(ChineseScheme::Wubi),
+                touch_keyboard_layout: TouchKeyboardLayout::NineKey,
+                ..Preferences::default()
+            };
+            preferences.touch_keyboard_schemes.enabled.insert(touch);
+            super::select_touch_scheme(&mut preferences, touch);
+            assert_eq!(preferences.touch_keyboard_schemes.selected, Some(touch));
+            assert_eq!(preferences.scheme, scheme, "{native}");
+            assert_eq!(
+                preferences.last_chinese_scheme,
+                Some(remembered),
+                "{native}"
+            );
+            assert_eq!(
+                preferences.touch_keyboard_layout,
+                TouchKeyboardLayout::TwentySixKey,
+                "{native}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_touch_scheme_that_is_not_enabled_falls_back_to_the_first_enabled_one() {
+        let mut preferences = Preferences::default();
+        assert!(!preferences
+            .touch_keyboard_schemes
+            .enabled
+            .contains(&TouchKeyboardScheme::Zhuyin));
+        super::select_touch_scheme(&mut preferences, TouchKeyboardScheme::Zhuyin);
+        assert_eq!(
+            preferences.touch_keyboard_schemes.selected,
+            Some(TouchKeyboardScheme::Quanpin)
+        );
+        assert_eq!(preferences.scheme, InputScheme::Quanpin);
+    }
+
+    #[test]
+    fn the_native_theme_allowlist_is_the_global_theme_ids() {
+        for theme in GlobalTheme::ALL {
+            let mut native = native();
+            native.global_theme = theme.id().into();
+            assert!(native.is_valid(), "{}", theme.id());
+        }
+        let mut native = native();
+        native.global_theme = "midnight".into();
+        assert!(!native.is_valid());
+    }
+
+    #[test]
     fn upload_maps_the_complete_apple_ios_preference_surface() {
-        let settings =
-            local_account_preferences(&native(), &Preferences::default(), &Default::default())
-                .unwrap();
+        let settings = local_account_preferences(&native(), &Preferences::default(), None).unwrap();
         assert_eq!(
             settings["input.schema"],
             AccountPreferenceValue::String("japanese".into())
@@ -504,11 +626,20 @@ mod tests {
             "platform.ios.haptics_enabled",
             "platform.ios.haptic_strength",
             "platform.ios.dictionary_learning",
-            "platform.ios.keyboard_skin",
-            "platform.ios.custom_keyboard_skin",
+            "platform.ios.global_theme",
+            "platform.ios.custom_theme_base",
         ] {
             assert!(settings.contains_key(key), "missing {key}");
         }
+        // No design anywhere: the key is left out rather than uploading a design nobody made.
+        assert!(!settings.contains_key("platform.ios.custom_keyboard_skin"));
+        let design = msime_client_core::preferences::TouchKeyboardSkinDesign::default();
+        let settings =
+            local_account_preferences(&native(), &Preferences::default(), Some(&design)).unwrap();
+        assert_eq!(
+            settings["platform.ios.custom_keyboard_skin"],
+            AccountPreferenceValue::String(serde_json::to_string(&design).unwrap())
+        );
         for key in [
             "input.frequency_mode",
             "input.frequency_trigger_count",
@@ -557,6 +688,20 @@ mod tests {
                 Err(AccountError::Invalid)
             );
         }
+        for base in ["custom", "fluent"] {
+            let invalid = AccountPreferences {
+                revision: 7,
+                settings: BTreeMap::from([(
+                    "platform.ios.custom_theme_base".into(),
+                    AccountPreferenceValue::String(base.into()),
+                )]),
+            };
+            assert_eq!(
+                IosPreferencePlan::from_cloud(&invalid),
+                Err(AccountError::Invalid),
+                "{base}"
+            );
+        }
     }
 
     #[test]
@@ -581,8 +726,12 @@ mod tests {
                     AccountPreferenceValue::Boolean(false),
                 ),
                 (
-                    "platform.ios.keyboard_skin".into(),
-                    AccountPreferenceValue::String("ocean".into()),
+                    "platform.ios.global_theme".into(),
+                    AccountPreferenceValue::String("night".into()),
+                ),
+                (
+                    "platform.ios.custom_theme_base".into(),
+                    AccountPreferenceValue::String("paper".into()),
                 ),
                 (
                     "input.frequency_mode".into(),
@@ -601,7 +750,7 @@ mod tests {
         let plan = IosPreferencePlan::from_cloud(&cloud).unwrap();
         let mut native = native();
         native.input_scheme = "japaneseNineKey".into();
-        native.keyboard_skin = "ocean".into();
+        native.global_theme = "night".into();
         let mut preferences = Preferences::default();
         preferences.clipboard_history = true;
         plan.apply_shared(&native, &mut preferences).unwrap();
@@ -616,7 +765,9 @@ mod tests {
         );
         assert!(preferences.traditional_chinese_output);
         assert!(!preferences.learning);
-        assert_eq!(preferences.touch_keyboard_skin, TouchKeyboardSkin::Ocean);
+        assert_eq!(preferences.global_theme, GlobalTheme::Night);
+        assert_eq!(preferences.custom_theme.base, GlobalTheme::Paper);
+        assert_eq!(preferences.custom_theme.keyboard, None);
         assert_eq!(preferences.frequency.mode.as_str(), "linear");
         assert_eq!(preferences.frequency.trigger_count, 7);
         assert_eq!(preferences.frequency.linear_step, 4);
@@ -640,6 +791,40 @@ mod tests {
         plan.apply_shared(&native, &mut preferences).unwrap();
         assert_eq!(preferences.scheme, InputScheme::Shuangpin);
         assert_eq!(preferences.shuangpin_profile, ShuangpinProfile::Microsoft);
+    }
+
+    #[test]
+    fn an_unknown_cloud_scheme_keeps_the_local_one_and_the_rest_applies() {
+        for unknown in ["cantonese", "zhuyin", "vietnamese", "esperanto"] {
+            let cloud = AccountPreferences {
+                revision: 11,
+                settings: BTreeMap::from([
+                    (
+                        "input.schema".into(),
+                        AccountPreferenceValue::String(unknown.into()),
+                    ),
+                    (
+                        "input.character_set".into(),
+                        AccountPreferenceValue::String("traditional".into()),
+                    ),
+                ]),
+            };
+            let plan = IosPreferencePlan::from_cloud(&cloud).unwrap();
+            let mut native = native();
+            native.input_scheme = "wubi".into();
+            native.traditional_chinese_output = false;
+            let requested = plan.requested_native(&native).unwrap();
+            assert_eq!(requested.input_scheme, "wubi", "{unknown}");
+            assert!(requested.traditional_chinese_output, "{unknown}");
+
+            let mut preferences = Preferences {
+                scheme: InputScheme::Wubi,
+                ..Preferences::default()
+            };
+            plan.apply_shared(&requested, &mut preferences).unwrap();
+            assert_eq!(preferences.scheme, InputScheme::Wubi, "{unknown}");
+            assert!(preferences.traditional_chinese_output, "{unknown}");
+        }
     }
 
     #[test]

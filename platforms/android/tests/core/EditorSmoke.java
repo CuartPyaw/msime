@@ -1,6 +1,6 @@
-import app.msime.client.EditorBridge;
-import app.msime.client.EditorPolicy;
-import app.msime.client.EnglishCapitalizationPolicy;
+import app.msime.android.EditorBridge;
+import app.msime.android.EditorPolicy;
+import app.msime.android.EnglishCapitalizationPolicy;
 import android.text.InputType;
 import java.util.ArrayList;
 import java.util.List;
@@ -37,6 +37,11 @@ public final class EditorSmoke {
         for (int type : new int[] {0, 2, 3, 0x81, 0x91, 0xe1, 0x80001}) check(!EditorPolicy.useEngine(type));
         check(EditorPolicy.allowLearning(0));
         check(!EditorPolicy.allowLearning(0x1000000));
+        // Key heatmap exclusion: text and numeric passwords, and fields that ask for no learning.
+        for (int type : new int[] {0x81, 0x91, 0xe1, 0x12}) check(EditorPolicy.excludesKeyStatistics(type, 0));
+        check(!EditorPolicy.excludesKeyStatistics(InputType.TYPE_CLASS_TEXT, 0));
+        check(!EditorPolicy.excludesKeyStatistics(InputType.TYPE_CLASS_NUMBER, 0));
+        check(EditorPolicy.excludesKeyStatistics(InputType.TYPE_CLASS_TEXT, 0x1000000));
         check(EditorPolicy.prefersLatin(InputType.TYPE_CLASS_TEXT
             | InputType.TYPE_TEXT_VARIATION_URI));
         check(EditorPolicy.prefersLatin(InputType.TYPE_CLASS_TEXT

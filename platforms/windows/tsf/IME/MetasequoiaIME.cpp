@@ -4,7 +4,7 @@
 #include "CandidateListUIPresenter.h"
 #include "CompositionProcessorEngine.h"
 #include "Compartment.h"
-#include "define.h"
+#include "Define.h"
 #include <debugapi.h>
 #include <namedpipeapi.h>
 #include <winnt.h>
@@ -17,12 +17,17 @@
 #include <vector>
 #include "FanyLog.h"
 #include "Ipc.h"
+#include "KeyPressStatisticsQueue.h"
 #include "CommonUtils.h"
 #include "Global/FanyDefines.h"
 #include "Utils/FanyUtils.h"
 #include "../Utils/PerfTimer.h"
 #include "../HostOptionsPaths.h"
+// The TSF sources use the Windows SDK max macro under MSVC; the Engine contract calls std::numeric_limits<...>::max(), which that macro would rewrite.
+#pragma push_macro("max")
+#undef max
 #include "keyboard_composition_pipe.h"
+#pragma pop_macro("max")
 
 #pragma comment(lib, "Shell32.lib")
 #pragma comment(lib, "Ole32.lib")
@@ -481,10 +486,13 @@ CMetasequoiaIME::CMetasequoiaIME()
     _deferredProjectedCaret = 0;
     _deferredProjectedCandidateActive = false;
     _deferredProjectedUnicodeMode = false;
+    _deferredProjectedKoreanHanjaListOpen = false;
     _deferredKeyFocusGeneration = 1;
     _deferredKeyDrainPosted = false;
     _serverUnavailableFallbackActive = false;
     _backspaceHoldArmed = false;
+    _passthroughStatsVirtualKey = 0;
+    _passthroughStatsMessageTime = 0;
     _shiftHotkeyArmed = false;
     _ctrlHotkeyArmed = false;
     _modifierHotkeyExpire = {};
@@ -519,7 +527,6 @@ CMetasequoiaIME::~CMetasequoiaIME()
         _pCandidateListUIPresenter = nullptr;
     }
     _DrainPendingCandidatePresenterCleanup();
-    DllRelease();
 
     /* 处理线程的清理 */
     if (_pIpcThread)
@@ -546,6 +553,8 @@ CMetasequoiaIME::~CMetasequoiaIME()
         CloseHandle(_ipcStopEvent);
         _ipcStopEvent = nullptr;
     }
+    // Last, so DllCanUnloadNow cannot report idle while the IPC thread is still joining.
+    DllRelease();
 }
 
 HRESULT CMetasequoiaIME::_RequestDeferredApplicationTextEditSession(_In_ ITfContext *pContext, WCHAR wch,
@@ -1142,7 +1151,11 @@ void CMetasequoiaIME::_RequestLocalSessionReset(_In_opt_ ITfContext *preferredCo
     {
         _KEYSTROKE_STATE keyState = {};
         keyState.Category = CATEGORY_COMPOSING;
-        keyState.Function = FUNCTION_CANCEL;
+        // A Korean syllable, a Zhuyin conversion or a Vietnamese word is text the user already wrote (scheme::CommitsOnBlur), so leaving the context commits it where every other composition is discarded.
+        keyState.Function =
+            msime::windows::scheme::CommitsOnBlur(Global::InputModeScheme.load(std::memory_order_relaxed))
+                ? FUNCTION_COMMIT_SYLLABLE
+                : FUNCTION_CANCEL;
         _localResetEditSessionQueued = true;
         _queuedLocalResetToken = resetToken;
         const HRESULT resetRequestHr =
@@ -1358,11 +1371,6 @@ STDAPI CMetasequoiaIME::ActivateEx(ITfThreadMgr *pThreadMgr, TfClientId tfClient
         Global::IsVSCodeLike = true;
     }
     */
-    // Set up IPC(named pipe)
-    // InitIpc();
-    // TODO: 去掉共享内存，只保留命名管道
-    // InitNamedpipe();
-
     Global::current_process_name = GetCurrentProcessName();
 
     if (!_InitThreadMgrEventSink())
@@ -1499,6 +1507,8 @@ ExitError:
 
 STDAPI CMetasequoiaIME::Deactivate()
 {
+    // The flush runs on the thread pool under its own loader reference, so it survives this tip going away. It is deliberately not waited for: TSF calls Deactivate the same way for a profile switch as for a closing thread and gives no exit signal to tell them apart, so a wait would stall every ordinary deactivation. A process that exits before the drain finishes loses at most the presses since the last focus-loss flush, capped by the 256-press and 30-second triggers.
+    FlushKeyPressStatistics();
     _SyncHostContextFocus(nullptr);
     _UninitBareShiftKeyboardHook();
     Global::HostUiLessMode = false;
@@ -1775,7 +1785,6 @@ void CMetasequoiaIME::IpcWorkerThread(CMetasequoiaIME *pIME)
         if (validFrame && buf.msg_type == Global::DataToTsfWorkerThreadMsgType::PagingCommaPeriodChanged)
         {
             // Accepted forms: "0", "1", "0|raw", "1|pinyin", "0|empty".
-            // Legacy clients only inspected data[0]; keep that contract.
             bool hasTerminator = false;
             for (const wchar_t ch : buf.data)
             {
@@ -1792,7 +1801,7 @@ void CMetasequoiaIME::IpcWorkerThread(CMetasequoiaIME *pIME)
             }
             else if (buf.data[1] == L'\0')
             {
-                // Legacy "0"/"1" payload.
+                // Paging flag without a preedit style.
             }
             else if (buf.data[1] == L'|')
             {
@@ -1808,7 +1817,6 @@ void CMetasequoiaIME::IpcWorkerThread(CMetasequoiaIME *pIME)
              buf.msg_type == Global::DataToTsfWorkerThreadMsgType::SmartPunctuationRepeatToChineseChanged ||
              buf.msg_type == Global::DataToTsfWorkerThreadMsgType::PairedPunctuationChanged ||
              buf.msg_type == Global::DataToTsfWorkerThreadMsgType::MicrosoftShuangpinChanged ||
-             buf.msg_type == Global::DataToTsfWorkerThreadMsgType::InputModeChanged ||
              buf.msg_type == Global::DataToTsfWorkerThreadMsgType::CapsLockChanged ||
              buf.msg_type == Global::DataToTsfWorkerThreadMsgType::TsfDiagnosticLogChanged))
         {
@@ -1823,6 +1831,11 @@ void CMetasequoiaIME::IpcWorkerThread(CMetasequoiaIME *pIME)
             }
             validFrame = hasTerminator && (buf.data[0] == L'0' || buf.data[0] == L'1') && buf.data[1] == L'\0';
         }
+        // The mode code is not a boolean: Korean and the schemes after it send '2' and up, which the boolean check above would drop and leave the previous mode keyed.
+        if (validFrame && buf.msg_type == Global::DataToTsfWorkerThreadMsgType::InputModeChanged)
+        {
+            validFrame = msime::windows::scheme::is_input_mode_payload(buf.data, std::size(buf.data));
+        }
         if (validFrame && buf.msg_type == Global::DataToTsfWorkerThreadMsgType::PunctuationLockChanged)
         {
             bool hasTerminator = false;
@@ -1835,7 +1848,6 @@ void CMetasequoiaIME::IpcWorkerThread(CMetasequoiaIME *pIME)
                 }
             }
             const bool validLock = buf.data[0] == L'0' || buf.data[0] == L'1' || buf.data[0] == L'2';
-            const bool legacyPayload = buf.data[1] == L'\0';
             const bool directPolicyPayload = buf.data[1] == L'|' && buf.data[2] == L's' &&
                                              (buf.data[3] == L'0' || buf.data[3] == L'1') &&
                                              buf.data[4] == L'd' &&
@@ -1843,7 +1855,7 @@ void CMetasequoiaIME::IpcWorkerThread(CMetasequoiaIME *pIME)
                                              buf.data[6] == L'l' &&
                                              (buf.data[7] == L'0' || buf.data[7] == L'1') &&
                                              buf.data[8] == L'\0';
-            validFrame = hasTerminator && validLock && (legacyPayload || directPolicyPayload);
+            validFrame = hasTerminator && validLock && directPolicyPayload;
         }
         if (validFrame && (buf.msg_type == Global::DataToTsfWorkerThreadMsgType::UpdateVoiceComposition ||
                            buf.msg_type == Global::DataToTsfWorkerThreadMsgType::CommitVoiceComposition))
@@ -1873,10 +1885,7 @@ void CMetasequoiaIME::IpcWorkerThread(CMetasequoiaIME *pIME)
             {
                 focusToken = _wcstoui64(buf.data, &end, 10);
             }
-            // Token 0 is a syntactically valid legacy/dummy activation marker,
-            // but it can never satisfy the nonzero focus barrier below. Treat
-            // it as a harmless stale frame instead of tearing down the healthy
-            // worker pipe.
+            // Token 0 parses but can never satisfy the nonzero focus barrier below. Treat it as a harmless stale frame instead of tearing down the healthy worker pipe.
             validFrame = hasTerminator && buf.data[0] != L'\0' && end && *end == L'\0';
         }
 
@@ -1994,9 +2003,18 @@ void CMetasequoiaIME::IpcWorkerThread(CMetasequoiaIME *pIME)
         {
             Global::MicrosoftShuangpinEnabled.store(buf.data[0] == L'1', std::memory_order_relaxed);
         }
+        else if (buf.msg_type == Global::DataToTsfWorkerThreadMsgType::LocalModeTriggersChanged)
+        {
+            const auto triggers = Global::ParseLocalModeTriggers(buf.data, std::size(buf.data));
+            Global::ExpressionModeEnabled.store(triggers.expression, std::memory_order_relaxed);
+            Global::CommandModeEnabled.store(triggers.command, std::memory_order_relaxed);
+            Global::MentionModeEnabled.store(triggers.mention, std::memory_order_relaxed);
+        }
         else if (buf.msg_type == Global::DataToTsfWorkerThreadMsgType::InputModeChanged)
         {
-            Global::JapaneseInputModeEnabled.store(buf.data[0] == L'1', std::memory_order_relaxed);
+            Global::InputModeScheme.store(
+                msime::windows::scheme::mode_scheme(msime::windows::scheme::input_mode_from_code(buf.data[0])),
+                std::memory_order_relaxed);
             const HWND ownerWindow = pIME->_msgWndHandle;
             if (ownerWindow && IsWindow(ownerWindow))
             {
@@ -2019,23 +2037,10 @@ void CMetasequoiaIME::IpcWorkerThread(CMetasequoiaIME *pIME)
                 lock = Global::PunctuationLock::AlwaysEnglish;
             }
             Global::PunctuationLockMode.store(lock, std::memory_order_relaxed);
-            if (buf.data[1] == L'|' && buf.data[2] == L's' && buf.data[4] == L'd' && buf.data[6] == L'l')
-            {
-                Global::SmartPunctuationSpaceConvertEnabled.store(buf.data[3] == L'1',
-                                                                  std::memory_order_relaxed);
-                Global::SmartPunctuationDirectDigitEnabled.store(buf.data[5] == L'1',
-                                                                  std::memory_order_relaxed);
-                Global::SmartPunctuationDirectLetterEnabled.store(buf.data[7] == L'1',
-                                                                   std::memory_order_relaxed);
-            }
-            else
-            {
-                // A legacy Server has no split policy; fail closed rather
-                // than retaining values from a previous extended frame.
-                Global::SmartPunctuationSpaceConvertEnabled.store(false, std::memory_order_relaxed);
-                Global::SmartPunctuationDirectDigitEnabled.store(false, std::memory_order_relaxed);
-                Global::SmartPunctuationDirectLetterEnabled.store(false, std::memory_order_relaxed);
-            }
+            // The frame was validated above as "<lock>|s<0|1>d<0|1>l<0|1>".
+            Global::SmartPunctuationSpaceConvertEnabled.store(buf.data[3] == L'1', std::memory_order_relaxed);
+            Global::SmartPunctuationDirectDigitEnabled.store(buf.data[5] == L'1', std::memory_order_relaxed);
+            Global::SmartPunctuationDirectLetterEnabled.store(buf.data[7] == L'1', std::memory_order_relaxed);
             const HWND ownerWindow = pIME->_msgWndHandle;
             if (ownerWindow && IsWindow(ownerWindow))
             {
@@ -2430,9 +2435,27 @@ LRESULT CALLBACK CMetasequoiaIME_WindowProc(HWND hWnd, UINT message, WPARAM wPar
             auto *engine = pIME->GetCompositionProcessorEngine();
             if (engine && engine->GetHostEngineAdapter() && engine->GetHostEngineAdapter()->valid())
             {
+                auto *host = engine->GetHostEngineAdapter();
+                const auto hostScheme = [host]() -> int {
+                    std::string raw, viewError;
+                    msime::tsf::EngineResult result;
+                    return host->view(&raw, &viewError) &&
+                                   msime::tsf::EngineSessionAdapter::parse_result(raw, &result, &viewError)
+                               ? static_cast<int>(result.view.scheme)
+                               : -1;
+                };
+                // A scheme switch discards the Engine's composition, but a Korean syllable, a Zhuyin conversion or a Vietnamese word is already on screen as text (scheme::CommitsOnBlur). Commit what the composition shows once the switch has happened, or the next key would replace it.
+                const int composingScheme = pIME->_IsComposing() && pIME->_pContext ? hostScheme() : -1;
                 std::string ignored, error;
-                (void)engine->GetHostEngineAdapter()->reload_preferences(
-                    msime::tsf::default_state_directory(), &ignored, &error);
+                (void)host->reload_preferences(msime::tsf::default_state_directory(), &ignored, &error);
+                if (msime::windows::scheme::CommitsOnBlur(composingScheme) && hostScheme() != composingScheme &&
+                    pIME->_IsComposing() && pIME->_pContext)
+                {
+                    _KEYSTROKE_STATE keyState = {};
+                    keyState.Category = CATEGORY_COMPOSING;
+                    keyState.Function = FUNCTION_COMMIT_SYLLABLE;
+                    (void)pIME->_InvokeKeyHandler(pIME->_pContext, 0, L'\0', 0, keyState, FANY_IME_NO_REQUEST_ID);
+                }
             }
             break;
         }
@@ -2513,11 +2536,6 @@ LRESULT CALLBACK CMetasequoiaIME_WindowProc(HWND hWnd, UINT message, WPARAM wPar
             pIME->_RefreshLanguageBarThemeIcons();
             break;
         }
-        break;
-    }
-    case WM_IMEActivation: {
-        // Retained only for message-number compatibility.  Main-pipe lifecycle
-        // messages no longer control floating-toolbar visibility.
         break;
     }
     case WM_ThreadFocus: {
@@ -2854,6 +2872,10 @@ LRESULT CALLBACK CMetasequoiaIME_WindowProc(HWND hWnd, UINT message, WPARAM wPar
             engine->SetPunctuationMode(pIME->_GetThreadMgr(), pIME->_GetClientId(), TRUE);
         }
         SendCurrentImeStatusSnapshot(pIME);
+        break;
+    }
+    case WM_ReplayKoreanSyllableKey: {
+        pIME->_RunKoreanSyllableKeyReplay(static_cast<UINT>(wParam));
         break;
     }
     case WM_PairedPunctuationCaretMove: {

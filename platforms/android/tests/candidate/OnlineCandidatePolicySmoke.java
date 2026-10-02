@@ -1,4 +1,4 @@
-import app.msime.client.OnlineCandidatePolicy;
+import app.msime.android.OnlineCandidatePolicy;
 import java.util.Arrays;
 import java.util.List;
 
@@ -37,6 +37,16 @@ public final class OnlineCandidatePolicySmoke {
             .equals(OnlineCandidatePolicy.signature(7, "ni'hao'ma", "fixture", true, "")));
         check(!OnlineCandidatePolicy.signature(7, "ni'hao", "fixture", true, "")
             .equals(OnlineCandidatePolicy.signature(7, "ni'hao", "other", true, "")));
+        check(!OnlineCandidatePolicy.signature(7, "a:b", "c", true, "")
+            .equals(OnlineCandidatePolicy.signature(7, "a", "b:c", true, "")));
+
+        // 失败请求只有仍属于当前会话和代次时才能重试；迟到失败不能清除新请求的签名。
+        String failed = signature(true, "");
+        check(OnlineCandidatePolicy.shouldReleaseAfterFailure(failed, failed, 4, 4, 7, 7));
+        check(!OnlineCandidatePolicy.shouldReleaseAfterFailure(failed,
+            signature(true, "{\"model\":\"new\"}"), 4, 4, 7, 7));
+        check(!OnlineCandidatePolicy.shouldReleaseAfterFailure(failed, failed, 3, 4, 7, 7));
+        check(!OnlineCandidatePolicy.shouldReleaseAfterFailure(failed, failed, 4, 4, 8, 7));
 
         // Provider order is kept, duplicates drop out, and the limit caps the result.
         check(OnlineCandidatePolicy.aiCandidates(

@@ -2,16 +2,17 @@
 //! Committed text is classified in memory and is never serialized.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::fs::{self, File, OpenOptions};
+use std::collections::{BTreeMap, HashSet};
+use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::SystemTime;
 use unicode_general_category::{get_general_category, GeneralCategory};
 use unicode_segmentation::UnicodeSegmentation;
 
-const MAX_RETAINED_DAYS: usize = 366;
-const MAX_DOCUMENT_BYTES: u64 = 1_048_576;
+/// Only a guard against loading a hostile or garbage file, not a retention limit. It must stay far above anything `Forever` can produce, because a document over it cannot be read at all and the whole history is lost with it; a day costs a few hundred bytes, so 64 MiB covers centuries.
+const MAX_DOCUMENT_BYTES: u64 = 64 * 1_048_576;
 const MAX_COMMIT_BYTES: usize = 40_000;
 const MAX_COMMIT_SCALARS: usize = 10_000;
 const MAX_COUNT: u64 = 9_000_000_000_000_000;
@@ -103,6 +104,10 @@ pub enum TypingSource {
     Shoudao,
     Wubi,
     Japanese,
+    Korean,
+    Cantonese,
+    Zhuyin,
+    Vietnamese,
     Handwriting,
     English,
     Local,
@@ -123,6 +128,10 @@ impl TypingSource {
             Self::Shoudao => "shoudao",
             Self::Wubi => "wubi",
             Self::Japanese => "japanese",
+            Self::Korean => "korean",
+            Self::Cantonese => "cantonese",
+            Self::Zhuyin => "zhuyin",
+            Self::Vietnamese => "vietnamese",
             Self::Handwriting => "handwriting",
             Self::English => "english",
             Self::Local => "local",
@@ -199,14 +208,14 @@ pub struct SelectionCounts {
 pub const RANKS: usize = 9;
 
 impl SelectionCounts {
-    fn add(&mut self, position: usize) -> Result<(), TypingStatisticsError> {
+    fn add(&mut self, position: usize, count: u64) -> Result<(), TypingStatisticsError> {
         if position == 0 {
             return Err(TypingStatisticsError::InvalidPosition);
         }
         if position > RANKS {
             self.beyond = self
                 .beyond
-                .checked_add(1)
+                .checked_add(count)
                 .filter(|count| *count <= MAX_COUNT)
                 .ok_or(TypingStatisticsError::CountExhausted)?;
             return Ok(());
@@ -216,7 +225,7 @@ impl SelectionCounts {
         }
         let slot = &mut self.ranks[position - 1];
         *slot = slot
-            .checked_add(1)
+            .checked_add(count)
             .filter(|count| *count <= MAX_COUNT)
             .ok_or(TypingStatisticsError::CountExhausted)?;
         Ok(())
@@ -228,6 +237,158 @@ impl SelectionCounts {
             .iter()
             .fold(self.beyond, |sum, count| sum.saturating_add(*count))
     }
+}
+
+/// Every key id `dailyKeys` may hold, and the only ones `record_keys` accepts.
+///
+/// W3C `KeyboardEvent.code` names for physical keys, so every desktop host and the settings page agree on one spelling without a translation table, plus the on-screen keys a soft keyboard has and a physical one does not. A soft 26-key letter is `KeyA`..`KeyZ`, its space, return, backspace and shift are `Space`, `Enter`, `Backspace` and `ShiftLeft`, and a symbol-layer key is the ANSI key that types that character. A key with no entry here is not counted at all: an id invented by one host would be a key no other host or page can draw, and a closed list is also what keeps a free-form string, and with it anything typed, out of the file.
+pub const KEY_IDS: &[&str] = &[
+    // Letters.
+    "KeyA",
+    "KeyB",
+    "KeyC",
+    "KeyD",
+    "KeyE",
+    "KeyF",
+    "KeyG",
+    "KeyH",
+    "KeyI",
+    "KeyJ",
+    "KeyK",
+    "KeyL",
+    "KeyM",
+    "KeyN",
+    "KeyO",
+    "KeyP",
+    "KeyQ",
+    "KeyR",
+    "KeyS",
+    "KeyT",
+    "KeyU",
+    "KeyV",
+    "KeyW",
+    "KeyX",
+    "KeyY",
+    "KeyZ",
+    // Digit row.
+    "Digit0",
+    "Digit1",
+    "Digit2",
+    "Digit3",
+    "Digit4",
+    "Digit5",
+    "Digit6",
+    "Digit7",
+    "Digit8",
+    "Digit9",
+    // ANSI punctuation.
+    "Backquote",
+    "Minus",
+    "Equal",
+    "BracketLeft",
+    "BracketRight",
+    "Backslash",
+    "Semicolon",
+    "Quote",
+    "Comma",
+    "Period",
+    "Slash",
+    // International layouts (ISO, JIS, Korean).
+    "IntlBackslash",
+    "IntlRo",
+    "IntlYen",
+    "Lang1",
+    "Lang2",
+    "Convert",
+    "NonConvert",
+    "KanaMode",
+    // Editing and whitespace.
+    "Space",
+    "Enter",
+    "Backspace",
+    "Tab",
+    "Escape",
+    "Delete",
+    "Insert",
+    "Home",
+    "End",
+    "PageUp",
+    "PageDown",
+    "ArrowUp",
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    // Modifiers.
+    "CapsLock",
+    "ShiftLeft",
+    "ShiftRight",
+    "ControlLeft",
+    "ControlRight",
+    "AltLeft",
+    "AltRight",
+    "MetaLeft",
+    "MetaRight",
+    "Fn",
+    "ContextMenu",
+    // Function row.
+    "F1",
+    "F2",
+    "F3",
+    "F4",
+    "F5",
+    "F6",
+    "F7",
+    "F8",
+    "F9",
+    "F10",
+    "F11",
+    "F12",
+    // Numeric keypad.
+    "Numpad0",
+    "Numpad1",
+    "Numpad2",
+    "Numpad3",
+    "Numpad4",
+    "Numpad5",
+    "Numpad6",
+    "Numpad7",
+    "Numpad8",
+    "Numpad9",
+    "NumpadDecimal",
+    "NumpadEnter",
+    "NumpadAdd",
+    "NumpadSubtract",
+    "NumpadMultiply",
+    "NumpadDivide",
+    "NumLock",
+    // On-screen keyboards only: the nine-key grid cells named by the digit printed on them (`Nine1` is the punctuation and separator cell), the nine-key side-column punctuation keys, and the symbol, layer, language, globe, emoji and voice keys.
+    "Nine0",
+    "Nine1",
+    "Nine2",
+    "Nine3",
+    "Nine4",
+    "Nine5",
+    "Nine6",
+    "Nine7",
+    "Nine8",
+    "Nine9",
+    "SoftPunctuation",
+    "SoftSymbol",
+    "SoftLayer",
+    "SoftLanguage",
+    "SoftGlobe",
+    "SoftEmoji",
+    "SoftVoice",
+];
+
+/// Whether `id` is one of [`KEY_IDS`].
+///
+/// A set rather than a scan of the list, because `validate` runs this for every key of every retained day on every read, and `Forever` retains years of them.
+pub fn is_known_key_id(id: &str) -> bool {
+    static KNOWN: OnceLock<HashSet<&'static str>> = OnceLock::new();
+    KNOWN
+        .get_or_init(|| KEY_IDS.iter().copied().collect())
+        .contains(id)
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -283,6 +444,13 @@ pub struct TypingStatistics {
     /// commit's instant, which is the only thing the gap can be measured against.
     #[serde(default)]
     pub last_commit_ms: u64,
+    /// Presses per key per local day: day, then a [`KEY_IDS`] entry, then how many times that key went down that day.
+    ///
+    /// Counts and nothing else. There is no hour, no order and no pairing of keys, because any of those would start to say what was typed rather than how hard each key works; a day of counts per key says only the latter. The day comes from the host for the same reason `record` takes one, and it is the day the presses happened on, not the day the host got round to flushing them.
+    ///
+    /// Not tied to `days`: keys are pressed on days that commit nothing (navigation, deleting, typing into an app with the input method in English), so a day may appear here and nowhere else. Absent from files written before this existed, which `default` reads as no key history.
+    #[serde(default)]
+    pub daily_keys: BTreeMap<String, BTreeMap<String, u64>>,
     /// How long recorded days are kept.
     #[serde(default, deserialize_with = "retention_or_forever")]
     pub retention: StatisticsRetention,
@@ -307,6 +475,7 @@ impl Default for TypingStatistics {
             selections: SelectionCounts::default(),
             daily_active_ms: BTreeMap::new(),
             daily_hours: BTreeMap::new(),
+            daily_keys: BTreeMap::new(),
             last_commit_ms: 0,
             retention: StatisticsRetention::Forever,
             last_pruned_day: String::new(),
@@ -331,13 +500,35 @@ impl TypingStatistics {
     }
 
     fn validate(&self) -> Result<(), TypingStatisticsError> {
-        if self.total > MAX_COUNT || self.days.len() > MAX_RETAINED_DAYS {
+        // No cap on the number of days: `Forever` keeps every day, as the baseline's stats_daily does, and the document size limit in `read_locked` is what bounds a file.
+        if self.total > MAX_COUNT {
+            return Err(TypingStatisticsError::InvalidDocument);
+        }
+        // A legacy document may keep a running total for days it no longer lists, so the
+        // retained days can add up to less than `total`. They can never add up to more: every
+        // recorded character increments both counters, and accepting the inverse would make a
+        // daily view report more characters than the aggregate it belongs to.
+        if self
+            .days
+            .values()
+            .try_fold(0_u64, |sum, count| sum.checked_add(*count))
+            .is_none_or(|sum| sum > self.total)
+        {
+            return Err(TypingStatisticsError::InvalidDocument);
+        }
+        if self.selections.ranks.len() > RANKS
+            || self.selections.beyond > MAX_COUNT
+            || self.selections.ranks.iter().any(|count| *count > MAX_COUNT)
+            || self
+                .selections
+                .ranks
+                .iter()
+                .try_fold(self.selections.beyond, |sum, count| sum.checked_add(*count))
+                .is_none_or(|sum| sum > MAX_COUNT)
+        {
             return Err(TypingStatisticsError::InvalidDocument);
         }
         validate_counts(&self.detail, self.total)?;
-        if self.daily_details.len() > MAX_RETAINED_DAYS {
-            return Err(TypingStatisticsError::InvalidDocument);
-        }
         for (day, count) in &self.days {
             validate_day(day)?;
             if *count > self.total {
@@ -351,11 +542,6 @@ impl TypingStatistics {
             .daily_details
             .keys()
             .any(|day| !self.days.contains_key(day))
-        {
-            return Err(TypingStatisticsError::InvalidDocument);
-        }
-        if self.daily_active_ms.len() > MAX_RETAINED_DAYS
-            || self.daily_hours.len() > MAX_RETAINED_DAYS
         {
             return Err(TypingStatisticsError::InvalidDocument);
         }
@@ -382,6 +568,11 @@ impl TypingStatistics {
                 return Err(TypingStatisticsError::InvalidDocument);
             }
         }
+        // Checked against the calendar rather than against `days`, which a key-only day is legitimately missing from.
+        for (day, keys) in &self.daily_keys {
+            validate_day(day).map_err(|_| TypingStatisticsError::InvalidDocument)?;
+            validate_key_counts(keys)?;
+        }
         Ok(())
     }
 
@@ -395,15 +586,48 @@ impl TypingStatistics {
         let Some(days) = self.retention.days() else {
             return;
         };
-        let Some(boundary) = day_before(today, days) else {
+        let Some(boundary) = crate::calendar::shift_day(today, -i64::from(days)) else {
             return;
         };
+        // Like the baseline's ClearThrough, which deletes the stats_daily rows its overview sums, a cleanup takes the pruned days out of the running totals too, so "累计", the category split and the daily average cover the retained window. A legacy day without a breakdown only lowers `total`; `breakdown(None)` reports the rest as unclassified.
+        for (_, count) in self.days.range(..boundary.clone()) {
+            self.total = self.total.saturating_sub(*count);
+        }
+        for (_, detail) in self.daily_details.range(..boundary.clone()) {
+            for (key, count) in &detail.characters {
+                if let Some(value) = self.detail.characters.get_mut(key) {
+                    *value = value.saturating_sub(*count);
+                }
+            }
+            for (key, count) in &detail.sources {
+                if let Some(value) = self.detail.sources.get_mut(key) {
+                    *value = value.saturating_sub(*count);
+                }
+            }
+        }
         self.days.retain(|day, _| *day >= boundary);
         self.daily_details.retain(|day, _| *day >= boundary);
         self.daily_active_ms.retain(|day, _| *day >= boundary);
         self.daily_hours.retain(|day, _| *day >= boundary);
-        // `total` and `detail` are lifetime counters the page shows as "累计"; the baseline keeps
-        // its own running totals across a cleanup too. Only the per-day axes are windowed.
+        self.daily_keys.retain(|day, _| *day >= boundary);
+        // Subtraction keeps whatever `total` and `detail` hold beyond the per-day records, which a document written by an older build can have. Where that leaves the counters out of step with each other - `total` below the retained days, or a category sum above `total` - validate() would reject the document this write produces, so fall back to what the retained days themselves say.
+        let retained = self
+            .days
+            .values()
+            .fold(0_u64, |sum, count| sum.saturating_add(*count));
+        self.total = self.total.max(retained);
+        let sum = |values: &BTreeMap<String, u64>| {
+            values
+                .values()
+                .fold(0_u64, |sum, count| sum.saturating_add(*count))
+        };
+        if sum(&self.detail.characters) > self.total || sum(&self.detail.sources) > self.total {
+            let mut rebuilt = TypingBreakdown::default();
+            for detail in self.daily_details.values() {
+                let _ = rebuilt.merge(detail);
+            }
+            self.detail = rebuilt;
+        }
     }
 
     /// Active milliseconds recorded for `day`, or `None` when that day predates the measurement.
@@ -433,6 +657,8 @@ pub enum TypingStatisticsError {
     CountExhausted,
     #[error("candidate position is not one-based")]
     InvalidPosition,
+    #[error("typing statistics key id is unknown or its count is zero")]
+    InvalidKey,
 }
 
 #[derive(Clone, Debug)]
@@ -457,29 +683,36 @@ impl TypingStatisticsStore {
     }
 
     fn lock(&self) -> Result<File, TypingStatisticsError> {
-        fs::create_dir_all(&self.directory)?;
-        let lock = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(self.directory.join("typing-statistics.lock"))?;
+        if let Some(parent) = self.directory.parent() {
+            crate::storage::reject_symlink(parent)?;
+        }
+        if !crate::storage::create_directory_and_check(&self.directory)? {
+            return Err(TypingStatisticsError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "typing statistics directory is not a real directory",
+            )));
+        }
+        let lock = crate::file_lock::open_lock_file(self.directory.join("typing-statistics.lock"))?;
         crate::file_lock::exclusive(&lock)?;
         Ok(lock)
     }
 
     fn read_locked(&self) -> Result<TypingStatistics, TypingStatisticsError> {
         let path = self.path();
-        let bytes = match fs::read(&path) {
-            Ok(bytes) => bytes,
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(TypingStatistics::default());
             }
             Err(error) => return Err(error.into()),
         };
-        if bytes.len() as u64 > MAX_DOCUMENT_BYTES {
+        if !metadata.file_type().is_file() {
             return Err(TypingStatisticsError::InvalidDocument);
         }
+        let bytes =
+            crate::bounded_io::read_bounded_file(File::open(&path)?, MAX_DOCUMENT_BYTES, || {
+                TypingStatisticsError::InvalidDocument
+            })?;
         let value: TypingStatistics = serde_json::from_slice(&bytes)?;
         value.validate()?;
         Ok(value)
@@ -497,39 +730,16 @@ impl TypingStatisticsStore {
             .map_err(|error| TypingStatisticsError::Io(error.error))
     }
 
-    /// Moves a valid legacy statistics document into this store without
-    /// replacing a document already created by the shared host.
-    pub fn migrate_from(
-        &self,
-        legacy_directory: impl AsRef<Path>,
-    ) -> Result<bool, TypingStatisticsError> {
-        let legacy_directory = legacy_directory.as_ref();
-        if legacy_directory == self.directory {
-            return Ok(false);
-        }
-        let _destination_lock = self.lock()?;
-        if self.path().try_exists()? {
-            return Ok(false);
-        }
-
-        let legacy = Self::new(legacy_directory);
-        let _legacy_lock = legacy.lock()?;
-        if self.path().try_exists()? || !legacy.path().try_exists()? {
-            return Ok(false);
-        }
-        let _ = legacy.read_locked()?;
-        fs::rename(legacy.path(), self.path())?;
-        Ok(true)
-    }
-
     pub fn load(&self) -> Result<TypingStatistics, TypingStatisticsError> {
         let _lock = self.lock()?;
         self.read_locked()
     }
 
     pub fn last_written(&self) -> Result<Option<SystemTime>, TypingStatisticsError> {
-        match fs::metadata(self.path()) {
-            Ok(metadata) => Ok(metadata.modified().ok()),
+        crate::storage::reject_symlink(&self.directory)?;
+        match fs::symlink_metadata(self.path()) {
+            Ok(metadata) if metadata.file_type().is_file() => Ok(metadata.modified().ok()),
+            Ok(_) => Err(TypingStatisticsError::InvalidDocument),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(error) => Err(error.into()),
         }
@@ -629,15 +839,10 @@ impl TypingStatisticsStore {
                 .ok_or(TypingStatisticsError::CountExhausted)?;
         }
 
-        while value.days.len() > MAX_RETAINED_DAYS {
-            let oldest = value.days.keys().next().cloned().expect("nonempty days");
-            value.days.remove(&oldest);
-            value.daily_details.remove(&oldest);
-            value.daily_active_ms.remove(&oldest);
-            value.daily_hours.remove(&oldest);
-        }
-        // On the first write of each day, as the baseline does. Doing it on every write would
-        // read the whole history on every commit for a boundary that moves once a day.
+        // The retention setting is the only thing that deletes days, matching the baseline's
+        // RetentionCutoff/ClearThrough: `Forever` keeps every one, and `MAX_DOCUMENT_BYTES` is what
+        // bounds the file. It runs on the first write of each day; doing it on every write would
+        // read the whole history on every commit.
         if value.last_pruned_day != day {
             value.apply_retention(day);
             value.last_pruned_day = day.to_owned();
@@ -653,14 +858,71 @@ impl TypingStatisticsStore {
     /// the lock are shared, so turning statistics off turns this off with them and no second
     /// switch appears in settings for a user to misread.
     pub fn record_selection(&self, position: usize) -> Result<(), TypingStatisticsError> {
+        self.record_selections(&[(position, 1)])
+    }
+
+    /// Count several commits at once, each `(position, count)` pair adding `count` commits from that one-based position, under one lock, one read and at most one write.
+    ///
+    /// This is what lets a host keep selections in memory and hand them over in batches instead of paying a full read, fsync and rename per selection. An empty batch touches nothing on disk. The batch is applied whole or not at all: an invalid position or an exhausted count leaves the document as it was. Statistics being off drops the batch without writing, the same answer `record_selection` gives.
+    pub fn record_selections(
+        &self,
+        selections: &[(usize, u64)],
+    ) -> Result<(), TypingStatisticsError> {
+        if selections.iter().all(|(_, count)| *count == 0) {
+            return Ok(());
+        }
         let _lock = self.lock()?;
         let mut value = self.read_locked()?;
         if !value.enabled {
             return Ok(());
         }
-        value.selections.add(position)?;
+        for &(position, count) in selections {
+            value.selections.add(position, count)?;
+        }
         self.write_locked(&value)?;
         Ok(())
+    }
+
+    /// Count key presses for `day`, each entry adding `count` presses of one [`KEY_IDS`] key, under one lock, one read and at most one write. Returns how many presses were added.
+    ///
+    /// `day` is the local day the presses happened on. A host that batches across midnight flushes the old day's counts under the old day before it counts anything for the new one; stamping them with the day of the flush would move typing onto a day it did not happen on.
+    ///
+    /// The batch is applied whole or not at all. An unknown key id or a zero count rejects it before the document is opened, because either one means the host is sending something this contract does not describe, and keeping the valid part would hide that. An empty batch touches nothing on disk, and statistics being off drops the batch without writing, the same answers `record_selections` gives. Retention runs on the first write of a day, exactly as `record` does it.
+    pub fn record_keys(
+        &self,
+        day: &str,
+        keys: &BTreeMap<String, u64>,
+    ) -> Result<u64, TypingStatisticsError> {
+        validate_day(day)?;
+        if keys
+            .iter()
+            .any(|(key, count)| *count == 0 || !is_known_key_id(key))
+        {
+            return Err(TypingStatisticsError::InvalidKey);
+        }
+        let presses = keys
+            .values()
+            .try_fold(0_u64, |sum, count| sum.checked_add(*count))
+            .filter(|sum| *sum <= MAX_COUNT)
+            .ok_or(TypingStatisticsError::CountExhausted)?;
+        if presses == 0 {
+            return Ok(0);
+        }
+        let _lock = self.lock()?;
+        let mut value = self.read_locked()?;
+        if !value.enabled {
+            return Ok(0);
+        }
+        let day_keys = value.daily_keys.entry(day.to_owned()).or_default();
+        for (key, count) in keys {
+            checked_increment(day_keys, key, *count)?;
+        }
+        if value.last_pruned_day != day {
+            value.apply_retention(day);
+            value.last_pruned_day = day.to_owned();
+        }
+        self.write_locked(&value)?;
+        Ok(presses)
     }
 
     pub fn set_enabled(&self, enabled: bool) -> Result<TypingStatistics, TypingStatisticsError> {
@@ -704,6 +966,7 @@ impl TypingStatisticsStore {
         value.selections = SelectionCounts::default();
         value.daily_active_ms.clear();
         value.daily_hours.clear();
+        value.daily_keys.clear();
         // Including when typing last happened: it is the only field that survives a reset by
         // saying anything about the user at all.
         value.last_commit_ms = 0;
@@ -770,64 +1033,24 @@ fn validate_counts(value: &TypingBreakdown, total: u64) -> Result<(), TypingStat
     Ok(())
 }
 
-/// The day key `days` days before `day`, or `None` when `day` is not a date.
+/// A day's key counts: whitelisted ids only, so never more entries than [`KEY_IDS`] has, each within `MAX_COUNT`.
 ///
-/// Days-since-epoch arithmetic on the calendar fields, so it stays correct across months, years
-/// and leap days without pulling a timezone into a pure function.
-fn day_before(day: &str, days: u32) -> Option<String> {
-    let year: i64 = day.get(0..4)?.parse().ok()?;
-    let month: i64 = day.get(5..7)?.parse().ok()?;
-    let date: i64 = day.get(8..10)?.parse().ok()?;
-    let shifted = days_from_civil(year, month, date).checked_sub(i64::from(days))?;
-    let (year, month, date) = civil_from_days(shifted);
-    Some(format!("{year:04}-{month:02}-{date:02}"))
-}
-
-/// Howard Hinnant's civil-date algorithms, for a proleptic Gregorian calendar.
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let year_of_era = (year - era * 400) as u64;
-    let month_position = if month > 2 { month - 3 } else { month + 9 } as u64;
-    let day_of_year = (153 * month_position + 2) / 5 + day as u64 - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    era * 146_097 + day_of_era as i64 - 719_468
-}
-
-fn civil_from_days(days: i64) -> (i64, i64, i64) {
-    let days = days + 719_468;
-    let era = if days >= 0 { days } else { days - 146_096 } / 146_097;
-    let day_of_era = (days - era * 146_097) as u64;
-    let year_of_era =
-        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let year = year_of_era as i64 + era * 400;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_position = (5 * day_of_year + 2) / 153;
-    let day = (day_of_year - (153 * month_position + 2) / 5 + 1) as i64;
-    let month = if month_position < 10 {
-        month_position + 3
-    } else {
-        month_position - 9
-    } as i64;
-    (if month <= 2 { year + 1 } else { year }, month, day)
+/// Not compared with the day's character count. Presses and committed characters measure different things — a pinyin syllable is several presses for one character, a deletion is a press for none — so neither bounds the other.
+fn validate_key_counts(keys: &BTreeMap<String, u64>) -> Result<(), TypingStatisticsError> {
+    if keys.len() > KEY_IDS.len()
+        || keys
+            .iter()
+            .any(|(key, count)| *count > MAX_COUNT || !is_known_key_id(key))
+    {
+        return Err(TypingStatisticsError::InvalidDocument);
+    }
+    Ok(())
 }
 
 fn validate_day(day: &str) -> Result<(), TypingStatisticsError> {
-    let bytes = day.as_bytes();
-    let valid = bytes.len() == 10
-        && bytes[4] == b'-'
-        && bytes[7] == b'-'
-        && bytes
-            .iter()
-            .enumerate()
-            .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit())
-        && day[5..7]
-            .parse::<u8>()
-            .is_ok_and(|month| (1..=12).contains(&month))
-        && day[8..10]
-            .parse::<u8>()
-            .is_ok_and(|date| (1..=31).contains(&date));
-    valid.then_some(()).ok_or(TypingStatisticsError::InvalidDay)
+    crate::calendar::is_valid_day(day)
+        .then_some(())
+        .ok_or(TypingStatisticsError::InvalidDay)
 }
 
 fn classify(grapheme: &str) -> &'static str {
@@ -894,510 +1117,10 @@ fn is_emoji(grapheme: &str) -> bool {
 }
 
 #[cfg(test)]
-mod selection_tests {
-    use super::*;
-
-    fn store() -> (tempfile::TempDir, TypingStatisticsStore) {
-        let directory = tempfile::tempdir().expect("tempdir");
-        let store = TypingStatisticsStore::new(directory.path());
-        // These tests are about counting, not about the default. Statistics ship off.
-        store.set_enabled(true).expect("enable");
-        (directory, store)
-    }
-
-    #[test]
-    fn counts_by_position_and_folds_the_tail() {
-        let (_directory, store) = store();
-        for position in [1, 1, 1, 2, 9, 10, 40] {
-            store.record_selection(position).expect("record");
-        }
-        let value = store.load().expect("load");
-        assert_eq!(value.selections.ranks[0], 3);
-        assert_eq!(value.selections.ranks[1], 1);
-        assert_eq!(value.selections.ranks[8], 1);
-        // Tenth and fortieth are both past a page and are not told apart.
-        assert_eq!(value.selections.beyond, 2);
-        assert_eq!(value.selections.total(), 7);
-    }
-
-    #[test]
-    fn rejects_a_zero_position() {
-        let (_directory, store) = store();
-        assert!(matches!(
-            store.record_selection(0),
-            Err(TypingStatisticsError::InvalidPosition)
-        ));
-    }
-
-    #[test]
-    fn the_shared_switch_and_reset_cover_it() {
-        let (_directory, store) = store();
-        store.record_selection(1).expect("record");
-        store.set_enabled(false).expect("disable");
-        store.record_selection(1).expect("record while off");
-        assert_eq!(store.load().expect("load").selections.total(), 1);
-
-        store.set_enabled(true).expect("enable");
-        store.record_selection(3).expect("record");
-        let value = store.reset().expect("reset");
-        assert_eq!(value.selections.total(), 0);
-    }
-
-    #[test]
-    fn a_file_written_before_this_existed_still_loads() {
-        let (directory, store) = store();
-        std::fs::write(
-            directory.path().join("typing-statistics.json"),
-            br#"{"enabled":true,"total":5,"days":{},"detail":{},"dailyDetails":{}}"#,
-        )
-        .expect("write");
-        let value = store.load().expect("load");
-        assert_eq!(value.total, 5);
-        assert_eq!(value.selections.total(), 0);
-    }
-}
+mod key_tests;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Arc;
+mod selection_tests;
 
-    #[test]
-    fn records_graphemes_categories_and_sources_without_text() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = TypingStatisticsStore::new(directory.path());
-        store.set_enabled(true).unwrap();
-        assert_eq!(
-            store
-                .record(
-                    "汉𠮷Aée\u{301}９1，!👨‍👩‍👧‍👦1️⃣あЖ+ \n",
-                    TypingSource::NineKey,
-                    "2026-09-07",
-                    Some(9),
-                )
-                .unwrap(),
-            14
-        );
-        let value = store.load().unwrap();
-        assert_eq!(value.total, 14);
-        assert_eq!(value.detail.characters["han"], 2);
-        assert_eq!(value.detail.characters["latin"], 3);
-        assert_eq!(value.detail.characters["number"], 2);
-        assert_eq!(value.detail.characters["punctuation"], 2);
-        assert_eq!(value.detail.characters["emoji"], 2);
-        assert_eq!(value.detail.characters["otherLetter"], 2);
-        assert_eq!(value.detail.characters["symbol"], 1);
-        assert_eq!(value.detail.sources["nineKey"], 14);
-        let persisted =
-            fs::read_to_string(directory.path().join("typing-statistics.json")).unwrap();
-        assert!(!persisted.contains('汉'));
-        assert!(persisted.contains("nineKey\":14"));
-    }
-
-    #[test]
-    fn migrates_legacy_totals_and_preserves_pause_on_reset() {
-        let directory = tempfile::tempdir().unwrap();
-        fs::write(
-            directory.path().join("typing-statistics.json"),
-            r#"{"enabled":true,"total":12,"days":{"2026-09-07":12}}"#,
-        )
-        .unwrap();
-        let store = TypingStatisticsStore::new(directory.path());
-        let legacy = store.load().unwrap();
-        assert_eq!(legacy.breakdown(None).characters["unknown"], 12);
-        store.set_enabled(false).unwrap();
-        assert_eq!(
-            store
-                .record("ignored", TypingSource::English, "2026-09-07", Some(9))
-                .unwrap(),
-            0
-        );
-        assert_eq!(store.load().unwrap().total, 12);
-        let reset = store.reset().unwrap();
-        assert!(!reset.enabled);
-        assert_eq!(reset.total, 0);
-        assert!(reset.days.is_empty());
-    }
-
-    #[test]
-    fn moves_a_valid_legacy_store_without_replacing_shared_statistics() {
-        let root = tempfile::tempdir().unwrap();
-        let legacy = TypingStatisticsStore::new(root.path());
-        legacy.set_enabled(true).unwrap();
-        legacy
-            .record("old", TypingSource::English, "2026-09-07", Some(9))
-            .unwrap();
-        let shared_directory = root.path().join("MSIME");
-        let shared = TypingStatisticsStore::new(&shared_directory);
-
-        assert!(shared.migrate_from(root.path()).unwrap());
-        assert!(!root.path().join("typing-statistics.json").exists());
-        assert_eq!(shared.load().unwrap().total, 3);
-
-        // Its document was moved away, so as far as the store is concerned this is a fresh
-        // profile again - and a fresh profile has statistics off.
-        legacy.set_enabled(true).unwrap();
-        legacy
-            .record("legacy", TypingSource::English, "2026-09-08", Some(9))
-            .unwrap();
-        assert!(!shared.migrate_from(root.path()).unwrap());
-        assert_eq!(shared.load().unwrap().total, 3);
-        assert_eq!(legacy.load().unwrap().total, 6);
-    }
-
-    #[test]
-    fn serializes_writers_and_bounds_daily_history() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = Arc::new(TypingStatisticsStore::new(directory.path()));
-        store.set_enabled(true).unwrap();
-        let writers = (0..50)
-            .map(|_| {
-                let store = Arc::clone(&store);
-                std::thread::spawn(move || {
-                    store
-                        .record("字", TypingSource::Quanpin, "2026-01-01", Some(9))
-                        .unwrap();
-                })
-            })
-            .collect::<Vec<_>>();
-        for writer in writers {
-            writer.join().unwrap();
-        }
-        for offset in 1..=370 {
-            let year = 2026 + (offset / 336);
-            let day_of_year = offset % 336;
-            let month = day_of_year / 28 + 1;
-            let day = day_of_year % 28 + 1;
-            store
-                .record(
-                    "字",
-                    TypingSource::Quanpin,
-                    &format!("{year:04}-{month:02}-{day:02}"),
-                    Some(9),
-                )
-                .unwrap();
-        }
-        let value = store.load().unwrap();
-        assert_eq!(value.days.len(), MAX_RETAINED_DAYS);
-        assert_eq!(value.daily_details.len(), MAX_RETAINED_DAYS);
-        assert_eq!(value.total, 420);
-        assert_eq!(value.detail.characters["han"], 420);
-    }
-
-    #[test]
-    fn rejects_invalid_dates_and_documents_without_overwriting() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = TypingStatisticsStore::new(directory.path());
-        assert!(matches!(
-            store.record("x", TypingSource::English, "2026-13-01", Some(9)),
-            Err(TypingStatisticsError::InvalidDay)
-        ));
-        let path = directory.path().join("typing-statistics.json");
-        fs::write(&path, r#"{"enabled":true,"total":1,"days":{},"detail":{"characters":{"latin":2},"sources":{}},"dailyDetails":{}}"#).unwrap();
-        assert!(matches!(
-            store.load(),
-            Err(TypingStatisticsError::InvalidDocument)
-        ));
-        assert!(fs::read_to_string(path).unwrap().contains("\"latin\":2"));
-    }
-
-    #[test]
-    fn active_time_counts_only_the_gaps_that_are_still_typing() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = TypingStatisticsStore::new(directory.path());
-        store.set_enabled(true).unwrap();
-        let day = "2026-09-21";
-        // The first commit has nothing to measure against, so it contributes no active time -
-        // otherwise the epoch itself would be counted as one enormous pause.
-        store
-            .record_at("a", TypingSource::Quanpin, day, Some(9), 1_000)
-            .unwrap();
-        assert_eq!(store.load().unwrap().active_ms(day), None);
-
-        store
-            .record_at("b", TypingSource::Quanpin, day, Some(9), 4_000)
-            .unwrap();
-        assert_eq!(store.load().unwrap().active_ms(day), Some(3_000));
-
-        // Exactly at the limit still counts; one millisecond past it is a break.
-        store
-            .record_at(
-                "c",
-                TypingSource::Quanpin,
-                day,
-                Some(9),
-                4_000 + ACTIVE_GAP_LIMIT_MS,
-            )
-            .unwrap();
-        assert_eq!(
-            store.load().unwrap().active_ms(day),
-            Some(3_000 + ACTIVE_GAP_LIMIT_MS)
-        );
-        let after_break = 4_000 + ACTIVE_GAP_LIMIT_MS + ACTIVE_GAP_LIMIT_MS + 1;
-        store
-            .record_at("d", TypingSource::Quanpin, day, Some(9), after_break)
-            .unwrap();
-        assert_eq!(
-            store.load().unwrap().active_ms(day),
-            Some(3_000 + ACTIVE_GAP_LIMIT_MS)
-        );
-
-        // A clock set backwards adds nothing and does not move the mark backwards; the next
-        // commit at a sane instant must not be measured against the rolled-back one.
-        store
-            .record_at("e", TypingSource::Quanpin, day, Some(9), 500)
-            .unwrap();
-        let rolled_back = store.load().unwrap();
-        assert_eq!(
-            rolled_back.active_ms(day),
-            Some(3_000 + ACTIVE_GAP_LIMIT_MS)
-        );
-        assert_eq!(rolled_back.last_commit_ms, after_break);
-
-        // Two commits in the same millisecond are not a gap.
-        store
-            .record_at("f", TypingSource::Quanpin, day, Some(9), after_break)
-            .unwrap();
-        assert_eq!(
-            store.load().unwrap().active_ms(day),
-            Some(3_000 + ACTIVE_GAP_LIMIT_MS)
-        );
-    }
-
-    #[test]
-    fn hourly_buckets_come_from_the_host_and_are_optional() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = TypingStatisticsStore::new(directory.path());
-        store.set_enabled(true).unwrap();
-        let day = "2026-09-21";
-        store
-            .record_at("ab", TypingSource::Quanpin, day, Some(0), 1_000)
-            .unwrap();
-        store
-            .record_at("c", TypingSource::Quanpin, day, Some(23), 2_000)
-            .unwrap();
-        // No hour: the characters still count, the day simply has no breakdown for them. The
-        // buckets are therefore a subset of the day's total, never equal to it in general.
-        store
-            .record_at("de", TypingSource::Quanpin, day, None, 3_000)
-            .unwrap();
-        // Out of range is dropped rather than folded into a neighbouring hour, which would put
-        // typing on the chart at a time it did not happen.
-        store
-            .record_at("f", TypingSource::Quanpin, day, Some(24), 4_000)
-            .unwrap();
-
-        let value = store.load().unwrap();
-        let hours = value.hours(day).unwrap();
-        assert_eq!(hours.len(), HOURS);
-        assert_eq!(hours[0], 2);
-        assert_eq!(hours[23], 1);
-        assert_eq!(hours.iter().sum::<u64>(), 3);
-        assert_eq!(value.days[day], 6);
-        assert_eq!(value.hours("2026-09-20"), None);
-    }
-
-    #[test]
-    fn retention_and_reset_take_the_activity_axes_with_them() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = TypingStatisticsStore::new(directory.path());
-        store.set_enabled(true).unwrap();
-        // 28-day months and 12-month years, so the synthetic calendar stays valid past the
-        // retention limit without pulling in a date library.
-        for offset in 0..=MAX_RETAINED_DAYS {
-            let day = format!(
-                "{:04}-{:02}-{:02}",
-                2026 + offset / 336,
-                (offset % 336) / 28 + 1,
-                offset % 28 + 1
-            );
-            store
-                .record_at(
-                    "字",
-                    TypingSource::Quanpin,
-                    &day,
-                    Some(9),
-                    1_000 + offset as u64 * 500,
-                )
-                .unwrap();
-        }
-        let value = store.load().unwrap();
-        assert_eq!(value.days.len(), MAX_RETAINED_DAYS);
-        // Pruning a day has to drop every axis keyed by it, or validate() rejects the document
-        // it just wrote and the user loses the whole history to a stale entry.
-        assert!(value.daily_active_ms.len() <= MAX_RETAINED_DAYS);
-        assert!(value.daily_hours.len() <= MAX_RETAINED_DAYS);
-        assert!(value
-            .daily_active_ms
-            .keys()
-            .all(|day| value.days.contains_key(day)));
-        assert!(value
-            .daily_hours
-            .keys()
-            .all(|day| value.days.contains_key(day)));
-        assert!(store.load().is_ok());
-
-        let reset = store.reset().unwrap();
-        assert!(reset.daily_active_ms.is_empty());
-        assert!(reset.daily_hours.is_empty());
-        // Reset means reset: when typing last happened is the one field that would otherwise
-        // survive and still say something about the user.
-        assert_eq!(reset.last_commit_ms, 0);
-    }
-
-    #[test]
-    fn the_retention_boundary_is_calendar_arithmetic() {
-        // Across a month, a year and a leap day, which is what a subtraction on the day number
-        // alone would get wrong.
-        assert_eq!(day_before("2026-09-21", 0).as_deref(), Some("2026-09-21"));
-        assert_eq!(day_before("2026-09-21", 30).as_deref(), Some("2026-08-22"));
-        assert_eq!(day_before("2026-01-05", 30).as_deref(), Some("2025-12-06"));
-        // 2028 is a leap year: 2028-03-01 minus one day is the 29th.
-        assert_eq!(day_before("2028-03-01", 1).as_deref(), Some("2028-02-29"));
-        assert_eq!(day_before("2026-03-01", 1).as_deref(), Some("2026-02-28"));
-        assert_eq!(day_before("2027-01-01", 365).as_deref(), Some("2026-01-01"));
-        // Not a date at all.
-        assert_eq!(day_before("not-a-day", 30), None);
-    }
-
-    #[test]
-    fn an_unknown_retention_keeps_everything() {
-        // A preference this build does not understand must never be read as permission to delete.
-        assert_eq!(
-            StatisticsRetention::parse("30d"),
-            StatisticsRetention::Days30
-        );
-        assert_eq!(
-            StatisticsRetention::parse("365d"),
-            StatisticsRetention::Days365
-        );
-        assert_eq!(
-            StatisticsRetention::parse("7d"),
-            StatisticsRetention::Forever
-        );
-        assert_eq!(StatisticsRetention::parse(""), StatisticsRetention::Forever);
-        assert_eq!(StatisticsRetention::Forever.days(), None);
-        assert_eq!(StatisticsRetention::Days90.days(), Some(90));
-        // And the same through the document, where a damaged value must not make the whole file
-        // unreadable either.
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("typing-statistics.json");
-        fs::write(
-            &path,
-            r#"{"enabled":true,"total":1,"days":{"2026-09-21":1},"retention":"7d"}"#,
-        )
-        .unwrap();
-        let store = TypingStatisticsStore::new(directory.path());
-        assert_eq!(
-            store.load().unwrap().retention,
-            StatisticsRetention::Forever
-        );
-    }
-
-    #[test]
-    fn retention_drops_days_outside_the_window_on_the_first_write_of_a_day() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = TypingStatisticsStore::new(directory.path());
-        store.set_enabled(true).unwrap();
-        for day in ["2026-06-01", "2026-08-25", "2026-09-20"] {
-            store
-                .record_at("字", TypingSource::Quanpin, day, Some(9), 1_000)
-                .unwrap();
-        }
-        assert_eq!(store.load().unwrap().days.len(), 3);
-
-        // Choosing a window applies it at once: the user asked for those days to be gone, and
-        // waiting for the next day boundary would leave them on the page they asked from.
-        let narrowed = store
-            .set_retention(StatisticsRetention::Days30, "2026-09-21")
-            .unwrap();
-        assert_eq!(
-            narrowed.days.keys().collect::<Vec<_>>(),
-            ["2026-08-25", "2026-09-20"]
-        );
-        assert!(!narrowed.daily_details.contains_key("2026-06-01"));
-        assert!(!narrowed.daily_hours.contains_key("2026-06-01"));
-        // Lifetime totals survive a cleanup, as they do in the baseline; only the per-day axes
-        // are windowed.
-        assert_eq!(narrowed.total, 3);
-
-        // A later day carries the window with it: 2026-08-25 falls out once "today" moves past
-        // thirty days from it.
-        store
-            .record_at("字", TypingSource::Quanpin, "2026-09-25", Some(9), 2_000)
-            .unwrap();
-        let moved = store.load().unwrap();
-        assert!(!moved.days.contains_key("2026-08-25"));
-        assert!(moved.days.contains_key("2026-09-20"));
-
-        // The mark that says the window has been applied for this day.
-        //
-        // That pruning happens on the *first* write of a day rather than on every write is a
-        // cost property, not an observable one: the boundary only depends on the day, so running
-        // it on every commit would reach the same result by doing more work. This asserts the
-        // mark is kept; nothing here can tell the two apart, and an assertion claiming to would
-        // be pinning nothing.
-        assert_eq!(moved.last_pruned_day, "2026-09-25");
-
-        // Forever removes nothing.
-        let kept = store
-            .set_retention(StatisticsRetention::Forever, "2027-12-31")
-            .unwrap();
-        assert_eq!(kept.days.len(), 2);
-    }
-
-    #[test]
-    fn statistics_are_off_until_they_are_asked_for() {
-        // The baseline ships them disabled and says so in its feature list. A fresh profile must
-        // not start counting what someone types before they have said yes.
-        let directory = tempfile::tempdir().unwrap();
-        let store = TypingStatisticsStore::new(directory.path());
-        assert!(!store.load().unwrap().enabled);
-        assert_eq!(
-            store
-                .record("字", TypingSource::Quanpin, "2026-09-21", Some(9))
-                .unwrap(),
-            0
-        );
-        assert_eq!(store.load().unwrap().total, 0);
-        // A document written before this field existed keeps what it says.
-        fs::write(
-            directory.path().join("typing-statistics.json"),
-            r#"{"enabled":true,"total":5,"days":{"2026-09-21":5}}"#,
-        )
-        .unwrap();
-        assert!(store.load().unwrap().enabled);
-    }
-
-    #[test]
-    fn rejects_activity_axes_that_do_not_match_the_days() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("typing-statistics.json");
-        let store = TypingStatisticsStore::new(directory.path());
-        let cases = [
-            // Active time on a day with no characters.
-            r#"{"enabled":true,"total":1,"days":{"2026-09-21":1},"dailyActiveMs":{"2026-09-20":5}}"#,
-            // More active time than a day contains.
-            r#"{"enabled":true,"total":1,"days":{"2026-09-21":1},"dailyActiveMs":{"2026-09-21":86400001}}"#,
-            // Buckets that do not describe a day of 24 hours.
-            r#"{"enabled":true,"total":1,"days":{"2026-09-21":1},"dailyHours":{"2026-09-21":[1,0,0]}}"#,
-            // Buckets claiming more characters than the day has.
-            r#"{"enabled":true,"total":1,"days":{"2026-09-21":1},"dailyHours":{"2026-09-21":[2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}}"#,
-        ];
-        for document in cases {
-            fs::write(&path, document).unwrap();
-            assert!(
-                matches!(store.load(), Err(TypingStatisticsError::InvalidDocument)),
-                "accepted {document}"
-            );
-        }
-        // A day with characters and no activity axes is not malformed: that is every day
-        // recorded before these axes existed.
-        fs::write(
-            &path,
-            r#"{"enabled":true,"total":1,"days":{"2026-09-21":1}}"#,
-        )
-        .unwrap();
-        assert_eq!(store.load().unwrap().total, 1);
-    }
-}
+#[cfg(test)]
+mod tests;

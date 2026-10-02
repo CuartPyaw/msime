@@ -14,6 +14,7 @@ private final class AccountFixture: URLProtocol, @unchecked Sendable {
   static var failLogout = false
   static var allowDelete = false
   static var omittedPreferenceKey: String?
+  static var themeSchema = true
   private static var preferenceRevision = 1
   private static var preferences: [String: Any] = ["platform.macos.candidate_font_size": 18, "platform.macos.candidate_learning": true, "platform.ios.nine_key": true]
   private static var clipboardEnabled = false
@@ -35,7 +36,10 @@ private final class AccountFixture: URLProtocol, @unchecked Sendable {
     func json(_ object: Any) -> String { String(data: try! JSONSerialization.data(withJSONObject: object), encoding: .utf8)! }
     switch (request.httpMethod!, request.url!.path) {
     case ("GET", "/v1/users/me/preferences/schema"):
-      body = json(["fields": ["platform.macos.candidate_skin": ["type":"string", "maxLength":64], "platform.macos.candidate_font_size": ["type":"integer"], "platform.macos.candidate_learning": ["type":"boolean"], "platform.macos.shuangpin_preedit_uses_raw": ["type":"boolean"], "platform.ios.nine_key": ["type":"boolean"]], "maximum_bytes": 1048576, "update_mode": "replace", "revision_required": true])
+      var fields: [String: Any] = ["platform.macos.global_theme": ["type":"string", "maxLength":64], "platform.macos.candidate_font_size": ["type":"integer"], "platform.macos.candidate_learning": ["type":"boolean"], "platform.macos.shuangpin_preedit_uses_raw": ["type":"boolean"], "platform.ios.nine_key": ["type":"boolean"]]
+      // A server that has registered only part of the theme group, as one that predates the custom theme would.
+      if Self.themeSchema { fields["platform.macos.custom_theme_base"] = ["type":"string", "maxLength":64]; fields["platform.macos.custom_candidate_skin"] = ["type":"string", "maxLength":128] }
+      body = json(["fields": fields, "maximum_bytes": 1048576, "update_mode": "replace", "revision_required": true])
     case ("GET", "/v1/users/me/preferences"):
       body = json(["revision":Self.preferenceRevision, "settings":Self.preferences.filter { $0.key != Self.omittedPreferenceKey }])
     case ("PUT", "/v1/users/me/preferences"):
@@ -148,8 +152,54 @@ private final class AccountFixture: URLProtocol, @unchecked Sendable {
     model.logout(delete: true); try await finished(model)
     try require(model.user == nil && !model.anonymous && discarded == 1 && anonymousStorage.load() == nil)
   }
+  // Three pages asked for while the first is still on the network send two requests: the first runs to the end and the third replaces the second in the waiting slot, so a slow connection never has more than one page in flight.
+  @MainActor static func candidateGlossSingleFlight() async throws {
+    let original = BackendCandidateGloss.perform
+    defer { BackendCandidateGloss.perform = original }
+    var started: [UInt64] = []
+    var release: [CheckedContinuation<Void, Never>] = []
+    BackendCandidateGloss.perform = { request in
+      started.append(request.generation)
+      await withCheckedContinuation { release.append($0) }
+    }
+    func settle(_ count: Int) async throws {
+      let deadline = Date().addingTimeInterval(5)
+      while release.count < count && Date() < deadline { try await Task.sleep(nanoseconds: 5_000_000) }
+      try await Task.sleep(nanoseconds: 50_000_000)
+    }
+    for generation: UInt64 in 1...3 { BackendCandidateGloss.fetch(words: ["测试"], primary: "en", secondary: "ja", generation: generation) }
+    try await settle(1)
+    try require(started == [1] && release.count == 1)
+    release.removeFirst().resume()
+    try await settle(1)
+    try require(started == [1, 3] && release.count == 1)
+    release.removeFirst().resume()
+    try await Task.sleep(nanoseconds: 50_000_000)
+    try require(started == [1, 3] && release.isEmpty)
+    // The slot is free again once the last request finishes, and an empty page never takes it.
+    BackendCandidateGloss.fetch(words: [], primary: "en", secondary: "", generation: 4)
+    BackendCandidateGloss.fetch(words: ["再见"], primary: "en", secondary: "", generation: 5)
+    try await settle(1)
+    try require(started == [1, 3, 5])
+    // The input method stopping its use of the account drops the waiting page, so nothing goes out after the user opted out; the request in flight still finishes.
+    BackendCandidateGloss.fetch(words: ["谢谢"], primary: "en", secondary: "", generation: 6)
+    msimeCancelAccountCandidateGlosses()
+    release.removeFirst().resume()
+    try await Task.sleep(nanoseconds: 50_000_000)
+    try require(started == [1, 3, 5] && release.isEmpty)
+  }
+  // The input method files a reply under the target it names and drops one without it, and it caches an empty answer as "the account has nothing", so every word asked about must be in the table.
+  @MainActor static func candidateGlossPayload() throws {
+    let info = BackendCandidateGloss.payload(words: ["测试", "东京", "空白", "测试", "你好", "你好"],
+                                             values: ["", "东京", "", "test", "hello", ""], code: "ja", generation: 7)
+    try require(info["target"] as? String == "ja" && info["generation"] as? UInt64 == 7)
+    // An unchanged value is sent as "", an empty one stays, and a duplicate keeps its non-empty answer whichever comes first.
+    try require(info["translations"] as? [String: String] == ["测试": "test", "东京": "", "空白": "", "你好": "hello"])
+  }
   @MainActor static func main() async throws {
     try windowAccountIsolation()
+    try candidateGlossPayload()
+    try await candidateGlossSingleFlight()
     try await fileTransfer()
     try await anonymousAccountFallback()
     let configuration = URLSessionConfiguration.ephemeral
@@ -162,7 +212,10 @@ private final class AccountFixture: URLProtocol, @unchecked Sendable {
     await BackendClipboardEntry.open(account: session, present: { clipboardAccount = $0 }, signIn: { signInRequests += 1 })
     try require(clipboardAccount == nil && signInRequests == 1)
     var windowClosures = 0
-    let model = MacAccountModel(client: client, account: session, closeAccountWindows: { windowClosures += 1 })
+    // The default anonymous session lives in the real App Group container, which an unsigned harness may not create and must never read or discard, so this model gets an empty in-memory one.
+    let model = MacAccountModel(client: client, account: session,
+                                anonymousAccount: BackendAccountSession(api: client, storage: MemoryCredentials()),
+                                closeAccountWindows: { windowClosures += 1 }, discardAnonymous: {})
     model.load(); try await finished(model)
     try require(model.providers["email"] == true && model.user == nil)
     model.channel = "phone"; model.target = "+10000000000"
@@ -180,13 +233,13 @@ private final class AccountFixture: URLProtocol, @unchecked Sendable {
     model.logout(delete: true); try await finished(model)
     try require(model.user != nil && model.message != nil && storage.load() != nil)
     try require(windowClosures == 0)
-    var localSettings: MacSettingsAccess.Values = ["platform.macos.candidate_skin": .string("wechat"), "platform.macos.candidate_font_size": .integer(16), "platform.macos.candidate_learning": .boolean(false), "platform.macos.shuangpin_preedit_uses_raw": .boolean(false)]
+    var localSettings: MacSettingsAccess.Values = ["platform.macos.global_theme": .string("shuishan"), "platform.macos.custom_theme_base": .string("system"), "platform.macos.custom_candidate_skin": .string(""), "platform.macos.candidate_font_size": .integer(16), "platform.macos.candidate_learning": .boolean(false), "platform.macos.shuangpin_preedit_uses_raw": .boolean(false)]
     let settings = MacSettingsModel(accountID: "synthetic-user", client: client, account: session, local: .init(snapshot: { localSettings }, validate: { values in
-      guard values.count == 4 else { throw Failure() }
+      guard values.count == 6 else { throw Failure() }
     }, apply: { localSettings = $0 }))
     settings.download(); try await finished(settings)
     try require(settings.preview?["platform.macos.candidate_font_size"] == .integer(18))
-    try require(settings.preview?["platform.macos.candidate_skin"] == .string("wechat"))
+    try require(settings.preview?["platform.macos.global_theme"] == .string("shuishan"))
     try require(settings.preview?["platform.macos.shuangpin_preedit_uses_raw"] == .boolean(false))
     AccountFixture.omittedPreferenceKey = "platform.macos.candidate_font_size"
     settings.download(); try await finished(settings)
@@ -206,7 +259,9 @@ private final class AccountFixture: URLProtocol, @unchecked Sendable {
     let credentials = try await session.credentials()
     let savedPreferences = try await client.preferences(token: credentials.token)
     try require(savedPreferences.settings["platform.ios.nine_key"] == .boolean(true))
-    try require(savedPreferences.settings["platform.macos.candidate_skin"] == .string("wechat"))
+    try require(savedPreferences.settings["platform.macos.global_theme"] == .string("shuishan"))
+    try require(savedPreferences.settings["platform.macos.custom_theme_base"] == .string("system") && savedPreferences.settings["platform.macos.custom_candidate_skin"] == .string(""))
+    try require(settings.message == "本机设置已上传，其他平台的云端设置已保留。")
     try require(savedPreferences.settings["platform.macos.shuangpin_preedit_uses_raw"] == .boolean(true))
     localSettings["platform.macos.shuangpin_preedit_uses_raw"] = .boolean(false)
     settings.download(); try await finished(settings)
@@ -216,6 +271,16 @@ private final class AccountFixture: URLProtocol, @unchecked Sendable {
     _ = try await client.putPreferences(savedPreferences, token: credentials.token)
     settings.upload(); try await finished(settings)
     try require(settings.message != nil)
+    // A server without the whole theme group still takes the other settings; the theme is left out as a group and the message says so, rather than the whole upload failing.
+    AccountFixture.themeSchema = false
+    localSettings["platform.macos.global_theme"] = .string("night")
+    localSettings["platform.macos.candidate_font_size"] = .integer(22)
+    settings.download(); try await finished(settings)
+    settings.upload(); try await finished(settings)
+    try require(settings.message == "本机设置已上传，其他平台的云端设置已保留。云端暂不支持主题设置，主题没有上传。")
+    let themeless = try await client.preferences(token: credentials.token)
+    try require(themeless.settings["platform.macos.candidate_font_size"] == .integer(22) && themeless.settings["platform.macos.global_theme"] == .string("shuishan"))
+    AccountFixture.themeSchema = true
     settings.close(); try require(settings.preview == nil && settings.cloud == nil)
     let clipboard = MacClipboardModel(accountID: "synthetic-user", client: client, account: session)
     clipboard.refresh(); try await finished(clipboard)

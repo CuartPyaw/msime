@@ -102,7 +102,7 @@ struct StatisticsHeatmap: View {
   private static let cell: CGFloat = 15
   private static let spacing: CGFloat = 3
   private static let labelWidth: CGFloat = 12
-  /// 最多画一年:引擎的每日明细就保留 366 天。
+  /// 最多画一年；这是图表的宽度上限，不是保留期限。
   private static let maximumWeeks = 53
   private var calendar: Calendar { Calendar.current }
 
@@ -183,17 +183,7 @@ struct StatisticsHeatmap: View {
     }.padding(.top, 15)
   }
 
-  private var legend: some View {
-    HStack(spacing: 5) {
-      Text("少").font(.caption2).foregroundStyle(.secondary)
-      ForEach([0.0, 0.25, 0.5, 0.75, 1.0], id: \.self) { level in
-        RoundedRectangle(cornerRadius: 2)
-          .fill(level == 0 ? Color.secondary.opacity(0.12) : accent.opacity(0.25 + 0.75 * level))
-          .frame(width: 12, height: 12)
-      }
-      Text("多").font(.caption2).foregroundStyle(.secondary)
-    }
-  }
+  private var legend: some View { StatisticsHeatLegend(accent: accent) }
 
   @ViewBuilder private func cellView(_ date: Date?, maximum: Int) -> some View {
     if let date {
@@ -201,7 +191,7 @@ struct StatisticsHeatmap: View {
       let level = Double(value) / Double(maximum)
       Button { onSelect(date) } label: {
         RoundedRectangle(cornerRadius: 3)
-          .fill(value == 0 ? Color.secondary.opacity(0.12) : accent.opacity(0.25 + 0.75 * level))
+          .fill(StatisticsHeatLegend.fill(value == 0 ? 0 : level, accent: accent))
           .frame(width: Self.cell, height: Self.cell)
           .overlay(RoundedRectangle(cornerRadius: 3)
             .strokeBorder(MetasequoiaTheme.cone, lineWidth: isSelected(date) ? 2 : 0))
@@ -219,6 +209,111 @@ struct StatisticsHeatmap: View {
   private func isSelected(_ date: Date) -> Bool {
     guard let selected else { return false }
     return calendar.isDate(date, inSameDayAs: selected)
+  }
+}
+
+/// 热力图的深浅和「少…多」图例。日历热力图和按键热力图共用一套,同一种深浅在两张图里是同一个意思。
+struct StatisticsHeatLegend: View {
+  let accent: Color
+
+  /// `level` 是这一格和最多那一格之比,0 到 1;0 是没有记录,画成最浅的一档。
+  static func fill(_ level: Double, accent: Color) -> Color {
+    level == 0 ? Color.secondary.opacity(0.12) : accent.opacity(0.25 + 0.75 * level)
+  }
+
+  var body: some View {
+    HStack(spacing: 5) {
+      Text("少").font(.caption2).foregroundStyle(.secondary)
+      ForEach([0.0, 0.25, 0.5, 0.75, 1.0], id: \.self) { level in
+        RoundedRectangle(cornerRadius: 2)
+          .fill(Self.fill(level, accent: accent))
+          .frame(width: 12, height: 12)
+      }
+      Text("多").font(.caption2).foregroundStyle(.secondary)
+    }.accessibilityHidden(true)
+  }
+}
+
+/// 按键热力图:照触屏键盘的样子画 26 键和底排,有九键记录时再画一个九宫格。一个键越常按颜色越深,深浅和日历热力图同一套。
+///
+/// 只画键盘上有位置的键;其余按过的键(数字、标点、符号键等)由页面另列成「其他键」。
+struct StatisticsKeyboardHeatmap: View {
+  let heatmap: TypingKeyHeatmap
+  let accent: Color
+
+  private static let keyHeight: CGFloat = 40
+  private static let spacing: CGFloat = 5
+  /// 一排按十个字母键的宽度排;Shift、删除、空格这些宽键占几个字母键。
+  private static let rowUnits: CGFloat = 10
+
+  private static func units(_ id: String) -> CGFloat {
+    switch id {
+    case TypingKeyID.space: return 5
+    case TypingKeyID.shift, TypingKeyID.backspace: return 1.5
+    case TypingKeyID.layer, TypingKeyID.globe, TypingKeyID.language, TypingKeyID.enter: return 1.25
+    default: return 1
+    }
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      GeometryReader { geometry in
+        let unit = (geometry.size.width - Self.spacing * (Self.rowUnits - 1)) / Self.rowUnits
+        VStack(spacing: Self.spacing) {
+          ForEach(TypingKeyHeatmap.keyboardRows, id: \.self) { row in
+            HStack(spacing: Self.spacing) {
+              ForEach(row, id: \.self) { id in
+                let units = Self.units(id)
+                keyCell(id, title: TypingKeyID.label(id), subtitle: nil)
+                  .frame(width: unit * units + Self.spacing * (units - 1))
+              }
+            }.frame(maxWidth: .infinity)
+          }
+        }
+      }
+      .frame(height: Self.keyHeight * CGFloat(TypingKeyHeatmap.keyboardRows.count)
+        + Self.spacing * CGFloat(TypingKeyHeatmap.keyboardRows.count - 1))
+      .accessibilityElement(children: .contain)
+      .accessibilityLabel("按键热力图")
+      .accessibilityIdentifier("statisticsKeyboard")
+      if heatmap.showsNineKey {
+        Text("九键").font(.caption).foregroundStyle(.secondary)
+        VStack(spacing: Self.spacing) {
+          ForEach(TypingKeyHeatmap.nineKeyRows, id: \.self) { row in
+            HStack(spacing: Self.spacing) {
+              ForEach(row, id: \.self) { id in
+                keyCell(id, title: String(id.dropFirst(4)), subtitle: TypingKeyHeatmap.nineKeySubtitle(id))
+                  .frame(width: 64)
+              }
+            }
+          }
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("九键热力图")
+        .accessibilityIdentifier("statisticsNineKey")
+      }
+      StatisticsHeatLegend(accent: accent)
+    }
+  }
+
+  private func keyCell(_ id: String, title: String, subtitle: String?) -> some View {
+    let level = heatmap.level(id)
+    return RoundedRectangle(cornerRadius: 6)
+      .fill(StatisticsHeatLegend.fill(level, accent: accent))
+      .overlay {
+        VStack(spacing: 0) {
+          Text(title).font(.system(size: title.count > 2 ? 11 : 15, weight: .medium))
+          if let subtitle, !subtitle.isEmpty { Text(subtitle).font(.system(size: 9)) }
+        }
+        .lineLimit(1).minimumScaleFactor(0.6)
+        // 深的几档上,黑字看不清。
+        .foregroundStyle(level > 0.55 ? Color.white : Color.primary)
+      }
+      .frame(height: Self.keyHeight)
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel(TypingKeyHeatmap.accessibilityLabel(id, count: heatmap.count(id)))
+      .accessibilityIdentifier("statisticsKey_\(id)")
   }
 }
 
@@ -288,5 +383,30 @@ struct StatisticsRankChart: View {
       .frame(height: CGFloat(ranked.count) * 30 + 20)
       .accessibilityIdentifier("statisticsRank")
     }
+  }
+}
+
+/// 今日时段:二十四小时每小时一根柱子。没有输入的小时也占一格 —— 只画有输入的那几个小时,上午和深夜就挤成相邻的两根,看不出一天的节奏。
+struct StatisticsHourlyChart: View {
+  let hours: [Int]
+  let accent: Color
+  let progress: Double
+
+  var body: some View {
+    Chart(Array(hours.enumerated()), id: \.offset) { hour, count in
+      BarMark(x: .value("时", hour), y: .value("字符", Double(count) * progress))
+        .cornerRadius(3)
+        .foregroundStyle(accent)
+    }
+    .chartXScale(domain: -0.5...23.5)
+    .chartXAxis {
+      AxisMarks(values: [0, 6, 12, 18, 23]) { value in
+        AxisGridLine()
+        AxisValueLabel { if let hour = value.as(Int.self) { Text("\(hour)时") } }
+      }
+    }
+    .chartYAxis { AxisMarks(position: .trailing) }
+    .frame(height: 140)
+    .accessibilityIdentifier("statisticsHours")
   }
 }

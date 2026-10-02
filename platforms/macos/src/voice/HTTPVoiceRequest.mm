@@ -1,13 +1,19 @@
 #import "HTTPVoiceRequest.h"
+#import "VoiceFailureMessages.h"
 #include "../../../../shared/voice/VoiceProviders.h"
 #include "../../../../shared/voice/PolishPrompt.h"
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
 namespace {
-NSError *Failure() {
-    return [NSError errorWithDomain:@"app.msime.client.voice" code:6
-        userInfo:@{NSLocalizedDescriptionKey: @"语音请求失败，请检查识别服务设置"}];
+NSError *Failure(const std::string &detail = {}) {
+    NSMutableDictionary *info = [@{NSLocalizedDescriptionKey: @"语音请求失败，请检查识别服务设置"} mutableCopy];
+    // The shared provider layer builds the detail from the answer, never from the token or the upload; a body that is not UTF-8 is simply not shown.
+    NSString *text = detail.empty() ? nil
+        : [[NSString alloc] initWithBytes:detail.data() length:detail.size() encoding:NSUTF8StringEncoding];
+    if (text.length) info[MSIMEVoiceFailureDetailKey] = text;
+    return [NSError errorWithDomain:@"app.msime.client.voice" code:6 userInfo:info];
 }
 std::string String(NSDictionary *options, NSString *key) {
     NSString *value = options[key];
@@ -28,11 +34,20 @@ std::string Polish(std::string text, NSDictionary *options, const std::shared_pt
         auto model = String(options, @"polish_model");
         if (endpoint.empty()) endpoint = msime::voice::default_polish_endpoint(provider);
         if (model.empty()) model = msime::voice::default_polish_model(provider);
-        auto prompt = msime::windows::polish_prompt_for({String(options, @"polish_prompt_id"),
-            String(options, @"polish_prompt"), String(options, @"polish_prompt_custom_1"),
-            String(options, @"polish_prompt_custom_2"), String(options, @"polish_prompt_custom_3")});
+        msime::windows::PolishPromptSlots slots;
+        slots.id = String(options, @"polish_prompt_id");
+        slots.custom_1 = String(options, @"polish_prompt_custom_1");
+        slots.custom_2 = String(options, @"polish_prompt_custom_2");
+        slots.custom_3 = String(options, @"polish_prompt_custom_3");
+        auto prompt = msime::windows::polish_prompt_for(slots);
         if (Endpoint(endpoint)) {
-            if (polishing) dispatch_async(dispatch_get_main_queue(), ^{ if (!cancelled->load()) polishing(); });
+            // A block captures a C++ reference as the reference, not as a copy of what it names. This one
+            // runs on main after Polish has returned, when the request owning `cancelled` may already be
+            // gone, so it has to hold its own share of the flag - reading through the parameter crashed.
+            if (polishing) {
+                std::shared_ptr<std::atomic_bool> flag = cancelled;
+                dispatch_async(dispatch_get_main_queue(), ^{ if (!flag->load()) polishing(); });
+            }
             // 30s, the budget the reference host uses and for the reason it measured: a chat completion
             // cleaning up to a minute of transcript does not answer inside the 3s default, and the catch
             // below keeps the ASR text without telling anyone - so the transcript reached the provider and
@@ -67,7 +82,7 @@ std::string Polish(std::string text, NSDictionary *options, const std::shared_pt
     NSMutableDictionary *snapshot = [NSMutableDictionary dictionary];
     for (NSString *key in @[@"asr_provider", @"asr_endpoint", @"asr_model", @"asr_model_path", @"asr_token", @"language",
         @"polish_provider", @"polish_endpoint", @"polish_model", @"polish_token", @"polish_prompt_id",
-        @"polish_prompt", @"polish_prompt_custom_1", @"polish_prompt_custom_2", @"polish_prompt_custom_3"]) {
+        @"polish_prompt_custom_1", @"polish_prompt_custom_2", @"polish_prompt_custom_3"]) {
         id value = options[key];
         if (value && (![value isKindOfClass:NSString.class] || [value length] > 8192 ||
             ![value dataUsingEncoding:NSUTF8StringEncoding])) {
@@ -88,18 +103,6 @@ std::string Polish(std::string text, NSDictionary *options, const std::shared_pt
     }
     if (recognitionRequired) {
         const auto provider = msime::voice::normalize_voice_provider(String(snapshot, @"asr_provider"));
-        if (provider == "local") {
-            // Nothing leaves the process, so there is no endpoint or token to check. What has to hold is that this build carries the recognizer and that the model is a readable file rather than a directory or a path the user has since moved.
-            NSString *model = snapshot[@"asr_model_path"];
-            BOOL directory = NO;
-            if (!msime::voice::local_asr_available() || !model.isAbsolutePath ||
-                ![NSFileManager.defaultManager fileExistsAtPath:model isDirectory:&directory] || directory) {
-                if (error) *error = Failure(); return nil;
-            }
-            snapshot[@"asr_provider"] = @"local";
-            _options = [snapshot copy];
-            return self;
-        }
         const auto endpoint = msime::voice::resolved_asr_endpoint(provider, String(snapshot, @"asr_endpoint"));
         // The batch multipart providers. Doubao is the streaming websocket and never reaches
         // this request; anything else is stale configuration rather than a provider choice.
@@ -115,14 +118,19 @@ std::string Polish(std::string text, NSDictionary *options, const std::shared_pt
     _options = [snapshot copy];
     return self;
 }
+- (NSUInteger)sampleLimit {
+    return msime::voice::batch_capture_sample_limit;
+}
 - (BOOL)recognizePCM:(NSData *)pcm completion:(void (^)(NSString *, NSError *))completion error:(NSError **)error {
     @synchronized(self) {
         if (!_recognitionRequired || _started || _cancelled->load() || !completion || !pcm.length ||
-            pcm.length % sizeof(float) || pcm.length > 16000 * 60 * sizeof(float)) {
+            pcm.length % sizeof(float)) {
             if (error) *error = Failure(); return NO;
         }
-        std::vector<float> samples(pcm.length / sizeof(float));
-        std::memcpy(samples.data(), pcm.bytes, pcm.length);
+        // Submit what was captured up to what the provider can take, as the capture buffer does.
+        const std::size_t limit = self.sampleLimit;
+        std::vector<float> samples(std::min<std::size_t>(pcm.length / sizeof(float), limit));
+        std::memcpy(samples.data(), pcm.bytes, samples.size() * sizeof(float));
         for (float value : samples) if (!std::isfinite(value) || std::fabs(value) > 1) {
             if (error) *error = Failure(); return NO;
         }
@@ -137,14 +145,13 @@ std::string Polish(std::string text, NSDictionary *options, const std::shared_pt
                 auto language = String(options, @"language");
                 if (language == "en-US" || language == "en-us") language = "en";
                 if (language == "zh-CN") language = "zh-cn";
-                auto text = String(options, @"asr_provider") == "local"
-                    ? msime::voice::recognize_local_asr(samples, String(options, @"asr_model_path"), language, cancelled)
-                    : msime::voice::recognize_cloud_asr(samples, String(options, @"asr_provider"),
-                        String(options, @"asr_endpoint"), String(options, @"asr_model"), String(options, @"asr_token"), language, cancelled);
+                auto text = msime::voice::recognize_cloud_asr(samples, String(options, @"asr_provider"),
+                    String(options, @"asr_endpoint"), String(options, @"asr_model"), String(options, @"asr_token"), language, cancelled);
                 text = Polish(std::move(text), options, cancelled, polishing);
                 result = [[NSString alloc] initWithBytes:text.data() length:text.size() encoding:NSUTF8StringEncoding];
                 if (!result.length) failure = Failure();
-            } catch (const std::exception &) { failure = Failure(); }
+            } catch (const msime::voice::CloudAsrError &cloudError) { failure = Failure(cloudError.user_message()); }
+            catch (const std::exception &) { failure = Failure(); }
             dispatch_async(dispatch_get_main_queue(), ^{ if (!cancelled->load()) completion(failure ? nil : result, failure); });
         });
         return YES;

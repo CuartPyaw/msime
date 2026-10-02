@@ -17,8 +17,6 @@ use msime_client_core::clipboard::ClipboardHistoryStore;
 use msime_client_core::preferences::PreferencesStore;
 #[cfg(target_os = "ios")]
 use msime_tauri_mobile_platform::MobilePlatform;
-#[cfg(target_os = "ios")]
-use std::path::PathBuf;
 use std::sync::Arc;
 #[cfg(target_os = "linux")]
 use std::sync::Mutex;
@@ -35,22 +33,44 @@ pub(crate) fn clipboard_enabled(
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) fn linux_clipboard_text() -> Result<String, HostActionError> {
-    let mut commands: Vec<(&str, &[&str])> = Vec::new();
+/// `Ok(None)` means a password manager marked the copy secret, so there is
+/// nothing to capture.
+pub(crate) fn linux_clipboard_text() -> Result<Option<String>, HostActionError> {
+    type Arguments = &'static [&'static str];
+    let mut commands: Vec<(&str, Arguments, Option<Arguments>)> = Vec::with_capacity(3);
     if std::env::var_os("WAYLAND_DISPLAY").is_some_and(|value| !value.is_empty()) {
-        commands.push(("wl-paste", &["--no-newline", "--type", "text"]));
+        commands.push((
+            "wl-paste",
+            &["--no-newline", "--type", "text"],
+            Some(&["--list-types"]),
+        ));
     }
     if std::env::var_os("DISPLAY").is_some_and(|value| !value.is_empty()) {
-        commands.push(("xclip", &["-selection", "clipboard", "-o"]));
-        commands.push(("xsel", &["--clipboard", "--output"]));
+        commands.push((
+            "xclip",
+            &["-selection", "clipboard", "-o"],
+            Some(&["-selection", "clipboard", "-o", "-t", "TARGETS"]),
+        ));
+        // xsel cannot list targets, so it is unfiltered. It is only reached
+        // when xclip could not read the clipboard at all.
+        commands.push(("xsel", &["--clipboard", "--output"], None));
     }
+    // Check the targets before reading so a secret never enters this process.
+    // The clipboard can change in between; the next poll corrects that. A
+    // listing that fails is not treated as secret, or history would stop
+    // working with tools that cannot list.
     // Preserve source line endings; wl-paste suppresses its own separator.
-    commands
-        .into_iter()
-        .find_map(|(program, arguments)| linux_clipboard::read_text(program, arguments))
-        .ok_or(HostActionError {
-            code: "unavailable",
-        })
+    for (program, arguments, targets) in commands {
+        if targets.is_some_and(|targets| linux_clipboard::offers_secret(program, targets)) {
+            return Ok(None);
+        }
+        if let Some(text) = linux_clipboard::read_text(program, arguments) {
+            return Ok(Some(text));
+        }
+    }
+    Err(HostActionError {
+        code: "unavailable",
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -83,7 +103,7 @@ pub(crate) fn start_linux_clipboard_monitor(
                     .unwrap_or(false);
                 if !enabled {
                     last_text = None;
-                } else if let Ok(text) = linux_clipboard_text() {
+                } else if let Ok(Some(text)) = linux_clipboard_text() {
                     if last_text.as_deref() != Some(text.as_str()) {
                         match preferences.capture_clipboard_text(text.clone()) {
                             Ok(true) => {
@@ -198,23 +218,6 @@ pub(crate) async fn clear_clipboard_history(
 pub(crate) fn clear_clipboard_history_blocking(
     state: &ClipboardHistoryState,
 ) -> Result<(), HostActionError> {
-    #[cfg(target_os = "ios")]
-    {
-        let state_root = std::env::var_os("MSIME_CLIENT_STATE_DIR")
-            .map(PathBuf::from)
-            .filter(|path| path.is_absolute())
-            .ok_or(HostActionError {
-                code: "unavailable",
-            })?;
-        let root = state_root.parent().ok_or(HostActionError {
-            code: "unavailable",
-        })?;
-        let _ = state;
-        return msime_host_api::clear_mobile_clipboard_history(root).map_err(|_| HostActionError {
-            code: "unavailable",
-        });
-    }
-    #[cfg(not(target_os = "ios"))]
     state
         .0
         .lock()
@@ -248,44 +251,38 @@ pub(crate) fn sync_clipboard_history_blocking(
     if !clipboard_enabled(store)? {
         return Err(HostActionError { code: "disabled" });
     }
+    // `None` is a clipboard with nothing capturable, such as a password
+    // manager's secret copy: the panel still gets the current history.
+    // The native macOS read is the monitor's: bounded, and it refuses concealed,
+    // transient and password-manager pasteboards, which pbpaste would not.
     #[cfg(target_os = "macos")]
-    let output = std::process::Command::new("pbpaste").output();
-    #[cfg(target_os = "linux")]
-    let output = linux_clipboard_text();
-    #[cfg(target_os = "windows")]
-    let text = msime_host_windows::read_clipboard_text()
-        .map_err(|_| HostActionError {
+    let text = msime_host_macos::clipboard_snapshot(true)
+        .ok_or(HostActionError {
             code: "unavailable",
         })?
-        .trim_end_matches(['\r', '\n'])
-        .to_owned();
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-    let output: Result<std::process::Output, std::io::Error> =
-        Err(std::io::Error::other("unsupported"));
+        .text;
     #[cfg(target_os = "linux")]
-    let text = output?;
-    #[cfg(all(not(target_os = "linux"), not(target_os = "windows")))]
-    let text = {
-        let output = output.map_err(|_| HostActionError {
-            code: "unavailable",
-        })?;
-        if !output.status.success() {
-            return Err(HostActionError {
-                code: "unavailable",
-            });
-        }
-        String::from_utf8(output.stdout)
+    let text = linux_clipboard_text()?;
+    #[cfg(target_os = "windows")]
+    let text = Some(
+        msime_host_windows::read_clipboard_text()
             .map_err(|_| HostActionError {
                 code: "unavailable",
             })?
             .trim_end_matches(['\r', '\n'])
-            .to_owned()
-    };
-    store
-        .capture_clipboard_text(text)
-        .map_err(|_| HostActionError {
-            code: "unavailable",
-        })?;
+            .to_owned(),
+    );
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    let text: Option<String> = Err(HostActionError {
+        code: "unavailable",
+    })?;
+    if let Some(text) = text {
+        store
+            .capture_clipboard_text(text)
+            .map_err(|_| HostActionError {
+                code: "unavailable",
+            })?;
+    }
     let mut history = state.0.lock().map_err(|_| HostActionError {
         code: "unavailable",
     })?;
@@ -314,7 +311,10 @@ pub(crate) async fn copy_text_impl(
     let store = store.inner().clone();
     #[cfg(target_os = "android")]
     {
-        if text.is_empty() || text.encode_utf16().count() > 4000 || text.contains('\0') {
+        if text.is_empty()
+            || !msime_client_core::is_bounded_utf16(&text, 4000)
+            || text.contains('\0')
+        {
             return Err(HostActionError {
                 code: "invalid_text",
             });
@@ -444,27 +444,24 @@ pub(crate) fn copy_text_blocking(
     let result = {
         use std::io::Write;
         let mut child = std::process::Command::new("pbcopy")
+            // A Finder-launched app has no LANG, and pbcopy would then decode
+            // the UTF-8 input in the legacy encoding and garble CJK text.
+            .env("LC_ALL", "en_US.UTF-8")
             .stdin(std::process::Stdio::piped())
             .spawn()
             .map_err(|_| HostActionError {
                 code: "unavailable",
             })?;
-        child
+        // stdin is dropped inside the closure, before the wait.
+        let written = child
             .stdin
             .take()
-            .ok_or(HostActionError {
-                code: "unavailable",
-            })?
-            .write_all(text.as_bytes())
-            .map_err(|_| HostActionError {
-                code: "unavailable",
-            })?;
-        child
-            .wait()
-            .map_err(|_| HostActionError {
-                code: "unavailable",
-            })?
-            .success()
+            .is_some_and(|mut stdin| stdin.write_all(text.as_bytes()).is_ok());
+        if !written {
+            let _ = child.kill();
+        }
+        let exited = child.wait().is_ok_and(|status| status.success());
+        written && exited
     };
     #[cfg(target_os = "linux")]
     let result = write_linux_clipboard(&text);

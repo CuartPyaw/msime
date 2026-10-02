@@ -1,10 +1,21 @@
 //! Bounded, silent output capture for Linux session tools.
 use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
 use std::ffi::OsStr;
+use std::fs;
 use std::io::{ErrorKind, Read, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
+
+/// Whether an executable file is available in an absolute directory listed by `PATH`.
+pub fn program_available(name: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|path| {
+        std::env::split_paths(&path).any(|directory| {
+            directory.is_absolute()
+                && fs::metadata(directory.join(name)).is_ok_and(|metadata| metadata.is_file())
+        })
+    })
+}
 
 /// Run a session command without capturing output, enforcing a hard deadline.
 /// The child is always reaped so a timed-out helper cannot remain attached to
@@ -15,6 +26,44 @@ pub fn run_status(program: &str, arguments: &[&str], timeout: Duration) -> bool 
         .map(|argument| OsStr::new(argument))
         .collect();
     run_status_os(OsStr::new(program), &arguments, timeout)
+}
+
+/// Start a launcher such as xdg-open, which in its generic mode runs the
+/// handler in the foreground. An early failing exit is a failure; a launcher
+/// still running after `check` has opened the handler, so it is left to run
+/// and reaped on its own thread instead of being killed at a deadline.
+pub fn launch(program: &str, arguments: &[&str], check: Duration) -> bool {
+    let Ok(mut child) = Command::new(program)
+        .args(arguments)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    let deadline = Instant::now() + check;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Ok(None) => {
+                let _ = std::thread::Builder::new()
+                    .name("msime-launcher-reaper".to_owned())
+                    .spawn(move || {
+                        let _ = child.wait();
+                    });
+                return true;
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
 }
 
 /// Run a command with one path argument without requiring the path to be UTF-8.
@@ -216,6 +265,22 @@ mod tests {
             &["-c", "sleep 1"],
             Duration::from_millis(20)
         ));
+    }
+
+    #[test]
+    fn launch_fails_only_on_an_early_failing_exit() {
+        let check = Duration::from_secs(1);
+        assert!(super::launch("/bin/sh", &["-c", "exit 0"], check));
+        assert!(!super::launch("/bin/sh", &["-c", "exit 4"], check));
+        assert!(!super::launch("/nonexistent/msime-launcher", &[], check));
+        // A launcher that keeps running is a handler that opened, not a hang.
+        let started = std::time::Instant::now();
+        assert!(super::launch(
+            "/bin/sh",
+            &["-c", "sleep 1"],
+            Duration::from_millis(20)
+        ));
+        assert!(started.elapsed() < Duration::from_millis(900));
     }
 
     #[cfg(unix)]

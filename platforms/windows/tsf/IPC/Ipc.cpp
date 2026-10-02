@@ -1,5 +1,5 @@
 #include "Ipc.h"
-#include "../../../../vendor/MSIME-Engine/contracts/ipc_negotiation.h"
+#include "../../../../shared/contracts/ipc_negotiation.h"
 #include <algorithm>
 #include <cstring>
 #include <cwctype>
@@ -17,11 +17,6 @@
 #include "MetasequoiaIME.h"
 #include <fmt/xchar.h>
 #include "../Utils/PerfTimer.h"
-
-static thread_local HANDLE hMapFile = nullptr;
-static thread_local void *pBuf = nullptr;
-static thread_local FanyImeSharedMemoryData *sharedData = nullptr;
-static thread_local bool canUseSharedMemory = false;
 
 static thread_local HANDLE hPipe = nullptr;
 static thread_local uint32_t negotiatedServerCapabilities = 0;
@@ -64,18 +59,37 @@ std::atomic<uint64_t> issue47Sequence{0};
 
 void CALLBACK FlushTsfDiagnosticLogs(PTP_CALLBACK_INSTANCE, PVOID);
 
+// The pipe names are machine-global, so another logged-on user can create them
+// first. Only talk to a server in this session; this queries the handle alone,
+// so it also works in app container and low integrity hosts. It does not tell
+// apart two accounts sharing one session.
+bool IsPipeServerInOwnSession(HANDLE pipe)
+{
+    ULONG serverSession = 0;
+    DWORD ownSession = 0;
+    return GetNamedPipeServerSessionId(pipe, &serverSession) &&
+           ProcessIdToSessionId(GetCurrentProcessId(), &ownSession) && serverSession == ownSession;
+}
+
 void ScheduleDiagnosticFlushLocked()
 {
     if (diagnosticFlushScheduled)
     {
         return;
     }
+    // Each submission takes its own loader reference; the callback hands it to
+    // FreeLibraryWhenCallbackReturns. The COM lock count cannot pin the DLL.
+    HMODULE module = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, reinterpret_cast<LPCWSTR>(&FlushTsfDiagnosticLogs),
+                            &module))
+    {
+        return;
+    }
     diagnosticFlushScheduled = true;
-    DllAddRef();
-    if (!TrySubmitThreadpoolCallback(FlushTsfDiagnosticLogs, nullptr, nullptr))
+    if (!TrySubmitThreadpoolCallback(FlushTsfDiagnosticLogs, module, nullptr))
     {
         diagnosticFlushScheduled = false;
-        DllRelease();
+        FreeLibrary(module);
     }
 }
 
@@ -99,6 +113,11 @@ bool SendDiagnosticBatch(const FanyImeTsfDiagnosticBatchHeader &header, const st
     {
         return false;
     }
+    if (!IsPipeServerInOwnSession(pipe))
+    {
+        CloseHandle(pipe);
+        return false;
+    }
 
     const size_t payloadBytes = payload.size() * sizeof(wchar_t);
     std::vector<unsigned char> frame(sizeof(header) + payloadBytes);
@@ -113,8 +132,9 @@ bool SendDiagnosticBatch(const FanyImeTsfDiagnosticBatchHeader &header, const st
     return writeResult && bytesWritten == frame.size();
 }
 
-void CALLBACK FlushTsfDiagnosticLogs(PTP_CALLBACK_INSTANCE, PVOID)
+void CALLBACK FlushTsfDiagnosticLogs(PTP_CALLBACK_INSTANCE instance, PVOID context)
 {
+    FreeLibraryWhenCallbackReturns(instance, static_cast<HMODULE>(context));
     Sleep(DiagnosticFlushDelayMs);
 
     FanyImeTsfDiagnosticBatchHeader header;
@@ -161,7 +181,6 @@ void CALLBACK FlushTsfDiagnosticLogs(PTP_CALLBACK_INSTANCE, PVOID)
     }
     if (loggingDisabled)
     {
-        DllRelease();
         return;
     }
 
@@ -185,7 +204,6 @@ void CALLBACK FlushTsfDiagnosticLogs(PTP_CALLBACK_INSTANCE, PVOID)
             ScheduleDiagnosticFlushLocked();
         }
     }
-    DllRelease();
 }
 // These tokens fence messages that can outlive a CMetasequoiaIME instance.
 // Per-instance counters can collide after HWND/HANDLE reuse during a rapid
@@ -560,6 +578,12 @@ bool TryOpenClientPipe(HANDLE &hPipeHandle, const wchar_t *pipeName, UINT pipeRo
     {
         return false;
     }
+    if (!IsPipeServerInOwnSession(openedPipe))
+    {
+        // Nothing, not even the hello, goes to a server in another session.
+        CloseHandle(openedPipe);
+        return false;
+    }
 
     hPipeHandle = openedPipe;
     // Main writes are NOWAIT. Both receive pipes use true overlapped I/O with
@@ -759,70 +783,6 @@ bool MarkNamedpipeSessionDirtyForOwner(const void *owner)
     return true;
 }
 
-int InitIpc()
-{
-    // The live protocol is named-pipe-only. Keep the legacy mapping open for
-    // ABI compatibility, but never advertise or select it for new traffic.
-    canUseSharedMemory = false;
-    sharedData = nullptr;
-    pBuf = nullptr;
-
-    //
-    // Shared memory, open here
-    //
-    hMapFile = OpenFileMappingW( //
-        FILE_MAP_ALL_ACCESS,     //
-        FALSE,                   //
-        FANY_IME_SHARED_MEMORY   //
-    );
-
-    //
-    // Shared memory is not available, try to use namedpipe
-    //
-    InitNamedpipe();
-
-    if (!hMapFile)
-    {
-        // Error handling
-        canUseSharedMemory = false;
-
-        // TODO: Log error
-
-        return 0;
-    }
-
-    pBuf = MapViewOfFile(    //
-        hMapFile,            //
-        FILE_MAP_ALL_ACCESS, //
-        0,                   //
-        0,                   //
-        BUFFER_SIZE          //
-    );                       //
-
-    if (!pBuf)
-    {
-        CloseHandle(hMapFile);
-        hMapFile = nullptr;
-        sharedData = nullptr;
-        canUseSharedMemory = false;
-        return 0;
-    }
-
-    sharedData = static_cast<FanyImeSharedMemoryData *>(pBuf);
-
-    return 0;
-}
-
-bool TryReadCandidatePageFromSharedMemory(std::wstring *candidatePage)
-{
-    if (candidatePage == nullptr || sharedData == nullptr)
-    {
-        return false;
-    }
-    candidatePage->assign(sharedData->candidate_string);
-    return !candidatePage->empty();
-}
-
 int InitNamedpipe()
 {
     return ConnectToAllNamedpipe();
@@ -865,24 +825,6 @@ int CloseIpc()
     // Namedpipe
     //
     CloseNamedpipe();
-    const int result = canUseSharedMemory ? 0 : -1;
-
-    //
-    // Shared memory
-    //
-    if (pBuf)
-    {
-        UnmapViewOfFile(pBuf);
-        pBuf = nullptr;
-    }
-    sharedData = nullptr;
-
-    if (hMapFile)
-    {
-        CloseHandle(hMapFile);
-        hMapFile = nullptr;
-    }
-    canUseSharedMemory = false;
 
     //
     // Events
@@ -900,7 +842,7 @@ int CloseIpc()
         }
     }
 
-    return result;
+    return 0;
 }
 
 int CloseNamedpipe()
@@ -934,22 +876,6 @@ bool SupportsKeyboardCompositionCancel(const void *owner)
 HANDLE GetToTsfWorkerThreadNamedpipe()
 {
     return hToTsfWorkerThreadPipe;
-}
-
-int WriteDataToSharedMemory(           //
-    UINT keycode,                      //
-    WCHAR wch,                         //
-    UINT modifiers_down,               //
-    const int point[2],                //
-    int pinyin_length,                 //
-    const std::wstring &pinyin_string, //
-    UINT write_flag                    //
-)
-{
-    // The shared-memory protocol has no client_id/request_id and cannot be
-    // made safe in a multi-TSF-thread process. Keep the mapping code only for
-    // legacy compatibility; all live event payloads use the named-pipe ABI.
-    return WriteDataToNamedPipe(keycode, wch, modifiers_down, point, pinyin_length, pinyin_string, write_flag);
 }
 
 /**
@@ -1245,21 +1171,9 @@ bool SendToNamedpipe(bool *deliveryAmbiguous = nullptr)
  * server
  *
  */
-void ClearNamedpipeDataIfExists(bool force)
+void ClearNamedpipeDataIfExists()
 {
-    // Request IDs make destructive draining both unnecessary and incorrect:
-    // an async edit session may still own any frame currently in this pipe.
-    // Mismatched replies are retained by TryReadData... in pendingReplies.
-    if (force)
-    {
-        // Compatibility path for Server-initiated candidate clicks: legacy
-        // Server builds deliver the same candidate both on the worker pipe and
-        // as one unsolicited (request_id == 0) reply. The worker payload has
-        // already been consumed by the caller, so discard exactly that one
-        // duplicate. TryRead caches every nonzero request reply it encounters
-        // and ignores PipeReady, preserving all edit-session-owned frames.
-        (void)TryReadDataFromServerPipeWithTimeout(FANY_IME_UNSOLICITED_REQUEST_ID);
-    }
+    // Request IDs make destructive draining both unnecessary and incorrect: an async edit session may still own any frame currently in this pipe. Mismatched replies are retained by TryReadData... in pendingReplies.
 }
 
 /**
@@ -1450,6 +1364,11 @@ bool SendToAuxNamedpipe(const std::wstring &pipeData, bool waitForAcknowledgemen
     }
     if (!hAuxPipe || hAuxPipe == INVALID_HANDLE_VALUE)
     {
+        return false;
+    }
+    if (!IsPipeServerInOwnSession(hAuxPipe))
+    {
+        CloseHandle(hAuxPipe);
         return false;
     }
     DWORD bytesWritten = 0;
@@ -1811,6 +1730,17 @@ int SendPuncSwitchEventToUIProcessViaNamedPipe(BOOL isPunc)
     namedpipeData.event_type = FanyImePipeEventType::PuncSwitch;
     /* 利用其他的字段，把标点符号的中英状态传递过去 */
     namedpipeData.keycode = isPunc;
+    SendToNamedpipe();
+
+    return 0;
+}
+
+int SendPairedPunctuationAutoClosedToServerViaNamedPipe(WCHAR opening)
+{
+    namedpipeData = {};
+    namedpipeData.event_type = FanyImePipeEventType::PairedPunctuationAutoClosed;
+    // The opening key whose nesting the Server's Engine pays back; no reply follows.
+    namedpipeData.keycode = opening;
     SendToNamedpipe();
 
     return 0;

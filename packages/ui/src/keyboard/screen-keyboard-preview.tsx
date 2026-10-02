@@ -1,22 +1,13 @@
 import { useId } from "react";
+import { themeEntry, type GlobalTheme } from "../theme/global-theme";
+import { clamp } from "../core/number";
 import {
   readableSkinText,
   skinColor,
   type TouchKeyboardSkinDesign,
 } from "./touch-keyboard-skin-design";
-
-// Built-in visual source: MSIME-Apple@11c950a63ec57656cd78b3f75aa621c293bfe453,
-// platforms/ios/SharedUI/KeyboardSkinPreference.swift and KeyboardSkinBackgroundView.swift.
-export type TouchKeyboardSkin =
-  | "forest"
-  | "ocean"
-  | "rose"
-  | "porcelain"
-  | "typewriter"
-  | "candy"
-  | "midnight"
-  | "blueprint"
-  | "custom";
+import { actionKeyboardLabels, desktopKeyboardRows, touchKeyboardRows } from "./keyboard-layouts";
+import { keyboardKeyPath } from "./keyboard-shape";
 
 type Palette = {
   background: string;
@@ -24,13 +15,11 @@ type Palette = {
   foreground: string;
   accent: string;
   action: string;
+  actionForeground: string;
 };
-export type TouchKeyboardSkinOption = {
-  id: TouchKeyboardSkin;
-  title: string;
-  description: string;
-  light: Palette;
-  dark: Palette;
+/** How a global theme draws a touch keyboard when no custom design applies. */
+export type KeyboardThemeLook = {
+  palette: Palette;
   cornerRadius: number;
   borderWidth: number;
   shadowOpacity: number;
@@ -40,25 +29,40 @@ export type TouchKeyboardSkinOption = {
   pattern: 0 | 1 | 2 | 3;
 };
 
-export const touchKeyboardSkinOptions: TouchKeyboardSkinOption[] = [
-  {
-    id: "forest",
-    title: "水杉绿",
-    description: "清新留白 · 经典圆角",
-    light: {
-      background: "#e8f0eb",
-      key: "#fff",
-      foreground: "#000",
-      accent: "#185c47",
-      action: "#185c47",
-    },
-    dark: {
-      background: "#17211c",
-      key: "#303d36",
-      foreground: "#fff",
-      accent: "#73cca6",
-      action: "#1f614a",
-    },
+// `system` is the platform's own keyboard, which the page cannot read; it previews the design's iOS system keyboard tokens (dc.html `kbBg` / `keyBg` / `keySpec` / `keyFg` and the brand accent).
+const systemKeyboard: Record<"dark" | "light", Palette> = {
+  light: {
+    background: "#D1D4DB",
+    key: "#FFFFFF",
+    foreground: "#000000",
+    accent: "#2C7A4B",
+    action: "#ABB0BB",
+    actionForeground: "#000000",
+  },
+  dark: {
+    background: "#2B2B2D",
+    key: "#6B6B6E",
+    foreground: "#FFFFFF",
+    accent: "#5FBF84",
+    action: "#464648",
+    actionForeground: "#FFFFFF",
+  },
+};
+
+/** The keyboard look of a global theme: its catalog palette (function keys draw in `function_key`), or the system preview for `system`, `custom` without a design and unknown ids. */
+export function keyboardThemeLook(skin: string, theme: "dark" | "light"): KeyboardThemeLook {
+  const keyboard = themeEntry(skin).keyboard;
+  return {
+    palette: keyboard
+      ? {
+          background: keyboard.background,
+          key: keyboard.key,
+          foreground: keyboard.text,
+          accent: keyboard.accent,
+          action: keyboard.function_key,
+          actionForeground: keyboard.text,
+        }
+      : systemKeyboard[theme],
     cornerRadius: 8,
     borderWidth: 0,
     shadowOpacity: 0,
@@ -66,226 +70,15 @@ export const touchKeyboardSkinOptions: TouchKeyboardSkinOption[] = [
     shadowOffset: 2,
     monospaced: false,
     pattern: 0,
-  },
-  {
-    id: "ocean",
-    title: "海盐蓝",
-    description: "海盐浅蓝 · 轻盈平面",
-    light: {
-      background: "#e6f0fa",
-      key: "#fff",
-      foreground: "#000",
-      accent: "#1f5ca3",
-      action: "#1f5ca3",
-    },
-    dark: {
-      background: "#171f2b",
-      key: "#2e384a",
-      foreground: "#fff",
-      accent: "#80bdfa",
-      action: "#295c9e",
-    },
-    cornerRadius: 8,
-    borderWidth: 0,
-    shadowOpacity: 0,
-    shadowRadius: 3,
-    shadowOffset: 2,
-    monospaced: false,
-    pattern: 0,
-  },
-  {
-    id: "rose",
-    title: "浅蔷薇",
-    description: "柔和蔷薇 · 简洁圆角",
-    light: {
-      background: "#fae8f0",
-      key: "#fff",
-      foreground: "#000",
-      accent: "#a14063",
-      action: "#a14063",
-    },
-    dark: {
-      background: "#291a21",
-      key: "#45303b",
-      foreground: "#fff",
-      accent: "#f59ebd",
-      action: "#8f3b5c",
-    },
-    cornerRadius: 8,
-    borderWidth: 0,
-    shadowOpacity: 0,
-    shadowRadius: 3,
-    shadowOffset: 2,
-    monospaced: false,
-    pattern: 0,
-  },
-  {
-    id: "porcelain",
-    title: "素白瓷",
-    description: "细线边框 · 克制直角",
-    light: {
-      background: "#ebedf0",
-      key: "#fcfcfc",
-      foreground: "#000",
-      accent: "#333d47",
-      action: "#333d47",
-    },
-    dark: {
-      background: "#1a1c21",
-      key: "#33363b",
-      foreground: "#fff",
-      accent: "#ccd6e3",
-      action: "#454f5c",
-    },
-    cornerRadius: 3,
-    borderWidth: 0.5,
-    shadowOpacity: 0,
-    shadowRadius: 3,
-    shadowOffset: 2,
-    monospaced: false,
-    pattern: 0,
-  },
-  {
-    id: "typewriter",
-    title: "纸上时光",
-    description: "暖纸网点 · 复古键帽",
-    light: {
-      background: "#e3d6bd",
-      key: "#fcf5e0",
-      foreground: "#000",
-      accent: "#5e4026",
-      action: "#5e4026",
-    },
-    dark: {
-      background: "#26211a",
-      key: "#40382b",
-      foreground: "#fff",
-      accent: "#deb882",
-      action: "#66472e",
-    },
-    cornerRadius: 5,
-    borderWidth: 1,
-    shadowOpacity: 0.3,
-    shadowRadius: 0,
-    shadowOffset: 3,
-    monospaced: true,
-    pattern: 1,
-  },
-  {
-    id: "candy",
-    title: "奶油桃桃",
-    description: "奶油波纹 · 饱满圆角",
-    light: {
-      background: "#fce0d1",
-      key: "#fff7ed",
-      foreground: "#000",
-      accent: "#943852",
-      action: "#943852",
-    },
-    dark: {
-      background: "#301f26",
-      key: "#4d333d",
-      foreground: "#fff",
-      accent: "#ffa8ba",
-      action: "#943852",
-    },
-    cornerRadius: 18,
-    borderWidth: 0,
-    shadowOpacity: 0.16,
-    shadowRadius: 3,
-    shadowOffset: 2,
-    monospaced: false,
-    pattern: 3,
-  },
-  {
-    id: "midnight",
-    title: "霓虹夜航",
-    description: "紫色星点 · 霓虹描边",
-    light: {
-      background: "#130f24",
-      key: "#291f40",
-      foreground: "#fff",
-      accent: "#c7b0ff",
-      action: "#663bb3",
-    },
-    dark: {
-      background: "#130f24",
-      key: "#291f40",
-      foreground: "#fff",
-      accent: "#c7b0ff",
-      action: "#663bb3",
-    },
-    cornerRadius: 10,
-    borderWidth: 1,
-    shadowOpacity: 0,
-    shadowRadius: 3,
-    shadowOffset: 2,
-    monospaced: false,
-    pattern: 1,
-  },
-  {
-    id: "blueprint",
-    title: "工程蓝图",
-    description: "蓝图网格 · 等宽字形",
-    light: {
-      background: "#0e2138",
-      key: "#173352",
-      foreground: "#fff",
-      accent: "#8ad6ff",
-      action: "#1f578a",
-    },
-    dark: {
-      background: "#0e2138",
-      key: "#173352",
-      foreground: "#fff",
-      accent: "#8ad6ff",
-      action: "#1f578a",
-    },
-    cornerRadius: 3,
-    borderWidth: 1,
-    shadowOpacity: 0,
-    shadowRadius: 3,
-    shadowOffset: 2,
-    monospaced: true,
-    pattern: 2,
-  },
-];
+  };
+}
 
 // Layout source: MSIME-Windows@04a8df56f86312474a069f4335a1b58da7afaa9e,
 // server/src/keyboard-panel/KeyboardPanel.cpp (GPL-3.0). This preview has no input actions.
-const key = (label: string, weight = 1) => ({ label, weight });
-const letters = (text: string) => [...text].map((label) => key(label));
-const rows = [
-  [...letters("`1234567890-="), key("Backspace", 1.9)],
-  [key("Tab", 1.5), ...letters("qwertyuiop[]"), key("\\", 1.4)],
-  [key("Caps Lock", 1.85), ...letters("asdfghjkl;'"), key("Enter", 2)],
-  [key("Shift", 2.35), ...letters("zxcvbnm,./"), key("Shift", 2.15)],
-  [
-    key("Ctrl", 1.25),
-    key("Win", 1.25),
-    key("Alt", 1.25),
-    key("Space", 6.7),
-    key("Alt", 1.25),
-    key("Win", 1.25),
-    key("Del", 1.25),
-    key("Ctrl", 1.25),
-  ],
-];
 // The touch hosts put three letter rows above a control strip, so the desktop artwork above is the
 // wrong picture of them: it promises a number row, Tab, Caps Lock and Win keys that a phone keyboard
 // simply does not have. Mirrors KeyboardLayout.LETTER_ROWS plus the leading controls that
 // MSIMEInputService builds beneath them.
-const touchRows = [
-  letters("qwertyuiop"),
-  [key("", 0.5), ...letters("asdfghjkl"), key("", 0.5)],
-  [key("⇧", 1.5), ...letters("zxcvbnm"), key("⌫", 1.5)],
-  [key("符号", 1.5), key("中/英", 1.5), key("空格", 4.5), key("，"), key("↵", 1.5)],
-];
-const actionLabels = new Set(["Backspace", "Enter", "Shift", "Del", "⇧", "⌫", "↵"]);
-
-function optionFor(id: Exclude<TouchKeyboardSkin, "custom">): TouchKeyboardSkinOption {
-  return touchKeyboardSkinOptions.find((option) => option.id === id) ?? touchKeyboardSkinOptions[0];
-}
 
 function Pattern({
   id,
@@ -330,27 +123,9 @@ function Pattern({
   );
 }
 
-function keyPath(
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  shape: string,
-  radius: number,
-): string {
-  if (shape === "pebble")
-    return `M${x + width * 0.35} ${y}C${x + width * 0.83} ${y} ${x + width} ${y + height * 0.04} ${x + width} ${y + height * 0.3}C${x + width} ${y + height * 0.85} ${x + width * 0.9} ${y + height} ${x + width * 0.68} ${y + height}C${x + width * 0.18} ${y + height} ${x} ${y + height * 0.97} ${x} ${y + height * 0.7}C${x} ${y + height * 0.2} ${x + width * 0.06} ${y} ${x + width * 0.35} ${y}Z`;
-  if (shape === "ticket") {
-    const r = Math.min(width, height) * 0.12;
-    return `M${x} ${y}H${x + width}V${y + height / 2 - r}A${r} ${r} 0 0 0 ${x + width} ${y + height / 2 + r}V${y + height}H${x}V${y + height / 2 + r}A${r} ${r} 0 0 0 ${x} ${y + height / 2 - r}Z`;
-  }
-  const r = shape === "capsule" ? height / 2 : Math.min(radius, height / 2, width / 2);
-  return `M${x + r} ${y}H${x + width - r}Q${x + width} ${y} ${x + width} ${y + r}V${y + height - r}Q${x + width} ${y + height} ${x + width - r} ${y + height}H${x + r}Q${x} ${y + height} ${x} ${y + height - r}V${y + r}Q${x} ${y} ${x + r} ${y}Z`;
-}
-
 export function ScreenKeyboardPreview({
   theme,
-  skin = "forest",
+  skin = "system",
   compact = false,
   customDesign,
   keySpacingTenths = 60,
@@ -359,7 +134,7 @@ export function ScreenKeyboardPreview({
   layout = "desktop",
 }: {
   theme: "dark" | "light";
-  skin?: TouchKeyboardSkin;
+  skin?: GlobalTheme;
   compact?: boolean;
   customDesign?: TouchKeyboardSkinDesign;
   keySpacingTenths?: number;
@@ -368,9 +143,9 @@ export function ScreenKeyboardPreview({
   layout?: "desktop" | "touch";
 }) {
   const touch = layout === "touch";
-  const layoutRows = touch ? touchRows : rows;
+  const layoutRows = touch ? touchKeyboardRows : desktopKeyboardRows;
   const custom = skin === "custom" && customDesign ? customDesign : undefined;
-  const option = optionFor(skin === "custom" ? "forest" : skin);
+  const option = keyboardThemeLook(skin, theme);
   const palette = custom
     ? {
         background: skinColor(custom.background),
@@ -378,8 +153,9 @@ export function ScreenKeyboardPreview({
         foreground: skinColor(custom.keyForeground),
         accent: skinColor(custom.accent),
         action: skinColor(custom.actionBackground),
+        actionForeground: skinColor(readableSkinText(custom.actionBackground)),
       }
-    : option[theme];
+    : option.palette;
   const cornerRadius = custom?.cornerRadius ?? option.cornerRadius;
   const borderWidth = custom?.borderWidth ?? option.borderWidth;
   const shadowOpacity = custom?.shadow ?? option.shadowOpacity;
@@ -390,16 +166,15 @@ export function ScreenKeyboardPreview({
   const keyShape = custom?.keyShape ?? "rounded";
   const keyMaterial = custom?.keyMaterial ?? "flat";
   const keyOpacity = custom?.keyOpacity ?? 1;
-  const actionForeground = custom ? skinColor(readableSkinText(custom.actionBackground)) : "#fff";
   const unique = useId().replaceAll(":", "");
   const patternId = `touch-skin-pattern-${unique}`;
   const shadowId = `touch-skin-shadow-${unique}`;
   const backgroundId = `touch-skin-background-${unique}`;
   const keyMaterialId = `touch-skin-key-material-${unique}`;
   const actionMaterialId = `touch-skin-action-material-${unique}`;
-  const keySpacing = Math.min(6, Math.max(3, keySpacingTenths / 10));
-  const rowSpacing = Math.min(10, Math.max(4, rowSpacingTenths / 10));
-  const canvasHeight = 400 + Math.min(48, Math.max(-12, heightAdjustment));
+  const keySpacing = clamp(keySpacingTenths / 10, 3, 6);
+  const rowSpacing = clamp(rowSpacingTenths / 10, 4, 10);
+  const canvasHeight = 400 + clamp(heightAdjustment, -12, 48);
   // Keep the default artwork byte-for-byte equivalent while making the
   // non-default geometry visibly track the iOS keyboard settings sliders.
   const keyGap = 4 + keySpacing - 6;
@@ -525,8 +300,8 @@ export function ScreenKeyboardPreview({
               // An unlabelled entry is the half-key inset that centres the home row, not a key the
               // user can press: it takes up its width and draws nothing.
               if (!item.label) return null;
-              const action = actionLabels.has(item.label);
-              const path = keyPath(
+              const action = actionKeyboardLabels.has(item.label);
+              const path = keyboardKeyPath(
                 left,
                 y,
                 width,
@@ -534,7 +309,14 @@ export function ScreenKeyboardPreview({
                 keyShape,
                 cornerRadius,
               );
-              const depthPath = keyPath(left, y + 3, width, height - 3, keyShape, cornerRadius);
+              const depthPath = keyboardKeyPath(
+                left,
+                y + 3,
+                width,
+                height - 3,
+                keyShape,
+                cornerRadius,
+              );
               const fill =
                 keyMaterial === "glass" || keyMaterial === "raised"
                   ? `url(#${action ? actionMaterialId : keyMaterialId})`
@@ -565,7 +347,7 @@ export function ScreenKeyboardPreview({
                           : skinColor(custom.customBorderColor)
                         : "none"
                     }
-                    strokeOpacity={custom ? 1 : skin === "midnight" ? 0.65 : 0.28}
+                    strokeOpacity={custom ? 1 : 0.28}
                     strokeWidth={borderWidth}
                   />
                   {keyMaterial === "paper" && (
@@ -583,7 +365,7 @@ export function ScreenKeyboardPreview({
                     textAnchor="middle"
                     dominantBaseline="middle"
                     fontSize={item.label.length === 1 ? 15 : 12}
-                    fill={action ? actionForeground : palette.foreground}
+                    fill={action ? palette.actionForeground : palette.foreground}
                   >
                     {item.label}
                   </text>

@@ -4,6 +4,7 @@
 #include "MetasequoiaIME.h"
 #include "CandidateListUIPresenter.h"
 #include "Ipc.h"
+#include "KeyPressStatisticsQueue.h"
 
 void CMetasequoiaIME::_SyncHostContextFocus(_In_opt_ ITfContext *context)
 {
@@ -11,11 +12,25 @@ void CMetasequoiaIME::_SyncHostContextFocus(_In_opt_ ITfContext *context)
     if (host && host->valid())
     {
         const bool changed = context && (!_hostFocusContext || !_IsSameComObject(context, _hostFocusContext));
+        bool koreanFinished = false;
         const bool success = _hostFocusState.update(context != nullptr, changed, [&](bool focused) {
             std::string raw, error;
-            return host->focus(focused, &raw, &error);
+            if (!host->focus(focused, &raw, &error)) return false;
+            msime::tsf::EngineResult result;
+            koreanFinished = msime::tsf::EngineSessionAdapter::parse_result(raw, &result, &error) &&
+                             result.has_commit && !result.commit.empty() &&
+                             msime::windows::scheme::CommitsOnBlur(static_cast<int>(result.view.scheme));
+            return true;
         });
         if (!success) context = nullptr;
+        // A focus change finishes a Korean syllable, a Zhuyin conversion or a Vietnamese word in the host instead of discarding it (scheme::CommitsOnBlur). It is already on screen as the composition, so end that composition where it is, or the next key would replace it.
+        if (koreanFinished && _IsComposing() && _pContext)
+        {
+            _KEYSTROKE_STATE keyState = {};
+            keyState.Category = CATEGORY_COMPOSING;
+            keyState.Function = FUNCTION_COMMIT_SYLLABLE;
+            (void)_InvokeKeyHandler(_pContext, 0, L'\0', 0, keyState, FANY_IME_NO_REQUEST_ID);
+        }
     }
     else context = nullptr;
     // Retain COM identity through transient NULL focus and pointer reuse.
@@ -75,6 +90,11 @@ STDAPI CMetasequoiaIME::OnUninitDocumentMgr(_In_ ITfDocumentMgr *pDocMgr)
 
 STDAPI CMetasequoiaIME::OnSetFocus(_In_ ITfDocumentMgr *pDocMgrFocus, _In_ ITfDocumentMgr *pDocMgrPrevFocus)
 {
+    if (pDocMgrFocus == nullptr)
+    {
+        // Document focus left: hand the key counts over now rather than when the timer fires.
+        FlushKeyPressStatistics();
+    }
     if (!IsNamedpipeFocusStateOwner(this))
     {
         return S_OK;
@@ -121,6 +141,8 @@ STDAPI CMetasequoiaIME::OnSetFocus(_In_ ITfDocumentMgr *pDocMgrFocus, _In_ ITfDo
     // physically reopens a channel as well when its health check fails.
     if (pDocMgrFocus && (!Global::g_connected || windowsTextInputHostTransition))
     {
+        // A genuine focus-session handover starts here, so the smart-punctuation action armed under the old activation must not survive into the new one. The frequent Chromium document swap handled above keeps the session and leaves the action alone.
+        _ClearSmartPunctuationAction();
         Global::g_connected = true;
         _workerCommitReady.store(false, std::memory_order_release);
         RequireNamedpipeFocusActivation();
@@ -292,6 +314,8 @@ void CMetasequoiaIME::_HandleFocusedContextStackChange(_In_opt_ ITfContext *chan
     }
 
     _ClearDeferredKeyDowns();
+    // The smart-punctuation action was armed for the old top context, and the edit session that would consume it is about to be invalidated too.
+    _ClearSmartPunctuationAction();
     MarkNamedpipeSessionDirtyForOwner(this);
     const UINT resetToken = _localSessionResetToken.load(std::memory_order_acquire);
     _RequestLocalSessionReset(resetContext, resetToken);

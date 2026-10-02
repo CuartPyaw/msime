@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <cstring>
+#include <map>
 #include <optional>
 
 using namespace msime::windows;
@@ -120,6 +121,21 @@ int main() {
   // TerminalDeactivation carries a client id and a focus token, both positive.
   const auto terminal = parse_aux_terminal_deactivation(L"TerminalDeactivation|7|42");
   require(terminal && terminal->client_id == 7 && terminal->focus_token == 42);
+  // The DLL's real client id is (pid << 32) | tid and the token a 64-bit
+  // request id, so both routinely exceed int32.
+  const auto real = parse_aux_terminal_deactivation(
+      L"TerminalDeactivation|5299989648942|18446744073709551615");
+  require(real && real->client_id == ((1234ull << 32) | 5678) &&
+          real->focus_token == 18446744073709551615ull);
+  require(!parse_aux_terminal_deactivation(
+      L"TerminalDeactivation|5299989648942|18446744073709551616"));
+  require(!parse_aux_terminal_deactivation(
+      L"TerminalDeactivation|99999999999999999999|42"));
+  require(!parse_aux_terminal_deactivation(
+      L"TerminalDeactivation|100000000000000000000|42"));
+  require(!parse_aux_terminal_deactivation(L"TerminalDeactivation|+1|42"));
+  require(!parse_aux_terminal_deactivation(L"TerminalDeactivation||42"));
+  require(!parse_aux_terminal_deactivation(L"TerminalDeactivation|7|"));
   require(!parse_aux_terminal_deactivation(L"TerminalDeactivation|7"));
   require(!parse_aux_terminal_deactivation(L"TerminalDeactivation|7|42|9"));
   require(!parse_aux_terminal_deactivation(L"TerminalDeactivation|0|42"));
@@ -131,6 +147,91 @@ int main() {
   // The verbs never claim each other's messages.
   require(!parse_aux_langbar_right_click(L"TerminalDeactivation|7|42"));
   require(!parse_aux_terminal_deactivation(L"LangbarRightClick|1|2|3|4"));
+
+  // Passthrough typing statistics: what the DLL builds is what the Server parses, sorted, and split to fit the pipe.
+  {
+    const auto messages = aux_typing_statistics_messages(true, L"hello");
+    require(messages.size() == 1 && messages[0] == L"TypingStatistics|E|ehllo");
+    const auto bytes = wire(messages[0]);
+    const auto text = aux_text_from_bytes(bytes.data(), bytes.size());
+    require(text.has_value());
+    const auto parsed = parse_aux_typing_statistics(*text);
+    require(parsed && parsed->english && parsed->characters == L"ehllo");
+    const auto chinese = parse_aux_typing_statistics(
+        aux_typing_statistics_messages(false, L"3,1")[0]);
+    require(chinese && !chinese->english && chinese->characters == L",13");
+    require(aux_typing_statistics_messages(true, L"").empty());
+    const std::wstring many(300, L'x');
+    size_t carried = 0;
+    for (const auto &message : aux_typing_statistics_messages(true, many)) {
+      require(message.size() * sizeof(wchar_t) <= max_aux_message_bytes);
+      const auto piece = parse_aux_typing_statistics(message);
+      require(piece.has_value());
+      carried += piece->characters.size();
+    }
+    require(carried == many.size());
+    require(!parse_aux_typing_statistics(L"TypingStatistics|E|"));
+    require(!parse_aux_typing_statistics(L"TypingStatistics|X|a"));
+    require(!parse_aux_typing_statistics(L"TypingStatistics|Ea"));
+    require(!parse_aux_typing_statistics(L"TypingStatisticsX|E|a"));
+    require(!parse_aux_typing_statistics(std::wstring(L"TypingStatistics|E|") + wchar_t(0xD83D)));
+    require(!parse_aux_langbar_right_click(L"TypingStatistics|E|a"));
+  }
+
+  // Key heatmap counts: per-day, sorted by id, split on entry boundaries, and an empty list is the probe.
+  {
+    const std::map<std::wstring, uint64_t> counts{{L"Space", 2}, {L"KeyA", 3}};
+    const auto messages = aux_typing_keys_messages(L"2026-10-01", counts);
+    require(messages.size() == 1 &&
+            messages[0] == L"TypingKeys|2026-10-01|KeyA=3,Space=2");
+    const auto bytes = wire(messages[0]);
+    const auto text = aux_text_from_bytes(bytes.data(), bytes.size());
+    require(text.has_value());
+    const auto parsed = parse_aux_typing_keys(*text);
+    require(parsed && parsed->day == L"2026-10-01" && parsed->counts == counts);
+    require(aux_typing_keys_messages(L"2026-10-01", {}).empty());
+
+    const auto probe = parse_aux_typing_keys(aux_typing_keys_probe(L"2026-10-01"));
+    require(probe && probe->day == L"2026-10-01" && probe->counts.empty());
+    require(aux_typing_keys_probe(L"2026-10-01") == L"TypingKeys|2026-10-01|");
+
+    // A batch wider than one message is carried whole, one entry never straddling two messages.
+    std::map<std::wstring, uint64_t> wide;
+    for (const auto *id : {L"KeyA", L"KeyB", L"KeyC", L"KeyD", L"KeyE", L"KeyF",
+                           L"KeyG", L"KeyH", L"Digit1", L"Digit2", L"ArrowRight",
+                           L"ArrowLeft", L"Backspace", L"NumpadSubtract",
+                           L"BracketRight", L"ControlRight", L"IntlBackslash"})
+      wide.emplace(id, 18446744073709551615ULL);
+    const auto split = aux_typing_keys_messages(L"2026-10-01", wide);
+    require(split.size() > 1);
+    std::map<std::wstring, uint64_t> carried;
+    for (const auto &message : split) {
+      require(message.size() * sizeof(wchar_t) <= max_aux_message_bytes);
+      const auto piece = parse_aux_typing_keys(message);
+      require(piece && piece->day == L"2026-10-01" && !piece->counts.empty());
+      carried.insert(piece->counts.begin(), piece->counts.end());
+    }
+    require(carried == wide);
+
+    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01"));
+    require(!parse_aux_typing_keys(L"TypingKeys|2026-1-01|KeyA=1"));
+    require(!parse_aux_typing_keys(L"TypingKeys|2026/10/01|KeyA=1"));
+    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01|KeyA"));
+    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01|KeyA="));
+    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01|=1"));
+    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01|KeyA=0"));
+    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01|KeyA=-1"));
+    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01|KeyA=1,"));
+    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01|KeyA=1,KeyA=2"));
+    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01|Key A=1"));
+    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01|KeyA=1|KeyB=1"));
+    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01|KeyA=18446744073709551616"));
+    require(!parse_aux_typing_keys(L"TypingKeys|2026-10-01|" + std::wstring(33, L'K') + L"=1"));
+    require(parse_aux_typing_keys(L"TypingKeys|2026-10-01|" + std::wstring(32, L'K') + L"=1").has_value());
+    require(!parse_aux_typing_keys(L"TypingKeysX|2026-10-01|KeyA=1"));
+    require(!parse_aux_typing_statistics(L"TypingKeys|2026-10-01|KeyA=1"));
+    require(!parse_aux_typing_keys(L"TypingStatistics|E|a"));
+  }
 
   std::cout << "Aux message: langbar rectangle parsed, malformed rejected\n";
     return 0;

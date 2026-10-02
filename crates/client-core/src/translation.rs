@@ -1,22 +1,12 @@
 //! Parsing and validation helpers for DeepLX-compatible custom translation services.
-//!
-//! The learned-translation store lives in [`store`]; this module is the
-//! translation request contract itself.
 
-pub mod store;
-
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use md5::Md5;
 use serde_json::Value;
 use sha2::Digest;
 use sha2::Sha256;
-use std::io::Read;
-use std::time::{Duration, Instant};
 
-const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
-const REQUEST_TIMEOUT: Duration = Duration::from_millis(2500);
-const BATCH_BUDGET: Duration = Duration::from_secs(6);
-const MAX_SOURCE_CHARS: usize = 40;
+pub const MAX_SOURCE_CHARS: usize = 40;
 const MAX_PERSIST_GLOSS_CHARS: usize = 32;
 
 /// Tencent TC3 signing primitive. The caller owns credential lifetime.
@@ -88,78 +78,12 @@ pub fn tencent_tmt_headers(
     ]
 }
 
-/// One signed Tencent TMT call: the credentials, the region they are scoped to
-/// and the moment the signature covers.
-pub struct TencentTmtRequest<'a> {
-    pub secret_id: &'a str,
-    pub secret_key: &'a str,
-    pub region: &'a str,
-    pub timestamp: i64,
-    pub date: &'a str,
-    pub source: &'a str,
-    pub target: &'a str,
-}
-
-pub fn translate_tencent_batch(
-    request_info: &TencentTmtRequest<'_>,
-    texts: &[String],
-) -> Vec<Option<String>> {
-    let TencentTmtRequest {
-        secret_id,
-        secret_key,
-        region,
-        timestamp,
-        date,
-        source,
-        target,
-    } = *request_info;
-    let results = vec![None; texts.len()];
-    let Some(payload) = tencent_tmt_payload(source, target, texts) else {
-        return results;
-    };
-    let authorization =
-        tencent_tc3_authorization(secret_id, secret_key, timestamp, date, payload.as_bytes());
-    if authorization.is_empty() {
-        return results;
-    }
-    let client = match reqwest::blocking::Client::builder()
-        .connect_timeout(REQUEST_TIMEOUT)
-        .timeout(REQUEST_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-    {
-        Ok(client) => client,
-        Err(_) => return results,
-    };
-    let mut request = client.post("https://tmt.tencentcloudapi.com").body(payload);
-    for (name, value) in tencent_tmt_headers(region, timestamp, &authorization) {
-        request = request.header(name, value);
-    }
-    let response = match request.send() {
-        Ok(response) if response.status().is_success() => response,
-        _ => return results,
-    };
-    let body = match response.text() {
-        Ok(body) => body,
-        Err(_) => return results,
-    };
-    parse_tencent_tmt_response(&body, texts.len())
-        .into_iter()
-        .flatten()
-        .map(Some)
-        .collect()
-}
-
 pub fn tencent_tmt_payload(source: &str, target: &str, texts: &[String]) -> Option<String> {
     if source.is_empty()
         || target.is_empty()
         || texts.is_empty()
         || texts.len() > 50
-        || texts.iter().any(|text| {
-            text.is_empty()
-                || text.chars().count() > MAX_SOURCE_CHARS
-                || text.chars().any(char::is_control)
-        })
+        || texts.iter().any(|text| !is_valid_source_text(text))
     {
         return None;
     }
@@ -180,12 +104,26 @@ pub fn parse_tencent_tmt_response(response: &str, expected: usize) -> Option<Vec
     if values.len() != expected || values.iter().any(|value| value.as_str().is_none()) {
         return None;
     }
-    Some(
+    let mut translations = Vec::with_capacity(expected);
+    translations.extend(
         values
             .iter()
-            .map(|value| value.as_str().unwrap().to_owned())
-            .collect(),
-    )
+            .map(|value| value.as_str().unwrap().to_owned()),
+    );
+    Some(translations)
+}
+
+/// Source text accepted by every cloud translation provider.
+pub fn is_valid_source_text(value: &str) -> bool {
+    !value.is_empty() && crate::text::is_bounded_chars(value, MAX_SOURCE_CHARS)
+}
+
+pub fn is_supported_translation_language(value: &str) -> bool {
+    matches!(value, "zh" | "en" | "fr" | "ja" | "es" | "ru" | "de" | "ko")
+}
+
+pub fn is_supported_translation_pair(source: &str, target: &str) -> bool {
+    is_supported_translation_language(source) && is_supported_translation_language(target)
 }
 
 pub fn format_translation_gloss(text: &str) -> Option<String> {
@@ -215,11 +153,15 @@ pub fn should_persist_translation(key: &str, gloss: &str) -> bool {
         && !gloss.eq_ignore_ascii_case(key)
 }
 
-pub fn usable_tencent_secret(value: &str) -> bool {
+pub fn usable_credential(value: &str) -> bool {
     let trimmed = value.trim_matches([' ', '\t', '\r', '\n']);
     !trimmed.is_empty()
         && !(trimmed.starts_with('<') && trimmed.ends_with('>'))
         && !trimmed.starts_with("FAKESECRET_")
+}
+
+pub fn is_valid_credential(value: &str) -> bool {
+    usable_credential(value) && crate::text::is_bounded_text(value, 4096)
 }
 
 /// NiuTrans v2 authStr is the lower-case MD5 of the lexicographically sorted
@@ -237,14 +179,12 @@ pub fn niutrans_auth_string(
         "apikey={apikey}&appId={app_id}&from={from}&srcText={source_text}&timestamp={timestamp}&to={to}"
     );
     let digest = Md5::digest(canonical.as_bytes());
-    format!("{digest:x}")
+    hex::encode(digest)
 }
 
-pub fn usable_niutrans_credential(value: &str) -> bool {
-    let trimmed = value.trim_matches([' ', '\t', '\r', '\n']);
-    !trimmed.is_empty()
-        && !(trimmed.starts_with('<') && trimmed.ends_with('>'))
-        && !trimmed.starts_with("FAKESECRET_")
+/// Mirrors the reference `BuildTranslationQuery`: Engine `CandidateSource::Emoji` (6) and `CandidateSource::Kaomoji` (7) are never translated, whatever their text. A kaomoji such as "(*Φ皿Φ*)" contains Han characters and would otherwise pass the Chinese text test, sending a picture to a gloss model that can only put noise under it.
+pub fn is_emoji_or_kaomoji_source(source: u8) -> bool {
+    matches!(source, 6 | 7)
 }
 
 pub fn is_cloud_translatable_english(text: &str) -> bool {
@@ -259,134 +199,69 @@ pub fn is_cloud_translatable_english(text: &str) -> bool {
     has_letter
 }
 
+/// Mirrors the reference `IsCloudTranslatableChinese`: any Han character makes the text translatable and only an emoji or pictograph rejects it, so mixed words such as "T恤" or "3D打印" are sent while digits, Latin letters and punctuation alone are not.
 pub fn is_cloud_translatable_chinese(text: &str) -> bool {
     let mut has_han = false;
     for ch in text.chars() {
-        if ('\u{3400}'..='\u{4DBF}').contains(&ch)
-            || ('\u{4E00}'..='\u{9FFF}').contains(&ch)
-            || ch == '\u{3007}'
-        {
-            has_han = true;
-        } else if matches!(ch, '\u{200D}' | '\u{FE0E}' | '\u{FE0F}' | '\u{20E3}')
+        if matches!(ch, '\u{200D}' | '\u{FE0E}' | '\u{FE0F}' | '\u{20E3}')
             || ('\u{2600}'..='\u{27BF}').contains(&ch)
             || ('\u{1F000}'..='\u{1FAFF}').contains(&ch)
             || ('\u{1F1E6}'..='\u{1F1FF}').contains(&ch)
         {
             return false;
-        } else if ch.is_ascii_punctuation() || ch.is_ascii_whitespace() {
-            continue;
-        } else if ch.is_ascii() || ('\u{1F000}'..='\u{1FAFF}').contains(&ch) {
-            return false;
         }
+        has_han = has_han
+            || ('\u{3400}'..='\u{4DBF}').contains(&ch)
+            || ('\u{4E00}'..='\u{9FFF}').contains(&ch)
+            || ('\u{F900}'..='\u{FAFF}').contains(&ch)
+            || ('\u{20000}'..='\u{2CEAF}').contains(&ch)
+            || ch == '\u{3007}';
     }
     has_han
 }
 
-#[derive(Clone, PartialEq, Eq)]
-pub struct TranslationConfig {
-    pub endpoint: String,
-    pub api_key: String,
-}
-
-pub fn translate_batch(
-    config: &TranslationConfig,
-    texts: &[String],
-    source: &str,
-    target: &str,
-) -> Vec<Option<String>> {
-    let mut cache = crate::cloud::candidates::TranslationCache::new(Duration::from_secs(480));
-    translate_batch_cached(config, texts, source, target, &mut cache)
-}
-
-pub fn translate_batch_cached(
-    config: &TranslationConfig,
-    texts: &[String],
-    source: &str,
-    target: &str,
-    cache: &mut crate::cloud::candidates::TranslationCache,
-) -> Vec<Option<String>> {
-    let mut results = vec![None; texts.len()];
-    if texts.is_empty()
-        || source.is_empty()
-        || target.is_empty()
-        || !is_supported_endpoint(&config.endpoint)
-    {
-        return results;
+/// Credentials and private input may only travel over TLS or to a local service.
+pub fn is_secure_endpoint(endpoint: &str) -> bool {
+    if !crate::text::is_bounded_text(endpoint, 2048) {
+        return false;
     }
-    let client = match reqwest::blocking::Client::builder()
-        .connect_timeout(REQUEST_TIMEOUT)
-        .timeout(REQUEST_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-    {
-        Ok(client) => client,
-        Err(_) => return results,
+    let Ok(url) = reqwest::Url::parse(endpoint) else {
+        return false;
     };
-    let started = Instant::now();
-    let scope = format!("{}\0{}\0", source, target);
-    let mut pending = Vec::new();
-    for (index, text) in texts.iter().enumerate() {
-        if text.is_empty()
-            || text.chars().count() > MAX_SOURCE_CHARS
-            || text.chars().any(char::is_control)
-        {
-            continue;
-        }
-        let cache_key = format!("{scope}{text}");
-        if let Some(value) = cache.get(&cache_key) {
-            results[index] = value;
-        } else {
-            pending.push((index, text));
-        }
+    if !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() {
+        return false;
     }
-    for (index, text) in pending {
-        let timeout = request_timeout(started.elapsed());
-        if timeout.is_zero() {
-            break;
+    match url.scheme() {
+        "https" => {
+            endpoint.split_once("://").is_some_and(|(_, authority)| {
+                authority
+                    .as_bytes()
+                    .first()
+                    .is_some_and(|byte| *byte != b'/')
+            }) && url.host_str().is_some_and(|host| !host.is_empty())
         }
-        let mut request = client
-            .post(&config.endpoint)
-            .timeout(timeout)
-            .json(&serde_json::json!({
-                "text": text,
-                "source_lang": source.to_ascii_uppercase(),
-                "target_lang": target.to_ascii_uppercase(),
-            }));
-        if !config.api_key.is_empty() {
-            request = request.bearer_auth(&config.api_key);
-        }
-        let response = match request.send() {
-            Ok(response) if response.status().is_success() => response,
-            _ => continue,
-        };
-        let value = read_translation_response(response);
-        cache.remember(format!("{scope}{text}"), value.clone());
-        results[index] = value;
+        "http" => matches!(
+            url.host_str(),
+            Some("localhost" | "127.0.0.1" | "[::1]" | "::1")
+        ),
+        _ => false,
     }
-    results
-}
-
-fn request_timeout(elapsed: Duration) -> Duration {
-    BATCH_BUDGET.saturating_sub(elapsed).min(REQUEST_TIMEOUT)
-}
-
-fn read_translation_response(reader: impl Read) -> Option<String> {
-    let mut body = Vec::new();
-    reader
-        .take((MAX_RESPONSE_BYTES + 1) as u64)
-        .read_to_end(&mut body)
-        .ok()?;
-    if body.len() > MAX_RESPONSE_BYTES {
-        return None;
-    }
-    parse_translation_response(std::str::from_utf8(&body).ok()?)
 }
 
 pub fn is_supported_endpoint(endpoint: &str) -> bool {
-    !endpoint.is_empty()
-        && endpoint.len() <= 2048
-        && !endpoint.chars().any(char::is_control)
-        && (endpoint.starts_with("https://") || endpoint.starts_with("http://"))
+    is_secure_endpoint(endpoint)
+}
+
+/// Whether a DeepLX-compatible reply reports a failure rather than an answer: a body that is not a JSON object, or one whose `code` is not 200. A reply that answers with no translation is still an answer, which `parse_translation_response` cannot tell apart from a failure because it returns `None` for both. Hosts negative-cache answers only, so a rate limit or an outage is asked again instead of hiding the gloss.
+pub fn translation_response_failed(response: &str) -> bool {
+    let Ok(root) = serde_json::from_str::<Value>(response) else {
+        return true;
+    };
+    if !root.is_object() {
+        return true;
+    }
+    root.get("code")
+        .is_some_and(|code| !(code.as_i64() == Some(200) || code.as_str() == Some("200")))
 }
 
 pub fn parse_translation_response(response: &str) -> Option<String> {
@@ -434,48 +309,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn response_limit_is_enforced_while_reading() {
-        struct Endless {
-            read: usize,
-        }
-        impl Read for Endless {
-            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
-                buffer.fill(b' ');
-                self.read += buffer.len();
-                Ok(buffer.len())
-            }
-        }
-        let mut endless = Endless { read: 0 };
-        assert!(read_translation_response(&mut endless).is_none());
-        assert_eq!(endless.read, MAX_RESPONSE_BYTES + 1);
-        let mut boundary = br#"{"data":"synthetic"}"#.to_vec();
-        boundary.resize(MAX_RESPONSE_BYTES, b' ');
-        assert_eq!(
-            read_translation_response(boundary.as_slice()).as_deref(),
-            Some("synthetic")
-        );
-        boundary.push(b' ');
-        assert!(read_translation_response(boundary.as_slice()).is_none());
-        assert!(read_translation_response(&b"\xff"[..]).is_none());
-    }
-
-    #[test]
-    fn request_timeout_respects_remaining_batch_budget() {
-        assert_eq!(request_timeout(Duration::ZERO), REQUEST_TIMEOUT);
-        assert_eq!(
-            request_timeout(Duration::from_millis(5500)),
-            Duration::from_millis(500)
-        );
-        assert_eq!(request_timeout(BATCH_BUDGET), Duration::ZERO);
-        assert_eq!(request_timeout(Duration::from_secs(7)), Duration::ZERO);
-    }
-
-    #[test]
     fn accepts_supported_endpoints_only() {
         assert!(is_supported_endpoint("https://translate.example/api"));
         assert!(is_supported_endpoint("http://localhost:8080/translate"));
+        assert!(is_supported_endpoint("http://127.0.0.1:8080/translate"));
+        assert!(is_supported_endpoint("http://[::1]:8080/translate"));
+        assert!(!is_supported_endpoint("http://translate.example/api"));
+        assert!(!is_supported_endpoint("http://localhost.example/api"));
+        assert!(!is_supported_endpoint("http://127.0.0.2/api"));
+        assert!(!is_supported_endpoint("http://user:secret@localhost/api"));
+        assert!(!is_supported_endpoint("http://localhost/api#fragment"));
         assert!(!is_supported_endpoint("ftp://translate.example"));
         assert!(!is_supported_endpoint("https://bad\n.example"));
+        assert!(!is_supported_endpoint("https:///api"));
     }
 
     #[test]
@@ -521,68 +367,6 @@ mod tests {
             parse_translation_response(r#"{"data":"first","translation":"second"}"#).as_deref(),
             Some("first")
         );
-    }
-
-    #[test]
-    fn translates_batch_with_deeplx_contract() {
-        use std::io::{BufRead, BufReader, Write};
-        use std::net::TcpListener;
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream
-                .set_read_timeout(Some(Duration::from_secs(3)))
-                .unwrap();
-            let mut reader = BufReader::new(&mut stream);
-            let mut request = String::new();
-            let mut content_length = None;
-            loop {
-                let mut line = String::new();
-                assert_ne!(reader.read_line(&mut line).unwrap(), 0);
-                if line == "\r\n" {
-                    break;
-                }
-                if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
-                    content_length = Some(value.trim().parse::<usize>().unwrap());
-                }
-                request.push_str(&line);
-            }
-            let mut body = vec![0; content_length.unwrap()];
-            reader.read_exact(&mut body).unwrap();
-            request.push_str(std::str::from_utf8(&body).unwrap());
-            assert!(request
-                .to_ascii_lowercase()
-                .contains("authorization: bearer test-key"));
-            assert!(request.contains("source_lang\":\"EN\""));
-            let body = r#"{"data":"","translation":"你好"}"#;
-            write!(
-                stream,
-                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(),
-                body
-            )
-            .unwrap();
-        });
-        // Exercise the same validated, persisted preferences the host reads.
-        let directory = tempfile::tempdir().unwrap();
-        let store = crate::preferences::PreferencesStore::new(directory.path());
-        let mut preferences = crate::preferences::Preferences::default();
-        preferences.custom_translation = crate::preferences::CustomTranslationPreferences {
-            enabled: true,
-            endpoint: format!("http://{address}"),
-            api_key: "test-key".into(),
-        };
-        store.save(0, preferences).unwrap();
-        let saved = store.load().unwrap().preferences.custom_translation;
-        assert!(saved.enabled);
-        let config = TranslationConfig {
-            endpoint: saved.endpoint,
-            api_key: saved.api_key,
-        };
-        let result = translate_batch(&config, &["hello".into()], "en", "zh");
-        server.join().unwrap();
-        assert_eq!(result, vec![Some("你好".into())]);
     }
 
     #[test]
@@ -641,63 +425,6 @@ Signature=fdaffffbe1460ecd8cbc30e296ff6f49cc3b4af10b11e099462cca023fdb2c6c"
     }
 
     #[test]
-    fn translation_inputs_over_source_limit_are_not_requested() {
-        use std::io::{Read, Write};
-        use std::net::TcpListener;
-
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        listener.set_nonblocking(true).unwrap();
-        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let accepted = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let server_done = done.clone();
-        let server_accepted = accepted.clone();
-        let server = std::thread::spawn(move || loop {
-            match listener.accept() {
-                Ok((mut stream, _)) => {
-                    server_accepted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    let mut request = [0_u8; 4096];
-                    let _ = stream.read(&mut request);
-                    let body = r#"{"data":"unexpected"}"#;
-                    write!(
-                        stream,
-                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                        body.len(),
-                        body
-                    )
-                    .unwrap();
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    if server_done.load(std::sync::atomic::Ordering::Relaxed) {
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(1));
-                }
-                Err(error) => panic!("translation fixture failed: {error}"),
-            }
-        });
-        let mut cache = crate::cloud::candidates::TranslationCache::new(Duration::from_secs(1));
-        let config = TranslationConfig {
-            endpoint: format!("http://{address}"),
-            api_key: String::new(),
-        };
-        for text in [
-            String::new(),
-            "字".repeat(41),
-            "before\0after".into(),
-            "before\u{0085}after".into(),
-        ] {
-            assert_eq!(
-                translate_batch_cached(&config, &[text], "zh", "en", &mut cache),
-                vec![None]
-            );
-        }
-        done.store(true, std::sync::atomic::Ordering::Relaxed);
-        server.join().unwrap();
-        assert_eq!(accepted.load(std::sync::atomic::Ordering::Relaxed), 0);
-    }
-
-    #[test]
     fn tencent_tmt_payload_matches_batch_contract() {
         let payload = tencent_tmt_payload("zh", "en", &["你好".into()]).unwrap();
         let value: Value = serde_json::from_str(&payload).unwrap();
@@ -734,15 +461,50 @@ Signature=fdaffffbe1460ecd8cbc30e296ff6f49cc3b4af10b11e099462cca023fdb2c6c"
     }
 
     #[test]
+    fn formats_multiline_translation_gloss_onto_one_line() {
+        // A host shows one row per target language, so a newline kept here would push the next target's gloss onto the wrong row.
+        assert_eq!(
+            format_translation_gloss("test\nfoo"),
+            Some("test foo".into())
+        );
+        assert_eq!(
+            format_translation_gloss("a\r\n\r\nb\n\tc"),
+            Some("a b c".into())
+        );
+    }
+
+    #[test]
+    fn formats_translation_gloss_without_trailing_whitespace() {
+        assert_eq!(
+            format_translation_gloss("test foo "),
+            Some("test foo".into())
+        );
+        assert_eq!(format_translation_gloss("test\n"), Some("test".into()));
+        assert_eq!(format_translation_gloss(" \n\t"), None);
+    }
+
+    #[test]
     fn niutrans_auth_string_is_sorted_md5_and_credentials_filter_placeholders() {
         assert_eq!(
             niutrans_auth_string("app-id", "api-key", "en", "zh", "1704067200000", "hello"),
             "6da3515e010ef871b66e4e31ff5ba580"
         );
-        assert!(usable_niutrans_credential("real-value"));
-        assert!(!usable_niutrans_credential("<YOUR_NIUTRANS_APP_ID>"));
-        assert!(!usable_niutrans_credential("FAKESECRET_test"));
-        assert!(!usable_niutrans_credential(" \n\t"));
+        assert!(usable_credential("real-value"));
+        assert!(!usable_credential("<YOUR_NIUTRANS_APP_ID>"));
+        assert!(!usable_credential("FAKESECRET_test"));
+        assert!(!usable_credential(" \n\t"));
+    }
+
+    #[test]
+    fn an_empty_answer_is_not_a_failed_reply() {
+        assert!(!translation_response_failed(r#"{"code":200,"data":""}"#));
+        assert!(!translation_response_failed(r#"{"data":"hello"}"#));
+        assert!(translation_response_failed(
+            r#"{"code":429,"message":"rate limited"}"#
+        ));
+        assert!(translation_response_failed(r#"{"code":"500"}"#));
+        assert!(translation_response_failed("<html>Bad Gateway</html>"));
+        assert!(translation_response_failed(r#"["data"]"#));
     }
 
     #[test]
@@ -754,10 +516,10 @@ Signature=fdaffffbe1460ecd8cbc30e296ff6f49cc3b4af10b11e099462cca023fdb2c6c"
 
     #[test]
     fn rejects_placeholder_tencent_secrets() {
-        assert!(usable_tencent_secret(" real-secret "));
-        assert!(!usable_tencent_secret("<YOUR_TENCENT_SECRET_ID>"));
-        assert!(!usable_tencent_secret("FAKESECRET_test"));
-        assert!(!usable_tencent_secret(" \n\t"));
+        assert!(usable_credential(" real-secret "));
+        assert!(!usable_credential("<YOUR_TENCENT_SECRET_ID>"));
+        assert!(!usable_credential("FAKESECRET_test"));
+        assert!(!usable_credential(" \n\t"));
     }
 
     #[test]
@@ -769,5 +531,12 @@ Signature=fdaffffbe1460ecd8cbc30e296ff6f49cc3b4af10b11e099462cca023fdb2c6c"
         assert!(!is_cloud_translatable_chinese("你好☀️"));
         assert!(!is_cloud_translatable_chinese("你‍好"));
         assert!(!is_cloud_translatable_chinese("你⃣"));
+        assert!(is_cloud_translatable_chinese("T恤"));
+        assert!(is_cloud_translatable_chinese("3D打印"));
+        assert!(is_cloud_translatable_chinese("\u{F900}"));
+        assert!(is_cloud_translatable_chinese("\u{20000}"));
+        assert!(!is_cloud_translatable_chinese("T"));
+        assert!(!is_cloud_translatable_chinese("123"));
+        assert!(!is_cloud_translatable_chinese(""));
     }
 }

@@ -1,7 +1,7 @@
 #include "Globals.h"
 #include "Private.h"
 #include "resource.h"
-#include "define.h"
+#include "Define.h"
 #include "MetasequoiaIMEBaseStructure.h"
 #include <unordered_set>
 #include <windows.h>
@@ -17,7 +17,6 @@ HINSTANCE dllInstanceHandle;
 LONG dllRefCount = -1;
 
 CRITICAL_SECTION CS;
-HFONT defaultlFontHandle; // Global font object we use everywhere
 
 //---------------------------------------------------------------------
 // MetasequoiaIME CLSID
@@ -298,6 +297,7 @@ extern const std::unordered_set<WCHAR> CommitWithHighlightedCandPunc = {
     L'[',  //
     L']',  //
     L'\\', //
+    L'/',  // Numpad divide and '/' commit the highlighted candidate followed by a literal '/'.
     L';',  //
     L':',  //
     L'\'', //

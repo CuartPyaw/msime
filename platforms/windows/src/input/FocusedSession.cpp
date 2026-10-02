@@ -1,11 +1,20 @@
 #include "FocusedSession.h"
+#include "InputSchemeTraits.h"
+#include "KeySoundPolicy.h"
+#include "TypingEffectPolicy.h"
+#include "TypingEffectSignal.h"
 #include <ctime>
 #include <memory>
 #include <stdexcept>
 #include <thread>
 #include <utility>
+#include "FullscreenForeground.h"
 
 namespace msime::windows {
+namespace {
+// Effect sounds and music stay quiet while a full-screen application is in front: a game, a video or a presentation the user did not ask to hear typing in.
+bool sound_allowed() { return !foreground_is_fullscreen(GetForegroundWindow()); }
+} // namespace
 std::string
 FocusedSession::typing_statistics_directory(const std::string &options) {
   try {
@@ -17,35 +26,9 @@ FocusedSession::typing_statistics_directory(const std::string &options) {
     return {};
   }
 }
-std::optional<FocusedSession::Commit> FocusedSession::pending_commit() const {
-  if (!composer_ || !composer_->has_pending())
-    return std::nullopt;
-  const auto &reply = composer_->pending();
-  if (!reply.committed_text || reply.committed_text->empty())
-    return std::nullopt;
-  return Commit{*reply.committed_text,
-                resolve_typing_source_from_transition(reply.source.transition)};
-}
-void FocusedSession::record_commit(const std::optional<Commit> &delivered) {
-  if (!delivered)
-    return;
-  if (statistics_) {
-    statistics_(delivered->text, delivered->source);
-    return;
-  }
-  if (statistics_directory_.empty())
-    return;
-  const auto local = local_time_parts(std::time(nullptr));
-  if (!local)
-    return;
-  auto request = typing_statistics_record_request(
-      statistics_directory_, delivered->text, delivered->source, local->day,
-      local->hour);
-  if (request.empty())
-    return;
-  // Off the input queue: the shared store takes a file lock, and a commit must
-  // never wait on statistics. Detached like the other hosts do; the request is
-  // a self-contained copy, so nothing here outlives it.
+namespace {
+// Off the calling thread: the shared store takes a file lock, and neither a commit nor a pipe listener may wait on statistics. Detached like the other hosts do; the request is a self-contained copy, so nothing here outlives it.
+void submit_typing_statistics_request(std::string request) {
   try {
     std::thread([payload = std::move(request)] {
       try {
@@ -60,6 +43,61 @@ void FocusedSession::record_commit(const std::optional<Commit> &delivered) {
   } catch (...) {
     // Thread exhaustion drops the record rather than the keystroke.
   }
+}
+} // namespace
+void record_typing_statistics_async(const std::string &directory,
+                                    const std::string &text,
+                                    TypingSource source, bool quiet) {
+  if (directory.empty())
+    return;
+  const auto local = local_time_parts(std::time(nullptr));
+  if (!local)
+    return;
+  auto request = typing_statistics_record_request(
+      directory, text, source, local->day, local->hour, quiet);
+  if (request.empty())
+    return;
+  submit_typing_statistics_request(std::move(request));
+}
+void record_typing_keys_async(const std::string &directory,
+                              const std::string &day,
+                              const std::map<std::string, uint64_t> &keys) {
+  auto request = typing_statistics_record_keys_request(directory, day, keys);
+  if (request.empty())
+    return;
+  submit_typing_statistics_request(std::move(request));
+}
+std::optional<FocusedSession::Commit> FocusedSession::pending_commit() const {
+  if (!composer_ || !composer_->has_pending())
+    return std::nullopt;
+  const auto &reply = composer_->pending();
+  if (!reply.committed_text || reply.committed_text->empty())
+    return std::nullopt;
+  return Commit{*reply.committed_text,
+                resolve_typing_source_from_transition(reply.source.transition),
+                transition_counts_as_typing(reply.source.transition)};
+}
+void FocusedSession::record_commit(const std::optional<Commit> &delivered) {
+  if (!delivered)
+    return;
+  // Sampled once, at commit time: the achievement jingle a milestone plays follows the same full-screen rule as the commit sound.
+  const bool allowed = sound_allowed();
+  if (allowed)
+    (void)session_.commit_sound();
+  // The commit flash, on the session's current combo: a commit counts nothing and only reports the state.
+  if (session_.input_enabled()) {
+    TypingEffectSignal::instance().publish_settings(pack_typing_effect_settings(session_.typing_effect_settings()));
+    TypingEffectSignal::instance().publish(
+        session_.typing_effect(typing_effect_commit(allowed)));
+  }
+  if (!delivered->typing)
+    return;
+  if (statistics_) {
+    statistics_(delivered->text, delivered->source);
+    return;
+  }
+  record_typing_statistics_async(statistics_directory_, delivered->text,
+                                 delivered->source, !allowed);
 }
 void FocusedSession::check_thread() const {
   if (std::this_thread::get_id() != thread_)
@@ -109,10 +147,11 @@ bool FocusedSession::prepare(const FocusLease &lease) {
       if (composer_)
         composer_->cancel();
       preferences_retry_.reset();
-      auto_commit_hide_pending_ = false;
+      continuation_hide_.clear();
       session_.activate(lease.epoch);
       composer_.emplace(client_, lease.epoch);
       lease_ = lease;
+      session_.set_music_active(sound_allowed());
     });
   } catch (...) {
     gate_.deactivate(lease);
@@ -207,7 +246,7 @@ bool FocusedSession::confirm(const FocusLease &lease, uint64_t request) {
   });
   if (confirmed) {
     if (auto_commit)
-      auto_commit_hide_pending_ = true;
+      continuation_hide_.arm(ContinuationHide::Clock::now());
     record_commit(delivered);
   }
   return confirmed;
@@ -273,6 +312,9 @@ FocusedSession::page_candidate(const FocusLease &lease, uint64_t session,
         current.at("session").get<uint64_t>() != session ||
         current.at("generation").get<uint64_t>() != generation)
       return;
+    // A page turned here would leave the list the TIP drives from its own host session on another page.
+    if (scheme::KeyboardOnlyCandidateList(static_cast<int>(current.value("scheme", 0u))))
+      return;
     result = session_.page_candidate(lease.epoch, session, generation,
                                      previous, steps);
   });
@@ -327,6 +369,15 @@ bool FocusedSession::set_chinese_punctuation(const FocusLease &lease, bool enabl
     session_.set_chinese_punctuation(lease.epoch, enabled);
   });
 }
+bool FocusedSession::balance_paired_punctuation(const FocusLease &lease,
+                                                uint8_t opening) {
+  check_thread();
+  if (!prepared(lease))
+    return false;
+  return gate_.with_active(lease, [&] {
+    session_.balance_paired_punctuation(lease.epoch, opening);
+  });
+}
 bool FocusedSession::cancel_composition(const FocusLease &lease) {
   check_thread();
   if (!prepared(lease))
@@ -336,7 +387,7 @@ bool FocusedSession::cancel_composition(const FocusLease &lease) {
       throw std::logic_error("Composition cancelled before reply delivery");
     session_.cancel_composition(lease.epoch);
     composer_->cancel();
-    auto_commit_hide_pending_ = false;
+    continuation_hide_.clear();
   });
 }
 HideCandidateDisposition
@@ -348,12 +399,10 @@ FocusedSession::hide_candidate(const FocusLease &lease) {
   gate_.with_active(lease, [&] {
     if (composer_->has_pending())
       throw std::logic_error("Composition hidden before reply delivery");
-    if (auto_commit_hide_pending_) {
-      auto_commit_hide_pending_ = false;
-      if (!session_.view().at("editing_text").get<std::string>().empty()) {
-        disposition = HideCandidateDisposition::Suppressed;
-        return;
-      }
+    if (continuation_hide_.consume(ContinuationHide::Clock::now()) &&
+        !session_.view().at("editing_text").get<std::string>().empty()) {
+      disposition = HideCandidateDisposition::Suppressed;
+      return;
     }
     session_.cancel_composition(lease.epoch);
     composer_->cancel();
@@ -378,7 +427,8 @@ bool FocusedSession::cancel(const FocusLease &lease) {
   gate_.deactivate(lease);
   composer_->cancel();
   preferences_retry_.reset();
-  auto_commit_hide_pending_ = false;
+  continuation_hide_.clear();
+  session_.set_music_active(false);
   session_.deactivate(lease.epoch);
   composer_.reset();
   lease_.reset();
@@ -509,6 +559,19 @@ std::optional<PendingReply> FocusedSession::configured_key(
     result = composer_->configured_key(session_, packet, lease.epoch, style,
                                        bindings, std::move(local_text),
                                        word_binding);
+    // After the Engine, so only a key the input method took sounds (with input off, in English mode, the Server answers keys without taking them), and before the online queries are built, so they add no delay to it.
+    if (result && session_.input_enabled()) {
+      if (const auto key_class = key_sound_class(packet)) {
+        const bool allowed = sound_allowed();
+        if (allowed)
+          (void)session_.key_sound(*key_class);
+        // The same keys drive the typing effect and its combo, which keep counting in a full-screen application but stay silent there. The candidate window draws it on the UI thread; this only posts the packed value.
+        const bool auto_repeat = (packet.modifiers_down & PipeMetadata::AutoRepeat) != 0;
+        TypingEffectSignal::instance().publish_settings(pack_typing_effect_settings(session_.typing_effect_settings()));
+        TypingEffectSignal::instance().publish(
+            session_.typing_effect(typing_effect_key_event(*key_class, allowed, auto_repeat)));
+      }
+    }
     attach_online_query(lease, result);
   });
   return result;

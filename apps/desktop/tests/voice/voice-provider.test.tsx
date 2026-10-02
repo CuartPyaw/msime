@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
+import { testHost } from "../support/host";
+import { settingsFormReady, saveSettingsNow } from "../support/settings-form";
 import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { SettingsPage, type SettingsClient, type Snapshot, type HostCapabilities } from "@msime/ui";
+import { SettingsPage, type SettingsClient, type Snapshot } from "@msime/ui";
 
 afterEach(cleanup);
 
@@ -22,7 +24,7 @@ function mount(client: Partial<SettingsClient>) {
 }
 
 async function openVoice() {
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   fireEvent.click(screen.getByRole("button", { name: "语音输入" }));
   return screen.getByLabelText("识别服务") as HTMLSelectElement;
 }
@@ -39,7 +41,7 @@ test("macOS system recognition is configurable without cloud ASR fields", async 
     .mockImplementation(async (_revision, preferences) => ({ ...base, revision: 5, preferences }));
   mount({
     save,
-    host: { platform: "macos" } as HostCapabilities,
+    host: testHost({ platform: "macos" }),
     load: async () => ({
       ...base,
       preferences: {
@@ -66,11 +68,11 @@ test("macOS system recognition is configurable without cloud ASR fields", async 
   fireEvent.change(screen.getByRole("combobox", { name: "结果提交策略" }), {
     target: { value: "ctrl_v" },
   });
-  expect(screen.getByRole("checkbox", { name: "启用文本润色" })).toBeTruthy();
+  expect(screen.getByRole("switch", { name: "启用文本润色" })).toBeTruthy();
   expect((screen.getByRole("combobox", { name: "识别语言" }) as HTMLInputElement).value).toBe(
     "zh-CN",
   );
-  fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+  saveSettingsNow();
   await vi.waitFor(() => expect(save).toHaveBeenCalled());
   expect(save.mock.calls[0][1].voice_input).toMatchObject({
     asr_provider: "system",
@@ -85,7 +87,7 @@ test("macOS system recognition is configurable without cloud ASR fields", async 
 test("a stored system provider is preserved on macOS and marked unavailable elsewhere", async () => {
   for (const platform of ["macos", "windows", "linux"]) {
     mount({
-      host: { platform } as HostCapabilities,
+      host: testHost({ platform }),
       load: async () => ({
         ...base,
         preferences: {
@@ -128,7 +130,7 @@ test("a stored provider selection round-trips through save", async () => {
   mount({ save });
   const select = await openVoice();
   fireEvent.change(select, { target: { value: "siliconflow" } });
-  fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+  saveSettingsNow();
   await vi.waitFor(() => expect(save).toHaveBeenCalled());
   expect(save.mock.calls[0][1].voice_input.asr_provider).toBe("siliconflow");
 });

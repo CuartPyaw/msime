@@ -1,6 +1,8 @@
+import { SchemeTraits } from "../SchemeTraits";
+
 /**
  * Candidate-management menu order and host operation metadata, ported from
- * platforms/android/java/app/msime/client/CandidateManagementAction.java.
+ * platforms/android/java/app/msime/android/CandidateManagementAction.java.
  *
  * The menu item ids are derived from the declaration order, so the order is part of the contract with
  * whatever renders the menu.
@@ -92,9 +94,9 @@ export class CandidateManagementAction {
     return Array.from(text).length !== 1;
   }
 
-  /** Dictionary mutations are only valid for local/user-dictionary candidates. */
+  /** Dictionary mutations are only valid for local/user-dictionary candidates, in a scheme that learns into the main dictionary; the others' candidates are not in it to pin, demote or remove. */
   static candidateActionsAvailable(scheme: string, source: number): boolean {
-    if (scheme === "japanese") {
+    if (!SchemeTraits.learnsIntoMainDictionary(SchemeTraits.fromName(scheme))) {
       return false;
     }
     return source === 0 || source === 1 || source === 4;
@@ -169,6 +171,27 @@ export class CandidateManagementAction {
     }
     const action: ManagementAction | null = CandidateManagementAction.touchGlossAction(gloss);
     return action === null ? [] : [action];
+  }
+
+  /**
+   * The full menu the source opens with a right click: the gloss first when the candidate carries a real translation, then 优先显示, the five fixed slots, 取消固定 and 删除词条. A 2in1 opens it with a right click; a phone has no right click, so its long press opens this rather than the gloss alone, as Android's long press does. An Engine annotation such as a Wubi code shares the gloss slot and is not a word, so it is never offered as text.
+   */
+  static managementActions(
+    gloss: string,
+    isTranslation: boolean,
+    fixedPosition: number,
+    available: boolean,
+    includeRemove: boolean,
+  ): ManagementAction[] {
+    const actions: ManagementAction[] = CandidateManagementAction.actionsForFixedPosition(
+      fixedPosition,
+      available,
+      includeRemove,
+    );
+    const glossAction: ManagementAction | null = isTranslation
+      ? CandidateManagementAction.glossAction(gloss)
+      : null;
+    return glossAction === null ? actions : [glossAction].concat(actions);
   }
 
   static validatePosition(position: number): number {

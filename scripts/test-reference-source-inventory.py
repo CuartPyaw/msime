@@ -12,11 +12,11 @@ This walks all 274 `.cpp`/`.h` files under the reference's `windows/` (the TSF t
 dictionaries) and `ui/src` (its own Direct2D widget framework), and requires each to resolve one of
 three ways:
 
-1. A file of the same name exists here, allowing for the naming conventions the two use.
+1. A code file of the same name exists here, allowing for the naming conventions the two use. Only non-test code under `platforms/windows/`, `crates/`, `apps/desktop/` and `packages/ui/` counts, and not the other platforms' directories inside those roots: a Linux test, a macOS header or an SVG with the same stem answers nothing on Windows, and the first version of this check let six reference files through that way.
 2. `ANSWERED_BY` names the file that answers it under a different name, and that file exists.
 3. `DELIBERATELY_ABSENT` records why nothing here needs to answer it.
 
-A reference file matching none of the three is the finding: a file nobody has accounted for.
+A reference file matching none of the three is the finding: a file nobody has accounted for. The two tables are checked on their own as well: an entry whose stem the same-name rule already answers, or that names no reference source at all, is stale and fails, because an entry rule 1 shadows is never read and so its path could rot unnoticed.
 
 Names alone would be a weak check, which is why the second form points at a path that has to exist
 rather than at a sentence. The reasons in the third form are the part to read sceptically - they are
@@ -41,8 +41,7 @@ TREES = ["windows", "server/src", "ui/src"]
 
 REFERENCE = reference_root(ROOT)
 
-# Reference file stem -> the path here that answers it. The path must exist; a rename that is not
-# also a move gets caught by rule 1 and never reaches this table.
+# Reference file stem -> the path here that answers it. The path must exist, and the stem must not also be answered by rule 1, which would make the entry dead weight.
 ANSWERED_BY: dict[str, str] = {
     # Cloud and translation. The request logic is shared because no part of it is Windows-specific;
     # only the worker that runs it on the input queue stayed native.
@@ -67,11 +66,11 @@ ANSWERED_BY: dict[str, str] = {
     # Dictionaries.
     "dictionary_manager": "crates/client-core/src/dictionary/import.rs",
     "dictionary_validation": "crates/client-core/src/dictionary/import.rs",
-    "dictionary_page": "crates/engine-bridge/src/lib.rs",
-    # Settings application. A Tauri window here, so the reference's Win32 host, its splash and its
-    # launcher become the shell, the window background and the host-side launcher respectively.
-    "settings_app": "apps/desktop/src-tauri/src/lib.rs",
-    "settings_splash": "apps/desktop/src-tauri/src/lib.rs",
+    "dictionary_page": "crates/engine/src/host/dictionary.rs",
+    # Windows settings are a native WinUI 3 window. The shared Tauri shell remains the panel host,
+    # so its launcher is still part of the platform boundary but is no longer the settings product.
+    "settings_app": "platforms/windows/settings/main.cpp",
+    "settings_splash": "platforms/windows/settings/main.cpp",
     "emoji_panel_splash": "apps/desktop/src-tauri/src/panel_window.rs",
     "settings_launcher": "platforms/windows/src/system/ShellLauncher.cpp",
     "ime_config": "crates/client-core/src/preferences.rs",
@@ -99,6 +98,8 @@ ANSWERED_BY: dict[str, str] = {
     # Voice input.
     "voice_batch_protocol": "platforms/windows/src/voice/VoiceControlMessage.cpp",
     "voice_control_dispatch": "platforms/windows/src/voice/VoiceControllerDispatch.h",
+    # The reference's `VoiceInput::` free functions (toggle, start, stop, cancel, recording state) are the methods of this session object; the keyboard hook it refreshes is `VoiceHotkeyController`.
+    "voice_input_service": "platforms/windows/src/voice/VoiceInputSession.h",
     "voice_input_overlay_utils": "platforms/windows/src/voice/WaveOverlayUtils.cpp",
     "mvi_utils": "platforms/windows/src/voice/VoiceProviders.h",
     # Sessions and the pipe. The reference's policy headers land on this repository's own
@@ -113,7 +114,7 @@ ANSWERED_BY: dict[str, str] = {
     "outbound_session_state": "platforms/windows/src/ipc/ReplyComposer.h",
     "pipe_write_policy": "platforms/windows/src/ipc/PipeIo.h",
     "async_request_origin": "platforms/windows/src/ipc/PipeTicket.h",
-    "ipc_protocol_limits": "platforms/windows/src/ipc/PipeMetadata.h",
+    "ipc_protocol_limits": "platforms/windows/common/PipeMetadata.h",
     # Diagnostics.
     "candidate_diag_log": "platforms/windows/src/ipc/DiagnosticBatch.h",
     "ftb_diag_log": "platforms/windows/src/ipc/DiagnosticBatch.h",
@@ -123,8 +124,8 @@ ANSWERED_BY: dict[str, str] = {
     "window_utils": "platforms/windows/src/candidate/WindowShadow.h",
     "single_instance": "platforms/windows/src/entrypoints/server_main.cpp",
     "chinese_converter": "platforms/windows/src/input/ChineseTextConversion.cpp",
-    "base_structures": "platforms/windows/src/ipc/PipeMetadata.h",
-    "defines": "platforms/windows/src/ipc/PipeMetadata.h",
+    "base_structures": "platforms/windows/common/PipeMetadata.h",
+    "defines": "platforms/windows/common/PipeMetadata.h",
     "client_fallback": "platforms/windows/tests/runtime/server_launch.cpp",
 }
 
@@ -132,16 +133,11 @@ ANSWERED_BY: dict[str, str] = {
 # because "handled differently" is the sentence that would make this check worthless.
 DELIBERATELY_ABSENT: dict[str, str] = {
     # The WebView2 candidate backend. The reference can render its candidate window either with
-    # Direct2D or with a WebView2 document; this repository has only the Direct2D one, and
-    # `ui_backend` survives as a configuration contract (registered RUST_ONLY in the field-drift
-    # gate) so a profile carrying it still loads.
+    # Direct2D or with a WebView2 document; this repository has only the Direct2D one and no `ui_backend` preference.
     "windows_webview2": "The candidate window has one renderer here, Direct2D. See docs/windows-parity.md.",
     "ui_backend_policy": (
         "Chooses between the two renderers per surface. With one renderer there is nothing to "
-        "choose, and the key is inert here (registered RUST_ONLY in the field-drift gate). What "
-        "the policy also carries - that `d2d`, `webview` and `web` are spellings this product has "
-        "written - is migrated into UiBackend's serde aliases, so a profile written by either side "
-        "is read rather than rejected."
+        "choose, so the shared preferences have no `ui_backend` field."
     ),
     "webview_utils": "WebView2 host helpers. The webview here is Tauri's, which brings its own.",
     # Engine-owned. These call into the Engine's own tables; the Engine is vendored whole, so the
@@ -152,7 +148,7 @@ DELIBERATELY_ABSENT: dict[str, str] = {
     # Infrastructure with no counterpart because the surrounding design differs.
     "serial_task_queue": (
         "Serialises the reference settings window's background work onto one thread. The settings "
-        "window here is a Tauri application whose commands already run on its async runtime."
+        "window here is a native WinUI 3 application whose bounded host-api calls run on its UI thread."
     ),
 }
 
@@ -175,11 +171,27 @@ def reference_sources() -> tuple[list[str], str, str] | None:
     return sources, ref, sha
 
 
+# Where a same-name file counts as an answer, and what kind of file it has to be.
+NAME_ROOTS = ("platforms/windows/", "crates/", "apps/desktop/", "packages/ui/")
+CODE_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hpp", ".rs", ".ts", ".tsx"}
+# Directory names that disqualify a file: tests are not the implementation, and the other platforms' code under the shared roots does not answer a Windows file.
+EXCLUDED_DIRS = {"tests", "test", "__tests__", "android", "ios", "linux", "macos", "harmony"}
+
+
 def local_stems() -> set[str]:
     listing = subprocess.run(
         ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True
     )
-    return {pathlib.Path(path).stem.lower() for path in listing.stdout.split()}
+    stems = set()
+    for path in listing.stdout.split():
+        pure = pathlib.PurePosixPath(path)
+        if (
+            path.startswith(NAME_ROOTS)
+            and pure.suffix in CODE_SUFFIXES
+            and not EXCLUDED_DIRS & set(pure.parts[:-1])
+        ):
+            stems.add(pure.stem.lower())
+    return stems
 
 
 def pascal(name: str) -> str:
@@ -201,17 +213,32 @@ def main() -> int:
     unaccounted: list[str] = []
     broken: list[tuple[str, str]] = []
 
+    def same_name(stem: str) -> bool:
+        return bool({stem.lower(), pascal(stem).lower(), stem.replace("_", "").lower()} & stems)
+
+    # The tables are checked before and independently of rule 1, so an entry rule 1 would shadow is read rather than skipped.
+    stale: list[str] = []
+    source_stems = {pathlib.Path(path).stem for path in sources}
+    for table, entries in (("ANSWERED_BY", ANSWERED_BY), ("DELIBERATELY_ABSENT", DELIBERATELY_ABSENT)):
+        for stem in sorted(entries):
+            if stem not in source_stems:
+                stale.append(f"{table}[{stem!r}] names no reference source")
+            elif same_name(stem):
+                stale.append(f"{table}[{stem!r}] is already answered by a same-name file here")
+    for stem in sorted(ANSWERED_BY.keys() & DELIBERATELY_ABSENT.keys()):
+        stale.append(f"{stem!r} is in both ANSWERED_BY and DELIBERATELY_ABSENT")
+
     for path in sources:
         stem = pathlib.Path(path).stem
-        if {stem.lower(), pascal(stem).lower(), stem.replace("_", "").lower()} & stems:
-            by_name.append(path)
-        elif stem in ANSWERED_BY:
+        if stem in ANSWERED_BY:
             answer = ROOT / ANSWERED_BY[stem]
             (renamed if answer.exists() else broken).append(
                 path if answer.exists() else (path, ANSWERED_BY[stem])
             )
         elif stem in DELIBERATELY_ABSENT:
             absent.append(path)
+        elif same_name(stem):
+            by_name.append(path)
         else:
             unaccounted.append(path)
 
@@ -219,7 +246,9 @@ def main() -> int:
         print(f"FAIL {path}: nothing here is recorded as answering this file", file=sys.stderr)
     for path, answer in sorted(broken):
         print(f"FAIL {path}: recorded as answered by `{answer}`, which does not exist", file=sys.stderr)
-    if unaccounted or broken:
+    for entry in stale:
+        print(f"FAIL stale entry: {entry}", file=sys.stderr)
+    if unaccounted or broken or stale:
         print(
             "\nName the file here that answers it, or record why nothing needs to - saying what "
             "the user gets instead, not that it is handled differently.",

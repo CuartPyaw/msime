@@ -115,7 +115,9 @@ final class HandwritingCanvas: UIView {
     guard drawing, let touch = touches.first, !strokes.isEmpty else { return }
     for point in (event?.coalescedTouches(for: touch) ?? [touch]).map({ $0.location(in: self) }) {
       guard strokes[strokes.count - 1].count < 512 else { break }
-      let bounded = CGPoint(x: min(max(point.x, 0), bounds.width), y: min(max(point.y, 0), bounds.height))
+      let bounded = CGPoint(
+        x: SharedNumber.clamped(point.x, to: 0...bounds.width),
+        y: SharedNumber.clamped(point.y, to: 0...bounds.height))
       if let last = strokes.last?.last, hypot(last.x - bounded.x, last.y - bounded.y) < 1 { continue }
       strokes[strokes.count - 1].append(bounded)
     }
@@ -138,7 +140,7 @@ final class HandwritingCanvas: UIView {
   }
   override func draw(_ rect: CGRect) {
     guard let context = UIGraphicsGetCurrentContext() else { return }
-    let skin = KeyboardSkinPreference.selected
+    let skin = KeyboardTheme.current
     let card = cardRect.isEmpty ? bounds : cardRect
     UIBezierPath(roundedRect: card, cornerRadius: 10).addClip()
     skin.keyBackground.setFill(); context.fill(card)
@@ -307,7 +309,7 @@ final class HandwritingInputView: UIView {
     statusCentred?.isActive = !sharesTheCanvas
   }
   private func showStatus(_ text: String) {
-    status.text = text; status.textColor = KeyboardSkinPreference.selected.keyForeground
+    status.text = text; status.textColor = KeyboardTheme.current.keyForeground
     status.isHidden = text.isEmpty
     placeStatus()
   }

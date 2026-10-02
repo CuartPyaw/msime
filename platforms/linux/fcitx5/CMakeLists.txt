@@ -16,8 +16,9 @@ if(Fcitx5Core_VERSION VERSION_GREATER_EQUAL 5.1.11)
 endif()
 find_package(nlohmann_json 3.11 REQUIRED)
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(ICU REQUIRED IMPORTED_TARGET icu-i18n icu-uc)
 pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0)
+# The brand mark leading the candidate card is the installed application icon, decoded with cairo, which the classic UI itself is built on.
+pkg_check_modules(CAIRO REQUIRED IMPORTED_TARGET cairo)
 set(MSIME_HOST_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../../../target/debug/libmsime_host_api.so" CACHE FILEPATH "Cargo-built Linux Host API")
 if(NOT EXISTS "${MSIME_HOST_LIBRARY}")
   message(FATAL_ERROR "Build msime-host-api for Linux first")
@@ -67,9 +68,8 @@ if(MSIME_BADGE_WAYLAND_FOUND AND MSIME_BADGE_WAYLAND_SCANNER)
   endif()
 endif()
 add_library(msime-fcitx5 MODULE FcitxEngine.cpp SystemTheme.cpp ../src/system/ChineseTextConversion.cpp ../src/system/DiagnosticLog.cpp ${MSIME_BADGE_WAYLAND_SOURCES})
-# X11 会话下的后端。两个后端互不依赖：只有一种可用时徽章照常工作，都没有时宿主只发
-# 面板那半文字提示。
-pkg_check_modules(MSIME_BADGE_X11 QUIET IMPORTED_TARGET x11 xext cairo-xlib pangocairo)
+# X11 会话下的后端。两个后端互不依赖：只有一种可用时徽章照常工作，都没有时宿主只发面板那半文字提示。xrandr 用来找焦点所在的显示器，和语音浮层同一套定位。
+pkg_check_modules(MSIME_BADGE_X11 QUIET IMPORTED_TARGET x11 xext xrandr cairo-xlib pangocairo)
 set(MSIME_BADGE_X11_SOURCES "")
 if(MSIME_BADGE_X11_FOUND)
   set(MSIME_BADGE_X11_SOURCES ../src/overlay/ModeBadgeX11Surface.cpp)
@@ -78,7 +78,7 @@ if(MSIME_BADGE_WAYLAND_SOURCES OR MSIME_BADGE_X11_SOURCES)
   target_sources(msime-fcitx5 PRIVATE ../src/overlay/ModeBadgeSurfaceFactory.cpp
       ${MSIME_BADGE_X11_SOURCES})
   target_compile_definitions(msime-fcitx5 PRIVATE MSIME_FCITX5_MODE_BADGE
-      MSIME_MODE_BADGE_ICON="${CMAKE_INSTALL_FULL_DATADIR}/icons/hicolor/128x128/apps/msime-client.png")
+      MSIME_MODE_BADGE_ICON="${CMAKE_INSTALL_FULL_DATADIR}/icons/hicolor/128x128/apps/msime-linux.png")
   target_include_directories(msime-fcitx5 PRIVATE ../src/overlay "${MSIME_BADGE_PROTOCOL_DIR}")
   if(MSIME_BADGE_WAYLAND_SOURCES)
     target_compile_definitions(msime-fcitx5 PRIVATE MSIME_BADGE_HAS_WAYLAND)
@@ -96,8 +96,11 @@ if(X11_SURFACE_FOUND)
   target_link_libraries(msime-fcitx5 PRIVATE PkgConfig::X11_SURFACE)
 endif()
 if(WAYLAND_CLIENT_FOUND AND WAYLAND_SCANNER_EXECUTABLE AND MSIME_XDG_SHELL_XML)
-  list(APPEND MSIME_FCITX5_WAVE_SOURCES ../src/overlay/WaveOverlayWaylandSurface.cpp
-       "${MSIME_LAYER_SHELL_CODE}" "${MSIME_XDG_SHELL_CODE}")
+  list(APPEND MSIME_FCITX5_WAVE_SOURCES ../src/overlay/WaveOverlayWaylandSurface.cpp)
+  # The badge's Wayland backend already compiles the same layer-shell and xdg-shell protocol code into this module; a second copy is a multiple-definition link error. It only shows where pangocairo is installed (any desktop with GTK development files), which the build-gate image does not have.
+  if(NOT MSIME_BADGE_WAYLAND_SOURCES)
+    list(APPEND MSIME_FCITX5_WAVE_SOURCES "${MSIME_LAYER_SHELL_CODE}" "${MSIME_XDG_SHELL_CODE}")
+  endif()
   target_include_directories(msime-fcitx5 PRIVATE "${MSIME_WAYLAND_PROTOCOL_DIR}")
   target_compile_definitions(msime-fcitx5 PRIVATE MSIME_LINUX_HAS_WAYLAND_SURFACE)
   target_link_libraries(msime-fcitx5 PRIVATE PkgConfig::WAYLAND_CLIENT)
@@ -112,11 +115,23 @@ endif()
 target_compile_features(msime-fcitx5 PRIVATE cxx_std_17)
 target_compile_options(msime-fcitx5 PRIVATE -Wall -Wextra -Werror)
 target_include_directories(msime-fcitx5 PRIVATE ../../../crates/host-api/include)
-target_link_libraries(msime-fcitx5 PRIVATE Fcitx5::Core PkgConfig::ICU PkgConfig::GIO nlohmann_json::nlohmann_json "${MSIME_HOST_LIBRARY}")
-target_compile_definitions(msime-fcitx5 PRIVATE MSIME_SYSTEM_OPTIONS="${CMAKE_INSTALL_FULL_SYSCONFDIR}/msime-client/runtime-options.json")
+target_link_libraries(msime-fcitx5 PRIVATE Fcitx5::Core PkgConfig::GIO PkgConfig::CAIRO nlohmann_json::nlohmann_json "${MSIME_HOST_LIBRARY}")
+# The built-in sound packs the parent project installs beside the resource bundle; the addon names them to the Host API as sound_packs.
+target_compile_definitions(msime-fcitx5 PRIVATE MSIME_SYSTEM_OPTIONS="${CMAKE_INSTALL_FULL_SYSCONFDIR}/msime-client/runtime-options.json"
+  MSIME_BINDIR="${CMAKE_INSTALL_FULL_BINDIR}" MSIME_ICON_DIR="${CMAKE_INSTALL_FULL_DATADIR}/icons/hicolor"
+  MSIME_SOUND_PACKS="${CMAKE_INSTALL_FULL_DATADIR}/msime-client/sound-packs")
 if(MSIME_FCITX5_CUSTOM_IM_INFORMATION)
   target_compile_definitions(msime-fcitx5 PRIVATE MSIME_FCITX5_CUSTOM_IM_INFORMATION)
 endif()
+# Usage reporting, through the same wrapper as the IBus host and with the same version: the parent project's MSIME_LINUX_VERSION, or platforms/linux/version.txt when this directory is configured on its own. Only the addon reports; the native test builds the engine without it.
+if(NOT MSIME_LINUX_VERSION)
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../version.txt")
+  file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../version.txt" MSIME_LINUX_VERSION LIMIT_COUNT 1)
+  string(STRIP "${MSIME_LINUX_VERSION}" MSIME_LINUX_VERSION)
+endif()
+target_sources(msime-fcitx5 PRIVATE ../../common/Telemetry.cpp)
+target_include_directories(msime-fcitx5 PRIVATE ../../common)
+target_compile_definitions(msime-fcitx5 PRIVATE MSIME_FCITX5_TELEMETRY MSIME_LINUX_VERSION="${MSIME_LINUX_VERSION}")
 file(RELATIVE_PATH MSIME_FCITX5_HOST_RELATIVE "${CMAKE_INSTALL_PREFIX}/${MSIME_FCITX5_ADDON_DIR}" "${CMAKE_INSTALL_FULL_LIBDIR}/msime-client")
 set_target_properties(msime-fcitx5 PROPERTIES INSTALL_RPATH "$ORIGIN/${MSIME_FCITX5_HOST_RELATIVE}")
 install(TARGETS msime-fcitx5 LIBRARY DESTINATION "${MSIME_FCITX5_ADDON_DIR}")
@@ -124,6 +139,11 @@ install(FILES "${MSIME_HOST_LIBRARY}" DESTINATION "${CMAKE_INSTALL_LIBDIR}/msime
 install(FILES msime.conf DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/addon")
 install(FILES msime-inputmethod.conf DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/inputmethod" RENAME msime.conf)
 if(BUILD_TESTING)
+  add_executable(fcitx5-preceding-characters-test tests/preceding_characters.cpp)
+  target_compile_features(fcitx5-preceding-characters-test PRIVATE cxx_std_17)
+  target_compile_options(fcitx5-preceding-characters-test PRIVATE -Wall -Wextra -Werror)
+  target_link_libraries(fcitx5-preceding-characters-test PRIVATE Fcitx5::Core)
+  add_test(NAME fcitx5-preceding-characters COMMAND fcitx5-preceding-characters-test)
   add_executable(fcitx5-native-test tests/native.cpp SystemTheme.cpp ../src/system/ChineseTextConversion.cpp ../src/system/DiagnosticLog.cpp)
   if(X11_SURFACE_FOUND)
     target_sources(fcitx5-native-test PRIVATE ../src/overlay/WaveOverlayX11Surface.cpp)
@@ -144,7 +164,19 @@ if(BUILD_TESTING)
   target_compile_features(fcitx5-native-test PRIVATE cxx_std_17)
   target_compile_options(fcitx5-native-test PRIVATE -Wall -Wextra -Werror)
   target_include_directories(fcitx5-native-test PRIVATE ../../../crates/host-api/include)
-  target_link_libraries(fcitx5-native-test PRIVATE Fcitx5::Core PkgConfig::ICU PkgConfig::GIO nlohmann_json::nlohmann_json "${MSIME_HOST_LIBRARY}")
+  target_link_libraries(fcitx5-native-test PRIVATE Fcitx5::Core PkgConfig::GIO PkgConfig::CAIRO nlohmann_json::nlohmann_json "${MSIME_HOST_LIBRARY}")
+  # The first-run case in tests/native.cpp needs a system options file that does not exist and a guide program it can stub, so neither may point at the installed locations.
+  target_compile_definitions(fcitx5-native-test PRIVATE
+    MSIME_SYSTEM_OPTIONS="${CMAKE_CURRENT_BINARY_DIR}/first-run-absent/runtime-options.json"
+    MSIME_BINDIR="${CMAKE_CURRENT_BINARY_DIR}/first-run-bin"
+    MSIME_ICON_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../data/icons/hicolor"
+    MSIME_ZHUYIN_DICTIONARY_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/../tests/runtime/zhuyin_dictionary.py")
+  # The candidate card's brand mark, decoded from the icons the package installs.
+  add_executable(linux-candidate-fcitx-logo-test ../tests/candidate/candidate_fcitx_logo.cpp)
+  target_compile_options(linux-candidate-fcitx-logo-test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+  target_link_libraries(linux-candidate-fcitx-logo-test PRIVATE PkgConfig::CAIRO nlohmann_json::nlohmann_json)
+  add_test(NAME linux-candidate-fcitx-logo
+    COMMAND linux-candidate-fcitx-logo-test "${CMAKE_CURRENT_SOURCE_DIR}/../data/icons/hicolor")
   set(MSIME_FCITX5_TEST_RESOURCES "" CACHE PATH "Verified resources directory for the native Fcitx5 test")
   if(MSIME_FCITX5_TEST_RESOURCES)
     add_test(NAME fcitx5-native-context
@@ -160,6 +192,14 @@ if(BUILD_TESTING)
           "${MSIME_FCITX5_TEST_RESOURCES}" "${MSIME_HOST_LIBRARY}"
           "$<TARGET_FILE:msime-fcitx5>")
       find_program(XVFB_RUN xvfb-run)
+      if(XVFB_RUN)
+        add_test(NAME fcitx5-page-number-visibility
+          COMMAND "${XVFB_RUN}" -a "${DBUS_RUN_SESSION}" --
+            "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/daemon.py"
+            "${MSIME_FCITX5_TEST_RESOURCES}" "${MSIME_HOST_LIBRARY}"
+            "$<TARGET_FILE:msime-fcitx5>" --page-number)
+        set_tests_properties(fcitx5-page-number-visibility PROPERTIES TIMEOUT 60)
+      endif()
       find_program(XDOTOOL xdotool)
       if(XVFB_RUN AND XDOTOOL)
         add_test(NAME fcitx5-gtk-editor

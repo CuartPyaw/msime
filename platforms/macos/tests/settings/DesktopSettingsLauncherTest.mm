@@ -10,7 +10,7 @@
 
 @implementation TestWorkspace
 - (NSURL *)URLForApplicationWithBundleIdentifier:(NSString *)identifier {
-    assert([identifier isEqualToString:@"app.msime.client"]);
+    assert([identifier isEqualToString:@"app.msime.macos"]);
     return self.installed ? [NSURL fileURLWithPath:@"/synthetic/Settings.app"] : nil;
 }
 - (void)openApplicationAtURL:(NSURL *)url configuration:(NSWorkspaceOpenConfiguration *)configuration
@@ -52,6 +52,9 @@ int main() {
         assert(workspace.launches == 3);
         MSIMEOpenDesktopUpdateSettings(workspace, fallback);
         assert([workspace.configuration.arguments isEqual:@[@"--route=settings:about"]]);
+        // The short-lived process is what carries the route to an already open settings window.
+        assert(workspace.configuration.createsNewApplicationInstance);
+        assert(workspace.configuration.activates);
         assert(workspace.launches == 4);
         workspace.completion(NSRunningApplication.currentApplication, nil);
         assert(fallbacks == 2);
@@ -60,7 +63,7 @@ int main() {
         assert(workspace.launches == 5);
         workspace.completion(NSRunningApplication.currentApplication, nil);
         assert(fallbacks == 2);
-        for (NSArray *entry in @[@[@((int)MSIMEDesktopSettingsPage::Translation), @"--route=settings:input"],
+        for (NSArray *entry in @[@[@((int)MSIMEDesktopSettingsPage::Translation), @"--route=settings:expression"],
                                  @[@((int)MSIMEDesktopSettingsPage::AI), @"--route=settings:ai"]]) {
             MSIMEOpenDesktopSettings((MSIMEDesktopSettingsPage)[entry[0] intValue], workspace, fallback);
             assert([workspace.configuration.arguments isEqual:@[entry[1]]]);

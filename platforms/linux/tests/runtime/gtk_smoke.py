@@ -1,9 +1,13 @@
 """Real GTK3 IM-module acceptance on a dedicated Xvfb display, synthetic text only."""
 import ctypes
 import os
+from pathlib import Path
 import sys
 import subprocess
 import time
+
+# The surrounding-text cases shared by the GTK and Qt smokes live in tests/input, not beside this script.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "input"))
 
 import gi
 
@@ -45,7 +49,7 @@ def keys(*values):
 
 
 wait(lambda: bus.is_connected(), "GTK fixture could not connect to IBus")
-wait(lambda: any(engine.get_name() == "msime-client" for engine in bus.list_active_engines()),
+wait(lambda: any(engine.get_name() == "msime-linux" for engine in bus.list_active_engines()),
      "Native IBus engine was not registered")
 window = Gtk.Window(title="MSIME synthetic GTK acceptance")
 layout = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -64,15 +68,15 @@ pump()
 subprocess.run(["xdotool", "windowfocus", "--sync", str(window.get_window().get_xid())], check=True)
 first.grab_focus()
 pump()
-assert bus.set_global_engine("msime-client")
+assert bus.set_global_engine("msime-linux")
 wait(lambda: bus.get_global_engine() is not None and
-     bus.get_global_engine().get_name() == "msime-client", "GTK engine activation failed")
+     bus.get_global_engine().get_name() == "msime-linux", "GTK engine activation failed")
 # Let the GTK IM module finish its asynchronous input-context setup.
 end = time.monotonic() + 0.3
 while time.monotonic() < end:
     pump()
     time.sleep(0.01)
-keys("Shift_L")
+# The prepared options carry the shipped Chinese default, so the first letters compose without a mode switch.
 keys("n", "i", "h", "a", "o")
 wait(lambda: bool(preedit["text"]), "GTK did not receive composition preedit")
 assert first.get_text() == "", "GTK committed spelling before selection"

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import {
   CommunityHomePage,
   CommunityResourcesPage,
@@ -50,6 +50,14 @@ function client(overrides: Partial<CommunityResourceClient> = {}): CommunityReso
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((accept) => {
+    resolve = accept;
+  });
+  return { promise, resolve };
+}
+
 test("loads a resource kind with exact search and scope, then removes duplicate pages", async () => {
   const first = base("dictionary");
   const second = base("dictionary", "10000000-0000-4000-8000-000000000002");
@@ -74,6 +82,41 @@ test("loads a resource kind with exact search and scope, then removes duplicate 
   view.unmount();
 });
 
+test("a failed fresh search hides pagination for the previous result set", async () => {
+  const first = base("dictionary");
+  const list = vi
+    .fn()
+    .mockResolvedValueOnce({ items: [first], has_more: true })
+    .mockRejectedValueOnce(new Error("offline"));
+  render(<CommunityResourcesPage client={client({ list })} kind="dictionary" />);
+  await waitFor(() => expect(list).toHaveBeenCalledWith("dictionary", "", "", 0));
+
+  fireEvent.change(screen.getByRole("textbox", { name: "搜索词库" }), {
+    target: { value: "新查询" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "搜索" }));
+  await waitFor(() => expect(list).toHaveBeenLastCalledWith("dictionary", "", "新查询", 0));
+
+  expect(screen.queryByRole("button", { name: "加载更多" })).toBeNull();
+});
+
+test("loading more keeps the last submitted search until a new search is run", async () => {
+  const first = base("dictionary");
+  const second = base("dictionary", "10000000-0000-0000-0000-000000000002");
+  const list = vi
+    .fn()
+    .mockResolvedValueOnce({ items: [first], has_more: true })
+    .mockResolvedValueOnce({ items: [second], has_more: false });
+  render(<CommunityResourcesPage client={client({ list })} kind="dictionary" />);
+  await waitFor(() => expect(list).toHaveBeenCalledWith("dictionary", "", "", 0));
+
+  fireEvent.change(screen.getByRole("textbox", { name: "搜索词库" }), {
+    target: { value: "尚未提交" },
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "加载更多" }));
+  await waitFor(() => expect(list).toHaveBeenLastCalledWith("dictionary", "", "", 1));
+});
+
 test("community home opens the requested resource collection", async () => {
   const resources = client();
   const skins = {
@@ -83,6 +126,7 @@ test("community home opens the requested resource collection", async () => {
     rate: vi.fn(),
     publish: vi.fn(),
     unpublish: vi.fn(),
+    setCategory: vi.fn(),
     finishTrial: vi.fn(),
   };
   render(
@@ -95,14 +139,14 @@ test("community home opens the requested resource collection", async () => {
     />,
   );
   await waitFor(() => expect(resources.list).toHaveBeenCalledWith("reply", "saved", "", 0));
-  expect(screen.getByRole("tab", { name: "回复" }).getAttribute("aria-selected")).toBe("true");
+  expect(screen.getByRole("tab", { name: "回复模板" }).getAttribute("aria-selected")).toBe("true");
 });
 
 test("resource scope also has a compact filter menu for mobile layouts", async () => {
   const list = vi.fn().mockResolvedValue({ items: [], has_more: false });
   render(<CommunityResourcesPage client={client({ list })} kind="reply" initialScope="saved" />);
   await waitFor(() => expect(list).toHaveBeenCalledWith("reply", "saved", "", 0));
-  const filter = screen.getByRole("group", { name: "回复筛选范围" });
+  const filter = screen.getByRole("group", { name: "回复模板筛选范围" });
   expect(filter.querySelector("button[aria-pressed='true']")?.textContent).toBe("收藏");
   fireEvent.click(screen.getByRole("button", { name: "筛选范围：我的作品" }));
   await waitFor(() => expect(list).toHaveBeenLastCalledWith("reply", "mine", "", 0));
@@ -130,6 +174,107 @@ test("dictionary details apply the displayed revision and refresh saved state", 
   expect(await screen.findByText("已导入云端词库，新增或更新 1 个词条。")).not.toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "收藏，关注后续更新" }));
   await waitFor(() => expect(save).toHaveBeenCalledWith(item.id, true));
+});
+
+test("resource details ignore a duplicate save while the first request is pending", async () => {
+  let resolveSave!: () => void;
+  const resource = base("dictionary");
+  const save = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        resolveSave = resolve;
+      }),
+  );
+  render(
+    <CommunityResourcesPage
+      client={client({
+        list: vi.fn().mockResolvedValue({ items: [resource], has_more: false }),
+        detail: vi.fn().mockResolvedValue(resource),
+        save,
+      })}
+      kind="dictionary"
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "查看词库 开发词包" }));
+  const saveButton = await screen.findByRole("button", { name: "收藏，关注后续更新" });
+  await act(async () => {
+    fireEvent.click(saveButton);
+    fireEvent.click(saveButton);
+  });
+  expect(save).toHaveBeenCalledOnce();
+  resolveSave();
+  await waitFor(() => expect(save).toHaveBeenCalledOnce());
+});
+
+test("a resource action from a replaced client cannot overwrite the current detail", async () => {
+  const item = base("dictionary");
+  const replacement = { ...item, name: "新客户端词库", saved: true };
+  let finishSave!: () => void;
+  let finishOldDetail!: () => void;
+  const stale = { ...item, saved: false };
+  const oldClient = client({
+    list: vi.fn().mockResolvedValue({ items: [item], has_more: false }),
+    detail: vi
+      .fn()
+      .mockResolvedValueOnce(item)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishOldDetail = () => resolve(stale);
+          }),
+      ),
+    save: vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSave = resolve;
+        }),
+    ),
+  });
+  const nextClient = client({
+    list: vi.fn().mockResolvedValue({ items: [replacement], has_more: false }),
+    detail: vi.fn().mockResolvedValue(replacement),
+  });
+  const view = render(<CommunityResourcesPage client={oldClient} kind="dictionary" />);
+  fireEvent.click(await screen.findByRole("button", { name: "查看词库 开发词包" }));
+  fireEvent.click(await screen.findByRole("button", { name: "收藏，关注后续更新" }));
+
+  finishSave();
+  await waitFor(() => expect(oldClient.detail).toHaveBeenCalledTimes(2));
+  view.rerender(<CommunityResourcesPage client={nextClient} kind="dictionary" />);
+  expect(await screen.findByRole("button", { name: "取消收藏" })).not.toBeNull();
+
+  finishOldDetail();
+  await Promise.resolve();
+  expect(screen.getByRole("button", { name: "取消收藏" })).not.toBeNull();
+});
+
+test("a publish response from a replaced resource client cannot close the editor", async () => {
+  let finishPublish!: () => void;
+  const oldClient = client({
+    publish: vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishPublish = resolve;
+        }),
+    ),
+  });
+  const nextClient = client();
+  const view = render(<CommunityResourcesPage client={oldClient} kind="reply" />);
+  fireEvent.click(await screen.findByRole("button", { name: "发布作品" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "社区作品名称" }), {
+    target: { value: "新的语气" },
+  });
+  fireEvent.change(screen.getByRole("textbox", { name: "社区回复提示词" }), {
+    target: { value: "请保持简洁" },
+  });
+  fireEvent.click(screen.getByRole("checkbox", { name: "确认拥有发布内容权利" }));
+  fireEvent.click(screen.getByRole("button", { name: "公开发布" }));
+
+  view.rerender(<CommunityResourcesPage client={nextClient} kind="reply" />);
+  expect(screen.getByRole("dialog", { name: "发布回复模板" })).not.toBeNull();
+  finishPublish();
+  await Promise.resolve();
+  expect(screen.getByRole("dialog", { name: "发布回复模板" })).not.toBeNull();
 });
 
 test("mobile resource details join the WebView history stack and system back restores the list", async () => {
@@ -235,11 +380,13 @@ test("reply details store an explicit local copy and never hide the prompt", asy
       kind="reply"
     />,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "查看回复 礼貌回复" }));
+  fireEvent.click(await screen.findByRole("button", { name: "查看回复模板 礼貌回复" }));
   expect(screen.getByText("请简洁、礼貌地回复。")).not.toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "添加到回复键盘" }));
+  fireEvent.click(screen.getByRole("button", { name: "添加到高情商回复键盘" }));
   await waitFor(() => expect(storeReply).toHaveBeenCalledWith(item));
-  expect(await screen.findByText("已添加到回复键盘；只有点按生成时才会发送文字。")).not.toBeNull();
+  expect(
+    await screen.findByText("已添加到高情商回复键盘；只有点按生成时才会发送文字。"),
+  ).not.toBeNull();
 });
 
 test("publishing a reply requires explicit rights confirmation", async () => {
@@ -268,4 +415,63 @@ test("publishing a reply requires explicit rights confirmation", async () => {
       0,
     ),
   );
+});
+
+test("resource editor ignores a same-tick duplicate submission", async () => {
+  const pending = deferred<void>();
+  const publish = vi.fn().mockReturnValue(pending.promise);
+  render(<CommunityResourcesPage client={client({ publish })} kind="reply" />);
+  fireEvent.click(await screen.findByRole("button", { name: "发布作品" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "社区作品名称" }), {
+    target: { value: "重复提交回复" },
+  });
+  fireEvent.change(screen.getByRole("textbox", { name: "社区回复提示词" }), {
+    target: { value: "请简洁回复" },
+  });
+  fireEvent.click(screen.getByRole("checkbox", { name: "确认拥有发布内容权利" }));
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "公开发布" }));
+    fireEvent.click(screen.getByRole("button", { name: "公开发布" }));
+  });
+  expect(publish).toHaveBeenCalledOnce();
+  pending.resolve();
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "发布回复模板" })).toBeNull());
+});
+
+test("resource editor keeps a new entry after removing an existing entry in one batch", async () => {
+  const item = {
+    ...base("dictionary"),
+    owned: true,
+    content: {
+      entries: [{ kind: "pinyin" as const, code: "jiu", word: "旧词", weight: 100 }],
+    },
+  };
+  render(
+    <CommunityResourcesPage
+      client={client({
+        list: vi.fn().mockResolvedValue({ items: [item], has_more: false }),
+        detail: vi.fn().mockResolvedValue(item),
+      })}
+      kind="dictionary"
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "查看词库 开发词包" }));
+  fireEvent.click(await screen.findByRole("button", { name: "编辑并发布新版本" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "社区词条编码" }), {
+    target: { value: "xin" },
+  });
+  fireEvent.change(screen.getByRole("textbox", { name: "社区词条文字" }), {
+    target: { value: "新词" },
+  });
+
+  act(() => {
+    fireEvent.click(screen.getByRole("button", { name: "移除" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加词条" }));
+  });
+
+  const dialog = screen.getByRole("dialog", { name: "更新社区作品" });
+  expect(within(dialog).getByLabelText("待发布词条 1/128")).not.toBeNull();
+  expect(within(dialog).getByText(/新词/)).not.toBeNull();
+  expect(within(dialog).queryByText(/旧词/)).toBeNull();
 });

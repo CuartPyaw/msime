@@ -19,7 +19,11 @@ final class ReplyKeyboardModel: ObservableObject {
 
   func setText(_ value: String) {
     resetResults()
-    guard value.count <= 10_000 else { status = "每次最多粘贴一万字"; return }
+    guard value.count <= 10_000 else {
+      text = ""
+      status = "每次最多粘贴一万字"
+      return
+    }
     text = value
     status = value.isEmpty ? "剪贴板里没有文字" : "选择下方风格生成，内容仅在点击风格时发送"
   }
@@ -81,7 +85,7 @@ struct ReplyKeyboardView: View {
   let paste: () -> Void
   let generate: (String) -> Void
   private let styles = ["😁 专属回复", "🥰 暖心关怀", "📣 捧场王", "😍 恋人", "🌪 幽默风趣", "👔 成熟稳重", "💬 土味情话", "🤩 高情商", "🙌 委婉拒绝"]
-  private var skin: KeyboardSkin { KeyboardSkinPreference.selected }
+  private var skin: KeyboardTheme { KeyboardTheme.current }
   private var radius: CGFloat { CGFloat(skin.cornerRadius) }
   private var keyGap: CGFloat { CGFloat(KeyboardLayoutPreference.keySpacing) }
   private var rowGap: CGFloat { CGFloat(KeyboardLayoutPreference.rowSpacing) }

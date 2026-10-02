@@ -23,8 +23,12 @@
 - (instancetype)initWithAIItems:(NSArray<NSDictionary *> *)items
                    configuration:(NSURLSessionConfiguration *)configuration
                       completion:(void (^)(NSArray<NSDictionary *> *translations))completion;
+/// Called on the main thread once per response the batch handles, before completion. `answeredTexts` lists the item texts that response answered, whether or not a translation came back for each; items never sent, and items whose transport failed, are absent, so a caller can negative-cache exactly the answered ones. A response that arrives after the deadline is still reported here, although it is left out of completion's results. Set before -start.
+@property(nonatomic, copy) void (^onReply)(NSArray<NSDictionary *> *results, NSArray<NSString *> *answeredTexts);
 /// Single-use. A six-second whole-batch deadline returns completed partial results.
 - (void)start;
-/// Suppresses completion, aborts transport and releases credential-bearing inputs.
+/// Lets the request already in flight land through onReply but starts no further item and never calls the original completion; `completion` runs instead once the batch ends by reply or deadline. The six-second deadline still applies. Returns NO, and cancels, when nothing is in flight.
+- (BOOL)detachWithCompletion:(void (^)(void))completion;
+/// Suppresses completion and onReply, aborts transport and releases credential-bearing inputs.
 - (void)cancel;
 @end

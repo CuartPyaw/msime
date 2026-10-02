@@ -111,20 +111,13 @@ pub(crate) fn close(window: &tauri::WebviewWindow) -> tauri::Result<()> {
 /// Enable routes as their native input/service bridges are migrated. The
 /// keyboard can use live foreground targeting without retaining an IMK client.
 pub(crate) fn startup_panel(route: Option<SurfaceRoute>) -> Option<PanelSurface> {
-    route
-        .filter(|route| *route == SurfaceRoute::Keyboard)?
-        .panel()
+    super::startup_panel_for_route(route, SurfaceRoute::Keyboard)
 }
 
 /// Runs before Tauri constructs any windows, so the hidden settings window
 /// cannot steal the editor's focus during a keyboard-only launch.
 pub(crate) fn prepare_windows(windows: &mut [WindowConfig], route: Option<SurfaceRoute>) {
-    if startup_panel(route).is_some() {
-        for window in windows.iter_mut().filter(|window| window.label == "main") {
-            window.visible = false;
-            window.focus = false;
-        }
-    }
+    super::prepare_windows_for_route(windows, route, SurfaceRoute::Keyboard);
 }
 
 #[cfg(test)]

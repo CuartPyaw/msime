@@ -34,10 +34,12 @@ pub mod character_width {
     }
 }
 
-pub use chinese_ime_lm::{Reranker, SentenceModel, DICTIONARY_SOURCES};
+pub use chinese_ime_lm::{CandidateFacts, Reranker, SentenceModel, DICTIONARY_SOURCES};
 use msime_client_core::preferences::TouchKeyboardLayout;
-use msime_engine_bridge::{
-    CandidateEdge, Command, EngineResult, EngineSnapshot, OnlineQuerySnapshot, Session,
+use msime_engine::host::{
+    local_mode_counts_as_typing, CandidateEdge, Command, CommandTableEntry,
+    CommandTranslationQuery, EngineResult, EngineSnapshot, MentionEntry, OnlineQuerySnapshot,
+    QuickPhraseEntry, Session, SharedKeymap,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -50,10 +52,11 @@ use std::io::{Read, Write};
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
 #[cfg(unix)]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);

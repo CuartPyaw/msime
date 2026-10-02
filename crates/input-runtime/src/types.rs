@@ -38,6 +38,22 @@ pub struct Candidate {
     pub translation: Option<String>,
 }
 
+/// The candidate fields needed by translation providers, without copying the rest of a display row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TranslationCandidate {
+    pub text: String,
+    pub source: u8,
+}
+
+/// Lightweight snapshot used when a host is deciding which visible candidates need glosses.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TranslationCandidates {
+    pub generation: u64,
+    pub scheme: u8,
+    pub local_mode: String,
+    pub candidates: Vec<TranslationCandidate>,
+}
+
 /// On-demand copy of every candidate owned by one Engine generation.
 ///
 /// Regular [`View`] values remain page-bounded so hosts do not pay to serialize
@@ -47,7 +63,7 @@ pub struct CandidateSnapshot {
     pub session: u64,
     pub generation: u64,
     pub preedit: String,
-    /// Engine-owned kana reading for Japanese; empty for other schemes.
+    /// Engine-owned kana reading for Japanese, the composing Hangul for Korean; empty for other schemes.
     pub reading: String,
     pub candidates: Vec<Candidate>,
 }
@@ -61,6 +77,10 @@ pub enum CharacterWidth {
 #[derive(Clone, Debug, Serialize)]
 pub struct View {
     pub scheme: u8,
+    /// The active scheme writes Chinese (`SchemeType::is_chinese`): what 中文 returns to and what the Chinese statistics count. Hosts branch on this rather than on scheme ordinals.
+    pub chinese_text: bool,
+    /// The host's Simplified-to-Traditional conversion applies to this view's preedit and to its commits: a scheme it applies to (`SchemeType::script_conversion_applies`) outside the `unicode` and `temporary_japanese` modes, whose text is not Chinese to convert.
+    pub script_conversion: bool,
     /// Engine-owned mobile layout mode. Digits are input, never candidate shortcuts, while active.
     pub nine_key: bool,
     pub nine_key_spellings: Vec<String>,
@@ -73,6 +93,8 @@ pub struct View {
     pub answered_by_pinyin_fallback: bool,
     /// Authoritative Engine mode, never inferred from displayed text.
     pub local_mode: String,
+    /// The non-letter characters the Engine takes as input in this state: the active local mode's spelling (digits and operators in `expression`, digits in `unicode`), or with nothing composed the keys that open a mode (`/`, `@`). A host sends these as characters, and treats a digit listed here as input rather than a candidate shortcut; the runtime already routes them away from punctuation.
+    pub spelling_symbols: String,
     /// Authoritative Engine English mode, independent of temporary local modes.
     pub dedicated_english: bool,
     pub session: u64,
@@ -88,7 +110,7 @@ pub struct View {
     /// its own caret by this string's length in whatever unit it measures.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub phrase_prefix: String,
-    /// Engine-owned kana reading for Japanese; empty for other schemes.
+    /// Engine-owned kana reading for Japanese, the composing Hangul for Korean (the text a host marks inline); empty for other schemes.
     pub reading: String,
     pub editing_text: String,
     /// Byte offset in Engine's ASCII editing_text, not an OS UTF-16 offset.
@@ -96,6 +118,8 @@ pub struct View {
     pub page: usize,
     pub page_size: usize,
     pub page_count: usize,
+    /// The scheme's openable candidate list (the Korean Hanja list) is showing. Hosts read this instead of inferring it from the scheme and a non-empty candidate list.
+    pub candidate_list_open: bool,
     pub candidates: Vec<Candidate>,
 }
 
@@ -103,6 +127,10 @@ pub struct View {
 pub struct OutputContext {
     pub scheme: u8,
     pub local_mode: String,
+    /// Whether the host's Simplified-to-Traditional conversion applies to this commit, decided by the mode the commit was made in ([`View::script_conversion`]).
+    pub script_conversion: bool,
+    /// Whether the host counts this commit in typing statistics. False for text the Engine generated in the expression, command and mention modes, which the user did not type out.
+    pub typing_statistics: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -129,8 +157,6 @@ pub struct AiAssistantProviderConfig {
     pub candidate_limit: u8,
     #[serde(default)]
     pub prompt_id: String,
-    #[serde(default)]
-    pub prompt: String,
     #[serde(default)]
     pub prompt_custom_1: String,
     #[serde(default)]
@@ -162,6 +188,20 @@ pub struct OnlineQuery {
     pub session_id: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai_assistant: Option<AiAssistantProviderConfig>,
+    /// Ask a provider for its cached AI candidates only, never the network. Windows shows a cached AI answer as soon as the input changes and fetches only after the idle delay; the Linux hosts send this probe immediately and the ordinary request after the delay. Hosts never receive it from `online_query`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ai_cache_only: bool,
+}
+
+impl OnlineQuery {
+    pub fn ai_candidate_limit(&self) -> usize {
+        self.ai_assistant
+            .as_ref()
+            .filter(|assistant| assistant.enabled)
+            .map_or(0, |assistant| {
+                usize::from(assistant.candidate_limit.clamp(1, 10))
+            })
+    }
 }
 
 fn default_cloud_candidates() -> bool {
@@ -188,16 +228,61 @@ pub struct NiuTransProviderConfig {
     pub apikey: String,
 }
 
+/// The online translation service the user selected in 翻译服务. Exactly one is active, matching Windows `ActiveProvider()`: the hosted account is explicit, then NiuTrans wins over the custom endpoint, which wins over Tencent, and `Off` means no online translation at all. The choice travels even when the selected service is not fully configured, so a provider never falls back to a service the user did not pick.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TranslationService {
+    #[serde(rename = "none")]
+    Off,
+    #[serde(rename = "account")]
+    Account,
+    Tencent,
+    NiuTrans,
+    Custom,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// A manually requested sentence translation is deliberately separate from
+/// the live candidate gloss path.  Hosts use it only after an explicit user
+/// action, so a long composition never causes a network request on every
+/// keystroke.
+const fn default_sentence_translation() -> bool {
+    false
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct TranslationQuery {
     pub generation: u64,
     #[serde(default = "default_translation_target_language")]
     pub target_language: String,
     pub candidates: Vec<String>,
+    #[serde(
+        default = "default_sentence_translation",
+        skip_serializing_if = "is_false"
+    )]
+    pub sentence: bool,
+    /// The service the user selected; every query carries it so the provider never guesses.
+    pub provider: TranslationService,
+    /// The user explicitly selected the hosted MSIME translation account. Linux
+    /// carries this flag through its provider socket; it is not a provider enum
+    /// value because the provider owns the account credentials.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub translation_account: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_translation: Option<TranslationProviderConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub niutrans: Option<NiuTransProviderConfig>,
+}
+
+/// The `/fy` request: English the user typed after the translate command, for the selected translation service to translate into Chinese. A host sends it as a one-item sentence `TranslationQuery` only when a service is selected, and hands the answer back with this value through `Runtime::apply_command_translation`, which puts it first as a row that commits the translation. It is the only request a local mode makes; `Runtime::online_query` stays `None` there.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct CommandTranslation {
+    pub generation: u64,
+    pub session_id: u64,
+    pub text: String,
 }
 
 fn default_translation_target_language() -> String {

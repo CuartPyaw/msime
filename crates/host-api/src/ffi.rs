@@ -11,6 +11,46 @@
 
 use crate::*;
 
+pub(crate) fn serialized_runtime_view(session: &HostSession) -> Result<Value, String> {
+    serde_json::to_value(session.runtime.view()).map_err(|error| error.to_string())
+}
+
+pub(crate) unsafe fn with_bounded_bytes<T>(
+    pointer: *const u8,
+    length: usize,
+    maximum: usize,
+    invalid: &'static str,
+    operation: impl FnOnce(&[u8]) -> Result<T, String>,
+) -> Result<T, String> {
+    if pointer.is_null() || length > maximum {
+        return Err(invalid.into());
+    }
+    operation(unsafe { std::slice::from_raw_parts(pointer, length) })
+}
+
+pub(crate) fn absolute_path(value: &str) -> bool {
+    Path::new(value).is_absolute()
+}
+
+pub(crate) fn parse_absolute_socket_path(bytes: &[u8]) -> Result<&str, String> {
+    parse_absolute_path(
+        bytes,
+        "socket path is not UTF-8",
+        "socket path must be absolute",
+    )
+}
+
+pub(crate) fn parse_absolute_path<'a>(
+    bytes: &'a [u8],
+    invalid_utf8: &'static str,
+    non_absolute: &'static str,
+) -> Result<&'a str, String> {
+    let path = std::str::from_utf8(bytes).map_err(|_| invalid_utf8.to_owned())?;
+    absolute_path(path)
+        .then_some(path)
+        .ok_or_else(|| non_absolute.to_owned())
+}
+
 // Shared by the session and host modules below, so it lives in the parent.
 /// The file name the reranking model is published under inside the resource set.
 pub(crate) const SENTENCE_MODEL_FILE: &str = "sentence-model.safetensors";
@@ -22,27 +62,24 @@ pub(crate) const SENTENCE_MODEL_FILE: &str = "sentence-model.safetensors";
 /// the small one keep today's behaviour exactly.
 pub(crate) const SETTLED_MODEL_FILE: &str = "sentence-model-desktop.safetensors";
 
+/// Largest model file a host will read into memory. The shipped settled model is about 25 MiB;
+/// this leaves room for a larger compatible model without allowing an arbitrary configured path to
+/// make startup allocate unbounded memory.
+pub(crate) const MAX_SENTENCE_MODEL_BYTES: u64 = 64 * 1024 * 1024;
+
 /// The candidate reranking model, loaded once per path and shared by every session using it.
 ///
-/// The path is separate from the dictionaries because the two artifacts change on entirely
-/// different schedules. A resource set is identified by a hash over all of its artifacts, so adding
-/// a seven megabyte model to the dictionary lock would make every model revision re-download the
-/// hundred and eighty five megabytes of dictionaries alongside it. Hosts that have not adopted a
-/// separate model artifact still find one placed next to the dictionaries.
-///
-/// Absence is the normal case for an installation that ships no model, so it is not an error and
-/// leaves behaviour exactly as it was.
-/// The settled model for a resource directory, or `None` when the set does not ship one.
-///
+/// The small model is part of the verified resource set. Prepared dictionaries contain only the
+/// Engine's writable dictionary files, so the default must resolve from `resources` instead.
 /// Shares `sentence_model`'s cache by going through it, so two sessions on the same resources load
 /// the twenty five megabytes once between them rather than once each.
 pub(crate) fn sentence_model_settled(
-    dictionaries: &str,
+    resources: &str,
     configured: Option<&str>,
 ) -> Option<Arc<SentenceModel>> {
     let path = match configured {
         Some(path) => PathBuf::from(path),
-        None => Path::new(dictionaries).join(SETTLED_MODEL_FILE),
+        None => Path::new(resources).join(SETTLED_MODEL_FILE),
     };
     // Absence is the normal case — most installations ship one model — so it is checked rather
     // than reported. A host that named a path and got nothing gets the same silence: a second
@@ -50,18 +87,15 @@ pub(crate) fn sentence_model_settled(
     if !path.is_file() {
         return None;
     }
-    sentence_model(dictionaries, path.to_str())
+    sentence_model(resources, path.to_str())
 }
 
 pub(crate) fn sentence_model(
-    dictionaries: &str,
+    resources: &str,
     configured: Option<&str>,
 ) -> Option<Arc<SentenceModel>> {
     static MODELS: OnceLock<Mutex<HashMap<PathBuf, Option<Arc<SentenceModel>>>>> = OnceLock::new();
-    let path = match configured {
-        Some(path) => PathBuf::from(path),
-        None => Path::new(dictionaries).join(SENTENCE_MODEL_FILE),
-    };
+    let path = sentence_model_path(resources, configured);
     let cache = MODELS.get_or_init(|| Mutex::new(HashMap::new()));
     let mut cache = cache.lock().ok()?;
     // Keyed by path: two sessions may legitimately be pointed at different models, and a cache that
@@ -69,8 +103,9 @@ pub(crate) fn sentence_model(
     if let Some(cached) = cache.get(&path) {
         return cached.clone();
     }
-    let loaded = std::fs::read(&path)
+    let loaded = std::fs::File::open(&path)
         .ok()
+        .and_then(|file| crate::bounded_file::read(file, MAX_SENTENCE_MODEL_BYTES).ok())
         .and_then(|bytes| match SentenceModel::load(&bytes) {
             Ok(model) => Some(Arc::new(model)),
             Err(error) => {
@@ -84,11 +119,21 @@ pub(crate) fn sentence_model(
     loaded
 }
 
+pub(crate) fn sentence_model_path(resources: &str, configured: Option<&str>) -> PathBuf {
+    configured
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(resources).join(SENTENCE_MODEL_FILE))
+}
+
 pub mod candidates;
 pub mod host;
 pub mod input;
 pub mod lifecycle;
+pub mod mcp;
+pub mod moderation;
+pub mod plugins;
 pub mod providers;
+pub mod reporting;
 pub mod session;
 pub mod translation;
 pub mod voice;
@@ -99,6 +144,8 @@ pub use candidates::*;
 pub use host::*;
 pub use input::*;
 pub use lifecycle::*;
+pub use mcp::*;
+pub use plugins::*;
 pub use providers::*;
 pub use session::*;
 pub use translation::*;

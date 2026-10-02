@@ -1,4 +1,5 @@
 #pragma once
+#include "../../../../shared/input/EnglishModeOutput.h"
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -135,5 +136,10 @@ inline bool space_conversion_matches_document(
   return preceding.size() >= 2 &&
          std::string_view(preceding.front()) == armed_preceding;
 }
+
+// English-mode punctuation and fullwidth output is shared with the macOS host; see shared/input/EnglishModeOutput.h.
+using msime::input::english_mode_chinese_punctuation;
+using msime::input::english_mode_output;
+using msime::input::EnglishPunctuationState;
 
 } // namespace msime::linux_host

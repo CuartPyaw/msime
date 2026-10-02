@@ -56,22 +56,36 @@ struct InputSettingsView: View {
   @State private var inputScheme = InputSchemePreference.scheme
   @State private var enabledSchemes = InputSchemePreference.enabledSchemes
   @State private var usesTraditionalOutput = ChineseOutputPreference.usesTraditional
+  @State private var startsInEnglish = false
+  @State private var defaultModeSaveFailed = false
+  @State private var schemeSaveFailed = false
+  @State private var outputSaveFailed = false
+  @State private var remembersImeMode = false
+  /// The shared document as last read, for the candidate preview at the top (dc.html: 输入 leads with the same card as 主题 and 候选栏).
+  @State private var document: [String: Any]?
+  @Environment(\.colorScheme) private var colorScheme
 
   var body: some View {
     Form {
         Section {
+          CandidatePreviewCard(theme: KeyboardTheme.resolve(document: document), document: document,
+                               systemDark: colorScheme == .dark)
+        }
+        .listRowBackground(Color.clear)
+        .listRowInsets(EdgeInsets())
+        Section {
           ForEach(ChineseInputScheme.allCases, id: \.self) { scheme in
             HStack {
               Button {
-                inputScheme = scheme
-                InputSchemePreference.scheme = scheme
+                schemeSaveFailed = !InputSchemePreference.save(scheme: scheme, enabled: enabledSchemes)
+                reloadPreferences()
               } label: {
                 HStack {
                   Text(scheme.title).foregroundStyle(.primary)
                   Spacer()
                   if inputScheme == scheme {
                     Image(systemName: "checkmark")
-                      .foregroundStyle(MetasequoiaTheme.forest)
+                      .foregroundStyle(MetasequoiaTheme.accent)
                       .accessibilityHidden(true)
                   }
                 }
@@ -84,7 +98,7 @@ struct InputSettingsView: View {
               Toggle(scheme.title, isOn: Binding(get: { enabledSchemes.contains(scheme) }, set: { enabled in
                 var selection = enabledSchemes
                 if enabled { selection.append(scheme) } else { selection.removeAll { $0 == scheme } }
-                InputSchemePreference.enabledSchemes = selection
+                schemeSaveFailed = !InputSchemePreference.save(scheme: inputScheme, enabled: selection)
                 reloadPreferences()
               }))
               .labelsHidden()
@@ -96,13 +110,9 @@ struct InputSettingsView: View {
         } header: {
           Text("输入方案")
         } footer: {
-          Text("开启的方案会显示在键盘快捷切换中，至少保留一种。点击名称设为当前方案。左右滑动空格可移动光标；滑动前会先完成当前输入。")
-        }
-
-        Section("手写输入") {
-          Text("首次在键盘中下载中文模型，需要完全访问权限。下载后可离线识别，笔迹和识别结果不会上传。Google ML Kit 会发送性能及使用统计。")
-            .font(.footnote).foregroundStyle(.secondary)
-          Link("手写 SDK 隐私说明", destination: URL(string: "https://developers.google.com/ml-kit/terms")!)
+          Text(schemeSaveFailed
+            ? "设置没有保存，键盘可能正在写入同一份设置，请再试一次。"
+            : "开启的方案会显示在键盘快捷切换中，至少保留一种。点击名称设为当前方案。粤拼和大千注音读取随安装包附带的语言词库，没有词库时键盘不会显示这两个方案；越南语切换回来时仍是原来的中文方案。左右滑动空格可移动光标；滑动前会先完成当前输入。")
         }
 
         Section("高情商回复") {
@@ -130,6 +140,46 @@ struct InputSettingsView: View {
           NavigationLink(destination: FuzzyPinyinSettingsView()) {
             Label("模糊音", systemImage: "waveform.path")
           }.accessibilityIdentifier("fuzzyPinyinSettingsLink")
+          NavigationLink(destination: PunctuationSettingsView()) {
+            Label("标点", systemImage: "textformat.abc.dottedunderline")
+          }.accessibilityIdentifier("punctuationSettingsLink")
+          NavigationLink(destination: HelpcodeSettingsView()) {
+            Label("辅助码", systemImage: "character.magnify")
+          }.accessibilityIdentifier("helpcodeSettingsLink")
+          NavigationLink(destination: LocalModeSettingsView()) {
+            Label("快捷模式", systemImage: "textformat.123")
+          }.accessibilityIdentifier("localModeSettingsLink")
+          NavigationLink(destination: ClipboardHistorySettingsView()) {
+            Label("剪贴板历史", systemImage: "doc.on.clipboard")
+          }.accessibilityIdentifier("clipboardHistorySettingsLink")
+        }
+
+        Section {
+          Picker("打开键盘时", selection: Binding(get: { startsInEnglish }, set: { english in
+            startsInEnglish = english
+            defaultModeSaveFailed = !MetasequoiaInputSessionBridge.updateSharedPreferences {
+              $0["default_ime_mode"] = english ? "english" : "chinese"
+            }
+            if defaultModeSaveFailed { reloadPreferences() }
+          })) {
+            Text("中文").tag(false)
+            Text("英文").tag(true)
+          }
+          .pickerStyle(.segmented)
+          .accessibilityIdentifier("defaultImeModePicker")
+          Toggle("沿用上次的中英文", isOn: Binding(get: { remembersImeMode }, set: { enabled in
+            remembersImeMode = enabled
+            ImeModeMemoryPreference.setEnabled(enabled)
+          }))
+          .accessibilityIdentifier("remembersImeModeToggle")
+        } header: {
+          Text("默认中英文")
+        } footer: {
+          Text(defaultModeSaveFailed
+            ? "设置没有保存，键盘可能正在写入同一份设置，请再试一次。"
+            : remembersImeMode
+              ? "新打开的键盘沿用你上次按中/英键选的模式，还没切换过时从上面的默认开始。网址、邮箱等输入框临时切到的英文不算。iOS 不告诉键盘正在哪个应用里输入，所以只能记住一个模式，不能像桌面端那样按应用记住。"
+              : "新打开的键盘从这里开始，与桌面端同步。按中/英键切换后，这次打开的键盘保持你的选择。iOS 不告诉键盘正在哪个应用里输入，所以不像桌面端那样按应用记住中英文。")
         }
 
         Section {
@@ -140,21 +190,25 @@ struct InputSettingsView: View {
           .pickerStyle(.segmented)
           .accessibilityIdentifier("chineseOutputPicker")
           .onChange(of: usesTraditionalOutput) { value in
-            ChineseOutputPreference.usesTraditional = value
+            guard value != ChineseOutputPreference.usesTraditional else { return }
+            outputSaveFailed = !ChineseOutputPreference.save(value)
+            if outputSaveFailed { reloadPreferences() }
           }
         } header: {
           Text("简繁体")
         } footer: {
-          Text("应用于候选词和输入的文字。")
+          Text(outputSaveFailed ? "设置没有保存，键盘可能正在写入同一份设置，请再试一次。" : "应用于候选词和输入的文字。")
         }
 
         Section {
           Toggle("按键音", isOn: $soundEnabled)
             .accessibilityIdentifier("keyboardSoundToggle")
-          Toggle("按键振动", isOn: $hapticsEnabled)
-            .accessibilityIdentifier("keyboardHapticsToggle")
-            .onChange(of: hapticsEnabled) { enabled in if enabled { previewHaptics() } }
-          if hapticsEnabled {
+          if KeyboardFeedbackPreference.hapticsAvailable {
+            Toggle("按键振动", isOn: $hapticsEnabled)
+              .accessibilityIdentifier("keyboardHapticsToggle")
+              .onChange(of: hapticsEnabled) { enabled in if enabled { previewHaptics() } }
+          }
+          if KeyboardFeedbackPreference.hapticsAvailable && hapticsEnabled {
             Picker("振动强度", selection: $hapticStrength) {
               ForEach(KeyboardHapticStrength.allCases, id: \.rawValue) { strength in
                 Text(strength.title).tag(strength.rawValue)
@@ -169,11 +223,13 @@ struct InputSettingsView: View {
         } header: {
           Text("按键反馈")
         } footer: {
-          Text("按键音受系统静音设置控制；振动效果取决于设备与系统支持。")
+          Text(KeyboardFeedbackPreference.hapticsAvailable
+            ? "按键音受系统静音设置控制；振动效果取决于设备与系统支持。"
+            : "按键音受系统静音设置控制。")
         }
 
     }
-    .navigationTitle("输入设置")
+    .navigationTitle("输入")
     .navigationBarTitleDisplayMode(.inline)
       .onAppear(perform: reloadPreferences)
       .onChange(of: scenePhase) { phase in
@@ -194,6 +250,9 @@ struct InputSettingsView: View {
     inputScheme = InputSchemePreference.scheme
     enabledSchemes = InputSchemePreference.enabledSchemes
     usesTraditionalOutput = ChineseOutputPreference.usesTraditional
+    document = MetasequoiaInputSessionBridge.loadSharedPreferences()
+    startsInEnglish = document?["default_ime_mode"] as? String == "english"
+    remembersImeMode = ImeModeMemoryPreference.isEnabled()
   }
 }
 
@@ -225,9 +284,9 @@ struct OnboardingView: View {
             .font(.headline)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 15)
-            .foregroundStyle(.white)
+            .foregroundStyle(MetasequoiaTheme.onAccent)
             .background(
-              MetasequoiaTheme.forest, in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+              MetasequoiaTheme.accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous)
             )
             .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
@@ -252,7 +311,7 @@ struct OnboardingView: View {
       .padding(.vertical, 30)
     }
     .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
-    .tint(MetasequoiaTheme.forest)
+    .tint(MetasequoiaTheme.accent)
     .navigationTitle("启用指南")
     .navigationBarTitleDisplayMode(.inline)
   }
@@ -261,7 +320,7 @@ struct OnboardingView: View {
     HStack(alignment: .center, spacing: 18) {
       MetasequoiaMark()
         .stroke(
-          MetasequoiaTheme.forest,
+          MetasequoiaTheme.accent,
           style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round)
         )
         .frame(width: 58, height: 76)

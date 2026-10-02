@@ -1,5 +1,13 @@
 import { createVoiceRecognitionClient } from "./voice/voice-recognition-client";
-import { StrictMode, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  StrictMode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { createRoot } from "react-dom/client";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke, isTauri } from "@tauri-apps/api/core";
@@ -15,11 +23,16 @@ import {
   EmojiPanel,
   HandwritingPanel,
   VoicePanel,
+  completeOnboardingPreferences,
+  usePreferencesSnapshot,
   SettingsPage,
   SettingsStartupPage,
   WelcomeFlowPage,
+  LinuxSetupPage,
+  MacosInstallPage,
   useCandidatePreviewTheme,
   type AccountClient,
+  type AccountProfile,
   type ApiCredentialTestResult,
   type ApiCredentialTestService,
   type ClipboardHistoryEntry,
@@ -30,11 +43,19 @@ import {
   type CloudDictionaryPanelClient,
   type EmojiCatalogGroup,
   type EmojiPanelClient,
+  type CustomHelpcodeSchema,
   type HostCapabilities,
+  type ProviderCredentialClient,
+  type ProviderCredentialStatus,
+  type VoiceCredentialSaveResult,
   type TypingStatisticsClient,
+  VocabularyReviewPanel,
+  type VocabularyReviewClient,
   type PanelClient,
   type VoicePanelClient,
   type Preferences,
+  type PreferencesRecovery,
+  type AppNotice,
   type SettingsClient,
   type Snapshot,
   type DictionaryClient,
@@ -42,29 +63,43 @@ import {
   type LocalDictionaryKind,
   type LocalDictionaryFormat,
   type OnboardingActions,
+  type OnboardingChoices,
   type OnboardingInputScheme,
+  type LinuxSetupClient,
+  type MacosInstallClient,
+  type LinuxSetupLine,
+  type LinuxSetupStatus,
+  type McpClientId,
+  type McpFlag,
+  type McpInstallOutcome,
+  type McpServerStatus,
+  type LocalVoiceModelList,
+  type LocalVoiceModelProgress,
+  type MentionEntry,
+  type ResourcePackClient,
+  type ResourcePackStatus,
+  type PluginCatalogResult,
+  type PluginClient,
+  type PluginPackage,
+  UNBATCHED_DICTIONARY_FILE_BYTES,
 } from "@msime/ui";
 import "@msime/ui/styles.css";
 import { subscribeWindowState } from "./input/window-state";
 import { discoverFontReader } from "./candidate/system-font-client";
-import { DesktopKeyboard } from "./input/desktop-keyboard";
+import { DesktopKeyboard, useHostPlatform } from "./input/desktop-keyboard";
 import { DesktopCloudDictionary } from "./dictionary/desktop-cloud-dictionary";
 import { testDesktopApiCredential } from "./account/credential-test-client";
 import { cloudDictionaryCapabilities, isMobileHost } from "./input/mobile-host-capabilities";
 import { createMobileHostServices } from "./core/mobile-host-services";
+import {
+  createDesktopCandidateSkinCommunity,
+  createDesktopPluginCommunity,
+} from "./core/desktop-host-services";
 
 const dictionary: DictionaryClient = {
-  // kind and query are omitted when absent so an older host still sees the
-  // request shape it knows.
   list: (offset, limit, kind, query) =>
     invoke("dictionary_request", {
-      action: {
-        operation: "list",
-        offset,
-        limit,
-        ...(kind ? { kind } : {}),
-        ...(query ? { query } : {}),
-      },
+      action: { operation: "list", offset, limit, kind, query },
     }),
   edit: (
     previous: DictionaryEntry | null,
@@ -101,6 +136,8 @@ const dictionary: DictionaryClient = {
 };
 const mobileDictionary: DictionaryClient = {
   ...dictionary,
+  // The mobile bridge sends an import to the host in one request rather than in batches.
+  maxImportFileBytes: UNBATCHED_DICTIONARY_FILE_BYTES,
   importPersonal: (text: string, request_id: string) =>
     invoke("dictionary_request", { action: { operation: "import_personal", text, request_id } }),
 };
@@ -125,16 +162,73 @@ async function downloadCloudEntryToLocal(
   });
   await dictionaryClient.importPersonal(text, `ui-cloud-download-${Date.now()}`);
 }
+const linuxSetupClient: LinuxSetupClient = {
+  run: async ({ download, cloudCandidates }, onLine) => {
+    const unlisten = await listen<LinuxSetupLine>("linux-setup-output", (event) =>
+      onLine(event.payload),
+    );
+    try {
+      return await invoke<LinuxSetupStatus>("run_linux_setup", { download, cloudCandidates });
+    } finally {
+      unlisten();
+    }
+  },
+};
+// The host resolves the plugins directory and the built-in sound packs, and shows its own picker for an import; the page never names a path.
+const plugins: PluginClient = {
+  catalog: () => invoke<PluginCatalogResult>("plugin_catalog"),
+  importPack: (source) => invoke<PluginPackage | null>("import_plugin_pack", { source }),
+  remove: (kind, id) => invoke<void>("remove_plugin_pack", { kind, id }),
+  loadMentions: () => invoke<MentionEntry[]>("load_plugin_mentions"),
+  saveMentions: (entries) => invoke<void>("save_plugin_mentions", { entries }),
+};
 const typingStatistics: TypingStatisticsClient = {
   load: () => invoke("load_typing_statistics"),
   setEnabled: (enabled: boolean) => invoke("set_typing_statistics_enabled", { enabled }),
   setRetention: (retention: string) => invoke("set_typing_statistics_retention", { retention }),
   reset: () => invoke("reset_typing_statistics"),
 };
+// Every method answers with the whole status, so the page keeps one request in flight rather than
+// following each change with a read of its own. The local day is resolved on the Rust side, which
+// is the process that knows the machine's timezone.
+const vocabularyReview: VocabularyReviewClient = {
+  load: () => invoke("load_vocabulary_review"),
+  answer: (word, known) => invoke("answer_vocabulary_card", { word, known }),
+  setSettings: (settings) =>
+    invoke("set_vocabulary_settings", {
+      wordbook: settings.wordbook,
+      newPerDay: settings.newPerDay,
+      sessionLimit: settings.sessionLimit,
+    }),
+  importWordbook: (name, text) => invoke("import_vocabulary_wordbook", { name, text }),
+  removeWordbook: (wordbook) => invoke("remove_vocabulary_wordbook", { wordbook }),
+  reset: () => invoke("reset_vocabulary_review"),
+};
+const inputSourceStartup: NonNullable<SettingsClient["inputSourceStartup"]> = {
+  status: () => invoke("input_source_startup_status"),
+  openSettings: () => invoke("open_input_source_settings"),
+};
+const macosInputModes: NonNullable<SettingsClient["macosInputModes"]> = {
+  enabled: () => invoke("enabled_input_modes"),
+  openSettings: () => invoke("open_input_source_settings"),
+};
+// macOS 按需下载的资源包（日文词库、粤语与注音词库、手写模型）；这些命令只在 macOS 宿主上注册，所以只在宿主报告 macOS 时提供给页面。
+const resourcePacks: ResourcePackClient = {
+  list: () => invoke<ResourcePackStatus[]>("resource_packs"),
+  install: (id) => invoke<string>("resource_pack_install", { id }),
+  cancel: (id) => invoke<boolean>("resource_pack_cancel", { id }),
+  onProgress: (listener) =>
+    listen<LocalVoiceModelProgress>("resource-pack-progress", (event) => listener(event.payload)),
+};
+const macosInstallClient: MacosInstallClient = {
+  install: () => invoke("run_first_input_source_install"),
+};
 const client: SettingsClient = {
   readAppVersion: getVersion,
   resolveFontFamilies: (names) => invoke("resolve_font_families", { names }),
   scanSkinCatalog: () => invoke("scan_skin_catalog"),
+  listHelpcodeSchemas: () => invoke<CustomHelpcodeSchema[]>("list_helpcode_schemas"),
+  resolveTheme: (request) => invoke("resolve_theme", { request }),
   readSkinToolbarCss: (id, relative) =>
     relative
       ? invoke("read_skin_stylesheet", { id, relative })
@@ -158,6 +252,11 @@ const client: SettingsClient = {
   onPreferencesChanged: (listener) =>
     listen<Snapshot>("preferences-changed", (event) => listener(event.payload)),
   openExternalUrl: (url) => invoke("open_external_url", { url }),
+  // The settings window asks for the console's notices when it opens; the host caches the feed for the server's one minute and keeps dismissals per notice id.
+  notices: {
+    list: () => invoke<AppNotice[]>("notices_list"),
+    dismiss: (id) => invoke<void>("notice_dismiss", { id }),
+  },
   openThirdPartyLicenses: () => invoke("open_third_party_licenses"),
   loadMacosShuangpinKeymap: () => invoke<boolean>("load_macos_shuangpin_keymap"),
   saveMacosShuangpinKeymap: (enabled) => invoke("save_macos_shuangpin_keymap", { enabled }),
@@ -169,10 +268,18 @@ const client: SettingsClient = {
   openHandwriting: () => invoke("open_handwriting_panel"),
   listVoiceCaptureDevices: () => invoke("list_voice_capture_devices"),
   openVoice: () => invoke("open_voice_panel"),
+  openVocabulary: () => invoke("open_vocabulary_panel"),
   openCloudClipboard: () => invoke("open_cloud_clipboard_panel"),
+  cloudClipboardRequest: (action) => invoke("cloud_clipboard_request", { action }),
   openCloudDictionary: () => invoke("open_cloud_dictionary_panel"),
   restartInputMethod: () => invoke("restart_input_method"),
   installInputSource: () => invoke("install_input_source"),
+  inputSourceStartup,
+  macosInputModes,
+  onDeviceTranslation: {
+    downloadableLanguages: () => invoke<string[]>("on_device_translation_downloadable_languages"),
+    openSettings: () => invoke("open_translation_language_settings"),
+  },
   uninstallInputSource: (removeUserData) => invoke("uninstall_input_source", { removeUserData }),
   dataDirectory: {
     status: () => invoke("data_directory_status"),
@@ -180,6 +287,16 @@ const client: SettingsClient = {
     move: () => invoke("move_data_directory"),
   },
   pickVoiceModelPath: () => invoke("pick_voice_model_path"),
+  localVoiceModels: {
+    list: () => invoke<LocalVoiceModelList>("voice_local_models"),
+    install: (id) => invoke<string>("voice_local_model_install", { id }),
+    cancel: (id) => invoke<boolean>("voice_local_model_cancel", { id }),
+    remove: (id) => invoke<void>("voice_local_model_remove", { id }),
+    onProgress: (listener) =>
+      listen<LocalVoiceModelProgress>("voice-local-model-progress", (event) =>
+        listener(event.payload),
+      ),
+  },
   windowControl: async (action) => {
     const window = getCurrentWindow();
     if (action === "minimize") return window.minimize();
@@ -212,8 +329,6 @@ const client: SettingsClient = {
     setPinned: (text, pinned) => invoke("set_clipboard_history_pinned", { text, pinned }),
   },
   dictionary,
-  resetLearnedData: () =>
-    invoke("dictionary_request", { action: { operation: "reset" } }).then(() => undefined),
   loadDefaultPreferences: () => invoke<Preferences>("restored_default_preferences"),
   /* mobile host services are injected after host_capabilities resolves */
 };
@@ -323,6 +438,19 @@ const panelClients: {
   },
 };
 const panel = new URLSearchParams(window.location.search).get("panel");
+// macOS 的手写面板第一次打开时下载手写模型。客户端固定为模块级对象，避免每次渲染换一个 client 让面板重置识别队列。
+const macosHandwritingClient: PanelClient = { ...panelClients.handwriting, resourcePacks };
+function DesktopHandwriting({ theme }: { theme: "dark" | "light" }) {
+  const platform = useHostPlatform(client.host);
+  return (
+    <HandwritingPanel
+      client={platform === "macos" ? macosHandwritingClient : panelClients.handwriting}
+      theme={theme}
+      platform={platform}
+    />
+  );
+}
+
 function DesktopPanelTheme({
   preferences,
   surface,
@@ -332,41 +460,7 @@ function DesktopPanelTheme({
   surface: "handwriting" | "voice" | "emoji";
   children: (theme: "dark" | "light") => ReactNode;
 }) {
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-  useEffect(() => {
-    let active = true;
-    let unsubscribe: (() => void) | undefined;
-    let latestRevision = -1;
-    const apply = (value: Snapshot) => {
-      if (!active || value.revision <= latestRevision) return;
-      latestRevision = value.revision;
-      setSnapshot(value);
-    };
-    const start = async () => {
-      try {
-        const stop = await preferences.onPreferencesChanged?.(apply);
-        if (!active) {
-          stop?.();
-          return;
-        }
-        unsubscribe = stop;
-      } catch {
-        /* Initial loading still works when event subscription is unavailable. */
-      }
-      if (active) {
-        try {
-          apply(await preferences.load());
-        } catch {
-          /* Keep the dark panel default. */
-        }
-      }
-    };
-    void start();
-    return () => {
-      active = false;
-      unsubscribe?.();
-    };
-  }, [preferences]);
+  const snapshot = usePreferencesSnapshot(preferences);
   const surfaceTheme =
     surface === "handwriting"
       ? snapshot?.preferences.handwriting_theme
@@ -375,21 +469,17 @@ function DesktopPanelTheme({
         : snapshot?.preferences.emoji_theme;
   return children(useCandidatePreviewTheme(snapshot?.preferences.theme, surfaceTheme));
 }
-// The host reports what it supports. Typing statistics were previously gated on
-// an Android user-agent match, which left the category dead on every desktop
-// even though the commands were registered.
+// The host reports what it supports; outside Tauri (the browser preview) there is no host.
 async function discoverHostCapabilities(): Promise<HostCapabilities | null> {
   if (!isTauri()) return null;
-  try {
-    return await invoke<HostCapabilities>("host_capabilities");
-  } catch {
-    return null; // A host without the command keeps its previous behaviour.
-  }
+  return await invoke<HostCapabilities>("host_capabilities");
 }
 
 function DesktopSettings() {
   const [settingsClient, setSettingsClient] = useState<SettingsClient | null>(null);
   const [bootstrapRequired, setBootstrapRequired] = useState<boolean | null>(null);
+  const [linuxSetup, setLinuxSetup] = useState<LinuxSetupStatus | null>(null);
+  const [macosInstall, setMacosInstall] = useState(false);
   const [replayOnboarding, setReplayOnboarding] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<
     | "voice"
@@ -405,6 +495,13 @@ function DesktopSettings() {
   >(null);
   const mobilePanelRef = useRef(mobilePanel);
   const [initialPage, setInitialPage] = useState<string | undefined>();
+  // A section requested while the page is already open. It navigates the mounted page rather than
+  // remounting it, which used to drop an unsaved draft; the nonce makes a repeated request count.
+  const [settingsRoute, setSettingsRoute] = useState<{ page: string; nonce: number }>();
+  const requestSettingsPage = useCallback((page: string) => {
+    setInitialPage(page);
+    setSettingsRoute((current) => ({ page, nonce: (current?.nonce ?? 0) + 1 }));
+  }, []);
   useEffect(() => {
     mobilePanelRef.current = mobilePanel;
   }, [mobilePanel]);
@@ -421,7 +518,7 @@ function DesktopSettings() {
     }
     setMobilePanel(next);
   };
-  const closeMobilePanel = () => {
+  const closeMobilePanel = useCallback(() => {
     if (
       typeof window !== "undefined" &&
       window.history.state?.msimeSettings === true &&
@@ -431,7 +528,35 @@ function DesktopSettings() {
     } else {
       setMobilePanel(null);
     }
-  };
+  }, []);
+  // The mobile panels restart their catalog, clipboard subscription or recording whenever their
+  // client changes, so these are built once rather than on every render of this component.
+  const closeMobilePanelAsync = useCallback(async () => closeMobilePanel(), [closeMobilePanel]);
+  const mobileEmojiClient = useMemo(
+    () => ({
+      ...panelClients.emoji,
+      close: closeMobilePanelAsync,
+      rememberInputTarget: undefined,
+      sendText: undefined,
+    }),
+    [closeMobilePanelAsync],
+  );
+  const iosHost = settingsClient?.host?.platform === "ios";
+  const mobileVoiceClient = useMemo(
+    () => ({
+      ...panelClients.voice,
+      close: closeMobilePanelAsync,
+      rememberInputTarget: undefined,
+      ...(iosHost
+        ? {
+            description:
+              "iOS App 负责录音和识别；识别结果不会直接写入键盘扩展，确认提交后会保存为待插入的语音结果。",
+            submitNotice: "已发送到本机键盘。返回目标 App，打开键盘“更多 → 语音结果”，确认后插入。",
+          }
+        : {}),
+    }),
+    [closeMobilePanelAsync, iosHost],
+  );
   useEffect(() => {
     const onPopState = (event: PopStateEvent) => {
       const state = event.state;
@@ -466,7 +591,7 @@ function DesktopSettings() {
         typeof page === "string" &&
         ["home", "appearance", "dictionary", "account", "about", "help", "feedback"].includes(page)
       ) {
-        setInitialPage(page);
+        requestSettingsPage(page);
         setMobilePanel(null);
       }
     };
@@ -486,7 +611,8 @@ function DesktopSettings() {
     let unsubscribe: (() => void) | undefined;
     if (isTauri()) {
       void listen<string>("settings-route", (event) => {
-        if (active) setInitialPage(event.payload || undefined);
+        // An entry with no section only brings the window forward; it keeps the page in view.
+        if (active && event.payload) requestSettingsPage(event.payload);
       })
         .then((stop) => {
           if (active) unsubscribe = stop;
@@ -510,7 +636,19 @@ function DesktopSettings() {
         : ios
           ? await invoke<boolean>("ios_onboarding_status").catch(() => false)
           : true;
+      // Linux prepares its runtime options from the first-run page instead of refusing to start without them.
+      const linuxSetupStatus =
+        host?.platform === "linux"
+          ? await invoke<LinuxSetupStatus>("linux_setup_status").catch(() => null)
+          : null;
+      // The window is already at the install window's size when this asks; see `first_install_window_pending`.
+      const macosInstallPending =
+        host?.platform === "macos"
+          ? await invoke<boolean>("first_install_window_pending").catch(() => false)
+          : false;
       if (!active) return;
+      if (linuxSetupStatus && !linuxSetupStatus.prepared) setLinuxSetup(linuxSetupStatus);
+      setMacosInstall(macosInstallPending);
       setBootstrapRequired((android || ios) && !ready);
       setInitialPage(page ?? undefined);
       const hosted: SettingsClient = host
@@ -538,7 +676,64 @@ function DesktopSettings() {
                       },
                 }
               : {}),
+            ...(host.platform === "macos" ? { resourcePacks } : {}),
+            // The macOS input method writes diagnostic.log under Application Support, which the Finder hides; the host reveals it rather than asking the user to navigate there.
+            ...(host.platform === "macos"
+              ? { openDiagnosticLogDirectory: () => invoke<void>("open_diagnostic_log_directory") }
+              : {}),
+            // A host that has not wired 背单词 hides the page rather than offering buttons whose every press would fail.
+            ...(host.vocabulary_review ? { vocabularyReview } : {}),
+            // This shell registers no download handler, and the macOS WKWebView cancels every download link without one, so the host writes the export into Downloads itself and the page can say where the file went. Linux runs the same shell and takes the same path; Windows' WebView2 and the mobile webviews keep the download link.
+            ...(host.platform === "macos" || host.platform === "linux"
+              ? {
+                  saveExport: (name: string, contents: string) =>
+                    invoke<string>("save_export", { name, contents }),
+                }
+              : {}),
+            // The pack store and its import picker are the desktop shells' own; the mobile hosts keep their keyboard feedback settings instead.
+            ...(host.platform === "macos" ||
+            host.platform === "linux" ||
+            host.platform === "windows"
+              ? { plugins }
+              : {}),
+            // 只有三个桌面宿主真正能清除学习数据：Android 的个人词库对 `reset` 一律报错，iOS 的 `reset` 不经过键盘扩展的个人词库，走的是 App 自己的引擎数据，不能保证清掉键盘扩展学到的内容，所以移动端不提供 `resetLearnedData`，设置页也就不显示这个按钮。
+            ...(host.platform === "macos" ||
+            host.platform === "linux" ||
+            host.platform === "windows"
+              ? {
+                  resetLearnedData: () =>
+                    invoke("dictionary_request", { action: { operation: "reset" } }).then(
+                      () => undefined,
+                    ),
+                }
+              : {}),
+            // msime-mcp is packaged beside the settings app on the three desktop hosts only.
+            ...(host.platform === "macos" ||
+            host.platform === "linux" ||
+            host.platform === "windows"
+              ? {
+                  mcpServerStatus: () => invoke<McpServerStatus>("mcp_server_status"),
+                  installMcpClient: (
+                    client: McpClientId,
+                    replace: boolean,
+                    flags: readonly McpFlag[],
+                  ) => invoke<McpInstallOutcome>("install_mcp_client", { client, replace, flags }),
+                }
+              : {}),
             ...(host.fuzzy_pinyin ? { fuzzyPinyin: true } : {}),
+            // iOS has no recover_preferences command: its keyboard mirrors the AI settings natively and only a save keeps that mirror in step.
+            ...(host.platform !== "ios"
+              ? {
+                  recoverPreferences: () => invoke<PreferencesRecovery>("recover_preferences"),
+                }
+              : {}),
+            ...(host.platform === "macos" ||
+            host.platform === "linux" ||
+            host.platform === "windows"
+              ? {
+                  openPreferencesDirectory: () => invoke<void>("open_preferences_directory"),
+                }
+              : {}),
             ...(host.platform === "ios" || host.platform === "android"
               ? createMobileHostServices(host.platform, {
                   invoke,
@@ -567,6 +762,38 @@ function DesktopSettings() {
                     service: ApiCredentialTestService,
                     config: Record<string, unknown>,
                   ) => invoke<ApiCredentialTestResult>("test_api_credential", { service, config }),
+                  providerCredentials: {
+                    status: () => invoke<ProviderCredentialStatus>("provider_credentials_status"),
+                    saveAi: ({ provider, endpoint, model, token }) =>
+                      invoke<ProviderCredentialStatus>("save_ai_provider_credential", {
+                        provider,
+                        endpoint,
+                        model,
+                        token,
+                      }),
+                    clearAi: (provider) =>
+                      invoke<ProviderCredentialStatus>("clear_ai_provider_credential", {
+                        provider,
+                      }),
+                    saveTencent: ({ secretId, secretKey, region }) =>
+                      invoke<ProviderCredentialStatus>("save_tencent_provider_credential", {
+                        secretId,
+                        secretKey,
+                        region,
+                      }),
+                    clearTencent: () =>
+                      invoke<ProviderCredentialStatus>("clear_tencent_provider_credential"),
+                    saveVoice: (credential) =>
+                      invoke<VoiceCredentialSaveResult>(
+                        "save_voice_provider_credential",
+                        credential,
+                      ),
+                    clearVoice: (kind, provider) =>
+                      invoke<VoiceCredentialSaveResult>("clear_voice_provider_credential", {
+                        kind,
+                        provider,
+                      }),
+                  } satisfies ProviderCredentialClient,
                 }
               : {}),
             ...(host.platform === "windows" || host.platform === "macos"
@@ -604,12 +831,19 @@ function DesktopSettings() {
                       invoke("account_request_code", { provider, target }),
                     login: (challengeId: string, code: string) =>
                       invoke("account_login", { challengeId, code }),
+                    googleLogin: () => invoke("account_google_login"),
+                    googleCancel: () => invoke("account_google_cancel"),
                     profile: () => invoke("account_profile"),
                     rename: (displayName: string) => invoke("account_rename", { displayName }),
+                    avatar: () => invoke<string | null>("account_avatar"),
+                    chooseAvatar: () => invoke<AccountProfile | null>("account_choose_avatar"),
+                    removeAvatar: () => invoke<AccountProfile>("account_remove_avatar"),
                     logout: (all: boolean) => invoke("account_logout", { all }),
                     deleteAccount: () => invoke("account_delete"),
                     clearExpired: () => invoke("account_forget"),
                   } satisfies AccountClient,
+                  communityCandidateSkins: createDesktopCandidateSkinCommunity(invoke),
+                  communityPlugins: createDesktopPluginCommunity(invoke),
                 }
               : {}),
             ...(host.platform === "ios"
@@ -664,22 +898,12 @@ function DesktopSettings() {
         ? () => invoke("android_show_input_method_picker").then(() => undefined)
         : async () => undefined,
   };
-  const completeOnboarding = async (scheme: OnboardingInputScheme) => {
+  const completeOnboarding = async (scheme: OnboardingInputScheme, choices: OnboardingChoices) => {
     const snapshot = await client.load();
-    const enabled = [...(snapshot.preferences.touch_keyboard_schemes?.enabled ?? [])];
-    if (!enabled.includes(scheme)) enabled.push(scheme);
-    await client.save(snapshot.revision, {
-      ...snapshot.preferences,
-      scheme: "quanpin",
-      last_chinese_scheme: "quanpin",
-      touch_keyboard_layout: scheme === "nine_key" ? "nine_key" : "twenty_six_key",
-      touch_keyboard_schemes: {
-        ...snapshot.preferences.touch_keyboard_schemes,
-        enabled,
-        selected: scheme,
-      },
-    });
+    await client.save(snapshot.revision, completeOnboardingPreferences(snapshot, scheme, choices));
     if (onboardingPlatform === "ios") await invoke("ios_onboarding_complete");
+    // Signing in happens on 我的, so the flow's 登录 lands there once the settings page mounts.
+    if (choices.openAccount) requestSettingsPage("account");
     setBootstrapRequired(false);
     setReplayOnboarding(false);
   };
@@ -688,13 +912,35 @@ function DesktopSettings() {
     setBootstrapRequired(false);
     setReplayOnboarding(false);
   };
+  if (linuxSetup)
+    return (
+      <LinuxSetupPage
+        status={linuxSetup}
+        client={linuxSetupClient}
+        onComplete={() => setLinuxSetup(null)}
+      />
+    );
+  if (macosInstall)
+    return (
+      <MacosInstallPage
+        client={macosInstallClient}
+        onComplete={() => {
+          void invoke("leave_first_install_window")
+            .catch(() => undefined)
+            .then(() => setMacosInstall(false));
+        }}
+      />
+    );
   // Mount once after discovery: replacing the client later would reload draft preferences.
   if (bootstrapRequired || replayOnboarding)
     return (
       <WelcomeFlowPage
         actions={onboardingActions}
         onComplete={completeOnboarding}
-        onSkip={onboardingPlatform === "ios" ? skipOnboarding : undefined}
+        // Android can leave too: the flow prepares the built-in dictionaries before it lets go, and those are what the next launch checks.
+        onSkip={skipOnboarding}
+        // The splash belongs to a first launch; replaying the flow from settings skips it.
+        splash={Boolean(bootstrapRequired) && !replayOnboarding}
       />
     );
   if (!settingsClient)
@@ -720,25 +966,7 @@ function DesktopSettings() {
       : {}),
   };
   if (mobilePanel === "voice") {
-    const ios = settingsClient.host?.platform === "ios";
-    return (
-      <VoicePanel
-        client={{
-          ...panelClients.voice,
-          close: async () => closeMobilePanel(),
-          rememberInputTarget: undefined,
-          ...(ios
-            ? {
-                description:
-                  "iOS App 负责录音和识别；识别结果不会直接写入键盘扩展，确认提交后会保存为待插入的语音结果。",
-                submitNotice:
-                  "已发送到本机键盘。返回目标 App，打开键盘“更多 → 语音结果”，确认后插入。",
-              }
-            : {}),
-        }}
-        theme="light"
-      />
-    );
+    return <VoicePanel client={mobileVoiceClient} theme="light" />;
   }
   if (mobilePanel === "emoji" || mobilePanel === "clipboard") {
     return (
@@ -747,13 +975,8 @@ function DesktopSettings() {
           <DesktopEmojiPanel
             theme={theme}
             initialPage={mobilePanel === "clipboard" ? "clipboard" : "home"}
-            client={{
-              ...panelClients.emoji,
-              close: async () => closeMobilePanel(),
-              rememberInputTarget: undefined,
-              sendText: undefined,
-            }}
-            close={async () => closeMobilePanel()}
+            client={mobileEmojiClient}
+            close={closeMobilePanelAsync}
           />
         )}
       </DesktopPanelTheme>
@@ -831,9 +1054,9 @@ function DesktopSettings() {
   }
   return (
     <SettingsPage
-      key={initialPage ?? "default"}
       client={settingsClient}
       initialPage={initialPage}
+      route={settingsRoute}
       onReplayOnboarding={() => setReplayOnboarding(true)}
     />
   );
@@ -916,7 +1139,7 @@ const content =
     <DesktopKeyboard client={panelClients.keyboard} preferences={client} />
   ) : panel === "handwriting" ? (
     <DesktopPanelTheme preferences={client} surface="handwriting">
-      {(theme) => <HandwritingPanel client={panelClients.handwriting} theme={theme} />}
+      {(theme) => <DesktopHandwriting theme={theme} />}
     </DesktopPanelTheme>
   ) : panel === "voice" ? (
     <DesktopPanelTheme preferences={client} surface="voice">
@@ -934,6 +1157,8 @@ const content =
     <DesktopPanelTheme preferences={client} surface="emoji">
       {(theme) => <DesktopEmojiPanel theme={theme} />}
     </DesktopPanelTheme>
+  ) : panel === "vocabulary" ? (
+    <VocabularyReviewPanel client={vocabularyReview} />
   ) : (
     <DesktopSettings />
   );

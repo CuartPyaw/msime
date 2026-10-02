@@ -1,4 +1,5 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { errorCode } from "../core/error-code";
 
 /** Host failures may contain private paths or data; display only fixed UI messages. */
 export function HostActionButton({
@@ -16,17 +17,25 @@ export function HostActionButton({
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<"success" | "error" | null>(null);
   const [errorMessage, setErrorMessage] = useState("操作失败，请重试。");
+  const mounted = useRef(true);
+  useEffect(
+    () => () => {
+      mounted.current = false;
+    },
+    [],
+  );
   async function run() {
-    if (!action || running.current) return;
+    if (!action || running.current || !mounted.current) return;
     running.current = true;
     setPending(true);
     setResult(null);
     try {
       await action();
+      if (!mounted.current) return;
       setResult("success");
     } catch (reason) {
-      const code =
-        typeof reason === "object" && reason !== null && "code" in reason ? reason.code : undefined;
+      if (!mounted.current) return;
+      const code = errorCode(reason);
       setErrorMessage(
         code === "unknown_skin"
           ? "找不到该外部皮肤，请先刷新皮肤目录。"
@@ -37,7 +46,7 @@ export function HostActionButton({
       setResult("error");
     } finally {
       running.current = false;
-      setPending(false);
+      if (mounted.current) setPending(false);
     }
   }
   return (

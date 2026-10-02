@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 // A small compressed response must not expand without bound in host-api.
 const MAX_RESPONSE_FRAME_BYTES: usize = 1_048_576;
 const MAX_RESPONSE_PAYLOAD_BYTES: usize = 1_048_576;
+const INITIAL_RESPONSE_CAPACITY: usize = 8 * 1024;
 
 /// Build the initial Doubao ASR request used by the Windows client.
 pub fn start_frame(
@@ -42,7 +43,7 @@ pub fn audio_frame(sequence: i32, pcm: &[u8], final_chunk: bool) -> Vec<u8> {
 }
 
 pub fn encode_json_frame(message_type: u8, flags: u8, sequence: i32, payload: &[u8]) -> Vec<u8> {
-    let mut gzip = GzEncoder::new(Vec::new(), Compression::default());
+    let mut gzip = GzEncoder::new(Vec::with_capacity(payload.len()), Compression::default());
     gzip.write_all(payload).expect("gzip write to memory");
     let compressed = gzip.finish().expect("gzip finish");
     let mut frame = Vec::with_capacity(12 + compressed.len());
@@ -83,7 +84,7 @@ pub fn decode_json_frame(frame: &[u8]) -> Option<(bool, i32, Vec<u8>)> {
     // bufread preserves unread bytes, allowing us to reject concatenated gzip
     // members or junk inside the declared compressed payload as well.
     let mut decoder = flate2::bufread::GzDecoder::new(&frame[offset..]);
-    let mut payload = Vec::new();
+    let mut payload = Vec::with_capacity(frame.len().min(INITIAL_RESPONSE_CAPACITY));
     (&mut decoder)
         .take((MAX_RESPONSE_PAYLOAD_BYTES + 1) as u64)
         .read_to_end(&mut payload)

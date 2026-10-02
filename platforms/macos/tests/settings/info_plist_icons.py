@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-"""Every icon the Info.plist names has to exist, and the menu icon has to be shaped for the menu.
+"""Info.plist 里写到的每个图标都必须存在，而菜单图标还得是菜单能用的形状。
 
-The input menu draws its icon through HIToolbox, which reads the file's pages rather than the DPI of a
-single one. A file with only a 2x page is taken for a 32-point image and cropped to its middle by the
-16-point menu slot, which for a stroke arrives as a filled square - a bug that looks like a design choice
-and is invisible until someone opens the input menu on a real install. Apple's own input methods ship
-16x16 at 72 dpi and 32x32 at 144 dpi in one file.
+输入菜单经 HIToolbox 绘制图标，它读的是文件里的页，而不是某一页的 DPI。只有一个 2x 页的文件会被当成 32 点图，再被 16 点的菜单槽裁去四周——对一条笔画来说，交到菜单上的就是一个实心方块。这个毛病看起来像是设计如此，而且只有在真机上打开输入菜单才看得见。苹果自家的输入法都是一个文件里放 16x16 @72dpi 与 32x32 @144dpi 两页。
 
-A missing file is the other half: the plist keys are strings, so a renamed resource fails silently and the
-menu falls back to a generic icon.
+另一半是文件缺失：plist 里这些键是字符串，资源改名之后不会报错，菜单直接回落到一个通用图标。
+
+每个输入模式的菜单图标和面板图标是同一张，而且各模式之间互不相同：几条都用 bundle 自己的标志时，菜单栏和系统的 Ctrl+空格 切换条上几个模式一模一样，分不清当前是哪个。模式图标由 scripts/render_menu_icon.swift 生成，每张只有一个铺满图块的大字：中 / 双 / 五 / 粤 / 注 / 日 / 한 / 越 / 英。
 """
 
+import plistlib
 import re
 import struct
 import sys
@@ -92,11 +90,29 @@ def main() -> int:
                     f"{value} is missing the {missing} page; the menu slot crops what it is given"
                 )
 
+    with plist_path.open("rb") as handle:
+        modes = (plistlib.load(handle).get("ComponentInputModeDict", {}).get("tsInputModeListKey", {}) or {})
+    mode_icons: dict[str, str] = {}
+    for mode, body in sorted(modes.items()):
+        menu, palette = body.get("tsInputModeMenuIconFileKey"), body.get("tsInputModePaletteIconFileKey")
+        if not menu:
+            failures.append(f"input mode {mode} names no menu icon; its entry would fall back to a generic icon")
+            continue
+        if palette != menu:
+            failures.append(f"input mode {mode} names {menu} for the menu but {palette} for the palette")
+        mode_icons[mode] = menu
+    shared: dict[str, list[str]] = {}
+    for mode, icon in sorted(mode_icons.items()):
+        shared.setdefault(icon, []).append(mode)
+    for icon, owners in sorted(shared.items()):
+        if len(owners) > 1:
+            failures.append(f"input modes {', '.join(owners)} all name {icon}; the menu bar and the switcher could not tell them apart")
+
     if failures:
         for failure in failures:
             print(failure, file=sys.stderr)
         return 1
-    print(f"{sum(len(v) for v in named.values())} icon references resolve; the menu icon carries both pages.")
+    print(f"{sum(len(v) for v in named.values())} icon references resolve; the menu icons carry both pages and each of the {len(mode_icons)} input modes has its own.")
     return 0
 
 

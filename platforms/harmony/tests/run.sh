@@ -11,3 +11,15 @@ if [[ ! -x "$tsc" ]]; then
 fi
 "$tsc" --project "$here/tsconfig.json"
 node "$repo_root/target/harmony-tests/tests/keyboard-logic.test.js"
+# The key-sound renderer is plain C++ over miniaudio with no NAPI in it, so the build machine's compiler checks what it writes and what it refuses.
+out="$repo_root/target/harmony-tests"
+miniaudio="$repo_root/platforms/windows/third_party/miniaudio"
+"${CXX:-c++}" -std=c++17 -O1 -c "$here/../native/miniaudio.cpp" -I"$miniaudio" -o "$out/miniaudio.o"
+"${CXX:-c++}" -std=c++17 -O1 -Wall -Wextra -Werror -I"$here/../native" -I"$miniaudio" \
+  "$here/key-sound-render.test.cpp" "$here/../native/key_sound_render.cpp" "$out/miniaudio.o" \
+  -lm -lpthread -o "$out/key-sound-render"
+scratch="$out/key-sound-render.d"
+rm -rf "$scratch"
+mkdir -p "$scratch"
+"$out/key-sound-render" "$scratch"
+rm -rf "$scratch"

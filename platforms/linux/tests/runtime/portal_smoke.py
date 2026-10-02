@@ -23,8 +23,8 @@ def wait(predicate):
     raise AssertionError("Expected portal input state was not observed")
 
 
-wait(lambda: any(e.get_name() == "msime-client" for e in admin.list_active_engines()))
-assert admin.set_global_engine("msime-client")
+wait(lambda: any(e.get_name() == "msime-linux" for e in admin.list_active_engines()))
+assert admin.set_global_engine("msime-linux")
 connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
 service = "org.freedesktop.portal.IBus"
 
@@ -48,10 +48,10 @@ subscription = connection.signal_subscribe(service, interface, "CommitText", pat
                                            Gio.DBusSignalFlags.NONE, signal)
 call(path, interface, "SetCapabilities", GLib.Variant("(u)", (int(IBus.Capabilite.FOCUS | IBus.Capabilite.PREEDIT_TEXT | IBus.Capabilite.LOOKUP_TABLE),)))
 call(path, interface, "FocusIn")
-call(path, interface, "PropertyActivate",
-     GLib.Variant("(su)", ("InputMode", int(IBus.PropState.CHECKED))))
+# The prepared options carry the shipped Chinese default, so the portal context composes from the first letter.
 for character in "nihao ":
-    assert call(path, interface, "ProcessKeyEvent", GLib.Variant("(uuu)", (ord(character), 0, 0))).unpack()[0]
+    assert call(path, interface, "ProcessKeyEvent", GLib.Variant("(uuu)", (ord(character), 0, 0))).unpack()[0], \
+        "Portal input context did not start in the shipped Chinese mode"
 wait(lambda: commits == ["你好"])
 # Abandon an in-progress reading across focus loss, then start fresh.
 for character in "nihao":

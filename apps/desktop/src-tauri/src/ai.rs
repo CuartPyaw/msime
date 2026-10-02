@@ -8,14 +8,43 @@
 use crate::CommandError;
 use reqwest::Url;
 use serde_json::Value;
+use std::io::Read;
+
+pub(crate) const MAX_RESPONSE_BYTES: usize = 1_024 * 1_024;
+const MAX_MODELS: usize = 128;
+
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum AiResponseBodyError {
+    TooLarge,
+    Read,
+}
+
+/// Read at most one byte past the response limit so streams without a reliable
+/// Content-Length cannot grow the settings process without bound.
+pub(crate) fn read_ai_response_body(reader: impl Read) -> Result<Vec<u8>, AiResponseBodyError> {
+    crate::shared::bounded_body::read_bounded(reader, MAX_RESPONSE_BYTES).map_err(|error| {
+        match error {
+            crate::shared::bounded_body::BoundedReadError::TooLarge => {
+                AiResponseBodyError::TooLarge
+            }
+            crate::shared::bounded_body::BoundedReadError::Read(_) => AiResponseBodyError::Read,
+        }
+    })
+}
 
 pub(crate) fn validate_ai_endpoint(value: &str) -> Result<Url, CommandError> {
-    if value.len() > 2048 || value.chars().any(char::is_control) {
+    if !msime_client_core::is_bounded_text_with_options(value, 2048, false) {
         return Err(CommandError { code: "ai_invalid" });
     }
     let url = Url::parse(value).map_err(|_| CommandError { code: "ai_invalid" })?;
     if !matches!(url.scheme(), "http" | "https")
-        || url.host_str().is_none()
+        || !value.split_once("://").is_some_and(|(_, authority)| {
+            authority
+                .as_bytes()
+                .first()
+                .is_some_and(|byte| *byte != b'/')
+        })
+        || url.host_str().is_none_or(str::is_empty)
         || !url.username().is_empty()
         || url.password().is_some()
         || url.fragment().is_some()
@@ -26,7 +55,8 @@ pub(crate) fn validate_ai_endpoint(value: &str) -> Result<Url, CommandError> {
 }
 
 pub(crate) fn validate_ai_token(token: &str) -> Result<(), CommandError> {
-    if token.is_empty() || token.len() > 16 * 1024 || token.chars().any(char::is_control) {
+    if token.is_empty() || !msime_client_core::is_bounded_text_with_options(token, 16 * 1024, false)
+    {
         return Err(CommandError { code: "ai_invalid" });
     }
     Ok(())
@@ -34,26 +64,23 @@ pub(crate) fn validate_ai_token(token: &str) -> Result<(), CommandError> {
 
 pub(crate) fn ai_text_is_valid(value: &str, allow_empty: bool) -> bool {
     (allow_empty || !value.is_empty())
-        && value.len() <= 16 * 1024
-        && !value.chars().any(|character| {
-            character == '\0'
-                || (character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
-        })
+        && msime_client_core::is_bounded_text_with_options(value, 16 * 1024, true)
 }
 
+/// The listing sits next to the chat endpoint, whatever its version prefix
+/// (`/v1`, `/v1beta/openai`, `/api/paas/v4`). Keep in step with
+/// `mobile_ai::models_url`.
 pub(crate) fn ai_models_url(endpoint: &Url) -> Url {
-    let mut url = endpoint.clone();
-    let path = endpoint.path();
-    let base = path.find("/v1/").map(|index| &path[..index]).unwrap_or("");
-    url.set_path(&format!("{base}/v1/models"));
-    url.set_query(None);
-    url
+    crate::shared::ai_url::models_url(endpoint.clone(), true)
 }
 
 pub(crate) fn ai_models_request(endpoint: &str, token: &str) -> Result<Vec<String>, CommandError> {
     let endpoint = validate_ai_endpoint(endpoint)?;
     validate_ai_token(token)?;
     let client = reqwest::blocking::Client::builder()
+        // The configured endpoint receives the user's bearer token. A redirect could replay it
+        // to a different origin, so this test request must stop at the first response.
+        .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(std::time::Duration::from_secs(5))
         .timeout(std::time::Duration::from_secs(15))
         .build()
@@ -71,21 +98,34 @@ pub(crate) fn ai_models_request(endpoint: &str, token: &str) -> Result<Vec<Strin
         .map_err(|_| CommandError {
             code: "ai_models_unavailable",
         })?;
-    let document: Value = response.json().map_err(|_| CommandError {
+    let body = read_ai_response_body(response).map_err(|error| match error {
+        AiResponseBodyError::TooLarge => CommandError {
+            code: "ai_models_invalid",
+        },
+        AiResponseBodyError::Read => CommandError {
+            code: "ai_models_unavailable",
+        },
+    })?;
+    let document: Value = serde_json::from_slice(&body).map_err(|_| CommandError {
         code: "ai_models_invalid",
     })?;
-    let models = document
+    let data = document
         .get("data")
         .and_then(Value::as_array)
         .ok_or(CommandError {
             code: "ai_models_invalid",
-        })?
+        })?;
+    let mut models = Vec::with_capacity(MAX_MODELS);
+    for id in data
         .iter()
         .filter_map(|item| item.get("id").and_then(Value::as_str))
-        .filter(|id| !id.is_empty() && id.len() <= 256 && !id.chars().any(char::is_control))
-        .take(128)
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
+        .filter(|id| {
+            !id.is_empty() && msime_client_core::is_bounded_text_with_options(id, 256, false)
+        })
+        .take(MAX_MODELS)
+    {
+        models.push(id.to_owned());
+    }
     if models.is_empty() {
         return Err(CommandError {
             code: "ai_models_invalid",
@@ -104,8 +144,7 @@ pub(crate) fn ai_test_request(
     let endpoint = validate_ai_endpoint(endpoint)?;
     validate_ai_token(token)?;
     if model.is_empty()
-        || model.len() > 256
-        || model.chars().any(char::is_control)
+        || !msime_client_core::is_bounded_text_with_options(model, 256, false)
         || !ai_text_is_valid(prompt, true)
         || !ai_text_is_valid(text, false)
     {
@@ -121,6 +160,9 @@ pub(crate) fn ai_test_request(
         ]
     });
     let client = reqwest::blocking::Client::builder()
+        // The configured endpoint receives the user's bearer token. A redirect could replay it
+        // to a different origin, so this test request must stop at the first response.
+        .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(std::time::Duration::from_secs(5))
         .timeout(std::time::Duration::from_secs(15))
         .build()
@@ -139,7 +181,15 @@ pub(crate) fn ai_test_request(
         .map_err(|_| CommandError {
             code: "ai_test_unavailable",
         })?;
-    let document: Value = response.json().map_err(|_| CommandError {
+    let body = read_ai_response_body(response).map_err(|error| match error {
+        AiResponseBodyError::TooLarge => CommandError {
+            code: "ai_test_invalid",
+        },
+        AiResponseBodyError::Read => CommandError {
+            code: "ai_test_unavailable",
+        },
+    })?;
+    let document: Value = serde_json::from_slice(&body).map_err(|_| CommandError {
         code: "ai_test_invalid",
     })?;
     let output = document

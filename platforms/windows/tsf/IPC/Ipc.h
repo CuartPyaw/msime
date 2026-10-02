@@ -9,9 +9,9 @@
 #include <string>
 #include <vector>
 
-#include "../../../../vendor/MSIME-Engine/contracts/windows_ipc.h"
+#include "../../../../shared/contracts/windows_ipc.h"
+#include "../../common/InputSchemeTraits.h"
 
-int InitIpc();
 int InitNamedpipe();
 int ConnectToAllNamedpipe();
 int ConnectToTsfNamedpipe();
@@ -39,18 +39,6 @@ bool SupportsKeyboardCompositionCancel(_In_ const void *owner);
 bool FlushNamedpipeFocusSessionReset();
 bool FlushNamedpipeImeDeactivation(uint64_t focusToken = 0);
 
-//
-// For shared memory
-//
-int WriteDataToSharedMemory(           //
-    UINT keycode,                      // VkCode
-    WCHAR wch,                         // Unicode character converted from vkcode
-    UINT modifiers_down,               //
-    const int point[2],                //
-    int pinyin_length,                 //
-    const std::wstring &pinyin_string, //
-    UINT write_flag                    //
-);
 KeyEventSendResult SendKeyEventToUIProcess(_Out_opt_ uint64_t *requestId = nullptr);
 void DebugTsfKeyLatency(_In_z_ const wchar_t *stage, uint64_t requestId, double elapsedMs, HRESULT result);
 void DebugTsfIssue47(_In_z_ const wchar_t *stage, uint64_t requestId, UINT code, WCHAR wch, UINT category,
@@ -71,6 +59,7 @@ int SendIMEStatusSnapshotToUIProcessViaNamedPipe(bool kbdIsOpen, bool fullwidthI
 int SendIMEStatusEventToUIProcessViaNamedPipe(bool kbdIsOpen, bool fullwidthIsOpen, bool puncIsOpen);
 int SendIMESwitchEventToUIProcessViaNamedPipe(UINT uImeStatus);
 int SendPuncSwitchEventToUIProcessViaNamedPipe(BOOL isPunc);
+int SendPairedPunctuationAutoClosedToServerViaNamedPipe(WCHAR opening);
 int SendDoubleSingleByteSwitchEventToUIProcessViaNamedPipe(BOOL isDoubleSingleByte);
 
 bool SendToAuxNamedpipe(const std::wstring &pipeData, bool waitForAcknowledgement = false);
@@ -92,11 +81,7 @@ int SendHideCandidateWndEventToUIProcessViaNamedPipe();
 int SendShowCandidateWndEventToUIProcessViaNamedPipe();
 int SendMoveCandidateWndEventToUIProcessViaNamedPipe();
 int SendLangbarRightClickEventToUIProcessViaNamedPipe(const RECT *prcArea);
-void ClearNamedpipeDataIfExists(bool force = false);
-// Best-effort read of the Server-published current candidate page (comma-
-// separated). Used in UILess mode so ITfCandidateListUIElement::GetString can
-// return real candidates after PrepareCandidateList has written shared memory.
-bool TryReadCandidatePageFromSharedMemory(_Out_ std::wstring *candidatePage);
+void ClearNamedpipeDataIfExists();
 struct FanyImeNamedpipeDataToTsf *TryReadDataFromServerPipeWithTimeout(uint64_t expectedRequestId);
 // When abortTransportOnTimeout is false, a missed reply leaves the pipe up and
 // returns a non-TransportUnavailable empty frame for the caller to fall back.
@@ -175,7 +160,12 @@ inline std::atomic_bool SmartPunctuationDirectLetterEnabled{false};
 // Default on until the Server sends the persisted setting.
 inline std::atomic_bool PairedPunctuationEnabled{true};
 inline std::atomic_bool MicrosoftShuangpinEnabled{false};
-inline std::atomic_bool JapaneseInputModeEnabled{false};
+// The scheme the TIP keys before its host session answers a key: scheme::mode_scheme of the mode the Server last announced in InputModeChanged, or of the scheme the preferences run before it has (common/InputSchemeTraits.h). The pinyin and shape schemes all read as quanpin, which they key alike.
+inline std::atomic_int InputModeScheme{0};
+// The V, "/" and "@" local modes, off until the Server sends LocalModeTriggersChanged: while off their keys route exactly as before the modes existed.
+inline std::atomic_bool ExpressionModeEnabled{false};
+inline std::atomic_bool CommandModeEnabled{false};
+inline std::atomic_bool MentionModeEnabled{false};
 inline std::atomic_bool CapsLockEnabled{false};
 inline std::atomic_bool TsfDiagnosticLogEnabled{false};
 inline thread_local bool g_connected = false;

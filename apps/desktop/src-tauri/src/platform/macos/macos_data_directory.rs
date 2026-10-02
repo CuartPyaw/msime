@@ -6,12 +6,13 @@
 
 use serde_json::Value;
 use std::collections::BTreeSet;
-use std::fs;
-use std::io::{self, Write};
+use std::fs::{self, File};
+use std::io;
 use std::path::{Path, PathBuf};
 
 pub(crate) const DATA_DIRECTORY_MARKER: &str = ".metasequoiaime-data";
 const OPTIONS_FILE: &str = "runtime-options.json";
+const MAX_LOCATOR_BYTES: u64 = 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MoveError {
@@ -34,29 +35,27 @@ struct LocatorBackup {
     contents: Option<Vec<u8>>,
 }
 
-fn atomic_write(path: &Path, contents: &[u8]) -> io::Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
-    fs::create_dir_all(parent)?;
-    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
-    temporary.write_all(contents)?;
-    temporary.as_file().sync_all()?;
-    temporary
-        .persist(path)
-        .map(|_| ())
-        .map_err(|error| error.error)
-}
-
 fn locator_backups(locators: &[PathBuf]) -> Result<Vec<LocatorBackup>, MoveError> {
     let mut unique = BTreeSet::new();
-    let mut backups = Vec::new();
+    let mut backups = Vec::with_capacity(locators.len());
     for path in locators {
         if !unique.insert(path.clone()) {
             continue;
         }
-        let contents = match fs::read(path) {
-            Ok(contents) => Some(contents),
+        let parent = path.parent().ok_or(MoveError::Publish)?;
+        crate::shared::atomic_file::check_directory_ancestors(parent)
+            .map_err(|_| MoveError::Publish)?;
+        if fs::symlink_metadata(path)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            return Err(MoveError::Publish);
+        }
+        let contents = match File::open(path) {
+            Ok(file) => Some(
+                crate::shared::bounded_body::read_bounded(file, MAX_LOCATOR_BYTES as usize)
+                    .map_err(|_| MoveError::Publish)?,
+            ),
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(_) => return Err(MoveError::Publish),
         };
@@ -72,7 +71,7 @@ fn restore_locators(backups: &[LocatorBackup]) {
     for backup in backups {
         match &backup.contents {
             Some(contents) => {
-                let _ = atomic_write(&backup.path, contents);
+                let _ = crate::shared::atomic_file::write(&backup.path, contents);
             }
             None => {
                 let _ = fs::remove_file(&backup.path);
@@ -84,39 +83,14 @@ fn restore_locators(backups: &[LocatorBackup]) {
 fn copy_tree_contents(source: &Path, destination: &Path) -> Result<(), MoveError> {
     for entry in fs::read_dir(source).map_err(|_| MoveError::Copy)? {
         let entry = entry.map_err(|_| MoveError::Copy)?;
-        copy_entry(&entry.path(), &destination.join(entry.file_name()))?;
+        crate::platform::desktop::desktop_data_directory::copy_entry(
+            &entry.path(),
+            &destination.join(entry.file_name()),
+            &|_| false,
+        )
+        .map_err(|_| MoveError::Copy)?;
     }
     Ok(())
-}
-
-fn copy_entry(source: &Path, destination: &Path) -> Result<(), MoveError> {
-    let metadata = fs::symlink_metadata(source).map_err(|_| MoveError::Copy)?;
-    if metadata.file_type().is_symlink() {
-        return Err(MoveError::Copy);
-    }
-    if metadata.is_dir() {
-        fs::create_dir(destination).map_err(|_| MoveError::Copy)?;
-        copy_tree_contents(source, destination)?;
-        fs::set_permissions(destination, metadata.permissions()).map_err(|_| MoveError::Copy)?;
-        return Ok(());
-    }
-    if !metadata.is_file() {
-        return Err(MoveError::Copy);
-    }
-    fs::copy(source, destination).map_err(|_| MoveError::Copy)?;
-    fs::set_permissions(destination, metadata.permissions()).map_err(|_| MoveError::Copy)?;
-    fs::File::open(destination)
-        .and_then(|file| file.sync_all())
-        .map_err(|_| MoveError::Copy)
-}
-
-fn remove_entry(path: &Path) -> io::Result<()> {
-    let metadata = fs::symlink_metadata(path)?;
-    if metadata.is_dir() && !metadata.file_type().is_symlink() {
-        fs::remove_dir_all(path)
-    } else {
-        fs::remove_file(path)
-    }
 }
 
 fn target_entries_are_replaceable(target: &Path, default_root: &Path) -> Result<bool, MoveError> {
@@ -141,30 +115,13 @@ fn target_entries_are_replaceable(target: &Path, default_root: &Path) -> Result<
     Ok(true)
 }
 
-fn validate_directory(path: &Path, error: MoveError) -> Result<PathBuf, MoveError> {
-    if !path.is_absolute() {
-        return Err(error);
-    }
-    let metadata = fs::symlink_metadata(path).map_err(|_| error)?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return Err(error);
-    }
-    fs::canonicalize(path).map_err(|_| error)
-}
-
 fn overlaps(first: &Path, second: &Path) -> bool {
     first.starts_with(second) || second.starts_with(first)
 }
 
-fn has_ownership_marker(directory: &Path) -> bool {
-    fs::symlink_metadata(directory.join(DATA_DIRECTORY_MARKER))
-        .map(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
-        .unwrap_or(false)
-}
-
 fn restore_target(target: &Path, had_marker: bool, backups: &[LocatorBackup]) {
     if target.exists() {
-        let _ = remove_entry(target);
+        let _ = crate::platform::desktop::desktop_data_directory::remove_entry(target);
     }
     let _ = fs::create_dir_all(target);
     if had_marker {
@@ -177,7 +134,12 @@ fn restore_target(target: &Path, had_marker: bool, backups: &[LocatorBackup]) {
 }
 
 fn cleanup_source(source: &Path, default_root: &Path, locators: &[PathBuf]) -> bool {
-    if source != default_root && !has_ownership_marker(source) {
+    if source != default_root
+        && !crate::platform::desktop::desktop_data_directory::has_ownership_marker(
+            source,
+            DATA_DIRECTORY_MARKER,
+        )
+    {
         return false;
     }
     let preserved: BTreeSet<std::ffi::OsString> = locators
@@ -202,7 +164,8 @@ fn cleanup_source(source: &Path, default_root: &Path, locators: &[PathBuf]) -> b
         if preserved.contains(&entry.file_name()) {
             continue;
         }
-        complete &= remove_entry(&entry.path()).is_ok();
+        complete &=
+            crate::platform::desktop::desktop_data_directory::remove_entry(&entry.path()).is_ok();
     }
     complete
 }
@@ -220,10 +183,19 @@ pub(crate) fn move_data_directory<F>(
 where
     F: FnOnce(&Path) -> Result<Value, MoveError>,
 {
-    let source = validate_directory(source, MoveError::InvalidSource)?;
-    let target = validate_directory(target, MoveError::InvalidTarget)?;
+    let source = crate::platform::desktop::desktop_data_directory::validate_directory(
+        source,
+        MoveError::InvalidSource,
+    )?;
+    let target = crate::platform::desktop::desktop_data_directory::validate_directory(
+        target,
+        MoveError::InvalidTarget,
+    )?;
     let default_root = fs::canonicalize(default_root).map_err(|_| MoveError::InvalidSource)?;
-    let native_locator_root = validate_directory(native_locator_root, MoveError::InvalidTarget)?;
+    let native_locator_root = crate::platform::desktop::desktop_data_directory::validate_directory(
+        native_locator_root,
+        MoveError::InvalidTarget,
+    )?;
     if source == target {
         return Ok(MoveOutcome {
             retained_old_data: false,
@@ -243,7 +215,10 @@ where
     }
 
     let backups = locator_backups(locators)?;
-    let had_marker = has_ownership_marker(&target);
+    let had_marker = crate::platform::desktop::desktop_data_directory::has_ownership_marker(
+        &target,
+        DATA_DIRECTORY_MARKER,
+    );
     let parent = target.parent().ok_or(MoveError::InvalidTarget)?;
     let staging = tempfile::Builder::new()
         .prefix(".msime-data-migration-")
@@ -256,7 +231,8 @@ where
     )
     .map_err(|_| MoveError::Copy)?;
 
-    remove_entry(&target).map_err(|_| MoveError::Copy)?;
+    crate::platform::desktop::desktop_data_directory::remove_entry(&target)
+        .map_err(|_| MoveError::Copy)?;
     let staging = staging.keep();
     if fs::rename(&staging, &target).is_err() {
         let _ = fs::create_dir_all(&target);
@@ -272,12 +248,12 @@ where
         }
     };
     let serialized = serde_json::to_vec_pretty(&document).map_err(|_| MoveError::Prepare)?;
-    if atomic_write(&target.join(OPTIONS_FILE), &serialized).is_err() {
+    if crate::shared::atomic_file::write(&target.join(OPTIONS_FILE), &serialized).is_err() {
         restore_target(&target, had_marker, &backups);
         return Err(MoveError::Prepare);
     }
     for locator in locators {
-        if atomic_write(locator, &serialized).is_err() {
+        if crate::shared::atomic_file::write(locator, &serialized).is_err() {
             restore_target(&target, had_marker, &backups);
             return Err(MoveError::Publish);
         }
@@ -364,6 +340,19 @@ mod tests {
     }
 
     #[test]
+    fn oversized_locator_is_rejected_before_relocation() {
+        let (_root, default, native, target, locators) = setup();
+        fs::write(&locators[0], vec![b'x'; MAX_LOCATOR_BYTES as usize + 1]).unwrap();
+        assert_eq!(
+            move_data_directory(&default, &target, &default, &native, &locators, |_| {
+                Ok(json!({}))
+            }),
+            Err(MoveError::Publish)
+        );
+        assert!(default.join("preferences.json").is_file());
+    }
+
+    #[test]
     fn refuses_nonempty_nested_and_symlinked_targets() {
         let (root, default, native, target, locators) = setup();
         fs::write(target.join("unrelated.txt"), b"keep").unwrap();
@@ -409,5 +398,30 @@ mod tests {
         assert!(outcome.retained_old_data);
         assert!(source.join("preferences.json").is_file());
         assert!(target.join("preferences.json").is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_symlinked_locator_without_reading_outside_it() {
+        use std::os::unix::fs::symlink;
+
+        let (root, default, native, target, locators) = setup();
+        let outside = root.path().join("outside-locator");
+        fs::write(&outside, b"external locator").unwrap();
+        fs::remove_file(&locators[0]).unwrap();
+        symlink(&outside, &locators[0]).unwrap();
+
+        assert_eq!(
+            move_data_directory(&default, &target, &default, &native, &locators, |_| {
+                Ok(json!({}))
+            }),
+            Err(MoveError::Publish)
+        );
+        assert!(fs::symlink_metadata(&locators[0])
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read(&outside).unwrap(), b"external locator");
+        assert!(default.join("preferences.json").is_file());
     }
 }

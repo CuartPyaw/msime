@@ -8,14 +8,11 @@
 #include <vector>
 
 namespace msime::windows {
-// What a tray entry asks the shared desktop shell to open. The shell is the
-// Tauri application both desktop hosts share: the IBus property menu launches
-// it through the same environment contract, so a surface exists once and both
-// hosts point at it instead of growing a second implementation.
+// What a tray entry asks a desktop surface to open. Settings uses the native WinUI 3 process; panels use the shared Tauri process. Both hosts read the same `--route=` argument, so routing remains one small protocol.
 struct ShellSurfaceRequest {
-  // MSIME_CLIENT_PANEL value. Empty opens the settings window itself.
+  // Panel route head. Empty opens the settings window itself.
   std::string panel;
-  // MSIME_CLIENT_SETTINGS_PAGE value. Empty keeps the settings default section.
+  // Settings category. Empty keeps the settings default section.
   std::string page;
 };
 // Paths are supplied by the Server that owns the prepared host document. The
@@ -25,8 +22,7 @@ struct ShellLaunchContext {
   std::filesystem::path state_root;
   std::filesystem::path host_options;
 };
-// The floating toolbar belongs to this process, so it is the one row the shell
-// never hears about.
+// The floating toolbar, the input modes and the stored switches belong to this process, so they are the rows the shell never hears about. 主题 and 词库… open their pages of the settings app by the ids it already routes.
 inline std::optional<ShellSurfaceRequest>
 shell_surface_request(TrayMenuCommand command) {
   switch (command) {
@@ -42,16 +38,29 @@ shell_surface_request(TrayMenuCommand command) {
     return ShellSurfaceRequest{{}, {}};
   case TrayMenuCommand::OpenAbout:
     return ShellSurfaceRequest{{}, "about"};
+  case TrayMenuCommand::OpenTheme:
+    return ShellSurfaceRequest{{}, "skin"};
+  case TrayMenuCommand::OpenDictionary:
+    return ShellSurfaceRequest{{}, "dictionary"};
   case TrayMenuCommand::ToggleFloatingToolbar:
+  case TrayMenuCommand::SelectChinese:
+  case TrayMenuCommand::SelectEnglish:
+  case TrayMenuCommand::ToggleFullwidth:
+  case TrayMenuCommand::ToggleChinesePunctuation:
+  case TrayMenuCommand::ToggleTranslations:
+  case TrayMenuCommand::SelectQuanpin:
+  case TrayMenuCommand::SelectShuangpin:
+  case TrayMenuCommand::SelectWubi:
+  case TrayMenuCommand::SelectJapanese:
+  case TrayMenuCommand::SelectKorean:
+  case TrayMenuCommand::SelectCantonese:
+  case TrayMenuCommand::SelectZhuyin:
+  case TrayMenuCommand::SelectVietnamese:
     break;
   }
   return std::nullopt;
 }
-// The cross-platform surface route the shell parses (client-core
-// host_surface::SurfaceRoute). A settings section travels as
-// "settings:<category>"; the bare section name is not a route head and would be
-// rejected. MSIME_CLIENT_PANEL and MSIME_CLIENT_SETTINGS_PAGE stay beside it as
-// the compatibility pair, matching what the IBus launcher emits.
+// The cross-platform surface route the shell parses (client-core host_surface::SurfaceRoute). A settings section travels as "settings:<category>"; the bare section name is not a route head and would be rejected.
 inline std::string shell_surface_route(const ShellSurfaceRequest &request) {
   if (!request.page.empty())
     return "settings:" + request.page;
@@ -60,20 +69,20 @@ inline std::string shell_surface_route(const ShellSurfaceRequest &request) {
   return request.panel;
 }
 
-// File names the package stages beside the Server. The installer name comes
-// first so a packaged shell wins over a developer build left in the same
-// directory.
-inline std::vector<std::wstring> shell_executable_names() {
-  return {L"msime-client-settings.exe", L"MSIME Client Preview.exe"};
+// File names the package stages beside the Server. Settings is a native WinUI
+// 3 process; the shared Tauri process remains the owner of the other panels.
+inline std::vector<std::wstring>
+shell_executable_names(const ShellSurfaceRequest &request) {
+  if (request.panel.empty())
+    return {L"msime-client-settings.exe"};
+  return {L"MSIME.exe"};
 }
-// Locate the shell: an explicit override first, then the package layout. Only
-// an existing file is accepted, so a stale setting cannot launch something
-// else, and an empty answer keeps the menu rows visibly disabled.
 inline std::optional<std::filesystem::path>
 shell_executable(const std::filesystem::path &directory,
-                 const std::wstring &configured) {
+                 const std::wstring &configured,
+                 const ShellSurfaceRequest &request) {
   std::error_code error;
-  if (!configured.empty()) {
+  if (request.panel.empty() && !configured.empty()) {
     const std::filesystem::path path(configured);
     if (!path.is_absolute() || !std::filesystem::is_regular_file(path, error))
       return std::nullopt;
@@ -81,23 +90,18 @@ shell_executable(const std::filesystem::path &directory,
   }
   if (directory.empty() || !directory.is_absolute())
     return std::nullopt;
-  for (const auto &name : shell_executable_names()) {
+  for (const auto &name : shell_executable_names(request)) {
     const auto path = directory / name;
     if (std::filesystem::is_regular_file(path, error))
       return path;
   }
   return std::nullopt;
 }
-// Compose the child environment from this process's block plus the request.
-// Existing MSIME_CLIENT_PANEL/MSIME_CLIENT_SETTINGS_PAGE/MSIME_CLIENT_ROUTE and
-// the two context entries are dropped, so a value this process was started with
-// cannot outvote the clicked row.
+// Compose the child environment from this process's block plus the request. Existing MSIME_CLIENT_ROUTE and the two context entries are dropped, so a value this process was started with cannot outvote the clicked row.
 // The result is the double-NUL terminated block CreateProcessW expects.
 inline std::wstring shell_environment_block(const wchar_t *existing,
                                             const ShellSurfaceRequest &request,
                                             const ShellLaunchContext *context) {
-  static constexpr std::wstring_view panel_name = L"MSIME_CLIENT_PANEL=";
-  static constexpr std::wstring_view page_name = L"MSIME_CLIENT_SETTINGS_PAGE=";
   static constexpr std::wstring_view state_name = L"MSIME_CLIENT_STATE_DIR=";
   static constexpr std::wstring_view options_name = L"MSIME_CLIENT_HOST_OPTIONS=";
   static constexpr std::wstring_view route_name = L"MSIME_CLIENT_ROUTE=";
@@ -110,8 +114,7 @@ inline std::wstring shell_environment_block(const wchar_t *existing,
           return false;
       return true;
     };
-    return starts_with(panel_name) || starts_with(page_name) ||
-           starts_with(state_name) || starts_with(options_name) ||
+    return starts_with(state_name) || starts_with(options_name) ||
            starts_with(route_name);
   };
   std::wstring block;
@@ -124,14 +127,8 @@ inline std::wstring shell_environment_block(const wchar_t *existing,
     }
     entry += value.size() + 1;
   }
-  auto append = [&block](std::wstring_view name, const std::string &value,
-                         bool allow_separator) {
-    if (value.empty())
-      return;
-    block.append(name);
-    // The contract only carries short lowercase ASCII identifiers; nothing a
-    // caller could turn into another variable or a command line. A route may
-    // additionally carry one ':' separating the surface from its section.
+  // The contract only carries short lowercase ASCII identifiers; nothing a caller could turn into another variable or a command line. A route may additionally carry one ':' separating the surface from its section.
+  auto validate = [](const std::string &value, bool allow_separator) {
     if (value.size() > 64)
       throw std::invalid_argument("Invalid shell surface request");
     size_t separators = 0;
@@ -142,13 +139,15 @@ inline std::wstring shell_environment_block(const wchar_t *existing,
       } else if (!((c >= 'a' && c <= 'z') || c == '-')) {
         throw std::invalid_argument("Invalid shell surface request");
       }
-      block.push_back(static_cast<wchar_t>(c));
     }
-    block.push_back(L'\0');
   };
-  append(panel_name, request.panel, false);
-  append(page_name, request.page, false);
-  append(route_name, shell_surface_route(request), true);
+  validate(request.panel, false);
+  validate(request.page, false);
+  const auto route = shell_surface_route(request);
+  validate(route, true);
+  block.append(route_name);
+  block.append(route.begin(), route.end());
+  block.push_back(L'\0');
   if (context) {
     if (!context->state_root.is_absolute() || !context->host_options.is_absolute())
       throw std::invalid_argument("Invalid shell launch context");
@@ -167,9 +166,7 @@ inline std::wstring shell_environment_block(const wchar_t *existing,
   return shell_environment_block(existing, request, nullptr);
 }
 
-// The Tauri shell uses the command-line route when a second launch is handed
-// to the already-running instance. Keep the route in the same short ASCII
-// vocabulary as the environment contract.
+// The Tauri shell uses the command-line route when a second launch is handed to the already-running instance. Keep the route in the same short ASCII vocabulary as the environment contract.
 inline std::wstring shell_route_argument(const ShellSurfaceRequest &request) {
   std::string route;
   if (!request.panel.empty())

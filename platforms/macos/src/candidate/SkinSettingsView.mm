@@ -1,23 +1,15 @@
 #import "SkinSettingsView.h"
 #import "../settings/AppearancePreferences.h"
+#import "../settings/SettingsLayout.h"
 #import "CandidateSkinPreviewView.h"
 #import "CandidateSkinAppearance.h"
 
 #include "CandidateSkin.h"
 
+#include <algorithm>
+
 namespace
 {
-void ConfigureCard(NSBox *card)
-{
-    card.boxType = NSBoxCustom;
-    card.titlePosition = NSNoTitle;
-    card.borderWidth = 1.0;
-    card.cornerRadius = 12.0;
-    card.borderColor = [NSColor separatorColor];
-    card.fillColor = [NSColor controlBackgroundColor];
-    card.translatesAutoresizingMaskIntoConstraints = NO;
-}
-
 NSTextField *Label(NSString *text, CGFloat size, NSFontWeight weight, NSColor *color)
 {
     NSTextField *label = [NSTextField labelWithString:text];
@@ -27,21 +19,22 @@ NSTextField *Label(NSString *text, CGFloat size, NSFontWeight weight, NSColor *c
     return label;
 }
 
-NSString *BuiltinDescription(const std::string &id)
+// The catalog carries ids, titles and a mode, not prose, so a card says what kind of theme it is rather than repeating a per-theme description kept here.
+NSString *ThemeDescription(const metasequoia::mac::ThemeCatalogEntry &entry)
 {
-    if (id == "wechat")
+    if (entry.id == "custom")
     {
-        return @"微信绿候选窗与悬浮工具栏";
+        return @"在底色上叠加自己的配色，或使用下方的外部皮肤";
     }
-    if (id == "graphite")
+    if (entry.appearance == "dark")
     {
-        return @"克制、平直的候选窗与悬浮工具栏";
+        return @"固定深色的候选窗、悬浮工具栏与菜单配色";
     }
-    if (id == "willow_green")
+    if (entry.appearance == "light")
     {
-        return @"柔和圆角与柳绿色整行高亮";
+        return @"固定浅色的候选窗、悬浮工具栏与菜单配色";
     }
-    return @"默认候选窗与悬浮状态栏";
+    return @"跟随系统明暗，使用 macOS 原生配色";
 }
 
 NSString *JoinedSkinValues(const std::vector<std::string> &values)
@@ -55,6 +48,14 @@ NSString *JoinedSkinValues(const std::vector<std::string> &values)
     return result;
 }
 } // namespace
+
+/// Scroll views lay an unflipped document view out from the bottom, which parks the list of skins
+/// against the bottom edge with its first card out of sight above.
+@interface MetasequoiaSkinDocumentView : NSView
+@end
+@implementation MetasequoiaSkinDocumentView
+- (BOOL)isFlipped { return YES; }
+@end
 
 @interface MetasequoiaSkinSwitch : NSSwitch
 @end
@@ -94,6 +95,10 @@ NSString *JoinedSkinValues(const std::vector<std::string> &values)
     NSMutableArray<NSString *> *_skinIds;
     NSMutableArray<NSString *> *_skinNames;
     NSMutableArray<NSNumber *> *_skinCompatibility;
+    /// The first _themeCardCount cards are the global themes; the rest are external packages.
+    NSUInteger _themeCardCount;
+    NSButton *_detachSkinButton;
+    BOOL _didScrollToTop;
 }
 
 - (instancetype)initWithFrame:(NSRect)frameRect
@@ -121,9 +126,11 @@ NSString *JoinedSkinValues(const std::vector<std::string> &values)
     _skinNames = [NSMutableArray array];
     _skinCompatibility = [NSMutableArray array];
 
-    NSTextField *title = Label(@"皮肤", 24.0, NSFontWeightSemibold, [NSColor labelColor]);
+    // The page opens on its summary, the way every other page of the settings window does. The 20pt
+    // 皮肤 heading that used to sit above it said what the toolbar title and the selected sidebar
+    // row both already say.
     NSTextField *summary =
-        Label(@"选择内置皮肤，或从本机目录加载自定义皮肤。", 13.0, NSFontWeightRegular, [NSColor secondaryLabelColor]);
+        Label(@"选择全局主题，或从本机目录加载外部皮肤。外部皮肤会作为自定义主题使用。", 13.0, NSFontWeightRegular, [NSColor secondaryLabelColor]);
     summary.maximumNumberOfLines = 2;
 
     NSScrollView *scroll = [[NSScrollView alloc] initWithFrame:NSZeroRect];
@@ -138,38 +145,48 @@ NSString *JoinedSkinValues(const std::vector<std::string> &values)
     _document.orientation = NSUserInterfaceLayoutOrientationVertical;
     _document.alignment = NSLayoutAttributeLeading;
     _document.spacing = 16.0;
-    _document.edgeInsets = NSEdgeInsetsMake(0.0, 30.0, 20.0, 30.0);
+    _document.edgeInsets =
+        NSEdgeInsetsMake(0.0, msime::mac::layout::kPageMargin, 20.0, msime::mac::layout::kPageMargin);
     _document.translatesAutoresizingMaskIntoConstraints = NO;
-    scroll.documentView = _document;
+    // The stack goes inside a flipped container rather than being the document view itself: an
+    // unflipped document view is laid out from the bottom, so the page opens showing the last skin
+    // in the list with the first one above the visible area.
+    NSView *documentContainer = [[MetasequoiaSkinDocumentView alloc] initWithFrame:NSZeroRect];
+    documentContainer.translatesAutoresizingMaskIntoConstraints = NO;
+    scroll.documentView = documentContainer;
+    [documentContainer addSubview:_document];
     [NSLayoutConstraint activateConstraints:@[
-        [_document.topAnchor constraintEqualToAnchor:scroll.contentView.topAnchor],
-        [_document.leadingAnchor constraintEqualToAnchor:scroll.contentView.leadingAnchor],
-        [_document.widthAnchor constraintEqualToAnchor:scroll.contentView.widthAnchor],
+        [documentContainer.topAnchor constraintEqualToAnchor:scroll.contentView.topAnchor],
+        [documentContainer.leadingAnchor constraintEqualToAnchor:scroll.contentView.leadingAnchor],
+        [documentContainer.widthAnchor constraintEqualToAnchor:scroll.contentView.widthAnchor],
+        [_document.topAnchor constraintEqualToAnchor:documentContainer.topAnchor],
+        [_document.leadingAnchor constraintEqualToAnchor:documentContainer.leadingAnchor],
+        [_document.trailingAnchor constraintEqualToAnchor:documentContainer.trailingAnchor],
+        [_document.bottomAnchor constraintEqualToAnchor:documentContainer.bottomAnchor],
     ]];
 
-    [self addSubview:title];
     [self addSubview:summary];
     [self addSubview:scroll];
     [NSLayoutConstraint activateConstraints:@[
-        [title.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:30.0],
-        [title.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-30.0],
-        [title.topAnchor constraintEqualToAnchor:self.topAnchor constant:28.0],
-        [summary.leadingAnchor constraintEqualToAnchor:title.leadingAnchor],
-        [summary.trailingAnchor constraintEqualToAnchor:title.trailingAnchor],
-        [summary.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:7.0],
+        // The page margins are the ones every other page of the settings window uses, so that
+        // landing on this one does not shift the summary and the cards under the pointer.
+        [summary.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:msime::mac::layout::kPageMargin],
+        [summary.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-msime::mac::layout::kPageMargin],
+        [summary.topAnchor constraintEqualToAnchor:self.topAnchor constant:msime::mac::layout::kPageMargin],
         [scroll.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
         [scroll.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
         [scroll.topAnchor constraintEqualToAnchor:summary.bottomAnchor constant:16.0],
         [scroll.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
     ]];
 
-    for (const metasequoia::mac::SkinListEntry &entry : metasequoia::mac::BuiltInSkinEntries())
+    for (const metasequoia::mac::ThemeCatalogEntry &entry : metasequoia::mac::ThemeCatalog())
     {
         [self addSection:[self makeCardForId:@(entry.id.c_str())
-                                        name:@(entry.name.c_str())
-                                 description:BuiltinDescription(entry.id)
+                                        name:@(entry.title.c_str())
+                                 description:ThemeDescription(entry)
                                 compatible:YES]];
     }
+    _themeCardCount = _skinIds.count;
 
     NSTextField *externalTitle = Label(@"外部皮肤", 13.0, NSFontWeightSemibold, [NSColor secondaryLabelColor]);
     NSTextField *externalHelp = Label(@"把包含 skin.toml 的皮肤文件夹复制到下面的目录，然后刷新。", 13.0,
@@ -184,11 +201,14 @@ NSString *JoinedSkinValues(const std::vector<std::string> &values)
     NSButton *refresh = [NSButton buttonWithTitle:@"刷新皮肤" target:self action:@selector(reload)];
     refresh.bezelStyle = NSBezelStyleRounded;
     refresh.accessibilityLabel = @"刷新皮肤";
-    NSStackView *actions = [NSStackView stackViewWithViews:@[ open, refresh ]];
+    _detachSkinButton = [NSButton buttonWithTitle:@"不使用外部皮肤" target:self action:@selector(detachExternalSkin:)];
+    _detachSkinButton.bezelStyle = NSBezelStyleRounded;
+    _detachSkinButton.accessibilityLabel = @"自定义主题不使用外部皮肤";
+    NSStackView *actions = [NSStackView stackViewWithViews:@[ open, refresh, _detachSkinButton ]];
     actions.orientation = NSUserInterfaceLayoutOrientationHorizontal;
     actions.spacing = 8.0;
     NSBox *externalHeader = [[NSBox alloc] initWithFrame:NSZeroRect];
-    ConfigureCard(externalHeader);
+    MSIMEConfigureCard(externalHeader);
     externalHeader.accessibilityLabel = @"外部皮肤卡片";
     NSStackView *headerStack =
         [NSStackView stackViewWithViews:@[ externalTitle, externalHelp, _directoryLabel, actions ]];
@@ -247,7 +267,10 @@ NSString *JoinedSkinValues(const std::vector<std::string> &values)
 {
     view.translatesAutoresizingMaskIntoConstraints = NO;
     [_document addArrangedSubview:view];
-    [view.widthAnchor constraintEqualToAnchor:_document.widthAnchor constant:-60.0].active = YES;
+    // A card spans the stack minus the margin the stack insets it by on either side.
+    [view.widthAnchor constraintEqualToAnchor:_document.widthAnchor
+                                     constant:-2.0 * msime::mac::layout::kPageMargin]
+        .active = YES;
 }
 
 - (NSView *)makeCardForId:(NSString *)skinId
@@ -256,7 +279,7 @@ NSString *JoinedSkinValues(const std::vector<std::string> &values)
               compatible:(BOOL)compatible
 {
     NSBox *card = [[NSBox alloc] initWithFrame:NSZeroRect];
-    ConfigureCard(card);
+    MSIMEConfigureCard(card);
     card.accessibilityLabel = [name stringByAppendingString:@"皮肤卡片"];
     NSTextField *title = Label(name, 15.0, NSFontWeightSemibold, [NSColor labelColor]);
     title.accessibilityLabel = [name stringByAppendingString:@"标题"];
@@ -327,7 +350,35 @@ NSString *JoinedSkinValues(const std::vector<std::string> &values)
         return;
     }
     sender.state = NSControlStateValueOn;
-    _preferences.skinID = skinId;
+    if (metasequoia::mac::IsGlobalThemeId(skinId.UTF8String))
+    {
+        // The custom card selects the custom theme as it stands, package included (THEME_CONTRACT §5); only 自定义主题不使用外部皮肤 drops the package.
+        _preferences.globalTheme = skinId;
+        return;
+    }
+    const std::filesystem::path root = _preferences.skinsRoot.fileSystemRepresentation ?: "";
+    const auto package = msime::mac::LoadSkinPackage(root, skinId.UTF8String);
+    [_preferences selectExternalSkin:skinId base:package ? @(package->base.c_str()) : @"system"];
+}
+
+- (void)detachExternalSkin:(id)sender
+{
+    (void)sender;
+    [_preferences clearCustomCandidateSkin];
+}
+
+/// Whether a package can be selected in the current layout. A package over a built-in base is drawn in that base's mode, so the host mode does not rule it out; over a system base it is drawn in the mode the candidate window resolves for a system base (the 候选窗主题 / 主题 light-dark choice, else the system's), which its manifest has to list. This is the React host's rule (external-skins.tsx) and THEME_CONTRACT §5.
+- (BOOL)packageIsCompatible:(const msime::mac::SkinPackage &)package
+{
+    const std::string layout = _preferences.vertical ? "vertical" : "horizontal";
+    for (const metasequoia::mac::ThemeCatalogEntry &entry : metasequoia::mac::ThemeCatalog())
+    {
+        if (entry.id == package.base && !entry.appearance.empty())
+            return std::find(package.layouts.begin(), package.layouts.end(), layout) != package.layouts.end();
+    }
+    NSAppearance *appearance = _preferences.systemBaseCandidateAppearanceOverride ?: self.effectiveAppearance;
+    NSString *host = MetasequoiaAppearanceIsDark(appearance) ? @"dark" : @"light";
+    return msime::mac::SupportsSkin(package, layout, host.UTF8String);
 }
 
 - (void)toggleCardTheme:(NSButton *)sender
@@ -368,26 +419,31 @@ NSString *JoinedSkinValues(const std::vector<std::string> &values)
 
 - (void)refreshCardChrome
 {
-    NSString *active = _preferences.skinID;
-    const NSUInteger builtInCount = metasequoia::mac::BuiltInSkinEntries().size();
+    NSString *active = _preferences.globalTheme;
+    NSString *activePackage = [active isEqual:@"custom"] ? _preferences.customCandidateSkin : nil;
     const std::filesystem::path root = _preferences.skinsRoot.fileSystemRepresentation ?: "";
-    NSAppearance *appearance = _preferences.candidateAppearanceOverride ?: self.effectiveAppearance;
-    NSString *theme = MetasequoiaAppearanceIsDark(appearance) ? @"dark" : @"light";
-    NSString *layout = _preferences.vertical ? @"vertical" : @"horizontal";
+    _detachSkinButton.enabled = _preferences.customCandidateSkin != nil;
     for (NSUInteger index = 0; index < _skinIds.count; ++index)
     {
         BOOL compatible = YES;
-        if (index >= builtInCount)
+        BOOL selected = NO;
+        if (index >= _themeCardCount)
         {
             auto package = msime::mac::LoadSkinPackage(root, _skinIds[index].UTF8String);
-            compatible = package.has_value() &&
-                         msime::mac::SupportsSkin(*package, layout.UTF8String, theme.UTF8String);
+            compatible = package.has_value() && [self packageIsCompatible:*package];
             _skinCompatibility[index] = @(compatible);
+            selected = [_skinIds[index] isEqualToString:activePackage ?: @""];
         }
-        const BOOL selected = [_skinIds[index] isEqualToString:active];
+        else
+        {
+            // A theme card is on while its theme is the global theme; under a package the custom card stays on beside the package's card, since the package is drawn over the custom theme.
+            selected = [_skinIds[index] isEqualToString:active];
+        }
         _switches[index].state = selected ? NSControlStateValueOn : NSControlStateValueOff;
         _switches[index].enabled = compatible;
         _themeButtons[index].title = [_previews[index] forcedThemeButtonTitle];
+        // A theme with a fixed mode looks the same in both, so there is nothing to preview in the other.
+        _themeButtons[index].hidden = [_previews[index] previewSkin].fixedDark.has_value();
         _titles[index].stringValue = [NSString
             stringWithFormat:@"%@（%@）", _skinNames[index], [_previews[index] previewUsesDark] ? @"Dark" : @"Light"];
         _previews[index].needsDisplay = YES;
@@ -396,7 +452,7 @@ NSString *JoinedSkinValues(const std::vector<std::string> &values)
 
 - (void)clearExternalCards
 {
-    while (_skinIds.count > metasequoia::mac::BuiltInSkinEntries().size())
+    while (_skinIds.count > _themeCardCount)
     {
         [_skinIds removeLastObject];
         [_skinNames removeLastObject];
@@ -429,12 +485,9 @@ NSString *JoinedSkinValues(const std::vector<std::string> &values)
     for (const metasequoia::mac::SkinPackage &package : catalog.packages)
     {
         NSString *description = package.description.empty()
-                                    ? [NSString stringWithFormat:@"基于 %s", package.base.c_str()]
+                                    ? [NSString stringWithFormat:@"基于%s", msime::mac::ThemeTitle(package.base).c_str()]
                                     : @(package.description.c_str());
-        NSAppearance *appearance = _preferences.candidateAppearanceOverride ?: self.effectiveAppearance;
-        NSString *theme = MetasequoiaAppearanceIsDark(appearance) ? @"dark" : @"light";
-        NSString *layout = _preferences.vertical ? @"vertical" : @"horizontal";
-        const BOOL compatible = msime::mac::SupportsSkin(package, layout.UTF8String, theme.UTF8String);
+        const BOOL compatible = [self packageIsCompatible:package];
         if (!compatible) {
             description = [NSString stringWithFormat:@"当前布局或明暗模式不受支持（%@，%@）",
                                                      JoinedSkinValues(package.layouts), JoinedSkinValues(package.themes)];
@@ -485,6 +538,32 @@ NSString *JoinedSkinValues(const std::vector<std::string> &values)
     }
     [self refreshCardChrome];
     [_document layoutSubtreeIfNeeded];
+    [self scrollCardsToTop];
+}
+
+/// A stack view is not flipped, so a scroll view holding one opens showing its bottom — the last
+/// skin in the list — and the first card is above the visible area. Harmless in the fixed 720pt
+/// window this used to live in, visible as soon as it became a page that gets resized.
+- (void)scrollCardsToTop
+{
+    NSScrollView *scroll = _document.enclosingScrollView;
+    NSView *document = scroll.documentView;
+    if (document == nil) return;
+    const CGFloat top = document.isFlipped ? 0.0 : NSMaxY(document.frame) - NSHeight(scroll.contentView.bounds);
+    [document scrollPoint:NSMakePoint(0.0, MAX(0.0, top))];
+}
+
+// Cards are built before the view has a superview, so nothing has a size yet and the scroll during
+// reload has nothing to work with. The first move into a window is the first moment it does.
+- (void)viewDidMoveToWindow
+{
+    [super viewDidMoveToWindow];
+    if (self.window == nil || _didScrollToTop) return;
+    _didScrollToTop = YES;
+    dispatch_async(dispatch_get_main_queue(), ^{
+      [self.window.contentView layoutSubtreeIfNeeded];
+      [self scrollCardsToTop];
+    });
 }
 
 @end

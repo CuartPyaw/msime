@@ -1,0 +1,114 @@
+import * as settings from "./settings-style";
+import { OpenPanelRow } from "./open-panel-row";
+import { ActionRow } from "./action-row";
+import { GroupList } from "../core/platform-controls";
+
+export interface VoiceInputIntroSectionProps {
+  localVoice: boolean;
+  localVoiceModelsAvailable: boolean;
+  systemVoice: boolean;
+  systemVoiceHostName: string;
+  android: boolean;
+  ios: boolean;
+  macos: boolean;
+  harmony: boolean;
+  linux: boolean;
+  showVoiceProviderSettings: boolean;
+  onOpenVoice?: () => void;
+}
+
+/** Platform-specific voice entry guidance: the first group of the 语音输入 page. */
+export function VoiceInputIntroSection({
+  localVoice,
+  localVoiceModelsAvailable,
+  systemVoice,
+  systemVoiceHostName,
+  android,
+  ios,
+  macos,
+  harmony,
+  linux,
+  showVoiceProviderSettings,
+  onOpenVoice,
+}: VoiceInputIntroSectionProps) {
+  if (localVoice) {
+    return (
+      <GroupList title="本地识别">
+        <p className={settings.groupNote}>
+          {localVoiceModelsAvailable
+            ? "录音和识别都在这台设备上完成，音频不会离开本机，也不需要任何 API Key。在下方下载一个模型并点击“使用”即可生效；下载只会连接 GitHub 或你配置的镜像。你的用户词库会作为热词提高专有名词的识别率。可选的文本润色仍会调用你配置的云服务。"
+            : "录音和识别都在这台机器上完成，音频不会离开本机，也不需要任何 API Key。需要一个已安装模型目录（包含 msime-model.json）的绝对路径，在下方填写；模型越大越准也越慢，首次识别要等模型载入。可选的文本润色仍会调用你配置的云服务。"}
+        </p>
+      </GroupList>
+    );
+  }
+  if (systemVoice) {
+    return (
+      <GroupList title={`${systemVoiceHostName} 系统语音`}>
+        <p className={settings.groupNote}>
+          在目标应用中启用水杉输入法，使用键盘内的语音入口录音。不需要识别 API
+          Key；首次使用需授予麦克风和语音识别权限。服务可用性及是否联网由系统决定，可选文本润色仍使用你配置的云服务。
+        </p>
+      </GroupList>
+    );
+  }
+  if (android) {
+    return (
+      <GroupList title={showVoiceProviderSettings ? "Android 语音输入" : "Android 系统语音"}>
+        <p className={settings.groupNote}>
+          {showVoiceProviderSettings
+            ? "键盘工具栏的“语音”入口按这里配置的服务商录音并转写；没有配置可用的服务商时回退到设备自带的系统语音识别，不需要任何 API Key。识别结果会回到键盘，确认后才插入当前输入框。"
+            : "从键盘工具栏的“语音”入口调用设备上的系统语音识别服务。识别结果会回到键盘，确认后才插入当前输入框。"}
+        </p>
+      </GroupList>
+    );
+  }
+  if (ios) {
+    return (
+      <GroupList title="iOS 应用语音">
+        <p className={settings.groupNote}>
+          在应用内点「开始 iOS 语音」录音，识别结果回到当前页面，确认后再使用。
+        </p>
+        {onOpenVoice && <ActionRow title="应用内语音" action={onOpenVoice} label="开始 iOS 语音" />}
+      </GroupList>
+    );
+  }
+  if (macos) {
+    return (
+      <GroupList title="macOS 输入法语音">
+        <p className={settings.groupNote}>
+          请在要输入的应用里，用下方语音快捷键或输入法悬浮工具栏开始语音输入；识别结果直接输入到该应用。
+        </p>
+      </GroupList>
+    );
+  }
+  if (harmony) {
+    return (
+      <GroupList title="HarmonyOS 输入法语音">
+        <p className={settings.groupNote}>
+          豆包配置有效时，键盘直接采集 16 kHz 麦克风音频并进行实时识别；选择系统识别时由 HarmonyOS
+          CoreSpeechKit 处理。识别结果会回到键盘，确认后才插入当前输入框。
+        </p>
+      </GroupList>
+    );
+  }
+  return (
+    <GroupList title="语音面板">
+      <OpenPanelRow
+        title="打开语音输入"
+        description={
+          linux
+            ? "录音和识别由已配置的语音服务完成"
+            : "在本机录音，音频发送给下方选择的识别服务转写"
+        }
+        action={onOpenVoice}
+        className={`secondary ${settings.openButton}`}
+      />
+      {linux && (
+        <p className={settings.groupNote}>
+          语音需要单独运行的语音服务：录音、模型和凭据都由它负责，服务未运行时无法录音。
+        </p>
+      )}
+    </GroupList>
+  );
+}

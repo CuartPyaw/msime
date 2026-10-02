@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { testHost } from "../support/host";
+import { settingsFormReady } from "../support/settings-form";
 import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { SettingsPage, type Snapshot } from "@msime/ui";
@@ -26,7 +28,7 @@ function renderSettings(platform: string, host: Record<string, unknown> = {}) {
       client={{
         load: vi.fn().mockResolvedValue(initial),
         save: vi.fn(),
-        host: { platform, ...host } as never,
+        host: testHost({ platform, ...host }),
         openSystemKeyboardSettings: vi.fn(),
         home: { openKeyboard: vi.fn(), openSystemKeyboardSettings: vi.fn() },
       }}
@@ -37,7 +39,7 @@ function renderSettings(platform: string, host: Record<string, unknown> = {}) {
 // Reached through the 键盘 tab's 全部设置 page, which is where the phone bar's `更多设置` dropdown
 // went — the bar is the source's four tabs and nothing else.
 async function handwritingPage(mobile = true) {
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   const { fireEvent } = await import("@testing-library/react");
   const list = mobile
     ? (fireEvent.click(screen.getByRole("button", { name: /全部设置/ })),
@@ -45,14 +47,12 @@ async function handwritingPage(mobile = true) {
     : screen.getByRole("navigation", { name: "设置分类" });
   const row = mobile
     ? [...list.querySelectorAll("button")].find(
-        (item) => item.querySelector("strong")?.textContent === "手写识别板",
+        (item) => item.querySelector("strong")?.textContent === "手写输入",
       )
-    : [...list.querySelectorAll("button")].find(
-        (item) => item.textContent?.trim() === "手写识别板",
-      );
-  if (!row) throw new Error("no row for 手写识别板");
+    : [...list.querySelectorAll("button")].find((item) => item.textContent?.trim() === "手写输入");
+  if (!row) throw new Error("no row for 手写输入");
   fireEvent.click(row);
-  return screen.getByRole("group", { name: "手写识别板" });
+  return screen.getByRole("group", { name: "手写输入" });
 }
 
 // HarmonyOS reaches handwriting by switching the keyboard's input scheme, the way the other
@@ -82,8 +82,8 @@ test("a desktop host still gets the launch button", async () => {
   // handwriting panel from the settings window.
   renderSettings("windows");
   const { fireEvent } = await import("@testing-library/react");
-  await screen.findByRole("button", { name: "保存设置" });
-  fireEvent.click(screen.getByRole("button", { name: "手写识别板" }));
-  const page = screen.getByRole("group", { name: "手写识别板" });
+  await settingsFormReady();
+  fireEvent.click(screen.getByRole("button", { name: "手写输入" }));
+  const page = screen.getByRole("group", { name: "手写输入" });
   expect(within(page).getByText("打开手写识别板")).toBeTruthy();
 });

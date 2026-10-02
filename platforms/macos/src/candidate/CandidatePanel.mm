@@ -2,6 +2,7 @@
 #import "CandidateSkinAppearance.h"
 #import "CandidateTypography.h"
 
+#include "../core/DiagnosticLog.h"
 #include <cmath>
 
 @interface MetasequoiaCandidateWindow : NSPanel
@@ -245,7 +246,8 @@
 }
 - (void)reloadSkin
 {
-    _skin = MetasequoiaResolveStoredCandidateSkin(MetasequoiaAppearanceIsDark(_chrome.effectiveAppearance));
+    _skin = MetasequoiaResolveStoredTheme(MetasequoiaAppearanceIsDark(_chrome.effectiveAppearance),
+                                          _panelType == kIMKSingleColumnScrollingCandidatePanel);
     _decorationImage = nil;
     if (_skin.decorationTopDip > 0.0 && !_skin.decorationPath.empty())
     {
@@ -255,7 +257,14 @@
 }
 - (void)setPanelType:(IMKCandidatePanelType)type
 {
+    const BOOL wasVertical = _panelType == kIMKSingleColumnScrollingCandidatePanel;
     _panelType = type;
+    // The layout decides whether a package is drawn, so a change of layout resolves the theme again.
+    if (wasVertical != (type == kIMKSingleColumnScrollingCandidatePanel))
+    {
+        [self reloadSkin];
+        return;
+    }
     [self layoutCandidates];
 }
 - (void)setHasPreviousPage:(BOOL)value
@@ -356,8 +365,12 @@
         const CGFloat decorationWidth =
             _skin.decorationWidthDip > 0.0 ? _skin.decorationWidthDip : MIN(size.width, _decorationImage.size.width);
         _decorationView.image = _decorationImage;
+        _decorationView.imageAlignment = _skin.decorationAlign == msime::mac::DecorationAlign::left     ? NSImageAlignTopLeft
+                                         : _skin.decorationAlign == msime::mac::DecorationAlign::center ? NSImageAlignTop
+                                                                                                        : NSImageAlignTopRight;
         _decorationView.frame =
-            NSMakeRect(size.width - decorationWidth, size.height - decorationHeight, decorationWidth, decorationHeight);
+            NSMakeRect(msime::mac::DecorationLeft(_skin.decorationAlign, size.width, inset, decorationWidth),
+                       size.height - decorationHeight, decorationWidth, decorationHeight);
         [_chrome addSubview:_decorationView];
     }
     CGFloat x = inset;
@@ -460,9 +473,12 @@
     y = MIN(MAX(y, NSMinY(bounds)), MAX(NSMinY(bounds), NSMaxY(bounds) - size.height));
     [_window setFrameOrigin:NSMakePoint(x, y)];
     [_window orderFrontRegardless];
+    msime_macos_diagnostic_writef("candidate-position hint=%ld rows=%lu vertical=%d size=(%.0f,%.0f) origin=(%.0f,%.0f) flipped=%d",
+        (long)hint, (unsigned long)_data.count, vertical ? 1 : 0, size.width, size.height, x, y, y >= NSMaxY(caret) ? 1 : 0);
 }
 - (void)hide
 {
+    if (msime_macos_diagnostic_enabled() && _window.isVisible) msime_macos_diagnostic_write("candidate hide reason=panel_hide");
     _tallestVerticalHeight = 0;
     [_window orderOut:nil];
 }

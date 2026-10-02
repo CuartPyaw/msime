@@ -4,9 +4,11 @@ import XCTest
 
 private final class ResourceProtocol: URLProtocol {
   static let id = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
+  static var requests = 0
   override class func canInit(with request: URLRequest) -> Bool { true }
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
   override func startLoading() {
+    Self.requests += 1
     var data = request.httpBody ?? Data()
     if let stream = request.httpBodyStream {
       stream.open(); defer { stream.close() }
@@ -52,6 +54,29 @@ private final class ResourceProtocol: URLProtocol {
   }
   override func stopLoading() {}
 }
+
+private final class InvalidResourceProtocol: URLProtocol {
+  override class func canInit(with request: URLRequest) -> Bool { true }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+  override func startLoading() {
+    let resource: [String: Any] = [
+      "id": ResourceProtocol.id.uuidString.lowercased(), "kind": "reply", "name": "合成模板",
+      "description": "", "author": "测试作者", "content": ["prompt": String(repeating: "字", count: 2_001)],
+      "revision": 1, "saves": 0, "saved": false, "owned": false,
+      "rating_count": 0, "rating_average": 0, "my_rating": 0
+    ]
+    let object: [String: Any] = request.url?.path == "/v1/community/resources"
+      ? ["items": [resource], "has_more": false] : resource
+    let data = try! JSONSerialization.data(withJSONObject: object)
+    client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200,
+      httpVersion: nil, headerFields: ["Content-Type": "application/json"])!,
+      cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didLoad: data)
+    client?.urlProtocolDidFinishLoading(self)
+  }
+  override func stopLoading() {}
+}
+
 final class BackendCommunityResourceTests: XCTestCase {
   private func client() -> BackendAccountClient {
     let configuration = URLSessionConfiguration.ephemeral
@@ -108,5 +133,33 @@ final class BackendCommunityResourceTests: XCTestCase {
         content:.init(entries:[]),revision:0,token:"session")
       XCTFail("Empty word pack was published")
     } catch let failure as BackendAccountClient.Failure { XCTAssertEqual(failure.status,400) }
+    ResourceProtocol.requests = 0
+    let invalid = BackendAccountClient.ResourceContent(entries: [
+      .init(kind: .quick, code: "", word: "合成", weight: -1),
+    ])
+    do {
+      _ = try await api.publishResource(id: ResourceProtocol.id, kind: .dictionary,
+        name: "词包", description: "", content: invalid, revision: 0, token: "session")
+      XCTFail("Invalid dictionary entry was sent")
+    } catch let failure as BackendAccountClient.Failure { XCTAssertEqual(failure.status, 400) }
+    XCTAssertEqual(ResourceProtocol.requests, 0)
+  }
+
+  func testMalformedResourceResponsesAreRejected() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [InvalidResourceProtocol.self]
+    let api = BackendAccountClient(configuration: configuration)
+    do {
+      _ = try await api.communityResources(.reply)
+      XCTFail("malformed resource page was accepted")
+    } catch let failure as BackendAccountClient.Failure {
+      XCTAssertEqual(failure.status, 502)
+    }
+    do {
+      _ = try await api.communityResource(ResourceProtocol.id)
+      XCTFail("malformed resource detail was accepted")
+    } catch let failure as BackendAccountClient.Failure {
+      XCTAssertEqual(failure.status, 502)
+    }
   }
 }

@@ -8,6 +8,16 @@ void require(bool condition, const char *message) {
 }
 }
 
+@interface SupportRootFileManager : NSFileManager
+@property(copy) NSString *supportRoot;
+@end
+@implementation SupportRootFileManager
+- (NSArray<NSURL *> *)URLsForDirectory:(NSSearchPathDirectory)directory inDomains:(NSSearchPathDomainMask)domains {
+    return directory == NSApplicationSupportDirectory ? @[[NSURL fileURLWithPath:self.supportRoot isDirectory:YES]]
+                                                      : [super URLsForDirectory:directory inDomains:domains];
+}
+@end
+
 int main() {
     @autoreleasepool {
         NSFileManager *files = NSFileManager.defaultManager;
@@ -38,6 +48,18 @@ int main() {
                 "missing provider path was advertised");
         require([MSIMEVoiceProviderSocketFromOptionsPath(optionsPath, @{}, files) isEqual:configured],
                 "explicit host options path was not read");
+
+        // Without an explicit path the input method reads the options in app.msime.macos.
+        SupportRootFileManager *support = [SupportRootFileManager new];
+        support.supportRoot = [root stringByAppendingPathComponent:@"Application Support"];
+        NSString *current = [support.supportRoot stringByAppendingPathComponent:@"app.msime.macos/runtime-options.json"];
+        require([MSIMEDefaultRuntimeOptionsPath(support) isEqual:current], "the default options path is not in app.msime.macos");
+        require(MSIMEVoiceProviderSocketFromOptionsPath(nil, @{}, support) == nil,
+                "a provider socket was read without default options");
+        [files createDirectoryAtPath:current.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
+        [options writeToFile:current atomically:YES];
+        require([MSIMEVoiceProviderSocketFromOptionsPath(nil, @{}, support) isEqual:configured],
+                "the provider socket was not read from the default options");
         [files removeItemAtPath:root error:nil];
     }
     return 0;

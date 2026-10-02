@@ -1,17 +1,15 @@
 use msime_client_core::host_surface::{PanelSurface, SurfaceRoute};
-use msime_host_macos::cloud_clipboard::{CloudClipboardError, CloudClipboardSession};
+use msime_host_macos::cloud_clipboard::CloudClipboardSession;
 use serde_json::Value;
 
 pub(crate) struct CloudState(Option<CloudClipboardSession>);
 impl CloudState {
     pub(crate) fn from_environment() -> Result<Self, &'static str> {
-        match std::env::var("MSIME_CLIENT_CLOUD_CLIPBOARD_SESSION") {
-            Ok(value) => CloudClipboardSession::parse(&value)
-                .map(|session| Self(Some(session)))
-                .map_err(|_| "Invalid native cloud session"),
-            Err(std::env::VarError::NotPresent) => Ok(Self(None)),
-            Err(_) => Err("Invalid native cloud session"),
-        }
+        super::native_cloud_session_from_environment(
+            "MSIME_CLIENT_CLOUD_CLIPBOARD_SESSION",
+            "Invalid native cloud session",
+        )
+        .map(Self)
     }
     pub(crate) fn request(
         &self,
@@ -26,33 +24,19 @@ impl CloudState {
             }
             session
                 .request(action)
-                .map_err(|error| crate::CommandError {
-                    code: match error {
-                        CloudClipboardError::Invalid => "invalid",
-                        CloudClipboardError::Unavailable => "unavailable",
-                        CloudClipboardError::OutcomeUnknown => "outcome_unknown",
-                        CloudClipboardError::Conflict => "conflict",
-                    },
-                })
+                .map_err(super::cloud_clipboard_error)
         })
     }
 }
 
 pub(crate) fn startup_panel(route: Option<SurfaceRoute>) -> Option<PanelSurface> {
-    route
-        .filter(|route| *route == SurfaceRoute::CloudClipboard)?
-        .panel()
+    super::startup_panel_for_route(route, SurfaceRoute::CloudClipboard)
 }
 pub(crate) fn prepare_windows(
     windows: &mut [tauri::utils::config::WindowConfig],
     route: Option<SurfaceRoute>,
 ) {
-    if startup_panel(route).is_some() {
-        for window in windows.iter_mut().filter(|window| window.label == "main") {
-            window.visible = false;
-            window.focus = false;
-        }
-    }
+    super::prepare_windows_for_route(windows, route, SurfaceRoute::CloudClipboard);
 }
 
 #[cfg(test)]

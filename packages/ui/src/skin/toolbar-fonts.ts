@@ -1,7 +1,9 @@
 import { decodeCssUrl } from "./css-image-value";
+import { fontFamilyKey } from "./font-family";
 import { animationVariables } from "./skin-animation-variables";
 import { preserveAnimationShorthands, preserveFontShorthands } from "./animation-shorthand-source";
 import { installConditionalFonts, type ConditionalFont } from "./conditional-fonts";
+import { walkCssRules } from "./css-rules";
 
 export function splitCssFontList(value: string): string[] {
   const parts: string[] = [];
@@ -47,10 +49,6 @@ export function fontPackagePath(source: string): string | null {
     : null;
 }
 
-function familyKey(value: string): string | null {
-  const quoted = value.startsWith('"') || value.startsWith("'");
-  return decodeCssUrl(quoted ? value.slice(1, -1) : value, quoted)?.toLowerCase() ?? null;
-}
 const genericFamilies =
   /^(serif|sans-serif|monospace|cursive|fantasy|system-ui|ui-serif|ui-sans-serif|ui-monospace|ui-rounded|math|fangsong|inherit|initial|unset|revert|revert-layer)$/i;
 let generation = 0;
@@ -122,7 +120,7 @@ export async function prepareToolbarFonts(
     return result;
   };
   for (const { style, media, supported } of definitions) {
-    const key = familyKey(style.getPropertyValue("font-family"));
+    const key = fontFamilyKey(style.getPropertyValue("font-family"));
     if (!key) {
       partial = true;
       continue;
@@ -169,27 +167,15 @@ export async function prepareToolbarFonts(
     if (!found) partial = true;
   }
   const styles: CSSStyleDeclaration[] = [];
-  function visit(rules: CSSRuleList) {
-    for (const rule of Array.from(rules)) {
-      if (rule.type === CSSRule.FONT_FACE_RULE) partial = true;
-      if (
-        rule.type === CSSRule.STYLE_RULE ||
-        rule.type === CSSRule.KEYFRAME_RULE ||
-        rule.constructor.name === "CSSNestedDeclarations"
-      )
-        styles.push((rule as CSSStyleRule).style);
-      if (
-        rule.type === CSSRule.STYLE_RULE ||
-        rule.type === CSSRule.MEDIA_RULE ||
-        rule.type === CSSRule.SUPPORTS_RULE ||
-        rule.type === CSSRule.KEYFRAMES_RULE
-      ) {
-        const nested = (rule as CSSGroupingRule).cssRules;
-        if (nested) visit(nested);
-      }
-    }
-  }
-  visit(sheet.cssRules);
+  walkCssRules(sheet.cssRules, (rule) => {
+    if (rule.type === CSSRule.FONT_FACE_RULE) partial = true;
+    if (
+      rule.type === CSSRule.STYLE_RULE ||
+      rule.type === CSSRule.KEYFRAME_RULE ||
+      rule.constructor.name === "CSSNestedDeclarations"
+    )
+      styles.push((rule as CSSStyleRule).style);
+  });
   const familyParser = new CSSStyleSheet();
   familyParser.insertRule(".family-parser {}", 0);
   const familyStyle = (familyParser.cssRules[0] as CSSStyleRule).style;
@@ -202,7 +188,9 @@ export async function prepareToolbarFonts(
     return {
       value: splitCssFontList(canonical)
         .map((family) =>
-          genericFamilies.test(family) ? family : (families.get(familyKey(family) ?? "") ?? family),
+          genericFamilies.test(family)
+            ? family
+            : (families.get(fontFamilyKey(family) ?? "") ?? family),
         )
         .join(", "),
       partial: false,

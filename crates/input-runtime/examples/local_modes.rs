@@ -11,7 +11,7 @@
 //!
 //! usage: local_modes <verified-dictionary-directory>
 
-use msime_engine_bridge::{prepare_options, Session};
+use msime_engine::host::{prepare_options, Session};
 use msime_input_runtime::{Action, Runtime};
 
 fn shift(runtime: &mut Runtime<Session>, value: u8) -> Result<(), Box<dyn std::error::Error>> {
@@ -43,7 +43,7 @@ fn candidates(runtime: &Runtime<Session>) -> Vec<String> {
 
 /// Enter a mode, type its example, and hand back what the panel offers.
 fn offer(
-    options: &msime_engine_bridge::EngineOptions,
+    options: &msime_engine::host::EngineOptions,
     mode: u8,
     input: &str,
 ) -> Result<(String, Vec<String>), Box<dyn std::error::Error>> {

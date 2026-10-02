@@ -4,7 +4,7 @@ private enum IOSCloudSettings {
   static func snapshot() throws -> [String: BackendPreferenceValue] {
     let scheme = InputSchemePreference.scheme
     let name = scheme.isJapanese ? "japanese" : scheme.shuangpinProfile != nil ? "shuangpin" : ((scheme == .nineKey || scheme == .thoughtfulReply || scheme == .handwriting) ? "quanpin" : scheme.rawValue)
-    let skinData = try JSONEncoder().encode(CustomKeyboardSkinStore.current)
+    let document = MetasequoiaInputSessionBridge.loadSharedPreferences()
     var settings: [String: BackendPreferenceValue] = [
       "input.schema": .string(name),
       "input.character_set": .string(ChineseOutputPreference.usesTraditional ? "traditional" : "simplified"),
@@ -12,27 +12,55 @@ private enum IOSCloudSettings {
       "platform.ios.sound_enabled": .boolean(KeyboardFeedbackPreference.soundEnabled),
       "platform.ios.haptics_enabled": .boolean(KeyboardFeedbackPreference.hapticsEnabled),
       "platform.ios.haptic_strength": .string(KeyboardFeedbackPreference.hapticStrength.rawValue),
-      "platform.ios.dictionary_learning": .boolean(DictionaryLearningPreference.enabled),
-      "platform.ios.keyboard_skin": .string(KeyboardSkinPreference.selected.rawValue),
-      "platform.ios.custom_keyboard_skin": .string(String(decoding: skinData, as: UTF8.self))
+      "platform.ios.dictionary_learning": .boolean(
+        InputHabitPreference.settings(in: document).learning),
+      "platform.ios.global_theme": .string(document.map(GlobalThemePreference.theme(in:)) ?? GlobalThemePreference.selected),
+      "platform.ios.custom_theme_base": .string(GlobalThemePreference.base(in: document))
     ]
+    // A custom theme without a keyboard design draws its base's keyboard; there is no design to upload then, and the cloud keeps whatever design it has (as the Tauri plugin does).
+    if let design = document == nil ? CustomKeyboardSkinStore.stored : GlobalThemePreference.design(in: document) {
+      settings["platform.ios.custom_keyboard_skin"] = .string(String(decoding: try JSONEncoder().encode(design), as: UTF8.self))
+    }
     if let profile = scheme.shuangpinProfile { settings["input.shuangpin_schema"] = .string(profile) }
     return settings
   }
   static func apply(_ values: [String: BackendPreferenceValue]) throws {
-    let plan = try IOSPreferencePlan(values)
+    let plan = try IOSPreferencePlan(values, themes: Set(GlobalThemeCatalog.ids))
     let custom = try plan.customSkinJSON.map { try JSONDecoder().decode(CustomKeyboardSkin.self, from: Data($0.utf8)).normalized }
+    let design = try custom.map { skin -> [String: Any] in
+      guard let value = CustomKeyboardSkin.documentValue(skin) else { throw CocoaError(.fileWriteUnknown) }
+      return value
+    }
     // Validate everything before writing. Unknown platforms' values stay in the
     // cloud and are never assigned to local defaults.
-    if let scheme = plan.scheme.flatMap(ChineseInputScheme.init(rawValue:)) { InputSchemePreference.scheme = scheme }
+    // Learning, the theme, the scheme and the output form live in the shared document, which the keyboard copies over the App Group on every reload. Those are the writes that can fail, so they go first and a failure leaves every App Group setting unchanged.
+    if let learning = plan.learning, InputHabitPreference.update({ $0.learning = learning }) == nil {
+      throw CocoaError(.fileWriteUnknown)
+    }
+    let scheme = plan.scheme.flatMap(ChineseInputScheme.init(rawValue:))
+    let enabled = InputSchemePreference.enabledSchemes
+    let schemeFields = scheme.flatMap { MetasequoiaInputSessionBridge.schemeMapping($0, enabledSchemes: enabled) }
+    let written = MetasequoiaInputSessionBridge.updateSharedPreferences { document in
+      if let theme = plan.globalTheme { document["global_theme"] = theme }
+      if plan.customThemeBase != nil || design != nil {
+        var customTheme = GlobalThemePreference.customTheme(in: document)
+        if let base = plan.customThemeBase {
+          if base == GlobalThemeCatalog.systemId { customTheme.removeValue(forKey: "base") } else { customTheme["base"] = base }
+        }
+        if let design { customTheme["keyboard"] = design }
+        document["custom_theme"] = customTheme
+      }
+      schemeFields?(&document)
+      if let traditional = plan.traditional { document[ChineseOutputPreference.documentKey] = traditional }
+    }
+    guard written else { throw CocoaError(.fileWriteUnknown) }
+    if let scheme { InputSchemePreference.scheme = scheme }
     if let traditional = plan.traditional { ChineseOutputPreference.usesTraditional = traditional }
     let defaults = KeyboardFeedbackPreference.defaults
     if let sound = plan.sound { defaults.set(sound, forKey: KeyboardFeedbackPreference.soundKey) }
     if let haptics = plan.haptics { defaults.set(haptics, forKey: KeyboardFeedbackPreference.hapticsKey) }
     if let strength = plan.strength { defaults.set(strength, forKey: KeyboardFeedbackPreference.strengthKey) }
-    if let learning = plan.learning { defaults.set(learning, forKey: DictionaryLearningPreference.key) }
-    if let custom { CustomKeyboardSkinStore.save(custom) }
-    if let skin = plan.skin { defaults.set(skin, forKey: KeyboardSkinPreference.key) }
+    if let document = MetasequoiaInputSessionBridge.loadSharedPreferences() { GlobalThemePreference.mirror(document) }
   }
 }
 
@@ -47,6 +75,7 @@ struct SettingsSyncView: View {
   @State private var applying = false
   @State private var uploading = false
   @State private var pending: Task<Void, Never>?
+  private let device = UIDevice.current.userInterfaceIdiom == .pad ? " iPad " : " iPhone "
 
   var body: some View {
     Form {
@@ -59,10 +88,10 @@ struct SettingsSyncView: View {
         }
       }
       Section {
-        SettingsActionRow(title: "上传本机设置", detail: "用这台手机的设置覆盖云端",
+        SettingsActionRow(title: "上传本机设置", detail: "用这台\(device)的设置覆盖云端",
                           symbol: "icloud.and.arrow.up",
                           enabled: cloud != nil && schema != nil) { uploading = true }
-        SettingsActionRow(title: "下载并应用", detail: "用云端设置覆盖这台手机",
+        SettingsActionRow(title: "下载并应用", detail: "用云端设置覆盖这台\(device)",
                           symbol: "icloud.and.arrow.down",
                           enabled: cloud?.settings.isEmpty == false) { applying = true }
       } header: {

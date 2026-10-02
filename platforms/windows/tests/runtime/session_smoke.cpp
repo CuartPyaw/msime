@@ -107,6 +107,104 @@ void local_mode_tests(const std::string &options) {
   }
 }
 
+// V, "/" and "@" through the production key route (ReplyComposer::configured_key), which is where the TIP's keys arrive. The Engine lists the keys it spells in View.spelling_symbols; the Server must hand those to it as input instead of reading a digit as a selection, an operator as paging or a "/" as punctuation. No dictionary is needed: the modes generate their rows.
+void local_mode_trigger_tests(const std::string &options) {
+  using namespace msime::windows;
+  ServerSession session(43, options);
+  uint64_t epoch = 1;
+  session.activate(epoch);
+  require(session.view().at("spelling_symbols") == "",
+          "Switched-off modes listed trigger symbols");
+  auto preferences = Json::parse(options).at("preferences");
+  preferences["local_modes"] = {
+      {"unicode", true},       {"date_time", true},
+      {"quick_phrase", true},  {"emoji", true},
+      {"kaomoji", true},       {"super_jianpin", true},
+      {"temporary_english", true}, {"temporary_japanese", true},
+      {"expression", true},    {"command", true},
+      {"mention", true}};
+  preferences["chinese_punctuation"] = true;
+  session.update_preferences(
+      epoch, Json{{"format_version", 1}, {"revision", 1}, {"preferences", preferences}}
+                 .dump());
+  ReplyComposer composer(43, epoch);
+  const auto bindings = preference_navigation(Json::object());
+  uint64_t request = 1;
+  auto press = [&](uint32_t vk, uint32_t text, uint32_t modifiers = 0) {
+    FanyImeNamedpipeData packet{};
+    packet.event_type = FanyImePipeEventType::KeyEvent;
+    packet.client_id = 43;
+    packet.request_id = request++;
+    packet.keycode = vk;
+    packet.wch = static_cast<FanyImeWireChar>(text);
+    packet.modifiers_down = modifiers;
+    auto reply = composer.configured_key(session, packet, epoch,
+                                         TsfPreeditStyle::Local, bindings);
+    require(reply.has_value(), "A local-mode key was not taken");
+    composer.confirm_delivery(43, epoch, packet.request_id);
+    return *reply;
+  };
+  require(session.view().at("spelling_symbols") == "/@",
+          "An idle pinyin session did not list the trigger symbols");
+
+  // V: digits and operators compose, including '-' while minus/equal paging is on and Shift+8's '*'.
+  press('V', 'V', 1);
+  require(session.view().at("local_mode") == "expression" &&
+              session.view().at("spelling_symbols") == "0123456789+-*/.()%^",
+          "Shift+V did not open the expression mode");
+  press('1', '1');
+  press(0xBB, '+', 1);
+  press('2', '2');
+  press('8', '*', 1);
+  press('3', '3');
+  press(0xBD, '-');
+  press('1', '1');
+  const auto expression = session.view();
+  require(expression.at("editing_text") == "V1+2*3-1" &&
+              !expression.at("candidates").empty() &&
+              expression.at("candidates").at(0).at("text") == "6",
+          "Digits or operators were not composed in the expression mode");
+  // Shift+1 prints '!', which the mode does not spell, so it picks the first row; the commit is generated text and not typing.
+  const auto chosen = press('1', '!', 1);
+  require(chosen.source.transition.at("commit") == "6" &&
+              chosen.committed_text == std::optional<std::string>("6") &&
+              !transition_counts_as_typing(chosen.source.transition) &&
+              session.view().at("local_mode") == "none",
+          "Shift+1 did not commit the expression result");
+
+  // "/" on an empty composition opens the command mode instead of typing a mark, and letters narrow it.
+  press(0xBF, '/');
+  require(session.view().at("local_mode") == "command" &&
+              session.view().at("editing_text") == "/",
+          "'/' did not open the command mode");
+  press('R', 'r');
+  press('Q', 'q');
+  const auto command = press(0x20, ' ');
+  require(command.committed_text && !command.committed_text->empty() &&
+              !transition_counts_as_typing(command.source.transition),
+          "Space did not commit the command row");
+
+  // "@" is Shift+2: the mode's key, not the second candidate. Backspace leaves it again.
+  press('2', '@', 1);
+  require(session.view().at("local_mode") == "mention" &&
+              session.view().at("editing_text") == "@",
+          "'@' did not open the mention mode");
+  press(0x08, '\b');
+  require(session.view().at("editing_text") == "" &&
+              session.view().at("local_mode") == "none",
+          "Backspace did not leave the mention mode");
+
+  // With ASCII punctuation "/" is the literal mark the user chose, and the Engine lists no trigger.
+  preferences["chinese_punctuation"] = false;
+  session.update_preferences(
+      epoch, Json{{"format_version", 1}, {"revision", 2}, {"preferences", preferences}}
+                 .dump());
+  session.set_chinese_punctuation(epoch, false);
+  require(session.view().at("spelling_symbols") == "",
+          "ASCII punctuation still listed the trigger symbols");
+  session.deactivate(epoch);
+}
+
 #ifdef _WIN32
 int wmain(int argc, wchar_t **argv) {
 #else
@@ -1036,14 +1134,14 @@ int main(int argc, char **argv) {
         translation_enter.request_id = request++;
         const auto translated = basic.configured_key(
             session, translation_enter, epoch, TsfPreeditStyle::Pinyin, {});
-        require(translated && translated->ui_selection &&
-                    translated->next_prefix.empty(),
-                "Ctrl+Enter did not route the highlighted translation");
-        basic.confirm_ui_delivery(
-            42, epoch,
-            translated->source.transition.at("view")
-                .at("generation")
-                .get<uint64_t>());
+        // A single sense is committed as exact text, like the reference, and never selects the candidate the Engine would learn from.
+        require(translated && !translated->ui_selection && translated->encoded &&
+                    translated->encoded->packet.msg_type ==
+                        FanyImeReplyType::CommitExactText &&
+                    translated->next_prefix.empty() &&
+                    session.view().at("editing_text") == "",
+                "Ctrl+Enter did not commit the highlighted translation as exact text");
+        basic.confirm_delivery(42, epoch, translation_enter.request_id);
         const auto unchanged = session.view();
         FanyImeNamedpipeData digit{};
         digit.client_id = 42;
@@ -1282,6 +1380,7 @@ int main(int argc, char **argv) {
       require(composer.selected_prefix().empty(),
               "Final reply retained stale prefix");
     }
+    local_mode_trigger_tests(options.dump());
     if (argc == 2)
       local_mode_tests(options.dump());
     std::cout << "Windows Server boundary: shared session, routing and input "

@@ -30,12 +30,15 @@ pub extern "C" fn msime_client_set_candidate_page_size(handle: u64, size: u8) ->
 pub extern "C" fn msime_client_set_chinese_punctuation(handle: u64, enabled: bool) -> *mut c_char {
     response(|| {
         with_session(handle, |session| {
+            let lock = session
+                .punctuation_lock_override
+                .unwrap_or_else(|| punctuation_lock_code(session.applied.punctuation_lock));
             session
                 .runtime
-                .set_chinese_punctuation_enabled(enabled)
+                .set_chinese_punctuation_enabled(engine_chinese_punctuation(enabled, lock))
                 .map_err(|e| e.to_string())?;
             session.punctuation_override = Some(enabled);
-            serde_json::to_value(session.runtime.view()).map_err(|e| e.to_string())
+            serialized_runtime_view(session)
         })
     })
 }
@@ -49,7 +52,7 @@ pub extern "C" fn msime_client_set_paired_punctuation(handle: u64, enabled: bool
                 .set_paired_punctuation_enabled(enabled)
                 .map_err(|e| e.to_string())?;
             session.paired_punctuation_override = Some(enabled);
-            serde_json::to_value(session.runtime.view()).map_err(|e| e.to_string())
+            serialized_runtime_view(session)
         })
     })
 }
@@ -63,7 +66,12 @@ pub extern "C" fn msime_client_set_punctuation_lock(handle: u64, lock: u8) -> *m
                 .set_punctuation_lock(lock)
                 .map_err(|e| e.to_string())?;
             session.punctuation_lock_override = Some(lock);
-            serde_json::to_value(session.runtime.view()).map_err(|e| e.to_string())
+            let engine_enabled = session.live_engine_chinese_punctuation();
+            session
+                .runtime
+                .set_chinese_punctuation_enabled(engine_enabled)
+                .map_err(|e| e.to_string())?;
+            serialized_runtime_view(session)
         })
     })
 }
@@ -77,7 +85,7 @@ pub extern "C" fn msime_client_set_english_mode(handle: u64, enabled: bool) -> *
                 .set_dedicated_english(enabled)
                 .map_err(|e| e.to_string())?;
             session.english_mode = enabled;
-            serde_json::to_value(session.runtime.view()).map_err(|e| e.to_string())
+            serialized_runtime_view(session)
         })
     })
 }
@@ -92,7 +100,7 @@ pub extern "C" fn msime_client_set_nine_key_mode(handle: u64, enabled: bool) -> 
                 .set_nine_key_enabled(enabled)
                 .map_err(|e| e.to_string())?;
             session.nine_key_override = Some(enabled);
-            serde_json::to_value(session.runtime.view()).map_err(|e| e.to_string())
+            serialized_runtime_view(session)
         })
     })
 }
@@ -106,7 +114,7 @@ pub extern "C" fn msime_client_set_character_width(handle: u64, fullwidth: bool)
             } else {
                 CharacterWidth::Halfwidth
             });
-            serde_json::to_value(session.runtime.view()).map_err(|e| e.to_string())
+            serialized_runtime_view(session)
         })
     })
 }
@@ -140,6 +148,8 @@ pub extern "C" fn msime_client_command(handle: u64, command: u32) -> *mut c_char
         12 => Action::SegmentBackspace,
         13 => Action::SegmentMoveLeft,
         14 => Action::SegmentMoveRight,
+        15 => Action::Command(Command::CommitRawWithoutLearning),
+        16 => Action::Command(Command::ConvertHanja),
         100 => Action::NextPage,
         101 => Action::PreviousPage,
         102 => Action::NextCandidate,
@@ -184,7 +194,6 @@ pub extern "C" fn msime_client_punctuation_with_context(
         let session = sessions
             .get(&handle)
             .ok_or_else(|| "unknown session or wrong thread".to_owned())?;
-        let view = session.runtime.view();
         let lock = match session.punctuation_lock_override {
             Some(1) => msime_client_core::preferences::PunctuationLock::Chinese,
             Some(2) => msime_client_core::preferences::PunctuationLock::English,
@@ -194,10 +203,9 @@ pub extern "C" fn msime_client_punctuation_with_context(
         let route = punctuation_route(PunctuationContext {
             character: ascii,
             preceding,
-            host_context_available: !session.english_mode
-                && !view.dedicated_english
-                && view.local_mode == "none"
-                && view.scheme != 3,
+            host_context_available: session
+                .runtime
+                .punctuation_host_context_available(session.english_mode),
             has_composition: !session.runtime.is_idle(),
             chinese_punctuation: session
                 .punctuation_override
@@ -258,13 +266,18 @@ pub unsafe extern "C" fn msime_client_smart_punctuation_arm(
                 .get(&handle)
                 .ok_or_else(|| "unknown session or wrong thread".to_owned())?;
             let smart = session.applied.smart_punctuation;
+            // The repeat gesture turns an ASCII mark into a Chinese one. Korean and Vietnamese write only ASCII marks and Zhuyin's punctuation keys spell bopomofo, so it never arms there; Japanese keeps arming as it always has.
+            let smart_scheme = !matches!(
+                SchemeType::from_u8(session.runtime.scheme()),
+                Some(SchemeType::Korean | SchemeType::Zhuyin | SchemeType::Vietnamese)
+            );
             let repeat = msime_client_core::punctuation::arm_repeat(
                 value.ascii,
                 &value.commit,
                 value.timestamp_ms,
                 value.editor_generation,
             )
-            .filter(|_| smart && session.applied.smart_punctuation_repeat);
+            .filter(|_| smart && session.applied.smart_punctuation_repeat && smart_scheme);
             let space = msime_client_core::punctuation::arm_space_convert(
                 &value.commit,
                 value.auto_closed_pair,
@@ -372,7 +385,10 @@ pub unsafe extern "C" fn msime_client_smart_punctuation_decide(
             let session = sessions
                 .get(&handle)
                 .ok_or_else(|| "unknown session or wrong thread".to_owned())?;
-            let view = session.runtime.view();
+            let candidate_count = repeat_snapshot
+                .as_ref()
+                .map(|_| session.runtime.candidate_page_len())
+                .unwrap_or(0);
             let replace = msime_client_core::punctuation::should_replace_repeat(
                 repeat_snapshot,
                 msime_client_core::punctuation::RepeatContext {
@@ -383,7 +399,7 @@ pub unsafe extern "C" fn msime_client_smart_punctuation_decide(
                     smart_punctuation: session.applied.smart_punctuation,
                     repeat_enabled: session.applied.smart_punctuation_repeat,
                     has_composition: !session.runtime.is_idle(),
-                    candidate_count: view.candidates.len(),
+                    candidate_count,
                 },
             );
             let space = msime_client_core::punctuation::decide_space_convert(
@@ -413,7 +429,7 @@ pub extern "C" fn msime_client_balance_paired_punctuation_after_auto_close(
                 .runtime
                 .balance_paired_punctuation_after_auto_close(opening)
                 .map_err(|e| e.to_string())?;
-            serde_json::to_value(session.runtime.view()).map_err(|e| e.to_string())
+            serialized_runtime_view(session)
         })
     })
 }
@@ -433,16 +449,20 @@ pub extern "C" fn msime_client_punctuation_ascii(handle: u64, ascii: u8) -> *mut
 /// would have to guess. Call it when the composition has been unchanged for the pause, and not
 /// while keys are still arriving.
 ///
-/// Answers `{"moved": bool, "view": ...}`. `moved` is false when the order did not change, which
-/// is the common case and the signal to leave the candidate window alone: repainting it
-/// identically on every pause is a flicker with no explanation behind it.
+/// Answers `{"moved": false}` when the order did not change, or `{"moved": true, "view": ...}`
+/// after a reorder. The false case is common and lets hosts leave the candidate window alone
+/// without serializing a view they will discard.
 #[no_mangle]
 pub extern "C" fn msime_client_rerank_settled(handle: u64) -> *mut c_char {
     response(|| {
         with_session(handle, |session| {
             let moved = session.runtime.rerank_settled();
-            let view = session.runtime.view();
-            Ok(serde_json::json!({"moved": moved, "view": view}))
+            if moved {
+                let view = session.runtime.view();
+                Ok(serde_json::json!({"moved": true, "view": view}))
+            } else {
+                Ok(serde_json::json!({"moved": false}))
+            }
         })
     })
 }
@@ -593,11 +613,11 @@ pub unsafe extern "C" fn msime_client_english_completions(
         }
         let bytes = unsafe { std::slice::from_raw_parts(prefix, prefix_length) };
         let prefix = std::str::from_utf8(bytes).map_err(|_| "invalid English completion prefix")?;
-        if !prefix.bytes().all(|value| value.is_ascii_alphabetic()) {
+        if !msime_client_core::is_ascii_alphabetic(prefix) {
             return Err("invalid English completion prefix".into());
         }
         with_session(handle, |session| {
-            let words = msime_engine_bridge::english_completions(
+            let words = msime_engine::host::english_completions(
                 &session.options.dictionaries,
                 prefix,
                 limit,

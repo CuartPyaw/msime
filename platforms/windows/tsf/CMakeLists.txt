@@ -91,11 +91,51 @@ target_compile_features(msime-tsf-raw-commit-test PRIVATE cxx_std_17)
 target_include_directories(msime-tsf-raw-commit-test PRIVATE ../../../crates/host-api/include)
 target_link_libraries(msime-tsf-raw-commit-test PRIVATE nlohmann_json::nlohmann_json)
 add_test(NAME msime-tsf-raw-commit COMMAND msime-tsf-raw-commit-test)
+add_executable(msime-tsf-host-composition-test tests/input/host_composition.cpp EngineResponse.cpp)
+target_compile_features(msime-tsf-host-composition-test PRIVATE cxx_std_17)
+target_include_directories(msime-tsf-host-composition-test PRIVATE ../../../crates/host-api/include)
+target_link_libraries(msime-tsf-host-composition-test PRIVATE nlohmann_json::nlohmann_json)
+add_test(NAME msime-tsf-host-composition COMMAND msime-tsf-host-composition-test)
 add_executable(msime-tsf-engine-response-test tests/input/engine_response.cpp EngineResponse.cpp)
 target_compile_features(msime-tsf-engine-response-test PRIVATE cxx_std_17)
 target_include_directories(msime-tsf-engine-response-test PRIVATE ../../../crates/host-api/include)
 target_link_libraries(msime-tsf-engine-response-test PRIVATE nlohmann_json::nlohmann_json)
 add_test(NAME msime-tsf-engine-response COMMAND msime-tsf-engine-response-test)
+add_executable(msime-tsf-punctuation-key-policy-test tests/input/punctuation_key_policy.cpp)
+target_compile_features(msime-tsf-punctuation-key-policy-test PRIVATE cxx_std_17)
+add_test(NAME msime-tsf-punctuation-key-policy COMMAND msime-tsf-punctuation-key-policy-test)
+add_executable(msime-tsf-korean-key-test tests/input/korean_key.cpp)
+target_compile_features(msime-tsf-korean-key-test PRIVATE cxx_std_17)
+target_include_directories(msime-tsf-korean-key-test PRIVATE ../../../crates/host-api/include)
+add_test(NAME msime-tsf-korean-key COMMAND msime-tsf-korean-key-test)
+add_executable(msime-tsf-host-composed-key-test tests/input/host_composed_key.cpp)
+target_compile_features(msime-tsf-host-composed-key-test PRIVATE cxx_std_17)
+target_include_directories(msime-tsf-host-composed-key-test PRIVATE ../../../crates/host-api/include)
+add_test(NAME msime-tsf-host-composed-key COMMAND msime-tsf-host-composed-key-test)
+# How the TIP routes the keys of the V, "/" and "@" modes, which must match the Server's EditPolicy.h.
+add_executable(msime-tsf-local-mode-key-policy-test tests/input/local_mode_key_policy.cpp)
+target_compile_features(msime-tsf-local-mode-key-policy-test PRIVATE cxx_std_17)
+if(MSVC)
+  target_compile_options(msime-tsf-local-mode-key-policy-test PRIVATE /W4 /WX)
+else()
+  target_compile_options(msime-tsf-local-mode-key-policy-test PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME msime-tsf-local-mode-key-policy COMMAND msime-tsf-local-mode-key-policy-test)
+# AltGr arrives as Ctrl+Alt: a chord that produces a character is typing, not an application shortcut.
+add_executable(msime-tsf-altgr-key-policy-test tests/input/altgr_key_policy.cpp)
+target_compile_features(msime-tsf-altgr-key-policy-test PRIVATE cxx_std_17)
+if(MSVC)
+  target_compile_options(msime-tsf-altgr-key-policy-test PRIVATE /W4 /WX)
+else()
+  target_compile_options(msime-tsf-altgr-key-policy-test PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME msime-tsf-altgr-key-policy COMMAND msime-tsf-altgr-key-policy-test)
+add_executable(msime-tsf-paired-punctuation-wiring-test tests/input/paired_punctuation_wiring.cpp)
+target_compile_features(msime-tsf-paired-punctuation-wiring-test PRIVATE cxx_std_17)
+add_test(NAME msime-tsf-paired-punctuation-wiring COMMAND msime-tsf-paired-punctuation-wiring-test ${CMAKE_CURRENT_SOURCE_DIR})
+add_executable(msime-tsf-smart-punctuation-focus-wiring-test tests/input/smart_punctuation_focus_wiring.cpp)
+target_compile_features(msime-tsf-smart-punctuation-focus-wiring-test PRIVATE cxx_std_17)
+add_test(NAME msime-tsf-smart-punctuation-focus-wiring COMMAND msime-tsf-smart-punctuation-focus-wiring-test ${CMAKE_CURRENT_SOURCE_DIR})
 
 # The TSF tip is an in-process DLL.  It is intentionally a separate target
 # from the out-of-process Windows Server.
@@ -130,7 +170,7 @@ add_library(msime-tsf SHARED
   Global/Globals.cpp
   IME/ActiveLanguageProfileNotifySink.cpp IME/FunctionProviderSink.cpp
   IME/MetasequoiaIME.cpp IME/MetasequoiaIMEBaseStructure.cpp
-  IPC/Ipc.cpp
+  IPC/Ipc.cpp IPC/PassthroughStatisticsQueue.cpp IPC/KeyPressStatisticsQueue.cpp
   Key/KeyEventSink.cpp Key/KeyHandler.cpp Key/KeyHandlerEditSession.cpp
   Key/KeyStateCategory.cpp
   LanguageBar/LanguageBar.cpp
@@ -153,7 +193,7 @@ find_path(UTF8CPP_INCLUDE_DIR NAMES utf8cpp/utf8.h REQUIRED)
 target_include_directories(msime-tsf PRIVATE
   . Candidate Compartment Composition DisplayAttribute Edit FanyLog Global
   Header IME IPC Key LanguageBar Register Tf Thread UI Utils
-  ../../../vendor/MSIME-Engine/contracts
+  ../../../shared/contracts
   ${UTF8CPP_INCLUDE_DIR}
   ../../../crates/host-api/include
 )
@@ -182,3 +222,15 @@ target_include_directories(msime-tsf-commit-and-continue-payload-test PRIVATE .)
 target_compile_features(msime-tsf-commit-and-continue-payload-test PRIVATE cxx_std_17)
 add_test(NAME msime-tsf-commit-and-continue-payload
   COMMAND msime-tsf-commit-and-continue-payload-test)
+add_executable(msime-tsf-passthrough-statistics-test
+  tests/passthrough_statistics.cpp)
+target_include_directories(msime-tsf-passthrough-statistics-test PRIVATE IPC)
+target_compile_features(msime-tsf-passthrough-statistics-test PRIVATE cxx_std_17)
+add_test(NAME msime-tsf-passthrough-statistics
+  COMMAND msime-tsf-passthrough-statistics-test)
+add_executable(msime-tsf-key-press-statistics-test
+  tests/key_press_statistics.cpp)
+target_include_directories(msime-tsf-key-press-statistics-test PRIVATE IPC)
+target_compile_features(msime-tsf-key-press-statistics-test PRIVATE cxx_std_17)
+add_test(NAME msime-tsf-key-press-statistics
+  COMMAND msime-tsf-key-press-statistics-test)

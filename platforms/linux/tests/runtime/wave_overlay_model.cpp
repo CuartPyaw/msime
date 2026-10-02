@@ -44,6 +44,9 @@ int main() {
   assert(!msime_voice_stream_inline_enabled(true, "doubao", "sendinput"));
   assert(!msime_voice_stream_inline_enabled(true, "doubao", "ctrl_v"));
   assert(!msime_voice_stream_inline_enabled(true, "openai"));
+  assert(msime_voice_stream_inline_enabled(true, "local"));
+  assert(!msime_voice_stream_inline_enabled(true, "local", "sendinput"));
+  assert(!msime_voice_stream_inline_enabled(false, "local"));
   assert(!msime_voice_stream_inline_enabled(false, "doubao"));
   assert(!msime_voice_overlay_light_theme("follow", "dark", false));
   assert(msime_voice_overlay_light_theme("follow", "light", true));
@@ -52,6 +55,9 @@ int main() {
   assert(msime_voice_overlay_light_theme("light", "dark", true));
   assert(!msime_voice_overlay_light_theme("dark", "light", false));
   model.light_theme = true;
+  model.palette = msime::linux_host::FloatingSurfaceColors{0x112233u, 0xEEEEEEu, 0x3584E4u, std::nullopt};
   model.reset();
   assert(model.light_theme);
+  // The theme's palette survives a reset as the mode does: both belong to the preferences, not to one recording.
+  assert(model.palette && model.palette->surface == 0x112233u && !model.palette->border);
 }

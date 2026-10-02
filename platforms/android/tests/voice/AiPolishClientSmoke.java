@@ -1,5 +1,5 @@
-import app.msime.client.AiPolishClient;
-import app.msime.client.AiPolishConfiguration;
+import app.msime.android.AiPolishClient;
+import app.msime.android.AiPolishConfiguration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -21,6 +21,10 @@ public final class AiPolishClientSmoke {
         AiPolishConfiguration overridden = config.withPrompt("reply prompt");
         check(overridden.prompt().equals("reply prompt") && overridden.credentialOrigin().equals(config.credentialOrigin()));
         check(overridden.toString().contains("fixture-model") && !overridden.toString().contains("fixture-key"));
+        check(AiPolishConfiguration.promptSlotKey("custom_2").equals("prompt_custom_2"));
+        check(AiPolishConfiguration.promptSlotKey("custom_3").equals("prompt_custom_3"));
+        check(AiPolishConfiguration.promptSlotKey("").equals("prompt_custom_1"));
+        check(AiPolishConfiguration.promptSlotKey("custom").equals("prompt_custom_1"));
         check(AiPolishConfiguration.acceptableText("𠮷".repeat(10_000)));
         check(!AiPolishConfiguration.acceptableText("a".repeat(10_001)));
         check(!AiPolishConfiguration.acceptableText("\ud800"));

@@ -1,4 +1,4 @@
-package app.msime.client;
+package app.msime.android;
 
 import java.util.ArrayDeque;
 import java.util.List;
@@ -39,6 +39,36 @@ public final class CandidateTranslationStoreSmoke {
             worker.shutdownNow();
         }
 
+        FakeScheduler retryScheduler = new FakeScheduler();
+        ExecutorService retryWorker = Executors.newSingleThreadExecutor();
+        AtomicInteger retryCalls = new AtomicInteger();
+        CountDownLatch firstRetryCall = new CountDownLatch(1);
+        CountDownLatch releaseRetryCall = new CountDownLatch(1);
+        CountDownLatch secondRetryCall = new CountDownLatch(1);
+        CandidateTranslationStore retryStore = new CandidateTranslationStore(
+            (texts, target) -> {
+                if (retryCalls.incrementAndGet() == 1) {
+                    firstRetryCall.countDown();
+                    releaseRetryCall.await(2, TimeUnit.SECONDS);
+                } else {
+                    secondRetryCall.countDown();
+                }
+                return List.of("retry translation");
+            }, retryWorker, retryScheduler, generation -> { });
+        try {
+            retryStore.refresh(List.of("你好"), List.of("en"), 4);
+            retryScheduler.runDelayed();
+            check(firstRetryCall.await(2, TimeUnit.SECONDS), "first retry request started");
+            retryStore.refresh(List.of("你好"), List.of("en"), 4);
+            retryScheduler.runDelayed();
+            releaseRetryCall.countDown();
+            check(secondRetryCall.await(2, TimeUnit.SECONDS),
+                "cancelled request can retry with the same signature");
+        } finally {
+            releaseRetryCall.countDown();
+            retryWorker.shutdownNow();
+        }
+
         FakeScheduler normalizationScheduler = new FakeScheduler();
         ExecutorService normalizationWorker = Executors.newSingleThreadExecutor();
         AtomicInteger normalizationArrivals = new AtomicInteger();
@@ -57,6 +87,32 @@ public final class CandidateTranslationStoreSmoke {
             check(normalizationArrivals.get() == 1, "normalized translation notified the host");
         } finally {
             normalizationWorker.shutdownNow();
+        }
+
+        FakeScheduler collisionScheduler = new FakeScheduler();
+        ExecutorService collisionWorker = Executors.newSingleThreadExecutor();
+        AtomicInteger collisionCalls = new AtomicInteger();
+        CountDownLatch firstCollisionCall = new CountDownLatch(1);
+        CountDownLatch secondCollisionCall = new CountDownLatch(1);
+        CandidateTranslationStore collisionStore = new CandidateTranslationStore(
+            (texts, target) -> {
+                if (collisionCalls.incrementAndGet() == 1) firstCollisionCall.countDown();
+                else secondCollisionCall.countDown();
+                return texts.stream().map(text -> text + " translation").toList();
+            }, collisionWorker, collisionScheduler, generation -> { });
+        try {
+            collisionStore.refresh(List.of("甲|乙"), List.of("en"), 6);
+            collisionScheduler.runDelayed();
+            check(firstCollisionCall.await(2, TimeUnit.SECONDS), "first collision request started");
+            collisionScheduler.runPosted();
+
+            collisionStore.refresh(List.of("甲", "乙"), List.of("en"), 6);
+            collisionScheduler.runDelayed();
+            check(secondCollisionCall.await(2, TimeUnit.SECONDS), "second collision request started");
+            collisionScheduler.runPosted();
+            check(collisionCalls.get() == 2, "word separators do not collide");
+        } finally {
+            collisionWorker.shutdownNow();
         }
         System.out.println("Android candidate translation store: stale request fencing passed");
     }

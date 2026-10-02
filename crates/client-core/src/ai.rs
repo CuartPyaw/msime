@@ -35,6 +35,9 @@ pub struct AiSuggestionResponse {
     pub candidates: Vec<AiSuggestion>,
 }
 
+/// The system prompt a blank prompt slot stands for. It used to exist only in the Windows installer's default configuration, so every other host that never wrote a prompt sent an empty system message and got replies the JSON parser rejects.
+pub const DEFAULT_CANDIDATE_PROMPT: &str = "你是一个中文全拼输入法联想引擎。输入为已经切分好的拼音数组、前文上下文和候选数量。\n\n优先生成与拼音严格对应的中文候选：若有 N 段拼音，首选必须尽量为 N 个汉字，每段拼音对应一个汉字，不得随意增删或改变读音。结合上下文、常用程度、语义完整性和固定搭配排序。\n\n若去掉分词后能明显组成更合理的英文单词、缩写、产品名或技术术语，如 `deep + seek → DeepSeek`、`git + hub → GitHub`，可优先返回英文；不要生造英文或做牵强匹配。\n\n只输出合法 JSON，不要解释或输出 Markdown：\n\n{\n\"candidates\": [\n{\n\"text\": \"候选内容\",\n\"type\": \"chinese或english\",\n\"confidence\": 0.98\n}\n]\n}\n\n候选按推荐程度降序排列，数量不超过指定上限；没有合理结果时返回空数组。";
+
 pub trait AiSuggestor {
     fn suggest(&self, request: &AiSuggestionRequest) -> Result<AiSuggestionResponse, AiError>;
 }
@@ -50,8 +53,7 @@ pub fn chat_completion_body(
     request.validate()?;
     if !AI_PROVIDERS.contains(&provider)
         || model.is_empty()
-        || model.len() > 256
-        || model.chars().any(char::is_control)
+        || !crate::text::is_bounded_text(model, 256)
         || prompt.len() > 16384
     {
         return Err(AiError::InvalidConfiguration);
@@ -77,10 +79,7 @@ pub fn chat_completion_body(
 /// have keyed is not matched by accident.
 fn credential_origin(endpoint: &str) -> Option<String> {
     let endpoint = endpoint.trim();
-    if endpoint.is_empty() || endpoint.len() > 2048 {
-        return None;
-    }
-    if endpoint.chars().any(char::is_control) {
+    if endpoint.is_empty() || !crate::text::is_bounded_text(endpoint, 2048) {
         return None;
     }
     let url = reqwest::Url::parse(endpoint).ok()?;
@@ -105,14 +104,8 @@ pub fn chat_completion_http_request(
         return Ok(None);
     }
     let endpoint = &config.endpoint;
-    let url = reqwest::Url::parse(endpoint).map_err(|_| AiError::InvalidConfiguration)?;
-    if endpoint.len() > 2048
-        || endpoint.chars().any(char::is_control)
-        || !matches!(url.scheme(), "http" | "https")
-        || url.host_str().is_none()
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.fragment().is_some()
+    reqwest::Url::parse(endpoint).map_err(|_| AiError::InvalidConfiguration)?;
+    if !crate::translation::is_secure_endpoint(endpoint)
         || request.candidate_limit != config.candidate_limit
     {
         return Err(AiError::InvalidConfiguration);
@@ -145,8 +138,7 @@ pub fn chat_completion_http_request(
         .unwrap_or(&config.token)
         .trim();
     if token.is_empty()
-        || token.len() > 4096
-        || token.chars().any(char::is_control)
+        || !crate::text::is_bounded_text(token, 4096)
         || token.starts_with("FAKESECRET_")
         || (token.starts_with('<') && token.ends_with('>'))
     {
@@ -155,8 +147,12 @@ pub fn chat_completion_http_request(
     let prompt = match config.prompt_id.as_str() {
         "custom_2" => &config.prompt_custom_2,
         "custom_3" => &config.prompt_custom_3,
-        _ if !config.prompt_custom_1.is_empty() => &config.prompt_custom_1,
-        _ => &config.prompt,
+        _ => &config.prompt_custom_1,
+    };
+    let prompt = if prompt.trim().is_empty() {
+        DEFAULT_CANDIDATE_PROMPT
+    } else {
+        prompt
     };
     let body = chat_completion_body(request, &config.provider, &config.model, prompt)?;
     if serde_json::to_vec(&body)
@@ -191,14 +187,13 @@ pub fn parse_chat_completion_response(body: &[u8], limit: u8) -> Option<AiSugges
         .as_str()?;
     let inner: serde_json::Value = serde_json::from_str(content).ok()?;
     let entries = inner.get("candidates")?.as_array()?;
-    let mut candidates: Vec<AiSuggestion> = Vec::new();
+    let mut candidates: Vec<AiSuggestion> = Vec::with_capacity(usize::from(limit));
     for entry in entries {
         let Some(text) = entry.get("text").and_then(serde_json::Value::as_str) else {
             continue;
         };
         if text.trim().is_empty()
-            || text.len() > 4096
-            || text.chars().any(char::is_control)
+            || !crate::text::is_bounded_text(text, 4096)
             || candidates.iter().any(|candidate| candidate.text == text)
         {
             continue;
@@ -398,7 +393,6 @@ mod tests {
             endpoint: "https://synthetic.invalid/chat".into(),
             model: "synthetic-model".into(),
             token: "synthetic-legacy".into(),
-            prompt: "legacy prompt".into(),
             prompt_custom_2: "second prompt".into(),
             ..Default::default()
         };
@@ -496,7 +490,10 @@ mod tests {
         assert_eq!(value["connect_timeout_ms"], 2500);
         assert_eq!(value["max_response_bytes"], 1048576);
         config.prompt_id = "custom_3".into();
-        assert_eq!(descriptor(&config)["body"]["messages"][0]["content"], "");
+        assert_eq!(
+            descriptor(&config)["body"]["messages"][0]["content"],
+            DEFAULT_CANDIDATE_PROMPT
+        );
         config
             .tokens
             .insert("deepseek".into(), "<placeholder>".into());
@@ -514,6 +511,12 @@ mod tests {
             assert!(chat_completion_http_request(&config, &request).is_err());
         }
         config.endpoint = "http://localhost:8080/chat".into();
+        assert!(chat_completion_http_request(&config, &request).is_ok());
+        config.endpoint = "http://api.deepseek.com/chat".into();
+        assert!(chat_completion_http_request(&config, &request).is_err());
+        config.endpoint = "http://localhost.example/chat".into();
+        assert!(chat_completion_http_request(&config, &request).is_err());
+        config.endpoint = "http://[::1]:8080/chat".into();
         assert!(chat_completion_http_request(&config, &request).is_ok());
         config.token = "bad\r\nheader".into();
         assert!(chat_completion_http_request(&config, &request).is_err());

@@ -55,13 +55,36 @@ final class DictionarySnapshotQueue: @unchecked Sendable {
     guard fields.count == 3, fields[0] == "local-v1", digest(String(fields[2])) else { return false }
     return fields[1] == "legacy" || UUID(uuidString: String(fields[1]))?.uuidString == String(fields[1])
   }
+  private func rejectSymlinkAncestors(_ path: URL) throws {
+    var current = path.standardizedFileURL
+    while current.path != "/" {
+      if current.path == "/var" || current.path == "/tmp" { break }
+      var status = stat()
+      if lstat(current.path, &status) == 0 {
+        guard status.st_mode & S_IFMT != S_IFLNK else { throw Failure.unavailable }
+      } else if errno != ENOENT {
+        throw Failure.unavailable
+      }
+      current = current.deletingLastPathComponent()
+    }
+  }
+  private func rejectSymlinkFile(_ path: URL) throws {
+    var status = stat()
+    if lstat(path.standardizedFileURL.path, &status) == 0 {
+      guard status.st_mode & S_IFMT != S_IFLNK else { throw Failure.unavailable }
+    } else if errno != ENOENT {
+      throw Failure.unavailable
+    }
+  }
   private func root() throws -> URL {
     guard let directory else { throw Failure.unavailable }
+    try rejectSymlinkAncestors(directory)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
     return directory
   }
   private func read(_ root: URL) throws -> DictionarySnapshotQueueState {
     let file = root.appendingPathComponent("state.json")
+    try rejectSymlinkFile(file)
     guard FileManager.default.fileExists(atPath: file.path) else { return .init() }
     let handle = try FileHandle(forReadingFrom: file)
     defer { try? handle.close() }
@@ -79,7 +102,7 @@ final class DictionarySnapshotQueue: @unchecked Sendable {
     Self.processLock.lock()
     defer { Self.processLock.unlock() }
     let root = try root()
-    let descriptor = open(root.appendingPathComponent("state.lock").path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+    let descriptor = open(root.appendingPathComponent("state.lock").path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, S_IRUSR | S_IWUSR)
     guard descriptor >= 0 else { throw Failure.unavailable }
     defer { close(descriptor) }
     guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else { throw Failure.busy }
@@ -96,10 +119,13 @@ final class DictionarySnapshotQueue: @unchecked Sendable {
     let applied = try update { state -> DictionarySnapshotRequest? in
       state.localVersion = version
       // The Engine's durable generation UUID is the receipt if publication
-      // succeeded but queue acknowledgement failed. Reconcile even a later
-      // cancellation: an already-applied dictionary cannot be cancelled retroactively.
+      // succeeded but queue acknowledgement failed. A terminal queue state
+      // wins if cancellation or another transition was recorded first.
       let generation = version.split(separator: ":")[1]
-      guard var request = state.request, request.id.uuidString == generation else { return nil }
+      // A receipt can arrive after cancellation or another terminal transition.
+      // Do not resurrect that request merely because the Engine generation matches.
+      guard var request = state.request, request.status.active,
+            request.id.uuidString == generation else { return nil }
       request.status = .applied
       state.request = request
       return request
@@ -108,7 +134,7 @@ final class DictionarySnapshotQueue: @unchecked Sendable {
   }
   func acquireWorkerLease() throws -> WorkerLease {
     let root = try root()
-    let descriptor = open(root.appendingPathComponent("worker.lock").path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+    let descriptor = open(root.appendingPathComponent("worker.lock").path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, S_IRUSR | S_IWUSR)
     guard descriptor >= 0 else { throw Failure.unavailable }
     guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else { close(descriptor); throw Failure.busy }
     return WorkerLease(descriptor, owner: root.standardizedFileURL)

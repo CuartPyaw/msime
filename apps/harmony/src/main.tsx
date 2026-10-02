@@ -1,5 +1,5 @@
 import { StrictMode } from "react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   SettingsPage,
@@ -23,6 +23,7 @@ import {
   CloudDictionaryFilesPanel,
   CloudDictionaryApplyPanel,
   CloudCandidatesPanel,
+  completeOnboardingPreferences,
   type AccountClient,
   type AccountPreferences,
   type AiSkinClient,
@@ -46,7 +47,17 @@ import {
   type Snapshot,
   type StatisticsRetention,
   type TypingStatisticsClient,
+  type VocabularyReviewClient,
+  type VocabularyReviewStatus,
   type TypingStatisticsStatus,
+  type LocalVoiceModelClient,
+  type LocalVoiceModelList,
+  type LocalVoiceModelProgress,
+  type MentionEntry,
+  type PluginCatalogResult,
+  type PluginClient,
+  type PluginPackage,
+  UNBATCHED_DICTIONARY_FILE_BYTES,
 } from "@msime/ui";
 import type {
   AiAssistantClient,
@@ -87,6 +98,7 @@ interface NativeBridge {
   dictionary(action: string): string;
   cloudDictionaryDownload(entry: string): string;
   typingStatistics(action: string): string;
+  vocabularyReview(action: string): string;
   /**
    * Starts one of the asynchronous requests and returns at once.
    *
@@ -122,6 +134,10 @@ interface NativeBridge {
   showInputMethodPicker(): string;
   /** Starts the picker and answers at once; the panel's own rescan is what shows the result. */
   importSkinFolder(): string;
+  /**
+   * The 插件 page's pack store and @ name list: `{operation:"catalog"|"remove"|"load_mentions"|"save_mentions",...}`, answered by `msime_client_plugins` as `{ok,value}` or `{ok:false,error,detail?}`. An import waits for the system picker, so it goes through `startRequest` as `plugin_import` instead.
+   */
+  plugins(action: string): string;
 }
 
 declare global {
@@ -131,6 +147,8 @@ declare global {
   var msimeHarmonyBridgeReply: ((id: number, reply: string) => void) | undefined;
   // eslint-disable-next-line no-var
   var msimeHarmonyAiSkinProgress: ((requestId: string, completed: number) => void) | undefined;
+  // eslint-disable-next-line no-var
+  var msimeHarmonyVoiceModelProgress: ((document: string) => void) | undefined;
 }
 
 /**
@@ -422,22 +440,34 @@ function communitySkinClient(native: NativeBridge): CommunitySkinClient {
       JSON.stringify({ operation: "community_skin", ...action }),
     ).then(unwrap<T>);
   return {
-    list: (offset, search) =>
-      request<CommunitySkinPage>({ community_operation: "list", offset, search }),
+    // 我的作品 asks the host for scope "mine", which it sends with the session and fields=moderation so a removed skin carries its 已下架 badge.
+    list: (offset, search, mine, category) =>
+      request<CommunitySkinPage>({
+        community_operation: "list",
+        offset,
+        search,
+        ...(mine ? { scope: "mine" } : {}),
+        category,
+      }),
     detail: (id) => request<CommunitySkin>({ community_operation: "detail", id }),
     download: (id, name) =>
       request<CommunitySkinDownload>({ community_operation: "download", id, name }),
     rate: async (id, stars) => {
       await request({ community_operation: "rate", id, stars });
     },
-    publish: async (id, name, description, design) => {
-      await request({ community_operation: "publish", id, name, description, design });
+    publish: async (id, name, description, design, category) => {
+      await request({ community_operation: "publish", id, name, description, design, category });
     },
+    setCategory: (id, category) =>
+      request<CommunitySkin>({ community_operation: "set_category", id, category }),
     unpublish: async (id) => {
       await request({ community_operation: "unpublish", id });
     },
     finishTrial: async (id, keep) => {
       await request({ community_operation: "finish_trial", id, keep });
+    },
+    report: async (id, reason, detail) => {
+      await request({ community_operation: "report", id, reason, detail });
     },
   };
 }
@@ -502,6 +532,9 @@ function communityResourceClient(native: NativeBridge): CommunityResourceClient 
     removeReply: async (id) => {
       await request({ resource_operation: "remove_reply", id });
     },
+    report: async (kind, id, reason, detail) => {
+      await request({ resource_operation: "report", kind, id, reason, detail });
+    },
   };
 }
 
@@ -540,6 +573,75 @@ function aiSkinClient(native: NativeBridge): AiSkinClient {
       };
       return () => {
         globalThis.msimeHarmonyAiSkinProgress = previous;
+      };
+    },
+  };
+}
+
+/**
+ * The on-device model store: the catalog models the `local` provider can run, downloaded into the app's own files directory.
+ *
+ * Every operation is an asynchronous bridge request, because an install blocks for the whole download on a native worker and a bridge method returning a Promise never settles here. Progress arrives on its own global as the `{id,stage,downloaded,total}` document client-core reports. The host drops the catalog's desktop-only models, and it has already turned the core's error text into the codes the page has sentences for.
+ *
+ * An install is given hours rather than the ordinary 30 seconds: it is a download of up to a few hundred megabytes on whatever network the phone has, and client-core reports a stalled connection itself. A deadline that fired first would report a failure for a download that then finishes.
+ */
+const voiceModelProgressListeners = new Set<(progress: LocalVoiceModelProgress) => void>();
+
+globalThis.msimeHarmonyVoiceModelProgress = (document: string) => {
+  let progress: LocalVoiceModelProgress;
+  try {
+    progress = JSON.parse(document) as LocalVoiceModelProgress;
+  } catch {
+    return;
+  }
+  for (const listener of voiceModelProgressListeners) listener(progress);
+};
+
+/**
+ * Rejects the way the desktop shell's plugin commands reject: `{code, detail}`, where detail is the rule client-core reports for a refused pack or name, so `pluginErrorMessage` can say which file or entry to fix.
+ */
+function unwrapPlugin<T>(raw: string): T {
+  const reply = JSON.parse(raw) as Reply<T> & { detail?: string };
+  if (!reply.ok) throw { code: reply.error, detail: reply.detail ?? null };
+  return reply.value;
+}
+
+/**
+ * The 插件 page's host side. The host fills in the state root and the bundle's built-in sound packs, so the page, as on the desktop, never names a path. An import waits on the system picker for as long as the user leaves it open, so its deadline is the one the export save allows.
+ */
+function pluginClient(native: NativeBridge): PluginClient {
+  const call = <T,>(action: Record<string, unknown>): T =>
+    unwrapPlugin<T>(native.plugins(JSON.stringify(action)));
+  return {
+    catalog: async () => call<PluginCatalogResult>({ operation: "catalog" }),
+    importPack: async (source) =>
+      unwrapPlugin<PluginPackage | null>(
+        await bridgeRequest(native, "plugin_import", JSON.stringify({ source }), 30 * 60 * 1000),
+      ),
+    remove: async (kind, id) => {
+      call<null>({ operation: "remove", kind, id });
+    },
+    loadMentions: async () => call<MentionEntry[]>({ operation: "load_mentions" }),
+    saveMentions: async (entries) => {
+      call<null>({ operation: "save_mentions", entries });
+    },
+  };
+}
+
+function localVoiceModelClient(native: NativeBridge): LocalVoiceModelClient {
+  const request = <T,>(action: Record<string, unknown>, timeoutMs?: number): Promise<T> =>
+    bridgeRequest(native, "voice_local_model", JSON.stringify(action), timeoutMs).then(unwrap<T>);
+  return {
+    list: () => request<LocalVoiceModelList>({ operation: "list" }),
+    install: (id) => request<string>({ operation: "install", id }, 6 * 60 * 60 * 1000),
+    cancel: (id) => request<boolean>({ operation: "cancel", id }),
+    remove: async (id) => {
+      await request<null>({ operation: "remove", id });
+    },
+    onProgress: async (listener) => {
+      voiceModelProgressListeners.add(listener);
+      return () => {
+        voiceModelProgressListeners.delete(listener);
       };
     },
   };
@@ -640,6 +742,8 @@ function makeClient(
         request_id,
       });
     },
+    // The native bridge sends an import to the host in one request rather than in batches.
+    maxImportFileBytes: UNBATCHED_DICTIONARY_FILE_BYTES,
     import: async (
       kind: LocalDictionaryKind,
       format: LocalDictionaryFormat,
@@ -703,6 +807,42 @@ function makeClient(
     reset: async () =>
       unwrap<TypingStatisticsStatus>(
         native.typingStatistics(JSON.stringify({ operation: "reset" })),
+      ),
+  };
+  // Synchronous, because a bridge method that returns a Promise never settles on this WebView.
+  // Every call answers with the whole status, so the page keeps one request in flight; the local
+  // day is resolved on the ArkTS side, which is the process that knows the device's timezone.
+  const vocabularyReview: VocabularyReviewClient = {
+    load: async () =>
+      unwrap<VocabularyReviewStatus>(
+        native.vocabularyReview(JSON.stringify({ operation: "load" })),
+      ),
+    answer: async (word: string, known: boolean) =>
+      unwrap<VocabularyReviewStatus>(
+        native.vocabularyReview(JSON.stringify({ operation: "answer", word, known })),
+      ),
+    setSettings: async (settings) =>
+      unwrap<VocabularyReviewStatus>(
+        native.vocabularyReview(
+          JSON.stringify({
+            operation: "set_settings",
+            wordbook: settings.wordbook,
+            new_per_day: settings.newPerDay,
+            session_limit: settings.sessionLimit,
+          }),
+        ),
+      ),
+    importWordbook: async (name: string, text: string) =>
+      unwrap<VocabularyReviewStatus>(
+        native.vocabularyReview(JSON.stringify({ operation: "import", name, text })),
+      ),
+    removeWordbook: async (wordbook: string) =>
+      unwrap<VocabularyReviewStatus>(
+        native.vocabularyReview(JSON.stringify({ operation: "remove", wordbook })),
+      ),
+    reset: async () =>
+      unwrap<VocabularyReviewStatus>(
+        native.vocabularyReview(JSON.stringify({ operation: "reset" })),
       ),
   };
   const aiAssistant: AiAssistantClient = {
@@ -771,6 +911,20 @@ function makeClient(
     openSkinDirectory: async () => {
       native.importSkinFolder();
     },
+    // ArkWeb drops the page's download link, so the host saves the export through the system save picker instead. The deadline covers a user who leaves the picker open: timing out under them would report a failure for a file that is then written anyway.
+    saveExport: async (name: string, contents: string) => {
+      const reply = await bridgeRequest(
+        native,
+        "save_export",
+        JSON.stringify({ name, contents }),
+        30 * 60 * 1000,
+      );
+      try {
+        return unwrap<string | null>(reply);
+      } catch {
+        throw new Error("无法保存导出文件，词库未导出。");
+      }
+    },
     listVoiceCaptureDevices: async () =>
       unwrap<VoiceCaptureDevice[]>(native.listVoiceCaptureDevices()),
     listFontFamilies: async () => unwrap<string[]>(native.listFontFamilies()),
@@ -798,6 +952,7 @@ function makeClient(
     },
     dictionary,
     typingStatistics,
+    vocabularyReview,
     aiAssistant,
     testApiCredential,
     // Four surfaces the keyboard already honours. Each writes shared preferences and nothing else,
@@ -845,7 +1000,11 @@ function makeClient(
     communitySkins: communitySkinClient(native),
     communityResources: communityResourceClient(native),
     aiSkins: aiSkinClient(native),
+    localVoiceModels: localVoiceModelClient(native),
+    // The page is offered only on a 2in1, the form factor that plays packs and routes the / and @ modes; a phone hides it whatever the host supplies.
+    plugins: pluginClient(native),
     openCloudClipboard: async () => openCloudClipboard(),
+    cloudClipboardRequest: cloudClipboardClient(native, () => undefined).request,
     openCloudDictionary: async () => openCloudDictionary(),
   };
 }
@@ -861,32 +1020,51 @@ function HarmonySettings({
   // the flow replaces the page rather than sitting somewhere inside it. Skipping is allowed: a
   // keyboard the user has decided to set up later is not a reason to withhold its settings.
   const [bootstrapRequired, setBootstrapRequired] = useState(onboarding);
+  // The splash belongs to a first launch; a flow replayed from settings opens on its first step.
+  const [replayed, setReplayed] = useState(false);
+  // 登录 at the end of the flow opens the settings on 我的, where signing in lives.
+  const [initialPage, setInitialPage] = useState<string>();
   const [cloudClipboardOpen, setCloudClipboardOpen] = useState(false);
   const [cloudDictionaryOpen, setCloudDictionaryOpen] = useState(false);
   const [cloudDictionaryPage, setCloudDictionaryPage] = useState<CloudDictionaryPage>("main");
-  const client = makeClient(
-    native,
-    () => setCloudClipboardOpen(true),
-    () => {
-      setCloudDictionaryPage("main");
-      setCloudDictionaryOpen(true);
-    },
+  // Each client is built once per bridge. SettingsPage and the cloud panels key their load and subscription effects on the client, so a fresh one on every render (opening a cloud panel re-renders this component) reloaded the page and threw away the unsaved draft. The callbacks only close over state setters, which React keeps stable.
+  const client = useMemo(
+    () =>
+      makeClient(
+        native,
+        () => setCloudClipboardOpen(true),
+        () => {
+          setCloudDictionaryPage("main");
+          setCloudDictionaryOpen(true);
+        },
+      ),
+    [native],
   );
-  const dictionaryClient = cloudDictionaryClient(
-    native,
-    () => setCloudDictionaryOpen(false),
-    setCloudDictionaryPage,
+  const cloudClipboard = useMemo(
+    () => cloudClipboardClient(native, () => setCloudClipboardOpen(false)),
+    [native],
   );
-  const filesClient: CloudDictionaryPanelClient = {
-    ...dictionaryClient,
-    snapshot: true,
-    snapshotNative: true,
-  };
+  const dictionaryClient = useMemo(
+    () =>
+      cloudDictionaryClient(native, () => setCloudDictionaryOpen(false), setCloudDictionaryPage),
+    [native],
+  );
+  const filesClient = useMemo<CloudDictionaryPanelClient>(
+    () => ({
+      ...dictionaryClient,
+      snapshot: true,
+      snapshotNative: true,
+    }),
+    [dictionaryClient],
+  );
   if (bootstrapRequired) {
+    // A 2-in-1 reports mobile_settings false: the flow draws itself as a desktop sheet there and opens without the phone's splash.
+    const mobileSettings = client.host?.mobile_settings;
     return (
       <WelcomeFlowPage
         actions={{
           platform: "harmony",
+          mobileSettings,
           // Resources are staged by the keyboard when it starts, and there is no separate step to
           // run here; the flow expects the promise, not work.
           prepareResources: async () => {},
@@ -895,38 +1073,34 @@ function HarmonySettings({
             native.showInputMethodPicker();
           },
         }}
-        onComplete={async (scheme) => {
+        onComplete={async (scheme, choices) => {
           // The scheme picked in the flow is the whole point of that step; dropping it would leave
           // the user with a keyboard laid out the way they had just declined. Written the same way
           // the mobile hosts write it, so a profile carried between them means the same thing.
           const snapshot = await client.load();
-          const enabled = [...(snapshot.preferences.touch_keyboard_schemes?.enabled ?? [])];
-          if (!enabled.includes(scheme)) enabled.push(scheme);
-          await client.save(snapshot.revision, {
-            ...snapshot.preferences,
-            scheme: "quanpin",
-            last_chinese_scheme: "quanpin",
-            touch_keyboard_layout: scheme === "nine_key" ? "nine_key" : "twenty_six_key",
-            touch_keyboard_schemes: {
-              ...snapshot.preferences.touch_keyboard_schemes,
-              enabled,
-              selected: scheme,
-            },
-          });
+          await client.save(
+            snapshot.revision,
+            completeOnboardingPreferences(snapshot, scheme, choices),
+          );
+          setInitialPage(choices.openAccount ? "account" : undefined);
           setBootstrapRequired(false);
         }}
         onSkip={async () => setBootstrapRequired(false)}
+        splash={mobileSettings !== false && !replayed}
       />
     );
   }
   return (
     <>
-      <SettingsPage client={client} onReplayOnboarding={() => setBootstrapRequired(true)} />
-      {cloudClipboardOpen && (
-        <CloudClipboardPanel
-          client={cloudClipboardClient(native, () => setCloudClipboardOpen(false))}
-        />
-      )}
+      <SettingsPage
+        client={client}
+        initialPage={initialPage}
+        onReplayOnboarding={() => {
+          setReplayed(true);
+          setBootstrapRequired(true);
+        }}
+      />
+      {cloudClipboardOpen && <CloudClipboardPanel client={cloudClipboard} />}
       {cloudDictionaryOpen && cloudDictionaryPage === "main" && (
         <CloudDictionaryPanel client={dictionaryClient} />
       )}

@@ -3,6 +3,7 @@
 //! Part of the C ABI; see the parent module for what these shims guarantee.
 
 use crate::*;
+use msime_client_core::is_bounded_text;
 
 /// Decode one Doubao v1 response frame for Apple hosts. The returned payload
 /// is UTF-8 JSON text; no frame bytes or credentials are retained.
@@ -36,11 +37,14 @@ unsafe fn write_doubao_frame(
     output_capacity: usize,
     output_length: *mut usize,
 ) -> bool {
-    if output.is_null() || output_length.is_null() {
+    // A null, zero-capacity output is the sizing probe used by mobile bindings. Report the
+    // required length before returning false so the caller can allocate exactly one frame. A null
+    // output with nonzero capacity is still an invalid destination and must not be accepted.
+    if output_length.is_null() || (output.is_null() && output_capacity != 0) {
         return false;
     }
     *output_length = frame.len();
-    if frame.len() > output_capacity {
+    if output_capacity < frame.len() {
         return false;
     }
     std::ptr::copy_nonoverlapping(frame.as_ptr(), output, frame.len());
@@ -154,12 +158,9 @@ pub unsafe extern "C" fn msime_client_voice_provider_request(
             std::slice::from_raw_parts(query, query_length)
         })
         .map_err(|_| "invalid voice query document")?;
-        let path =
-            std::str::from_utf8(unsafe { std::slice::from_raw_parts(socket_path, socket_length) })
-                .map_err(|_| "socket path is not UTF-8")?;
-        if !std::path::Path::new(path).is_absolute() {
-            return Err("socket path must be absolute".into());
-        }
+        let path = super::parse_absolute_socket_path(unsafe {
+            std::slice::from_raw_parts(socket_path, socket_length)
+        })?;
         Ok(UnixSocketProvider::new(path)
             .voice_with_options(&query.language, query.generation, &query.options)
             .map(|text| json!({"text": text}))
@@ -257,12 +258,9 @@ pub unsafe extern "C" fn msime_client_voice_provider_stream_feedback(
             std::slice::from_raw_parts(query, query_length)
         })
         .map_err(|_| "invalid voice query document")?;
-        let path =
-            std::str::from_utf8(unsafe { std::slice::from_raw_parts(socket_path, socket_length) })
-                .map_err(|_| "socket path is not UTF-8")?;
-        if !std::path::Path::new(path).is_absolute() {
-            return Err("socket path must be absolute".into());
-        }
+        let path = super::parse_absolute_socket_path(unsafe {
+            std::slice::from_raw_parts(socket_path, socket_length)
+        })?;
         let mut update = |text: &str, final_result: bool| {
             if let Some(callback) = callback {
                 unsafe {
@@ -290,7 +288,7 @@ pub unsafe extern "C" fn msime_client_voice_provider_stream_feedback(
                 }
             }
         };
-        let value = UnixSocketProvider::new(path).voice_stream_with_options_feedback(
+        let value = UnixSocketProvider::new(path).voice_stream_with_options_diagnosed(
             &query.language,
             query.generation,
             &query.options,
@@ -307,9 +305,12 @@ pub unsafe extern "C" fn msime_client_voice_provider_stream_feedback(
                 None
             },
         );
-        Ok(value
-            .map(|text| json!({"text": text}))
-            .unwrap_or(Value::Null))
+        match value {
+            Ok(text) => Ok(json!({"text": text})),
+            // A named missing dependency is the one provider failure reported as an error, so hosts can show what to install; older callers see it as any other failed call.
+            Err(Some(detail)) => Err(format!("voice_dependency_missing:{detail}")),
+            Err(None) => Ok(Value::Null),
+        }
     })
 }
 
@@ -328,12 +329,9 @@ pub unsafe extern "C" fn msime_client_voice_provider_cancel(
         if socket_path.is_null() || socket_length > 4096 {
             return Err("invalid voice provider socket buffer".into());
         }
-        let path =
-            std::str::from_utf8(unsafe { std::slice::from_raw_parts(socket_path, socket_length) })
-                .map_err(|_| "socket path is not UTF-8")?;
-        if !std::path::Path::new(path).is_absolute() {
-            return Err("socket path must be absolute".into());
-        }
+        let path = super::parse_absolute_socket_path(unsafe {
+            std::slice::from_raw_parts(socket_path, socket_length)
+        })?;
         Ok(json!(UnixSocketProvider::new(path).voice_cancel(generation)))
     })
 }
@@ -354,12 +352,288 @@ pub unsafe extern "C" fn msime_client_voice_provider_stop(
         if socket_path.is_null() || socket_length > 4096 {
             return Err("invalid voice provider socket buffer".into());
         }
-        let path =
-            std::str::from_utf8(unsafe { std::slice::from_raw_parts(socket_path, socket_length) })
-                .map_err(|_| "socket path is not UTF-8")?;
-        if !std::path::Path::new(path).is_absolute() {
-            return Err("socket path must be absolute".into());
-        }
+        let path = super::parse_absolute_socket_path(unsafe {
+            std::slice::from_raw_parts(socket_path, socket_length)
+        })?;
         Ok(json!(UnixSocketProvider::new(path).voice_stop(generation)))
+    })
+}
+
+// ---- on-device models and hotwords ----
+
+/// Largest request any of the local-model and hotword calls accepts. The hotword correction request carries a transcript and up to a few hundred hotwords.
+const LOCAL_VOICE_REQUEST_LIMIT: usize = 1 << 20;
+
+fn local_voice_request<T: serde::de::DeserializeOwned>(
+    request: *const u8,
+    length: usize,
+    limit: usize,
+) -> Result<T, String> {
+    if request.is_null() || length == 0 || length > limit {
+        return Err("invalid voice request buffer".into());
+    }
+    // SAFETY: the caller contract of every entry point using this guarantees `length` readable bytes; null and size are checked above.
+    let bytes = unsafe { std::slice::from_raw_parts(request, length) };
+    serde_json::from_slice(bytes).map_err(|_| "invalid voice request".to_owned())
+}
+
+fn local_model_root(root: &str) -> Result<&Path, String> {
+    if !is_bounded_text(root, 4096) {
+        return Err("invalid local model root".into());
+    }
+    let path = Path::new(root);
+    if !path.is_absolute() {
+        return Err("invalid local model root".into());
+    }
+    Ok(path)
+}
+
+/// Cancellation flags of the installs running in this process, by model id.
+fn local_model_installs() -> &'static Mutex<HashMap<String, Arc<std::sync::atomic::AtomicBool>>> {
+    static INSTALLS: OnceLock<Mutex<HashMap<String, Arc<std::sync::atomic::AtomicBool>>>> =
+        OnceLock::new();
+    INSTALLS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Hotwords for on-device recognition from the user's own pinyin dictionary words.
+///
+/// Request `{"options": HostOptions, "limit": 200}`, the same HostOptions `msime_client_dictionary` takes. Response `{"hotwords":[{"text","pinyin"}]}`, highest-weighted words first. Reads through the dictionary list action, so it fails with "dictionary maintenance busy" while a maintenance writer holds the store.
+///
+/// # Safety
+/// `request` must point to `length` readable bytes. Null is rejected.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_voice_hotwords(
+    request: *const u8,
+    length: usize,
+) -> *mut c_char {
+    response(|| {
+        #[derive(Deserialize)]
+        struct HotwordsRequest {
+            options: Value,
+            #[serde(default)]
+            limit: Option<usize>,
+        }
+        let request: HotwordsRequest =
+            local_voice_request(request, length, HOST_OPTIONS_DOCUMENT_LIMIT)?;
+        let limit = request
+            .limit
+            .unwrap_or(msime_client_core::voice::hotwords::DEFAULT_HOTWORD_LIMIT)
+            .min(1_000);
+        // Enough rows that the heaviest words can be picked even from a large dictionary, without reading the whole store for every voice session.
+        let hotwords = msime_client_core::voice::hotwords::hotwords_from_dictionary_pages(
+            limit,
+            1_000,
+            5_000,
+            |offset, page_size| {
+                let page = crate::dictionary_request_json(
+                    &serde_json::to_vec(&json!({
+                        "options": request.options,
+                        "action": {"operation": "list", "offset": offset, "limit": page_size, "kind": "pinyin", "user_only": true},
+                    }))
+                    .map_err(|_| "invalid voice request")?,
+                )?;
+                let entries = page["entries"].as_array().cloned().unwrap_or_default();
+                let mut hotword_entries = Vec::with_capacity(entries.len());
+                hotword_entries.extend(entries.iter().filter_map(|entry| {
+                    Some((
+                        entry["value"].as_str()?.to_owned(),
+                        entry["key"].as_str()?.to_owned(),
+                        entry["weight"].as_i64().unwrap_or(0),
+                    ))
+                }));
+                Ok::<Option<msime_client_core::voice::hotwords::DictionaryHotwordPage>, String>(
+                    Some(msime_client_core::voice::hotwords::DictionaryHotwordPage {
+                        entries: hotword_entries,
+                        has_more: page["has_more"].as_bool() == Some(true),
+                    }),
+                )
+            },
+        )?;
+        Ok(json!({ "hotwords": hotwords }))
+    })
+}
+
+/// Apply hotwords to a final transcript by pinyin similarity, for models whose manifest says `"hotwords": "pinyin"`.
+///
+/// Request `{"text": "...", "hotwords": [{"text","pinyin"}]}` (at most 1 MiB); response `{"text": "..."}`. Pure; no state is read.
+///
+/// # Safety
+/// `request` must point to `length` readable bytes. Null is rejected.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_voice_hotword_correct(
+    request: *const u8,
+    length: usize,
+) -> *mut c_char {
+    response(|| {
+        #[derive(Deserialize)]
+        struct CorrectRequest {
+            text: String,
+            #[serde(default)]
+            hotwords: Vec<msime_client_core::voice::hotwords::Hotword>,
+        }
+        let request: CorrectRequest =
+            local_voice_request(request, length, LOCAL_VOICE_REQUEST_LIMIT)?;
+        Ok(json!({
+            "text": msime_client_core::voice::hotwords::correct(&request.text, &request.hotwords),
+        }))
+    })
+}
+
+/// The on-device model catalog with what is installed under a root.
+///
+/// Request `{"root": "<absolute dir>"}`; response `{"models": [LocalModelStatus], "default": "<id>"}`. A model's `path` is what `voice_input.asr_model_path` is set to when the user picks it.
+///
+/// # Safety
+/// `request` must point to `length` readable bytes. Null is rejected.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_voice_local_models(
+    request: *const u8,
+    length: usize,
+) -> *mut c_char {
+    response(|| {
+        #[derive(Deserialize)]
+        struct ModelsRequest {
+            root: String,
+        }
+        let request: ModelsRequest = local_voice_request(request, length, 16_384)?;
+        let root = local_model_root(&request.root)?;
+        Ok(json!({
+            "models": msime_client_core::voice::local_models::list(root),
+            "default": msime_client_core::voice::local_models::default_model_id(),
+        }))
+    })
+}
+
+/// Download, verify and install one catalog model. Blocks until done: call it on a worker thread.
+///
+/// Request `{"root": "<absolute dir>", "id": "<catalog id>", "mirror": ""}`; response `{"path": "<root>/<id>"}`. `progress` (may be null) is called on the calling thread with `{"id","stage","downloaded","total"}` JSON, stage one of download, verify, extract, done; the buffer is only valid during the call. `msime_client_voice_local_model_cancel` stops it from any thread, and the call then fails with "local_model_cancelled". One install per id at a time; a second fails with "local_model_install_running". Other failures are "local_model_*" codes (network, http_status, size_mismatch, checksum_mismatch, unsafe_archive, missing_file, io, invalid_mirror, unknown).
+///
+/// # Safety
+/// `request` must point to `length` readable bytes. `progress` must stay valid for the call, must copy the buffer before returning and must not unwind.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_voice_local_model_install(
+    request: *const u8,
+    length: usize,
+    progress: Option<unsafe extern "C" fn(*const u8, usize, *mut std::ffi::c_void)>,
+    context: *mut std::ffi::c_void,
+) -> *mut c_char {
+    response(|| {
+        #[derive(Deserialize)]
+        struct InstallRequest {
+            root: String,
+            id: String,
+            #[serde(default)]
+            mirror: String,
+        }
+        let request: InstallRequest = local_voice_request(request, length, 16_384)?;
+        let root = local_model_root(&request.root)?;
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        {
+            let mut installs = local_model_installs()
+                .lock()
+                .map_err(|_| "internal runtime failure")?;
+            if installs.contains_key(&request.id) {
+                return Err("local_model_install_running".into());
+            }
+            installs.insert(request.id.clone(), cancel.clone());
+        }
+        struct Registered<'a>(&'a str);
+        impl Drop for Registered<'_> {
+            fn drop(&mut self) {
+                if let Ok(mut installs) = local_model_installs().lock() {
+                    installs.remove(self.0);
+                }
+            }
+        }
+        let _registered = Registered(&request.id);
+        let mut report = |event: msime_client_core::voice::local_models::InstallProgress| {
+            if let Some(callback) = progress {
+                let text = json!({
+                    "id": request.id,
+                    "stage": event.stage,
+                    "downloaded": event.downloaded,
+                    "total": event.total,
+                })
+                .to_string();
+                unsafe {
+                    callback(text.as_ptr(), text.len(), context);
+                }
+            }
+        };
+        let path = msime_client_core::voice::local_models::install(
+            root,
+            &request.id,
+            &request.mirror,
+            &mut report,
+            &cancel,
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(json!({ "path": path.to_string_lossy() }))
+    })
+}
+
+/// Stop a running install. Request `{"id": "<catalog id>"}` cancels that model's install; a null request, or one without `id`, cancels every install in this process. Response value: whether anything was running. The install call itself returns once it notices, between chunks.
+///
+/// # Safety
+/// `request` must be null or point to `length` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_voice_local_model_cancel(
+    request: *const u8,
+    length: usize,
+) -> *mut c_char {
+    response(|| {
+        #[derive(Deserialize)]
+        struct CancelRequest {
+            #[serde(default)]
+            id: Option<String>,
+        }
+        let id = if request.is_null() || length == 0 {
+            None
+        } else {
+            local_voice_request::<CancelRequest>(request, length, 16_384)?.id
+        };
+        let installs = local_model_installs()
+            .lock()
+            .map_err(|_| "internal runtime failure")?;
+        let mut cancelled = false;
+        for (running, flag) in installs.iter() {
+            if id.as_ref().is_none_or(|id| id == running) {
+                flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                cancelled = true;
+            }
+        }
+        Ok(json!(cancelled))
+    })
+}
+
+/// Delete an installed model. Request `{"root": "<absolute dir>", "id": "<catalog id>"}`; only catalog ids are accepted. Removing a model that is not installed succeeds. Response value: null.
+///
+/// # Safety
+/// `request` must point to `length` readable bytes. Null is rejected.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_voice_local_model_remove(
+    request: *const u8,
+    length: usize,
+) -> *mut c_char {
+    response(|| {
+        #[derive(Deserialize)]
+        struct RemoveRequest {
+            root: String,
+            id: String,
+        }
+        let request: RemoveRequest = local_voice_request(request, length, 16_384)?;
+        let root = local_model_root(&request.root)?;
+        // Hold the registry across the removal: releasing it after the check would let an
+        // install of the same id register and have its staging directory swept mid-download.
+        let installs = local_model_installs()
+            .lock()
+            .map_err(|_| "internal runtime failure")?;
+        if installs.contains_key(&request.id) {
+            return Err("local_model_install_running".into());
+        }
+        let removed = msime_client_core::voice::local_models::remove(root, &request.id);
+        drop(installs);
+        removed.map_err(|error| error.to_string())?;
+        Ok(Value::Null)
     })
 }

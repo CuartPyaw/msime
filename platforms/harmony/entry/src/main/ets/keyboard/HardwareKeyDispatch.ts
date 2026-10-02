@@ -15,7 +15,10 @@ import { HardwareKeyAction, HardwareKeyDecision } from "./HardwareKeyRouter";
 
 /** Everything a routed hardware key can ask of the keyboard. */
 export interface HardwareKeyTarget {
-  press(character: number, shifted: boolean): void;
+  /** Whether the key did anything; a letter the Engine declines goes back to the application. */
+  press(character: number, shifted: boolean): boolean;
+  /** Insert a printable ASCII character as its fullwidth form; false when fullwidth is off. */
+  widen(character: number): boolean;
   punctuation(character: number): void;
   backspace(): void;
   cancel(): void;
@@ -40,6 +43,12 @@ export interface HardwareKeyTarget {
   previousCandidate(): void;
   convertJapanese(): boolean;
   commitJapanese(): boolean;
+  /** Finish the composition and type `character` after it. */
+  commitThenType(character: number): void;
+  /** Finish the composition so its text is in the editor before the key that ended it reaches the application. */
+  finishBeforeKey(): void;
+  /** List the Hanja of the composing Korean syllable, or close the open list; false when the Engine declined, as it does for a lone jamo. */
+  convertHanja(): boolean;
 }
 
 export class HardwareKeyDispatch {
@@ -49,89 +58,111 @@ export class HardwareKeyDispatch {
    * RELEASE never arrives here — the caller hands the key back to the application before this is
    * reached — and IGNORED is a key deliberately consumed without an effect, which is how a disabled
    * navigation binding stops being text rather than becoming a stray character.
+   *
+   * Returns whether the key was consumed. Only a letter can come back unconsumed: the Engine declines an upper-case letter with nothing composed and, with fullwidth off, nothing else takes it; and a key that was claimed and then did nothing is a character the user typed and never saw. The other exception is deliberate: a Korean syllable ended by Return, a caret key or Delete is committed and the key then goes on to the application.
    */
-  static apply(decision: HardwareKeyDecision, shifted: boolean, target: HardwareKeyTarget): void {
+  static apply(
+    decision: HardwareKeyDecision,
+    shifted: boolean,
+    target: HardwareKeyTarget,
+  ): boolean {
     switch (decision.action) {
       case HardwareKeyAction.COMPOSE:
-        target.press(decision.character, shifted);
-        return;
+        // A capital the Engine declines is still eaten in fullwidth mode, as Windows eats every printable key then.
+        return target.press(decision.character, shifted) || target.widen(decision.character);
+      case HardwareKeyAction.WIDEN:
+        return target.widen(decision.character);
       case HardwareKeyAction.PUNCTUATION:
         target.punctuation(decision.character);
-        return;
+        break;
       case HardwareKeyAction.BACKSPACE:
         target.backspace();
-        return;
+        break;
       case HardwareKeyAction.CANCEL:
         target.cancel();
-        return;
+        break;
       case HardwareKeyAction.MOVE_LEFT:
         target.moveLeft();
-        return;
+        break;
       case HardwareKeyAction.MOVE_RIGHT:
         target.moveRight();
-        return;
+        break;
       case HardwareKeyAction.MOVE_HOME:
         target.moveHome();
-        return;
+        break;
       case HardwareKeyAction.MOVE_END:
         target.moveEnd();
-        return;
+        break;
       case HardwareKeyAction.DELETE_FORWARD:
         target.deleteForward();
-        return;
+        break;
       case HardwareKeyAction.BACKSPACE_SEGMENT:
         target.backspaceSegment();
-        return;
+        break;
       case HardwareKeyAction.MOVE_LEFT_SEGMENT:
         target.moveLeftSegment();
-        return;
+        break;
       case HardwareKeyAction.MOVE_RIGHT_SEGMENT:
         target.moveRightSegment();
-        return;
+        break;
       case HardwareKeyAction.COMMIT:
         target.commitHighlighted();
-        return;
+        break;
       case HardwareKeyAction.COMMIT_RAW:
         target.commitRaw();
-        return;
+        break;
       case HardwareKeyAction.COMMIT_TRANSLATION:
         target.commitTranslation();
-        return;
+        break;
       case HardwareKeyAction.SELECT:
         target.choose(decision.index);
-        return;
+        break;
       case HardwareKeyAction.RESET_CACHE:
         target.resetCache();
-        return;
+        break;
       case HardwareKeyAction.REMOVE_CANDIDATE:
         target.removeManagedCandidate(decision.index);
-        return;
+        break;
       case HardwareKeyAction.WORD_CHARACTER_FIRST:
         target.selectEdge(CandidateTextEdge.FIRST);
-        return;
+        break;
       case HardwareKeyAction.WORD_CHARACTER_LAST:
         target.selectEdge(CandidateTextEdge.LAST);
-        return;
+        break;
       case HardwareKeyAction.NEXT_PAGE:
         target.nextPage();
-        return;
+        break;
       case HardwareKeyAction.PREVIOUS_PAGE:
         target.previousPage();
-        return;
+        break;
       case HardwareKeyAction.NEXT_CANDIDATE:
         target.nextCandidate();
-        return;
+        break;
       case HardwareKeyAction.PREVIOUS_CANDIDATE:
         target.previousCandidate();
-        return;
+        break;
       case HardwareKeyAction.JAPANESE_CONVERT:
-        target.convertJapanese();
-        return;
+        // Space the conversion does not claim (a lone Fallback row, which is the raw composition) commits the way Space does outside Japanese.
+        if (!target.convertJapanese()) {
+          target.commitHighlighted();
+        }
+        break;
       case HardwareKeyAction.JAPANESE_COMMIT:
         target.commitJapanese();
-        return;
+        break;
+      case HardwareKeyAction.COMMIT_THEN_TYPE:
+        target.commitThenType(decision.character);
+        break;
+      case HardwareKeyAction.COMMIT_THEN_RELEASE:
+        target.finishBeforeKey();
+        return false;
+      case HardwareKeyAction.CONVERT_HANJA:
+        // Consumed whatever the Engine answers: the router only claims the key while a syllable composes, where handing it on would put it in the editor beside that syllable.
+        target.convertHanja();
+        break;
       default:
-        return;
+        break;
     }
+    return true;
   }
 }

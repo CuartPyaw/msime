@@ -34,54 +34,30 @@ pub struct DictionaryChange {
     pub replacement: Option<DictionaryEntry>,
 }
 
-pub fn validate_change_page(
-    after: i64,
-    changes: &[DictionaryChange],
-    next: i64,
-    has_more: bool,
-) -> bool {
-    if after < 0 || next < after {
-        return false;
-    }
-    let mut cursor = after;
-    for change in changes {
-        if change.revision <= cursor {
-            return false;
-        }
-        cursor = change.revision;
-    }
-    cursor == next && (!has_more || !changes.is_empty())
-}
-
 pub const MAX_IMPORT_BYTES: usize = 64 * 1024;
 
-pub fn dictionary_path(kind: DictionaryKind, offset: usize, search: &str) -> Option<String> {
-    if offset > 1_000_000
-        || search.len() > 1024
-        || search.contains('\0')
-        || search.chars().any(char::is_control)
-    {
-        return None;
-    }
-    let kind = match kind {
+pub(crate) fn kind_path(kind: DictionaryKind) -> &'static str {
+    match kind {
         DictionaryKind::Pinyin => "pinyin",
         DictionaryKind::Wubi => "wubi",
         DictionaryKind::Quick => "quick",
         DictionaryKind::English => "english",
-    };
+    }
+}
+
+pub fn dictionary_path(kind: DictionaryKind, offset: usize, search: &str) -> Option<String> {
+    if offset > 1_000_000 || !crate::is_bounded_text(search, 1024) {
+        return None;
+    }
+    let kind = kind_path(kind);
     Some(format!(
         "/v1/users/me/dictionaries/{kind}?q={}&offset={offset}&limit=100",
-        encode(search)
+        percent_encode(search)
     ))
 }
 
 pub fn mutation_path(kind: DictionaryKind, operation: &str) -> Option<String> {
-    let base = match kind {
-        DictionaryKind::Pinyin => "pinyin",
-        DictionaryKind::Wubi => "wubi",
-        DictionaryKind::Quick => "quick",
-        DictionaryKind::English => "english",
-    };
+    let base = kind_path(kind);
     match operation {
         "add" | "import" | "import-hans" | "export" => {
             Some(format!("/v1/users/me/dictionaries/{base}/{operation}"))
@@ -90,39 +66,11 @@ pub fn mutation_path(kind: DictionaryKind, operation: &str) -> Option<String> {
     }
 }
 
-pub fn entry_path(entry: &DictionaryEntry) -> Option<String> {
-    if entry.revision <= 0
-        || entry.id.len() != 64
-        || !entry
-            .id
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-    {
-        return None;
-    }
-    let kind = match entry.kind {
-        DictionaryKind::Pinyin => "pinyin",
-        DictionaryKind::Wubi => "wubi",
-        DictionaryKind::Quick => "quick",
-        DictionaryKind::English => "english",
-    };
-    Some(format!("/v1/users/me/dictionaries/{kind}/{}", entry.id))
-}
-
-pub fn changes_path(after: i64, limit: usize) -> Option<String> {
-    if after < 0 || !(1..=100).contains(&limit) {
-        return None;
-    }
-    Some(format!(
-        "/v1/users/me/dictionary/changes?after={after}&limit={limit}"
-    ))
-}
-
-fn encode(value: &str) -> String {
+pub fn percent_encode(value: &str) -> String {
     value
         .bytes()
         .map(|b| {
-            if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+            if crate::text::is_ascii_uri_unreserved(b) {
                 format!("{}", b as char)
             } else {
                 format!("%{:02X}", b)
@@ -131,19 +79,15 @@ fn encode(value: &str) -> String {
         .collect()
 }
 
+fn valid_dictionary_fields(code: &str, word: &str) -> bool {
+    !code.is_empty()
+        && !word.is_empty()
+        && crate::is_bounded_text(code, 256)
+        && crate::is_bounded_text(word, 1024)
+}
+
 pub fn validate_value(value: &DictionaryValue) -> Result<(), &'static str> {
-    if value.code.is_empty()
-        || value.code.len() > 256
-        || value.word.is_empty()
-        || value.word.len() > 1024
-    {
-        return Err("invalid dictionary value");
-    }
-    if value.code.contains('\0')
-        || value.word.contains('\0')
-        || value.code.chars().any(char::is_control)
-        || value.word.chars().any(char::is_control)
-    {
+    if !valid_dictionary_fields(&value.code, &value.word) {
         return Err("invalid dictionary value");
     }
     if value.weight < 0 {
@@ -156,13 +100,30 @@ pub fn validate_import(text: &str) -> Result<(), &'static str> {
     if text.is_empty()
         || text.len() > MAX_IMPORT_BYTES
         || text.contains('\0')
-        || text
-            .chars()
-            .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
+        || crate::text::has_disallowed_control(text)
     {
         return Err("invalid dictionary import");
     }
     Ok(())
+}
+
+pub fn valid_candidate_query(
+    text: &str,
+    kind: &str,
+    scheme: &str,
+    profile: &str,
+    limit: usize,
+) -> bool {
+    !text.is_empty()
+        && crate::is_bounded_text(text, 256)
+        && matches!(kind, "pinyin" | "jianpin" | "wubi" | "quick" | "english")
+        && matches!(scheme, "pinyin" | "shuangpin")
+        && matches!(profile, "xiaohe" | "ziranma" | "microsoft" | "shoudao")
+        && (1..=100).contains(&limit)
+}
+
+pub fn valid_candidate_value(code: &str, word: &str) -> bool {
+    valid_dictionary_fields(code, word)
 }
 
 #[cfg(test)]
@@ -212,55 +173,5 @@ mod tests {
             Some("/v1/users/me/dictionaries/quick/import".into())
         );
         assert!(mutation_path(DictionaryKind::Pinyin, "delete").is_none());
-    }
-
-    #[test]
-    fn validates_versioned_entry_path() {
-        let entry = DictionaryEntry {
-            id: "a".repeat(64),
-            kind: DictionaryKind::Pinyin,
-            value: DictionaryValue {
-                code: "ni".into(),
-                word: "你".into(),
-                weight: 1,
-            },
-            revision: 2,
-        };
-        assert_eq!(
-            entry_path(&entry).unwrap(),
-            format!("/v1/users/me/dictionaries/pinyin/{}", "a".repeat(64))
-        );
-        assert!(entry_path(&DictionaryEntry {
-            revision: 0,
-            ..entry
-        })
-        .is_none());
-    }
-
-    #[test]
-    fn validates_change_feed_cursor() {
-        assert_eq!(
-            changes_path(4, 50),
-            Some("/v1/users/me/dictionary/changes?after=4&limit=50".into())
-        );
-        assert!(changes_path(-1, 1).is_none());
-        assert!(changes_path(0, 101).is_none());
-    }
-
-    #[test]
-    fn validates_monotonic_change_pages() {
-        let change = DictionaryChange {
-            revision: 3,
-            previous: None,
-            replacement: None,
-        };
-        assert!(validate_change_page(
-            1,
-            std::slice::from_ref(&change),
-            3,
-            true
-        ));
-        assert!(!validate_change_page(3, &[change], 3, false));
-        assert!(!validate_change_page(1, &[], 1, true));
     }
 }

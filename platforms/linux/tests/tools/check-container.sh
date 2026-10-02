@@ -10,29 +10,21 @@ repo_root=$(cd "$(dirname "$0")/../../../.." && pwd)
 }
 resource_dir=$(cd "$1" && pwd)
 mkdir -p "$repo_root/target/linux"
-# /source is mounted read-only, so the Engine archive has to be there already -
-# and in a worktree it is not, because vendor/ is ignored and lives in whichever
-# checkout last fetched it. Mount that one rather than making this run impossible
-# from the working style this repository actually uses. Same lookup order as the
-# Windows gate's vcpkg tree and platforms/linux/build-container.sh.
-main_worktree=$(dirname "$(git -C "$repo_root" rev-parse --git-common-dir 2>/dev/null || echo "$repo_root")")
-vendor=""
-for candidate in "$repo_root/vendor" "$main_worktree/vendor"; do
-  [[ -d $candidate/MSIME-Engine ]] && vendor=$(cd "$candidate" && pwd) && break
-done
-docker build -t msime-client-linux-test:local -f "$repo_root/platforms/linux/tests/tools/Dockerfile" "$repo_root/platforms/linux/tests"
-test_image=msime-client-linux-test:local
+# Tag per checkout, as build-container.sh does: with a fixed tag, concurrent worktrees overwrite each other's image and a run can silently test another checkout's Dockerfile.
+tag=$(printf %s "$repo_root" | shasum | cut -c1-12)
+base_image=msime-linux-test:$tag
+docker build -t "$base_image" -f "$repo_root/platforms/linux/tests/tools/Dockerfile" "$repo_root/platforms/linux/tests"
+test_image=$base_image
 if [[ ${2:-} == --ibus-1.5.32 ]]; then
-  test_image=msime-client-linux-ibus132-test:local
-  docker build -t "$test_image" -f "$repo_root/platforms/linux/tests/tools/Dockerfile.ibus-1.5.32" "$repo_root/platforms/linux/tests"
+  test_image=msime-linux-ibus132-test:$tag
+  docker build -t "$test_image" --build-arg BASE_IMAGE="$base_image" -f "$repo_root/platforms/linux/tests/tools/Dockerfile.ibus-1.5.32" "$repo_root/platforms/linux/tests"
 fi
 if [[ ${2:-} == --fcitx5 ]]; then
-  test_image=msime-client-linux-fcitx5-test:local
-  docker build -t "$test_image" -f "$repo_root/platforms/linux/tests/tools/Dockerfile.fcitx5" "$repo_root/platforms/linux/tests"
+  test_image=msime-linux-fcitx5-test:$tag
+  docker build -t "$test_image" --build-arg BASE_IMAGE="$base_image" -f "$repo_root/platforms/linux/tests/tools/Dockerfile.fcitx5" "$repo_root/platforms/linux/tests"
 fi
 docker run --rm --init \
   -v "$repo_root:/source:ro" -v "$repo_root/target/linux:/build" -v "$resource_dir:/resources:ro" \
-  ${vendor:+-v "$vendor:/source/vendor:ro"} \
   -e CARGO_TARGET_DIR=/build/cargo -e CARGO_HOME=/build/cargo-home -e CARGO_BUILD_JOBS=4 \
   -e MSIME_ISOLATED_LINUX_TEST=1 \
   -e MSIME_TEST_FCITX5=$( [[ ${2:-} == --fcitx5 ]] && echo 1 || echo 0 ) \

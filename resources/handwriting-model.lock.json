@@ -1,0 +1,18 @@
+{
+  "source_commit": "a9b9f092219505166c927843762b650d1e0e501d",
+  "source": "https://github.com/metasequoiaime/msime-engine/tree/a9b9f092219505166c927843762b650d1e0e501d/handwriting/models",
+  "artifacts": [
+    {
+      "name": "handwriting-zh_CN.model",
+      "url": "https://raw.githubusercontent.com/metasequoiaime/msime-engine/a9b9f092219505166c927843762b650d1e0e501d/handwriting/models/handwriting-zh_CN.model",
+      "sha256": "e16153d1ff267cd479aea260d6f71a3edda8b4ba06db2d121513adda65a4449e",
+      "size": 26834816
+    },
+    {
+      "name": "HandwritingModel-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/metasequoiaime/msime-engine/a9b9f092219505166c927843762b650d1e0e501d/handwriting/models/HandwritingModel-LICENSE.txt",
+      "sha256": "a190dc9c8043755d90f8b0a75fa66b9e42d4af4c980bf5ddc633f0124db3cee7",
+      "size": 26430
+    }
+  ]
+}

@@ -18,10 +18,11 @@ inline bool msime_voice_overlay_light_theme(std::string_view surface_theme,
   return false;
 }
 
+// The streaming providers, whose partial transcripts can stand in the composition while the user speaks: Doubao in the cloud and on-device recognition, whose helper reports the transcript so far as it decodes.
 inline bool msime_voice_stream_inline_enabled(bool configured,
                                               std::string_view provider,
                                               std::string_view commit_mode = "tsf") {
-  return configured && provider == "doubao" &&
+  return configured && (provider == "doubao" || provider == "local") &&
          (commit_mode.empty() || commit_mode == "tsf");
 }
 
@@ -58,6 +59,17 @@ inline std::string msime_voice_result_or_transcript(std::string result,
   if (!transcript.empty())
     return msime_voice_bound_result(std::move(transcript));
   return msime_voice_bound_result(std::move(preedit));
+}
+
+// The notice a host shows when the voice provider ended a recording without text. `error` is the stream call's envelope error (empty when the provider just gave no result): a named missing dependency gets a fixed notice saying what to install, since recording again cannot succeed without it; anything else gets the generic provider notice. Provider text never reaches the user.
+inline const char *msime_voice_provider_failure_notice(std::string_view error) {
+  if (error == "voice_dependency_missing:websockets")
+    return "豆包语音需要 websockets 15 或更高版本，请安装 python3-websockets";
+  if (error == "voice_dependency_missing:recorder")
+    return "未找到录音工具，请安装 pulseaudio-utils、pipewire-bin 或 alsa-utils";
+  if (error == "voice_dependency_missing:local_asr")
+    return "本地语音识别组件无法加载，请重新安装输入法";
+  return "语音输入失败，请检查语音服务、麦克风及提供商配置后重试";
 }
 
 // Platform adapter contract: implementations run capture/provider work off

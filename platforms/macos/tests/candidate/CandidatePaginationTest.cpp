@@ -35,18 +35,29 @@ int main() {
     require(msime::mac::PhysicalCandidateDigitSlot(83) == 0 && msime::mac::PhysicalCandidateDigitSlot(92) == 8, "keypad digit mapping");
     require(msime::mac::PhysicalCandidateDigitSlot(82) == -1 && msime::mac::PhysicalCandidateDigitSlot(29) == -1 && msime::mac::PhysicalCandidateDigitSlot(0) == -1, "non-candidate key codes rejected");
     require(msime::mac::ShouldRoutePhysicalCandidateDigit(true, false, false, false), "ordinary candidate digits route");
-    require(!msime::mac::ShouldRoutePhysicalCandidateDigit(true, false, true, false), "Unicode digits reach the engine");
+    require(!msime::mac::ShouldRoutePhysicalCandidateDigit(true, false, true, false), "digits a mode spells with reach the engine");
     require(!msime::mac::ShouldRoutePhysicalCandidateDigit(true, true, false, false), "nine-key digits reach the engine");
     require(!msime::mac::ShouldRoutePhysicalCandidateDigit(true, false, false, true), "modified digits reach the engine");
     require(!msime::mac::ShouldRoutePhysicalCandidateDigit(false, false, false, false), "hidden candidate panel does not route digits");
-    require(msime::mac::ShouldRouteUnicodeShiftCandidateDigit(true, true, true),
-            "Unicode composition selects with Shift and a digit, which its hexadecimal input cannot use");
-    require(!msime::mac::ShouldRouteUnicodeShiftCandidateDigit(true, true, false),
-            "an unshifted digit is still hexadecimal input");
-    require(!msime::mac::ShouldRouteUnicodeShiftCandidateDigit(true, false, true),
-            "outside Unicode composition a shifted digit is punctuation, not a selection");
-    require(!msime::mac::ShouldRouteUnicodeShiftCandidateDigit(false, true, true),
+    require(msime::mac::ShouldRouteSpellingShiftCandidateDigit(true, true, true, false),
+            "a mode spelling with digits selects with Shift and a digit, which its input cannot use");
+    require(!msime::mac::ShouldRouteSpellingShiftCandidateDigit(true, true, false, false),
+            "an unshifted digit is still input");
+    require(!msime::mac::ShouldRouteSpellingShiftCandidateDigit(true, false, true, false),
+            "outside such a mode a shifted digit is punctuation, not a selection");
+    require(!msime::mac::ShouldRouteSpellingShiftCandidateDigit(false, true, true, false),
             "with no candidate panel there is nothing to select");
+    require(!msime::mac::ShouldRouteSpellingShiftCandidateDigit(true, true, true, true),
+            "a shifted digit the mode spells with, such as ( in expression mode, stays input");
+    require(msime::mac::PhysicalCandidateDigitCharacter(0) == '1' && msime::mac::PhysicalCandidateDigitCharacter(8) == '9' &&
+                msime::mac::PhysicalCandidateDigitCharacter(-1) == '\0' && msime::mac::PhysicalCandidateDigitCharacter(9) == '\0',
+            "candidate slots name the digit their key types");
+    require(msime::mac::PhysicalKeySoundClass(49) == 1 && msime::mac::PhysicalKeySoundClass(36) == 2 &&
+                msime::mac::PhysicalKeySoundClass(76) == 2 && msime::mac::PhysicalKeySoundClass(51) == 3,
+            "space, both enter keys and backspace have their own key sound class");
+    require(msime::mac::PhysicalKeySoundClass(0) == 0 && msime::mac::PhysicalKeySoundClass(117) == 0 &&
+                msime::mac::PhysicalKeySoundClass(18) == 0,
+            "letters, digits and forward delete use the default key sound");
     require(msime::mac::IsKeypadDecimal(65) && !msime::mac::IsKeypadDecimal(0), "keypad decimal mapping");
     require(msime::mac::KeypadPunctuation(65) == '.' && msime::mac::KeypadPunctuation(67) == '*' &&
                 msime::mac::KeypadPunctuation(69) == '+' && msime::mac::KeypadPunctuation(75) == '/' &&
@@ -60,4 +71,41 @@ int main() {
     require(msime::mac::CandidateWheelPageAction(-1, false, true, true) == CandidateWheelAction::None, "disabled wheel passthrough");
     require(msime::mac::CandidateWheelPageAction(1, true, false, true) == CandidateWheelAction::None, "wheel respects first page");
     require(msime::mac::CandidateWheelPageAction(-1, true, true, false) == CandidateWheelAction::None, "wheel respects last page");
+    using msime::mac::ConsumeCandidateWheelDelta;
+    double wheel = 0.0;
+    int wheelPages = 0;
+    for (int event = 0; event < 20; ++event)
+        wheelPages += ConsumeCandidateWheelDelta(wheel, -3.0, true, event == 0, false, 40.0);
+    require(wheelPages == -1 && wheel == -20.0, "one short trackpad swipe pages once and keeps the remainder");
+    require(ConsumeCandidateWheelDelta(wheel, -100.0, true, false, true, 40.0) == 0 && wheel == 0.0,
+            "momentum scrolling never pages and drops the remainder");
+    wheel = -30.0;
+    require(ConsumeCandidateWheelDelta(wheel, 30.0, true, false, false, 40.0) == 0 && wheel == 30.0,
+            "direction reversal drops the old remainder");
+    require(ConsumeCandidateWheelDelta(wheel, 10.0, true, false, false, 40.0) == 1 && wheel == 0.0,
+            "precise scrolling pages once per full notch toward the previous page");
+    wheel = 30.0;
+    require(ConsumeCandidateWheelDelta(wheel, 5.0, true, true, false, 40.0) == 0 && wheel == 5.0,
+            "gesture begin starts from an empty accumulator");
+    wheel = 0.0;
+    require(ConsumeCandidateWheelDelta(wheel, -130.0, true, false, false, 40.0) == -3 && wheel == -10.0,
+            "a multi-notch precise delta splits into several pages");
+    wheel = 25.0;
+    require(ConsumeCandidateWheelDelta(wheel, -6.0, false, false, false, 40.0) == -1 && wheel == 0.0,
+            "classic wheel pages once per notch regardless of line acceleration");
+    require(ConsumeCandidateWheelDelta(wheel, 0.0, false, false, false, 40.0) == 0, "zero classic delta does not page");
+    static_assert(msime::mac::CandidateWheelPreciseNotch > 0.0);
+    static_assert(msime::mac::KoreanKeyLetter('r', false) == 'r' && msime::mac::KoreanKeyLetter('R', false) == 'r',
+                  "Caps Lock must not turn a Korean key into its shifted jamo");
+    static_assert(msime::mac::KoreanKeyLetter('r', true) == 'R' && msime::mac::KoreanKeyLetter('R', true) == 'R',
+                  "Shift decides the case of a Korean key");
+    static_assert(msime::mac::KoreanKeyLetter('1', true) == '1' && msime::mac::KoreanKeyLetter('.', false) == '.' &&
+                      msime::mac::KoreanKeyLetter(' ', true) == ' ',
+                  "Only letters are recased for Korean");
+    require(msime::mac::JapaneseSpaceCommitsFallback(1, msime::mac::CandidateSourceFallback),
+            "a lone Fallback row (bare Shift+R) is committed by Japanese Space instead of arming a conversion");
+    require(!msime::mac::JapaneseSpaceCommitsFallback(1, 0) &&
+                !msime::mac::JapaneseSpaceCommitsFallback(2, msime::mac::CandidateSourceFallback) &&
+                !msime::mac::JapaneseSpaceCommitsFallback(0, msime::mac::CandidateSourceFallback),
+            "Japanese Space still arms a conversion for real candidates");
 }

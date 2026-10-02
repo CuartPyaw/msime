@@ -99,24 +99,12 @@ impl AiSkinApi for BackendAccountClient {
             128 * 1024,
             Duration::from_secs(30),
         )?;
-        if catalog.data.is_empty()
-            || catalog.data.len() > 33
-            || catalog.default_model.is_empty()
-            || catalog.default_model.len() > 200
-            || !catalog
-                .data
-                .iter()
-                .any(|model| model.id == catalog.default_model)
-            || catalog.data.iter().any(|model| {
-                model.id.is_empty()
-                    || model.id.len() > 200
-                    || model.id.chars().any(char::is_control)
-            })
-        {
-            return Err(AccountError::Unavailable);
-        }
-        let ids: BTreeSet<&str> = catalog.data.iter().map(|model| model.id.as_str()).collect();
-        if ids.len() != catalog.data.len() {
+        if !crate::account::valid_model_catalog(
+            catalog.data.iter().map(|model| model.id.as_str()),
+            &catalog.default_model,
+            33,
+            200,
+        ) {
             return Err(AccountError::Unavailable);
         }
         Ok(catalog)
@@ -154,8 +142,7 @@ impl AiSkinApi for BackendAccountClient {
             || messages.iter().any(|message| {
                 !matches!(message.role, "system" | "user" | "assistant")
                     || message.content.is_empty()
-                    || message.content.len() > 16 * 1024
-                    || message.content.chars().any(char::is_control)
+                    || !crate::text::is_bounded_text(message.content, 16 * 1024)
             })
         {
             return Err(AccountError::Invalid);
@@ -208,7 +195,7 @@ impl AiSkinApi for BackendAccountClient {
     }
 
     fn get_skin_artwork(&self, id: &str, token: &str) -> Result<AiSkinJob, AccountError> {
-        if !valid_job_id(id) {
+        if !crate::text::is_lower_hex(id, 48) {
             return Err(AccountError::Invalid);
         }
         let path = format!("/v1/skins/jobs/{id}");
@@ -227,7 +214,7 @@ impl AiSkinApi for BackendAccountClient {
     }
 
     fn delete_skin_artwork(&self, id: &str, token: &str) -> Result<(), AccountError> {
-        if !valid_job_id(id) {
+        if !crate::text::is_lower_hex(id, 48) {
             return Err(AccountError::Invalid);
         }
         let path = format!("/v1/skins/jobs/{id}");
@@ -252,7 +239,9 @@ struct RawSkinJob {
 }
 
 fn validate_job(job: RawSkinJob) -> Result<AiSkinJob, AccountError> {
-    if !valid_job_id(&job.id) || !matches!(job.state.as_str(), "running" | "succeeded" | "failed") {
+    if !crate::text::is_lower_hex(&job.id, 48)
+        || !matches!(job.state.as_str(), "running" | "succeeded" | "failed")
+    {
         return Err(AccountError::Unavailable);
     }
     if let Some(artwork) = &job.artwork {
@@ -263,13 +252,6 @@ fn validate_job(job: RawSkinJob) -> Result<AiSkinJob, AccountError> {
         state: job.state,
         artwork: job.artwork,
     })
-}
-
-fn valid_job_id(id: &str) -> bool {
-    id.len() == 48
-        && id
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn validate_artwork(artwork: &AiSkinArtwork) -> Result<Vec<u8>, AiSkinError> {
@@ -318,10 +300,7 @@ where
         cancelled: &AtomicBool,
         progress: impl Fn(usize) + Send + Sync,
     ) -> Result<Vec<AiSkinProposal>, AiSkinError> {
-        if prompt.is_empty()
-            || prompt.chars().count() > MAX_PROMPT_CHARACTERS
-            || prompt.chars().any(char::is_control)
-        {
+        if prompt.is_empty() || !crate::text::is_bounded_chars(prompt, MAX_PROMPT_CHARACTERS) {
             return Err(AiSkinError::InvalidResponse);
         }
         check_cancelled(cancelled)?;
@@ -388,9 +367,10 @@ where
             first_error.map_or_else(|| Ok(results), Err)
         })?;
         results.sort_by_key(|(index, _)| *index);
-        let results = results.into_iter().map(|(_, result)| result).collect();
+        let mut ordered = Vec::with_capacity(results.len());
+        ordered.extend(results.into_iter().map(|(_, result)| result));
         self.ensure_identity(&user_id)?;
-        Ok(results)
+        Ok(ordered)
     }
 
     fn request_authenticated<T>(
@@ -553,7 +533,7 @@ pub fn plan_ai_skins(text: &str) -> Result<Vec<AiSkinPlan>, AiSkinError> {
 
 fn distinct<T: PartialEq>(values: impl Iterator<Item = T>) -> usize {
     values
-        .fold(Vec::new(), |mut seen, value| {
+        .fold(Vec::with_capacity(3), |mut seen, value| {
             if !seen.contains(&value) {
                 seen.push(value);
             }
@@ -623,9 +603,9 @@ fn parse(text: &str) -> Result<Vec<AiSkinPlan>, AiSkinError> {
         if !(1..=32).contains(&source.name.trim().chars().count())
             || !(1..=280).contains(&source.description.chars().count())
             || !(40..=100).contains(&source.artwork_prompt.trim().chars().count())
-            || source.name.chars().any(char::is_control)
-            || source.description.chars().any(char::is_control)
-            || source.artwork_prompt.chars().any(char::is_control)
+            || crate::has_disallowed_control_with_options(&source.name, false)
+            || crate::has_disallowed_control_with_options(&source.description, false)
+            || crate::has_disallowed_control_with_options(&source.artwork_prompt, false)
             || !source.corner_radius.is_finite()
             || !(0.0..=20.0).contains(&source.corner_radius)
             || !source.border_width.is_finite()
@@ -720,7 +700,7 @@ fn contrast(first: u32, second: u32) -> f64 {
     (first.max(second) + 0.05) / (first.min(second) + 0.05)
 }
 
-fn readable_text(background: u32) -> u32 {
+pub(crate) fn readable_text(background: u32) -> u32 {
     if luminance(background) > 0.179 {
         0
     } else {

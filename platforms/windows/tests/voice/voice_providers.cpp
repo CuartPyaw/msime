@@ -1,4 +1,4 @@
-#include "VoiceProviders.h"
+#include "../../../../shared/voice/VoiceProviders.h"
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -26,13 +26,22 @@ int main() {
     require(!is_doubao_asr_provider("openai"));
     require(!is_doubao_asr_provider("siliconflow"));
     require(!is_doubao_asr_provider("groq"));
-    // "cloud" is the legacy spelling of siliconflow, not Doubao.
+    // A provider id this host does not know is not Doubao either.
     require(!is_doubao_asr_provider("cloud"));
 
     require(voice_endpoint_is_websocket("wss://openspeech.bytedance.com/api"));
     require(voice_endpoint_is_websocket("ws://localhost:9000"));
     require(!voice_endpoint_is_websocket("https://api.openai.com/v1/audio/transcriptions"));
     require(!voice_endpoint_is_websocket(""));
+
+    require(secure_voice_endpoint("https://api.openai.com/v1/audio/transcriptions", false));
+    require(secure_voice_endpoint("wss://openspeech.bytedance.com/api", true));
+    require(!secure_voice_endpoint("http://api.example.invalid/asr", false));
+    require(!secure_voice_endpoint("ws://api.example.invalid/asr", true));
+    require(!secure_voice_endpoint("https://user:pass@example.invalid/asr", false));
+    require(!secure_voice_endpoint("https:///asr", false));
+    require(!secure_voice_endpoint("https://example.invalid/a b", false));
+    require(!secure_voice_endpoint("https://example.invalid/asr#fragment", false));
 
     // Each provider's default endpoint must match its own transport, or the
     // mismatch check in VoiceInputSession would reject its own defaults.

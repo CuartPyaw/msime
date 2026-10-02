@@ -5,13 +5,11 @@ use serde_json::Value;
 pub(crate) struct DictionaryState(Option<CloudClipboardSession>);
 impl DictionaryState {
     pub(crate) fn from_environment() -> Result<Self, &'static str> {
-        match std::env::var("MSIME_CLIENT_CLOUD_DICTIONARY_SESSION") {
-            Ok(value) => CloudClipboardSession::parse(&value)
-                .map(|session| Self(Some(session)))
-                .map_err(|_| "Invalid native dictionary session"),
-            Err(std::env::VarError::NotPresent) => Ok(Self(None)),
-            Err(_) => Err("Invalid native dictionary session"),
-        }
+        super::native_cloud_session_from_environment(
+            "MSIME_CLIENT_CLOUD_DICTIONARY_SESSION",
+            "Invalid native dictionary session",
+        )
+        .map(Self)
     }
     pub(crate) fn request(
         &self,
@@ -20,23 +18,27 @@ impl DictionaryState {
     ) -> Option<Result<Value, crate::CommandError>> {
         self.0.as_ref().map(|session| {
             if label != "cloud-dictionary-panel" {
-                return Err(error(CloudClipboardError::Unavailable));
+                return Err(super::cloud_clipboard_error(
+                    CloudClipboardError::Unavailable,
+                ));
             }
-            let mut result = session.request_dictionary(action).map_err(error)?;
+            let mut result = session
+                .request_dictionary(action)
+                .map_err(super::cloud_clipboard_error)?;
             if action["operation"] == "export" {
                 let name = format!("dictionary-{}.tsv", action["kind"].as_str().unwrap_or(""));
-                let path = result["export_file"]["path"]
-                    .as_str()
-                    .ok_or_else(|| error(CloudClipboardError::Unavailable))?;
-                let bytes = result["export_file"]["bytes"]
-                    .as_u64()
-                    .ok_or_else(|| error(CloudClipboardError::Unavailable))?;
+                let path = result["export_file"]["path"].as_str().ok_or_else(|| {
+                    super::cloud_clipboard_error(CloudClipboardError::Unavailable)
+                })?;
+                let bytes = result["export_file"]["bytes"].as_u64().ok_or_else(|| {
+                    super::cloud_clipboard_error(CloudClipboardError::Unavailable)
+                })?;
                 let text = msime_host_macos::cloud_dictionary::read_export(
                     std::path::Path::new(path),
                     &name,
                     bytes,
                 )
-                .map_err(error)?;
+                .map_err(super::cloud_clipboard_error)?;
                 // The private descriptor is never returned to JavaScript.
                 result = serde_json::json!({"text":text,"filename":name});
             }
@@ -44,31 +46,14 @@ impl DictionaryState {
         })
     }
 }
-fn error(error: CloudClipboardError) -> crate::CommandError {
-    crate::CommandError {
-        code: match error {
-            CloudClipboardError::Invalid => "invalid",
-            CloudClipboardError::Unavailable => "unavailable",
-            CloudClipboardError::OutcomeUnknown => "outcome_unknown",
-            CloudClipboardError::Conflict => "conflict",
-        },
-    }
-}
 pub(crate) fn startup_panel(route: Option<SurfaceRoute>) -> Option<PanelSurface> {
-    route
-        .filter(|route| *route == SurfaceRoute::CloudDictionary)?
-        .panel()
+    super::startup_panel_for_route(route, SurfaceRoute::CloudDictionary)
 }
 pub(crate) fn prepare_windows(
     windows: &mut [tauri::utils::config::WindowConfig],
     route: Option<SurfaceRoute>,
 ) {
-    if startup_panel(route).is_some() {
-        for window in windows.iter_mut().filter(|window| window.label == "main") {
-            window.visible = false;
-            window.focus = false;
-        }
-    }
+    super::prepare_windows_for_route(windows, route, SurfaceRoute::CloudDictionary);
 }
 
 #[cfg(test)]

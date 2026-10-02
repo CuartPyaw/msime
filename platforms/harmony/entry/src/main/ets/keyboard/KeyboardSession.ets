@@ -1,14 +1,26 @@
 import inputMethodEngine from '@ohos.inputMethodEngine';
+import fs from '@ohos.file.fs';
 import client from 'libmsimeclient.so';
 import { utf8Length } from './Utf8';
+import { TextPolicy } from './TextPolicy';
 import { KeyboardLog, describeError } from './KeyboardLog';
 import { DictionaryMaintenancePolicy } from './DictionaryMaintenancePolicy';
 import { TypingStatisticsPolicy } from './TypingStatisticsPolicy';
+import { KeyPressBatch, KeyPressFlush } from './KeyIdPolicy';
+import { readTypingStatisticsEnabled, writeKeyPresses } from './TypingStatisticsWriter';
+import taskpool from '@ohos.taskpool';
 import { KeyboardSkin } from './skin/KeyboardSkin';
 import { CustomKeyboardSkin, CustomSkinDocument } from './skin/CustomKeyboardSkin';
+import {
+  CandidateColors, CustomThemeDocument, GlobalTheme, ResolvedTheme, ResolveThemeRequest, ThemeCatalogEntry
+} from './skin/GlobalTheme';
 import { KeyboardFormFactor } from './KeyboardFormFactor';
 import { KeyboardScheme, PreferenceMapping, SchemeDefinition } from './KeyboardScheme';
 import { EditorPolicy, EditorTraits } from './input/EditorPolicy';
+import { JapaneseSpacePolicy } from './input/JapaneseSpacePolicy';
+import { KoreanCompositionPolicy } from './input/KoreanCompositionPolicy';
+import { SchemeCompositionPolicy } from './input/SchemeCompositionPolicy';
+import { SchemeTraits } from './SchemeTraits';
 import {
   CapitalizationMode, EnglishCapitalizationPolicy
 } from './input/EnglishCapitalizationPolicy';
@@ -18,16 +30,24 @@ import { FullWidthInputPolicy } from './input/FullWidthInputPolicy';
 import { ChineseHelpcodePolicy } from './input/ChineseHelpcodePolicy';
 import { ChineseOutputPolicy } from './input/ChineseOutputPolicy';
 import { KeyboardFeedback, FeedbackSettings, HapticStrength } from './KeyboardFeedback';
-import { HardwareNavigationPreferences } from './HardwareKeyRouter';
+import { HardwareKeyRouter, HardwareNavigationPreferences, HardwareSpelling } from './HardwareKeyRouter';
 import vibrator from '@ohos.vibrator';
 import common from '@ohos.app.ability.common';
-import i18n from '@ohos.i18n';
 import { InputDiagnosticPolicy } from './input/InputDiagnosticPolicy';
 import { InputModeHudPolicy } from './InputModeHudPolicy';
 import { HardwareKeyTarget } from './HardwareKeyDispatch';
+import { EmojiPanelKey } from './emoji/EmojiPanelKeyPolicy';
 import { DEFAULT_VOICE_HOTKEY_BINDINGS, VoiceHotkeyAction, VoiceHotkeyBindings, VoiceHotkeyPolicy,
   VoiceKey } from './input/VoiceHotkeyPolicy';
 import { HarmonyVoiceRecordingBehaviour } from './input/HarmonyVoiceRecordingBehaviour';
+import { KeySoundPlayer } from './KeySoundPlayer';
+import { KEY_SOUNDS_OFF, KeySoundPolicy, PluginPreferenceDocument } from './KeySoundPolicy';
+import { MusicPlayer } from './MusicPlayer';
+import { MUSIC_OFF, MusicPolicy } from './MusicPolicy';
+import {
+  ResolvedTypingEffectDocument, TYPING_EFFECT_COMMIT, TYPING_EFFECTS_OFF, TypingEffect, TypingEffectPolicy,
+  TypingEffectSettings
+} from './TypingEffectPolicy';
 import { EnglishCompletions, EnglishReplacement, EnglishSuggestionPolicy }
   from './input/EnglishSuggestionPolicy';
 import { ImeModeScopePolicy } from './input/ImeModeScopePolicy';
@@ -44,16 +64,20 @@ import {
 } from './candidate/CandidateGlossLayoutPolicy';
 import { CandidatePresentationPolicy } from './candidate/CandidatePresentationPolicy';
 import {
-  CandidateSkinCatalogPolicy, CandidateSkinPackage, CandidateSkinPaletteTokens, CandidateSkinDecoration
+  CandidateSkinCatalogPolicy, CandidateSkinPackage, CandidateSkinDecoration, CandidateSkinBackground,
+  CandidateSkinAlign, CandidateSkinFit
 } from './candidate/CandidateSkinCatalogPolicy';
 import { CandidateWidthPolicy } from './candidate/CandidateWidthPolicy';
+import { CandidatePagerPolicy } from './candidate/CandidatePagerPolicy';
+import { CandidateLogoPolicy } from './candidate/CandidateLogoPolicy';
+import { CandidateNumberFontPolicy } from './candidate/CandidateNumberFontPolicy';
+import { KeyboardMetrics } from './KeyboardMetrics';
 import { OnlineCandidatePolicy, OnlineQuery } from './candidate/OnlineCandidatePolicy';
 import {
   TranslationPolicy, TranslationQuery, TranslationPlanItem, TranslationEntry,
   TranslationProviderConfig, TencentTranslationConfig, NiuTransTranslationConfig, TranslationCandidate
 } from './candidate/TranslationPolicy';
 import { TranslationSensePolicy } from './candidate/TranslationSensePolicy';
-import fs from '@ohos.file.fs';
 import pasteboard from '@ohos.pasteboard';
 import abilityAccessCtrl from '@ohos.abilityAccessCtrl';
 import bundleManager from '@ohos.bundle.bundleManager';
@@ -62,6 +86,10 @@ import {
   ClipboardHistoryStore, ClipboardHistoryItem, ClipboardHistoryError, ClipboardFailure
 } from './clipboard/ClipboardHistoryStore';
 import { ClipboardHistoryPreferencePolicy } from './clipboard/ClipboardHistoryPreferencePolicy';
+import { CloudClipboardClient } from './clipboard/CloudClipboardClient';
+import {
+  CloudClipboardListing, CloudClipboardPolicy, CloudClipboardSendOutcome
+} from './clipboard/CloudClipboardPolicy';
 import {
   DEFAULT_VOICE_INPUT_CONFIGURATION, VoiceInputConfiguration, VoiceInputConfigurationPolicy
 } from './input/VoiceInputConfiguration';
@@ -85,9 +113,13 @@ import {
   normalizeGroups, normalizeSymbolGroups
 } from './emoji/EmojiCatalogModel';
 import {
+  PluginSymbolGroup, PluginSymbolGroupDocument, PluginSymbolGroupPolicy
+} from './emoji/PluginSymbolGroupPolicy';
+import {
   SmartPunctuationRepeatPolicy, SmartPunctuationRepeatSnapshot
 } from './input/SmartPunctuationRepeatPolicy';
 import { BackspaceHoldPolicy } from './input/BackspaceHoldPolicy';
+import { InlinePreeditPolicy, InlinePreeditStyle } from './input/InlinePreeditPolicy';
 import {
   CompositionBoundary, CompositionBoundaryAction, CompositionBoundaryPolicy
 } from './input/CompositionBoundaryPolicy';
@@ -117,6 +149,8 @@ export interface CandidateEntry {
   /** The annotation slot is a translation rather than an Engine annotation; they are styled
    * differently because the source styles only one of them. */
   readonly annotationIsTranslation: boolean;
+  /** A Korean Hanja row's 훈음, drawn on the gloss line whatever the translation switches say and never committed; "" for any other row. */
+  readonly hunEum: string;
   /** Engine-selected candidate; selection is not necessarily the first row. */
   readonly highlighted: boolean;
   readonly badge: string;
@@ -135,10 +169,15 @@ interface EngineView {
    * 候选只吃掉部分输入时，引擎会继续组字并把选中的那一段交回来。留住它的宿主必须把它画出来：
    * 请求了却不画，用户已经选中的字既不在文档里也不在屏幕上，而组字在他取消之前不会结束
    * （scripts/test-phrase-preedit-hosts.py 守的就是这一半状态）。
+   *
+   * Absent rather than empty when nothing is held: the runtime skips serializing an empty prefix, so reading it bare throws on every ordinary keystroke.
    */
-  phrase_prefix: string;
+  phrase_prefix?: string;
   /** Byte offset into `editing_text`, which for this ASCII text is also the character index. */
   caret_position: number;
+  /** The candidate page on screen, from zero, and how many pages the whole list makes. */
+  page: number;
+  page_count: number;
   generation: number;
   /** Which spellings the digits typed so far could be, offered while the nine-key grid is up. */
   nine_key_spellings: string[];
@@ -157,9 +196,15 @@ interface EngineView {
   /** The Engine's own numbering, which the ported display policies are written against. */
   scheme: number;
   shuangpin_profile: string;
+  /** Whether `;` can be the `ing` final, which only the Microsoft layout has. */
+  microsoft_shuangpin?: boolean;
   /** 'none' unless a local utility mode is consuming the keys. */
   local_mode: string;
+  /** The non-letter keys the Engine takes as input now: the active local mode's digits and operators, or with nothing composed `/` and `@` for the modes they open. */
+  spelling_symbols: string;
   dedicated_english: boolean;
+  /** The scheme's openable candidate list is showing: the Korean Hanja list, the Zhuyin list. */
+  candidate_list_open: boolean;
 }
 
 // The stored preferences, read and written whole. Only the fields the keyboard changes are named;
@@ -190,6 +235,30 @@ interface TypingStatisticsRecordRequest {
   action: TypingStatisticsRecordAction;
 }
 
+interface TypingStatisticsRecordValue {
+  /** Characters counted from this text. */
+  recorded: number;
+  /** The commit count just passed, while achievements are switched on; otherwise null. */
+  milestone?: number | null;
+}
+
+interface TypingStatisticsRecordResponse {
+  ok: boolean;
+  value?: TypingStatisticsRecordValue;
+  error?: string;
+}
+
+interface TypingStatisticsKeysAction {
+  operation: string;
+  day: string;
+  keys: Record<string, number>;
+}
+
+interface TypingStatisticsKeysRequest {
+  directory: string;
+  action: TypingStatisticsKeysAction;
+}
+
 interface MobileClipboardAction {
   operation: string;
   text?: string;
@@ -198,7 +267,6 @@ interface MobileClipboardAction {
 
 interface MobileClipboardRequest {
   directory: string;
-  legacy: string;
   action: MobileClipboardAction;
 }
 
@@ -246,6 +314,9 @@ interface EmojiQuery {
   list_symbol_groups: boolean;
   parent: string;
   search: string;
+  // 只有列符号集插件组时才带插件目录；其余请求传 null，native 按未提供处理。
+  list_plugin_symbol_groups: boolean;
+  plugins: string | null;
 }
 
 export interface EmojiRow {
@@ -286,6 +357,16 @@ interface EmojiSymbolGroupsResponse {
   error: string;
 }
 
+interface PluginSymbolGroups {
+  plugin_symbol_groups: PluginSymbolGroupDocument[];
+}
+
+interface PluginSymbolGroupsResponse {
+  ok: boolean;
+  value: PluginSymbolGroups;
+  error: string;
+}
+
 /**
  * One row of the expanded panel: the word and whatever is written under it.
  *
@@ -298,6 +379,8 @@ export interface ExpandedCandidate {
   readonly text: string;
   readonly annotation: string;
   readonly annotationIsTranslation: boolean;
+  /** As CandidateEntry.hunEum. */
+  readonly hunEum: string;
 }
 
 interface CandidateSnapshot {
@@ -348,7 +431,6 @@ interface PreparedAiAssistant {
   endpoint: string;
   candidate_limit: number;
   prompt_id: string;
-  prompt: string;
   prompt_custom_1: string;
   prompt_custom_2: string;
   prompt_custom_3: string;
@@ -365,6 +447,16 @@ interface TranslationHttpDescriptor {
   expected_count?: number;
 }
 
+interface TranslationFetchResult {
+  current: boolean;
+  providerComplete: boolean;
+}
+
+interface TranslationProviderResult {
+  value: string | null;
+  completed: boolean;
+}
+
 interface TranslationResponseValue {
   generation: number;
   translations: TranslationEntry[];
@@ -379,6 +471,7 @@ interface GlossRequestDocument {
   generation: number;
   user_data: string;
   candidates: GlossRequestCandidate[];
+  target_language?: string;
 }
 
 interface TranslationPlanDocument {
@@ -424,12 +517,19 @@ export interface KeyboardState {
   readonly candidates: CandidateEntry[];
   readonly editing: string;
   readonly editingCaret: number;
+  /** The already-chosen part of a phrase leading `editing`, which the preedit style never hides. */
+  readonly phrasePrefix: string;
   readonly spellings: string[];
   readonly scheme: number;
   readonly shuangpinProfile: string;
   readonly localMode: string;
   readonly english: boolean;
   readonly diagnostic: string;
+  /** The candidate page on screen, from zero, and how many there are; a translation page is always the one page of one. */
+  readonly page: number;
+  readonly pageCount: number;
+  /** Whether the scheme's openable candidate list (the Korean Hanja list, the Zhuyin list) is on the strip; see `candidateListOpen`. */
+  readonly candidateListOpen: boolean;
 }
 
 interface EngineValue {
@@ -439,9 +539,16 @@ interface EngineValue {
   // the null the JSON names, so both have to be spelled out here. Treating one and not the other
   // threw on every focus, which tore the session down before a single key could be pressed.
   commit: string | null | undefined;
+  /** What the commit came from; present with a commit. */
+  commit_context?: CommitContext | null;
   /** Something the Engine wants the user told, such as a dictionary that could not be opened. */
   diagnostic: string | null | undefined;
   view: EngineView;
+}
+
+interface CommitContext {
+  /** False for text the expression, command and mention modes generated, which the user did not type out and typing statistics do not count. */
+  typing_statistics: boolean;
 }
 
 interface CreateValue {
@@ -517,6 +624,8 @@ const NO_CANDIDATE_SKIN_IMAGE: CandidateSkinImage = { image: null, aspectRatio: 
 // ended the last sentence. A caret further than this from one is in the middle of a sentence by any
 // reading, and the call is made on every text change, so it stays bounded.
 const MAX_CAPITALIZATION_CONTEXT_CHARACTERS: number = 64;
+// setPreviewText's range for "whatever preview text is shown now, or the caret when there is none".
+const PREVIEW_REPLACE_CURRENT: inputMethodEngine.Range = { start: -1, end: -1 };
 
 interface SkinResourceResponse {
   ok: boolean;
@@ -576,16 +685,18 @@ interface PreparedPreferences {
   /** `app` remembers the mode per application; `global` shares one across all of them. */
   ime_mode_scope?: string;
   scheme: string;
-  /** Optional in the shared document; absent means the Wubi remaining-code hint stays on. */
-  wubi_code_hint?: boolean;
+  /** The Wubi remaining-code hint, always written by the shared store and on by default. */
+  wubi_code_hint: boolean;
   /** Whether the mode badge is drawn after a Chinese/English switch. Defaults to on. */
   input_mode_hud?: boolean;
   /** Read-only English word completions while typing directly in English. Defaults to on. */
   english_suggestions?: boolean;
   shuangpin_profile: string;
   touch_keyboard_layout: string;
-  touch_keyboard_skin: string;
-  candidate_skin: string;
+  /** The shared global theme id; the ids and their palettes come from the theme catalog. */
+  global_theme: string;
+  /** What the `custom` theme is made of. Absent means the shared default: over `system`, with nothing set. */
+  custom_theme?: CustomThemeDocument;
   candidate_theme: string;
   candidate_selected_bar: boolean | null;
   candidate_follow_cursor: boolean;
@@ -593,30 +704,32 @@ interface PreparedPreferences {
   navigation: PreparedNavigationPreferences;
   candidate_layout: string;
   candidate_preedit_style: string;
+  /** Inline spelling in the document; the 2in1 draws it as editor preview text. */
+  tsf_preedit_style?: string;
   candidate_font_size: number;
   candidate_preedit_font_size: number;
+  /** 50..100; absent in documents that never changed it, which means an opaque card. */
+  candidate_opacity_percent?: number;
+  /** 0..32 points; absent or null leaves the card to the skin package, then the host. */
+  candidate_corner_radius?: number | null;
   candidate_font_family: string;
   /** Named first so Latin comes from it and Han falls through; absent means one family answers. */
   candidate_english_font?: string | null;
   candidate_fallback_fonts: string[];
-  candidate_text_color: string | null;
-  candidate_accent_color: string | null;
-  candidate_number_color: string | null;
-  candidate_selected_color: string | null;
-  candidate_hover_color: string | null;
-  candidate_surface_color: string | null;
-  candidate_border_color: string | null;
-  // 'follow', 'dark' or 'light' for the keyboard specifically; theme is the global one it falls
-  // back to, and only if both defer does the system decide.
+  // 'follow', 'dark' or 'light' for the keyboard specifically; theme is the app mode it falls back
+  // to, and only if both defer does the system decide. A global theme with a fixed appearance
+  // overrides all of them.
   screen_keyboard_theme: string;
-  /** 'follow', 'dark' or 'light' for the floating toolbar; it falls back to the global theme. */
+  /** 'follow', 'dark' or 'light' for the floating toolbar; it falls back to the app mode. */
   toolbar_theme?: string;
-  /** 'follow', 'dark' or 'light' for the voice panel; it falls back to the global theme. */
+  /** 'follow', 'dark' or 'light' for the voice panel; it falls back to the app mode. */
   voice_theme?: string;
-  /** 'follow', 'dark' or 'light' for the emoji panel; it falls back to the global theme. */
+  /** 'follow', 'dark' or 'light' for the emoji panel; it falls back to the app mode. */
   emoji_theme?: string;
-  /** 'follow', 'dark' or 'light' for the handwriting panel; it falls back to the global theme. */
+  /** 'follow', 'dark' or 'light' for the handwriting panel; it falls back to the app mode. */
   handwriting_theme?: string;
+  /** 'follow', 'dark' or 'light' for the candidate context menu; it falls back to the app mode. */
+  menu_theme?: string;
   theme: string;
   traditional_chinese_output: boolean;
   chinese_punctuation: boolean;
@@ -629,6 +742,8 @@ interface PreparedPreferences {
   floating_toolbar: PreparedFloatingToolbar;
   candidate_english_gloss: boolean;
   candidate_translations: boolean;
+  /** Always written by the shared store; optional so a hand-edited document without it still prepares. */
+  fuzzy_pinyin?: PreparedFuzzyPinyin;
   translation_target_language: string;
   translation_secondary_language?: string | null;
   custom_translation: TranslationProviderConfig;
@@ -643,12 +758,20 @@ interface PreparedPreferences {
   touch_voice_shortcut: boolean;
   /** Shared privacy switch for the private clipboard history file and keyboard entry point. */
   clipboard_history: boolean;
-  /** Shared custom touch-keyboard design; nested fields use the shared camelCase JSON shape. */
-  custom_touch_keyboard_skin?: CustomSkinDocument;
   voice_input: VoiceInputConfiguration;
   ai_assistant: PreparedAiAssistant;
   touch_keyboard_schemes: PreparedTouchKeyboardSchemes;
   keybindings: PreparedKeybindings;
+  /** Sound packs and the rest of the plugin settings; absent while every part is at its default. */
+  plugins?: PluginPreferenceDocument;
+}
+
+/** The shared fuzzy pinyin record. Turning it off keeps the rules, so the next on restores the same set. */
+interface PreparedFuzzyPinyin {
+  enabled: boolean;
+  rules: string[];
+  /** The store's marker that the first enable already opted every rule in; never shown. */
+  seeded?: boolean;
 }
 
 /** The shared touch-scheme record: which schemes the picker offers, and which one is current. */
@@ -680,7 +803,11 @@ interface PreparedFloatingToolbar {
   fullwidth: boolean;
   character_set: boolean;
   emoji: boolean;
+  /** Absent in documents written before the 2in1 toolbar carried it; shown there, as the shared default is. */
+  handwriting?: boolean;
   screen_keyboard: boolean;
+  /** Absent in documents written before the 2in1 toolbar carried it; shown there, as the shared default is. */
+  voice?: boolean;
   /** Shared switch for the settings button; absent in older documents, where it was always shown. */
   settings?: boolean;
   scale_percent: number;
@@ -697,27 +824,41 @@ interface PreparedKeybindings {
 
 /** What the view needs to draw itself, resolved once from the prepared preferences. */
 export interface KeyboardPreferences {
+  /** The keyboard's mode: its own theme, the app mode and the system, unless the global theme fixes it. */
   readonly dark: boolean;
-  readonly skinId: string;
-  readonly candidateSkinId: string;
-  /** Base palette used by an external candidate skin, when its manifest is available. */
-  readonly candidateSkinBase: string;
-  /** Manifest minimum width, clamped to the same bounds as the native estimate. */
+  /** The shared global theme id the keyboard and candidate window are drawn in. */
+  readonly globalThemeId: string;
+  /** Manifest minimum width of the drawn external package, clamped to the same bounds as the native estimate. */
   readonly candidateMinWidthVp: number;
   /** Image-only data URL for a compatible external candidate decoration. */
   readonly candidateDecorationImage: string | null;
   readonly candidateDecorationTopVp: number;
   readonly candidateDecorationWidthVp: number;
   readonly candidateDecorationAspectRatio: number;
+  /** Where the decoration sits along the card's top edge. */
+  readonly candidateDecorationAlign: CandidateSkinAlign;
+  /** The card radius: the user's, then the drawn package's; null keeps the host's. */
+  readonly candidateCornerRadiusVp: number | null;
+  /** Whether that radius is the user's own: only then do the rows round down with a card tighter than their own corners. */
+  readonly candidateCornerRadiusUser: boolean;
+  /** Image-only data URL drawn over the card surface, clipped to the card. */
+  readonly candidateBackgroundImage: string | null;
+  readonly candidateBackgroundFit: CandidateSkinFit;
+  readonly candidateBackgroundOpacity: number;
+  /** The user's 0.5..1 factor on the card's fill, border and background image; text and the selection stay opaque. */
+  readonly candidateWindowOpacity: number;
   readonly candidateDark: boolean;
-  readonly candidateSelectedBar: boolean | null;
+  /** The shared switch when it is set, otherwise what the theme says; the Harmony window marks the row with a fill, not a bar. */
+  readonly candidateSelectedBar: boolean;
   readonly pairedPunctuation: boolean;
   readonly keyboardTheme: string;
   readonly toolbarTheme: string;
   readonly voiceTheme: string;
   readonly emojiTheme: string;
   readonly handwritingTheme: string;
-  readonly globalTheme: string;
+  readonly menuTheme: string;
+  /** The `theme` preference: the light/dark app mode, which is not the global theme. */
+  readonly appMode: string;
   readonly scheme: string;
   readonly shuangpinProfile: string;
   readonly layout: string;
@@ -741,13 +882,8 @@ export interface KeyboardPreferences {
   readonly candidateFontFamily: string;
   readonly candidateEnglishFont: string | null;
   readonly candidateFallbackFonts: string[];
-  readonly candidateTextColor: string | null;
-  readonly candidateAccentColor: string | null;
-  readonly candidateNumberColor: string | null;
-  readonly candidateSelectedColor: string | null;
-  readonly candidateHoverColor: string | null;
-  readonly candidateSurfaceColor: string | null;
-  readonly candidateBorderColor: string | null;
+  /** The 2in1 candidate window's colours in its mode, from the resolved theme with the native tokens behind it. */
+  readonly candidateColors: CandidateColors;
   readonly keySpacingTenths: number;
   readonly rowSpacingTenths: number;
   readonly heightAdjustment: number;
@@ -764,6 +900,12 @@ interface PreparedOptions {
    * 是一个决定，只做一半就等于把用户已经选中的字藏起来。
    */
   phrase_preedit?: boolean;
+}
+
+interface TypingEffectSettingsResponse {
+  ok: boolean;
+  value: ResolvedTypingEffectDocument;
+  error: string;
 }
 
 interface PrepareResponse {
@@ -810,11 +952,14 @@ enum InputCommand {
   BACKSPACE_SEGMENT = 12,
   MOVE_LEFT_SEGMENT = 13,
   MOVE_RIGHT_SEGMENT = 14,
+  COMMIT_RAW_WITHOUT_LEARNING = 15,
+  CONVERT_HANJA = 16,
   NEXT_PAGE = 100,
   PREVIOUS_PAGE = 101,
   NEXT_CANDIDATE = 102,
   PREVIOUS_CANDIDATE = 103,
-  FIRST_CANDIDATE = 104
+  FIRST_CANDIDATE = 104,
+  LAST_CANDIDATE = 105
 }
 
 const JAPANESE_SCHEME: number = 3;
@@ -835,11 +980,24 @@ export class KeyboardSession implements HardwareKeyTarget {
   private personalDictionaryTimer: number = -1;
   private snapshotOptions: Object | undefined = undefined;
   private snapshotQueueTimer: number = -1;
+  // Key press counts for the key heatmap. Nothing is held while statistics are off, which is read from the store on every focus; until the editor's attribute has said what kind of field it is, a press could be a password's, so none is counted.
+  private keyStatisticsEnabled: boolean = false;
+  private keyStatisticsEditorKnown: boolean = false;
+  private readonly keyPresses: KeyPressBatch = new KeyPressBatch();
+  private keyFlushTimer: number = -1;
   private editorGeneration: number = 0;
+  // Bumped only by attach/detach: an idle Engine restart (which bumps editorGeneration) must not
+  // drop the focused editor's attribute.
+  private attributeGeneration: number = 0;
   // Editor mutations are echoed asynchronously through KeyboardDelegate.textChange. Keep the
   // count raised until those callbacks arrive so our own commit cannot be mistaken for a host edit
   // and finish a residual composition that the Engine deliberately left active.
   private pendingOwnEdits: number = 0;
+  private inlinePreeditStyle: InlinePreeditStyle = 'raw';
+  /** Whether the focused editor said it takes preview text; learned from its attribute. */
+  private previewSupported: boolean = false;
+  /** The preview text the editor holds now, empty when it holds none. */
+  private previewText: string = '';
   private replyContextGeneration: number = 0;
   private replyResultEditorGeneration: number = -1;
   private replyResultContextGeneration: number = -1;
@@ -865,6 +1023,15 @@ export class KeyboardSession implements HardwareKeyTarget {
   // because Space and Escape belong to a composition at every other moment.
   private voiceRecording: boolean = false;
   private voiceBehaviour: HarmonyVoiceRecordingBehaviour = new HarmonyVoiceRecordingBehaviour();
+  // Key, melody, commit and achievement sounds. Configured off on a phone, which keeps its own key feedback.
+  private readonly soundPlayer: KeySoundPlayer = new KeySoundPlayer();
+  private readonly musicPlayer: MusicPlayer = new MusicPlayer();
+  /** The typing effect and combo settings the preferences ask for; off on a phone, as the sounds are. */
+  private typingEffectPreferences: TypingEffectSettings = TYPING_EFFECTS_OFF;
+  /** `typingEffectPreferences` with the selected effect pack resolved by host-api: what is drawn. */
+  private typingEffects: TypingEffectSettings = TYPING_EFFECTS_OFF;
+  /** The focused editor's attributes have arrived, so whether it is a password field is known; background music waits for that. */
+  private editorAttributesKnown: boolean = false;
   private modeScope: ImeModeScopePolicy = new ImeModeScopePolicy();
   private modeScopeSetting: string = 'app';
   private defaultEnglish: boolean = false;
@@ -883,10 +1050,13 @@ export class KeyboardSession implements HardwareKeyTarget {
   private candidateEnglishGloss: boolean = false;
   private candidateGlossEnabled: boolean = false;
   private candidateGlossRows: number = 0;
+  // Mirrored for the function panel's 模糊音 tile; the rules themselves stay in the document.
+  private fuzzyPinyin: boolean = false;
   // Read before the panels are built, so a badge the user turned off is never created at all.
   private modeBadge: boolean = true;
   private resourceDirectory: string = '';
   private stateDirectory: string = '';
+  private cloudClipboardClient: CloudClipboardClient | undefined = undefined;
   private systemDark: boolean = false;
   // What the editor wants its return key to do. Sending this rather than a newline is what makes the
   // key search in a search field and send in a message field, which is the whole point of having it.
@@ -898,32 +1068,39 @@ export class KeyboardSession implements HardwareKeyTarget {
   private capitalization: CapitalizationMode = CapitalizationMode.NONE;
   private appearance: KeyboardPreferences = {
     dark: false,
-    skinId: 'forest',
-    candidateSkinId: 'willow_green',
-    candidateSkinBase: 'willow_green',
+    globalThemeId: 'system',
     candidateMinWidthVp: CandidateWidthPolicy.MIN_WIDTH_VP,
     candidateDecorationImage: null,
     candidateDecorationTopVp: 0,
     candidateDecorationWidthVp: 0,
     candidateDecorationAspectRatio: 1,
+    candidateDecorationAlign: 'right',
+    candidateCornerRadiusVp: null,
+    candidateCornerRadiusUser: false,
+    candidateBackgroundImage: null,
+    candidateBackgroundFit: 'cover',
+    candidateBackgroundOpacity: 1,
+    candidateWindowOpacity: 1,
     candidateDark: false,
-    candidateSelectedBar: null,
+    candidateSelectedBar: false,
     pairedPunctuation: true,
     keyboardTheme: 'follow',
     toolbarTheme: 'follow',
-    globalTheme: 'system',
+    appMode: 'system',
     emojiTheme: 'follow',
     handwritingTheme: 'follow',
+    menuTheme: 'follow',
     voiceTheme: 'follow',
-    // Everything, which is what an absent shared list means; the prepared record narrows it.
-    enabledSchemes: KeyboardScheme.SCHEMES.map(
+    // What an absent shared list means; the prepared record narrows it.
+    enabledSchemes: KeyboardScheme.DEFAULT_ENABLED.map(
       (candidate: SchemeDefinition): string => candidate.preferenceId),
     selectedScheme: null,
     scheme: 'quanpin',
     shuangpinProfile: 'xiaohe',
     layout: 'twenty_six_key',
     candidateFollowCursor: true,
-    numberRowSelection: false,
+    // The shared default (`number_row_selection` in client-core preferences.rs): 1 through 9 pick a candidate.
+    numberRowSelection: true,
     candidateShowPreedit: true,
     candidateLayout: 'vertical',
     navigation: {
@@ -935,13 +1112,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     candidateFontFamily: 'Noto Sans SC',
     candidateEnglishFont: null,
     candidateFallbackFonts: ['Noto Sans SC', 'Microsoft YaHei'],
-    candidateTextColor: null,
-    candidateAccentColor: null,
-    candidateNumberColor: null,
-    candidateSelectedColor: null,
-    candidateHoverColor: null,
-    candidateSurfaceColor: null,
-    candidateBorderColor: null,
+    candidateColors: GlobalTheme.candidateColors(null, false),
     keySpacingTenths: KeyboardGeometry.DEFAULT_KEY_SPACING_TENTHS,
     rowSpacingTenths: KeyboardGeometry.DEFAULT_ROW_SPACING_TENTHS,
     heightAdjustment: KeyboardGeometry.DEFAULT_HEIGHT_ADJUSTMENT_VP,
@@ -957,9 +1128,11 @@ export class KeyboardSession implements HardwareKeyTarget {
    * tapping the microphone silently discard a polish request that was about to answer.
    */
   private readonly polisher: HarmonyVoicePolisher = new HarmonyVoicePolisher();
+  /** The one in-flight reply request; invalidating its editor context must cancel the HTTP wait. */
+  private replyRequest: http.HttpRequest | undefined = undefined;
   private aiAssistant: PreparedAiAssistant = {
     enabled: false, provider: 'deepseek', model: '', token: '', tokens: {}, endpoint: '',
-    candidate_limit: 3, prompt_id: 'custom_1', prompt: '', prompt_custom_1: '',
+    candidate_limit: 3, prompt_id: 'custom_1', prompt_custom_1: '',
     prompt_custom_2: '', prompt_custom_3: ''
   };
 
@@ -974,10 +1147,16 @@ export class KeyboardSession implements HardwareKeyTarget {
   onVoiceInputChanged: ((enabled: boolean) => void) | undefined = undefined;
   /** Lets a desktop panel resize when a vertical candidate page changes height. */
   onCandidateCount: ((count: number) => void) | undefined = undefined;
+  /** Lets a desktop panel flash its candidate card and show the combo for each key and commit handed to the typing effect, with the settings it is drawn with (intensity, flash length and colour); `key` is false for a commit, which counts nothing and only reports the combo. */
+  onTypingEffect: ((effect: TypingEffect, settings: TypingEffectSettings, key: boolean) => void) | undefined = undefined;
   /** Lets a desktop panel follow the widest current candidate without measuring ArkUI nodes. */
   onCandidateWidth: ((widthVp: number) => void) | undefined = undefined;
   /** The native host owns panel geometry; the touch view reports its newly requested total height. */
   onTouchHeight: ((heightVp: number) => void) | undefined = undefined;
+  /** The ability's half of a preference reload: status panels and key bindings. */
+  onPreferencesReloaded: (() => void) | undefined = undefined;
+  /** The view's half of a preference reload: skins, geometry and the scheme face. */
+  onViewPreferencesReloaded: (() => void) | undefined = undefined;
   /**
    * Whether a composition is open, for the host that owns the panel.
    *
@@ -986,16 +1165,17 @@ export class KeyboardSession implements HardwareKeyTarget {
    * onChanged; this is the same news for the other reader, and fires only when the answer changes.
    */
   onComposition: ((active: boolean) => void) | undefined = undefined;
-  /** The mode badge's face, set by whichever window is currently drawing it. */
-  onModeBadge: ((english: boolean, dark: boolean) => void) | undefined = undefined;
+  /** The mode badge's face, set by whichever window is currently drawing it: the mode, the toolbar's font size and scale it is sized by, and the toolbar palette it wears. */
+  onModeBadge: ((english: boolean, fontSize: number, scale: number, toolbarSkin: ToolbarSkin) => void)
+    | undefined = undefined;
   /** The toolbar's face, set by whichever window is currently drawing it. */
   onToolbar: ((state: ToolbarState, buttons: ToolbarButton[], fontSize: number, scale: number,
-               skin: KeyboardSkin, toolbarSkin: ToolbarSkin) => void) | undefined = undefined;
+               toolbarSkin: ToolbarSkin) => void) | undefined = undefined;
   /** The status-bar panel owns the window; the ArkUI handle only reports its pan gesture. */
   onToolbarDragStart: (() => void) | undefined = undefined;
   onToolbarDrag: ((offsetX: number, offsetY: number) => void) | undefined = undefined;
-  /** The gear, which only the host can answer: it owns the window the settings open in. */
-  onToolbarSettings: (() => void) | undefined = undefined;
+  /** The settings application, which only the host can open: it owns the context that starts it. The 2in1 toolbar gear and the phone's 更多设置 card both reach it here. */
+  onOpenSettings: (() => void) | undefined = undefined;
   /**
    * A surface the toolbar asked for, which two readers need and for different reasons: the host
    * sizes and shows the window, the view draws what goes in it. Two slots rather than one, the way
@@ -1004,6 +1184,8 @@ export class KeyboardSession implements HardwareKeyTarget {
    */
   onSurfaceRequested: ((surface: DesktopSurface) => void) | undefined = undefined;
   onSurfaceChanged: ((surface: DesktopSurface) => void) | undefined = undefined;
+  /** The emoji panel's answer to a hardware key, set by the view that draws the panel; see EmojiPanelKeyPolicy. */
+  onPanelKey: ((key: EmojiPanelKey) => boolean) | undefined = undefined;
   private desktopSurface: DesktopSurface = DesktopSurface.NONE;
   private composedLast: boolean = false;
   /** The editor's traits arrive after inputStart, so the view is told when they do. */
@@ -1035,13 +1217,13 @@ export class KeyboardSession implements HardwareKeyTarget {
   }
 
   private readCandidateSkinImage(stateRoot: string, id: string,
-                                 decoration: CandidateSkinDecoration | null): CandidateSkinImage {
-    if (decoration === null) {
+                                 relative: string | null): CandidateSkinImage {
+    if (relative === null) {
       return NO_CANDIDATE_SKIN_IMAGE;
     }
     try {
       const request: SkinResourceRequest = {
-        directory: `${stateRoot}/skins`, id: id, relative: decoration.relative, kind: 'image'
+        directory: `${stateRoot}/skins`, id: id, relative: relative, kind: 'image'
       };
       const response: SkinResourceResponse =
         JSON.parse(client.skinResource(JSON.stringify(request))) as SkinResourceResponse;
@@ -1076,6 +1258,182 @@ export class KeyboardSession implements HardwareKeyTarget {
     }
   }
 
+  /**
+   * Resolves the global theme for both modes and draws every surface's appearance from the answer.
+   *
+   * The resolve reads the skin root, so it runs when the preferences are read or the theme is chosen, never while drawing. Both modes are resolved up front because each surface keeps its own light/dark rule: the keyboard, the candidate window and the toolbar can sit in different modes at once, and a theme over `system` (a package, say) answers differently in each.
+   */
+  private applyAppearance(preferences: PreparedPreferences): void {
+    if (this.themeCatalog.length === 0) {
+      this.themeCatalog = this.readThemeCatalog();
+    }
+    this.globalThemeId = preferences.global_theme;
+    this.customThemeBase = preferences.custom_theme?.base ?? 'system';
+    const design: CustomSkinDocument | undefined = preferences.custom_theme?.keyboard;
+    this.customDesign = design === undefined ? null : CustomKeyboardSkin.from(design);
+    this.themeLight = this.resolveTheme(preferences, false);
+    this.themeDark = this.resolveTheme(preferences, true);
+    const keyboardDark: boolean = this.themeDarkFor(preferences.screen_keyboard_theme, preferences.theme);
+    const candidateDark: boolean = this.themeDarkFor(preferences.candidate_theme, preferences.theme);
+    const candidateTheme: ResolvedTheme | null = candidateDark ? this.themeDark : this.themeLight;
+    const candidateColors: CandidateColors = GlobalTheme.candidateColors(
+      candidateTheme === null ? null : candidateTheme.candidate, candidateDark);
+    const toolbarDark: boolean = this.themeDarkFor(preferences.toolbar_theme ?? 'follow', preferences.theme);
+    const toolbarTheme: ResolvedTheme | null = toolbarDark ? this.themeDark : this.themeLight;
+    // `candidate_skin` is the one signal that a package was drawn in this layout and mode; the package catalog is only read for what the theme does not carry.
+    const packageId: string | null = candidateTheme === null ? null : candidateTheme.candidate_skin;
+    const toolbarPackageId: string | null = toolbarTheme === null ? null : toolbarTheme.candidate_skin;
+    const skinPackages: CandidateSkinPackage[] = packageId === null && toolbarPackageId === null
+      ? [] : this.readCandidateSkinCatalog(this.stateDirectory);
+    const skinMinWidth: number | null = packageId === null
+      ? null : CandidateSkinCatalogPolicy.minWidthVp(skinPackages, packageId);
+    const skinDecoration: CandidateSkinDecoration | null = packageId === null
+      ? null : CandidateSkinCatalogPolicy.decoration(skinPackages, packageId);
+    const skinToolbar: string | null = toolbarPackageId === null ? null
+      : this.readCandidateSkinToolbar(this.stateDirectory, toolbarPackageId,
+        CandidateSkinCatalogPolicy.toolbarStylesheet(skinPackages, toolbarPackageId));
+    const skinImage: CandidateSkinImage = KeyboardFormFactor.isDesktop() && packageId !== null
+      ? this.readCandidateSkinImage(this.stateDirectory, packageId,
+        skinDecoration === null ? null : skinDecoration.relative)
+      : NO_CANDIDATE_SKIN_IMAGE;
+    const skinBackground: CandidateSkinBackground | null = packageId === null
+      ? null : CandidateSkinCatalogPolicy.background(skinPackages, packageId);
+    // Like the decoration, the background is a desktop candidate window's; the touch strip keeps the keyboard's look.
+    const backgroundImage: CandidateSkinImage = KeyboardFormFactor.isDesktop() && packageId !== null
+      ? this.readCandidateSkinImage(this.stateDirectory, packageId,
+        skinBackground === null ? null : skinBackground.relative)
+      : NO_CANDIDATE_SKIN_IMAGE;
+    // The store validates both to the shared bounds; an out-of-range value from an older or foreign document is ignored rather than drawn.
+    const userRadius: number | null | undefined = preferences.candidate_corner_radius;
+    const userRadiusValid: boolean =
+      typeof userRadius === 'number' && Number.isFinite(userRadius) && userRadius >= 0 && userRadius <= 32;
+    const candidateRadius: number | null = userRadiusValid
+      ? userRadius as number
+      : packageId === null ? null : CandidateSkinCatalogPolicy.cornerRadiusVp(skinPackages, packageId);
+    const opacityPercent: number | undefined = preferences.candidate_opacity_percent;
+    const windowOpacity: number = typeof opacityPercent === 'number' && Number.isFinite(opacityPercent)
+      ? Math.max(50, Math.min(100, opacityPercent)) / 100 : 1;
+    this.appearance = {
+      dark: keyboardDark,
+      globalThemeId: preferences.global_theme,
+      candidateMinWidthVp: skinMinWidth === null
+        ? CandidateWidthPolicy.MIN_WIDTH_VP
+        : Math.max(CandidateWidthPolicy.MIN_WIDTH_VP,
+          Math.min(CandidateWidthPolicy.MAX_WIDTH_VP, skinMinWidth)),
+      candidateDecorationImage: skinImage.image,
+      candidateDecorationTopVp: skinImage.image === null ? 0 : (skinDecoration?.topVp ?? 0),
+      candidateDecorationWidthVp: skinImage.image === null ? 0 : (skinDecoration?.widthVp ?? 0),
+      candidateDecorationAspectRatio: skinImage.aspectRatio,
+      candidateDecorationAlign: skinDecoration === null ? 'right' : skinDecoration.align,
+      candidateCornerRadiusVp: candidateRadius,
+      candidateCornerRadiusUser: userRadiusValid,
+      candidateBackgroundImage: backgroundImage.image,
+      candidateBackgroundFit: skinBackground === null ? 'cover' : skinBackground.fit,
+      candidateBackgroundOpacity: skinBackground === null ? 1 : skinBackground.opacity,
+      candidateWindowOpacity: windowOpacity,
+      candidateDark: candidateDark,
+      candidateSelectedBar: preferences.candidate_selected_bar ?? candidateColors.showSelectedBar,
+      pairedPunctuation: preferences.paired_punctuation !== false,
+      keyboardTheme: preferences.screen_keyboard_theme,
+      toolbarTheme: preferences.toolbar_theme ?? 'follow',
+      voiceTheme: preferences.voice_theme ?? 'follow',
+      emojiTheme: preferences.emoji_theme ?? 'follow',
+      handwritingTheme: preferences.handwriting_theme ?? 'follow',
+      menuTheme: preferences.menu_theme ?? 'follow',
+      appMode: preferences.theme,
+      scheme: preferences.scheme,
+      shuangpinProfile: preferences.shuangpin_profile,
+      layout: preferences.touch_keyboard_layout,
+      selectedScheme: preferences.touch_keyboard_schemes?.selected ?? null,
+      // A Cantonese or Zhuyin card whose dictionary this package did not stage stays hidden even when enabled: the Engine would type 全拼 under it.
+      enabledSchemes: KeyboardScheme.withInstalledDictionaries(
+        KeyboardScheme.enabledFromPreferenceIds(preferences.touch_keyboard_schemes?.enabled ?? null),
+        (file: string): boolean => this.languageDictionaryInstalled(file))
+        .map((candidate: SchemeDefinition): string => candidate.preferenceId),
+      candidateFollowCursor: preferences.candidate_follow_cursor,
+      numberRowSelection: preferences.number_row_selection,
+      candidateShowPreedit: preferences.candidate_preedit_style !== 'empty',
+      candidateLayout: preferences.candidate_layout === 'horizontal' ? 'horizontal' : 'vertical',
+      navigation: {
+        minusEqual: preferences.navigation?.minus_equal ?? true,
+        commaPeriod: preferences.navigation?.comma_period ?? true,
+        brackets: preferences.navigation?.brackets ?? false,
+        tab: preferences.navigation?.tab ?? true,
+        pageUpDown: preferences.navigation?.page_up_down ?? true,
+        mouseWheel: preferences.navigation?.mouse_wheel ?? false,
+        arrows: preferences.navigation?.arrows ?? true
+      },
+      // The shared store validates these to 12..32 and strips control
+      // characters from family names. Clamp again at the host boundary so
+      // an older staged document cannot produce an unusable panel.
+      candidateFontSize: Math.max(12, Math.min(32, preferences.candidate_font_size)),
+      candidatePreeditFontSize:
+        Math.max(12, Math.min(32, preferences.candidate_preedit_font_size)),
+      candidateFontFamily: preferences.candidate_font_family.trim().length > 0
+        ? preferences.candidate_font_family : 'Noto Sans SC',
+      candidateEnglishFont: preferences.candidate_english_font ?? null,
+      candidateFallbackFonts: preferences.candidate_fallback_fonts.filter(
+        (font: string): boolean => font.trim().length > 0),
+      candidateColors: candidateColors,
+      // Clamped rather than trusted: the store validates, but an older document or a host that
+      // never learned the bounds would otherwise draw a keyboard nobody can hit.
+      keySpacingTenths: KeyboardGeometry.keySpacing(preferences.touch_key_spacing_tenths),
+      rowSpacingTenths: KeyboardGeometry.rowSpacing(preferences.touch_row_spacing_tenths),
+      heightAdjustment:
+        KeyboardGeometry.heightAdjustment(preferences.touch_keyboard_height_adjustment),
+      voiceShortcut: preferences.touch_voice_shortcut,
+      thoughtfulReply: preferences.touch_keyboard_schemes?.selected === 'thoughtful_reply'
+    };
+    // The theme's bar, then the package's `[toolbar]` colours for that mode, then its stylesheet.
+    const toolbarColors: CandidateColors = GlobalTheme.candidateColors(
+      toolbarTheme === null ? null : toolbarTheme.candidate, toolbarDark);
+    this.toolbarSkin = ToolbarSkinPolicy.fromCss(toolbarColors, skinToolbar,
+      ToolbarSkinPolicy.withPackage(toolbarColors,
+        CandidateSkinCatalogPolicy.toolbar(skinPackages, toolbarPackageId), toolbarDark));
+  }
+
+  /** A surface's mode: fixed by a theme with an appearance, otherwise its own setting, then the app mode, then the system. */
+  private themeDarkFor(surfaceTheme: string, appMode: string): boolean {
+    return GlobalTheme.surfaceDark(this.fixedAppearance(),
+      KeyboardSkin.resolveDark(surfaceTheme, appMode, this.systemDark));
+  }
+
+  /** `light` or `dark` when the global theme fixes the mode; the answer is the same for both requested modes. */
+  private fixedAppearance(): string | null {
+    return this.themeLight === null ? null : this.themeLight.appearance;
+  }
+
+  private readThemeCatalog(): ThemeCatalogEntry[] {
+    try {
+      return GlobalTheme.parseCatalog(client.themeCatalog());
+    } catch (error) {
+      KeyboardLog.error(`theme catalog unavailable: ${describeError(error)}`);
+      return [];
+    }
+  }
+
+  /** One mode of the global theme. A refused request draws the native tokens rather than failing the session. */
+  private resolveTheme(preferences: PreparedPreferences, dark: boolean): ResolvedTheme | null {
+    const request: ResolveThemeRequest = {
+      global_theme: preferences.global_theme,
+      custom_theme: preferences.custom_theme,
+      dark: dark,
+      layout: preferences.candidate_layout === 'horizontal' ? 'horizontal' : 'vertical',
+      skins_directory: `${this.stateDirectory}/skins`
+    };
+    try {
+      const resolved: ResolvedTheme | null =
+        GlobalTheme.parseResolved(client.resolveTheme(JSON.stringify(request)));
+      if (resolved === null) {
+        KeyboardLog.error(`theme ${preferences.global_theme} refused; drawing the native tokens`);
+      }
+      return resolved;
+    } catch (error) {
+      KeyboardLog.error(`theme unavailable: ${describeError(error)}`);
+      return null;
+    }
+  }
+
   start(resources: string, stateRoot: string, systemDark: boolean): boolean {
     let abi: number;
     try {
@@ -1084,14 +1442,15 @@ export class KeyboardSession implements HardwareKeyTarget {
       KeyboardLog.error(`native module unavailable: ${describeError(error)}`);
       return false;
     }
-    if (abi !== 2) {
-      KeyboardLog.error(`native ABI is ${abi}, expected 2`);
+    if (abi !== 3) {
+      KeyboardLog.error(`native ABI is ${abi}, expected 3`);
       return false;
     }
     this.resourceDirectory = resources;
     this.stateDirectory = stateRoot;
     this.systemDark = systemDark;
     this.feedbackSettings = this.feedback();
+    this.preferencesRevision = this.storedRevision(stateRoot);
     const request: PrepareRequest = { resources: resources, state_root: stateRoot };
     let options: string;
     try {
@@ -1109,30 +1468,13 @@ export class KeyboardSession implements HardwareKeyTarget {
       const preferences: PreparedPreferences = prepared.value.preferences;
       this.clipboardHistoryEnabled = ClipboardHistoryPreferencePolicy.enabled(
         preferences.clipboard_history);
+      this.inlinePreeditStyle = InlinePreeditPolicy.style(preferences.tsf_preedit_style);
       this.wubiCodeHint = CandidateAnnotationPreferencePolicy.wubiCodeHint(
         preferences.wubi_code_hint);
       this.candidateEnglishGloss = CandidateAnnotationPreferencePolicy.englishGloss(
         preferences.candidate_english_gloss);
-      this.candidateGlossEnabled = CandidateGlossLayoutPolicy.displays(
-        this.candidateEnglishGloss, preferences.candidate_translations);
-      const glossTargets: string[] = [preferences.translation_target_language];
-      if (preferences.translation_secondary_language !== undefined
-          && preferences.translation_secondary_language !== null
-          && !glossTargets.includes(preferences.translation_secondary_language)) {
-        glossTargets.push(preferences.translation_secondary_language);
-      }
-      const glossProviders: CandidateGlossProviderState = {
-        customEnabled: preferences.custom_translation.enabled,
-        customEndpoint: preferences.custom_translation.endpoint,
-        niuTransEnabled: preferences.niutrans.enabled,
-        niuTransAppId: preferences.niutrans.app_id,
-        niuTransApiKey: preferences.niutrans.apikey,
-        tencentEnabled: preferences.tencent_tmt.enabled,
-        tencentSecretId: preferences.tencent_tmt.secret_id,
-        tencentSecretKey: preferences.tencent_tmt.secret_key
-      };
-      this.candidateGlossRows = CandidateGlossLayoutPolicy.rows(this.candidateEnglishGloss,
-        glossTargets, preferences.candidate_translations, glossProviders);
+      this.applyCandidateGloss(preferences);
+      this.fuzzyPinyin = preferences.fuzzy_pinyin !== undefined && preferences.fuzzy_pinyin.enabled;
       this.modeBadge = InputModeHudPolicy.enabled(preferences.input_mode_hud);
       this.englishSuggestionsEnabled = preferences.english_suggestions !== false;
       if (ClipboardHistoryPreferencePolicy.shouldClearHistory(this.clipboardHistoryEnabled)) {
@@ -1141,31 +1483,8 @@ export class KeyboardSession implements HardwareKeyTarget {
       if (this.onClipboardHistoryChanged !== undefined) {
         this.onClipboardHistoryChanged(this.clipboardHistoryEnabled);
       }
-      const skinPackages: CandidateSkinPackage[] = this.readCandidateSkinCatalog(stateRoot);
-      const candidateDark: boolean = KeyboardSkin.resolveDark(preferences.candidate_theme,
-        preferences.theme, systemDark);
-      const candidateTheme: string = candidateDark ? 'dark' : 'light';
-      const skinSupported: boolean = CandidateSkinCatalogPolicy.supports(
-        skinPackages, preferences.candidate_skin, preferences.candidate_layout, candidateTheme);
-      const skinPalette: CandidateSkinPaletteTokens | null = CandidateSkinCatalogPolicy.palette(
-        skinSupported ? skinPackages : [], preferences.candidate_skin, candidateDark);
-      const skinBase: string | null = CandidateSkinCatalogPolicy.base(
-        skinSupported ? skinPackages : [], preferences.candidate_skin);
-      const skinMinWidth: number | null = CandidateSkinCatalogPolicy.minWidthVp(
-        skinSupported ? skinPackages : [], preferences.candidate_skin);
-      const skinSelectedBar: boolean | null = CandidateSkinCatalogPolicy.showSelectedBar(
-        skinSupported ? skinPackages : [], preferences.candidate_skin, candidateDark);
-      const skinDecoration: CandidateSkinDecoration | null = CandidateSkinCatalogPolicy.decoration(
-        skinSupported ? skinPackages : [], preferences.candidate_skin);
-      const skinToolbar: string | null = this.readCandidateSkinToolbar(stateRoot,
-        preferences.candidate_skin, CandidateSkinCatalogPolicy.toolbarStylesheet(
-          skinSupported ? skinPackages : [], preferences.candidate_skin));
-      const skinImage: CandidateSkinImage = KeyboardFormFactor.isDesktop()
-        ? this.readCandidateSkinImage(stateRoot, preferences.candidate_skin, skinDecoration)
-        : NO_CANDIDATE_SKIN_IMAGE;
       this.voiceInput = preferences.voice_input;
       this.voiceHotkeys.use(KeyboardSession.hotkeyBindings(preferences.voice_input));
-      this.customSkinDesign = CustomKeyboardSkin.from(preferences.custom_touch_keyboard_skin ?? null);
       if (this.onVoiceInputChanged !== undefined) {
         this.onVoiceInputChanged(this.voiceInputEnabled());
       }
@@ -1179,83 +1498,8 @@ export class KeyboardSession implements HardwareKeyTarget {
         switchLanguageCtrlAltSpace: preferences.keybindings.switch_language_ctrl_alt_space,
         toggleCharacterSetCtrlShiftF: preferences.keybindings.toggle_character_set_ctrl_shift_f
       };
-      this.appearance = {
-        // The keyboard's own theme wins, then the global one, and only if both defer does the
-        // system decide. resolveDark is the ported rule every other host already follows.
-        dark: KeyboardSkin.resolveDark(preferences.screen_keyboard_theme, preferences.theme,
-          systemDark),
-        skinId: preferences.touch_keyboard_skin,
-        candidateSkinId: preferences.candidate_skin,
-        candidateSkinBase: skinBase ?? preferences.candidate_skin,
-        candidateMinWidthVp: skinMinWidth === null
-          ? CandidateWidthPolicy.MIN_WIDTH_VP
-          : Math.max(CandidateWidthPolicy.MIN_WIDTH_VP,
-            Math.min(CandidateWidthPolicy.MAX_WIDTH_VP, skinMinWidth)),
-        candidateDecorationImage: skinImage.image,
-        candidateDecorationTopVp: skinImage.image === null ? 0 : (skinDecoration?.topVp ?? 0),
-        candidateDecorationWidthVp: skinImage.image === null ? 0 : (skinDecoration?.widthVp ?? 0),
-        candidateDecorationAspectRatio: skinImage.aspectRatio,
-        candidateDark: candidateDark,
-        candidateSelectedBar: preferences.candidate_selected_bar ?? skinSelectedBar,
-        pairedPunctuation: preferences.paired_punctuation !== false,
-        keyboardTheme: preferences.screen_keyboard_theme,
-        toolbarTheme: preferences.toolbar_theme ?? 'follow',
-        voiceTheme: preferences.voice_theme ?? 'follow',
-        emojiTheme: preferences.emoji_theme ?? 'follow',
-        handwritingTheme: preferences.handwriting_theme ?? 'follow',
-        globalTheme: preferences.theme,
-        scheme: preferences.scheme,
-        shuangpinProfile: preferences.shuangpin_profile,
-        layout: preferences.touch_keyboard_layout,
-        selectedScheme: preferences.touch_keyboard_schemes?.selected ?? null,
-        enabledSchemes: preferences.touch_keyboard_schemes?.enabled === undefined
-          ? KeyboardScheme.SCHEMES.map((candidate: SchemeDefinition): string => candidate.preferenceId)
-          : KeyboardScheme.enabledFromPreferenceIds(preferences.touch_keyboard_schemes.enabled)
-            .map((candidate: SchemeDefinition): string => candidate.preferenceId),
-        candidateFollowCursor: preferences.candidate_follow_cursor,
-        numberRowSelection: preferences.number_row_selection,
-        candidateShowPreedit: preferences.candidate_preedit_style !== 'empty',
-        candidateLayout: preferences.candidate_layout === 'horizontal' ? 'horizontal' : 'vertical',
-        navigation: {
-          minusEqual: preferences.navigation?.minus_equal ?? true,
-          commaPeriod: preferences.navigation?.comma_period ?? true,
-          brackets: preferences.navigation?.brackets ?? false,
-          tab: preferences.navigation?.tab ?? true,
-          pageUpDown: preferences.navigation?.page_up_down ?? true,
-          mouseWheel: preferences.navigation?.mouse_wheel ?? false,
-          arrows: preferences.navigation?.arrows ?? true
-        },
-        // The shared store validates these to 12..32 and strips control
-        // characters from family names. Clamp again at the host boundary so
-        // an older staged document cannot produce an unusable panel.
-        candidateFontSize: Math.max(12, Math.min(32, preferences.candidate_font_size)),
-        candidatePreeditFontSize:
-          Math.max(12, Math.min(32, preferences.candidate_preedit_font_size)),
-        candidateFontFamily: preferences.candidate_font_family.trim().length > 0
-          ? preferences.candidate_font_family : 'Noto Sans SC',
-        candidateEnglishFont: preferences.candidate_english_font ?? null,
-        candidateFallbackFonts: preferences.candidate_fallback_fonts.filter(
-          (font: string): boolean => font.trim().length > 0),
-        candidateTextColor: preferences.candidate_text_color ?? skinPalette?.text ?? null,
-        candidateAccentColor: preferences.candidate_accent_color ?? skinPalette?.accent ?? null,
-        candidateNumberColor: preferences.candidate_number_color ?? skinPalette?.number ?? null,
-        candidateSelectedColor: preferences.candidate_selected_color ?? skinPalette?.selected ?? null,
-        candidateHoverColor: preferences.candidate_hover_color ?? skinPalette?.hover ?? null,
-        candidateSurfaceColor: preferences.candidate_surface_color ?? skinPalette?.surface ?? null,
-        candidateBorderColor: preferences.candidate_border_color ?? skinPalette?.border ?? null,
-        // Clamped rather than trusted: the store validates, but an older document or a host that
-        // never learned the bounds would otherwise draw a keyboard nobody can hit.
-        keySpacingTenths: KeyboardGeometry.keySpacing(preferences.touch_key_spacing_tenths),
-        rowSpacingTenths: KeyboardGeometry.rowSpacing(preferences.touch_row_spacing_tenths),
-        heightAdjustment:
-          KeyboardGeometry.heightAdjustment(preferences.touch_keyboard_height_adjustment),
-        voiceShortcut: preferences.touch_voice_shortcut,
-        thoughtfulReply: preferences.touch_keyboard_schemes?.selected === 'thoughtful_reply'
-      };
-      this.toolbarSkin = ToolbarSkinPolicy.fromCss(
-        this.skin(this.appearance.skinId,
-          KeyboardSkin.resolveDark(this.appearance.toolbarTheme, this.appearance.globalTheme,
-            systemDark)), skinToolbar);
+      this.preparedPreferences = preferences;
+      this.applyAppearance(preferences);
       this.schemeName = preferences.scheme;
       this.profileName = preferences.shuangpin_profile;
       this.traditional = preferences.traditional_chinese_output;
@@ -1270,6 +1514,13 @@ export class KeyboardSession implements HardwareKeyTarget {
       this.toolbar = preferences.floating_toolbar;
       this.nineKeyMode = preferences.touch_keyboard_layout === 'nine_key'
         && preferences.scheme === 'quanpin';
+      this.soundPlayer.configure(KeyboardFormFactor.isDesktop()
+        ? KeySoundPolicy.settings(preferences.plugins) : KEY_SOUNDS_OFF, stateRoot);
+      this.musicPlayer.configure(KeyboardFormFactor.isDesktop()
+        ? MusicPolicy.settings(preferences.plugins) : MUSIC_OFF, stateRoot);
+      this.typingEffectPreferences = KeyboardFormFactor.isDesktop()
+        ? TypingEffectPolicy.settings(preferences.plugins) : TYPING_EFFECTS_OFF;
+      this.typingEffects = this.typingEffectPreferences;
     } catch (error) {
       KeyboardLog.error(`host preparation unreadable: ${describeError(error)}`);
       return false;
@@ -1287,6 +1538,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       }
       this.handle = created.value.session;
       KeyboardLog.info(`session ${this.handle} created`);
+      this.refreshTypingEffects();
       this.schedulePersonalDictionaryDrain();
       this.scheduleDictionarySnapshotPoll();
       return true;
@@ -1315,7 +1567,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       const reply: PersonalDictionarySyncResponse =
         JSON.parse(client.personalDictionarySync(options)) as PersonalDictionarySyncResponse;
       if (!reply.ok) {
-        KeyboardLog.error('personal dictionary queue not applied; it will be retried');
+        KeyboardLog.error(`personal dictionary queue not applied; it will be retried: ${reply.error}`);
         return false;
       }
       return reply.value.pending_count === 0;
@@ -1391,6 +1643,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     const attached: inputMethodEngine.InputClient | undefined = this.inputClient;
     const english: boolean = this.englishMode;
     const nineKey: boolean = this.nineKeyMode;
+    const revision: number = this.preferencesRevision;
     this.stop();
     if (!this.start(this.resourceDirectory, this.stateDirectory, this.systemDark)) {
       KeyboardLog.error(`${reason} left the session unavailable`);
@@ -1400,8 +1653,51 @@ export class KeyboardSession implements HardwareKeyTarget {
     this.nineKeyMode = nineKey;
     if (attached !== undefined && this.inputClient === attached) {
       this.apply(client.focus(this.handle, true));
+      this.refreshTypingEffects();
       this.applyView(client.setEnglishMode(this.handle, english));
       this.applyView(client.setNineKeyMode(this.handle, nineKey));
+    }
+    // Any rebuild reads the document afresh, whatever it was for, so the surfaces follow whenever the stored preferences moved underneath it.
+    if (this.preferencesRevision !== revision) {
+      this.announcePreferencesReloaded();
+    }
+  }
+
+  /** Tell the view and the ability that what they derive from the preferences has to be read again. */
+  private announcePreferencesReloaded(): void {
+    if (this.onViewPreferencesReloaded !== undefined) {
+      this.onViewPreferencesReloaded();
+    }
+    if (this.onPreferencesReloaded !== undefined) {
+      this.onPreferencesReloaded();
+    }
+  }
+
+  /**
+   * Pick up what the settings page saved since this session was built.
+   *
+   * The settings page is another process writing the same document. Windows pushes a change to the running server and polls as a fallback (`WM_APPLY_IME_CONFIG`, `TIMER_ID_CONFIG_SYNC`); here the keyboard compares the stored revision each time an editor takes focus, which is the first moment anyone could type with the new settings, and costs one small read rather than a timer. A composition in progress is left alone and the next focus picks the change up.
+   */
+  reloadChangedPreferences(): void {
+    if (this.handle === 0 || this.composing() || this.localMode !== 'none') {
+      return;
+    }
+    const revision: number = this.storedRevision(this.stateDirectory);
+    if (revision < 0 || revision === this.preferencesRevision) {
+      return;
+    }
+    KeyboardLog.info(`preferences moved from revision ${this.preferencesRevision} to ${revision}`);
+    this.restartIdleSession('preferences reload');
+  }
+
+  /** The revision of the stored preference document, or -1 when it cannot be read. */
+  private storedRevision(stateRoot: string): number {
+    try {
+      const loaded: SnapshotResponse = JSON.parse(client.loadPreferences(stateRoot)) as SnapshotResponse;
+      return loaded.ok ? loaded.value.revision : -1;
+    } catch (error) {
+      KeyboardLog.error(`preferences revision unreadable: ${describeError(error)}`);
+      return -1;
     }
   }
 
@@ -1415,14 +1711,182 @@ export class KeyboardSession implements HardwareKeyTarget {
     return this.appearance;
   }
 
-  /** Resolve a touch-keyboard skin with the shared custom design when selected. */
-  skin(id: string, dark: boolean): KeyboardSkin {
-    return KeyboardSkin.from(id, dark, id === 'custom' ? this.customSkinDesign : null);
+  /** The keyboard palette of the global theme in one mode: the custom design when the custom theme carries one, else the resolved palette, else the native tokens. */
+  keyboardSkin(dark: boolean): KeyboardSkin {
+    const title: string = this.themeTitle(this.globalThemeId);
+    if (this.globalThemeId === 'custom' && this.customDesign !== null) {
+      return KeyboardSkin.fromDesign(title, this.customDesign, dark);
+    }
+    const theme: ResolvedTheme | null = dark ? this.themeDark : this.themeLight;
+    return KeyboardSkin.fromTheme(this.globalThemeId, title, theme === null ? null : theme.keyboard, dark);
   }
 
-  /** The built-ins plus the current shared custom design for the native picker. */
-  keyboardSkins(dark: boolean): KeyboardSkin[] {
-    return KeyboardSkin.choices(dark, this.customSkinDesign);
+  /** The skin a keyboard-side surface (voice, emoji, handwriting, menus) wears: its own setting, then the app mode, then whatever the keyboard is in; a theme with a fixed appearance overrides all three. */
+  surfaceSkin(surfaceTheme: string): KeyboardSkin {
+    return this.keyboardSkin(GlobalTheme.surfaceDark(this.fixedAppearance(),
+      KeyboardSkin.resolveDark(surfaceTheme, this.appearance.appMode, this.appearance.dark)));
+  }
+
+  /** The 2in1 candidate context menu's colours. Menus derive from the candidate palette rather than the keyboard's, in the mode `menu_theme` picks the way `surfaceSkin` resolves the keyboard-side surfaces. */
+  menuColors(): CandidateColors {
+    const dark: boolean = GlobalTheme.surfaceDark(this.fixedAppearance(),
+      KeyboardSkin.resolveDark(this.appearance.menuTheme, this.appearance.appMode, this.appearance.dark));
+    const theme: ResolvedTheme | null = dark ? this.themeDark : this.themeLight;
+    return GlobalTheme.candidateColors(theme === null ? null : theme.candidate, dark);
+  }
+
+  /**
+   * One card per global theme for the native picker, in the shared catalog order.
+   *
+   * A built-in theme is shown in the mode it fixes, `system` in the current mode, and `custom` as the user's design, or its base when there is no design. Ids, titles and colours all come from the catalog; nothing here keeps a copy.
+   */
+  themeSkins(dark: boolean): KeyboardSkin[] {
+    if (this.themeCatalog.length === 0) {
+      return [this.keyboardSkin(dark)];
+    }
+    return this.themeCatalog.map((entry: ThemeCatalogEntry): KeyboardSkin => {
+      if (entry.id === this.globalThemeId) {
+        return this.keyboardSkin(GlobalTheme.surfaceDark(entry.appearance, dark));
+      }
+      if (entry.id === 'custom') {
+        if (this.customDesign !== null) {
+          return KeyboardSkin.fromDesign(entry.title, this.customDesign, dark);
+        }
+        const base: ThemeCatalogEntry | null = GlobalTheme.entry(this.themeCatalog, this.customThemeBase);
+        return base === null ? KeyboardSkin.fromTheme(entry.id, entry.title, null, dark)
+          : KeyboardSkin.fromTheme(entry.id, entry.title, base.keyboard,
+            GlobalTheme.surfaceDark(base.appearance, dark));
+      }
+      return KeyboardSkin.fromTheme(entry.id, entry.title, entry.keyboard,
+        GlobalTheme.surfaceDark(entry.appearance, dark));
+    });
+  }
+
+  /** Store a global theme picked on the keyboard and redraw every surface from it. */
+  selectGlobalTheme(id: string): boolean {
+    const changes: Map<string, Object> = new Map<string, Object>();
+    changes.set('global_theme', id);
+    if (!this.changePreferences(changes)) {
+      return false;
+    }
+    if (this.preparedPreferences !== undefined) {
+      this.preparedPreferences.global_theme = id;
+      this.applyAppearance(this.preparedPreferences);
+    }
+    this.refreshToolbar();
+    return true;
+  }
+
+  /** Whether candidates carry translations, which the function panel's 译 tile and the strip's 译 pill show as a switch. */
+  showsCandidateTranslations(): boolean {
+    return this.preparedPreferences !== undefined && this.preparedPreferences.candidate_translations;
+  }
+
+  /**
+   * Candidate translations on or off from the keyboard, through the same document the settings page writes.
+   *
+   * The session takes the change at once, since the translation query reads its preferences. What the host derived from the switch is derived again here: whether a gloss is drawn, and the line reserved for it, which moves the keyboard's height, so the view and the ability are told the way a settings reload tells them.
+   */
+  toggleCandidateTranslations(): boolean {
+    const prepared: PreparedPreferences | undefined = this.preparedPreferences;
+    if (prepared === undefined) {
+      return false;
+    }
+    const changes: Map<string, Object> = new Map<string, Object>();
+    changes.set('candidate_translations', !prepared.candidate_translations);
+    if (!this.changePreferences(changes)) {
+      return prepared.candidate_translations;
+    }
+    prepared.candidate_translations = !prepared.candidate_translations;
+    this.applyCandidateGloss(prepared);
+    this.publishCurrentCandidates();
+    this.announcePreferencesReloaded();
+    return prepared.candidate_translations;
+  }
+
+  /** Whether fuzzy pinyin is on, which the function panel's 模糊音 tile shows as a switch. */
+  usesFuzzyPinyin(): boolean {
+    return this.fuzzyPinyin;
+  }
+
+  /**
+   * Fuzzy pinyin on or off from the keyboard, with the selected rules kept.
+   *
+   * Saved before it is applied, the reverse of changePreferences: the store opts every rule in on the first enable, and the session has to be given that seeded set rather than the empty one that was sent, or the switch would read on while matching exactly until the next rebuild. The saved snapshot carries the revision the session is then given, so the two never disagree about what that revision holds.
+   */
+  toggleFuzzyPinyin(): boolean {
+    if (this.handle === 0) {
+      return this.fuzzyPinyin;
+    }
+    try {
+      const loaded: SnapshotResponse =
+        JSON.parse(client.loadPreferences(this.stateDirectory)) as SnapshotResponse;
+      if (!loaded.ok) {
+        KeyboardLog.error(`preferences unreadable: ${loaded.error}`);
+        return this.fuzzyPinyin;
+      }
+      const snapshot: PreferencesSnapshot = loaded.value;
+      const expected: number = snapshot.revision;
+      const stored: Object | undefined = snapshot.preferences['fuzzy_pinyin'];
+      const absent: PreparedFuzzyPinyin = { enabled: false, rules: [] };
+      const current: PreparedFuzzyPinyin = stored === undefined ? absent : stored as PreparedFuzzyPinyin;
+      // The record just parsed from disk with only the switch flipped: the rules and the seeding marker go back as they were read.
+      current.enabled = !current.enabled;
+      snapshot.preferences['fuzzy_pinyin'] = current;
+      snapshot.revision = expected + 1;
+      const saved: SnapshotResponse = JSON.parse(client.savePreferences(this.stateDirectory, expected,
+        JSON.stringify(snapshot))) as SnapshotResponse;
+      if (!saved.ok) {
+        KeyboardLog.error(`preferences not persisted: ${saved.error}`);
+        return this.fuzzyPinyin;
+      }
+      const applied: PrepareResponse =
+        JSON.parse(client.updatePreferences(this.handle, JSON.stringify(saved.value))) as PrepareResponse;
+      if (!applied.ok) {
+        // On disk but not in the session: leaving the revision behind makes the next focus rebuild from the document.
+        KeyboardLog.error(`preferences refused: ${applied.error}`);
+      } else {
+        this.preferencesRevision = saved.value.revision;
+      }
+      const fuzzy: PreparedFuzzyPinyin = saved.value.preferences['fuzzy_pinyin'] as PreparedFuzzyPinyin;
+      this.fuzzyPinyin = fuzzy.enabled;
+      if (this.preparedPreferences !== undefined) {
+        this.preparedPreferences.fuzzy_pinyin = fuzzy;
+      }
+    } catch (error) {
+      KeyboardLog.error(`preferences failed: ${describeError(error)}`);
+    }
+    return this.fuzzyPinyin;
+  }
+
+  /** Whether a gloss is drawn under the candidates and how many lines are kept for it, from the two switches and the providers that can answer. */
+  private applyCandidateGloss(preferences: PreparedPreferences): void {
+    this.candidateGlossEnabled = CandidateGlossLayoutPolicy.displays(
+      this.candidateEnglishGloss, preferences.candidate_translations);
+    const glossTargets: string[] = [preferences.translation_target_language];
+    if (preferences.translation_secondary_language !== undefined
+        && preferences.translation_secondary_language !== null
+        && !glossTargets.includes(preferences.translation_secondary_language)) {
+      glossTargets.push(preferences.translation_secondary_language);
+    }
+    const glossProviders: CandidateGlossProviderState = {
+      customEnabled: preferences.custom_translation.enabled,
+      customEndpoint: preferences.custom_translation.endpoint,
+      niuTransEnabled: preferences.niutrans.enabled,
+      niuTransAppId: preferences.niutrans.app_id,
+      niuTransApiKey: preferences.niutrans.apikey,
+      tencentEnabled: preferences.tencent_tmt.enabled,
+      tencentSecretId: preferences.tencent_tmt.secret_id,
+      tencentSecretKey: preferences.tencent_tmt.secret_key
+    };
+    this.candidateGlossRows = CandidateGlossLayoutPolicy.rows(this.candidateEnglishGloss,
+      glossTargets, preferences.candidate_translations, glossProviders,
+      this.installedOfflineGlosses(glossTargets));
+  }
+
+  private themeTitle(id: string): string {
+    const entry: ThemeCatalogEntry | null = GlobalTheme.entry(this.themeCatalog, id);
+    return entry === null ? id : entry.title;
   }
 
   /** Whether the shared privacy preference permits this host's private history file. */
@@ -1542,17 +2006,53 @@ export class KeyboardSession implements HardwareKeyTarget {
    * and pushes the rest along. Off means no room is kept and the chips are as wide as their words.
    */
   glossesExpected(): boolean {
-    return this.candidateGlossRows > 0;
+    return this.glossRows() > 0;
   }
 
-  /** Fixed horizontal rows reserved before asynchronous candidate glosses arrive. */
+  /** Fixed horizontal rows reserved before asynchronous candidate glosses arrive; Korean always keeps one for the 훈음 of its Hanja rows. */
   glossRows(): number {
-    return this.candidateGlossRows;
+    return CandidateGlossLayoutPolicy.schemeRows(this.candidateGlossRows, this.schemeName === 'korean');
   }
 
   /** True when the Engine is composing English rather than Chinese. */
   isEnglish(): boolean {
     return this.englishMode;
+  }
+
+  /**
+   * True in the Windows Ctrl+Shift+E mode: English, but a hardware letter spells a word from the English candidate list instead of going straight to the editor.
+   *
+   * The Engine side is the same dedicated-English flag either way; what differs is only whether a hardware key reaches it. The touch keyboard always sends its letters through, so on a phone the two are one mode.
+   */
+  isEnglishCandidates(): boolean {
+    return this.englishMode && this.englishCandidates;
+  }
+
+  /** Whether punctuation is locked to Chinese, which the Windows host keeps even in English mode (`ResolvePunctuationOpen`). */
+  punctuationLockedChinese(): boolean {
+    return this.punctuationLock === 'chinese';
+  }
+
+  /**
+   * Ctrl+Shift+E, as `IsEnglishModeToggleKey` → `SetEnglishInputMode` + `ClearState` on Windows.
+   *
+   * Unlike the Shift tap it commits nothing: the TSF side answers this chord with `FUNCTION_CANCEL`, and the Engine drops its composition when the dedicated-English flag flips. Leaving the mode goes back to Chinese, as the macOS host's `toggleDedicatedEnglishMode:` does.
+   */
+  toggleEnglishCandidates(): boolean {
+    if (this.handle === 0) {
+      return this.isEnglishCandidates();
+    }
+    const enabled: boolean = !this.isEnglishCandidates();
+    if (this.composing() && this.englishMode === enabled) {
+      // Direct English with a local-mode composition open: the flag does not flip, so the Engine would keep it.
+      this.cancel();
+    }
+    this.englishCandidates = enabled;
+    this.englishMode = enabled;
+    this.manualLanguageGeneration = this.editorGeneration;
+    this.modeScope.remember(this.englishMode);
+    this.applyView(client.setEnglishMode(this.handle, this.englishMode));
+    return enabled;
   }
 
   /** True when the editor now attached needs the full letter face instead of a nine-key grid. */
@@ -1565,6 +2065,36 @@ export class KeyboardSession implements HardwareKeyTarget {
     return !this.englishMode && this.schemeName === 'japanese';
   }
 
+  /** Whether letters go to the Korean Hangul automaton: the Korean scheme with neither English nor a local utility mode taking the keys. */
+  isKorean(): boolean {
+    return KoreanCompositionPolicy.selected(this.schemeName, this.englishMode, this.localMode);
+  }
+
+  /** Whether the scheme in force writes ASCII marks whatever the punctuation switch says: Korean and Vietnamese (`uses_chinese_punctuation`). */
+  writesAsciiPunctuation(): boolean {
+    const scheme: number = this.rulesScheme();
+    return scheme >= 0 && !SchemeTraits.usesChinesePunctuation(scheme);
+  }
+
+  /** Whether the scheme in force writes half-width whatever the width switch says: Korean and Vietnamese (`widens_full_width`). */
+  private keepsHalfWidth(): boolean {
+    const scheme: number = this.rulesScheme();
+    return scheme >= 0 && !SchemeTraits.widensFullWidth(scheme);
+  }
+
+  /** The Engine scheme number whose own key rules are in force, or -1 while English or a local utility mode takes the keys. */
+  rulesScheme(): number {
+    return SchemeCompositionPolicy.selectedRulesScheme(this.schemeName, this.englishMode, this.localMode);
+  }
+
+  /** Whether the scheme's openable candidate list (the composing Korean syllable's Hanja, the Zhuyin list) is on the strip, read from what the Engine last reported. */
+  candidateListOpen(): boolean {
+    const view: EngineView | undefined = this.lastView;
+    return view !== undefined && SchemeCompositionPolicy.listOpen(
+      SchemeCompositionPolicy.rulesScheme(view.scheme, view.dedicated_english, view.local_mode),
+      view.candidate_list_open);
+  }
+
   /** Which mode-switch gestures the user left bound, as the shared document has them. */
   modeBindings(): ModeBindings {
     return this.bindings;
@@ -1575,18 +2105,136 @@ export class KeyboardSession implements HardwareKeyTarget {
     return this.wordCharacter;
   }
 
+  /** Whether punctuation keys write Chinese punctuation, which the touch strip and the function panel show as a switch. */
+  usesChinesePunctuation(): boolean {
+    return this.chinesePunctuation;
+  }
+
   /**
    * Chinese punctuation or ASCII, which the toolbar button and the Windows Ctrl+. binding share.
    *
-   * Written as a preference rather than as a live session mode because that is how this host has
-   * always changed it: the same value drives the toolbar face and the settings page, and two
-   * mechanisms for one switch is how they come to disagree.
+   * Written as a preference rather than as a live session mode because that is how this host has always changed it: the same value drives the toolbar face and the settings page, and two mechanisms for one switch is how they come to disagree.
+   *
+   * The switch moves only once the store has taken the write: the reload that follows skips this session's own revision, so a refused write that still flipped the flag would write punctuation the settings page says is off. Returns the state now in effect.
    */
   togglePunctuation(): boolean {
+    if (!this.writePreference('chinese_punctuation', !this.chinesePunctuation)) {
+      return this.chinesePunctuation;
+    }
     this.chinesePunctuation = !this.chinesePunctuation;
     this.clearSmartPunctuationRepeat();
-    this.writePreference('chinese_punctuation', this.chinesePunctuation);
     return this.chinesePunctuation;
+  }
+
+  /**
+   * Insert a hardware key's printable ASCII character as its fullwidth form, the Windows double-byte mode. Returns false with fullwidth off, so the key goes back to the application.
+   */
+  widen(ascii: number): boolean {
+    if (!this.fullWidth || ascii < 0x20 || ascii > 0x7e || this.inputClient === undefined) {
+      return false;
+    }
+    this.clearSmartPunctuationRepeat();
+    this.insert(String.fromCharCode(ascii));
+    return true;
+  }
+
+  /** Whether direct ASCII is written in its fullwidth form. */
+  isFullWidth(): boolean {
+    return this.fullWidth;
+  }
+
+  /**
+   * Count a hardware character the keyboard handed to the application, as Windows counts the keys it does not eat (`stats_passthrough.h`). Only for an editor this keyboard composes for: a password field is not the user's typing to keep a record of.
+   */
+  recordPassthrough(character: number, ctrl: boolean, alt: boolean, logo: boolean): void {
+    if (!this.composes() || !TypingStatisticsPolicy.countsPassthrough(character, ctrl, alt, logo)) {
+      return;
+    }
+    this.recordTypingStatistics(String.fromCodePoint(character), this.typingSource());
+  }
+
+  /**
+   * Count one press of a key for the key heatmap: a soft key's tap or a physical key going down, by its id from KeyIdPolicy, null for a key without one.
+   *
+   * Every key counts while statistics are on, the ones that compose and the ones handed to the application alike, in a number, phone or date field as much as in prose, except in a password field: its keys are not the user's typing to keep a record of. Only counts are kept, per key and local day, never the order or what was typed. The press is filed under the day it happened on, and the write waits for a batch, a new day, the timer or the editor letting go.
+   */
+  recordKey(id: string | null): void {
+    if (id === null || !this.keyStatisticsEnabled || !this.keyStatisticsEditorKnown
+      || EditorPolicy.excludesKeyStatistics(this.traits) || this.stateDirectory.length === 0) {
+      return;
+    }
+    const due: KeyPressFlush[] = this.keyPresses.add(id, TypingStatisticsPolicy.day(new Date()));
+    for (const flush of due) {
+      this.sendKeyPresses(flush);
+    }
+    if (this.keyPresses.pending() === 0) {
+      this.cancelKeyFlushTimer();
+    } else if (this.keyFlushTimer < 0) {
+      this.keyFlushTimer = setTimeout((): void => {
+        this.keyFlushTimer = -1;
+        this.flushKeyPresses();
+      }, KeyPressBatch.FLUSH_INTERVAL_MS);
+    }
+  }
+
+  /** Write whatever key presses are held, now: the editor let go, or the keyboard is going away. */
+  private flushKeyPresses(): void {
+    this.cancelKeyFlushTimer();
+    const flush: KeyPressFlush | null = this.keyPresses.drain();
+    if (flush !== null) {
+      this.sendKeyPresses(flush);
+    }
+  }
+
+  private cancelKeyFlushTimer(): void {
+    if (this.keyFlushTimer >= 0) {
+      clearTimeout(this.keyFlushTimer);
+      this.keyFlushTimer = -1;
+    }
+  }
+
+  private sendKeyPresses(flush: KeyPressFlush): void {
+    if (this.stateDirectory.length === 0) return;
+    const action: TypingStatisticsKeysAction = {
+      operation: 'record_keys', day: flush.day, keys: flush.keys
+    };
+    const requestDocument: TypingStatisticsKeysRequest = {
+      directory: this.stateDirectory, action: action
+    };
+    const generation: number = this.attributeGeneration;
+    taskpool.execute(writeKeyPresses, JSON.stringify(requestDocument)).then((response: Object): void => {
+      const value: Record<string, Object> = JSON.parse(response as string) as Record<string, Object>;
+      if (value.ok !== true) {
+        KeyboardLog.error('typing statistics key counts refused');
+        return;
+      }
+      // The store drops a batch it is not counting and says so with recorded 0: statistics were turned off in settings while this editor kept focus. Stop holding presses until the next attach reads the switch again. A reply from an editor that has since let go says nothing about the one now focused, whose attach has already re-read the switch.
+      const result: Record<string, Object> = value.value as Record<string, Object>;
+      if ((result.recorded as number) === 0 && Object.keys(flush.keys).length > 0
+        && generation === this.attributeGeneration) {
+        this.keyStatisticsEnabled = false;
+        this.cancelKeyFlushTimer();
+        this.keyPresses.clear();
+      }
+    }).catch((error: Object): void => {
+      KeyboardLog.error(`typing statistics key counts unavailable: ${describeError(error)}`);
+    });
+  }
+
+  /**
+   * Read the statistics switch again, off the UI thread. Asked on every focus, which is how a switch flipped in the settings application reaches a keyboard that is already running; turning it off drops whatever was held rather than writing it.
+   */
+  private refreshKeyStatistics(): void {
+    if (this.stateDirectory.length === 0) return;
+    taskpool.execute(readTypingStatisticsEnabled, this.stateDirectory).then((value: Object): void => {
+      this.keyStatisticsEnabled = (value as number) === 1;
+      if (!this.keyStatisticsEnabled) {
+        this.cancelKeyFlushTimer();
+        this.keyPresses.clear();
+      }
+    }).catch((error: Object): void => {
+      KeyboardLog.error(`typing statistics switch unavailable: ${describeError(error)}`);
+    });
   }
 
   /** Halfwidth ASCII or its fullwidth twin, which Ctrl+Shift+F toggles. */
@@ -1620,7 +2268,8 @@ export class KeyboardSession implements HardwareKeyTarget {
     return {
       englishMode: this.toolbar.english_mode, punctuation: this.toolbar.punctuation,
       fullwidth: this.toolbar.fullwidth, characterSet: this.toolbar.character_set,
-      emoji: this.toolbar.emoji, screenKeyboard: this.toolbar.screen_keyboard,
+      emoji: this.toolbar.emoji, handwriting: this.toolbar.handwriting !== false,
+      screenKeyboard: this.toolbar.screen_keyboard, voice: this.toolbar.voice !== false,
       settings: this.toolbar.settings !== false
     };
   }
@@ -1632,15 +2281,17 @@ export class KeyboardSession implements HardwareKeyTarget {
     }
     const state: ToolbarState = {
       english: this.englishMode,
-      temporaryEnglish: this.localMode === 'temporary_english',
+      temporaryEnglish: this.localMode === 'temporary_english' || this.isEnglishCandidates(),
       japanese: !this.englishMode && this.schemeName === 'japanese',
+      korean: !this.englishMode && this.schemeName === 'korean',
+      vietnamese: !this.englishMode && this.schemeName === 'vietnamese',
       capsLock: this.capsLock,
-      chinesePunctuation: this.chinesePunctuation,
+      // Korean and Vietnamese write ASCII punctuation whatever the switch says (`uses_chinese_punctuation`), and the face reports what is written.
+      chinesePunctuation: this.chinesePunctuation && !this.writesAsciiPunctuation(),
       fullWidth: this.fullWidth, traditional: this.traditional
     };
     this.onToolbar(state, FloatingToolbarLayout.buttons(this.toolbarComponents()),
-      this.toolbarFontSize(), this.toolbarScale(),
-      this.skin(this.appearance.skinId, this.appearance.dark), this.toolbarSkin);
+      this.toolbarFontSize(), this.toolbarScale(), this.toolbarSkin);
   }
 
   beginToolbarDrag(): void {
@@ -1682,8 +2333,7 @@ export class KeyboardSession implements HardwareKeyTarget {
         this.toggleCharacterWidth();
         break;
       case ToolbarButton.CHARACTER_SET:
-        this.traditional = !this.traditional;
-        this.writePreference('traditional_chinese_output', this.traditional);
+        this.toggleCharacterSet();
         break;
       case ToolbarButton.EMOJI:
         this.requestSurface(DesktopSurface.EMOJI);
@@ -1691,20 +2341,39 @@ export class KeyboardSession implements HardwareKeyTarget {
       case ToolbarButton.SCREEN_KEYBOARD:
         this.requestSurface(DesktopSurface.SCREEN_KEYBOARD);
         break;
+      case ToolbarButton.HANDWRITING:
+        this.requestSurface(DesktopSurface.HANDWRITING);
+        break;
+      case ToolbarButton.VOICE:
+        this.requestSurface(DesktopSurface.VOICE);
+        break;
       default:
-        if (this.onToolbarSettings !== undefined) {
-          this.onToolbarSettings();
-        }
+        this.openSettings();
         break;
     }
     this.refreshToolbar();
   }
 
-  /** One value, through the same store the settings page writes, revision check and all. */
-  private writePreference(key: string, value: Object): void {
+  /**
+   * Simplified output becomes traditional and back, saved as the preference the settings page shows. Shared by the toolbar button, Ctrl+Shift+F and the function panel's 繁 tile.
+   *
+   * The switch moves only once the store has taken the write: the reload that follows skips this session's own revision, so a refused write that still flipped the flag would convert output the settings page says is off. Returns the state now in effect.
+   */
+  toggleCharacterSet(): boolean {
+    if (!this.writePreference('traditional_chinese_output', !this.traditional)) {
+      return this.traditional;
+    }
+    this.traditional = !this.traditional;
+    // The candidate bar shows converted text, so the list on screen follows the switch at once.
+    this.publishCurrentCandidates();
+    return this.traditional;
+  }
+
+  /** One value, through the same store the settings page writes, revision check and all. False when the store refused it. */
+  private writePreference(key: string, value: Object): boolean {
     const changes: Map<string, Object> = new Map<string, Object>();
     changes.set(key, value);
-    this.changePreferences(changes);
+    return this.changePreferences(changes);
   }
 
   /**
@@ -1745,21 +2414,31 @@ export class KeyboardSession implements HardwareKeyTarget {
     return this.desktopSurface;
   }
 
-  /** Tell whichever window is drawing the mode badge what to put on it. */
+  /** Offers a hardware key to the open 2in1 emoji panel, which the Windows panel receives as its focused window. False when no panel is open to take it. */
+  routePanelKey(key: EmojiPanelKey): boolean {
+    if (!KeyboardFormFactor.isDesktop() || this.desktopSurface !== DesktopSurface.EMOJI
+        || this.onPanelKey === undefined) {
+      return false;
+    }
+    return this.onPanelKey(key);
+  }
+
+  /** Tell whichever window is drawing the mode badge what to put on it, at the floating toolbar's size and in the toolbar theme's palette (toolbar_theme, then theme, then the system), as the macOS badge wears them. */
   setModeBadge(english: boolean): void {
     if (this.onModeBadge !== undefined) {
-      this.onModeBadge(english, this.appearance.dark);
+      this.onModeBadge(english, this.toolbarFontSize(), this.toolbarScale(), this.toolbarSkin);
     }
   }
 
   /** Whether something is being spelled right now, which decides who a physical key belongs to. */
   composing(): boolean {
-    return this.editing.length > 0;
+    return HardwareKeyRouter.composing(this.editing, this.phrasePrefix);
   }
 
   /** Tells the Engine which grid the user is typing on, so a 2 means ABC rather than a digit. */
   /** The scheme now in force, which decides whether the nine-key flag means anything. */
   useScheme(name: string, profileName: string | null = null): void {
+    const glossRows: number = this.glossRows();
     this.schemeName = name;
     if (profileName !== null) {
       this.profileName = profileName;
@@ -1767,6 +2446,10 @@ export class KeyboardSession implements HardwareKeyTarget {
     // Scheme changes happen from the keyboard's own picker as well as the desktop toolbar. Keep
     // the persistent toolbar's language face in sync before the next key or button action.
     this.refreshToolbar();
+    // Korean keeps a gloss line for the 훈음 whatever the switches say, so entering or leaving it can move the keyboard's height; the view and the ability are told the way the 译 switch tells them.
+    if (this.glossRows() !== glossRows) {
+      this.announcePreferencesReloaded();
+    }
   }
 
   setNineKey(enabled: boolean): void {
@@ -1788,6 +2471,8 @@ export class KeyboardSession implements HardwareKeyTarget {
     }
     this.finishCompositionBoundary(CompositionBoundary.MODE_SWITCH);
     this.englishMode = !this.englishMode;
+    // The Shift tap and the toolbar button go between Chinese and direct English; out of the Ctrl+Shift+E mode they go back to Chinese.
+    this.englishCandidates = false;
     this.manualLanguageGeneration = this.editorGeneration;
     // The user asked for this one, so it is the choice this application is remembered by.
     this.modeScope.remember(this.englishMode);
@@ -1810,11 +2495,13 @@ export class KeyboardSession implements HardwareKeyTarget {
 
   private finishCompositionBoundary(boundary: CompositionBoundary): void {
     const action: CompositionBoundaryAction = CompositionBoundaryPolicy.action(
-      this.composing(), this.schemeName === 'japanese', boundary);
+      this.composing(), this.schemeName === 'japanese', boundary,
+      SchemeTraits.commitsOnBlur(this.rulesScheme()));
     if (action === CompositionBoundaryAction.FINISH_COMPOSITION) {
       this.finishComposition();
     } else if (action === CompositionBoundaryAction.COMMIT_RAW) {
-      this.commitRaw();
+      // As typed, but not learned: Windows learns an entered English word only on Enter, and its mode switch commits the keystroke buffer without learning (`_HandleToogleIMEMode`).
+      this.command(InputCommand.COMMIT_RAW_WITHOUT_LEARNING);
     }
   }
 
@@ -1851,6 +2538,11 @@ export class KeyboardSession implements HardwareKeyTarget {
 
   voiceInputConfiguration(): VoiceInputConfiguration {
     return this.voiceInput;
+  }
+
+  /** The prepared host options the on-device recognizer reads the user's own words through, or null before the host has been prepared. */
+  voiceHotwordOptions(): Object | null {
+    return this.snapshotOptions ?? null;
   }
 
   /**
@@ -1960,16 +2652,30 @@ export class KeyboardSession implements HardwareKeyTarget {
   /** The framework hands over a fresh client on every inputStart. */
   attach(inputClient: inputMethodEngine.InputClient): void {
     const editorGeneration: number = ++this.editorGeneration;
+    const attributeGeneration: number = ++this.attributeGeneration;
     this.pendingOwnEdits = 0;
+    this.previewSupported = false;
+    this.previewText = '';
     this.invalidateReplyContext();
     this.clearSmartPunctuationRepeat();
     this.inputClient = inputClient;
+    this.editorAttributesKnown = false;
+    this.updateMusic();
+    this.keyStatisticsEditorKnown = false;
+    this.refreshKeyStatistics();
     inputClient.getEditorAttribute().then((attribute: inputMethodEngine.EditorAttribute): void => {
-      if (editorGeneration !== this.editorGeneration || this.inputClient !== inputClient) {
+      if (attributeGeneration !== this.attributeGeneration || this.inputClient !== inputClient) {
         return;
       }
       this.enterKey = attribute.enterKeyType;
+      this.previewSupported = attribute.isTextPreviewSupported === true;
       this.traits = KeyboardSession.traitsFor(attribute.inputPattern);
+      this.editorAttributesKnown = true;
+      // A pack imported again under the same id, or removed, while another editor had focus is picked up here, as host-api re-stamps its packs on focus.
+      this.soundPlayer.recheck();
+      this.musicPlayer.recheck();
+      this.updateMusic();
+      this.keyStatisticsEditorKnown = true;
       this.capitalization = EditorPolicy.capitalizationMode(this.traits,
         KeyboardSession.capitalizationFor(attribute.capitalizeMode));
       // Says the keyboard reached a real editor, which nothing else in the log does. Verifying that
@@ -1986,10 +2692,16 @@ export class KeyboardSession implements HardwareKeyTarget {
         this.modeScope.mode(this.defaultEnglish) || EditorPolicy.prefersLatin(this.traits);
       if (this.handle !== 0 && EditorPolicy.appliesDelayedLanguage(
         this.composing(), this.englishMode, english,
-        this.manualLanguageGeneration === editorGeneration)) {
+        this.manualLanguageGeneration >= editorGeneration)) {
         this.englishMode = english;
         this.applyView(client.setEnglishMode(this.handle, english));
       }
+      if (EditorPolicy.prefersLatin(this.traits)) {
+        // A password or address field takes its letters as typed, never through a candidate list.
+        this.englishCandidates = false;
+      }
+      // A composition carried into this editor was rendered before its attribute said whether it takes preview text.
+      this.syncPreview();
       if (this.onEditorChanged !== undefined) {
         this.onEditorChanged();
       }
@@ -1998,13 +2710,16 @@ export class KeyboardSession implements HardwareKeyTarget {
     });
     if (this.handle !== 0) {
       this.apply(client.focus(this.handle, true));
+      this.refreshTypingEffects();
       this.applyView(client.setEnglishMode(this.handle, this.englishMode));
       this.applyView(client.setNineKeyMode(this.handle, this.nineKeyMode));
     }
+    this.reloadChangedPreferences();
   }
 
   detach(): void {
     this.editorGeneration++;
+    this.attributeGeneration++;
     this.manualLanguageGeneration = -1;
     this.pendingOwnEdits = 0;
     this.modeScope.deactivate();
@@ -2018,7 +2733,13 @@ export class KeyboardSession implements HardwareKeyTarget {
       this.finishCompositionBoundary(CompositionBoundary.DEACTIVATE);
       this.apply(client.focus(this.handle, false));
     }
+    this.previewSupported = false;
+    this.previewText = '';
     this.inputClient = undefined;
+    this.editorAttributesKnown = false;
+    this.updateMusic();
+    this.keyStatisticsEditorKnown = false;
+    this.flushKeyPresses();
   }
 
   stop(): void {
@@ -2047,16 +2768,33 @@ export class KeyboardSession implements HardwareKeyTarget {
     }
   }
 
+  /** Final ability teardown: invalidate editor callbacks that may still be awaiting attributes. */
+  shutdown(): void {
+    this.stop();
+    this.soundPlayer.shutdown();
+    this.musicPlayer.shutdown();
+    this.attributeGeneration++;
+    this.inputClient = undefined;
+    this.previewSupported = false;
+    this.previewText = '';
+    this.keyStatisticsEditorKnown = false;
+    this.flushKeyPresses();
+  }
+
   /** Invalidate host-side network work before the focused editor changes or the session dies. */
   private cancelOnlineProviders(): void {
     this.onlineEpoch++;
     this.onlineSignature = '';
+    for (const request of this.onlineRequests) request.destroy();
+    this.onlineRequests.clear();
     if (this.onlineTimer >= 0) {
       clearTimeout(this.onlineTimer);
       this.onlineTimer = -1;
     }
     this.translationEpoch++;
     this.translationSignature = '';
+    for (const request of this.translationRequests) request.destroy();
+    this.translationRequests.clear();
     if (this.translationTimer >= 0) {
       clearTimeout(this.translationTimer);
       this.translationTimer = -1;
@@ -2066,6 +2804,9 @@ export class KeyboardSession implements HardwareKeyTarget {
   /** Invalidate asynchronous reply work without logging or retaining editor text. */
   invalidateReplyContext(notifyEditorChange: boolean = true): void {
     this.replyContextGeneration++;
+    const request: http.HttpRequest | undefined = this.replyRequest;
+    this.replyRequest = undefined;
+    if (request !== undefined) request.destroy();
     this.replyResultEditorGeneration = -1;
     this.replyResultContextGeneration = -1;
     this.replyResultTexts = [];
@@ -2115,6 +2856,15 @@ export class KeyboardSession implements HardwareKeyTarget {
   private insertEditorText(text: string): void {
     const inputClient: inputMethodEngine.InputClient | undefined = this.inputClient;
     if (inputClient === undefined) return;
+    if (this.previewText.length > 0 || this.commitSynchronously) {
+      // The insertion takes the preview text's place. It has to land before the next preview update, which is synchronous, and an asynchronous insert gives no such order.
+      try {
+        this.insertEditorTextSync(text);
+      } catch (error) {
+        KeyboardLog.error(`editor insertion unavailable: ${describeError(error)}`);
+      }
+      return;
+    }
     const generation: number = this.editorGeneration;
     this.pendingOwnEdits++;
     inputClient.insertText(text).catch((error: Object): void => {
@@ -2135,6 +2885,48 @@ export class KeyboardSession implements HardwareKeyTarget {
     } catch (error) {
       this.pendingOwnEdits--;
       throw new Error(describeError(error));
+    }
+    // An insertion replaces preview text and ends the preview.
+    this.previewText = '';
+  }
+
+  /**
+   * Bring the editor's preview text in line with the composition the Engine last reported.
+   *
+   * Every change is a document edit the editor echoes back like an insertion, so it is reserved the same way; otherwise the echo would read as the user editing the field and end the composition it came from.
+   */
+  private syncPreview(): void {
+    const inputClient: inputMethodEngine.InputClient | undefined = this.inputClient;
+    const view: EngineView | undefined = this.lastView;
+    const wanted: string = view === undefined ? '' : InlinePreeditPolicy.text(this.inlinePreeditStyle,
+      KeyboardFormFactor.isDesktop(), this.previewSupported, view.editing_text, view.preedit,
+      view.phrase_prefix ?? '', SchemeCompositionPolicy.drawsPreedit(SchemeCompositionPolicy.rulesScheme(
+        view.scheme, view.dedicated_english, view.local_mode)));
+    if (inputClient === undefined || wanted === this.previewText) return;
+    const shown: string = this.previewText;
+    this.pendingOwnEdits++;
+    try {
+      inputClient.setPreviewTextSync(wanted, PREVIEW_REPLACE_CURRENT);
+      if (wanted.length === 0) inputClient.finishTextPreviewSync();
+      this.previewText = wanted;
+      return;
+    } catch (error) {
+      this.pendingOwnEdits--;
+      KeyboardLog.error(`editor preview unavailable: ${describeError(error)}`);
+    }
+    // The editor refused preview text after saying it took it; stop offering it for this focus.
+    this.previewSupported = false;
+    this.previewText = '';
+    if (shown.length === 0) return;
+    // Letters of a composition must not stay behind in the document: end the preview and take them out, the way a cancelled composition leaves nothing.
+    try {
+      inputClient.finishTextPreviewSync();
+      // Only when the letters are still there as plain text: an editor that dropped them with the preview must not lose what precedes them.
+      if (inputClient.getForwardSync(shown.length) === shown) {
+        this.deleteEditorBackwardSync(shown.length);
+      }
+    } catch (error) {
+      KeyboardLog.error(`editor preview cleanup unavailable: ${describeError(error)}`);
     }
   }
 
@@ -2227,6 +3019,7 @@ export class KeyboardSession implements HardwareKeyTarget {
           this.nineKeyMode = nineKey;
           if (this.inputClient !== undefined) {
             this.apply(client.focus(this.handle, true));
+            this.refreshTypingEffects();
             this.applyView(client.setEnglishMode(this.handle, english));
             this.applyView(client.setNineKeyMode(this.handle, nineKey));
           }
@@ -2238,28 +3031,29 @@ export class KeyboardSession implements HardwareKeyTarget {
     return result;
   }
 
-  press(ascii: number, shift: boolean): void {
+  /** Whether the key did anything. The touch keyboard ignores the answer; the hardware path hands a declined letter back to the application. */
+  press(ascii: number, shift: boolean): boolean {
     // Checked before the repeat arming is cleared: the space that converts is the key immediately
     // after the mark, so this is the one press where both armings are live at once.
     if (this.convertPunctuationSpace(ascii)) {
-      return;
+      return true;
     }
     this.clearSmartPunctuationRepeat();
     if (!this.composes()) {
       // Straight to the editor, with no composition and nothing learned. A password or a one-time
       // code is not something an input method should be holding, let alone remembering.
       this.insert(shift ? String.fromCharCode(ascii).toUpperCase() : String.fromCharCode(ascii));
-      return;
+      return true;
     }
     if (this.handle === 0) {
       // Deliberately without the character: hilog is readable by tooling, and what the user types
       // does not belong in it. The refusal itself is the diagnostic.
       KeyboardLog.error('key ignored: no session');
-      return;
+      return false;
     }
     this.tapFeedback();
-    const before: number = this.editing.length;
-    this.apply(client.character(this.handle, ascii, shift));
+    const before: string = this.editing;
+    const handled: boolean = this.apply(client.character(this.handle, ascii, shift));
     // A letter that leaves the composition exactly as it was is the one failure this path cannot
     // otherwise report: the key was claimed, so the application never sees it, and the Engine
     // answered `ok`, so apply() has nothing to complain about. The result is a key that silently
@@ -2269,10 +3063,15 @@ export class KeyboardSession implements HardwareKeyTarget {
     // What is logged is the shape of the failure, never the key: a character in hilog is the user's
     // text. The scheme and the local mode are the two host-side inputs that decide whether a letter
     // should have composed at all, and both are already public state.
-    if (before === 0 && this.editing.length === 0) {
+    const consumed: boolean = handled || this.editing !== before;
+    // A capital with nothing composed is declined by design and handed back to the application, so only a lower-case letter that composed nothing is a failure worth reporting.
+    const capital: boolean = ascii >= 0x41 && ascii <= 0x5a;
+    if (!consumed && before.length === 0 && !capital) {
       KeyboardLog.error(`composing key produced no composition: scheme=${this.schemeName}`
-        + ` local=${this.localMode} english=${this.englishMode} candidates=${this.currentCandidates.length}`);
+        + ` local=${this.localMode} english=${this.englishMode} candidates=${this.currentCandidates.length}`
+        + ` shift=${shift} caps=${this.capsLock}`);
     }
+    return consumed;
   }
 
   /** Route an ASCII punctuation key through the shared editor-context policy. */
@@ -2281,7 +3080,8 @@ export class KeyboardSession implements HardwareKeyTarget {
     let preceding: number = 0;
     try {
       // Harmony's getForwardSync returns the bounded text immediately before the cursor.
-      preceding = SmartPunctuationContext.precedingCodePoint(this.inputClient.getForwardSync(2));
+      preceding = SmartPunctuationContext.precedingCodePoint(InlinePreeditPolicy.beforePreview(
+        this.inputClient.getForwardSync(2 + this.previewText.length), this.previewText));
     } catch (error) {
       // Editor context is optional; zero deliberately falls back to Engine punctuation.
       KeyboardLog.error(`editor punctuation context unavailable: ${describeError(error)}`);
@@ -2289,7 +3089,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     const now: number = Date.now();
     if (SmartPunctuationRepeatPolicy.shouldReplace(
       this.smartPunctuationSnapshot, ascii, preceding, now, this.editorGeneration,
-      this.smartPunctuation, this.smartPunctuationRepeat, this.editing.length > 0,
+      this.smartPunctuation, this.smartPunctuationRepeat, this.composing(),
       this.currentCandidates.length)) {
       const chinese: string | null = SmartPunctuationRepeatPolicy.chineseMark(ascii);
       if (chinese !== null) {
@@ -2309,12 +3109,21 @@ export class KeyboardSession implements HardwareKeyTarget {
       }
     }
 
-    const raw: string = client.punctuationWithContext(this.handle, ascii, preceding);
+    let raw: string = client.punctuationWithContext(this.handle, ascii, preceding);
     let completion: PairedPunctuationCompletion | null = null;
     let committed: string | null | undefined = null;
     try {
       const response: Response = JSON.parse(raw) as Response;
-      if (response.ok) committed = response.value.commit;
+      if (response.ok) {
+        // Rewritten before apply() commits it, so the editor receives the opening quote and the completion below closes it.
+        const reopened: string | null | undefined = PairedPunctuationPolicy.reopenQuote(
+          response.value.commit, ascii, this.appearance.pairedPunctuation);
+        if (reopened !== response.value.commit) {
+          response.value.commit = reopened;
+          raw = JSON.stringify(response);
+        }
+        committed = response.value.commit;
+      }
       completion = response.ok
         ? PairedPunctuationPolicy.completion(response.value.commit,
           this.appearance.pairedPunctuation) : null;
@@ -2326,11 +3135,12 @@ export class KeyboardSession implements HardwareKeyTarget {
     // write the literal mark itself; this is also the state from which a repeated smart mark can
     // be replaced on the next press.
     if ((committed === null || committed === undefined || committed.length === 0)
-        && this.inputClient !== undefined && this.editing.length === 0
+        && this.inputClient !== undefined && !this.composing()
         && this.currentCandidates.length === 0) {
       try {
-        const literal: string = FullWidthInputPolicy.output(String.fromCharCode(ascii), this.fullWidth)
-          ?? String.fromCharCode(ascii);
+        // Korean and Vietnamese punctuation is half-width ASCII in either character width (`widens_full_width`).
+        const literal: string = FullWidthInputPolicy.output(String.fromCharCode(ascii),
+          this.fullWidth && !this.keepsHalfWidth()) ?? String.fromCharCode(ascii);
         this.insertEditorTextSync(literal);
         this.recordTypingStatistics(literal, this.typingSource());
         this.refreshEnglishSuggestions();
@@ -2381,7 +3191,7 @@ export class KeyboardSession implements HardwareKeyTarget {
 
   commitHighlighted(): void {
     if (this.translationPage !== null) {
-      this.choose(0);
+      this.choose(this.translationHighlight);
       return;
     }
     this.command(InputCommand.SELECT_HIGHLIGHTED);
@@ -2392,6 +3202,19 @@ export class KeyboardSession implements HardwareKeyTarget {
     return this.currentCandidates.some((candidate: Candidate): boolean =>
       candidate.highlighted && typeof candidate.translation === 'string'
       && candidate.translation.length > 0);
+  }
+
+  /** What a hardware `'`, `;`, digit or `+` is being typed into; see `HardwareSpelling`. */
+  hardwareSpelling(): HardwareSpelling {
+    return {
+      localMode: this.localMode,
+      editing: this.editing,
+      caret: this.editingCaret,
+      wubi: this.schemeName === 'wubi',
+      microsoftShuangpin: this.lastView?.microsoft_shuangpin === true,
+      englishCandidates: this.isEnglishCandidates(),
+      spellingSymbols: this.lastView?.spelling_symbols ?? '',
+    };
   }
 
   hasHighlightedCandidate(): boolean {
@@ -2412,6 +3235,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     if (translations.length === 0) return;
     if (translations.length > 1) {
       this.translationPage = translations;
+      this.translationHighlight = 0;
       this.publishTranslationPage();
       return;
     }
@@ -2435,11 +3259,29 @@ export class KeyboardSession implements HardwareKeyTarget {
   /** Throw the composition away without committing it, which is what 重输 means. */
   cancel(): void {
     if (this.translationPage !== null) {
-      this.translationPage = null;
-      this.publishCurrentCandidates();
+      this.exitTranslationPage();
       return;
     }
     this.command(InputCommand.CANCEL);
+  }
+
+  /**
+   * Throw the whole composition away, for a gesture that means to clear it rather than step back. In a scheme whose first MSIME_CANCEL keeps the composition (`cancel_keeps_composition`: it closes a Korean Hanja or Zhuyin list, or takes a Vietnamese word back to its keys; msime_client.h) a second drops it too; anywhere else this is cancel.
+   */
+  discardComposition(): void {
+    const keeps: boolean = this.translationPage === null
+      && SchemeTraits.cancelKeepsComposition(this.rulesScheme());
+    this.cancel();
+    if (keeps && this.composing()) {
+      this.cancel();
+    }
+  }
+
+  /**
+   * MSIME_CONVERT_HANJA: list the Hanja of the composing Korean syllable, or close the open list and keep the syllable composing; in Zhuyin the same command opens or closes the list over the conversion. False when the Engine declined, which it does for a lone jamo and with nothing composing.
+   */
+  convertHanja(): boolean {
+    return this.command(InputCommand.CONVERT_HANJA);
   }
 
   /** Commit the spelling as typed rather than any candidate. */
@@ -2452,15 +3294,44 @@ export class KeyboardSession implements HardwareKeyTarget {
     return this.command(InputCommand.FINISH_COMPOSITION);
   }
 
+  /**
+   * A hardware key the composition has no use for: finish the composition, then type the key after it.
+   *
+   * The Windows host finalizes and then lets the application insert the key, so the character is typed as the key made it, halfwidth and unconverted. Here the keyboard inserts it itself, after the commit, because releasing the key would leave its order against the commit to the editor.
+   */
+  commitThenType(ascii: number): void {
+    this.commitThenInsert(String.fromCharCode(ascii));
+  }
+
+  /** `commitThenType` for text the keyboard chose rather than a key's own character: a Zhuyin symbol-layer mark whose ASCII key the Dachen editor would take as a phonetic or tone key. */
+  commitThenInsert(text: string): void {
+    this.finishComposition();
+    if (this.inputClient === undefined) return;
+    this.insertEditorText(text);
+    this.recordTypingStatistics(text, this.typingSource());
+  }
+
+  /**
+   * Korean, Zhuyin and Vietnamese: commit the open composition ahead of a key that goes on to do its own work (Return, a caret key, Delete).
+   *
+   * The commit is written synchronously, so it is in the document before the key that ended it reaches the editor or the application; left to the asynchronous insert, a Return could break the line ahead of the syllable it was meant to follow.
+   */
+  finishBeforeKey(): void {
+    this.commitSynchronously = true;
+    this.finishComposition();
+    this.commitSynchronously = false;
+  }
+
   /** Commit Japanese kana as entered, without forcing the first converted candidate. */
   commitReading(): boolean {
     return this.command(InputCommand.COMMIT_READING);
   }
 
-  /** Space starts Japanese conversion, then advances and wraps without committing. */
+  /** Space starts Japanese conversion, then advances and wraps without committing. False leaves Space to its normal commit, which is also what a lone Fallback row (the raw composition) needs. */
   convertJapanese(): boolean {
+    const firstSource: number = this.currentCandidates.length > 0 ? this.currentCandidates[0].source : -1;
     if (this.scheme !== JAPANESE_SCHEME || this.editing.length === 0
-        || this.currentCandidates.length === 0) {
+        || !JapaneseSpacePolicy.converts(this.currentCandidates.length, firstSource)) {
       return false;
     }
     if (this.japaneseConversionIndex < 0
@@ -2503,12 +3374,17 @@ export class KeyboardSession implements HardwareKeyTarget {
     this.command(InputCommand.MOVE_RIGHT);
   }
 
+  /**
+   * Home and End go to the ends of the whole candidate list while there are candidates, as the Windows source's `FUNCTION_MOVE_PAGE_TOP`/`BOTTOM` do and the other hosts' shared `FirstCandidate`/`LastCandidate` actions now do; with none on screen they move the caret in the spelling instead.
+   */
   moveHome(): void {
-    this.command(InputCommand.MOVE_HOME);
+    if (this.moveTranslationHighlight(-TranslationSensePolicy.MAX_SENSES)) return;
+    this.command(this.currentCandidates.length > 0 ? InputCommand.FIRST_CANDIDATE : InputCommand.MOVE_HOME);
   }
 
   moveEnd(): void {
-    this.command(InputCommand.MOVE_END);
+    if (this.moveTranslationHighlight(TranslationSensePolicy.MAX_SENSES)) return;
+    this.command(this.currentCandidates.length > 0 ? InputCommand.LAST_CANDIDATE : InputCommand.MOVE_END);
   }
 
   deleteForward(): void {
@@ -2528,19 +3404,44 @@ export class KeyboardSession implements HardwareKeyTarget {
   }
 
   nextPage(): void {
+    // A translation page is never more than one page: it holds at most MAX_SENSES, which is the largest page size.
+    if (this.translationPage !== null) return;
     this.command(InputCommand.NEXT_PAGE);
   }
 
   previousPage(): void {
+    if (this.translationPage !== null) return;
     this.command(InputCommand.PREVIOUS_PAGE);
   }
 
   nextCandidate(): void {
+    if (this.moveTranslationHighlight(1)) return;
     this.command(InputCommand.NEXT_CANDIDATE);
   }
 
   previousCandidate(): void {
+    if (this.moveTranslationHighlight(-1)) return;
     this.command(InputCommand.PREVIOUS_CANDIDATE);
+  }
+
+  /** Moves the highlight on the Ctrl+Enter translation page, if that page is up; false otherwise, so the key goes on to the Engine. */
+  private moveTranslationHighlight(delta: number): boolean {
+    const translations: string[] | null = this.translationPage;
+    if (translations === null) return false;
+    this.translationHighlight = KeyboardGeometry.bounded(
+      this.translationHighlight + delta, 0, translations.length - 1);
+    this.publishTranslationPage();
+    return true;
+  }
+
+  /**
+   * Puts the candidates back as they were before Ctrl+Enter, as the Windows host's `ExitTranslationCandidateMode` does. The composition was not touched while the page was up, so the Engine's own list is still the one to show.
+   */
+  private exitTranslationPage(): void {
+    if (this.translationPage === null) return;
+    this.translationPage = null;
+    this.translationHighlight = 0;
+    this.publishCurrentCandidates();
   }
 
   choose(index: number): void {
@@ -2587,6 +3488,8 @@ export class KeyboardSession implements HardwareKeyTarget {
   }
 
   private apply(raw: string): boolean {
+    // Every key the translation page does not answer itself ends up here, and on Windows every such key first puts the candidates back and then does what it would have done without the page (`ExitTranslationCandidateMode`). Left up, the page swallowed every later render, so a letter lengthened a composition the strip no longer showed and Enter committed under translations that stayed on screen.
+    this.exitTranslationPage();
     let response: Response;
     try {
       response = JSON.parse(raw) as Response;
@@ -2605,6 +3508,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     // Bounded before it reaches the surface: a diagnostic is a message, not a place to print a
     // stack trace into a keyboard four rows tall.
     this.editing = value.view.editing_text;
+    this.phrasePrefix = value.view.phrase_prefix ?? '';
     this.editingCaret = value.view.caret_position;
     this.scheme = value.view.scheme;
     this.diagnostic = InputDiagnosticPolicy.normalize(
@@ -2616,7 +3520,14 @@ export class KeyboardSession implements HardwareKeyTarget {
       // same boundary the Apple and Android hosts draw.
       const output: string = this.asTraditional(commit);
       this.insertEditorText(output);
-      this.recordTypingStatistics(output, this.typingSource());
+      // What the V, / and @ modes generated is not the user's typing: an evaluated sum or an expanded command template would count characters nobody typed.
+      if (value.commit_context?.typing_statistics !== false) {
+        this.recordTypingStatistics(output, this.typingSource());
+      }
+      if (!this.soundsSilencedByEditor()) {
+        this.soundPlayer.commit();
+        this.typingEffect(TYPING_EFFECT_COMMIT);
+      }
     }
     this.render(value.view);
     return value.handled === true;
@@ -2624,6 +3535,7 @@ export class KeyboardSession implements HardwareKeyTarget {
 
   /** For the entry points whose reply is a bare view. */
   private applyView(raw: string): void {
+    this.exitTranslationPage();
     let response: ViewResponse;
     try {
       response = JSON.parse(raw) as ViewResponse;
@@ -2642,7 +3554,14 @@ export class KeyboardSession implements HardwareKeyTarget {
   private fullWidth: boolean = false;
   private bindings: ModeBindings = DEFAULT_MODE_BINDINGS;
   private feedbackSettings: FeedbackSettings = KeyboardFeedback.DEFAULTS;
-  private customSkinDesign: CustomKeyboardSkin = CustomKeyboardSkin.defaults();
+  // The global theme as last resolved, one answer per mode; null draws the native tokens.
+  private preparedPreferences: PreparedPreferences | undefined = undefined;
+  private themeCatalog: ThemeCatalogEntry[] = [];
+  private themeLight: ResolvedTheme | null = null;
+  private themeDark: ResolvedTheme | null = null;
+  private globalThemeId: string = 'system';
+  private customThemeBase: string = 'system';
+  private customDesign: CustomKeyboardSkin | null = null;
   private vibratorFailed: boolean = false;
   private traditional: boolean = false;
   private chinesePunctuation: boolean = true;
@@ -2659,35 +3578,43 @@ export class KeyboardSession implements HardwareKeyTarget {
     enabled: true, english_mode: true, punctuation: true, fullwidth: true, character_set: true,
     emoji: true, screen_keyboard: false, scale_percent: 100, font_size: 20
   };
-  private toolbarSkin: ToolbarSkin = ToolbarSkinPolicy.base(KeyboardSkin.from('forest', false));
+  private toolbarSkin: ToolbarSkin = ToolbarSkinPolicy.base(GlobalTheme.candidateColors(null, false));
   private onlineTimer: number = -1;
   private onlineEpoch: number = 0;
+  private readonly onlineRequests: Set<http.HttpRequest> = new Set<http.HttpRequest>();
   private onlineSignature: string = '';
   private translationTimer: number = -1;
   private translationEpoch: number = 0;
+  private readonly translationRequests: Set<http.HttpRequest> = new Set<http.HttpRequest>();
   private translationSignature: string = '';
   private readonly translationCache: Map<string, string> = new Map<string, string>();
   private readonly translationNegativeCache: Map<string, number> = new Map<string, number>();
-  // ICU's Simplified-Traditional, which is the same transliteration Android reaches through its own
-  // ICU and Apple through its host boundary. Built once: constructing one per commit would pay for
-  // the table on every keystroke.
-  private converter: i18n.Transliterator | undefined = undefined;
   private editing: string = '';
+  /** The phrase piece the runtime holds ahead of the reading; it can outlive the reading, see HardwareKeyRouter.composing. */
+  private phrasePrefix: string = '';
   private japaneseConversionIndex: number = -1;
   private japaneseConversionReading: string = '';
+  /** Set by finishBeforeKey while its commit must reach the editor before the key that follows it. */
+  private commitSynchronously: boolean = false;
   // Where the segment keys have put the caret. Drawn by the candidate window, which is the
   // only place it is visible: the editor sees a committed string, not a composition.
   private editingCaret: number = 0;
   private currentCandidates: Candidate[] = [];
   private translationPage: string[] | null = null;
+  private translationHighlight: number = 0;
   private lastView: EngineView | undefined = undefined;
   private scheme: number = 0;
   private localMode: string = 'none';
+  /** Revision of the preference document the session was last built from; -1 before the first. */
+  private preferencesRevision: number = -1;
+  /** Set by Ctrl+Shift+E; only meaningful while `englishMode` is on. */
+  private englishCandidates: boolean = false;
 
   private render(view: EngineView): void {
     this.generation = view.generation;
     this.currentCandidates = view.candidates.slice();
     this.lastView = view;
+    this.syncPreview();
     if (this.japaneseConversionIndex >= 0
         && view.editing_text !== this.japaneseConversionReading) {
       this.japaneseConversionIndex = -1;
@@ -2701,17 +3628,20 @@ export class KeyboardSession implements HardwareKeyTarget {
     // this behind, so the toolbar's 半 never became 全 and the next tap asked for the same thing
     // again.
     this.fullWidth = view.character_width === 'Fullwidth';
-    const active: boolean = view.editing_text.length > 0;
+    const active: boolean = HardwareKeyRouter.composing(view.editing_text, view.phrase_prefix ?? '');
     if (active !== this.composedLast) {
       this.composedLast = active;
       if (this.onComposition !== undefined) {
         this.onComposition(active);
       }
     }
+    const reading: string = KeyboardSession.drawnReading(view);
+    // Korean's only candidates are the Hanja of the composing syllable, and their annotation is the 훈음 (msime_client.h).
+    const hanja: boolean = KoreanCompositionPolicy.active(view.scheme, view.dedicated_english, view.local_mode);
     const entries: CandidateEntry[] = [];
     for (const candidate of view.candidates) {
       entries.push({
-        text: candidate.text,
+        text: this.asTraditional(candidate.text),
         highlighted: candidate.highlighted,
         badge: CandidatePresentationPolicy.badge(candidate.source),
         fixedPosition: candidate.fixed_position,
@@ -2721,30 +3651,35 @@ export class KeyboardSession implements HardwareKeyTarget {
         // decides; this just supplies what it reasons about.
         hint: WubiCodeHintPolicy.hint(candidate.code, view.preedit, this.wubiCodeHint, view.scheme,
           view.local_mode, view.answered_by_pinyin_fallback),
-        annotation: CandidateGlossPolicy.annotation(candidate.annotation,
+        annotation: CandidateGlossPolicy.annotation(
+          CandidateGlossPolicy.slotAnnotation(hanja, candidate.annotation),
           candidate.translation ?? null, this.candidateGlossEnabled),
-        annotationIsTranslation: CandidateGlossPolicy.annotationIsTranslation(candidate.annotation,
-          candidate.translation ?? null, this.candidateGlossEnabled)
+        annotationIsTranslation: CandidateGlossPolicy.annotationIsTranslation(
+          CandidateGlossPolicy.slotAnnotation(hanja, candidate.annotation),
+          candidate.translation ?? null, this.candidateGlossEnabled),
+        hunEum: CandidateGlossPolicy.hunEum(hanja, candidate.annotation)
       });
     }
     if (this.onChanged !== undefined) {
       this.onChanged({
         candidates: entries,
         // 已选的那一段领在读音前面，与来源把 word_for_creating_word 拼在读音前面是同一件事。
-        editing: view.phrase_prefix + view.editing_text,
-        editingCaret: view.caret_position + view.phrase_prefix.length,
+        editing: (view.phrase_prefix ?? '') + reading,
+        editingCaret: KeyboardSession.drawnCaret(view, reading) + (view.phrase_prefix ?? '').length,
+        phrasePrefix: view.phrase_prefix ?? '',
         spellings: view.nine_key_spellings,
         scheme: view.scheme,
         shuangpinProfile: view.shuangpin_profile,
         localMode: view.local_mode,
         english: view.dedicated_english,
-        diagnostic: this.diagnostic
+        diagnostic: this.diagnostic,
+        page: view.page,
+        pageCount: view.page_count,
+        candidateListOpen: this.candidateListOpen()
       });
     }
     if (this.onCandidateWidth !== undefined) {
-      this.onCandidateWidth(CandidateWidthPolicy.widthVp(entries, view.editing_text,
-        this.preferences().candidateFontSize, this.preferences().candidatePreeditFontSize,
-        this.preferences().candidateMinWidthVp));
+      this.onCandidateWidth(this.candidateWidthVp(entries, reading, view.page, view.page_count));
     }
     if (this.onCandidateCount !== undefined) {
       this.onCandidateCount(entries.length);
@@ -2764,31 +3699,70 @@ export class KeyboardSession implements HardwareKeyTarget {
   private publishCurrentCandidates(): void {
     const view: EngineView | undefined = this.lastView;
     if (view === undefined || this.onChanged === undefined) return;
+    const hanja: boolean = KoreanCompositionPolicy.active(view.scheme, view.dedicated_english, view.local_mode);
     const entries: CandidateEntry[] = view.candidates.map((candidate: Candidate): CandidateEntry => ({
-      text: candidate.text, highlighted: candidate.highlighted,
+      text: this.asTraditional(candidate.text), highlighted: candidate.highlighted,
       badge: CandidatePresentationPolicy.badge(candidate.source),
       fixedPosition: candidate.fixed_position, source: candidate.source,
       translation: candidate.translation ?? null,
       hint: WubiCodeHintPolicy.hint(candidate.code, view.preedit, this.wubiCodeHint, view.scheme,
         view.local_mode, view.answered_by_pinyin_fallback),
-      annotation: CandidateGlossPolicy.annotation(candidate.annotation,
+      annotation: CandidateGlossPolicy.annotation(
+        CandidateGlossPolicy.slotAnnotation(hanja, candidate.annotation),
         candidate.translation ?? null, this.candidateGlossEnabled),
-      annotationIsTranslation: CandidateGlossPolicy.annotationIsTranslation(candidate.annotation,
-        candidate.translation ?? null, this.candidateGlossEnabled)
+      annotationIsTranslation: CandidateGlossPolicy.annotationIsTranslation(
+        CandidateGlossPolicy.slotAnnotation(hanja, candidate.annotation),
+        candidate.translation ?? null, this.candidateGlossEnabled),
+      hunEum: CandidateGlossPolicy.hunEum(hanja, candidate.annotation)
     }));
+    const reading: string = KeyboardSession.drawnReading(view);
     this.onChanged({
-      candidates: entries, editing: view.phrase_prefix + view.editing_text,
-      editingCaret: view.caret_position + view.phrase_prefix.length,
+      candidates: entries, editing: (view.phrase_prefix ?? '') + reading,
+      editingCaret: KeyboardSession.drawnCaret(view, reading) + (view.phrase_prefix ?? '').length,
+      phrasePrefix: view.phrase_prefix ?? '',
       spellings: view.nine_key_spellings,
       scheme: view.scheme, shuangpinProfile: view.shuangpin_profile, localMode: view.local_mode,
-      english: view.dedicated_english, diagnostic: this.diagnostic
+      english: view.dedicated_english, diagnostic: this.diagnostic,
+      page: view.page, pageCount: view.page_count, candidateListOpen: this.candidateListOpen()
     });
     if (this.onCandidateWidth !== undefined) {
-      this.onCandidateWidth(CandidateWidthPolicy.widthVp(entries, view.editing_text,
-        this.preferences().candidateFontSize, this.preferences().candidatePreeditFontSize,
-        this.preferences().candidateMinWidthVp));
+      this.onCandidateWidth(this.candidateWidthVp(entries, reading, view.page, view.page_count));
     }
     if (this.onCandidateCount !== undefined) this.onCandidateCount(entries.length);
+  }
+
+  /** The composition the strip draws: for Korean, Zhuyin and Vietnamese editing_text is only the keys behind the composition, so there the written text itself is drawn. */
+  private static drawnReading(view: EngineView): string {
+    return SchemeCompositionPolicy.reading(
+      SchemeCompositionPolicy.rulesScheme(view.scheme, view.dedicated_english, view.local_mode),
+      view.editing_text, view.preedit);
+  }
+
+  /** The caret within drawnReading: the Engine's own for a spelling, the end of a composition the scheme keeps the caret at the end of (a Vietnamese caret_position is a byte offset into a word that is not ASCII, so it is never used as an index). */
+  private static drawnCaret(view: EngineView, reading: string): number {
+    return SchemeCompositionPolicy.caret(
+      SchemeCompositionPolicy.rulesScheme(view.scheme, view.dedicated_english, view.local_mode),
+      view.caret_position, reading);
+  }
+
+  /** A horizontal candidate window on a machine with its own keys is as wide as its whole page; a vertical list is as wide as its widest row. A 2in1 window that shows the composition line also makes room on it for the brand mark and the page indicator. */
+  private candidateWidthVp(entries: CandidateEntry[], editing: string, page: number, pageCount: number): number {
+    const settings: KeyboardPreferences = this.preferences();
+    if (!KeyboardFormFactor.isDesktop()) {
+      return CandidateWidthPolicy.widthVp(entries, editing, settings.candidateFontSize,
+        settings.candidatePreeditFontSize, settings.candidateMinWidthVp);
+    }
+    const base: number = settings.candidateLayout !== 'vertical'
+      ? CandidateWidthPolicy.rowWidthVp(entries, editing, settings.candidateFontSize,
+        settings.candidatePreeditFontSize, KeyboardMetrics.CANDIDATE_PADDING_VP,
+        CandidateNumberFontPolicy.size(settings.candidateFontSize), settings.candidateMinWidthVp)
+      : CandidateWidthPolicy.widthVp(entries, editing, settings.candidateFontSize,
+        settings.candidatePreeditFontSize, settings.candidateMinWidthVp);
+    return settings.candidateShowPreedit
+      ? CandidatePagerPolicy.panelWidthVp(base, editing, settings.candidatePreeditFontSize, page, pageCount,
+        CandidateWidthPolicy.MAX_WIDTH_VP, CandidateLogoPolicy.slotWidthVp(
+          CandidateLogoPolicy.visible(KeyboardFormFactor.isDesktop(), settings.candidateShowPreedit)))
+      : base;
   }
 
   private publishTranslationPage(): void {
@@ -2796,22 +3770,21 @@ export class KeyboardSession implements HardwareKeyTarget {
     if (translations === null || this.onChanged === undefined) return;
     const view: EngineView | undefined = this.lastView;
     const entries: CandidateEntry[] = translations.map((text: string, index: number): CandidateEntry => ({
-      text: text, hint: '', annotation: '', annotationIsTranslation: false,
-      highlighted: index === 0, badge: '',
+      text: text, hint: '', annotation: '', annotationIsTranslation: false, hunEum: '',
+      highlighted: index === this.translationHighlight, badge: '',
       fixedPosition: 0, source: 0, translation: null
     }));
     this.onChanged({
       candidates: entries,
       editing: view?.editing_text ?? this.editing,
-      editingCaret: view?.caret_position ?? this.editingCaret, spellings: [],
+      editingCaret: view?.caret_position ?? this.editingCaret, phrasePrefix: '', spellings: [],
       scheme: view?.scheme ?? this.scheme, shuangpinProfile: view?.shuangpin_profile ?? this.profileName,
       localMode: view?.local_mode ?? this.localMode,
-      english: view?.dedicated_english ?? this.englishMode, diagnostic: this.diagnostic
+      english: view?.dedicated_english ?? this.englishMode, diagnostic: this.diagnostic,
+      page: 0, pageCount: 1, candidateListOpen: false
     });
     if (this.onCandidateWidth !== undefined) {
-      this.onCandidateWidth(CandidateWidthPolicy.widthVp(entries, view?.editing_text ?? this.editing,
-        this.preferences().candidateFontSize, this.preferences().candidatePreeditFontSize,
-        this.preferences().candidateMinWidthVp));
+      this.onCandidateWidth(this.candidateWidthVp(entries, view?.editing_text ?? this.editing, 0, 1));
     }
     if (this.onCandidateCount !== undefined) this.onCandidateCount(translations.length);
   }
@@ -2836,19 +3809,22 @@ export class KeyboardSession implements HardwareKeyTarget {
     if (this.onlineTimer >= 0) clearTimeout(this.onlineTimer);
     const epoch: number = ++this.onlineEpoch;
     const handle: number = this.handle;
+    const requestSignature: string = signature;
     this.onlineTimer = setTimeout((): void => {
       this.onlineTimer = -1;
-      void this.fetchOnline(handle, JSON.stringify(query), query, epoch);
+      void this.fetchOnline(handle, JSON.stringify(query), query, epoch, requestSignature);
     }, OnlineCandidatePolicy.QUIET_INTERVAL_MS);
   }
 
   private async fetchOnline(handle: number, queryDocument: string, query: OnlineQuery,
-    epoch: number): Promise<void> {
+    epoch: number, requestSignature: string): Promise<void> {
     if (epoch !== this.onlineEpoch || handle !== this.handle) return;
+    let complete: boolean = true;
     let aiQuery: OnlineQuery = query;
     let aiDocument: string = queryDocument;
     if (query.cloud_candidates && query.cloud_eligible) {
       const applied: boolean = await this.fetchCloud(handle, queryDocument, epoch);
+      complete = applied;
       // Applying a cloud result advances Engine's generation. Re-read the exact query before
       // sending AI so both optional providers can contribute without one becoming stale.
       if (applied && handle === this.handle && epoch === this.onlineEpoch) {
@@ -2858,16 +3834,30 @@ export class KeyboardSession implements HardwareKeyTarget {
           if (current.ok && current.value !== null) {
             aiQuery = current.value;
             aiDocument = JSON.stringify(current.value);
+          } else {
+            complete = false;
+            this.releaseOnlineSignatureIfCurrent(requestSignature, epoch, handle);
+            return;
           }
         } catch {
+          complete = false;
+          this.releaseOnlineSignatureIfCurrent(requestSignature, epoch, handle);
           return;
         }
       }
     }
+    if (epoch !== this.onlineEpoch || handle !== this.handle) return;
     const assistant = aiQuery.ai_assistant;
     if (assistant?.enabled === true && aiQuery.ai_eligible) {
-      await this.fetchAi(handle, aiDocument, assistant.candidate_limit, epoch);
+      complete = await this.fetchAi(handle, aiDocument, assistant.candidate_limit, epoch) && complete;
     }
+    if (!complete) this.releaseOnlineSignatureIfCurrent(requestSignature, epoch, handle);
+  }
+
+  private releaseOnlineSignatureIfCurrent(requestSignature: string, requestEpoch: number,
+    requestHandle: number): void {
+    if (OnlineCandidatePolicy.shouldReleaseAfterFailure(requestSignature, this.onlineSignature,
+      requestEpoch, this.onlineEpoch, requestHandle, this.handle)) this.onlineSignature = '';
   }
 
   private async fetchCloud(handle: number, queryDocument: string, epoch: number): Promise<boolean> {
@@ -2882,6 +3872,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       return false;
     }
     const request = http.createHttp();
+    this.onlineRequests.add(request);
     try {
       const response: http.HttpResponse = await request.request(url, {
         method: http.RequestMethod.GET,
@@ -2891,7 +3882,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       });
       if (epoch !== this.onlineEpoch || handle !== this.handle || response.responseCode < 200
         || response.responseCode >= 300 || typeof response.result !== 'string'
-        || OnlineCandidatePolicy.MAX_CLOUD_RESPONSE_BYTES < response.result.length) return false;
+        || !OnlineCandidatePolicy.acceptsCloudBody(response.result)) return false;
       const applied: NativeReply<OnlineApplyValue> = JSON.parse(client.applyCloudResponse(
         handle, queryDocument, response.result)) as NativeReply<OnlineApplyValue>;
       if (applied.ok && applied.value.applied) this.render(applied.value.view);
@@ -2900,41 +3891,46 @@ export class KeyboardSession implements HardwareKeyTarget {
       KeyboardLog.error(`cloud candidate unavailable: ${describeError(error)}`);
       return false;
     } finally {
+      this.onlineRequests.delete(request);
       request.destroy();
     }
   }
 
   private async fetchAi(handle: number, queryDocument: string, limit: number,
-    epoch: number): Promise<void> {
+    epoch: number): Promise<boolean> {
     let descriptor: AiHttpDescriptor | null;
     try {
       const reply: NativeReply<AiHttpDescriptor | null> = JSON.parse(
         client.aiRequestForQuery(handle, queryDocument)) as NativeReply<AiHttpDescriptor | null>;
-      if (!reply.ok || reply.value === null) return;
+      if (!reply.ok || reply.value === null) return false;
       descriptor = reply.value;
     } catch (error) {
       KeyboardLog.error(`AI query unavailable: ${describeError(error)}`);
-      return;
+      return false;
     }
     const request = http.createHttp();
+    this.onlineRequests.add(request);
     try {
       const response: http.HttpResponse = await request.request(descriptor.url, {
         method: http.RequestMethod.POST,
         header: descriptor.headers,
-        connectTimeout: Math.min(8000, Math.max(1000, descriptor.connect_timeout_ms)),
-        readTimeout: Math.min(10000, Math.max(1000, descriptor.timeout_ms)),
+        connectTimeout: KeyboardGeometry.bounded(descriptor.connect_timeout_ms, 1000, 8000),
+        readTimeout: KeyboardGeometry.bounded(descriptor.timeout_ms, 1000, 10000),
         extraData: JSON.stringify(descriptor.body)
       });
       if (epoch !== this.onlineEpoch || handle !== this.handle || response.responseCode < 200
-        || response.responseCode >= 300 || typeof response.result !== 'string') return;
+        || response.responseCode >= 300 || typeof response.result !== 'string') return false;
       const candidates: string[] | null = OnlineCandidatePolicy.aiCandidates(response.result, limit);
-      if (candidates === null || candidates.length === 0) return;
+      if (candidates === null || candidates.length === 0) return false;
       const applied: NativeReply<OnlineApplyValue> = JSON.parse(client.applyOnlineCandidates(
         handle, queryDocument, JSON.stringify(candidates), 1)) as NativeReply<OnlineApplyValue>;
       if (applied.ok && applied.value.applied) this.render(applied.value.view);
+      return applied.ok && applied.value.applied;
     } catch (error) {
       KeyboardLog.error(`AI candidate unavailable: ${describeError(error)}`);
+      return false;
     } finally {
+      this.onlineRequests.delete(request);
       request.destroy();
     }
   }
@@ -2959,72 +3955,47 @@ export class KeyboardSession implements HardwareKeyTarget {
     if (this.translationTimer >= 0) clearTimeout(this.translationTimer);
     const epoch: number = ++this.translationEpoch;
     const handle: number = this.handle;
+    const requestSignature: string = signature;
     this.translationTimer = setTimeout((): void => {
       this.translationTimer = -1;
-      void this.fetchTranslations(handle, JSON.stringify(query), query, epoch);
+      void this.fetchTranslations(handle, JSON.stringify(query), query, epoch, requestSignature);
     }, TranslationPolicy.QUIET_INTERVAL_MS);
   }
 
   private async fetchTranslations(handle: number, queryDocument: string,
-    query: TranslationQuery, epoch: number): Promise<void> {
+    query: TranslationQuery, epoch: number, requestSignature: string): Promise<void> {
     if (!this.translationCurrent(handle, epoch)) return;
     const entries: TranslationEntry[] = [];
+    let providerComplete: boolean = true;
     if (query.english_gloss && typeof query.resources === 'string' && query.resources.length > 0) {
       this.appendOfflineGloss(query, entries);
     }
+    const offline: Map<string, TranslationEntry[]> = this.offlineTargetGlosses(query);
     const deadline: number = Date.now() + 6000;
     const provider: string = TranslationPolicy.provider(query);
     for (const target of TranslationPolicy.targets(query)) {
-      if (!this.translationCurrent(handle, epoch) || Date.now() >= deadline) return;
-      let plan: TranslationPlanItem[] = [];
-      try {
-        const planDocument: string = TranslationPolicy.planRequest(target, query.candidates);
-        const planReply: NativeReply<TranslationPlanItem[]> =
-          JSON.parse(client.translationPlan(planDocument)) as NativeReply<TranslationPlanItem[]>;
-        if (planReply.ok && Array.isArray(planReply.value)) plan = planReply.value;
-      } catch (error) {
-        KeyboardLog.error(`translation plan unavailable: ${describeError(error)}`);
+      if (!this.translationCurrent(handle, epoch)) return;
+      if (Date.now() >= deadline) {
+        this.releaseTranslationSignatureIfCurrent(requestSignature, epoch, handle);
+        return;
       }
-      if (plan.length === 0 || provider.length === 0) continue;
-      const pending: TranslationPlanItem[] = [];
-      for (const item of plan) {
-        if (target === 'en' && query.english_gloss
-          && entries.some((entry: TranslationEntry): boolean => entry.text === item.text)) {
-          continue;
-        }
-        const key: string = TranslationPolicy.cacheKey(query, target, item);
-        const cached: string | undefined = this.translationCache.get(key);
-        if (cached !== undefined) {
-          TranslationPolicy.append(entries, item.text, cached);
-          continue;
-        }
-        const negativeUntil: number | undefined = this.translationNegativeCache.get(key);
-        if (negativeUntil !== undefined) {
-          if (negativeUntil > Date.now()) continue;
-          this.translationNegativeCache.delete(key);
-        }
-        pending.push(item);
+      // This target's answers are gathered apart, so the offline dictionary can fill only the candidates the online provider left unanswered.
+      const answered: TranslationEntry[] = [];
+      const result: TranslationFetchResult = await this.fetchTargetTranslations(query, target,
+        provider, entries, answered, epoch, handle, deadline);
+      if (!result.current) {
+        this.releaseTranslationSignatureIfCurrent(requestSignature, epoch, handle);
+        return;
       }
-      if (pending.length === 0) continue;
-      if (provider === 'tencent' && query.tencent_tmt !== null
-        && query.tencent_tmt !== undefined) {
-        await this.fetchTencentTranslations(query, pending, entries, epoch, handle, deadline);
-      } else {
-        for (const item of pending) {
-          if (!this.translationCurrent(handle, epoch) || Date.now() >= deadline) return;
-          let value: string | null = null;
-          if (provider === 'niutrans' && query.niutrans !== null
-            && query.niutrans !== undefined) {
-            value = await this.fetchNiuTranslation(query.niutrans, item, epoch, handle);
-          } else if (provider === 'custom' && query.custom_translation !== null
-            && query.custom_translation !== undefined) {
-            value = await this.fetchCustomTranslation(query.custom_translation, item, epoch, handle);
-          }
-          this.recordTranslation(query, target, item, value, entries);
-        }
-      }
+      providerComplete = providerComplete && result.providerComplete;
+      TranslationPolicy.fill(answered, offline.get(target) ?? []);
+      for (const entry of answered) TranslationPolicy.append(entries, entry.text, entry.translation);
     }
-    if (!this.translationCurrent(handle, epoch) || entries.length === 0) return;
+    if (!this.translationCurrent(handle, epoch)) return;
+    if (entries.length === 0) {
+      if (provider.length > 0) this.releaseTranslationSignatureIfCurrent(requestSignature, epoch, handle);
+      return;
+    }
     let appliedCurrent: boolean = false;
     try {
       const applied: NativeReply<OnlineApplyValue> = JSON.parse(client.applyTranslations(
@@ -3034,16 +4005,161 @@ export class KeyboardSession implements HardwareKeyTarget {
         appliedCurrent = applied.value.applied;
         this.render(applied.value.view);
       }
-      if (appliedCurrent && query.user_data !== undefined && query.user_data.length > 0
+      if (appliedCurrent && typeof query.user_data === 'string' && query.user_data.length > 0
         && TranslationPolicy.targets(query).includes('en')) {
         const saveRequest: TranslationGlossSaveRequest = {
           target_language: 'en', translations: entries
         };
         client.translationGlossSave(JSON.stringify(saveRequest), query.user_data);
       }
+      if (appliedCurrent && TranslationPolicy.shouldReleaseAfterProviderFailure(provider,
+        providerComplete, entries.length > 0)) {
+        this.releaseTranslationSignatureIfCurrent(requestSignature, epoch, handle);
+      }
+      if (!appliedCurrent) this.releaseTranslationSignatureIfCurrent(requestSignature, epoch, handle);
     } catch (error) {
       KeyboardLog.error(`candidate translations unavailable: ${describeError(error)}`);
+      this.releaseTranslationSignatureIfCurrent(requestSignature, epoch, handle);
     }
+  }
+
+  private releaseTranslationSignatureIfCurrent(requestSignature: string, requestEpoch: number,
+    requestHandle: number): void {
+    if (TranslationPolicy.shouldReleaseAfterFailure(requestSignature, this.translationSignature,
+      requestEpoch, this.translationEpoch, requestHandle, this.handle)) this.translationSignature = '';
+  }
+
+  /** One target's online answers, added to `answered`. `entries` is read only for the English candidates the offline gloss already covers. False when the work went stale or ran out of time. */
+  private async fetchTargetTranslations(query: TranslationQuery, target: string, provider: string,
+    entries: TranslationEntry[], answered: TranslationEntry[], epoch: number, handle: number,
+    deadline: number): Promise<TranslationFetchResult> {
+    // `/fy` is asked as its own item, past the plan and the caches (TranslationPolicy.commandItem).
+    const command: TranslationPlanItem | null = TranslationPolicy.commandItem(query);
+    let plan: TranslationPlanItem[] = command !== null ? [command] : [];
+    if (command === null) {
+      try {
+        const planDocument: string = TranslationPolicy.planRequest(target, query.candidates);
+        const planReply: NativeReply<TranslationPlanItem[]> =
+          JSON.parse(client.translationPlan(planDocument)) as NativeReply<TranslationPlanItem[]>;
+        if (planReply.ok && Array.isArray(planReply.value)) plan = planReply.value;
+      } catch (error) {
+        KeyboardLog.error(`translation plan unavailable: ${describeError(error)}`);
+      }
+    }
+    if (plan.length === 0 || provider.length === 0) {
+      return {
+        current: this.translationCurrent(handle, epoch),
+        providerComplete: provider.length === 0 || plan.length > 0,
+      };
+    }
+    const pending: TranslationPlanItem[] = [];
+    for (const item of plan) {
+      if (command !== null) {
+        pending.push(item);
+        continue;
+      }
+      if (target === 'en' && query.english_gloss
+        && entries.some((entry: TranslationEntry): boolean => entry.text === item.text)) {
+        continue;
+      }
+      const key: string = TranslationPolicy.cacheKey(query, target, item);
+      const cached: string | undefined = this.translationCache.get(key);
+      if (cached !== undefined) {
+        TranslationPolicy.append(answered, item.text, cached);
+        continue;
+      }
+      const negativeUntil: number | undefined = this.translationNegativeCache.get(key);
+      if (negativeUntil !== undefined) {
+        if (negativeUntil > Date.now()) continue;
+        this.translationNegativeCache.delete(key);
+      }
+      pending.push(item);
+    }
+    if (pending.length === 0) {
+      return { current: this.translationCurrent(handle, epoch), providerComplete: true };
+    }
+    if (provider === 'tencent' && query.tencent_tmt !== null
+      && query.tencent_tmt !== undefined) {
+      const providerComplete: boolean = await this.fetchTencentTranslations(
+        query, pending, answered, epoch, handle, deadline);
+      return {
+        current: this.translationCurrent(handle, epoch),
+        providerComplete: providerComplete,
+      };
+    } else {
+      let providerComplete: boolean = true;
+      for (const item of pending) {
+        if (!this.translationCurrent(handle, epoch) || Date.now() >= deadline) {
+          return { current: false, providerComplete: false };
+        }
+        let value: string | null = null;
+        let completed: boolean = false;
+        if (provider === 'niutrans' && query.niutrans !== null
+          && query.niutrans !== undefined) {
+          const result: TranslationProviderResult = await this.fetchNiuTranslation(
+            query.niutrans, item, epoch, handle);
+          value = result.value;
+          completed = result.completed;
+        } else if (provider === 'custom' && query.custom_translation !== null
+          && query.custom_translation !== undefined) {
+          const result: TranslationProviderResult = await this.fetchCustomTranslation(
+            query.custom_translation, item, epoch, handle);
+          value = result.value;
+          completed = result.completed;
+        }
+        if (!completed) providerComplete = false;
+        this.recordTranslation(query, target, item, value, answered);
+      }
+      return {
+        current: this.translationCurrent(handle, epoch),
+        providerComplete: providerComplete,
+      };
+    }
+  }
+
+  /** Each installed non-English target's offline glosses, read from the dictionary beside the resources. */
+  private offlineTargetGlosses(query: TranslationQuery): Map<string, TranslationEntry[]> {
+    const result: Map<string, TranslationEntry[]> = new Map<string, TranslationEntry[]>();
+    const resources: string = query.resources ?? '';
+    if (resources.length === 0) return result;
+    for (const language of TranslationPolicy.offlineTargets(query)) {
+      try {
+        const request: GlossRequestDocument = {
+          generation: query.generation,
+          user_data: '',
+          candidates: query.candidates.map((candidate: TranslationCandidate): GlossRequestCandidate => ({
+            text: candidate.text, source: 0
+          })),
+          target_language: language
+        };
+        const reply: NativeReply<TranslationResponseValue> = JSON.parse(
+          client.candidateGlosses(JSON.stringify(request), resources)) as NativeReply<TranslationResponseValue>;
+        if (!reply.ok || reply.value === undefined || reply.value.generation !== query.generation
+          || !Array.isArray(reply.value.translations)) continue;
+        const glosses: TranslationEntry[] = [];
+        for (const entry of reply.value.translations) {
+          TranslationPolicy.append(glosses, entry.text, entry.translation);
+        }
+        result.set(language, glosses);
+      } catch (error) {
+        KeyboardLog.error(`offline ${language} candidate glosses unavailable: ${describeError(error)}`);
+      }
+    }
+    return result;
+  }
+
+  /** Whether the Cantonese or Zhuyin dictionary `file` is staged in `language-dictionaries` beside the resources, which is where host preparation looks for it. */
+  private languageDictionaryInstalled(file: string): boolean {
+    const parent: string = this.resourceDirectory.substring(0, this.resourceDirectory.lastIndexOf('/'));
+    return parent.length > 0 && fs.accessSync(`${parent}/language-dictionaries/${file}`);
+  }
+
+  /** The non-English targets with an offline dictionary staged beside the resources, known before any query so the gloss line is reserved up front. */
+  private installedOfflineGlosses(targets: string[]): string[] {
+    const parent: string = this.resourceDirectory.substring(0, this.resourceDirectory.lastIndexOf('/'));
+    if (parent.length === 0) return [];
+    return targets.filter((target: string): boolean => target !== 'en'
+      && fs.accessSync(`${parent}/offline-glosses/zh-${target}.db`));
   }
 
   private appendOfflineGloss(query: TranslationQuery, entries: TranslationEntry[]): void {
@@ -3070,7 +4186,8 @@ export class KeyboardSession implements HardwareKeyTarget {
   }
 
   private async fetchTencentTranslations(query: TranslationQuery, items: TranslationPlanItem[],
-    entries: TranslationEntry[], epoch: number, handle: number, deadline: number): Promise<void> {
+    entries: TranslationEntry[], epoch: number, handle: number, deadline: number): Promise<boolean> {
+    let providerComplete: boolean = true;
     const groups: Map<string, TranslationPlanItem[]> = new Map<string, TranslationPlanItem[]>();
     for (const item of items) {
       const group: string = `${item.source_language}\n${item.target_language}`;
@@ -3079,9 +4196,12 @@ export class KeyboardSession implements HardwareKeyTarget {
       groups.set(group, values);
     }
     for (const group of groups.values()) {
-      if (!this.translationCurrent(handle, epoch) || Date.now() >= deadline) return;
+      if (!this.translationCurrent(handle, epoch) || Date.now() >= deadline) return false;
       const config: TencentTranslationConfig | null | undefined = query.tencent_tmt;
-      if (config === null || config === undefined) return;
+      if (config === null || config === undefined) {
+        providerComplete = false;
+        continue;
+      }
       const request: TencentTranslationRequest = {
         config: config,
         texts: group.map((item: TranslationPlanItem): string => item.key),
@@ -3099,25 +4219,36 @@ export class KeyboardSession implements HardwareKeyTarget {
       } catch (error) {
         KeyboardLog.error(`Tencent translation descriptor unavailable: ${describeError(error)}`);
       }
-      if (descriptor === null) continue;
+      if (descriptor === null) {
+        providerComplete = false;
+        continue;
+      }
       const body: string | null = await this.translationHttp(descriptor, false, epoch, handle);
-      if (body === null) continue;
+      if (body === null) {
+        providerComplete = false;
+        continue;
+      }
       try {
         const parsed: NativeReply<string[] | null> = JSON.parse(client.parseTencentTranslationResponse(
           body, group.length)) as NativeReply<string[] | null>;
-        if (!parsed.ok || parsed.value === null || parsed.value.length !== group.length) continue;
+        if (!parsed.ok || parsed.value === null || parsed.value.length !== group.length) {
+          providerComplete = false;
+          continue;
+        }
         for (let index: number = 0; index < group.length; index++) {
           this.recordTranslation(query, group[0].target_language, group[index], parsed.value[index],
             entries);
         }
       } catch (error) {
         KeyboardLog.error(`Tencent translation response unavailable: ${describeError(error)}`);
+        providerComplete = false;
       }
     }
+    return providerComplete;
   }
 
   private async fetchNiuTranslation(config: NiuTransTranslationConfig, item: TranslationPlanItem,
-    epoch: number, handle: number): Promise<string | null> {
+    epoch: number, handle: number): Promise<TranslationProviderResult> {
     const request: NiuTransTranslationRequest = {
         config: config,
         text: item.key,
@@ -3127,20 +4258,20 @@ export class KeyboardSession implements HardwareKeyTarget {
     };
     const descriptor: TranslationHttpDescriptor | null = this.translationDescriptor(
       client.niuTransTranslationHttpRequest(JSON.stringify(request)));
-    if (descriptor === null) return null;
+    if (descriptor === null) return { value: null, completed: false };
     const body: string | null = await this.translationHttp(descriptor, false, epoch, handle);
-    if (body === null) return null;
+    if (body === null) return { value: null, completed: false };
     try {
       const reply: NativeReply<string | null> = JSON.parse(
         client.parseNiuTransTranslationResponse(body)) as NativeReply<string | null>;
-      return reply.ok && reply.value !== null ? reply.value : null;
+      return { value: reply.ok ? reply.value : null, completed: reply.ok };
     } catch {
-      return null;
+      return { value: null, completed: false };
     }
   }
 
   private async fetchCustomTranslation(config: TranslationProviderConfig, item: TranslationPlanItem,
-    epoch: number, handle: number): Promise<string | null> {
+    epoch: number, handle: number): Promise<TranslationProviderResult> {
     const request: CustomTranslationRequest = {
         config: config,
         text: item.key,
@@ -3149,20 +4280,25 @@ export class KeyboardSession implements HardwareKeyTarget {
     };
     const descriptor: TranslationHttpDescriptor | null = this.translationDescriptor(
       client.customTranslationHttpRequest(JSON.stringify(request)));
-    if (descriptor === null) return null;
+    if (descriptor === null) return { value: null, completed: false };
     const body: string | null = await this.translationHttp(descriptor, true, epoch, handle);
-    if (body === null) return null;
+    if (body === null) return { value: null, completed: false };
     try {
       const reply: NativeReply<string | null> = JSON.parse(
         client.parseCustomTranslationResponse(body)) as NativeReply<string | null>;
-      return reply.ok && reply.value !== null ? reply.value : null;
+      return { value: reply.ok ? reply.value : null, completed: reply.ok };
     } catch {
-      return null;
+      return { value: null, completed: false };
     }
   }
 
   private recordTranslation(query: TranslationQuery, target: string, item: TranslationPlanItem,
     value: string | null, entries: TranslationEntry[]): void {
+    // A `/fy` answer is the command's row, not a candidate gloss: it is neither cached nor remembered as a failure.
+    if (query.sentence === true) {
+      if (value !== null) TranslationPolicy.append(entries, item.text, value);
+      return;
+    }
     if (value === null) {
       this.translationNegativeCache.set(TranslationPolicy.cacheKey(query, target, item),
         Date.now() + TranslationPolicy.NEGATIVE_CACHE_MS);
@@ -3194,16 +4330,16 @@ export class KeyboardSession implements HardwareKeyTarget {
     if (!this.translationCurrent(handle, epoch) || typeof descriptor.url !== 'string'
       || descriptor.url.length > 2048 || descriptor.url.includes('\n')
       || descriptor.url.includes('\r')
-      || (!descriptor.url.startsWith('https://')
-        && !(allowHttp && descriptor.url.startsWith('http://')))) return null;
+      || !TextPolicy.validSecureAuthority(descriptor.url, allowHttp)) return null;
     if (descriptor.max_response_bytes > TranslationPolicy.MAX_RESPONSE_BYTES) return null;
     const request = http.createHttp();
+    this.translationRequests.add(request);
     try {
       const response: http.HttpResponse = await request.request(descriptor.url, {
         method: http.RequestMethod.POST,
         header: descriptor.headers,
-        connectTimeout: Math.min(3000, Math.max(1000, descriptor.timeout_ms)),
-        readTimeout: Math.min(8000, Math.max(1000, descriptor.timeout_ms)),
+        connectTimeout: KeyboardGeometry.bounded(descriptor.timeout_ms, 1000, 3000),
+        readTimeout: KeyboardGeometry.bounded(descriptor.timeout_ms, 1000, 8000),
         extraData: descriptor.body_utf8 !== undefined
           ? descriptor.body_utf8 : JSON.stringify(descriptor.body ?? {})
       });
@@ -3215,6 +4351,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       KeyboardLog.error(`candidate translation request unavailable: ${describeError(error)}`);
       return null;
     } finally {
+      this.translationRequests.delete(request);
       request.destroy();
     }
   }
@@ -3240,7 +4377,7 @@ export class KeyboardSession implements HardwareKeyTarget {
   static feedbackIn(stateRoot: string): FeedbackSettings {
     try {
       const path: string = KeyboardSession.feedbackFileIn(stateRoot);
-      if (!fs.accessSync(path)) {
+      if (!fs.accessSync(path) || fs.statSync(path).size > KeyboardFeedback.MAX_BYTES) {
         return KeyboardFeedback.DEFAULTS;
       }
       return KeyboardFeedback.parse(fs.readTextSync(path));
@@ -3254,8 +4391,11 @@ export class KeyboardSession implements HardwareKeyTarget {
     try {
       const handle = fs.openSync(KeyboardSession.feedbackFileIn(stateRoot),
         fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
-      fs.writeSync(handle.fd, KeyboardFeedback.serialize(settings));
-      fs.closeSync(handle);
+      try {
+        fs.writeSync(handle.fd, KeyboardFeedback.serialize(settings));
+      } finally {
+        fs.closeSync(handle);
+      }
       return true;
     } catch (error) {
       KeyboardLog.error(`key feedback not saved: ${describeError(error)}`);
@@ -3266,7 +4406,8 @@ export class KeyboardSession implements HardwareKeyTarget {
   /** How keys should feel on this device, which is not something the shared preferences carry. */
   feedback(): FeedbackSettings {
     try {
-      if (!fs.accessSync(this.feedbackFile())) {
+      if (!fs.accessSync(this.feedbackFile())
+        || fs.statSync(this.feedbackFile()).size > KeyboardFeedback.MAX_BYTES) {
         return KeyboardFeedback.DEFAULTS;
       }
       return KeyboardFeedback.parse(fs.readTextSync(this.feedbackFile()));
@@ -3280,8 +4421,11 @@ export class KeyboardSession implements HardwareKeyTarget {
     try {
       const handle = fs.openSync(this.feedbackFile(),
         fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
-      fs.writeSync(handle.fd, KeyboardFeedback.serialize(settings));
-      fs.closeSync(handle);
+      try {
+        fs.writeSync(handle.fd, KeyboardFeedback.serialize(settings));
+      } finally {
+        fs.closeSync(handle);
+      }
       this.feedbackSettings = settings;
       return true;
     } catch (error) {
@@ -3332,7 +4476,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     const directory: string = this.clipboardRoot();
     if (directory.length === 0) return null;
     const request: MobileClipboardRequest = {
-      directory: directory, legacy: 'harmony_state', action: action
+      directory: directory, action: action
     };
     try {
       const reply: MobileClipboardReply = JSON.parse(
@@ -3388,7 +4532,8 @@ export class KeyboardSession implements HardwareKeyTarget {
       const entries: ClipboardHistoryItem[] = this.clipboardEntries(value);
       if (value.captured !== true) {
         return { entries: entries, failure: value.reason === 'full'
-          ? ClipboardFailure.FULL : ClipboardFailure.INVALID_FILE };
+          ? ClipboardFailure.FULL : value.reason === 'invalid'
+            ? ClipboardFailure.TOO_LONG : ClipboardFailure.INVALID_FILE };
       }
       return { entries: entries, failure: null };
     } catch (error) {
@@ -3407,6 +4552,59 @@ export class KeyboardSession implements HardwareKeyTarget {
 
   clearClipboardHistory(): ClipboardHistoryMutation {
     return this.mutateClipboard({ operation: 'clear' }, 'cleared');
+  }
+
+  /**
+   * Which editor a cloud clipboard listing was fetched for.
+   *
+   * The attribute generation rather than the editor one: only attach and detach move it, so an idle Engine restart does not throw away a listing that still belongs to the focused field.
+   */
+  cloudClipboardEditor(): number {
+    return this.attributeGeneration;
+  }
+
+  /** Whether the focused editor may see cloud clipboard items: never a password field, nor one whose attributes are still unknown. */
+  cloudClipboardVisible(): boolean {
+    return this.inputClient !== undefined
+      && CloudClipboardPolicy.editorAllows(this.editorAttributesKnown, this.traits.password);
+  }
+
+  /**
+   * The account's cloud clipboard, fetched now.
+   *
+   * Null when the listing no longer belongs to the focused editor: the field changed while the request was out, or it is one that may not see cloud items. A late answer for another field is dropped rather than shown, since tapping one of its items would paste into a field it was never fetched for.
+   */
+  async cloudClipboardItems(): Promise<CloudClipboardListing | null> {
+    const editor: number = this.attributeGeneration;
+    if (!this.cloudClipboardVisible()) return null;
+    const listing: CloudClipboardListing = await this.cloudClipboard().list();
+    if (!CloudClipboardPolicy.current(editor, this.attributeGeneration) || !this.cloudClipboardVisible()) {
+      return null;
+    }
+    return listing;
+  }
+
+  /** Inserts a cloud item the way a local history entry is inserted, but only into the editor its listing was fetched for. */
+  insertCloudClipboard(text: string, editor: number): boolean {
+    if (!CloudClipboardPolicy.current(editor, this.attributeGeneration) || !this.cloudClipboardVisible()) {
+      return false;
+    }
+    this.insert(text);
+    return true;
+  }
+
+  /** Uploads one local history entry the user chose; nothing reaches the cloud clipboard any other way. */
+  async sendToCloudClipboard(text: string): Promise<CloudClipboardSendOutcome> {
+    return await this.cloudClipboard().add(text);
+  }
+
+  private cloudClipboard(): CloudClipboardClient {
+    // Kept only once start() has named the state directory; a client made before that has no session file to read.
+    const cached: CloudClipboardClient | undefined = this.cloudClipboardClient;
+    if (cached !== undefined) return cached;
+    const made: CloudClipboardClient = new CloudClipboardClient(this.stateDirectory);
+    if (this.stateDirectory.length > 0) this.cloudClipboardClient = made;
+    return made;
   }
 
   private mutateClipboard(action: MobileClipboardAction,
@@ -3560,12 +4758,12 @@ export class KeyboardSession implements HardwareKeyTarget {
     }
     const editorGeneration: number = this.editorGeneration;
     const contextGeneration: number = this.replyContextGeneration;
+    // The reply instructions ride in the first custom slot, which the shared request builder reads as the system prompt; the user's candidate prompts do not apply to replies.
     const config: PreparedAiAssistant = {
       enabled: this.aiAssistant.enabled, provider: this.aiAssistant.provider,
       model: this.aiAssistant.model, token: this.aiAssistant.token, tokens: this.aiAssistant.tokens,
-      endpoint: this.aiAssistant.endpoint, candidate_limit: 3, prompt_id: this.aiAssistant.prompt_id,
-      prompt: request.prompt, prompt_custom_1: this.aiAssistant.prompt_custom_1,
-      prompt_custom_2: this.aiAssistant.prompt_custom_2, prompt_custom_3: this.aiAssistant.prompt_custom_3
+      endpoint: this.aiAssistant.endpoint, candidate_limit: 3, prompt_id: 'custom_1',
+      prompt_custom_1: request.prompt, prompt_custom_2: '', prompt_custom_3: ''
     };
     const input: AiHttpRequestInput = {
       segmented_pinyin: ['reply'], context: request.source, candidate_limit: 3
@@ -3583,11 +4781,12 @@ export class KeyboardSession implements HardwareKeyTarget {
       return [];
     }
     const requestHttp = http.createHttp();
+    this.replyRequest = requestHttp;
     try {
       const response: http.HttpResponse = await requestHttp.request(descriptor.url, {
         method: http.RequestMethod.POST, header: descriptor.headers,
-        connectTimeout: Math.min(8000, Math.max(1000, descriptor.connect_timeout_ms)),
-        readTimeout: Math.min(10000, Math.max(1000, descriptor.timeout_ms)),
+        connectTimeout: KeyboardGeometry.bounded(descriptor.connect_timeout_ms, 1000, 8000),
+        readTimeout: KeyboardGeometry.bounded(descriptor.timeout_ms, 1000, 10000),
         extraData: JSON.stringify(descriptor.body)
       });
       if (!ReplyContextPolicy.matches(editorGeneration, this.editorGeneration,
@@ -3609,6 +4808,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       KeyboardLog.error(`thoughtful reply unavailable: ${describeError(error)}`);
       return [];
     } finally {
+      if (this.replyRequest === requestHttp) this.replyRequest = undefined;
       requestHttp.destroy();
     }
   }
@@ -3744,13 +4944,16 @@ export class KeyboardSession implements HardwareKeyTarget {
         KeyboardLog.error(`preferences refused: ${applied.error}`);
         return false;
       }
-      const saved: PrepareResponse =
+      const saved: SnapshotResponse =
         JSON.parse(client.savePreferences(this.stateDirectory, expected, document)) as
-          PrepareResponse;
+          SnapshotResponse;
       if (!saved.ok) {
         // The session already has them; only the write failed. Say so rather than pretending the
         // change did not happen, because on screen it plainly did.
         KeyboardLog.error(`preferences not persisted: ${saved.error}`);
+      } else {
+        // Our own write, already applied; the next focus must not rebuild the session for it. The revision is the store's answer rather than expected + 1: a save that changes nothing keeps the stored revision, and assuming the next one would make the next real change made elsewhere look like this one.
+        this.preferencesRevision = saved.value.revision;
       }
       this.clipboardHistoryEnabled = nextClipboardHistory;
       if (changes.has('voice_input')) {
@@ -3793,7 +4996,9 @@ export class KeyboardSession implements HardwareKeyTarget {
       list_groups: false,
       list_symbol_groups: false,
       parent: parent,
-      search: search
+      search: search,
+      list_plugin_symbol_groups: false,
+      plugins: null
     };
     try {
       const response: EmojiResponse =
@@ -3820,7 +5025,9 @@ export class KeyboardSession implements HardwareKeyTarget {
       list_groups: true,
       list_symbol_groups: false,
       parent: '',
-      search: ''
+      search: '',
+      list_plugin_symbol_groups: false,
+      plugins: null
     };
     try {
       const raw: string = client.emojiCatalog(JSON.stringify(query), this.resourceDirectory);
@@ -3845,7 +5052,9 @@ export class KeyboardSession implements HardwareKeyTarget {
       list_groups: false,
       list_symbol_groups: true,
       parent: '',
-      search: ''
+      search: '',
+      list_plugin_symbol_groups: false,
+      plugins: null
     };
     try {
       const raw: string = client.emojiCatalog(JSON.stringify(query), this.resourceDirectory);
@@ -3861,29 +5070,50 @@ export class KeyboardSession implements HardwareKeyTarget {
   }
 
   /**
+   * 已安装符号集插件的组，读自 `<stateDirectory>/plugins`，与设置页交给插件管理的是同一个目录。
+   *
+   * 不依赖 `others.db`；读不出来时返回空表，表情面板照旧只显示内置内容。
+   */
+  pluginSymbolGroups(): PluginSymbolGroup[] {
+    if (this.stateDirectory.length === 0 || this.resourceDirectory.length === 0) {
+      return [];
+    }
+    const query: EmojiQuery = {
+      category: 'symbols',
+      limit: 1,
+      offset: 0,
+      group: '',
+      cursor: false,
+      list_groups: false,
+      list_symbol_groups: false,
+      parent: '',
+      search: '',
+      list_plugin_symbol_groups: true,
+      plugins: `${this.stateDirectory}/plugins`
+    };
+    try {
+      const raw: string = client.emojiCatalog(JSON.stringify(query), this.resourceDirectory);
+      const response: PluginSymbolGroupsResponse = JSON.parse(raw) as PluginSymbolGroupsResponse;
+      if (!response.ok) {
+        KeyboardLog.error(`plugin symbol groups refused: ${response.error}`);
+        return [];
+      }
+      return PluginSymbolGroupPolicy.parse(response.value.plugin_symbol_groups);
+    } catch (error) {
+      KeyboardLog.error(`plugin symbol groups unavailable: ${describeError(error)}`);
+      return [];
+    }
+  }
+
+  /**
    * Simplified to Traditional, where the user asked for it and the text is Chinese to begin with.
    *
-   * A converter that fails must not lose the text, so anything it cannot do falls back to what came
-   * in. The policy decides whether it applies at all; Japanese and the local modes are not Chinese
-   * output however the setting reads.
+   * The conversion is the shared phrase-level OpenCC s2t tables compiled into the native library, the same one the Windows, macOS, Linux and Android hosts call, so 头发 becomes 頭髮 and 发展 becomes 發展 here exactly as there. A converter that fails must not lose the text, so anything it cannot do falls back to what came in. The policy decides whether it applies at all; dedicated English, Japanese and the temporary Japanese mode are not Chinese output however the setting reads.
    */
   private asTraditional(text: string): string {
-    if (!this.traditional) {
-      return text;
-    }
-    if (this.converter === undefined) {
-      try {
-        this.converter = i18n.Transliterator.getInstance('Simplified-Traditional');
-      } catch (error) {
-        KeyboardLog.error(`no simplified-to-traditional transliterator: ${describeError(error)}`);
-        this.traditional = false;
-        return text;
-      }
-    }
-    const converter: i18n.Transliterator = this.converter;
-    return ChineseOutputPolicy.output(text, true,
+    return ChineseOutputPolicy.output(text, this.traditional,
       ChineseOutputPolicy.applies(this.englishMode, this.scheme, this.localMode),
-      (value: string): string => converter.transform(value));
+      (value: string): string | null => client.simplifiedToTraditional(value));
   }
 
   /**
@@ -4033,6 +5263,13 @@ export class KeyboardSession implements HardwareKeyTarget {
    *
    * Returns whether the key was claimed, so the caller knows not to hand it on.
    */
+  /** Opens the settings application: dictionary, quick phrases, cloud and voice providers live there rather than on the keyboard. */
+  openSettings(): void {
+    if (this.onOpenSettings !== undefined) {
+      this.onOpenSettings();
+    }
+  }
+
   routeVoiceHotkey(key: VoiceKey): boolean {
     if (!this.voiceInputEnabled()) {
       return false;
@@ -4057,6 +5294,7 @@ export class KeyboardSession implements HardwareKeyTarget {
   setVoiceRecording(active: boolean, cancelled: boolean = false): void {
     const changed: boolean = this.voiceRecording !== active;
     this.voiceRecording = active;
+    this.updateMusic();
     if (!active) {
       this.voiceHotkeys.reset();
     }
@@ -4081,6 +5319,83 @@ export class KeyboardSession implements HardwareKeyTarget {
   /** The extension's context, which is what turns a packaged tone into something playable. */
   useVoiceContext(context: common.Context): void {
     this.voiceBehaviour.use(context);
+  }
+
+  /** The extension's context, which says where the built-in sound packs are and where rendered notes may go. */
+  useSoundContext(context: common.Context): void {
+    this.soundPlayer.use(context);
+    this.musicPlayer.use(context);
+  }
+
+  /** Background music plays on a 2in1 while an editor whose attributes are known has focus, is not a password field, and nothing is being recorded; the desktop hosts tell their player the same with `msime_client_music_set_active`. */
+  private updateMusic(): void {
+    this.musicPlayer.setActive(
+      MusicPolicy.active(this.editorAttributesKnown, this.traits.password, this.voiceRecording));
+  }
+
+  /** Whether the editor forbids sounds: a password field, or one whose attributes have not arrived yet, since `traits` still describes the previous field until they do (as music waits for them). */
+  private soundsSilencedByEditor(): boolean {
+    return !this.editorAttributesKnown || this.traits.password;
+  }
+
+  /**
+   * The sound of a hardware key-down, on a 2in1 with key sounds on. Never in a password field: the rhythm of a password is what a key sound would give away.
+   */
+  hardwareKeySound(keyCode: number, unicodeChar: number, ctrl: boolean, alt: boolean, logo: boolean): void {
+    if (KeySoundPolicy.keysSilent(this.soundsSilencedByEditor(), this.isEnglish(), this.isEnglishCandidates())) {
+      return;
+    }
+    const keyClass: number = KeySoundPolicy.keyClass(keyCode, unicodeChar, ctrl, alt, logo);
+    if (keyClass >= 0) {
+      this.soundPlayer.key(keyClass);
+      // HarmonyOS key events do not say whether a key is an auto-repeat, so every key-down counts.
+      this.typingEffect(keyClass);
+    }
+  }
+
+  /**
+   * Hand one key or commit to the session's typing effect, alongside its sound, while a style is drawn or the combo is counted. host-api links no audio stack here, so a tier-up sound it reports due is played by this host; the view draws the rest.
+   *
+   * @param event a `msime_client_typing_effect` event: a key sound class, or `TYPING_EFFECT_COMMIT`
+   */
+  private typingEffect(event: number): void {
+    if (this.handle === 0 || !TypingEffectPolicy.active(this.typingEffects)) {
+      return;
+    }
+    const effect: TypingEffect = TypingEffectPolicy.decode(client.typingEffect(this.handle, event));
+    if (effect.tierSound) {
+      this.soundPlayer.tierUp(TypingEffectPolicy.tier(effect.count));
+    }
+    const listener: ((effect: TypingEffect, settings: TypingEffectSettings, key: boolean) => void) | undefined =
+      this.onTypingEffect;
+    if (listener !== undefined) {
+      listener(effect, this.typingEffects, event !== TYPING_EFFECT_COMMIT);
+    }
+  }
+
+  /** Resolve the selected effect pack through host-api: after the session is created and after each focus-in, which is when host-api looks at the pack again, never per key. Without a pack nothing is asked. */
+  private refreshTypingEffects(): void {
+    const preferences: TypingEffectSettings = this.typingEffectPreferences;
+    if (this.handle === 0 || preferences.pack === '') {
+      this.typingEffects = preferences;
+      return;
+    }
+    try {
+      const answer: TypingEffectSettingsResponse =
+        JSON.parse(client.typingEffectSettings(this.handle)) as TypingEffectSettingsResponse;
+      if (!answer.ok) {
+        KeyboardLog.error(`typing effect settings refused: ${answer.error}`);
+        this.typingEffects = preferences;
+        return;
+      }
+      if (answer.value.issue !== null) {
+        KeyboardLog.error(`effect pack ${preferences.pack} unavailable: ${answer.value.issue}`);
+      }
+      this.typingEffects = TypingEffectPolicy.resolve(preferences, answer.value);
+    } catch (error) {
+      KeyboardLog.error(`typing effect settings unreadable: ${describeError(error)}`);
+      this.typingEffects = preferences;
+    }
   }
 
   /** Whether the current recording outlives its hold key, for the panel that says so. */
@@ -4122,14 +5437,15 @@ export class KeyboardSession implements HardwareKeyTarget {
     }
     let preceding: number = 0;
     try {
-      preceding = SmartPunctuationContext.precedingCodePoint(this.inputClient.getForwardSync(2));
+      preceding = SmartPunctuationContext.precedingCodePoint(InlinePreeditPolicy.beforePreview(
+        this.inputClient.getForwardSync(2 + this.previewText.length), this.previewText));
     } catch (error) {
       KeyboardLog.error(`punctuation space context unavailable: ${describeError(error)}`);
       this.clearSmartPunctuationSpace();
       return false;
     }
     const decision: SpaceConvertDecision = SmartPunctuationSpacePolicy.decide(
-      snapshot, character, preceding, this.editing.length > 0, this.editorGeneration);
+      snapshot, character, preceding, this.composing(), this.editorGeneration);
     if (decision !== SpaceConvertDecision.CONVERT) {
       this.clearSmartPunctuationSpace();
       return false;
@@ -4163,8 +5479,9 @@ export class KeyboardSession implements HardwareKeyTarget {
     const dedicatedEnglish: boolean = view?.dedicated_english ?? this.englishMode;
     return this.smartPunctuation && this.smartPunctuationRepeat
       && this.chinesePunctuation && this.punctuationLock === 'follow'
-      && !dedicatedEnglish && this.localMode === 'none' && this.schemeName !== 'japanese'
-      && this.editing.length === 0 && this.currentCandidates.length === 0
+      && !dedicatedEnglish && this.localMode === 'none'
+      && SchemeTraits.hostSmartPunctuation(SchemeTraits.fromName(this.schemeName))
+      && !this.composing() && this.currentCandidates.length === 0
       && SmartPunctuationRepeatPolicy.chineseMark(ascii) !== null
       && SmartPunctuationRepeatPolicy.isAsciiAlphanumeric(preceding);
   }
@@ -4187,8 +5504,13 @@ export class KeyboardSession implements HardwareKeyTarget {
     setTimeout((): void => {
       try {
         const response: string = client.typingStatistics(request);
-        const value: Record<string, Object> = JSON.parse(response) as Record<string, Object>;
-        if (value.ok !== true) KeyboardLog.error('typing statistics write refused');
+        const value: TypingStatisticsRecordResponse = JSON.parse(response) as TypingStatisticsRecordResponse;
+        if (value.ok !== true) {
+          KeyboardLog.error('typing statistics write refused');
+        } else if (typeof value.value?.milestone === 'number' && !this.soundsSilencedByEditor()) {
+          // host-api reports the milestone only while achievements are on; it plays the jingle itself on the desktop, and here the player does. Not over a password field, like every other sound.
+          this.soundPlayer.achievement();
+        }
       } catch (error) {
         KeyboardLog.error(`typing statistics unavailable: ${describeError(error)}`);
       }
@@ -4225,14 +5547,19 @@ export class KeyboardSession implements HardwareKeyTarget {
       // The generation identifies the composition these belong to; selecting against a stale one
       // would act on a list the user is no longer looking at.
       this.generation = response.value.generation;
+      // The snapshot carries no scheme; the list being the Hanja one is read from the view it expands.
+      const hanja: boolean = this.candidateListOpen() && this.lastView?.scheme === SchemeTraits.KOREAN;
       const entries: ExpandedCandidate[] = [];
       for (const candidate of response.value.candidates) {
         entries.push({
-          text: candidate.text,
-          annotation: CandidateGlossPolicy.annotation(candidate.annotation,
+          text: this.asTraditional(candidate.text),
+          annotation: CandidateGlossPolicy.annotation(
+            CandidateGlossPolicy.slotAnnotation(hanja, candidate.annotation),
             candidate.translation ?? null, this.candidateGlossEnabled),
           annotationIsTranslation: CandidateGlossPolicy.annotationIsTranslation(
-            candidate.annotation, candidate.translation ?? null, this.candidateGlossEnabled)
+            CandidateGlossPolicy.slotAnnotation(hanja, candidate.annotation),
+            candidate.translation ?? null, this.candidateGlossEnabled),
+          hunEum: CandidateGlossPolicy.hunEum(hanja, candidate.annotation)
         });
       }
       return entries;

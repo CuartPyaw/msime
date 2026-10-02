@@ -13,7 +13,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
-loader = importlib.machinery.SourceFileLoader("online_provider", str(ROOT / "scripts" / "msime-client-online-provider"))
+loader = importlib.machinery.SourceFileLoader("online_provider", str(ROOT / "scripts" / "msime-linux-online-provider"))
 spec = importlib.util.spec_from_loader(loader.name, loader)
 provider = importlib.util.module_from_spec(spec)
 loader.exec_module(provider)
@@ -56,7 +56,7 @@ class TencentCredentials(unittest.TestCase):
     def test_reload_reuses_cache_after_whitespace_only_change(self):
         server = SimpleNamespace(tencent_config_path=self.path, translation_cache={},
                                  translation_lock=threading.Lock())
-        query = {"candidates": ["测试"], "target_language": "en"}
+        query = {"candidates": ["测试"], "target_language": "en", "provider": "tencent"}
         self.save(self.clean)
         with mock.patch.object(provider, "fetch", return_value={"Response": {"TargetTextList": ["synthetic"]}}) as fetch:
             first = provider.translations(query, server)

@@ -2,6 +2,40 @@ import XCTest
 import Security
 
 final class KeyboardAITests: XCTestCase {
+  func testCommunityLibraryRejectsASymlinkedDirectoryBeforeWritingExternalResource() throws {
+    #if canImport(Darwin)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("msime-community-link-\(UUID().uuidString)")
+    let outside = FileManager.default.temporaryDirectory.appendingPathComponent("msime-community-target-\(UUID().uuidString)")
+    defer {
+      try? FileManager.default.removeItem(at: root)
+      try? FileManager.default.removeItem(at: outside)
+    }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+    let linked = root.appendingPathComponent("linked", isDirectory: true)
+    try FileManager.default.createSymbolicLink(at: linked, withDestinationURL: outside)
+    let item = CommunityResource(id: UUID().uuidString, kind: .reply, name: "测试风格", description: "测试", author: "测试作者",
+      content: .init(prompt: "使用三句简短的话"), revision: 1, saves: 0, saved: true, owned: false,
+      rating_count: 0, rating_average: 0, my_rating: 0)
+
+    XCTAssertThrowsError(try CommunityLibrary.save(item, in: linked))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: outside.appendingPathComponent("CommunityLibrary.json").path))
+    #endif
+  }
+
+  @MainActor
+  func testOversizedPasteClearsPreviousSourceText() {
+    let model = ReplyKeyboardModel()
+    model.setText("旧文本")
+
+    model.setText(String(repeating: "字", count: 10_001))
+
+    XCTAssertEqual(model.text, "")
+    XCTAssertTrue(model.replies.isEmpty)
+    XCTAssertFalse(model.busy)
+    XCTAssertTrue(model.status.contains("一万字"))
+  }
+
   @MainActor
   func testReplyClearDropsLateResultsAndNeverInsertsAutomatically() async throws {
     let model = ReplyKeyboardModel()
@@ -53,6 +87,18 @@ final class KeyboardAITests: XCTestCase {
     XCTAssertEqual(requests, 1)
     XCTAssertFalse(model.busy)
     XCTAssertTrue(model.status.contains("模板已移除"))
+  }
+
+  func testCommunityLibraryRejectsMalformedReplyTemplate() throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("msime-community-invalid-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let item = CommunityResource(id: UUID().uuidString, kind: .reply, name: "测试风格",
+      description: "测试", author: "测试作者",
+      content: .init(prompt: String(repeating: "字", count: 2_001)), revision: 1, saves: 0,
+      saved: true, owned: false, rating_count: 0, rating_average: 0, my_rating: 0)
+    XCTAssertThrowsError(try CommunityLibrary.save(item, in: directory))
   }
 
   func testAISelectionRejectsDocumentCaretAndTextChanges() {

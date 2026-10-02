@@ -1,14 +1,29 @@
 // @vitest-environment jsdom
+import { testHost } from "../support/host";
+import { settingsFormReady } from "../support/settings-form";
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import {
+  SETTINGS_AUTOSAVE_DELAY_MS,
   SettingsPage,
   parseCustomTranslations,
-  type HostCapabilities,
+  useCustomTranslations,
+  type CustomTranslationsClient,
   type Snapshot,
 } from "@msime/ui";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 const initial: Snapshot = {
   format_version: 1,
@@ -52,11 +67,11 @@ test("a host with nowhere to drop a file can still supply the overlay", async ()
   const save = vi.fn().mockResolvedValue(undefined);
   render(
     <SettingsPage
-      initialPage="input"
+      initialPage="expression"
       client={{
         load: async () => initial,
         save: vi.fn(),
-        host: { platform: "harmony" } as HostCapabilities,
+        host: testHost({ platform: "harmony" }),
         customTranslations: { load: async () => "你好\thello\n", save },
       }}
     />,
@@ -64,9 +79,11 @@ test("a host with nowhere to drop a file can still supply the overlay", async ()
   const field = (await screen.findByLabelText("自定义候选释义")) as HTMLTextAreaElement;
   expect(field.value).toBe("你好\thello\n");
   fireEvent.change(field, { target: { value: "刚才\tjust now\n" } });
-  fireEvent.click(screen.getByRole("button", { name: "保存自定义释义" }));
-  await screen.findByText(/已保存 1 条释义/);
+  expect(screen.queryByRole("button", { name: "保存自定义释义" })).toBeNull();
+  // Saved on its own once typing pauses.
+  await screen.findByText("已保存");
   expect(save).toHaveBeenCalledWith("刚才\tjust now\n");
+  expect(screen.getByText("1 条释义")).toBeTruthy();
 });
 
 test("the desktop hosts get the overlay too, where the profile directory is hidden", async () => {
@@ -76,11 +93,11 @@ test("the desktop hosts get the overlay too, where the profile directory is hidd
   const save = vi.fn().mockResolvedValue(undefined);
   render(
     <SettingsPage
-      initialPage="input"
+      initialPage="expression"
       client={{
         load: async () => initial,
         save: vi.fn(),
-        host: { platform: "macos" } as HostCapabilities,
+        host: testHost({ platform: "macos" }),
         customTranslations: { load: async () => "", save },
       }}
     />,
@@ -88,22 +105,131 @@ test("the desktop hosts get the overlay too, where the profile directory is hidd
   const field = (await screen.findByLabelText("自定义候选释义")) as HTMLTextAreaElement;
   expect(field.value).toBe("");
   fireEvent.change(field, { target: { value: "你好\thello\n" } });
-  fireEvent.click(screen.getByRole("button", { name: "保存自定义释义" }));
-  await screen.findByText(/已保存 1 条释义/);
-  expect(save).toHaveBeenCalledWith("你好\thello\n");
+  // Leaving the field saves at once rather than waiting out the countdown.
+  fireEvent.blur(field);
+  await waitFor(() => expect(save).toHaveBeenCalledWith("你好\thello\n"));
+  await screen.findByText("已保存");
 });
 
 test("a host without the route is not offered the section", async () => {
   render(
     <SettingsPage
-      initialPage="input"
+      initialPage="expression"
       client={{
         load: async () => initial,
         save: vi.fn(),
-        host: { platform: "windows" } as HostCapabilities,
+        host: testHost({ platform: "windows" }),
       }}
     />,
   );
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   expect(screen.queryByLabelText("自定义候选释义")).toBeNull();
+});
+
+function overlayClient(save: CustomTranslationsClient["save"]): CustomTranslationsClient {
+  return { load: async () => "", save };
+}
+
+async function advance(ms: number) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+}
+
+test("typing saves once, after the edits pause", async () => {
+  vi.useFakeTimers();
+  const save = vi.fn().mockResolvedValue(undefined);
+  const client = overlayClient(save);
+  const { result } = renderHook(() => useCustomTranslations({ client }));
+  await advance(0);
+
+  act(() => result.current.setText("你"));
+  await advance(SETTINGS_AUTOSAVE_DELAY_MS - 100);
+  act(() => result.current.setText("你好\thello"));
+  await advance(SETTINGS_AUTOSAVE_DELAY_MS - 100);
+  expect(save).not.toHaveBeenCalled();
+
+  await advance(100);
+  expect(save).toHaveBeenCalledExactlyOnceWith("你好\thello");
+  expect(result.current.saveState).toBe("saved");
+});
+
+test("a failed save keeps the edit and 重试 writes it again", async () => {
+  vi.useFakeTimers();
+  const save = vi.fn().mockRejectedValueOnce(new Error("磁盘已满")).mockResolvedValue(undefined);
+  const client = overlayClient(save);
+  const { result } = renderHook(() => useCustomTranslations({ client }));
+  await advance(0);
+
+  act(() => result.current.setText("你好\thello"));
+  await advance(SETTINGS_AUTOSAVE_DELAY_MS);
+  expect(result.current.saveState).toBe("failed");
+  expect(result.current.saveError).toBe("磁盘已满");
+
+  await act(() => result.current.flush());
+  expect(save).toHaveBeenCalledTimes(2);
+  expect(save).toHaveBeenLastCalledWith("你好\thello");
+  expect(result.current.saveState).toBe("saved");
+});
+
+test("an edit made while a save is in flight is saved after it", async () => {
+  vi.useFakeTimers();
+  let finish: () => void = () => undefined;
+  const save = vi
+    .fn()
+    .mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)))
+    .mockResolvedValue(undefined);
+  const client = overlayClient(save);
+  const { result } = renderHook(() => useCustomTranslations({ client }));
+  await advance(0);
+
+  act(() => result.current.setText("a\tb"));
+  await advance(SETTINGS_AUTOSAVE_DELAY_MS);
+  expect(result.current.saveState).toBe("saving");
+  act(() => result.current.setText("a\tc"));
+  await act(async () => finish());
+
+  expect(save).toHaveBeenCalledTimes(2);
+  expect(save).toHaveBeenLastCalledWith("a\tc");
+  expect(result.current.saveState).toBe("saved");
+});
+
+test("leaving the page saves the pending edit at once", async () => {
+  vi.useFakeTimers();
+  const save = vi.fn().mockResolvedValue(undefined);
+  const client = overlayClient(save);
+  const { result } = renderHook(() => useCustomTranslations({ client }));
+  await advance(0);
+
+  act(() => result.current.setText("你好\thello"));
+  await act(async () => {
+    window.dispatchEvent(new Event("pagehide"));
+  });
+  expect(save).toHaveBeenCalledExactlyOnceWith("你好\thello");
+});
+
+test("closing the page with an edit still counting down writes it", async () => {
+  vi.useFakeTimers();
+  const save = vi.fn().mockResolvedValue(undefined);
+  const client = overlayClient(save);
+  const { result, unmount } = renderHook(() => useCustomTranslations({ client }));
+  await advance(0);
+
+  act(() => result.current.setText("你好\thello"));
+  unmount();
+  await advance(0);
+  expect(save).toHaveBeenCalledExactlyOnceWith("你好\thello");
+});
+
+test("an oversized overlay is not written", async () => {
+  vi.useFakeTimers();
+  const save = vi.fn().mockResolvedValue(undefined);
+  const client = overlayClient(save);
+  const { result } = renderHook(() => useCustomTranslations({ client }));
+  await advance(0);
+
+  act(() => result.current.setText("x".repeat(1024 * 1024 + 1)));
+  await advance(SETTINGS_AUTOSAVE_DELAY_MS);
+  expect(save).not.toHaveBeenCalled();
+  expect(result.current.notice).toBe("自定义释义过大，请精简后再保存。");
 });

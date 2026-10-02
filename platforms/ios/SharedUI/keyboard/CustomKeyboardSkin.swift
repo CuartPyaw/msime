@@ -1,5 +1,6 @@
 import UIKit
 import ImageIO
+import Darwin
 
 enum SkinKeyShape: String, Codable, CaseIterable, Sendable {
   case rounded, capsule, ticket, pebble
@@ -97,6 +98,10 @@ enum CustomKeyboardSkinStore {
   static let key = "customKeyboardSkin.v1"
   private static let cache = Cache()
   static var current: CustomKeyboardSkin { cache.load() }
+  /// The saved design, or nil when there is none: `current` falls back to the editor's starting design, which is not one the user applied.
+  static var stored: CustomKeyboardSkin? {
+    KeyboardFeedbackPreference.defaults.data(forKey: key) == nil ? nil : cache.load()
+  }
   static func save(_ skin: CustomKeyboardSkin) {
     guard let data = try? JSONEncoder().encode(skin.normalized) else { return }
     KeyboardFeedbackPreference.defaults.set(data, forKey: key)
@@ -128,15 +133,33 @@ struct SavedKeyboardSkin: Codable, Identifiable, Equatable {
 
 enum CustomSkinLibrary {
   // Keep the multi-photo library out of preferences, which the keyboard reads on each key.
-  private static var file: URL {
-    let root = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: InputSchemePreference.appGroupIdentifier)
+  private static func file(in directory: URL? = nil) -> URL {
+    let root = directory ?? FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: InputSchemePreference.appGroupIdentifier)
       ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
     return root.appendingPathComponent("CustomSkins", isDirectory: true).appendingPathComponent("library.json")
   }
-  static var designs: [SavedKeyboardSkin] {
-    guard let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+  private static func rejectsSymlinkAncestors(_ path: URL) -> Bool {
+    var current = path.standardizedFileURL
+    while true {
+      if current.path == "/" || current.path == "/var" || current.path == "/tmp" { return false }
+      var status = stat()
+      if lstat(current.path, &status) == 0 {
+        if status.st_mode & S_IFMT == S_IFLNK { return true }
+      } else if errno != ENOENT {
+        return true
+      }
+      let parent = current.deletingLastPathComponent()
+      if parent == current { return false }
+      current = parent
+    }
+  }
+  static var designs: [SavedKeyboardSkin] { designs(in: nil) }
+  static func designs(in directory: URL?) -> [SavedKeyboardSkin] {
+    let file = file(in: directory)
+    guard !rejectsSymlinkAncestors(file),
+          let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize,
           size <= 9_000_000,
-          let data = try? Data(contentsOf: file),
+          let data = try? BoundedFileReader.read(from: file, maximumBytes: 9_000_000),
           let items = try? JSONDecoder().decode([SavedKeyboardSkin].self, from: data) else { return [] }
     return Array(items.prefix(12)).map { item in
       var item = item
@@ -148,10 +171,12 @@ enum CustomSkinLibrary {
   /// Empties the library. Only the UI suite's reset argument calls this: the library lives in the
   /// app group, which survives uninstalling the app, so a test that leaks a skin has no other way
   /// of getting back to a known state.
-  static func removeAll() { try? FileManager.default.removeItem(at: file) }
+  static func removeAll() { try? FileManager.default.removeItem(at: file()) }
   #endif
   @discardableResult
-  static func save(_ items: [SavedKeyboardSkin]) -> Bool {
+  static func save(_ items: [SavedKeyboardSkin], in directory: URL? = nil) -> Bool {
+    let file = file(in: directory)
+    guard !rejectsSymlinkAncestors(file) else { return false }
     let items = items.prefix(12).map { item in
       var item = item
       item.name = String(item.name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(32))
@@ -210,5 +235,17 @@ enum SkinPhotoData {
       if let data = image.jpegData(compressionQuality: quality), data.count <= 512_000 { return data }
     }
     return nil
+  }
+
+  // Synced or downloaded photos skip `thumbnail`; never decode them at full size in the extension.
+  static func image(from data: Data, maxPixelSize: Int = 1536) -> UIImage? {
+    guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+          let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+            kCGImageSourceShouldCacheImmediately: true
+          ] as CFDictionary) else { return nil }
+    return UIImage(cgImage: cg)
   }
 }

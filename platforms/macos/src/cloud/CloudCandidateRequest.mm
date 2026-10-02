@@ -2,10 +2,18 @@
 
 #include "msime_client.h"
 
+static BOOL MSIMEIsAllowedDescriptorURL(NSURL *url) {
+    if ([url.scheme isEqual:@"https"]) return YES;
+    if (![url.scheme isEqual:@"http"]) return NO;
+    NSString *host = url.host.lowercaseString;
+    return [host isEqual:@"localhost"] || [host isEqual:@"127.0.0.1"] || [host isEqual:@"::1"];
+}
+
 @implementation MSIMECloudCandidateRequest {
     NSURL *_url;
     NSURLSessionConfiguration *_configuration;
     NSURLSession *_session;
+    NSURLSessionDataTask *_task;
     NSMutableData *_body;
     void (^_completion)(NSData *);
     BOOL _started;
@@ -38,7 +46,7 @@
     if ([address lengthOfBytesUsingEncoding:NSUTF8StringEncoding] > 2048 ||
         [address rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location != NSNotFound) return self;
     NSURL *url = [NSURL URLWithString:address];
-    if (![@[@"https", @"http"] containsObject:url.scheme] || !url.host.length || url.user || url.password || url.fragment) return self;
+    if (!MSIMEIsAllowedDescriptorURL(url) || !url.host.length || url.user || url.password || url.fragment) return self;
     NSDictionary *headers = descriptor[@"headers"];
     if (![headers isKindOfClass:NSDictionary.class] || headers.count > 2 || ![headers[@"Content-Type"] isEqual:@"application/json"]) return self;
     for (id key in headers) {
@@ -123,7 +131,7 @@
     NSString *address = descriptor[@"url"];
     NSURL *url = [NSURL URLWithString:address];
     NSDictionary *headers = descriptor[@"headers"];
-    if ([address lengthOfBytesUsingEncoding:NSUTF8StringEncoding] > 2048 || ![@[@"https", @"http"] containsObject:url.scheme] ||
+    if ([address lengthOfBytesUsingEncoding:NSUTF8StringEncoding] > 2048 || !MSIMEIsAllowedDescriptorURL(url) ||
         !url.host.length || url.user || url.password || url.fragment || ![headers isKindOfClass:NSDictionary.class] ||
         headers.count != 2 || ![headers[@"Content-Type"] isEqual:@"application/json"] ||
         ![headers[@"Authorization"] isKindOfClass:NSString.class] || ![headers[@"Authorization"] hasPrefix:@"Bearer "]) return self;
@@ -157,11 +165,25 @@
     _configuration.timeoutIntervalForResource = _timeout;
     _body = [NSMutableData data];
     _session = [NSURLSession sessionWithConfiguration:_configuration delegate:self delegateQueue:NSOperationQueue.mainQueue];
-    NSURLSessionDataTask *task = _translationRequest ? [_session dataTaskWithRequest:_translationRequest] : [_session dataTaskWithURL:_url];
-    [task resume];
+    _task = _translationRequest ? [_session dataTaskWithRequest:_translationRequest] : [_session dataTaskWithURL:_url];
+    [_task resume];
+}
+- (void)startInSession:(NSURLSession *)session {
+    NSAssert(NSThread.isMainThread, @"Cloud transport must run on main thread");
+    if (_started || !_completion) return;
+    _started = YES;
+    // Only a translation descriptor has passed validation; the owner of a shared session configured it, so this request neither owns nor invalidates it.
+    if (!_translationRequest || !session) { [self finish:nil]; return; }
+    _body = [NSMutableData data];
+    _task = [session dataTaskWithRequest:_translationRequest];
+    // A per-task delegate keeps the status, body-limit and redirect checks on this request even though the session is shared and has no delegate of its own.
+    _task.delegate = self;
+    [_task resume];
 }
 - (void)cancel {
     _completion = nil;
+    [_task cancel];
+    _task = nil;
     [_session invalidateAndCancel];
     _session = nil;
     _body = nil;

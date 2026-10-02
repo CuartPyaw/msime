@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
+import { testHost } from "../support/host";
+import { settingsFormReady, saveSettingsNow } from "../support/settings-form";
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { SettingsPage, type Snapshot } from "@msime/ui";
 
 afterEach(() => {
@@ -28,7 +30,7 @@ function renderSettings(platform: string, save = vi.fn().mockResolvedValue(undef
       client={{
         load: vi.fn().mockResolvedValue(initial),
         save,
-        host: { platform } as never,
+        host: testHost({ platform }),
         home: { openKeyboard: vi.fn(), openSystemKeyboardSettings: vi.fn() },
       }}
     />,
@@ -43,14 +45,9 @@ async function moreSettingsRows() {
   // and then opens one would otherwise wait for a button that this page does not have.
   const open = screen.queryByRole("region", { name: "全部设置" });
   if (open) return [...open.querySelectorAll("button")];
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   fireEvent.click(screen.getByRole("button", { name: /全部设置/ }));
   return [...screen.getByRole("region", { name: "全部设置" }).querySelectorAll("button")];
-}
-
-async function moreSettingsTitles() {
-  const rows = await moreSettingsRows();
-  return rows.map((row) => row.querySelector("strong")?.textContent ?? "");
 }
 
 async function openMoreSetting(title: string) {
@@ -60,28 +57,32 @@ async function openMoreSetting(title: string) {
   fireEvent.click(row);
 }
 
+// The helper-code settings are a group of the 输入 page; the former `helpcode` route opens that page.
+async function openHelpcode() {
+  await openMoreSetting("输入");
+  return screen.getByRole("region", { name: "辅助码" });
+}
+
 // The Android keyboard sends helper codes -- Shift during a quanpin or shuangpin
 // composition -- and the Engine reads the schema from these preferences, so the
 // page has to be reachable there.
-test("Android reaches the helper-code page from the 键盘 tab", async () => {
+test("Android reaches the helper-code settings from the 键盘 tab", async () => {
   renderSettings("android");
 
-  expect(await moreSettingsTitles()).toContain("辅助码");
-
-  await openMoreSetting("辅助码");
-  expect(screen.getByRole("heading", { name: "辅助码" })).toBeTruthy();
-  expect(screen.getByText(/按 Shift 再输入的字母作为辅助码/)).toBeTruthy();
+  const helpcode = await openHelpcode();
+  expect(screen.getByRole("heading", { name: "输入" })).toBeTruthy();
+  expect(within(helpcode).getByText(/按 Shift 再输入的字母作为辅助码/)).toBeTruthy();
 });
 
 test("Android saves a helper-code schema into shared preferences", async () => {
   const save = renderSettings("android");
 
-  await openMoreSetting("辅助码");
+  await openHelpcode();
   const schema = screen.getByRole("combobox", { name: /全拼辅助码方案/ }) as HTMLSelectElement;
   expect(schema.value).toBe("ziranma");
   fireEvent.change(schema, { target: { value: "xiaohe" } });
 
-  fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+  saveSettingsNow();
   await waitFor(() =>
     expect(save).toHaveBeenCalledWith(
       7,
@@ -96,24 +97,44 @@ test("Android saves a helper-code schema into shared preferences", async () => {
 test("mobile names the candidate row rather than a window", async () => {
   renderSettings("android");
 
-  await openMoreSetting("辅助码");
+  await openHelpcode();
   expect(screen.getByLabelText("在候选栏中显示双拼辅助码")).toBeTruthy();
   expect(screen.getByLabelText("在候选栏中显示全拼辅助码")).toBeTruthy();
   expect(screen.queryByLabelText("在候选窗口中显示双拼辅助码")).toBeNull();
 });
 
-// The Apple keyboard extension has no helper-code input at all.
-test("iOS keeps the helper-code page hidden", async () => {
-  renderSettings("ios");
+// The iOS keyboard extension marks a helper code with Shift like Android, and its host says so; the page follows that capability.
+test("iOS reaches the helper-code settings when its keyboard marks helper codes", async () => {
+  render(
+    <SettingsPage
+      client={{
+        load: vi.fn().mockResolvedValue(initial),
+        save: vi.fn(),
+        host: testHost({ platform: "ios", helpcode_shift_entry: true }),
+        home: { openKeyboard: vi.fn(), openSystemKeyboardSettings: vi.fn() },
+      }}
+    />,
+  );
 
-  expect(await moreSettingsTitles()).not.toContain("辅助码");
+  await openHelpcode();
+  expect(screen.getByText(/按 Shift\s*再输入的字母作为辅助码/)).toBeTruthy();
+  expect(screen.getByLabelText("在候选栏中显示全拼辅助码")).toBeTruthy();
 });
 
-test("the desktop sidebar keeps the helper-code page and its window wording", async () => {
+// A host that does not report the Shift helper-code gesture keeps the group hidden.
+test("an iOS host without the capability keeps the helper-code settings hidden", async () => {
+  renderSettings("ios");
+
+  await openMoreSetting("输入");
+  expect(screen.queryByRole("region", { name: "辅助码" })).toBeNull();
+});
+
+test("the desktop input page keeps the helper-code settings and their window wording", async () => {
   renderSettings("windows");
 
-  await screen.findByRole("button", { name: "保存设置" });
-  fireEvent.click(screen.getByRole("button", { name: "辅助码" }));
+  await settingsFormReady();
+  fireEvent.click(screen.getByRole("button", { name: "输入" }));
+  expect(screen.getByRole("region", { name: "辅助码" })).toBeTruthy();
   expect(screen.getByLabelText("在候选窗口中显示双拼辅助码")).toBeTruthy();
   expect(screen.getByLabelText("在候选窗口中显示全拼辅助码")).toBeTruthy();
 });
@@ -122,24 +143,22 @@ test("the desktop sidebar keeps the helper-code page and its window wording", as
 // ported, and the session calls it on every shifted key during a quanpin or shuangpin
 // composition. The page was hidden there anyway, which left a shipping feature with no way to
 // pick a schema or turn it off — the state this file's Android tests exist to prevent.
-test("HarmonyOS reaches the helper-code page from the 键盘 tab", async () => {
+test("HarmonyOS reaches the helper-code settings from the 键盘 tab", async () => {
   renderSettings("harmony");
 
-  expect(await moreSettingsTitles()).toContain("辅助码");
-
-  await openMoreSetting("辅助码");
-  expect(screen.getByRole("heading", { name: "辅助码" })).toBeTruthy();
+  await openHelpcode();
+  expect(screen.getByRole("heading", { name: "输入" })).toBeTruthy();
 });
 
 test("HarmonyOS saves a helper-code schema into shared preferences", async () => {
   const save = renderSettings("harmony");
 
-  await openMoreSetting("辅助码");
+  await openHelpcode();
   const schema = screen.getByRole("combobox", { name: /全拼辅助码方案/ }) as HTMLSelectElement;
   expect(schema.value).toBe("ziranma");
   fireEvent.change(schema, { target: { value: "xiaohe" } });
 
-  fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+  saveSettingsNow();
   await waitFor(() =>
     expect(save).toHaveBeenCalledWith(
       7,
@@ -159,12 +178,12 @@ test("the Shift explanation follows the capability, not the platform name", asyn
       client={{
         load: vi.fn().mockResolvedValue(initial),
         save: vi.fn(),
-        host: { platform: "harmony", helpcode_shift_entry: true } as never,
+        host: testHost({ platform: "harmony", helpcode_shift_entry: true }),
         home: { openKeyboard: vi.fn(), openSystemKeyboardSettings: vi.fn() },
       }}
     />,
   );
-  await openMoreSetting("辅助码");
+  await openHelpcode();
   expect(screen.getByText(/按 Shift\s*再输入的字母作为辅助码/)).toBeTruthy();
 });
 
@@ -174,11 +193,12 @@ test("a host that appends helper codes is not told to hold Shift", async () => {
       client={{
         load: vi.fn().mockResolvedValue(initial),
         save: vi.fn(),
-        host: { platform: "windows", helpcode_shift_entry: false } as never,
+        host: testHost({ platform: "windows", helpcode_shift_entry: false }),
       }}
     />,
   );
-  await screen.findByRole("button", { name: "保存设置" });
-  fireEvent.click(screen.getByRole("button", { name: "辅助码" }));
+  await settingsFormReady();
+  fireEvent.click(screen.getByRole("button", { name: "输入" }));
+  expect(screen.getByRole("region", { name: "辅助码" })).toBeTruthy();
   expect(screen.queryByText(/按 Shift\s*再输入的字母作为辅助码/)).toBeNull();
 });

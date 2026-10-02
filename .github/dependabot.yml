@@ -1,0 +1,59 @@
+# Every third-party action in .github/workflows is pinned to a commit SHA, which nobody updates by hand. Dependabot keeps those pins current; Cargo and pnpm are grouped into one pull request per ecosystem so a monthly sweep stays reviewable, and major versions are left out of the group so each one arrives on its own.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    labels: [dependencies, github_actions]
+    groups:
+      actions:
+        patterns: ['*']
+
+  - package-ecosystem: cargo
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: build
+    labels: [dependencies]
+    groups:
+      # Families whose members share types across crate boundaries, so upgrading one alone does not compile: windows 0.61 exposes windows-numerics 0.2 types, and hmac 0.13 needs a sha2 and md-5 on the same digest release. Separate pull requests for these (#535, #536) could never pass. They come together, whatever the update type, and ahead of cargo-minor because a dependency joins the first group it matches.
+      rustcrypto:
+        patterns: [digest, hmac, sha2, md-5]
+      windows-rs:
+        patterns: ['windows', 'windows-*']
+      cargo-minor:
+        update-types: [minor, patch]
+
+  # platforms/android/gradle-app is the hand-maintained Android project; apps/desktop/src-tauri/gen/android is Tauri's generated one and is regenerated rather than bumped, so it stays out.
+  - package-ecosystem: gradle
+    directory: /platforms/android/gradle-app
+    target-branch: develop
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: build
+    labels: [dependencies, platform/android]
+    groups:
+      gradle-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: build
+    labels: [dependencies]
+    groups:
+      pnpm-minor:
+        update-types: [minor, patch]

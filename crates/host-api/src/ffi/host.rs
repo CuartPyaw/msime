@@ -3,10 +3,38 @@
 //! Part of the C ABI; see the parent module for what these shims guarantee.
 
 use crate::*;
+use msime_client_core::is_bounded_text;
+
+/// Candidate and commit text normally stays far below this bound. Keep the direct conversion ABI
+/// bounded as well so a malformed native length cannot make it scan an unbounded buffer or allocate
+/// an arbitrarily large converted string.
+const MAX_TRADITIONAL_CONVERSION_BYTES: usize = 1 << 20;
 
 #[no_mangle]
 pub extern "C" fn msime_client_abi_version() -> u32 {
-    2
+    3
+}
+
+/// Convert Simplified Chinese text to Traditional Chinese with the shared OpenCC `s2t` tables.
+///
+/// Returns the converted text itself rather than the standard JSON response: hosts call this for every candidate on a page and every commit, and wrapping each string in a document only to parse it back out would put a JSON round trip on the typing path. Returns null for a null pointer, invalid UTF-8 or an interior NUL, so the caller keeps its own text.
+/// # Safety
+/// `text` points to `length` readable bytes. The returned string must be released with `msime_client_string_free`.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_simplified_to_traditional(
+    text: *const u8,
+    length: usize,
+) -> *mut c_char {
+    if text.is_null() || length > MAX_TRADITIONAL_CONVERSION_BYTES {
+        return std::ptr::null_mut();
+    }
+    // SAFETY: guaranteed by the documented caller contract.
+    let bytes = unsafe { std::slice::from_raw_parts(text, length) };
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return std::ptr::null_mut();
+    };
+    let converted = msime_client_core::chinese_conversion::simplified_to_traditional(text);
+    CString::new(converted).map_or(std::ptr::null_mut(), CString::into_raw)
 }
 
 /// Resolve display font families using the same adapter as the shared preview.
@@ -116,6 +144,55 @@ pub unsafe extern "C" fn msime_client_prepare_host(
     })
 }
 
+/// Re-prepare a published runtime options file whose working dictionaries belong to an older resource generation, as after a package upgrade, and record the language dictionaries installed beside the resources (see [`refresh_host_options_with_language_dictionaries`]). Returns whether the file was rewritten. Only the input method host calls this, before creating any session from that file.
+/// # Safety
+/// `path` points to `length` readable UTF-8 bytes naming an absolute file. Null is rejected.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_refresh_host(path: *const u8, length: usize) -> *mut c_char {
+    response(|| {
+        if path.is_null() || length > 4096 {
+            return Err("invalid options path buffer".into());
+        }
+        // SAFETY: guaranteed by the caller contract.
+        let bytes = unsafe { std::slice::from_raw_parts(path, length) };
+        let path = std::path::Path::new(
+            std::str::from_utf8(bytes).map_err(|_| "invalid options path encoding")?,
+        );
+        if !path.is_absolute() {
+            return Err("options path must be absolute".into());
+        }
+        refresh_host_options_with_language_dictionaries(path)
+            .map(Value::Bool)
+            .map_err(|e| e.to_string())
+    })
+}
+
+/// Register the device's anonymous MSIME account under `directory` (`anonymous-account.json` and `anonymous-session.json`) unless a session is already there. Blocks on the network for up to about a minute: call from a background thread. Value is true once a session exists.
+/// # Safety
+/// `directory` points to `length` readable UTF-8 bytes naming an absolute directory. Null is rejected.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_ensure_anonymous_account(
+    directory: *const u8,
+    length: usize,
+) -> *mut c_char {
+    response(|| {
+        if directory.is_null() || length > 4096 {
+            return Err("invalid account directory buffer".into());
+        }
+        // SAFETY: guaranteed by the caller contract.
+        let bytes = unsafe { std::slice::from_raw_parts(directory, length) };
+        let directory = std::path::Path::new(
+            std::str::from_utf8(bytes).map_err(|_| "invalid account directory encoding")?,
+        );
+        if !directory.is_absolute() {
+            return Err("account directory must be absolute".into());
+        }
+        msime_client_core::account::ensure_anonymous_account(directory)
+            .map(|()| Value::Bool(true))
+            .map_err(|e| e.to_string())
+    })
+}
+
 /// The shared preference defaults, as the document a host would have to produce.
 ///
 /// A host that patches one key into a nested preference object needs the rest of
@@ -131,23 +208,157 @@ pub extern "C" fn msime_client_default_preferences() -> *mut c_char {
     })
 }
 
-/// 内置候选皮肤的 id、显示标题，以及新建偏好所用的默认皮肤。
+/// The transcription provider and the optional rewrite, resolved from a preferences directory.
 ///
-/// 每个宿主都要把内置皮肤列出来、判断某个 id 是不是内置的、并给它一个名字，于是每个
-/// 宿主原先各写了一份表。这类副本已经漂过：Linux 的 IBus 与 Fcitx5 两个并列宿主对同
-/// 一个 `graphite` 给出的名字不同。和上面的默认偏好同理，这份契约在共享层发布一次，
-/// 宿主只消费。顺序即宿主的展示顺序和循环顺序。
+/// The Android keyboard has its own voice entry and never goes through the desktop shell, so the
+/// resolution it needs is here rather than in that shell. Contains credentials: never log the
+/// response; release with `msime_client_string_free`.
+/// # Safety
+/// `directory` points to `length` readable UTF-8 bytes naming an absolute path. Null is rejected.
 #[no_mangle]
-pub extern "C" fn msime_client_builtin_skins() -> *mut c_char {
+pub unsafe extern "C" fn msime_client_mobile_voice_configuration(
+    directory: *const u8,
+    length: usize,
+) -> *mut c_char {
     response(|| {
-        let skins: Vec<_> = msime_client_core::skin::catalog::BUILTIN_SKINS
-            .iter()
-            .map(|(id, title)| serde_json::json!({ "id": id, "title": title }))
-            .collect();
+        if directory.is_null() || length == 0 || length > 16_384 {
+            return Err("invalid preferences directory".into());
+        }
+        // SAFETY: guaranteed by the documented caller contract; size checked above.
+        let bytes = unsafe { std::slice::from_raw_parts(directory, length) };
+        let directory = std::str::from_utf8(bytes).map_err(|_| "invalid preferences directory")?;
+        if !std::path::Path::new(directory).is_absolute() {
+            return Err("invalid preferences directory".into());
+        }
+        let store = msime_client_core::preferences::PreferencesStore::new(directory);
+        let snapshot = store.load().map_err(|_| "preferences unavailable")?;
+        let provider = msime_client_core::voice::provider::mobile_voice_provider_configuration(
+            &snapshot.preferences,
+        )
+        .map(|value| {
+            json!({
+                "provider": value.provider,
+                "endpoint": value.endpoint,
+                "model": value.model,
+                "token": value.token,
+                "headers": value
+                    .headers
+                    .iter()
+                    .map(|header| json!({"name": header.name, "value": header.value}))
+                    .collect::<Vec<_>>(),
+                "enableItn": value.enable_itn,
+                "enablePunctuation": value.enable_punctuation,
+                "enableDdc": value.enable_ddc,
+                "boostingTableId": value.boosting_table_id,
+                "modelPath": value.model_path,
+            })
+        });
+        let polish = msime_client_core::voice::provider::mobile_voice_polish_configuration(
+            &snapshot.preferences,
+        )
+        .map(|value| {
+            json!({
+                "endpoint": value.endpoint,
+                "model": value.model,
+                "token": value.token,
+                "promptId": value.prompt_id,
+                "promptCustom1": value.prompt_custom_1,
+                "promptCustom2": value.prompt_custom_2,
+                "promptCustom3": value.prompt_custom_3,
+            })
+        });
+        Ok(json!({ "provider": provider, "polish": polish }))
+    })
+}
+
+/// The global theme picker: every theme id in picker order with its title and palettes, and the default id.
+///
+/// `system` and `custom` carry no palettes here: `system` is the host's native tokens, and `custom` is only known once resolved against the user's `custom_theme`. Hosts draw the picker from this and keep no copy of the ids, titles or colours.
+#[no_mangle]
+pub extern "C" fn msime_client_theme_catalog() -> *mut c_char {
+    response(|| {
         Ok(serde_json::json!({
-            "skins": skins,
-            "default": msime_client_core::skin::catalog::DEFAULT_SKIN,
+            "themes": msime_client_core::skin::theme::catalog(),
+            "default": msime_client_core::skin::theme::GlobalTheme::default(),
         }))
+    })
+}
+
+/// Largest resolve request. A custom keyboard design may carry a photo of up to 682,668 base64 bytes, and the rest of the request is small.
+const MAX_THEME_REQUEST_BYTES: usize = 1 << 20;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResolveThemeRequest {
+    global_theme: msime_client_core::skin::theme::GlobalTheme,
+    #[serde(default)]
+    custom_theme: msime_client_core::preferences::CustomTheme,
+    dark: bool,
+    layout: msime_client_core::preferences::CandidateLayout,
+    skins_directory: Option<String>,
+    package: Option<serde_json::Value>,
+}
+
+/// Resolve the colours a host draws for a global theme.
+///
+/// The request carries the two preference fields as the host read them, so this takes no preferences directory and does no preference I/O: `global_theme` (one of the seven ids; any other id, a retired skin id included, fails the request as `invalid theme request`) and `custom_theme` (optional, validated as strictly as the preference itself). `dark` is the host's effective mode for the surface being drawn, and `layout` (`horizontal` or `vertical`) its candidate layout: a package is drawn only in a layout and a mode its manifest declares, so no host keeps a gate of its own. For `custom` with a `custom_theme.candidate_skin`, the host names where that package comes from with at most one of `skins_directory` (an absolute skin root; the package is loaded and validated as `msime_client_skin_package` does; every host that scans the root, which is every host but Linux) or `package` (one entry of the published `candidate_skin_catalog`, which only the Linux hosts read). A `package` that is not such an entry, a `SkinSummary` from `msime_client_skin_catalog` included, fails the call: that is a host bug, and reading it anyway would drop its declared modes and selection bar without a word. A package that is missing from the root, invalid on disk or not the one `candidate_skin` names is left out rather than failing the call: the theme still resolves, over its base.
+/// # Safety
+/// `request` points to `length` readable UTF-8 JSON bytes. Null is rejected.
+/// The returned response must be released with `msime_client_string_free`.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_resolve_theme(
+    request: *const u8,
+    length: usize,
+) -> *mut c_char {
+    response(|| {
+        if request.is_null() || length == 0 || length > MAX_THEME_REQUEST_BYTES {
+            return Err("invalid theme request".into());
+        }
+        // SAFETY: guaranteed by the documented caller contract; size checked above.
+        let bytes = unsafe { std::slice::from_raw_parts(request, length) };
+        let request: ResolveThemeRequest =
+            serde_json::from_slice(bytes).map_err(|_| "invalid theme request")?;
+        request
+            .custom_theme
+            .validate()
+            .map_err(|error| error.to_string())?;
+        if request.skins_directory.is_some() && request.package.is_some() {
+            return Err("theme request names both a skins directory and a package".into());
+        }
+        if request
+            .skins_directory
+            .as_deref()
+            .is_some_and(|directory| !Path::new(directory).is_absolute())
+        {
+            return Err("skin directory must be absolute".into());
+        }
+        let theme = request.global_theme;
+        let wanted = request
+            .custom_theme
+            .candidate_skin
+            .as_deref()
+            .filter(|_| theme == msime_client_core::skin::theme::GlobalTheme::Custom);
+        let entry = request
+            .package
+            .map(msime_client_core::skin::theme::ThemePackage::from_host_catalog_entry)
+            .transpose()?;
+        let package = match (wanted, request.skins_directory, entry) {
+            (Some(id), Some(directory), _) => {
+                msime_client_core::skin::catalog::load_package(&directory, id)
+                    .ok()
+                    .map(|summary| msime_client_core::skin::theme::ThemePackage::from(&summary))
+            }
+            (Some(_), None, entry) => entry,
+            _ => None,
+        };
+        let resolved = msime_client_core::skin::theme::resolve(
+            theme,
+            &request.custom_theme,
+            request.dark,
+            request.layout,
+            package.as_ref(),
+        );
+        serde_json::to_value(resolved).map_err(|error| error.to_string())
     })
 }
 
@@ -175,12 +386,44 @@ pub unsafe extern "C" fn msime_client_shuangpin_key_hints(
         // SAFETY: guaranteed by the documented caller contract; size checked above.
         let bytes = unsafe { std::slice::from_raw_parts(profile, length) };
         let name = std::str::from_utf8(bytes).map_err(|_| "invalid shuangpin profile encoding")?;
-        let hints: serde_json::Map<String, serde_json::Value> =
-            msime_engine_bridge::shuangpin_key_hints(name)
+        let entries = msime_engine::host::shuangpin_key_hints(name);
+        let mut hints = serde_json::Map::with_capacity(entries.len());
+        hints.extend(
+            entries
                 .into_iter()
-                .map(|entry| (entry.key, serde_json::Value::String(entry.hint)))
-                .collect();
+                .map(|entry| (entry.key, serde_json::Value::String(entry.hint))),
+        );
         Ok(serde_json::Value::Object(hints))
+    })
+}
+
+/// The double-pinyin codes of the whole zero-initial syllables for one profile, read out of the Engine's own profile tables, as a JSON object such as `{"a":"aa","ang":"ah",...}`.
+///
+/// A keymap panel shows these next to the key face, and like the key hints they depend only on the profile, so this takes no handle. An unknown name yields an empty object.
+/// # Safety
+/// `profile` points to `length` readable UTF-8 bytes. Null is rejected.
+/// The returned response must be released with `msime_client_string_free`.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_shuangpin_zero_initials(
+    profile: *const u8,
+    length: usize,
+) -> *mut c_char {
+    response(|| {
+        if profile.is_null() || length > 64 {
+            return Err("invalid shuangpin profile buffer".into());
+        }
+        // SAFETY: guaranteed by the documented caller contract; size checked above.
+        let bytes = unsafe { std::slice::from_raw_parts(profile, length) };
+        let name = std::str::from_utf8(bytes).map_err(|_| "invalid shuangpin profile encoding")?;
+        let entries = msime_engine::host::shuangpin_zero_initials(name);
+        let mut codes = serde_json::Map::with_capacity(entries.len());
+        codes.extend(entries.into_iter().map(|(syllable, code)| {
+            (
+                syllable.to_string(),
+                serde_json::Value::String(code.to_string()),
+            )
+        }));
+        Ok(serde_json::Value::Object(codes))
     })
 }
 
@@ -198,11 +441,11 @@ pub unsafe extern "C" fn msime_client_load_preferences(
         }
         // SAFETY: guaranteed by the documented caller contract.
         let bytes = unsafe { std::slice::from_raw_parts(directory, length) };
-        let directory =
-            std::str::from_utf8(bytes).map_err(|_| "invalid preferences directory encoding")?;
-        if !std::path::Path::new(directory).is_absolute() {
-            return Err("preferences directory must be absolute".into());
-        }
+        let directory = super::parse_absolute_path(
+            bytes,
+            "invalid preferences directory encoding",
+            "preferences directory must be absolute",
+        )?;
         let snapshot = PreferencesStore::new(directory)
             .load()
             .map_err(|e| e.to_string())?;
@@ -237,6 +480,9 @@ pub unsafe extern "C" fn msime_client_typing_statistics(
             /// honest result, since this layer cannot resolve the host's timezone itself.
             #[serde(default)]
             hour: Option<u8>,
+            /// Set by a host that must keep effect sounds quiet right now (Windows while a full-screen application is in front): the commit is still counted and the milestone still reported, but no jingle plays.
+            #[serde(default)]
+            quiet: bool,
         },
         SetEnabled {
             enabled: bool,
@@ -246,6 +492,11 @@ pub unsafe extern "C" fn msime_client_typing_statistics(
             /// The caller's local day, for the same reason `record` takes one: only the host
             /// knows which day the window is counted back from.
             day: String,
+        },
+        /// Key presses a host batched in memory, as `{"KeyA": 3, ...}` press counts for the local day they happened on. Ids outside `KEY_IDS` or zero counts reject the whole batch.
+        RecordKeys {
+            day: String,
+            keys: std::collections::BTreeMap<String, u64>,
         },
         Reset,
     }
@@ -273,9 +524,29 @@ pub unsafe extern "C" fn msime_client_typing_statistics(
                 source,
                 day,
                 hour,
+                quiet,
             } => {
+                // The count is read first only when a session asked for achievement sounds, so recording stays one read and one write for everyone else.
+                let before = key_sound::achievements_armed()
+                    .then(|| store.load().ok().map(|statistics| statistics.total))
+                    .flatten();
                 let recorded = store
                     .record(&text, source, &day, hour)
+                    .map_err(|error| error.to_string())?;
+                let milestone = before.and_then(|before| {
+                    msime_client_core::plugins::achievement_milestone(
+                        before,
+                        before.saturating_add(recorded),
+                    )
+                });
+                if milestone.is_some() && !quiet {
+                    key_sound::achievement();
+                }
+                Ok(json!({"recorded": recorded, "milestone": milestone}))
+            }
+            StatisticsAction::RecordKeys { day, keys } => {
+                let recorded = store
+                    .record_keys(&day, &keys)
                     .map_err(|error| error.to_string())?;
                 Ok(json!({"recorded": recorded}))
             }
@@ -355,6 +626,62 @@ pub unsafe extern "C" fn msime_client_skin_catalog(
         }
         serde_json::to_value(msime_client_core::skin::catalog::scan(directory))
             .map_err(|e| e.to_string())
+    })
+}
+
+/// Scan the Engine resource directory for optional custom helper-code tables. Native settings
+/// presenters use the same metadata as the shared settings page; the Engine remains responsible
+/// for parsing and applying the table itself. An absent `helpcodes/custom` directory is an empty
+/// catalog rather than an error.
+/// # Safety
+/// `resources` points to `length` readable UTF-8 bytes naming an absolute resource directory.
+/// Null is rejected. The returned JSON must be released with `msime_client_string_free`.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_helpcode_schemas(
+    resources: *const u8,
+    length: usize,
+) -> *mut c_char {
+    response(|| {
+        if resources.is_null() || length > 16_384 {
+            return Err("invalid helpcode resource buffer".into());
+        }
+        // SAFETY: guaranteed by the documented caller contract; size checked above.
+        let bytes = unsafe { std::slice::from_raw_parts(resources, length) };
+        let resources =
+            std::str::from_utf8(bytes).map_err(|_| "invalid helpcode resource encoding")?;
+        let schemas = crate::list_custom_helpcode_schemas(resources)?;
+        serde_json::to_value(schemas).map_err(|error| error.to_string())
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct SkinPackageRequest {
+    directory: String,
+    id: String,
+}
+
+/// Validate one installed skin package with the loader the settings page uses, so a native presenter resolving the selected skin accepts exactly the manifests the catalog lists (full TOML 1.0, the Windows toml++ baseline). The value is one camelCase entry of `msime_client_skin_catalog`'s `packages`; a package that fails validation answers `{ok:false,error}` with the loader's reason.
+/// # Safety
+/// `request` points to `length` readable UTF-8 JSON bytes. Null is rejected.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_skin_package(
+    request: *const u8,
+    length: usize,
+) -> *mut c_char {
+    response(|| {
+        if request.is_null() || length == 0 || length > 65_536 {
+            return Err("invalid skin package request".into());
+        }
+        // SAFETY: guaranteed by the documented caller contract.
+        let bytes = unsafe { std::slice::from_raw_parts(request, length) };
+        let request: SkinPackageRequest =
+            serde_json::from_slice(bytes).map_err(|_| "invalid skin package request")?;
+        if !Path::new(&request.directory).is_absolute() {
+            return Err("skin directory must be absolute".into());
+        }
+        let package =
+            msime_client_core::skin::catalog::load_package(&request.directory, &request.id)?;
+        serde_json::to_value(package).map_err(|e| e.to_string())
     })
 }
 
@@ -455,6 +782,41 @@ pub unsafe extern "C" fn msime_client_skin_toolbar_stylesheet(
         )
         .map_err(|_| "skin stylesheet unavailable")?;
         serde_json::to_value(stylesheet).map_err(|_| "skin stylesheet response failed".into())
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct SkinImportRequest {
+    source: String,
+    directory: String,
+}
+
+/// Copy a skin folder the user picked into the host's skin root, for a host whose root no file manager reaches (the iOS App Group). Returns `{id}`, the folder name the catalog lists it under; a failure's message is the import's code (`skin_name`, `skin_manifest` or `storage`) so the host can explain it.
+/// # Safety
+/// `request` points to `length` readable UTF-8 JSON bytes. Null is rejected.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_skin_import(
+    request: *const u8,
+    length: usize,
+) -> *mut c_char {
+    response(|| {
+        if request.is_null() || length == 0 || length > 65_536 {
+            return Err("invalid skin import request".into());
+        }
+        // SAFETY: guaranteed by the documented caller contract.
+        let bytes = unsafe { std::slice::from_raw_parts(request, length) };
+        let request: SkinImportRequest =
+            serde_json::from_slice(bytes).map_err(|_| "invalid skin import request")?;
+        if !Path::new(&request.source).is_absolute() || !Path::new(&request.directory).is_absolute()
+        {
+            return Err("skin paths must be absolute".into());
+        }
+        let id = msime_client_core::skin::folder_import::import(
+            Path::new(&request.source),
+            Path::new(&request.directory),
+        )
+        .map_err(str::to_owned)?;
+        Ok(json!({ "id": id }))
     })
 }
 
@@ -799,10 +1161,9 @@ pub unsafe extern "C" fn msime_client_ai_skin_plan(
                 // refuses is one the service would refuse after four requests.
                 if prompt.is_empty()
                     || prompt.chars().count() > 500
-                    || prompt.chars().any(char::is_control)
+                    || msime_client_core::has_disallowed_control_with_options(&prompt, false)
                     || model.is_empty()
-                    || model.len() > 200
-                    || model.chars().any(char::is_control)
+                    || !is_bounded_text(&model, 200)
                 {
                     return Err("ai_skin_invalid".into());
                 }
@@ -881,21 +1242,17 @@ pub unsafe extern "C" fn msime_client_dictionary_manifest(
         // Bounded before parsing: this is a packaged file, and one that has grown to megabytes is
         // not a manifest whatever it parses as.
         let file = path.join("dictionary-manifest.json");
-        let text = std::fs::read_to_string(&file)
-            .ok()
-            .filter(|text| text.len() <= 1024 * 1024)
-            .ok_or("dictionary_manifest_unavailable")?;
+        let bytes = crate::bounded_file::read(
+            std::fs::File::open(&file).map_err(|_| "dictionary_manifest_unavailable")?,
+            1024 * 1024,
+        )
+        .map_err(|_| "dictionary_manifest_unavailable")?;
+        let text = std::str::from_utf8(&bytes).map_err(|_| "dictionary_manifest_unavailable")?;
         let manifest: Manifest =
-            serde_json::from_str(&text).map_err(|_| "dictionary_manifest_unavailable")?;
+            serde_json::from_str(text).map_err(|_| "dictionary_manifest_unavailable")?;
         if manifest.profile.is_empty()
-            || manifest.profile.len() > 64
-            || manifest.profile.chars().any(char::is_control)
-            || !manifest
-                .source
-                .commit
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit())
-            || manifest.source.commit.len() != 40
+            || !is_bounded_text(&manifest.profile, 64)
+            || !msime_client_core::is_ascii_hex(&manifest.source.commit, 40)
         {
             return Err("dictionary_manifest_unavailable".into());
         }
@@ -937,34 +1294,19 @@ pub unsafe extern "C" fn msime_client_load_clipboard_history(
         history
             .load()
             .map_err(|_| "clipboard history unavailable")?;
-        let entries: Vec<_> = history
-            .entries()
-            .iter()
-            .map(|entry| entry.text.as_str())
-            .collect();
-        // Keep the existing ABI shape until native hosts opt into the
-        // structured history bridge in their platform-specific migrations.
+        let mut entries = Vec::with_capacity(history.entries().len());
+        entries.extend(history.entries().iter().map(|entry| entry.text.as_str()));
+        // This ABI returns plain entry text; the structured history is not exposed through it.
         Ok(serde_json::json!({"enabled": true, "entries": entries}))
     })
 }
 
 const MAX_MOBILE_CLIPBOARD_REQUEST_BYTES: usize = 524_288;
-const MAX_APPLE_LEGACY_CLIPBOARD_BYTES: u64 = 4_000_000;
-const APPLE_REFERENCE_DATE_UNIX_SECONDS: f64 = 978_307_200.0;
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MobileClipboardRequest {
     directory: String,
-    #[serde(default)]
-    legacy: Option<MobileClipboardLegacy>,
     action: MobileClipboardAction,
-}
-
-#[derive(Clone, Copy, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum MobileClipboardLegacy {
-    HarmonyState,
 }
 
 #[derive(Deserialize)]
@@ -977,235 +1319,7 @@ enum MobileClipboardAction {
     Clear,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct AppleLegacyClipboardEntry {
-    id: String,
-    text: String,
-    date: f64,
-    pinned: bool,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct HarmonyLegacyClipboardEntry {
-    text: String,
-    at: f64,
-    pinned: bool,
-}
-
-fn valid_uuid_string(value: &str) -> bool {
-    value.len() == 36
-        && value.bytes().enumerate().all(|(index, byte)| {
-            if matches!(index, 8 | 13 | 18 | 23) {
-                byte == b'-'
-            } else {
-                byte.is_ascii_hexdigit()
-            }
-        })
-}
-
-fn apple_date_to_unix_ms(value: f64) -> Option<u64> {
-    let milliseconds = (value + APPLE_REFERENCE_DATE_UNIX_SECONDS) * 1000.0;
-    (milliseconds.is_finite() && milliseconds >= 0.0 && milliseconds <= u64::MAX as f64)
-        .then(|| milliseconds.round() as u64)
-}
-
-fn apple_clipboard_migration_lock(root: &std::path::Path) -> Result<std::fs::File, String> {
-    std::fs::create_dir_all(root).map_err(|_| "clipboard migration unavailable")?;
-    let lock_path = root.join(".msime-clipboard-history-migration.lock");
-    let mut options = std::fs::OpenOptions::new();
-    options.create(true).truncate(false).read(true).write(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let lock = options
-        .open(lock_path)
-        .map_err(|_| "clipboard migration unavailable")?;
-    lock.lock().map_err(|_| "clipboard migration unavailable")?;
-    Ok(lock)
-}
-
-/// Migrate the fixed legacy Apple history into the shared mobile state once.
-/// The source is removed only after the destination has been persisted.
-pub fn migrate_apple_clipboard_history(root: &std::path::Path) -> Result<bool, String> {
-    use std::io::Read;
-
-    let _lock = apple_clipboard_migration_lock(root)?;
-
-    let shared_path = root.join("MSIME").join("clipboard_history.json");
-    let mut shared = msime_client_core::clipboard::ClipboardHistoryStore::open(&shared_path);
-    shared
-        .load()
-        .map_err(|_| "shared clipboard history unavailable")?;
-    if !shared.entries().is_empty() {
-        return Ok(false);
-    }
-
-    let legacy_path = root.join("Clipboard").join("history.json");
-    let metadata = match std::fs::symlink_metadata(&legacy_path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(_) => return Err("legacy clipboard history unavailable".into()),
-    };
-    if !metadata.file_type().is_file() || metadata.len() > MAX_APPLE_LEGACY_CLIPBOARD_BYTES {
-        return Err("invalid legacy clipboard history".into());
-    }
-    let mut bytes = Vec::new();
-    std::fs::File::open(&legacy_path)
-        .and_then(|file| {
-            file.take(MAX_APPLE_LEGACY_CLIPBOARD_BYTES + 1)
-                .read_to_end(&mut bytes)
-        })
-        .map_err(|_| "legacy clipboard history unavailable")?;
-    if bytes.len() as u64 > MAX_APPLE_LEGACY_CLIPBOARD_BYTES {
-        return Err("invalid legacy clipboard history".into());
-    }
-    let legacy: Vec<AppleLegacyClipboardEntry> =
-        serde_json::from_slice(&bytes).map_err(|_| "invalid legacy clipboard history")?;
-    if legacy.len() > 50 {
-        return Err("invalid legacy clipboard history".into());
-    }
-    let mut ids = std::collections::HashSet::new();
-    let mut texts = std::collections::HashSet::new();
-    let mut entries = Vec::with_capacity(legacy.len());
-    for entry in legacy {
-        let Some(timestamp_ms) = apple_date_to_unix_ms(entry.date) else {
-            return Err("invalid legacy clipboard history".into());
-        };
-        if !valid_uuid_string(&entry.id)
-            || !ids.insert(entry.id)
-            || !texts.insert(entry.text.clone())
-            || !msime_client_core::clipboard::mobile_text_is_valid(&entry.text)
-        {
-            return Err("invalid legacy clipboard history".into());
-        }
-        entries.push(msime_client_core::clipboard::ClipboardHistoryEntry {
-            text: entry.text,
-            timestamp_ms,
-            pinned: entry.pinned,
-        });
-    }
-    let imported = shared
-        .import_if_empty(entries)
-        .map_err(|_| "clipboard migration failed")?;
-    if imported {
-        std::fs::remove_file(&legacy_path).map_err(|_| "clipboard migration cleanup failed")?;
-    }
-    Ok(imported)
-}
-
-/// Migrate the first Harmony host's local structured history into the shared mobile store.
-/// The caller opts into this path explicitly, so an unrelated `state` directory in an Apple App
-/// Group can never be mistaken for Harmony data.
-fn migrate_harmony_clipboard_history(root: &std::path::Path) -> Result<bool, String> {
-    use std::io::Read;
-
-    let _lock = apple_clipboard_migration_lock(root)?;
-    let shared_path = root.join("MSIME").join("clipboard_history.json");
-    let mut shared = msime_client_core::clipboard::ClipboardHistoryStore::open(&shared_path);
-    shared
-        .load()
-        .map_err(|_| "shared clipboard history unavailable")?;
-    if !shared.entries().is_empty() {
-        return Ok(false);
-    }
-
-    let legacy_path = root.join("state").join("clipboard-history.json");
-    let metadata = match std::fs::symlink_metadata(&legacy_path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(_) => return Err("legacy clipboard history unavailable".into()),
-    };
-    if !metadata.file_type().is_file() || metadata.len() > MAX_APPLE_LEGACY_CLIPBOARD_BYTES {
-        return Err("invalid legacy clipboard history".into());
-    }
-    let mut bytes = Vec::new();
-    std::fs::File::open(&legacy_path)
-        .and_then(|file| {
-            file.take(MAX_APPLE_LEGACY_CLIPBOARD_BYTES + 1)
-                .read_to_end(&mut bytes)
-        })
-        .map_err(|_| "legacy clipboard history unavailable")?;
-    if bytes.len() as u64 > MAX_APPLE_LEGACY_CLIPBOARD_BYTES {
-        return Err("invalid legacy clipboard history".into());
-    }
-    let legacy: Vec<HarmonyLegacyClipboardEntry> =
-        serde_json::from_slice(&bytes).map_err(|_| "invalid legacy clipboard history")?;
-    if legacy.len() > 50 {
-        return Err("invalid legacy clipboard history".into());
-    }
-    let mut texts = std::collections::HashSet::new();
-    let mut entries = Vec::with_capacity(legacy.len());
-    for entry in legacy {
-        if !entry.at.is_finite()
-            || entry.at < 0.0
-            || entry.at > u64::MAX as f64
-            || !texts.insert(entry.text.clone())
-            || !msime_client_core::clipboard::mobile_text_is_valid(&entry.text)
-        {
-            return Err("invalid legacy clipboard history".into());
-        }
-        entries.push(msime_client_core::clipboard::ClipboardHistoryEntry {
-            text: entry.text,
-            timestamp_ms: entry.at.round() as u64,
-            pinned: entry.pinned,
-        });
-    }
-    let imported = shared
-        .import_if_empty(entries)
-        .map_err(|_| "clipboard migration failed")?;
-    if imported {
-        std::fs::remove_file(&legacy_path).map_err(|_| "clipboard migration cleanup failed")?;
-    }
-    Ok(imported)
-}
-
-/// Clear shared mobile history and its fixed Apple legacy source under one lock.
-fn clear_mobile_clipboard_history_with_legacy(
-    root: &std::path::Path,
-    legacy: Option<MobileClipboardLegacy>,
-) -> Result<(), String> {
-    let _lock = apple_clipboard_migration_lock(root)?;
-    let legacy_path = root.join("Clipboard").join("history.json");
-    match std::fs::symlink_metadata(&legacy_path) {
-        Ok(metadata) if metadata.file_type().is_file() => {
-            std::fs::remove_file(&legacy_path).map_err(|_| "mobile clipboard clear failed")?;
-        }
-        Ok(_) => return Err("mobile clipboard clear failed".into()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(_) => return Err("mobile clipboard clear failed".into()),
-    }
-    if matches!(legacy, Some(MobileClipboardLegacy::HarmonyState)) {
-        let harmony_path = root.join("state").join("clipboard-history.json");
-        match std::fs::symlink_metadata(&harmony_path) {
-            Ok(metadata) if metadata.file_type().is_file() => {
-                std::fs::remove_file(harmony_path).map_err(|_| "mobile clipboard clear failed")?;
-            }
-            Ok(_) => return Err("mobile clipboard clear failed".into()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return Err("mobile clipboard clear failed".into()),
-        }
-    }
-    msime_client_core::clipboard::ClipboardHistoryStore::open(
-        root.join("MSIME").join("clipboard_history.json"),
-    )
-    .clear()
-    .map_err(|_| "mobile clipboard clear failed".to_owned())
-}
-
-/// Clear the shared mobile and Apple legacy history for native callers that do not request a
-/// platform-specific migration path.
-pub fn clear_mobile_clipboard_history(root: &std::path::Path) -> Result<(), String> {
-    clear_mobile_clipboard_history_with_legacy(root, None)
-}
-
-/// Structured mobile clipboard history operations. The directory is the trusted
-/// App Group root; shared data lives below MSIME and the fixed Apple legacy path
-/// is migrated under a stable lock. This intentionally does not read or change
-/// the desktop automatic-capture preference: mobile access is host-permission gated.
+/// Structured mobile clipboard history operations. The directory is the trusted App Group root; shared data lives below MSIME. This intentionally does not read or change the desktop automatic-capture preference: mobile access is host-permission gated.
 /// # Safety
 /// `request` points to `length` readable JSON bytes. Null is rejected.
 #[no_mangle]
@@ -1225,14 +1339,6 @@ pub unsafe extern "C" fn msime_client_mobile_clipboard_history(
         if !root.is_absolute() || request.directory.len() > 16384 {
             return Err("invalid mobile clipboard directory".into());
         }
-        if matches!(&request.action, MobileClipboardAction::Clear) {
-            clear_mobile_clipboard_history_with_legacy(root, request.legacy)?;
-            return Ok(json!({"cleared": true, "migrated": false, "entries": []}));
-        }
-        let mut migrated = migrate_apple_clipboard_history(root)?;
-        if matches!(request.legacy, Some(MobileClipboardLegacy::HarmonyState)) {
-            migrated = migrate_harmony_clipboard_history(root)? || migrated;
-        }
         let path = root.join("MSIME").join("clipboard_history.json");
         let mut history = msime_client_core::clipboard::ClipboardHistoryStore::open(path);
         match request.action {
@@ -1240,13 +1346,11 @@ pub unsafe extern "C" fn msime_client_mobile_clipboard_history(
                 history
                     .load()
                     .map_err(|_| "mobile clipboard history unavailable")?;
-                Ok(json!({"entries": history.entries(), "migrated": migrated}))
+                Ok(json!({"entries": history.entries()}))
             }
             MobileClipboardAction::Capture { text } => {
                 if !msime_client_core::clipboard::mobile_text_is_valid(&text) {
-                    return Ok(
-                        json!({"captured": false, "reason": "invalid", "migrated": migrated}),
-                    );
+                    return Ok(json!({"captured": false, "reason": "invalid"}));
                 }
                 let captured = history
                     .push_mobile(text)
@@ -1254,7 +1358,6 @@ pub unsafe extern "C" fn msime_client_mobile_clipboard_history(
                 Ok(json!({
                     "captured": captured,
                     "reason": (!captured).then_some("full"),
-                    "migrated": migrated,
                     "entries": history.entries()
                 }))
             }
@@ -1269,7 +1372,6 @@ pub unsafe extern "C" fn msime_client_mobile_clipboard_history(
                     .map_err(|_| "mobile clipboard pin update failed")?;
                 Ok(json!({
                     "updated": updated,
-                    "migrated": migrated,
                     "entries": history.entries()
                 }))
             }
@@ -1284,11 +1386,15 @@ pub unsafe extern "C" fn msime_client_mobile_clipboard_history(
                     .map_err(|_| "mobile clipboard removal failed")?;
                 Ok(json!({
                     "removed": removed,
-                    "migrated": migrated,
                     "entries": history.entries()
                 }))
             }
-            MobileClipboardAction::Clear => unreachable!("clear handled before migration"),
+            MobileClipboardAction::Clear => {
+                history
+                    .clear()
+                    .map_err(|_| "mobile clipboard clear failed")?;
+                Ok(json!({"cleared": true, "entries": []}))
+            }
         }
     })
 }
@@ -1391,15 +1497,61 @@ pub unsafe extern "C" fn msime_client_try_load_preferences(
         }
         // SAFETY: guaranteed by the documented caller contract.
         let bytes = unsafe { std::slice::from_raw_parts(directory, length) };
-        let directory =
-            std::str::from_utf8(bytes).map_err(|_| "invalid preferences directory encoding")?;
-        if !std::path::Path::new(directory).is_absolute() {
-            return Err("preferences directory must be absolute".into());
-        }
+        let directory = super::parse_absolute_path(
+            bytes,
+            "invalid preferences directory encoding",
+            "preferences directory must be absolute",
+        )?;
         let snapshot = PreferencesStore::new(directory)
             .try_load()
             .map_err(|e| e.to_string())?;
         serde_json::to_value(snapshot).map_err(|e| e.to_string())
+    })
+}
+
+/// Repair a preferences document that is not well-formed JSON, backing it up first.
+/// See `PreferencesStore::recover_malformed`; a valid or missing document is left untouched.
+/// # Safety
+/// `directory` must point to `length` readable bytes. Null is rejected.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_recover_preferences(
+    directory: *const u8,
+    length: usize,
+) -> *mut c_char {
+    response(|| {
+        if directory.is_null() || length > 16384 {
+            return Err("invalid preferences directory buffer".into());
+        }
+        // SAFETY: guaranteed by the documented caller contract.
+        let bytes = unsafe { std::slice::from_raw_parts(directory, length) };
+        let directory = super::parse_absolute_path(
+            bytes,
+            "invalid preferences directory encoding",
+            "preferences directory must be absolute",
+        )?;
+        let outcome = PreferencesStore::new(directory)
+            .recover_malformed()
+            .map_err(|e| e.to_string())?;
+        Ok(match outcome {
+            msime_client_core::preferences::RecoveryOutcome::NotNeeded(snapshot) => json!({
+                "recovered": false,
+                "snapshot": snapshot,
+            }),
+            msime_client_core::preferences::RecoveryOutcome::Recovered {
+                snapshot,
+                backup_path,
+                salvaged,
+            } => json!({
+                "recovered": true,
+                "snapshot": snapshot,
+                "backup_path": backup_path.to_string_lossy(),
+                "backup_name": backup_path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                "salvaged": salvaged,
+            }),
+        })
     })
 }
 
@@ -1422,16 +1574,16 @@ pub unsafe extern "C" fn msime_client_save_preferences(
         if directory.is_null()
             || snapshot.is_null()
             || directory_length > 16384
-            || snapshot_length > 16384
+            || snapshot_length > PREFERENCES_DOCUMENT_LIMIT
         {
             return Err("invalid preferences save buffer".into());
         }
         let directory_bytes = unsafe { std::slice::from_raw_parts(directory, directory_length) };
-        let directory = std::str::from_utf8(directory_bytes)
-            .map_err(|_| "invalid preferences directory encoding")?;
-        if !std::path::Path::new(directory).is_absolute() {
-            return Err("preferences directory must be absolute".into());
-        }
+        let directory = super::parse_absolute_path(
+            directory_bytes,
+            "invalid preferences directory encoding",
+            "preferences directory must be absolute",
+        )?;
         let snapshot_bytes = unsafe { std::slice::from_raw_parts(snapshot, snapshot_length) };
         let snapshot: PreferencesSnapshot =
             serde_json::from_slice(snapshot_bytes).map_err(|_| "invalid preferences snapshot")?;
@@ -1448,5 +1600,72 @@ pub unsafe extern "C" fn msime_client_save_preferences(
                 .map_err(|e| e.to_string())?;
         }
         serde_json::to_value(saved).map_err(|e| e.to_string())
+    })
+}
+
+/// Read or update 背单词 wordbooks and review progress.
+///
+/// A shim: the request is parsed into the shared action type and the answer is the shared status,
+/// serialised. Every rule — what an action does, how the queue is built, what counts as today —
+/// belongs to `msime_client_core::vocabulary::session`, so this host and the Tauri command layer
+/// cannot drift from each other.
+/// # Safety
+/// `request` points to `length` readable JSON bytes. Null is rejected.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_vocabulary_review(
+    request: *const u8,
+    length: usize,
+) -> *mut c_char {
+    use msime_client_core::vocabulary::session;
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Request {
+        directory: String,
+        /// The verified resource directory, whose `wordbooks/` sibling holds the bundled books.
+        /// A host that stages none simply offers the imported ones.
+        resources: String,
+        /// The caller's local day. Required by every action, because the counts and the queue are
+        /// both per-day and this layer cannot resolve the host's timezone.
+        day: String,
+        action: session::ReviewAction,
+        /// 插件目录的绝对路径：其中的单词本插件作为 `pack-<插件 id>` 词书列出。不传的宿主（Android、iOS）只有内置和导入的书。
+        #[serde(default)]
+        plugins: Option<String>,
+    }
+
+    response(|| {
+        // Deliberately not the 65_536 the other entry points use. Those carry a setting or one
+        // clipboard row; this one carries an imported word list, and a five-thousand-word CET book
+        // is a few hundred kilobytes of text. Copying the smaller cap here would have made the
+        // import path reject every real file while looking like it was merely being careful.
+        if request.is_null() || length > session::MAX_IMPORT_BYTES {
+            return Err("invalid vocabulary review buffer".into());
+        }
+        // SAFETY: guaranteed by the documented caller contract.
+        let bytes = unsafe { std::slice::from_raw_parts(request, length) };
+        let request: Request =
+            serde_json::from_slice(bytes).map_err(|_| "invalid vocabulary review request")?;
+        if request.directory.len() > 16_384
+            || !std::path::Path::new(&request.directory).is_absolute()
+            || request.resources.len() > 16_384
+            || !std::path::Path::new(&request.resources).is_absolute()
+        {
+            return Err("invalid vocabulary review directory".into());
+        }
+        if request.plugins.as_deref().is_some_and(|plugins| {
+            plugins.len() > 16_384 || !std::path::Path::new(plugins).is_absolute()
+        }) {
+            return Err("invalid vocabulary review directory".into());
+        }
+        let status = session::apply(
+            std::path::Path::new(&request.directory),
+            std::path::Path::new(&request.resources),
+            request.plugins.as_deref().map(std::path::Path::new),
+            &request.day,
+            request.action,
+        )
+        .map_err(|error| error.to_string())?;
+        serde_json::to_value(status).map_err(|_| "vocabulary review response failed".to_owned())
     })
 }

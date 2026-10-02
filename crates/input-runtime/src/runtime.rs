@@ -2,6 +2,7 @@
 //! providers return asynchronously.
 
 use super::*;
+use msime_engine::SchemeType;
 
 pub enum Action {
     ResetCache,
@@ -58,6 +59,10 @@ pub struct Runtime<E: InputEngine = Session> {
     pub(crate) highlighted: usize,
     pub(crate) translations: HashMap<String, String>,
     pub(crate) cached: EngineSnapshot,
+    /// The Engine's own index for each seat of `cached`.
+    ///
+    /// `rerank`, `demote_runner_up_readings` and `normalize_online_slots` reorder the cached list, but the Engine knows nothing of that and selects by its own order. Every call that names a candidate to the Engine goes through [`Self::engine_index`]; without it, an AI candidate seated in slot 1 committed whatever the Engine held at 1.
+    pub(crate) engine_order: Vec<usize>,
     pub(crate) snapshot_valid: bool,
     pub(crate) character_width: CharacterWidth,
     pub(crate) touch_keyboard_layout: TouchKeyboardLayout,
@@ -75,8 +80,7 @@ pub struct Runtime<E: InputEngine = Session> {
     pub(crate) phrase_preedit: bool,
     /// The piece already chosen for the phrase being composed, held back from the document.
     ///
-    /// Non-empty only while the Engine is still composing, so a host's existing test for "is there
-    /// a composition" stays true wherever this is non-empty.
+    /// Non-empty while the Engine is still composing, and in one case after its reading is gone: a segment Backspace (Ctrl+Backspace) that empties a reading whose phrase still has a selection to take back leaves the phrase in the composition, as the reference's `keep_creating_word_after_empty_raw` does. A host must therefore count a non-empty [`View::phrase_prefix`] as a composition, alongside the reading and the candidates.
     pub(crate) phrase_prefix: String,
     /// One entry per selection that grew the held phrase, newest last.
     ///
@@ -88,11 +92,9 @@ pub struct Runtime<E: InputEngine = Session> {
     /// A selection that consumed no reading is not recorded, because there is nothing for it to
     /// restore - the same reason the reference refuses an empty `consumed_raw_input_with_cases`.
     pub(crate) phrase_selections: Vec<PhraseSelection>,
-    /// Recently committed text, sent to the AI provider as context.
+    /// Recently committed text, sent to the AI provider as context and pushed to the Engine as its rescoring context.
     ///
-    /// The reference sends what the user has just written so a suggestion fits
-    /// the sentence in progress. Every host but Linux left this empty, which
-    /// made AI suggestions guess from the pinyin alone.
+    /// The reference sends what the user has just written so a suggestion fits the sentence in progress. Every host but Linux left this empty, which made AI suggestions guess from the pinyin alone. The Engine's neural sentence association conditions on the same text, so every change here is mirrored with [`InputEngine::set_rescoring_context`]; without it the engine-side models ranked every sentence as if nothing had been written before it.
     pub(crate) ai_context: String,
     /// Reorders candidates the pinyin decoder assembled, when a host supplied a model.
     ///
@@ -109,38 +111,113 @@ pub struct Runtime<E: InputEngine = Session> {
     /// plausible now; when the user stops to read the candidates, it has to be right. The fast
     /// model owns the first job and this one owns the second.
     pub(crate) settled_reranker: Option<Reranker>,
+    /// Whether [`Runtime::rerank_settled`] runs the settled model: the product's desktop sentence model switch. On unless a host turns it off, so a caller that attaches a model and says nothing else gets it.
+    pub(crate) settled_rerank_enabled: bool,
 }
 
 /// `CandidateSource::Generated`: a whole-sentence path the word lattice assembled. The one source
 /// whose members really are alternative readings of the same key.
 pub(crate) const LATTICE_SOURCE: u8 = 8;
 
-/// Move the flagged elements to the end, keeping both groups in their existing order.
-pub(crate) fn move_to_back<T>(items: &mut Vec<T>, moved: &[bool]) {
-    let mut flags = moved.iter();
-    let mut tail: Vec<T> = Vec::new();
-    let mut head: Vec<T> = Vec::with_capacity(items.len());
-    for item in items.drain(..) {
-        if flags.next().copied().unwrap_or(false) {
-            tail.push(item);
-        } else {
-            head.push(item);
-        }
-    }
-    head.append(&mut tail);
-    *items = head;
+/// `SchemeType::Korean`: Hangul syllables that compose in the preedit, with no Chinese punctuation; the only candidates are the composing syllable's Hanja, in the Engine's table order, once the host asks for them.
+pub const KOREAN_SCHEME: u8 = SchemeType::Korean as u8;
+
+/// The traits of the scheme behind `scheme`, which the Engine reports as its `SchemeType` ordinal. Only the placeholder snapshot of a failed refresh carries an ordinal no scheme has; each caller decides what that placeholder means, the way the ordinal comparisons this replaces did.
+fn scheme_type(scheme: u8) -> Option<SchemeType> {
+    SchemeType::from_u8(scheme)
 }
 
-/// Move the element at `index` to the front, keeping everything else in its existing order.
+/// Whether the runtime may reorder the scheme's candidate list (the sentence model and the runner-up demotion). A scheme whose selection goes straight to the document instead of being held as phrase progress (the Korean Hanja list) lists its table in frequency order, not readings of one sentence the model can compare, and that order is the one to keep.
+pub(crate) fn runtime_reorders_candidates(scheme: u8) -> bool {
+    scheme_type(scheme).is_none_or(SchemeType::holds_phrase_progress)
+}
+
+/// [`View::script_conversion`] for a scheme ordinal and local mode name.
+pub(crate) fn script_conversion(scheme: u8, local_mode: &str) -> bool {
+    scheme_type(scheme).is_some_and(SchemeType::script_conversion_applies)
+        && !matches!(local_mode, "unicode" | "temporary_japanese")
+}
+
+/// Move the flagged elements to the end, keeping both groups in their existing order.
+#[cfg(test)]
+pub(crate) fn move_to_back<T>(items: &mut [T], moved: &[bool]) {
+    // Stable-partition in place. A rotation moves the next unflagged item ahead of the flagged
+    // run without allocating a second vector; candidate arrays are kept in lockstep by calling
+    // this once for each array below, and their usual size makes the bounded O(n²) movement cheap.
+    let mut head_len = 0;
+    for index in 0..items.len() {
+        if moved.get(index).copied().unwrap_or(false) {
+            continue;
+        }
+        if head_len != index {
+            items[head_len..=index].rotate_right(1);
+        }
+        head_len += 1;
+    }
+}
+
+/// Apply a permutation in place. `order` maps each new seat to its old seat.
 ///
-/// A rotation rather than a swap, so the rest of the list stays as the engine ranked it: promoting
-/// one candidate is the whole change, not a reshuffle.
-fn apply_order<T: Clone>(items: &mut Vec<T>, order: &[usize]) {
-    *items = order.iter().map(|index| items[*index].clone()).collect();
+/// The order is built as a permutation of the candidate seats, so each cycle can be rotated with
+/// swaps. Keeping the operation in place matters here because the same order is applied to eight
+/// parallel arrays, several of which contain candidate strings.
+pub(crate) fn apply_order<T>(items: &mut [T], order: &[usize]) {
+    debug_assert_eq!(items.len(), order.len());
+    for start in 0..items.len() {
+        // Process each cycle only from its smallest member, without allocating a visited bitmap.
+        let mut current = order[start];
+        let mut smallest = start;
+        while current != start {
+            smallest = smallest.min(current);
+            current = order[current];
+        }
+        if smallest != start {
+            continue;
+        }
+        current = start;
+        while order[current] != start {
+            let next = order[current];
+            items.swap(current, next);
+            current = next;
+        }
+    }
+}
+
+/// Keep the Engine-index mapping empty while the cached candidates are still in Engine order.
+/// Reordering paths call this immediately before their first permutation, so ordinary keystrokes
+/// avoid rebuilding an identity vector on every snapshot.
+fn ensure_engine_order(engine_order: &mut Vec<usize>, count: usize) {
+    if engine_order.len() == count {
+        return;
+    }
+    engine_order.clear();
+    engine_order.extend(0..count);
 }
 
 fn rotate_to_front<T>(items: &mut [T], index: usize) {
     items[..=index].rotate_right(1);
+}
+
+/// How far the context handed to a reranker moves at a time once it no longer fits the model.
+pub(crate) const RERANK_CONTEXT_STEP: usize = 16;
+
+/// The tail of the committed text a reranker should see, trimmed so the window holds still while a candidate grows.
+///
+/// The reranker keeps the model state for its prefix across keystrokes, keyed on the prefix tokens, and that cache is what keeps a keystroke inside a frame. It trims the context itself to leave room for the longest candidate, so left to do that, a context longer than the window slides by one character every time a candidate gains one — which is most keystrokes that complete a syllable. Every slide is a different prefix, so it reran the prefix and dropped every resume point with it, and a keystroke cost 20-45ms instead of about 1ms. Nothing showed it in a short test: the context only outgrows the window after a few sentences in one application, which is when "typing falls behind" was reported.
+///
+/// Trimming here, in steps, keeps the prefix identical until the longest candidate crosses a step, and the reranker then finds nothing further to trim because everything handed over already fits. A context that fits whole is handed over unchanged, so short contexts rank exactly as before.
+pub(crate) fn rerank_context(context: &str, window: usize, longest: usize) -> &str {
+    let room = window.saturating_sub(longest + 1);
+    let keep = room / RERANK_CONTEXT_STEP * RERANK_CONTEXT_STEP;
+    let count = context.chars().count();
+    if count <= room {
+        return context;
+    }
+    let skip = count - keep;
+    context
+        .char_indices()
+        .nth(skip)
+        .map_or("", |(start, _)| &context[start..])
 }
 
 impl Runtime<Session> {
@@ -148,7 +225,8 @@ impl Runtime<Session> {
     pub fn set_chinese_punctuation_enabled(&mut self, enabled: bool) -> Result<(), RuntimeError> {
         self.engine
             .set_chinese_punctuation_enabled(enabled)
-            .map_err(|error| RuntimeError::Engine(error.to_string()))
+            .map_err(|error| RuntimeError::Engine(error.to_string()))?;
+        self.refresh_idle_spelling_symbols()
     }
 
     pub fn online_query(&self) -> Result<Option<OnlineQuery>, RuntimeError> {
@@ -170,17 +248,14 @@ impl Runtime<Session> {
             ai_eligible: query.ai_eligible,
             cloud_candidates: true,
             session_id: query.session_id,
-            ai_context: self.ai_context.clone(),
+            ai_context: if query.ai_eligible {
+                self.ai_context.clone()
+            } else {
+                String::new()
+            },
             ai_assistant: None,
+            ai_cache_only: false,
         }))
-    }
-
-    /// Queue the current eligible query for an injected provider. Hosts call
-    /// this after dispatching input; the bounded worker performs I/O off-thread.
-    pub fn submit_online_query(&self, worker: &OnlineProviderWorker) -> Result<bool, RuntimeError> {
-        Ok(self
-            .online_query()?
-            .is_some_and(|query| worker.submit(query)))
     }
 
     pub fn apply_online_candidate(
@@ -189,26 +264,7 @@ impl Runtime<Session> {
         candidate: &str,
         source: u8,
     ) -> Result<bool, RuntimeError> {
-        // Provider callbacks are asynchronous and can be malformed even when
-        // their query identity is still current. Keep the single-item path
-        // subject to the same bounds as the batch path before handing text to
-        // Engine; the Windows source rejects empty callback results as well.
-        if candidate.is_empty()
-            || candidate.len() > 4096
-            || candidate.chars().any(char::is_control)
-            || source > 1
-            // Windows only merges a cloud suggestion into an existing
-            // candidate page.  A callback arriving after the local page was
-            // cleared must not manufacture a new page from stale provider
-            // state.  AI suggestions intentionally do not use this guard:
-            // Windows accepts them for an otherwise eligible pinyin query
-            // even when the local dictionary returned no rows.
-            || (source == 0 && self.cached.candidates.is_empty())
-            || (source == 0 && (!query.cloud_candidates || !query.cloud_eligible))
-            || (source == 1 && !query.ai_eligible)
-        {
-            return Ok(false);
-        }
+        let cloud_candidates = query.cloud_candidates;
         let query = OnlineQuerySnapshot {
             available: true,
             scheme: query.scheme,
@@ -221,6 +277,74 @@ impl Runtime<Session> {
             ai_eligible: query.ai_eligible,
             session_id: query.session_id,
         };
+        self.apply_online_candidate_snapshot(query, candidate, source, cloud_candidates)
+    }
+
+    /// Apply a provider result while transferring its query into the Engine call.
+    ///
+    /// Hosts that own the deserialized query do not need it after this call. Moving its strings
+    /// and pinyin segments avoids rebuilding the same bounded query just before every asynchronous
+    /// candidate is merged.
+    pub fn apply_online_candidate_owned(
+        &mut self,
+        query: OnlineQuery,
+        candidate: &str,
+        source: u8,
+    ) -> Result<bool, RuntimeError> {
+        let cloud_candidates = query.cloud_candidates;
+        let OnlineQuery {
+            scheme,
+            generation,
+            identity,
+            query_text,
+            cache_key,
+            pinyin_segments,
+            cloud_eligible,
+            ai_eligible,
+            session_id,
+            ..
+        } = query;
+        let query = OnlineQuerySnapshot {
+            available: true,
+            scheme,
+            generation,
+            identity,
+            query_text,
+            cache_key,
+            pinyin_segments,
+            cloud_eligible,
+            ai_eligible,
+            session_id,
+        };
+        self.apply_online_candidate_snapshot(query, candidate, source, cloud_candidates)
+    }
+
+    fn apply_online_candidate_snapshot(
+        &mut self,
+        query: OnlineQuerySnapshot,
+        candidate: &str,
+        source: u8,
+        cloud_candidates: bool,
+    ) -> Result<bool, RuntimeError> {
+        // Provider callbacks are asynchronous and can be malformed even when
+        // their query identity is still current. Keep the single-item path
+        // subject to the same bounds as the batch path before handing text to
+        // Engine; the Windows source rejects empty callback results as well.
+        if candidate.is_empty()
+            || !msime_client_core::is_bounded_text(candidate, 4096)
+            || source > 1
+            // Windows only merges a cloud suggestion into an existing
+            // candidate page.  A callback arriving after the local page was
+            // cleared must not manufacture a new page from stale provider
+            // state.  AI suggestions intentionally do not use this guard:
+            // Windows accepts them for an otherwise eligible pinyin query
+            // even when the local dictionary returned no rows.
+            || (source == 0 && self.cached.candidates.is_empty())
+            || (source == 0 && (!cloud_candidates || !query.cloud_eligible))
+            || (source == 1 && !query.ai_eligible)
+        {
+            return Ok(false);
+        }
         let applied = self
             .engine
             .apply_online_candidate(&query, candidate, source)
@@ -243,27 +367,12 @@ impl Runtime<Session> {
         candidates: &[String],
         source: u8,
     ) -> Result<bool, RuntimeError> {
+        let cloud_candidates = query.cloud_candidates;
         let limit = if source == 0 {
             1
         } else {
-            query
-                .ai_assistant
-                .as_ref()
-                .filter(|ai| ai.enabled)
-                .map_or(0, |ai| usize::from(ai.candidate_limit.clamp(1, 10)))
+            query.ai_candidate_limit()
         };
-        if candidates.is_empty()
-            || candidates.len() > limit
-            || candidates.iter().any(|text| {
-                text.is_empty() || text.len() > 4096 || text.chars().any(char::is_control)
-            })
-            || source > 1
-            || (source == 0 && self.cached.candidates.is_empty())
-            || (source == 0 && (!query.cloud_candidates || !query.cloud_eligible))
-            || (source == 1 && !query.ai_eligible)
-        {
-            return Ok(false);
-        }
         let query = OnlineQuerySnapshot {
             available: true,
             scheme: query.scheme,
@@ -276,6 +385,69 @@ impl Runtime<Session> {
             ai_eligible: query.ai_eligible,
             session_id: query.session_id,
         };
+        self.apply_online_candidates_snapshot(query, candidates, source, cloud_candidates, limit)
+    }
+
+    /// Apply an ordered provider batch while transferring its query into the Engine call.
+    pub fn apply_online_candidates_owned(
+        &mut self,
+        query: OnlineQuery,
+        candidates: &[String],
+        source: u8,
+    ) -> Result<bool, RuntimeError> {
+        let cloud_candidates = query.cloud_candidates;
+        let limit = if source == 0 {
+            1
+        } else {
+            query.ai_candidate_limit()
+        };
+        let OnlineQuery {
+            scheme,
+            generation,
+            identity,
+            query_text,
+            cache_key,
+            pinyin_segments,
+            cloud_eligible,
+            ai_eligible,
+            session_id,
+            ..
+        } = query;
+        let query = OnlineQuerySnapshot {
+            available: true,
+            scheme,
+            generation,
+            identity,
+            query_text,
+            cache_key,
+            pinyin_segments,
+            cloud_eligible,
+            ai_eligible,
+            session_id,
+        };
+        self.apply_online_candidates_snapshot(query, candidates, source, cloud_candidates, limit)
+    }
+
+    fn apply_online_candidates_snapshot(
+        &mut self,
+        query: OnlineQuerySnapshot,
+        candidates: &[String],
+        source: u8,
+        cloud_candidates: bool,
+        limit: usize,
+    ) -> Result<bool, RuntimeError> {
+        if candidates.is_empty()
+            || candidates.len() > limit
+            || candidates
+                .iter()
+                .any(|text| text.is_empty() || !msime_client_core::is_bounded_text(text, 4096))
+            || source > 1
+            || (source == 0 && self.cached.candidates.is_empty())
+            || (source == 0 && (!cloud_candidates || !query.cloud_eligible))
+            || (source == 1 && !query.ai_eligible)
+        {
+            return Ok(false);
+        }
         let applied = self
             .engine
             .apply_online_candidates(&query, candidates, source)
@@ -306,12 +478,59 @@ impl<E: InputEngine> Runtime<E> {
     }
 
     pub fn set_punctuation_lock(&mut self, lock: u8) -> Result<(), RuntimeError> {
-        self.engine.set_punctuation_lock(lock)
+        self.engine.set_punctuation_lock(lock)?;
+        self.refresh_idle_spelling_symbols()
+    }
+
+    /// With nothing composed, whether `/` and `@` open their modes follows the punctuation mode and lock, so the cached `spelling_symbols` that `punctuation` and the host read is taken again. A composition keeps its view: its symbols do not depend on either.
+    fn refresh_idle_spelling_symbols(&mut self) -> Result<(), RuntimeError> {
+        if self.cached.editing_text.is_empty() {
+            self.refresh()?;
+        }
+        Ok(())
     }
 
     pub fn set_dedicated_english(&mut self, enabled: bool) -> Result<(), RuntimeError> {
         self.advance()?;
         self.engine.set_dedicated_english(enabled)?;
+        self.refresh()
+    }
+
+    /// Hand the Engine a new `/` command table. An open command list is rebuilt from it, so the view is refreshed.
+    pub fn set_command_table(&mut self, table: &[CommandTableEntry]) -> Result<(), RuntimeError> {
+        self.advance()?;
+        self.engine.set_command_table(table)?;
+        self.refresh()
+    }
+
+    /// 把宿主给的辅助码表交给引擎（`None` 回到方案自己的表），并刷新视图里的候选和辅助码注释。
+    pub fn set_helpcode_table(&mut self, table: Option<SharedKeymap>) -> Result<(), RuntimeError> {
+        self.advance()?;
+        self.engine.set_helpcode_table(table)?;
+        self.refresh()
+    }
+
+    /// 把新的 K 模式宿主短语表交给引擎；打开的 K 模式列表据此重建，所以视图要刷新。
+    pub fn set_quick_phrase_table(
+        &mut self,
+        table: &[QuickPhraseEntry],
+    ) -> Result<(), RuntimeError> {
+        self.advance()?;
+        self.engine.set_quick_phrase_table(table)?;
+        self.refresh()
+    }
+
+    /// Hand the Engine a new `@` name list, refreshing the view as `set_command_table` does.
+    pub fn set_mention_entries(&mut self, entries: &[MentionEntry]) -> Result<(), RuntimeError> {
+        self.advance()?;
+        self.engine.set_mention_entries(entries)?;
+        self.refresh()
+    }
+
+    /// Turn the places of `@` mode on or off, refreshing the view as `set_mention_entries` does. The engine starts with them off, so a new or replaced engine needs this again.
+    pub fn set_mention_places(&mut self, enabled: bool) -> Result<(), RuntimeError> {
+        self.advance()?;
+        self.engine.set_mention_places(enabled)?;
         self.refresh()
     }
 
@@ -338,10 +557,15 @@ impl<E: InputEngine> Runtime<E> {
             ai_context: String::new(),
             reranker: None,
             settled_reranker: None,
+            settled_rerank_enabled: true,
             focused: false,
             page_size: page_size.into(),
             highlighted: 0,
             translations: HashMap::new(),
+            // The initial snapshot is already in Engine order. Keep the mapping empty until a
+            // presentation reorder actually needs it; engine_index falls back to the seat while
+            // the list remains untouched.
+            engine_order: Vec::new(),
             cached,
             snapshot_valid: true,
             character_width: CharacterWidth::Halfwidth,
@@ -379,26 +603,39 @@ impl<E: InputEngine> Runtime<E> {
         self.settled_reranker = reranker;
     }
 
-    /// Re-rank the current candidates with the settled model, reporting whether the order moved.
+    /// Turn the settled rerank on or off without dropping the attached model, so switching it back on needs no reload. Hosts drive this from the desktop sentence model preference.
+    pub fn set_settled_rerank_enabled(&mut self, enabled: bool) {
+        self.settled_rerank_enabled = enabled;
+    }
+
+    pub fn settled_rerank_enabled(&self) -> bool {
+        self.settled_rerank_enabled
+    }
+
+    /// Re-rank the current candidates with the settled model, reporting whether the order moved. Nothing happens without an attached model or while the settled rerank is switched off.
     ///
-    /// The host decides when this is: it owns the clock and already runs a settle timer for cloud
-    /// candidates. The runtime has no timer of its own and should not grow one — a keystroke that
-    /// arrives while this is deciding makes the whole answer stale, and only the host knows that
-    /// a keystroke arrived.
+    /// The host decides when this is: it owns the clock and already runs a settle timer for cloud candidates. The runtime has no timer of its own and should not grow one — a keystroke that arrives while this is deciding makes the whole answer stale, and only the host knows that a keystroke arrived.
     ///
-    /// Returns false when nothing changed, so a host can skip redrawing the candidate window. A
-    /// window that repaints identically on every pause is a flicker the user cannot explain.
+    /// Returns false when nothing changed, so a host can skip redrawing the candidate window. A window that repaints identically on every pause is a flicker the user cannot explain.
     pub fn rerank_settled(&mut self) -> bool {
-        if self.settled_reranker.is_none() || self.is_idle() {
+        // A reorder has to advance the generation (old IDs would otherwise select by the new seats), so an exhausted generation cannot reorder at all.
+        if !self.settled_rerank_enabled
+            || self.settled_reranker.is_none()
+            || self.is_idle()
+            || self.generation.checked_add(1).is_none()
+        {
             return false;
         }
-        let leader = self.cached.candidates.first().cloned();
         std::mem::swap(&mut self.reranker, &mut self.settled_reranker);
-        self.rerank();
+        let mut moved = self.rerank();
         std::mem::swap(&mut self.reranker, &mut self.settled_reranker);
-        let moved = self.cached.candidates.first() != leader.as_ref();
+        // The same passes the fast path runs after its rerank, so the seats they fix stay fixed.
+        moved |= self.demote_runner_up_readings();
+        moved |= self.normalize_online_slots();
         if moved {
             self.snapshot_valid = true;
+            self.highlighted = 0;
+            let _ = self.advance();
         }
         moved
     }
@@ -419,9 +656,34 @@ impl<E: InputEngine> Runtime<E> {
         self.remember_commit(text);
     }
 
+    /// Forget the committed text that candidates are ranked against, which [`Runtime::seed_context`] fills.
+    ///
+    /// [`Runtime::seed_context`] appends, exactly as a commit does, and cancelling a composition keeps what was committed before it. A harness that seeds a different context per case therefore has to clear it first, or every case is ranked against the tail of all the cases before it. The Engine's rescoring context is cleared with it, so both rankers start from the same empty sentence. The Engine's committed-word context is left alone: seeding never adds to it, so there is nothing of the seed's there to forget, unlike [`Runtime::focus`], which also ends real commits.
+    pub fn clear_context(&mut self) {
+        self.ai_context.clear();
+        self.engine.set_rescoring_context("");
+    }
+
     /// Switch the Engine's digit interpretation only after the host finishes composition.
+    /// Move the caret used by Engine prefix decoding. `None` restores end-of-composition behavior.
+    pub fn set_caret(&mut self, caret: Option<usize>) -> Result<(), RuntimeError> {
+        self.engine.set_caret(caret);
+        self.refresh()
+            .map_err(|error| RuntimeError::Engine(error.to_string()))
+    }
+
+    /// Raw offset consumed by the candidate decoder, floored to a complete pinyin unit.
+    pub fn prefix_end(&self) -> usize {
+        self.engine.prefix_end()
+    }
+
+    /// Original-cased raw input after the decoded prefix.
+    pub fn pending_suffix(&self) -> String {
+        self.engine.pending_suffix()
+    }
+
     pub fn set_nine_key_enabled(&mut self, enabled: bool) -> Result<(), RuntimeError> {
-        if enabled && self.cached.scheme != 0 {
+        if enabled && !scheme_type(self.cached.scheme).is_some_and(SchemeType::nine_key) {
             return Err(RuntimeError::InvalidNineKeyScheme);
         }
         if !self.is_idle() {
@@ -438,8 +700,26 @@ impl<E: InputEngine> Runtime<E> {
     pub fn view(&self) -> View {
         let page = self.highlighted / self.page_size;
         let start = page * self.page_size;
+        let page_len = self
+            .cached
+            .candidates
+            .len()
+            .saturating_sub(start)
+            .min(self.page_size);
+        let mut candidates = Vec::with_capacity(page_len);
+        candidates.extend(
+            self.cached
+                .candidates
+                .iter()
+                .enumerate()
+                .skip(start)
+                .take(page_len)
+                .map(|(index, text)| self.candidate(index, text)),
+        );
         View {
             scheme: self.cached.scheme,
+            chinese_text: scheme_type(self.cached.scheme).is_some_and(SchemeType::is_chinese),
+            script_conversion: script_conversion(self.cached.scheme, &self.cached.local_mode),
             nine_key: self.cached.nine_key,
             nine_key_spellings: self.cached.nine_key_spellings.clone(),
             touch_keyboard_layout: self.touch_keyboard_layout,
@@ -448,6 +728,12 @@ impl<E: InputEngine> Runtime<E> {
             shuangpin_profile: self.cached.shuangpin_profile.clone(),
             answered_by_pinyin_fallback: self.cached.answered_by_pinyin_fallback,
             local_mode: self.cached.local_mode.clone(),
+            // A held phrase piece is a composition too: no key opens a mode behind it, and a host that reads the symbols (Harmony) must not compose or pick with them.
+            spelling_symbols: if self.phrase_prefix.is_empty() || self.cached.local_mode != "none" {
+                self.cached.spelling_symbols.clone()
+            } else {
+                String::new()
+            },
             dedicated_english: self.cached.dedicated_english,
             session: self.session,
             generation: self.generation,
@@ -460,16 +746,71 @@ impl<E: InputEngine> Runtime<E> {
             page,
             page_size: self.page_size,
             page_count: self.cached.candidates.len().div_ceil(self.page_size),
-            candidates: self
-                .cached
+            candidate_list_open: self.cached.candidate_list_open,
+            candidates,
+        }
+    }
+
+    /// Number of candidates on the currently published page, without building candidate rows.
+    /// Hosts that only need the count for a punctuation decision can avoid materializing a full
+    /// [`View`].
+    pub fn candidate_page_len(&self) -> usize {
+        let start = (self.highlighted / self.page_size) * self.page_size;
+        self.cached
+            .candidates
+            .len()
+            .saturating_sub(start)
+            .min(self.page_size)
+    }
+
+    /// The Engine scheme ordinal of the applied state, without materializing a [`View`].
+    pub fn scheme(&self) -> u8 {
+        self.cached.scheme
+    }
+
+    /// Whether punctuation may use the Engine's Chinese route for this applied state.
+    /// This mirrors the host-facing mode checks without materializing a [`View`].
+    pub fn punctuation_host_context_available(&self, english_mode: bool) -> bool {
+        !english_mode
+            && !self.cached.dedicated_english
+            && self.cached.local_mode == "none"
+            && scheme_type(self.cached.scheme).is_some_and(SchemeType::host_smart_punctuation)
+    }
+
+    /// Copy only the state and candidate fields needed to plan translation requests. This avoids
+    /// constructing display-only codes, annotations, IDs and highlight flags on every key.
+    pub fn translation_candidates(&self) -> Option<TranslationCandidates> {
+        let start = (self.highlighted / self.page_size) * self.page_size;
+        let page_len = self
+            .cached
+            .candidates
+            .len()
+            .saturating_sub(start)
+            .min(self.page_size);
+        let mut candidates = Vec::with_capacity(page_len);
+        candidates.extend(
+            self.cached
                 .candidates
                 .iter()
                 .enumerate()
                 .skip(start)
-                .take(self.page_size)
-                .map(|(index, text)| self.candidate(index, text))
-                .collect(),
-        }
+                .take(page_len)
+                .map(|(index, text)| TranslationCandidate {
+                    text: text.clone(),
+                    source: self
+                        .cached
+                        .candidate_sources
+                        .get(index)
+                        .copied()
+                        .unwrap_or_default(),
+                }),
+        );
+        (!candidates.is_empty()).then_some(TranslationCandidates {
+            generation: self.generation,
+            scheme: self.cached.scheme,
+            local_mode: self.cached.local_mode.clone(),
+            candidates,
+        })
     }
 
     /// Copy the complete candidate generation for an explicitly opened panel.
@@ -481,30 +822,38 @@ impl<E: InputEngine> Runtime<E> {
     /// quietly showing the first tranche. Release them here too: this call is the request for all of
     /// them. A refusal is not fatal; the caller still gets whatever the generation already holds.
     pub fn all_candidates(&mut self) -> CandidateSnapshot {
-        if self.engine.expand_initial_candidates().unwrap_or(false) {
-            if let Ok(snapshot) = self.engine.snapshot() {
-                self.cached = snapshot;
-                self.rerank();
-                self.demote_runner_up_readings();
-            }
+        // Candidate IDs are tied to the generation.  Once that identity space is
+        // exhausted we cannot publish a reordered snapshot safely: advancing would
+        // fail and retaining the old generation would let an ID from the previous
+        // seat select a different candidate.  Keep the currently published view
+        // stable; callers can still inspect the candidates already released.
+        if self.generation == u64::MAX {
+            return self.all_candidates_cached();
+        }
+        // The released tail reorders the list, so the page's IDs must not keep selecting by seat.
+        if self.expand_cached_candidates().unwrap_or(false) {
+            // `generation == u64::MAX` was handled above, so this cannot fail.
+            debug_assert!(self.advance().is_ok());
         }
         self.all_candidates_cached()
     }
 
     /// The generation as it stands, without asking the engine for more.
     fn all_candidates_cached(&self) -> CandidateSnapshot {
+        let mut candidates = Vec::with_capacity(self.cached.candidates.len());
+        candidates.extend(
+            self.cached
+                .candidates
+                .iter()
+                .enumerate()
+                .map(|(index, text)| self.candidate(index, text)),
+        );
         CandidateSnapshot {
             session: self.session,
             generation: self.generation,
             preedit: self.cached.preedit.clone(),
             reading: self.cached.reading.clone(),
-            candidates: self
-                .cached
-                .candidates
-                .iter()
-                .enumerate()
-                .map(|(index, text)| self.candidate(index, text))
-                .collect(),
+            candidates,
         }
     }
 
@@ -547,15 +896,59 @@ impl<E: InputEngine> Runtime<E> {
                 .copied()
                 .unwrap_or_default(),
             highlighted: index == self.highlighted,
-            translation: self.translations.get(text).cloned(),
+            translation: (!self.translations.is_empty())
+                .then(|| self.translations.get(text).cloned())
+                .flatten(),
         }
     }
 
+    /// A held phrase counts as a composition even when its reading is empty.
     pub fn is_idle(&self) -> bool {
         self.snapshot_valid
+            && self.phrase_prefix.is_empty()
             && self.cached.preedit.is_empty()
             && self.cached.editing_text.is_empty()
             && self.cached.candidates.is_empty()
+    }
+
+    /// The host uses the generation to detect whether a deferred preference
+    /// update changed the view after an input action.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// The live `/fy` request, if the composition is one; see [`CommandTranslation`].
+    pub fn command_translation(&self) -> Option<CommandTranslation> {
+        let query = self.engine.command_translation_query()?;
+        Some(CommandTranslation {
+            generation: self.generation,
+            session_id: query.session_id,
+            text: query.text,
+        })
+    }
+
+    /// Show a translation for a `/fy` request as the first row, which commits the translation. False for an answer to an older generation, another session or text no longer typed, and for text a row cannot show.
+    pub fn apply_command_translation(
+        &mut self,
+        query: &CommandTranslation,
+        translation: &str,
+    ) -> Result<bool, RuntimeError> {
+        if query.generation != self.generation
+            || !msime_client_core::is_bounded_text(translation, 4096)
+        {
+            return Ok(false);
+        }
+        let request = CommandTranslationQuery {
+            session_id: query.session_id,
+            text: query.text.clone(),
+        };
+        if !self.engine.apply_command_translation(&request, translation) {
+            return Ok(false);
+        }
+        // The row arrives outside dispatch(), so the identity advances as it does for an online candidate and an ID from the page before cannot select the new first row.
+        self.advance()?;
+        self.refresh()?;
+        Ok(true)
     }
 
     /// Apply translations to the current candidate generation. Stale async
@@ -568,7 +961,16 @@ impl<E: InputEngine> Runtime<E> {
         if generation != self.generation {
             return false;
         }
-        self.translations = translations.into_iter().collect();
+        let translations: HashMap<String, String> = translations.into_iter().collect();
+        // The answer to a `/fy` request arrives through the same host path as candidate glosses, so a host forwarding `translation_query` needs nothing else: it becomes the row that commits the translation, not a gloss under the English.
+        if let Some(query) = self.command_translation() {
+            if let Some(translation) = translations.get(&query.text) {
+                return self
+                    .apply_command_translation(&query, translation)
+                    .unwrap_or(false);
+            }
+        }
+        self.translations = translations;
         true
     }
 
@@ -609,7 +1011,9 @@ impl<E: InputEngine> Runtime<E> {
         let cached = engine.snapshot()?;
         self.advance()?;
         self.engine = engine;
-        self.cached = cached;
+        // The committed text belongs to the client, not the engine, so the replacement ranks against it as its predecessor did.
+        self.engine.set_rescoring_context(&self.ai_context);
+        self.load_snapshot(cached);
         self.snapshot_valid = true;
         self.page_size = page_size.into();
         self.highlighted = 0;
@@ -675,11 +1079,25 @@ impl<E: InputEngine> Runtime<E> {
         if !self.engine.expand_initial_candidates()? {
             return Ok(false);
         }
-        self.cached = self.engine.snapshot()?;
+        let snapshot = self.engine.snapshot()?;
+        self.load_snapshot(snapshot);
         self.rerank();
         self.demote_runner_up_readings();
         self.normalize_online_slots();
         Ok(true)
+    }
+
+    /// Take a snapshot straight from the Engine, whose seats are still in the Engine's order.
+    fn load_snapshot(&mut self, snapshot: EngineSnapshot) {
+        // An empty mapping means the cached order is the Engine's order; build it lazily only if
+        // one of the presentation reorderings below actually moves a candidate.
+        self.engine_order.clear();
+        self.cached = snapshot;
+    }
+
+    /// The Engine's index for the candidate sitting at `seat` of the cached list. A seat past the end is passed through unchanged, so the Engine keeps answering for an empty page exactly as it did.
+    fn engine_index(&self, seat: usize) -> usize {
+        self.engine_order.get(seat).copied().unwrap_or(seat)
     }
 
     fn advance(&mut self) -> Result<(), RuntimeError> {
@@ -690,24 +1108,23 @@ impl<E: InputEngine> Runtime<E> {
         Ok(())
     }
 
-    /// Keep the tail of what was committed, cut on a character boundary.
+    /// Keep the tail of what was committed, cut on a character boundary, and hand it to the Engine.
     ///
-    /// Bounded at 1024 bytes because `query_candidates` refuses anything longer
-    /// outright - an over-long context would silently disable the whole query
-    /// rather than being trimmed for us.
+    /// Bounded at 1024 bytes because `query_candidates` refuses anything longer outright - an over-long context would silently disable the whole query rather than being trimmed for us.
     pub(crate) fn remember_commit(&mut self, text: &str) {
         if !self.focused {
             self.ai_context.clear();
-            return;
-        }
-        self.ai_context.push_str(text);
-        if self.ai_context.len() > 1024 {
-            let mut cut = self.ai_context.len() - 1024;
-            while cut < self.ai_context.len() && !self.ai_context.is_char_boundary(cut) {
-                cut += 1;
+        } else {
+            self.ai_context.push_str(text);
+            if self.ai_context.len() > 1024 {
+                let mut cut = self.ai_context.len() - 1024;
+                while cut < self.ai_context.len() && !self.ai_context.is_char_boundary(cut) {
+                    cut += 1;
+                }
+                self.ai_context.drain(..cut);
             }
-            self.ai_context.drain(..cut);
         }
+        self.engine.set_rescoring_context(&self.ai_context);
     }
 
     /// Take the last selection of a phrase-in-progress back, when the key asks for it.
@@ -789,21 +1206,21 @@ impl<E: InputEngine> Runtime<E> {
     /// - something ended the composition and committed, so the held pieces lead that commit - the
     ///   reference does the same on Enter, which commits `word_for_creating_word` together with the
     ///   remaining raw input;
-    /// - the composition ended with nothing committed. A cancel means the user threw the whole
-    ///   thing away, so the held pieces go with it. Anything else commits what is held rather than
-    ///   dropping letters the user chose. That is a deliberate step away from the reference, which
-    ///   keeps showing the piece with an empty reading: holding text with no composition to hang it
-    ///   on would make every host's test for "is there a composition" lie. Backspacing the reading
-    ///   away only reaches this with nothing to go back to: a selection that can be taken back
-    ///   takes that key first, in [`Runtime::retreat_phrase_selection`].
+    /// - the reading is gone with nothing committed. A cancel means the user threw the whole thing away, so the held pieces go with it. A segment Backspace (`keep_empty`) that emptied the reading while a selection can still be taken back keeps the phrase in the composition, as the reference's `keep_creating_word_after_empty_raw` does: the next Backspace puts the last reading back and the next Ctrl+Backspace deletes the last chosen piece, both in [`Runtime::retreat_phrase_selection`]. Anything else commits what is held rather than dropping letters the user chose. A plain Backspace only empties the reading here with nothing to go back to - a selection that can be taken back takes that key first - and the reference ends the word in that case too.
+    ///
+    /// When the held phrase is all there is to send or throw away, the key acted on the composition, so it counts as handled: an Enter or Space the Engine does not want with an empty reading must not also reach the application.
     fn hold_phrase_progress(
         &mut self,
         picked: bool,
         discard: bool,
+        keep_empty: bool,
         consumed: &str,
         result: &mut EngineResult,
     ) {
-        if !self.phrase_preedit {
+        // A Korean syllable that the next key finished is already final text, not a chosen piece of a phrase: it goes to the document even while the next syllable composes. So does anything a scheme that never holds phrase progress commits.
+        if !self.phrase_preedit
+            || scheme_type(self.cached.scheme).is_some_and(|scheme| !scheme.holds_phrase_progress())
+        {
             return;
         }
         let composing = !self.cached.editing_text.is_empty();
@@ -822,16 +1239,32 @@ impl<E: InputEngine> Runtime<E> {
         if self.phrase_prefix.is_empty() || composing {
             return;
         }
-        let held = std::mem::take(&mut self.phrase_prefix);
-        self.phrase_selections.clear();
-        if discard {
+        if keep_empty && !discard && !result.has_commit && !self.phrase_selections.is_empty() {
+            result.handled = true;
             return;
         }
+        let held = std::mem::take(&mut self.phrase_prefix);
+        self.phrase_selections.clear();
         if result.has_commit {
-            result.commit = held + &result.commit;
-        } else {
+            if !discard {
+                result.commit = held + &result.commit;
+            }
+            return;
+        }
+        result.handled = true;
+        if !discard {
             result.has_commit = true;
             result.commit = held;
+        }
+    }
+
+    /// The context of a commit made in the applied state.
+    fn output_context(&self) -> OutputContext {
+        OutputContext {
+            scheme: self.cached.scheme,
+            local_mode: self.cached.local_mode.clone(),
+            script_conversion: script_conversion(self.cached.scheme, &self.cached.local_mode),
+            typing_statistics: local_mode_counts_as_typing(&self.cached.local_mode),
         }
     }
 
@@ -839,14 +1272,10 @@ impl<E: InputEngine> Runtime<E> {
         // Every commit passes through here, so this is the one place the AI
         // context has to be fed from.
         if result.has_commit {
-            let committed = result.commit.clone();
-            self.remember_commit(&committed);
+            self.remember_commit(&result.commit);
         }
         Transition {
-            commit_context: result.has_commit.then(|| OutputContext {
-                scheme: self.cached.scheme,
-                local_mode: self.cached.local_mode.clone(),
-            }),
+            commit_context: result.has_commit.then(|| self.output_context()),
             handled: result.handled,
             commit: result.has_commit.then_some(result.commit),
             diagnostic: (!result.diagnostic.is_empty()).then_some(result.diagnostic),
@@ -883,7 +1312,7 @@ impl<E: InputEngine> Runtime<E> {
     /// Only the online case is touched: with neither a cloud nor an AI candidate present the
     /// Engine already produces the fourth line, so there is nothing to rearrange and nothing to
     /// risk.
-    fn normalize_online_slots(&mut self) {
+    fn normalize_online_slots(&mut self) -> bool {
         const CLOUD: u8 = 2;
         const AI: u8 = 3;
         const ENGLISH: u8 = 4;
@@ -898,66 +1327,140 @@ impl<E: InputEngine> Runtime<E> {
             || snapshot.candidate_annotations.len() != count
             || snapshot.candidate_positions.len() != count
             || snapshot.candidate_corrected.len() != count
+            || snapshot.candidate_answers_key.len() != count
         {
-            return;
+            return false;
         }
         if !snapshot
             .candidate_sources
             .iter()
             .any(|source| *source == CLOUD || *source == AI)
         {
-            return;
-        }
-
-        let (mut locals, mut cloud, mut ai, mut english, mut emoji, mut kaomoji) = (
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-        );
-        for (index, source) in snapshot.candidate_sources.iter().enumerate() {
-            match *source {
-                CLOUD => cloud.push(index),
-                AI => ai.push(index),
-                ENGLISH => english.push(index),
-                EMOJI => emoji.push(index),
-                KAOMOJI => kaomoji.push(index),
-                _ => locals.push(index),
-            }
+            return false;
         }
 
         // A provider may answer with several candidates - the AI limit reaches ten - and they take
         // their seat as a group. The reference has only one of each to place and silently drops the
         // rest; dropping a candidate the user was offered is not an option here.
+        //
+        // The Engine never puts English first while a Chinese candidate exists, whatever its weight or pin, except for a word the user fixed at position 1 (`apply_candidate_positions`). An English candidate at index zero with locals present is that word. It keeps the first seat and the leading English seat is not filled a second time.
+        let is_local = |source: u8| !matches!(source, CLOUD | AI | ENGLISH | EMOJI | KAOMOJI);
+        let first_english = snapshot
+            .candidate_sources
+            .iter()
+            .position(|source| *source == ENGLISH);
+        let local_count = snapshot
+            .candidate_sources
+            .iter()
+            .filter(|source| is_local(**source))
+            .count();
+        let promoted_english = first_english == Some(0) && local_count != 0;
+        let has_cloud = snapshot.candidate_sources.contains(&CLOUD);
+        let first_emoji = snapshot
+            .candidate_sources
+            .iter()
+            .position(|source| *source == EMOJI);
+        let first_kaomoji = snapshot
+            .candidate_sources
+            .iter()
+            .position(|source| *source == KAOMOJI);
         let mut order = Vec::with_capacity(count);
-        let mut locals = locals.into_iter();
-        order.extend(locals.next());
-        if !cloud.is_empty() {
-            order.append(&mut cloud);
-            order.append(&mut ai);
+        if promoted_english {
+            order.push(0);
         }
-        let mut english = english.into_iter();
-        order.extend(english.next());
-        order.append(&mut ai);
-        let mut emoji = emoji.into_iter();
-        let mut kaomoji = kaomoji.into_iter();
-        order.extend(emoji.next());
-        order.extend(kaomoji.next());
-        order.extend(locals);
-        order.extend(english);
-        order.extend(emoji);
-        order.extend(kaomoji);
+        // The hiragana/katakana pair of a single complete kana keeps seats 1 and 2 ahead of every online candidate, as the reference's `preserve_single_kana_pair` does (server/src/ipc/event_listener.cpp); the reading is the converted kana, so one character in U+3041..U+3096 is its `IsSingleKanaConversion`.
+        let mut reading = snapshot.reading.chars();
+        let single_kana = scheme_type(snapshot.scheme) == Some(SchemeType::JapaneseRomaji)
+            && matches!((reading.next(), reading.next()), (Some(kana), None) if ('\u{3041}'..='\u{3096}').contains(&kana));
+        let local_prefix = if single_kana { 2 } else { 1 };
+        let mut local_seen = 0;
+        for (index, source) in snapshot.candidate_sources.iter().enumerate() {
+            if is_local(*source) {
+                if local_seen < local_prefix {
+                    order.push(index);
+                }
+                local_seen += 1;
+            }
+        }
+        if has_cloud {
+            for (index, source) in snapshot.candidate_sources.iter().enumerate() {
+                if *source == CLOUD {
+                    order.push(index);
+                }
+            }
+            for (index, source) in snapshot.candidate_sources.iter().enumerate() {
+                if *source == AI {
+                    order.push(index);
+                }
+            }
+        }
+        if !promoted_english {
+            if let Some(index) = first_english {
+                order.push(index);
+            }
+        }
+        if !has_cloud {
+            for (index, source) in snapshot.candidate_sources.iter().enumerate() {
+                if *source == AI {
+                    order.push(index);
+                }
+            }
+        }
+        if let Some(index) = first_emoji {
+            order.push(index);
+        }
+        if let Some(index) = first_kaomoji {
+            order.push(index);
+        }
+        local_seen = 0;
+        for (index, source) in snapshot.candidate_sources.iter().enumerate() {
+            if is_local(*source) {
+                if local_seen >= local_prefix {
+                    order.push(index);
+                }
+                local_seen += 1;
+            }
+        }
+        for (index, source) in snapshot.candidate_sources.iter().enumerate() {
+            if *source == ENGLISH && Some(index) != first_english {
+                order.push(index);
+            }
+        }
+        for (index, source) in snapshot.candidate_sources.iter().enumerate() {
+            if *source == EMOJI && Some(index) != first_emoji {
+                order.push(index);
+            }
+        }
+        for (index, source) in snapshot.candidate_sources.iter().enumerate() {
+            if *source == KAOMOJI && Some(index) != first_kaomoji {
+                order.push(index);
+            }
+        }
+        // An English candidate the user fixed to a seat goes back to that seat after the seating, so a cloud or AI reply does not push it behind the online candidates (reference: server/src/ipc/candidate_selection_policy.h, the fixed-English pass at the end of NormalizeMixedCandidateOrder). Seats are 1-based and 0 means unfixed; a seat past the end clamps to the end, as the reference's `insert_at` does.
+        let mut fixed_english = Vec::with_capacity(count);
+        order.retain(|index| {
+            let fixed = snapshot.candidate_sources[*index] == ENGLISH
+                && snapshot.candidate_positions[*index] > 0;
+            if fixed {
+                fixed_english.push(*index);
+            }
+            !fixed
+        });
+        fixed_english.sort_by_key(|index| snapshot.candidate_positions[*index]);
+        for index in fixed_english {
+            let seat = usize::from(snapshot.candidate_positions[index] - 1).min(order.len());
+            order.insert(seat, index);
+        }
         // A permutation or nothing: a missing or repeated index would silently drop a candidate.
         debug_assert_eq!(order.len(), count);
         if order.len() != count {
-            return;
+            return false;
         }
         if order.iter().enumerate().all(|(seat, index)| seat == *index) {
-            return;
+            return false;
         }
 
+        ensure_engine_order(&mut self.engine_order, count);
         let snapshot = &mut self.cached;
         apply_order(&mut snapshot.candidates, &order);
         apply_order(&mut snapshot.candidate_codes, &order);
@@ -965,11 +1468,24 @@ impl<E: InputEngine> Runtime<E> {
         apply_order(&mut snapshot.candidate_sources, &order);
         apply_order(&mut snapshot.candidate_positions, &order);
         apply_order(&mut snapshot.candidate_corrected, &order);
+        apply_order(&mut snapshot.candidate_answers_key, &order);
+        apply_order(&mut self.engine_order, &order);
+        true
     }
 
-    fn rerank(&mut self) {
+    fn rerank(&mut self) -> bool {
+        // A Korean Hanja list is a table in frequency order for one syllable, not Chinese text the language model can read.
+        if !runtime_reorders_candidates(self.cached.scheme) {
+            return false;
+        }
+        // A Wubi list the table answered is ranked by the table: the Engine seats the Wubi rows first (`merge_pinyin_fallback`) and appends the mixed-in pinyin rows after them. Those pinyin rows are corrections of the same letters (dyn read as dun), so the corrected-key rule below would strip the exact code hit (态 on dyn) of its dictionary exemption and let the model promote a longer code's row (太快 on dynn) over it. Only a list the pinyin fallback answered alone is pinyin, and that one is reranked like pinyin.
+        if scheme_type(self.cached.scheme) == Some(SchemeType::Wubi)
+            && !self.cached.answered_by_pinyin_fallback
+        {
+            return false;
+        }
         let Some(reranker) = self.reranker.as_mut() else {
-            return;
+            return false;
         };
         let snapshot = &self.cached;
         let count = snapshot.candidates.len();
@@ -979,14 +1495,41 @@ impl<E: InputEngine> Runtime<E> {
             || snapshot.candidate_annotations.len() != count
             || snapshot.candidate_positions.len() != count
             || snapshot.candidate_corrected.len() != count
+            || snapshot.candidate_answers_key.len() != count
         {
-            return;
+            return false;
         }
-        let texts: Vec<&str> = snapshot.candidates.iter().map(String::as_str).collect();
-        let Some(promote) = reranker.best(&self.ai_context, &texts, &snapshot.candidate_sources)
-        else {
-            return;
+        let mut texts = Vec::with_capacity(snapshot.candidates.len());
+        texts.extend(snapshot.candidates.iter().map(String::as_str));
+        // A dictionary hit earns the model's deference because it carries corpus frequency for the
+        // key the user typed. That premise fails the moment the engine offers a correction of that
+        // key: the frequency then belongs to the letters that arrived rather than to the word they
+        // were aiming at, and the list holds both readings. So the whole list loses the exemption,
+        // not the corrected rows — the row that would wrongly win is the uncorrected one.
+        //
+        // With correction off, or with nothing corrected, this is exactly the previous behaviour,
+        // which is what the 2052-case dictionary measurement was taken on.
+        let corrected_key = snapshot
+            .candidate_corrected
+            .iter()
+            .any(|&corrected| corrected);
+        // Only candidates that answer the key are scored, so they are the ones the window has to leave room for.
+        let longest = texts
+            .iter()
+            .zip(&snapshot.candidate_answers_key)
+            .filter(|(_, answers)| **answers)
+            .map(|(text, _)| text.chars().count())
+            .max()
+            .unwrap_or(0);
+        let context = rerank_context(&self.ai_context, reranker.model().context_length(), longest);
+        let Some(promote) = reranker.best_where(context, &texts, |index| CandidateFacts {
+            answers_key: snapshot.candidate_answers_key[index],
+            trusted_dictionary_hit: DICTIONARY_SOURCES.contains(&snapshot.candidate_sources[index])
+                && !corrected_key,
+        }) else {
+            return false;
         };
+        ensure_engine_order(&mut self.engine_order, count);
         let snapshot = &mut self.cached;
         rotate_to_front(&mut snapshot.candidates, promote);
         rotate_to_front(&mut snapshot.candidate_codes, promote);
@@ -994,34 +1537,42 @@ impl<E: InputEngine> Runtime<E> {
         rotate_to_front(&mut snapshot.candidate_sources, promote);
         rotate_to_front(&mut snapshot.candidate_positions, promote);
         rotate_to_front(&mut snapshot.candidate_corrected, promote);
+        rotate_to_front(&mut snapshot.candidate_answers_key, promote);
+        rotate_to_front(&mut self.engine_order, promote);
+        true
     }
 
-    /// Move the runner-up sentence readings behind the rest of the list.
+    /// Keep the leading sentence readings together near the top and move the rest of them behind the list.
     ///
-    /// The lattice searches several readings of the whole key so that something can choose between
-    /// them. Leaving all of them at the front fills the candidate page with near-duplicate
-    /// sentences and pushes the short candidates a user actually wants off it, which is why the
-    /// search used to be pinned to a single path.
+    /// The lattice searches several readings of the whole key so that something can choose between them. Leaving all of them at the front fills the candidate page with near-duplicate sentences and pushes the short candidates a user actually wants off it, which is why the search used to be pinned to a single path.
     ///
-    /// They are moved rather than removed. A candidate page needs its *first* row to be the chosen
-    /// reading; it does not need the others gone. Deleting them threw away the model's second and
-    /// third choices, so a reading the model ranked third was unreachable even when it was right.
+    /// For a sentence of three or more characters the first page keeps three readings, seated together right after the first one, and only the rest are moved back. One reading was too few once the Google fallback stopped holding a second sentence seat: on sentences-neutral-v1 top5 fell to 0.615 and on sentences-v2 to 0.269 with the correct sentence sitting at reading two or three, and keeping three lifts them to 0.839 and 0.763 while quanpin-words-v1 top5 moves only from 0.940 to 0.938. Shorter readings still keep one, because two-syllable keys are where the runner-ups (倪好, 你号, 你毫 after 你好) push dictionary words off the page, and keeping three there costs words top5 two points.
     ///
-    /// Only lattice readings are touched. An earlier version of this keyed on "any source that is
-    /// not a dictionary", which is wrong twice over: a source number says which code produced a
-    /// candidate, not that two candidates are spellings of one answer, and most of the other
-    /// sources are plural by design — English words, emoji, kaomoji, quick phrases and AI
-    /// suggestions all arrive as lists, and that version silently dropped all but one of each.
-    fn demote_runner_up_readings(&mut self) {
-        // The lattice never runs on fewer than three syllables, so a shorter candidate reached the
-        // list some other way and is not a reading of the same sentence. Japanese kana are the case
-        // that proves it: あ and ア are both Generated and both one character.
-        const SENTENCE_SYLLABLES: usize = 3;
+    /// They are moved rather than removed. Deleting them threw away the model's later choices, so a reading the model ranked fourth was unreachable even when it was right.
+    ///
+    /// Only lattice readings are touched. An earlier version of this keyed on "any source that is not a dictionary", which is wrong twice over: a source number says which code produced a candidate, not that two candidates are spellings of one answer, and most of the other sources are plural by design — English words, emoji, kaomoji, quick phrases and AI suggestions all arrive as lists, and that version silently dropped all but one of each.
+    pub(crate) fn demote_runner_up_readings(&mut self) -> bool {
+        // The lattice runs from two syllables (a single syllable is never decoded), so a shorter candidate reached the list some other way and is not a reading of the same sentence. Japanese kana are the case that proves it: あ and ア are both Generated and both one character. Two rather than three because two-syllable keys are where the lattice's runner-up readings otherwise fill the first page ahead of dictionary words: on quanpin-words-v1 this moves two-syllable top5 from 0.883 to 0.924 with top1 unchanged.
+        const SENTENCE_SYLLABLES: usize = 2;
+        // From this many characters a reading is a sentence rather than a word, and the page keeps `SENTENCE_READINGS` of them.
+        const LONG_SENTENCE_CHARACTERS: usize = 3;
+        const SENTENCE_READINGS: usize = 3;
 
+        // Korean Hanja rows are not lattice readings, and their table order is the one to keep.
+        if !runtime_reorders_candidates(self.cached.scheme) {
+            return false;
+        }
         let snapshot = &self.cached;
         let count = snapshot.candidates.len();
-        if count < 2 || snapshot.candidate_sources.len() != count {
-            return;
+        if count < 2
+            || snapshot.candidate_codes.len() != count
+            || snapshot.candidate_annotations.len() != count
+            || snapshot.candidate_sources.len() != count
+            || snapshot.candidate_positions.len() != count
+            || snapshot.candidate_corrected.len() != count
+            || snapshot.candidate_answers_key.len() != count
+        {
+            return false;
         }
         let Some(width) = snapshot
             .candidates
@@ -1030,63 +1581,91 @@ impl<E: InputEngine> Runtime<E> {
             .find(|(_, source)| **source == LATTICE_SOURCE)
             .map(|(text, _)| text.chars().count())
         else {
-            return;
+            return false;
         };
         if width < SENTENCE_SYLLABLES {
-            return;
+            return false;
         }
-        // Everything after the first lattice reading of the full key is a runner-up.
-        let mut kept_one = false;
-        let mut demote: Vec<bool> = Vec::with_capacity(count);
-        for (text, source) in snapshot.candidates.iter().zip(&snapshot.candidate_sources) {
-            let reading = *source == LATTICE_SOURCE && text.chars().count() == width;
-            demote.push(reading && kept_one);
-            kept_one |= reading;
+        let keep = if width >= LONG_SENTENCE_CHARACTERS {
+            SENTENCE_READINGS
+        } else {
+            1
+        };
+        // Every lattice reading of the full key, in list order. The first stays where it is, the next `keep - 1` are seated right behind it, and the rest go to the back in their existing order.
+        let readings: Vec<usize> = (0..count)
+            .filter(|&index| {
+                snapshot.candidate_sources[index] == LATTICE_SOURCE
+                    && snapshot.candidates[index].chars().count() == width
+            })
+            .collect();
+        let (kept, demoted) = readings.split_at(keep.min(readings.len()));
+        let mut order = Vec::with_capacity(count);
+        for index in 0..count {
+            if index != kept[0] && readings.contains(&index) {
+                continue;
+            }
+            order.push(index);
+            if index == kept[0] {
+                order.extend_from_slice(&kept[1..]);
+            }
         }
-        if !demote.iter().any(|moved| *moved) {
-            return;
+        order.extend_from_slice(demoted);
+        debug_assert_eq!(order.len(), count);
+        if order.iter().enumerate().all(|(seat, index)| seat == *index) {
+            return false;
         }
+        ensure_engine_order(&mut self.engine_order, count);
         let snapshot = &mut self.cached;
-        move_to_back(&mut snapshot.candidates, &demote);
-        move_to_back(&mut snapshot.candidate_codes, &demote);
-        move_to_back(&mut snapshot.candidate_annotations, &demote);
-        move_to_back(&mut snapshot.candidate_sources, &demote);
-        move_to_back(&mut snapshot.candidate_positions, &demote);
-        move_to_back(&mut snapshot.candidate_corrected, &demote);
+        apply_order(&mut snapshot.candidates, &order);
+        apply_order(&mut snapshot.candidate_codes, &order);
+        apply_order(&mut snapshot.candidate_annotations, &order);
+        apply_order(&mut snapshot.candidate_sources, &order);
+        apply_order(&mut snapshot.candidate_positions, &order);
+        apply_order(&mut snapshot.candidate_corrected, &order);
+        apply_order(&mut snapshot.candidate_answers_key, &order);
+        apply_order(&mut self.engine_order, &order);
+        true
     }
 
     pub(crate) fn refresh(&mut self) -> Result<(), RuntimeError> {
         self.snapshot_valid = false;
         self.translations.clear();
-        // Drop cached candidate identities even if fetching the replacement fails.
-        let previous = std::mem::replace(
-            &mut self.cached,
-            EngineSnapshot {
-                scheme: 255,
-                nine_key: false,
-                nine_key_spellings: Vec::new(),
-                candidate_annotations: Vec::new(),
-                candidate_codes: Vec::new(),
-                candidate_sources: Vec::new(),
-                candidate_positions: Vec::new(),
-                candidate_corrected: Vec::new(),
-                microsoft_shuangpin: false,
-                shuangpin_profile: String::new(),
-                answered_by_pinyin_fallback: true,
-                wubi_unique_four_code: false,
-                local_mode: "unknown".into(),
-                dedicated_english: false,
-                preedit: String::new(),
-                reading: String::new(),
-                editing_text: String::new(),
-                caret_position: 0,
-                segment_raw_boundaries: vec![],
-                candidates: Vec::new(),
-            },
-        );
+        self.engine_order.clear();
         let previous_highlight = self.highlighted;
         self.highlighted = 0;
-        self.cached = self.engine.snapshot()?;
+        // Drop cached candidate identities even if fetching the replacement fails.
+        let snapshot = match self.engine.snapshot() {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                self.cached = EngineSnapshot {
+                    scheme: 255,
+                    nine_key: false,
+                    nine_key_spellings: Vec::new(),
+                    candidate_annotations: Vec::new(),
+                    candidate_codes: Vec::new(),
+                    candidate_sources: Vec::new(),
+                    candidate_positions: Vec::new(),
+                    candidate_corrected: Vec::new(),
+                    candidate_answers_key: Vec::new(),
+                    candidate_list_open: false,
+                    microsoft_shuangpin: false,
+                    shuangpin_profile: String::new(),
+                    answered_by_pinyin_fallback: true,
+                    wubi_unique_four_code: false,
+                    local_mode: "unknown".into(),
+                    spelling_symbols: String::new(),
+                    dedicated_english: false,
+                    preedit: String::new(),
+                    reading: String::new(),
+                    editing_text: String::new(),
+                    caret_position: 0,
+                    segment_raw_boundaries: vec![],
+                    candidates: Vec::new(),
+                };
+                return Err(error);
+            }
+        };
+        let previous = std::mem::replace(&mut self.cached, snapshot);
         self.rerank();
         self.demote_runner_up_readings();
         self.normalize_online_slots();
@@ -1102,6 +1681,7 @@ impl<E: InputEngine> Runtime<E> {
             && self.cached.candidate_sources == previous.candidate_sources
             && self.cached.candidate_positions == previous.candidate_positions
             && self.cached.candidate_corrected == previous.candidate_corrected
+            && self.cached.candidate_answers_key == previous.candidate_answers_key
         {
             self.highlighted =
                 previous_highlight.min(self.cached.candidates.len().saturating_sub(1));
@@ -1113,23 +1693,61 @@ impl<E: InputEngine> Runtime<E> {
         self.advance()?;
         // Invalidate the client before cancellation, including on engine failure.
         self.focused = false;
-        let result = self.engine.command(Command::Cancel);
+        // A Korean syllable is text the user already wrote, not a reading still to be converted, so leaving the client commits it, as it does for every scheme that commits on blur; every other composition is cancelled. Attaching a client (`focused`) stays a pure reset: a syllable typed in the previous client must never be written into the new one.
+        let commits_on_blur = !focused
+            && scheme_type(self.cached.scheme).is_some_and(SchemeType::commits_on_blur)
+            && !self.cached.dedicated_english
+            && self.cached.local_mode == "none"
+            && !self.cached.editing_text.is_empty();
+        let result = if commits_on_blur {
+            self.engine.finish(0)
+        } else {
+            self.discard_composition()
+        };
         self.refresh()?;
         let mut result = result?;
         // Leaving the client cancels the composition, but a phrase piece being held back is text
         // the user chose and, before it was held back, would already be in the document. Send it.
-        self.hold_phrase_progress(false, false, "", &mut result);
+        self.hold_phrase_progress(false, false, false, "", &mut result);
         self.focused = focused;
         // A different client is a different sentence, so context never leaks
-        // from one application into another.
+        // from one application into another. The Engine's committed-word context follows the same rule: the next word
+        // no longer follows the last one, and no later pick may take back what a commit in the other client taught.
         self.ai_context.clear();
+        self.engine.set_rescoring_context("");
+        self.engine.reset_context();
         Ok(self.transition(result))
     }
 
+    /// Throw the composition away. Cancel is the user's Escape, and in some schemes the first one keeps the composition: with an openable candidate list open (the Korean Hanja list) it only closes the list, and a Vietnamese word goes back to its raw keys. A second Cancel then takes the composition too.
+    fn discard_composition(&mut self) -> Result<EngineResult, RuntimeError> {
+        let result = self.engine.command(Command::Cancel)?;
+        if scheme_type(self.cached.scheme).is_some_and(SchemeType::cancel_keeps_composition)
+            && !self.engine.snapshot()?.editing_text.is_empty()
+        {
+            return self.engine.command(Command::Cancel);
+        }
+        Ok(result)
+    }
+
     fn punctuation(&mut self, value: u8) -> Result<EngineResult, RuntimeError> {
+        // A symbol the Engine spells with (an operator in the expression mode) or opens a mode with (`/` with nothing composed) is input, whichever route the host chose for the key: finishing first would commit the half-typed spelling. A phrase still being held is a composition too, and the mark has to end it rather than open a mode after it.
+        if self.cached.spelling_symbols.as_bytes().contains(&value)
+            && (self.cached.local_mode != "none" || self.phrase_prefix.is_empty())
+        {
+            return self.engine.character(value, false);
+        }
+        // The apostrophe is not a spelling symbol, but right after a unit (`3jin'g`) or a `/fy` word it separates rather than ends.
+        if value == b'\'' && self.engine.takes_local_separator() {
+            return self.engine.character(value, false);
+        }
+        // A mark on a bare `/` or `@` ends the mode as punctuation; finishing first would commit the first row.
+        if self.bare_mode_prefix() {
+            return self.engine.punctuation(value);
+        }
         // Finish through Engine with the host highlight BEFORE asking it to translate.
         // Calling Engine punctuation on an active composition would choose candidate zero.
-        let mut finished = self.engine.finish(self.highlighted)?;
+        let mut finished = self.engine.finish(self.engine_index(self.highlighted))?;
         let punctuation = match self.engine.punctuation(value) {
             Ok(result) => result,
             Err(error) if finished.has_commit => {
@@ -1145,6 +1763,10 @@ impl<E: InputEngine> Runtime<E> {
             Err(error) => return Err(error),
         };
         if !finished.has_commit {
+            if !punctuation.handled && !self.phrase_prefix.is_empty() {
+                // The held phrase piece goes out ahead of the mark (`hold_phrase_progress`), which marks the key handled, so a mark with no Chinese form has to go out with it rather than be left to the host.
+                return Ok(literal_mark(value, punctuation.diagnostic));
+            }
             return Ok(punctuation);
         }
         finished.handled = true;
@@ -1162,12 +1784,38 @@ impl<E: InputEngine> Runtime<E> {
         Ok(finished)
     }
 
+    /// A `/` or `@` mode holding nothing but its prefix.
+    fn bare_mode_prefix(&self) -> bool {
+        matches!(self.cached.local_mode.as_str(), "command" | "mention")
+            && self.cached.editing_text.len() == 1
+    }
+
     fn punctuation_ascii(&mut self, value: u8) -> Result<EngineResult, RuntimeError> {
+        // A spelling symbol is input, as on the punctuation route: it extends the local mode in progress, and a scheme that spells with marks (Zhuyin's bopomofo keys) takes them whenever it lists them. The symbols that open a mode with nothing composed are the exception: there the host asked for the literal mark after weighing the surrounding text (a `/` after a digit), so it never opens a mode.
+        let spells = self.cached.local_mode != "none"
+            || (self.phrase_prefix.is_empty()
+                && scheme_type(self.cached.scheme)
+                    .is_some_and(|scheme| !scheme.opens_local_modes()));
+        if spells && self.cached.spelling_symbols.as_bytes().contains(&value) {
+            return self.engine.character(value, false);
+        }
+        if value == b'\'' && self.engine.takes_local_separator() {
+            return self.engine.character(value, false);
+        }
         // Keep the same highlighted-candidate completion semantics as normal
         // punctuation, but do not ask Engine to translate the trailing mark.
         // The Linux host has already applied its surrounding-text policy.
-        let mut finished = self.engine.finish(self.highlighted)?;
+        // A bare `/` or `@` commits as the literal prefix rather than its first row.
+        let mut finished = if self.bare_mode_prefix() {
+            self.engine.command(Command::CommitRaw)?
+        } else {
+            self.engine.finish(self.engine_index(self.highlighted))?
+        };
         if !finished.has_commit {
+            // As in `punctuation`: a held phrase piece takes the key, so the mark goes out with it.
+            if !self.phrase_prefix.is_empty() {
+                return Ok(literal_mark(value, finished.diagnostic));
+            }
             return Ok(finished);
         }
         finished.handled = true;
@@ -1258,22 +1906,40 @@ impl<E: InputEngine> Runtime<E> {
             self.highlighted = index;
             return Ok(self.transition(empty_result(true)));
         }
-        let commit_context = OutputContext {
-            scheme: self.cached.scheme,
-            local_mode: self.cached.local_mode.clone(),
-        };
         // Going back into the phrase, before the Engine sees the key: both rules replace what the
         // key would otherwise do.
         if let Some(transition) = self.retreat_phrase_selection(&action)? {
             return Ok(transition);
         }
         // What the reading held before the Engine saw this key. A selection that consumes part of
-        // it has to record the piece it took, and only the difference says what that was.
-        let reading_before = self.cached.editing_text.clone();
+        // it has to record the piece it took, and only the difference says what that was. Digits
+        // may become a selection after the Engine sees them, so all Character actions stay in the
+        // set; commands, punctuation and navigation never consume a candidate reading.
+        let selection_action = matches!(
+            &action,
+            Action::Character { .. }
+                | Action::Select(_)
+                | Action::SelectAnyCandidate(_)
+                | Action::SelectEdge(..)
+                | Action::SelectHighlighted
+        );
+        let reading_before =
+            (self.phrase_preedit && selection_action).then(|| self.cached.editing_text.clone());
         // A digit on the candidate page picks a candidate; the Engine is asked the same question as
         // for Select, so it can begin a phrase the same way.
         let mut selected_by_digit = false;
         let character_action = matches!(action, Action::Character { .. });
+        // Wubi top-commit (顶字): a letter typed after a complete four-letter code the Wubi table
+        // answered, unique or not, commits the first candidate and starts the next composition
+        // with that letter. The Engine caps a native Wubi code at four letters and would drop the
+        // fifth, so without this the user loses the key they typed. It is judged on the reading
+        // before the key, with the caret at its end: a caret moved back into the code is an edit
+        // of the code, not the start of the next character. A held phrase stays open, matching
+        // the reference's creating-word guard.
+        let wubi_top_commit = matches!(action, Action::Character { value, .. } if value.is_ascii_alphabetic())
+            && self.snapshot_valid
+            && self.phrase_prefix.is_empty()
+            && wubi_four_code_is_complete(&self.cached);
         let result = match action {
             Action::ResetCache => {
                 self.engine.reset_cache()?;
@@ -1286,7 +1952,24 @@ impl<E: InputEngine> Runtime<E> {
             }
             Action::Punctuation(value) => self.punctuation(value),
             Action::PunctuationAscii(value) => self.punctuation_ascii(value),
-            Action::Finish => self.engine.finish(self.highlighted),
+            // A bare `/` or `@` flushes as the literal prefix, as on the punctuation routes; finishing would commit the list's first row.
+            Action::Finish if self.bare_mode_prefix() => self.engine.command(Command::CommitRaw),
+            Action::Finish => self.engine.finish(self.engine_index(self.highlighted)),
+            Action::Character { value, shift } if wubi_top_commit => self
+                .engine
+                .select(self.engine_index(0))
+                .and_then(|committed| {
+                    self.engine.character(value, shift)?;
+                    Ok(committed)
+                }),
+            // A symbol that would open a mode behind a held phrase piece ends the phrase as punctuation instead, as on the punctuation route.
+            Action::Character { value, .. }
+                if !self.phrase_prefix.is_empty()
+                    && self.cached.local_mode == "none"
+                    && self.cached.spelling_symbols.as_bytes().contains(&value) =>
+            {
+                self.punctuation(value)
+            }
             Action::Character { value, shift } => {
                 self.engine.character(value, shift).and_then(|result| {
                     // The nine-key separator is a layout action, not Chinese quote punctuation.
@@ -1296,8 +1979,20 @@ impl<E: InputEngine> Runtime<E> {
                     if !result.handled && value.is_ascii_punctuation() {
                         return self.punctuation(value);
                     }
-                    // Let Engine consume numeric input (Unicode mode, nine-key, etc.) first.
+                    // Space the Engine let go over an open list, with nothing committed, is a pick of the highlighted row, as the Space command is (Zhuyin leaves it to the runtime; Korean commits its syllable first and so is not a pick).
+                    if !result.handled
+                        && !result.has_commit
+                        && value == b' '
+                        && self.cached.candidate_list_open
+                        && len > 0
+                    {
+                        return self.engine.select(self.engine_index(self.highlighted));
+                    }
+                    // Let Engine consume numeric input (Unicode mode, nine-key, etc.) first. A result that already committed (a Korean syllable the digit ended) is final: selecting now would replace that commit and lose the text. A digit the scheme spells with (a Zhuyin tone or phonetic key) is never a pick, even one the Engine let go: Zhuyin leaves 1-9 to selection only while its list is open, when they are not spelling symbols, so `0` there stays ㄢ.
                     if result.handled
+                        || result.has_commit
+                        || (self.cached.local_mode == "none"
+                            && self.cached.spelling_symbols.as_bytes().contains(&value))
                         || self.cached.nine_key
                         || !(b'1'..=b'9').contains(&value)
                         || len == 0
@@ -1310,32 +2005,58 @@ impl<E: InputEngine> Runtime<E> {
                         return Ok(empty_result(true));
                     }
                     selected_by_digit = true;
-                    self.engine.select(page_start + slot)
+                    self.engine.select(self.engine_index(page_start + slot))
                 })
             }
             Action::Command(command) => self.engine.command(command),
             Action::SegmentBackspace => self.engine.segment_command(SegmentCommand::Backspace),
             Action::SegmentMoveLeft => self.engine.segment_command(SegmentCommand::MoveLeft),
             Action::SegmentMoveRight => self.engine.segment_command(SegmentCommand::MoveRight),
-            Action::Select(id) => self.engine.select(id.index),
-            Action::SelectAnyCandidate(id) => self.engine.select(id.index),
-            Action::SelectEdge(id, edge) => self.engine.select_edge(id.index, edge),
-            Action::PinCandidate(id) => self.engine.pin_candidate(id.index),
-            Action::RemoveCandidate(id) => self.engine.remove_candidate(id.index),
+            Action::Select(id) => self.engine.select(self.engine_index(id.index)),
+            Action::SelectAnyCandidate(id) => self.engine.select(self.engine_index(id.index)),
+            Action::SelectEdge(id, edge) => {
+                self.engine.select_edge(self.engine_index(id.index), edge)
+            }
+            Action::PinCandidate(id) => self.engine.pin_candidate(self.engine_index(id.index)),
+            Action::RemoveCandidate(id) => {
+                self.engine.remove_candidate(self.engine_index(id.index))
+            }
             Action::FixCandidatePosition(id, position) => {
                 if !(1..=5).contains(&position) {
                     return Err(RuntimeError::Engine(
                         "Candidate position must be between 1 and 5".into(),
                     ));
                 }
-                self.engine.fix_candidate_position(id.index, position)
+                self.engine
+                    .fix_candidate_position(self.engine_index(id.index), position)
             }
-            Action::ClearCandidatePosition(id) => self.engine.clear_candidate_position(id.index),
+            Action::ClearCandidatePosition(id) => self
+                .engine
+                .clear_candidate_position(self.engine_index(id.index)),
             Action::ChooseNineKeySpelling(id) => self.engine.choose_nine_key_spelling(id.index),
-            Action::SelectHighlighted if len > 0 => self.engine.select(self.highlighted),
+            // A scheme that spells with Space lists it among its spelling symbols (Zhuyin's first tone, or opening its list with no syllable pending), and then the Space command is that key rather than a pick of the highlighted row.
+            Action::SelectHighlighted
+                if self.cached.spelling_symbols.as_bytes().contains(&b' ') =>
+            {
+                self.engine.character(b' ', false)
+            }
+            Action::SelectHighlighted if len > 0 => {
+                self.engine.select(self.engine_index(self.highlighted))
+            }
             Action::SelectHighlighted => self.engine.command(Command::CommitCandidate),
             _ => return Ok(self.transition(empty_result(false))),
         };
+        // Keep the pre-refresh mode only when this action can produce a commit. Most keystrokes
+        // leave the composition open, so copying local_mode for them is wasted work. A held phrase
+        // and the automatic Wubi top-commit can produce a commit after the Engine result itself
+        // says otherwise.
+        let needs_commit_context = result.as_ref().is_ok_and(|result| result.has_commit)
+            || !self.phrase_prefix.is_empty()
+            || (character_action
+                && self.snapshot_valid
+                && self.cached.wubi_unique_four_code
+                && self.phrase_prefix.is_empty());
+        let commit_context = needs_commit_context.then(|| self.output_context());
         let refresh = self.refresh();
         let mut result = result?;
         if let Err(error) = refresh {
@@ -1351,34 +2072,46 @@ impl<E: InputEngine> Runtime<E> {
             && self.cached.wubi_unique_four_code
             && self.phrase_prefix.is_empty()
         {
-            result = self.engine.select(0)?;
-            self.refresh()?;
+            result = self.engine.select(self.engine_index(0))?;
+            if let Err(error) = self.refresh() {
+                result.diagnostic = format!("Candidate refresh failed: {error}");
+            }
         }
         // The Engine takes what it used off the front of the reading, so what is gone from the
         // front is what the selection consumed. A reading that did not simply shrink - a special
         // mode rewriting it, a fallback replacing it - leaves nothing to restore, and that
         // selection is recorded as unretractable rather than guessed at.
         let consumed = reading_before
-            .strip_suffix(self.cached.editing_text.as_str())
-            .unwrap_or("")
-            .to_owned();
-        let picked = selected_by_digit
-            || matches!(
-                action,
-                Action::Select(_)
-                    | Action::SelectAnyCandidate(_)
-                    | Action::SelectEdge(..)
-                    | Action::SelectHighlighted
-            );
+            .as_deref()
+            .and_then(|reading| reading.strip_suffix(self.cached.editing_text.as_str()))
+            .unwrap_or("");
+        let picked = selected_by_digit || selection_action;
         // Escape throws the whole composition away, the chosen pieces with it - the reference's
         // _HandleCancel clears `word_for_creating_word` in the same breath.
         let discarded = matches!(action, Action::Command(Command::Cancel));
-        self.hold_phrase_progress(picked, discarded, &consumed, &mut result);
+        // Segment editing on an emptied reading leaves the held phrase for the next segment key or Backspace, instead of sending it to the document (the reference's `keep_creating_word_after_empty_raw`).
+        let keep_empty = matches!(
+            action,
+            Action::SegmentBackspace | Action::SegmentMoveLeft | Action::SegmentMoveRight
+        );
+        self.hold_phrase_progress(picked, discarded, keep_empty, consumed, &mut result);
         let mut transition = self.transition(result);
-        if transition.commit.is_some() {
-            transition.commit_context = Some(commit_context);
+        if let Some(commit_context) = commit_context {
+            if transition.commit.is_some() {
+                transition.commit_context = Some(commit_context);
+            }
         }
         Ok(transition)
+    }
+}
+
+/// `value` committed as it is, for a mark that has to leave together with a held phrase piece.
+fn literal_mark(value: u8, diagnostic: String) -> EngineResult {
+    EngineResult {
+        handled: true,
+        has_commit: true,
+        commit: char::from(value).to_string(),
+        diagnostic,
     }
 }
 
@@ -1389,4 +2122,23 @@ pub(crate) fn empty_result(handled: bool) -> EngineResult {
         commit: String::new(),
         diagnostic: String::new(),
     }
+}
+
+/// The reference Engine's `wubi_four_code_is_complete`, read off the snapshot this Engine already
+/// publishes: the guards of `wubi_unique_four_code` without the candidate count. The code is a
+/// native Wubi one (not dedicated English, no local mode, not answered by the pinyin fallback), it
+/// is exactly the four letters the Wubi scheme caps a table-answered code at, the caret is at its
+/// end, and there is a candidate to commit: a four-letter spelling no row matched was not answered
+/// by the table, and committing nothing would still drop the key.
+pub(crate) fn wubi_four_code_is_complete(snapshot: &EngineSnapshot) -> bool {
+    const WUBI_COMPLETE_CODE_LENGTH: usize = 4;
+    scheme_type(snapshot.scheme) == Some(SchemeType::Wubi)
+        && !snapshot.dedicated_english
+        && snapshot.local_mode == "none"
+        && !snapshot.nine_key
+        && !snapshot.answered_by_pinyin_fallback
+        && snapshot.editing_text.len() == WUBI_COMPLETE_CODE_LENGTH
+        && msime_client_core::is_ascii_alphabetic(&snapshot.editing_text)
+        && snapshot.caret_position == WUBI_COMPLETE_CODE_LENGTH
+        && !snapshot.candidates.is_empty()
 }

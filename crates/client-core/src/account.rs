@@ -29,6 +29,34 @@ const MAX_CHAT_MESSAGE_BYTES: usize = 16 * 1024;
 const MAX_CHAT_REQUEST_BYTES: usize = 64 * 1024;
 const MAX_CHAT_RESPONSE_BYTES: usize = 16 * 1024;
 const REFRESH_EARLY_SECONDS: u64 = 30;
+/// Backend bearer sessions are short-lived; reject malformed responses that would create a
+/// practically permanent local session.
+const MAX_SESSION_SECONDS: u64 = 86_400 * 30;
+
+pub(crate) fn valid_model_catalog<'a>(
+    models: impl IntoIterator<Item = &'a str>,
+    default_model: &str,
+    maximum_models: usize,
+    maximum_id_bytes: usize,
+) -> bool {
+    let mut ids = Vec::with_capacity(maximum_models);
+    ids.extend(models);
+    !ids.is_empty()
+        && ids.len() <= maximum_models
+        && !default_model.is_empty()
+        && crate::text::is_bounded_text(default_model, maximum_id_bytes)
+        && ids.contains(&default_model)
+        && ids
+            .iter()
+            .all(|id| !id.is_empty() && crate::text::is_bounded_text(id, maximum_id_bytes))
+        && {
+            let mut unique = std::collections::HashSet::with_capacity(ids.len());
+            for id in &ids {
+                unique.insert(id);
+            }
+            unique.len() == ids.len()
+        }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AccountIdentity {
@@ -40,6 +68,12 @@ pub struct AccountUser {
     pub id: String,
     pub display_name: String,
     pub created_at: String,
+    /// The verified email of the linked Google identity. Absent for other sign-ins, from older backends, and in sessions saved before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    /// The uploaded avatar's public URL, else the Google picture; absent when the user has neither. Fetched only through [`fetch_account_avatar`], which accepts the two hosts it can name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -301,6 +335,15 @@ pub enum AccountError {
     Storage,
     #[error("account operation was cancelled")]
     Cancelled,
+    /// The server's content screening refused the upload (`422 blocked_content`). The text has to change; the service itself is up.
+    #[error("content contains words that may not be published")]
+    BlockedContent,
+    /// The server could not screen the upload right now (`503 screening_unavailable`); the same request can be sent again later.
+    #[error("content screening is temporarily unavailable")]
+    ScreeningUnavailable,
+    /// The account is banned (`403 account_banned`).
+    #[error("account is banned")]
+    Banned,
 }
 
 impl AccountError {
@@ -313,6 +356,46 @@ impl AccountError {
             Self::Cancelled => "account_cancelled",
             Self::Conflict => "account_conflict",
             Self::NotFound | Self::Unavailable => "account_unavailable",
+            Self::BlockedContent => "account_blocked_content",
+            Self::ScreeningUnavailable => "account_screening_unavailable",
+            Self::Banned => "account_banned",
+        }
+    }
+
+    /// The Chinese sentence a host shows for a refusal the user can act on (`blocked_content`, `screening_unavailable`, `account_banned`), or `None` for errors the host words itself.
+    pub fn moderation_message(&self) -> Option<&'static str> {
+        match self {
+            Self::BlockedContent => Some("内容包含不允许发布的词语，请修改后再提交"),
+            Self::ScreeningUnavailable => Some("审核服务暂时不可用，请稍后重试"),
+            Self::Banned => Some("该账号已被封禁，暂时无法使用账号相关功能"),
+            _ => None,
+        }
+    }
+
+    /// The error for a failed response a host received itself: `status` is the HTTP status and `body` the response body (the server's `{"error":{"code":...}}`), mapped exactly as this crate's own requests map theirs.
+    pub fn from_http_response(status: u16, body: &[u8]) -> Self {
+        let status = StatusCode::from_u16(status).unwrap_or(StatusCode::SERVICE_UNAVAILABLE);
+        Self::from_response(status, body)
+    }
+
+    /// Maps a failed response by the server's error code (`{"error":{"code":...}}`) where it names a condition the caller must tell apart, and by the status otherwise.
+    fn from_response(status: StatusCode, body: &[u8]) -> Self {
+        #[derive(Deserialize)]
+        struct Envelope {
+            error: Detail,
+        }
+        #[derive(Deserialize)]
+        struct Detail {
+            code: String,
+        }
+        let code = serde_json::from_slice::<Envelope>(body)
+            .map(|envelope| envelope.error.code)
+            .unwrap_or_default();
+        match code.as_str() {
+            "blocked_content" => Self::BlockedContent,
+            "screening_unavailable" => Self::ScreeningUnavailable,
+            "account_banned" => Self::Banned,
+            _ => Self::from_status(status),
         }
     }
 
@@ -333,13 +416,24 @@ impl AccountError {
 // The shared data types and limits stay here; the behaviour is split by what it
 // does. Each part is re-exported, so `client_core::account::X` still resolves to
 // everything it did when this was one file.
+mod anonymous;
 mod api;
+mod avatar;
 mod client;
+mod file_storage;
+mod google;
 mod session;
 mod validate;
 
+pub use anonymous::{
+    ensure_anonymous_account, AnonymousSessionStorage, ANONYMOUS_ACCOUNT_FILE,
+    ANONYMOUS_SESSION_FILE,
+};
 pub use api::*;
+pub use avatar::*;
 pub use client::*;
+pub use file_storage::*;
+pub use google::*;
 pub use session::*;
 pub use validate::*;
 

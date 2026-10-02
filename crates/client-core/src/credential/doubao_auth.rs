@@ -1,16 +1,6 @@
 //! Shared authentication policy for credential probes and native recognition.
 
-fn usable(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 8192
-        && !value.chars().any(char::is_control)
-        && !value.starts_with('<')
-        && !value.chars().all(|c| c == '*')
-}
-
-/// Produces sensitive request headers; callers must not log or persist them.
-/// An absent historical mode infers legacy auth from a usable App ID. Explicit
-/// API-key mode always ignores stale App IDs, including masked placeholders.
+/// Produces sensitive request headers; callers must not log or persist them. An empty mode means API-key auth, which always ignores stale App IDs, including masked placeholders.
 pub fn headers(
     mode: &str,
     app_id: &str,
@@ -19,12 +9,14 @@ pub fn headers(
 ) -> Option<Vec<(&'static str, String)>> {
     let (app_id, token, resource_id) = (app_id.trim(), token.trim(), resource_id.trim());
     let legacy = match mode.trim() {
-        "api_key" => false,
+        "api_key" | "" => false,
         "legacy" => true,
-        "" => usable(app_id),
         _ => return None,
     };
-    if !usable(token) || !usable(resource_id) || (legacy && !usable(app_id)) {
+    if !crate::credential::usable_token(token)
+        || !crate::credential::usable_token(resource_id)
+        || (legacy && !crate::credential::usable_token(app_id))
+    {
         return None;
     }
     let mut headers = vec![
@@ -45,12 +37,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn explicit_mode_wins_and_legacy_documents_remain_compatible() {
+    fn explicit_mode_wins_and_empty_mode_means_api_key() {
         for (mode, app, legacy) in [
             ("api_key", "stale-app", false),
             ("api_key", "<stored>", false),
             ("legacy", "synthetic-app", true),
-            ("", "synthetic-app", true),
+            ("", "synthetic-app", false),
             ("", "", false),
         ] {
             let result = headers(mode, app, " synthetic-token ", " fixture-resource ").unwrap();

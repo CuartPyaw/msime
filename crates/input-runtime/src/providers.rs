@@ -3,15 +3,26 @@
 //! keystroke path.
 
 use super::*;
+use msime_engine::SchemeType;
 
 /// Build the default cloud request for an eligible online query. Hosts perform
 /// the actual network I/O through their injected transport and then submit the
 /// result to `Runtime::apply_online_candidate`.
 pub fn cloud_request_url(query: &OnlineQuery) -> Option<String> {
-    if !query.cloud_eligible || !query.cloud_candidates {
+    if !cloud_query_allowed(query) {
         return None;
     }
-    msime_client_core::cloud::candidates::build_google_url(&query.query_text, query.scheme == 3)
+    msime_client_core::cloud::candidates::build_google_url(
+        &query.query_text,
+        SchemeType::from_u8(query.scheme) == Some(SchemeType::JapaneseRomaji),
+    )
+}
+
+/// Whether a cloud provider may answer `query`: the query asks for cloud candidates and its scheme is one a cloud provider converts. Korean syllables, for one, are already the text, so a query claiming eligibility for them is refused, as is one naming a scheme the Engine does not have.
+fn cloud_query_allowed(query: &OnlineQuery) -> bool {
+    query.cloud_eligible
+        && query.cloud_candidates
+        && SchemeType::from_u8(query.scheme).is_some_and(SchemeType::cloud_eligible)
 }
 
 /// Convert a host-fetched Google response into a bounded online result.
@@ -19,7 +30,7 @@ pub fn cloud_candidate_from_response(
     query: OnlineQuery,
     response: &[u8],
 ) -> Option<OnlineCandidate> {
-    if !query.cloud_eligible || !query.cloud_candidates {
+    if !cloud_query_allowed(&query) {
         return None;
     }
     let text = msime_client_core::cloud::candidates::parse_google_response(response)?;
@@ -53,6 +64,71 @@ fn with_terminator(request: &str) -> String {
     line
 }
 
+#[cfg(unix)]
+fn valid_ai_provider_endpoint(provider: &str, endpoint: &str) -> bool {
+    !provider.is_empty()
+        && msime_client_core::is_bounded_text(provider, 64)
+        && !endpoint.is_empty()
+        && msime_client_core::is_bounded_text(endpoint, 2048)
+}
+
+#[cfg(unix)]
+fn provider_path_has_no_symlink_ancestors(path: &Path) -> bool {
+    for ancestor in path.ancestors() {
+        if ancestor.as_os_str().is_empty() {
+            continue;
+        }
+        match std::fs::symlink_metadata(ancestor) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                #[cfg(target_os = "macos")]
+                if ancestor == Path::new("/tmp") || ancestor == Path::new("/var") {
+                    continue;
+                }
+                return false;
+            }
+            Ok(_) => {}
+            Err(_) => return false,
+        }
+    }
+    true
+}
+
+// Read one newline-delimited response before the deadline, retaining only the
+// line itself and refusing to grow the buffer past the provider contract.
+#[cfg(unix)]
+fn read_bounded_line(
+    stream: &mut UnixStream,
+    deadline: std::time::Instant,
+    response_limit: usize,
+    accept_eof: bool,
+) -> Option<String> {
+    let mut bytes = Vec::with_capacity(response_limit.min(1024));
+    loop {
+        let remaining = deadline.checked_duration_since(std::time::Instant::now())?;
+        if remaining.is_zero() {
+            return None;
+        }
+        stream.set_read_timeout(Some(remaining)).ok()?;
+        let mut chunk = [0_u8; 1024];
+        let count = match stream.read(&mut chunk) {
+            Ok(0) if accept_eof => return String::from_utf8(bytes).ok(),
+            Ok(0) => return None,
+            Ok(count) => count,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return None,
+        };
+        let end = chunk[..count].iter().position(|byte| *byte == b'\n');
+        let consumed = end.map_or(count, |index| index + 1);
+        if bytes.len() + consumed > response_limit {
+            return None;
+        }
+        bytes.extend_from_slice(&chunk[..consumed]);
+        if end.is_some() {
+            return String::from_utf8(bytes).ok();
+        }
+    }
+}
+
 // One-shot panel providers have a fixed transfer deadline, including writes.
 // Check the response envelope before appending bytes, not after allocating it.
 #[cfg(unix)]
@@ -78,30 +154,7 @@ fn exchange_panel_request(
             Err(_) => return None,
         }
     }
-    let mut bytes = Vec::new();
-    loop {
-        let remaining = deadline.checked_duration_since(std::time::Instant::now())?;
-        if remaining.is_zero() {
-            return None;
-        }
-        stream.set_read_timeout(Some(remaining)).ok()?;
-        let mut chunk = [0_u8; 1024];
-        let count = match stream.read(&mut chunk) {
-            Ok(0) => return String::from_utf8(bytes).ok(),
-            Ok(count) => count,
-            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(_) => return None,
-        };
-        let end = chunk[..count].iter().position(|byte| *byte == b'\n');
-        let consumed = end.map_or(count, |index| index + 1);
-        if bytes.len() + consumed > response_limit {
-            return None;
-        }
-        bytes.extend_from_slice(&chunk[..consumed]);
-        if end.is_some() {
-            return String::from_utf8(bytes).ok();
-        }
-    }
+    read_bounded_line(stream, deadline, response_limit, true)
 }
 
 // Retain incomplete UTF-8/JSON lines across polling timeouts. Bound the
@@ -158,6 +211,9 @@ impl UnixSocketProvider {
     pub(crate) fn connect(&self) -> Option<UnixStream> {
         use std::os::unix::fs::{FileTypeExt, MetadataExt};
 
+        if !provider_path_has_no_symlink_ancestors(&self.path) {
+            return None;
+        }
         let parent = self.path.parent()?;
         let parent_metadata = std::fs::symlink_metadata(parent).ok()?;
         let socket_metadata = std::fs::symlink_metadata(&self.path).ok()?;
@@ -192,13 +248,15 @@ impl UnixSocketProvider {
         if query.query_text.len() > 4096 || query.identity.len() > 4096 {
             return None;
         }
-        let timeout =
-            if query.ai_eligible && query.ai_assistant.as_ref().is_some_and(|ai| ai.enabled) {
-                // Windows ai_assistant.cpp permits eight seconds for model inference.
-                std::time::Duration::from_secs(8)
-            } else {
-                std::time::Duration::from_millis(500)
-            };
+        let timeout = if query.ai_eligible
+            && !query.ai_cache_only
+            && query.ai_assistant.as_ref().is_some_and(|ai| ai.enabled)
+        {
+            // Windows ai_assistant.cpp permits eight seconds for model inference, and the provider holds that budget itself. The extra second covers its worker start-up so a reply it accepted at the deadline is not dropped here; a cache probe never waits on the network.
+            std::time::Duration::from_secs(9)
+        } else {
+            std::time::Duration::from_millis(500)
+        };
         let mut stream = self.connect()?;
         stream
             .set_write_timeout(Some(std::time::Duration::from_millis(500)))
@@ -214,28 +272,7 @@ impl UnixSocketProvider {
         // One response deadline: partial writes by the provider must not
         // restart the inference timeout or grow an unbounded line buffer.
         let deadline = std::time::Instant::now() + timeout;
-        let mut bytes = Vec::new();
-        loop {
-            let remaining = deadline.checked_duration_since(std::time::Instant::now())?;
-            if remaining.is_zero() {
-                return None;
-            }
-            stream.set_read_timeout(Some(remaining)).ok()?;
-            let mut chunk = [0_u8; 1024];
-            let count = stream.read(&mut chunk).ok()?;
-            if count == 0 {
-                return None;
-            }
-            let end = chunk[..count].iter().position(|byte| *byte == b'\n');
-            bytes.extend_from_slice(&chunk[..end.map_or(count, |index| index + 1)]);
-            if bytes.len() > 16384 {
-                return None;
-            }
-            if end.is_some() {
-                break;
-            }
-        }
-        let line = String::from_utf8(bytes).ok()?;
+        let line = read_bounded_line(&mut stream, deadline, 16_384, false)?;
         #[derive(Deserialize)]
         struct Reply {
             text: String,
@@ -254,19 +291,14 @@ impl UnixSocketProvider {
         if replies.len() > 11 {
             return None;
         }
-        let ai_limit = query
-            .ai_assistant
-            .as_ref()
-            .filter(|ai| ai.enabled)
-            .map_or(0, |ai| usize::from(ai.candidate_limit.clamp(1, 10)));
+        let ai_limit = query.ai_candidate_limit();
         let limits = [1, ai_limit];
         let mut source_counts = [0; 2];
-        let mut candidates = Vec::new();
+        let mut candidates = Vec::with_capacity(replies.len());
         for reply in replies {
             if reply.text.is_empty()
-                || reply.text.len() > 4096
+                || !msime_client_core::is_bounded_text(&reply.text, 4096)
                 || reply.source > 1
-                || reply.text.chars().any(char::is_control)
             {
                 return None;
             }
@@ -275,26 +307,38 @@ impl UnixSocketProvider {
             {
                 continue;
             }
+            // A provider may repeat a candidate while merging multiple backends. Duplicates do
+            // not occupy a slot in the runtime, so discard them before enforcing the per-source
+            // quota; otherwise one repeated value can hide a distinct candidate that still fits.
+            if candidates.iter().any(|(text, _)| text == &reply.text) {
+                continue;
+            }
             let source = usize::from(reply.source);
             source_counts[source] += 1;
             if source_counts[source] > limits[source] {
                 return None;
             }
-            if !candidates.iter().any(|(text, _)| text == &reply.text) {
-                candidates.push((reply.text, reply.source));
-            }
+            candidates.push((reply.text, reply.source));
         }
         Some(candidates)
     }
 
     pub fn translate(&self, query: TranslationQuery) -> Option<Vec<TranslationResult>> {
+        const MAX_SENTENCE_CHARS: usize = 512;
+        let candidate_limit = if query.sentence { 1 } else { 9 };
         if query.candidates.is_empty()
-            || query.candidates.len() > 9
+            || query.candidates.len() > candidate_limit
             || query.candidates.iter().any(|text| {
-                text.is_empty() || text.len() > 4096 || text.chars().any(char::is_control)
+                text.is_empty()
+                    || !msime_client_core::is_bounded_text(text, 4096)
+                    || (query.sentence && text.chars().count() > MAX_SENTENCE_CHARS)
             })
         {
             return None;
+        }
+        // Translation switched off: no candidate text leaves the host, not even to the local provider.
+        if query.provider == TranslationService::Off {
+            return Some(Vec::new());
         }
         let mut stream = self.connect()?;
         stream
@@ -311,40 +355,17 @@ impl UnixSocketProvider {
         // Leave room for the provider's six-second translation batch budget.
         // A partial response cannot renew this deadline or grow without bound.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
-        let mut bytes = Vec::new();
-        loop {
-            let remaining = deadline.checked_duration_since(std::time::Instant::now())?;
-            if remaining.is_zero() {
-                return None;
-            }
-            stream.set_read_timeout(Some(remaining)).ok()?;
-            let mut chunk = [0_u8; 1024];
-            let count = stream.read(&mut chunk).ok()?;
-            if count == 0 {
-                return None;
-            }
-            let end = chunk[..count].iter().position(|byte| *byte == b'\n');
-            bytes.extend_from_slice(&chunk[..end.map_or(count, |index| index + 1)]);
-            if bytes.len() > 131_072 {
-                return None;
-            }
-            if end.is_some() {
-                break;
-            }
-        }
-        let line = String::from_utf8(bytes).ok()?;
+        let line = read_bounded_line(&mut stream, deadline, 131_072, false)?;
         #[derive(Deserialize)]
         struct Reply {
             translations: Vec<TranslationResult>,
         }
         let reply: Reply = serde_json::from_str(&line).ok()?;
-        if reply.translations.len() > 9
+        if reply.translations.len() > candidate_limit
             || reply.translations.iter().any(|item| {
-                item.text.len() > 4096
+                !msime_client_core::is_bounded_text(&item.text, 4096)
                     || item.translation.is_empty()
-                    || item.translation.len() > 4096
-                    || item.text.chars().any(char::is_control)
-                    || item.translation.chars().any(char::is_control)
+                    || !msime_client_core::is_bounded_text(&item.translation, 4096)
                     || !query.candidates.contains(&item.text)
             })
         {
@@ -387,7 +408,7 @@ impl UnixSocketProvider {
         let result = serde_json::from_str::<CredentialTestResult>(&line).ok()?;
         (!result.message.is_empty()
             && result.message.len() <= 1024
-            && !result.message.chars().any(char::is_control))
+            && !msime_client_core::has_disallowed_control_with_options(&result.message, false))
         .then_some(result)
     }
 
@@ -400,13 +421,7 @@ impl UnixSocketProvider {
     /// the request. `provider` and `endpoint` come from the settings page and the
     /// provider refuses unless its private configuration names the same two.
     pub fn ai_models(&self, provider: &str, endpoint: &str) -> Option<Vec<String>> {
-        if provider.is_empty()
-            || provider.len() > 64
-            || endpoint.is_empty()
-            || endpoint.len() > 2048
-            || provider.chars().any(char::is_control)
-            || endpoint.chars().any(char::is_control)
-        {
+        if !valid_ai_provider_endpoint(provider, endpoint) {
             return None;
         }
         let request = json!({
@@ -429,9 +444,10 @@ impl UnixSocketProvider {
         let reply: Reply = serde_json::from_str(&line).ok()?;
         (reply.models.len() <= 128
             && !reply.models.is_empty()
-            && reply.models.iter().all(|model| {
-                !model.is_empty() && model.len() <= 256 && !model.chars().any(char::is_control)
-            }))
+            && reply
+                .models
+                .iter()
+                .all(|model| !model.is_empty() && msime_client_core::is_bounded_text(model, 256)))
         .then_some(reply.models)
     }
 
@@ -449,18 +465,12 @@ impl UnixSocketProvider {
         prompt: &str,
         text: &str,
     ) -> Option<String> {
-        if provider.is_empty()
-            || provider.len() > 64
-            || endpoint.is_empty()
-            || endpoint.len() > 2048
+        if !valid_ai_provider_endpoint(provider, endpoint)
             || model.is_empty()
-            || model.len() > 256
+            || !msime_client_core::is_bounded_text(model, 256)
             || text.trim().is_empty()
             || text.len() > 8192
             || prompt.len() > 8192
-            || [provider, endpoint, model]
-                .iter()
-                .any(|value| value.chars().any(char::is_control))
         {
             return None;
         }
@@ -494,9 +504,7 @@ impl UnixSocketProvider {
         let polished = reply.text.trim();
         (!polished.is_empty()
             && polished.len() <= 16_384
-            && !polished
-                .chars()
-                .any(|character| character.is_control() && character != '\n'))
+            && !msime_client_core::has_disallowed_control_with_allowed(polished, &['\n']))
         .then(|| polished.to_owned())
     }
 
@@ -532,14 +540,12 @@ impl UnixSocketProvider {
         let reply: Reply = serde_json::from_str(&line).ok()?;
         if reply.candidates.len() > 12
             || reply.candidates.iter().any(|candidate| {
-                candidate.is_empty()
-                    || candidate.len() > 4096
-                    || candidate.chars().any(char::is_control)
+                candidate.is_empty() || !msime_client_core::is_bounded_text(candidate, 4096)
             })
         {
             return None;
         }
-        msime_engine_bridge::handwriting_order_candidates(&reply.candidates).ok()
+        msime_engine::host::handwriting_order_candidates(&reply.candidates).ok()
     }
 
     /// Search the user-owned emoji catalog. Results stay outside the IBus
@@ -616,10 +622,7 @@ impl UnixSocketProvider {
         .filter(|text| !text.is_empty())
     }
 
-    /// Run a newline-delimited voice provider stream. Provider updates use
-    /// `{text, type:"partial"}` (or `interim`) and the terminal update uses
-    /// `{text, type:"final"}`. A legacy single `{text}` response is treated
-    /// as final. Only bounded UTF-8 text crosses the host boundary.
+    /// Run a newline-delimited voice provider stream. Every event carries the request `generation`. Provider updates use `{text, type:"partial"}` (or `interim`) and the terminal update uses `{text, type:"final"}`. Only bounded UTF-8 text crosses the host boundary.
     #[cfg(unix)]
     pub fn voice_stream_with_options_cancelled(
         &self,
@@ -661,8 +664,54 @@ impl UnixSocketProvider {
         options: &Value,
         cancelled: Option<&AtomicBool>,
         update: &mut dyn FnMut(&str, bool),
+        status: Option<&mut dyn FnMut(&str)>,
+        level: Option<&mut dyn FnMut(f32)>,
+    ) -> Option<String> {
+        self.voice_stream_with_options_diagnosed(
+            language, generation, options, cancelled, update, status, level,
+        )
+        .ok()
+    }
+
+    /// Same stream as `voice_stream_with_options_feedback`, but a provider that refuses the recording with `voice_dependency_missing` and a known `detail` (`"websockets"`, `"recorder"` or `"local_asr"`) comes back as `Err(Some(detail))`, so hosts can tell the user what to install. Every other failure, including an unknown detail, is `Err(None)`; provider-supplied text never crosses this boundary.
+    #[cfg(unix)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn voice_stream_with_options_diagnosed(
+        &self,
+        language: &str,
+        generation: u64,
+        options: &Value,
+        cancelled: Option<&AtomicBool>,
+        update: &mut dyn FnMut(&str, bool),
+        status: Option<&mut dyn FnMut(&str)>,
+        level: Option<&mut dyn FnMut(f32)>,
+    ) -> Result<String, Option<&'static str>> {
+        let mut missing_dependency = None;
+        self.voice_stream_session(
+            language,
+            generation,
+            options,
+            cancelled,
+            update,
+            status,
+            level,
+            &mut missing_dependency,
+        )
+        .ok_or(missing_dependency)
+    }
+
+    #[cfg(unix)]
+    #[allow(clippy::too_many_arguments)]
+    fn voice_stream_session(
+        &self,
+        language: &str,
+        generation: u64,
+        options: &Value,
+        cancelled: Option<&AtomicBool>,
+        update: &mut dyn FnMut(&str, bool),
         mut status: Option<&mut dyn FnMut(&str)>,
         mut level: Option<&mut dyn FnMut(f32)>,
+        missing_dependency: &mut Option<&'static str>,
     ) -> Option<String> {
         if generation == 0
             || language.len() > 64
@@ -684,7 +733,7 @@ impl UnixSocketProvider {
                 query.insert("options".to_owned(), options.clone());
             }
         }
-        let mut events = Vec::new();
+        let mut events = Vec::with_capacity(2);
         if status.is_some() {
             events.push("status");
         }
@@ -705,24 +754,23 @@ impl UnixSocketProvider {
         // Up to ten minutes of capture, two sixty-second ASR attempts and
         // optional polishing. Cancellation is checked at least every 100ms.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(730);
-        let mut pending = Vec::new();
+        let mut pending = Vec::with_capacity(16_384);
         loop {
             let line = read_voice_provider_line(&mut stream, &mut pending, deadline, cancelled)?;
             let value = serde_json::from_str::<Value>(line.trim_end()).ok()?;
-            // Explicit stream events belong to the request generation. Keep
-            // the documented bare terminal response from pre-stream
-            // providers, but do not let a typed event omit its binding.
-            let event_generation = value.get("generation").and_then(Value::as_u64);
-            if event_generation != Some(generation) {
-                // Keep compatibility with pre-stream providers, which return
-                // a bare {"text": ...} terminal object, but require a binding
-                // for every explicitly typed stream event.
-                let typed_event = value.get("type").is_some() || value.get("event").is_some();
-                if typed_event || event_generation.is_some() {
-                    return None;
-                }
+            // Every stream event belongs to the request generation.
+            if value.get("generation").and_then(Value::as_u64) != Some(generation) {
+                return None;
             }
             if value.get("ok").and_then(Value::as_bool) == Some(false) {
+                if value.get("error").and_then(Value::as_str) == Some("voice_dependency_missing") {
+                    *missing_dependency = match value.get("detail").and_then(Value::as_str) {
+                        Some("websockets") => Some("websockets"),
+                        Some("recorder") => Some("recorder"),
+                        Some("local_asr") => Some("local_asr"),
+                        _ => None,
+                    };
+                }
                 return None;
             }
             let text = value.get("text").and_then(Value::as_str).unwrap_or("");
@@ -880,42 +928,56 @@ impl UnixSocketProvider {
 /// receives only copied query data. Results remain inert until the owner
 /// applies them through Runtime::apply_online_candidate, which revalidates
 /// session identity and Engine generation.
+///
+/// Only the newest query waits: a submit overwrites whatever is pending, so a
+/// provider that is busy for seconds still answers the text the user has now,
+/// not the first intermediate one that happened to fit a queue.
 pub struct OnlineProviderWorker {
-    requests: Option<mpsc::SyncSender<OnlineQuery>>,
-    results: mpsc::Receiver<OnlineCandidate>,
+    pending: Arc<Mutex<Option<OnlineQuery>>>,
+    wake: Option<mpsc::SyncSender<()>>,
+    /// A latest-value slot keeps completed provider responses bounded too.
+    /// An unbounded channel here would let a host that stopped polling grow
+    /// memory once for every completed query, even though only the newest
+    /// generation can ever be applied.
+    results: Arc<Mutex<Option<OnlineCandidate>>>,
     join: Option<JoinHandle<()>>,
 }
 
 impl OnlineProviderWorker {
     pub fn spawn<F>(capacity: usize, provider: F) -> Result<Self, &'static str>
     where
-        F: Fn(OnlineQuery) -> Option<(String, u8)> + Send + 'static,
+        F: Fn(&OnlineQuery) -> Option<(String, u8)> + Send + 'static,
     {
         Self::spawn_with_debounce(capacity, std::time::Duration::ZERO, provider)
     }
 
+    /// `capacity` is kept for API stability and must be positive; the worker
+    /// holds a single latest-value slot regardless.
     pub fn spawn_with_debounce<F>(
         capacity: usize,
         debounce: std::time::Duration,
         provider: F,
     ) -> Result<Self, &'static str>
     where
-        F: Fn(OnlineQuery) -> Option<(String, u8)> + Send + 'static,
+        F: Fn(&OnlineQuery) -> Option<(String, u8)> + Send + 'static,
     {
         if capacity == 0 {
             return Err("provider queue capacity must be positive");
         }
-        let (requests, incoming) = mpsc::sync_channel::<OnlineQuery>(capacity);
-        let (outgoing, results) = mpsc::channel();
+        let pending = Arc::new(Mutex::new(None::<OnlineQuery>));
+        let slot = Arc::clone(&pending);
+        let results = Arc::new(Mutex::new(None::<OnlineCandidate>));
+        let result_slot = Arc::clone(&results);
+        // A wake-up signal only; the query itself lives in the slot. A full
+        // signal channel already promises the worker will look again.
+        let (wake, incoming) = mpsc::sync_channel::<()>(1);
         let join = thread::Builder::new()
             .name("msime-online-provider".into())
             .spawn(move || {
-                while let Ok(mut query) = incoming.recv() {
-                    // Coalesce bursts from one composition: Windows waits for
-                    // input to settle instead of querying every intermediate text.
-                    while let Ok(newest) = incoming.try_recv() {
-                        query = newest;
-                    }
+                while incoming.recv().is_ok() {
+                    // Windows waits for input to settle instead of querying
+                    // every intermediate text; a submit during the wait just
+                    // replaces the query read when it ends.
                     if !debounce.is_zero() {
                         let deadline = std::time::Instant::now() + debounce;
                         loop {
@@ -925,49 +987,70 @@ impl OnlineProviderWorker {
                                 break;
                             }
                             match incoming.recv_timeout(remaining) {
-                                Ok(newest) => query = newest,
+                                Ok(()) => {}
                                 Err(mpsc::RecvTimeoutError::Timeout) => break,
                                 Err(mpsc::RecvTimeoutError::Disconnected) => return,
                             }
                         }
                     }
-                    if let Some((text, source)) = provider(query.clone()) {
+                    // Hold the lock only for the swap, never across the provider.
+                    let query = match slot.lock() {
+                        Ok(mut pending) => pending.take(),
+                        Err(poisoned) => poisoned.into_inner().take(),
+                    };
+                    let Some(query) = query else {
+                        continue;
+                    };
+                    if let Some((text, source)) = provider(&query) {
                         if text.is_empty() || source > 1 {
                             continue;
                         }
-                        if outgoing
-                            .send(OnlineCandidate {
-                                query,
-                                text,
-                                source,
-                            })
-                            .is_err()
-                        {
-                            break;
+                        let candidate = OnlineCandidate {
+                            query,
+                            text,
+                            source,
+                        };
+                        // Replacing a queued answer is safe: Runtime checks
+                        // the query's session and generation before applying
+                        // it, and only the newest answer can still be useful.
+                        match result_slot.lock() {
+                            Ok(mut result) => *result = Some(candidate),
+                            Err(poisoned) => *poisoned.into_inner() = Some(candidate),
                         }
                     }
                 }
             })
             .map_err(|_| "could not spawn provider worker")?;
         Ok(Self {
-            requests: Some(requests),
+            pending,
+            wake: Some(wake),
             results,
             join: Some(join),
         })
     }
 
+    /// Replace the pending query with this one. False only after shutdown or
+    /// when the worker is gone.
     pub fn submit(&self, query: OnlineQuery) -> bool {
-        self.requests
-            .as_ref()
-            .is_some_and(|requests| requests.try_send(query).is_ok())
+        let Some(wake) = self.wake.as_ref() else {
+            return false;
+        };
+        match self.pending.lock() {
+            Ok(mut pending) => *pending = Some(query),
+            Err(_) => return false,
+        }
+        !matches!(wake.try_send(()), Err(mpsc::TrySendError::Disconnected(_)))
     }
 
     pub fn try_recv(&self) -> Option<OnlineCandidate> {
-        self.results.try_recv().ok()
+        match self.results.lock() {
+            Ok(mut result) => result.take(),
+            Err(poisoned) => poisoned.into_inner().take(),
+        }
     }
 
     pub fn shutdown(mut self) {
-        self.requests.take();
+        self.wake.take();
         if let Some(join) = self.join.take() {
             let _ = join.join();
         }

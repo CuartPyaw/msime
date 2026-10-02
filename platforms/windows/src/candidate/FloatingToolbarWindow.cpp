@@ -40,21 +40,8 @@ bool same(const FocusLease &a, const FocusLease &b) {
   return a.epoch == b.epoch && a.token == b.token &&
          same_ticket(a.transport, b.transport);
 }
-// The preference array is ordered as character_set, punctuation, fullwidth,
-// emoji, screen_keyboard, settings. Language is always present; the
-// other buttons follow the shared shell order. Handwriting, voice and about
-// are not offered here - the shipped toolbar has no voice button at all, and
-// all three stay one click away in the tray menu.
-std::vector<int> slots(const std::array<bool, 6> &items) {
-  std::vector<int> result;
-  result.push_back(0); // language
-  if (items[2]) result.push_back(1); // fullwidth
-  if (items[1]) result.push_back(2); // punctuation
-  if (items[0]) result.push_back(3); // character set
-  if (items[3]) result.push_back(4); // emoji
-  if (items[4]) result.push_back(5); // screen keyboard
-  if (items[5]) result.push_back(6); // settings
-  return result;
+std::vector<int> slots(const std::array<bool, 6> &items, bool language) {
+  return floating_toolbar_slots(items, language);
 }
 // Buttons that do nothing on their own: they ask the shared desktop shell to
 // open a surface. The rest - the three mode toggles, 简繁, voice and hide - are
@@ -166,7 +153,7 @@ void FloatingToolbarWindow::refresh(bool enabled) {
     const auto metrics = toolbar_metrics(static_cast<double>(font_size_));
     const double unit = toolbar_pixel_unit(GetDpiForWindow(window_), scale_);
     const int width = static_cast<int>(std::ceil(
-        toolbar_window_width(slots(items_).size(), metrics) * unit));
+        toolbar_window_width(slots(items_, language_button_).size(), metrics) * unit));
     const int height = static_cast<int>(std::ceil(toolbar_window_height(metrics) * unit));
     const int margin = dpi_scale(window_, 20);
     FloatingToolbarPlacementInput placement;
@@ -245,7 +232,7 @@ void FloatingToolbarWindow::paint() {
   if (!format)
     throw std::runtime_error("Toolbar text format unavailable");
   const auto bar = toolbar_metrics(static_cast<double>(font_size_));
-  const auto card = toolbar_card(slots(items_).size(), bar);
+  const auto card = toolbar_card(slots(items_, language_button_).size(), bar);
   const D2D1_RECT_F card_rect{
       static_cast<float>(card.left) * unit, static_cast<float>(card.top) * unit,
       static_cast<float>(card.right) * unit,
@@ -278,7 +265,7 @@ void FloatingToolbarWindow::paint() {
         shown_character_set_,
         std::nullopt, std::nullopt, std::nullopt,
         std::nullopt, std::nullopt, std::nullopt, std::nullopt};
-    const auto active = slots(items_);
+    const auto active = slots(items_, language_button_);
     const auto layout = toolbar_metrics(static_cast<double>(font_size_));
     // The product mark at the far left. Drawn before the drag strip and the
     // buttons, and skipped rather than substituted if the icon will not load -
@@ -313,7 +300,7 @@ void FloatingToolbarWindow::paint() {
         strip + static_cast<float>(layout.handle - 1.0) * unit;
     target->DrawLine({divider, top + height * 0.231f * unit},
                      {divider, top + height * 0.769f * unit},
-                     brush(palette_.border), 1.0f * unit);
+                     brush(palette_.divider.value_or(palette_.border)), 1.0f * unit);
     for (size_t i = 0; i < active.size(); ++i) {
       const int button = active[i];
       const auto box = toolbar_cell(i, layout);
@@ -321,14 +308,13 @@ void FloatingToolbarWindow::paint() {
                              static_cast<float>(box.top) * unit,
                              static_cast<float>(box.right) * unit,
                              static_cast<float>(box.bottom) * unit};
-      // Hover and press fills, so a button looks like one. Pressed is drawn
-      // with the selected colour rather than a darker hover, matching the card.
-      // A button the shell would have to answer is drawn disabled: no hover
-      // fill and the secondary text colour, exactly as the tray draws a row
-      // whose capability is missing.
+      // Hover and press fills, so a button looks like one. Pressed is drawn like the card's selected row, the selected fill with the selected text colour on it, rather than a darker hover. A button the shell would have to answer is drawn disabled: no hover fill and the secondary text colour, exactly as the tray draws a row whose capability is missing.
       const bool usable = shell_available_ || !needs_shell(button);
+      const bool down = usable && hovered_ == i && pressed_ == i;
+      const auto &glyph_color = !usable ? palette_.number
+                                : down  ? palette_.selected_text
+                                        : palette_.text;
       if (hovered_ == i && usable) {
-        const bool down = pressed_ == i;
         const D2D1_ROUNDED_RECT fill{{cell.left + 2.0f * unit, cell.top,
                                       cell.right - 2.0f * unit, cell.bottom},
                                      palette_.item_radius * unit,
@@ -356,7 +342,7 @@ void FloatingToolbarWindow::paint() {
       if (!length)
         continue;
       target->DrawText(drawn_text, length, cell_format, cell,
-                       brush(usable ? palette_.text : palette_.number));
+                       brush(glyph_color));
       // Dedicated English underlines its "En". Upstream insets the line by a
       // twelfth of the cell and floors both the offset and the stroke, so it
       // stays a visible line rather than thinning away at small icon sizes.
@@ -365,7 +351,7 @@ void FloatingToolbarWindow::paint() {
         const float side = (cell.right - cell.left) * 0.08f;
         const float y = cell.bottom - (std::max)(2.0f * unit, size * 0.12f);
         target->DrawLine({cell.left + side, y}, {cell.right - side, y},
-                         brush(palette_.text),
+                         brush(glyph_color),
                          (std::max)(1.0f * unit, size * 0.06f));
       }
     }
@@ -488,7 +474,7 @@ LRESULT CALLBACK FloatingToolbarWindow::procedure(HWND window, UINT message,
       // Pressing a button shows it pressed until the release is handled.
       self->pressed_ = toolbar_button_at_pixel(
           GET_X_LPARAM(l), GET_Y_LPARAM(l), GetDpiForWindow(window),
-          self->scale_, slots(self->items_).size(), drag);
+          self->scale_, slots(self->items_, self->language_button_).size(), drag);
       const auto value = self->reader_();
       if (self->pressed_ && value && self->shown_ &&
           same(value->lease, self->shown_->lease)) {
@@ -522,7 +508,7 @@ LRESULT CALLBACK FloatingToolbarWindow::procedure(HWND window, UINT message,
       // Hover feedback needs to know where the pointer is; without tracking,
       // the buttons gave no sign that they were buttons at all.
       const int x = GET_X_LPARAM(l);
-      const auto active = slots(self->items_);
+      const auto active = slots(self->items_, self->language_button_);
       const auto layout = toolbar_metrics(static_cast<double>(self->font_size_));
       const auto hovered = toolbar_button_at_pixel(
           x, GET_Y_LPARAM(l), GetDpiForWindow(window), self->scale_, active.size(), layout);
@@ -562,7 +548,7 @@ LRESULT CALLBACK FloatingToolbarWindow::procedure(HWND window, UINT message,
       }
       const auto value = self->reader_();
       const int x = GET_X_LPARAM(l);
-      const auto active = slots(self->items_);
+      const auto active = slots(self->items_, self->language_button_);
       const auto layout = toolbar_metrics(static_cast<double>(self->font_size_));
       const auto position_at =
           toolbar_button_at_pixel(x, GET_Y_LPARAM(l), GetDpiForWindow(window),

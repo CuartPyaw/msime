@@ -1,3 +1,4 @@
+use msime_client_core::is_bounded_text;
 use serde::{Deserialize, Serialize};
 #[cfg(any(target_os = "ios", test))]
 use serde_json::json;
@@ -23,6 +24,56 @@ pub struct AndroidVoicePlatform<R: Runtime>(PluginHandle<R>);
 struct AndroidVoiceRequest<'a> {
     request_id: &'a str,
     language: &'a str,
+    /// The configured transcription provider, when there is a usable one.
+    ///
+    /// Absent means the host should use the platform recognizer, which is what this host has
+    /// always done and remains the right default here: Android ships a speech service that needs
+    /// no account, no token and no network of the user's choosing. The provider is what a user
+    /// gets by configuring one in settings, not something to be required of everyone.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider: Option<MobileVoiceTranscriptionRequest>,
+    /// The optional rewrite that runs over whatever was transcribed, by either engine.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    polish: Option<AndroidVoicePolishRequest>,
+}
+
+/// The optional rewrite that runs over a transcript, when the user asked for one.
+///
+/// The prompt is not here: the host resolves the selected slot through the shared preset table so
+/// there is one copy of the wording that marks the transcript as data rather than instructions.
+#[cfg(any(target_os = "android", test))]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AndroidVoicePolishRequest {
+    pub endpoint: String,
+    pub model: String,
+    pub token: String,
+    pub prompt_id: String,
+    pub prompt_custom_1: String,
+    pub prompt_custom_2: String,
+    pub prompt_custom_3: String,
+}
+
+#[cfg(any(target_os = "android", test))]
+impl AndroidVoicePolishRequest {
+    pub fn is_valid(&self) -> bool {
+        self.endpoint.starts_with("https://")
+            && msime_client_core::voice::provider::bounded_voice_fields(
+                &self.endpoint,
+                &self.model,
+                &self.token,
+            )
+            && !self.model.trim().is_empty()
+            && !self.token.trim().is_empty()
+            && is_bounded_text(&self.prompt_id, 64)
+            && [
+                &self.prompt_custom_1,
+                &self.prompt_custom_2,
+                &self.prompt_custom_3,
+            ]
+            .iter()
+            .all(|slot| is_bounded_text(slot, 8192))
+    }
 }
 
 #[cfg(target_os = "android")]
@@ -33,22 +84,34 @@ struct AndroidVoiceResponse {
 
 #[cfg(any(target_os = "android", test))]
 fn valid_android_voice_request(request_id: &str, language: &str) -> bool {
-    !request_id.is_empty()
-        && request_id.len() <= 64
-        && request_id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    msime_client_core::voice::is_valid_request_id(request_id)
         && !language.is_empty()
-        && language.len() <= 64
-        && !language.chars().any(char::is_control)
+        && is_bounded_text(language, 64)
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn valid_mobile_voice_text(text: &str) -> bool {
+    !text.trim().is_empty()
+        && msime_client_core::is_bounded_chars_without_nul(text, MAX_MOBILE_VOICE_TEXT_CHARS)
 }
 
 #[cfg(target_os = "android")]
 impl<R: Runtime> AndroidVoicePlatform<R> {
-    pub async fn recognize_voice(&self, request_id: &str, language: &str) -> Result<String, ()> {
+    /// `provider` is passed on only when it validates; an invalid one falls back to the platform
+    /// recognizer rather than failing the request, because a misconfigured token should not take
+    /// away the recognizer the user had before they configured anything.
+    pub async fn recognize_voice(
+        &self,
+        request_id: &str,
+        language: &str,
+        provider: Option<MobileVoiceTranscriptionRequest>,
+        polish: Option<AndroidVoicePolishRequest>,
+    ) -> Result<String, ()> {
         if !valid_android_voice_request(request_id, language) {
             return Err(());
         }
+        let provider = provider.filter(MobileVoiceTranscriptionRequest::is_valid);
+        let polish = polish.filter(AndroidVoicePolishRequest::is_valid);
         let response = self
             .0
             .run_mobile_plugin_async::<AndroidVoiceResponse>(
@@ -56,11 +119,13 @@ impl<R: Runtime> AndroidVoicePlatform<R> {
                 AndroidVoiceRequest {
                     request_id,
                     language,
+                    provider,
+                    polish,
                 },
             )
             .await
             .map_err(|_| ())?;
-        if response.text.chars().count() > 10_000 || response.text.contains('\0') {
+        if !msime_client_core::is_bounded_chars_without_nul(&response.text, 10_000) {
             return Err(());
         }
         Ok(response.text)
@@ -88,7 +153,7 @@ impl<R: Runtime> AndroidVoicePlatform<R> {
     }
 
     pub fn save_voice_text(&self, text: &str) -> Result<(), ()> {
-        if text.trim().is_empty() || text.chars().count() > 10_000 || text.contains('\0') {
+        if !valid_mobile_voice_text(text) {
             return Err(());
         }
         self.0
@@ -107,13 +172,15 @@ pub struct AppIconInfo {
 const MAX_IOS_CUSTOM_KEYBOARD_SKIN_BYTES: usize = 800_000;
 #[cfg(any(target_os = "ios", test))]
 const MAX_IOS_CLIPBOARD_TEXT_UTF16_UNITS: usize = 4_000;
-const MAX_IOS_VOICE_ENDPOINT_BYTES: usize = 2_048;
-const MAX_IOS_VOICE_MODEL_BYTES: usize = 512;
-const MAX_IOS_VOICE_TOKEN_BYTES: usize = 16 * 1024;
-#[cfg(any(target_os = "ios", test))]
-const MAX_IOS_VOICE_TEXT_CHARS: usize = 10_000;
-const MAX_IOS_VOICE_HEADER_BYTES: usize = 8_192;
-const MAX_IOS_VOICE_BOOSTING_TABLE_BYTES: usize = 4_096;
+#[cfg(any(target_os = "android", target_os = "ios", test))]
+const MAX_MOBILE_VOICE_TEXT_CHARS: usize = 10_000;
+const MAX_MOBILE_VOICE_HEADER_BYTES: usize = 8_192;
+const MAX_MOBILE_VOICE_BOOSTING_TABLE_BYTES: usize = 4_096;
+const MAX_MOBILE_VOICE_MODEL_PATH_BYTES: usize = 4_096;
+/// Same ceiling `msime_client_voice_hotwords` applies to its `limit`.
+const MAX_MOBILE_VOICE_HOTWORDS: usize = 1_000;
+const MAX_MOBILE_VOICE_HOTWORD_TEXT_BYTES: usize = 256;
+const MAX_MOBILE_VOICE_HOTWORD_PINYIN_BYTES: usize = 1_024;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -124,8 +191,19 @@ pub struct IosKeyboardPreferences {
     pub haptics_enabled: bool,
     pub haptic_strength: String,
     pub english_suggestions: bool,
+    /// The candidate strip draws the shared desktop candidate skin and colours instead of the keyboard skin's; the switch lives in the App Group because the keyboard reads it on every redraw.
+    pub candidate_palette_follows_desktop: bool,
+    /// 行内预编辑: the keyboard also writes the composition into the text field as marked text. Off by default and kept in the App Group, because the shared `tsf_preedit_style` defaults to raw in every document and would switch every existing iOS user over.
+    pub inline_preedit: bool,
+    /// Whether this device can vibrate for key presses: false on iPad, which has no Taptic Engine. Read-only; the plugin reports it and never stores it.
+    pub haptics_available: bool,
+    /// 数字行与 Tab 键 on the iPad full-width keyboard, kept in the App Group. The plugin reports it only on an iPad and writes it only when present, so a phone neither shows nor stores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tablet_full_keys: Option<bool>,
     pub dictionary_learning: bool,
-    pub keyboard_skin: String,
+    /// The global theme id (`Preferences::global_theme`), kept in the App Group under `globalTheme` so the keyboard extension reads it without the preferences document. Only the seven theme ids are valid.
+    pub global_theme: String,
+    /// The custom theme's keyboard design (`Preferences::custom_theme.keyboard`) as JSON; `None` when the custom theme has no design and draws its base theme's keyboard. The App Group keeps it under `customKeyboardSkin.v1`.
     pub custom_keyboard_skin: Option<String>,
 }
 
@@ -146,14 +224,11 @@ pub struct IosKeyboardAiPreferences {
 
 impl IosKeyboardAiPreferences {
     pub fn is_valid(&self) -> bool {
-        let bounded = |value: &str, limit: usize| {
-            value.len() <= limit && !value.chars().any(char::is_control)
-        };
-        bounded(&self.provider, 64)
-            && bounded(&self.endpoint, 2_048)
-            && bounded(&self.model, 512)
-            && bounded(&self.prompt, 16 * 1_024)
-            && bounded(&self.token, 16 * 1_024)
+        is_bounded_text(&self.provider, 64)
+            && is_bounded_text(&self.endpoint, 2_048)
+            && is_bounded_text(&self.model, 512)
+            && is_bounded_text(&self.prompt, 16 * 1_024)
+            && is_bounded_text(&self.token, 16 * 1_024)
             && (!self.enabled
                 || (!self.provider.is_empty()
                     && !self.endpoint.trim().is_empty()
@@ -165,43 +240,77 @@ impl IosKeyboardAiPreferences {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct IosVoiceRequestHeader {
+pub struct MobileVoiceRequestHeader {
     pub name: String,
     pub value: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct IosVoiceTranscriptionRequest {
+pub struct MobileVoiceTranscriptionRequest {
     pub request_id: String,
     pub provider: String,
     pub endpoint: String,
     pub model: String,
     pub token: String,
-    pub headers: Vec<IosVoiceRequestHeader>,
+    pub headers: Vec<MobileVoiceRequestHeader>,
     pub enable_itn: bool,
     pub enable_punctuation: bool,
     pub enable_ddc: bool,
     pub boosting_table_id: String,
+    /// Provider `local` only: the absolute path of the installed model directory to run on the device.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub model_path: String,
+    /// Provider `local` only: the user's own dictionary words, passed to a recognizer with native hotword support or applied after the final text by `msime_client_voice_hotword_correct` when the model's manifest says `"hotwords": "pinyin"`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hotwords: Vec<MobileVoiceHotword>,
 }
 
-impl IosVoiceTranscriptionRequest {
+/// One user-dictionary word for on-device recognition, shaped like `msime_client_core::voice::hotwords::Hotword`.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MobileVoiceHotword {
+    pub text: String,
+    /// Toneless, lowercase syllables separated by single spaces.
+    pub pinyin: String,
+}
+
+fn valid_mobile_voice_hotwords(hotwords: &[MobileVoiceHotword]) -> bool {
+    hotwords.len() <= MAX_MOBILE_VOICE_HOTWORDS
+        && hotwords.iter().all(|hotword| {
+            !hotword.text.trim().is_empty()
+                && is_bounded_text(&hotword.text, MAX_MOBILE_VOICE_HOTWORD_TEXT_BYTES)
+                && is_bounded_text(&hotword.pinyin, MAX_MOBILE_VOICE_HOTWORD_PINYIN_BYTES)
+        })
+}
+
+impl MobileVoiceTranscriptionRequest {
     pub fn is_valid(&self) -> bool {
-        let common = !self.request_id.is_empty()
-            && self.request_id.len() <= 64
-            && self
-                .request_id
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-            && self.endpoint.len() <= MAX_IOS_VOICE_ENDPOINT_BYTES
-            && !self.endpoint.chars().any(char::is_control)
-            && self.model.len() <= MAX_IOS_VOICE_MODEL_BYTES
-            && !self.model.chars().any(char::is_control)
-            && self.token.len() <= MAX_IOS_VOICE_TOKEN_BYTES
-            && !self.token.chars().any(char::is_control)
-            && self.boosting_table_id.len() <= MAX_IOS_VOICE_BOOSTING_TABLE_BYTES
-            && !self.boosting_table_id.chars().any(char::is_control);
+        let common = msime_client_core::voice::is_valid_request_id(&self.request_id)
+            && msime_client_core::voice::provider::bounded_voice_fields(
+                &self.endpoint,
+                &self.model,
+                &self.token,
+            )
+            && is_bounded_text(
+                &self.boosting_table_id,
+                MAX_MOBILE_VOICE_BOOSTING_TABLE_BYTES,
+            )
+            && is_bounded_text(&self.model_path, MAX_MOBILE_VOICE_MODEL_PATH_BYTES)
+            && valid_mobile_voice_hotwords(&self.hotwords);
         if !common {
+            return false;
+        }
+        // On-device recognition: nothing is sent anywhere, so no endpoint, token, header or boosting table may ride along, and the model has to be an absolute path in the app's own storage.
+        if self.provider == "local" {
+            return self.model_path.starts_with('/')
+                && self.endpoint.is_empty()
+                && self.model.is_empty()
+                && self.token.is_empty()
+                && self.headers.is_empty()
+                && self.boosting_table_id.is_empty();
+        }
+        if !self.model_path.is_empty() || !self.hotwords.is_empty() {
             return false;
         }
         // Every one of these is the same OpenAI-compatible multipart upload, so they share one
@@ -223,7 +332,7 @@ impl IosVoiceTranscriptionRequest {
     }
 }
 
-fn valid_doubao_headers(headers: &[IosVoiceRequestHeader]) -> bool {
+fn valid_doubao_headers(headers: &[MobileVoiceRequestHeader]) -> bool {
     if !(3..=4).contains(&headers.len())
         || headers.iter().any(|header| {
             !matches!(
@@ -234,8 +343,7 @@ fn valid_doubao_headers(headers: &[IosVoiceRequestHeader]) -> bool {
                     | "x-api-resource-id"
                     | "x-api-request-id"
             ) || header.value.is_empty()
-                || header.value.len() > MAX_IOS_VOICE_HEADER_BYTES
-                || header.value.chars().any(char::is_control)
+                || !is_bounded_text(&header.value, MAX_MOBILE_VOICE_HEADER_BYTES)
         })
     {
         return false;
@@ -252,14 +360,14 @@ fn valid_doubao_headers(headers: &[IosVoiceRequestHeader]) -> bool {
 #[cfg(any(target_os = "ios", test))]
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct IosVoiceTranscriptionResponse {
+pub struct MobileVoiceTranscriptionResponse {
     pub text: String,
 }
 
 #[cfg(any(target_os = "ios", test))]
-impl IosVoiceTranscriptionResponse {
+impl MobileVoiceTranscriptionResponse {
     fn is_valid(&self) -> bool {
-        self.text.chars().count() <= MAX_IOS_VOICE_TEXT_CHARS && !self.text.contains('\0')
+        msime_client_core::is_bounded_chars_without_nul(&self.text, MAX_MOBILE_VOICE_TEXT_CHARS)
     }
 }
 
@@ -276,20 +384,17 @@ impl IosKeyboardPreferences {
                 | "wubi"
                 | "japaneseNineKey"
                 | "japanese"
+                | "korean"
                 | "handwriting"
                 | "thoughtfulReply"
+                | "cantonese"
+                | "zhuyin"
+                | "vietnamese"
         ) && matches!(self.haptic_strength.as_str(), "light" | "medium" | "strong")
+            // The ids of msime_client_core::skin::theme::GlobalTheme, which this crate does not depend on; the desktop crate's iOS account tests hold the two lists together.
             && matches!(
-                self.keyboard_skin.as_str(),
-                "forest"
-                    | "ocean"
-                    | "rose"
-                    | "porcelain"
-                    | "typewriter"
-                    | "candy"
-                    | "midnight"
-                    | "blueprint"
-                    | "custom"
+                self.global_theme.as_str(),
+                "system" | "shuishan" | "light" | "paper" | "night" | "ink" | "custom"
             )
             && self.custom_keyboard_skin.as_ref().is_none_or(|value| {
                 value.len() <= MAX_IOS_CUSTOM_KEYBOARD_SKIN_BYTES
@@ -299,10 +404,28 @@ impl IosKeyboardPreferences {
     }
 }
 
+/// The installed families UIKit reports, sorted and without duplicates, or nil when the list is not something a font picker should show.
+#[cfg(any(target_os = "ios", test))]
+fn installed_font_families(families: Vec<String>) -> Option<Vec<String>> {
+    const MAX_FAMILIES: usize = 16_384;
+    const MAX_FAMILY_BYTES: usize = 128;
+    if families.len() > MAX_FAMILIES
+        || families
+            .iter()
+            .any(|family| family.trim().is_empty() || !is_bounded_text(family, MAX_FAMILY_BYTES))
+    {
+        return None;
+    }
+    let families: std::collections::BTreeSet<String> = families.into_iter().collect();
+    let mut result = Vec::with_capacity(families.len());
+    result.extend(families);
+    Some(result)
+}
+
 #[cfg(any(target_os = "ios", test))]
 fn is_valid_ios_clipboard_text(value: &str) -> bool {
     !value.is_empty()
-        && value.encode_utf16().count() <= MAX_IOS_CLIPBOARD_TEXT_UTF16_UNITS
+        && msime_client_core::is_bounded_utf16(value, MAX_IOS_CLIPBOARD_TEXT_UTF16_UNITS)
         && !value.contains('\0')
 }
 
@@ -346,6 +469,18 @@ struct AppleSignInResponse {
 }
 
 #[cfg(target_os = "ios")]
+#[derive(Deserialize)]
+struct SkinFolderPickResponse {
+    path: Option<String>,
+}
+
+#[cfg(target_os = "ios")]
+#[derive(Deserialize)]
+struct FontFamiliesResponse {
+    families: Vec<String>,
+}
+
+#[cfg(target_os = "ios")]
 #[derive(Serialize)]
 struct CopyTextRequest<'a> {
     text: &'a str,
@@ -370,16 +505,6 @@ struct LegacyAppleAccountSession {
     tokens: Value,
     #[serde(rename = "expiresAt")]
     expires_at: f64,
-}
-
-#[cfg(any(target_os = "ios", test))]
-#[derive(Deserialize)]
-struct LegacyAppleCommunitySession {
-    access_token: String,
-    refresh_token: String,
-    user: Value,
-    saved_at: Option<f64>,
-    expires_in: Option<i64>,
 }
 
 #[cfg(any(target_os = "ios", test))]
@@ -417,29 +542,6 @@ fn migrated_account_session_payload(value: &str) -> Option<String> {
         let expires_at_unix_ms = apple_date_to_unix_millis(legacy.expires_at)?;
         return serde_json::to_string(&json!({
             "tokens": legacy.tokens,
-            "expires_at_unix_ms": expires_at_unix_ms,
-        }))
-        .ok();
-    }
-
-    if document.get("access_token").is_some() {
-        let legacy: LegacyAppleCommunitySession = serde_json::from_value(document).ok()?;
-        let expires_in = legacy.expires_in.unwrap_or(900);
-        let expires_in = u64::try_from(expires_in).ok()?;
-        let expires_at_unix_ms = match legacy.saved_at {
-            Some(saved_at) => {
-                apple_date_to_unix_millis(saved_at)?.checked_add(expires_in.checked_mul(1000)?)?
-            }
-            None => 0,
-        };
-        return serde_json::to_string(&json!({
-            "tokens": {
-                "access_token": legacy.access_token,
-                "refresh_token": legacy.refresh_token,
-                "token_type": "Bearer",
-                "expires_in": expires_in,
-                "user": legacy.user,
-            },
             "expires_at_unix_ms": expires_at_unix_ms,
         }))
         .ok();
@@ -526,10 +628,10 @@ impl<R: Runtime> MobilePlatform<R> {
     pub async fn sign_in_with_apple(&self, challenge_id: &str, nonce: &str) -> Result<String, ()> {
         if challenge_id.is_empty()
             || challenge_id.len() > 256
-            || challenge_id.chars().any(char::is_control)
+            || msime_client_core::has_disallowed_control_with_options(challenge_id, false)
             || nonce.is_empty()
             || nonce.len() > 4096
-            || nonce.chars().any(char::is_control)
+            || msime_client_core::has_disallowed_control_with_options(nonce, false)
         {
             return Err(());
         }
@@ -546,9 +648,38 @@ impl<R: Runtime> MobilePlatform<R> {
             .map_err(|_| ())?;
         (!response.credential.is_empty()
             && response.credential.len() <= 16 * 1024
-            && !response.credential.chars().any(char::is_control))
+            && !msime_client_core::has_disallowed_control_with_options(&response.credential, false))
         .then_some(response.credential)
         .ok_or(())
+    }
+
+    /// Let the user pick a skin folder in Files. `None` when they dismissed the picker. The folder stays readable to this process until [`Self::end_skin_folder_access`], which the caller must invoke once it has copied the folder.
+    pub async fn pick_skin_folder(&self) -> Result<Option<std::path::PathBuf>, ()> {
+        let response = self
+            .0
+            .run_mobile_plugin_async::<SkinFolderPickResponse>("pickSkinFolder", ())
+            .await
+            .map_err(|_| ())?;
+        match response.path {
+            None => Ok(None),
+            Some(path) if std::path::Path::new(&path).is_absolute() => Ok(Some(path.into())),
+            Some(_) => Err(()),
+        }
+    }
+
+    pub fn end_skin_folder_access(&self) -> Result<(), ()> {
+        self.0
+            .run_mobile_plugin("endSkinFolderAccess", ())
+            .map_err(|_| ())
+    }
+
+    /// Family names only, as the desktop font catalog gives them; the keyboard draws candidates with the same UIKit families, so a name picked here is one it can find.
+    pub fn list_font_families(&self) -> Result<Vec<String>, ()> {
+        let response = self
+            .0
+            .run_mobile_plugin::<FontFamiliesResponse>("listFontFamilies", ())
+            .map_err(|_| ())?;
+        installed_font_families(response.families).ok_or(())
     }
 
     pub fn copy_text(&self, text: &str) -> Result<(), ()> {
@@ -561,7 +692,7 @@ impl<R: Runtime> MobilePlatform<R> {
     }
 
     pub fn save_voice_text(&self, text: &str) -> Result<(), ()> {
-        if text.trim().is_empty() || text.chars().count() > 10_000 || text.contains('\0') {
+        if !valid_mobile_voice_text(text) {
             return Err(());
         }
         self.0
@@ -571,21 +702,21 @@ impl<R: Runtime> MobilePlatform<R> {
 
     pub async fn recognize_voice(
         &self,
-        request: IosVoiceTranscriptionRequest,
-    ) -> Result<IosVoiceTranscriptionResponse, ()> {
+        request: MobileVoiceTranscriptionRequest,
+    ) -> Result<MobileVoiceTranscriptionResponse, ()> {
         if !request.is_valid() {
             return Err(());
         }
         let response = self
             .0
-            .run_mobile_plugin_async::<IosVoiceTranscriptionResponse>("recognizeVoice", request)
+            .run_mobile_plugin_async::<MobileVoiceTranscriptionResponse>("recognizeVoice", request)
             .await
             .map_err(|_| ())?;
         response.is_valid().then_some(response).ok_or(())
     }
 
     pub fn stop_voice(&self, request_id: &str) -> Result<(), ()> {
-        if request_id.is_empty() || request_id.len() > 64 {
+        if !msime_client_core::voice::is_valid_request_id(request_id) {
             return Err(());
         }
         self.0
@@ -599,7 +730,7 @@ impl<R: Runtime> MobilePlatform<R> {
     }
 
     pub fn cancel_voice(&self, request_id: Option<&str>) -> Result<(), ()> {
-        if request_id.is_some_and(|value| value.is_empty() || value.len() > 64) {
+        if request_id.is_some_and(|value| !msime_client_core::voice::is_valid_request_id(value)) {
             return Err(());
         }
         self.0
@@ -658,7 +789,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             }
             #[cfg(target_os = "android")]
             {
-                let handle = api.register_android_plugin("app.msime.client", "VoicePlugin")?;
+                let handle = api.register_android_plugin("app.msime.android", "VoicePlugin")?;
                 app.manage(AndroidVoicePlatform(handle));
             }
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -671,11 +802,12 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_supported_app_icon_style, is_valid_account_session_payload, is_valid_ios_clipboard_text,
-        migrated_account_session_payload, valid_android_voice_request, IosKeyboardAiPreferences,
-        IosKeyboardPreferences, IosVoiceRequestHeader, IosVoiceTranscriptionRequest,
-        IosVoiceTranscriptionResponse, MAX_ACCOUNT_SESSION_BYTES,
-        MAX_IOS_CLIPBOARD_TEXT_UTF16_UNITS, MAX_IOS_VOICE_TEXT_CHARS,
+        installed_font_families, is_supported_app_icon_style, is_valid_account_session_payload,
+        is_valid_ios_clipboard_text, migrated_account_session_payload, valid_android_voice_request,
+        IosKeyboardAiPreferences, IosKeyboardPreferences, MobileVoiceHotword,
+        MobileVoiceRequestHeader, MobileVoiceTranscriptionRequest,
+        MobileVoiceTranscriptionResponse, MAX_ACCOUNT_SESSION_BYTES,
+        MAX_IOS_CLIPBOARD_TEXT_UTF16_UNITS, MAX_MOBILE_VOICE_TEXT_CHARS,
     };
     use serde_json::Value;
 
@@ -730,7 +862,7 @@ mod tests {
 
     #[test]
     fn ios_voice_requests_accept_only_bounded_batch_providers() {
-        let request = IosVoiceTranscriptionRequest {
+        let request = MobileVoiceTranscriptionRequest {
             request_id: "fixture-request-1".into(),
             provider: "openai".into(),
             endpoint: "https://fixture.invalid/v1/audio/transcriptions".into(),
@@ -741,28 +873,30 @@ mod tests {
             enable_punctuation: true,
             enable_ddc: false,
             boosting_table_id: String::new(),
+            model_path: String::new(),
+            hotwords: Vec::new(),
         };
         assert!(request.is_valid());
         for provider in ["openai", "siliconflow", "groq", "everyapi", "mistral"] {
-            assert!(IosVoiceTranscriptionRequest {
+            assert!(MobileVoiceTranscriptionRequest {
                 provider: provider.into(),
                 ..request.clone()
             }
             .is_valid());
         }
         for provider in ["system", "custom", ""] {
-            assert!(!IosVoiceTranscriptionRequest {
+            assert!(!MobileVoiceTranscriptionRequest {
                 provider: provider.into(),
                 ..request.clone()
             }
             .is_valid());
         }
-        assert!(!IosVoiceTranscriptionRequest {
+        assert!(!MobileVoiceTranscriptionRequest {
             endpoint: "http://fixture.invalid/transcriptions".into(),
             ..request.clone()
         }
         .is_valid());
-        assert!(!IosVoiceTranscriptionRequest {
+        assert!(!MobileVoiceTranscriptionRequest {
             model: "fixture\nmodel".into(),
             ..request
         }
@@ -770,22 +904,119 @@ mod tests {
     }
 
     #[test]
+    fn local_voice_requests_carry_only_a_model_path_and_hotwords() {
+        let request = MobileVoiceTranscriptionRequest {
+            request_id: "fixture-request-1".into(),
+            provider: "local".into(),
+            endpoint: String::new(),
+            model: String::new(),
+            token: String::new(),
+            headers: Vec::new(),
+            enable_itn: true,
+            enable_punctuation: true,
+            enable_ddc: false,
+            boosting_table_id: String::new(),
+            model_path: "/data/user/0/fixture/voice-models/x-asr-zh-en-streaming".into(),
+            hotwords: vec![MobileVoiceHotword {
+                text: "水杉".into(),
+                pinyin: "shui shan".into(),
+            }],
+        };
+        assert!(request.is_valid());
+        let value = serde_json::to_value(&request).unwrap();
+        assert_eq!(
+            value["modelPath"],
+            "/data/user/0/fixture/voice-models/x-asr-zh-en-streaming"
+        );
+        assert_eq!(value["hotwords"][0]["pinyin"], "shui shan");
+
+        for invalid in [
+            MobileVoiceTranscriptionRequest {
+                model_path: String::new(),
+                ..request.clone()
+            },
+            MobileVoiceTranscriptionRequest {
+                model_path: "relative/model".into(),
+                ..request.clone()
+            },
+            MobileVoiceTranscriptionRequest {
+                model_path: "/fixture/\nmodel".into(),
+                ..request.clone()
+            },
+            MobileVoiceTranscriptionRequest {
+                endpoint: "https://fixture.invalid/asr".into(),
+                ..request.clone()
+            },
+            MobileVoiceTranscriptionRequest {
+                token: "synthetic-token".into(),
+                ..request.clone()
+            },
+            MobileVoiceTranscriptionRequest {
+                hotwords: vec![
+                    MobileVoiceHotword {
+                        text: "水杉".into(),
+                        pinyin: "shui shan".into(),
+                    };
+                    1_001
+                ],
+                ..request.clone()
+            },
+            MobileVoiceTranscriptionRequest {
+                hotwords: vec![MobileVoiceHotword {
+                    text: " ".into(),
+                    pinyin: String::new(),
+                }],
+                ..request.clone()
+            },
+        ] {
+            assert!(!invalid.is_valid());
+        }
+
+        // A network provider never carries the on-device fields, and an older serialisation without them still reads.
+        let network = MobileVoiceTranscriptionRequest {
+            provider: "openai".into(),
+            endpoint: "https://fixture.invalid/v1/audio/transcriptions".into(),
+            model: "fixture-model".into(),
+            token: "synthetic-token".into(),
+            model_path: String::new(),
+            hotwords: Vec::new(),
+            ..request.clone()
+        };
+        assert!(network.is_valid());
+        let value = serde_json::to_value(&network).unwrap();
+        assert!(value.get("modelPath").is_none());
+        assert!(value.get("hotwords").is_none());
+        let decoded: MobileVoiceTranscriptionRequest = serde_json::from_value(value).unwrap();
+        assert_eq!(decoded, network);
+        assert!(!MobileVoiceTranscriptionRequest {
+            model_path: "/fixture/model".into(),
+            ..network.clone()
+        }
+        .is_valid());
+        assert!(!MobileVoiceTranscriptionRequest {
+            hotwords: request.hotwords.clone(),
+            ..network
+        }
+        .is_valid());
+    }
+
+    #[test]
     fn ios_voice_requests_accept_only_provider_bound_doubao_headers() {
         let headers = vec![
-            IosVoiceRequestHeader {
+            MobileVoiceRequestHeader {
                 name: "x-api-key".into(),
                 value: "synthetic-key".into(),
             },
-            IosVoiceRequestHeader {
+            MobileVoiceRequestHeader {
                 name: "x-api-resource-id".into(),
                 value: "fixture-resource".into(),
             },
-            IosVoiceRequestHeader {
+            MobileVoiceRequestHeader {
                 name: "x-api-request-id".into(),
                 value: "00000000-0000-4000-8000-000000000000".into(),
             },
         ];
-        let request = IosVoiceTranscriptionRequest {
+        let request = MobileVoiceTranscriptionRequest {
             request_id: "fixture-request-1".into(),
             provider: "doubao".into(),
             endpoint: "wss://fixture.invalid/asr".into(),
@@ -796,29 +1027,31 @@ mod tests {
             enable_punctuation: true,
             enable_ddc: false,
             boosting_table_id: "fixture-table".into(),
+            model_path: String::new(),
+            hotwords: Vec::new(),
         };
         assert!(request.is_valid());
-        assert!(!IosVoiceTranscriptionRequest {
+        assert!(!MobileVoiceTranscriptionRequest {
             endpoint: "https://fixture.invalid/asr".into(),
             ..request.clone()
         }
         .is_valid());
-        assert!(!IosVoiceTranscriptionRequest {
+        assert!(!MobileVoiceTranscriptionRequest {
             token: "synthetic-duplicate".into(),
             ..request.clone()
         }
         .is_valid());
-        assert!(!IosVoiceTranscriptionRequest {
+        assert!(!MobileVoiceTranscriptionRequest {
             headers: vec![
-                IosVoiceRequestHeader {
+                MobileVoiceRequestHeader {
                     name: "authorization".into(),
                     value: "synthetic-key".into(),
                 },
-                IosVoiceRequestHeader {
+                MobileVoiceRequestHeader {
                     name: "x-api-resource-id".into(),
                     value: "fixture-resource".into(),
                 },
-                IosVoiceRequestHeader {
+                MobileVoiceRequestHeader {
                     name: "x-api-request-id".into(),
                     value: "fixture-request".into(),
                 },
@@ -830,15 +1063,15 @@ mod tests {
 
     #[test]
     fn ios_voice_responses_reject_unbounded_or_nul_text() {
-        assert!(IosVoiceTranscriptionResponse {
+        assert!(MobileVoiceTranscriptionResponse {
             text: "fixture result".into()
         }
         .is_valid());
-        assert!(!IosVoiceTranscriptionResponse {
-            text: "x".repeat(MAX_IOS_VOICE_TEXT_CHARS + 1)
+        assert!(!MobileVoiceTranscriptionResponse {
+            text: "x".repeat(MAX_MOBILE_VOICE_TEXT_CHARS + 1)
         }
         .is_valid());
-        assert!(!IosVoiceTranscriptionResponse {
+        assert!(!MobileVoiceTranscriptionResponse {
             text: "fixture\0result".into()
         }
         .is_valid());
@@ -874,17 +1107,6 @@ mod tests {
         assert!(document.get("expiresAt").is_none());
     }
 
-    #[test]
-    fn legacy_community_session_is_migrated_without_logging_secrets() {
-        let payload = r#"{"access_token":"synthetic-access","refresh_token":"synthetic-refresh","user":{"id":"synthetic-user","display_name":"","created_at":""},"saved_at":0,"expires_in":900}"#;
-        let migrated = migrated_account_session_payload(payload).unwrap();
-        let document: Value = serde_json::from_str(&migrated).unwrap();
-        assert_eq!(document["tokens"]["token_type"], "Bearer");
-        assert_eq!(document["tokens"]["expires_in"], 900);
-        assert_eq!(document["tokens"]["user"]["id"], "synthetic-user");
-        assert_eq!(document["expires_at_unix_ms"], 978_308_100_000_u64);
-    }
-
     fn keyboard_preferences() -> IosKeyboardPreferences {
         IosKeyboardPreferences {
             input_scheme: "japaneseNineKey".into(),
@@ -893,9 +1115,27 @@ mod tests {
             haptics_enabled: true,
             haptic_strength: "strong".into(),
             english_suggestions: true,
+            candidate_palette_follows_desktop: true,
+            inline_preedit: true,
+            haptics_available: true,
+            tablet_full_keys: None,
             dictionary_learning: false,
-            keyboard_skin: "custom".into(),
+            global_theme: "custom".into(),
             custom_keyboard_skin: Some(r#"{"background":15269867}"#.into()),
+        }
+    }
+
+    #[test]
+    fn ios_keyboard_preferences_accept_the_cantonese_zhuyin_and_vietnamese_touch_schemes() {
+        for scheme in ["cantonese", "zhuyin", "vietnamese"] {
+            let mut preferences = keyboard_preferences();
+            preferences.input_scheme = scheme.into();
+            assert!(preferences.is_valid(), "{scheme}");
+        }
+        for scheme in ["Cantonese", "jyutping", "bopomofo", "telex"] {
+            let mut preferences = keyboard_preferences();
+            preferences.input_scheme = scheme.into();
+            assert!(!preferences.is_valid(), "{scheme}");
         }
     }
 
@@ -912,12 +1152,74 @@ mod tests {
         assert!(!invalid.is_valid());
 
         let mut invalid = keyboard_preferences();
-        invalid.keyboard_skin = "../skin".into();
+        invalid.global_theme = "../skin".into();
+        assert!(!invalid.is_valid());
+
+        // The removed keyboard skins are not themes.
+        let mut invalid = keyboard_preferences();
+        invalid.global_theme = "ocean".into();
         assert!(!invalid.is_valid());
 
         let mut invalid = keyboard_preferences();
         invalid.custom_keyboard_skin = Some("[]".into());
         assert!(!invalid.is_valid());
+    }
+
+    #[test]
+    fn ios_keyboard_preferences_round_trip_the_candidate_palette_switch() {
+        let encoded = serde_json::to_value(keyboard_preferences()).unwrap();
+        assert_eq!(encoded["candidatePaletteFollowsDesktop"], true);
+        let decoded: IosKeyboardPreferences = serde_json::from_value(encoded).unwrap();
+        assert!(decoded.candidate_palette_follows_desktop);
+    }
+
+    #[test]
+    fn ios_keyboard_preferences_round_trip_the_inline_preedit_switch() {
+        let encoded = serde_json::to_value(keyboard_preferences()).unwrap();
+        assert_eq!(encoded["inlinePreedit"], true);
+        let decoded: IosKeyboardPreferences = serde_json::from_value(encoded).unwrap();
+        assert!(decoded.inline_preedit);
+    }
+
+    #[test]
+    fn ios_keyboard_preferences_report_whether_the_device_can_vibrate() {
+        let mut encoded = serde_json::to_value(keyboard_preferences()).unwrap();
+        encoded["hapticsAvailable"] = false.into();
+        let decoded: IosKeyboardPreferences = serde_json::from_value(encoded).unwrap();
+        assert!(!decoded.haptics_available);
+    }
+
+    #[test]
+    fn ios_keyboard_preferences_carry_the_ipad_digit_row_only_when_reported() {
+        // A phone snapshot has no switch, and saving it back must not write one.
+        let phone = serde_json::to_value(keyboard_preferences()).unwrap();
+        assert!(phone.get("tabletFullKeys").is_none());
+        let decoded: IosKeyboardPreferences = serde_json::from_value(phone).unwrap();
+        assert_eq!(decoded.tablet_full_keys, None);
+
+        let mut ipad = keyboard_preferences();
+        ipad.tablet_full_keys = Some(false);
+        let encoded = serde_json::to_value(&ipad).unwrap();
+        assert_eq!(encoded["tabletFullKeys"], false);
+        let decoded: IosKeyboardPreferences = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded.tablet_full_keys, Some(false));
+    }
+
+    #[test]
+    fn ios_font_families_are_sorted_unique_and_bounded() {
+        assert_eq!(
+            installed_font_families(vec![
+                "PingFang SC".into(),
+                "Helvetica".into(),
+                "PingFang SC".into()
+            ]),
+            Some(vec!["Helvetica".to_string(), "PingFang SC".to_string()])
+        );
+        assert_eq!(installed_font_families(vec![]), Some(vec![]));
+        assert_eq!(installed_font_families(vec![" ".into()]), None);
+        assert_eq!(installed_font_families(vec!["a\nb".into()]), None);
+        assert_eq!(installed_font_families(vec!["x".repeat(129)]), None);
+        assert_eq!(installed_font_families(vec!["f".into(); 16_385]), None);
     }
 
     #[test]

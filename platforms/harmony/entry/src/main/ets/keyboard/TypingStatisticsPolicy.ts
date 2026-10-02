@@ -13,6 +13,10 @@ export class TypingStatisticsPolicy {
     if (scheme === "quanpin") return nineKey ? "nineKey" : "quanpin";
     if (scheme === "wubi") return "wubi";
     if (scheme === "japanese") return "japanese";
+    if (scheme === "korean") return "korean";
+    if (scheme === "cantonese") return "cantonese";
+    if (scheme === "zhuyin") return "zhuyin";
+    if (scheme === "vietnamese") return "vietnamese";
     if (scheme === "shuangpin") {
       if (profile === "ziranma") return "ziranma";
       if (profile === "microsoft") return "microsoft";
@@ -20,6 +24,13 @@ export class TypingStatisticsPolicy {
       return "shuangpin";
     }
     return "unknown";
+  }
+
+  /**
+   * Whether a character the keyboard released to the application counts as typed, the rule of Windows `ShouldCountPassthroughChar`: a printable character without Ctrl, Alt or the logo key. Shift is allowed, since it is how capitals and symbols are typed; control characters and DEL are editing, not text.
+   */
+  static countsPassthrough(character: number, ctrl: boolean, alt: boolean, logo: boolean): boolean {
+    return !ctrl && !alt && !logo && character >= 0x20 && character !== 0x7f;
   }
 
   static day(date: Date): string {

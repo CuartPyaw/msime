@@ -1,7 +1,7 @@
 //! Cooperative cross-process access to prepared dictionaries and their user journal.
 //! Lock files are stable coordination objects and must not be removed.
 
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io;
 use std::path::Path;
 
@@ -28,19 +28,16 @@ impl DictionaryAccess {
                 "absolute dictionary paths required",
             ));
         }
+        crate::storage::reject_symlink(user)?;
+        crate::storage::reject_symlink(dictionaries)?;
         let mut roots = vec![user.canonicalize()?, dictionaries.canonicalize()?];
         roots.sort();
         roots.dedup();
-        let mut files = Vec::new();
+        let mut files = Vec::with_capacity(roots.len());
         for root in roots {
-            let mut options = OpenOptions::new();
-            options.read(true).write(true).create(true).truncate(false);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            let file = options.open(root.join(".msime-dictionary-access.lock"))?;
+            let file = crate::file_lock::open_private_lock_file(
+                root.join(".msime-dictionary-access.lock"),
+            )?;
             let acquired = if exclusive {
                 crate::file_lock::try_exclusive(&file)?
             } else {
@@ -107,5 +104,23 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_a_symlinked_root_before_creating_an_external_lock() {
+        use std::os::unix::fs::symlink;
+
+        let parent = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let user = parent.path().join("user");
+        symlink(outside.path(), &user).unwrap();
+        let dictionaries = tempfile::tempdir().unwrap();
+
+        assert!(DictionaryAccess::try_session(&user, dictionaries.path()).is_err());
+        assert!(!outside
+            .path()
+            .join(".msime-dictionary-access.lock")
+            .exists());
     }
 }

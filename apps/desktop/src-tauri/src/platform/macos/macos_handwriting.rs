@@ -1,5 +1,17 @@
-//! The Engine owns handwriting recognition; macOS only locates packaged data.
+//! 手写识别由引擎负责，macOS 这边只负责找到模型文件。
+//!
+//! 发布包不再内置手写模型，第一次打开手写面板时下载到 `<state_root>/resource-packs/handwriting/`，查找时优先用这份已下载的模型（[`downloaded_model`]）；从内置模型的旧版本升级上来、还没下载时，退回 app 里的 `Contents/Resources/handwriting/`（[`bundled_model`]）。
+use msime_client_core::resource_packs::{self, ResourcePack};
 use std::path::{Path, PathBuf};
+
+/// `state_root` 下已完整安装的手写资源包里的模型；没有安装、缺少 `msime-model.json` 或模型是符号链接时为 `None`。
+pub(crate) fn downloaded_model(state_root: &Path) -> Option<PathBuf> {
+    resource_packs::installed_file(
+        state_root,
+        ResourcePack::Handwriting,
+        "handwriting-zh_CN.model",
+    )
+}
 
 pub(crate) fn bundled_model(executable: &Path) -> Option<PathBuf> {
     if !executable.is_absolute() {
@@ -22,8 +34,55 @@ mod tests {
     use super::*;
     use msime_input_runtime::{HandwritingPoint, HandwritingQuery};
 
+    /// The Engine's ordered-stroke 中 fixture, mapped through `place`.
+    fn zhong_strokes(place: impl Fn((f32, f32)) -> (f32, f32)) -> Vec<Vec<(f32, f32)>> {
+        vec![
+            vec![(35., 40.), (35., 105.)],
+            vec![(35., 40.), (125., 40.), (125., 105.)],
+            vec![(35., 105.), (125., 105.)],
+            vec![(80., 15.), (80., 140.)],
+        ]
+        .into_iter()
+        .map(|stroke| stroke.into_iter().map(&place).collect())
+        .collect()
+    }
+
+    fn query(strokes: Vec<Vec<(f32, f32)>>) -> HandwritingQuery {
+        HandwritingQuery {
+            language: "zh-CN".into(),
+            strokes: strokes
+                .into_iter()
+                .map(|stroke| {
+                    stroke
+                        .into_iter()
+                        .map(|(x, y)| HandwritingPoint { x, y })
+                        .collect()
+                })
+                .collect(),
+        }
+    }
+
+    /// The pinned model (resources/handwriting-model.lock.json): `MSIME_HANDWRITING_MODEL`, else where `scripts/fetch_handwriting_model.py` puts it. It is a 26.8 MB download, so the recognition cases are skipped, with the reason printed, when it has not been fetched.
+    fn engine_model() -> Option<PathBuf> {
+        let path = std::env::var_os("MSIME_HANDWRITING_MODEL")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../../target/handwriting-model/handwriting-zh_CN.model")
+            });
+        if path.is_file() {
+            return Some(path);
+        }
+        eprintln!(
+            "skipped: no handwriting model at {}; run scripts/fetch_handwriting_model.py or set MSIME_HANDWRITING_MODEL",
+            path.display()
+        );
+        None
+    }
+
     #[test]
-    fn relocated_bundle_uses_the_fixed_engine_model_for_real_single_character_recognition() {
+    fn relocated_bundle_finds_the_packaged_model() {
         let root = tempfile::tempdir().unwrap();
         let executable = root.path().join("Synthetic.app/Contents/MacOS/synthetic");
         assert!(bundled_model(&executable).is_none());
@@ -32,31 +91,55 @@ mod tests {
             .join("Synthetic.app/Contents/Resources/handwriting");
         std::fs::create_dir_all(&resource).unwrap();
         let model = resource.join("handwriting-zh_CN.model");
-        let source = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../vendor/MSIME-Engine/handwriting/models/handwriting-zh_CN.model");
-        std::fs::copy(source, &model).unwrap();
-        let resolved = bundled_model(&executable).expect("packaged model");
-        assert_eq!(resolved, model);
+        std::fs::write(&model, b"placeholder").unwrap();
+        assert_eq!(bundled_model(&executable), Some(model));
         assert!(bundled_model(Path::new("Synthetic.app/Contents/MacOS/synthetic")).is_none());
         assert!(bundled_model(&root.path().join("synthetic")).is_none());
-        let query = HandwritingQuery {
-            language: "zh-CN".into(),
-            // Synthetic 中, the same ordered-stroke fixture used by the Engine.
-            strokes: vec![
-                vec![(35., 40.), (35., 105.)],
-                vec![(35., 40.), (125., 40.), (125., 105.)],
-                vec![(35., 105.), (125., 105.)],
-                vec![(80., 15.), (80., 140.)],
-            ]
-            .into_iter()
-            .map(|stroke| {
-                stroke
-                    .into_iter()
-                    .map(|(x, y)| HandwritingPoint { x, y })
-                    .collect()
-            })
-            .collect(),
+    }
+
+    #[test]
+    fn downloaded_handwriting_model_needs_a_published_pack() {
+        let state = tempfile::tempdir().unwrap();
+        assert_eq!(downloaded_model(state.path()), None);
+        let pack = resource_packs::root(state.path()).join(ResourcePack::Handwriting.id());
+        std::fs::create_dir_all(&pack).unwrap();
+        let model = pack.join("handwriting-zh_CN.model");
+        std::fs::write(&model, b"placeholder").unwrap();
+        // 没有 msime-model.json 的目录可能是中断的安装，不算数。
+        assert_eq!(downloaded_model(state.path()), None);
+        std::fs::write(
+            pack.join(msime_client_core::voice::local_models::MANIFEST_FILE),
+            serde_json::to_vec(&ResourcePack::Handwriting.manifest()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(downloaded_model(state.path()), Some(model));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_downloaded_handwriting_model_is_ignored() {
+        let state = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let pack = resource_packs::root(state.path()).join(ResourcePack::Handwriting.id());
+        std::fs::create_dir_all(&pack).unwrap();
+        std::fs::write(
+            pack.join(msime_client_core::voice::local_models::MANIFEST_FILE),
+            serde_json::to_vec(&ResourcePack::Handwriting.manifest()).unwrap(),
+        )
+        .unwrap();
+        let target = outside.path().join("handwriting-zh_CN.model");
+        std::fs::write(&target, b"placeholder").unwrap();
+        std::os::unix::fs::symlink(&target, pack.join("handwriting-zh_CN.model")).unwrap();
+        assert_eq!(downloaded_model(state.path()), None);
+    }
+
+    #[test]
+    fn the_packaged_model_recognizes_a_single_character() {
+        let Some(resolved) = engine_model() else {
+            return;
         };
+        // Synthetic 中, the same ordered-stroke fixture used by the engine.
+        let query = query(zhong_strokes(|(x, y)| (x, y)));
         let candidates =
             msime_host_api::handwriting_local_candidates(resolved.to_str().unwrap(), &query)
                 .unwrap();
@@ -65,20 +148,39 @@ mod tests {
     }
 
     #[test]
-    fn macos_bundle_declares_model_licenses_and_pinned_provenance() {
+    fn a_line_of_two_characters_is_recognized_as_one_multi_character_candidate() {
+        // 中 written twice side by side, each about 150 px tall in the 420 px panel canvas.
+        let scale = 1.2;
+        let mut strokes =
+            zhong_strokes(|(x, y)| (20. + (x - 35.) * scale, 130. + (y - 15.) * scale));
+        strokes.extend(zhong_strokes(|(x, y)| {
+            (220. + (x - 35.) * scale, 130. + (y - 15.) * scale)
+        }));
+        let Some(model) = engine_model() else {
+            return;
+        };
+        let candidates =
+            msime_host_api::handwriting_local_candidates(model.to_str().unwrap(), &query(strokes))
+                .unwrap();
+        assert_eq!(candidates.first().map(String::as_str), Some("中中"));
+        assert!(candidates.len() <= 12);
+    }
+
+    #[test]
+    fn macos_package_downloads_the_model_on_demand() {
         let configuration: serde_json::Value =
             serde_json::from_str(include_str!("../../../tauri.macos.conf.json")).unwrap();
         let resources = configuration["bundle"]["resources"].as_object().unwrap();
-        for name in [
-            "handwriting-zh_CN.model",
-            "HandwritingModel-LICENSE.txt",
-            "Zinnia-LICENSE.txt",
-            "provenance.json",
-        ] {
-            assert!(resources
-                .values()
-                .any(|path| path == &format!("handwriting/{name}")));
-        }
+        assert!(resources
+            .values()
+            .any(|path| path == "handwriting/Zinnia-LICENSE.txt"));
         assert_eq!(configuration["bundle"]["active"], true);
+        // 发布包不再带手写模型：首次打开手写面板时由 App 下载到 resource-packs/handwriting。打包脚本要在编译前用同一个安装器确认资源包可下载，并断言包里没有模型。
+        let package = include_str!("../../../../../../platforms/macos/package-release.sh");
+        assert!(package.contains("install_resource_pack"));
+        assert!(
+            package.contains(r#"test ! -e "$resources_dir/handwriting/handwriting-zh_CN.model""#)
+        );
+        assert!(!package.contains("fetch_handwriting_model.py"));
     }
 }

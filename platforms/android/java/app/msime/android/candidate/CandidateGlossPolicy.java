@@ -1,0 +1,59 @@
+package app.msime.android;
+
+/** Pure lifecycle and presentation rules for optional offline candidate glosses. */
+public final class CandidateGlossPolicy {
+    public static final int MAX_ENTRY_BYTES = 4096;
+
+    public record Token(long session, long generation, long epoch) {
+        public Token {
+            if (session <= 0 || generation < 0 || epoch < 0)
+                throw new IllegalArgumentException("Invalid candidate gloss token");
+        }
+
+        public boolean isCurrent(long currentSession, long currentGeneration, long currentEpoch) {
+            return session == currentSession && generation == currentGeneration
+                && epoch == currentEpoch;
+        }
+    }
+
+    private CandidateGlossPolicy() {}
+
+    /** Engine annotations (for example Wubi codes) occupy the shared hint slot first. */
+    public static String annotation(
+            String engineAnnotation, String translation, boolean glossEnabled) {
+        if (engineAnnotation != null && !engineAnnotation.isEmpty()) return engineAnnotation;
+        return glossEnabled && validEntry(translation) ? translation : "";
+    }
+
+    /**
+     * The secondary rows of a Korean Hanja candidate, each drawn on its own line under the Hanja.
+     *
+     * <p>The 훈음 (for example 나라 이름 한) is the Engine annotation of a Hanja row and is always shown, whatever the gloss and translation preferences say, because it is how a Hanja is told apart from its homophones. A gloss or translation the candidate carries follows on the next row when glosses are on, instead of being displaced by the 훈음 as the shared hint slot would. Display text only: selection commits the candidate text by its index, never these rows.
+     */
+    public static String hanjaAnnotation(
+            String reading, String translation, boolean glossEnabled) {
+        String gloss = glossEnabled && validEntry(translation) ? translation : "";
+        if (reading == null || reading.isEmpty()) return gloss;
+        return gloss.isEmpty() ? reading : reading + "\n" + gloss;
+    }
+
+    public static String hanjaAccessibilitySuffix(
+            String reading, String translation, boolean glossEnabled) {
+        String suffix = reading == null || reading.isEmpty() ? "" : "，训音：" + reading;
+        String gloss = glossEnabled && validEntry(translation) ? translation : "";
+        return gloss.isEmpty() ? suffix : suffix + "，释义：" + gloss;
+    }
+
+    public static String accessibilitySuffix(
+            String engineAnnotation, String translation, boolean glossEnabled) {
+        if (engineAnnotation != null && !engineAnnotation.isEmpty())
+            return "，提示：" + engineAnnotation;
+        String gloss = annotation(engineAnnotation, translation, glossEnabled);
+        return gloss.isEmpty() ? "" : "，英文释义：" + gloss;
+    }
+
+    public static boolean validEntry(String value) {
+        return value != null && !value.isEmpty()
+            && TextPolicy.utf8Length(value) <= MAX_ENTRY_BYTES;
+    }
+}

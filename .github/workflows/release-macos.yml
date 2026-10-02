@@ -4,14 +4,27 @@ on:
     inputs:
       version: {description: Semantic version (defaults to platforms/macos/version.txt), required: false, type: string}
       prerelease: {description: Mark as prerelease, required: false, default: false, type: boolean}
+      publish: {description: Publish the build as a macos-v release (otherwise it is only uploaded as a workflow artifact), required: false, default: false, type: boolean}
 permissions: {contents: write}
 concurrency: {group: release-macos, cancel-in-progress: false}
 jobs:
   release:
+    # 发布包是 universal 的（arm64 + x86_64），在 Apple 芯片的 runner 上交叉编出 x86_64。Rust 引擎不再链接只有 arm64 的 Homebrew 库，C/C++ 部分只用系统 SDK，所以一台机器就能编出两种架构。
     runs-on: macos-15
+    timeout-minutes: 120
+    # Mapped here because secrets.* cannot appear in a step's if:. All are optional; see the signing comment below and platforms/macos/README.md (发布包). The names are the ones the repository's Developer ID secrets were stored under; reading any other name gives an empty string, which silently turns every release into an ad-hoc, un-notarized package.
+    #   MACOS_DEVELOPER_ID_CERTIFICATE_BASE64    base64 of the Developer ID Application certificate and key, exported as .p12
+    #   MACOS_DEVELOPER_ID_CERTIFICATE_PASSWORD  the .p12 export password
+    #   MACOS_DEVELOPER_ID_APPLICATION           the identity name, e.g. "Developer ID Application: Name (TEAMID)"
+    #   MACOS_NOTARY_APPLE_ID, MACOS_NOTARY_TEAM_ID, MACOS_NOTARY_APP_SPECIFIC_PASSWORD  notarization credentials for xcrun notarytool
+    #   HOMEBREW_TAP_TOKEN                       a token that can push to metasequoiaime/homebrew-tap, for the cask update after a release
+    env:
+      MACOS_CERTIFICATE_P12_BASE64: "${{ secrets.MACOS_DEVELOPER_ID_CERTIFICATE_BASE64 }}"
+      MACOS_CERTIFICATE_PASSWORD: "${{ secrets.MACOS_DEVELOPER_ID_CERTIFICATE_PASSWORD }}"
+      MACOS_SIGNING_IDENTITY: "${{ secrets.MACOS_DEVELOPER_ID_APPLICATION }}"
     steps:
-      - uses: actions/checkout@v4
-        with: {fetch-depth: 0}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: {fetch-depth: 0, persist-credentials: false}
       - id: version
         name: Resolve independent macOS version
         env: {REQUESTED: "${{ inputs.version }}"}
@@ -19,16 +32,134 @@ jobs:
           version="${REQUESTED:-$(tr -d '[:space:]' < platforms/macos/version.txt)}"
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           echo "value=$version" >> "$GITHUB_OUTPUT"
-      - name: Build macOS native host
+      - name: Install dependencies
+        run: brew install nlohmann-json
+      # platforms/macos/CMakeLists.txt makes an empty MSIME_SPARKLE_ROOT a FATAL_ERROR, so the
+      # configure below cannot run without this. Same pinned version, same digest and same cache key
+      # as ci-macos.yml -- the digest lives beside the version in CMakeLists.txt.
+      - name: Cache the pinned Sparkle archive
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/sparkle-archive
+          # Keyed on platforms/macos/CMakeLists.txt, which is where the pinned version and the digest
+          # actually live. There is no CMakeLists.txt at the repository root, so hashFiles('CMakeLists.txt')
+          # would expand to the empty string and leave a constant key that survives a version bump.
+          key: sparkle-2.9.6-${{ runner.os }}-${{ hashFiles('platforms/macos/CMakeLists.txt') }}
+      - name: Prepare pinned Sparkle
         run: |
-          cargo build --locked -p msime-host-api
-          cmake -S platforms/macos -B target/macos-release -DCMAKE_BUILD_TYPE=Release
-          cmake --build target/macos-release --config Release
-      - name: Package macOS release
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/sparkle-archive"
+          archive="$RUNNER_TEMP/sparkle-archive/Sparkle-2.9.6.tar.xz"
+          if [[ ! -f "$archive" ]]; then
+            curl --fail --location --retry 3 \
+              https://github.com/sparkle-project/Sparkle/releases/download/2.9.6/Sparkle-2.9.6.tar.xz \
+              --output "$archive"
+          fi
+          # Checked on every run rather than only after a download: a restored cache entry is written
+          # by earlier runs of this workflow, which is not a stronger provenance than the download.
+          printf '%s  %s\n' \
+            '52bf9e88cdd972fc0c81501377a880e90d47031bd8ca5462488f843e2609e192' \
+            "$archive" | shasum -a 256 --check
+          rm -rf "$RUNNER_TEMP/sparkle"
+          mkdir -p "$RUNNER_TEMP/sparkle"
+          tar -xJf "$archive" -C "$RUNNER_TEMP/sparkle"
+          test -d "$RUNNER_TEMP/sparkle/Sparkle.framework"
+          echo "MSIME_SPARKLE_ROOT=$RUNNER_TEMP/sparkle" >> "$GITHUB_ENV"
+      - name: Enable pnpm
+        # Reads the pnpm version from packageManager in package.json.
+        run: corepack enable
+      # Signing is optional so that the workflow still produces a package on a fork or before the certificate exists. Without these secrets every signature is ad-hoc and nothing is notarized: Gatekeeper quarantines the downloaded app, which then has to be opened once with right-click Open, and macOS will not register the embedded input method as an input source, so the package only installs for a developer who re-signs it with their own Developer ID through platforms/macos/scripts/install.sh. With them the package gives the Windows-equivalent download, install and type flow.
+      - name: Import Developer ID certificate
+        if: ${{ env.MACOS_CERTIFICATE_P12_BASE64 != '' }}
+        run: |
+          set -euo pipefail
+          : "${MACOS_SIGNING_IDENTITY:?MACOS_CERTIFICATE_P12_BASE64 is set but MACOS_SIGNING_IDENTITY is not}"
+          keychain="$RUNNER_TEMP/msime-signing.keychain-db"
+          password="$(openssl rand -base64 32)"
+          certificate="$RUNNER_TEMP/msime-signing.p12"
+          printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$certificate"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$certificate" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm -f "$certificate"
+          security find-identity -v -p codesigning "$keychain" | grep -F "$MACOS_SIGNING_IDENTITY"
+          echo "MSIME_SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+      # stage-resources.sh stages target/offline-glosses when it is there and package-release.sh embeds it.
+      - name: Fetch the locked offline candidate glosses
+        run: python3 scripts/fetch_offline_glosses.py
+      # Fetches the pinned dictionaries, builds the Release host library, the input method bundle and the Tauri settings app that embeds both, signs them (Developer ID when the secrets are present, ad-hoc otherwise), checks the embedded resources and signatures inside the mounted DMG, notarizes when the Apple ID secrets are present, and writes SHA256SUMS.
+      # 包里只带核心词库；日文词典、粤拼/注音词库和手写模型由 App 首次用到时下载。package-release.sh 在编译之前先用 App 的同一个安装器把三个资源包装一遍，地址失效或哈希不符就在这里失败，不会发出一个补不齐数据的包。
+      # package-release.sh 按这两个 target 各编一次 Rust 产物再合并；rust-toolchain.toml 只固定编译器版本，不带这两个标准库。
+      - name: Add the Rust targets for the universal package
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: Build macOS package
+        env:
+          VERSION: "${{ steps.version.outputs.value }}"
+          APPLE_ID: "${{ secrets.MACOS_NOTARY_APPLE_ID }}"
+          APPLE_TEAM_ID: "${{ secrets.MACOS_NOTARY_TEAM_ID }}"
+          APPLE_APP_SPECIFIC_PASSWORD: "${{ secrets.MACOS_NOTARY_APP_SPECIFIC_PASSWORD }}"
+        run: bash platforms/macos/package-release.sh "$VERSION" dist
+      - name: Remove signing keychain
+        if: ${{ always() && env.MSIME_SIGNING_KEYCHAIN != '' }}
+        run: security delete-keychain "$MSIME_SIGNING_KEYCHAIN"
+      - name: Verify release assets
         env: {VERSION: "${{ steps.version.outputs.value }}"}
-        run: tar -czf "msime-macos-${VERSION}.tar.gz" -C target/macos-release .
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dmgs=(dist/*.dmg)
+          [[ ${#dmgs[@]} -eq 1 ]]
+          [[ "$(basename "${dmgs[0]}")" == "msime-macos-${VERSION}-universal.dmg" ]]
+          [[ -f dist/SHA256SUMS ]]
+          (cd dist && shasum -a 256 -c SHA256SUMS)
+          ls -l dist
+          echo "- $(basename "${dmgs[0]}"): $(stat -f %z "${dmgs[0]}") bytes" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: msime-macos-${{ steps.version.outputs.value }}
+          path: dist/
+          if-no-files-found: error
+      # workflow_dispatch runs on whatever ref it is given, so publishing has to be asked for rather
+      # than implied. Without the gate a dispatch on a feature branch cuts a real public release.
       - name: Publish independent macOS release
+        if: ${{ inputs.publish }}
         env: {GH_TOKEN: "${{ github.token }}", VERSION: "${{ steps.version.outputs.value }}", PRERELEASE: "${{ inputs.prerelease }}"}
         run: |
           tag="macos-v${VERSION}"
-          flags=(); [[ "$PRERELEASE" == true ]] && flags+=(--prerelease); gh release create "$tag" "msime-macos-${VERSION}.tar.gz" --target "$GITHUB_SHA" --title "macOS ${VERSION}" --generate-notes "${flags[@]}"
+          # --generate-notes otherwise starts from whichever tag in the repository is newest, and the six platforms interleave prefixes, so a macOS release could be described by the diff since an ios-v tag. fetch-depth: 0 above is what makes this list complete.
+          start=$(git tag --list 'macos-v*' --sort=-v:refname | head -1)
+          flags=(); [[ "$PRERELEASE" == true ]] && flags+=(--prerelease)
+          [[ -n "$start" ]] && flags+=(--notes-start-tag "$start")
+          gh release create "$tag" dist/*.dmg dist/SHA256SUMS --target "$GITHUB_SHA" --title "macOS ${VERSION}" --generate-notes "${flags[@]}"
+      # brew install --cask metasequoiaime/tap/msime. Only a notarized final release goes to the tap: an ad-hoc package installs but macOS will not register its input method, and a prerelease is not what someone installing from Homebrew asked for. stapler validate checks the ticket in the DMG itself rather than trusting which secrets were set.
+      - name: Update the Homebrew cask
+        if: ${{ inputs.publish && !inputs.prerelease }}
+        env: {GH_TOKEN: "${{ secrets.HOMEBREW_TAP_TOKEN }}", VERSION: "${{ steps.version.outputs.value }}"}
+        run: |
+          set -euo pipefail
+          dmg="dist/msime-macos-${VERSION}-universal.dmg"
+          if ! xcrun stapler validate "$dmg"; then
+            echo "::warning::$dmg is not notarized; the Homebrew cask was left at its previous version"
+            exit 0
+          fi
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN is not set; the Homebrew cask was left at its previous version"
+            exit 0
+          fi
+          sha256="$(shasum -a 256 "$dmg" | cut -d' ' -f1)"
+          gh auth setup-git
+          git clone --depth 1 https://github.com/metasequoiaime/homebrew-tap.git "$RUNNER_TEMP/tap"
+          mkdir -p "$RUNNER_TEMP/tap/Casks"
+          sed -e "s/@VERSION@/${VERSION}/g" -e "s/@SHA256@/${sha256}/g" platforms/macos/homebrew/msime.rb.in > "$RUNNER_TEMP/tap/Casks/msime.rb"
+          cd "$RUNNER_TEMP/tap"
+          git add Casks/msime.rb
+          if git diff --cached --quiet; then
+            echo "The cask is already at ${VERSION}"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "msime ${VERSION}"
+          git push origin HEAD

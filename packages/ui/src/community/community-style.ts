@@ -28,8 +28,8 @@ export const heading =
   "flex items-start justify-between gap-4 px-0.5 py-1 max-tight:flex-col max-tight:items-stretch max-tight:gap-2";
 /** The heading's left column has to be allowed to shrink or the actions get pushed off the edge. */
 export const headingBody = "min-w-0";
-export const headingTitle = "m-0 text-xl text-body";
-export const headingNote = "mt-[5px] mb-0 text-xs text-muted";
+export const headingTitle = "m-0 text-xl [color:var(--p-text)]";
+export const headingNote = "mt-[5px] mb-0 [font-size:var(--p-sub-fs)] [color:var(--p-sub)]";
 /** Stacked on a roomy window, laid out in a row once the heading has to share a phone's width. */
 /**
  * The actions beside the gallery heading.
@@ -40,7 +40,7 @@ export const headingNote = "mt-[5px] mb-0 text-xs text-muted";
  * past the right edge with nothing to scroll it into view.
  */
 export const headingActions =
-  "flex shrink-0 grow-0 basis-auto flex-col items-end gap-2 max-tight:flex-row max-tight:flex-wrap max-tight:items-center max-tight:justify-start [&>button]:m-0 [&>button]:whitespace-nowrap";
+  "flex shrink-0 grow-0 basis-auto flex-col items-end gap-2 max-tight:flex-row max-tight:flex-wrap max-tight:items-center max-tight:justify-start [&>button]:m-0 [&>button]:whitespace-nowrap [&>.primary]:rounded-lg [&>.primary]:border [&>.primary]:border-accent-soft-border [&>.primary]:bg-accent-strong [&>.primary]:px-3 [&>.primary]:py-[7px] [&>.primary]:text-white";
 /**
  * A scope switch that stays put. Two buttons fit a phone, and the skin gallery has exactly two -- the
  * stylesheet hid these below 560px for every page, which left that gallery with no way to reach 我的作品
@@ -58,13 +58,17 @@ export const scopeMenuItem =
   "m-0 rounded-md border-0 bg-transparent px-[9px] py-[7px] text-left whitespace-nowrap text-body hover:bg-[var(--button-secondary-bg)]";
 
 export const grid = "grid grid-cols-2 gap-x-3 gap-y-3.5 max-phone:grid-cols-1";
+/** A gallery tile keeps its own card surface: on Windows a group is transparent and square, which would leave a tile with no edge at all. Only its text takes the platform tokens. */
 export const card =
-  "flex min-w-0 flex-col items-stretch gap-2 overflow-hidden rounded-[19px] border border-edge bg-card p-2.5 text-left text-body shadow-card hover:border-edge-strong";
+  "flex min-w-0 flex-col items-stretch gap-2 overflow-hidden rounded-[19px] border border-edge bg-card p-2.5 text-left [color:var(--p-text)] shadow-card hover:border-edge-strong";
 /** The stage a preview sits on: it clips the artwork and gives it a backdrop of its own. */
 export const cardStage = "block overflow-hidden rounded-[11px] bg-[var(--skin-preview-stage-bg)]";
-export const cardTitle = "overflow-hidden text-[15px] text-ellipsis whitespace-nowrap";
-export const cardAuthor = "overflow-hidden text-xs text-ellipsis whitespace-nowrap text-secondary";
-export const cardMetrics = "flex justify-between gap-2 text-[11px] tabular-nums text-muted";
+export const cardTitle =
+  "overflow-hidden [font-size:var(--p-row-fs)] font-medium text-ellipsis whitespace-nowrap";
+export const cardAuthor =
+  "overflow-hidden [font-size:var(--p-sub-fs)] text-ellipsis whitespace-nowrap [color:var(--p-sub)]";
+export const cardMetrics =
+  "flex justify-between gap-2 text-[11px] tabular-nums [color:var(--p-sub)]";
 
 export const more = "m-0 self-center";
 export const notice = "my-[26px] text-center text-muted";
@@ -83,9 +87,10 @@ export const divided = "border-t border-[var(--divider-color)] pt-3.5";
 export const action = "min-h-[42px] self-stretch";
 export const actionNotice = "m-0 rounded-[9px] bg-accent-soft px-3 py-2.5 text-xs text-secondary";
 
+/** `danger` has no shared style of its own, and the shared `secondary` carries a 12px top margin; without these the confirming button falls back to the bare button look and sits higher than 取消, as settings' `serviceConfirmation` already handles. */
 export const confirmation =
-  "flex flex-col gap-3 rounded-[10px] border border-danger bg-raised p-3.5 [&>p]:m-0 [&>p]:leading-relaxed [&>p]:text-secondary";
-export const confirmationActions = "flex flex-wrap gap-2";
+  "flex flex-col gap-3 rounded-[10px] border border-danger bg-raised p-3.5 [&>p]:m-0 [&>p]:leading-relaxed [&>p]:text-secondary [&>div]:flex [&>div]:flex-wrap [&>div]:items-center [&>div]:gap-2 [&_.secondary]:mt-0 [&_.danger]:rounded-lg [&_.danger]:border [&_.danger]:border-danger [&_.danger]:bg-danger [&_.danger]:px-3 [&_.danger]:py-[7px] [&_.danger]:text-white";
+export const confirmationActions = "flex flex-wrap items-center gap-2";
 export const destructive = "rounded-lg border border-danger bg-danger px-3 py-[7px] text-white";
 
 export const backdrop = "fixed inset-0 z-20 grid place-items-center overflow-auto bg-black/45 p-6";
@@ -113,8 +118,9 @@ export const dialogActions =
 
 /** A resource has no artwork, so the tile leads with a glyph standing in for its kind. */
 export const resourceIcon =
-  "grid size-9 place-items-center rounded-[11px] bg-accent-soft text-lg text-accent";
-export const resourceDescription = "line-clamp-2 min-h-8 text-xs leading-relaxed text-secondary";
+  "grid size-9 place-items-center rounded-[11px] bg-accent-soft text-lg [color:var(--p-accent-text)]";
+export const resourceDescription =
+  "line-clamp-2 min-h-8 [font-size:var(--p-sub-fs)] leading-relaxed [color:var(--p-sub)]";
 
 /** The add-an-entry row: four narrow fields and a button, wrapping rather than squeezing on a phone. */
 export const entryForm =
@@ -130,3 +136,8 @@ export const entryPreview =
 /** The category strip above the gallery: one column per tab, like the phone's other tab strips. */
 export const categoryTabs =
   "grid grid-cols-3 gap-[3px] rounded-[9px] bg-subtle p-[3px] [&>button]:min-h-[34px] [&>button]:rounded-[7px] [&>button]:border-0 [&>button]:bg-transparent [&>button]:text-secondary [&>button[aria-selected=true]]:bg-raised [&>button[aria-selected=true]]:text-body [&>button[aria-selected=true]]:shadow-card";
+/** The desktop community's two galleries, candidate-window skins and plugin packs: the same strip as `categoryTabs` with two columns. */
+export const categoryTabsPair =
+  "grid grid-cols-2 gap-[3px] rounded-[9px] bg-subtle p-[3px] [&>button]:min-h-[34px] [&>button]:rounded-[7px] [&>button]:border-0 [&>button]:bg-transparent [&>button]:text-secondary [&>button[aria-selected=true]]:bg-raised [&>button[aria-selected=true]]:text-body [&>button[aria-selected=true]]:shadow-card";
+/** The kind filter above the plugin gallery. */
+export const kindFilter = "flex flex-wrap gap-1.5 [&>button]:m-0 [&>button]:whitespace-nowrap";

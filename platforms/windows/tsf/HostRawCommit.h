@@ -13,6 +13,8 @@ enum class RawCommitStatus { Completed, Unhandled, Failed };
 // no knowledge of the scheme here - an unhandled answer leaves the composition untouched and the
 // raw command runs exactly as before. Without this, Enter in Japanese put `nihon` in the document
 // where the user meant にほん.
+//
+// Korean answers the same command with its open syllable and handled=false, because a Korean key that ends a syllable still does its own work afterwards. Only the commit matters here, so the handled flag is not required: the Engine has already let go of that syllable, and asking for the raw letters next would find nothing.
 template<class Host, class Insert, class Cleanup>
 RawCommitStatus CommitHostRaw(Host &host, Insert insert, Cleanup cleanup, std::string *error) {
     std::string raw;
@@ -20,8 +22,8 @@ RawCommitStatus CommitHostRaw(Host &host, Insert insert, Cleanup cleanup, std::s
     std::string reading;
     EngineResult kana;
     if (host.command(MSIME_COMMIT_READING, &reading, nullptr) &&
-        EngineSessionAdapter::parse_result(reading, &kana, nullptr) && kana.handled &&
-        kana.has_commit && !kana.commit.empty()) {
+        EngineSessionAdapter::parse_result(reading, &kana, nullptr) && kana.has_commit &&
+        !kana.commit.empty()) {
         if (!insert(kana.commit)) return RawCommitStatus::Failed;
         cleanup();
         return RawCommitStatus::Completed;

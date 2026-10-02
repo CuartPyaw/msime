@@ -4,9 +4,7 @@ if(PROJECT_IS_TOP_LEVEL)
   include(CTest)
 endif()
 
-# Only the sources that need nothing beyond Foundation are built here. The dictionary
-# installation and snapshot bridges include Engine headers, so their tests belong with a
-# configuration that already builds the Engine rather than in this standalone project.
+# The session lease is the only source here; dictionary installation and snapshots go through the host-api C ABI.
 if(BUILD_TESTING)
   add_executable(apple-bridge-session-lease
     tests/dictionary_session_lease.mm DictionarySessionLease.mm)

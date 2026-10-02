@@ -1,11 +1,52 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "../core/confirm";
+import {
+  keyboardHeatmapModel,
+  keyHeatLevel,
+  scopedKeyCounts,
+  type DailyKeyCounts,
+  type KeyboardHeatmapKey,
+} from "./keyboard-heatmap";
+import { scopedBreakdown } from "./typing-breakdown";
+import { DONUT_OUTER, DONUT_THICKNESS, donutSegments } from "./typing-chart";
+import { SelectSettingField } from "./select-setting-field";
+import { SettingToggle } from "./setting-toggle";
+import { ActionButton } from "./action-button";
+import {
+  charactersPerMinute,
+  readableCharacters,
+  withUnknown,
+  type TypingBreakdown,
+} from "./typing-speed";
+export type { TypingBreakdown } from "./typing-speed";
+import {
+  dayLabel,
+  currentStreak,
+  formatActiveTime,
+  longestStreak,
+  mobileTrendLength,
+  recentDays,
+  statisticsHeatmapWeeks,
+  sumStatisticValues,
+} from "./typing-statistics-helpers";
+export {
+  addDays,
+  currentStreak,
+  formatActiveTime,
+  longestStreak,
+} from "./typing-statistics-helpers";
 
-const heading = "m-0 text-[15px] font-semibold text-body";
-const metric = "flex min-w-0 flex-col gap-1";
-const metricValue = "text-[30px] font-[650] leading-tight break-anywhere tabular-nums text-accent";
-const footerNote = "mt-3.5 mb-0 text-xs leading-relaxed text-muted";
-const privacy = "mt-4 mb-0 text-xs leading-[1.7] text-muted";
+const heading = "m-0 [font-size:var(--p-row-fs)] font-semibold [color:var(--p-text)]";
+// 摘要在标签行上方，切换标签时保持不动，所以压成紧凑的 3 × 2 网格，单位和数字放在同一行；会随标签变化的内容都放在标签下方。
+const metricGrid = "grid grid-cols-3 gap-x-6 gap-y-[18px] max-phone:grid-cols-2 max-phone:gap-x-3";
+const metric = "flex min-w-0 flex-col gap-1 [&>span]:text-xs [&>span]:[color:var(--p-sub)]";
+const metricLine =
+  "flex min-w-0 flex-wrap items-baseline gap-x-1 [&>small]:text-xs [&>small]:[color:var(--p-sub)]";
+const metricValue =
+  "text-[22px] font-[650] leading-tight break-anywhere tabular-nums [color:var(--p-accent-text)]";
+const metricNote = "text-xs [color:var(--p-sub)]";
+const footerNote = "mt-3.5 mb-0 text-xs leading-relaxed [color:var(--p-sub)]";
+const privacy = "mt-4 mb-0 text-xs leading-[1.7] [color:var(--p-sub)]";
 const overviewPollMs = 5_000;
 const overviewMinIntervalMs = 1_000;
 const overviewStaleMs = 15_000;
@@ -23,16 +64,14 @@ const menuItem =
 const page = "flex flex-col gap-3.5 max-phone:gap-2.5";
 const empty = "mt-0.5 mb-3.5 text-center text-muted";
 const rankChart = "mt-4 mb-[18px] flex flex-col gap-[11px]";
-// The first column has to hold the longest label without the row's ellipsis cutting it, so the two
-// charts size it differently: 候选命中位置 carries a share column the scheme ranking does not.
-const rankRow = (withShare: boolean) =>
-  `grid items-center gap-[9px] text-xs ${withShare ? "grid-cols-[minmax(88px,1fr)_minmax(80px,2fr)_auto_auto]" : "grid-cols-[minmax(80px,1fr)_minmax(90px,2fr)_auto]"} [&>span]:overflow-hidden [&>span]:text-ellipsis [&>span]:whitespace-nowrap [&>strong]:min-w-9 [&>strong]:text-right [&>strong]:tabular-nums [&>strong]:text-secondary [&>small]:min-w-11 [&>small]:text-right [&>small]:tabular-nums [&>small]:text-muted`;
+// The first column has to hold the longest label without the row's ellipsis cutting it. The count and share columns are fixed rather than auto because every row is its own grid: sized to their own content, a seven-digit count beside a two-digit one would start each track at a different x.
+const rankRow =
+  "grid grid-cols-[minmax(88px,1fr)_minmax(80px,2fr)_72px_48px] items-center gap-[9px] text-xs [&>span]:overflow-hidden [&>span]:text-ellipsis [&>span]:whitespace-nowrap [&>strong]:text-right [&>strong]:tabular-nums [&>strong]:text-secondary [&>small]:text-right [&>small]:tabular-nums [&>small]:text-muted";
 const rankTrack = "h-[11px] overflow-hidden rounded-full bg-subtle";
 const legendRow =
   "grid animate-row-reveal grid-cols-[22px_minmax(0,1fr)_auto_58px] items-center gap-[9px] motion-reduce:animate-none max-phone:grid-cols-[22px_minmax(0,1fr)_auto_50px] max-phone:gap-[7px] [&>strong]:font-medium [&>strong]:tabular-nums [&>small]:m-0 [&>small]:text-right [&>small]:tabular-nums";
 const legendDot =
   "grid size-[22px] place-items-center rounded-[7px] text-xs font-[650] leading-none";
-const shapeGraphic = "size-full rounded-full";
 
 // The heatmap's five shades are one accent at five opacities, indexed by level, so the level a day
 // falls into picks its class directly. Level 0 is the empty track rather than a faint accent.
@@ -50,16 +89,13 @@ const heatWeek = "grid grid-rows-[repeat(7,14px)] gap-[3px]";
 const bar = "block w-full min-h-0.5 rounded-t-[3px] rounded-b-[1px]";
 const axis = "mt-[7px] flex justify-between text-xs text-muted";
 
-// The segmented control behind both the phone's content tabs and the desktop's range picker. The
-// column count is a parameter because the two differ, and because the tab row silently kept four
-// columns after a fifth tab was added -- the extra one wrapped onto a second row at a quarter width.
-const segmented = (columns: number) =>
-  `grid gap-[3px] rounded-[9px] bg-subtle p-[3px] ${columns === 5 ? "grid-cols-5" : "grid-cols-3"} [&>button]:min-h-[34px] [&>button]:rounded-[7px] [&>button]:border-0 [&>button]:bg-transparent [&>button]:text-secondary [&>button[aria-selected=true]]:bg-raised [&>button[aria-selected=true]]:text-body [&>button[aria-selected=true]]:shadow-card [&>button[aria-pressed=true]]:bg-raised [&>button[aria-pressed=true]]:text-body [&>button[aria-pressed=true]]:shadow-card`;
-
-export type TypingBreakdown = {
-  characters: Record<string, number>;
-  sources: Record<string, number>;
+// The segmented control behind the content tabs. The column count is a parameter because the tab row silently kept four columns after a fifth tab was added -- the extra one wrapped onto a second row at a quarter width. Each count is spelled out so Tailwind sees the class.
+const segmentedColumns: Record<number, string> = {
+  5: "grid-cols-5",
+  6: "grid-cols-6",
 };
+const segmented = (columns: number) =>
+  `grid gap-[3px] rounded-[9px] bg-subtle p-[3px] ${segmentedColumns[columns]} [&>button]:min-h-[34px] [&>button]:rounded-[7px] [&>button]:border-0 [&>button]:bg-transparent [&>button]:text-secondary [&>button[aria-selected=true]]:bg-raised [&>button[aria-selected=true]]:text-body [&>button[aria-selected=true]]:shadow-card`;
 
 export type SelectionCounts = {
   /** Commits from positions 1..9, index 0 being the first candidate. */
@@ -97,6 +133,8 @@ export type TypingStatistics = {
   dailyActiveMs?: Record<string, number>;
   /** Characters per local hour, 24 buckets per day. Absent for days the host sent no hour for. */
   dailyHours?: Record<string, number[]>;
+  /** Presses per key per local day, keyed by `KeyboardEvent.code` or soft-keyboard id. Absent in statistics written before keys were counted. */
+  dailyKeys?: DailyKeyCounts;
 };
 
 export type TypingStatisticsStatus = {
@@ -115,7 +153,8 @@ export interface TypingStatisticsClient {
   reset(): Promise<TypingStatisticsStatus>;
 }
 
-type Period = 7 | 30 | 0;
+/** Days the desktop trend bars cover. */
+const DESKTOP_TREND_DAYS = 30;
 type Slice = { id: string; title: string; count: number; color: string; symbol: string };
 
 const palette = [
@@ -147,6 +186,10 @@ const sources = [
   ["shoudao", "首道双拼"],
   ["wubi", "86 五笔"],
   ["japanese", "日语"],
+  ["korean", "韩语"],
+  ["cantonese", "粤拼"],
+  ["zhuyin", "注音"],
+  ["vietnamese", "越南语"],
   ["handwriting", "手写"],
   ["english", "英文键盘"],
   ["local", "本地输入"],
@@ -174,6 +217,10 @@ const sourceSymbols: Record<string, string> = {
   shoudao: "首",
   wubi: "五",
   japanese: "日",
+  korean: "韩",
+  cantonese: "粤",
+  zhuyin: "注",
+  vietnamese: "越",
   handwriting: "手",
   english: "A",
   local: "本",
@@ -182,43 +229,6 @@ const sourceSymbols: Record<string, string> = {
   voice: "♪",
   unknown: "?",
 };
-
-function dayKey(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function recentDays(length: number, today = new Date()): { key: string; label: string }[] {
-  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  return Array.from({ length }, (_, index) => {
-    const date = new Date(start);
-    date.setDate(start.getDate() - (length - index - 1));
-    return { key: dayKey(date), label: `${date.getMonth() + 1}月${date.getDate()}日` };
-  });
-}
-
-function mobileTrendLength(days: Record<string, number>): number {
-  const earliest = Object.keys(days)
-    .filter((key) => /^\d{4}-\d{2}-\d{2}$/.test(key))
-    .sort()[0];
-  if (!earliest) return 30;
-  const start = new Date(`${earliest}T00:00:00`);
-  if (Number.isNaN(start.getTime())) return 30;
-  const today = new Date();
-  const span =
-    Math.floor(
-      (new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime() -
-        start.getTime()) /
-        86_400_000,
-    ) + 1;
-  return Math.min(366, Math.max(30, span));
-}
-
-function sum(values: Record<string, number>, keys: readonly string[]): number {
-  return keys.reduce((total, key) => total + (values[key] ?? 0), 0);
-}
 
 /** Buckets in a day, matching the shared store. */
 export const HOURS = 24;
@@ -231,13 +241,6 @@ export const HOURS = 24;
  * into `other`, so Japanese input measures as zero speed. This product has a full Japanese mode,
  * so `otherLetter` (kana, hangul, and every other script that is not Han or Latin) counts too.
  */
-const speedCharacterKinds = ["han", "latin", "otherLetter"] as const;
-
-/** A day's characters that count toward speed; zero for days with no recorded breakdown. */
-function readableCharacters(detail: Partial<TypingBreakdown> | undefined): number {
-  return speedCharacterKinds.reduce((total, kind) => total + (detail?.characters?.[kind] ?? 0), 0);
-}
-
 /**
  * Offsets a `YYYY-MM-DD` key by whole days.
  *
@@ -245,21 +248,6 @@ function readableCharacters(detail: Partial<TypingBreakdown> | undefined): numbe
  * arithmetic would lose or repeat a day at a daylight-saving boundary - which on those two days a
  * year would break a streak that was never broken.
  */
-export function addDays(key: string, days: number): string {
-  const parsed = Date.parse(`${key}T00:00:00Z`);
-  if (Number.isNaN(parsed)) return key;
-  const shifted = new Date(parsed + days * 86_400_000);
-  const month = String(shifted.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(shifted.getUTCDate()).padStart(2, "0");
-  return `${shifted.getUTCFullYear()}-${month}-${day}`;
-}
-
-/** Characters per active minute; zero when either side is missing. */
-function charactersPerMinute(characters: number, activeMs: number): number {
-  if (characters <= 0 || activeMs <= 0) return 0;
-  return characters / (activeMs / 60_000);
-}
-
 /**
  * A day needs this much active time before it can win "fastest day".
  *
@@ -304,6 +292,8 @@ export function activityMetrics(statistics: TypingStatistics, todayKey: string):
   let fastestDay: string | null = null;
   let bestDay: string | null = null;
   let bestDayCharacters = 0;
+  // The baseline's average is the sum of its day rows over the row count, so it divides what the recorded days hold rather than `total`, which the host's validation allows to run above them.
+  let recordedCharacters = 0;
   for (const key of recorded) {
     const activeMs = activeByDay[key] ?? 0;
     const readable = readableCharacters(statistics.dailyDetails?.[key]);
@@ -320,6 +310,7 @@ export function activityMetrics(statistics: TypingStatistics, todayKey: string):
       }
     }
     const characters = statistics.days[key] ?? 0;
+    recordedCharacters += characters;
     if (characters > bestDayCharacters) {
       bestDayCharacters = characters;
       bestDay = key;
@@ -328,7 +319,7 @@ export function activityMetrics(statistics: TypingStatistics, todayKey: string):
   const todayHours = statistics.dailyHours?.[todayKey];
   return {
     recordedDays: recorded.length,
-    averagePerDay: recorded.length === 0 ? 0 : statistics.total / recorded.length,
+    averagePerDay: recorded.length === 0 ? 0 : recordedCharacters / recorded.length,
     todayActiveMs: activeByDay[todayKey] ?? 0,
     totalActiveMs,
     todaySpeed: charactersPerMinute(
@@ -348,98 +339,167 @@ export function activityMetrics(statistics: TypingStatistics, todayKey: string):
 }
 
 /**
+ * The average hour-by-hour profile of the days before today, the baseline the hourly chart sets today against.
+ *
+ * Only days with a full 24-bucket record and at least one character take part: a day the host recorded no hours for is unknown, and averaging it in as zeros would flatten the profile. Null when no such day exists.
+ */
+export function usualHours(
+  dailyHours: TypingStatistics["dailyHours"],
+  todayKey: string,
+): { hours: number[]; days: number } | null {
+  const sums = Array.from({ length: HOURS }, () => 0);
+  let days = 0;
+  for (const [key, hours] of Object.entries(dailyHours ?? {})) {
+    if (key >= todayKey || !Array.isArray(hours) || hours.length !== HOURS) continue;
+    if (!hours.some((count) => count > 0)) continue;
+    hours.forEach((count, hour) => (sums[hour] += count));
+    days += 1;
+  }
+  return days === 0 ? null : { hours: sums.map((sum) => sum / days), days };
+}
+
+/**
+ * Characters per active minute for each of `keys`, or null for a day whose speed is unknown.
+ *
+ * A day needs the same minimum active time as "fastest day" before it gets a point, so a few characters typed in two seconds do not draw a spike that flattens every real day beside it.
+ */
+export function dailySpeeds(
+  statistics: TypingStatistics,
+  keys: readonly string[],
+): (number | null)[] {
+  return keys.map((key) => {
+    const activeMs = statistics.dailyActiveMs?.[key] ?? 0;
+    if (activeMs < fastestDayMinimumActiveMs) return null;
+    return charactersPerMinute(readableCharacters(statistics.dailyDetails?.[key]), activeMs);
+  });
+}
+
+/**
  * Consecutive recorded days ending today, or ending yesterday when today has no record yet.
  *
  * Today is still in progress, so it must not reset a streak the user has not actually broken.
  */
-export function currentStreak(recorded: readonly string[], todayKey: string): number {
-  const present = new Set(recorded);
-  let cursor = present.has(todayKey) ? todayKey : addDays(todayKey, -1);
-  let streak = 0;
-  while (present.has(cursor)) {
-    streak += 1;
-    cursor = addDays(cursor, -1);
-  }
-  return streak;
-}
-
-/** The longest run of consecutive recorded days. `recorded` must be sorted ascending. */
-export function longestStreak(recorded: readonly string[]): number {
-  if (recorded.length === 0) return 0;
-  let longest = 1;
-  let run = 1;
-  for (let index = 1; index < recorded.length; index += 1) {
-    if (recorded[index] === recorded[index - 1]) continue;
-    run = recorded[index] === addDays(recorded[index - 1], 1) ? run + 1 : 1;
-    if (run > longest) longest = run;
-  }
-  return longest;
-}
-
-/** `1小时23分` / `12分` / `45秒`, so a reader does not divide milliseconds in their head. */
-export function formatActiveTime(milliseconds: number): string {
-  if (milliseconds <= 0) return "0分";
-  const totalMinutes = Math.floor(milliseconds / 60_000);
-  if (totalMinutes === 0) return `${Math.max(1, Math.round(milliseconds / 1000))}秒`;
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  if (hours === 0) return `${minutes}分`;
-  return minutes === 0 ? `${hours}小时` : `${hours}小时${minutes}分`;
-}
-
 /** `9月21日` from a `YYYY-MM-DD` key, matching the labels the trend axis uses. */
-function dayLabel(key: string): string {
-  const [, month, day] = key.split("-");
-  return `${Number(month)}月${Number(day)}日`;
+/** How many recorded days the per-day detail table lists, as in the Windows source's `DETAIL_DAYS`. */
+export const DETAIL_DAYS = 30;
+
+export type DailyDetailRow = {
+  key: string;
+  total: number;
+  han: number;
+  latin: number;
+  number: number;
+  punctuation: number;
+  /** Other scripts, emoji, symbols and the unclassified remainder a day's breakdown does not cover. */
+  other: number;
+  /** Null when the day predates active-time measurement, which is unknown rather than zero. */
+  activeMs: number | null;
+  /** Null exactly when `activeMs` is, so an unmeasured day never reads as zero speed. */
+  speed: number | null;
+};
+
+/**
+ * The per-day detail table's rows: the most recent recorded days up to today, newest first.
+ *
+ * Only recorded days become rows, like the source's `detailRows(overview.daily, DETAIL_DAYS)`, which takes the last rows of the recorded daily series and reverses them. The source's cjk/latin/digit/punct/other columns map onto this product's finer classes, with every class the source has no column for folded into `other`.
+ */
+export function dailyDetailRows(
+  statistics: TypingStatistics,
+  todayKey: string,
+  days = DETAIL_DAYS,
+): DailyDetailRow[] {
+  const keys = Object.keys(statistics.days)
+    .filter((key) => /^\d{4}-\d{2}-\d{2}$/.test(key) && key <= todayKey)
+    .sort()
+    .slice(-days)
+    .reverse();
+  return keys.map((key) => {
+    const total = statistics.days[key] ?? 0;
+    const detail = statistics.dailyDetails?.[key];
+    const characters = withUnknown(detail, total).characters;
+    const han = characters.han ?? 0;
+    const latin = characters.latin ?? 0;
+    const number = characters.number ?? 0;
+    const punctuation = characters.punctuation ?? 0;
+    const classified = Object.values(characters).reduce((sum, value) => sum + value, 0);
+    const recordedActive = statistics.dailyActiveMs?.[key];
+    const activeMs = typeof recordedActive === "number" ? recordedActive : null;
+    return {
+      key,
+      total,
+      han,
+      latin,
+      number,
+      punctuation,
+      other: Math.max(0, classified - han - latin - number - punctuation),
+      activeMs,
+      speed: activeMs === null ? null : charactersPerMinute(readableCharacters(detail), activeMs),
+    };
+  });
 }
 
-function withUnknown(value: Partial<TypingBreakdown> | undefined, total: number): TypingBreakdown {
-  const characters = { ...value?.characters };
-  const sourceCounts = { ...value?.sources };
-  characters.unknown =
-    (characters.unknown ?? 0) +
-    Math.max(0, total - Object.values(characters).reduce((a, b) => a + b, 0));
-  sourceCounts.unknown =
-    (sourceCounts.unknown ?? 0) +
-    Math.max(0, total - Object.values(sourceCounts).reduce((a, b) => a + b, 0));
-  return { characters, sources: sourceCounts };
-}
+/** The table's columns: 汉字/字母 rather than the source's 中文/英文, because here kana and other scripts are neither and sit in 其他. */
+const detailColumns = [
+  "日期",
+  "字数",
+  "汉字",
+  "字母",
+  "数字",
+  "标点",
+  "其他",
+  "活跃",
+  "速度",
+] as const;
 
-function scopedBreakdown(statistics: TypingStatistics, keys: string[] | null): TypingBreakdown {
-  if (keys === null) return withUnknown(statistics.detail, statistics.total);
-  const result: TypingBreakdown = { characters: {}, sources: {} };
-  for (const key of keys) {
-    const count = statistics.days[key] ?? 0;
-    const detail = withUnknown(statistics.dailyDetails?.[key], count);
-    for (const [id, value] of Object.entries(detail.characters))
-      result.characters[id] = (result.characters[id] ?? 0) + value;
-    for (const [id, value] of Object.entries(detail.sources))
-      result.sources[id] = (result.sources[id] ?? 0) + value;
-  }
-  return result;
-}
-
-type HeatmapDay = { key: string; label: string; count: number; future: boolean };
-
-function statisticsHeatmapWeeks(days: Record<string, number>, today = new Date()): HeatmapDay[][] {
-  const current = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const sundayOffset = current.getDay();
-  const thisSunday = new Date(current);
-  thisSunday.setDate(current.getDate() - sundayOffset);
-  const start = new Date(thisSunday);
-  start.setDate(thisSunday.getDate() - 52 * 7);
-  return Array.from({ length: 53 }, (_, week) =>
-    Array.from({ length: 7 }, (_, row) => {
-      const date = new Date(start);
-      date.setDate(start.getDate() + week * 7 + row);
-      const key = dayKey(date);
-      return {
-        key,
-        label: `${date.getMonth() + 1}月${date.getDate()}日`,
-        count: days[key] ?? 0,
-        future: date > current,
-      };
-    }),
+function DailyDetails({ rows }: { rows: DailyDetailRow[] }) {
+  const count = (value: number) => value.toLocaleString("zh-CN");
+  return (
+    <section className="section m-0" aria-labelledby="statistics-details-title">
+      <h2 className={heading} id="statistics-details-title">
+        按日明细 · 最近 {DETAIL_DAYS} 天
+      </h2>
+      {rows.length === 0 ? (
+        <p className={`${empty} mt-3.5`}>暂无输入记录</p>
+      ) : (
+        <div className="mt-3 overflow-x-auto">
+          <table
+            className="w-full border-collapse text-xs tabular-nums [&_td]:border-t [&_td]:border-edge [&_td]:px-2 [&_td]:py-1.5 [&_td]:text-right [&_td]:whitespace-nowrap [&_td:first-child]:text-left [&_th]:px-2 [&_th]:pb-1.5 [&_th]:text-right [&_th]:font-medium [&_th]:whitespace-nowrap [&_th]:text-muted [&_th:first-child]:text-left"
+            aria-labelledby="statistics-details-title"
+          >
+            <thead>
+              <tr>
+                {detailColumns.map((title) => (
+                  <th scope="col" key={title}>
+                    {title}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.key}>
+                  <td>{dayLabel(row.key)}</td>
+                  <td className="font-medium text-body">{count(row.total)}</td>
+                  {[row.han, row.latin, row.number, row.punctuation, row.other].map(
+                    (value, index) => (
+                      <td className="text-secondary" key={index}>
+                        {count(value)}
+                      </td>
+                    ),
+                  )}
+                  <td>{row.activeMs === null ? "—" : formatActiveTime(row.activeMs)}</td>
+                  <td>{row.speed === null ? "—" : `${count(Math.round(row.speed))} 字/分钟`}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className={footerNote}>
+        列出最近 {DETAIL_DAYS}{" "}
+        个有记录的日期，新的在上；「其他」含其他文字、表情、符号与历史未分类。活跃与速度显示「—」的日期早于活跃时长的记录。
+      </p>
+    </section>
   );
 }
 
@@ -454,12 +514,10 @@ function StatisticsHeatmap({
 }) {
   const weeks = useMemo(() => statisticsHeatmapWeeks(days), [days]);
   const maximum = Math.max(1, ...weeks.flat().map((day) => day.count));
-  const monthLabels = weeks.map((week, index) => {
-    const current = week[0];
-    const previous = index > 0 ? weeks[index - 1][0] : undefined;
-    return index === 0 || current.key.slice(0, 7) !== previous?.key.slice(0, 7)
-      ? `${current.label.split("月")[0]}月`
-      : "";
+  // A month is labelled only on the column holding its 1st, so each label sits over the column where that month begins.
+  const monthLabels = weeks.map((week) => {
+    const first = week.find((day) => day.key.endsWith("-01"));
+    return first ? `${first.label.split("月")[0]}月` : "";
   });
   return (
     <div className="mt-2" role="group" aria-label="每日输入热力图">
@@ -478,7 +536,7 @@ function StatisticsHeatmap({
             className={`${heatWeek} w-[18px] flex-[0_0_18px] text-right text-[9px] leading-[14px] text-muted`}
             aria-hidden="true"
           >
-            {["", "一", "", "三", "", "五", ""].map((label, index) => (
+            {["一", "", "三", "", "五", "", ""].map((label, index) => (
               <span key={index}>{label}</span>
             ))}
           </div>
@@ -497,6 +555,7 @@ function StatisticsHeatmap({
                       type="button"
                       className={`${heatCell} ${heatLevels[level]} cursor-pointer${selectedDay === day.key ? " outline-2 outline-offset-1 outline-[#e59b43]" : ""}`}
                       key={day.key}
+                      title={`${day.label}：${day.count > 0 ? `${day.count.toLocaleString("zh-CN")} 字符` : "无记录"}`}
                       aria-label={`热力图：${day.label}，${day.count} 字符`}
                       aria-pressed={selectedDay === day.key}
                       onClick={() => onSelect(day.key)}
@@ -519,14 +578,311 @@ function StatisticsHeatmap({
   );
 }
 
+function KeyboardHeatmapRows({
+  rows,
+  maximum,
+  className,
+}: {
+  rows: KeyboardHeatmapKey[][];
+  maximum: number;
+  className: string;
+}) {
+  return (
+    <div className={className}>
+      {rows.map((row, rowIndex) => (
+        <div className="flex gap-1" key={rowIndex}>
+          {row.map((key, index) => {
+            const style = { flexGrow: key.weight, flexBasis: 0 };
+            // An unlabelled entry is spacing that lines a row up with the one above, not a key.
+            if (!key.code)
+              return <span className="min-w-0" style={style} key={index} aria-hidden="true" />;
+            const level = keyHeatLevel(key.count, maximum);
+            const name = `${key.name}，${key.count.toLocaleString("zh-CN")} 次`;
+            return (
+              <span
+                role="img"
+                className="relative grid h-9 min-w-0 place-items-center overflow-hidden rounded-[5px] border border-edge text-[11px] leading-none max-phone:h-8 max-phone:text-[10px]"
+                style={style}
+                key={index}
+                title={name}
+                aria-label={name}
+              >
+                <i className={`absolute inset-0 ${heatLevels[level]}`} aria-hidden="true" />
+                <span
+                  className={`relative overflow-hidden px-0.5 text-ellipsis whitespace-nowrap ${level >= 3 ? "[color:var(--p-on-accent,#fff)]" : "text-secondary"}`}
+                  aria-hidden="true"
+                >
+                  {key.label}
+                </span>
+              </span>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * How often each key was pressed in the page's scope, drawn on the keyboard the counts came from: the ANSI board for a physical keyboard, the phone's 26-key layout (plus the nine-key grid once one of its cells was pressed) for an on-screen one.
+ */
+function KeyboardHeatmap({
+  dailyKeys,
+  scopeKeys,
+  scopeLabel,
+  mobile,
+  platform,
+}: {
+  dailyKeys: DailyKeyCounts | undefined;
+  scopeKeys: string[] | null;
+  scopeLabel: string;
+  mobile: boolean;
+  platform?: string;
+}) {
+  const model = keyboardHeatmapModel(scopedKeyCounts(dailyKeys, scopeKeys), mobile, platform);
+  const count = (value: number) => value.toLocaleString("zh-CN");
+  return (
+    <section className="section m-0" aria-labelledby="statistics-keys-title">
+      <h2 className={heading} id="statistics-keys-title">
+        按键热力图 · {scopeLabel}
+      </h2>
+      {model.total === 0 ? (
+        <p className={`${empty} mt-3.5`}>这段时间还没有按键记录</p>
+      ) : (
+        <>
+          <p className="mt-[7px] mb-0 text-xs text-muted">
+            共 {count(model.total)} 次按键，颜色越深按得越多
+          </p>
+          <div role="group" aria-label="按键热力图">
+            <KeyboardHeatmapRows
+              rows={model.rows}
+              maximum={model.maximum}
+              className="mt-3 flex flex-col gap-1"
+            />
+            {model.nineRows && (
+              <div role="group" aria-label="九宫格按键">
+                <p className="mt-3.5 mb-0 text-xs text-muted">九宫格</p>
+                <KeyboardHeatmapRows
+                  rows={model.nineRows}
+                  maximum={model.maximum}
+                  className="mx-auto mt-2 flex max-w-[260px] flex-col gap-1"
+                />
+              </div>
+            )}
+            {model.others.length > 0 && (
+              <div className="mt-3.5">
+                <p className="m-0 text-xs text-muted" id="statistics-keys-others">
+                  其他键
+                </p>
+                <ul
+                  className="m-0 mt-2 flex list-none flex-wrap gap-1.5 p-0 text-xs"
+                  aria-labelledby="statistics-keys-others"
+                >
+                  {model.others.map((key) => (
+                    <li
+                      className="flex items-center gap-1.5 rounded-[5px] border border-edge px-2 py-1"
+                      key={key.code}
+                      aria-label={`${key.label}，${count(key.count)} 次`}
+                    >
+                      <i
+                        className={`block size-2.5 rounded-[2px] ${heatLevels[keyHeatLevel(key.count, model.maximum)]}`}
+                        aria-hidden="true"
+                      />
+                      <span aria-hidden="true">{key.label}</span>
+                      <strong
+                        className="font-medium tabular-nums text-secondary"
+                        aria-hidden="true"
+                      >
+                        {count(key.count)}
+                      </strong>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+          <div className="mt-2 flex items-center gap-1 text-[10px] text-muted" aria-hidden="true">
+            <span>少</span>
+            {heatLevels.map((shade, level) => (
+              <i className={`block size-3 rounded-[2px] ${shade}`} key={level} />
+            ))}
+            <span>多</span>
+          </div>
+          <ol
+            className="m-0 mt-3.5 flex list-none flex-col gap-1.5 p-0 text-xs"
+            aria-label="最常按的键"
+          >
+            {model.top.map((key, index) => (
+              <li className="flex items-center gap-2" key={key.code}>
+                <span className="w-4 text-right tabular-nums text-muted">{index + 1}</span>
+                <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+                  {key.label}
+                </span>
+                <strong className="font-medium tabular-nums text-secondary">
+                  {count(key.count)} 次
+                </strong>
+              </li>
+            ))}
+          </ol>
+        </>
+      )}
+      <p className={footerNote}>
+        只保存每个键每天被按下的次数，不保存按键顺序和输入内容；按住不放只算一次，密码框中的按键不计入。
+      </p>
+    </section>
+  );
+}
+
+/** Horizontal position, in viewBox units, of the middle of column `index` of `count`, so a line drawn over a row of bars passes through each bar's centre. */
+const columnCenter = (index: number, count: number) => ((index + 0.5) / Math.max(1, count)) * 100;
+
+/** An SVG path through the known values, lifting the pen over every null so an unknown day reads as a gap rather than a dip to zero. */
+function linePath(values: readonly (number | null)[], y: (value: number) => number): string {
+  let path = "";
+  let drawing = false;
+  values.forEach((value, index) => {
+    if (value === null) {
+      drawing = false;
+      return;
+    }
+    path += `${drawing ? "L" : "M"}${columnCenter(index, values.length)},${y(value)} `;
+    drawing = true;
+  });
+  return path.trim();
+}
+
+/**
+ * A dashed reference line across a plot. Dashed on purpose: it marks a threshold, not a grid. Its value is named in the caption above the plot rather than on the line, where a label would sit on top of the data.
+ */
+function ReferenceLine({ bottom }: { bottom: number }) {
+  return (
+    <i
+      className="pointer-events-none absolute inset-x-0 block h-px bg-[repeating-linear-gradient(90deg,var(--text-muted)_0_4px,transparent_4px_8px)] opacity-70"
+      style={{ bottom: `${bottom}%` }}
+      aria-hidden="true"
+    />
+  );
+}
+
+/**
+ * Characters per active minute for each day of the trend window.
+ *
+ * Speed is a rate, so it gets a line rather than bars, and the scale starts near the slowest day instead of at zero: a typist moving between 60 and 75 characters a minute would otherwise see a flat line at the top of the plot. The axis labels name both ends so the cropped scale is never hidden. Days without enough measured time are gaps.
+ */
+function SpeedTrend({
+  days,
+  speeds,
+  averageSpeed,
+  selectedDay,
+}: {
+  days: { key: string; label: string }[];
+  speeds: (number | null)[];
+  averageSpeed: number;
+  selectedDay: string | null;
+}) {
+  const known = speeds.filter((speed): speed is number => speed !== null);
+  const count = (value: number) => Math.round(value).toLocaleString("zh-CN");
+  if (known.length === 0)
+    return (
+      <p className={`${empty} mt-3.5`}>
+        这段时间还没有测量到足够的活跃时长。每天连续打字满 1 分钟后，这里会画出当天的速度。
+      </p>
+    );
+  const high = Math.max(...known, averageSpeed);
+  const low = Math.min(...known, averageSpeed);
+  const spread = Math.max(high - low, high * 0.2, 1);
+  const top = Math.ceil(high + spread * 0.15);
+  const bottom = Math.max(0, Math.floor(low - spread * 0.25));
+  const height = (value: number) => ((value - bottom) / Math.max(1, top - bottom)) * 100;
+  const y = (value: number) => 100 - height(value);
+  // Every point gets a dot while they are far enough apart to read; past that only a point with no neighbour does, since a lone day draws no line at all.
+  const dotted = (index: number) =>
+    speeds[index] !== null &&
+    (days.length <= 45 || (speeds[index - 1] == null && speeds[index + 1] == null));
+  return (
+    <>
+      <p className="mt-[7px] mb-0 text-xs text-muted">
+        最快 {count(Math.max(...known))} · 最慢 {count(Math.min(...known))} · 虚线为平均{" "}
+        {count(averageSpeed)} 字 / 分钟 · {known.length} 天有测量
+      </p>
+      <div
+        className="relative mt-3 h-[120px] border-b border-edge text-accent"
+        role="img"
+        aria-label={`每日输入速度折线图，${known.length} 天有测量，平均 ${count(averageSpeed)} 字每分钟`}
+      >
+        {/* The scale does not start at zero, so both ends are labelled inside the plot, where they keep its columns aligned with the daily bars above. */}
+        <span
+          className="pointer-events-none absolute top-0 left-0 text-[10px] leading-none text-muted tabular-nums"
+          aria-hidden="true"
+        >
+          {top}
+        </span>
+        <span
+          className="pointer-events-none absolute bottom-1 left-0 text-[10px] leading-none text-muted tabular-nums"
+          aria-hidden="true"
+        >
+          {bottom}
+        </span>
+        <ReferenceLine bottom={height(averageSpeed)} />
+        <svg
+          className="absolute inset-0 block size-full overflow-visible"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          aria-hidden="true"
+        >
+          <path
+            d={linePath(speeds, y)}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
+        {/* Dots and hover columns are HTML rather than SVG: the plot stretches to its box, which would squash an SVG circle into an ellipse. */}
+        {days.map((day, index) => {
+          const speed = speeds[index];
+          const chosen = selectedDay === day.key;
+          return (
+            <span
+              className="absolute inset-y-0"
+              style={{
+                left: `${(index / days.length) * 100}%`,
+                width: `${100 / days.length}%`,
+              }}
+              key={day.key}
+              title={`${day.label}：${speed === null ? "活跃不足 1 分钟，未计算" : `${count(speed)} 字 / 分钟`}`}
+              aria-hidden="true"
+            >
+              {speed !== null && (dotted(index) || chosen) && (
+                <i
+                  className={`absolute left-1/2 block -translate-x-1/2 translate-y-1/2 rounded-full ring-2 ring-card-solid ${chosen ? "size-2.5 bg-[#e59b43]" : "size-[7px] bg-accent"}`}
+                  style={{ bottom: `${height(speed)}%` }}
+                />
+              )}
+            </span>
+          );
+        })}
+      </div>
+      <div className={axis}>
+        <span>{days[0]?.label}</span>
+        <span>{days.at(-1)?.label}</span>
+      </div>
+    </>
+  );
+}
+
 function StatisticsTrendLine({
   days,
   counts,
   selectedDay,
+  average,
 }: {
   days: { key: string; label: string }[];
   counts: Record<string, number>;
   selectedDay: string | null;
+  average: number;
 }) {
   const values = days.map((day) => counts[day.key] ?? 0);
   const lineValues =
@@ -546,10 +902,11 @@ function StatisticsTrendLine({
   const selectedValue = selectedIndex >= 0 ? values[selectedIndex] : 0;
   return (
     <div
-      className="mt-3 h-[170px] w-full text-accent"
+      className="relative mt-3 h-[170px] w-full text-accent"
       role="img"
       aria-label={days.length > 120 ? "每日输入趋势折线图，显示七日均线" : "每日输入趋势折线图"}
     >
+      {average > 0 && <ReferenceLine bottom={4 + (average / maximum) * 88} />}
       <svg
         className="block size-full overflow-visible"
         viewBox="0 0 100 100"
@@ -584,75 +941,82 @@ function StatisticsTrendLine({
   );
 }
 
-type DistributionVariant = "bar" | "pie" | "donut" | "rank";
+/**
+ * How a distribution is drawn. A donut is part-to-whole at a glance, which suits character types and language modes: a handful of classes with one usually dominant. Input schemes can number sixteen, past what hue can tell apart, so they are a ranking in one colour where the label carries identity.
+ */
+type DistributionVariant = "donut" | "rank";
 
-function chartGradient(slices: Slice[], total: number): string {
-  let cursor = 0;
-  const segments = slices
-    .filter((slice) => slice.count > 0)
-    .map((slice) => {
-      const start = (cursor / total) * 360;
-      cursor += slice.count;
-      return `${slice.color} ${start}deg ${(cursor / total) * 360}deg`;
-    });
-  return segments.length ? `conic-gradient(${segments.join(", ")})` : "var(--surface-subtle)";
-}
+const shareText = (count: number, total: number) =>
+  total === 0 ? "—" : `${((count / total) * 100).toFixed(1)}%`;
 
 function ShapeChart({
+  title,
   slices,
   variant,
   total,
 }: {
+  title: string;
   slices: Slice[];
-  variant: Exclude<DistributionVariant, "bar">;
+  variant: DistributionVariant;
   total: number;
 }) {
   if (variant === "rank") {
     const ranked = slices.filter((slice) => slice.count > 0).sort((a, b) => b.count - a.count);
     const peak = Math.max(1, ...ranked.map((slice) => slice.count));
     return (
-      <div className={rankChart} role="img" aria-label="输入方案排行">
-        {ranked.length === 0 && <p className={empty}>暂无输入记录</p>}
-        {ranked.map((slice) => (
-          <div className={rankRow(false)} key={slice.id}>
+      <div className={rankChart} role="img" aria-label={`${title}排行`}>
+        {ranked.map((slice, index) => (
+          <div
+            className={`${rankRow} animate-row-reveal motion-reduce:animate-none`}
+            style={{ animationDelay: `${Math.min(index, 8) * 0.03}s` }}
+            key={slice.id}
+            aria-label={`${slice.title} ${slice.count} 字符，${shareText(slice.count, total)}`}
+          >
             <span>{slice.title}</span>
             <div className={rankTrack}>
               <i
-                className="block h-full rounded-[inherit]"
-                style={{ width: `${(slice.count / peak) * 100}%`, backgroundColor: slice.color }}
+                className="block h-full origin-left animate-bar-reveal rounded-[inherit] bg-accent motion-reduce:animate-none"
+                style={{ width: `${(slice.count / peak) * 100}%` }}
               />
             </div>
             <strong>{slice.count.toLocaleString("zh-CN")}</strong>
+            <small>{shareText(slice.count, total)}</small>
           </div>
         ))}
       </div>
     );
   }
-  const label = variant === "pie" ? "字符类型饼图" : "语言模式环形图";
   return (
     <div
-      className="relative mx-auto mt-4 mb-[18px] grid size-[190px] place-items-center"
+      className="relative mx-auto size-[190px] shrink-0"
       role="img"
-      aria-label={label}
+      aria-label={`${title}环形图`}
     >
-      <div
-        // The donut is the pie with its middle masked out, so both variants share one gradient and
-        // differ only by that mask.
-        className={
-          variant === "donut"
-            ? `${shapeGraphic} [mask:radial-gradient(circle,transparent_0_61%,#000_62%)]`
-            : shapeGraphic
-        }
-        style={{ background: chartGradient(slices, Math.max(1, total)) }}
-      />
-      {variant === "donut" && (
-        <div className="absolute flex size-[106px] flex-col items-center justify-center rounded-full bg-card">
-          <strong className="text-[25px] tabular-nums text-body">
-            {total.toLocaleString("zh-CN")}
-          </strong>
-          <span className="text-[11px] text-muted">字符</span>
-        </div>
-      )}
+      {/* 用 SVG 画环：环宽约为外半径的四分之一，扇区之间留底色缝隙，原先用 conic-gradient 加遮罩只能画出一道细线。 */}
+      <svg className="block size-full" viewBox="0 0 100 100" aria-hidden="true">
+        {donutSegments(slices).map((segment, index) =>
+          "ring" in segment ? (
+            <circle
+              key={index}
+              cx="50"
+              cy="50"
+              r={DONUT_OUTER - DONUT_THICKNESS / 2}
+              fill="none"
+              stroke={segment.color}
+              strokeWidth={DONUT_THICKNESS}
+              data-donut-segment=""
+            />
+          ) : (
+            <path key={index} d={segment.d} fill={segment.color} data-donut-segment="" />
+          ),
+        )}
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <strong className="text-[25px] leading-tight font-semibold tabular-nums text-body">
+          {total.toLocaleString("zh-CN")}
+        </strong>
+        <span className="text-[11px] text-muted">字符</span>
+      </div>
     </div>
   );
 }
@@ -661,65 +1025,63 @@ function Distribution({
   title,
   slices,
   footer,
-  variant = "bar",
+  variant,
+  wide = false,
 }: {
   title: string;
   slices: Slice[];
   footer?: string;
-  variant?: DistributionVariant;
+  variant: DistributionVariant;
+  /** Sets a donut beside its legend instead of above it, where the page is wide enough. */
+  wide?: boolean;
 }) {
   const total = slices.reduce((value, slice) => value + slice.count, 0);
   const visible = slices.filter((slice) => slice.count > 0 || slice.id !== "unknown");
   return (
-    <section className="section m-0" aria-labelledby={`statistics-${title}`}>
+    <section className="section m-0 @container" aria-labelledby={`statistics-${title}`}>
       <h2 className={heading} id={`statistics-${title}`}>
         {title}
       </h2>
-      {variant === "bar" ? (
-        <div
-          className="mt-4 mb-3.5 flex h-[18px] w-full overflow-hidden rounded-full bg-subtle"
-          aria-hidden="true"
-        >
-          {slices
-            .filter((slice) => slice.count > 0)
-            .map((slice) => (
-              <span
-                className="h-full origin-left animate-bar-reveal motion-reduce:animate-none"
-                key={slice.id}
-                style={{
-                  backgroundColor: slice.color,
-                  width: `${(slice.count / Math.max(1, total)) * 100}%`,
-                }}
-              />
-            ))}
-        </div>
+      {total === 0 ? (
+        <p className={`${empty} mt-3.5`}>暂无输入记录</p>
       ) : (
-        <ShapeChart slices={slices} variant={variant} total={total} />
+        // 标题独占一行，图表区整体放在标题下方；宽版按容器宽度而不是视口宽度决定是否并排，窄窗口里环形图回到图例上方，不再把图例挤成一字一行。
+        <div
+          className={
+            variant === "donut"
+              ? `mt-4 grid gap-5 ${wide ? "@min-[520px]:grid-cols-[190px_minmax(0,1fr)] @min-[520px]:items-center @min-[520px]:gap-8" : ""}`
+              : undefined
+          }
+        >
+          <ShapeChart title={title} slices={slices} variant={variant} total={total} />
+          {/* A ranking already names, counts and shares every row, so it needs no legend. */}
+          {variant === "donut" && (
+            <div className="flex flex-col gap-[11px]">
+              {visible.map((slice, index) => (
+                <div
+                  // The rows reveal in sequence. The stylesheet staggered them with eight :nth-child rules;
+                  // the index is already here, so the delay comes from it and any row count works.
+                  className={legendRow}
+                  style={{ animationDelay: `${Math.min(index, 8) * 0.03}s` }}
+                  key={slice.id}
+                  aria-label={`${slice.title} ${slice.count} 字符，${shareText(slice.count, total)}`}
+                >
+                  <span
+                    className={legendDot}
+                    style={{ color: slice.color, backgroundColor: `${slice.color}1a` }}
+                    aria-hidden="true"
+                  >
+                    {slice.symbol}
+                  </span>
+                  <span>{slice.title}</span>
+                  <strong>{slice.count.toLocaleString("zh-CN")}</strong>
+                  <small>{shareText(slice.count, total)}</small>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
-      {total === 0 && <p className={empty}>暂无输入记录</p>}
-      <div className="flex flex-col gap-[11px]">
-        {visible.map((slice, index) => (
-          <div
-            // The rows reveal in sequence. The stylesheet staggered them with eight :nth-child rules;
-            // the index is already here, so the delay comes from it and any row count works.
-            className={legendRow}
-            style={{ animationDelay: `${Math.min(index, 8) * 0.03}s` }}
-            key={slice.id}
-            aria-label={`${slice.title} ${slice.count} 字符，${total === 0 ? "无占比" : `${((slice.count / total) * 100).toFixed(1)}%`}`}
-          >
-            <span
-              className={legendDot}
-              style={{ color: slice.color, backgroundColor: `${slice.color}1a` }}
-              aria-hidden="true"
-            >
-              {slice.symbol}
-            </span>
-            <span>{slice.title}</span>
-            <strong>{slice.count.toLocaleString("zh-CN")}</strong>
-            <small>{total === 0 ? "—" : `${((slice.count / total) * 100).toFixed(1)}%`}</small>
-          </div>
-        ))}
-      </div>
       {footer && <p className={footerNote}>{footer}</p>}
     </section>
   );
@@ -773,7 +1135,7 @@ function CandidateRanks({ selections }: { selections: SelectionCounts | undefine
         <div className={rankChart} role="img" aria-label="候选命中位置分布">
           {rows.map((row) => (
             <div
-              className={rankRow(true)}
+              className={rankRow}
               key={row.id}
               aria-label={`${row.label}：${row.count} 次，${share(row.count)}`}
             >
@@ -798,37 +1160,72 @@ function CandidateRanks({ selections }: { selections: SelectionCounts | undefine
 }
 
 /**
- * Today's characters by local hour.
+ * Today's characters by local hour, set against the average of earlier days.
  *
- * Every hour gets a column, including the empty ones: a chart that only drew the hours with input
- * would put 9am next to 3pm and read as continuous typing.
+ * Every hour gets a column, including the empty ones: a chart that only drew the hours with input would put 9am next to 3pm and read as continuous typing. Today is the point, so it is the accent bars; the usual day is context, so it is a thin neutral line over them, on the same scale.
  */
-function StatisticsHourlyBars({ hours }: { hours: readonly number[] }) {
-  const peak = Math.max(1, ...hours);
+function StatisticsHourlyBars({
+  hours,
+  usual,
+}: {
+  hours: readonly number[];
+  usual: { hours: number[]; days: number } | null;
+}) {
+  const peak = Math.max(1, ...hours, ...(usual?.hours ?? []));
   const total = hours.reduce((sum, count) => sum + count, 0);
+  const count = (value: number) => Math.round(value).toLocaleString("zh-CN");
   return (
     <>
       <p className="mt-[7px] mb-0 text-xs text-muted">
-        最高 {peak.toLocaleString("zh-CN")} 字符 / 小时 · 共 {total.toLocaleString("zh-CN")} 字符
+        最高 {count(Math.max(0, ...hours))} 字符 / 小时 · 共 {count(total)} 字符
       </p>
+      {usual && (
+        <div className="mt-2 flex items-center gap-4 text-[11px] text-secondary" aria-hidden="true">
+          <span className="flex items-center gap-1.5">
+            <i className="block size-2.5 rounded-[2px] bg-accent" />
+            今日
+          </span>
+          <span className="flex items-center gap-1.5">
+            <i className="block h-0.5 w-3.5 rounded-full bg-[var(--text-secondary)]" />
+            平时（前 {usual.days.toLocaleString("zh-CN")} 天平均）
+          </span>
+        </div>
+      )}
       <div
-        className="mt-3 flex h-[110px] items-end gap-[3px]"
+        className="relative mt-3 flex h-[110px] items-end gap-[3px]"
         role="img"
-        aria-label="今日各时段输入分布"
+        aria-label={usual ? "今日各时段输入分布，与平时对比" : "今日各时段输入分布"}
       >
-        {hours.map((count, hour) => (
+        {hours.map((value, hour) => (
           <div
             key={hour}
             className="flex h-full min-w-0 flex-1 flex-col justify-end"
-            title={`${hour} 时：${count} 字符`}
-            aria-label={`${hour} 时，${count} 字符`}
+            title={`${hour} 时：今日 ${value} 字符${usual ? `，平时 ${count(usual.hours[hour])} 字符` : ""}`}
+            aria-label={`${hour} 时，${value} 字符`}
           >
             <i
-              className={`${bar} bg-accent ${count === 0 ? "opacity-25" : "opacity-85"}`}
-              style={{ height: `${Math.max(2, (count / peak) * 100)}%` }}
+              className={`${bar} bg-accent ${value === 0 ? "opacity-25" : "opacity-85"}`}
+              style={{ height: `${Math.max(2, (value / peak) * 100)}%` }}
             />
           </div>
         ))}
+        {usual && (
+          <svg
+            className="pointer-events-none absolute inset-0 block size-full overflow-visible text-[var(--text-secondary)]"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            <path
+              d={linePath(usual.hours, (value) => 100 - (value / peak) * 100)}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+            />
+          </svg>
+        )}
       </div>
       <div className={axis}>
         <span>0 时</span>
@@ -880,26 +1277,52 @@ export function TypingStatisticsPage({
 }) {
   const { confirm, confirmation } = useConfirm();
   const [status, setStatus] = useState<TypingStatisticsStatus>();
-  const [period, setPeriod] = useState<Period>(7);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
-  const [mobileTab, setMobileTab] = useState<"trend" | "kind" | "mode" | "scheme" | "ranks">(
-    "trend",
-  );
+  // 打开页面时先看按键热力图，它排在标签行的第一位；标签只存在组件状态里，不跨次打开记忆。
+  const [contentTab, setContentTab] = useState<
+    "keys" | "trend" | "kind" | "mode" | "scheme" | "ranks"
+  >("keys");
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const requestRef = useRef<Promise<TypingStatisticsStatus> | null>(null);
   const requestStartedAtRef = useRef(0);
   const lastRequestAtRef = useRef(0);
   const statusSignatureRef = useRef("");
+  const mounted = useRef(true);
+  const clientGeneration = useRef(0);
   const mobileTrendDays = useMemo(
     () => recentDays(mobileTrendLength(status?.statistics.days ?? {})),
     [status?.statistics.days],
   );
-  const desktopTrendDays = useMemo(() => recentDays(period === 0 ? 30 : period), [period]);
+  const desktopTrendDays = useMemo(() => recentDays(DESKTOP_TREND_DAYS), []);
   const trendDays = mobile ? mobileTrendDays : desktopTrendDays;
 
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      requestRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const generation = ++clientGeneration.current;
+    requestRef.current = null;
+    requestStartedAtRef.current = 0;
+    lastRequestAtRef.current = 0;
+    setBusy(false);
+    setError("");
+    return () => {
+      if (generation === clientGeneration.current) {
+        clientGeneration.current++;
+        requestRef.current = null;
+      }
+    };
+  }, [client]);
+
   async function update(operation: () => Promise<TypingStatisticsStatus>, overview = false) {
-    if (requestRef.current) return;
+    if (!mounted.current || requestRef.current) return;
+    const generation = clientGeneration.current;
     setBusy(true);
     setError("");
     const request = operation();
@@ -908,23 +1331,34 @@ export function TypingStatisticsPage({
     if (overview) lastRequestAtRef.current = requestStartedAtRef.current;
     try {
       const next = await request;
-      if (requestRef.current !== request) return;
+      if (
+        !mounted.current ||
+        clientGeneration.current !== generation ||
+        requestRef.current !== request
+      )
+        return;
       statusSignatureRef.current = JSON.stringify(next);
       setStatus(next);
     } catch {
-      if (requestRef.current === request)
+      if (
+        mounted.current &&
+        clientGeneration.current === generation &&
+        requestRef.current === request
+      )
         setError("无法读取或保存统计，请稍后重试。原有统计不会被自动重置。");
     } finally {
       if (requestRef.current === request) {
         requestRef.current = null;
-        setBusy(false);
+        if (mounted.current && clientGeneration.current === generation) setBusy(false);
       }
     }
   }
 
   useEffect(() => {
     let active = true;
+    const generation = clientGeneration.current;
     const refreshWhenVisible = () => {
+      if (!mounted.current || clientGeneration.current !== generation) return;
       const now = Date.now();
       if (
         document.visibilityState === "hidden" ||
@@ -939,7 +1373,8 @@ export function TypingStatisticsPage({
       requestStartedAtRef.current = now;
       void request
         .then((next) => {
-          if (!active || requestRef.current !== request) return;
+          if (!active || clientGeneration.current !== generation || requestRef.current !== request)
+            return;
           const signature = JSON.stringify(next);
           if (signature !== statusSignatureRef.current) {
             statusSignatureRef.current = signature;
@@ -947,13 +1382,14 @@ export function TypingStatisticsPage({
           }
         })
         .catch(() => {
-          if (active && requestRef.current === request)
+          if (active && clientGeneration.current === generation && requestRef.current === request)
             setError("无法读取或保存统计，请稍后重试。原有统计不会被自动重置。");
         })
         .finally(() => {
           if (requestRef.current === request) {
             requestRef.current = null;
-            if (active) setBusy(false);
+            if (active && mounted.current && clientGeneration.current === generation)
+              setBusy(false);
           }
         });
     };
@@ -982,24 +1418,28 @@ export function TypingStatisticsPage({
       </div>
     );
   const statistics = status.statistics;
-  const scopeKeys = selectedDay
-    ? [selectedDay]
-    : mobile || period === 0
-      ? null
-      : trendDays.map((day) => day.key);
+  const scopeKeys = selectedDay ? [selectedDay] : null;
   const breakdown = scopedBreakdown(statistics, scopeKeys);
   const scopeTotal =
     scopeKeys === null
       ? statistics.total
       : scopeKeys.reduce((total, key) => total + (statistics.days[key] ?? 0), 0);
   const today = recentDays(1)[0];
-  const scopeTitle = selectedDay
-    ? (trendDays.find((day) => day.key === selectedDay)?.label ?? selectedDay)
-    : mobile || period === 0
-      ? "累计输入"
-      : `近 ${period} 天输入`;
+  const selectedLabel = selectedDay
+    ? (trendDays.find((day) => day.key === selectedDay)?.label ?? dayLabel(selectedDay))
+    : null;
+  const scopeTitle = selectedLabel ?? "累计输入";
+  const keyScopeLabel = selectedLabel ?? "累计";
   const maximum = Math.max(1, ...trendDays.map((day) => statistics.days[day.key] ?? 0));
   const activity = activityMetrics(statistics, today.key);
+  // The reference line is the average of the window's recorded days, the same "日均" the rhythm card uses, so empty days do not drag it down.
+  const trendRecorded = trendDays
+    .map((day) => statistics.days[day.key] ?? 0)
+    .filter((count) => count > 0);
+  const trendAverage =
+    trendRecorded.length === 0
+      ? 0
+      : trendRecorded.reduce((sum, count) => sum + count, 0) / trendRecorded.length;
   const characterSlices = characterKinds.map(([id, title], index) => ({
     id,
     title,
@@ -1018,7 +1458,7 @@ export function TypingStatisticsPage({
     {
       id: "chinese",
       title: "中文模式",
-      count: sum(breakdown.sources, [
+      count: sumStatisticValues(breakdown.sources, [
         "quanpin",
         "nineKey",
         "shuangpin",
@@ -1026,6 +1466,8 @@ export function TypingStatisticsPage({
         "microsoft",
         "shoudao",
         "wubi",
+        "cantonese",
+        "zhuyin",
       ]),
       color: palette[0],
       symbol: "中",
@@ -1036,6 +1478,21 @@ export function TypingStatisticsPage({
       count: breakdown.sources.japanese ?? 0,
       color: palette[4],
       symbol: "日",
+    },
+    {
+      id: "korean",
+      title: "韩语模式",
+      count: breakdown.sources.korean ?? 0,
+      color: palette[6],
+      symbol: "韩",
+    },
+    {
+      id: "vietnamese",
+      title: "越南语模式",
+      count: breakdown.sources.vietnamese ?? 0,
+      // Every palette colour already names a slice here, so this one has its own, as 高情商回复 does.
+      color: "#d0605e",
+      symbol: "越",
     },
     {
       id: "english",
@@ -1085,7 +1542,7 @@ export function TypingStatisticsPage({
   const resetStatistics = async () => {
     const confirmed = await confirm({
       title: "清空打字统计",
-      message: "累计字数、分类和每日记录都会被删除，无法恢复。",
+      message: "累计字数、分类、每日记录和按键次数都会被删除，无法恢复。",
       confirmLabel: "清空",
       danger: true,
     });
@@ -1120,23 +1577,21 @@ export function TypingStatisticsPage({
                   onChange={(event) => void update(() => client.setEnabled(event.target.checked))}
                 />
               </label>
-              <button
-                type="button"
-                role="menuitem"
+              <ActionButton
+                action={() => void update(() => client.load(), true)}
+                ariaBusy={busy}
+                className=""
                 disabled={busy}
-                onClick={() => void update(() => client.load(), true)}
-              >
-                {busy ? "处理中…" : "刷新统计"}
-              </button>
-              <button
-                type="button"
+                label={busy ? "处理中…" : "刷新统计"}
                 role="menuitem"
+              />
+              <ActionButton
+                action={() => void resetStatistics()}
                 className={`${menuItem} text-danger`}
                 disabled={busy}
-                onClick={() => void resetStatistics()}
-              >
-                清空统计
-              </button>
+                label="清空统计"
+                role="menuitem"
+              />
             </div>
           </details>
         </div>
@@ -1147,116 +1602,77 @@ export function TypingStatisticsPage({
             输入统计已关闭
           </h2>
           <p className="mt-2 mb-0 leading-relaxed text-secondary">
-            开启后这里会显示输入字数、速度与时段分布。统计只保存在本机，不记录输入内容，也不联网。
+            开启后这里会显示输入字数、速度、时段分布与按键热力图。统计只保存在本机，不记录输入内容，也不联网。
           </p>
-          <button
-            type="button"
+          <ActionButton
+            action={() => void update(() => client.setEnabled(true))}
+            ariaBusy={busy}
             className="secondary"
             disabled={busy}
-            onClick={() => void update(() => client.setEnabled(true))}
-          >
-            {busy ? "处理中…" : "启用输入统计"}
-          </button>
+            label={busy ? "处理中…" : "启用输入统计"}
+          />
         </section>
       )}
-      <section className="section m-0">
-        {mobile ? (
-          <div className={segmented(5)} role="tablist" aria-label="统计内容">
-            {(
-              [
-                ["trend", "趋势"],
-                ["kind", "类型"],
-                ["mode", "模式"],
-                ["scheme", "方案"],
-                ["ranks", "候选"],
-              ] as const
-            ).map(([value, label]) => (
-              <button
-                type="button"
-                role="tab"
-                key={value}
-                aria-selected={mobileTab === value}
-                onClick={() => {
-                  setMobileTab(value);
-                  setSelectedDay(null);
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className={segmented(3)} role="group" aria-label="统计范围">
-            {(
-              [
-                [7, "7 天"],
-                [30, "30 天"],
-                [0, "累计"],
-              ] as const
-            ).map(([value, label]) => (
-              <button
-                type="button"
-                key={value}
-                aria-pressed={period === value}
-                onClick={() => {
-                  setPeriod(value);
-                  setSelectedDay(null);
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="mt-[22px] grid grid-cols-2 gap-6 max-phone:gap-3">
+      <section className="section m-0" aria-label="统计概览">
+        <div className={metricGrid}>
           <div className={metric}>
-            <span className="text-secondary">今日输入</span>
-            <strong className={metricValue} aria-label="今日输入字符数">
-              {(statistics.days[today.key] ?? 0).toLocaleString("zh-CN")}
-            </strong>
-            <small className="m-0">字符</small>
+            <span>今日输入</span>
+            <div className={metricLine}>
+              <strong className={metricValue} aria-label="今日输入字符数">
+                {(statistics.days[today.key] ?? 0).toLocaleString("zh-CN")}
+              </strong>
+              <small>字符</small>
+            </div>
           </div>
           <div className={metric}>
-            <span className="text-secondary">{scopeTitle}</span>
-            <strong className={metricValue} aria-label="当前范围输入字符数">
-              {scopeTotal.toLocaleString("zh-CN")}
-            </strong>
-            <small className="m-0">字符</small>
-          </div>
-        </div>
-      </section>
-      <section className="section m-0" aria-labelledby="statistics-rhythm-title">
-        <h2 className={heading} id="statistics-rhythm-title">
-          输入节奏
-        </h2>
-        <div className="mt-[22px] grid grid-cols-2 gap-6 max-phone:gap-3">
-          <div className={metric}>
-            <span className="text-secondary">今日速度</span>
-            <strong className={metricValue} aria-label="今日输入速度">
-              {Math.round(activity.todaySpeed).toLocaleString("zh-CN")}
-            </strong>
-            <small className="m-0">字 / 分钟</small>
+            <span>{scopeTitle}</span>
+            <div className={metricLine}>
+              <strong className={metricValue} aria-label="当前范围输入字符数">
+                {scopeTotal.toLocaleString("zh-CN")}
+              </strong>
+              <small>字符</small>
+            </div>
           </div>
           <div className={metric}>
-            <span className="text-secondary">平均速度</span>
-            <strong className={metricValue} aria-label="平均输入速度">
-              {Math.round(activity.averageSpeed).toLocaleString("zh-CN")}
-            </strong>
-            <small className="m-0">字 / 分钟</small>
+            <span title="连续打字的时间">今日活跃</span>
+            <div className={metricLine}>
+              <strong className={metricValue} aria-label="今日活跃时长">
+                {formatActiveTime(activity.todayActiveMs)}
+              </strong>
+            </div>
           </div>
           <div className={metric}>
-            <span className="text-secondary">今日活跃</span>
-            <strong className={metricValue} aria-label="今日活跃时长">
-              {formatActiveTime(activity.todayActiveMs)}
-            </strong>
-            <small className="m-0">连续打字的时间</small>
+            <span>今日速度</span>
+            <div className={metricLine}>
+              <strong className={metricValue} aria-label="今日输入速度">
+                {Math.round(activity.todaySpeed).toLocaleString("zh-CN")}
+              </strong>
+              <small>字 / 分钟</small>
+            </div>
           </div>
           <div className={metric}>
-            <span className="text-secondary">连续天数</span>
-            <strong className={metricValue} aria-label="连续输入天数">
-              {activity.currentStreak.toLocaleString("zh-CN")}
-            </strong>
-            <small className="m-0">最长 {activity.longestStreak.toLocaleString("zh-CN")} 天</small>
+            <span>平均速度</span>
+            <div className={metricLine}>
+              <strong className={metricValue} aria-label="平均输入速度">
+                {Math.round(activity.averageSpeed).toLocaleString("zh-CN")}
+              </strong>
+              <small>字 / 分钟</small>
+            </div>
+            {activity.hasActivity && (
+              <small className={metricNote}>共 {formatActiveTime(activity.totalActiveMs)}</small>
+            )}
+          </div>
+          <div className={metric}>
+            <span>连续天数</span>
+            <div className={metricLine}>
+              <strong className={metricValue} aria-label="连续输入天数">
+                {activity.currentStreak.toLocaleString("zh-CN")}
+              </strong>
+              <small>天</small>
+            </div>
+            <small className={metricNote}>
+              最长 {activity.longestStreak.toLocaleString("zh-CN")} 天
+            </small>
           </div>
         </div>
         <div className={`${axis} flex-wrap gap-x-4`}>
@@ -1279,21 +1695,36 @@ export function TypingStatisticsPage({
             : "还没有测量到活跃时长。这项从本次更新后开始记录，之前的输入只有字数。"}
         </p>
       </section>
-      {activity.todayHours && (
-        <section className="section m-0" aria-labelledby="statistics-hours-title">
-          <h2 className={heading} id="statistics-hours-title">
-            今日时段
-          </h2>
-          <StatisticsHourlyBars hours={activity.todayHours} />
-        </section>
-      )}
-      {(!mobile || mobileTab === "trend") && (
+      <div className={segmented(6)} role="tablist" aria-label="统计内容">
+        {(
+          [
+            ["keys", "按键"],
+            ["trend", "趋势"],
+            ["kind", "类型"],
+            ["mode", "模式"],
+            ["scheme", "方案"],
+            ["ranks", "候选"],
+          ] as const
+        ).map(([value, label]) => (
+          <button
+            type="button"
+            role="tab"
+            key={value}
+            aria-selected={contentTab === value}
+            onClick={() => {
+              setContentTab(value);
+              // 桌面端切换标签时保留选中的那一天：它的柱子在「趋势」里，而其他标签正是用来看这一天的分项。
+              if (mobile) setSelectedDay(null);
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {contentTab === "trend" && (
         <section className="section m-0" aria-labelledby="statistics-trend-title">
           <h2 className={heading} id="statistics-trend-title">
-            每日趋势 ·{" "}
-            {mobile && trendDays.length >= 360
-              ? "近一年"
-              : `近 ${mobile ? trendDays.length : period === 0 ? 30 : period} 天`}
+            每日趋势 · {mobile && trendDays.length >= 360 ? "近一年" : `近 ${trendDays.length} 天`}
           </h2>
           <p className="mt-[7px] mb-0 text-xs text-muted">
             最高{" "}
@@ -1301,16 +1732,19 @@ export function TypingStatisticsPage({
               ? 0
               : maximum.toLocaleString("zh-CN")}{" "}
             字符 / 天
+            {trendAverage > 0 &&
+              ` · 虚线为日均 ${Math.round(trendAverage).toLocaleString("zh-CN")} 字符`}
           </p>
           {mobile ? (
             <StatisticsTrendLine
               days={trendDays}
               counts={statistics.days}
               selectedDay={selectedDay}
+              average={trendAverage}
             />
           ) : (
             <div
-              className={`mt-3 flex h-[145px] items-end ${trendDays.length === 7 ? "gap-2.5" : "gap-[3px]"} max-phone:gap-0.5`}
+              className={`relative mt-3 flex h-[145px] items-end ${trendDays.length === 7 ? "gap-2.5" : "gap-[3px]"} max-phone:gap-0.5`}
             >
               {trendDays.map((day) => {
                 const count = statistics.days[day.key] ?? 0;
@@ -1339,6 +1773,7 @@ export function TypingStatisticsPage({
                   </button>
                 );
               })}
+              {trendAverage > 0 && <ReferenceLine bottom={(trendAverage / maximum) * 100} />}
             </div>
           )}
           <div className={axis}>
@@ -1359,116 +1794,159 @@ export function TypingStatisticsPage({
             {mobile ? "点按热力图查看当天的分类与占比。" : "点按柱形查看当天的分类与占比。"}
           </p>
           {selectedDay && (
-            <button type="button" className="secondary" onClick={() => setSelectedDay(null)}>
-              返回整个时间范围
-            </button>
+            <ActionButton action={() => setSelectedDay(null)} label="返回整个时间范围" />
           )}
         </section>
       )}
-      {(!mobile || mobileTab === "kind") && (
-        <Distribution title="字符类型" slices={characterSlices} variant={mobile ? "pie" : "bar"} />
+      {contentTab === "trend" && activity.todayHours && (
+        <section className="section m-0" aria-labelledby="statistics-hours-title">
+          <h2 className={heading} id="statistics-hours-title">
+            今日时段
+          </h2>
+          <StatisticsHourlyBars
+            hours={activity.todayHours}
+            usual={usualHours(statistics.dailyHours, today.key)}
+          />
+        </section>
       )}
-      {(!mobile || mobileTab === "mode") && (
+      {contentTab === "trend" && (
+        <section className="section m-0" aria-labelledby="statistics-speed-title">
+          <h2 className={heading} id="statistics-speed-title">
+            速度趋势
+          </h2>
+          <SpeedTrend
+            days={trendDays}
+            speeds={dailySpeeds(
+              statistics,
+              trendDays.map((day) => day.key),
+            )}
+            averageSpeed={activity.averageSpeed}
+            selectedDay={selectedDay}
+          />
+        </section>
+      )}
+      {!mobile && contentTab === "trend" && (
+        <section className="section m-0" aria-labelledby="statistics-calendar-title">
+          <h2 className={heading} id="statistics-calendar-title">
+            日历热力图
+          </h2>
+          <p className="mt-[7px] mb-0 text-xs text-muted">近 12 个月，颜色越深输入越多</p>
+          <StatisticsHeatmap
+            days={statistics.days}
+            selectedDay={selectedDay}
+            onSelect={(key) => setSelectedDay((current) => (current === key ? null : key))}
+          />
+        </section>
+      )}
+      {contentTab === "keys" && (
+        <KeyboardHeatmap
+          dailyKeys={statistics.dailyKeys}
+          scopeKeys={scopeKeys}
+          scopeLabel={keyScopeLabel}
+          mobile={mobile}
+          platform={platform}
+        />
+      )}
+      {contentTab === "kind" && (
+        <Distribution title="字符类型" slices={characterSlices} variant="donut" wide={!mobile} />
+      )}
+      {contentTab === "mode" && (
         <Distribution
           title="语言模式"
           slices={languageSlices}
-          variant={mobile ? "donut" : "bar"}
+          variant="donut"
+          wide={!mobile}
           footer="按提交时使用的键盘模式统计，不推测文本语言；中文模式下输入的数字仍计入中文模式。AI 润色和语音输入单独按来源统计。"
         />
       )}
-      {(!mobile || mobileTab === "scheme") && (
+      {contentTab === "scheme" && (
         <Distribution
           title="输入方案"
           slices={sourceSlices}
-          variant={mobile ? "rank" : "bar"}
-          footer="输入方案统计其上屏字符数，不计未上屏的拼音按键。旧版本总数保留为历史未分类，新输入开始记录细分。"
+          variant="rank"
+          footer="输入方案统计其上屏字符数；拼音等按键另由按键热力图计数，只记每个键每天的按下次数。来源无法归类的字数计入历史未分类。"
         />
       )}
-      {(!mobile || mobileTab === "ranks") && <CandidateRanks selections={statistics.selections} />}
+      {!mobile && contentTab === "trend" && (
+        <DailyDetails rows={dailyDetailRows(statistics, today.key)} />
+      )}
+      {contentTab === "ranks" && <CandidateRanks selections={statistics.selections} />}
       {mobile ? (
         <section className="section m-0 pt-0.5">
           <p className={`${privacy} mt-0`}>
-            仅统计水杉键盘成功提交的字符，含标点及表情，不含空格、换行和未上屏拼音。组合表情计为一个字符，删除文字不扣减。仅在本机保存日期、分类和数量，不保存输入内容。每日明细保留最近
-            366 个有记录的日期，累计分类持续保留。
+            字数仅统计水杉键盘成功提交的字符，含标点及表情，不含空格和换行。组合表情计为一个字符，删除文字不扣减。按键热力图只保存每个键每天被按下的次数，不保存按键顺序和输入内容。仅在本机保存日期、分类和数量，不保存输入内容。每日明细默认永久保留。
           </p>
         </section>
       ) : (
         <section className="section m-0">
-          <label className="section-header mb-4">
-            <span className="section-title">
-              记录打字统计<small>关闭后，新提交不会增加统计。</small>
-            </span>
-            <input
-              aria-label="记录打字统计"
-              className="toggle"
-              type="checkbox"
-              checked={statistics.enabled}
-              disabled={busy}
-              onChange={(event) => void update(() => client.setEnabled(event.target.checked))}
-            />
-          </label>
+          <SettingToggle
+            label="记录打字统计"
+            description="关闭后，新提交不会增加统计。"
+            ariaLabel="记录打字统计"
+            rowClassName="mb-4"
+            compact
+            checked={statistics.enabled}
+            disabled={busy}
+            onChange={(enabled) => void update(() => client.setEnabled(enabled))}
+          />
           {client.setRetention && (
-            <label className="section-header mb-4">
-              <span className="section-title">
-                自动清理<small>按保留策略删除超期的每日记录，跨天后首次记录时执行。</small>
-              </span>
-              <select
-                aria-label="自动清理"
-                value={statistics.retention ?? "forever"}
-                disabled={busy}
-                onChange={(event) => {
-                  const setRetention = client.setRetention;
-                  if (!setRetention) return;
-                  const chosen = event.target.value as StatisticsRetention;
-                  void update(() => setRetention(chosen));
-                }}
-              >
-                {retentionChoices.map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <SelectSettingField
+              label="自动清理"
+              inputLabel="自动清理"
+              description="按保留策略删除超期的每日记录并从累计中扣除，跨天后首次记录时执行。"
+              fieldClassName="section-header mb-4"
+              value={statistics.retention ?? "forever"}
+              disabled={busy}
+              onChange={(value) => {
+                const setRetention = client.setRetention;
+                if (!setRetention) return;
+                const chosen = value as StatisticsRetention;
+                void update(() => setRetention(chosen));
+              }}
+            >
+              {retentionChoices.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </SelectSettingField>
           )}
           <div className="flex flex-wrap gap-[9px]">
-            <button
-              type="button"
+            <ActionButton
+              action={() => void update(() => client.load(), true)}
+              ariaBusy={busy}
               className="secondary m-0"
               disabled={busy}
-              onClick={() => void update(() => client.load(), true)}
-            >
-              {busy ? "处理中…" : "刷新统计"}
-            </button>
+              label={busy ? "处理中…" : "刷新统计"}
+            />
             {client.openDirectory && (
-              <button
-                type="button"
-                className="secondary m-0"
-                disabled={busy}
-                onClick={() => {
+              <ActionButton
+                action={async () => {
                   const openDirectory = client.openDirectory;
                   if (!openDirectory) return;
                   setError("");
-                  void openDirectory().catch(() =>
-                    setError("无法打开数据目录，可能是文件管理器不可用。"),
-                  );
+                  try {
+                    await openDirectory();
+                  } catch {
+                    setError("无法打开数据目录，可能是文件管理器不可用。");
+                  }
                 }}
-              >
-                打开数据目录
-              </button>
+                ariaBusy={busy}
+                className="secondary m-0"
+                disabled={busy}
+                label="打开数据目录"
+              />
             )}
-            <button
-              type="button"
+            <ActionButton
+              action={() => void resetStatistics()}
+              ariaBusy={busy}
               className="secondary m-0 text-danger"
               disabled={busy}
-              onClick={() => void resetStatistics()}
-            >
-              清空统计
-            </button>
+              label="清空统计"
+            />
           </div>
           <p className={privacy}>
-            仅统计水杉键盘成功提交的字符，含标点及表情，不含空格、换行和未上屏拼音。组合表情计为一个字符，删除文字不扣减。仅在本机保存日期、分类和数量，不保存输入内容。每日明细保留最近
-            366 个有记录的日期，累计分类持续保留。
+            字数统计水杉键盘提交的字符，以及英文模式和放行给应用的字母、数字与符号（按按键时估计），含标点及表情，不含空格和换行。组合表情计为一个字符，删除文字不扣减。按键热力图只保存每个键每天被按下的次数，不保存按键顺序和输入内容。仅在本机保存日期、分类和数量，不保存输入内容。每日明细默认永久保留，可在「自动清理」中改为只保留最近一段时间；清理删除的日期同时从累计总数与分类中扣除。
           </p>
         </section>
       )}
@@ -1477,9 +1955,7 @@ export function TypingStatisticsPage({
           <h2 className={heading}>统计没有数据</h2>
           <p className="mt-2 mb-0 leading-relaxed text-secondary">{availabilityMessage}</p>
           {iosPlatform && status.availability === "neverWritten" && openSystemSettings && (
-            <button type="button" className="secondary" onClick={() => void openSystemSettings()}>
-              打开系统键盘设置
-            </button>
+            <ActionButton action={openSystemSettings} label="打开系统键盘设置" />
           )}
         </section>
       )}

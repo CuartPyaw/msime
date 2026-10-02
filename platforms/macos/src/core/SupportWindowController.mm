@@ -1,4 +1,5 @@
 #import "SupportWindowController.h"
+#import "WindowPresentation.h"
 
 namespace {
 
@@ -68,7 +69,9 @@ void OpenPreferences(void) {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
     id controller = [type performSelector:@selector(sharedController)];
-    if ([controller respondsToSelector:@selector(showAndActivate)]) [controller performSelector:@selector(showAndActivate)];
+    // This button sits under the help page's line about candidate settings, input schemes and shortcuts being adjustable in the settings window, so the page it has to open is 输入. It used to call the argument-less -showAndActivate, which landed on whatever page the window happened to be showing.
+    if ([controller respondsToSelector:@selector(showAndActivateWithPageIdentifier:)])
+        [controller performSelector:@selector(showAndActivateWithPageIdentifier:) withObject:@"input"];
 #pragma clang diagnostic pop
 }
 
@@ -112,7 +115,7 @@ void OpenPreferences(void) {
     switch (page) {
         case MSIMESupportPageAbout: {
             title = @"关于水杉输入法";
-            NSString *version = NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"] ?: @"0.50.0";
+            NSString *version = NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"] ?: @"0.51.0";
             views = @[
                 Heading(@"水杉 IME"),
                 Body(@"为现代 macOS 桌面体验打造的开放中文输入法。"),
@@ -169,8 +172,7 @@ void OpenPreferences(void) {
     self.window.contentView = content;
     [self.window center];
     [self showWindow:nil];
-    [self.window makeKeyAndOrderFront:nil];
-    [NSApp activateIgnoringOtherApps:YES];
+    MSIMEPresentWindow(self.window);
 }
 
 - (void)checkForUpdates:(id)sender { (void)sender; InvokeUpdateController(); }

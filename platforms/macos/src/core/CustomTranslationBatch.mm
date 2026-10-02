@@ -8,6 +8,7 @@
     void (^_completion)(NSArray<NSDictionary *> *);
     NSMutableArray<NSDictionary *> *_results;
     MSIMECloudCandidateRequest *_request;
+    NSURLSession *_session;
     NSTimer *_timer;
     NSTimeInterval _deadline;
     NSUInteger _nextIndex;
@@ -15,6 +16,7 @@
     BOOL _tencent;
     BOOL _ai;
     BOOL _niuTrans;
+    BOOL _detached;
 }
 - (instancetype)initWithNiuTransItems:(NSArray<NSDictionary *> *)items config:(NSDictionary *)config
                         configuration:(NSURLSessionConfiguration *)configuration
@@ -128,6 +130,20 @@
     return [[MSIMECloudCandidateRequest alloc] initWithTranslationDescriptor:descriptor
         configuration:_configuration completion:completion];
 }
+// One session per NiuTrans or custom batch, so the second word onwards reuses the first word's connection instead of paying another TCP and TLS handshake out of the six-second budget. It carries the same hardening as a request's own session, and no delegate: each task reports to its own request.
+- (NSURLSession *)transportSession {
+    if (_session || !_configuration) return _session;
+    NSURLSessionConfiguration *configuration = [_configuration copy];
+    configuration.URLCache = nil;
+    configuration.HTTPCookieStorage = nil;
+    configuration.URLCredentialStorage = nil;
+    configuration.HTTPShouldSetCookies = NO;
+    configuration.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+    configuration.timeoutIntervalForRequest = 2.5;
+    configuration.timeoutIntervalForResource = 2.5;
+    _session = [NSURLSession sessionWithConfiguration:configuration delegate:nil delegateQueue:NSOperationQueue.mainQueue];
+    return _session;
+}
 - (void)start {
     NSAssert(NSThread.isMainThread, @"Translation batch must run on main thread");
     if (_started || !_completion) return;
@@ -143,48 +159,58 @@
 }
 - (void)advance {
     if (!_completion) return;
-    if (_nextIndex >= _items.count || [self currentTime] >= _deadline) { [self finish]; return; }
+    if (_detached || _nextIndex >= _items.count || [self currentTime] >= _deadline) { [self finish]; return; }
     NSDictionary *item = _items[_nextIndex++];
     NSString *text = item[@"text"];
     NSUInteger sequence = _nextIndex;
     __weak MSIMECustomTranslationBatch *weakSelf = self;
-    void (^reply)(NSData *) = ^(NSData *body) {
+    // `answered` is NO for a transport failure (nothing came back, which includes HTTP errors such as 429) and for a body in which the provider reports a failure: Tencent's Response.Error, NiuTrans' errorCode, a DeepLX code other than 200, or a malformed body. Those items stay unanswered, so the caller asks again rather than hiding the gloss for eight minutes over a rate limit or an outage. A request that could not even be built is an answer: asking again builds the same invalid request.
+    void (^handle)(NSData *, BOOL) = ^(NSData *body, BOOL answered) {
         MSIMECustomTranslationBatch *strongSelf = weakSelf;
         if (!strongSelf || !strongSelf->_completion || sequence != strongSelf->_nextIndex) return;
-        // The main queue may be busy when the deadline timer becomes due.
-        if ([strongSelf currentTime] >= strongSelf->_deadline) { [strongSelf finish]; return; }
-        NSArray *translations = nil;
-        NSString *translation = nil;
+        NSMutableArray<NSDictionary *> *results = [NSMutableArray array];
         if (strongSelf->_niuTrans) {
-            translation = body ? [MSIMEClientSession parseNiuTransTranslationResponse:body error:nil] : nil;
+            NSString *translation = body ? [MSIMEClientSession parseNiuTransTranslationResponse:body error:nil] : nil;
+            if (translation.length) [results addObject:@{@"text":text, @"translation":translation}];
+            if (body && [MSIMEClientSession niuTransTranslationReplyFailed:body]) answered = NO;
         } else if (strongSelf->_tencent) {
-            translations = body ? [MSIMEClientSession parseTencentTranslationResponse:body
+            NSArray *translations = body ? [MSIMEClientSession parseTencentTranslationResponse:body
                 expectedCount:[item[@"originals"] count] error:nil] : nil;
+            // Tencent's parser already tells the two apart: an answer is an array, with NSNull where a text got nothing.
+            if (body && !translations) answered = NO;
+            for (NSUInteger i = 0; i < translations.count; ++i) {
+                id gloss = translations[i];
+                if ([gloss isKindOfClass:NSString.class] && [gloss length])
+                    [results addObject:@{@"text":item[@"originals"][i], @"translation":gloss}];
+            }
         } else if (strongSelf->_ai) {
-            translations = nil;
             NSUInteger limit = [item[@"candidate_limit"] isKindOfClass:NSNumber.class]
                 ? [item[@"candidate_limit"] unsignedIntegerValue] : 10;
             NSArray *values = body ? [MSIMEClientSession parseAIResponse:body limit:limit error:nil] : nil;
             for (NSString *value in values) if ([value isKindOfClass:NSString.class] && value.length)
-                [strongSelf->_results addObject:@{@"text":item[@"text"], @"translation":value}];
+                [results addObject:@{@"text":text, @"translation":value}];
         } else {
-            translation = body ? [MSIMEClientSession parseCustomTranslationResponse:body error:nil] : nil;
+            NSString *translation = body ? [MSIMEClientSession parseCustomTranslationResponse:body error:nil] : nil;
+            if (translation.length) [results addObject:@{@"text":text, @"translation":translation}];
+            if (body && [MSIMEClientSession customTranslationReplyFailed:body]) answered = NO;
         }
-        if ([strongSelf currentTime] >= strongSelf->_deadline) { [strongSelf finish]; return; }
-        for (NSUInteger i = 0; i < translations.count; ++i) {
-            id gloss = translations[i];
-            if ([gloss isKindOfClass:NSString.class] && [gloss length])
-                [strongSelf->_results addObject:@{@"text":item[@"originals"][i], @"translation":gloss}];
-        }
-        if (translation.length) [strongSelf->_results addObject:@{@"text":text, @"translation":translation}];
+        // A Tencent item is a whole language group, answered by its original texts; every other item is one text.
+        NSArray<NSString *> *answeredTexts = !answered ? @[] : strongSelf->_tencent ? item[@"originals"] : @[text];
+        // The main queue may be busy when the deadline timer becomes due. A response that was already paid for still reaches onReply, so the caller can cache it, but completion keeps to what arrived in time.
+        BOOL late = [strongSelf currentTime] >= strongSelf->_deadline;
+        if (!late) [strongSelf->_results addObjectsFromArray:results];
+        if (strongSelf->_onReply) strongSelf->_onReply([results copy], answeredTexts);
+        if (!strongSelf->_completion) return;
+        if (late) { [strongSelf finish]; return; }
         strongSelf->_request = nil;
         [strongSelf advance];
     };
+    void (^reply)(NSData *) = ^(NSData *body) { handle(body, body != nil); };
     if (_niuTrans) {
         NSMutableDictionary *input = [item[@"request"] mutableCopy];
         input[@"timestamp"] = [NSString stringWithFormat:@"%lld", (long long)([self unixTime] * 1000)];
         NSDictionary *descriptor = [MSIMEClientSession niuTransTranslationHTTPRequest:input error:nil];
-        if (!descriptor) { reply(nil); return; }
+        if (!descriptor) { handle(nil, YES); return; }
         if ([self currentTime] >= _deadline) { [self finish]; return; }
         _request = [self niuTransRequestForDescriptor:descriptor completion:reply];
     } else if (_tencent) {
@@ -192,7 +218,7 @@
             @"config":item[@"config"], @"texts":item[@"texts"],
             @"source_language":item[@"source_language"], @"target_language":item[@"target_language"],
             @"timestamp":@((long long)[self unixTime])} error:nil];
-        if (!descriptor) { reply(nil); return; }
+        if (!descriptor) { handle(nil, YES); return; }
         if ([self currentTime] >= _deadline) { [self finish]; return; }
         _request = [self tencentRequestForDescriptor:descriptor completion:reply];
     } else if (_ai) {
@@ -200,7 +226,9 @@
     } else {
         _request = [self requestForDescriptor:item[@"request"] completion:reply];
     }
-    [_request start];
+    // NiuTrans and custom send one request per word within the 2.5-second budget the shared session enforces. Tencent sends one request per language group, and an AI request needs its own 8-second budget, so both keep a session of their own.
+    if (!_tencent && !_ai) [_request startInSession:[self transportSession]];
+    else [_request start];
 }
 - (void)finish {
     void (^completion)(NSArray<NSDictionary *> *) = _completion;
@@ -208,13 +236,24 @@
     [self cancel];
     if (completion) completion(results);
 }
+- (BOOL)detachWithCompletion:(void (^)(void))completion {
+    NSAssert(NSThread.isMainThread, @"Translation batch must run on main thread");
+    if (!_completion || !_request) { [self cancel]; return NO; }
+    void (^ended)(void) = [completion copy];
+    _detached = YES;
+    _completion = ^(NSArray<NSDictionary *> *results) { (void)results; if (ended) ended(); };
+    return YES;
+}
 - (void)cancel {
     NSAssert(NSThread.isMainThread, @"Translation batch must run on main thread");
     _completion = nil;
+    _onReply = nil;
     [_timer invalidate];
     _timer = nil;
     [_request cancel];
     _request = nil;
+    [_session invalidateAndCancel];
+    _session = nil;
     _items = nil;
     _configuration = nil;
     _results = nil;
@@ -222,5 +261,6 @@
 - (void)dealloc {
     [_timer invalidate];
     [_request cancel];
+    [_session invalidateAndCancel];
 }
 @end

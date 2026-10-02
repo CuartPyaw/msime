@@ -100,7 +100,7 @@ int main(int argc, char **argv) {
                                     "procedure DataDirBrowseClick");
     contains(validation, "IsPathInside(Critical[Index], Directory)",
              "Data directory may contain a system or user root");
-    contains(validation, "IsPathInside(Directory, Protected[Index])",
+    contains(validation, "IsPathInside(Directory, ProtectedDirs[Index])",
              "Data directory may be placed inside a protected root");
     contains(validation, "Pos('\\..\\', WithSlash)",
              "Data-directory traversal is not rejected");
@@ -139,6 +139,78 @@ int main(int argc, char **argv) {
              "Installer proceeds after failing to claim the data directory");
     contains(script, "'数据目录（词库、用户配置、皮肤）：'",
              "Ready page does not disclose the selected data directory");
+
+    // DataDir carries uninsdeletevalue, so it is already gone at usPostUninstall. The uninstaller must remove the directory it read at start, or a custom data directory outlives every uninstall.
+    const auto initialize = between(script, "function InitializeUninstall",
+                                    "procedure StopProcess");
+    contains(initialize, "ResolvePreviousDataDir;",
+             "Uninstall does not capture DataDir before its value is removed");
+    const auto post_uninstall =
+        between(script, "else if CurUninstallStep = usPostUninstall",
+                "TryDeleteTree(ResolvePreviousDataDir);");
+    contains(post_uninstall, "if OwnsDataDir(ResolvePreviousDataDir) then",
+             "Uninstall removes a data directory it did not record");
+    if (post_uninstall.find("GetDataDir(") != std::string::npos)
+      throw std::runtime_error(
+          "Uninstall re-reads DataDir after the registry value is removed");
+
+    // DataDir is the Server state root, not only config.toml / skins. An upgrade must clear package items only, and a data-directory change must move every user item while deleting the old directory only after nothing can fail any more.
+    const auto package = between(script, "function IsPackageAppDataItem",
+                                 "function IsPreservedAppDataItem");
+    for (const char *state :
+         {"'preferences.json'", "'user'", "'cache'", "'logs'",
+          "'config.toml'", "'skins'",
+          "'runtime-options.json'"})
+      if (package.find(state) != std::string::npos)
+        throw std::runtime_error(std::string("Upgrade cleanup deletes user state ") + state);
+    const auto preserved = between(script, "function IsPreservedAppDataItem",
+                                   "function InitializeUninstall");
+    contains(preserved, "(not IsPackageAppDataItem(FileName))",
+             "Upgrade cleanup deletes Server state");
+    const auto migrated = between(script, "function IsMigratedDataItem",
+                                  "function RobocopySucceeded");
+    contains(migrated, "(not IsPackageAppDataItem(FileName))",
+             "Migration copies package files instead of user state");
+    contains(migrated, "(CompareText(FileName, 'runtime-options.json') <> 0)",
+             "Migration carries absolute paths of the previous directory");
+    const auto migrate = between(script, "function MigrateUserDataDir",
+                                 "procedure FinishDataDirMove");
+    contains(migrate, "IsMigratedDataItem(FindRec.Name)",
+             "Migration does not walk every user item");
+    contains(migrate, "(not IsPathInside(NewDir, Source))",
+             "Migration copies the new directory into itself");
+    contains(migrate, "if IsPathInside(OldDir, Destination) then",
+             "Migration can write into its own source");
+    contains(migrate, "DataDirMigrated := True",
+             "A completed migration never removes the previous directory");
+    for (const char *removal : {"TryDeleteTree", "DelTree", "DeleteFile", "/MOVE"})
+      if (migrate.find(removal) != std::string::npos)
+        throw std::runtime_error("Migration deletes the source before installation succeeds");
+    const auto finish = between(script, "procedure FinishDataDirMove",
+                                "function PrepareToInstall");
+    contains(finish, "if not DataDirMigrated then",
+             "Previous directory is removed without a completed copy");
+    contains(finish, "(not OwnsDataDir(OldDir))",
+             "Previous directory is removed without our ownership marker");
+    contains(finish, "if not IsPathInside(NewDir, OldDir) then",
+             "Removing the previous directory can delete a new one inside it");
+    contains(finish, "if not IsPathInside(NewDir, ItemPath) then",
+             "Removing the previous directory can delete a new one inside it");
+    const auto post_install = between(script, "if CurStep = ssPostInstall then",
+                                      "procedure CurUninstallStepChanged");
+    const auto finish_call = post_install.find("FinishDataDirMove;");
+    for (const char *step : {"CreateWatchdogLogonTask;", "EnsureImeUserDataDir;"})
+      if (finish_call == std::string::npos ||
+          post_install.find(step) == std::string::npos ||
+          post_install.find(step) > finish_call)
+        throw std::runtime_error(std::string("Previous directory is removed before ") + step);
+
+    // The installer starts the Server with --production, which is not a Watchdog launch; the Server therefore brings its Watchdog back when TSF, not the Watchdog, revives it.
+    const wchar_t *production[] = {L"MetasequoiaImeServer.exe",
+                                   L"--production"};
+    if (msime::windows::parse_server_arguments(2, production).supervised)
+      throw std::runtime_error(
+          "A TSF-started Server would not restore its Watchdog");
     std::cout << "Installer launch and data-directory contracts passed\n";
     return 0;
   } catch (const std::exception &error) {

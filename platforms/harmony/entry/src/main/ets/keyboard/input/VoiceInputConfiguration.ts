@@ -42,6 +42,10 @@ export interface VoiceInputConfiguration {
   doubao_auth_mode: string;
   asr_resource_id: string;
   asr_model: string;
+  /** Directory of the installed on-device model the `local` provider loads; absent or empty means none has been picked. */
+  asr_model_path?: string;
+  /** Download mirror the settings page uses for model installs; the keyboard only carries it through. */
+  asr_model_mirror?: string;
   polish_enabled: boolean;
   polish_text: boolean;
   polish_provider: string;
@@ -50,7 +54,6 @@ export interface VoiceInputConfiguration {
   polish_endpoint: string;
   polish_model: string;
   polish_prompt_id: string;
-  polish_prompt: string;
   polish_prompt_custom_1: string;
   polish_prompt_custom_2: string;
   polish_prompt_custom_3: string;
@@ -83,6 +86,8 @@ export const DEFAULT_VOICE_INPUT_CONFIGURATION: VoiceInputConfiguration = {
   doubao_auth_mode: "api_key",
   asr_resource_id: "volc.seedasr.sauc.duration",
   asr_model: "",
+  asr_model_path: "",
+  asr_model_mirror: "",
   polish_enabled: false,
   polish_text: false,
   polish_provider: "siliconflow",
@@ -91,7 +96,6 @@ export const DEFAULT_VOICE_INPUT_CONFIGURATION: VoiceInputConfiguration = {
   polish_endpoint: "https://api.siliconflow.cn/v1/chat/completions",
   polish_model: "Qwen/Qwen3-8B",
   polish_prompt_id: "cleanup",
-  polish_prompt: "",
   polish_prompt_custom_1: "",
   polish_prompt_custom_2: "",
   polish_prompt_custom_3: "",
@@ -101,7 +105,7 @@ export const DEFAULT_VOICE_INPUT_CONFIGURATION: VoiceInputConfiguration = {
   doubao_boosting_table_id: "",
 };
 
-/** Keeps legacy prepared documents enabled unless they explicitly opt out. */
+/** Voice input is on unless the prepared document explicitly turns it off. */
 export class VoiceInputConfigurationPolicy {
   static enabled(value: boolean | undefined): boolean {
     return value !== false;

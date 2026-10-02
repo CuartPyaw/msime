@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
+import { settingsFormReady } from "../support/settings-form";
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { SettingsPage, type DictionaryEntry, type Snapshot } from "@msime/ui";
 import { answerConfirm } from "../support/confirm";
 // Not re-exported from the package root; take it from the module that owns it.
@@ -52,7 +53,7 @@ async function openDictionary(dictionary: ReturnType<typeof dictionaryClient>) {
       client={{ load: async () => snapshot, save: vi.fn(), dictionary: dictionary as never }}
     />,
   );
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   fireEvent.click(screen.getByRole("button", { name: "词库" }));
   // The page lists on demand rather than on open.
   fireEvent.click(await screen.findByRole("button", { name: "查询" }));
@@ -105,6 +106,34 @@ test("deleting the only row on a later page steps back instead of showing nothin
   expect(dictionary.list.mock.calls[2][0]).toBe(0);
 });
 
+test("a bundled row is badged and its edit only changes the weight", async () => {
+  const bundled: DictionaryEntry = {
+    kind: "quick_phrase",
+    key: "dh",
+    value: "电话",
+    weight: 500,
+    source: "bundled",
+  };
+  const user: DictionaryEntry = { ...bundled, key: "wd", value: "我的", source: "user" };
+  const dictionary = dictionaryClient({
+    list: vi.fn().mockResolvedValue({ entries: [bundled, user], has_more: false }),
+  });
+  await openDictionary(dictionary);
+  expect(screen.getAllByText("内置")).toHaveLength(1);
+  // A user row keeps the full editor; the bundled one offers only a weight change.
+  expect(screen.getByRole("button", { name: "编辑" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "调权重" }));
+  const code = screen.getByDisplayValue("dh") as HTMLInputElement;
+  const phrase = screen.getByDisplayValue("电话") as HTMLInputElement;
+  expect(code.readOnly && phrase.readOnly).toBe(true);
+  fireEvent.change(screen.getByDisplayValue("500"), { target: { value: "1" } });
+  fireEvent.click(screen.getByRole("button", { name: "保存" }));
+  await waitFor(() => expect(dictionary.edit).toHaveBeenCalled());
+  const [previous, replacement] = dictionary.edit.mock.calls[0];
+  expect(previous).toEqual(bundled);
+  expect(replacement).toEqual({ ...bundled, weight: 1 });
+});
+
 test("Android personal dictionary JSON import previews and queues only after confirmation", async () => {
   const importPersonal = vi.fn().mockResolvedValue({ queued: true, pending_count: 2 });
   const dictionary = dictionaryClient({ importPersonal });
@@ -113,7 +142,7 @@ test("Android personal dictionary JSON import previews and queues only after con
       client={{ load: async () => snapshot, save: vi.fn(), dictionary: dictionary as never }}
     />,
   );
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   fireEvent.click(screen.getByRole("button", { name: "词库" }));
 
   const file = new File(
@@ -123,7 +152,7 @@ test("Android personal dictionary JSON import previews and queues only after con
         version: 1,
         entries: [
           { kind: "pinyin", key: "ni hao", value: "你好", weight: 100000 },
-          { kind: "quickPhrase", key: "hello1", value: "你好！", weight: 3 },
+          { kind: "quickPhrase", key: "hello", value: "你好！", weight: 3 },
         ],
       }),
     ],
@@ -141,6 +170,89 @@ test("Android personal dictionary JSON import previews and queues only after con
     ),
   );
   expect(await screen.findByText(/已加入本机同步队列/)).not.toBeNull();
+});
+
+test("personal dictionary import ignores a duplicate confirmation while pending", async () => {
+  let resolveImport!: (value: { queued: boolean; pending_count: number }) => void;
+  const importPersonal = vi.fn(
+    () =>
+      new Promise<{ queued: boolean; pending_count: number }>(
+        (resolve) => (resolveImport = resolve),
+      ),
+  );
+  const dictionary = dictionaryClient({ importPersonal });
+  render(
+    <SettingsPage
+      client={{ load: async () => snapshot, save: vi.fn(), dictionary: dictionary as never }}
+    />,
+  );
+  await settingsFormReady();
+  fireEvent.click(screen.getByRole("button", { name: "词库" }));
+  const file = new File(
+    [
+      JSON.stringify({
+        format: "msime-personal-dictionary",
+        version: 1,
+        entries: [{ kind: "pinyin", key: "ni", value: "你", weight: 1 }],
+      }),
+    ],
+    "pending.json",
+    { type: "application/json" },
+  );
+  fireEvent.change(screen.getByLabelText("选择个人词库 JSON 文件"), { target: { files: [file] } });
+  await screen.findByText(/已校验 1 条/);
+  const confirm = screen.getByRole("button", { name: "确认导入" });
+  await act(async () => {
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+  });
+  expect(importPersonal).toHaveBeenCalledTimes(1);
+  resolveImport({ queued: true, pending_count: 1 });
+  await screen.findByText(/已加入本机同步队列/);
+});
+
+test("personal dictionary import ignores a response from a replaced dictionary client", async () => {
+  let resolveImport!: (value: { queued: boolean; pending_count: number }) => void;
+  const oldImport = vi.fn(
+    () =>
+      new Promise<{ queued: boolean; pending_count: number }>(
+        (resolve) => (resolveImport = resolve),
+      ),
+  );
+  const oldDictionary = dictionaryClient({ importPersonal: oldImport });
+  const view = render(
+    <SettingsPage
+      client={{ load: async () => snapshot, save: vi.fn(), dictionary: oldDictionary as never }}
+    />,
+  );
+  await settingsFormReady();
+  fireEvent.click(screen.getByRole("button", { name: "词库" }));
+  const file = new File(
+    [
+      JSON.stringify({
+        format: "msime-personal-dictionary",
+        version: 1,
+        entries: [{ kind: "pinyin", key: "ni", value: "你", weight: 1 }],
+      }),
+    ],
+    "stale.json",
+    { type: "application/json" },
+  );
+  fireEvent.change(screen.getByLabelText("选择个人词库 JSON 文件"), { target: { files: [file] } });
+  await screen.findByText(/已校验 1 条/);
+  fireEvent.click(screen.getByRole("button", { name: "确认导入" }));
+  await waitFor(() => expect(oldImport).toHaveBeenCalled());
+  const nextDictionary = dictionaryClient({
+    importPersonal: vi.fn().mockResolvedValue({ queued: true, pending_count: 0 }),
+  });
+  view.rerender(
+    <SettingsPage
+      client={{ load: async () => snapshot, save: vi.fn(), dictionary: nextDictionary as never }}
+    />,
+  );
+  resolveImport({ queued: true, pending_count: 1 });
+  await Promise.resolve();
+  expect(screen.queryByText(/已加入本机同步队列，共 1 条/)).toBeNull();
 });
 
 test("personal dictionary JSON validation normalizes before keeping malformed and duplicate entries out", () => {

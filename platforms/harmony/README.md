@@ -1,8 +1,10 @@
-# HarmonyOS 输入宿主预览
+# HarmonyOS 输入宿主
 
-迁移对照见 [docs/harmony-parity.md](../../docs/harmony-parity.md)：用什么方法比过 MSIME-Apple、发现了什么、哪些是按平台特性裁剪而不是欠账，以及真机验收时该优先核对的几项。
+ArkTS 宿主与 NAPI 原生边界是完整实现：键盘扩展、设置应用、账号、社区、AI、语音、手写、候选与词库都在本目录内。能力对照见 [docs/harmony-parity.md](../../docs/harmony-parity.md)：用什么方法比过 MSIME-Apple、哪些是按平台特性裁剪而不是欠账。
 
-OpenHarmony 适配保留 ArkTS/ArkUI 应用入口与 NAPI 原生边界。共享输入算法、组合状态、配置校验和资源准备继续由 Rust Host API 与 C++ Engine 提供；`platforms/harmony/native/client_napi.cpp` 只负责 NAPI 注册和 C ABI 转发，不复制候选分页或输入状态机。
+OpenHarmony 适配保留 ArkTS/ArkUI 应用入口与 NAPI 原生边界。共享输入算法、组合状态、配置校验和资源准备继续由 Rust Host API 与 Rust Engine（`crates/engine`）提供；`platforms/harmony/native/client_napi.cpp` 只负责 NAPI 注册和 C ABI 转发，不复制候选分页或输入状态机。
+
+繁体输出只在显示与上屏边界转换：候选条与展开候选面板的显示文字、Engine 提交、`insert` 与 `insertWithSource` 经过 `KeyboardSession.asTraditional`，Engine 的候选原文、候选身份（按序号选择）和组合文本保持简体；由 `ChineseOutputPolicy` 决定是否适用（dedicated English、日语方案、临时日语保留原文），转换本身走 NAPI `simplifiedToTraditional` 调共享导出 `msime_client_simplified_to_traditional`，即 OpenCC s2t 词级转换，与 Windows、macOS、Linux、Android、iOS 逐字一致——「头发」出「頭髮」、「发展」出「發展」，ICU `i18n.Transliterator` 的逐字转换分不开这两个「发」。C ABI 拒绝的输入（内嵌 NUL）返回 `null`，保留原文。`scripts/test-harmony-traditional-output.py` 钉住从 C 头文件到调用点的这条接线，并拒绝宿主源码里重新出现 ICU 转写。
 
 Harmony 设置页暴露共享的模糊拼音规则、触摸输入方案启用列表、自定义触摸键盘皮肤设计和候选英文释义开关。这四项此前都只有键盘一侧在消费：`PreferencesStore` 里有值，键盘准备 Engine 会话时会读，但设置页从未开启对应的客户端开关，用户没有任何途径改动它们。它们各自只写共享偏好，不需要平台能力。
 
@@ -24,9 +26,9 @@ Harmony 设置页暴露共享的模糊拼音规则、触摸输入方案启用列
 
 上传前先读云端文档再合并，而不是替换：它带着用户登录过的每一台设备的字段，从手机上传没有理由清掉桌面写进去的东西。应用方向由页面报出账号 id，宿主在往返前后各核对一次当前会话——确认框还开着时的一次登出换号，会把陌生人的设置写到用户自己的设置上，而那个屏幕上没有任何东西能撤销它。写完本机文档后宿主主动把新文档推给页面，不等窗口重新切到前台：那个监听是为键盘的改动准备的，本窗口自己造成的改动不该需要切一次应用才看得见。
 
-共享皮肤页的「我的设计」也由 Harmony 承载，对应 MSIME-Apple 的 `CustomSkinEditorView` 与 `CustomKeyboardSkin`。它不是设置文档里那份 `custom_touch_keyboard_skin`（那只有一套，是当前正在用的那一套），而是最多十二套具名设计的独立文件——命名、改名、覆盖、删除。
+共享皮肤页的「我的设计」也由 Harmony 承载，对应 MSIME-Apple 的 `CustomSkinEditorView` 与 `CustomKeyboardSkin`。它不是设置文档里 `custom_theme.keyboard` 那一份（那只有一套，是全局主题选 `custom` 时正在用的那一套），而是最多十二套具名设计的独立文件——命名、改名、覆盖、删除。
 
-来源断言审计补上了原生键盘最后一段渲染链。此前 `CustomKeyboardSkin` 虽然解析渐变、照片、图案、键帽形状/材质、阴影和透明度，真正的 `KeyboardView` 却只读取基础颜色与等宽字体，导致共享设置预览会变、系统键盘不变。现在共享 Base64 照片先经过 512 KB 与 JPEG/PNG/GIF/WebP 魔数校验，再作为 ArkUI 图片源进入根背景；渐变、照片位置/压暗和三种固定图案在键盘背板绘制，键帽消费形状半径、材质高光、阴影与填充 alpha。填充透明度不再施加到整个容器，因此不会把键文字一起淡化。`scripts/test-harmony-custom-skin-rendering.py` 固定这些产品调用点；本轮没有 HAP 或设备截图证据。
+来源断言审计补上了原生键盘最后一段渲染链。此前 `CustomKeyboardSkin` 虽然解析渐变、照片、图案、键帽形状/材质、阴影和透明度，真正的 `KeyboardView` 却只读取基础颜色与等宽字体，导致共享设置预览会变、系统键盘不变。现在共享 Base64 照片先经过 512 KB 与 JPEG/PNG/GIF/WebP 魔数校验，再作为 ArkUI 图片源进入根背景；渐变、照片位置/压暗和三种固定图案在键盘背板绘制，键帽消费形状半径、材质高光、阴影与填充 alpha。填充透明度不再施加到整个容器，因此不会把键文字一起淡化。`scripts/test-harmony-custom-skin-rendering.py` 固定这些产品调用点。
 
 这条没有像账号那样在 ArkTS 里重写一份，而是走新的 C ABI `msime_client_custom_skin_library`：Tauri 宿主把 `CustomSkinLibraryStore` 当 Rust 直接调，只通过 C ABI 到达这个 crate 的宿主（本宿主就是）否则就得把同一个文件的锁、原子替换、名称规范化和十二条上限再实现一遍，而一个库两个 store 正是两边开始对"里面有什么"意见不一致的起点。请求不带 `action` 是读，带了就先改再读，两种都回整个库——每个调用方改完都要重画列表，只回自己那一条会让页面猜改名对排序做了什么。
 
@@ -64,6 +66,14 @@ Apple 的首页（`KeyboardHomeView`）也由 Harmony 承载，但是按本平�
 
 `openKeyboard` 故意不提供。Android 为它开一个独立的面板窗口；本宿主的键盘是 InputMethodExtensionAbility，编辑器要它的时候才出现，设置应用没有窗口可开。不提供这个动作时那张卡片会回落到共享的屏幕键盘页，那才是这里"让我看看键盘"的诚实版本。表情和剪贴板两个动作不提供的理由相同：在本宿主上它们是键盘自己键面上的界面，不是窗口。
 
+云剪贴板在键盘里也有一份：剪贴板面板（手机的剪贴板键面、2in1 表情面板的剪贴板页）分「本机」与「云端」两栏。云端只在面板打开和点「刷新」时读取一次，没有轮询，复制时不上传，也不读系统剪贴板；点一条就插入当前编辑器。本机历史长按一条出现「发到云剪贴板」，只有已登录且云剪贴板已开启时可用。密码框里没有「云端」这一栏，读取期间换了编辑器的结果直接丢弃，判断都在 `keyboard/clipboard/CloudClipboardPolicy.ts`。键盘不持有凭据：两个进程同属 `entry` 模块，`files/state/account-session.json` 是同一个文件，键盘每次操作都按它新建一个 `AccountCloudBridge`，所以设置页里的登出、换号对键盘立即生效。设置应用和键盘扩展是两个进程，而服务端每次刷新都轮换刷新令牌，有人出示已用过的刷新令牌就吊销整个会话——两个进程同时刷新，或一个进程拿着另一个已经轮换掉的旧令牌去刷新，都会把用户在所有地方登出。所以每一次刷新都在 `files/state/account-session.lock` 的排他文件锁（`fs.File.lock`）里进行：`AccountCloudBridge` 进锁后先重读会话文件，另一个进程已为同一账号存下更新的会话就直接接过来用，只有磁盘上没有更好的令牌时才刷新；写回前再读一次，会话已被登出或换号就丢弃这次轮换。登录、登出、资料回写和令牌被拒后的清除也走同一把锁，被拒时只清除仍是被拒那份的会话，不会误删刚登录的新会话。拿不到锁就不刷新，报暂时不可用而不是去冒吊销的险。会话文件改为写临时文件再原子改名，读的一方不会读到写了一半的文档并把它当作损坏清掉。
+
+使用情况上报、公告与社区审核走 client-core 的共享实现，本宿主只决定何时调用。上报开关是共享偏好 `usage_reporting`（默认开启，设置页关闭后立即清空本地队列）；队列、随机安装 id、每日一次的 `active` 和会话记录都在 `files/state/telemetry`，设置应用和键盘扩展两个进程共用、由 client-core 加锁。一次会话就是一个键盘进程：`KeyboardExtensionAbility` 创建时开始、被正常销毁时结束；设置应用只发送已排队的事件，不再在每次启动时发 `download`。崩溃不装自己的处理器，而是用 HiAppEvent 在下次启动时收系统上报的 `APP_CRASH`（JavaScript 与原生都有），所以崩溃仍按原来的方式结束进程。键盘在开始新会话前等两秒：这期间收到的、属于上一个键盘进程的崩溃写成那次会话的崩溃记录，于是计为 `session_crash`；其余崩溃（设置应用的、或来得太晚的）写成独立记录，只计为 `crash`。原生帧只留文件名加 pc 和符号，信号只留名称和 code，不带地址；`TelemetryPolicy.ts` 里的这些决定由 `tests/run.sh` 覆盖，HiAppEvent 的实际投递时机只能在设备上确认。
+
+公告在设置窗口打开或回到前台时取（client-core 一分钟内直接用缓存），显示为设置页上方一张可关闭的卡片，关闭按公告 id 记在本地。正文是 client-core 用 pulldown-cmark 渲染、原始 HTML 已转义的 HTML，放进一个禁用脚本、CSP 为 `default-src 'none'` 的小 Web 组件里；点链接一律交给系统浏览器或邮件应用。这里没有用 RichText：它没有拦截链接点击的入口，链接会在卡片里打开，而 Web 组件的 `onLoadIntercept` 可以把它拦下来交出去。
+
+社区页仍是共享界面，本宿主的 `AccountCloudBridge` 为它补上三件事：「我的作品」列表和详情带 `fields=moderation`，作品自身的 `moderation` 字段（approved、pending、removed）原样交给页面，由页面只对 removed 显示「已下架」；`report` 操作（皮肤 `community_operation`、词库与回复 `resource_operation`）按固定的六个理由发 `POST /v1/community/reports`，需要会话，设备的匿名账号也算；422 `blocked_content`、503 `screening_unavailable`、403 `account_banned` 分别报成 `community_blocked_content`、`community_screening_unavailable`、`community_account_banned`，与桌面端同名，被封禁时不再去刷新令牌。
+
 `registerJavaScriptProxy` 的名单现在由 `scripts/test-harmony-bridge-parity.py` 守着。ArkTS 对注入对象暴露什么有两处决定——类上的方法，和交给 `registerJavaScriptProxy` 的名字——而页面看得见的只有后者。一个名字只加了一处仍然能通过类型检查、能编译、能打包，然后在真机上以 `msimeHarmony.<name> is not a function` 的形式失败，表现是某一块功能就是不工作，而那恰好在这里谁也跑不了的那个平台上。具名皮肤库那一片就是这么漏的：方法写了，名字没注册，三道绿灯什么都没说。
 
 个人词库文件导入也由 Harmony 承载，对应 MSIME-Apple 的 `PersonalDictionaryImportView` 与 `PersonalDictionaryImport`。共享页面上的那张卡片只在宿主提供 `dictionary.importPersonal` 时出现，此前本宿主不提供。
@@ -86,7 +96,7 @@ Apple 润色的是**选区**：用户选中一段话，点润色，面板给出�
 
 替换前会重新读一次光标前的文字并要求原文还在那里。一次润色要几秒，其间用户可以继续打字、移动光标或换个输入框；那时替换会删掉现在那里的东西，再把另一段话的重写放进去。不匹配就拒绝并说明，而不是硬替。
 
-删除长度按码点计算而不是 `String.length`。`deleteBackwardSync(length)` 的文档只写了"length of text"，两种读法对 BMP 之外的字符不一样——句中一个 emoji 是一个码点、两个 UTF-16 单元；本宿主唯一把单位钉死的地方是退格路径的注释，写的是"一个 scalar"，这里采用同一读法。这是本片唯一一个真机可能推翻的判断，而上面那次重读正是为它兜底：单位错了的代价是一次拒绝，不是一条被改坏的消息。
+删除长度按码点计算而不是 `String.length`。`deleteBackwardSync(length)` 的文档只写了"length of text"，两种读法对 BMP 之外的字符不一样——句中一个 emoji 是一个码点、两个 UTF-16 单元；本宿主唯一把单位钉死的地方是退格路径的注释，写的是"一个 scalar"，这里采用同一读法。文档措辞留有歧义，所以上面那次重读同时给它兜底：单位错了的代价是一次拒绝，不是一条被改坏的消息。
 
 工具面板里的入口只在配置了润色服务时可用，并随语音设置的变更通知一起重新判定——重写发到用户自己的服务，一个永远失败的卡片只会教会用户忽略这个面板。
 
@@ -104,23 +114,27 @@ Apple 润色的是**选区**：用户选中一段话，点润色，面板给出�
 
 反馈页附带的系统版本由本宿主填入。`os_version` 不属于 `HostCapabilities::for_platform` —— 它不是平台假设而是关于这台机器的事实，所以每个宿主自己读了再加上去；此前只有 macOS 这么做。缺它的时候页面写的是「平台：harmony」并附上 WebView 的 User-Agent，那标识的是浏览器内核，不是复现问题所需要的系统。现在从 `deviceInfo.osFullName` 取：`OpenHarmony-6.0.1.112` 去掉产品名后是 `6.0.1.112`，页面在它前面自己会写平台名，于是读作「HarmonyOS 6.0.1.112」。取不到合规的版本号就不填——这条字符串进的是用户提交的报告，要么照系统说的写，要么什么都不写。
 
-候选翻译复用共享 `translation_query` 与 `apply_translations` 代际契约。Harmony 原生边界负责把 Tencent TMT、NiuTrans 和 DeepLX 兼容自定义 provider 的签名/请求描述器及响应解析暴露给 ArkTS，网络传输仍由 Harmony HTTPS 栈完成；本地英文词典释义先在 Engine 侧解析，在线结果只补齐缺失项。多语言释义合并为有界的 ` / ` 展示文本，按 provider、目标语言和词条缓存，过期或 generation 不匹配的结果不会污染当前候选页。英文目标的成功释义通过共享 ABI 写入用户词典覆盖层，凭据只存在于当前请求内，不写日志。
+候选翻译复用共享 `translation_query` 与 `apply_translations` 代际契约。Harmony 原生边界负责把 Tencent TMT、NiuTrans 和 DeepLX 兼容自定义 provider 的签名/请求描述器及响应解析暴露给 ArkTS，网络传输仍由 Harmony HTTPS 栈完成；本地英文词典释义先在 Engine 侧解析，在线结果只补齐缺失项。多语言释义合并为有界的 ` / ` 展示文本，按 provider、目标语言和词条缓存，过期或 generation 不匹配的结果不会污染当前候选页。英文目标的成功释义通过共享 ABI 写入用户词库覆盖层，凭据只存在于当前请求内，不写日志。
 
-共享设置中的“流式预编辑”现在也由 Harmony 消费：关闭时识别中的临时结果不进面板，只有最终结果才显示；此前无论该开关如何，临时结果一律显示。“结果提交策略”反过来从 Harmony 的设置页移除——Windows 在 TSF / SendInput / 粘贴之间选，macOS 在系统事件与输入会话之间选，Linux 把选择交给用户自管的服务，而键盘扩展只有输入客户端一条提交路径，三选一在这里是一个只有一种结果的控件。该判断由 `HostCapabilities::voice_commit_mode` 决定。
+共享设置中的“流式预编辑”现在也由 Harmony 消费：关闭时识别中的临时结果不进面板，只有最终结果才显示；此前无论该开关如何，临时结果一律显示。“结果提交策略”反过来从 Harmony 的设置页移除——Windows 在 TSF / SendInput / 粘贴之间选，macOS 在系统事件与输入会话之间选，而键盘扩展只有输入客户端一条提交路径（Linux 同样只经 IBus / Fcitx5 提交，也不提供该选项），三选一在这里是一个只有一种结果的控件。该判断由 `HostCapabilities::voice_commit_mode` 决定。
 
 录音行为的四个共享开关现在也由 Harmony 消费——设置页的说明一直写着"录音期间的提示音与静音由输入法在本机处理"，而此前本宿主一项都不做。开始与结束提示音使用 Windows 安装包同一份 `start.mp3` / `end.mp3`（同样的字节，放进模块的 `rawfile/audios/`），经 AVPlayer 播放，播放器随每次提示音创建并释放：键盘扩展不是媒体应用，为一段不到一秒的声音常驻一条音频管线不值得。`sound_enabled` 是两个提示音之上的总开关。"录音时静音其他音频"通过 `AudioSessionManager.activateAudioSession` 以 `CONCURRENCY_PAUSE_OTHERS` 实现，录音结束或取消时 `deactivateAudioSession` 归还；该项默认关闭，从正在播放的应用手里拿走音频会话是侵入性的。取消的录音不播结束音——没有识别结果可宣告。以上任何一步失败都只记日志，不影响录音本身。
 
-语音回复的解释逻辑抽成了 `VoiceResponsePolicy`。识别器本身握着麦克风、套接字和会话代次，没有凭据和真实音频就跑不起来；但"这条回复是什么意思"不需要两者，而且恰恰是最容易写错的部分——豆包的错误码可能出现在顶层也可能在 `payload_msg` 里，文字同样两处都可能，而没有文字的最终帧仍然必须结束录音，当成"什么都没发生"会让麦克风一直开着。这部分现在用合成回复逐条覆盖；provider 的真实往返仍未验证。
+语音回复的解释逻辑抽成了 `VoiceResponsePolicy`。识别器本身握着麦克风、套接字和会话代次，没有凭据和真实音频就跑不起来；但"这条回复是什么意思"不需要两者，而且恰恰是最容易写错的部分——豆包的错误码可能出现在顶层也可能在 `payload_msg` 里，文字同样两处都可能，而没有文字的最终帧仍然必须结束录音，当成"什么都没发生"会让麦克风一直开着。这部分用合成回复逐条覆盖。
 
 2in1 硬件键盘补齐 Windows 的五个语音快捷键，各自受共享 `voice_input.hotkey_*` 开关控制：右 Alt 长按录音、Ctrl+Win 与 Ctrl+右 Alt 两个长按和弦、录音中按空格锁定（松开长按键不再结束）、Ctrl+F9 开始/停止（也用于结束已锁定的录音），录音中按 Esc 取消。设置页一直显示这五个开关，此前本宿主一个也不消费。空格与 Esc 只在录音时被占用，其余时刻仍归组合输入；长按键的重复按下不算第二次请求。录音状态由绘制识别面板的视图告知会话，识别自行结束（拿到最终结果或 provider 失败）时会清掉长按与锁定，否则下一次按下长按键会被当成一次并不存在的录音的释放。
 
-共享设置中的“顶部语音入口”现在也会驱动 Harmony 触屏键盘：开启后，快捷栏会显示麦克风入口并直接打开系统识别；`voice_input.enabled` 关闭时，顶部入口和“工具”面板卡片都会隐藏，保持平台特性与 Windows 的可选语音开关一致。
+共享设置中的“顶部语音入口”现在也会驱动 Harmony 触屏键盘：开启后，快捷栏会显示麦克风入口并直接打开系统识别；`voice_input.enabled` 关闭时，顶部入口隐藏，功能面板的语音图块保留在原位但变灰（0.4 不透明度）且不响应点按，保持平台特性与 Windows 的可选语音开关一致，同时不让图块网格因一个开关而重排。
 
-共享设置中的“语音面板主题”也由 Harmony 消费：`dark`/`light` 覆盖全局主题，`follow` 继承全局主题；语音面板使用当前键盘皮肤的对应明暗调色板。
-共享设置中的“表情面板主题”和“手写面板主题”也由 Harmony 消费：各自的 `dark`/`light` 覆盖全局主题，`follow` 继承全局主题；两个面板分别使用当前键盘皮肤的对应明暗调色板。
-共享设置中的“工具栏主题”也由 Harmony 消费：`dark`/`light` 覆盖全局主题，`follow` 继承全局主题；浮动工具栏保留当前键盘皮肤和候选皮肤的安全 CSS 覆盖，但使用该主题解析出的基础明暗调色板。
+共享设置中的“语音面板主题”也由 Harmony 消费：`dark`/`light` 覆盖全局主题，`follow` 继承全局主题；语音面板使用全局主题 keyboard 调色板的对应明暗一套。
 
-共享设置中的自定义触摸键盘皮肤也由 Harmony 消费：选择 `custom` 时读取共享设计的颜色、圆角、边框、透明度和键面字体属性；原生皮肤选择器会展示同一份设计，避免设置页保存了设计但键盘仍绘制默认皮肤。
+共享设置中的“表情面板主题”和“手写面板主题”也由 Harmony 消费：各自的 `dark`/`light` 覆盖全局主题，`follow` 继承全局主题；两个面板分别使用全局主题 keyboard 调色板的对应明暗一套。
+
+共享设置中的“工具栏主题”也由 Harmony 消费：`dark`/`light` 覆盖全局主题，`follow` 继承全局主题；浮动工具栏按主题约定从 candidate 调色板派生（底色取 surface、按钮文字取 text、悬停取 hover、描边与分隔线取 border、拖动柄取 secondary；工具栏按钮以按钮面上的字表示开关状态，没有单独的开启态填色），只有主题在该明暗下带 `candidate_skin` 时才再叠加那个皮肤包的安全 CSS。
+
+共享设置中的“菜单主题”（`menu_theme`）由 2in1 候选右键菜单消费：`dark`/`light` 覆盖全局主题，`follow` 继承；菜单同样从 candidate 调色板派生（surface 底、text 字、accent 动作、border 描边），而不是键盘调色板。触摸键盘上的长按条属于键盘本身，继续用键盘调色板。
+
+全局主题（system / shuishan / light / paper / night / ink / custom）经 ABI 3 的 `msime_client_resolve_theme` 与主题目录接入：键盘按主题的 keyboard 调色板着色（字母键、功能键、secondary 文字各有其色，回车键始终是平台 accent 白字），2in1 候选窗与 STATUS_BAR 工具栏使用 candidate 调色板，主题带固定明暗时所有面都随之固定。`global_theme` 为 `custom` 时，`custom_theme.keyboard` 若带一份设计，键盘读取它的颜色、圆角、边框、透明度和键面字体属性；否则用 `custom_theme.base` 所指主题的 keyboard 调色板。原生主题选择器会展示同一份设计，避免设置页保存了设计但键盘仍绘制默认配色。2in1 候选窗的次要文字（译文、注释、编码提示和序号）一律用调色板自带透明度的 secondary，不再叠加额外的不透明度；组字行末尾显示「当前页 / 总页」与可点的 ‹ ›，组字行关闭时它随之隐藏。输入模式提示（中/英徽章）用主题的 accent 与 on_accent 着色。触摸候选栏空闲时是一条横栏：34vp 标志按钮（功能面板打开时填平台 accentSoft）、中/英、方案、译、标点四个胶囊（译是候选译文开关，开启时字用 accent 色、关闭时用 secondary），以及表情、语音、收起键盘和打开设置；输入时候选不编号、无底色，选中项以 accent 与 600 字重区分。功能面板为每行四格的 52vp 图块，开启态是 accentSoft 底加 accent 字形；前八格按设计排列为拼、译、中/英、全、主题、标点、模糊音、设置，原有的繁体、表情及其余工具跟在后面，滚动可达。译与模糊音写的是设置页同一份 `candidate_translations` 与 `fuzzy_pinyin.enabled`：切换译文后键盘按新值重算释义行并调整高度；模糊音先存盘再交给会话，这样首次开启时由偏好存储补上的全部规则会立即生效，关闭时已选规则原样保留。
 
 共享设置中的触摸输入方案启用列表也由 Harmony 消费：输入方案选择器只展示启用的方案，切换当前方案时保留其余启用/禁用状态，不会因为一次选择把用户隐藏的方案重新打开。
 
@@ -144,33 +158,7 @@ Apple 润色的是**选区**：用户选中一段话，点润色，面板给出�
 
 `build-native.sh` 在本机已跑通（2026-09-20）：`arm64-v8a`（真机）、`x86_64`（模拟器）和 `armeabi-v7a` 三个 ABI 的 Rust/C++/NAPI 交叉构建全部成功，各产出 `libmsimeclient.so`、`libmsime_host_api.so` 和 `libc++_shared.so`；`hvigorw assembleHap` 打出的 HAP 约 25 MB，包含全部三个 `libs/<abi>/`。`msime-client-core` 对 `aarch64-unknown-linux-ohos` 的 `cargo check` 亦通过。
 
-`MSIME_OHOS_DEPS` 指的是某一个 ABI 的前缀本身（里面直接是 `lib/` 和 `include/`），不是放着各 ABI 子目录的父目录——每个 ABI 传各自那一个。脚本在找不到时会把要跑的三条命令连同它期望的绝对路径一起打出来，照抄即可，但 `sqlite3.h` 不要从 vcpkg 的 `buildtrees` 里拿：那份被 vcpkg 改过，开头 `#include "sqlite3-vcpkg-config.h"`，只复制它会在编译 Engine 时报找不到该头文件。把同名文件从 `target/tooling/vcpkg/packages/sqlite3_<triplet>/include/` 一并复制过去，并用它记录的那几个开关（`SQLITE_ENABLE_UNLOCK_NOTIFY`、`SQLITE_ENABLE_COLUMN_METADATA`、`SQLITE_OS_UNIX`）编译 `sqlite3.c`，这样与其他平台用的是同一套特性。前缀放在 worktree 之外（例如 `~/ohos-deps/<abi>`）可以避免每开一个 worktree 重建一次。
-
-32 位的 `armeabi-v7a` 需要额外一步：Engine 的 `find_package(fmt CONFIG)` 和 `find_package(spdlog CONFIG)` 会拒绝 Homebrew 的 config，因为那两份 config 带 64 位断言。两者在这里都只作头文件使用（Engine 只链接 `fmt::fmt-header-only`，并从 `spdlog::spdlog_header_only` 读取头文件目录），所以自建两份不带位宽断言的最小 config 指过去即可，无需改 Engine：
-
-```sh
-deps=$PWD/target/ohos-deps/armeabi-v7a
-mkdir -p "$deps/cmake/fmt" "$deps/cmake/spdlog"
-cat > "$deps/cmake/fmt/fmt-config.cmake" <<EOF
-add_library(fmt::fmt-header-only INTERFACE IMPORTED)
-set_target_properties(fmt::fmt-header-only PROPERTIES
-  INTERFACE_INCLUDE_DIRECTORIES "$(brew --prefix fmt)/include"
-  INTERFACE_COMPILE_DEFINITIONS "FMT_HEADER_ONLY=1")
-EOF
-cat > "$deps/cmake/spdlog/spdlog-config.cmake" <<EOF
-add_library(spdlog::spdlog_header_only INTERFACE IMPORTED)
-set_target_properties(spdlog::spdlog_header_only PROPERTIES
-  INTERFACE_INCLUDE_DIRECTORIES "$(brew --prefix spdlog)/include"
-  INTERFACE_COMPILE_DEFINITIONS "SPDLOG_FMT_EXTERNAL=1"
-  INTERFACE_LINK_LIBRARIES fmt::fmt-header-only)
-EOF
-# 各自再放一个 <name>-config-version.cmake，只需把 PACKAGE_VERSION_COMPATIBLE 设为 TRUE
-MSIME_FMT_DIR="$deps/cmake/fmt" MSIME_SPDLOG_DIR="$deps/cmake/spdlog" \
-MSIME_OHOS_NDK=/absolute/openharmony/native MSIME_OHOS_DEPS="$deps" \
-  bash platforms/harmony/build-native.sh armeabi-v7a
-```
-
-`SPDLOG_FMT_EXTERNAL` 不能省：它让 spdlog 用上面那份 fmt 而不是自带副本，与 64 位构建的解析方式一致。
+Engine 换成纯 Rust crate 之后（2026-09-30），同一脚本在三个 ABI 上重新跑通，除 NDK 之外不再需要任何准备：以前要手工编译的 `libsqlite3.a` 前缀和 32 位 `armeabi-v7a` 需要的 fmt/spdlog 替身 config 都随 C++ Engine 一起去掉了，`libmsime_host_api.so` 的动态依赖只剩 `libc.so`。这一轮没有重新打 HAP，也没有上设备。
 
 ## 应用图标切换：本平台没有这个能力
 
@@ -190,7 +178,7 @@ Apple 的 `AppIconSettingsView` 和 Android 的同名入口在共享页面上是
 
 后续按来源 `GlossTakesItsOwnLineUnderTheCandidate`、`AChipKeepsItsHeightWhileTheTranslationIsStillOnItsWay` 与 `TheKeyboardGrowsByTheRowsTheStripReserves` 补齐了另一半：手机和横排 2-in-1 候选把释义放在词条下方，按设置与可用 provider 在请求发出前预留固定第二行，原生 panel 同步增加同样的高度；大候选字号会把释义行一起撑高，不截字。纵向 2-in-1 列表仍按来源纵向样式把释义放在旁边，不额外增高。
 
-这次断言审计还找出两处比样式更直接的错误。第一，在线 `candidate_translations` 的结果被误绑到独立的 `candidate_english_gloss` 开关；关掉随包英文释义后，网络结果已经写回 Engine 却永远不画。现在展示门控是两者的并集，是否预留空行则分别按「目标语言含英语」和「已配置可用 provider」判断。第二，无释义时实现返回的是 `width('100%')`，与“按词宽”的注释和 `CandidateChipWidth.content(..., false, ...)` 测试相反，横排因此一屏只有一个候选；现在走同一份词宽算术。`scripts/test-harmony-candidate-translation.py` 固定这条宿主接线，纯逻辑套件固定 provider、空占位、面板高度和纵向适配。这里没有新增 HAP 或设备画面证据。
+这次断言审计还找出两处比样式更直接的错误。第一，在线 `candidate_translations` 的结果被误绑到独立的 `candidate_english_gloss` 开关；关掉随包英文释义后，网络结果已经写回 Engine 却永远不画。现在展示门控是两者的并集，是否预留空行则分别按「目标语言含英语」和「已配置可用 provider」判断。第二，无释义时实现返回的是 `width('100%')`，与“按词宽”的注释和 `CandidateChipWidth.content(..., false, ...)` 测试相反，横排因此一屏只有一个候选；现在走同一份词宽算术。`scripts/test-harmony-candidate-translation.py` 固定这条宿主接线，纯逻辑套件固定 provider、空占位、面板高度和纵向适配。
 
 ## 展开候选面板里没有释义，长按也没有反应
 
@@ -243,8 +231,6 @@ Apple 的 `AppIconSettingsView` 和 Android 的同名入口在共享页面上是
 
 括号走的是条状浮层而不是菜单——`bindContextMenu` 在输入法面板里不显示，这台宿主上每一处长按列表都是这么画的，快捷标点和候选词管理共用同一条。三者互斥，打开一个会关掉另外两个。
 
-**证据边界：没有设备验证。** 与上一片（方案回落）同样的原因——模拟器起不来，启动器卡在 `CheckRuntimeEnv::RunCheck() → ErrorHandler::ShowDialog` 等一个模态框，而那个框不在任何一块显示器上（两块都截过），无障碍接口也读不到它。不会对看不见内容的模态框盲按键。ArkTS 编译通过、五道门禁通过、1379 条断言通过。
-
 ## 在设置页关掉当前方案，键盘要能离开它
 
 共享设置页管着「哪些输入方案出现在选择器里」。关掉键盘正在用的那一个，它从选择器里消失，而键盘照旧用着它——于是既看不见也退不出，除非随便挑另一个。来源在写入启用列表的那一刻就把当前方案归一（`DisabledSchemesAreHiddenAndCurrentSchemeFallsBack`：应用中的日语遇上只启用 `[全拼9键, 五笔]`，存下来的方案立即变成全拼9键；清空则回落到全拼）。
@@ -253,11 +239,11 @@ Apple 的 `AppIconSettingsView` 和 Android 的同名入口在共享页面上是
 
 `touch_keyboard_schemes.selected` 此前只被读来判断是不是回复键盘，现在整体进了设置记录：`scheme` 和 `touch_keyboard_layout` 是 Engine 的视角，它们解析出什么与选择器还提不提供它无关。
 
-**证据边界：这一条没有设备验证。** 单测覆盖了来源断言的那两种情形（已应用项不在启用列表、启用列表被清空）和写回的三种判定，五道门禁与 HAP 打包都过，但模拟器这次起不来——启动器卡在 `CheckRuntimeEnv::RunCheck() → ErrorHandler::ShowDialog` 的模态框上（`sample` 抓到的调用栈），两个实例表现一致，而本机磁盘已到 98%。清掉本 worktree 的构建产物后仍然如此。
+单测覆盖了来源断言的那两种情形（已应用项不在启用列表、启用列表被清空）和写回的三种判定。
 
-## 快捷栏七个按钮此前对读屏全是哑的
+## 快捷栏的按钮此前对读屏全是哑的
 
-候选行下面那条工具栏整条是图标，没有一个挂了 `accessibilityText`。`KeyAccessibilityPolicy` 里有 `tools`、`skin`、`scheme` 三个名字（移植好、没人调用），另外四个连名字都没有。现在七个都有：`更多快捷设置`、`表情与符号`、`语音输入`、`切换皮肤`、`选择输入方案`、`键盘大小与间距`、`收起键盘`。`shortcutIcon`/`shortcutText` 的 label 参数不是可选的——按键至少还画着一个字符，这些只画图标。
+候选行下面那条工具栏原本整条是图标，没有一个挂了 `accessibilityText`；`KeyAccessibilityPolicy` 里当时只有 `tools`、`skin`、`scheme` 三个名字（移植好、没人调用）。现在快捷栏上每个控件都有名字，从左到右：标志 `更多快捷设置`（`tools`，打开功能面板）、中/英胶囊（`languageState`，读「切换中英文，当前中文」）、方案胶囊 `选择输入方案`（`scheme`）、译胶囊（`tile(translations(), …)`，读「显示译文，已开启／已关闭」）、标点胶囊（`punctuationState`，读当前是中文还是英文标点）、`表情与符号`（`emoji`）、`语音输入`（`voice`，仅在开启语音快捷键且语音可用时出现）、`生成高情商回复`（`reply`，仅在当前方案是回复键盘时出现）、`收起键盘`（`dismiss`）、⚙ `打开设置`（`settings`）。`选择主题`（`theme`，原 `skin` 的「切换皮肤」，皮肤并入全局主题后改名）和 `键盘大小与间距`（`geometry`）已不在快捷栏上，而是功能面板里的图块；面板的每个图块都经 `KeyAccessibilityPolicy.tile` 读名字，开关类图块（如「中文标点」）再读出已开启或已关闭。`shortcutIcon`/`shortcutText`/`stripPill` 的 label 参数不是可选的——按键至少还画着一个字符，这些只画图标或一两个字。
 
 日语的 `小゛゜` 键同时补上：它靠变淡表示"还没有假名可改"，而变淡这件事读屏不会转述，所以停用态的名字直接把原因说出来（`JapaneseVariantPolicy.accessibilityLabel`，同样是移植好没人调用的）。
 
@@ -271,7 +257,7 @@ Apple 的 `AppIconSettingsView` 和 Android 的同名入口在共享页面上是
 
 **分清「自动的」和「用户按的」是这一片的关键，两个方向都会出错。** `EnglishLetterCaseState.isAutomatic()` 正是为此存在，同样此前无人调用。一头：`tapLetter` 原本在按键后无条件清掉 SHIFTED，若自动大写设的 Shift 也被清，全大写字段就只会给出第一个大写字母——所以现在只清用户按的那一种，自动的那种交给随后的重算。另一头：自动规则若无差别地跑，用户按下 Shift 之后、字母之前只要来一次候选刷新就会把它抹掉——所以 `applyAutomaticCase` 遇到非自动的 SHIFTED 直接返回。编辑器要求 `none` 时整条路径不动手，因为「不要大写」是在说自动规则，没在说用户刚按的那个 Shift。
 
-**证据边界：只验到了静默那一半。** 模拟器上能打开的编辑器——本应用设置页的 WebView 文本框、浏览器地址栏、浏览器搜索框——`attached to editor` 日志里一律是 `capitalize=none`；改设备名那个框会声明什么不知道，它要求先登录华为账号。所以管线确实接通（日志能打出映射后的值，说明属性读到且未抛），静默路径不回归（英文键面行为与此前一致），但**大写真正发生的那一半没有在设备上看到**，只有 1335 条断言覆盖着策略本身的三个分支。要补这一条，需要一个会声明 `SENTENCES`／`WORDS` 的编辑器。
+模拟器上能打开的编辑器——本应用设置页的 WebView 文本框、浏览器地址栏、浏览器搜索框——`attached to editor` 日志里一律是 `capitalize=none`，映射后的值能从日志读出，说明属性确实读到；要在设备上看到大写真正发生，需要一个会声明 `SENTENCES`／`WORDS` 的编辑器，策略本身的三个分支由逻辑套件覆盖。
 
 ## 每一块键面都以同一行动作键结尾
 
@@ -293,6 +279,49 @@ Apple 的 `AppIconSettingsView` 和 Android 的同名入口在共享页面上是
 
 模拟器上按 `attached to editor` 的 `pattern` 实测过一个来回（方案设为全拼 9 键）：共享设置页 AI 那一屏的「模型」是 `pattern=0`，键面是九宫格、方案标签「全拼 9 键」；紧挨着的「接口地址」声明为 `type="url"`，WebView 把它报成 `pattern=6`（`PATTERN_URI`），键面立刻变成小写 26 键、标签「英文 26 键」、空格键写 `space`；点回「模型」，`pattern=0`，九宫格和「全拼 9 键」都回来了。小写是对的：`capitalizationMode` 对 URI 返回 `NONE`，与 Apple 那条断言里 `q` 而非 `Q` 的判断一致。
 
+## 韩语 Dubeolsik（두벌식）
+
+韩语是输入法里与日语并列的又一个方案，不是单独的系统语言：选择器末尾多一张「韩语 26 键」卡（`KeyboardScheme.KOREAN`，偏好 id 与 Engine 方案名都是 `korean`，Engine 编号 4），选中时和日语一样把被替换的中文方案记进 `last_chinese_scheme`。账号同步的 `input.schema` 接受 `korean`，打字统计记在 `korean` 名下。唯一的候选是组字音节的汉字（한자）列表，见下文；没有云候选、学习和繁体转换。
+
+26 键面换成 `DubeolsikLayout` 的字母键：键帽画的是该键对应的韩文字母（ㅂㅈㄷㄱㅅ…），按住 Shift 时 Q W E R T O P 换成 ㅃㅉㄸㄲㅆㅒㅖ；点击发出的仍是 ASCII 字母，Shift 下发大写，Engine 按大小写区分 ㄱ 与 ㄲ。第二排去掉了 `;` 键，符号键面、`,` 键和快捷标点菜单都显示并输出半角 ASCII，语言键写「한」。
+
+组字中的音节在编辑器里以预览文本内联显示（手机上也是，不看 `tsf_preedit_style`），候选条画的是音节本身而不是 `editing_text` 里的按键字母。空格、数字先提交音节再由键盘自己打出这个键；回车先同步提交音节再执行编辑器动作；标点由 Engine 与音节一起提交；切换方案、切到英文、失去焦点都提交而不是丢弃音节。
+
+硬件键盘走 `HardwareKeyRouter.routeKorean`：字母总是组字，大小写只看 Shift、不看 Caps Lock；空闲时其余按键全部交还应用；组字时退格删一个字母、Esc 丢弃，回车、方向键、Home/End、Delete、Tab、翻页键先同步提交音节再交还应用（`COMMIT_THEN_RELEASE`）。以上只由 `tests/run.sh` 的逻辑测试覆盖，尚未在设备上验证。
+
+### 汉字（한자）转换
+
+只转换当前正在组字的那一个音节（已上屏的音节不转换），汉字表由 Engine 内置（取自 libhangul，BSD-3-Clause 声明随 HAP 放在 `resfile/licenses/`）。宿主发 `MSIME_CONVERT_HANJA`（`InputCommand.CONVERT_HANJA = 16`）打开列表，再发一次关闭；判断“列表开着”的依据是 Korean 规则成立且视图带候选（`KoreanCompositionPolicy.hanjaListOpen`），因为 Korean 在这条命令之前没有任何候选。
+
+显示：候选正文只有汉字本身。Engine 把训音（훈음，如 韓 的「나라 이름 한」）放在候选的 annotation 里，宿主把它取到 `CandidateEntry.hunEum`（`CandidateGlossPolicy.hunEum`），画在候选下方的释义行上，与「随包英文释义」「候选翻译」两个开关无关：Korean 方案下 `glossRows()` 至少为 1（`CandidateGlossLayoutPolicy.schemeRows`），按方案而不是按列表是否打开预留，所以打开列表不会改变键盘高度；切换进出 Korean 时 `useScheme` 按 `译` 开关同样的方式通知视图和 ability 重算高度。共享翻译查询现在也为 Korean 的汉字行取释义，开关打开且有结果时译文接在训音后面，同一行写成「훈음 · 译文」，单行放不下就截尾；没有训音的行（约四分之三）只显示译文或留空。训音不进共享的 annotation 槽位，所以长按「插入释义」只会打出译文，训音永远不会上屏；读屏念作「训音：…」。展开候选面板同样在汉字下方显示「훈음 · 译文」。2in1 竖排候选窗没有释义行，训音以小号字画在汉字旁边。
+
+- 触屏：组字时候选条组字行末尾出现「漢」按钮（2in1 的候选窗不画，那里用硬件键），点一下列出汉字，列表开着时底色填充，再点关闭；单个字母没有汉字，Engine 不处理，组字行提示「单个字母没有对应的汉字」。列表开着时空格和回车选高亮的汉字（回车键面已是「确认」），点候选直接上屏，长按退格清空组字时连发两次取消，否则第一次只关掉列表。
+- 硬件键盘：组字时韩文键盘的汉字键（`KEYCODE_HANJA` = 2614，即 `Lang2`）或不带修饰键的 F9 触发，按住只触发一次；无论 Engine 是否处理都吞掉这个键，空闲时交还应用。列表开着时 `routeKorean` 先让给 `routeHanjaList`：空格、回车、小键盘回车选高亮项，1–9 选本页（共享偏好 `number_row_selection` 关闭时仍是提交韩文再打数字），上下键、翻页键、Tab 按导航偏好翻页和移动高亮，左右键在方向键导航打开时移动高亮；关掉的绑定和 Home/End 保持 Korean 原有含义。`- = [ ] , .` 仍是标点，由 Engine 关掉列表并把韩文和标点一起提交；退格、Esc 只关列表、保留音节；字母关掉列表后照常组字；切换方案、失焦和编辑器自己的改动提交的是韩文。
+
+列表没打开时，所有按键与点按的行为与上文完全一致。以上由 `tests/run.sh` 的逻辑测试和 `hvigorw assembleHap` 的 ArkTS 编译覆盖，尚未在设备上验证。
+
+## 粤语、注音与越南语
+
+选择器末尾在「韩语 26 键」之后再加三张卡：「粤语」（`KeyboardScheme.CANTONESE`，Engine 方案名 `cantonese`，编号 5）、「注音」（`ZHUYIN`，`zhuyin`，编号 6）和「越南语」（`VIETNAMESE`，`vietnamese`，编号 7）。三者默认都不启用（`DEFAULT_ENABLED` 不含它们），由用户在设置页打开。粤语和注音是中文方案：选中时它们自己就是 `last_chinese_scheme`，「中文」回到它们，打字统计记在 `cantonese`、`zhuyin` 名下；越南语和日语、韩语一样不是中文方案，选中时保留原来的 `last_chinese_scheme`，统计记在 `vietnamese` 名下。三者都不学进主词库，所以候选长按没有置顶、降权、删除；简繁转换开关对它们不起作用（粤语与注音本来就是繁体）。快捷栏和语言键上粤语、注音显示「中」，越南语显示「越」。
+
+方案之间的差异不再逐处写方案名，而是集中在 `SchemeTraits.ts`：它按 Engine 的方案编号逐条镜像 `crates/engine/src/types.rs` 里 `SchemeType` 的谓词（`is_chinese`、`uses_chinese_punctuation`、`commits_on_blur`、`locks_caret`、`has_openable_candidate_list` 等），每个谓词写成“对哪些编号成立”的列表，`scripts/test-scheme-traits-parity.py` 读这个文件，常量编号、`NAMES` 或任一谓词与 Engine 不一致时失败。`input/SchemeCompositionPolicy.ts` 是原 Korean 专用组字策略的推广：韩语、注音、越南语的组字行画 Engine 的 `preedit`（写出来的字，而不是按键），光标固定在末尾；韩语和注音的候选只在用户打开的列表里出现，是否打开以视图的 `candidate_list_open` 为准。英文模式和本地工具模式下这些规则都不生效。
+
+### 词库与暂存
+
+粤语和注音各需一份语言词库（`cantonese.db`、`zhuyin.db`，由 `scripts/fetch_language_dictionaries.py` 取回或 `msime-dict-build languages` 生成），越南语不需要。`stage-resources.sh` 的第三个参数（默认 `target/language-dictionaries`）指向这些文件，每份词库只在其许可证文本（`rime_cantonese_LICENSE.txt`、`libchewing_data_LICENSE.txt`）同在时才暂存到 `resfile/language-dictionaries/`，缺许可证直接失败；一份都没有时只打印提示，设 `MSIME_REQUIRE_LANGUAGE_DICTIONARIES=1` 则要求两份都在。键盘与设置页启动时用 `StagedResources.stageLanguageDictionaries` 把它们复制到 `files/language-dictionaries/`，与 `files/engine` 相邻，host-api 在那里找到并写进运行时选项；新包不带词库时删掉旧副本。词库缺失的方案不出现：设置页的 `hostCapabilities` 从 `input_schemes` 里去掉它（与桌面端 `drop_uninstalled_language_schemes` 一致），键盘的方案列表经 `KeyboardScheme.withInstalledDictionaries` 过滤，全部被过滤时回落到全拼。
+
+### 注音（大千）
+
+触屏换成 `input/ZhuyinLayout.ts` 描述的大千键面：数字行加 `-`，三排字母各自补上 `; , . /`，共 41 键四行，键帽画注音符号或声调（3 ˇ、4 ˋ、6 ˊ、7 ˙，读屏念作「三声」等），四行高度与其他键面三排字母加行距相同，切换方案时键盘高度不变。点击发出 ASCII 键，由 Engine 的大千编辑器组字，空格是一声。组字行末尾的按钮在注音下写「選」：点一下打开候选列表，再点关闭（读屏为「选字」/「关闭候选列表」）。列表开着时 Engine 把数字 1–9 当选号，而触屏在候选条上选字，所以点数字键会先关掉列表再按键，打出的是键帽上的符号。回车沿用共享规则：列表开着提交高亮行，否则提交整段转换结果。符号键面上大千要占用的键（`1234567890,./;-`）由键盘先提交转换结果再直接打出标点（中文标点开关打开时打中文标点），其余符号照常走标点路线。
+
+硬件键盘走 `HardwareKeyRouter.routeZhuyin`，以 Engine 给出的 `spelling_symbols` 为准：空闲时能起音节的数字（`1 2 5 8 9 0`）直接组字，`, . / ; -` 经标点路线交回 Engine 组字，声调数字等其余键落回中文路线；组字时 Engine 列出的数字与标点都组字；下方向键打开列表；列表开着时交给 `routeHanjaList`，空格、回车选高亮，1–9 选本页，方向、翻页、Tab 按导航偏好移动；Shift+数字等标点总是标点；左右键、Home/End、Delete 和 Ctrl+退格/左/右先提交再交还应用（转换结果里没有光标）。
+
+### 越南语（Telex / VNI）
+
+触屏用普通 26 键，字母按实际大小写发出，Shift 只作用一次，不做自动大写；符号、逗号键与快捷标点都是半角 ASCII，第二排没有 `;` 键。组字行画 Engine 写出的带声调词。符号键面上的数字只在 VNI 且正在组字时作为声调键交给 Engine（Engine 此时把 `0123456789` 列为 `spelling_symbols`），否则先提交词再打数字；空格提交词并打出空格；回车先提交词，再照常换行或提交编辑框。失焦与切换方案提交当前词。硬件键盘走 `routeKorean` 的同一条路（不认汉字键）：字母总是组字，空闲时其余键交还应用，组字时 VNI 数字组字，标点连词一起提交，其他键先提交再交还应用。
+
+以上由 `tests/run.sh` 的逻辑测试和 `hvigorw assembleHap` 的 ArkTS 编译覆盖，尚未在设备或模拟器上验证。
+
 ## 2026-09-21：首次在模拟器上跑起来
 
 在 API 21 的 `Mate 70 Pro` arm64 模拟器（DevEco 自带镜像，`hdc` 连 `127.0.0.1:5555`）上完成了一次装机运行，实测到的东西比之前所有交叉构建加起来都多。
@@ -306,13 +335,13 @@ Apple 的 `AppIconSettingsView` 和 Android 的同名入口在共享页面上是
 - 新增 C ABI 的整条链路通了。词库页显示「规格 desktop」「词库版本 e92a9c7c64e2」，与 `resources/desktop-dictionary.lock.json` 的 `source_commit` 前十二位一致——从 `msime_client_dictionary_manifest` 经 NAPI、ArkTS 桥、`registerJavaScriptProxy` 到共享 React 卡片，每一跳都真的走通了。
 - 引擎资源暂存正常：`staged /data/storage/el2/base/haps/entry/files/engine`。第一次跑打出 `no packaged resources at /engine` 是因为漏了 `stage-resources.sh`，不是代码问题；补上 180 MB 的已验证词库后即正常。
 
-**键盘作为系统输入法在模拟器上完整跑通了。** 在社区页的搜索框里打 `nihao`，组合行显示 `nihao`，候选栏给出 `1 你好`，点选后 `你好` 进入输入框——按键经 ArkTS、NAPI、`crates/host-api` 的 C ABI、`input-runtime`、`engine-bridge` 一路到 C++ Engine 并带着随包词库返回，整条链路真的走通。回车键读的是编辑器自己的动作：搜索框上显示「前往」，组合进行中变成「选定」，组合结束又变回「前往」。
+**键盘作为系统输入法在模拟器上完整跑通了。** 在社区页的搜索框里打 `nihao`，组合行显示 `nihao`，候选栏给出 `1 你好`，点选后 `你好` 进入输入框——按键经 ArkTS、NAPI、`crates/host-api` 的 C ABI、`input-runtime`、`engine-bridge` 一路到 C++ Engine 并带着随包词库返回，整条链路真的走通（这是当时的链路；C++ Engine 与 `engine-bridge` 已由 `crates/engine` 取代，`input-runtime` 现在直接调用它）。回车键读的是编辑器自己的动作：搜索框上显示「前往」，组合进行中变成「选定」，组合结束又变回「前往」。
 
 **这里有一个必须写下来的操作事实：输入法要在 `FULL_EXPERIENCE_MODE` 下才会被框架驱动。** `ime -e <bundle>` 的默认是 `-b`，也就是 `BASIC_MODE`；在那个模式下 `ime -s` 会成功、`ime -g` 会报告本输入法是当前输入法、`app.msime.client:inputMethod` 进程也会起来，但编辑器获得焦点时框架打的是 `ShowKeyboardImplWithoutLock, panel not create` 与 `OnInputStart, entry is nullptr`，而本扩展的 ArkTS 一行日志都没有——`onCreate` 从未运行。表现就是键盘完全不出现，且看不出任何错误。换成 `ime -e <bundle> -f` 之后，同一次点击立刻打出 `attached to editor: pattern=0 enter=2`，面板正常呈现。做过一次对照：同一个输入框、同一次点击，华为系统输入法在我们处于 BASIC_MODE 时照常弹出，所以这不是模拟器、WebView 或该字段的问题。
 
 键盘在第三方应用里同样可用：华为浏览器的搜索框上打 `nihao` 得到候选 `你好`，上屏后浏览器据此拉取了联想词，说明文字确实到达了那个编辑器。回车键在那里读作「搜索」而在本应用的搜索框读作「前往」，两次都取自编辑器自己声明的动作。
 
-仍然没有证据的：账号、社区与 AI 服务的真实往返（模拟器本身联网，社区页显示离线预览数据是因为没有登录账号）、`deleteBackwardSync(length)` 的单位、读屏实际念出的内容、个人词库大批导入在真机常驻扩展中跨批排空并进入真实候选。队列的 4/4/1 批处理、回执不重放、Engine 规范化、空闲续排和会话状态恢复已有源码与单元测试证据，但本轮没有重建 HAP 或设备复测。真机签名与麦克风授权流程同样未验。
+那一轮里社区页显示的是离线预览数据，因为当时没有登录账号；账号、社区与 AI 服务的真实往返需要一个已登录的账号会话，麦克风相关路径需要用户授予 `ohos.permission.MICROPHONE`。个人词库队列的 4/4/1 批处理、回执不重放、Engine 规范化、空闲续排和会话状态恢复由逻辑套件覆盖。
 
 按键音与振动现在也能从设置页调整，而不只是键盘内那张卡片：共享 `mobileKeyboardFeedback` 客户端读写键盘自己的 `key-feedback.json`，两个进程共用同一份文件（这项设置属于当前设备而非账号，所以不进共享偏好）。设置页是第二个写入者，改动在键盘下次启动时生效。强度预览直接振一下。共享 DTO 把最强一档叫 `strong`，键盘自己的枚举叫 `heavy`，两边由 `KeyboardFeedbackBridge` 转换——直接赋值会写入键盘不认识的值，`KeyboardFeedback.parse` 会静默回退，表现为"保存了但手感没变"。
 
@@ -326,7 +355,15 @@ Apple 的 `AppIconSettingsView` 和 Android 的同名入口在共享页面上是
 
 共享设置中的“中英文切换提示”现在也由 Harmony 消费，并改由 `input_mode_hud` 宿主能力而非平台名决定是否出现在设置页。2in1 上模式徽标只在该偏好开启且没有悬浮工具栏时创建；关闭后不再占用那一个 STATUS_BAR 面板名额。手机形态本来就在键面上显示模式，不声明该能力。
 
-候选的两项可选注释现在各读各的共享偏好，不再一律显示：`wubi_code_hint` 控制五笔剩余编码提示，字段缺省时按共享 `wubi_code_hint_enabled` 的默认开启处理；`candidate_english_gloss` 控制离线英文释义，共享默认关闭，只有文档明确写 `true` 才显示。Engine 注释仍优先占用同一个提示槽位。
+候选的两项可选注释现在各读各的共享偏好，不再一律显示：`wubi_code_hint` 控制五笔剩余编码提示，共享默认开启，只有文档明确写 `false` 才隐藏；`candidate_english_gloss` 控制离线英文释义，共享默认关闭，只有文档明确写 `true` 才显示。Engine 注释仍优先占用同一个提示槽位。
+
+2in1 的按键音、打字旋律、上屏音和成就音效读共享偏好的 `plugins` 段，与桌面三端同一份设置、同一套音效包，只是播放器不同：host-api 在 HarmonyOS 上不链接音频栈，所以由 `KeySoundPlayer.ets` 用 SoundPool 播放。包里有哪些文件由 NAPI `keySoundPack` 调 `msime_client_key_sound_pack` 取得，校验只有 client-core 一份；哪个事件放哪个文件、旋律怎么走、停顿 3 秒从头开始，是 `KeySoundPolicy.ts` 照 host-api 播放器移植的规则，逻辑测试钉住。WAV 样本由 `native/key_sound_render.cpp` 用 miniaudio（与 Windows 宿主同一份单头文件）解码，先按头部声明的帧数查 1.5 秒上限、解码时再以声明长度为界，然后按旋律用到的每个音高各写一个 48 kHz 的 WAV 到 cacheDir，SoundPool 只解码本宿主写出的文件；变调按播放速率算，与桌面一致，升一个八度的音也短一半。Ogg 样本在 2in1 上不播放：本宿主不解码 Vorbis，交给 SoundPool 就会在媒体服务里整段解码，解码后的长度没有任何东西能限住，所以只有 WAV 样本出声（内置包全是 WAV）。SoundPool 用音乐流类型创建，系统对短音走混音而不打断正在播放的音乐，不走录音那套 `CONCURRENCY_PAUSE_OTHERS`。只在 2in1 上配置，手机形态保留自己的 `key-feedback.json`；密码框里和英文模式下不出声，与桌面三端一致。按键音在按键被处理之后触发，包括交还给应用的键；上屏音跟着 Engine 的每次提交；成就音效来自打字统计 `record` 应答里的 `milestone`，所以要打字统计开着才有。设置页在 2in1 上声明 `key_sound`、`music` 与 `plugin_triggers` 能力。
+
+2in1 的背景音乐由 `MusicPlayer.ets` 用 AVPlayer 流式播放：曲目由 NAPI `musicPack` 调 `msime_client_music_pack` 取得（绝对路径与 `max_track_seconds`），校验同样只有 client-core 一份；何时放、按什么顺序是 `MusicPolicy.ts` 照 host-api 播放器 `tick_music` 移植的规则，逻辑测试钉住。音乐开关打开且选了包时，inputStart 之后等编辑框属性回来、确认不是密码框才开始放；inputStop（系统随之收起面板）、密码框获得焦点和录音期间暂停，焦点回到普通编辑框再继续。候选窗每打完一个词就收起一次，那不是输入法被收起，不暂停音乐。每首曲子开播前先用 AVMetadataExtractor 读容器声明的时长，超过 `max_track_seconds` 或读不出来就跳过；播放中再按 `timeUpdate` 的位置查同一个上限，超出就切下一首，与桌面解码器先查声明帧数、播放中再数帧数一致。曲目按清单顺序循环。AVPlayer 边读边解码，所以 Ogg 曲目在这里也能放，不像按键音样本那样只放 WAV。包读不出来、没有一首时长合格、或 AVPlayer 报错，音乐就关掉并在日志里留一行，直到音乐设置变化（换包、开关、音量）才重试；换包或开关会从头重新加载，只改音量直接调到正在放的曲子上。AVPlayer 的 `state` 要等 play/pause 执行完才变，所以同一时间只发一个 play 或 pause，播放器落定到 playing 或 paused 后再按会话此刻的状态对一次，`MusicTransport` 的逻辑测试钉住：快速切换焦点不会让音乐在普通编辑框里卡在暂停，也不会在密码框里响。播放用音乐流类型，是否打断别的应用正在放的音乐由系统的音频焦点策略决定；别的应用拿走焦点后，系统自己暂停的曲子不会马上被重新播放，被系统停掉的播放器直接释放，下次焦点回到可以放音乐的编辑框时重新打开当前曲目。手机形态拿到的永远是关着的设置，不创建任何播放器。
+
+插件页的包管理与 @ 名单走 NAPI `plugins` 调 `msime_client_plugins`：列出已装和内置的包、删除、读写 @ 名单都在设置桥的同步方法 `plugins` 里完成，状态目录和内置音效包目录（`resourceDir/sound-packs`）由桥补上，页面不经手任何路径，规则和失败码与桌面三端的 Tauri 命令是同一份（client-core 的 `PluginFailure`），失败时连同 client-core 给出的具体原因一起显示。导入要等系统选择器，所以走 `startRequest` 的 `plugin_import`：用 `DocumentViewPicker` 选文件夹或 `.zip`，选中的文档 URI 本库打不开，于是先复制到 cacheDir 下的临时目录，再交给 `msime_client_plugins` 按同一套规则安装，临时副本无论成败都删掉。桌面的 client-core 直接读选中的文件夹或压缩包、边复制边按上限停下，这里的临时复制也照同一组上限先查再复制（`PluginImportPolicy.ts`，数值取自 `crates/client-core/src/plugins/import.rs`）：文件夹只看顶层，遇到子文件夹、符号链接、超过 16 个文件、单个文件超过 16 MiB 或合计超过 66 MiB 就不复制直接拒绝，压缩包超过 80 MiB 同样不复制，所以误选了「下载」这类大文件夹不会先整个复制进缓存再被拒绝；真正的规则校验仍只在 client-core。临时副本用固定名字（`pack`、`pack.zip`），不用选中的文件名，包 id 本来就读自 plugin.toml。安装要解压最多 80 MB、校验后换入，所以走 NAPI `pluginsAsync` 在工作线程上跑，不占 UI 线程；列表、删除和 @ 名单这些小读写仍走同步的 `plugins`。装进 `files/state/plugins` 的包和 `mentions.json`，键盘进程在下一次聚焦时就读到。
+
+V、`/`、`@` 三个模式的按键由 Engine 导出的 `spelling_symbols` 决定：`HardwareKeyRouter` 在组合中遇到列在其中的字符就交给 Engine 拼写，否则 Shift+1..9 选词，原先只认 `local_mode === "unicode"` 的分支因此泛化到 V 模式的数字和运算符（Shift+9 是 `(` 不是选第九个；`-`、`.` 是运算符和小数点不是翻页；小键盘的点也是小数点）。`/`、`@` 在无组合时照常作为标点交给 runtime，由 runtime 按 `spelling_symbols` 改走 Engine 进入模式。这三个模式生成的上屏内容按 `commit_context.typing_statistics` 不计入打字统计。
 
 ## 目录结构
 
@@ -334,8 +371,8 @@ Apple 的 `AppIconSettingsView` 和 Android 的同名入口在共享页面上是
 - `native/`：NAPI/C++ 适配层。
 - `tests/`：不依赖设备的 TypeScript 键盘逻辑测试。
 - `AppScope/`、`entry/src/main/resources/`：应用元数据和资源。
-- `build-native.sh`、`stage-resources.sh`：共享 Host API、NAPI 库和固定资源的构建/暂存入口。
-- `entry/src/main/resources/rawfile/settings/index.html`：设置页的单文件打包产物，由 `apps/harmony` 生成，见下方[设置页打包](#设置页打包)。
+- `build-native.sh`、`stage-resources.sh`、`stage-voice-runtime.sh`：共享 Host API、NAPI 库、固定资源和 sherpa-onnx HAR 的构建/暂存入口。
+- `entry/src/main/resources/rawfile/settings/index.html`：设置页的单文件打包产物，由 `stage-settings.sh` 从 `apps/harmony` 生成，不提交，见下方[设置页打包](#设置页打包)。
 
 Windows 文档里的“自定义候选窗翻译”在 Harmony 上改由设置页提供。Engine 本来就在每个宿主上读这份覆盖层——`prepare_translation_sidecar` 先看用户数据目录再看资源目录——所以缺的从来不是功能，而是投放途径：没人能把文件放进应用沙盒。设置页的“自定义候选释义”把同一份内容写到 Engine 已经在看的位置（`<state>/user/custom_translations.txt`），解析规则逐条对齐 `EnglishDictionary::load_custom_translations`（Tab 分隔、`#` 注释、首尾空白修剪、源词含非 ASCII 即中译英、同源词后者覆盖前者），页面因此能在保存前说清楚这份文件里到底有多少条、多少行读不出来。留空即删除该文件，而不是留下一份 Engine 每次都读成空集的文档。**不写进已暂存的资源目录**：那里按锁文件逐项精确校验，多一个文件就会让键盘拒绝启动。
 
@@ -343,53 +380,48 @@ Windows 文档里的“自定义候选窗翻译”在 Harmony 上改由设置页
 
 ## 设置页打包
 
-`entry/src/main/resources/rawfile/settings/index.html` 是提交进仓库的构建产物，不要手工编辑。它由 `apps/harmony` 生成：
+设置页是 `entry/src/main/resources/rawfile/settings/index.html`，由 `apps/harmony` 从共享设置 UI（`packages/ui`）构建，**不提交进仓库**（已加入 `.gitignore`）。每次打 HAP 之前运行：
 
 ```sh
-pnpm --filter @msime/harmony build
+bash platforms/harmony/stage-settings.sh   # 需先在仓库根目录 pnpm install --frozen-lockfile
 ```
 
-之所以提交而不是在打包时生成，是因为 `hvigorw assembleHap` 不会调用 Node 工具链；HAP 打包时这个文件必须已经在 rawfile 里。它也必须是**单文件**：`resource://` 文档的 origin 为 null，WebView 会拒绝跨 origin 拉取模块脚本和样式表，所以脚本、样式和资源全部内联进 HTML，因此体积在 1 MB 以上。改动共享设置 UI（`packages/ui`）后需要重新生成并连同源码一起提交，否则 HarmonyOS 上看到的还是旧界面。
+它必须是**单文件**：`resource://` 文档的 origin 为 null，WebView 会拒绝跨 origin 拉取模块脚本和样式表，所以脚本、样式和资源全部内联进 HTML，体积在 1 MB 以上；脚本在构建后确认目录里只有这一个文件。`entry/hvigorfile.ts` 在 hvigor 配置阶段检查它存在且非空，缺失时直接报错并给出上面这条命令——没有它的 HAP 能装能跑，只是设置窗口一片空白、没有任何报错，所以不让它被打出来。
 
-这一段以上的话此前就写在这里，仍然被违反了 52 次：从 #2863 到本次修复之间有 52 个提交改动 `packages/ui/src`，包没有重建过一次，HarmonyOS 的设置页一直在渲染一个别处已经不存在的界面。陈旧的包不会报错——它照常打开，只是少掉了此后加的每一个控件。因此 `scripts/verify-local.sh` 现在跑 `scripts/test-harmony-settings-bundle.py`：重建到临时目录并逐字节比对（该构建可复现，三次构建同一哈希），不一致就失败并给出重建命令。校验只报告漂移，不替你改文件。没写成 hvigor 任务是因为打包侧调不动 Node 工具链，而 `verify-local.sh` 本来就是本仓唯一的合并前门。
+这个文件以前是提交进仓库的，理由是 `hvigorw assembleHap` 不调用 Node 工具链。它先是漂移过：52 个改动 `packages/ui/src` 的提交期间包一次都没重建，HarmonyOS 的设置页一直在渲染别处已经不存在的界面。为此加的门禁要求提交的产物与源码逐字节一致，于是每个改共享 UI 的 PR 都要重新生成这个 1 MB 的单行文件，任意两个同时在途的 PR 必然在它上面冲突，合并时只能再构建一次来解决。可打 HAP 本来就要先跑 `stage-resources.sh`、`build-native.sh`、`stage-voice-runtime.sh` 这些准备步骤，在同一处构建设置页，它就不可能比同一份检出里的 UI 旧，也没有东西可冲突。`scripts/test-harmony-settings-bundle.py`（`verify-local.sh` 与 HarmonyOS CI 都跑）现在检查它没有被重新提交、仍被忽略，并且仍能构建成单文件。
 
 ## 本地构建
 
-准备 DevEco Studio 提供的 OpenHarmony NDK，或设置 `MSIME_OHOS_NDK` 指向包含 `build/cmake/ohos.toolchain.cmake` 的 NDK。先安装依赖（根目录 `pnpm install --frozen-lockfile`），准备对应 Rust target、目标 ABI 的 SQLite 前缀和 Boost/fmt/spdlog CMake 配置目录。非 Homebrew 布局需显式设置 `MSIME_BOOST_DIR`、`MSIME_BOOST_HEADERS_DIR`、`MSIME_FMT_DIR` 和 `MSIME_SPDLOG_DIR`，再运行：
+准备 DevEco Studio 提供的 OpenHarmony NDK，或设置 `MSIME_OHOS_NDK` 指向包含 `build/cmake/ohos.toolchain.cmake` 的 NDK。先安装依赖（根目录 `pnpm install --frozen-lockfile`）和对应 Rust target，再运行。Engine 是纯 Rust crate（`crates/engine`），SQLite 由 `rusqlite` 的 `bundled` 特性用 NDK 的编译器包装一起编进 `libmsime_host_api.so`，不需要另备设备端依赖前缀：
 
 ```sh
 resource_dir="$(cargo run --quiet -p msime-client-core --example install_resources --locked -- target/resources)"
 bash platforms/harmony/stage-resources.sh "$resource_dir"
+bash platforms/harmony/stage-settings.sh
 MSIME_OHOS_NDK=/absolute/openharmony/native \
-MSIME_OHOS_DEPS=/absolute/ohos-deps/arm64-v8a \
 bash platforms/harmony/build-native.sh arm64-v8a
+bash platforms/harmony/stage-voice-runtime.sh
 cd platforms/harmony
 # 使用 DevEco SDK 配套且已加入 PATH 的 hvigorw
 ohpm install
 hvigorw assembleHap
 ```
 
-`MSIME_OHOS_DEPS` 指向的 sqlite3 前缀需要自己准备一次，NDK 不带，仓库也不带。2026-09-20 用官方 amalgamation 走通过一次，记录在此以便复现：
+`stage-resources.sh` 还把仓库自带的六套辅助码表（`resources/helpcodes`，不在词库发布里）连同来源声明放进 `resfile/engine/helpcodes/`：Engine 从资源目录下的 `helpcodes/` 读辅助码表，共享校验放行这个真实目录。`StagedResources` 按相对路径列出其中的文件，所以辅助码表跟其他资源一起复制到 `files/engine`，表有变化时同样重新暂存。
 
-```sh
-# sqlite.org 下载页公布的 SHA3-256 为
-# 628a44cfe82c66aed1ccbbe85a562d2e33ebe64b3288981ed76285612227934e
-curl -O https://sqlite.org/2026/sqlite-amalgamation-3530400.zip
-openssl dgst -sha3-256 sqlite-amalgamation-3530400.zip   # 与上面核对后再解压
-unzip -q sqlite-amalgamation-3530400.zip
-ndk=/absolute/openharmony/native
-deps=$PWD/target/ohos-deps/arm64-v8a && mkdir -p "$deps/lib" "$deps/include"
-"$ndk/llvm/bin/aarch64-unknown-linux-ohos-clang" -O2 -fPIC \
-  -c sqlite-amalgamation-3530400/sqlite3.c -o "$deps/sqlite3.o"
-"$ndk/llvm/bin/llvm-ar" rcs "$deps/lib/libsqlite3.a" "$deps/sqlite3.o"
-cp sqlite-amalgamation-3530400/sqlite3.h "$deps/include/"
-```
+引擎编进了取自 libhangul `data/hanja/hanja.txt` 的韩语汉字表，其 BSD-3-Clause 许可第 2 条要求二进制分发附带声明；引擎的粤语与注音方案所用的粤拼、注音音节与词条分别取自 rime-cantonese（CC BY 4.0，要求署名）与 libchewing-data（LGPL-2.1-or-later，要求附许可证全文与源码位置），鸿蒙版的这两个方案只在词库随包时提供（见上文「粤语、注音与越南语」），但声明随每一份引擎走，各平台共用一份清单，所以 `stage-resources.sh` 把 `resources/licenses/libhangul-hanja-BSD-3-Clause.txt`、`rime-cantonese-CC-BY-4.0.txt` 与 `libchewing-data-LGPL-2.1.txt` 暂存到与 `resfile/engine` 相邻的 `resfile/licenses/`，随 HAP 一起分发；放在 `engine` 里会被锁文件校验拒绝。
 
-支持 `arm64-v8a`、`armeabi-v7a` 和 `x86_64`。原生库暂存到 `entry/libs/<abi>/`，这些目录是构建产物，不提交到仓库。资源准备仍使用根目录固定的 `resources/desktop-dictionary.lock.json`，不得把本机路径、凭据或用户输入放入 HAP。
+`stage-resources.sh` 的第二个参数（默认 `target/offline-glosses`）是可选的非英文离线释义，由 `scripts/build_offline_glosses.py` 生成。数据库和 `offline-glosses-NOTICE.txt` 都在时暂存到 `resfile/offline-glosses`，键盘启动时用同一个 `StagedResources` 复制到 `files/offline-glosses`，与 `files/engine` 相邻，引擎就在那里找 `zh-<lang>.db`；新包不带它们时会删掉旧副本。已安装词典的目标语言在翻译查询里以 `offline_gloss_languages` 出现：用户自己配置的在线翻译先答，离线词典只补在线没答上的候选，同一行按目标顺序合并。
+
+支持 `arm64-v8a`、`armeabi-v7a` 和 `x86_64`。原生库暂存到 `entry/libs/<abi>/`，这些目录是构建产物，不提交到仓库。
+
+`stage-voice-runtime.sh` 用 `scripts/fetch_voice_runtime.py --platform harmony` 取回 `resources/voice-runtime.lock.json` 按 SHA-256 锁定的 sherpa-onnx `.har`，复制到 `entry/libs/sherpa_onnx.har`（同样被忽略、不提交）。`entry/oh-package.json5` 以固定文件名依赖它，所以不先暂存 `ohpm install` 会失败。本地语音识别（`local` 提供方）在 `workers/LocalAsrWorker.ets` 里加载 `voice_input.asr_model_path` 指向的模型目录，音频不出设备；该 HAR 自带的 `libc++_shared.so` 与 `build-native.sh` 暂存的同为 NDK 运行时，`entry/build-profile.json5` 用 `pickFirsts` 只打包一份。`arm64-v8a` 和 `x86_64` 之外（即 `armeabi-v7a`）上游 HAR 不带库，本地识别在该 ABI 上不可用。
+
+系统语音（`system` 提供方）以写音频模式（`recognitionMode: 0`）启动 CoreSpeechKit：麦克风由 `HarmonyPcmCapture` 采集，按 1280 字节切帧后 `writeAudio`，`isFinal` 只结束一句，`isLast` 才结束整个会话。资源准备仍使用根目录固定的 `resources/desktop-dictionary.lock.json`，不得把本机路径、凭据或用户输入放入 HAP。
 
 ## 模拟器验证（2026-09-20）
 
-首次在 HarmonyOS 模拟器上跑起来，记录可复现路径与结果。镜像为 DevEco 自带的 HarmonyOS 6.0.1(21) phone，与项目 `compileSdkVersion` 一致：
+首次在 HarmonyOS 模拟器上跑起来，记录可复现路径与结果。当时的 bundleName 是 `app.msime.client`，下文日志与验证记录里的包名照原样保留；现在的 bundleName 是 `app.msime.harmony`，命令已按它改写。镜像为 DevEco 自带的 HarmonyOS 6.0.1(21) phone，与项目 `compileSdkVersion` 一致：
 
 ```sh
 emu=/Applications/DevEco-Studio.app/Contents/tools/emulator/Emulator
@@ -399,7 +431,7 @@ export PATH="<command-line-tools>/sdk/default/openharmony/toolchains:$PATH"
 hdc list targets -v                            # 等到 Connected
 hdc file send <hap> /data/local/tmp/msime.hap
 hdc shell bm install -p /data/local/tmp/msime.hap
-hdc shell ime -e app.msime.client -f           # 启用输入法
+hdc shell ime -e app.msime.harmony -f          # 启用输入法
 hdc shell hilog -x | grep A00051/MSIME         # 本宿主的日志域
 ```
 
@@ -426,9 +458,9 @@ MSIME: panel ready: phone, soft keyboard
 
 该验证同时暴露了两个缺陷，均已修复：OHOS 的 AsyncCallback 无论成败都会传入 `BusinessError`，成功时 `code` 为 0，因此 `if (error)` 恒为真——设置页每次加载成功都会记一条"加载失败"，真正的失败反而淹没其中；手写识别更严重，`componentSnapshot.get` 的回调同样这样判断，于是每一笔都在看快照之前就走了失败分支，手写从来没有识别成功过。
 
-仍未验证：按键经由输入法组字。此处此前写作"手机形态刻意不接管硬件按键"，那是读错了代码的结论。`KeyboardExtensionAbility` 确实只在 `isDesktop()` 时注册 `keyEvent`，但那段注释论证的是「2in1 上这是唯一通路」——它说明桌面需要注册，并没有说明手机不该注册。区别不是文字游戏：手机或平板接上蓝牙/USB 键盘时，不注册意味着框架把按键直接交给编辑器，物理键打出原文字母而完全不组字，这是功能缺口。现已改为形态决定画不画键、枚举决定路不路由键（`HardwareKeyboardPolicy`），判据是 `ALPHABETIC_KEYBOARD` 而非 `sources` 含 `keyboard`——后者在每台手机上都因音量与电源键成立。因此这一项的设备验证不再需要一台 2in1，任何接得上键盘的设备都可以。
+硬件按键的注册不按形态一刀切：`KeyboardExtensionAbility` 早期只在 `isDesktop()` 时注册 `keyEvent`，那段注释论证的是「2in1 上这是唯一通路」，并没有说明手机不该注册。手机或平板接上蓝牙/USB 键盘时，不注册意味着框架把按键直接交给编辑器，物理键打出原文字母而完全不组字。现在是形态决定画不画键、枚举决定路不路由键（`HardwareKeyboardPolicy`），判据是 `ALPHABETIC_KEYBOARD` 而非 `sources` 含 `keyboard`——后者在每台手机上都因音量与电源键成立。因此任何接得上键盘的设备都能验证这条路径，不限于 2in1。
 
-## 验证边界
+## 构建门禁与逻辑回归
 
 **先 `ohpm install`，再 `hvigorw assembleHap`，两步缺一不可。** `ohpm install` 在 `entry/oh_modules/` 建出指向 `src/main/cpp/types/libmsimeclient` 的链接，`import client from 'libmsimeclient.so'` 才解析得到那份 `.d.ts`。没有这一步，ArkTS 把整个 NAPI 边界当作无类型处理并照样打包成功——一个全新的 worktree 默认就是这种状态，于是"构建通过"实际上没有检查过任何一处原生调用。本仓的 `Settings.ets` 里就藏着一处这样的错误，直到装上模块才暴露出来。
 
@@ -440,5 +472,4 @@ MSIME: panel ready: phone, soft keyboard
 bash platforms/harmony/tests/run.sh
 ```
 
-该命令编译并运行 `tests/keyboard-logic.test.ts`。`build-native.sh` 只证明指定 OpenHarmony NDK 下的 Rust/C++/NAPI 交叉构建和 ELF 导出检查；`hvigorw assembleHap` 只证明 HAP 打包。当前没有 HarmonyOS 真机或模拟器运行证据，未完成系统输入法注册、焦点/选区、生命周期、签名、麦克风授权流程、Core Speech Kit 实际识别和设备编辑器验收，因此不能把交叉构建描述为平台接入完成。
-本切片已完成主机边界与 HAP 打包验证，但仍需在 HarmonyOS 真机或模拟器上确认设置页的文件选择、沙盒资源暂存、编辑器焦点恢复以及实际词库读写；设备验证前不宣称完成平台接入。
+该命令编译并运行 `tests/keyboard-logic.test.ts`，CI 的 `ci-platforms.yml` harmonyos job 跑的就是这条。三道门禁各自回答不同的问题，互相替代不了：`tests/run.sh` 覆盖纯逻辑，`build-native.sh` 覆盖指定 OpenHarmony NDK 下的 Rust/C++/NAPI 交叉构建与 ELF 导出检查，`hvigorw assembleHap` 覆盖 ArkTS 编译与 HAP 打包。设备侧的系统输入法注册、焦点与编辑器接管、面板生命周期见上面的「模拟器验证」两节。

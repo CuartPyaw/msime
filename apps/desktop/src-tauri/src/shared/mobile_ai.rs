@@ -5,10 +5,12 @@
 //! boundaries as the Android native implementation without exposing secrets to
 //! JavaScript logs or browser extensions.
 
+use msime_client_core::{
+    is_bounded_chars, is_bounded_chars_with_options, is_bounded_text_with_options,
+};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeSet;
-use std::io::Read;
 use std::time::Duration;
 
 const MAX_ENDPOINT_LENGTH: usize = 2_048;
@@ -42,21 +44,20 @@ struct ModelEntry {
     active: Option<bool>,
 }
 
-fn has_disallowed_control(value: &str, allow_whitespace: bool) -> bool {
-    value.chars().any(|character| {
-        character.is_control() && !(allow_whitespace && matches!(character, '\n' | '\r' | '\t'))
-    })
-}
-
 fn valid_endpoint(endpoint: &str) -> Result<reqwest::Url, Error> {
     let value = endpoint.trim();
-    if value.is_empty() || value.len() > MAX_ENDPOINT_LENGTH || has_disallowed_control(value, false)
-    {
+    if value.is_empty() || !is_bounded_text_with_options(value, MAX_ENDPOINT_LENGTH, false) {
         return Err(Error::Invalid);
     }
     let url = reqwest::Url::parse(value).map_err(|_| Error::Invalid)?;
     if url.scheme() != "https"
-        || url.host_str().is_none()
+        || !value.split_once("://").is_some_and(|(_, authority)| {
+            authority
+                .as_bytes()
+                .first()
+                .is_some_and(|byte| *byte != b'/')
+        })
+        || url.host_str().is_none_or(str::is_empty)
         || url.username() != ""
         || url.password().is_some()
         || url.fragment().is_some()
@@ -68,39 +69,27 @@ fn valid_endpoint(endpoint: &str) -> Result<reqwest::Url, Error> {
 
 fn valid_token(token: &str) -> Result<String, Error> {
     let value = token.trim();
-    if value.len() > MAX_TOKEN_LENGTH || has_disallowed_control(value, false) {
+    if !is_bounded_text_with_options(value, MAX_TOKEN_LENGTH, false) {
         return Err(Error::Invalid);
     }
     Ok(value.to_owned())
 }
 
+// Keep in step with the desktop `ai::ai_models_url`.
 fn models_url(endpoint: &str) -> Result<reqwest::Url, Error> {
-    let mut url = valid_endpoint(endpoint)?;
-    let mut path = url.path().trim_end_matches('/').to_owned();
-    for suffix in ["/chat/completions", "/audio/transcriptions"] {
-        if let Some(prefix) = path.strip_suffix(suffix) {
-            path = prefix.to_owned();
-            break;
-        }
-    }
-    if !path.ends_with('/') {
-        path.push('/');
-    }
-    path.push_str("models");
-    url.set_path(&path);
-    Ok(url)
+    Ok(crate::shared::ai_url::models_url(
+        valid_endpoint(endpoint)?,
+        false,
+    ))
 }
 
 fn bounded_response(response: reqwest::blocking::Response) -> Result<Vec<u8>, Error> {
-    let mut limited = response.take((MAX_RESPONSE_BYTES + 1) as u64);
-    let mut bytes = Vec::new();
-    limited
-        .read_to_end(&mut bytes)
-        .map_err(|_| Error::Unavailable)?;
-    if bytes.len() > MAX_RESPONSE_BYTES {
-        return Err(Error::Invalid);
-    }
-    Ok(bytes)
+    crate::shared::bounded_body::read_bounded(response, MAX_RESPONSE_BYTES).map_err(|error| {
+        match error {
+            crate::shared::bounded_body::BoundedReadError::TooLarge => Error::Invalid,
+            crate::shared::bounded_body::BoundedReadError::Read(_) => Error::Unavailable,
+        }
+    })
 }
 
 fn parse_models(page: ModelPage, models: &mut BTreeSet<String>) -> Result<(), Error> {
@@ -194,7 +183,9 @@ pub fn fetch_models(endpoint: &str, token: &str) -> Result<Vec<String>, Error> {
             if models.is_empty() {
                 return Err(Error::Invalid);
             }
-            return Ok(models.into_iter().collect());
+            let mut result = Vec::with_capacity(models.len());
+            result.extend(models);
+            return Ok(result);
         }
         if !anthropic {
             return Err(Error::Invalid);
@@ -214,8 +205,7 @@ pub fn fetch_models(endpoint: &str, token: &str) -> Result<Vec<String>, Error> {
 
 fn valid_text(value: &str, maximum: usize, require_non_empty: bool) -> bool {
     (!require_non_empty || !value.trim().is_empty())
-        && value.chars().count() <= maximum
-        && !has_disallowed_control(value, true)
+        && is_bounded_chars_with_options(value, maximum, true)
 }
 
 fn parse_completion(body: &[u8]) -> Result<String, Error> {
@@ -247,11 +237,9 @@ pub fn polish(
     let prompt = prompt.trim();
     let token = valid_token(token)?;
     if model.is_empty()
-        || model.chars().count() > MAX_MODEL_LENGTH
-        || has_disallowed_control(model, false)
+        || !is_bounded_chars(model, MAX_MODEL_LENGTH)
         || prompt.is_empty()
-        || prompt.chars().count() > MAX_PROMPT_LENGTH
-        || has_disallowed_control(prompt, true)
+        || !is_bounded_chars_with_options(prompt, MAX_PROMPT_LENGTH, true)
         || !valid_text(text, MAX_TEXT_CODE_POINTS, true)
     {
         return Err(Error::Invalid);
@@ -307,6 +295,7 @@ mod tests {
     #[test]
     fn endpoint_and_text_boundaries_match_the_mobile_contract() {
         assert!(valid_endpoint("https://fixture.invalid/api").is_ok());
+        assert!(valid_endpoint("https:///api").is_err());
         assert!(valid_endpoint("http://fixture.invalid/api").is_err());
         assert!(valid_endpoint("https://user:pass@fixture.invalid/api").is_err());
         assert!(valid_text("合成文本", 10_000, true));

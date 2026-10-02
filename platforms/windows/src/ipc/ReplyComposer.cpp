@@ -1,6 +1,8 @@
 #include "ReplyComposer.h"
 #include "CandidateTranslationPolicy.h"
 #include "ChineseTextConversion.h"
+#include "InputSchemeTraits.h"
+#include "KoreanHanjaKey.h"
 #include "PunctuationPolicy.h"
 #include <algorithm>
 #include <limits>
@@ -24,6 +26,33 @@ std::optional<NavigationReply> navigation_for(ReplyPath path) {
     return std::nullopt;
   }
 }
+// The UI-less reply for a composition: its display text and the candidate page, with the highlight the view marks.
+EncodedReply uiless_composition(uint64_t request, const std::string &display,
+                                const nlohmann::json &view) {
+  std::vector<std::string> candidates;
+  size_t highlighted = 0;
+  bool found_highlight = false;
+  for (const auto &candidate : view.at("candidates")) {
+    if (candidate.at("highlighted").get<bool>()) {
+      if (found_highlight)
+        throw std::logic_error("Ambiguous candidate highlight");
+      highlighted = candidates.size();
+      found_highlight = true;
+    }
+    candidates.push_back(candidate.at("text").get<std::string>());
+  }
+  if (!candidates.empty() && !found_highlight)
+    throw std::logic_error("Missing candidate highlight");
+  return uiless_reply(request, display, candidates, highlighted);
+}
+// The reference's CandidateTextForOutput: the Japanese scheme's kana and kanji never go through the simplified-to-traditional table, whatever the character-set toggle says. Korean Hangul and Vietnamese are not Chinese text either, and Cantonese and Zhuyin are Traditional already (scheme::ScriptConversionApplies). The toggle itself is untouched, so leaving any of them restores traditional output.
+bool traditional_projection(const ServerSession &session) {
+  if (!session.traditional_output())
+    return false;
+  return scheme::ScriptConversionApplies(static_cast<int>(session.view().value("scheme", 0u)));
+}
+// The view's scheme, as the scheme traits take it.
+int view_scheme(const nlohmann::json &view) { return static_cast<int>(view.value("scheme", 0u)); }
 } // namespace
 ReplyComposer::ReplyComposer(uint64_t client, uint64_t epoch)
     : client_(client), epoch_(epoch) {
@@ -148,27 +177,30 @@ ReplyComposer::stage(const KeyResult &result, ReplyPath path, bool uiless,
                          ? navigation_reply(result.request_id, *navigation)
                          : preedit_reply(result.request_id, prefix_ + display);
     } else {
-      std::vector<std::string> candidates;
-      size_t highlighted = 0;
-      bool found_highlight = false;
-      for (const auto &candidate : view.at("candidates")) {
-        if (candidate.at("highlighted").get<bool>()) {
-          if (found_highlight)
-            throw std::logic_error("Ambiguous candidate highlight");
-          highlighted = candidates.size();
-          found_highlight = true;
-        }
-        candidates.push_back(candidate.at("text").get<std::string>());
-      }
-      if (!candidates.empty() && !found_highlight)
-        throw std::logic_error("Missing candidate highlight");
-      next.encoded = uiless_reply(result.request_id, prefix_ + display,
-                                  candidates, highlighted);
+      next.encoded = uiless_composition(result.request_id, prefix_ + display, view);
     }
     break;
+  case ReplyPath::SyllableCommit:
+    // No selected prefix exists in Korean, and the commit is already in the document by the time this reply is read: the TIP's host session produced the same syllable for the same key. Only the composition after it is encoded.
+    if (!prefix_.empty()) {
+      invalid();
+      break;
+    }
+    if (result.reply_expected) {
+      if (raw.empty())
+        next.encoded = ignored_reply(result.request_id);
+      else
+        next.encoded = uiless ? uiless_composition(result.request_id, display, view)
+                              : preedit_reply(result.request_id, display);
+    }
+    next.next_prefix.clear();
+    if (!output_delta.empty())
+      next.committed_text = output_delta;
+    break;
   case ReplyPath::AutoCommitAndContinue: {
+    // Two Wubi commits take this path: the fourth letter of a unique code, which leaves nothing to compose, and a letter typed after a complete code (顶字), which commits the first candidate and leaves that letter composing. The worker frame tells the TIP to consume the four letters of the committed code from its own buffer and keep whatever follows, so the key reply only has to show the composition the Engine now holds.
     const auto &context = result.transition.at("commit_context");
-    if (delta.empty() || !raw.empty() || context.is_null() ||
+    if (delta.empty() || context.is_null() ||
         context.value("scheme", 255u) != 2u) {
       invalid();
       break;
@@ -180,8 +212,8 @@ ReplyComposer::stage(const KeyResult &result, ReplyPath path, bool uiless,
       break;
     }
     if (result.reply_expected)
-      next.encoded = uiless ? uiless_reply(result.request_id, {}, {}, 0)
-                            : preedit_reply(result.request_id, {});
+      next.encoded = uiless ? uiless_composition(result.request_id, display, view)
+                            : preedit_reply(result.request_id, display);
     next.next_prefix.clear();
     next.committed_text = total;
     break;
@@ -201,7 +233,7 @@ const PendingReply &ReplyComposer::dispatch(
     ReplyPath path, bool uiless, std::optional<std::string> local_text) {
   if (pending_ || packet.client_id != client_ || epoch != epoch_)
     throw std::logic_error("Pending or expired Windows reply route");
-  traditional_output_ = session.traditional_output();
+  traditional_output_ = traditional_projection(session);
   if (session_ && session.view().at("session").get<uint64_t>() != session_)
     throw std::logic_error("Reply changed host session");
   if (path == ReplyPath::LocalCommit && session.input_enabled()) {
@@ -267,7 +299,7 @@ std::optional<PendingReply> ReplyComposer::basic_key(
     TsfPreeditStyle style, std::optional<std::string> local_text) {
   if (pending_ || packet.client_id != client_ || epoch != epoch_)
     throw std::logic_error("Pending or expired Windows reply route");
-  traditional_output_ = session.traditional_output();
+  traditional_output_ = traditional_projection(session);
   if (style != TsfPreeditStyle::Local && style != TsfPreeditStyle::Pinyin &&
       style != TsfPreeditStyle::Empty)
     throw std::invalid_argument("Invalid TSF preedit style");
@@ -277,12 +309,33 @@ std::optional<PendingReply> ReplyComposer::basic_key(
     if (auto translation = translation_page_key(session, packet, epoch))
       return translation;
   }
+  // Ahead of the reset route, which would treat Escape as discarding the syllable when with the list open it only closes the list.
+  if (auto hanja = korean_hanja(session, packet, epoch))
+    return hanja;
   const auto action = translate_key(packet);
   const bool uiless = (packet.modifiers_down & FanyImePipeFlags::UiLess) != 0;
-  if (action.kind == KeyKind::LocalReset)
-    return dispatch(session, packet, epoch, ReplyPath::LocalCancel, uiless);
+  if (action.kind == KeyKind::LocalReset) {
+    // The first Escape on a Vietnamese word shows its raw keys again and the word keeps composing, so there is no cleared composition to report; the TIP stays composing with the same keys.
+    const auto current = session.view();
+    const bool restores_raw = packet.keycode == kVirtualKeyEscape && session.input_enabled() &&
+                              scheme::CancelRestoresRaw(view_scheme(current)) &&
+                              !current.at("editing_text").get<std::string>().empty();
+    return dispatch(session, packet, epoch, restores_raw ? ReplyPath::NoReply : ReplyPath::LocalCancel, uiless);
+  }
   if (action.kind == KeyKind::Ignore)
     return dispatch(session, packet, epoch, ReplyPath::NoReply, uiless);
+  // Ctrl+Shift+E reaches the Server as an ordinary key whose composition the TSF has already cancelled without reading a reply, the same contract as Escape. Toggle the mode here, as the reference does unconditionally, instead of letting the generic modifier fallback drop it.
+  if (is_english_mode_toggle_key(packet.keycode,
+                                 PipeMetadata::key_modifiers(packet.modifiers_down))) {
+    const bool toggle = session.input_enabled();
+    KeyResult result{client_, epoch_, packet.request_id, false,
+                     nlohmann::json{{"commit", nullptr},
+                                    {"view", toggle ? session.toggle_dedicated_english(epoch)
+                                                    : session.view()}}};
+    return stage(result, toggle ? ReplyPath::LocalCancel : ReplyPath::NoReply, uiless);
+  }
+  if (auto korean = korean_syllable_end(session, packet, epoch))
+    return korean;
   // Control+Enter is a candidate-only translation action. It must be checked
   // before the generic modifier fallback, which intentionally forwards other
   // Control combinations to the host application.
@@ -315,7 +368,9 @@ std::optional<PendingReply> ReplyComposer::basic_key(
   const auto modifiers = PipeMetadata::key_modifiers(packet.modifiers_down);
   const bool digit = key >= '1' && key <= '9';
   if ((key == 0x20 && modifiers == 0) ||
-      (digit && modifiers == (mode == "unicode" ? 1u : 0u)))
+      (digit && digit_selects_candidate(
+                    mode, view.value("spelling_symbols", std::string{}),
+                    static_cast<uint32_t>(packet.wch), modifiers)))
     return dispatch(session, packet, epoch, ReplyPath::Selection, uiless);
   return std::nullopt;
 }
@@ -332,7 +387,7 @@ std::optional<PendingReply> ReplyComposer::toggle_character_set(
                      (!persist || persist(desired));
   if (apply)
     (void)session.toggle_traditional_output(epoch);
-  traditional_output_ = session.traditional_output();
+  traditional_output_ = traditional_projection(session);
   KeyResult result{client_, epoch_, packet.request_id, false,
                    nlohmann::json{{"commit", nullptr}, {"view", session.view()}}};
   return stage(result, ReplyPath::NoReply,
@@ -343,7 +398,7 @@ ReplyComposer::edit(ServerSession &session, const FanyImeNamedpipeData &packet,
                     uint64_t epoch, TsfPreeditStyle style) {
   if (pending_ || packet.client_id != client_ || epoch != epoch_)
     throw std::logic_error("Pending or expired Windows reply route");
-  traditional_output_ = session.traditional_output();
+  traditional_output_ = traditional_projection(session);
   if (style != TsfPreeditStyle::Local && style != TsfPreeditStyle::Pinyin &&
       style != TsfPreeditStyle::Empty)
     throw std::invalid_argument("Invalid TSF preedit style");
@@ -358,7 +413,8 @@ ReplyComposer::edit(ServerSession &session, const FanyImeNamedpipeData &packet,
                 before.value("microsoft_shuangpin", false),
                 before.at("editing_text").get<std::string>(),
                 before.at("caret_position").get<size_t>(),
-                before.value("scheme", 0u) == 3u);
+                before.value("scheme", 0u) == 3u,
+                before.value("spelling_symbols", std::string{}));
   if (kind == EditKind::None)
     return std::nullopt;
   auto result = session.key(packet, epoch);
@@ -377,7 +433,14 @@ ReplyComposer::edit(ServerSession &session, const FanyImeNamedpipeData &packet,
       !result.transition.at("commit").is_null() &&
       !result.transition.at("commit_context").is_null() &&
       result.transition.at("commit_context").value("scheme", 255u) == 2u;
-  return stage(result, auto_wubi_commit ? ReplyPath::AutoCommitAndContinue : path,
+  // A Korean letter that starts a new syllable carries the finished one as its commit, a Vietnamese key typed after a finished word commits it, and a Zhuyin syllable past the conversion's limit commits its first word. The TIP writes each of them from its own host session (scheme::AlwaysInlinePreedit), so here they are only counted.
+  const bool tip_commit =
+      !result.transition.at("commit").is_null() &&
+      scheme::AlwaysInlinePreedit(view_scheme(result.transition.at("view")));
+  return stage(result,
+               auto_wubi_commit ? ReplyPath::AutoCommitAndContinue
+               : tip_commit     ? ReplyPath::SyllableCommit
+                                : path,
                uiless);
 }
 std::optional<PendingReply>
@@ -386,7 +449,7 @@ ReplyComposer::navigate(ServerSession &session,
                         const NavigationBindings &bindings) {
   if (pending_ || packet.client_id != client_ || epoch != epoch_)
     throw std::logic_error("Pending or expired Windows reply route");
-  traditional_output_ = session.traditional_output();
+  traditional_output_ = traditional_projection(session);
   if (session_ && session.view().at("session").get<uint64_t>() != session_)
     throw std::logic_error("Reply changed host session");
   auto result = session.navigate(packet, epoch, bindings);
@@ -438,11 +501,14 @@ void ReplyComposer::confirm_delivery(uint64_t client, uint64_t epoch,
 std::optional<PendingReply> ReplyComposer::select_candidate(ServerSession &session,
     uint64_t expected_session, uint64_t generation, size_t index) {
   if (pending_ || !session.input_enabled()) return std::nullopt;
-  traditional_output_ = session.traditional_output();
+  traditional_output_ = traditional_projection(session);
   const auto view = session.view();
   if (!expected_session || view.at("session") != expected_session ||
       (session_ && session_ != expected_session) ||
       view.at("generation") != generation || !view.at("focused").get<bool>())
+    return std::nullopt;
+  // A pick made here would leave the TIP's own host session behind (scheme::KeyboardOnlyCandidateList).
+  if (scheme::KeyboardOnlyCandidateList(view_scheme(view)))
     return std::nullopt;
   const auto raw_before = view.at("editing_text").get<std::string>();
   if (translation_page_active_) {
@@ -526,20 +592,21 @@ std::optional<PendingReply> ReplyComposer::commit_candidate_translation(
       PipeMetadata::key_modifiers(packet.modifiers_down) != 2u ||
       (packet.modifiers_down & PipeMetadata::CandidateActive) == 0)
     return std::nullopt;
-  traditional_output_ = session.traditional_output();
+  traditional_output_ = traditional_projection(session);
   const auto view = session.view();
   if (!view.at("focused").get<bool>() || view.at("candidates").empty())
     return std::nullopt;
+  // The TIP never sends this for Korean, Zhuyin or Vietnamese: it composes them in its own host session, which a commit made here would leave behind. A Hanja row's translation is display only, like its 훈음, which never reaches the view's translation at all.
+  if (scheme::AlwaysInlinePreedit(view_scheme(view)))
+    return std::nullopt;
   const auto generation = view.at("generation").get<uint64_t>();
   const auto expected_session = view.at("session").get<uint64_t>();
-  size_t index = 0;
   std::string translation;
   bool found = false;
   for (const auto &candidate : view.at("candidates")) {
     if (!candidate.value("highlighted", false)) {
       continue;
     }
-    index = candidate.at("id").at("index").get<size_t>();
     translation = candidate.value("translation", std::string{});
     found = true;
     break;
@@ -564,26 +631,18 @@ std::optional<PendingReply> ReplyComposer::commit_candidate_translation(
     translation_page_active_ = true;
     return translation_page_reply(packet, epoch, page);
   }
-  translation = first_translation_sense(translation);
-  auto transition = session.select(epoch, generation, index);
-  const auto raw = transition.at("view").at("editing_text").get<std::string>();
-  const auto output = simplified_to_traditional(translation, traditional_output_);
+  // Like the reference HandleTranslationCommitKey, a single sense is committed as exact text and the composition is dropped: the gloss is not a candidate the user picked, so it must not go through selection and teach the Engine.
+  const auto output = simplified_to_traditional(
+      first_translation_sense(translation), traditional_output_);
+  session.cancel_composition(epoch);
+  auto transition = session.view();
+  transition["commit"] = nullptr;
   PendingReply next;
   next.source = {client_, epoch_, packet.request_id, true, transition};
-  next.next_prefix = prefix_;
+  next.encoded = exact_commit(packet.request_id, prefix_ + output);
+  next.next_prefix.clear();
+  next.committed_text = prefix_ + output;
   next.traditional_output = traditional_output_;
-  if (raw.empty()) {
-    next.ui_selection = ui_complete_selection(prefix_ + output);
-    next.next_prefix.clear();
-    next.committed_text = prefix_ + output;
-  } else {
-    next.next_prefix = prefix_ + output;
-    next.ui_selection = ui_partial_selection(
-        raw, next.next_prefix,
-        next.next_prefix + transition.at("view").at("preedit").get<std::string>());
-  }
-  if (!next.ui_selection)
-    throw std::runtime_error("Unencodable candidate translation selection");
   session_ = expected_session;
   pending_ = std::move(next);
   return pending_;
@@ -637,6 +696,90 @@ std::optional<PendingReply> ReplyComposer::restore_segment(
     throw std::runtime_error("Unencodable segment restoration");
   pending_ = std::move(next);
   return pending_;
+}
+
+std::optional<PendingReply> ReplyComposer::korean_hanja(
+    ServerSession &session, const FanyImeNamedpipeData &packet,
+    uint64_t epoch) {
+  if (!session.input_enabled() ||
+      packet.event_type != FanyImePipeEventType::KeyEvent ||
+      (PipeMetadata::key_modifiers(packet.modifiers_down) & ~1u) != 0)
+    return std::nullopt;
+  const auto key = korean_hanja_key(packet.keycode, static_cast<uint32_t>(packet.wch));
+  if (key.kind == KoreanHanjaKeyKind::None)
+    return std::nullopt;
+  const auto current = session.view();
+  const int scheme = view_scheme(current);
+  // The scheme's rules hold only outside the dedicated English mode and every local mode, which keep their own rules in that scheme.
+  const bool rules = scheme::OpensCandidateList(scheme) &&
+                     !current.value("dedicated_english", false) &&
+                     current.at("local_mode").get<std::string>() == "none";
+  const bool composing = rules && !current.at("editing_text").get<std::string>().empty();
+  // Under these rules the Engine lists candidates only once the list is opened, so a composing view with candidates is the open list.
+  const bool list_open = composing && !current.at("candidates").empty();
+  const bool trigger = composing && opens_candidate_list(scheme, packet.keycode, list_open);
+  const bool hanja_key = packet.keycode == kVirtualKeyHanja;
+  if (!trigger && !hanja_key && !list_open)
+    return std::nullopt;
+  const bool uiless = (packet.modifiers_down & FanyImePipeFlags::UiLess) != 0;
+  nlohmann::json transition;
+  if (!trigger && (hanja_key || !list_open)) {
+    // The TIP eats the Hanja key only while a Korean syllable composes. One that arrives after the syllable ended, or after the scheme changed, is spent here too rather than left with no reply; in every other scheme it is no key of a list and is spent the same way.
+    transition = {{"handled", false}, {"commit", nullptr}, {"view", current}};
+  } else if (trigger) {
+    transition = session.command(epoch, MSIME_OPEN_CANDIDATE_LIST);
+  } else if (key.kind == KoreanHanjaKeyKind::Select) {
+    // A digit past the visible page chooses nothing.
+    const auto &page = current.at("candidates");
+    if (key.value < page.size()) {
+      const auto &id = page.at(key.value).at("id");
+      transition = session.select(epoch, id.at("generation").get<uint64_t>(), id.at("index").get<size_t>());
+    } else {
+      transition = {{"handled", true}, {"commit", nullptr}, {"view", current}};
+    }
+  } else {
+    transition = session.command(epoch, key.value);
+  }
+  // The TIP has already written a chosen Hanja from its own session, so a commit is only counted, as for a syllable. A Zhuyin choice commits nothing: it fixes that span of the conversion, which keeps composing.
+  const auto path = transition.at("commit").is_null() ? ReplyPath::NoReply : ReplyPath::SyllableCommit;
+  return stage({client_, epoch_, packet.request_id, false, std::move(transition)}, path, uiless);
+}
+
+std::optional<PendingReply> ReplyComposer::korean_syllable_end(
+    ServerSession &session, const FanyImeNamedpipeData &packet,
+    uint64_t epoch) {
+  if (!session.input_enabled() ||
+      packet.event_type != FanyImePipeEventType::KeyEvent ||
+      (PipeMetadata::key_modifiers(packet.modifiers_down) & ~1u) != 0)
+    return std::nullopt;
+  switch (packet.keycode) {
+  case 0x09: // Tab
+  case 0x0D: // Enter
+  case 0x21: // Page Up
+  case 0x22: // Page Down
+  case 0x23: // End
+  case 0x24: // Home
+  case 0x25: // Left
+  case 0x26: // Up
+  case 0x27: // Right
+  case 0x28: // Down
+  case 0x2D: // Insert
+  case 0x2E: // Delete
+    break;
+  default:
+    return std::nullopt;
+  }
+  const auto current = session.view();
+  // Korean, Zhuyin and Vietnamese compose in the TIP's own host session and write the composition out when a key leaves it (scheme::CommitsOnBlur); an open Zhuyin list took its keys in korean_hanja already.
+  if (!scheme::CommitsOnBlur(view_scheme(current)) ||
+      current.at("local_mode").get<std::string>() != "none" ||
+      current.at("editing_text").get<std::string>().empty())
+    return std::nullopt;
+  // The TIP committed the composition and the key goes on to the application, directly or replayed after a queued commit (Zhuyin's Enter only commits), so nothing is sent back.
+  return stage({client_, epoch_, packet.request_id, false,
+                session.finish_composition(epoch)},
+               ReplyPath::SyllableCommit,
+               (packet.modifiers_down & FanyImePipeFlags::UiLess) != 0);
 }
 
 std::optional<PendingReply> ReplyComposer::translation_page_key(
@@ -725,7 +868,7 @@ std::optional<PendingReply> ReplyComposer::configured_key(
     std::optional<std::string> local_text, WordCharacterBinding word_binding) {
   if (pending_ || packet.client_id != client_ || epoch != epoch_)
     throw std::logic_error("Pending or expired Windows reply route");
-  traditional_output_ = session.traditional_output();
+  traditional_output_ = traditional_projection(session);
   if (style != TsfPreeditStyle::Local && style != TsfPreeditStyle::Pinyin &&
       style != TsfPreeditStyle::Empty)
     throw std::invalid_argument("Invalid TSF preedit style");
@@ -740,10 +883,16 @@ std::optional<PendingReply> ReplyComposer::configured_key(
   const auto current = session.view();
   if (!session.input_enabled() || current.at("local_mode") == "unknown")
     return std::nullopt;
-  if (candidate_punctuation(packet, bindings))
+  const bool composing =
+      !current.at("editing_text").get<std::string>().empty();
+  // Checked first: the numpad decimal is also on the candidate punctuation list, where it would be translated to '。'.
+  if ((composing && literal_candidate_punctuation(packet)) ||
+      candidate_punctuation(packet, bindings, view_scheme(current) == scheme::Japanese,
+                            !scheme::UsesChinesePunctuation(view_scheme(current)) ||
+                                scheme::OpensCandidateList(view_scheme(current))))
     return dispatch(session, packet, epoch, ReplyPath::Punctuation,
                     (packet.modifiers_down & FanyImePipeFlags::UiLess) != 0);
-  if (current.at("editing_text").get<std::string>().empty())
+  if (!composing)
     return std::nullopt;
   return navigate(session, packet, epoch, bindings);
 }

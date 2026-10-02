@@ -14,6 +14,14 @@ pub mod cloud_dictionary;
 #[cfg(target_os = "macos")]
 pub mod panel_session;
 
+#[cfg(target_os = "macos")]
+pub(crate) const SESSION_JSON_MAX_BYTES: usize = 2048;
+
+#[cfg(target_os = "macos")]
+pub(crate) fn valid_session_socket_path(path: &str) -> bool {
+    path.len() < 104 && std::path::Path::new(path).is_absolute() && !path.contains('\0')
+}
+
 /// Keeps WebKit detached while a desktop adapter changes a window's class.
 /// Main-thread-only; dropping restores the view and its window observations.
 #[cfg(target_os = "macos")]
@@ -77,34 +85,6 @@ pub fn restore_launch_target(target: LaunchTarget) -> bool {
     unsafe { msime_macos_restore_launch_target(target.pid, target.launched) }
 }
 
-/// Post a keyboard stroke to the application captured before a non-activating
-/// panel was shown. The launch time is checked again in native code so a
-/// recycled PID can never receive input intended for the old application.
-#[cfg(target_os = "macos")]
-pub fn send_keyboard_key_to_target(request: &KeyboardInputRequest, target: &LaunchTarget) -> bool {
-    let Some(stroke) = keyboard_stroke(request) else {
-        return false;
-    };
-    unsafe extern "C" {
-        fn msime_macos_send_keyboard_key_to_target(
-            pid: i32,
-            launched: f64,
-            code: u16,
-            flags: u64,
-        ) -> bool;
-    }
-    // SAFETY: scalar ABI; native code validates the target identity, main
-    // thread, Accessibility permission and event allocation before posting.
-    unsafe {
-        msime_macos_send_keyboard_key_to_target(
-            target.pid,
-            target.launched,
-            stroke.code,
-            stroke.flags,
-        )
-    }
-}
-
 /// Enumerate input-capable CoreAudio devices using their stable UIDs. The
 /// callback runs synchronously on the caller's thread and never opens a
 /// device, so this is safe to use from a Tauri blocking task.
@@ -129,8 +109,8 @@ pub fn voice_capture_devices() -> Vec<(String, String)> {
             || name.is_empty()
             || uid.len() > 512
             || name.len() > 512
-            || uid.chars().any(char::is_control)
-            || name.chars().any(char::is_control)
+            || msime_client_core::has_disallowed_control_with_options(uid, false)
+            || msime_client_core::has_disallowed_control_with_options(name, false)
         {
             return;
         }
@@ -198,9 +178,7 @@ pub fn uninstall_input_source(
     ok.then_some(()).ok_or("uninstall failed")
 }
 
-/// Ask the separate IMK process to release active dictionary sessions before a
-/// settings process takes the exclusive maintenance lock.  The notification
-/// carries no input, credentials, or paths.
+/// Wake the separate IMK process so it releases its dictionary sessions now, after the caller has written the quiesce lease beside the dictionary lock. IMK only lets go while that lease is live, so a stray notification drops nothing. The notification carries no input, credentials, or paths.
 #[cfg(target_os = "macos")]
 pub fn quiesce_input_sessions() {
     unsafe extern "C" {
@@ -222,62 +200,6 @@ pub fn notify_typing_statistics_enabled(enabled: bool) {
     // SAFETY: scalar ABI; the native function posts one per-user notification and retains no
     // caller-owned state.
     unsafe { msime_macos_notify_typing_statistics_enabled(enabled) };
-}
-
-/// Read the account session shared with the Swift backend Keychain store.
-#[cfg(target_os = "macos")]
-pub fn account_load() -> Result<Option<Vec<u8>>, &'static str> {
-    let mut bytes = vec![0_u8; 1024 * 1024];
-    let mut length = 0_usize;
-    unsafe extern "C" {
-        fn msime_macos_account_load(buffer: *mut u8, capacity: usize, length: *mut usize) -> i32;
-    }
-    let status = unsafe { msime_macos_account_load(bytes.as_mut_ptr(), bytes.len(), &mut length) };
-    if status < 0 || length > bytes.len() {
-        return Err("account keychain unavailable");
-    }
-    Ok((status == 1).then(|| {
-        bytes.truncate(length);
-        bytes
-    }))
-}
-
-#[cfg(target_os = "macos")]
-pub fn account_save(bytes: &[u8]) -> Result<(), &'static str> {
-    if bytes.is_empty() || bytes.len() > 1024 * 1024 {
-        return Err("account session too large");
-    }
-    unsafe extern "C" {
-        fn msime_macos_account_save(bytes: *const u8, length: usize) -> bool;
-    }
-    unsafe { msime_macos_account_save(bytes.as_ptr(), bytes.len()) }
-        .then_some(())
-        .ok_or("account keychain unavailable")
-}
-
-#[cfg(target_os = "macos")]
-pub fn account_clear() -> Result<(), &'static str> {
-    unsafe extern "C" {
-        fn msime_macos_account_clear() -> bool;
-    }
-    unsafe { msime_macos_account_clear() }
-        .then_some(())
-        .ok_or("account keychain unavailable")
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn account_load() -> Result<Option<Vec<u8>>, &'static str> {
-    Ok(None)
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn account_save(_: &[u8]) -> Result<(), &'static str> {
-    Err("account unavailable")
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn account_clear() -> Result<(), &'static str> {
-    Err("account unavailable")
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -339,6 +261,104 @@ pub fn clipboard_snapshot(include_text: bool) -> Option<ClipboardSnapshot> {
         .then(|| String::from_utf8(bytes[..length].to_vec()).ok())
         .flatten();
     Some(ClipboardSnapshot { change_count, text })
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod clipboard_type_tests {
+    use std::ffi::CString;
+
+    unsafe extern "C" {
+        /// Pure predicate `msime_macos_read_clipboard` applies to `pasteboard.types`: true only when the list carries plain text and none of the nspasteboard.org or password-manager marker types.
+        fn msime_macos_clipboard_types_capturable(
+            types: *const *const std::ffi::c_char,
+            count: usize,
+        ) -> bool;
+    }
+
+    unsafe extern "C" {
+        /// Same normalization `msime_macos_read_clipboard` applies to the pasteboard string before copying it out.
+        fn msime_macos_normalize_clipboard_text(
+            input: *const u8,
+            input_length: usize,
+            buffer: *mut u8,
+            capacity: usize,
+            length: *mut usize,
+        ) -> bool;
+    }
+
+    fn normalized(text: &str) -> Option<String> {
+        let mut buffer = vec![0_u8; msime_client_core::clipboard::MAX_TEXT_BYTES];
+        let mut length = 0_usize;
+        // SAFETY: both buffers stay valid for the call and the native function writes at most `buffer.len()` bytes.
+        let ok = unsafe {
+            msime_macos_normalize_clipboard_text(
+                text.as_ptr(),
+                text.len(),
+                buffer.as_mut_ptr(),
+                buffer.len(),
+                &mut length,
+            )
+        };
+        ok.then(|| String::from_utf8(buffer[..length].to_vec()).unwrap())
+    }
+
+    #[test]
+    fn over_long_copies_are_truncated_like_the_shared_history() {
+        let long = "x".repeat(4001);
+        assert_eq!(normalized(&long).as_deref(), Some(&long[..4000]));
+        // A surrogate pair straddling the 4000-unit cut is dropped whole rather than split.
+        let straddle = format!("{}\u{1F600}tail", "x".repeat(3999));
+        assert_eq!(normalized(&straddle).as_deref(), Some(&straddle[..3999]));
+        // Three-byte characters at the limit still fit the 12000-byte buffer.
+        let wide = "\u{4E2D}".repeat(5000);
+        let expected = "\u{4E2D}".repeat(4000);
+        assert_eq!(normalized(&wide).as_deref(), Some(expected.as_str()));
+        assert_eq!(normalized("copied\r\0\r").as_deref(), Some("copied"));
+        assert_eq!(
+            normalized("line\r\nnext\n").as_deref(),
+            Some("line\r\nnext\n")
+        );
+        assert_eq!(normalized("").as_deref(), Some(""));
+        for sample in [
+            long.as_str(),
+            straddle.as_str(),
+            wide.as_str(),
+            "copied\r\0\r",
+        ] {
+            assert_eq!(
+                normalized(sample).unwrap(),
+                msime_client_core::clipboard::normalize_text(sample)
+            );
+        }
+    }
+
+    fn capturable(types: &[&str]) -> bool {
+        let owned: Vec<CString> = types.iter().map(|t| CString::new(*t).unwrap()).collect();
+        let pointers: Vec<*const std::ffi::c_char> = owned.iter().map(|t| t.as_ptr()).collect();
+        // SAFETY: the pointers stay valid for the call and the native predicate only reads them.
+        unsafe { msime_macos_clipboard_types_capturable(pointers.as_ptr(), pointers.len()) }
+    }
+
+    #[test]
+    fn marker_and_password_manager_types_are_not_capturable() {
+        const STRING: &str = "public.utf8-plain-text";
+        assert!(capturable(&[STRING]));
+        assert!(capturable(&["public.html", STRING]));
+        for marker in [
+            "org.nspasteboard.ConcealedType",
+            "com.agilebits.onepassword",
+            "org.nspasteboard.TransientType",
+            "org.nspasteboard.AutoGeneratedType",
+            "de.petermaurer.TransientPasteboardType",
+            "com.typeit4me.clipping",
+            "Pasteboard generator type",
+        ] {
+            assert!(!capturable(&[STRING, marker]), "{marker}");
+            assert!(!capturable(&[marker, STRING]), "{marker}");
+        }
+        assert!(!capturable(&["public.png"]));
+        assert!(!capturable(&[]));
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -512,6 +532,28 @@ pub fn pick_directory() -> Option<String> {
     path
 }
 
+/// Ask the user for an installed voice model directory (one holding msime-model.json) and return its absolute path, or `None` when cancelled.
+///
+/// Unlike [`pick_directory`], the panel offers no new folder and says nothing about the data directory. Must run on the AppKit main thread; the native side refuses anywhere else.
+#[cfg(target_os = "macos")]
+pub fn pick_voice_model_directory() -> Option<String> {
+    unsafe extern "C" {
+        fn msime_macos_pick_voice_model_directory() -> *mut std::os::raw::c_char;
+        fn msime_macos_free_picked_path(path: *mut std::os::raw::c_char);
+    }
+    // SAFETY: the native side returns either null or a strdup'd UTF-8 path that this owns and frees.
+    let raw = unsafe { msime_macos_pick_voice_model_directory() };
+    if raw.is_null() {
+        return None;
+    }
+    let path = unsafe { std::ffi::CStr::from_ptr(raw) }
+        .to_str()
+        .ok()
+        .map(str::to_owned);
+    unsafe { msime_macos_free_picked_path(raw) };
+    path
+}
+
 /// Stop every running instance of the separate InputMethodKit bundle before its state is moved.
 /// Must run on the AppKit main thread.
 #[cfg(target_os = "macos")]
@@ -593,20 +635,5 @@ mod tests {
         for key in [0, 0x100, 0xffff, 0x2c, 0x91, 0x13, 0x2d] {
             assert!(keyboard_stroke(&request(key)).is_none());
         }
-    }
-
-    /// Name every account entry point without calling one: the keychain belongs to the user, and what is
-    /// worth checking here is the linkage. Compiled as Objective-C++ without `extern "C"`, the bridge
-    /// exported C++-mangled names that resolved nothing, and every binary reaching it - the Tauri settings
-    /// app among them - failed to link. A test that merely references them fails the same way.
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn the_account_bridge_exports_c_symbols() {
-        let load: fn() -> Result<Option<Vec<u8>>, &'static str> = account_load;
-        let save: fn(&[u8]) -> Result<(), &'static str> = account_save;
-        let clear: fn() -> Result<(), &'static str> = account_clear;
-        // Linking is the assertion. black_box keeps the three references from being optimised away
-        // without letting anything run.
-        std::hint::black_box((load, save, clear));
     }
 }

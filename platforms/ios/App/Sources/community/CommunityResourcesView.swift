@@ -10,20 +10,27 @@ struct CommunityHomeView: View {
   @State private var refresh = UUID()
   @State private var didPublish = false
   var body: some View {
-    VStack(spacing: 0) {
-      HStack(spacing: 10) {
-        categoryButton(0, title: "皮肤", symbol: "paintpalette")
-        categoryButton(1, title: "词库", symbol: "character.book.closed")
-        categoryButton(2, title: "回复", symbol: "text.bubble")
-      }.padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 3)
-      Group {
-        if category == 0 { SkinCommunityView(embedded: true) }
-        else { CommunityResourcesView(kind: category == 1 ? .dictionary : .reply).id(category) }
-      }.id(refresh)
+    Group {
+      if category == 0 { SkinCommunityView(embedded: true) }
+      else { CommunityResourcesView(kind: category == 1 ? .dictionary : .reply).id(category) }
+    }
+    .id(refresh)
+    // An inset rather than a row above the list, so the list stays the page's scroll view and the large title still folds into the bar as it scrolls.
+    .safeAreaInset(edge: .top, spacing: 0) {
+      HStack(spacing: 0) {
+        categoryButton(0, title: "皮肤")
+        categoryButton(1, title: "词库")
+        categoryButton(2, title: "回复模板")
+      }
+      .padding(2)
+      .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
+      .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 8)
+      // Kept inside its own frame: a colour background reaches into the safe area by default, and here it would paint over the large title.
+      .background(Color(uiColor: .systemGroupedBackground), ignoresSafeAreaEdges: [])
     }
     .background(Color(uiColor: .systemGroupedBackground))
-    .navigationTitle("")
-    .navigationBarTitleDisplayMode(.inline)
+    .navigationTitle("社区")
+    .navigationBarTitleDisplayMode(.large)
     .toolbar {
       ToolbarItem(placement: .navigationBarTrailing) {
         Button { publish(category) } label: { Label("发布", systemImage: "plus").labelStyle(.titleAndIcon).font(.subheadline.weight(.semibold)) }
@@ -43,14 +50,18 @@ struct CommunityHomeView: View {
       }
     }) { AccountLoginSheet() }
   }
-  private func categoryButton(_ value: Int, title: String, symbol: String) -> some View {
+  /// One segment of the design's capsule switch. Buttons rather than a segmented Picker: each keeps its own identifier and selected trait, which a Picker's segments do not carry.
+  private func categoryButton(_ value: Int, title: String) -> some View {
     Button { navigation.communityCategory = value } label: {
-      HStack(spacing: 6) {
-        Image(systemName: symbol).font(.system(size: 16, weight: .medium))
-        Text(title).font(.system(size: 15, weight: .semibold))
-      }.frame(maxWidth: .infinity).frame(height: 46)
-        .foregroundStyle(category == value ? Color.white : Color.secondary)
-        .background(category == value ? MetasequoiaTheme.forest : Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+      Text(title).font(.system(size: 13, weight: category == value ? .semibold : .regular))
+        .frame(maxWidth: .infinity).frame(height: 30)
+        .foregroundStyle(category == value ? Color.primary : Color.secondary)
+        .background {
+          if category == value {
+            Capsule().fill(Color(uiColor: .systemBackground)).shadow(color: .black.opacity(0.08), radius: 2, y: 1)
+          }
+        }
+        .contentShape(Capsule())
     }.buttonStyle(.plain).accessibilityIdentifier("communityCategory-\(value)")
       .accessibilityAddTraits(category == value ? [.isSelected] : [])
   }
@@ -89,7 +100,7 @@ struct CommunityResourcesView: View {
         }.padding(.vertical, 2)
         if items.isEmpty && !busy {
           VStack(spacing: 12) {
-            Image(systemName: kind.icon).font(.largeTitle).foregroundStyle(MetasequoiaTheme.forest)
+            Image(systemName: kind.icon).font(.largeTitle).foregroundStyle(MetasequoiaTheme.accent)
             Text(scope == "" ? "期待第一份\(kind == .dictionary ? "词库" : "回复模板")" : "这里还没有作品")
             Text(scope == "saved" ? "去社区逛逛，收藏喜欢的作品。" : "点右上角 + 发布你的第一份作品。")
               .font(.caption).foregroundStyle(.secondary)
@@ -107,7 +118,8 @@ struct CommunityResourcesView: View {
       }.padding(16)
     }
     .navigationTitle(initialScope.isEmpty ? "社区" : "\(initialScope == "saved" ? "收藏的" : "我发布的")\(kind.title)")
-    .navigationBarTitleDisplayMode(.inline)
+    // Without a scope this is the 社区 tab's own list, which carries the tab's large title.
+    .navigationBarTitleDisplayMode(initialScope.isEmpty ? .large : .inline)
     .toolbar {
       if offersPublishing {
         ToolbarItem(placement: .navigationBarTrailing) {
@@ -163,7 +175,10 @@ struct CommunityResourceDetail: View {
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 18) {
-        Label(item.name, systemImage: item.kind.icon).font(.title2.bold())
+        HStack {
+          Label(item.name, systemImage: item.kind.icon).font(.title2.bold())
+          if item.removed { CommunityRemovedBadge() }
+        }
         Text("\(item.author) · v\(item.revision)").foregroundStyle(.secondary)
         Text(item.description)
         HStack {
@@ -191,7 +206,7 @@ struct CommunityResourceDetail: View {
           Text(item.content.prompt ?? "").font(.body).textSelection(.enabled)
             .padding().frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
-          Button("添加到回复键盘") { run {
+          Button("添加到高情商回复键盘") { run {
             try await SkinCommunityAPI.shared.saveResource(item.id, saved: true)
             let latest = try await SkinCommunityAPI.shared.resource(item.id)
             try CommunityLibrary.save(latest); updated = latest
@@ -203,7 +218,7 @@ struct CommunityResourceDetail: View {
           updated = try await SkinCommunityAPI.shared.resource(item.id)
         }}.disabled(busy)
         if item.kind == .reply {
-          Button("从本机回复键盘移除") { run { try CommunityLibrary.remove(item.id); message = "已从本机移除，社区收藏保留。" } }.disabled(busy)
+          Button("从本机高情商回复键盘移除") { run { try CommunityLibrary.remove(item.id); message = "已从本机移除，社区收藏保留。" } }.disabled(busy)
         }
         if !item.owned {
           HStack {
@@ -216,6 +231,7 @@ struct CommunityResourceDetail: View {
                 .accessibilityLabel("\(stars) 星").disabled(busy || !item.saved)
             }
           }
+          CommunityReportButton(kind: item.kind == .dictionary ? "dictionaries" : "replies", itemID: item.id)
         } else {
           Button("编辑并发布新版本") { editing = true }.disabled(busy)
           Button("下架作品", role: .destructive) { confirmDelete = true }.disabled(busy)

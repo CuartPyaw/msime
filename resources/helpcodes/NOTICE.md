@@ -1,8 +1,8 @@
 # 辅助码表：来源、权利与分发限制
 
-这个目录放的是**本仓库自己携带**的辅助码表，由 `scripts/apply_engine_jiajia_helpcode.py` 在准备 Engine 时注入到 `vendor/MSIME-Engine/helpcode/helpcodes/` 下。
+这个目录放的是本仓库携带的全部六套辅助码表，由 `crates/engine/src/assets.rs` 的 `HELPCODES` 登记。
 
-Engine 自带的五套辅助码表（蓝天小雨点、自然码、首右 2.0、首右 Plus、小鹤）不在这里，它们随 `engine-lock.json` 锁定的归档一起来，来源说明见 `vendor/MSIME-Engine/helpcode/NOTICE.md`。
+另外五套（蓝天小雨点、自然码、首右 2.0、首右 Plus、小鹤）原先随 Engine 归档而来，来源说明原样保存在同目录 `ENGINE-NOTICE.md`。
 
 ## `jiajia_helpcode.txt`
 
@@ -26,4 +26,4 @@ Engine 自带的五套辅助码表（蓝天小雨点、自然码、首右 2.0、
 
 来源仓库的 `engine/helpcode/NOTICE.md` 对全部六张表写明：没有任何一项拿到了明确的再分发授权，需要逐个与方案作者确认，或改为在运行时由用户自行导入而不随包分发；并指出 `jiajia` 一行与其余各表性质不同（其余各表只是复现已发表的输入方案），若后续要做权利澄清应优先处理这一项。
 
-**在澄清之前，不要假定这些数据可以自由再分发。** 本仓库以 GPL-3.0 分发，该许可**不覆盖**这张表的内容。打包发布前应确认这一项在目标渠道的分发是否可接受；如果不可接受，去掉 `engine-lock.json` 里的 `scripts/apply_engine_jiajia_helpcode.py` 即可让整套方案不进入产物——设置页会随之少一个选项，其余五套不受影响。
+**在澄清之前，不要假定这些数据可以自由再分发。** 本仓库以 GPL-3.0 分发，该许可**不覆盖**这张表的内容。打包发布前应确认这一项在目标渠道的分发是否可接受；如果不可接受，从 `crates/engine/src/assets.rs` 的 `HELPCODES` 去掉 `jiajia` 那一行，并让该渠道的资源打包不再带上这张表——设置页会随之少一个选项，其余五套不受影响。

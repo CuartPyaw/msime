@@ -3,6 +3,43 @@
 //! Part of the C ABI; see the parent module for what these shims guarantee.
 
 use crate::*;
+use msime_client_core::is_bounded_text;
+
+fn traditional_retry_inputs(
+    candidates: &[(String, u8)],
+    glosses: &[String],
+) -> (Vec<(String, u8)>, Vec<usize>) {
+    let mut retry = Vec::with_capacity(candidates.len());
+    let mut retry_index = Vec::with_capacity(candidates.len());
+    for (index, ((text, source), gloss)) in candidates.iter().zip(glosses).enumerate() {
+        if !gloss.is_empty() {
+            continue;
+        }
+        let simplified =
+            msime_client_core::chinese_conversion::traditional_to_simplified_characters(text);
+        if simplified != *text {
+            retry.push((simplified, *source));
+            retry_index.push(index);
+        }
+    }
+    (retry, retry_index)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn traditional_retry_inputs_reserve_candidate_capacity() {
+        let candidates = vec![("學".to_owned(), 1), ("你好".to_owned(), 2)];
+        let glosses = vec![String::new(), String::new()];
+        let (retry, indexes) = traditional_retry_inputs(&candidates, &glosses);
+        assert_eq!(retry.len(), 1);
+        assert_eq!(indexes, [0]);
+        assert!(retry.capacity() >= candidates.len());
+        assert!(indexes.capacity() >= candidates.len());
+    }
+}
 
 /// Plan eligible visible candidates using shared script filters. No I/O.
 /// # Safety
@@ -13,9 +50,6 @@ pub unsafe extern "C" fn msime_client_custom_translation_plan(
     length: usize,
 ) -> *mut c_char {
     response(|| {
-        if request.is_null() || length > 65536 {
-            return Err("invalid translation plan buffer".into());
-        }
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Candidate {
@@ -28,19 +62,31 @@ pub unsafe extern "C" fn msime_client_custom_translation_plan(
             target_language: String,
             candidates: Vec<Candidate>,
         }
-        let request: Request =
-            serde_json::from_slice(unsafe { std::slice::from_raw_parts(request, length) })
-                .map_err(|_| "invalid translation plan")?;
+        let request: Request = unsafe {
+            with_bounded_bytes(
+                request,
+                length,
+                65536,
+                "invalid translation plan buffer",
+                |bytes| {
+                    serde_json::from_slice(bytes).map_err(|_| "invalid translation plan".into())
+                },
+            )?
+        };
         if request.candidates.len() > 9
-            || !["en", "fr", "ja", "es", "ru", "de", "ko"]
-                .contains(&request.target_language.as_str())
+            || request.target_language == "zh"
+            || !msime_client_core::translation::is_supported_translation_language(
+                &request.target_language,
+            )
         {
             return Err("invalid translation plan parameters".into());
         }
-        let mut results = Vec::new();
+        let mut results = Vec::with_capacity(request.candidates.len());
         for candidate in request.candidates {
             // Engine CandidateSource::Emoji / Kaomoji, and unknown sources.
-            if matches!(candidate.source, 6 | 7 | 10..=255) || candidate.text.chars().count() > 40 {
+            if matches!(candidate.source, 6 | 7 | 10..=255)
+                || !msime_client_core::translation::is_valid_source_text(&candidate.text)
+            {
                 continue;
             }
             let (source, target, key) =
@@ -75,18 +121,23 @@ pub unsafe extern "C" fn msime_client_ai_http_request(
     length: usize,
 ) -> *mut c_char {
     response(|| {
-        if request.is_null() || length > 65536 {
-            return Err("invalid AI request buffer".into());
-        }
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Request {
             config: msime_client_core::preferences::AiAssistantPreferences,
             input: msime_client_core::ai::AiSuggestionRequest,
         }
-        let request: Request =
-            serde_json::from_slice(unsafe { std::slice::from_raw_parts(request, length) })
-                .map_err(|_| "invalid AI request document")?;
+        let request: Request = unsafe {
+            with_bounded_bytes(
+                request,
+                length,
+                65536,
+                "invalid AI request buffer",
+                |bytes| {
+                    serde_json::from_slice(bytes).map_err(|_| "invalid AI request document".into())
+                },
+            )?
+        };
         msime_client_core::ai::chat_completion_http_request(&request.config, &request.input)
             .map(|value| value.unwrap_or(Value::Null))
             .map_err(|e| e.to_string())
@@ -128,12 +179,14 @@ pub unsafe extern "C" fn msime_client_learned_translation_request(
     request: *const u8,
     length: usize,
 ) -> *mut c_char {
-    response(|| {
-        if request.is_null() || length > 65536 {
-            return Err("invalid learned translation buffer".into());
-        }
-        learned_translation::execute(unsafe { std::slice::from_raw_parts(request, length) })
-            .map_err(str::to_owned)
+    response(|| unsafe {
+        with_bounded_bytes(
+            request,
+            length,
+            65536,
+            "invalid learned translation buffer",
+            |bytes| learned_translation::execute(bytes).map_err(str::to_owned),
+        )
     })
 }
 
@@ -145,12 +198,14 @@ pub unsafe extern "C" fn msime_client_tencent_translation_http_request(
     request: *const u8,
     length: usize,
 ) -> *mut c_char {
-    response(|| {
-        if request.is_null() || length > 65536 {
-            return Err("invalid Tencent request buffer".into());
-        }
-        tencent_translation::descriptor(unsafe { std::slice::from_raw_parts(request, length) })
-            .map_err(String::from)
+    response(|| unsafe {
+        with_bounded_bytes(
+            request,
+            length,
+            65536,
+            "invalid Tencent request buffer",
+            |bytes| tencent_translation::descriptor(bytes).map_err(String::from),
+        )
     })
 }
 
@@ -162,12 +217,14 @@ pub unsafe extern "C" fn msime_client_niutrans_translation_http_request(
     request: *const u8,
     length: usize,
 ) -> *mut c_char {
-    response(|| {
-        if request.is_null() || length > 65536 {
-            return Err("invalid NiuTrans request buffer".into());
-        }
-        niutrans_translation::descriptor(unsafe { std::slice::from_raw_parts(request, length) })
-            .map_err(String::from)
+    response(|| unsafe {
+        with_bounded_bytes(
+            request,
+            length,
+            65536,
+            "invalid NiuTrans request buffer",
+            |bytes| niutrans_translation::descriptor(bytes).map_err(String::from),
+        )
     })
 }
 
@@ -206,6 +263,28 @@ pub unsafe extern "C" fn msime_client_parse_niutrans_translation_response(
         }
         Ok(
             niutrans_translation::parse(unsafe { std::slice::from_raw_parts(body, length) })
+                .unwrap_or(Value::Null),
+        )
+    })
+}
+
+/// Format one gloss a host produced itself (Apple's on-device model, say) the way provider replies are formatted: whitespace runs collapse to one space, the ends are trimmed, and a gloss that is empty afterwards or carries a control character becomes null. A newline left in would otherwise start a new row and push the next target language's gloss out of place. No I/O.
+/// # Safety
+/// `text` must reference `length` readable bytes for this call.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_format_translation_gloss(
+    text: *const u8,
+    length: usize,
+) -> *mut c_char {
+    response(|| {
+        if text.is_null() || length > 65536 {
+            return Err("invalid translation gloss buffer".into());
+        }
+        let text = std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, length) })
+            .map_err(|_| "invalid translation gloss text")?;
+        Ok(
+            msime_client_core::translation::format_translation_gloss(text)
+                .map(Value::String)
                 .unwrap_or(Value::Null),
         )
     })
@@ -253,11 +332,10 @@ pub unsafe extern "C" fn msime_client_custom_translation_http_request(
                     .all(|byte| byte.is_ascii_alphabetic() || byte == b'-')
         };
         if !msime_client_core::translation::is_supported_endpoint(&config.endpoint)
-            || config.api_key.len() > 4096
-            || config.api_key.chars().any(char::is_control)
+            || !is_bounded_text(&config.api_key, 4096)
             || text.is_empty()
-            || text.chars().count() > 40
-            || text.chars().any(char::is_control)
+            || !is_bounded_text(&text, 160)
+            || !msime_client_core::translation::is_valid_source_text(&text)
             || !valid_language(&source_language)
             || !valid_language(&target_language)
         {
@@ -301,6 +379,37 @@ pub unsafe extern "C" fn msime_client_parse_custom_translation_response(
     })
 }
 
+/// Whether a DeepLX-compatible reply reports a failure rather than an answer. A failed reply is asked again; only an answer, empty or not, may be negative-cached. An oversized or null buffer is a failure.
+/// # Safety
+/// `body` must reference `length` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_custom_translation_reply_failed(
+    body: *const u8,
+    length: usize,
+) -> bool {
+    if body.is_null() || length > 1048576 {
+        return true;
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(body, length) };
+    std::str::from_utf8(bytes)
+        .map(msime_client_core::translation::translation_response_failed)
+        .unwrap_or(true)
+}
+
+/// Whether a NiuTrans reply reports a failure (rate limit, credentials, malformed body) rather than an answer. A failed reply is asked again; only an answer, empty or not, may be negative-cached.
+/// # Safety
+/// `body` must reference `length` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_niutrans_translation_reply_failed(
+    body: *const u8,
+    length: usize,
+) -> bool {
+    if body.is_null() || length > 1_048_576 {
+        return true;
+    }
+    niutrans_translation::failed(unsafe { std::slice::from_raw_parts(body, length) })
+}
+
 /// Apply asynchronous candidate translations for an exact candidate generation.
 /// The buffer is a JSON array of `{text, translation}` objects and is not retained.
 ///
@@ -329,10 +438,7 @@ pub unsafe extern "C" fn msime_client_apply_translations(
             serde_json::from_slice(bytes).map_err(|_| "translations must be a UTF-8 JSON array")?;
         if values.len() > 4096
             || values.iter().any(|item| {
-                item.text.len() > 4096
-                    || item.translation.len() > 4096
-                    || item.text.chars().any(char::is_control)
-                    || item.translation.chars().any(char::is_control)
+                !is_bounded_text(&item.text, 4096) || !is_bounded_text(&item.translation, 4096)
             })
         {
             return Err("translation entries exceed limits".into());
@@ -383,23 +489,29 @@ pub unsafe extern "C" fn msime_client_translation_gloss_save(
             return Err("user data requires an existing absolute directory".into());
         }
         if request.translations.len() > 9
-            || request.translations.iter().any(|item| {
-                item.text.len() > 4096
-                    || item.translation.len() > 4096
-                    || item.text.chars().any(char::is_control)
-            })
+            || request
+                .translations
+                .iter()
+                .any(|item| !is_bounded_text(&item.text, 4096) || item.translation.len() > 4096)
         {
             return Err("translation persistence entries exceed limits".into());
         }
         let mut saved = 0;
         if request.target_language == "en" {
+            // The overlay lives in the user directory, so it waits behind dictionary maintenance and a data directory move like a session does; a save refused here is only a cache entry lost.
+            let _access = DictionaryAccess::try_session(
+                std::path::Path::new(user_data),
+                std::path::Path::new(user_data),
+            )
+            .map_err(|_| "dictionary access unavailable")?
+            .ok_or("dictionary maintenance busy")?;
             use msime_client_core::translation::{
                 format_translation_gloss, is_cloud_translatable_chinese,
                 is_cloud_translatable_english, should_persist_translation,
             };
             for item in request.translations {
                 let english = is_cloud_translatable_english(&item.text);
-                if item.text.chars().count() > 40
+                if !msime_client_core::translation::is_valid_source_text(&item.text)
                     || (!english && !is_cloud_translatable_chinese(&item.text))
                 {
                     continue;
@@ -415,7 +527,7 @@ pub unsafe extern "C" fn msime_client_translation_gloss_save(
                 } else {
                     item.text
                 };
-                if msime_engine_bridge::save_candidate_gloss(user_data, !english, &key, &gloss) {
+                if msime_engine::host::save_candidate_gloss(user_data, !english, &key, &gloss) {
                     saved += 1;
                 }
             }
@@ -444,6 +556,8 @@ pub unsafe extern "C" fn msime_client_candidate_gloss_request(
         generation: u64,
         #[serde(default)]
         user_data: Option<String>,
+        #[serde(default)]
+        target_language: Option<String>,
         candidates: Vec<GlossCandidate>,
     }
     #[derive(Deserialize)]
@@ -463,35 +577,71 @@ pub unsafe extern "C" fn msime_client_candidate_gloss_request(
         let request: Request =
             serde_json::from_slice(unsafe { std::slice::from_raw_parts(request, request_length) })
                 .map_err(|_| "invalid candidate gloss request")?;
-        if request.candidates.len() > 4096
-            || request.candidates.iter().any(|candidate| {
-                candidate.text.is_empty()
-                    || candidate.text.len() > 4096
-                    || candidate.text.chars().any(char::is_control)
+        let Request {
+            generation,
+            user_data,
+            target_language,
+            candidates: raw_candidates,
+        } = request;
+        if raw_candidates.len() > 4096
+            || raw_candidates.iter().any(|candidate| {
+                candidate.text.is_empty() || !is_bounded_text(&candidate.text, 4096)
             })
         {
             return Err("candidate gloss entries exceed limits".into());
         }
-        let resources =
-            std::str::from_utf8(unsafe { std::slice::from_raw_parts(resources, resources_length) })
-                .map_err(|_| "resources path is not UTF-8")?;
-        if !std::path::Path::new(resources).is_absolute() {
-            return Err("resources path must be absolute".into());
-        }
-        let candidates = request
-            .candidates
-            .iter()
-            .map(|candidate| (candidate.text.clone(), candidate.source))
-            .collect::<Vec<_>>();
-        let user_data = request.user_data.as_deref().unwrap_or("");
+        let resources = super::parse_absolute_path(
+            unsafe { std::slice::from_raw_parts(resources, resources_length) },
+            "resources path is not UTF-8",
+            "resources path must be absolute",
+        )?;
+        let mut candidates = Vec::with_capacity(raw_candidates.len());
+        candidates.extend(
+            raw_candidates
+                .into_iter()
+                .map(|candidate| (candidate.text, candidate.source)),
+        );
+        let user_data = user_data.as_deref().unwrap_or("");
         if !user_data.is_empty()
             && (user_data.len() > 4096 || !std::path::Path::new(user_data).is_absolute())
         {
             return Err("user data path must be absolute".into());
         }
-        let glosses =
-            msime_engine_bridge::candidate_glosses_with_user(resources, user_data, &candidates)
-                .map_err(|_| "candidate gloss dictionary unavailable")?;
+        let lookup = |candidates: &[(String, u8)]| -> Result<Vec<String>, String> {
+            Ok(match target_language.as_deref() {
+                None | Some("en") => msime_engine::host::candidate_glosses_with_user(
+                    resources, user_data, candidates,
+                )
+                .map_err(|_| "candidate gloss dictionary unavailable")?,
+                // Another language reads only its offline dictionary: the learned store and custom_translations.txt hold English. A dictionary that is not installed answers nothing, so the host keeps whatever the online path brings.
+                Some(language) if crate::OFFLINE_GLOSS_LANGUAGES.contains(&language) => {
+                    let Some(database) =
+                        crate::offline_glosses_beside(std::path::Path::new(resources), language)
+                    else {
+                        return Ok(vec![String::new(); candidates.len()]);
+                    };
+                    let database = database
+                        .to_str()
+                        .ok_or("candidate gloss dictionary unavailable")?;
+                    msime_engine::host::candidate_target_glosses(database, language, candidates)
+                        .map_err(|_| "candidate gloss dictionary unavailable")?
+                }
+                Some(_) => return Err("invalid candidate gloss request".into()),
+            })
+        };
+        let mut glosses = lookup(&candidates)?;
+        // The gloss tables are keyed by Simplified text, so a Traditional candidate - a Korean Hanja such as 韓, or any candidate under Traditional output - finds nothing under its own spelling. Ask again under the Simplified characters for the ones that missed; the reply still names the candidate as shown.
+        if glosses.len() == candidates.len() {
+            let (retry, retry_index) = traditional_retry_inputs(&candidates, &glosses);
+            if !retry.is_empty() {
+                let found = lookup(&retry)?;
+                if found.len() == retry.len() {
+                    for (index, gloss) in retry_index.into_iter().zip(found) {
+                        glosses[index] = gloss;
+                    }
+                }
+            }
+        }
         if glosses.len() != candidates.len() {
             return Err("candidate gloss response mismatch".into());
         }
@@ -506,18 +656,17 @@ pub unsafe extern "C" fn msime_client_candidate_gloss_request(
             })
             .filter(|total| *total <= 900_000)
             .ok_or("candidate gloss response exceeds limits")?;
-        let translations = candidates
-            .into_iter()
-            .zip(glosses)
-            .filter_map(|((text, _), translation)| {
+        let mut translations = Vec::with_capacity(candidates.len());
+        translations.extend(candidates.into_iter().zip(glosses).filter_map(
+            |((text, _), translation)| {
                 (!translation.is_empty()).then_some(json!({
                     "text": text,
                     "translation": translation,
                 }))
-            })
-            .collect::<Vec<_>>();
+            },
+        ));
         Ok(json!({
-            "generation": request.generation,
+            "generation": generation,
             "translations": translations,
         }))
     })
@@ -556,10 +705,7 @@ pub unsafe extern "C" fn msime_client_english_completions_request(
         if !(1..=32).contains(&request.limit)
             || request.prefix.is_empty()
             || request.prefix.len() > 128
-            || !request
-                .prefix
-                .bytes()
-                .all(|byte| byte.is_ascii_alphabetic())
+            || !msime_client_core::is_ascii_alphabetic(&request.prefix)
         {
             return Err("invalid English completion prefix".into());
         }
@@ -569,7 +715,7 @@ pub unsafe extern "C" fn msime_client_english_completions_request(
         if !Path::new(resources).is_absolute() {
             return Err("resources path must be absolute".into());
         }
-        let items = msime_engine_bridge::english_completions(
+        let items = msime_engine::host::english_completions(
             resources,
             &request.prefix,
             usize::from(request.limit),

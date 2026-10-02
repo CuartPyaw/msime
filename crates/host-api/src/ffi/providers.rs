@@ -3,14 +3,39 @@
 //! Part of the C ABI; see the parent module for what these shims guarantee.
 
 use crate::*;
+use msime_client_core::is_bounded_text;
+
+#[cfg(test)]
+mod tests {
+    use super::online_candidate_response;
+    use serde_json::json;
+
+    #[test]
+    fn online_candidate_response_carries_only_the_batch() {
+        let value =
+            online_candidate_response(vec![("first".to_owned(), 0), ("second".to_owned(), 1)]);
+
+        assert_eq!(
+            value,
+            json!({"candidates": [
+                {"text": "first", "source": 0},
+                {"text": "second", "source": 1},
+            ]})
+        );
+    }
+}
+
+fn online_candidate_response(candidates: Vec<(String, u8)>) -> Value {
+    let mut rows = Vec::with_capacity(candidates.len());
+    for (text, source) in candidates {
+        rows.push(json!({"text": text, "source": source}));
+    }
+    json!({"candidates": rows})
+}
 
 #[no_mangle]
 pub extern "C" fn msime_client_view(handle: u64) -> *mut c_char {
-    response(|| {
-        with_session(handle, |session| {
-            serde_json::to_value(session.runtime.view()).map_err(|e| e.to_string())
-        })
-    })
+    response(|| with_session(handle, |session| serialized_runtime_view(session)))
 }
 
 #[no_mangle]
@@ -62,16 +87,119 @@ pub unsafe extern "C" fn msime_client_ai_request_for_query(
             // built from: chat_completion_http_request rejects a request whose
             // limit disagrees with its config, and the query document's copy
             // can lag the pending preferences this call is meant to follow.
-            let config = &preferences.ai_assistant;
+            let mut config = preferences.ai_assistant.clone();
+            if let Some(token) = &session.ai_credential {
+                config.tokens.insert(config.provider.clone(), token.clone());
+            }
             let request = AiSuggestionRequest {
                 segmented_pinyin: query.pinyin_segments,
                 context: query.ai_context,
                 candidate_limit: config.candidate_limit,
             };
-            msime_client_core::ai::chat_completion_http_request(config, &request)
+            msime_client_core::ai::chat_completion_http_request(&config, &request)
                 .map(|value| value.unwrap_or(Value::Null))
                 .map_err(|error| error.to_string())
         })
+    })
+}
+
+/// Hand the session an AI provider credential kept outside the preferences. It is used for the active provider in place of any token the preferences carry, lives only as long as the session, and is never persisted or reported back. An empty token clears it.
+/// # Safety
+/// `token` references `token_length` readable UTF-8 bytes; null is accepted only with a zero length. No buffers are retained.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_set_ai_credential(
+    handle: u64,
+    token: *const u8,
+    token_length: usize,
+) -> *mut c_char {
+    response(|| {
+        if (token.is_null() && token_length != 0) || token_length > 4096 {
+            return Err("invalid AI credential buffer".into());
+        }
+        let token = if token_length == 0 {
+            None
+        } else {
+            let text =
+                std::str::from_utf8(unsafe { std::slice::from_raw_parts(token, token_length) })
+                    .map_err(|_| "invalid AI credential")?;
+            if !is_bounded_text(text, 4096) {
+                return Err("invalid AI credential".into());
+            }
+            Some(text.to_owned())
+        };
+        with_session(handle, |session| {
+            session.ai_credential = token;
+            Ok(Value::Bool(true))
+        })
+    })
+}
+
+/// The online translation service a query names, with the configuration of the services it may reach. `account_allowed` says whether the hosted account may be chosen at all: candidate glosses reach it only with candidate translation on, and the `/fy` request, which the account cannot answer, asks with it allowed so an explicit account choice is still recognised and never falls back to another service.
+struct TranslationServices {
+    provider: TranslationService,
+    translation_account: bool,
+    custom_translation: Option<Value>,
+    tencent_tmt: Option<Value>,
+    niutrans: Option<Value>,
+}
+
+fn selected_translation_services(
+    preferences: &msime_client_core::preferences::Preferences,
+    account_allowed: bool,
+) -> Result<TranslationServices, &'static str> {
+    let custom_translation = &preferences.custom_translation;
+    let tencent = &preferences.tencent_tmt;
+    // The MSIME account gloss endpoint (api.msime.app) is used only when the user explicitly chose it and no service of their own takes precedence. Tencent counts only with usable secrets, because its default `enabled: true` is not a user choice.
+    let translation_account = account_allowed
+        && preferences.translation_account
+        && !preferences.niutrans.enabled
+        && !custom_translation.enabled
+        && !(tencent.enabled
+            && msime_client_core::translation::usable_credential(&tencent.secret_id)
+            && msime_client_core::translation::usable_credential(&tencent.secret_key));
+    // The selected service, derived from the enable flags alone so an incomplete NiuTrans or custom configuration stays selected instead of reading as Tencent. A host whose Tencent secret lives outside preferences (Linux keeps it in the provider's own file) relies on this to honour 关闭.
+    let provider = if translation_account {
+        TranslationService::Account
+    } else if preferences.niutrans.enabled {
+        TranslationService::NiuTrans
+    } else if custom_translation.enabled {
+        TranslationService::Custom
+    } else if tencent.enabled {
+        TranslationService::Tencent
+    } else {
+        TranslationService::Off
+    };
+    // Selecting custom translation must never silently fall back to TMT.
+    let tencent_tmt = (!custom_translation.enabled
+        && !preferences.niutrans.enabled
+        && tencent.enabled
+        && msime_client_core::translation::usable_credential(&tencent.secret_id)
+        && msime_client_core::translation::usable_credential(&tencent.secret_key))
+    .then(|| serde_json::to_value(tencent))
+    .transpose()
+    .map_err(|_| "invalid Tencent translation configuration")?;
+    let custom_translation = (custom_translation.enabled
+        && !preferences.niutrans.enabled
+        && !custom_translation.endpoint.is_empty())
+    .then(|| {
+        json!({
+            "enabled": true,
+            "endpoint": &custom_translation.endpoint,
+            "api_key": &custom_translation.api_key,
+        })
+    });
+    let niutrans = (preferences.niutrans.enabled
+        && msime_client_core::translation::usable_credential(&preferences.niutrans.app_id)
+        && msime_client_core::translation::usable_credential(&preferences.niutrans.apikey))
+    .then(|| serde_json::to_value(&preferences.niutrans))
+    .transpose()
+    .map_err(|_| "invalid NiuTrans translation configuration")?;
+    Ok(TranslationServices {
+        provider,
+        translation_account,
+        custom_translation,
+        tencent_tmt,
+        niutrans,
     })
 }
 
@@ -109,15 +237,61 @@ pub extern "C" fn msime_client_translation_query(handle: u64) -> *mut c_char {
                     preferences.translation_target_language,
                     msime_client_core::preferences::TranslationTargetLanguage::En
                 );
-            if !preferences.candidate_translations && !english_gloss {
+            // Non-English targets with an offline dictionary installed beside the resources, in preference order. The same switches as macOS's English fallback reach them: the offline gloss switch, or candidate translation, whose online answer replaces the offline one when it arrives. Never read from the user directory, so no user path is needed for them.
+            let offline_gloss_languages =
+                if preferences.candidate_translations || preferences.candidate_english_gloss {
+                    let mut languages = Vec::with_capacity(target_languages.len());
+                    languages.extend(target_languages.iter().filter_map(|language| {
+                        let language = serde_json::to_value(language).ok()?;
+                        let code = language.as_str()?;
+                        crate::offline_glosses_beside(
+                            std::path::Path::new(&session.options.resources),
+                            code,
+                        )
+                        .map(|_| code.to_owned())
+                    }));
+                    languages
+                } else {
+                    Vec::new()
+                };
+            // `/fy` asks the selected service whatever the gloss switches say: it is the user's explicit request, a single English text translated into Chinese that comes back as a row which commits it. Nothing else rides it, so no offline dictionary is consulted and nothing is persisted.
+            if let Some(command) = session.runtime.command_translation() {
+                // The hosted account only glosses Chinese candidates, so `/fy` needs a service of the user's own.
+                let services = selected_translation_services(preferences, true)?;
+                if matches!(
+                    services.provider,
+                    TranslationService::Off | TranslationService::Account
+                ) {
+                    return Ok(Value::Null);
+                }
+                return Ok(json!({
+                    "generation": command.generation,
+                    "sentence": true,
+                    "target_language": "zh",
+                    "target_languages": ["zh"],
+                    "candidates": [{"text": command.text, "online_gloss": false}],
+                    "provider": services.provider,
+                    "translation_account": false,
+                    "custom_translation": services.custom_translation,
+                    "tencent_tmt": services.tencent_tmt,
+                    "niutrans": services.niutrans,
+                    "english_gloss": false,
+                    "resources": Value::Null,
+                    "user_data": Value::Null,
+                }));
+            }
+            if !preferences.candidate_translations
+                && !english_gloss
+                && offline_gloss_languages.is_empty()
+            {
                 return Ok(Value::Null);
             }
-            let view = session.runtime.view();
-            // Windows does not request glosses for Japanese candidates. Use
-            // Engine's active mode, including temporary Japanese composition.
-            if view.candidates.is_empty()
-                || view.scheme == 3
-                || view.local_mode == "temporary_japanese"
+            let Some(candidates_view) = session.runtime.translation_candidates() else {
+                return Ok(Value::Null);
+            };
+            // Only the schemes that show glosses ask for them: Windows does not request glosses for Japanese candidates, while Korean's Hanja rows are glossed like Chinese ones: their 훈음 is drawn by the host whatever this answers, and a translation or gloss goes on the line under it. Use Engine's active mode, including temporary Japanese composition.
+            if !SchemeType::from_u8(candidates_view.scheme).is_some_and(SchemeType::shows_glosses)
+                || candidates_view.local_mode == "temporary_japanese"
             {
                 return Ok(Value::Null);
             }
@@ -133,52 +307,24 @@ pub extern "C" fn msime_client_translation_query(handle: u64) -> *mut c_char {
             // per candidate, so English candidates still reach it, and the offline
             // dictionary answers for every candidate because it never leaves the
             // machine.
-            let candidates = view
-                .candidates
-                .iter()
-                .map(|candidate| {
-                    json!({
-                        "text": candidate.text,
-                        "online_gloss":
-                            msime_client_core::translation::is_cloud_translatable_chinese(
-                                &candidate.text,
-                            ),
-                    })
-                })
-                .collect::<Vec<_>>();
-            let custom_translation = &preferences.custom_translation;
-            let tencent = &preferences.tencent_tmt;
-            // Selecting custom translation must never silently fall back to TMT.
-            let tencent_tmt = (!custom_translation.enabled
-                && !preferences.niutrans.enabled
-                && tencent.enabled
-                && msime_client_core::translation::usable_tencent_secret(&tencent.secret_id)
-                && msime_client_core::translation::usable_tencent_secret(&tencent.secret_key))
-            .then(|| serde_json::to_value(tencent))
-            .transpose()
-            .map_err(|_| "invalid Tencent translation configuration")?;
-            let custom_translation = (custom_translation.enabled
-                && !preferences.niutrans.enabled
-                && !custom_translation.endpoint.is_empty())
-            .then(|| {
+            //
+            // Emoji and kaomoji sources never qualify, whatever their text: many kaomoji carry Han characters ("(*Φ皿Φ*)") and would otherwise queue behind real words on the serial on-device model and spend account quota, as Windows' BuildTranslationQuery already refuses.
+            let mut candidates = Vec::with_capacity(candidates_view.candidates.len());
+            candidates.extend(candidates_view.candidates.iter().map(|candidate| {
                 json!({
-                    "enabled": true,
-                    "endpoint": &custom_translation.endpoint,
-                    "api_key": &custom_translation.api_key,
+                    "text": candidate.text,
+                    "online_gloss":
+                        !msime_client_core::translation::is_emoji_or_kaomoji_source(
+                            candidate.source,
+                        ) && msime_client_core::translation::is_cloud_translatable_chinese(
+                            &candidate.text,
+                        ),
                 })
-            });
-            let niutrans = (preferences.niutrans.enabled
-                && msime_client_core::translation::usable_niutrans_credential(
-                    &preferences.niutrans.app_id,
-                )
-                && msime_client_core::translation::usable_niutrans_credential(
-                    &preferences.niutrans.apikey,
-                ))
-            .then(|| serde_json::to_value(&preferences.niutrans))
-            .transpose()
-            .map_err(|_| "invalid NiuTrans translation configuration")?;
-            Ok(json!({
-                "generation": view.generation,
+            }));
+            let services =
+                selected_translation_services(preferences, preferences.candidate_translations)?;
+            let mut query = json!({
+                "generation": candidates_view.generation,
                 "target_language": serde_json::to_value(preferences.translation_target_language)
                     .map_err(|e| e.to_string())?,
                 "target_languages": target_languages
@@ -186,17 +332,25 @@ pub extern "C" fn msime_client_translation_query(handle: u64) -> *mut c_char {
                     .map(|language| serde_json::to_value(language).map_err(|e| e.to_string()))
                     .collect::<Result<Vec<_>, _>>()?,
                 "candidates": candidates,
-                "custom_translation": custom_translation,
-                "tencent_tmt": tencent_tmt,
-                "niutrans": niutrans,
+                "provider": services.provider,
+                "translation_account": services.translation_account,
+                "custom_translation": services.custom_translation,
+                "tencent_tmt": services.tencent_tmt,
+                "niutrans": services.niutrans,
                 "english_gloss": english_gloss,
                 // The packaged resource path is only needed for offline
                 // lookup. The user path is also needed by a background host
                 // worker to persist successful English-target translations.
-                "resources": english_gloss.then(|| session.options.resources.clone()),
+                "resources": (english_gloss || !offline_gloss_languages.is_empty())
+                    .then(|| session.options.resources.clone()),
                 "user_data": (english_gloss || persist_english_translation)
                     .then(|| session.options.user_data.clone()),
-            }))
+            });
+            // Omitted rather than empty, so a host with no offline dictionary installed sees the query it always did.
+            if !offline_gloss_languages.is_empty() {
+                query["offline_gloss_languages"] = json!(offline_gloss_languages);
+            }
+            Ok(query)
         })
     })
 }
@@ -249,24 +403,12 @@ pub unsafe extern "C" fn msime_client_online_provider_request(
             std::slice::from_raw_parts(query, query_length)
         })
         .map_err(|_| "invalid online query document")?;
-        let path =
-            std::str::from_utf8(unsafe { std::slice::from_raw_parts(socket_path, socket_length) })
-                .map_err(|_| "socket path is not UTF-8")?;
-        if !std::path::Path::new(path).is_absolute() {
-            return Err("socket path must be absolute".into());
-        }
+        let path = super::parse_absolute_socket_path(unsafe {
+            std::slice::from_raw_parts(socket_path, socket_length)
+        })?;
         Ok(UnixSocketProvider::new(path)
             .query_candidates(query)
-            .map(|candidates| {
-                let rows: Vec<_> = candidates
-                    .into_iter()
-                    .map(|(text, source)| json!({"text": text, "source": source}))
-                    .collect();
-                // Preserve the single-result fields for older CLI consumers.
-                let mut value = rows.first().cloned().unwrap_or(json!({}));
-                value["candidates"] = json!(rows);
-                value
-            })
+            .map(online_candidate_response)
             .unwrap_or(Value::Null))
     })
 }
@@ -298,12 +440,9 @@ pub unsafe extern "C" fn msime_client_cloud_dictionary_provider_request(
             serde_json::from_slice::<cloud_dictionary::CloudDictionaryRequest>(request_bytes)
                 .map_err(|_| "invalid cloud dictionary request")?;
         cloud_dictionary::validate_cloud_request(&parsed).map_err(|error| error.to_owned())?;
-        let path =
-            std::str::from_utf8(unsafe { std::slice::from_raw_parts(socket_path, socket_length) })
-                .map_err(|_| "socket path is not UTF-8")?;
-        if !std::path::Path::new(path).is_absolute() {
-            return Err("socket path must be absolute".into());
-        }
+        let path = super::parse_absolute_socket_path(unsafe {
+            std::slice::from_raw_parts(socket_path, socket_length)
+        })?;
         let request = serde_json::from_slice::<serde_json::Value>(request_bytes)
             .map_err(|_| "invalid cloud dictionary request")?;
         msime_input_runtime::UnixSocketProvider::new(path)
@@ -338,12 +477,9 @@ pub unsafe extern "C" fn msime_client_cloud_clipboard_provider_request(
         let request = serde_json::from_slice::<serde_json::Value>(request_bytes)
             .map_err(|_| "invalid cloud clipboard request")?;
         cloud_clipboard::validate_request(&request).map_err(|error| error.to_owned())?;
-        let path =
-            std::str::from_utf8(unsafe { std::slice::from_raw_parts(socket_path, socket_length) })
-                .map_err(|_| "socket path is not UTF-8")?;
-        if !std::path::Path::new(path).is_absolute() {
-            return Err("socket path must be absolute".into());
-        }
+        let path = super::parse_absolute_socket_path(unsafe {
+            std::slice::from_raw_parts(socket_path, socket_length)
+        })?;
         msime_input_runtime::UnixSocketProvider::new(path)
             .cloud_clipboard(request)
             .ok_or_else(|| "cloud clipboard provider unavailable".to_owned())
@@ -372,12 +508,9 @@ pub unsafe extern "C" fn msime_client_translation_provider_request(
             std::slice::from_raw_parts(query, query_length)
         })
         .map_err(|_| "invalid translation query document")?;
-        let path =
-            std::str::from_utf8(unsafe { std::slice::from_raw_parts(socket_path, socket_length) })
-                .map_err(|_| "socket path is not UTF-8")?;
-        if !std::path::Path::new(path).is_absolute() {
-            return Err("socket path must be absolute".into());
-        }
+        let path = super::parse_absolute_socket_path(unsafe {
+            std::slice::from_raw_parts(socket_path, socket_length)
+        })?;
         Ok(UnixSocketProvider::new(path)
             .translate(query)
             .map(|items| json!({"translations": items}))
@@ -412,12 +545,9 @@ pub unsafe extern "C" fn msime_client_handwriting_provider_request(
             std::slice::from_raw_parts(query, query_length)
         })
         .map_err(|_| "invalid handwriting query document")?;
-        let path =
-            std::str::from_utf8(unsafe { std::slice::from_raw_parts(socket_path, socket_length) })
-                .map_err(|_| "socket path is not UTF-8")?;
-        if !std::path::Path::new(path).is_absolute() {
-            return Err("socket path must be absolute".into());
-        }
+        let path = super::parse_absolute_socket_path(unsafe {
+            std::slice::from_raw_parts(socket_path, socket_length)
+        })?;
         Ok(UnixSocketProvider::new(path)
             .handwriting(query)
             .map(|candidates| json!({"candidates": candidates}))
@@ -483,12 +613,9 @@ pub unsafe extern "C" fn msime_client_emoji_provider_request(
             std::slice::from_raw_parts(query, query_length)
         })
         .map_err(|_| "invalid emoji query document")?;
-        let path =
-            std::str::from_utf8(unsafe { std::slice::from_raw_parts(socket_path, socket_length) })
-                .map_err(|_| "socket path is not UTF-8")?;
-        if !std::path::Path::new(path).is_absolute() {
-            return Err("socket path must be absolute".into());
-        }
+        let path = super::parse_absolute_socket_path(unsafe {
+            std::slice::from_raw_parts(socket_path, socket_length)
+        })?;
         Ok(UnixSocketProvider::new(path)
             .emoji(query)
             .map(|items| json!({"items": items}))
@@ -513,6 +640,11 @@ pub(crate) struct EmojiCatalogQuery {
     pub(crate) parent: String,
     #[serde(default)]
     pub(crate) cursor: bool,
+    /// 插件目录的绝对路径，`list_plugin_symbol_groups` 从这里读符号集。
+    #[serde(default)]
+    pub(crate) plugins: Option<String>,
+    #[serde(default)]
+    pub(crate) list_plugin_symbol_groups: bool,
 }
 
 /// Query the local verified `others.db` Emoji catalog without a provider socket.
@@ -544,33 +676,46 @@ pub unsafe extern "C" fn msime_client_emoji_catalog_request(
             std::slice::from_raw_parts(query, query_length)
         })
         .map_err(|_| "invalid emoji query document")?;
-        let resources =
-            std::str::from_utf8(unsafe { std::slice::from_raw_parts(resources, resources_length) })
-                .map_err(|_| "resources path is not UTF-8")?;
-        if !std::path::Path::new(resources).is_absolute() {
-            return Err("resources path must be absolute".into());
-        }
+        let resources = super::parse_absolute_path(
+            unsafe { std::slice::from_raw_parts(resources, resources_length) },
+            "resources path is not UTF-8",
+            "resources path must be absolute",
+        )?;
         if query.offset > i64::MAX as usize || query.panel.limit == 0 {
             return Err("invalid emoji page".into());
         }
         if query.list_groups {
-            let groups =
-                msime_engine_bridge::emoji_catalog_groups(resources, &query.panel.category)
-                    .map_err(|_| "local emoji catalog unavailable")?;
+            let groups = msime_engine::host::emoji_catalog_groups(resources, &query.panel.category)
+                .map_err(|_| "local emoji catalog unavailable")?;
             return Ok(json!({"groups": groups}));
         }
+        if query.list_plugin_symbol_groups {
+            // 符号集插件不依赖 others.db：目录不可用时内置符号读不出来，插件组照样给。没传插件目录时没有插件组。
+            let groups = match query.plugins.as_deref() {
+                None => Vec::new(),
+                Some(plugins) if std::path::Path::new(plugins).is_absolute() => {
+                    crate::plugin_symbol_groups(std::path::Path::new(plugins))
+                }
+                Some(_) => return Err("plugins path must be absolute".into()),
+            };
+            return Ok(json!({ "plugin_symbol_groups": groups }));
+        }
         if query.list_symbol_groups {
-            let groups = msime_engine_bridge::emoji_symbol_groups(resources)
+            let groups = msime_engine::host::emoji_symbol_groups(resources)
                 .map_err(|_| "local emoji catalog unavailable")?;
-            return Ok(
-                json!({"symbol_groups": groups.into_iter().map(|g| json!({"parent":g.parent,"title":g.title})).collect::<Vec<_>>()}),
+            let mut symbol_groups = Vec::with_capacity(groups.len());
+            symbol_groups.extend(
+                groups
+                    .into_iter()
+                    .map(|group| json!({"parent":group.parent,"title":group.title})),
             );
+            return Ok(json!({"symbol_groups": symbol_groups}));
         }
         if !query.parent.is_empty() && query.panel.category != "symbols" {
             return Err("parent filter requires symbols catalog".into());
         }
         if query.cursor {
-            let slice = msime_engine_bridge::emoji_catalog_slice(
+            let slice = msime_engine::host::emoji_catalog_slice(
                 resources,
                 &query.panel.search,
                 &query.panel.category,
@@ -580,15 +725,21 @@ pub unsafe extern "C" fn msime_client_emoji_catalog_request(
                 &query.parent,
             )
             .map_err(|_| "local emoji catalog unavailable")?;
-            return Ok(json!({
-                "items": slice.items.into_iter().map(|item| json!({
+            let next_offset = slice.next_offset;
+            let complete = slice.complete;
+            let mut items = Vec::with_capacity(slice.items.len());
+            items.extend(slice.items.into_iter().map(|item| {
+                json!({
                     "text": item.text, "annotation": item.annotation, "group": item.group,
-                })).collect::<Vec<_>>(),
-                "next_offset": slice.next_offset,
-                "complete": slice.complete,
+                })
+            }));
+            return Ok(json!({
+                "items": items,
+                "next_offset": next_offset,
+                "complete": complete,
             }));
         }
-        let items = msime_engine_bridge::emoji_catalog_parent_page(
+        let items = msime_engine::host::emoji_catalog_filtered_page(
             resources,
             &query.panel.search,
             &query.panel.category,
@@ -598,17 +749,16 @@ pub unsafe extern "C" fn msime_client_emoji_catalog_request(
             &query.parent,
         )
         .map_err(|_| "local emoji catalog unavailable")?;
+        let mut rendered_items = Vec::with_capacity(items.len());
+        rendered_items.extend(items.into_iter().map(|item| {
+            json!({
+                "text": item.text,
+                "annotation": item.annotation,
+                "group": item.group,
+            })
+        }));
         Ok(json!({
-            "items": items
-                .into_iter()
-                .map(|item| {
-                    json!({
-                        "text": item.text,
-                        "annotation": item.annotation,
-                        "group": item.group,
-                    })
-                })
-                .collect::<Vec<_>>()
+            "items": rendered_items
         }))
     })
 }

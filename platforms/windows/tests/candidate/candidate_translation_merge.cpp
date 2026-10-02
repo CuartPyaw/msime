@@ -62,11 +62,41 @@ int main() {
     // Nothing planned means nothing to ask, whatever is already answered.
     REQUIRE(untranslated_texts(local, Texts{}).empty());
 
+    // A non-English offline dictionary fills only what the user's own
+    // translator left: the online answer stays, the unanswered candidate gets
+    // the dictionary's gloss, an online entry with an empty gloss takes the
+    // dictionary's in place rather than leaving the text listed twice, and an
+    // empty dictionary gloss adds nothing.
+    Answered online{{"你好", "salut"}, {"再见", ""}};
+    fill_offline_glosses(online, Answered{{"你好", "bonjour"},
+                                          {"世界", "monde"},
+                                          {"再见", "au revoir"},
+                                          {"空", ""}});
+    REQUIRE(online == (Answered{{"你好", "salut"},
+                                {"再见", "au revoir"},
+                                {"世界", "monde"}}));
+
+    // With no online answer at all, the usual case, the dictionary is the page.
+    Answered none;
+    fill_offline_glosses(none, Answered{{"世界", "monde"}});
+    REQUIRE(none == (Answered{{"世界", "monde"}}));
+
     // The senses split, which shares this header. Both separators, and the
     // first non-empty sense is what Ctrl+Enter commits.
     REQUIRE(first_translation_sense("hello; hi") == "hello");
     REQUIRE(first_translation_sense("；世界") == "世界");
     REQUIRE(first_translation_sense("   ").empty());
+
+    // A `/fy` query is one English sentence into the query's own target, asked directly rather than through the candidate plan, which refuses a Chinese target.
+    const auto command = command_translation_item(true, Texts{"hello world"}, "zh");
+    REQUIRE(command && command->text == "hello world" &&
+            command->source_language == "en" && command->target_language == "zh");
+    // A candidate gloss query is never one, nor is a sentence query that does not hold exactly one non-empty text and a target.
+    REQUIRE(!command_translation_item(false, Texts{"hello world"}, "zh"));
+    REQUIRE(!command_translation_item(true, Texts{"hello", "world"}, "zh"));
+    REQUIRE(!command_translation_item(true, Texts{}, "zh"));
+    REQUIRE(!command_translation_item(true, Texts{""}, "zh"));
+    REQUIRE(!command_translation_item(true, Texts{"hello"}, ""));
 
     std::cout << "candidate translation merge policy ok\n";
     return 0;

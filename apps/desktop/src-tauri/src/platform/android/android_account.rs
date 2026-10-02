@@ -1,34 +1,41 @@
+use super::android_theme_preferences::{apply_theme_settings, insert_theme_settings};
+use crate::platform::mobile::mobile_account_helpers::{
+    account_chat as shared_account_chat, account_chat_models as shared_account_chat_models,
+    account_command_error, account_delete as shared_account_delete,
+    account_forget as shared_account_forget, account_login as shared_account_login,
+    account_logout as shared_account_logout,
+    account_preferences_load as shared_account_preferences_load,
+    account_preferences_schema as shared_account_preferences_schema,
+    account_profile as shared_account_profile, account_rename as shared_account_rename,
+    account_request_code as shared_account_request_code, account_status as shared_account_status,
+    call_session, cleanup_stale_snapshot_previews, clear_snapshot_previews,
+    clear_snapshot_previews_after, cloud_dictionary_account_request, replace_pending_snapshot,
+    snapshot_command_error, snapshot_response_without_account, snapshot_text_within_limit,
+    take_pending_snapshot, valid_mobile_haptic_strength, validate_pending_snapshot,
+    PendingSnapshot, SnapshotMetadata,
+};
+use crate::platform::mobile::mobile_account_preferences::{
+    frequency_account_preferences, insert_bool, insert_integer, insert_string,
+};
+use crate::platform::mobile::mobile_community::MobileCommunityState;
+use crate::shared::account_dto::{
+    providers_response_without_apple, ChallengeResponse, ChatModelsResponse, ChatResponse,
+    PreferenceSchemaResponse, ProfileResponse, ProvidersResponse, StatusResponse,
+};
 use msime_client_core::account::{
-    merge_account_preferences, validate_account_preferences, AccountCandidateQuery,
-    AccountChallenge, AccountChatMessage, AccountChatModels, AccountError, AccountPreferenceSchema,
-    AccountPreferenceValue, AccountPreferences, AccountProfile, AccountSessionStorage, AccountUser,
+    merge_account_preferences, validate_account_preferences, AccountChatMessage, AccountError,
+    AccountPreferenceSchema, AccountPreferenceValue, AccountPreferences, AccountSessionStorage,
     BackendAccountClient, BackendAccountSession, SavedAccountSession,
 };
 use msime_client_core::cloud::dictionary::DictionaryKind;
-use msime_client_core::community::resource::{
-    BackendCommunityResourceService, CommunityResource, CommunityResourceApplication,
-    CommunityResourceContent, CommunityResourceKind, CommunityResourcePage,
-    CommunityResourcePublication, CommunityResourceScope,
-};
-use msime_client_core::community::resource_library::{
-    CommunityResourceLibraryError, CommunityResourceLibraryStore,
+use msime_client_core::cloud::snapshot_validation::{
+    has_keys as snapshot_has_keys, parse_strict_object, required_integer as snapshot_integer,
+    required_text as snapshot_text, valid_timestamp as snapshot_timestamp,
 };
 use msime_client_core::preferences::{
-    FrequencyMode, FrequencyPreferences, InputScheme, Preferences, PreferencesSnapshot,
-    PreferencesStore, ShuangpinProfile, ThemeMode, TouchKeyboardLayout, TouchKeyboardSkin,
-    TouchKeyboardSkinDesign,
+    FrequencyMode, InputScheme, Preferences, PreferencesSnapshot, PreferencesStore,
+    ShuangpinProfile, ThemeMode, TouchKeyboardLayout,
 };
-use msime_client_core::skin::ai::{AiSkinError, AiSkinProposal, BackendAiSkinService};
-use msime_client_core::skin::community::{
-    BackendCommunitySkinService, CommunitySkin, CommunitySkinPage,
-};
-use msime_client_core::skin::custom_library::{
-    CustomSkinLibraryError, CustomSkinLibraryStore, SavedTouchKeyboardSkin,
-};
-use msime_client_core::skin::keyboard_trial::{
-    KeyboardSkinTrial, KeyboardSkinTrialError, KeyboardSkinTrialStore,
-};
-use serde::de::{DeserializeSeed, MapAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -36,13 +43,16 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::plugin::{Builder, PluginHandle, TauriPlugin};
-use tauri::{Emitter, Manager, Runtime, State, Wry};
+use tauri::{Manager, Runtime, State, Wry};
 use uuid::Uuid;
 
 const MAX_SECURE_SESSION_BYTES: usize = 16 * 1024;
+
+fn valid_secure_session(value: &str) -> bool {
+    !value.is_empty() && value.len() <= MAX_SECURE_SESSION_BYTES
+}
 
 #[derive(Deserialize)]
 struct LoadResponse {
@@ -89,7 +99,7 @@ struct AiTestRequest<'a> {
 }
 
 #[derive(Clone)]
-struct AndroidAccountStorage<R: Runtime>(PluginHandle<R>);
+pub(crate) struct AndroidAccountStorage<R: Runtime>(PluginHandle<R>);
 
 impl<R: Runtime> AccountSessionStorage for AndroidAccountStorage<R> {
     fn load(&self) -> Result<Option<SavedAccountSession>, AccountError> {
@@ -100,7 +110,7 @@ impl<R: Runtime> AccountSessionStorage for AndroidAccountStorage<R> {
         response
             .value
             .map(|value| {
-                if value.is_empty() || value.len() > MAX_SECURE_SESSION_BYTES {
+                if !valid_secure_session(&value) {
                     return Err(AccountError::Storage);
                 }
                 serde_json::from_str(&value).map_err(|_| AccountError::Storage)
@@ -110,7 +120,7 @@ impl<R: Runtime> AccountSessionStorage for AndroidAccountStorage<R> {
 
     fn save(&self, session: &SavedAccountSession) -> Result<(), AccountError> {
         let value = serde_json::to_string(session).map_err(|_| AccountError::Storage)?;
-        if value.is_empty() || value.len() > MAX_SECURE_SESSION_BYTES {
+        if !valid_secure_session(&value) {
             return Err(AccountError::Storage);
         }
         self.0
@@ -126,11 +136,6 @@ impl<R: Runtime> AccountSessionStorage for AndroidAccountStorage<R> {
 }
 
 type Session = BackendAccountSession<BackendAccountClient, AndroidAccountStorage<Wry>>;
-type CommunityService =
-    BackendCommunitySkinService<BackendAccountClient, AndroidAccountStorage<Wry>>;
-type CommunityResourceService =
-    BackendCommunityResourceService<BackendAccountClient, AndroidAccountStorage<Wry>>;
-type AiSkinService = BackendAiSkinService<BackendAccountClient, AndroidAccountStorage<Wry>>;
 
 pub struct AccountState {
     session: Arc<Session>,
@@ -138,22 +143,19 @@ pub struct AccountState {
     snapshot_directory: PathBuf,
     snapshot_previews: Arc<Mutex<HashMap<String, PendingSnapshot>>>,
     feedback: PluginHandle<Wry>,
-    community: Arc<CommunityService>,
-    resources: Arc<CommunityResourceService>,
-    ai_skin: Arc<AiSkinService>,
-    ai_skin_requests: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
 }
 
-struct PendingSnapshot {
-    account_id: String,
-    path: PathBuf,
-    metadata: SnapshotMetadata,
+impl AccountState {
+    /// The account session, for the account-backed commands shared with iOS.
+    pub(crate) fn session(&self) -> &Arc<Session> {
+        &self.session
+    }
 }
 
 pub fn init() -> TauriPlugin<Wry> {
     Builder::new("account-storage")
         .setup(|app, api| {
-            let handle = api.register_android_plugin("app.msime.client", "AccountPlugin")?;
+            let handle = api.register_android_plugin("app.msime.android", "AccountPlugin")?;
             let platform = handle.clone();
             let feedback = handle.clone();
             let client = BackendAccountClient::new()?;
@@ -161,273 +163,24 @@ pub fn init() -> TauriPlugin<Wry> {
                 client.clone(),
                 AndroidAccountStorage(handle),
             ));
-            let community = Arc::new(BackendCommunitySkinService::new(
-                client,
-                Arc::clone(&session),
-            ));
-            let resource_client = BackendAccountClient::new()?;
-            let resources = Arc::new(BackendCommunityResourceService::new(
-                resource_client,
-                Arc::clone(&session),
-            ));
-            let ai_skin = Arc::new(BackendAiSkinService::new(
-                BackendAccountClient::new()?,
-                Arc::clone(&session),
-            ));
+            let community = MobileCommunityState::new(client, &session)?;
+            let snapshot_directory = app
+                .path()
+                .app_data_dir()?
+                .join("files/bootstrap/state/dictionary-snapshots");
+            fs::create_dir_all(&snapshot_directory)?;
+            cleanup_stale_snapshot_previews(&snapshot_directory)?;
             app.manage(AccountState {
                 session,
                 platform,
-                snapshot_directory: app
-                    .path()
-                    .app_data_dir()?
-                    .join("files/bootstrap/state/dictionary-snapshots"),
+                snapshot_directory,
                 snapshot_previews: Arc::new(Mutex::new(HashMap::new())),
                 feedback,
-                community,
-                resources,
-                ai_skin,
-                ai_skin_requests: Arc::new(Mutex::new(HashMap::new())),
             });
+            app.manage(community);
             Ok(())
         })
         .build()
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SnapshotMetadata {
-    cloud_revision: i64,
-    sha256: String,
-    #[serde(skip_serializing)]
-    file_sha256: String,
-    bytes: u64,
-    records: usize,
-    entries: usize,
-    overlays: usize,
-    positions: usize,
-    selections: usize,
-}
-
-struct StrictSnapshotValue {
-    depth: usize,
-}
-
-impl<'de> DeserializeSeed<'de> for StrictSnapshotValue {
-    type Value = Value;
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        struct SnapshotValueVisitor {
-            depth: usize,
-        }
-
-        impl<'de> Visitor<'de> for SnapshotValueVisitor {
-            type Value = Value;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                formatter.write_str("a strict JSON object value")
-            }
-
-            fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
-                Ok(Value::Bool(value))
-            }
-
-            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
-                Ok(Value::Number(value.into()))
-            }
-
-            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
-                Ok(Value::Number(value.into()))
-            }
-
-            fn visit_f64<E>(self, _value: f64) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                Err(E::custom("floating point values are not allowed"))
-            }
-
-            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E> {
-                Ok(Value::String(value.to_owned()))
-            }
-
-            fn visit_string<E>(self, value: String) -> Result<Self::Value, E> {
-                Ok(Value::String(value))
-            }
-
-            fn visit_none<E>(self) -> Result<Self::Value, E> {
-                Ok(Value::Null)
-            }
-
-            fn visit_unit<E>(self) -> Result<Self::Value, E> {
-                Ok(Value::Null)
-            }
-
-            fn visit_seq<A>(self, _sequence: A) -> Result<Self::Value, A::Error>
-            where
-                A: serde::de::SeqAccess<'de>,
-            {
-                Err(serde::de::Error::custom("arrays are not allowed"))
-            }
-
-            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-            where
-                A: MapAccess<'de>,
-            {
-                if self.depth > 1 {
-                    return Err(serde::de::Error::custom("nested objects are not allowed"));
-                }
-                let mut object = serde_json::Map::new();
-                while let Some(key) = map.next_key::<String>()? {
-                    if object.contains_key(&key) {
-                        return Err(serde::de::Error::custom("duplicate JSON key"));
-                    }
-                    let value = map.next_value_seed(StrictSnapshotValue {
-                        depth: self.depth + 1,
-                    })?;
-                    object.insert(key, value);
-                }
-                Ok(Value::Object(object))
-            }
-        }
-
-        deserializer.deserialize_any(SnapshotValueVisitor { depth: self.depth })
-    }
-}
-
-fn parse_snapshot_object(bytes: &[u8]) -> Result<serde_json::Map<String, Value>, AccountError> {
-    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
-    let value = StrictSnapshotValue { depth: 0 }
-        .deserialize(&mut deserializer)
-        .map_err(|_| AccountError::Invalid)?;
-    deserializer.end().map_err(|_| AccountError::Invalid)?;
-    value.as_object().cloned().ok_or(AccountError::Invalid)
-}
-
-fn snapshot_has_keys(map: &serde_json::Map<String, Value>, keys: &[&str]) -> bool {
-    map.len() == keys.len() && keys.iter().all(|key| map.contains_key(*key))
-}
-
-fn snapshot_text<'a>(
-    data: &'a serde_json::Map<String, Value>,
-    key: &str,
-    maximum: usize,
-) -> Result<&'a str, AccountError> {
-    let value = data
-        .get(key)
-        .and_then(Value::as_str)
-        .filter(|value| {
-            !value.is_empty()
-                && value.len() <= maximum
-                && !value
-                    .bytes()
-                    .any(|byte| matches!(byte, 0 | b'\t' | b'\n' | b'\r'))
-        })
-        .ok_or(AccountError::Invalid)?;
-    Ok(value)
-}
-
-fn snapshot_integer(data: &serde_json::Map<String, Value>, key: &str) -> Result<i64, AccountError> {
-    data.get(key)
-        .and_then(Value::as_i64)
-        .ok_or(AccountError::Invalid)
-}
-
-fn snapshot_timestamp(value: &str) -> bool {
-    fn digits(bytes: &[u8], start: usize, end: usize) -> Option<u32> {
-        (end <= bytes.len() && bytes[start..end].iter().all(u8::is_ascii_digit)).then(|| {
-            bytes[start..end]
-                .iter()
-                .fold(0, |value, byte| value * 10 + u32::from(byte - b'0'))
-        })
-    }
-    let bytes = value.as_bytes();
-    if bytes.len() < 20
-        || digits(bytes, 0, 4).is_none()
-        || bytes.get(4) != Some(&b'-')
-        || bytes.get(7) != Some(&b'-')
-        || bytes.get(10) != Some(&b'T')
-        || bytes.get(13) != Some(&b':')
-        || bytes.get(16) != Some(&b':')
-    {
-        return false;
-    }
-    let year = digits(bytes, 0, 4).unwrap();
-    let month = match digits(bytes, 5, 7) {
-        Some(value) => value,
-        None => return false,
-    };
-    let day = match digits(bytes, 8, 10) {
-        Some(value) => value,
-        None => return false,
-    };
-    let hour = match digits(bytes, 11, 13) {
-        Some(value) => value,
-        None => return false,
-    };
-    let minute = match digits(bytes, 14, 16) {
-        Some(value) => value,
-        None => return false,
-    };
-    let second = match digits(bytes, 17, 19) {
-        Some(value) => value,
-        None => return false,
-    };
-    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let days = [
-        31,
-        if leap { 29 } else { 28 },
-        31,
-        30,
-        31,
-        30,
-        31,
-        31,
-        30,
-        31,
-        30,
-        31,
-    ];
-    if year == 0
-        || !(1..=12).contains(&month)
-        || day == 0
-        || day > days[month as usize - 1]
-        || hour >= 24
-        || minute >= 60
-        || second >= 60
-    {
-        return false;
-    }
-    let mut offset = 19;
-    if matches!(bytes.get(offset), Some(b'.' | b',')) {
-        offset += 1;
-        let start = offset;
-        while bytes.get(offset).is_some_and(u8::is_ascii_digit) {
-            offset += 1;
-        }
-        if offset == start {
-            return false;
-        }
-    }
-    let zone = &bytes[offset..];
-    if zone == b"Z" {
-        return true;
-    }
-    if zone.len() != 6
-        || !matches!(zone[0], b'+' | b'-')
-        || !zone[1].is_ascii_digit()
-        || !zone[2].is_ascii_digit()
-        || zone[3] != b':'
-        || !zone[4].is_ascii_digit()
-        || !zone[5].is_ascii_digit()
-    {
-        return false;
-    }
-    let zone_hour = u32::from(zone[1] - b'0') * 10 + u32::from(zone[2] - b'0');
-    let zone_minute = u32::from(zone[4] - b'0') * 10 + u32::from(zone[5] - b'0');
-    zone_hour < 24 && zone_minute < 60
 }
 
 fn inspect_snapshot_record(
@@ -448,8 +201,8 @@ fn inspect_snapshot_record(
         .get("data")
         .and_then(Value::as_object)
         .ok_or(AccountError::Invalid)?;
-    let code = snapshot_text(data, "code", 512)?.to_owned();
-    let word = snapshot_text(data, "word", 2048)?.to_owned();
+    let code = snapshot_text(data, "code", 512, AccountError::Invalid)?.to_owned();
+    let word = snapshot_text(data, "word", 2048, AccountError::Invalid)?.to_owned();
     match kind {
         "entry" | "overlay" => {
             let outer_keys_valid = if kind == "overlay" {
@@ -511,8 +264,8 @@ fn inspect_snapshot_record(
             {
                 return Err(AccountError::Invalid);
             }
-            let weight = snapshot_integer(data, "weight")?;
-            let record_revision = snapshot_integer(data, "revision")?;
+            let weight = snapshot_integer(data, "weight", AccountError::Invalid)?;
+            let record_revision = snapshot_integer(data, "revision", AccountError::Invalid)?;
             if !(0..=100_000_000).contains(&weight)
                 || (weight == 0 && !deleted)
                 || !(1..=revision).contains(&record_revision)
@@ -555,13 +308,13 @@ fn inspect_snapshot_record(
             if !snapshot_has_keys(data, &["context", "code", "word", value_key]) {
                 return Err(AccountError::Invalid);
             }
-            let context = snapshot_text(data, "context", 512)?.to_owned();
+            let context = snapshot_text(data, "context", 512, AccountError::Invalid)?.to_owned();
             if context.len() + code.len() + word.len() > 2048 {
                 return Err(AccountError::Invalid);
             }
             let identity = (context.clone(), code, word);
             if kind == "position" {
-                let position = snapshot_integer(data, "position")?;
+                let position = snapshot_integer(data, "position", AccountError::Invalid)?;
                 if !(1..=5).contains(&position)
                     || !positions.insert(identity)
                     || !position_slots.insert((context, position))
@@ -570,7 +323,7 @@ fn inspect_snapshot_record(
                 }
                 Ok(3)
             } else {
-                let count = snapshot_integer(data, "count")?;
+                let count = snapshot_integer(data, "count", AccountError::Invalid)?;
                 if !(0..=10).contains(&count) || !selections.insert(identity) {
                     return Err(AccountError::Invalid);
                 }
@@ -638,7 +391,7 @@ fn inspect_snapshot(path: &std::path::Path) -> Result<SnapshotMetadata, AccountE
         if total_bytes > MAX_BYTES || line.is_empty() {
             return Err(AccountError::Invalid);
         }
-        let map = parse_snapshot_object(&line)?;
+        let map = parse_strict_object(&line).map_err(|_| AccountError::Invalid)?;
         let kind = map
             .get("type")
             .and_then(Value::as_str)
@@ -711,14 +464,12 @@ fn inspect_snapshot(path: &std::path::Path) -> Result<SnapshotMetadata, AccountE
                 let expected_sha = map
                     .get("sha256")
                     .and_then(Value::as_str)
-                    .filter(|value| {
-                        value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit())
-                    })
+                    .filter(|value| msime_client_core::is_ascii_hex(value, 64))
                     .ok_or(AccountError::Invalid)?;
                 // Cloned, not consumed: the loop keeps reading after the footer
                 // so that trailing data is rejected, and those iterations still
                 // reach the digest.
-                let actual = format!("{:x}", digest.clone().finalize());
+                let actual = hex::encode(digest.clone().finalize());
                 if expected_records != records || expected_sha != actual {
                     return Err(AccountError::Invalid);
                 }
@@ -753,7 +504,7 @@ fn inspect_snapshot(path: &std::path::Path) -> Result<SnapshotMetadata, AccountE
     Ok(SnapshotMetadata {
         cloud_revision: revision,
         sha256,
-        file_sha256: format!("{:x}", file_digest.finalize()),
+        file_sha256: hex::encode(file_digest.finalize()),
         bytes: total_bytes,
         records,
         entries: counts[0],
@@ -779,29 +530,6 @@ struct CancelSnapshotRequest {
     account_id: String,
 }
 
-fn snapshot_command_error() -> crate::CommandError {
-    crate::CommandError {
-        code: "snapshot_unavailable",
-    }
-}
-
-fn snapshot_response_without_account(mut value: Value) -> Result<Value, crate::CommandError> {
-    let object = value.as_object_mut().ok_or_else(snapshot_command_error)?;
-    if let Some(request) = object.get_mut("request").and_then(Value::as_object_mut) {
-        request.remove("accountId");
-    }
-    Ok(value)
-}
-
-fn clear_snapshot_previews(previews: &Arc<Mutex<HashMap<String, PendingSnapshot>>>) {
-    let Ok(mut pending) = previews.lock() else {
-        return;
-    };
-    for item in pending.drain().map(|(_, item)| item) {
-        let _ = fs::remove_file(item.path);
-    }
-}
-
 async fn dictionary_snapshot_preview(
     state: State<'_, AccountState>,
 ) -> Result<Value, crate::CommandError> {
@@ -814,13 +542,6 @@ async fn dictionary_snapshot_preview(
     let file_token = token.clone();
     let (account_id, path, metadata) = tauri::async_runtime::spawn_blocking(move || {
         fs::create_dir_all(&directory).map_err(|_| AccountError::Unavailable)?;
-        if let Ok(files) = fs::read_dir(&directory) {
-            for file in files.flatten() {
-                if file.file_name().to_string_lossy().starts_with("download-") {
-                    let _ = fs::remove_file(file.path());
-                }
-            }
-        }
         let profile = session.profile()?;
         let path = directory.join(format!("download-{file_token}.ndjson"));
         let result = session
@@ -836,23 +557,16 @@ async fn dictionary_snapshot_preview(
     })
     .await
     .map_err(|_| snapshot_command_error())?
-    .map_err(|error| crate::CommandError { code: error.code() })?;
-    let old = {
-        let mut pending = previews.lock().map_err(|_| snapshot_command_error())?;
-        let old = pending
-            .drain()
-            .map(|(_, item)| item.path)
-            .collect::<Vec<_>>();
-        pending.insert(
-            token.clone(),
-            PendingSnapshot {
-                account_id,
-                path,
-                metadata: metadata.clone(),
-            },
-        );
-        old
-    };
+    .map_err(account_command_error)?;
+    let old = replace_pending_snapshot(
+        &previews,
+        token.clone(),
+        PendingSnapshot {
+            account_id,
+            path,
+            metadata: metadata.clone(),
+        },
+    )?;
     for path in old {
         let _ = fs::remove_file(path);
     }
@@ -866,33 +580,13 @@ async fn dictionary_snapshot_enqueue(
     state: State<'_, AccountState>,
     token: String,
 ) -> Result<Value, crate::CommandError> {
-    let parsed = Uuid::parse_str(&token).map_err(|_| crate::CommandError {
-        code: "snapshot_invalid",
-    })?;
-    let pending = {
-        let mut previews = state
-            .snapshot_previews
-            .lock()
-            .map_err(|_| snapshot_command_error())?;
-        previews
-            .remove(&parsed.to_string())
-            .ok_or_else(|| crate::CommandError {
-                code: "snapshot_invalid",
-            })?
-    };
+    let pending = take_pending_snapshot(&state.snapshot_previews, &token)?;
     let session = Arc::clone(&state.session);
     let platform = state.platform.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let path = pending.path.clone();
         let result = (|| {
-            let profile = session.profile()?;
-            if profile.user.id != pending.account_id {
-                return Err(AccountError::Conflict);
-            }
-            let changes = session.dictionary_changes(pending.metadata.cloud_revision, 1)?;
-            if !changes.changes.is_empty() {
-                return Err(AccountError::Conflict);
-            }
+            validate_pending_snapshot(&session, &pending)?;
             let state = platform
                 .run_mobile_plugin::<Value>("snapshotState", ())
                 .map_err(|_| AccountError::Unavailable)?;
@@ -917,7 +611,7 @@ async fn dictionary_snapshot_enqueue(
     })
     .await
     .map_err(|_| snapshot_command_error())?
-    .map_err(|error| crate::CommandError { code: error.code() })?;
+    .map_err(account_command_error)?;
     snapshot_response_without_account(result)
 }
 
@@ -946,13 +640,18 @@ async fn dictionary_snapshot_export(
     })
     .await
     .map_err(|_| snapshot_command_error())?
-    .map_err(|error| crate::CommandError { code: error.code() })
+    .map_err(account_command_error)
 }
 
 async fn dictionary_snapshot_restore_preview(
     state: State<'_, AccountState>,
     text: String,
 ) -> Result<Value, crate::CommandError> {
+    if !snapshot_text_within_limit(text.len()) {
+        return Err(crate::CommandError {
+            code: "snapshot_invalid",
+        });
+    }
     let session = Arc::clone(&state.session);
     let directory = state.snapshot_directory.clone();
     let token = Uuid::new_v4().to_string();
@@ -977,7 +676,7 @@ async fn dictionary_snapshot_restore_preview(
     })
     .await
     .map_err(|_| snapshot_command_error())?
-    .map_err(|error| crate::CommandError { code: error.code() })
+    .map_err(account_command_error)
 }
 
 async fn dictionary_snapshot_restore(
@@ -986,6 +685,11 @@ async fn dictionary_snapshot_restore(
     expected_sha256: String,
     revision: i64,
 ) -> Result<Value, crate::CommandError> {
+    if !snapshot_text_within_limit(text.len()) {
+        return Err(crate::CommandError {
+            code: "snapshot_invalid",
+        });
+    }
     let session = Arc::clone(&state.session);
     let directory = state.snapshot_directory.clone();
     let token = Uuid::new_v4().to_string();
@@ -1013,7 +717,7 @@ async fn dictionary_snapshot_restore(
     })
     .await
     .map_err(|_| snapshot_command_error())?
-    .map_err(|error| crate::CommandError { code: error.code() })
+    .map_err(account_command_error)
 }
 
 async fn dictionary_snapshot_status(
@@ -1041,17 +745,8 @@ async fn dictionary_snapshot_cancel(
     })
     .await
     .map_err(|_| snapshot_command_error())?
-    .map_err(|error| crate::CommandError { code: error.code() })?;
-    let old = {
-        let mut pending = previews.lock().map_err(|_| snapshot_command_error())?;
-        pending
-            .drain()
-            .map(|(_, item)| item.path)
-            .collect::<Vec<_>>()
-    };
-    for path in old {
-        let _ = fs::remove_file(path);
-    }
+    .map_err(account_command_error)?;
+    clear_snapshot_previews(&previews);
     let result = tauri::async_runtime::spawn_blocking(move || {
         platform
             .run_mobile_plugin::<Value>("cancelSnapshot", CancelSnapshotRequest { account_id })
@@ -1060,91 +755,6 @@ async fn dictionary_snapshot_cancel(
     .await
     .map_err(|_| snapshot_command_error())??;
     snapshot_response_without_account(result)
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StatusResponse {
-    user: Option<UserResponse>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct UserResponse {
-    id: String,
-    display_name: String,
-    created_at: String,
-}
-
-impl From<AccountUser> for UserResponse {
-    fn from(user: AccountUser) -> Self {
-        Self {
-            id: user.id,
-            display_name: user.display_name,
-            created_at: user.created_at,
-        }
-    }
-}
-
-#[derive(Serialize)]
-pub struct ProvidersResponse {
-    email: bool,
-    phone: bool,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChallengeResponse {
-    challenge_id: String,
-    expires_in: u64,
-}
-
-impl From<AccountChallenge> for ChallengeResponse {
-    fn from(challenge: AccountChallenge) -> Self {
-        Self {
-            challenge_id: challenge.challenge_id,
-            expires_in: challenge.expires_in,
-        }
-    }
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProfileResponse {
-    user: UserResponse,
-    providers: Vec<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChatModelResponse {
-    id: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChatModelsResponse {
-    data: Vec<ChatModelResponse>,
-    default_model: String,
-}
-
-impl From<AccountChatModels> for ChatModelsResponse {
-    fn from(models: AccountChatModels) -> Self {
-        Self {
-            data: models
-                .data
-                .into_iter()
-                .map(|model| ChatModelResponse { id: model.id })
-                .collect(),
-            default_model: models.default_model,
-        }
-    }
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChatResponse {
-    content: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1159,504 +769,11 @@ struct AppIconRequest<'a> {
     style: &'a str,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PreferenceSchemaResponse {
-    fields: BTreeMap<String, msime_client_core::account::AccountPreferenceField>,
-    maximum_bytes: usize,
-    update_mode: String,
-    revision_required: bool,
-}
-
-impl From<AccountPreferenceSchema> for PreferenceSchemaResponse {
-    fn from(schema: AccountPreferenceSchema) -> Self {
-        Self {
-            fields: schema.fields,
-            maximum_bytes: schema.maximum_bytes,
-            update_mode: schema.update_mode,
-            revision_required: schema.revision_required,
-        }
-    }
-}
-
-impl From<AccountProfile> for ProfileResponse {
-    fn from(profile: AccountProfile) -> Self {
-        let mut providers = Vec::new();
-        for identity in profile.identities {
-            if !providers.contains(&identity.provider) {
-                providers.push(identity.provider);
-            }
-        }
-        Self {
-            user: profile.user.into(),
-            providers,
-        }
-    }
-}
-
-async fn call<T, F>(state: State<'_, AccountState>, operation: F) -> Result<T, crate::CommandError>
-where
-    T: Send + 'static,
-    F: FnOnce(&Session) -> Result<T, AccountError> + Send + 'static,
-{
-    let session = Arc::clone(&state.session);
-    tauri::async_runtime::spawn_blocking(move || operation(&session))
-        .await
-        .map_err(|_| crate::CommandError {
-            code: "account_unavailable",
-        })?
-        .map_err(|error| crate::CommandError { code: error.code() })
-}
-
-fn community_error(error: AccountError) -> crate::CommandError {
-    crate::CommandError {
-        code: match error {
-            AccountError::Invalid => "community_invalid",
-            AccountError::Unauthorized => "community_unauthorized",
-            AccountError::Forbidden => "community_forbidden",
-            AccountError::NotFound => "community_not_found",
-            AccountError::RateLimited => "community_rate_limited",
-            AccountError::Cancelled => "community_cancelled",
-            AccountError::Storage => "community_storage",
-            AccountError::Conflict => "community_conflict",
-            AccountError::Unavailable => "community_unavailable",
-        },
-    }
-}
-
-fn ai_skin_error(error: AiSkinError) -> crate::CommandError {
-    let code = match error {
-        AiSkinError::Cancelled => "ai_skin_cancelled",
-        AiSkinError::InvalidResponse => "ai_skin_invalid",
-        AiSkinError::Account(error) => error.code(),
-    };
-    crate::CommandError { code }
-}
-
-fn valid_ai_skin_request_id(value: &str) -> bool {
-    (1..=96).contains(&value.len())
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AiSkinProgress {
-    request_id: String,
-    completed: usize,
-}
-
-#[tauri::command]
-pub async fn ai_skin_generate(
-    app: tauri::AppHandle<Wry>,
-    state: State<'_, AccountState>,
-    request_id: String,
-    prompt: String,
-) -> Result<Vec<AiSkinProposal>, crate::CommandError> {
-    if !valid_ai_skin_request_id(&request_id) {
-        return Err(crate::CommandError {
-            code: "ai_skin_invalid",
-        });
-    }
-    let cancelled = Arc::new(AtomicBool::new(false));
-    {
-        let mut requests = state
-            .ai_skin_requests
-            .lock()
-            .map_err(|_| crate::CommandError {
-                code: "ai_skin_unavailable",
-            })?;
-        if requests
-            .insert(request_id.clone(), Arc::clone(&cancelled))
-            .is_some()
-        {
-            return Err(crate::CommandError {
-                code: "ai_skin_busy",
-            });
-        }
-    }
-    let service = Arc::clone(&state.ai_skin);
-    let progress_app = app.clone();
-    let progress_request_id = request_id.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        service.generate(&prompt, &cancelled, move |completed| {
-            let _ = progress_app.emit(
-                "ai-skin-progress",
-                AiSkinProgress {
-                    request_id: progress_request_id.clone(),
-                    completed,
-                },
-            );
-        })
-    })
-    .await
-    .map_err(|_| crate::CommandError {
-        code: "ai_skin_unavailable",
-    })?
-    .map_err(ai_skin_error);
-    if let Ok(mut requests) = state.ai_skin_requests.lock() {
-        requests.remove(&request_id);
-    }
-    result
-}
-
-#[tauri::command]
-pub async fn ai_skin_cancel(
-    state: State<'_, AccountState>,
-    request_id: String,
-) -> Result<(), crate::CommandError> {
-    if !valid_ai_skin_request_id(&request_id) {
-        return Err(crate::CommandError {
-            code: "ai_skin_invalid",
-        });
-    }
-    let requests = state
-        .ai_skin_requests
-        .lock()
-        .map_err(|_| crate::CommandError {
-            code: "ai_skin_unavailable",
-        })?;
-    if let Some(cancelled) = requests.get(&request_id) {
-        cancelled.store(true, Ordering::Release);
-    }
-    Ok(())
-}
-
-async fn community_call<T, F>(
-    state: State<'_, AccountState>,
-    operation: F,
-) -> Result<T, crate::CommandError>
-where
-    T: Send + 'static,
-    F: FnOnce(&CommunityService) -> Result<T, AccountError> + Send + 'static,
-{
-    let service = Arc::clone(&state.community);
-    tauri::async_runtime::spawn_blocking(move || operation(&service))
-        .await
-        .map_err(|_| crate::CommandError {
-            code: "community_unavailable",
-        })?
-        .map_err(community_error)
-}
-
-fn custom_skin_error(error: CustomSkinLibraryError) -> crate::CommandError {
-    crate::CommandError {
-        code: match error {
-            CustomSkinLibraryError::Full => "community_skin_library_full",
-            CustomSkinLibraryError::InvalidName => "community_skin_invalid_name",
-            CustomSkinLibraryError::DuplicateName => "community_skin_duplicate_name",
-            CustomSkinLibraryError::NotFound => "community_skin_not_found",
-            CustomSkinLibraryError::Json(_) | CustomSkinLibraryError::Invalid => {
-                "community_skin_library_format"
-            }
-            CustomSkinLibraryError::Io(_) => "community_storage",
-        },
-    }
-}
-
-fn trial_error(error: KeyboardSkinTrialError) -> crate::CommandError {
-    crate::CommandError {
-        code: match error {
-            KeyboardSkinTrialError::Io(_) | KeyboardSkinTrialError::Preferences(_) => {
-                "community_storage"
-            }
-            KeyboardSkinTrialError::Json(_) | KeyboardSkinTrialError::Invalid => {
-                "community_trial_format"
-            }
-        },
-    }
-}
-
-fn resource_library_error(error: CommunityResourceLibraryError) -> crate::CommandError {
-    crate::CommandError {
-        code: match error {
-            CommunityResourceLibraryError::Io(_) => "community_storage",
-            CommunityResourceLibraryError::Json(_) | CommunityResourceLibraryError::Invalid => {
-                "community_resource_library_format"
-            }
-        },
-    }
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CommunitySkinDownloadResponse {
-    skin: SavedTouchKeyboardSkin,
-    trial: KeyboardSkinTrial,
-}
-
-#[tauri::command]
-pub async fn community_skin_list(
-    state: State<'_, AccountState>,
-    offset: usize,
-    search: String,
-) -> Result<CommunitySkinPage, crate::CommandError> {
-    community_call(state, move |service| service.list(offset, &search)).await
-}
-
-#[tauri::command]
-pub async fn community_skin_detail(
-    state: State<'_, AccountState>,
-    id: String,
-) -> Result<CommunitySkin, crate::CommandError> {
-    let id = uuid::Uuid::parse_str(&id).map_err(|_| crate::CommandError {
-        code: "community_invalid",
-    })?;
-    community_call(state, move |service| service.detail(id)).await
-}
-
-#[tauri::command]
-pub async fn community_skin_download(
-    state: State<'_, AccountState>,
-    library: State<'_, CustomSkinLibraryStore>,
-    trials: State<'_, KeyboardSkinTrialStore>,
-    id: String,
-    name: String,
-) -> Result<CommunitySkinDownloadResponse, crate::CommandError> {
-    let id = uuid::Uuid::parse_str(&id).map_err(|_| crate::CommandError {
-        code: "community_invalid",
-    })?;
-    let service = Arc::clone(&state.community);
-    let library = library.inner().clone();
-    let trials = trials.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let design = service.download(id).map_err(community_error)?;
-        let (trial, _) = trials.begin(&name, design.clone()).map_err(trial_error)?;
-        let skin = match library.import_download(id, &name, design) {
-            Ok(skin) => skin,
-            Err(error) => {
-                let _ = trials.finish(trial.id, false);
-                return Err(custom_skin_error(error));
-            }
-        };
-        Ok(CommunitySkinDownloadResponse { skin, trial })
-    })
-    .await
-    .map_err(|_| crate::CommandError {
-        code: "community_unavailable",
-    })?
-}
-
-#[tauri::command]
-pub async fn community_skin_rate(
-    state: State<'_, AccountState>,
-    id: String,
-    stars: u8,
-) -> Result<(), crate::CommandError> {
-    let id = uuid::Uuid::parse_str(&id).map_err(|_| crate::CommandError {
-        code: "community_invalid",
-    })?;
-    community_call(state, move |service| service.rate(id, stars)).await
-}
-
-#[tauri::command]
-pub async fn community_skin_publish(
-    state: State<'_, AccountState>,
-    id: String,
-    name: String,
-    description: String,
-    design: TouchKeyboardSkinDesign,
-) -> Result<(), crate::CommandError> {
-    let id = uuid::Uuid::parse_str(&id).map_err(|_| crate::CommandError {
-        code: "community_invalid",
-    })?;
-    community_call(state, move |service| {
-        service.publish(id, &name, &description, &design)
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn community_skin_unpublish(
-    state: State<'_, AccountState>,
-    id: String,
-) -> Result<(), crate::CommandError> {
-    let id = uuid::Uuid::parse_str(&id).map_err(|_| crate::CommandError {
-        code: "community_invalid",
-    })?;
-    community_call(state, move |service| service.unpublish(id)).await
-}
-
-#[tauri::command]
-pub async fn community_skin_finish_trial(
-    trials: State<'_, KeyboardSkinTrialStore>,
-    id: String,
-    keep: bool,
-) -> Result<(), crate::CommandError> {
-    let id = uuid::Uuid::parse_str(&id).map_err(|_| crate::CommandError {
-        code: "community_invalid",
-    })?;
-    let trials = trials.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || trials.finish(id, keep).map(|_| ()))
-        .await
-        .map_err(|_| crate::CommandError {
-            code: "community_storage",
-        })?
-        .map_err(trial_error)
-}
-
-fn resource_scope(value: &str) -> Result<CommunityResourceScope, crate::CommandError> {
-    match value {
-        "" => Ok(CommunityResourceScope::All),
-        "mine" => Ok(CommunityResourceScope::Mine),
-        "saved" => Ok(CommunityResourceScope::Saved),
-        _ => Err(crate::CommandError {
-            code: "community_invalid",
-        }),
-    }
-}
-
-async fn resource_call<T, F>(
-    state: State<'_, AccountState>,
-    operation: F,
-) -> Result<T, crate::CommandError>
-where
-    T: Send + 'static,
-    F: FnOnce(&CommunityResourceService) -> Result<T, AccountError> + Send + 'static,
-{
-    let service = Arc::clone(&state.resources);
-    tauri::async_runtime::spawn_blocking(move || operation(&service))
-        .await
-        .map_err(|_| crate::CommandError {
-            code: "community_unavailable",
-        })?
-        .map_err(community_error)
-}
-
-#[tauri::command]
-pub async fn community_resource_list(
-    state: State<'_, AccountState>,
-    kind: CommunityResourceKind,
-    scope: String,
-    search: String,
-    offset: usize,
-) -> Result<CommunityResourcePage, crate::CommandError> {
-    let scope = resource_scope(&scope)?;
-    resource_call(state, move |service| {
-        service.list(kind, scope, &search, offset)
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn community_resource_detail(
-    state: State<'_, AccountState>,
-    id: String,
-) -> Result<CommunityResource, crate::CommandError> {
-    let id = uuid::Uuid::parse_str(&id).map_err(|_| crate::CommandError {
-        code: "community_invalid",
-    })?;
-    resource_call(state, move |service| service.detail(id)).await
-}
-
-#[tauri::command]
-pub async fn community_resource_publish(
-    state: State<'_, AccountState>,
-    id: String,
-    kind: CommunityResourceKind,
-    name: String,
-    description: String,
-    content: CommunityResourceContent,
-    revision: u32,
-) -> Result<CommunityResourcePublication, crate::CommandError> {
-    let id = uuid::Uuid::parse_str(&id).map_err(|_| crate::CommandError {
-        code: "community_invalid",
-    })?;
-    resource_call(state, move |service| {
-        service.publish(id, kind, &name, &description, &content, revision)
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn community_resource_apply(
-    state: State<'_, AccountState>,
-    id: String,
-    resource_revision: u32,
-) -> Result<CommunityResourceApplication, crate::CommandError> {
-    let id = uuid::Uuid::parse_str(&id).map_err(|_| crate::CommandError {
-        code: "community_invalid",
-    })?;
-    resource_call(state, move |service| service.apply(id, resource_revision)).await
-}
-
-#[tauri::command]
-pub async fn community_resource_save(
-    state: State<'_, AccountState>,
-    id: String,
-    saved: bool,
-) -> Result<(), crate::CommandError> {
-    let id = uuid::Uuid::parse_str(&id).map_err(|_| crate::CommandError {
-        code: "community_invalid",
-    })?;
-    resource_call(state, move |service| service.save(id, saved)).await
-}
-
-#[tauri::command]
-pub async fn community_resource_rate(
-    state: State<'_, AccountState>,
-    id: String,
-    stars: u8,
-) -> Result<(), crate::CommandError> {
-    let id = uuid::Uuid::parse_str(&id).map_err(|_| crate::CommandError {
-        code: "community_invalid",
-    })?;
-    resource_call(state, move |service| service.rate(id, stars)).await
-}
-
-#[tauri::command]
-pub async fn community_resource_unpublish(
-    state: State<'_, AccountState>,
-    id: String,
-) -> Result<(), crate::CommandError> {
-    let id = uuid::Uuid::parse_str(&id).map_err(|_| crate::CommandError {
-        code: "community_invalid",
-    })?;
-    resource_call(state, move |service| service.delete(id)).await
-}
-
-#[tauri::command]
-pub async fn community_resource_store_reply(
-    library: State<'_, CommunityResourceLibraryStore>,
-    item: CommunityResource,
-) -> Result<(), crate::CommandError> {
-    let library = library.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || library.save_reply(item))
-        .await
-        .map_err(|_| crate::CommandError {
-            code: "community_storage",
-        })?
-        .map_err(resource_library_error)
-}
-
-#[tauri::command]
-pub async fn community_resource_remove_reply(
-    library: State<'_, CommunityResourceLibraryStore>,
-    id: String,
-) -> Result<(), crate::CommandError> {
-    let id = uuid::Uuid::parse_str(&id).map_err(|_| crate::CommandError {
-        code: "community_invalid",
-    })?;
-    let library = library.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || library.remove(id))
-        .await
-        .map_err(|_| crate::CommandError {
-            code: "community_storage",
-        })?
-        .map_err(resource_library_error)
-}
-
 #[tauri::command]
 pub async fn account_status(
     state: State<'_, AccountState>,
 ) -> Result<StatusResponse, crate::CommandError> {
-    call(state, |session| {
-        session.status().map(|user| StatusResponse {
-            user: user.map(Into::into),
-        })
-    })
-    .await
+    shared_account_status(state).await
 }
 
 #[tauri::command]
@@ -1825,11 +942,8 @@ pub async fn ai_test(
 pub async fn account_providers(
     state: State<'_, AccountState>,
 ) -> Result<ProvidersResponse, crate::CommandError> {
-    call(state, |session| {
-        session.providers().map(|providers| ProvidersResponse {
-            email: providers.get("email") == Some(&true),
-            phone: providers.get("phone") == Some(&true) || providers.get("sms") == Some(&true),
-        })
+    call_session(state.session(), |session| {
+        session.providers().map(providers_response_without_apple)
     })
     .await
 }
@@ -1840,12 +954,7 @@ pub async fn account_request_code(
     provider: String,
     target: String,
 ) -> Result<ChallengeResponse, crate::CommandError> {
-    call(state, move |session| {
-        session
-            .request_code(&provider, &target)
-            .map(ChallengeResponse::from)
-    })
-    .await
+    shared_account_request_code(state, provider, target).await
 }
 
 #[tauri::command]
@@ -1854,31 +963,21 @@ pub async fn account_login(
     challenge_id: String,
     code: String,
 ) -> Result<StatusResponse, crate::CommandError> {
-    call(state, move |session| {
-        session
-            .sign_in(&challenge_id, &code)
-            .map(|user| StatusResponse {
-                user: Some(user.into()),
-            })
-    })
-    .await
+    shared_account_login(state, challenge_id, code).await
 }
 
 #[tauri::command]
 pub async fn account_profile(
     state: State<'_, AccountState>,
 ) -> Result<ProfileResponse, crate::CommandError> {
-    call(state, |session| {
-        session.profile().map(ProfileResponse::from)
-    })
-    .await
+    shared_account_profile(state).await
 }
 
 #[tauri::command]
 pub async fn account_chat_models(
     state: State<'_, AccountState>,
 ) -> Result<ChatModelsResponse, crate::CommandError> {
-    call(state, |session| session.chat_models().map(Into::into)).await
+    shared_account_chat_models(state).await
 }
 
 #[tauri::command]
@@ -1887,12 +986,7 @@ pub async fn account_chat(
     messages: Vec<AccountChatMessage>,
     model: String,
 ) -> Result<ChatResponse, crate::CommandError> {
-    call(state, move |session| {
-        session
-            .chat(&messages, &model)
-            .map(|content| ChatResponse { content })
-    })
-    .await
+    shared_account_chat(state, messages, model).await
 }
 
 #[tauri::command]
@@ -1900,10 +994,7 @@ pub async fn account_rename(
     state: State<'_, AccountState>,
     display_name: String,
 ) -> Result<ProfileResponse, crate::CommandError> {
-    call(state, move |session| {
-        session.rename(&display_name).map(ProfileResponse::from)
-    })
-    .await
+    shared_account_rename(state, display_name).await
 }
 
 #[tauri::command]
@@ -1912,130 +1003,30 @@ pub async fn account_logout(
     all: bool,
 ) -> Result<(), crate::CommandError> {
     let previews = Arc::clone(&state.snapshot_previews);
-    let result = call(state, move |session| session.logout(all)).await;
-    if result.is_ok() {
-        clear_snapshot_previews(&previews);
-    }
-    result
+    clear_snapshot_previews_after(&previews, shared_account_logout(state, all).await)
 }
 
 #[tauri::command]
 pub async fn account_delete(state: State<'_, AccountState>) -> Result<(), crate::CommandError> {
     let previews = Arc::clone(&state.snapshot_previews);
-    let result = call(state, |session| session.delete_account()).await;
-    if result.is_ok() {
-        clear_snapshot_previews(&previews);
-    }
-    result
+    clear_snapshot_previews_after(&previews, shared_account_delete(state).await)
 }
 
 #[tauri::command]
 pub async fn account_forget(state: State<'_, AccountState>) -> Result<(), crate::CommandError> {
     let previews = Arc::clone(&state.snapshot_previews);
-    let result = call(state, |session| session.forget()).await;
-    if result.is_ok() {
-        clear_snapshot_previews(&previews);
-    }
-    result
-}
-
-pub async fn cloud_clipboard_request(
-    state: State<'_, AccountState>,
-    action: Value,
-) -> Result<Value, crate::CommandError> {
-    let operation = action
-        .get("operation")
-        .and_then(Value::as_str)
-        .ok_or(crate::CommandError {
-            code: "invalid_cloud_clipboard",
-        })?;
-    match operation {
-        "list" => {
-            let search = action
-                .get("search")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned();
-            call(state, move |session| {
-                session.clipboard(&search).and_then(|page| {
-                    serde_json::to_value(page).map_err(|_| AccountError::Unavailable)
-                })
-            })
-            .await
-        }
-        "set_enabled" => {
-            let enabled =
-                action
-                    .get("enabled")
-                    .and_then(Value::as_bool)
-                    .ok_or(crate::CommandError {
-                        code: "invalid_cloud_clipboard",
-                    })?;
-            call(state, move |session| {
-                session
-                    .set_clipboard_enabled(enabled)
-                    .map(|()| serde_json::json!({ "enabled": enabled }))
-            })
-            .await
-        }
-        "add" => {
-            let text = action
-                .get("text")
-                .and_then(Value::as_str)
-                .ok_or(crate::CommandError {
-                    code: "invalid_cloud_clipboard",
-                })?
-                .to_owned();
-            call(state, move |session| {
-                session.add_clipboard(&text).and_then(|item| {
-                    serde_json::to_value(item).map_err(|_| AccountError::Unavailable)
-                })
-            })
-            .await
-        }
-        "delete" => {
-            let id = action
-                .get("id")
-                .and_then(Value::as_str)
-                .ok_or(crate::CommandError {
-                    code: "invalid_cloud_clipboard",
-                })?
-                .to_owned();
-            call(state, move |session| {
-                session
-                    .delete_clipboard(Some(&id))
-                    .map(|()| serde_json::json!({}))
-            })
-            .await
-        }
-        _ => Err(crate::CommandError {
-            code: "invalid_cloud_clipboard",
-        }),
-    }
-}
-
-fn dictionary_kind(value: &str) -> Result<DictionaryKind, crate::CommandError> {
-    match value {
-        "pinyin" => Ok(DictionaryKind::Pinyin),
-        "wubi" => Ok(DictionaryKind::Wubi),
-        "quick" => Ok(DictionaryKind::Quick),
-        "english" => Ok(DictionaryKind::English),
-        _ => Err(crate::CommandError {
-            code: "invalid_cloud_dictionary",
-        }),
-    }
+    clear_snapshot_previews_after(&previews, shared_account_forget(state).await)
 }
 
 pub async fn cloud_dictionary_request(
     state: State<'_, AccountState>,
-    action: Value,
+    request: msime_host_api::cloud_dictionary::CloudDictionaryRequest,
 ) -> Result<Value, crate::CommandError> {
     use msime_host_api::cloud_dictionary::CloudDictionaryRequest;
 
-    let request: CloudDictionaryRequest =
-        serde_json::from_value(action).map_err(|_| crate::CommandError {
-            code: "invalid_cloud_dictionary",
-        })?;
+    if let Some(result) = cloud_dictionary_account_request(&state, &request).await {
+        return result;
+    }
     match request {
         CloudDictionaryRequest::SnapshotPreview => dictionary_snapshot_preview(state).await,
         CloudDictionaryRequest::SnapshotExport => dictionary_snapshot_export(state).await,
@@ -2051,261 +1042,15 @@ pub async fn cloud_dictionary_request(
         CloudDictionaryRequest::SnapshotRestoreNative { .. } => Err(crate::CommandError {
             code: "snapshot_unavailable",
         }),
+        CloudDictionaryRequest::SnapshotRestoreCancel => Err(crate::CommandError {
+            code: "snapshot_unavailable",
+        }),
         CloudDictionaryRequest::SnapshotEnqueue { token } => {
             dictionary_snapshot_enqueue(state, token).await
         }
         CloudDictionaryRequest::SnapshotStatus => dictionary_snapshot_status(state).await,
         CloudDictionaryRequest::SnapshotCancel => dictionary_snapshot_cancel(state).await,
-        CloudDictionaryRequest::List {
-            kind,
-            offset,
-            search,
-        } => {
-            let kind = dictionary_kind(&kind)?;
-            call(state, move |session| {
-                session.dictionary(kind, &search, offset).and_then(|page| {
-                    serde_json::to_value(page).map_err(|_| AccountError::Unavailable)
-                })
-            })
-            .await
-        }
-        CloudDictionaryRequest::Catalog {
-            kind,
-            code,
-            offset,
-            scheme,
-            profile,
-        } => {
-            let kind = dictionary_kind(&kind)?;
-            call(state, move |session| {
-                session
-                    .dictionary_catalog(kind, &code, offset, &scheme, &profile)
-                    .and_then(|page| {
-                        serde_json::to_value(serde_json::json!({
-                            "catalog_entries": page.entries,
-                            "has_more": page.has_more,
-                            "offset": page.offset,
-                            "revision": page.revision,
-                            "normalized": page.normalized,
-                        }))
-                        .map_err(|_| AccountError::Unavailable)
-                    })
-            })
-            .await
-        }
-        CloudDictionaryRequest::Add {
-            kind,
-            code,
-            word,
-            weight,
-        } => {
-            let kind = dictionary_kind(&kind)?;
-            call(state, move |session| {
-                session
-                    .add_dictionary(kind, &code, &word, weight)
-                    .and_then(|change| {
-                        serde_json::to_value(change).map_err(|_| AccountError::Unavailable)
-                    })
-            })
-            .await
-        }
-        CloudDictionaryRequest::Update {
-            kind,
-            id,
-            code,
-            word,
-            weight,
-            revision,
-        } => {
-            let kind = dictionary_kind(&kind)?;
-            call(state, move |session| {
-                session
-                    .update_dictionary(kind, &id, &code, &word, weight, revision)
-                    .and_then(|change| {
-                        serde_json::to_value(change).map_err(|_| AccountError::Unavailable)
-                    })
-            })
-            .await
-        }
-        CloudDictionaryRequest::EditCatalog {
-            kind,
-            code,
-            word,
-            revision,
-            replacement,
-        } => {
-            let kind = dictionary_kind(&kind)?;
-            let replacement = replacement.map(|value| (value.code, value.word, value.weight));
-            call(state, move |session| {
-                let replacement = replacement
-                    .as_ref()
-                    .map(|(code, word, weight)| (code.as_str(), word.as_str(), *weight));
-                session
-                    .edit_dictionary_catalog(kind, &code, &word, revision, replacement)
-                    .and_then(|change| {
-                        serde_json::to_value(change).map_err(|_| AccountError::Unavailable)
-                    })
-            })
-            .await
-        }
-        CloudDictionaryRequest::Candidates {
-            text,
-            kind,
-            scheme,
-            profile,
-            limit,
-        } => {
-            let query = AccountCandidateQuery {
-                text,
-                kind,
-                scheme,
-                profile,
-                limit,
-            };
-            call(state, move |session| {
-                session.personal_candidates(&query).and_then(|result| {
-                    serde_json::to_value(result).map_err(|_| AccountError::Unavailable)
-                })
-            })
-            .await
-        }
-        CloudDictionaryRequest::Rank {
-            text,
-            kind,
-            scheme,
-            profile,
-            limit,
-            code,
-            word,
-            revision,
-            mode,
-            linear_step,
-            trigger_count,
-            force_top,
-        } => {
-            let query = AccountCandidateQuery {
-                text,
-                kind,
-                scheme,
-                profile,
-                limit,
-            };
-            call(state, move |session| {
-                session
-                    .rank_candidate(
-                        &query,
-                        &code,
-                        &word,
-                        revision,
-                        &mode,
-                        linear_step,
-                        trigger_count,
-                        force_top,
-                    )
-                    .map(|result| {
-                        serde_json::json!({
-                            "revision": result.revision,
-                            "changed": result.changed,
-                            "selection_count": result.selection.count,
-                        })
-                    })
-            })
-            .await
-        }
-        CloudDictionaryRequest::RemoveCandidate {
-            text,
-            kind,
-            scheme,
-            profile,
-            limit,
-            code,
-            word,
-            revision,
-        } => {
-            let query = AccountCandidateQuery {
-                text,
-                kind,
-                scheme,
-                profile,
-                limit,
-            };
-            call(state, move |session| {
-                session
-                    .remove_candidate(&query, &code, &word, revision)
-                    .and_then(|result| {
-                        serde_json::to_value(result).map_err(|_| AccountError::Unavailable)
-                    })
-            })
-            .await
-        }
-        CloudDictionaryRequest::FixedPositions { context, offset } => {
-            call(state, move |session| {
-                session
-                    .fixed_positions(&context, offset)
-                    .and_then(|result| {
-                        serde_json::to_value(result).map_err(|_| AccountError::Unavailable)
-                    })
-            })
-            .await
-        }
-        CloudDictionaryRequest::SetFixedPosition {
-            context,
-            code,
-            word,
-            position,
-            revision,
-        } => {
-            call(state, move |session| {
-                session
-                    .set_fixed_position(&context, &code, &word, position, revision)
-                    .and_then(|result| {
-                        serde_json::to_value(result).map_err(|_| AccountError::Unavailable)
-                    })
-            })
-            .await
-        }
-        CloudDictionaryRequest::Delete { kind, id, revision } => {
-            let kind = dictionary_kind(&kind)?;
-            call(state, move |session| {
-                session
-                    .delete_dictionary(kind, &id, revision)
-                    .and_then(|change| {
-                        serde_json::to_value(change).map_err(|_| AccountError::Unavailable)
-                    })
-            })
-            .await
-        }
-        CloudDictionaryRequest::Import { kind, format, text } => {
-            let kind = dictionary_kind(&kind)?;
-            call(state, move |session| {
-                session
-                    .import_dictionary(kind, &format, &text)
-                    .and_then(|result| {
-                        serde_json::to_value(result).map_err(|_| AccountError::Unavailable)
-                    })
-            })
-            .await
-        }
-        CloudDictionaryRequest::Export { kind, format } => {
-            let kind = dictionary_kind(&kind)?;
-            call(state, move |session| {
-                session.export_dictionary(kind, &format).map(|result| {
-                    serde_json::json!({
-                        "text": result.text,
-                        "filename": result.filename,
-                    })
-                })
-            })
-            .await
-        }
-        CloudDictionaryRequest::Changes { after, limit } => {
-            call(state, move |session| {
-                session.dictionary_changes(after, limit).and_then(|page| {
-                    serde_json::to_value(page).map_err(|_| AccountError::Unavailable)
-                })
-            })
-            .await
-        }
+        _ => unreachable!("account cloud dictionary request was handled above"),
     }
 }
 
@@ -2328,10 +1073,7 @@ pub async fn app_icon_set(
     state: State<'_, AccountState>,
     style: String,
 ) -> Result<AppIconResponse, crate::CommandError> {
-    if !matches!(
-        style.as_str(),
-        "classic" | "forest" | "sky" | "dusk" | "vermilion"
-    ) {
+    if !msime_tauri_mobile_platform::is_supported_app_icon_style(&style) {
         return Err(crate::CommandError {
             code: "invalid_app_icon",
         });
@@ -2346,38 +1088,16 @@ pub async fn app_icon_set(
     .map_err(|_| crate::CommandError { code: "app_icon" })?
 }
 
-fn insert_string(settings: &mut BTreeMap<String, AccountPreferenceValue>, key: &str, value: &str) {
-    settings.insert(
-        key.to_owned(),
-        AccountPreferenceValue::String(value.to_owned()),
-    );
-}
-
-fn insert_bool(settings: &mut BTreeMap<String, AccountPreferenceValue>, key: &str, value: bool) {
-    settings.insert(key.to_owned(), AccountPreferenceValue::Boolean(value));
-}
-
-fn insert_integer(settings: &mut BTreeMap<String, AccountPreferenceValue>, key: &str, value: i64) {
-    settings.insert(key.to_owned(), AccountPreferenceValue::Integer(value));
-}
-
-fn frequency_account_preferences(
-    frequency: &FrequencyPreferences,
-) -> BTreeMap<String, AccountPreferenceValue> {
-    BTreeMap::from([
-        (
-            "input.frequency_mode".into(),
-            AccountPreferenceValue::String(frequency.mode.as_str().into()),
-        ),
-        (
-            "input.frequency_trigger_count".into(),
-            AccountPreferenceValue::Integer(i64::from(frequency.trigger_count)),
-        ),
-        (
-            "input.frequency_linear_step".into(),
-            AccountPreferenceValue::Integer(i64::from(frequency.linear_step)),
-        ),
-    ])
+/// The account value for a scheme, or none for a scheme the account schema does not name yet. Cantonese, Zhuyin and Vietnamese are left out rather than mapped to a neighbour, so the account keeps the scheme it last recorded instead of being overwritten with one the user did not choose.
+fn account_input_schema(scheme: InputScheme) -> Option<&'static str> {
+    match scheme {
+        InputScheme::Quanpin => Some("quanpin"),
+        InputScheme::Shuangpin => Some("shuangpin"),
+        InputScheme::Wubi => Some("wubi"),
+        InputScheme::Japanese => Some("japanese"),
+        InputScheme::Korean => Some("korean"),
+        InputScheme::Cantonese | InputScheme::Zhuyin | InputScheme::Vietnamese => None,
+    }
 }
 
 fn local_account_preferences(
@@ -2386,16 +1106,9 @@ fn local_account_preferences(
 ) -> Result<BTreeMap<String, AccountPreferenceValue>, AccountError> {
     let preferences = &snapshot.preferences;
     let mut settings = BTreeMap::new();
-    insert_string(
-        &mut settings,
-        "input.schema",
-        match preferences.scheme {
-            InputScheme::Quanpin => "quanpin",
-            InputScheme::Shuangpin => "shuangpin",
-            InputScheme::Wubi => "wubi",
-            InputScheme::Japanese => "japanese",
-        },
-    );
+    if let Some(schema) = account_input_schema(preferences.scheme) {
+        insert_string(&mut settings, "input.schema", schema);
+    }
     insert_string(
         &mut settings,
         "input.character_set",
@@ -2435,7 +1148,7 @@ fn local_account_preferences(
     insert_bool(
         &mut settings,
         "input.wubi_code_hint",
-        preferences.wubi_code_hint.unwrap_or(true),
+        preferences.wubi_code_hint,
     );
     insert_string(
         &mut settings,
@@ -2446,28 +1159,7 @@ fn local_account_preferences(
             TouchKeyboardLayout::Handwriting => "handwriting",
         },
     );
-    insert_string(
-        &mut settings,
-        "platform.android.keyboard_skin",
-        match preferences.touch_keyboard_skin {
-            TouchKeyboardSkin::Forest => "forest",
-            TouchKeyboardSkin::Ocean => "ocean",
-            TouchKeyboardSkin::Rose => "rose",
-            TouchKeyboardSkin::Porcelain => "porcelain",
-            TouchKeyboardSkin::Typewriter => "typewriter",
-            TouchKeyboardSkin::Candy => "candy",
-            TouchKeyboardSkin::Midnight => "midnight",
-            TouchKeyboardSkin::Blueprint => "blueprint",
-            TouchKeyboardSkin::Custom => "custom",
-        },
-    );
-    let custom_skin = serde_json::to_string(&preferences.custom_touch_keyboard_skin)
-        .map_err(|_| AccountError::Invalid)?;
-    insert_string(
-        &mut settings,
-        "platform.android.custom_keyboard_skin",
-        &custom_skin,
-    );
+    insert_theme_settings(&mut settings, preferences)?;
     insert_string(
         &mut settings,
         "platform.android.theme",
@@ -2476,11 +1168,6 @@ fn local_account_preferences(
             ThemeMode::Light => "light",
             ThemeMode::System => "system",
         },
-    );
-    insert_string(
-        &mut settings,
-        "platform.android.candidate_skin",
-        &preferences.candidate_skin,
     );
     insert_integer(
         &mut settings,
@@ -2564,26 +1251,31 @@ fn integer_setting(
     }
 }
 
+fn supports_schema_field(
+    schema: &AccountPreferenceSchema,
+    key: &str,
+    expected: &str,
+) -> Result<bool, AccountError> {
+    match schema.fields.get(key) {
+        None => Ok(false),
+        Some(field)
+            if field.value_type == expected
+                || ((expected == "number" || expected == "integer")
+                    && matches!(field.value_type.as_str(), "integer" | "number")) =>
+        {
+            Ok(true)
+        }
+        Some(_) => Err(AccountError::Invalid),
+    }
+}
+
 fn apply_frequency_preferences(
     preferences: &mut Preferences,
     values: &BTreeMap<String, AccountPreferenceValue>,
     schema: &AccountPreferenceSchema,
 ) -> Result<(), AccountError> {
-    let supports = |key: &str, expected: &str| -> Result<bool, AccountError> {
-        match schema.fields.get(key) {
-            None => Ok(false),
-            Some(field)
-                if field.value_type == expected
-                    || ((expected == "number" || expected == "integer")
-                        && matches!(field.value_type.as_str(), "integer" | "number")) =>
-            {
-                Ok(true)
-            }
-            Some(_) => Err(AccountError::Invalid),
-        }
-    };
     if let Some(value) = string_setting(values, "input.frequency_mode")? {
-        if supports("input.frequency_mode", "string")? {
+        if supports_schema_field(schema, "input.frequency_mode", "string")? {
             preferences.frequency.mode = match value.as_str() {
                 "disabled" => FrequencyMode::Disabled,
                 "pin" => FrequencyMode::Pin,
@@ -2595,15 +1287,36 @@ fn apply_frequency_preferences(
         }
     }
     if let Some(value) = integer_setting(values, "input.frequency_trigger_count")? {
-        if supports("input.frequency_trigger_count", "integer")? {
+        if supports_schema_field(schema, "input.frequency_trigger_count", "integer")? {
             preferences.frequency.trigger_count =
                 u8::try_from(value).map_err(|_| AccountError::Invalid)?;
         }
     }
     if let Some(value) = integer_setting(values, "input.frequency_linear_step")? {
-        if supports("input.frequency_linear_step", "integer")? {
+        if supports_schema_field(schema, "input.frequency_linear_step", "integer")? {
             preferences.frequency.linear_step =
                 u8::try_from(value).map_err(|_| AccountError::Invalid)?;
+        }
+    }
+    Ok(())
+}
+
+fn apply_input_scheme(
+    preferences: &mut Preferences,
+    values: &BTreeMap<String, AccountPreferenceValue>,
+    schema: &AccountPreferenceSchema,
+) -> Result<(), AccountError> {
+    if let Some(value) = string_setting(values, "input.schema")? {
+        if supports_schema_field(schema, "input.schema", "string")? {
+            // A scheme this host does not offer (a newer device's Cantonese, Zhuyin or Vietnamese) keeps the local one rather than refusing the whole sync, so the rest of the document still applies.
+            preferences.scheme = match value.as_str() {
+                "quanpin" => InputScheme::Quanpin,
+                "shuangpin" => InputScheme::Shuangpin,
+                "wubi" => InputScheme::Wubi,
+                "japanese" => InputScheme::Japanese,
+                "korean" => InputScheme::Korean,
+                _ => preferences.scheme,
+            };
         }
     }
     Ok(())
@@ -2627,32 +1340,9 @@ fn apply_local_account_preferences(
     }
     let mut preferences = snapshot.preferences.clone();
     let values = &cloud.settings;
-    let supports = |key: &str, expected: &str| -> Result<bool, AccountError> {
-        match schema.fields.get(key) {
-            None => Ok(false),
-            Some(field)
-                if field.value_type == expected
-                    || ((expected == "number" || expected == "integer")
-                        && matches!(field.value_type.as_str(), "integer" | "number")) =>
-            {
-                Ok(true)
-            }
-            Some(_) => Err(AccountError::Invalid),
-        }
-    };
-    if let Some(value) = string_setting(values, "input.schema")? {
-        if supports("input.schema", "string")? {
-            preferences.scheme = match value.as_str() {
-                "quanpin" => InputScheme::Quanpin,
-                "shuangpin" => InputScheme::Shuangpin,
-                "wubi" => InputScheme::Wubi,
-                "japanese" => InputScheme::Japanese,
-                _ => return Err(AccountError::Invalid),
-            };
-        }
-    }
+    apply_input_scheme(&mut preferences, values, schema)?;
     if let Some(value) = string_setting(values, "input.character_set")? {
-        if supports("input.character_set", "string")? {
+        if supports_schema_field(schema, "input.character_set", "string")? {
             preferences.traditional_chinese_output = match value.as_str() {
                 "traditional" => true,
                 "simplified" => false,
@@ -2661,7 +1351,7 @@ fn apply_local_account_preferences(
         }
     }
     if let Some(value) = string_setting(values, "input.shuangpin_schema")? {
-        if supports("input.shuangpin_schema", "string")? {
+        if supports_schema_field(schema, "input.shuangpin_schema", "string")? {
             preferences.shuangpin_profile = match value.as_str() {
                 "xiaohe" => ShuangpinProfile::Xiaohe,
                 "ziranma" => ShuangpinProfile::Ziranma,
@@ -2672,33 +1362,33 @@ fn apply_local_account_preferences(
         }
     }
     if let Some(value) = bool_setting(values, "input.learning")? {
-        if supports("input.learning", "boolean")? {
+        if supports_schema_field(schema, "input.learning", "boolean")? {
             preferences.learning = value;
         }
     }
     apply_frequency_preferences(&mut preferences, values, schema)?;
     if let Some(value) = bool_setting(values, "input.chinese_punctuation")? {
-        if supports("input.chinese_punctuation", "boolean")? {
+        if supports_schema_field(schema, "input.chinese_punctuation", "boolean")? {
             preferences.chinese_punctuation = value;
         }
     }
     if let Some(value) = bool_setting(values, "input.smart_punctuation")? {
-        if supports("input.smart_punctuation", "boolean")? {
+        if supports_schema_field(schema, "input.smart_punctuation", "boolean")? {
             preferences.smart_punctuation = value;
         }
     }
     if let Some(value) = bool_setting(values, "input.paired_punctuation")? {
-        if supports("input.paired_punctuation", "boolean")? {
+        if supports_schema_field(schema, "input.paired_punctuation", "boolean")? {
             preferences.paired_punctuation = value;
         }
     }
     if let Some(value) = bool_setting(values, "input.wubi_code_hint")? {
-        if supports("input.wubi_code_hint", "boolean")? {
-            preferences.wubi_code_hint = Some(value);
+        if supports_schema_field(schema, "input.wubi_code_hint", "boolean")? {
+            preferences.wubi_code_hint = value;
         }
     }
     if let Some(value) = string_setting(values, "platform.android.keyboard_layout")? {
-        if supports("platform.android.keyboard_layout", "string")? {
+        if supports_schema_field(schema, "platform.android.keyboard_layout", "string")? {
             preferences.touch_keyboard_layout = match value.as_str() {
                 "twenty_six_key" => TouchKeyboardLayout::TwentySixKey,
                 "nine_key" => TouchKeyboardLayout::NineKey,
@@ -2707,30 +1397,11 @@ fn apply_local_account_preferences(
             };
         }
     }
-    if let Some(value) = string_setting(values, "platform.android.keyboard_skin")? {
-        if supports("platform.android.keyboard_skin", "string")? {
-            preferences.touch_keyboard_skin = match value.as_str() {
-                "forest" => TouchKeyboardSkin::Forest,
-                "ocean" => TouchKeyboardSkin::Ocean,
-                "rose" => TouchKeyboardSkin::Rose,
-                "porcelain" => TouchKeyboardSkin::Porcelain,
-                "typewriter" => TouchKeyboardSkin::Typewriter,
-                "candy" => TouchKeyboardSkin::Candy,
-                "midnight" => TouchKeyboardSkin::Midnight,
-                "blueprint" => TouchKeyboardSkin::Blueprint,
-                "custom" => TouchKeyboardSkin::Custom,
-                _ => return Err(AccountError::Invalid),
-            };
-        }
-    }
-    if let Some(value) = string_setting(values, "platform.android.custom_keyboard_skin")? {
-        if supports("platform.android.custom_keyboard_skin", "string")? {
-            preferences.custom_touch_keyboard_skin =
-                serde_json::from_str(&value).map_err(|_| AccountError::Invalid)?;
-        }
-    }
+    apply_theme_settings(&mut preferences, values, |key, expected| {
+        supports_schema_field(schema, key, expected)
+    })?;
     if let Some(value) = string_setting(values, "platform.android.theme")? {
-        if supports("platform.android.theme", "string")? {
+        if supports_schema_field(schema, "platform.android.theme", "string")? {
             preferences.theme = match value.as_str() {
                 "dark" => ThemeMode::Dark,
                 "light" => ThemeMode::Light,
@@ -2739,34 +1410,38 @@ fn apply_local_account_preferences(
             };
         }
     }
-    if let Some(value) = string_setting(values, "platform.android.candidate_skin")? {
-        if supports("platform.android.candidate_skin", "string")? {
-            if value.is_empty() || value.len() > 128 || value.chars().any(char::is_control) {
-                return Err(AccountError::Invalid);
-            }
-            preferences.candidate_skin = value;
-        }
-    }
     if let Some(value) = integer_setting(values, "platform.android.touch_key_spacing_tenths")? {
-        if supports("platform.android.touch_key_spacing_tenths", "integer")? {
+        if supports_schema_field(
+            schema,
+            "platform.android.touch_key_spacing_tenths",
+            "integer",
+        )? {
             preferences.touch_key_spacing_tenths =
                 u8::try_from(value).map_err(|_| AccountError::Invalid)?;
         }
     }
     if let Some(value) = integer_setting(values, "platform.android.touch_row_spacing_tenths")? {
-        if supports("platform.android.touch_row_spacing_tenths", "integer")? {
+        if supports_schema_field(
+            schema,
+            "platform.android.touch_row_spacing_tenths",
+            "integer",
+        )? {
             preferences.touch_row_spacing_tenths =
                 u8::try_from(value).map_err(|_| AccountError::Invalid)?;
         }
     }
     if let Some(value) = integer_setting(values, "platform.android.keyboard_height_adjustment")? {
-        if supports("platform.android.keyboard_height_adjustment", "integer")? {
+        if supports_schema_field(
+            schema,
+            "platform.android.keyboard_height_adjustment",
+            "integer",
+        )? {
             preferences.touch_keyboard_height_adjustment =
                 i8::try_from(value).map_err(|_| AccountError::Invalid)?;
         }
     }
     if let Some(value) = bool_setting(values, "platform.android.voice_shortcut")? {
-        if supports("platform.android.voice_shortcut", "boolean")? {
+        if supports_schema_field(schema, "platform.android.voice_shortcut", "boolean")? {
             preferences.touch_voice_shortcut = value;
         }
     }
@@ -2789,7 +1464,7 @@ fn apply_local_account_preferences(
         None
     };
     if let Some(value) = bool_setting(values, "platform.android.sound_enabled")? {
-        if supports("platform.android.sound_enabled", "boolean")? {
+        if supports_schema_field(schema, "platform.android.sound_enabled", "boolean")? {
             feedback_values
                 .as_mut()
                 .ok_or(AccountError::Storage)?
@@ -2797,7 +1472,7 @@ fn apply_local_account_preferences(
         }
     }
     if let Some(value) = bool_setting(values, "platform.android.haptics_enabled")? {
-        if supports("platform.android.haptics_enabled", "boolean")? {
+        if supports_schema_field(schema, "platform.android.haptics_enabled", "boolean")? {
             feedback_values
                 .as_mut()
                 .ok_or(AccountError::Storage)?
@@ -2805,8 +1480,8 @@ fn apply_local_account_preferences(
         }
     }
     if let Some(value) = string_setting(values, "platform.android.haptic_strength")? {
-        if supports("platform.android.haptic_strength", "string")? {
-            if !matches!(value.as_str(), "light" | "medium" | "strong") {
+        if supports_schema_field(schema, "platform.android.haptic_strength", "string")? {
+            if !valid_mobile_haptic_strength(&value) {
                 return Err(AccountError::Invalid);
             }
             feedback_values
@@ -2833,14 +1508,14 @@ fn apply_local_account_preferences(
 pub async fn account_preferences_schema(
     state: State<'_, AccountState>,
 ) -> Result<PreferenceSchemaResponse, crate::CommandError> {
-    call(state, |session| session.preference_schema().map(Into::into)).await
+    shared_account_preferences_schema(state).await
 }
 
 #[tauri::command]
 pub async fn account_preferences_load(
     state: State<'_, AccountState>,
 ) -> Result<AccountPreferences, crate::CommandError> {
-    call(state, |session| session.preferences()).await
+    shared_account_preferences_load(state).await
 }
 
 #[tauri::command]
@@ -2869,7 +1544,7 @@ pub async fn account_preferences_upload(
     .map_err(|_| crate::CommandError {
         code: "account_unavailable",
     })?
-    .map_err(|error| crate::CommandError { code: error.code() })
+    .map_err(account_command_error)
 }
 
 #[tauri::command]
@@ -2896,7 +1571,7 @@ pub async fn account_preferences_apply(
     .map_err(|_| crate::CommandError {
         code: "account_unavailable",
     })?
-    .map_err(|error| crate::CommandError { code: error.code() })
+    .map_err(account_command_error)
 }
 
 #[tauri::command]
@@ -2922,10 +1597,7 @@ pub async fn mobile_keyboard_feedback_save(
     state: State<'_, AccountState>,
     request: MobileKeyboardFeedbackRequest,
 ) -> Result<FeedbackSettings, crate::CommandError> {
-    if !matches!(
-        request.settings.haptic_strength.as_str(),
-        "light" | "medium" | "strong"
-    ) {
+    if !valid_mobile_haptic_strength(&request.settings.haptic_strength) {
         return Err(crate::CommandError {
             code: "invalid_feedback",
         });
@@ -2955,7 +1627,7 @@ pub async fn mobile_keyboard_feedback_preview(
     state: State<'_, AccountState>,
     request: MobileKeyboardFeedbackPreviewRequest,
 ) -> Result<(), crate::CommandError> {
-    if !matches!(request.strength.as_str(), "light" | "medium" | "strong") {
+    if !valid_mobile_haptic_strength(&request.strength) {
         return Err(crate::CommandError {
             code: "invalid_feedback",
         });
@@ -2982,10 +1654,12 @@ pub async fn mobile_keyboard_feedback_preview(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_frequency_preferences, frequency_account_preferences, AccountPreferenceSchema,
-        AccountPreferenceValue, FrequencyMode, FrequencyPreferences, Preferences,
+        account_input_schema, apply_frequency_preferences, apply_input_scheme,
+        frequency_account_preferences, AccountPreferenceSchema, AccountPreferenceValue,
+        FrequencyMode, InputScheme, Preferences,
     };
     use msime_client_core::account::AccountPreferenceField;
+    use msime_client_core::preferences::FrequencyPreferences;
     use std::collections::BTreeMap;
 
     fn frequency_schema() -> AccountPreferenceSchema {
@@ -3059,5 +1733,64 @@ mod tests {
         assert!(
             apply_frequency_preferences(&mut preferences, &invalid, &frequency_schema()).is_err()
         );
+    }
+
+    #[test]
+    fn the_account_names_only_the_schemes_its_schema_knows() {
+        for (scheme, schema) in [
+            (InputScheme::Quanpin, Some("quanpin")),
+            (InputScheme::Shuangpin, Some("shuangpin")),
+            (InputScheme::Wubi, Some("wubi")),
+            (InputScheme::Japanese, Some("japanese")),
+            (InputScheme::Korean, Some("korean")),
+            (InputScheme::Cantonese, None),
+            (InputScheme::Zhuyin, None),
+            (InputScheme::Vietnamese, None),
+        ] {
+            assert_eq!(account_input_schema(scheme), schema, "{scheme:?}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_cloud_scheme_keeps_the_local_one_and_the_rest_applies() {
+        let mut schema = frequency_schema();
+        schema.fields.insert(
+            "input.schema".into(),
+            AccountPreferenceField {
+                value_type: "string".into(),
+            },
+        );
+        for unknown in ["cantonese", "zhuyin", "vietnamese", "esperanto"] {
+            let mut values = frequency_account_preferences(&FrequencyPreferences {
+                mode: FrequencyMode::Linear,
+                trigger_count: 7,
+                linear_step: 4,
+            });
+            values.insert(
+                "input.schema".into(),
+                AccountPreferenceValue::String(unknown.into()),
+            );
+            let mut preferences = Preferences {
+                scheme: InputScheme::Wubi,
+                ..Preferences::default()
+            };
+            apply_input_scheme(&mut preferences, &values, &schema).unwrap();
+            apply_frequency_preferences(&mut preferences, &values, &schema).unwrap();
+            assert_eq!(preferences.scheme, InputScheme::Wubi, "{unknown}");
+            assert_eq!(
+                preferences.frequency.mode,
+                FrequencyMode::Linear,
+                "{unknown}"
+            );
+        }
+
+        let mut values = BTreeMap::new();
+        values.insert(
+            "input.schema".into(),
+            AccountPreferenceValue::String("korean".into()),
+        );
+        let mut preferences = Preferences::default();
+        apply_input_scheme(&mut preferences, &values, &schema).unwrap();
+        assert_eq!(preferences.scheme, InputScheme::Korean);
     }
 }

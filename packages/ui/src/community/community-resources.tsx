@@ -1,10 +1,37 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { randomUuid } from "../core/random-id";
+import { pushMobileSettingsState } from "../settings/mobile-navigation";
 import { CommunitySkinsPage, type CommunitySkinClient } from "./community-skins";
+import {
+  appendUniqueById,
+  communityRating,
+  resourceKindTitle,
+  resourceMessage,
+  runCommunityAction,
+} from "./community-helpers";
 import type { CustomSkinLibraryClient } from "../keyboard/touch-keyboard-skin-design";
 import * as style from "./community-style";
+import { CommunitySearchForm } from "./community-search-form";
+import { CommunityDialogActions, CommunityDialogHeader } from "./community-dialog";
+import {
+  CommunityRemovedBadge,
+  CommunityReportSection,
+  communityReportedNotice,
+  type CommunityModeration,
+  type CommunityReportReason,
+} from "./community-report";
+import {
+  CommunityResourceScopeButtons,
+  type CommunityResourceScope,
+} from "./community-resource-scope-buttons";
+import { CommunityRightsAgreement } from "./community-rights-agreement";
+import { CommunityInputField } from "./community-input-field";
+import { CommunitySelectField } from "./community-select-field";
+import { CommunityTextareaField } from "./community-textarea-field";
+import { ActionButton } from "../core/action-button";
 
 export type CommunityResourceKind = "dictionary" | "reply";
-export type CommunityResourceScope = "" | "mine" | "saved";
+export type { CommunityResourceScope } from "./community-resource-scope-buttons";
 export type CommunitySharedWord = {
   kind: "pinyin" | "wubi" | "quick" | "english";
   code: string;
@@ -26,6 +53,8 @@ export type CommunityResource = {
   rating_count: number;
   rating_average: number;
   my_rating: number;
+  /** Sent only on the user's own items; `removed` shows 已下架. */
+  moderation?: CommunityModeration | null;
 };
 export type CommunityResourcePage = { items: CommunityResource[]; has_more: boolean };
 export type CommunityResourceApplication = {
@@ -64,54 +93,13 @@ export interface CommunityResourceClient {
   unpublish(id: string): Promise<void>;
   storeReply(item: CommunityResource): Promise<void>;
   removeReply(id: string): Promise<void>;
-}
-
-function resourceMessage(error: unknown): string {
-  if (typeof error === "object" && error !== null && "code" in error) {
-    switch (error.code) {
-      case "community_invalid":
-        return "内容无效，请修改后重试。";
-      case "community_unauthorized":
-        return "请先登录后执行此操作。";
-      case "community_forbidden":
-        return "没有权限执行此操作。";
-      case "community_conflict":
-        return "作品状态已变化或已达到发布上限，请刷新后重试。";
-      case "community_not_found":
-        return "作品不存在或已下架。";
-      case "community_rate_limited":
-        return "请求过于频繁，请稍后再试。";
-      case "community_cancelled":
-        return "账号状态已变化，请重新加载。";
-      case "community_storage":
-        return "无法安全保存本地模板，请稍后重试。";
-      case "community_resource_library_format":
-        return "本地模板库无法读取，请检查后重试。";
-    }
-  }
-  return "社区暂时不可用，请稍后重试。";
-}
-
-function unique(current: CommunityResource[], incoming: CommunityResource[]): CommunityResource[] {
-  const ids = new Set(current.map((item) => item.id));
-  return [...current, ...incoming.filter((item) => !ids.has(item.id) && ids.add(item.id))];
-}
-
-function publicationId(): string {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
-  return (
-    "00000000-0000-4000-8000-" + Math.random().toString(16).slice(2).padEnd(12, "0").slice(0, 12)
-  );
-}
-
-function kindTitle(kind: CommunityResourceKind): string {
-  return kind === "dictionary" ? "词库" : "回复";
-}
-function scopeTitle(scope: CommunityResourceScope): string {
-  return scope === "mine" ? "我的作品" : scope === "saved" ? "收藏" : "全部";
-}
-function rating(item: CommunityResource): string {
-  return item.rating_count === 0 ? "暂无评分" : `${item.rating_average.toFixed(1)} 分`;
+  /** Reports another user's dictionary or reply template to the moderators. */
+  report?(
+    kind: CommunityResourceKind,
+    id: string,
+    reason: CommunityReportReason,
+    detail: string,
+  ): Promise<void>;
 }
 
 function ResourceCard({ item, open }: { item: CommunityResource; open: () => void }) {
@@ -120,18 +108,22 @@ function ResourceCard({ item, open }: { item: CommunityResource; open: () => voi
       type="button"
       className={style.card}
       onClick={open}
-      aria-label={`查看${kindTitle(item.kind)} ${item.name}`}
+      aria-label={`查看${resourceKindTitle(item.kind)} ${item.name}`}
     >
       <span className={style.resourceIcon} aria-hidden="true">
         {item.kind === "dictionary" ? "字" : "话"}
       </span>
       <strong className={style.cardTitle}>{item.name}</strong>
-      <span className={style.cardAuthor}>{item.owned ? "我的作品" : item.author}</span>
+      <span className={style.cardAuthor}>
+        {item.owned ? "我的作品" : item.author}
+        {item.owned && item.moderation === "removed" && " · 已下架"}
+      </span>
       <span className={style.resourceDescription}>
-        {item.description || (item.kind === "dictionary" ? "共享词条" : "回复语气模板")}
+        {item.description || (item.kind === "dictionary" ? "共享词条" : "回复模板")}
       </span>
       <span className={style.cardMetrics}>
-        ☆ {rating(item)} · {item.saves.toLocaleString("zh-CN")} 人收藏
+        ☆ {communityRating(item.rating_count, item.rating_average)} ·{" "}
+        {item.saves.toLocaleString("zh-CN")} 人收藏
       </span>
     </button>
   );
@@ -150,7 +142,7 @@ function ResourceEditor({
   close: () => void;
   onPublished: () => Promise<void>;
 }) {
-  const [id] = useState(existing?.id ?? publicationId);
+  const [id] = useState(existing?.id ?? randomUuid());
   const [name, setName] = useState(existing?.name ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
   const [prompt, setPrompt] = useState(existing?.content.prompt ?? "");
@@ -162,6 +154,19 @@ function ResourceEditor({
   const [agreed, setAgreed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const mounted = useRef(true);
+  const clientGeneration = useRef(0);
+  const actionRunning = useRef(false);
+  useEffect(() => {
+    const generation = ++clientGeneration.current;
+    mounted.current = true;
+    actionRunning.current = false;
+    setBusy(false);
+    return () => {
+      mounted.current = false;
+      if (generation === clientGeneration.current) clientGeneration.current++;
+    };
+  }, [client]);
   const addEntry = () => {
     const value = { kind: entryKind, code: code.trim(), word, weight: Number(weight) };
     if (
@@ -177,14 +182,14 @@ function ResourceEditor({
       setError("词条不能为空、不能重复，权重必须为非负整数，且最多 128 条。");
       return;
     }
-    setEntries([...entries, value]);
+    setEntries((current) => [...current, value]);
     setCode("");
     setWord("");
     setError("");
   };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (busy) return;
+    if (busy || actionRunning.current) return;
     const normalizedName = name.trim();
     const normalizedDescription = description.trim();
     const valid =
@@ -201,22 +206,29 @@ function ResourceEditor({
       );
       return;
     }
-    setBusy(true);
-    setError("");
-    try {
-      await client.publish(
-        id,
-        kind,
-        normalizedName,
-        normalizedDescription,
-        kind === "reply" ? { prompt } : { entries },
-        existing?.revision ?? 0,
-      );
-      await onPublished();
-    } catch (publishError) {
-      setError(resourceMessage(publishError));
-      setBusy(false);
-    }
+    const generation = clientGeneration.current;
+    await runCommunityAction({
+      busy,
+      generation,
+      clientGeneration,
+      actionRunning,
+      setBusy,
+      setError,
+      isCurrent: () => mounted.current && generation === clientGeneration.current,
+      formatError: resourceMessage,
+      operation: async (isCurrent) => {
+        await client.publish(
+          id,
+          kind,
+          normalizedName,
+          normalizedDescription,
+          kind === "reply" ? { prompt } : { entries },
+          existing?.revision ?? 0,
+        );
+        if (!isCurrent()) return;
+        await onPublished();
+      },
+    });
   };
   return (
     <div className={style.backdrop}>
@@ -224,108 +236,90 @@ function ResourceEditor({
         className={style.dialog}
         role="dialog"
         aria-modal="true"
-        aria-label={existing ? "更新社区作品" : `发布${kindTitle(kind)}`}
+        aria-label={existing ? "更新社区作品" : `发布${resourceKindTitle(kind)}`}
         onSubmit={(event) => void submit(event)}
       >
-        <div className={style.dialogHeading}>
-          <h2 className={style.dialogTitle}>{existing ? "更新作品" : `发布${kindTitle(kind)}`}</h2>
-          <button
-            type="button"
-            className={style.dialogClose}
-            onClick={close}
-            disabled={busy}
-            aria-label="关闭发布窗口"
-          >
-            ×
-          </button>
-        </div>
+        <CommunityDialogHeader
+          title={existing ? "更新作品" : `发布${resourceKindTitle(kind)}`}
+          titleClassName={style.dialogTitle}
+          busy={busy}
+          onClose={close}
+        />
         {error && (
           <p role="alert" className="error">
             {error}
           </p>
         )}
-        <label className={style.field}>
-          作品名称
-          <input
-            aria-label="社区作品名称"
-            maxLength={32}
-            value={name}
-            disabled={busy}
-            onChange={(event) => setName(event.target.value)}
-          />
-        </label>
-        <label className={style.field}>
-          作品说明
-          <textarea
-            aria-label="社区作品说明"
-            maxLength={280}
-            rows={3}
-            value={description}
-            disabled={busy}
-            onChange={(event) => setDescription(event.target.value)}
-          />
-        </label>
+        <CommunityInputField
+          label="作品名称"
+          ariaLabel="社区作品名称"
+          maxLength={32}
+          value={name}
+          disabled={busy}
+          onChange={setName}
+        />
+        <CommunityTextareaField
+          label="作品说明"
+          ariaLabel="社区作品说明"
+          maxLength={280}
+          rows={3}
+          value={description}
+          disabled={busy}
+          onChange={setDescription}
+        />
         {kind === "reply" ? (
-          <label className={style.field}>
-            回复提示词
-            <textarea
-              aria-label="社区回复提示词"
-              maxLength={2000}
-              rows={8}
-              value={prompt}
-              disabled={busy}
-              onChange={(event) => setPrompt(event.target.value)}
-            />
-          </label>
+          <CommunityTextareaField
+            label="回复提示词"
+            ariaLabel="社区回复提示词"
+            maxLength={2000}
+            rows={8}
+            value={prompt}
+            disabled={busy}
+            onChange={setPrompt}
+          />
         ) : (
           <>
             <div className={style.entryForm}>
-              <label className={style.field}>
-                类型
-                <select
-                  aria-label="社区词条类型"
-                  value={entryKind}
-                  onChange={(event) =>
-                    setEntryKind(event.target.value as CommunitySharedWord["kind"])
-                  }
-                >
-                  <option value="pinyin">拼音</option>
-                  <option value="wubi">五笔</option>
-                  <option value="quick">快捷短语</option>
-                  <option value="english">英文</option>
-                </select>
-              </label>
-              <label className={style.field}>
-                编码
-                <input
-                  aria-label="社区词条编码"
-                  value={code}
-                  disabled={busy}
-                  onChange={(event) => setCode(event.target.value)}
-                />
-              </label>
-              <label className={style.field}>
-                词语
-                <input
-                  aria-label="社区词条文字"
-                  value={word}
-                  disabled={busy}
-                  onChange={(event) => setWord(event.target.value)}
-                />
-              </label>
-              <label className={style.field}>
-                权重
-                <input
-                  aria-label="社区词条权重"
-                  type="number"
-                  value={weight}
-                  disabled={busy}
-                  onChange={(event) => setWeight(event.target.value)}
-                />
-              </label>
-              <button type="button" className="secondary" disabled={busy} onClick={addEntry}>
-                添加词条
-              </button>
+              <CommunitySelectField
+                label="类型"
+                ariaLabel="社区词条类型"
+                value={entryKind}
+                disabled={busy}
+                onChange={(value) => setEntryKind(value as CommunitySharedWord["kind"])}
+              >
+                <option value="pinyin">拼音</option>
+                <option value="wubi">五笔</option>
+                <option value="quick">快捷短语</option>
+                <option value="english">英文</option>
+              </CommunitySelectField>
+              <CommunityInputField
+                label="编码"
+                ariaLabel="社区词条编码"
+                value={code}
+                disabled={busy}
+                onChange={setCode}
+              />
+              <CommunityInputField
+                label="词语"
+                ariaLabel="社区词条文字"
+                value={word}
+                disabled={busy}
+                onChange={setWord}
+              />
+              <CommunityInputField
+                label="权重"
+                ariaLabel="社区词条权重"
+                type="number"
+                value={weight}
+                disabled={busy}
+                onChange={setWeight}
+              />
+              <ActionButton
+                action={addEntry}
+                className="secondary"
+                disabled={busy}
+                label="添加词条"
+              />
             </div>
             <div className={style.entryList} aria-label={`待发布词条 ${entries.length}/128`}>
               {entries.map((item, index) => (
@@ -333,43 +327,35 @@ function ResourceEditor({
                   <span>
                     {item.word} · <code>{item.code}</code> · {item.weight}
                   </span>
-                  <button
-                    type="button"
+                  <ActionButton
+                    action={() => setEntries(entries.filter((_, current) => current !== index))}
                     className="secondary"
                     disabled={busy}
-                    onClick={() => setEntries(entries.filter((_, current) => current !== index))}
-                  >
-                    移除
-                  </button>
+                    label="移除"
+                  />
                 </div>
               ))}
             </div>
           </>
         )}
         {!existing && (
-          <label className={style.agreement}>
-            <input
-              type="checkbox"
-              aria-label="确认拥有发布内容权利"
-              checked={agreed}
-              disabled={busy}
-              onChange={(event) => setAgreed(event.target.checked)}
-            />
-            我拥有发布所用内容的权利，并同意其他用户查看和使用
-          </label>
+          <CommunityRightsAgreement
+            agreementText="我拥有发布所用内容的权利，并同意其他用户查看和使用"
+            ariaLabel="确认拥有发布内容权利"
+            checked={agreed}
+            disabled={busy}
+            onChange={setAgreed}
+          />
         )}
         <p className={style.warning}>
           发布内容会公开展示。请勿包含 API
           Key、私人聊天内容或其他个人资料；发布后可在“我的作品”中下架。
         </p>
-        <div className={style.dialogActions}>
-          <button type="button" className="secondary" disabled={busy} onClick={close}>
-            取消
-          </button>
+        <CommunityDialogActions busy={busy} onClose={close}>
           <button type="submit" className="primary" disabled={busy}>
             {busy ? "正在发布…" : existing ? "发布新版本" : "公开发布"}
           </button>
-        </div>
+        </CommunityDialogActions>
       </form>
     </div>
   );
@@ -392,45 +378,62 @@ function ResourceDetail({
   const [notice, setNotice] = useState("");
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const run = async (action: () => Promise<void>) => {
-    if (busy) return;
-    setBusy(true);
-    setError("");
-    setNotice("");
-    try {
-      await action();
-    } catch (actionError) {
-      setError(resourceMessage(actionError));
-    } finally {
-      setBusy(false);
-    }
+  const mounted = useRef(true);
+  const clientGeneration = useRef(0);
+  const actionBusyRef = useRef(false);
+  const renderGeneration = clientGeneration.current;
+  const run = async (action: (generation: number) => Promise<void>) => {
+    if (actionBusyRef.current || busy) return;
+    const generation = clientGeneration.current;
+    await runCommunityAction({
+      busy,
+      generation,
+      clientGeneration,
+      actionRunning: actionBusyRef,
+      setBusy,
+      setError,
+      setNotice,
+      isCurrent: () => mounted.current && generation === clientGeneration.current,
+      formatError: resourceMessage,
+      operation: () => action(generation),
+    });
   };
   useEffect(() => {
     let active = true;
+    const generation = ++clientGeneration.current;
+    mounted.current = true;
+    actionBusyRef.current = false;
+    setBusy(false);
     void client
       .detail(initial.id)
       .then((value) => {
-        if (active) setItem(value);
+        if (active && generation === clientGeneration.current) setItem(value);
       })
       .catch((errorValue) => {
-        if (active) setError(resourceMessage(errorValue));
+        if (active && generation === clientGeneration.current)
+          setError(resourceMessage(errorValue));
       });
     return () => {
       active = false;
+      mounted.current = false;
+      if (generation === clientGeneration.current) clientGeneration.current++;
     };
   }, [client, initial.id]);
   const save = () =>
-    void run(async () => {
+    void run(async (generation) => {
       await client.save(item.id, !item.saved);
-      setItem(await client.detail(item.id));
+      if (!mounted.current || generation !== clientGeneration.current) return;
+      const updated = await client.detail(item.id);
+      if (mounted.current && generation === clientGeneration.current) setItem(updated);
     });
   const apply = () =>
-    void run(async () => {
+    void run(async (generation) => {
       const result = await client.apply(item.id, item.revision);
+      if (!mounted.current || generation !== clientGeneration.current) return;
       setNotice(`已导入云端词库，新增或更新 ${result.imported} 个词条。`);
     });
   const applyLocal = () =>
-    void run(async () => {
+    void run(async (generation) => {
       if (!localDictionary?.import) return;
       const groups = new Map<CommunitySharedWord["kind"], CommunitySharedWord[]>();
       for (const entry of item.content.entries ?? []) {
@@ -452,38 +455,56 @@ function ResourceDetail({
         );
         applied += result.applied;
       }
+      if (!mounted.current || generation !== clientGeneration.current) return;
       setNotice(`已导入本机词库，应用 ${applied} 个词条。`);
     });
   const storeReply = () =>
-    void run(async () => {
+    void run(async (generation) => {
       await client.save(item.id, true);
+      if (!mounted.current || generation !== clientGeneration.current) return;
       const latest = await client.detail(item.id);
+      if (!mounted.current || generation !== clientGeneration.current) return;
       await client.storeReply(latest);
+      if (!mounted.current || generation !== clientGeneration.current) return;
       setItem(latest);
-      setNotice("已添加到回复键盘；只有点按生成时才会发送文字。");
+      setNotice("已添加到高情商回复键盘；只有点按生成时才会发送文字。");
     });
   const rateResource = (stars: number) =>
-    void run(async () => {
+    void run(async (generation) => {
       await client.rate(item.id, stars);
-      setItem(await client.detail(item.id));
+      if (!mounted.current || generation !== clientGeneration.current) return;
+      const updated = await client.detail(item.id);
+      if (!mounted.current || generation !== clientGeneration.current) return;
+      setItem(updated);
       setNotice(`已评分：${stars} 星。`);
     });
   const removeReply = () =>
-    void run(async () => {
+    void run(async (generation) => {
       await client.removeReply(item.id);
-      setNotice("已从本机回复键盘移除，社区收藏保留。");
+      if (!mounted.current || generation !== clientGeneration.current) return;
+      setNotice("已从本机高情商回复键盘移除，社区收藏保留。");
     });
   const unpublish = () =>
-    void run(async () => {
+    void run(async (generation) => {
       await client.unpublish(item.id);
+      if (!mounted.current || generation !== clientGeneration.current) return;
       setConfirmDelete(false);
       close();
     });
+  const report = async (reason: CommunityReportReason, detail: string) => {
+    if (!client.report) return false;
+    let reported = false;
+    await run(async (generation) => {
+      await client.report!(item.kind, item.id, reason, detail);
+      if (!mounted.current || generation !== clientGeneration.current) return;
+      reported = true;
+      setNotice(communityReportedNotice);
+    });
+    return reported;
+  };
   return (
     <div className={style.page}>
-      <button type="button" className={style.back} disabled={busy} onClick={close}>
-        ← 社区
-      </button>
+      <ActionButton action={close} className={style.back} disabled={busy} label="← 社区" />
       {error && (
         <p role="alert" className="error">
           {error}
@@ -498,10 +519,12 @@ function ResourceDetail({
             </p>
           </div>
           {item.owned && <span className={style.detailBadge}>我的作品</span>}
+          <CommunityRemovedBadge owned={item.owned} moderation={item.moderation} />
         </div>
         {item.description && <p className={style.description}>{item.description}</p>}
         <p className={style.metrics}>
-          {item.saves.toLocaleString("zh-CN")} 人收藏 · {rating(item)} ·{" "}
+          {item.saves.toLocaleString("zh-CN")} 人收藏 ·{" "}
+          {communityRating(item.rating_count, item.rating_average)} ·{" "}
           {item.rating_count.toLocaleString("zh-CN")} 人评分
         </p>
         {item.kind === "dictionary" ? (
@@ -516,23 +539,19 @@ function ResourceDetail({
               ))}
             </div>
             {localDictionary?.import && (
-              <button
-                type="button"
+              <ActionButton
+                action={applyLocal}
                 className={`primary ${style.action}`}
                 disabled={busy}
-                onClick={applyLocal}
-              >
-                导入这版词库到本机
-              </button>
+                label="导入这版词库到本机"
+              />
             )}
-            <button
-              type="button"
+            <ActionButton
+              action={apply}
               className={`secondary ${style.action}`}
               disabled={busy}
-              onClick={apply}
-            >
-              导入这版词库到云端
-            </button>
+              label="导入这版词库到云端"
+            />
             <p className={`${style.metrics} ${style.divided}`}>
               本机导入只更新当前设备；云端导入会合并到账号云词库。版本发生变化时云端导入会停止并要求重新查看。
             </p>
@@ -541,22 +560,18 @@ function ResourceDetail({
           <>
             <h3>提示词预览</h3>
             <pre className={style.promptPreview}>{item.content.prompt}</pre>
-            <button
-              type="button"
+            <ActionButton
+              action={storeReply}
               className={`primary ${style.action}`}
               disabled={busy}
-              onClick={storeReply}
-            >
-              添加到回复键盘
-            </button>
-            <button
-              type="button"
+              label="添加到高情商回复键盘"
+            />
+            <ActionButton
+              action={removeReply}
               className={`secondary ${style.action}`}
               disabled={busy}
-              onClick={removeReply}
-            >
-              从本机回复键盘移除
-            </button>
+              label="从本机高情商回复键盘移除"
+            />
           </>
         )}
         {notice && (
@@ -564,14 +579,12 @@ function ResourceDetail({
             {notice}
           </p>
         )}
-        <button
-          type="button"
+        <ActionButton
+          action={save}
           className={`secondary ${style.action}`}
           disabled={busy}
-          onClick={save}
-        >
-          {item.saved ? "取消收藏" : "收藏，关注后续更新"}
-        </button>
+          label={item.saved ? "取消收藏" : "收藏，关注后续更新"}
+        />
         {!item.owned && (
           <div
             className={`${style.divided} [&>p]:mt-0 [&>p]:mb-2.5 [&>p]:text-xs [&>p]:text-secondary`}
@@ -596,23 +609,22 @@ function ResourceDetail({
         )}
         {item.owned && (
           <>
-            <button
-              type="button"
+            <ActionButton
+              action={() => setEditing(true)}
               className={`secondary ${style.action}`}
               disabled={busy}
-              onClick={() => setEditing(true)}
-            >
-              编辑并发布新版本
-            </button>
-            <button
-              type="button"
+              label="编辑并发布新版本"
+            />
+            <ActionButton
+              action={() => setConfirmDelete(true)}
               className="danger-text community-unpublish"
               disabled={busy}
-              onClick={() => setConfirmDelete(true)}
-            >
-              下架作品
-            </button>
+              label="下架作品"
+            />
           </>
+        )}
+        {!item.owned && client.report && (
+          <CommunityReportSection actionBusy={busy} onReport={report} />
         )}
         {confirmDelete && (
           <div className={style.confirmation} role="alertdialog" aria-label="确认下架作品">
@@ -621,17 +633,18 @@ function ResourceDetail({
               {item.name}”吗？
             </p>
             <div>
-              <button type="button" className="danger" disabled={busy} onClick={unpublish}>
-                确认下架
-              </button>
-              <button
-                type="button"
+              <ActionButton
+                action={unpublish}
+                className="danger"
+                disabled={busy}
+                label="确认下架"
+              />
+              <ActionButton
+                action={() => setConfirmDelete(false)}
                 className="secondary"
                 disabled={busy}
-                onClick={() => setConfirmDelete(false)}
-              >
-                取消
-              </button>
+                label="取消"
+              />
             </div>
           </div>
         )}
@@ -644,7 +657,9 @@ function ResourceDetail({
           close={() => setEditing(false)}
           onPublished={async () => {
             setEditing(false);
-            setItem(await client.detail(item.id));
+            const updated = await client.detail(item.id);
+            if (!mounted.current || renderGeneration !== clientGeneration.current) return;
+            setItem(updated);
           }}
         />
       )}
@@ -674,18 +689,25 @@ export function CommunityResourcesPage({
   const [selected, setSelected] = useState<CommunityResource | null>(null);
   const [editing, setEditing] = useState(false);
   const generation = useRef(0);
-  const load = async (append = false) => {
+  const activeSearch = useRef("");
+  const load = async (append = false, query = activeSearch.current) => {
     const current = ++generation.current;
     setBusy(true);
     setError("");
     const offset = append ? items.length : 0;
     try {
-      const page = await client.list(kind, scope, search, offset);
+      const page = await client.list(kind, scope, query, offset);
       if (current !== generation.current) return;
-      setItems((value) => (append ? unique(value, page.items) : page.items));
+      setItems((value) => (append ? appendUniqueById(value, page.items) : page.items));
       setMore(page.has_more);
+      if (!append) activeSearch.current = query;
     } catch (loadError) {
-      if (current === generation.current) setError(resourceMessage(loadError));
+      if (current === generation.current) {
+        setError(resourceMessage(loadError));
+        // The existing rows belong to the previous query or scope. Do not let
+        // their continuation offset be used with the failed fresh request.
+        if (!append) setMore(false);
+      }
     } finally {
       if (current === generation.current) setBusy(false);
     }
@@ -698,16 +720,7 @@ export function CommunityResourcesPage({
   }, [client, kind, scope]);
   const openDetail = (item: CommunityResource) => {
     if (mobile && typeof window !== "undefined") {
-      const current = window.history.state;
-      window.history.pushState(
-        {
-          ...(current && typeof current === "object" ? current : {}),
-          msimeSettings: true,
-          page: "community",
-          communityDetail: { kind, id: item.id },
-        },
-        "",
-      );
+      pushMobileSettingsState({ page: "community", communityDetail: { kind, id: item.id } });
     }
     setSelected(item);
   };
@@ -742,32 +755,19 @@ export function CommunityResourcesPage({
     );
   return (
     <div className={style.page}>
-      <form
-        className={style.searchRow}
-        role="search"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void load();
-        }}
-      >
-        <input
-          className={style.searchInput}
-          aria-label={`搜索${kindTitle(kind)}`}
-          placeholder={`搜索${kindTitle(kind)}`}
-          value={search}
-          onChange={(event) => setSearch([...event.target.value].slice(0, 128).join(""))}
-        />
-        <button type="submit" className={style.searchSubmit}>
-          搜索
-        </button>
-      </form>
+      <CommunitySearchForm
+        label={`搜索${resourceKindTitle(kind)}`}
+        value={search}
+        onChange={setSearch}
+        onSubmit={() => void load(false, search)}
+      />
       <div className={style.heading}>
         <div className={style.headingBody}>
           <h2 className={style.headingTitle}>
             {scope === "mine"
-              ? `我的${kindTitle(kind)}作品`
+              ? `我的${resourceKindTitle(kind)}作品`
               : scope === "saved"
-                ? `收藏的${kindTitle(kind)}`
+                ? `收藏的${resourceKindTitle(kind)}`
                 : kind === "dictionary"
                   ? "好词，随手可得"
                   : "找到舒服的表达"}
@@ -779,86 +779,12 @@ export function CommunityResourcesPage({
           </p>
         </div>
         <div className={style.headingActions}>
-          <div
-            className={style.scopeButtonsCollapsing}
-            role="group"
-            aria-label={`${kindTitle(kind)}范围`}
-          >
-            <button
-              type="button"
-              className={scope === "" ? "primary" : "secondary"}
-              aria-pressed={scope === ""}
-              onClick={() => setScope("")}
-            >
-              全部
-            </button>
-            <button
-              type="button"
-              className={scope === "saved" ? "primary" : "secondary"}
-              aria-pressed={scope === "saved"}
-              onClick={() => setScope("saved")}
-            >
-              收藏
-            </button>
-            <button
-              type="button"
-              className={scope === "mine" ? "primary" : "secondary"}
-              aria-pressed={scope === "mine"}
-              onClick={() => setScope("mine")}
-            >
-              我的作品
-            </button>
-          </div>
-          <details className={style.scopeMenu}>
-            <summary className={style.scopeMenuSummary} aria-label={`${kindTitle(kind)}筛选范围`}>
-              {scopeTitle(scope)}
-            </summary>
-            <div
-              className={style.scopeMenuList}
-              role="group"
-              aria-label={`${kindTitle(kind)}筛选范围`}
-            >
-              <button
-                type="button"
-                className={style.scopeMenuItem}
-                aria-label="筛选范围：全部"
-                aria-pressed={scope === ""}
-                onClick={(event) => {
-                  setScope("");
-                  event.currentTarget.closest("details")?.removeAttribute("open");
-                }}
-              >
-                全部
-              </button>
-              <button
-                type="button"
-                className={style.scopeMenuItem}
-                aria-label="筛选范围：收藏"
-                aria-pressed={scope === "saved"}
-                onClick={(event) => {
-                  setScope("saved");
-                  event.currentTarget.closest("details")?.removeAttribute("open");
-                }}
-              >
-                收藏
-              </button>
-              <button
-                type="button"
-                className={style.scopeMenuItem}
-                aria-label="筛选范围：我的作品"
-                aria-pressed={scope === "mine"}
-                onClick={(event) => {
-                  setScope("mine");
-                  event.currentTarget.closest("details")?.removeAttribute("open");
-                }}
-              >
-                我的作品
-              </button>
-            </div>
-          </details>
-          <button type="button" className="primary" onClick={() => setEditing(true)}>
-            发布作品
-          </button>
+          <CommunityResourceScopeButtons
+            resourceLabel={resourceKindTitle(kind)}
+            scope={scope}
+            onScopeChange={setScope}
+          />
+          <ActionButton action={() => setEditing(true)} className="primary" label="发布作品" />
         </div>
       </div>
       {error && (
@@ -867,7 +793,7 @@ export function CommunityResourcesPage({
         </p>
       )}
       {!busy && items.length === 0 && (
-        <p className={style.notice}>这里还没有{kindTitle(kind)}作品。</p>
+        <p className={style.notice}>这里还没有{resourceKindTitle(kind)}作品。</p>
       )}
       <div className={style.grid}>
         {items.map((item) => (
@@ -880,14 +806,12 @@ export function CommunityResourcesPage({
         </p>
       )}
       {more && (
-        <button
-          type="button"
+        <ActionButton
+          action={() => void load(true)}
           className="secondary community-more"
           disabled={busy}
-          onClick={() => void load(true)}
-        >
-          加载更多
-        </button>
+          label="加载更多"
+        />
       )}
       {editing && (
         <ResourceEditor
@@ -960,7 +884,7 @@ export function CommunityHomePage({
           aria-selected={category === "reply"}
           onClick={() => setCategory("reply")}
         >
-          回复
+          回复模板
         </button>
       </div>
       {category === "skin" ? (

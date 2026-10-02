@@ -1,0 +1,41 @@
+name: Welcome
+
+# Greets a person's first issue and first pull request in this repository with the pointers the templates cannot give on their own. Uses pull_request_target so fork pull requests can be commented on; nothing is checked out.
+
+on:
+  issues:
+    types: [opened]
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  greet:
+    name: First interaction
+    # first-interaction has no notion of a bot account, so Dependabot's first bump in this repository qualifies as a first pull request and gets a greeting written for a person. Skip anything ending in [bot].
+    #
+    # 仓库所有者、成员和协作者不可能是第一次来，跳过他们。first-interaction 判断是否首次的办法是把作者在本仓库的全部 issue 和 PR 逐页翻一遍：维护者有几千条，2026-10-02 #2898 翻到第 58 页时 GitHub 回了 502，job 失败，PR 上平白多一个红叉（日志最后照样是 Not First Contribution）。author_association 随事件给出，不用再调 API。
+    if: >-
+      ${{ !endsWith(github.actor, '[bot]')
+      && !contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.issue.author_association || github.event.pull_request.author_association) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/first-interaction@1c4688942c71f71d4f5502a26ea67c331730fa4d # v3.1.0
+        with:
+          issue_message: |
+            感谢报告！这是你在本仓库的第一个 issue。
+
+            - 请确认内容里没有真实输入文本、凭据、个人资料或私人路径；如有，请编辑删除。
+            - 缺陷请写明平台、版本和最小复现步骤，这能大大加快定位。
+            - 安全问题请改走 [私下报告入口](https://github.com/metasequoiaime/msime/security/advisories/new)，不要在公开 issue 里讨论细节。
+          pr_message: |
+            感谢你的第一个 PR！合并前请留意：
+
+            - 日常改动请以 `develop` 为目标分支，`main` 只接受发布提升。
+            - PR 标题使用 Conventional Commits（例如 `fix(linux): ...`），squash 合并时它会成为提交信息。
+            - 合并前本地跑一次 `bash scripts/verify-local.sh --quick`，并在 PR 描述里写明实际执行过的验证和未覆盖的平台。
+            - 架构边界与验证分级见 [ARCHITECTURE.md](https://github.com/metasequoiaime/msime/blob/develop/ARCHITECTURE.md)，贡献流程见 [CONTRIBUTING.md](https://github.com/metasequoiaime/msime/blob/develop/CONTRIBUTING.md)。

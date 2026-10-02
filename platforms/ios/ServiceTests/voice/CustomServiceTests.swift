@@ -46,6 +46,44 @@ final class CustomServiceTests: XCTestCase {
     XCTAssertEqual(packets.map(\.2), [false, true])
   }
 
+  func testDoubaoStreamsWhileRecordingAndReportsEachPartial() async throws {
+    let transport = DoubaoLiveFixtureTransport()
+    var packets: [(Int32, Int, Bool)] = []
+    let codec = DoubaoVoiceCoordinator.FrameCodec(
+      startFrame: { Data([0x01]) },
+      audioFrame: { sequence, pcm, final in
+        packets.append((sequence, pcm.count, final))
+        return Data([UInt8(truncatingIfNeeded: sequence)])
+      },
+      decodeFrame: { frame in
+        switch frame {
+        case Data([0xA1]): (false, "你好")
+        case Data([0xFF]): (true, "你好世界")
+        default: nil
+        }
+      }
+    )
+    var configuration = CustomServiceConfiguration.loadVoicePreset(.doubao)
+    configuration.voiceAppKey = "fixture-app"
+    configuration.voiceResourceID = "fixture-resource"
+    let (pcm, continuation) = AsyncStream<Data>.makeStream()
+    continuation.yield(Data(repeating: 0x2A, count: 4_000))
+    continuation.yield(Data(repeating: 0x2A, count: 2_401))
+    continuation.finish()
+    var partials: [String] = []
+    let result = try await CustomServiceClient.streamDoubao(
+      configuration: configuration, token: "fixture-access", generation: 7,
+      client: DoubaoVoiceClient(transport: transport, codec: codec), pcm: pcm) { partials.append($0) }
+
+    XCTAssertEqual(result, "你好世界")
+    XCTAssertEqual(partials, ["你好", "你好世界"])
+    XCTAssertEqual(transport.handshake?.accessKey, "fixture-access")
+    XCTAssertEqual(transport.sentFrames, [Data([0x01]), Data([2]), Data([0xFD])])
+    XCTAssertEqual(packets.map(\.0), [2, -3])
+    XCTAssertEqual(packets.map(\.1), [6_400, 1])
+    XCTAssertEqual(packets.map(\.2), [false, true])
+  }
+
   func testDoubaoRequestDoesNotFallBackToMultipartWithoutHostCodec() async throws {
     let configuration = CustomServiceConfiguration.loadVoicePreset(.doubao)
     do {
@@ -88,10 +126,11 @@ final class CustomServiceTests: XCTestCase {
     defer { defaults.removePersistentDomain(forName: suite) }
     let ai = CustomServiceConfiguration.loadPreset(.deepSeek, defaults: defaults)
     try ai.save(.ai, token: "", defaults: defaults)
-    // Existing installations have these keys without a provider identifier.
-    defaults.set("https://custom.invalid/audio/transcriptions", forKey: "service.voice.endpoint")
-    defaults.set("legacy-model", forKey: "service.voice.model")
-    for provider in VoiceProviderPreset.allCases where provider != .custom {
+    var customVoice = CustomServiceConfiguration.loadVoicePreset(.custom, defaults: defaults)
+    customVoice.endpoint = "https://custom.invalid/audio/transcriptions"
+    customVoice.model = "custom-model"
+    try customVoice.save(.voice, token: "", defaults: defaults)
+    for provider in VoiceProviderPreset.allCases where provider != .custom && !provider.isOnDevice {
       var config = CustomServiceConfiguration.loadVoicePreset(provider, defaults: defaults)
       XCTAssertEqual(try config.validatedURL(allowWebSocket: provider == .doubao).absoluteString,
                      provider.endpoint)
@@ -104,15 +143,60 @@ final class CustomServiceTests: XCTestCase {
       try config.save(.voice, token: "", defaults: defaults)
       XCTAssertEqual(CustomServiceConfiguration.load(.voice, defaults: defaults).voiceProvider, provider)
     }
-    for provider in VoiceProviderPreset.allCases where provider != .custom {
+    for provider in VoiceProviderPreset.allCases where provider != .custom && !provider.isOnDevice {
       XCTAssertEqual(CustomServiceConfiguration.loadVoicePreset(provider, defaults: defaults).model,
                      "saved-\(provider.rawValue)")
     }
     let custom = CustomServiceConfiguration.loadVoicePreset(.custom, defaults: defaults)
-    XCTAssertEqual(custom.model, "legacy-model")
+    XCTAssertEqual(custom.model, "custom-model")
     XCTAssertEqual(custom.endpoint, "https://custom.invalid/audio/transcriptions")
     XCTAssertEqual(CustomServiceConfiguration.load(.ai, defaults: defaults).endpoint, ai.endpoint)
     XCTAssertEqual(CustomServiceConfiguration.load(.ai, defaults: defaults).provider, .deepSeek)
+  }
+
+  func testOnDeviceProvidersSaveOnlyTheChoiceAndKeepTheCloudService() throws {
+    let suite = "msime-voice-on-device-\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    var customVoice = CustomServiceConfiguration.loadVoicePreset(.custom, defaults: defaults)
+    customVoice.endpoint = "https://custom.invalid/audio/transcriptions"
+    customVoice.model = "custom-model"
+    try customVoice.save(.voice, token: "", defaults: defaults)
+    for provider in [VoiceProviderPreset.local, .system] {
+      XCTAssertTrue(provider.isOnDevice)
+      XCTAssertEqual(provider.endpoint, "")
+      XCTAssertNil(provider.documentation)
+      let config = CustomServiceConfiguration.loadVoicePreset(provider, defaults: defaults)
+      XCTAssertThrowsError(try config.validatedURL())
+      XCTAssertNoThrow(try config.save(.voice, token: "", defaults: defaults))
+      XCTAssertEqual(CustomServiceConfiguration.load(.voice, defaults: defaults).voiceProvider, provider)
+      XCTAssertEqual(defaults.string(forKey: "service.voice.endpoint"), "https://custom.invalid/audio/transcriptions")
+    }
+    XCTAssertNil(defaults.string(forKey: "service.voice.presets.local.endpoint"))
+    let custom = CustomServiceConfiguration.loadVoicePreset(.custom, defaults: defaults)
+    XCTAssertEqual(custom.endpoint, "https://custom.invalid/audio/transcriptions")
+    XCTAssertEqual(custom.model, "custom-model")
+    XCTAssertFalse(VoiceProviderPreset.allCases.filter { !$0.isOnDevice }.contains { $0.endpoint.isEmpty && $0 != .custom })
+  }
+
+  func testDoubaoKeepsTheChosenStreamEndpointAndReadsBothResultShapes() throws {
+    let suite = "msime-doubao-endpoint-\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let endpoints = VoiceProviderPreset.doubaoStreamEndpoints.map(\.endpoint)
+    XCTAssertTrue(endpoints.contains(VoiceProviderPreset.doubao.endpoint), "默认接口要在可选列表里")
+    let nostream = try XCTUnwrap(endpoints.first { $0.hasSuffix("bigmodel_nostream") })
+    var config = CustomServiceConfiguration.loadVoicePreset(.doubao, defaults: defaults)
+    config.endpoint = nostream
+    try config.save(.voice, token: "", defaults: defaults)
+    XCTAssertEqual(CustomServiceConfiguration.loadVoicePreset(.doubao, defaults: defaults).endpoint, nostream)
+    XCTAssertEqual(CustomServiceConfiguration.load(.voice, defaults: defaults).endpoint, nostream)
+
+    XCTAssertEqual(DoubaoHostFrameCodec.transcript(in: ["result": ["text": "你好"]]), "你好")
+    XCTAssertEqual(DoubaoHostFrameCodec.transcript(in: ["result": [["text": "你好，"], ["text": "世界"]]]), "你好，世界")
+    XCTAssertEqual(DoubaoHostFrameCodec.transcript(in: ["result": [[String: Any]]()]), "")
+    XCTAssertEqual(DoubaoHostFrameCodec.transcript(in: ["text": "网关"]), "网关")
+    XCTAssertNil(DoubaoHostFrameCodec.transcript(in: [:]))
   }
 
   func testConfigurationRejectsUnsafeOrIncompleteEndpoints() {
@@ -163,6 +247,49 @@ final class CustomServiceTests: XCTestCase {
       XCTAssertFalse(error.localizedDescription.contains("private server detail"))
     }
   }
+
+  func testConnectionTestAcceptsAnySuccessAndReportsHTTPFailure() async throws {
+    let session = URLSessionConfiguration.ephemeral
+    session.protocolClasses = [FixtureProtocol.self]
+    var configuration = CustomServiceConfiguration()
+    configuration.endpoint = "https://msime-tests.invalid/success"
+    configuration.model = "fixture"
+    try await CustomServiceClient.test(kind: .ai, configuration: configuration, token: "fixture-token",
+                                       sessionConfiguration: session)
+    // The fixture's chat reply is not a transcript; a voice test still passes on the status alone.
+    try await CustomServiceClient.test(kind: .voice, configuration: configuration, token: "fixture-token",
+                                       sessionConfiguration: session)
+    configuration.endpoint = "https://msime-tests.invalid/denied"
+    do {
+      try await CustomServiceClient.test(kind: .ai, configuration: configuration, token: "fixture-token",
+                                         sessionConfiguration: session)
+      XCTFail("HTTP failure was accepted")
+    } catch {
+      XCTAssertTrue(error.localizedDescription.contains("401"))
+    }
+  }
+
+  func testConnectionTestSendsOneSecondOfSilence() throws {
+    let pcm = Data(count: 32_000)
+    let wav = CustomServiceClient.silentWAV(pcm)
+    XCTAssertEqual(wav.count, 44 + pcm.count)
+    XCTAssertEqual(WAVPCMExtractor.extract(from: wav), pcm)
+  }
+
+  func testDoubaoConnectionTestTreatsAnEmptyTranscriptAsAccepted() async throws {
+    let transport = DoubaoRequestFixtureTransport()
+    let codec = DoubaoVoiceCoordinator.FrameCodec(
+      startFrame: { Data([0x01]) },
+      audioFrame: { _, _, _ in Data([0x02]) },
+      decodeFrame: { _ in (true, "") }
+    )
+    var configuration = CustomServiceConfiguration.loadVoicePreset(.doubao)
+    configuration.voiceAppKey = "fixture-app"
+    configuration.voiceResourceID = "fixture-resource"
+    try await CustomServiceClient.test(kind: .voice, configuration: configuration, token: "fixture-access",
+                                       doubaoClient: DoubaoVoiceClient(transport: transport, codec: codec))
+    XCTAssertEqual(transport.handshake?.accessKey, "fixture-access")
+  }
 }
 
 private final class DoubaoRequestFixtureTransport: DoubaoVoiceTransport {
@@ -173,6 +300,30 @@ private final class DoubaoRequestFixtureTransport: DoubaoVoiceTransport {
   func start(endpoint: URL, handshake: DoubaoHandshake) async throws { self.handshake = handshake }
   func send(binary frame: Data) async throws { sent.append(frame) }
   func receive() async throws -> Data { Data([0xFF]) }
+  func finish() {}
+}
+
+/// Answers with a partial result at once and holds the final one until the last packet has gone out, the order a live session sees.
+private final class DoubaoLiveFixtureTransport: DoubaoVoiceTransport, @unchecked Sendable {
+  private let lock = NSLock()
+  private var sent: [Data] = []
+  private var received = 0
+  var handshake: DoubaoHandshake?
+
+  var sentFrames: [Data] { lock.withLock { sent } }
+
+  func start(endpoint: URL) async throws {}
+  func start(endpoint: URL, handshake: DoubaoHandshake) async throws { self.handshake = handshake }
+  func send(binary frame: Data) async throws { lock.withLock { sent.append(frame) } }
+  func receive() async throws -> Data {
+    let first = lock.withLock { () -> Bool in
+      received += 1
+      return received == 1
+    }
+    if first { return Data([0xA1]) }
+    while !lock.withLock({ sent.contains(Data([0xFD])) }) { try await Task.sleep(nanoseconds: 1_000_000) }
+    return Data([0xFF])
+  }
   func finish() {}
 }
 
@@ -205,6 +356,16 @@ final class CatalogFixtureProtocol: URLProtocol, @unchecked Sendable {
 }
 
 extension CustomServiceTests {
+  func testAnthropicAIRequestUsesNativeAuthenticationHeaders() throws {
+    let configuration = CustomServiceConfiguration.loadPreset(.anthropic)
+    let request = try CustomServiceClient.makeRequest(
+      kind: .ai, configuration: configuration, prompt: "Reply OK", text: "OK", wav: nil,
+      token: "fixture")
+    XCTAssertEqual(request.value(forHTTPHeaderField: "x-api-key"), "fixture")
+    XCTAssertEqual(request.value(forHTTPHeaderField: "anthropic-version"), "2023-06-01")
+    XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+  }
+
   func testModelCatalogUsesKeyWithoutRequiringAModelAndFiltersCapabilities() async throws {
     let session = URLSessionConfiguration.ephemeral
     session.protocolClasses = [CatalogFixtureProtocol.self]

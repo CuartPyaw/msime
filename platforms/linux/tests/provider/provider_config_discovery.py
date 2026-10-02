@@ -28,6 +28,10 @@ def local_fetch(url, *args, **kwargs):
         return {"choices": [{"message": {"content": json.dumps({"candidates": [{"text": "synthetic candidate"}]})}}]}
     raise AssertionError("unexpected endpoint")
 module.fetch = local_fetch
+import os
+if os.environ.pop("MSIME_TEST_SOCKET_ACTIVATION", None):
+    # systemd names the process it activates; the test cannot know the pid before the fork.
+    os.environ["LISTEN_PID"] = str(os.getpid())
 module.main()
 '''
 
@@ -39,13 +43,12 @@ class ConfigDiscovery(unittest.TestCase):
         self.root = Path(self.directory.name)
         self.config = self.root / "config"
         self.address = self.root / "provider.sock"
-        # msime_provider_runtime is installed beside the provider scripts, so that is
-# the directory the launched provider has to import from.
+        # msime_provider_runtime is installed beside the provider scripts, so that is the directory the launched provider has to import from.
         self.env = {**os.environ, "PYTHONPATH": str(ROOT / "scripts")}
 
     def start(self, *args):
         process = subprocess.Popen(
-            [sys.executable, "-c", HARNESS, str(ROOT / "scripts" / "msime-client-online-provider"),
+            [sys.executable, "-c", HARNESS, str(ROOT / "scripts" / "msime-linux-online-provider"),
              str(self.address), *map(str, args)], env=self.env,
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         self.addCleanup(self.stop, process)
@@ -66,7 +69,7 @@ class ConfigDiscovery(unittest.TestCase):
                 return json.loads(reader.readline(16385))
 
     def test_launcher_tracks_directory_before_files_exist(self):
-        loader = importlib.machinery.SourceFileLoader("launcher", str(ROOT / "scripts" / "msime-client-provider-session"))
+        loader = importlib.machinery.SourceFileLoader("launcher", str(ROOT / "scripts" / "msime-linux-provider-session"))
         spec = importlib.util.spec_from_loader(loader.name, loader)
         module = importlib.util.module_from_spec(spec)
         loader.exec_module(module)
@@ -91,8 +94,8 @@ class ConfigDiscovery(unittest.TestCase):
         ai = {"cloud_candidates": False, "cloud_eligible": False, "ai_eligible": True,
               "pinyin_segments": ["ni", "hao"], "ai_assistant": {
                   "enabled": True, "provider": "synthetic", "endpoint": "https://provider.example.invalid/",
-                  "model": "synthetic", "prompt": "synthetic prompt"}}
-        translation = {"candidates": ["你好"], "target_language": "en"}
+                  "model": "synthetic", "prompt_custom_1": "synthetic prompt"}}
+        translation = {"candidates": ["你好"], "target_language": "en", "provider": "tencent"}
         def check(enabled):
             self.assertEqual(bool(self.request("online", ai)["candidates"]), enabled)
             self.assertEqual(bool(self.request("translation", translation)["translations"]), enabled)
@@ -133,6 +136,41 @@ class ConfigDiscovery(unittest.TestCase):
                 process = self.start(option, self.root / "absent.json")
                 process.communicate(timeout=3)
                 self.assertEqual(process.returncode, 2)
+
+    def test_serves_a_socket_passed_by_systemd_and_leaves_it_in_place(self):
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.addCleanup(listener.close)
+        listener.bind(str(self.address))
+        listener.listen()
+        env = {**self.env, "MSIME_TEST_SOCKET_ACTIVATION": "1", "LISTEN_FDS": "1"}
+        process = subprocess.Popen(
+            [sys.executable, "-c", HARNESS, str(ROOT / "scripts" / "msime-linux-online-provider"),
+             str(self.address), "--config-directory", str(self.config)], env=env,
+            pass_fds=(3,), preexec_fn=lambda: os.dup2(listener.fileno(), 3),
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        self.addCleanup(self.stop, process)
+        translation = {"candidates": ["你好"], "target_language": "en", "provider": "tencent"}
+        # No startup lock and no bind: the request is answered on the socket the test created.
+        self.assertEqual(self.request("translation", translation), {"translations": []})
+        self.assertFalse(Path(str(self.address) + ".lock").exists())
+        process.terminate()
+        process.communicate(timeout=5)
+        # systemd keeps the path across provider restarts, so the provider must not remove it.
+        self.assertTrue(self.address.exists())
+
+    def test_rejects_an_inherited_socket_for_another_path(self):
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.addCleanup(listener.close)
+        listener.bind(str(self.root / "other.sock"))
+        listener.listen()
+        env = {**self.env, "MSIME_TEST_SOCKET_ACTIVATION": "1", "LISTEN_FDS": "1"}
+        process = subprocess.Popen(
+            [sys.executable, "-c", HARNESS, str(ROOT / "scripts" / "msime-linux-online-provider"),
+             str(self.address), "--config-directory", str(self.config)], env=env,
+            pass_fds=(3,), preexec_fn=lambda: os.dup2(listener.fileno(), 3),
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        process.communicate(timeout=5)
+        self.assertEqual(process.returncode, 2)
 
     def test_relative_directory_is_rejected(self):
         process = self.start("--config-directory", "relative")

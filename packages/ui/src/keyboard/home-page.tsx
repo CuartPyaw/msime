@@ -1,6 +1,11 @@
-import { ScreenKeyboardPreview, type TouchKeyboardSkin } from "./screen-keyboard-preview";
+import { useId } from "react";
+import { ScreenKeyboardPreview } from "./screen-keyboard-preview";
+import { groupTitle } from "../core/platform-controls-style";
+import { keyboardThemeId, themeEntry } from "../theme/global-theme";
 import { useCandidatePreviewTheme } from "../candidate/candidate-preview-theme";
+import { ActionButton } from "../core/action-button";
 import type { Preferences, TouchKeyboardScheme } from "../index";
+import { touchKeyboardSchemeTitle } from "../settings/touch-keyboard-scheme-helpers";
 
 // Every tappable surface on this page is the same card: full width, a hairline that strengthens on
 // hover, and the shared press animation. Named here rather than repeated at each of the five call
@@ -108,38 +113,18 @@ export interface MoreSettingsPage {
   icon: string;
 }
 
+/** 「全部设置」里的一组页面；`title` 是导航组名，为空时不显示组名。 */
+export interface MoreSettingsGroup {
+  title?: string;
+  pages: readonly MoreSettingsPage[];
+}
+
 export interface HomePageActions {
   openKeyboard?: () => Promise<void>;
   openEmojiPanel?: () => Promise<void>;
   openClipboardPanel?: () => Promise<void>;
   openSystemKeyboardSettings?: () => Promise<void>;
   showInputMethodPicker?: () => Promise<void>;
-}
-
-function schemeTitle(preferences: Preferences): string {
-  const selected = preferences.touch_keyboard_schemes?.selected;
-  if (selected) {
-    return {
-      quanpin: "全拼 26 键",
-      nine_key: "全拼 9 键",
-      xiaohe: "小鹤双拼",
-      ziranma: "自然码双拼",
-      microsoft: "微软双拼",
-      shoudao: "首道双拼",
-      wubi: "86 五笔",
-      japanese_nine_key: "日语 9 键",
-      japanese: "日语 26 键",
-      handwriting: "手写",
-      thoughtful_reply: "高情商回复",
-    }[selected];
-  }
-  if (preferences.touch_keyboard_layout === "handwriting") return "手写";
-  if (preferences.touch_keyboard_layout === "nine_key")
-    return preferences.scheme === "japanese" ? "日语 9 键" : "全拼 9 键";
-  if (preferences.scheme === "japanese") return "日语 26 键";
-  if (preferences.scheme === "wubi") return "86 五笔";
-  if (preferences.scheme === "shuangpin") return `${preferences.shuangpin_profile} 双拼`;
-  return "全拼 26 键";
 }
 
 export function HomePage({
@@ -149,6 +134,7 @@ export function HomePage({
   onSelectScheme,
   onOpenChat,
   touchLayout = false,
+  ios = false,
 }: {
   preferences: Preferences;
   actions?: HomePageActions;
@@ -156,23 +142,14 @@ export function HomePage({
   onOpenChat?: () => void;
   onSelectScheme?: (scheme: TouchKeyboardScheme) => void;
   touchLayout?: boolean;
+  /** iOS opens the keyboard extension's settings, where 完全访问 lives; Android and HarmonyOS open the system input method settings. */
+  ios?: boolean;
 }) {
   const theme = useCandidatePreviewTheme(preferences.theme, preferences.screen_keyboard_theme);
-  const skin = preferences.touch_keyboard_skin ?? "forest";
-  const customDesign = preferences.custom_touch_keyboard_skin;
-  const skinTitle =
-    skin === "custom"
-      ? "我的皮肤"
-      : ({
-          forest: "水杉绿",
-          ocean: "海盐蓝",
-          rose: "浅蔷薇",
-          porcelain: "素白瓷",
-          typewriter: "纸上时光",
-          candy: "奶油桃桃",
-          midnight: "霓虹夜航",
-          blueprint: "工程蓝图",
-        }[skin] ?? "水杉绿");
+  const selected = themeEntry(preferences.global_theme).id;
+  const skin = keyboardThemeId(selected, preferences.custom_theme);
+  const customDesign = preferences.custom_theme?.keyboard ?? undefined;
+  const skinTitle = selected === "custom" ? "我的皮肤" : themeEntry(selected).title;
   const invokeAction = (action?: () => Promise<void>) => {
     if (action) void action();
   };
@@ -218,7 +195,7 @@ export function HomePage({
           <span>
             <strong className={cardTitle}>我的键盘</strong>
             <small className={cardNote}>
-              {skinTitle} · {schemeTitle(preferences)}
+              {skinTitle} · {touchKeyboardSchemeTitle(preferences)}
             </small>
           </span>
           <em className="shrink-0 grow-0 basis-auto rounded-full bg-accent-soft px-2 py-1 text-[11px] not-italic text-accent">
@@ -227,7 +204,7 @@ export function HomePage({
         </div>
         <ScreenKeyboardPreview
           theme={theme}
-          skin={skin as TouchKeyboardSkin}
+          skin={skin}
           customDesign={customDesign}
           layout={touchLayout ? "touch" : "desktop"}
         />
@@ -249,7 +226,7 @@ export function HomePage({
             glyph="◈"
             icon={new URL("../assets/skin.svg", import.meta.url).href}
           />
-          <strong className={quickTitle}>皮肤</strong>
+          <strong className={quickTitle}>主题</strong>
           <small className={quickNote}>{skinTitle}</small>
         </button>
         <button type="button" className={quickTile} onClick={() => onOpenPage("input")}>
@@ -260,7 +237,7 @@ export function HomePage({
             icon={new URL("../assets/input.svg", import.meta.url).href}
           />
           <strong className={quickTitle}>输入方案</strong>
-          <small className={quickNote}>{schemeTitle(preferences)}</small>
+          <small className={quickNote}>{touchKeyboardSchemeTitle(preferences)}</small>
         </button>
         <button type="button" className={quickTile} onClick={() => onOpenPage("screen-keyboard")}>
           <QuickIcon
@@ -308,7 +285,7 @@ export function HomePage({
             icon={new URL("../assets/utilities.svg", import.meta.url).href}
           />
           <strong className={quickTitle}>系统设置</strong>
-          <small className={quickNote}>启用与完全访问</small>
+          <small className={quickNote}>{ios ? "启用与完全访问" : "启用与设为默认"}</small>
         </button>
       </div>
       <button
@@ -358,7 +335,7 @@ export function HomePage({
         />
         <span className={rowBody}>
           <strong className={cardTitle}>全部设置</strong>
-          <small className={cardNote}>输入偏好、词库、AI 与语音</small>
+          <small className={cardNote}>打字、外观、语音与词库</small>
         </span>
         <span className={rowChevron} aria-hidden="true">
           ›
@@ -366,40 +343,32 @@ export function HomePage({
       </button>
       <div className="flex flex-wrap gap-[9px]">
         {actions?.openEmojiPanel && (
-          <button
-            type="button"
+          <ActionButton
+            action={() => invokeAction(actions.openEmojiPanel)}
             className="secondary m-0"
-            onClick={() => invokeAction(actions.openEmojiPanel)}
-          >
-            表情与符号
-          </button>
+            label="表情与符号"
+          />
         )}
         {actions?.openClipboardPanel && (
-          <button
-            type="button"
+          <ActionButton
+            action={() => invokeAction(actions.openClipboardPanel)}
             className="secondary m-0"
-            onClick={() => invokeAction(actions.openClipboardPanel)}
-          >
-            剪贴板历史
-          </button>
+            label="剪贴板历史"
+          />
         )}
         {actions?.openSystemKeyboardSettings && (
-          <button
-            type="button"
+          <ActionButton
+            action={() => invokeAction(actions.openSystemKeyboardSettings)}
             className="secondary m-0"
-            onClick={() => invokeAction(actions.openSystemKeyboardSettings)}
-          >
-            系统键盘设置
-          </button>
+            label={ios ? "系统键盘设置" : "系统输入法设置"}
+          />
         )}
         {actions?.showInputMethodPicker && (
-          <button
-            type="button"
+          <ActionButton
+            action={() => invokeAction(actions.showInputMethodPicker)}
             className="secondary m-0"
-            onClick={() => invokeAction(actions.showInputMethodPicker)}
-          >
-            选择输入法
-          </button>
+            label="选择输入法"
+          />
         )}
       </div>
     </section>
@@ -407,23 +376,50 @@ export function HomePage({
 }
 
 /**
- * The pages that have no tab of their own.
+ * 没有独立标签的设置页。
  *
- * Reached from the 键盘 tab rather than from a fifth cell in the bar, because the source's bar is
- * four tabs and its other pages sit one level down inside the first of them. One grouped list with
- * a hairline between the rows, not a card per page.
+ * 从「键盘」标签进入，而不是在标签栏里加第五格：来源应用的标签栏只有四格，其余页面都在第一个标签下一层。每组画成一张带分隔线的列表，而不是每页一张卡片。
+ *
+ * 每组列表上方显示导航的组名（与桌面侧栏同一份 `settingsNavGroups`），手机上只剩一项的组也能看出它属于哪一类。
  */
 export function MoreSettingsPage({
-  pages,
+  groups,
   onOpenPage,
 }: {
-  pages: readonly MoreSettingsPage[];
+  /** 导航分组，每组画成组名下的一张列表。 */
+  groups: readonly MoreSettingsGroup[];
   onOpenPage: (page: string) => void;
 }) {
   return (
     <section className="flex flex-col gap-3" aria-label="全部设置">
+      {groups.map((group) => (
+        <MoreSettingsGroupList key={group.pages[0]?.id} group={group} onOpenPage={onOpenPage} />
+      ))}
+    </section>
+  );
+}
+
+function MoreSettingsGroupList({
+  group,
+  onOpenPage,
+}: {
+  group: MoreSettingsGroup;
+  onOpenPage: (page: string) => void;
+}) {
+  const titleId = useId();
+  return (
+    <div
+      className="flex flex-col gap-[var(--p-g-title-gap)]"
+      role={group.title ? "group" : undefined}
+      aria-labelledby={group.title ? titleId : undefined}
+    >
+      {group.title && (
+        <h3 id={titleId} className={groupTitle}>
+          {group.title}
+        </h3>
+      )}
       <div className={listGroup}>
-        {pages.map((item) => (
+        {group.pages.map((item) => (
           <button
             key={item.id}
             type="button"
@@ -440,6 +436,6 @@ export function MoreSettingsPage({
           </button>
         ))}
       </div>
-    </section>
+    </div>
   );
 }

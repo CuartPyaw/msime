@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -13,16 +13,8 @@ use std::path::{Path, PathBuf};
 #[serde(deny_unknown_fields)]
 pub struct Artifact {
     pub name: String,
-    /// Download location. Empty when the artifact is supplied by the Engine tree instead; see
-    /// `engine_path`.
-    #[serde(default)]
+    /// HTTPS download location.
     pub url: String,
-    /// Path inside the pinned Engine checkout, for artifacts that ship with the Engine rather than
-    /// with the dictionary release. The Engine is already pinned by commit and archive SHA-256 in
-    /// engine-lock.json, so republishing the same bytes in the dictionary release would create a
-    /// second source of truth for them.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub engine_path: String,
     pub sha256: String,
     pub size: u64,
 }
@@ -34,6 +26,10 @@ pub struct ResourceSet {
     pub source_commit: String,
     pub artifacts: Vec<Artifact>,
 }
+
+/// macOS 发布包不内置、改为按需下载的桌面词库文件。两者作为一个整体出现或缺席：日文词典与它的 Mozc 许可说明必须同时在场，只有一个在场时按原规则校验失败。
+pub const MACOS_ON_DEMAND_ARTIFACTS: [&str; 2] =
+    ["dict_japanese.dat", "mozc_dictionary_oss_README.txt"];
 
 #[derive(Debug, thiserror::Error)]
 pub enum ResourceError {
@@ -53,17 +49,12 @@ pub enum ResourceError {
 
 impl ResourceSet {
     pub fn validate(&self) -> Result<(), ResourceError> {
-        let hex = |text: &str, len| {
-            text.len() == len
-                && text
-                    .bytes()
-                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-        };
+        let hex = crate::is_lower_hex;
         if !hex(&self.source_commit, 40) || self.artifacts.is_empty() || self.artifacts.len() > 128
         {
             return Err(ResourceError::InvalidManifest);
         }
-        let mut names = HashSet::new();
+        let mut names = HashSet::with_capacity(self.artifacts.len());
         for artifact in &self.artifacts {
             // A flat, portable resource layout. Reject aliases, traversal and device names.
             let stem = artifact
@@ -80,20 +71,12 @@ impl ResourceSet {
                 || artifact.name.len() > 128
                 || artifact.name.starts_with('.')
                 || artifact.name.ends_with('.')
-                || !artifact
-                    .name
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+                || !crate::is_ascii_identifier_with_dots(&artifact.name)
                 || reserved
                 || !names.insert(artifact.name.to_ascii_lowercase())
                 || !hex(&artifact.sha256, 64)
                 || artifact.size > 2 * 1024 * 1024 * 1024
-                // Exactly one source, and a download must be HTTPS. An artifact with both, or
-                // with neither, is a manifest that cannot be resolved unambiguously.
-                || artifact.url.is_empty() == artifact.engine_path.is_empty()
-                || (!artifact.url.is_empty() && !artifact.url.starts_with("https://"))
-                || artifact.engine_path.contains("..")
-                || artifact.engine_path.starts_with('/')
+                || !artifact.url.starts_with("https://")
             {
                 return Err(ResourceError::InvalidManifest);
             }
@@ -104,7 +87,63 @@ impl ResourceSet {
     pub fn generation(&self) -> Result<String, ResourceError> {
         self.validate()?;
         let encoded = serde_json::to_vec(self).map_err(|_| ResourceError::InvalidManifest)?;
-        Ok(format!("{:x}", Sha256::digest(encoded)))
+        Ok(hex::encode(Sha256::digest(encoded)))
+    }
+
+    /// 只保留 `names` 中列出的文件，顺序与锁文件一致，source_commit 不变。
+    pub fn only(&self, names: &[&str]) -> ResourceSet {
+        self.filtered(|name| names.contains(&name))
+    }
+
+    /// 去掉 `names` 中列出的文件，是 [`ResourceSet::only`] 的补集。
+    pub fn without(&self, names: &[&str]) -> ResourceSet {
+        self.filtered(|name| !names.contains(&name))
+    }
+
+    /// 目录实际按哪一份清单发货。`on_demand` 中的文件全部不存在（连符号链接也没有）时，说明这是不内置按需文件的发布包，返回去掉它们的子集；其余情况（列表为空、部分存在、是符号链接、读取出错）一律返回完整清单，让 `verify` 像以前一样报告缺一半或文件损坏。
+    pub fn as_shipped_in(&self, directory: &Path, on_demand: &[&str]) -> ResourceSet {
+        let all_absent = !on_demand.is_empty()
+            && on_demand.iter().all(|name| {
+                matches!(
+                    fs::symlink_metadata(directory.join(name)),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound
+                )
+            });
+        if all_absent {
+            self.without(on_demand)
+        } else {
+            self.clone()
+        }
+    }
+
+    fn filtered(&self, keep: impl Fn(&str) -> bool) -> ResourceSet {
+        ResourceSet {
+            source_commit: self.source_commit.clone(),
+            artifacts: self
+                .artifacts
+                .iter()
+                .filter(|artifact| keep(&artifact.name))
+                .cloned()
+                .collect(),
+        }
+    }
+}
+
+/// Remove stages an installer left when it was killed mid-download. Only called under the
+/// exclusive `resources.lock`, so none of them can still be in use. Only real directories are
+/// removed, and a failure never stops the install.
+fn sweep_abandoned_stages(root: &Path) {
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let is_stage = entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.starts_with("incoming-"));
+        if is_stage && entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            let _ = fs::remove_dir_all(entry.path());
+        }
     }
 }
 
@@ -124,14 +163,10 @@ impl ResourceStore {
         mut fetch: impl FnMut(&Artifact) -> Result<Box<dyn Read>, std::io::Error>,
     ) -> Result<PathBuf, ResourceError> {
         let generation = specification.generation()?;
-        fs::create_dir_all(&self.root)?;
-        let lock = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(self.root.join("resources.lock"))?;
+        crate::storage::create_directory_and_check(&self.root)?;
+        let lock = crate::file_lock::open_lock_file(self.root.join("resources.lock"))?;
         crate::file_lock::exclusive(&lock)?;
+        sweep_abandoned_stages(&self.root);
         let destination = self.root.join(generation);
         if fs::symlink_metadata(&destination).is_ok() {
             self.verify(&destination, specification)?;
@@ -151,6 +186,7 @@ impl ResourceStore {
         Ok(destination)
     }
 
+    /// Check that `directory` holds exactly the artifacts `specification` pins, each with its pinned length and SHA-256, and nothing else. One exception: a real `helpcodes/` directory is let through for the Engine's helpcode tables. `verify` never writes.
     pub fn verify(
         &self,
         directory: &Path,
@@ -165,11 +201,8 @@ impl ResourceStore {
                 describe(kind)
             )));
         }
-        let expected: HashSet<_> = specification
-            .artifacts
-            .iter()
-            .map(|a| a.name.as_str())
-            .collect();
+        let mut expected = HashSet::with_capacity(specification.artifacts.len());
+        expected.extend(specification.artifacts.iter().map(|a| a.name.as_str()));
         let mut count = 0;
         for entry in fs::read_dir(directory)? {
             let entry = entry?;
@@ -181,6 +214,10 @@ impl ResourceStore {
                     directory.display()
                 )));
             };
+            // The Engine reads its helpcode tables from `helpcodes/` under this same directory. They are an Engine asset rather than part of the pinned dictionary release, so a host that ships them puts them here; only the directory itself is let through, and every pinned file is still checked below.
+            if name == HELPCODE_DIRECTORY && kind.is_dir() {
+                continue;
+            }
             if !kind.is_file() {
                 return Err(ResourceError::ExistingGeneration(format!(
                     "{name} in {} is a {}, not a file",
@@ -197,11 +234,13 @@ impl ResourceStore {
             count += 1;
         }
         if count != expected.len() {
-            let mut missing: Vec<_> = expected
-                .iter()
-                .filter(|name| !directory.join(name).is_file())
-                .copied()
-                .collect();
+            let mut missing = Vec::with_capacity(expected.len());
+            missing.extend(
+                expected
+                    .iter()
+                    .filter(|name| !directory.join(name).is_file())
+                    .copied(),
+            );
             missing.sort_unstable();
             return Err(ResourceError::ExistingGeneration(format!(
                 "{} holds {count} of the {} pinned resources, missing: {}",
@@ -217,6 +256,14 @@ impl ResourceStore {
         Ok(())
     }
 }
+
+/// Where the Engine looks for helpcode tables, relative to the resource directory (`helpcodes/…` in its asset contract).
+const HELPCODE_DIRECTORY: &str = "helpcodes";
+
+/// Verification markers are generated locally and contain only the pinned
+/// artifact names and metadata. Keep a corrupt or replaced marker from
+/// allocating without bound before it is discarded as a cache miss.
+const MAX_MARKER_BYTES: u64 = 64 * 1024;
 
 fn describe(kind: std::fs::FileType) -> &'static str {
     if kind.is_dir() {
@@ -251,7 +298,7 @@ fn copy_verified(
         hash.update(&buffer[..count]);
         output.write_all(&buffer[..count])?;
     }
-    if remaining != 0 || format!("{:x}", hash.finalize()) != artifact.sha256 {
+    if remaining != 0 || hex::encode(hash.finalize()) != artifact.sha256 {
         return Err(ResourceError::Integrity);
     }
     Ok(())
@@ -262,9 +309,7 @@ fn copy_verified(
 /// `verify` reads every artifact to recompute its SHA-256. That is the right thing to do once,
 /// and the wrong thing to do on every launch: the desktop set is 169 MB, which costs about half a
 /// second of hashing before the first keystroke can be served, every time the Server process
-/// starts. The Engine is already handled this way - `scripts/fetch_engine.py` writes a marker
-/// naming what it prepared and skips the work when it matches - and this is the same idea for the
-/// dictionaries.
+/// starts.
 ///
 /// What the marker cannot do is replace the hashes. It records the identity of the *set* and, per
 /// file, the size and modification time the verified bytes had. A file whose size or mtime moved is
@@ -281,6 +326,11 @@ pub struct VerifiedMarker {
     pub directory: String,
     /// `(name, size, modified-nanoseconds)` per artifact, sorted by name.
     pub files: Vec<(String, u64, u128)>,
+    /// Every entry in the resource directory, including the Engine-owned `helpcodes` directory.
+    /// The fast path must notice an unpinned file appearing after the initial verification; the
+    /// full verifier rejects such files, so a marker that does not record the directory shape
+    /// would silently skip that check on the next launch.
+    pub entries: Vec<String>,
 }
 
 impl VerifiedMarker {
@@ -289,11 +339,50 @@ impl VerifiedMarker {
         directory: &Path,
         specification: &ResourceSet,
     ) -> Result<Option<Self>, ResourceError> {
-        let mut files = Vec::with_capacity(specification.artifacts.len());
-        for artifact in &specification.artifacts {
-            let Ok(metadata) = fs::metadata(directory.join(&artifact.name)) else {
+        let mut expected = HashSet::with_capacity(specification.artifacts.len());
+        expected.extend(
+            specification
+                .artifacts
+                .iter()
+                .map(|artifact| artifact.name.as_str()),
+        );
+        let Ok(directory_entries) = fs::read_dir(directory) else {
+            return Ok(None);
+        };
+        let mut entries = Vec::with_capacity(specification.artifacts.len() + 1);
+        for entry in directory_entries {
+            let Ok(entry) = entry else {
                 return Ok(None);
             };
+            let Ok(kind) = entry.file_type() else {
+                return Ok(None);
+            };
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+                return Ok(None);
+            };
+            // Keep the same exception as `verify`: Engine helpcode tables are installed beside
+            // the pinned artifacts, but the directory itself must be a real directory.
+            if name == HELPCODE_DIRECTORY {
+                if !kind.is_dir() {
+                    return Ok(None);
+                }
+            } else if !expected.contains(name.as_str()) || !kind.is_file() {
+                return Ok(None);
+            }
+            entries.push(name);
+        }
+        entries.sort();
+        let mut files = Vec::with_capacity(specification.artifacts.len());
+        for artifact in &specification.artifacts {
+            // `metadata` follows symlinks. The full verifier rejects them, so use
+            // `symlink_metadata` here and force a marker miss instead of letting a symlinked
+            // artifact inherit the target file's size and mtime.
+            let Ok(metadata) = fs::symlink_metadata(directory.join(&artifact.name)) else {
+                return Ok(None);
+            };
+            if !metadata.file_type().is_file() {
+                return Ok(None);
+            }
             let Ok(modified) = metadata.modified() else {
                 return Ok(None);
             };
@@ -311,6 +400,7 @@ impl VerifiedMarker {
             generation: specification.generation()?,
             directory: directory.to_string_lossy().into_owned(),
             files,
+            entries,
         }))
     }
 
@@ -319,15 +409,50 @@ impl VerifiedMarker {
     /// A marker that is absent, unreadable or not the shape this version writes is simply a miss:
     /// the caller hashes, and writes a fresh one.
     pub fn read(path: &Path) -> Option<Self> {
-        serde_json::from_slice(&fs::read(path).ok()?).ok()
+        if path
+            .parent()
+            .is_some_and(|parent| crate::storage::reject_symlink(parent).is_err())
+        {
+            return None;
+        }
+        let metadata = fs::symlink_metadata(path).ok()?;
+        if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+            return None;
+        }
+        let bytes = crate::bounded_io::read_bounded_file_with(
+            File::open(path).ok()?,
+            MAX_MARKER_BYTES,
+            || (),
+            |_| (),
+        )
+        .ok()?;
+        serde_json::from_slice(&bytes).ok()
     }
 
     pub fn write(&self, path: &Path) -> Result<(), ResourceError> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+        if let Ok(metadata) = fs::symlink_metadata(path) {
+            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+                return Err(ResourceError::Io(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "resource marker is not a regular file",
+                )));
+            }
+        }
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        if !crate::storage::create_directory_and_check(parent)? {
+            return Err(ResourceError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "marker parent is not a real directory",
+            )));
         }
         let encoded = serde_json::to_vec(self).map_err(|_| ResourceError::InvalidManifest)?;
-        fs::write(path, encoded)?;
+        let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+        temporary.write_all(&encoded)?;
+        temporary.as_file().sync_all()?;
+        temporary
+            .persist(path)
+            .map(|_| ())
+            .map_err(|error| error.error)?;
         Ok(())
     }
 }
@@ -342,8 +467,7 @@ mod tests {
             artifacts: vec![Artifact {
                 name: "msime.db".into(),
                 url: "https://example.invalid/msime.db".into(),
-                engine_path: String::new(),
-                sha256: format!("{:x}", Sha256::digest(b"fixture")),
+                sha256: hex::encode(Sha256::digest(b"fixture")),
                 size: 7,
             }],
         }
@@ -351,23 +475,153 @@ mod tests {
     fn source(bytes: &[u8]) -> Box<dyn Read> {
         Box::new(Cursor::new(bytes.to_vec()))
     }
+
+    fn fixture_artifact(name: &str, bytes: &[u8]) -> Artifact {
+        Artifact {
+            name: name.into(),
+            url: format!("https://example.invalid/{name}"),
+            sha256: hex::encode(Sha256::digest(bytes)),
+            size: bytes.len() as u64,
+        }
+    }
+
+    /// 在现有夹具上追加两个按需下载的文件，夹在核心文件中间，用来检查顺序保持不变。
+    fn desktop_specification() -> ResourceSet {
+        let mut set = specification();
+        set.artifacts
+            .push(fixture_artifact(MACOS_ON_DEMAND_ARTIFACTS[0], b"japanese"));
+        set.artifacts
+            .push(fixture_artifact(MACOS_ON_DEMAND_ARTIFACTS[1], b"readme"));
+        set.artifacts
+            .push(fixture_artifact("english.db", b"english"));
+        set
+    }
+
+    fn write_core(directory: &Path) {
+        fs::write(directory.join("msime.db"), b"fixture").unwrap();
+        fs::write(directory.join("english.db"), b"english").unwrap();
+    }
+
+    fn names(set: &ResourceSet) -> Vec<&str> {
+        set.artifacts.iter().map(|a| a.name.as_str()).collect()
+    }
+
     #[test]
-    fn an_artifact_names_exactly_one_source() {
-        let with = |url: &str, engine: &str| {
+    fn only_and_without_partition_the_set_in_lock_order() {
+        let spec = desktop_specification();
+        let on_demand = spec.only(&MACOS_ON_DEMAND_ARTIFACTS);
+        let core = spec.without(&MACOS_ON_DEMAND_ARTIFACTS);
+        assert_eq!(
+            names(&on_demand),
+            ["dict_japanese.dat", "mozc_dictionary_oss_README.txt"]
+        );
+        assert_eq!(names(&core), ["msime.db", "english.db"]);
+        assert_eq!(on_demand.source_commit, spec.source_commit);
+        assert_eq!(core.source_commit, spec.source_commit);
+        assert!(on_demand.validate().is_ok() && core.validate().is_ok());
+    }
+
+    #[test]
+    fn a_core_only_directory_ships_and_verifies_the_subset() {
+        let directory = tempfile::tempdir().unwrap();
+        write_core(directory.path());
+        let spec = desktop_specification();
+        let shipped = spec.as_shipped_in(directory.path(), &MACOS_ON_DEMAND_ARTIFACTS);
+        assert_eq!(names(&shipped), ["msime.db", "english.db"]);
+        let store = ResourceStore::new(directory.path());
+        assert!(store.verify(directory.path(), &shipped).is_ok());
+        assert_ne!(spec.generation().unwrap(), shipped.generation().unwrap());
+    }
+
+    #[test]
+    fn a_half_present_pair_is_verified_against_the_full_set() {
+        let directory = tempfile::tempdir().unwrap();
+        write_core(directory.path());
+        fs::write(directory.path().join("dict_japanese.dat"), b"japanese").unwrap();
+        let spec = desktop_specification();
+        let shipped = spec.as_shipped_in(directory.path(), &MACOS_ON_DEMAND_ARTIFACTS);
+        assert_eq!(names(&shipped), names(&spec));
+        let error = ResourceStore::new(directory.path())
+            .verify(directory.path(), &shipped)
+            .unwrap_err();
+        assert!(
+            matches!(&error, ResourceError::ExistingGeneration(message) if message.contains("mozc_dictionary_oss_README.txt")),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_complete_directory_ships_the_full_set() {
+        let directory = tempfile::tempdir().unwrap();
+        write_core(directory.path());
+        fs::write(directory.path().join("dict_japanese.dat"), b"japanese").unwrap();
+        fs::write(
+            directory.path().join("mozc_dictionary_oss_README.txt"),
+            b"readme",
+        )
+        .unwrap();
+        let spec = desktop_specification();
+        let shipped = spec.as_shipped_in(directory.path(), &MACOS_ON_DEMAND_ARTIFACTS);
+        assert_eq!(names(&shipped), names(&spec));
+        assert!(ResourceStore::new(directory.path())
+            .verify(directory.path(), &shipped)
+            .is_ok());
+    }
+
+    /// 用户词库代际取自完整锁文件的 generation，裁剪发货清单不能改变它。
+    #[test]
+    fn the_full_generation_is_unchanged() {
+        let lock: ResourceSet = serde_json::from_str(include_str!(
+            "../../../resources/desktop-dictionary.lock.json"
+        ))
+        .unwrap();
+        let before = lock.generation().unwrap();
+        let empty = tempfile::tempdir().unwrap();
+        let _ = lock.only(&MACOS_ON_DEMAND_ARTIFACTS);
+        let _ = lock.without(&MACOS_ON_DEMAND_ARTIFACTS);
+        let shipped = lock.as_shipped_in(empty.path(), &MACOS_ON_DEMAND_ARTIFACTS);
+        assert_eq!(lock.generation().unwrap(), before);
+        assert_eq!(lock.artifacts.len(), 9);
+        assert_eq!(shipped.artifacts.len(), 7);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_on_demand_file_still_fails_verification() {
+        let directory = tempfile::tempdir().unwrap();
+        write_core(directory.path());
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("dict_japanese.dat");
+        fs::write(&target, b"japanese").unwrap();
+        std::os::unix::fs::symlink(&target, directory.path().join("dict_japanese.dat")).unwrap();
+        let spec = desktop_specification();
+        let shipped = spec.as_shipped_in(directory.path(), &MACOS_ON_DEMAND_ARTIFACTS);
+        assert_eq!(names(&shipped), names(&spec));
+        assert!(ResourceStore::new(directory.path())
+            .verify(directory.path(), &shipped)
+            .is_err());
+    }
+
+    #[test]
+    fn an_empty_on_demand_list_keeps_the_full_set() {
+        let directory = tempfile::tempdir().unwrap();
+        write_core(directory.path());
+        let spec = desktop_specification();
+        assert_eq!(
+            names(&spec.as_shipped_in(directory.path(), &[])),
+            names(&spec)
+        );
+    }
+    #[test]
+    fn an_artifact_needs_an_https_url() {
+        let with = |url: &str| {
             let mut set = specification();
             set.artifacts[0].url = url.into();
-            set.artifacts[0].engine_path = engine.into();
             set.validate()
         };
-        assert!(with("https://example.invalid/a", "").is_ok());
-        assert!(with("", "googlepinyinime-rev/data/dict_pinyin.dat").is_ok());
-        // Neither source, or both, leaves the artifact unresolvable.
-        assert!(with("", "").is_err());
-        assert!(with("https://example.invalid/a", "data/a.dat").is_err());
-        // A download must still be HTTPS, and an Engine path must stay inside the checkout.
-        assert!(with("http://example.invalid/a", "").is_err());
-        assert!(with("", "../escape.dat").is_err());
-        assert!(with("", "/absolute.dat").is_err());
+        assert!(with("https://example.invalid/a").is_ok());
+        assert!(with("").is_err());
+        assert!(with("http://example.invalid/a").is_err());
     }
 
     #[test]
@@ -403,6 +657,45 @@ mod tests {
             assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
         }
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_rejects_a_symlinked_root() {
+        let parent = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let root = parent.path().join("resources");
+        std::os::unix::fs::symlink(outside.path(), &root).unwrap();
+        let store = ResourceStore::new(&root);
+
+        assert!(store
+            .install(&specification(), |_| Ok(source(b"fixture")))
+            .is_err());
+        assert!(!outside.path().join("resources.lock").exists());
+        assert!(outside.path().read_dir().unwrap().next().is_none());
+    }
+    #[test]
+    fn stages_an_interrupted_install_left_are_swept() {
+        let root = tempfile::tempdir().unwrap();
+        let store = ResourceStore::new(root.path());
+        let spec = specification();
+        let stale = root.path().join("incoming-abandoned");
+        fs::create_dir(&stale).unwrap();
+        fs::write(stale.join("msime.db"), b"fix").unwrap();
+        let path = store.install(&spec, |_| Ok(source(b"fixture"))).unwrap();
+        assert!(!stale.exists());
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 2);
+        // A cached install sweeps too, and a file of that name is left alone.
+        fs::create_dir(&stale).unwrap();
+        fs::write(root.path().join("incoming-note"), b"").unwrap();
+        assert_eq!(
+            store
+                .install(&spec, |_| panic!("must not fetch cached resources"))
+                .unwrap(),
+            path
+        );
+        assert!(!stale.exists());
+        assert!(root.path().join("incoming-note").is_file());
+    }
     #[test]
     fn failed_upgrade_preserves_previous_generation() {
         let root = tempfile::tempdir().unwrap();
@@ -415,6 +708,24 @@ mod tests {
             .is_err());
         assert_eq!(fs::read(old.join("msime.db")).unwrap(), b"fixture");
     }
+    #[test]
+    fn verification_admits_the_engine_helpcode_directory_only() {
+        let root = tempfile::tempdir().unwrap();
+        let store = ResourceStore::new(root.path());
+        let spec = specification();
+        let path = store.install(&spec, |_| Ok(source(b"fixture"))).unwrap();
+        fs::create_dir(path.join("helpcodes")).unwrap();
+        fs::write(path.join("helpcodes/helpcode.txt"), b"a=aa").unwrap();
+        assert!(store.verify(&path, &spec).is_ok());
+        // A file by that name, or any other extra directory, is still not in the pinned set.
+        fs::remove_dir_all(path.join("helpcodes")).unwrap();
+        fs::write(path.join("helpcodes"), b"").unwrap();
+        assert!(store.verify(&path, &spec).is_err());
+        fs::remove_file(path.join("helpcodes")).unwrap();
+        fs::create_dir(path.join("extra")).unwrap();
+        assert!(store.verify(&path, &spec).is_err());
+    }
+
     #[test]
     fn rejects_path_aliases_and_duplicate_names() {
         for name in [
@@ -491,6 +802,38 @@ mod tests {
         );
     }
 
+    #[test]
+    fn marker_misses_unpinned_entries_and_symlinked_artifacts() {
+        let directory = tempfile::tempdir().unwrap();
+        let spec = specification();
+        fs::write(directory.path().join("msime.db"), b"fixture").unwrap();
+        assert!(VerifiedMarker::describe(directory.path(), &spec)
+            .unwrap()
+            .is_some());
+
+        // Resource verification rejects files outside the pinned set. The marker fast path must
+        // therefore stop matching when one appears after the initial verification.
+        fs::write(directory.path().join("unexpected.db"), b"fixture").unwrap();
+        assert_eq!(
+            VerifiedMarker::describe(directory.path(), &spec).unwrap(),
+            None
+        );
+
+        fs::remove_file(directory.path().join("unexpected.db")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let target = directory.path().join("target.db");
+            fs::write(&target, b"fixture").unwrap();
+            fs::remove_file(directory.path().join("msime.db")).unwrap();
+            symlink(&target, directory.path().join("msime.db")).unwrap();
+            assert_eq!(
+                VerifiedMarker::describe(directory.path(), &spec).unwrap(),
+                None
+            );
+        }
+    }
+
     /// A marker that cannot be read is a miss, not a failure.
     #[test]
     fn an_unusable_marker_falls_back_to_hashing() {
@@ -503,11 +846,90 @@ mod tests {
         assert_eq!(VerifiedMarker::read(&path), None, "an older or newer shape");
 
         let spec = specification();
-        fs::write(directory.path().join("msime.db"), b"fixture").unwrap();
-        let marker = VerifiedMarker::describe(directory.path(), &spec)
+        let resources = directory.path().join("resources");
+        fs::create_dir(&resources).unwrap();
+        fs::write(resources.join("msime.db"), b"fixture").unwrap();
+        let marker = VerifiedMarker::describe(&resources, &spec)
             .unwrap()
             .unwrap();
         marker.write(&path).unwrap();
-        assert_eq!(VerifiedMarker::read(&path), Some(marker), "round trips");
+        assert_eq!(
+            VerifiedMarker::read(&path),
+            Some(marker.clone()),
+            "round trips"
+        );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let outside = directory.path().join("outside-marker.json");
+            fs::write(&outside, b"keep outside").unwrap();
+            fs::remove_file(&path).unwrap();
+            symlink(&outside, &path).unwrap();
+            assert_eq!(
+                VerifiedMarker::read(&path),
+                None,
+                "a symlinked marker is a cache miss"
+            );
+            assert!(
+                marker.write(&path).is_err(),
+                "a symlinked marker is not overwritten"
+            );
+            assert_eq!(fs::read(&outside).unwrap(), b"keep outside");
+            fs::remove_file(&path).unwrap();
+        }
+
+        fs::write(&path, vec![b' '; MAX_MARKER_BYTES as usize + 1]).unwrap();
+        assert_eq!(
+            VerifiedMarker::read(&path),
+            None,
+            "oversized markers are cache misses"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn marker_write_rejects_a_symlinked_parent() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let resources = root.path().join("resources");
+        fs::create_dir(&resources).unwrap();
+        fs::write(resources.join("msime.db"), b"fixture").unwrap();
+        let marker = VerifiedMarker::describe(&resources, &specification())
+            .unwrap()
+            .unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let linked = root.path().join("linked");
+        symlink(outside.path(), &linked).unwrap();
+
+        assert!(marker
+            .write(&linked.join("verified-resources.json"))
+            .is_err());
+        assert!(!outside.path().join("verified-resources.json").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn marker_read_ignores_a_symlinked_parent() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let resources = root.path().join("resources");
+        fs::create_dir(&resources).unwrap();
+        fs::write(resources.join("msime.db"), b"fixture").unwrap();
+        let marker = VerifiedMarker::describe(&resources, &specification())
+            .unwrap()
+            .unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let outside_path = outside.path().join("verified-resources.json");
+        marker.write(&outside_path).unwrap();
+        let linked = root.path().join("linked");
+        symlink(outside.path(), &linked).unwrap();
+
+        assert_eq!(
+            VerifiedMarker::read(&linked.join("verified-resources.json")),
+            None
+        );
     }
 }

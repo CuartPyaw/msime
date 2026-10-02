@@ -51,15 +51,11 @@ impl ImportKind {
 
     fn key_is_well_formed(self, key: &str, format: ImportFormat) -> bool {
         match self {
-            ImportKind::Pinyin => key.bytes().all(|byte| {
-                byte.is_ascii_lowercase()
-                    || byte == b'\''
-                    || (format == ImportFormat::Rime && byte == b' ')
-            }),
-            ImportKind::Wubi => key.bytes().all(|byte| byte.is_ascii_lowercase()),
-            ImportKind::QuickPhrase => key
-                .bytes()
-                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit()),
+            ImportKind::Pinyin => {
+                super::pinyin_code_is_well_formed(key, format == ImportFormat::Rime)
+            }
+            ImportKind::Wubi => super::wubi_code_is_well_formed(key),
+            ImportKind::QuickPhrase => super::quick_phrase_code_is_well_formed(key),
             ImportKind::English => super::english_code_is_well_formed(key),
         }
     }
@@ -225,13 +221,9 @@ pub fn parse(
     if text.len() > max_bytes {
         return Err(ImportError::TooLarge);
     }
-    // A NUL or stray control byte means the file is not the text format claimed;
-    // examining rows from it would be guesswork.
-    if text.contains('\0')
-        || text
-            .chars()
-            .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
-    {
+    // A disallowed control byte means the file is not the text format claimed; examining rows
+    // from it would be guesswork.
+    if crate::text::has_disallowed_control(text) {
         return Err(ImportError::ControlCharacters);
     }
 
@@ -252,11 +244,14 @@ pub fn parse(
 }
 
 /// Every row of the text in one column order, with unusable ones counted rather than fatal.
-fn parse_rows(kind: ImportKind, format: ImportFormat, text: &str) -> ImportReport {
+///
+/// Unlike [`parse`] this never refuses the text: it neither checks the envelope nor tries the other column order. A caller that already had the host refuse part of a larger file uses it to name that part's rows the way a single request would have.
+pub fn parse_rows(kind: ImportKind, format: ImportFormat, text: &str) -> ImportReport {
+    let row_capacity = text.lines().take(MAX_ENTRIES).count();
     let mut report = ImportReport {
-        entries: Vec::new(),
+        entries: Vec::with_capacity(row_capacity),
         failed: 0,
-        first_failures: Vec::new(),
+        first_failures: Vec::with_capacity(REPORTED_FAILURES),
         truncated: false,
         swapped: false,
     };
@@ -308,7 +303,8 @@ fn parse_row(
     format: ImportFormat,
     line: &str,
 ) -> Result<ImportEntry, ImportIssue> {
-    let columns: Vec<_> = line.split('\t').collect();
+    let mut columns = Vec::with_capacity(3);
+    columns.extend(line.splitn(4, '\t'));
     if !(2..=3).contains(&columns.len()) {
         return Err(ImportIssue::ColumnCount);
     }
@@ -332,16 +328,16 @@ fn parse_row(
     if key.len() > kind.key_limit() {
         return Err(ImportIssue::KeyTooLong);
     }
-    if !kind.key_is_well_formed(&key, format) || key.chars().any(char::is_control) {
+    if !kind.key_is_well_formed(&key, format) {
         return Err(ImportIssue::KeyAlphabet);
     }
     if word.is_empty() {
         return Err(ImportIssue::EmptyValue);
     }
-    if word.len() > MAX_VALUE_BYTES || word.chars().any(char::is_control) {
+    if !crate::text::is_bounded_text(word, MAX_VALUE_BYTES) {
         return Err(ImportIssue::ValueTooLong);
     }
-    if kind == ImportKind::QuickPhrase && word.encode_utf16().count() > MAX_QUICK_PHRASE_UTF16 {
+    if kind == ImportKind::QuickPhrase && !crate::is_bounded_utf16(word, MAX_QUICK_PHRASE_UTF16) {
         return Err(ImportIssue::QuickPhraseTooLong);
     }
     if weight < 0 {
@@ -515,12 +511,19 @@ mod tests {
             .collect::<Vec<_>>(),
             vec![("dont", "don't"), ("e-mail", "e-mail")]
         );
-        // Quick phrase keys allow digits.
+        // Quick phrase keys are letters only, as in the reference.
         assert_eq!(
-            parse_ok(ImportKind::QuickPhrase, "standard", "你好\tnh1\n")
+            parse(ImportKind::QuickPhrase, "standard", "你好\tnh1\n", LIMIT),
+            Err(ImportError::NoUsableRows)
+        );
+        // An uppercase quick phrase key is folded, not refused.
+        assert_eq!(
+            parse_ok(ImportKind::QuickPhrase, "standard", "你好\tNH\n")
                 .entries
-                .len(),
-            1
+                .iter()
+                .map(|entry| entry.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["nh"]
         );
         // Negative weights are refused.
         assert_eq!(
@@ -607,7 +610,7 @@ mod tests {
         let mut selector = PageSelector::new(0, 5);
         let mut taken = 0;
         for (is_wubi, key) in &rows {
-            if dictionary_row_matches(*is_wubi, key, "") && selector.accept() {
+            if dictionary_row_matches(*is_wubi, ImportKind::Wubi, key, "") && selector.accept() {
                 taken += 1;
             }
         }
@@ -638,19 +641,57 @@ mod tests {
 
     #[test]
     fn the_code_prefix_is_matched_case_insensitively() {
-        assert!(dictionary_row_matches(true, "wq", "w"));
-        assert!(dictionary_row_matches(true, "WQ", "w"));
-        assert!(dictionary_row_matches(true, "wq", "WQ"));
-        assert!(dictionary_row_matches(true, " wq ", "wq"));
+        assert!(dictionary_row_matches(true, ImportKind::Wubi, "wq", "w"));
+        assert!(dictionary_row_matches(true, ImportKind::Wubi, "WQ", "w"));
+        assert!(dictionary_row_matches(true, ImportKind::Wubi, "wq", "WQ"));
+        assert!(dictionary_row_matches(true, ImportKind::Wubi, " wq ", "wq"));
         // A prefix, not a substring: the user is typing a code from the start.
-        assert!(!dictionary_row_matches(true, "awq", "wq"));
+        assert!(!dictionary_row_matches(true, ImportKind::Wubi, "awq", "wq"));
         // Longer than the key cannot match.
-        assert!(!dictionary_row_matches(true, "wq", "wqx"));
+        assert!(!dictionary_row_matches(true, ImportKind::Wubi, "wq", "wqx"));
         // An empty prefix matches everything of the right kind.
-        assert!(dictionary_row_matches(true, "anything", ""));
+        assert!(dictionary_row_matches(
+            true,
+            ImportKind::Wubi,
+            "anything",
+            ""
+        ));
         // The kind still gates it, whatever the prefix.
-        assert!(!dictionary_row_matches(false, "wq", ""));
-        assert!(!dictionary_row_matches(false, "wq", "wq"));
+        assert!(!dictionary_row_matches(false, ImportKind::Wubi, "wq", ""));
+        assert!(!dictionary_row_matches(false, ImportKind::Wubi, "wq", "wq"));
+    }
+
+    #[test]
+    fn a_pinyin_prefix_ignores_syllable_separators() {
+        let pinyin =
+            |key: &str, prefix: &str| dictionary_row_matches(true, ImportKind::Pinyin, key, prefix);
+        // Stored keys are separated; users type without separators, with spaces, or stop inside a syllable.
+        for prefix in ["nihao", "nih", "ni'hao", "ni hao", "NiHao", "n"] {
+            assert!(pinyin("ni'hao", prefix), "{prefix:?}");
+        }
+        // A key stored with spaces is compared the same way.
+        assert!(pinyin("ni hao", "nihao"));
+        // Still a prefix from the start of the key, and never longer than it.
+        assert!(!pinyin("ni'hao", "hao"));
+        assert!(!pinyin("ni'hao", "nihaoma"));
+        assert!(!pinyin("ni'hao", "nhao"));
+        // The accepted overmatch: without separators a prefix can cross a syllable boundary.
+        assert!(pinyin("xi'an", "xian"));
+        assert!(pinyin("xian", "xi'an"));
+        // The kind still gates it.
+        assert!(!dictionary_row_matches(
+            false,
+            ImportKind::Pinyin,
+            "ni'hao",
+            "nihao"
+        ));
+        // Other kinds keep separators significant: an apostrophe is part of an English code.
+        assert!(!dictionary_row_matches(
+            true,
+            ImportKind::English,
+            "don't",
+            "dont"
+        ));
     }
 
     #[test]
@@ -722,15 +763,20 @@ mod tests {
 
     #[test]
     fn the_code_prefix_is_case_insensitive_and_starts_at_the_key() {
-        assert!(dictionary_row_matches(true, "wq", "w"));
-        assert!(dictionary_row_matches(true, "WQ", "w"));
-        assert!(dictionary_row_matches(true, "wq", "WQ"));
-        assert!(dictionary_row_matches(true, " wq ", "wq"));
-        assert!(!dictionary_row_matches(true, "awq", "wq"));
-        assert!(!dictionary_row_matches(true, "wq", "wqx"));
-        assert!(dictionary_row_matches(true, "anything", ""));
-        assert!(!dictionary_row_matches(false, "wq", ""));
-        assert!(!dictionary_row_matches(false, "wq", "wq"));
+        assert!(dictionary_row_matches(true, ImportKind::Wubi, "wq", "w"));
+        assert!(dictionary_row_matches(true, ImportKind::Wubi, "WQ", "w"));
+        assert!(dictionary_row_matches(true, ImportKind::Wubi, "wq", "WQ"));
+        assert!(dictionary_row_matches(true, ImportKind::Wubi, " wq ", "wq"));
+        assert!(!dictionary_row_matches(true, ImportKind::Wubi, "awq", "wq"));
+        assert!(!dictionary_row_matches(true, ImportKind::Wubi, "wq", "wqx"));
+        assert!(dictionary_row_matches(
+            true,
+            ImportKind::Wubi,
+            "anything",
+            ""
+        ));
+        assert!(!dictionary_row_matches(false, ImportKind::Wubi, "wq", ""));
+        assert!(!dictionary_row_matches(false, ImportKind::Wubi, "wq", "wq"));
     }
 
     #[test]
@@ -833,14 +879,28 @@ impl PageSelector {
 
 /// Does this row belong to the requested kind and code prefix?
 ///
-/// The prefix is compared case-insensitively over ASCII because every code
-/// alphabet here is ASCII and users type codes in either case.
-pub fn dictionary_row_matches(kind_matches: bool, key: &str, prefix: &str) -> bool {
+/// The prefix is compared case-insensitively over ASCII because every code alphabet here is ASCII and users type codes in either case.
+///
+/// A pinyin key is stored with its syllables separated (`ni'hao`), but users search the way they type: `nihao`, `ni hao` or a prefix that ends inside a syllable such as `nih`. Separators are therefore ignored on both sides for pinyin rows, the way the Windows reference accepts an unseparated search by normalizing it before it queries. The cost is that a prefix can span a syllable boundary either way - `xian` finds both `xi'an` and `xian` - which is what a prefix search should do anyway.
+pub fn dictionary_row_matches(
+    kind_matches: bool,
+    row_kind: ImportKind,
+    key: &str,
+    prefix: &str,
+) -> bool {
     if !kind_matches {
         return false;
     }
     if prefix.is_empty() {
         return true;
+    }
+    if row_kind == ImportKind::Pinyin {
+        let not_separator = |byte: &u8| !matches!(byte, b'\'' | b' ');
+        let mut key = key.bytes().filter(not_separator);
+        return prefix.bytes().filter(not_separator).all(|wanted| {
+            key.next()
+                .is_some_and(|byte| byte.eq_ignore_ascii_case(&wanted))
+        });
     }
     let key = key.trim();
     if key.len() < prefix.len() {

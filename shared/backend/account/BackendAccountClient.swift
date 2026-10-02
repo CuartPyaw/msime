@@ -2,6 +2,9 @@ import Foundation
 
 /// Shared account transport. Platform UI owns consent and Keychain persistence.
 struct BackendAccountClient: Sendable {
+  /// Backend bearer sessions are short-lived; reject responses that would create a practically permanent local session.
+  static let maxSessionSeconds = 86_400 * 30
+
   struct User: Codable, Equatable, Sendable {
     let id: String
     let display_name: String
@@ -31,7 +34,25 @@ struct BackendAccountClient: Sendable {
   }
   struct Failure: Error, LocalizedError, Sendable {
     let status: Int
+    /// The server's `error.code`, read from the body of a refused request; nil when there was none.
+    var code: String? = nil
+
+    /// The community moderation refusals, which the user has to be told apart from an outage.
+    static let moderationMessages = [
+      "blocked_content": "内容包含不允许发布的词语，请修改后再提交",
+      "screening_unavailable": "审核服务暂时不可用，请稍后重试",
+      "account_banned": "该账号已被封禁，暂时无法使用账号相关功能",
+    ]
+    static let moderationStatuses = ["blocked_content": 422, "screening_unavailable": 503, "account_banned": 403]
+
+    /// The Chinese sentence for a moderation refusal, or nil when this failure is not one.
+    var moderationMessage: String? {
+      guard let code, Self.moderationStatuses[code] == status else { return nil }
+      return Self.moderationMessages[code]
+    }
+
     var errorDescription: String? {
+      if let moderationMessage { return moderationMessage }
       switch status {
       case 400: return "请求内容无效或超出大小限制，请检查后重试。"
       case 401: return "登录已失效，请重新登录。"
@@ -69,9 +90,14 @@ struct BackendAccountClient: Sendable {
   }
   func challenge(provider: String, target: String = "", linkToken: String? = nil) async throws -> Challenge {
     struct Body: Encodable { let provider: String; let target: String; let purpose: String }
-    return try await json("POST", "/v1/auth/challenges", token: linkToken,
-                          body: JSONEncoder().encode(Body(provider: provider, target: target,
-                                                        purpose: linkToken == nil ? "login" : "link")))
+    let value: Challenge = try await json("POST", "/v1/auth/challenges", token: linkToken,
+                                          body: JSONEncoder().encode(Body(provider: provider, target: target,
+                                                                        purpose: linkToken == nil ? "login" : "link")))
+    guard Self.validSingleLine(value.challenge_id, maximumBytes: 256, empty: false), value.expires_in > 0,
+          value.nonce.map({ Self.validSingleLine($0, maximumBytes: 4096) }) ?? true,
+          value.authorization_url.map({ Self.validSingleLine($0, maximumBytes: 4096) }) ?? true
+    else { throw Failure(status: 0) }
+    return value
   }
   func login(challenge: String, credential: String, linkToken: String? = nil) async throws -> Tokens {
     struct Body: Encodable { let challenge_id: String; let credential: String }
@@ -86,7 +112,14 @@ struct BackendAccountClient: Sendable {
     return try validated(tokens)
   }
   func profile(token: String) async throws -> Profile {
-    try await json("GET", "/v1/users/me", token: token)
+    let value: Profile = try await json("GET", "/v1/users/me", token: token)
+    guard Self.validUser(value.user), value.identities.count <= 16,
+          value.identities.allSatisfy({ identity in
+            !identity.provider.isEmpty && identity.provider.utf8.count <= 32
+              && identity.provider.utf8.allSatisfy({ (97...122).contains($0) || $0 == 95 || $0 == 45 })
+              && Self.validSingleLine(identity.subject, maximumBytes: 512)
+          }) else { throw Failure(status: 0) }
+    return value
   }
   func rename(_ name: String, token: String) async throws {
     struct Body: Encodable { let display_name: String }
@@ -102,6 +135,13 @@ struct BackendAccountClient: Sendable {
     _ = try await request("DELETE", "/v1/users/me", token: token)
   }
 
+  // URLComponents leaves '+' bare, which the server decodes as a space; only a value can hold one.
+  static func encodedPath(_ components: URLComponents) -> String? {
+    var components = components
+    components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+    return components.string
+  }
+
   // Used by the explicit user-data screens as well as account operations. No redirects,
   // cookies, cached private data, arbitrary origins, or server error text are exposed.
   func request(_ method: String, _ path: String, token: String? = nil,
@@ -110,7 +150,9 @@ struct BackendAccountClient: Sendable {
     let request = try makeRequest(method, path, token: token, body: body, timeout: timeout)
     let (bytes, response) = try await session.bytes(for: request)
     guard let response = response as? HTTPURLResponse else { throw Failure(status: 0) }
-    guard (200..<300).contains(response.statusCode) else { throw Failure(status: response.statusCode) }
+    guard (200..<300).contains(response.statusCode) else {
+      throw Failure(status: response.statusCode, code: try? await Self.errorCode(bytes))
+    }
     guard response.expectedContentLength <= maximumResponseBytes else { throw Failure(status: 0) }
     var data = Data()
     for try await byte in bytes {
@@ -120,6 +162,26 @@ struct BackendAccountClient: Sendable {
     try Task.checkCancellation()
     return data
   }
+  /// `error.code` of a refusal body `{"error":{"code":...}}`, reading at most 4 KiB. The server's message text is never shown.
+  static func errorCode(_ bytes: URLSession.AsyncBytes) async throws -> String? {
+    var data = Data()
+    for try await byte in bytes {
+      guard data.count < 4096 else { return nil }
+      data.append(byte)
+    }
+    return errorCode(data)
+  }
+
+  static func errorCode(_ data: Data) -> String? {
+    guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let error = root["error"] as? [String: Any],
+          let code = error["code"] as? String,
+          (1...64).contains(code.utf8.count),
+          code.utf8.allSatisfy({ (97...122).contains($0) || (48...57).contains($0) || $0 == 95 })
+    else { return nil }
+    return code
+  }
+
   private func makeRequest(_ method: String, _ path: String, token: String?, body: Data?, timeout: TimeInterval = 30) throws -> URLRequest {
     guard path.hasPrefix("/v1/"), !path.contains("\\"),
           let url = URL(string: path, relativeTo: origin)?.absoluteURL,
@@ -215,14 +277,26 @@ struct BackendAccountClient: Sendable {
     do { return try JSONDecoder().decode(T.self, from: data) }
     catch { throw Failure(status: 0) }
   }
-  private func validated(_ tokens: Tokens) throws -> Tokens {
+  static func validate(_ tokens: Tokens) throws {
     let hex = CharacterSet(charactersIn: "0123456789abcdef")
-    guard tokens.token_type == "Bearer", tokens.expires_in > 0,
-          !tokens.user.id.isEmpty,
+    guard tokens.token_type == "Bearer", (1...maxSessionSeconds).contains(tokens.expires_in),
+          validUser(tokens.user),
           [tokens.access_token, tokens.refresh_token].allSatisfy({ token in
             token.utf8.count == 64 && token.unicodeScalars.allSatisfy(hex.contains)
           }) else { throw Failure(status: 0) }
+  }
+  private static func validUser(_ user: User) -> Bool {
+    validSingleLine(user.id, maximumBytes: 256, empty: false)
+      && user.display_name.unicodeScalars.count <= 64
+      && !user.display_name.unicodeScalars.contains { $0.properties.generalCategory == .control }
+      && validSingleLine(user.created_at, maximumBytes: 128)
+  }
+  private static func validSingleLine(_ value: String, maximumBytes: Int, empty: Bool = true) -> Bool {
+    (empty || !value.isEmpty) && value.utf8.count <= maximumBytes
+      && !value.unicodeScalars.contains { $0.properties.generalCategory == .control }
+  }
+  private func validated(_ tokens: Tokens) throws -> Tokens {
+    try Self.validate(tokens)
     return tokens
   }
 }
-

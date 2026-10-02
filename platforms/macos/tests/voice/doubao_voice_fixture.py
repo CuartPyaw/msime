@@ -4,10 +4,19 @@ import base64
 import gzip
 import hashlib
 import json
+import socketserver
 import struct
 import subprocess
 import sys
 import threading
+
+
+# HTTPServer.server_bind resolves the bound address with socket.getfqdn, which waits on reverse DNS before this loopback server exists - 35 s on the macOS CI runners. Nothing reads server_name, so bind without it.
+class LoopbackHTTPServer(ThreadingHTTPServer):
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
 
 errors = []
 counts = {}
@@ -69,7 +78,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
-            legacy = self.path in ("/legacy", "/inferred", "/trimmed-legacy")
+            legacy = self.path in ("/legacy", "/trimmed-legacy")
             assert self.headers.get("X-Api-Key") == (None if legacy else "fixture-token")
             assert self.headers.get("X-Api-App-Key") == ("stale-fixture-app" if legacy else None)
             assert self.headers.get("X-Api-Access-Key") == ("fixture-token" if legacy else None)
@@ -100,6 +109,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.receive()  # The native finish deadline must close the socket.
             elif self.path == "/invalid-pcm":
                 self.receive()
+            elif self.path == "/long":
+                # A stream well past the old 60 s cap arrives whole, as the MSIME-Windows client sends it.
+                samples = 0
+                while True:
+                    kind, sequence, pcm = self.receive()
+                    assert kind in (0x21, 0x23)
+                    samples += len(pcm) // 2
+                    if kind == 0x23:
+                        break
+                self.transcript(f"synthetic long {samples}", True)
             else:
                 kind, sequence, pcm = self.receive()
                 assert kind == 0x21 and sequence == 2 and pcm == b"\xff\x1f" * 3200
@@ -118,14 +137,24 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
 
 
-server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+server = LoopbackHTTPServer(("127.0.0.1", 0), Handler)
+# A handler can sit in a 40 s socket read; joining it on close outlived ctest's limit, so a hang was killed before this script could say anything.
+server.daemon_threads = True
+server.block_on_close = False
 threading.Thread(target=server.serve_forever, daemon=True).start()
 try:
-    result = subprocess.run([sys.argv[1], f"ws://127.0.0.1:{server.server_port}"], timeout=60)
-    assert result.returncode == 0 and not errors
+    client = subprocess.Popen([sys.argv[1], f"ws://127.0.0.1:{server.server_port}"])
+    try:
+        returncode = client.wait(timeout=60)
+    except subprocess.TimeoutExpired:
+        # Every wait in the client fails on its own deadline, so reaching this means a thread is stuck; its stack is the only useful output.
+        subprocess.run(["sample", str(client.pid), "3"], stdout=sys.stderr, stderr=sys.stderr)
+        client.kill()
+        raise
+    assert returncode == 0 and not errors
     assert all(counts.get(path) == 1 for path in
-               ("/api", "/legacy", "/inferred", "/masked-app", "/inferred-masked", "/trimmed", "/trimmed-legacy",
-                "/malformed", "/server-error", "/oversized", "/redirect", "/cancel", "/drop", "/silent"))
+               ("/api", "/legacy", "/unset", "/masked-app", "/trimmed", "/trimmed-legacy",
+                "/malformed", "/server-error", "/oversized", "/redirect", "/cancel", "/drop", "/silent", "/long"))
     assert "/leaked" not in counts
 finally:
     server.shutdown()

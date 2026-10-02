@@ -15,6 +15,7 @@
 @end
 @implementation SyntheticTranslationRequest
 - (void)start { assert(!_started); _started = YES; }
+- (void)startInSession:(NSURLSession *)session { assert(session); [self start]; }
 // Keep the reply deliberately, to simulate an already-enqueued late callback.
 - (void)cancel { _cancelled = YES; }
 @end
@@ -57,7 +58,7 @@ static SyntheticTranslationBatch *Batch(NSArray *items, void (^completion)(NSArr
     return [[SyntheticTranslationBatch alloc] initWithItems:items configuration:NSURLSessionConfiguration.ephemeralSessionConfiguration completion:completion];
 }
 static void AssertReleased(MSIMECustomTranslationBatch *batch) {
-    for (NSString *key in @[@"items", @"request", @"timer", @"configuration", @"results", @"completion"])
+    for (NSString *key in @[@"items", @"request", @"session", @"timer", @"configuration", @"results", @"completion", @"onReply"])
         assert(![batch valueForKey:key]);
 }
 static void TestSequentialResults() {
@@ -66,6 +67,8 @@ static void TestSequentialResults() {
         assert(NSThread.isMainThread && ++calls == 1);
         assert(([results isEqual:@[@{@"text":@"one", @"translation":@"一"}, @{@"text":@"four", @"translation":@"四"}]]));
     });
+    NSMutableArray *replies = [NSMutableArray array];
+    batch.onReply = ^(NSArray *results, NSArray *answered) { assert(calls == 0); [replies addObject:@[results, answered]]; };
     batch.now = 100;
     [batch start]; [batch start];
     assert(batch.requests.count == 1 && batch.requests[0].started);
@@ -79,6 +82,9 @@ static void TestSequentialResults() {
     assert(batch.requests.count == 4);
     batch.requests[3].reply(Response(@"四"));
     assert(calls == 1);
+    // Neither a transport failure nor a malformed body answers anything, so "two" and "three" stay free to be asked again.
+    assert(([replies isEqual:@[@[@[@{@"text":@"one", @"translation":@"一"}], @[@"one"]], @[@[], @[]], @[@[], @[]],
+        @[@[@{@"text":@"four", @"translation":@"四"}], @[@"four"]]]]));
     [batch start]; [batch cancel];
     batch.requests[3].reply(Response(@"late"));
     assert(calls == 1 && batch.requests.count == 4);
@@ -91,6 +97,12 @@ static void TestDeadline() {
             assert(++calls == 1);
             assert(([results isEqual:@[@{@"text":@"one", @"translation":@"一"}]]));
         });
+        NSMutableArray *answered = [NSMutableArray array];
+        NSMutableArray *translated = [NSMutableArray array];
+        batch.onReply = ^(NSArray *results, NSArray *texts) {
+            [answered addObjectsFromArray:texts];
+            [translated addObjectsFromArray:[results valueForKey:@"translation"]];
+        };
         batch.now = 50;
         [batch start];
         NSTimer *timer = [batch valueForKey:@"timer"];
@@ -105,6 +117,9 @@ static void TestDeadline() {
         assert(calls == 1 && batch.requests.count == 2 && batch.requests[1].cancelled && !timer.valid);
         batch.requests[1].reply(Response(@"late again"));
         assert(calls == 1);
+        // "three" was never sent, so it is never reported as answered. A response the busy main queue delivered after the deadline was still paid for and still reaches onReply, but not completion.
+        if (useTimer.boolValue) assert(([answered isEqual:@[@"one"]] && [translated isEqual:@[@"一"]]));
+        else assert(([answered isEqual:@[@"one", @"two"]] && [translated isEqual:@[@"一", @"too late"]]));
         AssertReleased(batch);
     }
 }
@@ -183,6 +198,18 @@ static void TestBoundsAndEmptyResults() {
     assert(calls == 1);
     AssertReleased(invalidTransport);
 }
+// A provider that reports a failure in a well-formed body - DeepLX's non-200 code, as a rate limit or an outage comes back - has not answered: negative-caching it would hide the gloss for eight minutes over something asking again fixes. An answer with no translation is still an answer.
+static void TestFailedRepliesAreNotAnswers() {
+    SyntheticTranslationBatch *batch = Batch(@[Item(@"one"), Item(@"two"), Item(@"three")], ^(NSArray *results) { assert(results.count == 0); });
+    NSMutableArray *answered = [NSMutableArray array];
+    batch.onReply = ^(NSArray *results, NSArray *texts) { assert(results.count == 0); [answered addObject:texts]; };
+    [batch start];
+    batch.requests[0].reply([@"{\"code\":429,\"message\":\"rate limited\"}" dataUsingEncoding:NSUTF8StringEncoding]);
+    batch.requests[1].reply([@"{\"code\":200,\"data\":\"\"}" dataUsingEncoding:NSUTF8StringEncoding]);
+    batch.requests[2].reply([@"{\"code\":\"500\"}" dataUsingEncoding:NSUTF8StringEncoding]);
+    assert(([answered isEqual:@[@[], @[@"two"], @[]]]));
+    AssertReleased(batch);
+}
 static NSDictionary *TencentItem(NSString *text, NSString *key, NSString *source, NSString *target) {
     return @{@"text":text, @"key":key, @"source_language":source, @"target_language":target};
 }
@@ -223,6 +250,18 @@ static void TestTencentGroups() {
     assert(calls == 1);
     AssertReleased(batch);
 }
+static void TestTencentFailedRepliesAreNotAnswers() {
+    NSArray *items = @[TencentItem(@"Hello", @"hello", @"en", @"zh"), TencentItem(@"你好", @"你好", @"zh", @"en")];
+    SyntheticTranslationBatch *batch = TencentBatch(items, ^(NSArray *results) { (void)results; });
+    NSMutableArray *answered = [NSMutableArray array];
+    batch.onReply = ^(NSArray *results, NSArray *texts) { (void)results; [answered addObject:texts]; };
+    [batch start];
+    // Tencent reports a rate limit or a signature error as Response.Error in an HTTP 200 body.
+    batch.requests[0].reply([@"{\"Response\":{\"Error\":{\"Code\":\"RequestLimitExceeded\"}}}" dataUsingEncoding:NSUTF8StringEncoding]);
+    batch.requests[1].reply(TencentResponse(@[@""]));
+    assert(([answered isEqual:@[@[], @[@"你好"]]]));
+    AssertReleased(batch);
+}
 static void TestTencentFailuresAndCancellation() {
     NSArray *items = @[TencentItem(@"Hello", @"hello", @"en", @"zh"), TencentItem(@"你好", @"你好", @"zh", @"en")];
     for (NSData *bad in @[TencentResponse(@[]), TencentResponse(@[@"one", @"two"]),
@@ -248,12 +287,17 @@ static void TestTencentFailuresAndCancellation() {
     for (NSNumber *timerDriven in @[@NO, @YES]) {
         __block NSUInteger calls = 0;
         SyntheticTranslationBatch *batch = TencentBatch(items, ^(NSArray *results) { assert(++calls == 1 && results.count == 1); });
+        NSMutableArray *answered = [NSMutableArray array];
+        batch.onReply = ^(NSArray *results, NSArray *texts) { (void)results; [answered addObject:texts]; };
         [batch start];
         batch.requests[0].reply(TencentResponse(@[@"你好"]));
         batch.now = 6;
         if (timerDriven.boolValue) [[batch valueForKey:@"timer"] fire];
         else batch.requests[1].reply(TencentResponse(@[@"late"]));
         assert(calls == 1 && batch.requests[1].cancelled);
+        // Answers are reported by original text, one language group at a time; the group the deadline cut off is not answered.
+        if (timerDriven.boolValue) assert(([answered isEqual:@[@[@"Hello"]]]));
+        else assert(([answered isEqual:@[@[@"Hello"], @[@"你好"]]]));
         AssertReleased(batch);
     }
     for (NSArray *invalid in @[@[@1], @[TencentItem(@"", @"hello", @"en", @"zh")],
@@ -300,6 +344,50 @@ static void TestTencentFailuresAndCancellation() {
     assert(!weakBatch && request.cancelled);
     request.reply(TencentResponse(@[@"late"]));
 }
+static void TestDetachLetsInFlightLand() {
+    SyntheticTranslationBatch *batch = Batch(@[Item(@"one"), Item(@"two")], ^(NSArray *results) { (void)results; assert(false); });
+    NSMutableArray *replies = [NSMutableArray array];
+    batch.onReply = ^(NSArray *results, NSArray *answered) { [replies addObject:@[results, answered]]; };
+    [batch start];
+    NSTimer *timer = [batch valueForKey:@"timer"];
+    __block NSUInteger ended = 0;
+    assert([batch detachWithCompletion:^{ ++ended; }]);
+    // The request already sent is left running; nothing further is sent.
+    assert(!batch.requests[0].cancelled && timer.valid && ended == 0);
+    batch.requests[0].reply(Response(@"一"));
+    assert(([replies isEqual:@[@[@[@{@"text":@"one", @"translation":@"一"}], @[@"one"]]]]));
+    assert(batch.requests.count == 1 && ended == 1 && !timer.valid);
+    batch.requests[0].reply(Response(@"again"));
+    assert(replies.count == 1 && ended == 1);
+    AssertReleased(batch);
+    // The deadline still bounds a detached batch.
+    SyntheticTranslationBatch *slow = Batch(@[Item(@"one")], ^(NSArray *results) { (void)results; assert(false); });
+    __block NSUInteger slowReplies = 0;
+    slow.onReply = ^(NSArray *results, NSArray *answered) { (void)results; (void)answered; ++slowReplies; };
+    [slow start];
+    __block BOOL slowEnded = NO;
+    assert([slow detachWithCompletion:^{ slowEnded = YES; }]);
+    [[slow valueForKey:@"timer"] fire];
+    assert(slowEnded && slow.requests[0].cancelled);
+    slow.requests[0].reply(Response(@"late"));
+    assert(slowReplies == 0);
+    AssertReleased(slow);
+    // Nothing in flight, before start or after the last reply, cancels outright.
+    SyntheticTranslationBatch *idle = Batch(@[Item(@"one")], ^(NSArray *results) { (void)results; assert(false); });
+    assert(![idle detachWithCompletion:^{ assert(false); }]);
+    [idle start];
+    assert(idle.requests.count == 0);
+    AssertReleased(idle);
+    // A hard cancel of a detached batch drops its reply as well.
+    SyntheticTranslationBatch *dropped = Batch(@[Item(@"one")], ^(NSArray *results) { (void)results; assert(false); });
+    dropped.onReply = ^(NSArray *results, NSArray *answered) { (void)results; (void)answered; assert(false); };
+    [dropped start];
+    assert([dropped detachWithCompletion:^{ assert(false); }]);
+    [dropped cancel];
+    assert(dropped.requests[0].cancelled);
+    dropped.requests[0].reply(Response(@"late"));
+    AssertReleased(dropped);
+}
 static void TestAIItems() {
     NSArray *items = @[
         @{@"text":@"候选甲", @"candidate_limit":@1, @"request":@{@"url":@"https://ai.invalid/chat", @"method":@"POST", @"headers":@{@"Content-Type":@"application/json", @"Authorization":@"Bearer synthetic"}, @"body":@{@"model":@"synthetic"}, @"timeout_ms":@8000, @"connect_timeout_ms":@2500, @"max_response_bytes":@1048576}},
@@ -316,12 +404,15 @@ static void TestAIItems() {
 int main() {
     @autoreleasepool {
         TestSequentialResults();
+        TestFailedRepliesAreNotAnswers();
         TestDeadline();
         TestCancellationAndLifetime();
         TestCopiedInput();
         TestBoundsAndEmptyResults();
         TestTencentGroups();
         TestTencentFailuresAndCancellation();
+        TestTencentFailedRepliesAreNotAnswers();
+        TestDetachLetsInFlightLand();
         TestAIItems();
     }
     return 0;

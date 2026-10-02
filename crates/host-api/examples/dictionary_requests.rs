@@ -102,12 +102,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         json!([])
     );
 
-    // An English code and the word it types out are two different texts. `dont` types out `don't`,
-    // which is the case the reference's own importer exists to accept and the one the Engine used
-    // to refuse: its English rule demanded that the word be the code again, letter for letter,
-    // ignoring case. The table underneath always had room for it - `english_words(word, display,
-    // weight)` is two columns - so what changed is the rule, in
-    // `scripts/apply_engine_english_display.py`.
+    // An English code and the word it types out are two different texts. `dont` types out `don't`, which is the case the reference's own importer exists to accept: an English entry's word does not have to be its code again letter for letter, because the table keeps the code and the displayed word in separate columns.
     let contraction = json!({ "kind": "english", "key": "dont", "value": "don't", "weight": 4096 });
     let add_contraction = json!({ "operation": "edit", "previous": null, "replacement": contraction.clone(), "request_id": "native-english-display" });
     assert_eq!(
@@ -159,10 +154,45 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(request(&options, remove_contraction)["ok"], true);
     let remove_hyphenated = json!({ "operation": "edit", "previous": hyphenated, "replacement": null, "request_id": "native-english-hyphen-remove" });
     assert_eq!(request(&options, remove_hyphenated)["ok"], true);
+    assert_eq!(
+        request(&options, list.clone())["value"]["entries"],
+        json!([])
+    );
+
+    // Full pinyin typed the way people type it. The add form hands over `nihao`; it is cut into the syllables the Engine stores, as an imported row is, and a search without separators - or one that stops inside a syllable - finds it.
+    let typed = json!({ "kind": "pinyin", "key": "nihao", "value": "你好", "weight": 10000 });
+    let stored = json!({ "kind": "pinyin", "key": "ni'hao", "value": "你好", "weight": 10000 });
+    let add_typed = json!({ "operation": "edit", "previous": null, "replacement": typed, "request_id": "native-pinyin-unseparated" });
+    assert_eq!(
+        request(&options, add_typed)["value"]["applied"],
+        true,
+        "full pinyin without separators is saved"
+    );
+    for query in ["nihao", "nih", "ni hao", "ni'hao"] {
+        let search = json!({ "operation": "list", "offset": 0, "limit": 100, "kind": "pinyin", "query": query });
+        assert_eq!(
+            request(&options, search)["value"]["entries"],
+            json!([stored]),
+            "{query:?} finds the separated key"
+        );
+    }
+    // Jianpin is refused, and the reason survives to the caller instead of a generic rejection.
+    let jianpin = json!({ "kind": "pinyin", "key": "nhao", "value": "你好", "weight": 10000 });
+    let add_jianpin = json!({ "operation": "edit", "previous": null, "replacement": jianpin, "request_id": "native-pinyin-jianpin" });
+    let refused = request(&options, add_jianpin);
+    assert_eq!(refused["ok"], false);
+    assert!(
+        refused["error"]
+            .as_str()
+            .is_some_and(|reason| reason.starts_with("invalid dictionary entry: ")),
+        "the refusal names the rule; got {refused}"
+    );
+    let remove_stored = json!({ "operation": "edit", "previous": stored, "replacement": null, "request_id": "native-pinyin-remove" });
+    assert_eq!(request(&options, remove_stored)["ok"], true);
     assert_eq!(request(&options, list)["value"]["entries"], json!([]));
 
     println!(
-        "native list/busy/add/retry/recreate/commit/remove/fold/english-display roundtrip passed"
+        "native list/busy/add/retry/recreate/commit/remove/fold/english-display/pinyin-search roundtrip passed"
     );
     Ok(())
 }

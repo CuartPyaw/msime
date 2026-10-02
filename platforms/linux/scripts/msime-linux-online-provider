@@ -1,0 +1,1166 @@
+#!/usr/bin/env python3
+"""User-session candidate and translation transport. Never logs requests or HTTP errors."""
+import argparse
+import base64
+import concurrent.futures
+import datetime
+import functools
+import hashlib
+import hmac
+import http.client
+import json
+import os
+from pathlib import Path
+import secrets
+import signal
+import socket
+import socketserver
+import stat
+import struct
+import string
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+from types import SimpleNamespace
+import urllib.parse
+import urllib.request
+
+from msime_provider_runtime import open_server
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+http_processes = set()
+http_process_lock = threading.Lock()
+http_stopping = threading.Event()
+MAX_AI_CACHE_ENTRIES = 4096
+MAX_TRANSLATION_CACHE_ENTRIES = 4096
+NEGATIVE_TRANSLATION_CACHE_TTL = 480
+ANONYMOUS_ACCOUNT_ORIGIN = "https://api.msime.app"
+ANONYMOUS_ACCOUNT_MAX_BYTES = 16 * 1024
+ANONYMOUS_ACCOUNT_SUBJECT_LENGTH = 16
+ANONYMOUS_ACCOUNT_SECRET_LENGTH = 48
+CLOUD_REQUEST_TIMEOUT = 2.0
+# Windows ai_assistant.cpp gives model inference CURLOPT_TIMEOUT_MS 8000 and CURLOPT_CONNECTTIMEOUT_MS 2500, the same numbers client-core's AI descriptor carries. This is also the longest deadline an HTTP worker accepts, so no caller can ask for a budget the worker would silently refuse.
+AI_REQUEST_TIMEOUT = 8.0
+AI_CONNECT_TIMEOUT = 2.5
+# One request line from client-core. UnixSocketProvider::ai_test lets a polish test carry an 8192-byte prompt and an 8192-byte sample in a request up to 32768 bytes, so that kind alone gets the larger limit; every other request keeps the 16384-byte one.
+REQUEST_LINE_LIMIT = 16384
+AI_TEST_REQUEST_LINE_LIMIT = 32768
+# The associative prompt a blank prompt slot stands for: Windows compiles it into AiAssistantConfig::prompt (ime_config.h) and client-core keeps the same text as ai::DEFAULT_CANDIDATE_PROMPT for the hosts that build their request there. The shared preferences leave the slot empty, so without this every Linux AI request carried an empty system message and the model answered prose the JSON parser rejects. ai_service_contract.py keeps this copy equal to the client-core one.
+DEFAULT_AI_PROMPT = "你是一个中文全拼输入法联想引擎。输入为已经切分好的拼音数组、前文上下文和候选数量。\n\n优先生成与拼音严格对应的中文候选：若有 N 段拼音，首选必须尽量为 N 个汉字，每段拼音对应一个汉字，不得随意增删或改变读音。结合上下文、常用程度、语义完整性和固定搭配排序。\n\n若去掉分词后能明显组成更合理的英文单词、缩写、产品名或技术术语，如 `deep + seek → DeepSeek`、`git + hub → GitHub`，可优先返回英文；不要生造英文或做牵强匹配。\n\n只输出合法 JSON，不要解释或输出 Markdown：\n\n{\n\"candidates\": [\n{\n\"text\": \"候选内容\",\n\"type\": \"chinese或english\",\n\"confidence\": 0.98\n}\n]\n}\n\n候选按推荐程度降序排列，数量不超过指定上限；没有合理结果时返回空数组。"
+
+
+class ConnectBoundedHTTPSConnection(http.client.HTTPSConnection):
+    """An HTTPS connection whose TCP, proxy tunnel and TLS handshake have their own shorter limit.
+
+    urllib has one socket timeout, used for connecting and for every read after it. libcurl separates the two, and a model that takes five seconds to answer must not be cut off by the connect limit, so connect under the connect limit and then give the socket back the request timeout. The overall deadline stays with the worker's alarm and the parent process.
+    """
+
+    def __init__(self, *args, connect_timeout, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.connect_timeout = connect_timeout
+
+    def connect(self):
+        request_timeout = self.timeout
+        self.timeout = min(self.connect_timeout, request_timeout)
+        try:
+            super().connect()
+        finally:
+            self.timeout = request_timeout
+        self.sock.settimeout(request_timeout)
+
+
+class ConnectBoundedHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, connect_timeout):
+        super().__init__()
+        self.connect_timeout = connect_timeout
+
+    def https_open(self, req):
+        return self.do_open(functools.partial(ConnectBoundedHTTPSConnection,
+                                              connect_timeout=self.connect_timeout),
+                            req, context=self._context)
+
+
+def fetch_direct(url, timeout, body=None, token=None, extra_headers=None, connect_timeout=None):
+    headers = {"Content-Type": "application/json", "User-Agent": "MSIME-Client"}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    headers.update(extra_headers or {})
+    payload = body if isinstance(body, bytes) else None if body is None else json.dumps(body).encode()
+    request = urllib.request.Request(url, data=payload, headers=headers)
+    handlers = [NoRedirect()]
+    if connect_timeout is not None:
+        handlers.append(ConnectBoundedHTTPSHandler(connect_timeout))
+    with urllib.request.build_opener(*handlers).open(request, timeout=timeout) as response:
+        payload = response.read(65537)
+    if len(payload) > 65536:
+        raise ValueError("response too large")
+    return payload
+
+
+def fetch(url, timeout, body=None, token=None, extra_headers=None, connect_timeout=None):
+    # Include DNS, TLS, upload and response reads in one deadline. Request data travels only through anonymous pipes, never command-line arguments.
+    deadline = time.monotonic() + timeout
+    body = body if isinstance(body, bytes) else None if body is None else json.dumps(body).encode()
+    request = {"url": url, "timeout": timeout,
+               "body": base64.b64encode(body).decode("ascii") if body is not None else None,
+               "token": token, "extra_headers": extra_headers}
+    if connect_timeout is not None:
+        request["connect_timeout"] = connect_timeout
+    metadata = json.dumps(request).encode()
+    if len(metadata) > 262144 or timeout <= 0:
+        raise ValueError("invalid HTTP request")
+    with http_process_lock:
+        if http_stopping.is_set():
+            raise ValueError("HTTP service stopped")
+        process = subprocess.Popen(
+            [sys.executable, str(Path(__file__).resolve()), "--http-request"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        http_processes.add(process)
+    try:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("HTTP request deadline exceeded")
+        output, _ = process.communicate(metadata, timeout=remaining)
+        if process.returncode != 0 or len(output) > 65536:
+            raise ValueError("HTTP request failed")
+        return json.loads(output)
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait()
+        for stream in (process.stdin, process.stdout):
+            if stream is not None:
+                stream.close()
+        with http_process_lock:
+            http_processes.discard(process)
+
+
+def stop_http_requests():
+    with http_process_lock:
+        http_stopping.set()
+        processes = list(http_processes)
+    for process in processes:
+        if process.poll() is None:
+            process.kill()
+    for process in processes:
+        process.wait()
+
+
+def http_request_worker():
+    try:
+        raw = sys.stdin.buffer.read(262145)
+        if len(raw) > 262144:
+            return 1
+        request = json.loads(raw)
+        timeout = request.get("timeout")
+        if type(timeout) not in (int, float) or not 0 < timeout <= AI_REQUEST_TIMEOUT:
+            return 1
+        connect_timeout = request.get("connect_timeout")
+        if connect_timeout is not None and (
+                type(connect_timeout) not in (int, float) or not 0 < connect_timeout <= timeout):
+            return 1
+        # The parent normally enforces the deadline and reaps this worker.
+        # Keep a process-local limit too, so a crashed parent cannot leave DNS
+        # or a slowly streaming HTTP response running indefinitely. The default
+        # signal action terminates even while native code is blocked.
+        signal.signal(signal.SIGALRM, signal.SIG_DFL)
+        signal.setitimer(signal.ITIMER_REAL, timeout)
+        body = request.get("body")
+        request["body"] = base64.b64decode(body, validate=True) if body is not None else None
+        response = fetch_direct(**request)
+        # Validate before emitting; failures never print response text or errors.
+        json.loads(response)
+        sys.stdout.buffer.write(response)
+        return 0
+    except Exception:
+        return 1
+
+
+def candidate(text, source):
+    if not isinstance(text, str):
+        return None
+    if any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in text):
+        return None
+    text = text.strip()
+    if not text or len(text.encode()) > 4096:
+        return None
+    return {"text": text, "source": source}
+
+
+def cloud(query):
+    # A cache probe never leaves the machine; only the debounced request may reach the network.
+    if (query.get("ai_cache_only") or not query.get("cloud_candidates", True) or
+            not query.get("cloud_eligible")):
+        return None
+    text = query.get("query_text")
+    if not isinstance(text, str) or not text or len(text.encode()) > 4096:
+        return None
+    params = urllib.parse.urlencode({"text": text, "itc": "ja-t-i0-und" if
+        query.get("scheme") == 3 else "zh-t-i0-pinyin", "num": 1, "ie": "utf-8", "oe": "utf-8"})
+    result = fetch("https://inputtools.google.com/request?" + params, CLOUD_REQUEST_TIMEOUT)
+    # Match Windows cloud_ime's SUCCESS/first-candidate contract while
+    # rejecting malformed provider JSON before indexing nested values.
+    if (isinstance(result, list) and len(result) >= 2 and result[0] == "SUCCESS" and
+        isinstance(result[1], list) and result[1] and isinstance(result[1][0], list) and
+        len(result[1][0]) >= 2 and isinstance(result[1][0][1], list) and
+        result[1][0][1]):
+        return candidate(result[1][0][1][0], 0)
+    return None
+
+
+def ai_prompt(options):
+    selected = options.get("prompt_id") or "custom_1"
+    if selected not in ("custom_1", "custom_2", "custom_3"):
+        return None
+    prompt = options.get("prompt_" + selected, "")
+    if not isinstance(prompt, str) or len(prompt.encode()) > 8192:
+        return None
+    # Blank means "not customised" and gets the same built-in text client-core falls back to.
+    return prompt if prompt.strip() else DEFAULT_AI_PROMPT
+
+
+def select_ai_config(config, query):
+    options = query.get("ai_assistant")
+    if not isinstance(options, dict) or not options.get("enabled") or not query.get("ai_eligible"):
+        return None
+    provider = options.get("provider")
+    if not isinstance(provider, str):
+        return None
+    if config.get("provider") == provider:
+        return config
+    return config.get("profiles", {}).get(provider)
+
+
+def ai_cache_key(query):
+    options = query.get("ai_assistant")
+    segments = query.get("pinyin_segments")
+    if (not isinstance(options, dict) or not options.get("enabled") or
+            not isinstance(segments, list) or not segments):
+        return None
+    identity = {}
+    for key in ("provider", "endpoint", "model"):
+        value = options.get(key)
+        if not isinstance(value, str):
+            return None
+        identity[key] = value
+    # Match Windows AiCandidateWorker: omit credentials, prompt, context,
+    # session and generation so a successful result survives view refreshes.
+    identity["pinyin_segments"] = segments
+    return json.dumps(identity, ensure_ascii=False, sort_keys=True,
+                      separators=(",", ":"))
+
+
+def configured_ai(query, path, cache=None, cache_lock=None):
+    # Do not touch the private file when this query cannot request AI.
+    options = query.get("ai_assistant")
+    if not path or not query.get("ai_eligible") or not isinstance(options, dict) or not options.get("enabled"):
+        return None
+    config = load_ai_config(path)
+    selected = select_ai_config(config, query)
+    key = ai_cache_key(query)
+    if key is not None and cache is not None and cache_lock is not None:
+        with cache_lock:
+            cached = cache.get(key)
+        if cached is not None:
+            return [dict(row) for row in cached]
+    # Windows AiCandidateWorker shows a cached answer as soon as the input changes and spends the network request only after 650 ms of idle input. Hosts probe with this flag immediately, so a miss here must stay local.
+    if query.get("ai_cache_only"):
+        return None
+    rows = ai(query, selected)
+    # Empty and failed responses remain retryable. Bound memory exactly like
+    # the Windows worker, clearing the cache before the next insertion.
+    if rows and key is not None and cache is not None and cache_lock is not None:
+        stored = [dict(row) for row in rows]
+        with cache_lock:
+            if len(cache) >= MAX_AI_CACHE_ENTRIES:
+                cache.clear()
+            cache[key] = stored
+    return rows
+
+
+def ai(query, config):
+    options = query.get("ai_assistant")
+    if not query.get("ai_eligible") or not isinstance(options, dict) or not options.get("enabled"):
+        return None
+    # Bind each credential to its configured endpoint; never send it to a URL
+    # supplied by a socket request or an HTTP redirect.
+    if not config or any(options.get(key) != config.get(key) for key in ("provider", "endpoint", "model")):
+        return None
+    segments = query.get("pinyin_segments")
+    context = query.get("ai_context", "")
+    limit = options.get("candidate_limit", 3)
+    if (not isinstance(segments, list) or not 1 <= len(segments) <= 128 or
+        any(not isinstance(s, str) or not s or len(s.encode()) > 32 for s in segments) or
+        not isinstance(context, str) or len(context.encode()) > 1024 or
+        type(limit) is not int or not 1 <= limit <= 10):
+        return None
+    prompt = ai_prompt(options)
+    if prompt is None:
+        return None
+    body = {"model": config["model"], "stream": False, "temperature": 0.2,
+            "max_tokens": 512, "response_format": {"type": "json_object"},
+            "messages": [{"role": "system", "content": prompt},
+                         {"role": "user", "content": json.dumps({
+                             "segmented_pinyin": segments, "context": context,
+                             "candidate_limit": limit}, ensure_ascii=False)}]}
+    if config["provider"] == "deepseek":
+        body["thinking"] = {"type": "disabled"}
+    result = fetch(config["endpoint"], AI_REQUEST_TIMEOUT, body, config["token"],
+                   connect_timeout=AI_CONNECT_TIMEOUT)
+    parsed = json.loads(result["choices"][0]["message"]["content"])
+    values = parsed.get("candidates")
+    if not isinstance(values, list):
+        return None
+    rows = []
+    seen = set()
+    for value in values:
+        if not isinstance(value, dict):
+            continue
+        row = safely(candidate, value.get("text"), 1)
+        if row is None or row["text"] in seen:
+            continue
+        rows.append(row)
+        seen.add(row["text"])
+        if len(rows) == limit:
+            break
+    return rows
+
+
+def safely(call, *args):
+    try:
+        return call(*args)
+    except Exception:
+        return None
+
+
+def translation_direction(text, target):
+    if (any(c in string.ascii_letters for c in text) and
+        all(c in string.ascii_letters + " -'" for c in text)):
+        return "en", "zh"
+    # Match Windows translation_gloss.cpp: mixed text containing Han is
+    # eligible, but pictographs and emoji sequence components are not.
+    has_han = False
+    for c in text:
+        cp = ord(c)
+        if (cp in (0x200D, 0xFE0E, 0xFE0F, 0x20E3) or
+            0x2600 <= cp <= 0x27BF or 0x1F000 <= cp <= 0x1FAFF):
+            return None
+        if (0x3400 <= cp <= 0x4DBF or 0x4E00 <= cp <= 0x9FFF or
+            0xF900 <= cp <= 0xFAFF or 0x20000 <= cp <= 0x2CEAF or cp == 0x3007):
+            has_han = True
+    return ("zh", target) if has_han else None
+
+
+def translation_gloss(value):
+    if not isinstance(value, str):
+        return None
+    value = value.replace("\t", " ").replace("\r", " ").replace("\n", " ")
+    value = " ".join(part for part in value.split(" ") if part)
+    return value if candidate(value, 0) and not any(127 <= ord(c) <= 159 for c in value) else None
+
+
+def _anonymous_private_path(path):
+    """Read one owner-only anonymous-account document, or return None when absent."""
+    if path is None:
+        return None
+    try:
+        return load_private_config(path)
+    except FileNotFoundError:
+        return None
+
+
+def _write_anonymous_private(path, document):
+    """Atomically publish a small owner-only JSON document beside provider config."""
+    if path is None or not path.is_absolute() or not isinstance(document, dict):
+        return False
+    encoded = json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(encoded) > ANONYMOUS_ACCOUNT_MAX_BYTES:
+        return False
+    try:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        info = path.parent.stat()
+        if info.st_uid != os.getuid() or info.st_mode & 0o077 or not stat.S_ISDIR(info.st_mode):
+            return False
+        descriptor, temporary_name = tempfile.mkstemp(prefix="." + path.name + ".", dir=path.parent)
+        temporary = Path(temporary_name)
+        os.fchmod(descriptor, 0o600)
+        try:
+            with os.fdopen(descriptor, "wb") as target:
+                descriptor = None
+                target.write(encoded)
+                target.flush()
+                os.fsync(target.fileno())
+            os.replace(temporary, path)
+            return True
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+    except OSError:
+        return False
+
+
+def _anonymous_identity(server):
+    """Return the local anonymous subject and secret, creating them if needed."""
+    path = getattr(server, "anonymous_account_path", None)
+    try:
+        current = _anonymous_private_path(path)
+    except (OSError, ValueError, UnicodeError, json.JSONDecodeError):
+        return None
+    if current:
+        subject, secret = current.get("subject"), current.get("secret")
+        if (isinstance(subject, str) and isinstance(secret, str) and
+                subject.startswith("msime-") and len(subject) == 6 + ANONYMOUS_ACCOUNT_SUBJECT_LENGTH and
+                all(ch in "abcdefghijklmnopqrstuvwxyz0123456789" for ch in subject[6:]) and
+                len(secret) == ANONYMOUS_ACCOUNT_SECRET_LENGTH and
+                all(ch in "abcdefghijklmnopqrstuvwxyz0123456789" for ch in secret)):
+            return subject, secret
+        return None
+    if path is None:
+        return None
+    alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+    identity = {
+        "subject": "msime-" + "".join(secrets.choice(alphabet) for _ in range(ANONYMOUS_ACCOUNT_SUBJECT_LENGTH)),
+        "secret": "".join(secrets.choice(alphabet) for _ in range(ANONYMOUS_ACCOUNT_SECRET_LENGTH)),
+    }
+    if _write_anonymous_private(path, identity):
+        return identity["subject"], identity["secret"]
+    # Another provider thread may have published the identity first.
+    try:
+        current = _anonymous_private_path(path)
+    except (OSError, ValueError, UnicodeError, json.JSONDecodeError):
+        return None
+    if current:
+        return _anonymous_identity(SimpleNamespace(anonymous_account_path=path))
+    return None
+
+
+def _anonymous_tokens(server):
+    path = getattr(server, "anonymous_session_path", None)
+    try:
+        current = _anonymous_private_path(path)
+    except (OSError, ValueError, UnicodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(current, dict):
+        return None
+    tokens = current.get("tokens")
+    expiry = current.get("expires_at_unix_ms")
+    if not isinstance(tokens, dict) or not isinstance(expiry, (int, float)):
+        return None
+    token = tokens.get("access_token")
+    if (isinstance(token, str) and len(token) == 64 and
+            all(ch in string.hexdigits for ch in token) and
+            expiry > int(time.time() * 1000) + 30_000):
+        return token
+    return None
+
+
+def _validated_anonymous_tokens(document):
+    if not isinstance(document, dict):
+        return None
+    access = document.get("access_token")
+    refresh = document.get("refresh_token")
+    expires = document.get("expires_in")
+    user = document.get("user")
+    if (not isinstance(access, str) or len(access) != 64 or not all(ch in string.hexdigits for ch in access) or
+            not isinstance(refresh, str) or len(refresh) != 64 or not all(ch in string.hexdigits for ch in refresh) or
+            document.get("token_type") != "Bearer" or not isinstance(expires, int) or not 0 < expires <= 86_400 * 30 or
+            not isinstance(user, dict) or not isinstance(user.get("id"), str) or not user["id"]):
+        return None
+    return {"access_token": access, "refresh_token": refresh, "token_type": "Bearer",
+            "expires_in": expires, "user": user}
+
+
+def anonymous_access_token(server):
+    """Get the translation token, creating the device's anonymous backend account when needed."""
+    lock = getattr(server, "anonymous_lock", None)
+    if lock is None:
+        return None
+    with lock:
+        current = _anonymous_tokens(server)
+        if current:
+            return current
+        identity = _anonymous_identity(server)
+        if identity is None:
+            return None
+        subject, secret = identity
+        # A refresh avoids creating another account when a long-lived device token expires.
+        try:
+            saved = _anonymous_private_path(getattr(server, "anonymous_session_path", None))
+        except (OSError, ValueError, UnicodeError, json.JSONDecodeError):
+            saved = None
+        refresh = saved.get("tokens", {}).get("refresh_token") if isinstance(saved, dict) else None
+        if isinstance(refresh, str) and len(refresh) == 64 and all(ch in string.hexdigits for ch in refresh):
+            refreshed = safely(fetch, ANONYMOUS_ACCOUNT_ORIGIN + "/v1/auth/refresh", 10,
+                               {"refresh_token": refresh})
+            tokens = _validated_anonymous_tokens(refreshed)
+            if tokens and _write_anonymous_private(
+                    server.anonymous_session_path,
+                    {"tokens": tokens, "expires_at_unix_ms": int(time.time() * 1000) + tokens["expires_in"] * 1000}):
+                return tokens["access_token"]
+        challenge = safely(fetch, ANONYMOUS_ACCOUNT_ORIGIN + "/v1/auth/challenges", 10,
+                           {"provider": "anonymous", "target": subject, "purpose": "login"})
+        challenge_id = challenge.get("challenge_id") if isinstance(challenge, dict) else None
+        if not isinstance(challenge_id, str) or not challenge_id:
+            return None
+        logged_in = safely(fetch, ANONYMOUS_ACCOUNT_ORIGIN + "/v1/auth/login", 10,
+                           {"challenge_id": challenge_id, "credential": secret})
+        tokens = _validated_anonymous_tokens(logged_in)
+        if not tokens or not _write_anonymous_private(
+                server.anonymous_session_path,
+                {"tokens": tokens, "expires_at_unix_ms": int(time.time() * 1000) + tokens["expires_in"] * 1000}):
+            return None
+        return tokens["access_token"]
+
+
+def anonymous_translation(texts, source, target, server):
+    token = anonymous_access_token(server)
+    if not token:
+        return [None] * len(texts)
+    result = safely(fetch, ANONYMOUS_ACCOUNT_ORIGIN + "/v1/translate", 2.5,
+                    {"texts": texts, "source_lang": source.upper(), "target_lang": target.upper()}, token)
+    if (not isinstance(result, dict) or result.get("code") not in (200, "200") or
+            not isinstance(result.get("data"), list)):
+        return [None] * len(texts)
+    values = result["data"]
+    return [translation_gloss(values[index]) if index < len(values) else None
+            for index in range(len(texts))]
+
+
+def custom_translation(config, text, source, target, timeout):
+    result = fetch(config["endpoint"], timeout, {
+        "text": text, "source_lang": source.upper(), "target_lang": target.upper()}, config.get("api_key"))
+    if not isinstance(result, dict) or ("code" in result and result["code"] not in (200, "200")):
+        return None
+    for key in ("data", "translation", "result", "translations"):
+        value = result.get(key)
+        if isinstance(value, list):
+            value = value[0] if value else None
+        if isinstance(value, dict):
+            value = next((value[k] for k in ("text", "translation", "data")
+                          if isinstance(value.get(k), str)), None)
+        gloss = translation_gloss(value)
+        if gloss:
+            return gloss
+    return None
+
+
+def secure_custom_endpoint(endpoint):
+    if (not isinstance(endpoint, str) or not endpoint or len(endpoint) > 2048 or
+            any(ord(character) < 32 or ord(character) == 127 for character in endpoint)):
+        return False
+    try:
+        url = urllib.parse.urlsplit(endpoint)
+        # Reading port also rejects malformed port syntax before a request is built.
+        _ = url.port
+        return (url.hostname is not None and url.username is None and
+                url.password is None and not url.fragment and
+                (url.scheme == "https" or
+                 (url.scheme == "http" and url.hostname in ("localhost", "127.0.0.1", "::1"))))
+    except ValueError:
+        return False
+
+
+def niutrans_translation(config, text, source, target, timeout):
+    app_id = config.get("app_id", "")
+    apikey = config.get("apikey", "")
+    if (not isinstance(app_id, str) or not isinstance(apikey, str) or
+        not app_id.strip() or not apikey.strip() or
+        len(app_id) > 4096 or len(apikey) > 4096 or
+        any(ord(c) < 33 or ord(c) > 126 for c in app_id.strip()) or
+        any(ord(c) < 33 or ord(c) > 126 for c in apikey.strip()) or
+        app_id.lstrip().startswith(("<", "FAKESECRET_")) or
+        apikey.lstrip().startswith(("<", "FAKESECRET_"))):
+        return None
+    app_id, apikey = app_id.strip(), apikey.strip()
+    timestamp = str(int(time.time() * 1000))
+    raw = ("apikey=" + apikey + "&appId=" + app_id + "&from=" + source +
+           "&srcText=" + text + "&timestamp=" + timestamp + "&to=" + target)
+    auth = hashlib.md5(raw.encode("utf-8")).hexdigest()
+    body = urllib.parse.urlencode({"from": source, "to": target, "appId": app_id,
+                                   "timestamp": timestamp, "srcText": text,
+                                   "authStr": auth}).encode("utf-8")
+    result = fetch("https://api.niutrans.com/v2/text/translate", timeout,
+                   body, extra_headers={"Content-Type": "application/x-www-form-urlencoded; charset=utf-8"})
+    if not isinstance(result, dict) or "errorCode" in result or "errorMsg" in result:
+        return None
+    return translation_gloss(result.get("tgtText"))
+
+
+def tencent_translation(config, texts, source, target, timeout):
+    payload = json.dumps({"Source": source, "Target": target, "ProjectId": 0,
+                          "SourceTextList": texts}, ensure_ascii=False, separators=(",", ":")).encode()
+    timestamp = int(time.time())
+    date = datetime.datetime.fromtimestamp(timestamp, datetime.timezone.utc).strftime("%Y-%m-%d")
+    signed_headers = "content-type;host;x-tc-action"
+    canonical = ("POST\n/\n\ncontent-type:application/json; charset=utf-8\n"
+                 "host:tmt.tencentcloudapi.com\nx-tc-action:texttranslatebatch\n\n" +
+                 signed_headers + "\n" + hashlib.sha256(payload).hexdigest())
+    scope = date + "/tmt/tc3_request"
+    to_sign = "TC3-HMAC-SHA256\n" + str(timestamp) + "\n" + scope + "\n" + hashlib.sha256(canonical.encode()).hexdigest()
+    key = ("TC3" + config["secret_key"]).encode()
+    for value in (date, "tmt", "tc3_request"):
+        key = hmac.new(key, value.encode(), hashlib.sha256).digest()
+    signature = hmac.new(key, to_sign.encode(), hashlib.sha256).hexdigest()
+    headers = {"Content-Type": "application/json; charset=utf-8", "Host": "tmt.tencentcloudapi.com",
+               "X-TC-Action": "TextTranslateBatch", "X-TC-Timestamp": str(timestamp),
+               "X-TC-Version": "2018-03-21", "X-TC-Region": config.get("region") or "ap-guangzhou",
+               "Authorization": "TC3-HMAC-SHA256 Credential=" + config["secret_id"] + "/" + scope +
+                   ", SignedHeaders=" + signed_headers + ", Signature=" + signature}
+    result = fetch("https://tmt.tencentcloudapi.com/", timeout, payload, extra_headers=headers)
+    values = result["Response"]["TargetTextList"]
+    if not isinstance(values, list):
+        return [None] * len(texts)
+    # Keep positional correspondence even when the provider returns only part
+    # of the batch or an unusable entry, matching Windows TextTranslateBatch.
+    return [translation_gloss(values[index]) if index < len(values) else None
+            for index in range(len(texts))]
+
+
+def translations(query, server):
+    texts = query.get("candidates")
+    target = query.get("target_language", "en")
+    sentence = query.get("sentence", False)
+    max_text_chars = 512 if sentence else 40
+    if (not isinstance(sentence, bool) or not isinstance(texts, list) or
+        len(texts) > (1 if sentence else 9) or
+        any(not isinstance(text, str) or len(text.encode()) > 4096 for text in texts) or
+        target not in ("en", "fr", "ja", "es", "ru", "de", "ko")):
+        return []
+    niutrans = query.get("niutrans")
+    niutrans = niutrans if isinstance(niutrans, dict) and niutrans.get("enabled") else None
+    custom = query.get("custom_translation")
+    custom = custom if isinstance(custom, dict) and custom.get("enabled") else None
+    # Match Windows ActiveProvider/WorkerLoop: only the service the user selected may be asked, and an unusable selection sends nothing rather than falling back to Tencent. A query without the field is malformed and sends nothing.
+    selected = query.get("provider")
+    account_selected = query.get("translation_account") is True and selected in ("none", "account")
+    if account_selected:
+        # The shared query marks this only after the user explicitly chose the
+        # MSIME account and no user-owned service is usable. Keep that choice
+        # visible to this process instead of falling back to Tencent.
+        selected = "account"
+    if (selected not in ("tencent", "niutrans", "custom", "account") or
+        (selected == "niutrans" and not niutrans) or (selected == "custom" and not custom)):
+        return []
+    if selected == "account":
+        provider = ("account", str(getattr(server, "anonymous_account_path", "")))
+    elif selected == "niutrans":
+        app_id = niutrans.get("app_id", "")
+        apikey = niutrans.get("apikey", "")
+        if (not isinstance(app_id, str) or not isinstance(apikey, str) or
+            len(app_id) > 4096 or len(apikey) > 4096):
+            return []
+        app_id, apikey = app_id.strip(), apikey.strip()
+        niutrans = {"enabled": True, "app_id": app_id, "apikey": apikey}
+        provider = ("niutrans", hashlib.sha256((app_id + "\0" + apikey).encode()).digest())
+    elif selected == "custom":
+        endpoint = custom.get("endpoint", "")
+        if not isinstance(endpoint, str) or len(endpoint) > 2048:
+            return []
+        endpoint = endpoint.strip(" \t\r\n")
+        if not secure_custom_endpoint(endpoint):
+            return []
+        token = custom.get("api_key", "")
+        if not isinstance(token, str) or len(token) > 4096:
+            return []
+        token = token.strip(" \t\r\n")
+        # Match Windows ResolveCustomConfig; use one normalized snapshot for
+        # requests in both directions and for cache identity, without editing
+        # the incoming query or the user's persisted preferences.
+        custom = {**custom, "endpoint": endpoint, "api_key": token}
+        # Keep credentials out of cache keys and separate caches when they change.
+        provider = (endpoint, hashlib.sha256(token.encode()).digest())
+    else:
+        # Each request keeps one credential snapshot, including both directions.
+        # A removed or invalid file disables Tencent until a valid file is restored.
+        path = server.tencent_config_path
+        tencent_config = safely(load_tencent_config, path) if path else None
+        if not tencent_config:
+            return []
+        scope = json.dumps(tencent_config, sort_keys=True, separators=(",", ":")).encode()
+        provider = ("tencent", hashlib.sha256(scope).digest())
+    deadline = time.monotonic() + 6
+    found = {}
+    groups = {}
+    for text in dict.fromkeys(texts):
+        direction = (translation_direction(text, target)
+                     if 0 < len(text) and len(text) <= max_text_chars else None)
+        if direction is None:
+            continue
+        key = (provider, direction, text)
+        with server.translation_lock:
+            cached = server.translation_cache.get(key)
+        if cached and cached[0] > time.monotonic():
+            found[text] = cached[1]
+        else:
+            groups.setdefault(direction, []).append(text)
+    for (source, destination), pending in groups.items():
+        if selected == "account":
+            remaining = min(2.5, deadline - time.monotonic())
+            values = anonymous_translation(pending, source, destination, server) if remaining > 0 else None
+            values = values or [None] * len(pending)
+        elif selected == "niutrans":
+            values = []
+            for text in pending:
+                remaining = min(2.5, deadline - time.monotonic())
+                values.append(safely(niutrans_translation, niutrans, text, source, destination, remaining)
+                              if remaining > 0 else None)
+        elif selected == "custom":
+            values = []
+            for text in pending:
+                remaining = min(2.5, deadline - time.monotonic())
+                values.append(safely(custom_translation, custom, text, source, destination, remaining)
+                              if remaining > 0 else None)
+        else:
+            remaining = min(2.5, deadline - time.monotonic())
+            values = safely(tencent_translation, tencent_config, pending, source, destination, remaining) if remaining > 0 else None
+            values = values or [None] * len(pending)
+        with server.translation_lock:
+            for text, value in zip(pending, values):
+                found[text] = value
+                if len(server.translation_cache) >= MAX_TRANSLATION_CACHE_ENTRIES:
+                    server.translation_cache.pop(next(iter(server.translation_cache)))
+                server.translation_cache[(provider, (source, destination), text)] = (
+                    float("inf") if value else
+                    time.monotonic() + NEGATIVE_TRANSLATION_CACHE_TTL, value)
+    return [{"text": text, "translation": found[text]} for text in dict.fromkeys(texts) if found.get(text)]
+
+
+def ai_credential_test(config, path):
+    if not path or not isinstance(config, dict):
+        return False
+    private = load_ai_config(path)
+    provider = config.get("provider")
+    if not isinstance(provider, str):
+        return False
+    selected = private if private.get("provider") == provider else private.get("profiles", {}).get(provider)
+    if (not isinstance(selected, dict) or
+            any(config.get(key) != selected.get(key) for key in ("provider", "endpoint", "model"))):
+        return False
+    body = {"model": selected["model"], "stream": False, "max_tokens": 1,
+            "messages": [{"role": "user", "content": "Reply OK"}]}
+    if provider == "deepseek":
+        body["thinking"] = {"type": "disabled"}
+    elif provider == "siliconflow":
+        body["enable_thinking"] = False
+    result = fetch(selected["endpoint"], 7.0, body, selected["token"])
+    # A successful chat probe must contain at least one choice. An empty
+    # choices array is a valid JSON error-shaped response from some gateways,
+    # but it does not prove that the configured model can answer requests.
+    return (isinstance(result, dict) and isinstance(result.get("choices"), list)
+            and bool(result["choices"]))
+
+
+def select_ai_profile(config, path):
+    """The private entry matching the settings page's provider, or None.
+
+    Same rule the credential test uses: the settings page names a provider and an
+    endpoint, the private file holds the token, and the two have to agree before
+    anything goes out. The model is deliberately not compared here - listing the
+    models available at an endpoint is how a user finds out what to put in that
+    field.
+    """
+    if not path or not isinstance(config, dict):
+        return None
+    private = load_ai_config(path)
+    provider = config.get("provider")
+    if not isinstance(provider, str):
+        return None
+    selected = private if private.get("provider") == provider else private.get("profiles", {}).get(provider)
+    if (not isinstance(selected, dict) or
+            any(config.get(key) != selected.get(key) for key in ("provider", "endpoint"))):
+        return None
+    return selected
+
+
+def ai_models_url(endpoint):
+    """The model catalogue beside the configured chat endpoint.
+
+    Remove a known operation suffix and append ``/models`` under the same API
+    prefix, matching the desktop and mobile hosts. An endpoint of
+    ``https://host/openai/v1/chat/completions`` lists at
+    ``https://host/openai/v1/models``; a provider whose endpoint is
+    ``https://host/chat/completions`` lists at ``https://host/models``.
+    """
+    parts = urllib.parse.urlsplit(endpoint)
+    path = parts.path.rstrip("/")
+    for suffix in ("/chat/completions", "/audio/transcriptions"):
+        if path.endswith(suffix):
+            path = path[: -len(suffix)]
+            break
+    if not path.endswith("/"):
+        path += "/"
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, path + "models", "", ""))
+
+
+def ai_models(query, server):
+    """List the models the configured AI service offers. Names only."""
+    selected = select_ai_profile(query if isinstance(query, dict) else {}, server.ai_config_path)
+    if not selected:
+        return {"models": []}
+    document = fetch(ai_models_url(selected["endpoint"]), 7.0, None, selected["token"])
+    if not isinstance(document, dict) or not isinstance(document.get("data"), list):
+        return {"models": []}
+    models = []
+    for entry in document["data"]:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("id")
+        if (not isinstance(name, str) or not name or len(name) > 256 or
+                any(ord(character) < 32 or 127 <= ord(character) <= 159 for character in name) or
+                name in models):
+            continue
+        models.append(name)
+        if len(models) == 128:
+            break
+    return {"models": models}
+
+
+def ai_polish_test(query, server):
+    """Run one polish request through the configured service and return its text.
+
+    The prompt and the sample text come from the settings page; the endpoint,
+    model and token come from the private file. Nothing here is cached: this is a
+    button the user pressed, not a candidate request.
+    """
+    query = query if isinstance(query, dict) else {}
+    selected = select_ai_profile(query, server.ai_config_path)
+    prompt = query.get("prompt", "")
+    text = query.get("text")
+    if (not selected or selected.get("model") != query.get("model") or
+            not isinstance(prompt, str) or len(prompt.encode()) > 8192 or
+            not isinstance(text, str) or not text.strip() or len(text.encode()) > 8192):
+        return {"text": ""}
+    body = {"model": selected["model"], "stream": False, "temperature": 0.2,
+            "messages": [{"role": "system", "content": prompt},
+                         {"role": "user", "content": text}]}
+    if selected["provider"] == "deepseek":
+        body["thinking"] = {"type": "disabled"}
+    elif selected["provider"] == "siliconflow":
+        body["enable_thinking"] = False
+    document = fetch(selected["endpoint"], AI_REQUEST_TIMEOUT, body, selected["token"])
+    if not isinstance(document, dict) or not isinstance(document.get("choices"), list):
+        return {"text": ""}
+    for choice in document["choices"]:
+        message = choice.get("message") if isinstance(choice, dict) else None
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, str) and content.strip() and len(content.encode()) <= 16384:
+            return {"text": content.strip()}
+    return {"text": ""}
+
+
+def credential_test(query, server):
+    service = query.get("service")
+    config = query.get("config")
+    if service not in ("translation.tencent", "translation.niutrans",
+                       "translation.custom", "ai.assistant") or not isinstance(config, dict):
+        return {"ok": False, "message": "不支持此配置测试。"}
+    try:
+        if service == "translation.tencent":
+            private = load_tencent_config(server.tencent_config_path) if server.tencent_config_path else None
+            ok = bool(private and tencent_translation(private, ["hello"], "en", "zh", 7.0)[0])
+        elif service == "translation.niutrans":
+            ok = bool(niutrans_translation(config, "hello", "en", "zh", 7.0))
+        elif service == "translation.custom":
+            endpoint = config.get("endpoint")
+            token = config.get("api_key", "")
+            if (not isinstance(endpoint, str) or not isinstance(token, str) or
+                    len(endpoint) > 2048 or len(token) > 4096):
+                ok = False
+            else:
+                endpoint = endpoint.strip(" \t\r\n")
+                normalized = {"endpoint": endpoint, "api_key": token.strip(" \t\r\n")}
+                ok = bool(secure_custom_endpoint(endpoint) and
+                          custom_translation(normalized, "hello", "en", "zh", 7.0))
+        else:
+            ok = ai_credential_test(config, server.ai_config_path)
+    except Exception:
+        ok = False
+    return {"ok": ok, "message": "连接成功，当前配置有效。" if ok else
+            "测试失败，请检查 provider 私有配置、当前选项和网络。"}
+
+
+def read_request(rfile):
+    """Read and parse one request line, or return None when it is truncated or over the limit for its kind.
+
+    The limits count the JSON without its newline, the way client-core checks request.len() before appending the terminator.
+    """
+    line = rfile.readline(AI_TEST_REQUEST_LINE_LIMIT + 2)
+    if len(line) - 1 > AI_TEST_REQUEST_LINE_LIMIT or not line.endswith(b"\n"):
+        return None
+    request = json.loads(line)
+    if not isinstance(request, dict):
+        return None
+    if len(line) - 1 > REQUEST_LINE_LIMIT and request.get("kind") != "ai_test":
+        return None
+    return request
+
+
+class Handler(socketserver.StreamRequestHandler):
+    def handle(self):
+        self.request.settimeout(8)
+        _, uid, _ = struct.unpack("3i", self.request.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+        if uid != os.getuid():
+            return
+        try:
+            request = read_request(self.rfile)
+            if request is None:
+                return
+            query = request["query"]
+            if request.get("version") != 1 or not isinstance(query, dict):
+                return
+            if request.get("kind") == "ai_models":
+                self.wfile.write(json.dumps(safely(ai_models, query, self.server) or {"models": []},
+                                            ensure_ascii=False).encode() + b"\n")
+                return
+            if request.get("kind") == "ai_test":
+                self.wfile.write(json.dumps(safely(ai_polish_test, query, self.server) or {"text": ""},
+                                            ensure_ascii=False).encode() + b"\n")
+                return
+            if request.get("kind") == "credential_test":
+                self.wfile.write(json.dumps(credential_test(query, self.server),
+                                            ensure_ascii=False).encode() + b"\n")
+                return
+            if request.get("kind") == "translation":
+                rows = translations(query, self.server)
+                self.wfile.write(json.dumps({"translations": rows}, ensure_ascii=False).encode() + b"\n")
+                return
+            if request.get("kind") != "online":
+                return
+            # Fetch independently so a failed AI response still preserves cloud.
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                jobs = [pool.submit(safely, cloud, query),
+                        pool.submit(safely, configured_ai, query,
+                                    self.server.ai_config_path,
+                                    self.server.ai_candidate_cache,
+                                    self.server.ai_candidate_cache_lock)]
+                rows = []
+                seen = set()
+                for job in jobs:
+                    result = job.result()
+                    for row in result if isinstance(result, list) else [result]:
+                        if row is None or row["text"] in seen:
+                            continue
+                        proposed = rows + [row]
+                        if len(json.dumps({"candidates": proposed}, ensure_ascii=False).encode()) + 1 > 16384:
+                            continue
+                        rows.append(row)
+                        seen.add(row["text"])
+            self.wfile.write(json.dumps({"candidates": rows}, ensure_ascii=False).encode() + b"\n")
+        except Exception:
+            pass
+
+
+class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+    daemon_threads = True
+    slots = threading.BoundedSemaphore(4)
+
+    def process_request(self, request, address):
+        if not self.slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, address)
+        except Exception:
+            self.slots.release()
+            raise
+
+    def process_request_thread(self, request, address):
+        try:
+            super().process_request_thread(request, address)
+        finally:
+            self.slots.release()
+
+    def handle_error(self, request, address):
+        pass
+
+
+def load_private_config(path):
+    descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW)
+    with os.fdopen(descriptor, "rb") as source:
+        info = os.fstat(source.fileno())
+        if info.st_uid != os.getuid() or info.st_mode & 0o077 or not stat.S_ISREG(info.st_mode):
+            raise ValueError("invalid private configuration")
+        raw = source.read(16385)
+        after = os.fstat(source.fileno())
+        identity = lambda value: (value.st_dev, value.st_ino, value.st_size,
+                                  value.st_mtime_ns, value.st_ctime_ns, value.st_mode, value.st_uid)
+        if len(raw) > 16384 or identity(info) != identity(after):
+            raise ValueError("invalid private configuration")
+    config = json.loads(raw.decode("utf-8"))
+    if not isinstance(config, dict):
+        raise ValueError("invalid private configuration")
+    return config
+
+
+def load_tencent_config(path):
+    config = load_private_config(path)
+    for key in ("secret_id", "secret_key"):
+        value = config.get(key)
+        # Match Windows CloudTranslation::TrimSecret for pasted credentials.
+        # Normalize before validation, signing and cache-scope construction.
+        if isinstance(value, str):
+            value = value.strip(" \t\r\n")
+        if (not isinstance(value, str) or not value.strip() or
+            any(ord(c) < 33 or ord(c) > 126 for c in value) or
+            value.startswith(("FAKESECRET_", "<"))):
+            raise ValueError("invalid Tencent credential")
+        config[key] = value
+    region = config.get("region", "")
+    if (not isinstance(region, str) or len(region) > 64 or
+        any(c not in string.ascii_lowercase + string.digits + "-" for c in region)):
+        raise ValueError("invalid Tencent region")
+    return {"secret_id": config["secret_id"], "secret_key": config["secret_key"],
+            "region": region or "ap-guangzhou"}
+
+
+def load_ai_config(path):
+    config = load_private_config(path)
+    profiles = config.get("profiles", {})
+    if not isinstance(profiles, dict) or len(profiles) > 16:
+        raise ValueError("invalid AI profiles")
+    entries = [config] if "provider" in config else []
+    for provider, entry in profiles.items():
+        if (not isinstance(provider, str) or not provider or len(provider) > 64
+                or not isinstance(entry, dict) or entry.get("provider", provider) != provider
+                or config.get("provider") == provider):
+            raise ValueError("invalid AI profile")
+        entry["provider"] = provider
+        entries.append(entry)
+    if not entries:
+        raise ValueError("missing AI configuration")
+    for entry in entries:
+        if any(not isinstance(entry.get(key), str) or not entry[key].strip()
+               for key in ("provider", "endpoint", "model", "token")):
+            raise ValueError("invalid AI configuration")
+        for key in ("provider", "endpoint", "model"):
+            entry[key] = entry[key].strip(" \t\r\n")
+        if any(any(ord(character) < 32 or 127 <= ord(character) <= 159
+                   for character in entry[key]) for key in ("provider", "endpoint", "model")):
+            raise ValueError("invalid AI configuration")
+        # Match the shared Windows/client credential policy for pasted tokens:
+        # discard surrounding whitespace before validation and every request.
+        # Keep interior whitespace untouched so the provider receives exactly
+        # the configured secret after normalization.
+        token = entry["token"].strip(" \t\r\n")
+        entry["token"] = token
+        if token.startswith(("<", "FAKESECRET_")) or any(ord(c) < 33 or ord(c) > 126 for c in token):
+            raise ValueError("invalid AI credential")
+        url = urllib.parse.urlsplit(entry["endpoint"])
+        if url.scheme != "https" or not url.hostname or url.username or url.password or url.fragment:
+            raise ValueError("invalid AI endpoint")
+    return config
+
+
+def anonymous_server(config_directory):
+    config_directory = config_directory.absolute()
+    return SimpleNamespace(
+        anonymous_account_path=config_directory / "anonymous-account.json",
+        anonymous_session_path=config_directory / "anonymous-session.json",
+        anonymous_lock=threading.Lock(),
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("socket", type=Path, nargs="?", help="absolute socket path in a private runtime directory")
+    parser.add_argument(
+        "--ensure-anonymous-account",
+        action="store_true",
+        help="create or refresh this user's anonymous translation account, then exit",
+    )
+    parser.add_argument("--ai-config", type=Path, help="owner-only JSON: provider/endpoint/model/token and optional profiles by provider")
+    parser.add_argument("--tencent-config", type=Path, help="owner-only JSON: secret_id, secret_key, optional region")
+    parser.add_argument("--config-directory", type=Path,
+                        help="absolute directory for optional AI/Tencent config files, read on each request")
+    args = parser.parse_args()
+    if args.config_directory is None:
+        config_root = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+        if not Path(config_root).is_absolute():
+            parser.error("config directory must be absolute")
+        args.config_directory = Path(config_root) / "msime-client"
+    if args.config_directory and not args.config_directory.is_absolute():
+        parser.error("config directory must be absolute")
+    if args.ensure_anonymous_account:
+        if args.socket is not None:
+            parser.error("--ensure-anonymous-account does not take a socket")
+        token = anonymous_access_token(anonymous_server(args.config_directory))
+        if not token:
+            parser.error("anonymous account could not be created")
+        return
+    if args.socket is None:
+        parser.error("the following arguments are required: socket")
+    if args.ai_config:
+        try:
+            load_ai_config(args.ai_config)
+        except Exception:
+            parser.error("AI configuration must be valid owner-only JSON")
+    if args.tencent_config:
+        try:
+            load_tencent_config(args.tencent_config)
+        except Exception:
+            parser.error("Tencent configuration must be valid owner-only JSON")
+    # Explicit files retain startup validation. Directory defaults may be
+    # absent or invalid until the user creates or repairs them; each request
+    # still uses the existing owner-only configuration readers.
+    if args.config_directory:
+        args.ai_config = args.ai_config or args.config_directory / "ai-provider.json"
+        args.tencent_config = args.tencent_config or args.config_directory / "tencent-provider.json"
+    try:
+        parent = args.socket.parent.stat()
+        if (not args.socket.is_absolute() or parent.st_uid != os.getuid() or
+                parent.st_mode & 0o077 or not stat.S_ISDIR(parent.st_mode)):
+            raise ValueError()
+    except (OSError, ValueError):
+        parser.error("socket requires an absolute path in an owner-only directory")
+    os.umask(0o077)
+    try:
+        server, service_lock = open_server(Server, args.socket, Handler)
+    except (OSError, ValueError):
+        parser.error("online service is already running or its socket cannot be recovered")
+    server.ai_config_path = args.ai_config.absolute() if args.ai_config else None
+    server.tencent_config_path = args.tencent_config.absolute() if args.tencent_config else None
+    account = anonymous_server(args.config_directory) if args.config_directory else None
+    server.anonymous_account_path = account.anonymous_account_path if account else None
+    server.anonymous_session_path = account.anonymous_session_path if account else None
+    server.anonymous_lock = account.anonymous_lock if account else None
+    server.translation_cache = {}
+    server.translation_lock = threading.Lock()
+    server.ai_candidate_cache = {}
+    server.ai_candidate_cache_lock = threading.Lock()
+    identity = args.socket.stat() if service_lock is not None else None
+    def stop(signum, frame):
+        raise KeyboardInterrupt()
+    signal.signal(signal.SIGTERM, stop)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        stop_http_requests()
+        server.server_close()
+        if service_lock is not None:
+            try:
+                current = args.socket.stat()
+                if (current.st_dev, current.st_ino) == (identity.st_dev, identity.st_ino):
+                    args.socket.unlink()
+            except FileNotFoundError:
+                pass
+            finally:
+                os.close(service_lock)
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] == ["--http-request"]:
+        sys.exit(http_request_worker())
+    main()

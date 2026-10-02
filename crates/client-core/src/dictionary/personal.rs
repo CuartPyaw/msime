@@ -6,7 +6,8 @@
 
 use crate::file_lock;
 use serde::{Deserialize, Serialize};
-use std::fs::{self, File, OpenOptions};
+use std::collections::HashSet;
+use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -15,6 +16,8 @@ const MAX_STATE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_REQUESTS: usize = 160;
 const MAX_ACTIVE_REQUESTS: usize = 128;
 const MAX_PAGE_ENTRIES: usize = 100;
+/// The code prefix a page may be filtered by, as the Engine list accepts it.
+const MAX_QUERY_BYTES: usize = 256;
 const MAX_HISTORY: usize = 32;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
@@ -65,28 +68,37 @@ impl PersonalWord {
             PersonalWordKind::English => 64,
         };
         let key_valid = match self.kind {
-            PersonalWordKind::Pinyin => self
-                .key
-                .bytes()
-                .all(|byte| byte.is_ascii_lowercase() || byte == b'\'' || byte == b' '),
-            PersonalWordKind::Wubi | PersonalWordKind::QuickPhrase => {
-                self.key.bytes().all(|byte| {
-                    byte.is_ascii_lowercase()
-                        || (self.kind == PersonalWordKind::QuickPhrase && byte.is_ascii_digit())
-                })
+            PersonalWordKind::Pinyin => super::pinyin_code_is_well_formed(&self.key, true),
+            PersonalWordKind::Wubi => super::wubi_code_is_well_formed(&self.key),
+            PersonalWordKind::QuickPhrase => {
+                super::quick_phrase_transport_code_is_well_formed(&self.key)
             }
             PersonalWordKind::English => super::english_code_is_well_formed(&self.key),
         };
-        let value_has_invalid_control = self.value.chars().any(|character| {
-            character.is_control()
-                && !(self.kind == PersonalWordKind::QuickPhrase && matches!(character, '\n' | '\t'))
-        });
+        let allowed_controls: &[char] = if self.kind == PersonalWordKind::QuickPhrase {
+            &['\n', '\t']
+        } else {
+            &[]
+        };
+        let value_has_invalid_control =
+            crate::has_disallowed_control_with_allowed(&self.value, allowed_controls);
         if self.key.is_empty()
             || self.key.len() > key_limit
             || !key_valid
             || self.value.is_empty()
             || value_has_invalid_control
             || self.weight < 0
+        {
+            return Err("invalid personal dictionary entry");
+        }
+        Ok(())
+    }
+
+    /// Validation for an entry that is being written: `validate` plus the stricter rules new input and imports follow. A quick phrase code must be letters only, as in the reference; a stored row with a digit still passes `validate`, so it loads and can be deleted.
+    pub fn validate_new(&self) -> Result<(), &'static str> {
+        self.validate()?;
+        if self.kind == PersonalWordKind::QuickPhrase
+            && !super::quick_phrase_code_is_well_formed(&self.key)
         {
             return Err("invalid personal dictionary entry");
         }
@@ -137,6 +149,16 @@ pub struct PersonalDictionaryState {
     pub snapshot_error: Option<String>,
     pub page_offset: usize,
     pub requested_page_offset: usize,
+    /// The dictionary and code prefix the host asked the keyboard to page through. The keyboard answers from the user's whole store, so a filter chosen in the host no longer has to be applied to one unfiltered page, which left a later page's matches unreachable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_kind: Option<PersonalWordKind>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub requested_query: String,
+    /// The filter `entries` answer, so a host can tell a page still waiting for the keyboard from a page of its own search.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_kind: Option<PersonalWordKind>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub page_query: String,
     pub refresh_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completed_refresh_id: Option<String>,
@@ -153,6 +175,10 @@ impl Default for PersonalDictionaryState {
             snapshot_error: None,
             page_offset: 0,
             requested_page_offset: 0,
+            requested_kind: None,
+            requested_query: String::new(),
+            page_kind: None,
+            page_query: String::new(),
             refresh_id: Uuid::new_v4().to_string(),
             completed_refresh_id: None,
         }
@@ -166,6 +192,14 @@ impl PersonalDictionaryState {
             .filter(|request| request.status == PersonalWordRequestStatus::Pending)
             .count()
     }
+}
+
+/// One page of the user's own words, optionally within one dictionary and under one code prefix.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PersonalPageRequest {
+    pub offset: usize,
+    pub kind: Option<PersonalWordKind>,
+    pub query: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -215,9 +249,23 @@ impl PersonalDictionaryStore {
     }
 
     pub fn read(&self) -> Result<PersonalDictionaryState, PersonalDictionaryError> {
+        if let Some(parent) = self.directory.parent() {
+            crate::storage::reject_symlink(parent)?;
+        }
+        crate::storage::reject_symlink(&self.directory)?;
         let file = self.directory.join("sync.json");
-        if !file.exists() {
-            return Ok(PersonalDictionaryState::default());
+        match fs::symlink_metadata(&file) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(PersonalDictionaryError::InvalidState)
+            }
+            Ok(metadata) if !metadata.file_type().is_file() => {
+                return Err(PersonalDictionaryError::InvalidState)
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Ok(PersonalDictionaryState::default())
+            }
+            Err(error) => return Err(error.into()),
         }
         read_file(&file)
     }
@@ -240,8 +288,13 @@ impl PersonalDictionaryStore {
             return Err(PersonalDictionaryError::InvalidRequest);
         }
         validate_request_id(&request.id)?;
-        for word in request.previous.iter().chain(request.replacement.iter()) {
+        // The previous entry is a stored row and only has to be one the store can hold; the replacement is new input and follows the stricter rules.
+        if let Some(word) = &request.previous {
             word.validate()
+                .map_err(|_| PersonalDictionaryError::InvalidRequest)?;
+        }
+        if let Some(word) = &request.replacement {
+            word.validate_new()
                 .map_err(|_| PersonalDictionaryError::InvalidRequest)?;
         }
         self.update(|state| enqueue_request(state, request))
@@ -256,9 +309,9 @@ impl PersonalDictionaryStore {
             return Err(PersonalDictionaryError::InvalidRequest);
         }
         validate_request_id(&id_prefix)?;
-        let mut identities = std::collections::HashSet::new();
+        let mut identities = std::collections::HashSet::with_capacity(words.len());
         for word in &words {
-            word.validate()
+            word.validate_new()
                 .map_err(|_| PersonalDictionaryError::InvalidRequest)?;
             if !identities.insert(word.identity()) {
                 return Err(PersonalDictionaryError::InvalidRequest);
@@ -273,12 +326,14 @@ impl PersonalDictionaryStore {
             if active + words.len() > MAX_ACTIVE_REQUESTS {
                 return Err(PersonalDictionaryError::TooManyRequests);
             }
-            if state.requests.iter().any(|request| {
-                request.status != PersonalWordRequestStatus::Applied
-                    && request
-                        .identities()
-                        .any(|identity| identities.contains(&identity))
-            }) {
+            if has_identity_conflict(
+                &state.requests,
+                &identities,
+                &[
+                    PersonalWordRequestStatus::Pending,
+                    PersonalWordRequestStatus::Failed,
+                ],
+            ) {
                 return Err(PersonalDictionaryError::Conflict);
             }
             prune_history(state);
@@ -304,14 +359,13 @@ impl PersonalDictionaryStore {
             }) else {
                 return Ok(());
             };
-            let identities: std::collections::HashSet<_> =
-                state.requests[index].identities().collect();
-            if state.requests.iter().any(|request| {
-                request.status == PersonalWordRequestStatus::Pending
-                    && request
-                        .identities()
-                        .any(|identity| identities.contains(&identity))
-            }) {
+            let mut identities = std::collections::HashSet::with_capacity(2);
+            identities.extend(state.requests[index].identities());
+            if has_identity_conflict(
+                &state.requests,
+                &identities,
+                &[PersonalWordRequestStatus::Pending],
+            ) {
                 return Err(PersonalDictionaryError::Conflict);
             }
             state.requests[index].status = PersonalWordRequestStatus::Pending;
@@ -330,12 +384,20 @@ impl PersonalDictionaryStore {
         })
     }
 
-    pub fn request_page(&self, offset: usize) -> Result<(), PersonalDictionaryError> {
-        if offset > 1_000_000 {
+    pub fn request_page(
+        &self,
+        offset: usize,
+        kind: Option<PersonalWordKind>,
+        query: &str,
+    ) -> Result<(), PersonalDictionaryError> {
+        let query = query.trim();
+        if offset > 1_000_000 || query.len() > MAX_QUERY_BYTES {
             return Err(PersonalDictionaryError::InvalidRequest);
         }
         self.update(|state| {
             state.requested_page_offset = offset;
+            state.requested_kind = kind;
+            state.requested_query = query.to_owned();
             state.refresh_id = Uuid::new_v4().to_string();
             Ok(())
         })
@@ -350,18 +412,20 @@ impl PersonalDictionaryStore {
     ) -> Result<(), PersonalDictionaryError>
     where
         Apply: FnMut(&PersonalWordRequest) -> Result<(), String>,
-        Page: FnMut(usize) -> Result<PersonalWordPage, String>,
+        Page: FnMut(&PersonalPageRequest) -> Result<PersonalWordPage, String>,
     {
         self.update(|state| {
-            let pending: Vec<usize> = state
-                .requests
-                .iter()
-                .enumerate()
-                .filter_map(|(index, request)| {
-                    (request.status == PersonalWordRequestStatus::Pending).then_some(index)
-                })
-                .take(4)
-                .collect();
+            let mut pending = Vec::with_capacity(4);
+            pending.extend(
+                state
+                    .requests
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, request)| {
+                        (request.status == PersonalWordRequestStatus::Pending).then_some(index)
+                    })
+                    .take(4),
+            );
             for index in pending {
                 match apply(&state.requests[index]) {
                     Ok(()) => {
@@ -377,11 +441,18 @@ impl PersonalDictionaryStore {
             if state.pending_count() == 0 {
                 state.completed_refresh_id = Some(state.refresh_id.clone());
             }
-            match page(state.requested_page_offset) {
+            let request = PersonalPageRequest {
+                offset: state.requested_page_offset,
+                kind: state.requested_kind,
+                query: state.requested_query.clone(),
+            };
+            match page(&request) {
                 Ok(snapshot) if snapshot.entries.len() <= MAX_PAGE_ENTRIES => {
                     state.entries = snapshot.entries;
                     state.has_more = snapshot.has_more;
-                    state.page_offset = state.requested_page_offset;
+                    state.page_offset = request.offset;
+                    state.page_kind = request.kind;
+                    state.page_query = request.query;
                     state.snapshot_date = Some("updated".to_owned());
                     state.snapshot_error = None;
                 }
@@ -398,22 +469,22 @@ impl PersonalDictionaryStore {
     where
         F: FnOnce(&mut PersonalDictionaryState) -> Result<(), PersonalDictionaryError>,
     {
-        fs::create_dir_all(&self.directory)?;
+        if !crate::storage::create_directory_and_check(&self.directory)? {
+            return Err(PersonalDictionaryError::InvalidState);
+        }
         let lock_path = self.directory.join("sync.lock");
-        let lock = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(lock_path)?;
+        let lock = file_lock::open_lock_file(lock_path)?;
         if !file_lock::try_exclusive(&lock)? {
             return Err(PersonalDictionaryError::Busy);
         }
         let file = self.directory.join("sync.json");
-        let mut state = if file.exists() {
-            read_file(&file)?
-        } else {
-            PersonalDictionaryState::default()
+        let mut state = match fs::symlink_metadata(&file) {
+            Ok(metadata) if metadata.file_type().is_file() => read_file(&file)?,
+            Ok(_) => return Err(PersonalDictionaryError::InvalidState),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                PersonalDictionaryState::default()
+            }
+            Err(error) => return Err(error.into()),
         };
         validate_state(&state)?;
         action(&mut state)?;
@@ -423,13 +494,10 @@ impl PersonalDictionaryStore {
         if bytes.len() > MAX_STATE_BYTES {
             return Err(PersonalDictionaryError::InvalidState);
         }
-        let temporary = self
-            .directory
-            .join(format!("sync.json.tmp-{}", std::process::id()));
-        let mut output = File::create(&temporary)?;
-        output.write_all(&bytes)?;
-        output.sync_all()?;
-        fs::rename(temporary, file)?;
+        let mut temporary = tempfile::NamedTempFile::new_in(&self.directory)?;
+        temporary.write_all(&bytes)?;
+        temporary.as_file().sync_all()?;
+        temporary.persist(file).map_err(|error| error.error)?;
         Ok(())
     }
 }
@@ -446,13 +514,13 @@ fn enqueue_request(
     if active >= MAX_ACTIVE_REQUESTS {
         return Err(PersonalDictionaryError::TooManyRequests);
     }
-    let identities: std::collections::HashSet<_> = request.identities().collect();
-    if state.requests.iter().any(|item| {
-        item.status == PersonalWordRequestStatus::Pending
-            && item
-                .identities()
-                .any(|identity| identities.contains(&identity))
-    }) {
+    let mut identities = HashSet::with_capacity(2);
+    identities.extend(request.identities());
+    if has_identity_conflict(
+        &state.requests,
+        &identities,
+        &[PersonalWordRequestStatus::Pending],
+    ) {
         return Err(PersonalDictionaryError::Conflict);
     }
     prune_history(state);
@@ -461,38 +529,51 @@ fn enqueue_request(
     Ok(())
 }
 
+fn has_identity_conflict(
+    requests: &[PersonalWordRequest],
+    identities: &HashSet<String>,
+    statuses: &[PersonalWordRequestStatus],
+) -> bool {
+    requests.iter().any(|request| {
+        statuses.contains(&request.status)
+            && request
+                .identities()
+                .any(|identity| identities.contains(&identity))
+    })
+}
+
 fn prune_history(state: &mut PersonalDictionaryState) {
-    let keep: std::collections::HashSet<_> = state
-        .requests
-        .iter()
-        .filter(|request| request.status == PersonalWordRequestStatus::Applied)
-        .rev()
-        .take(MAX_HISTORY)
-        .map(|request| request.id.clone())
-        .collect();
+    let mut keep = std::collections::HashSet::with_capacity(MAX_HISTORY.min(state.requests.len()));
+    keep.extend(
+        state
+            .requests
+            .iter()
+            .filter(|request| request.status == PersonalWordRequestStatus::Applied)
+            .rev()
+            .take(MAX_HISTORY)
+            .map(|request| request.id.clone()),
+    );
     state.requests.retain(|request| {
         request.status != PersonalWordRequestStatus::Applied || keep.contains(&request.id)
     });
 }
 
 fn validate_request_id(id: &str) -> Result<(), PersonalDictionaryError> {
-    if id.is_empty()
-        || id.len() > 120
-        || !id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-    {
+    if !crate::is_bounded_ascii_identifier(id, 120) {
         return Err(PersonalDictionaryError::InvalidRequest);
     }
     Ok(())
 }
 
 fn read_file(file: &Path) -> Result<PersonalDictionaryState, PersonalDictionaryError> {
-    let metadata = fs::metadata(file)?;
-    if metadata.len() as usize > MAX_STATE_BYTES {
+    let metadata = fs::symlink_metadata(file)?;
+    if !metadata.file_type().is_file() {
         return Err(PersonalDictionaryError::InvalidState);
     }
-    let bytes = fs::read(file)?;
+    let file_handle = File::open(file)?;
+    let bytes = crate::bounded_io::read_bounded_file(file_handle, MAX_STATE_BYTES as u64, || {
+        PersonalDictionaryError::InvalidState
+    })?;
     let state: PersonalDictionaryState =
         serde_json::from_slice(&bytes).map_err(|_| PersonalDictionaryError::InvalidState)?;
     validate_state(&state)?;
@@ -505,11 +586,13 @@ fn validate_state(state: &PersonalDictionaryState) -> Result<(), PersonalDiction
         || state.entries.len() > MAX_PAGE_ENTRIES
         || state.page_offset > 1_000_000
         || state.requested_page_offset > 1_000_000
+        || state.requested_query.len() > MAX_QUERY_BYTES
+        || state.page_query.len() > MAX_QUERY_BYTES
         || state.refresh_id.is_empty()
     {
         return Err(PersonalDictionaryError::InvalidState);
     }
-    let mut ids = std::collections::HashSet::new();
+    let mut ids = std::collections::HashSet::with_capacity(state.requests.len());
     for request in &state.requests {
         if request.id.is_empty() || !ids.insert(&request.id) {
             return Err(PersonalDictionaryError::InvalidState);
@@ -585,6 +668,48 @@ mod tests {
     }
 
     #[test]
+    fn a_page_request_carries_its_filter_to_the_keyboard_and_back() {
+        let root = tempfile::tempdir().unwrap();
+        let store = PersonalDictionaryStore::new(root.path());
+        let entry = word("dh", "电话");
+        store
+            .request_page(100, Some(PersonalWordKind::QuickPhrase), " dh ")
+            .unwrap();
+        let mut seen = None;
+        store
+            .synchronize(
+                |_| Ok(()),
+                |request| {
+                    seen = Some(request.clone());
+                    Ok(PersonalWordPage {
+                        entries: vec![entry.clone()],
+                        has_more: false,
+                    })
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            seen,
+            Some(PersonalPageRequest {
+                offset: 100,
+                kind: Some(PersonalWordKind::QuickPhrase),
+                query: "dh".into(),
+            })
+        );
+        let state = store.read().unwrap();
+        assert_eq!(state.page_kind, Some(PersonalWordKind::QuickPhrase));
+        assert_eq!(state.page_query, "dh");
+        let text = fs::read_to_string(root.path().join("sync.json")).unwrap();
+        assert!(text.contains(r#""requestedKind":"quickPhrase""#), "{text}");
+        assert!(text.contains(r#""pageQuery":"dh""#), "{text}");
+
+        assert!(matches!(
+            store.request_page(0, None, &"a".repeat(MAX_QUERY_BYTES + 1)),
+            Err(PersonalDictionaryError::InvalidRequest)
+        ));
+    }
+
+    #[test]
     fn import_validation_and_conflicts_are_atomic() {
         let root = tempfile::tempdir().unwrap();
         let store = PersonalDictionaryStore::new(root.path());
@@ -607,7 +732,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let store = PersonalDictionaryStore::new(root.path());
         let words: Vec<_> = (0..9)
-            .map(|index| word(&format!("batch{index}"), "fixture"))
+            .map(|index| word(&format!("batch{}", char::from(b'a' + index)), "fixture"))
             .collect();
         store.enqueue_import(words, "import".into()).unwrap();
         let ids: Vec<_> = store
@@ -657,6 +782,69 @@ mod tests {
         assert_eq!(fs::read(directory.join("sync.json")).unwrap(), b"not-json");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_personal_dictionary_paths() {
+        use std::os::unix::fs::symlink;
+
+        let target = tempfile::tempdir().unwrap();
+        let parent = tempfile::tempdir().unwrap();
+        let linked_root = parent.path().join("user-data");
+        symlink(target.path(), &linked_root).unwrap();
+        let linked = PersonalDictionaryStore::new(&linked_root);
+        assert!(matches!(linked.read(), Err(PersonalDictionaryError::Io(_))));
+        assert!(!target.path().join("sync.json").exists());
+
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("sync.json");
+        let outside = tempfile::tempdir().unwrap();
+        let outside_path = outside.path().join("sync.json");
+        fs::write(&outside_path, b"{}").unwrap();
+        symlink(&outside_path, &path).unwrap();
+        let store = PersonalDictionaryStore::new(root.path());
+        assert!(matches!(
+            store.read(),
+            Err(PersonalDictionaryError::InvalidState)
+        ));
+        assert!(store
+            .enqueue(None, Some(word("ni", "ni")), "synthetic-id".into())
+            .is_err());
+    }
+
+    #[test]
+    fn oversized_state_is_rejected_before_json_decode() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("sync.json");
+        fs::write(&path, vec![b'x'; MAX_STATE_BYTES + 1]).unwrap();
+        let store = PersonalDictionaryStore::new(root.path());
+        assert!(matches!(
+            store.read(),
+            Err(PersonalDictionaryError::InvalidState)
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn does_not_follow_a_fixed_personal_dictionary_temporary_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let temporary = root
+            .path()
+            .join(format!("sync.json.tmp-{}", std::process::id()));
+        let outside_file = outside.path().join("sync.json");
+        fs::write(&outside_file, b"keep me").unwrap();
+        symlink(&outside_file, &temporary).unwrap();
+        let store = PersonalDictionaryStore::new(root.path());
+
+        store
+            .enqueue(None, Some(word("ni", "你")), "synthetic-id".into())
+            .unwrap();
+        assert_eq!(fs::read(outside_file).unwrap(), b"keep me");
+        assert!(root.path().join("sync.json").is_file());
+    }
+
     #[test]
     fn transport_validation_matches_engine_multiline_quick_phrases() {
         assert!(word("fixture", "first line\nsecond\tcolumn")
@@ -671,5 +859,49 @@ mod tests {
         .validate()
         .is_err());
         assert!(word("fixture", "first\0second").validate().is_err());
+    }
+
+    #[test]
+    fn digit_quick_phrase_codes_are_refused_for_new_input_but_stored_rows_stay_usable() {
+        let legacy = word("nh1", "你好");
+        assert!(legacy.validate().is_ok());
+        assert!(legacy.validate_new().is_err());
+        assert!(word("nh", "你好").validate_new().is_ok());
+
+        let root = tempfile::tempdir().unwrap();
+        let store = PersonalDictionaryStore::new(root.path());
+        assert!(matches!(
+            store.enqueue(None, Some(legacy.clone()), "add".into()),
+            Err(PersonalDictionaryError::InvalidRequest)
+        ));
+        assert!(matches!(
+            store.enqueue_import(vec![legacy.clone()], "import".into()),
+            Err(PersonalDictionaryError::InvalidRequest)
+        ));
+
+        // A row the Engine already holds with a digit still lands in the stored snapshot and loads back.
+        store
+            .synchronize(
+                |_| Ok(()),
+                |_| {
+                    Ok(PersonalWordPage {
+                        entries: vec![legacy.clone()],
+                        has_more: false,
+                    })
+                },
+            )
+            .unwrap();
+        assert_eq!(store.read().unwrap().entries, vec![legacy.clone()]);
+        // It can be deleted, and edited to a letters-only code, but not re-saved with the digit.
+        assert!(matches!(
+            store.enqueue(
+                Some(legacy.clone()),
+                Some(word("nh2", "你好")),
+                "edit-digit".into()
+            ),
+            Err(PersonalDictionaryError::InvalidRequest)
+        ));
+        store.enqueue(Some(legacy), None, "delete".into()).unwrap();
+        assert_eq!(store.read().unwrap().pending_count(), 1);
     }
 }

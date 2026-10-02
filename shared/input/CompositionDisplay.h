@@ -7,9 +7,7 @@ namespace msime::input {
 
 // Whether the composition on screen should be the kana rather than the letters that produced it.
 //
-// A Japanese composition is かな: that is what the user means, what the candidates are for, and what
-// Enter commits. The Engine hands over both - `editing_text` for the romaji and `reading` for the
-// kana - and every other scheme leaves the reading empty, so this answers for all of them.
+// A Japanese composition is かな: that is what the user means, what the candidates are for, and what Enter commits. The Engine hands over both - `editing_text` for the romaji and `reading` for the kana. A Korean composition is the same shape: `editing_text` holds the Dubeolsik key letters of the open syllable and `reading` the Hangul, and the caret always sits at the end of the letters because the Engine ignores a host caret move there. Every other scheme leaves the reading empty, so this answers for all of them.
 //
 // The exception is a caret the user has moved into the middle of the letters. The Engine's offset
 // is an offset into the romaji and there is no map from it into the kana, so rather than draw the

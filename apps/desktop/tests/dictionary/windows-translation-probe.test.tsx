@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { testHost } from "../support/host";
 import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SettingsPage, type Snapshot } from "@msime/ui";
@@ -57,12 +58,12 @@ test.each([
     const probe = vi.fn().mockResolvedValue({ ok: true, message: "fixture complete" });
     render(
       <SettingsPage
-        initialPage="input"
+        initialPage="expression"
         client={{
           load: async () => snapshot,
           save: vi.fn(),
           testApiCredential: probe,
-          host: { platform: "windows" } as never,
+          host: testHost({ platform: "windows" }),
         }}
       />,
     );

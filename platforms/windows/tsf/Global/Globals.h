@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Private.h"
-#include "define.h"
+#include "Define.h"
 #include "MetasequoiaIMEBaseStructure.h"
 #include <iostream>
 #include <string>
@@ -101,7 +101,6 @@ extern HINSTANCE dllInstanceHandle;
 extern LONG dllRefCount;
 
 extern CRITICAL_SECTION CS;
-extern HFONT defaultlFontHandle; // Global font object we use everywhere
 
 extern const CLSID MetasequoiaIMECLSID;
 extern const GUID MetasequoiaIMEGuidProfile;

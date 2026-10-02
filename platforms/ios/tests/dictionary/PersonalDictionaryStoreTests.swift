@@ -1,6 +1,33 @@
 import XCTest
 
+/// A distinct letters-only code for fixture row `index` (0..<676): quick phrase codes take letters only, as the Windows source's `valid_code` does, so a numbered fixture spells its number in letters.
+private func letterCode(_ prefix: String, _ index: Int) -> String {
+  let letters = Array("abcdefghijklmnopqrstuvwxyz")
+  return prefix + String(letters[index / 26]) + String(letters[index % 26])
+}
+
 final class PersonalDictionaryStoreTests: XCTestCase {
+  func testQueueRejectsASymlinkedLockFile() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("msime-dictionary-lock-test-\(UUID().uuidString)")
+    let outsideDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("msime-dictionary-lock-target-\(UUID().uuidString)")
+    defer {
+      try? FileManager.default.removeItem(at: root)
+      try? FileManager.default.removeItem(at: outsideDirectory)
+    }
+    let directory = root.appendingPathComponent("PersonalDictionary", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: outsideDirectory, withIntermediateDirectories: true)
+    let outsideLock = outsideDirectory.appendingPathComponent("outside.lock")
+    try Data("synthetic-lock-target".utf8).write(to: outsideLock)
+    try FileManager.default.createSymbolicLink(
+      at: directory.appendingPathComponent("sync.lock"), withDestinationURL: outsideLock)
+
+    let store = PersonalDictionaryStore(directory: root)
+    XCTAssertThrowsError(try store.enqueue(previous: nil, replacement: .init(key: "ni", value: "拟")))
+    XCTAssertEqual(try Data(contentsOf: outsideLock), Data("synthetic-lock-target".utf8))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("sync.json").path))
+  }
+
   func testQueueAcknowledgementFailureAndPaging() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -27,7 +54,7 @@ final class PersonalDictionaryStoreTests: XCTestCase {
     try host.retry(removal)
     try host.requestPage(offset: 100)
     try keyboard.synchronize(apply: { XCTAssertEqual($0.id, removal) }, page: {
-      XCTAssertEqual($0, 100)
+      XCTAssertEqual($0.offset, 100)
       return .init(entries: [], hasMore: false)
     })
     XCTAssertEqual(try host.read().pageOffset, 100)
@@ -58,7 +85,7 @@ final class PersonalDictionaryStoreTests: XCTestCase {
         try session.applyPersonalPrevious($0.previous?.bridgeValue, replacement: $0.replacement?.bridgeValue,
                                           requestID: $0.id)
       }, page: {
-        let result = try session.personalEntries(atOffset: UInt($0))
+        let result = try session.personalEntries(atOffset: UInt($0.offset))
         let entries = try XCTUnwrap(result["entries"] as? [[String: Any]])
         return .init(entries: try entries.map { try PersonalWord(bridgeValue: $0) },
                      hasMore: try XCTUnwrap(result["hasMore"] as? Bool))
@@ -85,9 +112,15 @@ final class PersonalDictionaryStoreTests: XCTestCase {
     XCTAssertThrowsError(try PersonalWord(key: "nihao", value: "你好").validated())
     XCTAssertThrowsError(try PersonalWord(key: "ni'hao", value: "你").validated())
     XCTAssertThrowsError(try PersonalWord(kind: .wubi, key: "abcde", value: "词").validated())
-    XCTAssertThrowsError(try PersonalWord(kind: .english, key: "wrong", value: "Word").validated())
+    // An English code may differ from its word (dont types don't), but stays letters, hyphens and apostrophes.
+    XCTAssertEqual(try PersonalWord(kind: .english, key: "dont", value: "don't").validated().value, "don't")
+    XCTAssertThrowsError(try PersonalWord(kind: .english, key: "dont1", value: "don't").validated())
     XCTAssertThrowsError(try PersonalWord(key: "ni", value: "a\0b").validated())
-    XCTAssertEqual(try PersonalWord(kind: .quickPhrase, key: "HELLO1", value: "第一行\n第二行").validated().key, "hello1")
+    XCTAssertEqual(try PersonalWord(kind: .quickPhrase, key: "HELLO", value: "第一行\n第二行").validated().key, "hello")
+    // A quick phrase code takes letters only, and the refusal names that rule rather than a generic one.
+    XCTAssertThrowsError(try PersonalWord(kind: .quickPhrase, key: "hello1", value: "你好").validated()) {
+      XCTAssertEqual($0.localizedDescription, "快捷短语编码只能包含英文字母，长度 1 到 32。")
+    }
   }
 
   func testImportValidatesAllEntriesAndRejectsMalformedOrDuplicateData() throws {
@@ -129,7 +162,7 @@ final class PersonalDictionaryStoreTests: XCTestCase {
     XCTAssertEqual(try Data(contentsOf: file), original)
     XCTAssertThrowsError(try store.enqueueImport([fresh, .init(key: "nihao", value: "你好")]))
     XCTAssertEqual(try Data(contentsOf: file), original)
-    let tooMany = (0..<125).map { PersonalWord(kind: .quickPhrase, key: "fixture\($0)", value: "fixture") }
+    let tooMany = (0..<125).map { PersonalWord(kind: .quickPhrase, key: letterCode("fixture", $0), value: "fixture") }
     XCTAssertThrowsError(try store.enqueueImport(tooMany))
     XCTAssertEqual(try Data(contentsOf: file), original)
     try store.synchronize(apply: { _ in }, page: { _ in .init(entries: [], hasMore: false) })
@@ -142,7 +175,7 @@ final class PersonalDictionaryStoreTests: XCTestCase {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
     let store = PersonalDictionaryStore(directory: root)
-    try store.enqueueImport((0..<9).map { .init(kind: .quickPhrase, key: "batch\($0)", value: "fixture") })
+    try store.enqueueImport((0..<9).map { .init(kind: .quickPhrase, key: letterCode("batch", $0), value: "fixture") })
     let ids = try store.read().requests.map(\.id)
     var applied = [String]()
     try store.synchronize(apply: { applied.append($0.id) }, page: { _ in .init(entries: [], hasMore: false) })
@@ -163,7 +196,7 @@ final class PersonalDictionaryStoreTests: XCTestCase {
     // Multiple read chunks, including escaped newlines and multibyte text,
     // while every entry stays under the Engine's quick-phrase limit.
     let words = (0..<128).map {
-      PersonalWord(kind: .quickPhrase, key: "file\($0)", value: String(repeating: "你好\n", count: 60))
+      PersonalWord(kind: .quickPhrase, key: letterCode("file", $0), value: String(repeating: "你好\n", count: 60))
     }
     let data = try PersonalDictionaryImport(entries: words).encoded()
     XCTAssertGreaterThan(data.count, 65_536)
@@ -209,16 +242,5 @@ final class PersonalDictionaryStoreTests: XCTestCase {
     ])
     try fixture.write(to: file, options: .atomic)
     XCTAssertNoThrow(try store.read())
-  }
-}
-import XCTest
-
-@MainActor
-final class FuzzyPinyinPreferenceTests: XCTestCase {
-  func testFirstEnableSeedsEveryRuleOnce() {
-    let seeded = FuzzyPinyinPreference.seededSelection(enabled: true, seeded: false, current: "")
-    XCTAssertEqual(seeded.split(separator: ",").map(String.init), FuzzyPinyinPreference.ruleIDs)
-    XCTAssertEqual(FuzzyPinyinPreference.seededSelection(enabled: true, seeded: true, current: "z-zh"), "z-zh")
-    XCTAssertEqual(FuzzyPinyinPreference.seededSelection(enabled: false, seeded: false, current: ""), "")
   }
 }

@@ -80,6 +80,8 @@ FOUNDATION_EXPORT NSNotificationName const MSIMEClientSessionDidReplaceSnapshotN
 /// Signed NiuTrans v2 form descriptor. Send body_utf8 unchanged; never log it.
 + (nullable NSDictionary *)niuTransTranslationHTTPRequest:(NSDictionary *)request error:(NSError **)error;
 + (nullable NSString *)parseNiuTransTranslationResponse:(NSData *)body error:(NSError **)error;
+/// A gloss this host produced itself, formatted as provider replies are: whitespace collapsed, ends trimmed. nil when nothing usable is left.
++ (nullable NSString *)formatTranslationGloss:(NSString *)gloss error:(NSError **)error;
 /// Pure AI descriptor with credentials; never log it or follow HTTP redirects.
 + (nullable NSDictionary *)aiHTTPRequest:(NSDictionary *)request error:(NSError **)error;
 + (nullable NSArray<NSString *> *)parseAIResponse:(NSData *)body limit:(NSUInteger)limit error:(NSError **)error;
@@ -92,10 +94,24 @@ FOUNDATION_EXPORT NSNotificationName const MSIMEClientSessionDidReplaceSnapshotN
 + (nullable NSArray<NSDictionary *> *)customTranslationPlan:(NSDictionary *)request error:(NSError **)error;
 /// Parse only a successful HTTP response; nil without error means no usable translation.
 + (nullable NSString *)parseCustomTranslationResponse:(NSData *)body error:(NSError **)error;
+/// Whether a custom (DeepLX-compatible) or NiuTrans reply reports a failure - malformed, a non-200 code, errorCode/errorMsg - rather than an answer. The parsers return nil for both a failure and an answer with no text; only answers may be negative-cached.
++ (BOOL)customTranslationReplyFailed:(NSData *)body;
++ (BOOL)niuTransTranslationReplyFailed:(NSData *)body;
 /// Offline dictionary lookup; may run on a worker with copied {generation,candidates:[{text,source}]}.
 + (nullable NSDictionary *)candidateGlossRequest:(NSDictionary *)request resources:(NSString *)resources error:(NSError **)error;
 /// Apply on the originating session/thread only. A stale generation is ignored.
 - (nullable NSDictionary *)applyTranslations:(NSArray<NSDictionary *> *)translations generation:(uint64_t)generation error:(NSError **)error;
+/// Effect sounds and background music from this session's preferences.plugins, played by the host library on macOS (see msime_client_key_sound). These sit on the key path: they only queue a request, never block or read files, and answer whether one was queued. NO when nothing is switched on, the session is closed, or the platform does not play (iOS). Never call them for a key typed into a secure field.
+/// keyClass is 0 for any other key, 1 space, 2 enter, 3 backspace.
+- (BOOL)keySound:(uint32_t)keyClass;
+/// Call when a transition commits text; plays the commit sample or advances a melody that follows commits.
+- (BOOL)commitSound;
+/// YES while the input method is active in a field that is not secure; music plays only in between.
+- (BOOL)setMusicActive:(BOOL)active;
+/// The typing effect of one key or commit to draw (msime_client_typing_effect): event 0-3 the key class, 4 a commit, 5 a backspace by another route, with 0x100 for an auto-repeat and 0x200 to keep the tier-up sound quiet. Answers the packed combo count, tier-up bit and style; 0 when effects and the combo counter are off or the session is closed. Also for the key path; never for a key typed into a secure field.
+- (uint32_t)typingEffect:(uint32_t)event;
+/// The session's resolved typing effect (msime_client_typing_effect_settings): {pack, issue, style, intensity, colors, duration_ms, particles, combo_counter}. It may read the selected effect pack's manifest, so call it after a preference update and after a focus-in, never per key.
+- (nullable NSDictionary<NSString *, id> *)typingEffectSettingsWithError:(NSError **)error;
 - (nullable NSDictionary<NSString *, id> *)setCandidatePageSize:(uint8_t)size error:(NSError **)error;
 - (nullable NSDictionary<NSString *, id> *)updatePreferencesSnapshot:(NSDictionary<NSString *, id> *)snapshot error:(NSError **)error;
 - (nullable NSDictionary<NSString *, id> *)startVoiceWithError:(NSError **)error;
@@ -155,6 +171,8 @@ FOUNDATION_EXPORT NSNotificationName const MSIMEClientSessionDidReplaceSnapshotN
 + (nullable NSDictionary<NSString *, id> *)savePreferencesInDirectory:(NSString *)directory expectedRevision:(uint64_t)revision snapshot:(NSDictionary<NSString *, id> *)snapshot error:(NSError **)error;
 /// Read the complete shared snapshot, including its current revision.
 + (nullable NSDictionary<NSString *, id> *)loadPreferencesInDirectory:(NSString *)directory error:(NSError **)error;
+/// Repair a preferences document that is not well-formed JSON after backing it up beside itself; see msime_client_recover_preferences. Returns {recovered, snapshot, backup_path?, backup_name?, salvaged?}. Blocks on disk: call off the main thread.
++ (nullable NSDictionary<NSString *, id> *)recoverPreferencesInDirectory:(NSString *)directory error:(NSError **)error;
 /// Start on main thread; disk/lock work runs in background, completion on main.
 - (void)reloadPreferencesDirectory:(NSString *)directory completion:(void (^)(NSDictionary * _Nullable result, NSError * _Nullable error))completion;
 - (BOOL)closeWithError:(NSError **)error;

@@ -1,6 +1,6 @@
 /**
  * Editor-action labels shared by return-key rendering and dispatch, ported from
- * platforms/android/java/app/msime/client/ReturnKeyAction.java.
+ * platforms/android/java/app/msime/android/ReturnKeyAction.java.
  *
  * The numbers are the editor action constants the host receives; they are kept rather than renamed so
  * the mapping stays checkable against what the framework sends.
@@ -17,6 +17,8 @@ export enum ReturnDispatch {
   FINISH_COMPOSITION = "finish-composition",
   COMMIT_HIGHLIGHTED = "commit-highlighted",
   COMMIT_READING = "commit-reading",
+  /** Korean and Vietnamese: commit the open composition, then let Return do what it does in the editor. */
+  FINISH_THEN_EDITOR = "finish-then-editor",
 }
 
 export class ReturnKeyAction {
@@ -25,7 +27,22 @@ export class ReturnKeyAction {
     composing: boolean,
     candidateCount: number,
     japaneseConverted: boolean = false,
+    korean: boolean = false,
+    vietnamese: boolean = false,
   ): ReturnDispatch {
+    // A Vietnamese word is finished text with no list behind it, so Return commits it and still breaks the line or submits, as for a Korean syllable.
+    if (vietnamese) {
+      return composing ? ReturnDispatch.FINISH_THEN_EDITOR : ReturnDispatch.EDITOR;
+    }
+    // A Korean syllable is finished text rather than a spelling to confirm, so Return commits it and still breaks the line or submits, as every Korean keyboard does. The one exception is the syllable's open Hanja list, the only candidates Korean has: there Return chooses the highlighted Hanja, which only the session knows (msime_client.h).
+    if (korean) {
+      if (!composing) {
+        return ReturnDispatch.EDITOR;
+      }
+      return candidateCount > 0
+        ? ReturnDispatch.COMMIT_HIGHLIGHTED
+        : ReturnDispatch.FINISH_THEN_EDITOR;
+    }
     if (japanese && composing) {
       return japaneseConverted ? ReturnDispatch.COMMIT_HIGHLIGHTED : ReturnDispatch.COMMIT_READING;
     }

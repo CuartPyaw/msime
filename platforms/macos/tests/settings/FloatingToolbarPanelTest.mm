@@ -18,6 +18,7 @@
 @property(nonatomic) NSUInteger updateRequests;
 @property(nonatomic) NSUInteger websiteRequests;
 @property(nonatomic) NSUInteger hideRequests;
+@property(nonatomic) NSUInteger inputSchemeMenuRequests;
 @end
 
 @implementation FloatingToolbarTestDelegate
@@ -34,6 +35,11 @@
 - (void)floatingToolbarDidRequestCheckForUpdates:(MSIMEFloatingToolbarPanel *)toolbar { (void)toolbar; ++_updateRequests; }
 - (void)floatingToolbarDidRequestOpenWebsite:(MSIMEFloatingToolbarPanel *)toolbar { (void)toolbar; ++_websiteRequests; }
 - (void)floatingToolbarDidRequestHide:(MSIMEFloatingToolbarPanel *)toolbar { (void)toolbar; ++_hideRequests; }
+- (NSMenu *)floatingToolbarInputSchemeMenu:(MSIMEFloatingToolbarPanel *)toolbar {
+    (void)toolbar;
+    ++_inputSchemeMenuRequests;
+    return [[NSMenu alloc] initWithTitle:@"输入方案"];
+}
 @end
 
 static NSButton *FindButton(NSView *view, NSString *identifier) {
@@ -47,6 +53,21 @@ static NSButton *FindButton(NSView *view, NSString *identifier) {
     return nil;
 }
 
+static NSView *FindView(NSView *view, NSString *identifier) {
+    if ([view.accessibilityIdentifier isEqualToString:identifier]) return view;
+    for (NSView *subview in view.subviews) {
+        NSView *found = FindView(subview, identifier);
+        if (found) return found;
+    }
+    return nil;
+}
+
+// Mirrors the panel's width: buttons and their gaps, the 6pt trailing run, and the 46.2pt leading run of logo (34), gap (4), gap (3), divider (1.2) and gap (4).
+static double ExpectedWidth(double count, double fontSize, double factor) {
+    const double gaps = count > 0 ? count - 1 : 0;
+    return std::ceil((count * (fontSize + 8.0) + gaps * 2.0 + 6.0 + (34.0 + 4.0 + 3.0 + 1.2 + 4.0)) * factor);
+}
+
 static void SendButton(NSButton *button) {
     assert(button != nil && button.target != nil && button.action != nullptr);
     [NSApp sendAction:button.action to:button.target from:button];
@@ -58,8 +79,10 @@ int main() {
 
         NSRect visible = NSMakeRect(-1200.0, -800.0, 1920.0, 1080.0);
         NSRect defaultFrame = MSIMEFloatingToolbarFrame(NSMakeRect(0.0, 0.0, 1.0, 1.0), visible, NO);
-        assert(defaultFrame.size.width == 422.0 && defaultFrame.size.height == 44.0);
-        assert(defaultFrame.origin.x == NSMaxX(visible) - 442.0 && defaultFrame.origin.y == NSMinY(visible) + 20.0);
+        // 六个按钮：表情、手写、语音和屏幕键盘需要手动打开，切换输入方案默认开启。
+        assert(defaultFrame.size.width == 255.0 && defaultFrame.size.height == 44.0);
+        assert(defaultFrame.size.width == ExpectedWidth(6, 24, 1));
+        assert(defaultFrame.origin.x == NSMaxX(visible) - 275.0 && defaultFrame.origin.y == NSMinY(visible) + 20.0);
         NSRect restored = MSIMEFloatingToolbarFrame(NSMakeRect(-4000.0, 4000.0, 1.0, 1.0), visible, YES);
         assert(restored.origin.x == NSMinX(visible) + 12.0 && restored.origin.y == NSMaxY(visible) - 56.0);
         assert(MetasequoiaFloatingToolbarShouldShow(YES, YES, NO));
@@ -76,7 +99,7 @@ int main() {
         MSIMEFloatingToolbarPanel *panel = [[MSIMEFloatingToolbarPanel alloc] init];
         assert(panel != nil && !panel.canBecomeKeyWindow && !panel.canBecomeMainWindow);
         assert((panel.collectionBehavior & NSWindowCollectionBehaviorCanJoinAllSpaces) != 0);
-        assert((panel.collectionBehavior & NSWindowCollectionBehaviorFullScreenAuxiliary) == 0);
+        assert((panel.collectionBehavior & NSWindowCollectionBehaviorFullScreenAuxiliary) != 0);
         [panel applyThemePreferences:@{}];
         assert(panel.appearance == nil);
         [panel applyThemePreferences:@{@"theme": @"light", @"toolbar_theme": @"follow"}];
@@ -137,6 +160,8 @@ int main() {
         msime::mac::SkinTokens toolbarDark = dark;
         toolbarLight.surface = {0.2, 0.4, 0.6, 1};
         toolbarDark.surface = {0.6, 0.2, 0.4, 1};
+        toolbarLight.hover = {0.0, 0.0, 0.0, 0.06};
+        toolbarDark.hover = {1.0, 1.0, 1.0, 0.10};
         [panel applyLightToolbarSkin:toolbarLight darkSkin:toolbarDark];
         [panel applyThemePreferences:@{@"toolbar_theme": @"dark"}];
         assert([[[panel valueForKey:@"chrome"] valueForKey:@"fillColor"] isEqual:MetasequoiaColorFromRgba(toolbarDark.surface)]);
@@ -150,19 +175,95 @@ int main() {
         NSButton *handwriting = FindButton(panel.contentView, @"MetasequoiaFloatingToolbarHandwriting");
         NSButton *keyboard = FindButton(panel.contentView, @"MetasequoiaFloatingToolbarScreenKeyboard");
         NSButton *voice = FindButton(panel.contentView, @"MetasequoiaFloatingToolbarVoice");
+        NSButton *inputScheme = FindButton(panel.contentView, @"MetasequoiaFloatingToolbarInputScheme");
+        assert(inputScheme && inputScheme.image && [inputScheme.accessibilityLabel isEqualToString:@"切换输入方案"]);
+        assert([inputScheme.toolTip isEqualToString:inputScheme.accessibilityLabel]);
+        NSView *logo = FindView(panel.contentView, @"MetasequoiaFloatingToolbarLogo");
+        assert(logo != nil && [logo.accessibilityLabel isEqualToString:@"水杉输入法"]);
+        // The four opt-in buttons, after the empty snapshot above: built, labelled and off the row until
+        // a snapshot turns them on. Their labels and images exist either way, which is what makes turning
+        // one on a visibility change and nothing else.
         assert(keyboard && keyboard.image && keyboard.hidden);
         assert([keyboard.accessibilityLabel isEqualToString:@"打开水杉屏幕键盘"]);
         assert([keyboard.toolTip isEqualToString:keyboard.accessibilityLabel]);
-        assert(emoji && emoji.image && !emoji.hidden);
+        assert(emoji && emoji.image && emoji.hidden);
         assert([emoji.accessibilityLabel isEqualToString:@"打开水杉表情面板"]);
         assert([emoji.toolTip isEqualToString:emoji.accessibilityLabel]);
-        assert(handwriting && handwriting.image && !handwriting.hidden);
+        assert(handwriting && handwriting.image && handwriting.hidden);
         assert([handwriting.accessibilityLabel isEqualToString:@"打开水杉手写识别板"]);
         assert([handwriting.toolTip isEqualToString:handwriting.accessibilityLabel]);
-        assert(voice && voice.image && !voice.hidden);
+        assert(voice && voice.image && voice.hidden);
         assert([voice.accessibilityLabel isEqualToString:@"开始或结束语音输入"]);
         assert([voice.toolTip isEqualToString:voice.accessibilityLabel]);
         assert(inputMode && punctuation && fullWidth && traditional && handwriting && voice && settings);
+
+        // The logo, standing in for the reference's ToolbarDragHandle, and the ToolbarDivider lead the row. Dragging the logo moves the panel; pressing a button never does. The reference's separate handle bar is gone.
+        NSView *handle = FindView(panel.contentView, @"MetasequoiaFloatingToolbarLogo");
+        NSView *divider = FindView(panel.contentView, @"MetasequoiaFloatingToolbarDivider");
+        assert(handle != nil && divider != nil && handle.mouseDownCanMoveWindow && panel.movableByWindowBackground);
+        assert(FindView(panel.contentView, @"MetasequoiaFloatingToolbarGrip") == nil);
+        [panel.contentView layoutSubtreeIfNeeded];
+        {
+            const NSRect handleRect = [handle convertRect:handle.bounds toView:panel.contentView];
+            const NSRect dividerRect = [divider convertRect:divider.bounds toView:panel.contentView];
+            const NSRect firstRect = [inputMode convertRect:inputMode.bounds toView:panel.contentView];
+            assert(NSMaxX(handleRect) <= NSMinX(dividerRect) && NSMaxX(dividerRect) <= NSMinX(firstRect));
+        }
+        for (NSButton *button in @[inputMode, punctuation, fullWidth, traditional, emoji, handwriting, keyboard, voice, settings]) {
+            assert(!button.mouseDownCanMoveWindow);
+            [button updateTrackingAreas];
+            BOOL alwaysActive = NO;
+            for (NSTrackingArea *area in button.trackingAreas)
+                if ((area.options & NSTrackingActiveAlways) != 0 && (area.options & NSTrackingMouseEnteredAndExited) != 0) alwaysActive = YES;
+            assert(alwaysActive);
+        }
+
+        // Hover and pressed fill and the divider derive from the toolbar palette: the row hover and the outline (THEME_CONTRACT §3). The logo drag handle keeps the brand mark's own colours.
+        NSEvent *entered = [NSEvent enterExitEventWithType:NSEventTypeMouseEntered location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:panel.windowNumber context:nil eventNumber:0 trackingNumber:0 userData:NULL];
+        NSEvent *exited = [NSEvent enterExitEventWithType:NSEventTypeMouseExited location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:panel.windowNumber context:nil eventNumber:0 trackingNumber:0 userData:NULL];
+        [inputMode mouseEntered:entered];
+        assert([[inputMode valueForKey:@"hovered"] boolValue]);
+        [inputMode mouseExited:exited];
+        assert(![[inputMode valueForKey:@"hovered"] boolValue]);
+        // A hidden window gets no mouseExited:, so hiding the toolbar clears the hover itself.
+        [inputMode mouseEntered:entered];
+        [panel orderOut:nil];
+        assert(![[inputMode valueForKey:@"hovered"] boolValue]);
+        [panel applyThemePreferences:@{@"toolbar_theme": @"dark"}];
+        assert([[inputMode valueForKey:@"hoverFillColor"] isEqual:MetasequoiaColorFromRgba(toolbarDark.hover)]);
+        assert([[divider valueForKey:@"fillColor"] isEqual:MetasequoiaColorFromRgba(toolbarDark.border)]);
+        [panel applyThemePreferences:@{@"toolbar_theme": @"light"}];
+        assert([[inputMode valueForKey:@"hoverFillColor"] isEqual:MetasequoiaColorFromRgba(toolbarLight.hover)]);
+        assert([[divider valueForKey:@"fillColor"] isEqual:MetasequoiaColorFromRgba(toolbarLight.border)]);
+        // The toolbar palette's radius drives the chrome at the current scale, and a package divider colour replaces the outline on the divider only.
+        assert([[panel valueForKey:@"chrome"] layer].cornerRadius == 10.0);
+        {
+            msime::mac::SkinTokens roundedLight = toolbarLight;
+            msime::mac::SkinTokens roundedDark = toolbarDark;
+            roundedLight.radius = 4.0f;
+            roundedDark.radius = 16.0f;
+            roundedDark.divider = msime::mac::Rgba{0.9f, 0.1f, 0.1f, 1.0f};
+            [panel applyLightToolbarSkin:roundedLight darkSkin:roundedDark];
+            [panel applyThemePreferences:@{@"toolbar_theme": @"dark"}];
+            assert([[panel valueForKey:@"chrome"] layer].cornerRadius == 16.0);
+            assert([[divider valueForKey:@"fillColor"] isEqual:MetasequoiaColorFromRgba(*roundedDark.divider)]);
+            assert([[[panel valueForKey:@"chrome"] valueForKey:@"strokeColor"] isEqual:MetasequoiaColorFromRgba(roundedDark.border)]);
+            [panel applyThemePreferences:@{@"toolbar_theme": @"light"}];
+            assert([[panel valueForKey:@"chrome"] layer].cornerRadius == 4.0);
+            assert([[divider valueForKey:@"fillColor"] isEqual:MetasequoiaColorFromRgba(roundedLight.border)]);
+            [panel applySizingPreferences:@{@"floating_toolbar": @{@"scale_percent": @150, @"font_size": @24}}];
+            assert([[panel valueForKey:@"chrome"] layer].cornerRadius == 6.0);
+            [panel applySizingPreferences:@{@"floating_toolbar": @{@"scale_percent": @100, @"font_size": @24}}];
+            [panel applyLightToolbarSkin:toolbarLight darkSkin:toolbarDark];
+            // Candidate tokens alone never set the toolbar radius: a card radius stays on the card.
+            MSIMEFloatingToolbarPanel *candidateOnly = [[MSIMEFloatingToolbarPanel alloc] init];
+            [candidateOnly setFrameAutosaveName:@""];
+            msime::mac::SkinTokens card = light;
+            card.radius = 28.0f;
+            [candidateOnly applyLightSkin:card darkSkin:card];
+            [candidateOnly applyThemePreferences:@{@"toolbar_theme": @"light"}];
+            assert([[candidateOnly valueForKey:@"chrome"] layer].cornerRadius == 10.0);
+        }
         for (NSNumber *scale in @[@75, @100, @125, @150]) {
             for (NSNumber *size in @[@16, @18, @20, @22, @24, @26, @28]) {
                 NSDictionary *preferences = @{@"floating_toolbar": @{@"scale_percent": scale, @"font_size": size}};
@@ -172,16 +273,19 @@ int main() {
                 // the frame: setVisible: applies it when the toolbar is placed. Resizing a hidden window
                 // would otherwise persist a frame through its autosave name.
                 const NSSize preferred = [[panel valueForKey:@"preferredSize"] sizeValue];
-                assert(preferred.width == std::ceil((422.0 + 8.0 * (size.doubleValue - 24.0)) * factor));
+                assert(preferred.width == ExpectedWidth(6, size.doubleValue, factor));
                 assert(preferred.height == std::ceil((size.doubleValue + 20.0) * factor));
-                assert(std::abs(inputMode.frame.size.width - (size.doubleValue + 18.0) * factor) < 0.01);
-                assert(std::abs(inputMode.frame.size.height - (size.doubleValue + 8.0) * factor) < 0.01);
-                assert(std::abs(inputMode.font.pointSize - size.doubleValue * factor * 0.833) < 0.01);
-                // AppKit aligns the later stack items to backing pixels at fractional positions.
-                assert(std::abs(emoji.frame.size.width - (size.doubleValue + 18.0) * factor) <= 1.0 / panel.backingScaleFactor);
+                // Every size here scales to a multiple of half a point, which is a whole pixel on a Retina screen and not on a 1x one - the CI runner's display - where AppKit rounds the first item too.
+                assert(std::abs(inputMode.frame.size.width - (size.doubleValue + 8.0) * factor) <= 1.0 / panel.backingScaleFactor);
+                assert(std::abs(inputMode.frame.size.height - (size.doubleValue + 8.0) * factor) <= 1.0 / panel.backingScaleFactor);
+                assert(std::abs(inputMode.font.pointSize - size.doubleValue * factor * 0.95) < 0.01);
+                // AppKit aligns the later stack items to backing pixels at fractional positions. Settings
+                // rather than emoji: emoji is opt-in and off here, and a hidden stack item has no laid-out
+                // frame to measure. Its width constraint below is set either way.
+                assert(std::abs(settings.frame.size.width - (size.doubleValue + 8.0) * factor) <= 1.0 / panel.backingScaleFactor);
                 for (NSLayoutConstraint *constraint in emoji.constraints) {
                     if ([constraint.identifier isEqualToString:@"ToolbarButtonWidth"])
-                        assert(constraint.constant == (size.doubleValue + 18.0) * factor);
+                        assert(constraint.constant == (size.doubleValue + 8.0) * factor);
                 }
                 assert([emoji.contentTintColor isEqual:settings.contentTintColor]);
                 assert(emoji.symbolConfiguration != nil);
@@ -196,7 +300,7 @@ int main() {
                 assert(NSEqualSizes(stablePreferred, [[panel valueForKey:@"preferredSize"] sizeValue]));
                 [panel applySizingPreferences:@{@"floating_toolbar": @{@"scale_percent": scale, @"font_size": size, @"screen_keyboard": @YES}}];
                 assert(!keyboard.hidden && keyboard.superview != nil);
-                assert([[panel valueForKey:@"preferredSize"] sizeValue].width == std::ceil((472.0 + 9.0 * (size.doubleValue - 24.0)) * factor));
+                assert([[panel valueForKey:@"preferredSize"] sizeValue].width == ExpectedWidth(7, size.doubleValue, factor));
                 assert([keyboard.contentTintColor isEqual:settings.contentTintColor]);
                 NSImage *expectedKeyboard = [keyboard.image imageWithSymbolConfiguration:
                     [NSImageSymbolConfiguration configurationWithPointSize:size.doubleValue * factor weight:NSFontWeightRegular]];
@@ -205,7 +309,7 @@ int main() {
             }
         }
         [panel applySizingPreferences:@{@"floating_toolbar": @{@"scale_percent": @999, @"font_size": @(-1)}}];
-        assert(NSEqualSizes([[panel valueForKey:@"preferredSize"] sizeValue], NSMakeSize(422.0, 44.0)));
+        assert(NSEqualSizes([[panel valueForKey:@"preferredSize"] sizeValue], NSMakeSize(255.0, 44.0)));
         [panel applySizingPreferences:@{@"floating_toolbar": @{@"scale_percent": @150, @"font_size": @28}}];
         FloatingToolbarTestDelegate *sizingDelegate = [FloatingToolbarTestDelegate new];
         // Configured while hidden, so it is the preferred size that carries it; showing the toolbar is what
@@ -221,8 +325,10 @@ int main() {
         NSArray<NSButton *> *optionalButtons = @[inputMode, punctuation, fullWidth, traditional, emoji, keyboard, settings];
         NSArray<NSString *> *keys = @[@"english_mode", @"punctuation", @"fullwidth", @"character_set", @"emoji", @"screen_keyboard", @"settings"];
         for (NSUInteger mask = 0; mask < 128; ++mask) {
-            NSMutableDictionary *components = [@{@"scale_percent": @150, @"font_size": @28, @"english_mode": @NO} mutableCopy];
-            NSUInteger count = 2;
+            NSMutableDictionary *components = [@{@"scale_percent": @150, @"font_size": @28, @"english_mode": @NO, @"input_scheme": @NO} mutableCopy];
+            // Handwriting and voice are absent from every mask below, and absent now means off, so they
+            // add nothing to the count.
+            NSUInteger count = 0;
             for (NSUInteger index = 0; index < keys.count; ++index) {
                 const BOOL enabled = (mask & (1u << index)) != 0;
                 components[keys[index]] = @(enabled);
@@ -231,10 +337,16 @@ int main() {
             [panel applySizingPreferences:@{@"floating_toolbar": components}];
             for (NSUInteger index = 0; index < keys.count; ++index)
                 assert(optionalButtons[index].hidden == ((mask & (1u << index)) == 0));
-            assert([[panel valueForKey:@"preferredSize"] sizeValue].width == std::ceil((count * 46.0 + (count - 1) * 8.0 + 30.0) * 1.5));
+            assert([[panel valueForKey:@"preferredSize"] sizeValue].width == ExpectedWidth(count, 28, 1.5));
             assert(inputMode.superview != nil);
-            CGFloat previousRight = 0;
-            for (NSButton *button in @[inputMode, punctuation, fullWidth, traditional, emoji, handwriting, keyboard, voice, settings]) {
+            // The logo and divider lead the row; every visible button sits right of them.
+            const NSRect logoRect = [logo convertRect:logo.bounds toView:panel.contentView];
+            const NSRect dividerRect = [divider convertRect:divider.bounds toView:panel.contentView];
+            // mask 0 leaves the row empty, and an empty row drops the divider - the logo stays, so the panel can still be dragged.
+            assert(divider.hidden == (count == 0) && std::abs(NSMinX(logoRect)) < 0.01 && std::abs(NSWidth(logoRect) - 57.0) <= 1.0 / panel.backingScaleFactor);
+            assert(std::abs(NSMinX(dividerRect) - NSMaxX(logoRect) - 4.5) <= 1.0 / panel.backingScaleFactor && std::abs(NSWidth(dividerRect) - 1.8) <= 1.0 / panel.backingScaleFactor);
+            CGFloat previousRight = NSMaxX(dividerRect);
+            for (NSButton *button in @[inputMode, inputScheme, punctuation, fullWidth, traditional, emoji, handwriting, keyboard, voice, settings]) {
                 if (button.hidden) continue;
                 const NSRect rect = [button convertRect:button.bounds toView:panel.contentView];
                 assert(NSMinX(rect) >= previousRight);
@@ -242,16 +354,26 @@ int main() {
                 previousRight = NSMaxX(rect);
             }
         }
+        // With every button off the divider goes, but the logo stays so the panel can still be dragged.
+        [panel applySizingPreferences:@{@"floating_toolbar": @{@"english_mode": @NO, @"input_scheme": @NO, @"punctuation": @NO, @"fullwidth": @NO, @"character_set": @NO, @"emoji": @NO, @"handwriting": @NO, @"screen_keyboard": @NO, @"voice": @NO, @"settings": @NO}}];
+        assert(FindView(panel.contentView, @"MetasequoiaFloatingToolbarLogo") == handle && !handle.hidden && divider.hidden);
+        assert([[panel valueForKey:@"preferredSize"] sizeValue].width == ExpectedWidth(0, 24, 1));
         [panel applySizingPreferences:@{}];
+        assert(!divider.hidden);
         for (NSButton *button in optionalButtons) {
-            assert(button.hidden == (button == keyboard));
+            assert(button.hidden == (button == keyboard || button == emoji));
             if (!button.hidden) assert(button.superview != nil);
         }
-        assert([[panel valueForKey:@"preferredSize"] sizeValue].width == 422.0);
+        assert(!inputScheme.hidden);
+        assert([[panel valueForKey:@"preferredSize"] sizeValue].width == 255.0);
         [panel applySizingPreferences:@{@"floating_toolbar": @{@"screen_keyboard": @"invalid"}}];
-        assert(keyboard.hidden && [[panel valueForKey:@"preferredSize"] sizeValue].width == 422.0);
+        assert(keyboard.hidden && [[panel valueForKey:@"preferredSize"] sizeValue].width == 255.0);
         [panel applySizingPreferences:@{@"floating_toolbar": @{@"screen_keyboard": @YES}}];
-        assert(!keyboard.hidden && [[panel valueForKey:@"preferredSize"] sizeValue].width == 472.0);
+        assert(!keyboard.hidden && [[panel valueForKey:@"preferredSize"] sizeValue].width == ExpectedWidth(7, 24, 1));
+        // 切换输入方案按钮可以单独关掉。
+        [panel applySizingPreferences:@{@"floating_toolbar": @{@"input_scheme": @NO}}];
+        assert(inputScheme.hidden && [[panel valueForKey:@"preferredSize"] sizeValue].width == ExpectedWidth(5, 24, 1));
+        [panel applySizingPreferences:@{}];
 
         [panel updateEnglishInputMode:YES chinesePunctuationEnabled:NO fullWidthEnabled:YES traditionalChineseOutputEnabled:YES];
         assert([inputMode.title isEqualToString:@"英"] && [punctuation.title isEqualToString:@"."] &&
@@ -284,12 +406,81 @@ int main() {
         assert([inputMode.title isEqualToString:@"英"]);
         [panel updateEnglishInputMode:NO
                  englishCandidateMode:YES
-                    japaneseInputMode:YES
+                               scheme:@"japanese"
+                          schemeTitle:@"日语"
                              capsLock:NO
                 chinesePunctuationEnabled:YES
                          fullWidthEnabled:NO
           traditionalChineseOutputEnabled:NO];
         assert([inputMode.title isEqualToString:@"En"]);
+        [panel updateEnglishInputMode:NO
+                 englishCandidateMode:NO
+                               scheme:@"korean"
+                          schemeTitle:@"韩语"
+                             capsLock:NO
+                chinesePunctuationEnabled:YES
+                         fullWidthEnabled:NO
+          traditionalChineseOutputEnabled:NO];
+        assert([inputMode.title isEqualToString:@"한"]);
+        [panel updateEnglishInputMode:YES
+                 englishCandidateMode:NO
+                               scheme:@"korean"
+                          schemeTitle:@"韩语"
+                             capsLock:NO
+                chinesePunctuationEnabled:YES
+                         fullWidthEnabled:NO
+          traditionalChineseOutputEnabled:NO];
+        assert([inputMode.title isEqualToString:@"英"]);
+        // The button carries the input menu's badge for each Chinese scheme, and the tooltip names the Shuangpin keymap the glyph cannot.
+        [panel updateEnglishInputMode:NO
+                 englishCandidateMode:NO
+                               scheme:@"shuangpin"
+                          schemeTitle:@"小鹤双拼"
+                             capsLock:NO
+                chinesePunctuationEnabled:YES
+                         fullWidthEnabled:NO
+          traditionalChineseOutputEnabled:NO];
+        assert([inputMode.title isEqualToString:@"双"] && [inputMode.toolTip isEqualToString:@"小鹤双拼 · 切换到英文输入"] &&
+               [inputMode.accessibilityLabel isEqualToString:inputMode.toolTip]);
+        [panel updateEnglishInputMode:YES
+                 englishCandidateMode:NO
+                               scheme:@"shuangpin"
+                          schemeTitle:@"自然码双拼"
+                             capsLock:NO
+                chinesePunctuationEnabled:YES
+                         fullWidthEnabled:NO
+          traditionalChineseOutputEnabled:NO];
+        assert([inputMode.title isEqualToString:@"英"] && [inputMode.toolTip isEqualToString:@"自然码双拼 · 切换到中文输入"]);
+        [panel updateEnglishInputMode:NO
+                 englishCandidateMode:NO
+                               scheme:@"wubi"
+                          schemeTitle:@"五笔 86"
+                             capsLock:NO
+                chinesePunctuationEnabled:YES
+                         fullWidthEnabled:NO
+          traditionalChineseOutputEnabled:NO];
+        assert([inputMode.title isEqualToString:@"五"] && [inputMode.toolTip isEqualToString:@"五笔 86 · 切换到英文输入"]);
+        // The opt-in schemes carry their input menu badges too.
+        for (NSArray<NSString *> *entry in @[@[@"cantonese", @"粤拼", @"粤"], @[@"zhuyin", @"注音", @"注"], @[@"vietnamese", @"越南语", @"越"]]) {
+            [panel updateEnglishInputMode:NO
+                     englishCandidateMode:NO
+                                   scheme:entry[0]
+                              schemeTitle:entry[1]
+                                 capsLock:NO
+                    chinesePunctuationEnabled:YES
+                             fullWidthEnabled:NO
+              traditionalChineseOutputEnabled:NO];
+            assert([inputMode.title isEqualToString:entry[2]]);
+        }
+        [panel updateEnglishInputMode:NO
+                 englishCandidateMode:NO
+                               scheme:@"quanpin"
+                          schemeTitle:@"全拼"
+                             capsLock:NO
+                chinesePunctuationEnabled:YES
+                         fullWidthEnabled:NO
+          traditionalChineseOutputEnabled:NO];
+        assert([inputMode.title isEqualToString:@"中"] && [inputMode.toolTip isEqualToString:@"全拼 · 切换到英文输入"]);
 
         FloatingToolbarTestDelegate *delegate = [FloatingToolbarTestDelegate new];
         panel.toolbarDelegate = delegate;
@@ -301,17 +492,25 @@ int main() {
         assert(delegate.emojiRequests == 1 && delegate.characterPaletteRequests == 0);
         SendButton(handwriting);
         assert(delegate.handwritingRequests == 1);
+        // 点切换输入方案按钮向代理要菜单；空菜单不弹出。
+        SendButton(inputScheme);
+        assert(delegate.inputSchemeMenuRequests == 1);
         SendButton(keyboard);
         assert(delegate.keyboardRequests == 1 && delegate.emojiRequests == 1);
         SendButton(voice);
         assert(delegate.voiceToggles == 1);
+        // The gear opens settings on click; the utility menu is only its right-click menu.
+        SendButton(settings);
+        assert(delegate.settingsRequests == 1);
+        assert(settings.menu.numberOfItems == 10 && [settings.menu itemAtIndex:1].action == @selector(openSettings:));
+        assert([settings.accessibilityLabel isEqualToString:@"打开水杉输入法设置"]);
         for (NSString *selectorName in @[@"openCharacterPalette:", @"openSettings:", @"checkForUpdates:",
                                          @"openWebsite:", @"dismissFloatingToolbar:"]) {
             [NSApp sendAction:NSSelectorFromString(selectorName) to:panel from:nil];
         }
         assert(delegate.inputModeToggles == 1 && delegate.punctuationToggles == 1 &&
                delegate.fullWidthToggles == 1 && delegate.traditionalToggles == 1 &&
-               delegate.characterPaletteRequests == 1 && delegate.settingsRequests == 1 &&
+               delegate.characterPaletteRequests == 1 && delegate.settingsRequests == 2 &&
                delegate.updateRequests == 1 && delegate.websiteRequests == 1 && delegate.hideRequests == 1);
 
         NSMenu *menu = CreateMSIMEFloatingToolbarUtilityMenu(panel);
@@ -348,5 +547,53 @@ int main() {
         SendButton(emoji);
         assert(newDelegate.emojiRequests == 1 && delegate.emojiRequests == 1);
         [panel deactivateForDelegate:newDelegate];
+
+        // Selecting another input source is the reference's WM_IMEDEACTIVATE: the toolbar hides and lets go of whichever controller owned it, so that controller can no longer show it again. Whether the first show actually puts the panel on screen depends on the frontmost app being fullscreen, so the reactivation is compared against it rather than against a fixed value.
+        FloatingToolbarTestDelegate *residentOwner = [FloatingToolbarTestDelegate new];
+        [panel activateForDelegate:residentOwner visible:YES];
+        const BOOL shownWhenActive = panel.visible;
+        assert(panel.toolbarDelegate == residentOwner);
+        NSTimer *idle = [panel valueForKey:@"idleTimer"];
+        assert(idle.valid);
+        [panel noteInputForDelegate:residentOwner];
+        assert([panel valueForKey:@"idleTimer"] == idle);
+        [idle fire];
+        assert(!panel.visible && [[panel valueForKey:@"idleHidden"] boolValue]);
+        [panel setVisible:YES forDelegate:residentOwner];
+        [panel activateForDelegate:residentOwner visible:YES];
+        assert([panel valueForKey:@"idleTimer"] == nil);
+        assert([[panel valueForKey:@"idleHidden"] boolValue]);
+        [panel noteInputForDelegate:[FloatingToolbarTestDelegate new]];
+        assert(panel.toolbarDelegate == residentOwner);
+        [panel noteInputForDelegate:residentOwner];
+        assert(panel.visible == shownWhenActive && ![[panel valueForKey:@"idleHidden"] boolValue]);
+        [panel setVisible:NO forDelegate:residentOwner];
+        [panel noteInputForDelegate:residentOwner];
+        assert(!panel.visible && [panel valueForKey:@"idleTimer"] == nil);
+        [panel setVisible:YES forDelegate:residentOwner];
+        assert(panel.visible == shownWhenActive && [panel valueForKey:@"idleTimer"] != nil);
+        [panel deactivateForInputSourceSwitch];
+        assert(!panel.visible && panel.toolbarDelegate == nil);
+        [panel setVisible:YES forDelegate:residentOwner];
+        assert(!panel.visible && panel.toolbarDelegate == nil);
+        SendButton(keyboard);
+        assert(residentOwner.keyboardRequests == 0);
+
+        // The next activation, which is the user selecting MSIME again, shows it as before.
+        FloatingToolbarTestDelegate *returningOwner = [FloatingToolbarTestDelegate new];
+        [panel activateForDelegate:returningOwner visible:YES];
+        assert(panel.toolbarDelegate == returningOwner && panel.visible == shownWhenActive);
+        [panel deactivateForInputSourceSwitch];
+        assert(!panel.visible && panel.toolbarDelegate == nil);
+
+        // A resident toolbar whose owner is freed (the client app quit) hides on the next refresh, which every application activation triggers, instead of leaving buttons that reach nobody.
+        @autoreleasepool {
+            FloatingToolbarTestDelegate *transientOwner = [FloatingToolbarTestDelegate new];
+            [panel activateForDelegate:transientOwner visible:YES];
+            assert(panel.visible == shownWhenActive);
+        }
+        assert(panel.toolbarDelegate == nil);
+        [[NSWorkspace sharedWorkspace].notificationCenter postNotificationName:NSWorkspaceDidActivateApplicationNotification object:[NSWorkspace sharedWorkspace]];
+        assert(!panel.visible);
     }
 }

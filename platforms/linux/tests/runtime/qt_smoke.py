@@ -1,8 +1,12 @@
 """Real Qt5/Qt6 IM-module acceptance on isolated X11 or Wayland displays, synthetic text only."""
 import os
+from pathlib import Path
 import sys
 import subprocess
 import time
+
+# The surrounding-text cases shared by the GTK and Qt smokes live in tests/input, not beside this script.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "input"))
 
 import gi
 
@@ -57,7 +61,7 @@ if wayland:
 
 
 wait(lambda: bus.is_connected(), "Qt fixture could not connect to IBus")
-wait(lambda: any(engine.get_name() == "msime-client" for engine in bus.list_active_engines()),
+wait(lambda: any(engine.get_name() == "msime-linux" for engine in bus.list_active_engines()),
      "Native IBus engine was not registered")
 
 
@@ -86,9 +90,9 @@ else:
     subprocess.run(["xdotool", "windowfocus", "--sync", str(int(window.winId()))], check=True)
 first.setFocus()
 pump()
-assert bus.set_global_engine("msime-client")
+assert bus.set_global_engine("msime-linux")
 wait(lambda: bus.get_global_engine() is not None and
-     bus.get_global_engine().get_name() == "msime-client", "Qt engine activation failed")
+     bus.get_global_engine().get_name() == "msime-linux", "Qt engine activation failed")
 # Let the Qt IM module finish its asynchronous input-context setup.
 end = time.monotonic() + 0.3
 while time.monotonic() < end:
@@ -103,7 +107,7 @@ if os.environ.get("MSIME_TEST_INITIAL_FOCUS") == "1":
          "Initial Qt focus did not identify UTF-16 document positions")
     first.setText("")
     print(f"{qt_version} initial-focus Unicode document acceptance passed")
-keys("Shift_L")
+# The prepared options carry the shipped Chinese default, so the first letters compose without a mode switch.
 keys("n", "i", "h", "a", "o")
 wait(lambda: bool(first.preedit), "Qt did not receive composition preedit")
 assert first.text() == "", "Qt committed spelling before selection"

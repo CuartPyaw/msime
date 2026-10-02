@@ -1,8 +1,10 @@
 #pragma once
+#include "ContinuationHide.h"
 #include "FocusGate.h"
 #include "ReplyComposer.h"
 #include "TypingStatistics.h"
 #include <functional>
+#include <map>
 #include <string>
 
 namespace msime::windows {
@@ -11,6 +13,14 @@ namespace msime::windows {
 // without touching the shared store; the default writes it there.
 using TypingStatisticsSink =
     std::function<void(const std::string &, TypingSource)>;
+// Hands one record to the shared store on a detached thread. An empty directory or text records nothing; so does a store whose statistics are switched off, because the shared entry point checks that itself. `quiet` keeps a milestone's achievement jingle silent (see `typing_statistics_record_request`).
+void record_typing_statistics_async(const std::string &directory,
+                                    const std::string &text,
+                                    TypingSource source, bool quiet = false);
+// Hands one day's per-key press counts to the shared store on a detached thread. Same contract as above: nothing to record or a store with statistics off writes nothing.
+void record_typing_keys_async(const std::string &directory,
+                              const std::string &day,
+                              const std::map<std::string, uint64_t> &keys);
 enum class HideCandidateDisposition { Rejected, Cancelled, Suppressed };
 
 // One registered client's queue-owned adapter. No pipe I/O runs here; the
@@ -94,6 +104,8 @@ public:
   bool reset_cache();
   bool set_input_enabled(const FocusLease &lease, bool enabled);
   bool set_chinese_punctuation(const FocusLease &lease, bool enabled);
+  // Leaves the composition and any pending reply alone: the nesting count is not part of either.
+  bool balance_paired_punctuation(const FocusLease &lease, uint8_t opening);
   // Retain at most one latest snapshot while a reply is pending. True means
   // accepted for delivery, not necessarily applied to an active composition.
   bool queue_preferences(const FocusLease &lease, const std::string &snapshot);
@@ -113,9 +125,11 @@ private:
   struct Commit {
     std::string text;
     TypingSource source = TypingSource::Unknown;
+    // False for the text the V, "/" and "@" modes generate; see transition_counts_as_typing.
+    bool typing = true;
   };
   std::optional<Commit> pending_commit() const;
-  // Records a commit that has been confirmed as delivered.
+  // Records a commit that has been confirmed as delivered, and plays its commit sound.
   void record_commit(const std::optional<Commit> &delivered);
   static std::string typing_statistics_directory(const std::string &options);
   FocusGate &gate_;
@@ -127,6 +141,6 @@ private:
   std::optional<FocusLease> lease_;
   std::optional<ReplyComposer> composer_;
   std::optional<nlohmann::json> preferences_retry_;
-  bool auto_commit_hide_pending_ = false;
+  ContinuationHide continuation_hide_;
 };
 } // namespace msime::windows

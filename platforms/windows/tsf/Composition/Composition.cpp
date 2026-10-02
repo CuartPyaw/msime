@@ -761,6 +761,15 @@ void CMetasequoiaIME::_ResetSmartPunctuationHistory()
     _smartPunctuationForegroundWindow = nullptr;
 }
 
+void CMetasequoiaIME::_ClearSmartPunctuationAction()
+{
+    _ResetSmartPunctuationHistory();
+    _pendingSmartPunctuationReplacement = 0;
+    _pendingSmartPunctuationFocusToken = 0;
+    _pendingSmartPunctuationForegroundWindow = nullptr;
+    _pendingSmartPunctuationDeadline = 0;
+}
+
 bool CMetasequoiaIME::_QueueSmartPunctuationRewrite(WCHAR replacement)
 {
     if (replacement == 0 || _msgWndHandle == nullptr)
@@ -1093,6 +1102,13 @@ STDAPI CMetasequoiaIME::OnCompositionTerminated(TfEditCookie ecWrite, _In_ ITfCo
     if (nextEpoch == 0)
     {
         _compositionEpoch.fetch_add(1, std::memory_order_acq_rel);
+    }
+
+    // An application that ends a Korean, Zhuyin or Vietnamese composition keeps its text in the document (scheme::AlwaysInlinePreedit draws it there whatever the preedit preference). The host session has to let go of it as well, or the next key would build on that text and commit it a second time. An ending this TIP made itself has already settled the host, which may by then hold the next composition.
+    if (!_terminatingOwnComposition &&
+        msime::windows::scheme::AlwaysInlinePreedit(Global::InputModeScheme.load(std::memory_order_relaxed)))
+    {
+        (void)_CancelHostComposition();
     }
 
     // Detach and end the old candidate/session before the COM cleanup calls

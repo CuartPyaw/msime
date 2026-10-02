@@ -4,6 +4,8 @@ mod aliases_macos;
 #[cfg(windows)]
 mod aliases_windows;
 
+use msime_client_core::is_bounded_text;
+
 /// Resolve display-only CSS names without changing stored font preferences.
 ///
 /// A preference can hold a face name where a stylesheet needs a family, because the picker is not the
@@ -16,7 +18,7 @@ pub fn resolve_css_families(names: Vec<String>) -> Result<Vec<String>, &'static 
     if names.len() > 33
         || names
             .iter()
-            .any(|name| name.is_empty() || name.len() > 128 || name.chars().any(char::is_control))
+            .any(|name| name.is_empty() || !is_bounded_text(name, 128))
     {
         return Err("font_family");
     }
@@ -72,16 +74,12 @@ pub fn list() -> Result<Vec<String>, &'static str> {
 fn parse_catalog(output: &[u8], max_families: usize) -> Result<Vec<String>, &'static str> {
     use std::collections::BTreeSet;
 
-    const MAX_BYTES: usize = 128;
     let output = std::str::from_utf8(output).map_err(|_| "font_catalog")?;
     let mut names = BTreeSet::new();
     for line in output.lines() {
         for family in line.split(',') {
             let family = family.trim();
-            if !family.is_empty()
-                && family.len() <= MAX_BYTES
-                && !family.chars().any(char::is_control)
-            {
+            if !family.is_empty() && is_bounded_text(family, 128) {
                 names.insert(family.to_owned());
             }
             if names.len() > max_families {
@@ -89,7 +87,9 @@ fn parse_catalog(output: &[u8], max_families: usize) -> Result<Vec<String>, &'st
             }
         }
     }
-    Ok(names.into_iter().collect())
+    let mut result = Vec::with_capacity(names.len());
+    result.extend(names);
+    Ok(result)
 }
 
 #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
@@ -282,7 +282,9 @@ mod macos {
                 }
             }
         }
-        Ok(names.into_iter().collect())
+        let mut result = Vec::with_capacity(names.len());
+        result.extend(names);
+        Ok(result)
     }
 
     #[cfg(test)]

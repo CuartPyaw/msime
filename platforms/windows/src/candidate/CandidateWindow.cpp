@@ -4,6 +4,8 @@
 #include "CandidateWheel.h"
 #include "CursorResource.h"
 #include "NativeFontAlias.h"
+#include "ServerResources.h"
+#include "TypingEffectSignal.h"
 #include "WindowShadow.h"
 #include <algorithm>
 #include <iterator>
@@ -32,6 +34,10 @@ bool installed_font(const std::wstring &family) {
   return found;
 }
 constexpr wchar_t class_name[] = L"MSIME.Client.Preview.Candidates";
+// The typing flash repaints at about 30 frames a second while it fades, then its timer is killed; the combo timer fires once, when the count it shows goes stale.
+constexpr UINT_PTR typing_flash_timer = 0x4501;
+constexpr UINT_PTR typing_combo_timer = 0x4502;
+constexpr UINT typing_flash_frame_millis = 30;
 // Affect only this UI operation; restore the caller's thread context even on
 // failure. The created HWND retains PMv2 awareness for its entire lifetime.
 struct DpiScope {
@@ -84,16 +90,16 @@ std::wstring wide(const std::string &text) {
     throw std::invalid_argument("Invalid window text");
   return result;
 }
-// Text width in device independent pixels. DirectWrite is the same engine the
-// renderer draws with, so the card cannot be sized for a different shaping.
+// Text width in device independent pixels. DirectWrite is the same engine the renderer draws with, so the card cannot be sized for a different shaping. `weight` is the weight the text is drawn at: the preedit is semibold.
 double measured_width(msimeui::DeviceResources &device, const std::wstring &text,
                       const std::wstring &family, float size,
-                      IDWriteFontFallback *fallback) {
+                      IDWriteFontFallback *fallback,
+                      DWRITE_FONT_WEIGHT weight = DWRITE_FONT_WEIGHT_NORMAL) {
   if (text.empty() || size <= 0.0f)
     return 0.0;
   auto *factory = device.GetDWriteFactory();
   auto *format = device.GetTextFormat(
-      family, size, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING,
+      family, size, weight, DWRITE_TEXT_ALIGNMENT_LEADING,
       DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_WORD_WRAPPING_NO_WRAP);
   set_candidate_font_fallback(format, fallback);
   Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
@@ -107,6 +113,38 @@ double measured_width(msimeui::DeviceResources &device, const std::wstring &text
     return metrics.widthIncludingTrailingWhitespace;
   // Without a usable factory the card is still sized, just less precisely.
   return static_cast<double>(text.size()) * static_cast<double>(size) * 0.92;
+}
+// The page indicator in the preedit row, "2 / 5", or empty when the card draws no pager: without candidates or a page count from the Engine there is nothing to page.
+std::wstring pager_label(const CandidatePresentation &value) {
+  if (value.candidates.empty() || value.page_count == 0 ||
+      value.page >= value.page_count)
+    return {};
+  return std::to_wstring(value.page + 1) + L" / " +
+         std::to_wstring(value.page_count);
+}
+// Height of text wrapped to `width` DIPs, with the same top aligned, wrapping format paint() draws a run below the first line with.
+double wrapped_height(msimeui::DeviceResources &device, const std::wstring &text,
+                      const std::wstring &family, float size, double width,
+                      IDWriteFontFallback *fallback) {
+  if (text.empty() || size <= 0.0f || !(width > 0.0))
+    return 0.0;
+  auto *factory = device.GetDWriteFactory();
+  auto *format = device.GetTextFormat(
+      family, size, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING,
+      DWRITE_PARAGRAPH_ALIGNMENT_NEAR, DWRITE_WORD_WRAPPING_WRAP);
+  set_candidate_font_fallback(format, fallback);
+  Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
+  DWRITE_TEXT_METRICS metrics{};
+  if (factory && format &&
+      SUCCEEDED(factory->CreateTextLayout(text.c_str(),
+                                          static_cast<UINT32>(text.size()),
+                                          format, static_cast<float>(width),
+                                          65536.0f, layout.GetAddressOf())) &&
+      layout && SUCCEEDED(layout->GetMetrics(&metrics)))
+    return std::ceil(metrics.height);
+  // Same fallback as the shipped presenter: whole lines of the estimated width.
+  return std::ceil(measured_width(device, text, family, size, fallback) / width) *
+         static_cast<double>(size) * 1.25;
 }
 struct Painting {
   HWND window;
@@ -163,7 +201,6 @@ build_font_fallback(IDWriteFactory *factory,
 } // namespace
 CandidateWindow::CandidateWindow(Reader reader, Click click, unsigned font_size,
                                  unsigned preedit_font_size,
-                                 std::optional<COLORREF> text_color,
                                  std::string font_family,
                                  std::vector<std::string> fallback_fonts,
                                  std::optional<bool> dark_theme,
@@ -172,9 +209,8 @@ CandidateWindow::CandidateWindow(Reader reader, Click click, unsigned font_size,
     : reader_(std::move(reader)), click_(std::move(click)), page_(std::move(page)),
       rendered_(std::move(rendered)),
       font_size_(font_size),
-      preedit_font_size_(preedit_font_size), text_color_(text_color),
-      palette_(dark_theme.value_or(false) ? CandidatePalette{}
-                                          : candidate_light_palette()),
+      preedit_font_size_(preedit_font_size),
+      palette_(candidate_native_palette(dark_theme.value_or(false))),
       font_family_(wide(font_family)), dark_theme_(dark_theme), horizontal_(horizontal),
       show_preedit_(show_preedit), mouse_wheel_(mouse_wheel) {
   if (font_family_.empty() || font_family_.size() > 128)
@@ -224,6 +260,7 @@ CandidateWindow::CandidateWindow(Reader reader, Click click, unsigned font_size,
                             nullptr, descriptor.hInstance, this);
   if (!window_)
     throw std::runtime_error("Candidate window unavailable");
+  TypingEffectSignal::instance().attach(window_);
 }
 CandidateWindow::Apartment::Apartment() {
   const HRESULT entered =
@@ -239,8 +276,30 @@ CandidateWindow::Apartment::~Apartment() {
     CoUninitialize();
 }
 CandidateWindow::~CandidateWindow() {
-  if (window_)
+  if (window_) {
+    TypingEffectSignal::instance().detach(window_);
     DestroyWindow(window_);
+  }
+  if (logo_)
+    DestroyIcon(logo_);
+}
+ID2D1Bitmap *CandidateWindow::logo_bitmap(int pixels) {
+  if (pixels <= 0)
+    return nullptr;
+  if (!logo_ || logo_pixels_ != pixels) {
+    // Loaded at the drawn size rather than LR_SHARED's cached standard size, as the floating toolbar does, so the mark is not resampled.
+    const HANDLE loaded =
+        LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_MSIME_LOGO),
+                   IMAGE_ICON, pixels, pixels, LR_DEFAULTCOLOR);
+    if (!loaded)
+      return nullptr;
+    if (logo_)
+      DestroyIcon(logo_);
+    logo_ = static_cast<HICON>(loaded);
+    logo_pixels_ = pixels;
+  }
+  return device_.GetBitmapFromIcon(logo_, L"icon:candidate-logo:" +
+                                              std::to_wstring(pixels));
 }
 void CandidateWindow::set_palette(CandidatePalette palette) {
   palette_ = std::move(palette);
@@ -249,9 +308,6 @@ void CandidateWindow::set_palette(CandidatePalette palette) {
     InvalidateRect(window_, nullptr, FALSE);
 }
 void CandidateWindow::set_theme_palette(CandidatePalette palette) {
-  // The freshly resolved palette contains the current text override. Do not
-  // let the constructor's old COLORREF mask it after changing or clearing it.
-  text_color_.reset();
   set_palette(std::move(palette));
   invalidate_geometry();
 }
@@ -295,11 +351,24 @@ bool CandidateWindow::set_fonts(const CandidateFontSettings &settings) {
   }
 }
 void CandidateWindow::set_layout(CandidateLayoutSettings settings) {
-  if (horizontal_ == settings.horizontal && show_preedit_ == settings.show_preedit)
+  if (horizontal_ == settings.horizontal && show_preedit_ == settings.show_preedit &&
+      wubi_code_hint_ == settings.wubi_code_hint)
     return;
   horizontal_ = settings.horizontal;
   show_preedit_ = settings.show_preedit;
+  // The hint is applied by the reader; remembering it here is what repaints an unchanged generation when it is toggled.
+  wubi_code_hint_ = settings.wubi_code_hint;
   invalidate_geometry();
+}
+bool CandidateWindow::set_style(const CandidateWindowStyle &style) {
+  if (!style.valid())
+    return false;
+  if (style == style_)
+    return true;
+  style_ = style;
+  // A new scale changes every size measured in device pixels, and opacity and radius only show in a new frame; both start from a fresh layout.
+  invalidate_geometry();
+  return true;
 }
 void CandidateWindow::invalidate_geometry() {
   // Geometry can change without an Engine generation change. Never reuse old
@@ -307,6 +376,7 @@ void CandidateWindow::invalidate_geometry() {
   shown_.reset();
   painted_.reset();
   pressed_.reset();
+  pressed_page_.reset();
   hovered_.reset();
   wheel_accumulator_ = 0;
   tallest_ = 0;
@@ -322,6 +392,7 @@ void CandidateWindow::hide() {
   shown_.reset();
   painted_.reset();
   pressed_.reset();
+  pressed_page_.reset();
   hovered_.reset();
   wheel_accumulator_ = 0;
   ShowWindow(window_, SW_HIDE);
@@ -418,28 +489,30 @@ CandidateBounds CandidateWindow::card_bounds(const CandidatePresentation &value,
   if (!fallback_families_.empty() && !font_fallback_)
     font_fallback_ = build_font_fallback(device_.GetDWriteFactory(),
                                         fallback_families_);
-  const double scale = static_cast<double>(dpi) / 96.0;
+  const double scale = layout_scale(dpi);
   CandidateCardInput input;
   input.horizontal = horizontal_;
   input.preedit_visible = show_preedit_;
   input.font_size = font_size_;
   input.preedit_font_size = preedit_font_size_;
   input.max_width = static_cast<double>(available_width) / scale / 2.0;
+  // A horizontal page of long candidates may widen to the work area less 16 DIPs on each side rather than start a second line.
+  input.max_single_line_width =
+      static_cast<double>(available_width) / scale - 2.0 * 16.0;
   input.max_height = static_cast<double>(available_height) / scale / 2.0;
   input.skin_min_width = skin_min_width_;
   if (show_preedit_)
-    input.preedit_width = measured_width(device_, wide(value.preedit),
-                                         font_family_,
-                                         static_cast<float>(preedit_font_size_),
-                                         font_fallback_.Get());
-  for (const auto &candidate : value.candidates) {
-    auto label = candidate.text + candidate.annotation + candidate.badge;
-    if (!candidate.translation.empty())
-      label += "  · " + candidate.translation;
-    input.item_widths.push_back(measured_width(
-        device_, wide(label), font_family_, static_cast<float>(font_size_),
-        font_fallback_.Get()));
-  }
+    input.preedit_width = measured_width(
+        device_, wide(value.preedit), font_family_,
+        static_cast<float>(preedit_font_size_), font_fallback_.Get(),
+        DWRITE_FONT_WEIGHT_SEMI_BOLD);
+  // The pager shares the preedit row, which is drawn with or without the preedit because it carries the brand mark.
+  input.page_width = measured_width(
+      device_, pager_label(value), font_family_,
+      static_cast<float>(CandidateCardMetrics{}.pager_font),
+      font_fallback_.Get());
+  input.items = measure_items(value);
+  input.wrapped = wrap_measure(value);
   const auto card = candidate_card_size(input);
   const auto shadow_left =
       static_cast<int64_t>(std::lround(shadow_insets_.left * scale));
@@ -477,7 +550,9 @@ CandidateBounds CandidateWindow::card_bounds(const CandidatePresentation &value,
   placement.width = static_cast<int>(content_width);
   placement.height = static_cast<int>(content_height);
   placement.decision_height = static_cast<int>(
-      horizontal_ ? content_height : (std::min)(tallest_, available_height));
+      horizontal_ ? content_height
+                  : candidate_vertical_decision_height(tallest_, scale,
+                                                       available_height));
   placement.work_left = work.left;
   placement.work_top = work.top;
   placement.work_right = work.right;
@@ -489,6 +564,93 @@ CandidateBounds CandidateWindow::card_bounds(const CandidatePresentation &value,
                                              static_cast<int>(shadow_top),
                                              static_cast<int>(shadow_right),
                                              static_cast<int>(shadow_bottom)});
+}
+// The shipped presenter draws three runs per candidate: the text with its badge, the annotation (辅助码) and the translation, the last at a smaller size. Measuring them apart is what lets a long annotation or translation wrap under the text instead of being clipped off the end of one long label. The translation run is candidate_secondary_text, which puts a Korean Hanja's 훈음 above its translation.
+std::vector<CandidateItemWidths>
+CandidateWindow::measure_items(const CandidatePresentation &value) {
+  const auto metrics =
+      candidate_card_metrics(font_size_, preedit_font_size_, show_preedit_);
+  std::vector<CandidateItemWidths> items;
+  items.reserve(value.candidates.size());
+  for (const auto &candidate : value.candidates) {
+    auto width = [&](const std::string &text, double size) {
+      return measured_width(device_, wide(text), font_family_,
+                            static_cast<float>(size), font_fallback_.Get());
+    };
+    items.push_back({width(candidate.text + candidate.badge, font_size_),
+                     width(candidate.annotation, font_size_),
+                     width(candidate_secondary_text(candidate),
+                           metrics.translation_font),
+                     candidate_secondary_lines(candidate)});
+  }
+  return items;
+}
+CandidateWrapMeasure
+CandidateWindow::wrap_measure(const CandidatePresentation &value) {
+  const auto metrics =
+      candidate_card_metrics(font_size_, preedit_font_size_, show_preedit_);
+  // Copies, not references: the measure outlives neither call, but it must not depend on that.
+  struct Runs {
+    std::wstring text, annotation, translation;
+  };
+  std::vector<Runs> runs;
+  runs.reserve(value.candidates.size());
+  for (const auto &candidate : value.candidates)
+    runs.push_back({wide(candidate.text + candidate.badge),
+                    wide(candidate.annotation),
+                    wide(candidate_secondary_text(candidate))});
+  return [this, runs = std::move(runs), font = static_cast<float>(font_size_),
+          translation_font = static_cast<float>(metrics.translation_font)](
+             size_t index, CandidateRun run, double width) {
+    if (index >= runs.size())
+      return 0.0;
+    const auto &item = runs[index];
+    const bool translation = run == CandidateRun::translation;
+    return wrapped_height(device_,
+                          run == CandidateRun::text ? item.text
+                          : translation            ? item.translation
+                                                   : item.annotation,
+                          font_family_, translation ? translation_font : font,
+                          width, font_fallback_.Get());
+  };
+}
+void CandidateWindow::take_typing_effect() {
+  const std::optional<uint32_t> packed = TypingEffectSignal::instance().take();
+  if (!packed)
+    return;
+  // A 0 decodes to no combo and no flash, which kills both timers below and clears a count still on the card.
+  effect_ = decode_typing_effect(*packed);
+  effect_started_ = GetTickCount64();
+  // The focused session's effect pack, published with the key; before any session has published one the preference-derived intensity and the host's own flash stand.
+  if (const auto settings = unpack_typing_effect_settings(TypingEffectSignal::instance().settings()))
+    effect_settings_ = *settings;
+  else
+    effect_settings_ = resolve_typing_effect_settings(effect_intensity_, std::nullopt, std::nullopt);
+  // Windows' "Show animations" switch is its reduced motion setting: with it off the card does not flash, and the combo count still shows.
+  BOOL animations = TRUE;
+  if (!SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0))
+    animations = TRUE;
+  effect_flashing_ = animations && typing_effect_flash_alpha(effect_, effect_settings_.intensity, 0, effect_settings_.flash_millis) > 0.0f;
+  if (effect_flashing_)
+    SetTimer(window_, typing_flash_timer, typing_flash_frame_millis, nullptr);
+  else
+    KillTimer(window_, typing_flash_timer);
+  if (effect_.combo >= 2)
+    SetTimer(window_, typing_combo_timer, typing_effect_combo_millis, nullptr);
+  else
+    KillTimer(window_, typing_combo_timer);
+  if (IsWindowVisible(window_))
+    InvalidateRect(window_, nullptr, FALSE);
+}
+void CandidateWindow::typing_effect_tick(UINT_PTR timer) {
+  if (timer == typing_combo_timer) {
+    KillTimer(window_, typing_combo_timer);
+  } else if (GetTickCount64() - effect_started_ >= effect_settings_.flash_millis) {
+    KillTimer(window_, typing_flash_timer);
+    effect_flashing_ = false;
+  }
+  if (IsWindowVisible(window_))
+    InvalidateRect(window_, nullptr, FALSE);
 }
 void CandidateWindow::paint() {
   DpiScope dpi_scope;
@@ -502,6 +664,11 @@ void CandidateWindow::paint() {
   }
   if (value->candidates.size() > 9)
     throw std::invalid_argument("Oversized window page");
+  // The user's scale rides on the target's DPI, as the system scale does, so every DIP below - fonts, paddings, radius, shadow - grows with it and matches the size card_bounds gave the window. At 100% the window's own DPI stays the only source.
+  device_.SetDpiOverride(
+      style_.scale_percent == 100
+          ? 0.0f
+          : static_cast<float>(layout_scale(GetDpiForWindow(window_)) * 96.0));
   if (!device_.EnsureForComposition(window_))
     throw std::runtime_error("Candidate device unavailable");
   auto *target = device_.GetRenderTarget();
@@ -532,23 +699,22 @@ void CandidateWindow::paint() {
   if (!fallback_families_.empty() && !font_fallback_)
     font_fallback_ = build_font_fallback(device_.GetDWriteFactory(),
                                          fallback_families_);
-  auto format = [&](unsigned points, DWRITE_TEXT_ALIGNMENT alignment) {
+  // A run placed below the first line is top aligned and wraps, matching wrapped_height(); everything on a first line is centred in it and does not wrap. Candidate text wider than its column wraps too but stays centred in its measured box, as the shipped presenter draws it.
+  auto format = [&](double points, DWRITE_TEXT_ALIGNMENT alignment,
+                    bool wrap = false, bool centred = false,
+                    DWRITE_FONT_WEIGHT weight = DWRITE_FONT_WEIGHT_NORMAL) {
     auto *value = device_.GetTextFormat(
-        font_family_, static_cast<float>(points),
-        DWRITE_FONT_WEIGHT_NORMAL, alignment, DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
-        DWRITE_WORD_WRAPPING_NO_WRAP);
+        font_family_, static_cast<float>(points), weight, alignment,
+        wrap && !centred ? DWRITE_PARAGRAPH_ALIGNMENT_NEAR
+                         : DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
+        wrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
     if (!value)
       throw std::runtime_error("Candidate text format unavailable");
     set_candidate_font_fallback(value, font_fallback_.Get());
     return value;
   };
   const float inset = palette_.border_width / 2.0f;
-  // The configured text color still wins over the skin token.
-  const CandidateColor text_color =
-      text_color_ ? candidate_rgb(GetRValue(*text_color_) << 16 |
-                                  GetGValue(*text_color_) << 8 |
-                                  GetBValue(*text_color_))
-                  : palette_.text;
+  const CandidateColor text_color = palette_.text;
   target->BeginDraw();
   // Clear to nothing: only the rounded card itself is opaque, so the corners
   // stay transparent rather than showing a square window edge.
@@ -558,72 +724,166 @@ void CandidateWindow::paint() {
       static_cast<float>(frame.card_top) + inset,
       static_cast<float>(frame.card_left + frame.card_width) - inset,
       static_cast<float>(frame.card_top + frame.card_height) - inset};
+  // The Fluent flyout shadow, 0 8px 16px: a 16px CSS blur is a Gaussian of sigma 8.
   const WindowShadowPass shadow_passes[] = {
-      {12.0f, palette_.shadow_outer_alpha, 8.0f, 10.0f},
-      {4.0f, palette_.shadow_inner_alpha, 2.0f, 3.0f},
+      {8.0f, palette_.shadow_alpha, 0.0f, 8.0f},
   };
-  draw_window_shadow_passes(target, card_rect, palette_.radius, shadow_passes,
+  // The user's radius, else the package's, else the theme's.
+  const float radius = candidate_card_radius(style_, skin_radius_, palette_.radius);
+  const float row_radius = candidate_row_radius(style_, palette_.item_radius, radius);
+  draw_window_shadow_passes(target, card_rect, radius, shadow_passes,
                             std::size(shadow_passes));
-  const D2D1_ROUNDED_RECT card{card_rect, palette_.radius, palette_.radius};
-  target->FillRoundedRectangle(card, brush(palette_.surface));
-  target->DrawRoundedRectangle(card, brush(palette_.border),
+  const D2D1_ROUNDED_RECT card{card_rect, radius, radius};
+  // The user's opacity fades the card itself - surface, package background and border - and nothing drawn on it, so the text stays as legible as the theme made it.
+  target->FillRoundedRectangle(card, brush(candidate_faded(palette_.surface, style_)));
+  const float background_opacity = background_.opacity * style_.opacity();
+  const uint64_t effect_elapsed = GetTickCount64() - effect_started_;
+  const float flash = effect_flashing_ ? typing_effect_flash_alpha(effect_, effect_settings_.intensity, effect_elapsed, effect_settings_.flash_millis) : 0.0f;
+  // The package background sits on the surface and under the border and the text, masked by the card's rounded outline.
+  if (!background_.image.empty() && background_opacity > 0.0f) {
+    D2D1_SIZE_F natural{};
+    auto *bitmap = device_.GetBitmapFromFile(background_.image, &natural);
+    const auto rects = candidate_background_rects(
+        background_.fit,
+        {card_rect.left, card_rect.top, card_rect.right, card_rect.bottom},
+        natural.width, natural.height);
+    Microsoft::WRL::ComPtr<ID2D1Factory> factory;
+    target->GetFactory(&factory);
+    Microsoft::WRL::ComPtr<ID2D1RoundedRectangleGeometry> outline;
+    if (bitmap && rects && factory &&
+        SUCCEEDED(factory->CreateRoundedRectangleGeometry(card, &outline))) {
+      target->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), outline.Get()),
+                        nullptr);
+      const auto &to = rects->destination;
+      const auto &from = rects->source;
+      const D2D1_RECT_F source{from.left, from.top, from.right, from.bottom};
+      target->DrawBitmap(bitmap, D2D1_RECT_F{to.left, to.top, to.right, to.bottom},
+                         background_opacity, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                         &source);
+      target->PopLayer();
+    }
+  }
+  target->DrawRoundedRectangle(card, brush(candidate_faded(palette_.border, style_)),
                                palette_.border_width);
+  // The typing flash: a faint accent wash over the surface, under the text, and an accent outline that grows with the style. Both fade with the flash. An effect pack's first colour takes the accent's place.
+  if (flash > 0.0f) {
+    const auto flash_color = effect_settings_.color ? candidate_rgb(*effect_settings_.color) : palette_.accent;
+    auto wash = flash_color;
+    wash.a = flash * 0.12f;
+    target->FillRoundedRectangle(card, brush(wash));
+    auto outline = flash_color;
+    outline.a = flash;
+    target->DrawRoundedRectangle(card, brush(outline),
+                                 palette_.border_width + static_cast<float>(static_cast<uint32_t>(effect_.style)));
+  }
   // The mascot, drawn last so it sits over the card's top edge - that overlap
   // is the whole point of the decoration.
   if (!decoration_image_.empty() && decoration_offset_ > 0.0f) {
     D2D1_SIZE_F natural{};
     if (auto *bitmap = device_.GetBitmapFromFile(decoration_image_, &natural)) {
-      const float drawn_width = static_cast<float>(decoration_width_);
-      // Keep the image's own aspect ratio: a package gives a width, not a box,
-      // so deriving the height is what stops the artwork being squashed.
-      const float drawn_height =
-          natural.width > 0.0f ? drawn_width * (natural.height / natural.width)
-                               : decoration_offset_;
-      // Right-aligned above the card, as the settings preview places it.
-      const float right =
-          static_cast<float>(frame.card_left + frame.card_width) -
-          static_cast<float>(metrics.pad_x);
-      const float left = (std::max)(0.0f, right - drawn_width);
-      const float bottom = static_cast<float>(shadow_insets_.top) +
-                           decoration_offset_ +
-                           static_cast<float>(metrics.pad_y);
-      const float top = (std::max)(static_cast<float>(shadow_insets_.top),
-                                   bottom - drawn_height);
-      target->DrawBitmap(bitmap, D2D1_RECT_F{left, top, right, bottom}, 1.0f,
-                         D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+      // A package gives a width, not a box: the height follows the image's own aspect ratio, and artwork too tall for the band plus the pad_y overlap shrinks uniformly instead of being squashed. Placed along the card's top edge as the manifest aligns it, as the settings preview places it.
+      if (const auto rect = candidate_decoration_rect(
+              decoration_align_, static_cast<float>(frame.card_left),
+              static_cast<float>(frame.card_left + frame.card_width),
+              static_cast<float>(frame.card_top),
+              static_cast<float>(metrics.pad_x),
+              static_cast<float>(metrics.pad_y), decoration_offset_,
+              static_cast<float>(decoration_width_), natural.width,
+              natural.height))
+        target->DrawBitmap(
+            bitmap, D2D1_RECT_F{rect->left, rect->top, rect->right, rect->bottom},
+            1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
     }
   }
+  // The Fluent top row: the brand mark, then the preedit in the accent colour at semibold on the left, the page indicator and the previous and next arrows in the secondary colour on the right. The row is there even with the preedit hidden, so the mark always is.
+  auto box = [&frame](const CandidateRowBounds &bounds) {
+    return D2D1_RECT_F{static_cast<float>(frame.card_left + bounds.left),
+                       static_cast<float>(frame.card_top + bounds.top),
+                       static_cast<float>(frame.card_left + bounds.right),
+                       static_cast<float>(frame.card_top + bounds.bottom)};
+  };
+  // Loaded at the size it is drawn at, in real pixels, as the floating toolbar loads it, and skipped rather than substituted if the icon will not load.
+  if (auto *logo = logo_bitmap(static_cast<int>(std::lround(
+          metrics.logo_side * layout_scale(GetDpiForWindow(window_))))))
+    target->DrawBitmap(logo, box(candidate_logo_bounds(metrics)), 1.0f,
+                       D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+  const auto label = pager_label(*value);
+  const std::optional<CandidatePagerLayout> pager = candidate_pager_layout(
+      frame.card_width,
+      measured_width(device_, label, font_family_,
+                     static_cast<float>(metrics.pager_font),
+                     font_fallback_.Get()),
+      metrics);
+  if (pager) {
+    target->DrawText(label.c_str(), static_cast<UINT32>(label.size()),
+                      format(metrics.pager_font, DWRITE_TEXT_ALIGNMENT_TRAILING),
+                      box(pager->indicator), brush(palette_.number));
+    // The previous arrow is dimmed on the first page, where it does nothing. The next one never is: the Engine fetches candidates lazily, so the page count grows as the user pages and the last page counted is not known to be the last.
+    auto previous_color = palette_.number;
+    if (value->page == 0)
+      previous_color.a *= 0.4f;
+    const wchar_t previous_glyph[] = L"\u2039", next_glyph[] = L"\u203A";
+    target->DrawText(previous_glyph, 1,
+                      format(metrics.pager_font, DWRITE_TEXT_ALIGNMENT_CENTER),
+                      box(pager->previous), brush(previous_color));
+    target->DrawText(next_glyph, 1,
+                      format(metrics.pager_font, DWRITE_TEXT_ALIGNMENT_CENTER),
+                      box(pager->next), brush(palette_.number));
+  }
+  const D2D1_RECT_F preedit_rect{
+      static_cast<float>(frame.card_left + candidate_preedit_left(metrics)),
+      static_cast<float>(frame.card_top + metrics.pad_y),
+      static_cast<float>(frame.card_left +
+                         (pager ? pager->left - metrics.pager_gap
+                                : frame.card_width - metrics.pad_x / 2.0)),
+      static_cast<float>(frame.card_top) +
+          static_cast<float>(metrics.pad_y + metrics.preedit_row)};
+  // The combo count, right-aligned at the end of the preedit row before the pager. Drawn only where it fits beside the reading, so it never covers what the user is typing.
+  if (typing_effect_shows_combo(effect_.combo, effect_elapsed)) {
+    const auto combo = L"\u00D7" + std::to_wstring(effect_.combo);
+    const double combo_width = measured_width(
+        device_, combo, font_family_, static_cast<float>(metrics.pager_font),
+        font_fallback_.Get(), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    const double reading_width =
+        show_preedit_ ? measured_width(device_, wide(value->preedit), font_family_,
+                                       static_cast<float>(preedit_font_size_),
+                                       font_fallback_.Get(), DWRITE_FONT_WEIGHT_SEMI_BOLD)
+                      : 0.0;
+    if (static_cast<double>(preedit_rect.left) + reading_width + metrics.pager_gap + combo_width <=
+        static_cast<double>(preedit_rect.right))
+      target->DrawText(combo.c_str(), static_cast<UINT32>(combo.size()),
+                        format(metrics.pager_font, DWRITE_TEXT_ALIGNMENT_TRAILING, false,
+                               false, DWRITE_FONT_WEIGHT_SEMI_BOLD),
+                        preedit_rect, brush(flash > 0.0f && effect_.tier_up ? palette_.accent : palette_.number),
+                        D2D1_DRAW_TEXT_OPTIONS_CLIP);
+  }
   if (show_preedit_) {
-    const D2D1_RECT_F rect{
-        static_cast<float>(frame.card_left + metrics.pad_x),
-        static_cast<float>(frame.card_top + metrics.pad_y),
-        static_cast<float>(frame.card_left + frame.card_width -
-                           metrics.pad_x / 2.0),
-        static_cast<float>(frame.card_top) +
-            static_cast<float>(metrics.pad_y + metrics.preedit_row)};
+    const D2D1_RECT_F &rect = preedit_rect;
     const auto text = wide(value->preedit);
-    // Same clamp, same reason as the candidate rows below: a long enough
-    // reading would otherwise be drawn past the card.
-    target->DrawText(text.c_str(), static_cast<UINT32>(text.size()),
-                      format(preedit_font_size_, DWRITE_TEXT_ALIGNMENT_LEADING),
-                      rect, brush(text_color), D2D1_DRAW_TEXT_OPTIONS_CLIP);
-    // The insertion point. Without it, moving left or right inside a long
-    // pinyin string gave no indication of where the next key would land - and
-    // the settings preview drew a caret the real window never did.
+    // Same clamp, same reason as the candidate rows below: a long enough reading would otherwise be drawn past the card, or under the pager.
+    if (rect.right > rect.left)
+      target->DrawText(text.c_str(), static_cast<UINT32>(text.size()),
+                        format(preedit_font_size_, DWRITE_TEXT_ALIGNMENT_LEADING,
+                               false, false, DWRITE_FONT_WEIGHT_SEMI_BOLD),
+                        rect, brush(palette_.accent),
+                        D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    // The insertion point. Without it, moving left or right inside a long pinyin string gave no indication of where the next key would land - and the settings preview drew a caret the real window never did.
     if (value->preedit_caret != std::string::npos &&
         value->preedit_caret <= value->preedit.size()) {
       const auto before =
           wide(value->preedit.substr(0, value->preedit_caret));
       const auto offset = measured_width(
           device_, before, font_family_,
-          static_cast<float>(preedit_font_size_), font_fallback_.Get());
+          static_cast<float>(preedit_font_size_), font_fallback_.Get(),
+          DWRITE_FONT_WEIGHT_SEMI_BOLD);
       const float x = rect.left + static_cast<float>(offset);
-      // A hairline rather than a filled block, so it does not obscure the
-      // character it sits before.
+      // A hairline rather than a filled block, so it does not obscure the character it sits before.
       const float inset_y = static_cast<float>(metrics.preedit_row) * 0.15f;
-      target->FillRectangle(
-          D2D1_RECT_F{x, rect.top + inset_y, x + 1.5f, rect.bottom - inset_y},
-          brush(palette_.accent));
+      // A caret past the clipped preedit is not drawn, so it cannot land on the pager.
+      if (x <= rect.right)
+        target->FillRectangle(
+            D2D1_RECT_F{x, rect.top + inset_y, x + 1.5f, rect.bottom - inset_y},
+            brush(palette_.accent));
     }
   }
   // The selection number keeps its own column so candidates start on one
@@ -631,9 +891,13 @@ void CandidateWindow::paint() {
   const float number = static_cast<float>(font_size_) * 0.8f;
   const float gutter = static_cast<float>(metrics.number_and_bar);
   const size_t count = value->candidates.size();
+  // Laid out at the width actually drawn, which the work area may have narrowed below what card_bounds asked for.
+  auto rows = candidate_page_layout(measure_items(*value), frame.card_width,
+                                    metrics, horizontal_, wrap_measure(*value));
+  const float first_line = static_cast<float>(metrics.candidate_row);
   for (size_t i = 0; i < count; ++i) {
-    const auto row =
-        candidate_row_bounds(i, count, frame.card_width, metrics, horizontal_);
+    const auto &row = rows[i].bounds;
+    const auto &item = rows[i].item;
     // Rows are laid out in card coordinates; the decoration strip sits above
     // the card, so every row moves down with it. Without this the rows would
     // be drawn over the artwork and the hit test below would disagree.
@@ -642,17 +906,20 @@ void CandidateWindow::paint() {
                            static_cast<float>(frame.card_left + row.right),
                            static_cast<float>(frame.card_top + row.bottom)};
     if (value->candidates[i].highlighted || hovered_ == i) {
-      const D2D1_ROUNDED_RECT selection{rect, palette_.item_radius,
-                                        palette_.item_radius};
+      const D2D1_ROUNDED_RECT selection{rect, row_radius, row_radius};
       target->FillRoundedRectangle(selection, brush(value->candidates[i].highlighted
                                                         ? palette_.selected
                                                         : palette_.hover));
       if (value->candidates[i].highlighted && palette_.show_selected_bar) {
-        const float inset_y =
-            static_cast<float>(metrics.candidate_row) * 0.25f;
-        const D2D1_ROUNDED_RECT bar{{rect.left + 2.0f, rect.top + inset_y,
-                                     rect.left + 5.0f, rect.bottom - inset_y},
-                                    1.5f, 1.5f};
+        const auto extent = candidate_selection_bar(
+            rect.left, rect.top, rect.bottom, metrics.candidate_row);
+        const float radius =
+            static_cast<float>(candidate_selection_bar_width * 0.5);
+        const D2D1_ROUNDED_RECT bar{{static_cast<float>(extent.left),
+                                     static_cast<float>(extent.top),
+                                     static_cast<float>(extent.right),
+                                     static_cast<float>(extent.bottom)},
+                                    radius, radius};
         target->FillRoundedRectangle(bar, brush(palette_.accent));
       }
     }
@@ -660,9 +927,7 @@ void CandidateWindow::paint() {
     // normal one. Skins that fill the selection with an opaque accent set it,
     // because their unselected text would otherwise be unreadable on the fill.
     const bool selected = value->candidates[i].highlighted;
-    const auto number_color =
-        selected && palette_.selected_number.a > 0.0f ? palette_.selected_number
-                                                      : palette_.number;
+    const auto number_color = candidate_row_number_color(palette_, selected);
     const auto row_text_color =
         candidate_row_text_color(palette_, text_color, selected,
                                  value->candidates[i].fixed_position != 0);
@@ -670,24 +935,39 @@ void CandidateWindow::paint() {
     target->DrawText(label.c_str(), static_cast<UINT32>(label.size()),
                       format(font_size_, DWRITE_TEXT_ALIGNMENT_TRAILING),
                       D2D1_RECT_F{rect.left, rect.top, rect.left + number,
-                                  rect.bottom},
+                                  rect.top + first_line},
                       brush(number_color));
-    auto candidate_label = value->candidates[i].text +
-                           value->candidates[i].annotation +
-                           value->candidates[i].badge;
-    if (!value->candidates[i].translation.empty())
-      candidate_label += "  · " + value->candidates[i].translation;
-    const auto text = wide(candidate_label);
-    // Clipped to the row. The card is clamped to the work area, the format
-    // does not wrap, and without this a candidate wider than that clamp paints
-    // straight past the card edge - onto the transparent shadow margin, so the
-    // overflow reads as text floating beside the window. It is also text the
-    // user cannot click: hit testing uses this same row rectangle.
+    const auto text = wide(value->candidates[i].text + value->candidates[i].badge);
+    // Text wider than its column was laid out wrapped (wrapped_height() at this same width), and the row already grew by that height, so it wraps here inside the row that hit testing uses. Text that fits keeps the single-line format, so rounding cannot wrap what was laid out as one line. Still clipped to the row as a guard: without it anything the layout did not account for would paint past the card edge onto the transparent shadow margin.
     target->DrawText(
         text.c_str(), static_cast<UINT32>(text.size()),
-        format(font_size_, DWRITE_TEXT_ALIGNMENT_LEADING),
-        D2D1_RECT_F{rect.left + gutter, rect.top, rect.right, rect.bottom},
+        format(font_size_, DWRITE_TEXT_ALIGNMENT_LEADING, item.text_wrapped, true),
+        D2D1_RECT_F{rect.left + gutter, rect.top, rect.right,
+                    rect.top + static_cast<float>(item.text_height)},
         brush(row_text_color), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    // The annotation keeps the plain text colour even on a fixed-position row, and follows the selected text colour like the text does. The translation is the theme's secondary colour: a package's translation colour, or else the number colour (selected_number on the selected row).
+    const auto annotation_color =
+        candidate_row_text_color(palette_, text_color, selected, false);
+    const auto translation_color =
+        candidate_row_translation_color(palette_, selected);
+    // Runs extend to the row's right edge rather than their measured width, so rounding cannot wrap or clip a run that was laid out as fitting.
+    auto draw_run = [&](const std::string &run, const CandidateRunBox &box,
+                        double size, const CandidateColor &color) {
+      if (run.empty() || box.width <= 0.0)
+        return;
+      const auto run_text = wide(run);
+      const float left = rect.left + gutter + static_cast<float>(box.x);
+      const float top = rect.top + static_cast<float>(box.y);
+      target->DrawText(run_text.c_str(), static_cast<UINT32>(run_text.size()),
+                        format(size, DWRITE_TEXT_ALIGNMENT_LEADING, box.below),
+                        D2D1_RECT_F{left, top, rect.right,
+                                    top + static_cast<float>(box.height)},
+                        brush(color), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    };
+    draw_run(value->candidates[i].annotation, item.annotation, font_size_,
+             annotation_color);
+    draw_run(candidate_secondary_text(value->candidates[i]), item.translation,
+             metrics.translation_font, translation_color);
   }
   const HRESULT drawn = target->EndDraw();
   // A composition swap chain only reaches the screen once it is presented.
@@ -711,17 +991,19 @@ void CandidateWindow::paint() {
   if (FAILED(drawn))
     throw std::runtime_error("Candidate drawing failed");
   painted_ = value;
+  painted_rows_ = std::move(rows);
+  painted_pager_ = pager;
   painted_dpi_ = GetDpiForWindow(window_);
   if (rendered_)
     rendered_(*painted_);
 }
 std::optional<CandidateClick> CandidateWindow::hit(int x, int y) {
-  if (!click_ || !painted_ || !IsWindowVisible(window_))
+  if (!click_ || !painted_ || !painted_->pointer_input || !IsWindowVisible(window_))
     return std::nullopt;
   RECT bounds{};
   if (!GetClientRect(window_, &bounds))
     return std::nullopt;
-  const double scale = painted_dpi_ ? painted_dpi_ / 96.0 : 1.0;
+  const double scale = layout_scale(painted_dpi_);
   // Convert from physical client pixels into the visible card. The transparent
   // blur margins and decoration are deliberately not interactive.
   const double card_x = x / scale - shadow_insets_.left;
@@ -733,15 +1015,25 @@ std::optional<CandidateClick> CandidateWindow::hit(int x, int y) {
                              shadow_insets_.bottom - decoration_offset_;
   if (card_x < 0.0 || card_y < 0.0)
     return std::nullopt;
-  const auto row = candidate_card_hit(
-      card_x, card_y, card_width, card_height, painted_->candidates.size(),
-      candidate_card_metrics(font_size_, preedit_font_size_, show_preedit_),
-      horizontal_);
-  if (!row)
+  const auto row =
+      candidate_card_hit(card_x, card_y, card_width, card_height, painted_rows_);
+  if (!row || *row >= painted_->candidates.size())
     return std::nullopt;
   const auto &candidate = painted_->candidates[*row];
   return CandidateClick{painted_->lease, candidate.session,
                         candidate.generation, candidate.index};
+}
+std::optional<bool> CandidateWindow::pager_hit(int x, int y) {
+  if (!page_ || !painted_ || !painted_->pointer_input || !painted_pager_ ||
+      !IsWindowVisible(window_))
+    return std::nullopt;
+  const double scale = layout_scale(painted_dpi_);
+  // The same conversion into the visible card as hit().
+  const double card_x = x / scale - shadow_insets_.left;
+  const double card_y =
+      y / scale - shadow_insets_.top - static_cast<double>(decoration_offset_);
+  return candidate_pager_hit(card_x, card_y, painted_pager_,
+                             painted_->page == 0);
 }
 void CandidateWindow::show_context_menu(const CandidateClick &click,
                                         POINT client_point) {
@@ -765,38 +1057,19 @@ void CandidateWindow::show_context_menu(const CandidateClick &click,
       ++i;
   }
 
-  // The flyout is not modal. TrackPopupMenuEx ran a nested message loop, and
-  // the Server's pump is a bounded PeekMessage batch that also applies
-  // preference changes, syncs Caps Lock and drives the toolbar - so for as
-  // long as the menu was open, none of that ran.
-  if (!flyout_) {
+  // The flyout is not modal. TrackPopupMenuEx ran a nested message loop, and the Server's pump is a bounded PeekMessage batch that also applies preference changes, syncs Caps Lock and drives the toolbar - so for as long as the menu was open, none of that ran.
+  if (!flyout_)
     flyout_ = std::make_unique<CandidateFlyoutWindow>(
-        [this, click](const CandidateMenuChoice &choice) {
+        [this](const CandidateMenuChoice &choice) {
           if (!click_)
             return;
-          CandidateClick action = click;
-          switch (choice.command) {
-          case CandidateMenuCommand::PinToTop:
-            action.action = CandidateAction::Pin;
-            break;
-          case CandidateMenuCommand::Remove:
-            action.action = CandidateAction::Remove;
-            break;
-          case CandidateMenuCommand::FixAtPosition:
-            action.action = CandidateAction::FixPosition;
-            action.position = static_cast<uint8_t>(choice.position);
-            break;
-          case CandidateMenuCommand::ClearFixedPosition:
-            action.action = CandidateAction::ClearPosition;
-            break;
-          case CandidateMenuCommand::FixPosition:
-            // Opens the submenu; never itself a chosen command.
-            return;
-          }
-          click_(action);
+          if (const auto action =
+                  menu_target_.choose(choice.command, choice.position))
+            click_(*action);
         });
-    flyout_->set_palette(palette_);
-  }
+  // Every opening acts on its own candidate and wears the current theme: the flyout is reused, so neither may be fixed at the first right click. The reference rebuilds its menu on every open for the same effect (candidate_presenter.cpp:560-563).
+  menu_target_.open(click);
+  flyout_->set_palette(palette_);
   POINT screen = client_point;
   if (!ClientToScreen(window_, &screen))
     throw std::runtime_error("Candidate context menu position unavailable");
@@ -828,7 +1101,8 @@ LRESULT CALLBACK CandidateWindow::procedure(HWND window, UINT message,
           self->wheel_accumulator_ = 0;
           return DefWindowProcW(window, message, wparam, lparam);
         }
-        if (!self->page_ || !self->painted_ || !IsWindowVisible(window)) {
+        if (!self->page_ || !self->painted_ || !self->painted_->pointer_input ||
+            !IsWindowVisible(window)) {
           self->wheel_accumulator_ = 0;
           return 0;
         }
@@ -845,13 +1119,19 @@ LRESULT CALLBACK CandidateWindow::procedure(HWND window, UINT message,
         return 0;
       }
       case WM_LBUTTONDOWN:
-        self->pressed_ = self->hit(static_cast<short>(LOWORD(lparam)),
-                                   static_cast<short>(HIWORD(lparam)));
-        if (self->pressed_) {
+        self->pressed_page_ = self->pager_hit(static_cast<short>(LOWORD(lparam)),
+                                              static_cast<short>(HIWORD(lparam)));
+        self->pressed_ = self->pressed_page_
+                             ? std::nullopt
+                             : self->hit(static_cast<short>(LOWORD(lparam)),
+                                         static_cast<short>(HIWORD(lparam)));
+        if (self->pressed_ || self->pressed_page_) {
           SetCapture(window);
           TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, window, 0};
-          if (!TrackMouseEvent(&track))
+          if (!TrackMouseEvent(&track)) {
             self->pressed_.reset();
+            self->pressed_page_.reset();
+          }
         }
         return 0;
       case WM_MOUSEMOVE: {
@@ -859,8 +1139,10 @@ LRESULT CALLBACK CandidateWindow::procedure(HWND window, UINT message,
         TrackMouseEvent(&track);
         const auto click = self->hit(static_cast<short>(LOWORD(lparam)),
                                      static_cast<short>(HIWORD(lparam)));
-        SetCursor(LoadCursorW(nullptr, click ? wide_cursor(IDC_HAND)
-                                             : wide_cursor(IDC_ARROW)));
+        const auto arrow = self->pager_hit(static_cast<short>(LOWORD(lparam)),
+                                           static_cast<short>(HIWORD(lparam)));
+        SetCursor(LoadCursorW(nullptr, click || arrow ? wide_cursor(IDC_HAND)
+                                                      : wide_cursor(IDC_ARROW)));
         std::optional<size_t> hovered;
         if (click && self->painted_) {
           for (size_t i = 0; i < self->painted_->candidates.size(); ++i)
@@ -875,8 +1157,21 @@ LRESULT CALLBACK CandidateWindow::procedure(HWND window, UINT message,
         // it clears pressed_. Releasing first therefore destroys the very press
         // this handler is about to read, and the click never reaches click_.
         const auto pressed = self->pressed_;
+        const auto pressed_page = self->pressed_page_;
         self->pressed_.reset();
+        self->pressed_page_.reset();
         if (GetCapture() == window) ReleaseCapture();
+        if (pressed_page) {
+          // One page per click, in the direction of the arrow the press started on. The painted page's identity goes with it, so the Server refuses a click on a page that has since changed.
+          if (self->pager_hit(static_cast<short>(LOWORD(lparam)),
+                              static_cast<short>(HIWORD(lparam))) ==
+              pressed_page) {
+            const auto &value = *self->painted_;
+            self->page_(CandidatePage{value.lease, value.session,
+                                      value.generation, *pressed_page, 1u});
+          }
+          return 0;
+        }
         const auto hit = self->hit(static_cast<short>(LOWORD(lparam)),
                                    static_cast<short>(HIWORD(lparam)));
         if (pressed && hit && pressed->session == hit->session &&
@@ -902,6 +1197,7 @@ LRESULT CALLBACK CandidateWindow::procedure(HWND window, UINT message,
       case WM_MOUSELEAVE:
         if (GetCapture() == window) ReleaseCapture();
         self->pressed_.reset();
+        self->pressed_page_.reset();
         self->hovered_.reset();
         SetCursor(LoadCursorW(nullptr, wide_cursor(IDC_ARROW)));
         return 0;
@@ -928,10 +1224,19 @@ LRESULT CALLBACK CandidateWindow::procedure(HWND window, UINT message,
         self->shown_.reset();
         self->painted_.reset();
         self->pressed_.reset();
+        self->pressed_page_.reset();
         self->hovered_.reset();
         return message == WM_POWERBROADCAST ? TRUE : 0;
       case WM_PAINT:
         self->paint();
+        return 0;
+      case typing_effect_message:
+        self->take_typing_effect();
+        return 0;
+      case WM_TIMER:
+        if (wparam != typing_flash_timer && wparam != typing_combo_timer)
+          break;
+        self->typing_effect_tick(static_cast<UINT_PTR>(wparam));
         return 0;
       case WM_CLOSE:
         self->hide();

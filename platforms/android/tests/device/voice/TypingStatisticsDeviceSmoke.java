@@ -1,4 +1,4 @@
-package app.msime.client.test;
+package app.msime.android.test;
 
 import android.app.Activity;
 import android.content.Intent;
@@ -8,6 +8,8 @@ import android.util.AtomicFile;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
+import app.msime.android.TypingStatisticsDocument;
+import app.msime.android.TypingStatisticsModel;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -38,6 +40,10 @@ public final class TypingStatisticsDeviceSmoke extends DeviceSmoke {
     }
 
     @Override protected void runChecks() throws Exception {
+        stage = "legacy statistics default";
+        TypingStatisticsModel legacy = TypingStatisticsDocument.parse("{\"days\":{}}");
+        if (legacy == null || legacy.enabled())
+            throw new AssertionError("Missing enabled field must keep statistics disabled");
         File root = getTargetContext().getFilesDir().getCanonicalFile();
         JSONObject options = new JSONObject(new String(
             Files.readAllBytes(new File(root, "runtime-options.json").toPath()), StandardCharsets.UTF_8));
@@ -58,10 +64,10 @@ public final class TypingStatisticsDeviceSmoke extends DeviceSmoke {
             stage = "controlled statistics baseline";
             publish(preferences, preferenceSnapshot.toString().getBytes(StandardCharsets.UTF_8));
             Files.deleteIfExists(statistics.toPath());
-            shell("am start -W -n app.msime.android/app.msime.client.home.HomeActivity");
-            shell("ime disable app.msime.android/app.msime.client.MSIMEInputService");
-            shell("ime enable app.msime.android/app.msime.client.MSIMEInputService");
-            shell("ime set app.msime.android/app.msime.client.MSIMEInputService");
+            shell("am start -W -n app.msime.android/app.msime.android.home.HomeActivity");
+            shell("ime disable app.msime.android/app.msime.android.MSIMEInputService");
+            shell("ime enable app.msime.android/app.msime.android.MSIMEInputService");
+            shell("ime set app.msime.android/app.msime.android.MSIMEInputService");
             SystemClock.sleep(1000);
 
             stage = "IME aggregate write";
@@ -117,7 +123,7 @@ public final class TypingStatisticsDeviceSmoke extends DeviceSmoke {
             js("(" + REFRESH + ").click(); true");
             awaitJs("(" + RANGE_TOTAL + ")?.textContent === '2'");
         } finally {
-            shell("am start -W -n app.msime.android/app.msime.client.home.HomeActivity");
+            shell("am start -W -n app.msime.android/app.msime.android.home.HomeActivity");
             SystemClock.sleep(500);
             restore(preferences, originalPreferences);
             restore(statistics, originalStatistics);
@@ -125,8 +131,8 @@ public final class TypingStatisticsDeviceSmoke extends DeviceSmoke {
     }
 
     private void typeSyntheticPhrase() throws Exception {
-        shell("am force-stop app.msime.client.test");
-        shell("am start -W -f 0x10008000 -n app.msime.client.test/app.msime.client.test.EditorActivity");
+        shell("am force-stop app.msime.android.test");
+        shell("am start -W -f 0x10008000 -n app.msime.android.test/app.msime.android.test.EditorActivity");
         tap(field("msime-test-plain"));
         for (String key : new String[] {"n", "i", "h", "a", "o"}) tap(key(key));
         tap(key("空格"));

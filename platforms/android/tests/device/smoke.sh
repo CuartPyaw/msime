@@ -35,71 +35,87 @@ tap() {
   [[ "$bounds" =~ ^\[([0-9]+),([0-9]+)\]\[([0-9]+),([0-9]+)\]$ ]] || { echo "Missing tap target: $1" >&2; exit 1; }
   "$adb" -s "$serial" shell input tap "$(( (BASH_REMATCH[1] + BASH_REMATCH[3]) / 2 ))" "$(( (BASH_REMATCH[2] + BASH_REMATCH[4]) / 2 ))"
 }
-# The host prepares the shipped dictionary itself on first run; there is no button to press for it
-# any more. The 键盘 tab shows the state only while preparing or after a failure, so the tab having
-# rendered with no preparation notice is what readiness looks like.
-"$adb" -s "$serial" shell am start -W -n app.msime.android/app.msime.client.home.HomeActivity >/dev/null
+# The host prepares the shipped dictionary itself on first run; there is no button to press for it any more. The 设置 tab shows the state only while preparing or after a failure, so the tab having rendered with no preparation notice is what readiness looks like.
+# A fresh install plays the first-launch splash and then opens onboarding over the home screen; the loop skips onboarding when it finds it, and the splash dismisses itself.
+# The 设置 tab is drawn under the splash, so 试用键盘 is in the dump while the splash still covers it, and onboarding is only started as the splash begins to fade. Readiness therefore also needs the splash gone, and has to hold on two polls a second apart so an onboarding window that is still opening gets its chance to appear and be skipped.
+"$adb" -s "$serial" shell am start -W -n app.msime.android/app.msime.android.home.HomeActivity >/dev/null
 ready=false
+settled=0
 for attempt in $(seq 1 60); do
   dump
   if [[ $(xmllint --xpath 'boolean(//node[contains(@text,"词库准备失败")])' "$xml") == true ]]; then echo "Device bootstrap failed" >&2; exit 1; fi
+  if [[ $(xmllint --xpath 'boolean(//node[contains(@resource-id,":id/onboarding_skip")])' "$xml") == true ]]; then
+    settled=0
+    tap '//node[contains(@resource-id,":id/onboarding_skip")]'
+    sleep 1
+    continue
+  fi
   if [[ $(xmllint --xpath 'boolean(//node[contains(@text,"试用键盘")])' "$xml") == true \
-     && $(xmllint --xpath 'boolean(//node[contains(@text,"正在准备词库")])' "$xml") == false ]]; then ready=true; break; fi
+     && $(xmllint --xpath 'boolean(//node[contains(@text,"正在准备词库")])' "$xml") == false \
+     && $(xmllint --xpath 'boolean(//node[contains(@resource-id,":id/home_intro")])' "$xml") == false ]]; then
+    settled=$((settled + 1))
+    if (( settled >= 2 )); then ready=true; break; fi
+  else
+    settled=0
+  fi
   sleep 1
 done
 [[ "$ready" == true ]] || { echo "Device bootstrap timed out" >&2; exit 1; }
-"$adb" -s "$serial" shell ime enable app.msime.android/app.msime.client.MSIMEInputService
-"$adb" -s "$serial" shell ime set app.msime.android/app.msime.client.MSIMEInputService
-"$adb" -s "$serial" shell am force-stop app.msime.client.test
-result=$("$adb" -s "$serial" shell am instrument -w app.msime.client.test/app.msime.client.test.DeviceSmoke)
+"$adb" -s "$serial" shell ime enable app.msime.android/app.msime.android.MSIMEInputService
+"$adb" -s "$serial" shell ime set app.msime.android/app.msime.android.MSIMEInputService
+"$adb" -s "$serial" shell am force-stop app.msime.android.test
+result=$("$adb" -s "$serial" shell am instrument -w app.msime.android.test/app.msime.android.test.DeviceSmoke)
 printf '%s\n' "$result"
 [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "System input acceptance failed" >&2; exit 1; }
-result=$("$adb" -s "$serial" shell am instrument -w app.msime.client.test/app.msime.client.test.CandidatePanelDeviceSmoke)
+result=$("$adb" -s "$serial" shell am instrument -w app.msime.android.test/app.msime.android.test.CandidatePanelDeviceSmoke)
 printf '%s\n' "$result"
 [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Candidate panel acceptance failed" >&2; exit 1; }
-result=$("$adb" -s "$serial" shell am instrument -w app.msime.client.test/app.msime.client.test.MoreToolsDeviceSmoke)
+result=$("$adb" -s "$serial" shell am instrument -w app.msime.android.test/app.msime.android.test.MoreToolsDeviceSmoke)
 printf '%s\n' "$result"
 [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "More tools acceptance failed" >&2; exit 1; }
-result=$("$adb" -s "$serial" shell am instrument -w app.msime.client.test/app.msime.client.test.EmojiPickerDeviceSmoke)
+result=$("$adb" -s "$serial" shell am instrument -w app.msime.android.test/app.msime.android.test.EmojiPickerDeviceSmoke)
 printf '%s\n' "$result"
 [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Emoji picker acceptance failed" >&2; exit 1; }
-result=$("$adb" -s "$serial" shell am instrument -w app.msime.client.test/app.msime.client.test.PreferencesDeviceSmoke)
+result=$("$adb" -s "$serial" shell am instrument -w app.msime.android.test/app.msime.android.test.PreferencesDeviceSmoke)
 printf '%s\n' "$result"
 [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Preferences acceptance failed" >&2; exit 1; }
-result=$("$adb" -s "$serial" shell am instrument -w app.msime.client.test/app.msime.client.test.KeyboardHeightDeviceSmoke)
+result=$("$adb" -s "$serial" shell am instrument -w app.msime.android.test/app.msime.android.test.KeyboardHeightDeviceSmoke)
 printf '%s\n' "$result"
 [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Keyboard height acceptance failed" >&2; exit 1; }
-result=$("$adb" -s "$serial" shell am instrument -w app.msime.client.test/app.msime.client.test.FuzzyPinyinDeviceSmoke)
+result=$("$adb" -s "$serial" shell am instrument -w app.msime.android.test/app.msime.android.test.FuzzyPinyinDeviceSmoke)
 printf '%s\n' "$result"
 [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Fuzzy pinyin acceptance failed" >&2; exit 1; }
-result=$("$adb" -s "$serial" shell am instrument -w app.msime.client.test/app.msime.client.test.CandidateGlossDeviceSmoke)
+result=$("$adb" -s "$serial" shell am instrument -w app.msime.android.test/app.msime.android.test.CandidateGlossDeviceSmoke)
 printf '%s\n' "$result"
 [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Candidate gloss acceptance failed" >&2; exit 1; }
-result=$("$adb" -s "$serial" shell am instrument -w app.msime.client.test/app.msime.client.test.NineKeyEnglishDeviceSmoke)
+result=$("$adb" -s "$serial" shell am instrument -w app.msime.android.test/app.msime.android.test.NineKeyEnglishDeviceSmoke)
 printf '%s\n' "$result"
 [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Nine-key English acceptance failed" >&2; exit 1; }
-result=$("$adb" -s "$serial" shell am instrument -w app.msime.client.test/app.msime.client.test.ChineseHelpcodeDeviceSmoke)
+result=$("$adb" -s "$serial" shell am instrument -w app.msime.android.test/app.msime.android.test.ChineseHelpcodeDeviceSmoke)
 printf '%s\n' "$result"
 [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Chinese helpcode acceptance failed" >&2; exit 1; }
-result=$("$adb" -s "$serial" shell am instrument -w app.msime.client.test/app.msime.client.test.MicrosoftShuangpinDeviceSmoke)
+result=$("$adb" -s "$serial" shell am instrument -w app.msime.android.test/app.msime.android.test.MicrosoftShuangpinDeviceSmoke)
 printf '%s\n' "$result"
 [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Microsoft double-pinyin acceptance failed" >&2; exit 1; }
 if [[ "$settings" == true ]]; then
   for suite in SettingsDeviceSmoke SettingsLifecycleSmoke AccountStorageDeviceSmoke; do
-    result=$("$adb" -s "$serial" shell am instrument -w "app.msime.client.test/app.msime.client.test.$suite")
+    result=$("$adb" -s "$serial" shell am instrument -w "app.msime.android.test/app.msime.android.test.$suite")
     printf '%s\n' "$result"
     [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Shared settings acceptance failed" >&2; exit 1; }
   done
+  result=$("$adb" -s "$serial" shell am instrument -w app.msime.android.test/app.msime.android.BackendAccountRefreshDeviceSmoke)
+  printf '%s\n' "$result"
+  [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Account refresh acceptance failed" >&2; exit 1; }
 fi
 if [[ "$statistics" == true ]]; then
   "$adb" -s "$serial" shell am force-stop app.msime.android
-  result=$("$adb" -s "$serial" shell am instrument -w app.msime.client.test/app.msime.client.test.TypingStatisticsDeviceSmoke)
+  result=$("$adb" -s "$serial" shell am instrument -w app.msime.android.test/app.msime.android.test.TypingStatisticsDeviceSmoke)
   printf '%s\n' "$result"
   [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Typing statistics acceptance failed" >&2; exit 1; }
 fi
 if [[ "$handwriting" == true ]]; then
-  touch_request=/data/user/0/app.msime.client.test/cache/msime-handwriting-touch.request
-  touch_ack=/data/user/0/app.msime.client.test/cache/msime-handwriting-touch.ack
+  touch_request=/data/user/0/app.msime.android.test/cache/msime-handwriting-touch.request
+  touch_ack=/data/user/0/app.msime.android.test/cache/msime-handwriting-touch.ack
   handwriting_output=""
   original_adbd_uid=$("$adb" -s "$serial" shell id -u | tr -d '\r')
   cleanup_handwriting_bridge() {
@@ -149,7 +165,7 @@ if [[ "$handwriting" == true ]]; then
   "$adb" -s "$serial" shell rm -f "$touch_request" "$touch_ack"
   handwriting_output=$(mktemp "$repo_root/target/android/device-test/handwriting.XXXXXX")
   "$adb" -s "$serial" shell am instrument -w \
-    app.msime.client.test/app.msime.client.test.HandwritingDeviceSmoke \
+    app.msime.android.test/app.msime.android.test.HandwritingDeviceSmoke \
     >"$handwriting_output" &
   instrumentation_pid=$!
   last_request=0
@@ -165,7 +181,7 @@ if [[ "$handwriting" == true ]]; then
       last_request=$request_id
     fi
     if (( SECONDS >= touch_deadline )); then
-      "$adb" -s "$serial" shell am force-stop app.msime.client.test
+      "$adb" -s "$serial" shell am force-stop app.msime.android.test
       break
     fi
     sleep 0.1

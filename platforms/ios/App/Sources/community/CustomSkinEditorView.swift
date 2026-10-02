@@ -29,6 +29,7 @@ struct CustomSkinEditorView: View {
   @AppStorage(KeyboardFeedbackPreference.hapticsKey, store: KeyboardFeedbackPreference.defaults) private var hapticsEnabled = false
   @AppStorage(KeyboardFeedbackPreference.strengthKey, store: KeyboardFeedbackPreference.defaults) private var hapticStrength = KeyboardHapticStrength.medium.rawValue
   @State private var feedback: UIImpactFeedbackGenerator?
+  @State private var documentWrite: Task<Void, Never>?
 
 
   private func apply(_ next: CustomKeyboardSkin, record: Bool = true) {
@@ -37,9 +38,43 @@ struct CustomSkinEditorView: View {
     if record { undo.append(design); undo = Array(undo.suffix(30)); redo.removeAll() }
     CustomKeyboardSkinStore.save(next)
     design = next
+    scheduleDocumentWrite()
   }
-  @AppStorage(KeyboardSkinPreference.key, store: KeyboardFeedbackPreference.defaults)
-  private var selected = KeyboardSkin.forest.rawValue
+
+  /// The keyboard reads the design from the shared document, which a colour drag would otherwise rewrite on every frame; the write waits for the edits to settle. The App Group copy above only feeds this page's previews.
+  private func scheduleDocumentWrite() {
+    documentWrite?.cancel()
+    documentWrite = Task { @MainActor in
+      try? await Task.sleep(nanoseconds: 400_000_000)
+      guard !Task.isCancelled else { return }
+      documentWrite = nil
+      writeDocument()
+    }
+  }
+
+  private func flushDocumentWrite() {
+    guard let pending = documentWrite else { return }
+    pending.cancel()
+    documentWrite = nil
+    writeDocument()
+  }
+
+  private func writeDocument() {
+    guard let mapping = GlobalThemePreference.storingDesign(design), GlobalThemePreference.update(mapping) else {
+      message = "这次修改没能交给键盘，请稍后再改一次。"
+      return
+    }
+  }
+
+  private func useCustomSkin() {
+    documentWrite?.cancel()
+    documentWrite = nil
+    if !GlobalThemePreference.apply(design) {
+      message = "没能切换到我的皮肤，请稍后重试。"
+    }
+  }
+  @AppStorage(GlobalThemePreference.key, store: KeyboardFeedbackPreference.defaults)
+  private var selected = GlobalThemeCatalog.systemId
 
   private func update<T>(_ path: WritableKeyPath<CustomKeyboardSkin, T>, _ value: T) {
     var next = design
@@ -77,7 +112,7 @@ struct CustomSkinEditorView: View {
             }.frame(height: 26)
             Text(title).font(.system(size: 13, weight: activeCategory == title ? .semibold : .regular))
           }.frame(maxWidth: .infinity).frame(height: 64)
-            .foregroundStyle(activeCategory == title ? MetasequoiaTheme.forest : Color.secondary)
+            .foregroundStyle(activeCategory == title ? MetasequoiaTheme.accent : Color.secondary)
             .contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityIdentifier("skinEditorTab_" + title)
           .accessibilityAddTraits(activeCategory == title ? .isSelected : [])
@@ -101,12 +136,12 @@ struct CustomSkinEditorView: View {
           Text("26 键").tag(false); Text("9 键").tag(true)
         }.pickerStyle(.segmented).frame(width: 124).accessibilityIdentifier("skinEditorPreviewLayout")
         Spacer(minLength: 0)
-        Button { selected = KeyboardSkin.custom.rawValue } label: {
-          Label(selected == KeyboardSkin.custom.rawValue ? "正在使用" : "使用皮肤", systemImage: "checkmark.circle.fill")
+        Button { useCustomSkin() } label: {
+          Label(selected == GlobalThemeCatalog.customId ? "正在使用" : "使用皮肤", systemImage: "checkmark.circle.fill")
             .font(.caption.weight(.semibold))
         }.accessibilityIdentifier("applyCustomSkin")
       }.padding(.horizontal, 12).background(Color(uiColor: .systemBackground))
-      KeyboardSkinPreview(skin: .custom, nineKey: nineKey).id(design)
+      KeyboardSkinPreview(skin: .designed(design), nineKey: nineKey).id(design)
         .accessibilityIdentifier("fullKeyboardSkinPreview")
     }
   }
@@ -125,7 +160,7 @@ struct CustomSkinEditorView: View {
         Button { showPhotos = true } label: {
           Label("相册", systemImage: "photo.badge.plus").frame(maxWidth: .infinity).frame(height: 44)
         }.accessibilityIdentifier("skinEditorAlbum")
-      }.buttonStyle(.bordered).tint(MetasequoiaTheme.forest)
+      }.buttonStyle(.bordered).tint(MetasequoiaTheme.accent)
       LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
         ForEach(Array(backgroundPresets.enumerated()), id: \.offset) { index, preset in
           let active = design.photo == nil && design.background == preset.0 && design.gradientEnd == preset.1
@@ -137,9 +172,9 @@ struct CustomSkinEditorView: View {
             RoundedRectangle(cornerRadius: 10)
               .fill(LinearGradient(colors: [Color(uiColor: CustomKeyboardSkin.color(preset.0)), Color(uiColor: CustomKeyboardSkin.color(preset.1 ?? preset.0))], startPoint: .topLeading, endPoint: .bottomTrailing))
               .frame(height: 74)
-              .overlay(RoundedRectangle(cornerRadius: 10).stroke(active ? MetasequoiaTheme.forest : Color.primary.opacity(0.08), lineWidth: active ? 2 : 1))
+              .overlay(RoundedRectangle(cornerRadius: 10).stroke(active ? MetasequoiaTheme.accent : Color.primary.opacity(0.08), lineWidth: active ? 2 : 1))
               .overlay(alignment: .bottomTrailing) {
-                if active { Image(systemName: "checkmark.circle.fill").foregroundStyle(.white, MetasequoiaTheme.forest).padding(6) }
+                if active { Image(systemName: "checkmark.circle.fill").foregroundStyle(MetasequoiaTheme.onAccent, MetasequoiaTheme.accent).padding(6) }
               }
           }.buttonStyle(.plain).accessibilityLabel(preset.2)
             .accessibilityIdentifier("skinBackgroundPreset_\(index)")
@@ -158,19 +193,23 @@ struct CustomSkinEditorView: View {
   private var soundControls: some View {
     Section {
       Toggle("按键音", isOn: $soundEnabled).accessibilityIdentifier("skinEditorSound")
-      Toggle("按键振动", isOn: $hapticsEnabled).accessibilityIdentifier("skinEditorHaptics")
-      Picker("振动强度", selection: $hapticStrength) {
-        ForEach(KeyboardHapticStrength.allCases, id: \.rawValue) { Text($0.title).tag($0.rawValue) }
-      }.disabled(!hapticsEnabled)
-      Button("试一下振动") {
-        if hapticsEnabled {
-          let strength = KeyboardHapticStrength(rawValue: hapticStrength) ?? .medium
-          feedback = UIImpactFeedbackGenerator(style: strength.style)
-          feedback?.prepare(); feedback?.impactOccurred(intensity: strength.intensity)
-        }
-      }.disabled(!hapticsEnabled)
+      if KeyboardFeedbackPreference.hapticsAvailable {
+        Toggle("按键振动", isOn: $hapticsEnabled).accessibilityIdentifier("skinEditorHaptics")
+        Picker("振动强度", selection: $hapticStrength) {
+          ForEach(KeyboardHapticStrength.allCases, id: \.rawValue) { Text($0.title).tag($0.rawValue) }
+        }.disabled(!hapticsEnabled)
+        Button("试一下振动") {
+          if hapticsEnabled {
+            let strength = KeyboardHapticStrength(rawValue: hapticStrength) ?? .medium
+            feedback = UIImpactFeedbackGenerator(style: strength.style)
+            feedback?.prepare(); feedback?.impactOccurred(intensity: strength.intensity)
+          }
+        }.disabled(!hapticsEnabled)
+      }
     } header: { Text("打字反馈") } footer: {
-      Text("音效与振动是所有皮肤共用的键盘设置。按键音受系统静音状态影响，振动需在支持的真机上体验。")
+      Text(KeyboardFeedbackPreference.hapticsAvailable
+        ? "音效与振动是所有皮肤共用的键盘设置。按键音受系统静音状态影响，振动需在支持的真机上体验。"
+        : "按键音是所有皮肤共用的键盘设置，受系统静音状态影响。")
     }
   }
 
@@ -330,6 +369,7 @@ if section == "我的" {
       if current != design { design = current; undo.removeAll(); redo.removeAll() }
       saved = CustomSkinLibrary.designs
     }
+    .onDisappear { flushDocumentWrite() }
     .navigationTitle("自定义皮肤")
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
@@ -347,13 +387,13 @@ if section == "我的" {
             .accessibilityIdentifier("skinEditorTools")
           Button { renaming = nil; name = "我的设计 \(saved.count + 1)"; showSave = true } label: {
             Text("保存").font(.subheadline.weight(.semibold)).padding(.horizontal, 14).padding(.vertical, 7)
-              .foregroundStyle(.white).background(MetasequoiaTheme.forest, in: Capsule())
+              .foregroundStyle(MetasequoiaTheme.onAccent).background(MetasequoiaTheme.accent, in: Capsule())
           }.accessibilityIdentifier("saveCustomSkin")
         }
       }
     }
     .sheet(isPresented: $showAI, onDismiss: { saved = CustomSkinLibrary.designs }) {
-      AISkinGenerationView { next in apply(next); selected = KeyboardSkin.custom.rawValue; section = "按键" }
+      AISkinGenerationView { next in apply(next); useCustomSkin(); section = "按键" }
     }
     .sheet(item: $publishingSkin) { item in SavedSkinPublishFlow(skinID: item.id) }
     .sheet(isPresented: $showPhotos) {
@@ -380,7 +420,7 @@ if section == "我的" {
               saved = CustomSkinLibrary.designs
               showSave = false; message = "保存失败，请检查设备可用空间后重试。"; return
             }
-            if renaming == nil { selected = KeyboardSkin.custom.rawValue }
+            if renaming == nil { useCustomSkin() }
             showSave = false
             section = "我的"
           }.disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

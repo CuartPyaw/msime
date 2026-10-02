@@ -1,4 +1,4 @@
-import app.msime.client.VoiceResultStore;
+import app.msime.android.VoiceResultStore;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.file.Files;
@@ -24,6 +24,23 @@ public final class VoiceResultStoreSmoke {
         try {
             VoiceResultStore store = new VoiceResultStore(directory);
             long now = 1_000_000L;
+            Path outside = Files.createDirectory(directory.resolve("outside"));
+            Files.createDirectories(outside.resolve("middle/nested"));
+            Path linkedParent = directory.resolve("linked-parent");
+            Files.createSymbolicLink(linkedParent, outside);
+            VoiceResultStore linkedStore = new VoiceResultStore(
+                linkedParent.resolve("middle").resolve("nested"));
+            fails(VoiceResultStore.Reason.UNAVAILABLE, () -> linkedStore.save("synthetic", now));
+            check(!Files.exists(outside.resolve("middle/nested/result.bin")));
+            Files.delete(linkedParent);
+            Path outsideLock = Files.createTempFile("msime-voice-lock-target-", ".lock");
+            Files.writeString(outsideLock, "synthetic-lock-target");
+            Path linkedLock = directory.resolve("transfer.lock");
+            Files.createSymbolicLink(linkedLock, outsideLock);
+            fails(VoiceResultStore.Reason.UNAVAILABLE, () -> store.read(now));
+            check(Files.readString(outsideLock).equals("synthetic-lock-target"));
+            Files.delete(linkedLock);
+            Files.delete(outsideLock);
             fails(VoiceResultStore.Reason.INVALID, () -> store.read(-1));
             fails(VoiceResultStore.Reason.INVALID, () -> store.save("   ", now));
             fails(VoiceResultStore.Reason.INVALID, () -> store.save("\ud800", now));

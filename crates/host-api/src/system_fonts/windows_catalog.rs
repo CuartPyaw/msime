@@ -18,11 +18,7 @@ impl Catalog {
         let Ok(name) = String::from_utf16(value) else {
             return;
         };
-        if name.is_empty()
-            || name.starts_with('@')
-            || name.len() > 128
-            || name.chars().any(char::is_control)
-        {
+        if name.is_empty() || !super::is_bounded_text(&name, 128) || name.starts_with('@') {
             return;
         }
         if self.names.len() == MAX_FAMILIES && !self.names.contains(&name) {
@@ -139,7 +135,9 @@ pub(super) fn list() -> Result<Vec<String>, &'static str> {
     if catalog.names.is_empty() {
         return Err("font_catalog");
     }
-    Ok(catalog.names.into_iter().collect())
+    let mut names = Vec::with_capacity(catalog.names.len());
+    names.extend(catalog.names);
+    Ok(names)
 }
 
 #[cfg(test)]

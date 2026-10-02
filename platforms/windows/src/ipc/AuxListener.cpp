@@ -1,6 +1,7 @@
 #include "AuxListener.h"
 #include "PipeIo.h"
 #include "PipeListener.h"
+#include "PipePeer.h"
 
 namespace msime::windows {
 namespace {
@@ -16,7 +17,9 @@ std::unique_ptr<AuxListener> AuxListener::create(const std::wstring &name,
                                                  MessageSink message_sink,
                                                  ActivationSink activation,
                                                  TerminalSink terminal,
-                                                 MaintenanceSink maintenance) {
+                                                 MaintenanceSink maintenance,
+                                                 StatisticsSink statistics,
+                                                 KeysSink keys) {
   error = ERROR_SUCCESS;
   if (!sink) {
     error = ERROR_INVALID_PARAMETER;
@@ -37,6 +40,8 @@ std::unique_ptr<AuxListener> AuxListener::create(const std::wstring &name,
   aux->activation_ = std::move(activation);
   aux->terminal_ = std::move(terminal);
   aux->maintenance_ = std::move(maintenance);
+  aux->statistics_ = std::move(statistics);
+  aux->keys_ = std::move(keys);
   aux->worker_ = std::thread([raw = aux.get()] { raw->run(); });
   return aux;
 }
@@ -115,6 +120,20 @@ void AuxListener::run() {
       ++stats_.malformed;
       continue;
     }
+    // The DACL has to admit AppContainer and low-integrity hosts, because the
+    // TIP runs inside them. The verbs that restart the Server or drop every
+    // session are only ever sent by the settings process, so they are
+    // accepted from a full desktop process of this user and nothing else.
+    const auto maintenance = parse_aux_dictionary_maintenance(*text);
+    if (maintenance || *text == L"RestartServer") {
+      DWORD peer_error = ERROR_SUCCESS;
+      if (!pipe_client_is_desktop_user(accepted.connection->handle(),
+                                       peer_error)) {
+        std::lock_guard<std::mutex> lock(stats_mutex_);
+        ++stats_.rejected;
+        continue;
+      }
+    }
     if (message_sink_)
       message_sink_(*text);
     if (const auto activation = parse_aux_activation(*text)) {
@@ -124,7 +143,7 @@ void AuxListener::run() {
       ++stats_.dispatched;
       continue;
     }
-    if (const auto maintenance = parse_aux_dictionary_maintenance(*text)) {
+    if (maintenance) {
       // Same contract as the deactivation below: the caller takes "OK" as
       // proof that the sessions are gone and the dictionary lock is free, so
       // it is written only once that is actually true.
@@ -139,11 +158,45 @@ void AuxListener::run() {
       continue;
     }
     if (const auto terminal = parse_aux_terminal_deactivation(*text)) {
+      // The client id is (pid << 32) | tid; a sender may only fence its own.
+      ULONG pid = 0;
+      DWORD peer_error = ERROR_SUCCESS;
+      if (!pipe_client_in_session(accepted.connection->handle(), pid,
+                                  peer_error) ||
+          static_cast<DWORD>(terminal->client_id >> 32) != pid) {
+        std::lock_guard<std::mutex> lock(stats_mutex_);
+        ++stats_.rejected;
+        continue;
+      }
       // The DLL polls this pipe for a literal "OK" and blocks its TSF thread
       // for 150 ms without one. Answer only once the client really is gone:
       // an unconditional "OK" would tell the DLL a teardown happened that did
       // not, which is worse than the wait.
       const bool done = terminal_ && terminal_(*terminal);
+      if (done)
+        write_ok(accepted.connection->handle());
+      std::lock_guard<std::mutex> lock(stats_mutex_);
+      if (done)
+        ++stats_.dispatched;
+      else
+        ++stats_.unknown_verb;
+      continue;
+    }
+    if (const auto statistics = parse_aux_typing_statistics(*text)) {
+      // The batch carries typed characters, so it goes to the sink and nowhere else. The DLL backs off when no "OK" arrives, which is the right answer both when statistics are off and when nobody is listening for them.
+      const bool done = statistics_ && statistics_(*statistics);
+      if (done)
+        write_ok(accepted.connection->handle());
+      std::lock_guard<std::mutex> lock(stats_mutex_);
+      if (done)
+        ++stats_.dispatched;
+      else
+        ++stats_.unknown_verb;
+      continue;
+    }
+    if (const auto keys = parse_aux_typing_keys(*text)) {
+      // Counts per key only, but still the user's typing: they go to the sink and nowhere else, and silence is the answer whenever statistics are off.
+      const bool done = keys_ && keys_(*keys);
       if (done)
         write_ok(accepted.connection->handle());
       std::lock_guard<std::mutex> lock(stats_mutex_);

@@ -1,14 +1,23 @@
 import { useEffect, useRef, useState } from "react";
+import { errorCode } from "../core/error-code";
+import { runAsyncAction } from "../core/async-action";
+import { aiSkinMessage, libraryError } from "./touch-keyboard-skin-errors";
+import { createAiSkinPrompt } from "./touch-keyboard-skin-ai";
+import { randomRequestId } from "../core/random-id";
 import { ScreenKeyboardPreview } from "./screen-keyboard-preview";
+import { boundTouchSkinArtwork, readAndCompressTouchSkinPhoto } from "./touch-skin-images";
 import {
   defaultTouchKeyboardSkinDesign,
+  boundedSkinName,
   hasReadableSkinText,
   normalizeTouchKeyboardSkinDesign,
   readableSkinText,
   skinColor,
+  skinColorNumber,
   skinContrast,
   touchKeyboardBackgroundPresets,
   touchKeyboardSkinTemplates,
+  updateSavedTouchKeyboardSkinName,
   type AiSkinClient,
   type AiSkinProposal,
   type CustomSkinLibraryAction,
@@ -19,124 +28,19 @@ import {
   type TouchSkinKeyShape,
 } from "./touch-keyboard-skin-design";
 import type { CommunitySkinClient } from "../community/community-skins";
+import {
+  communitySkinCategories,
+  communitySkinCategoryLabels,
+  type CommunitySkinCategory,
+} from "../community/community-skin-category";
 import * as skin from "./touch-skin-style";
 import * as doc from "../settings/document-style";
 import * as community from "../community/community-style";
+import { ActionButton } from "../core/action-button";
 
 type Category = "背景" | "按键" | "文本" | "设计" | "我的";
 type NameEditor = { operation: "create" } | { operation: "rename"; id: string };
 type Confirmation = { operation: "update" | "delete"; item: SavedTouchKeyboardSkin };
-
-function colorNumber(value: string): number {
-  return Number.parseInt(value.slice(1), 16);
-}
-
-function boundedSkinName(value: string): string {
-  const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-  return Array.from(segmenter.segment(value), (item) => item.segment)
-    .slice(0, 32)
-    .join("");
-}
-
-async function boundedPhoto(file: File): Promise<string> {
-  if (!file.type.startsWith("image/") || file.size > 20_000_000) throw new Error("invalid image");
-  const url = URL.createObjectURL(file);
-  try {
-    const image = new Image();
-    image.src = url;
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve();
-      image.onerror = () => reject(new Error("image decode failed"));
-    });
-    if (!image.naturalWidth || !image.naturalHeight) throw new Error("empty image");
-    const scale = Math.min(1, 1024 / Math.max(image.naturalWidth, image.naturalHeight));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("canvas unavailable");
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    for (const quality of [0.8, 0.6, 0.4, 0.2]) {
-      const data = canvas.toDataURL("image/jpeg", quality).split(",")[1] ?? "";
-      if (Math.floor(data.length * 0.75) <= 512_000) return data;
-    }
-    throw new Error("image too large");
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
-async function boundedArtwork(artwork: AiSkinProposal["artwork"]): Promise<string> {
-  const source = artwork.b64_json;
-  const bytes = Uint8Array.from(atob(source), (character) => character.charCodeAt(0));
-  if (bytes.length > 512_000) {
-    const image = new Image();
-    image.src = `data:${artwork.mime_type};base64,${source}`;
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve();
-      image.onerror = () => reject(new Error("artwork decode failed"));
-    });
-    const scale = Math.min(1, 1024 / Math.max(image.naturalWidth, image.naturalHeight));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("canvas unavailable");
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    for (const quality of [0.8, 0.6, 0.4, 0.2]) {
-      const result = canvas.toDataURL("image/jpeg", quality).split(",")[1] ?? "";
-      if (Math.floor(result.length * 0.75) <= 512_000) return result;
-    }
-    throw new Error("artwork too large");
-  }
-  return source;
-}
-
-function aiSkinPrompt(): string {
-  const scenes = [
-    "月光森林里的狐狸茶屋",
-    "云朵之间的鲸鱼邮局",
-    "雨夜街角的猫咪书店",
-    "星际列车上的花园",
-    "蘑菇村的秋日集市",
-    "珊瑚海里的水母舞会",
-    "雪山小屋与极光",
-    "竹林里的熊猫茶会",
-    "沙漠星空下的旅店",
-    "复古街机里的糖果世界",
-    "樱花河畔的兔子野餐",
-    "漂浮岛屿上的灯塔",
-  ];
-  const selected = [...scenes]
-    .sort(() => Math.random() - 0.5)
-    .slice(0, 3)
-    .join("；");
-  return `这是一次随机皮肤抽卡。分别围绕以下三个灵感创作三套主题，每套对应一个场景：${selected}。自由设计原创角色、插画风格和配色，三套键帽造型与材质都要不同，文字清晰。不要使用已有品牌或角色。`;
-}
-
-function aiSkinMessage(error: unknown): string {
-  const code = typeof error === "object" && error !== null && "code" in error ? error.code : "";
-  switch (code) {
-    case "ai_skin_invalid":
-      return "AI 返回的皮肤设计或插画格式无效，请重新抽取。";
-    case "ai_skin_cancelled":
-      return "已取消这次抽卡。";
-    case "ai_skin_busy":
-      return "已有一次抽卡正在进行，请稍候。";
-    case "account_unauthorized":
-      return "请先登录，再来抽取皮肤。";
-    case "account_rate_limited":
-      return "请求过于频繁，请稍后再试。";
-    default:
-      return "AI 皮肤暂时不可用，请稍后重试。";
-  }
-}
-
-function randomSkinRequestId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
-    return crypto.randomUUID();
-  return `ai-skin-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
 
 function AiSkinGeneration({
   client,
@@ -160,8 +64,20 @@ function AiSkinGeneration({
   const [publishing, setPublishing] = useState<SavedTouchKeyboardSkin | null>(null);
   const [publishDescription, setPublishDescription] = useState("");
   const [publishAgreed, setPublishAgreed] = useState(false);
+  const [publishCategory, setPublishCategory] = useState<CommunitySkinCategory>("other");
   const [publishBusy, setPublishBusy] = useState(false);
+  const publishRunning = useRef(false);
+  const generateRunning = useRef(false);
+  const saveRunning = useRef(false);
   const requestRef = useRef("");
+  const mounted = useRef(true);
+
+  useEffect(
+    () => () => {
+      mounted.current = false;
+    },
+    [],
+  );
 
   useEffect(() => {
     requestRef.current = requestId;
@@ -190,21 +106,22 @@ function AiSkinGeneration({
   );
 
   const generate = async () => {
-    if (busy) return;
-    const id = randomSkinRequestId();
+    if (busy || generateRunning.current) return;
+    generateRunning.current = true;
+    const id = randomRequestId("ai-skin");
     requestRef.current = id;
     setRequestId(id);
     setBusy(true);
     setCompleted(0);
     setMessage("");
     try {
-      const result = await client.generate(id, aiSkinPrompt());
+      const result = await client.generate(id, createAiSkinPrompt());
       const prepared = await Promise.all(
         result.map(async (proposal) => ({
           ...proposal,
           design: {
             ...proposal.design,
-            photo: await boundedArtwork(proposal.artwork),
+            photo: await boundTouchSkinArtwork(proposal.artwork),
             photoShade: 0.08,
             photoPosition: 0.5,
             keyOpacity: 0.92,
@@ -212,24 +129,22 @@ function AiSkinGeneration({
           },
         })),
       );
+      if (!mounted.current) return;
       setProposals(prepared);
     } catch (error) {
-      if (
-        typeof error !== "object" ||
-        error === null ||
-        !("code" in error) ||
-        error.code !== "ai_skin_cancelled"
-      )
-        setMessage(aiSkinMessage(error));
+      if (errorCode(error) !== "ai_skin_cancelled")
+        if (mounted.current) setMessage(aiSkinMessage(error));
     } finally {
-      setBusy(false);
-      requestRef.current = "";
+      generateRunning.current = false;
+      if (mounted.current) setBusy(false);
+      if (requestRef.current === id) requestRef.current = "";
     }
   };
 
   const save = async (proposal: AiSkinProposal): Promise<SavedTouchKeyboardSkin | null> => {
     const existing = saved[proposal.name];
-    if (existing) return existing;
+    if (existing || saveRunning.current) return existing ?? null;
+    saveRunning.current = true;
     try {
       const current = await library.load();
       if (current.length >= 12) throw { code: "custom_skin_full" };
@@ -242,38 +157,50 @@ function AiSkinGeneration({
       const next = await library.mutate({ operation: "create", name, design: proposal.design });
       const item = next.find((value) => value.name === name);
       if (!item) throw new Error("skin was not saved");
+      if (!mounted.current) return null;
       setSaved((currentSaved) => ({ ...currentSaved, [proposal.name]: item }));
       setMessage("已保存到“我的皮肤”。");
       return item;
     } catch (error) {
-      setMessage(libraryError(error));
+      if (mounted.current) setMessage(libraryError(error));
       return null;
+    } finally {
+      saveRunning.current = false;
     }
   };
 
   const publish = async () => {
-    if (!publishing || !communitySkins || !publishAgreed || publishBusy) return;
+    if (!publishing || !communitySkins || !publishAgreed || publishBusy || publishRunning.current)
+      return;
     const name = publishing.name.trim();
     const description = publishDescription.trim();
     if (!name || name.length > 32 || description.length > 280) {
       setMessage("请填写有效的名称和设计说明。");
       return;
     }
+    publishRunning.current = true;
     setPublishBusy(true);
     try {
-      await communitySkins.publish(publishing.id, name, description, publishing.design);
+      await communitySkins.publish(
+        publishing.id,
+        name,
+        description,
+        publishing.design,
+        publishCategory,
+      );
+      if (!mounted.current) return;
       setPublishing(null);
       setPublishDescription("");
       setPublishAgreed(false);
+      setPublishCategory("other");
       setMessage("已发布到社区。");
     } catch (error) {
-      setMessage(
-        typeof error === "object" && error !== null && "code" in error
-          ? `发布失败：${String(error.code)}`
-          : "暂时无法发布皮肤，请稍后重试。",
-      );
+      const code = errorCode(error);
+      if (mounted.current)
+        setMessage(code ? `发布失败：${code}` : "暂时无法发布皮肤，请稍后重试。");
     } finally {
-      setPublishBusy(false);
+      publishRunning.current = false;
+      if (mounted.current) setPublishBusy(false);
     }
   };
 
@@ -290,15 +217,13 @@ function AiSkinGeneration({
             <h2>AI 皮肤抽卡</h2>
             <p>一次抽出三张原创皮肤，遇到喜欢的就留下。</p>
           </div>
-          <button
-            type="button"
+          <ActionButton
+            action={onClose}
             className={community.dialogClose}
             disabled={busy}
-            onClick={onClose}
-            aria-label="关闭 AI 皮肤抽卡"
-          >
-            ×
-          </button>
+            ariaLabel="关闭 AI 皮肤抽卡"
+            label="×"
+          />
         </div>
         {proposals.length === 0 && (
           <div className={doc.mysteryCards} aria-hidden="true">
@@ -309,28 +234,24 @@ function AiSkinGeneration({
             ))}
           </div>
         )}
-        <button
-          type="button"
+        <ActionButton
+          action={() => generate()}
           className="primary"
           disabled={busy}
-          onClick={() => void generate()}
           aria-label="抽三张皮肤"
-        >
-          {proposals.length ? "再抽三张" : "抽三张皮肤"}
-        </button>
+          label={proposals.length ? "再抽三张" : "抽三张皮肤"}
+        />
         <p className={doc.generationNote}>
           AI 随机搭配插画、键帽造型与材质。抽到的皮肤可以继续编辑、保存或分享。
         </p>
         {busy && (
           <p role="status">
             主题插画已完成 {completed}/3，可能需要几分钟…{" "}
-            <button
-              type="button"
+            <ActionButton
+              action={() => client.cancel(requestRef.current)}
               className="secondary"
-              onClick={() => void client.cancel(requestRef.current)}
-            >
-              取消
-            </button>
+              label="取消"
+            />
           </p>
         )}
         {message && <p role="status">{message}</p>}
@@ -343,39 +264,34 @@ function AiSkinGeneration({
                 <p>{proposal.description}</p>
                 <ScreenKeyboardPreview theme="light" skin="custom" customDesign={proposal.design} />
                 <div className={doc.cardActions}>
-                  <button
-                    type="button"
-                    className="primary"
-                    onClick={() => {
+                  <ActionButton
+                    action={() => {
                       onUse(proposal.design);
                       onClose();
                     }}
-                  >
-                    使用并继续编辑
-                  </button>
-                  <button
-                    type="button"
+                    className="primary"
+                    label="使用并继续编辑"
+                  />
+                  <ActionButton
+                    action={async () => {
+                      await save(proposal);
+                    }}
                     className="secondary"
                     disabled={Boolean(item)}
-                    onClick={() => void save(proposal)}
-                  >
-                    {item ? "已保存" : "保存到我的皮肤"}
-                  </button>
+                    label={item ? "已保存" : "保存到我的皮肤"}
+                  />
                   {communitySkins && (
-                    <button
-                      type="button"
+                    <ActionButton
+                      action={async () => {
+                        const value = await save(proposal);
+                        if (value) {
+                          setPublishing(value);
+                          setPublishDescription(proposal.description);
+                        }
+                      }}
                       className="secondary"
-                      onClick={() =>
-                        void save(proposal).then((value) => {
-                          if (value) {
-                            setPublishing(value);
-                            setPublishDescription(proposal.description);
-                          }
-                        })
-                      }
-                    >
-                      发布到社区
-                    </button>
+                      label="发布到社区"
+                    />
                   )}
                 </div>
               </article>
@@ -391,7 +307,13 @@ function AiSkinGeneration({
                 aria-label="AI 皮肤名称"
                 value={publishing.name}
                 maxLength={32}
-                onChange={(event) => setPublishing({ ...publishing, name: event.target.value })}
+                onChange={(event) =>
+                  setPublishing((current) =>
+                    current
+                      ? updateSavedTouchKeyboardSkinName(current, event.target.value)
+                      : current,
+                  )
+                }
               />
             </label>
             <label>
@@ -402,6 +324,23 @@ function AiSkinGeneration({
                 maxLength={280}
                 onChange={(event) => setPublishDescription(event.target.value)}
               />
+            </label>
+            <label>
+              分类
+              <select
+                aria-label="发布分类"
+                value={publishCategory}
+                disabled={publishBusy}
+                onChange={(event) =>
+                  setPublishCategory(event.target.value as CommunitySkinCategory)
+                }
+              >
+                {communitySkinCategories.map((item) => (
+                  <option key={item} value={item}>
+                    {communitySkinCategoryLabels[item]}
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               <input
@@ -440,24 +379,6 @@ function AiSkinGeneration({
   );
 }
 
-function libraryError(error: unknown): string {
-  const code = typeof error === "object" && error !== null && "code" in error ? error.code : "";
-  switch (code) {
-    case "custom_skin_full":
-      return "最多保存 12 套皮肤，请先删除不需要的设计。";
-    case "custom_skin_invalid_name":
-      return "请输入皮肤名称。";
-    case "custom_skin_duplicate_name":
-      return "已经有同名皮肤，请换一个名称。";
-    case "custom_skin_not_found":
-      return "这套皮肤已在其他窗口中变更，请重新打开图库。";
-    case "custom_skin_format":
-      return "皮肤图库无法读取，原文件已保留。";
-    default:
-      return "皮肤图库保存失败，请检查设备可用空间后重试。";
-  }
-}
-
 export function TouchKeyboardSkinEditor({
   design,
   selected,
@@ -492,29 +413,40 @@ export function TouchKeyboardSkinEditor({
   const [skinName, setSkinName] = useState("");
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [aiGenerationOpen, setAiGenerationOpen] = useState(false);
+  const mounted = useRef(true);
+  const libraryGeneration = useRef(0);
+  const libraryActionBusy = useRef(false);
+  useEffect(
+    () => () => {
+      mounted.current = false;
+      libraryGeneration.current += 1;
+      libraryActionBusy.current = false;
+    },
+    [],
+  );
   useEffect(() => {
-    let current = true;
-    if (!library)
-      return () => {
-        current = false;
-      };
-    setLibraryBusy(true);
-    void library
-      .load()
-      .then((items) => {
-        if (current) {
-          setSaved(items);
-          setLibraryNotice("");
-        }
-      })
-      .catch((error) => {
-        if (current) setLibraryNotice(libraryError(error));
-      })
-      .finally(() => {
-        if (current) setLibraryBusy(false);
-      });
+    const generation = ++libraryGeneration.current;
+    if (!library) return;
+    libraryActionBusy.current = true;
+    void runAsyncAction(
+      {
+        busy: false,
+        isCurrent: () => mounted.current && generation === libraryGeneration.current,
+        setBusy: (busy) => {
+          libraryActionBusy.current = busy;
+          setLibraryBusy(busy);
+        },
+        setError: setLibraryNotice,
+      },
+      async (isCurrent) => {
+        const items = await library.load();
+        if (isCurrent()) setSaved(items);
+      },
+      { formatError: libraryError },
+    );
     return () => {
-      current = false;
+      if (generation === libraryGeneration.current) libraryGeneration.current += 1;
+      libraryActionBusy.current = false;
     };
   }, [library]);
   const apply = (next: TouchKeyboardSkinDesign, record = true) => {
@@ -557,19 +489,31 @@ export function TouchKeyboardSkinEditor({
     });
   };
   const mutateLibrary = async (action: CustomSkinLibraryAction, success: string) => {
-    if (!library) return false;
-    setLibraryBusy(true);
-    setLibraryNotice("");
-    try {
-      setSaved(await library.mutate(action));
-      setLibraryNotice(success);
-      return true;
-    } catch (error) {
-      setLibraryNotice(libraryError(error));
-      return false;
-    } finally {
-      setLibraryBusy(false);
-    }
+    if (!library || libraryActionBusy.current) return false;
+    libraryActionBusy.current = true;
+    const generation = libraryGeneration.current;
+    let succeeded = false;
+    await runAsyncAction(
+      {
+        busy: false,
+        isCurrent: () => mounted.current && generation === libraryGeneration.current,
+        setBusy: (busy) => {
+          libraryActionBusy.current = busy;
+          setLibraryBusy(busy);
+        },
+        setError: setLibraryNotice,
+      },
+      async (isCurrent) => {
+        const items = await library.mutate(action);
+        if (!isCurrent()) return;
+        setSaved(items);
+        setLibraryNotice(success);
+        succeeded = true;
+      },
+      { formatError: libraryError },
+    );
+    libraryActionBusy.current = false;
+    return succeeded;
   };
   const submitName = async () => {
     if (!nameEditor) return;
@@ -615,37 +559,31 @@ export function TouchKeyboardSkinEditor({
         <div>
           <div className="section-title">
             自定义皮肤
-            <small>Apple 同款当前设计字段；修改后使用页面底部“保存设置”写入共享配置</small>
+            <small>Apple 同款当前设计字段；修改后自动写入共享配置</small>
           </div>
         </div>
         <div className={skin.editorHeadingActions}>
           {aiSkins && library && (
-            <button
-              type="button"
+            <ActionButton
+              action={() => setAiGenerationOpen(true)}
               className="primary"
               disabled={disabled || libraryBusy}
-              onClick={() => setAiGenerationOpen(true)}
-            >
-              AI 皮肤抽卡
-            </button>
+              label="AI 皮肤抽卡"
+            />
           )}
           {library && (
-            <button
-              type="button"
-              className="primary"
-              disabled={disabled || libraryBusy || saved.length >= 12}
-              onClick={() => {
+            <ActionButton
+              action={() => {
                 setSkinName(`我的设计 ${saved.length + 1}`);
                 setNameEditor({ operation: "create" });
                 setLibraryNotice("");
               }}
-            >
-              保存设计
-            </button>
+              className="primary"
+              disabled={disabled || libraryBusy || saved.length >= 12}
+              label="保存设计"
+            />
           )}
-          <button type="button" className="secondary" onClick={onClose}>
-            完成
-          </button>
+          <ActionButton action={onClose} className="secondary" label="完成" />
         </div>
       </div>
       {aiGenerationOpen && aiSkins && library && (
@@ -785,7 +723,7 @@ export function TouchKeyboardSkinEditor({
                   aria-label="背景起始色"
                   type="color"
                   value={skinColor(design.background)}
-                  onChange={(event) => patch({ background: colorNumber(event.target.value) })}
+                  onChange={(event) => patch({ background: skinColorNumber(event.target.value) })}
                 />
               </label>
               <label className={skin.checkLabel}>
@@ -808,7 +746,9 @@ export function TouchKeyboardSkinEditor({
                       aria-label="渐变结束色"
                       type="color"
                       value={skinColor(design.gradientEnd)}
-                      onChange={(event) => patch({ gradientEnd: colorNumber(event.target.value) })}
+                      onChange={(event) =>
+                        patch({ gradientEnd: skinColorNumber(event.target.value) })
+                      }
                     />
                   </label>
                   <label className={skin.checkLabel}>
@@ -836,7 +776,7 @@ export function TouchKeyboardSkinEditor({
                     event.target.value = "";
                     if (!file) return;
                     setPhotoError("");
-                    void boundedPhoto(file)
+                    void readAndCompressTouchSkinPhoto(file)
                       .then((photo) => patch({ photo }))
                       .catch(() => setPhotoError("无法读取或压缩这张照片，请换一张再试。"));
                   }}
@@ -929,7 +869,9 @@ export function TouchKeyboardSkinEditor({
                   aria-label="键帽颜色"
                   type="color"
                   value={skinColor(design.keyBackground)}
-                  onChange={(event) => patch({ keyBackground: colorNumber(event.target.value) })}
+                  onChange={(event) =>
+                    patch({ keyBackground: skinColorNumber(event.target.value) })
+                  }
                 />
               </label>
               <label>
@@ -939,7 +881,9 @@ export function TouchKeyboardSkinEditor({
                   aria-label="功能键颜色"
                   type="color"
                   value={skinColor(design.actionBackground)}
-                  onChange={(event) => patch({ actionBackground: colorNumber(event.target.value) })}
+                  onChange={(event) =>
+                    patch({ actionBackground: skinColorNumber(event.target.value) })
+                  }
                 />
               </label>
             </div>
@@ -1028,7 +972,7 @@ export function TouchKeyboardSkinEditor({
                   type="color"
                   value={skinColor(design.customBorderColor ?? design.accent)}
                   onChange={(event) =>
-                    patch({ customBorderColor: colorNumber(event.target.value) })
+                    patch({ customBorderColor: skinColorNumber(event.target.value) })
                   }
                 />
               </label>
@@ -1054,7 +998,7 @@ export function TouchKeyboardSkinEditor({
                 aria-label="按键文字"
                 type="color"
                 value={skinColor(design.keyForeground)}
-                onChange={(event) => patch({ keyForeground: colorNumber(event.target.value) })}
+                onChange={(event) => patch({ keyForeground: skinColorNumber(event.target.value) })}
               />
             </label>
             <label>
@@ -1064,7 +1008,7 @@ export function TouchKeyboardSkinEditor({
                 aria-label="提示与工具栏"
                 type="color"
                 value={skinColor(design.accent)}
-                onChange={(event) => patch({ accent: colorNumber(event.target.value) })}
+                onChange={(event) => patch({ accent: skinColorNumber(event.target.value) })}
               />
             </label>
             {!hasReadableSkinText(design) && (
@@ -1139,37 +1083,31 @@ export function TouchKeyboardSkinEditor({
                     <strong>{item.name}</strong>
                   </button>
                   <div className={skin.libraryActions}>
-                    <button
-                      type="button"
+                    <ActionButton
+                      action={() => setConfirmation({ operation: "update", item })}
                       className="secondary"
                       disabled={libraryBusy}
-                      aria-label={`用当前设计更新 ${item.name}`}
-                      onClick={() => setConfirmation({ operation: "update", item })}
-                    >
-                      更新
-                    </button>
-                    <button
-                      type="button"
-                      className="secondary"
-                      disabled={libraryBusy}
-                      aria-label={`重命名 ${item.name}`}
-                      onClick={() => {
+                      ariaLabel={`用当前设计更新 ${item.name}`}
+                      label="更新"
+                    />
+                    <ActionButton
+                      action={() => {
                         setSkinName(item.name);
                         setNameEditor({ operation: "rename", id: item.id });
                         setLibraryNotice("");
                       }}
-                    >
-                      重命名
-                    </button>
-                    <button
-                      type="button"
+                      className="secondary"
+                      disabled={libraryBusy}
+                      ariaLabel={`重命名 ${item.name}`}
+                      label="重命名"
+                    />
+                    <ActionButton
+                      action={() => setConfirmation({ operation: "delete", item })}
                       className="danger-text"
                       disabled={libraryBusy}
-                      aria-label={`删除 ${item.name}`}
-                      onClick={() => setConfirmation({ operation: "delete", item })}
-                    >
-                      删除
-                    </button>
+                      ariaLabel={`删除 ${item.name}`}
+                      label="删除"
+                    />
                   </div>
                 </article>
               ))}

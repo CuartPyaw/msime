@@ -5,7 +5,7 @@
 #include "KeyHandlerEditSession.h"
 #include "MetasequoiaIMEBaseStructure.h"
 #include "Compartment.h"
-#include "define.h"
+#include "Define.h"
 #include "../EngineSessionAdapter.h"
 #include <memory>
 
@@ -77,6 +77,8 @@ class CCompositionProcessorEngine
     WCHAR GetVirtualKey(DWORD_PTR dwIndex);
     // Shift+U unicode input: composition buffer starts with 'U'.
     BOOL IsUnicodeModeComposition() const;
+    // Shift+V expression input while the Server reports the mode on: composition buffer starts with 'V'.
+    BOOL IsExpressionModeComposition() const;
 
     void GetReadingStrings(                                          //
         _Inout_ CMetasequoiaImeArray<CStringRange> *pReadingStrings, //
@@ -191,7 +193,6 @@ class CCompositionProcessorEngine
                                  _In_z_ LPCWSTR pwszTooltipValue, DWORD dwOnIconIndex, DWORD dwOffIconIndex,
                                  _Outptr_result_maybenull_ CLangBarItemButton **ppLangBarItemButton, BOOL isSecureMode);
     void SetInitialCandidateListRange();
-    void SetDefaultCandidateTextFont();
     void InitializeMetasequoiaIMECompartment(_In_ ITfThreadMgr *pThreadMgr, TfClientId tfClientId);
 
     class XPreservedKey;

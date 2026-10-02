@@ -1,6 +1,31 @@
 import XCTest
 
 final class VoiceTextHandoffTests: XCTestCase {
+  func testReadRejectsASymlinkedTransferLock() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("msime-voice-lock-test-\(UUID().uuidString)")
+    let outsideDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("msime-voice-lock-target-\(UUID().uuidString)")
+    defer {
+      try? FileManager.default.removeItem(at: root)
+      try? FileManager.default.removeItem(at: outsideDirectory)
+    }
+    let handoffDirectory = root.appendingPathComponent("VoiceHandoff", isDirectory: true)
+    try FileManager.default.createDirectory(at: handoffDirectory, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: outsideDirectory, withIntermediateDirectories: true)
+    let outsideLock = outsideDirectory.appendingPathComponent("outside.lock")
+    try Data("synthetic-lock-target".utf8).write(to: outsideLock)
+    let now = Date(timeIntervalSince1970: 1_000_000)
+    let entry = VoiceTextHandoff(id: UUID(), text: "fixture", createdAt: now, expiresAt: now.addingTimeInterval(600))
+    // 和写入的字节比，不和再编码一次的结果比：`JSONEncoder` 不保证两次编码的键顺序相同。
+    let stored = try JSONEncoder().encode(entry)
+    try stored.write(to: handoffDirectory.appendingPathComponent("result.json"))
+    try FileManager.default.createSymbolicLink(
+      at: handoffDirectory.appendingPathComponent("transfer.lock"), withDestinationURL: outsideLock)
+
+    XCTAssertThrowsError(try VoiceTextHandoffStore(directory: root).read(now: now))
+    XCTAssertEqual(try Data(contentsOf: outsideLock), Data("synthetic-lock-target".utf8))
+    XCTAssertEqual(try Data(contentsOf: handoffDirectory.appendingPathComponent("result.json")), stored)
+  }
+
   func testOneTimeClaimReplacementAndExpiry() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -21,6 +46,25 @@ final class VoiceTextHandoffTests: XCTestCase {
     let removable = try host.save("discard fixture", now: now)
     try host.discard(removable.id, now: now)
     XCTAssertNil(try keyboard.read(now: now))
+  }
+
+  func testReadRejectsASymlinkedResultFile() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("msime-voice-result-test-\(UUID().uuidString)")
+    let outsideDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("msime-voice-result-target-\(UUID().uuidString)")
+    defer {
+      try? FileManager.default.removeItem(at: root)
+      try? FileManager.default.removeItem(at: outsideDirectory)
+    }
+    let handoffDirectory = root.appendingPathComponent("VoiceHandoff", isDirectory: true)
+    try FileManager.default.createDirectory(at: handoffDirectory, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: outsideDirectory, withIntermediateDirectories: true)
+    let outside = outsideDirectory.appendingPathComponent("outside.json")
+    try Data("keep".utf8).write(to: outside)
+    try FileManager.default.createSymbolicLink(
+      at: handoffDirectory.appendingPathComponent("result.json"), withDestinationURL: outside)
+
+    XCTAssertThrowsError(try VoiceTextHandoffStore(directory: root).read())
+    XCTAssertEqual(try Data(contentsOf: outside), Data("keep".utf8))
   }
 
   func testInvalidSavePreservesPendingTextAndMalformedStateIsNotConsumed() throws {

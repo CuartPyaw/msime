@@ -4,12 +4,21 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import socket
+import socketserver
 import subprocess
 import sys
 import tempfile
 import threading
 import time
 import unittest
+
+
+# HTTPServer.server_bind resolves the bound address with socket.getfqdn, which waits on reverse DNS before this loopback server exists - 35 s on the macOS CI runners. Nothing reads server_name, so bind without it.
+class LoopbackHTTPServer(ThreadingHTTPServer):
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -33,7 +42,7 @@ class CustomTranslationConfig(unittest.TestCase):
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)
-        http = ThreadingHTTPServer(("127.0.0.1", 0), HTTPHandler)
+        http = LoopbackHTTPServer(("127.0.0.1", 0), HTTPHandler)
         thread = threading.Thread(target=http.serve_forever, daemon=True)
         thread.start()
         def stop_http():
@@ -42,7 +51,7 @@ class CustomTranslationConfig(unittest.TestCase):
             thread.join(timeout=3)
         self.addCleanup(stop_http)
         self.endpoint = "http://127.0.0.1:" + str(http.server_port) + "/translate"
-        process = subprocess.Popen([sys.executable, str(ROOT / "scripts" / "msime-client-online-provider"), str(self.address)],
+        process = subprocess.Popen([sys.executable, str(ROOT / "scripts" / "msime-linux-online-provider"), str(self.address)],
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         def stop_provider():
             if process.poll() is None:
@@ -56,7 +65,7 @@ class CustomTranslationConfig(unittest.TestCase):
         self.assertTrue(self.address.exists())
 
     def request(self, endpoint, token):
-        query = {"candidates": ["测试", "synthetic"], "target_language": "fr",
+        query = {"candidates": ["测试", "synthetic"], "target_language": "fr", "provider": "custom",
                  "custom_translation": {"enabled": True, "endpoint": endpoint, "api_key": token}}
         with socket.socket(socket.AF_UNIX) as client:
             client.settimeout(8)
@@ -102,8 +111,12 @@ class CustomTranslationConfig(unittest.TestCase):
         self.assertEqual(self.calls[0][1], "Bearer synthetic-local-key")
 
     def test_unsupported_endpoint_does_not_send_http(self):
-        for endpoint in ("file:///synthetic", "ftp://127.0.0.1/translate", " "):
+        for endpoint in ("file:///synthetic", "ftp://127.0.0.1/translate", " ",
+                         "http://translate.example.test/translate",
+                         "http://localhost.example.test/translate",
+                         "http://127.0.0.2/translate"):
             self.assertEqual(self.request(endpoint, "synthetic-local-key"), [])
+            self.assertFalse(self.credential_test(endpoint, "synthetic-local-key")["ok"])
         self.assertEqual(self.calls, [])
 
 

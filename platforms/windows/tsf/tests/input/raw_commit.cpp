@@ -82,5 +82,17 @@ int main() {
             japanese.calls != 1 ||
             japanese_events != std::vector<std::string>{"fallback", "cleanup"}) return EXIT_FAILURE;
     }
+    // Korean: the reading command hands over the open syllable with handled=false. It is still the text to insert, and the raw command, which would find nothing left, is not asked.
+    {
+        Host korean;
+        korean.reading_response =
+            R"({"ok":true,"value":{"handled":false,"commit":"한","diagnostic":null,"view":{"preedit":"","editing_text":""}}})";
+        std::vector<std::string> korean_events;
+        if (msime::tsf::CommitHostRaw(korean, [&](const std::string &text) { korean_events.push_back(text); return true; },
+                                      [&] { korean_events.push_back("cleanup"); }, &error) !=
+                RawCommitStatus::Completed ||
+            korean.reading_calls != 1 || korean.calls != 0 ||
+            korean_events != std::vector<std::string>{"한", "cleanup"}) return EXIT_FAILURE;
+    }
     return EXIT_SUCCESS;
 }

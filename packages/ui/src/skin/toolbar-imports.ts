@@ -1,3 +1,4 @@
+import { utf8ByteLength } from "../core/text";
 import parse from "postcss/lib/parse";
 import { atRule, type AtRule, type ChildNode, type Root } from "postcss";
 import { decodeCssUrl, rebaseCssResources } from "./css-image-value";
@@ -5,7 +6,6 @@ import { decodeCssUrl, rebaseCssResources } from "./css-image-value";
 const MAX_IMPORTS = 16;
 const MAX_DEPTH = 8;
 const MAX_BYTES = 16 * 1024 * 1024;
-const encoder = new TextEncoder();
 
 export type ToolbarImportReader = (relative: string) => Promise<string>;
 
@@ -136,10 +136,10 @@ export async function prepareToolbarImports(
   entry: string,
   read?: ToolbarImportReader,
 ): Promise<{ css: string; partial: boolean }> {
-  if (!entry || entry.length > 256 || encoder.encode(css).byteLength > MAX_BYTES)
+  if (!entry || entry.length > 256 || utf8ByteLength(css) > MAX_BYTES)
     return { css: "", partial: true };
   let imports = 0,
-    bytes = encoder.encode(css).byteLength,
+    bytes = utf8ByteLength(css),
     partial = false;
   const active = new Set([entry]);
 
@@ -165,6 +165,8 @@ export async function prepareToolbarImports(
       else declaration.value = rebased;
     }
     let importsAllowed = true;
+    // The copy is the point: rule.remove() below takes nodes out of root.nodes while this walks it.
+    // oxlint-disable-next-line unicorn/no-useless-spread
     for (const node of [...root.nodes]) {
       if (node.type === "comment") continue;
       const rule = node.type === "atrule" ? (node as AtRule) : null;
@@ -196,7 +198,7 @@ export async function prepareToolbarImports(
         imports++;
         active.add(spec.relative);
         const imported = await read(spec.relative);
-        bytes += encoder.encode(imported).byteLength;
+        bytes += utf8ByteLength(imported);
         if (bytes > MAX_BYTES) throw new Error("stylesheet budget exceeded");
         const child = await expand(imported, spec.relative, depth + 1);
         active.delete(spec.relative);

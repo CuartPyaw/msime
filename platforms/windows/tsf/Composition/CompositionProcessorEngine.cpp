@@ -8,7 +8,7 @@
 #include "Compartment.h"
 #include "LanguageBar.h"
 #include "RegKey.h"
-#include "define.h"
+#include "Define.h"
 #include "../HostOptionsPaths.h"
 #include <msctf.h>
 #include <string>
@@ -286,6 +286,12 @@ Exit:
 BOOL CCompositionProcessorEngine::IsUnicodeModeComposition() const
 {
     return _keystrokeBuffer.GetLength() > 0 && _keystrokeBuffer.Get() && _keystrokeBuffer.Get()[0] == L'U';
+}
+
+BOOL CCompositionProcessorEngine::IsExpressionModeComposition() const
+{
+    return Global::IsExpressionModeComposition(_keystrokeBuffer.Get(), _keystrokeBuffer.GetLength(),
+                                               Global::ExpressionModeEnabled.load(std::memory_order_relaxed));
 }
 
 BOOL CCompositionProcessorEngine::AddVirtualKey(WCHAR wch)
@@ -598,7 +604,7 @@ namespace
 bool IsJapaneseLongVowelKey(UINT uCode, WCHAR wch)
 {
     return uCode == VK_OEM_MINUS && wch == L'-' &&
-           Global::JapaneseInputModeEnabled.load(std::memory_order_relaxed);
+           Global::InputModeScheme.load(std::memory_order_relaxed) == msime::windows::scheme::Japanese;
 }
 
 // In Japanese mode '=' and non-long-vowel '-' are punctuation rather than
@@ -611,7 +617,7 @@ bool IsJapaneseMinusEqualPunctuationKey(UINT uCode, WCHAR wch, BOOL fComposing, 
     {
         return false;
     }
-    if (keystrokeLength == 0 || !Global::JapaneseInputModeEnabled.load(std::memory_order_relaxed))
+    if (keystrokeLength == 0 || Global::InputModeScheme.load(std::memory_order_relaxed) != msime::windows::scheme::Japanese)
     {
         return false;
     }
@@ -629,22 +635,10 @@ bool IsCommitWithHighlightedCandidatePunctuationInCandidateMode(UINT uCode, WCHA
         return false;
     }
 
-    // Candidate paging keys must keep their navigation semantics even if the
-    // corresponding character is also listed in CommitWithHighlightedCandPunc.
-    switch (uCode)
+    // Candidate paging keys must keep their navigation semantics even if the corresponding character is also listed in CommitWithHighlightedCandPunc. The numpad '+' and '-' are not among them.
+    if (Global::IsCandidateNavigationKeyBeforePunctuation(uCode))
     {
-    case VK_PRIOR:
-    case VK_NEXT:
-    case VK_OEM_MINUS:
-    case VK_OEM_PLUS:
-    case VK_SUBTRACT:
-    case VK_ADD:
-    case VK_HOME:
-    case VK_END:
-    case VK_TAB:
         return false;
-    default:
-        break;
     }
 
     return wch != 0 && Global::CommitWithHighlightedCandPunc.count(wch) > 0;
@@ -1119,7 +1113,7 @@ void CCompositionProcessorEngine::OnPreservedKey( //
             Global::ModifiersDown &= ~0b00000001;
         if (notifyServer)
         {
-            WriteDataToSharedMemory(Global::Keycode, L'\0', Global::ModifiersDown, nullptr, 0, L"", 0b000111);
+            WriteDataToNamedPipe(Global::Keycode, L'\0', Global::ModifiersDown, nullptr, 0, L"", 0b000111);
             SendKeyEventToUIProcess();
             ClearNamedpipeDataIfExists();
         }
@@ -1332,8 +1326,6 @@ void CCompositionProcessorEngine::SetupConfiguration()
 
     SetInitialCandidateListRange();
 
-    SetDefaultCandidateTextFont();
-
     return;
 }
 
@@ -1476,8 +1468,9 @@ void CCompositionProcessorEngine::InitializeMetasequoiaIMECompartment(_In_ ITfTh
 {
     // Default CN/EN on IME activate / switch-in (input.default_ime_mode).
     const BOOL openChinese = FanyUtils::ReadConfiguredDefaultImeModeChinese();
-    Global::JapaneseInputModeEnabled.store(FanyUtils::ReadConfiguredJapaneseInputMode() != FALSE,
-                                           std::memory_order_relaxed);
+    Global::InputModeScheme.store(
+        msime::windows::scheme::mode_scheme(msime::windows::scheme::input_mode(FanyUtils::ReadConfiguredRunningScheme())),
+        std::memory_order_relaxed);
     // Use the suppressing writer so the OPENCLOSE sink does not treat this as
     // a user choice and drop the defense we are about to arm.
     SetKeyboardOpenCompartment(pThreadMgr, tfClientId, openChinese);
@@ -2010,26 +2003,6 @@ void CCompositionProcessorEngine::SetInitialCandidateListRange()
     }
 }
 
-void CCompositionProcessorEngine::SetDefaultCandidateTextFont()
-{
-    // Candidate Text Font
-    if (Global::defaultlFontHandle == nullptr)
-    {
-        WCHAR fontName[50] = {'\0'};
-        LoadString(Global::dllInstanceHandle, IDS_DEFAULT_FONT, fontName, 50);
-        Global::defaultlFontHandle = CreateFont(-MulDiv(10, GetDeviceCaps(GetDC(NULL), LOGPIXELSY), 72), 0, 0, 0,
-                                                FW_MEDIUM, 0, 0, 0, 0, 0, 0, 0, 0, fontName);
-        if (!Global::defaultlFontHandle)
-        {
-            LOGFONT lf;
-            SystemParametersInfo(SPI_GETICONTITLELOGFONT, sizeof(LOGFONT), &lf, 0);
-            // Fall back to the default GUI font on failure.
-            Global::defaultlFontHandle = CreateFont(-MulDiv(10, GetDeviceCaps(GetDC(NULL), LOGPIXELSY), 72), 0, 0, 0,
-                                                    FW_MEDIUM, 0, 0, 0, 0, 0, 0, 0, 0, lf.lfFaceName);
-        }
-    }
-}
-
 //////////////////////////////////////////////////////////////////////
 //
 //    CCompositionProcessorEngine
@@ -2163,6 +2136,29 @@ BOOL CCompositionProcessorEngine::IsVirtualKeyNeed( //
         }
         return TRUE;
     }
+    // V-mode: its digits and operators compose, ahead of the paging and punctuation meanings of '-', '+', '.' and '/'; a digit key printing anything else selects. Ctrl and Alt chords never reach here.
+    if (IsExpressionModeComposition())
+    {
+        switch (Global::ClassifyExpressionKey(uCode, pwch ? *pwch : 0))
+        {
+        case Global::ExpressionKey::Input:
+            if (pKeyState)
+            {
+                pKeyState->Category = CATEGORY_COMPOSING;
+                pKeyState->Function = FUNCTION_INPUT;
+            }
+            return TRUE;
+        case Global::ExpressionKey::SelectByNumber:
+            if (pKeyState)
+            {
+                pKeyState->Category = CATEGORY_CANDIDATE;
+                pKeyState->Function = FUNCTION_SELECT_BY_NUMBER;
+            }
+            return TRUE;
+        case Global::ExpressionKey::Unclaimed:
+            break;
+        }
+    }
 
     if (IsJapaneseLongVowelKey(uCode, pwch ? *pwch : 0))
     {
@@ -2191,7 +2187,7 @@ BOOL CCompositionProcessorEngine::IsVirtualKeyNeed( //
     const bool isCommaPeriodPagingKey = uCode == VK_OEM_COMMA || uCode == VK_OEM_PERIOD;
     const bool isBracketPagingKey = uCode == VK_OEM_4 || uCode == VK_OEM_6;
     const bool isMinusEqualPagingKey = (uCode == VK_OEM_MINUS || uCode == VK_OEM_PLUS) &&
-                                       !Global::JapaneseInputModeEnabled.load(std::memory_order_relaxed);
+                                       Global::InputModeScheme.load(std::memory_order_relaxed) != msime::windows::scheme::Japanese;
     if (candidateMode != CANDIDATE_NONE &&
         (isMinusEqualPagingKey || isCommaPeriodPagingKey || isBracketPagingKey || uCode == VK_TAB ||
          uCode == VK_PRIOR || uCode == VK_NEXT || uCode == VK_UP || uCode == VK_DOWN))

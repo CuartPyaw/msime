@@ -11,12 +11,16 @@ import http from '@ohos.net.http';
 import webSocket from '@ohos.net.webSocket';
 import util from '@ohos.util';
 import fs from '@ohos.file.fs';
+import fileUri from '@ohos.file.fileuri';
 import { KeyboardLog, describeError } from '../keyboard/KeyboardLog';
 import { KeyboardSession } from '../keyboard/KeyboardSession';
 import { StagedResources } from '../keyboard/StagedResources';
+import { KeyboardScheme } from '../keyboard/KeyboardScheme';
 import { HarmonyAccountCloudBridge } from '../account/HarmonyAccountCloudBridge';
 import { HarmonyAiSkins } from '../account/HarmonyAiSkins';
 import { utf8Length } from '../keyboard/Utf8';
+import { TextPolicy } from '../keyboard/TextPolicy';
+import { TypingStatisticsPolicy } from '../keyboard/TypingStatisticsPolicy';
 import { niutransAuth, tencentAuthorization } from '../keyboard/CredentialCrypto';
 import { HarmonyVoiceCaptureDevices } from '../keyboard/input/HarmonyVoiceCaptureDevices';
 import { KeyboardFeedbackBridge, MobileKeyboardFeedback } from '../keyboard/KeyboardFeedbackBridge';
@@ -25,6 +29,9 @@ import { PreferenceRevisionPolicy } from '../keyboard/input/PreferenceRevisionPo
 import { PreferencesErrorCode } from '../keyboard/settings/PreferencesErrorCode';
 import picker from '@ohos.file.picker';
 import { SkinImportPolicy } from '../keyboard/skin/SkinImportPolicy';
+import {
+  PickedEntryKind, PluginFolderScan, PluginImportPolicy, PluginImportRefusal
+} from '../keyboard/settings/PluginImportPolicy';
 import EntryAbility from '../entryability/EntryAbility';
 import { ImeEnabledState, OnboardingState, OnboardingStatePolicy }
   from '../keyboard/input/OnboardingStatePolicy';
@@ -36,6 +43,18 @@ import {
 } from '../keyboard/settings/AiModelCatalogPolicy';
 import { SettingsFormFactorCapabilities, SettingsFormFactorProjection }
   from '../keyboard/settings/SettingsFormFactorCapabilities';
+import { LocalVoiceModelAction, LocalVoiceModelPolicy } from '../keyboard/settings/LocalVoiceModelPolicy';
+import { AiAuthenticationPolicy } from '../keyboard/settings/AiAuthenticationPolicy';
+import { HarmonyTelemetry } from '../telemetry/Telemetry';
+import { TelemetryPolicy } from '../telemetry/TelemetryPolicy';
+import { NoticeItem, NoticePolicy } from '../notices/NoticePolicy';
+
+/** `{root}` for the list, `{root, id, mirror}` for an install, `{root, id}` for a removal, `{id}` for a cancel. */
+interface LocalVoiceModelRequest {
+  root?: string;
+  id?: string;
+  mirror?: string;
+}
 
 /** One key-feedback operation from the page: load, save or preview. */
 interface KeyboardFeedbackAction {
@@ -54,6 +73,11 @@ interface KeyboardFeedbackReply {
 interface CustomTranslationAction {
   operation: string;
   text?: string;
+}
+
+interface ExportSaveRequest {
+  name: string;
+  contents: string;
 }
 
 interface TextReply {
@@ -112,6 +136,14 @@ interface VoiceCaptureDeviceReply {
 
 const BRIDGE_NAME: string = 'msimeHarmony';
 const PLATFORM: string = 'harmony';
+
+/** `{directory, platform, channel}` for `client.notices`; `{directory, id}` for `client.noticeDismiss`. */
+interface NoticesRequest {
+  directory: string;
+  platform?: string;
+  channel?: string;
+  id?: string;
+}
 
 /** One AI skin request from the page: start a run, or stop the one under that id. */
 interface AiSkinAction {
@@ -197,6 +229,49 @@ interface TypingStatisticsAction {
   operation: string;
   enabled?: boolean;
   retention?: string;
+  day?: string;
+}
+
+/** One 插件 page request; only the operation is read here, the rest travels to `msime_client_plugins` as the page wrote it. */
+interface PluginPageAction {
+  operation: string;
+}
+
+/** The page's import request: which picker to show. */
+interface PluginImportRequest {
+  source: string;
+}
+
+/** `msime_client_plugins`'s import action, naming the staged copy of what was picked. */
+interface PluginImportAction {
+  operation: string;
+  source: string;
+}
+
+interface PluginImportCall {
+  state_root: string;
+  sound_packs: string;
+  action: PluginImportAction;
+}
+
+/** 背单词 request, as `msime_client_vocabulary_review` reads it. */
+interface VocabularyRequest {
+  directory: string;
+  day: string;
+  action: VocabularyAction;
+  /** 插件目录：其中的单词本插件列进书目。只在声明了 `wordbook_packs` 的形态（2in1）上传，手机不传。 */
+  plugins?: string;
+}
+
+interface VocabularyAction {
+  operation: string;
+  word?: string;
+  known?: boolean;
+  wordbook?: string;
+  new_per_day?: number;
+  session_limit?: number;
+  name?: string;
+  text?: string;
 }
 
 interface TypingStatisticsDocument {
@@ -416,6 +491,12 @@ struct Settings {
   private controller: web_webview.WebviewController = new web_webview.WebviewController();
   private context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
   private bridge: SettingsBridge = new SettingsBridge();
+  // Notices from the MSIME service that the user has not dismissed, newest first; the card shows the first.
+  @State notices: NoticeItem[] = [];
+  private noticeController: web_webview.WebviewController = new web_webview.WebviewController();
+  private noticeAttached: boolean = false;
+  // The notice whose body the card's web view holds, so a refresh that changes nothing does not reload it.
+  private noticeShown: string = '';
 
   aboutToAppear(): void {
     this.bridge.attach(this.context);
@@ -423,7 +504,120 @@ struct Settings {
     // Started here rather than on demand: the page reads the answer synchronously, and the reply
     // carries whether it is ready so the page waits instead of acting on a default.
     this.bridge.prepareOnboarding();
-    EntryAbility.onActivated = (): void => this.bridge.refreshPreferencesIfChanged();
+    this.loadNotices();
+    EntryAbility.onActivated = (): void => {
+      this.bridge.refreshPreferencesIfChanged();
+      this.loadNotices();
+    };
+  }
+
+  /**
+   * Fetches the notices when the window opens or comes back to the front, never on a timer: client-core answers from its copy for a minute after a fetch, which is as often as the service wants to be asked.
+   */
+  private loadNotices(): void {
+    const request: NoticesRequest = {
+      directory: `${this.context.filesDir}/state/notices`, platform: PLATFORM, channel: 'app'
+    };
+    client.notices(JSON.stringify(request)).then((reply: string): void => {
+      this.notices = NoticePolicy.items(reply);
+      this.renderNotice();
+    }).catch((error: Error): void => {
+      KeyboardLog.error(`notices unavailable: ${describeError(error)}`);
+    });
+  }
+
+  private dismissNotice(id: string): void {
+    const request: NoticesRequest = { directory: `${this.context.filesDir}/state/notices`, id: id };
+    const reply: string = client.noticeDismiss(JSON.stringify(request));
+    if (!NoticePolicy.accepted(reply)) {
+      KeyboardLog.error(`notice dismissal not saved: ${reply}`);
+    }
+    this.notices = NoticePolicy.without(this.notices, id);
+    this.renderNotice();
+  }
+
+  /** Loads the first notice's body into the card, as base64 so no character in it is read as part of a data URL. */
+  private renderNotice(): void {
+    if (this.notices.length === 0) {
+      // The card and its web view leave the page; a later notice attaches a new one.
+      this.noticeAttached = false;
+      this.noticeShown = '';
+      return;
+    }
+    if (!this.noticeAttached || this.notices[0].id === this.noticeShown) {
+      return;
+    }
+    const notice: NoticeItem = this.notices[0];
+    try {
+      const bytes: Uint8Array = util.TextEncoder.create('utf-8').encodeInto(NoticePolicy.page(notice.html));
+      this.noticeController.loadData(new util.Base64Helper().encodeToStringSync(bytes), 'text/html', 'base64');
+      this.noticeShown = notice.id;
+    } catch (error) {
+      KeyboardLog.error(`notice not shown: ${describeError(error)}`);
+    }
+  }
+
+  /** A link in a notice opens in the system browser or mail application, never inside the card. */
+  private openNoticeLink(url: string): void {
+    const link: string | null = NoticePolicy.externalLink(url);
+    if (link === null) {
+      KeyboardLog.error('refused to open a notice link');
+      return;
+    }
+    const want: Want = { action: 'ohos.want.action.viewData', entities: ['entity.system.browsable'], uri: link };
+    this.context.startAbility(want).catch((error: Object): void => {
+      KeyboardLog.error(`notice link would not open: ${describeError(error)}`);
+    });
+  }
+
+  @Builder
+  noticeCard() {
+    Column() {
+      Row() {
+        Text(this.notices[0].title)
+          .fontSize(16)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('sys.color.ohos_id_color_text_primary'))
+          .layoutWeight(1)
+          .maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Button() {
+          Text('✕').fontSize(14).fontColor($r('sys.color.ohos_id_color_text_secondary'))
+        }
+        .type(ButtonType.Circle)
+        .width(32)
+        .height(32)
+        .backgroundColor(Color.Transparent)
+        .accessibilityText('关闭公告')
+        .onClick((): void => this.dismissNotice(this.notices[0].id))
+      }
+      .width('100%')
+      Web({ src: 'about:blank', controller: this.noticeController })
+        .javaScriptAccess(false)
+        .domStorageAccess(false)
+        .fileAccess(false)
+        .onlineImageAccess(false)
+        .backgroundColor(Color.Transparent)
+        .onControllerAttached((): void => {
+          this.noticeAttached = true;
+          this.noticeShown = '';
+          this.renderNotice();
+        })
+        .onLoadIntercept((event: OnLoadInterceptEvent): boolean => {
+          const url: string = event.data.getRequestUrl();
+          if (NoticePolicy.ownPage(url)) {
+            return false;
+          }
+          this.openNoticeLink(url);
+          return true;
+        })
+        .width('100%')
+        .height(96)
+    }
+    .padding({ left: 16, right: 8, top: 8, bottom: 8 })
+    .margin({ left: 12, right: 12, top: 8, bottom: 4 })
+    .borderRadius(16)
+    .backgroundColor($r('sys.color.ohos_id_color_card_bg'))
   }
 
   aboutToDisappear(): void {
@@ -434,6 +628,9 @@ struct Settings {
 
   build() {
     Column() {
+      if (this.notices.length > 0) {
+        this.noticeCard()
+      }
       Web({ src: $rawfile('settings/index.html'), controller: this.controller })
         .javaScriptAccess(true)
         .domStorageAccess(true)
@@ -449,17 +646,17 @@ struct Settings {
               ['loadPreferences', 'savePreferences', 'hostCapabilities', 'appVersion',
                 'scanSkinCatalog', 'readSkinImage', 'readSkinFont', 'readSkinToolbarCss',
                 'customSkinLibrary', 'dictionaryManifest', 'dictionary', 'cloudDictionaryDownload',
-                'typingStatistics', 'openExternalUrl', 'copyText',
+                'typingStatistics', 'vocabularyReview', 'openExternalUrl', 'copyText',
                 'openSystemKeyboardSettings', 'listVoiceCaptureDevices', 'listFontFamilies',
                 'keyboardFeedback', 'customTranslations', 'onboardingStatus',
-                'showInputMethodPicker', 'importSkinFolder', 'startRequest'],
+                'showInputMethodPicker', 'importSkinFolder', 'startRequest', 'plugins'],
               []);
           } catch (error) {
             KeyboardLog.error(`settings bridge not registered: ${describeError(error)}`);
           }
         })
         .width('100%')
-        .height('100%')
+        .layoutWeight(1)
     }
     .width('100%')
     .height('100%')
@@ -500,6 +697,8 @@ class SettingsBridge {
     // it too, and two staging rules for one directory is how it came to hold a set matching neither.
     StagedResources.stage(`${context.resourceDir}/engine`, `${context.filesDir}/engine`,
       `${context.filesDir}/engine.ready`);
+    // Here as well as in the keyboard, so the page offers Cantonese and Zhuyin (see hostCapabilities) before the keyboard has ever run.
+    StagedResources.stageLanguageDictionaries(context.resourceDir, context.filesDir);
   }
 
 
@@ -620,7 +819,7 @@ class SettingsBridge {
       if (fs.accessSync(destination)) {
         // Replacing rather than merging: a half-overwritten skin is a skin whose stylesheet and
         // assets come from two different versions, which the catalog would list and then draw wrong.
-        fs.rmdirSync(destination);
+        StagedResources.removeDirectory(destination);
       }
       fs.copyDirSync(picked[0], `${this.stateDirectory}/skins`, 1);
     } catch (error) {
@@ -683,11 +882,132 @@ class SettingsBridge {
       this.aiTest(payload).then(deliver).catch(failed);
     } else if (kind === 'api_credential') {
       this.testApiCredential(payload).then(deliver).catch(failed);
+    } else if (kind === 'voice_local_model') {
+      this.voiceLocalModel(payload).then(deliver).catch((error: Object): void => {
+        KeyboardLog.error(`local voice model request failed: ${describeError(error)}`);
+        deliver(LocalVoiceModelPolicy.refusal('local_model_failed'));
+      });
+    } else if (kind === 'plugin_import') {
+      this.importPlugin(payload).then(deliver).catch((error: Object): void => {
+        KeyboardLog.error(`plugin import failed: ${describeError(error)}`);
+        deliver(JSON.stringify({ ok: false, error: 'storage' }));
+      });
+    } else if (kind === 'save_export') {
+      this.saveExport(payload).then(deliver).catch((error: Object): void => {
+        KeyboardLog.error(`export save failed: ${describeError(error)}`);
+        deliver(JSON.stringify({ ok: false, error: 'export_unavailable' }));
+      });
     } else {
       KeyboardLog.error(`unknown bridge request: ${kind}`);
       this.deliverReply(id, JSON.stringify({ ok: false, error: 'unknown_request' }));
     }
     return JSON.stringify({ ok: true, value: '', error: '' } as TextReply);
+  }
+
+  /**
+   * Saves an exported dictionary where the user chooses, which is what the source's download link gets from WebView2.
+   *
+   * ArkWeb drops a blob download link unless a download delegate takes it, and a delegate would only save into the sandbox, where no file manager reaches. So the page hands the text over, it is staged privately, and the save picker decides where it goes, the same way the cloud dictionary export already works. The reply carries the saved file's name to show, or null when the user closed the picker, which is not a failure.
+   */
+  private async saveExport(document: string): Promise<string> {
+    let request: ExportSaveRequest;
+    try {
+      request = JSON.parse(document) as ExportSaveRequest;
+    } catch {
+      return JSON.stringify({ ok: false, error: 'export_invalid' });
+    }
+    const name: string | null = SkinImportPolicy.destinationName(request.name);
+    if (name === null || typeof request.contents !== 'string' || this.context === undefined) {
+      return JSON.stringify({ ok: false, error: 'export_invalid' });
+    }
+    const directory: string = `${this.stateDirectory}/dictionary-exports`;
+    const staging: string = `${directory}/${util.generateRandomUUID(false)}.txt`;
+    let destination: string = '';
+    try {
+      if (!fs.accessSync(directory)) {
+        fs.mkdirSync(directory, true);
+      }
+      const file: fs.File = fs.openSync(staging, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+      try {
+        fs.writeSync(file.fd, request.contents);
+      } finally {
+        fs.closeSync(file);
+      }
+      const options: picker.DocumentSaveOptions = new picker.DocumentSaveOptions();
+      options.newFileNames = [name];
+      const selected: string[] = await new picker.DocumentViewPicker(this.context).save(options);
+      if (selected.length === 0) {
+        return JSON.stringify({ ok: true, value: null, error: '' });
+      }
+      destination = selected[0];
+      fs.copyFileSync(staging, destination);
+      KeyboardLog.info('export saved');
+      // The picker answers with a provider URI, which means nothing to the user; the file's own name is what they will look for.
+      return JSON.stringify({ ok: true, value: SkinImportPolicy.pickedName(destination) ?? name, error: '' });
+    } catch (error) {
+      KeyboardLog.error(`export save failed: ${describeError(error)}`);
+      try {
+        if (destination.length > 0 && fs.accessSync(destination)) {
+          fs.unlinkSync(destination);
+        }
+      } catch {
+        // Reporting the failure matters more than a picker URI which has already disappeared.
+      }
+      return JSON.stringify({ ok: false, error: 'export_storage' });
+    } finally {
+      try {
+        if (fs.accessSync(staging)) {
+          fs.unlinkSync(staging);
+        }
+      } catch {
+        // A missing staging file is already the desired postcondition.
+      }
+    }
+  }
+
+  /**
+   * The on-device model manager: list, install, cancel and remove catalog models under `<filesDir>/voice-models`, the directory the keyboard's local recognizer loads `asr_model_path` from.
+   *
+   * Every operation goes through the asynchronous bridge because an install blocks for the whole download and runs on a native worker; the three short ones answer at once but share the route so the page has one shape to wait on. The install downloads through the mirror the saved preferences name, read at the moment it starts, which is what the page means by "save the settings first".
+   */
+  private async voiceLocalModel(document: string): Promise<string> {
+    const action: LocalVoiceModelAction | null = LocalVoiceModelPolicy.action(document);
+    if (action === null || this.context === undefined) {
+      return LocalVoiceModelPolicy.refusal('local_model_failed');
+    }
+    const root: string = LocalVoiceModelPolicy.root(this.context.filesDir);
+    const id: string = action.id ?? '';
+    if (action.operation === 'list') {
+      const request: LocalVoiceModelRequest = { root: root };
+      return LocalVoiceModelPolicy.listReply(client.voiceLocalModels(JSON.stringify(request)), root);
+    }
+    if (action.operation === 'cancel') {
+      const request: LocalVoiceModelRequest = { id: id };
+      return LocalVoiceModelPolicy.rewrite(client.voiceLocalModelCancel(JSON.stringify(request)));
+    }
+    if (action.operation === 'remove') {
+      const request: LocalVoiceModelRequest = { root: root, id: id };
+      return LocalVoiceModelPolicy.rewrite(client.voiceLocalModelRemove(JSON.stringify(request)));
+    }
+    if (!fs.accessSync(root)) {
+      fs.mkdirSync(root, true);
+    }
+    const mirror: string = LocalVoiceModelPolicy.mirror(client.loadPreferences(this.stateDirectory));
+    const request: LocalVoiceModelRequest = { root: root, id: id, mirror: mirror };
+    const reply: string = await client.voiceLocalModelInstall(JSON.stringify(request),
+      (progress: string): void => this.deliverVoiceModelProgress(progress));
+    return LocalVoiceModelPolicy.installReply(reply);
+  }
+
+  private deliverVoiceModelProgress(progress: string): void {
+    if (this.webview === undefined) return;
+    this.webview.runJavaScript(
+      `globalThis.msimeHarmonyVoiceModelProgress && globalThis.msimeHarmonyVoiceModelProgress(`
+      + `${JSON.stringify(progress)})`)
+      .catch((error: Object): void => {
+        // A progress tick that does not arrive costs the user a moving bar, not the download.
+        KeyboardLog.error(`voice model progress not delivered: ${describeError(error)}`);
+      });
   }
 
   /** Hands one reply back to the page, under the number it was asked with. */
@@ -701,6 +1021,135 @@ class SettingsBridge {
       .catch((error: Object): void => {
         KeyboardLog.error(`bridge reply not delivered: ${describeError(error)}`);
       });
+  }
+
+  /**
+   * The 插件 page's pack store and @ name list: `catalog`, `remove`, `load_mentions` and `save_mentions`, answered by `msime_client_plugins` with the same rules and failure codes the desktop shell answers with. The page never names a path: the state root and the bundle's built-in sound packs are filled in here, and an import, which has to wait for the system picker, arrives through `startRequest` as `plugin_import` instead.
+   */
+  plugins(actionDocument: string): string {
+    const refused: string = JSON.stringify({ ok: false, error: 'invalid' });
+    if (this.context === undefined) {
+      return refused;
+    }
+    let action: PluginPageAction;
+    try {
+      action = JSON.parse(actionDocument) as PluginPageAction;
+    } catch {
+      return refused;
+    }
+    if (!['catalog', 'remove', 'load_mentions', 'save_mentions'].includes(action.operation)) {
+      return refused;
+    }
+    return client.plugins(`{"state_root":${JSON.stringify(this.stateDirectory)},`
+      + `"sound_packs":${JSON.stringify(this.soundPacks())},"action":${actionDocument}}`);
+  }
+
+  /** The built-in sound packs this bundle ships, where the keyboard's players read them too. */
+  private soundPacks(): string {
+    return this.context === undefined ? '' : `${this.context.resourceDir}/sound-packs`;
+  }
+
+  /**
+   * Installs a pack folder or `.zip` file the user picks with the system picker.
+   *
+   * What the picker hands back is a document URI the native library cannot open, so the pick is copied into a private staging directory first, under a fixed name rather than the picked one, and installed from there by `msime_client_plugins` on a worker thread, which checks it by the same rules as every other host and leaves nothing installed when it refuses. The copy stops at client-core's bounds (`PluginImportPolicy`), so a wrong pick is refused before it is copied whole. The staging copy is removed however the import ends, after the worker has finished with it. The reply is the installed pack, or null when the user closed the picker, which is not a failure.
+   */
+  private async importPlugin(document: string): Promise<string> {
+    const context: common.UIAbilityContext | undefined = this.context;
+    let request: PluginImportRequest;
+    try {
+      request = JSON.parse(document) as PluginImportRequest;
+    } catch {
+      return JSON.stringify({ ok: false, error: 'invalid' });
+    }
+    if (context === undefined || (request.source !== 'folder' && request.source !== 'archive')) {
+      return JSON.stringify({ ok: false, error: 'invalid' });
+    }
+    const folder: boolean = request.source === 'folder';
+    let picked: string[] = [];
+    try {
+      const options: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
+      options.selectMode = folder ? picker.DocumentSelectMode.FOLDER : picker.DocumentSelectMode.FILE;
+      options.maxSelectNumber = 1;
+      if (!folder) {
+        options.fileSuffixFilters = ['插件|.zip'];
+      }
+      picked = await new picker.DocumentViewPicker(context).select(options);
+    } catch (error) {
+      KeyboardLog.error(`plugin picker refused: ${describeError(error)}`);
+      return JSON.stringify({ ok: false, error: 'storage' });
+    }
+    if (picked.length === 0) {
+      return JSON.stringify({ ok: true, value: null });
+    }
+    const staging: string = `${context.cacheDir}/plugin-import/${util.generateRandomUUID(false)}`;
+    try {
+      fs.mkdirSync(staging, true);
+      let source: string;
+      if (folder) {
+        source = `${staging}/${PluginImportPolicy.FOLDER_NAME}`;
+        const refusal: PluginImportRefusal | null =
+          await this.copyPluginFolder(new fileUri.FileUri(picked[0]).path, source);
+        if (refusal !== null) {
+          return JSON.stringify(refusal);
+        }
+      } else {
+        source = `${staging}/${PluginImportPolicy.ARCHIVE_NAME}`;
+        const file: fs.File = fs.openSync(picked[0], fs.OpenMode.READ_ONLY);
+        try {
+          const refusal: PluginImportRefusal | null = PluginImportPolicy.archive(fs.statSync(file.fd).size);
+          if (refusal !== null) {
+            return JSON.stringify(refusal);
+          }
+          await fs.copyFile(file.fd, source);
+        } finally {
+          fs.closeSync(file);
+        }
+      }
+      const action: PluginImportAction = { operation: 'import', source: source };
+      const call: PluginImportCall = {
+        state_root: this.stateDirectory, sound_packs: this.soundPacks(), action: action
+      };
+      const reply: string = await client.pluginsAsync(JSON.stringify(call));
+      KeyboardLog.info('plugin import answered');
+      return reply;
+    } catch (error) {
+      KeyboardLog.error(`plugin import failed: ${describeError(error)}`);
+      return JSON.stringify({ ok: false, error: 'storage' });
+    } finally {
+      try {
+        if (fs.accessSync(staging)) {
+          fs.rmdirSync(staging);
+        }
+      } catch (error) {
+        KeyboardLog.error(`plugin import staging not removed: ${describeError(error)}`);
+      }
+    }
+  }
+
+  /**
+   * Copy the top level of a picked pack folder to `destination`, or answer why it cannot be a pack without copying anything. Every entry is looked at before the first byte is copied, and the look stops at the first entry that rules the folder out: a subfolder, a link, or more files or bytes than any pack may hold.
+   */
+  private async copyPluginFolder(picked: string, destination: string): Promise<PluginImportRefusal | null> {
+    const scan: PluginFolderScan = new PluginFolderScan();
+    for (const name of fs.listFileSync(picked)) {
+      if (PluginImportPolicy.hidden(name)) {
+        continue;
+      }
+      const stat: fs.Stat = fs.lstatSync(`${picked}/${name}`);
+      const kind: PickedEntryKind = stat.isSymbolicLink() ? PickedEntryKind.LINK
+        : stat.isDirectory() ? PickedEntryKind.DIRECTORY
+        : stat.isFile() ? PickedEntryKind.FILE : PickedEntryKind.OTHER;
+      const refusal: PluginImportRefusal | null = scan.take(name, kind, stat.size);
+      if (refusal !== null) {
+        return refusal;
+      }
+    }
+    fs.mkdirSync(destination);
+    for (const name of scan.files) {
+      await fs.copyFile(`${picked}/${name}`, `${destination}/${name}`);
+    }
+    return null;
   }
 
   /** The shared settings page uses the same validated catalog as desktop presenters. */
@@ -932,6 +1381,10 @@ class SettingsBridge {
   savePreferences(expectedRevision: number, document: string): string {
     const reply: string = client.savePreferences(this.stateDirectory, expectedRevision, document);
     this.rememberRevision(reply);
+    // Turning usage reporting off drops what is queued at once rather than at the next start; the keyboard's running session goes with it.
+    if (TelemetryPolicy.reportingTurnedOff(document, reply)) {
+      HarmonyTelemetry.reportingTurnedOff(this.stateDirectory);
+    }
     return PreferencesErrorCode.rewrite(reply);
   }
 
@@ -943,6 +1396,13 @@ class SettingsBridge {
    * it the feedback page names the platform and quotes the web view's user agent, which identifies
    * the browser engine rather than the system a report would have to be reproduced on.
    */
+  /** Whether an input scheme's dictionary, if it needs one, is in the staged language-dictionaries directory. */
+  private languageDictionaryInstalled(scheme: string): boolean {
+    const file: string | null = KeyboardScheme.languageDictionary(scheme);
+    return file === null
+      || (this.context !== undefined && fs.accessSync(`${this.context.filesDir}/language-dictionaries/${file}`));
+  }
+
   hostCapabilities(): string {
     const document: string = client.hostCapabilities(PLATFORM);
     const release: string | null = OsVersionPolicy.release(deviceInfo.osFullName);
@@ -962,13 +1422,33 @@ class SettingsBridge {
       value['floating_toolbar'] = projection.floatingToolbar;
       value['floating_toolbar_appearance'] = projection.floatingToolbarAppearance;
       value['floating_toolbar_components'] = projection.floatingToolbarComponents;
+      value['floating_toolbar_handwriting'] = projection.floatingToolbarHandwriting;
+      value['floating_toolbar_voice'] = projection.floatingToolbarVoice;
       value['mode_switch_shortcuts'] = projection.modeSwitchShortcuts;
       value['panel_shortcuts'] = projection.panelShortcuts;
       value['number_row_selection'] = projection.numberRowSelection;
+      value['voice_hotkeys'] = projection.voiceHotkeys;
+      if (projection.fixedCandidateLayout !== null) {
+        value['fixed_candidate_layout'] = projection.fixedCandidateLayout;
+      }
       value['candidate_follow_cursor'] = projection.candidateFollowCursor;
+      value['candidate_window_opacity'] = projection.candidateWindowOpacity;
+      value['candidate_corner_radius'] = projection.candidateCornerRadius;
       value['input_mode_hud'] = projection.inputModeHud;
+      value['key_sound'] = projection.keySound;
+      value['music'] = projection.music;
+      value['plugin_triggers'] = projection.pluginTriggers;
+      value['typing_effects'] = projection.typingEffects;
+      value['wordbook_packs'] = projection.wordbookPacks;
+      value['symbol_set_packs'] = projection.symbolSetPacks;
       if (release !== null) {
         value['os_version'] = release;
+      }
+      // Cantonese and Zhuyin are offered only with their dictionary installed, as the desktop app's `drop_uninstalled_language_schemes` does; the keyboard leaves such a scheme out of its picker by the same rule.
+      const schemes: Object | undefined = value['input_schemes'];
+      if (Array.isArray(schemes)) {
+        value['input_schemes'] = (schemes as string[]).filter((scheme: string): boolean =>
+          this.languageDictionaryInstalled(scheme));
       }
       return JSON.stringify(reply);
     } catch (error) {
@@ -1069,6 +1549,45 @@ class SettingsBridge {
     return this.accountBridge.snapshot(action, `${this.context.filesDir}/engine`, this.stateDirectory);
   }
 
+  /**
+   * 背单词: forward one action to the shared review session.
+   *
+   * Synchronous, like `typingStatistics` beside it, because a bridge method must not return a
+   * Promise — the async channel never settles on this WebView, which is recorded twice in this
+   * file. An imported word list is a few hundred kilobytes, which the shared entry point reads in
+   * one call; the ceiling here is the envelope, not the file.
+   *
+   * The day is resolved here rather than in the page. This process is the one that knows the
+   * device's timezone, and the shared layer never derives a day from one.
+   */
+  vocabularyReview(actionDocument: string): string {
+    if (actionDocument.length === 0 || actionDocument.length > 8 * 1024 * 1024) {
+      return JSON.stringify({ ok: false, error: 'invalid vocabulary review request' });
+    }
+    try {
+      const action: VocabularyAction = JSON.parse(actionDocument) as VocabularyAction;
+      if (!['load', 'answer', 'set_settings', 'import', 'remove', 'reset'].includes(action.operation)) {
+        return JSON.stringify({ ok: false, error: 'invalid vocabulary review request' });
+      }
+      const now: Date = new Date();
+      const month: string = `${now.getMonth() + 1}`.padStart(2, '0');
+      const date: string = `${now.getDate()}`.padStart(2, '0');
+      const request: VocabularyRequest = {
+        directory: this.stateDirectory,
+        day: `${now.getFullYear()}-${month}-${date}`,
+        action: action,
+      };
+      // 与设置页拿到的 `wordbook_packs` 能力同一个来源：没有这项能力的形态不列单词本插件。
+      if (SettingsFormFactorCapabilities.resolve(deviceInfo.deviceType).wordbookPacks) {
+        request.plugins = `${this.stateDirectory}/plugins`;
+      }
+      return client.vocabularyReview(JSON.stringify(request));
+    } catch (error) {
+      KeyboardLog.error(`vocabulary review failed: ${describeError(error)}`);
+      return JSON.stringify({ ok: false, error: 'vocabulary review failed' });
+    }
+  }
+
   typingStatistics(actionDocument: string): string {
     if (actionDocument.length === 0 || actionDocument.length > 4096) {
       return JSON.stringify({ ok: false, error: 'invalid typing statistics request' });
@@ -1080,6 +1599,10 @@ class SettingsBridge {
         || (action.operation === 'set_retention'
           && !['forever', '30d', '90d', '180d', '365d'].includes(action.retention ?? ''))) {
         return JSON.stringify({ ok: false, error: 'invalid typing statistics request' });
+      }
+      // The store counts the retention window back from the caller's local day and refuses a set_retention without one. This process is the one that knows the device's timezone, as for vocabularyReview above.
+      if (action.operation === 'set_retention') {
+        action.day = TypingStatisticsPolicy.day(new Date());
       }
       const raw: string = client.typingStatistics(JSON.stringify({
         directory: this.stateDirectory, action: action
@@ -1123,7 +1646,7 @@ class SettingsBridge {
     const endpoint: string | null = AiModelCatalogPolicy.modelsUrl(request.endpoint);
     const token: string = request.token.trim();
     if (endpoint === null || token.length === 0 || utf8Length(token) > 16 * 1024
-      || this.hasControl(token)) {
+      || TextPolicy.hasControl(token)) {
       return JSON.stringify({ ok: false, error: 'ai_invalid' });
     }
     const anthropic: boolean = AiModelCatalogPolicy.isAnthropic(request.provider, endpoint);
@@ -1189,9 +1712,9 @@ class SettingsBridge {
     const token: string = request.token.trim();
     const model: string = request.model.trim();
     if (endpoint === null || token.length === 0 || utf8Length(token) > 16 * 1024
-      || this.hasControl(token) || model.length === 0 || utf8Length(model) > 256
-      || this.hasControl(model) || !this.validAiText(request.prompt, true)
-      || !this.validAiText(request.text, false)) {
+      || TextPolicy.hasControl(token) || model.length === 0 || utf8Length(model) > 256
+      || TextPolicy.hasControl(model) || !TextPolicy.validMultiline(request.prompt, 16 * 1024, true)
+      || !TextPolicy.validMultiline(request.text, 16 * 1024, false)) {
       return JSON.stringify({ ok: false, error: 'ai_invalid' });
     }
     const body: AiTestBody = {
@@ -1203,12 +1726,14 @@ class SettingsBridge {
         { role: 'user', content: request.text }
       ]
     };
+    // ArkTS has no object spread; headers() hands back a fresh record, so adding to it is safe.
+    const header: Record<string, string> = AiAuthenticationPolicy.headers(endpoint, token);
+    header['Content-Type'] = 'application/json';
     const httpRequest = http.createHttp();
     try {
       const response: http.HttpResponse = await httpRequest.request(endpoint, {
         method: http.RequestMethod.POST,
-        header: { Accept: 'application/json', 'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}` },
+        header: header,
         connectTimeout: 5000,
         readTimeout: 15000,
         extraData: JSON.stringify(body)
@@ -1219,7 +1744,7 @@ class SettingsBridge {
       }
       const document: AiCompletionDocument = JSON.parse(response.result) as AiCompletionDocument;
       const content: string | undefined = document.choices?.[0]?.message?.content;
-      if (content === undefined || !this.validAiText(content, false)) {
+      if (content === undefined || !TextPolicy.validMultiline(content, 16 * 1024, false)) {
         return JSON.stringify({ ok: false, error: 'ai_test_invalid' });
       }
       return JSON.stringify({ ok: true, value: content.trim() });
@@ -1418,7 +1943,7 @@ class SettingsBridge {
     const model: string = (config.model ?? '').trim();
     const provider: string = (config.provider ?? '').trim();
     if (endpoint === null || !this.validCredentialSecret(token, 8192) || model.length === 0
-      || utf8Length(model) > 256 || this.hasControl(model)
+      || utf8Length(model) > 256 || TextPolicy.hasControl(model)
       || !['openai', 'siliconflow', 'deepseek', 'groq'].includes(provider)) {
       return this.credentialReply(false, '请填写有效的 HTTPS 接口地址、API Key 和模型名。');
     }
@@ -1465,7 +1990,7 @@ class SettingsBridge {
     const model: string = (config.model ?? '').trim();
     if (!['openai', 'siliconflow', 'groq', 'everyapi', 'mistral'].includes(provider) || endpoint === null
       || !this.validCredentialSecret(token, 8192) || model.length === 0
-      || utf8Length(model) > 256 || this.hasControl(model)) {
+      || utf8Length(model) > 256 || TextPolicy.hasControl(model)) {
       return this.credentialReply(false, '请填写有效的 HTTPS 转写接口地址、API Key 和模型名。');
     }
     const boundary: string = '----MSIMEHarmonyCredentialProbe';
@@ -1509,7 +2034,7 @@ class SettingsBridge {
       || !this.validCredentialSecret(token, 8192)
       || (authMode === 'legacy' && !this.validCredentialSecret(appId, 8192))
       || !this.validCredentialSecret(resourceId, 256)
-      || utf8Length(boostingTableId) > 256 || this.hasControl(boostingTableId)) {
+      || utf8Length(boostingTableId) > 256 || TextPolicy.hasControl(boostingTableId)) {
       return this.credentialReply(false, '请填写有效的 WSS 接口、资源 ID 及对应鉴权方式的凭据。');
     }
     const requestId: string = util.generateRandomUUID(false);
@@ -1677,53 +2202,28 @@ class SettingsBridge {
 
   private validCredentialEndpoint(value: string, allowHttp: boolean): string | null {
     const endpoint: string = value.trim();
-    if (endpoint.length === 0 || utf8Length(endpoint) > 2048 || this.hasControl(endpoint)
-      || (!endpoint.startsWith('https://') && !(allowHttp && endpoint.startsWith('http://')))
-      || endpoint.includes('@') || endpoint.includes('#')) return null;
-    const authority: string = endpoint.substring(endpoint.indexOf('://') + 3).split('/')[0]
-      .split('?')[0];
-    return authority.length === 0 ? null : endpoint;
+    if (!TextPolicy.validSecureAuthority(endpoint, allowHttp)) return null;
+    return endpoint;
   }
 
   private validDoubaoEndpoint(value: string): string | null {
     const endpoint: string = value.trim();
-    if (endpoint.length === 0 || utf8Length(endpoint) > 2048 || this.hasControl(endpoint)
-      || !endpoint.startsWith('wss://') || endpoint.includes('@') || endpoint.includes('#')) {
+    if (!TextPolicy.validAuthority(endpoint, ['wss://'])) {
       return null;
     }
-    const authority: string = endpoint.substring(6).split('/')[0].split('?')[0];
-    return authority.length === 0 ? null : endpoint;
+    return endpoint;
   }
 
   private validCredentialSecret(value: string, maxBytes: number): boolean {
-    return value.length > 0 && utf8Length(value) <= maxBytes && !this.hasControl(value)
+    return value.length > 0 && utf8Length(value) <= maxBytes && !TextPolicy.hasControl(value)
       && !value.startsWith('<') && !value.startsWith('FAKESECRET_')
       && !Array.from(value).every((character: string): boolean => character === '*');
   }
 
   private validAiEndpoint(value: string): string | null {
     const endpoint: string = value.trim();
-    if (endpoint.length === 0 || utf8Length(endpoint) > 2048 || this.hasControl(endpoint)
-      || (!endpoint.startsWith('http://') && !endpoint.startsWith('https://'))
-      || endpoint.includes('@') || endpoint.includes('#')) return null;
-    const authority: string = endpoint.substring(endpoint.indexOf('://') + 3).split('/')[0]
-      .split('?')[0];
-    return authority.length === 0 ? null : endpoint;
-  }
-
-  private validAiText(value: string, allowEmpty: boolean): boolean {
-    return (allowEmpty || value.trim().length > 0) && utf8Length(value) <= 16 * 1024
-      && !value.includes('\u0000') && !Array.from(value).some((character: string): boolean => {
-        const code: number = character.codePointAt(0) ?? 0;
-        return code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d;
-      });
-  }
-
-  private hasControl(value: string): boolean {
-    return Array.from(value).some((character: string): boolean => {
-      const code: number = character.codePointAt(0) ?? 0;
-      return code <= 0x1f || (code >= 0x7f && code <= 0x9f);
-    });
+    if (!TextPolicy.validSecureAuthority(endpoint, true)) return null;
+    return endpoint;
   }
 
   appVersion(): string {

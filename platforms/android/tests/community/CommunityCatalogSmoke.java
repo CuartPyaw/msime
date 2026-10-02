@@ -1,0 +1,57 @@
+import app.msime.android.CommunityCatalog;
+import app.msime.android.CommunityRequest;
+import java.lang.reflect.Method;
+import java.util.UUID;
+
+public final class CommunityCatalogSmoke {
+    public static void main(String[] arguments) throws Exception {
+        // The JVM smokes run against android.jar, whose org.json classes are stubs that throw, so the policy is checked separately from parse.
+        Method invalid = CommunityCatalog.class.getDeclaredMethod("invalidPage", int.class, int.class, boolean.class);
+        invalid.setAccessible(true);
+        check(!(boolean) invalid.invoke(null, CommunityRequest.PAGE_SIZE, CommunityRequest.PAGE_SIZE, true), "a full page may have more results");
+        check((boolean) invalid.invoke(null, CommunityRequest.PAGE_SIZE + 1, CommunityRequest.PAGE_SIZE + 1, false), "a page larger than the shared limit must be rejected");
+        check((boolean) invalid.invoke(null, 0, 0, true), "an empty page with more results must be rejected");
+        check((boolean) invalid.invoke(null, 1, 0, true), "a page with only malformed rows must not retry the same offset");
+        check((boolean) invalid.invoke(null, 2, 1, true), "dropping any row must not shift the next offset");
+        check(!(boolean) invalid.invoke(null, 0, 0, false), "an empty final page must be accepted");
+        Method responseLimit = CommunityCatalog.class.getDeclaredMethod(
+            "maximumResponseBytes", CommunityRequest.Kind.class);
+        responseLimit.setAccessible(true);
+        check((int) responseLimit.invoke(null, CommunityRequest.Kind.SKIN) == 4 * 1024 * 1024,
+            "skin pages keep the ordinary response bound");
+        check((int) responseLimit.invoke(null, CommunityRequest.Kind.DICTIONARY) == 48 * 1024 * 1024,
+            "dictionary pages allow the shared resource response bound");
+        check((int) responseLimit.invoke(null, CommunityRequest.Kind.REPLY) == 48 * 1024 * 1024,
+            "reply pages allow the shared resource response bound");
+        Method validItem = CommunityCatalog.class.getDeclaredMethod(
+            "validItem", CommunityCatalog.Item.class, CommunityRequest.Kind.class);
+        validItem.setAccessible(true);
+        CommunityCatalog.Item malformed = new CommunityCatalog.Item(
+            "not-a-uuid", CommunityRequest.Kind.SKIN, "名称", "说明", "作者", 0, 0, 0, null,
+            CommunityRequest.Category.OTHER, false);
+        check(!(boolean) validItem.invoke(null, malformed, CommunityRequest.Kind.SKIN),
+            "malformed community items must be rejected");
+        CommunityCatalog.Item invalidRating = new CommunityCatalog.Item(
+            UUID.randomUUID().toString(), CommunityRequest.Kind.SKIN, "名称", "说明", "作者",
+            0, 0, 1, null, CommunityRequest.Category.OTHER, false);
+        check(!(boolean) validItem.invoke(null, invalidRating, CommunityRequest.Kind.SKIN),
+            "a rating average without ratings must be rejected");
+        // 分类只属于皮肤：皮肤条目必须有分类（缺失时已解析成 other），词库和回复条目不能有。
+        Method validCategory = CommunityCatalog.class.getDeclaredMethod(
+            "validCategory", CommunityRequest.Kind.class, CommunityRequest.Category.class);
+        validCategory.setAccessible(true);
+        check((boolean) validCategory.invoke(null, CommunityRequest.Kind.SKIN,
+            CommunityRequest.Category.GUOFENG), "a skin with a category is valid");
+        check(!(boolean) validCategory.invoke(null, CommunityRequest.Kind.SKIN, null),
+            "a skin whose category did not parse must be rejected");
+        check(!(boolean) validCategory.invoke(null, CommunityRequest.Kind.DICTIONARY,
+            CommunityRequest.Category.OTHER), "a dictionary carries no category");
+        check((boolean) validCategory.invoke(null, CommunityRequest.Kind.REPLY, null),
+            "a reply set without a category is valid");
+        System.out.println("Android community catalogue bounds passed");
+    }
+
+    private static void check(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}

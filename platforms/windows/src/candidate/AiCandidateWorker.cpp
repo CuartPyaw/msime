@@ -1,4 +1,5 @@
 #include "AiCandidateWorker.h"
+#include "CandidateHttpPolicy.h"
 
 #include "msime_client.h"
 
@@ -101,12 +102,20 @@ std::optional<std::string> ai_cache_key(const std::string &query) {
     if (!config.is_object() || !config.value("enabled", false) ||
         !segments.is_array() || segments.empty())
       return std::nullopt;
+    // The provider is asked for this many candidates. Keep it in the cache
+    // identity: reusing a three-candidate answer after the user raises the
+    // preference to ten would silently hide the newly requested rows.
+    const auto configured_limit = config.value("candidate_limit", 3);
+    const auto candidate_limit = configured_limit >= 1 && configured_limit <= 10
+                                     ? configured_limit
+                                     : 3;
     // Match the source worker's cache identity. Deliberately omit token,
     // prompt, context, session, and generation so no secrets are retained and
     // an unchanged prefix can be reused after a candidate refresh.
     return nlohmann::json{{"provider", config.value("provider", std::string{})},
                           {"endpoint", config.value("endpoint", std::string{})},
                           {"model", config.value("model", std::string{})},
+                          {"candidate_limit", candidate_limit},
                           {"pinyin_segments", segments}}
         .dump();
   } catch (...) {
@@ -120,9 +129,7 @@ std::optional<std::string> https_post(const nlohmann::json &descriptor,
     if (!descriptor.is_object() || !descriptor.at("url").is_string())
       return std::nullopt;
     const auto url = descriptor.at("url").get<std::string>();
-    if (url.size() > 2048 || url.rfind("https://", 0) != 0 ||
-        std::any_of(url.begin(), url.end(),
-                    [](unsigned char ch) { return ch < 32 || ch == 127; }))
+    if (!valid_candidate_url(url))
       return std::nullopt;
     const auto headers = descriptor.value("headers", nlohmann::json::object());
     if (!headers.is_object())
@@ -268,6 +275,7 @@ AiCandidateWorker::fetch(const std::string &query,
         !parsed.at("value").is_array())
       return {};
     std::vector<std::string> candidates;
+    candidates.reserve(limit);
     for (const auto &entry : parsed.at("value")) {
       if (!entry.is_string())
         continue;

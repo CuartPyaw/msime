@@ -3,19 +3,24 @@
 #include <cassert>
 
 @interface MSIMETranslationSettingsWindow (TestActions)
-- (void)save:(id)sender;
 - (void)reload:(id)sender;
 - (void)revealKey:(id)sender;
 - (void)revealTencentKey:(id)sender;
-- (void)updateControls:(id)sender;
+- (void)controlChanged:(id)sender;
 - (void)providerChanged:(id)sender;
 - (void)revealNiuTransKey:(id)sender;
+- (void)controlTextDidEndEditing:(NSNotification *)notification;
 @end
 static void Wait(MSIMETranslationSettingsWindow *window) {
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:3];
-    while ([[window valueForKey:@"busy"] boolValue] && deadline.timeIntervalSinceNow > 0)
+    while (([[window valueForKey:@"busy"] boolValue] || [[window valueForKey:@"saving"] boolValue]) && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
-    assert(![[window valueForKey:@"busy"] boolValue]);
+    assert(![[window valueForKey:@"busy"] boolValue] && ![[window valueForKey:@"saving"] boolValue]);
+}
+// A text field losing focus: whatever differs from what was last written is saved.
+static void Commit(MSIMETranslationSettingsWindow *window) {
+    [window controlTextDidEndEditing:[NSNotification notificationWithName:NSControlTextDidEndEditingNotification object:nil]];
+    Wait(window);
 }
 int main() {
     @autoreleasepool {
@@ -41,6 +46,16 @@ int main() {
         NSTextField *secretId = [window valueForKey:@"secretId"], *region = [window valueForKey:@"region"], *plainTencent = [window valueForKey:@"plainTencentKey"];
         NSSecureTextField *tencentKey = [window valueForKey:@"tencentKey"];
         assert([tencentKey isKindOfClass:NSSecureTextField.class] && !tencentKey.hidden && plainTencent.hidden);
+        // 新装默认选「水杉账号」（#2519）：腾讯云默认的 `enabled: true` 没有可用凭据，不算用户的选择，凭据行全部禁用。
+        assert(provider.indexOfSelectedItem == 3 && !tencent.enabled && !secretId.enabled && !tencentKey.enabled);
+        assert(tencent.state == NSControlStateValueOn && [region.stringValue isEqual:@"ap-guangzhou"]);
+        // 下面的流程从一份没有选过账号的已有配置开始，即升级上来的用户：文档里没有 `translation_account`，按未选择读，服务落在腾讯云。
+        NSMutableDictionary *existing = [initial mutableCopy], *existingPreferences = [initial[@"preferences"] mutableCopy];
+        [existingPreferences removeObjectForKey:@"translation_account"]; existing[@"preferences"] = existingPreferences;
+        assert([MSIMEClientSession savePreferencesInDirectory:root expectedRevision:[initial[@"revision"] unsignedLongLongValue] snapshot:existing error:&error] && !error);
+        initial = [MSIMEClientSession loadPreferencesInDirectory:root error:&error];
+        assert(initial && !error && ![initial[@"preferences"][@"translation_account"] boolValue]);
+        [window reload:nil]; Wait(window); assert(saves == 0);
         assert(tencent.state == NSControlStateValueOn && secretId.enabled && [region.stringValue isEqual:@"ap-guangzhou"]);
         secretId.stringValue = @"AKIDsynthetic"; tencentKey.stringValue = @"synthetic-tencent";
         assert([key isKindOfClass:NSSecureTextField.class] && !key.hidden && plain.hidden);
@@ -49,37 +64,43 @@ int main() {
         NSButton *revealNiuTrans = [window valueForKey:@"revealNiuTrans"];
         assert(target.numberOfItems == 7 && secondary.numberOfItems == 8 && secondary.indexOfSelectedItem == 0);
         assert(provider.indexOfSelectedItem == 0 && !endpoint.enabled);
-        assert(([provider.itemTitles isEqual:@[@"腾讯云", @"小牛翻译（NiuTrans）", @"自定义 DeepLX"]]));
+        assert(([provider.itemTitles isEqual:@[@"腾讯云", @"小牛翻译（NiuTrans）", @"自定义 DeepLX", @"水杉账号（发送到 api.msime.app）"]]));
         assert(offline.state == NSControlStateValueOff && offline.enabled);
         assert([grid rowAtIndex:5].hidden && ![grid rowAtIndex:8].hidden);
-        [provider selectItemAtIndex:1]; [window providerChanged:nil];
+        // A provider whose fields are incomplete is not written.
+        [provider selectItemAtIndex:1]; [window providerChanged:nil]; Wait(window); assert(saves == 0);
         assert(![grid rowAtIndex:11].hidden && ![grid rowAtIndex:12].hidden && appId.enabled && niuTransKey.enabled);
         appId.stringValue = @"synthetic-niutrans-app"; niuTransKey.stringValue = @"synthetic-niutrans-key";
-        appId.stringValue = @""; [window save:nil]; assert(saves == 0 && ![[window valueForKey:@"busy"] boolValue]);
+        appId.stringValue = @""; Commit(window); assert(saves == 0);
         appId.stringValue = @"synthetic-niutrans-app";
-        revealNiuTrans.state = NSControlStateValueOn; [window revealNiuTransKey:nil];
+        // Revealing a key ends the edit only after the text has moved, so the key is never saved empty.
+        revealNiuTrans.state = NSControlStateValueOn; [window revealNiuTransKey:nil]; Wait(window); assert(saves == 1);
         assert(niuTransKey.hidden && !plainNiuTrans.hidden && !niuTransKey.stringValue.length);
+        NSDictionary *stored = [MSIMEClientSession loadPreferencesInDirectory:root error:&error];
+        assert([stored[@"preferences"][@"niutrans"][@"enabled"] isEqual:@YES]);
+        assert([stored[@"preferences"][@"niutrans"][@"apikey"] isEqual:@"synthetic-niutrans-key"]);
+        assert([stored[@"preferences"][@"tencent_tmt"][@"secret_id"] isEqual:@"AKIDsynthetic"]);
         plainNiuTrans.stringValue = @"synthetic-niutrans-key-edited";
-        revealNiuTrans.state = NSControlStateValueOff; [window revealNiuTransKey:nil];
+        revealNiuTrans.state = NSControlStateValueOff; [window revealNiuTransKey:nil]; Wait(window); assert(saves == 2);
         assert([niuTransKey.stringValue isEqual:@"synthetic-niutrans-key-edited"] && !plainNiuTrans.stringValue.length);
-        [provider selectItemAtIndex:2]; [window providerChanged:nil];
+        [provider selectItemAtIndex:2]; [window providerChanged:nil]; Wait(window); assert(saves == 2);
         assert(![grid rowAtIndex:5].hidden && [grid rowAtIndex:8].hidden);
         assert(endpoint.enabled && key.enabled);
         assert(!tencent.enabled && !secretId.enabled && !tencentKey.enabled && !region.enabled);
         endpoint.stringValue = @"file:///synthetic";
-        [window save:nil];
-        assert(saves == 0 && ![[window valueForKey:@"busy"] boolValue]);
+        Commit(window);
+        assert(saves == 2);
         endpoint.stringValue = @"https://translation.invalid/api"; key.stringValue = @"synthetic";
         reveal.state = NSControlStateValueOn; [window revealKey:nil];
         assert(key.hidden && !plain.hidden && !key.stringValue.length && [plain.stringValue isEqual:@"synthetic"]);
+        // An edit made while a save is in flight is written once that save finishes.
         plain.stringValue = @"synthetic-edited";
         reveal.state = NSControlStateValueOff; [window revealKey:nil];
         assert([key.stringValue isEqual:@"synthetic-edited"] && !plain.stringValue.length);
-        [target selectItemAtIndex:1];
-        [secondary selectItemAtIndex:3];
-        [window save:nil]; Wait(window);
-        assert(saves == 1);
-        NSDictionary *stored = [MSIMEClientSession loadPreferencesInDirectory:root error:&error];
+        Wait(window); assert(saves == 4);
+        [target selectItemAtIndex:1]; [window controlChanged:target]; Wait(window); assert(saves == 5);
+        [secondary selectItemAtIndex:3]; [window controlChanged:secondary]; Wait(window); assert(saves == 6);
+        stored = [MSIMEClientSession loadPreferencesInDirectory:root error:&error];
         assert(stored && !error);
         assert([stored[@"preferences"][@"translation_target_language"] isEqual:@"fr"]);
         assert([stored[@"preferences"][@"translation_secondary_language"] isEqual:@"ja"]);
@@ -90,23 +111,26 @@ int main() {
         assert([stored[@"preferences"][@"niutrans"][@"apikey"] isEqual:@"synthetic-niutrans-key-edited"]);
         assert([stored[@"preferences"][@"tencent_tmt"][@"secret_key"] isEqual:@"synthetic-tencent"]);
         assert([stored[@"preferences"][@"cloud_candidates"] isEqual:initial[@"preferences"][@"cloud_candidates"]]);
-        // A different writer advances the revision; stale drafts cannot overwrite it.
+        // A different writer advances the revision; the edit is moved onto it and keeps what that writer stored.
         NSMutableDictionary *other = [stored mutableCopy], *otherPreferences = [stored[@"preferences"] mutableCopy];
         otherPreferences[@"candidate_page_size"] = @7; other[@"preferences"] = otherPreferences;
         assert([MSIMEClientSession savePreferencesInDirectory:root expectedRevision:[stored[@"revision"] unsignedLongLongValue] snapshot:other error:&error] && !error);
         endpoint.stringValue = @"https://changed.invalid/api";
-        [window save:nil]; Wait(window);
-        assert(saves == 1);
+        Commit(window);
+        assert(saves == 7);
+        stored = [MSIMEClientSession loadPreferencesInDirectory:root error:&error];
+        assert([stored[@"preferences"][@"candidate_page_size"] isEqual:@7]);
+        assert([stored[@"preferences"][@"custom_translation"][@"endpoint"] isEqual:@"https://changed.invalid/api"]);
         [window reload:nil]; Wait(window);
-        assert([endpoint.stringValue isEqual:@"https://translation.invalid/api"]);
+        assert([endpoint.stringValue isEqual:@"https://changed.invalid/api"]);
         assert(provider.indexOfSelectedItem == 2 && ![grid rowAtIndex:5].hidden && [grid rowAtIndex:8].hidden);
         assert(secondary.indexOfSelectedItem == 3);
         assert(offline.state == NSControlStateValueOff);
         enabled.state = NSControlStateValueOff; [provider selectItemAtIndex:0];
         [window providerChanged:nil]; assert(!target.enabled && !secondary.enabled && !endpoint.enabled);
-        offline.state = NSControlStateValueOn; [window updateControls:nil];
+        offline.state = NSControlStateValueOn; [window controlChanged:offline];
         assert(target.enabled && secondary.enabled);
-        [window save:nil]; Wait(window); assert(saves == 2);
+        Wait(window); assert(saves == 9);
         stored = [MSIMEClientSession loadPreferencesInDirectory:root error:&error];
         assert([stored[@"preferences"][@"candidate_page_size"] isEqual:@7]);
         assert([stored[@"preferences"][@"candidate_translations"] isEqual:@NO]);
@@ -114,57 +138,80 @@ int main() {
         assert([stored[@"preferences"][@"custom_translation"][@"enabled"] isEqual:@NO]);
         assert([stored[@"preferences"][@"custom_translation"][@"api_key"] isEqual:@"synthetic-edited"]);
         assert(tencent.enabled && secretId.enabled && tencentKey.enabled);
-        revealTencent.state = NSControlStateValueOn; [window revealTencentKey:nil];
+        revealTencent.state = NSControlStateValueOn; [window revealTencentKey:nil]; Wait(window); assert(saves == 9);
         assert(tencentKey.hidden && !plainTencent.hidden && !tencentKey.stringValue.length);
         assert([plainTencent.stringValue isEqual:@"synthetic-tencent"]);
-        [provider selectItemAtIndex:2]; [window providerChanged:nil];
+        [provider selectItemAtIndex:2]; [window providerChanged:nil]; Wait(window); assert(saves == 10);
         assert(revealTencent.state == NSControlStateValueOff && !plainTencent.stringValue.length);
         assert([tencentKey.stringValue isEqual:@"synthetic-tencent"] && ![grid rowAtIndex:5].hidden);
         reveal.state = NSControlStateValueOn; [window revealKey:nil];
-        [provider selectItemAtIndex:0]; [window providerChanged:nil];
+        [provider selectItemAtIndex:0]; [window providerChanged:nil]; Wait(window); assert(saves == 11);
         assert(reveal.state == NSControlStateValueOff && !plain.stringValue.length);
         assert([key.stringValue isEqual:@"synthetic-edited"] && [grid rowAtIndex:5].hidden);
-        [provider selectItemAtIndex:1]; [window providerChanged:nil];
+        [provider selectItemAtIndex:1]; [window providerChanged:nil]; Wait(window); assert(saves == 12);
         assert(appId.enabled && [appId.stringValue isEqual:@"synthetic-niutrans-app"]);
-        [window save:nil]; Wait(window); assert(saves == 3);
         stored = [MSIMEClientSession loadPreferencesInDirectory:root error:&error];
         assert([stored[@"preferences"][@"niutrans"][@"enabled"] isEqual:@YES]);
-        [provider selectItemAtIndex:0]; [window providerChanged:nil];
+        [provider selectItemAtIndex:0]; [window providerChanged:nil]; Wait(window); assert(saves == 13);
         revealTencent.state = NSControlStateValueOn; [window revealTencentKey:nil];
         plainTencent.stringValue = @"synthetic-tencent-edited"; region.stringValue = @"ap-shanghai";
-        [window save:nil]; Wait(window); assert(saves == 4);
+        Commit(window); assert(saves == 14);
         stored = [MSIMEClientSession loadPreferencesInDirectory:root error:&error];
         assert([stored[@"preferences"][@"tencent_tmt"][@"secret_key"] isEqual:@"synthetic-tencent-edited"]);
         assert([stored[@"preferences"][@"tencent_tmt"][@"region"] isEqual:@"ap-shanghai"]);
-        revealTencent.state = NSControlStateValueOff; [window revealTencentKey:nil];
+        revealTencent.state = NSControlStateValueOff; [window revealTencentKey:nil]; Wait(window); assert(saves == 14);
         assert(!plainTencent.stringValue.length && [tencentKey.stringValue isEqual:@"synthetic-tencent-edited"]);
         // Shared validation rejects malformed drafts without changing stored settings.
-        region.stringValue = @"invalid\nregion"; [window save:nil]; Wait(window); assert(saves == 4);
+        region.stringValue = @"invalid\nregion"; Commit(window); assert(saves == 14);
         assert([[MSIMEClientSession loadPreferencesInDirectory:root error:&error][@"revision"] isEqual:stored[@"revision"]]);
         [window reload:nil]; Wait(window);
         assert([region.stringValue isEqual:@"ap-shanghai"] && !tencentKey.hidden && plainTencent.hidden);
         assert(provider.indexOfSelectedItem == 0 && [grid rowAtIndex:5].hidden && ![grid rowAtIndex:8].hidden);
-        // A concurrent edit also protects Tencent drafts through the same CAS revision.
+        // A Tencent edit made over a concurrent write is moved onto it the same way.
         other = [stored mutableCopy]; otherPreferences = [stored[@"preferences"] mutableCopy];
         otherPreferences[@"candidate_page_size"] = @8; other[@"preferences"] = otherPreferences;
         assert([MSIMEClientSession savePreferencesInDirectory:root expectedRevision:[stored[@"revision"] unsignedLongLongValue] snapshot:other error:&error]);
-        secretId.stringValue = @"AKIDchanged"; [window save:nil]; Wait(window); assert(saves == 4);
-        [window reload:nil]; Wait(window); assert([secretId.stringValue isEqual:@"AKIDsynthetic"]);
-        tencent.state = NSControlStateValueOff; [window updateControls:nil];
+        secretId.stringValue = @"AKIDchanged"; Commit(window); assert(saves == 15);
+        [window reload:nil]; Wait(window); assert([secretId.stringValue isEqual:@"AKIDchanged"]);
+        tencent.state = NSControlStateValueOff; [window controlChanged:tencent];
         assert(!secretId.enabled && !tencentKey.enabled && !region.enabled);
-        [window save:nil]; Wait(window); assert(saves == 5);
+        Wait(window); assert(saves == 16);
         stored = [MSIMEClientSession loadPreferencesInDirectory:root error:&error];
         assert([stored[@"preferences"][@"tencent_tmt"][@"enabled"] isEqual:@NO]);
         assert([stored[@"preferences"][@"tencent_tmt"][@"secret_key"] isEqual:@"synthetic-tencent-edited"]);
         assert([stored[@"preferences"][@"candidate_page_size"] isEqual:@8]);
-        [secondary selectItemAtIndex:0]; [window save:nil]; Wait(window); assert(saves == 6);
+        [secondary selectItemAtIndex:0]; [window controlChanged:secondary]; Wait(window); assert(saves == 17);
         stored = [MSIMEClientSession loadPreferencesInDirectory:root error:&error];
         assert(!stored[@"preferences"][@"translation_secondary_language"]);
-        offline.state = NSControlStateValueOff; [window updateControls:nil];
+        offline.state = NSControlStateValueOff; [window controlChanged:offline];
         assert(!target.enabled && !secondary.enabled);
-        [window save:nil]; Wait(window); assert(saves == 7);
+        Wait(window); assert(saves == 18);
         stored = [MSIMEClientSession loadPreferencesInDirectory:root error:&error];
         assert([stored[@"preferences"][@"candidate_english_gloss"] isEqual:@NO]);
+        assert([stored[@"preferences"][@"translation_account"] isEqual:@NO]);
+        // The MSIME account is an explicit choice: it hides every credential row, and saving it turns Tencent off even if its checkbox was left on.
+        tencent.state = NSControlStateValueOn;
+        [provider selectItemAtIndex:3]; [window providerChanged:nil];
+        assert(!tencent.enabled && !secretId.enabled && !appId.enabled && !endpoint.enabled);
+        assert([grid rowAtIndex:5].hidden && [grid rowAtIndex:7].hidden && [grid rowAtIndex:8].hidden && [grid rowAtIndex:11].hidden);
+        Wait(window); assert(saves == 19);
+        stored = [MSIMEClientSession loadPreferencesInDirectory:root error:&error];
+        assert([stored[@"preferences"][@"translation_account"] isEqual:@YES]);
+        assert([stored[@"preferences"][@"tencent_tmt"][@"enabled"] isEqual:@NO]);
+        assert([stored[@"preferences"][@"tencent_tmt"][@"secret_key"] isEqual:@"synthetic-tencent-edited"]);
+        assert([stored[@"preferences"][@"niutrans"][@"enabled"] isEqual:@NO]);
+        assert([stored[@"preferences"][@"custom_translation"][@"enabled"] isEqual:@NO]);
+        [window reload:nil]; Wait(window);
+        assert(provider.indexOfSelectedItem == 3 && tencent.state == NSControlStateValueOff && !tencent.enabled);
+        // Any other choice drops the key, so the document goes back to what an older strict parser can read.
+        [provider selectItemAtIndex:0]; [window providerChanged:nil];
+        assert(tencent.enabled && ![grid rowAtIndex:8].hidden);
+        Wait(window); assert(saves == 20);
+        stored = [MSIMEClientSession loadPreferencesInDirectory:root error:&error];
+        assert([stored[@"preferences"][@"translation_account"] isEqual:@NO]);
+        [window reload:nil]; Wait(window); assert(provider.indexOfSelectedItem == 0);
+        // Controls that reflect what is stored write nothing.
+        Commit(window); [window controlChanged:enabled]; Wait(window); assert(saves == 20);
         [window.window.contentView layoutSubtreeIfNeeded];
         NSView *stack = window.window.contentView.subviews.firstObject;
         assert(NSMinY(stack.frame) >= 0 && NSMaxY(stack.frame) <= NSHeight(window.window.contentView.bounds));
@@ -174,12 +221,22 @@ int main() {
             assert(NSMinX(rect) >= 0 && NSMaxX(rect) <= NSWidth(window.window.contentView.bounds));
             assert(NSMinY(rect) >= 0 && NSMaxY(rect) <= NSHeight(window.window.contentView.bounds));
         }
+        // Closing the window writes an edit that never lost focus instead of discarding it.
+        region.stringValue = @"ap-beijing";
         [window close];
         assert(!key.stringValue.length && !plain.stringValue.length && ![window valueForKey:@"snapshot"]);
         assert(!secretId.stringValue.length && !tencentKey.stringValue.length && !plainTencent.stringValue.length);
         assert(!appId.stringValue.length && !niuTransKey.stringValue.length && !plainNiuTrans.stringValue.length);
+        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:3];
+        while (saves == 20 && deadline.timeIntervalSinceNow > 0)
+            [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+        assert(saves == 21);
+        stored = [MSIMEClientSession loadPreferencesInDirectory:root error:&error];
+        assert([stored[@"preferences"][@"tencent_tmt"][@"region"] isEqual:@"ap-beijing"]);
+        assert([stored[@"preferences"][@"tencent_tmt"][@"secret_id"] isEqual:@"AKIDchanged"]);
         [window showWindow:nil]; [window close];
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        assert(saves == 21);
         assert(!key.stringValue.length && ![window valueForKey:@"snapshot"]);
         assert(!secretId.stringValue.length && !tencentKey.stringValue.length && !plainTencent.stringValue.length);
         assert(!appId.stringValue.length && !niuTransKey.stringValue.length && !plainNiuTrans.stringValue.length);

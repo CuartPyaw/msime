@@ -49,9 +49,24 @@ def fetch(artifact: dict, destination: Path) -> None:
     # file where an installer would pick it up as finished.
     with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as staged:
         staged_path = Path(staged.name)
-        with urllib.request.urlopen(url) as response:
-            while block := response.read(CHUNK):
-                staged.write(block)
+        try:
+            with urllib.request.urlopen(url, timeout=300) as response:
+                advertised = response.headers.get("Content-Length")
+                if advertised is not None:
+                    try:
+                        if int(advertised) > artifact["size"]:
+                            raise SystemExit(f"{artifact['name']}: response is larger than the lock")
+                    except ValueError:
+                        pass
+                size = 0
+                while block := response.read(CHUNK):
+                    size += len(block)
+                    if size > artifact["size"]:
+                        raise SystemExit(f"{artifact['name']}: response is larger than the lock")
+                    staged.write(block)
+        except BaseException:
+            staged_path.unlink(missing_ok=True)
+            raise
     actual = digest(staged_path)
     size = staged_path.stat().st_size
     if actual != artifact["sha256"] or size != artifact["size"]:
@@ -67,7 +82,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     arguments = parser.parse_args()
-    lock = json.loads(LOCK.read_text())
+    lock = json.loads(LOCK.read_text(encoding="utf-8"))
     arguments.out.mkdir(parents=True, exist_ok=True)
     for artifact in lock["artifacts"]:
         destination = arguments.out / artifact["name"]

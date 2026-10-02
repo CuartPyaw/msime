@@ -5,6 +5,7 @@ import Darwin
 import Security
 import Tauri
 import UIKit
+import UniformTypeIdentifiers
 
 private struct SetAppIconArgs: Decodable {
   let style: String
@@ -213,7 +214,7 @@ private final class IOSVoiceTranscriptionService {
           components.user == nil, components.password == nil, components.fragment == nil else {
       return false
     }
-    if ["openai", "siliconflow", "groq"].contains(args.provider) {
+    if ["openai", "siliconflow", "groq", "everyapi", "mistral"].contains(args.provider) {
       return components.scheme?.lowercased() == "https" && !model.isEmpty &&
         args.headers.isEmpty && args.boostingTableId.isEmpty
     }
@@ -325,7 +326,7 @@ private final class IOSVoiceTranscriptionService {
       options: .notifyOthersOnDeactivation)
     guard let file = session.file else { return }
     session.file = nil
-    let audio = try? Data(contentsOf: file, options: .mappedIfSafe)
+    let audio = try? Self.readBoundedFile(file, maximumBytes: Self.maximumAudioBytes)
     try? FileManager.default.removeItem(at: file)
     guard let audio, audio.count >= 44, audio.count <= Self.maximumAudioBytes else {
       fail(session, code: "voice_recording")
@@ -349,6 +350,20 @@ private final class IOSVoiceTranscriptionService {
       case .failure(let failure):
         session.invoke.reject(failure.code, code: failure.code)
       }
+    }
+  }
+
+  private static func readBoundedFile(_ url: URL, maximumBytes: Int) throws -> Data {
+    let handle = try FileHandle(forReadingFrom: url)
+    defer { try? handle.close() }
+    var result = Data()
+    result.reserveCapacity(min(maximumBytes, 64 * 1024))
+    while true {
+      let remaining = maximumBytes - result.count
+      let chunk = try handle.read(upToCount: min(64 * 1024, remaining + 1)) ?? Data()
+      if chunk.isEmpty { return result }
+      guard chunk.count <= remaining else { throw VoicePluginFailure(code: "voice_recording") }
+      result.append(chunk)
     }
   }
 
@@ -458,7 +473,7 @@ private final class VoiceTextHandoffWriter {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
       attributes: [.posixPermissions: 0o700])
     let descriptor = open(directory.appendingPathComponent("transfer.lock").path,
-      O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+      O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, S_IRUSR | S_IWUSR)
     guard descriptor >= 0 else { throw NSError(domain: "voice_handoff", code: 3) }
     defer { close(descriptor) }
     guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
@@ -476,8 +491,12 @@ private struct SaveKeyboardPreferencesArgs: Decodable {
   let hapticsEnabled: Bool
   let hapticStrength: String
   let englishSuggestions: Bool
+  let candidatePaletteFollowsDesktop: Bool
+  let inlinePreedit: Bool
+  /// Absent unless the page offered the iPad switch, so a phone never writes it.
+  let tabletFullKeys: Bool?
   let dictionaryLearning: Bool
-  let keyboardSkin: String
+  let globalTheme: String
   let customKeyboardSkin: String?
 }
 
@@ -592,36 +611,22 @@ private struct IOSKeyboardPreferenceStore {
   static let maximumCustomSkinBytes = 800_000
   static let schemeOrder = [
     "quanpin", "nineKey", "shuangpin", "ziranma", "microsoft", "shoudao", "wubi",
-    "japaneseNineKey", "japanese", "handwriting", "thoughtfulReply",
+    "japaneseNineKey", "japanese", "korean", "handwriting", "thoughtfulReply",
+    "cantonese", "zhuyin", "vietnamese",
   ]
-  static let skinOrder = [
-    "forest", "ocean", "rose", "porcelain", "typewriter", "candy", "midnight",
-    "blueprint", "custom",
-  ]
+  /// Schemes a keyboard with no stored `enabledInputSchemes` leaves off, so adding them does not change existing keyboards; the user turns them on in settings.
+  static let optInSchemes: Set<String> = ["cantonese", "zhuyin", "vietnamese"]
+  /// The global theme ids (`GlobalTheme::ALL` in client-core), the only values `globalTheme` may hold.
+  static let themeOrder = ["system", "shuishan", "light", "paper", "night", "ink", "custom"]
   static let hapticStrengths = ["light", "medium", "strong"]
 
   private var defaults: UserDefaults {
     UserDefaults(suiteName: "group.app.msime.ios") ?? .standard
   }
 
-  private func migrateJapaneseSchemes() {
-    guard !defaults.bool(forKey: "japaneseSchemesSplit") else { return }
-    if var enabled = defaults.stringArray(forKey: "enabledInputSchemes"),
-       enabled.contains("japanese"), !enabled.contains("japaneseNineKey") {
-      enabled.append("japaneseNineKey")
-      defaults.set(enabled, forKey: "enabledInputSchemes")
-    }
-    if defaults.string(forKey: "chineseInputScheme") == "japanese",
-       !defaults.bool(forKey: "japaneseRomanKeys") {
-      defaults.set("japaneseNineKey", forKey: "chineseInputScheme")
-    }
-    defaults.set(true, forKey: "japaneseSchemesSplit")
-  }
-
   private func enabledSchemes() -> [String] {
-    migrateJapaneseSchemes()
     guard let stored = defaults.stringArray(forKey: "enabledInputSchemes") else {
-      return Self.schemeOrder
+      return Self.schemeOrder.filter { !Self.optInSchemes.contains($0) }
     }
     let enabled = Self.schemeOrder.filter(stored.contains)
     return enabled.isEmpty ? ["quanpin"] : enabled
@@ -629,8 +634,7 @@ private struct IOSKeyboardPreferenceStore {
 
   private func selectedScheme() -> String {
     let enabled = enabledSchemes()
-    let legacy = defaults.bool(forKey: "inputSchemeUsesShuangpin") ? "shuangpin" : "quanpin"
-    let selected = defaults.string(forKey: "chineseInputScheme") ?? legacy
+    let selected = defaults.string(forKey: "chineseInputScheme") ?? "quanpin"
     return enabled.contains(selected) ? selected : enabled[0]
   }
 
@@ -646,7 +650,7 @@ private struct IOSKeyboardPreferenceStore {
 
   func snapshot() -> [String: Any] {
     let strength = defaults.string(forKey: "keyboardHapticStrength") ?? "medium"
-    let skin = defaults.string(forKey: "keyboardSkin") ?? "forest"
+    let theme = defaults.string(forKey: "globalTheme") ?? "system"
     return [
       "inputScheme": selectedScheme(),
       "traditionalChineseOutput": defaults.bool(forKey: "chineseOutputUsesTraditional"),
@@ -654,8 +658,11 @@ private struct IOSKeyboardPreferenceStore {
       "hapticsEnabled": defaults.bool(forKey: "keyboardHapticsEnabled"),
       "hapticStrength": Self.hapticStrengths.contains(strength) ? strength : "medium",
       "englishSuggestions": defaults.object(forKey: "english.suggestions") as? Bool ?? true,
+      "candidatePaletteFollowsDesktop": defaults.bool(forKey: "candidate_palette_follows_desktop"),
+      "inlinePreedit": defaults.bool(forKey: "keyboard.inline_preedit"),
+      "tabletFullKeys": defaults.object(forKey: "keyboard.tablet.fullKeys") as? Bool ?? true,
       "dictionaryLearning": defaults.bool(forKey: "dictionaryLearningEnabled"),
-      "keyboardSkin": Self.skinOrder.contains(skin) ? skin : "forest",
+      "globalTheme": Self.themeOrder.contains(theme) ? theme : "system",
       "customKeyboardSkin": customSkinJSON() as Any? ?? NSNull(),
     ]
   }
@@ -663,7 +670,7 @@ private struct IOSKeyboardPreferenceStore {
   func save(_ args: SaveKeyboardPreferencesArgs) throws -> [String: Any] {
     guard Self.schemeOrder.contains(args.inputScheme),
           Self.hapticStrengths.contains(args.hapticStrength),
-          Self.skinOrder.contains(args.keyboardSkin) else {
+          Self.themeOrder.contains(args.globalTheme) else {
       throw NSError(domain: "keyboard_preferences", code: 1)
     }
     if let custom = args.customKeyboardSkin {
@@ -678,15 +685,16 @@ private struct IOSKeyboardPreferenceStore {
     let enabled = enabledSchemes()
     let selected = enabled.contains(args.inputScheme) ? args.inputScheme : enabled[0]
     defaults.set(selected, forKey: "chineseInputScheme")
-    defaults.set(["shuangpin", "ziranma", "microsoft", "shoudao"].contains(selected),
-                 forKey: "inputSchemeUsesShuangpin")
     defaults.set(args.traditionalChineseOutput, forKey: "chineseOutputUsesTraditional")
     defaults.set(args.soundEnabled, forKey: "keyboardSoundEnabled")
     defaults.set(args.hapticsEnabled, forKey: "keyboardHapticsEnabled")
     defaults.set(args.hapticStrength, forKey: "keyboardHapticStrength")
     defaults.set(args.englishSuggestions, forKey: "english.suggestions")
+    defaults.set(args.candidatePaletteFollowsDesktop, forKey: "candidate_palette_follows_desktop")
+    defaults.set(args.inlinePreedit, forKey: "keyboard.inline_preedit")
+    if let fullKeys = args.tabletFullKeys { defaults.set(fullKeys, forKey: "keyboard.tablet.fullKeys") }
     defaults.set(args.dictionaryLearning, forKey: "dictionaryLearningEnabled")
-    defaults.set(args.keyboardSkin, forKey: "keyboardSkin")
+    defaults.set(args.globalTheme, forKey: "globalTheme")
     if let custom = args.customKeyboardSkin {
       defaults.set(Data(custom.utf8), forKey: "customKeyboardSkin.v1")
     } else {
@@ -704,14 +712,6 @@ private struct AccountSessionKeychain {
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: "app.msime.backend.account",
       kSecAttrAccount as String: "https://api.msime.app",
-    ]
-  }
-
-  private var legacyQuery: [String: Any] {
-    [
-      kSecClass as String: kSecClassGenericPassword,
-      kSecAttrService as String: "app.msime.ios.community",
-      kSecAttrAccount as String: "api.msime.app",
     ]
   }
 
@@ -739,10 +739,7 @@ private struct AccountSessionKeychain {
   }
 
   func load() throws -> String? {
-    if let data = try loadData(query) {
-      return try decode(data)
-    }
-    guard let data = try loadData(legacyQuery) else {
+    guard let data = try loadData(query) else {
       return nil
     }
     return try decode(data)
@@ -764,18 +761,9 @@ private struct AccountSessionKeychain {
     guard status == errSecSuccess else {
       throw NSError(domain: "secure_storage", code: Int(status))
     }
-    try clearLegacy()
-  }
-
-  private func clearLegacy() throws {
-    let status = SecItemDelete(legacyQuery as CFDictionary)
-    guard status == errSecSuccess || status == errSecItemNotFound else {
-      throw NSError(domain: "secure_storage", code: Int(status))
-    }
   }
 
   func clear() throws {
-    try clearLegacy()
     let status = SecItemDelete(query as CFDictionary)
     guard status == errSecSuccess || status == errSecItemNotFound else {
       throw NSError(domain: "secure_storage", code: Int(status))
@@ -832,6 +820,34 @@ private final class AppleSignInCoordinator: NSObject, ASAuthorizationControllerD
   }
 }
 
+/// Keeps the folder picker's delegate alive while the invoke is pending. It reports the folder, or nil when the user dismissed the picker, exactly once, whichever way the sheet went away.
+private final class SkinFolderPickerCoordinator: NSObject, UIDocumentPickerDelegate,
+    UIAdaptivePresentationControllerDelegate {
+  private var finish: ((URL?) -> Void)?
+
+  init(finish: @escaping (URL?) -> Void) {
+    self.finish = finish
+  }
+
+  private func complete(_ url: URL?) {
+    let finish = self.finish
+    self.finish = nil
+    finish?(url)
+  }
+
+  func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+    complete(urls.first)
+  }
+
+  func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+    complete(nil)
+  }
+
+  func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+    complete(nil)
+  }
+}
+
 final class MobilePlatformPlugin: Plugin {
   private static let onboardingKey = "hasCompletedOnboarding"
   private let accountSession = AccountSessionKeychain()
@@ -840,7 +856,21 @@ final class MobilePlatformPlugin: Plugin {
   private let voiceHandoff = VoiceTextHandoffWriter()
   private let voiceTranscription = IOSVoiceTranscriptionService()
   private var appleSignIn: AppleSignInCoordinator?
+  private var skinFolderPicker: SkinFolderPickerCoordinator?
+  /// The picked folder while Rust copies it; security-scoped access is per process, so holding it here is what lets the copy read the folder.
+  private var skinFolderAccess: (url: URL, scoped: Bool)?
   private var previewFeedback: UIImpactFeedbackGenerator?
+
+  /// Only iPhones have the Taptic Engine keyboard feedback drives, so the settings page hides the vibration controls elsewhere, as the native settings app does; only iPads draw the full-width keyboard that carries the digit row and Tab key, so the switch is reported there alone. The idiom is read on the main thread, where UIKit answers it.
+  private func resolveKeyboardPreferences(_ invoke: Invoke, _ snapshot: [String: Any]) {
+    onMain {
+      var snapshot = snapshot
+      let idiom = UIDevice.current.userInterfaceIdiom
+      snapshot["hapticsAvailable"] = idiom == .phone
+      if idiom != .pad { snapshot.removeValue(forKey: "tabletFullKeys") }
+      invoke.resolve(snapshot)
+    }
+  }
 
   private func onMain(_ action: @escaping () -> Void) {
     if Thread.isMainThread {
@@ -1008,6 +1038,58 @@ final class MobilePlatformPlugin: Plugin {
     }
   }
 
+  /// Lets the user pick a skin folder in Files and hands its path to Rust, which copies it into the App Group skin folder. The folder stays readable until `endSkinFolderAccess`. Dismissing the picker resolves with no path: changing one's mind is not a failure.
+  @objc public func pickSkinFolder(_ invoke: Invoke) {
+    onMain { [weak self] in
+      guard let self else { return }
+      guard self.skinFolderPicker == nil, self.skinFolderAccess == nil else {
+        invoke.reject("busy", code: "busy")
+        return
+      }
+      var presenter = self.manager.viewController
+      while let presented = presenter?.presentedViewController {
+        presenter = presented
+      }
+      // The app itself targets iOS 16; the guard is for this package's older manifest floor.
+      guard let presenter, #available(iOS 14.0, *) else {
+        invoke.reject("skin_import", code: "skin_import")
+        return
+      }
+      let coordinator = SkinFolderPickerCoordinator { [weak self] url in
+        guard let self else { return }
+        self.skinFolderPicker = nil
+        guard let url else {
+          invoke.resolve(["path": NSNull()])
+          return
+        }
+        // A folder inside the app's own container is readable without a scope, and reports false here.
+        self.skinFolderAccess = (url, url.startAccessingSecurityScopedResource())
+        invoke.resolve(["path": url.path])
+      }
+      self.skinFolderPicker = coordinator
+      let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder])
+      picker.allowsMultipleSelection = false
+      picker.delegate = coordinator
+      picker.presentationController?.delegate = coordinator
+      presenter.present(picker, animated: true)
+    }
+  }
+
+  @objc public func endSkinFolderAccess(_ invoke: Invoke) {
+    onMain { [self] in
+      if let access = skinFolderAccess, access.scoped {
+        access.url.stopAccessingSecurityScopedResource()
+      }
+      skinFolderAccess = nil
+      invoke.resolve()
+    }
+  }
+
+  /// Installed UIKit families for the shared font picker; the Rust side sorts and bounds them.
+  @objc public func listFontFamilies(_ invoke: Invoke) {
+    invoke.resolve(["families": UIFont.familyNames])
+  }
+
   @objc public func copyText(_ invoke: Invoke) {
     let args: CopyTextArgs
     do {
@@ -1077,13 +1159,13 @@ final class MobilePlatformPlugin: Plugin {
   }
 
   @objc public func loadKeyboardPreferences(_ invoke: Invoke) {
-    invoke.resolve(keyboardPreferences.snapshot())
+    resolveKeyboardPreferences(invoke, keyboardPreferences.snapshot())
   }
 
   @objc public func saveKeyboardPreferences(_ invoke: Invoke) {
     do {
       let args = try invoke.parseArgs(SaveKeyboardPreferencesArgs.self)
-      invoke.resolve(try keyboardPreferences.save(args))
+      resolveKeyboardPreferences(invoke, try keyboardPreferences.save(args))
     } catch {
       invoke.reject("keyboard_preferences", code: "keyboard_preferences")
     }

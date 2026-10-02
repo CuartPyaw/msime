@@ -8,6 +8,15 @@ use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+/// The largest preference document accepted by the shared host boundary. This
+/// covers a validated custom skin photo while preventing a damaged local file
+/// from forcing an unbounded allocation during startup or recovery.
+const MAX_DOCUMENT_BYTES: u64 = 1024 * 1024;
+
+fn valid_font_family(value: &str) -> bool {
+    !value.is_empty() && crate::text::is_bounded_text(value, 128)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum InputScheme {
@@ -16,6 +25,14 @@ pub enum InputScheme {
     Shuangpin,
     Wubi,
     Japanese,
+    /// Korean Hangul on the Dubeolsik layout. The Engine ordinal is 4.
+    Korean,
+    /// Cantonese in toneless Jyutping, read from `cantonese.db`. A Chinese scheme. The Engine ordinal is 5.
+    Cantonese,
+    /// Bopomofo on the Dachen layout, read from `zhuyin.db`. A Chinese scheme. The Engine ordinal is 6.
+    Zhuyin,
+    /// Vietnamese through Telex or VNI, set in `vietnamese`. The Engine ordinal is 7.
+    Vietnamese,
 }
 
 /// Presentation layout for touch keyboard hosts. Desktop hosts preserve but ignore it.
@@ -26,22 +43,6 @@ pub enum TouchKeyboardLayout {
     TwentySixKey,
     NineKey,
     Handwriting,
-}
-
-/// Apple-compatible built-in visual styles for touch keyboard hosts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum TouchKeyboardSkin {
-    #[default]
-    Forest,
-    Ocean,
-    Rose,
-    Porcelain,
-    Typewriter,
-    Candy,
-    Midnight,
-    Blueprint,
-    Custom,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,7 +63,7 @@ pub enum TouchSkinKeyMaterial {
     Paper,
 }
 
-/// Apple-compatible current custom design. Named designs live in a separate bounded library.
+/// Apple-compatible keyboard editor design: the keyboard half of the custom theme. Named designs live in a separate bounded library.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct TouchKeyboardSkinDesign {
@@ -117,6 +118,25 @@ impl Default for TouchKeyboardSkinDesign {
 }
 
 impl TouchKeyboardSkinDesign {
+    /// 薄荷晨光: a clear mint gradient under rounded white keys with deep green text. The 水杉精选 design of the same name in the skin community, and the touch keyboards' default.
+    pub fn mint_morning() -> Self {
+        Self {
+            background: 0xD8F0E4,
+            key_background: 0xFAFFF9,
+            key_foreground: 0x173D30,
+            accent: 0x245A43,
+            action_background: 0x245A43,
+            corner_radius: 14.0,
+            border_width: 0.5,
+            shadow: 0.08,
+            pattern: 0,
+            monospaced: false,
+            gradient_end: Some(0xEEF6DD),
+            custom_border_color: Some(0xB6D8C5),
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn validate(&self) -> bool {
         let colors = [
             Some(self.background),
@@ -208,6 +228,111 @@ fn supported_skin_photo(bytes: &[u8]) -> bool {
         || (bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP")
 }
 
+/// What the `custom` global theme is made of. It is kept while another theme is selected, so switching back restores it.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CustomTheme {
+    /// The theme the custom theme is drawn over: `system` (the platform's own tokens) or one of the five built-in themes, never `custom`. It supplies the candidate colours the package and the pickers leave unset and, while there is no keyboard design, the keyboard. An applied package replaces it with the package's own manifest `base`.
+    #[serde(skip_serializing_if = "is_system_theme")]
+    pub base: crate::skin::theme::GlobalTheme,
+    /// The external candidate skin package (a folder name in the host's skin root) whose colours and decoration the custom theme uses. Never a global theme id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub candidate_skin: Option<String>,
+    /// The candidate colour pickers, drawn over the package's colours.
+    #[serde(skip_serializing_if = "CustomCandidateColors::is_empty")]
+    pub candidate_colors: CustomCandidateColors,
+    /// The keyboard editor design; community, saved and AI-generated keyboard skins are applied by writing it here. `None` until the user designs or applies one: the custom theme then draws the base theme's keyboard.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keyboard: Option<TouchKeyboardSkinDesign>,
+}
+
+fn is_system_theme(theme: &crate::skin::theme::GlobalTheme) -> bool {
+    *theme == crate::skin::theme::GlobalTheme::System
+}
+
+impl CustomTheme {
+    /// The same checks `Preferences::validate` applies to `custom_theme`, for hosts that receive a custom theme outside a preferences document.
+    pub fn validate(&self) -> Result<(), PreferencesError> {
+        if self.base == crate::skin::theme::GlobalTheme::Custom {
+            return Err(PreferencesError::InvalidCustomThemeBase);
+        }
+        if self
+            .keyboard
+            .as_ref()
+            .is_some_and(|design| !design.validate())
+        {
+            return Err(PreferencesError::InvalidTouchKeyboardSkinDesign);
+        }
+        let colors = &self.candidate_colors;
+        for (color, error) in [
+            (&colors.text, PreferencesError::InvalidCandidateTextColor),
+            (
+                &colors.number,
+                PreferencesError::InvalidCandidateNumberColor,
+            ),
+            (
+                &colors.accent,
+                PreferencesError::InvalidCandidateAccentColor,
+            ),
+            (
+                &colors.selected,
+                PreferencesError::InvalidCandidateSelectedColor,
+            ),
+            (&colors.hover, PreferencesError::InvalidCandidateHoverColor),
+            (
+                &colors.surface,
+                PreferencesError::InvalidCandidateSurfaceColor,
+            ),
+            (
+                &colors.border,
+                PreferencesError::InvalidCandidateBorderColor,
+            ),
+        ] {
+            if color
+                .as_deref()
+                .is_some_and(|color| !crate::is_hex_color(color, &[6]))
+            {
+                return Err(error);
+            }
+        }
+        // 与皮肤目录的文件夹名同一形状，但沿用较宽的 `is_selectable_id`：被 msime-windows 内置外观占用的旧皮肤名仍可保存，只是目录里找不到它。
+        if self
+            .candidate_skin
+            .as_deref()
+            .is_some_and(|skin| !crate::skin::catalog::is_selectable_id(skin))
+        {
+            return Err(PreferencesError::InvalidCandidateSkin);
+        }
+        Ok(())
+    }
+}
+
+/// The seven candidate colour pickers, each `#RRGGBB` or unset.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CustomCandidateColors {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub number: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selected: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hover: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub surface: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub border: Option<String>,
+}
+
+impl CustomCandidateColors {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// Stable Apple-compatible entries shown by touch-keyboard scheme pickers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -223,10 +348,18 @@ pub enum TouchKeyboardScheme {
     Japanese,
     Handwriting,
     ThoughtfulReply,
+    Korean,
+    /// 粤拼 26 键: toneless Jyutping on the pinyin 26-key letters (`InputScheme::Cantonese`).
+    Cantonese,
+    /// 大千注音: bopomofo on the four-row Dachen keyboard, each key sending its Dachen ASCII key (`InputScheme::Zhuyin`).
+    Zhuyin,
+    /// 越南语 26 键: Vietnamese on the Latin 26-key letters, composed by the method in `Preferences::vietnamese` (`InputScheme::Vietnamese`).
+    Vietnamese,
 }
 
 impl TouchKeyboardScheme {
-    pub const ALL: [Self; 11] = [
+    /// Every touch scheme in picker order. Schemes are appended, never reordered.
+    pub const ALL: [Self; 15] = [
         Self::Quanpin,
         Self::NineKey,
         Self::Xiaohe,
@@ -238,6 +371,26 @@ impl TouchKeyboardScheme {
         Self::Japanese,
         Self::Handwriting,
         Self::ThoughtfulReply,
+        Self::Korean,
+        Self::Cantonese,
+        Self::Zhuyin,
+        Self::Vietnamese,
+    ];
+
+    /// The schemes a keyboard shows before the user picks any: all but Cantonese, Zhuyin and Vietnamese, which the user turns on, as on macOS where their input modes start disabled. A document without `touch_keyboard_schemes` therefore keeps the keyboard it always had.
+    pub const DEFAULT_ENABLED: [Self; 12] = [
+        Self::Quanpin,
+        Self::NineKey,
+        Self::Xiaohe,
+        Self::Ziranma,
+        Self::Microsoft,
+        Self::Shoudao,
+        Self::Wubi,
+        Self::JapaneseNineKey,
+        Self::Japanese,
+        Self::Handwriting,
+        Self::ThoughtfulReply,
+        Self::Korean,
     ];
 }
 
@@ -251,7 +404,7 @@ pub struct TouchKeyboardSchemePreferences {
 }
 
 fn default_touch_keyboard_schemes() -> BTreeSet<TouchKeyboardScheme> {
-    TouchKeyboardScheme::ALL.into_iter().collect()
+    TouchKeyboardScheme::DEFAULT_ENABLED.into_iter().collect()
 }
 
 impl Default for TouchKeyboardSchemePreferences {
@@ -271,16 +424,24 @@ impl TouchKeyboardSchemePreferences {
 
 /// Which state a new focus session starts in.
 ///
-/// Chinese, because that is what this input method is for: opening in English means the first thing
-/// a new user does is find the switch. The macOS host already resolved anything but an explicit
-/// "english" to Chinese on its own, so this is the shared default agreeing with the one host that
-/// had already decided.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+/// Windows starts in English, as the source product does: its factory template (`installer/default_config/config.default.toml`, `[input] default_ime_mode = "english"`) is what a fresh reference install runs with, and `platforms/windows/installer/config.default.toml` ships the same, but the running host reads this document, so the effective first-run value on Windows was Chinese. Both the Server's mode authority and the TIP's own read go through this default when the document has no value yet.
+///
+/// The other hosts start in Chinese, because that is what this input method is for: opening in English means the first thing a new user does is find the switch. The macOS host already resolved anything but an explicit "english" to Chinese on its own. A stored value is untouched either way; this answers only for a document that does not have the key yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DefaultImeMode {
-    #[default]
     Chinese,
     English,
+}
+
+impl Default for DefaultImeMode {
+    fn default() -> Self {
+        if cfg!(windows) {
+            Self::English
+        } else {
+            Self::Chinese
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -297,6 +458,45 @@ pub enum ChineseScheme {
     Quanpin,
     Shuangpin,
     Wubi,
+    Cantonese,
+    Zhuyin,
+}
+
+impl From<ChineseScheme> for InputScheme {
+    fn from(scheme: ChineseScheme) -> Self {
+        match scheme {
+            ChineseScheme::Quanpin => Self::Quanpin,
+            ChineseScheme::Shuangpin => Self::Shuangpin,
+            ChineseScheme::Wubi => Self::Wubi,
+            ChineseScheme::Cantonese => Self::Cantonese,
+            ChineseScheme::Zhuyin => Self::Zhuyin,
+        }
+    }
+}
+
+/// How Vietnamese letters and tones are typed. The Engine code is the declaration order (`vietnamese_input_method`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum VietnameseInputMethod {
+    #[default]
+    Telex,
+    Vni,
+}
+
+/// Where the tone mark goes in an `oa`, `oe` or `uy` syllable: modern places it on the second vowel (hoà), classic on the first (hòa). The Engine code is the declaration order (`vietnamese_tone_style`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum VietnameseToneStyle {
+    #[default]
+    Modern,
+    Classic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct VietnamesePreferences {
+    pub input_method: VietnameseInputMethod,
+    pub tone_style: VietnameseToneStyle,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -332,6 +532,32 @@ pub enum CharacterWidthPreference {
     Fullwidth,
 }
 
+/// Candidate sentence-association sources. The dictionary lattice keeps its historical default; neural rerankers are opt-in because they add model work while typing or settling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SentenceAssociationPreferences {
+    #[serde(default = "enabled_by_default")]
+    pub word_lattice: bool,
+    /// Runs the desktop sentence model as the input runtime's settled reranker once typing pauses, when a host has installed it; the Engine never loads that model.
+    #[serde(default)]
+    pub neural_desktop: bool,
+    #[serde(default)]
+    pub neural_keyboard: bool,
+    #[serde(default)]
+    pub show_next_on_duplicate: bool,
+}
+
+impl Default for SentenceAssociationPreferences {
+    fn default() -> Self {
+        Self {
+            word_lattice: true,
+            neural_desktop: false,
+            neural_keyboard: false,
+            show_next_on_duplicate: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preferences {
@@ -343,6 +569,10 @@ pub struct Preferences {
     pub voice_input: VoiceInputPreferences,
     #[serde(default)]
     pub ai_assistant: AiAssistantPreferences,
+    /// Controls local whole-sentence candidate sources. Neural reranking remains opt-in until
+    /// its model is installed.
+    #[serde(default)]
+    pub sentence_association: SentenceAssociationPreferences,
     #[serde(default)]
     pub custom_translation: CustomTranslationPreferences,
     #[serde(default)]
@@ -373,29 +603,22 @@ pub struct Preferences {
     /// the one surface override the client was missing.
     #[serde(default)]
     pub menu_theme: SettingsTheme,
-    #[serde(default = "default_candidate_skin")]
-    pub candidate_skin: String,
+    /// The one theme that colours the candidate window, toolbar, menus and touch keyboard on every host. `theme` above stays the light/dark mode the `system` theme and the settings window follow.
+    #[serde(default)]
+    pub global_theme: crate::skin::theme::GlobalTheme,
+    #[serde(default)]
+    pub custom_theme: CustomTheme,
     #[serde(default)]
     pub candidate_layout: CandidateLayout,
     #[serde(default)]
     pub candidate_preedit_style: CandidatePreeditStyle,
+    /// Show the current/total page text in Linux candidate panels, independently of preedit.
+    #[serde(default = "enabled_by_default")]
+    pub show_candidate_page_number: bool,
     #[serde(default)]
     pub tsf_preedit_style: PreeditStyle,
     #[serde(default)]
     pub diagnostic_log: DiagnosticLogPreferences,
-    /// Accepted for compatibility, and deliberately not honoured.
-    ///
-    /// The reference offers Direct2D or WebView2 for the candidate window,
-    /// toolbar and tray menu because it carries both renderers. This client
-    /// draws those three natively with Direct2D and has no second renderer to
-    /// switch to, so no host reads this and no settings page offers it -
-    /// a control here would be a choice with one outcome.
-    ///
-    /// It cannot simply be deleted: `Preferences` denies unknown fields, so
-    /// dropping it would make every saved document that contains it fail to
-    /// parse.
-    #[serde(default)]
-    pub ui_backend: UiBackend,
     #[serde(default = "enabled_by_default")]
     pub candidate_follow_cursor: bool,
     /// macOS displays a short, non-activating badge after switching between
@@ -405,19 +628,13 @@ pub struct Preferences {
     pub input_mode_hud: bool,
     pub scheme: InputScheme,
     /// Show the Wubi code suffix that remains after the typed prefix.
-    /// `None` preserves the default-on behavior without rewriting legacy documents.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wubi_code_hint: Option<bool>,
+    #[serde(default = "enabled_by_default")]
+    pub wubi_code_hint: bool,
     /// Answer an unmatched Wubi code with candidates from the same Pinyin spelling.
     #[serde(default)]
     pub wubi_mixed_pinyin: bool,
     #[serde(default)]
     pub touch_keyboard_layout: TouchKeyboardLayout,
-    /// Touch-only keyboard appearance. Candidate-window skins remain independent.
-    #[serde(default)]
-    pub touch_keyboard_skin: TouchKeyboardSkin,
-    #[serde(default)]
-    pub custom_touch_keyboard_skin: TouchKeyboardSkinDesign,
     /// Touch-only picker visibility and optional host selection. Desktop hosts preserve but ignore it.
     #[serde(
         default,
@@ -436,13 +653,19 @@ pub struct Preferences {
     /// Show a direct voice-result entry in touch-keyboard toolbars.
     #[serde(default)]
     pub touch_voice_shortcut: bool,
-    /// Retained when the active scheme is Japanese. Absent in legacy documents.
+    /// The optional buttons on the touch keyboard's toolbar, the counterpart of the floating toolbar's component switches. The voice entry stays under `touch_voice_shortcut`.
+    #[serde(default)]
+    pub touch_toolbar: TouchToolbarPreferences,
+    /// Retained when the active scheme is Japanese, Korean or Vietnamese.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_chinese_scheme: Option<ChineseScheme>,
     #[serde(default)]
     pub shuangpin_profile: ShuangpinProfile,
     #[serde(default = "enabled_by_default")]
     pub shuangpin_preedit_uses_raw: bool,
+    /// The Vietnamese input method and tone placement.
+    #[serde(default)]
+    pub vietnamese: VietnamesePreferences,
     pub candidate_page_size: u8,
     /// Linux IBus can release the number row to the application while a
     /// candidate list is visible. Other hosts preserve this preference even
@@ -453,20 +676,15 @@ pub struct Preferences {
     pub candidate_font_size: u8,
     #[serde(default = "default_candidate_preedit_font_size")]
     pub candidate_preedit_font_size: u8,
+    /// Overall size of the floating candidate window, 50-200 percent. The host multiplies `candidate_font_size` and every piece of window geometry (paddings, row heights, header, arrows, insets, shadow) by it.
+    #[serde(default = "default_candidate_scale_percent")]
+    pub candidate_scale_percent: u16,
+    /// Opacity of the candidate card, 50-100 percent. It multiplies only the alpha of the card fill, its border and the skin background image; text, numbers and the selection highlight stay opaque.
+    #[serde(default = "default_candidate_opacity_percent")]
+    pub candidate_opacity_percent: u8,
+    /// Corner radius of the candidate card in points (DIP on Windows), 0-32. It wins over the skin package's `corner_radius_dip`, which wins over the host's own constant; absent means the host or skin decides. Row and selection radii become the smaller of the host's row radius and this.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub candidate_text_color: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub candidate_number_color: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub candidate_accent_color: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub candidate_selected_color: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub candidate_hover_color: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub candidate_surface_color: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub candidate_border_color: Option<String>,
+    pub candidate_corner_radius: Option<u8>,
     #[serde(default = "default_candidate_font_family")]
     pub candidate_font_family: String,
     /// Optional leading face for the Windows candidate glyph fallback chain.
@@ -476,12 +694,7 @@ pub struct Preferences {
     #[serde(default = "default_candidate_fallback_fonts")]
     pub candidate_fallback_fonts: Vec<String>,
     pub learning: bool,
-    #[serde(default = "enabled_by_default")]
-    /// Legacy all-types switch retained so older snapshots still parse. It no
-    /// longer enables either correction type; callers use the two `quanpin`
-    /// fields, matching the fixed Windows baseline.
-    pub autocorrect: bool,
-    #[serde(default, skip_serializing_if = "QuanpinPreferences::is_empty")]
+    #[serde(default)]
     pub quanpin: QuanpinPreferences,
     #[serde(default)]
     pub fuzzy_pinyin: FuzzyPinyinPreferences,
@@ -497,9 +710,7 @@ pub struct Preferences {
     pub smart_punctuation: bool,
     #[serde(default = "smart_punctuation_default")]
     pub smart_punctuation_repeat: bool,
-    /// Space after a just-committed Chinese punctuation rewrites it as ASCII.
-    /// Off by default, like the rest of the family on the Windows baseline:
-    /// it changes a character the user already saw land.
+    /// Space after a just-committed Chinese punctuation rewrites it as ASCII. Off by default on every host, like the rest of the family in the source: it changes a character the user already saw land.
     #[serde(default)]
     pub smart_punctuation_space_convert: bool,
     /// Keep `,` `.` `:` as ASCII when they follow a digit.
@@ -533,6 +744,9 @@ pub struct Preferences {
     pub mixed_input: MixedInputPreferences,
     #[serde(default)]
     pub local_modes: LocalModePreferences,
+    /// Sound packs, background music, achievements and the enabled command tables. Left out of the document while every part is at its default, so a build from before plugins still reads a document that never touched them; the packs themselves and the @ name list live under the plugins directory, not here.
+    #[serde(default, skip_serializing_if = "PluginPreferences::is_default")]
+    pub plugins: PluginPreferences,
     #[serde(default)]
     pub clipboard_history: bool,
     /// Fetch one additional candidate from the configured cloud provider.
@@ -549,10 +763,15 @@ pub struct Preferences {
     pub english_suggestions: bool,
     #[serde(default)]
     pub translation_target_language: TranslationTargetLanguage,
-    /// Optional second language for mobile candidate glosses. `None` preserves the
-    /// legacy single-language behavior and is omitted from serialized snapshots.
+    /// Optional second language for mobile candidate glosses. `None` shows a single language and is omitted from serialized snapshots.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub translation_secondary_language: Option<TranslationTargetLanguage>,
+    /// True when the MSIME account (水杉账号) is the candidate translation service; candidates are then sent to `https://api.msime.app/v1/translate`. Fresh macOS and Linux installs start with it chosen (see `Default`); a document without the field reads false.
+    #[serde(default)]
+    pub translation_account: bool,
+    /// Send anonymous usage reports (daily activity, session ends, crash summaries; see [`crate::telemetry`] and PRIVACY.md) to `https://api.msime.app/v1/telemetry/events`. On by default; turning it off stops all reporting and clears the local queue. A reader treats an absent key as on.
+    #[serde(default = "enabled_by_default")]
+    pub usage_reporting: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -565,7 +784,7 @@ pub struct VoiceInputPreferences {
     pub start_sound: bool,
     #[serde(default = "enabled_by_default")]
     pub end_sound: bool,
-    #[serde(default)]
+    #[serde(default = "source_voice_default")]
     pub mute_system_audio: bool,
     #[serde(default)]
     pub language: String,
@@ -580,10 +799,8 @@ pub struct VoiceInputPreferences {
     pub asr_provider: String,
     #[serde(default)]
     pub asr_app_key: String,
-    /// Doubao authentication mode (`api_key` or `legacy`). Empty preserves
-    /// compatibility with older files and lets each host infer the mode from
-    /// the stored App ID.
-    #[serde(default)]
+    /// Doubao authentication mode (`api_key` or `legacy`, the two console types Doubao offers). Empty means `api_key`.
+    #[serde(default = "default_doubao_auth_mode")]
     pub doubao_auth_mode: String,
     #[serde(default)]
     pub asr_token: String,
@@ -598,15 +815,17 @@ pub struct VoiceInputPreferences {
     pub asr_endpoint: String,
     #[serde(default)]
     pub asr_model: String,
-    /// Absolute path to a local Whisper model file. Only the `local` provider
-    /// reads it; nothing is uploaded and no endpoint or token applies.
+    /// Absolute path to the installed model directory the `local` provider runs (one containing `msime-model.json`, see `voice::local_models`). Nothing is uploaded and no endpoint or token applies. Only the path's shape is checked here, since the same document is read on every OS: any absolute form the host OS uses is accepted, and the recognizer finds its files only through `msime-model.json`, so a path without one is a missing model rather than an invalid document.
     #[serde(default)]
     pub asr_model_path: String,
+    /// Optional `https://` prefix placed in front of every local model download URL (ghproxy-style), for networks where GitHub release downloads are slow or blocked. Empty downloads from the catalog URLs as they are.
+    #[serde(default)]
+    pub asr_model_mirror: String,
     #[serde(default)]
     pub asr_resource_id: String,
     #[serde(default)]
     pub polish_enabled: bool,
-    #[serde(default)]
+    #[serde(default = "source_voice_default")]
     pub polish_text: bool,
     #[serde(default)]
     pub polish_provider: String,
@@ -621,8 +840,6 @@ pub struct VoiceInputPreferences {
     pub polish_model: String,
     #[serde(default)]
     pub polish_prompt_id: String,
-    #[serde(default)]
-    pub polish_prompt: String,
     /// Show streaming ASR updates in the host preedit while recording.
     #[serde(default = "enabled_by_default")]
     pub stream_inline_preedit: bool,
@@ -646,7 +863,7 @@ pub struct VoiceInputPreferences {
     pub doubao_enable_itn: bool,
     #[serde(default = "enabled_by_default")]
     pub doubao_enable_punc: bool,
-    #[serde(default)]
+    #[serde(default = "source_voice_default")]
     pub doubao_enable_ddc: bool,
     #[serde(default)]
     pub doubao_boosting_table_id: String,
@@ -654,34 +871,35 @@ pub struct VoiceInputPreferences {
 
 impl Default for VoiceInputPreferences {
     fn default() -> Self {
+        let polish = default_polish_service();
         Self {
             enabled: true,
             sound_enabled: true,
             start_sound: true,
             end_sound: true,
-            mute_system_audio: false,
+            mute_system_audio: source_voice_default(),
             language: "zh-cn".into(),
             capture_backend: String::new(),
             capture_device: String::new(),
             commit_mode: "tsf".into(),
             asr_provider: "doubao".into(),
             asr_app_key: String::new(),
-            doubao_auth_mode: "api_key".into(),
+            doubao_auth_mode: default_doubao_auth_mode(),
             asr_token: String::new(),
             asr_tokens: BTreeMap::new(),
             asr_endpoint: "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async".into(),
             asr_model: String::new(),
             asr_model_path: String::new(),
+            asr_model_mirror: String::new(),
             asr_resource_id: "volc.seedasr.sauc.duration".into(),
             polish_enabled: false,
-            polish_text: false,
-            polish_provider: "siliconflow".into(),
+            polish_text: source_voice_default(),
+            polish_provider: polish.provider.into(),
             polish_token: String::new(),
             polish_tokens: BTreeMap::new(),
-            polish_endpoint: "https://api.siliconflow.cn/v1/chat/completions".into(),
-            polish_model: "Qwen/Qwen3-8B".into(),
+            polish_endpoint: polish.endpoint.into(),
+            polish_model: polish.model.into(),
             polish_prompt_id: "cleanup".into(),
-            polish_prompt: String::new(),
             stream_inline_preedit: true,
             polish_prompt_custom_1: String::new(),
             polish_prompt_custom_2: String::new(),
@@ -693,7 +911,7 @@ impl Default for VoiceInputPreferences {
             hotkey_ctrl_f9: true,
             doubao_enable_itn: true,
             doubao_enable_punc: true,
-            doubao_enable_ddc: false,
+            doubao_enable_ddc: source_voice_default(),
             doubao_boosting_table_id: String::new(),
         }
     }
@@ -701,9 +919,11 @@ impl Default for VoiceInputPreferences {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AiAssistantPreferences {
-    #[serde(default)]
+    #[serde(default = "source_ai_default")]
     pub enabled: bool,
-    #[serde(default)]
+    /// A missing key falls back to the same provider as a missing section, so
+    /// a hand-edited `{"enabled": true}` still loads.
+    #[serde(default = "default_ai_provider")]
     pub provider: String,
     #[serde(default)]
     pub model: String,
@@ -717,8 +937,6 @@ pub struct AiAssistantPreferences {
     pub candidate_limit: u8,
     #[serde(default)]
     pub prompt_id: String,
-    #[serde(default)]
-    pub prompt: String,
     #[serde(default)]
     pub prompt_custom_1: String,
     #[serde(default)]
@@ -769,18 +987,27 @@ fn default_ai_candidate_limit() -> u8 {
     3
 }
 
+/// Kept equal to `AiAssistantPreferences::default().provider`.
+fn default_ai_provider() -> String {
+    "deepseek".into()
+}
+
 impl Default for AiAssistantPreferences {
     fn default() -> Self {
+        let (endpoint, model) = if source_ai_default() {
+            (SOURCE_DEEPSEEK_ENDPOINT, SOURCE_DEEPSEEK_MODEL)
+        } else {
+            ("", "")
+        };
         Self {
-            enabled: false,
+            enabled: source_ai_default(),
             provider: "deepseek".into(),
-            model: String::new(),
+            model: model.into(),
             token: String::new(),
             tokens: BTreeMap::new(),
-            endpoint: String::new(),
+            endpoint: endpoint.into(),
             candidate_limit: 3,
             prompt_id: "custom_1".into(),
-            prompt: String::new(),
             prompt_custom_1: String::new(),
             prompt_custom_2: String::new(),
             prompt_custom_3: String::new(),
@@ -807,6 +1034,9 @@ pub struct FloatingToolbarPreferences {
     pub enabled: bool,
     #[serde(default = "enabled_by_default")]
     pub english_mode: bool,
+    /// 切换输入方案的按钮：点开列出全拼、双拼、五笔、粤拼、注音等方案。默认开启——在 macOS 27 上粤、注这类菜单栏入口只能由用户自己去系统设置里添加，这个按钮让不加入口也能切换。目前只有 macOS 的工具栏画它（见 `HostCapabilities::floating_toolbar_input_scheme`）。
+    #[serde(default = "enabled_by_default")]
+    pub input_scheme: bool,
     #[serde(default = "default_toolbar_scale")]
     pub scale_percent: u16,
     #[serde(default = "default_toolbar_font_size")]
@@ -817,16 +1047,23 @@ pub struct FloatingToolbarPreferences {
     pub punctuation: bool,
     #[serde(default = "enabled_by_default")]
     pub character_set: bool,
-    #[serde(default = "enabled_by_default")]
+    /// Off by default, with `handwriting` and `voice`, so the toolbar a new profile gets is the
+    /// compact one. This is a deliberate reversal: these three defaulted on because they had been on
+    /// the toolbar since it shipped, and the switches appearing was not allowed to remove them. A
+    /// profile that never touched the switches therefore loses these buttons and turns back on the
+    /// ones it wants, which is the cost that was chosen over carrying the wider toolbar forever.
+    /// Windows is unaffected: its installer template sets every component explicitly, mirroring the
+    /// reference's own default config.
+    #[serde(default)]
     pub emoji: bool,
     /// The handwriting panel button. The reference's toolbar has no such button; this client's
-    /// macOS toolbar carries one, and until now it could not be turned off.
-    #[serde(default = "enabled_by_default")]
+    /// macOS toolbar carries one, and it is opt-in for the reason above.
+    #[serde(default)]
     pub handwriting: bool,
     #[serde(default)]
     pub screen_keyboard: bool,
     /// The voice input button, for the same reason as `handwriting`.
-    #[serde(default = "enabled_by_default")]
+    #[serde(default)]
     pub voice: bool,
     #[serde(default = "enabled_by_default")]
     pub settings: bool,
@@ -839,20 +1076,50 @@ fn default_toolbar_font_size() -> u16 {
     24
 }
 
+/// Which optional buttons the touch keyboard's toolbar carries. The first three are the buttons the bar always had; the rest are tools that otherwise sit one tap deeper, in the keyboard's 更多 panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TouchToolbarPreferences {
+    pub layout: bool,
+    pub emoji: bool,
+    pub skin: bool,
+    pub clipboard: bool,
+    pub ai: bool,
+    pub character_set: bool,
+    pub fullwidth: bool,
+    pub punctuation: bool,
+}
+
+impl Default for TouchToolbarPreferences {
+    fn default() -> Self {
+        Self {
+            layout: true,
+            emoji: true,
+            skin: true,
+            clipboard: false,
+            ai: false,
+            character_set: false,
+            fullwidth: false,
+            punctuation: false,
+        }
+    }
+}
+
 impl Default for FloatingToolbarPreferences {
     fn default() -> Self {
         Self {
             enabled: true,
             english_mode: true,
+            input_scheme: true,
             scale_percent: 100,
             font_size: 24,
             fullwidth: true,
             punctuation: true,
             character_set: true,
-            emoji: true,
-            handwriting: true,
+            emoji: false,
+            handwriting: false,
             screen_keyboard: false,
-            voice: true,
+            voice: false,
             settings: true,
         }
     }
@@ -901,21 +1168,6 @@ pub enum PreeditStyle {
     Empty,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum UiBackend {
-    /// `d2d` is what the Windows factory configuration writes and what the reference's own
-    /// `IsSupported` accepts, so the two halves of this product disagreed on the spelling of their
-    /// default: a document carrying it was rejected outright rather than read.
-    #[default]
-    #[serde(alias = "d2d")]
-    Direct2d,
-    /// The reference treats `webview` and `web` as the same choice, having written both at
-    /// different times. Reading them costs nothing and keeps a profile from resetting.
-    #[serde(alias = "webview", alias = "web")]
-    Webview2,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LocalModePreferences {
@@ -927,6 +1179,18 @@ pub struct LocalModePreferences {
     pub super_jianpin: bool,
     pub temporary_english: bool,
     pub temporary_japanese: bool,
+    /// `V` on an empty composition: calculator, Chinese numerals and dates. Off by default, because Shift+V otherwise types a capital V.
+    #[serde(default)]
+    pub expression: bool,
+    /// `/` on an empty composition: built-in and installed commands. Off by default, because `/` otherwise types a mark.
+    #[serde(default)]
+    pub command: bool,
+    /// `@` on an empty composition: the local mention list. Off by default, because `@` otherwise types itself.
+    #[serde(default)]
+    pub mention: bool,
+    /// The `@` mode also offers China's provinces, cities and counties from the Engine's built-in table, after the user's own names. Off by default, and only meaningful while `mention` is on.
+    #[serde(default)]
+    pub mention_places: bool,
 }
 
 impl Default for LocalModePreferences {
@@ -940,8 +1204,180 @@ impl Default for LocalModePreferences {
             super_jianpin: true,
             temporary_english: true,
             temporary_japanese: true,
+            expression: false,
+            command: false,
+            mention: false,
+            mention_places: false,
         }
     }
+}
+
+/// What the plugin packs do: which pack sounds and how loud, and which command tables the `/` mode reads. Everything is off in a fresh profile. Pack ids name a built-in pack or one installed under the plugins directory; a host that cannot find the named pack stays silent rather than falling back to another.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PluginPreferences {
+    pub key_sound: KeySoundPreferences,
+    pub commit_sound: CommitSoundPreferences,
+    pub melody: MelodyPreferences,
+    pub music: MusicPreferences,
+    pub achievements: AchievementPreferences,
+    /// Installed command-table packs the `/` mode reads, in priority order: the first pack that defines a trigger wins.
+    pub command_tables: Vec<String>,
+    /// The typing effect a host draws on keys and commits; `Off` draws nothing.
+    pub effect_style: crate::plugins::EffectStyle,
+    /// 0-100: how large and how long the effect is drawn. Only the host reads it.
+    pub effect_intensity: u8,
+    /// An installed effect pack whose style and parameters replace `effect_style` and `effect_intensity`; empty for none, which leaves those two in force. A selected pack that cannot be loaded draws no effect rather than falling back (`plugins::effect_pack::TypingEffect::resolve`). Left out of the document while empty, so a build from before effect packs still reads a document that never selected one.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub effect_pack: String,
+    /// Count consecutive keys and show the count; a pause of `plugins::COMBO_IDLE_RESET_MILLIS` or a backspace starts it again.
+    pub combo_counter: bool,
+    /// Play the key sound pack's commit sample, pitched up, when the count reaches one of `plugins::COMBO_MILESTONES`.
+    pub combo_tier_sound: bool,
+    /// K 模式读取的已安装短语表包，按优先级排列，最多 `MAX_PHRASE_TABLES` 个。为空时不写进文档，没有这个键的旧版本照样能读。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub phrase_tables: Vec<String>,
+    /// 全拼方案选用的已安装辅助码表包；为空表示沿用 `quanpin_helpcode.schema`；包载入失败时也回退到那个方案。为空时不写进文档。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub helpcode_pack_quanpin: String,
+    /// 双拼方案选用的已安装辅助码表包，规则同 `helpcode_pack_quanpin`。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub helpcode_pack_shuangpin: String,
+}
+
+impl Default for PluginPreferences {
+    fn default() -> Self {
+        Self {
+            key_sound: KeySoundPreferences::default(),
+            commit_sound: CommitSoundPreferences::default(),
+            melody: MelodyPreferences::default(),
+            music: MusicPreferences::default(),
+            achievements: AchievementPreferences::default(),
+            command_tables: Vec::new(),
+            effect_style: crate::plugins::EffectStyle::Off,
+            effect_intensity: 50,
+            effect_pack: String::new(),
+            combo_counter: false,
+            combo_tier_sound: false,
+            phrase_tables: Vec::new(),
+            helpcode_pack_quanpin: String::new(),
+            helpcode_pack_shuangpin: String::new(),
+        }
+    }
+}
+
+impl PluginPreferences {
+    /// Most command tables enabled at once.
+    pub const MAX_COMMAND_TABLES: usize = 16;
+    /// 同时启用的短语表包上限。
+    pub const MAX_PHRASE_TABLES: usize = 16;
+
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    fn validate(&self) -> bool {
+        let pack = |id: &str| id.is_empty() || crate::skin::catalog::safe_id(id);
+        pack(&self.key_sound.pack)
+            && pack(&self.melody.pack)
+            && pack(&self.music.pack)
+            && pack(&self.effect_pack)
+            && self.key_sound.volume <= 100
+            && self.music.volume <= 100
+            && self.effect_intensity <= 100
+            && self.command_tables.len() <= Self::MAX_COMMAND_TABLES
+            && self.command_tables.iter().enumerate().all(|(index, id)| {
+                crate::skin::catalog::safe_id(id) && !self.command_tables[..index].contains(id)
+            })
+            && pack(&self.helpcode_pack_quanpin)
+            && pack(&self.helpcode_pack_shuangpin)
+            && self.phrase_tables.len() <= Self::MAX_PHRASE_TABLES
+            && self.phrase_tables.iter().enumerate().all(|(index, id)| {
+                crate::skin::catalog::safe_id(id) && !self.phrase_tables[..index].contains(id)
+            })
+    }
+}
+
+/// What a key sounds like.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeySoundMode {
+    /// The sound pack's sample for the key's class.
+    #[default]
+    Keys,
+    /// The next note of the melody pack.
+    Melody,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct KeySoundPreferences {
+    pub enabled: bool,
+    pub mode: KeySoundMode,
+    /// The sound pack keys, commits and achievements are played from.
+    pub pack: String,
+    /// 0-100, for every effect sound: keys, the melody, commits and achievements.
+    pub volume: u8,
+}
+
+impl Default for KeySoundPreferences {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mode: KeySoundMode::Keys,
+            pack: crate::plugins::DEFAULT_SOUND_PACK.to_owned(),
+            volume: 50,
+        }
+    }
+}
+
+/// A sound when text is committed, from the key sound pack's `commit` sample. Independent of the key sound switch.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CommitSoundPreferences {
+    pub enabled: bool,
+}
+
+/// The sequence pack a key plays a note of when `key_sound.mode` is `melody`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MelodyPreferences {
+    pub pack: String,
+}
+
+impl Default for MelodyPreferences {
+    fn default() -> Self {
+        Self {
+            pack: crate::plugins::DEFAULT_MELODY_PACK.to_owned(),
+        }
+    }
+}
+
+/// Background music, streamed from an installed music pack while the input method is active. Off, and with no pack chosen, until the user picks one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MusicPreferences {
+    pub enabled: bool,
+    pub pack: String,
+    /// 0-100.
+    pub volume: u8,
+}
+
+impl Default for MusicPreferences {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            pack: String::new(),
+            volume: 30,
+        }
+    }
+}
+
+/// A short jingle, the key sound pack's `achievement` sample, when the commit count passes one of `plugins::ACHIEVEMENT_MILESTONES`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AchievementPreferences {
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -958,7 +1394,7 @@ impl Default for MixedInputPreferences {
         Self {
             english: true,
             minimum_prefix: 5,
-            emoji: false,
+            emoji: source_mixed_emoji_default(),
             kaomoji: false,
         }
     }
@@ -1091,21 +1527,61 @@ fn enabled_by_default() -> bool {
     true
 }
 
-/// Smart punctuation is off on a fresh Windows profile and on nowhere else.
+/// Smart punctuation is off on a fresh Windows or macOS profile.
 ///
-/// It rewrites a character the user already saw land, so the Windows baseline
-/// ships the whole family disabled and asks for it to be turned on
-/// deliberately - `platforms/windows/installer/config.default.toml` has every
-/// one of the five switches `false`. That file is the installed template; the
-/// running Server reads this document instead, so without this the effective
-/// first-run default on Windows was the opposite of the baseline it ships.
+/// It rewrites a character the user already saw land, so the source ships the whole family disabled and asks for it to be turned on deliberately - `platforms/windows/installer/config.default.toml` has every one of the five switches `false`. That file is only the installed template; the running host reads this document, so without this the effective first-run default would be the opposite of the baseline the source ships. macOS is the port of that desktop product and follows it.
 ///
-/// Only Windows moves. The other hosts have shipped these on and a preference
-/// that changes under existing users is worse than one that differs by
-/// platform; a stored value is untouched either way, since this answers only
-/// for a document that does not have the key yet.
+/// Linux, Android, iOS and HarmonyOS keep what they have shipped, since a preference that changes under existing users is worse than one that differs by platform. A stored value is never reinterpreted either way; this answers only for a document that does not have the key yet.
 fn smart_punctuation_default() -> bool {
-    !cfg!(windows)
+    !cfg!(any(windows, target_os = "macos"))
+}
+
+/// Three voice switches the source ships on and the shared document had off: muting other audio while recording, Doubao's semantic smoothing (DDC), and polishing the recognized text.
+///
+/// `platforms/windows/installer/config.default.toml` has all three `true`, matching the source's factory configuration, but like smart punctuation that file is only the installed template - the running host reads this document - so the effective first-run value on Windows was `false`. macOS is the port of that desktop product and follows it. None of the three depends on the platform: muting uses CoreAudio on macOS, DDC is a Doubao request flag, and polishing still needs a polish token before anything is sent.
+///
+/// The other hosts keep what they have shipped. A stored value is untouched either way; this answers only for a document that does not have the key yet.
+fn source_voice_default() -> bool {
+    cfg!(any(windows, target_os = "macos"))
+}
+
+/// The source's factory template turns the AI assistant on and points it at DeepSeek (`deepseek-v4-flash`); `platforms/windows/installer/config.default.toml` ships the same, but the running host reads this document, so the effective first-run value on Windows was off with no endpoint or model. macOS follows the desktop product it ports. Being on without a token sends nothing: `chat_completion_http_request` refuses to build a request until a usable key is set.
+///
+/// The other hosts keep the assistant off with an empty endpoint and model. A stored value is untouched either way; this answers only for a document that does not have the key yet.
+fn source_ai_default() -> bool {
+    cfg!(any(windows, target_os = "macos"))
+}
+
+const SOURCE_DEEPSEEK_ENDPOINT: &str = "https://api.deepseek.com/chat/completions";
+const SOURCE_DEEPSEEK_MODEL: &str = "deepseek-v4-flash";
+
+/// A polish provider with the endpoint and model that belong to it, kept together so a default never pairs one provider's URL with another's model.
+struct PolishService {
+    provider: &'static str,
+    endpoint: &'static str,
+    model: &'static str,
+}
+
+/// First-run polish service. The source template and the Windows installer template both ship DeepSeek (`deepseek-v4-flash`), and macOS follows the desktop product it ports; the other hosts keep SiliconFlow with `Qwen/Qwen3-8B`, which is what they have shipped. Stored values are never reinterpreted.
+fn default_polish_service() -> PolishService {
+    if source_voice_default() {
+        PolishService {
+            provider: "deepseek",
+            endpoint: SOURCE_DEEPSEEK_ENDPOINT,
+            model: SOURCE_DEEPSEEK_MODEL,
+        }
+    } else {
+        PolishService {
+            provider: "siliconflow",
+            endpoint: "https://api.siliconflow.cn/v1/chat/completions",
+            model: "Qwen/Qwen3-8B",
+        }
+    }
+}
+
+/// The source's `config.default.toml` ships `emoji_mixed_input = true`; Windows follows it, macOS follows the desktop product it ports, the other hosts keep `false`, and a stored value is untouched either way.
+fn source_mixed_emoji_default() -> bool {
+    cfg!(any(windows, target_os = "macos"))
 }
 
 fn default_candidate_font_size() -> u8 {
@@ -1116,6 +1592,14 @@ fn default_candidate_preedit_font_size() -> u8 {
     15
 }
 
+fn default_candidate_scale_percent() -> u16 {
+    100
+}
+
+fn default_candidate_opacity_percent() -> u8 {
+    100
+}
+
 fn default_touch_key_spacing_tenths() -> u8 {
     60
 }
@@ -1124,9 +1608,6 @@ fn default_touch_row_spacing_tenths() -> u8 {
     70
 }
 
-fn default_candidate_skin() -> String {
-    crate::skin::catalog::DEFAULT_SKIN.to_owned()
-}
 fn default_candidate_font_family() -> String {
     "Noto Sans SC".to_owned()
 }
@@ -1138,12 +1619,41 @@ fn default_commit_mode() -> String {
     "tsf".to_owned()
 }
 
+fn default_doubao_auth_mode() -> String {
+    "api_key".to_owned()
+}
+
+/// Builds for a touch keyboard: iOS, Android and HarmonyOS. The desktop hosts keep their own defaults.
+const TOUCH_KEYBOARD_BUILD: bool = cfg!(any(
+    target_os = "ios",
+    target_os = "android",
+    target_env = "ohos"
+));
+
+/// A new install on a touch keyboard starts on the custom theme drawn with 薄荷晨光, the keyboard skin the phones ship as their default; on the desktop it follows the system. A saved document always carries `global_theme`, so this only decides what a device that has never saved looks like, and what 恢复默认设置 returns to.
+fn default_global_theme() -> crate::skin::theme::GlobalTheme {
+    if TOUCH_KEYBOARD_BUILD {
+        crate::skin::theme::GlobalTheme::Custom
+    } else {
+        crate::skin::theme::GlobalTheme::default()
+    }
+}
+
+/// The custom theme a new install starts with: 薄荷晨光 on a touch keyboard over the system base, so the candidate colours still follow the platform; empty on the desktop.
+fn default_custom_theme() -> CustomTheme {
+    CustomTheme {
+        keyboard: TOUCH_KEYBOARD_BUILD.then(TouchKeyboardSkinDesign::mint_morning),
+        ..CustomTheme::default()
+    }
+}
+
 impl Default for Preferences {
     fn default() -> Self {
         Self {
             default_ime_mode: DefaultImeMode::default(),
             ime_mode_scope: ImeModeScope::default(),
             ai_assistant: AiAssistantPreferences::default(),
+            sentence_association: SentenceAssociationPreferences::default(),
             custom_translation: CustomTranslationPreferences::default(),
             tencent_tmt: TencentTmtPreferences::default(),
             niutrans: NiuTransPreferences::default(),
@@ -1159,44 +1669,40 @@ impl Default for Preferences {
             voice_theme: SettingsTheme::default(),
             emoji_theme: SettingsTheme::default(),
             menu_theme: SettingsTheme::default(),
-            candidate_skin: default_candidate_skin(),
+            global_theme: default_global_theme(),
+            custom_theme: default_custom_theme(),
             candidate_layout: CandidateLayout::default(),
             candidate_preedit_style: CandidatePreeditStyle::default(),
+            show_candidate_page_number: true,
             tsf_preedit_style: PreeditStyle::default(),
             diagnostic_log: DiagnosticLogPreferences::default(),
-            ui_backend: UiBackend::default(),
             candidate_follow_cursor: true,
             input_mode_hud: true,
             scheme: InputScheme::default(),
-            wubi_code_hint: None,
+            wubi_code_hint: true,
             wubi_mixed_pinyin: false,
             touch_keyboard_layout: TouchKeyboardLayout::default(),
-            touch_keyboard_skin: TouchKeyboardSkin::default(),
-            custom_touch_keyboard_skin: TouchKeyboardSkinDesign::default(),
             touch_keyboard_schemes: TouchKeyboardSchemePreferences::default(),
             touch_key_spacing_tenths: default_touch_key_spacing_tenths(),
             touch_row_spacing_tenths: default_touch_row_spacing_tenths(),
             touch_keyboard_height_adjustment: 0,
             touch_voice_shortcut: false,
+            touch_toolbar: TouchToolbarPreferences::default(),
             last_chinese_scheme: None,
             shuangpin_profile: ShuangpinProfile::default(),
             shuangpin_preedit_uses_raw: true,
+            vietnamese: VietnamesePreferences::default(),
             candidate_page_size: 6,
             number_row_selection: true,
             candidate_font_size: default_candidate_font_size(),
             candidate_preedit_font_size: default_candidate_preedit_font_size(),
-            candidate_text_color: None,
-            candidate_number_color: None,
-            candidate_accent_color: None,
-            candidate_selected_color: None,
-            candidate_hover_color: None,
-            candidate_surface_color: None,
-            candidate_border_color: None,
+            candidate_scale_percent: default_candidate_scale_percent(),
+            candidate_opacity_percent: default_candidate_opacity_percent(),
+            candidate_corner_radius: None,
             candidate_font_family: default_candidate_font_family(),
             candidate_english_font: None,
             candidate_fallback_fonts: default_candidate_fallback_fonts(),
             learning: true,
-            autocorrect: true,
             quanpin: QuanpinPreferences::default(),
             fuzzy_pinyin: FuzzyPinyinPreferences::default(),
             quanpin_helpcode: default_quanpin_helpcode(),
@@ -1216,6 +1722,7 @@ impl Default for Preferences {
             frequency: FrequencyPreferences::default(),
             mixed_input: MixedInputPreferences::default(),
             local_modes: LocalModePreferences::default(),
+            plugins: PluginPreferences::default(),
             clipboard_history: false,
             cloud_candidates: true,
             candidate_translations: true,
@@ -1223,6 +1730,9 @@ impl Default for Preferences {
             english_suggestions: true,
             translation_target_language: TranslationTargetLanguage::default(),
             translation_secondary_language: None,
+            // Only the desktop hosts that offer 水杉账号 in the translation service picker default to it; Android, iOS, Windows and HarmonyOS keep it as an explicit choice.
+            translation_account: cfg!(any(target_os = "macos", target_os = "linux")),
+            usage_reporting: true,
         }
     }
 }
@@ -1299,19 +1809,21 @@ impl FuzzyPinyinPreferences {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QuanpinPreferences {
-    /// Optional keeps legacy snapshots distinguishable from an explicit value.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub autocorrect_transposition: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub autocorrect_neighbor: Option<bool>,
+    #[serde(default = "enabled_by_default")]
+    pub autocorrect_transposition: bool,
+    #[serde(default = "enabled_by_default")]
+    pub autocorrect_neighbor: bool,
 }
 
-impl QuanpinPreferences {
-    fn is_empty(&self) -> bool {
-        self.autocorrect_transposition.is_none() && self.autocorrect_neighbor.is_none()
+impl Default for QuanpinPreferences {
+    fn default() -> Self {
+        Self {
+            autocorrect_transposition: true,
+            autocorrect_neighbor: true,
+        }
     }
 }
 
@@ -1325,21 +1837,21 @@ pub enum ShuangpinProfile {
     Microsoft,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum HelpcodeSchema {
     Lantian,
     #[default]
     Ziranma,
-    #[serde(rename = "shouyou2_0")]
     Shouyou2,
     Shouyouplus,
     Xiaohe,
     Jiajia,
+    /// A user table under the resource set's `helpcodes/custom` directory.
+    Custom(String),
 }
 
 impl HelpcodeSchema {
-    pub fn as_str(self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             Self::Lantian => "lantian",
             Self::Ziranma => "ziranma",
@@ -1347,11 +1859,40 @@ impl HelpcodeSchema {
             Self::Shouyouplus => "shouyouplus",
             Self::Xiaohe => "xiaohe",
             Self::Jiajia => "jiajia",
+            Self::Custom(value) => value,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+impl Serialize for HelpcodeSchema {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for HelpcodeSchema {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        match value.as_str() {
+            "lantian" => Ok(Self::Lantian),
+            "ziranma" => Ok(Self::Ziranma),
+            "shouyou2_0" => Ok(Self::Shouyou2),
+            "shouyouplus" => Ok(Self::Shouyouplus),
+            "xiaohe" => Ok(Self::Xiaohe),
+            "jiajia" => Ok(Self::Jiajia),
+            value if crate::helpcode::is_custom_schema(value) => Ok(Self::Custom(value.into())),
+            _ => Err(serde::de::Error::custom("unknown helpcode schema")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HelpcodePreferences {
     #[serde(default = "enabled_by_default")]
@@ -1379,6 +1920,34 @@ fn default_quanpin_helpcode() -> HelpcodePreferences {
     }
 }
 
+/// Whether `path` is absolute on any OS a preferences document may be read on: a Unix path, a Windows drive path (`C:\...` or `C:/...`), a verbatim or device path (`\\?\...`, `\\.\...`) or a UNC share (`\\server\share`). Checked textually rather than with `Path::is_absolute`, which answers only for the OS doing the checking, so a Windows path saved by the Windows host would be refused when the same document is validated elsewhere.
+pub fn is_absolute_model_path(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    if bytes.first() == Some(&b'/') {
+        return true;
+    }
+    if bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/')
+    {
+        return true;
+    }
+    // `\\server\share`, `\\?\C:\...` and `\\.\device`: two leading separators and something after them.
+    bytes.len() > 2 && bytes[0] == b'\\' && bytes[1] == b'\\' && bytes[2] != b'\\'
+}
+
+/// Whether `mirror` is an acceptable `asr_model_mirror`: empty, or an `https://` URL of at most 2048 bytes with no control characters or whitespace.
+pub fn valid_model_mirror(mirror: &str) -> bool {
+    mirror.is_empty()
+        || (mirror.len() <= 2048
+            && mirror.len() > "https://".len()
+            && mirror.starts_with("https://")
+            && !mirror
+                .chars()
+                .any(|ch| ch.is_control() || ch.is_whitespace()))
+}
+
 fn default_shuangpin_helpcode() -> HelpcodePreferences {
     HelpcodePreferences {
         enabled: true,
@@ -1387,10 +1956,7 @@ fn default_shuangpin_helpcode() -> HelpcodePreferences {
     }
 }
 
-/// Persisted recognition provider identifiers. Hosts expose only the providers
-/// they implement: `system` is the macOS Speech adapter, not a cloud profile,
-/// and `local` is on-device Whisper, which needs `asr_model_path` and a host
-/// built with the recognizer behind it.
+/// Persisted recognition provider identifiers. Hosts expose only the providers they implement: `system` is the platform speech adapter, not a cloud profile, and `local` is an installed on-device sherpa-onnx model directory named by `asr_model_path`, which needs a host built with the recognizer behind it.
 pub const ASR_PROVIDERS: [&str; 8] = [
     "doubao",
     "siliconflow",
@@ -1422,39 +1988,14 @@ pub const AI_PROVIDERS: [&str; 12] = [
 pub const POLISH_PROVIDERS: [&str; 5] = ["siliconflow", "openai", "deepseek", "groq", "doubao"];
 
 impl Preferences {
-    pub fn wubi_code_hint_enabled(&self) -> bool {
-        self.wubi_code_hint.unwrap_or(true)
-    }
-
-    pub fn quanpin_autocorrect_transposition(&self) -> bool {
-        self.quanpin.autocorrect_transposition.unwrap_or(false)
-    }
-
-    pub fn quanpin_autocorrect_neighbor(&self) -> bool {
-        self.quanpin.autocorrect_neighbor.unwrap_or(false)
-    }
-
     pub fn active_helpcode(&self) -> HelpcodePreferences {
         match self.scheme {
-            InputScheme::Shuangpin => self.shuangpin_helpcode,
-            InputScheme::Quanpin => self.quanpin_helpcode,
+            InputScheme::Shuangpin => self.shuangpin_helpcode.clone(),
+            InputScheme::Quanpin => self.quanpin_helpcode.clone(),
             _ => HelpcodePreferences {
                 enabled: false,
                 ..HelpcodePreferences::default()
             },
-        }
-    }
-
-    /// Replace recognition and polishing provider ids no backend implements with
-    /// the shared defaults. Used on the read path only: a file written by an
-    /// older build must still load, and it is never rewritten as a side effect.
-    pub fn normalize_voice_providers(&mut self) {
-        let default = Self::default();
-        if !ASR_PROVIDERS.contains(&self.voice_input.asr_provider.as_str()) {
-            self.voice_input.asr_provider = default.voice_input.asr_provider;
-        }
-        if !POLISH_PROVIDERS.contains(&self.voice_input.polish_provider.as_str()) {
-            self.voice_input.polish_provider = default.voice_input.polish_provider;
         }
     }
 
@@ -1466,10 +2007,7 @@ impl Preferences {
     /// same promise has to be kept from the other direction: start at `Default` and carry the
     /// service configuration across.
     ///
-    /// The endpoint, provider and model travel with the token rather than resetting beside it. A
-    /// key left pointing at a default endpoint is worse than either keeping the pair or clearing
-    /// it, because nothing on the page says the two no longer belong together. `asr_model_path`
-    /// travels for the same reason: it is a file the user went and found.
+    /// The endpoint, provider and model travel with the token rather than resetting beside it. A key left pointing at a default endpoint is worse than either keeping the pair or clearing it, because nothing on the page says the two no longer belong together. `asr_model_path` travels for the same reason: it is a model the user went and downloaded.
     ///
     /// `fuzzy_pinyin.seeded` is not a setting at all -- it records that the one-time seeding has
     /// happened -- so clearing it would silently re-seed rules the user had turned off.
@@ -1483,6 +2021,7 @@ impl Preferences {
         next.voice_input.asr_endpoint = self.voice_input.asr_endpoint.clone();
         next.voice_input.asr_model = self.voice_input.asr_model.clone();
         next.voice_input.asr_model_path = self.voice_input.asr_model_path.clone();
+        next.voice_input.asr_model_mirror = self.voice_input.asr_model_mirror.clone();
         next.voice_input.asr_resource_id = self.voice_input.asr_resource_id.clone();
         next.voice_input.doubao_auth_mode = self.voice_input.doubao_auth_mode.clone();
         next.voice_input.polish_provider = self.voice_input.polish_provider.clone();
@@ -1515,37 +2054,25 @@ impl Preferences {
     pub fn validate(&self) -> Result<(), PreferencesError> {
         let tencent = &self.tencent_tmt;
         if tencent.secret_id.len() > 4096
-            || tencent.secret_key.len() > 4096
-            || tencent.secret_key.chars().any(char::is_control)
-            || !tencent
-                .secret_id
-                .bytes()
-                .all(|ch| ch.is_ascii_alphanumeric() || ch == b'_' || ch == b'-')
+            || !crate::text::is_bounded_text(&tencent.secret_key, 4096)
+            || !crate::is_ascii_identifier(&tencent.secret_id)
             || tencent.region.len() > 64
-            || !tencent
-                .region
-                .bytes()
-                .all(|ch| ch.is_ascii_alphanumeric() || ch == b'-')
+            || !crate::is_ascii_alphanumeric_dash(&tencent.region)
         {
             return Err(PreferencesError::InvalidTencentTmt);
         }
         let niutrans = &self.niutrans;
-        if niutrans.app_id.len() > 4096
-            || niutrans.apikey.len() > 4096
-            || niutrans.app_id.chars().any(char::is_control)
-            || niutrans.apikey.chars().any(char::is_control)
+        if !crate::text::is_bounded_text(&niutrans.app_id, 4096)
+            || !crate::text::is_bounded_text(&niutrans.apikey, 4096)
             || (!niutrans.app_id.is_empty()
-                && !crate::translation::usable_niutrans_credential(&niutrans.app_id))
+                && !crate::translation::usable_credential(&niutrans.app_id))
             || (!niutrans.apikey.is_empty()
-                && !crate::translation::usable_niutrans_credential(&niutrans.apikey))
+                && !crate::translation::usable_credential(&niutrans.apikey))
         {
             return Err(PreferencesError::InvalidNiuTrans);
         }
         let translation = &self.custom_translation;
-        if translation.endpoint.len() > 2048
-            || translation.api_key.len() > 4096
-            || translation.endpoint.chars().any(char::is_control)
-            || translation.api_key.chars().any(char::is_control)
+        if !crate::text::is_bounded_text(&translation.api_key, 4096)
             || (!translation.endpoint.is_empty()
                 && !crate::translation::is_supported_endpoint(&translation.endpoint))
         {
@@ -1559,9 +2086,9 @@ impl Preferences {
         let model_path = &self.voice_input.asr_model_path;
         if !ASR_PROVIDERS.contains(&self.voice_input.asr_provider.as_str())
             || !POLISH_PROVIDERS.contains(&self.voice_input.polish_provider.as_str())
-            || model_path.len() > 4096
-            || model_path.chars().any(char::is_control)
-            || (!model_path.is_empty() && !model_path.starts_with('/'))
+            || !crate::text::is_bounded_text(model_path, 4096)
+            || (!model_path.is_empty() && !is_absolute_model_path(model_path))
+            || !valid_model_mirror(&self.voice_input.asr_model_mirror)
         {
             return Err(PreferencesError::InvalidVoiceInput);
         }
@@ -1572,6 +2099,9 @@ impl Preferences {
         }
         if !(1..=8).contains(&self.mixed_input.minimum_prefix) {
             return Err(PreferencesError::InvalidMixedInput);
+        }
+        if !self.plugins.validate() {
+            return Err(PreferencesError::InvalidPlugins);
         }
         if !(1..=10).contains(&self.frequency.trigger_count)
             || !(1..=10).contains(&self.frequency.linear_step)
@@ -1587,9 +2117,7 @@ impl Preferences {
         {
             return Err(PreferencesError::InvalidTouchKeyboardSpacing);
         }
-        if !self.custom_touch_keyboard_skin.validate() {
-            return Err(PreferencesError::InvalidTouchKeyboardSkinDesign);
-        }
+        self.custom_theme.validate()?;
         if self.touch_keyboard_schemes.enabled.is_empty()
             || self
                 .touch_keyboard_schemes
@@ -1604,97 +2132,32 @@ impl Preferences {
         if !(12..=32).contains(&self.candidate_preedit_font_size) {
             return Err(PreferencesError::InvalidCandidateFontSize);
         }
-        if let Some(color) = &self.candidate_text_color {
-            if color.len() != 7
-                || color.as_bytes()[0] != b'#'
-                || !color[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
-            {
-                return Err(PreferencesError::InvalidCandidateTextColor);
-            }
-        }
-        if let Some(color) = &self.candidate_number_color {
-            if color.len() != 7
-                || color.as_bytes()[0] != b'#'
-                || !color[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
-            {
-                return Err(PreferencesError::InvalidCandidateNumberColor);
-            }
-        }
-        if let Some(color) = &self.candidate_accent_color {
-            if color.len() != 7
-                || color.as_bytes()[0] != b'#'
-                || !color[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
-            {
-                return Err(PreferencesError::InvalidCandidateAccentColor);
-            }
-        }
-        if let Some(color) = &self.candidate_selected_color {
-            if color.len() != 7
-                || color.as_bytes()[0] != b'#'
-                || !color[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
-            {
-                return Err(PreferencesError::InvalidCandidateSelectedColor);
-            }
-        }
-        if let Some(color) = &self.candidate_hover_color {
-            if color.len() != 7
-                || color.as_bytes()[0] != b'#'
-                || !color[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
-            {
-                return Err(PreferencesError::InvalidCandidateHoverColor);
-            }
-        }
-        for (color, error) in [
-            (
-                &self.candidate_surface_color,
-                PreferencesError::InvalidCandidateSurfaceColor,
-            ),
-            (
-                &self.candidate_border_color,
-                PreferencesError::InvalidCandidateBorderColor,
-            ),
-        ] {
-            if let Some(color) = color {
-                if color.len() != 7
-                    || color.as_bytes()[0] != b'#'
-                    || !color[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
-                {
-                    return Err(error);
-                }
-            }
+        if !(50..=200).contains(&self.candidate_scale_percent)
+            || !(50..=100).contains(&self.candidate_opacity_percent)
+            || self
+                .candidate_corner_radius
+                .is_some_and(|radius| radius > 32)
+        {
+            return Err(PreferencesError::InvalidCandidateWindowStyle);
         }
         // Font family names are Unicode display names, not paths or identifiers.
         // Keep the existing UTF-8 byte budget while allowing localized families.
-        if self.candidate_font_family.is_empty()
-            || self.candidate_font_family.len() > 128
-            || self.candidate_font_family.chars().any(char::is_control)
-        {
+        if !valid_font_family(&self.candidate_font_family) {
             return Err(PreferencesError::InvalidCandidateFontFamily);
         }
-        if self.candidate_english_font.as_ref().is_some_and(|font| {
-            font.is_empty() || font.len() > 128 || font.chars().any(char::is_control)
-        }) {
-            return Err(PreferencesError::InvalidCandidateFontFamily);
-        }
-        if self.candidate_skin.is_empty()
-            || self.candidate_skin.len() > 64
-            || !self.candidate_skin.is_ascii()
-            || !self.candidate_skin.as_bytes()[0].is_ascii_alphanumeric()
-            || !self.candidate_skin.bytes().all(|byte| {
-                byte.is_ascii_lowercase()
-                    || byte.is_ascii_digit()
-                    || byte == b'.'
-                    || byte == b'_'
-                    || byte == b'-'
-            })
+        if self
+            .candidate_english_font
+            .as_deref()
+            .is_some_and(|font| !valid_font_family(font))
         {
-            return Err(PreferencesError::InvalidCandidateSkin);
+            return Err(PreferencesError::InvalidCandidateFontFamily);
         }
         // Match the 32 ordered supplementary families in Windows appearance.ts.
         if self.candidate_fallback_fonts.len() > 32
-            || self.candidate_fallback_fonts.iter().any(|font| {
-                font.is_empty() || font.len() > 128 || font.chars().any(char::is_control)
-            })
+            || self
+                .candidate_fallback_fonts
+                .iter()
+                .any(|font| !valid_font_family(font))
         {
             return Err(PreferencesError::InvalidCandidateFontFamily);
         }
@@ -1749,10 +2212,14 @@ pub enum PreferencesError {
         "at least one touch keyboard scheme must be enabled and the selection must be visible"
     )]
     InvalidTouchKeyboardSchemes,
-    #[error("custom touch keyboard skin design is invalid")]
+    #[error("custom theme keyboard design is invalid")]
     InvalidTouchKeyboardSkinDesign,
+    #[error("custom theme base must be system or a built-in theme")]
+    InvalidCustomThemeBase,
     #[error("candidate font size must be between 12 and 32")]
     InvalidCandidateFontSize,
+    #[error("candidate window scale must be 50-200%, opacity 50-100% and corner radius 0-32")]
+    InvalidCandidateWindowStyle,
     #[error("candidate text color must be #RRGGBB or omitted")]
     InvalidCandidateTextColor,
     #[error("candidate number color must be #RRGGBB or omitted")]
@@ -1769,7 +2236,7 @@ pub enum PreferencesError {
     InvalidCandidateBorderColor,
     #[error("candidate font family must be non-empty, contain no control characters, and be at most 128 bytes")]
     InvalidCandidateFontFamily,
-    #[error("candidate skin identifier is invalid")]
+    #[error("custom theme candidate skin identifier is invalid")]
     InvalidCandidateSkin,
     #[error("word-to-character and paging cannot use the same keys")]
     ConflictingKeyBindings,
@@ -1777,16 +2244,42 @@ pub enum PreferencesError {
     InvalidFrequency,
     #[error("mixed English minimum prefix must be between 1 and 8")]
     InvalidMixedInput,
+    #[error("plugin settings are invalid")]
+    InvalidPlugins,
     #[error("preferences changed; reload before saving")]
     Conflict,
     #[error("unsupported preferences format")]
     UnsupportedFormat,
     #[error("preferences revision exhausted")]
     RevisionExhausted,
+    #[error("preferences document is too large")]
+    DocumentTooLarge,
     #[error("preferences storage failed: {0}")]
     Io(#[from] std::io::Error),
     #[error("invalid preferences document: {0}")]
     Json(#[from] serde_json::Error),
+}
+
+/// What `PreferencesStore::recover` did.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RecoveryOutcome {
+    /// The document already loads (or does not exist yet); nothing was written or backed up.
+    NotNeeded(PreferencesSnapshot),
+    /// The damaged document was copied verbatim to `backup_path` and replaced by `snapshot`. `salvaged` is true when at least one setting from the damaged document survived; false means the replacement is the defaults.
+    Recovered {
+        snapshot: PreferencesSnapshot,
+        backup_path: PathBuf,
+        salvaged: bool,
+    },
+}
+
+/// Which damaged documents `recover` may rewrite.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecoveryScope {
+    /// Anything the normal read rejects, other than a storage failure.
+    Unreadable,
+    /// Only bytes that are not well-formed JSON at all. A well-formed document the schema rejects may come from a newer build and is left alone.
+    Malformed,
 }
 
 pub struct PreferencesStore {
@@ -1800,14 +2293,19 @@ impl PreferencesStore {
         }
     }
 
+    /// The directory holding `preferences.json`, its lock and any `preferences.json.corrupt-*` backups `recover` wrote.
+    pub fn directory(&self) -> &Path {
+        &self.directory
+    }
+
     fn open_lock(&self) -> Result<File, PreferencesError> {
-        fs::create_dir_all(&self.directory)?;
-        let lock = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(self.directory.join("preferences.lock"))?;
+        if !crate::storage::create_directory_and_check(&self.directory)? {
+            return Err(PreferencesError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "preferences directory is not a real directory",
+            )));
+        }
+        let lock = crate::file_lock::open_lock_file(self.directory.join("preferences.lock"))?;
         Ok(lock)
     }
 
@@ -1822,20 +2320,28 @@ impl PreferencesStore {
     }
 
     fn read_locked(&self) -> Result<PreferencesSnapshot, PreferencesError> {
-        let bytes = match fs::read(self.path()) {
-            Ok(bytes) => bytes,
+        let path = self.path();
+        let metadata = match std::fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(PreferencesSnapshot::default())
             }
             Err(error) => return Err(error.into()),
         };
-        let mut snapshot: PreferencesSnapshot = serde_json::from_slice(&bytes)?;
+        if !metadata.file_type().is_file() {
+            return Err(PreferencesError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "preferences document is not a regular file",
+            )));
+        }
+        let bytes =
+            crate::bounded_io::read_bounded_file(File::open(&path)?, MAX_DOCUMENT_BYTES, || {
+                PreferencesError::DocumentTooLarge
+            })?;
+        let snapshot: PreferencesSnapshot = serde_json::from_slice(&bytes)?;
         if snapshot.format_version != 1 {
             return Err(PreferencesError::UnsupportedFormat);
         }
-        // Older builds offered recognition providers no backend implements. Fall
-        // back in memory so those files still load; the file is not rewritten.
-        snapshot.preferences.normalize_voice_providers();
         snapshot.preferences.validate()?;
         Ok(snapshot)
     }
@@ -1918,11 +2424,14 @@ impl PreferencesStore {
             .collect();
             preferences.fuzzy_pinyin.seeded = true;
         } else if current.preferences.fuzzy_pinyin.seeded {
-            // Keep the internal marker monotonic even if an older client sends
-            // a snapshot that predates the field.
+            // Keep the internal marker monotonic even if a client sends a snapshot without the field.
             preferences.fuzzy_pinyin.seeded = true;
         }
         preferences.validate()?;
+        // Hosts save whenever a setting might have changed, several processes and controllers at a time, and every reader reloads and reapplies the whole document when the revision moves. Writing the same settings again would cost an fsync under the exclusive lock and a reload everywhere for nothing, so an unchanged document keeps its revision. An existing file only: the first save still creates it.
+        if current.revision > 0 && preferences == current.preferences {
+            return Ok(current);
+        }
         let snapshot = PreferencesSnapshot {
             format_version: 1,
             revision: current
@@ -1938,6 +2447,169 @@ impl PreferencesStore {
         )?;
         Ok(snapshot)
     }
+
+    /// Replace a document that `load` rejects, keeping what can be kept.
+    ///
+    /// This is the counterpart of the source's `SyncConfigWithInstalledTemplate` repair of a config.toml that does not parse. The damaged bytes are first copied verbatim to `preferences.json.corrupt-YYYYMMDD-HHMMSS` (UTC) beside the document; if that copy cannot be written nothing else happens, so the original is never lost. Then every top-level setting the current schema accepts is carried over one at a time onto the defaults, and a section that fails as a whole (a wrong-typed sibling next to a service key, say) is retried field by field, so credentials survive the way `ReapplyRealCredentials` keeps real API tokens. Whatever still does not fit takes its default.
+    ///
+    /// A missing or already loadable document is `NotNeeded` and nothing is written, so calling this twice, or racing another writer that already repaired the file, is harmless. Storage failures are returned unchanged and never lead to a rewrite. There is no compare-and-swap: the caller has no valid revision to offer, and the lock plus the re-check that the document is still unreadable cover the race.
+    pub fn recover(&self) -> Result<RecoveryOutcome, PreferencesError> {
+        self.recover_within(RecoveryScope::Unreadable)
+    }
+
+    /// `recover`, restricted to a document that is not well-formed JSON (truncated, empty, overwritten with other bytes). A well-formed document the schema rejects - unknown fields or a newer `format_version` - returns the load error unchanged, because it is most likely a newer build's file and rewriting it behind the user's back would lose that build's settings. Input method hosts call this automatically; the explicit settings-page repair uses `recover`.
+    pub fn recover_malformed(&self) -> Result<RecoveryOutcome, PreferencesError> {
+        self.recover_within(RecoveryScope::Malformed)
+    }
+
+    fn recover_within(&self, scope: RecoveryScope) -> Result<RecoveryOutcome, PreferencesError> {
+        let _lock = self.lock()?;
+        let failure = match self.read_locked() {
+            Ok(snapshot) => return Ok(RecoveryOutcome::NotNeeded(snapshot)),
+            Err(PreferencesError::Io(error)) => return Err(PreferencesError::Io(error)),
+            Err(failure) => failure,
+        };
+        let bytes = crate::bounded_io::read_bounded_file(
+            File::open(self.path())?,
+            MAX_DOCUMENT_BYTES,
+            || PreferencesError::DocumentTooLarge,
+        )?;
+        let document = serde_json::from_slice::<serde_json::Value>(&bytes).ok();
+        if scope == RecoveryScope::Malformed && document.is_some() {
+            return Err(failure);
+        }
+        let backup_path = self.write_backup(&bytes)?;
+        let (preferences, salvaged) = match &document {
+            Some(document) => salvage_preferences(document)?,
+            None => (Preferences::default(), false),
+        };
+        let revision = match document
+            .as_ref()
+            .and_then(|document| document.get("revision"))
+            .and_then(serde_json::Value::as_u64)
+        {
+            Some(revision) => revision
+                .checked_add(1)
+                .ok_or(PreferencesError::RevisionExhausted)?,
+            // Hosts skip a document whose revision equals the one they last applied, so restarting at 1 could leave a running host on the pre-damage values. Seconds since the epoch are far above any revision a host counted up to and still leave the counter room to grow.
+            None => std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_secs())
+                .unwrap_or(0)
+                .max(1),
+        };
+        let snapshot = PreferencesSnapshot {
+            format_version: 1,
+            revision,
+            preferences,
+        };
+        atomic_write(
+            &self.directory,
+            &self.path(),
+            &serde_json::to_vec_pretty(&snapshot)?,
+        )?;
+        Ok(RecoveryOutcome::Recovered {
+            snapshot,
+            backup_path,
+            salvaged,
+        })
+    }
+
+    /// Copy the damaged bytes to a new file and make sure they reached the disk before the original is replaced. `create_new` means an existing backup is never overwritten; a name already taken gets a `-N` suffix.
+    fn write_backup(&self, bytes: &[u8]) -> Result<PathBuf, PreferencesError> {
+        let now = time::OffsetDateTime::now_utc();
+        let stem = format!(
+            "preferences.json.corrupt-{:04}{:02}{:02}-{:02}{:02}{:02}",
+            now.year(),
+            u8::from(now.month()),
+            now.day(),
+            now.hour(),
+            now.minute(),
+            now.second()
+        );
+        let mut attempt = 0u32;
+        loop {
+            let name = if attempt == 0 {
+                stem.clone()
+            } else {
+                format!("{stem}-{attempt}")
+            };
+            let path = self.directory.join(name);
+            let mut file = match OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(file) => file,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    attempt += 1;
+                    continue;
+                }
+                Err(error) => return Err(error.into()),
+            };
+            if let Err(error) = file.write_all(bytes).and_then(|()| file.sync_all()) {
+                drop(file);
+                let _ = fs::remove_file(&path);
+                return Err(error.into());
+            }
+            return Ok(path);
+        }
+    }
+}
+
+/// Whether `preferences` is a document `load` would accept.
+fn acceptable_preferences(candidate: &serde_json::Map<String, serde_json::Value>) -> bool {
+    serde_json::from_value::<Preferences>(serde_json::Value::Object(candidate.clone()))
+        .is_ok_and(|preferences| preferences.validate().is_ok())
+}
+
+/// Carry every setting of a damaged document that the current schema accepts onto the defaults, one top-level key at a time, retrying a rejected section one field at a time. Returns the result and whether anything was kept.
+fn salvage_preferences(
+    document: &serde_json::Value,
+) -> Result<(Preferences, bool), PreferencesError> {
+    let default = Preferences::default();
+    let serde_json::Value::Object(mut salvaged) = serde_json::to_value(&default)? else {
+        return Ok((default, false));
+    };
+    // A snapshot keeps its settings under `preferences`; a bare settings object at the root is accepted too.
+    let source = match document.get("preferences") {
+        Some(serde_json::Value::Object(source)) => source.clone(),
+        _ => match document {
+            serde_json::Value::Object(source) => source.clone(),
+            _ => return Ok((default, false)),
+        },
+    };
+    let mut kept = false;
+    for (key, value) in &source {
+        let mut candidate = salvaged.clone();
+        candidate.insert(key.clone(), value.clone());
+        if acceptable_preferences(&candidate) {
+            salvaged = candidate;
+            kept = true;
+            continue;
+        }
+        let serde_json::Value::Object(fields) = value else {
+            continue;
+        };
+        let mut section = match salvaged.get(key) {
+            Some(serde_json::Value::Object(section)) => section.clone(),
+            _ => serde_json::Map::new(),
+        };
+        let mut section_kept = false;
+        for (field, field_value) in fields {
+            let mut trial = section.clone();
+            trial.insert(field.clone(), field_value.clone());
+            let mut candidate = salvaged.clone();
+            candidate.insert(key.clone(), serde_json::Value::Object(trial.clone()));
+            if acceptable_preferences(&candidate) {
+                section = trial;
+                section_kept = true;
+            }
+        }
+        if section_kept {
+            salvaged.insert(key.clone(), serde_json::Value::Object(section));
+            kept = true;
+        }
+    }
+    // Every step above was accepted by the same check, so this cannot fail on the salvaged map.
+    let preferences: Preferences = serde_json::from_value(serde_json::Value::Object(salvaged))?;
+    Ok((preferences, kept))
 }
 
 fn atomic_write(directory: &Path, path: &Path, contents: &[u8]) -> Result<(), PreferencesError> {

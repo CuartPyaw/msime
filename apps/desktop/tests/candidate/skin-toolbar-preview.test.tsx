@@ -13,6 +13,7 @@ test("draft components and size update the SVG toolbar including language visibi
   const preferences: FloatingToolbarPreferences = {
     enabled: true,
     english_mode: true,
+    input_scheme: true,
     fullwidth: true,
     punctuation: true,
     character_set: true,
@@ -96,20 +97,15 @@ test("toolbar preview contains upstream static icons without scripts, IDs or hos
   }
 });
 
+// jsdom does not substitute custom properties, so the computed value is the declaration itself: a package's `--msime-toolbar-background`, falling back to the upstream colour.
 test.each([
-  ["fluent", "dark", "rgb(26, 26, 26)"],
-  ["fluent", "light", "rgb(255, 255, 255)"],
-  ["wechat", "dark", "rgb(21, 21, 21)"],
-  ["wechat", "light", "rgb(247, 247, 247)"],
-  ["graphite", "dark", "rgb(28, 31, 35)"],
-  ["graphite", "light", "rgb(251, 251, 252)"],
-  ["willow_green", "dark", "rgb(45, 47, 46)"],
-  ["willow_green", "light", "rgb(244, 245, 243)"],
-])("%s/%s toolbar uses the upstream palette", (skin, appearance, surface) => {
+  ["dark", "var(--msime-toolbar-background, #1a1a1a)"],
+  ["light", "var(--msime-toolbar-background, #ffffff)"],
+])("%s toolbar uses the upstream palette", (appearance, surface) => {
   const mounted = render(
     <>
       <style>{css}</style>
-      <div className={`skin-card-preview skin-${skin}`} data-preview-theme={appearance}>
+      <div className="skin-card-preview" data-preview-theme={appearance}>
         <SkinToolbarPreview />
       </div>
     </>,

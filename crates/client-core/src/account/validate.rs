@@ -1,37 +1,18 @@
 //! Every value crossing the account boundary is bounded and checked here.
 //! The backend is not trusted to keep its own limits, and neither is the caller.
 
+use super::google::valid_google_loopback_target;
 use super::*;
 
 pub(super) fn validate_clipboard_search(value: &str) -> Result<(), AccountError> {
-    if value.len() > 1024 || value.chars().any(char::is_control) {
-        Err(AccountError::Invalid)
-    } else {
-        Ok(())
-    }
-}
-
-pub(super) fn percent_encode_query(value: &str) -> String {
-    let mut encoded = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-            encoded.push(byte as char);
-        } else {
-            encoded.push('%');
-            encoded.push(char::from(b"0123456789ABCDEF"[(byte >> 4) as usize]));
-            encoded.push(char::from(b"0123456789ABCDEF"[(byte & 0x0f) as usize]));
-        }
-    }
-    encoded
+    validate_bounded_text(value, 1024)
 }
 
 pub(super) fn validate_clipboard_text(value: &str) -> Result<(), AccountError> {
     if value.trim().is_empty()
-        || value.encode_utf16().count() > 4000
+        || !crate::is_bounded_utf16(value, 4000)
         || value.contains('\0')
-        || value
-            .chars()
-            .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+        || crate::text::has_disallowed_control(value)
     {
         Err(AccountError::Invalid)
     } else {
@@ -40,11 +21,7 @@ pub(super) fn validate_clipboard_text(value: &str) -> Result<(), AccountError> {
 }
 
 pub(super) fn validate_clipboard_id(value: &str) -> Result<(), AccountError> {
-    if value.len() != 64
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
+    if !crate::text::is_lower_hex(value, 64) {
         Err(AccountError::Invalid)
     } else {
         Ok(())
@@ -54,10 +31,7 @@ pub(super) fn validate_clipboard_id(value: &str) -> Result<(), AccountError> {
 pub(super) fn validate_clipboard_item(value: &AccountClipboardItem) -> Result<(), AccountError> {
     validate_clipboard_id(&value.id)?;
     validate_clipboard_text(&value.text)?;
-    if value.updated_at.is_empty()
-        || value.updated_at.len() > 128
-        || value.updated_at.chars().any(char::is_control)
-    {
+    if value.updated_at.is_empty() || !crate::text::is_bounded_text(&value.updated_at, 128) {
         return Err(AccountError::Unavailable);
     }
     Ok(())
@@ -73,28 +47,32 @@ pub(super) fn validate_clipboard_page(value: &AccountClipboardPage) -> Result<()
     Ok(())
 }
 
-pub(super) fn dictionary_kind_path(kind: DictionaryKind) -> &'static str {
+fn dictionary_code_is_well_formed(kind: DictionaryKind, code: &str) -> bool {
     match kind {
-        DictionaryKind::Pinyin => "pinyin",
-        DictionaryKind::Wubi => "wubi",
-        DictionaryKind::Quick => "quick",
-        DictionaryKind::English => "english",
+        DictionaryKind::Pinyin => crate::dictionary::pinyin_code_is_well_formed(code, true),
+        DictionaryKind::Wubi => crate::dictionary::wubi_code_is_well_formed(code),
+        DictionaryKind::Quick => {
+            crate::dictionary::quick_phrase_transport_code_is_well_formed(code)
+        }
+        DictionaryKind::English => crate::dictionary::english_code_is_well_formed(code),
     }
 }
 
-pub(super) fn dictionary_path(
+fn validate_dictionary_fields(
     kind: DictionaryKind,
-    offset: usize,
-    search: &str,
-) -> Result<String, AccountError> {
-    if offset > 1_000_000 || search.len() > 1024 || search.chars().any(char::is_control) {
-        return Err(AccountError::Invalid);
+    code: &str,
+    word: &str,
+) -> Result<(), AccountError> {
+    if !dictionary_code_is_well_formed(kind, code)
+        || code.is_empty()
+        || !crate::text::is_bounded_text(code, 256)
+        || word.is_empty()
+        || !crate::text::is_bounded_text(word, 1024)
+    {
+        Err(AccountError::Invalid)
+    } else {
+        Ok(())
     }
-    Ok(format!(
-        "/v1/users/me/dictionaries/{}?q={}&offset={offset}&limit=100",
-        dictionary_kind_path(kind),
-        percent_encode_query(search)
-    ))
 }
 
 pub(super) fn validate_dictionary_catalog_query(
@@ -104,14 +82,11 @@ pub(super) fn validate_dictionary_catalog_query(
     profile: &str,
 ) -> Result<(), AccountError> {
     if offset > 1_000_000
-        || code.len() > 256
-        || code.contains('\0')
+        || !crate::text::is_bounded_text(code, 256)
         || scheme.is_empty()
-        || scheme.len() > 64
+        || !crate::text::is_bounded_text(scheme, 64)
         || profile.is_empty()
-        || profile.len() > 64
-        || scheme.chars().any(char::is_control)
-        || profile.chars().any(char::is_control)
+        || !crate::text::is_bounded_text(profile, 64)
     {
         Err(AccountError::Invalid)
     } else {
@@ -129,10 +104,10 @@ pub(super) fn dictionary_catalog_path(
     validate_dictionary_catalog_query(code, offset, scheme, profile)?;
     Ok(format!(
         "/v1/users/me/dictionaries/{}/catalog?q={}&offset={offset}&limit=100&scheme={}&profile={}",
-        dictionary_kind_path(kind),
-        percent_encode_query(code),
-        percent_encode_query(scheme),
-        percent_encode_query(profile)
+        crate::cloud::dictionary::kind_path(kind),
+        crate::cloud::dictionary::percent_encode(code),
+        crate::cloud::dictionary::percent_encode(scheme),
+        crate::cloud::dictionary::percent_encode(profile)
     ))
 }
 
@@ -141,28 +116,7 @@ pub(super) fn validate_dictionary_catalog_identity(
     code: &str,
     word: &str,
 ) -> Result<(), AccountError> {
-    let code_ok = match kind {
-        DictionaryKind::Pinyin => code
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || matches!(byte, b'\'' | b' ')),
-        DictionaryKind::Wubi => code.bytes().all(|byte| byte.is_ascii_lowercase()),
-        DictionaryKind::Quick => code
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit()),
-        DictionaryKind::English => crate::dictionary::english_code_is_well_formed(code),
-    };
-    if !code_ok
-        || code.is_empty()
-        || code.len() > 256
-        || word.is_empty()
-        || word.len() > 1024
-        || code.chars().any(char::is_control)
-        || word.chars().any(char::is_control)
-    {
-        Err(AccountError::Invalid)
-    } else {
-        Ok(())
-    }
+    validate_dictionary_fields(kind, code, word)
 }
 
 pub(super) fn validate_dictionary_catalog_entry(
@@ -183,8 +137,7 @@ pub(super) fn validate_dictionary_catalog_page(
     if page.entries.len() > MAX_DICTIONARY_PAGE_ENTRIES
         || page.offset > 1_000_000
         || page.revision < 0
-        || page.normalized.len() > 256
-        || page.normalized.chars().any(char::is_control)
+        || !crate::text::is_bounded_text(&page.normalized, 256)
     {
         return Err(AccountError::Unavailable);
     }
@@ -195,7 +148,7 @@ pub(super) fn validate_dictionary_catalog_page(
 }
 
 pub(super) fn validate_bounded_text(value: &str, maximum_bytes: usize) -> Result<(), AccountError> {
-    if value.len() > maximum_bytes || value.chars().any(char::is_control) {
+    if !crate::text::is_bounded_text(value, maximum_bytes) {
         Err(AccountError::Invalid)
     } else {
         Ok(())
@@ -203,20 +156,13 @@ pub(super) fn validate_bounded_text(value: &str, maximum_bytes: usize) -> Result
 }
 
 pub(super) fn validate_candidate_query(query: &AccountCandidateQuery) -> Result<(), AccountError> {
-    if query.text.is_empty()
-        || query.text.len() > 256
-        || query.text.chars().any(char::is_control)
-        || !matches!(
-            query.kind.as_str(),
-            "pinyin" | "jianpin" | "wubi" | "quick" | "english"
-        )
-        || !matches!(query.scheme.as_str(), "pinyin" | "shuangpin")
-        || !matches!(
-            query.profile.as_str(),
-            "xiaohe" | "ziranma" | "microsoft" | "shoudao"
-        )
-        || !(1..=100).contains(&query.limit)
-    {
+    if !crate::cloud::dictionary::valid_candidate_query(
+        &query.text,
+        &query.kind,
+        &query.scheme,
+        &query.profile,
+        query.limit,
+    ) {
         Err(AccountError::Invalid)
     } else {
         Ok(())
@@ -240,12 +186,11 @@ pub(super) fn validate_candidate_value(
     code: &str,
     word: &str,
 ) -> Result<(), AccountError> {
-    validate_bounded_text(code, 256)?;
-    validate_bounded_text(word, 1024)?;
-    if code.is_empty()
-        || word.is_empty()
-        || (query.kind == "quick"
-            && word.encode_utf16().count() > crate::dictionary::import::MAX_QUICK_PHRASE_UTF16)
+    if !crate::cloud::dictionary::valid_candidate_value(code, word) {
+        return Err(AccountError::Invalid);
+    }
+    if query.kind == "quick"
+        && !crate::is_bounded_utf16(word, crate::dictionary::import::MAX_QUICK_PHRASE_UTF16)
     {
         Err(AccountError::Invalid)
     } else {
@@ -275,13 +220,10 @@ pub(super) fn validate_ranking_arguments(
 pub(super) fn validate_personal_candidates(
     result: &AccountPersonalCandidates,
 ) -> Result<(), AccountError> {
-    if result.candidates.len() > 100
-        || result.revision < 0
-        || result.context.len() > 1024
-        || result.context.chars().any(char::is_control)
-    {
+    if result.candidates.len() > 100 || result.revision < 0 {
         return Err(AccountError::Unavailable);
     }
+    validate_bounded_text(&result.context, 1024).map_err(|_| AccountError::Unavailable)?;
     for candidate in &result.candidates {
         validate_bounded_text(&candidate.code, 256).map_err(|_| AccountError::Unavailable)?;
         validate_bounded_text(&candidate.word, 1024).map_err(|_| AccountError::Unavailable)?;
@@ -318,22 +260,8 @@ pub(super) fn validate_fixed_positions(result: &AccountFixedPositions) -> Result
     Ok(())
 }
 
-pub(super) fn mutation_path(kind: DictionaryKind, operation: &str) -> Option<String> {
-    matches!(operation, "add" | "import" | "import-hans" | "export").then(|| {
-        format!(
-            "/v1/users/me/dictionaries/{}/{}",
-            dictionary_kind_path(kind),
-            operation
-        )
-    })
-}
-
 pub(super) fn validate_dictionary_id(value: &str) -> Result<(), AccountError> {
-    if value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
+    if crate::text::is_lower_hex(value, 64) {
         Ok(())
     } else {
         Err(AccountError::Invalid)
@@ -346,31 +274,35 @@ pub(super) fn validate_dictionary_value(
     word: &str,
     weight: i64,
 ) -> Result<(), AccountError> {
-    let (code_ok, code_limit) = match kind {
-        DictionaryKind::Pinyin => (
-            code.bytes()
-                .all(|byte| byte.is_ascii_lowercase() || matches!(byte, b'\'' | b' ')),
-            256,
-        ),
-        DictionaryKind::Wubi => (code.bytes().all(|byte| byte.is_ascii_lowercase()), 4),
-        DictionaryKind::Quick => (
-            code.bytes()
-                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit()),
-            32,
-        ),
-        DictionaryKind::English => (crate::dictionary::english_code_is_well_formed(code), 64),
+    // Keep writes and inbound responses on the same shared contract. The
+    // shared field check runs first; this layer adds only the per-dictionary
+    // syntax and legacy inbound compatibility rules.
+    validate_dictionary_fields(kind, code, word)?;
+    let code_limit = match kind {
+        DictionaryKind::Pinyin => 256,
+        DictionaryKind::Wubi => 4,
+        DictionaryKind::Quick => 32,
+        DictionaryKind::English => 64,
     };
-    if !code_ok
-        || code.is_empty()
-        || code.len() > code_limit
-        || word.is_empty()
-        || word.len() > 1024
+    if code.len() > code_limit
         || weight < 0
-        || code.chars().any(char::is_control)
-        || word.chars().any(char::is_control)
         || (kind == DictionaryKind::Quick
-            && word.encode_utf16().count() > crate::dictionary::import::MAX_QUICK_PHRASE_UTF16)
+            && !crate::is_bounded_utf16(word, crate::dictionary::import::MAX_QUICK_PHRASE_UTF16))
     {
+        return Err(AccountError::Invalid);
+    }
+    Ok(())
+}
+
+/// The check for a value this client is about to write: `validate_dictionary_value` plus the stricter rules new input follows. A quick phrase code must be letters only, as in the reference; inbound rows keep the lenient check so a stored code with a digit still syncs.
+pub(super) fn validate_new_dictionary_value(
+    kind: DictionaryKind,
+    code: &str,
+    word: &str,
+    weight: i64,
+) -> Result<(), AccountError> {
+    validate_dictionary_value(kind, code, word, weight)?;
+    if kind == DictionaryKind::Quick && !crate::dictionary::quick_phrase_code_is_well_formed(code) {
         return Err(AccountError::Invalid);
     }
     Ok(())
@@ -427,12 +359,7 @@ pub(super) fn validate_dictionary_import(
 ) -> Result<(), AccountError> {
     if !matches!(format, "standard" | "windows" | "hans")
         || (format == "hans" && kind != DictionaryKind::Pinyin)
-        || text.is_empty()
-        || text.len() > 64 * 1024
-        || text.contains('\0')
-        || text
-            .chars()
-            .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+        || crate::cloud::dictionary::validate_import(text).is_err()
     {
         return Err(AccountError::Invalid);
     }
@@ -450,11 +377,11 @@ pub(super) fn validate_dictionary_import_result(
 }
 
 pub(super) fn read_bounded_response(
-    mut response: Response,
+    response: Response,
     maximum_response_bytes: usize,
 ) -> Result<Vec<u8>, AccountError> {
     if !response.status().is_success() {
-        return Err(AccountError::from_status(response.status()));
+        return Err(error_from_response(response));
     }
     if response
         .content_length()
@@ -462,16 +389,17 @@ pub(super) fn read_bounded_response(
     {
         return Err(AccountError::Unavailable);
     }
-    let mut bytes = Vec::new();
-    response
-        .by_ref()
-        .take((maximum_response_bytes + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|_| AccountError::Unavailable)?;
-    if bytes.len() > maximum_response_bytes {
-        return Err(AccountError::Unavailable);
-    }
-    Ok(bytes)
+    crate::bounded_io::read_bounded(response, maximum_response_bytes as u64)
+        .map_err(|_| AccountError::Unavailable)
+}
+
+/// Largest error body read to find the server's error code; the backend's error documents are a few dozen bytes.
+const MAX_ERROR_BODY_BYTES: u64 = 4096;
+
+pub(super) fn error_from_response(response: Response) -> AccountError {
+    let status = response.status();
+    let body = crate::bounded_io::read_bounded(response, MAX_ERROR_BODY_BYTES).unwrap_or_default();
+    AccountError::from_response(status, &body)
 }
 
 pub fn validate_account_preferences(value: &AccountPreferences) -> Result<(), AccountError> {
@@ -487,8 +415,7 @@ pub fn validate_account_preferences(value: &AccountPreferences) -> Result<(), Ac
                 return Err(AccountError::Unavailable);
             }
             AccountPreferenceValue::String(string)
-                if string.len() > MAX_ACCOUNT_PREFERENCE_STRING_BYTES
-                    || string.chars().any(char::is_control) =>
+                if !crate::text::is_bounded_text(string, MAX_ACCOUNT_PREFERENCE_STRING_BYTES) =>
             {
                 return Err(AccountError::Unavailable);
             }
@@ -557,20 +484,27 @@ pub fn merge_account_preferences(
 pub(super) fn valid_preference_key(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= MAX_ACCOUNT_PREFERENCE_KEY_BYTES
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        && crate::is_ascii_identifier_with_dots(value)
 }
 
 pub(super) fn validate_provider_target(provider: &str, target: &str) -> Result<(), AccountError> {
     if provider == "apple" {
         return target.is_empty().then_some(()).ok_or(AccountError::Invalid);
     }
+    if provider == "google" {
+        return valid_google_loopback_target(target)
+            .then_some(())
+            .ok_or(AccountError::Invalid);
+    }
+    if provider == "anonymous" {
+        return super::anonymous::valid_anonymous_subject(target)
+            .then_some(())
+            .ok_or(AccountError::Invalid);
+    }
     if !matches!(provider, "email" | "phone")
         || target.is_empty()
-        || target.len() > 320
+        || !crate::text::is_bounded_text(target, 320)
         || target.trim() != target
-        || target.chars().any(char::is_control)
     {
         return Err(AccountError::Invalid);
     }
@@ -579,17 +513,16 @@ pub(super) fn validate_provider_target(provider: &str, target: &str) -> Result<(
 
 pub(super) fn validate_challenge(challenge: &AccountChallenge) -> Result<(), AccountError> {
     if challenge.challenge_id.is_empty()
-        || challenge.challenge_id.len() > 256
-        || challenge.challenge_id.chars().any(char::is_control)
+        || !crate::text::is_bounded_text(&challenge.challenge_id, 256)
         || challenge.expires_in == 0
         || challenge
             .nonce
             .as_ref()
-            .is_some_and(|value| value.len() > 4096 || value.chars().any(char::is_control))
+            .is_some_and(|value| !crate::text::is_bounded_text(value, 4096))
         || challenge
             .authorization_url
             .as_ref()
-            .is_some_and(|value| value.len() > 4096 || value.chars().any(char::is_control))
+            .is_some_and(|value| !crate::text::is_bounded_text(value, 4096))
     {
         return Err(AccountError::Unavailable);
     }
@@ -598,10 +531,9 @@ pub(super) fn validate_challenge(challenge: &AccountChallenge) -> Result<(), Acc
 
 pub(super) fn validate_login(challenge: &str, credential: &str) -> Result<(), AccountError> {
     if challenge.is_empty()
-        || challenge.len() > 256
-        || challenge.chars().any(char::is_control)
+        || !crate::text::is_bounded_text(challenge, 256)
         || credential.len() != 6
-        || !credential.bytes().all(|byte| byte.is_ascii_digit())
+        || !crate::is_ascii_digits(credential)
     {
         return Err(AccountError::Invalid);
     }
@@ -610,50 +542,52 @@ pub(super) fn validate_login(challenge: &str, credential: &str) -> Result<(), Ac
 
 pub(super) fn validate_apple_login(challenge: &str, credential: &str) -> Result<(), AccountError> {
     if challenge.is_empty()
-        || challenge.len() > 256
-        || challenge.chars().any(char::is_control)
+        || !crate::text::is_bounded_text(challenge, 256)
         || credential.is_empty()
-        || credential.len() > 16 * 1024
-        || credential.chars().any(char::is_control)
+        || !crate::text::is_bounded_text(credential, 16 * 1024)
     {
         return Err(AccountError::Invalid);
     }
     Ok(())
 }
 
-pub(super) fn validate_display_name(value: &str) -> Result<(), AccountError> {
-    if value.is_empty()
-        || value.trim() != value
-        || value.chars().count() > 64
-        || value.chars().any(char::is_control)
+/// A Google authorization code arrives on the loopback redirect and goes straight to the backend, which exchanges it with the desktop client secret. Codes are opaque printable ASCII, so anything else is refused before it leaves the process.
+pub(super) fn validate_google_login(challenge: &str, credential: &str) -> Result<(), AccountError> {
+    if challenge.is_empty()
+        || !crate::text::is_bounded_text(challenge, 256)
+        || credential.is_empty()
+        || credential.len() > 2048
+        || !credential.bytes().all(|byte| byte.is_ascii_graphic())
     {
+        return Err(AccountError::Invalid);
+    }
+    Ok(())
+}
+
+/// The transport check for `/v1/auth/login`. The session has already applied the provider's own rule (six digits, an Apple identity token or a Google authorization code), so the client accepts a credential that satisfies any of them.
+pub(super) fn validate_login_request(
+    challenge: &str,
+    credential: &str,
+) -> Result<(), AccountError> {
+    validate_login(challenge, credential)
+        .or_else(|_| validate_apple_login(challenge, credential))
+        .or_else(|_| validate_google_login(challenge, credential))
+}
+
+pub(super) fn validate_display_name(value: &str) -> Result<(), AccountError> {
+    if value.is_empty() || value.trim() != value || !crate::text::is_bounded_chars(value, 64) {
         return Err(AccountError::Invalid);
     }
     Ok(())
 }
 
 pub(super) fn validate_chat_models(value: &AccountChatModels) -> Result<(), AccountError> {
-    if value.data.is_empty()
-        || value.data.len() > MAX_CHAT_MODELS
-        || value.default_model.is_empty()
-        || value.default_model.len() > MAX_CHAT_MODEL_ID_BYTES
-        || !value
-            .data
-            .iter()
-            .any(|model| model.id == value.default_model)
-        || value.data.iter().any(|model| {
-            model.id.is_empty()
-                || model.id.len() > MAX_CHAT_MODEL_ID_BYTES
-                || model.id.chars().any(char::is_control)
-        })
-        || value
-            .data
-            .iter()
-            .map(|model| &model.id)
-            .collect::<std::collections::HashSet<_>>()
-            .len()
-            != value.data.len()
-    {
+    if !crate::account::valid_model_catalog(
+        value.data.iter().map(|model| model.id.as_str()),
+        &value.default_model,
+        MAX_CHAT_MODELS,
+        MAX_CHAT_MODEL_ID_BYTES,
+    ) {
         return Err(AccountError::Unavailable);
     }
     Ok(())
@@ -664,15 +598,14 @@ pub(super) fn validate_chat_request(
     model: &str,
 ) -> Result<(), AccountError> {
     if model.is_empty()
-        || model.len() > MAX_CHAT_MODEL_ID_BYTES
-        || model.chars().any(char::is_control)
+        || !crate::text::is_bounded_text(model, MAX_CHAT_MODEL_ID_BYTES)
         || messages.is_empty()
         || messages.len() > MAX_CHAT_MESSAGES
         || messages.iter().any(|message| {
             !matches!(message.role.as_str(), "user" | "assistant" | "system")
-                || message.content.is_empty()
+                || message.content.trim().is_empty()
                 || message.content.len() > MAX_CHAT_MESSAGE_BYTES
-                || message.content.chars().any(char::is_control)
+                || crate::text::has_disallowed_control(&message.content)
         })
     {
         return Err(AccountError::Invalid);
@@ -683,19 +616,13 @@ pub(super) fn validate_chat_request(
 pub(super) fn validate_tokens(tokens: &AccountTokens) -> Result<(), AccountError> {
     if tokens.token_type != "Bearer"
         || tokens.expires_in == 0
-        || !valid_token(&tokens.access_token)
-        || !valid_token(&tokens.refresh_token)
+        || tokens.expires_in > MAX_SESSION_SECONDS
+        || !crate::text::is_lower_hex(&tokens.access_token, 64)
+        || !crate::text::is_lower_hex(&tokens.refresh_token, 64)
     {
         return Err(AccountError::Unavailable);
     }
     validate_user(&tokens.user).map_err(|_| AccountError::Unavailable)
-}
-
-pub(super) fn valid_token(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 pub(super) fn validate_user(user: &AccountUser) -> Result<(), AccountError> {
@@ -703,10 +630,16 @@ pub(super) fn validate_user(user: &AccountUser) -> Result<(), AccountError> {
         user_id: user.id.clone(),
     })
     .map_err(|_| AccountError::Invalid)?;
-    if user.display_name.chars().count() > 64
-        || user.display_name.chars().any(char::is_control)
-        || user.created_at.len() > 128
-        || user.created_at.chars().any(char::is_control)
+    if !crate::text::is_bounded_chars(&user.display_name, 64)
+        || !crate::text::is_bounded_text(&user.created_at, 128)
+        || user
+            .email
+            .as_ref()
+            .is_some_and(|email| !crate::text::is_bounded_text(email, 320))
+        || user
+            .avatar_url
+            .as_ref()
+            .is_some_and(|url| !crate::text::is_bounded_text(url, 2048))
     {
         return Err(AccountError::Invalid);
     }
@@ -723,8 +656,7 @@ pub(super) fn validate_profile(profile: &AccountProfile) -> Result<(), AccountEr
                     .provider
                     .bytes()
                     .all(|byte| byte.is_ascii_lowercase() || byte == b'_' || byte == b'-')
-                || identity.subject.len() > 512
-                || identity.subject.chars().any(char::is_control)
+                || !crate::text::is_bounded_text(&identity.subject, 512)
         })
     {
         return Err(AccountError::Unavailable);
@@ -733,10 +665,7 @@ pub(super) fn validate_profile(profile: &AccountProfile) -> Result<(), AccountEr
 }
 
 pub fn validate_identity(identity: &AccountIdentity) -> Result<(), &'static str> {
-    if identity.user_id.is_empty()
-        || identity.user_id.len() > 256
-        || identity.user_id.chars().any(char::is_control)
-    {
+    if identity.user_id.is_empty() || !crate::text::is_bounded_text(&identity.user_id, 256) {
         return Err("invalid account identity");
     }
     Ok(())

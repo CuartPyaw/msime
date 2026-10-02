@@ -14,20 +14,24 @@ struct ClipboardHistoryItem: Equatable, Identifiable {
   var text: String
   var date = Date()
   var pinned = false
+
+  /// Windows' clipboard search: a case-insensitive substring match that keeps the stored order, with an empty query showing everything.
+  static func matching(_ items: [Self], query: String) -> [Self] {
+    guard !query.isEmpty else { return items }
+    return items.filter { $0.text.range(of: query, options: .caseInsensitive) != nil }
+  }
 }
 
 struct ClipboardHistoryStore {
   static let limit = 50
   let root: URL
   let file: URL
-  let legacyFile: URL
 
   init(directory: URL? = nil) {
     root = directory ?? FileManager.default.containerURL(
       forSecurityApplicationGroupIdentifier: InputSchemePreference.appGroupIdentifier)
       ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
     file = root.appendingPathComponent("MSIME/clipboard_history.json")
-    legacyFile = root.appendingPathComponent("Clipboard/history.json")
   }
 
   func load() throws -> [ClipboardHistoryItem] {
@@ -39,7 +43,7 @@ struct ClipboardHistoryStore {
       guard let text = row["text"] as? String,
             let timestamp = row["timestampMs"] as? NSNumber,
             let pinned = row["pinned"] as? Bool,
-            text.utf8.count <= 40_000
+            !text.contains("\0")
       else { throw Failure.invalidFile }
       return ClipboardHistoryItem(
         text: text, date: Date(timeIntervalSince1970: timestamp.doubleValue / 1_000),
@@ -51,10 +55,10 @@ struct ClipboardHistoryStore {
     guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
       throw Failure.empty
     }
-    guard text.count <= 10_000, text.utf8.count <= 40_000 else { throw Failure.tooLong }
     let value = try call(["operation": "capture", "text": text])
     guard value["captured"] as? Bool == true else {
       if value["reason"] as? String == "full" { throw Failure.full }
+      if value["reason"] as? String == "invalid" { throw Failure.invalidText }
       throw Failure.invalidFile
     }
   }
@@ -110,11 +114,11 @@ struct ClipboardHistoryStore {
   }
 
   enum Failure: Error, LocalizedError {
-    case empty, tooLong, full, invalidFile, stale
+    case empty, invalidText, full, invalidFile, stale
     var errorDescription: String? {
       switch self {
       case .empty: "剪贴板中没有可保存的文本，或尚未允许粘贴。"
-      case .tooLong: "单条最多保存 10,000 字，请缩短后重试。"
+      case .invalidText: "剪贴板文本过长或包含不能保存的字符，请缩短或修改后重试。"
       case .full: "50 条历史均已固定，请先取消固定或删除一条。"
       case .invalidFile: "历史记录无法读取；原文件已保留。"
       case .stale: "记录已在其他窗口中更改，请重试。"

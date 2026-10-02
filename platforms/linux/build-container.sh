@@ -22,16 +22,6 @@ command -v docker >/dev/null 2>&1 || {
   exit 2
 }
 
-# The Engine is an unpacked archive under vendor/, not a checked-in tree, so a
-# fresh worktree has none. Mount whichever tree already holds it rather than
-# fetching another copy per worktree - the same order the Windows gate uses to
-# find its vcpkg.
-main_worktree="$(dirname "$(git rev-parse --git-common-dir 2>/dev/null || echo .)")"
-vendor=""
-for candidate in "$repo_root/vendor" "$main_worktree/vendor"; do
-  [ -d "$candidate/MSIME-Engine" ] && vendor="$(cd "$candidate" && pwd)" && break
-done
-
 build_root="$repo_root/target/linux-build-gate"
 mkdir -p "$build_root"
 
@@ -39,7 +29,7 @@ mkdir -p "$build_root"
 # built from the Dockerfile in each of them, so a fixed tag means whichever
 # finished last decides what everybody runs - a gate silently executing another
 # checkout's image is worse than no gate.
-image_tag="msime-client-linux-build-gate:$(printf %s "$repo_root" | shasum | cut -c1-12)"
+image_tag="msime-linux-build-gate:$(printf %s "$repo_root" | shasum | cut -c1-12)"
 
 docker build -q -t "$image_tag" \
   -f platforms/linux/tests/tools/Dockerfile.build-gate platforms/linux/tests >/dev/null
@@ -47,11 +37,9 @@ echo "gate image: $image_tag" >&2
 
 docker run --rm --init \
   -v "$repo_root":/source \
-  ${vendor:+-v "$vendor":/source/vendor:ro} \
   -v "$build_root":/build \
   -w /source \
   -e CARGO_TARGET_DIR=/build/cargo \
-  ${vendor:+-e MSIME_SKIP_ENGINE_FETCH=1} \
   "$image_tag" bash -euo pipefail -c '
     cargo build -p msime-host-api --locked
     cmake -S platforms/linux -B /build/cmake -G Ninja \

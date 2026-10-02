@@ -129,7 +129,9 @@ pub(crate) fn panel_position(
                 logical_workspace = sway_workspace_for_container(&tree, id, None);
                 sway_rect_for_container(&tree, id)
             }),
-        PanelInputTarget::Wayland | PanelInputTarget::Ydotool => None,
+        PanelInputTarget::Wayland | PanelInputTarget::Ydotool | PanelInputTarget::InputMethod => {
+            None
+        }
     }?;
     if ![rect.0, rect.1, rect.2, rect.3]
         .iter()
@@ -228,6 +230,10 @@ fn capture_panel_input_target() -> Result<PanelInputTarget, HostActionError> {
             return Ok(target);
         }
     }
+    // GNOME and KDE on Wayland expose neither a virtual keyboard nor a focus query, so without ydotool the only way into the editor is the input method's own connection to it.
+    if panel_input_socket().is_some() {
+        return Ok(PanelInputTarget::InputMethod);
+    }
     Err(HostActionError {
         code: "unavailable",
     })
@@ -239,11 +245,24 @@ pub(crate) fn remember_panel_input_target(
     label: &str,
     replace: bool,
 ) -> Result<(), HostActionError> {
-    let mut target = state.0.lock().map_err(|_| HostActionError {
+    let unavailable = || HostActionError {
         code: "unavailable",
-    })?;
+    };
+    if !replace
+        && state
+            .0
+            .lock()
+            .map_err(|_| unavailable())?
+            .contains_key(label)
+    {
+        return Ok(());
+    }
+    // The probes run session tools with timeouts of their own; send_key and the
+    // other panels must not wait on the lock for them.
+    let captured = capture_panel_input_target()?;
+    let mut target = state.0.lock().map_err(|_| unavailable())?;
     if replace || !target.contains_key(label) {
-        target.insert(label.to_owned(), capture_panel_input_target()?);
+        target.insert(label.to_owned(), captured);
     }
     Ok(())
 }
@@ -436,7 +455,7 @@ fn xdotool_key_name(virtual_key: u16) -> Option<String> {
 #[cfg(target_os = "linux")]
 fn xdotool_key_args(request: &KeyboardInputRequest) -> Option<String> {
     let key = xdotool_key_name(request.virtual_key)?;
-    let mut parts: Vec<String> = Vec::new();
+    let mut parts: Vec<String> = Vec::with_capacity(5);
     if request.include_sticky_modifiers {
         if request.modifiers.ctrl {
             parts.push("ctrl".to_owned());
@@ -548,17 +567,25 @@ fn release_panel_focus(
             windows: Vec::new(),
         });
     }
-    let windows: Vec<_> = [
-        "handwriting-panel",
-        "emoji-panel",
-        "clipboard-panel",
-        "voice-panel",
-        "cloud-clipboard-panel",
-        "cloud-dictionary-panel",
-    ]
-    .into_iter()
-    .filter_map(|label| app.get_webview_window(label))
-    .collect();
+    release_focused_panels(app)
+}
+
+#[cfg(target_os = "linux")]
+const EDITABLE_PANEL_LABELS: [&str; 6] = [
+    "handwriting-panel",
+    "emoji-panel",
+    "clipboard-panel",
+    "voice-panel",
+    "cloud-clipboard-panel",
+    "cloud-dictionary-panel",
+];
+
+#[cfg(target_os = "linux")]
+fn release_focused_panels(app: &tauri::AppHandle) -> Result<PanelFocusRelease, HostActionError> {
+    let windows: Vec<_> = EDITABLE_PANEL_LABELS
+        .into_iter()
+        .filter_map(|label| app.get_webview_window(label))
+        .collect();
     let mut focused = false;
     for window in &windows {
         focused |= window.is_focused().map_err(|_| HostActionError {
@@ -570,7 +597,7 @@ fn release_panel_focus(
         // The screen keyboard never accepts focus and stays available for typing.
         // Annotated because the rollback loop below calls a method on an element
         // before the `push` that would otherwise name the type.
-        let mut hidden: Vec<tauri::WebviewWindow> = Vec::new();
+        let mut hidden: Vec<tauri::WebviewWindow> = Vec::with_capacity(EDITABLE_PANEL_LABELS.len());
         for window in windows {
             let visible = window.is_visible().unwrap_or(false);
             if window.hide().is_err() {
@@ -603,6 +630,153 @@ fn with_panel_focus_released<T>(
     let result = send();
     release.restore();
     result
+}
+
+// ---- Input method route ----
+//
+// The MSIME IBus engine and Fcitx5 addon listen on a user-private socket and type into the context they have focused (platforms/linux/src/system/PanelInputChannel.h). That reaches the editor on every session type, including GNOME and KDE on Wayland where no tool can, so it is tried before xdotool, wtype and ydotool, which remain for sessions where another input method is active.
+
+#[cfg(target_os = "linux")]
+fn panel_input_socket() -> Option<std::path::PathBuf> {
+    discover_session_provider("panel-input.sock")
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum ImeReply {
+    Ok(Option<u64>),
+    Declined,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Debug, PartialEq, Eq)]
+enum ImeOutcome {
+    Delivered,
+    // The host answered that it did not type anything, or could not be reached: another route may try.
+    Declined,
+    // The request was sent and no answer came back. The host may still have typed it, so no other route may try, or the text could appear twice.
+    Unknown,
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn parse_ime_reply(line: &str) -> Option<ImeReply> {
+    let value: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+    match value.get("ok")?.as_bool()? {
+        true => Some(ImeReply::Ok(
+            value.get("generation").and_then(serde_json::Value::as_u64),
+        )),
+        false => Some(ImeReply::Declined),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn ime_exchange(
+    socket: &std::path::Path,
+    request: &serde_json::Value,
+) -> Result<ImeReply, ImeOutcome> {
+    use std::io::{BufRead, Write};
+    let mut stream =
+        std::os::unix::net::UnixStream::connect(socket).map_err(|_| ImeOutcome::Declined)?;
+    // The host parks a request for up to 700ms while focus moves back to the editor.
+    stream
+        .set_write_timeout(Some(std::time::Duration::from_millis(500)))
+        .and_then(|_| stream.set_read_timeout(Some(std::time::Duration::from_millis(1500))))
+        .map_err(|_| ImeOutcome::Declined)?;
+    let mut line = request.to_string();
+    line.push('\n');
+    // The host acts only on a complete line, so a failed write cannot have typed anything.
+    stream
+        .write_all(line.as_bytes())
+        .map_err(|_| ImeOutcome::Declined)?;
+    let mut reply = String::new();
+    std::io::BufReader::new(std::io::Read::take(&stream, 4096))
+        .read_line(&mut reply)
+        .map_err(|_| ImeOutcome::Unknown)?;
+    parse_ime_reply(&reply).ok_or(ImeOutcome::Unknown)
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn ime_key_request(request: &KeyboardInputRequest) -> Option<serde_json::Value> {
+    let key = xdotool_key_name(request.virtual_key)?;
+    let sticky = request.include_sticky_modifiers;
+    Some(serde_json::json!({
+        "op": "key",
+        "key": key,
+        "keycode": ydotool_key_code(request.virtual_key).unwrap_or(0),
+        "shift": request.shift,
+        "control": sticky && request.modifiers.ctrl,
+        "alt": sticky && request.modifiers.alt,
+        "super": sticky && request.modifiers.win,
+    }))
+}
+
+#[cfg(target_os = "linux")]
+fn send_through_input_method(app: &tauri::AppHandle, mut request: serde_json::Value) -> ImeOutcome {
+    let Some(socket) = panel_input_socket() else {
+        return ImeOutcome::Declined;
+    };
+    let focused = |window: &tauri::WebviewWindow| window.is_focused().unwrap_or(false);
+    let panel_focused = EDITABLE_PANEL_LABELS
+        .into_iter()
+        .filter_map(|label| app.get_webview_window(label))
+        .any(|window| focused(&window));
+    // Our own settings window would take the text as readily as any editor. Leave that case to the routes that address the remembered window rather than the focused one.
+    let own_window_focused = |app: &tauri::AppHandle| {
+        app.webview_windows().into_iter().any(|(label, window)| {
+            !EDITABLE_PANEL_LABELS.contains(&label.as_str()) && focused(&window)
+        })
+    };
+    if !panel_focused {
+        if own_window_focused(app) {
+            return ImeOutcome::Declined;
+        }
+        return match ime_exchange(&socket, &request) {
+            Ok(ImeReply::Ok(_)) => ImeOutcome::Delivered,
+            Ok(ImeReply::Declined) => ImeOutcome::Declined,
+            Err(outcome) => outcome,
+        };
+    }
+    // The panel holds the focus, so the input method's focused context is the panel's own web view. Note the focus generation, hide the panels, and ask for a context focused after it.
+    let generation = match ime_exchange(&socket, &serde_json::json!({ "op": "generation" })) {
+        Ok(ImeReply::Ok(Some(generation))) => generation,
+        _ => return ImeOutcome::Declined,
+    };
+    let Ok(release) = release_focused_panels(app) else {
+        return ImeOutcome::Declined;
+    };
+    let outcome = if own_window_focused(app) {
+        ImeOutcome::Declined
+    } else {
+        request["after_generation"] = generation.into();
+        match ime_exchange(&socket, &request) {
+            Ok(ImeReply::Ok(_)) => ImeOutcome::Delivered,
+            Ok(ImeReply::Declined) => ImeOutcome::Declined,
+            Err(outcome) => outcome,
+        }
+    };
+    release.restore();
+    outcome
+}
+
+// Runs the input method route and turns its outcome into the answer for the caller: Some when it settled the request, None when the tool routes should try.
+#[cfg(target_os = "linux")]
+fn settle_through_input_method(
+    app: &tauri::AppHandle,
+    target: &PanelInputTarget,
+    request: serde_json::Value,
+) -> Option<Result<(), HostActionError>> {
+    match send_through_input_method(app, request) {
+        ImeOutcome::Delivered => Some(Ok(())),
+        ImeOutcome::Unknown => Some(Err(HostActionError {
+            code: "unavailable",
+        })),
+        ImeOutcome::Declined if matches!(target, PanelInputTarget::InputMethod) => {
+            Some(Err(HostActionError {
+                code: "unavailable",
+            }))
+        }
+        ImeOutcome::Declined => None,
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -639,6 +813,12 @@ pub(crate) fn send_panel_key(
     request.validate().map_err(|_| HostActionError {
         code: "invalid_key",
     })?;
+    let ime_request = ime_key_request(&request).ok_or(HostActionError {
+        code: "invalid_key",
+    })?;
+    if let Some(result) = settle_through_input_method(app, &target, ime_request) {
+        return result;
+    }
     if let PanelInputTarget::X11(window) = &target {
         let key = xdotool_key_args(&request).ok_or(HostActionError {
             code: "invalid_key",
@@ -649,8 +829,8 @@ pub(crate) fn send_panel_key(
         let code = ydotool_key_code(request.virtual_key).ok_or(HostActionError {
             code: "invalid_key",
         })?;
-        let mut args = Vec::new();
-        let mut modifiers = Vec::new();
+        let mut args = Vec::with_capacity(10);
+        let mut modifiers = Vec::with_capacity(3);
         if request.include_sticky_modifiers {
             if request.modifiers.ctrl {
                 modifiers.push(29u16);
@@ -684,7 +864,7 @@ pub(crate) fn send_panel_key(
     let key = xdotool_key_name(request.virtual_key).ok_or(HostActionError {
         code: "invalid_key",
     })?;
-    let mut args = Vec::new();
+    let mut args = Vec::with_capacity(10);
     if request.include_sticky_modifiers {
         if request.modifiers.ctrl {
             args.extend(["-M".to_owned(), "ctrl".to_owned()]);
@@ -717,6 +897,15 @@ fn send_panel_text_to_target(
     target: &PanelInputTarget,
     text: &str,
 ) -> Result<(), HostActionError> {
+    if !text
+        .chars()
+        .any(|character| matches!(character, '\n' | '\r' | '\t'))
+    {
+        let request = serde_json::json!({ "op": "text", "text": text });
+        if let Some(result) = settle_through_input_method(app, target, request) {
+            return result;
+        }
+    }
     // ydotool types an ASCII key map, while newlines and tabs must remain
     // literal text rather than becoming application shortcuts on any backend.
     let literal_transfer = panel_text_requires_clipboard(target, text);
@@ -811,17 +1000,20 @@ pub(crate) async fn send_panel_text(
     text: String,
     source: TypingSource,
 ) -> Result<(), HostActionError> {
-    if text.is_empty()
-        || text.len() > 4096
-        || text
-            .chars()
-            .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
-    {
-        return Err(HostActionError {
-            code: "invalid_text",
-        });
-    }
+    validate_panel_text(&text)?;
     let target = panel_input_target(state, &label)?;
+    deliver_panel_text(app, target, typing_statistics, text, source).await
+}
+
+/// Sends text the caller has already validated to one target, off the main thread, and counts it once it arrived.
+#[cfg(target_os = "linux")]
+async fn deliver_panel_text(
+    app: tauri::AppHandle,
+    target: PanelInputTarget,
+    typing_statistics: &tauri::State<'_, TypingStatisticsState>,
+    text: String,
+    source: TypingSource,
+) -> Result<(), HostActionError> {
     let typing_statistics = typing_statistics.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let result = send_panel_text_to_target(&app, &target, &text);
@@ -837,10 +1029,43 @@ pub(crate) async fn send_panel_text(
 }
 
 #[cfg(target_os = "linux")]
+fn validate_panel_text(text: &str) -> Result<(), HostActionError> {
+    if text.is_empty()
+        || text.len() > 4096
+        || msime_client_core::has_disallowed_control_with_options(text, true)
+    {
+        return Err(HostActionError {
+            code: "invalid_text",
+        });
+    }
+    Ok(())
+}
+
+/// Sends text from the cloud clipboard panel to the editor captured when this open of the panel began, never to a target another panel or an earlier open left behind.
+#[cfg(target_os = "linux")]
+pub(crate) async fn send_cloud_clipboard_text(
+    app: tauri::AppHandle,
+    typing_statistics: &tauri::State<'_, TypingStatisticsState>,
+    text: String,
+) -> Result<(), HostActionError> {
+    validate_panel_text(&text)?;
+    let target = cloud_clipboard_input_target(&app).ok_or(HostActionError {
+        code: "unavailable",
+    })?;
+    deliver_panel_text(app, target, typing_statistics, text, TypingSource::Unknown).await
+}
+
+#[cfg(target_os = "linux")]
 pub(crate) fn send_panel_ctrl_v(
     app: &tauri::AppHandle,
     target: &PanelInputTarget,
 ) -> Result<(), HostActionError> {
+    let request = serde_json::json!({
+        "op": "key", "key": "v", "keycode": 47, "control": true,
+    });
+    if let Some(result) = settle_through_input_method(app, target, request) {
+        return result;
+    }
     with_panel_focus_released(app, target, || {
         if let PanelInputTarget::X11(window) = target {
             return send_x11_panel_key(window, "ctrl+v");
@@ -871,22 +1096,10 @@ pub(crate) fn send_panel_voice_text(
     app: &tauri::AppHandle,
     target: &PanelInputTarget,
     text: &str,
-    commit_mode: &str,
 ) -> Result<(), HostActionError> {
-    voice_output::submit(text, commit_mode, |mode, text| match mode {
-        // An independent Tauri panel has no IBus input context. Both input
-        // modes therefore use the remembered Linux editor target, while the
-        // in-engine voice entry continues to commit through IBus directly.
-        voice_output::OutputMode::Tsf | voice_output::OutputMode::SendInput => {
-            send_panel_text_to_target(app, target, text).is_ok()
-        }
-        voice_output::OutputMode::Clipboard => {
-            if !write_linux_clipboard(text) {
-                return false;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(30));
-            send_panel_ctrl_v(app, target).is_ok()
-        }
+    // An independent Tauri panel has no input context of its own, so the text goes to the remembered editor target the way every other panel's text does: through the active MSIME host, or the typing fallbacks when another input method is active. Linux offers no voice commit strategy (see HostCapabilities::voice_commit_mode), so the stored mode is not read here; `tsf` names the default mode only so the shared length and control-character checks run.
+    voice_output::submit(text, "tsf", |_, text| {
+        send_panel_text_to_target(app, target, text).is_ok()
     })
     .map_err(|error| HostActionError {
         code: match error {
@@ -940,6 +1153,11 @@ fn focused_panel_target(state: &tauri::State<'_, PanelInputState>) -> Result<(),
         .ok_or(HostActionError {
             code: "unavailable",
         })?;
+    focus_panel_target(target)
+}
+
+#[cfg(target_os = "windows")]
+fn focus_panel_target(target: PanelInputTarget) -> Result<(), HostActionError> {
     msime_host_windows::focus(target.0)
         .then_some(())
         .ok_or(HostActionError {
@@ -1001,14 +1219,159 @@ pub(crate) fn send_panel_text_windows(
         })
 }
 
-// Panels sit bottom-centered on the work area, where the native ones did.
+/// Sends text from the cloud clipboard panel to the editor captured when this open of the panel began, never to the target another panel or an earlier open left in [`PanelInputState`].
 #[cfg(target_os = "windows")]
-pub(crate) fn windows_panel_position(width: f64, height: f64) -> Option<tauri::Position> {
+pub(crate) fn send_cloud_clipboard_text_windows(
+    app: &tauri::AppHandle,
+    text: &str,
+) -> Result<(), HostActionError> {
+    if !msime_host_windows::valid_text(text) {
+        return Err(HostActionError {
+            code: "invalid_text",
+        });
+    }
+    let target = cloud_clipboard_input_target(app).ok_or(HostActionError {
+        code: "unavailable",
+    })?;
+    focus_panel_target(target)?;
+    msime_host_windows::send_text(text)
+        .then_some(())
+        .ok_or(HostActionError {
+            code: "invalid_text",
+        })
+}
+
+// Panels sit where the native ones did: bottom-centred on the work area, or centred for the panels the shipped product centred.
+#[cfg(target_os = "windows")]
+pub(crate) fn windows_panel_position(
+    width: f64,
+    height: f64,
+    placement: msime_client_core::host_surface::PanelPlacement,
+) -> Option<tauri::Position> {
+    use msime_client_core::host_surface::PanelPlacement;
     msime_host_windows::work_area().map(|area| {
-        let (x, y) = area.bottom_center(width, height);
+        let (x, y) = match placement {
+            PanelPlacement::BottomCenter => area.bottom_center(width, height),
+            PanelPlacement::Center => area.center(width, height),
+        };
         tauri::Position::Physical(tauri::PhysicalPosition::new(
             x.round() as i32,
             y.round() as i32,
         ))
     })
+}
+
+// ---- Cloud clipboard input target ----
+//
+// The cloud clipboard panel types text that came from another device, so it must only ever reach an editor the user was in when they opened it. The shared [`PanelInputState`] cannot promise that: on Windows it is one slot every panel overwrites and that a failed capture leaves as it was, and on Linux a failed capture keeps whatever an earlier open stored for the label. On both, opening the panel from the settings window finds our own window focused, so the slot still names whatever editor some earlier panel captured. The panel therefore keeps its own target, captured for each open and dropped when it closes; without one it can only copy.
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) const CLOUD_CLIPBOARD_PANEL: &str = "cloud-clipboard-panel";
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[derive(Default)]
+pub(crate) struct CloudClipboardInputState(Mutex<FreshInputTarget<PanelInputTarget>>);
+
+/// The editor this open of the cloud clipboard panel may type into, if one was captured.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) fn cloud_clipboard_input_target(app: &tauri::AppHandle) -> Option<PanelInputTarget> {
+    app.state::<CloudClipboardInputState>()
+        .0
+        .lock()
+        .ok()?
+        .target()
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) fn forget_cloud_clipboard_input_target(app: &tauri::AppHandle) {
+    if let Ok(mut slot) = app.state::<CloudClipboardInputState>().0.lock() {
+        slot.close();
+    }
+}
+
+/// Remembers the editor a panel that is about to open should type into. Every panel but the cloud clipboard keeps the shared behaviour; the cloud clipboard also captures its own target for this open, keeping it only when it is verifiably another application's window.
+#[cfg(target_os = "linux")]
+pub(crate) fn remember_opening_panel_target(
+    app: &tauri::AppHandle,
+    state: &tauri::State<'_, PanelInputState>,
+    label: &str,
+) {
+    if label != CLOUD_CLIPBOARD_PANEL {
+        let _ = remember_panel_input_target(state, label, true);
+        return;
+    }
+    let cloud = app.state::<CloudClipboardInputState>();
+    let Ok(open) = cloud.0.lock().map(|mut slot| slot.begin_open()) else {
+        return;
+    };
+    // A failed capture leaves the label's previous entry in place, so drop it first: the panel must not be positioned over, or type into, an editor from an earlier open.
+    if let Ok(mut targets) = state.0.lock() {
+        targets.remove(label);
+    }
+    let _ = remember_panel_input_target(state, label, true);
+    let captured = panel_input_target(state, label)
+        .ok()
+        .filter(linux_target_is_external);
+    let Ok(mut slot) = cloud.0.lock() else {
+        return;
+    };
+    slot.record(open, captured);
+}
+
+/// Whether a captured target is provably a window of another process. Only X11 and sway name a window whose owner can be checked; ydotool, wtype and the input method type into whatever holds focus when the text is sent, which from a panel opened in the settings window is that window, so they are never treated as an external editor.
+#[cfg(target_os = "linux")]
+fn linux_target_is_external(target: &PanelInputTarget) -> bool {
+    let read = |program: &str, arguments: &[&str], limit: usize| {
+        linux_process::read_text(program, arguments, limit, std::time::Duration::from_secs(1))
+    };
+    let owner = match target {
+        PanelInputTarget::X11(window) => read("xdotool", &["getwindowpid", window], 64)
+            .and_then(|output| output.trim().parse::<u32>().ok()),
+        PanelInputTarget::Sway(id) => read("swaymsg", &["-t", "get_tree", "-r"], 1024 * 1024)
+            .and_then(|output| serde_json::from_str::<serde_json::Value>(&output).ok())
+            .and_then(|tree| sway_pid_for_container(&tree, *id)),
+        PanelInputTarget::Ydotool | PanelInputTarget::Wayland | PanelInputTarget::InputMethod => {
+            None
+        }
+    };
+    owner.is_some_and(|pid| pid != std::process::id())
+}
+
+/// The process that owns a sway container, from the `pid` sway reports for each view.
+#[cfg(target_os = "linux")]
+pub(crate) fn sway_pid_for_container(value: &serde_json::Value, id: u64) -> Option<u32> {
+    if value.get("id").and_then(serde_json::Value::as_u64) == Some(id) {
+        return value
+            .get("pid")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|pid| u32::try_from(pid).ok());
+    }
+    ["nodes", "floating_nodes"]
+        .into_iter()
+        .filter_map(|key| value.get(key).and_then(serde_json::Value::as_array))
+        .flatten()
+        .find_map(|node| sway_pid_for_container(node, id))
+}
+
+/// Remembers the editor a panel that is about to open should type into. Every panel keeps the shared behaviour; the cloud clipboard also captures its own target for this open, and only when the foreground window belongs to another process.
+#[cfg(target_os = "windows")]
+pub(crate) fn remember_opening_panel_target(
+    app: &tauri::AppHandle,
+    state: &tauri::State<'_, PanelInputState>,
+    label: &str,
+) {
+    let _ = remember_panel_input_target(state);
+    if label != CLOUD_CLIPBOARD_PANEL {
+        return;
+    }
+    let cloud = app.state::<CloudClipboardInputState>();
+    let Ok(mut slot) = cloud.0.lock() else {
+        return;
+    };
+    let open = slot.begin_open();
+    let target = msime_host_windows::foreground_is_external()
+        .then(msime_host_windows::foreground_window)
+        .flatten()
+        .map(PanelInputTarget);
+    slot.record(open, target);
 }

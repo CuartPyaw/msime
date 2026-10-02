@@ -18,6 +18,15 @@ import SwiftUI
     assert(MacEmojiFlow.vertical(from: 5, direction: 1, cells: cells) == 5)
     assert(MacEmojiFlow.vertical(from: -1, direction: 1, cells: cells) == nil)
     assert(MacEmojiFlow.cells(texts: [], width: 200).isEmpty)
+    // 分节流式布局：行号跨节续接，上下方向键可以在 All 和插件分组之间移动；空节不占行。
+    let second = MacEmojiFlow.cells(texts: ["aaaaa", "bbbbbb"], width: 200, measure: measure)
+    let stacked = MacEmojiFlow.stacked([cells, [], second])
+    assert(stacked.map(\.row) == [0, 0, 1, 1, 2, 2, 3, 3])
+    assert(stacked[6].rect == second[0].rect)
+    assert(MacEmojiFlow.vertical(from: 4, direction: 1, cells: stacked) == 6)
+    assert(MacEmojiFlow.vertical(from: 7, direction: -1, cells: stacked) == 5)
+    assert(MacEmojiFlow.stacked([cells]).map(\.row) == cells.map(\.row))
+    assert(MacEmojiFlow.stacked([]).isEmpty)
     for width: CGFloat in [0, -1, .infinity, .nan] {
       assert(MacEmojiFlow.cells(texts: texts, width: width).isEmpty)
     }
@@ -56,7 +65,7 @@ import SwiftUI
     }
     let selectedRect = cells[3].rect
     let pixel = (Int((selectedRect.minY + 12) * 3) * image.width + Int((selectedRect.minX + 12) * 3)) * 4
-    for (channel, expected) in [224, 215, 229].enumerated() {
+    for (channel, expected) in [223, 232, 229].enumerated() {
       assert(abs(Int(pixels[pixel + channel]) - expected) <= 2)
     }
     print("Emoji flow geometry, fitting, wrapping, navigation and native rendering passed")

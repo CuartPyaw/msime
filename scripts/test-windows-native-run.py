@@ -13,9 +13,9 @@ links on its own with the host compiler is one whose translation unit needs
 nothing from Windows; anything that does not is skipped and stays covered by the
 cross build alone. Nothing has to be added here when a test is added.
 
-Three sources compile but do not pass here, and they are exclusions with reasons
-rather than failures - see `HOST_DIFFERENCES`. Every other failure is reported:
-these are the same assertions the Windows build would make.
+The sources in `HOST_DIFFERENCES` compile but do not pass here, or do not compile here for a reason that is the host's rather than the code's, and they are exclusions with reasons rather than failures. Every other failure is reported: these are the same assertions the Windows build would make.
+
+A source that stops at a missing header is skipped only when the header is not in this repository - a Windows SDK or system header. A header the repository does have means the include path here is wrong, and skipping it would drop a portable test from the count without anyone noticing, which is how two of the TIP's tests went unrun.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from __future__ import annotations
 import functools
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -61,6 +62,7 @@ HOST_DIFFERENCES = {
 # Sources whose `main` takes an argument the build system supplies.
 ARGUMENTS = {
     "core/installer_launch.cpp": ["platforms/windows/installer/msime_setup.iss"],
+    "input/zhuyin_keys.cpp": ["platforms/windows/tests/input/fixtures/zhuyin.db"],
 }
 
 # The three online workers are the exception to "one translation unit": their
@@ -75,9 +77,55 @@ COMPANIONS: dict[str, tuple[list[str], bool]] = {
     "candidate/cloud_candidate_worker.cpp": (["src/candidate/CloudCandidateWorker.cpp"], True),
     "candidate/ai_candidate_worker.cpp": (["src/candidate/AiCandidateWorker.cpp"], True),
     "candidate/translation_worker.cpp": (["src/candidate/TranslationWorker.cpp"], True),
+    # Ctrl+Enter translation commit, through the reply composer against a real Engine session.
+    "input/candidate_translation_commit.cpp": (
+        [
+            "src/ipc/ReplyComposer.cpp",
+            "src/ipc/ReplyCodec.cpp",
+            "src/ipc/ServerSession.cpp",
+            "src/input/ChineseTextConversion.cpp",
+        ],
+        True,
+    ),
+    # The Server side of the Korean scheme and its Hanja list, through the reply composer against a real Engine session.
+    "input/korean_keys.cpp": (
+        [
+            "src/ipc/ReplyComposer.cpp",
+            "src/ipc/ReplyCodec.cpp",
+            "src/ipc/ServerSession.cpp",
+            "src/input/ChineseTextConversion.cpp",
+        ],
+        True,
+    ),
+    # The Server side of the Zhuyin scheme and its candidate list, against a real Engine session and a checked-in dictionary.
+    "input/zhuyin_keys.cpp": (
+        [
+            "src/ipc/ReplyComposer.cpp",
+            "src/ipc/ReplyCodec.cpp",
+            "src/ipc/ServerSession.cpp",
+            "src/input/ChineseTextConversion.cpp",
+        ],
+        True,
+    ),
+    # The Server side of the Vietnamese scheme, against a real Engine session.
+    "input/vietnamese_keys.cpp": (
+        [
+            "src/ipc/ReplyComposer.cpp",
+            "src/ipc/ReplyCodec.cpp",
+            "src/ipc/ServerSession.cpp",
+            "src/input/ChineseTextConversion.cpp",
+        ],
+        True,
+    ),
+    # Book-title nesting paid back after the TSF auto-closes, against a real Engine session.
+    "input/paired_punctuation_balance.cpp": (
+        ["src/ipc/ServerSession.cpp", "src/ipc/ReplyCodec.cpp", "src/input/ChineseTextConversion.cpp"],
+        True,
+    ),
     # The TIP's reply parser, which its own policy tests call. No host library: this is JSON in,
     # struct out.
     "tsf/input/raw_commit.cpp": (["tsf/EngineResponse.cpp"], False),
+    "tsf/input/host_composition.cpp": (["tsf/EngineResponse.cpp"], False),
     "tsf/input/engine_response.cpp": (["tsf/EngineResponse.cpp"], False),
 }
 COMPANION_LIBRARIES = ["-lcurl", "-lsqlite3"]
@@ -155,12 +203,35 @@ def include_flags() -> list[str]:
     # Every source directory, the way the Windows build exposes them, plus the
     # contract and host headers. Derived so a new subdirectory needs no edit.
     directories = [SRC, *(path for path in sorted(SRC.iterdir()) if path.is_dir())]
-    directories += [TESTS / "core", ROOT / "vendor/MSIME-Engine/contracts", ROOT / "crates/host-api/include"]
-    # The TIP's own headers, for its own tests.
-    directories += [ROOT / "platforms/windows/tsf"]
+    # The DLL/Server contract headers, which the Windows build puts on the global include path. Ahead of the TIP's directories, so the forwarding tsf/IPC/KeyEventSendResult.h does not shadow the definition it forwards to.
+    directories += [ROOT / "platforms/windows/common"]
+    directories += [TESTS / "core", ROOT / "shared/contracts", ROOT / "crates/host-api/include"]
+    # The TIP's own headers, for its own tests: its root and each of its source directories, which its CMakeLists hands to individual tests (`IPC` for passthrough statistics, `Global` for the smart punctuation fingerprint). Last, so a header both trees have still resolves to the host's copy as before.
+    tsf = ROOT / "platforms/windows/tsf"
+    directories += [tsf]
+    if tsf.exists():
+        directories += [path for path in sorted(tsf.iterdir()) if path.is_dir() and path.name != "tests"]
     flags = [f"-I{path}" for path in directories if path.exists()]
     flags += [f"-I{path}" for path in EXTRA_INCLUDES if pathlib.Path(path).exists()]
     return flags
+
+
+# clang's `fatal error: 'X' file not found` and GCC's `fatal error: X: No such file or directory`.
+MISSING_HEADER = re.compile(r"fatal error: '?([^':\s]+)'?:? (?:file not found|No such file or directory)")
+
+
+@functools.lru_cache(maxsize=1)
+def repository_files() -> tuple[str, ...]:
+    listed = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True)
+    return tuple(listed.stdout.splitlines())
+
+
+def repository_header(header: str) -> str | None:
+    """The tracked file an `#include` of this name would have found, if the repository has one."""
+    return next(
+        (path for path in repository_files() if path == header or path.endswith(f"/{header}")),
+        None,
+    )
 
 
 def accepts_declspec(driver: str) -> bool:
@@ -213,7 +284,7 @@ def build(
         return binary, ""
     # Two ordinary reasons a test source does not build on its own here, both
     # of them "the Windows build owns this one":
-    #   - it reaches for a Windows header;
+    #   - it reaches for a Windows header, one this repository does not have;
     #   - it needs the other translation units the Windows build links it with,
     #     which shows up as undefined symbols.
     # Anything else is code that does not compile, and letting that quietly
@@ -225,6 +296,11 @@ def build(
         "Undefined symbols",
         "undefined reference",
     )
+    missing = MISSING_HEADER.search(compiled.stderr)
+    if missing:
+        found = repository_header(missing.group(1))
+        if found:
+            return None, f"cannot find {missing.group(1)}, which this repository has at {found}: the include path here is missing its directory"
     if any(marker in compiled.stderr for marker in ordinary):
         return None, ""
     if relative in HOST_DIFFERENCES:

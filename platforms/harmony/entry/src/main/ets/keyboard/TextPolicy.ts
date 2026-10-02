@@ -1,0 +1,51 @@
+import { utf8Length } from "./Utf8";
+
+/** Text validation shared by settings, network and candidate policies. */
+export class TextPolicy {
+  /** Accepts one URL scheme with a non-empty authority before callers apply their own bounds. */
+  static hasAuthority(value: string, scheme: string): boolean {
+    if (!value.startsWith(scheme)) return false;
+    const authority: string = value.substring(scheme.length).split("/")[0].split("?")[0];
+    return authority.length > 0;
+  }
+
+  /** Validates a bounded endpoint with one of the supplied schemes and no user-info or fragment. */
+  static validAuthority(value: string, schemes: string[], maxBytes: number = 2048): boolean {
+    return value.length > 0 && utf8Length(value) <= maxBytes && !TextPolicy.hasControl(value)
+      && schemes.some((scheme: string): boolean => TextPolicy.hasAuthority(value, scheme))
+      && !value.includes("@") && !value.includes("#");
+  }
+
+  /** Allows plaintext only for a loopback authority; credentials remain HTTPS-only. */
+  static validSecureAuthority(value: string, allowHttp: boolean, maxBytes: number = 2048): boolean {
+    if (!TextPolicy.validAuthority(value, allowHttp ? ["https://", "http://"] : ["https://"], maxBytes)) {
+      return false;
+    }
+    if (value.startsWith("https://")) return true;
+    if (!allowHttp || !value.startsWith("http://")) return false;
+    const prefixLength: number = "http://".length;
+    const rest: string = value.substring(prefixLength);
+    const relativeEnd: number = rest.search(/[\/?#]/);
+    const authority: string = rest.substring(0, relativeEnd < 0 ? rest.length : relativeEnd);
+    if (authority === "localhost" || authority.startsWith("localhost:")) return true;
+    if (authority === "127.0.0.1" || authority.startsWith("127.0.0.1:")) return true;
+    return authority === "[::1]" || authority.startsWith("[::1]:");
+  }
+
+  /** Rejects the C0 and C1 control ranges while leaving printable Unicode untouched. */
+  static hasControl(value: string): boolean {
+    return Array.from(value).some((character: string): boolean => {
+      const code: number = character.codePointAt(0) ?? 0;
+      return code <= 0x1f || (code >= 0x7f && code <= 0x9f);
+    });
+  }
+
+  /** Bounds text while allowing the line breaks and tabs used in prompts and transcripts. */
+  static validMultiline(value: string, maxBytes: number, requireNonEmpty: boolean): boolean {
+    return (!requireNonEmpty || value.trim().length > 0) && utf8Length(value) <= maxBytes
+      && !Array.from(value).some((character: string): boolean => {
+        const code: number = character.codePointAt(0) ?? 0;
+        return code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d;
+      });
+  }
+}

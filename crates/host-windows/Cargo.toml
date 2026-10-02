@@ -14,7 +14,7 @@ msime-client-core = { path = "../client-core" }
 # panels need live here behind safe wrappers.
 [target.'cfg(windows)'.dependencies]
 msime-client-core = { path = "../client-core" }
-windows-sys = { version = "0.59", features = [
+windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
   "Win32_UI_Input_KeyboardAndMouse",
@@ -28,21 +28,21 @@ windows-sys = { version = "0.59", features = [
   "Win32_System_Memory",
   "Win32_System_Pipes",
   "Win32_System_RemoteDesktop",
+  "Win32_System_Registry",
   "Win32_System_IO",
   "Win32_Storage_FileSystem",
   "Win32_Security",
-  "Win32_Security_Credentials",
 ] }
 # Windows Ink handwriting recognition is WinRT, which windows-sys does not
 # project; this is the same InkRecognizerContainer the reference panel uses.
-windows = { version = "0.61", features = [
+windows = { version = "0.62", features = [
   "UI_Input_Inking",
   "Foundation",
   "Foundation_Collections",
 ] }
-# The 0.61 projection takes these from their own crates.
-windows-numerics = "0.2"
-windows-collections = "0.2"
+# The 0.62 projection takes these from their own crates, and they have to be the versions windows 0.62 itself uses: a Matrix3x2 or an IIterable from a different windows-numerics / windows-collections is a different type to the compiler, however identical it looks.
+windows-numerics = "0.3"
+windows-collections = "0.3"
 
 [lints]
 workspace = true

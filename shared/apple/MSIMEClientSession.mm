@@ -16,16 +16,18 @@ static void VoicePhase(uint8_t phase, void *opaque) { auto *c=(VoiceStreamContex
 
 struct SnapshotReaderContext { MSIMESnapshotNextRecord block; };
 static intptr_t SnapshotNext(void *opaque, uint8_t *buffer, size_t capacity) {
-    auto *context = static_cast<SnapshotReaderContext *>(opaque);
-    NSError *failure = nil;
-    NSDictionary *record = context->block(&failure);
-    if (failure) return -1;
-    if (!record) return 0;
-    NSError *serializationError = nil;
-    NSData *data = [NSJSONSerialization dataWithJSONObject:record options:0 error:&serializationError];
-    if (serializationError || !data || data.length == 0 || data.length > capacity) return -1;
-    memcpy(buffer, data.bytes, data.length);
-    return static_cast<intptr_t>(data.length);
+    @autoreleasepool {
+        auto *context = static_cast<SnapshotReaderContext *>(opaque);
+        NSError *failure = nil;
+        NSDictionary *record = context->block(&failure);
+        if (failure) return -1;
+        if (!record) return 0;
+        NSError *serializationError = nil;
+        NSData *data = [NSJSONSerialization dataWithJSONObject:record options:0 error:&serializationError];
+        if (serializationError || !data || data.length == 0 || data.length > capacity) return -1;
+        memcpy(buffer, data.bytes, data.length);
+        return static_cast<intptr_t>(data.length);
+    }
 }
 
 static id decodeValue(char *response, NSError **error) {
@@ -182,6 +184,13 @@ static NSDictionary *decode(char *response, NSError **error) {
     id value = decodeValue(msime_client_parse_niutrans_translation_response((const uint8_t *)body.bytes, body.length), error);
     return [value isKindOfClass:NSString.class] ? value : nil;
 }
++ (NSString *)formatTranslationGloss:(NSString *)gloss error:(NSError **)error {
+    NSData *data = [gloss isKindOfClass:NSString.class] ? [gloss dataUsingEncoding:NSUTF8StringEncoding] : nil;
+    if (!data || data.length > 65536) { setError(error, @"翻译释义格式错误或过大"); return nil; }
+    if (!data.length) return nil;
+    id value = decodeValue(msime_client_format_translation_gloss((const uint8_t *)data.bytes, data.length), error);
+    return [value isKindOfClass:NSString.class] ? value : nil;
+}
 + (NSDictionary *)aiHTTPRequest:(NSDictionary *)request error:(NSError **)error {
     if (![NSJSONSerialization isValidJSONObject:request]) { setError(error, @"AI 请求格式错误"); return nil; }
     NSData *data = [NSJSONSerialization dataWithJSONObject:request options:0 error:error];
@@ -211,6 +220,14 @@ static NSDictionary *decode(char *response, NSError **error) {
     if (!body.length) return nil;
     id value = decodeValue(msime_client_parse_tencent_translation_response((const uint8_t *)body.bytes, body.length, count), error);
     return [value isKindOfClass:NSArray.class] ? value : nil;
+}
++ (BOOL)customTranslationReplyFailed:(NSData *)body {
+    if (![body isKindOfClass:NSData.class]) return YES;
+    return msime_client_custom_translation_reply_failed((const uint8_t *)body.bytes, body.length);
+}
++ (BOOL)niuTransTranslationReplyFailed:(NSData *)body {
+    if (![body isKindOfClass:NSData.class]) return YES;
+    return msime_client_niutrans_translation_reply_failed((const uint8_t *)body.bytes, body.length);
 }
 + (NSArray<NSDictionary *> *)customTranslationPlan:(NSDictionary *)request error:(NSError **)error {
     if (![NSJSONSerialization isValidJSONObject:request]) { setError(error, @"翻译计划格式错误"); return nil; }
@@ -456,6 +473,11 @@ static NSDictionary *decode(char *response, NSError **error) {
     NSData *dir = [directory dataUsingEncoding:NSUTF8StringEncoding];
     return decode(msime_client_load_preferences(static_cast<const uint8_t *>(dir.bytes), dir.length), error);
 }
++ (NSDictionary *)recoverPreferencesInDirectory:(NSString *)directory error:(NSError **)error {
+    if (![directory isAbsolutePath] || directory.length == 0) { setError(error, @"偏好目录必须是绝对路径"); return nil; }
+    NSData *dir = [directory dataUsingEncoding:NSUTF8StringEncoding];
+    return decode(msime_client_recover_preferences(static_cast<const uint8_t *>(dir.bytes), dir.length), error);
+}
 - (nullable instancetype)initWithOptions:(NSDictionary<NSString *, id> *)options error:(NSError **)error {
     if (![NSThread isMainThread]) { setError(error, @"输入会话必须在主线程创建"); return nil; }
     self = [super init];
@@ -581,6 +603,23 @@ static NSDictionary *decode(char *response, NSError **error) {
 - (nullable NSDictionary *)clearPositionGeneration:(uint64_t)generation index:(NSUInteger)index error:(NSError **)error {
     if (![self checkThreadAndHandle:error]) return nil;
     return decode(msime_client_clear_candidate_position(_handle, generation, index), error);
+}
+// No NSError and no main-thread check here: these run on every key press, and the host library already answers false for a closed handle or another thread.
+- (BOOL)keySound:(uint32_t)keyClass {
+    return _handle && msime_client_key_sound(_handle, keyClass);
+}
+- (BOOL)commitSound {
+    return _handle && msime_client_commit_sound(_handle);
+}
+- (BOOL)setMusicActive:(BOOL)active {
+    return _handle && msime_client_music_set_active(_handle, active);
+}
+- (uint32_t)typingEffect:(uint32_t)event {
+    return _handle ? msime_client_typing_effect(_handle, event) : 0;
+}
+- (nullable NSDictionary *)typingEffectSettingsWithError:(NSError **)error {
+    if (![self checkThreadAndHandle:error]) return nil;
+    return decode(msime_client_typing_effect_settings(_handle), error);
 }
 - (nullable NSDictionary *)setCandidatePageSize:(uint8_t)size error:(NSError **)error {
     if (![self checkThreadAndHandle:error]) return nil;

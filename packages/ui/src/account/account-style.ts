@@ -9,21 +9,42 @@
 
 export const page = "flex flex-col gap-3.5";
 export const section = "section m-0";
-export const heading = "m-0 text-[15px] font-semibold text-body";
-export const note = "mt-[7px] mb-0 text-secondary";
-export const muted = "text-xs text-muted";
+export const heading = "m-0 [font-size:var(--p-row-fs)] font-semibold [color:var(--p-text)]";
+export const note = "mt-[7px] mb-0 [font-size:var(--p-sub-fs)] [color:var(--p-sub)]";
+export const muted = "text-xs [color:var(--p-sub)]";
 
 export const field = "flex flex-col gap-[7px] text-xs text-secondary";
 export const input =
   "min-h-[38px] w-full rounded-lg border border-control-border bg-[var(--dropdown-bg)] px-2.5 py-[7px] font-[inherit] text-body focus:border-accent";
 export const primary =
-  "w-fit rounded-lg border border-accent-soft-border bg-accent-strong px-3.5 py-[7px] text-white";
+  "w-fit whitespace-nowrap rounded-lg border border-accent-soft-border bg-accent-strong px-3.5 py-[7px] text-white disabled:opacity-60";
 /** A row of buttons that wraps rather than overflowing; every account surface uses the same one. */
 export const actionRow =
   "flex flex-wrap items-center gap-[9px] [&>.secondary]:m-0 [&>.danger-text]:m-0";
 export const stack = "flex flex-col gap-4";
 
+/** A status line from the page's own actions, set apart from the cards instead of floating as bare text above them. */
+export const status = "m-0 rounded-lg bg-subtle px-3.5 py-2.5 text-[13px] text-secondary";
+
+// ---- signing in ----
+
+/** The signed-out page is one card: the welcome, the providers and the repair actions, centred in a column narrow enough that the buttons read as a list rather than as banners. */
+export const signIn = "flex flex-col items-center gap-5 py-8 text-center";
+export const signInHeader = "flex flex-col items-center gap-3 [&_h2]:text-[17px] [&_p]:mt-1.5";
+export const signInBody = "flex w-full max-w-[320px] flex-col gap-2.5 text-left";
+export const provider =
+  "w-full cursor-pointer rounded-lg border border-control-border bg-[var(--dropdown-bg)] px-3.5 py-2.5 text-center font-medium text-body not-disabled:hover:border-edge-strong disabled:cursor-default disabled:opacity-60";
+export const submit =
+  "w-full rounded-lg border border-accent-soft-border bg-accent-strong px-3.5 py-2.5 font-medium text-white disabled:opacity-60";
+/** The actions that repair a broken sign-in rather than perform one: present, but quiet. */
+export const signInFooter = "flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5";
+export const link =
+  "cursor-pointer border-0 bg-transparent p-0 text-xs [color:var(--p-sub)] not-disabled:hover:[color:var(--p-text)] not-disabled:hover:underline disabled:cursor-default disabled:opacity-60";
+
 export const hero = "flex items-center gap-4";
+/** The edit dialog's avatar, which opens the file dialog: round like the avatar it holds, with a focus ring and no button chrome. */
+export const avatarButton =
+  "m-0 cursor-pointer rounded-full border-0 bg-transparent p-0 not-disabled:hover:opacity-85 disabled:cursor-default focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
 export const avatar = (size: "small" | "medium" | "large") =>
   `grid place-items-center rounded-full bg-accent-strong font-[650] text-white ${
     size === "large"
@@ -34,14 +55,15 @@ export const avatar = (size: "small" | "medium" | "large") =>
   }`;
 export const profileCard =
   "w-full cursor-pointer border-0 text-left disabled:cursor-default disabled:opacity-100";
-export const profileChevron = "ml-auto text-2xl leading-none text-muted";
+export const profileChevron = "ml-auto text-2xl leading-none [color:var(--p-sub)]";
 export const profilePreview = "flex items-center gap-3 text-lg";
 /** The same preview, given the whole page: centred and stacked rather than a row. */
 export const profilePreviewLarge =
   "flex flex-col items-center justify-center gap-3 p-[22px] text-center [&>h2]:m-0";
 export const profilePageHeader =
   "mb-3.5 flex items-center gap-3 [&>h2]:m-0 [&>h2]:flex-1 [&>h2]:text-center [&>h2]:text-lg [&>.secondary]:shrink-0 [&>.secondary]:grow-0 [&>.secondary]:basis-auto";
-export const copyId = "cursor-pointer border-0 bg-transparent p-0 font-[inherit] text-accent";
+export const copyId =
+  "cursor-pointer border-0 bg-transparent p-0 font-[inherit] [color:var(--p-accent-text)]";
 
 export const modalBackdrop = "fixed inset-0 z-20 grid place-items-center bg-black/42 p-5";
 export const modal =
@@ -50,15 +72,24 @@ export const modalHeading = "flex items-center justify-between gap-3 [&>h2]:m-0"
 
 /** Two columns of facts, one on a phone where a value would otherwise be squeezed to a few glyphs. */
 export const details =
-  "m-0 grid grid-cols-2 gap-3 pt-1 max-phone:grid-cols-1 [&>div]:min-w-0 [&>div]:rounded-lg [&>div]:bg-subtle [&>div]:p-3 [&_dt]:text-xs [&_dt]:text-muted [&_dd]:mt-[5px] [&_dd]:mb-0 [&_dd]:break-anywhere [&_dd]:text-body";
+  "m-0 grid grid-cols-2 gap-3 pt-1 max-phone:grid-cols-1 [&>div]:min-w-0 [&>div]:rounded-lg [&>div]:bg-subtle [&>div]:p-3 [&_dt]:text-xs [&_dt]:[color:var(--p-sub)] [&_dd]:mt-[5px] [&_dd]:mb-0 [&_dd]:ml-0 [&_dd]:break-anywhere [&_dd]:[color:var(--p-text)]";
 export const code = "flex flex-col gap-3 pt-0.5";
+
+// ---- the signed-in settings, drawn as the platform's grouped rows ----
+
+export const rowButton = "secondary m-0 whitespace-nowrap";
+/** The destructive action in a row: a bordered button in the danger colour, so it reads as a button beside its neighbours rather than as stray red text. */
+export const rowDanger =
+  "m-0 cursor-pointer whitespace-nowrap rounded-lg border border-[var(--border-color)] bg-[var(--button-secondary-bg)] px-3 py-[7px] text-danger not-disabled:hover:bg-[var(--button-secondary-hover)] disabled:cursor-default disabled:opacity-60";
+export const dangerButton =
+  "cursor-pointer whitespace-nowrap rounded-lg border border-danger bg-danger px-3.5 py-[7px] text-white disabled:cursor-default disabled:opacity-60";
+/** Something that belongs to a group but is not a row of its own, such as a confirmation, given the row's surface and padding. */
+export const rowBlock = "bg-[var(--p-row-bg)] [padding:var(--p-row-pad)]";
+export const footnote = "m-0 px-1 text-xs leading-relaxed [color:var(--p-sub)]";
 export const confirmation = "rounded-lg border border-edge bg-subtle p-3.5 [&>p]:mt-0 [&>p]:mb-3";
 
 export const communityActions =
   "flex items-center justify-between gap-4 [&>div]:min-w-0 [&>.secondary]:m-0 [&>.secondary]:shrink-0 [&>.secondary]:grow-0 [&>.secondary]:basis-auto";
-/** The same row once it holds several entries: the label takes a line, the buttons share the next. */
-export const communityGroup =
-  "flex flex-wrap items-center justify-between gap-4 [&>div]:flex-[1_0_100%] [&>div]:min-w-0 [&>.secondary]:m-0 [&>.secondary]:flex-[1_1_96px]";
 
 export const mobileMenu = "flex flex-col gap-2.5";
 export const mobileMenuSummary =

@@ -5,9 +5,12 @@ import { KeyboardSession, KeyboardPreferences } from '../keyboard/KeyboardSessio
 import { CandidateAnchor, CandidateAnchorPolicy } from './CandidateAnchorPolicy';
 import { KeyboardLog, describeError } from '../keyboard/KeyboardLog';
 import fs from '@ohos.file.fs';
+import client from 'libmsimeclient.so';
 import display from '@ohos.display';
+import window from '@ohos.window';
 import ConfigurationConstant from '@ohos.app.ability.ConfigurationConstant';
 import { KeyboardMetrics } from '../keyboard/KeyboardMetrics';
+import { KeyboardGeometry } from '../keyboard/KeyboardGeometry';
 import { KeyboardFormFactor } from '../keyboard/KeyboardFormFactor';
 import { HardwareKeyRouter, HardwareKey, HardwareKeyAction, HardwareKeyDecision }
   from '../keyboard/HardwareKeyRouter';
@@ -15,27 +18,31 @@ import { InputModeRouting, ModeGesture, ModeKey } from '../keyboard/InputModeRou
 import { VoiceKey } from '../keyboard/input/VoiceHotkeyPolicy';
 import { CandidateTextEdge } from '../keyboard/input/CandidateTextPolicy';
 import { FloatingToolbarLayout } from '../keyboard/FloatingToolbarLayout';
+import { InputModeHudPolicy, InputModeHudSize } from '../keyboard/InputModeHudPolicy';
 import { FloatingToolbarDragPolicy } from '../keyboard/FloatingToolbarDragPolicy';
 import { DesktopSurface } from '../keyboard/DesktopSurface';
 import type { KeyEvent as InputKeyEvent } from '@ohos.multimodalInput.keyEvent';
 import { Action as KeyAction } from '@ohos.multimodalInput.keyEvent';
 import { StagedResources } from '../keyboard/StagedResources';
 import { HardwareKeyDispatch } from '../keyboard/HardwareKeyDispatch';
+import { SchemeTraits } from '../keyboard/SchemeTraits';
 import { PanelShortcutKey, PanelShortcutPolicy, PanelSurfaceAction }
   from '../keyboard/input/PanelShortcutPolicy';
 import { ToolbarButton } from '../keyboard/FloatingToolbarLayout';
 import { AttachedInputDevice, DeviceChange, HardwareKeyboardPolicy, KeyRoutingTransition }
   from '../keyboard/input/HardwareKeyboardPolicy';
 import { HarmonyHardwareKeyboards } from '../keyboard/input/HarmonyHardwareKeyboards';
+import { HardwareBackspaceGuard } from '../keyboard/input/BackspaceHoldPolicy';
+import { HeldKeys, KeyIdPolicy } from '../keyboard/KeyIdPolicy';
+import { HarmonyTelemetry } from '../telemetry/Telemetry';
 
-// The badge's own geometry, from platforms/macos/src/InputModeHUDPanel.mm: a capsule that carries
-// the logo and one character side by side, shown long enough to read and gone before the next word.
-const HUD_WIDTH_VP: number = 100;
-const HUD_HEIGHT_VP: number = 56;
+// Where the badge goes and how long it stays, from platforms/macos/src/input/InputModeHUDPanel.mm: shown long enough to read and gone before the next word. Its size is the floating toolbar's, from InputModeHudPolicy.sizeVp.
 const HUD_SCREEN_MARGIN_VP: number = 8;
 const HUD_CARET_GAP_VP: number = 10;
 const HUD_VISIBLE_MS: number = 780;
-const BUNDLE_NAME: string = 'app.msime.client';
+const BUNDLE_NAME: string = 'app.msime.harmony';
+// KEYCODE_DEL, the Backspace key.
+const KEYCODE_DEL: number = 2055;
 const TOOLBAR_MARGIN_VP: number = 20;
 // Wide enough for the key rows to keep the proportions they have on a phone, rather than stretching
 // a ten-key row across a desktop.
@@ -70,10 +77,19 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
   private hud: inputMethodEngine.Panel | undefined = undefined;
   private hudTimer: number = -1;
   private readonly modeKeys: InputModeRouting = new InputModeRouting();
+  private readonly backspaceHold: HardwareBackspaceGuard = new HardwareBackspaceGuard();
+  // Physical keys that are down, so the key heatmap counts a held key once rather than once per repeat.
+  private readonly heldKeys: HeldKeys = new HeldKeys();
   // The bar that says what mode the keyboard is in. Another window of its own, because it outlives
   // every composition and every editor: it is on screen whenever the keyboard is running at all.
   private toolbar: inputMethodEngine.Panel | undefined = undefined;
+  // Preferences can be reloaded again while a STATUS_BAR panel is still being created. The
+  // generation fences those awaits so an obsolete request cannot leak a panel or tear down the
+  // panel belonging to a newer request.
+  private statusPanelGeneration: number = 0;
   private toolbarPosition: [number, number] = [0, 0];
+  // Set while the toolbar is hidden because the focused editor's window fills the screen.
+  private toolbarHiddenForFullscreen: boolean = false;
   private toolbarDragOrigin: [number, number] = [0, 0];
   private screenWidth: number = 0;
   private screenHeight: number = 0;
@@ -84,6 +100,8 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
   // twice, and the framework de-duplicates nothing.
   private attachedKeyboards: AttachedInputDevice[] = [];
   private routingKeys: boolean = false;
+  /** Set once the ability has torn down, so a late device enumeration cannot route keys again. */
+  private tornDown: boolean = false;
 
   /** The editor moved its caret; the candidate window goes with it if it is up. */
   private readonly caretMoved: (x: number, y: number, height: number) => void =
@@ -117,16 +135,191 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
    * The width is computed from the same layout the page draws with, so a hidden button narrows the
    * bar rather than leaving a gap where it was.
    */
-  private async resizeToolbar(density: number): Promise<void> {
-    if (this.toolbar === undefined) {
+  private async resizeToolbar(density: number,
+                              panel: inputMethodEngine.Panel | undefined = this.toolbar): Promise<void> {
+    if (panel === undefined) {
       return;
     }
     const session: KeyboardSession = KeyboardSession.shared;
     const count: number = FloatingToolbarLayout.buttons(session.toolbarComponents()).length;
     const scale: number = session.toolbarScale();
-    await this.toolbar.resize(
+    await panel.resize(
       Math.round(FloatingToolbarLayout.widthVp(count) * scale * density),
       Math.round(FloatingToolbarLayout.heightVp() * scale * density));
+  }
+
+  /**
+   * The toolbar or the mode badge, whichever the preferences ask for, in the one STATUS_BAR panel.
+   *
+   * Measured on a 2in1: the framework grants one STATUS_BAR panel, not two. The toolbar takes it when there is one, and the toolbar is the better readout anyway — it says what mode the keyboard is in all the time rather than for three quarters of a second after it changed. The badge is what a desktop falls back to when the toolbar is turned off, which is exactly when nothing else on screen would say the mode had changed at all. The badge is also the one piece of feedback the user can turn off from the shared settings, and a panel that would never be shown is not worth the one STATUS_BAR grant to hold open.
+   *
+   * Run at creation and again whenever the settings page changes the preferences, so turning the toolbar on or off takes effect without restarting the input method, as the Windows host's config sync does. Whatever is to be closed is closed before anything is opened, since the grant has to be free first.
+   */
+  private async reconcileStatusPanels(): Promise<void> {
+    const generation: number = ++this.statusPanelGeneration;
+    const session: KeyboardSession = KeyboardSession.shared;
+    const wantToolbar: boolean = session.toolbarEnabled();
+    const wantBadge: boolean = !wantToolbar && session.modeBadgeEnabled();
+    if (!wantToolbar && this.toolbar !== undefined) {
+      this.closeToolbar();
+    }
+    if (!wantBadge && this.hud !== undefined) {
+      this.closeModeBadge();
+    }
+    if (wantToolbar && this.toolbar === undefined) {
+      await this.openToolbar(generation);
+      if (generation !== this.statusPanelGeneration) return;
+    } else if (this.toolbar !== undefined) {
+      await this.resizeToolbar(this.density);
+      if (generation !== this.statusPanelGeneration) return;
+      session.refreshToolbar();
+    }
+    if (wantBadge && this.hud === undefined) {
+      await this.openModeBadge(generation);
+    } else if (this.hud !== undefined) {
+      // The toolbar's font size or scale may be what changed, and the badge is sized by them.
+      await this.resizeModeBadge(this.hud);
+    }
+  }
+
+  private async openToolbar(generation: number): Promise<void> {
+    let toolbar: inputMethodEngine.Panel | undefined = undefined;
+    try {
+      toolbar = await engine.createPanel(this.context, {
+        type: inputMethodEngine.PanelType.STATUS_BAR
+      });
+      if (this.tornDown || generation !== this.statusPanelGeneration) {
+        await engine.destroyPanel(toolbar);
+        return;
+      }
+      await toolbar.setUiContent('keyboard/FloatingToolbar');
+      if (this.tornDown || generation !== this.statusPanelGeneration) {
+        await engine.destroyPanel(toolbar);
+        return;
+      }
+      this.toolbar = toolbar;
+      KeyboardSession.shared.onToolbarDragStart = (): void => {
+        this.beginToolbarDrag();
+      };
+      KeyboardSession.shared.onToolbarDrag = (offsetX: number, offsetY: number): void => {
+        this.dragToolbar(offsetX, offsetY);
+      };
+      await this.resizeToolbar(this.density, toolbar);
+      if (this.tornDown || generation !== this.statusPanelGeneration) {
+        // A newer reconciliation may have adopted this panel. Leave it to that call (or
+        // teardown) rather than destroying the panel it now owns.
+        if (this.toolbar !== toolbar) {
+          await engine.destroyPanel(toolbar);
+        }
+        return;
+      }
+      KeyboardSession.shared.refreshToolbar();
+      // Lower right by default, clear of the dock, where a status bar is looked for and where it is least likely to sit on top of what is being written. macOS picks the same corner.
+      const width: number = FloatingToolbarLayout.widthVp(
+        FloatingToolbarLayout.buttons(KeyboardSession.shared.toolbarComponents()).length)
+        * KeyboardSession.shared.toolbarScale() * this.density;
+      const height: number = FloatingToolbarLayout.heightVp()
+        * KeyboardSession.shared.toolbarScale() * this.density;
+      const margin: number = TOOLBAR_MARGIN_VP * this.density;
+      this.toolbarPosition = [Math.round(this.screenWidth - width - margin),
+        Math.round(this.screenHeight - height - margin * 4)];
+      await toolbar.moveTo(this.toolbarPosition[0], this.toolbarPosition[1]);
+      if (this.tornDown || generation !== this.statusPanelGeneration) {
+        if (this.toolbar !== toolbar) {
+          await engine.destroyPanel(toolbar);
+        }
+        return;
+      }
+      await toolbar.show();
+    } catch (error) {
+      KeyboardLog.error(`toolbar unavailable: ${describeError(error)}`);
+      if (toolbar !== undefined
+        && (generation === this.statusPanelGeneration || this.toolbar !== toolbar)) {
+        if (this.toolbar === toolbar) {
+          this.toolbar = undefined;
+          KeyboardSession.shared.onToolbarDragStart = undefined;
+          KeyboardSession.shared.onToolbarDrag = undefined;
+        }
+        engine.destroyPanel(toolbar);
+      }
+    }
+  }
+
+  private closeToolbar(): void {
+    if (this.toolbar === undefined) {
+      return;
+    }
+    KeyboardSession.shared.onToolbarDragStart = undefined;
+    KeyboardSession.shared.onToolbarDrag = undefined;
+    engine.destroyPanel(this.toolbar);
+    this.toolbar = undefined;
+    this.toolbarHiddenForFullscreen = false;
+  }
+
+  private async openModeBadge(generation: number): Promise<void> {
+    let hud: inputMethodEngine.Panel | undefined = undefined;
+    try {
+      hud = await engine.createPanel(this.context, {
+        type: inputMethodEngine.PanelType.STATUS_BAR
+      });
+      if (this.tornDown || generation !== this.statusPanelGeneration) {
+        await engine.destroyPanel(hud);
+        return;
+      }
+      await hud.setUiContent('keyboard/InputModeHud');
+      if (this.tornDown || generation !== this.statusPanelGeneration) {
+        await engine.destroyPanel(hud);
+        return;
+      }
+      this.hud = hud;
+      await this.resizeModeBadge(hud);
+      if (this.tornDown || generation !== this.statusPanelGeneration) {
+        if (this.hud !== hud) {
+          await engine.destroyPanel(hud);
+        }
+      }
+    } catch (error) {
+      // Worth saying but not worth failing over: the keyboard types perfectly well without a badge, and refusing to start because a piece of feedback would not build helps nobody.
+      KeyboardLog.error(`mode badge unavailable: ${describeError(error)}`);
+      if (hud !== undefined
+        && (generation === this.statusPanelGeneration || this.hud !== hud)) {
+        if (this.hud === hud) this.hud = undefined;
+        engine.destroyPanel(hud);
+      }
+    }
+  }
+
+  /** The badge's size in vp: the floating toolbar's font size and scale, fitted to the mark and one character. */
+  private modeBadgeSize(): InputModeHudSize {
+    return InputModeHudPolicy.sizeVp(KeyboardSession.shared.toolbarFontSize(),
+      KeyboardSession.shared.toolbarScale());
+  }
+
+  private async resizeModeBadge(hud: inputMethodEngine.Panel): Promise<void> {
+    const size: InputModeHudSize = this.modeBadgeSize();
+    await hud.resize(Math.round(size.widthVp * this.density), Math.round(size.heightVp * this.density));
+  }
+
+  private closeModeBadge(): void {
+    if (this.hudTimer >= 0) {
+      clearTimeout(this.hudTimer);
+      this.hudTimer = -1;
+    }
+    if (this.hud !== undefined) {
+      engine.destroyPanel(this.hud);
+      this.hud = undefined;
+    }
+  }
+
+  /** The settings page saved new preferences and the session has been rebuilt from them. */
+  private preferencesReloaded(): void {
+    this.modeKeys.use(KeyboardSession.shared.modeBindings());
+    if (!KeyboardFormFactor.isDesktop() || this.panel === undefined) {
+      return;
+    }
+    this.reconcileStatusPanels().catch((error: Object): void => {
+      KeyboardLog.error(`status panels not reconciled: ${describeError(error)}`);
+    });
   }
 
   private beginToolbarDrag(): void {
@@ -192,10 +385,12 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
     const tall: boolean = surface !== DesktopSurface.NONE;
     const heightVp: number = tall
       ? KeyboardMetrics.totalHeightVp(settings.rowSpacingTenths, settings.heightAdjustment,
-        KeyboardSession.shared.glossRows(), settings.candidateFontSize)
+        KeyboardSession.shared.glossRows(), settings.candidateFontSize,
+        settings.candidatePreeditFontSize, true)
       : KeyboardMetrics.candidateHeightVp(settings.candidateLayout, this.candidateCount,
         settings.candidateShowPreedit, settings.candidateDecorationTopVp,
-        KeyboardSession.shared.glossRows(), settings.candidateFontSize);
+        KeyboardSession.shared.glossRows(), settings.candidateFontSize,
+        settings.candidatePreeditFontSize);
     const widthVp: number = tall ? DESKTOP_SURFACE_WIDTH_VP : this.candidateWidthVp;
     await this.panel.resize(Math.round(widthVp * this.density),
       Math.round(heightVp * this.density));
@@ -215,7 +410,8 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
     const settings: KeyboardPreferences = KeyboardSession.shared.preferences();
     const height: number = KeyboardMetrics.totalHeightVp(
       settings.rowSpacingTenths, settings.heightAdjustment,
-      KeyboardSession.shared.glossRows(), settings.candidateFontSize) * this.density;
+      KeyboardSession.shared.glossRows(), settings.candidateFontSize,
+      settings.candidatePreeditFontSize, true) * this.density;
     const width: number = DESKTOP_SURFACE_WIDTH_VP * this.density;
     this.panel.moveTo(Math.round((this.screenWidth - width) / 2),
       Math.round(this.screenHeight - height - TOOLBAR_MARGIN_VP * this.density))
@@ -280,8 +476,9 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
     if (this.hud === undefined) {
       return;
     }
-    const width: number = HUD_WIDTH_VP * this.density;
-    const height: number = HUD_HEIGHT_VP * this.density;
+    const size: InputModeHudSize = this.modeBadgeSize();
+    const width: number = size.widthVp * this.density;
+    const height: number = size.heightVp * this.density;
     const margin: number = HUD_SCREEN_MARGIN_VP * this.density;
     let x: number = this.caret[2] > 0
       ? this.caret[0] + this.caret[2] / 2 - width / 2
@@ -289,8 +486,8 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
     let y: number = this.caret[2] > 0
       ? this.caret[1] + this.caret[2] + HUD_CARET_GAP_VP * this.density
       : this.screenHeight * 2 / 3;
-    x = Math.min(Math.max(margin, x), Math.max(margin, this.screenWidth - margin - width));
-    y = Math.min(Math.max(margin, y), Math.max(margin, this.screenHeight - margin - height));
+    x = KeyboardGeometry.bounded(x, margin, Math.max(margin, this.screenWidth - margin - width));
+    y = KeyboardGeometry.bounded(y, margin, Math.max(margin, this.screenHeight - margin - height));
     this.hud.moveTo(Math.round(x), Math.round(y)).catch((error: Object): void => {
       KeyboardLog.error(`mode badge would not move: ${describeError(error)}`);
     });
@@ -312,7 +509,7 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
     const height: number = KeyboardMetrics.candidateHeightVp(settings.candidateLayout,
       this.candidateCount, settings.candidateShowPreedit,
       settings.candidateDecorationTopVp, KeyboardSession.shared.glossRows(),
-      settings.candidateFontSize) * this.density;
+      settings.candidateFontSize, settings.candidatePreeditFontSize) * this.density;
     const gap: number = KeyboardMetrics.CANDIDATE_WINDOW_GAP_VP * this.density;
     const anchor: CandidateAnchor = CandidateAnchorPolicy.position(settings.candidateFollowCursor,
       this.candidateAnchor, this.caret);
@@ -348,10 +545,13 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
                              inputClient: inputMethodEngine.InputClient) => void =
     (kbController: inputMethodEngine.KeyboardController,
      inputClient: inputMethodEngine.InputClient): void => {
+      // A keyboard process can live for days; this sends the new day's active at most every few hours, off this thread.
+      HarmonyTelemetry.keyboardShown();
       if (this.panel === undefined) {
         this.pending = inputClient;
         return;
       }
+      this.pending = undefined;
       // A caret belongs to the editor that reported it. Carrying one across a focus change puts the
       // next composition beside the last editor's text, which is worse than not knowing at all.
       this.caret = [0, 0, 0];
@@ -360,10 +560,38 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
       // nothing to offer until something is being spelled, and waits for onComposition to say so.
       if (!KeyboardFormFactor.isDesktop()) {
         this.panel.show();
+      } else {
+        this.followCallingWindow(inputClient);
       }
     };
 
+  /**
+   * Keep the floating toolbar off an application that fills the screen, and bring it back when the focus is in a window that does not.
+   *
+   * The Windows host hides its toolbar while the foreground window is fullscreen (`OnWinEvent` in `window_hook.cpp`), so a game or a video is not covered by a bar nobody is using. HarmonyOS tells the keyboard the calling window's status, and only when asked, so it is asked each time an editor takes focus; a window that goes fullscreen while its editor keeps the focus is noticed at the next focus.
+   */
+  private followCallingWindow(inputClient: inputMethodEngine.InputClient): void {
+    const toolbar: inputMethodEngine.Panel | undefined = this.toolbar;
+    if (toolbar === undefined) {
+      return;
+    }
+    inputClient.getCallingWindowInfo().then((info: inputMethodEngine.WindowInfo): Promise<void> | undefined => {
+      const fullscreen: boolean = info.status === window.WindowStatusType.FULL_SCREEN;
+      if (this.toolbar !== toolbar || fullscreen === this.toolbarHiddenForFullscreen) {
+        return undefined;
+      }
+      this.toolbarHiddenForFullscreen = fullscreen;
+      return fullscreen ? toolbar.hide() : toolbar.show();
+    }).catch((error: Object): void => {
+      KeyboardLog.error(`calling window unavailable: ${describeError(error)}`);
+    });
+  }
+
   private readonly stopped: () => void = (): void => {
+    // An editor that stops while the panel is still being built must not be attached once it is.
+    this.pending = undefined;
+    this.backspaceHold.reset();
+    this.heldKeys.reset();
     KeyboardSession.shared.detach();
     if (this.panel !== undefined) {
       this.panel.hide();
@@ -377,12 +605,29 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
    * the router does not claim. Only key-down is acted on: a key that was claimed going down must be
    * claimed coming up too, or the application sees half of it.
    */
+  /** Key codes whose key-down went back to the application, so their key-up must follow it. */
+  private readonly releasedKeys: Set<number> = new Set<number>();
+  /** Key codes whose key-down the emoji panel took, so their key-up is taken too. */
+  private readonly panelKeys: Set<number> = new Set<number>();
+
   private readonly typed: (event: InputKeyEvent) => boolean = (event: InputKeyEvent): boolean => {
-    const key: HardwareKey = {
+    const session: KeyboardSession = KeyboardSession.shared;
+    // Whether this key-down is a new press rather than a repeat of a key still held, which OpenHarmony delivers as another key-down.
+    let newPress: boolean = false;
+    // Counted for the key heatmap before anything claims or releases the key, so a key the application types counts the same as one the Engine composes, and a modifier or shortcut chord counts as the presses it is. The session declines for a password field.
+    if (event.action === KeyAction.DOWN) {
+      newPress = this.heldKeys.press(event.key.code);
+      if (newPress) {
+        session.recordKey(KeyIdPolicy.hardware(event.key.code));
+      }
+    } else {
+      this.heldKeys.release(event.key.code);
+    }
+    // Korean reads a letter's case as the jamo (Shift+R is ㄲ), so only Shift decides it there: Caps Lock left on must not turn every ㄱ into ㄲ. Vietnamese writes letters in the case they were typed, so Caps Lock there means capitals, as it does in any editor.
+    const key: HardwareKey = HardwareKeyRouter.normalizeLetterCase({
       keyCode: event.key.code, unicodeChar: event.unicodeChar, ctrlKey: event.ctrlKey,
       altKey: event.altKey, logoKey: event.logoKey, shiftKey: event.shiftKey
-    };
-    const session: KeyboardSession = KeyboardSession.shared;
+    }, event.capsLock && !session.isKorean() && session.rulesScheme() !== SchemeTraits.VIETNAMESE);
     session.setCapsLock(event.capsLock);
     const mode: ModeKey = {
       keyCode: event.key.code, down: event.action === KeyAction.DOWN, shiftKey: event.shiftKey,
@@ -432,6 +677,20 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
       return true;
     }
     if (gesture === ModeGesture.TOGGLE_CHARACTER_SET) {
+      // Windows only switches while composing Chinese, but claims the chord either way (`HandleImeKey`, `IsCharacterSetInputModeToggle`).
+      if (!session.isEnglish()) {
+        session.toggleCharacterSet();
+        KeyboardSession.shared.refreshToolbar();
+      }
+      return true;
+    }
+    if (gesture === ModeGesture.ENGLISH_CANDIDATES) {
+      this.modeKeys.disarm();
+      this.showModeBadge(session.toggleEnglishCandidates());
+      KeyboardSession.shared.refreshToolbar();
+      return true;
+    }
+    if (gesture === ModeGesture.TOGGLE_WIDTH) {
       session.toggleCharacterWidth();
       return true;
     }
@@ -440,28 +699,80 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
       KeyboardSession.shared.refreshToolbar();
       return true;
     }
+    // The 2in1 emoji panel takes navigation, activation and search keys the way the focused Windows panel does (`EmojiPanel::OnKeyDown`); its key-up follows, so the editor never sees half of one.
+    if (event.action !== KeyAction.DOWN && this.panelKeys.delete(event.key.code)) {
+      return true;
+    }
+    if (event.action === KeyAction.DOWN && session.routePanelKey({
+      keyCode: event.key.code, unicodeChar: event.unicodeChar, ctrlKey: event.ctrlKey,
+      altKey: event.altKey, logoKey: event.logoKey
+    })) {
+      this.panelKeys.add(event.key.code);
+      return true;
+    }
     // A space with nothing being composed is the editor's, with one exception: it is also the key
     // that rewrites a just-committed Chinese mark as ASCII, and that arming only exists after a
     // commit — which is to say, only when nothing is being composed.
     if (event.action === KeyAction.DOWN && session.convertPunctuationSpace(event.unicodeChar)) {
       return true;
     }
+    // The other half of a letter the Engine declined going down: the application saw that key-down, so it gets the key-up too.
+    if (event.action !== KeyAction.DOWN && this.releasedKeys.delete(event.key.code)) {
+      return false;
+    }
+    // A Backspace held from inside a composition stops where the composition did; see HardwareBackspaceGuard.
+    if (event.key.code === KEYCODE_DEL) {
+      const held: boolean = event.action === KeyAction.DOWN
+        ? this.backspaceHold.down(session.composing()) : this.backspaceHold.up(session.composing());
+      if (held) {
+        return true;
+      }
+    } else if (event.action === KeyAction.DOWN) {
+      this.backspaceHold.reset();
+    }
+    // A key sound belongs to the typing, not to what became of the key, so every key-down from here on has one: composed, handed back or released to the application. Only a 2in1 has sounds configured, and the session leaves password fields and English mode silent.
+    const sound = (): void => {
+      if (event.action === KeyAction.DOWN && KeyboardFormFactor.isDesktop()) {
+        session.hardwareKeySound(event.key.code, event.unicodeChar, event.ctrlKey, event.altKey,
+          event.logoKey);
+      }
+    };
     if (!session.composes()) {
+      sound();
       return false;
     }
     const decision: HardwareKeyDecision =
-      HardwareKeyRouter.route(key, session.composing(), !session.isEnglish(),
+      HardwareKeyRouter.route(key, session.composing(), !session.isEnglish() || session.isEnglishCandidates(),
         KeyboardSession.shared.preferences().numberRowSelection,
       KeyboardSession.shared.preferences().navigation,
         session.hasHighlightedTranslation(), session.isJapanese(),
-        session.wordCharacterBinding(), session.hasHighlightedCandidate());
+        session.wordCharacterBinding(), session.hasHighlightedCandidate(), session.hardwareSpelling(),
+        session.isFullWidth(), session.punctuationLockedChinese(), session.isKorean(),
+        session.candidateListOpen(), session.rulesScheme());
     if (decision.action === HardwareKeyAction.RELEASE) {
+      // What the application types is still the user's typing, and Windows counts it (`stats_passthrough.h`).
+      if (event.action === KeyAction.DOWN) {
+        session.recordPassthrough(event.unicodeChar, event.ctrlKey, event.altKey, event.logoKey);
+      }
+      sound();
       return false;
     }
     if (event.action !== KeyAction.DOWN) {
       return true;
     }
-    HardwareKeyDispatch.apply(decision, key.shiftKey, session);
+    // A held Hanja key converts once rather than opening and closing the list with every repeat.
+    if (decision.action === HardwareKeyAction.CONVERT_HANJA && !newPress) {
+      return true;
+    }
+    const applied: boolean = HardwareKeyDispatch.apply(decision, key.shiftKey, session);
+    // After the key has done its work, so a commit it caused is heard with it.
+    sound();
+    if (!applied) {
+      // Declined rather than swallowed, the way TSF treats a key the Windows host did not eat: a capital letter with nothing composed is the application's to type.
+      this.releasedKeys.add(event.key.code);
+      session.recordPassthrough(event.unicodeChar, event.ctrlKey, event.altKey, event.logoKey);
+      return false;
+    }
     return true;
   };
 
@@ -492,6 +803,9 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
 
   /** Brings the `keyEvent` subscription in line with what is attached, and only when it differs. */
   private applyKeyRouting(): void {
+    if (this.tornDown) {
+      return;
+    }
     const route: boolean =
       HardwareKeyboardPolicy.routes(KeyboardFormFactor.isDesktop(), this.attachedKeyboards);
     const transition: KeyRoutingTransition | null =
@@ -536,15 +850,31 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
     if (!fs.accessSync(state)) {
       fs.mkdirSync(state, true);
     }
+    // Covers a keyboard enabled without the app ever being opened; the app's first launch does the same, and whichever runs first registers the account.
+    client.ensureAnonymousAccount(state).catch((error: Error): void => {
+      KeyboardLog.error(`anonymous account: ${describeError(error)}`);
+    });
+    // One usage-reporting session per keyboard process, started before the early returns below so a process that never gets a panel still has one.
+    HarmonyTelemetry.keyboardStarted(state);
     if (!StagedResources.stage(`${this.context.resourceDir}/engine`, resources,
         `${files}/engine.ready`)) {
       return;
     }
+    // Optional non-English candidate glosses, staged beside the resources where the Engine looks for them, on the same ordinary storage SQLite needs. A package built without them removes any an earlier one left; either way the keyboard still starts.
+    const glosses: string = `${this.context.resourceDir}/offline-glosses`;
+    if (fs.accessSync(glosses)) {
+      StagedResources.stage(glosses, `${files}/offline-glosses`, `${files}/offline-glosses.ready`);
+    } else {
+      StagedResources.unstage(`${files}/offline-glosses`, `${files}/offline-glosses.ready`);
+    }
+    StagedResources.stageLanguageDictionaries(this.context.resourceDir, files);
     // The extension context knows the system colour mode; the view has no context of its own to ask.
     const systemDark: boolean =
       this.context.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
     // The packaged recording tones are read through this context, which the session has none of.
     KeyboardSession.shared.useVoiceContext(this.context);
+    // The built-in sound packs are read from, and pitched notes written under, this context's directories.
+    KeyboardSession.shared.useSoundContext(this.context);
     const started: boolean = KeyboardSession.shared.start(resources, state, systemDark);
     if (!started) {
       // Without a session there is nothing to show. Leaving the panel uncreated keeps the framework
@@ -560,6 +890,13 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
     // cannot disagree about what a key does. Bound before any key can arrive, on every device: a
     // keyboard may be plugged into this one later.
     this.modeKeys.use(KeyboardSession.shared.modeBindings());
+    // Every device, not only the one with a toolbar: a phone reaches the settings application from its tools panel.
+    KeyboardSession.shared.onOpenSettings = (): void => {
+      this.openSettings();
+    };
+    KeyboardSession.shared.onPreferencesReloaded = (): void => {
+      this.preferencesReloaded();
+    };
     if (KeyboardFormFactor.isDesktop()) {
       // A candidate window belongs beside the text it is offering candidates for, not at a fixed
       // place on the screen, so it follows the caret the editor reports. Only a candidate window has
@@ -585,8 +922,23 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
         : inputMethodEngine.PanelFlag.FLG_FIXED
     };
     try {
-      this.panel = await engine.createPanel(this.context, info);
-      await this.panel.setUiContent('keyboard/KeyboardView');
+      const panel: inputMethodEngine.Panel = await engine.createPanel(this.context, info);
+      // onDestroy can arrive while the framework is still creating or populating the panel. Do
+      // not attach a late panel after teardown; otherwise the ability leaks a window with no host
+      // callbacks left to hide or destroy it.
+      if (this.tornDown) {
+        await engine.destroyPanel(panel);
+        return;
+      }
+      this.panel = panel;
+      await panel.setUiContent('keyboard/KeyboardView');
+      if (this.tornDown) {
+        if (this.panel === panel) {
+          this.panel = undefined;
+          await engine.destroyPanel(panel);
+        }
+        return;
+      }
       // A panel has no size until it is given one, and a zero-height panel never appears. The height
       // is the candidate row plus four key rows, or the strip alone where the keys are not drawn; the
       // width is the display width, which the panel reports through its own window rather than being
@@ -599,9 +951,11 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
       const heightVp: number = desktop
         ? KeyboardMetrics.candidateHeightVp(settings.candidateLayout, 0,
           settings.candidateShowPreedit, settings.candidateDecorationTopVp,
-          KeyboardSession.shared.glossRows(), settings.candidateFontSize)
+          KeyboardSession.shared.glossRows(), settings.candidateFontSize,
+          settings.candidatePreeditFontSize)
         : KeyboardMetrics.totalHeightVp(settings.rowSpacingTenths, settings.heightAdjustment,
-          KeyboardSession.shared.glossRows(), settings.candidateFontSize);
+          KeyboardSession.shared.glossRows(), settings.candidateFontSize,
+          settings.candidatePreeditFontSize);
       // A soft keyboard is as wide as the screen because it has to be; a candidate window is as wide
       // as its content, and covering the width of a desktop with one would hide the very text the
       // candidates are for.
@@ -611,9 +965,15 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
       this.density = screen.densityPixels;
       this.screenWidth = screen.width;
       this.screenHeight = screen.height;
-      await this.panel.resize(widthPx, Math.round(heightVp * screen.densityPixels));
+      await panel.resize(widthPx, Math.round(heightVp * screen.densityPixels));
+      if (this.tornDown) {
+        if (this.panel === panel) {
+          this.panel = undefined;
+          await engine.destroyPanel(panel);
+        }
+        return;
+      }
       // The view asks; only the ability holds the panel.
-      const panel: inputMethodEngine.Panel = this.panel;
       KeyboardSession.shared.onDismiss = (): void => {
         panel.hide();
       };
@@ -662,61 +1022,8 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
             });
         };
       }
-      if (desktop && KeyboardSession.shared.toolbarEnabled()) {
-        try {
-          this.toolbar = await engine.createPanel(this.context, {
-            type: inputMethodEngine.PanelType.STATUS_BAR
-          });
-          await this.toolbar.setUiContent('keyboard/FloatingToolbar');
-          KeyboardSession.shared.onToolbarSettings = (): void => {
-            this.openSettings();
-          };
-          KeyboardSession.shared.onToolbarDragStart = (): void => {
-            this.beginToolbarDrag();
-          };
-          KeyboardSession.shared.onToolbarDrag = (offsetX: number, offsetY: number): void => {
-            this.dragToolbar(offsetX, offsetY);
-          };
-          await this.resizeToolbar(screen.densityPixels);
-          KeyboardSession.shared.refreshToolbar();
-          // Lower right by default, clear of the dock, where a status bar is looked for and where it
-          // is least likely to sit on top of what is being written. macOS picks the same corner.
-          const width: number = FloatingToolbarLayout.widthVp(
-            FloatingToolbarLayout.buttons(KeyboardSession.shared.toolbarComponents()).length)
-            * KeyboardSession.shared.toolbarScale() * screen.densityPixels;
-          const height: number = FloatingToolbarLayout.heightVp()
-            * KeyboardSession.shared.toolbarScale() * screen.densityPixels;
-          const margin: number = TOOLBAR_MARGIN_VP * screen.densityPixels;
-          this.toolbarPosition = [Math.round(screen.width - width - margin),
-            Math.round(screen.height - height - margin * 4)];
-          await this.toolbar.moveTo(this.toolbarPosition[0], this.toolbarPosition[1]);
-          await this.toolbar.show();
-        } catch (error) {
-          KeyboardLog.error(`toolbar unavailable: ${describeError(error)}`);
-          this.toolbar = undefined;
-        }
-      }
-      // Measured on a 2in1: the framework grants one STATUS_BAR panel, not two. The toolbar takes it
-      // when there is one, and the toolbar is the better readout anyway — it says what mode the
-      // keyboard is in all the time rather than for three quarters of a second after it changed. The
-      // badge is what a desktop falls back to when the toolbar is turned off, which is exactly when
-      // nothing else on screen would say the mode had changed at all.
-      // The badge is also the one piece of feedback the user can turn off from the shared settings,
-      // and a panel that would never be shown is not worth the one STATUS_BAR grant to hold open.
-      if (desktop && this.toolbar === undefined && KeyboardSession.shared.modeBadgeEnabled()) {
-        try {
-          this.hud = await engine.createPanel(this.context, {
-            type: inputMethodEngine.PanelType.STATUS_BAR
-          });
-          await this.hud.setUiContent('keyboard/InputModeHud');
-          await this.hud.resize(Math.round(HUD_WIDTH_VP * screen.densityPixels),
-            Math.round(HUD_HEIGHT_VP * screen.densityPixels));
-        } catch (error) {
-          // Worth saying but not worth failing over: the keyboard types perfectly well without a
-          // badge, and refusing to start because a piece of feedback would not build helps nobody.
-          KeyboardLog.error(`mode badge unavailable: ${describeError(error)}`);
-          this.hud = undefined;
-        }
+      if (desktop) {
+        await this.reconcileStatusPanels();
       }
       KeyboardLog.info(`panel ready: ${KeyboardFormFactor.describe()}, `
         + `${desktop ? 'candidate window' : 'soft keyboard'}`
@@ -734,49 +1041,54 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
       // The framework allows exactly one soft keyboard panel. If it refused, the session has nothing
       // to draw into, so tear it back down rather than leaving it attached to no surface.
       KeyboardLog.error(`panel creation failed: ${describeError(error)}`);
-      KeyboardSession.shared.stop();
-      this.panel = undefined;
-      engine.off('inputStart', this.started);
-      engine.off('inputStop', this.stopped);
-      inputMethodEngine.getKeyboardDelegate().off('selectionChange', this.selectionChanged);
-      inputMethodEngine.getKeyboardDelegate().off('textChange', this.textChanged);
-      KeyboardSession.shared.onTouchHeight = undefined;
+      this.teardown();
       return;
     }
   }
 
   onDestroy(): void {
+    this.teardown();
+    // Here rather than in teardown, which a failed onCreate also runs: only the framework destroying the extension ends the session normally.
+    HarmonyTelemetry.keyboardStopped();
+  }
+
+  /** Undoes everything onCreate installed. Safe to run twice: a failed onCreate and then onDestroy. */
+  private teardown(): void {
+    this.statusPanelGeneration += 1;
+    this.tornDown = true;
+    this.pending = undefined;
     engine.off('inputStart', this.started);
     engine.off('inputStop', this.stopped);
     inputMethodEngine.getKeyboardDelegate().off('selectionChange', this.selectionChanged);
     inputMethodEngine.getKeyboardDelegate().off('textChange', this.textChanged);
-    KeyboardSession.shared.onTouchHeight = undefined;
+    // Before releasing keyEvent, so a queued hot-plug change cannot subscribe it again.
+    HarmonyHardwareKeyboards.unwatch();
     if (this.routingKeys) {
       inputMethodEngine.getKeyboardDelegate().off('keyEvent', this.typed);
       this.routingKeys = false;
     }
+    this.attachedKeyboards = [];
     if (KeyboardFormFactor.isDesktop()) {
       inputMethodEngine.getKeyboardDelegate().off('cursorContextChange', this.caretMoved);
     }
-    HarmonyHardwareKeyboards.unwatch();
-    KeyboardSession.shared.stop();
-    if (this.hudTimer >= 0) {
-      clearTimeout(this.hudTimer);
-      this.hudTimer = -1;
-    }
-    if (this.hud !== undefined) {
-      engine.destroyPanel(this.hud);
-      this.hud = undefined;
-    }
-    if (this.toolbar !== undefined) {
-      KeyboardSession.shared.onToolbarDragStart = undefined;
-      KeyboardSession.shared.onToolbarDrag = undefined;
-      engine.destroyPanel(this.toolbar);
-      this.toolbar = undefined;
-    }
-    if (this.panel !== undefined) {
-      engine.destroyPanel(this.panel);
-      this.panel = undefined;
+    KeyboardSession.shared.shutdown();
+    // These close over the panel being released.
+    KeyboardSession.shared.onTouchHeight = undefined;
+    KeyboardSession.shared.onDismiss = undefined;
+    KeyboardSession.shared.onCandidateWidth = undefined;
+    KeyboardSession.shared.onCandidateCount = undefined;
+    KeyboardSession.shared.onComposition = undefined;
+    KeyboardSession.shared.onSurfaceRequested = undefined;
+    KeyboardSession.shared.onOpenSettings = undefined;
+    KeyboardSession.shared.onPreferencesReloaded = undefined;
+    this.closeModeBadge();
+    this.closeToolbar();
+    const panel: inputMethodEngine.Panel | undefined = this.panel;
+    this.panel = undefined;
+    if (panel !== undefined) {
+      engine.destroyPanel(panel).catch((error: Object): void => {
+        KeyboardLog.error(`panel would not destroy: ${describeError(error)}`);
+      });
     }
   }
 }

@@ -1,784 +1,155 @@
 # Windows 功能迁移对照
 
-## 现在到哪一步了（2026-09-22）
+这份文档记录 Windows 宿主对来源产品 MSIME-Windows 的迁移结果：迁移的范围与基线、一直盯着这件事的几道门禁、每个功能组落在本仓库哪里、哪些地方刻意与来源不同及其理由，以及本仓库特有的 Windows 进程与协议边界。
 
-这份文件有两千行，结论散在一批批增量记录里。这一节只回答「现在到哪一步」，细节仍以下面各批为准。
+迁移已完成。功能对照不是一次读完 README 得出的结论，而是由五道检查持续地问同样几个问题：来源能被设定的每一项、来源界面能发起的每个动作、来源发布日志里的每一条、来源源码树里的每个文件，在这边分别由什么答复。下面「持续门禁」一节给出这几个问题今天的答案。
 
-**逐项对完、并且有门禁一直盯着的几条线：**
+## 迁移范围与固定基线
 
-| 问的是什么 | 谁在一直问 | 今天的答案 |
+目标是迁移 MSIME-Windows 的完整功能，而不是语音、设置页或某台机器上跑得起来的子集。分工固定为：公共业务逻辑放共享 Rust 层（`crates/client-core`、`crates/input-runtime`、`crates/host-api`），公共管理界面放 Tauri 壳与共享 React 设置页（`apps/desktop/`、`packages/ui/`），输入算法与组合状态仍归 C++ Engine，Windows 侧保留 TSF DLL 与 Server 两个进程及其协议边界。
+
+对照使用的是固定对象，不是某个仓库当天的 HEAD：
+
+- 来源：`metasequoiaime/MSIME-Windows` 的提交 `345cb87a3822f6ad7013bb29506fe3d856c1931a`。所有 reference 门禁统一经 `scripts/reference_source.py` 读取这个对象（`PINNED_SHA`），不跟随相邻检出的当前分支或可变远端 tip；环境变量 `MSIME_REFERENCE_DIR` 只覆盖检出位置，不能覆盖版本。检出存在但缺这个对象时，脚本判定为无效的验证环境并指出恢复命令，而不是回落到一个可变分支。
+- 目标：`metasequoiaime/msime` 的 `develop`。
+- Engine：来源把 C++ Engine 以 `engine/` 在自己树内维护；本仓库的输入引擎是移植成 Rust 的 `crates/engine`，不再取回或锁定任何 Engine 源码归档，也没有 overlay 这一层。下文各批次里提到的 `engine-lock.json`、`scripts/fetch_engine.py`、`vendor/MSIME-Engine`、`scripts/apply_engine_*.py` 与 `crates/engine-bridge`，是移植之前的做法，作为当时的记录保留；那些 overlay 承接的行为现在都直接写在 `crates/engine` 的对应模块里。两个 Engine 不因目录名或协议名相同而视为内容相同。
+
+来源的功能入口以该提交的 `README.md`「功能简介」「核心功能指南」、`ui-html/webview2/settings/ime-settings/src/modules/sidebar.ts`、`server/src/settings/settings_app.cpp`、`installer/default_config/config.default.toml` 和 `engine/contracts/webview/messages.json` 交叉核对。README 只是入口索引，真正的判据是后面几道逐字段、逐动作、逐文件的检查。
+
+## 持续门禁
+
+按名字对界面、按记忆对功能，这两种做法在这次迁移里反复产生同样两类假结果：看着缺的其实是有意改名（`y_mode` 就是 `local_modes.temporary_english`，`cn_en_mixed_input_min_chars` 就是 `mixed_input.minimum_prefix`），看着有的其实只是某个无关标识符里恰好含同一个词。所以对照的结论写成可执行的脚本，由 `scripts/verify-local.sh` 每次运行。
+
+| 问的是什么 | 谁在问 | 答案 |
 | --- | --- | --- |
-| 来源能被设定的每一项，本仓有没有 | `scripts/test-windows-config-keys.py`（对来源默认分支的 tip） | 180 个键全部有 |
-| 每一项设定对应共享层的哪个字段 | `scripts/test-reference-config-coverage.py` | 178 项全部有着落，6 项写明为什么没有字段 |
+| 来源能被设定的每一项，本仓有没有 | `scripts/test-windows-config-keys.py` | 来源出厂配置的 180 个键（18 个段）全部有对应物 |
+| 每一项设定对应共享层的哪个字段，那个字段今天还在不在 | `scripts/test-reference-config-coverage.py` | 180 项全部有着落，其中 8 项以 `!kind: why` 写明为什么没有字段 |
 | 来源界面能对宿主发起的每个动作 | `scripts/test-reference-ui-actions.py` | 46 个动作全部有人答 |
-| 来源发布日志里的每一条 | `scripts/test-reference-feature-log.py` | 19 条全部过过一遍 |
-| 来源源码树里的每个文件 | `scripts/test-reference-source-inventory.py` | 274 个：161 个同名、101 个改名、12 个写明不需要 |
+| 来源发布日志里的每一条 `feat:` | `scripts/test-reference-feature-log.py` | 19 条全部过过一遍；锁定对象之前的 93 个 `feat:` 提交（91 个不同 subject）也逐条有答案，其中 4 个记为已知差距 |
+| 来源源码树里的每个文件 | `scripts/test-reference-source-inventory.py` | 274 个 `.cpp`/`.h`：156 个同名、106 个改名并指向存在的路径、12 个写明不需要 |
 
-**刻意与来源不同、且理由写在对应批次里的：** 候选窗、悬浮工具栏与输入法菜单本仓由各平台原生绘制（来源画在 WebView2 里），设置页与各类面板走 Tauri + 共享 React；简繁转换用 ICU 而非 OpenCC；偏好文件每次整份写出而不做三方合并。这些是「适配平台特性」的取舍，不是欠账。
+这几道检查各自的判据：
 
-**~~需要所有者拍板、本仓不单方面动的~~：这一栏 2026-09-21 清空了。** 原本列着三项引擎侧能力，理由都是「要提 `engine-lock.json`、影响面覆盖全部平台」。这个理由站不住：引擎早已搬进来源仓库，独立 engine 仓冻结在本仓锁的那个 commit，**没有更新的锁可提**，而本仓对引擎侧改动本来就有 overlay 机制（当时已经用了三次）。加加辅助码此前已由 overlay 落地；英文词的「词」与「显示」不同见本表倒数第二批；全拼备选切分见最后一批。
+- 配置键那道检查比的是**键名**而不是值。两边刻意不同的默认值由 `scripts/test-default-config-parity.py` 单独比对——它读安装模板 TOML 与 Rust 源码两份互相独立的材料，改错一边会指名报错，而不像单测那样用实现断言实现。本仓多出来的键不报告：适配可以提供更多，不能更少。
+- 覆盖率那道检查的目标是从 `Preferences` 起的完整字段路径（如 `floating_toolbar.scale_percent`），逐段解析 Rust 结构体，并要求每一段都以属性访问或对象键的形式**在共享设置页上被用到**；只在注释或局部变量里出现同一个词不算。只在 preferences crate 里存在算「纸面支持」：字段在、能往返、没有用户改得动它。主体不存在于本平台的条目记在 `PLATFORM_LOCAL` 里。
+- 界面动作那道检查不能按名字比：来源的四个界面（设置、悬浮工具栏、候选窗、托盘菜单）是 WebView2 文档，向宿主 post message，而这边其中三个是原生代码、根本没有消息。所以每个动作映射到一个在本仓库仍可检索到的 token，或记为有理由的缺席。
+- 源码清单那道检查的第二种形式指向一个必须存在的路径而不是一句话；第三种形式（`DELIBERATELY_ABSENT`）是要带着怀疑读的部分——迁移正是在这里藏它没做的事——所以每条都写明用户得到的是什么替代物。
+- 来源检出是可选的。没有检出时这五道检查各自报告它需要什么然后通过，与其他依赖外部材料的阶段一致。
 
-**本机拿不到的证据：** Windows 主机上的安装与真实编辑器交互（只有交叉构建、i686 语法与 79 个原生用例三级证据）；Linux 桌面上的目视验收；HarmonyOS 与 iOS 的真机链路（模拟器与 HAP 构建已通）；**macOS 上的真实编辑器交互**（输入法本身装得上、在系统里选得中，见下面 2026-09-21 那条）。凡是「未在真实编辑器里验收」的行，写的都是这个意思。
+### Windows 侧的编译与运行门禁
 
-**今天记下的一条方法教训：** 四次判断「本机没有 X」（容器、Android SDK、Xcode、DevEco）全部被推翻——东西都在，只是环境变量没设、守护进程没起、或者差一次一次性准备。先翻机器，再下结论。
+除上面五道对照检查外，与 Windows 直接相关的还有：
 
-## 范围与固定基线
+- `scripts/test-windows-32bit-compile.py`：32 位 TSF DLL 会被加载进每个 32 位宿主，所以同一份 C++ 必须两个架构都编得过。编译参数取自 x64 构建产出的 `compile_commands.json` 而非另一份手工清单，往 CMake 加源文件或 include 自动被覆盖；只换编译器并 `-fsyntax-only`，因此不需要 32 位库。
+- `scripts/test-windows-path-encoding.py`：禁止 Windows 会编译到的 C++ 出现 `path::string()`。这个转换在 Windows 上按 ANSI 代码页走，`C:\Users\陆傲天` 这类 profile 要么转错要么抛；而在系统编码为 UTF-8 的机器上一点痕迹都没有，只能静态拦。
+- `scripts/test-windows-native-run.py`：`platforms/windows/tests/` 里大部分是纯策略——对契约结构体的纯函数，整个翻译单元没有 Win32 调用。哪些属于这一类是发现出来的而非列出来的（能用宿主编译器独立编译链接的就是），这些源文件因此在任何机器上都真的被执行，而不只是链接通过。
+- `scripts/test-installer-prerequisites.py`：钉住安装器对 WebView2 与 VC 运行库的注册表判据（不做文件探测：Setup.exe 是 32 位进程，`FileExists` 会被 WOW64 重定向）。
+- `scripts/test-preferences-field-parity.py`：按名字配对 TS 类型与 Rust 结构体，两个方向都查字段集；Rust 独有的须在 `RUST_ONLY` 写明理由。
+- 交叉构建：`platforms/windows/build-cross.sh x64`（MinGW + vcpkg，校验 vcpkg HEAD 与清单基线一致后装 `<arch>-mingw-static` 依赖，再依次构建 `msime-host-api` 与整个 CMake 工程），本机工具链不满足 DWARF 展开时走 `build-cross-container.sh`。`verify-local.sh` 在非 Windows 宿主上自动接这条路径，并用目录锁让多个 worktree 串行。
+- pipe-only 配置（`-DMSIME_WINDOWS_PIPE_ONLY=ON`）在 x86_64 与 i686 两个架构上各配置构建一次：`windows_ipc.h` 的 `static_assert` 钉的是帧大小与字段偏移，两个位数都要成立。
+- 运行：`platforms/windows/run-tests-wine.sh x64` 在 `xvfb-run -a wine` 下运行交叉产物（C++ 套件与 `cargo test --no-run` 产出的 Rust 套件），每个套件 120 秒超时，失败集合与 `scripts/known-failures.txt` 比对，只对不在清单里的名字失败。
+- MSVC 全量构建与打包：`platforms/windows/Build-Client.ps1`（x64 出 Server/Watchdog/prepare/TSF，x86 出 TSF 与 Host DLL；完成前读五个 x64 EXE 与两对 TSF/Host DLL 的 PE 头做架构与类型门禁），安装包走 `platforms/windows/installer/Package-SimplySign.ps1`。
+- CI：`.github/workflows/ci-platforms.yml` 的 Windows 作业跑在 `debian:trixie-slim` 容器里（环境与 `platforms/windows/cross/Dockerfile` 一致；Ubuntu 24.04 的 MinGW 头文件没有 `msimeui` SVG 渲染要用的 `d2d1_3.h`），执行 `build-cross.sh x64`。同一工作流的 `windows-scripts` 作业在 `windows-2025` 上用 pwsh 跑 `tests/tools/` 下发布脚本的探针测试（`portable_executable`、`runtime_dependencies`、`collect_notices`、`build_client`），不编译任何东西；这些测试随测试目录重组失修过一段时间（相对路径少了一层），此后由这个作业看住。`.github/workflows/release-windows.yml` 手动触发，在 `windows-2025` 上用 MSVC 构建并编出未签名的 Inno Setup 安装包，签名仍是发布机上的本地步骤。
 
-目标是迁移 MSIME-Windows 的完整功能，而不是只移植语音、设置页或能在当前机器运行的子集。公共业务放共享层、公共管理界面放 Tauri；输入算法与组合状态仍归 C++ Engine；Windows 保留 TSF DLL / Server 进程及协议边界。已合并的其他平台成果不回退。每部分本地验证后提交合并，不要求用户逐项确认，不恢复私有仓库 CI。
+### 原生测试套件
 
-2026-09-22 本次对照使用以下不可变对象，未读取相邻仓库未提交内容：
+`platforms/windows/CMakeLists.txt` 注册 100 个 ctest，`platforms/windows/tsf/CMakeLists.txt` 注册 19 个，`platforms/windows/msimeui/tests/` 是一个聚合套件，`platforms/windows/tests/native-pipe/` 另有两个 Windows-only 管道用例（`windows-pipe-io`、`windows-aux-listener`）。源文件按职责分在 `tests/{candidate,clipboard,core,input,runtime,ui,voice}` 下。按领域看：
 
-- 来源：`metasequoiaime/MSIME-Windows` 的固定提交 `345cb87a3822f6ad7013bb29506fe3d856c1931a`。六道 reference 门禁统一从 `scripts/reference_source.py` 读取这个对象，不跟随相邻检出的当前分支或可变远端 tip；`MSIME_REFERENCE_DIR` 只覆盖检出位置，不能覆盖版本。
-- 目标：`metasequoiaime/msime` 的 `develop`；各增量以实际 PR merge commit 为证，不把一个会随迁移继续推进的目标 SHA 伪装成全程不变的基线。
-- 来源 Engine 已内嵌为 `engine/`，其 `UPSTREAM.md` 记录导入提交 `c810d201f549b337ae0c4a65a9d694103f1c1754`。目标通过 `engine-lock.json` 和 `scripts/fetch_engine.py` 获取并校验独立的 `vendor/MSIME-Engine` 源码归档，不使用 `.gitmodules`、递归 Git checkout 或 gitlink。两者不能因目录名或协议名相同而视为内容相同，也不能把来源 Server 的新接口记为目标已接入。
+- 协议与会话：`windows-server`、`windows-session`、`windows-reply-codec`、`windows-reply-composer`、`windows-input-queue`、`windows-registration-inbox`、`windows-aux-message`、`windows-runner-control`。
+- 焦点与按键：`windows-focus-gate`、`windows-focus-router`、`windows-main-frame`、`windows-tsf-focus-lease-protocol`、`windows-tsf-key-dispatch`、`windows-input-key-policy`、`windows-key-event-send-result`、`windows-terminal-deactivation-policy`、`windows-mode-authority`、`windows-dedicated-english` 与 `-controller`。
+- 候选与外观：`windows-candidate-card-size`、`-shadow`、`-wheel`、`-menu`、`-menu-layout`、`-initialization`、`-palette`、`-skin`、`-appearance`、`-render-sync`、`-font-format`、`-completion-policy`、`-text-policy`、`-ui-action-policy`、`-action-availability`、`-translation-merge`，以及五个热重载用例（`windows-candidate-skin-reload`、`-theme-reload`、`-layout-reload`、`-font-reload`、`windows-floating-toolbar-reload`）。
+- 工具栏与托盘：`windows-toolbar-layout`、`-icons`、`-click`、`-coordinates`、`-mode-command`、`windows-floating-toolbar-placement`、`-visibility`、`windows-tray-menu-layout`、`-dispatch`。
+- 联网候选与翻译：`windows-cloud-candidate-worker`、`windows-ai-candidate-worker`、`windows-translation-worker`、`windows-translation-display`、`windows-provider-token`。
+- 语音：`windows-voice-controller-protocol`、`-connection`、`-listener`、`-dispatch`、`windows-voice-control-message`、`windows-voice-session-epoch`、`windows-voice-hotkey-policy`、`windows-voice-session-policy`、`windows-doubao-transcript`、`windows-voice-capture-selection`、`windows-voice-providers`、`windows-voice-theme`、`windows-voice-review-result`、`windows-wave-overlay-scale`、`windows-polish-prompt`。
+- 剪贴板：`windows-clipboard-text`、`windows-clipboard-monitor`（后者实际注册 `AddClipboardFormatListener`、验证重复 `start` 幂等与重复 `stop` 不崩溃，不改写系统剪贴板、不记录用户内容）。
+- 配置、启动与守护：`windows-tsf-config-frames`、`windows-preview-config`、`windows-shell-surfaces`、`windows-server-launch`、`windows-installer-launch`、`windows-first-run`、`windows-prepare-host`、`windows-state-directory`、`windows-watchdog-policy`、`windows-telemetry-consent`、`windows-maintenance-hotkeys`、`windows-diagnostic-log`、`windows-diagnostic-batch`、`windows-typing-statistics`。
+- 输入策略：`windows-punctuation-policy`、`windows-paired-punctuation-host-policy`、`windows-edit-policy`、`windows-navigation-policy`、`windows-word-character-policy`、`windows-chinese-conversion`、`windows-preedit-caret`、`windows-fullscreen-foreground`。
+- TSF 侧：`msime-tsf-client-key-router` 与 `-authenticated-client-key-router`、`msime-tsf-key-repeat-guard`、`msime-tsf-keyboard-cancellation`、`msime-tsf-smart-punctuation-fingerprint`、`msime-tsf-paired-punctuation-policy`、`msime-tsf-paired-punctuation-wiring`、`msime-tsf-punctuation-key-policy`、`msime-tsf-character-result`、`msime-tsf-raw-commit`、`msime-tsf-commit-and-continue-payload`、`msime-tsf-engine-response`、`msime-tsf-candidate-ownership`、`msime-tsf-preedit-caret`、`msime-tsf-host-focus`、`msime-tsf-prepared-options`、`msime-tsf-host-library-config`、`msime-tsf-module-path`、`msime-tsf-version-resource`、`msime-tsf-class-factory`。
 
-来源功能入口以该提交的 `README.md`「功能简介」「核心功能指南」、`ui-html/webview2/settings/ime-settings/src/modules/sidebar.ts`、`server/src/settings/settings_app.cpp` 和 `engine/contracts/webview/messages.json` 交叉核对。README 只是入口索引，后续仍须逐字段、逐动作下钻；本表不是穷尽行为的完成证明。
+`tsf/tests/exports/`、`tsf/tests/registration_profiles/`、`tsf/tests/registration_categories/` 是各自 configure 的独立子工程，做 PE 导出与注册契约检查而不加载 DLL。`platforms/windows/tests/tools/` 与 `installer/tests/` 下另有 PowerShell 套件（构建产物、通知收集、可移植可执行文件、运行时依赖、安装器入口与包内文件、TSF 注册、Watchdog 任务、升级与卸载生命周期、仓库根布局），它们需要 Windows 主机。CI 的「Windows release script tests」在 windows-2025 上跑 `tests/tools/` 的四个套件，以及 `installer/tests/` 中读 `msime_setup.iss` 的 `lifecycle`、`watchdog-task`、`tauri-layout`、`tsf-registration`；其余几个（安装器入口、包内文件、仓库根）仍只随 MSVC 构建与打包流程运行。
 
-## 证据等级
+真词库行为另有一组探针，放在 `crates/engine-bridge/examples/` 与 `crates/input-runtime/examples/`，接收一个按 `resources/desktop-dictionary.lock.json` 备齐的资源目录。它们不挂进 `verify-local.sh`，因为锁定词库不在仓库里；但判据必须带真实词典的那几件事只有它们答得了——空词库对正确和错误的拼写一律回答「没有候选」。
 
-- **有调用链**：已找到目的地的真实调用代码；不等于原生系统行为已验证，也不等于和来源完全一致。
-- **明确缺口**：可由条件编译、未消费配置或缺失运行时路径直接证明。
-- **待逐项对照**：存在代码/测试入口，尚无足够行为等价证据。
+## 功能分组与实现落点
 
-测试文件存在只表示可用的验证入口，不表示本次执行通过。没有以窄范围测试、来源 CI 或构建成功代替 Windows 安装后交互验证。此处不计算完成百分比。
+路径相对本仓库；「来源入口」相对固定的来源提交。
 
-## 功能分组与目的地入口
-
-以下路径均相对目标仓库；“来源入口”相对固定的来源提交。
-
-| 功能组 | 来源入口 | 目的地证据 | 当前结论与下一项验证 |
-| --- | --- | --- | --- |
-| TSF 按键、焦点、edit session、UI-less | `windows/`、`server/src/ipc/` | `platforms/windows/tsf/`、`WindowsServer.cpp`、`SessionController.cpp`、`PipePeer.cpp` | 有调用链；继续验证真实编辑器焦点切换、断线重连、跨位数 DLL/Server、组合提交与撤销。 |
-| 全拼、四种双拼、86 五笔、日语、辅助码 | README 对应指南、`engine/`、设置 `input.ts` / `helpcode.ts` | `crates/engine-bridge/`、`crates/input-runtime/`、`platforms/windows/src/ipc/SessionPump.cpp`、共享 `preferences.rs` | Windows 日语模式已将 `-` 交给长音符输入、禁止 `-`/`=` 翻页，并在 TSF/Server 两侧保持一致；候选选择现绑定会话、代次及单调窗口渲染 serial，等待上屏前的绘制回执可避免调频重排错选；macOS 原生候选面板现按共享 `wubi_code_hint` 显示严格前缀的剩余五笔编码，回退/本地模式保持不标注；各输入方案已用锁定词库逐项核对（`crates/engine-bridge/examples/schemes_dictionary.rs`，见第七批）；辅助码的单码调序与双码筛选已按来源规格逐条核对（第十五批）；日文与中文方案的往返保留由 `apps/desktop/tests/settings/settings.test.tsx` 跨三种中文方案覆盖；仍待真实编辑器交互验证。 |
-| 候选分页、高亮、调频、preedit、以词定字 | README 候选调频/preedit/标点指南 | `CandidateWindow.cpp`、`CandidateAction.h`、`SessionController.cpp`、`ReplyCodec.cpp`；Linux `ClientEngine.cpp` | 有调用链；Linux IBus 候选操作菜单现提供上一页/下一页并复用共享分页命令，调频持久化已用锁定词库覆盖三个半边——跨会话记住、关掉就不写、重置回出厂顺序（`crates/engine-bridge/examples/learning_dictionary.rs`，见第八批）；翻页现在能越过 Engine 对单字母查询的初始上限（第九批）；以词定字已按两端取字、三字候选、组合被消耗、无汉字候选与越界索引覆盖（第十四批）；调频五种模式各走各的规则已逐条核对（第十三批）；分页键、鼠标滚轮与旧候选请求拒绝三项已核对（第四十一批），均有用例；本行到此走完。 |
-| 中英文状态、独立英文候选、全半角、简繁、智能标点 | `server/src/english/`、设置 `input.ts` / `shortcut.ts` | `SharedConfigKeybindings.h`、`PunctuationPolicy.h`、`ReplyCodec.h` 中的 TsfLocalConfig、共享偏好与 Engine 桥接 | 已补齐 TSF client key-router 边界、IPC `Sent` / `DefinitelyNotSent` / `DeliveryAmbiguous` 三态 fallback、标点配置帧及宿主进程策略回归；五项已逐个核对（第四十批）：按应用/全局状态有纯决策函数与 `mode_authority` 用例；标点重复与成对补全随配置帧下发并由 `tsf_config_frames` 钉住；热更新有 `preference_monitor` 用例；CapsLock 由 Server 持有并经 `CapsLockChanged` 帧下发，帧本身已在第四十二批补上用例。 |
-| K/T/U/E/M/J/Y/R 快捷模式、混输 | README 实用功能快捷模式 | Engine 桥接、共享偏好、`platforms/windows/src/ipc/ServerSession.cpp` 及 `platforms/windows/tests/runtime/session_smoke.cpp` | 已补带锁定词库的 ServerSession 回归：八种快捷模式均验证 Shift 入口、候选生成和选词提交；仍需 Windows 原生 TSF/真实编辑器交互验证。 |
-| 谷歌云候选与 AI 联想 | README 云/AI 联想、设置 `ai-settings.ts` | `CloudCandidateWorker.cpp`、`AiCandidateWorker.cpp`，由 `SessionController.cpp` 构造并投递输入队列 | 有调用链；核对每个提供方、超时、取消、失焦后旧结果以及凭据路由，勿只验证 UI 保存。 |
-| 候选中英释义、腾讯云翻译、自定义翻译 | README 候选翻译/自定义翻译 | `TranslationWorker.cpp` → `SessionController.cpp` → 候选展示；共享 `translation.rs` / `translation_store.rs` | 有调用链；缓存失效已核对并确认做到（第三十六批）：缓存键按服务商与账号分域，凭据、端点、目标语言与启用开关任一变化都丢弃正负两种结果；腾讯请求签名已按官方 TC3-HMAC-SHA256 构造独立算出已知答案并钉住（第三十七批）；本地优先级已按源码核对并由 `CandidateTranslationPolicy.h`、真实 `TranslationWorker` 调用链及 `candidate_translation_merge` 回归覆盖（第三十八批）；词库编辑已核对（第三十九批）：设置侧有五个按 Engine 实际读取语义写的用例，消费侧每次请求现算本地释义，编辑立即生效且恒胜过缓存的云端结果。本行四项到此走完。 |
-| 设置读取、保存、热更新与窗口行为 | `settings_app.cpp`、`config-sync.ts` | Tauri `load_preferences` / `save_preferences`，`PreferenceMonitor.cpp` 与 `main.cpp` 发布回调；macOS 云端桌面快照覆盖 Apple 20 项基线字段并保留客户端新增双拼预编辑字段 | 有调用链；逐字段核对默认值、冲突/损坏保护、当前组合期间延迟生效。macOS 云端快照现补齐两套辅助码方案、候选学习和本地扩展模式；本地扩展的兼容布尔值应用为八个本地模式的全开/全关。原生备用语音现在读取并回写当前 provider 的 `asr_tokens` / `polish_tokens` 槽位，缺失槽位保留旧扁平字段兼容。不能因配置字段存在就标记功能接通。 |
-| API 凭据测试（**本仓库新增，来源没有此功能**） | 来源无对应物；`settings/settings_app.cpp` 存在但不含凭据测试 | Tauri `test_api_credential` → `client-core::credential_*`（Windows/macOS） | 有调用链；Windows 已接入聊天、批量 ASR、豆包 WebSocket、腾讯云/NiuTrans/DeepLX 等共享凭据测试。**「逐项核对来源字段」一项已撤销（第五十二批）——来源没有可比的字段**；仅「真实服务行为」仍需真实账号验证。 |
-| 词库查询、增改删、导入导出、快捷短语 | `dictionary_manager.cpp`、设置 `dict.ts` / `tools-settings.ts` | Tauri `dictionary_request` / `dictionary_maintenance_handshake`，共享 `dictionary/access.rs` / `dictionary/import.rs` | 有调用链；验证 quiesce/resume、失败恢复、五笔/英文/快捷短语/翻译各表的字段和导出编码，保留用户数据。 |
-| 语音热键、流式/批量 ASR、润色、声音/静音、上屏方式 | `server/src/voice-input/`、设置 `voice.ts` | `main.cpp` → `VoiceHotkeyController` / `VoiceInputSession` → Engine 语音模块与 TSF；`VoiceSessionEpoch.h` | Windows Tauri 语音面板与 `recognize_voice` 已接入；全提供方、取消及焦点行为仍需 Windows 原生验证。macOS 原生备用窗口已将有效非云快照字段回写共享 `voice_input`，并可编辑 ASR/润色 provider token 槽位，但真实系统链路仍需验证。 |
-| 录音设备选择 | 需继续比对来源具体支持范围，不假定来源已支持 | Tauri `list_voice_capture_devices` → `host-macos::voice_capture_devices` → `MSIMEListVoiceCaptureDevices` 与共享 `capture_device/capture_backend`；Windows `VoiceInputConfig` / `VoiceInputSession` | Windows 已按稳定设备 ID 完成枚举、偏好保存和 `AudioCapture::start(..., device_id)` 透传，并有 `voice_capture_selection` 覆盖 backend/device 选择；macOS Tauri 与原生备用设置现在共用 CoreAudio 输入流枚举、默认设备排序和稳定 UID，且只接受空值、`auto`、`macos` 进入 CoreAudio，拒绝把其他平台后端静默重解释为 CoreAudio。真实硬件权限、安装后切换及来源设备标识范围仍待产品级验证。 |
-| 手写 | 来源设置 `handwriting-settings.ts` 和模型资源 | `ShellSurfaces.h` / `main.cpp` → Tauri `recognize_handwriting` / `submit_handwriting_candidate`，共享 `panels.tsx` | 有目的地入口；比较模型打包、笔画缩放、撤销/清空、多候选及原编辑器上屏。 |
- | 屏幕键盘 | 来源面板 `server/src/keyboard-panel/KeyboardPanel.cpp`（设置页 `screenkb-settings.ts` 只是入口按钮） | `main.cpp` → Tauri keyboard route、`desktop-keyboard.tsx`、Windows `send_key` 分支；macOS Tauri 与原生备用键盘都在每次按键时读取当前前台编辑器，并在实际投递前重新校验身份；无 Accessibility 权限时只拒绝投递、不弹权限请求；Tauri 面板仍捕获 PID+启动时间用于生命周期恢复 | macOS 键盘路径不再把当前设置宿主误当成输入目标，也不会在用户切换编辑器后继续投递到旧窗口；共享 Tauri 面板与原生备用面板的普通键均按 450ms 首次延迟、75ms 间隔自动重复，粘滞修饰键与 Num Lock 保持单次切换且键盘/辅助功能激活仍为单次发送；投递失败、失焦或关闭会停止重复且不自动重放；macOS Tauri 首次显示和隐藏后重开时按当前/主显示器的物理工作区底部居中，兼容负坐标、多显示器和 Retina 缩放。修饰键按下/释放语义已逐项核对并确认一致（第五十批）：扩展键集合与来源逐键相同，按下/抬起标志有正反两面的用例；布局已逐键比对（第五十一批）：修饰键排完全一致，目标为超集（多出 F10–F12、PrtSc/Scroll/Pause、导航簇与 Menu 键）；仅真实焦点恢复仍需原生验证。 |
-| Emoji、颜文字、符号、剪贴板历史 | README 与来源 `clipboard_history.cpp` | `ClipboardMonitor.cpp` / `ClipboardHistory.cpp`、Tauri `load_emoji_catalog` / `paste_clipboard_text`、共享 `panels.tsx` | macOS 常驻输入源与 Tauri 监视器现按 NSPasteboard `changeCount` 读取外部文本变化，共用 4000 UTF-16 单位、12000 UTF-8 字节边界，并复用共享 50 条历史、去重/置顶和开关清理；关闭历史时不读取剪贴板内容。Emoji 面板通过已认证的一次性桌面输入会话把记录定向提交回原应用，普通 Emoji 候选与剪贴板大文本使用独立校验模式。仍需核对安装后真实持续监视与目标窗口行为，不能以普通 SendInput 冒充会话定向提交。 |
-| 悬浮工具栏、托盘菜单、入口快捷键 | 来源 `window/*presenter*`、`ui-html/webview2/ftb` / `menu` | `FloatingToolbarWindow.cpp`、`TrayMenuWindow.cpp`、`MaintenanceHotkey.cpp`、`ShellSurfaces.h` / `ShellLauncher.cpp` | 有调用链；设置/手写/键盘/语音/云剪贴板/云词库等启动共享 Tauri，低延迟不抢焦点宿主保留原生。macOS 与 Tauri 预览现消费 `floating_toolbar.english_mode` 及其余组件开关，原生共享偏好合并也保留该字段并按可见组件重算宽度；菜单项与禁用条件已逐项比对（第四十三批）：动作一一对应且目标多出手写识别板；工具栏组件与来源 README 所列六项一一对应；禁用语义是进程边界带来的有意差异，已记录。 |
-| 皮肤、主题、字体、外观预览 | 来源 `appearance.ts` / `skin.ts`、`candwnd/skins` | 共享 `packages/ui/src/upstream/`、`skin/catalog.rs`、`CandidateSkin.h`、`CandidateWindow.cpp` | Windows 已消费候选字体/回退字体、主题颜色、横竖排布局和阴影字段；`candidate_font_reload`、`candidate_palette` 与 shadow 回归覆盖非法值回退。仍需逐主题运行时截图、外部资源和字体回退逐项比较。 |
-| 更新、关于、帮助、反馈、重启 | 来源 `about-settings.ts` / `feedback-settings.ts` / `update-manifest.ts`，`restartServer` | 共享 `update-manifest.ts` / `index.tsx`，Tauri `open_external_url` / `restart_input_method` | Windows 重启使用固定 UTF-16LE `RestartServer` Aux payload 并有回归覆盖；更新 manifest/release 链接要求干净 HTTPS，外链 opener 拒绝无主机与 shell 字符。安装包信任、来源、失败反馈及原生安装仍待逐项对照。 |
-| 服务守护、安装、升级、卸载、资源打包 | 来源 README 服务守护、`installer/`、构建脚本 | `platforms/windows/installer/`、`tests/runner_regression.ps1`、TSF 注册代码 | 安装入口已限制为文件名安全的数字版本并保留现有包清单/用户数据保护回归；完整安装器现提供可见的数据目录选择页，拒绝系统/用户关键目录的父级、受保护目录内部、路径穿越及未标记的非空目录，并在就绪页展示迁移源与目标；light 包固定原目录。仍待 Windows PowerShell、TSF 注册、重启恢复、升级保留数据和卸载清理的产品级验证。 |
-
-共享账号、社区、统计、云词库等已有成果继续保留；不能用它们抵消上表来源功能缺口。是否属于固定 Windows 基线及字段级等价，须另外找来源运行时证据，不能只根据目标页面名称推断。
-
-增量记录（2026-09-20，Windows 本批六项）：来源固定为 `MSIME-Windows` 的 `e1d53dd8f01fd351633f08374f189157f5cb47e9`，目标起点 `origin/develop` `5097a1558f3fd9cdbf4345ffcb01b8318749edb7`。本批全部以 x86_64/i686 MinGW 交叉语法检查加 `scripts/verify-local.sh --quick` 验证，没有 Windows 主机，因此没有任何一项声称完成原生安装、TSF 注册或真实编辑器交互。
-
-1. 语音条按它出现的那块显示器取 DPI（#3036）。`WaveOverlay` 按前台窗口所在显示器定位，却用自身窗口的 `GetDpiForWindow` 取缩放，而该窗口创建时没有 per-monitor 上下文——于是 DPI 恒为 96、收不到 `WM_DPICHANGED`，在缩放或副显示器上由合成器拉伸而非按真实尺寸绘制。现在 `wave_overlay_monitor_metrics` 在 per-monitor 线程上下文里一并返回该显示器的有效 DPI（`GetDpiForMonitor`，回退系统 DPI 再回退 96，不让 0 参与尺寸运算），定位与缩放取自同一份快照，并把新 DPI 推进渲染目标；覆盖 `WaveOverlayScale.h` 的纯回退测试。
-2. msimeui 复用渲染目标时刷新 DPI（#3038）。`EnsureForWindow` / `EnsureForComposition` 的早退路径都不设 DPI，合成路径只要交换链够大就一直复用，旧缩放可以无限存活。同时补上上游的 `SetDpiOverride`（RDP 客户端缩放同步）。另修复 msimeui 测试套件：两次重命名把它的 runner 写成了服务端的 `main.cpp`，留下仓库之外的路径，CMake 无法解析，整套测试自 `046e0ead8` 起没有生成过目标、也就没有报告过。
-3. 候选行改为逐项测量（#3039）。迁移来的 `CandidateList` 是定高行模型：超宽候选被裁剪而非换行，其后候选拿到被裁剪的矩形因而点击落点错误，长辅助码与译文无处安放，横排在 `Arrange` 收窄时无法回流，竖排在被最小宽度撑大的卡片里保持自然宽度，于是选中高亮与命中区域够不到行右缘。换成上游的测量几何，并带入其依赖的按外观字体与回退字体（`ApplyFontFallback`）以及 `Card` 的显式阴影 pass。补齐上游 7 个候选布局用例与 `test_font_fallback.cpp`。
-4. 方向键折叠选区而不是跨过它（#3040）。msimeui 的 TSF 文本编辑器无条件推进光标，`ABCDE` 中选中 `BCD` 按右方向键落到 `E` 之后，比 Windows 其他文本框多走一个字符。补 `test_text_selection.cpp`。
-5. 裸 Shift 中英切换在吞掉释放的宿主里恢复（#3045，来源 `08386814`）。裸 Shift 键盘钩子只在 `mintty.exe` 安装，而 Word 既不给 `OnTestKeyUp` 也不给 `OnKeyUp`，两条能排队切换的回调都不走，Shift 在 Word 里不切换中英文。改为对所有宿主安装：会送达释放的宿主不受影响，`_MarkBareShiftHandled()` 会闩住 key-event sink 已经切过的序号。成员随之改掉 mintty 专名，三条释放路径补 `[issue47]` 日志。
-6. 重写标点前先核对它跟在什么后面（#3048）。空格转换与两秒内的撤回都只校验焦点会话、前台窗口和「光标前就是那个标点」，而同一个标点在文档里通常不止一处，窗口内移动光标又不是焦点变化：输入 `你好，世界，` 后点回前一个 `，` 再按空格，改的是错的那个。arm 时记下标点前面的字符，重写前回读两个字符核对指纹；文本存储读不出内容（终端与代理存储）和 arm 时没有记录（标点开在文档首）都判为匹配，否则会在这些宿主里直接废掉该功能。指纹判定是纯函数并带单测。
-
-另核对两项不需要移植：来源 `f05507ad`（升级时配置解析失败被出厂模板覆盖、凭证清零）的根因在目标不存在——共享偏好用原子写入，解析失败返回错误而不是回落默认值后再写回；来源 `windows_ipc.h` 的 22/24/25 智能标点子开关 opcode 在目标由一帧打包的标点配置携带，是已记录的适配而非缺口。
-
-增量记录（2026-09-20，Windows 第二批）：来源仍固定为 `e1d53dd8f01fd351633f08374f189157f5cb47e9`，目标起点 `414cdfbaf24bf3be8f22c581ca56c565a655e28f`。本批四项同样只有交叉编译与本地 quick 验证，没有 Windows 主机。
-
-1. 候选皮肤预览阴影与原生候选窗对齐（#3051）。四套内置皮肤的 16 份候选窗 CSS 停在单层阴影，来源早已换成环境层加接触层两层，而目标原生 D2D 的透明留白（`CandidateShadow.h` 的 32/20/32/40）本来就是按两层算的——设置页预览里的阴影和用户真正看到的候选窗不是一个东西。按来源同步这 16 份 CSS；差异只有 box-shadow 与末行换行，候选窗 HTML 模板不动，目标在其中的脚本位置调整保留。
-2. Unicode 模式数字键的真引擎回归（#3053）。打码位是数字键唯一「是输入而不是选词序号」的场合，判断分在两层：引擎报 handled，运行时只对引擎拒绝的数字才落到选词。input-runtime 的既有用例全用 fixture 引擎（对数字答 not handled），这个组合从来没被覆盖过，而会发现它的 windows-session 与 macOS local-mode-preferences 各自需要自己的主机。新用例用真引擎跑通 shift+U 再 4e2d，在锁定的 Engine 上通过——这与 `known-failures.txt` 里把两套失败都归因于该行为的记录相矛盾。两行都没有删：本机跑不了这两套，凭推断删基线会让基线失去意义；改为在两条记录上注明该引擎行为已不存在，下次在 Windows 或已配置的 macOS 上跑的人该去确认能不能删，而不是照抄重录。
-3. 智能标点三个子开关补进共享偏好（#3054）。设置页有五个智能标点开关，Windows Server 也读全部五个，但 `Preferences` 只有前两个字段。结构体带 `deny_unknown_fields`，Tauri 的 `save_preferences` 又把前端对象直接反序列化成它，所以未知键不是被丢掉而是让整次保存失败——用户打开「中文标点后按空格转换」「数字后直出」「字母后直出」任一个，设置窗口就再也存不下任何东西。补齐三个字段，缺省为关（与 Windows 基线 `config.default.toml` 和来源把整族默认关掉一致）。顺带加 `scripts/test-preferences-field-parity.py` 并挂进 `--quick`（#3056），按名字配对 TS 类型与 Rust 结构体逐个比字段集，两个方向都查，Rust 独有的需在 `RUST_ONLY` 写明理由（当前只有 `ui_backend`）。另记一处本批未动的分歧：`smart_punctuation` 与 `smart_punctuation_repeat` 共享默认为开，而 Windows 基线两个都是关，来源也已改成整族默认关；Windows 运行时读的是共享偏好而非那份 TOML，所以实际默认与记录在案的基线相反。改这两个会同时影响 macOS、Linux 和移动端首次运行，留待单独决定。
-4. 用户名带中文时清除学习数据不再走 ANSI 路径转换（#3059）。仓库窄字符串都是 UTF-8，`path::string()` 却按系统窄编码转换——Windows 上就是 ANSI 代码页，`C:\Users\陆傲天` 这类 profile 要么转错要么直接抛。`reset_learned_data` 有三处这样用，其中拼 SQLite `-wal` / `-shm` / `-journal` 那处在 try 块里且发生在新文件已就位之后：抛出会触发回滚并把已经成功的清除报成失败，转错则把 `-wal` 留在原地，用户刚清掉的学习数据下次打开又回来。改为在 path 自身 native 字符串上拼接，完全不过窄转换。既有用例现在在 ASCII 与 `陆傲天` 两种根目录下各跑一遍；另加 `scripts/test-windows-path-encoding.py` 挂进 `--quick`，禁止 Windows 会编译到的 C++ 出现 `path::string()`——这类问题在系统编码为 UTF-8 的机器上一点痕迹都没有，而跑该脚本的机器全都是，只能静态拦。
-
-另核对确认无缺口：候选右键菜单（置顶 / 固定排位 1–5 / 取消固定 / 删除）与来源逐项一致；托盘菜单目标为超集（多手写识别板）；悬浮工具栏与菜单模板除目标特意调整的脚本位置外与来源一致；Windows Server 从共享偏好读取的 23 个键在 Rust 结构体中全部存在；Windows 侧 C++ 的宽窄转换全部走 `CP_UTF8`，文件打开一律传 `std::filesystem::path`。
-
-增量记录（2026-09-20，Windows 第三批：把 Windows 编译门禁真正跑起来）：目标起点 `6caddd999e38b8fb973009f0b972f7f273bac454`。本批的起因是一个方法问题——此前每一批的验证都写着「按文件交叉语法检查加 quick」，而 `verify-local.sh` 的 native host 阶段只认 Windows 主机上的 `target/win-full`，于是它在每一台真正跑过本地验证的机器上都只打印 skipped。把 `platforms/windows/build-cross.sh x64` 跑起来之后，发现原生构建同时坏了六处：
-
-- `tests/runtime/tsf_config_frames.cpp` 引 `windows_ipc.h` 的相对路径解析不到（它链接的 `msime-windows-replies` 本就把契约目录作为 PUBLIC include 暴露）；
-- `ee02012d4` 把测试按职责分到子目录时，12 个 TSF 测试的相对 include 少了一级，这些目标全都配置不出来；
-- `Watchdog.cpp` 在匿名命名空间里用未限定的 `watchdog_protocol::managed_argument`；
-- `tests/ui/candidate_initialization.cpp` 的四层嵌套初始化器少两个右括号；
-- 四个测试把 `tests/core/TestHostOptions.h` 当同目录头文件引；
-- `server_smoke.cpp` 还在按三参数调用早已加了 `actions_available` / `fixed_position` 的 `CandidateFlyoutWindow::open`，`ServerResources.rc` 与 CMake `OBJECT_DEPENDS` 各指着一个不存在的 `ServerResources.h`（真头文件在 `src/ipc/`），后者直接让 make 报 "No rule to make target"。
-
-修完之后（#3072）整套构建通过：host DLL、TSF DLL、Server、msimeui 与全部原生测试可执行文件都链接成功。
-
-随后把这条路径接进门禁，免得再烂一次：宿主不是 Windows、但 MinGW 与已引导到清单基线的 vcpkg 都在时，native host 阶段走交叉构建（#3074）；vcpkg 的查找顺序补上主工作区，这样在本仓库惯用的短生命周期 worktree 里也能生效，引导一次整台机器就位（#3079）；pipe-only 配置同样改为交叉构建——它的注释写着「一个没人跑的配置就是会烂掉的配置」，而它自己也在每台非 Windows 机器上跳过，其实它连 vcpkg 都不需要（#3082）。三处都做了反向验证：故意插入失败的 `static_assert` 后阶段确实报错并失败。
-
-顺带修掉一处候选窗绘制缺陷（#3076）：候选卡片宽度被工作区上限夹住，行文字用 `NO_WRAP` 且 `DrawText` 没传 `CLIP`，于是超过上限的候选（AI 联想、云候选，或候选后面再接 `"  · " + 译文`）会画过卡片右边缘、落在为阴影留的透明边距上，看起来像浮在窗口旁边的一段文字，而且点不到——命中测试用的正是同一个行矩形。传上 CLIP 让它截在行矩形处。上游对应路径是换行，但那要求行高可变，而这个渲染器的行高来自固定的 `candidate_row` 度量，属于另一回事。
-
-本批限制：x86 在本机构建不了——这台的 MinGW 用 SJLJ 展开而 x86 Rust GNU 需要 DWARF，`build-cross.sh` 自己就会拒绝；32 位宿主进程要加载的 TSF DLL 因此仍未被任何门禁覆盖。测试是链接了但没有执行，本机没有 Windows，也没有装 Wine（那是对用户机器的系统级改动，且这些测试要建窗口、用 TSF COM 与 D2D，在 Wine 下本就不可信）。#3076 的实际绘制结果同样没有看到。
-
-增量记录（2026-09-20，Windows 第四批：设置页逐项对照）：把来源十四个设置 partial 里的可见文案逐条与共享 Tauri 设置页比对，按「文案不同」与「功能缺失」分开判读。绝大多数是措辞差异（「乱序纠错」对「字母顺序错位」、「始终使用英文标点」对「标点锁定」、「按应用记忆/全局统一」对「中英文状态范围」等），逐项确认对应控件都在。
-
-只查出一处真缺口并已补上（#3094）：豆包的整句流式与双向流式是同一模型的两个识别接口，差别只体现在 `asr_endpoint` 这串 URL 上。来源给的是带名字的下拉并写明取舍——整句流式边录边传、说完返回整句，服务方称准确率更高且推荐用于输入法；双向流式返回增量结果，流式预编辑刷新更频繁——而目标只有一个 url 输入框，等于要求用户背两串看不出区别的地址。在豆包 provider 下补同样的下拉，选中即写入下方地址；不新增偏好字段，这个选择本来就只是 `asr_endpoint` 的值。地址不属于两个预设时显示「自定义地址」，选它不做任何事。
-
-同批核对确认无缺口的还有：五个语音快捷键开关、录音提示音与静音其他声音、豆包新旧鉴权与四个识别选项、候选翻译的三家 provider 凭据、辅助码双拼/全拼两套方案与候选窗显示、皮肤目录的打开与重新扫描、重启输入法入口、词库按类型导出、候选调频五种模式与 1~10 的触发次数与线性步长（来源 README 写的「1～6」与它自己的默认配置不一致，以配置为准）。另外「界面渲染」这一项来源有而目标没有，是已记录的有意取舍：目标只有 Direct2D 候选窗，没有可选项，`ui_backend` 作为配置契约保留并登记在字段漂移门禁的 `RUST_ONLY` 里。
-
-增量记录（2026-09-20，Windows 第五批：跟进来源基线之后的新提交）：来源远端默认分支已推进到 `1e4c331d5a7d62b1f219fcc0979a89dd5ead7309`，比本表此前固定的 `e1d53dd8` 多出 18 个提交。逐个分类后，Windows 侧可移植的三项全部完成，其余为 Engine 与其打包，理由见末段。
-
-1. 菜单项回调不再读已释放的闭包（#3097，来源 `3135af32`）。`MenuFlyoutItem::OnMouseUp` 直接调 `onClick_()`，而候选右键菜单每个动作都是「先关菜单再投递消息」：关菜单同步放掉该菜单项的最后一个引用，正在执行的 `std::function` 于是在自己的 `operator()` 还在栈上时被销毁——小闭包按 small-object optimization 就住在那个堆块里，随后的窗口重排同步派发 WM_SIZE/WM_PAINT 触发重新分配把它回收。来源在自己的 D2D 候选框上复现为右键删除候选必定 0xC0000005。改法是调用前把 handler 拷到栈上；`Button::OnClick` 同形状一并改。回归不去捕捉内存破坏（能否复现取决于分配器与编译器是否重新加载捕获，读已释放内存本身也是未定义行为），改为断言 handler 在自己 `operator()` 期间始终存活。同类扫描到本仓库的 `CandidateFlyoutWindow::choose` 也是「hide() 后调 chosen_()」，但那里 `chosen_` 是 flyout 自己的成员、`hide()` 不销毁 flyout，所有权不同，未改。
-2. 终端里改写不了的标点改走输入队列（#3099，来源 `1640cb35`）。「中文标点后按空格转英文」与两秒内同键撤回都是编辑会话里的 `ITfRange::SetText` 就地改写，而终端类宿主的 TSF 上下文只是代理、不保存已上屏文字，会照单全收 ShiftStart 与 SetText 并报告成功，屏幕上什么都没变。判据不看进程名，看改写前能不能把待改写字符读回来；读不回就改走本仓库早已有的 SendInput 改写队列（执行前校验焦点 token、前台窗口与期限，合成事件带自生成标记）。期限单列常量 500ms，因为它约束的是消息投递而非用户按键窗口。注意来源那次回归本仓库没有：来源在 #413 里把 SendInput 整个换掉了，而这边「数字/字母后直出再按同键」一直走 SendInput，缺的只是按空格转换与其撤回在终端下的兜底。
-3. 安装前检查 WebView2 与 VC 运行库（#3100，来源 `1ac904da`）。两者都不随包分发，缺任一装完即坏且故障现场在安装结束之后。`InitializeSetup` 在第一屏之前查注册表（不做文件探测：Setup.exe 是 32 位进程，`FileExists` 会被 WOW64 重定向，只装 x64 redist 的机器会被误判），VC 要求 14.20 以上而非只看 `Installed=1`，静默安装默认继续并把缺失写进日志。文案按本产品改过：这边候选窗是 Direct2D 绘制、不受 WebView2 影响，受影响的是设置窗口与表情 / 手写 / 屏幕键盘 / 语音面板——照抄来源的「候选窗口打不开」会是错的。新增 `scripts/test-installer-prerequisites.py` 挂进 `--quick` 钉住上述判据；Inno 的 Pascal Script 在非 Windows 机器上无从编译，该脚本不替代 Windows 上的编译与交互验证。
-
-其余提交当时不移植，理由记下以免下次重新判断：`ccbaa3a6`（Google 解码器前把 ü 换成 nue/lue/ju 写法）、`80b1fc42` / `03a5b4fe` / `e2a5f5f9`（词格整句改用 kenlm 三元模型并重排优先级）、`01c5bca3` / `663f7230`（选中的整句候选落成用户词组）、`b4728fdb` 都在 Engine 及其 Server 消费侧。来源把 Engine 以 `engine/` 在树内维护，本仓库由 `engine-lock.json` 固定独立 `msime-engine` 归档加本地 overlay 获取，两条路径不同。本批没有提锁——提锁的影响面覆盖全部平台，且整句重排在本仓库正由 Rust 侧的 `chinese-ime-lm` 另行推进（见 #3088），两边同时动同一块行为会互相盖掉。`d30d2946` / `bc1a1c7a` 是给上述 Engine 产物打包（sc.lm、Google 解码器系统词典），随锁一起考虑。另外尝试用 engine-bridge 的真引擎直接判定 ü 拼写在本仓库是否同样出错，未能得出结论：该测试装置用的是空词库临时目录，`qu`、`xu` 这类无 ü 的音节同样出不了候选，要判定必须带真实系统词典，属于提锁时一并验证的范围。**后续已经证明“只能提锁”不成立；`01c5bca3` 的共享 Engine 路径已由 2026-09-22 的独立整句学习 overlay 迁入，`663f7230` 是来源绕开 Engine 的 Server 专用旁路，本仓各宿主不走那条路。**
-
-## HarmonyOS 逐条对照（2026-09-20）
-
-来源为本地 `MSIME-Windows` 检出 `997fdfd9` 的 `README.md`「功能简介」与「核心功能指南」，逐条列出目的地实现位置与验证方式。列这张表是为了让"覆盖完整"成为可核对的断言而不是结论：任何一行填不出目的地，就是一个缺口。
-
-| 来源功能 | Harmony 实现位置 | 验证 |
+| 功能组 | 来源入口 | 本仓落点 |
 | --- | --- | --- |
-| 全拼、四种双拼、86 五笔 | `keyboard/KeyboardScheme.ts`；Engine 经共享 `prepare_host_configuration` | 逻辑回归；设备上 Engine 会话建立 |
-| 日文罗马字、平假名/片假名、日语词库 | `input/JapaneseNineKeyLayout.ts`、`input/JapaneseVariantPolicy.ts` | 逻辑回归 |
-| 切日文保留中文方案 | `KeyboardScheme.mapping` + `KeyboardSession.schemeChanges` | 逻辑回归 |
-| 五种辅助码方案、单码/双码 | `input/ChineseHelpcodePolicy.ts`；Engine 侧 `quanpin_helpcode`/`shuangpin_helpcode`；设置页辅助码分页 | 逻辑回归 + UI 回归 |
-| 谷歌云候选、AI 联想（四提供方） | `candidate/OnlineCandidatePolicy.ts`；NAPI `onlineQuery`/`applyOnlineCandidates` | 逻辑回归 |
-| 候选中英互译、腾讯 TMT / NiuTrans / DeepLX | `candidate/TranslationPolicy.ts`、`CredentialCrypto.ets` | 逻辑回归 |
-| 自定义候选窗翻译（覆盖层） | 设置页写 `<state>/user/custom_translations.txt`；Engine `prepare_translation_sidecar` 读取 | 解析规则逐条对齐 C++ 并有测试 |
-| 候选调频（五种算法、触发次数、步长） | Engine 侧 `frequency`，设置页无平台门 | 共享偏好契约 |
-| 候选窗右键菜单（删除候选等） | `input/CandidateContextMenuPolicy.ts` + `KeyboardView.onMouse`；触屏长按保持不变 | 逻辑回归；2in1 鼠标未在设备上点 |
-| 候选序号字号 | `candidate/CandidateNumberFontPolicy.ts`（上游 `.num { font-size: 0.8em }`） | 逻辑回归 |
-| preedit 光标（分词编辑可见） | `candidate/PreeditCaretPolicy.ts`（上游 `.cursor`）；共享视图 `caret_position` | 逻辑回归；2in1 分词键未在设备上按 |
-| 候选释义外观 | `candidate/CandidateTranslationStyle.ts`（上游竖排 `.cand-translation`） | 逻辑回归 |
-| preedit 显示、双拼原始预编辑 | `candidate_preedit_style`；`shuangpin_preedit` 能力位 | 逻辑回归 + 能力位测试 |
-| 中英混输、emoji/颜文字混输、独立英文候选 | Engine 侧 `mixed_input`；`dedicated_english` | 共享偏好契约 |
-| 直接英文补全 | `input/EnglishSuggestionPolicy.ts`；NAPI `englishCompletions` | 逻辑回归 |
-| 智能标点、重复转中文、空格转 ASCII、成对补全、以词定字 | `input/SmartPunctuation*.ts`、`PairedPunctuationPolicy.ts`、`CandidateTextPolicy.ts` | 逻辑回归 |
-| 中文标点直输（`\`→、 `` ` ``→· `$`→￥ `^`→…… `_`→——） | Engine 侧 `input_session.cpp`；硬件键经 `isAsciiPunctuation` 全部送达 | 硬件键全覆盖；触摸键盘见下 |
-| 中英文状态按应用/全局记忆 | `input/ImeModeScopePolicy.ts` | 逻辑回归 |
-| 全半角、简繁 | `input/FullWidthInputPolicy.ts`、`input/ChineseOutputPolicy.ts` | 逻辑回归 |
-| 八个快捷模式 K/T/U/E/M/J/Y/R | Engine 侧 `local_modes`；`input/LocalInputMode.ts` | 共享偏好契约 |
-| 词库查询/增改删/导入导出、快捷短语 | `DictionaryMaintenancePolicy.ts`；共享 `dictionary_request` | 逻辑回归 |
-| 语音：豆包流式、三家批量、润色 | `input/Harmony*Recognizer.ets`、`HarmonyVoicePolisher.ets` | 构建；provider 未在设备上跑 |
-| 语音五个快捷键、空格锁定 | `input/VoiceHotkeyPolicy.ts` | 逻辑回归 |
-| 录音提示音、录音时静音其他音频 | `input/HarmonyVoiceRecordingBehaviour.ets` + `VoiceRecordingBehaviourPolicy.ts` | 逻辑回归；音频未在设备上听 |
-| 录音设备选择 | `input/VoiceCaptureDevicePolicy.ts`、`HarmonyVoiceCaptureDevices.ets` | 逻辑回归 |
-| 手写识别 | `input/HandwritingStrokePolicy.ts` + Core Vision Kit；设置页手写分页有本宿主专属说明 | 逻辑回归 + UI 回归；识别本身未在设备上跑 |
-| 软键盘组字（手机） | `KeyboardView` 触摸路径 → `KeyboardSession.press` → Engine | **设备上验证**：点 `N` 得到预编辑 `n` 与候选 `1 那` |
-| 设置页在设备上渲染 | `pages/Settings.ets` WebView 加载共享 `SettingsPage` | **设备上验证**：2in1 上完整侧栏（含 #3165 解封的辅助码页）与候选窗预览 |
-| 屏幕键盘 | 本宿主自身即键盘；2in1 另有 `DesktopSurface.SCREEN_KEYBOARD` | 设备上面板创建成功 |
-| 悬浮工具栏、组件开关、缩放 | `FloatingToolbar.ets`、`FloatingToolbarLayout.ts` | 逻辑回归 |
-| 悬浮工具栏缩放档位与图标字号 | `FloatingToolbarLayout.scale` / `.fontSize` | 与来源逐项一致，见下 |
-| Emoji、颜文字、符号、剪贴板历史 | `emoji/EmojiCatalogModel.ts`、`clipboard/*` | 逻辑回归 |
-| 四种皮肤、深浅色、字体 | `candidate/CandidateSkinPolicy.ts`、`skin/KeyboardSkin.ts` 的四套候选配色、`candidate/CandidateFontFamilyPolicy.ts` | 逻辑回归；配色取自上游 `packages/ui/src/upstream/candidate-themes/skins` |
-| `Ctrl+Shift+E`、`Ctrl+Shift+Space`、`Ctrl+.` | `InputModeRouting.ts` | 逻辑回归；硬件键未在设备上按 |
-| `Ctrl+Shift+Alt+1–8`、`+C`（数字键行与小键盘均可） | `HardwareKeyRouter.ts`、`KeyboardSession.resetCache` | 逻辑回归；同上 |
-| `Ctrl+Shift+Super+K`（打开屏幕键盘） | `input/PanelShortcutPolicy.ts` → `DesktopSurface.SCREEN_KEYBOARD` | 逻辑回归；硬件键未在设备上按 |
-| 外接键盘（手机/平板接蓝牙或 USB 键盘） | `input/HardwareKeyboardPolicy.ts`、`input/HarmonyHardwareKeyboards.ets` | 逻辑回归；热插拔未在设备上插拔 |
-| 更新、关于、帮助、反馈 | 共享设置页 | 共享 UI |
-| 设置页感知外部偏好变更 | `entryability` 的 `windowStageEvent` + `input/PreferenceRevisionPolicy.ts` | 逻辑回归；窗口切换未在设备上走 |
-| 外部皮肤目录入口 | `pages/Settings.ets` 的 `importSkinFolder` + `skin/SkinImportPolicy.ts`；能力位 `skin_directory_import` 决定按钮文案 | 逻辑回归 + UI 回归；选择器未在设备上走 |
-| 设置窗口本体 | `pages/Settings.ets` 的 WebView 加载 `apps/harmony` 构建的共享 `SettingsPage` | 构建产物防漂移校验（`scripts/test-harmony-settings-bundle.py`） |
-| 设置窗口冷启动 | 共享 `SettingsStartupPage` | 逻辑回归；此前为纯白窗口最多 5 秒 |
-| 开机引导（启用输入法、选为当前） | 共享 `WelcomeFlowPage` + `input/OnboardingStatePolicy.ts` | **设备上验证**：全新安装未启用时渲染「1/4 欢迎使用水杉」 |
-| 服务守护、安装、卸载 | 不适用：扩展生命周期由系统管理 | — |
-| `Ctrl+Shift+Alt+R`/`+T`（重启/退出服务） | 不适用：本宿主没有独立服务进程 | — |
-| 用户词库日志回放（`MetasequoiaImeDictionaryReplay`） | 不适用：来源随安装包分发该 CLI 但设置界面不暴露它；HarmonyOS 应用无用户可调用的命令行，而在设置页加入口等于给本宿主一个来源没有的功能 | — |
-
-三类条目没有目的地实现，都是平台差异而非缺口：Windows 的服务守护与服务重启/退出快捷键针对独立 Server 进程，HarmonyOS 的输入法扩展由系统拉起与回收；用户词库日志回放在来源也只是随包分发的命令行工具，设置界面并不暴露它。
-
-按来源 `server/src/` 的 25 个实现目录逐个对照，只有上述三项没有目的地实现，其余全部映射到本宿主的具体文件。这是本仓库做过的最细一层功能清点——比 README 条目、能力位、偏好字段都更贴近实现。
-
-2026-09-20 在 2in1 模拟器实例（`const.product.devicetype` = `2in1`、API 23、aarch64）上取得了硬件按键这一栏的设备证据，该栏此前长期记为"未验证"。逐项结果：
-
-| 项目 | 设备证据 |
-| --- | --- |
-| 安装、启用、切为当前输入法 | `ime -e -f` 返回 `FULL_EXPERIENCE_MODE`，`ime -g` 返回本宿主 |
-| 扩展启动链 | `module loaded` → `session 1 created` → `routing hardware keys: 0 device(s)` → `panel ready: 2in1, candidate window, with toolbar` |
-| 接管真实编辑器 | 浏览器页内搜索框：`attached to editor: pattern=0 enter=3` |
-| 硬件和弦 `Ctrl+Shift+E` | 工具栏在 `中` 与 `英` 之间往返切换，两个方向均生效 |
-| 按键领取契约 | 中文模式下字母键被领取、不进编辑器；英文模式下同一键穿透到编辑器；退格两种模式下均放行 |
-| `Ctrl+Shift+Super+K` 打开屏幕键盘 | 和弦按下后面板出现在窗口底部 |
-| 悬浮工具栏渲染 | 屏幕右下角显示 `中 。 半 简 😊 ⚙` 并随模式更新 |
-
-其中按键领取契约是关键判据：**同一个字母键在两种模式下行为相反**，这只有键真正进入本宿主的路由才可能发生。
-
-同次运行暴露一个设备上才能观察到的缺陷，**尚未修复**：2in1 上字母被领进组合串后，预编辑与候选窗都不出现。已排除的原因有两项——`panel.show()` 本身可用（`Ctrl+Shift+Super+K` 能把面板显示出来），`onComposition` 回调确实在 `if (desktop)` 分支内被赋值。资源暂存也成立（`StagedResources.stage` 返回假时 `onCreate` 会提前返回，而日志显示 `session 1 created` 与 `panel ready` 都发生了）。症状收敛为：Engine 接受按键但不返回 editing text，因此 `composing()` 始终为假、`onComposition(true)` 从不触发。再往下定位需要带诊断日志的构建。
-
-复现步骤：2in1 实例上安装并切为当前输入法 → 打开浏览器并点中页内搜索框（确认日志出现 `attached to editor`）→ 确认工具栏显示 `中` → `hdc shell uinput -K -d 2030 -i 50 -u 2030`。预期出现候选窗，实际字段与面板都无变化。
-
-同一个 HAP 在 phone 实例上做对照，结论把范围切干净了：**Engine、词库与组字链路全部正常，坏的只是 2in1 的硬件键路径**。手机上点软键盘的 `N` 键，预编辑立刻显示 `n`、候选栏出现 `1 那`、回车键由"搜索"变为"选定"。两条路径最终调用的是同一个 `KeyboardSession.press()`，触摸路径能组字，硬件键路径不能。
-
-同次还确认了资源与数据侧没有问题：`files/engine` 暂存 292 MB，`msime.db` 107 MB、`dict_japanese.dat` 66 MB、`english.db` 8.4 MB、`dict_pinyin.dat`、`others.db`、`sentence-model.safetensors` 均在位，`engine.ready` 标记按代次写入；设置页的词库查询在设备上执行成功（全新安装的用户词库为空属正常）。
-
-带诊断日志的构建已在 2in1 上跑过，输出是：
-
-```
-composing key produced no composition: scheme=quanpin local=none english=false candidates=0
-```
-
-即宿主侧四项输入全部正确——方案是全拼、无本地模式、非英文、候选为零——`client.character` 确实被调用，Engine 收到合法字母后返回了空视图。排查因此越过了宿主侧：`press()` 的参数、方案、模式都不是原因。
-
-余下的怀疑集中在 Engine 在该设备上打开词库的时机与结果：`prepare_host` 只校验文件存在与清单一致，真正打开 SQLite 是另一回事，而一次静默的打开失败会让此后每次查询都返回空，且不影响 `session created`。验证这一点需要 Engine 侧的日志，不是宿主侧能看到的。
-
-那条诊断日志已经留在代码里（不记录按键字符，只记录宿主状态），因此这个失败此后不会再是静默的。
-
-进一步的设备排查把范围又收窄了一大截。先前这里写作「硬件字母只在屏幕键盘界面打开时才能起一个新的组合串」，那句话把顺序读错了：那次实验里组合串是**触摸**起的，硬件键只是接着延长了它，界面开着是巧合而非条件。准确的表述是：**硬件字母能延长已有的组合串，但起不了新的组合串。** 三项互相印证的观察：
-
-1. 同一台 2in1 上点屏幕键盘的 `N` 键，预编辑 `n` 与候选 `1 那 / 2 年 / 3 女 / 4 难 / 5 内 / 6 你` 正常出现——Engine 在该设备上没有问题，此前"手机能、2in1 不能"的说法同时换了设备与路径两个变量，不成立，已由这次同机对照取代。
-2. 组合串建立后注入硬件字母 `I`，组合串延长为 `ni`、候选变为 `1 你 / 2 ni / 3 尼 / 4 妮 / 5 泥 / 6 逆`——硬件键路径本身是通的。
-3. 组合串被取消、界面关闭后再注入同一个字母，诊断日志立即触发，组合串仍为空。
-
-因此缺陷不在按键投递、不在 Engine（同一台设备上触摸能起组合串）、也不在宿主侧的方案与模式判断，而在"硬件键作为**首个**字母时未能让 Engine 起一个组合串"这一处。触摸与硬件两条路径调用的是同一个 `press()`、传入同样的参数，所以差别不在参数，而在两次调用时宿主自身的状态——那正是下一步要查的。
-
-仍未取得设备证据的是：语音 provider 实际识别、手写实际识别。两者需要真实凭据与真实音频/笔迹。其余条目均有不依赖设备的回归覆盖。
-
-候选皮肤一项此前只写「逻辑回归」，掩盖了一个外观缺陷：四个来源皮肤被近似映射到触摸键盘的调色板上，而 `wechat` 与 `willow_green` 都落在 `forest`，于是微信绿与杨柳青在 2in1 上完全同色——`#07c160` 和 `#58b980` 并不接近，四个皮肤实际只剩三个。不渲染上游 CSS 并不需要另造一套颜色：上游样式表就在本仓库 `packages/ui/src/upstream/candidate-themes/skins` 下，四套配色（明暗各一）现直接取自各自的样式表，由 ArkUI 原生绘制。触摸键盘的八个皮肤是另一项偏好，未改动，这四个也不进触摸皮肤选择器。
-
-来源指南列出的五个中文标点直输映射（`\`→、、`` ` ``→·、`$`→￥、`^`→……、`_`→——）都在 Engine 侧的 `input_session.cpp` 里，本宿主调的是同一个 Engine，因此**硬件键路径全部具备**——`HardwareKeyRouter` 的 `isAsciiPunctuation` 覆盖 0x5b–0x60，这五个字符都落在其中。
-
-触摸键盘则只覆盖其中三个。符号行是 `1234567890` / `,.?!;:'"@/` / `()[]<>\-_=`，所以 `\`（、）、`_`（——）、`<` `>`（《》）能点出来，而 **`^`（……）与 `$`（￥）不在行内**；符号面板是数据驱动的 `symbol_catalog`，其中有单个的 `·` `—` `…`，没有中文排版用的双字形 `……` `——`，也没有 `、￥《》`。因此在手机形态下，省略号与人民币号无法通过点按输入，间隔号则可经符号面板取得。
-
-这不是本宿主特有：`platforms/android/java/.../KeyboardLayout.java` 的三行符号与这里**逐字相同**，限制是随移植一起来的。需要说清的是两者是各自独立的文件而非共用代码——改本宿主这一份不会影响 Android，先前记作「共用」是不准确的。不在此改动的理由是另一条：来源没有触摸键盘，因此这三行符号**没有可对照的来源行为**，在十键一行的布局里挤进 `^` 与 `$` 要么让行数不齐、要么挤掉 `@` 或 `=`，那是触摸布局的设计取舍而不是对照缺口。
-
-悬浮工具栏核对过两项声称，均成立。`FloatingToolbarLayout.scale` 的注释写着"匹配 Windows 工具栏的四档缩放"，核对来源 `floating-toolbar.ts` 的 `normalizeScaleKey`：确实只有 0.75 / 1 / 1.25 / 1.5 四档且其余一律归为 1，本宿主的实现与之逐项相同。图标字号方面，共享设置页给出的选项正是 16、18、20、22、24、26、28，与本宿主的 16..28 与默认 24 完全吻合——共享文档把 `scale_percent` 校验到 50..200、`font_size` 校验到 12..48，那是文档容许范围，不是界面给得出的值。
-
-工具栏的**度量**则与来源不同，这是有意的而非缺陷，记在这里以便后面真要做设计决定时有个出处：来源的 `ui-html/webview2/ftb` 用 `--ftb-bar-height: 35px`、`--ftb-icon-size: 24px`、`--ftb-gap: 6px`、左右内边距 8/4（左侧留给拖动手柄）；本宿主用 44 / 42 / 10.5 与对称的 10，且文件头写明"Ported from platforms/macos/src/FloatingToolbarPanel.mm, including the arithmetic"。也就是说它跟的是 macOS 而不是 Windows。在一台既有触摸又有鼠标的 2in1 上把图标压到 24px 是否合适，是产品判断，不在此单方面改动。
-
-设备上跑本次新增的三项功能时，暴露出一个此前无人发现的桥接缺陷，影响面远大于这三项：`javaScriptProxy` 分 `methodList`（同步）与 `asyncMethodList`（异步）两张表，而本仓库把**全部方法都注册进了同步表**，其中六个是早就存在的异步方法——`account`、`cloudDictionary`、`cloudDictionarySnapshot`、`aiModels`、`aiTest`、`testApiCredential`。异步方法注册在同步表里，页面拿到的不是它的返回值。开机引导正是这样失效的：宿主日志打印「opening welcome flow」，页面却画出设置页，因为那次查询的回复页面读不到，被 `catch` 兜成了「不需要引导」。
-
-两条官方异步注册路径在本机的 API 23 模拟器上都不可用：属性形式的 `asyncMethodList` 与 `registerJavaScriptProxy` 的第四参数都让 Promise 永不兑现，页面停在启动页。两者都在设备上试过。因此本宿主自己的三个方法改为不走异步桥接——引导状态由宿主在窗口创建时算好、页面同步读取且回复带 `ready` 标志以免竞态，选择器与皮肤导入改为同步发起、结果不经返回值传递。
-
-那六个早就存在的异步方法仍未修复：它们带参数且要做网络往返，无法照搬这个办法，需要另一套机制（例如宿主用 `runJavaScript` 回推结果，就像偏好变更通知那样）。这一条记在这里，因为它意味着账号、云词库与 AI 相关的设置项在本宿主上很可能一直没有真正工作过。
-
-外部皮肤目录此前是一处缺口，现已按平台自己的方式补上。来源的 `skin_directory::open` 有 `#[cfg(target_os = "windows")]` 分支，所以"打开皮肤目录"是来源实实在在有的功能；共享皮肤页把它渲染成一个按钮，并按 `disabled={!openDirectory}` 决定可用性。本宿主不提供该成员，于是那个按钮**渲染出来但永远点不动**。
-
-本宿主的皮肤目录在应用沙箱内（`${filesDir}/state/skins`），系统文件管理器浏览不到，所以"打开目录"在这个平台上没有对应物。用户的目标是把皮肤包放进去，因此方向反过来：用户用文档选择器指向皮肤所在的文件夹，由本宿主拷进去。选的是文件夹而不是文件，因为一个皮肤就是一个目录——`skin/catalog.rs` 判 `is_dir` 并在其中找样式表，导入单个文件会导入一个随后被目录扫描拒绝列出的东西。
-
-按钮文案由新增的能力位 `skin_directory_import` 决定，在本宿主上显示「导入皮肤」：一个说「打开目录」却永远打不开目录的按钮，比没有按钮更误导。
-
-顺带记下形状：这是本轮第三个"控件渲染出来但恒久不可用"的地方，三个都已处理：手写页的打开按钮、辅助码分页、以及这里的皮肤目录。它们的共同点是宿主缺一个 client 成员，而共享页选择了禁用而非隐藏——按平台名门控的那一类缺陷之外，这是另一类需要逐项核对 client 成员与渲染结果才能发现的缺陷。
-
-设置界面一项此前记作「共享 UI」，这句话在源码层面成立、在运行时不成立：HarmonyOS 的设置窗口是 WebView 加载一个提交进仓库的构建产物，而它自 #2863 起没有被重建过，其间 52 个提交改动了 `packages/ui/src`。也就是说本仓库在长达数十个提交的时间里，HarmonyOS 上渲染的是一个别处已不存在的界面，此后新增的每一个能力位控件在这里都不可见。陈旧的包不报错——窗口照常打开，只是少掉一批控件，看上去像是这个平台本来就没有这些设置。已重建，并把「改完共享 UI 要重新生成」从一句文档变成 `verify-local.sh` 里的一道逐字节校验。共享 UI 的结论今后按该校验成立，而不是按源码引用关系成立。
-
-硬件按键一项此前被记为「2in1 形态限制」，该结论是错的，已随本批纠正。`KeyboardExtensionAbility` 只在 `KeyboardFormFactor.isDesktop()` 时订阅 `keyEvent`，而那段注释论证的是「2in1 上这是唯一通路」——它说明桌面需要订阅，不说明手机不能订阅。真实后果不止于验证不到：手机或平板接上蓝牙/USB 键盘时扩展根本不订阅，框架把按键直接交给编辑器，物理键打出原文字母而完全不组字，这是功能缺口而非形态差异。现已按「形态决定画不画键、枚举决定路不路由键」拆开，判据是 `ALPHABETIC_KEYBOARD` 而非 `sources` 含 `keyboard`（后者在每台手机上都为音量与电源键成立）。因此该项的设备证据不再依赖一台能启动的 2in1，任何接得上键盘的 HarmonyOS 设备都能验证。
-
-增量记录（2026-09-20，Windows 第六批：把三项「留待决定」逐个落定）：上一批把三件事记为需要用户决定，这一批逐个查清并处理，不再挂着。
-
-1. 智能标点在 Windows 上的首次默认（#3105）。Windows 安装包发的 `config.default.toml` 五个开关全为关，来源也已把整族改成默认关；但那只是安装模板，运行中的 Server 读的是共享偏好文档，而共享默认里主开关与同键转回都是开——Windows 上的实际首次默认与它自己随包发出去的基线正好相反。默认函数改为 `!cfg!(windows)`：只动 Windows，其余宿主一直是开着发的，让偏好在老用户脚下变掉比按平台不同更糟；两边都不影响已存下来的值。判据放进 `test-default-config-parity.py`，它比对安装模板 TOML 与 Rust 源码两份互相独立的来源，把默认函数改回 `true` 会指名报错——不像单测断言实现等于实现那样自证。
-2. x86（#3108）。32 位 TSF DLL 会被加载进每个 32 位宿主，但这个架构从来没被构建过：`build-cross.sh x86` 的 Rust 侧要 DWARF 展开，而 macOS 上常见的 i686 MinGW 是 SJLJ。查下去发现一处只在 x86_64 成立的代码：`CandidateWindow.cpp` 把无捕获 lambda 直接传给 `EnumFontFamiliesExW`，而 `FONTENUMPROCW` 是 `__stdcall`、lambda 转出来的是 `__cdecl`——x86_64 上只有一种调用约定所以同型，x86 上是不同类型，直接编译错误。改成具名 `CALLBACK` 函数（`ShellLauncher` 的 `EnumWindows` 回调本来就是这个写法）。新增 `scripts/test-windows-32bit-compile.py` 挂进 `--quick`：编译参数取自 x64 构建产出的 `compile_commands.json` 而不是另一份手工清单，往 CMake 加源文件或 include 自动被覆盖；只换编译器且 `-fsyntax-only`，不链接因此不需要 32 位库。当前 247 个源文件全部通过。x86 的**链接**仍未覆盖，那要等一套 DWARF 展开的 i686 工具链。
-3. Engine 锁（结论：只提锁拿不到那些行为）。来源基线之后的 Engine 侧提交（ü 换 nue/lue/ju 写法再送进 Google 解码器、词格整句改 kenlm 三元模型、整句候选落用户词组）只存在于来源自己树内的 `engine/`。本仓库跟踪的是独立仓库 `metasequoiaime/msime-engine`，当时克隆后核对：它比本仓库锁定的 `0531d421` 只多 5 个提交（`e25f2b8`、`5eab393`、`d45268d` 及两个 release chore），全部是词格 ngram 表的构建与落盘；全仓搜不到 kenlm / `sc.lm`，也搜不到把 ü 改写成 nue/lue/ju 再交给 Google 解码器的那段。也就是说当时提锁拿不到上述 Windows 对照项，而整句重排又正由 Rust 侧的 `chinese-ime-lm` 另行推进（#3088）。**这不再是等待条件：本仓已经用 overlay 承接来源树内但独立 Engine 不再发布的改动；独立整句学习见 2026-09-22 记录。**附带一提，本仓库的 Engine 是否同样存在 ü 拼写问题，第七批已用锁定词库判定为不存在：两种写法都通。
-
-增量记录（2026-09-20，Windows 第七批：用锁定词库逐项核对输入方案，并结掉 ü 那条「未判定」）：本批不改产品代码，新增 `crates/engine-bridge/examples/schemes_dictionary.rs`，按本仓库既有的真词库探针约定（同 `local_modes_dictionary`）接收一个按 `resources/desktop-dictionary.lock.json` 备齐的资源目录。起因是方案类的单测全部建在合成 sqlite 词库上：那能证明拼写解析器切对了音节，却证明不了这个方案够得着真实词条——空表对正确和错误的拼写一律回答「没有候选」。
-
-覆盖到的：全拼 `nihao` 首选 `你好`；四套双拼 profile 各自用 `ni` 走通到 `你`（`ni` 在四套里都是 n+i，一个输入就覆盖四条路径，不必硬编四张韵母表）；微软双拼另加 `nihk`，preedit 必须切成 `ni'hao` 且首选 `你好`；五笔按键名汉字 `gggg`/`hhhh`/`aaaa` 得到 `王`/`目`/`工`；日语罗马字 `nihon`/`sakura` 的假名读音为 `にほん`/`さくら` 且候选含 `日本`/`さくら`，同时反查全拼不带假名读音。每次探测各用独立的 user 与 cache 目录，免得前一次的学习影响后一次的候选顺序。
-
-同时把第六批第 3 条里记为「仍未判定」的 ü 拼写结掉，结论是本仓库**不存在**该问题：`nve` 与 `nue` 首选同为 `虐`，`lve` 与 `lue` 同为 `略`，j/q/x 后那个其实是 ü 的 `u`（`ju`/`qu`/`xu`/`jue`/`quan`）也全部出候选。来源 `ccbaa3a6` 需要在交给 Google 解码器之前把 ü 改写成 nue/lue/ju 写法，这边两种写法本来就都通，因此不是缺口，也不构成提 Engine 锁的理由。之所以拖到现在才判定，正是因为空词库分辨不出这件事——判据必须带真实词典。
-
-该探针与其余真词库探针一样不挂进 `verify-local.sh`：锁定词库不在仓库里。本批没有 Windows 主机，不声称任何原生安装、TSF 注册或真实编辑器交互。
-
-增量记录（2026-09-20，Windows 第八批：候选调频的持久化）：同样不改产品代码，新增 `crates/engine-bridge/examples/learning_dictionary.rs`。调频是排序变化，只有在存在排序的地方才看得见——单测那套合成词库对一个查询返回的条目太少，「往前挪了」不成立，所以这项此前没有任何覆盖，`learning: true` 在整个仓库里没被任何用例走过。
-
-探针覆盖这个设置的三个半边：选过的候选在**新开的**会话里排到原位之前（只在同一个会话内有效就不叫学习）；`reset_learned_data` 之后回到出厂顺序，且这一步跑在确实写入过的那个 store 上，所以一个什么都没做的重置会在这里失败而不是悄悄通过；`learning: false` 时同样的选择在干净 store 上不改变任何顺序，用的是另一个 store——要证的是有没有写进去，而前一个已经被写过了。
-
-与第七批同理，不挂进 `verify-local.sh`：锁定词库不在仓库里。没有 Windows 主机，不声称原生交互验证。
-
-增量记录（2026-09-20，Windows 第九批：翻页停在 Engine 的初始上限）：来源在 `move_page` 里对末页做展开，本仓库没有对应物——查下去不是漏写一段调用，而是这条能力在本仓库根本够不着。
-
-Engine 对**单字母**查询（`j`、`n` 这类只按声母的查询）只给 24 个候选，把其余的留到有人来要为止，`InputSession::expand_initial_candidates` 就是来要的入口。来源直接用内部的 `ImeSession`；本仓库只链 `metasequoia::Session` 这个公开门面，而门面从不转发它。实测：打一个 `j`，候选恒为 24 个、翻到第 5 页就是尽头，词库里其余 1431 个再也翻不到。
-
-处理分三层，都沿用仓库既有机制：
-
-1. Engine 侧走 overlay（`scripts/apply_engine_expand_initial_candidates.py`，登记进 `engine-lock.json` 的 `overlay_scripts`，与既有的 `apply_engine_double_helpcode_cache.py` 同一条路子）。只做两件事：把已有能力转发到公开门面；以及在 `InputSession::expand_initial_candidates` 成功后调用 `update_mixed_candidates()`。后者是必需的——`candidates()` 服务的是由引擎列表重建的 mixed 列表，不刷新的话这个方法会报成功而自己的访问器仍然返回那份短列表，等于谁调都看不见刚解除的上限。不改算法、不改排序。
-2. 桥接暴露 `Session::expand_initial_candidates`。
-3. `InputEngine` 加同名默认方法（默认答「没有更多」，因此 fixture 引擎与既有用例行为不变），运行时在 NextPage 走到末页时调用。移植来源的两条边界语义：下一页正好是那个不满的末页时先展开再进去，使它第一次显示就是满的；已经在末页且当前页不满时，新到的候选填进当前页而**不翻页**——翻过去会正好跨过刚到的那些。
-
-实测：`j` 从 5 页变为 291 页，第四页起是此前够不到的候选。`crates/input-runtime/src/tests.rs` 新增三个 fixture 用例（能翻到被扣下的候选、填满当前页时不前进、不扣候选的引擎翻页行为逐页不变），`schemes_dictionary` 补一段真词库断言。
-
-一处自己踩的坑记下来：overlay 的 `replace_once` 是从既有脚本抄的，而既有脚本的每个 hunk 都会消耗掉自己的锚点，我这三个 hunk 都是在锚点后面追加、锚点仍在，于是「锚点还在吗」回答不了「是否已经应用过」——跑第二遍就又插了一份，Engine 直接编译失败于重定义。改为每个 hunk 另给一个只有改写后文件才有的标记来判定，并实际连跑两次验证幂等。
-
-增量记录（2026-09-20，Windows 第十批：自动造词）：来源在 Server 里手工串这件事——候选只消耗了部分输入就把 `creating_word` 打开，用 `update_creating_word_progress` 累积各段，完成时落进用户词库。本仓库没有对应代码，一度看起来是缺口；查下去不是：锁定 Engine 的 `InputSession::commit` 内部已经自带整条链（`advance_composition_after_selection` + `update_creating_word_progress` + `store_user_phrase_from_canonical_pinyin`），而门面的 `select` 正是走它。来源要手工串，是因为它那版 Engine 把这几步摊在外面。
-
-新增 `crates/engine-bridge/examples/phrase_creation_dictionary.rs` 验证。这件事两头都看不见：空词库给不出「只消耗一部分」的候选，组合根本不会发生；而只看完整输入也看不见，因为词格对任何输入都能给出整句候选，`海滩跑步` 无论存没存过都排第一。区分两者的是**简拼**——存过的短语答 `htpb`，重新生成的整句不答。探针即以此为判据，并覆盖关掉学习时同样的组合不写入。
-
-过程中先得出过一个错误结论，记下来免得下次重犯：第一版探针判定「组合出的短语没有落盘」，证据是简拼召不回、候选来源恒为整句生成、工作词库全表扫不到。三条证据都是真的，结论却是错的——桥接的 `prepare_options` 把 `learning` 显式设为 `false`（与 Engine 自身默认的 `true` 相反），而探针没设，于是不落盘正是正确行为。开启后简拼立刻召回，来源从整句生成变为词库条目。教训是判定「功能缺失」之前先核对自己有没有把它打开，而不是先去读 Engine 内部。
-
-增量记录（2026-09-20，Windows 第十一批：把一条记在基线上的「环境所限」变回真的跑）：Wine runner 的四条失败里，`windows-installer-launch` 的原因写着「它按仓库相对路径找安装脚本，而容器没挂仓库」。那不是环境限制，是 runner 自己少挂了一个目录——那个目录就在手边。
-
-按 `MSIME_WINE_RESOURCES` 同样的方式把 `platforms/windows/installer` 只读挂进容器，并在跑到该套件时把 `msime_setup.iss` 的路径传进去。该测试读的是真实的安装脚本而不是参数的副本，所以这是它本来就要的输入。
-
-结果从 73 通过 / 4 失败变为 74 通过 / 3 失败，基线里那一条随之删掉。剩下三条的原因仍是测量出来的：`windows-server-smoke` 无合成器、`windows-fullscreen-foreground` 无真实显示器、`windows-session-smoke` 的词库准备在 Wine 下失败（同一调用在本机返回 ok）。
-
-这一轮顺带暴露了我自己的一个方法错误，记下来：主工作区落后 develop 44 个提交，而我在它上面 grep 判定过若干「本仓库没有 X」。落后正好会伪造缺失——`run-tests-wine.sh` 就是这样被我判成不存在的，它其实早在 develop 上。凡是结论为「不存在」的检查，必须在最新代码上复核；结论为「存在」的不受影响。第一遍用旧产物跑出的 `windows-dedicated-english` 失败同理，是旧二进制而非回归，重新交叉构建后即通过。
-
-增量记录（2026-09-20，Windows 第十二批：给 Wine 容器一块虚拟显示）：上一批之后 Wine 还剩三条失败，其中两条记的理由是「要合成器」和「要真实显示器」。前者读错了——`XDG_RUNTIME_DIR is invalid or not set` 说的是没有 X 服务器，而不是没有合成器，X 服务器这个容器供得起。镜像装上 `xvfb`，跑测试时走 `xvfb-run -a`。
-
-`windows-fullscreen-foreground` 随之通过，基线那条删掉。`windows-server-smoke` 也走过了窗口创建，但停在新的地方：断言候选窗报告 `DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2`，而 Wine 建得出窗口却不把这个感知上下文从 `GetWindowDpiAwarenessContext` 带回来。仍是 Wine 的限制，但比它替换掉的那条窄得多，也是读出来的而不是推的。
-
-合起来，Wine 下从最初的 72 通过 / 5 失败到现在 75 通过 / 2 失败。
-
-一个坑：`xvfb` 包本身不含 `xauth`，缺了它 `xvfb-run` 直接报 `xauth command not found`，于是整轮 77 个套件全部 FAIL——看起来像改动把一切弄坏了，实际是 runner 自己起不来。加装 `xauth` 即可。这类「全红」要先怀疑 runner，不要先怀疑被测对象。
-
-增量记录（2026-09-20，Windows 第十四批：以词定字）：沿来源 README 的功能清单继续。`[` 上屏高亮候选的首个汉字、`]` 上屏末字，这条规则只有在存在多字候选时才有意义，空词库根本走不到。新增 `crates/engine-bridge/examples/word_to_character_dictionary.rs`。
-
-覆盖两端取字、三字候选（末字不能靠取第二个字蒙混过去）、组合被消耗、不含汉字的候选、越界索引。
-
-「组合被消耗」这一条专门去来源核对过，不是想当然：来源在发出 `Normal` 或 `CommitExactText` 之后调用 `ClearState()`，所以把剩余输入留着继续组合的宿主会与它不一致。本仓库经 Engine 的 `select_edge` 达到同样结果。
-
-不含汉字的候选（该输入的英文候选）也两边一致：Engine 拒绝处理且不动组合，宿主随后回退到从候选文本里抽字；抽不到就整条上屏——来源的 `ExtractHanCharacter` 返回空时同样保留完整候选文本走 `Normal`。
-
-增量记录（2026-09-20，Windows 第十五批：辅助码）：来源 README 给辅助码的篇幅最长，规格也最细，且自带可验证的例子——「阿」的自然码辅助码是 `ek`。新增 `crates/engine-bridge/examples/helpcode_dictionary.rs`：单码只调整顺序（匹配的排前，其余保留），双码严格筛选（只留匹配的），词组第一码取首字首码、第二码取末字首码。四条全部符合来源描述，包括 `ayiEN` 同时留下「阿姨」和「阿姨好」——末字「好」是 `nz`，规则读的是末字的**首**码，所以它该留下。
-
-这一批差点报出一个不存在的缺陷，记下来：第一次探测时 `aEK` 返回**空候选列表**、`aE` 也不把「阿」提前，看起来像双码辅助整个坏掉。实际是辅助码表（`helpcodes/*.txt`）是与词库分开的 Engine 资源，而我的资源目录只按 `resources/desktop-dictionary.lock.json` 备了 8 个词典产物，根本没有那些表。表一旦缺失，没有任何候选能匹配任何辅助码，于是单码不再调序、双码把一切筛光——读起来正是「功能坏了」的样子。补上表之后四条立刻全对。
-
-顺着这条又核了一遍打包：设置页提供五种方案，而安装测试只断言打包了 `helpcode.txt` 一个文件，一度怀疑只发了蓝天小雨点一种。查 `Prepare-PackageFiles.ps1` 是 `Copy-DirectoryContents` 整个 helpcodes 目录，五种都发，安装测试那行只是抽查。不是缺口。
-
-探针自己把表补进资源视图，因此不需要使用者额外准备；大词库用符号链接、辅助码表实拷贝——Engine 把资源暂存进用户目录那一步不跟随链接目录，链过去等于没有表。
-
-增量记录（2026-09-20，Windows 第十六批：简繁转换的实现差异，以及它此前零覆盖）：沿来源 README 清单查到简繁，发现两件事。
-
-**一、实现方式不同，且此前从未记录。** 来源用 OpenCC：`server/src/conversion/chinese_converter.cpp` 加载 `assets/opencc` 下的 `s2t.json`，是词级转换。本仓库用 `platforms/windows/src/input/ChineseTextConversion.cpp` 的 `LCMapStringEx(LCMAP_TRADITIONAL_CHINESE)`，映射表属于操作系统，是逐字的。全仓搜不到 opencc 的任何痕迹。
-
-这会在一对多的字上产生不同输出（「发」既可作「發」也可作「髮」，「里」「干」同理），而词级转换正是用来消解这种歧义的。**具体差多少没有测量**：`LCMapStringEx` 只在 Windows 上有行为，本机没有 Windows 主机；拿 Wine 的映射表冒充 Windows 的映射表没有意义。
-
-引入 OpenCC 是加依赖（库加数据资产，另有许可问题），按仓库规矩不擅自做，记在此处待定。
-
-**二、这个函数此前没有任何测试。** 新增 `platforms/windows/tests/input/chinese_conversion.cpp`，并且刻意不去钉映射表——钉具体的繁体字等于钉一个 Windows 版本，在 Wine 下则是钉 Wine 的表。测的是这段代码自己的契约：开关关闭时原样返回、空输入、ASCII 原样、非法 UTF-8 走回退而不抛也不丢字、转换不会把非空文本变空、结果仍是同样字数的合法 UTF-8。Wine 下通过，套件计数 75/77 变为 76/78。
-
-增量记录（2026-09-20，Windows 第十七批：中英混输的触发字符数）：来源写明英文候选在字母串达到设定长度（1～8）后才出现。新增 `crates/engine-bridge/examples/mixed_input_dictionary.rs`，用真实英文词库验证阈值 2 与 3 各自的边界、把阈值抬到超过已输入长度会把候选收回、以及关掉混输后任何长度都不出英文候选。
-
-这项的陷阱在于「没有英文候选」有两个原因：阈值没到，和词库里根本没有以这串字母开头的词。分不清这两者的测试，在功能被整个关掉时也会通过。所以每个否定用例都与同一串字母上的肯定用例成对出现，关掉开关那一组用的正是上面刚刚出过候选的字母串。
-
-（探测过程中 `shij` 在任何阈值下都不出英文候选，正是后一种原因——英文词库没有该前缀，不是阈值失效。这也是不把它写进断言的理由。）
-
-增量记录（2026-09-20，Windows 第十八批：emoji 与颜文字在候选里的位置）：来源把规则写成「emoji 在英文候选之后插入，颜文字排在 emoji 之后」。其实现更具体——`server/src/ipc/candidate_selection_policy.h` 的 `NormalizeMixedCandidateOrder`：头部按 本地、[云]、[AI]、英文₁、emoji₁、颜文字₁ 依次插入，其余按 英文→emoji→颜文字 的组序追加到尾部。本仓库实测输出与这条规则逐项吻合（`ku` 的尾部正是「剩余英文→剩余 emoji」）。
-
-新增 `crates/engine-bridge/examples/mixed_ordering_dictionary.rs`，钉住用户看得见的那部分：三类各自第一个的相对次序，以及两个开关各自只移除自己那一类。后半条是必需的——只断言「存在时的次序」，对一个完全忽略开关的实现同样成立。
-
-顺带更正本表此前一处标签错误：候选来源的数值按 `core/word_item.h` 的枚举序号，9 是 **Fallback** 不是 Generated（Generated 是 8）。第十批记录里把整句候选的来源 9 写成「整句生成」，措辞不准；该批的结论（那条候选不是词库条目、学习后变为词库条目）不受影响。
-
-增量记录（2026-09-20，Windows 第十九批：快捷模式的文档化边界）：`local_modes_dictionary` 此前只验证八种模式各自能进入、能出候选、能上屏，没有核对**内容**。按来源表格补两处。
-
-日期时间模式的三个答案各有三种拼法（`rq`/`riqi`/`date`、`sj`/`shijian`/`time`、`xq`/`xingqi`/`week`），此前只测过 `rq`，九个入口里八个从未走过。判据是同一答案的三种拼法**结果必须一致**——这才证明它们是别名，而不是三个恰好都非空的东西。时间那组只比形状：它的答案在探针运行期间会变，要求三者相等会在跨秒时失败。另加一条日期与星期的结果必须不同，否则三组全返回同一个字符串也能通过。
-
-超级简拼按首字母检索，`nh` 能检索到「你好」。**这里我先写错了断言**：按来源表格里「全拼如 `nh` → 你好」写成了断言首选等于「你好」，实测首选是「女孩」。来源那句是举例说明简拼检索得到它，不是承诺排第一；排第几取决于词频，钉首选是过度规定。改为断言「你好」在候选之中，并附一条前八个候选都不是单字——单字会说明它退化成了普通拼音检索而非简拼检索。
-
-增量记录（2026-09-20，Windows 第二十批：来源 README 的功能清单走完）：第十三到十九批沿来源 README 逐项验证，本批把结论收口并更新上表中已被覆盖、却仍写着「仍需核对」的行。
-
-这条轴上查到的**唯一真差异**是简繁转换的实现方式（第十六批，结论已在第二十七批更正为跨平台策略而非 Windows 单点缺口）。
-
-其余逐项都与来源一致：输入方案与辅助码、候选调频五种模式、以词定字、中英混输触发长度、emoji 与颜文字的插入位置、快捷模式的文档化拼法、日文与中文方案的往返保留（后者已由 `apps/desktop/tests/settings/settings.test.tsx` 覆盖，不需另加探针）。
-
-这七批里我自己犯过三类错，一并记下，因为它们各自代表一种失效模式：**前提没核对**（`learning` 默认关、辅助码表没备、主工作区落后 44 个提交，三次都差点把「我没打开它」报成「功能坏了」）；**把举例当契约**（来源写「如 `nh` → 你好」是说简拼检索得到它，我写成了断言首选等于它）；**否定断言不设防**（只断言「有候选时的次序」或「没有英文候选」，对一个把功能整个关掉的实现同样成立，因此每条否定都要与同一输入上的肯定成对）。
-
-增量记录（2026-09-20，Windows 第二十一批：x86 终于被构建出来）：第六批把 x86 记为受阻，理由是「`build-cross.sh x86` 的 Rust 侧要 DWARF 展开，而 macOS 上常见的 i686 MinGW 是 SJLJ」。那条守卫自己就写着「换一套兼容的工具链」——那是**这台机器**的限制，不是这个架构的。Debian 的 i686 MinGW 配置为 `--disable-sjlj-exceptions --with-dwarf2`，容器里现成。
-
-新增 `platforms/windows/cross/Dockerfile` 与 `platforms/windows/build-cross-container.sh`：把仓库挂进容器跑既有的 `build-cross.sh`，不改构建流程本身。vcpkg 与依赖树用容器专属目录，因为 macOS 上引导出的 vcpkg 里是 macOS 二进制。结果：**x86 的 host DLL、TSF DLL、Server 与全部原生测试首次全部链接成功**，32 位宿主进程要加载的那个 TSF DLL 至此不再是从未构建过的目标。
-
-路上暴露出四处只有在这条路径上才会现形的问题，逐条修掉，四处都是各平台都更正确的写法而非容器补丁：
-
-1. **CMake 的 C 编译器落到宿主**。`build-cross.sh` 只设了 `CMAKE_CXX_COMPILER`，C 编译器取默认；在 Linux 容器里那就是 `/usr/bin/cc`，链接时报 `unrecognized option '--major-image-version'`。显式设 `CMAKE_C_COMPILER`。
-2. **没有声明目标 Windows 版本**。`ID2D1DeviceContext5` 在 Direct2D 头文件里被 `NTDDI_VERSION >= NTDDI_WIN10_RS2` 挡着，而构建从未声明过版本、取的是工具链默认值——Homebrew 的够高，Debian 的不够。代码本来就要求 1703（per-monitor v2 DPI 与该接口都起自那一版），现在在 CMakeLists 里写明。（改这处时我顺手把 `project()` 的语言加成了 `C CXX`，那是多余的：容器里触发 C 编译器检测的是 Engine 的 voice 子项目，而加上之后 pipe-only 那条不含该子项目的配置反倒开始要求 C 编译器。已撤回，只保留 `CMAKE_C_COMPILER`。）
-3. **`#include "InputScope.h"`**。那是平台头不是自有头，MinGW 提供的是 `inputscope.h`，大小写敏感的文件系统找不到。改为 `#include <inputscope.h>`。
-4. **`hr == D2DERR_RECREATE_TARGET` 的符号比较**。`HRESULT` 有符号而该宏在部分 SDK/MinGW 版本里是无符号，于是在一套工具链上是警告、另一套上静默。按规矩做了广度扫描：同样写法共 **7 处**，全部改为显式转 `HRESULT`。
-
-本机 x64 构建与 Wine 套件（76 通过 / 2 失败）均无回归。x86 的**执行**仍未覆盖：Wine runner 目前只搬 x86_64 的 MinGW 运行库。
-
-增量记录（2026-09-20，Windows 第二十二批：x86 不只构建，也真的跑起来了）：上一批让 x86 首次链接成功，但执行仍未覆盖，理由是 Wine runner 只搬 x86_64 的运行库。这一批把两处补齐。
-
-**运行库要跟着产物走。** x64 由本机工具链构建，x86 由容器构建——把本机的 i686 运行库拿给 x86 用是错的，本机那套是 SJLJ，而产物是 DWARF，差别正好就在展开器上。runner 现在按架构取：x64 仍问本机编译器，x86 从 cross 镜像里取（`-print-file-name`，不去猜发行版这个月用的是哪个版本化 gcc 目录），取的是 `libgcc_s_dw2-1.dll` 而不是 `libgcc_s_seh-1.dll`。
-
-**Wine 镜像原本跑不了 32 位。** 补上运行库之后 78 个套件仍然全红。按上一批记下的规矩先查 runner，单独跑一个可执行文件得到 `failed to load syswow64\ntdll.dll` —— Debian 的 wine 在 amd64 上要 `dpkg --add-architecture i386` 加 `wine32` 才有 WoW64，缺了它每个 32 位程序都起不来。加上之后：**x86 76 通过 / 2 失败**，与 x64 完全相同的两条、同样的原因（Wine 不回传 PER_MONITOR_AWARE_V2；词库准备在 Wine 下失败而本机 ok）。
-
-至此那个要被加载进每个 32 位宿主进程的 TSF DLL，既构建得出也跑得起来。x64 在同一镜像上无回归。
-
-增量记录（2026-09-20，Windows 第二十三批：托盘到 Tauri 壳之间的路由契约加门禁）：托盘菜单与悬浮工具栏交给共享 Tauri 壳的是一个路由字符串，C++ 侧 `ShellSurfaces.h` 产出、Rust 侧 `host_surface.rs` 解析。两边各有自己的测试，各自按自己的词汇表通过，所以**只改一边的名字不会有任何可见故障**——解析不了的路由不是错误，它打开普通设置窗口，于是那行菜单照样能点，只是打开了错的东西。
-
-新增 `scripts/test-shell-route-parity.py` 并挂进 `--quick`：从两个文件各自抽出面板路由与设置分区的名字集合，逐个核对 C++ 能产出的每一个都在 Rust 接受的范围内。当前 4 个面板路由与 1 个设置分区全部对得上。
-
-做了反向验证，因为只会通过的门禁没有价值：把 Rust 侧的 `"handwriting"` 改成 `"handwriting-x"`，门禁指名报出「Windows Server 产出的面板路由 handwriting，SurfaceRoute::parse 不接受，那行会打开设置窗口」；把 `"about"` 同样改掉也会各报各的。恢复后通过。
-
-（Linux 的启动器发同一份契约，因此这道门禁同时覆盖它。）
-
-增量记录（2026-09-20，Windows 第二十四批：一条我自己归错因的失败，其实是真缺陷）：`windows-session-smoke` 在 Wine 下的词库准备失败，我此前把它记成「Wine 的限制，不是产品的」，依据是同一个 `msime_client_prepare_host` 在本机返回 `ok:true`。那个依据本身没错，结论错了。
-
-这次先让测试把拒绝原因打出来（它原本只断言 `ok`，把回复里的 `error` 丢掉了，一条消息代表所有失败方式——和第十一批那次「队列任务失败」同样的毛病）。真正的原因是 **`Runtime directories must be absolute`**。
-
-顺着查：`prepare_host_configuration` 用 `std::fs::canonicalize`，Windows 上它返回 `\\?\` 扩展长度形式；Engine 用 `std::filesystem::path::is_absolute` 校验，而 **libstdc++ 认为 `\\?\Z:\res` 的 root name 为空、因而不是绝对路径**。用一个最小 MinGW 程序在 Wine 下直接验证了这一点。这不是 Wine 的行为，是 libstdc++ 的行为——MSVC 的标准库能解析该前缀，所以用它构建的发布版从不暴露；GNU 交叉构建以及跑这些二进制的每一个测试都会撞上。
-
-修法是交给 Engine 之前去掉该前缀，且只解开驱动器形式：`\\?\UNC\server\share` 对文件系统的含义与 `\\server\share` 不同，不能改写成一个「恰好能解析」的路径。
-
-修完之后准备成功，套件推进到「Layout-produced punctuation replaced digit selection」——那条断言此前从未被执行过，因为每一次运行都停在它前面。它是下一个要查的东西，不是已知的环境限制，基线按此改写。
-
-教训与第十五批的辅助码那次相反：那次是「我没打开它」被误当成功能坏了；这次是真缺陷被我误当成环境限制。两者的共同点是**把观察到的现象直接当成结论，而没有把失败原因取出来看**。
-
-增量记录（2026-09-20，Windows 第二十五批：新推进到的那条断言写错了）：上一批修好路径前缀之后，`windows-session-smoke` 推进到「Layout-produced punctuation replaced digit selection」——一条此前从未被执行过的断言。它测的是非美式布局下未加 Shift 的数字键产生标点时仍应按数字选词。
-
-先确认不是第一批那次改动（选词分支只认数字键）引入的：那里取的是 `normalize_digit_key(packet.keycode)`，用的是 keycode 不是 `wch`，VK '1' 带 `&` 仍得 '1'。不是它。
-
-取实情：回复是 `NavigationIgnored`、commit 为空；再打印按键前的会话，`candidates` 为空、`editing_text` 为空。原因清楚了——这段上文用 Ctrl+Enter 提交了候选翻译，**组合已经结束**，此时按 '1' 无可选，返回 Ignored 正是对的。**是断言写错了**，它要一个活着的组合却没有建立。
-
-修法是在两条「不该被消耗」的检查之后重新键入一段输入，并先断言确有候选可选。那两条检查本身仍然有效，只是它们真正断言的是「视图没有变化」，在空组合上同样成立。
-
-结果：带资源目录时 `windows-session-smoke` **整体通过**，套件从 76/78 变为 **77/78**，只剩 `windows-server-smoke`（Wine 不把 PER_MONITOR_AWARE_V2 从 `GetWindowDpiAwarenessContext` 带回来）。
-
-这是第二次遇到「从未被执行过的断言本身是错的」（前一次是模式通知那条）。共同点是：一条断言只要没被执行过，它就只是一段**意图**，不是事实。
-
-增量记录（2026-09-20，Windows 第二十六批：让 77/78 成为默认而不是靠手工准备）：上一批把 Wine 套件推到 77/78，但那只在有人先把约 185 MB 词库备到某个目录、再设 `MSIME_WINE_RESOURCES` 时成立——也就是说完整覆盖依赖一次没有记录在案的人工操作。
-
-runner 现在自己去找仓库既有的约定缓存 `target/desktop-resources`（`platforms/windows/installer/DesktopResources.md` 就是这么写的，打包脚本也默认它），并解析其中按代次哈希命名的子目录——`install_resources` 把产物装在那一层，直接挂父目录是挂不到文件的。每次运行都打印用的是哪一份，免得计数含义不明。
-
-写进注释的那条准备命令是**实跑验证过的，而且第一版是错的**：只跑 `install_resources` 会失败，因为锁里有一个产物来自 Engine 检出而不是词库发布，必须先跑 `scripts/fetch_engine.py`。这正是不该照抄自己记忆里的命令的理由。
-
-结果：有缓存的检出直接得到 77/78 且无需知道任何环境变量；没有的仍是 76/78，基线按此改写，两条路径都实测过。
-
-增量记录（2026-09-20，Windows 第二十七批：更正第十六批对简繁转换的定性）：第十六批把简繁记成「Windows 用 `LCMapStringEx` 而来源用 OpenCC，引不引 OpenCC 属于待定的依赖决定」。那段描述没错，但**定性错了**——我只看了 Windows 一个平台就把它当成 Windows 的单点选择。
-
-把三个桌面宿主都查一遍：Windows 用 `LCMapStringEx(LCMAP_TRADITIONAL_CHINESE)`，macOS 用 `CFStringTransform(Simplified-Traditional)`，Linux 用 ICU 的 `Simplified-Traditional` transliterator。**三家用的都是各自平台自带的转换设施**，而来源在包里带一份 OpenCC 数据。也就是说这不是 Windows 漏掉了什么，而是本仓库一条一致的跨平台策略；换成 OpenCC 意味着三个平台一起换，或者让 Windows 与另外两个不一致。
-
-取舍仍然真实存在：逐字映射在一对多的字上不如词级转换（「发」既可作「發」也可作「髮」），而消解这种歧义正是词级转换存在的理由。变化的是这件事该怎么提出来——不是「Windows 要不要加个依赖」，而是「三个桌面宿主要不要一起从平台设施换成随包分发的词级表」。仍然待定，但现在问题问对了。
-
-附带一处不对称，查清后认为合理：Linux 那边有 `汉语 → 漢語` 的具体断言，Windows 那边（第十六批新增的测试）刻意不钉映射表。理由是 ICU 是随包的库、行为稳定，而 `LCMapStringEx` 的表归操作系统、随 Windows 版本变动——在后者上钉具体繁体字等于钉一个 Windows 版本。
-
-增量记录（2026-09-20，Windows 第二十八批：把最后一条失败查到底，并否掉一个我自己做过的改动）：`windows-server-smoke` 是 Wine 下唯一还失败的套件，此前记的理由是「Wine 不把 `PER_MONITOR_AWARE_V2` 从 `GetWindowDpiAwarenessContext` 带回来」。写一个最小程序实测：Wine **接受** `SetThreadDpiAwarenessContext(PMv2)`，线程确实是 PMv2，但在该线程上创建的窗口报回 per-monitor **v1**（awareness=2）。所以那句话是对的，只是不完整。
-
-据此我先做了一处改动：按 ntdll 的 `wine_get_version` 精确识别 Wine，在其下接受 v1（Windows 上仍严格要求 v2）。它确实让断言通过了——**然后套件在更深处继续失败**，`window.failed()` 为真、窗口不可见。也就是说放松那条断言**换不来任何通过**，只给测试代码增加了 Wine 感知的复杂度。**改动已撤回。**
-
-真正的拦路者查清了：`DeviceResources::EnsureForComposition` 走 `DCompositionCreateDevice` 与 `CreateSwapChainForComposition`，而 Wine 的 DirectComposition 基本是桩。往镜像里加 Mesa 软件光栅器也无济于事，设备照样建不出来。
-
-这是唯一一条真正需要 Windows（或一个实现了 DirectComposition 的 Wine）的套件，基线按上述顺序逐条记下，免得下一个人重走这三步。
-
-顺带说明这轮的取舍：能让计数好看的改动（放松断言）被否掉了，因为它并不能让套件通过；留下的是一条把原因查准的记录。计数不是目的。
-
-增量记录（2026-09-20，Windows 第二十九批：那条「需要 Windows」其实源于一处有意的设计分歧）：上一批把 `windows-server-smoke` 的拦路者定位到 Wine 的 DirectComposition 是桩。这一批问下一个问题——**来源是怎么做的**，因为如果来源也走 DirectComposition，那它就是纯环境限制；如果不是，那这条失败是本仓库自己的选择带来的。
-
-来源的输入法窗口用 **`WS_EX_LAYERED` 分层窗口**（`server/src/window/ime_windows.cpp`），DirectComposition 只出现在它的 WebView2 与设置路径里。本仓库的原生候选窗、候选浮出、悬浮工具栏、托盘菜单四个表面统一走 `DeviceResources::EnsureForComposition`，即 `DCompositionCreateDevice` 加 `CreateSwapChainForComposition`。
-
-所以这条失败的性质要改写：**不是「这个功能只能在 Windows 上验证」，而是「本仓库为这四个表面选了一条来源没走的合成路径，而 Wine 尚未实现它」**。来源那条路在 Wine 下本来是跑得起来的。
-
-这不构成要求改回分层窗口的理由——合成交换链避开了 `UpdateLayeredWindow` 每帧的 CPU 拷贝，四个表面都是低延迟且不能抢焦点的，选它有实在的道理，属于表里一贯记的「适配平台特性」。而且 `EnsureForComposition` 失败时回退到 `EnsureForWindow` 也不是好主意：普通 HWND 交换链拿不到逐像素透明，候选卡片的阴影会退化成不透明矩形，静默变丑比明确失败更糟。
-
-记下来是因为这两种读法对后续决策不同：若哪天要让这套在无 DirectComposition 的环境（Wine、或某些远程会话）下也能画，那是一次明确的渲染路径工作，而不是「等一台 Windows 机器」。
-
-增量记录（2026-09-20，Windows 第三十批：更正第二十八批的拦路者，并记下一次做了又撤回的实现）：第二十八批说 `windows-server-smoke` 卡在 Wine 的 DirectComposition 是桩。**那个结论是读代码路径推出来的，不是测出来的，而且是错的。**
-
-按第二十九批的判断（来源用分层窗口，所以这条路可以不依赖合成器），我实现了一条分层回退：`EnsureForComposition` 失败时改走 `CreateDCRenderTarget` + 预乘 alpha DIB + `UpdateLayeredWindow`。先用一个独立最小程序在 Wine 下验证过这整条链可用（D2D 工厂、`CreateDCRenderTarget`、`BindDC`、绘制、`UpdateLayeredWindow` 全部成功，窗口可见）。接缝也是干净的：没有任何调用方用 `GetDeviceContext()`，全部走已是基接口类型的 `GetRenderTarget()`。
-
-**但回退在套件里根本没被走到。** 逐步加诊断才看清：`DeviceResources::EnsureFactories()` 需要 Direct2D、DirectWrite 与 WIC 三样，Wine 下前两样成功，`CoCreateInstance(CLSID_WICImagingFactory)` 返回 `REGDB_E_CLASSNOTREG`。`windowscodecs.dll` 在 prefix 里存在，但类没注册；`wine regsvr32 windowscodecs.dll` 不是修好它而是挂住。
-
-也就是说 `EnsureFactories` 在 `EnsureForComposition` 走到 `DCompositionCreateDevice` 之前就返回了假——**Wine 的 DirectComposition 到底行不行，至今仍然未知**。
-
-因此那条分层回退**已撤回**，没有合入：它编译得过、原理验证过，但在这里一次都没被执行到，合进去等于把一段无法演示其作用的渲染代码放进产品。等 WIC 可用之后再说。
-
-第二十八批那条「否掉一个能让计数变好看的改动」的判断依然成立，但**理由变了**：当时我以为渲染永远不通，所以放松 DPI 断言没意义；实际是连工厂都建不起来。结论对，推理错。这两者的区别值得记下——对的结论配错的推理，下一次就会错。
-
-增量记录（2026-09-20，Windows 第三十一批：三道坎逐个查清并移走，候选窗在 Wine 下真的画出来了）：上一批测出 `EnsureFactories` 的 WIC 失败于 `REGDB_E_CLASSNOTREG`。这一批找到原因并接着往下走。
-
-**一、prefix 是在没有显示器的情况下烘进镜像的。** Dockerfile 里那句 `wineboot --init 2>/dev/null; true` 看起来成功了，实际留下一个 WIC 未注册的 prefix。对照实验很直接：同一镜像里用烘好的 prefix 取 WIC 得 `0x80040154`，而在显示器下新建一个 prefix 再取就是 `S_OK`。改成在 `xvfb-run` 下创建并等 `wineserver -w`（注册表在 `wineboot` 返回时仍在写）。
-
-**二、DPI 断言。** Wine 接受 `SetThreadDpiAwarenessContext(PMv2)`，但该线程创建的窗口报回 v1。测试改为按 ntdll 是否导出 `wine_get_version` 精确识别 Wine，仅在其下接受 v1，Windows 上仍要求 v2，线程自身的上下文照旧严格断言。
-
-**三、DirectComposition 确实是桩**（这次是测出来的：WIC 修好、窗口能建之后，合成路径仍然失败）。`DeviceResources` 现在在 `EnsureForComposition` 失败时回退到分层窗口——`CreateDCRenderTarget` 加预乘 alpha DIB 加 `UpdateLayeredWindow`，正是来源画这些表面的方式。**回退只在原先直接失败的地方生效**，有合成器的宿主永远走不到它。
-
-结果：候选窗在 Wine 下画出来并可见（`failed()` 为假），套件从第 115 行推进到第 185 行——**中间约七十行断言此前从未被执行过，现在全部通过**。现在停在点击命中测试：卡片画出来了、窗口可见，但合成的 `WM_LBUTTONDOWN`/`UP` 没有被记为一次点击。那是新的前沿。
-
-两点自我更正：第三十批我说这段回退「无法演示其作用，因此撤回」——那个判断在当时是对的（它确实一次都没被走到），**移走 WIC 这道坎之后就不对了**，所以这次它带着证据回来了。另外，一次运行里 `windows-voice-controller-connection` 失败过一次、随后两次都通过，是负载相关的不稳定而非本批引入的回归；我重跑了才这么说。
-
-增量记录（2026-09-20，Windows 第三十二批：候选点击在任何同步派发 WM_CAPTURECHANGED 的系统上都不会生效）：上一批让候选窗在 Wine 下画了出来，套件随即停在点击测试。一路查下去发现两处，一处在测试、一处在产品。
-
-**测试侧**：`first_candidate_point` 按**窗口**宽度算行布局，并把算出的**卡片坐标**直接当客户区坐标发出去。而窗口的 `hit()` 明确只在卡片内命中——透明阴影留白不可交互——它会先减去 32/20 的左上留白，并按卡片宽度（窗口宽减去左右留白）排布行。于是这个辅助函数产生的点永远落在行的左上方之外。它从未被执行过，所以一直没人发现。
-
-**产品侧，这条是真缺陷**：`WM_LBUTTONUP` 先 `ReleaseCapture()` 再读 `pressed_`。`ReleaseCapture` 会把 `WM_CAPTURECHANGED` 派发给这个窗口，而那正是取消路径——它清空 `pressed_`。也就是说释放动作销毁了紧接着要读的那次按下，点击到不了回调。顺序调换即可：先取走按下、清空，再释放捕获。**这不是 Wine 特有的**，任何同步派发该消息的系统上都一样。
-
-两处修完，套件从第 192 行推进到第 305 行，中间包括点击计数与三种取消语义（`WM_MOUSELEAVE`、`WM_CANCELMODE`、`WM_CAPTURECHANGED`）全部通过。现在停在候选浮出窗那一段，是另一个表面，属于下一个前沿。
-
-过程中还有一次自己造成的弯路值得记：有一轮我把构建输出重定向到 `/dev/null`，构建其实因为 `%f` 对上整型而失败，于是我拿旧的可执行文件跑了一整轮并得出「诊断没有输出」的困惑结论。**关键命令不要丢掉输出**——仓库规矩里本来就写着不要把需要看 exit code 的命令接管道，这次是同一类错误的另一种形态。
-
-增量记录（2026-09-20，Windows 第三十三批：x64 套件在 Wine 下首次 78/78 全通过）：最后一条 `windows-server-smoke` 拿下了，原因是第五处——**只画文字的表面不该依赖 COM**。
-
-浮出窗 `open()` 返回可见，`UpdateWindow()` 触发重绘后变为不可见。把被吞掉的异常打出来是「Candidate menu device unavailable」，再往里是 `EnsureFactories()` 为假，最后定位到 `CoCreateInstance(CLSID_WICImagingFactory)` 返回 `0x800401F0`（`CO_E_NOTINITIALIZED`）——运行该窗口的线程没有初始化 COM。
-
-`EnsureFactories` 把 WIC 当硬性前提，而 WIC 在这里只用于两个位图函数，且那两个函数**本来就检查空工厂并提前返回**。所以改为按需创建：`EnsureFactories` 不再因它失败，两个位图函数在真正需要时自己尝试。**只影响当前会整体失败的路径**，COM 已初始化的宿主行为不变。
-
-至此 x64 在 Wine 下 **78 通过 / 0 失败**，是本仓库第一次整套通过。三轮连跑为 78/0、78/0、77/1，那一次失败是 `windows-voice-controller-listener`；加上更早一轮的 `windows-voice-controller-connection`，这一族在模拟环境下是负载相关而非固定失败，已按仓库既有写法记进基线，免得单轮飘红被当成回归。
-
-**x86 仍是 76/2**（`windows-server-smoke` 与 `windows-session-smoke`），卡在与 x64 同一条渲染断言上。已排除 WIC：32 位探针在同一镜像里取 WIC 成功。原因未定，留作下一轮，不猜。
-
-回顾这条线的全部五道坎，四道是测出来的、一道是我先推错又测正的：prefix 无显示器创建导致 WIC 未注册 → DPI v2 不回传 → DirectComposition 是桩（回退到分层窗口）→ 点击点算在卡片坐标系却当客户区坐标发 → `ReleaseCapture` 先于读取按下 → WIC 被当成硬性前提。其中**后两条是产品缺陷，会影响真实 Windows 用户**，其余是环境或测试自身的问题。
-
-增量记录（2026-09-20，Windows 第三十四批：x86 那两条的原因查定）：上一批留下「x86 仍是 76/2，原因未定」。查定了，是 Wine 32 位与 64 位之间的不对称。
-
-分层回退在 x86 上建不起来：Wine 的 32 位 Direct2D 对 `CreateDCRenderTarget` 返回 `DXGI_ERROR_UNSUPPORTED`（`0x887A0004`），用 `D2D1_RENDER_TARGET_TYPE_DEFAULT` 与 `_SOFTWARE` 都一样；同一镜像里编成 64 位的同一段代码则成功。于是需要真正绘制的那两个套件在 x86 上失败、在 x64 上通过。
-
-**不是 WIC**：32 位探针在同一镜像里取 WIC 成功，这一条先排除了。
-
-有一条可能的出路是改用 WIC 位图渲染目标再拷进 DIB——但那会把刚刚从这条路径上摘掉的 COM 依赖又装回去，而收益只在 Wine。因此记录而不做：这是明确的取舍，不是没想到。
-
-至此两个架构的状态是 x64 78/78、x86 76/78，两边剩余项的原因都精确到具体 API 与错误码，没有一条写着「环境所限」四个字了事。
-
-增量记录（2026-09-20，Windows 第三十五批：更正一个我自己报出去的数字）：上一批我说 x64 在 Wine 下 78/78 全部通过。**那个数字是对的，但它的含义比我说的窄**——`msimeui-tests` 根本没被跑到。
-
-CMake 把它产出到 `bin/` 子目录，而 runner 的通配符找的是与其余可执行文件同级的位置，于是**那个模式什么都没匹配上，整套测试在每一次计数里都不存在**。我在给自己加的分层回退补测试时，去确认「既有的合成用例是否已覆盖它」，才发现这个套件压根没跑。
-
-补上之后它**失败**：35 个用例里跑过 18 个，然后进程死于 `rosetta error: invalid gdt selector index 5`。通过的那些是布局类用例，停下的位置是需要真实 DirectWrite 与 Direct2D 设备的那组——**是 arm64 主机模拟 x86_64 的问题，不是 Wine，也不是产品**。x86_64 主机上很可能走得更远，基线只记这台机器的实际情况。
-
-所以正确的说法是：**x64 在 Wine 下 78 通过 / 1 失败**，那一条是此前静默缺席的 `msimeui-tests`。它不是新坏的，只是终于可见了。
-
-这条教训和之前几次同形，但方向相反：前几次是「断言从未被执行过所以是错的」，这次是「**整套测试从未被执行过，而计数看起来完全正常**」。一个通配符匹配不到东西时不会报错，只会安静地少跑一批——比断言写错更难发现。
-
-增量记录（2026-09-20，Windows 第三十六批：核清一条过时的「仍需核对」）：表里翻译那行写着「仍需比较本地优先级、腾讯请求签名、词库编辑与缓存失效」。其中**缓存失效已经做到了**，描述过时。
-
-`TranslationWorker` 给缓存键加了服务商域：小牛按 `niutrans:<app_id>`（源码注释写明「切换账号不能复用别人的译文，而密钥本身绝不进入缓存键」），自定义按 `custom:<endpoint>`，腾讯为 `tencent`。`SessionController` 在凭据、端点、目标语言或启用开关变化时调用 `clear_cache()`，并且注释写明要连负缓存一起丢——「即使候选页仍然合格」。
-
-本批只改这一行描述，不动代码。另外两项（本地优先级、腾讯请求签名）仍未核对，保留在表里。
-
-增量记录（2026-09-20，Windows 第三十七批：腾讯签名从「自证」改成「已知答案」）：表里剩下的两项之一是腾讯请求签名。现有测试只验三件事——同输入同输出、不同输入不同输出、长度 64。**一个算错但稳定的实现能全部通过**，因为它拿这段代码跟它自己比。
-
-按腾讯公开的 TC3-HMAC-SHA256 构造（`HMAC(HMAC(HMAC("TC3"+key, date), service), "tc3_request")`）在这段代码之外独立算出期望值，钉住三样：派生签名、载荷摘要、以及**整个 Authorization 头**——后者把凭据作用域与签名头列表一并钉住，因为请求被拒可能源于这三者中的任何一个。
-
-做了反向验证：把实现里的 `"tc3_request"` 改成 `"tc3_reques"`，**只有新测试失败**（7 通过 / 1 失败），原有的确定性测试在错误实现上照常通过。恢复后 8 个全过。这正是自证型测试抓不住的那类改动。
-
-表里那行剩下本地优先级与词库编辑两项，仍未核对。
-
-增量记录（2026-09-20，Windows 第三十八批：本地优先级是对的，但一行测试都没有）：表里剩下的「本地优先级」按源码核对结果是**实现正确**。`TranslationWorker` 先把已有译文的候选收进 `translated_texts`，再遍历 `custom_translation_plan` 的结果，对已在集合中的条目 `continue`——本地命中既不会被重复拿去问云端，也不会被云端结果覆盖。源码注释写明这是「保留本地词典命中、只对未命中的去问云端」，并点出错误做法是「把一条离线命中当成整页」。
-
-但它**没有任何测试**：`platforms/windows/tests/` 下没有一个文件引用 `TranslationWorker`。共享侧的 `custom_translation_plan` 有测试，覆盖的是去重、来源筛选、语向与长度限制——请求里根本不带已有译文，所以那条合并规则不在它的覆盖范围内。
-
-正确的做法是把这段合并判据抽成纯函数（`CandidateTranslationPolicy.h` 就是现成的去处）再钉住。**本批没有做**：那是对线上 worker 的行为性改动，而本机的 Docker 守护进程已停（见下一段），Windows 套件跑不起来。不做无法验证的改动，这一条按未覆盖记录，等能跑套件时再补。
-
-顺带记下本机状态：本轮密集的容器构建与多份词库下载把磁盘撑满（一度只剩 119 MB），OrbStack 因此停止，不是它自身故障。已清理自己产生的临时文件与主工作区的 `target/windows-full`；未触碰其他任务的 worktree 与正在被使用的共享 vcpkg 依赖树。跨检出共享依赖的机制仓库本来就有，本轮在主机侧没有充分利用，是这次资源耗尽的直接原因。
-
-增量记录（2026-09-20，Windows 第三十九批：翻译那一行的四项全部走完）：表里这行原写着「仍需比较本地优先级、腾讯请求签名、词库编辑与缓存失效」。四项逐个核完：
-
-- **缓存失效**（第三十六批）：已做到，且比那句话要求的细——缓存键按服务商与账号分域，凭据、端点、目标语言、启用开关任一变化丢弃正负两种结果。
-- **腾讯请求签名**（第三十七批）：原测试只验确定性与敏感性，算错但稳定的实现照样通过；改为按官方构造独立算出的已知答案，并做了反向验证。
-- **本地优先级**（第三十八批）：实现正确，但零测试覆盖，按未覆盖记录，没有做无法验证的改动。
-- **词库编辑**（本批）：设置侧有五个用例，且是按 Engine 实际的读取与覆盖语义写的——被 Engine 丢弃的行要计数而不是静默保留、同源多次拼写以最后一次为准。消费侧 `msime_client_candidate_gloss_request` 每次请求现算，带 `user_data` 与 `resources`，所以编辑立即生效；本地结果在 plan 与缓存循环之前填入，因此恒胜过缓存的云端结果。
-
-四项里三项确认做到、一项确认缺测试。这一行不再留「仍需」。
-
-增量记录（2026-09-20，Windows 第四十批：中英文状态那一行的五项逐个核对）：这行原写着「仍需分别核对按应用/全局状态、CapsLock、标点重复、成对补全与热更新」。
-
-**有测试的四项**：按应用/全局状态在 `ModeAuthority.h` 里是一个纯决策函数（失焦不推送、未播种时先由首次观察播种、换客户端时权威胜出且只推不一致者、同客户端改模式则成为新权威），`tests/input/mode_authority.cpp` 覆盖；标点重复（`SmartPunctuationRepeatToChineseChanged`）与成对补全（`PairedPunctuationChanged`）随配置帧下发，`tests/runtime/tsf_config_frames.cpp` 钉住帧序并另外覆盖按进程排除成对补全的策略；热更新由 `PreferenceMonitor` 负责，有 `tests/core/preference_monitor.cpp`。
-
-**只有源码核对、没有专门用例的一项**：CapsLock。Server 以 `GetKeyState(VK_CAPITAL)` 播种、由维护钩子回调更新，再经 `CapsLockChanged` 帧下发；源码注释写明钩子回调只发布状态、绝不碰传输，由主循环投递。这一项按「已实现但缺专门覆盖」记录，与第三十八批的本地优先级同等对待——**不把读过代码算成测过**。
-
-增量记录（2026-09-20，Windows 第四十一批：候选分页那一行的最后三项）：原写着「仍需检查分页键与鼠标行为和旧候选请求拒绝」。三项都有实际覆盖。
-
-**分页键**：`NavigationPolicy.h` 的键映射此前已与来源 `event_listener.cpp` 逐键对照过——减号/等号、逗号/句点、方括号、Tab（Shift 为上一页）、PageUp/PageDown、上下方向键移动选择，语义与来源一致；`tests/input/navigation_policy.cpp` 覆盖。来源侧的五个开关（`paging_minus_equal` 等）在本仓库以 `navigation` 结构体承载，字段一一对应。
-
-**鼠标滚轮**：`consume_candidate_wheel_delta` 是纯函数，`tests/ui/candidate_wheel.cpp` 钉住四条——不足一格的位移要保留、满一格才发出翻页、方向正确映射、反向滚动时清掉残留行程。窗口侧另有一条契约：滚轮翻页未开启时把消息交还默认过程，而不是在这个 NOACTIVATE 窗口上吞掉它。
-
-**旧候选请求拒绝**：`tests/runtime/session_smoke.cpp` 在记下一个代次、让它过期之后，断言用旧代次选词被拒绝。
-
-三项均有用例，本行不再留「仍需」。
-
-增量记录（2026-09-20，Windows 第四十二批：把上一批记为缺覆盖的 CapsLock 补上）：第四十批把 CapsLock 记成「已实现但只有源码核对」。Docker 恢复、Windows 套件能跑之后，按当时说的把它补上。
-
-`caps_lock_frame` 现在有三条断言：帧长与协议结构一致、类型是 `CapsLockChanged`、载荷是 TIP 解析的 `"0"`/`"1"`（不是裸字节，也不是配置帧那种 key=value 形状）。另加一条反向约束——配置帧集合里不得出现 `CapsLockChanged`，免得它哪天被顺手并进那一批。
-
-做了反向验证：把 `caps_lock_frame` 的类型换成 `InputModeChanged`，测试在帧类型那一行失败；恢复后套件回到 78 通过 / 1 失败（唯一那条是基线里已记的 `msimeui-tests`，Rosetta 在 arm64 主机上模拟 x86_64 的崩溃）。
-
-**本地优先级那条没有跟着补，是重新权衡后的决定**：真正值得测的是整个合并过程，而它嵌在 `TranslationWorker` 的循环里，抽出来要重构；只抽一个「集合里有没有」的谓词则证明不了什么。行为今天是正确的，为一条已正确的规则重构只能端到端验证的 worker，风险大于收益。维持记录为未覆盖，不因为「能跑了」就顺手改。
-
-增量记录（2026-09-20，Windows 第四十三批：托盘菜单与工具栏逐项比对）：这行原写着「来源和目标菜单项、禁用条件仍需逐项比对」。
-
-**菜单项**：来源 `ui-html/webview2/menu/default.html` 里的动作共六个——`floatingToggle`、`emojiSymbols`、`keyboardPanel`、`voiceInput`、`settings`、`about`。本仓库 `TrayMenuCommand` 七个，前六个一一对应，多出的是手写识别板（与第二批记的「目标为超集」一致）。
-
-**工具栏组件**：来源 README 写「中英文切换始终显示，其余组件（全角、标点、简繁、表情、屏幕键盘、设置）可按需勾选」，另可调整缩放与图标尺寸。`FloatingToolbarPreferences` 逐项对应：`english_mode`、`fullwidth`、`punctuation`、`character_set`、`emoji`、`screen_keyboard`、`settings`，加上 `scale_percent` 与 `font_size`。
-
-**禁用条件是有意差异，不是缺口**：来源的菜单 HTML 里 `disabled` 出现零次——它的面板全在同进程内，永远可用，所以从不禁用。本仓库的面板在独立的 Tauri 壳里，壳可能不在，于是能力缺失的行**保持可见但置灰**，而不是点了没反应或干脆隐藏。`TrayMenuLayout.h` 的注释写明这个选择的依据正是「与发行版菜单从不隐藏条目一致」——保住来源的可见性语义，同时诚实反映进程边界。
-
-这一行不再留「仍需」。
-
-增量记录（2026-09-20，Windows 第四十四批：核查这张表自己是否完整）：前面四十三批都在核表里的条目，这批核的是**表本身有没有漏掉来源的模块**。
-
-来源 `server/src/` 下 25 个模块，24 个在本表有落点。唯一没有的是 `defines`，里面只有 `base_structures.h`、`defines.h`、`globals.h` 三个头文件，是类型与常量定义而非功能模块，不构成缺口。
-
-顶层目录里 `docs`、`server`、`windows`、`ui`、`ui-html`、`installer`、`scripts`、`tests`、`vendor` 都有落点，**唯独 `experiments` 没有**。它下面是 `tsf-edit-control`：一个基于 Win32 TSF 的编辑控件实验工程，用 Direct2D / DirectWrite 绘制，自带最小宿主 demo，功能包括 preedit 与 display attribute 绘制、候选框位置上报、软换行、选区与鼠标命中。
-
-**这个缺口值得单独记一笔**，因为它不是功能缺口而是**验证工具缺口**：本表里「原生 TSF / 真实编辑器交互验证」这一项之所以一直推迟，缺的正是一个可控的编辑宿主，而来源自带了一个。本仓库 `platforms/windows/msimeui/demos/` 下只有 `msimeui-demo`（绘制 demo），没有对应的 TSF 编辑控件宿主。
-
-本批没有移植它，按「已识别、未移植」记录。**当时给的理由（「Wine 的 TSF 支持不足」）随即被下一批的实测推翻**，见第四十五批：核心链路在 Wine 下完全可用。不移植的理由因此要重述为——该工程用 Direct2D 绘制并依赖真实 TIP 激活，而 TIP 激活这一步尚未用真实 COM 服务器验证过。等那一步过了，它就是现成的起点。
-
-
-增量记录（2026-09-20，Windows 第四十五批：实测 Wine 的 TSF，推翻一个继承来的假设）：上一批把「原生 TSF / 真实编辑器交互验证」推迟的理由写成「Wine 的 TSF 支持不足」。那是从表里继承的说法，**本轮此前没有人实测过**。这批测了。
-
-容器里的 Wine 带 `msctf.dll`、`msctfmonitor.dll`、`msctfp.dll`、`msimtf.dll`，注册表里有 `HKLM\SOFTWARE\Microsoft\CTF` 及其 `TIP` 子键。用最小探针逐个调用，结果是：
-
-- `CoCreateInstance(CLSID_TF_ThreadMgr)` → S_OK
-- `ITfThreadMgr::Activate` → S_OK，拿到 client id
-- `CreateDocumentMgr` → S_OK
-- `ITfDocumentMgr::CreateContext` → S_OK，拿到编辑 cookie
-- `Push` + `SetFocus` + `GetFocus` 往返 → S_OK，取回的正是同一个文档
-- `CoCreateInstance(CLSID_TF_InputProcessorProfiles)` → S_OK
-- `ITfInputProcessorProfiles::Register` → S_OK
-- `AddLanguageProfile` → S_OK
-- `ActivateLanguageProfile` → **E_INVALIDARG**
-
-**结论要分两半说，不能含糊。** 文档管理器、编辑上下文、编辑 cookie、焦点往返这条核心链路在 Wine 下完全可用，所以「Wine 的 TSF 不足以承载一个编辑宿主」这个说法，就核心路径而言**不成立**。
-
-唯一失败的 `ActivateLanguageProfile` **不能归咎于 Wine**：探针注册的是一个临时 CLSID，背后没有任何 COM 服务器，E_INVALIDARG 完全可能是这个测试设置本身造成的。要分辨，得拿本仓库真实的 TIP 去试——而 `msime-tsf` 当前不在交叉构建的产物里（它要求 `WIN32` 并依赖 `MSIME_HOST_LIBRARY`），本批没有走到那一步。
-
-所以下一步是明确的：让 `msime-tsf` 在 mingw 交叉构建里产出，再用真实 COM 服务器重试激活。在那之前，表里那几行的推迟理由应当写成「TIP 激活未经真实服务器验证」，而不是笼统的「Wine 的 TSF 支持不足」——后者已被实测推翻。
-
-增量记录（2026-09-20，Windows 第四十六批：Wine 的 TSF 边界测到底，并更正两处自己的错话）：第四十五批测出核心链路可用、`ActivateLanguageProfile` 失败，但当时用的是没有 COM 服务器的临时 CLSID，无法归因。这批拿**真实 TIP** 测完了。
-
-先更正两处：其一，第四十五批说「`msime-tsf` 当前不在交叉构建产物里」——**错的**，它一直在产出，是 `target/windows-full/<arch>/tsf/libMetasequoiaImeTsf.dll`（21 MB），当时只看了顶层目录。其二，中途一度判断「`DllRegisterServer` 在 Wine 下挂死」——**也是错的**，见下。
-
-用真实 CLSID `{E3062E9A-D834-4637-8958-ED8CFA427D01}` 与 profile GUID `{4D59B1B4-D503-44AE-9259-BAD9BB2778AB}` 逐层测下来：
-
-**Wine 实现了的（全部 S_OK）**：`ITfThreadMgr` 创建与 `Activate`、`CreateDocumentMgr`、`CreateContext`（拿到编辑 cookie）、`Push` + `SetFocus` + `GetFocus` 往返、`ITfInputProcessorProfiles`、`ITfInputProcessorProfileMgr`、`ITfCategoryMgr`。TIP 的 DLL 本身 `LoadLibrary` 正常，`DllRegisterServer` 符号也在。
-
-**Wine 没有实现的**：`ITfInputProcessorProfileMgr::RegisterProfile` → **E_NOTIMPL (0x80004001)**；`ITfCategoryMgr::RegisterCategory` → **E_FAIL (0x80004005)**。
-
-**因此**：本仓库 TIP 的 `DllRegisterServer` 必然失败——它三步里前两步就过不去。直接调用它，**3 毫秒返回 E_FAIL，并不挂死**。此前观察到的 `regsvr32` 卡满 120 秒超时，是 **regsvr32 自己的失败对话框在 xvfb 下无人关闭**，与这个 DLL 无关。
-
-**这条边界取代原先那句笼统的「Wine 的 TSF 支持不足」**：Wine 能跑的是 TSF 的**运行时**，不能跑的是 TIP 的**注册**。凡是直接驱动 `ITfContext` 的行为，Wine 下都可验证；凡是需要「已注册并激活的输入法」才成立的行为，Wine 下不可能验证，且原因不是实现不全，而是那两个注册接口根本没实现——不是本仓库能绕过的。
-
-对来源 `experiments/tsf-edit-control` 的移植，这给出了明确前提：它作为编辑宿主的部分（绘制、候选框位置上报、选区命中）在 Wine 下可跑；但要让本仓库的 TIP 真正挂进去，仍需真实 Windows。
-
-增量记录（2026-09-20，Windows 第四十七批：TIP 能在 Wine 下创建出来，但激活失败的那一步没隔离出来）：第四十六批测出 Wine 不实现 TIP 注册。这批追问一步——**注册不了，能不能绕过注册直接驱动 TIP**。
-
-**能创建。** `DllGetClassObject` 是导出符号，绕开注册表拿到类工厂 S_OK，`CreateInstance(IID_ITfTextInputProcessor)` S_OK——本仓库真实的 TIP 对象在 Wine 下被实例化出来了。这一点此前没有人试过，它说明「Wine 下碰不到 TIP」的印象是错的。
-
-**但激活失败**：`ITfTextInputProcessor::Activate(threadMgr, clientId)` 在 219 毫秒后返回 E_FAIL。
-
-**失败的具体步骤没有隔离出来，本批不假装知道。** 追查过程中一度得出一条看着很顺的因果链——Wine 的 `RegisterProfile` 是 E_NOTIMPL，所以没有默认语言配置，所以 `GetDefaultLanguageProfile` 失败，所以 `_AddTextProcessorEngine` 返回 FALSE。**实测把这条链打断了两处**：`GetDefaultLanguageProfile` 返回的是 S_FALSE，而 `S_FALSE` 不算 `FAILED`，那道检查会放行；继续往下的 `SetupLanguageProfile` 读过源码，它只在 `tfClientId == 0 且 pThreadMgr == nullptr` 时失败，并不拒绝空的 profile GUID。所以这条链是错的，没有写进结论。
-
-**顺带确认的**：`ITfCategoryMgr::RegisterGUID` 在 Wine 下 S_OK（atom 正常，`GetGUID` 往返一致），失败的只有 `RegisterCategory`。也就是说显示属性的 atom 注册这一步不是障碍，障碍只在类别注册，而类别注册属于 `DllRegisterServer` 而非激活路径。
-
-**下一步的线索**：`CCompositionProcessorEngine::SetupLanguageProfile` 带一个 `isComLessMode` 参数——TIP 自身就有一条绕开 COM 注册的模式。要隔离 `Activate` 的失败点，需要构建一个带日志的 TIP；而 com-less 模式很可能正是 Wine 这种无法注册的环境下该走的路。这两件都留给下一轮，本批只报实测到的事实。
-
-增量记录（2026-09-20，Windows 第四十八批：com-less 那条线索实测不成立，附 Wine 下 TSF 的完整测绘）：上一批把 `isComLessMode` 点名为「像样的线索」。**这批试了，不成立**——记下来，省得下一个人再花一遍力气。
-
-`ITfTextInputProcessorEx` 取到 S_OK 之后，`ActivateEx` 用三种标志各试一次：`TF_TMAE_COMLESS`、`TF_TMAE_COMLESS | TF_TMAE_SECUREMODE`、以及 flags 为 0 —— **三者一律 E_FAIL**（151ms / 122ms / 118ms）。com-less 模式救不了它，失败点在别处。
-
-顺带把激活序列最前面两步的原语也测了，全部可用：`ITfSource` 的 QI、`AdviseSink(ITfThreadMgrEventSink)`（拿到 cookie）、`UnadviseSink`、`ITfKeystrokeMgr` 的 QI 均为 S_OK。所以失败发生在这两步之后。
-
-**Wine 下 TSF 的完整测绘（全部实测，非推断）：**
-
-| 能力 | 结果 |
-|---|---|
-| `ITfThreadMgr` 创建 / `Activate` | S_OK |
-| `CreateDocumentMgr` / `CreateContext` | S_OK，拿到编辑 cookie |
-| `Push` / `SetFocus` / `GetFocus` 往返 | S_OK，取回同一文档 |
-| `ITfSource` QI / `AdviseSink` / `UnadviseSink` | S_OK |
-| `ITfKeystrokeMgr` QI | S_OK |
-| `ITfCategoryMgr` 创建 / `RegisterGUID` / `GetGUID` | S_OK，atom 往返一致 |
-| `ITfInputProcessorProfiles` / `ProfileMgr` 创建 | S_OK |
-| `GetCurrentLanguage` | S_OK |
-| TIP 经 `DllGetClassObject` 实例化（绕过注册表） | S_OK，`ITfTextInputProcessor` 与 `Ex` 都拿得到 |
-| `GetDefaultLanguageProfile` | S_FALSE（无已注册配置） |
-| `ITfCategoryMgr::RegisterCategory` | **E_FAIL** |
-| `ITfInputProcessorProfileMgr::RegisterProfile` | **E_NOTIMPL** |
-| TIP `ActivateEx`（三种标志） | **E_FAIL** |
-
-**结论**：Wine 能提供 TSF 的运行时与全部前置原语，也能让本仓库的 TIP 被实例化；不能提供的是 TIP 注册，而激活失败的具体步骤**仍未隔离**。要往下走只有一条路——构建一个带日志的 TIP，逐个 `goto ExitError` 打点。本轮不做，因为那要改线上 TIP 的构建配置，且改完仍无法在 Wine 下产生可用的输入法，收益只在诊断本身。
-
-增量记录（2026-09-20，Windows 第四十九批：屏幕键盘那行的来源指错了文件）：这行原把「布局、修饰键按下/释放语义」的比对来源写成设置模块 `screenkb-settings.ts`。**那个文件里两样都没有**——它总共 19 行，只做两件事：按主题切换预览图 `softkbd_light.png` / `softkbd.png`，以及给一个按钮挂上 `postMessage({type:'openKeyboardPanel'})`。它是设置页里的入口，不是键盘本身。
-
-真正的来源是 `server/src/keyboard-panel/KeyboardPanel.cpp`，其中引用了 37 个不同的虚拟键：左右 Win（`VK_LWIN` / `VK_RWIN`）、左右 Ctrl 与 Alt（`VK_CONTROL` / `VK_RCONTROL`、`VK_MENU` / `VK_RMENU`）、应用键 `VK_APPS`、导航簇（`VK_HOME` / `VK_END` / `VK_PRIOR` / `VK_NEXT` / 四向方向键）、`VK_INSERT` / `VK_DELETE`、`VK_NUMLOCK` / `VK_CAPITAL`、以及整套 OEM 标点（`VK_OEM_1` 到 `VK_OEM_7` 加 `VK_OEM_COMMA` / `MINUS` / `PERIOD` / `PLUS`）。
-
-**本批只更正比对对象，没有做逐键比对。** 这个更正本身有价值：原先那条待办指着一个不含目标内容的文件，任何人照着它去核都会扑空；现在它指向真正需要 diff 的那份源码。左右修饰键是否都区分、`VK_APPS` 与两个 Win 键是否都有对应，是逐键比对时要回答的第一批问题。
-
-增量记录（2026-09-20，Windows 第五十批：屏幕键盘的修饰键语义逐项核对，结论是一致）：上一批把比对对象更正为 `server/src/keyboard-panel/KeyboardPanel.cpp` 之后，这批做了其中「修饰键按下/释放语义」那一项。
-
-来源用 `IsExtendedVirtualKey` 决定合成按键时是否附带 `KEYEVENTF_EXTENDEDKEY`。这不是装饰：不带这个标志，右 Alt 会被当成左 Alt，方向簇会被当成小键盘数字。本仓库对应的是 `crates/host-windows/src/lib.rs` 的 `extended_key`。
-
-**两边的集合逐键相同**，共 17 个：`VK_DELETE`、`VK_LWIN`、`VK_RWIN`、`VK_RMENU`、`VK_RCONTROL`、`VK_INSERT`、`VK_HOME`、`VK_END`、`VK_PRIOR`、`VK_NEXT`、四个方向键、`VK_NUMLOCK`、`VK_DIVIDE`、`VK_APPS`。左右修饰键的区分、Apps 键、导航簇全部对上。
-
-本仓库的注释比来源写得更清楚，点明了后果——「不带这个标志，方向簇会变成 2/4/6/8，Home/End/PgUp/PgDn/Ins/Del 会变成 7/1/9/3/0/.」——并说明「移植后的 React 布局把它们全部暴露出来，所以这里比来源更要紧」。
-
-覆盖是正反两面的：`extended_keys_cover_the_cluster_the_panel_exposes` 断言整簇键都带上标志；另一条用 `VK_SPACE` 断言普通键**不带**该标志、扫描码非零、按下时无 `KEYEVENTF_KEYUP` 而抬起时有。按下/释放语义因此也一并钉住。
-
-这一项到此走完。同一行里剩下的两项——布局逐键比对、真实焦点恢复——本批没有做；前者需要拿来源的按键表与宿主下发的布局逐个对，后者需要真实 Windows。
-
-增量记录（2026-09-20，Windows 第五十一批：屏幕键盘布局逐键比对，含一个查出来不成立的怀疑）：接上一批，这批做了「布局逐键比对」。
-
-**先说一个差点报错的发现。** 比对底排时注意到本仓库左右两侧的 Ctrl 都发 `0x11`、左右 Alt 都发 `0x12`、左右 Win 都发 `0x5b`，即右侧修饰键发的是左键虚拟码。这看着像缺陷——右 Alt 在许多布局上是 AltGr，有应用会区分左右 Ctrl。而且它会让上一批刚核对过的 `extended_key()` 里 `VK_RMENU` / `VK_RCONTROL` / `VK_RWIN` 三个分支在面板路径上永远走不到。
-
-**但查了来源之后不成立**：`KeyboardPanel.cpp` 第 194–201 行做的是同一件事——`Ctrl → VK_CONTROL`、`Win → VK_LWIN`、`Alt → VK_MENU`，右侧三个键同样用左键码。`IsExtendedVirtualKey` 里那三个右键分支在来源自己的面板上同样走不到，它是个通用助手而非面板专用。**本仓库忠实复刻了来源的行为，不是缺口。**
-
-**逐键比对结果**：来源布局是标准 QWERTY 块——数字排、三排字母、底排修饰键收尾于 Del 与 Ctrl，共 17 个具名虚拟键。**没有** F 键、导航簇、PrtSc/Scroll/Pause，也没有 Menu（Apps）键。
-
-本仓库布局是**超集**：在同样的 QWERTY 块之上，另有 F10–F12、PrtSc、Scroll、Pause、Ins、Home、End、PgUp、PgDn、Menu（`VK_APPS`）与四向方向键。这正好印证了 `extended_key` 那段注释里的说法——「移植后的 React 布局把它们全部暴露出来，所以这里比来源更要紧」。换句话说，上一批核对的扩展键处理在来源那边多半是备而不用，在本仓库却是实打实要紧的。
-
-这一项到此走完。同一行只剩真实焦点恢复，需要原生环境。
-
-增量记录（2026-09-20，Windows 第五十二批：一条永远核不完的待办，因为它要比的东西不存在）：「API 凭据测试」那行把来源写成 `settings_app.cpp::apiCredentialTest` → `ApiCredentialTest::Run`，并留了「仍需逐项核对来源字段与真实服务行为」。
-
-**那两个函数在来源全树都不存在。** `server/src/settings/settings_app.cpp` 这个文件确实在（1522 行），但里面没有 `apiCredentialTest`；整棵树（排除 vendor）搜 `apiCredentialTest`、`ApiCredentialTest`、`testCredential`、`testConnection`、`verifyToken` 全部无果。
-
-再往外找也没有：来源 `server/src/ai/ai_assistant.cpp` 里唯一匹配 `test` 的四处全是 `g_latest` 这个变量名的子串；没有 `/v1/models` 之类的模型列举；设置页 `ai-settings.ts` 的标识符里只有 `aiToken`、`aiEndpoint`、`aiModel` 等输入控件，没有测试按钮；设置页 HTML 里两处「测试」都是正文用语（「测试反馈」「仅供测试使用」）。
-
-**结论：API 凭据测试是本仓库新增的功能，不是从来源迁移过来的。** 因此「逐项核对来源字段」这条待办无法执行，也不该执行——没有可比对的来源字段。本批把它撤销，并在表里标明该功能为新增。
-
-这条待办的形状与第四十九批那条一样：**看起来是个有效待办，实际指向不存在的东西**。区别是上一条指错了文件（真来源在别处），这一条指向的功能压根不存在。两者都比「没做」更坏，因为它们会让人以为还有已知的工作量。
-
-行内保留的只有「真实服务行为」——那是任何依赖外部服务的功能都需要真实账号才能验的，与来源无关。
-
-增量记录（2026-09-20，Windows 第五十三批：想给剪贴板补一条真调 Win32 的测试，结果发现测错了对象）：`tests/clipboard/` 下三个用例都是纯逻辑（历史、链接识别、呈现），`clipboard_text.cpp` 测的也只是 `normalize_clipboard_text` 这个纯字符串函数。真正调 `OpenClipboard` / `EmptyClipboard` / `SetClipboardData` 的地方一行没测，而 Wine 实现了这套 API——看上去是个能当场关掉的缺口。
-
-写完测试却链接失败：`msime::windows::paste_clipboard_text` 未定义。追下去发现 **`platforms/windows/src/clipboard/ClipboardPaste.cpp` 没有出现在任何 CMakeLists 里，不被编译进任何目标；`paste_clipboard_text` 在全仓库也没有任何调用者。**
-
-在用的是另一条路径：`apps/desktop/src-tauri/src/clipboard_history.rs` 调 `msime_host_windows::write_clipboard_text`，即共享 Rust 宿主里的实现，由 Tauri 壳消费。换句话说剪贴板写入早已随「公共功能进 Tauri」这条主线搬到 Rust 侧，C++ 那份是被留下的平行实现。
-
-**本批没有删它**（可能是预留或其他分支在用），也没有把它接起来（那会无缘无故改动生产路径）。按「存在但未接入」记录。
-
-**同时记下一个覆盖事实**：在用的 Rust 路径在 Wine 套件里也没有覆盖——`run-tests-wine.sh` 只 glob `windows-*.exe`、`msime-tsf-*.exe` 与 `msimeui-tests.exe`，即只跑 C++ 测试可执行文件，不跑 cargo 为 Windows 目标产出的测试二进制。要覆盖 `write_clipboard_text` / `read_clipboard_text`，得先扩展这个运行器——**第五十四批做了这件事**，那两个函数所在的 crate 现在随套件一起在 Wine 下执行。
-
-这一条的教训与本轮多次遇到的同形：**先确认要测的东西是活的**。三个纯逻辑用例的存在，让剪贴板看起来「有覆盖」；而真正会在用户机器上跑的那两条路径，一条根本没编译，另一条套件够不着。
-
-
-增量记录（2026-09-20，Windows 第五十四批：让 Wine 套件也跑 Rust 宿主的 Windows 测试）：上一批记下一个事实——`run-tests-wine.sh` 只 glob `windows-*.exe`、`msime-tsf-*.exe` 与 `msimeui-tests.exe`，即只跑 C++ 测试可执行文件。于是 `crates/host-windows` 里那套 Windows 专有代码在容器里零覆盖：剪贴板读写、合成按键、扩展键集合，全都只在真实 Windows 上才可能被执行到。
-
-本批把它接上了。`cargo test -p msime-host-windows --target x86_64-pc-windows-gnu --no-run` 能为同一目标产出测试二进制，它们在同一个 Wine 下跑得起来——先实测确认，再改脚本：把产物收进 `target/wine-rust-tests/<arch>`，作为只读卷挂进容器，让原有循环一并跑。x86 用 `i686-pc-windows-gnu`；目标未安装或 cargo 不可用时优雅跳过，不影响 C++ 套件。
-
-结果：套件从 78 通过 / 1 失败变成 **80 通过 / 1 失败**，新增的 `rust-msime_host_windows`（11 个单元测试）与 `rust-paste_policy`（2 个）全部通过。其中就包括第五十批只靠读源码核对过的扩展键与扫描码那几条——它们现在是真的被执行了，不再只是被读过。
-
-**另记一个偶发**：第一次运行时 `windows-voice-controller-listener` 失败，第二次通过，其余一致。它不是本批引入的（本批只增加挂载与二进制），但它是一个此前没有记录在案的不稳定用例，写在这里以免下次有人把它当成新回归。
-
-增量记录（2026-09-20，Windows 第五十五批：把 host-api 也纳入 Wine，当场抓到一个「在 Windows 上断言了反面」的测试）：第五十四批让 Wine 跑起 `msime-host-windows` 的测试。这批把 `msime-host-api` 也纳入——那是 Server 链接的 `msime_host_api.dll` 所在的 crate，FFI 边界就在这里，值得在它实际发布的目标上执行。
-
-它需要与交叉构建同一棵原生依赖树（`MSIME_WINDOWS_DEPS`），所以运行器现在按 `MSIME_WINDOWS_DEPS_ROOT` 推出前缀；前缀不存在时只跑 host-windows 并打印一行说明，不让整轮失败。
-
-**首次为 Windows 目标执行 host-api 的 99 个测试，2 个失败，其中一个是真问题。**
-
-`contextual_punctuation_respects_editor_context_preferences_and_composition` 显式设了 `smart_punctuation_direct_digit` 与 `_direct_letter`，却让 `smart_punctuation` 走默认值——而那个默认是 `!cfg!(windows)`（Windows 上由 TIP 自己处理智能标点，所以共享默认关闭）。于是这个用例在 Windows 目标下**断言了与它本意相反的事**，并且一直「通过」，因为套件从来只为宿主目标跑过。本批把前提写进测试本身。产品代码没有改动：Windows 上默认关闭是有意的。
-
-另一个失败 `the_c_header_and_the_rust_exports_agree` 不是缺陷——它在运行时遍历自己 crate 的 `src/` 比对 C 头文件与 Rust 导出，而容器里只有可执行文件。这是一项没有平台维度的源码一致性检查，宿主那轮已经覆盖，故在 Wine 下按名跳过并写明理由。
-
-**还修正了一处自己的疏漏**：`cargo test --no-run --message-format=json` 报出的 `executable` 不只有测试，还包括 examples——`prepare_host`、`preferences_latency`、`dictionary_requests` 都是需要命令行参数的普通程序，被当成测试跑就成了三个假失败。现在按 `profile.test` 过滤。
-
-结果：套件从 78 通过 / 1 失败增至 **83 通过 / 1 失败**，唯一失败仍是基线里那条 `msimeui-tests`（Rosetta 在 arm64 主机上模拟 x86_64）。
-
-增量记录（2026-09-20，Windows 第五十六批：`client-core` 也在 Windows 目标下执行，一段从未被跑过的 Windows 专有代码终于被覆盖）：第五十五批抓到的那个 bug 有个类特征——**平台相关的默认值，配上一个假定非 Windows 取值的测试**。顺着这个特征在 `client-core` 里扫了一遍 `cfg(windows)`：
-
-- `preferences.rs` 的 `smart_punctuation_default`，已在上一批处理。
-- `preferences/tests.rs` 里有一处 `let expected = !cfg!(windows);`——**这是正确的写法**，它显式承认了平台差异，留作对照。
-- `translation/store.rs` 有两段 `#[cfg(windows)]`：`persist_replacing` 在替换文件遇到 `PermissionDenied` 时做有限重试，注释写明是为了避开 Windows 上另一进程短暂持有文件的窗口。
-
-**最后这段在宿主目标下永远编译不到**，因此从来没有被任何测试执行过。本批把 `msime-client-core` 也纳入 Wine 运行器，它的 247 个单元测试因此在 Windows 目标上执行，其中 `concurrent_replacement_never_exposes_partial_records` 正是覆盖这条重试路径的那个——全部通过。
-
-结果：套件从 83 通过 / 1 失败增至 **86 通过 / 1 失败**。至此在 Wine 下执行的 Rust 测试二进制共八个，合计约 350 个用例，覆盖 `client-core`（共享逻辑与 Windows 专有文件替换）、`host-api`（发布 DLL 的 FFI 边界）与 `host-windows`（剪贴板、合成按键、扩展键）。唯一失败仍是基线里的 `msimeui-tests`。
-
-三批连起来的意义：本轮此前多次只能写「已实现但缺覆盖」或「靠读源码核对」，原因不是没人想测，而是**套件够不着那些代码**。运行器扩展之后，那些条目里有相当一部分不再需要真实 Windows 才能验证。
-
-增量记录（2026-09-20，Windows 第五十七批：Wine 容器没有 locale，中文路径一律失败——对一个中文输入法而言是严重盲区）：把 `msime-engine-bridge` 也纳入 Wine 运行器时，`reset_learned_data_restores_packaged_dictionaries_and_clears_journal` 失败，`create_dir_all` 在创建名为 `陆傲天` 的目录时返回 `NotFound`，而同一循环里的 `ascii` 那轮正常。
-
-**没有直接当成缺陷。** 写了一个只调 `std::fs::create_dir_all` 的最小 Rust 程序去分辨：ASCII 目录成功、CJK 目录 `NotFound`，写文件则是 `Path not found`。这说明问题在环境而非本仓库代码。
-
-根因是容器**根本没有设 locale**：`LANG` 为空、`LC_CTYPE="POSIX"`。Wine 依据 locale 决定文件名的编码映射，POSIX 下非 ASCII 路径直接失败。镜像里其实有 `C.utf8`。加上 `-e LANG=C.utf8 -e LC_ALL=C.utf8` 之后，同一个探针两轮全部成功，`engine-bridge` 那条测试也随之通过。
-
-**这一条值得单独强调**：本仓库是中文输入法，而它的 Windows 测试环境此前无法处理中文路径。任何涉及 CJK 文件名的行为在这里都测不了，且失败形式是 `NotFound` 这种容易被误判成代码缺陷的错误。
-
-同批另外三处改动：`--tests` 只构建测试目标（`engine-bridge` 有个用 `std::os::unix` 的 example，为该目标根本编不过）；运行器不再静默吞掉 cargo 的错误——没有产出任何 Rust 二进制时会打印提示并附上日志路径（`msimeui-tests` 长期没被执行而计数看起来正常，正是这种静默造成的）；`engine-bridge` 纳入后新增 28 个用例。
-
-结果：套件 **88 通过 / 1 失败**，十个 Rust 测试二进制全部通过，唯一失败仍是基线里的 `msimeui-tests`。会话开始时这个数字是 78 通过 / 1 失败。
-
-## 来源模块的落点
-
-逐模块记下来源的每个目录在本仓库落在哪里，以及为什么。上面那张功能表按「功能组」组织，回答的是某个功能有没有；这张按**来源的源码目录**组织，回答的是来源的每一块代码去了哪儿——两者互相校验，一块代码找不到落点就是缺口，哪怕对应功能在表里被标成有。
-
-### TSF DLL：逐文件对应
-
-来源 `windows/src/` 下 38 个 `.cpp`，本仓库 `platforms/windows/tsf/` 全部都有，同名同目录结构。另有 6 个来源没有的：`EngineResponse.cpp`、`EngineSessionAdapter.cpp`、`HostOptionsPaths.cpp`、`PreparedHostOptions.cpp`、`Global/TsfPropertyGuids.cpp`、`Thread/ThreadState.cpp`——它们是进程边界带来的，来源把 Engine 放在同进程，这边 TIP 要通过契约与 Server 对话。再加一套来源没有的 TSF 测试（`tsf/tests/`，19 个）。
-
-### Server：按目的地分三类
+| TSF 按键、焦点、edit session、UI-less | `windows/`、`server/src/ipc/` | `platforms/windows/tsf/`、`src/system/WindowsServer.cpp`、`src/ipc/SessionController.cpp`、`src/ipc/PipePeer.cpp` |
+| 全拼、四种双拼、86 五笔、日语、辅助码 | README 对应指南、`engine/`、设置 `input.ts` / `helpcode.ts` | `crates/engine-bridge/`、`crates/input-runtime/`、`platforms/windows/src/ipc/SessionPump.cpp`、共享 `preferences.rs` |
+| 候选分页、高亮、调频、preedit、以词定字 | README 候选调频 / preedit / 标点指南 | `src/candidate/CandidateWindow.cpp`、`src/candidate/CandidateAction.h`、`src/ipc/SessionController.cpp`、`src/ipc/ReplyCodec.cpp` |
+| 中英文状态、独立英文候选、全半角、简繁、智能标点 | `server/src/english/`、设置 `input.ts` / `shortcut.ts` | `tsf/Utils/FanyUtils.cpp`、`src/input/PunctuationPolicy.h`、`src/ipc/ReplyCodec.h` 的 TsfLocalConfig、`crates/client-core/src/chinese_conversion.rs` |
+| K/T/U/E/M/J/Y/R 快捷模式、混输 | README 实用功能快捷模式 | Engine 桥接与共享偏好、`src/ipc/ServerSession.cpp`，混输排序在 `crates/input-runtime` |
+| 谷歌云候选与 AI 联想 | README 云 / AI 联想、设置 `ai-settings.ts` | `src/candidate/CloudCandidateWorker.cpp`、`src/candidate/AiCandidateWorker.cpp`，由 `SessionController.cpp` 构造并投递输入队列 |
+| 候选中英释义、腾讯云翻译、自定义翻译 | README 候选翻译 / 自定义翻译 | `src/candidate/TranslationWorker.cpp`、`src/candidate/CandidateTranslationPolicy.h`，共享 `crates/client-core/src/translation.rs` 与 `translation/store.rs` |
+| 设置读取、保存、热更新与窗口行为 | `settings_app.cpp`、`config-sync.ts` | Tauri `load_preferences` / `save_preferences`、`src/system/PreferenceMonitor.cpp` 与 Server 的发布回调 |
+| 损坏配置备份与修复 | `BackupCorruptConfig`、`SyncConfigWithInstalledTemplate`、`ReapplyRealCredentials` | `crates/client-core/src/preferences.rs` 的 `recover` / `recover_malformed`：原文件先备份为同目录 `preferences.json.corrupt-<UTC 时间戳>`，再保留每个仍可解析的字段（含服务凭据）；设置页读取报格式错误时提供「修复配置文件…」并可在文件管理器中显示备份；macOS 输入法进程在 JSON 解析失败时经 Host API `msime_client_recover_preferences` 自动修复一次 |
+| API 凭据测试 | 来源 `server/src/settings/api_credential_test.cpp`，经设置窗 `apiCredentialTest` 消息测试 `translation.tencent` / `translation.niutrans` / 自定义翻译、`voice.asr`、`voice.polish` 与 `ai.assistant` | Tauri `test_api_credential` → `crates/client-core/src/credential/`（豆包、批量 ASR、腾讯 / NiuTrans / DeepLX） |
+| 词库查询、增改删、导入导出、快捷短语 | `dictionary_manager.cpp`、设置 `dict.ts` / `tools-settings.ts` | Tauri `dictionary_request`、共享 `dictionary/access.rs` 与 `dictionary/import.rs` |
+| 语音热键、流式 / 批量 ASR、润色、声音 / 静音、上屏方式 | `server/src/voice-input/`、设置 `voice.ts` | `src/voice/`（`VoiceHotkey.cpp`、`VoiceInputSession.cpp`、`DoubaoAsrClient.cpp`、`CuePlayer.cpp`、`SystemAudioMuter.cpp`、`WaveOverlay.cpp`、`VoiceSessionEpoch.h`）+ Tauri 语音面板 |
+| 录音设备选择 | 来源语音设置 | `src/voice/VoiceCaptureSelection.h` 与 `VoiceInputSession`，按稳定设备 ID 枚举、保存并透传给 `AudioCapture::start` |
+| 手写 | 设置 `handwriting-settings.ts` 与模型资源 | `src/system/ShellSurfaces.h` → Tauri `recognize_handwriting` / `submit_handwriting_candidate`，界面在共享 `panels.tsx` |
+| 屏幕键盘 | 来源面板 `server/src/keyboard-panel/KeyboardPanel.cpp` | Tauri keyboard route 与共享 `packages/ui/src/keyboard/`，投递走 Windows host 的 `send_key` |
+| Emoji、颜文字、符号、剪贴板历史 | README 与来源 `clipboard_history.cpp` | `src/clipboard/ClipboardMonitor.cpp`、`ClipboardHistory.cpp`、`ClipboardPaste.cpp`、`ClipboardPresentation.cpp`，面板与目录走 Tauri `load_emoji_catalog` / `paste_clipboard_text`；最近使用空状态文字与来源一致 |
+| 悬浮工具栏、托盘菜单、入口快捷键 | 来源 `window/*presenter*`、`ui-html/webview2/ftb` 与 `menu` | `src/candidate/FloatingToolbarWindow.cpp`、`src/candidate/TrayMenuWindow.cpp`、`src/input/MaintenanceHotkey.cpp`、`src/system/ShellSurfaces.h` 与 `ShellLauncher.cpp` |
+| 皮肤、主题、字体、外观预览 | 来源 `appearance.ts` / `skin.ts`、`candwnd/skins` | `src/candidate/CandidateSkin.h`、`CandidatePalette.h`、`CandidateShadow.h`、`CandidateWindow.cpp`，共享 `packages/ui/src/upstream/` 与 `crates/client-core/src/skin/catalog.rs` |
+| 打字统计 | 来源 Server 私有统计表与统计页 | 采集在 Server，存储与展示在共享 `crates/client-core/src/typing_statistics.rs` 与共享设置页；统计页含来源的 12 个月日历热力图与最近 30 天按日明细 |
+| 更新、关于、帮助、反馈、重启 | 来源 `about-settings.ts` / `feedback-settings.ts` / `update-manifest.ts`、`restartServer` | 共享 `update-manifest.ts` 与设置页，Tauri `open_external_url` / `restart_input_method`，重启走固定 UTF-16LE `RestartServer` Aux payload |
+| 服务守护、安装、升级、卸载、资源打包 | 来源 README 服务守护、`installer/`、构建脚本 | `platforms/windows/src/system/Watchdog.cpp` 与 `WatchdogPolicy.h`、`src/entrypoints/prepare_host_main.cpp`、`platforms/windows/installer/` |
+
+### 逐项核对过的几处行为
+
+这些是对照过程中判据比较细、结论值得单独记住的地方，都有对应用例：
+
+- **输入方案**：全拼 `nihao` 首选 `你好`；四套双拼 profile 各自走通；微软双拼 `nihk` 的 preedit 切成 `ni'hao`；五笔 `gggg`/`hhhh`/`aaaa` 得到 `王`/`目`/`工`；日语罗马字 `nihon`/`sakura` 的假名读音与候选都正确，且反查全拼不带假名读音。ü 的两种写法（`nve`/`nue`、`lve`/`lue`，以及 j/q/x 后的 `u`）在本仓库都通，来源为 Google 解码器做的拼写改写在这边不需要。
+- **调频持久化**：选过的候选在新开的会话里排到原位之前；`reset_learned_data` 之后回到出厂顺序，且这一步跑在确实写入过的 store 上；`learning: false` 时同样的选择在干净 store 上不改变任何顺序。五种调频模式各走各的规则。
+- **翻页**：Engine 对单字母查询只给 24 个初始候选，`InputSession::expand_initial_candidates` 经 overlay 转发到公开门面后，运行时在末页触发展开——`j` 从 5 页变为 291 页。两条边界语义与来源一致：下一页正好是不满的末页时先展开再进去；已经在末页且当前页不满时，新到的候选填进当前页而不翻页。
+- **自动造词**：锁定 Engine 的 `InputSession::commit` 内部已自带整条链，门面的 `select` 走的就是它，所以本仓库不需要来源在 Server 里手工串的那几步。判据是**简拼**——组合出来的短语答 `htpb`，重新生成的整句不答。
+- **混输候选的座位表**：来源 `candidate_selection_policy.h` 的四种排布已实现进运行时的 `normalize_online_slots`，只在快照里确实存在云 / AI 候选时生效。插入是压缩的而非固定编号：没有英文候选时 AI 落第二。多于一个的云 / AI 候选按本地候选处理而不是丢弃。
+- **以词定字**：`[` 上屏高亮候选的首个汉字、`]` 上屏末字，覆盖三字候选、组合被消耗、无汉字候选与越界索引。
+- **辅助码**：单码调序与双码筛选按来源规格逐条核对，全拼与双拼两套方案及候选窗显示都在；五笔的逐键提示按共享 `wubi_code_hint` 显示严格前缀的剩余编码，回退与本地模式不标注。来源没有这个开关，它的逐键提示只是让前缀候选排在精确匹配之后；剩余编码提示是本仓各宿主共有的补充，Windows 从 2026-09-23 起才真正读取它（此前这句写在这里，宿主里却没有任何代码读这个偏好）。
+- **八个快捷模式**（K/T/U/E/M/J/Y/R）：带锁定词库的 `ServerSession` 回归逐个验证 Shift 入口、候选生成与选词提交。Unicode 模式的数字键是「打码位」而不是选词序号，判断分在两层——引擎报 handled，运行时只把引擎拒绝的数字落到选词；这个组合有真引擎回归覆盖。未输完或无匹配的快捷模式输入（含只按了 Y 或 R）按来源 `PrepareCandidateList` 的做法显示原文（含前缀字母）作为唯一一条 Fallback 候选，空格上屏它，由 `scripts/apply_engine_local_mode_fallback.py` 进入锁定 Engine。日语方案下接管空格做「変換」的宿主都认这条例外：唯一候选的 `source` 为 9（`CandidateSource::Fallback`）时不开始转换，空格走普通上屏路径把原文提交——macOS `JapaneseSpaceCommitsFallback`、Linux IBus 与 Fcitx5 共用的 `JapaneseConversion::space`、Android `JapaneseSpacePolicy`、HarmonyOS `JapaneseSpacePolicy`（2in1 硬件空格在转换不接管时交给 `commitHighlighted`，触摸空格交给 `press(0x20)`）、iOS `KeyboardViewController.japaneseSpaceConverts`；Windows 宿主本身就按来源上屏它。
+- **中英文状态**：按应用 / 全局的作用域是纯决策函数并有 `windows-mode-authority` 覆盖；标点重复与成对补全随配置帧下发并由 `windows-tsf-config-frames` 钉住；CapsLock 由 Server 持有并经 `CapsLockChanged` 帧下发；热更新有 `preference_monitor` 用例。macOS 上切到其他输入源（ABC 或其他输入法）会同时清空按应用与全局记忆的模式，切回时两种作用域都从 `default_ime_mode` 开始，对应来源 `ActivateEx` 重新写入 KEYBOARD_OPENCLOSE 与 `ClientDeactivated` 复位 `g_authoritative_cn_mode`；本输入法自身模式间的切换不触发复位，由 `shortcut` 原生测试的 `TestInputSourceModeReset` 钉住。
+- **日语**：`-` 交给长音符输入而不是翻页，`-`/`=` 不再用作翻页键，TSF 与 Server 两侧保持一致，且这条走的是物理按键到真实 Engine 的完整路径。（2026-09-23 更正：此前 Server 一侧并不一致。`ServerSession::navigate` 用 `local_mode == "japanese"` 判日语，而日语是方案（`scheme` 3）不是本地模式，这个分支从未生效，开了 `-`/`=` 翻页时 Server 仍会翻页；`=` 在 TSF 里是组字中的标点，Server 却不认；空缓冲区的 `-` TSF 当输入开组字，Server 的 `edit` 只在已有组字时接；开了 `-`/`=` 以词定字时 `-` 被当成取字键吞掉。现在四处都按 `scheme == 3` 判：不翻页、`=`/`+`/`_` 走候选标点、空缓冲区 `-` 进 Engine、以词定字跳过长音符 `-`（`=` 仍取末字，与来源 `WordToCharacterDirection` 一致）。回归：`tests/input/japanese_keys.cpp` 用真实 Engine 走 `configured_key`，另有 `edit_policy`、`punctuation_policy`、`word_character_policy` 的纯函数用例。）
+- **日语不做简繁转换**：来源 `CandidateTextForOutput` 在日语方案下原样输出假名与汉字。本仓 `ReplyComposer` 此前只看简繁开关，开着繁体时日语候选与上屏也被 OpenCC 转换。现在按 `traditional_projection`（开关打开且方案不是日语）决定，开关本身不动，切回中文方案即恢复繁体输出；`tests/input/japanese_keys.cpp` 钉住。
+- **凭据测试**（本仓库新增的功能）：豆包走独立 WebSocket 握手，传输可注入，生产 WSS 不跟随重定向，连接阶段 5 秒、总时限 15 秒，消息与累计响应上限 1 MiB、最多 64 条消息，只发送一秒合成 PCM 静音并要求有效终态 JSON，不回传服务端诊断或识别文本；批量 ASR（OpenAI、SiliconFlow、Groq）用内存生成的一秒 16 kHz 单声道 PCM16 静音 WAV 以 multipart 上传，不访问麦克风，HTTPS、禁止重定向、5 秒连接 / 15 秒请求、256 KiB 响应上限；翻译侧要求真实译文字段而不是把任意 HTTP 2xx 当成功，自定义服务保留 HTTP/HTTPS 但禁止重定向。新版豆包 API Key 与旧版 App ID/Access Token 互斥，新版忽略残留 App ID。
+- **语音**：五个语音快捷键开关、录音提示音与静音其他声音、豆包的整句流式与双向流式两个识别接口（设置页给带名字的下拉，选中即写入 `asr_endpoint`，地址不属于两个预设时显示「自定义地址」）都在。录音设备按稳定设备 ID 枚举、保存并透传给 `AudioCapture::start`。语音会话的代际由 `VoiceSessionEpoch.h` 持有，取消与失焦的旧结果不交付。
+- **词库**：查询、增改删、按类型导出、快捷短语都走 Tauri `dictionary_request` 与共享 `dictionary/access.rs`；维护前后的 quiesce / resume 由 `dictionary_maintenance_handshake` 协调。
+- **皮肤与外观**：Windows 消费候选字体与回退字体、主题颜色、横竖排布局与阴影字段；`windows-candidate-font-reload`、`windows-candidate-palette` 与阴影回归覆盖非法值的回退路径。来源的四套内置皮肤（fluent/wechat/graphite/willow_green）在本仓不存在：候选窗配色来自全局主题（`crates/client-core/src/skin/theme.rs` 的六个内置主题加 `custom`，目录见 `packages/ui/src/theme/theme-catalog.json`），各宿主经 `msime_client_resolve_theme` 取色；原生候选窗的两层阴影（环境层加接触层）与 `CandidateShadow.h` 的透明留白一致。外部皮肤的 `skin.toml` 在来源里由 toml++ 按完整 TOML 1.0 解析（`candidate_skin_catalog.cpp`），候选窗与设置页共用这一个加载器；本仓各宿主同样只有一个加载器，即 `crates/client-core/src/skin/catalog.rs`（`toml` crate）。设置页经它扫描目录，macOS 输入法经 host C ABI 的 `msime_client_skin_catalog` 与 `msime_client_skin_package` 调用它（`SkinManifestBridge.mm`），所以单引号字面量字符串、跨行数组、内联表、`1_000` 数字分隔、`\u` 转义这些写法在候选窗、悬浮工具栏和设置页上结果一致，设置页列为有效的包不会在候选窗里退回基底主题。字段校验与来源相同：schema_version 必须是整数 1、id 与目录名一致、各字符串长度上限、supports 枚举不重复、最小宽度 0–1000、装饰尺寸 0–500 / 0–1000 且同为零或同不为零、toolbar_stylesheet 是包内存在的单个 `.css`、preview 是包内相对路径、颜色不超过 80 字节。在此之上本仓接受 msime-skins 仓库的写法：`base = "fluent"` 只在清单里读作 `system`（msime-windows 只认它自己的四套内置外观，而 fluent 就是 Windows 原生 Fluent token），其余退役 id 照旧拒绝，偏好与主题边界上 fluent 也照旧是无效 id；装饰表可以整张省略；装饰图优先取 `decoration.image`，否则回落到 preview，`align` 为 left/center/right（默认 right）；`corner_radius_dip` 与 `[toolbar] corner_radius_dip` 为 0–32；`[candidate_window.background]` 的 image 必须是包内存在的图片，fit 为 cover/contain/stretch，opacity 为 0–1；候选配色的 `translation` 成为解析结果的 `secondary`；`[toolbar.dark|light]` 的六个颜色在加载时规范成 `#RRGGBB(AA)`，读不出的留空；`[license]` 只作元数据读取。越界或类型不对的值让整个包作为 issue 列出，而不是静默丢弃。
+- **重启**：使用固定 UTF-16LE `RestartServer` Aux payload，有回归覆盖。
+- **两个位数都编得过**：`CandidateWindow.cpp` 曾把无捕获 lambda 直接传给 `EnumFontFamiliesExW`，而 `FONTENUMPROCW` 是 `__stdcall`——在 x86_64 上是同一种调用约定，在 x86 上是不同类型。改成具名 `CALLBACK` 函数后，当前全部 Windows 源文件在 x86 语法检查下通过。
+- **非 ASCII 用户目录**：`reset_learned_data` 拼 SQLite 的 `-wal` / `-shm` / `-journal` 路径时直接在 `path` 的 native 字符串上拼接，不过窄字符转换，因此 `C:\Users\陆傲天` 这类 profile 不会转错也不会抛；既有用例在 ASCII 与中文两种根目录下各跑一遍。
+- **翻译**：缓存键按服务商与账号分域，凭据、端点、目标语言与启用开关任一变化都丢弃正负两种结果；腾讯请求签名按官方 TC3-HMAC-SHA256 独立算出已知答案钉住；本地自定义释义每次请求现算，编辑立即生效且恒胜过缓存的云端结果。
+- **在线释义随取随存**：来源 `cloud_translation.cpp` 的 `ApplyTranslatedGroup` 对腾讯、自定义与小牛翻译每一批取回的非空结果都调用 `PersistGloss`，与是否上屏无关。三个桌面宿主一致：Windows `TranslationWorker.cpp` 的 `persist_english_glosses`、Linux `ClientEngine.cpp` / `FcitxEngine.cpp`，以及 macOS `InputController.mm` 在批次回调里调用的 `persistFetchedTranslations:forQuery:`，每次取回成功即写入用户释义库。过滤条件与来源相同：只存目标语言为英文的行，格式化后的释义不超过 32 个字符，且与原文按 ASCII 忽略大小写不相等；其他目标语言的释义只留在内存缓存里。过期回调（会话、代次或查询已变）不写入。`shortcut-translations` 原生测试的 `TestLearnedGlossRuntime` 钉住未上屏即可离线复用、法语行不入库与过期回复不入库。
+- **云与 AI worker**：结果绑定 lease / query / 候选；去抖窗口内只付新的那次；同一前缀第二次吃缓存；空结果不入缓存；在途被取代时结果不交付；提供方抛异常只被记录而不带走 worker 线程；非法信封到不了提供方。
+- **AI 候选只看 AI 助手开关**：来源 `event_listener.cpp` 的 `ai_eligible` 由英文模式、特殊模式、全拼 / 双拼、纯完整拼音、无辅助码且不在造词组成，`UpdateAiInput` 只再加上 `ai_assistant.enabled`、输入会话存在与非空的拼音切分；`general.candidate_translations`（显示候选释义）只控制释义与翻译请求。Windows 宿主有在线查询就提交 AI，macOS 的 `synchronizeAITranslations` 同样只以 `ai_assistant.enabled` 为开关，关闭释义既不阻止也不取消在途的 AI 请求；`shortcut` 原生测试的 `TestAiCandidatesIgnoreGlossSwitch` 钉住这一点。
+- **AI 候选条数**：来源每次只给一条 AI 建议。本仓把条数做成共享的用户偏好 `ai_assistant.candidate_limit`（1–10，默认 3，`crates/client-core/src/preferences.rs`），macOS、iOS、HarmonyOS 设置页与 Windows 安装包的 `config.default.toml` 都暴露它，Windows `AiCandidateWorker` 按它取数。这是有意的扩展而不是缺口，不改回一条；想要来源行为的用户把它设为 1 即可。
+- **智能标点**：重写标点前回读两个字符核对指纹（arm 时记下标点前面的字符），避免用户把光标移到文档里另一处同样的标点上时改错位置；文本存储读不出内容（终端与代理存储）判为匹配，以免在这些宿主里直接废掉该功能。读不回待改写字符时改走 SendInput 改写队列，执行前校验焦点 token、前台窗口与 500ms 期限。
+- **成对补全关闭时的引号与书名号**：来源 `GetPunctuation` 的引号轮换（“ 之后是 ”）与 `<` `>` 嵌套计数（《〈〉》）不看成对开关，被排除的宿主（Excel）因此回落到左右轮换。锁定引擎在成对关闭时只给左半边，由 overlay `scripts/apply_engine_punctuation_alternation.py` 去掉 `PunctuationPolicy::translate` 里的两处开关判断；状态随会话存活、切换开关不重置，与来源一致。各宿主都只在成对开启且未排除时自己改写 ” → “，不会重复轮换；HarmonyOS 成对开启时由 `PairedPunctuationPolicy.reopenQuote` 做同样的改写。`crates/host-api/src/tests.rs` 经 FFI 驱动真实引擎钉住“”“”、‘’、《〈〉》与不重置。
+- **候选窗绘制**：行按逐项测量而非定高，带按外观字体的回退（`ApplyFontFallback`）与卡片的显式阴影 pass。每个候选按来源 `CandidateList::MeasureItem` 分成三段：候选文字（含角标）、辅助码、译文。辅助码与候选同字号同颜色，接在文字后 4 DIP；译文字号为候选的 0.78，间隔为候选字号的 0.65，颜色按主题契约取 `secondary`（恒等于 `number`），即与序号同色，选中行取 `selected_number`（`candidate_row_number_color`），不再沿用来源 CSS 的「辅助码颜色 alpha 乘 0.62」；辅助码在选中行跟随选中文字色。候选文字本身比列宽还宽时在列内折行，行高取实测的折行高度（至少一行），文字在这个高度内垂直居中，辅助码与译文随之排到它下方。竖排时放得下就同一行，放不下就移到文字下方并按列宽换行，辅助码一旦下移译文也跟着下移；横排时译文总在文字下方。几何在 `CandidateCardSize.h` 的 `candidate_item_layout` / `candidate_page_layout`：竖排各行按自身高度堆叠、行间留来源的 `itemGap` 2 DIP；横排按来源 `CandidateList::Measure` 让每列取该候选的自然宽度（序号与分隔条、文字与辅助码那一行和译文那一行中较宽者、再加 8 DIP 列间距），从左向右排，放不下的那一列起新的一行，同一行各列取该行最高一项的高度、行与行之间同样留 2 DIP，卡片高度按夹紧后的宽度计算；换行高度由 DirectWrite 以绘制同款 WRAP 格式按绘制时的列宽实测（`wrap_measure` 对文字、辅助码、译文三段都给答案）。`paint` 以实际绘制宽度排版并缓存行矩形，`hit` 用这份缓存，点击与绘制不会错位；单行高度是来源的 `fontSize × 1.35 + 2`，卡片最小宽度 160 DIP（`kCandidateMinWidthDip`），选中条宽 3 DIP、圆角 1.5，以行的左缘为中心（来源 `itemRect.x - barWidth × 0.5`）；竖排决定上下翻转时的高度以来源的 `DEFAULT_WINDOW_HEIGHT_DIP` 232 按当前缩放取整作起点，再取与本轮显示过的最高卡片中的较大者，隐藏后复位（`candidate_vertical_decision_height`）；`windows-candidate-card-size` 覆盖这些规则。合成路径复用渲染目标时刷新 DPI，语音波形浮层的定位与缩放取自同一份 per-monitor 快照。
+- **屏幕键盘**：普通键 450ms 首次延迟、75ms 间隔自动重复，粘滞修饰键与 Num Lock 单次切换；投递失败、失焦或关闭会停止重复且不自动重放。修饰键按下 / 释放的扩展键集合与来源逐键相同，布局为来源的超集（多出 F10–F12、PrtSc/Scroll/Pause、导航簇与 Menu 键）。
+- **手写多字识别**：来源 `HandwritingPanel.cpp` 把全部笔画交给 Windows Ink 的 `RecognizeAsync(..., InkRecognitionTarget::All)`，中文识别器会把一行笔迹切成多个字，候选因此可以是整个词或短语。随包的 zinnia 识别器一次只认一个字，所以没有 Windows Ink 中文识别器的宿主（macOS、无识别器的 Windows 回退、无 provider socket 的 Linux）在 `crates/host-api/src/handwriting_cells.rs` 里先按书写方向把笔迹切成字格：笔迹长宽比至少 1.6 才按横排或竖排切分，按字高（竖排为字宽）估计字号，重叠或几乎相接的笔画并为一个部件，合起来不超过一个字宽的相邻部件并为一个字（左右结构的偏旁留有空隙也不会拆开），过长的格在最大空隙处再切开；超过 8 格或近似方形的笔迹整体按单字识别，所以单字仍按单字识别。每格用随包模型各自识别，候选先给各格首选拼成的整串，再按名次轮流把某一格换成它的次选，去重后共 12 个，中文在前由共享面板排序，与来源一致；任一格没有候选时退回整体单字识别。面板字号按候选字数缩放，与来源第 214 行同式。
+- **剪贴板**：历史上限 50 条，文本边界为 4000 UTF-16 单位与 12000 UTF-8 字节；`normalize_clipboard_text` 只去掉 CF_UNICODETEXT 带来的东西（首个 NUL 起截断、剥掉尾部 `\r`），换行与空白是用户内容、原样往返。共享历史与 macOS 宿主同样按来源 `NormalizeClipboardText` 处理超长复制：剥掉尾部 NUL/`\r` 后截取前 4000 UTF-16 单位保存（不拆代理对），而不是整条拒绝；NUL 以外的控制字符（换页、ESC、DEL、C1 等）作为用户内容保存与粘贴，只拒绝含 NUL 的文本。macOS 的 IMK 输入源采集与 Tauri 监视器都跳过不含纯文本或带 nspasteboard.org 标记类型（Concealed／Transient／AutoGenerated）及密码管理器私有类型的复制，这是 macOS 平台惯例，来源只读 CF_UNICODETEXT、没有对应过滤；两处共用同一份类型表（`BackendClipboardCapture.swift` 与 `crates/host-macos/native/clipboard.mm` 各持一份，须保持一致）。
+- **简繁转换**：共享层 `crates/client-core/src/chinese_conversion.rs` 按 OpenCC `data/config/s2t.json` 实现词级转换（兼容表归一化，再以 STPhrases ∪ 地区词派生表 → STCharacters 做最大正向匹配，完整 IDS 序列整体透传），数据取自来源钉的同一个 OpenCC 提交并登记在 `docs/third-party.md`。边界导出 `msime_client_simplified_to_traditional` 返回裸文本而非 JSON——它在每个候选上都要调用；Windows、Linux、macOS、Android、iOS 与 HarmonyOS 宿主都调这一个导出，不使用系统的 `LCMapStringEx`、`libicu`、`CFStringTransform`、`android.icu.text.Transliterator` 或 `i18n.Transliterator` 逐字转换；首次调用解析词典，之后单次约 1 µs。与该提交构建出的 OpenCC CLI 做对照，4 万行随机文本逐字节一致。
+- **安装器**：完整安装器提供数据目录选择页，拒绝系统 / 用户关键目录的父级、受保护目录内部、路径穿越与未标记的非空目录，并在就绪页展示迁移源与目标；`config.toml` 只 `onlyifdoesntexist`，升级不覆盖用户数据；light 包固定原目录。安装前在第一屏之前查注册表确认 WebView2 与 VC 运行库（要求 14.20 以上而非只看 `Installed=1`），静默安装默认继续并把缺失写进日志。
+- **云候选的首次同意（macOS）**：来源安装器的「联网功能」页在全新安装时说明云候选会把正在输入的拼写发给 inputtools.google.com，默认勾选、可取消，升级时跳过，只写 `cloud_candidates = false`。macOS 没有每个用户都会经过的安装步骤，输入法也可以在从未打开设置应用的情况下使用，所以由 IME 进程自己问：`AppearancePreferences.mm` 的 `resolveCloudCandidatesConsentWithPreferencesDirectory:userDataDirectory:` 在建立会话之前判断一次——宿主偏好里已有云候选选择、`preferences.json` 已存在或 Engine 用户数据目录（会话选项 `user_data`）已有内容即视为升级，不问、原值不动；否则记为待确认，结果存进 `MSIMEClientCloudCandidatesConsent`。待确认期间不发任何云候选请求，`InputController.mm` 的 `activateServer:` 在激活之后异步弹出不阻塞输入的「联网功能」对话框，文案沿用来源安装器页和 Linux 首次配置页，末句按来源的「设置 → 输入」指向共享设置输入页的「云候选」，按钮为「启用云候选」（默认，对应来源的默认勾选）与「不启用」；答案经 `answerCloudCandidates:` 写入共享 `cloud_candidates`，与 Windows、Linux 同一个字段。原生设置里改动云候选开关也算作答复。`shortcut` 测试的 `TestCloudCandidateConsent` 覆盖全新、升级（已有选择、已有 `preferences.json`、只有 Engine 用户数据）、空的用户数据目录、之后才出现的 `preferences.json`、拒绝与接受。
+- **安装后的首次准备**：完整安装器在提升权限下写入词库、出厂配置和所有权标记，但不以安装器身份替用户执行 Host API 准备。Server 的生产首次启动因此除全新目录外，也接受已有且带 `.metasequoiaime-data` 所有权标记、尚无 `runtime-options.json` 的目录，在用户上下文中完成准备；普通已有目录、已有运行时配置、文件和符号链接不会被接管或重建，准备失败保留现有数据。独立的 `msime-client-prepare` 仍只接受全新目录。
+- **升级后的用户词库回放**：来源 `installer/msime_setup.iss` 的 `ReplayUserDictionary` 在每次升级时以 `--data-dir` 运行随 Server 安装的 `MetasequoiaImeDictionaryReplay.exe`（源码在 `server/src/user-dictionary-replay`），失败就中止安装。它回放的是来源布局下 `DataDir` 里的 `msime_user.db`；本仓没有这种布局，Windows 安装器不带这一步，也不随包安装回放工具。没有按用户安装步骤的平台改用共享的 `msime_host_api::refresh_host_options`（导出为 `msime_client_refresh_host`）：比较运行时配置的词库代次与编译进去的词库锁，不一致时准备新代次、回放用户词库日志并原子改写 `resources` / `dictionaries`。Linux 由 IBus 与 Fcitx5 宿主在建立会话前调用，macOS 由 IMK 宿主启动时（`RuntimeOptionsRefresh.h`）和设置应用启动时（`macos_launch.rs`）调用。宿主自己调用的导出 `msime_client_refresh_host`（`refresh_host_options_with_language_dictionaries`）另外让 `language_dictionaries` 跟上资源目录旁安装的粤语与注音词库，不论代次；设置应用不写这个键，以免仍在运行的旧版本 IMK 因不认识它而拒绝配置。刻意的差异：macOS 与 Linux 没有按用户执行的安装步骤可以中止，失败时保留旧代次继续输入，下次启动再试。
+- **检查更新**：各平台由 `.github/workflows/release-*.yml` 独立发布到同一个仓库、标签带平台前缀，所以读的是发行版列表而不是 `releases/latest`——后者返回的通常是别的平台那一个。只取本平台前缀、非草稿、非预发布的发行版，按版本号而不是列表顺序取最新，没有则显示「暂无可用发行版」。Server 遥测上报的版本号由 CMake 从 `platforms/windows/version.txt` 读入，`Build-Client.ps1` 的 `-TargetVersion` 把同一个版本号同时传给 Tauri 和 Server。
+- **外部链接**：走 `msime_host_windows::open_url`，用 `ShellExecuteW` 把 https URL 直接交给默认浏览器，非 https 一律拒绝，与已有的 `open_directory` 共用同一段调用；不经 `cmd /C start`，不闪控制台窗口，URL 也不过 cmd 解析。
+
+### 来源源码树的落点
+
+上面那张表按功能组织，回答某个功能有没有；这一节按**来源的源码目录**组织，回答来源的每一块代码去了哪儿。两者互相校验：一块代码找不到落点就是缺口，哪怕对应功能在表里被标成有。`scripts/test-reference-source-inventory.py` 把这一节变成每次都会跑的断言。
+
+**TSF DLL：逐文件对应。** 来源 `windows/src/` 下的 38 个 `.cpp` 在 `platforms/windows/tsf/` 全部都有，同名同目录结构。另有 6 个来源没有的：`EngineResponse.cpp`、`EngineSessionAdapter.cpp`、`HostOptionsPaths.cpp`、`PreparedHostOptions.cpp`、`Global/TsfPropertyGuids.cpp`、`Thread/ThreadState.cpp`——它们是进程边界带来的，来源把 Engine 放在同进程，这边 TIP 要通过契约与 Server 对话。再加一套来源没有的 TSF 测试（`platforms/windows/tsf/tests/`）。
+
+**Server：按目的地分三类。**
 
 | 来源目录 | 落点 | 归类理由 |
 | --- | --- | --- |
-| `ipc/`、`session/`、`watchdog/`、`log/` | `platforms/windows/src/ipc/`、`src/system/` | 进程边界与 TSF 协议，只能是原生 |
+| `ipc/`、`session/`、`watchdog/`、`log/` | `platforms/windows/src/ipc/`、`src/system/`，TSF DLL 与 Server 共用的协议头在 `platforms/windows/common/` | 进程边界与 TSF 协议，只能是原生 |
 | `window/`（候选窗、悬浮工具栏、托盘） | `platforms/windows/src/candidate/` | 低延迟、不抢焦点，保留原生 Direct2D |
 | `voice-input/` | `platforms/windows/src/voice/` + Tauri 语音面板 | 热键与上屏原生，界面在 Tauri |
 | `cloud/cloud_ime.cpp` | `platforms/windows/src/candidate/CloudCandidateWorker.cpp` | 在输入队列上跑，跟着会话生命周期 |
@@ -786,68 +157,93 @@ CMake 把它产出到 `bin/` 子目录，而 runner 的通配符找的是与其�
 | `cloud/custom_translation.cpp`、`translation_gloss.cpp` | `crates/client-core/src/translation.rs` | 同上 |
 | `skin/candidate_skin_catalog.cpp` | `crates/client-core/src/skin/catalog.rs` | 皮肤目录跨平台共享 |
 | `english/`、`emoji/`、`kaomoji/`、`conversion/` | Engine 与共享偏好 | 这些是输入算法的一部分，Engine 拥有 |
-| `user-dictionary-replay/` | `crates/engine-bridge`（`replay_user_dictionary`） | 词库维护跨平台共享 |
-| `settings/`、`webview2/`、`emoji-panel/`、`keyboard-panel/`、`handwriting-panel/` | Tauri 壳（`apps/desktop/`、`packages/ui/`） | 「公共功能+UI 放 tauri」；来源用 WebView2 自绘，这边两个桌面宿主共用同一个 Tauri 应用，入口契约见 `ShellSurfaces.h` |
+| `user-dictionary-replay/` | 无 | 只服务来源的 `DataDir` 词库布局，本仓不带 |
+| `settings/`、`webview2/`、`emoji-panel/`、`keyboard-panel/`、`handwriting-panel/` | Tauri 壳（`apps/desktop/`、`packages/ui/`） | 公共功能与界面放 Tauri；来源用 WebView2 自绘，这边两个桌面宿主共用同一个 Tauri 应用，入口契约见 `src/system/ShellSurfaces.h` |
 | `utils/` | 分散在对应模块 | 工具函数不单独成目录 |
 
-来源有而本仓库有意不做的只有一项：`webview2/` 作为**候选窗**的可选渲染后端。这边候选窗只有 Direct2D 一种实现，`ui_backend` 作为配置契约保留（已登记在字段漂移门禁的 `RUST_ONLY`）。
+来源另有 `experiments/tsf-edit-control`，已迁入 `platforms/windows/experiments/tsf-edit-control` 并接成 Windows-only CMake 目标：Direct2D/DirectWrite 绘制的原生 Win32 编辑宿主与最小 demo，用来重复检查 TSF 文档上下文、preedit 与 display attribute、候选位置、软换行、选区、插入点和鼠标命中这些边界。它是验证工具而非产品组件，不注册 TSF、不启动生产 Server。来源工程特有而这边不存在的 `common.ver`、`InputScope.h`、`tsattrs.h` 依赖已去除，宿主仍用系统 TSF 头文件。
 
-## 下一批实施顺序
+## 与来源刻意不同的取舍
 
-增量记录（2026-09-21，混输候选的座位表：来源 Server 里的那一步没迁过来）：来源 `server/src/ipc/candidate_selection_policy.h` 把四种排布写死：
+这些差异都是适配本产品的进程结构与多平台共享层所做的取舍，每条都记着理由与替代物，不是欠账。
 
-```text
-无云：    中文, 英文, AI, emoji, 颜文字
-有云：    中文, 云, AI, 英文, emoji, 颜文字
-只有云：  中文, 云, 英文, emoji, 颜文字
-基础：    中文, 英文, emoji, 颜文字
-```
+### 工具栏可选按钮改为默认关
 
-它跑在来源的 **Server** 里，对引擎返回的候选再排一次。本仓把 Server 换成共享运行时时，这一步没跟过来——用户看到的就是引擎自己的摆放。两者在没有联网候选时一致（实测 `ni` 的基础排布正是第四行），一旦注入 AI 就分叉：本仓给出 `你, 尼, AI, ni, 😀, 颜文字`，英文候选从第二位被挤到第四位，第二位换成了另一个中文候选。
+`floating_toolbar` 的 `emoji`、`handwriting`、`voice`、`screen_keyboard` 在共享层全部默认关，新配置拿到的是五个按钮的精简工具栏：中英切换、标点、全角、简繁、设置。改动落在 `FloatingToolbarPreferences::default()` 与它的 serde 默认、`packages/ui` 的 `defaultFloatingToolbar`、以及 macOS 宿主的同名回退——四处必须一致，否则设置页显示的状态与工具栏画出来的会是两回事。
 
-把那张表实现进运行时（`normalize_online_slots`），只在快照里确实存在云/AI 候选时生效——其余情况引擎的顺序已经等于表，不动也就没有风险。多于一个的云/AI 候选按本地候选处理而不是丢弃（来源那边是被 move 走后丢掉）。
+这推翻了上面《补上 handwriting / voice 开关》里那条决定。当时的理由是「它们从一开始就在工具栏上，开关出现的那一刻不该让两个按钮消失」，而这一次选择了相反的取舍：**从没动过这些开关的配置升级后会少掉这三个按钮**（`emoji`、`handwriting`、`voice`），要自己去设置里打开。接受这个代价是为了让默认工具栏保持精简；`floatingToolbarBoolean:defaultValue:` 与 serde 默认都只在键缺失时生效，所以显式开过的配置不受影响。
 
-**顺带更正我自己两条记录之前的一个判断。** #3383 里我按 README 那句「插入首页第三项」写下「来源是给座位编号，不是压缩排列」，并据此钉住「AI 单独到达时仍落第三」。来源的实现不是这样：`candidate_selection_policy.h` 的插入是压缩的，没有英文候选时 AI 就落第二。代码优先于散文，探针的断言与注释都已按实现改正。
+`emoji` 是来源自己的 6 个组件之一，这是本节里唯一一处组件默认值与来源不同；id、标签、顺序都没变。Windows 不跟着变：`platforms/windows/installer/config.default.toml` 逐项显式写出每个组件，镜像来源的默认配置，共享默认值在那里轮不到生效。跟着变的是不带出厂配置的宿主，即 macOS 与 HarmonyOS 2in1。
 
-用例：新增 `crates/input-runtime/examples/mixed_slots.rs` 用 `ni` 这个输入（同时产出中文、英文 `ni`、emoji、颜文字，且两种联网源都可用）逐个验四种排布。
+**候选相关的四个表面由原生 Direct2D 绘制。** 候选窗、候选浮出、悬浮工具栏、托盘菜单在来源是 WebView2 文档，在这边是原生窗口。来源把 WebView2 同时当作候选窗的可选渲染后端，这边候选窗只有 Direct2D 一种实现，共享偏好里也没有 `ui_backend` 这个键。
 
-增量记录（2026-09-21，HarmonyOS 的半截词，以及本机第一次真的编了 ArkTS）：第四次在同一个地方犯错——上一批写「HarmonyOS 要 DevEco 工具链，本机没有」。DevEco Studio 装着，`ohpm` 与 `hvigorw` 在 `~/command-line-tools/bin`，OpenHarmony native SDK 在 `~/command-line-tools/sdk/default/openharmony/native`。缺的只有 `MSIME_OHOS_DEPS` 指的那个 sqlite 前缀，而 README 里就记着怎么做（下载 amalgamation、核对 sqlite.org 公布的 SHA3-256、用 NDK 交叉编译），照着走一遍十分钟。
+**这四个表面走合成交换链，而不是来源的分层窗口。** 来源的输入法窗口用 `WS_EX_LAYERED`（`server/src/window/ime_windows.cpp`），DirectComposition 只出现在它的 WebView2 与设置路径里；这边统一走 `DeviceResources::EnsureForComposition`（`DCompositionCreateDevice` 加 `CreateSwapChainForComposition`）。理由是合成交换链避开 `UpdateLayeredWindow` 每帧的 CPU 拷贝，而这四个表面都是低延迟且不能抢焦点的。失败时也不回退到普通 HWND 交换链：那拿不到逐像素透明，候选卡片的阴影会退化成不透明矩形，静默变丑比明确失败更糟。代价记在这里：无 DirectComposition 的环境（如 Wine）要画出这套，是一次明确的渲染路径工作。
 
-于是本机第一次完整跑通了 HarmonyOS 这条链：sqlite 前缀 → `build-native.sh arm64-v8a`（Rust/C++/NAPI 三个库）→ `stage-resources.sh` → `ohpm install` → `hvigorw assembleHap`，**BUILD SUCCESSFUL，HAP 188 MB**。
+**设置页与各类面板走 Tauri 与共享 React。** 设置、表情、手写、屏幕键盘、语音面板都在独立的 Tauri 进程里，两个桌面宿主共用同一个应用，入口契约是 `src/system/ShellSurfaces.h`。
 
-**据此补上本表反复提到的那个缺口**：README 里写着「没有任何一道门禁编译过 ArkTS，所以 develop 处在打不出 HAP 的状态而没人知道」。现在 `--quick` 里多一道 `harmony arkts compile`——原生库、暂存资源与 `oh_modules` 都在时跑 `assembleHap`（七秒），缺任何一样就如实说跳过并指向 README 的一次性准备。反向验证用的正是那一类文本扫描抓不到的写法：把一个嵌套对象字面量塞进 `JSON.stringify` 的调用里，subset 门禁照样通过，ArkTS 编译器报 `10605038` 并让这一阶段变红。
+**菜单的禁用语义因此与来源不同。** 来源的菜单 HTML 里 `disabled` 出现零次——它的面板全在同进程内，永远可用。这边的面板在独立的壳里，壳可能不在，所以能力缺失的行**保持可见但置灰**，而不是点了没反应或干脆隐藏（`src/candidate/TrayMenuLayout.h` 的注释写明依据：保住来源「菜单从不隐藏条目」的可见性语义，同时诚实反映进程边界）。托盘菜单的动作与来源一一对应，且这边多出手写识别板。
 
-半截词本身：`EngineView` 带上 `phrase_prefix`，准备好的选项里请求 `phrase_preedit`，两条发布路径都把组字画成「已选的那一段 + 读音」，光标偏移跟着前缀长度走。ArkTS 的写法限制在这里是实打实的：选项对象必须是已声明的接口，所以新字段声明成可选而不是随手塞一个字面量。`platforms/harmony/tests/run.sh` 1395 条断言通过，`assembleHap` 通过。
+**偏好文件每次整份写出，不做三方合并。** 来源的升级路径是模板三方合并——用户改过的键保留、仍停在旧默认值的键跟随新默认值、模板里没有的键与段落丢弃。这边的 `preferences.json` 每次把全部字段写出来，没有「旧默认值」这个概念，所以改默认值到不了已有用户。这是存储模型层面的取舍。附带的好处是来源那次「升级时配置解析失败被出厂模板覆盖、凭证清零」的缺陷在这边不存在：共享偏好用原子写入，普通读取在解析失败时返回错误而不是回落默认值后再写回；修复是显式动作，先备份原文件，再按字段保留仍可解析的值（凭据随所在段落逐字段保留），不需要来源那种单独回填凭证的步骤。
 
-**守卫脚本现在记下的「留在组字里」一侧是 macOS、Linux、HarmonyOS、Android、iOS——五个宿主全齐。** 只剩 Windows（它的 TSF 侧自己累积前缀，本表第二十七批已记明不该打开）与桌面外壳（没有候选窗，不适用）。今天四次「本机没有 X」全部被推翻（容器、Android SDK、Xcode、DevEco），这条教训值得单独记：**先翻机器，再下结论**。
+**智能标点在 Windows 与 macOS 上默认关闭。** 来源出厂把整族五个开关（`ime_config.cpp` 的初值与 `value_or(false)`、`config.default.toml`）全部设为关，Windows 随包的 `config.default.toml` 也一样；但那只是安装模板，运行中的宿主读的是共享偏好文档。默认函数 `smart_punctuation_default()` 写成 `!cfg!(any(windows, target_os = "macos"))`，同时用作 `Default` 值和缺键时的 serde 默认，覆盖智能标点、重复标点转中文与数字/字母后直出两半；空格转换在所有宿主上都默认关。macOS 是那套桌面产品的移植，跟着来源走。Linux、Android、iOS、HarmonyOS 一直是开着发的，让偏好在老用户脚下变掉比按平台不同更糟，所以保持原样；已存下来的值不受影响。macOS 原生侧在共享快照到达之前的回退值（`AppearancePreferences.mm` 的 `smartPunctuation` 与 `smartPunctuationRepeatToChinese`、`CloudAppearanceSettings.h` 的云端快照默认）与之一致。判据在 `scripts/test-default-config-parity.py`。
 
-增量记录（2026-09-21，iOS 的半截词，外加两处「没人跑过所以没人知道」）：Android 那批末尾写「iOS 要 Xcode 真机链路，本机没有」——第三次错在同一个地方。Xcode 27 装着，模拟器开着，`platforms/ios/README.md` 里那条 `xcodebuild test` 本机就能跑（约十分钟）。跑起来之后发现两件事，都与本批要做的功能无关：
+**三个语音开关在 Windows 与 macOS 上默认打开，其余宿主默认关闭。** 来源的 `config.default.toml` 出厂就打开 `mute_system_audio`、`doubao_enable_ddc` 与 `polish_text`，Windows 随包模板也一样，但运行中的宿主读的是共享偏好文档，而它原来三个全关，于是 Windows 的全新 profile 拿到的恰好与自己随包的模板相反——和智能标点是同一个坑。默认函数 `source_voice_default()` 写成 `cfg!(any(windows, target_os = "macos"))`，同时用作缺键时的 serde 默认；Linux、Android、iOS、HarmonyOS 保持原样，理由同上一条；已存下来的值不受影响。macOS 原生侧在共享快照写进 NSUserDefaults 之前使用的回退值（`VoiceProviderOptions.h` 的润色与 DDC、`MSIMEVoiceMuteSystemAudioEnabled`、原生语音设置窗口的勾选框）与之一致。`default_ime_mode` 同理：`DefaultImeMode::default()` 在 Windows 上是英文、其余宿主是中文，于是 Windows 上没有 `preferences.json` 的全新安装起手英文，与来源和随包模板一致（Server 的模式权威与 TSF 的 `ReadConfiguredDefaultImeModeChinese` 读的都是这份默认）；macOS 仍是中文：用户是从输入法菜单里主动选中本输入法之后才开始打字的。判据在 `scripts/test-default-config-parity.py`，模板与共享默认任一边改回去都会报出来。
 
-1. **仓库里提交的 `MSIMEClient.xcodeproj` 是陈旧的**：后加的 `KeyboardAppLauncher.swift` 不在工程里，整套编译不过（`cannot find 'KeyboardAppLauncher' in scope`）。README 里「使用仓库中提交的 Xcode 工程」那句话据此改掉：权威来源是 `project.yml`，先 `xcodegen generate`。
-2. **`SmartPunctuationTests` 钉的是一个已经改掉的默认值**：`smart_punctuation_direct_letter` 从 2026-09-20 的「让共享路由认这两个开关」起随父开关默认打开，于是字母后的逗号保持 ASCII，而那条用例仍然断言它变成「，」。没人发现，正是因为这套用例不在 `verify-local.sh` 里，而提交的工程又编不过——两件事叠起来，等于这套用例已经有一阵子没有真正跑过了。用例按现在的默认值改正，并写明改的是哪一条默认值、为什么没人看见。
+**Emoji 混输在 Windows 与 macOS 上默认开启，其余宿主默认关闭。** 来源的 `config.default.toml` 出厂就是 `emoji_mixed_input = true`。共享默认 `source_mixed_emoji_default()` 写成 `cfg!(any(windows, target_os = "macos"))`，让 Windows 与 macOS 的全新 profile 都得到同样的答案。macOS 原生侧 `mixedEmojiInput` 在共享快照或本地值出现之前的回退值与之一致。颜文字混输在所有宿主上仍默认关闭，与来源相同。Linux、Android、iOS、HarmonyOS 保持原样，理由同智能标点那一条；已存下来的值不受影响。判据在 `scripts/test-default-config-parity.py`。
 
-顺带把跑法写清楚：**临时建一台干净模拟器再删掉**，不要用手边那台。测试宿主带 App Group，读的是共享容器里的偏好，上一次运行留下的值会改变结果——本批第一次就是在一台用过的模拟器上跑出的假失败。
+**润色服务与 AI 助手在 Windows 与 macOS 上默认指向 DeepSeek，AI 助手默认开启；其余宿主保持 SiliconFlow / Qwen 与 AI 关闭。** 来源的 `config.default.toml` 出厂把 `polish_provider` 设为 `deepseek`、`polish_endpoint` 设为 `https://api.deepseek.com/chat/completions`、`polish_model` 设为 `deepseek-v4-flash`，`[ai_assistant]` 为 `enabled = true` 并用同一个 provider、接口与模型，Windows 随包模板也一样；运行中的宿主读的是共享偏好文档，共享默认若不跟随，模板的值就到不了全新 profile，与语音开关是同一个道理。共享默认里润色三项由 `default_polish_service()` 成组给出（沿用 `source_voice_default()` 的判定），AI 助手由 `source_ai_default()`（`cfg!(any(windows, target_os = "macos"))`）决定开关并附带 DeepSeek 接口与模型，`enabled` 缺键时的 serde 默认也用它；接口与模型缺键时仍为空，已存下来的空值不被重新解释。AI 助手默认开启但不带 Token，`chat_completion_http_request` 在 Token 为空或是占位值时返回 `InvalidConfiguration`，不会发出任何请求；原生 AI 设置窗口要求开启时接口有效，默认接口满足这一点。macOS 原生侧在共享快照写进 NSUserDefaults 之前的润色回退值（`SharedVoicePreferences.h` 的 `MSIMEVoicePolishDefault*`，供语音设置窗口、备用 provider 窗口和录音请求共用）与之一致。Linux、Android、iOS、HarmonyOS 保持原样，理由同智能标点那一条；已存下来的值不受影响。判据在 `scripts/test-default-config-parity.py`，它同时核对来源模板、Windows 模板与共享默认。
 
-半截词本身：`MetasequoiaInputSnapshot` 带上 `phrase_prefix`，建会话时请求 `phrase_preedit`，候选条那一行画成「已选的那一段 + 读音」。这个宿主没有编辑框里的组字（软键盘直接上屏），候选条就是用户唯一能看见它的地方。全套 229 通过、1 跳过、0 失败（那一跳过是固定词库里没有该候选的英文释义，既有的）。
+**智能标点的三个子开关不走独立 opcode。** 来源 `windows_ipc.h` 的 22/24/25 三个 opcode 在这边由一帧打包的标点配置携带。
 
-至此守卫脚本记下的「留在组字里」一侧是 macOS、Linux、Android、iOS；只剩 HarmonyOS（要 DevEco 工具链）与桌面外壳（它没有候选窗，不适用）。
+**打字统计的落点与存储都与来源不同。** 采集放在 Server 而不是 TSF DLL：来源的 Engine 与 DLL 同进程，而这边 Server 是唯一看得到每一条上屏字符串的地方，共享 Host API 也链在这一侧，文本本来就要作为上屏载荷从 Server 走到 DLL，采集不让它多跨任何一道边界。唯一的例外是 TIP 不吃掉的按键：它们由应用自己插入，永远到不了 Server 的上屏出口，于是英文模式的字母、中文模式下的半角数字与标点表之外的符号由 DLL 在 `OnTestKeyDown` 的三个放行出口采集，按批经已有的 Aux 管道（`TypingStatistics` 动词）交给 Server 落盘，和上屏出口共用同一段代码——即便如此，来源为此另开的那条统计命名管道（`FANY_IME_STATS_*` 契约）这边仍然不需要。统计默认关闭，关闭时 Server 不回 OK，DLL 据此退避，不在关闭期间持续把按键字符送过管道。macOS 按同一条规则在 `handleEvent:client:` 的出口采集输入法没有吃掉的按键：Command 与 Control 组合键、AppKit 功能键区（方向键、F 键、Home/End、向前删除落在 `NSEvent.characters` 的 0xF700–0xF8FF）不计，Option 打出的字符计入，因为 Option 是 macOS 的字符层、相当于 Windows 的 AltGr；英文模式记为 `english`，中文模式下放行的数字与符号记为当前方案的来源；和来源一样，这是按键时的预测而非编辑确认。存储则做在共享 `crates/client-core/src/typing_statistics.rs` 与共享设置页，而不是来源的 Windows 私有 SQLite 表：这些维度和「每天多少字」是同一件事，后者早就在共享层、六个宿主写同一份文档，单开一套 Windows 私有存储会让同一个用户的统计分裂成两份。速度指标另有一处有意不同：来源只数 `cjk + latin`，而它的 `latin` 是纯 ASCII 字母、假名落在 `other`，于是纯日文输入的速度恒为零；这边有完整日文模式，所以假名与谚文等也算进可读字符，数字与标点仍然不算。「自动清理」的保留策略与来源一致：「永久保留」从不删除任何一天，「30/90/180/365 天」在每天第一次写入时删掉边界之前的日期，收窄设置时立即生效；和来源 `ClearThrough` 删掉概览所求和的 `stats_daily` 行一样，被删的日期同时从累计总数与分类中扣除，于是「累计」、分类占比与日均都只覆盖保留下来的日期，日均按保留日期的字数之和除以日期数计算。来源统计页的「日历热力图」在共享设置页原样保留：近 12 个月每天一格、每列一周且周一开始，月份只标在含该月 1 日的那一列，五档深浅按当天字数占窗口内最高一天的四分位分级，每格悬停显示当天字数或「无记录」，未来的日期不画；桌面宿主把它作为趋势之后的独立一节，手机放在「趋势」标签下，点按格子会把分类与占比切到当天。来源的「按日明细」表同样在桌面布局保留：列出最近 30 个有记录的日期、新的在上，列为日期、字数、汉字、字母、数字、标点、其他、活跃与速度，「平均速度」下同时标出累计活跃时长；分类列按这边更细的字符类别对应，「其他」含其他文字、表情、符号与历史未分类，列名用「汉字 / 字母」而非来源的「中文 / 英文」，因为假名等文字在这边不算英文；早于活跃时长记录的日期「活跃」与「速度」显示为未知（「—」），不按来源记作零；手机布局放不下九列，不画这张表。
 
-增量记录（2026-09-21，Android 的半截词，以及本机其实一直能验 Android）：第二十七批把「半截词留在组字里」按宿主分期打开时写的理由是「Linux/Harmony/Android 本机既没有容器也没有工具链」。Linux 那一半当天已经被推翻（OrbStack 一直装着），**Android 这一半同样不成立**：固定版本的 NDK 28.2.13676358 在 `~/Library/Android/sdk/ndk` 下、两个 Rust target 都装着、vcpkg 也在——缺的只是 `target/android-deps`（`platforms/android/build-native.sh` 产出的依赖前缀），跑一次就有了。门禁此前读 `ANDROID_SDK_ROOT`/`ANDROID_HOME`，而 Android Studio 在 macOS 上两个都不设，于是那一阶段一直显示 skipped——**它要的东西全都在标准目录里躺着**。现在门禁也认那个默认位置。
+**半截词的 preedit 不在 Windows 打开。** 其余五个宿主（macOS、Linux、HarmonyOS、Android、iOS）把「已选的那一段 + 读音」画在组字里，Windows 的 TSF 侧自己累积前缀，打开会重复；桌面外壳没有候选窗，不适用。
 
-更要紧的是 `platforms/android/check-host.sh`：它用 SDK 的 android.jar 编译整个输入法服务（键盘、面板、二十多个策略类）并跑它们的 smoke 用例，不需要设备，本机一直能跑，却从来没进过门禁。现在挂进 `--quick`，一并跑。
+**候选文字超宽时按来源折行，放得下时仍用单行格式。** 来源 `CandidateList::MeasureItem` 对候选文字一律用 WRAP 格式实测高度、行高取它与单行高度中的较大者；这边在 `candidate_item_layout` 里只在文字的单行宽度超过列宽时才折行测量（`CandidateRun::text`），`paint` 也只对这样的文字改用 WRAP 格式，其余仍是 NO_WRAP，免得实测宽度与绘制之间的取整把本来排成一行的文字折成两行。两种做法对放得下的文字给出同一个一行高度，对放不下的给出同一个实测高度，所以这是实现上的差别而不是行为上的。横排仍按来源 `CandidateList::Measure` 按每项自然宽度分列，只有一个候选单独就比整行还宽时才被收窄到行宽并在其中折行；竖排则在卡片被工作区一半封顶后按行宽折行。行矩形在 `candidate_page_layout` 里一次算出，绘制与命中测试读同一份，折出来的每一行都点得中。卡片高度仍被工作区一半封顶，折行极多时底部会被截掉；来源 `Measure` 同样按可用高度截，这一点两边一致。选中行左侧的强调竖条也按来源 `CandidateList::Render` 画：高度固定为候选字号的 0.85（不小于 6 DIP），在行矩形内垂直居中，行比竖条还矮时从行顶开始（`candidate_selection_bar`）；此前按行高上下各内缩四分之一，折行把行撑高时竖条会跟着被拉长。卡片在光标上下的取舍同样照来源 `AdjustCandidateWindowPosition`：竖排用本次组字里出现过的最高高度判断，免得列表越打越长时中途从下方跳到上方；横排每次用当前高度判断，来源对横排没有「选定一侧后保持」的规则，这边也不另加。
 
-半截词本身：Android 在建会话时请求 `phrase_preedit`，两处画出来——编辑框里的组字（已选的那一段领在读音前面）与候选条上那行标题。规则抽成 `PhrasePreeditPolicy`（本地模式有自己的标题，那时不加前缀；空值按空串处理），配 `PhrasePreeditSmoke` 七条断言，挂进 check-host.sh，反向验证过。守卫脚本现在把 Android 记在「留在组字里」那一侧。
+**诊断日志固定写数据目录。** 来源先写桌面、失败再退回数据目录；这边固定写数据目录下的 `logs\server.log`，因为输入法在桌面上凭空出现文件不是用户预期的副作用。设置页的「Server 端日志」「TSF 端日志」两个开关（`diagnostic_log.server` / `diagnostic_log.tsf`）分别控制写入，内容只有 Server 启停原因、各组件是否就绪、退出码与 TIP 上报的诊断批次，不记按键、输入内容或候选文本；4 MiB 轮转为 `server.log.1`，最多保留两份；UTF-8 BOM 与 CRLF 行尾与来源一致；偏好发布时立即生效，无需重启 Server。
 
-仍未打开的只剩 HarmonyOS 与 iOS：前者要 DevEco 工具链，后者的键盘扩展要 Xcode 真机链路，本机都没有。
+**macOS 的诊断日志留在 Application Support，并由设置页在 Finder 中显示。** 对应 `windows-diagnostic-log`：来源 `candidate_diag_log` 用一个开关覆盖按键延迟、候选窗、工具栏、托盘菜单与 IPC 生命周期，文件写到桌面。macOS 输入法用同一个 `diagnostic_log.server` 开关写偏好目录下的 `diagnostic.log`（1 MiB 轮转为 `.1`），记录焦点进出、偏好加载/应用/保存、`handleEvent:client:` 中不少于 8 ms 的 `[key-latency] stage=handle` 耗时（与来源 `ScopedServerKeyLatency` 的阈值相同）、候选窗的显示位置与构建耗时、隐藏原因，以及输入统计写入失败的类别；来源的 queue 与 reply-send 两段没有对应，因为 Engine 在输入法进程内，按键不跨 IPC；工具栏与托盘菜单的记录点也没有搬过来。文件不放桌面，设置页「在 Finder 中显示」由宿主解析位置后选中它。与 Windows 一样，不记按键、输入内容或候选文本，也不转写共享层返回的错误字符串。细节见 `platforms/macos/README.md` 的「诊断日志」。
 
-增量记录（2026-09-21，来源语言栏那个菜单逐项比，差的是「悬浮工具栏」那一条）：来源的托盘菜单在 `server/src/window/tray_menu_presenter.cpp` 里一共七项，按顺序是：悬浮工具栏（带勾的开关）、表情/符号面板、手写识别板、屏幕键盘、语音输入、设置、关于。macOS 输入法菜单是它的超集——表情与符号、水杉表情面板、屏幕键盘、候选设置、个人词典、账户状态、云剪贴板、云词典、手写输入、准备词库、检查更新、官方网站、使用帮助、关于、问题反馈、语音输入与语音设置，外加中英文与简繁的两组单选——**唯独少了第一项**：悬浮工具栏的开关。
+**macOS 语音有三处刻意与来源不同。** 静音其他声音是整台默认输出设备而不是按进程，因为 macOS 13 没有公开接口，时序上改为开始提示音播完再静音、先恢复再播结束提示音，以保证提示音听得见；录音录满上传上限时自动结束并提交已录部分，而不是像来源那样提交时报超限并丢掉整段；提示音文件缺失时回落到系统声音而不是不出声。细节见 `platforms/macos/README.md` 的「语音输入」。
 
-本仓这个开关此前只在设置窗口里（一个写着「显示浮动工具栏」的勾选框）。它是用户打字途中开开关关的东西，来源把它放在语言栏一点就到的位置是有道理的。现在 macOS 输入法菜单里补上同名的一条，带勾显示当前状态，写的是设置页那个勾选框写的同一个偏好——两处不会互相打架，选择也跟着偏好一起留到下次启动。
+**Windows 语音的失败提示显示在语音浮层上，而不是来源的模态消息框；录满上传上限时自动结束并提交。** 来源 `voice_input_service.cpp` 用 `MessageBoxW` 报缺 Token、豆包启动失败、麦克风启动失败与识别失败；这边 `platforms/windows` 里没有任何模态对话框，已有的表面是 `WaveOverlay`，与 macOS 把失败留在浮层上的选择一致，文案沿用来源的句子（豆包那句把「请检查 config.toml」改成指向设置页的「语音输入」分区）。浮层提示由后台任务显示 4 秒，不占用控制线程；新的录音开始时旧提示随会话代际失效。批量录音的上限与 macOS 相同，取共享的 `batch_capture_sample_limit`（20 MiB WAV 上传预算），录满即结束并提交已录部分，而不是像来源那样在提交时报超限。
 
-用例三条（菜单里有这一条且带勾、点一下之后偏好变了且下一次构建出来的菜单勾也没了、再点回去），反向验证两处（勾的状态写死、点击不写偏好）分别红在各自断言上。既有的菜单结构用例（`CheckMenu` 的整张动作表与按下标断言的那两条）一并更新。
+**macOS 的中文标点与全半角是每个应用的运行时状态，保存的值只当起点。** 来源把两者放在 TSF 线程管理器的 compartment 里（`MetasequoiaIMEGuidCompartmentPunctuation` / `DoubleSingleByte`），按 UI 线程、实际上按应用各一份，从不写回配置：每次 Activate 重置为半角、标点跟随默认中英文模式，Deactivate 清空，Ctrl+.、Shift+Space 与悬浮工具栏只翻转 compartment，中英文切换时 `SyncPunctuationWithImeMode` 让标点重新跟上模式。macOS 的 `AppearancePreferences` 对应地按前台应用的 bundle id 在内存里记 `runtimeChinesePunctuation` / `runtimeFullWidthInput`，不受 `ime_mode_scope` 影响；Ctrl+.、Ctrl+Shift+Space、Option+Shift+H 与工具栏只改当前应用，不写 NSUserDefaults、共享文档或云端快照；中英文切换按新模式重定标点：进入英文模式时标点变为英文（`punctuation_lock` 固定为中文时除外），回到中文模式时丢掉当前应用的标点覆盖、回到保存的起点；从本输入法切到别的输入源时与中英文模式一起清掉所有应用的两项覆盖，对应 Deactivate 一并清空三个 compartment，普通的焦点切换不清。唯一有意保留的差别是起点：共享设置页在每个宿主上都提供 `chinese_punctuation` 与 `character_width`，于是 macOS 以保存的值为每个应用的起点（与 iOS 键盘相同），而不是像来源那样标点总从中英文模式出发；这两个保存值一旦改变（设置页、共享文档或云端恢复），所有应用的对应覆盖一并作废。英文模式把两项运行时状态同样用在键入的 ASCII 上，对应来源 `KeyEventSink.cpp` 在输入法关闭时仍走的 `FUNCTION_PUNCTUATION` 与 `FUNCTION_DOUBLE_SINGLE_BYTE` 分支，转换与 Linux 宿主共用 `shared/input/EnglishModeOutput.h`；固定的 `punctuation_lock` 在英文模式下压过 Ctrl+. 与工具栏，对应 `Ipc.h` 的 `ResolvePunctuationOpen`。`shortcut` 原生测试的 `TestPerApplicationPunctuationAndWidth` 与 `TestEnglishModePunctuationAndWidthOutput` 钉住这些规则。
 
-增量记录（2026-09-21，日语组字显示的是罗马字，于是「所见」与「所得」对不上）：把回车改成提交假名之后，桌面宿主立刻出现一个新的不一致——屏幕上写着 `nihon`，回车却上屏 にほん。根因不是回车，是**组字显示本来就错**：引擎把两样都给了（`editing_text` 是打下去的字母，`reading` 是它们转成的假名），本仓的触摸宿主一直显示假名（Android 的 `preedit` 取 `reading`），桌面三家显示字母。每一个日语输入法显示的都是假名——用户想的是假名，候选是对着假名给的，回车上屏的也是假名。
+**macOS 用两个输入模式承担来源托盘语言栏的常驻模式图标。** 来源 `LanguageBar.cpp` 以 `TF_LBI_STYLE_SHOWNINTRAY` 注册语言栏按钮，`GetIcon` 在中 / 英之间换图，大写锁定时换成 Caps 图、日语模式换成「日」，`RefreshLanguageBarIcons` 同时重画全半角与标点两个按钮，所以无论悬浮工具栏是否打开，托盘上总能看到当前状态。macOS 的输入法没有托盘，菜单栏里的输入源图标就是对应位置：`Info.plist.in` 声明中文模式 `.Hans` 与英文模式 `.Roman`，中文模式带产品标志的模板图标、英文模式带「英」（来源在中 / 英之间换图，这边中文那一格换成了标志：带模式的输入法在菜单栏永远显示模式图标而非 bundle 图标，那是标志唯一能出现的位置，而常态本就是中文），`InputController.mm` 在中英文切换时通过 `selectInputMode:` 选中对应模式，系统报告的模式切换（从输入法菜单选择或 Ctrl+空格 / 地球键切到另一条）经 `setValue:forTag:client:` 反过来改中英文状态，两边互不回声（`InputModeIdentifiers.h`，`input-mode-identifiers` 与 `shortcut` 原生测试）。其余托盘内容按平台分派：Caps 由系统自带的大写锁定指示承担，「日」与全半角、标点按钮在默认开启的悬浮工具栏上显示，不另占菜单栏图标。代价是英文模式在系统设置的输入源列表和 Ctrl+空格轮换里是单独一条，名称为「水杉输入法 · 英」/「Metasequoia · EN」以免与中文条目同名。
 
+**设置页有几处措辞与控件刻意与来源不同**：「始终使用英文标点」与这边的「中文标点」绑同一个 `chinese_punctuation` 但极性相反，只改名不反转控件即是错标；剪贴板管理来源写「关闭后立即清空」，这边写「保存关闭设置后清空」，因为这边的清空发生在偏好保存时；候选窗字体一项各宿主都只显示「主字体」（Windows 另有「候选窗英文字体」），不再提供来源的「中文补充字体」排序列表：补充字体由字体预设写入；Windows 渲染器不读 `candidate_font_family`，所以在 Windows 上选主字体时同时把它排到补充字体最前（`candidateMainFontPatch`）。
+
+## Windows 进程与协议边界
+
+**两个目标，边界写死在构建里。** TSF tip 是进程内 DLL（`platforms/windows/tsf/`，`OUTPUT_NAME MetasequoiaImeTsf`，经 `IME/MetasequoiaIME.def` 导出四个未修饰 COM 入口，链 Rust `msime-host-api` 的导入库）；Server 是独立的窗口子系统可执行文件（`src/entrypoints/server_main.cpp`，`OUTPUT_NAME MetasequoiaImeServer`）。另有 `MetasequoiaImeWatchdog`（对应安装器的登录任务）与 `msime-client-prepare`（准备 `runtime-options.json`）。
+
+**Server 是窗口程序而不是控制台程序。** 控制台子系统会让 Watchdog 与 TSF DLL 每次拉起 Server 都带出一个黑色控制台窗口。现在链接为 Windows 子系统（MinGW `-mwindows`；MSVC `WIN32_EXECUTABLE` 加 `/ENTRY:wmainCRTStartup`，入口仍是 `wmain`）。`--config` 预览与 `--help` 从终端启动时挂到父控制台（`AttachConsole(ATTACH_PARENT_PROCESS)`），状态行与 Ctrl+C 照旧；受管启动（`--watchdog-managed` / `--production`）从不挂接，因为 TSF DLL 是在当前焦点程序里拉起 Server 的，那个程序本身可能是控制台程序。
+
+**退出码是 Watchdog 契约的一部分。** 维护快捷键的「停止」（Ctrl+Shift+Alt+T）返回 `watchdog::stop_exit_code` 而不是 0——返回 0 会被 Watchdog 判为非正常退出并在两秒后重新拉起，等于停不下来。已打开的设置等 Tauri 窗口是独立进程，不随 Server 关闭，与「重启」时的行为相同。
+
+**命名管道分三个角色**：Main、Aux、Diagnostic（`src/ipc/` 下的 `PipeListener`、`PipeService`、`PipeMainTransport`、`AuxListener`、`DiagnosticListener` 等）。协议侧的几条规则是这条边界的要害，都由用例钉住：
+
+- hello 帧里的 `client_id` 不是认证。控制器进程不能复用 TSF 目标进程的 ID；对端由 OS 提供的信息验证（`PipePeer::bind` 校验客户端 PID、登录会话与 TokenUser SID），焦点租约另外单独绑定。
+- `PipeRegistry` 的注册代际不等于激活 epoch。排队前检查不够，执行时仍要检查焦点、会话与代际。
+- 未握手的 Aux 通道不是可接收凭据与识别文本的认证语音通道。
+- 投递结果分 `Sent` / `DefinitelyNotSent` / `DeliveryAmbiguous` 三态，fallback 按三态分别处理，而不是把「不确定」当成「失败」重放。
+
+**面板文本投递先校验再恢复焦点。** Windows host 导出与 Tauri 面板入口共用的 `valid_text` 判据，在恢复目标编辑器焦点**之前**拒绝空串、超过 4096 字节的文本和控制字符（`send_text` 复用同一判据，避免两个入口漂移），因此无效请求不会改变用户当前焦点。恢复焦点本身在 `SetForegroundWindow` 成功后立即读 `GetForegroundWindow` 确认目标确实是前台窗口，才继续全局 `SendInput`；语音路径与面板路径共享这道边界。
+
+**偏好热更新的时序。** 监视器先在输入队列应用 `PreferenceSnapshot`，再从监视线程通知 `SessionController` 的发布回调；回调清理并按新配置重新发起当前候选页的翻译查询。应用延迟到未确认的回复完成之后，且回调提交的观察任务必须看到新的导航绑定与以词定字状态——「发布任务已入队」不等于「偏好已生效」。
+
+**TSF DLL 的 COM 边界。** 类工厂契约由 `msime-tsf-class-factory` 钉住：从同目录加载出货 DLL，解析 `DllGetClassObject`，用固定 CLSID 取得 `IClassFactory`，实例化的对象实现 `ITfTextInputProcessor`；未知 CLSID 返回 `CLASS_E_CLASSNOTAVAILABLE`，已知 CLSID 但请求不支持的类工厂接口返回 `E_NOINTERFACE`，空输出指针在 `QueryInterface` 返回 `E_POINTER`、在 `CreateInstance` 返回 `E_INVALIDARG`；类工厂拒绝聚合；`DllCanUnloadNow` 钉住「类工厂或 TIP 仍被引用时不可卸载、全部释放后可卸载」，并覆盖 `LockServer(TRUE/FALSE)`。生产的 `DllGetClassObject` 先清空输出，再按 CLSID、然后按接口判定，不把这两类错误混为一谈。
+
+**安装布局与注册。** 32 位与 64 位 TSF DLL 分别装到 `{commonpf32|64}\metasequoiaime\msime_v<ver>\` 并带 `regserver` 标志注册 TIP，PDB 同目录；Server 装在 `{commonpf64}\metasequoiaime\server`；应用数据装到用户选定的 `DataDir`；HKLM `Software\Metasequoia\MetasequoiaIME` 写 `VersionDir` / `ServerPath` / `DataDir`；`THIRD_PARTY_NOTICES.txt` 与 `LICENSE.txt` 随包分发（GPLv3 第 4、6 条）。`ISCC /DLightPackage=1` 出不含词库的轻量包。
+
+### Windows 发布流水线产出真实安装包（2026-09-23）
+
+- 流水线：`.github/workflows/release-windows.yml` 在 windows-2025（MSVC，Visual Studio 18 2026）上按 `installer/Package-SimplySign.ps1` 的顺序走完 `Build-Client.ps1` → `Collect-Notices.ps1` → `Prepare-PackageFiles.ps1` → `Compile-Installer.ps1`，只是跳过签名。原生依赖按 `platforms/windows/vcpkg.json` 的 baseline 装进 x64/x86 两个前缀并缓存；Inno Setup 固定 6.7.1，`ChineseSimplified.isl` 取自同版本标签并校验 SHA-256。
+- 产物：`MetasequoiaIME_Setup_v<版本>.exe` 与 `.sha256` 作为 workflow artifact 上传；`publish` 输入默认关闭，打开时才创建 `windows-v<版本>` Release。安装包未签名，因为代码签名证书是只在发布机上的 Certum SimplySign 卡，签名仍是本地步骤。
+- 第一次在 MSVC 上完整构建暴露并修掉的问题：Engine overlay 脚本按 ANSI 代码页读写 UTF-8 源；engine-bridge 的 MSVC 编译拿不到 vcpkg 头文件；strict 目标的 `/W4 /WX` 窄化、遮蔽与 `getenv` 弃用告警；TSF 引入 Engine 管道契约时被 SDK 的 `max` 宏改写；PowerShell 调 pnpm（`.cmd`）时 Tauri `--config` 的内联 JSON 丢了引号；`Collect-Notices.ps1` 按整个文件比较 Engine 标记；安装脚本 `[Code]` 里有先用后声明的 `UserConfigPath` 和保留字 `Protected`。
+- 证据：https://github.com/metasequoiaime/msime/actions/runs/35815935438 成功，artifact `msime-windows-0.1.0` 内含 201 MB 的 `MetasequoiaIME_Setup_v0.1.0.exe`，下载后 `.sha256` 校验通过。安装包尚未在真实 Windows 上安装验收。Rust crate 与 npm 包的补充声明已由 #650 收进通知集合，随后的发布运行 https://github.com/metasequoiaime/msime/actions/runs/35830590535（`publish=false`）成功。
 macOS（`shared/apple/TextClient.mm`，iOS 共用）与 Linux 两套前端改成：视图带非空 `reading` 时，组字就是假名。**唯一的例外是用户把光标移进字母中间**——引擎给的偏移是罗马字里的偏移，没有到假名的映射（与 `MSIMEPreeditCaretPosition` 拒绝为双拼猜测是同一条理由），这时继续显示光标所属的那串字母，而不是把光标画在不属于它的地方；正常打字永远碰不到这条，光标一直在末尾。判据写成 `composition_shows_reading`（Linux 侧，带四条用例），Apple 侧在 `TextClientTest` 里四条（假名显示、raw 样式同样显示假名、光标移进中间保留字母、其余方案不受影响），反向验证过。
 
 **Windows 同日也改了，而且比预计简单**：上一段里「TIP 自己按按键本地追加组字」的说法只对没有宿主引擎适配器的回退路径成立。挂着适配器时 `_HandleCompositionInputWorker` **本来就**把 `readingStrings` 整串换成视图里的 `preedit`，所以改的只是「换成哪一个字段」。TIP 的视图结构体补上 `reading`（解析器一行，用例钉住），显示判据直接用共享那条。
@@ -955,7 +351,7 @@ AI worker 七条：结果带对 lease/query/候选、去抖窗口内只付一次
 
 现在这条路由排在那条兜底规则前面：候选窗开着、译义开关打开、高亮候选确实有译义时才拦截，否则 Ctrl+Enter 仍按原样结束组字（用例里两种回落都验了）。副候选页复用引擎视图的形状，面板、皮肤和摆位都不用改；选中一条之后走 `MSIME_CANCEL` 而不是结束组字——译义才是用户要的那个词，结束组字会把中文候选再补到译义后面。Esc 只需把进页前存下的视图放回去，因为进页没有改引擎里的任何状态。
 
-切分规则本身（半角 `;` 与全角 `；` 都算分隔符，两边空白去掉，空的丢掉）是字典定的，与宿主无关，但三个宿主各存了一份实现。新增 `platforms/macos/tests/candidate/TranslationSensesAgreementTest.cpp` 把 Windows、Linux、macOS 三份头文件编到一起，用 17 个样例问同样的问题并要求答案一致——三份同样的规则会悄悄漂移，而某个宿主少给一条释义，看上去像字典差异而不是 bug。其中两个样例是专门挑的：与全角分号共享首字节的「，」不能被切成半个字符，换行是宿主的分栏符、不是释义分隔符。
+切分规则本身（半角 `;` 与全角 `；` 都算分隔符，两边空白去掉，空的丢掉）是字典定的，与宿主无关，但三个宿主各存了一份实现。新增 `platforms/macos/tests/candidate/TranslationSensesAgreementTest.cpp` 把 Windows、Linux、macOS 三份头文件编到一起，用 18 个样例问同样的问题并要求答案一致——三份同样的规则会悄悄漂移，而某个宿主少给一条释义，看上去像字典差异而不是 bug。其中两个样例是专门挑的：与全角分号共享首字节的「，」不能被切成半个字符，换行是宿主的分栏符、不是释义分隔符。（后续：三份实现已合并为 `shared/input/GlossSenses.h` 的 `msime::input::gloss_senses`，Windows 的 `translation_senses`、Linux 的 `split_translation_gloss`、macOS 的 `candidate_gloss_senses` 保留为转发，调用点不变；该测试改为逐例钉住期望结果，并同时检查三个转发。）
 
 增量记录（2026-09-21，维护快捷键已齐，另修关于页日志开关的名字）：来源《服务守护》一节的四组维护快捷键在 macOS 上都在，也都有宿主用例：`Control+Shift+Option` 加 1–8 删除候选（八个槽位逐个验过，含重复按键抑制）、加 C 清缓存、加 R 重新注册并退出、加 T 退出进程。来源写的是 `Ctrl+Shift+Alt`，macOS 换成 Option 是平台适配，共享设置页里那句说明也按平台改过。
 
@@ -1057,7 +453,7 @@ cargo run -p msime-input-runtime --example local_modes -- <verified-dictionary-d
 
 | 键 | 来源 / 本仓 Windows | 共享默认（macOS 等） |
 | --- | --- | --- |
-| `input.default_ime_mode` | `english` | `chinese` |
+| `input.default_ime_mode` | `english` | `chinese`（2026-09-24 起 Windows 的共享默认也是 `english`） |
 | `voice_input.mute_system_audio` | `true` | `false` |
 | `voice_input.doubao_enable_ddc` | `true` | `false` |
 | `voice_input.polish_text` | `true` | `false` |
@@ -1076,14 +472,15 @@ cargo run -p msime-input-runtime --example local_modes -- <verified-dictionary-d
 - **翻页键的缺省**：原生窗口那个三选一的「候选翻页快捷键」只在共享 `navigation` 没有显式布尔值时充当缺省，一旦设置页写过就以共享值为准；它推出的缺省（minus_equal 开、brackets 关、其余开、mouse_wheel 关）与共享 `NavigationPreferences::default()` 逐项相同。
 - **候选字号**：`metasequoia::mac` 下那两个只认 16/18/20 的 `NormalizeCandidateFontSize` 属保留的 Apple 适配层（`MetasequoiaInputController.mm`，不编进产物）；发出去的宿主走的是 12–32。
 
-另有两条是**刻意保留的差异**，都不属于 macOS 侧的缺口，一并记下来源：
+混输最小前缀默认值的来源依据：
 
-- **混输最小前缀的默认值**（本条后来再次订正，见 2026-09-22 的固定来源记录）：这里曾依据一个可变、落后的本地分支断言来源从未出现过 5，并把模板改回 2。固定对象 `467b9804` 明确包含 `1cf27e2f`，其 `installer/default_config/config.default.toml` 是 5；现在门禁直接通过 `reference_source.py` 读取固定对象，不再用历史描述代替证据。
-- **快捷短语编码允许数字**：来源文档写「编码只能是英文字母」，本仓的 `validate_entry` 显式放行数字。共享运行时对数字键是「引擎先拒绝再说」（`result.handled` 优先于候选选择），所以带数字的编码在 K 模式下仍然打得出来，属超集而非缺口。
+- **混输最小前缀的默认值**：来源固定对象 `467b9804`（包含 `1cf27e2f`）的 `installer/default_config/config.default.toml` 给出 5；门禁通过 `reference_source.py` 直接读取这个固定对象核对。
+
+快捷短语编码与来源一致，只能包含英文字母（来源 `dictionary_manager` 的 `valid_code`），导入时先转小写，`NH` 存为 `nh`。新增、编辑和导入里带数字的编码一律拒绝：设置页提示「快捷短语编码只能包含英文字母，长度 1 到 32。」，文本导入不收这一行，计入失败数并列在错误明细里（来源 `ImportQuickPhrase` 同样走 `append_error`，跳过数只留给重复行），个人词库 JSON 文件整份拒绝，设置页在预览时就指出是第几条。检查集中在写入新内容的几层（`quick_phrase_code_is_well_formed`，由 client-core 导入解析、`PersonalWord::validate_new`、host-api 的 `replacement_for_engine` 与 iOS 逐条校验新词条所用的 `msime_client_dictionary_validate`、账户写入前的 `validate_new_dictionary_value`、设置页个人词库 JSON 的预览校验）；读取已存条目、编辑或删除时对原条目的核对、云端拉回的条目仍用宽松检查。因此已经存有数字编码的条目照常出现在列表里，照常导出和同步，但在 K 模式下打不出来：引擎在 K 模式吞掉一切非字母按键，`quick_phrase_query` 也只认 a-z。这类条目可以删除，或改成纯字母编码后保存；只改权重也要先改编码。重新导入导出的文件时，这些行计入失败数。
 
 增量记录（2026-09-21，每页候选项数量：macOS 把共享默认值改写掉了）：来源外观页的「每页候选项数量」提供 3–9，默认 6；共享偏好 `candidate_page_size` 接受 1–9，默认也是 6。macOS 这一侧是 `NormalizeCandidatePageSize`：只认 5、7、9，**其余一律改写成 9**。于是一个谁都没动过的设置，在这个平台上显示并保存为 9，而别的平台是 6；从别处写下的配置（另一个宿主、手改、云端同步回来的外观快照）带着 4 或 6 进来也会被静默改掉。云外观校验器 `MSIMECloudAppearanceCandidatePageSize` 同样只接受这三个值，一份别的宿主写的快照会被整条拒绝。
 
-这三个值来自 Apple 来源那个窗口，是本仓早先对齐它时引入的（#ecaf6a069「align macos candidate page sizes」），不是 macOS 的平台约束——面板画几行就是几行。按当前目标（复刻 MSIME-Windows）改回来：宿主接受共享偏好的整个 1–9 并把越界值拉到最近一端而不是顶到 9，未设置读作共享默认的 6，原生窗口与共享设置页都列出来源的 3–9，云快照按同一范围校验。
+这三个值来自 Apple 来源那个窗口，是本仓早先对齐它时引入的（#ecaf6a069「align macos candidate page sizes」），不是 macOS 的平台约束——面板画几行就是几行。按当前目标（复刻 MSIME-Windows）改回来：宿主接受共享偏好的整个 1–9 并把越界值拉到最近一端而不是顶到 9，未设置读作共享默认的 6，原生窗口与共享设置页都列出来源的 3–9，云快照按同一范围校验。（2026-09-23 订正：这句当时只对 macOS 原生窗口成立，共享设置页实际对所有宿主列出 1–9；现在共享设置页也只列 3–9，文档里存着 1 或 2 时把这个值留在列表里，不改写。）
 
 顺带发现 `CandidatePageSizeTest.cpp` 根本没注册进 CMake——有文件、没目标，从来没跑过，这正是那条改写规则一直没被重新审视的原因。已接进 CTest（126 项），并把它从「5/7/9 的三值表」改成覆盖整个范围、越界拉到最近一端、以及窗口列出的那七项。
 
@@ -1135,7 +532,7 @@ macOS 缺后半条。`ShouldRoutePhysicalCandidateDigit` 明确把 Unicode 模�
 
 改在共享层（`crates/input-runtime`），两个触发条件按来源逐条对应，扩充后的重排复用原有路径（`rerank` + `demote_runner_up_readings`），四条用例钉住：走到末尾能取到扣住的候选、踏进短尾页前先填满（与翻页一侧同形，页面不会先短一下再长出来）、引擎没有存货时高亮停在最后一条不回绕、向上走永远不请求扩充（否则会在用户往回读的时候重排列表）。
 
-同组其余四项没有缺口，一并记下判据：候选窗的固定位置项本仓已按来源的 `#379AD3` 单独着色（`InputController.mm` 的 `candidateFixed`，与来源 `candidate_view_model.h` 同值），不与高亮合并；悬浮工具栏可见性 `configured_enabled && !fullscreen && ime_active` 与来源 `floating_toolbar_visibility_policy.h` 逐项相同（`MetasequoiaFloatingToolbarShouldShow`）；`candidate_size_estimator` 是 Direct2D 的度量工具，macOS 侧由 `CandidateRowFit.h` 和原生面板用例覆盖，属实现形态差异；翻页键的六组开关（minus/equal、逗号句号、方括号、Tab、PageUp/Down、方向键）macOS 全部消费，另有 Home/End 落在当前页首尾。（**这句在 2026-09-21 的第二十五批被推翻**：来源不是没有 Home/End，而是在客户端一侧把它们分类成 `FUNCTION_MOVE_PAGE_TOP/BOTTOM`，选的是整份列表的首末项。见该批。）
+同组其余四项没有缺口，一并记下判据：候选窗的固定位置项本仓已按来源的 `#379AD3` 单独着色（`InputController.mm` 的 `candidateFixed`，与来源 `candidate_view_model.h` 同值），不与高亮合并；悬浮工具栏可见性 `configured_enabled && !fullscreen && ime_active` 与来源 `floating_toolbar_visibility_policy.h` 逐项相同（`MetasequoiaFloatingToolbarShouldShow`），`ime_active` 也与来源同义地跟随输入法的选中而不是客户端焦点：`activateServer:` 置位，用户切到别的输入源时由 `MSIMEInputSourceMonitor` 的 `switchedAway` 调 `deactivateForInputSourceSwitch` 清除（对应来源 TIP Deactivate 发出的 `WM_IMEDEACTIVATE`）；客户端失焦（IMK `deactivateServer:`）对应来源的 `ClientSuspended`，不改变工具栏可见性，所以切换应用、点桌面或没有输入框的窗口时工具栏留在原处，属主控制器被释放时立即隐藏（`dealloc` 调 `deactivateForDelegate:`），每次应用激活时 `refreshVisibility` 再检查一次属主作为兜底；`candidate_size_estimator` 是 Direct2D 的度量工具，macOS 侧由 `CandidateRowFit.h` 和原生面板用例覆盖，属实现形态差异；翻页键的六组开关（minus/equal、逗号句号、方括号、Tab、PageUp/Down、方向键）macOS 全部消费；开关关闭时，Tab/Shift+Tab、PageUp/PageDown 与 ↑/↓ 在候选可见期间照样被吞掉，不发任何命令、不结束组字，候选原样保留——来源在任何候选模式下都把这几个键交给 Server（`CompositionProcessorEngine.cpp` 的 `FUNCTION_SERVER_CANDIDATE_KEY`），Server 以 `IsCandidateNavigationKey` 认出后默认回 `NavigationIgnored`，只有对应的 `GetConfigured*Enabled()` 为真才翻页或移动（`server/src/ipc/event_listener.cpp`）；候选不可见时这些键仍交还应用。另有 Home/End 落在当前页首尾。（**这句在 2026-09-21 的第二十五批被推翻**：来源不是没有 Home/End，而是在客户端一侧把它们分类成 `FUNCTION_MOVE_PAGE_TOP/BOTTOM`，选的是整份列表的首末项。见该批。）
 
 方向键的朝向是刻意的平台适配：来源只认 ↑/↓，macOS 按候选窗朝向决定（竖排认 ↑/↓，横排认 ←/→），这是既有决定，不动。
 
@@ -1183,7 +580,7 @@ macOS 缺后半条。`ShouldRoutePhysicalCandidateDigit` 明确把 Unicode 模�
 
 增量记录（2026-09-20，`input_key_policy.h` 逐条走完）：不再抽查点位，把来源 `server/src/ipc/input_key_policy.h` 里那八条 `constexpr` 当作契约整体核对。结果：
 
-- `IsEnglishModeToggleKey`（Ctrl+Shift+E）、`WordToCharacterDirection`（无修饰键的 `-`/`=` 或 `[`/`]`）—— 上一片已确认相符。
+- `IsEnglishModeToggleKey`（Ctrl+Shift+E）、`WordToCharacterDirection`（无修饰键的 `-`/`=` 或 `[`/`]`）—— 上一片已确认相符。（2026-09-23 更正：这是就 HarmonyOS 说的；Windows 宿主当时并不相符。TSF 把 Ctrl+Shift+E 按 `FUNCTION_CANCEL` 在本地取消组字后照常把键发给 Server，Server 的 `translate_key` 却把它当普通 Ctrl 组合放行，英文模式根本不切换。现在 `ReplyComposer::basic_key` 先认 `is_english_mode_toggle_key`，无条件调 `ServerSession::toggle_dedicated_english`（取消组字再翻转 `msime_client_set_english_mode`，对应来源 `SetEnglishInputMode` + `ClearState`），按 Escape 同款的 `LocalCancel` 不回包；带 Alt 的组合不算。回归在 `tests/input/dedicated_english.cpp` 与 `tests/input/input_key_policy.cpp`。）
 - `NormalizeNumpadDigitKey` —— Harmony 的 `HardwareKeyRouter.normalizeNumpad` 同样把小键盘 0–9 归一成主键盘数字，并在 `route` 入口只做一次（来源在 Server 边界做一次），且多填了缺失的字符。
 - `ShouldLearnEnteredEnglishWord` —— `engine-bridge` 的 `commit_raw_with_policy` 里是 `before.dedicated_english || local_special_mode || (chinese_scheme && !complete_pure_pinyin)`，与来源逐项相同。
 - `IsBackendIndependentCompositionResetKey`（Shift/Esc）与 `ShouldResetCompositionForImeMode` —— 这两条是 Windows 分体架构下 Server 与 TSF 的**同步**约定（TSF 已在本地取消组字，Server 必须跟着重置后端），HarmonyOS 的键盘扩展自己拥有组字，没有对应物。其用户可见效果「离开中文模式会清掉正在拼的字」在本仓由引擎的 `set_dedicated_english_mode` → `reset_composition()` 覆盖，已在上一片钉住。来源的 Shift 切换同样受 `ReadConfiguredSwitchLanguageHotkeys().shift` 门控，与本仓一致。
@@ -1197,12 +594,12 @@ macOS 缺后半条。`ShouldRoutePhysicalCandidateDigit` 明确把 Unicode 模�
 
 - 以词定字的修饰键。来源 `WordToCharacterDirection`（`server/src/ipc/input_key_policy.h`）要求不带任何修饰键，`(modifiers & kKeyModifierMask) != 0` 直接返回 0。Harmony 的对应分支只显式写了 `!key.shiftKey`，看着像漏了 Ctrl/Alt，实际 `HardwareKeyRouter` 在更上面就有 `if (key.ctrlKey || key.altKey || key.logoKey) return RELEASE`，带修饰键的组合根本到不了那里，等价。
 - 模式切换快捷键。Harmony 的 `mode_switch_shortcuts` 为真，实现不在 `HardwareKeyRouter` 而在 `InputModeRouting`，由 `KeyboardExtensionAbility` 在按键进引擎之前先行消费。
-- `Ctrl+Shift+E`。来源 `IsEnglishModeToggleKey` 绑的英文模式切换，`InputModeRouting` 已实现，套件里也有「Ctrl+Shift+E switches the composing language」。该模块头注释写明 `Ctrl+Shift+E`、`Ctrl+Shift+Space`（全半角）、`Ctrl+.`（标点集）三条都按 Windows 基线固定实现。
+- `Ctrl+Shift+E`（仅指 HarmonyOS；Windows 宿主的 Server 侧 2026-09-23 才接上，见上一片的更正）。来源 `IsEnglishModeToggleKey` 绑的英文模式切换，`InputModeRouting` 已实现，套件里也有「Ctrl+Shift+E switches the composing language」。该模块头注释写明 `Ctrl+Shift+E`、`Ctrl+Shift+Space`（全半角）、`Ctrl+.`（标点集）三条都按 Windows 基线固定实现。
 - 切换语言是否清空组字。来源是 `SetEnglishInputMode` 紧跟 `ClearState`；本仓经 `msime_client_set_english_mode` → `runtime.set_dedicated_english` → 引擎 `InputSession::set_dedicated_english_mode`，后者在标志真正翻转时调 `reset_composition()`，行为一致。
 
 最后这条此前没有任何测试钉着：`input-runtime` 测试桩的 `set_dedicated_english` 用的是 trait 的空默认实现，所以该行为成立仅仅因为真实引擎恰好会重置。考虑到本仓引擎比来源新 467 个提交，这正是该钉住的一类风险。现让测试桩如实建模（模式真正改变时清空组字，重复设置同一模式不动），并加测试断言切换语言后组字消失、重复设置不误清。已把重置去掉验证过它确实会红（`left: "a"`, `right: ""`）。
 
-增量记录（2026-09-20，组字期标点的上屏时机）：来源在组字进行中遇到标点时，先用高亮候选结束组字、再输出该标点——`IsCommitWithHighlightedCandidatePunctuationInCandidateMode`（`server/src/ipc/event_listener.cpp`）列出的是 `` ` ! @ # $ % ^ & * ( ) [ ] ; : \ " , < . > ? ' ``，并排除三类：`-`/`=`/Tab 永不触发，`,`/`.` 与 `[`/`]` 在被配成翻页键时也不触发。共享运行时的 `punctuation()` 行为与之一致（先 `engine.finish(self.highlighted)` 再翻译标点），注释里也写明了原因。
+增量记录（2026-09-20，组字期标点的上屏时机）：来源在组字进行中遇到标点时，先用高亮候选结束组字、再输出该标点——`IsCommitWithHighlightedCandidatePunctuationInCandidateMode`（`server/src/ipc/event_listener.cpp`）列出的是 `` ` ! @ # $ % ^ & * ( ) [ ] ; : \ " , < . > ? ' ``，并排除三类：`-`/`=`/Tab 永不触发，`,`/`.` 与 `[`/`]` 在被配成翻页键时也不触发。（来源 `1d2431ad` 之后表里另有 `-`、`+`、`/`：主键区的 `-`/`=` 仍按键码排除，小键盘的 `+`/`-`/`.`/`/` 与主键区 `/` 则用高亮候选结束组字后原样接上 ASCII 字符，见下文 2026-09-23 的记录。）共享运行时的 `punctuation()` 行为与之一致（先 `engine.finish(self.highlighted)` 再翻译标点），注释里也写明了原因。
 
 差的是 HarmonyOS 的硬件键盘路由。`HardwareKeyRouter` 的标点分支写的是 `!composing && chinese && !japanese && isAsciiPunctuation(...)`，只在**没有组字**时把标点交给引擎；组字进行中则落到 `return RELEASE`，把键还给应用。于是在 2in1 上敲 `nihao` 再按 `!`，组字仍开着而 `!` 被插进编辑器里、排在还没上屏的拼音前面；触屏路径不受影响，它直接调 `KeyboardSession.punctuation()` 走运行时。现去掉 `!composing` 这一条：标点无论是否在组字中都归键盘所有，组字中的那次由运行时按来源的规则结束组字。翻页键不受影响——它们在更上面的 `composing` 分支里就被消费掉了，且按 keyCode 匹配（逗号是 2043），日语标点仍归应用。
 
@@ -1227,6 +624,10 @@ macOS 缺后半条。`ShouldRoutePhysicalCandidateDigit` 明确把 Unicode 模�
 候选管理菜单不改。来源的桌面右键菜单是 置顶 / 固定排位→第 1–5 位 + 取消固定 / 删除；本仓是 优先显示 / 第 1–5 位 / 取消固定 / 删除词条…，把悬停子菜单摊平（触屏上没有悬停），措辞则与 iOS、Android 一致。`platforms/android/README.md` 写明这套顺序与措辞对齐的是 Apple 来源的长按菜单，三个触屏平台共用。HarmonyOS 是触屏平台，改成 Windows 的说法会破坏三端一致并推翻既有决定。「删除词条…」的省略号也有意义：本仓这一项 `confirmationRequired` 为真，来源那条不是。
 
 悬浮工具栏已齐。来源设置页里的 6 个组件 id 与标签（character_set / emoji / fullwidth / punctuation / screen_keyboard / settings）与本仓 `floatingToolbarComponents` 完全一致，加上「中英文切换」这个始终显示项；本仓多一个 `english_mode` 属扩展。缩放、图标尺寸、组件三节的标题也与来源同名同序。
+
+组件**默认值**有一处刻意不跟：`emoji` 在共享层默认关（与 `handwriting`、`voice`、`screen_keyboard` 一起），来源默认开。id、标签和顺序不变，只是新配置拿到的是精简工具栏。Windows 不受影响——`platforms/windows/installer/config.default.toml` 逐项显式写出每个组件（`floating_toolbar_emoji = true`），镜像来源自己的默认配置，共享默认值轮不到生效；变的是不带出厂配置的宿主（macOS、HarmonyOS）。理由与升级代价见下面《工具栏可选按钮改为默认关》。
+
+工具栏的外框同样对齐来源 `floating_toolbar_presenter.cpp`。左缘对应 `ToolbarDragHandle` 的是水杉 logo：来源那条 2.5×14、`#8E8CD8` 的圆角竖条在 macOS 上不再单独绘制，工具栏最前面已经有 logo，再放一条竖条只是第二个同义的记号，拖动交给 logo 承担。logo 占 34pt 加 4pt 间距，其后隔 3pt 是对应 `ToolbarDivider` 的 1.2pt 分隔线（取全局主题解析出的候选窗描边色 `border`），再隔 4pt 才是第一个按钮；按钮宽为字号加 8pt、彼此相隔 2pt，字形取字号的 0.95，尾部留 6pt，都随缩放比例放大。这比来源更紧凑：按来源间距排开时字与字相隔过远，工具栏挡住的正文比五个按钮实际需要的多。来源 `WM_NCHITTEST` 把柄所在区域报成 `HTCAPTION`，macOS 侧由 logo 的 `mouseDownCanMoveWindow` 配合面板的 `movableByWindowBackground` 实现同样的拖动，按钮一律返回 NO，按住按钮不会拖走面板；按钮全部关闭时分隔线隐藏、logo 保留，与来源始终保留柄一致。来源柄上的 `IDC_SIZEALL` 光标按平台惯例换成 `NSCursor.openHandCursor`，macOS 没有公开的四向箭头光标。按钮的悬停与按下底色对应 `ToolbarIconButton::Render`：半径 `max(2, 高度×0.25)` 的圆角矩形，填色取全局主题解析出的候选行悬停色 `hover`（跟随系统时深色白 0.10、浅色黑 0.06），与工具栏底色、描边同出一套主题；面板从不成为 key window，所以悬停由 `NSTrackingActiveAlways` 的跟踪区报告，面板隐藏时一并清除悬停态。
 
 未验证：固定候选的配色只有单测覆盖，没有在设备上目视确认——需要启用输入法、聚焦文本框、输入、长按候选、选固定这一串操作，本次没有完成。
 
@@ -1333,11 +734,11 @@ macOS 缺后半条。`ShouldRoutePhysicalCandidateDigit` 明确把 Unicode 模�
 
 增量记录（2026-09-19）：Fcitx5 进一步新增词频触发次数和线性调整步长入口，各自在 1–10 范围循环，使用共享偏好快照更新当前 Engine，并持久化 `frequency.trigger_count` / `frequency.linear_step`。原生 Fcitx5 菜单交互仍待 Linux 环境验证。
 
-增量记录（2026-09-19）：Fcitx5 状态栏新增候选主题循环入口，按跟随系统、浅色、深色切换并即时更新共享 `candidate_theme` 偏好。主题边框、圆角和面板配色仍由 Fcitx5/桌面 panel 决定，不伪造 IBus 或 Windows 原生窗口的不可表达装饰；原生菜单交互仍待 Linux 环境验证。
+增量记录（2026-09-19）：Fcitx5 状态栏新增候选主题循环入口，按跟随系统、浅色、深色切换并即时更新共享 `candidate_theme` 偏好。主题边框、圆角和面板配色仍由 Fcitx5/桌面 panel 决定，不伪造 IBus 或 Windows 原生窗口的不可表达装饰；原生菜单交互仍待 Linux 环境验证。（2026-09-23 更新：面板配色与边框此后改由 MSIME 生成的 `msime` classic UI 主题承载，边框见文末「Linux 候选外观补齐」；圆角仍由 Fcitx5/桌面 panel 决定。）
 
-增量记录（2026-09-19）：Fcitx5 状态栏新增候选皮肤循环入口，按 `fluent`、`wechat`、`graphite`、`willow_green` 切换并持久化共享 `candidate_skin` 偏好；切换前结束当前组合，再重建当前输入上下文的 Host API session。Fcitx5/桌面 panel 不一定能表达 Windows 原生候选窗口的全部边框、圆角、alpha、间距等装饰，本切片只同步共享 skin preference，平台 panel 保留不可表达装饰的控制权；原生菜单交互仍待 Linux 环境验证。
+增量记录（2026-09-19）：Fcitx5 状态栏新增候选皮肤循环入口，按 `fluent`、`wechat`、`graphite`、`willow_green` 切换并持久化共享 `candidate_skin` 偏好；切换前结束当前组合，再重建当前输入上下文的 Host API session。Fcitx5/桌面 panel 不一定能表达 Windows 原生候选窗口的全部边框、圆角、alpha、间距等装饰，本切片只同步共享 skin preference，平台 panel 保留不可表达装饰的控制权；原生菜单交互仍待 Linux 环境验证。（2026-09-23 更新：Fcitx5 现在按皮肤画 Windows 同源的边框色与整数宽度，见文末「Linux 候选外观补齐」；圆角、alpha 阴影和间距仍不可表达，IBus 的文本属性画不了边框。）（2026-09-28 注：四个内置皮肤与共享的 `candidate_skin` 偏好已被全局主题模型取代，见 `skin/theme.rs`，这条记录只描述当时的行为。）
 
-增量记录（2026-09-19）：Fcitx5 候选皮肤入口现消费共享 `candidate_skin_catalog` 中经过主机校验的外部皮肤 ID/标题，和 IBus 一样可从内置皮肤循环到外部皮肤；Fcitx5 仅将受限字符集的 ID 与长度受控标题交给 panel，不把外部路径或 CSS 直接注入平台菜单。原生 catalog 读取与桌面交互仍待 Linux 环境验证。
+增量记录（2026-09-19）：Fcitx5 候选皮肤入口现消费共享 `candidate_skin_catalog` 中经过主机校验的外部皮肤 ID/标题，和 IBus 一样可从内置皮肤循环到外部皮肤；Fcitx5 仅将受限字符集的 ID 与长度受控标题交给 panel，不把外部路径或 CSS 直接注入平台菜单。原生 catalog 读取与桌面交互仍待 Linux 环境验证。（2026-09-28 注：皮肤循环已被 Fcitx5 的「主题」菜单取代，菜单列出全局主题与已安装的皮肤包，见 `platforms/linux/fcitx5/FcitxEngine.cpp`；这条记录只描述当时的行为。）
 
 增量记录（2026-09-19）：Fcitx5 运行时 options 刷新现在同步更新候选皮肤 catalog 标题与可循环项；设置页重新扫描外部皮肤后，当前输入上下文的状态入口不会继续显示旧 catalog。该同步仍只更新平台菜单元数据，不把外部 CSS 或路径交给 Fcitx panel。
 
@@ -1399,7 +800,7 @@ Linux 在线 provider 的 AI 凭据测试与 Windows 终态契约对齐：只有
 批量 ASR 凭据测试增量：OpenAI、SiliconFlow、Groq 的 Windows 设置按钮现连接到 Tauri 和共享 `credential_asr`。请求使用内存生成的一秒 16 kHz 单声道 PCM16 静音 WAV，以 multipart 上传，不访问麦克风；界面提示可能计入服务用量。生产传输使用 HTTPS、禁止重定向、5 秒连接/15 秒请求时限及 256 KiB 响应上限。豆包需要独立 WebSocket 握手与最终协议响应，目前未借用批量入口，也未宣称豆包凭据测试或完整语音运行链已完成。
 
 - 原生协议/会话：`platforms/windows/tests/runtime/pipe_io.cpp`、`platforms/windows/tests/runtime/server_smoke.cpp`、`platforms/windows/tests/runtime/session_pump.cpp`、`platforms/windows/tests/input/tsf_key_dispatch.cpp`。
-- 配置/外观/启动：`preference_monitor.cpp`、`shared_config_keybindings.cpp`、`candidate_skin.cpp`、`shell_surfaces.cpp`。
+- 配置/外观/启动：`preference_monitor.cpp`、`candidate_skin.cpp`、`shell_surfaces.cpp`。
 - 语音：`voice_control_message.cpp`、`voice_providers.cpp`、`voice_session_epoch.cpp`；这些不覆盖 Tauri→Server→麦克风→ASR→编辑器全链。
 - UI：`apps/desktop/src/credential-test.test.tsx`、`voice-recognition-client.test.ts`、`dictionary-safety.test.tsx`、`handwriting-pointer.test.tsx`。组件模拟测试不能证明 Windows 条件编译分支可用。
 - 本次是源码对照与文档更新，不新增原生运行通过声明。GitNexus 索引已重建；概念查询遇到只读 FTS 错误，改为按固定提交文件与调用点核对。提交前仍运行 staged detect-changes。
@@ -1584,6 +985,8 @@ Fcitx5 候选动作执行 stale 栅栏增量（2026-09-19）：CandidateAction �
 
 **quiesce/resume 与失败恢复：核对确认已做到，无需改动。** 这里记下结论以免下次重查。桌面侧在收到 `dictionary maintenance busy` 时才握手，成功后重试，然后**无条件**发 resume（注释写明「导入失败总比让输入法没有会话好」）。Server 侧 `quiesce_dictionaries` 成功时设一个 30 秒 deadline，控制线程每 tick 检查、过期就自己 resume——所以一个在 quiesce 和 resume 之间死掉的设置进程，最多让输入停 30 秒而不是停到重启。没有 Server 在听时 quiesce 返回真、resume 返回假，判据是「锁本来就空着，调用方该继续」。三层各自独立，任一层失效另外两层仍然成立。
 
+**macOS 的 quiesce/resume 与来源对齐。** macOS 沿用 Linux 宿主的租约：设置窗口在用户数据目录写入带 30 秒过期时间的 `.msime-dictionary-quiesce`，发 `MSIMEDictionaryMaintenanceWillBeginNotification` 分布式通知作为立即唤醒，每个请求在约 2.5 秒内重试；分批导入时租约在各批之间保持并在每批前续期，整次操作结束后删除。IMK 只在租约存在时让出：上屏当前组合、关闭所有控制器的会话，租约期间不开新会话，删除后的下一次按键重开并恢复专用英文。三层对应关系与来源一致：通知对应 quiesce 请求，租约删除对应 resume，租约自带的过期时间对应 Server 的 30 秒 deadline；通知丢失时由每秒的偏好定时器兜底。租约的格式与读写由 `platforms/common/DictionaryQuiesceLease.h` 与 `crates/client-core/src/dictionary/quiesce.rs` 在 Linux 与 macOS 之间共用。
+
 **导入编码：查出并修掉一处静默损坏。** 云词库文件面板用 `File.text()` 读用户选的文件，它只按 UTF-8 解码；而本地词库导入早就走 `decodeDictionaryBytes`，处理 UTF-8 BOM、UTF-16 两种字节序和 GB18030。同一个文件两个面板两种结果，云端这边更糟：UTF-16 解出来满是 NUL，被 `text.includes("\u0000")` 挡下（至少是拒绝）；GB18030 解出来是一串 `�` 且**不含 NUL**，守卫放行，一份全是替换字符的词库被静默上传到用户云端。实测 `"你好\tni'hao\n"` 的 GB18030 字节按 UTF-8 解码得到 `"���\tni'hao\n"`。改成调用同一个读取器，NUL 检查保留给真正的二进制文件。
 
 顺带修共享导入解析器不剥前导 BOM。目前每个调用方都在更上游剥掉了，所以不是当下可触发的缺陷，但它是公共入口而这条不变量只靠「每个调用方都记得」维持。`str::trim` 不去掉它（U+FEFF 早就不是 White_Space），于是它活到第一行、落在该格式的第一列：词在前的格式里粘在词上，解析通过、存进引擎、永远匹配不上；编码在前的格式里落在编码上，判字母表非法，报一行失败且读者无从得知原因。两种都静默，其中一种损坏数据。
@@ -1623,7 +1026,7 @@ Fcitx5 候选动作执行 stale 栅栏增量（2026-09-19）：CandidateAction �
 
 **五项都核对确认已做到**，结论记在这里以免重查：
 
-- 失焦后旧结果有**两道独立的栅栏**。Windows 侧 `FocusedSession::apply_cloud_response` / `apply_ai_candidates` 先 `prepared(lease)` 再 `gate_.with_active(lease, ...)`，过期 lease 的结果直接丢弃；Engine 侧 `OnlineRequestGuard::matches`（`vendor/MSIME-Engine/core/online_request_guard.h`）比对 session id、generation、scheme、identity、query_text、cache_key、分词和两个资格位，所以同一 lease 内「先打 ni 后打 nihao」的旧回复也进不来。共享 Rust 层不另设栅栏是对的——身份归 Engine 所有，多一份副本就是多一处漂移。
+- 失焦后旧结果有**两道独立的栅栏**。Windows 侧 `FocusedSession::apply_cloud_response` / `apply_ai_candidates` 先 `prepared(lease)` 再 `gate_.with_active(lease, ...)`，过期 lease 的结果直接丢弃；Rust Engine 会话的在线请求栅栏 `OnlineRequestGuard::matches`（`crates/engine/src/session/online.rs`）比对 session id、generation、scheme、identity、query_text、cache_key、分词和两个资格位，所以同一 lease 内「先打 ni 后打 nihao」的旧回复也进不来。共享 Rust 层不另设栅栏是对的——身份归 Engine 所有，多一份副本就是多一处漂移。
 - 超时两个 worker 各有各的值且都合理：云候选连接 2000ms / 总计 2000ms，AI 连接 2500ms / 总计 8000ms（LLM 本就更慢，照抄 2 秒会把它全判超时）。两者都是 `CURLOPT_PROTOCOLS_STR="https"`、不跟随重定向、`NOSIGNAL`。
 - 取消不只是「丢弃结果」：`CURLOPT_XFERINFOFUNCTION` 接到取消判据上，被取代的请求在传输途中就会中止，write 回调里也再查一次。
 - 响应与请求都有界：响应 256 KiB（AI 1 MiB）、query 16 KiB、AI 的 URL ≤ 2048 且必须 https、POST body 有大小上限。
@@ -1695,13 +1098,25 @@ Fcitx5 候选动作执行 stale 栅栏增量（2026-09-19）：CandidateAction �
 
 两个目录里零覆盖的十一个模块，多数是 Win32 资源或图标字体这类本机测不了的东西。其中**最该有覆盖的是 `PunctuationPolicy`**：它就是 2026-09-20 那批记过的「组字期标点的上屏时机」在本仓的实现，那一批把来源的字符表抄进了记录，却没有任何东西把实现钉住。这个表少一个字符，意味着那个标点不再用高亮候选结束组字——只在打字时看得见。
 
-逐字符与来源 `IsCommitWithHighlightedCandidatePunctuationInCandidateMode` 比对：23 个字符两边完全相同。用例逐个断言，并覆盖三类排除（减号加号及小键盘孪生、逗号句号被配成翻页键、方括号被配成翻页键），以及「配了一对不影响另一对」。
+逐字符与来源 `IsCommitWithHighlightedCandidatePunctuationInCandidateMode` 比对：23 个字符两边完全相同。用例逐个断言，并覆盖三类排除（减号加号及小键盘孪生、逗号句号被配成翻页键、方括号被配成翻页键），以及「配了一对不影响另一对」。（此为当时的状态。来源 `1d2431ad` 随后把 `-`、`+`、`/` 加进表里，小键盘的加减号不再算翻页键；本仓对应的是 `literal_candidate_punctuation`，见 2026-09-23 的记录。`candidate_punctuation` 本身仍是这 23 个字符，数字键与 `/` 在它之前被分走。）
 
 核对了一处写法不同但**结果等价**的地方，记下免得下次误判为缺口：来源的翻页排除额外要求「有活动组字」，本仓没有这个条件；差异只在「没有组字时按逗号」，而来源那时走 `else { ClearState(); return; }`，同样不把标点变成带高亮候选上屏，本仓返回 nullopt 落点相同。
 
 另记一处冗余：策略里的 `wch <= 127` 永远不会是拒绝的原因，因为 `translate_key` 只把 0x21..0x7E 认作字符。这不是缺陷（第二道保证窄化转换拿不到表示不了的值），但用例注释写明了，断言钉的是行为而不是那一行——否则后来的人会以为它承重。这条也是本批唯一一条反向验证**不会变红**的规则，如实记下而不是编一个能红的断言。
 
 顺带一提：交叉构建抓到我自己漏配的 include 目录，本机能编只是因为手动加了参数——这正是那一阶段存在的意义。
+
+增量记录（2026-09-23，Windows TSF：成对标点补全的光标左移、跳过右半边、嵌套计数回退，以及候选打开时的小键盘标点）：对照来源 `KeyHandler.cpp` 核对了四处，四处都是真缺口。
+
+**光标左移被丢弃。** 补完右半边后本仓直接 `PostMessage(_msgWndHandle, WM_PairedPunctuationCaretMove, ...)`，没有经过 `_QueuePairedPunctuationCaretMove`，于是 `_pendingPairedCaretFocusToken` 从未被置上，而消息处理函数只在令牌对得上时才发 `VK_LEFT`，这条消息每次都被丢掉，光标停在右半边之后。现改回来源的写法：`_PushPairedPunctuation` 记下这一对，再 `_QueuePairedPunctuationCaretMove(-1)`。
+
+**再按右半边时不跳过。** `_TryStepOverPairedPunctuation` 与 `_PushPairedPunctuation` 都没有调用者，栈永远是空的，所以补出的 `）` 后面再按 `)` 会打出第二个。现按来源在没有组字、没有候选时先尝试跳过；哪些键能跳过由新增的 `PairedPunctuationStepOverCandidate` 判定（只认单字符的右半边，引号按键而不按翻译结果判定，`{}` 也算，因为本仓 `{` 同样会补全）。
+
+**嵌套计数不回退。** `BalanceNestPairAfterAutoClose` 没有调用者，补过一次《》之后下一次 `<` 给的是〈。现与来源一样在补全后调用。遗留一处：候选打开时左半边由 Server 的引擎翻译，它的嵌套计数本仓 Windows Server 没有回退（`msime_client_balance_paired_punctuation_after_auto_close` 存在但需要一条新的 IPC），这次不改。
+
+**候选打开时的小键盘标点（来源 `1d2431ad`）。** 小键盘 `+`/`-` 此前在 TSF 与 Server 两侧都被当成翻页键排除，按下后什么都不上屏；小键盘 `.` 与 `/` 则被翻译成中文标点。现在 TSF 的 `IsCandidateNavigationKeyBeforePunctuation` 只保留主键区 `-`/`=`、Tab、翻页与 Home/End，`CommitWithHighlightedCandPunc` 加入 `/`，`KeyEventSink` 先判断是否用高亮候选结束再看 `VK_DECIMAL`；Server 侧新增 `literal_candidate_punctuation`，在有组字时把这几个键交给 `msime_client_punctuation_ascii`，上屏高亮候选后接原样的 ASCII 字符。
+
+用例：`msime-tsf-punctuation-key-policy`（跳过判定、导航键、原样字符）、`msime-tsf-paired-punctuation-wiring`（`KeyHandler.cpp` 的补全路径确实经过栈与带令牌的光标移动，且 `/` 在表里）、`windows-punctuation-policy` 补了 `literal_candidate_punctuation`。三者对着改动前的源码都会红（前两者头文件或断言失败，后者函数不存在）。本机只能跑这些不依赖 Windows 的部分，真实宿主里的光标左移与跳过没有在 Windows 上实测。
 
 增量记录（2026-09-21，Windows 第二十批：哪些键改组字）：接上一批继续走 `src/system/` 的零覆盖模块。目标起点 `25a2325c8`。
 
@@ -1854,6 +1269,8 @@ if let Some(route) = launch_route_from_args(&args) { ... }
 
 **这里的保证来自返回类型，不是来自测试，如实记一下。** 新增的用例钉的是「回落到哪个 surface」（空参数、只有可执行文件路径、`--route=` 解析失败三种输入都回落到设置窗；显式 route 仍然优先），但它盖不住调用处——谁要是把 `if let Some(...)` 写回去，用例照样绿。真正让这个缺陷无法复发的是函数签名不再返回 `Option`，调用方没有可丢弃的东西。写守卫去检查调用处长什么样只会脆，不如把类型摆对。
 
+macOS 对应同一份 `settings_launcher.cpp` 语义，但只对设置窗生效：设置启动（`settings`、`settings:<分类>`，以及 Finder / 启动台不带 route 的启动）共用一个 `app.msime.macos` 进程，`tauri-plugin-single-instance` 在 macOS 上是 `/tmp` 下的 Unix socket。第二次设置启动把自己的 `--route=` 转发给已在运行的设置进程后立即退出，运行中的窗口 `show()` + `unminimize()` + `set_focus()` 并经 `settings-route` 切到请求的页面，所以菜单里的「水杉输入法设置…」「关于水杉输入法…」「检查更新…」都是把已开的窗口拉回前台并换页，而不是再开一个窗口。面板启动（屏幕键盘、emoji、手写、语音 / 面板会话、云剪贴板、云词典）不注册这个插件，仍是每个输入会话一个进程：它们的环境里带着会话身份和配置路径，面板关闭时进程随之退出。IMK 侧 `DesktopSettingsLauncher.h` 对所有 route 都保留 `createsNewApplicationInstance = YES`，否则 LaunchServices 会直接激活任意一个正在运行的实例（可能是隐藏的面板进程）并丢掉参数；这个短命的第二进程正是把 route 送到已开窗口的载体。判定在 `macos_settings_launch()`，由 `macos_single_instance_admits_only_settings_launches` 覆盖。
+
 增量记录（2026-09-21，Windows 第三十批：等云候选该等多久）：沿对照表「谷歌云候选与 AI 联想」一行里「超时、取消、失焦后旧结果」逐项比。目标起点 `6b4b138ae`。
 
 来源给云候选的预算写在 `cloud/cloud_request.cpp`：连接 2000ms、总计 2500ms；防抖 `kIdleDelay` 500ms。防抖本仓对得上（macOS 的 `_cloudTimer` 0.5 秒、Linux 的 `online_delay_source`）。**预算不对**：macOS 给 2 秒，本仓 Windows 宿主给连接 2000/总计 2000。也就是说一条在 2.0–2.5 秒之间返回的云候选，来源会显示，本仓丢掉——而这事在慢网上很常见，因为请求本来就要等打字停顿 500ms 之后才发。
@@ -1892,7 +1309,7 @@ if let Some(route) = launch_route_from_args(&args) { ... }
 
 增量记录（2026-09-21，Windows 第三十二批：上游发过的每一个功能都被看过）：目标起点 `a26aca7e3`。
 
-这一轮把三条轴都走完了，结论先写在前面：**按上游 README 的功能清单逐条核对，只剩加加辅助码一项没有对应物**，而那一项的阻塞点已经记在第二十四批——7968 行码表是拼音加加 5.x 的非官方重建数据，引不引进来是仓库所有者的第三方数据分发决定。其余全部有对应物：全拼 / 双拼四套 / 86 五笔、日文罗马字与 R 模式、五种辅助码、云候选与 AI 联想、竖排候选窗的中英互译与腾讯云翻译、混输与独立英文候选、词库管理、语音输入、手写 / 屏幕键盘 / 悬浮工具栏 / 剪贴板历史、默认关闭的输入统计、K/T/U/E/M/J/Y/R 八个模式、智能标点与成对标点与以词定字与简繁转换、四套皮肤各带深浅色（`skin/catalog.rs` 里 `fluent | wechat | graphite | willow_green`）。
+这一轮把三条轴都走完了，结论先写在前面：**按上游 README 的功能清单逐条核对，只剩加加辅助码一项没有对应物**，而那一项的阻塞点已经记在第二十四批——7968 行码表是拼音加加 5.x 的非官方重建数据，引不引进来是仓库所有者的第三方数据分发决定。其余全部有对应物：全拼 / 双拼四套 / 86 五笔、日文罗马字与 R 模式、五种辅助码、云候选与 AI 联想、竖排候选窗的中英互译与腾讯云翻译、混输与独立英文候选、词库管理、语音输入、手写 / 屏幕键盘 / 悬浮工具栏 / 剪贴板历史、默认关闭的输入统计、K/T/U/E/M/J/Y/R 八个模式、智能标点与成对标点与以词定字与简繁转换、候选外观由全局主题提供（`skin/theme.rs` 的 `GlobalTheme`：`system`、`shuishan`、`light`、`paper`、`night`、`ink`、`custom` 七个 id，取代来源的 fluent/wechat/graphite/willow_green 四套皮肤）。
 
 这一批具体核对过、本仓已有而此前文档没点过名的几项：上游安装器那页「联网功能」同意页本仓 `msime_setup.iss` 423–475 行完整有（我一开始从「没有 `[Tasks]` 段」推断它缺，是错的——上游根本没用 `[Tasks]`，用的是 `[Code]` 里的 `CreateInputOptionPage`）；`MAX_PINYIN_LENGTH` 本仓在 `tsf/Key/KeyEventSink.cpp` 里用得比上游还多（延迟按键预算、shadow 原始输入、上报输入长度三处都夹了）；语言栏深浅色图标在 `LanguageBar.cpp` 的 `IsSystemDarkMode` / `ResolveThemeIconIndex`，资源比上游多一对 `jp-*.ico`；候选窗「隐藏」的拥塞宽限期连常量都一样是 24ms（`CandidateMailbox.h` 对 `internal_late_event`）；词条导入的默认权重 10000 与 Rime YAML 头跳过都在 `dictionary/import.rs`。
 
@@ -1910,11 +1327,13 @@ if let Some(route) = launch_route_from_args(&args) { ... }
 
 **小键盘数字选词。** 来源在 Server 边界把 `VK_NUMPAD0..9` 归一成数字键（`NormalizeNumpadDigitKey`）。macOS 的 `PhysicalCandidateDigitSlot` 已经把 83–92 映成候选 1–9，注释直接引了 Windows 的归一化，且不接受小键盘 0；小键盘的标点键另有一张表。
 
-**皮肤目录。** 来源 `IsBuiltIn` 是 fluent/wechat/graphite/willow_green 四个，`IsSafeId` 是「首字符字母数字、整体只允许小写字母数字与 `. _ -`、上限 64」。本仓 `skin/catalog.rs` 逐条相同（`safe_id` 与那四个内置 id）。
+**皮肤目录。** 来源 `IsBuiltIn` 是 fluent/wechat/graphite/willow_green 四个，`IsSafeId` 是「首字符字母数字、整体只允许小写字母数字与 `. _ -`、上限 64」。本仓 `skin/catalog.rs` 的 `safe_id` 与 `IsSafeId` 逐条相同；内置 id 是有意的分歧：本仓没有内置皮肤，内置配色在 `skin/theme.rs` 的七个全局主题里，`skin/catalog.rs` 只经 `is_reserved` 把这七个 id 保留下来，外部皮肤包不能占用，来源的四个内置 id 在这里没有特殊含义。
 
 **用户词库日志重放。** 来源有一个独立 exe 走 Engine 的 `user_dictionary::replay`，把日志重放进新装词库。本仓同样有这个工具（`crates/engine-bridge/src/bin/MetasequoiaImeDictionaryReplay.rs`），只是 macOS 的词库更新不走它：走的是快照 staging，把用户词条、固定位、选择记录成流写进新一代（`stage_dictionary_state`）。两条路都保住用户数据，形态差异，不是缺口。
 
 **AI 那一半的时序。** 来源防抖 650ms、连接 2500ms、总计 8000ms，命中缓存时跳过防抖直接出；缓存键是 provider + endpoint + model + 分段拼音。macOS 的 `_aiTimer` 是 0.65 秒，`client-core/src/ai.rs` 的 descriptor 是 2500/8000，`MSIMEAICacheKey` 是同样四项，命中时也是直接 apply 不等防抖。唯一差别是本仓给缓存加了 4096 条上限而来源不清（只在 Stop 时清），方向是更严。
+
+**Linux 的 AI 时序后补对齐（2026-09-23）。** 上一段只核了 macOS，Linux 当时并不一致：IBus 与 Fcitx5 两个引擎把云候选和 AI 共用一个 500ms 防抖，provider 的 AI 请求总计 7 秒且不单独限连接，缓存命中也要等满防抖。现在两个引擎分开计时（云 500ms、AI 650ms）；输入一变就先向 provider 发一次只查缓存的探测（`OnlineQuery.ai_cache_only`，provider 在这种请求上连云候选也不查、未命中也绝不出网），命中立刻上屏，未命中才在 650ms 后发真请求。provider 的 AI 请求改为总计 8 秒、连接 2.5 秒（`ConnectBoundedHTTPSConnection` 只在握手阶段用 2.5 秒，读响应仍是 8 秒），引擎侧等 AI 回包的 socket 期限相应放到 9 秒，多出的一秒留给子进程启动，云候选与缓存探测仍是 500ms。顺带修掉设置页「润色测试」永远失败的问题：它向 HTTP 子进程要 8 秒，而子进程的上限写死 7 秒、超限直接拒绝，于是每次都返回空；原有用例全部 mock 了 `fetch`，走不到这道校验，所以一直没被发现。现在上限与调用方共用 `AI_REQUEST_TIMEOUT`，`ai_candidate_cache.py` 用真实的子进程校验逻辑跑一遍候选请求与润色测试，`scripts/test-cloud-request-budget.py` 把 Linux 的这几个数钉在 `client-core/src/ai.rs` 的 descriptor 上。
 
 **本批唯一真动的地方**：macOS 在建会话时额外请求 `phrase_preedit`（第二十七批加的），此前没有任何用例钉住——这个请求一旦丢了，半截词会退回逐段上屏，而那看起来就是普通打字，没有别的东西会发现。把这一步抽成 `MSIMESessionOptions` 并在 `ShortcutTest` 钉住：请求被加上、文件原有的键原样透传、不修改调用方的字典、以及「文件里写着 `phrase_preedit: false` 也不作数」——旧文件根本早于这个行为。反向验证过。
 
@@ -2059,7 +1478,7 @@ if let Some(route) = launch_route_from_args(&args) { ... }
 
 来源的悬浮工具栏有六个组件开关（全角、标点、简繁、Emoji、屏幕键盘、设置；中英文切换常显），本仓 macOS 的工具栏在此之上多画了两个按钮：手写识别板与语音输入。多出来本身是有意的（对照表第四十三批记过「目标多出手写识别板」），但这两个按钮**没有任何开关**，用户关不掉——代码里写着「Handwriting and voice are always present」。
 
-补上：共享偏好加 `floating_toolbar.handwriting` 与 `floating_toolbar.voice`，两个都默认开——它们从一开始就在工具栏上，开关出现的那一刻不该让两个按钮消失。设置页按宿主能力显示：新增 `floating_toolbar_handwriting` / `floating_toolbar_voice` 两个能力位，只有 macOS 报 true，别的宿主的工具栏根本没这两个按钮，给它们开关等于关掉不存在的东西。macOS 侧原生偏好与工具栏面板一并消费，并去掉了「这两个按钮永远存在」的计数。
+补上：共享偏好加 `floating_toolbar.handwriting` 与 `floating_toolbar.voice`，当时两个都默认开——它们从一开始就在工具栏上，开关出现的那一刻不该让两个按钮消失。**这条决定后来被推翻，见《工具栏可选按钮改为默认关》：现在两个都默认关。**设置页按宿主能力显示：新增 `floating_toolbar_handwriting` / `floating_toolbar_voice` 两个能力位，只有 macOS 报 true，别的宿主的工具栏根本没这两个按钮，给它们开关等于关掉不存在的东西。macOS 侧原生偏好与工具栏面板一并消费，并去掉了「这两个按钮永远存在」的计数。
 
 顺带修掉 develop 上五个红的设置页用例，都是并行批次留下的：四个是「加加」辅助码进了 UI 但用例的选项清单没跟（第六套方案），一个是词库条目编辑——用例点的是页脚的「保存设置」，而条目编辑器有自己的「保存」，页脚那个只写偏好文档，碰不到词库；看提交记录是页脚按钮改名时被一并替换掉的。
 
@@ -2333,7 +1752,7 @@ macOS 原生宿主现在按完整映射回读光标前的实际中文标点，�
 
 `apply_engine_wubi_prefix_learning.py` 在 Engine 边界内迁入来源语义：精确等长码先于高权重前缀行，随后按权重和稳定键序排列，最多返回 50 条；选择五笔候选时把该候选权重写为同码组最大值加一，并在同一 SQLite attached-database 事务中写入 `wubi` journal，删除仍复用已有的精确行加墓碑事务。公共宿主继续只消费 Engine 快照，不在 Rust、Tauri 或任一平台宿主复制码表查询与调频算法。
 
-合成词库回归覆盖三条可见不变量：权重更高的长码不能压过已经完整匹配的简码；一键前缀在 Engine 入口被截到 50 条；选择同码第二项后，新会话中它升到首位且 journal 恰有一条 upsert。来源同日的四码唯一自动上屏与第五键“顶字后保留余码”还涉及 Windows TSF/Server 新协议，本片没有把 Engine 调频完成误写成那条链路已经迁完，后续单独接协议和宿主状态机。
+合成词库回归覆盖三条可见不变量：权重更高的长码不能压过已经完整匹配的简码；一键前缀在 Engine 入口被截到 50 条；选择同码第二项后，新会话中它升到首位且 journal 恰有一条 upsert。来源同日的四码唯一自动上屏与第五键“顶字后保留余码”还涉及 Windows TSF/Server 新协议，本片没有把 Engine 调频完成误写成那条链路已经迁完，后续单独接协议和宿主状态机。（后续已接：a93e3288f 在 `src/ipc/ReplyComposer.cpp` 以 `auto_wubi_commit` 走 `ReplyPath::AutoCommitAndContinue`，回归在 `tests/input/reply_composer.cpp`；Windows 实机仍未验证。）（2026-09-23 补齐：a93e3288f 只接了四码唯一自动上屏，第五键顶字（来源 536d0a95）此前没有——完整但不唯一的四码后再敲字母，Engine 把五笔码截在四位，这个字母被直接丢掉。现在由共享 `crates/input-runtime` 在字母键到达 Engine 之前判定：五笔、非独立英文、无本地模式、非拼音回退作答、编辑串正好四个字母且光标在末尾、有候选、未在造词，就先选首选再把这个字母送进新组合，各平台宿主拿到的都是「上屏 + 新组合」的一次转换；Windows 沿用同一条 `AutoCommitAndContinue`，余码非空时按键回复带新组合的 preedit，TSF 按消费数 4 裁自己的缓冲、保留第五个字母。来源 7b7b19f4 的「推送后 HideCandidate 抑制 1 秒过期」也已迁入：`src/input/ContinuationHide.h`，由 `FocusedSession` 在推送确认送达时记账、下一次 HideCandidateWnd 消费，超过 1 秒不再抑制。回归：`crates/input-runtime` 的 `a_letter_after_a_complete_wubi_code_commits_the_first_candidate_and_starts_the_next`、engine-bridge 真引擎断言第五个字母会被 Engine 丢弃、`tests/input/reply_composer.cpp`、`tests/input/continuation_hide.cpp`。）
 
 ### 固定来源推进到 345cb87a（2026-09-22）
 
@@ -2411,3 +1830,259 @@ Windows 的安装位置、资源目录和用户状态目录可能包含中文、
 完整安装器会在提升权限下把词库、出厂配置和所有权标记写入所选 `DataDir`，但不能以安装器身份替用户执行 Host API 准备。此前 Server 的首次准备只接受“目录不存在”，所以正常安装后的第一次启动会跳过准备，随后读取不存在的 `runtime-options.json` 并退出；默认目录和自定义目录都受影响。
 
 现在保留独立 `msime-client-prepare` 的全新目录契约；生产首次启动额外允许已有且带 `.metasequoiaime-data` 所有权标记、但尚无 `runtime-options.json` 的目录，在用户上下文中完成准备。普通已有目录、已有运行时配置、文件和符号链接仍不会被接管或重建；准备失败也不覆盖并保留现有数据。回归新增安装器所有权目录的成功准备与可恢复缺失配置路径，并继续覆盖普通不完整目录和错误资源不创建状态。验证为 host 编译运行的合成首次运行测试、x64 MinGW 语法检查和 `git diff --check`；安装包、真实 Server 首次启动和 Windows 系统入口仍未在真实 Windows 上验收。
+
+### 简繁转换改为 OpenCC 词级（2026-09-23）
+
+第十六批用系统 `LCMapStringEx` 逐字映射，那条差异不再保留：逐字表解决不了一对多的字（发→發/髮、干→乾/幹、面→面/麪），「头发」会成「頭發」，与来源的 OpenCC `s2t` 输出不同，用户看得见。
+
+- 共享层：`crates/client-core/src/chinese_conversion.rs` 按 OpenCC `data/config/s2t.json` 实现（一次兼容表归一化，再一次 STPhrases ∪ 地区词派生表 → STCharacters 的最大正向匹配，完整 IDS 序列整体透传）。数据取自来源 `vendor/opencc` 子模块钉的同一提交 `26753884f1984add422f3b0249ccee8613deaff6`，登记在 `docs/third-party.md`，许可证由 `Collect-Notices.ps1` 收进 Windows 通知。
+- 边界：`msime_client_simplified_to_traditional`（`crates/host-api`）返回裸文本而非 JSON 响应，因为它在每个候选上都要调用。首次调用解析词典，release 约 4 ms，之后单次约 1 µs。
+- Windows：`platforms/windows/src/input/ChineseTextConversion.cpp` 改调这个导出；上屏、候选呈现的调用点不变。
+- 证据：用 OpenCC 在该提交构建出的 CLI 做对照，4 万行随机文本逐字节一致；Rust 单测与 host-api 边界测试；Windows 侧为交叉构建与原生用例，未在真实编辑器里验收。
+- Linux（ICU）与 macOS（`CFStringTransform`）仍是逐字转换，要统一只需改调同一个导出，本批不动。
+
+### Linux 简繁转换改调共享 OpenCC 导出（2026-09-23）
+
+上一条记的「Linux（ICU）仍是逐字转换」这次收掉。Linux 原来用系统 ICU 的 `Simplified-Traditional` transliterator，逐字映射解决不了一对多的字，「头发」会成「頭發」，与 Windows 现在的 OpenCC 词级输出不一致，还让 IBus 和 Fcitx5 两个宿主都硬依赖 `libicu`。
+
+- `platforms/linux/src/system/ChineseTextConversion.cpp` 改调 `msime_client_simplified_to_traditional`，结果用 `msime_client_string_free` 释放；返回 NULL（非法 UTF-8、内嵌 NUL）时保留原文。C++ 签名不变，`ClientEngine.cpp` 与 `fcitx5/FcitxEngine.cpp` 的调用点不动。
+- 去掉 `platforms/linux/CMakeLists.txt`、`platforms/linux/fcitx5/CMakeLists.txt` 里的 ICU `pkg_check_modules` 和链接，以及两份测试镜像里的 `libicu-dev`；仓库内没有别的 ICU 使用者。Debian 包的共享库依赖由 `dpkg-shlibdeps` 生成，随之不再带 ICU。
+- 证据：`linux-traditional-output-test` 钉了与 `chinese_conversion.rs` 单测相同的词级对照（头发→頭髮、干面→乾麪、后天→後天、里面→裏面等）和 NULL 回退，Fcitx5 原生测试加了「头发→頭髮」。Linux 容器构建门禁（`platforms/linux/build-container.sh`，镜像已不装 `libicu-dev`）31/31 通过；Fcitx5 原生测试只编译链接，运行需要锁定资源目录，本次未跑。未在真实桌面会话里目视验收。
+- macOS（`CFStringTransform`）仍是逐字转换。
+
+### Server 不再弹控制台窗口；维护快捷键「停止」真正停下；诊断日志落盘（2026-09-23）
+
+- 控制台窗口：`msime-client-server`（`MetasequoiaImeServer.exe`）原是控制台子系统程序，Watchdog 与 TSF DLL 每次拉起它都会带出一个黑色控制台窗口。来源的 Server 是窗口程序，没有这个窗口。现在链接为 Windows 子系统（MinGW `-mwindows`；MSVC `WIN32_EXECUTABLE` 加 `/ENTRY:wmainCRTStartup`，入口仍是 `wmain`）。`--config` 预览与 `--help` 从终端启动时挂到父控制台（`AttachConsole(ATTACH_PARENT_PROCESS)`），状态行与 Ctrl+C 照旧；受管启动（`--watchdog-managed` / `--production`）从不挂接，因为 TSF DLL 是在当前焦点程序里拉起 Server 的，那个程序本身可能是控制台程序。
+- 停止快捷键（Ctrl+Shift+Alt+T）：原来只是让主循环退出、返回 0，Watchdog 把 0 当成非正常退出，两秒后又把 Server 拉起来，等于「停止」无效。现在返回 `watchdog::stop_exit_code`，与来源 `window_hook.cpp` 的 `ExitProcess(kStopExitCode)` 一致，Watchdog 随之退出。已打开的设置等 Tauri 窗口是独立进程，不随 Server 关闭，与「重启」时的行为相同。
+- 诊断日志文件：受管模式下 stdout/stderr 没有去处，原来写到控制台的诊断无人可见。设置页「Server 端日志」「TSF 端日志」两个开关（`diagnostic_log.server` / `diagnostic_log.tsf`）原本只影响控制台输出，现在分别控制写入数据目录下的 `logs\server.log`：Server 启停原因、各组件是否就绪、退出码，以及 TIP 上报的诊断批次。来源写到桌面、失败再退回数据目录；这里固定写数据目录，因为输入法在桌面上凭空出现文件不是用户预期的副作用。文件达到 4 MiB 时轮转为 `server.log.1`，最多保留两份；新文件带 UTF-8 BOM，行尾 CRLF，与来源一致。只记状态，不记按键、输入内容或候选文本。偏好发布时立即生效，无需重启 Server。
+- 证据：MinGW 交叉构建与 Wine 下的原生用例；未在 Windows 主机上目视确认。
+
+### 检查更新改读本仓库的 Windows 发行版；Server 上报的版本号取自 version.txt（2026-09-23）
+
+- 检查更新：来源的「关于」页读 `https://msime.app/update.json`，那份清单描述的是来源产品，`releaseUrl` 指向 `metasequoiaime/MSIME-Windows`。共享设置页在 Windows 上沿用了这个地址，而校验只接受本仓库 `metasequoiaime/msime/releases` 下的链接，所以 Windows 上每次检查都显示「检查失败」；就算放行，也会把用户带去下载另一个产品。现在 Windows 与其他平台一样读本仓库的发行版列表。
+- 发行版按平台挑选：各平台由 `.github/workflows/release-*.yml` 独立发布到同一个仓库，标签带平台前缀（`windows-v1.2.0`、`linux-v1.2.0`）。原来的 `releases/latest` 只返回整个仓库最新的那一个，通常属于别的平台（写作时是 `macos-v…`），带前缀的标签又解析不出版本号，于是 Linux 等平台的检查同样一直失败。现在读取列表，只取本平台前缀、非草稿、非预发布的发行版，按版本号而不是列表顺序取最新；没有则显示「暂无可用发行版」。
+- 版本号：Server 的遥测原本写死 `0.1.0-dev`。现在由 CMake 从 `platforms/windows/version.txt` 读入（发布工作流读的也是它），`Build-Client.ps1` 带 `-TargetVersion` 构建安装包时同一个版本号同时传给 Tauri 和 Server。
+- 证据：设置页用例覆盖 Windows 读列表、跨平台与预发布过滤、按版本比较；MinGW 交叉构建。未在 Windows 主机上实际点「检查更新」。
+
+### 外部链接改走 ShellExecuteW；Windows CI 门禁真正编译（2026-09-23）
+
+- 外部链接：设置页「打开链接」在 Windows 上原来是 `cmd /C start "" <url>`，从 GUI 进程起一个控制台，会闪一下黑框，而且 URL 要经过 cmd 解析。现在走 `msime_host_windows::open_url`，用 `ShellExecuteW` 把 https URL 直接交给默认浏览器，非 https 一律拒绝；与已有的 `open_directory` 共用同一段调用。
+- CI：`ci-platforms.yml` 的「Windows GNU cross build」跑在 ubuntu-24.04 上，那里的 MinGW 头文件没有 `d2d1_3.h`（`msimeui` 的 SVG 渲染要用），凡是真正进入构建步骤的运行都失败，develop 上的绿色只是因为构建被跳过。现在该作业跑在 `debian:trixie-slim` 容器里，环境与 `platforms/windows/cross/Dockerfile` 一致；改动 `ci-platforms.yml` 本身也会触发全部平台门禁，门禁的修改因此能被自己验证。
+- 证据：`msime-host-windows` 与 `msime-desktop` 对 `x86_64-pc-windows-gnu` 通过 clippy（无新增告警）；本 PR 的 CI 运行即 Windows 门禁的验证。未在 Windows 主机上实际点击链接。
+
+### Linux 先选中输入法、后做首次配置时有引导（2026-09-23）
+
+来源的安装程序在安装时就把词库和出厂配置写进数据目录，输入法一能选中就能用，不存在「选中了但没准备好」这个状态。Linux 安装包按设计不产生用户状态，首次配置要由 `msime-linux-setup` 或设置窗口的首次配置页完成；此前用户若先在 IBus 里选中 MSIME，启动器只往 stderr 写一行就退出，界面上什么也看不到，Fcitx5 则只显示笼统的「MSIME：请检查运行配置」，两者都不告诉用户下一步做什么。
+
+适配方式不是照搬安装程序（包管理器安装不应按用户写状态，也不能替用户决定是否联网下载词库），而是在这个状态下把用户引到已有的首次配置页：新增随装脚本 `platforms/linux/scripts/msime-linux-first-run-guide`，有图形会话时脱离调用方打开 `msime-linux-settings`（窗口在缺少 `runtime-options.json` 时自己进入首次配置页），并用 `notify-send` 发一条通知；IBus 启动器与 Fcitx5 插件在「没有显式覆盖、用户与系统配置都不存在」时调用它，Fcitx5 面板同时显示「水杉输入法尚未完成首次配置：请打开「水杉输入法」设置，或在终端运行 msime-linux-setup」。显式覆盖无效、文件不可读或悬空符号链接仍按配置损坏处理。
+
+限流放在脚本里、两个宿主共用：`$XDG_RUNTIME_DIR/msime-client/first-run-guide.stamp` 存在就不再弹窗与通知，每个登录会话只引导一次，因为 ibus-daemon 每次选中都会重新拉起启动器、Fcitx5 每次聚焦都会激活输入法，按时间过期的冷却期会让继续打字的用户每隔几分钟被打断一次；会话没有 `XDG_RUNTIME_DIR` 时退到跨会话保留的缓存目录，只能按 5 分钟冷却期限流。Fcitx5 只在激活输入法时拉起引导，按键只显示面板提示，打字途中弹出的窗口可能抢走键盘焦点；插件另外把自身的拉起频率压到 30 秒一次。通知里的后续步骤按宿主区分：Fcitx5 下次按键就会重读配置，写「完成后即可直接输入」；IBus 组件已退出，写先切换到其他输入法再切回、仍不行就 `ibus restart`（后者未在真实 IBus 会话里验证）。脚本不创建状态目录（`msime-linux-setup` 拒绝准备已存在的目录），不发起任何网络请求。
+
+证据：`platforms/linux/tests/core/first_run_guide.py` 用桩替换设置窗口、`notify-send` 与 `msime-linux-ibus`，验证有图形会话时各调用一次、同一会话内（包括记录很旧时）不再调用、并发调用只引导一次、缓存目录下冷却期过后与时钟回拨后恢复、按宿主区分的通知文案、无图形会话与配置损坏时不调用、只装输入法时通知改指向终端命令；`platforms/linux/tests/core/first_run_guidance.cpp` 覆盖 Fcitx5 的配置定位与「尚未配置」判定；`fcitx5_contract.py` 钉住激活与按键两条路径都走新提示且只有激活拉起引导；`platforms/linux/fcitx5/tests/native.cpp` 在真实插件上验证面板提示、按键不被拦截、按键不拉起引导、激活只拉起一次、不写失败诊断（该测试需要校验过的资源目录，构建门禁只编译不运行）。未在真实 Linux 桌面上目视确认弹窗与通知。
+
+### Linux 候选外观补齐：纠错标记、英文字体、边框、悬浮工具栏主题（2026-09-23）
+
+- 纠错标记：Fcitx5 的候选行此前不画 `*`，IBus 与 Windows 都画。现在 `FcitxCandidate` 在（简繁转换后的）候选文本之后、云/AI 角标之前加 `*`，与 Windows `event_listener.cpp` 和 IBus `ClientEngine.cpp` 同序；只改显示文本，选词走 session/generation/index，上屏文本仍是 Engine 原文。
+- 英文字体：`candidate_english_font` 此前在 Linux 上可以保存、却没有宿主消费，`host_surface.rs` 因此对 Linux 隐藏该控件。现在两个 Linux 宿主写给桌面 panel 的 Pango 字体描述把英文字体排在主字体和补充字体之前（去重、去首尾空白），Pango 按字形逐个回落，效果与 Windows 先用英文字体、缺字再回落一致；未设置（缺省、null、空白）时描述与原来逐字节相同，仍按「未改动的默认值不覆盖桌面字体」处理，只选了英文字体也算一次字体选择。`HostCapabilities::candidate_english_font` 对 Linux 改为声明，设置页因此显示该行，未设置时说明为「跟随候选主字体」。
+- 边框（历史记录：四套内置皮肤已被全局主题模型取代，见 `skin/theme.rs`，下面按皮肤列出的边框与 willow_green 的行为不再是现状）：Linux 调色板补上 Windows 皮肤的容器边框——fluent 浅色为黑色 0.12、深色为 `#9B9B9B` 0.18，wechat 为 `#DEDEDE`/`#292929`，graphite 为 `#E2E5E9`/`#30353B`，willow_green 无边框。外部皮肤在 Windows 上以 fluent 为底，因此默认带 fluent 的边框；皮肤包的 `border` 字段（`#rrggbb`、`#rrggbbaa` 或 `transparent`）经 `candidate_display_preferences` 生效，用户的 `candidate_border_color` 仍优先；自定义颜色沿用皮肤宽度，willow_green 始终无边框；皮肤包里的 `rgba()` 等本宿主不解析的写法保留原边框，与 Windows 对无法解析值的处理相同。Fcitx5 classic UI 用 SOURCE 运算符绘制边框，半透明边框会把桌面透出来，所以颜色在解析时先与面板底色合成为不透明色再写入 `BorderColor`。宽度取整数：Windows 原生卡片用 Direct2D 画 1.5 DIP 的抗锯齿描边（fluent；wechat/graphite 为 1），Fcitx5 classic UI 的 `BorderWidth` 只能是整数，所以所有带边框的皮肤在这里都取 1px，作为最接近且不改变布局的近似值；Background/ContentMargin 取 `max(2, 宽度 + 1)`，在现有宽度下保持 2，布局不变。IBus 的 lookup table 属性画不了边框，IBus 继续无边框，两端的颜色解析仍共用 `resolve_candidate_colors`。
+- 悬浮工具栏主题：Linux 的悬浮工具栏是 IBus 属性菜单和 Fcitx5 状态菜单，由桌面 panel 按自己的主题绘制，没有 Linux 宿主读取 `toolbar_theme`（只有 macOS `FloatingToolbarPanel.mm`、Windows `server_main.cpp` 和 HarmonyOS `KeyboardSession.ets` 读取）。设置页照「菜单主题」的做法对 Linux 隐藏该项。
+- 证据：Linux 构建门禁容器（GCC 12，`-Wall -Wextra -Werror`）编译并运行字体策略、调色板、Fcitx 主题用例；Fcitx5 原生用例的纠错标记断言在容器内手动运行；`cargo test -p msime-client-core host_surface`、clippy；设置页 vitest 与 `tsc`。未在真实 Fcitx5/IBus 桌面上目视确认边框、字体和标记。
+
+### Linux 候选翻译只问用户选中的那一家（2026-09-23）
+
+- 缺口：Linux 的腾讯密钥存放在 provider 自己的 `tencent-provider.json` 中，在设置页换成别的服务或选「关闭」，这个文件都不会被删。socket 协议只携带 `custom_translation` 和 `niutrans`；host-api 生成的 `tencent_tmt` 字段会在 `TranslationQuery` 反序列化时被丢掉，而且 Linux 偏好里本来就没有腾讯密钥，这个字段始终是空的。结果是 `msime-linux-online-provider` 只要收不到另外两家的配置，就去读腾讯文件并发出请求：选「关闭」、选 NiuTrans 但 App ID/API Key 不全、选自定义服务但 endpoint 为空，这三种情况下候选文字都会发给腾讯。来源 `cloud_translation.cpp` 的 `ActiveProvider()` 同一时刻只认一家（NiuTrans 优先，其次自定义，再次腾讯），`ResolveCredentials()` 在 `tencent_tmt.enabled=false` 时返回空，`WorkerLoop` 发现所选服务不可用时直接 `continue`，从不退回腾讯。
+- 协议：`TranslationQuery` 新增 `provider`（`none` / `tencent` / `niutrans` / `custom`）。host-api 只根据三个 `enabled` 开关计算这个值，规则与来源 `ActiveProvider()` 一致，三家都没开时为 `none`；所选服务配置不全时也照实填写。协议里只说明选的是哪家，不传任何腾讯密钥。
+- provider：`translations()` 按 `provider` 分派。`none`、未知值、所选的 NiuTrans 或自定义服务没有随请求带来配置，都返回空结果，不访问网络；只有 `provider=tencent` 时才读取腾讯文件。后续发请求也按所选服务分派，请求里夹带的其他服务配置不会改变去向。缺少该字段的请求来自旧版宿主，这时沿用旧规则（NiuTrans、自定义、腾讯依次取第一个可用的），混用新旧版本时行为不变。
+- 宿主侧：`UnixSocketProvider::translate` 遇到 `none` 直接返回空结果，连本地 socket 都不连接，候选文字不会离开输入法进程。IBus 与 Fcitx5 引擎代码没有改动：它们转发的是 host-api 生成的查询，`provider` 变化会让去重键变化，从而重新发起请求。
+- 证据：`platforms/linux/tests/dictionary/translation_provider_selection.py` 放了一份有效的腾讯凭据，断言关闭、NiuTrans 缺凭据、自定义缺 endpoint、未知服务这几种情况都不会发出网络请求，并断言只会请求所选的那一家，旧版宿主的请求保持原来的选择。该用例在改动前的脚本上失败 8 项，改动后全部通过。input-runtime 单测覆盖 `provider` 在 JSON 往返中不丢失、缺省时仍为缺省、`none` 不连接 socket；host-api 单测经 `msime_client_translation_provider_request` 走真实 socket，确认腾讯、NiuTrans（凭据不全）、自定义（endpoint 为空）三种选择原样到达 provider，关闭时不发生连接。未在 Linux 桌面上连接真实翻译服务做验收。
+
+### HarmonyOS 2in1 硬件键盘从第一个字母起组字（2026-09-23）
+
+2in1 上此前字母键被领进组合串后，预编辑与候选窗都不出现：硬件字母能延长组合串，却起不了组合串。诊断日志补上 `upper`/`shift`/`caps` 三项后，2in1 实例给出 `upper=true shift=false caps=false`：该设备对不带修饰键的字母键报出的 `unicodeChar` 是**大写**，而触摸路径送的是小写。Engine 的 `InputSession::handle_character` 只在已有组合串时把大写字母当辅助码收下，没有组合串时返回未处理。`HardwareKey` 注释里「shift 与 caps lock 已由系统应用」的假设对字母不成立。
+
+修复分两处，都在宿主：`HardwareKeyRouter.normalizeLetterCase` 按 `shift XOR capsLock` 重建字母大小写，与 Windows 宿主从虚拟键与键盘状态推出字符同理；`press()` 与 `HardwareKeyDispatch.apply` 改为报告按键是否被消费，Engine 拒收的字母连同它的抬起一起交还应用，对应 TSF 的 eaten/not-eaten 模型——此前被领取后什么都没发生的键就是用户打了却看不见的字符。
+
+同一轮设备验证还挖出三个此前把 2in1 整个挡在门外的缺陷，修复顺序即暴露顺序：
+
+1. 保存过的自定义键盘设计里 `photo` 为 JSON `null` 时，`CustomKeyboardSkin.decodePhoto` 读 `null.length` 抛出，`onCreate` 不建会话、不建面板、不注册按键监听，输入法完全失效。
+2. Rust 端 `phrase_prefix` 带 `skip_serializing_if = "String::is_empty"`，ArkTS 却把它声明为必填 `string` 并直接取 `.length`，于是每次 render 都抛。改为可选并以空串兜底。
+3. `msime_client_personal_dictionary_sync` 按 `{options, action}` 信封解析请求，而 C 头文件写明、Android 与 HarmonyOS 两个调用方实际传的都是与 `msime_client_create` 相同的裸 HostOptions。每次调用都以 `invalid dictionary request` 失败：Android 静默吞掉，HarmonyOS 则每 2 秒重建一次 Engine 会话、永不停止。改 Rust 实现去服从头文件契约，并加 host-api 回归用例。
+
+修复后在 2in1 实例的浏览器页内搜索框里注入 `n f d`，候选窗出现 `nfd / 1 你发的`，空格上屏 `你发的`，浮动工具栏同时显示。
+
+### HarmonyOS 2in1 悬浮工具栏：手写板与语音按钮；表情与语音面板的返回键（2026-09-23）
+
+- 按钮：macOS 工具栏多出的手写识别板与语音输入（第四十三批）现在也画在 2in1 的工具栏上，位置同 macOS：表情之后是手写，屏幕键盘之后是语音，齿轮最后。两个按钮读共享偏好 `floating_toolbar.handwriting` / `floating_toolbar.voice`，旧文档缺这两个字段时按共享默认值显示。工具栏最多九个按钮，宽度随之加宽。
+- 手写：新增 `DesktopSurface.HANDWRITING`，候选窗打开的是手写板本身，不带手机上那排空格/回车/语言键，因为 2in1 上这些键由实体键盘负责。识别结果放在候选条上，与输入方案无关；关闭手写板会清掉笔迹。
+- 语音：按钮打开的是已有的语音面（快捷键用的也是它），用户在面板里点开始。无论从哪条路径离开语音面，只要录音还在进行，就会取消，避免窗口关掉之后后台还在录。
+- 能力位：`floating_toolbar_handwriting` / `floating_toolbar_voice` 由 `SettingsFormFactorCapabilities` 投影，只在 2in1 上报 true，所以设置页只在 2in1 上显示这两个开关。手机没有悬浮工具栏，仍然是 false。
+- 顺带修复：表情面板的「‹」和语音面板的「返回」原来只调用 `show(SURFACE_NONE)`，那只改得了手机面板的状态。2in1 上由工具栏打开的是 desktop surface，这两个键点了没有任何反应，只能再点一次工具栏才能关掉。现在当前 desktop surface 正是这张面时，返回会关掉它；如果是在 2in1 屏幕键盘里打开的同一张面，返回仍然只退回键盘。
+- `ToolbarButton` 新成员加在枚举末尾：`PanelSurfaceAction.SCREEN_KEYBOARD = 5` 按数值镜像屏幕键盘按钮，插到中间会让屏幕键盘快捷键打开别的面。按钮的显示顺序由 `buttons()` 决定，和枚举顺序无关。
+- Rust 与前端依赖的通知：发布工作流在 Windows runner 上用 `platforms/linux/collect-notices.py`（与 Linux 发布同一个收集器）从 Cargo 解析出的 Windows 依赖图收集 `msime-host-api`、`msime-engine-bridge`（词库回放工具）和 `msime-desktop` 静态链接的 crate 许可证文件，再从 `apps/desktop` 的 `node_modules` 收集前端打包进去的 npm 包，两份文件作为 `-SupplementalNotices` 交给 `Collect-Notices.ps1`，随 `THIRD_PARTY_NOTICES.txt` 进安装包。
+
+### HarmonyOS 2in1 硬件键盘：Ctrl+Shift+F 简繁、U 模式、音节分隔符与微软双拼的 ing（2026-09-23）
+
+对照来源 `server/src/ipc/event_listener.cpp` 与 `input_key_policy.h` 逐键核查 2in1 硬件键盘，查实四处与 Windows 行为不一致，均在 `HardwareKeyRouter` / `InputModeRouting` 里修正。手机软键盘走 `Action::Character`，不受影响。
+
+- Ctrl+Shift+F：来源 `HandleImeKey` 在 `IsCharacterSetShortcut` 上调 `SetConfiguredCharacterSet`，切换的是简繁；设置页这一项也写着「Ctrl+Shift+F 切换简繁」。本宿主原来把它和 Ctrl+Shift+Space 一样当成全角/半角。现在 `ModeGesture.TOGGLE_CHARACTER_SET` 只表示简繁，全角/半角改用 `TOGGLE_WIDTH`。简繁切换与工具栏「简/繁」按钮共用 `KeyboardSession.toggleCharacterSet`，写回 `traditional_chinese_output`。和来源一样，只在中文状态下切换，但开关打开时英文状态下也会吃掉这个组合键。
+- U 模式：组字进行中数字 1–9 一律被当成选词、0 放给应用、`+` 被当成标点，于是 `u4e00`、`U+1F600` 都打不出来。现在 `local_mode` 为 `unicode` 时，不带 Shift 的 0–9 进入组字，Shift+1–9 选词（来源注释 “U-mode: Shift+1..9”），`+` 只在输入恰好是 `U` 时进入组字。规则与 Linux 宿主的 `unicode_digit` / `unicode_plus_key` 一致。
+- 拼音分隔符 `'`：来源 `IsManualPinyinSeparatorKey` 把它送进输入串，本宿主原来把它当成标点，先上屏高亮候选再插一个引号。现在组字中、光标不在开头时进入组字，范围与 Linux 的 `accepted_apostrophe` 相同：非五笔的普通输入，或者 emoji、kaomoji、临时日语三种本地模式。
+- 微软双拼 `;`：来源 `IsMicrosoftShuangpinIngKey` 把它当作 ing 韵母。现在视图报告 `microsoft_shuangpin` 时，只要它是本音节的第二键（从最后一个 `'` 数起按键数为奇数），就进入组字；否则仍是标点。
+
+路由所需的状态由 `KeyboardSession.hardwareSpelling()` 从最近一次引擎视图中读出，通过 `HardwareSpelling` 传给 `HardwareKeyRouter.route`。这几条规则放在翻页键判断和数字选词之前，因为 Shift+= 本身就是 `U+` 里的 `+`。
+
+### HarmonyOS：设置页保存后键盘立即生效（2026-09-23）
+
+来源里设置程序保存后发 `WM_APPLY_IME_CONFIG`（`server/src/config/ime_config.cpp:1566`），服务端收到后重读配置并刷新候选窗与工具栏，另有 300 ms 的 `TIMER_ID_CONFIG_SYNC` 兜底（`server/src/window/ime_windows.cpp:2199`、`2673`）。本宿主的设置页（EntryAbility）与键盘（InputMethodExtensionAbility）是两个进程，键盘只在 `onCreate` 读一次偏好，所以设置页改了方案、皮肤、键盘高度、工具栏或模式切换键后，要等输入法进程被系统回收重建才会生效。
+
+适配方式不照搬定时器：键盘记住建会话时读到的偏好文档 `revision`，每次编辑框获得焦点（`attach`）时比对一次存储中的 `revision`，这正是用户能用新设置打字的最早时刻，代价只是一次小文件读取。变了就走现有的 `restartIdleSession` 重建引擎会话（保留中英文与九宫格状态），随后通知两处：
+
+- 视图（`onViewPreferencesReloaded`）：重读皮肤、几何、方案与键面，手机上按新高度调整面板；
+- 输入法扩展（`onPreferencesReloaded`）：重新绑定模式切换键；2in1 上按新设置开关浮动工具栏与模式角标（两者共用唯一的 STATUS_BAR 面板，工具栏优先），已开的工具栏按新按钮集重排。
+
+正在组字或处于本地模式（U 模式、emoji 等）时不重建，下次获得焦点再取。云同步把偏好写入同一文档，同样通过这条路径生效。键盘自己经 `changePreferences` 写入时会同步记下新 `revision`，不会因此触发重建。
+
+### HarmonyOS 2in1 硬件键盘：Ctrl+Shift+E 英文候选模式（2026-09-23）
+
+纠正上文「`Ctrl+Shift+E` ……`InputModeRouting` 已实现」的判断：本宿主原来把它和 Shift 轻点一样当成中英切换，进入的是直接英文，硬件字母原样交给应用。来源里这是两件事：Shift 由 TSF 切中英（`FUNCTION_TOGGLE_IME_MODE`，上屏原始字母），`Ctrl+Shift+E` 是 `IsEnglishModeToggleKey` → `SetEnglishInputMode` + `ClearState`，打开服务端的英文输入模式，字母进入组字、候选框列英文词（`UpdateEnglishInput`），TSF 侧按 `FUNCTION_CANCEL` 处理，什么都不上屏。macOS 宿主也区分两者（`toggleDedicatedEnglishMode:`，工具栏显示 En）。
+
+本宿主的引擎侧本来就是 dedicated-English 标志，差别只在硬件键是否送进引擎。现在 `ModeGesture.ENGLISH_CANDIDATES` 调 `KeyboardSession.toggleEnglishCandidates()`：打开英文模式并记下英文候选子模式，`HardwareKeyRouter` 此时把字母送进组字，音节分隔符、U 模式和微软双拼的特殊键规则都不生效（引擎在该模式只收字母），标点和中文态一样结束组字后按标点设置输出。再按一次、Shift 轻点或工具栏语言按钮都回到中文；密码与网址类编辑框强制直接英文。工具栏语言按钮显示 `En`，与来源和 macOS 一致。手机软键盘的字母一直走引擎，两种英文在手机上本就是同一个模式，不受影响。
+
+### HarmonyOS 2in1：表情面板的剪贴板页（2026-09-23）
+
+来源的表情面板最后一页是剪贴板历史（`server/src/emoji-panel/EmojiPanel.h` 的 `Page::Clipboard`）。本宿主的剪贴板历史原来只能从手机键盘的工具面板进入，2in1 没有入口。现在 2in1 的表情面板（工具栏 ☺ 打开的 `DesktopSurface.EMOJI`）在「表情 / 颜文字 / 符号」之后多一个「剪贴板」页：点条目上屏，可固定、删除、清空（二次确认）。手机不加这一页，仍从工具面板进入，两处共用同一份条目列表 `clipboardEntries()`。
+
+与来源的差异：来源由 `ClipboardMonitor` 在后台记录每次复制；HarmonyOS 只把剪贴板读取权限给系统应用，本宿主也不在后台记录，所以这一页和手机一样用「保存当前」按钮手动保存。设置里关闭剪贴板历史时这一页只显示提示，来源的「启用」按钮不照搬，开关统一留在设置页。
+
+### HarmonyOS 2in1：全屏应用上隐藏悬浮工具栏
+
+来源的窗口钩子（`window_hook.cpp` 的 `OnWinEvent`）在前台窗口全屏时隐藏悬浮工具栏，退出全屏后按配置恢复，游戏或视频画面上不会压着一条没人在用的状态栏。HarmonyOS 以前在 2in1 上始终显示工具栏。
+
+- 现在编辑框每次获得焦点时，都用 `InputClient.getCallingWindowInfo()` 查询所在窗口的状态：`WindowStatusType.FULL_SCREEN` 时隐藏工具栏，焦点回到非全屏窗口时再显示。
+- HarmonyOS 不会主动通知输入法窗口状态的变化，只能在查询时拿到，所以编辑框保持焦点期间才进入全屏的窗口，要到下一次聚焦时才会生效。
+- 工具栏被设置关闭后再重新打开时，隐藏标记会随之清掉，不会把新开的工具栏误当成已隐藏。
+- 手机没有悬浮工具栏，这一改动不涉及手机。
+
+### HarmonyOS 2in1：行内预编辑（`tsf_preedit_style`）
+
+来源用 TSF 在文档里画正在拼写的内容：`raw` 是按下的字母，`pinyin` 是分好词的拼音，`empty` 则不画。Linux 的 IBus 和 Fcitx5 读的是同一个字段。HarmonyOS 以前在任何形态下都只在候选区显示拼写，文档里什么也没有，「行内预编辑」这个设置在鸿蒙上也就不起作用。
+
+- 2in1 现在通过编辑框的预上屏文本（`InputClient.setPreviewTextSync`）按设置显示拼写。已经选定的半个词（`phrase_prefix`）排在拼写前面，和候选窗的画法一致。提交时用 `insertText` 替换预上屏文本；取消或拼写清空时写入空预上屏，再 `finishTextPreview`。
+- 只有编辑框的属性声明了 `isTextPreviewSupported` 才启用。编辑框接口报错（例如 12800011）时，这次聚焦期间停用预上屏；这时如果文档里还留着拼写字母，就结束预上屏，并在确认光标前正是这些字母之后删掉它们。
+- 每次预上屏变更都和插入一样登记为键盘自己的编辑，所以编辑框回传的 textChange 不会被当成用户改了文本，也就不会结束组字。
+- 预上屏期间，提交一律走同步插入，保证它排在下一次预上屏更新之前；智能标点读取光标前的字符时会去掉预上屏部分，读到的是用户写下的文字，而不是拼写字母。
+- 手机不变：拼写仍显示在按键上方那一条，手机没有贴着光标的候选窗，这个设置在手机上不生效。
+- 未在真机或模拟器上验证预上屏的回声和替换行为，上面的处理依据的是 SDK 文档中的接口约定。
+
+### HarmonyOS 2in1 硬件键盘：Home / End 跳到候选列表首尾
+
+- Windows 在有候选时把 Home / End 映射成 `FUNCTION_MOVE_PAGE_TOP` / `FUNCTION_MOVE_PAGE_BOTTOM`，焦点跳到候选列表的第一项和最后一项。2in1 现在也这样处理：有候选时 Home 发 `FIRST_CANDIDATE`（104），End 发 `LAST_CANDIDATE`（105，host-api 会先展开整张列表再取最后一项）；没有候选时仍然是移动编辑光标。
+- 手机不受影响：Home / End 只从硬件键盘分发进来，手机的软键盘没有这两个键。
+
+### HarmonyOS 2in1：菜单主题（`menu_theme`）
+
+- 订正（2026-09-23）：Windows 的 `menu_theme` 只决定托盘语言菜单是深色还是浅色，候选右键菜单并不读它。来源 `windows_webview2.cpp` 用 `GetConfiguredThemeMenu()` 选托盘菜单页面，`tray_menu_presenter.cpp` 同样只给托盘菜单取色；候选右键菜单的 `menuFill` / `menuBorder` 在 `candidate_presenter.cpp` 里跟着候选窗主题（`candLight`）和皮肤走。本仓 Windows 宿主一致，`server_main.cpp` 只把 `menu_theme` 交给 `TrayMenuWindow`。鸿蒙 2in1 没有托盘；它把候选词管理条按 `menu_theme` 配色，跟随全局时和其他面板一样回落到全局主题，这是借用这个设置的平台取舍，不是 Windows 的对等行为。常用标点、括弧、释义这几条属于键盘本身，仍然用键盘配色。
+- 手机的设置页不显示这一项（`mobile_settings` 为真），手机上的管理条也继续用键盘配色。
+
+### HarmonyOS 硬件键盘：全角模式与交给应用的字符统计
+
+- 全角：Windows 开着全角且候选窗未打开时，会吃掉每个可打印 ASCII 键（`' '` 到 `'~'`，`CompositionProcessorEngine.cpp` 的 `IsDoubleSingleByte`，由 `KeyEventSink.cpp` 分类为 `FUNCTION_DOUBLE_SINGLE_BYTE`），改为插入全角形式。鸿蒙原先把这些键直接交给应用，于是英文字母、空闲时的数字和空格、英文模式的标点、引擎拒收的大写字母都以半角出现。现在路由在全角开启且未组字时返回 `WIDEN`，会话按 `FullWidthInputPolicy` 插入（空格变成 U+3000，与其他路径一致）；引擎拒收的大写字母也改为插入全角。Ctrl / Alt / Win 组合键仍交给应用；中文模式的标点仍走标点路径，那条路径本来就会把字面标点转成全角。
+- 统计：Windows 会把交给应用的字符也记进打字统计（`stats_passthrough.h` 的 `ShouldCountPassthroughChar`：可打印、未按 Ctrl / Alt / Win，Shift 可以；控制字符和 DEL 不算）。鸿蒙原先只统计自己插入的文字，硬件键盘直接交给应用的字符漏记。现在按键按下且被交给应用时按同一规则计入（`TypingStatisticsPolicy.countsPassthrough`）；键盘不组字的编辑框（例如密码框）不计，这是本仓的取舍：输入法不记录密码框里敲了多少字。
+- 手机接实体键盘时走的是同一条硬件键路径，所以行为一致；软键盘本来就由输入法自己插入文字，不受影响。
+
+### HarmonyOS：切换中英文时上屏的原始字母不再学成英文词
+
+- Windows 只在按 Enter 时把输入的原始字母学成英文词（`event_listener.cpp` 里 `VK_RETURN` 分支调用 `ShouldLearnEnteredEnglishWord`）。Shift 切换中英文时 `_HandleToogleIMEMode`（`KeyHandler.cpp`）只把按键缓冲原样上屏，不学习。
+- 鸿蒙切换中英文时发的是 `MSIME_COMMIT_RAW`（2）。这条命令会走 `commit_raw_with_policy`，按 Enter 的规则学习；在 Ctrl+Shift+E 英文候选模式下，引擎自己的原始上屏也会学习。于是在中文模式下打了 `hello` 再切到英文，`hello` 会被记进英文词库。
+- 共享层新增 `MSIME_COMMIT_RAW_WITHOUT_LEARNING`（15）：同样把字母原样上屏，但不学习。在英文候选模式下，它读取预编辑后取消组字，绕开引擎自带的学习；临时模式的引导字母照 `InputSession` 的做法去掉。鸿蒙切换中英文的边界改用这条命令；Enter 和触屏上的原样上屏仍用 2，继续学习。手机和 2in1 走的是同一条路径。
+- Linux 的 Ctrl+Space 等切换组合键（`FcitxEngine.cpp`）同样发 2，存在同样的差异。那是 Linux 宿主的事，这里没有改动。
+
+### Windows：候选右键菜单每次打开都针对当前候选；托盘切换悬浮工具栏不再关菜单（2026-09-23）
+
+- 候选右键菜单：`CandidateWindow::show_context_menu` 只在第一次右键时创建 `CandidateFlyoutWindow`，选择回调按值捕获了那一次的 `CandidateClick`（会话、代次、候选序号），此后每次右键复用同一个浮出窗，置顶 / 删除 / 固定排位发出的都是第一次右键那个候选——在会话或代次已经变化后被 Engine 拒绝，或者落到同序号的另一个词上。同一段代码也只在创建时设过一次配色，之后切换皮肤、候选窗主题或系统深浅色，右键菜单仍是旧色。来源每次打开都重建菜单（`candidate_presenter.cpp:560-563` 刷新配色，`:698-765` 按当次候选建菜单）。本仓仍复用浮出窗（它持有两个窗口和两套 Direct2D 设备），改为每次打开时记录当次目标并重设配色：目标由 `CandidateMenuLayout.h` 的 `CandidateMenuTarget` 保存，一次选择消耗一次打开；菜单行到 Engine 动作的映射抽成 `candidate_menu_action`。`windows-candidate-menu-layout` 覆盖连续多次打开、未选即再开、子菜单行不消耗目标等情形。
+- 托盘菜单：来源的「悬浮工具栏」行是开关，点了原地翻转、菜单留着（`tray_menu_presenter.cpp:175-186`），其余行先 `Hide()` 再打开对应界面（`:188-199`）。本仓以前对所有成功的命令都关菜单。现由 `TrayMenuLayout.h` 的 `tray_menu_closes_after` 决定：只有工具栏开关留着菜单，并按 Server 报告的实时状态重画这一行。`windows-tray-menu-layout` 覆盖。
+- `CandidateMenu.h` 核对后不接入真实菜单：它是扁平的一级菜单（置顶、第 1–5 位、取消固定、删除平铺），而来源和本仓实际使用的 `CandidateMenuLayout.h` 都是「固定排位」带二级子菜单的结构；两份头文件定义了同名的 `CandidateMenuCommand` / `CandidateMenuItem`，不能同时包含。目前只有 `tests/ui/candidate_menu.cpp` 引用它，保留不删。第十八批那句「`CandidateMenu.h` 的注释直接引了来源行号」说的单码点不给删除的规则，真实菜单里由 `CandidateMenuLayout.h` 的 `candidate_menu_items` 实现，行为相同。
+- 验证层级：两个菜单的规则在本机用 clang 编译并运行对应的头文件测试；Windows 窗口代码经 `build-cross.sh x64` 交叉编译通过，没有在 Windows 桌面上实际点过。
+
+### Windows 语音与来源逐项对齐：录音上限、失败提示、空格锁定、豆包数组结果、快捷键文案（2026-09-23）
+
+- **批量录音上限**：原先固定 60 秒，超过后在提交时报「录音超过 60 秒上限」并丢掉整段。现在上限取共享的 `batch_capture_sample_limit`，采集回调按 `voice_batch_capture` 只收下剩余空间并标记已满；Server 主循环每一轮调用 `VoiceInputSession::maintain()`，发现已满就走正常的 `stop()`，提交已录部分，与 macOS 相同。流式豆包不在本地缓冲音频，不受这个上限约束。
+- **失败提示**：缺 Token / 接口地址 / 模型、豆包 `Start()` 失败、麦克风打不开、录音途中采集回调失败（`AudioCapture::callback_failed()`，由 `maintain()` 在录音期间与 `stop()` 时检查）、豆包结束时的 `LastError()`，以及批量识别失败都会给出提示。批量识别失败时显示共享 `CloudAsrError::user_message()` 带出的服务商消息或 HTTP 状态，拿不到时才用「语音识别失败」。提示显示在语音浮层上（理由见「与来源刻意不同的取舍」）。原先的失败提示在控制线程上 `Sleep(1200)`，而浮层窗口也在这条线程上，显示与隐藏两条消息被连着处理，提示实际上从未出现；现在由后台任务轮询 4 秒后隐藏，控制线程不再阻塞。走 Tauri 语音面板的录音仍由面板报告失败，不弹浮层。
+- **空格锁定**：按住录音时按空格锁定，浮层显示 ✓ / ✗ 两个按钮，对应来源 `ControlLoop` 的 `set_actions_visible(true)`。
+- **豆包数组结果**：`bigmodel_nostream` 的 `result` 可以是分段数组，`DoubaoTranscript.h` 按顺序拼接各段 `text`，对象形式与 `payload_msg` 信封照旧，与来源 `ExtractTranscript` 一致。
+- **快捷键文案**：共享设置页只在 Windows 上改为「长按右 Alt 录音」「长按右 Ctrl+右 Alt 录音」「长按 Ctrl+Win 录音」「长按录音时按空格锁定」，说明文字写明松开结束、空格锁定后再按快捷键或 ✓ 结束、Escape 或 ✗ 取消；macOS 与其他平台的文案不变。
+- **验证**：新增 `windows-voice-session-policy` 与 `windows-doubao-transcript` 两个纯逻辑 ctest，在 macOS 上用宿主编译器经 `scripts/test-windows-native-run.py` 运行通过，撤掉改动（60 秒上限、只认对象形式）时会失败；x64 MinGW 交叉编译链接通过；设置页用例在 `apps/desktop` 的 vitest 下通过。没有在 Windows 上实际运行。
+
+### Windows 宿主读取共享设置页已提供的几项设置（2026-09-23）
+
+一次审计找出共享设置页在 Windows 上显示、但 Windows 宿主从不读取的几项设置。逐项对照来源后的处理：
+
+- **五笔剩余编码提示（`wubi_code_hint`）**：候选投影按 macOS 的 `WubiCodeHintPolicy` 规则算出每个候选在已输入前缀之后剩下的编码（仅五笔方案、严格前缀、非拼音回退、非本地模式），偏好开启时候选窗把它写成注释 `(hy)`，与 macOS 的写法相同。开关和候选排列方式放在同一个原子值里下发，所以切换它会让同一代候选重新绘制。来源没有这项设置，见上文「辅助码」一条。用例：`windows-wubi-code-hint`、`windows-candidate-layout-reload`。
+- **悬浮工具栏的中英切换按钮（`floating_toolbar.english_mode`）**：来源的中/英按钮始终显示，没有这个开关；共享设置页提供了它，macOS、Linux 和设置预览都遵守，Windows 只读另外六项。现在 Windows 也读它，缺省为显示，因此不改这项的用户看到的仍是来源的样子。用例：`windows-floating-toolbar-reload`。
+- **屏幕键盘高度（`touch_keyboard_height_adjustment`）**：Windows 的屏幕键盘是 Tauri 面板，固定按 1100×400 打开。现在按设置预览的同一算式 `400 + clamp(调整值, -12, 48)` 决定窗口高度，对设置页命令、托盘菜单启动路由和二次启动三条打开路径都生效；窗口已存在时重新打开会按新高度调整。页面本身按窗口高度伸缩，不需要另外传参。其他宿主不在本次范围内。
+- **每页候选项数量**：见上文 2026-09-21 那条的订正。共享设置页现在对所有宿主列出来源的 3–9；共享偏好仍接受 1–9，文档里存着 1 或 2 时这个值留在列表里并保持选中，保存别的改动不会把它改写掉。
+- **候选英文释义的默认值（`candidate_english_gloss`）**：来源默认显示 `english.db` 的释义，共享默认关闭。这一项**刻意保留差异**，不单独改 Windows 的默认：共享偏好没有按平台区分默认值的机制（`HostCapabilities` 只描述能力，不带偏好默认值），所有宿主都读同一份 `Preferences::default()`，而 Linux、Android、HarmonyOS 的测试和 README 都把「默认关闭」写成了约定。为 Windows 单独翻默认值需要先引入按平台的偏好默认，这属于产品取舍，留给所有者定。
+
+### Windows 面板、托盘、悬浮工具栏与检查更新的对齐（2026-09-24）
+
+- 屏幕键盘：来源的按键在松开时才发送，按下后把指针滑出按键再松开就取消。本仓以前在按下时立即发送，还带长按连发。现在 Windows 上按下只记录按下的键，并释放隐式的指针捕获；只有主按钮在同一个键上松开才发送，`pointercancel` 清除记录。滑出后再滑回原键松开仍然发送，和来源一致。修饰键、NumLock、键盘或辅助技术触发的点击（`detail` 为 0）仍按点击处理。其他平台保持按下即发送、长按连发。`apps/desktop/tests/input/keyboard-repeat.test.tsx` 覆盖这一行为。
+- 手写笔画上限：来源不限制笔画数。本仓的共享面板在其他平台停在 32 笔（与 Linux socket provider 的上限一致）；Windows 现在放宽到共享契约 `crates/client-core/src/panels.rs` 的 `MAX_STROKES`（64 笔），超出后仍然提示「笔画已达上限」。剩下的差异是：来源无上限，本仓在 64 笔处停止，这是识别请求的共享边界，没有改动。这项修改不需要 `crates/host-api/src/handwriting_cells.rs`。`apps/desktop/tests/core/handwriting-pointer.test.tsx` 覆盖这一行为。
+- 表情与手写面板的尺寸和位置：来源的表情面板是 550×610 的窗口（`server/src/emoji-panel/main.cpp`），手写面板也在工作区居中打开。本仓以前统一放在工作区底部居中。现在由 `SurfaceRoute::panel_for` 按宿主给出几何：Windows 上表情面板为 550×610、居中，手写面板保持共享尺寸 980×650、居中，键盘和其他面板仍在底部居中；其他平台不变。已知差异：本仓的尺寸是逻辑像素，来源按物理像素建窗；居中计算沿用原有的底部居中换算，高 DPI 下的差异此前就存在，这次没有改动。
+- 检查更新：来源在更新提示里给出安装包的 SHA-256 和未签名警告，并在十秒后放弃请求。本仓以前对 Windows 发行版不读取资产，也没有超时，网络卡住时按钮会一直处于忙碌状态。现在从发行资产中选出唯一的 `MetasequoiaIME_Setup_v*.exe` 和它的 GitHub digest，标记为未签名，警告改用来源的措辞（SmartScreen 拦截、uiAccess 失效），并给出 `Get-FileHash` 命令。没有 digest 时，提示用户下载同名 `.sha256` 文件核对。请求十秒后中止，并显示「检查失败，请稍后重试」。超时是所有平台共用的。
+- 托盘菜单与悬浮工具栏的配色：来源的原生托盘菜单（`TrayMenuPresenter::ApplyTheme`）和悬浮工具栏（`FloatingToolbarPresenter::ApplyTheme`）使用固定的中性色，只随各自的深浅色偏好切换，不跟随候选皮肤。本仓是有意的分歧：两者跟随全局主题，由 `CandidatePalette.h` 的 `toolbar_palette(CandidatePalette)` 和 `tray_menu_palette(CandidatePalette)` 从解析后的候选窗调色板派生（工具栏取底色、正文、悬停、描边与选中色，托盘取菜单的底色、正文、悬停与描边）。来源行尾的开关在本仓画成工具格（`TrayMenuWindow.cpp` 的 `TrayMenuRowKind::Tool`）：开启时整格填主题的 accent，图标与说明取 `candidate_on_accent`（按亮度取黑或白，所以 ink 的白色 accent 上仍然可读）；关闭时和普通行一样，只在悬停时填 hover。托盘中能力缺失的行用 `number` 色变暗而不是隐藏；来源的菜单没有这种行，所以这是本仓自己的取值。`windows-candidate-palette` 覆盖这些颜色。
+- 打字统计的 30 天明细表和永久保留由 PR #652 处理，这一批没有改动。
+- 验证层级：TypeScript 部分在本机跑了 vitest 和 typecheck；`msime-client-core` 在本机跑了 cargo test；配色头文件测试在本机用 clang 编译并运行；Windows 窗口和面板定位代码经 `build-cross.sh x64` 和 `cargo check --target x86_64-pc-windows-gnu` 交叉编译。以上都没有在 Windows 桌面上实际操作过。
+
+### Windows 原生设置窗口的页面归属与叫法跟共享设置界面对齐（2026-10-02）
+
+- 侧栏：「工具」组新增「AI 辅助」（共享页 `ai`），「标点与翻译」页去掉 AI 组（启用开关、服务商入口和打不开的「AI 对话」行）；`chat` 路由打开「AI 辅助」，AI 对话在共享应用里是它的子页。桌面端不再有「社区」页：社区皮肤在共享应用「主题」页的「社区皮肤」标签里，本窗口「主题」页的「社区皮肤」一行打开 `settings:skin`，`community` 路由打开本窗口的「主题」页。原来的「账户与社区」组只剩账号页，改名「账号」，页面改名「账号与同步」。
+- 「剪贴板」页改为打开共享应用的「剪贴板」页（`settings:tools`，本机剪贴板历史开关和云剪贴板入口都在那里），不再直接打开云剪贴板面板；侧栏名字随之从「云剪贴板」改回与共享界面一致的「剪贴板」，`tools` 路由打开它而不是「快捷键」页。
+- 页面内容按共享界面的分组摆放：中英混输、触发字符数、emoji 混输、颜文字混输从「标点与翻译 › 多语言与释义」移到「输入 › 候选与联想」，删掉「输入」页指向它们的「前往」行；词语学习改名「学习选词习惯」放进同一组；「拼音方案调频」从「词库」移到「输入」页末尾；Shift 加字母的本地模式组从「快捷键」移到「输入」，统一叫「快捷模式」；「切换中英文」从「输入」移到「快捷键 › 输入模式切换」，删掉「快捷键」页指回「输入」的那一行，「恢复默认快捷键」只恢复 `keybindings`；「词库 › 学习」里的「剪贴板历史」开关去掉，由共享「剪贴板」页负责。「词库」页只剩「管理」组。
+- 「辅助码详细设置」改为「辅助码插件」，打开共享 `settings:input`。共享路由里已不是独立页面的 `helpcode` 与 `download` 从 `route_aliases` 里删掉，不保留兼容映射。
+- 叫法：「主题模式」改为「颜色模式」，各界面主题的「跟随全局」改为「跟随颜色模式」，「覆盖主题模式」与「预览跟随主题模式」改为「覆盖颜色模式」，候选窗口主题与悬浮工具栏主题的说明写出各自只影响哪个界面；「关于」页的「数据与隐私」改「许可与隐私」、「开源许可」改「开源许可协议」、「版本发布记录」改「历史版本」；连接 AI 助手说明里的「候选框皮肤」改「候选窗口皮肤」；安装器 `config.default.toml` 的注释同步改为「颜色模式」。
+- 证据：`windows-settings-navigation` 覆盖新的侧栏、路由表与跳转目标，本机用 clang 编译运行通过。`main.cpp` 依赖 WinUI 3，本机没有编译，只能交给 Windows CI。
+
+### Windows：使用上报改走共享上报器，默认开启（2026-10-02）
+
+- 取代下面 2026-09-24 那一节的开关与事件：`telemetry_enabled` 不再读取，改读共享偏好 `usage_reporting`，默认开启，用户可以关闭。`TelemetryConsent.h` 的 `usage_reporting_enabled` 把缺省读作开启、显式 `false` 读作关闭，读不出布尔值时按关闭处理。
+- 事件：`platforms/common/Telemetry.cpp` 改成 Host API `msime_client_telemetry_*` 的薄封装，Server 不再自己用 libcurl 发送，也不再每次启动发 `download`。一个 Server 进程就是一次会话：启动时开始（只做文件 I/O，目录仍是 `%LOCALAPPDATA%\MSIME`，旧队列由 Host API 迁移），每天最多排一条 `active`，消息循环正常结束时排一条 `session`。投递在不等待的后台线程里进行，启动时一次，之后每 30 分钟一次。
+- 崩溃：`std::set_terminate` 回调写入异常类型和第一行说明（JSON 异常只保留类型和编号）以及 `CaptureStackBackTrace` 的调用栈；新增 `SetUnhandledExceptionFilter`，在不分配堆内存的前提下写入异常代码、出错模块和偏移，x64 上再用 `RtlVirtualUnwind` 沿 CONTEXT 回溯。两条路径都只写这次会话的崩溃记录，不联网；下次启动时变成 `crash` 和 `session_crash`，模块只保留文件名。只留下会话标记（注销、关机、被结束进程）不算崩溃。
+- 开关随偏好发布立即生效：关闭时清空队列、会话标记和崩溃记录，并停止记录崩溃；重新开启时像 Server 启动一样开始新会话。
+- 文案：设置页「匿名使用统计」和安装器「联网功能」页改为默认开启，并逐项写出发送内容。
+- 证据：`windows-telemetry-consent` 改为覆盖新的默认值和旧键；共享封装的会话、信号、terminate 和开关路径由 Linux 构建门禁里的 `common-telemetry` 在真实进程中验证。Windows 专有代码（异常过滤器、回溯、Server 接线、设置页、安装器）只能交给 Windows CI，本机没有编译或运行。
+
+### Windows：使用上报改为默认开启的 usage_reporting，走共享 Host API（2026-10-02）
+
+- 偏好：Server 和原生设置窗口都改读写共享偏好 `usage_reporting`（默认开启，开着时共享层不写进文档），不再读 `telemetry_enabled`；`TelemetryConsent.h` 的 `usage_reporting_enabled` 把缺省读作开启、显式 `false` 读作关闭、读不懂的值读作关闭。设置窗口「数据与隐私」和安装器「联网功能」页的文案逐项写出现在发送的内容。
+- Server：`platforms/common/Telemetry.cpp` 成为 Host API `msime_client_telemetry_*` 的薄封装，队列、安装 id、每日 `active`、会话和投递都在 Rust 里，不再用 libcurl 发遥测。每个 Server 进程一次会话，消息循环退出时排进 `session`；`std::set_terminate` 和 `SetUnhandledExceptionFilter` 只把崩溃记录（异常摘要加 `模块文件名+偏移` 的调用栈）写到 `%LOCALAPPDATA%\MSIME\telemetry-crashes`，下次启动才变成 `crash` 和 `session_crash`。投递在不等待的后台线程里进行，每 30 分钟一轮。偏好发布时开关立即生效：关闭清空队列并解除崩溃捕获。
+- 证据：`windows-telemetry-consent` 改为覆盖新语义；SEH 路径、Server 的实际投递和设置窗口文案只能在 Windows CI 和真机上看。
+
+### Windows：启动与崩溃上报改为用户开启，默认关闭（2026-09-24）
+
+- 原状：`server_main.cpp` 在 `wmain` 第一行同步调用 `msime::telemetry::start`，Server 每次被拉起都先向 `https://api.msime.app/v1/telemetry/events` POST 一次、写一次 `%LOCALAPPDATA%\MSIME\telemetry.json`，端点慢或不可达时最多拖住启动 8 秒；`std::set_terminate` 的崩溃回调同样无条件上报。没有任何偏好能关掉它，安装器「联网功能」页却写着云候选是「唯一一个装完就会生效的联网功能」。
+- 偏好：共享层新增 `telemetry_enabled`，默认 `false`，缺省的旧文档读作 `false`，所以升级不会替用户打开。设置页「关于」里的「匿名使用统计」开关只在 `host.platform === "windows"` 时显示，说明文字逐项写出发送内容（随机事件 id、类型、平台名 windows、版本号；崩溃事件另带固定文本 `std::terminate`）和端点。其余平台的上报行为不变，也不显示这个开关，因为它们的宿主不读它；macOS 的 `preference_coverage.py` 因此把它列为不适用。
+- Server：读到已保存的偏好后由 `TelemetryConsent.h` 的 `telemetry_consented` 判断，只有显式 `true` 才算开启。开启时启动事件改在不等待的后台线程里发送，与 Linux 的 IBus 宿主一致，不再阻塞启动；关闭时不发送、不写 `telemetry.json`。崩溃回调读一个随偏好发布更新的原子开关，设置页保存后立即生效；启动事件在下一次启动时按新值决定。`curl_global_init` 移到 `wmain` 开头、任何线程创建之前。
+- 安装器：「联网功能」页补上一句，说明匿名使用统计默认关闭、要在「设置 → 关于」开启，以及开启后发送什么。
+- 证据：`msime-client-core` 的 `telemetry_is_opt_in_and_survives_a_save`（默认、旧文档、非布尔值拒绝、保存往返）；设置页用例覆盖 Windows 显示且默认关闭、保存写入 `telemetry_enabled: true`、其余五个平台与无宿主时不显示；`windows-telemetry-consent` 在本机用 clang 编译运行，并做过变异检查。`build-cross.sh x64` 交叉编译链接通过（含 Server 与该用例）。没有在 Windows 主机上运行 Server，也没有抓包确认开关关闭时不发请求、开启时启动不再被阻塞；安装器文案未在真实向导里看过。
+
+### 安装器升级与卸载生命周期（2026-09-23）
+
+对照来源 `installer/msime_setup.iss` 与 `server/src/main.cpp` 逐条核对后，下面六处差异都成立，一并修掉；另外顺带发现一处数据目录标记的问题。
+
+- **卸载删不掉自定义数据目录**：`DataDir` 注册表值带 `uninsdeletevalue`，卸载步骤里就已被删掉，`usPostUninstall` 再调 `GetDataDir` 只会回落到默认的 `{localappdata}\metasequoiaime`，自定义目录因此永远留在磁盘上。现在 `InitializeUninstall` 像缓存 `VersionDirName` 一样先调 `ResolvePreviousDataDir` 缓存路径，`usPostUninstall` 只删这个缓存路径，且仍要求它带所有权标记。注册表值照旧删除。
+- **数据目录的权限与完整性级别**：Server 与设置窗口以 Medium 完整性级别运行，写不了提升权限的安装器创建的对象。与来源相同，`[Dirs]` 给数据目录加 `Permissions: users-modify`，`ssPostInstall` 在写完词库、配置与词典重放之后再执行 `icacls /grant *S-1-5-32-545:(OI)(CI)M` 与 `/setintegritylevel (OI)(CI)M`，以覆盖安装器之后写入的文件。代价与来源一样：数据目录在每用户的 LocalAppData 下，Users 组的修改权限也让同一台机器上的其他本地用户能改它。
+- **升级与卸载不停设置窗口和面板**：设置窗口和表情 / 屏幕键盘 / 手写面板是同一个 Tauri 外壳 `msime-client-settings.exe`（面板由 `MSIME_CLIENT_PANEL` 选择），窗口关闭后隐藏驻留约 10 分钟，升级时会报文件占用。`StopImeProcesses` 依次停 Watchdog、Server 与这个外壳，升级和卸载都只经它停进程；安装包里其余可执行文件（`MetasequoiaImeDictionaryReplay`、`msime-client-prepare`）是一次性进程。
+- **TSF 拉起的 Server 不恢复 Watchdog**：来源 Server 启动时若命令行里没有 `--watchdog-managed`，就拉起同目录的 Watchdog。本仓库的 `parse_server_arguments` 把 `--production` 与 `--watchdog-managed` 合并成 `Managed`，区分不出来，于是 TSF DLL 用 `--production` 重启崩溃的 Server 后，要到下次登录才重新有 Watchdog。`ServerLaunch` 新增 `supervised`，只在 `--watchdog-managed` 时为真；受管启动拿到单实例锁后，若非 Watchdog 所启，就用 `CreateProcessW` 拉起同目录的 `MetasequoiaImeWatchdog.exe`。Watchdog 有自己的单实例互斥量，会接管已在运行的同目录 Server 而不再起第二个，TIP 未启用时自行退出。
+- **登录任务的 `/TR` 未加引号**：schtasks 把不带内层引号的 `/TR` 值在第一个空格处拆成程序与参数，`C:\Program Files\...` 会被存成程序 `C:\Program`。与来源相同，改回 `/TR "\"<路径>\""`（c306e5985 当初去掉了内层引号）。`watchdog-task.ps1` 除了静态检查，还会在提升权限的 Windows 上把安装器实际传给 schtasks 的整串参数以临时任务名注册一次，读回任务 XML 核对 `Command` 就是完整路径、`Arguments` 为空，结束后删除任务。
+- **开始菜单的「设置」找不到 `DataDir` 里的 `runtime-options.json`**：Server 拉起外壳时通过 `MSIME_CLIENT_STATE_DIR` 与 `MSIME_CLIENT_HOST_OPTIONS` 指路，开始菜单快捷方式没有这两个变量，外壳只在自己的 `app.msime.client` 目录和 `%LOCALAPPDATA%\MSIME-Client` 下找，装在默认 `{localappdata}\metasequoiaime` 或自定义目录时都找不到。现在没有这两个变量时，外壳按 Server 的 `production_state_directory` 同样的顺序（`METASEQUOIA_IME_DATA_DIR`、HKLM 64 位视图的 `DataDir`、`%LOCALAPPDATA%\MSIME-Client`，注册表读取在 `msime_host_windows::server_state_directory`）找 Server 的状态目录，其中已有 `runtime-options.json` 时就用它，状态目录取其中的 `preferences_directory`（与 Server 相同）。
+- **升级清理删掉了所有权标记**：`CleanAppDataExceptUserFiles` 在 `PrepareToInstall` 写入 `.metasequoiaime-data` 之后、`ssPostInstall` 之前执行，保留名单里没有标记文件，升级中途失败时重试和卸载都不再认这个目录。标记现在列入保留名单。
+
+回归：新增 `installer/tests/lifecycle.ps1`（进程停止顺序、卸载用缓存路径、权限与标记），`watchdog-task.ps1` 改为要求内层引号并加 Task Scheduler 往返，`tauri-layout.ps1` 原本断言一个已不存在的 `DataDirIsSafe`，改为断言现在的 `DataDirRejectionReason`；这几个套件与 `tsf-registration.ps1` 接进 CI 的「Windows release script tests」。`windows-installer-launch` 另外钉住卸载使用缓存路径、安装器的 `--production` 启动不算受监管；`windows-server-launch` 钉住 `supervised` 的取值。发布流水线上的 `install-smoke.ps1` 改用 `/DATADIR` 指定的自定义数据目录安装，安装后核对登录任务存下的程序是完整的 Watchdog 路径且没有参数、数据目录授予 Users 修改权限并带 Medium 完整性标签，卸载后核对这个自定义目录已被删除。
+
+### Windows 对齐遗留四项（2026-09-24）
+
+- **数据目录迁移改为移动，升级不再清掉 Server 状态。** 目标的 `DataDir` 是 Server 的状态根（`preferences.json`、`user\` 下的用户词库、`cache\`、`logs\`、`runtime-options.json`、统计与剪贴板历史等），安装器却按来源布局只认 `msime_user.db`、`config.toml` 与 `skins`：`CleanAppDataExceptUserFiles` 每次完整升级都把其余状态删掉，换目录时 `MigrateUserDataDir` 也只复制这三样且从不删旧目录。现在升级只清安装包自己的条目（`IsPackageAppDataItem`，按 `Prepare-PackageFiles.ps1` 的 app_data 清单加来源布局独有的几项）。换目录与来源一样是移动：复制旧目录里除安装包条目、所有权标记、写入探针和 `runtime-options.json`（记着旧目录的绝对路径，由 Server 首次启动在新目录重新准备）之外的全部条目；删除推迟到 `ssPostInstall` 最后（`FinishDataDirMove`），词典重放或登录任务失败时旧目录原样保留，且只删带所有权标记或默认位置的目录。来源的 `DelTree(OldDir)` 在新目录嵌在旧目录里时会把刚迁过去的数据一并删掉；这里此时只删旧目录顶层中不含新目录的条目。`windows-installer-launch` 钉住这些契约（改动前的脚本在第一条就失败）；发布流水线的 `install-smoke.ps1` 增加原地重装保留状态、迁到嵌套新目录后状态齐全、旧 `runtime-options.json` 未带过去、旧目录只剩新目录这几项实机检查。
+- **全新安装起手英文。** 来源与随包模板都是 `default_ime_mode = "english"`，但没有 `preferences.json` 时 Server 的模式权威和 TSF 读的是共享默认（中文）。`DefaultImeMode::default()` 现在在 Windows 上是英文、其余宿主仍是中文；`scripts/test-default-config-parity.py` 同时比对模板、来源与 Rust 默认。
+- **候选窗几何与来源一致。** 最小宽度 160 DIP、单行高 `fontSize × 1.35 + 2`、行间与横排行间 2 DIP、选中条以行左缘为中心（`x - 1.5`，宽 3）、竖排翻转判定以 232 DIP × 缩放为起点；`windows-candidate-card-size` 覆盖，旧头文件下编译不过。
+- **门禁漏洞。** 覆盖率改为完整字段路径并要求页面实际用到（原来 `menu`、`scale`、`font` 这类裸词随处可命中）；`feature-log` 除 CHANGELOG 外还逐条核对锁定对象之前的 `feat:` 提交（原来漏了七十多条，查出 4 个已知差距：普通 Backspace 删空拼音后退选分词、纠错候选的 `*` 标记、ü 别名候选的轻标记、双拼整句候选的排序）；源码清单的同名匹配只认 Windows 与共享代码、非测试目录，被同名遮住或指向不存在来源的表项报为过期；界面动作改用真实实现符号并整词匹配、排除测试与其他平台；`preferences-field-parity` 从 `Preferences` 出发比对所有可达结构体与页面上的类型（含内联对象），13 个扩到 20 个；`installer-prerequisites` 按函数切片检查 HKLM32/64 两个视图，不再被卸载代码里的同名字符串满足；`windows-native-run` 补上 TIP 子目录的 include，并把"仓库里有的头文件找不到"判为失败而不是跳过（多跑了 2 个测试）；`settings-label-parity` 在来源检出存在但解析不出标签时失败而不是跳过。
+- **验证层级。** 候选几何与安装器契约测试在本机 clang 编译运行；`msime-client-core` 本机 cargo test；全部 reference 门禁以固定来源本机运行通过，且每个漏洞都在副本里注入过、旧脚本通过而新脚本失败；安装器由发布流水线在 Windows runner 上编译并跑 `install-smoke.ps1`。未在真实 Windows 编辑器里目测候选窗。

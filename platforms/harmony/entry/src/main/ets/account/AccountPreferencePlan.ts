@@ -69,21 +69,16 @@ const MAX_KEY_BYTES = 128;
 // document limit is the real bound, so one string may occupy almost the full 1 MiB envelope.
 const MAX_STRING_BYTES = MAX_JSON_BYTES;
 
-const SCHEMES = ["quanpin", "shuangpin", "wubi", "japanese"];
+const SCHEMES = ["quanpin", "shuangpin", "wubi", "japanese", "korean"];
+// Schemes this host types in that the cloud `input.schema` cannot carry (an older device would refuse the whole document), so uploading leaves the field out and the account keeps the scheme it holds.
+const LOCAL_ONLY_SCHEMES = ["cantonese", "zhuyin", "vietnamese"];
 const SHUANGPIN_PROFILES = ["xiaohe", "ziranma", "shoudao", "microsoft"];
 const FREQUENCY_MODES = ["disabled", "pin", "halve", "linear", "promote"];
 const LAYOUTS = ["twenty_six_key", "nine_key", "handwriting"];
-const TOUCH_SKINS = [
-  "forest",
-  "ocean",
-  "rose",
-  "porcelain",
-  "typewriter",
-  "candy",
-  "midnight",
-  "blueprint",
-  "custom",
-];
+// The seven global theme ids the shared layer accepts; any other id, a retired skin id included, is refused rather than mapped.
+const GLOBAL_THEMES = ["system", "shuishan", "light", "paper", "night", "ink", "custom"];
+// What a custom theme may be drawn over: the platform tokens or a built-in theme, never `custom` itself.
+const THEME_BASES = ["system", "shuishan", "light", "paper", "night", "ink"];
 const THEMES = ["dark", "light", "system"];
 const HAPTIC_STRENGTHS = ["light", "medium", "strong"];
 
@@ -220,8 +215,9 @@ export function localAccountPreferences(
   feedback: FeedbackValues,
 ): AccountPreferenceSettings {
   const frequency = record(member(preferences, "frequency")) ?? {};
+  const customTheme = record(member(preferences, "custom_theme")) ?? {};
+  const scheme = member(preferences, "scheme");
   const settings: AccountPreferenceSettings = {
-    "input.schema": enumerated(member(preferences, "scheme"), SCHEMES, "quanpin"),
     "input.character_set": flag(member(preferences, "traditional_chinese_output"), false)
       ? "traditional"
       : "simplified",
@@ -243,20 +239,26 @@ export function localAccountPreferences(
       LAYOUTS,
       "twenty_six_key",
     ),
-    "platform.harmony.keyboard_skin": enumerated(
-      member(preferences, "touch_keyboard_skin"),
-      TOUCH_SKINS,
-      "forest",
+    "platform.harmony.global_theme": enumerated(
+      member(preferences, "global_theme"),
+      GLOBAL_THEMES,
+      "system",
     ),
-    "platform.harmony.custom_keyboard_skin": JSON.stringify(
-      member(preferences, "custom_touch_keyboard_skin") ?? {},
+    "platform.harmony.custom_theme_base": enumerated(
+      member(customTheme, "base"),
+      THEME_BASES,
+      "system",
     ),
+    // The custom theme's keyboard design as JSON; an empty string is "no design" (the base theme's keyboard is drawn), so that state syncs as well.
+    "platform.harmony.custom_keyboard_skin": (() => {
+      const design = record(member(customTheme, "keyboard"));
+      return design === null ? "" : JSON.stringify(design);
+    })(),
     "platform.harmony.theme": enumerated(member(preferences, "theme"), THEMES, "system"),
-    "platform.harmony.candidate_skin": (() => {
-      const value = member(preferences, "candidate_skin");
-      return typeof value === "string" && value.length > 0 && value.length <= 128
-        ? value
-        : "fluent";
+    // The custom theme's external candidate package; an empty string is "none", so clearing it syncs as well.
+    "platform.harmony.custom_candidate_skin": (() => {
+      const value = member(customTheme, "candidate_skin");
+      return typeof value === "string" && externalSkinId(value) ? value : "";
     })(),
     "platform.harmony.touch_key_spacing_tenths": whole(
       member(preferences, "touch_key_spacing_tenths"),
@@ -279,6 +281,9 @@ export function localAccountPreferences(
       "medium",
     ),
   };
+  if (!(typeof scheme === "string" && LOCAL_ONLY_SCHEMES.includes(scheme))) {
+    settings["input.schema"] = enumerated(scheme, SCHEMES, "quanpin");
+  }
   return settings;
 }
 
@@ -327,6 +332,16 @@ class Reader {
   }
 }
 
+/** `catalog::is_external_id`: a safe package folder name that is not a global theme id. */
+function externalSkinId(value: string): boolean {
+  return (
+    value.length > 0 &&
+    value.length <= 64 &&
+    /^[a-z0-9][a-z0-9._-]*$/.test(value) &&
+    !GLOBAL_THEMES.includes(value)
+  );
+}
+
 function choose(value: string, allowed: string[]): string {
   if (!allowed.includes(value)) refuse("account_invalid");
   return value;
@@ -363,7 +378,8 @@ export function applyAccountPreferences(
   const preferences: Document = { ...local };
 
   const scheme = reader.text("input.schema");
-  if (scheme !== null) preferences.scheme = choose(scheme, SCHEMES);
+  // A scheme this host does not offer (a newer device's Cantonese, Zhuyin or Vietnamese) keeps the local one rather than refusing the whole sync, so the rest of the document still applies.
+  if (scheme !== null && SCHEMES.includes(scheme)) preferences.scheme = scheme;
   const characterSet = reader.text("input.character_set");
   if (characterSet !== null) {
     preferences.traditional_chinese_output =
@@ -404,26 +420,50 @@ export function applyAccountPreferences(
 
   const layout = reader.text("platform.harmony.keyboard_layout");
   if (layout !== null) preferences.touch_keyboard_layout = choose(layout, LAYOUTS);
-  const touchSkin = reader.text("platform.harmony.keyboard_skin");
-  if (touchSkin !== null) preferences.touch_keyboard_skin = choose(touchSkin, TOUCH_SKINS);
+  const globalTheme = reader.text("platform.harmony.global_theme");
+  if (globalTheme !== null) preferences.global_theme = choose(globalTheme, GLOBAL_THEMES);
+  // The custom theme is one nested record; its synced parts are written onto a copy so the ones the account does not carry (the candidate colour pickers) stay as they were.
+  const customTheme: Document = { ...(record(member(local, "custom_theme")) ?? {}) };
+  let customThemeTouched = false;
+  const themeBase = reader.text("platform.harmony.custom_theme_base");
+  if (themeBase !== null) {
+    // `system` is the default and the shared document omits it, so it is written by removing the member.
+    if (choose(themeBase, THEME_BASES) === "system") {
+      delete customTheme.base;
+    } else {
+      customTheme.base = themeBase;
+    }
+    customThemeTouched = true;
+  }
   const customSkin = reader.text("platform.harmony.custom_keyboard_skin");
   if (customSkin !== null) {
-    let design: Object | null;
-    try {
-      design = JSON.parse(customSkin) as Object;
-    } catch {
-      refuse("account_invalid");
+    if (customSkin.length === 0) {
+      delete customTheme.keyboard;
+    } else {
+      let design: Object | null;
+      try {
+        design = JSON.parse(customSkin) as Object;
+      } catch {
+        refuse("account_invalid");
+      }
+      if (design === null || record(design) === null) refuse("account_invalid");
+      customTheme.keyboard = design;
     }
-    if (design === null || record(design) === null) refuse("account_invalid");
-    preferences.custom_touch_keyboard_skin = design;
+    customThemeTouched = true;
   }
+  const candidateSkin = reader.text("platform.harmony.custom_candidate_skin");
+  if (candidateSkin !== null) {
+    if (candidateSkin.length === 0) {
+      delete customTheme.candidate_skin;
+    } else {
+      if (!externalSkinId(candidateSkin)) refuse("account_invalid");
+      customTheme.candidate_skin = candidateSkin;
+    }
+    customThemeTouched = true;
+  }
+  if (customThemeTouched) preferences.custom_theme = customTheme;
   const theme = reader.text("platform.harmony.theme");
   if (theme !== null) preferences.theme = choose(theme, THEMES);
-  const candidateSkin = reader.text("platform.harmony.candidate_skin");
-  if (candidateSkin !== null) {
-    if (candidateSkin.length === 0 || candidateSkin.length > 128) refuse("account_invalid");
-    preferences.candidate_skin = candidateSkin;
-  }
   const keySpacing = reader.integer("platform.harmony.touch_key_spacing_tenths");
   if (keySpacing !== null) preferences.touch_key_spacing_tenths = bounded(keySpacing, 0, 255);
   const rowSpacing = reader.integer("platform.harmony.touch_row_spacing_tenths");

@@ -50,6 +50,7 @@
 }
 @end
 @interface LivePresentationFixture : NSObject
+@property(copy) NSString *detail;
 // The controller picks the overlay screen from the caret on every failure; model the real overlay property so the assignment lands somewhere.
 @property(nonatomic, weak) NSScreen *preferredScreen;
 @property float lastLevel;
@@ -60,6 +61,7 @@
 @property NSUInteger phase;
 @property NSUInteger failure;
 @property NSUInteger failures;
+@property BOOL locked;
 - (void)setListening:(BOOL)listening;
 - (void)setProcessing:(BOOL)polishing;
 - (void)restore;
@@ -67,9 +69,10 @@
 @implementation LivePresentationFixture
 - (void)setInputLevel:(float)level { self.lastLevel = level; ++self.levelUpdates; }
 - (void)dismissProcessing { self.dismissed = YES; }
-- (void)setListening:(BOOL)listening { self.phase = listening ? 1 : 0; self.failure = 0; self.preview = @""; }
+- (void)setListening:(BOOL)listening { self.phase = listening ? 1 : 0; self.failure = 0; self.preview = @""; self.locked = NO; }
+- (void)setRecordingLocked:(BOOL)locked { self.locked = locked; }
 - (void)setTranscript:(NSString *)text { self.preview = text; }
-- (void)showFailure:(MSIMEVoiceFailure)failure { self.failure = failure; self.phase = 4; ++self.failures; self.preview = @""; }
+- (void)showFailure:(MSIMEVoiceFailure)failure detail:(NSString *)detail { self.failure = failure; self.detail = detail; self.phase = 4; ++self.failures; self.preview = @""; }
 - (void)dismissFailure { if (self.failure) [self setListening:NO]; }
 - (void)setProcessing:(BOOL)polishing { self.phase = polishing ? 3 : 2; }
 - (void)applyThemePreferences:(NSDictionary *)preferences { (void)preferences; }
@@ -293,7 +296,9 @@ int main(int argc, char **) {
         const auto option = NSEventModifierFlagOption | NX_DEVICERALTKEYMASK;
         assert([controller handleEvent:key(61, option, NSEventTypeFlagsChanged) client:client]);
         assert(capture.active);
+        assert(!presentation.locked);
         assert([controller handleEvent:key(49, option, NSEventTypeKeyDown) client:client]);
+        assert(presentation.locked); // Locking the hold shows the overlay's actions.
         assert([controller handleEvent:key(61, 0, NSEventTypeFlagsChanged) client:client]);
         assert([controller handleEvent:key(49, 0, NSEventTypeKeyUp) client:client]);
         assert(capture.active && ![[controller valueForKey:@"liveVoiceProcessing"] boolValue]);
@@ -392,7 +397,7 @@ int main(int argc, char **) {
         controller.usePolishFixture = YES;
         voiceArguments[@"MSIMEClientVoicePolishText"] = @YES;
         voiceArguments[@"MSIMEClientVoicePolishToken"] = @"fixture-only";
-        voiceArguments[@"MSIMEClientVoicePolishPrompt"] = @"synthetic original prompt";
+        voiceArguments[@"MSIMEClientVoicePolishPromptCustom1"] = @"synthetic original prompt";
         [defaults setVolatileDomain:voiceArguments forName:NSArgumentDomain];
         [controller toggleVoiceInput:nil];
         LivePolishFixture *polish = controller.polishFixture;
@@ -400,14 +405,14 @@ int main(int argc, char **) {
         const auto beforePolishStops = capture.captureStops;
         capture.transcript(@"synthetic partial before polish", NO);
         assert(!polish.submissions);
-        voiceArguments[@"MSIMEClientVoicePolishPrompt"] = @"synthetic later prompt";
+        voiceArguments[@"MSIMEClientVoicePolishPromptCustom1"] = @"synthetic later prompt";
         [defaults setVolatileDomain:voiceArguments forName:NSArgumentDomain];
         capture.transcript(@"synthetic original", YES);
         capture.transcript(@"duplicate final", YES);
         capture.transcript(@"late partial", NO);
         assert(polish.submissions == 1 && [polish.input isEqual:@"synthetic original"]);
         assert(presentation.phase == 3);
-        assert([controller.polishOptions[@"polish_prompt"] isEqual:@"synthetic original prompt"]);
+        assert([controller.polishOptions[@"polish_prompt_custom_1"] isEqual:@"synthetic original prompt"]);
         assert([controller.polishOptions[@"polish_text"] isEqual:@YES] && [controller.polishOptions[@"polish_enabled"] isEqual:@NO]);
         assert(capture.captureStops > beforePolishStops && capture.active && client.commits.count == beforePolish);
         assert([client.marked isEqual:@"synthetic partial before polish"]);

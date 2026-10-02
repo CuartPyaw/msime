@@ -60,6 +60,39 @@ int main(int argc, char **argv) {
         Wait(^BOOL { return done; });
         const NSTimeInterval elapsed = NSProcessInfo.processInfo.systemUptime - started;
         assert(elapsed >= 5.5);
+        // A recording past the old 60 s cut is uploaded, and one past the batch budget is sent up to it rather than refused: MSIME-Windows caps a batch upload at 20 MiB of 16-bit WAV, not at a duration.
+        NSMutableDictionary *longOptions = [options mutableCopy];
+        longOptions[@"asr_endpoint"] = [base stringByAppendingString:@"/asr-long"];
+        longOptions[@"polish_enabled"] = @NO;
+        request = [[MSIMEHTTPVoiceRequest alloc] initWithOptions:longOptions error:nil];
+        assert(request.sampleLimit == msime::voice::batch_capture_sample_limit); // The host ends the recording here.
+        NSMutableData *longPCM = [NSMutableData dataWithLength:(msime::voice::batch_capture_sample_limit + 16000) * sizeof(float)];
+        __block NSString *longText = nil;
+        assert([request recognizePCM:longPCM completion:^(NSString *text, NSError *error) {
+            assert(!error); longText = text;
+        } error:nil]);
+        Wait(^BOOL { return longText != nil; });
+        NSString *longExpected = [NSString stringWithFormat:@"synthetic long %zu", msime::voice::batch_capture_sample_limit];
+        assert([longText isEqual:longExpected]);
+        // A rejected request shows the provider's own message, as MSIME-Windows does, and a SiliconFlow 5xx its trace id; the generic description stays for anything that reads only that.
+        NSMutableDictionary *deniedOptions = [longOptions mutableCopy];
+        deniedOptions[@"asr_endpoint"] = [base stringByAppendingString:@"/asr-denied"];
+        NSMutableDictionary *traceOptions = [longOptions mutableCopy];
+        traceOptions[@"asr_provider"] = @"siliconflow";
+        traceOptions[@"asr_endpoint"] = [base stringByAppendingString:@"/asr-trace"];
+        for (NSArray *expectation in @[
+            @[deniedOptions, @"语音识别失败：Incorrect synthetic key"],
+            @[traceOptions, @"语音识别失败：HTTP 500。这是硅基流动服务端内部错误，模型名 fixture-model 本身是官方支持的。 追踪 ID：synthetic-trace。"]]) {
+            request = [[MSIMEHTTPVoiceRequest alloc] initWithOptions:expectation[0] error:nil];
+            __block NSError *rejection = nil;
+            assert([request recognizePCM:valid completion:^(NSString *text, NSError *error) {
+                assert(!text && error); rejection = error;
+            } error:nil]);
+            Wait(^BOOL { return rejection != nil; });
+            assert([rejection.userInfo[NSLocalizedFailureReasonErrorKey] isEqual:expectation[1]]);
+            assert([rejection.localizedDescription isEqual:@"语音请求失败，请检查识别服务设置"]);
+            assert(![rejection.userInfo.description containsString:@"fixture-token"]);
+        }
         request = [[MSIMEHTTPVoiceRequest alloc] initWithOptions:options error:nil];
         [request cancel];
         assert(![request recognizePCM:valid completion:^(NSString *, NSError *) { assert(false); } error:nil]);
@@ -71,24 +104,18 @@ int main(int argc, char **argv) {
         options[@"asr_token"] = @"fixture-token"; options[@"asr_provider"] = @"doubao";
         assert(![[MSIMEHTTPVoiceRequest alloc] initWithOptions:options error:nil]);
 
-        // The on-device provider is accepted on its model file alone: no endpoint, no token. What it must
-        // not accept is a model that is missing, a directory, or a relative path, because each of those
-        // fails only once the user is holding the shortcut and waiting for text.
+        // The on-device provider is never a batch request: an installed model streams through the helper, and a stale Whisper model file from before the model catalog must be refused here rather than recognised somewhere else.
         NSMutableDictionary *local = [@{@"asr_provider": @"local", @"language": @"zh-cn"} mutableCopy];
         NSString *directory = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
         assert([NSFileManager.defaultManager createDirectoryAtPath:directory withIntermediateDirectories:YES
                                                         attributes:nil error:nil]);
         NSString *file = [directory stringByAppendingPathComponent:@"ggml-model.bin"];
         assert([NSFileManager.defaultManager createFileAtPath:file contents:NSData.data attributes:nil]);
-        for (NSString *rejected in @[@"", @"ggml-model.bin", directory,
+        for (NSString *rejected in @[@"", @"ggml-model.bin", directory, file,
                                      [directory stringByAppendingPathComponent:@"absent.bin"]]) {
             local[@"asr_model_path"] = rejected;
             assert(![[MSIMEHTTPVoiceRequest alloc] initWithOptions:local error:nil]);
         }
-        local[@"asr_model_path"] = file;
-        MSIMEHTTPVoiceRequest *localRequest = [[MSIMEHTTPVoiceRequest alloc] initWithOptions:local error:nil];
-        // A build without the recognizer must refuse the provider rather than quietly recognising elsewhere.
-        assert((localRequest != nil) == msime::voice::local_asr_available());
         assert([NSFileManager.defaultManager removeItemAtPath:directory error:nil]);
     }
 }

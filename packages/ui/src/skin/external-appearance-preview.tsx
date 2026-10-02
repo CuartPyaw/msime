@@ -1,95 +1,144 @@
 import { useEffect, useId, useMemo, useState, type CSSProperties } from "react";
 import type { Preferences } from "../index";
 import {
+  decorationImage,
   dimension,
-  previewPaletteCss,
+  drawnPackagePalette,
+  skinGeometryStyle,
+  useSkinPreviewAssets,
   type ExternalSkin,
   type SkinCatalog,
 } from "./external-skins";
-import { installSkinPalette } from "./skin-palette";
-import { useSkinImage, type SkinImageReader } from "./skin-image";
-import { SkinCandidatePreview } from "./skin-candidate-preview";
+import { useSelectedBarPalette } from "./skin-palette";
+import {
+  candidatePaletteStyle,
+  customCandidatePalette,
+  themeEntry,
+  type ResolvedTheme,
+  type ResolveThemeRequest,
+} from "../theme/global-theme";
+import type { SkinImageReader } from "./skin-image";
+import { ReservedCandidatePreview, type PreviewReserve } from "./skin-candidate-preview";
 import { candidateFontSize, candidateFontStyle } from "../candidate/candidate-font-size";
-import { candidateTextStyle } from "../candidate/candidate-text-color";
 import { candidateFamilyStyle } from "../candidate/candidate-font-family";
+import { candidateOpacityPercent, candidateWindowStyle } from "../candidate/candidate-window-style";
 import * as settings from "../settings/settings-style";
+import { ActionButton } from "../core/action-button";
+
+/** The host's own `resolve()` answer for `request`, when the host has a theme call; `undefined` until it arrives, when it fails, and for a request it was not asked for. */
+function useResolvedTheme(
+  resolve: ((request: ResolveThemeRequest) => Promise<ResolvedTheme>) | undefined,
+  request: ResolveThemeRequest,
+): ResolvedTheme | undefined {
+  const key = JSON.stringify(request);
+  const [result, setResult] = useState<{ key: string; theme: ResolvedTheme }>();
+  useEffect(() => {
+    if (!resolve) return;
+    let current = true;
+    resolve(JSON.parse(key) as ResolveThemeRequest).then(
+      (theme) => {
+        if (current) setResult({ key, theme });
+      },
+      () => {},
+    );
+    return () => {
+      current = false;
+    };
+  }, [resolve, key]);
+  return resolve && result?.key === key ? result.theme : undefined;
+}
 
 function LoadedPreview({
   skin,
   preferences,
   readImage,
+  resolve,
   helpcode,
   theme,
+  reserve,
 }: {
   skin: ExternalSkin;
   preferences: Preferences;
   readImage?: SkinImageReader;
+  resolve?: (request: ResolveThemeRequest) => Promise<ResolvedTheme>;
   helpcode: boolean;
   theme: "dark" | "light";
+  reserve?: PreviewReserve;
 }) {
   const scope = `appearance-external-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
-  const [paletteFailed, setPaletteFailed] = useState(false);
-  useEffect(() => {
-    try {
-      const remove = installSkinPalette(previewPaletteCss(scope, skin.candidate, theme));
-      setPaletteFailed(false);
-      return remove;
-    } catch {
-      setPaletteFailed(true);
-    }
-  }, [scope, skin.candidate, theme]);
-  const top = dimension(skin.decorationTopDip, 500),
-    width = dimension(skin.decorationWidthDip, 1000);
-  const decorated = top > 0 && width > 0;
-  const image = useSkinImage(readImage, skin.id, decorated ? skin.preview : null, 0);
-  const [decodeFailed, setDecodeFailed] = useState(false);
-  useEffect(() => setDecodeFailed(false), [image]);
-  const base = ["fluent", "wechat", "graphite", "willow_green"].includes(skin.base)
-    ? skin.base
-    : "fluent";
+  const layout = preferences.candidate_layout ?? "vertical";
+  // The host's `resolve()` is the authority; until it answers, and on hosts without it, the page's mirror layers the base, the package palette for the drawn mode (none when the package does not declare it) and the pickers the same way.
+  const resolved = useResolvedTheme(resolve, {
+    global_theme: "custom",
+    custom_theme: preferences.custom_theme,
+    dark: theme === "dark",
+    layout,
+  });
+  const palette = resolved
+    ? resolved.candidate
+    : customCandidatePalette(
+        skin.base,
+        preferences.custom_theme?.candidate_colors,
+        drawnPackagePalette(skin, theme),
+      );
+  const hideBar = palette?.show_selected_bar === false;
+  const paletteFailed = useSelectedBarPalette(scope, hideBar);
+  const decorated =
+    dimension(skin.decorationTopDip, 500) > 0 && dimension(skin.decorationWidthDip, 1000) > 0;
+  const decoration = decorated ? decorationImage(skin) : null;
+  const { image, decodeFailed, onImageError, background } = useSkinPreviewAssets(
+    readImage,
+    skin,
+    decoration,
+    0,
+  );
   const geometry = {
+    ...candidatePaletteStyle(palette),
     ...candidateFontStyle(preferences),
-    ...candidateTextStyle(
-      preferences.candidate_text_color,
-      preferences.candidate_number_color,
-      preferences.candidate_accent_color,
-      preferences.candidate_selected_color,
-      preferences.candidate_hover_color,
-      preferences.candidate_surface_color,
-      preferences.candidate_border_color,
-    ),
     ...candidateFamilyStyle(preferences),
-    "--msime-skin-min-width": `${dimension(skin.minWidthDip, 1000)}px`,
-    "--msime-skin-decoration-top": `${decorated ? top : 0}px`,
-    "--msime-skin-decoration-width": `${decorated ? width : 0}px`,
+    ...skinGeometryStyle(skin, theme),
+    // After the package geometry: the user's corner radius beats the package's, as on the hosts.
+    ...candidateWindowStyle(preferences),
   } as CSSProperties;
+  // The window opacity fades the package background along with the surface it lies on.
+  const opacity = candidateOpacityPercent(preferences.candidate_opacity_percent) / 100;
+  const drawnBackground = background.drawn && {
+    ...background.drawn,
+    opacity: background.drawn.opacity * opacity,
+  };
   return (
     <div className={decorated ? "external-skin-decorated" : undefined}>
       <div
         data-skin-preview=""
-        className={`${settings.skinCardPreview} appearance-candidate-preview skin-${base} ${scope}`}
+        className={`${settings.skinCardPreview} appearance-candidate-preview ${scope}`}
         style={geometry}
         data-preview-theme={theme}
+        data-decoration-align={skin.decorationAlign ?? "right"}
         data-font-size={candidateFontSize(preferences.candidate_font_size)}
         aria-hidden="true"
       >
         <div className={settings.skinPreviewStage} data-skin-stage="">
-          <SkinCandidatePreview
-            orientation={preferences.candidate_layout ?? "vertical"}
+          <ReservedCandidatePreview
+            reserve={reserve}
+            orientation={layout}
             count={preferences.candidate_page_size}
             preedit={preferences.candidate_preedit_style !== "empty"}
             helpcode={helpcode}
             decorated={decorated}
             image={decodeFailed ? undefined : image?.url}
-            onImageError={() => setDecodeFailed(true)}
+            onImageError={onImageError}
+            background={drawnBackground}
+            onBackgroundError={background.onError}
           />
         </div>
       </div>
-      {paletteFailed && <p role="status">当前浏览器无法应用皮肤配色，保留基础预览。</p>}
-      {(image?.failed || decodeFailed) && (
+      {paletteFailed && <p role="status">当前浏览器无法隐藏皮肤的选中条，其余配色照常预览。</p>}
+      {(image?.failed || decodeFailed || background.failed) && (
         <p role="status">皮肤图片加载失败，保留基础预览。可刷新预览重试。</p>
       )}
-      {decorated && skin.preview && !readImage && <p role="status">当前宿主不支持皮肤图片预览。</p>}
+      {(decoration || skin.background) && !readImage && (
+        <p role="status">当前宿主不支持皮肤图片预览。</p>
+      )}
     </div>
   );
 }
@@ -98,21 +147,27 @@ export function ExternalAppearancePreview({
   preferences,
   scan,
   readImage,
+  resolve,
   active,
   revision,
   helpcode,
   theme,
+  reserve,
 }: {
   preferences: Preferences;
   scan?: () => Promise<SkinCatalog>;
   readImage?: SkinImageReader;
+  /** `SettingsClient.resolveTheme`, when the host has it. */
+  resolve?: (request: ResolveThemeRequest) => Promise<ResolvedTheme>;
   active: boolean;
   revision: number;
   helpcode: boolean;
   theme: "dark" | "light";
+  /** 见 `ReservedCandidatePreview`。 */
+  reserve?: PreviewReserve;
 }) {
   const [refresh, setRefresh] = useState(0);
-  const id = preferences.candidate_skin;
+  const id = preferences.custom_theme?.candidate_skin;
   const key = useMemo(() => ({}), [scan, id, active, revision, refresh]);
   const [result, setResult] = useState<{ key: object; skin?: ExternalSkin; failed?: boolean }>();
   useEffect(() => {
@@ -134,19 +189,20 @@ export function ExternalAppearancePreview({
   if (!scan) return <p role="status">当前宿主不支持扫描外部皮肤，无法预览所选皮肤。</p>;
   const current = result?.key === key ? result : undefined;
   const skin = current?.skin;
+  // A built-in base fixes the mode whatever the host draws in, as `resolve()` does: the package palette for that mode is used when the package declares it, and the base alone is drawn when it does not.
+  const fixed = skin ? themeEntry(skin.base).appearance : null;
+  const drawn = fixed ?? theme;
   const compatible =
     skin?.layouts.includes(preferences.candidate_layout ?? "vertical") &&
-    skin.themes.includes(theme);
+    (fixed !== null || skin.themes.includes(theme));
   return (
     <>
-      <button
-        type="button"
+      <ActionButton
+        action={() => setRefresh((value) => value + 1)}
         className="skin-preview-switch"
         disabled={!current}
-        onClick={() => setRefresh((value) => value + 1)}
-      >
-        刷新预览
-      </button>
+        label="刷新预览"
+      />
       {!current ? (
         <p role="status">正在读取所选皮肤。</p>
       ) : current.failed ? (
@@ -160,8 +216,10 @@ export function ExternalAppearancePreview({
           skin={skin}
           preferences={preferences}
           readImage={readImage}
+          resolve={resolve}
           helpcode={helpcode}
-          theme={theme}
+          theme={drawn}
+          reserve={reserve}
         />
       )}
     </>

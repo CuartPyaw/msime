@@ -80,10 +80,46 @@ final class BackendCloudClipboardProvider: NSObject {
     return result
   }
 
+  /// What became of one local history entry the user explicitly chose to send; `message` is the shared wording the panel shows.
+  enum SendOutcome: Equatable {
+    case sent, signedOut, disabled, failed
+    var message: String {
+      switch self {
+      case .sent: return "已发到云剪贴板"
+      case .signedOut: return "登录水杉账号后可在设备间同步剪贴板"
+      case .disabled: return "云剪贴板未开启"
+      case .failed: return "发到云剪贴板失败，请重试"
+      }
+    }
+  }
+
+  /// Uploads one explicitly chosen text. The server's enabled flag is read first, so nothing leaves the device while the account has cloud clipboard switched off; the upload itself is never retried.
+  func send(_ text: String) async -> SendOutcome {
+    do {
+      let page = try await execute(["operation": "list", "search": ""])
+      guard page["enabled"] as? Bool == true else { return .disabled }
+      _ = try await execute(["operation": "add", "text": text])
+      return .sent
+    } catch { return .failed }
+  }
+
+  /// `send(_:)` for the signed-in native account, or `.signedOut` when there is none.
+  static func send(_ text: String) async -> SendOutcome {
+    let provider: BackendCloudClipboardProvider? = await withCheckedContinuation { continuation in
+      prepare { continuation.resume(returning: $0) }
+    }
+    guard let provider else { return .signedOut }
+    return await provider.send(text)
+  }
+
   @objc func request(_ request: NSDictionary, completion: @escaping (NSDictionary) -> Void) -> Progress {
     let progress = Progress(totalUnitCount: 1)
     let task = Task {
-      do { completion(["ok":true, "value":try await execute(request)]) }
+      // Progress.cancel() sets isCancelled synchronously but dispatches cancellationHandler asynchronously, so the handler's task.cancel() can land after this body has already run past execute's first checkCancellation. A caller that cancels before the work starts would then still see the request sent. Read the flag the caller set synchronously rather than racing the handler; cancellation arriving mid-flight is still the handler's job, and an already-sent request cannot be recalled anyway.
+      do {
+        guard !progress.isCancelled else { throw CancellationError() }
+        completion(["ok":true, "value":try await execute(request)])
+      }
       catch { completion(["ok":false, "error":"unavailable"]) }
       progress.completedUnitCount = 1
       progress.cancellationHandler = nil

@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
+import { testHost } from "../support/host";
+import { settingsFormReady } from "../support/settings-form";
 import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { HomePage, SettingsPage, type HostCapabilities, type Snapshot } from "@msime/ui";
+import { HomePage, SettingsPage, type Snapshot } from "@msime/ui";
 
 afterEach(cleanup);
 
@@ -11,7 +13,7 @@ const initial: Snapshot = {
   preferences: {
     scheme: "shuangpin",
     shuangpin_profile: "xiaohe",
-    touch_keyboard_skin: "ocean",
+    global_theme: "night",
     touch_keyboard_schemes: { enabled: ["xiaohe"], selected: "xiaohe" },
     candidate_page_size: 5,
     learning: true,
@@ -24,9 +26,12 @@ test("renders the keyboard home surface with the current skin and scheme", () =>
 
   expect(screen.getByRole("region", { name: "首页" })).toBeTruthy();
   expect(screen.getByText("我的键盘")).toBeTruthy();
-  expect(screen.getByText("海盐蓝 · 小鹤双拼")).toBeTruthy();
+  expect(screen.getByText("夜青 · 小鹤双拼")).toBeTruthy();
   expect(screen.getByRole("img", { name: "屏幕键盘完整布局预览" })).toBeTruthy();
   expect(screen.getByText("高情商回复")).toBeTruthy();
+  // 磁贴与主题页同名；「全部设置」的副标题按导航分组概括。
+  expect(screen.getByRole("button", { name: /^主题/ })).toBeTruthy();
+  expect(screen.getByText("打字、外观、语音与词库")).toBeTruthy();
 });
 
 // Each shortcut is meant to be recognisable by its own colour rather than by reading the label, so
@@ -34,7 +39,7 @@ test("renders the keyboard home surface with the current skin and scheme", () =>
 // tiles are styled with utilities now, and a class name there is no longer a stable handle.
 test("home shortcuts expose a distinct visual tile for each function", () => {
   render(<HomePage preferences={initial.preferences} onOpenPage={vi.fn()} />);
-  const grid = screen.getByRole("button", { name: /皮肤/ }).parentElement!;
+  const grid = screen.getByRole("button", { name: /^主题/ }).parentElement!;
   const tiles = [...grid.querySelectorAll("button")];
   expect(tiles).toHaveLength(6);
 
@@ -47,7 +52,7 @@ test("routes home shortcuts to the shared settings pages", () => {
   const onOpenPage = vi.fn();
   render(<HomePage preferences={initial.preferences} onOpenPage={onOpenPage} />);
 
-  fireEvent.click(screen.getByRole("button", { name: /皮肤/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^主题/ }));
   fireEvent.click(screen.getByRole("button", { name: /输入方案/ }));
   fireEvent.click(screen.getByRole("button", { name: /按键/ }));
   // The row used to land on 外观 alone; it opens the 全部设置 list now, which is where every page
@@ -72,6 +77,7 @@ test("exposes Apple home shortcuts for dictionary, AI and system settings", () =
       preferences={initial.preferences}
       actions={{ openSystemKeyboardSettings }}
       onOpenPage={onOpenPage}
+      ios
     />,
   );
 
@@ -100,7 +106,7 @@ test("iOS home keyboard card opens and focuses the shared keyboard tryout", asyn
   const client = {
     load: async () => initial,
     save: vi.fn(),
-    host: { platform: "ios" } as HostCapabilities,
+    host: testHost({ platform: "ios" }),
     home: { openSystemKeyboardSettings: vi.fn() },
     chat: {
       models: async () => ({ data: [{ id: "fixture-chat" }], defaultModel: "fixture-chat" }),
@@ -139,8 +145,10 @@ test("invokes Android keyboard and system input actions", () => {
   };
   render(<HomePage preferences={initial.preferences} actions={actions} onOpenPage={vi.fn()} />);
 
+  // 完全访问 and 系统键盘设置 are the iOS keyboard extension's words; Android opens the system input method settings.
+  expect(screen.getByRole("button", { name: "系统设置启用与设为默认" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: /试用键盘/ }));
-  fireEvent.click(screen.getByRole("button", { name: "系统键盘设置" }));
+  fireEvent.click(screen.getByRole("button", { name: "系统输入法设置" }));
   fireEvent.click(screen.getByRole("button", { name: "选择输入法" }));
 
   expect(actions.openKeyboard).toHaveBeenCalledOnce();
@@ -166,7 +174,7 @@ test("opens the Android emoji and clipboard tools inside the mobile shell", () =
   expect(openClipboardPanel).toHaveBeenCalledOnce();
 });
 
-test("opens Android on home and preserves the appearance fallback without home capability", async () => {
+test("opens Android on home and falls back to the first navigation page without home capability", async () => {
   render(
     <SettingsPage
       client={{
@@ -183,8 +191,8 @@ test("opens Android on home and preserves the appearance fallback without home c
 
   cleanup();
   render(<SettingsPage client={{ load: async () => initial, save: vi.fn() }} />);
-  await screen.findByRole("button", { name: "保存设置" });
-  expect(screen.getByRole("button", { name: "外观" }).getAttribute("aria-current")).toBe("page");
+  await settingsFormReady();
+  expect(screen.getByRole("button", { name: "输入" }).getAttribute("aria-current")).toBe("page");
   expect(screen.queryByRole("region", { name: "首页" })).toBeNull();
 });
 
@@ -198,6 +206,7 @@ test("opens iOS system keyboard settings from the shared home", async () => {
         home: {
           openSystemKeyboardSettings,
         },
+        host: testHost({ platform: "ios" }),
       }}
     />,
   );
@@ -230,6 +239,6 @@ test("enables and selects thoughtful reply when opened from Android home", async
       .getAttribute("aria-pressed"),
   ).toBe("true");
   expect(
-    (screen.getByRole("checkbox", { name: "显示输入方案 高情商回复" }) as HTMLInputElement).checked,
+    (screen.getByRole("switch", { name: "显示输入方案 高情商回复" }) as HTMLInputElement).checked,
   ).toBe(true);
 });

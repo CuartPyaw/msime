@@ -8,6 +8,9 @@ namespace msime_linux {
 #ifndef MSIME_INSTALLED_RESOURCE_RELATIVE_DIR
 #define MSIME_INSTALLED_RESOURCE_RELATIVE_DIR "../share/msime-client/resources"
 #endif
+#ifndef MSIME_INSTALLED_SOUND_PACKS_RELATIVE_DIR
+#define MSIME_INSTALLED_SOUND_PACKS_RELATIVE_DIR "../share/msime-client/sound-packs"
+#endif
 
 // Resolve the resource bundle installed beside the executable.  The bundle is
 // deliberately derived from /proc/self/exe (the caller supplies that resolved
@@ -24,6 +27,11 @@ inline std::string installed_resource_directory(
   const auto resolved = std::filesystem::canonical(candidate, error);
   if (error || !resolved.is_absolute()) return {};
   return resolved.string();
+}
+
+// The built-in sound packs installed beside the resource bundle. The IBus host names them to the Host API as sound_packs: the library's own fallback looks beside the configured resource directory, and that is no longer the installed one once the user has downloaded a newer dictionary into their own data directory.
+inline std::string installed_sound_pack_directory(const std::filesystem::path &executable) {
+  return installed_resource_directory(executable, MSIME_INSTALLED_SOUND_PACKS_RELATIVE_DIR);
 }
 
 } // namespace msime_linux

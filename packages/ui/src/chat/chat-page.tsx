@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useConfirm } from "../core/confirm";
+import { errorCode } from "../core/error-code";
+import { ActionButton } from "../core/action-button";
 import * as chat from "./chat-style";
+import { boundedHistory, chatMessageByteLength, MAX_MESSAGE_BYTES } from "./chat-history";
+import { chatError } from "./chat-errors";
 
 export type ChatMessage = {
   role: "user" | "assistant" | "system";
@@ -21,33 +25,7 @@ export interface ChatClient {
 
 type DisplayMessage = ChatMessage & { id: number };
 
-function chatError(error: unknown): string {
-  if (typeof error === "object" && error !== null && "code" in error) {
-    switch (error.code) {
-      case "account_unauthorized":
-        return "登录后即可与 AI 对话。";
-      case "account_invalid":
-        return "消息或模型无效，请检查后重试。";
-      case "account_rate_limited":
-        return "操作过于频繁，请稍后再试。";
-      case "account_unavailable":
-        return "聊天服务暂不可用，请稍后重试。";
-    }
-  }
-  return "连接失败，请检查网络后重试。";
-}
-
-function boundedHistory(messages: DisplayMessage[]): ChatMessage[] {
-  const result: ChatMessage[] = [];
-  let bytes = 0;
-  for (const message of [...messages].reverse()) {
-    const nextBytes = bytes + new TextEncoder().encode(message.content).length;
-    if (result.length >= 14 || nextBytes >= 48_000) break;
-    result.unshift({ role: message.role, content: message.content });
-    bytes = nextBytes;
-  }
-  return result;
-}
+// Mirrors the client-core byte and message limits used by the chat service.
 
 export function ChatPage({
   client,
@@ -71,36 +49,47 @@ export function ChatPage({
   const [error, setError] = useState("");
   const [loginNeeded, setLoginNeeded] = useState(false);
   const generation = useRef(0);
+  const modelGeneration = useRef(0);
+  const mounted = useRef(true);
+  const sendingRef = useRef(false);
+  const modelsRunning = useRef(false);
   const nextMessageId = useRef(1);
   const composer = useRef<HTMLTextAreaElement>(null);
 
   const loadModels = async () => {
+    if (!mounted.current || modelsRunning.current) return;
+    modelsRunning.current = true;
+    const current = ++modelGeneration.current;
     setLoadingModels(true);
     setError("");
     setLoginNeeded(false);
     try {
       const value = await client.models();
+      if (!mounted.current || modelGeneration.current !== current) return;
       setCatalog(value);
       setSelectedModel((current) =>
         value.data.some((model) => model.id === current) ? current : value.defaultModel,
       );
     } catch (cause) {
-      const unauthorized =
-        typeof cause === "object" &&
-        cause !== null &&
-        "code" in cause &&
-        cause.code === "account_unauthorized";
+      if (!mounted.current || modelGeneration.current !== current) return;
+      const unauthorized = errorCode(cause) === "account_unauthorized";
       setLoginNeeded(unauthorized);
       setError(chatError(cause));
     } finally {
-      setLoadingModels(false);
+      if (modelGeneration.current === current) modelsRunning.current = false;
+      if (mounted.current && modelGeneration.current === current) setLoadingModels(false);
     }
   };
 
   useEffect(() => {
+    mounted.current = true;
     void loadModels();
     return () => {
+      mounted.current = false;
+      modelGeneration.current += 1;
       generation.current += 1;
+      sendingRef.current = false;
+      modelsRunning.current = false;
     };
   }, [client]);
 
@@ -111,8 +100,9 @@ export function ChatPage({
   }, [autoFocus]);
 
   const requestReply = async (history: DisplayMessage[]) => {
-    if (sending || !selectedModel) return;
+    if (sending || sendingRef.current || !selectedModel) return;
     const version = ++generation.current;
+    sendingRef.current = true;
     setSending(true);
     setError("");
     try {
@@ -124,15 +114,14 @@ export function ChatPage({
       ]);
     } catch (cause) {
       if (generation.current !== version) return;
-      const unauthorized =
-        typeof cause === "object" &&
-        cause !== null &&
-        "code" in cause &&
-        cause.code === "account_unauthorized";
+      const unauthorized = errorCode(cause) === "account_unauthorized";
       setLoginNeeded(unauthorized);
       setError(chatError(cause));
     } finally {
-      if (generation.current === version) setSending(false);
+      if (generation.current === version) {
+        sendingRef.current = false;
+        setSending(false);
+      }
     }
   };
 
@@ -144,6 +133,11 @@ export function ChatPage({
       return;
     }
     if (!selectedModel) return;
+    // Refused before it joins the conversation; otherwise every retry would resend it and fail.
+    if (chatMessageByteLength(content) > MAX_MESSAGE_BYTES) {
+      setError("消息过长，请精简后再发送。");
+      return;
+    }
     const next = [...messages, { id: nextMessageId.current++, role: "user" as const, content }];
     setMessages(next);
     setDraft("");
@@ -157,6 +151,7 @@ export function ChatPage({
 
   const cancel = () => {
     generation.current += 1;
+    sendingRef.current = false;
     setSending(false);
   };
 
@@ -193,28 +188,22 @@ export function ChatPage({
               </select>
             )
           )}
-          <button
-            type="button"
+          <ActionButton
+            action={() => void loadModels()}
             className="secondary"
             disabled={loadingModels || sending}
-            onClick={() => void loadModels()}
-          >
-            刷新模型
-          </button>
+            label="刷新模型"
+          />
         </div>
       </div>
       {loginNeeded && onLogin && (
-        <button type="button" className={`primary ${chat.login}`} onClick={onLogin}>
-          登录使用 AI
-        </button>
+        <ActionButton action={onLogin} className={`primary ${chat.login}`} label="登录使用 AI" />
       )}
       {error && (
         <div className={chat.error} role="alert">
           <span>{error}</span>
           {!loginNeeded && messages.at(-1)?.role === "user" && (
-            <button type="button" className="secondary" disabled={sending} onClick={retry}>
-              重试
-            </button>
+            <ActionButton action={retry} className="secondary" disabled={sending} label="重试" />
           )}
         </div>
       )}
@@ -255,11 +244,8 @@ export function ChatPage({
           }}
         />
         <div className={chat.actions}>
-          <button
-            type="button"
-            className="secondary"
-            disabled={!messages.length && !draft}
-            onClick={() => {
+          <ActionButton
+            action={() => {
               if (!messages.length) {
                 clear();
                 return;
@@ -272,22 +258,19 @@ export function ChatPage({
                 if (confirmed) clear();
               });
             }}
-          >
-            新对话
-          </button>
+            className="secondary"
+            disabled={!messages.length && !draft}
+            label="新对话"
+          />
           {sending ? (
-            <button type="button" className="secondary" onClick={cancel}>
-              取消
-            </button>
+            <ActionButton action={cancel} className="secondary" label="取消" />
           ) : (
-            <button
-              type="button"
+            <ActionButton
+              action={send}
               className="primary"
               disabled={!draft.trim() || (!loginNeeded && !selectedModel)}
-              onClick={send}
-            >
-              发送
-            </button>
+              label="发送"
+            />
           )}
         </div>
         <small>

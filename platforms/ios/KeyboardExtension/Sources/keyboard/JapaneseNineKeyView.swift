@@ -37,6 +37,8 @@ final class JapaneseNineKeyView: UIStackView {
     Key(kana: ["0", "〜", "…", "ー", ""], strokes: ["", "", "", "", ""]),
     Key(kana: ["、", "。", "？", "！", "…"], strokes: ["", "", "", "", ""]),
   ]
+  /// A grid cell was pressed, by its index in `keys`: once per tap, flick or menu choice, before the input it produces.
+  var onKeyPress: ((Int) -> Void)?
   var onInput: ((String) -> Void)?
   var onSymbol: ((String) -> Void)?
   var onDelete: (() -> Void)?
@@ -204,6 +206,7 @@ final class JapaneseNineKeyView: UIStackView {
     guard keys.indices.contains(index), keys[index].kana.indices.contains(direction) else { return }
     let key = keys[index]
     guard !key.kana[direction].isEmpty else { return }
+    onKeyPress?(index)
     if key.strokes[direction].isEmpty { onSymbol?(key.kana[direction]) }
     else { onInput?(key.strokes[direction]) }
   }
@@ -321,7 +324,7 @@ private final class KanaFlickPreview: UIView {
   }
 
   func show(_ kana: [String], highlighting direction: Int, over key: UIView, in host: UIView) {
-    let skin = KeyboardSkinPreference.selected
+    let skin = KeyboardTheme.current
     for (index, chip) in chips.enumerated() {
       let text = index < kana.count ? kana[index] : ""
       chip.label.text = text
