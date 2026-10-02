@@ -51,17 +51,21 @@ export function CandidateShortcutsSection({
         />
       )}
       <Row title="选择候选">{key(`Space${numberRowSelection ? " 或 1–9" : ""}`)}</Row>
-      {/* 几组翻页键合成一行，免得同名的行重复出现。 */}
-      {paging.length > 0 && (
-        <Row title="向前 / 向后翻页">
-          <span className={settings.shortcutKeys}>
-            {paging.map(([option, chord]) => (
-              <kbd key={option} className={settings.shortcutKey}>
-                {chord}
-              </kbd>
-            ))}
-          </span>
-        </Row>
+      {/* 几组翻页键合成一行，免得同名的行重复出现。只有一组时和其他行一样放在行尾；多组时排到标题下方另起一行，标题不会被挤成两行。 */}
+      {paging.length === 1 && <Row title="向前 / 向后翻页">{key(paging[0][1])}</Row>}
+      {paging.length > 1 && (
+        <Row
+          title="向前 / 向后翻页"
+          description={
+            <span className={settings.shortcutKeys}>
+              {paging.map(([option, chord]) => (
+                <kbd key={option} className={settings.shortcutKey}>
+                  {chord}
+                </kbd>
+              ))}
+            </span>
+          }
+        />
       )}
       {navigation.mouse_wheel && (
         <Row title={mobile ? "候选栏翻页" : "候选窗口翻页"}>{key("鼠标滚轮")}</Row>

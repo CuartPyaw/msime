@@ -121,8 +121,8 @@ export const toolbarRequiredLabel = "ml-auto text-xs text-muted";
 export const shortcutKey =
   "min-w-30 rounded-[5px] border border-edge bg-[var(--button-secondary-bg)] px-2 py-1 text-center font-[inherit] text-xs text-body";
 export const shortcutRowDanger = "text-danger";
-/** 一行里并列的几组按键，例如「向前 / 向后翻页」同时开着的几种翻页键。 */
-export const shortcutKeys = "flex flex-wrap justify-end gap-1.5";
+/** 一行里并列的几组按键，例如「向前 / 向后翻页」同时开着的几种翻页键；排在行标题下方、靠左换行，标题保持一行。 */
+export const shortcutKeys = "mt-1 flex flex-wrap justify-start gap-1.5";
 
 // ---- service actions ----
 

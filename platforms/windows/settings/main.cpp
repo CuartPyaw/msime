@@ -2768,22 +2768,30 @@ private:
     }
 
     auto language = add_group(page, L"中英文");
+    // 偏好里仍是三个独立的布尔值，这里和共用设置页一样只让选一个：同时开着多个时按 Shift > 单击 Ctrl > Ctrl+Alt+Space 显示第一个，选中一项时一次写全三个，「不使用」三个都关。
     const std::array<std::pair<const wchar_t *, const wchar_t *>, 3> switches{{
-        {L"switch_language_shift", L"Shift 切换中英文"},
-        {L"switch_language_ctrl", L"单击 Ctrl 切换中英文"},
-        {L"switch_language_ctrl_alt_space", L"Ctrl+Alt+Space 切换中英文"},
+        {L"shift", L"keybindings.switch_language_shift"},
+        {L"ctrl", L"keybindings.switch_language_ctrl"},
+        {L"ctrl_alt_space", L"keybindings.switch_language_ctrl_alt_space"},
     }};
-    std::vector<Check> keys;
-    for (const auto &[id, label] : switches) {
-      const std::wstring key = std::wstring(L"keybindings.") + id;
-      keys.push_back({label, document_.Boolean(key, false), [this, key](bool on) {
-                        change([&](PreferencesDocument &doc) {
-                          doc.SetBoolean(key, on);
-                        }, false);
-                      }});
+    std::wstring language_switch = L"none";
+    for (const auto &[choice, key] : switches) {
+      if (document_.Boolean(key, false)) {
+        language_switch = choice;
+        break;
+      }
     }
-    add_row(language, 0xE8AB, L"中英文切换键", L"选择用于切换中英文的按键", nullptr,
-            checks_panel(std::move(keys), 230));
+    add_row(language, 0xE8AB, L"切换中英文", L"选择用于切换中英文的按键",
+            select_control(L"切换中英文",
+                           {{L"shift", L"Shift"}, {L"ctrl", L"单击 Ctrl"},
+                            {L"ctrl_alt_space", L"Ctrl+Alt+Space"}, {L"none", L"不使用"}},
+                           language_switch,
+                           [this, switches](std::wstring const &value) {
+                             change([&](PreferencesDocument &doc) {
+                               for (const auto &[choice, key] : switches)
+                                 doc.SetBoolean(key, value == choice);
+                             }, false);
+                           }));
     segment_row(language, 0xE774, L"默认中英文", L"新焦点会话开始时使用的中文或英文状态",
                 L"default_ime_mode", {{L"chinese", L"中文"}, {L"english", L"英文"}},
                 L"english");
