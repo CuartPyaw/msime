@@ -113,6 +113,7 @@ import { useClipboardHistoryToggle } from "./settings/use-clipboard-history-togg
 import { useTouchKeyboardSchemeSelection } from "./settings/use-touch-keyboard-scheme-selection";
 import { useSettingsDestinationActions } from "./settings/use-settings-destination-actions";
 import { useMacosSettings } from "./settings/use-macos-settings";
+import type { MacosInputModesClient } from "./settings/macos-input-mode-entries-section";
 import { useWindowState } from "./settings/use-window-state";
 import { useAppVersion } from "./settings/use-app-version";
 import { supportDiagnostics } from "./settings/support-diagnostics";
@@ -300,6 +301,11 @@ export {
   type UseSettingsDestinationActionsOptions,
 } from "./settings/use-settings-destination-actions";
 export { useMacosSettings, type UseMacosSettingsOptions } from "./settings/use-macos-settings";
+export {
+  MacosInputModeEntriesSection,
+  macosInputModeEntries,
+  type MacosInputModesClient,
+} from "./settings/macos-input-mode-entries-section";
 export { useWindowState, type UseWindowStateOptions } from "./settings/use-window-state";
 export {
   useSettingsWindowInteractions,
@@ -1428,6 +1434,8 @@ export interface HostCapabilities {
   floating_toolbar_handwriting: boolean;
   /** The toolbar carries a voice input button, for the same reason. */
   floating_toolbar_voice: boolean;
+  /** 工具栏带切换输入方案的按钮（目前只有 macOS）。 */
+  floating_toolbar_input_scheme: boolean;
   mode_switch_shortcuts: boolean;
   panel_shortcuts: boolean;
   number_row_selection: boolean;
@@ -1819,6 +1827,8 @@ export { dictionaryKindKeyHint } from "./settings/pages/dictionary-page";
 export type FloatingToolbarPreferences = {
   enabled: boolean;
   english_mode: boolean;
+  /** 切换输入方案的按钮。 */
+  input_scheme: boolean;
   fullwidth: boolean;
   punctuation: boolean;
   character_set: boolean;
@@ -1946,6 +1956,8 @@ export interface SettingsClient {
   restartInputMethod?: () => Promise<void>;
   /** macOS installs/updates the separate InputMethodKit bundle before registering it. */
   installInputSource?: () => Promise<void>;
+  /** macOS 上哪几个输入模式已经加入输入法列表，用于「方案」里的「菜单栏入口」提示。 */
+  macosInputModes?: MacosInputModesClient;
   /** macOS installs or refreshes the input method on every start; this reports what that did. */
   inputSourceStartup?: {
     /** Resolves once the start-time check has finished; `null` when it did not run for this launch. Whether the source is enabled is read afresh on every call, and nothing is installed again, so it is safe to call repeatedly. */

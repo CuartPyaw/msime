@@ -2994,6 +2994,32 @@ static __weak MSIMEInputController *MSIMEFocusedController;
     pinned[@"menu_theme"] = *fixed ? @"dark" : @"light";
     return pinned;
 }
+// 「输入方案」子菜单：输入法菜单和悬浮工具栏的切换输入方案按钮用的是同一份。`currentTitle` 带回正在用的方案的名字，没有打勾的项时为 nil。
+- (NSMenu *)inputSchemeMenuWithCurrentTitle:(NSString **)currentTitle {
+    NSString *profile = [NSString stringWithUTF8String:msime::mac::ShuangpinSchemaTitle(_appearance.shuangpinProfile.UTF8String ?: "")];
+    if ([profile hasSuffix:@"双拼"] && profile.length > 2) profile = [profile substringToIndex:profile.length - 2];
+    NSArray<NSString *> *schemes = MSIMEInputSchemeNames();
+    NSArray<NSString *> *schemeTitles = @[@"全拼", [NSString stringWithFormat:@"双拼（%@）", profile], @"五笔 86", @"日语", @"韩语", @"粤拼", @"注音", @"越南语"];
+    NSMenu *schemeMenu = [[NSMenu alloc] initWithTitle:@"输入方案"];
+    schemeMenu.autoenablesItems = NO;
+    // A scheme that cannot run here (Cantonese or Zhuyin without its dictionary) is not offered, and the check is on the scheme actually running, so a preference naming one shows the scheme it fell back to.
+    NSDictionary *hostOptions = [self inputSchemeHostOptions];
+    NSString *effectiveScheme = MSIMEEffectiveInputScheme(_appearance.inputScheme, _appearance.lastChineseScheme, hostOptions);
+    for (NSUInteger index = 0; index < schemes.count; ++index) {
+        if (!MSIMEInputSchemeAvailable(schemes[index], hostOptions)) continue;
+        NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:schemeTitles[index] action:@selector(selectInputScheme:) keyEquivalent:@""];
+        item.target = self;
+        item.representedObject = schemes[index];
+        item.state = [effectiveScheme isEqual:schemes[index]] ? NSControlStateValueOn : NSControlStateValueOff;
+        if (item.state == NSControlStateValueOn && currentTitle) *currentTitle = schemeTitles[index];
+        [schemeMenu addItem:item];
+    }
+    return schemeMenu;
+}
+- (NSMenu *)floatingToolbarInputSchemeMenu:(MSIMEFloatingToolbarPanel *)toolbar {
+    (void)toolbar;
+    return [self inputSchemeMenuWithCurrentTitle:nullptr];
+}
 - (NSMenu *)menu {
     [self ensureAppearance];
     NSMenu *menu = [[NSMenu alloc] initWithTitle:@"水杉输入法"];
@@ -3035,25 +3061,8 @@ static __weak MSIMEInputController *MSIMEFocusedController;
     [menu addItem:translations];
     [menu addItem:NSMenuItem.separatorItem];
     // The scheme and the theme are each one choice out of several, so each is a submenu whose row names the current one, the way the system lists an input source's modes. As a radio list under a header the scheme alone took six rows.
-    NSString *profile = [NSString stringWithUTF8String:msime::mac::ShuangpinSchemaTitle(_appearance.shuangpinProfile.UTF8String ?: "")];
-    if ([profile hasSuffix:@"双拼"] && profile.length > 2) profile = [profile substringToIndex:profile.length - 2];
-    NSArray<NSString *> *schemes = MSIMEInputSchemeNames();
-    NSArray<NSString *> *schemeTitles = @[@"全拼", [NSString stringWithFormat:@"双拼（%@）", profile], @"五笔 86", @"日语", @"韩语", @"粤拼", @"注音", @"越南语"];
-    NSMenu *schemeMenu = [[NSMenu alloc] initWithTitle:@"输入方案"];
-    schemeMenu.autoenablesItems = NO;
     NSString *currentSchemeTitle = nil;
-    // A scheme that cannot run here (Cantonese or Zhuyin without its dictionary) is not offered, and the check is on the scheme actually running, so a preference naming one shows the scheme it fell back to.
-    NSDictionary *hostOptions = [self inputSchemeHostOptions];
-    NSString *effectiveScheme = MSIMEEffectiveInputScheme(_appearance.inputScheme, _appearance.lastChineseScheme, hostOptions);
-    for (NSUInteger index = 0; index < schemes.count; ++index) {
-        if (!MSIMEInputSchemeAvailable(schemes[index], hostOptions)) continue;
-        NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:schemeTitles[index] action:@selector(selectInputScheme:) keyEquivalent:@""];
-        item.target = self;
-        item.representedObject = schemes[index];
-        item.state = [effectiveScheme isEqual:schemes[index]] ? NSControlStateValueOn : NSControlStateValueOff;
-        if (item.state == NSControlStateValueOn) currentSchemeTitle = schemeTitles[index];
-        [schemeMenu addItem:item];
-    }
+    NSMenu *schemeMenu = [self inputSchemeMenuWithCurrentTitle:&currentSchemeTitle];
     NSMenuItem *scheme = [[NSMenuItem alloc] initWithTitle:currentSchemeTitle ? [NSString stringWithFormat:@"输入方案（%@）", currentSchemeTitle] : @"输入方案" action:nil keyEquivalent:@""];
     scheme.submenu = schemeMenu;
     [menu addItem:scheme];
@@ -3399,7 +3408,7 @@ static __weak MSIMEInputController *MSIMEFocusedController;
 }
 // Keeps the selected input mode - 中, 双, 五, 粤, 注, 英, 日, 한 or 越 in the input menu - in step with the Chinese/English state and the scheme actually running. A switch the system reported is already recorded as shown, so this does not echo it back.
 //
-// 所有方案切换都会走到这里——不论来自输入菜单、两个设置窗口、Tauri 设置页还是用户选中的模式——所以按需模式也在这里打开：实际运行的方案从上次同步的方案（lastSyncedInputScheme，跨启动保留）变成粤拼、注音或越南文时，先启用对应模式再选中它。这里看的是实际生效的方案，所以词库装好之前就选了的方案，在词库到位时才算选中。方案和上次同步的一样时不启用任何模式，用户从输入菜单移除的模式不会在每次启动时被加回来。第一次同步（还没有 lastSyncedInputScheme）落在这三个方案上同样启用：这个持久记录是后来才加的，加上它之前就在用粤拼的人，否则要先切走再切回来才能看到「粤」。模式没能打开时不记录这次切换，下一次同步再试。
+// 所有方案切换都会走到这里——不论来自输入菜单、两个设置窗口、Tauri 设置页还是用户选中的模式——所以按需模式也在这里打开：实际运行的方案从上次同步的方案（lastSyncedInputScheme，跨启动保留）变成粤拼、注音或越南文时，先启用对应模式再选中它。这里看的是实际生效的方案，所以词库装好之前就选了的方案，在词库到位时才算选中。方案和上次同步的一样时不启用任何模式，用户从输入菜单移除的模式不会在每次启动时被加回来。第一次同步（还没有 lastSyncedInputScheme）落在这三个方案上同样启用：这个持久记录是后来才加的，加上它之前就在用粤拼的人，否则要先切走再切回来才能看到「粤」。模式没能打开时不记录这次切换，下一次同步再试。macOS 27 不允许进程启用键盘输入模式，`TISEnableInputSource` 在那里返回 noErr 而状态不变，所以这里在那个版本上打不开任何模式，只是照常记录；用户要在系统设置里自己添加，设置页的「菜单栏入口」会说明去哪里加。
 - (void)syncSystemInputModeForClient:(id)client {
     NSString *scheme = MSIMEEffectiveInputScheme(_appearance.inputScheme, _appearance.lastChineseScheme, [self inputSchemeHostOptions]);
     NSString *synced = _appearance.lastSyncedInputScheme;
