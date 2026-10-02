@@ -31,9 +31,6 @@ test("keeps utility page fieldsets composed behind one component", () => {
         onNumberRowSelectionChange: vi.fn(),
         showPanelShortcuts: false,
         harmony: false,
-        showDesktopMaintenanceShortcuts: false,
-        linux: false,
-        maintenanceChord: "",
       }}
       utilities={{
         disabled: false,

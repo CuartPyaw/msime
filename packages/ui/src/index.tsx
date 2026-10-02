@@ -865,10 +865,6 @@ export {
   type CandidateShortcutsSectionProps,
 } from "./settings/candidate-shortcuts-section";
 export {
-  MaintenanceShortcutsSection,
-  type MaintenanceShortcutsSectionProps,
-} from "./settings/maintenance-shortcuts-section";
-export {
   InputMethodServiceSection,
   type InputMethodServiceSectionProps,
 } from "./settings/input-method-service-section";
@@ -2146,7 +2142,6 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
   } = capabilities;
   const {
     fullwidthChord,
-    maintenanceChord,
     releasesPageUrl: platformReleasesPageUrl,
     licenseUrl: platformLicenseUrl,
     issuesUrl: platformIssuesUrl,
@@ -2673,10 +2668,8 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     showCandidateCornerRadius,
     showInputModeHUD,
     showVoiceCaptureDevices,
-    showDesktopMaintenanceShortcuts,
     showFullwidthChord,
     fullwidthChord,
-    maintenanceChord,
     clientHostedPlatform,
     platformLicenseUrl,
     platformReleasesPageUrl,
