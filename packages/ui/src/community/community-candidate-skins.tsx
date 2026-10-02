@@ -12,13 +12,13 @@ import { CommunityDetailHeader } from "./community-detail-header";
 import * as style from "./community-style";
 import { CommunitySearchForm } from "./community-search-form";
 import { CommunityScopeButtons } from "./community-scope-buttons";
-import { CommunitySkinModerationSection } from "./community-skin-moderation-section";
+import { CommunityModerationSection } from "./community-moderation-section";
 import {
   CommunityReportSection,
   type CommunityModeration,
   type CommunityReportReason,
 } from "./community-report";
-import { CommunitySkinCardMetrics } from "./community-skin-card-metrics";
+import { CommunityCardMetrics } from "./community-card-metrics";
 import { CommunityCardAuthor } from "./community-card-author";
 import { CommunityInstallButton } from "./community-install-button";
 import { CommunityReplaceConfirmation } from "./community-replace-confirmation";
@@ -232,7 +232,7 @@ function CommunityCandidateSkinCard({
         private={skin.visibility === "private"}
         removed={skin.moderation === "removed"}
       />
-      <CommunitySkinCardMetrics
+      <CommunityCardMetrics
         downloads={skin.downloads}
         ratingCount={skin.rating_count}
         ratingAverage={skin.rating_average}
@@ -515,7 +515,7 @@ export function CommunityCandidateSkinsPage({
               onChange={(next) => void changeOwnCategory(next)}
             />
           )}
-          <CommunitySkinModerationSection
+          <CommunityModerationSection
             owned={selected.owned}
             unpublishable={selected.visibility === "public"}
             actionBusy={actionBusy}

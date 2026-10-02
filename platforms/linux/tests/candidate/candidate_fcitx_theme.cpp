@@ -62,6 +62,18 @@ std::vector<std::string> files_with(const std::filesystem::path &directory, cons
 
 std::vector<std::string> staged(const std::filesystem::path &directory) { return files_with(directory, "decoration-"); }
 
+struct ShapeNameProbe {
+  std::size_t reserved = 0;
+  std::vector<std::string> names;
+
+  void reserve(std::size_t count) {
+    reserved = count;
+    names.reserve(count);
+  }
+
+  void push_back(std::string name) { names.push_back(std::move(name)); }
+};
+
 // Every Image= value in a theme with the @2x copy of each, sorted.
 std::vector<std::string> shapes_named(const std::string &theme) {
   std::vector<std::string> names;
@@ -247,6 +259,10 @@ int main() {
   // The images: every name the theme gives is generated, with an @2x copy, and they decode as the shapes they stand for.
   const auto files = host::fcitx_candidate_theme_files(wechat_dark, true);
   assert(files.conf == theme);
+  ShapeNameProbe shape_names;
+  host::fcitx_collect_shape_names(files, shape_names);
+  assert(shape_names.reserved == files.images.size());
+  assert(shape_names.names.size() == files.images.size());
   std::vector<std::string> generated;
   for (const auto &image : files.images) generated.push_back(image.file);
   std::sort(generated.begin(), generated.end());

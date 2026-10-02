@@ -61,6 +61,12 @@ struct FcitxThemeFiles {
   std::vector<FcitxThemeImage> images;
 };
 
+template <typename ShapeNames>
+inline void fcitx_collect_shape_names(const FcitxThemeFiles &theme, ShapeNames &names) {
+  names.reserve(theme.images.size());
+  for (const auto &image : theme.images) names.push_back(image.file);
+}
+
 // Generated images are named shape-<content hash>.png with an @2x copy beside each: changed colours give new names, so theme.conf changes with them and the classic UI loads the new pictures rather than ones it already holds under the old names.
 inline constexpr std::string_view kFcitxShapePrefix = "shape-";
 
@@ -475,9 +481,9 @@ inline bool write_fcitx_candidate_theme(const std::filesystem::path &file, const
   const auto overlay = decoration ? stage_fcitx_overlay(directory, *decoration) : std::nullopt;
   const auto theme = fcitx_candidate_theme_files(colors, dark, overlay, corner_radius, logo, user_radius);
   std::vector<std::string> shapes;
+  fcitx_collect_shape_names(theme, shapes);
   for (const auto &image : theme.images) {
     if (!write_fcitx_theme(directory / image.file, image.bytes)) return false;
-    shapes.push_back(image.file);
   }
   if (!write_fcitx_theme(file, theme.conf)) return false;
   remove_stale_fcitx_files(directory, kFcitxOverlayPrefix, overlay ? std::vector<std::string>{overlay->file} : std::vector<std::string>{});

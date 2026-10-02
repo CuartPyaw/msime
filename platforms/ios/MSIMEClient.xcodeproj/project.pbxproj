@@ -3015,7 +3015,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = LXCL4Z68GU;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.51.4;
+				MARKETING_VERSION = 0.51.5;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
@@ -3028,7 +3028,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = LXCL4Z68GU;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.51.4;
+				MARKETING_VERSION = 0.51.5;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
@@ -3065,10 +3065,12 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = App/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "水杉输入法";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "仅在你开始语音输入时录音：本地模型在本机识别，系统语音识别交由 iOS 处理，其他识别服务会把录音发送到你配置的服务。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "仅在你选择“系统语音识别”并开始录音时，用 iOS 的语音识别把录音转成文字。";
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -3087,6 +3089,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = app.msime.ios;
 				PRODUCT_NAME = MSIMEApp;
+				PROVISIONING_PROFILE_SPECIFIER = "$(MSIME_IOS_APP_PROFILE)";
 			};
 			name = Release;
 		};
@@ -3177,6 +3180,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = app.msime.ios.keyboard;
 				PRODUCT_NAME = MSIMEKeyboardExtension;
+				PROVISIONING_PROFILE_SPECIFIER = "$(MSIME_IOS_KEYBOARD_PROFILE)";
 				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/KeyboardExtension/Sources/core/MetasequoiaKeyboard-Bridging-Header.h";
 			};
 			name = Release;
@@ -3241,10 +3245,12 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = App/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "水杉输入法";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "仅在你开始语音输入时录音：本地模型在本机识别，系统语音识别交由 iOS 处理，其他识别服务会把录音发送到你配置的服务。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "仅在你选择“系统语音识别”并开始录音时，用 iOS 的语音识别把录音转成文字。";
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -3263,6 +3269,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = app.msime.ios;
 				PRODUCT_NAME = MSIMEApp;
+				PROVISIONING_PROFILE_SPECIFIER = "$(MSIME_IOS_APP_PROFILE)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
 			};
 			name = Debug;
@@ -3329,6 +3336,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = app.msime.ios.keyboard;
 				PRODUCT_NAME = MSIMEKeyboardExtension;
+				PROVISIONING_PROFILE_SPECIFIER = "$(MSIME_IOS_KEYBOARD_PROFILE)";
 				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/KeyboardExtension/Sources/core/MetasequoiaKeyboard-Bridging-Header.h";
 			};
 			name = Debug;

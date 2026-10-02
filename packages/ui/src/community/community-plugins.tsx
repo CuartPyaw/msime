@@ -20,12 +20,12 @@ import {
 } from "./community-helpers";
 import { useCommunityGallery, type CommunityGalleryClient } from "./community-gallery";
 import { CommunityErrorAlert } from "./community-error-alert";
-import { CommunityDialogHeader } from "./community-dialog";
+import { CommunityDialogActions, CommunityDialogHeader } from "./community-dialog";
 import { CommunityDetailStatus } from "./community-detail-status";
 import { CommunityDetailHeader } from "./community-detail-header";
 import * as style from "./community-style";
 import { CommunitySearchForm } from "./community-search-form";
-import { CommunitySkinModerationSection } from "./community-skin-moderation-section";
+import { CommunityModerationSection } from "./community-moderation-section";
 import { CommunityScopeButtons } from "./community-scope-buttons";
 import { CommunityRightsAgreement } from "./community-rights-agreement";
 import { CommunityInputField } from "./community-input-field";
@@ -36,7 +36,7 @@ import {
   type CommunityModeration,
   type CommunityReportReason,
 } from "./community-report";
-import { CommunitySkinCardMetrics } from "./community-skin-card-metrics";
+import { CommunityCardMetrics } from "./community-card-metrics";
 import { CommunityCardAuthor } from "./community-card-author";
 import { CommunityInstallButton } from "./community-install-button";
 import { CommunityReplaceConfirmation } from "./community-replace-confirmation";
@@ -152,7 +152,7 @@ function CommunityPluginCard({ plugin, open }: { plugin: CommunityPlugin; open: 
       {plugin.description && (
         <span className={style.resourceDescription}>{plugin.description}</span>
       )}
-      <CommunitySkinCardMetrics
+      <CommunityCardMetrics
         downloads={plugin.downloads}
         ratingCount={plugin.rating_count}
         ratingAverage={plugin.rating_average}
@@ -354,7 +354,7 @@ export function CommunityPluginsPage({
               onCancel={() => setConfirmReplace(false)}
             />
           )}
-          <CommunitySkinModerationSection
+          <CommunityModerationSection
             owned={selected.owned}
             actionBusy={actionBusy}
             ratingDescription="我的评分（安装后可评，可重新选择）"
@@ -726,8 +726,7 @@ export function CommunityPluginPublishDialog({
             <p className={style.warning}>{publishWarning}</p>
           </>
         )}
-        <div className={style.dialogActions}>
-          <ActionButton action={onClose} className="secondary" disabled={busy} label="取消" />
+        <CommunityDialogActions busy={busy} onClose={onClose}>
           {!packError && (
             <ActionButton
               action={() => submit()}
@@ -736,7 +735,7 @@ export function CommunityPluginPublishDialog({
               label={busy ? "正在发布…" : "公开发布"}
             />
           )}
-        </div>
+        </CommunityDialogActions>
       </div>
     </div>
   );
