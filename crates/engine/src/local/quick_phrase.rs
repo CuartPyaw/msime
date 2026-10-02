@@ -78,12 +78,14 @@ fn read(connection: &Connection, prefix: &str, limit: usize) -> rusqlite::Result
 
 /// 宿主短语表里 Engine 能用的行：编码是 1..=`KEY_LIMIT` 个小写字母，文本非空白、不超过 `TEXT_UTF16_LIMIT` 个 UTF-16 单元、不含控制字符；按启用顺序最多保留 `TABLE_LIMIT` 行，再按编码稳定排序，同一编码内保持启用顺序。
 pub fn usable_quick_phrase_table(table: &[QuickPhraseEntry]) -> Vec<QuickPhraseEntry> {
-    let mut usable: Vec<QuickPhraseEntry> = table
-        .iter()
-        .filter(|entry| usable_entry(entry))
-        .take(TABLE_LIMIT)
-        .cloned()
-        .collect();
+    let mut usable = Vec::with_capacity(table.len().min(TABLE_LIMIT));
+    usable.extend(
+        table
+            .iter()
+            .filter(|entry| usable_entry(entry))
+            .take(TABLE_LIMIT)
+            .cloned(),
+    );
     usable.sort_by(|a, b| a.key.cmp(&b.key));
     usable
 }
@@ -239,6 +241,16 @@ mod tests {
         let kept = usable_quick_phrase_table(&many);
         assert_eq!(kept.len(), TABLE_LIMIT);
         assert_eq!(kept.last().unwrap().text, (TABLE_LIMIT - 1).to_string());
+    }
+
+    #[test]
+    fn usable_table_reserves_the_capped_input_capacity() {
+        let table = ["aa", "ab", "ac"]
+            .into_iter()
+            .map(|key| phrase(key, "短语"))
+            .collect::<Vec<_>>();
+        let usable = usable_quick_phrase_table(&table);
+        assert_eq!(usable.capacity(), table.len().min(TABLE_LIMIT));
     }
 
     #[test]
