@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { HostPlatform, Preferences } from "../index";
-import { GroupList, Row, Segmented, Slider } from "../core/platform-controls";
+import { GroupList, Row, Slider } from "../core/platform-controls";
 import {
   candidateFontPresetAvailable,
   candidateFontPresetPatch,
@@ -20,6 +20,8 @@ import {
   candidateScaleSlider,
 } from "../candidate/candidate-window-style";
 import * as settings from "./settings-style";
+import { SegmentedRow } from "./segmented-row";
+import { SliderRow } from "./slider-row";
 
 export type CandidateWindowStyleSectionPreferences = Pick<
   Preferences,
@@ -44,7 +46,7 @@ export function CandidateFontPresetRow({
 }: CandidateFontPresetRowProps) {
   const preset = currentCandidateFontPreset(preferences, platform);
   return (
-    <Row
+    <SegmentedRow
       title="候选字体"
       description={
         preset === null
@@ -53,19 +55,16 @@ export function CandidateFontPresetRow({
             ? "Windows 没有自带圆体"
             : undefined
       }
-    >
-      <Segmented<CandidateFontPresetId | "custom">
-        options={candidateFontPresets.map((entry) => ({
-          value: entry.id,
-          label: entry.label,
-          disabled: !candidateFontPresetAvailable(entry.id, platform),
-        }))}
-        value={preset ?? "custom"}
-        onChange={(id) => {
-          if (id !== "custom") onChange(candidateFontPresetPatch(id, platform, preferences));
-        }}
-      />
-    </Row>
+      options={candidateFontPresets.map((entry) => ({
+        value: entry.id,
+        label: entry.label,
+        disabled: !candidateFontPresetAvailable(entry.id, platform),
+      }))}
+      value={preset ?? "custom"}
+      onChange={(id) => {
+        if (id !== "custom") onChange(candidateFontPresetPatch(id, platform, preferences));
+      }}
+    />
   );
 }
 
@@ -78,16 +77,14 @@ export interface CandidateScaleRowProps {
 export function CandidateScaleRow({ preferences, onChange }: CandidateScaleRowProps) {
   const scale = candidateScalePercent(preferences.candidate_scale_percent);
   return (
-    <Row title="整体大小" description={`${scale}%，字号与窗口尺寸一起缩放`}>
-      <span className={settings.sliderControl}>
-        <Slider
-          {...candidateScaleSlider}
-          value={scale}
-          valueText={`${scale}%`}
-          onChange={(value) => onChange(candidateScalePatch(value))}
-        />
-      </span>
-    </Row>
+    <SliderRow
+      title="整体大小"
+      description={`${scale}%，字号与窗口尺寸一起缩放`}
+      {...candidateScaleSlider}
+      value={scale}
+      valueText={`${scale}%`}
+      onChange={(value) => onChange(candidateScalePatch(value))}
+    />
   );
 }
 
@@ -116,16 +113,14 @@ export function CandidateWindowStyleSection({
   return (
     <GroupList title="窗口样式">
       {showOpacity && (
-        <Row title="不透明度" description={`${opacity}%，文字和焦点高亮保持不透明`}>
-          <span className={settings.sliderControl}>
-            <Slider
-              {...candidateOpacitySlider}
-              value={opacity}
-              valueText={`${opacity}%`}
-              onChange={(value) => onChange(candidateOpacityPatch(value))}
-            />
-          </span>
-        </Row>
+        <SliderRow
+          title="不透明度"
+          description={`${opacity}%，文字和焦点高亮保持不透明`}
+          {...candidateOpacitySlider}
+          value={opacity}
+          valueText={`${opacity}%`}
+          onChange={(value) => onChange(candidateOpacityPatch(value))}
+        />
       )}
       {showCornerRadius && (
         <Row

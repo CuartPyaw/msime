@@ -51,6 +51,7 @@ import {
   emojiDisplayName,
   flattenGroups,
   matchesEmojiItem,
+  matchingGroupItems,
 } from "./emoji-panel-helpers";
 
 export { emojiDisplayName } from "./emoji-panel-helpers";
@@ -1800,7 +1801,7 @@ export function CloudClipboardPanel({ client }: { client: CloudClipboardPanelCli
       } catch {
         if (revision === refreshRevision.current) setNotice("已上传，但历史刷新失败，请点击刷新");
       }
-    }, "上传失败，请确认账户 provider 已连接");
+    }, "上传失败，请确认账号 provider 已连接");
   }
 
   function remove(id: string) {
@@ -2021,8 +2022,8 @@ export function CloudDictionaryPanel({ client }: { client: CloudDictionaryPanelC
   function refresh(nextOffset = 0, nextSearch = searchRef.current, nextKind = kind) {
     return run(async (revision) => {
       await load(revision, nextOffset, nextSearch, nextKind);
-      if (isCurrent(revision)) setNotice("云词典已刷新");
-    }, "无法访问云词典服务，请确认 provider 已连接");
+      if (isCurrent(revision)) setNotice("云词库已刷新");
+    }, "无法访问云词库服务，请确认 provider 已连接");
   }
 
   useEffect(() => {
@@ -2136,9 +2137,9 @@ export function CloudDictionaryPanel({ client }: { client: CloudDictionaryPanelC
     void refresh(0, searchRef.current, next);
   }
   return (
-    <main className={`native-panel ${cloud.dictionaryPanel}`} aria-label="云词典">
+    <main className={`native-panel ${cloud.dictionaryPanel}`} aria-label="云词库">
       {confirmation}
-      <CloudPanelHeader title="水杉云词典" onClose={() => void client.close()} />
+      <CloudPanelHeader title="水杉云词库" onClose={() => void client.close()} />
       <div className={cloud.dictionaryBody}>
         <p className={cloud.dictionaryNote}>
           管理当前账号的云端词条。修改需要 provider 提供登录态和同步服务。
@@ -3975,8 +3976,13 @@ export function EmojiPanel({
   const groups =
     page === "emoji" ? catalog.emoji : page === "kaomoji" ? catalog.kaomoji : catalog.symbols;
   const categoryPage = page === "emoji" || page === "symbols" ? page : null;
+  // 插件组的分类键带上包 id：同名的内置分类或别的包不会和它合并。
   const categoryKey = (group: EmojiCatalogGroup) =>
-    page === "symbols" && group.parent ? `parent:${group.parent}` : `group:${group.title}`;
+    group.pack !== undefined
+      ? JSON.stringify(["pack", group.pack])
+      : page === "symbols" && group.parent
+        ? `parent:${group.parent}`
+        : `group:${group.title}`;
   const categoryTabs: { id: string; title: string; icon: string }[] = [];
   for (const group of groups) {
     const id = categoryKey(group);
@@ -4006,13 +4012,11 @@ export function EmojiPanel({
     .map((group) => ({
       ...group,
       flow: page === "kaomoji",
-      items: group.items.filter((item) => matchesEmojiItem(item, query)),
+      items: matchingGroupItems(group, query),
     }))
     .filter((group) => group.items.length);
   const symbolPreview = query
-    ? flattenGroups(catalog.symbols)
-        .filter((item) => matchesEmojiItem(item, query))
-        .slice(0, 18)
+    ? catalog.symbols.flatMap((group) => matchingGroupItems(group, query)).slice(0, 18)
     : catalog.symbols
         .flatMap((group) => group.items.map((item, index) => ({ item, index })))
         .sort((left, right) => left.index - right.index)
@@ -4033,9 +4037,7 @@ export function EmojiPanel({
       icon: catalog.kaomoji[0]?.icon ?? "ヾ",
       moreTarget: "kaomoji",
       flow: true,
-      items: flattenGroups(catalog.kaomoji)
-        .filter((item) => matchesEmojiItem(item, query))
-        .slice(0, 15),
+      items: catalog.kaomoji.flatMap((group) => matchingGroupItems(group, query)).slice(0, 15),
     },
     {
       title: "Symbols",
@@ -4589,7 +4591,10 @@ export function EmojiPanel({
               </div>
             )}
           {displayGroups.map((group) => (
-            <div className="mb-[22px]" key={JSON.stringify([group.parent, group.title])}>
+            <div
+              className="mb-[22px]"
+              key={JSON.stringify([group.pack ?? null, group.parent ?? null, group.title])}
+            >
               <div className="mb-2 flex min-h-[34px] items-center gap-[9px]">
                 <span className="w-6 text-center font-emoji text-xl">{group.icon}</span>
                 <h2 className={panelHeading}>{group.title}</h2>

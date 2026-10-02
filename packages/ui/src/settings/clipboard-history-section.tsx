@@ -35,7 +35,7 @@ export interface ClipboardHistorySectionProps {
   children?: ReactNode;
 }
 
-/** 桌面和移动设置宿主共用的本地剪贴板历史控件：「剪贴板」页的「剪贴板」和「历史记录」两组，后面接宿主追加的内容（它的云端面板）。 */
+/** 桌面和移动设置宿主共用的本地剪贴板历史控件：「剪贴板」页的「剪贴板」和「历史记录」两组，后面接宿主追加的内容（它的云剪贴板）。 */
 export function ClipboardHistorySection({
   client,
   historyEnabled,
@@ -167,12 +167,12 @@ export function ClipboardHistorySection({
     <>
       <GroupList title="剪贴板">
         {ios ? (
-          <Row title="剪贴板管理" description={clipboardDescription} />
+          <Row title="剪贴板历史" description={clipboardDescription} />
         ) : (
           <SwitchRow
-            title="剪贴板管理"
+            title="剪贴板历史"
             description={clipboardDescription}
-            aria-label="剪贴板管理"
+            aria-label="剪贴板历史"
             checked={historyEnabled}
             onChange={toggle}
           />

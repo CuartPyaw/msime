@@ -19,7 +19,7 @@ if (-not $script.Contains('#define MySettingsExeName "msime-client-settings.exe"
     -not $script.Contains('{#MySettingsExeName}')) {
     throw 'Start Menu shortcut does not target the staged WinUI settings executable'
 }
-# 逐条点名，而不是数数：#2830 去掉了单独安装 config.default.toml 的那条记录后，「至少 3 条」的计数就失效了，而它本来也分辨不出少的是哪一条。
+# 逐条点名，而不是数数：#2830 去掉单独安装 config.default.toml 的记录后，原来「至少 3 条」的计数就失效了；计数每少一条记录就要跟着改，也分辨不出少的是哪一条。
 $dataDirRecords = @($records | Where-Object { $_.Value.Contains('{code:GetDataDir}') })
 $appData = @($dataDirRecords | Where-Object { $_.Value.Contains('\app_data\*') })
 $userConfig = @($dataDirRecords | Where-Object {
