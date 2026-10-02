@@ -133,6 +133,7 @@ impl JournalRow {
         match self.kind.as_slice() {
             b"pinyin" => apply_pinyin(main, &self.key, &self.value, delete, self.weight),
             b"wubi" => apply_simple(main, "wubi86", &self.key, &self.value, delete, self.weight),
+            b"wubi98" => apply_simple(main, "wubi98", &self.key, &self.value, delete, self.weight),
             b"quick" => apply_simple(
                 main,
                 "quick_parases",
@@ -317,6 +318,7 @@ pub(super) mod tests {
              CREATE TABLE tbl_7_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);
              CREATE TABLE tbl_others_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);
              CREATE TABLE wubi86(key TEXT,value TEXT,weight INTEGER);
+             CREATE TABLE wubi98(key TEXT,value TEXT,weight INTEGER);
              CREATE TABLE quick_parases(key TEXT,value TEXT,weight INTEGER);",
         );
         sql(&journal, OPERATIONS_DDL);
@@ -332,6 +334,26 @@ pub(super) mod tests {
         sql(
             &fixture.journal,
             &format!("INSERT INTO user_dictionary_operations(dictionary,key,value,operation,weight,display,updated_at) VALUES{row};"),
+        );
+    }
+
+    #[test]
+    fn wubi_and_wubi98_rows_land_in_their_own_tables() {
+        let fixture = fixture();
+        journal_row(&fixture, "('wubi','kl','号','upsert',11,'',1)");
+        journal_row(&fixture, "('wubi98','kg','号','upsert',12,'',2)");
+        replay(&fixture.journal, &fixture.main, &fixture.english);
+        assert_eq!(
+            weight(&fixture.main, "SELECT weight FROM wubi86 WHERE key='kl'"),
+            Some(11)
+        );
+        assert_eq!(
+            weight(&fixture.main, "SELECT weight FROM wubi98 WHERE key='kg'"),
+            Some(12)
+        );
+        assert_eq!(
+            weight(&fixture.main, "SELECT weight FROM wubi86 WHERE key='kg'"),
+            None
         );
     }
 

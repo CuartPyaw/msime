@@ -125,7 +125,7 @@ fn validate_entry(
                 return invalid(SYLLABLE_COUNT_MISMATCH);
             }
         }
-        PersonalDictionaryKind::Wubi => {
+        PersonalDictionaryKind::Wubi | PersonalDictionaryKind::Wubi98 => {
             if key.len() > 4 || !key.bytes().all(letters) {
                 return invalid(INVALID_WUBI_CODE);
             }
@@ -391,9 +391,14 @@ fn apply_personal_edit(
         PersonalDictionaryKind::Pinyin => {
             apply_pinyin(connection, key_bytes, value_bytes, remove, weight)?
         }
-        PersonalDictionaryKind::Wubi => {
-            apply_simple(connection, "wubi86", key_bytes, value_bytes, remove, weight)?
-        }
+        PersonalDictionaryKind::Wubi | PersonalDictionaryKind::Wubi98 => apply_simple(
+            connection,
+            entry.kind.wubi_table().unwrap_or_default(),
+            key_bytes,
+            value_bytes,
+            remove,
+            weight,
+        )?,
         PersonalDictionaryKind::QuickPhrase => apply_simple(
             connection,
             "quick_parases",
@@ -519,9 +524,12 @@ mod tests {
                 assets::ENGLISH_DICTIONARY,
                 "SELECT count(*) FROM english_words WHERE word=?1 AND display=?2".to_owned(),
             ),
-            PersonalDictionaryKind::Wubi => (
+            PersonalDictionaryKind::Wubi | PersonalDictionaryKind::Wubi98 => (
                 assets::MAIN_DICTIONARY,
-                "SELECT count(*) FROM wubi86 WHERE key=?1 AND value=?2".to_owned(),
+                format!(
+                    "SELECT count(*) FROM {} WHERE key=?1 AND value=?2",
+                    entry.kind.wubi_table().unwrap()
+                ),
             ),
             PersonalDictionaryKind::QuickPhrase => (
                 assets::MAIN_DICTIONARY,
@@ -579,6 +587,7 @@ mod tests {
             ),
             (entry(Wubi, "abcde", "词", 1), INVALID_WUBI_CODE),
             (entry(Wubi, "ab1", "词", 1), INVALID_WUBI_CODE),
+            (entry(Wubi98, "abcde", "词", 1), INVALID_WUBI_CODE),
             (
                 entry(QuickPhrase, "bad;code", "text", 1),
                 INVALID_QUICK_PHRASE_CODE,

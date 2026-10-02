@@ -46,6 +46,7 @@ pub use types::{
     FrequencyAdjustmentOptions, FuzzyPinyinOptions, KeyResult, LocalInputMode, LocalModeOptions,
     MixedExpressiveOptions, OnlineQuery, PersonalDictionaryEntry, PersonalDictionaryKind,
     SchemeType, SentenceAssociationOptions, ShuangpinProfileKind, WordItem, WubiInputOptions,
+    WubiProfileKind,
 };
 pub use user_dictionary::bundled::{
     dictionary_table_entries, edit_bundled_dictionary_entry, DictionaryTableEntry,

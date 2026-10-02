@@ -16,7 +16,9 @@ use crate::paths::RuntimePaths;
 use crate::quanpin::QuanpinEngine;
 use crate::shuangpin::profile::profile;
 use crate::shuangpin::ShuangpinEngine;
-use crate::types::{CandidateSource, QueryRequest, SchemeType, ShuangpinProfileKind, WordItem};
+use crate::types::{
+    CandidateSource, QueryRequest, SchemeType, ShuangpinProfileKind, WordItem, WubiProfileKind,
+};
 use crate::wubi::provider::WubiProvider;
 
 pub struct ProviderRegistry {
@@ -92,6 +94,10 @@ impl ProviderRegistry {
     }
 
     /// Cached pinyin answers carry the old table's annotations and the online rows stored beside them, so both pinyin engines drop their caches, as the reference's setters did (quanpin/engine.h:37-41, shuangpin/shuangpin_dictionary.h:250-254). The reference left the shuangpin fuzzy cache alone; clearing it too only costs one requery.
+    pub fn set_wubi_profile(&mut self, profile: WubiProfileKind) {
+        self.wubi.set_profile(profile);
+    }
+
     pub fn set_helpcode_keymap(&mut self, keymap: Option<SharedKeymap>) {
         self.keymap = keymap;
         self.quanpin.reset_cache();

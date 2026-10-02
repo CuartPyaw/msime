@@ -149,28 +149,27 @@ fn update_pinyin_weight(
 fn update_wubi_weight(
     main: &Connection,
     journal: &Connection,
+    kind: PersonalDictionaryKind,
     key: &str,
     value: &str,
     weight: i64,
 ) -> Result<()> {
     let weight = clamp_managed_weight(weight);
+    let Some(table) = kind.wubi_table() else {
+        return Err(EngineError::invalid(UNSTORABLE_ENTRY));
+    };
     if key.is_empty() || value.is_empty() {
         return Err(EngineError::invalid(UNSTORABLE_ENTRY));
     }
     let changed = main
-        .prepare_cached("UPDATE wubi86 SET weight=?1 WHERE key=?2 AND value=?3")?
+        .prepare_cached(&format!(
+            "UPDATE {table} SET weight=?1 WHERE key=?2 AND value=?3"
+        ))?
         .execute(params![weight, key, value])?;
     if changed == 0 {
         return Err(EngineError::failed(MISSING_ROW));
     }
-    write_upsert(
-        journal,
-        PersonalDictionaryKind::Wubi,
-        key,
-        value,
-        weight,
-        "",
-    )
+    write_upsert(journal, kind, key, value, weight, "")
 }
 
 fn update_ranked_weight(
@@ -181,8 +180,8 @@ fn update_ranked_weight(
     value: &str,
     weight: i64,
 ) -> Result<()> {
-    if kind == PersonalDictionaryKind::Wubi {
-        update_wubi_weight(main, journal, key, value, weight)
+    if kind.is_wubi() {
+        update_wubi_weight(main, journal, kind, key, value, weight)
     } else {
         update_pinyin_weight(main, journal, key, value, weight)
     }
@@ -326,7 +325,7 @@ pub fn adjust_candidate_ranking(request: &RankingRequest<'_>) -> Result<bool> {
     let owns_entry_key: Vec<bool> = database_candidates
         .iter()
         .map(|item| {
-            if request.kind == PersonalDictionaryKind::Wubi {
+            if request.kind.is_wubi() {
                 item.pinyin == request.entry_key
             } else {
                 candidate_dictionary_key(item, request.context_key) == request.entry_key
@@ -748,6 +747,59 @@ mod tests {
             .execute_batch("DELETE FROM wubi86 WHERE value='或'")
             .unwrap();
         assert!(adjust_candidate_ranking(&request).is_err());
+    }
+
+    #[test]
+    fn wubi98_writes_to_wubi98_under_its_own_kind() {
+        let dir = Dir::new();
+        dir.wubi(&[("aaaa", "工", 100)]);
+        let main_db = dir.main_db();
+        Sqlite::open(&main_db)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE wubi98(key TEXT,value TEXT,weight INTEGER);\
+                 INSERT INTO wubi98 VALUES('aaaa','工',100);\
+                 INSERT INTO wubi98 VALUES('aaaa','式',50);",
+            )
+            .unwrap();
+        let mut ordered = vec![item("aaaa", "工", 100), item("aaaa", "式", 50)];
+        for row in &mut ordered {
+            row.canonical_pinyin.clear();
+        }
+        let user_db = dir.journal();
+        let request = RankingRequest {
+            main_db: &main_db,
+            user_db: &user_db,
+            context_key: "aaaa",
+            ordered: &ordered,
+            entry_key: "aaaa",
+            value: "式",
+            mode: FrequencyAdjustmentMode::Pin,
+            linear_step: 1,
+            trigger_count: 1,
+            force_top: true,
+            kind: PersonalDictionaryKind::Wubi98,
+        };
+        assert!(adjust_candidate_ranking(&request).unwrap());
+        assert_eq!(
+            query_i64(&main_db, "SELECT weight FROM wubi98 WHERE value='式'"),
+            Some(600)
+        );
+        assert_eq!(
+            query_i64(&main_db, "SELECT weight FROM wubi86 WHERE value='工'"),
+            Some(100)
+        );
+        assert_eq!(
+            count(&user_db, "SELECT count(*) FROM user_dictionary_operations WHERE dictionary='wubi98' AND key='aaaa' AND value='式' AND weight=600"),
+            1
+        );
+        assert_eq!(
+            count(
+                &user_db,
+                "SELECT count(*) FROM user_dictionary_operations WHERE dictionary='wubi'"
+            ),
+            0
+        );
     }
 
     fn plan(weights: &[i64], owned: &[bool], target: usize) -> WeightPlan {

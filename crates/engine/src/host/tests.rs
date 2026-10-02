@@ -26,6 +26,7 @@ fn options(root: &Path) -> EngineOptions {
         autocorrect_neighbor: true,
         fuzzy_pinyin_rules: 0,
         wubi_mixed_pinyin: false,
+        wubi_profile: 0,
         helpcode: false,
         show_helpcode: true,
         helpcode_schema: "ziranma".into(),
@@ -695,6 +696,9 @@ fn invalid_options_return_errors_instead_of_unwinding_into_rust() {
     value.shuangpin_profile = 255;
     assert_eq!(message(&value), "Unsupported shuangpin profile");
     value.shuangpin_profile = 0;
+    value.wubi_profile = 2;
+    assert_eq!(message(&value), "Unsupported wubi profile");
+    value.wubi_profile = 1;
     value.frequency_mode = "sometimes".into();
     assert_eq!(message(&value), "Unsupported frequency mode");
     value.frequency_mode = "promote".into();
@@ -1838,6 +1842,46 @@ fn snapshot_vectors_stay_parallel_to_the_candidates() {
 }
 
 // The C++ wrote the queued personal context from `atexit`; here the dropped session writes it, so a host that quits within the ~2 s flush delay of its last pick keeps it.
+/// 98 五笔会话读 `wubi98`，选词的学习记录归入 `wubi98`，不碰 `wubi86`。
+#[test]
+fn a_wubi98_session_reads_and_learns_into_wubi98() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.scheme = 2;
+    value.wubi_profile = 1;
+    value.learning = true;
+    for directory in [&value.resources, &value.dictionaries] {
+        Connection::open(Path::new(directory).join("msime.db"))
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE wubi86(key TEXT,value TEXT,weight INTEGER);
+                 INSERT INTO wubi86 VALUES('kg','甲',300);
+                 CREATE TABLE wubi98(key TEXT,value TEXT,weight INTEGER);
+                 INSERT INTO wubi98 VALUES('kg','乙',300),('kg','丙',100);
+                 CREATE TABLE quick_parases(key TEXT,value TEXT,weight INTEGER);",
+            )
+            .unwrap();
+    }
+    let mut session = Session::new(&value).unwrap();
+    type_text(&mut session, b"kg");
+    let snapshot = session.snapshot().unwrap();
+    assert_eq!(snapshot.candidates, vec!["乙", "丙"]);
+    assert!(session.select(1).unwrap().has_commit);
+    drop(session);
+    let journal = Connection::open(Path::new(&value.user_data).join("msime_user.db")).unwrap();
+    let count = |dictionary: &str| -> i64 {
+        journal
+            .query_row(
+                "SELECT count(*) FROM user_dictionary_operations WHERE dictionary=?1",
+                [dictionary],
+                |row| row.get(0),
+            )
+            .unwrap()
+    };
+    assert_eq!(count("wubi98"), 1);
+    assert_eq!(count("wubi"), 0);
+}
+
 #[test]
 fn dropping_a_session_writes_its_queued_personal_context() {
     let dir = tempfile::tempdir().unwrap();

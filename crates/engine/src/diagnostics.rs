@@ -58,6 +58,7 @@ pub const INVALID_CANDIDATE_POSITION: &str = "Invalid candidate position";
 pub const INVALID_CANDIDATE_EDGE: &str = "Invalid candidate edge";
 pub const UNSUPPORTED_INPUT_SCHEME: &str = "Unsupported input scheme";
 pub const UNSUPPORTED_SHUANGPIN_PROFILE: &str = "Unsupported shuangpin profile";
+pub const UNSUPPORTED_WUBI_PROFILE: &str = "Unsupported wubi profile";
 pub const UNSUPPORTED_FREQUENCY_MODE: &str = "Unsupported frequency mode";
 pub const UNSUPPORTED_VIETNAMESE_METHOD: &str = "Unsupported Vietnamese input method";
 pub const UNSUPPORTED_VIETNAMESE_TONE_STYLE: &str = "Unsupported Vietnamese tone style";

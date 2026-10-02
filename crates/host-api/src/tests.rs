@@ -148,6 +148,7 @@ fn local_mode_resource_gates_preserve_unrelated_modes() {
         autocorrect_neighbor: false,
         fuzzy_pinyin_rules: 0,
         wubi_mixed_pinyin: false,
+        wubi_profile: 0,
         helpcode: false,
         show_helpcode: false,
         helpcode_schema: "ziranma".into(),
@@ -826,6 +827,7 @@ fn wubi_mixed_pinyin_reaches_engine_and_applies_after_composition() {
     let mut preferences = Preferences {
         scheme: InputScheme::Wubi,
         wubi_mixed_pinyin: true,
+        wubi_profile: 0,
         ..Preferences::default()
     };
     let queued = update(handle, 1, &preferences);

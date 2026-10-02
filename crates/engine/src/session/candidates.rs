@@ -366,7 +366,7 @@ impl InputSession {
         let kind = if english {
             PersonalDictionaryKind::English
         } else if wubi {
-            PersonalDictionaryKind::Wubi
+            self.engine.wubi_input_options().profile.dictionary_kind()
         } else {
             PersonalDictionaryKind::Pinyin
         };
