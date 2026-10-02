@@ -196,7 +196,10 @@ impl JapaneseDictionary {
             {
                 group_end += 1;
             }
-            let ids = (group_start as u32..group_end as u32).collect();
+            let ids = collect_query_ids(
+                group_start as u32..group_end as u32,
+                group_end - group_start,
+            );
             let best = best_ids(ids, SHORT_PREFIX_CANDIDATE_COUNT, |id| self.cost_of(id));
             index.entry(first.to_string()).or_insert(best);
             group_start = group_end;
