@@ -85,6 +85,13 @@ pub fn restore_launch_target(target: LaunchTarget) -> bool {
     unsafe { msime_macos_restore_launch_target(target.pid, target.launched) }
 }
 
+const INITIAL_CAPTURE_DEVICE_CAPACITY: usize = 128;
+
+#[cfg(any(target_os = "macos", test))]
+fn capture_device_buffer() -> Vec<(String, String)> {
+    Vec::with_capacity(INITIAL_CAPTURE_DEVICE_CAPACITY)
+}
+
 /// Enumerate input-capable CoreAudio devices using their stable UIDs. The
 /// callback runs synchronously on the caller's thread and never opens a
 /// device, so this is safe to use from a Tauri blocking task.
@@ -127,7 +134,7 @@ pub fn voice_capture_devices() -> Vec<(String, String)> {
         );
     }
 
-    let mut devices = Vec::new();
+    let mut devices = capture_device_buffer();
     // SAFETY: `collect` has the ABI and lifetime required by the native
     // callback; the context points to a live Vec for the duration of the call.
     unsafe {
@@ -635,5 +642,10 @@ mod tests {
         for key in [0, 0x100, 0xffff, 0x2c, 0x91, 0x13, 0x2d] {
             assert!(keyboard_stroke(&request(key)).is_none());
         }
+    }
+
+    #[test]
+    fn capture_device_buffer_reserves_the_listing_capacity() {
+        assert!(capture_device_buffer().capacity() >= INITIAL_CAPTURE_DEVICE_CAPACITY);
     }
 }
