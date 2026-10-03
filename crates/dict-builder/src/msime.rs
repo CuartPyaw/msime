@@ -349,10 +349,6 @@ pub fn build_wubi(connection: &mut Connection, path: &Path) -> Result<(usize, us
 }
 
 /// Builds `wubi98` from the 98 wubi group's table as upstream ships it: UTF-16LE with a byte-order mark, `value<TAB>code` lines, no weights. Candidates of one code are listed best first, so each gets [`WUBI98_WEIGHT_STEP`] times the number of candidates after it plus one: the last of a code weighs one step, as the 86 table's lowest rank does.
-pub fn build_wubi98(connection: &mut Connection, path: &Path) -> Result<(usize, usize)> {
-    build_wubi98_sources(connection, path, &[])
-}
-
 /// 从主 UTF-16 表和完整的补充表构建 98 五笔。补充表作为独立来源保留，不写成手工特例；重复的“编码、词语”去重，主表保持原有权重和顺序。
 pub fn build_wubi98_sources(
     connection: &mut Connection,
@@ -625,7 +621,10 @@ mod tests {
         let path = dir.path().join("wubi98.txt");
         std::fs::write(&path, bytes).unwrap();
         let mut connection = Connection::open_in_memory().unwrap();
-        assert_eq!(build_wubi98(&mut connection, &path).unwrap(), (6, 5));
+        assert_eq!(
+            build_wubi98_sources(&mut connection, &path, &[]).unwrap(),
+            (6, 5)
+        );
         let rows: Vec<(String, String, i64)> = connection
             .prepare("select key, value, weight from wubi98 order by key, weight desc")
             .unwrap()
@@ -659,7 +658,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = write(dir.path(), "wubi98.txt", "工\ta\r\n");
         let mut connection = Connection::open_in_memory().unwrap();
-        assert!(build_wubi98(&mut connection, &path).is_err());
+        assert!(build_wubi98_sources(&mut connection, &path, &[]).is_err());
     }
 
     #[test]
