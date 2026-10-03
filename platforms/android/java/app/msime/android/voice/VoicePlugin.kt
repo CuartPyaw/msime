@@ -96,6 +96,11 @@ class VoicePlugin(activity: Activity) : Plugin(activity) {
     private val worker = Executors.newSingleThreadExecutor()
     private val activeJob = AtomicReference<VoiceJob?>(null)
 
+    override fun onDestroy() {
+        worker.shutdownNow()
+        super.onDestroy()
+    }
+
     private fun store(): VoiceResultStore {
         val files = hostActivity.filesDir ?: throw IllegalStateException("private files unavailable")
         return VoiceResultStore(File(files, "voice-handoff").toPath())
