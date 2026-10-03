@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Keep the Android tryout model loader usable after a successful response."""
+"""确保 Android 试用页加载模型后恢复控件，编辑草稿时仍能取消请求。"""
 from pathlib import Path
+import ast
 import re
 import unittest
 
@@ -10,6 +11,41 @@ SOURCE = ROOT / "platforms/android/java/app/msime/android/home/KeyboardTryoutAct
 
 
 class KeyboardTryoutSourceContract(unittest.TestCase):
+    def test_editing_during_chat_keeps_stop_enabled(self):
+        source = SOURCE.read_text()
+        watcher = re.search(
+            r"void afterTextChanged\(@NonNull Editable text\) \{(?P<body>.*?)\n\s*\}",
+            source,
+            re.S,
+        )
+        self.assertIsNotNone(watcher, "could not locate the tryout draft watcher")
+        enabled = re.search(r"sendAi\.setEnabled\((.*?)\);", watcher.group("body"))
+        self.assertIsNotNone(enabled, "could not locate the draft action state")
+        expression = enabled.group(1).replace("models.isEmpty()", "models_empty")
+        expression = expression.replace("text.length()", "text_length")
+        expression = expression.replace("&&", " and ").replace("||", " or ")
+        expression = expression.replace("!", " not ").strip()
+        tree = ast.parse(expression, mode="eval")
+        allowed = (ast.Expression, ast.BoolOp, ast.And, ast.Or, ast.UnaryOp,
+                   ast.Not, ast.Compare, ast.Gt, ast.Name, ast.Load, ast.Constant)
+        self.assertTrue(all(isinstance(node, allowed) for node in ast.walk(tree)))
+        self.assertTrue(all(node.id in {"sending", "models_empty", "text_length"}
+                            for node in ast.walk(tree) if isinstance(node, ast.Name)))
+        condition = compile(tree, str(SOURCE), "eval")
+        for sending in (False, True):
+            for models_empty in (False, True):
+                for text_length in (0, 12):
+                    with self.subTest(sending=sending, models_empty=models_empty,
+                                      text_length=text_length):
+                        actual = eval(condition, {"__builtins__": {}}, {
+                            "sending": sending, "models_empty": models_empty,
+                            "text_length": text_length,
+                        })
+                        if sending:
+                            self.assertTrue(actual, "draft edits must keep Stop enabled")
+                        else:
+                            self.assertEqual(actual, not models_empty and text_length > 0)
+
     def test_model_loader_restores_controls_after_success(self):
         source = SOURCE.read_text()
         success = re.search(
