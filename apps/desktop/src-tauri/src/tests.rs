@@ -113,6 +113,17 @@ fn snapshot_restore_preflight_rejects_text_larger_than_native_limit() {
     assert!(!crate::platform::account_helpers::snapshot_text_within_limit(512 * 1024 * 1024 + 1));
 }
 
+#[test]
+fn external_url_allows_encoded_query_parameters() {
+    assert!(super::external_url_is_safe(
+        "https://github.com/metasequoiaime/msime/issues/new?title=bug&body=synthetic%20report"
+    ));
+    assert!(!super::external_url_is_safe("javascript:alert(1)"));
+    assert!(!super::external_url_is_safe(
+        "https://example.com/path|whoami"
+    ));
+}
+
 #[cfg(unix)]
 #[test]
 fn runtime_options_reject_a_symlinked_file() {
