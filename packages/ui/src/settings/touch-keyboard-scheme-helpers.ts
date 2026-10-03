@@ -12,7 +12,6 @@ export type TouchKeyboardScheme =
   | "japanese_nine_key"
   | "japanese"
   | "handwriting"
-  | "thoughtful_reply"
   | "korean"
   | "cantonese"
   | "zhuyin"
@@ -42,7 +41,6 @@ export function touchKeyboardSchemeTitle(preferences: Preferences): string {
       japanese_nine_key: "日语 9 键",
       japanese: "日语 26 键",
       handwriting: "手写",
-      thoughtful_reply: "高情商回复",
       korean: "韩语 26 键",
       cantonese: "粤拼 26 键",
       zhuyin: "大千注音",
@@ -74,7 +72,6 @@ export const touchKeyboardSchemeOptions: [TouchKeyboardScheme, string][] = [
   ["japanese_nine_key", "日语 9 键"],
   ["japanese", "日语 26 键"],
   ["handwriting", "手写"],
-  ["thoughtful_reply", "高情商回复"],
   ["korean", "韩语 26 键"],
   ["cantonese", "粤拼 26 键"],
   ["zhuyin", "大千注音"],

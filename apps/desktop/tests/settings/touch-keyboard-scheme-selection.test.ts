@@ -78,7 +78,24 @@ test("selecting a visible scheme updates the draft through the shared hook", () 
 });
 
 test("the helper exposes the complete stable scheme order", () => {
-  expect(allTouchKeyboardSchemes).toContain("thoughtful_reply");
+  expect(allTouchKeyboardSchemes).toEqual([
+    "quanpin",
+    "nine_key",
+    "xiaohe",
+    "ziranma",
+    "microsoft",
+    "shoudao",
+    "wubi",
+    "japanese_nine_key",
+    "japanese",
+    "handwriting",
+    "korean",
+    "cantonese",
+    "zhuyin",
+    "vietnamese",
+  ]);
+  // 高情商回复是键盘工具栏上的工具，不再是输入方案。
+  expect(allTouchKeyboardSchemes as string[]).not.toContain("thoughtful_reply");
 });
 
 test("applies queued scheme changes to the latest draft", () => {
@@ -161,14 +178,14 @@ test("selecting Japanese from Vietnamese keeps the remembered Chinese scheme", (
 });
 
 test("Cantonese, Zhuyin and Vietnamese are appended after Korean and are opt-in", () => {
-  expect(allTouchKeyboardSchemes).toHaveLength(15);
-  expect(allTouchKeyboardSchemes.slice(11)).toEqual([
+  expect(allTouchKeyboardSchemes).toHaveLength(14);
+  expect(allTouchKeyboardSchemes.slice(10)).toEqual([
     "korean",
     "cantonese",
     "zhuyin",
     "vietnamese",
   ]);
-  expect(defaultTouchKeyboardSchemes).toEqual(allTouchKeyboardSchemes.slice(0, 12));
+  expect(defaultTouchKeyboardSchemes).toEqual(allTouchKeyboardSchemes.slice(0, 11));
 });
 
 test("a document without a stored list does not show the opt-in schemes", () => {

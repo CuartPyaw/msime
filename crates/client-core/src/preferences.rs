@@ -347,7 +347,6 @@ pub enum TouchKeyboardScheme {
     JapaneseNineKey,
     Japanese,
     Handwriting,
-    ThoughtfulReply,
     Korean,
     /// 粤拼 26 键: toneless Jyutping on the pinyin 26-key letters (`InputScheme::Cantonese`).
     Cantonese,
@@ -359,7 +358,7 @@ pub enum TouchKeyboardScheme {
 
 impl TouchKeyboardScheme {
     /// Every touch scheme in picker order. Schemes are appended, never reordered.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 14] = [
         Self::Quanpin,
         Self::NineKey,
         Self::Xiaohe,
@@ -370,7 +369,6 @@ impl TouchKeyboardScheme {
         Self::JapaneseNineKey,
         Self::Japanese,
         Self::Handwriting,
-        Self::ThoughtfulReply,
         Self::Korean,
         Self::Cantonese,
         Self::Zhuyin,
@@ -378,7 +376,7 @@ impl TouchKeyboardScheme {
     ];
 
     /// The schemes a keyboard shows before the user picks any: all but Cantonese, Zhuyin and Vietnamese, which the user turns on, as on macOS where their input modes start disabled. A document without `touch_keyboard_schemes` therefore keeps the keyboard it always had.
-    pub const DEFAULT_ENABLED: [Self; 12] = [
+    pub const DEFAULT_ENABLED: [Self; 11] = [
         Self::Quanpin,
         Self::NineKey,
         Self::Xiaohe,
@@ -389,18 +387,73 @@ impl TouchKeyboardScheme {
         Self::JapaneseNineKey,
         Self::Japanese,
         Self::Handwriting,
-        Self::ThoughtfulReply,
         Self::Korean,
     ];
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(from = "StoredTouchKeyboardSchemePreferences")]
 pub struct TouchKeyboardSchemePreferences {
-    #[serde(default = "default_touch_keyboard_schemes")]
     pub enabled: BTreeSet<TouchKeyboardScheme>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub selected: Option<TouchKeyboardScheme>,
+}
+
+/// 文档里可能出现的方案取值：现行方案，加上已经退役的 `thoughtful_reply`。高情商回复曾是一个触屏方案，现在改为键盘工具栏上的工具，旧文档里留下的这个取值在读入时迁移掉，而不是让整份偏好读取失败。其它不认识的取值（比如更新版本写入的方案）仍然报错，保持文档原样不动。
+#[derive(Deserialize)]
+enum StoredTouchKeyboardScheme {
+    #[serde(rename = "thoughtful_reply")]
+    RetiredThoughtfulReply,
+    #[serde(untagged)]
+    Current(TouchKeyboardScheme),
+}
+
+impl StoredTouchKeyboardScheme {
+    fn current(self) -> Option<TouchKeyboardScheme> {
+        match self {
+            Self::RetiredThoughtfulReply => None,
+            Self::Current(scheme) => Some(scheme),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoredTouchKeyboardSchemePreferences {
+    #[serde(default)]
+    enabled: Option<Vec<StoredTouchKeyboardScheme>>,
+    #[serde(default)]
+    selected: Option<StoredTouchKeyboardScheme>,
+}
+
+impl From<StoredTouchKeyboardSchemePreferences> for TouchKeyboardSchemePreferences {
+    fn from(stored: StoredTouchKeyboardSchemePreferences) -> Self {
+        let enabled = match stored.enabled {
+            None => default_touch_keyboard_schemes(),
+            Some(stored_enabled) => {
+                let stored_count = stored_enabled.len();
+                let mut enabled: BTreeSet<_> = stored_enabled
+                    .into_iter()
+                    .filter_map(StoredTouchKeyboardScheme::current)
+                    .collect();
+                // 列表里只剩退役方案时，按各平台对空列表的约定回到全拼 26 键；原本就存成空列表的文档不在这里补，仍由 `validate` 拒绝。
+                if enabled.is_empty() && stored_count > 0 {
+                    enabled.insert(TouchKeyboardScheme::Quanpin);
+                }
+                enabled
+            }
+        };
+        let mut preferences = Self {
+            enabled,
+            selected: None,
+        };
+        preferences.selected = stored.selected.map(|selected| {
+            selected
+                .current()
+                .unwrap_or_else(|| preferences.first_enabled())
+        });
+        preferences
+    }
 }
 
 fn default_touch_keyboard_schemes() -> BTreeSet<TouchKeyboardScheme> {
@@ -419,6 +472,14 @@ impl Default for TouchKeyboardSchemePreferences {
 impl TouchKeyboardSchemePreferences {
     fn is_default(&self) -> bool {
         self == &Self::default()
+    }
+
+    /// 选中的方案不可用时退回的方案：按 `ALL` 顺序第一个启用的方案，一个都没有时是全拼 26 键。
+    pub fn first_enabled(&self) -> TouchKeyboardScheme {
+        TouchKeyboardScheme::ALL
+            .into_iter()
+            .find(|scheme| self.enabled.contains(scheme))
+            .unwrap_or(TouchKeyboardScheme::Quanpin)
     }
 }
 

@@ -22,7 +22,7 @@ public enum TypingSource {
         if (dedicatedEnglish) return ENGLISH;
         if (scheme == null) return UNKNOWN;
         return switch (scheme) {
-            case QUANPIN, THOUGHTFUL_REPLY -> QUANPIN;
+            case QUANPIN -> QUANPIN;
             case QUANPIN_NINE_KEY -> NINE_KEY;
             case XIAOHE -> SHUANGPIN;
             case ZIRANMA -> ZIRANMA;

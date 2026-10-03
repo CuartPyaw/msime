@@ -18,7 +18,6 @@ public enum KeyboardScheme {
     JAPANESE_NINE_KEY("japanese_nine_key", "japanese", null, "nine_key", "日语 9 键", "あ", "9"),
     JAPANESE("japanese", "japanese", null, "twenty_six_key", "日语 26 键", "あ", "26"),
     HANDWRITING("handwriting", "quanpin", null, "handwriting", "手写", "写", "手"),
-    THOUGHTFUL_REPLY("thoughtful_reply", "quanpin", null, "twenty_six_key", "高情商回复", "聊", "AI"),
     KOREAN("korean", "korean", null, "twenty_six_key", "韩语 26 键", "한", "26"),
     CANTONESE("cantonese", "cantonese", null, "twenty_six_key", "粤拼 26 键", "粤", "26"),
     ZHUYIN("zhuyin", "zhuyin", null, "twenty_six_key", "大千注音", "注", "大千"),
@@ -149,7 +148,7 @@ public enum KeyboardScheme {
     public static PreferenceMapping mappingForRuntimeSelection(
             KeyboardScheme applied, KeyboardScheme selected,
             String currentLastChineseScheme, String currentProfile) {
-        if (selected == null || selected == THOUGHTFUL_REPLY || selected == applied) return null;
+        if (selected == null || selected == applied) return null;
         return selected.mapping(currentLastChineseScheme, currentProfile);
     }
 
@@ -164,7 +163,7 @@ public enum KeyboardScheme {
             return XIAOHE;
         }
         for (KeyboardScheme candidate : values()) {
-            if (candidate != THOUGHTFUL_REPLY && candidate.shuangpinProfile == null && candidate.engineScheme.equals(scheme)
+            if (candidate.shuangpinProfile == null && candidate.engineScheme.equals(scheme)
                     && !"nine_key".equals(candidate.touchKeyboardLayout)) return candidate;
         }
         return QUANPIN;

@@ -21,14 +21,14 @@ public final class KeyboardSchemeSmoke {
 
     public static void main(String[] args) throws Exception {
         check(Arrays.stream(KeyboardScheme.values()).map(KeyboardScheme::title).toList().equals(List.of(
-            "全拼 26 键", "全拼 9 键", "小鹤双拼", "自然码双拼", "微软双拼", "首道双拼", "86 五笔", "日语 9 键", "日语 26 键", "手写", "高情商回复", "韩语 26 键",
+            "全拼 26 键", "全拼 9 键", "小鹤双拼", "自然码双拼", "微软双拼", "首道双拼", "86 五笔", "日语 9 键", "日语 26 键", "手写", "韩语 26 键",
             "粤拼 26 键", "大千注音", "越南语 26 键")));
         check(Arrays.stream(KeyboardScheme.values()).map(KeyboardScheme::preferenceId).toList().equals(List.of(
             "quanpin", "nine_key", "xiaohe", "ziranma", "microsoft", "shoudao", "wubi",
-            "japanese_nine_key", "japanese", "handwriting", "thoughtful_reply", "korean",
+            "japanese_nine_key", "japanese", "handwriting", "korean",
             "cantonese", "zhuyin", "vietnamese")));
         check(Arrays.stream(KeyboardScheme.values()).map(value -> value.glyph() + value.badge()).toList().equals(
-            List.of("拼26", "拼9", "鹤双", "自双", "微双", "S双", "五86", "あ9", "あ26", "写手", "聊AI", "한26",
+            List.of("拼26", "拼9", "鹤双", "自双", "微双", "S双", "五86", "あ9", "あ26", "写手", "한26",
                 "粤26", "注大千", "越26")));
         // 五笔只有一个方案入口，标题与角标跟随 `wubi_profile`；缺省和未知值按 86 版，其它方案不受影响。
         check(KeyboardScheme.normalizedWubiProfile("wubi98").equals("wubi98"));
@@ -48,20 +48,22 @@ public final class KeyboardSchemeSmoke {
         check(KeyboardScheme.fromPreferenceId("future") == null);
         List<KeyboardScheme> visible = KeyboardScheme.enabledFromPreferenceIds(List.of(
             "thoughtful_reply", "future", "nine_key", "nine_key", "quanpin"));
-        check(visible.equals(List.of(KeyboardScheme.QUANPIN, KeyboardScheme.QUANPIN_NINE_KEY,
-            KeyboardScheme.THOUGHTFUL_REPLY)));
+        check(visible.equals(List.of(KeyboardScheme.QUANPIN, KeyboardScheme.QUANPIN_NINE_KEY)));
+        // 高情商回复已不是输入方案，而是工具栏上的入口：旧偏好里存的 `thoughtful_reply` 与未知的未来方案一样被丢掉；只存了它的列表回落到全拼 26 键。
+        check(KeyboardScheme.fromPreferenceId("thoughtful_reply") == null);
+        check(Arrays.stream(KeyboardScheme.values()).noneMatch(value -> value.title().equals("高情商回复")));
+        check(KeyboardScheme.enabledFromPreferenceIds(List.of("thoughtful_reply")).equals(List.of(KeyboardScheme.QUANPIN)));
         check(KeyboardScheme.enabledFromPreferenceIds(List.of()).equals(List.of(KeyboardScheme.QUANPIN)));
         check(KeyboardScheme.resolveEnabledSelection(KeyboardScheme.QUANPIN_NINE_KEY, null, visible)
             == KeyboardScheme.QUANPIN_NINE_KEY);
+        // 旧偏好选中的 `thoughtful_reply` 按未知方案处理，落到第一个启用的方案，与共享偏好读旧文档时的回落一致。
         check(KeyboardScheme.resolveEnabledSelection(KeyboardScheme.QUANPIN_NINE_KEY, "thoughtful_reply", visible)
-            == KeyboardScheme.THOUGHTFUL_REPLY);
+            == KeyboardScheme.QUANPIN);
         check(KeyboardScheme.resolveEnabledSelection(KeyboardScheme.QUANPIN_NINE_KEY, "handwriting", visible)
             == KeyboardScheme.QUANPIN);
         check(KeyboardScheme.mappingForRuntimeSelection(
             KeyboardScheme.JAPANESE, KeyboardScheme.QUANPIN_NINE_KEY, "japanese", "xiaohe")
             .touchKeyboardLayout().equals("nine_key"));
-        check(KeyboardScheme.mappingForRuntimeSelection(
-            KeyboardScheme.QUANPIN, KeyboardScheme.THOUGHTFUL_REPLY, "quanpin", "xiaohe") == null);
         check(KeyboardScheme.mappingForRuntimeSelection(
             KeyboardScheme.QUANPIN, KeyboardScheme.QUANPIN, "quanpin", "xiaohe") == null);
         check(KeyboardScheme.fromPreferences("quanpin", "xiaohe", "handwriting") == KeyboardScheme.HANDWRITING);
@@ -89,7 +91,6 @@ public final class KeyboardSchemeSmoke {
         mapping(KeyboardScheme.KOREAN, "korean", "xiaohe", "korean", "quanpin", "xiaohe");
         mapping(KeyboardScheme.JAPANESE, "korean", "xiaohe", "japanese", "quanpin", "xiaohe");
         mapping(KeyboardScheme.HANDWRITING, "wubi", "microsoft", "quanpin", "quanpin", "microsoft");
-        mapping(KeyboardScheme.THOUGHTFUL_REPLY, "wubi", "microsoft", "quanpin", "quanpin", "microsoft");
         check(KeyboardScheme.enabledFromPreferenceIds(List.of("korean", "quanpin"))
             .equals(List.of(KeyboardScheme.QUANPIN, KeyboardScheme.KOREAN)));
         mapping(KeyboardScheme.JAPANESE, "invalid", "invalid", "japanese", "quanpin", "xiaohe");
@@ -105,7 +106,7 @@ public final class KeyboardSchemeSmoke {
         check(KeyboardScheme.fromPreferenceId("zhuyin") == KeyboardScheme.ZHUYIN);
         // Without a stored list the three newest schemes stay off; a stored list turns them on in the fixed order.
         List<KeyboardScheme> defaults = KeyboardScheme.enabledFromPreferenceIds(null);
-        check(defaults.size() == 12 && !defaults.contains(KeyboardScheme.CANTONESE)
+        check(defaults.size() == 11 && !defaults.contains(KeyboardScheme.CANTONESE)
             && !defaults.contains(KeyboardScheme.ZHUYIN) && !defaults.contains(KeyboardScheme.VIETNAMESE)
             && defaults.contains(KeyboardScheme.KOREAN));
         check(Arrays.stream(KeyboardScheme.values()).filter(KeyboardScheme::optIn).toList().equals(List.of(

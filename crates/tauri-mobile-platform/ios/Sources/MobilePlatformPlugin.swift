@@ -611,8 +611,7 @@ private struct IOSKeyboardPreferenceStore {
   static let maximumCustomSkinBytes = 800_000
   static let schemeOrder = [
     "quanpin", "nineKey", "shuangpin", "ziranma", "microsoft", "shoudao", "wubi",
-    "japaneseNineKey", "japanese", "korean", "handwriting", "thoughtfulReply",
-    "cantonese", "zhuyin", "vietnamese",
+    "japaneseNineKey", "japanese", "korean", "handwriting", "cantonese", "zhuyin", "vietnamese",
   ]
   /// Schemes a keyboard with no stored `enabledInputSchemes` leaves off, so adding them does not change existing keyboards; the user turns them on in settings.
   static let optInSchemes: Set<String> = ["cantonese", "zhuyin", "vietnamese"]

@@ -113,7 +113,7 @@ int main() {
       frame.generation = 1;
       frame.visible = true;
       frame.preedit = "U4e2d";
-      frame.candidates.push_back({1, 1, 0, "中", true, {}, {}, false, {}});
+      frame.candidates.push_back({1, 1, 0, "中", true, false, {}, {}, false, {}});
       value = frame;
       value->y = invalid_candidate_anchor_y;
       window.refresh();

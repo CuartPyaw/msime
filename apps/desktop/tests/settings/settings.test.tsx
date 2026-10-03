@@ -313,7 +313,6 @@ const touchSchemeLabels = [
   "日语 9 键",
   "日语 26 键",
   "手写",
-  "高情商回复",
   "韩语 26 键",
 ];
 const touchSchemeIds = [
@@ -327,7 +326,6 @@ const touchSchemeIds = [
   "japanese_nine_key",
   "japanese",
   "handwriting",
-  "thoughtful_reply",
   "korean",
 ];
 
@@ -344,7 +342,9 @@ test("Android touch schemes follow Apple order and stay absent on hosts without 
       .getAllByRole("button")
       .map((button) => button.textContent?.replace("✓", "")),
   ).toEqual(touchSchemeLabels);
-  expect(within(group).getAllByRole("switch")).toHaveLength(12);
+  // 高情商回复是键盘工具栏上的工具，不是输入方案。
+  expect(within(group).queryByText("高情商回复")).toBeNull();
+  expect(within(group).getAllByRole("switch")).toHaveLength(11);
   enabled.unmount();
   render(<SettingsPage client={{ load: async () => initial, save: vi.fn() }} />);
   fireEvent.click(await screen.findByRole("button", { name: "输入" }));
@@ -377,7 +377,7 @@ test("touch hosts offering Cantonese, Zhuyin and Vietnamese list their touch sch
       .getAllByRole("button")
       .map((button) => button.textContent?.replace("✓", "")),
   ).toEqual([...touchSchemeLabels, "粤拼 26 键", "大千注音", "越南语 26 键"]);
-  expect(within(group).getAllByRole("switch")).toHaveLength(15);
+  expect(within(group).getAllByRole("switch")).toHaveLength(14);
   for (const label of ["粤拼 26 键", "大千注音", "越南语 26 键"]) {
     expect(
       (screen.getByRole("switch", { name: `显示输入方案 ${label}` }) as HTMLInputElement).checked,
@@ -543,7 +543,7 @@ test("mobile input settings expose the keyboard AI entry", async () => {
     />,
   );
   fireEvent.click(await screen.findByRole("button", { name: "标点与翻译" }));
-  expect(screen.getByText(/切换到高情商回复键盘/)).toBeDefined();
+  expect(screen.getByText(/点键盘工具栏上的回复/)).toBeDefined();
   fireEvent.click(screen.getByRole("button", { name: "配置键盘 AI" }));
   expect(await screen.findByText("启用 AI 辅助")).toBeDefined();
 });

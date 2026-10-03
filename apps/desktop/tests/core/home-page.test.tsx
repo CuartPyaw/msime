@@ -65,7 +65,7 @@ test("routes home shortcuts to the shared settings pages", () => {
     ["input"],
     ["screen-keyboard"],
     ["more"],
-    ["input"],
+    ["ai"],
   ]);
 });
 
@@ -120,21 +120,14 @@ test("iOS home keyboard card opens and focuses the shared keyboard tryout", asyn
   await waitFor(() => expect(document.activeElement).toBe(composer));
 });
 
-test("selects thoughtful reply from the home feature entry", () => {
+test("the home reply entry opens AI settings instead of selecting a scheme", () => {
   const onOpenPage = vi.fn();
-  const onSelectScheme = vi.fn();
-  render(
-    <HomePage
-      preferences={initial.preferences}
-      onOpenPage={onOpenPage}
-      onSelectScheme={onSelectScheme}
-    />,
-  );
+  render(<HomePage preferences={initial.preferences} onOpenPage={onOpenPage} />);
 
   fireEvent.click(screen.getByRole("button", { name: /高情商回复/ }));
 
-  expect(onSelectScheme).toHaveBeenCalledWith("thoughtful_reply");
-  expect(onOpenPage).toHaveBeenCalledWith("input");
+  expect(onOpenPage.mock.calls).toEqual([["ai"]]);
+  expect(screen.getByText(/点键盘工具栏上的回复/)).toBeTruthy();
 });
 
 test("invokes Android keyboard and system input actions", () => {
@@ -217,12 +210,13 @@ test("opens iOS system keyboard settings from the shared home", async () => {
   expect(screen.queryByRole("button", { name: "选择输入法" })).toBeNull();
 });
 
-test("enables and selects thoughtful reply when opened from Android home", async () => {
+test("the Android home reply entry opens AI settings and leaves the touch schemes alone", async () => {
+  const save = vi.fn();
   render(
     <SettingsPage
       client={{
         load: async () => initial,
-        save: vi.fn(),
+        save,
         touchKeyboardSchemes: true,
         home: {
           openKeyboard: vi.fn().mockResolvedValue(undefined),
@@ -233,12 +227,7 @@ test("enables and selects thoughtful reply when opened from Android home", async
   await screen.findByRole("region", { name: "首页" });
   fireEvent.click(screen.getByRole("button", { name: /高情商回复/ }));
 
-  expect(
-    screen
-      .getByRole("button", { name: "设为当前输入方案 高情商回复" })
-      .getAttribute("aria-pressed"),
-  ).toBe("true");
-  expect(
-    (screen.getByRole("switch", { name: "显示输入方案 高情商回复" }) as HTMLInputElement).checked,
-  ).toBe(true);
+  expect(await screen.findByText("启用 AI 辅助")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "设为当前输入方案 高情商回复" })).toBeNull();
+  expect(save).not.toHaveBeenCalled();
 });

@@ -1,7 +1,8 @@
 import Foundation
 
 enum ChineseInputScheme: String, CaseIterable {
-  case quanpin, nineKey, shuangpin, ziranma, microsoft, shoudao, wubi, japaneseNineKey, japanese, korean, handwriting, thoughtfulReply, cantonese, zhuyin, vietnamese
+  // 「高情商回复」已改为工具栏入口，不再是方案。旧版存下的 `thoughtfulReply`（App Group）或 `thoughtful_reply`（共享文档）在这里认不出来，与其他未知值一样走 `InputSchemePreference` 的回退：已选的落到全拼 26 键或第一个可用方案，启用列表里直接忽略。
+  case quanpin, nineKey, shuangpin, ziranma, microsoft, shoudao, wubi, japaneseNineKey, japanese, korean, handwriting, cantonese, zhuyin, vietnamese
 
   /// The schemes a fresh install leaves off until the user enables them, as the settings host does (`optInSchemes` in MobilePlatformPlugin).
   static let optInSchemes: [ChineseInputScheme] = [.cantonese, .zhuyin, .vietnamese]
@@ -61,7 +62,6 @@ enum ChineseInputScheme: String, CaseIterable {
     case .japanese: "japanese"
     case .korean: "korean"
     case .handwriting: "handwriting"
-    case .thoughtfulReply: "thoughtful_reply"
     case .cantonese: "cantonese"
     case .zhuyin: "zhuyin"
     case .vietnamese: "vietnamese"
@@ -83,7 +83,6 @@ enum ChineseInputScheme: String, CaseIterable {
     case .japaneseNineKey: "日语 9 键"
     case .korean: "韩语 26 键"
     case .handwriting: "手写"
-    case .thoughtfulReply: "高情商回复"
     case .cantonese: "粤拼 26 键"
     case .zhuyin: "大千注音"
     case .vietnamese: "越南语 26 键"

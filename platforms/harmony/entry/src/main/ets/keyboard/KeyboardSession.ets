@@ -892,7 +892,6 @@ export interface KeyboardPreferences {
   readonly rowSpacingTenths: number;
   readonly heightAdjustment: number;
   readonly voiceShortcut: boolean;
-  readonly thoughtfulReply: boolean;
 }
 
 interface PreparedOptions {
@@ -1121,8 +1120,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     keySpacingTenths: KeyboardGeometry.DEFAULT_KEY_SPACING_TENTHS,
     rowSpacingTenths: KeyboardGeometry.DEFAULT_ROW_SPACING_TENTHS,
     heightAdjustment: KeyboardGeometry.DEFAULT_HEIGHT_ADJUSTMENT_VP,
-    voiceShortcut: false,
-    thoughtfulReply: false
+    voiceShortcut: false
   };
   private voiceInput: VoiceInputConfiguration = DEFAULT_VOICE_INPUT_CONFIGURATION;
   /**
@@ -1387,8 +1385,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       rowSpacingTenths: KeyboardGeometry.rowSpacing(preferences.touch_row_spacing_tenths),
       heightAdjustment:
         KeyboardGeometry.heightAdjustment(preferences.touch_keyboard_height_adjustment),
-      voiceShortcut: preferences.touch_voice_shortcut,
-      thoughtfulReply: preferences.touch_keyboard_schemes?.selected === 'thoughtful_reply'
+      voiceShortcut: preferences.touch_voice_shortcut
     };
     // The theme's bar, then the package's `[toolbar]` colours for that mode, then its stylesheet.
     const toolbarColors: CandidateColors = GlobalTheme.candidateColors(

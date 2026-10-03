@@ -3058,7 +3058,6 @@ export function SettingsPage(props: SettingsPageProps) {
     restoreDefaults,
     recoverPreferences,
     dirty,
-    selectHomeScheme,
     keyboardPreviewTheme,
     availablePages,
     sidebarGroups,
@@ -3325,7 +3324,6 @@ export function SettingsPage(props: SettingsPageProps) {
                 preferences={draft}
                 actions={client.home}
                 onOpenPage={onOpenPage}
-                onSelectScheme={selectHomeScheme}
                 onOpenChat={onOpenChat}
                 touchLayout={mobilePlatform}
                 ios={iosPlatform}

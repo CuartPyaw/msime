@@ -265,7 +265,7 @@ public final class KeyboardFragment extends HomeTabFragment {
     private static String schemeTerms() {
         StringBuilder terms = new StringBuilder("输入方案 拼音 键盘布局");
         for (KeyboardScheme candidate : KeyboardScheme.values()) {
-            if (candidate != KeyboardScheme.THOUGHTFUL_REPLY) terms.append(' ').append(candidate.title());
+            terms.append(' ').append(candidate.title());
         }
         // 「98 五笔」在输入方案里同样可选，搜得到它才找得到这一行。
         terms.append(' ').append(KeyboardScheme.WUBI.title(KeyboardScheme.WUBI_98));

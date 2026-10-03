@@ -1827,13 +1827,82 @@ fn touch_keyboard_scheme_visibility_matches_apple_order_and_fallback_contract() 
 }
 
 #[test]
+fn retired_thoughtful_reply_touch_scheme_is_migrated_on_read() {
+    // 高情商回复已经不是方案，新文档里不会再写出它。
+    assert!(TouchKeyboardScheme::ALL
+        .into_iter()
+        .all(|scheme| serde_json::to_value(scheme).unwrap() != "thoughtful_reply"));
+    assert!(serde_json::from_value::<TouchKeyboardScheme>("thoughtful_reply".into()).is_err());
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(dir.path());
+    let saved = store.save(0, Preferences::default()).unwrap();
+    for (stored, enabled, selected) in [
+        // 选中的是高情商回复：从列表里去掉，选中退回按顺序第一个启用的方案，与选中方案被关闭时的处理相同。
+        (
+            serde_json::json!({"enabled": ["wubi", "thoughtful_reply", "handwriting"], "selected": "thoughtful_reply"}),
+            vec![TouchKeyboardScheme::Wubi, TouchKeyboardScheme::Handwriting],
+            Some(TouchKeyboardScheme::Wubi),
+        ),
+        // 只在列表里：去掉它，选中不变。
+        (
+            serde_json::json!({"enabled": ["nine_key", "thoughtful_reply"], "selected": "nine_key"}),
+            vec![TouchKeyboardScheme::NineKey],
+            Some(TouchKeyboardScheme::NineKey),
+        ),
+        // 列表里只有它：按空列表的约定回到全拼 26 键。
+        (
+            serde_json::json!({"enabled": ["thoughtful_reply"], "selected": "thoughtful_reply"}),
+            vec![TouchKeyboardScheme::Quanpin],
+            Some(TouchKeyboardScheme::Quanpin),
+        ),
+        // 没有存列表时用缺省列表，选中退回全拼 26 键。
+        (
+            serde_json::json!({"selected": "thoughtful_reply"}),
+            TouchKeyboardScheme::DEFAULT_ENABLED.to_vec(),
+            Some(TouchKeyboardScheme::Quanpin),
+        ),
+    ] {
+        let mut legacy = serde_json::to_value(&saved).unwrap();
+        legacy["preferences"]["touch_keyboard_schemes"] = stored;
+        let bytes = serde_json::to_vec(&legacy).unwrap();
+        fs::write(store.path(), &bytes).unwrap();
+        let loaded = store.load().unwrap();
+        let schemes = &loaded.preferences.touch_keyboard_schemes;
+        assert_eq!(schemes.enabled, enabled.into_iter().collect());
+        assert_eq!(schemes.selected, selected);
+        loaded.preferences.validate().unwrap();
+        // 读取不改写文件；迁移后的内容与读到的相同，原样保存也不写盘，迁移结果随下一次真正的改动落盘。
+        assert_eq!(fs::read(store.path()).unwrap(), bytes);
+        let unchanged = store
+            .save(loaded.revision, loaded.preferences.clone())
+            .unwrap();
+        assert_eq!(unchanged, loaded);
+        assert_eq!(fs::read(store.path()).unwrap(), bytes);
+        let mut changed = loaded.preferences;
+        changed.candidate_page_size = if changed.candidate_page_size == 5 {
+            6
+        } else {
+            5
+        };
+        let resaved = store.save(loaded.revision, changed).unwrap();
+        let document: serde_json::Value =
+            serde_json::from_slice(&fs::read(store.path()).unwrap()).unwrap();
+        assert!(!document["preferences"]["touch_keyboard_schemes"]
+            .to_string()
+            .contains("thoughtful_reply"));
+        assert_eq!(store.load().unwrap(), resaved);
+    }
+}
+
+#[test]
 fn cantonese_zhuyin_and_vietnamese_touch_schemes_are_appended_and_opt_in() {
     assert_eq!(
-        TouchKeyboardScheme::ALL[..12],
+        TouchKeyboardScheme::ALL[..11],
         TouchKeyboardScheme::DEFAULT_ENABLED
     );
     assert_eq!(
-        TouchKeyboardScheme::ALL[12..],
+        TouchKeyboardScheme::ALL[11..],
         [
             TouchKeyboardScheme::Cantonese,
             TouchKeyboardScheme::Zhuyin,

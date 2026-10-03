@@ -264,7 +264,6 @@ public final class KeyboardSheets {
         String currentWubi = KeyboardScheme.normalizedWubiProfile(
             preferences.optString("wubi_profile", KeyboardScheme.WUBI_86));
         for (KeyboardScheme scheme : KeyboardScheme.values()) {
-            if (scheme == KeyboardScheme.THOUGHTFUL_REPLY) continue;
             if (!scheme.installed(languageDictionaries)) continue;
             if (scheme == KeyboardScheme.WUBI) {
                 // 五笔只有一个方案，86 与 98 是它的两个版本：各列一行，选中哪行就同时写 `scheme` 和 `wubi_profile`。

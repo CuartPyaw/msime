@@ -67,7 +67,6 @@ final class KeyboardSchemePickerView: UIView {
       case .zhuyin: glyph = "注"; badge = "大千"
       case .vietnamese: glyph = "越"; badge = "26"
       case .handwriting: glyph = "写"; badge = "手"
-      case .thoughtfulReply: glyph = "聊"; badge = "AI"
       }
       return makeCard(title: scheme.title, glyph: glyph, badge: badge,
         selected: isChineseMode && scheme == selected, identifier: "schemeCard-\(scheme.rawValue)") { onSelect(scheme) }
