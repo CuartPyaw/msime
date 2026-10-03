@@ -24,6 +24,21 @@ Fcitx5 候选操作通过原生候选 Action（新版本）和输入上下文 st
 
 候选页显示时，Home/End 将高亮移动到整份候选列表的首项或末项，页码随之切换（End 会先展开按需加载的候选）；没有候选页时仍交给编辑器处理。
 
+### Wayland 成对标点光标转发
+
+Fcitx5 的 Wayland 虚拟键盘会沿用当前修饰状态，因此用 Shift 输入标点时，补全后的左移和跳过闭标点的右移都等到 Shift 状态清零后才转发；Shift 仍正常参与标点输入和模式快捷键。失焦、reset 和会话关闭会取消待转发方向键。Fcitx5 5.1.22 起可回读实际修饰状态；更旧版本等下一次无 Shift 的按键，在处理该输入之前完成回移。
+
+专项 E2E 复用隔离 daemon，需要 Node.js 22+、`wtype` 和 Chrome（默认 `google-chrome-stable`，可用 `MSIME_TEST_CHROME` 指定）。先启动支持输入法和虚拟键盘协议的独立 Wayland 合成器，下面的 socket **不能指向日常桌面**：
+
+```sh
+MSIME_ISOLATED_LINUX_TEST=1 WAYLAND_DISPLAY=/absolute/test-compositor/wayland-0 \
+  dbus-run-session -- python3 platforms/linux/fcitx5/tests/daemon.py \
+  /absolute/verified/resources "$PWD/target/debug/libmsime_host_api.so" \
+  "$PWD/target/linux-ibus/fcitx5/libmsime-fcitx5.so" --wayland-punctuation
+```
+
+测试检查五种标点补全、继续输入保留闭符号、持续按住 Shift 连按开闭括号、快速输入和失焦取消，以及已有闭标点跳过路径的无 Shift 右移；事件记录和截图写到 `target/paired-punctuation-probe/`，不读取个人配置或页面。
+
 ## 安装后首次使用
 
 安装包的 Debian `postinst` 会为当前已登录且可联系到的用户自动注册本机匿名水杉账号；网络暂时不可用时不影响安装，在线 provider 会在之后重试。安装本身仍不准备词库和运行配置，也不会替你选中输入法。其余首次配置由随装的 `msime-linux-setup` 补齐：

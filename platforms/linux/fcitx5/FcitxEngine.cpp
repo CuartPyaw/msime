@@ -465,6 +465,8 @@ public:
     last_smart_punctuation_at_ = {};
     smart_punctuation_rejected_ = 0;
     paired_tracker_.clear();
+    pending_caret_.clear();
+    caret_forward_event_.reset();
     session_fullwidth_ = false;
     japanese_conversion_.reset();
     backspace_hold_.reset();
@@ -2953,7 +2955,7 @@ public:
     }
     return handled;
   }
-  // The character right after the caret. std::nullopt when the host publishes nothing usable; an empty string when the document ends at the caret.
+  // 逻辑光标右侧的字符，计入尚未转发的左右移；宿主信息不可用时返回 nullopt，文档末尾返回空串。
   std::optional<std::string> followingCharacter() {
     const auto &surrounding = ic_.surroundingText();
     if (privateInput() || !ic_.capabilityFlags().test(fcitx::CapabilityFlag::SurroundingText) ||
@@ -2961,15 +2963,50 @@ public:
       return std::nullopt;
     const auto &text = surrounding.text();
     const auto length = fcitx::utf8::lengthValidated(text);
-    if (length == fcitx::utf8::INVALID_LENGTH || surrounding.cursor() > length)
+    auto cursor = static_cast<int64_t>(surrounding.cursor());
+    for (const auto sym : pending_caret_) cursor += sym == FcitxKey_Left ? -1 : 1;
+    if (length == fcitx::utf8::INVALID_LENGTH || cursor < 0 || static_cast<size_t>(cursor) > length)
       return std::nullopt;
-    if (surrounding.cursor() == length) return std::string{};
-    const auto start = fcitx::utf8::nextNChar(text.begin(), surrounding.cursor());
+    if (static_cast<size_t>(cursor) == length) return std::string{};
+    const auto start = fcitx::utf8::nextNChar(text.begin(), static_cast<size_t>(cursor));
     return std::string(start, fcitx::utf8::nextChar(start));
   }
+  std::optional<bool> caretShiftHeld() const;
   void forwardCaret(fcitx::KeySym sym) {
+    // Wayland 虚拟键盘沿用物理修饰状态；Shift 尚未松开时不能发送方向键，否则会选中文字。
+    if (std::string_view(ic_.frontend()).find("wayland") == 0 && caretShiftHeld().value_or(caret_shift_)) {
+      pending_caret_.push_back(sym);
+#ifdef MSIME_FCITX5_XKB_STATE_MASK
+      if (!caret_forward_event_) {
+        caret_forward_event_ = loop_->addTimeEvent(CLOCK_MONOTONIC, fcitx::now(CLOCK_MONOTONIC), 0,
+            [this](fcitx::EventSourceTime *timer, uint64_t) {
+              if (!ic_.hasFocus() || restricted() || privateInput()) {
+                pending_caret_.clear();
+              } else if (const auto shift = caretShiftHeld()) {
+                if (*shift) {
+                  // 松开按键与 modifiers 更新会跨轮到达；只轮询状态，不按固定延时盲发。
+                  timer->setNextInterval(1000);
+                  timer->setOneShot();
+                } else {
+                  flushPendingCaret();
+                }
+              }
+              // 无可回读状态时停止轮询，交给下一次无 Shift 按键处理。
+              return true;
+            });
+      } else {
+        caret_forward_event_->setNextInterval(1000);
+      }
+      caret_forward_event_->setOneShot();
+#endif
+      return;
+    }
     ic_.forwardKey(fcitx::Key(sym), false);
     ic_.forwardKey(fcitx::Key(sym), true);
+  }
+  void flushPendingCaret() {
+    const auto pending = std::exchange(pending_caret_, {});
+    for (const auto sym : pending) forwardCaret(sym);
   }
   bool pairedPunctuationEnabled() const {
     return chinese_punctuation_ && paired_punctuation_ &&
@@ -3334,6 +3371,9 @@ public:
   // Ctrl+. pressed in English mode under the "follow" lock: English mode types Chinese punctuation until the next Chinese/English switch, as Windows does with its punctuation compartment on and the IME closed. Session-only and kept apart from chinese_punctuation_, which a preference refresh re-derives from the saved preference.
   bool english_chinese_punctuation_ = false;
   bool pair_inserted_ = false;
+  bool caret_shift_ = false;
+  std::vector<fcitx::KeySym> pending_caret_;
+  std::unique_ptr<fcitx::EventSourceTime> caret_forward_event_;
   // Japanese converts with Space and commits with Enter; see ../src/core/JapaneseConversion.h.
   msime::linux_host::JapaneseConversion japanese_conversion_;
   msime::linux_host::BackspaceHoldPolicy backspace_hold_;
@@ -5802,6 +5842,8 @@ public:
     auto *state = event.inputContext()->propertyFor(&factory_);
     state->backspace_hold_.reset();
     state->toggle_chord_held_ = FcitxKey_None;
+    state->pending_caret_.clear();
+    state->caret_forward_event_.reset();
     // 为不支持预编辑的客户端画在面板里的韩文音节、注音转换、越南文单词或藏文音节串只存在于这里，所以重置时把它写出去，而不是丢掉用户已经打的字（失焦时的同一规则见 focus_watch_）。
     const bool koreanPanelSyllable =
         state->session_ && state->commitsOnBlur() && !state->view_.value("editing_text", std::string{}).empty() &&
@@ -6239,10 +6281,29 @@ void FcitxState::showInputModeHud() {
 #endif
 }
 
+std::optional<bool> FcitxState::caretShiftHeld() const {
+#ifdef MSIME_FCITX5_XKB_STATE_MASK
+  if (const auto mask = engine_->instance()->xkbStateMask(ic_.display())) {
+    const auto [depressed, latched, locked] = *mask;
+    // XKB 核心修饰位的 Shift 与 Fcitx 的 ShiftMask 均为最低位；锁定及粘滞 Shift 也须等待。
+    return ((depressed | latched | locked) & static_cast<uint32_t>(fcitx::KeyState::Shift)) != 0;
+  }
+#endif
+  // debt: 老版 Fcitx5 无法回读修饰状态，等下一次无 Shift 的按键再回移；升级至 5.1.22 后可即时回移。
+  return std::nullopt;
+}
+
 bool FcitxState::key(fcitx::KeyEvent &event) {
   const auto &key = event.key();
   const auto sym = key.sym();
   const auto states = key.states();
+  // 规范化后的符号可能已丢掉 Shift 位，光标转发必须按原始事件判断。
+  caret_shift_ = event.rawKey().states().test(fcitx::KeyState::Shift);
+  if (!caret_shift_ && !isShiftKey(event)) {
+    // 下一按键可能与松开事件同批到达；先回移，再处理输入，避免文字落在闭标点外。
+    caret_forward_event_.reset();
+    flushPendingCaret();
+  }
   if (sym == FcitxKey_BackSpace && event.isRelease()) {
     const bool owned = backspace_hold_.armed();
     backspace_hold_.release();

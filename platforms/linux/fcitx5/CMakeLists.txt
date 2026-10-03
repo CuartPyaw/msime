@@ -123,6 +123,10 @@ target_compile_definitions(msime-fcitx5 PRIVATE MSIME_SYSTEM_OPTIONS="${CMAKE_IN
 if(MSIME_FCITX5_CUSTOM_IM_INFORMATION)
   target_compile_definitions(msime-fcitx5 PRIVATE MSIME_FCITX5_CUSTOM_IM_INFORMATION)
 endif()
+# 修饰状态回读自 5.1.22 才公开，旧发行版保留按下一次无 Shift 按键回移的兼容路径。
+if(Fcitx5Core_VERSION VERSION_GREATER_EQUAL 5.1.22)
+  target_compile_definitions(msime-fcitx5 PRIVATE MSIME_FCITX5_XKB_STATE_MASK)
+endif()
 # Usage reporting, through the same wrapper as the IBus host and with the same version: the parent project's MSIME_LINUX_VERSION, or platforms/linux/version.txt when this directory is configured on its own. Only the addon reports; the native test builds the engine without it.
 if(NOT MSIME_LINUX_VERSION)
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../version.txt")
@@ -165,6 +169,9 @@ if(BUILD_TESTING)
   target_compile_options(fcitx5-native-test PRIVATE -Wall -Wextra -Werror)
   target_include_directories(fcitx5-native-test PRIVATE ../../../crates/host-api/include)
   target_link_libraries(fcitx5-native-test PRIVATE Fcitx5::Core PkgConfig::GIO PkgConfig::CAIRO nlohmann_json::nlohmann_json "${MSIME_HOST_LIBRARY}")
+  if(Fcitx5Core_VERSION VERSION_GREATER_EQUAL 5.1.22)
+    target_compile_definitions(fcitx5-native-test PRIVATE MSIME_FCITX5_XKB_STATE_MASK)
+  endif()
   # The first-run case in tests/native.cpp needs a system options file that does not exist and a guide program it can stub, so neither may point at the installed locations.
   target_compile_definitions(fcitx5-native-test PRIVATE
     MSIME_SYSTEM_OPTIONS="${CMAKE_CURRENT_BINARY_DIR}/first-run-absent/runtime-options.json"
