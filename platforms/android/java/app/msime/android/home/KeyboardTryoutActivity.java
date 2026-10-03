@@ -86,7 +86,8 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) { }
             @Override public void afterTextChanged(@NonNull Editable text) {
                 if (text.length() > DRAFT_LIMIT) text.delete(DRAFT_LIMIT, text.length());
-                sendAi.setEnabled(!sending && !models.isEmpty() && text.length() > 0);
+                // 请求进行中按钮是「停止」，继续编辑或清空草稿都不能禁用取消操作。
+                sendAi.setEnabled(sending || (!models.isEmpty() && text.length() > 0));
             }
         });
 
