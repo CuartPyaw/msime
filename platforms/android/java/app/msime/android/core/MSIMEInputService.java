@@ -6078,12 +6078,12 @@ public final class MSIMEInputService extends InputMethodService {
                 }
                 CloudClipboardPanelPolicy.Status result = failure;
                 main.post(() -> {
+                    if (!CloudClipboardPanelPolicy.acceptsUploadResult(
+                            generation, cloudClipboardGeneration) || !clipboardPanelOpen()) return;
                     Toast.makeText(this, result == null ? "已发到云剪贴板"
                         : result == CloudClipboardPanelPolicy.Status.SIGNED_OUT
                             ? CloudClipboardPanelPolicy.SIGNED_OUT_MESSAGE
                             : "未能发到云剪贴板，请稍后重试", Toast.LENGTH_SHORT).show();
-                    if (!CloudClipboardPanelPolicy.accepts(generation, cloudClipboardGeneration)
-                            || !clipboardPanelOpen()) return;
                     // Re-read rather than splice the entry in: the service deduplicates and orders the list.
                     refreshCloudClipboard();
                 });
