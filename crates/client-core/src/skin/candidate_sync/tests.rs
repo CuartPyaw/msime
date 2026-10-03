@@ -873,13 +873,13 @@ fn an_unpublished_row_is_uploaded_again_rather_than_deleted_locally() {
 }
 
 #[test]
-fn a_failed_unpublish_keeps_the_row_remembered() {
+fn an_unrelated_missing_unpublish_keeps_the_row_remembered() {
     let fixture = Fixture::new();
     write_skin(&fixture.root, "sakura", "樱花", 1);
     fixture.sync();
     assert_eq!(
         unpublish(&fixture.state, &fixture.library, Uuid::new_v4()),
-        Err(AccountError::NotFound)
+        Ok(())
     );
     assert_eq!(
         synced_packages(&fixture.state).keys().collect::<Vec<_>>(),
@@ -901,6 +901,24 @@ fn a_successful_unpublish_reports_state_storage_failure() {
         Err(AccountError::Storage),
     );
     assert!(fixture.library.rows.borrow().is_empty());
+}
+
+#[test]
+fn an_unpublish_retry_cleans_state_after_remote_success_was_persisted_late() {
+    let fixture = Fixture::new();
+    write_skin(&fixture.root, "sakura", "樱花", 1);
+    fixture.sync();
+    let id = *fixture.library.rows.borrow().keys().next().unwrap();
+    fs::remove_file(&fixture.state).unwrap();
+    fs::create_dir(&fixture.state).unwrap();
+
+    assert_eq!(
+        unpublish(&fixture.state, &fixture.library, id),
+        Err(AccountError::Storage)
+    );
+    fs::remove_dir(&fixture.state).unwrap();
+    assert_eq!(unpublish(&fixture.state, &fixture.library, id), Ok(()));
+    assert!(synced_packages(&fixture.state).is_empty());
 }
 
 #[test]
