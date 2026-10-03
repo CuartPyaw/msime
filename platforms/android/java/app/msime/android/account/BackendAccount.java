@@ -145,6 +145,7 @@ public final class BackendAccount {
 
     /** Finish it with the provider's ID token, and keep the session this device is now signed in on. */
     public void login(Challenge challenge, String idToken) throws Exception {
+        if (ownerProcess != null) throw new IllegalStateException("account session owner");
         JSONObject tokens = request("POST", "/v1/auth/login",
             new JSONObject().put("challenge_id", challenge.id()).put("credential", idToken), null);
         String access = tokens.optString("access_token", "");
@@ -331,6 +332,7 @@ public final class BackendAccount {
 
     /** Forget the session on this device. The account itself is untouched. */
     public void signOut() {
+        if (ownerProcess != null) return;
         try {
             synchronized (SESSION_LOCK) {
                 sessionGeneration++;

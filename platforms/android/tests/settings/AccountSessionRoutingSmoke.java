@@ -88,8 +88,42 @@ public final class AccountSessionRoutingSmoke {
         check(retry, "an owner that cannot tell is reported to callers that word a retry");
         check(storeTouches.get() == 0, "a non-owning process never touches the session store");
         check(requests.get() == 0, "a non-owning process never refreshes");
+
+        AtomicInteger loginRequests = new AtomicInteger();
+        BackendAccount.SessionStore loginStore = new BackendAccount.SessionStore() {
+            @Override public String load() { return null; }
+            @Override public void save(String value) { loginRequests.incrementAndGet(); }
+            @Override public void clear() { loginRequests.incrementAndGet(); }
+        };
+        BackendAccount secondary = new BackendAccount(loginStore, (method, path, body, token) -> {
+            loginRequests.incrementAndGet();
+            return new org.json.JSONObject()
+                .put("access_token", TOKEN)
+                .put("refresh_token", TOKEN)
+                .put("token_type", "Bearer")
+                .put("expires_in", 900);
+        }, () -> TOKEN);
+        boolean loginRejected = false;
+        try {
+            secondary.login(null, null);
+        } catch (RuntimeException error) {
+            loginRejected = error instanceof IllegalStateException;
+        }
+        check(loginRejected, "a non-owning process rejects local sign-in");
+        check(loginRequests.get() == 0, "a non-owning process never signs in through its local store");
+
+        AtomicInteger signOutTouches = new AtomicInteger();
+        BackendAccount.SessionStore signOutStore = new BackendAccount.SessionStore() {
+            @Override public String load() { return TOKEN_SESSION; }
+            @Override public void save(String value) { signOutTouches.incrementAndGet(); }
+            @Override public void clear() { signOutTouches.incrementAndGet(); }
+        };
+        new BackendAccount(signOutStore, requester, () -> TOKEN).signOut();
+        check(signOutTouches.get() == 0, "a non-owning process never signs out through its local store");
         System.out.println("Android account session routing: single refreshing process passed");
     }
+
+    private static final String TOKEN_SESSION = "synthetic-session";
 
     private static void check(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
