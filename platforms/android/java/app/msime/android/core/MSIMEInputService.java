@@ -5106,7 +5106,10 @@ public final class MSIMEInputService extends InputMethodService {
             this::startVoiceRecognition);
         recognize.setLayoutParams(new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        recognize.setEnabled(voiceInputEnabled && VoiceRecognitionActivity.available(this));
+        VoiceConfiguration configured = VoiceConfiguration.read(preferencesDirectory, "ime-preview");
+        boolean platformRecognizerAvailable = VoiceRecognitionActivity.available(this);
+        recognize.setEnabled(voiceInputEnabled
+            && (platformRecognizerAvailable || configured.provider() != null));
         applySkin();
     }
 

@@ -273,6 +273,19 @@ class AndroidVoiceProjectConfigurationTests(unittest.TestCase):
         self.assertIn("stopRecognition();", activity)
         self.assertIn("cancel.setOnClickListener(ignored -> cancelRecognition());", activity)
 
+    def test_configured_provider_can_start_without_platform_recognizer(self):
+        service = (
+            ROOT / "platforms/android/java/app/msime/android/core/MSIMEInputService.java"
+        ).read_text()
+        render_start = service.index("private void renderVoiceResult()")
+        render_end = service.index("private void renderLayoutSettingsState()", render_start)
+        render = service[render_start:render_end]
+        # A configured cloud or local provider is a complete voice path even on devices without
+        # Android's optional SpeechRecognizer service.
+        self.assertIn("VoiceConfiguration.read(", render)
+        self.assertIn("configured.provider() != null", render)
+        self.assertIn("VoiceRecognitionActivity.available(this)", render)
+
     def test_cancelling_an_upload_disconnects_the_in_flight_request(self):
         recognizer = (
             ROOT / "platforms/android/java/app/msime/android/voice/HttpAsrRecognizer.java"
