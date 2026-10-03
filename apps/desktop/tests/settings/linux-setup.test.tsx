@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, test, vi } from "vitest";
+import { StrictMode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
   LinuxSetupPage,
@@ -59,6 +60,19 @@ test("ignores a same-tick duplicate setup action", async () => {
   expect(run).toHaveBeenCalledOnce();
   resolveRun({ ...missing, prepared: true });
   await screen.findByRole("heading", { name: "配置完成" });
+});
+
+test("Linux first-run setup remains available after StrictMode effect replay", async () => {
+  const run = vi.fn(async () => ({ ...missing, prepared: true }));
+  render(
+    <StrictMode>
+      <LinuxSetupPage status={missing} client={{ run }} onComplete={vi.fn()} />
+    </StrictMode>,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "开始配置" }));
+  await screen.findByRole("heading", { name: "配置完成" });
+  expect(run).toHaveBeenCalledOnce();
 });
 
 test("Linux first-run page discloses cloud candidates and passes a declined choice", async () => {
