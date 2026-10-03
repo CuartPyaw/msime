@@ -3,6 +3,7 @@ package app.msime.android;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.function.Predicate;
 
 /** Host-only paging and recent-selection policy for the Engine-owned emoji catalog. */
 public final class EmojiCatalogModel {
@@ -56,6 +57,13 @@ public final class EmojiCatalogModel {
                 || nextOffset > Integer.MAX_VALUE || (!complete && nextOffset == requestedOffset))
             throw new IllegalArgumentException("Invalid emoji catalog page");
         return new Page(items, (int) nextOffset, complete);
+    }
+
+    /** 丢弃设备字体画不成单个字形的条目（系统 emoji 字体比目录的 Unicode 版本旧时会出现方框或被拆开的 ZWJ 序列），游标仍按扫描行前进。 */
+    public static Page renderable(Page page, Predicate<String> drawable) {
+        ArrayList<Item> kept = new ArrayList<>();
+        for (Item item : page.items()) if (drawable.test(item.text())) kept.add(item);
+        return new Page(kept, page.nextOffset(), page.complete());
     }
 
     /** Most-recent first, deduplicated, and bounded without retaining invalid persisted values. */

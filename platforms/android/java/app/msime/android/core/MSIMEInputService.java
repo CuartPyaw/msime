@@ -425,6 +425,8 @@ public final class MSIMEInputService extends InputMethodService {
         1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(32),
         new ThreadPoolExecutor.AbortPolicy());
     private final ExecutorService emojiWorker = Executors.newSingleThreadExecutor();
+    // 只在 `emojiWorker` 线程上使用；`hasGlyph` 会走系统字体回退链，能判断当前设备能否画出某个表情。
+    private final Paint emojiGlyphPaint = new Paint();
     private final ExecutorService cloudClipboardWorker = Executors.newSingleThreadExecutor();
     private final ExecutorService candidateGlossWorker = new ThreadPoolExecutor(
         1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(1),
@@ -3973,7 +3975,11 @@ public final class MSIMEInputService extends InputMethodService {
         renderEmojiStatus();
         emojiWorker.execute(() -> {
             EmojiCatalogModel.Page page = null;
-            try { page = decodeEmojiPage(NativeClient.emojiCatalog(query, resources), offset, category); }
+            try {
+                page = EmojiCatalogModel.renderable(decodeEmojiPage(
+                    NativeClient.emojiCatalog(query, resources), offset, category),
+                    emojiGlyphPaint::hasGlyph);
+            }
             catch (JSONException | RuntimeException | LinkageError ignored) {
                 // The UI reports a sanitized catalog error; never expose resource paths or rows.
             }
