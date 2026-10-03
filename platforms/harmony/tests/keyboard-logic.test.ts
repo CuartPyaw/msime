@@ -874,6 +874,12 @@ group("bounds native speech language, session and result text", () => {
     VoiceRecognitionPolicy.result("x".repeat(VOICE_MAX_TEXT + 20)).length === VOICE_MAX_TEXT,
     "voice result is bounded",
   );
+  const splitEmoji = "x".repeat(VOICE_MAX_TEXT - 1) + "😀";
+  const boundedEmoji = VoiceRecognitionPolicy.result(splitEmoji);
+  check(
+    boundedEmoji === "x".repeat(VOICE_MAX_TEXT - 1),
+    "voice result truncation does not leave a lone surrogate",
+  );
 });
 
 group("voice input preference gates every Harmony entry point", () => {
