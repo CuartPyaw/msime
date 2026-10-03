@@ -19,6 +19,7 @@ export type VoiceErrorHandler = (message: string) => void;
  */
 export class HarmonyVoiceRecognizer {
   private engine: speechRecognizer.SpeechRecognitionEngine | undefined = undefined;
+  private engineLanguage: string = '';
   private sessionId: string = '';
   private generation: number = 0;
   private resultHandler: VoiceResultHandler | undefined = undefined;
@@ -88,10 +89,21 @@ export class HarmonyVoiceRecognizer {
     this.generation = (this.generation + 1) % 1000000000;
     this.sessionId = VoiceRecognitionPolicy.sessionId(this.generation);
     const session: string = this.sessionId;
+    const requestedLanguage: string = VoiceRecognitionPolicy.language(language);
+    if (this.engine !== undefined && VoiceRecognitionPolicy.engineLanguageChanged(
+      this.engineLanguage, requestedLanguage)) {
+      try {
+        this.engine.shutdown();
+      } catch (error) {
+        // 框架可能已经释放了空闲引擎。
+      }
+      this.engine = undefined;
+      this.engineLanguage = '';
+    }
     if (this.engine === undefined) {
       const created: speechRecognizer.SpeechRecognitionEngine =
         await speechRecognizer.createEngine({
-        language: VoiceRecognitionPolicy.language(language),
+        language: requestedLanguage,
         // CoreSpeechKit's offline recognizer is the platform-specific Harmony path.
         online: 1,
         extraParams: { recognizerMode: 'short' }
@@ -108,6 +120,7 @@ export class HarmonyVoiceRecognizer {
         return;
       }
       this.engine = created;
+      this.engineLanguage = requestedLanguage;
       this.engine.setListener({
         onStart: (): void => {},
         onEvent: (): void => {},
@@ -220,6 +233,7 @@ export class HarmonyVoiceRecognizer {
         // The service may already have released a failed engine.
       }
       this.engine = undefined;
+      this.engineLanguage = '';
     }
     this.resultHandler = undefined;
     this.errorHandler = undefined;

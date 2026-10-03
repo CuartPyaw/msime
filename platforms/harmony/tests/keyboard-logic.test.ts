@@ -863,6 +863,14 @@ group("bounds native speech language, session and result text", () => {
   check(VoiceRecognitionPolicy.language("  ") === "zh-CN", "voice defaults to Chinese");
   check(VoiceRecognitionPolicy.language("x".repeat(100)).length <= 32, "voice language is bounded");
   check(
+    VoiceRecognitionPolicy.engineLanguageChanged("zh-CN", "en-US"),
+    "a changed voice language rebuilds the system engine",
+  );
+  check(
+    !VoiceRecognitionPolicy.engineLanguageChanged("zh-CN", "zh-CN"),
+    "the same voice language reuses the system engine",
+  );
+  check(
     VoiceRecognitionPolicy.sessionId(12) === "msime-voice-12",
     "voice session ids are deterministic",
   );

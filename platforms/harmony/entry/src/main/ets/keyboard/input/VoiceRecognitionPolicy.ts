@@ -11,6 +11,10 @@ export class VoiceRecognitionPolicy {
     return trimmed.slice(0, VOICE_MAX_LANGUAGE);
   }
 
+  static engineLanguageChanged(current: string, next: string): boolean {
+    return VoiceRecognitionPolicy.language(current) !== VoiceRecognitionPolicy.language(next);
+  }
+
   static sessionId(generation: number): string {
     const bounded: number = Math.max(1, Math.floor(generation)) % 1000000000;
     return `msime-voice-${bounded}`;
