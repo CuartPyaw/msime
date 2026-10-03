@@ -96,6 +96,10 @@ public final class HttpAsrPolicy {
         if (language == null) return "";
         String trimmed = language.trim();
         int separator = trimmed.indexOf('-');
+        int underscore = trimmed.indexOf('_');
+        if (separator < 0 || (underscore >= 0 && underscore < separator)) {
+            separator = underscore;
+        }
         String primary = separator < 0 ? trimmed : trimmed.substring(0, separator);
         return primary.toLowerCase(Locale.ROOT);
     }

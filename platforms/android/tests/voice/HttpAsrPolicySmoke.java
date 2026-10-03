@@ -52,7 +52,9 @@ public final class HttpAsrPolicySmoke {
         // 简繁 setting, not the transcriber's to decide.
         check("zh".equals(HttpAsrPolicy.isoLanguage("zh-CN"))
                 && "zh".equals(HttpAsrPolicy.isoLanguage("zh-TW"))
+                && "zh".equals(HttpAsrPolicy.isoLanguage("zh_CN"))
                 && "en".equals(HttpAsrPolicy.isoLanguage("en-US"))
+                && "en".equals(HttpAsrPolicy.isoLanguage("en_US"))
                 && "ja".equals(HttpAsrPolicy.isoLanguage("ja")),
             "a BCP 47 tag is reduced to its primary subtag");
         check("".equals(HttpAsrPolicy.isoLanguage(null))
