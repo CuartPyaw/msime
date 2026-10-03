@@ -51,7 +51,7 @@ VI_CHANNELS = ("platforms/macos/CMakeLists.txt", "platforms/macos/resources/Lice
 # 移动端（Android、iOS、HarmonyOS）的 Engine 同样编入 vi 和 ewts，它们的打包脚本也要带上两份许可证全文。
 MOBILE_CRATE_CHANNELS = ("platforms/android/build-native.sh", "platforms/ios/project.yml", "platforms/ios/tests/settings/ProjectConfigurationTests.py", "platforms/harmony/stage-resources.sh")
 VI_CHANNELS = VI_CHANNELS + MOBILE_CRATE_CHANNELS
-# 藏文方案背后的 ewts crate 以 MIT OR Apache-2.0 发布，这里按 MIT 使用。和 vi 一样，由手工列出声明的 macOS 包、Windows 安装包和移动端打包脚本显式带上它的许可证全文。
+# 藏文方案背后的 ewts crate 以 MIT OR Apache-2.0 发布，这里按 MIT 使用；它的转换表取自 Apache-2.0 的 ewts-js，所以同一个文件里还附着 ewts-js 的版权行和 Apache-2.0 全文。和 vi 一样，由手工列出声明的 macOS 包、Windows 安装包和移动端打包脚本显式带上它的许可证全文。
 EWTS_LICENCE = "resources/licenses/ewts-MIT.txt"
 EWTS_CHANNELS = VI_CHANNELS + ("platforms/windows/Notices.md", "docs/third-party.md")
 failures = []
@@ -97,6 +97,9 @@ def main() -> int:
         check(any("vi-MIT.txt" in line for line in live), f"{channel} does not ship vi-MIT.txt")
     ewts_licence = ROOT / EWTS_LICENCE
     check(ewts_licence.is_file() and "Copyright (c) Maxim Zommer" in ewts_licence.read_text(encoding="utf-8"), f"{EWTS_LICENCE} is missing or lost the ewts copyright line")
+    # ewts 的转换表取自 Apache-2.0 的 ewts-js，Apache-2.0 要求随分发保留版权行并附许可证全文；只有 macOS 和 Linux 的声明另外写了出处，其余渠道只带这一个文件，所以两者都必须在文件里。
+    ewts_text = ewts_licence.read_text(encoding="utf-8") if ewts_licence.is_file() else ""
+    check("Copyright (C) 2010-2025 Roger Espel Llima" in ewts_text and "END OF TERMS AND CONDITIONS" in ewts_text, f"{EWTS_LICENCE} must carry the ewts-js copyright line and the full Apache License 2.0 text")
     for channel in EWTS_CHANNELS:
         live = [line for line in (ROOT / channel).read_text(encoding="utf-8").splitlines() if not line.lstrip().startswith("#")]
         check(any("ewts-MIT.txt" in line for line in live), f"{channel} does not ship ewts-MIT.txt")
