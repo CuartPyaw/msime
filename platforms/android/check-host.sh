@@ -249,6 +249,14 @@ if [[ "$(rg -c 'catch \(RuntimeException \| LinkageError' "$voice_activity" || t
   echo "Android voice recognition workers must catch unexpected runtime/linkage failures" >&2
   exit 1
 fi
+# 匿名账号注册由每次 HomeActivity 重建触发，但同一进程只能保留一个网络注册任务。
+identity_source="$repo_root/platforms/android/java/app/msime/android/account/AccountIdentity.java"
+if ! rg -q 'AtomicBoolean REGISTERING' "$identity_source" \
+    || ! rg -q 'REGISTERING\.compareAndSet\(false, true\)' "$identity_source" \
+    || ! rg -q 'REGISTERING\.set\(false\)' "$identity_source"; then
+  echo "Android anonymous account registration must be single-flight" >&2
+  exit 1
+fi
 # Reject an oversized response before JNI obtains a native view of the Java byte array. The shared
 # decoder has the same one-megabyte wire bound, but checking after GetByteArrayElements can briefly
 # duplicate an untrusted oversized WebSocket message.
