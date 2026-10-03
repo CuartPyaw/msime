@@ -673,29 +673,30 @@ public final class MSIMEInputService extends InputMethodService {
             reportTypingStatisticsFailure();
             return;
         }
-        submitTypingStatistics(request, null);
+        submitTypingStatistics(request, null, engineStartGeneration);
     }
 
     /**
      * Send one statistics request on the worker; {@code nothingRecorded}, when given, runs on the main thread if the store took none of a non-empty batch, which is how it answers once statistics are off.
      */
-    private void submitTypingStatistics(String request, Runnable nothingRecorded) {
+    private void submitTypingStatistics(String request, Runnable nothingRecorded,
+                                        long lifecycleGeneration) {
         try {
             typingStatisticsWorker.execute(() -> {
                 try {
                     JSONObject result = new JSONObject(NativeClient.typingStatistics(request));
                     if (!result.getBoolean("ok")) {
-                        reportTypingStatisticsFailure();
+                        reportTypingStatisticsFailure(lifecycleGeneration);
                     } else if (nothingRecorded != null
                         && result.getJSONObject("value").getLong("recorded") == 0) {
                         main.post(nothingRecorded);
                     }
                 } catch (Exception | LinkageError error) {
-                    reportTypingStatisticsFailure();
+                    reportTypingStatisticsFailure(lifecycleGeneration);
                 }
             });
         } catch (RuntimeException error) {
-            reportTypingStatisticsFailure();
+            reportTypingStatisticsFailure(lifecycleGeneration);
         }
     }
 
@@ -808,11 +809,17 @@ public final class MSIMEInputService extends InputMethodService {
         long generation = keyStatisticsGeneration;
         submitTypingStatistics(request, () -> {
             if (generation == keyStatisticsGeneration) disableKeyStatistics();
-        });
+        }, engineStartGeneration);
     }
 
     private void reportTypingStatisticsFailure() {
+        reportTypingStatisticsFailure(engineStartGeneration);
+    }
+
+    private void reportTypingStatisticsFailure(long lifecycleGeneration) {
         main.post(() -> {
+            if (!TypingStatisticsLifecyclePolicy.acceptsFailure(
+                    lifecycleGeneration, engineStartGeneration)) return;
             if (statisticsFailureReported) return;
             statisticsFailureReported = true;
             preferencesNotice = " · 打字统计未能写入";
