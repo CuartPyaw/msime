@@ -542,6 +542,7 @@ javac --release 17 -Xlint:all -Werror -cp "$android_jar" -d "$output_dir" \
   "$repo_root/platforms/android/tests/settings/HostOptionsPolicySmoke.java" \
   "$repo_root/platforms/android/tests/settings/AccountTokenPolicySmoke.java" \
   "$repo_root/platforms/android/tests/settings/TypingStatisticsModelSmoke.java" \
+  "$repo_root/platforms/android/tests/settings/TypingStatisticsLifecycleSmoke.java" \
   "$repo_root/platforms/android/tests/settings/KeyPressCountingSmoke.java" \
   "$repo_root/platforms/android/tests/settings/VocabularyReviewModelSmoke.java" \
   "$repo_root/platforms/android/tests/settings/InputFeatureToggleSmoke.java" \
@@ -648,6 +649,7 @@ java -cp "$output_dir" HostOptionsPolicySmoke
 java -cp "$output_dir" AccountTokenPolicySmoke
 java -cp "$output_dir" SignInAttemptPolicySmoke
 java -cp "$output_dir" TypingStatisticsModelSmoke
+java -cp "$output_dir" TypingStatisticsLifecycleSmoke
 java -cp "$output_dir" KeyPressCountingSmoke
 java -cp "$output_dir" VocabularyReviewModelSmoke
 java -cp "$output_dir" InputFeatureToggleSmoke
