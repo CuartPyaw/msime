@@ -186,7 +186,16 @@ class VoicePlugin(activity: Activity) : Plugin(activity) {
             invoke.reject("unavailable", "unavailable")
             return
         }
-        worker.execute { pollResult(job) }
+        try {
+            worker.execute { pollResult(job) }
+        } catch (_: RuntimeException) {
+            // 插件销毁与提交轮询可能交错；提交失败时回滚活动请求，不能让 Tauri 永久等待。
+            if (activeJob.compareAndSet(job, null)) {
+                VoiceRecognitionActivity.clearRequest(args.requestId)
+                VoiceRecognitionActivity.cancelActive()
+                invoke.reject("cancelled", "cancelled")
+            }
+        }
     }
 
     private fun pollResult(job: VoiceJob) {

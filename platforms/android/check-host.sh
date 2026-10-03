@@ -257,6 +257,13 @@ if ! rg -q 'AtomicBoolean REGISTERING' "$identity_source" \
   echo "Android anonymous account registration must be single-flight" >&2
   exit 1
 fi
+# 语音插件销毁时 executor 可能已经拒绝轮询任务；提交失败必须回滚活动请求并取消识别页。
+voice_plugin="$repo_root/platforms/android/java/app/msime/android/voice/VoicePlugin.kt"
+if ! rg -qU 'try \{\s*worker\.execute \{ pollResult\(job\) \}\s*\} catch \(_: RuntimeException\)' "$voice_plugin" \
+    || ! rg -q 'VoiceRecognitionActivity\.clearRequest\(args\.requestId\)' "$voice_plugin"; then
+  echo "Android voice plugin must roll back a rejected result poll" >&2
+  exit 1
+fi
 # Reject an oversized response before JNI obtains a native view of the Java byte array. The shared
 # decoder has the same one-megabyte wire bound, but checking after GetByteArrayElements can briefly
 # duplicate an untrusted oversized WebSocket message.
