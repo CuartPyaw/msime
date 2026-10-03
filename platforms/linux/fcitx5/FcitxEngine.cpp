@@ -101,6 +101,7 @@
 #include <cctype>
 #include <mutex>
 #include <thread>
+#include <tuple>
 #include <ctime>
 #if __has_include(<fcitx/candidateaction.h>)
 #include <fcitx/candidateaction.h>
@@ -576,6 +577,7 @@ public:
     case msime::linux_host::InputModeIndicator::Korean: return "한";
     case msime::linux_host::InputModeIndicator::Cantonese: return "粤";
     case msime::linux_host::InputModeIndicator::Zhuyin: return "注";
+    case msime::linux_host::InputModeIndicator::Stroke: return "笔";
     case msime::linux_host::InputModeIndicator::Vietnamese: return "越";
     case msime::linux_host::InputModeIndicator::Tibetan: return "藏";
     case msime::linux_host::InputModeIndicator::English: return "英";
@@ -621,10 +623,11 @@ public:
     return true;
   }
   // The schemes in the order of the view's scheme index, which is also the order the status action steps through them.
-  static constexpr std::array<const char *, 9> kSchemes = {"quanpin", "shuangpin", "wubi", "japanese", "korean",
-                                                           "cantonese", "zhuyin", "vietnamese", "tibetan"};
+  static constexpr std::array<const char *, 10> kSchemes = {"quanpin", "shuangpin", "wubi", "japanese", "korean",
+                                                            "cantonese", "zhuyin", "vietnamese", "tibetan",
+                                                            "stroke"};
   static_assert(kSchemes.size() == msime::linux_host::kInputSchemeIds.size());
-  // Whether a scheme can run with the runtime options this context last read: Cantonese and Zhuyin need their language dictionary (core/InputSchemes.h).
+  // Whether a scheme can run with the runtime options this context last read: Cantonese, Zhuyin and Stroke need their language dictionary (core/InputSchemes.h).
   bool schemeAvailable(const char *id) const {
     return msime::linux_host::input_scheme_available(id, scheme_dictionaries_);
   }
@@ -634,7 +637,7 @@ public:
         scheme_override_.value_or(preferences_.value("scheme", std::string("quanpin"))),
         preferences_.value("last_chinese_scheme", std::string("quanpin")), scheme_dictionaries_);
   }
-  // Works out from the runtime options just read which language dictionaries are installed, once per read rather than per key, and lists Cantonese and Zhuyin in the scheme menu only while theirs is.
+  // Works out from the runtime options just read which language dictionaries are installed, once per read rather than per key, and lists Cantonese, Zhuyin and Stroke in the scheme menu only while theirs is.
   void noteSchemeOptions(const Json &options) {
     scheme_dictionaries_ = msime::linux_host::language_dictionary_availability(options);
     refreshSchemeMenu();
@@ -3148,7 +3151,7 @@ public:
     if (!ensure() || restricted() || privateInput() || !ic_.hasFocus()) return false;
     return apply(msime_client_reset_cache(session_));
   }
-  // 繁体输出转换只用于简体中文（`script_conversion_applies`）：日文（假名和 Engine 选的汉字）与韩文（谚文和用户选的汉字）原样通过，粤拼和注音本来就写繁体字，越南文和藏文不是中文。候选行、上屏和状态区动作都问这同一道关口，所以候选行显示的字永远就是它上屏的字（s2t 会把汉字 后 画成 後）。
+  // 繁体输出转换只用于简体中文（`script_conversion_applies`）：日文（假名和 Engine 选的汉字）与韩文（谚文和用户选的汉字）原样通过，粤拼和注音本来就写繁体字，笔画候选按 stroke.db 里存的字形原样取用，越南文和藏文不是中文。候选行、上屏和状态区动作都问这同一道关口，所以候选行显示的字永远就是它上屏的字（s2t 会把汉字 后 画成 後）。
   bool scriptConversionApplies() const {
     return msime::linux_host::scheme::ScriptConversionApplies(view_.value("scheme", 0));
   }
@@ -3296,7 +3299,7 @@ public:
   std::string dictionary_user_data_;
   std::string resources_;
   std::optional<std::string> scheme_override_;
-  // The language dictionaries the runtime options named when this context last read them, which decide whether Cantonese and Zhuyin can run (noteSchemeOptions).
+  // The language dictionaries the runtime options named when this context last read them, which decide whether Cantonese, Zhuyin and Stroke can run (noteSchemeOptions).
   msime::linux_host::LanguageDictionaryAvailability scheme_dictionaries_;
   bool caps_lock_ = false;
   std::string mode_indicator_label_;
@@ -3746,6 +3749,7 @@ public:
     case 6: return "输入方案：注音";
     case 7: return "输入方案：越南文";
     case 8: return "输入方案：藏文";
+    case 9: return "输入方案：笔画";
     default: return "输入方案：全拼";
     }
   }
@@ -5466,6 +5470,7 @@ public:
              {&scheme_korean_action_, "msime-scheme-korean"},
              {&scheme_cantonese_action_, "msime-scheme-cantonese"},
              {&scheme_zhuyin_action_, "msime-scheme-zhuyin"},
+             {&scheme_stroke_action_, "msime-scheme-stroke"},
              {&scheme_vietnamese_action_, "msime-scheme-vietnamese"},
              {&scheme_tibetan_action_, "msime-scheme-tibetan"},
              {&input_group_action_, "msime-group-input"},
@@ -5475,9 +5480,9 @@ public:
              {&candidate_group_action_, "msime-group-candidate"},
              {&candidate_group_separator_, "msime-group-candidate-separator"}})
       action->registerAction(name, &instance->userInterfaceManager());
-    // 输入方案 lists the schemes rather than stepping through them on each click. Cantonese and Zhuyin join it once a context has read runtime options naming their dictionaries (rebuildSchemeMenu).
+    // 输入方案 lists the schemes rather than stepping through them on each click. Cantonese, Zhuyin and Stroke join it once a context has read runtime options naming their dictionaries (rebuildSchemeMenu).
     scheme_action_.setMenu(&scheme_menu_);
-    rebuildSchemeMenu(nullptr, false, false);
+    rebuildSchemeMenu(nullptr, false, false, false);
     // The design menu keeps 中文/英文, 全角/标点/译文, 输入方案 and 主题/词库…/设置…/关于 at the top; every other switch the status area listed moves, as the same action, into one of three groups.
     input_group_action_.setMenu(&input_group_menu_);
     for (auto *action : std::initializer_list<fcitx::Action *>{
@@ -5900,9 +5905,10 @@ public:
   FcitxSchemeItemAction scheme_zhuyin_action_{&factory_, 6, "注音"};
   FcitxSchemeItemAction scheme_vietnamese_action_{&factory_, 7, "越南文"};
   FcitxSchemeItemAction scheme_tibetan_action_{&factory_, 8, "藏文"};
-  // The entries scheme_menu_ holds, in menu order, and whether Cantonese and Zhuyin were among them when it was last built.
+  FcitxSchemeItemAction scheme_stroke_action_{&factory_, 9, "笔画"};
+  // The entries scheme_menu_ holds, in menu order, and whether Cantonese, Zhuyin and Stroke were among them when it was last built.
   std::vector<fcitx::Action *> scheme_menu_entries_;
-  std::optional<std::pair<bool, bool>> scheme_menu_languages_;
+  std::optional<std::tuple<bool, bool, bool>> scheme_menu_languages_;
   FcitxShuangpinProfileAction shuangpin_profile_action_{&factory_};
   FcitxModeAction width_action_{&factory_, FcitxModeAction::Mode::Fullwidth};
   fcitx::Menu nine_key_menu_;
@@ -5966,7 +5972,7 @@ public:
   std::vector<std::unique_ptr<FcitxGlobalThemeItemAction>> global_theme_package_items_;
   std::vector<std::pair<std::string, std::string>> global_theme_packages_;
   void rebuildThemeMenu(fcitx::InputContext *ic);
-  void rebuildSchemeMenu(fcitx::InputContext *ic, bool cantonese, bool zhuyin);
+  void rebuildSchemeMenu(fcitx::InputContext *ic, bool cantonese, bool zhuyin, bool stroke);
   fcitx::Menu candidate_page_size_menu_;
   FcitxCandidatePageSizeAction candidate_page_size_action_;
   FcitxCandidatePageSizeItemAction candidate_page_size1_{&factory_, 1};
@@ -6089,7 +6095,8 @@ void FcitxState::refreshThemeMenu() {
 }
 
 void FcitxState::refreshSchemeMenu() {
-  if (engine_) engine_->rebuildSchemeMenu(&ic_, schemeAvailable("cantonese"), schemeAvailable("zhuyin"));
+  if (engine_) engine_->rebuildSchemeMenu(&ic_, schemeAvailable("cantonese"), schemeAvailable("zhuyin"),
+                                          schemeAvailable("stroke"));
 }
 
 void FcitxState::refreshToolbar() {
@@ -6988,17 +6995,18 @@ void FcitxEngine::rebuildThemeMenu(fcitx::InputContext *ic) {
 }
 
 // The scheme menu is shared by every context, so it follows the runtime options the last context read, as the theme menu does. The Chinese schemes come first and the other input languages after them, as in the IBus menu; nothing is rebuilt while the languages stay the same, so an entry is never replaced under a menu that shows it.
-void FcitxEngine::rebuildSchemeMenu(fcitx::InputContext *ic, bool cantonese, bool zhuyin) {
-  const std::pair languages{cantonese, zhuyin};
+void FcitxEngine::rebuildSchemeMenu(fcitx::InputContext *ic, bool cantonese, bool zhuyin, bool stroke) {
+  const std::tuple languages{cantonese, zhuyin, stroke};
   if (scheme_menu_languages_ == languages) return;
   for (auto *entry : scheme_menu_entries_) scheme_menu_.removeAction(entry);
   scheme_menu_entries_.clear();
-  scheme_menu_entries_.reserve(9);
+  scheme_menu_entries_.reserve(10);
   scheme_menu_entries_.insert(
       scheme_menu_entries_.end(),
       {&scheme_quanpin_action_, &scheme_shuangpin_action_, &scheme_wubi_action_});
   if (cantonese) scheme_menu_entries_.push_back(&scheme_cantonese_action_);
   if (zhuyin) scheme_menu_entries_.push_back(&scheme_zhuyin_action_);
+  if (stroke) scheme_menu_entries_.push_back(&scheme_stroke_action_);
   scheme_menu_entries_.insert(scheme_menu_entries_.end(),
                               {&scheme_japanese_action_, &scheme_korean_action_, &scheme_vietnamese_action_,
                                &scheme_tibetan_action_});

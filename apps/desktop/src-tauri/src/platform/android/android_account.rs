@@ -1090,7 +1090,7 @@ pub async fn app_icon_set(
     .map_err(|_| crate::CommandError { code: "app_icon" })?
 }
 
-/// 方案在账号里的取值；账号 schema 还没有收录的方案为空。粤拼、注音、越南文和藏文不写，而不是映射到相近的方案，这样账号保留上次记录的方案，不会被改成用户没选过的方案。
+/// 方案在账号里的取值；账号 schema 还没有收录的方案为空。粤拼、注音、越南文、藏文和笔画不写，而不是映射到相近的方案，这样账号保留上次记录的方案，不会被改成用户没选过的方案。
 fn account_input_schema(scheme: InputScheme) -> Option<&'static str> {
     match scheme {
         InputScheme::Quanpin => Some("quanpin"),
@@ -1101,7 +1101,8 @@ fn account_input_schema(scheme: InputScheme) -> Option<&'static str> {
         InputScheme::Cantonese
         | InputScheme::Zhuyin
         | InputScheme::Vietnamese
-        | InputScheme::Tibetan => None,
+        | InputScheme::Tibetan
+        | InputScheme::Stroke => None,
     }
 }
 
@@ -1329,7 +1330,7 @@ fn apply_input_scheme(
 ) -> Result<(), AccountError> {
     if let Some(value) = string_setting(values, "input.schema")? {
         if supports_schema_field(schema, "input.schema", "string")? {
-            // A scheme this host does not offer (a newer device's Cantonese, Zhuyin or Vietnamese) keeps the local one rather than refusing the whole sync, so the rest of the document still applies.
+            // A scheme this host does not offer (a newer device's Cantonese, Zhuyin, Vietnamese or Stroke) keeps the local one rather than refusing the whole sync, so the rest of the document still applies.
             preferences.scheme = match value.as_str() {
                 "quanpin" => InputScheme::Quanpin,
                 "shuangpin" => InputScheme::Shuangpin,
@@ -1790,6 +1791,7 @@ mod tests {
             (InputScheme::Zhuyin, None),
             (InputScheme::Vietnamese, None),
             (InputScheme::Tibetan, None),
+            (InputScheme::Stroke, None),
         ] {
             assert_eq!(account_input_schema(scheme), schema, "{scheme:?}");
         }
@@ -1804,7 +1806,14 @@ mod tests {
                 value_type: "string".into(),
             },
         );
-        for unknown in ["cantonese", "zhuyin", "vietnamese", "tibetan", "esperanto"] {
+        for unknown in [
+            "cantonese",
+            "zhuyin",
+            "vietnamese",
+            "tibetan",
+            "stroke",
+            "esperanto",
+        ] {
             let mut values = frequency_account_preferences(&FrequencyPreferences {
                 mode: FrequencyMode::Linear,
                 trigger_count: 7,

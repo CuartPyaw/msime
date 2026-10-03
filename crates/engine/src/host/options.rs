@@ -28,7 +28,7 @@ pub struct EngineOptions {
     pub user_data: String,
     pub cache: String,
     pub dictionaries: String,
-    /// 0 全拼，1 双拼，2 五笔，3 日文，4 韩文，5 粤拼，6 注音，7 越南文，8 藏文。
+    /// 0 全拼，1 双拼，2 五笔，3 日文，4 韩文，5 粤拼，6 注音，7 越南文，8 藏文，9 笔画。
     pub scheme: u8,
     /// 0 xiaohe, 1 ziranma, 2 shoudao, 3 microsoft.
     pub shuangpin_profile: u8,
@@ -89,6 +89,8 @@ pub struct EngineOptions {
     pub cantonese_dictionary: String,
     /// Absolute path of `zhuyin.db`, empty when the host has none; the Zhuyin scheme is unavailable without it.
     pub zhuyin_dictionary: String,
+    /// Absolute path of `stroke.db`, empty when the host has none; the Stroke scheme is unavailable without it.
+    pub stroke_dictionary: String,
     /// `dict_japanese.dat` 的绝对路径；为空时从资源目录读取。
     pub japanese_dictionary: String,
 }
@@ -157,6 +159,7 @@ pub fn prepare_options(
         vietnamese_tone_style: VietnameseToneStyle::Modern as u8,
         cantonese_dictionary: String::new(),
         zhuyin_dictionary: String::new(),
+        stroke_dictionary: String::new(),
         japanese_dictionary: String::new(),
     })
 }
@@ -194,6 +197,7 @@ pub fn session_options(options: &EngineOptions) -> Result<SessionOptions> {
     session.vietnamese_tone_style = vietnamese_tone_style;
     session.cantonese_dictionary = PathBuf::from(&options.cantonese_dictionary);
     session.zhuyin_dictionary = PathBuf::from(&options.zhuyin_dictionary);
+    session.stroke_dictionary = PathBuf::from(&options.stroke_dictionary);
     session.japanese_dictionary = PathBuf::from(&options.japanese_dictionary);
     session.learning = options.learning;
     session.autocorrect_types = autocorrect_types;

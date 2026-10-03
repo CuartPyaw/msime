@@ -42,7 +42,7 @@ export interface InputSchemeSettingsContentProps {
   onToggleTouchKeyboardScheme: (scheme: TouchKeyboardScheme, enabled: boolean) => void;
   onMacosShuangpinKeymapChange: (enabled: boolean) => void;
   onMacosWubiAutoCommitUniqueChange: (enabled: boolean) => void;
-  /** 宿主提供按需资源包时传入（目前只有 macOS）：选用日文、粤拼或注音会照常保存方案并开始下载对应词库，下载完成前运行时按缺少词库回退。 */
+  /** 宿主提供按需资源包时传入（目前只有 macOS）：选用日文、粤拼、注音或笔画会照常保存方案并开始下载对应词库，下载完成前运行时按缺少词库回退。 */
   resourcePacks?: ResourcePacks;
 }
 
@@ -73,7 +73,7 @@ export function InputSchemeSettingsContent({
   };
   const schemePack = resourcePackForScheme(preferences.scheme);
   const chineseSchemes = isChineseScheme(preferences.scheme);
-  // 粤拼、注音、越南语和藏文的触屏键盘输入各自的方案，所以只在宿主提供该方案时出现（粤拼和注音还需要装好词库）。
+  // 粤拼、注音、越南语、藏文和笔画的触屏键盘输入各自的方案，所以只在宿主提供该方案时出现（粤拼、注音和笔画还需要装好词库）。
   // 五笔键盘只有一个，标题跟随当前的五笔版本。
   const touchOptions = touchKeyboardSchemeOptions
     .filter(
@@ -81,7 +81,8 @@ export function InputSchemeSettingsContent({
         (scheme !== "cantonese" &&
           scheme !== "zhuyin" &&
           scheme !== "vietnamese" &&
-          scheme !== "tibetan") ||
+          scheme !== "tibetan" &&
+          scheme !== "stroke") ||
         inputSchemes.includes(scheme),
     )
     .map(([scheme, title]): [TouchKeyboardScheme, string] => [

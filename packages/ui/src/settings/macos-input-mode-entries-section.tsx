@@ -32,6 +32,7 @@ export const macosInputModeEntries: readonly ModeEntry[] = [
   { mode: "Korean", name: "水杉输入法 · 韩", scheme: "korean", language: "韩语" },
   { mode: "Vietnamese", name: "水杉输入法 · 越", scheme: "vietnamese", language: "越南语" },
   { mode: "Tibetan", name: "水杉输入法 · 藏", scheme: "tibetan", language: "藏语" },
+  { mode: "Stroke", name: "水杉输入法 · 笔", scheme: "stroke", language: "简体中文" },
   { mode: "Roman", name: "水杉输入法 · 英", scheme: null, language: "简体中文" },
 ];
 
@@ -86,7 +87,7 @@ export interface MacosInputModeEntriesSectionProps {
   client?: MacosInputModesClient;
   /** 当前（草稿里）的输入方案：它的入口还没加入时，这一行先说它。 */
   scheme: InputScheme;
-  /** 宿主提供的方案；没提供的方案（例如没装词库的粤拼、注音）不列出它的入口。 */
+  /** 宿主提供的方案；没提供的方案（例如没装词库的粤拼、注音、笔画）不列出它的入口。 */
   inputSchemes: readonly InputScheme[];
   onError: (message: string) => void;
 }

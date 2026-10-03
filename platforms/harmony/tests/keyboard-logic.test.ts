@@ -380,6 +380,7 @@ import { FloatingToolbarDragPolicy } from "../entry/src/main/ets/keyboard/Floati
 import { InlinePreeditPolicy } from "../entry/src/main/ets/keyboard/input/InlinePreeditPolicy";
 import { DubeolsikLayout } from "../entry/src/main/ets/keyboard/input/DubeolsikLayout";
 import { ZhuyinLayout } from "../entry/src/main/ets/keyboard/input/ZhuyinLayout";
+import { StrokeKey, StrokeLayout } from "../entry/src/main/ets/keyboard/input/StrokeLayout";
 import { SchemeCompositionPolicy } from "../entry/src/main/ets/keyboard/input/SchemeCompositionPolicy";
 import { SchemeTraits } from "../entry/src/main/ets/keyboard/SchemeTraits";
 import {
@@ -1705,8 +1706,8 @@ group("enabled schemes keep the fixed order and never resolve to nothing", () =>
   );
   check(
     KeyboardScheme.enabledFromPreferenceIds(null) === KeyboardScheme.DEFAULT_ENABLED &&
-      KeyboardScheme.DEFAULT_ENABLED.length === KeyboardScheme.SCHEMES.length - 4,
-    "a null list means every scheme but the four the user turns on",
+      KeyboardScheme.DEFAULT_ENABLED.length === KeyboardScheme.SCHEMES.length - 5,
+    "a null list means every scheme but the five the user turns on",
   );
 });
 
@@ -4458,6 +4459,18 @@ group("return performs an editor action only when nothing else claimed it", () =
   check(
     ReturnKeyAction.dispatch(false, true, 0) === ReturnDispatch.FINISH_COMPOSITION,
     "a candidate-less non-Japanese composition is still finished before Return",
+  );
+  check(
+    ReturnKeyAction.dispatch(false, true, 3, false, false, false, true) === ReturnDispatch.COMMIT_RAW,
+    "Stroke Return commits the typed letters even with candidates, as on iOS, Android and a hardware Return",
+  );
+  check(
+    ReturnKeyAction.dispatch(false, true, 0, false, false, false, true) === ReturnDispatch.COMMIT_RAW,
+    "a Stroke composition without candidates commits its letters too",
+  );
+  check(
+    ReturnKeyAction.dispatch(false, false, 0, false, false, false, true) === ReturnDispatch.EDITOR,
+    "with nothing composing Stroke's Return is the editor's",
   );
   check(
     ReturnKeyAction.dispatch(false, false, 0) === ReturnDispatch.EDITOR,
@@ -8789,7 +8802,7 @@ group("applying writes only what the schema declares", () => {
   check(refusedValue, "a declared key carrying a value this host has no meaning for is refused");
 
   // The one exception is the scheme: a newer device may name one this host does not offer, and refusing would stop every other setting from syncing.
-  for (const unknown of ["cantonese", "zhuyin", "vietnamese", "tibetan", "esperanto"]) {
+  for (const unknown of ["cantonese", "zhuyin", "vietnamese", "tibetan", "stroke", "esperanto"]) {
     const kept = applyAccountPreferences(
       { ...local, scheme: "wubi" },
       {
@@ -11223,8 +11236,8 @@ group("Korean draws the syllable, not the key letters behind it", () => {
 
 group("the Korean scheme is one more card, and remembers the Chinese scheme it replaced", () => {
   check(
-    KeyboardScheme.SCHEMES[10] === KeyboardScheme.KOREAN && KeyboardScheme.SCHEMES.length === 15,
-    "appended after the first ten, as the shared fifteen-entry picker has it",
+    KeyboardScheme.SCHEMES[10] === KeyboardScheme.KOREAN && KeyboardScheme.SCHEMES.length === 16,
+    "appended after the first ten, as the shared sixteen-entry picker has it",
   );
   check(
     KeyboardScheme.fromPreferenceId("korean") === KeyboardScheme.KOREAN,
@@ -11393,8 +11406,8 @@ group("账号同步用 input.wubi_schema 携带五笔版本", () => {
   }
 });
 
-group("account sync leaves the scheme out for Cantonese, Zhuyin and Vietnamese", () => {
-  for (const scheme of ["cantonese", "zhuyin", "vietnamese", "tibetan"]) {
+group("account sync leaves the scheme out for Cantonese, Zhuyin, Vietnamese, Tibetan and Stroke", () => {
+  for (const scheme of ["cantonese", "zhuyin", "vietnamese", "tibetan", "stroke"]) {
     const values = localAccountPreferences({ scheme }, syncFeedback);
     check(!("input.schema" in values), `${scheme} never uploads an input schema`);
     const merged = mergeAccountPreferences(
@@ -13157,14 +13170,16 @@ group("a picked pack is copied for import only within client-core's bounds", () 
 
 group("the scheme traits answer as the Engine's SchemeType predicates", () => {
   check(
-    SchemeTraits.NAMES.length === 9 &&
+    SchemeTraits.NAMES.length === 10 &&
+      SchemeTraits.fromName("tibetan") === SchemeTraits.TIBETAN &&
+      SchemeTraits.fromName("stroke") === SchemeTraits.STROKE &&
       SchemeTraits.fromName("cantonese") === SchemeTraits.CANTONESE &&
       SchemeTraits.fromName("zhuyin") === SchemeTraits.ZHUYIN &&
       SchemeTraits.fromName("vietnamese") === SchemeTraits.VIETNAMESE &&
       SchemeTraits.fromName("nope") === -1,
     "the wire names index the scheme numbers, and an unknown name is -1",
   );
-  for (const unknown of [-1, 9, 99]) {
+  for (const unknown of [-1, 10, 99]) {
     check(
       !SchemeTraits.isChinese(unknown) &&
         !SchemeTraits.usesChinesePunctuation(unknown) &&
@@ -13244,7 +13259,7 @@ group(
   "Cantonese, Zhuyin and Vietnamese are three more cards, Cantonese and Zhuyin needing a dictionary",
   () => {
     check(
-      KeyboardScheme.SCHEMES.length === 15 &&
+      KeyboardScheme.SCHEMES.length === 16 &&
         KeyboardScheme.SCHEMES[10] === KeyboardScheme.KOREAN &&
         KeyboardScheme.SCHEMES[11] === KeyboardScheme.CANTONESE &&
         KeyboardScheme.SCHEMES[12] === KeyboardScheme.ZHUYIN &&
@@ -13409,6 +13424,297 @@ group("the Dachen keys wear their bopomofo and send their ASCII key", () => {
     KeyAccessibilityPolicy.zhuyinList(false) === "选字" &&
       KeyAccessibilityPolicy.zhuyinList(true) === "关闭候选列表",
     "選 is read as what the next tap does",
+  );
+});
+
+group("Stroke is one more card, opt-in and needing stroke.db", () => {
+  check(
+    KeyboardScheme.SCHEMES.length === 16 &&
+      KeyboardScheme.SCHEMES[14] === KeyboardScheme.TIBETAN &&
+      KeyboardScheme.SCHEMES[15] === KeyboardScheme.STROKE,
+    "appended after Tibetan, as the shared TouchKeyboardScheme::ALL appends it",
+  );
+  const stroke: SchemeDefinition = KeyboardScheme.STROKE;
+  check(
+    stroke.preferenceId === "stroke" &&
+      stroke.engineScheme === "stroke" &&
+      stroke.shuangpinProfile === null &&
+      stroke.title === "笔画" &&
+      stroke.glyph === "笔" &&
+      stroke.badge === "5" &&
+      KeyboardScheme.title(stroke, null) === "笔画" &&
+      KeyboardScheme.badge(stroke, "wubi98") === "5",
+    "the card is 笔画 with the glyph 笔",
+  );
+  check(
+    stroke.touchKeyboardLayout === "twenty_six_key",
+    "the keypad is picked by scheme, so the card never turns on the nine-key digit decoding",
+  );
+  check(
+    !KeyboardScheme.DEFAULT_ENABLED.includes(stroke) &&
+      KeyboardScheme.enabledFromPreferenceIds(null).indexOf(stroke) < 0,
+    "Stroke is off until the user turns it on",
+  );
+  check(
+    KeyboardScheme.fromPreferenceId("stroke") === stroke &&
+      KeyboardScheme.enabledFromPreferenceIds(["stroke", "quanpin"])
+        .map((scheme: SchemeDefinition): string => scheme.preferenceId)
+        .join() === "quanpin,stroke",
+    "the preference id resolves, in the fixed order",
+  );
+  check(
+    KeyboardScheme.fromPreferences("stroke", null, "twenty_six_key") === stroke &&
+      KeyboardScheme.fromPreferences("stroke", null, "nine_key") === stroke &&
+      KeyboardScheme.fromPreferences("stroke", "ziranma", "handwriting") === stroke,
+    "the Engine scheme stroke resolves to its card whatever touch layout is saved",
+  );
+  check(
+    KeyboardScheme.engineSchemeName(9) === "stroke" &&
+      KeyboardScheme.engineSchemeName(10) === "quanpin",
+    "nine names Stroke rather than falling back to quanpin",
+  );
+  check(KeyboardScheme.languageDictionary("stroke") === "stroke.db", "Stroke reads stroke.db");
+  const enabled: SchemeDefinition[] = [KeyboardScheme.QUANPIN, KeyboardScheme.ZHUYIN, stroke];
+  check(
+    KeyboardScheme.withInstalledDictionaries(
+      enabled,
+      (file: string): boolean => file === "zhuyin.db",
+    )
+      .map((scheme: SchemeDefinition): string => scheme.preferenceId)
+      .join() === "quanpin,zhuyin",
+    "without stroke.db the card is hidden",
+  );
+  check(
+    KeyboardScheme.withInstalledDictionaries(
+      enabled,
+      (file: string): boolean => file === "stroke.db",
+    )
+      .map((scheme: SchemeDefinition): string => scheme.preferenceId)
+      .join() === "quanpin,stroke",
+    "with it the card stays, independently of the other dictionaries",
+  );
+  check(
+    KeyboardScheme.withInstalledDictionaries([stroke], () => false)[0] === KeyboardScheme.QUANPIN,
+    "and a keyboard left with nothing falls back to 全拼",
+  );
+  check(
+    KeyboardScheme.mapping(stroke, "wubi", null).scheme === "stroke" &&
+      KeyboardScheme.mapping(stroke, "wubi", null).lastChineseScheme === "stroke" &&
+      KeyboardScheme.mapping(stroke, "wubi", null).touchKeyboardLayout === "twenty_six_key" &&
+      KeyboardScheme.mapping(KeyboardScheme.JAPANESE, "stroke", null).lastChineseScheme ===
+        "stroke" &&
+      KeyboardScheme.mapping(KeyboardScheme.VIETNAMESE, "stroke", null).lastChineseScheme ===
+        "stroke",
+    "Stroke is itself the Chinese scheme 中文 goes back to, and a non-Chinese switch remembers it",
+  );
+  check(
+    TypingStatisticsPolicy.source("stroke", "xiaohe", false, false, "none") === "stroke" &&
+      TypingStatisticsPolicy.source("stroke", "xiaohe", true, false, "none") === "english" &&
+      TypingStatisticsPolicy.source("stroke", "xiaohe", false, false, "emoji") === "local",
+    "it counts under its own typing source, and English or a local mode under theirs",
+  );
+  check(
+    !ChineseOutputPolicy.applies(false, SchemeTraits.STROKE, "none"),
+    "the Simplified-to-Traditional switch does not convert it",
+  );
+  check(
+    !CandidateManagementAction.candidateActionsAvailable("stroke", 0),
+    "it learns nothing into the main dictionary, so it offers no dictionary actions",
+  );
+  check(
+    FloatingToolbarLayout.face(ToolbarButton.INPUT_MODE, {
+      ...FloatingToolbarLayout.idleState(),
+      stroke: true,
+    }) === "笔" &&
+      FloatingToolbarLayout.face(ToolbarButton.INPUT_MODE, {
+        ...FloatingToolbarLayout.idleState(),
+        stroke: true,
+        english: true,
+      }) === "英" &&
+      FloatingToolbarLayout.idleState().stroke === false,
+    "the toolbar wears 笔 for Stroke, and English still takes precedence",
+  );
+});
+
+group("the Stroke traits are Cantonese's, as the Engine decides them", () => {
+  const predicates: [string, (scheme: number) => boolean][] = [
+    ["isChinese", SchemeTraits.isChinese],
+    ["scriptConversionApplies", SchemeTraits.scriptConversionApplies],
+    ["usesChinesePunctuation", SchemeTraits.usesChinesePunctuation],
+    ["hostSmartPunctuation", SchemeTraits.hostSmartPunctuation],
+    ["widensFullWidth", SchemeTraits.widensFullWidth],
+    ["learnsIntoMainDictionary", SchemeTraits.learnsIntoMainDictionary],
+    ["commitsOnBlur", SchemeTraits.commitsOnBlur],
+    ["hasOpenableCandidateList", SchemeTraits.hasOpenableCandidateList],
+    ["cancelKeepsComposition", SchemeTraits.cancelKeepsComposition],
+    ["locksCaret", SchemeTraits.locksCaret],
+  ];
+  for (const [name, predicate] of predicates) {
+    check(
+      predicate(SchemeTraits.STROKE) === predicate(SchemeTraits.CANTONESE),
+      `${name} answers for Stroke as for Cantonese`,
+    );
+  }
+  check(
+    SchemeTraits.STROKE === 9 && SchemeTraits.NAMES[9] === "stroke",
+    "nine is the Engine's SchemeType::Stroke and its wire name",
+  );
+  check(
+    SchemeTraits.isChinese(SchemeTraits.STROKE) &&
+      SchemeTraits.usesChinesePunctuation(SchemeTraits.STROKE) &&
+      !SchemeTraits.learnsIntoMainDictionary(SchemeTraits.STROKE) &&
+      !SchemeTraits.commitsOnBlur(SchemeTraits.STROKE) &&
+      !SchemeTraits.locksCaret(SchemeTraits.STROKE),
+    "Chinese with Chinese marks, read-only, discarded rather than committed on blur, caret free",
+  );
+});
+
+group("a Stroke composition draws its glyphs at the Engine's caret", () => {
+  check(
+    SchemeCompositionPolicy.selectedRulesScheme("stroke", false, "none") === SchemeTraits.STROKE &&
+      SchemeCompositionPolicy.selectedRulesScheme("stroke", true, "none") === -1 &&
+      SchemeCompositionPolicy.selectedRulesScheme("stroke", false, "emoji") === -1,
+    "the Stroke rules hold only while neither English nor a local mode takes the keys",
+  );
+  check(
+    SchemeCompositionPolicy.drawsKeyGlyphs(SchemeTraits.STROKE) &&
+      !SchemeCompositionPolicy.drawsKeyGlyphs(SchemeTraits.CANTONESE) &&
+      !SchemeCompositionPolicy.drawsKeyGlyphs(SchemeTraits.ZHUYIN) &&
+      !SchemeCompositionPolicy.drawsKeyGlyphs(-1),
+    "only Stroke draws one glyph per typed key",
+  );
+  check(
+    SchemeCompositionPolicy.reading(SchemeTraits.STROKE, "hsxz", "一丨＊乛") === "一丨＊乛" &&
+      SchemeCompositionPolicy.reading(SchemeTraits.STROKE, "", "") === "" &&
+      SchemeCompositionPolicy.reading(-1, "hsxz", "一丨＊乛") === "hsxz",
+    "the strip draws the glyphs, never the typed letters; English draws what it typed",
+  );
+  check(
+    SchemeCompositionPolicy.caret(SchemeTraits.STROKE, 1, "一丨＊乛") === 1 &&
+      SchemeCompositionPolicy.caret(SchemeTraits.STROKE, 4, "一丨＊乛") === 4,
+    "the caret is the Engine's, since each letter is one glyph",
+  );
+  check(
+    SchemeCompositionPolicy.listOpen(SchemeTraits.STROKE, true) === false,
+    "Stroke has no openable list, whatever the flag says",
+  );
+  const reading: string = SchemeCompositionPolicy.reading(SchemeTraits.STROKE, "hs", "一丨");
+  check(
+    InlinePreeditPolicy.text("raw", true, true, reading, "一丨", "") === "一丨" &&
+      InlinePreeditPolicy.text("pinyin", true, true, reading, "一丨", "") === "一丨" &&
+      InlinePreeditPolicy.text("raw", false, true, reading, "一丨", "") === "",
+    "a 2in1 previews the glyphs in either style when handed the drawn reading; a phone keeps them on the strip",
+  );
+});
+
+group("the stroke keypad wears the five strokes and the wildcard, and sends their letters", () => {
+  check(
+    StrokeLayout.ROWS.map((row: StrokeKey[]): string =>
+      row.map((key: StrokeKey): string => key.input).join(""),
+    ).join("|") === "hsp|nzx",
+    "two rows of three: 横竖撇 over 点折 and the wildcard",
+  );
+  check(
+    StrokeLayout.ROWS.flat()
+      .map((key: StrokeKey): string => key.face)
+      .join("") === "一丨丿丶乛＊",
+    "each key wears the glyph the Engine draws in the preedit",
+  );
+  check(
+    StrokeLayout.ROWS.flat()
+      .map((key: StrokeKey): string => key.hint)
+      .join() === "横,竖,撇,点,折,通配",
+    "and the stroke's name under it",
+  );
+  check(
+    StrokeLayout.ROWS.flat()
+      .map((key: StrokeKey): string => key.label)
+      .join() === "横,竖,撇,点,折,通配符",
+    "a screen reader says the stroke's name rather than the glyph",
+  );
+  check(
+    StrokeLayout.ROWS.flat().every(
+      (key: StrokeKey): boolean =>
+        key.face.length === 1 &&
+        (key.face.charCodeAt(0) < 0xd800 || key.face.charCodeAt(0) > 0xdfff),
+    ),
+    "every glyph is one BMP code unit, so a caret in the letters is the same index in the glyphs",
+  );
+  check(
+    StrokeLayout.WILDCARD === "x" &&
+      ["h", "s", "p", "n", "z"].every((input: string): boolean =>
+        StrokeLayout.startsComposition(input),
+      ) &&
+      !StrokeLayout.startsComposition("x") &&
+      !StrokeLayout.startsComposition("a"),
+    "only the five strokes start a composition",
+  );
+  check(
+    StrokeLayout.sends("h", false) &&
+      StrokeLayout.sends("h", true) &&
+      StrokeLayout.sends("x", true) &&
+      !StrokeLayout.sends("x", false) &&
+      !StrokeLayout.sends("a", true),
+    "the wildcard is sent only while composing, so an idle tap never types an x",
+  );
+});
+
+group("a hardware keyboard on Stroke takes the shared Chinese route", () => {
+  const key = (keyCode: number, unicodeChar: number): HardwareKey => ({
+    keyCode,
+    unicodeChar,
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+    logoKey: false,
+  });
+  const spelling: HardwareSpelling = {
+    ...PLAIN_SPELLING,
+    editing: "hs",
+    caret: 2,
+    wubi: HardwareKeyRouter.spellsWithoutSyllables("stroke"),
+  };
+  const route = (hardware: HardwareKey, composing: boolean): HardwareKeyDecision =>
+    HardwareKeyRouter.route(
+      hardware,
+      composing,
+      true,
+      true,
+      undefined,
+      false,
+      false,
+      "disabled",
+      composing,
+      composing ? spelling : PLAIN_SPELLING,
+      false,
+      false,
+      false,
+      false,
+      SchemeTraits.STROKE,
+    );
+  check(
+    HardwareKeyRouter.spellsWithoutSyllables("stroke") &&
+      HardwareKeyRouter.spellsWithoutSyllables("wubi") &&
+      !HardwareKeyRouter.spellsWithoutSyllables("quanpin") &&
+      !HardwareKeyRouter.spellsWithoutSyllables("cantonese"),
+    "Stroke codes, like Wubi codes, have no syllables",
+  );
+  check(
+    route(key(2063, 0x27), true).action === HardwareKeyAction.PUNCTUATION,
+    "so ' mid-composition stays a mark instead of a separator",
+  );
+  const stroke = route(key(2024, 0x68), false);
+  const wildcard = route(key(2040, 0x78), true);
+  check(
+    stroke.action === HardwareKeyAction.COMPOSE &&
+      stroke.character === 0x68 &&
+      wildcard.action === HardwareKeyAction.COMPOSE &&
+      wildcard.character === 0x78,
+    "the stroke letters and the wildcard go to the Engine, which decides what composes",
+  );
+  check(
+    route(key(2001, 0x31), true).action === HardwareKeyAction.SELECT,
+    "a digit picks from the page, since strokes are letters",
   );
 });
 

@@ -242,6 +242,8 @@ public final class MSIMEInputService extends InputMethodService {
     private Button globeButton;
     private Button deleteButton;
     private View nineKeySidebar;
+    /** 笔画网格的通配键：只在组字中可用，render 时按组字状态更新。 */
+    private Button strokeWildcardKey;
     private String actionRowSignature = "";
     private boolean brandPillVisible;
     private JapaneseFlickPreview japaneseFlickPreview;
@@ -613,6 +615,7 @@ public final class MSIMEInputService extends InputMethodService {
             }
             public boolean compose(String text) { return target.setComposingText(text, 1); }
             public boolean finish() { return target.finishComposingText(); }
+            public boolean select(int start, int end) { return target.setSelection(start, end); }
             public void end() { target.endBatchEdit(); }
         };
     }
@@ -1057,7 +1060,9 @@ public final class MSIMEInputService extends InputMethodService {
             try { NativeClient.destroy(session); } catch (LinkageError ignored) { }
             session = 0;
         }
-        if (connection != null) bridge.abandon(sink(typingSource()));
+        // A Stroke composition still marked here (the session stopped without CommitRaw) is stroke glyphs, not text: remove it rather than finish it into the document.
+        if (connection != null && strokeCompositionMarked()) bridge.discard(sink(typingSource()));
+        else if (connection != null) bridge.abandon(sink(typingSource()));
         view = null;
         closeCandidatePanel();
         closeClipboardHistory();
@@ -1598,9 +1603,11 @@ public final class MSIMEInputService extends InputMethodService {
         // Korean marks the composing Hangul, not the key letters editing_text holds; a transition may carry the syllable the key finished and the next one together, and the bridge writes the commit first. Zhuyin's editing_text is the Dachen keys too, and it marks the reading (the conversion and the pending bopomofo) by the same rule.
         int nextViewScheme = next.optInt("scheme", -1);
         boolean nextDedicatedEnglish = next.optBoolean("dedicated_english", dedicatedEnglish);
+        // 笔画的 editing_text 是字母 hspnzx，reading 才是用户按下的笔画字形（一丨丿丶乛＊），所以同样标记 reading。
         String composing = KoreanInputPolicy.composing(
             KoreanInputPolicy.active(nextViewScheme, nextDedicatedEnglish)
-                || ZhuyinInputPolicy.active(nextViewScheme, nextDedicatedEnglish),
+                || ZhuyinInputPolicy.active(nextViewScheme, nextDedicatedEnglish)
+                || StrokeInputPolicy.active(nextViewScheme, nextDedicatedEnglish),
             next.optString("phrase_prefix", ""), next.getString("editing_text"),
             next.optString("reading", ""));
         // 九键的 editing_text 是按下的数字键（64426），写进输入框对用户没有意义；和 iOS 默认一样不在输入框里标记组词，组词只显示在键盘自己的预编辑栏上（选过的音节显示为拼音，如 ni'426）。
@@ -1861,10 +1868,11 @@ public final class MSIMEInputService extends InputMethodService {
         }
     }
 
-    /** 粤拼、注音、越南语和藏文的候选不带任何释义（`shows_glosses`）。它们之前的方案沿用本宿主原有的规则，日语候选仍附英文释义。 */
+    /** 粤拼、注音、越南语、藏文和笔画的候选不带任何释义（`shows_glosses`）。它们之前的方案沿用本宿主原有的规则，日语候选仍附英文释义。 */
     private static boolean schemeShowsGlosses(int scheme) {
         return scheme != InputSchemeTraits.CANTONESE && scheme != InputSchemeTraits.ZHUYIN
-            && scheme != InputSchemeTraits.VIETNAMESE && scheme != InputSchemeTraits.TIBETAN;
+            && scheme != InputSchemeTraits.VIETNAMESE && scheme != InputSchemeTraits.TIBETAN
+            && scheme != InputSchemeTraits.STROKE;
     }
 
     private void scheduleCandidateTranslations() {
@@ -2504,6 +2512,13 @@ public final class MSIMEInputService extends InputMethodService {
             && ZhuyinInputPolicy.active(view.optInt("scheme", -1), dedicatedEnglish);
     }
 
+    /** A Stroke composition whose glyphs the editor holds as its composing region (apply marks View.reading for Stroke). */
+    private boolean strokeCompositionMarked() {
+        return view != null && !view.optString("editing_text", "").isEmpty()
+            && StrokeInputPolicy.active(view.optInt("scheme", -1), dedicatedEnglish)
+            && !view.optBoolean("nine_key", false);
+    }
+
     private boolean vietnameseSchemeActive() {
         return view != null
             && VietnameseInputPolicy.active(view.optInt("scheme", -1), dedicatedEnglish);
@@ -2592,6 +2607,7 @@ public final class MSIMEInputService extends InputMethodService {
         int layout = displayedTouchLayout(view);
         return keyboardLayer == KeyboardLayout.Layer.LETTERS
             && layout != QUANPIN_NINE_KEY_LAYOUT && layout != JAPANESE_NINE_KEY_LAYOUT
+            && layout != KeyboardLayout.STROKE_LAYOUT
             && selectedScheme != KeyboardScheme.QUANPIN_NINE_KEY
             && selectedScheme != KeyboardScheme.JAPANESE_NINE_KEY;
     }
@@ -3116,7 +3132,10 @@ public final class MSIMEInputService extends InputMethodService {
                 if (keepsComposition && left != null && !left.optString("editing_text", "").isEmpty())
                     value(NativeClient.command(session, 3));
             } catch (JSONException | LinkageError error) { fail(); }
-            if (connection != null) bridge.abandon(sink(typingSource()));
+            // Stroke marks its stroke glyphs, which are not text the user wrote (`commits_on_blur` is false): finishing the region would leave 一丨 in the document, so the region is removed and the tapped selection put back.
+            if (connection != null && strokeCompositionMarked())
+                bridge.discard(sink(typingSource()), composingStart, composingEnd, newStart, newEnd);
+            else if (connection != null) bridge.abandon(sink(typingSource()));
             view = null;
             render();
         }
@@ -3813,7 +3832,7 @@ public final class MSIMEInputService extends InputMethodService {
     private boolean supportsLocalTools() {
         if (view == null) return false;
         int scheme = view.optInt("scheme", 0);
-        // 韩语没有本地模式：那里 Shift+字母是双辅音。粤拼、注音、越南语和藏文也没有（`opens_local_modes`）。
+        // 韩语没有本地模式：那里 Shift+字母是双辅音。粤拼、注音、越南语、藏文和笔画也没有（`opens_local_modes`）。
         return !dedicatedEnglish && scheme != 2 && scheme != 3
             && scheme != KoreanInputPolicy.KOREAN_SCHEME
             && (!InputSchemeTraits.known(scheme) || InputSchemeTraits.opensLocalModes(scheme));
@@ -6291,7 +6310,7 @@ public final class MSIMEInputService extends InputMethodService {
 
     private boolean traditionalOutputToolAvailable() {
         int scheme = view == null ? -1 : view.optInt("scheme", -1);
-        // 粤拼和注音本来就写繁体字，越南语和藏文不是中文（`script_conversion_applies`）。
+        // 粤拼和注音本来就写繁体字，笔画的候选就是字本身，越南语和藏文不是中文（`script_conversion_applies`）。
         return scheme != 3 && scheme != KoreanInputPolicy.KOREAN_SCHEME
             && (!InputSchemeTraits.known(scheme) || InputSchemeTraits.scriptConversionApplies(scheme))
             && canSaveChineseOutput();
@@ -6421,10 +6440,11 @@ public final class MSIMEInputService extends InputMethodService {
     private boolean candidateManagementEnabled() {
         if (view == null || !view.optString("local_mode", "none").equals("none")) return false;
         int scheme = view.optInt("scheme", 0);
-        // 粤拼、注音、越南语和藏文的候选不属于拼音用户词库，不能固定、删除或调整顺序。
+        // 粤拼、注音、越南语、藏文和笔画的候选不属于拼音用户词库，不能固定、删除或调整顺序。
         return scheme != 2 && scheme != 3 && scheme != KoreanInputPolicy.KOREAN_SCHEME
             && scheme != InputSchemeTraits.CANTONESE && scheme != InputSchemeTraits.ZHUYIN
-            && scheme != InputSchemeTraits.VIETNAMESE && scheme != InputSchemeTraits.TIBETAN;
+            && scheme != InputSchemeTraits.VIETNAMESE && scheme != InputSchemeTraits.TIBETAN
+            && scheme != InputSchemeTraits.STROKE;
     }
 
     private void editCandidate(JSONObject id, CandidateManagementAction action) {
@@ -7224,6 +7244,7 @@ public final class MSIMEInputService extends InputMethodService {
         shuangpinKeyInputs.clear();
         microsoftFinalKey = null;
         nineKeySidebar = null;
+        strokeWildcardKey = null;
         japaneseSpaceKey = null;
         japaneseReturnKey = null;
         japaneseSymbolsKey = null;
@@ -7244,6 +7265,13 @@ public final class MSIMEInputService extends InputMethodService {
         if (keyboardLayer == KeyboardLayout.Layer.LETTERS
             && displayedTouchLayout(view) == HANDWRITING_LAYOUT) {
             rebuildHandwritingRows();
+            applyKeyboardGeometry();
+            return;
+        }
+        // 笔画键盘的符号页与手写一样交给 26 键符号行，字母层才画笔画网格。
+        if (keyboardLayer == KeyboardLayout.Layer.LETTERS
+            && displayedTouchLayout(view) == KeyboardLayout.STROKE_LAYOUT) {
+            rebuildStrokeRows();
             applyKeyboardGeometry();
             return;
         }
@@ -7454,6 +7482,86 @@ public final class MSIMEInputService extends InputMethodService {
             "Nine0"));
         container.addView(actions, new LinearLayout.LayoutParams(0,
             LinearLayout.LayoutParams.MATCH_PARENT, 0.8f));
+    }
+
+    /**
+     * 笔画键盘：九键外框（标点侧栏、⌫ 列、固定高度）中间换成 {@link StrokeKeyboardLayout} 的 2×3 笔画网格。
+     *
+     * <p>笔画键直接走 character()，不走 type()：type() 会套用 Shift 大小写，也会把 ASCII 标点交给标点路径。九键的拼音选择条只属于拼音九键，这里不挂（挂上去要先从旧侧栏摘下，否则 addView 会抛异常）。
+     */
+    private void rebuildStrokeRows() {
+        dismissNineKeyHoldOptions();
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.HORIZONTAL);
+        adjustFixedHeight(container, KeyboardGeometry.NINE_KEY_HEIGHT_DP);
+        keyRows.addView(container, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, pixels(180)));
+
+        LinearLayout punctuation = new LinearLayout(this);
+        punctuation.setOrientation(LinearLayout.VERTICAL);
+        for (String symbol : NineKeyLayout.punctuation()) {
+            Button key = keyId(keyboardKey(symbol, "符号 " + symbol,
+                () -> commitNineKeyLiteral(symbol)), "SoftPunctuation");
+            if (key instanceof KeyboardPressButton press)
+                press.setKeyboardRole(KeyboardKeyRole.PLAIN);
+            punctuation.addView(key, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+        }
+        FrameLayout sidebar = new FrameLayout(this);
+        nineKeySidebar = sidebar;
+        applySidebarRail();
+        sidebar.addView(punctuation, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        container.addView(sidebar, new LinearLayout.LayoutParams(0,
+            LinearLayout.LayoutParams.MATCH_PARENT, 0.7f));
+
+        LinearLayout grid = new LinearLayout(this);
+        grid.setOrientation(LinearLayout.VERTICAL);
+        for (java.util.List<StrokeKeyboardLayout.Key> keys : StrokeKeyboardLayout.rows()) {
+            LinearLayout row = new LinearLayout(this);
+            for (StrokeKeyboardLayout.Key key : keys) {
+                Button keyButton = keyboardKey(StrokeKeyboardLayout.face(key),
+                    StrokeKeyboardLayout.accessibilityLabel(key), () -> strokeKey(key));
+                keyButton.setContentDescription(StrokeKeyboardLayout.accessibilityLabel(key));
+                if (keyButton instanceof KeyboardPressButton press)
+                    press.setKeyboardRole(KeyboardKeyRole.KEY);
+                keyId(keyButton, KeyPressIds.forCharacter(key.input()));
+                if (key.input() == StrokeKeyboardLayout.WILDCARD) strokeWildcardKey = keyButton;
+                addNineKey(row, keyButton);
+            }
+            grid.addView(row, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+        }
+        container.addView(grid, new LinearLayout.LayoutParams(0,
+            LinearLayout.LayoutParams.MATCH_PARENT, 3));
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.VERTICAL);
+        Runnable deleteAction = () -> {
+            if (connection != null && !command(0)) connection.deleteSurroundingTextInCodePoints(1, 0);
+        };
+        Button delete = keyId(keyboardKey("⌫", "删除", deleteAction), "Backspace");
+        bindBackspaceRepeat(delete, deleteAction);
+        addNineKey(actions, delete);
+        addNineKey(actions, keyId(keyboardKey(".", "句点", this::commitNineKeyPeriod), "Period"));
+        addNineKey(actions, keyId(keyboardKey("0", "数字 0", () -> commitNineKeyLiteral("0")),
+            "Nine0"));
+        container.addView(actions, new LinearLayout.LayoutParams(0,
+            LinearLayout.LayoutParams.MATCH_PARENT, 0.8f));
+        updateStrokeWildcardKey();
+    }
+
+    /** 笔画键送出它的字母；Engine 不收的键（空组合时的通配）什么也不写，免得往输入框里漏一个 x。 */
+    private void strokeKey(StrokeKeyboardLayout.Key key) {
+        if (connection == null) return;
+        if (!StrokeKeyboardLayout.sends(key.input(), hasEngineComposition())) return;
+        character(key.input(), false);
+    }
+
+    private void updateStrokeWildcardKey() {
+        if (strokeWildcardKey == null) return;
+        strokeWildcardKey.setEnabled(
+            StrokeKeyboardLayout.sends(StrokeKeyboardLayout.WILDCARD, hasEngineComposition()));
     }
 
     /** Show the digit and literal letters printed on a nine-key key, like Apple's hold popup. */
@@ -8393,6 +8501,7 @@ public final class MSIMEInputService extends InputMethodService {
         updateSymbolKeyFaces();
         updateShuangpinKeyHints();
         updateQuickPunctuation();
+        updateStrokeWildcardKey();
         String currentEditingText = view == null ? "" : view.optString("editing_text", "");
         if (!japaneseSchemeActive() || currentEditingText.isEmpty()) {
             japaneseConversionIndex = null;
@@ -8516,7 +8625,8 @@ public final class MSIMEInputService extends InputMethodService {
                     : selectedScheme == KeyboardScheme.CANTONESE ? InputSchemeTraits.CANTONESE
                     : selectedScheme == KeyboardScheme.ZHUYIN ? InputSchemeTraits.ZHUYIN
                     : selectedScheme == KeyboardScheme.VIETNAMESE ? InputSchemeTraits.VIETNAMESE
-                    : selectedScheme == KeyboardScheme.TIBETAN ? InputSchemeTraits.TIBETAN : -1)
+                    : selectedScheme == KeyboardScheme.TIBETAN ? InputSchemeTraits.TIBETAN
+                    : selectedScheme == KeyboardScheme.STROKE ? InputSchemeTraits.STROKE : -1)
                 : view.optInt("scheme", -1);
             boolean japanese = scheme == 3;
             boolean korean = scheme == KoreanInputPolicy.KOREAN_SCHEME;
@@ -8524,8 +8634,9 @@ public final class MSIMEInputService extends InputMethodService {
             boolean zhuyin = scheme == InputSchemeTraits.ZHUYIN;
             boolean vietnamese = scheme == InputSchemeTraits.VIETNAMESE;
             boolean tibetan = scheme == InputSchemeTraits.TIBETAN;
+            boolean stroke = scheme == InputSchemeTraits.STROKE;
             scriptShortcutButton.setEnabled(!japanese && !korean && !cantonese && !zhuyin
-                && !vietnamese && !tibetan && canSaveChineseOutput());
+                && !vietnamese && !tibetan && !stroke && canSaveChineseOutput());
             String label = traditionalChineseOutput ? "切换到简体" : "切换到繁体";
             String outputState = japanese ? "日语不使用简繁转换"
                 : korean ? "韩语不使用简繁转换"
@@ -8533,6 +8644,7 @@ public final class MSIMEInputService extends InputMethodService {
                 : zhuyin ? "注音直接输出繁体"
                 : vietnamese ? "越南语不使用简繁转换"
                 : tibetan ? "藏文不使用简繁转换"
+                : stroke ? "笔画不使用简繁转换"
                 : traditionalOutputSaving ? "正在保存"
                 : traditionalChineseOutput ? "繁体" : "简体";
             scriptShortcutButton.setContentDescription(
