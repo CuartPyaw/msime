@@ -19,6 +19,13 @@ class AndroidPluginLifecycleContract(unittest.TestCase):
         self.assertRegex(source, r"override\s+fun\s+onDestroy\(\)\s*\{")
         self.assertIn("worker.shutdownNow()", source)
 
+    def test_voice_plugin_cancels_active_job_before_shutdown(self):
+        source = (ROOT / "platforms/android/java/app/msime/android/voice/VoicePlugin.kt").read_text()
+        destroy = source[source.index("override fun onDestroy()"):source.index("private fun store()")]
+        self.assertIn("activeJob.getAndSet(null)", destroy)
+        self.assertIn("current.invoke.reject(\"cancelled\", \"cancelled\")", destroy)
+        self.assertIn("VoiceRecognitionActivity.cancelActive()", destroy)
+
 
 if __name__ == "__main__":
     unittest.main()

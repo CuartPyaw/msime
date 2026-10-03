@@ -97,6 +97,11 @@ class VoicePlugin(activity: Activity) : Plugin(activity) {
     private val activeJob = AtomicReference<VoiceJob?>(null)
 
     override fun onDestroy() {
+        val current = activeJob.getAndSet(null)
+        if (current != null) {
+            current.invoke.reject("cancelled", "cancelled")
+            VoiceRecognitionActivity.cancelActive()
+        }
         worker.shutdownNow()
         super.onDestroy()
     }
