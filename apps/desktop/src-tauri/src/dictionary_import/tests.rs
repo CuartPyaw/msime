@@ -538,6 +538,11 @@ fn batches_are_cut_at_line_ends_within_both_host_bounds() {
 }
 
 #[test]
+fn zero_batch_budget_is_rejected_before_reserving_batches() {
+    assert!(split_import("", false, 0).is_none());
+}
+
+#[test]
 fn a_large_import_with_the_longest_request_id_still_fits() {
     let mut host = FakeHost::new();
     let text = phrases(4000, &[]);
