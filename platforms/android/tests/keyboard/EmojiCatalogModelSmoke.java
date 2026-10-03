@@ -9,6 +9,11 @@ public final class EmojiCatalogModelSmoke {
         check(groups.equals(List.of("Smileys and emotion", "People and body",
             "Animals and nature", "Food and drink", "Travel and places", "Activities",
             "Objects", "Symbols", "Flags")), "Unicode group order");
+        List<String> icons = new ArrayList<>(EmojiCatalogModel.categories().stream()
+            .map(EmojiCatalogModel.Category::icon).toList());
+        icons.add(EmojiCatalogModel.RECENTS.icon());
+        check(icons.stream().noneMatch(String::isEmpty) && icons.stream().distinct().count() == icons.size(),
+            "every category tab has its own icon");
         check(EmojiCatalogModel.COLUMNS == 8 && EmojiCatalogModel.PAGE_SIZE == 64,
             "eight-column bounded pages");
 

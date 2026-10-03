@@ -43,7 +43,6 @@ import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.widget.Button;
 import android.widget.FrameLayout;
-import android.widget.GridLayout;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
 import android.widget.ScrollView;
@@ -141,10 +140,9 @@ public final class MSIMEInputService extends InputMethodService {
     private LinearLayout moreToolsPanel;
     private boolean localInputToolsOpen;
     private LinearLayout emojiPanel;
-    private HorizontalScrollView emojiTabsScroll;
     private LinearLayout emojiTabs;
     private ScrollView emojiGridScroll;
-    private GridLayout emojiGrid;
+    private LinearLayout emojiGrid;
     private TextView emojiStatus;
     private SeekBar keySpacingSlider;
     private SeekBar rowSpacingSlider;
@@ -3611,7 +3609,10 @@ public final class MSIMEInputService extends InputMethodService {
         applySkinToView(keyboardRoot);
         // The keyboard-wide pass already styled these subtrees; re-walk the two that carry their
         // own light/dark setting so only their faces change.
-        if (emojiPanel != null) applySkinToView(emojiPanel, emojiSkin);
+        if (emojiPanel != null) {
+            applySkinToView(emojiPanel, emojiSkin);
+            styleEmojiChrome();
+        }
         if (handwritingActive() && keyRows != null) applySkinToView(keyRows, handwritingSkin);
         // 回复面板的分段控件、源文字卡片和操作列不按角色上色，上面那一遍把它们清成了无底色，这里补回来。
         styleReplyKeyboard();
@@ -4025,51 +4026,88 @@ public final class MSIMEInputService extends InputMethodService {
 
     private void renderEmojiStatus() {
         if (emojiStatus == null) return;
-        if (emojiLoading) emojiStatus.setText("正在加载表情…");
-        else if (emojiItems.isEmpty()) emojiStatus.setText("暂无表情");
-        else if (emojiComplete) emojiStatus.setText(emojiItems.size() + " 个表情");
-        else emojiStatus.setText(emojiItems.size() + " 个表情 · 继续滚动加载");
+        // 分类栏只剩图标，分类名改由这一行给出。
+        String title = emojiSelectedCategory == -1 ? EmojiCatalogModel.RECENTS.title()
+            : emojiSelectedCategory >= 0 && emojiSelectedCategory < EmojiCatalogModel.categories().size()
+            ? EmojiCatalogModel.categories().get(emojiSelectedCategory).title() : "表情";
+        if (emojiLoading && emojiItems.isEmpty()) emojiStatus.setText(title + " · 正在加载…");
+        else if (emojiItems.isEmpty()) emojiStatus.setText(title + " · 暂无表情");
+        else emojiStatus.setText(title + " · " + emojiItems.size() + " 个表情");
     }
 
     private void renderEmojiTabs() {
         if (emojiTabs == null) return;
         emojiTabs.removeAllViews();
-        if (!emojiRecents.isEmpty()) addEmojiTab("最近", -1);
+        if (!emojiRecents.isEmpty()) addEmojiTab(EmojiCatalogModel.RECENTS, -1);
         for (int index = 0; index < EmojiCatalogModel.categories().size(); index++)
-            addEmojiTab(EmojiCatalogModel.categories().get(index).title(), index);
+            addEmojiTab(EmojiCatalogModel.categories().get(index), index);
     }
 
-    private void addEmojiTab(String title, int category) {
-        Button tab = new Button(this);
+    private void addEmojiTab(EmojiCatalogModel.Category entry, int category) {
+        KeyboardPressButton tab = new KeyboardPressButton(this);
+        tab.setKeyboardRole(KeyboardKeyRole.PLAIN);
         tab.setAllCaps(false);
-        tab.setText(title);
-        tab.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        tab.setText(entry.icon());
+        tab.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        tab.setPadding(0, 0, 0, 0);
+        tab.setMinWidth(0);
+        tab.setMinimumWidth(0);
+        tab.setMinHeight(0);
+        tab.setMinimumHeight(0);
         tab.setSelected(emojiSelectedCategory == category);
-        tab.setContentDescription("表情分类 " + title);
+        tab.setContentDescription("表情分类 " + entry.title());
         if (Build.VERSION.SDK_INT >= 30)
             tab.setStateDescription(tab.isSelected() ? "已选中" : "未选中");
-        styleButton(tab, true);
         tab.setOnClickListener(ignored -> {
             playFeedback(tab);
             selectEmojiCategory(category);
         });
-        emojiTabs.addView(tab, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, pixels(38)));
+        emojiTabs.addView(tab, new LinearLayout.LayoutParams(0, pixels(40), 1));
+    }
+
+    /** 共享换肤遍历之后再画分类栏和状态行：选中的分类是浅强调色圆角底，其余只是半透明图标，不再是一排实心按钮。 */
+    private void styleEmojiChrome() {
+        if (emojiTabs != null) {
+            for (int index = 0; index < emojiTabs.getChildCount(); index++) {
+                View tab = emojiTabs.getChildAt(index);
+                if (tab.isSelected()) {
+                    GradientDrawable face = new GradientDrawable();
+                    face.setColor(Color.parseColor(emojiSkin.accentSoft()));
+                    face.setCornerRadius(pixels(10));
+                    tab.setBackground(new InsetDrawable(face, pixels(2), pixels(3), pixels(2), pixels(3)));
+                    tab.setAlpha(1f);
+                } else {
+                    tab.setBackground(null);
+                    tab.setAlpha(.5f);
+                }
+                tab.setElevation(0);
+            }
+        }
+        if (emojiStatus != null) emojiStatus.setTextColor(fade(emojiSkin.keyForeground(), .55));
     }
 
     private void renderEmojiGrid() {
         if (emojiGrid == null) return;
         emojiGrid.removeAllViews();
+        // 每行固定八等分：不足一行时格子保持原宽，不会被拉满整行。
+        LinearLayout row = null;
         for (EmojiCatalogModel.Item item : emojiItems) {
+            if (row == null || row.getChildCount() == EmojiCatalogModel.COLUMNS) {
+                row = new LinearLayout(this);
+                row.setWeightSum(EmojiCatalogModel.COLUMNS);
+                emojiGrid.addView(row, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, pixels(48)));
+            }
             Button cell = keyboardKey(item.text(), "表情 " + item.text(),
                 () -> insertEmoji(item.text()));
-            cell.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
+            ((KeyboardPressButton) cell).setKeyboardRole(KeyboardKeyRole.PLAIN);
+            cell.setTextSize(TypedValue.COMPLEX_UNIT_SP, 28);
             cell.setPadding(0, 0, 0, 0);
-            GridLayout.LayoutParams params = new GridLayout.LayoutParams(
-                GridLayout.spec(GridLayout.UNDEFINED), GridLayout.spec(GridLayout.UNDEFINED, 1f));
-            params.width = 0;
-            params.height = pixels(48);
-            emojiGrid.addView(cell, params);
+            cell.setMinWidth(0);
+            cell.setMinimumWidth(0);
+            cell.setMinHeight(0);
+            cell.setMinimumHeight(0);
+            row.addView(cell, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
         }
         renderEmojiStatus();
         applySkin();
@@ -8269,34 +8307,40 @@ public final class MSIMEInputService extends InputMethodService {
         LinearLayout emojiHeader = new LinearLayout(this);
         emojiHeader.setGravity(Gravity.CENTER_VERTICAL);
         Button closeEmoji = button(emojiHeader, "‹", this::closeEmojiPicker);
+        ((KeyboardPressButton) closeEmoji).setKeyboardRole(KeyboardKeyRole.GLYPH);
+        closeEmoji.setTextSize(TypedValue.COMPLEX_UNIT_SP, 26);
+        closeEmoji.setPadding(0, 0, 0, pixels(3));
+        closeEmoji.setMinHeight(0);
+        closeEmoji.setMinimumHeight(0);
         closeEmoji.setContentDescription("返回键盘");
-        closeEmoji.setLayoutParams(new LinearLayout.LayoutParams(pixels(56), pixels(40)));
+        closeEmoji.setLayoutParams(new LinearLayout.LayoutParams(pixels(48), pixels(40)));
         TextView emojiTitle = new TextView(this);
         emojiTitle.setText("表情");
-        emojiTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        emojiTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         emojiTitle.setGravity(Gravity.CENTER);
         emojiHeader.addView(emojiTitle, new LinearLayout.LayoutParams(0, pixels(40), 1));
         Button deleteEmoji = button(emojiHeader, "⌫", this::deleteFromEmojiPicker);
+        ((KeyboardPressButton) deleteEmoji).setKeyboardRole(KeyboardKeyRole.GLYPH);
+        deleteEmoji.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        deleteEmoji.setPadding(0, 0, 0, 0);
+        deleteEmoji.setMinHeight(0);
+        deleteEmoji.setMinimumHeight(0);
         deleteEmoji.setContentDescription("删除");
-        deleteEmoji.setLayoutParams(new LinearLayout.LayoutParams(pixels(56), pixels(40)));
+        deleteEmoji.setLayoutParams(new LinearLayout.LayoutParams(pixels(48), pixels(40)));
         emojiPanel.addView(emojiHeader);
         emojiTabs = new LinearLayout(this);
         emojiTabs.setOrientation(LinearLayout.HORIZONTAL);
-        emojiTabsScroll = new HorizontalScrollView(this);
-        emojiTabsScroll.setHorizontalScrollBarEnabled(false);
-        emojiTabsScroll.setContentDescription("表情分类");
-        emojiTabsScroll.addView(emojiTabs);
-        emojiPanel.addView(emojiTabsScroll, new LinearLayout.LayoutParams(
+        emojiTabs.setContentDescription("表情分类");
+        emojiPanel.addView(emojiTabs, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, pixels(40)));
         emojiStatus = new TextView(this);
-        emojiStatus.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        emojiStatus.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         emojiStatus.setGravity(Gravity.CENTER_VERTICAL);
+        emojiStatus.setPadding(pixels(6), 0, pixels(6), 0);
         emojiPanel.addView(emojiStatus, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, pixels(20)));
-        emojiGrid = new GridLayout(this);
-        emojiGrid.setColumnCount(EmojiCatalogModel.COLUMNS);
-        emojiGrid.setAlignmentMode(GridLayout.ALIGN_BOUNDS);
-        emojiGrid.setUseDefaultMargins(false);
+            LinearLayout.LayoutParams.MATCH_PARENT, pixels(24)));
+        emojiGrid = new LinearLayout(this);
+        emojiGrid.setOrientation(LinearLayout.VERTICAL);
         emojiGridScroll = new ScrollView(this);
         emojiGridScroll.setFillViewport(false);
         emojiGridScroll.setVerticalScrollBarEnabled(false);
