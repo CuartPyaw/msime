@@ -1,8 +1,9 @@
 //! 五笔码表的 provider（`R/providers/wubi_candidate_provider.cpp`，含 wubi_prefix_learning overlay）：按 `WubiProfileKind` 读 `wubi86` 或 `wubi98`。Exact code first, then weight, no value dedup, at most 50 rows. The provider only reads: learning and removal of a wubi row go through `session`, which journals them with the wubi kind and then resets this cache.
 
-use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 
+use lru::LruCache;
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 
@@ -10,6 +11,7 @@ use crate::dictionary::pinyin::BUSY_TIMEOUT;
 use crate::types::{CandidateSource, QueryRequest, SchemeType, WordItem, WubiProfileKind};
 
 const QUERY_LIMIT: i64 = 50;
+const REVERSE_CACHE_CAPACITY: usize = 1024;
 const REVERSE_QUERY_SQL_86: &str = "SELECT \"key\" FROM wubi86 WHERE \"value\" = ?1 ORDER BY length(\"key\") DESC, \"weight\" DESC, \"key\" ASC, rowid ASC LIMIT 1";
 const REVERSE_QUERY_SQL_98: &str = "SELECT \"key\" FROM wubi98 WHERE \"value\" = ?1 ORDER BY length(\"key\") DESC, \"weight\" DESC, \"key\" ASC, rowid ASC LIMIT 1";
 
@@ -29,7 +31,7 @@ pub struct WubiProvider {
     main_db: PathBuf,
     profile: WubiProfileKind,
     connection: Option<Connection>,
-    reverse_cache: HashMap<String, Option<String>>,
+    reverse_cache: LruCache<String, Option<String>>,
 }
 
 impl WubiProvider {
@@ -39,7 +41,7 @@ impl WubiProvider {
             main_db: main_db.to_path_buf(),
             profile: WubiProfileKind::Wubi86,
             connection: None,
-            reverse_cache: HashMap::new(),
+            reverse_cache: LruCache::new(NonZeroUsize::new(REVERSE_CACHE_CAPACITY).unwrap()),
         }
     }
 
@@ -89,7 +91,7 @@ impl WubiProvider {
         let code = self
             .connection()
             .and_then(|connection| reverse_code(connection, profile, word).ok().flatten());
-        self.reverse_cache.insert(word.to_owned(), code.clone());
+        self.reverse_cache.put(word.to_owned(), code.clone());
         code
     }
 
@@ -359,5 +361,15 @@ mod tests {
             rows(&mut fixture.provider, "wqbb"),
             vec![row("wqbb", "父子", 99)]
         );
+    }
+
+    #[test]
+    fn reverse_cache_does_not_grow_without_bound() {
+        let mut fixture = fixture("CREATE TABLE wubi86(key TEXT,value TEXT,weight INTEGER);");
+        for index in 0..=1024 {
+            let word = format!("合成{index:04}");
+            assert_eq!(fixture.provider.reverse_code(&word), None);
+        }
+        assert!(fixture.provider.reverse_cache.len() <= 1024);
     }
 }
