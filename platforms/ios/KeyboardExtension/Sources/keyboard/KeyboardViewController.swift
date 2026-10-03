@@ -91,6 +91,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   private let shortcutBar = UIStackView()
   private var candidateContent: UIStackView?
   private let scriptShortcut = UIButton()
+  /// 工具栏常驻的「回复」按钮，打开或收起高情商回复面板。
+  private let replyShortcut = UIButton()
   private let emojiShortcut = UIButton()
   private let skinShortcut = UIButton()
   private let layoutShortcut = UIButton()
@@ -206,7 +208,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   private let spellingStack = UIStackView()
   private var spellingButtons: [UIButton] = []
   private var usesTraditionalOutput = false
-  private var replyPanelSuppressed = false
+  /// 高情商回复面板是否由工具栏的「回复」按钮打开。它是工具而不是方案：打开时盖住键区，关闭后回到原来的键盘，引擎方案始终不变。
+  private var replyKeyboardShown = false
   private var reportedStatisticsFailure = false
   /// Key presses waiting for the next write. Counted only while statistics are on, which the store is asked on every appearance; with them off nothing is kept, not even in memory.
   private var keyPresses = TypingKeyCounter()
@@ -598,6 +601,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     DiagnosticLog.shared.write("focus_out")
     KeyboardUsageReporting.dismissed()
     replyModel.setText("")
+    // 回复面板是工具，键盘收起时跟其他面板一起关掉，下次出现回到原来的键盘。
+    closeReplyKeyboard()
     handwriting.deactivate()
     snapshotWorker.stop()
     candidateGlossEpoch &+= 1
@@ -1110,7 +1115,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     brand.brandImageView.tintColor = KeyboardTheme.current.accent
     shortcutBar.addArrangedSubview(brand)
     brand.widthAnchor.constraint(equalToConstant: 44).isActive = true
-    let shortcuts = [layoutShortcut, scriptShortcut, emojiShortcut, skinShortcut, clipboardShortcut, aiShortcut,
+    let shortcuts = [layoutShortcut, scriptShortcut, replyShortcut, emojiShortcut, skinShortcut, clipboardShortcut, aiShortcut,
                      characterSetShortcut, fullwidthShortcut, punctuationShortcut, schemeButton, dismissShortcut]
     for button in shortcuts {
       shortcutBar.addArrangedSubview(button)
@@ -1133,10 +1138,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     ])
     scriptShortcut.addAction(UIAction { [weak self] _ in
       guard let self else { return }
-      if inputScheme == .thoughtfulReply { showKeyboardAI(); return }
       countKeyPress(TypingKeyID.voice)
       showKeyboardVoice()
     }, for: .primaryActionTriggered)
+    replyShortcut.addAction(UIAction { [weak self] _ in self?.toggleReplyKeyboard() }, for: .primaryActionTriggered)
     emojiShortcut.addAction(UIAction { [weak self] _ in
       self?.countKeyPress(TypingKeyID.emoji)
       self?.showEmojiPicker()
@@ -1180,18 +1185,15 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       button.accessibilityLabel = label
       button.accessibilityIdentifier = id
     }
-    // 简繁是一次性设置,不占常驻工具位;这个位置只在高情商回复方案或顶部语音入口开启时出现。
-    //
-    // Script choice is made once and then left alone -- the app's 输入设置 already carries it, and the toolbar is the row you see whenever nothing is being composed. It moved into 更多, which is where the other settings that are set once already live.
-    if inputScheme == .thoughtfulReply {
-      configure(scriptShortcut, title: nil, symbol: "bubble.left.and.text.bubble.right",
-        label: "生成高情商回复", id: "replyShortcut")
-    } else {
-      configure(scriptShortcut, title: nil, symbol: "waveform", label: "语音结果", id: "layoutVoiceShortcut")
-    }
+    // 简繁是一次性设置，不占常驻工具位；这个位置只在顶部语音入口开启时出现。简繁切换移进了「更多」，与其他设一次就不再动的设置放在一起。
+    configure(scriptShortcut, title: nil, symbol: "waveform", label: "语音结果", id: "layoutVoiceShortcut")
     scriptShortcut.isEnabled = true
     scriptShortcut.accessibilityValue = nil
-    scriptShortcut.isHidden = inputScheme != .thoughtfulReply && !KeyboardLayoutPreference.voiceShortcutEnabled
+    scriptShortcut.isHidden = !KeyboardLayoutPreference.voiceShortcutEnabled
+    // 回复按钮在任何方案下都常驻；面板打开时它的值读作「已打开」，再点一次收起。
+    configure(replyShortcut, title: nil, symbol: "bubble.left.and.text.bubble.right",
+      label: "高情商回复", id: "replyShortcut")
+    replyShortcut.accessibilityValue = replyPanel != nil ? "已打开" : nil
     configure(emojiShortcut, title: nil, symbol: "face.smiling", label: "表情", id: "emojiShortcut")
     configure(skinShortcut, title: nil, symbol: "tshirt", label: "切换皮肤", id: "skinShortcut")
     skinShortcut.accessibilityValue = KeyboardTheme.current.title
@@ -2436,17 +2438,14 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     case .zhuyin: session.switchToZhuyin()
     case .vietnamese: session.switchToVietnamese()
     case .handwriting: session.switch(toShuangpin: false)
-    case .quanpin, .thoughtfulReply: session.switch(toShuangpin: usesShuangpin)
+    case .quanpin: session.switch(toShuangpin: usesShuangpin)
     case .shuangpin: session.switch(toShuangpinProfile: "xiaohe")
     }
   }
 
   private func selectInputScheme(_ scheme: ChineseInputScheme, persistShared: Bool = true) {
     guard InputSchemePreference.offeredSchemes.contains(scheme) else { return }
-    if scheme == inputScheme {
-      if scheme == .thoughtfulReply { synchronizeReplyKeyboard() }
-      return
-    }
+    if scheme == inputScheme { return }
     playInputClick()
     let source = typingSource
     // An open Korean syllable, Zhuyin conversion or Vietnamese word is text the user already wrote, so leaving the scheme commits it; the switch below would otherwise discard it along with the marked text.
@@ -2468,14 +2467,30 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     synchronizeReplyKeyboard()
   }
 
+  /// 工具栏「回复」按钮：面板开着就收起回到原键盘，没开就打开。
+  private func toggleReplyKeyboard() {
+    if replyKeyboardShown { closeReplyKeyboard() } else { openReplyKeyboard() }
+  }
+
+  private func openReplyKeyboard() {
+    closeKeyboardPicker()
+    closeKeyboardService()
+    replyKeyboardShown = true
+    synchronizeReplyKeyboard()
+  }
+
+  private func closeReplyKeyboard() {
+    replyKeyboardShown = false
+    synchronizeReplyKeyboard()
+  }
+
   private func synchronizeReplyKeyboard() {
-    guard inputScheme == .thoughtfulReply, isChineseMode else {
+    guard replyKeyboardShown else {
       replyModel.resetResults()
-      replyPanelSuppressed = false
       dismissReplyPanel()
       return
     }
-    guard replyPanel == nil, !replyPanelSuppressed else { return }
+    guard replyPanel == nil else { return }
     let panel = UIHostingController(rootView: ReplyKeyboardView(model: replyModel,
       paste: { [weak self] in
         guard let self else { return }
@@ -2495,6 +2510,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       panel.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
     ])
     panel.didMove(toParent: self)
+    updateShortcutButtons()
   }
 
   private func dismissReplyPanel() {
@@ -2503,6 +2519,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     panel.view.removeFromSuperview()
     panel.removeFromParent()
     replyPanel = nil
+    updateShortcutButtons()
   }
 
   private func generateReply(style: String) {
@@ -2517,7 +2534,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       before: textDocumentProxy.documentContextBeforeInput, selected: textDocumentProxy.selectedText,
       after: textDocumentProxy.documentContextAfterInput)
     let matches: () -> Bool = { [weak self] in
-      guard let self, hasFullAccess, inputScheme == .thoughtfulReply,
+      guard let self, hasFullAccess, replyKeyboardShown,
             KeyboardAIService.configuration() == configuration else { return false }
       return context.matches(document: KeyboardHostContext.documentIdentifier(for: textDocumentProxy),
         before: textDocumentProxy.documentContextBeforeInput, selected: textDocumentProxy.selectedText,
@@ -2535,23 +2552,13 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }, insert: { [weak self] result in
       guard let self, matches() else { return false }
       insertOwnText(result, source: .reply)
-      // The panel is pinned to every edge, so it covers the text that was just inserted and the
-      // backspace that would fix it -- the only delete it leaves on screen edits the pasted source
-      // instead. Its own status asks the reader to go and check the chat app, so it gets out of the
-      // way and behaves like the other pickers, which close once a choice is made. The reply
-      // shortcut brings it back.
-      replyPanelSuppressed = true
-      dismissReplyPanel()
+      // 面板贴满键区，会挡住刚插入的文字和能修改它的退格键——留在屏幕上的唯一删除键改的是粘贴进来的原文。面板自己的状态已经提示去聊天应用里确认，所以插入后它像其他选择器一样收起，回到原来的键盘；工具栏的「回复」按钮能再打开它，粘贴的原文仍保留在模型里。
+      closeReplyKeyboard()
       return true
     })
   }
 
   private func showKeyboardAI() {
-    if inputScheme == .thoughtfulReply {
-      replyPanelSuppressed = false
-      synchronizeReplyKeyboard()
-      return
-    }
     guard hasFullAccess else { showDiagnostic("AI 需要开启键盘的“允许完全访问”。"); return }
     guard let configuration = KeyboardAIService.configuration() else {
       showDiagnostic("请在水杉 App 的 AI 设置中启用键盘 AI 并保存配置。"); return
@@ -3473,7 +3480,6 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     if localModeTrigger == "R" || (isChineseMode && inputScheme.isJapanese) { return .japanese }
     if localModeTrigger != nil { return .local }
     if !isChineseMode { return .english }
-    if inputScheme == .thoughtfulReply { return .quanpin }
     return TypingSource(rawValue: inputScheme.rawValue) ?? .unknown
   }
 

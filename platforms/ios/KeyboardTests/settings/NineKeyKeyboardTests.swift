@@ -193,7 +193,27 @@ final class NineKeyKeyboardTests: XCTestCase {
     XCTAssertTrue(bridge.setFuzzyPinyinRules(0))
   }
 
-  func testThoughtfulReplySchemeShowsDedicatedKeyboardAndCanBeDisabled() throws {
+  func testThoughtfulReplyIsNoLongerAnInputScheme() throws {
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: InputSchemePreference.appGroupIdentifier))
+    let previousEnabled = defaults.object(forKey: InputSchemePreference.enabledSchemesKey)
+    let previousScheme = defaults.object(forKey: "chineseInputScheme")
+    defer {
+      defaults.set(previousEnabled, forKey: InputSchemePreference.enabledSchemesKey)
+      defaults.set(previousScheme, forKey: "chineseInputScheme")
+    }
+    XCTAssertNil(ChineseInputScheme(rawValue: "thoughtfulReply"))
+    XCTAssertNil(ChineseInputScheme.scheme(sharedIdentifier: "thoughtful_reply"))
+    XCTAssertFalse(ChineseInputScheme.allCases.map(\.title).contains("高情商回复"))
+    // 旧版存下的选择和启用列表：选择回退到全拼 26 键，启用列表里直接忽略。
+    defaults.set(["quanpin", "thoughtfulReply"], forKey: InputSchemePreference.enabledSchemesKey)
+    defaults.set("thoughtfulReply", forKey: "chineseInputScheme")
+    XCTAssertEqual(InputSchemePreference.enabledSchemes, [.quanpin])
+    XCTAssertEqual(InputSchemePreference.scheme, .quanpin)
+    defaults.set(["thoughtfulReply"], forKey: InputSchemePreference.enabledSchemesKey)
+    XCTAssertEqual(InputSchemePreference.enabledSchemes, [.quanpin])
+  }
+
+  func testReplyShortcutOpensAndClosesReplyKeyboardOverAnyScheme() throws {
     let defaults = try XCTUnwrap(UserDefaults(suiteName: InputSchemePreference.appGroupIdentifier))
     let previousEnabled = defaults.object(forKey: InputSchemePreference.enabledSchemesKey)
     let previous = InputSchemePreference.scheme
@@ -201,33 +221,39 @@ final class NineKeyKeyboardTests: XCTestCase {
       defaults.set(previousEnabled, forKey: InputSchemePreference.enabledSchemesKey)
       InputSchemePreference.scheme = previous
     }
-    InputSchemePreference.enabledSchemes = [.quanpin, .thoughtfulReply]
-    InputSchemePreference.scheme = .thoughtfulReply
+    InputSchemePreference.enabledSchemes = [.quanpin, .nineKey]
+    InputSchemePreference.scheme = .nineKey
     let controller = KeyboardViewController()
     controller.loadViewIfNeeded()
-    XCTAssertEqual(try button("schemeButton", in: controller).accessibilityValue, "高情商回复")
-    XCTAssertTrue(descendants(controller.view).contains { $0.accessibilityIdentifier == "replyKeyboard" })
+    let hasReply = { self.descendants(controller.view).contains { $0.accessibilityIdentifier == "replyKeyboard" } }
+    let shortcut = try button("replyShortcut", in: controller)
+    XCTAssertFalse(shortcut.isHidden)
+    XCTAssertFalse(hasReply())
+
+    shortcut.sendActions(for: .primaryActionTriggered)
+    XCTAssertTrue(hasReply())
+    XCTAssertEqual(shortcut.accessibilityValue, "已打开")
     let reply = try XCTUnwrap(descendants(controller.view).first { $0.accessibilityIdentifier == "replyKeyboard" })
     let strip = try XCTUnwrap(descendants(controller.view).first { $0.accessibilityIdentifier == "candidateStrip" })
     controller.view.layoutIfNeeded()
     XCTAssertGreaterThanOrEqual(reply.convert(reply.bounds, to: controller.view).minY,
                                 strip.convert(strip.bounds, to: controller.view).maxY - 0.5)
-    XCTAssertFalse(descendants(controller.view).contains { $0.accessibilityIdentifier == "replySchemes" })
-    XCTAssertTrue(try XCTUnwrap(button("nineKey6", in: controller).superview).isHidden)
-    InputSchemePreference.enabledSchemes = [.quanpin]
-    controller.viewWillAppear(false)
-    XCTAssertEqual(InputSchemePreference.scheme, .quanpin)
-    XCTAssertTrue(try button("layoutVoiceShortcut", in: controller).isHidden)
-    XCTAssertFalse(descendants(controller.view).contains { $0.accessibilityIdentifier == "replyKeyboard" })
+    // 面板只是盖在键区上，方案不变。
+    XCTAssertEqual(InputSchemePreference.scheme, .nineKey)
+    XCTAssertEqual(try button("schemeButton", in: controller).accessibilityValue, "全拼 9 键")
 
-    // Inserting a reply takes the panel away so the text it just wrote, and the backspace that
-    // edits it, are reachable. The reply shortcut is what brings it back, so that path has to work
-    // even when the panel is already gone.
-    InputSchemePreference.enabledSchemes = [.quanpin, .thoughtfulReply]
-    InputSchemePreference.scheme = .thoughtfulReply
+    // 再点一次收起，回到原来的九键键盘。
+    shortcut.sendActions(for: .primaryActionTriggered)
+    XCTAssertFalse(hasReply())
+    XCTAssertNil(shortcut.accessibilityValue)
+    XCTAssertFalse(try XCTUnwrap(button("nineKey6", in: controller).superview).isHidden)
+
+    // 键盘收起时面板一起关掉，下次出现是原来的键盘。
+    shortcut.sendActions(for: .primaryActionTriggered)
+    XCTAssertTrue(hasReply())
+    controller.viewWillDisappear(false)
     controller.viewWillAppear(false)
-    try button("replyShortcut", in: controller).sendActions(for: .primaryActionTriggered)
-    XCTAssertTrue(descendants(controller.view).contains { $0.accessibilityIdentifier == "replyKeyboard" })
+    XCTAssertFalse(hasReply())
   }
 
   func testDisabledSchemesAreHiddenAndCurrentSchemeFallsBack() throws {
@@ -646,7 +672,7 @@ final class NineKeyKeyboardTests: XCTestCase {
       XCTAssertEqual(visible.compactMap(\.accessibilityIdentifier), [
         "moreShortcut", "layoutShortcut",
       ] + (KeyboardLayoutPreference.voiceShortcutEnabled ? ["layoutVoiceShortcut"] : []) + [
-        "emojiShortcut", "skinShortcut", "schemeButton", "dismissShortcut",
+        "replyShortcut", "emojiShortcut", "skinShortcut", "schemeButton", "dismissShortcut",
       ])
       for item in visible {
         XCTAssertGreaterThanOrEqual(item.bounds.width, 42)
@@ -1174,7 +1200,7 @@ final class NineKeyKeyboardTests: XCTestCase {
       XCTAssertGreaterThanOrEqual(brandSlot.bounds.width - brand.frame.maxX, 6)
       XCTAssertLessThan(brand.convert(brand.bounds, to: toolbar).maxX,
                         try button("schemeButton", in: controller).convert(try button("schemeButton", in: controller).bounds, to: toolbar).minX)
-      for id in ["layoutShortcut", "schemeButton", "emojiShortcut",
+      for id in ["layoutShortcut", "replyShortcut", "schemeButton", "emojiShortcut",
                  "skinShortcut", "moreShortcut", "dismissShortcut"] {
         let control = try button(id, in: controller)
         XCTAssertGreaterThanOrEqual(control.bounds.width, 44)

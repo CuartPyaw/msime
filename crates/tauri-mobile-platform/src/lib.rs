@@ -386,7 +386,6 @@ impl IosKeyboardPreferences {
                 | "japanese"
                 | "korean"
                 | "handwriting"
-                | "thoughtfulReply"
                 | "cantonese"
                 | "zhuyin"
                 | "vietnamese"

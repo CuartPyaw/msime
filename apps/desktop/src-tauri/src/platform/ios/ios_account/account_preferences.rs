@@ -33,7 +33,7 @@ pub(crate) fn local_account_preferences(
     let mut settings = BTreeMap::new();
     // The cloud `input.schema` cannot carry Cantonese, Zhuyin or Vietnamese (an older device would refuse the whole document), so those leave the scheme and the nine-key switch out and the cloud keeps what it has.
     let scheme = match native.input_scheme.as_str() {
-        "quanpin" | "handwriting" | "thoughtfulReply" => Some(("quanpin", None, false)),
+        "quanpin" | "handwriting" => Some(("quanpin", None, false)),
         "nineKey" => Some(("quanpin", None, true)),
         "shuangpin" => Some(("shuangpin", Some("xiaohe"), false)),
         "ziranma" => Some(("shuangpin", Some("ziranma"), false)),
@@ -383,7 +383,6 @@ fn touch_scheme(value: &str) -> Result<TouchKeyboardScheme, AccountError> {
         "japaneseNineKey" => Ok(TouchKeyboardScheme::JapaneseNineKey),
         "japanese" => Ok(TouchKeyboardScheme::Japanese),
         "handwriting" => Ok(TouchKeyboardScheme::Handwriting),
-        "thoughtfulReply" => Ok(TouchKeyboardScheme::ThoughtfulReply),
         "korean" => Ok(TouchKeyboardScheme::Korean),
         "cantonese" => Ok(TouchKeyboardScheme::Cantonese),
         "zhuyin" => Ok(TouchKeyboardScheme::Zhuyin),
@@ -413,10 +412,7 @@ fn select_touch_scheme(preferences: &mut Preferences, requested: TouchKeyboardSc
     {
         requested
     } else {
-        TouchKeyboardScheme::ALL
-            .into_iter()
-            .find(|scheme| preferences.touch_keyboard_schemes.enabled.contains(scheme))
-            .unwrap_or(TouchKeyboardScheme::Quanpin)
+        preferences.touch_keyboard_schemes.first_enabled()
     };
     preferences.touch_keyboard_schemes.selected = Some(selected);
     match selected {
@@ -472,8 +468,7 @@ fn select_touch_scheme(preferences: &mut Preferences, requested: TouchKeyboardSc
         }
         TouchKeyboardScheme::Quanpin
         | TouchKeyboardScheme::NineKey
-        | TouchKeyboardScheme::Handwriting
-        | TouchKeyboardScheme::ThoughtfulReply => {
+        | TouchKeyboardScheme::Handwriting => {
             preferences.scheme = InputScheme::Quanpin;
             preferences.last_chinese_scheme = Some(ChineseScheme::Quanpin);
             preferences.touch_keyboard_layout = match selected {

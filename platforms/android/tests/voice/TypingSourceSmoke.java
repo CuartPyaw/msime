@@ -27,7 +27,6 @@ public final class TypingSourceSmoke {
         check(TypingSource.resolve(KeyboardScheme.QUANPIN, true, null) == TypingSource.ENGLISH);
         check(TypingSource.resolve(KeyboardScheme.QUANPIN, true, "emoji") == TypingSource.LOCAL);
         check(TypingSource.resolve(KeyboardScheme.QUANPIN, false, "temporary_japanese") == TypingSource.JAPANESE);
-        check(TypingSource.resolve(KeyboardScheme.THOUGHTFUL_REPLY, false, null) == TypingSource.QUANPIN);
         check(TypingSource.AI.id().equals("ai") && TypingSource.REPLY.id().equals("reply")
             && TypingSource.VOICE.id().equals("voice"));
         System.out.println("Android typing statistics: Apple source mapping passed");

@@ -1397,7 +1397,7 @@ struct KeyboardView {
     this.japanese = candidate.engineScheme === 'japanese' && candidate.touchKeyboardLayout
       === 'nine_key';
     KeyboardSession.shared.setNineKey(this.nineKey);
-    this.show(candidate === KeyboardScheme.THOUGHTFUL_REPLY ? SURFACE_REPLY : SURFACE_NONE);
+    this.show(SURFACE_NONE);
   }
 
   /**
@@ -1735,8 +1735,7 @@ struct KeyboardView {
     this.fuzzyPinyin = KeyboardSession.shared.usesFuzzyPinyin();
     this.applySkins();
     this.wubiProfile = this.settings.wubiProfile;
-    this.scheme = this.settings.thoughtfulReply ? KeyboardScheme.THOUGHTFUL_REPLY
-      : this.enabledScheme();
+    this.scheme = this.enabledScheme();
     this.nineKey = this.scheme.touchKeyboardLayout === 'nine_key';
     this.japanese = this.scheme.engineScheme === 'japanese' && this.nineKey;
     KeyboardSession.shared.setNineKey(this.nineKey);
@@ -2666,12 +2665,11 @@ struct KeyboardView {
             }
           });
       }
-      if (this.scheme === KeyboardScheme.THOUGHTFUL_REPLY) {
-        this.shortcutText('💬', KeyAccessibilityPolicy.reply(),
-          this.surface === SURFACE_REPLY, () => {
-            this.show(SURFACE_REPLY);
-          });
-      }
+      // 高情商回复是工具而不是输入方案：任何方案下都从这里打开回复面板，再点一次或点面板里的「完成」回到原来的键盘。
+      this.shortcutText('💬', KeyAccessibilityPolicy.reply(),
+        this.surface === SURFACE_REPLY, () => {
+          this.toggle(SURFACE_REPLY);
+        });
       this.shortcutIcon($r('app.media.tool_dismiss'), KeyAccessibilityPolicy.dismiss(), false, () => {
         KeyboardSession.shared.dismiss();
       });

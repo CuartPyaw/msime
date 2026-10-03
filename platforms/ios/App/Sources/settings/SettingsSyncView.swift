@@ -3,7 +3,7 @@ import SwiftUI
 private enum IOSCloudSettings {
   static func snapshot() throws -> [String: BackendPreferenceValue] {
     let scheme = InputSchemePreference.scheme
-    let name = scheme.isJapanese ? "japanese" : scheme.shuangpinProfile != nil ? "shuangpin" : ((scheme == .nineKey || scheme == .thoughtfulReply || scheme == .handwriting) ? "quanpin" : scheme.rawValue)
+    let name = scheme.isJapanese ? "japanese" : scheme.shuangpinProfile != nil ? "shuangpin" : ((scheme == .nineKey || scheme == .handwriting) ? "quanpin" : scheme.rawValue)
     let document = MetasequoiaInputSessionBridge.loadSharedPreferences()
     var settings: [String: BackendPreferenceValue] = [
       "input.schema": .string(name),

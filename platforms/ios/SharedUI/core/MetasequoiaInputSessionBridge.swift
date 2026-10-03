@@ -436,7 +436,7 @@ final class MetasequoiaInputSessionBridge: @unchecked Sendable {
     case .zhuyin: engineScheme = "zhuyin"
     case .vietnamese: engineScheme = "vietnamese"
     case .shuangpin, .ziranma, .microsoft, .shoudao: engineScheme = "shuangpin"
-    case .quanpin, .nineKey, .handwriting, .thoughtfulReply: engineScheme = "quanpin"
+    case .quanpin, .nineKey, .handwriting: engineScheme = "quanpin"
     }
     let layout: String
     switch selected {

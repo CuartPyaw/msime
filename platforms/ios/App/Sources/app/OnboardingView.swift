@@ -118,7 +118,7 @@ struct InputSettingsView: View {
         }
 
         Section("高情商回复") {
-          Text("复制对方的话，切换到高情商回复键盘，点“粘贴”后选择九宫格里的回复风格。支持帮你回、帮润色和换一句，点选回复插入聊天输入框。")
+          Text("复制对方的话，点键盘工具栏上的回复按钮打开高情商回复面板，点“粘贴”后选择九宫格里的回复风格。支持帮你回、帮润色和换一句，点选回复插入聊天输入框。")
             .font(.footnote).foregroundStyle(.secondary)
           NavigationLink(destination: ServiceSettingsView(kind: .ai)) {
             Label("配置键盘 AI", systemImage: "sparkles")

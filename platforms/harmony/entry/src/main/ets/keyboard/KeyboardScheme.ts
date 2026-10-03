@@ -166,16 +166,6 @@ const HANDWRITING: SchemeDefinition = {
   glyph: "写",
   badge: "手",
 };
-const THOUGHTFUL_REPLY: SchemeDefinition = {
-  id: "THOUGHTFUL_REPLY",
-  preferenceId: "thoughtful_reply",
-  engineScheme: "quanpin",
-  shuangpinProfile: null,
-  touchKeyboardLayout: "twenty_six_key",
-  title: "高情商回复",
-  glyph: "聊",
-  badge: "AI",
-};
 
 export class KeyboardScheme {
   static readonly QUANPIN: SchemeDefinition = QUANPIN;
@@ -188,7 +178,6 @@ export class KeyboardScheme {
   static readonly JAPANESE_NINE_KEY: SchemeDefinition = JAPANESE_NINE_KEY;
   static readonly JAPANESE: SchemeDefinition = JAPANESE;
   static readonly HANDWRITING: SchemeDefinition = HANDWRITING;
-  static readonly THOUGHTFUL_REPLY: SchemeDefinition = THOUGHTFUL_REPLY;
   static readonly KOREAN: SchemeDefinition = KOREAN;
   static readonly CANTONESE: SchemeDefinition = CANTONESE;
   static readonly ZHUYIN: SchemeDefinition = ZHUYIN;
@@ -206,7 +195,6 @@ export class KeyboardScheme {
     JAPANESE_NINE_KEY,
     JAPANESE,
     HANDWRITING,
-    THOUGHTFUL_REPLY,
     // Appended, as the shared `TouchKeyboardScheme::ALL` appends it, so the existing cards keep their places.
     KOREAN,
     CANTONESE,
@@ -325,7 +313,7 @@ export class KeyboardScheme {
     currentLastChineseScheme: string | null,
     currentProfile: string | null,
   ): PreferenceMapping | null {
-    if (selected === null || selected === THOUGHTFUL_REPLY || selected === applied) {
+    if (selected === null || selected === applied) {
       return null;
     }
     return KeyboardScheme.mapping(selected, currentLastChineseScheme, currentProfile);
@@ -355,7 +343,6 @@ export class KeyboardScheme {
     }
     for (const candidate of KeyboardScheme.SCHEMES) {
       if (
-        candidate !== THOUGHTFUL_REPLY &&
         candidate.shuangpinProfile === null &&
         candidate.engineScheme === scheme &&
         candidate.touchKeyboardLayout !== "nine_key"

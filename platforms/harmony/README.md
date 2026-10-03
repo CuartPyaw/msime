@@ -235,15 +235,17 @@ Apple 的 `AppIconSettingsView` 和 Android 的同名入口在共享页面上是
 
 共享设置页管着「哪些输入方案出现在选择器里」。关掉键盘正在用的那一个，它从选择器里消失，而键盘照旧用着它——于是既看不见也退不出，除非随便挑另一个。来源在写入启用列表的那一刻就把当前方案归一（`DisabledSchemesAreHiddenAndCurrentSchemeFallsBack`：应用中的日语遇上只启用 `[全拼9键, 五笔]`，存下来的方案立即变成全拼9键；清空则回落到全拼）。
 
-这里不能在写入时做，页面和键盘是两个进程，页面写的是文档而不是一个正在运行的键盘。所以改在 attach 时读：`KeyboardScheme.resolveEnabledSelection` 按「共享选择 → 已应用 → 第一个启用项」定出该用哪一个，`mappingForRuntimeSelection` 决定这算不算一次移动（原地不动、以及目标是回复键盘，都返回 null），移动了才把 `scheme`／`last_chinese_scheme`／`shuangpin_profile`／`touch_keyboard_layout` 一起写回并推给 Engine。两个都是早就移植好、此前没有调用方的。
+这里不能在写入时做，页面和键盘是两个进程，页面写的是文档而不是一个正在运行的键盘。所以改在 attach 时读：`KeyboardScheme.resolveEnabledSelection` 按「共享选择 → 已应用 → 第一个启用项」定出该用哪一个，`mappingForRuntimeSelection` 决定这算不算一次移动（原地不动时返回 null），移动了才把 `scheme`／`last_chinese_scheme`／`shuangpin_profile`／`touch_keyboard_layout` 一起写回并推给 Engine。两个都是早就移植好、此前没有调用方的。
 
-`touch_keyboard_schemes.selected` 此前只被读来判断是不是回复键盘，现在整体进了设置记录：`scheme` 和 `touch_keyboard_layout` 是 Engine 的视角，它们解析出什么与选择器还提不提供它无关。
+`touch_keyboard_schemes` 整体进了设置记录：`scheme` 和 `touch_keyboard_layout` 是 Engine 的视角，它们解析出什么与选择器还提不提供它无关。
+
+高情商回复是工具而不是输入方案：`KeyboardScheme.SCHEMES` 和方案选择器里没有它，快捷栏上的 💬（`reply`）在任何方案下都在，点一下打开回复面板（`SURFACE_REPLY`），再点一次或点面板里的「完成」回到原来的键盘。旧文档里存的 `thoughtful_reply` 不是一个已知的方案 id，按未知 id 处理：`enabledFromPreferenceIds` 把它从启用列表里去掉（只剩它时回落到全拼 26 键），`resolveEnabledSelection` 把存着它的选择落到第一个启用项。插入的回复按 `reply` 来源记入打字统计，与当前方案无关。
 
 单测覆盖了来源断言的那两种情形（已应用项不在启用列表、启用列表被清空）和写回的三种判定。
 
 ## 快捷栏的按钮此前对读屏全是哑的
 
-候选行下面那条工具栏原本整条是图标，没有一个挂了 `accessibilityText`；`KeyAccessibilityPolicy` 里当时只有 `tools`、`skin`、`scheme` 三个名字（移植好、没人调用）。现在快捷栏上每个控件都有名字，从左到右：标志 `更多快捷设置`（`tools`，打开功能面板）、中/英胶囊（`languageState`，读「切换中英文，当前中文」）、方案胶囊 `选择输入方案`（`scheme`）、译胶囊（`tile(translations(), …)`，读「显示译文，已开启／已关闭」）、标点胶囊（`punctuationState`，读当前是中文还是英文标点）、`表情与符号`（`emoji`）、`语音输入`（`voice`，仅在开启语音快捷键且语音可用时出现）、`生成高情商回复`（`reply`，仅在当前方案是回复键盘时出现）、`收起键盘`（`dismiss`）、⚙ `打开设置`（`settings`）。`选择主题`（`theme`，原 `skin` 的「切换皮肤」，皮肤并入全局主题后改名）和 `键盘大小与间距`（`geometry`）已不在快捷栏上，而是功能面板里的图块；面板的每个图块都经 `KeyAccessibilityPolicy.tile` 读名字，开关类图块（如「中文标点」）再读出已开启或已关闭。`shortcutIcon`/`shortcutText`/`stripPill` 的 label 参数不是可选的——按键至少还画着一个字符，这些只画图标或一两个字。
+候选行下面那条工具栏原本整条是图标，没有一个挂了 `accessibilityText`；`KeyAccessibilityPolicy` 里当时只有 `tools`、`skin`、`scheme` 三个名字（移植好、没人调用）。现在快捷栏上每个控件都有名字，从左到右：标志 `更多快捷设置`（`tools`，打开功能面板）、中/英胶囊（`languageState`，读「切换中英文，当前中文」）、方案胶囊 `选择输入方案`（`scheme`）、译胶囊（`tile(translations(), …)`，读「显示译文，已开启／已关闭」）、标点胶囊（`punctuationState`，读当前是中文还是英文标点）、`表情与符号`（`emoji`）、`语音输入`（`voice`，仅在开启语音快捷键且语音可用时出现）、`生成高情商回复`（`reply`，任何方案下都在）、`收起键盘`（`dismiss`）、⚙ `打开设置`（`settings`）。`选择主题`（`theme`，原 `skin` 的「切换皮肤」，皮肤并入全局主题后改名）和 `键盘大小与间距`（`geometry`）已不在快捷栏上，而是功能面板里的图块；面板的每个图块都经 `KeyAccessibilityPolicy.tile` 读名字，开关类图块（如「中文标点」）再读出已开启或已关闭。`shortcutIcon`/`shortcutText`/`stripPill` 的 label 参数不是可选的——按键至少还画着一个字符，这些只画图标或一两个字。
 
 日语的 `小゛゜` 键同时补上：它靠变淡表示"还没有假名可改"，而变淡这件事读屏不会转述，所以停用态的名字直接把原因说出来（`JapaneseVariantPolicy.accessibilityLabel`，同样是移植好没人调用的）。
 

@@ -372,7 +372,8 @@ public final class MSIMEInputService extends InputMethodService {
     private AiPolishClient.Operation replyOperation;
     private EditorContextSnapshot replyTarget;
     private AiPolishConfiguration replyRequestConfiguration;
-    private boolean replySuppressed;
+    /** 高情商回复面板是否打开。它是工具栏「回复」按钮开关的工具面板，与当前输入方案无关；关闭后回到原来的键盘。 */
+    private boolean replyOpen;
     private boolean statisticsFailureReported;
     /** Key presses since the last write, per key and local day. Main thread only. */
     private final KeyPressBatch keyPresses = new KeyPressBatch();
@@ -429,10 +430,6 @@ public final class MSIMEInputService extends InputMethodService {
     private final AiPolishClient aiPolishClient = new AiPolishClient(new AiPolishHttpTransport());
     private final PreferencesReloader preferencesReloader = new PreferencesReloader(
         (task, delay) -> main.postDelayed(task, delay), preferencesWorker, NativeClient::loadPreferences);
-
-    private boolean thoughtfulReplyEnabled() {
-        return enabledSchemes.contains(KeyboardScheme.THOUGHTFUL_REPLY);
-    }
 
     private record SchemeConfiguration(
         java.util.List<KeyboardScheme> enabled, java.util.List<KeyboardScheme> visible,
@@ -574,9 +571,7 @@ public final class MSIMEInputService extends InputMethodService {
     private void alignEngineSchemeWithSelection(
             JSONObject preferences, KeyboardScheme engineScheme,
             SchemeConfiguration configuration) throws JSONException {
-        if (preferences == null
-                || configuration.selected() == KeyboardScheme.THOUGHTFUL_REPLY
-                || configuration.selected() == engineScheme) return;
+        if (preferences == null || configuration.selected() == engineScheme) return;
         KeyboardScheme.PreferenceMapping mapping = KeyboardScheme.mappingForRuntimeSelection(
             engineScheme, configuration.selected(),
             preferences.optString("last_chinese_scheme", preferences.optString("scheme", "quanpin")),
@@ -882,7 +877,6 @@ public final class MSIMEInputService extends InputMethodService {
         updateAutomaticCapitalization();
         rebuildKeyRows();
         render();
-        replySuppressed = false;
         synchronizeReplyKeyboard();
     }
 
@@ -3072,8 +3066,7 @@ public final class MSIMEInputService extends InputMethodService {
         }
         boolean replyVisible = replyKeyboard != null
             && replyKeyboard.getVisibility() == View.VISIBLE;
-        if (selectedScheme == KeyboardScheme.THOUGHTFUL_REPLY
-                && (replyTarget != null || (selectionChanged && replyVisible))) {
+        if (replyTarget != null || (selectionChanged && replyVisible)) {
             invalidateReplyContext("输入位置已变化，请重新选择回复方式");
         }
         if (session != 0 && view != null && !view.optString("editing_text").isEmpty()
@@ -4125,6 +4118,7 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     private void closeReplyKeyboard() {
+        replyOpen = false;
         replyModel.resetResults();
         clearReplyRequestReferences();
         setReplyKeyboardVisible(false);
@@ -4152,18 +4146,12 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     private boolean replyReady() {
-        return selectedScheme == KeyboardScheme.THOUGHTFUL_REPLY && thoughtfulReplyEnabled()
-            && aiPolishReady();
+        return replyOpen && aiPolishReady();
     }
 
     private void synchronizeReplyKeyboard() {
         if (replyKeyboard == null) return;
-        if (selectedScheme != KeyboardScheme.THOUGHTFUL_REPLY || !thoughtfulReplyEnabled()) {
-            closeReplyKeyboard();
-            replySuppressed = false;
-            return;
-        }
-        if (replySuppressed) {
+        if (!replyOpen) {
             setReplyKeyboardVisible(false);
             return;
         }
@@ -4171,9 +4159,22 @@ public final class MSIMEInputService extends InputMethodService {
         setReplyKeyboardVisible(true);
     }
 
+    /** 工具栏「回复」按钮：面板关着就打开，开着就收起回到原来的键盘。任何输入方案下都可用。 */
+    private void toggleReplyKeyboard() {
+        if (replyOpen) hideReplyKeyboard();
+        else showReplyKeyboard();
+    }
+
+    /** 收起面板但保留已生成的回复，再次打开时仍能看到；与插入回复后的收起相同。还在生成的请求随收起取消，免得结果在面板关着时到达。 */
+    private void hideReplyKeyboard() {
+        if (replyModel.busy()) invalidateReplyContext("面板已收起，请重新选择回复方式");
+        replyOpen = false;
+        setReplyKeyboardVisible(false);
+        render();
+    }
+
     private void showReplyKeyboard() {
-        if (selectedScheme != KeyboardScheme.THOUGHTFUL_REPLY) return;
-        replySuppressed = false;
+        replyOpen = true;
         closeEmojiPicker();
         closeSymbolPanel();
         closeCandidatePanel();
@@ -4183,6 +4184,7 @@ public final class MSIMEInputService extends InputMethodService {
         closeVoiceResult();
         closeAiPolish();
         synchronizeReplyKeyboard();
+        render();
     }
 
     private void pasteReplySource() {
@@ -4253,7 +4255,7 @@ public final class MSIMEInputService extends InputMethodService {
         replyOperation = null;
         if (!replyTargetMatches() || replyRequestConfiguration == null
                 || !replyRequestConfiguration.equals(aiPolishConfiguration)
-                || selectedScheme != KeyboardScheme.THOUGHTFUL_REPLY) {
+                || !replyOpen) {
             invalidateReplyContext("输入位置或 AI 配置已变化，请重新选择回复方式");
             return;
         }
@@ -4272,12 +4274,15 @@ public final class MSIMEInputService extends InputMethodService {
             try {
                 if (!commitText(value, TypingSource.REPLY)) return false;
             } catch (RuntimeException error) { return false; }
-            replySuppressed = true;
+            replyOpen = false;
             return true;
         });
         clearReplyRequestReferences();
         renderReplyKeyboard();
-        if (inserted) setReplyKeyboardVisible(false);
+        if (inserted) {
+            setReplyKeyboardVisible(false);
+            render();
+        }
     }
 
     private void showReplyTemplates() {
@@ -5431,7 +5436,6 @@ public final class MSIMEInputService extends InputMethodService {
         }
         if (scheme == selectedScheme) {
             closeSchemePicker();
-            if (scheme == KeyboardScheme.THOUGHTFUL_REPLY) showReplyKeyboard();
             return;
         }
         replyModel.resetResults();
@@ -7672,7 +7676,7 @@ public final class MSIMEInputService extends InputMethodService {
         aiPolishShortcutButton = button(shortcutBar, "AI", this::showAiPolish);
         aiPolishShortcutButton.setContentDescription("打开 AI 润色");
         replyShortcutButton = shortcutButton(shortcutBar, "回复",
-            KeyboardShortcutIconPolicy.Icon.REPLY, this::showReplyKeyboard);
+            KeyboardShortcutIconPolicy.Icon.REPLY, this::toggleReplyKeyboard);
         replyShortcutButton.setContentDescription("生成高情商回复");
         // 漢 is the touch counterpart of a Korean keyboard's Hanja key: it lists the Hanja of the composing syllable on the strip below and closes the list again. It sits in the header so it stays put while the list fills the strip, and render() shows it only while a Korean syllable composes; the filled face says the list is open. While a Zhuyin conversion composes the same key reads 選 and opens the conversion's list, through the same shared command 16 (MSIME_OPEN_CANDIDATE_LIST).
         KeyboardPressButton hanja = new KeyboardPressButton(this);
@@ -8262,12 +8266,11 @@ public final class MSIMEInputService extends InputMethodService {
         }
         if (emojiShortcutButton != null) {
             emojiShortcutButton.setVisibility(idle && session != 0 && !emojiResources.isEmpty()
-                && selectedScheme != KeyboardScheme.THOUGHTFUL_REPLY ? View.VISIBLE : View.GONE);
+                ? View.VISIBLE : View.GONE);
             emojiShortcutButton.setEnabled(session != 0 && !emojiResources.isEmpty());
         }
         if (voiceShortcutButton != null) {
-            voiceShortcutButton.setVisibility(touchVoiceShortcutEnabled
-                && selectedScheme != KeyboardScheme.THOUGHTFUL_REPLY ? View.VISIBLE : View.GONE);
+            voiceShortcutButton.setVisibility(touchVoiceShortcutEnabled ? View.VISIBLE : View.GONE);
             voiceShortcutButton.setEnabled(voiceInsertionReady());
         }
         if (aiPolishShortcutButton != null) {
@@ -8276,9 +8279,11 @@ public final class MSIMEInputService extends InputMethodService {
             aiPolishShortcutButton.setEnabled(aiPolishReady());
         }
         if (replyShortcutButton != null) {
-            replyShortcutButton.setVisibility(selectedScheme == KeyboardScheme.THOUGHTFUL_REPLY
-                ? View.VISIBLE : View.GONE);
-            replyShortcutButton.setEnabled(replyReady());
+            // 回复面板不属于任何输入方案，每个方案都显示这个入口；未配置 AI 时面板里会提示去设置。开着时始终可点，用来收起面板。
+            replyShortcutButton.setVisibility(View.VISIBLE);
+            replyShortcutButton.setEnabled(replyOpen || aiPolishReady());
+            replyShortcutButton.setSelected(replyOpen);
+            replyShortcutButton.setContentDescription(replyOpen ? "收起高情商回复" : "生成高情商回复");
         }
         if (microsoftFinalKey != null) {
             String currentLocalMode = view == null ? "none" : view.optString("local_mode", "none");
