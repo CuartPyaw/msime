@@ -174,7 +174,12 @@ pub fn installed_file(state_root: &Path, pack: ResourcePack, name: &str) -> Opti
     {
         return None;
     }
-    let path = published_directory(state_root, pack)?.join(name);
+    let directory = published_directory(state_root, pack)?;
+    let manifest = local_models::installed_manifest(&root(state_root), pack.id())?;
+    if manifest != pack.manifest() {
+        return None;
+    }
+    let path = directory.join(name);
     fs::symlink_metadata(&path)
         .ok()?
         .file_type()
@@ -341,6 +346,27 @@ mod tests {
         );
         // 没有 msime-model.json 的目录不算安装完整。
         fs::remove_file(directory.join(MANIFEST_FILE)).unwrap();
+        assert_eq!(
+            installed_file(state.path(), pack, "dict_japanese.dat"),
+            None
+        );
+    }
+
+    #[test]
+    fn installed_file_ignores_an_outdated_published_pack() {
+        let state = tempfile::tempdir().unwrap();
+        let pack = ResourcePack::Japanese;
+        let directory = publish_fake(state.path(), pack);
+        fs::write(
+            directory.join(MANIFEST_FILE),
+            serde_json::to_vec(&serde_json::json!({
+                "pack": pack.id(),
+                "source_commit": "old"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
         assert_eq!(
             installed_file(state.path(), pack, "dict_japanese.dat"),
             None
