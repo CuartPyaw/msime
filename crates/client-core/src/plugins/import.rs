@@ -240,6 +240,12 @@ fn extract(source: &Path, staging: &Path) -> Result<(), PluginError> {
     let mut members: Vec<(usize, Vec<String>)> = Vec::with_capacity(archive.len());
     for index in 0..archive.len() {
         let member = archive.by_index_raw(index).map_err(archive_error)?;
+        if !plain_archive_name(member.name()) {
+            return Err(PluginError::Archive(format!(
+                "{} 不是普通的相对文件路径",
+                member.name()
+            )));
+        }
         let path = member
             .enclosed_name()
             .ok_or_else(|| PluginError::Archive(format!("{} 指向了压缩包之外", member.name())))?;
@@ -351,6 +357,15 @@ fn plain_components(path: &Path) -> Option<Vec<String>> {
         }
     }
     (!parts.is_empty()).then_some(parts)
+}
+
+/// 在 `zip` 规范化之前检查原始名称，拒绝绝对路径、盘符和 `..`。
+/// `enclosed_name` 会去掉绝对前缀并解析父目录组件，仅检查它的结果会漏掉这些非法名称。
+fn plain_archive_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with(['/', '\\'])
+        && !name.contains(':')
+        && !name.split(['/', '\\']).any(|component| component == "..")
 }
 
 fn plain_component_capacity(path: &Path) -> usize {
