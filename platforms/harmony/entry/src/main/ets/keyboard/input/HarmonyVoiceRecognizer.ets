@@ -120,7 +120,12 @@ export class HarmonyVoiceRecognizer {
           this.deliver(config, whole, result.isLast);
         },
         onComplete: (session: string): void => {
-          if (session === this.sessionId) this.deliver(config, this.lastResultText, true);
+          if (session !== this.sessionId) return;
+          // CoreSpeechKit may complete a write-audio session without a preceding stop().
+          // Release the capturer and invalidate the session before delivering the result so
+          // a completion handler cannot cancel an already-finished CoreSpeechKit session.
+          this.finishSystemSession(session);
+          this.deliver(config, this.lastResultText, true);
         },
         onError: (session: string, code: number, message: string): void => {
           if (session !== this.sessionId) return;
@@ -233,9 +238,17 @@ export class HarmonyVoiceRecognizer {
     this.sentences.reset();
     const session: string = this.sessionId;
     this.sessionId = '';
-    if (this.engine !== undefined && session.length > 0) {
+    if (this.engine !== undefined && session.length > 0 && this.engine.isBusy()) {
       this.engine.cancel(session);
     }
+  }
+
+  private finishSystemSession(session: string): void {
+    if (session !== this.sessionId) return;
+    void this.capture.stop();
+    this.slicer.reset();
+    this.sentences.reset();
+    this.sessionId = '';
   }
 
   private deliver(config: VoiceInputConfiguration, text: string, final: boolean): void {
