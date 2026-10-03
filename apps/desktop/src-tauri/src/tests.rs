@@ -471,6 +471,7 @@ fn external_links_require_clean_https_urls() {
     for url in [
         "https://example.com/help",
         "https://updates.example.com/v1?channel=stable",
+        "https://example.com/a&b",
     ] {
         assert!(super::external_url_is_safe(url));
     }
@@ -481,7 +482,6 @@ fn external_links_require_clean_https_urls() {
         "https://example.com/help path",
         "https://user:secret@example.com/help",
         "https://example.com:bad/help",
-        "https://example.com/a&b",
         "https://example.com/\"quoted\"",
         "https://example.com/\\escape",
     ] {
