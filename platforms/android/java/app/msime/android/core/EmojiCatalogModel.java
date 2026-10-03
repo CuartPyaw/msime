@@ -10,10 +10,12 @@ public final class EmojiCatalogModel {
     public static final int COLUMNS = 8;
     public static final int PAGE_SIZE = 64;
     public static final int RECENTS_LIMIT = 24;
+    // 分类栏用图标而不是文字，十个分类才能在一行里等分放下；图标与共享 UI `emoji-catalog.ts` 一致。
+    public static final Category RECENTS = new Category("最近", "最近", "🕘");
     public static final int MAX_TEXT_CODE_POINTS = 32;
     public static final int MAX_ANNOTATION_CODE_POINTS = 1_024;
 
-    public record Category(String group, String title) {}
+    public record Category(String group, String title, String icon) {}
     public record Item(String text, String annotation, String group) {
         public Item {
             if (text == null || text.isEmpty()
@@ -34,15 +36,15 @@ public final class EmojiCatalogModel {
 
     // Unicode group order; database row sort order interleaves Symbols and Flags.
     private static final List<Category> CATEGORIES = List.of(
-        new Category("Smileys and emotion", "笑脸"),
-        new Category("People and body", "人物"),
-        new Category("Animals and nature", "动物"),
-        new Category("Food and drink", "食物"),
-        new Category("Travel and places", "旅行"),
-        new Category("Activities", "活动"),
-        new Category("Objects", "物品"),
-        new Category("Symbols", "符号"),
-        new Category("Flags", "旗帜")
+        new Category("Smileys and emotion", "笑脸", "😀"),
+        new Category("People and body", "人物", "👋"),
+        new Category("Animals and nature", "动物", "🐾"),
+        new Category("Food and drink", "食物", "🍎"),
+        new Category("Travel and places", "旅行", "🚗"),
+        new Category("Activities", "活动", "⚽"),
+        new Category("Objects", "物品", "💡"),
+        new Category("Symbols", "符号", "🔣"),
+        new Category("Flags", "旗帜", "🏳️")
     );
 
     private EmojiCatalogModel() {}
