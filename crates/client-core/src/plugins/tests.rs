@@ -963,6 +963,16 @@ fn import_follows_no_symbolic_link() {
     assert!(fs::read_dir(outside.path()).unwrap().next().is_none());
 }
 
+#[test]
+fn plugin_file_names_refuse_windows_device_names_on_every_platform() {
+    for name in [
+        "CON", "con.txt", "PRN.md", "AUX", "NUL", "COM1.wav", "lpt9.tsv",
+    ] {
+        assert!(!valid_file_name(name), "{name} must be refused");
+    }
+    assert!(valid_file_name("COM10.wav"));
+}
+
 /// An archive member: `(name, Some(bytes))` for a file, `(name, None)` for a directory.
 type Member<'a> = (&'a str, Option<&'a [u8]>);
 
