@@ -4211,18 +4211,33 @@ group("clipboard entries are bounded in characters and in UTF-8 bytes", () => {
   const wide = "中".repeat(1000);
   check(wide.length === 1000, "a thousand UTF-16 units");
   check(ClipboardHistoryPolicy.acceptable(wide) === true, "three thousand bytes is well inside");
-  // Worth recording: with MAX_CHARS at 10000 UTF-16 units, the worst case is 5000 astral characters
-  // at four bytes each, or 20000 bytes. The byte bound of 40000 is therefore unreachable through the
-  // character bound and is purely defensive. The Java original has the same property.
-  const astral = "😀".repeat(ClipboardHistoryPolicy.MAX_CHARS / 2);
-  check(astral.length === ClipboardHistoryPolicy.MAX_CHARS, "exactly at the character bound");
+  // The character bound counts extended graphemes, so ten thousand four-byte emoji also reach the
+  // independent forty-thousand-byte limit exactly.
+  const astral = "😀".repeat(ClipboardHistoryPolicy.MAX_CHARS);
+  check(astral.length === ClipboardHistoryPolicy.MAX_CHARS * 2, "UTF-16 still uses two units per emoji");
   check(
     ClipboardHistoryPolicy.acceptable(astral) === true,
-    "the heaviest text the character bound allows is still inside the byte bound",
+    "ten thousand emoji fit at both shared limits",
   );
   check(
     ClipboardHistoryPolicy.acceptable("😀".repeat(6000)) === true,
     "astral characters count once rather than as two UTF-16 units",
+  );
+  check(
+    ClipboardHistoryPolicy.acceptable("e\u0301".repeat(5001)) === true,
+    "combining marks stay in one grapheme, matching the shared store",
+  );
+  check(
+    ClipboardHistoryPolicy.acceptable("👩‍👩‍👧‍👦".repeat(1500)) === true,
+    "zero-width-joiner emoji stay in one grapheme, matching the shared store",
+  );
+  check(
+    ClipboardHistoryPolicy.acceptable("✈️".repeat(5001)) === true,
+    "variation selectors stay in one grapheme, matching the shared store",
+  );
+  check(
+    ClipboardHistoryPolicy.acceptable("x\r\n".repeat(5000)) === true,
+    "CRLF stays in one grapheme, matching the shared store",
   );
   check(
     ClipboardHistoryPolicy.acceptable("a\u0000b") === false,
