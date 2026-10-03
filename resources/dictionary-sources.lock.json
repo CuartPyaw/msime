@@ -6,7 +6,7 @@
     },
     "rime-ice": {
       "repository": "https://github.com/iDvel/rime-ice.git",
-      "commit": "3aea6d3694fb3d94ec663641f021f788822897ad"
+      "commit": "9e66b0729083b37d217312294f6d516c8d7234be"
     },
     "msime-dictionary": {
       "repository": "https://github.com/metasequoiaime/msime-dictionary.git",
@@ -27,6 +27,10 @@
     "libhangul": {
       "repository": "https://github.com/libhangul/libhangul.git",
       "commit": "717409ce61524bb3d8426060a384822f21354c62"
+    },
+    "rime-ice-supplement": {
+      "repository": "https://github.com/iDvel/rime-ice.git",
+      "commit": "3aea6d3694fb3d94ec663641f021f788822897ad"
     }
   },
   "mozc": {
