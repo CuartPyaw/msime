@@ -38,6 +38,12 @@ public final class AccountFragment extends HomeTabFragment {
     // while this screen was in the background.
     @Override protected void onBecameVisible() { render(); }
 
+    @Override public void onDestroy() {
+        // Activity 销毁后，旧的登录 challenge 可能不会再回调；释放本页的门禁让新页面可以重试。
+        signInAttempt.cancel();
+        super.onDestroy();
+    }
+
     private void render() {
         View view = getView();
         if (view == null) return;

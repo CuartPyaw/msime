@@ -14,6 +14,11 @@ public final class SignInAttemptPolicy {
         active = false;
     }
 
+    /** 宿主销毁时取消尚未完成的登录，避免旧页面把新页面的入口一直锁住。 */
+    public void cancel() {
+        active = false;
+    }
+
     public boolean active() {
         return active;
     }
