@@ -2345,6 +2345,7 @@ export function CloudDictionaryFilesPanel({ client }: { client: CloudDictionaryP
   }, [client, invalidate]);
 
   useEffect(() => {
+    mounted.current = true;
     return () => {
       mounted.current = false;
     };
