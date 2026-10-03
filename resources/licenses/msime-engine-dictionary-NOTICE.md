@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | `source/BaseDict.txt`、`cn/BaseDictV1.txt` | [wuhgit/CustomPinyinDictionary](https://github.com/wuhgit/CustomPinyinDictionary) | **未声明** |
 | `source/BaseDictIce.txt`、`cn/BaseDictIceV1.txt` | [iDvel/rime-ice](https://github.com/iDvel/rime-ice) | GPL-3.0 |
+| `cn/RimeIceSupplementV1.txt` | [iDvel/rime-ice](https://github.com/iDvel/rime-ice)，提交 `3aea6d3694fb3d94ec663641f021f788822897ad` 的开源词条，排除 `BaseDictIceV1.txt` 已有的同词同音行 | GPL-3.0 |
 | `cn/BaseDictAllV1Part1.txt`、`cn/BaseDictAllV1Part2.txt` | 上面两者合并去重 | GPL-3.0 与**未声明**的混合 |
 | `cn/SingleCharsAllV1.txt` | [iDvel/rime-ice](https://github.com/iDvel/rime-ice)，读音以 [mozillazg/pinyin-data](https://github.com/mozillazg/pinyin-data) 校正 | GPL-3.0 + MIT |
 | `source/SampleIMESimplifiedQuanPin.txt` | [microsoft/Windows-classic-samples](https://github.com/microsoft/Windows-classic-samples) | MIT |

@@ -10,7 +10,7 @@
     },
     "msime-dictionary": {
       "repository": "https://github.com/metasequoiaime/msime-dictionary.git",
-      "commit": "d00a93528b661ffa0f0da4aacc423a6d2d26b05d"
+      "commit": "12172293680f71d28015c45ddce8000d72fd3264"
     },
     "rime-cantonese": {
       "repository": "https://github.com/rime/rime-cantonese.git",
@@ -69,6 +69,12 @@
       "url": "https://github.com/metasequoiaime/msime-dictionary/releases/download/sources-v1.3.0/BaseDictIceV1.txt",
       "sha256": "d364637b9e27bb9b1c325971a4fa587e371ee3f98807b407744da345b876d4ec",
       "size": 28521963
+    },
+    {
+      "path": "cn/RimeIceSupplementV1.txt",
+      "url": "https://github.com/metasequoiaime/msime-dictionary/releases/download/sources-v1.4.0/RimeIceSupplementV1.txt",
+      "sha256": "aa382455a3e6127fba26ee69db1155b77b6be2b960cf538688beff59606cb07d",
+      "size": 1324324
     },
     {
       "path": "cn/Wubi86.txt",

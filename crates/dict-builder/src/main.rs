@@ -381,6 +381,9 @@ impl Build {
                     // Without a provenance record the whitelist cannot be applied, so every single character of the licensed source is accepted.
                     (vec![self.sources.pinned("cn/BaseDictIceV1.txt")?], None)
                 };
+                let supplement = self.sources.pinned("cn/RimeIceSupplementV1.txt")?;
+                let mut phrases = phrases;
+                phrases.push(supplement);
                 let inputs = msime::QuanpinInputs {
                     single_chars: &single_chars,
                     whitelist,
