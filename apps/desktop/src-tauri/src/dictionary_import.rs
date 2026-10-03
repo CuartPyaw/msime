@@ -184,6 +184,12 @@ pub(crate) struct ImportBatch {
 ///
 /// A Rime file's YAML header, `---` through `...`, is replaced by empty lines rather than carried: the parser only skips it when it sees the opening `---`, so a batch that began inside it would read the rest as rows. Keeping the lines, empty, keeps every later line at its own number.
 pub(crate) fn split_import(text: &str, rime: bool, budget: usize) -> Option<Vec<ImportBatch>> {
+    // The request envelope itself can consume the whole budget (for example, when a large
+    // preferences document is sent alongside the import). There is no batch that can fit then;
+    // reject before the capacity estimate below turns the input length into a huge allocation.
+    if budget == 0 {
+        return None;
+    }
     let empty = |lines_before| ImportBatch {
         text: String::new(),
         lines_before,
