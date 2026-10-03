@@ -183,11 +183,15 @@ struct Budget {
 
 impl Budget {
     fn take(&mut self, bytes: u64) -> Result<(), PluginError> {
-        self.files += 1;
-        self.bytes += bytes;
-        if self.files > MAX_PACK_FILES || bytes > MAX_FILE_BYTES || self.bytes > MAX_TOTAL_BYTES {
+        let total = self.bytes.checked_add(bytes);
+        if self.files >= MAX_PACK_FILES
+            || bytes > MAX_FILE_BYTES
+            || total.is_none_or(|total| total > MAX_TOTAL_BYTES)
+        {
             return Err(PluginError::Invalid("插件太大".into()));
         }
+        self.files += 1;
+        self.bytes = total.expect("the total was checked above");
         Ok(())
     }
 }
@@ -375,6 +379,15 @@ fn plain_component_capacity(path: &Path) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn budget_rejects_an_oversized_member_without_overflowing() {
+        let mut budget = Budget {
+            files: 0,
+            bytes: u64::MAX - 1,
+        };
+        assert!(budget.take(2).is_err());
+    }
 
     #[test]
     fn plain_component_capacity_matches_path_components() {
