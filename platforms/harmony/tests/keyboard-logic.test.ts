@@ -10976,6 +10976,16 @@ group("Harmony batch transcription accepts every shared cloud preset", () => {
   );
   check(HttpAsrConfigurationPolicy.valid(mistral), "the complete Mistral preset can record");
   check(
+    HttpAsrConfigurationPolicy.transcriptionLanguage("openai", "zh-CN") === "zh"
+      && HttpAsrConfigurationPolicy.transcriptionLanguage("openai", "zh_CN") === "zh"
+      && HttpAsrConfigurationPolicy.transcriptionLanguage("openai", "en-US") === "en",
+    "Harmony HTTP ASR reduces locale tags to the primary language",
+  );
+  check(
+    HttpAsrConfigurationPolicy.transcriptionLanguage("siliconflow", "zh-CN") === "",
+    "Harmony SiliconFlow ASR omits the unsupported language field",
+  );
+  check(
     !HttpAsrConfigurationPolicy.valid({
       ...mistral,
       asr_endpoint: "https://user:secret@example.test/v1/audio/transcriptions",
