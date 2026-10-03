@@ -10,7 +10,8 @@ use crate::dictionary::pinyin::BUSY_TIMEOUT;
 use crate::types::{CandidateSource, QueryRequest, SchemeType, WordItem, WubiProfileKind};
 
 const QUERY_LIMIT: i64 = 50;
-const REVERSE_QUERY_SQL: &str = "SELECT \"key\" FROM wubi86 WHERE \"value\" = ?1 ORDER BY length(\"key\") DESC, \"weight\" DESC, \"key\" ASC, rowid ASC LIMIT 1";
+const REVERSE_QUERY_SQL_86: &str = "SELECT \"key\" FROM wubi86 WHERE \"value\" = ?1 ORDER BY length(\"key\") DESC, \"weight\" DESC, \"key\" ASC, rowid ASC LIMIT 1";
+const REVERSE_QUERY_SQL_98: &str = "SELECT \"key\" FROM wubi98 WHERE \"value\" = ?1 ORDER BY length(\"key\") DESC, \"weight\" DESC, \"key\" ASC, rowid ASC LIMIT 1";
 
 /// A prefix query: the typed code's own rows lead, then every longer code it prefixes by weight. The same word reached through several codes (工 at a, aaa and aaaa) is kept once per code, because ranking and removal act on the code the row arrived with.
 const QUERY_SQL_86: &str = "SELECT \"key\", \"value\", \"weight\" FROM wubi86 WHERE \"key\" >= ?1 AND \"key\" < ?2 ORDER BY (\"key\" = ?1) DESC, \"weight\" DESC, \"key\" ASC, rowid ASC LIMIT ?3";
@@ -45,6 +46,7 @@ impl WubiProvider {
     /// 切换码表版本；下一次查询起读新表。
     pub fn set_profile(&mut self, profile: WubiProfileKind) {
         self.profile = profile;
+        self.reverse_cache.clear();
     }
 
     /// `SELECT "key","value","weight" FROM wubi86 WHERE "key" >= ?1 AND "key" < ?2 ORDER BY ("key" = ?1) DESC, "weight" DESC, "key" ASC, rowid ASC LIMIT ?3`, `?2` = the code with its last letter incremented and `?3` = 50. Rows carry `scheme = Wubi`. Any SQLite failure is an empty answer, as in the reference.
@@ -83,9 +85,10 @@ impl WubiProvider {
         if let Some(code) = self.reverse_cache.get(word) {
             return code.clone();
         }
+        let profile = self.profile;
         let code = self
             .connection()
-            .and_then(|connection| reverse_code(connection, word).ok().flatten());
+            .and_then(|connection| reverse_code(connection, profile, word).ok().flatten());
         self.reverse_cache.insert(word.to_owned(), code.clone());
         code
     }
@@ -151,9 +154,20 @@ fn query_rows(
     Ok(candidates)
 }
 
-fn reverse_code(connection: &Connection, word: &str) -> rusqlite::Result<Option<String>> {
+fn reverse_code(
+    connection: &Connection,
+    profile: WubiProfileKind,
+    word: &str,
+) -> rusqlite::Result<Option<String>> {
     connection
-        .query_row(REVERSE_QUERY_SQL, [word], |row| row.get(0))
+        .query_row(
+            match profile {
+                WubiProfileKind::Wubi86 => REVERSE_QUERY_SQL_86,
+                WubiProfileKind::Wubi98 => REVERSE_QUERY_SQL_98,
+            },
+            [word],
+            |row| row.get(0),
+        )
         .optional()
 }
 

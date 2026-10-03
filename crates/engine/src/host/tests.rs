@@ -1902,6 +1902,29 @@ fn wubi_reverse_codes_are_shown_for_quanpin_and_mixed_wubi_candidates() {
 }
 
 #[test]
+fn wubi_reverse_codes_follow_the_selected_profile() {
+    let root = tempfile::tempdir().unwrap();
+    let mut options = helpcode_fixture(
+        root.path(),
+        "CREATE TABLE wubi98(key TEXT,value TEXT,weight INTEGER);
+         INSERT INTO wubi86 VALUES('wqvb','你好',300);
+         INSERT INTO wubi98 VALUES('abcd','你好',300);",
+        "",
+    );
+    options.wubi_profile = 1;
+    let mut session = Session::new(&options).unwrap();
+    type_text(&mut session, b"nihao");
+    let view = session.snapshot().unwrap();
+    let index = view
+        .candidates
+        .iter()
+        .position(|word| word == "你好")
+        .unwrap();
+    assert!(view.candidate_annotations[index].contains("abcd"));
+    assert!(!view.candidate_annotations[index].contains("wqvb"));
+}
+
+#[test]
 fn hiding_helpcode_restores_correction_annotations() {
     let root = tempfile::tempdir().unwrap();
     let mut options = helpcode_fixture(
