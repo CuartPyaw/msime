@@ -8856,7 +8856,11 @@ fn publish_resource_pack(state_root: &Path, pack: ResourcePack, files: &[&str]) 
     for name in files {
         std::fs::write(directory.join(name), b"downloaded").unwrap();
     }
-    std::fs::write(directory.join("msime-model.json"), b"{}").unwrap();
+    std::fs::write(
+        directory.join("msime-model.json"),
+        serde_json::to_vec(&pack.manifest()).unwrap(),
+    )
+    .unwrap();
     directory
 }
 
