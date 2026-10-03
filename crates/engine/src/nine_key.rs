@@ -430,7 +430,10 @@ impl NineKeySession {
         for prefix in prefixes {
             for word in english.query_prefix(&prefix, ENGLISH_LIMIT) {
                 // Only a whole code that starts with the digits counts; otherwise letters beyond the expanded prefix leak in.
-                if !digits_for_word(&word.word).starts_with(&digits)
+                // The database lookup key is the lowercase spelling in `pinyin`; `word` is the
+                // display form and may intentionally contain punctuation or spaces (for example
+                // the custom entry `dont` displayed as `don't`).
+                if !digits_for_word(&word.pinyin).starts_with(&digits)
                     || has_candidate_word(&words, &word.word)
                 {
                     continue;
@@ -1139,6 +1142,32 @@ mod tests {
             "mixed English waits for the minimum prefix"
         );
         assert_eq!(session.snapshot().candidates[0].pinyin, "6");
+    }
+
+    #[test]
+    fn english_t9_uses_the_lookup_word_when_display_has_punctuation() {
+        let fixture = fixture();
+        Connection::open(fixture.paths.dictionary(assets::ENGLISH_DICTIONARY))
+            .unwrap()
+            .execute(
+                "INSERT INTO english_words(word, display, weight) VALUES ('dont', 'don''t', 100)",
+                [],
+            )
+            .unwrap();
+        let mut session = open(
+            &fixture.paths,
+            false,
+            EnglishInputOptions {
+                mixed_candidates: false,
+                ..EnglishInputOptions::default()
+            },
+        );
+        session.set_english_only(true);
+        type_digits(&mut session, "3668");
+        assert!(
+            words(&session).contains(&"don't".to_owned()),
+            "T9 should match the lookup key even when the displayed word contains punctuation"
+        );
     }
 
     #[test]
