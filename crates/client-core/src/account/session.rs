@@ -418,6 +418,15 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
         rejected_token: Option<&str>,
         expected_user_id: Option<&str>,
     ) -> Result<(String, String), AccountError> {
+        self.credentials_with_generation(rejected_token, expected_user_id)
+            .map(|(user_id, token, _)| (user_id, token))
+    }
+
+    fn credentials_with_generation(
+        &self,
+        rejected_token: Option<&str>,
+        expected_user_id: Option<&str>,
+    ) -> Result<(String, String, u64), AccountError> {
         {
             let mut state = self.lock()?;
             self.load_locked(&mut state)?;
@@ -440,16 +449,17 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
         {
             return Err(AccountError::Cancelled);
         }
-        Ok((saved.tokens.user.id.clone(), token))
+        Ok((saved.tokens.user.id.clone(), token, state.generation))
     }
 
     pub fn profile(&self) -> Result<AccountProfile, AccountError> {
-        let (user_id, profile) = self.authenticated_with_user(|api, token| api.profile(token))?;
+        let (user_id, profile, generation) =
+            self.authenticated_with_user(|api, token| api.profile(token))?;
         validate_profile(&profile)?;
         if profile.user.id != user_id {
             return Err(AccountError::Cancelled);
         }
-        self.update_user(profile.user.clone())?;
+        self.update_user(profile.user.clone(), generation)?;
         Ok(profile)
     }
 
@@ -514,14 +524,14 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
         F: Fn(&A, &str) -> Result<T, AccountError>,
     {
         self.authenticated_with_user(operation)
-            .map(|(_, result)| result)
+            .map(|(_, result, _)| result)
     }
 
-    fn authenticated_with_user<T, F>(&self, operation: F) -> Result<(String, T), AccountError>
+    fn authenticated_with_user<T, F>(&self, operation: F) -> Result<(String, T, u64), AccountError>
     where
         F: Fn(&A, &str) -> Result<T, AccountError>,
     {
-        let (user_id, token) = self.credentials(None, None)?;
+        let (user_id, token, generation) = self.credentials_with_generation(None, None)?;
         let result = match operation(&self.api, &token) {
             Err(AccountError::Unauthorized) => {
                 let (_, replacement) = self.credentials(Some(&token), Some(&user_id))?;
@@ -529,7 +539,18 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
             }
             result => result,
         }?;
-        Ok((user_id, result))
+        let mut state = self.lock()?;
+        self.load_locked(&mut state)?;
+        if state.generation != generation
+            || state
+                .saved
+                .as_ref()
+                .map(|saved| saved.tokens.user.id.as_str())
+                != Some(user_id.as_str())
+        {
+            return Err(AccountError::Cancelled);
+        }
+        Ok((user_id, result, generation))
     }
 
     pub fn preference_schema(&self) -> Result<AccountPreferenceSchema, AccountError> {
@@ -762,10 +783,13 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
             .or_else(|_| self.storage.clear())
     }
 
-    fn update_user(&self, user: AccountUser) -> Result<(), AccountError> {
+    fn update_user(&self, user: AccountUser, generation: u64) -> Result<(), AccountError> {
         self.storage.with_refresh_lock(|| {
             let mut state = self.lock()?;
             self.load_locked(&mut state)?;
+            if state.generation != generation {
+                return Err(AccountError::Cancelled);
+            }
             let current = state.saved.as_mut().ok_or(AccountError::Cancelled)?;
             if current.tokens.user.id != user.id {
                 return Err(AccountError::Cancelled);
@@ -787,7 +811,7 @@ where
     S: AccountSessionStorage,
 {
     let identity = if session.status()?.is_some() {
-        Some(session.credentials(None, None)?)
+        Some(session.credentials_with_generation(None, None)?)
     } else {
         None
     };
@@ -806,7 +830,13 @@ where
     }?;
     let expected = identity.as_ref().map(|value| value.0.as_str());
     let current = session.status()?.map(|user| user.id);
-    if current.as_deref() != expected {
+    let generation_matches = identity.as_ref().is_none_or(|(_, _, generation)| {
+        session
+            .lock()
+            .map(|state| state.generation == *generation)
+            .unwrap_or(false)
+    });
+    if current.as_deref() != expected || !generation_matches {
         return Err(AccountError::Cancelled);
     }
     Ok(result)
