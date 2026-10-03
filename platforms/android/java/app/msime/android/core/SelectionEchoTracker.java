@@ -44,6 +44,7 @@ public final class SelectionEchoTracker {
 
     /** 这次写入的结果算不出来（发按键事件、编辑器拒绝了写入、删除时有选区或组字区等）。 */
     public void invalidate() {
+        pendingCount = 0;
         known = false;
         written = false;
         slack = 0;
@@ -146,13 +147,20 @@ public final class SelectionEchoTracker {
         if (!known) return;
         if (selectionStart != selectionEnd || composingStart >= 0
                 || selectionStart - slack - maximum < 0 || slack + maximum - minimum > MAX_SLACK) {
-            invalidate();
+            invalidateCurrentPrediction();
             return;
         }
         selectionStart -= minimum;
         selectionEnd = selectionStart;
         slack += maximum - minimum;
         written = true;
+    }
+
+    /** This operation cannot be predicted, but earlier writes may still have valid pending echoes. */
+    private void invalidateCurrentPrediction() {
+        known = false;
+        written = false;
+        slack = 0;
     }
 
     /**

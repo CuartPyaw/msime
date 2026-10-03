@@ -88,6 +88,14 @@ public final class SelectionEchoTrackerSmoke {
         unknown.expect();
         check(!unknown.acknowledge(0, 0, -1, -1));
 
+        // invalidate 后，之前写入的迟到回声已经不能再代表当前编辑器状态；它必须按外部变化重新定基。
+        SelectionEchoTracker invalidated = new SelectionEchoTracker();
+        invalidated.reset(0, 0);
+        invalidated.commit(2);
+        invalidated.expect();
+        invalidated.invalidate();
+        check(!invalidated.acknowledge(2, 2, -1, -1));
+
         // 回报带着组字区时，下一次上屏替换的是那个组字区。
         SelectionEchoTracker rebased = new SelectionEchoTracker();
         rebased.reset(0, 0);
