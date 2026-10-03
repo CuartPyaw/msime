@@ -216,6 +216,22 @@ impl Session {
                     annotation = compute_helpcodes(&candidate.word, uppercase_all, keymap);
                 }
             }
+            if value.local_mode == LocalInputMode::None
+                && !value.dedicated_english
+                && matches!(
+                    candidate.scheme,
+                    SchemeType::Quanpin | SchemeType::Shuangpin | SchemeType::Wubi
+                )
+            {
+                if let Some(code) = self.inner.candidate_wubi_code(&candidate.word) {
+                    if !annotation.contains(code) {
+                        if !annotation.is_empty() {
+                            annotation.push(' ');
+                        }
+                        annotation.push_str(code);
+                    }
+                }
+            }
             output.candidate_annotations.push(annotation);
             output.candidate_sources.push(candidate.source as u8);
             output

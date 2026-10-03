@@ -1,14 +1,16 @@
 //! 五笔码表的 provider（`R/providers/wubi_candidate_provider.cpp`，含 wubi_prefix_learning overlay）：按 `WubiProfileKind` 读 `wubi86` 或 `wubi98`。Exact code first, then weight, no value dedup, at most 50 rows. The provider only reads: learning and removal of a wubi row go through `session`, which journals them with the wubi kind and then resets this cache.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use rusqlite::types::ValueRef;
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags, OptionalExtension};
 
 use crate::dictionary::pinyin::BUSY_TIMEOUT;
 use crate::types::{CandidateSource, QueryRequest, SchemeType, WordItem, WubiProfileKind};
 
 const QUERY_LIMIT: i64 = 50;
+const REVERSE_QUERY_SQL: &str = "SELECT \"key\" FROM wubi86 WHERE \"value\" = ?1 ORDER BY length(\"key\") DESC, \"weight\" DESC, \"key\" ASC, rowid ASC LIMIT 1";
 
 /// A prefix query: the typed code's own rows lead, then every longer code it prefixes by weight. The same word reached through several codes (工 at a, aaa and aaaa) is kept once per code, because ranking and removal act on the code the row arrived with.
 const QUERY_SQL_86: &str = "SELECT \"key\", \"value\", \"weight\" FROM wubi86 WHERE \"key\" >= ?1 AND \"key\" < ?2 ORDER BY (\"key\" = ?1) DESC, \"weight\" DESC, \"key\" ASC, rowid ASC LIMIT ?3";
@@ -26,6 +28,7 @@ pub struct WubiProvider {
     main_db: PathBuf,
     profile: WubiProfileKind,
     connection: Option<Connection>,
+    reverse_cache: HashMap<String, Option<String>>,
 }
 
 impl WubiProvider {
@@ -35,6 +38,7 @@ impl WubiProvider {
             main_db: main_db.to_path_buf(),
             profile: WubiProfileKind::Wubi86,
             connection: None,
+            reverse_cache: HashMap::new(),
         }
     }
 
@@ -68,6 +72,22 @@ impl WubiProvider {
     /// Closes the connection, so the next query sees what learning or removal wrote since.
     pub fn reset_cache(&mut self) {
         self.connection = None;
+        self.reverse_cache.clear();
+    }
+
+    /// 返回词条的完整五笔 86 编码。反查只服务于候选展示，不改变候选排序或选择身份；同一词条的多个编码优先取完整编码、再取词库权重最高的一条。
+    pub fn reverse_code(&mut self, word: &str) -> Option<String> {
+        if word.is_empty() {
+            return None;
+        }
+        if let Some(code) = self.reverse_cache.get(word) {
+            return code.clone();
+        }
+        let code = self
+            .connection()
+            .and_then(|connection| reverse_code(connection, word).ok().flatten());
+        self.reverse_cache.insert(word.to_owned(), code.clone());
+        code
     }
 
     fn connection(&mut self) -> Option<&Connection> {
@@ -129,6 +149,12 @@ fn query_rows(
         candidates.push(item);
     }
     Ok(candidates)
+}
+
+fn reverse_code(connection: &Connection, word: &str) -> rusqlite::Result<Option<String>> {
+    connection
+        .query_row(REVERSE_QUERY_SQL, [word], |row| row.get(0))
+        .optional()
 }
 
 #[cfg(test)]
