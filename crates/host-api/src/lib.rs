@@ -648,6 +648,7 @@ fn scheme_code(scheme: InputScheme) -> u8 {
         InputScheme::Cantonese => 5,
         InputScheme::Zhuyin => 6,
         InputScheme::Vietnamese => 7,
+        InputScheme::Tibetan => 8,
     }
 }
 
