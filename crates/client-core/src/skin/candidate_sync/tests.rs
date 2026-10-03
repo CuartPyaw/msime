@@ -603,7 +603,7 @@ fn a_failed_download_skips_only_that_package() {
 fn someone_elses_package_installed_from_the_gallery_is_left_alone() {
     let fixture = Fixture::new();
     write_skin(&fixture.root, "sakura", "樱花", 1);
-    record_install(&fixture.state, "sakura", Uuid::new_v4());
+    record_install(&fixture.state, "sakura", Uuid::new_v4()).unwrap();
     assert_eq!(fixture.sync(), CandidateSkinSyncReport::default());
     assert_eq!(fixture.library.calls(), ["list"]);
     // Once it is gone locally the record goes too, and a package of that name is the user's own again.
@@ -614,12 +614,23 @@ fn someone_elses_package_installed_from_the_gallery_is_left_alone() {
 }
 
 #[test]
+fn recording_a_gallery_install_reports_state_storage_failure() {
+    let fixture = Fixture::new();
+    fs::create_dir(&fixture.state).unwrap();
+
+    assert_eq!(
+        record_install(&fixture.state, "sakura", Uuid::new_v4()),
+        Err(STORAGE),
+    );
+}
+
+#[test]
 fn the_users_own_package_installed_from_the_gallery_is_compared_afresh() {
     let fixture = Fixture::new();
     write_skin(&fixture.root, "sakura", "樱花", 1);
     fixture.sync();
     let id = *fixture.library.rows.borrow().keys().next().unwrap();
-    record_install(&fixture.state, "sakura", id);
+    record_install(&fixture.state, "sakura", id).unwrap();
     fixture.library.calls();
     assert_eq!(fixture.sync(), CandidateSkinSyncReport::default());
     assert_eq!(fixture.library.calls(), ["list", "detail"]);
