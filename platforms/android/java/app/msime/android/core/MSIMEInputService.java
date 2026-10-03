@@ -1847,10 +1847,10 @@ public final class MSIMEInputService extends InputMethodService {
         }
     }
 
-    /** Cantonese, Zhuyin and Vietnamese candidates carry no glosses of any kind (`shows_glosses`). The schemes before them keep the rules this host already had, which still gloss Japanese candidates in English. */
+    /** 粤拼、注音、越南语和藏文的候选不带任何释义（`shows_glosses`）。它们之前的方案沿用本宿主原有的规则，日语候选仍附英文释义。 */
     private static boolean schemeShowsGlosses(int scheme) {
         return scheme != InputSchemeTraits.CANTONESE && scheme != InputSchemeTraits.ZHUYIN
-            && scheme != InputSchemeTraits.VIETNAMESE;
+            && scheme != InputSchemeTraits.VIETNAMESE && scheme != InputSchemeTraits.TIBETAN;
     }
 
     private void scheduleCandidateTranslations() {
@@ -2490,12 +2490,22 @@ public final class MSIMEInputService extends InputMethodService {
             && VietnameseInputPolicy.active(view.optInt("scheme", -1), dedicatedEnglish);
     }
 
-    /** Korean or Vietnamese: letters build the written text directly, so Shift is their case and the return key keeps its editor action. */
-    private boolean letterCompositionActive() {
-        return koreanSchemeActive() || vietnameseSchemeActive();
+    private boolean tibetanSchemeActive() {
+        return view != null
+            && TibetanInputPolicy.active(view.optInt("scheme", -1), dedicatedEnglish);
     }
 
-    /** Korean, Zhuyin or Vietnamese (`locks_caret`, `commits_on_blur`): the composition is text the user already wrote, with no caret inside it and no candidate list until one is opened. */
+    /** 越南语或藏文：字母按敲下的大小写写进组字，所以键面显示大小写，和英文键一样，而不是中文键盘的大写键面。 */
+    private boolean letterCaseSchemeActive() {
+        return vietnameseSchemeActive() || tibetanSchemeActive();
+    }
+
+    /** 韩语、越南语或藏文：字母直接拼成书写的文字，所以 Shift 是它们的大小写。韩语和越南语的回车上屏后还执行编辑器动作；藏文的回车只确认组字，见 `returnKeyConfirms`。 */
+    private boolean letterCompositionActive() {
+        return koreanSchemeActive() || letterCaseSchemeActive();
+    }
+
+    /** 韩语、注音、越南语或藏文（`locks_caret`、`commits_on_blur`）：组字是用户已经写下的文字，里面没有光标，打开列表之前也没有候选列表。 */
     private boolean writtenCompositionActive() {
         return view != null && !dedicatedEnglish
             && InputSchemeTraits.locksCaret(view.optInt("scheme", -1));
@@ -2611,7 +2621,7 @@ public final class MSIMEInputService extends InputMethodService {
         int scheme = view == null ? -1 : view.optInt("scheme", -1);
         String profile = view == null ? "" : view.optString("shuangpin_profile", "");
         String localMode = view == null ? "none" : view.optString("local_mode", "none");
-        boolean chineseMode = !dedicatedEnglish && !vietnameseSchemeActive();
+        boolean chineseMode = !dedicatedEnglish && !letterCaseSchemeActive();
         boolean local = view != null && !"none".equals(localMode);
         boolean shifted = letterCase.usesUppercase();
         if (!profile.equals(shuangpinHintsProfile)) {
@@ -2643,7 +2653,7 @@ public final class MSIMEInputService extends InputMethodService {
 
     private void updateAutomaticCapitalization() {
         if (!dedicatedEnglish) {
-            // On the Korean keycaps Shift is the double consonant the user chose, not capitalisation, and in Vietnamese it is the case of the next letter or a Caps Lock, so an editor update must not drop it.
+            // 韩语键面上 Shift 是用户选的双辅音而不是大写；越南语和藏文里它是下一个字母的大小写或 Caps Lock（威利转写区分大小写），所以编辑器的更新不能把它清掉。
             if (!letterCompositionActive()) letterCase.reset();
             return;
         }
@@ -2717,11 +2727,11 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     /**
-     * Whether the return key only confirms the composition. A Korean syllable is committed by Enter and the key still does its own work, so the key keeps its editor action there, unless the syllable's Hanja list is open: then Enter only chooses a Hanja. A Vietnamese word is the same: Enter writes it out and then does its editor action.
+     * 回车键是否只确认组字。韩语音节由回车上屏，按键随后照常执行自己的动作，所以那里保留编辑器动作，除非音节的汉字列表打开：这时回车只选汉字。越南语单词也一样：回车写出单词再执行编辑器动作。藏文不同：Engine 吞掉组字时的回车（handled），只上屏藏文、不加音节点，所以组字时回车键显示「确认」。
      */
     private boolean returnKeyConfirms() {
         return view != null && !view.optString("editing_text", "").isEmpty()
-            && (!letterCompositionActive() || koreanHanjaListOpen());
+            && (!letterCompositionActive() || koreanHanjaListOpen() || tibetanSchemeActive());
     }
 
     /** The return key's face: accent-filled 确认 while composing, the function tint otherwise. */
@@ -2985,7 +2995,7 @@ public final class MSIMEInputService extends InputMethodService {
         // Paging only means something while there is a candidate list. With nothing composed these
         // keys are the editor's: Tab moves focus, Page Down scrolls, and a comma is a comma.
         // Korean has no candidate list until its Hanja list opens: until then its punctuation follows the syllable, and Home/End end the syllable through HardwareKeyPolicy below and then move the caret. With the list open these keys page and move the highlight as for any list, except that the marks stay punctuation and Left/Right, which have no caret inside a syllable to move, move the highlight; Escape closes the list and keeps the syllable.
-        // Zhuyin and Vietnamese follow the same split: with no list open (Vietnamese never has one) these keys end the composition and do their own work, and an open Zhuyin list pages and moves its highlight like the Hanja list. Down opens a closed Zhuyin list, libchewing's key for it, whatever the arrow binding says, since with the list closed there is no highlight to move.
+        // 注音、越南语和藏文按同样的方式区分：没有打开列表时（越南语和藏文从来没有列表）这些键结束组字并执行自己的动作，打开的注音列表则像汉字列表一样翻页和移动高亮。不论方向键绑定是什么，↓ 都打开关闭着的注音列表（这是 libchewing 打开列表的键），因为列表关闭时没有高亮可以移动。
         boolean koreanHanjaList = koreanHanjaListOpen();
         boolean openedList = koreanHanjaList || zhuyinListOpen();
         if (ZhuyinInputPolicy.listDownKey(keyCode, event.isShiftPressed(), zhuyinOpensList(),
@@ -3072,14 +3082,14 @@ public final class MSIMEInputService extends InputMethodService {
         if (session != 0 && view != null && !view.optString("editing_text").isEmpty()
                 && (newStart != composingEnd || newEnd != composingEnd)) {
             // Don't apply an empty composition over the editor's newly moved selection.
-            // A Korean syllable is already the final Hangul, marked inline; finishing the region below leaves it in the document, so it counts as typed. A Zhuyin conversion and a Vietnamese word are written text the same way (`commits_on_blur`).
+            // 韩语音节已经是最终的韩文并内联标记，下面结束组字区域后它留在文档里，所以算作已输入。注音转换、越南语单词和藏文音节同样是已书写的文字（`commits_on_blur`）；藏文记的是 `editing_text` 里转换后的藏文。
             if (koreanSchemeActive() || zhuyinSchemeActive())
                 recordTypingStatistics(view.optString("reading", ""), typingSource());
-            else if (vietnameseSchemeActive())
+            else if (letterCaseSchemeActive())
                 recordTypingStatistics(view.optString("editing_text", ""), typingSource());
             boolean keepsComposition = !koreanSchemeActive() && writtenCompositionActive();
             try {
-                // With a Korean Hanja list open the first cancel only closes the list (msime_client.h), so it takes a second to drop the syllable the editor now holds as typed text. Zhuyin's first cancel only closes its list and Vietnamese's only takes the word back to its keys, so whatever they leave composing takes one more.
+                // 韩语汉字列表打开时第一次取消只关闭列表（msime_client.h），要再取消一次才丢掉编辑器里已作为文字保留的音节。注音的第一次取消只关闭列表，越南语和藏文的只退回原始按键，所以它们留下的组字还要再取消一次。
                 JSONObject cancelled = null;
                 for (int cancels = KoreanInputPolicy.cancelsToDiscard(koreanHanjaListOpen()); cancels > 0; cancels--)
                     cancelled = value(NativeClient.command(session, 3));
@@ -3696,7 +3706,7 @@ public final class MSIMEInputService extends InputMethodService {
 
     /** Width for the text this host commits itself, which never passes through the runtime. */
     private String fullWidthOutput(String text) {
-        // Korean and Vietnamese write half-width ASCII whatever the width setting says (`widens_full_width`), as the runtime does for their own commits.
+        // 韩语、越南语和藏文无论全角设置怎样都写半角 ASCII（`widens_full_width`），和 runtime 对它们自己的上屏一样。
         return FullWidthInputPolicy.output(text, fullWidthInput && !letterCompositionActive());
     }
 
@@ -3775,7 +3785,7 @@ public final class MSIMEInputService extends InputMethodService {
     private boolean supportsLocalTools() {
         if (view == null) return false;
         int scheme = view.optInt("scheme", 0);
-        // Korean has no local modes: Shift+letter is a double consonant there. Nor do Cantonese, Zhuyin and Vietnamese (`opens_local_modes`).
+        // 韩语没有本地模式：那里 Shift+字母是双辅音。粤拼、注音、越南语和藏文也没有（`opens_local_modes`）。
         return !dedicatedEnglish && scheme != 2 && scheme != 3
             && scheme != KoreanInputPolicy.KOREAN_SCHEME
             && (!InputSchemeTraits.known(scheme) || InputSchemeTraits.opensLocalModes(scheme));
@@ -6037,7 +6047,7 @@ public final class MSIMEInputService extends InputMethodService {
 
     private boolean traditionalOutputToolAvailable() {
         int scheme = view == null ? -1 : view.optInt("scheme", -1);
-        // Cantonese and Zhuyin write Traditional characters already, and Vietnamese is not Chinese (`script_conversion_applies`).
+        // 粤拼和注音本来就写繁体字，越南语和藏文不是中文（`script_conversion_applies`）。
         return scheme != 3 && scheme != KoreanInputPolicy.KOREAN_SCHEME
             && (!InputSchemeTraits.known(scheme) || InputSchemeTraits.scriptConversionApplies(scheme))
             && canSaveChineseOutput();
@@ -6167,10 +6177,10 @@ public final class MSIMEInputService extends InputMethodService {
     private boolean candidateManagementEnabled() {
         if (view == null || !view.optString("local_mode", "none").equals("none")) return false;
         int scheme = view.optInt("scheme", 0);
-        // Cantonese, Zhuyin and Vietnamese rows are not the pinyin user dictionary's to pin, delete or reorder.
+        // 粤拼、注音、越南语和藏文的候选不属于拼音用户词库，不能固定、删除或调整顺序。
         return scheme != 2 && scheme != 3 && scheme != KoreanInputPolicy.KOREAN_SCHEME
             && scheme != InputSchemeTraits.CANTONESE && scheme != InputSchemeTraits.ZHUYIN
-            && scheme != InputSchemeTraits.VIETNAMESE;
+            && scheme != InputSchemeTraits.VIETNAMESE && scheme != InputSchemeTraits.TIBETAN;
     }
 
     private void editCandidate(JSONObject id, CandidateManagementAction action) {
@@ -6993,8 +7003,8 @@ public final class MSIMEInputService extends InputMethodService {
             applyKeyboardGeometry();
             return;
         }
-        // A Vietnamese letter is written in the case it is typed in, so its keys show that case as the English keys do rather than the caps of a Chinese keyboard.
-        boolean chineseMode = !dedicatedEnglish && !vietnameseSchemeActive();
+        // 越南语字母和藏文的威利转写字母按敲下的大小写写入，所以键面像英文键一样显示大小写，而不是中文键盘的大写键面。
+        boolean chineseMode = !dedicatedEnglish && !letterCaseSchemeActive();
         boolean localMode = view != null
             && !"none".equals(view.optString("local_mode", "none"));
         boolean shifted = letterCase.usesUppercase();
@@ -7012,7 +7022,11 @@ public final class MSIMEInputService extends InputMethodService {
                 rows.size(), rowIndex, true));
             keyRows.addView(row, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-            for (String key : keys) {
+            boolean tibetanSymbols = keyboardLayer == KeyboardLayout.Layer.SYMBOLS
+                && tibetanSchemeActive();
+            for (String rowKey : keys) {
+                // 藏文的符号页把 `=` 换成叠写用的 `+`。
+                final String key = KeyboardLayout.symbolRowKey(rowKey, tibetanSymbols);
                 final String input = key;
                 String face = keyboardLayer == KeyboardLayout.Layer.SYMBOLS
                     ? ChineseSymbolFaces.face(key, sendsChinesePunctuation())
@@ -7773,7 +7787,7 @@ public final class MSIMEInputService extends InputMethodService {
         // toolbar, and what the action row keeps is whatever KeyboardActionRow lists for the surface.
         LinearLayout controls = new LinearLayout(this);
         shiftButton = button(controls, "⇧", () -> {
-            // On the Korean keycaps Shift is the double consonant row, not the way into English, and in Vietnamese it is the letter case.
+            // 韩语键面上 Shift 是双辅音那一排，不是切到英文的入口；越南语和藏文里它是字母大小写。
             if (!dedicatedEnglish && session != 0 && !helpcodeCompositionEligible()
                     && !letterCompositionActive()) {
                 toggleInputLanguage();
@@ -8242,21 +8256,24 @@ public final class MSIMEInputService extends InputMethodService {
                     : selectedScheme == KeyboardScheme.KOREAN ? KoreanInputPolicy.KOREAN_SCHEME
                     : selectedScheme == KeyboardScheme.CANTONESE ? InputSchemeTraits.CANTONESE
                     : selectedScheme == KeyboardScheme.ZHUYIN ? InputSchemeTraits.ZHUYIN
-                    : selectedScheme == KeyboardScheme.VIETNAMESE ? InputSchemeTraits.VIETNAMESE : -1)
+                    : selectedScheme == KeyboardScheme.VIETNAMESE ? InputSchemeTraits.VIETNAMESE
+                    : selectedScheme == KeyboardScheme.TIBETAN ? InputSchemeTraits.TIBETAN : -1)
                 : view.optInt("scheme", -1);
             boolean japanese = scheme == 3;
             boolean korean = scheme == KoreanInputPolicy.KOREAN_SCHEME;
             boolean cantonese = scheme == InputSchemeTraits.CANTONESE;
             boolean zhuyin = scheme == InputSchemeTraits.ZHUYIN;
             boolean vietnamese = scheme == InputSchemeTraits.VIETNAMESE;
+            boolean tibetan = scheme == InputSchemeTraits.TIBETAN;
             scriptShortcutButton.setEnabled(!japanese && !korean && !cantonese && !zhuyin
-                && !vietnamese && canSaveChineseOutput());
+                && !vietnamese && !tibetan && canSaveChineseOutput());
             String label = traditionalChineseOutput ? "切换到简体" : "切换到繁体";
             String outputState = japanese ? "日语不使用简繁转换"
                 : korean ? "韩语不使用简繁转换"
                 : cantonese ? "粤拼直接输出繁体"
                 : zhuyin ? "注音直接输出繁体"
                 : vietnamese ? "越南语不使用简繁转换"
+                : tibetan ? "藏文不使用简繁转换"
                 : traditionalOutputSaving ? "正在保存"
                 : traditionalChineseOutput ? "繁体" : "简体";
             scriptShortcutButton.setContentDescription(
@@ -8321,7 +8338,7 @@ public final class MSIMEInputService extends InputMethodService {
             String caseLabel = shiftLayout == KeyboardLayout.KOREAN_LAYOUT
                 ? KoreanKeyboardLayout.SHIFT_LABEL
                 : letterCase.accessibilityLabel(dedicatedEnglish || session == 0
-                    || vietnameseSchemeActive());
+                    || letterCaseSchemeActive());
             String caseValue = letterCase.accessibilityValue();
             shiftButton.setContentDescription(Build.VERSION.SDK_INT >= 30
                 ? caseLabel : caseLabel + "，" + caseValue);
