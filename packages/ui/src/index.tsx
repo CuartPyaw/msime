@@ -1484,8 +1484,9 @@ export type InputScheme =
   | "korean"
   | "cantonese"
   | "zhuyin"
-  | "vietnamese";
-/** Mirrors `client-core::preferences::ChineseScheme`: the schemes a Japanese, Korean or Vietnamese selection returns to. */
+  | "vietnamese"
+  | "tibetan";
+/** 对应 `client-core::preferences::ChineseScheme`：选日文、韩文、越南文或藏文后要回到的中文方案。 */
 export type ChineseScheme = "quanpin" | "shuangpin" | "wubi" | "cantonese" | "zhuyin";
 /** Mirrors `client-core::preferences::VietnamesePreferences`. Absent from a document left at its defaults: Telex with modern tone placement. */
 export type VietnamesePreferences = {
