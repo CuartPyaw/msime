@@ -148,9 +148,18 @@ public final class CustomSkinLibrary {
         iterator.setText(value);
         int count = 0;
         iterator.first();
-        while (iterator.next() != BreakIterator.DONE) {
-            if (++count > MAX_NAME_LENGTH) return false;
+        int boundary;
+        while ((boundary = iterator.next()) != BreakIterator.DONE) {
+            if (!joinedByZeroWidthJoiner(value, boundary)
+                    && ++count > MAX_NAME_LENGTH) return false;
         }
         return true;
+    }
+
+    /** Some JDK Unicode tables split an emoji ZWJ sequence at the joiner; Android ICU does not. */
+    private static boolean joinedByZeroWidthJoiner(String value, int boundary) {
+        int before = value.codePointBefore(boundary);
+        int after = boundary < value.length() ? value.codePointAt(boundary) : -1;
+        return before == 0x200D || after == 0x200D;
     }
 }
