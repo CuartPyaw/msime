@@ -566,7 +566,7 @@ IDWriteTextFormat *DeviceResources::GetTextFormat(const std::wstring &fontFamily
     {
         if (FAILED(dwriteFactory_->CreateTextFormat(L"Microsoft YaHei", nullptr, key.fontWeight,
                                                     DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-                                                    key.fontSize, format.GetAddressOf())))
+                                                    key.fontSize, L"", format.GetAddressOf())))
         {
             return nullptr;
         }
