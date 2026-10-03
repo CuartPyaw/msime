@@ -6,7 +6,7 @@
  * NAPI dependency, so they run under plain node, and the assertions are written against the Java
  * source they were ported from rather than against the port.
  */
-import { KeyboardGeometry } from "../entry/src/main/ets/keyboard/KeyboardGeometry";
+import { HitOffset, KeyboardGeometry } from "../entry/src/main/ets/keyboard/KeyboardGeometry";
 import {
   LocalAsrPolicy,
   PcmFrameSlicer,
@@ -166,6 +166,7 @@ import {
 } from "../entry/src/main/ets/keyboard/candidate/CandidateGlossPolicy";
 import { ShuangpinKeyHintPolicy } from "../entry/src/main/ets/keyboard/input/ShuangpinKeyHintPolicy";
 import { EditorPolicy, EditorTraits } from "../entry/src/main/ets/keyboard/input/EditorPolicy";
+import { EditEchoLedger } from "../entry/src/main/ets/keyboard/input/EditEchoLedger";
 import { KeyboardSkin } from "../entry/src/main/ets/keyboard/skin/KeyboardSkin";
 import { GlobalTheme, KeyboardThemePalette } from "../entry/src/main/ets/keyboard/skin/GlobalTheme";
 import { ToolbarSkinPolicy } from "../entry/src/main/ets/keyboard/ToolbarSkinPolicy";
@@ -1559,6 +1560,76 @@ group("display strings match the Java formatting", () => {
   check(KeyboardGeometry.halfGapPixels(60, 3) === 9, "half gap rounds to whole pixels");
   check(KeyboardGeometry.halfGapPixels(60, 0) === 0, "a non-positive density yields no gap");
   check(KeyboardGeometry.halfGapPixels(60, Number.NaN) === 0, "a non-finite density yields no gap");
+});
+
+/** Whether a point in key coordinates falls in the union of the key-sized rectangles `hitOffsets` returned. */
+function inHitRegion(
+  offsets: HitOffset[],
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+): boolean {
+  return offsets.some(
+    (offset: HitOffset): boolean =>
+      x >= offset.x && x <= offset.x + width && y >= offset.y && y <= offset.y + height,
+  );
+}
+
+group("a key's touch region reaches into half of each gap and no further", () => {
+  const width = 32;
+  const height = 42;
+  const halfKey = 3;
+  const halfRow = 3.5;
+  const offsets = KeyboardGeometry.hitOffsets(halfKey, halfRow, halfKey, halfRow);
+  check(offsets.length === 4, "four key-sized rectangles make up the extended region");
+  let exact = true;
+  for (let y = -6; y <= height + 6; y += 0.5) {
+    for (let x = -6; x <= width + 6; x += 0.5) {
+      const expected =
+        x >= -halfKey && x <= width + halfKey && y >= -halfRow && y <= height + halfRow;
+      if (inHitRegion(offsets, width, height, x, y) !== expected) exact = false;
+    }
+  }
+  check(exact, "their union is exactly the key widened by half a gap on every side");
+
+  // The next key in the row starts one full gap to the right; a touch in the gap belongs to whichever key is nearer.
+  const gap = halfKey * 2;
+  let owned = true;
+  for (let x = width + 0.25; x < width + gap; x += 0.5) {
+    const left = inHitRegion(offsets, width, height, x, height / 2);
+    const right = inHitRegion(offsets, width, height, x - width - gap, height / 2);
+    if (left === right || left !== x < width + halfKey) owned = false;
+  }
+  check(
+    owned,
+    "every point of the gap between two keys belongs to exactly one of them, split at its midpoint",
+  );
+
+  check(
+    KeyboardGeometry.hitOffsets(halfKey, 0, halfKey, 0).length === 2,
+    "an axis that does not extend adds no rectangle",
+  );
+  const rail = KeyboardGeometry.hitOffsets(halfKey, 0, halfKey, halfRow);
+  check(
+    !inHitRegion(rail, width, height, width / 2, -0.5),
+    "and the region does not grow on that side",
+  );
+  check(
+    inHitRegion(rail, width, height, width / 2, height + halfRow),
+    "while it still does on the others",
+  );
+
+  const plain = KeyboardGeometry.hitOffsets(0, 0, 0, 0);
+  check(
+    plain.length === 1 && plain[0].x === 0 && plain[0].y === 0,
+    "no extension is the key itself",
+  );
+  const negative = KeyboardGeometry.hitOffsets(-2, -2, -2, -2);
+  check(
+    negative.length === 1 && negative[0].x === 0 && negative[0].y === 0,
+    "a negative extension never shrinks the key",
+  );
 });
 
 group("layout adjustment follows the first drag axis", () => {
@@ -4461,11 +4532,13 @@ group("return performs an editor action only when nothing else claimed it", () =
     "a candidate-less non-Japanese composition is still finished before Return",
   );
   check(
-    ReturnKeyAction.dispatch(false, true, 3, false, false, false, true) === ReturnDispatch.COMMIT_RAW,
+    ReturnKeyAction.dispatch(false, true, 3, false, false, false, true) ===
+      ReturnDispatch.COMMIT_RAW,
     "Stroke Return commits the typed letters even with candidates, as on iOS, Android and a hardware Return",
   );
   check(
-    ReturnKeyAction.dispatch(false, true, 0, false, false, false, true) === ReturnDispatch.COMMIT_RAW,
+    ReturnKeyAction.dispatch(false, true, 0, false, false, false, true) ===
+      ReturnDispatch.COMMIT_RAW,
     "a Stroke composition without candidates commits its letters too",
   );
   check(
@@ -6153,14 +6226,62 @@ group("a delayed editor callback never interrupts typing", () => {
 });
 
 group("editor change echoes preserve keyboard-owned composition", () => {
+  const ledger = new EditEchoLedger();
   check(
-    !EditorPolicy.isExternalTextChange(1),
-    "a pending keyboard edit consumes its own asynchronous text-change echo",
-  );
-  check(
-    EditorPolicy.isExternalTextChange(0),
+    !ledger.acknowledge(0),
     "a text change with no pending keyboard mutation came from the host",
   );
+  ledger.reserve(100);
+  check(
+    ledger.acknowledge(150),
+    "a pending keyboard edit consumes its own asynchronous text-change echo",
+  );
+  check(!ledger.acknowledge(160), "and only one: the next change is the host's");
+
+  // Return in a multi-line field inserts a newline whose echo lands after the next letter started a composition.
+  ledger.reserve(1000);
+  check(
+    ledger.acknowledge(1200),
+    "a late newline echo is the keyboard's and does not finish the new composition",
+  );
+
+  // A preview update is two calls; finishing an empty preview changes nothing and the editor sends no echo for it.
+  ledger.reserve(2000);
+  ledger.reserve(2000);
+  check(ledger.acknowledge(2030), "the preview text change is consumed");
+  check(
+    ledger.pending(2030) === 1,
+    "the finish that produced no echo is still reserved for a while",
+  );
+  check(
+    !ledger.acknowledge(2000 + EditEchoLedger.ECHO_TIMEOUT_MS + 1),
+    "but expires, so a genuine host edit afterwards still finishes the composition",
+  );
+  check(ledger.pending(5000) === 0, "an expired reservation is gone");
+
+  ledger.reserve(6000);
+  check(
+    ledger.acknowledge(6000 + EditEchoLedger.ECHO_TIMEOUT_MS),
+    "an echo arriving right at the limit is still the keyboard's",
+  );
+
+  ledger.reserve(7000);
+  ledger.reserve(7010);
+  ledger.release();
+  check(ledger.pending(7020) === 1, "an edit the editor refused gives its reservation back");
+  ledger.clear();
+  check(!ledger.acknowledge(7030), "a new editor starts with nothing reserved");
+
+  ledger.reserve(9000);
+  check(
+    !ledger.acknowledge(8000),
+    "a reservation from a clock that has since gone back cannot linger",
+  );
+
+  for (let index = 0; index < EditEchoLedger.MAX_PENDING + 4; index++) {
+    ledger.reserve(10000);
+  }
+  check(ledger.pending(10000) === EditEchoLedger.MAX_PENDING, "reservations are bounded");
 });
 
 group("a password field never sees a composition buffer", () => {
@@ -11406,18 +11527,21 @@ group("账号同步用 input.wubi_schema 携带五笔版本", () => {
   }
 });
 
-group("account sync leaves the scheme out for Cantonese, Zhuyin, Vietnamese, Tibetan and Stroke", () => {
-  for (const scheme of ["cantonese", "zhuyin", "vietnamese", "tibetan", "stroke"]) {
-    const values = localAccountPreferences({ scheme }, syncFeedback);
-    check(!("input.schema" in values), `${scheme} never uploads an input schema`);
-    const merged = mergeAccountPreferences(
-      { revision: 3, settings: { "input.schema": "wubi" } },
-      values,
-      fullPreferenceSchema(),
-    );
-    check(merged.settings["input.schema"] === "wubi", `${scheme} keeps the account's scheme`);
-  }
-});
+group(
+  "account sync leaves the scheme out for Cantonese, Zhuyin, Vietnamese, Tibetan and Stroke",
+  () => {
+    for (const scheme of ["cantonese", "zhuyin", "vietnamese", "tibetan", "stroke"]) {
+      const values = localAccountPreferences({ scheme }, syncFeedback);
+      check(!("input.schema" in values), `${scheme} never uploads an input schema`);
+      const merged = mergeAccountPreferences(
+        { revision: 3, settings: { "input.schema": "wubi" } },
+        values,
+        fullPreferenceSchema(),
+      );
+      check(merged.settings["input.schema"] === "wubi", `${scheme} keeps the account's scheme`);
+    }
+  },
+);
 
 group("a hardware keyboard on Korean composes letters and hands the rest back in order", () => {
   const key = (over: Record<string, unknown> = {}): HardwareKey => ({
