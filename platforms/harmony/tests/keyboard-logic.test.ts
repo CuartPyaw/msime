@@ -9551,6 +9551,15 @@ group("the skin gallery is public to browse and signed in to change", () => {
       "an id that is not a uuid never reaches a path",
     );
   });
+  void gallery({
+    community_operation: "detail",
+    id: "00000000-0000-0000-0000-000000000000",
+  }).then((result) => {
+    check(
+      JSON.parse(result).error === "community_invalid",
+      "the nil uuid is refused before it reaches a path",
+    );
+  });
   void gallery({ community_operation: "rate", id, stars: 9 }).then((result) => {
     check(JSON.parse(result).error === "community_invalid", "a rating outside 1..5 is refused");
   });
