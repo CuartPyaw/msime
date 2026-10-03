@@ -161,6 +161,7 @@ export interface CandidateSkinCommunityClient {
 }
 
 type PreviewLoader = (id: string) => Promise<string>;
+const CANDIDATE_SKIN_PREVIEW_CACHE_CAPACITY = 16;
 
 /** The package's preview image, read only once its card or detail view is on the page. */
 function CandidateSkinPreviewImage({
@@ -324,11 +325,21 @@ export function CommunityCandidateSkinsPage({
   const loadPreview = useMemo<PreviewLoader>(() => {
     const cache = new Map<string, Promise<string>>();
     return (id) => {
-      let pending = cache.get(id);
-      if (!pending) {
-        pending = client.preview(id).then((value) => value.dataUrl);
-        pending.catch(() => cache.delete(id));
-        cache.set(id, pending);
+      const cached = cache.get(id);
+      if (cached) {
+        cache.delete(id);
+        cache.set(id, cached);
+        return cached;
+      }
+      const pending = client.preview(id).then((value) => value.dataUrl);
+      pending.catch(() => {
+        if (cache.get(id) === pending) cache.delete(id);
+      });
+      cache.set(id, pending);
+      while (cache.size > CANDIDATE_SKIN_PREVIEW_CACHE_CAPACITY) {
+        const oldest = cache.keys().next().value;
+        if (oldest === undefined) break;
+        cache.delete(oldest);
       }
       return pending;
     };
