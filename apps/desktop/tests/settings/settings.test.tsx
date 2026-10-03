@@ -2,6 +2,7 @@
 import { testHost } from "../support/host";
 import { settingsFormReady, saveSettingsNow } from "../support/settings-form";
 import { afterEach, expect, test, vi } from "vitest";
+import { StrictMode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import minimizeIcon from "../../../../packages/ui/src/assets/minimize.svg";
 import maximizeIcon from "../../../../packages/ui/src/assets/maximize.svg";
@@ -4596,15 +4597,17 @@ test("Android AI skin draw prepares artwork, saves a proposal and continues edit
     },
   ]);
   render(
-    <SettingsPage
-      client={{
-        load: async () => initial,
-        save: vi.fn(),
-        customTouchKeyboardSkins: true,
-        aiSkins,
-        customSkinLibrary: { load: async () => [], mutate },
-      }}
-    />,
+    <StrictMode>
+      <SettingsPage
+        client={{
+          load: async () => initial,
+          save: vi.fn(),
+          customTouchKeyboardSkins: true,
+          aiSkins,
+          customSkinLibrary: { load: async () => [], mutate },
+        }}
+      />
+    </StrictMode>,
   );
   fireEvent.click(await screen.findByRole("button", { name: "主题" }));
   fireEvent.click(screen.getByRole("button", { name: "设计我的皮肤" }));
