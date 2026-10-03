@@ -632,6 +632,7 @@ pub async fn account_preferences_upload(
     let platform = state.platform.clone();
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let (user_id, _, generation) = session.credentials_with_generation(None, None)?;
         let schema = session.preference_schema()?;
         let cloud = session.preferences()?;
         let native = platform
@@ -650,7 +651,7 @@ pub async fn account_preferences_upload(
             return Err(AccountError::Unavailable);
         }
         let merged = merge_account_preferences(&cloud, &values, &schema)?;
-        session.put_preferences(&merged)
+        session.put_preferences_with_generation(&merged, generation, &user_id)
     })
     .await
     .map_err(|_| crate::CommandError {
@@ -893,5 +894,18 @@ mod tests {
                 "revisionRequired":true
             })
         );
+    }
+
+    #[test]
+    fn preference_upload_is_fenced_by_the_session_generation() {
+        let source = include_str!("ios_account.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        assert!(source.contains(
+            "let (user_id, _, generation) = session.credentials_with_generation(None, None)?;"
+        ));
+        assert!(source
+            .contains("session.put_preferences_with_generation(&merged, generation, &user_id)"));
     }
 }
