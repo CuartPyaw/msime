@@ -10,7 +10,7 @@
     },
     "msime-dictionary": {
       "repository": "https://github.com/metasequoiaime/msime-dictionary.git",
-      "commit": "fb597bc2c1bd965041f7d4821e63a1ede426a29b"
+      "commit": "06008c4af76671dd5ca38b427cddfe87589d0c1a"
     },
     "rime-cantonese": {
       "repository": "https://github.com/rime/rime-cantonese.git",
@@ -31,6 +31,10 @@
     "rime-ice-supplement": {
       "repository": "https://github.com/iDvel/rime-ice.git",
       "commit": "3aea6d3694fb3d94ec663641f021f788822897ad"
+    },
+    "McBopomofo": {
+      "repository": "https://github.com/openvanilla/McBopomofo.git",
+      "commit": "be6564acad6c4d3265c34a2e1a872d80f9db6068"
     }
   },
   "mozc": {
@@ -193,6 +197,12 @@
       "url": "https://github.com/metasequoiaime/msime-dictionary/releases/download/sources-v1.3.0/tsi.csv",
       "sha256": "c889a1ac3ae1901b3f8f62748bc41b958f010bf995f7f88dbaf9e3494f341428",
       "size": 5244487
+    },
+    {
+      "path": "tw/McBopomofoSupplement.txt",
+      "url": "https://github.com/metasequoiaime/msime-dictionary/releases/download/sources-v1.4.0/McBopomofoSupplement.txt",
+      "sha256": "6f299a0bb4e5e1d80e6597ffb4ceb01b8ede19fe337126c743afdaa5ebe54ac0",
+      "size": 1232220
     },
     {
       "path": "tw/word.csv",
