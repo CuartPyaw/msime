@@ -4850,6 +4850,66 @@ fn cloud_candidate_requires_an_existing_local_candidate_page() {
 }
 
 #[test]
+fn direct_cloud_callbacks_follow_a_pending_disable() {
+    for batch in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let preferences = Preferences {
+            scheme: InputScheme::Quanpin,
+            cloud_candidates: true,
+            ..chinese_preferences()
+        };
+        let handle = test_host_with_pinyin_fixture(dir.path(), preferences.clone());
+        read(msime_client_focus(handle, true));
+        for byte in b"nihao" {
+            read(msime_client_character(handle, *byte, false));
+        }
+        let old_query = read(msime_client_online_query(handle))["value"].clone();
+        assert_eq!(old_query["cloud_candidates"], true);
+        let before = read(msime_client_view(handle))["value"].clone();
+        assert!(!before["candidates"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+
+        let disabled = Preferences {
+            cloud_candidates: false,
+            ..preferences
+        };
+        assert_eq!(update(handle, 1, &disabled)["value"]["deferred"], true);
+
+        let query = old_query.to_string();
+        let result = if batch {
+            let candidates = serde_json::to_vec(&json!(["云候选"])).unwrap();
+            read(unsafe {
+                msime_client_apply_online_candidates(
+                    handle,
+                    query.as_ptr(),
+                    query.len(),
+                    candidates.as_ptr(),
+                    candidates.len(),
+                    0,
+                )
+            })
+        } else {
+            let candidate = "云候选";
+            read(unsafe {
+                msime_client_apply_online_candidate(
+                    handle,
+                    query.as_ptr(),
+                    query.len(),
+                    candidate.as_ptr(),
+                    candidate.len(),
+                    0,
+                )
+            })
+        };
+        assert_eq!(result["value"]["applied"], false, "batch={batch}: {result}");
+        assert_eq!(result["value"]["view"], before, "batch={batch}: {result}");
+        read(msime_client_destroy(handle));
+    }
+}
+
+#[test]
 fn an_ai_credential_handed_over_in_memory_signs_requests_without_being_stored() {
     let dir = tempfile::tempdir().unwrap();
     let mut preferences = Preferences {
