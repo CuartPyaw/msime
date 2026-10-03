@@ -128,7 +128,7 @@ Android Tauri 设置仅在 Android WebView 注入统计能力，桌面设置不�
 
 中文候选在支持个人词典管理的方案中提供与固定 Apple 来源一致的长按菜单顺序：优先显示、固定到首位、取消固定和删除词条；删除操作要求 Android 确认对话框。固定位置通过共享 host API 限制为 1–5，本界面固定到首位时只传入位置 1。候选身份仍由 Engine 返回的 session/generation/index 传入 JNI，generation 或候选身份过期后不会修改当前会话；五笔、日语和本地输入模式不展示管理菜单。
 
-候选 UI 现在消费共享的 `candidate_layout`、`candidate_font_size`、`candidate_preedit_font_size`、`candidate_font_family`、`candidate_english_font`、`candidate_fallback_fonts` 和 `candidate_theme`；候选栏是键盘顶部的一条，按全局主题解析出的键盘调色板（以 `candidate_theme` 的明暗解析）渲染普通候选栏和展开面板，选中候选用强调色加粗，候选按钮、预编辑、页码和英文建议使用设置中的首选字体，缺字回落交给 Android 系统字体链。非法主题、颜色和字体安全回退。自定义主题的候选颜色选择器 `custom_theme.candidate_colors` 只作用于桌面候选窗，Android 候选栏跟随键盘调色板。偏好热更新成功后立即调整候选排列、字号、字体和调色板，不重建 Engine 会话。字号只接受核心偏好允许的 12–32 范围，字体名称遵循共享的 128 UTF-8 字节和控制字符边界。
+候选 UI 现在消费共享的 `candidate_font_size`、`candidate_preedit_font_size`、`candidate_font_family`、`candidate_english_font`、`candidate_fallback_fonts` 和 `candidate_theme`；候选栏是键盘顶部的一条，按全局主题解析出的键盘调色板（以 `candidate_theme` 的明暗解析）渲染普通候选栏和展开面板，选中候选用强调色加粗，候选按钮、预编辑、页码和英文建议使用设置中的首选字体，缺字回落交给 Android 系统字体链。非法主题、颜色和字体安全回退。自定义主题的候选颜色选择器 `custom_theme.candidate_colors` 只作用于桌面候选窗，Android 候选栏跟随键盘调色板。共享的 `candidate_layout` 只描述桌面候选窗：触屏候选条只有一行高，和 iOS 一样始终横排，释义在候选下面另起一行，更多候选在展开面板里看。偏好热更新成功后立即调整候选字号、字体和调色板，不重建 Engine 会话。字号只接受核心偏好允许的 12–32 范围，字体名称遵循共享的 128 UTF-8 字节和控制字符边界。
 
 横向候选条在 Engine session、generation 或候选页变化时回到当前页首项；这样翻页或新组字不会沿用上一页的横向偏移，把用户带到旧列表的中段。仅释义/翻译等同一代次的显示重绘保留用户当前滚动位置。候选身份仍由共享 session/generation/index 决定，Android 不自行排序或改写候选内容。
 

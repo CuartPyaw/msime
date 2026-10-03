@@ -1196,13 +1196,13 @@ public final class MSIMEInputService extends InputMethodService {
         candidateAppearance = CandidateAppearance.from(preferences,
             surfaceSkin(preferences, "candidate_theme"));
         if (preferences == null) {
-            candidateHorizontal = false;
+            candidateHorizontal = true;
             candidateFontSize = 16;
             candidatePreeditFontSize = 16;
             return;
         }
-        String layout = preferences.optString("candidate_layout", "vertical");
-        candidateHorizontal = CandidateAppearance.isHorizontal(layout);
+        // 共享的 `candidate_layout` 是桌面候选窗的横排/竖排，默认竖排；触屏候选条只有一行高，竖排时每个候选占满整行往下排，一屏只露出第一个。和 iOS 一样，触屏键盘始终横排，更多候选在展开面板里看。
+        candidateHorizontal = true;
         candidateFontSize = CandidateAppearance.fontSize(preferences.optInt("candidate_font_size", 16));
         candidatePreeditFontSize = CandidateAppearance.fontSize(
             preferences.optInt("candidate_preedit_font_size", candidateFontSize));
@@ -1433,10 +1433,9 @@ public final class MSIMEInputService extends InputMethodService {
         KeyboardSkin nextSkin = keyboardSkin(preferences);
         JSONObject nextLocalModes = preferences.optJSONObject("local_modes");
         if (nextLocalModes == null) nextLocalModes = new JSONObject();
-        String nextLayout = preferences.optString("candidate_layout", "vertical");
         CandidateAppearance.Palette nextCandidateAppearance = CandidateAppearance.from(
             preferences, surfaceSkin(preferences, "candidate_theme"));
-        boolean nextHorizontal = CandidateAppearance.isHorizontal(nextLayout);
+        boolean nextHorizontal = true;
         int nextFontSize = CandidateAppearance.fontSize(preferences.optInt("candidate_font_size", 16));
         int nextPreeditFontSize = CandidateAppearance.fontSize(
             preferences.optInt("candidate_preedit_font_size", nextFontSize));
@@ -6294,12 +6293,12 @@ public final class MSIMEInputService extends InputMethodService {
         return true;
     }
 
-    /** {@code ownRow} starts the annotation on its own row under the candidate, as Korean Hanja rows draw their 훈음; otherwise it follows the candidate inline. */
+    /** 释义（以及韩语汉字的 훈음）总是从候选下面另起一行，和 iOS 候选条一致；放在同一行会把候选撑宽，一屏只剩一两个候选。 */
     private CharSequence candidateLabel(String prefix, String text, String annotation,
-                                        boolean highlighted, boolean ownRow) {
+                                        boolean highlighted) {
         if (annotation.isEmpty() && prefix.isEmpty()) return text;
         String primary = prefix + text;
-        SpannableString label = new SpannableString(primary + (ownRow ? "\n" : " ") + annotation);
+        SpannableString label = new SpannableString(primary + "\n" + annotation);
         if (!prefix.isEmpty()) {
             label.setSpan(new ForegroundColorSpan(candidateAppearance.number()), 0, prefix.length(),
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
@@ -6326,9 +6325,8 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     /** Rows of one rendered candidate label; see {@link #candidateLabel}. */
-    private static int candidateLabelLines(String annotation, boolean ownRow) {
-        return ownRow ? CandidateTranslationPolicy.renderedOwnRowLines(annotation)
-            : CandidateTranslationPolicy.renderedGlossLines(annotation);
+    private static int candidateLabelLines(String annotation) {
+        return CandidateTranslationPolicy.renderedOwnRowLines(annotation);
     }
 
     /** Whether the candidates on the strip are the Hanja of a composing Korean syllable, whose annotation is the 훈음 drawn on its own row. */
@@ -6496,9 +6494,8 @@ public final class MSIMEInputService extends InputMethodService {
         // Touch candidates follow Apple's chip surface: the word itself is shown without a
         // numeric prefix. The slot remains available through contentDescription and the shared
         // session/generation/index identity for accessibility and hardware number-row selection.
-        boolean ownRow = koreanHanjaRows();
-        button.setText(candidateLabel("", text, annotation, highlighted, ownRow));
-        int labelLines = candidateLabelLines(annotation, ownRow);
+        button.setText(candidateLabel("", text, annotation, highlighted));
+        int labelLines = candidateLabelLines(annotation);
         button.setMinLines(labelLines);
         button.setMaxLines(labelLines);
         configureCandidateTextLayout(button, labelLines);
@@ -6524,9 +6521,8 @@ public final class MSIMEInputService extends InputMethodService {
             : candidatePanelSnapshot.optString("preedit", "");
         String annotation = candidateAnnotation(candidate, typed);
         button.setAllCaps(false);
-        boolean ownRow = koreanHanjaRows();
-        button.setText(candidateLabel("", text, annotation, highlighted, ownRow));
-        int labelLines = candidateLabelLines(annotation, ownRow);
+        button.setText(candidateLabel("", text, annotation, highlighted));
+        int labelLines = candidateLabelLines(annotation);
         button.setMinLines(labelLines);
         button.setMaxLines(labelLines);
         configureCandidateTextLayout(button, labelLines);

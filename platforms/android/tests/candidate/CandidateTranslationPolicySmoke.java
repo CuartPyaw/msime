@@ -82,9 +82,9 @@ public final class CandidateTranslationPolicySmoke {
         check(CandidateTranslationPolicy.renderedOwnRowLines("나라 이름 한\nKorea\n韓国") == 4,
             "each gloss row follows the 훈음 row");
         check(CandidateTranslationPolicy.reservedGlossRows(0, false) == 0
-                && CandidateTranslationPolicy.reservedGlossRows(1, false) == 0
-                && CandidateTranslationPolicy.reservedGlossRows(2, false) == 1,
-            "an inline first gloss reserves no extra strip height");
+                && CandidateTranslationPolicy.reservedGlossRows(1, false) == 1
+                && CandidateTranslationPolicy.reservedGlossRows(2, false) == 2,
+            "every gloss row under the candidate reserves a row of strip height");
         check(CandidateTranslationPolicy.reservedGlossRows(0, true) == 1,
             "Korean reserves the 훈음 row with glosses off");
         check(CandidateTranslationPolicy.reservedGlossRows(2, true) == 3,
