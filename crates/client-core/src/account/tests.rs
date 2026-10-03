@@ -237,6 +237,8 @@ struct FakeApi {
     refreshes: Arc<AtomicUsize>,
     reject_refresh: Arc<AtomicBool>,
     refresh_gate: Option<Arc<(Mutex<bool>, Condvar)>>,
+    preferences_started: Arc<AtomicBool>,
+    preferences_gate: Option<Arc<(Mutex<bool>, Condvar)>>,
     logins: Arc<Mutex<Vec<(String, String)>>>,
 }
 
@@ -246,6 +248,8 @@ impl FakeApi {
             refreshes: Arc::new(AtomicUsize::new(0)),
             reject_refresh: Arc::new(AtomicBool::new(false)),
             refresh_gate: None,
+            preferences_started: Arc::new(AtomicBool::new(false)),
+            preferences_gate: None,
             logins: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -359,6 +363,14 @@ impl AccountApi for FakeApi {
     fn preferences(&self, access_token: &str) -> Result<AccountPreferences, AccountError> {
         if access_token == token(b'a') {
             return Err(AccountError::Unauthorized);
+        }
+        self.preferences_started.store(true, Ordering::SeqCst);
+        if let Some(gate) = &self.preferences_gate {
+            let (lock, ready) = &**gate;
+            let mut open = lock.lock().map_err(|_| AccountError::Unavailable)?;
+            while !*open {
+                open = ready.wait(open).map_err(|_| AccountError::Unavailable)?;
+            }
         }
         Ok(AccountPreferences {
             revision: 42,
@@ -685,6 +697,63 @@ fn logout_clears_local_session_before_remote_result() {
     session.logout(true).unwrap();
     assert!(storage.load().unwrap().is_none());
     assert_eq!(session.status().unwrap(), None);
+}
+
+#[test]
+fn authenticated_operation_is_cancelled_when_session_changes_before_completion() {
+    let storage = MemoryStorage::default();
+    installed(&storage, valid_future_expiry());
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let mut api = FakeApi::new();
+    let started = Arc::clone(&api.preferences_started);
+    api.preferences_gate = Some(Arc::clone(&gate));
+    let session = Arc::new(BackendAccountSession::new(api, storage));
+    let worker = {
+        let session = Arc::clone(&session);
+        thread::spawn(move || session.preferences())
+    };
+    while !started.load(Ordering::SeqCst) {
+        thread::yield_now();
+    }
+    session.forget().unwrap();
+    let (lock, ready) = &*gate;
+    *lock.lock().unwrap() = true;
+    ready.notify_all();
+    assert_eq!(worker.join().unwrap(), Err(AccountError::Cancelled));
+}
+
+#[test]
+fn account_request_is_cancelled_when_same_user_signs_in_again_before_completion() {
+    let storage = MemoryStorage::default();
+    installed(&storage, valid_future_expiry());
+    let session = Arc::new(BackendAccountSession::new(FakeApi::new(), storage));
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let started = Arc::new(AtomicBool::new(false));
+    let worker = {
+        let session = Arc::clone(&session);
+        let gate = Arc::clone(&gate);
+        let started = Arc::clone(&started);
+        thread::spawn(move || {
+            request_with_account_session(&FakeApi::new(), &session, true, |_api, _token| {
+                started.store(true, Ordering::SeqCst);
+                let (lock, ready) = &*gate;
+                let mut open = lock.lock().map_err(|_| AccountError::Unavailable)?;
+                while !*open {
+                    open = ready.wait(open).map_err(|_| AccountError::Unavailable)?;
+                }
+                Ok::<_, AccountError>("stale result")
+            })
+        })
+    };
+    while !started.load(Ordering::SeqCst) {
+        thread::yield_now();
+    }
+    session.forget().unwrap();
+    session.sign_in("synthetic-challenge", "123456").unwrap();
+    let (lock, ready) = &*gate;
+    *lock.lock().unwrap() = true;
+    ready.notify_all();
+    assert_eq!(worker.join().unwrap(), Err(AccountError::Cancelled));
 }
 
 fn serve_once(response: Vec<u8>) -> String {
