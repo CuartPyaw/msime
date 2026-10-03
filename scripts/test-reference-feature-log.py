@@ -223,10 +223,10 @@ REVIEWED_COMMITS: dict[str, str] = {
         "platforms/windows/installer/config.default.toml."
     ),
     "feat(engine): ü 系拼写别名归一，非标准拼法候选带轻标记": (
-        "Partly ported. The alias normalisation is in crates/engine/src/pinyin/syllables.rs and "
-        "crates/engine/src/pinyin/autocorrect.rs (reference commit 94abc08e). The light "
-        "`*` marker is not drawn on Windows: the view carries `corrected` per candidate but "
-        "platforms/windows/src/candidate/CandidatePresentation.h never reads it."
+        "The alias normalisation is in crates/engine/src/pinyin/syllables.rs and "
+        "crates/engine/src/pinyin/autocorrect.rs (reference commit 94abc08e). Windows projects "
+        "the view's `corrected` flag in platforms/windows/src/candidate/CandidatePresentation.h "
+        "and draws the same light `*` marker as the other hosts."
     ),
     "feat(engine): 全拼纠错补齐漏字/多字，k-best 切分按词频消解歧义": (
         "crates/engine/src/pinyin/autocorrect.rs and crates/engine/src/pinyin/typos.rs, with the "
@@ -289,10 +289,10 @@ REVIEWED_COMMITS: dict[str, str] = {
         "platforms/windows/installer/config.default.toml."
     ),
     "feat(server): 全拼纠错分类开关配置接线与候选标记": (
-        "Partly ported. The two switches reach the Engine through crates/host-api/src/lib.rs "
-        "(options.autocorrect_transposition/neighbor). The `*` marker on corrected candidates is "
-        "not drawn on Windows: platforms/windows/src/candidate/CandidatePresentation.h ignores the "
-        "candidate's `corrected` flag."
+        "The two switches reach the Engine through crates/host-api/src/lib.rs "
+        "(options.autocorrect_transposition/neighbor), and Windows carries each candidate's "
+        "`corrected` flag through platforms/windows/src/candidate/CandidatePresentation.h to the "
+        "display-only `*` marker."
     ),
     "feat(tsf): convert edit session keys for client router (#301)": (
         "client_key_event in platforms/windows/tsf/Key/KeyStateCategory.h."
