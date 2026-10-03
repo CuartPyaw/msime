@@ -4813,6 +4813,11 @@ group("a capture device shows the most specific name it has", () => {
     VoiceCaptureDevicePolicy.label("a".repeat(200), "", 8).length === 128,
     "an implausibly long name is bounded rather than rendered whole",
   );
+  check(
+    VoiceCaptureDevicePolicy.label("x".repeat(126) + "😀tail", "", 8) ===
+      "x".repeat(126) + "…",
+    "a bounded device name does not leave a lone surrogate",
+  );
 });
 
 group("an absent capture device falls back rather than failing the recording", () => {
