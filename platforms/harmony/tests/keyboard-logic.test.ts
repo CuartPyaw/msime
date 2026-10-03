@@ -7333,6 +7333,40 @@ group("account and cloud clipboard bridge keeps secrets native", () => {
     });
 });
 
+group("account session generation changes on same-user re-login", () => {
+  let stored: string | null = null;
+  const session = (access: string, refresh: string) => JSON.stringify({
+    access_token: access.repeat(64),
+    refresh_token: refresh.repeat(64),
+    token_type: "Bearer",
+    expires_in: 3600,
+    user: { id: "same-user", display_name: "Test", created_at: "2026-01-01" },
+  });
+  const bridge = new AccountCloudBridge(
+    {
+      request: async (_method, path) => path === "/v1/auth/login"
+        ? { status: 200, body: session("a", "b") }
+        : { status: 200, body: "{}" },
+    },
+    {
+      load: () => stored,
+      save: (value) => { stored = value; },
+      clear: () => { stored = null; },
+    },
+  );
+  void bridge.handle('{"operation":"login","challenge_id":"challenge","credential":"123456"}')
+    .then(async (first) => {
+      check(JSON.parse(first).ok === true, "the first login succeeds");
+      const firstGeneration = bridge.sessionGeneration();
+      await bridge.handle('{"operation":"clear_expired"}');
+      await bridge.handle('{"operation":"login","challenge_id":"challenge","credential":"123456"}');
+      check(
+        bridge.currentUserId() === "same-user" && bridge.sessionGeneration() > firstGeneration,
+        "a same-user re-login gets a new session generation",
+      );
+    });
+});
+
 group("account responses reject oversized JSON envelopes", () => {
   const transport: AccountTransport = {
     request: async () => ({

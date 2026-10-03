@@ -533,6 +533,7 @@ export class HarmonyAccountCloudBridge {
    * button fail entirely for the sake of a setting that simply has nowhere to go yet.
    */
   private async uploadPreferences(stateRoot: string): Promise<string> {
+    const expectedGeneration: number = this.bridge.sessionGeneration();
     const schemaReply = await this.bridge.preferenceSchema();
     if (schemaReply.error !== undefined || schemaReply.value === undefined) {
       return this.failure(schemaReply.error ?? 'account_unavailable');
@@ -559,6 +560,9 @@ export class HarmonyAccountCloudBridge {
     }
     if (!declaredAny) return this.failure('account_unavailable');
     const merged = mergeAccountPreferences(cloud, declared, schema);
+    if (this.bridge.sessionGeneration() !== expectedGeneration) {
+      return this.failure('account_cancelled');
+    }
     const putReply = await this.bridge.putPreferenceDocument(
       merged as Object as Record<string, Object>);
     if (putReply.error !== undefined || putReply.value === undefined) {
@@ -578,6 +582,7 @@ export class HarmonyAccountCloudBridge {
    * a stranger's and nothing on this screen can put them back.
    */
   private async applyPreferences(userId: string, stateRoot: string): Promise<string> {
+    const expectedGeneration: number = this.bridge.sessionGeneration();
     if (userId.length === 0 || this.bridge.currentUserId() !== userId) {
       return this.failure('account_unauthorized');
     }
@@ -595,7 +600,8 @@ export class HarmonyAccountCloudBridge {
     if (cloud === null) return this.failure('account_unavailable');
     // Re-checked after the round trip: a sign-out during it invalidates the answer that just came
     // back, and this is the last point before the write where saying so still costs nothing.
-    if (this.bridge.currentUserId() !== userId) return this.failure('account_cancelled');
+    if (this.bridge.sessionGeneration() !== expectedGeneration
+      || this.bridge.currentUserId() !== userId) return this.failure('account_cancelled');
     const local = this.localDocument(stateRoot);
     if (local === null) return this.failure('account_storage');
     const applied: AppliedPreferences = applyAccountPreferences(

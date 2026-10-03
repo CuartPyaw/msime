@@ -806,6 +806,11 @@ export class AccountCloudBridge {
     return session?.user.id ?? null;
   }
 
+  /** A marker for native operations that may write after several asynchronous account calls. */
+  sessionGeneration(): number {
+    return this.generation;
+  }
+
   /**
    * An authenticated request for the AI skin run, whose bodies this bridge does not compose.
    *
