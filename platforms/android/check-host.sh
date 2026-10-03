@@ -243,6 +243,12 @@ if ! rg -q 'NativeClient\.doubaoStartFrame|NativeClient\.doubaoAudioFrame' \
   echo "Android streaming recognition must build its frames through the shared Host API" >&2
   exit 1
 fi
+# 识别线程遇到 JNI、TLS 或音频组件的意外异常时也必须结束请求；否则录音窗口会永久停在转写中。
+voice_activity="$repo_root/platforms/android/java/app/msime/android/voice/VoiceRecognitionActivity.java"
+if [[ "$(rg -c 'catch \(RuntimeException \| LinkageError' "$voice_activity" || true)" -lt 3 ]]; then
+  echo "Android voice recognition workers must catch unexpected runtime/linkage failures" >&2
+  exit 1
+fi
 # Reject an oversized response before JNI obtains a native view of the Java byte array. The shared
 # decoder has the same one-megabyte wire bound, but checking after GetByteArrayElements can briefly
 # duplicate an untrusted oversized WebSocket message.
