@@ -671,25 +671,28 @@ pub async fn account_preferences_apply(
     let platform = state.platform.clone();
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        session.credentials(None, Some(&user_id))?;
+        let (_, _, generation) = session.credentials_with_generation(None, Some(&user_id))?;
         let plan = account_preferences::IosPreferencePlan::from_cloud(&preferences)?;
         let local = store.load().map_err(|_| AccountError::Storage)?;
         let previous_native = platform
             .load_keyboard_preferences()
             .map_err(|_| AccountError::Storage)?;
         let requested = plan.requested_native(&previous_native)?;
-        let saved_native = platform
-            .save_keyboard_preferences(&requested)
-            .map_err(|_| AccountError::Storage)?;
-        let mut next = local.preferences.clone();
-        if let Err(error) = plan.apply_shared(&saved_native, &mut next) {
-            let _ = platform.save_keyboard_preferences(&previous_native);
-            return Err(error);
-        }
-        if store.save(local.revision, next).is_err() {
-            let _ = platform.save_keyboard_preferences(&previous_native);
-            return Err(AccountError::Storage);
-        }
+        session.with_generation(generation, Some(&user_id), || {
+            let saved_native = platform
+                .save_keyboard_preferences(&requested)
+                .map_err(|_| AccountError::Storage)?;
+            let mut next = local.preferences.clone();
+            if let Err(error) = plan.apply_shared(&saved_native, &mut next) {
+                let _ = platform.save_keyboard_preferences(&previous_native);
+                return Err(error);
+            }
+            if store.save(local.revision, next).is_err() {
+                let _ = platform.save_keyboard_preferences(&previous_native);
+                return Err(AccountError::Storage);
+            }
+            Ok::<(), AccountError>(())
+        })?;
         Ok::<(), AccountError>(())
     })
     .await

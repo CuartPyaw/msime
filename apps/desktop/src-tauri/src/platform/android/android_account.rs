@@ -1564,6 +1564,7 @@ pub async fn account_preferences_upload(
     let feedback = state.feedback.clone();
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let (user_id, _, generation) = session.credentials_with_generation(None, None)?;
         let schema = session.preference_schema()?;
         let cloud = session.preferences()?;
         let local = store.load().map_err(|_| AccountError::Storage)?;
@@ -1575,7 +1576,7 @@ pub async fn account_preferences_upload(
             return Err(AccountError::Unavailable);
         }
         let merged = merge_account_preferences(&cloud, &values, &schema)?;
-        session.put_preferences(&merged)
+        session.put_preferences_with_generation(&merged, generation, &user_id)
     })
     .await
     .map_err(|_| crate::CommandError {
@@ -1595,13 +1596,15 @@ pub async fn account_preferences_apply(
     let feedback = state.feedback.clone();
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        session.credentials(None, Some(&user_id))?;
+        let (_, _, generation) = session.credentials_with_generation(None, Some(&user_id))?;
         let schema = session.preference_schema()?;
         let local = store.load().map_err(|_| AccountError::Storage)?;
-        let next = apply_local_account_preferences(&local, &preferences, &schema, &feedback)?;
-        store
-            .save(local.revision, next)
-            .map_err(|_| AccountError::Storage)?;
+        session.with_generation(generation, Some(&user_id), || {
+            let next = apply_local_account_preferences(&local, &preferences, &schema, &feedback)?;
+            store
+                .save(local.revision, next)
+                .map_err(|_| AccountError::Storage)
+        })?;
         Ok::<(), AccountError>(())
     })
     .await

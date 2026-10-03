@@ -756,6 +756,41 @@ fn account_request_is_cancelled_when_same_user_signs_in_again_before_completion(
     assert_eq!(worker.join().unwrap(), Err(AccountError::Cancelled));
 }
 
+#[test]
+fn a_generation_guard_rejects_a_same_user_relogin_before_local_write() {
+    let storage = MemoryStorage::default();
+    installed(&storage, valid_future_expiry());
+    let session = BackendAccountSession::new(FakeApi::new(), storage);
+    let (_, _, generation) = session
+        .credentials_with_generation(None, Some("fixture-user"))
+        .unwrap();
+
+    session.forget().unwrap();
+    session.sign_in("synthetic-challenge", "123456").unwrap();
+
+    let mut wrote = false;
+    assert_eq!(
+        session.with_generation(generation, Some("fixture-user"), || {
+            wrote = true;
+            Ok::<_, AccountError>(())
+        }),
+        Err(AccountError::Cancelled)
+    );
+    assert!(
+        !wrote,
+        "a stale account operation must not reach its local write"
+    );
+
+    let cloud = AccountPreferences {
+        revision: 1,
+        settings: BTreeMap::new(),
+    };
+    assert_eq!(
+        session.put_preferences_with_generation(&cloud, generation, "fixture-user"),
+        Err(AccountError::Cancelled)
+    );
+}
+
 fn serve_once(response: Vec<u8>) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
