@@ -551,7 +551,7 @@ pub fn sync_candidate_skins(
         run.package(id, local.contains(id), newest.get(id))?;
     }
     run.with_local_effect(|run| {
-        let _ = save_state(run.state_path, &run.state);
+        save_state(run.state_path, &run.state).map_err(|_| AccountError::Storage)?;
         Ok(())
     })?;
     Ok(run.report)
