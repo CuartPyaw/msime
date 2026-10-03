@@ -275,12 +275,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   private var letterCaseState = LetterCaseState.lowercase
   private var isAutomaticShift = false
   private var lastShiftTapTime: TimeInterval?
-  // UIKit sends textWillChange/textDidChange for the keyboard's own edits too, not just for edits
-  // the host makes. textWillChange cancels the composition, so every commit that was meant to leave
-  // a residual composition running destroyed it a runloop turn later. The proxy is cross-process,
-  // so the callback does not arrive inside insertText and a simple set/clear flag is already false
-  // by the time it lands — the count has to stay raised until the callback consumes it.
-  private var pendingOwnEdits = 0
+  /// UIKit 也为键盘自己的改动回调 `textWillChange`，而它会结束组字：没认出回声，一次留着剩余组字的上屏会在一轮之后把组字毁掉，下一键刚开始的组字也会被前一键迟到的回声结束。怎么认见 `OwnEditEchoWindow`。
+  private var ownEditEcho = OwnEditEchoWindow()
   /// What 行内预编辑 last wrote into the host as marked text; empty when nothing is marked.
   private var inlineMarkedText = ""
 
@@ -511,10 +507,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       DiagnosticLog.shared.write("dictionary_resume_failed")
       showDiagnostic(error.localizedDescription)
     }
-    // A fresh editing session owes us no callbacks. Clearing the count here bounds the damage if
-    // UIKit ever skips the delegate pair for one of our own edits: the worst case is that a single
-    // host-initiated change is treated as an echo, not a counter that stays raised forever.
-    pendingOwnEdits = 0
+    // 新的编辑会话不欠任何回调，上一次出现时留下的回声窗口不能延续到这里。
+    ownEditEcho.reset()
     inlineMarkedText = ""
     if schemePicker != nil { closeKeyboardPicker() }
     synchronizeInputContext()
@@ -581,15 +575,13 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     replyModel.invalidateContext()
     handwriting.clear()
     closeKeyboardService()
-    // Our own edit coming back to us: the composition it produced is still the live one.
-    if pendingOwnEdits > 0 {
-      pendingOwnEdits -= 1
-      return
-    }
+    // 自己改动的回声：那次改动之后的组字仍是当前的组字。
+    if ownEditEcho.isEcho(at: ProcessInfo.processInfo.systemUptime) { return }
     // With 行内预编辑 the host already holds the letters: moving the caret out of marked text makes them ordinary text, and clearing the field removes them. Committing the composition as well would write it a second time, so the engine lets it go instead.
     if !inlineMarkedText.isEmpty {
       inlineMarkedText = ""
       textDocumentProxy.unmarkText()
+      noteOwnEdit()
       render(discardComposition())
       return
     }
@@ -640,7 +632,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     // throw them away.
     render(session.finishComposition())
     _ = session.suspendDictionarySession()
-    pendingOwnEdits = 0
+    ownEditEcho.reset()
     cancelBackspacePress()
     diagnosticDismissTimer?.invalidate()
     diagnosticDismissTimer = nil
@@ -652,7 +644,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   }
 
   private func installKeyboard() {
-    let root = UIStackView()
+    let root = KeyAreaStackView()
     keyboardRoot = root
     root.axis = .vertical
     root.spacing = 7
@@ -666,7 +658,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       root.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -7),
     ])
 
-    root.addArrangedSubview(makeCandidateStrip())
+    let candidateStrip = makeCandidateStrip()
+    root.addArrangedSubview(candidateStrip)
+    // 候选栏和手写区不是键：落在它们里面的触摸照旧，它们的按钮也不来接键距里的触摸。
+    root.gapRoutingExclusions = [candidateStrip, handwriting]
     let numberRow = makeNumberRow()
     numberRowView = numberRow
     root.addArrangedSubview(numberRow)
@@ -874,7 +869,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
           ])
           button.tag = digit
           let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleNineKeyHold(_:)))
-          hold.minimumPressDuration = 0.3
+          // 0.5 秒与 UIKit 自己的默认值、HarmonyOS `LongPressGesture` 的默认 500ms 一致；Android 这里用系统长按时长 `ViewConfiguration.getLongPressTimeout()`，12 起默认 400ms、之前 500ms。原来的 0.3 秒比哪一端都短，主线程稍一卡顿，一次普通的点按就会被当成长按、弹出菜单而不出字。
+          hold.minimumPressDuration = Self.nineKeyHoldDuration
           button.addGestureRecognizer(hold)
           button.accessibilityHint = "长按输入 \(digit) 或 \(letters)"
         }
@@ -920,6 +916,9 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       key.button.accessibilityHint = digits ? nil : key.letters.map { "长按输入 \(key.digit) 或 \($0)" }
     }
   }
+
+  /// 九键 2–9 按住多久弹出数字与字母菜单，理由见 `makeNineKeyLayout` 里设置它的地方。
+  static let nineKeyHoldDuration: TimeInterval = 0.5
 
   private static let nineKeyLetters: [Int: String] = [
     2: "ABC", 3: "DEF", 4: "GHI", 5: "JKL", 6: "MNO", 7: "PQRS", 8: "TUV", 9: "WXYZ",
@@ -1972,6 +1971,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       && pairedPunctuation.stepOver(ascii: punctuation, editor: editor, following: textDocumentProxy.documentContextAfterInput) {
       clearSmartPunctuationArming()
       textDocumentProxy.adjustTextPosition(byCharacterOffset: 1)
+      noteOwnEdit()
       return
     }
 
@@ -2007,6 +2007,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     insertOwnText(completion.closing)
     if completion.opening == "<" { session.balancePairedPunctuationAfterAutoClose(opening: completion.opening) }
     textDocumentProxy.adjustTextPosition(byCharacterOffset: -1)
+    noteOwnEdit()
     pairedPunctuation.push(closing: completion.closing, editor: editor)
   }
 
@@ -3422,6 +3423,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     guard KeyboardHostContext.documentIdentifier(for: textDocumentProxy) == document else { return }
     pairedPunctuation.clear()
     textDocumentProxy.adjustTextPosition(byCharacterOffset: offset)
+    noteOwnEdit()
   }
 
   @objc private func handleSpacePan(_ pan: UIPanGestureRecognizer) {
@@ -3546,8 +3548,11 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     handleInputModeList(from: sender, with: event)
   }
 
-  // Every document mutation the keyboard makes goes through here so textWillChange can tell its own
-  // echo apart from a genuine host-initiated change.
+  /// 键盘每次经 `textDocumentProxy` 改动文档之后都记一笔，`textWillChange` 据此认出自己的回声。
+  private func noteOwnEdit() {
+    ownEditEcho.recordOwnEdit(at: ProcessInfo.processInfo.systemUptime)
+  }
+
   private var typingSource: TypingSource {
     if localModeTrigger == "R" || (isChineseMode && inputScheme.isJapanese) { return .japanese }
     if localModeTrigger != nil { return .local }
@@ -3560,13 +3565,13 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     if replacingComposition && !inlineMarkedText.isEmpty {
       // Turning the marked letters into the committed text and unmarking it is one change to the document, where removing them and then inserting would be two.
       inlineMarkedText = ""
-      pendingOwnEdits += 1
       textDocumentProxy.setMarkedText(text, selectedRange: NSRange(location: (text as NSString).length, length: 0))
       textDocumentProxy.unmarkText()
+      noteOwnEdit()
     } else {
       showInlineComposition("")
-      pendingOwnEdits += 1
       textDocumentProxy.insertText(text)
+      noteOwnEdit()
     }
     recordTypingStatistics(text, source: source ?? typingSource)
   }
@@ -3710,15 +3715,14 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
 
   private func deleteOwnBackward() {
     showInlineComposition("")
-    pendingOwnEdits += 1
     textDocumentProxy.deleteBackward()
+    noteOwnEdit()
   }
 
   /// Bring the host's marked text in line with `text`; an empty `text` takes it out.
   private func showInlineComposition(_ text: String) {
     guard let edit = InlineCompositionPolicy.edit(showing: inlineMarkedText, next: text) else { return }
     inlineMarkedText = text
-    pendingOwnEdits += 1
     switch edit {
     case .mark(let marked):
       textDocumentProxy.setMarkedText(marked, selectedRange: NSRange(location: (marked as NSString).length, length: 0))
@@ -3726,6 +3730,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       textDocumentProxy.setMarkedText("", selectedRange: NSRange(location: 0, length: 0))
       textDocumentProxy.unmarkText()
     }
+    noteOwnEdit()
   }
 
   private func render(_ snapshot: MetasequoiaInputSnapshot, source originalSource: TypingSource? = nil) {
