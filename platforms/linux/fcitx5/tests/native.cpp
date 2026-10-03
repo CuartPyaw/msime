@@ -233,8 +233,9 @@ int main(int argc, char **argv) {
     modeBadgeTheme();
     classicuiTakeoverRecord();
     require(argc == 2 || (argc == 3 && (std::string(argv[2]) == "--ai" ||
-                                       std::string(argv[2]) == "--ctrl-space")),
-            "usage: fcitx5-native-test <verified-resources> [--ai|--ctrl-space]");
+                                       std::string(argv[2]) == "--ctrl-space" ||
+                                       std::string(argv[2]) == "--local-modes")),
+            "usage: fcitx5-native-test <verified-resources> [--ai|--ctrl-space|--local-modes]");
     const bool ai = argc == 3 && std::string(argv[2]) == "--ai";
     const std::string suggestion = ai ? "合成候选" : "在线";
     char temporary[] = "/tmp/msime-fcitx5-test-XXXXXX";
@@ -550,6 +551,45 @@ int main(int argc, char **argv) {
     require(!state->voice_hotkey_hold_space_lock_,
             "initial voice context reads the hold-to-lock preference");
     require(state->view_.contains("candidates"), "focus must unpack transition view");
+    // 真实 KeyEvent 会把 Shift+字母规范化成大写并移除 Shift 位；快捷模式必须仍能进入，
+    // 不能把普通大写或 CapsLock 当快捷键，也不能在组合键末尾松开 Shift 时切到英文。
+    {
+      const auto press = [&](fcitx::KeySym sym, fcitx::KeyStates states = fcitx::KeyStates(), bool release = false) {
+        fcitx::KeyEvent event(&ic, fcitx::Key(sym, states), release);
+        engine.keyEvent(entry, event);
+        return event.accepted();
+      };
+      const fcitx::KeyStates shiftState{fcitx::KeyState::Shift};
+      const auto before = ic.committed;
+      for (const auto &[sym, mode] : std::array<std::pair<fcitx::KeySym, const char *>, 8>{{
+               {FcitxKey_T, "date_time"}, {FcitxKey_U, "unicode"},
+               {FcitxKey_K, "quick_phrase"}, {FcitxKey_E, "emoji"},
+               {FcitxKey_M, "kaomoji"}, {FcitxKey_J, "super_jianpin"},
+               {FcitxKey_Y, "temporary_english"}, {FcitxKey_R, "temporary_japanese"}}}) {
+        require(!press(sym) && !press(sym, fcitx::KeyState::CapsLock),
+                "Uppercase without Shift must pass through");
+        require(state->view_.value("local_mode", std::string("none")) == "none",
+                "Uppercase without Shift must not enter a local mode");
+        press(FcitxKey_Shift_L, shiftState);
+        require(press(sym, shiftState), "Shift local-mode shortcut must be consumed");
+        require(state->view_.value("local_mode", std::string("none")) == mode,
+                "Shift local-mode shortcut must enter its mode");
+        press(sym, shiftState, true);
+        press(FcitxKey_Shift_L, fcitx::KeyStates(), true);
+        require(state->input_enabled_, "Shift chord release must not switch to English");
+        require(press(FcitxKey_Escape) &&
+                    state->view_.value("local_mode", std::string("none")) == "none",
+                "Escape must leave the local mode");
+      }
+      require(!press(FcitxKey_V, shiftState), "Disabled expression mode must pass through");
+      require(ic.committed == before, "Mode shortcuts must not commit uppercase letters");
+      if (argc == 3 && std::string(argv[2]) == "--local-modes") {
+        state->close();
+        std::filesystem::remove_all(directory);
+        std::cout << "Fcitx5 Shift local modes, uppercase passthrough and modifier release passed\n";
+        return 0;
+      }
+    }
     auto changedPreferences = options["preferences"];
     changedPreferences["number_row_selection"] = false;
     changedPreferences["candidate_layout"] = "horizontal";

@@ -183,6 +183,8 @@ if(BUILD_TESTING)
       COMMAND fcitx5-native-test "${MSIME_FCITX5_TEST_RESOURCES}")
     add_test(NAME fcitx5-native-ai
       COMMAND fcitx5-native-test "${MSIME_FCITX5_TEST_RESOURCES}" --ai)
+    add_test(NAME fcitx5-local-mode-shortcuts
+      COMMAND fcitx5-native-test "${MSIME_FCITX5_TEST_RESOURCES}" --local-modes)
     find_package(Python3 COMPONENTS Interpreter)
     find_program(DBUS_RUN_SESSION dbus-run-session)
     if(Python3_Interpreter_FOUND AND DBUS_RUN_SESSION)

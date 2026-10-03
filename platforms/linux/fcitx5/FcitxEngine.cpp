@@ -6943,7 +6943,9 @@ bool FcitxState::key(fcitx::KeyEvent &event) {
       return apply(msime_client_character(
           session_, static_cast<uint8_t>(rawShift ? std::toupper(letter) : std::tolower(letter)), rawShift));
     }
-    return apply(msime_client_character(session_, static_cast<uint8_t>(text[0]), key.states().test(fcitx::KeyState::Shift)));
+    // Fcitx5 规范化 Shift+字母时会移除 Shift 位；快捷模式入口必须读取原始事件。
+    return apply(msime_client_character(session_, static_cast<uint8_t>(text[0]),
+                                        event.rawKey().states().test(fcitx::KeyState::Shift)));
   }
   if (composing) command(MSIME_FINISH_COMPOSITION);
   return false;
