@@ -30,7 +30,8 @@ import app.msime.android.clipboard.CloudClipboardTextPolicy;
 public final class BackendAccount {
     private static final String ORIGIN = "https://api.msime.app";
     private static final String SESSION_STORE = "msime_account_session_v2";
-    private static final int MAX_RESPONSE_BYTES = 64 * 1024;
+    /** Matches client-core's account JSON response ceiling; a full cloud clipboard page can exceed 64 KiB. */
+    private static final int MAX_RESPONSE_BYTES = 1024 * 1024;
     private static final long MAX_SESSION_MILLISECONDS = AccountTokenPolicy.MAX_SESSION_SECONDS * 1000L;
     private static final Object SESSION_LOCK = new Object();
     private static FutureTask<String> refreshFlight;
