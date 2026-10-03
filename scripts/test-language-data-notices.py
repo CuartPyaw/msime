@@ -17,7 +17,7 @@ DICTIONARY_RELEASES = "https://github.com/metasequoiaime/msime-dictionary/releas
 LICENCES = {
     "resources/licenses/rime-cantonese-CC-BY-4.0.txt": (
         "rime/rime-cantonese",
-        "259f0e48bba840c3a2e0d117539e96937f3d89bc",
+        "ac277184f161f297c2031b497588975234019f9d",
         "yue/",
         ("CanCLID", "Linguistic Society of Hong Kong", "Attribution 4.0 International", "tone digits are removed", "jyut6ping3.maps.dict.yaml (released under the Open Data Commons Open Database License 1.0)", "jyut6ping3.phrase.dict.yaml"),
     ),

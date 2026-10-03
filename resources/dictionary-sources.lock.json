@@ -10,11 +10,11 @@
     },
     "msime-dictionary": {
       "repository": "https://github.com/metasequoiaime/msime-dictionary.git",
-      "commit": "4141a99"
+      "commit": "d00a93528b661ffa0f0da4aacc423a6d2d26b05d"
     },
     "rime-cantonese": {
       "repository": "https://github.com/rime/rime-cantonese.git",
-      "commit": "259f0e48bba840c3a2e0d117539e96937f3d89bc"
+      "commit": "ac277184f161f297c2031b497588975234019f9d"
     },
     "libchewing-data": {
       "repository": "https://github.com/chewing/libchewing-data.git",
@@ -156,21 +156,21 @@
     },
     {
       "path": "yue/jyut6ping3.chars.dict.yaml",
-      "url": "https://github.com/metasequoiaime/msime-dictionary/releases/download/sources-v1.3.0/jyut6ping3.chars.dict.yaml",
-      "sha256": "9b053a594c80eae76545bcdd83239884a49b1ba48b89ca0ab9e8daac79f33013",
-      "size": 345329
+      "url": "https://github.com/metasequoiaime/msime-dictionary/releases/download/sources-v1.4.0/jyut6ping3.chars.dict.yaml",
+      "sha256": "d5c06066ae160bcba5d4340b6424f845e1a3f86caab7e67e5b1725e01458afc6",
+      "size": 345273
     },
     {
       "path": "yue/jyut6ping3.words.dict.yaml",
-      "url": "https://github.com/metasequoiaime/msime-dictionary/releases/download/sources-v1.3.0/jyut6ping3.words.dict.yaml",
-      "sha256": "54d174ad2bb997e4a678b7b076b84e4dc5914481b32467cdea3b43e88b7d5474",
-      "size": 2630257
+      "url": "https://github.com/metasequoiaime/msime-dictionary/releases/download/sources-v1.4.0/jyut6ping3.words.dict.yaml",
+      "sha256": "436ec7b5b0b1d320f5bea72ab009e36dcccb0ae75c2dea0c55810a33c8ee1abb",
+      "size": 2627723
     },
     {
       "path": "yue/essay-cantonese.txt",
-      "url": "https://github.com/metasequoiaime/msime-dictionary/releases/download/sources-v1.3.0/essay-cantonese.txt",
-      "sha256": "d08836175f598219f43c2f2f9e12e12711212dbefe08d57b2eddb7a9d9f22a5d",
-      "size": 3416812
+      "url": "https://github.com/metasequoiaime/msime-dictionary/releases/download/sources-v1.4.0/essay-cantonese.txt",
+      "sha256": "12caf53435ad0e1aaaa6a323fe2f3f3aba73046a111989e5e3e3ccc9a79fca3d",
+      "size": 3417249
     },
     {
       "path": "tw/tsi.csv",
