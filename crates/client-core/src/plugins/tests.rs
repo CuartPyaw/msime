@@ -1148,6 +1148,88 @@ fn hostile_archives_are_refused_before_anything_is_installed() {
     assert!(leftovers.is_empty(), "{leftovers:?}");
 }
 
+#[test]
+fn archives_with_absolute_wrapped_paths_are_refused() {
+    let files = tempdir().unwrap();
+    let state = tempdir().unwrap();
+    let root = state.path().join("plugins");
+    let wav = wav();
+    for prefix in ["/", "\\", "C:/", "C:", "//synthetic/share/"] {
+        let archive = files.path().join("absolute-wrapped.zip");
+        let manifest = format!("{prefix}typewriter/plugin.toml");
+        let key = format!("{prefix}typewriter/key.wav");
+        let space = format!("{prefix}typewriter/space.wav");
+        zip_file(
+            &archive,
+            &[
+                (&manifest, Some(SOUND.as_bytes())),
+                (&key, Some(&wav)),
+                (&space, Some(&wav)),
+            ],
+        );
+        assert!(
+            matches!(validate(&archive), Err(PluginError::Archive(_))),
+            "{prefix}"
+        );
+        assert!(
+            matches!(import(&archive, &root), Err(PluginError::Archive(_))),
+            "{prefix}"
+        );
+        assert!(!root.join("sound/typewriter").exists());
+    }
+}
+
+#[test]
+fn archives_with_normalized_parent_paths_are_refused() {
+    let files = tempdir().unwrap();
+    let state = tempdir().unwrap();
+    let root = state.path().join("plugins");
+    let wav = wav();
+    let archive = files.path().join("normalized-parent.zip");
+    for prefix in ["typewriter/../typewriter/", "typewriter\\..\\typewriter\\"] {
+        let key = format!("{prefix}key.wav");
+        let space = format!("{prefix}space.wav");
+        zip_file(
+            &archive,
+            &[
+                ("typewriter/plugin.toml", Some(SOUND.as_bytes())),
+                (&key, Some(&wav)),
+                (&space, Some(&wav)),
+            ],
+        );
+        assert!(
+            matches!(validate(&archive), Err(PluginError::Archive(_))),
+            "{prefix}"
+        );
+        assert!(
+            matches!(import(&archive, &root), Err(PluginError::Archive(_))),
+            "{prefix}"
+        );
+        assert!(!root.join("sound/typewriter").exists());
+    }
+}
+
+#[test]
+fn archives_with_current_directory_prefixes_still_install() {
+    let files = tempdir().unwrap();
+    let state = tempdir().unwrap();
+    let wav = wav();
+    let archive = files.path().join("current-directory.zip");
+    zip_file(
+        &archive,
+        &[
+            ("./typewriter/plugin.toml", Some(SOUND.as_bytes())),
+            ("./typewriter/./key.wav", Some(&wav)),
+            ("./typewriter/space.wav", Some(&wav)),
+        ],
+    );
+    assert_eq!(validate(&archive).unwrap().id, "typewriter");
+    assert_eq!(
+        import(&archive, &state.path().join("plugins")).unwrap().id,
+        "typewriter"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn an_archived_symbolic_link_is_refused() {
