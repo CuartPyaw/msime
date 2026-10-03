@@ -359,6 +359,19 @@ fn a_local_package_is_uploaded_private_under_its_manifest_name_once() {
 }
 
 #[test]
+fn sync_reports_state_storage_failure_after_remote_success() {
+    let fixture = Fixture::new();
+    write_skin(&fixture.root, "sakura", "樱花", 1);
+    fs::create_dir(&fixture.state).unwrap();
+
+    assert_eq!(
+        sync_candidate_skins(&fixture.root, &fixture.state, &fixture.library),
+        Err(AccountError::Storage),
+    );
+    assert_eq!(fixture.library.rows.borrow().len(), 1);
+}
+
+#[test]
 fn matching_packages_on_both_sides_are_recorded_without_an_upload() {
     let fixture = Fixture::new();
     write_skin(&fixture.root, "sakura", "樱花", 1);
@@ -956,9 +969,12 @@ fn a_symlinked_sync_state_does_not_delete_a_local_skin() {
     symlink(&external_state, &fixture.state).unwrap();
 
     // 外部同步状态不能让同步删除本地皮肤，且外部文件不能被改写。
-    let report = fixture.sync();
-    assert_eq!(report.uploaded, ids(&["sakura"]));
+    assert_eq!(
+        sync_candidate_skins(&fixture.root, &fixture.state, &fixture.library),
+        Err(AccountError::Storage)
+    );
     assert!(fixture.installed("sakura"));
+    assert_eq!(fixture.library.rows.borrow().len(), 1);
     assert_eq!(fs::read(&external_state).unwrap(), bytes);
 }
 
@@ -975,10 +991,13 @@ fn a_symlinked_sync_state_parent_does_not_write_outside() {
     let state_path = linked_parent.join(STATE_FILE);
 
     // 状态文件父目录是外部链接时，保存不能在外部目录留下同步状态。
-    let report = sync_candidate_skins(&fixture.root, &state_path, &fixture.library).unwrap();
-    assert_eq!(report.uploaded, ids(&["sakura"]));
+    assert_eq!(
+        sync_candidate_skins(&fixture.root, &state_path, &fixture.library),
+        Err(AccountError::Storage)
+    );
     assert!(!outside.path().join(STATE_FILE).exists());
     assert!(fixture.installed("sakura"));
+    assert_eq!(fixture.library.rows.borrow().len(), 1);
 }
 
 #[cfg(unix)]
