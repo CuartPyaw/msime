@@ -4,7 +4,7 @@
 #include "msimeui/Fonts.h"
 #include "msimeui/Theme.h"
 #include "msimeui/Window.h"
-#include "LruCache.h"
+#include "msimeui/LruCache.h"
 
 #include <algorithm>
 #include <cmath>
@@ -199,7 +199,6 @@ ComPtr<IDWriteTextLayout> CreateCachedTextLayout(IDWriteFactory *factory, const 
                    paragraphAlignment == other.paragraphAlignment && wordWrapping == other.wordWrapping;
         }
     };
-    static constexpr std::size_t kTextFormatCacheCapacity = 128;
     static LruCache<TextFormatKey, ComPtr<IDWriteTextFormat>> formatCache(kTextFormatCacheCapacity);
     TextFormatKey key;
     key.factory = factory;
