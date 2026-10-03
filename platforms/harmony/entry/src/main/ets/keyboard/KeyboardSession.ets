@@ -17,6 +17,7 @@ import {
 import { KeyboardFormFactor } from './KeyboardFormFactor';
 import { KeyboardScheme, PreferenceMapping, SchemeDefinition } from './KeyboardScheme';
 import { EditorPolicy, EditorTraits } from './input/EditorPolicy';
+import { EditEchoLedger } from './input/EditEchoLedger';
 import { JapaneseSpacePolicy } from './input/JapaneseSpacePolicy';
 import { KoreanCompositionPolicy } from './input/KoreanCompositionPolicy';
 import { SchemeCompositionPolicy } from './input/SchemeCompositionPolicy';
@@ -993,10 +994,8 @@ export class KeyboardSession implements HardwareKeyTarget {
   // Bumped only by attach/detach: an idle Engine restart (which bumps editorGeneration) must not
   // drop the focused editor's attribute.
   private attributeGeneration: number = 0;
-  // Editor mutations are echoed asynchronously through KeyboardDelegate.textChange. Keep the
-  // count raised until those callbacks arrive so our own commit cannot be mistaken for a host edit
-  // and finish a residual composition that the Engine deliberately left active.
-  private pendingOwnEdits: number = 0;
+  // 编辑器把每次改动异步回报为 `KeyboardDelegate.textChange`。自己的每次写入都在这里记一笔，等到回声才消掉，免得输入法自己的写入被当成宿主修改，结束引擎有意留着的组字；没等来回声的记录到时作废，见 `EditEchoLedger`。
+  private readonly ownEdits: EditEchoLedger = new EditEchoLedger();
   private inlinePreeditStyle: InlinePreeditStyle = 'raw';
   /** Whether the focused editor said it takes preview text; learned from its attribute. */
   private previewSupported: boolean = false;
@@ -2520,11 +2519,24 @@ export class KeyboardSession implements HardwareKeyTarget {
    * with every value, ENTER_KEY_TYPE_NEW_LINE included. Measured, not assumed: replacing this with
    * the split put insertText("\n") into a WebView textarea that ignored it, and the same key with
    * the same editor (enter=8) had produced a newline the moment before.
+   *
+   * 多行编辑器里这一键插入换行，编辑器照样回报一次 `textChange`，所以和插入一样先记一笔；GO、SEARCH 这类动作不一定改动文字，没有回声的那一笔到时作废。
    */
   submit(): void {
-    if (this.inputClient !== undefined) {
-      this.inputClient.sendKeyFunction(this.enterKey);
-    }
+    const inputClient: inputMethodEngine.InputClient | undefined = this.inputClient;
+    if (inputClient === undefined) return;
+    const generation: number = this.editorGeneration;
+    this.ownEdits.reserve(Date.now());
+    inputClient.sendKeyFunction(this.enterKey).then((handled: boolean): void => {
+      if (!handled && generation === this.editorGeneration && this.inputClient === inputClient) {
+        this.ownEdits.release();
+      }
+    }).catch((error: Object): void => {
+      if (generation === this.editorGeneration && this.inputClient === inputClient) {
+        this.ownEdits.release();
+      }
+      KeyboardLog.error(`editor key function unavailable: ${describeError(error)}`);
+    });
   }
 
   /** Begin one host-independent voice generation, so late platform callbacks can be rejected. */
@@ -2659,7 +2671,7 @@ export class KeyboardSession implements HardwareKeyTarget {
   attach(inputClient: inputMethodEngine.InputClient): void {
     const editorGeneration: number = ++this.editorGeneration;
     const attributeGeneration: number = ++this.attributeGeneration;
-    this.pendingOwnEdits = 0;
+    this.ownEdits.clear();
     this.previewSupported = false;
     this.previewText = '';
     this.invalidateReplyContext();
@@ -2727,7 +2739,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     this.editorGeneration++;
     this.attributeGeneration++;
     this.manualLanguageGeneration = -1;
-    this.pendingOwnEdits = 0;
+    this.ownEdits.clear();
     this.modeScope.deactivate();
     this.clearEnglishSuggestions();
     this.invalidateReplyContext();
@@ -2750,7 +2762,7 @@ export class KeyboardSession implements HardwareKeyTarget {
 
   stop(): void {
     this.editorGeneration++;
-    this.pendingOwnEdits = 0;
+    this.ownEdits.clear();
     this.invalidateReplyContext();
     this.clearSmartPunctuationRepeat();
     this.cancelOnlineProviders();
@@ -2831,8 +2843,7 @@ export class KeyboardSession implements HardwareKeyTarget {
   /** Reconcile a document mutation reported by the editor with keyboard-owned edit echoes. */
   editorTextChanged(): void {
     this.invalidateReplyContext();
-    if (!EditorPolicy.isExternalTextChange(this.pendingOwnEdits)) {
-      this.pendingOwnEdits--;
+    if (this.ownEdits.acknowledge(Date.now())) {
       if (this.onEditorChanged !== undefined) {
         this.onEditorChanged();
       }
@@ -2872,11 +2883,10 @@ export class KeyboardSession implements HardwareKeyTarget {
       return;
     }
     const generation: number = this.editorGeneration;
-    this.pendingOwnEdits++;
+    this.ownEdits.reserve(Date.now());
     inputClient.insertText(text).catch((error: Object): void => {
-      if (generation === this.editorGeneration && this.inputClient === inputClient
-          && this.pendingOwnEdits > 0) {
-        this.pendingOwnEdits--;
+      if (generation === this.editorGeneration && this.inputClient === inputClient) {
+        this.ownEdits.release();
       }
       KeyboardLog.error(`editor insertion unavailable: ${describeError(error)}`);
     });
@@ -2884,22 +2894,28 @@ export class KeyboardSession implements HardwareKeyTarget {
 
   /** Synchronous insert variant for an atomic read/replace editor operation. */
   private insertEditorTextSync(text: string): void {
-    if (this.inputClient === undefined) return;
-    this.pendingOwnEdits++;
-    try {
-      this.inputClient.insertTextSync(text);
-    } catch (error) {
-      this.pendingOwnEdits--;
-      throw new Error(describeError(error));
-    }
+    const inputClient: inputMethodEngine.InputClient | undefined = this.inputClient;
+    if (inputClient === undefined) return;
+    this.editEditorSync((): void => inputClient.insertTextSync(text));
     // An insertion replaces preview text and ends the preview.
     this.previewText = '';
+  }
+
+  /** 同步改动一次编辑器，并为它的 `textChange` 回声记一笔；调用抛错说明编辑器没有改动，那一笔随即撤回。 */
+  private editEditorSync(edit: () => void): void {
+    this.ownEdits.reserve(Date.now());
+    try {
+      edit();
+    } catch (error) {
+      this.ownEdits.release();
+      throw new Error(describeError(error));
+    }
   }
 
   /**
    * Bring the editor's preview text in line with the composition the Engine last reported.
    *
-   * Every change is a document edit the editor echoes back like an insertion, so it is reserved the same way; otherwise the echo would read as the user editing the field and end the composition it came from.
+   * Every change is a document edit the editor echoes back like an insertion, so it is reserved the same way; otherwise the echo would read as the user editing the field and end the composition it came from. 设置预上屏文字和结束预上屏是两次调用，各记一笔：结束时文字没变就不会有回声，多记的那一笔到时作废。
    */
   private syncPreview(): void {
     const inputClient: inputMethodEngine.InputClient | undefined = this.inputClient;
@@ -2911,14 +2927,12 @@ export class KeyboardSession implements HardwareKeyTarget {
         view.scheme, view.dedicated_english, view.local_mode)));
     if (inputClient === undefined || wanted === this.previewText) return;
     const shown: string = this.previewText;
-    this.pendingOwnEdits++;
     try {
-      inputClient.setPreviewTextSync(wanted, PREVIEW_REPLACE_CURRENT);
-      if (wanted.length === 0) inputClient.finishTextPreviewSync();
+      this.editEditorSync((): void => inputClient.setPreviewTextSync(wanted, PREVIEW_REPLACE_CURRENT));
+      if (wanted.length === 0) this.editEditorSync((): void => inputClient.finishTextPreviewSync());
       this.previewText = wanted;
       return;
     } catch (error) {
-      this.pendingOwnEdits--;
       KeyboardLog.error(`editor preview unavailable: ${describeError(error)}`);
     }
     // The editor refused preview text after saying it took it; stop offering it for this focus.
@@ -2927,7 +2941,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     if (shown.length === 0) return;
     // Letters of a composition must not stay behind in the document: end the preview and take them out, the way a cancelled composition leaves nothing.
     try {
-      inputClient.finishTextPreviewSync();
+      this.editEditorSync((): void => inputClient.finishTextPreviewSync());
       // Only when the letters are still there as plain text: an editor that dropped them with the preview must not lose what precedes them.
       if (inputClient.getForwardSync(shown.length) === shown) {
         this.deleteEditorBackwardSync(shown.length);
@@ -2939,14 +2953,9 @@ export class KeyboardSession implements HardwareKeyTarget {
 
   /** Delete through the editor while reserving the asynchronous text-change echo it produces. */
   private deleteEditorBackwardSync(count: number): void {
-    if (this.inputClient === undefined) return;
-    this.pendingOwnEdits++;
-    try {
-      this.inputClient.deleteBackwardSync(count);
-    } catch (error) {
-      this.pendingOwnEdits--;
-      throw new Error(describeError(error));
-    }
+    const inputClient: inputMethodEngine.InputClient | undefined = this.inputClient;
+    if (inputClient === undefined) return;
+    this.editEditorSync((): void => inputClient.deleteBackwardSync(count));
   }
 
   /** Resume one durable cloud snapshot before a shared Engine session takes the read lock. */
@@ -3186,7 +3195,9 @@ export class KeyboardSession implements HardwareKeyTarget {
           KeyboardLog.error(`book-title punctuation balance refused: ${balanceResponse.error}`);
         }
       }
-      this.inputClient.moveCursorSync(inputMethodEngine.Direction.CURSOR_LEFT);
+      // 移动光标同样会回报一次 `textChange`。
+      const inputClient: inputMethodEngine.InputClient = this.inputClient;
+      this.editEditorSync((): void => inputClient.moveCursorSync(inputMethodEngine.Direction.CURSOR_LEFT));
     } catch (error) {
       KeyboardLog.error(`paired punctuation completion unavailable: ${describeError(error)}`);
     }

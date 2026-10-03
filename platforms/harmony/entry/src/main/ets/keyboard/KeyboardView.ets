@@ -51,7 +51,7 @@ import { KeyboardMetrics } from './KeyboardMetrics';
 import {
   COMBO_IDLE_RESET_MILLIS, TypingEffect, TypingEffectPolicy, TypingEffectSettings
 } from './TypingEffectPolicy';
-import { KeyboardGeometry } from './KeyboardGeometry';
+import { HitOffset, KeyboardGeometry } from './KeyboardGeometry';
 import {
   KeyboardLayoutDragAxis, KeyboardLayoutDragPolicy
 } from './input/KeyboardLayoutDragPolicy';
@@ -124,6 +124,10 @@ interface KeyOptions {
   label?: string;
   /** The double-pinyin unit under the letter, or empty when the key does not stand for one. */
   hint?: string;
+  /**
+   * 字母键的小写字母。设了它，键面和读屏文字在绘制时按当前大小写现算，`face` 和 `label` 不再用：自动大写在每次文字变化后异步切换大小写，若把大小写放进 `ForEach` 的键标识，每次切换都会重建全部字母键，手指正按着的那个键也被换掉，这次按键就丢了。
+   */
+  letter?: string;
   size: number;
   /** Filled with the platform accent: a held Shift, or Return while a composition is open. */
   emphasized: boolean;
@@ -1004,7 +1008,7 @@ struct KeyboardView {
   @Builder
   keyFace($$: KeyOptions) {
     Column() {
-      Text($$.face)
+      Text($$.letter === undefined ? $$.face : this.letterFace($$.letter))
         .fontSize($$.size)
         .maxLines(1)
         .fontColor(this.skin.keyLabelColor($$.emphasized, $$.special === true))
@@ -1032,7 +1036,7 @@ struct KeyboardView {
     Column() {
       this.keyFace($$)
     }
-    .accessibilityText($$.label ?? $$.face)
+    .accessibilityText($$.letter === undefined ? ($$.label ?? $$.face) : this.letterLabel($$.letter))
     .layoutWeight(1)
     .height('100%')
     .backgroundColor(this.skin.keySurfaceBackground($$.emphasized, $$.special === true))
@@ -1043,6 +1047,7 @@ struct KeyboardView {
     .borderColor(this.skin.borderColor)
     .shadow({ radius: this.skin.shadowRadius, color: this.skin.shadowColor(),
       offsetX: 0, offsetY: this.skin.shadowOffset })
+    .responseRegion(this.keyHitRegion())
     .onClick($$.action)
   }
 
@@ -1052,7 +1057,7 @@ struct KeyboardView {
     Column() {
       this.keyFace($$)
     }
-    .accessibilityText($$.label ?? $$.face)
+    .accessibilityText($$.letter === undefined ? ($$.label ?? $$.face) : this.letterLabel($$.letter))
     .width($$.width)
     .height('100%')
     .backgroundColor(this.skin.keySurfaceBackground($$.emphasized, $$.special === true))
@@ -1063,6 +1068,7 @@ struct KeyboardView {
     .borderColor(this.skin.borderColor)
     .shadow({ radius: this.skin.shadowRadius, color: this.skin.shadowColor(),
       offsetX: 0, offsetY: this.skin.shadowOffset })
+    .responseRegion(this.keyHitRegion())
     .onClick($$.action)
   }
 
@@ -1890,6 +1896,27 @@ struct KeyboardView {
     return this.geometryRowSpacing / 10;
   }
 
+  /** 键的触摸区：左右各扩出半个键距、上下各扩出半个行距，相邻键在空隙中线相接，键与候选栏之间的空隙也只占一半，碰不到候选栏，见 `KeyboardGeometry.hitOffsets`。 */
+  private keyHitRegion(): Rectangle[] {
+    const halfKey: number = this.keySpacing() / 2;
+    const halfRow: number = this.rowSpacing() / 2;
+    return this.hitRegion(halfKey, halfRow, halfKey, halfRow);
+  }
+
+  /** 九键和笔画键盘左侧标点栏的一格：格与格之间没有空隙，只有首格向上、末格向下扩出半个行距，左右照键扩出半个键距。 */
+  private railHitRegion(index: number, count: number): Rectangle[] {
+    const halfKey: number = this.keySpacing() / 2;
+    const halfRow: number = this.rowSpacing() / 2;
+    return this.hitRegion(halfKey, index === 0 ? halfRow : 0, halfKey, index === count - 1 ? halfRow : 0);
+  }
+
+  private hitRegion(left: number, top: number, right: number, bottom: number): Rectangle[] {
+    return KeyboardGeometry.hitOffsets(left, top, right, bottom).map((offset: HitOffset): Rectangle => {
+      const rectangle: Rectangle = { x: offset.x, y: offset.y, width: '100%', height: '100%' };
+      return rectangle;
+    });
+  }
+
   /** The adjustment is spread across the key rows so none of them keeps a stray pixel. */
   private rowHeight(index: number): number {
     return KeyboardGeometry.adjustedRowHeight(KeyboardMetrics.ROW_HEIGHT_VP,
@@ -1919,7 +1946,8 @@ struct KeyboardView {
     // the same characters on both layers, so without it ForEach would judge the subtrees identical
     // and the digit layer would go on reading ABC, DEF, GHI. The twenty-six key rows never needed it
     // because their two layers hold different characters.
-    return `${this.english}:${this.caseMode}:${this.localMode}:${this.shuangpinProfile}:`
+    // 大小写不在这里：字母键的键面和读屏文字在绘制时按大小写现算（见 `KeyOptions.letter`），自动大写切换时键节点保持不变，正按着的键不会被重建。
+    return `${this.english}:${this.localMode}:${this.shuangpinProfile}:`
       + `${this.engineScheme}:${this.scheme.preferenceId}:${this.symbols}:${this.skin.key()}`;
   }
 
@@ -2015,8 +2043,8 @@ struct KeyboardView {
     if (this.koreanFace()) {
       return {
         face: this.letterFace(letter),
-        // The jamo itself, which is what a screen reader set to Korean reads.
-        label: this.letterFace(letter),
+        label: this.letterLabel(letter),
+        letter: letter,
         size: KeyboardMetrics.KEY_FONT_SIZE,
         emphasized: false,
         width: 0,
@@ -2025,17 +2053,27 @@ struct KeyboardView {
     }
     return {
       face: this.letterFace(letter),
-      // Ported with the face policy and, until now, computed for nobody: the view attached no
-      // accessibility text at all, so every key on this keyboard was silent to a screen reader.
-      label: LetterKeyFacePolicy.accessibilityLabel(letter,
-        !this.english && !this.vietnameseFace() && !this.tibetanFace(),
-        this.localMode !== 'none', this.caseMode !== LetterCaseMode.LOWERCASE),
+      label: this.letterLabel(letter),
+      letter: letter,
       hint: this.letterHint(letter),
       size: KeyboardMetrics.KEY_FONT_SIZE,
       emphasized: false,
       width: 0,
       action: () => this.tapLetter(letter)
     };
+  }
+
+  /** What a screen reader says for a letter key under the current case. */
+  private letterLabel(letter: string): string {
+    if (this.koreanFace()) {
+      // The jamo itself, which is what a screen reader set to Korean reads.
+      return this.letterFace(letter);
+    }
+    // Ported with the face policy and, until now, computed for nobody: the view attached no
+    // accessibility text at all, so every key on this keyboard was silent to a screen reader.
+    return LetterKeyFacePolicy.accessibilityLabel(letter,
+      !this.english && !this.vietnameseFace() && !this.tibetanFace(),
+      this.localMode !== 'none', this.caseMode !== LetterCaseMode.LOWERCASE);
   }
 
   /** The shared English/primary/fallback order, as one CSS-style list for a Text modifier. */
@@ -2813,7 +2851,7 @@ struct KeyboardView {
         // One column, two jobs, exactly as the iOS sidebar does it: the readings the digits could
         // stand for while something is being spelled, and the common punctuation when nothing is.
         if (this.symbols) {
-          ForEach(NineKeyLayout.digitPunctuation(), (symbol: string) => {
+          ForEach(NineKeyLayout.digitPunctuation(), (symbol: string, index: number) => {
             Column() {
               Text(symbol)
                 .fontSize(KeyboardMetrics.SMALL_KEY_FONT_SIZE)
@@ -2825,6 +2863,7 @@ struct KeyboardView {
             .justifyContent(FlexAlign.Center)
             .width('100%')
             .accessibilityText(KeyAccessibilityPolicy.symbol(symbol))
+            .responseRegion(this.railHitRegion(index, NineKeyLayout.digitPunctuation().length))
             .onClick(() => {
               KeyboardSession.shared.recordKey(KeyIdPolicy.SOFT_PUNCTUATION);
               KeyboardSession.shared.punctuation(symbol.charCodeAt(0));
@@ -2850,7 +2889,7 @@ struct KeyboardView {
           .width('100%')
           .height('100%')
         } else {
-          ForEach(NineKeyLayout.punctuation(), (symbol: string) => {
+          ForEach(NineKeyLayout.punctuation(), (symbol: string, index: number) => {
             Column() {
               Text(this.symbolFace(symbol))
                 .fontSize(KeyboardMetrics.SMALL_KEY_FONT_SIZE)
@@ -2861,6 +2900,7 @@ struct KeyboardView {
             .layoutWeight(1)
             .justifyContent(FlexAlign.Center)
             .width('100%')
+            .responseRegion(this.railHitRegion(index, NineKeyLayout.punctuation().length))
             .onClick(() => {
               KeyboardSession.shared.recordKey(KeyIdPolicy.SOFT_PUNCTUATION);
               KeyboardSession.shared.punctuation(symbol.charCodeAt(0));
@@ -2894,7 +2934,7 @@ struct KeyboardView {
 
       Column({ space: this.rowSpacing() }) {
         Column() {
-          this.deleteKey('100%')
+          this.deleteKey('100%', true)
         }
         .layoutWeight(1)
         .width('100%')
@@ -2961,6 +3001,7 @@ struct KeyboardView {
     .borderColor(this.skin.borderColor)
     .shadow({ radius: this.skin.shadowRadius, color: this.skin.shadowColor(),
       offsetX: 0, offsetY: this.skin.shadowOffset })
+    .responseRegion(this.keyHitRegion())
     .onClick(() => {
       KeyboardSession.shared.recordKey(KeyIdPolicy.nineKey(key.input));
       KeyboardSession.shared.press(key.input.charCodeAt(0), false);
@@ -3085,7 +3126,7 @@ struct KeyboardView {
    * ends with the finger somewhere else.
    */
   @Builder
-  deleteKey(width: Length) {
+  deleteKey(width: Length, intoGaps: boolean) {
     Column() {
       Text('⌫')
         .fontSize(KeyboardMetrics.KEY_FONT_SIZE)
@@ -3105,6 +3146,8 @@ struct KeyboardView {
     .borderColor(this.skin.borderColor)
     .shadow({ radius: this.skin.shadowRadius, color: this.skin.shadowColor(),
       offsetX: 0, offsetY: this.skin.shadowOffset })
+    // 表情面板标题栏里的删除键不在键盘的键距里，触摸区不扩。
+    .responseRegion(intoGaps ? this.keyHitRegion() : this.hitRegion(0, 0, 0, 0))
     .onTouch((event: TouchEvent): void => {
       if (event.type === TouchType.Down) {
         this.startBackspace();
@@ -3149,6 +3192,7 @@ struct KeyboardView {
     .borderColor(this.skin.borderColor)
     .shadow({ radius: this.skin.shadowRadius, color: this.skin.shadowColor(),
       offsetX: 0, offsetY: this.skin.shadowOffset })
+    .responseRegion(this.keyHitRegion())
     .onTouch((event: TouchEvent): void => {
       const position: number = event.touches[0].windowX;
       if (event.type === TouchType.Down) {
@@ -4629,6 +4673,7 @@ struct KeyboardView {
       ? JapaneseVariantPolicy.bracketsLabel()
       : JapaneseVariantPolicy.accessibilityLabel(
         JapaneseVariantPolicy.enabled(this.japanese, this.symbols, this.editing.length > 0)))
+    .responseRegion(this.keyHitRegion())
     .onClick(() => {
       if (JapaneseVariantPolicy.brackets(this.japanese, this.symbols)) {
         // A strip rather than a menu: bindContextMenu does not show inside an input method panel,
@@ -4681,6 +4726,7 @@ struct KeyboardView {
     .borderRadius(KeyboardMetrics.KEY_CORNER_VP)
     .borderWidth(this.skin.borderWidth)
     .borderColor(this.skin.borderColor)
+    .responseRegion(this.keyHitRegion())
     .onTouch((event: TouchEvent): void => {
       if (event.type === TouchType.Down) {
         this.flickX = event.touches[0].windowX;
@@ -5660,7 +5706,7 @@ struct KeyboardView {
         }
         Blank()
         Column() {
-          this.deleteKey(KeyboardMetrics.MODIFIER_WIDTH_VP)
+          this.deleteKey(KeyboardMetrics.MODIFIER_WIDTH_VP, false)
         }
         .width(KeyboardMetrics.MODIFIER_WIDTH_VP)
         .height(KeyboardMetrics.ROW_HEIGHT_VP * 3 / 5)
@@ -5956,6 +6002,7 @@ struct KeyboardView {
     .borderWidth(this.skin.borderWidth)
     .borderColor(this.skin.borderColor)
     .accessibilityText(label)
+    .responseRegion(this.keyHitRegion())
     .onClick(action)
   }
 
@@ -6183,7 +6230,7 @@ struct KeyboardView {
               ? this.symbolKey(KeyboardScheme.symbolRowKey(key, this.tibetanFace()))
               : this.letterKey(key));
           }, (key: string) => key + this.faceKey())
-          this.deleteKey(KeyboardMetrics.MODIFIER_WIDTH_VP);
+          this.deleteKey(KeyboardMetrics.MODIFIER_WIDTH_VP, true);
         }
         .width('100%')
         .height(this.rowHeight(2))
@@ -6223,7 +6270,7 @@ struct KeyboardView {
       ForEach(ZhuyinLayout.ROWS[3], (key: string) => {
         this.flexibleKey(this.zhuyinKey(key));
       }, (key: string) => key + this.faceKey())
-      this.deleteKey(KeyboardMetrics.MODIFIER_WIDTH_VP);
+      this.deleteKey(KeyboardMetrics.MODIFIER_WIDTH_VP, true);
     }
     .width('100%')
     .height(this.dachenRowHeight())
@@ -6246,7 +6293,7 @@ struct KeyboardView {
   strokeGrid() {
     Row({ space: this.keySpacing() }) {
       Column() {
-        ForEach(NineKeyLayout.punctuation(), (symbol: string) => {
+        ForEach(NineKeyLayout.punctuation(), (symbol: string, index: number) => {
           Column() {
             Text(this.symbolFace(symbol))
               .fontSize(KeyboardMetrics.SMALL_KEY_FONT_SIZE)
@@ -6258,6 +6305,7 @@ struct KeyboardView {
           .justifyContent(FlexAlign.Center)
           .width('100%')
           .accessibilityText(KeyAccessibilityPolicy.symbol(symbol))
+          .responseRegion(this.railHitRegion(index, NineKeyLayout.punctuation().length))
           .onClick(() => {
             KeyboardSession.shared.recordKey(KeyIdPolicy.SOFT_PUNCTUATION);
             KeyboardSession.shared.punctuation(symbol.charCodeAt(0));
@@ -6284,7 +6332,7 @@ struct KeyboardView {
       .height('100%')
 
       Column() {
-        this.deleteKey('100%')
+        this.deleteKey('100%', true)
       }
       .width(`${NINE_KEY_COLUMN_PERCENT}%`)
       .height('100%')
