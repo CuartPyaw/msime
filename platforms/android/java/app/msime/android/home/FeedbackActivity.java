@@ -13,6 +13,7 @@ import android.widget.TextView;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import app.msime.android.R;
+import app.msime.android.policy.FeedbackBodyPolicy;
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.chip.Chip;
@@ -34,9 +35,6 @@ public final class FeedbackActivity extends AppCompatActivity {
     // copy is guarded by scripts/test-support-channels.py rather than left to be noticed.
     private static final String QQ_GROUP = "829919142";
     private static final String TELEGRAM_URL = "https://t.me/msimegroup";
-    /** GitHub 的地址长度有限，过长的正文在这里截断，完整的走「复制报告」。 */
-    private static final int MAX_BODY = 4000;
-
     private String kind = KINDS[0];
     private EditText detail;
 
@@ -126,8 +124,7 @@ public final class FeedbackActivity extends AppCompatActivity {
     }
 
     private void submit() {
-        String body = report();
-        if (body.length() > MAX_BODY) body = body.substring(0, MAX_BODY);
+        String body = FeedbackBodyPolicy.clip(report());
         Uri url = Uri.parse(ISSUES).buildUpon()
             .appendQueryParameter("title", kind)
             .appendQueryParameter("body", body)

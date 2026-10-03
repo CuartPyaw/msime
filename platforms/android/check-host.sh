@@ -494,6 +494,7 @@ javac --release 17 -Xlint:all -Werror -cp "$android_jar" -d "$output_dir" \
   "$repo_root/platforms/android/tests/dictionary/DictionarySnapshotQueueSmoke.java" \
   "$repo_root/platforms/android/tests/dictionary/CustomSkinLibrarySmoke.java" \
   "$repo_root/platforms/android/tests/settings/DiagnosticPolicySmoke.java" \
+  "$repo_root/platforms/android/tests/settings/FeedbackBodyPolicySmoke.java" \
   "$repo_root/platforms/android/tests/settings/HostOptionsPolicySmoke.java" \
   "$repo_root/platforms/android/tests/settings/AccountTokenPolicySmoke.java" \
   "$repo_root/platforms/android/tests/settings/TypingStatisticsModelSmoke.java" \
@@ -517,6 +518,7 @@ javac --release 17 -Xlint:all -Werror -cp "$android_jar" -d "$output_dir" \
   "$repo_root/platforms/android/tests/candidate/CandidatePreeditStylePolicySmoke.java" \
   "$repo_root/platforms/android/tests/keyboard/SymbolPanelModelSmoke.java"
 java -cp "$output_dir" EditorSmoke
+java -cp "$output_dir" FeedbackBodyPolicySmoke
 java -cp "$output_dir:$android_jar" app.msime.android.BootstrapMarkerSmoke
 java -cp "$output_dir:$android_jar" app.msime.android.core.TelemetryHandlerSmoke
 java -cp "$output_dir" PhrasePreeditSmoke
