@@ -4810,13 +4810,14 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     self.inputScheme = MSIMEInputSchemeNames()[sender.tag];
 }
 // 当前方案在菜单栏的入口还没加入输入法列表时显示提示；没有探针（测试与其它链接了设置窗口的程序）时不显示。
+// 系统设置的键盘设置扩展跑在沙盒里，用的是自己容器里的输入源缓存，替换 bundle 后不刷新，所以新版本加的模式要注销重新登录后才进得了「添加」对话框，提示里一并说明。
 - (void)refreshInputModeHint {
     if (!_inputModeHintRow) return;
     NSString *mode = MSIMEInputModeID(MSIMEInputModeFor(NO, self.inputScheme));
     const BOOL missing = MSIMEInputModeEnabledProbe != nullptr && !MSIMEInputModeEnabledProbe(mode);
     _inputModeHintRow.hidden = !missing;
     if (!missing) return;
-    _inputModeHintLabel.stringValue = [NSString stringWithFormat:@"菜单栏里还没有「%@」，要先把它加进输入法列表才能从菜单栏切过去。macOS 只允许你自己添加：点「打开键盘设置」，在「输入法」一行点「编辑…」，再点左下角「+」，在左栏选或搜索「%@」后添加。", MSIMEInputModeMenuName(mode), MSIMEInputModeAddDialogLanguage(mode)];
+    _inputModeHintLabel.stringValue = [NSString stringWithFormat:@"菜单栏里还没有「%@」，要先把它加进输入法列表才能从菜单栏切过去。macOS 只允许你自己添加：点「打开键盘设置」，在「输入法」一行点「编辑…」，再点左下角「+」，在左栏选或搜索「%@」后添加。刚安装或刚更新出来的入口，要注销并重新登录一次才会出现在「添加」对话框里。", MSIMEInputModeMenuName(mode), MSIMEInputModeAddDialogLanguage(mode)];
 }
 - (void)openInputSourceSettings:(id)sender {
     (void)sender;
