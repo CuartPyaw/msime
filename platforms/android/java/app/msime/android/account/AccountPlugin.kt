@@ -84,6 +84,11 @@ class AccountPlugin(activity: Activity) : Plugin(activity) {
     private val storage = AndroidAccountSessionStorage(activity)
     private val bootstrapWorker: ExecutorService = Executors.newSingleThreadExecutor()
 
+    override fun onDestroy() {
+        bootstrapWorker.shutdownNow()
+        super.onDestroy()
+    }
+
     private fun snapshotQueue(): DictionarySnapshotQueue {
         val files = hostActivity.filesDir
             ?: throw IllegalStateException("private files unavailable")
