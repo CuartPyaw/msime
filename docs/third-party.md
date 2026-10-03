@@ -44,7 +44,7 @@
 
 | 产物 | 大小 | 已知来源 |
 | --- | --- | --- |
-| `msime.db` | 81.9 MB | 工作词库，含 86 与 98 五笔码表 |
+| `msime.db` | 81.9 MB | 工作词库，含 86 与 98 五笔码表；98 版同时合并 `msime-dictionary` 的开源补充表 |
 | `english.db` | 1.5 MB | Engine 发布的英文词库 |
 | `bigram.bin` | 12.0 MB | Engine 发布的二元语言模型表，整句词格仲裁按它加权 |
 | `trigram.bin` | 12.0 MB | Engine 发布的三元语言模型表，同上 |

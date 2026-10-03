@@ -410,9 +410,11 @@ impl Build {
                 Ok(format!("{imported} rows imported, {skipped} skipped"))
             }
             Stage::Wubi98 => {
-                let (imported, skipped) = msime::build_wubi98(
+                let supplement = self.sources.pinned("cn/Wubi98Fcitx.txt")?;
+                let (imported, skipped) = msime::build_wubi98_sources(
                     &mut self.database("msime.db")?,
                     &self.sources.pinned("cn/Wubi98.txt")?,
+                    &[supplement.as_path()],
                 )?;
                 Ok(format!("{imported} rows imported, {skipped} skipped"))
             }
