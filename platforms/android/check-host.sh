@@ -466,6 +466,7 @@ javac --release 17 -Xlint:all -Werror -cp "$android_jar" -d "$output_dir" \
   "$repo_root/platforms/android/tests/core/PhrasePreeditSmoke.java" \
   "$repo_root/platforms/android/tests/core/InputViewRefreshPolicySmoke.java" \
   "$repo_root/platforms/android/tests/core/EditorContextSnapshotSmoke.java" \
+  "$repo_root/platforms/android/tests/core/SelectionEchoTrackerSmoke.java" \
   "$repo_root/platforms/android/tests/settings/PreferencesSmoke.java" \
   "$repo_root/platforms/android/tests/settings/PreferencesSavePolicySmoke.java" \
   "$repo_root/platforms/android/tests/settings/InputModeStoreSmoke.java" \
@@ -568,6 +569,7 @@ java -cp "$output_dir:$android_jar" app.msime.android.core.TelemetryHandlerSmoke
 java -cp "$output_dir" PhrasePreeditSmoke
 java -cp "$output_dir" InputViewRefreshPolicySmoke
 java -cp "$output_dir" EditorContextSnapshotSmoke
+java -cp "$output_dir" SelectionEchoTrackerSmoke
 java -cp "$output_dir" PreferencesSmoke
 java -cp "$output_dir" PreferencesSavePolicySmoke
 java -cp "$output_dir" app.msime.android.InputModeStoreSmoke
