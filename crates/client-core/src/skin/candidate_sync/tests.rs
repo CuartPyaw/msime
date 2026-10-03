@@ -852,6 +852,22 @@ fn a_failed_unpublish_keeps_the_row_remembered() {
 }
 
 #[test]
+fn a_successful_unpublish_reports_state_storage_failure() {
+    let fixture = Fixture::new();
+    write_skin(&fixture.root, "sakura", "樱花", 1);
+    fixture.sync();
+    let id = *fixture.library.rows.borrow().keys().next().unwrap();
+    fs::remove_file(&fixture.state).unwrap();
+    fs::create_dir(&fixture.state).unwrap();
+
+    assert_eq!(
+        unpublish(&fixture.state, &fixture.library, id),
+        Err(AccountError::Storage),
+    );
+    assert!(fixture.library.rows.borrow().is_empty());
+}
+
+#[test]
 fn a_missing_skin_root_deletes_nothing_once_packages_are_remembered() {
     let fixture = Fixture::new();
     write_skin(&fixture.root, "sakura", "樱花", 1);

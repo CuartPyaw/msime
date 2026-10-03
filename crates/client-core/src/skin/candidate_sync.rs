@@ -329,7 +329,7 @@ pub fn unpublish(
     state
         .packages
         .retain(|_, synced| synced.cloud_id != publication);
-    let _ = save_state(state_path, &state);
+    save_state(state_path, &state).map_err(|_| AccountError::Storage)?;
     Ok(())
 }
 
