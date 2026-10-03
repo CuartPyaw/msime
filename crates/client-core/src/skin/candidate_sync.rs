@@ -324,7 +324,10 @@ pub fn unpublish(
     publication: Uuid,
 ) -> Result<(), AccountError> {
     let _run = lock_runs();
-    remote.unpublish(publication)?;
+    match remote.unpublish(publication) {
+        Ok(()) | Err(AccountError::NotFound) => {}
+        Err(error) => return Err(error),
+    }
     let mut state = load_state(state_path);
     state
         .packages
