@@ -6,6 +6,8 @@
 
 namespace msimeui
 {
+inline constexpr std::size_t kTextFormatCacheCapacity = 128;
+
 // A small UI cache whose entries are kept alive in most-recently-used order.
 // The cache owns the values and evicts the oldest entry before it grows past
 // the configured capacity.
