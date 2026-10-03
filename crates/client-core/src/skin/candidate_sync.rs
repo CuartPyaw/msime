@@ -449,7 +449,7 @@ pub fn publish(
                 local_digest,
             },
         );
-        let _ = save_state(state_path, &state);
+        save_state(state_path, &state).map_err(|_| AccountError::Storage)?;
         Ok(())
     })
     .map_err(CandidateSkinPublishError::Account)?;
