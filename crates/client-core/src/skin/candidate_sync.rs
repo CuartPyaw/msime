@@ -305,12 +305,16 @@ fn local_packages(root: &Path) -> std::io::Result<BTreeSet<String>> {
 }
 
 /// Record that `package_id` was just installed from the gallery publication `publication`. A later run leaves the package alone unless that publication is one of the user's own, and compares it afresh if it is, since the install replaced whatever was synced before.
-pub fn record_install(state_path: &Path, package_id: &str, publication: Uuid) {
+pub fn record_install(
+    state_path: &Path,
+    package_id: &str,
+    publication: Uuid,
+) -> Result<(), &'static str> {
     let _run = lock_runs();
     let mut state = load_state(state_path);
     state.packages.remove(package_id);
     state.installed.insert(package_id.to_owned(), publication);
-    let _ = save_state(state_path, &state);
+    save_state(state_path, &state)
 }
 
 /// Take the publication `publication` out of the library and forget the row it was synced with. The local folder is then uploaded again as a new private package by the next run rather than deleted to match. Both happen under the run lock: a run that listed the library between the two would find the row gone while its state still named it, and delete the local folder.
