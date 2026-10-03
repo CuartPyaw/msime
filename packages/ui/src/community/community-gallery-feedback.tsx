@@ -23,7 +23,7 @@ export function CommunityGalleryFeedback({
         <CommunityErrorAlert message={error} signInRequired={signInRequired} onLogin={onLogin} />
       )}
       {notice}
-      {empty}
+      {!error && empty}
     </>
   );
 }

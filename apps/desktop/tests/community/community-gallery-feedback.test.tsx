@@ -6,7 +6,7 @@ import * as ui from "@msime/ui";
 
 afterEach(cleanup);
 
-test("shared gallery feedback renders error, notice and empty content", () => {
+test("shared gallery feedback hides empty content when the gallery failed", () => {
   const Feedback = (
     ui as unknown as {
       CommunityGalleryFeedback?: ComponentType<{
@@ -34,9 +34,22 @@ test("shared gallery feedback renders error, notice and empty content", () => {
 
   expect(screen.getByRole("alert").textContent).toContain("需要登录");
   expect(screen.getByText("刚刚完成")).toBeTruthy();
-  expect(screen.getByText("这里是空的")).toBeTruthy();
+  expect(screen.queryByText("这里是空的")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "去登录" }));
   expect(onLogin).toHaveBeenCalledOnce();
+});
+
+test("shared gallery feedback renders empty content without an error", () => {
+  const Feedback = (
+    ui as unknown as {
+      CommunityGalleryFeedback?: ComponentType<{ empty?: ReactNode }>;
+    }
+  ).CommunityGalleryFeedback;
+  expect(Feedback).toBeDefined();
+  if (!Feedback) return;
+
+  render(<Feedback empty={<p>这里是空的</p>} />);
+  expect(screen.getByText("这里是空的")).toBeTruthy();
 });
 
 test("community galleries reuse the shared feedback component", () => {
