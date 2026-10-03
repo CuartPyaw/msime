@@ -780,6 +780,29 @@ fn publishing_cancels_when_same_user_relogs_in_before_state_save() {
 }
 
 #[test]
+fn publishing_reports_state_storage_failure_after_remote_success() {
+    let fixture = Fixture::new();
+    write_skin(&fixture.root, "sakura", "樱花", 1);
+    fs::create_dir(&fixture.state).unwrap();
+
+    assert_eq!(
+        publish(
+            &fixture.root,
+            &fixture.state,
+            &fixture.library,
+            "sakura",
+            Uuid::new_v4(),
+            "樱花".into(),
+            String::new(),
+            CandidateSkinVisibility::Private,
+            None,
+        ),
+        Err(CandidateSkinPublishError::Account(AccountError::Storage))
+    );
+    assert_eq!(fixture.library.rows.borrow().len(), 1);
+}
+
+#[test]
 fn publishing_a_new_package_creates_a_row_that_sync_then_knows() {
     let fixture = Fixture::new();
     write_skin(&fixture.root, "sakura", "樱花", 1);
