@@ -98,6 +98,11 @@ public final class DictionarySnapshotQueueSmoke {
             String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
                 .digest(Files.readAllBytes(source)));
             String account = "fixture-account";
+            fails(DictionarySnapshotQueue.Reason.INVALID,
+                () -> queue.enqueue(source, account, 42, version, "0".repeat(64)));
+            try (Stream<Path> entries = Files.list(root.resolve("queue"))) {
+                check(entries.noneMatch(path -> path.getFileName().toString().endsWith(".incoming")));
+            }
             queue.publishLocalVersion(version);
             check(queue.read().request() == null);
             UUID id = queue.enqueue(source, account, 42, version, digest);
