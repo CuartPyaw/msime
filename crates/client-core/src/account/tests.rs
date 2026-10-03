@@ -232,6 +232,27 @@ impl AccountSessionStorage for MemoryStorage {
     }
 }
 
+#[derive(Clone, Default)]
+struct SharedMemoryStorage(MemoryStorage);
+
+impl AccountSessionStorage for SharedMemoryStorage {
+    fn load(&self) -> Result<Option<SavedAccountSession>, AccountError> {
+        self.0.load()
+    }
+
+    fn save(&self, session: &SavedAccountSession) -> Result<(), AccountError> {
+        self.0.save(session)
+    }
+
+    fn clear(&self) -> Result<(), AccountError> {
+        self.0.clear()
+    }
+
+    fn shared_across_processes(&self) -> bool {
+        true
+    }
+}
+
 #[derive(Clone)]
 struct FakeApi {
     refreshes: Arc<AtomicUsize>,
@@ -239,6 +260,8 @@ struct FakeApi {
     refresh_gate: Option<Arc<(Mutex<bool>, Condvar)>>,
     preferences_started: Arc<AtomicBool>,
     preferences_gate: Option<Arc<(Mutex<bool>, Condvar)>>,
+    put_preferences_started: Arc<AtomicBool>,
+    put_preferences_gate: Option<Arc<(Mutex<bool>, Condvar)>>,
     logins: Arc<Mutex<Vec<(String, String)>>>,
 }
 
@@ -250,6 +273,8 @@ impl FakeApi {
             refresh_gate: None,
             preferences_started: Arc::new(AtomicBool::new(false)),
             preferences_gate: None,
+            put_preferences_started: Arc::new(AtomicBool::new(false)),
+            put_preferences_gate: None,
             logins: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -394,6 +419,14 @@ impl AccountApi for FakeApi {
     ) -> Result<AccountPreferences, AccountError> {
         if access_token == token(b'a') {
             return Err(AccountError::Unauthorized);
+        }
+        self.put_preferences_started.store(true, Ordering::SeqCst);
+        if let Some(gate) = &self.put_preferences_gate {
+            let (lock, ready) = &**gate;
+            let mut open = lock.lock().map_err(|_| AccountError::Unavailable)?;
+            while !*open {
+                open = ready.wait(open).map_err(|_| AccountError::Unavailable)?;
+            }
         }
         Ok(AccountPreferences {
             revision: preferences.revision + 1,
@@ -789,6 +822,38 @@ fn a_generation_guard_rejects_a_same_user_relogin_before_local_write() {
         session.put_preferences_with_generation(&cloud, generation, "fixture-user"),
         Err(AccountError::Cancelled)
     );
+}
+
+#[test]
+fn a_shared_logout_during_preference_upload_reports_cancellation() {
+    let storage = SharedMemoryStorage::default();
+    installed(&storage.0, valid_future_expiry());
+    let api = FakeApi::new();
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let mut api_for_request = api.clone();
+    api_for_request.put_preferences_gate = Some(Arc::clone(&gate));
+    let session = Arc::new(BackendAccountSession::new(api_for_request, storage.clone()));
+    let (_, _, generation) = session
+        .credentials_with_generation(None, Some("fixture-user"))
+        .unwrap();
+    let cloud = AccountPreferences {
+        revision: 1,
+        settings: BTreeMap::new(),
+    };
+    let request_session = Arc::clone(&session);
+    let request = thread::spawn(move || {
+        request_session.put_preferences_with_generation(&cloud, generation, "fixture-user")
+    });
+    while !api.put_preferences_started.load(Ordering::SeqCst) {
+        thread::yield_now();
+    }
+    storage.clear().unwrap();
+    {
+        let (lock, ready) = &*gate;
+        *lock.lock().unwrap() = true;
+        ready.notify_all();
+    }
+    assert_eq!(request.join().unwrap(), Err(AccountError::Cancelled));
 }
 
 fn serve_once(response: Vec<u8>) -> String {

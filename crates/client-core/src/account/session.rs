@@ -639,7 +639,9 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
             result => result?,
         };
         validate_account_preferences(&updated)?;
-        let state = self.lock()?;
+        let mut state = self.lock()?;
+        // 移动端会话文件与键盘进程共享，接受云端写入前重新读取，避免另一进程退出账号被本地缓存遮住。
+        self.load_locked(&mut state)?;
         if state.generation != expected_generation
             || state
                 .saved
