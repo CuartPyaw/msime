@@ -72,12 +72,12 @@ function AiSkinGeneration({
   const requestRef = useRef("");
   const mounted = useRef(true);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
       mounted.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
 
   useEffect(() => {
     requestRef.current = requestId;
@@ -410,14 +410,14 @@ export function TouchKeyboardSkinEditor({
   const mounted = useRef(true);
   const libraryGeneration = useRef(0);
   const libraryActionBusy = useRef(false);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
       mounted.current = false;
       libraryGeneration.current += 1;
       libraryActionBusy.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
   useEffect(() => {
     const generation = ++libraryGeneration.current;
     if (!library) return;
