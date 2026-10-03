@@ -21,6 +21,15 @@ public final class EmojiCatalogModelSmoke {
         EmojiCatalogModel.Page tail = EmojiCatalogModel.validatePage(List.of(item), 128, 64, 129, true);
         check(tail.complete(), "short tail completes cursor");
 
+        EmojiCatalogModel.Item missing = new EmojiCatalogModel.Item("🫠", "melting", "fixture");
+        EmojiCatalogModel.Page mixed = EmojiCatalogModel.validatePage(
+            List.of(item, missing), 0, 64, 64, false);
+        EmojiCatalogModel.Page drawn = EmojiCatalogModel.renderable(mixed, text -> !text.equals("🫠"));
+        check(drawn.items().equals(List.of(item)) && drawn.nextOffset() == 64 && !drawn.complete(),
+            "undrawable entries are dropped without moving the cursor");
+        check(EmojiCatalogModel.renderable(mixed, text -> false).items().isEmpty(),
+            "fully undrawable page stays a valid empty scan page");
+
         expectFailure(() -> EmojiCatalogModel.validatePage(List.of(), 0, 64, 0, false));
         expectFailure(() -> EmojiCatalogModel.validatePage(List.of(), 64, 64, 63, true));
         expectFailure(() -> EmojiCatalogModel.validatePage(List.of(), 0, 64, 65, false));
@@ -40,7 +49,7 @@ public final class EmojiCatalogModelSmoke {
             "recent selection moves without duplication");
         check(EmojiCatalogModel.normalizeRecents(List.of("🌲", "🌲", "", "🌊"))
             .equals(List.of("🌲", "🌊")), "persisted recents are normalized");
-        System.out.println("Emoji catalog model: group order, cursor bounds and recents passed");
+        System.out.println("Emoji catalog model: group order, cursor bounds, glyph filtering and recents passed");
     }
 
     private static void expectFailure(Runnable action) {
