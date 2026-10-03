@@ -4138,6 +4138,12 @@ group("diagnostics are trimmed, bounded and elided", () => {
     "an overlong diagnostic is cut to the bound including the ellipsis",
   );
   check(bounded.endsWith("…"), "and says it was cut");
+  const splitEmoji = "x".repeat(InputDiagnosticPolicy.MAX_LENGTH - 2) + "😀tail";
+  const boundedEmoji = InputDiagnosticPolicy.normalize(splitEmoji);
+  check(
+    boundedEmoji === "x".repeat(InputDiagnosticPolicy.MAX_LENGTH - 2) + "…",
+    "diagnostic truncation does not leave a lone surrogate",
+  );
   check(InputDiagnosticPolicy.visible("hi") === true, "a real diagnostic shows");
   check(InputDiagnosticPolicy.visible("   ") === false, "an empty one does not");
 });
