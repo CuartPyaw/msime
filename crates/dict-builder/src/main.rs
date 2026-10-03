@@ -437,9 +437,17 @@ impl Build {
                 } else {
                     Default::default()
                 };
-                let base = english::parse_base_dict_words(&text::read(
+                let mut base = english::parse_base_dict_words(&text::read(
                     &self.sources.pinned("en/BaseDictIceEn.txt")?,
                 )?)?;
+                let supplement = english::parse_base_dict_words(&text::read(
+                    &self.sources.pinned("en/RimeIceEnglishSupplementV1.txt")?,
+                )?)?;
+                let supplement_added = supplement
+                    .keys()
+                    .filter(|word| !base.contains_key(*word))
+                    .count();
+                base.extend(supplement);
                 let counts = english::parse_google_counts(&text::read(
                     &self.sources.pinned("en/google_count_1_w.txt")?,
                 )?);
@@ -454,8 +462,9 @@ impl Build {
                     &custom,
                 )?;
                 Ok(format!(
-                    "{} words, {} custom rows: {} added, {} replacing a base row",
+                    "{} words ({} from rime-ice supplement), {} custom rows: {} added, {} replacing a base row",
                     rows.base,
+                    supplement_added,
                     custom.len(),
                     rows.custom_added,
                     rows.custom_replaced

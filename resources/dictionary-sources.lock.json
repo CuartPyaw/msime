@@ -6,11 +6,11 @@
     },
     "rime-ice": {
       "repository": "https://github.com/iDvel/rime-ice.git",
-      "commit": "9e66b0729083b37d217312294f6d516c8d7234be"
+      "commit": "3aea6d3694fb3d94ec663641f021f788822897ad"
     },
     "msime-dictionary": {
       "repository": "https://github.com/metasequoiaime/msime-dictionary.git",
-      "commit": "12172293680f71d28015c45ddce8000d72fd3264"
+      "commit": "fb597bc2c1bd965041f7d4821e63a1ede426a29b"
     },
     "rime-cantonese": {
       "repository": "https://github.com/rime/rime-cantonese.git",
@@ -99,6 +99,12 @@
       "url": "https://github.com/metasequoiaime/msime-dictionary/releases/download/sources-v1.3.0/BaseDictIceEn.txt",
       "sha256": "d8e063481a29d87b762a33d58de7c5098fbabaf0f719e16a2a5a4538a0d7a8cf",
       "size": 399282
+    },
+    {
+      "path": "en/RimeIceEnglishSupplementV1.txt",
+      "url": "https://github.com/metasequoiaime/msime-dictionary/releases/download/sources-v1.4.0/RimeIceEnglishSupplementV1.txt",
+      "sha256": "f21e53a577cb822ed0df1c5350c2a5ec8ed70344dd80b2f0e793126d54e79efe",
+      "size": 42184
     },
     {
       "path": "en/google_count_1_w.txt",
