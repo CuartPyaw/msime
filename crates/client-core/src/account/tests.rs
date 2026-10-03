@@ -253,6 +253,34 @@ impl AccountSessionStorage for SharedMemoryStorage {
     }
 }
 
+#[derive(Clone, Default)]
+struct FailingLockStorage(MemoryStorage);
+
+impl AccountSessionStorage for FailingLockStorage {
+    fn load(&self) -> Result<Option<SavedAccountSession>, AccountError> {
+        self.0.load()
+    }
+
+    fn save(&self, session: &SavedAccountSession) -> Result<(), AccountError> {
+        self.0.save(session)
+    }
+
+    fn clear(&self) -> Result<(), AccountError> {
+        self.0.clear()
+    }
+
+    fn shared_across_processes(&self) -> bool {
+        true
+    }
+
+    fn with_refresh_lock<T>(
+        &self,
+        _body: impl FnOnce() -> Result<T, AccountError>,
+    ) -> Result<T, AccountError> {
+        Err(AccountError::Unavailable)
+    }
+}
+
 #[derive(Clone)]
 struct FakeApi {
     refreshes: Arc<AtomicUsize>,
@@ -700,6 +728,26 @@ fn late_refresh_cannot_restore_forgotten_session() {
     ready.notify_all();
     assert_eq!(worker.join().unwrap(), Err(AccountError::Cancelled));
     assert!(storage.load().unwrap().is_none());
+}
+
+#[test]
+fn sign_out_does_not_clear_when_shared_lock_cannot_be_taken() {
+    let storage = FailingLockStorage::default();
+    storage
+        .0
+        .save(&SavedAccountSession {
+            tokens: tokens(b'a', b'b', 900),
+            expires_at_unix_ms: valid_future_expiry(),
+        })
+        .unwrap();
+    let session = BackendAccountSession::new(FakeApi::new(), storage.clone());
+
+    assert_eq!(session.forget(), Err(AccountError::Unavailable));
+    assert_eq!(
+        storage.load().unwrap().unwrap().tokens.refresh_token,
+        token(b'b'),
+        "an unlocked clear could race an in-flight refresh and resurrect the session"
+    );
 }
 
 #[test]

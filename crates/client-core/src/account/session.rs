@@ -856,10 +856,8 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
             state.saved = None;
             state.loaded = true;
         }
-        // Under the refresh lock, so a refresh another process has in flight cannot write its tokens back after this clear. A lock that cannot be taken still clears: clearing can only sign out.
-        self.storage
-            .with_refresh_lock(|| self.storage.clear())
-            .or_else(|_| self.storage.clear())
+        // 必须在刷新锁内清理，避免另一个进程的刷新在退出后写回 token。拿不到锁时保持存储不变；无锁清理会与进行中的刷新竞争并恢复会话。
+        self.storage.with_refresh_lock(|| self.storage.clear())
     }
 
     fn update_user(&self, user: AccountUser, generation: u64) -> Result<(), AccountError> {
