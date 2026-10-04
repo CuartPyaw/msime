@@ -10,6 +10,8 @@ public final class CandidateTranslationResponseSmoke {
             "fractional translation status codes must reject the response");
         check(!BackendTranslationClient.successStatusCode(new BigDecimal("200.0000000000000000001")),
             "precise fractional translation status codes must reject the response");
+        check(!BackendTranslationClient.successStatusCode(200.0),
+            "rounded fractional JSON translation status codes must reject the response");
         check(!BackendTranslationClient.successStatusCode(true),
             "boolean translation status codes must reject the response");
         check(BackendTranslationClient.successStatusCode(200),
