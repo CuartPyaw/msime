@@ -1,0 +1,23 @@
+{
+  "source_commit": "42256e7924c2dc91d0f3f7849d68b3bef2ea9a2b",
+  "artifacts": [
+    {
+      "name": "msime-english.db",
+      "url": "https://github.com/metasequoiaime/msime-dictionary/releases/download/dict-v2.0.6/msime-english.db",
+      "sha256": "fdb0a57c4b53b256b8e3d3aae5ece5eedf419f4df310e9009aee402ae9dd71da",
+      "size": 1626112
+    },
+    {
+      "name": "msime-others.db",
+      "url": "https://github.com/metasequoiaime/msime-dictionary/releases/download/dict-v2.0.6/msime-others.db",
+      "sha256": "9f3cae5b407038e0e4536c40582a0bc0feb732657f0ae2d38196374cede52f94",
+      "size": 1314816
+    },
+    {
+      "name": "msime-dictionary-manifest.json",
+      "url": "https://github.com/metasequoiaime/msime-dictionary/releases/download/dict-v2.0.6/msime-dictionary-manifest.json",
+      "sha256": "010a5f1a26744717fe70d3d3fbd60e713ae23ee143b1f7065215fe5a9d48593d",
+      "size": 3728
+    }
+  ]
+}

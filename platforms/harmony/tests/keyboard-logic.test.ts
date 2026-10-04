@@ -16,7 +16,10 @@ import {
   LocalAsrPathTrust,
   PathTrustStat,
 } from "../entry/src/main/ets/keyboard/input/LocalAsrPathTrust";
-import { LocalAsrTextReader, LocalAsrTextReaderApi } from "../entry/src/main/ets/keyboard/input/LocalAsrTextReader";
+import {
+  LocalAsrTextReader,
+  LocalAsrTextReaderApi,
+} from "../entry/src/main/ets/keyboard/input/LocalAsrTextReader";
 import { KeyboardMetrics } from "../entry/src/main/ets/keyboard/KeyboardMetrics";
 import {
   KeyboardLayoutDragAxis,
@@ -50,6 +53,7 @@ import {
   SchemeDefinition,
   PreferenceMapping,
 } from "../entry/src/main/ets/keyboard/KeyboardScheme";
+import { AppEdition } from "../entry/src/main/ets/keyboard/AppEdition";
 import { ReplyKeyboardPolicy } from "../entry/src/main/ets/keyboard/ReplyKeyboardPolicy";
 import { ReplyContextPolicy } from "../entry/src/main/ets/keyboard/ReplyContextPolicy";
 import { CommunityReplyLibraryPolicy } from "../entry/src/main/ets/keyboard/CommunityReplyLibraryPolicy";
@@ -739,14 +743,35 @@ group("bounds and deduplicates asynchronous online AI candidates", () => {
 });
 
 group("AI 候选逐条跳过无效结构，保留相邻的有效候选", () => {
-  for (const invalid of [null, {}, 42, true, "synthetic", [], { text: null },
-    { text: 12 }, { text: true }, { text: {} }, { text: [] }]) {
-    const response = JSON.stringify({ choices: [{ message: { content: JSON.stringify({
-      candidates: [{ text: "甲" }, invalid, { text: "乙" }, { text: "甲" }, { text: "丙" }],
-    }) } }] });
+  for (const invalid of [
+    null,
+    {},
+    42,
+    true,
+    "synthetic",
+    [],
+    { text: null },
+    { text: 12 },
+    { text: true },
+    { text: {} },
+    { text: [] },
+  ]) {
+    const response = JSON.stringify({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              candidates: [{ text: "甲" }, invalid, { text: "乙" }, { text: "甲" }, { text: "丙" }],
+            }),
+          },
+        },
+      ],
+    });
     const values = OnlineCandidatePolicy.aiCandidates(response, 2);
-    check(values !== null && values.join(",") === "甲,乙",
-      `无效候选 ${JSON.stringify(invalid)} 不丢弃整批结果`);
+    check(
+      values !== null && values.join(",") === "甲,乙",
+      `无效候选 ${JSON.stringify(invalid)} 不丢弃整批结果`,
+    );
   }
 });
 
@@ -4232,7 +4257,10 @@ group("clipboard entries are bounded in characters and in UTF-8 bytes", () => {
   // The character bound counts extended graphemes, so ten thousand four-byte emoji also reach the
   // independent forty-thousand-byte limit exactly.
   const astral = "😀".repeat(ClipboardHistoryPolicy.MAX_CHARS);
-  check(astral.length === ClipboardHistoryPolicy.MAX_CHARS * 2, "UTF-16 still uses two units per emoji");
+  check(
+    astral.length === ClipboardHistoryPolicy.MAX_CHARS * 2,
+    "UTF-16 still uses two units per emoji",
+  );
   check(
     ClipboardHistoryPolicy.acceptable(astral) === true,
     "ten thousand emoji fit at both shared limits",
@@ -9034,6 +9062,203 @@ group("applying writes only what the schema declares", () => {
   );
 });
 
+// 与 shared/contracts/editions.json 里的拼音版、五笔版、日文版、越南文版和藏文版相同：方案和默认方案。
+const pinyinEdition = AppEdition.of("pinyin", ["quanpin", "shuangpin"], "quanpin");
+const wubiEdition = AppEdition.of("wubi", ["wubi"], "wubi");
+const japaneseEdition = AppEdition.of("japanese", ["japanese"], "japanese");
+const vietnameseEdition = AppEdition.of("vietnamese", ["vietnamese"], "vietnamese");
+const tibetanEdition = AppEdition.of("tibetan", ["tibetan"], "tibetan");
+
+group("an edition declaration is complete or refused", () => {
+  check(AppEdition.current() === AppEdition.FULL, "the only HarmonyOS product today is full");
+  check(
+    AppEdition.of("full", ["wubi"], "wubi") === AppEdition.FULL,
+    "full is full whatever it lists",
+  );
+  check(
+    AppEdition.FULL.offers("tibetan") && AppEdition.FULL.offersSchemeChoice(),
+    "full offers everything",
+  );
+  check(!wubiEdition.offersSchemeChoice() && wubiEdition.offers("wubi"), "wubi has one scheme");
+  check(!pinyinEdition.offers("wubi") && pinyinEdition.offersSchemeChoice(), "pinyin has two");
+  let refused = false;
+  try {
+    AppEdition.of("wubi", ["wubi"], "quanpin");
+  } catch {
+    refused = true;
+  }
+  check(refused, "a default scheme outside the edition is refused");
+});
+
+group("the account scheme follows the edition both ways", () => {
+  const schema = fullPreferenceSchema();
+  const local = {
+    scheme: "wubi",
+    shuangpin_profile: "ziranma",
+    wubi_profile: "wubi98",
+    touch_keyboard_layout: "twenty_six_key",
+  };
+  const full = localAccountPreferences(local, syncFeedback);
+  check(
+    full["input.schema"] === "wubi" &&
+      full["input.shuangpin_schema"] === "ziranma" &&
+      full["input.wubi_schema"] === "wubi98" &&
+      full["platform.harmony.keyboard_layout"] === "twenty_six_key",
+    "full uploads everything it did before",
+  );
+  const wubi = localAccountPreferences(local, syncFeedback, wubiEdition);
+  check(
+    !("input.schema" in wubi) && !("platform.harmony.keyboard_layout" in wubi),
+    "a one-scheme edition never uploads the scheme or the layout that goes with it",
+  );
+  check(!("input.shuangpin_schema" in wubi), "nor a double pinyin profile it does not offer");
+  check(wubi["input.wubi_schema"] === "wubi98", "but its own wubi profile still travels");
+  const pinyin = localAccountPreferences(
+    { scheme: "shuangpin", shuangpin_profile: "ziranma" },
+    syncFeedback,
+    pinyinEdition,
+  );
+  check(pinyin["input.schema"] === "shuangpin", "a multi-scheme edition uploads its own scheme");
+  check(!("input.wubi_schema" in pinyin), "and never a wubi profile");
+
+  const cloud: AccountPreferences = {
+    revision: 1,
+    settings: {
+      "input.schema": "wubi",
+      "input.character_set": "traditional",
+      "platform.harmony.keyboard_layout": "nine_key",
+    },
+  };
+  const onPinyin = applyAccountPreferences(
+    { scheme: "quanpin", touch_keyboard_layout: "twenty_six_key" },
+    cloud,
+    schema,
+    syncFeedback,
+    pinyinEdition,
+  );
+  check(
+    onPinyin.preferences.scheme === "quanpin" &&
+      onPinyin.preferences.touch_keyboard_layout === "twenty_six_key",
+    "a scheme the edition lacks reads as absent, and its layout stays put with it",
+  );
+  check(onPinyin.preferences.traditional_chinese_output === true, "the rest still applies");
+  const onWubi = applyAccountPreferences(
+    { scheme: "wubi" },
+    { revision: 1, settings: { "input.schema": "quanpin" } },
+    schema,
+    syncFeedback,
+    wubiEdition,
+  );
+  check(onWubi.preferences.scheme === "wubi", "a one-scheme edition never takes the account's");
+  const onFull = applyAccountPreferences({ scheme: "quanpin" }, cloud, schema, syncFeedback);
+  check(
+    onFull.preferences.scheme === "wubi" && onFull.preferences.touch_keyboard_layout === "nine_key",
+    "full applies the scheme as before",
+  );
+});
+
+group("keyboard scheme fallbacks follow the edition's default", () => {
+  check(KeyboardScheme.fallback() === KeyboardScheme.QUANPIN, "full falls back to 全拼 26 键");
+  check(KeyboardScheme.fallback(pinyinEdition) === KeyboardScheme.QUANPIN, "and so does pinyin");
+  check(KeyboardScheme.fallback(wubiEdition) === KeyboardScheme.WUBI, "wubi falls back to wubi");
+  const wubiCards = KeyboardScheme.enabledFromPreferenceIds(null, wubiEdition);
+  check(
+    wubiCards.length === 2 &&
+      wubiCards[0] === KeyboardScheme.WUBI &&
+      wubiCards[1] === KeyboardScheme.HANDWRITING,
+    "a wubi device that never chose shows wubi and handwriting",
+  );
+  check(
+    KeyboardScheme.enabledFromPreferenceIds(["quanpin", "xiaohe"], wubiEdition)[0] ===
+      KeyboardScheme.WUBI,
+    "a list carried over from full falls back to the edition's default",
+  );
+  check(
+    KeyboardScheme.resolveEnabledSelection(null, null, [], wubiEdition) === KeyboardScheme.WUBI,
+    "an empty list resolves to the edition's default",
+  );
+  check(
+    KeyboardScheme.fromPreferences("nonsense", null, "twenty_six_key", wubiEdition) ===
+      KeyboardScheme.WUBI,
+    "an unknown scheme reads as the edition's default",
+  );
+  check(
+    KeyboardScheme.engineSchemeOf(KeyboardScheme.HANDWRITING) === "quanpin" &&
+      KeyboardScheme.engineSchemeOf(KeyboardScheme.HANDWRITING, wubiEdition) === "wubi",
+    "handwriting runs the edition's default scheme behind it",
+  );
+  check(
+    KeyboardScheme.fromPreferences("wubi", null, "handwriting", wubiEdition) ===
+      KeyboardScheme.HANDWRITING,
+    "which maps back to handwriting",
+  );
+  const mapping = KeyboardScheme.mapping(KeyboardScheme.HANDWRITING, null, null, wubiEdition);
+  check(
+    mapping.scheme === "wubi" &&
+      mapping.lastChineseScheme === "wubi" &&
+      mapping.touchKeyboardLayout === "handwriting",
+    "and that is what the preference mapping writes",
+  );
+  check(
+    KeyboardScheme.mapping(KeyboardScheme.HANDWRITING, null, null).scheme === "quanpin",
+    "full handwriting still writes quanpin",
+  );
+});
+
+group("the language editions offer only their own scheme and no handwriting", () => {
+  check(
+    !japaneseEdition.offersSchemeChoice() &&
+      !vietnameseEdition.offersSchemeChoice() &&
+      !tibetanEdition.offersSchemeChoice(),
+    "each language edition has one scheme",
+  );
+  for (const edition of [japaneseEdition, vietnameseEdition, tibetanEdition]) {
+    check(
+      !KeyboardScheme.offeredBy(KeyboardScheme.HANDWRITING, edition),
+      `${edition.id} has no handwriting, which writes Chinese characters`,
+    );
+  }
+  check(
+    KeyboardScheme.offeredBy(KeyboardScheme.HANDWRITING) &&
+      KeyboardScheme.offeredBy(KeyboardScheme.HANDWRITING, pinyinEdition) &&
+      KeyboardScheme.offeredBy(KeyboardScheme.HANDWRITING, wubiEdition),
+    "the Chinese editions keep handwriting",
+  );
+  const japaneseCards = KeyboardScheme.enabledFromPreferenceIds(null, japaneseEdition);
+  check(
+    japaneseCards.length === 2 &&
+      japaneseCards[0] === KeyboardScheme.JAPANESE_NINE_KEY &&
+      japaneseCards[1] === KeyboardScheme.JAPANESE,
+    "a japanese device that never chose shows the two Japanese keyboards",
+  );
+  const vietnameseCards = KeyboardScheme.enabledFromPreferenceIds(null, vietnameseEdition);
+  check(
+    vietnameseCards.length === 1 && vietnameseCards[0] === KeyboardScheme.VIETNAMESE,
+    "a vietnamese device that never chose shows Vietnamese, though full makes the user turn it on",
+  );
+  const tibetanCards = KeyboardScheme.enabledFromPreferenceIds(null, tibetanEdition);
+  check(
+    tibetanCards.length === 1 && tibetanCards[0] === KeyboardScheme.TIBETAN,
+    "and a tibetan one shows Tibetan",
+  );
+  check(
+    KeyboardScheme.fallback(japaneseEdition) === KeyboardScheme.JAPANESE &&
+      KeyboardScheme.fallback(vietnameseEdition) === KeyboardScheme.VIETNAMESE &&
+      KeyboardScheme.fallback(tibetanEdition) === KeyboardScheme.TIBETAN,
+    "each falls back to its own scheme",
+  );
+  check(
+    KeyboardScheme.enabledFromPreferenceIds(["quanpin", "handwriting"], tibetanEdition)[0] ===
+      KeyboardScheme.TIBETAN,
+    "a list carried over from full, handwriting included, falls back to the edition's scheme",
+  );
+  check(
+    KeyboardScheme.fromPreferences("nonsense", null, "twenty_six_key", vietnameseEdition) ===
+      KeyboardScheme.VIETNAMESE,
+    "an unknown scheme reads as the edition's default",
+  );
+});
+
 /** A runner whose answers are scripted, so the rules between the steps can be exercised alone. */
 function aiSkinRunner(overrides: Partial<AiSkinRunner> = {}): {
   runner: AiSkinRunner;
@@ -12401,7 +12626,10 @@ group("LocalAsrTextReader", () => {
     },
     decode: (bytes: Uint8Array): string => new TextDecoder().decode(bytes),
   };
-  check(LocalAsrTextReader.read("/model.txt", 16, api, 0) === "model", "reads a short model text file");
+  check(
+    LocalAsrTextReader.read("/model.txt", 16, api, 0) === "model",
+    "reads a short model text file",
+  );
   check(opened.length === 0, "closes the model text file after reading");
 
   const oversized: LocalAsrTextReaderApi = {
@@ -12824,11 +13052,20 @@ group("URL mode and its trigger keys route through the symbols the Engine lists"
   // 触屏符号键：组字中列出的符号（含数字）走字符路由，空闲时列出的 `/` `@` 和没列出的符号照旧走标点路由。
   const touch = (spelling: Partial<HardwareSpelling>, character: number) =>
     HardwareKeyRouter.touchSpells({ ...PLAIN_SPELLING, ...spelling }, character);
-  check(touch(url, 0x31) && touch(url, 0x3d) && touch(url, 0x2e), "touch digits and = . are URL input");
+  check(
+    touch(url, 0x31) && touch(url, 0x3d) && touch(url, 0x2e),
+    "touch digits and = . are URL input",
+  );
   check(!touch(url, 0x3c), "touch < ends the URL on the punctuation route");
-  check(touch(www, 0x2e) && !touch(www, 0x31), "touch . after www opens the URL; a digit there is not listed");
+  check(
+    touch(www, 0x2e) && !touch(www, 0x31),
+    "touch . after www opens the URL; a digit there is not listed",
+  );
   check(!touch({ spellingSymbols: "/@" }, 0x2f), "idle / stays on the punctuation route");
-  check(!touch({ ...url, englishCandidates: true }, 0x31), "the English candidate mode spells letters only");
+  check(
+    !touch({ ...url, englishCandidates: true }, 0x31),
+    "the English candidate mode spells letters only",
+  );
   // 有意的行为变化只有粤拼：组字中只列了撇号（`cantonese::SPELLING_SYMBOLS_COMPOSING`）时，数字键没被占用，Shift+1 是它打出的 `!`，与 Windows `EditPolicy.h` 的 `digit_selects_candidate` 和全拼一致；裸数字仍然选候选。藏文由 route() 交给 routeKorean，不经过这里。
   const cantonese: Partial<HardwareSpelling> = { editing: "nei", caret: 3, spellingSymbols: "'" };
   const bang = route({ keyCode: 2001, unicodeChar: 0x21, shiftKey: true }, cantonese);
@@ -13854,7 +14091,10 @@ group("Stroke is one more card, opt-in and needing msime-stroke.db", () => {
       KeyboardScheme.engineSchemeName(10) === "quanpin",
     "nine names Stroke rather than falling back to quanpin",
   );
-  check(KeyboardScheme.languageDictionary("stroke") === "msime-stroke.db", "Stroke reads msime-stroke.db");
+  check(
+    KeyboardScheme.languageDictionary("stroke") === "msime-stroke.db",
+    "Stroke reads msime-stroke.db",
+  );
   const enabled: SchemeDefinition[] = [KeyboardScheme.QUANPIN, KeyboardScheme.ZHUYIN, stroke];
   check(
     KeyboardScheme.withInstalledDictionaries(
@@ -14219,11 +14459,11 @@ group("a hardware keyboard on Zhuyin and Vietnamese composes what the Engine spe
     "Shift+1 is still a mark with the list open, since only 0 is listed",
   );
   // 注音没有音节撇号：组字中的 `'` 走标点路由，配对引号和编辑器上下文才会生效。
-  const apostrophe: HardwareKeyDecision = zhuyin(
-    key({ keyCode: 2063, unicodeChar: 0x27 }),
-    true,
-    { ...DACHEN, editing: "su3", caret: 3 },
-  );
+  const apostrophe: HardwareKeyDecision = zhuyin(key({ keyCode: 2063, unicodeChar: 0x27 }), true, {
+    ...DACHEN,
+    editing: "su3",
+    caret: 3,
+  });
   check(
     apostrophe.action === HardwareKeyAction.PUNCTUATION && apostrophe.character === 0x27,
     "a ' while composing Zhuyin is punctuation, not a syllable separator",
