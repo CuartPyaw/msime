@@ -67,6 +67,15 @@ $tip64 = Join-Path $pf64 "$versionDir\MetasequoiaImeTsf.dll"
 $tip32 = Join-Path $pf32 "$versionDir\MetasequoiaImeTsf.dll"
 Check (Test-Path -LiteralPath (Join-Path $pf64 "$versionDir\$($identity.host_dll)") -PathType Leaf) "64-bit $($identity.host_dll) installed beside the TSF DLL"
 Check (Test-Path -LiteralPath (Join-Path $pf32 "$versionDir\$($identity.host_dll)") -PathType Leaf) "32-bit $($identity.host_dll) installed beside the TSF DLL"
+# Server 目录的 x64 宿主 DLL 与 64 位 TIP 取自同一份暂存文件；包里不再在 server_exe 下另带一份。
+Check (Test-Path -LiteralPath (Join-Path $pf64 "server\$($identity.host_dll)") -PathType Leaf) "server\$($identity.host_dll) installed"
+Check (-not (Test-Path -LiteralPath (Join-Path $pf64 'server\MetasequoiaImeTsf.dll'))) 'no stray TSF DLL in the Server folder'
+# TIP 会被加载进每个进程；它旁边只该有它的宿主 DLL 和运行时依赖，不该有设置程序的 Windows App SDK 或 Server 的语音运行时。
+$tipNeighbours = @(Get-ChildItem -LiteralPath (Join-Path $pf64 $versionDir) -File -Include 'Microsoft.*', 'onnxruntime*', 'sherpa*' -Recurse -ErrorAction SilentlyContinue | ForEach-Object Name)
+Check ($tipNeighbours.Count -eq 0) "64-bit TSF folder carries no Server-only DLLs ($($tipNeighbours -join ', '))"
+# 符号是单独的发布资产。
+$installedSymbols = @(Get-ChildItem -LiteralPath $pf64, $pf32 -Recurse -File -Include '*.pdb', '*.ilk' -ErrorAction SilentlyContinue | ForEach-Object FullName)
+Check ($installedSymbols.Count -eq 0) "no PDB or .ilk installed ($($installedSymbols -join ', '))"
 Check (Test-Path -LiteralPath $tip64 -PathType Leaf) '64-bit TSF DLL installed'
 Check (Test-Path -LiteralPath $tip32 -PathType Leaf) '32-bit TSF DLL installed'
 Check ((InprocServer 'HKLM:\SOFTWARE\Classes') -eq $tip64) '64-bit COM server registered to the installed DLL'

@@ -10,26 +10,79 @@ use std::path::{Path, PathBuf};
 /// The largest runtime-options document read. A macOS document carries the preferences, and with them a custom screen-keyboard photo of up to 1 MiB of base64.
 const OPTIONS_READ_LIMIT: u64 = 2 << 20;
 
-pub const USAGE: &str = "usage: msime-mcp [flags]                                serve the Model Context Protocol over stdio
-       msime-mcp [flags] tools                          list the tools, with their argument schemas, as JSON
-       msime-mcp [flags] call <tool> [<json>|-|@file]   run one tool and print its result as JSON
-       msime-mcp [flags] prompts                        list the guided tasks (prompts), as JSON
-       msime-mcp [flags] prompt <name> [<json>|@file]   print a guided task's instructions, such as diagnose or make_skin
-       msime-mcp [flags] expand <keys> [--scheme quanpin|shuangpin|wubi] [--limit <n>] [--json]
-                                                        print the candidates typing <keys> offers, one per line: rank, text, code, origin, weight
-       msime-mcp [flags] config [--json]                print the current preferences, one key = value per line
-       msime-mcp [flags] config set <key>=<value>...    change preferences, such as scheme=shuangpin or candidate_page_size=9, and print them
+/// 帮助文本。`{program}` 换成用户实际敲的命令名，见 [`usage`]。不手动折行：每一行是一个完整的条目或句子，并且短到在 80 列的终端里也不会被折断，改动措辞时不会牵动别的行。
+const USAGE: &str = "usage: {program} expand <keys>... [--scheme <scheme>] [--limit <n>] [--json]
+       {program} config [--json]
+       {program} config get <key>... [--json]
+       {program} config set <key>=<value>...
+       {program} [flags] tools | call <tool> [<args>]
+       {program} [flags] prompts | prompt <name> [<args>]
+       {program} [flags]
 
-Manages 水杉输入法 (MSIME) for an AI assistant: over stdio as an MCP server, or one tool per run from a shell. Both offer the same tools and prompts under the same flags. call takes the tool's arguments as a JSON object (default {}), reads it from stdin when given -, or from a UTF-8 file when given @file, which works in every shell; tool names may use - for _. A refused call prints the reason to stderr and exits 1.
+Test 水杉输入法 (MSIME) by hand, or let an AI assistant manage it.
 
-expand and config are shortcuts for testing the input method by hand: expand is lookup_candidates in the user's current scheme unless --scheme names another, config is get_preferences, and config set is update_preferences at the current revision. They read the preferences anew on every run, and the input method picks up a change within a few seconds. expand implies --allow-dictionary-read and config set implies --allow-write.
+Testing by hand:
+  expand <keys>...         The candidates each <keys> offers, one per line
+    --scheme <scheme>      quanpin, shuangpin or wubi; yours by default
+    --limit <n>            At most n candidates, 1 to 50; 20 by default
+    --json                 JSON instead of rank, text, code, origin, weight
+  expand -                 Read the keys from stdin, one per line
+  config                   Your preferences, one key = value per line
+  config get <key>...      Only the values of these preferences, one per line
+  config set <key>=<value> Change some, such as scheme=shuangpin
+  With more than one <keys>, each one's candidates follow a # <keys> line.
+  With --json and more than one <keys>, each gets one line of JSON.
+  Blank lines and lines starting with # in the keys from stdin are skipped.
+  If some <keys> cannot be looked up, the others still are and expand exits 1.
+  Every run reads the current preferences; there is nothing to reload.
+  The input method applies config set within a few seconds.
+  expand leaves out cloud and AI candidates and the context of earlier words.
+  From a terminal, expand implies --allow-dictionary-read.
+  From a terminal, config set implies --allow-write.
+  Run by an AI assistant, they need those flags as call does.
 
-  --options <path>     The runtime-options document the input method hosts read. Defaults to MSIME_CLIENT_HOST_OPTIONS, then MSIME_IBUS_OPTIONS, then the platform's usual location.
-  --state-dir <path>   The directory holding preferences.json, typing-statistics.json and the skins folder. Defaults to MSIME_CLIENT_STATE_DIR, then the document's preferences_directory.
-  --allow-write        Offer the tools that change quick phrases and preferences and install candidate-window skins. Without it the server is read-only.
-  --allow-dictionary-read
-                       Offer the tools that read the user's own dictionary words and look up the candidates a code offers. With --allow-write as well, also the tools that add, reweight, remove and import words.
-  --help, --version";
+For an AI assistant:
+  (no command)             Serve the Model Context Protocol over stdio
+  tools                    List the tools and their argument schemas as JSON
+  call <tool> [<args>]     Run one tool and print its result as JSON
+  prompts                  List the guided tasks as JSON
+  prompt <name> [<args>]   Print a guided task, such as diagnose or make_skin
+  <args> is a JSON object (default {}), or - to read it from stdin.
+  <args> may also be @file, a UTF-8 file, which works in every shell.
+  Tool and prompt names may use - for _. A refused call exits 1.
+  The server and these commands offer the same tools under the same flags.
+
+Flags:
+  --options <path>         The runtime-options document the input method reads
+  --state-dir <path>       The directory holding preferences.json and the skins
+  --allow-write            Offer the writing tools: phrases, preferences, skins
+  --allow-dictionary-read  Offer the tools that read your dictionary words
+  --help, --version
+  Both allow flags together also offer the tools that edit dictionary words.
+  --options defaults to MSIME_CLIENT_HOST_OPTIONS, then MSIME_IBUS_OPTIONS.
+  Without those, --options is the input method's usual place on this system.
+  --state-dir defaults to MSIME_CLIENT_STATE_DIR, then the document's own.";
+
+/// 帮助文本，用户敲的是什么命令名就写什么。
+pub fn usage() -> String {
+    USAGE.replace("{program}", program())
+}
+
+/// 用户敲的命令名：经 Homebrew 或手动链接成 `msime` 时是 `msime`，否则是 `msime-mcp`。帮助和报错都用它，照着抄就能运行。
+pub fn program() -> &'static str {
+    static NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    NAME.get_or_init(|| {
+        std::env::args_os()
+            .next()
+            .as_deref()
+            .map(Path::new)
+            .and_then(Path::file_stem)
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or("msime-mcp")
+            .to_owned()
+    })
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
@@ -50,10 +103,10 @@ pub enum Command {
         name: String,
         arguments: Arguments,
     },
-    /// `expand`：查一串按键在当前方案（或 `--scheme` 指定的方案）下给出的候选。
+    /// `expand`：查按键在当前方案（或 `--scheme` 指定的方案）下给出的候选。`codes` 按命令行的顺序，`-` 表示在这个位置插入从 stdin 读到的各行。
     Expand {
         config: Config,
-        code: String,
+        codes: Vec<String>,
         scheme: Option<String>,
         limit: Option<u64>,
         json: bool,
@@ -61,6 +114,12 @@ pub enum Command {
     /// `config`：打印当前偏好。
     ShowConfig {
         config: Config,
+        json: bool,
+    },
+    /// `config get <key>...`：只打印这几项偏好的值。
+    GetConfig {
+        config: Config,
+        keys: Vec<String>,
         json: bool,
     },
     /// `config set <key>=<value>...`：按当前 revision 修改偏好。值能按 JSON 解析就按 JSON（数字、布尔、null），否则当字符串。
@@ -71,6 +130,31 @@ pub enum Command {
     },
     Help,
     Version,
+}
+
+impl Command {
+    /// 有人在终端里亲手运行时，expand 和 config set 不必再另加开关：敲下它们就是要看自己的词库候选、改自己的偏好。判断依据是 stderr 是终端；stdin 不算，因为 `expand -` 本来就从管道读。助手运行命令时会截获输出，stderr 不是终端，这时和 `call` 一样要有用户在设置页「连接 AI 助手」里选的开关，快捷命令不能绕过用户的选择。这不是安全边界，开关本来就写在命令行上，它守的是用户的授权意图。
+    pub fn run_by_a_person(mut self) -> Self {
+        match &mut self {
+            Command::Expand { config, .. } => config.allow_dictionary_read = true,
+            Command::SetConfig { config, .. } => config.allow_write = true,
+            _ => {}
+        }
+        self
+    }
+
+    /// 快捷命令缺了它要的开关时，告诉调用方缺哪一个。工具没有提供时服务器的回答说不清原因，所以在启动服务器之前就拒绝。
+    pub fn missing_flag(&self) -> Option<&'static str> {
+        match self {
+            Command::Expand { config, .. } if !config.allow_dictionary_read => Some(
+                "expand reads the dictionary, so outside a terminal it needs --allow-dictionary-read",
+            ),
+            Command::SetConfig { config, .. } if !config.allow_write => {
+                Some("config set changes preferences, so outside a terminal it needs --allow-write")
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Where `call` finds the tool's arguments.
@@ -106,7 +190,7 @@ pub fn parse(
     let mut scheme = None;
     let mut limit = None;
     let mut json = false;
-    let mut positional = Vec::with_capacity(4);
+    let mut positional: Vec<String> = Vec::with_capacity(4);
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
         match arg.to_str() {
@@ -158,7 +242,7 @@ pub fn parse(
             return Err(format!("{} must be an absolute path", path.display()));
         }
     }
-    let mut config = Config {
+    let config = Config {
         options,
         state_dir,
         allow_write,
@@ -166,13 +250,13 @@ pub fn parse(
     };
     match positional.first().map(String::as_str) {
         Some("expand") => {
-            let [_, code] = <[String; 2]>::try_from(positional)
-                .map_err(|_| "expand needs exactly one string of keys")?;
-            // 在终端里亲手敲 expand 就是要看词库候选，不必再另加开关。
-            config.allow_dictionary_read = true;
+            let codes = positional.split_off(1);
+            if codes.is_empty() {
+                return Err("expand needs keys, or - to read them from stdin".into());
+            }
             return Ok(Command::Expand {
                 config,
-                code,
+                codes,
                 scheme,
                 limit,
                 json,
@@ -186,7 +270,6 @@ pub fn parse(
                         .iter()
                         .map(|pair| setting(pair))
                         .collect::<Result<_, _>>()?;
-                    config.allow_write = true;
                     Ok(Command::SetConfig {
                         config,
                         changes,
@@ -194,6 +277,16 @@ pub fn parse(
                     })
                 }
                 Some("set") => Err("config set needs at least one <key>=<value>".into()),
+                Some("get") if positional.len() > 2 => Ok(Command::GetConfig {
+                    config,
+                    // 和 config set 一样接受 kebab-case。
+                    keys: positional[2..]
+                        .iter()
+                        .map(|key| key.replace('-', "_"))
+                        .collect(),
+                    json,
+                }),
+                Some("get") => Err("config get needs at least one key".into()),
                 Some(word) => Err(format!("unknown config command {word}")),
             };
         }
@@ -410,6 +503,56 @@ mod tests {
     }
 
     #[test]
+    fn every_help_line_fits_an_80_column_terminal_under_either_name() {
+        for name in ["msime", "msime-mcp"] {
+            let text = USAGE.replace("{program}", name);
+            for line in text.lines() {
+                assert!(line.chars().count() <= 80, "{line}");
+            }
+        }
+    }
+
+    #[test]
+    fn only_a_person_at_a_terminal_gets_the_shortcuts_without_flags() {
+        let parsed = |list: &[&str]| parse(args(list), |_: &str| None).unwrap();
+        let expand = parsed(&["--options", "/a.json", "expand", "nihao"]);
+        assert!(expand
+            .missing_flag()
+            .unwrap()
+            .contains("--allow-dictionary-read"));
+        let expand = expand.run_by_a_person();
+        assert!(expand.missing_flag().is_none());
+        let Command::Expand { config, .. } = expand else {
+            panic!("expected expand");
+        };
+        assert!(config.allow_dictionary_read && !config.allow_write);
+
+        let set = parsed(&["--options", "/a.json", "config", "set", "scheme=wubi"]);
+        assert!(set.missing_flag().unwrap().contains("--allow-write"));
+        let Command::SetConfig { config, .. } = set.run_by_a_person() else {
+            panic!("expected config set");
+        };
+        assert!(config.allow_write && !config.allow_dictionary_read);
+
+        // 开关写在命令行上时，不在终端里也照常运行。
+        let flagged = parsed(&[
+            "--options",
+            "/a.json",
+            "--allow-dictionary-read",
+            "expand",
+            "nihao",
+        ]);
+        assert!(flagged.missing_flag().is_none());
+        // 只读偏好的命令本来就不需要开关。
+        assert!(parsed(&["--options", "/a.json", "config"])
+            .missing_flag()
+            .is_none());
+        assert!(parsed(&["--options", "/a.json", "config", "get", "scheme"])
+            .missing_flag()
+            .is_none());
+    }
+
+    #[test]
     fn bad_command_lines_are_refused() {
         let env = |_: &str| None;
         assert!(parse(args(&["--options"]), env).is_err());
@@ -509,7 +652,7 @@ mod tests {
         let parsed = |list: &[&str]| parse(args(list), |_: &str| None);
         let Command::Expand {
             config,
-            code,
+            codes,
             scheme,
             limit,
             json,
@@ -527,13 +670,19 @@ mod tests {
         else {
             panic!("expected expand");
         };
-        assert!(config.allow_dictionary_read && !config.allow_write);
-        assert_eq!(code, "ni'hao");
+        assert!(!config.allow_dictionary_read && !config.allow_write);
+        assert_eq!(codes, ["ni'hao"]);
         assert_eq!(scheme.as_deref(), Some("wubi"));
         assert_eq!(limit, Some(5));
         assert!(!json);
         assert!(parsed(&["--options", "/a.json", "expand"]).is_err());
-        assert!(parsed(&["--options", "/a.json", "expand", "a", "b"]).is_err());
+        // 一次查几串按键，`-` 留到运行时换成 stdin 的各行。
+        let Command::Expand { codes, .. } =
+            parsed(&["--options", "/a.json", "expand", "a", "-", "b"]).unwrap()
+        else {
+            panic!("expected expand");
+        };
+        assert_eq!(codes, ["a", "-", "b"]);
         assert!(parsed(&["--options", "/a.json", "expand", "a", "--limit", "x"]).is_err());
 
         let Command::ShowConfig { config, json } =
@@ -559,7 +708,7 @@ mod tests {
         else {
             panic!("expected config set");
         };
-        assert!(config.allow_write && !config.allow_dictionary_read);
+        assert!(!config.allow_write && !config.allow_dictionary_read);
         assert_eq!(
             changes,
             [
@@ -572,7 +721,21 @@ mod tests {
         assert!(parsed(&["--options", "/a.json", "config", "set"]).is_err());
         assert!(parsed(&["--options", "/a.json", "config", "set", "scheme"]).is_err());
         assert!(parsed(&["--options", "/a.json", "config", "set", "=wubi"]).is_err());
+        let Command::GetConfig { config, keys, json } = parsed(&[
+            "--options",
+            "/a.json",
+            "config",
+            "get",
+            "scheme",
+            "candidate-page-size",
+        ])
+        .unwrap() else {
+            panic!("expected config get");
+        };
+        assert!(!config.allow_write && !json);
+        assert_eq!(keys, ["scheme", "candidate_page_size"]);
         assert!(parsed(&["--options", "/a.json", "config", "get"]).is_err());
+        assert!(parsed(&["--options", "/a.json", "config", "unset", "scheme"]).is_err());
         // 只属于 expand 和 config 的开关不能悄悄跟着别的命令。
         assert!(parsed(&["--options", "/a.json", "config", "--scheme", "wubi"]).is_err());
         assert!(parsed(&["--options", "/a.json", "tools", "--json"]).is_err());

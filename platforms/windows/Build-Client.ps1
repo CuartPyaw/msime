@@ -42,8 +42,7 @@ $buildRoot = Join-Path $RepoRoot "target/windows-$Edition"
 foreach ($relative in @('Cargo.toml', 'crates/engine/Cargo.toml',
                          'platforms/windows/CMakeLists.txt', 'platforms/windows/tsf/CMakeLists.txt',
                          'platforms/windows/settings/MSIME.Settings.vcxproj',
-                         'apps/desktop/package.json', 'scripts/fetch_voice_runtime.py',
-                         'scripts/fetch_handwriting_model.py')) {
+                         'apps/desktop/package.json', 'scripts/fetch_voice_runtime.py')) {
     if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot $relative) -PathType Leaf)) {
         throw "Missing Client build source: $relative"
     }
@@ -90,7 +89,11 @@ try {
         } else { @('msime-tsf') }
         Invoke-ClientBuild cmake (@('--build', $output, '--config', 'RelWithDebInfo', '--parallel', '4', '--target') + $targets)
         Invoke-ClientBuild cmake @('-E', 'copy_if_different', (Join-Path $release 'msime_host_api.dll'), (Join-Path $bin $hostDll))
+        # 现在就把 PDB 取到它所属的 DLL 旁边：后面的 MCP 和桌面端构建共用这个 target 目录，可能重建 host-api，用同一个名字改写 PDB。复制时保留 DLL 内嵌的文件名；Collect-Symbols.ps1 把它打进符号包。
+        Invoke-ClientBuild cmake @('-E', 'copy_if_different', (Join-Path $release 'msime_host_api.pdb'), (Join-Path $bin 'msime_host_api.pdb'))
         if ($arch -eq 'x64') {
+            # msime-mcp --version 和 MCP 握手报告的版本（crates/mcp-server/build.rs）；没给 TargetVersion 时它读 platforms/windows/version.txt。
+            if ($TargetVersion -ne '') { $env:MSIME_VERSION = $TargetVersion }
             Invoke-ClientBuild cargo @('build', '--locked', '--release', '--target', $triple,
                 '-p', 'msime-mcp-server', '--bin', 'msime-mcp')
             Invoke-ClientBuild cmake @('-E', 'copy_if_different', (Join-Path $release 'msime-mcp.exe'), $bin)
@@ -149,9 +152,6 @@ try {
     Invoke-ClientBuild cmake (@('-E', 'copy_if_different') +
         @($voiceRuntimeLibraries | ForEach-Object { Join-Path $voiceRuntime $_ }) +
         @((Join-Path $buildRoot 'x64/bin')))
-    # The offline handwriting model and its LGPL-2.1 licence, pinned by resources/handwriting-model.lock.json. Prepare-PackageFiles.ps1 stages both beside the Server from target/handwriting-model and Collect-Notices.ps1 reads the licence there. The fetch discards anything that does not match the lock and leaves a matching copy alone.
-    Invoke-ClientBuild python @((Join-Path $RepoRoot 'scripts/fetch_handwriting_model.py'),
-        '--out', (Join-Path $RepoRoot 'target/handwriting-model'))
     foreach ($arch in @('x64', 'x86')) {
         $bin = Join-Path $buildRoot "$arch/bin"
         $prefix = if ($arch -eq 'x64') { $X64Dependencies } else { $X86Dependencies }

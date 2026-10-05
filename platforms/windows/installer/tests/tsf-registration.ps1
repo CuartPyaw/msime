@@ -7,12 +7,22 @@ $registrations = @($records | Where-Object { $_.Value -match '\bregserver\b' })
 if ($registrations.Count -ne 2) { throw 'Expected exactly two TSF registrations' }
 foreach ($arch in @('32', '64')) {
     $tip = @($registrations | Where-Object { $_.Value.Contains("\tsf_dll\$arch\MetasequoiaImeTsf.dll") })
-    $hostDll = @($records | Where-Object { $_.Value.Contains("\tsf_dll\$arch\*.dll") })
+    $hostDll = @($records | Where-Object { $_.Value.Contains("\tsf_dll\$arch\*.dll") -and $_.Value.Contains('{code:GetVersionDir}') })
     if ($tip.Count -ne 1 -or $hostDll.Count -ne 1 -or $hostDll[0].Value -match '\bregserver\b' -or
         $hostDll[0].Index -gt $tip[0].Index -or
         -not $hostDll[0].Value.Contains('Excludes: "MetasequoiaImeTsf.dll"') -or
         -not $hostDll[0].Value.Contains("{commonpf$arch}\{#MyEditionInstallDir}\{code:GetVersionDir}")) {
         throw 'TSF dependency installation/registration contract mismatch'
     }
+}
+# Server 目录的 x64 宿主 DLL 和运行时 DLL 取自 TIP 所用的 tsf_dll\64 源文件，包里只存一份；server_exe 不再自带一份。
+$serverShared = @($records | Where-Object { $_.Value.Contains('\tsf_dll\64\*.dll') -and $_.Value.Contains('{commonpf64}\{#MyEditionInstallDir}\server"') })
+if ($serverShared.Count -ne 1 -or $serverShared[0].Value -match '\bregserver\b' -or
+    -not $serverShared[0].Value.Contains('Excludes: "MetasequoiaImeTsf.dll"')) {
+    throw 'Server folder does not install the shared x64 host and runtime DLLs from tsf_dll\64'
+}
+# 符号作为单独的发布资产发布，从不安装。
+if (@($records | Where-Object { $_.Value -match '\.pdb"' }).Count -ne 0) {
+    throw 'Installer installs PDB files'
 }
 Write-Output 'TSF dependencies install without COM registration before matching TIPs'
