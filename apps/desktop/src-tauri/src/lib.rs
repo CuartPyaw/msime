@@ -3508,7 +3508,8 @@ async fn uninstall_input_source(
         // Wait for a start-time refresh or a manual install that is still writing the bundle.
         let _guard = macos_input_source::install_lock();
         // macOS 27 lets only System Settings change the enabled input source list: TISDisableInputSource from any other process, the input method's own IMK server included, ends in cfprefsd refusing the write to com.apple.inputsources, and so does writing that domain directly. Once the bundle is gone TIS no longer knows its sources, and their entries stay in System Settings until the user removes each one. So the user removes them first, while the bundle can still answer for them, and the uninstall waits until the list no longer has this input method.
-        if macos_input_source::input_source_enabled() == Some(true) {
+        // Only the input method entry counts: a mode entry it left behind is shown nowhere and cannot be removed, and would hold the uninstall back for good.
+        if macos_input_source::input_method_listed() == Some(true) {
             let _ = open_input_source_settings();
             return Err(HostActionError {
                 code: "input_source_listed",
