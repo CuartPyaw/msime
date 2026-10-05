@@ -88,6 +88,8 @@ docker run --rm --init \
   ${CARGO_BUILD_JOBS:+-e CARGO_BUILD_JOBS="$CARGO_BUILD_JOBS"} \
   ${CMAKE_BUILD_PARALLEL_LEVEL:+-e CMAKE_BUILD_PARALLEL_LEVEL="$CMAKE_BUILD_PARALLEL_LEVEL"} \
   "$package_image" bash -euo pipefail -c '
+    # 在这里去掉 Rust 二进制的符号表，而不是写进 workspace 的 [profile.release]：CMake 用 install(FILES/PROGRAMS) 安装它们，CPACK_STRIP_FILES 管不到；而 debian/rules 和 rpm/msime.spec 构建同样的 crate 时带 line-tables-only 调试信息，由 dh_strip 和 find-debuginfo 拆分成 dbgsym 和 debuginfo 包。
+    export CARGO_PROFILE_RELEASE_STRIP=symbols
     cargo build --release --locked -p msime-host-api
     cargo build --release --locked -p msime-mcp-server --bin msime-mcp
     desktop_args=()
@@ -162,6 +164,13 @@ docker run --rm --init \
     if [ "$MSIME_PACKAGE_FORMAT" = rpm ]; then
       sha256sum -- *.rpm > SHA256SUMS
     else
+      # 这个 bookworm 镜像里的 CPack（CMake 3.25）只用 xz 预设 6 压缩 data.tar.xz，也没有 CPACK_DEBIAN_COMPRESSION_LEVEL，所以每个 .deb 都以 -9 重新打包，大约还能再省五分之一。单个压缩线程把内存控制在 xz -9 每线程所需的 674 MiB，单个块的压缩率也最好。重新打包还会把 control.tar.gz 变成 control.tar.xz，release-linux.yml 据此确认这一步执行过。
+      for deb in *.deb; do
+        repack=$(mktemp -d)
+        dpkg-deb --raw-extract "$deb" "$repack/root"
+        dpkg-deb --root-owner-group --threads-max=1 -Zxz -z9 --build "$repack/root" "$deb" >/dev/null
+        rm -rf "$repack"
+      done
       sha256sum -- *.deb *.tar.gz > SHA256SUMS
     fi
     cat SHA256SUMS

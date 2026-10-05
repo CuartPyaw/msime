@@ -182,6 +182,31 @@ foreach ($hostDll in @($tsf32Host, $tsf64Host)) {
         throw "缺少对应架构 TSF 的 $hostDllName"
     }
 }
+# TIP 的运行时 DLL。x86 输出目录里只有 32 位 TIP 的构建产物、它的宿主 DLL 和 Copy-RuntimeDependencies.ps1 放进去的 vcpkg DLL，所以其中其他 DLL 都是 TIP 的依赖。x64 输出目录与 Server、自包含的 WinUI 设置程序和语音运行时共用，整个复制会在 64 位 TIP 旁边多放一份 Windows App SDK 和 onnxruntime/sherpa；两个前缀装的是同一份 vcpkg 清单，所以 64 位 TIP 取 32 位 TIP 旁边那些名字，每一个都必须在它旁边存在。
+# 别的版本的宿主 DLL 永远不是本版本 TIP 的依赖。
+$editionHostDllNames = @($editionTable.editions | Where-Object { $null -ne $_.platforms.windows } | ForEach-Object { [string]$_.platforms.windows.host_dll })
+$tsf32Dependencies = @(
+    Get-ChildItem -LiteralPath (Split-Path -Parent $tsf32Release) -File -Filter '*.dll' |
+        Where-Object { $_.Name -notin (@('MetasequoiaImeTsf.dll') + $editionHostDllNames) } |
+        ForEach-Object FullName
+)
+$tsf64Dependencies = @(
+    foreach ($dependency in $tsf32Dependencies) {
+        $candidate = Join-Path (Split-Path -Parent $tsf64Release) (Split-Path -Leaf $dependency)
+        if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            throw "64 位 TSF 旁缺少运行时依赖 $(Split-Path -Leaf $dependency)（32 位 TSF 旁有它）：$candidate"
+        }
+        $candidate
+    }
+)
+# 安装器从 tsf_dll\64 那一份把 x64 宿主 DLL 和这些依赖装进 Server 目录，包里只存一份；Server 输出里同名却内容不同的文件会被它悄悄替换，所以在替换任何旧的暂存内容之前就在这里拒绝。
+foreach ($shared in @($tsf64Host) + $tsf64Dependencies) {
+    $serverCopy = Join-Path $serverRelease (Split-Path -Leaf $shared)
+    if ((Test-Path -LiteralPath $serverCopy -PathType Leaf) -and
+        (Get-FileHash -LiteralPath $serverCopy).Hash -ne (Get-FileHash -LiteralPath $shared).Hash) {
+        throw "Server 输出里的 $(Split-Path -Leaf $shared) 与 64 位 TSF 旁的同名文件不同：$serverCopy"
+    }
+}
 # The self-contained Windows App SDK copies its own runtime executables beside the WinUI settings app, and Microsoft ships them without symbols; they are packaged, but no PDB is expected for them.
 $windowsAppSdkExecutables = @('RestartAgent')
 $serverExecutables = @(
@@ -299,8 +324,7 @@ $targetSoundPacks = Join-Path $targetAppData 'sound-packs'
 Reset-Directory -LiteralPath $targetSoundPacks
 Copy-DirectoryContents -Source (Join-Path $RepoRoot 'resources/sound-packs') -Destination $targetSoundPacks
 
-# Server Release 输出整体复制，但测试程序及其 PDB 绝不能进入安装包。
-# 其他 PDB 保留在对应 EXE 旁边，方便安装后直接进行崩溃分析。
+# Server Release 输出整体复制，但测试程序及其 PDB 绝不能进入安装包。其他 PDB 照常暂存在对应 EXE 旁边，供发布流程打成单独的符号包；msime_setup.iss 不把 PDB 和 .ilk 装到用户机器上。
 Reset-Directory -LiteralPath $targetServer
 Copy-DirectoryContents -Source $serverRelease -Destination $targetServer
 # Match ShellSurfaces.h, independent of Cargo/Tauri's build artifact filename.
@@ -477,6 +501,11 @@ Get-ChildItem -LiteralPath $targetServer -Recurse -File |
         (Test-PackageTestArtifact -BaseName $_.BaseName)
     } |
     Remove-Item -Force
+# CI 里 Server 输出目录同时也是 x64 TIP 的构建目录。TIP 和它的符号暂存在 tsf_dll\64 下，只从版本目录加载；宿主 DLL 和 TIP 的运行时 DLL 也从同一份 tsf_dll\64 进入 Server 目录（msime_setup.iss），所以它们都不重复暂存。Build-Client.ps1 也把宿主 DLL 的 PDB 留在这里；Collect-Symbols.ps1 直接从构建输出取它打进符号包，所以它完全不暂存。
+foreach ($name in @('MetasequoiaImeTsf.dll', 'MetasequoiaImeTsf.pdb', $hostDllName, 'msime_host_api.pdb') + @($tsf64Dependencies | ForEach-Object { Split-Path -Leaf $_ })) {
+    $staged = Join-Path $targetServer $name
+    if (Test-Path -LiteralPath $staged -PathType Leaf) { Remove-Item -LiteralPath $staged -Force }
+}
 
 # 版本声明（Edition::PACKAGE_MARKER_FILE）：MSIME.exe 和 msime-mcp.exe 从自己所在的 Server 目录读它，决定连哪个版本的 Server、用哪个状态目录。只有管理员能写 Program Files，普通进程改不了它。full 不带这个文件，包与引入版本之前相同。
 $editionMarker = Join-Path $targetServer 'edition.json'
@@ -495,12 +524,9 @@ Copy-Item -LiteralPath $tsf64Release -Destination $targetTsf64 -Force
 Copy-Item -LiteralPath $tsf64Pdb -Destination $targetTsf64 -Force
 Copy-Item -LiteralPath $tsf32Host -Destination $targetTsf32 -Force
 Copy-Item -LiteralPath $tsf64Host -Destination $targetTsf64 -Force
-foreach ($pair in @(@($tsf32Release, $targetTsf32), @($tsf64Release, $targetTsf64))) {
-    # Build-Client collects architecture-checked release dependencies beside TIP.
-    Get-ChildItem -LiteralPath (Split-Path -Parent $pair[0]) -File -Filter '*.dll' |
-        Where-Object { $_.Name -notin @('MetasequoiaImeTsf.dll', $hostDllName) } |
-        Copy-Item -Destination $pair[1] -Force
-}
+# Build-Client 把检查过架构的发布依赖收集到 TIP 旁边；只复制上面列出的那些，绝不复制共用 x64 目录里的其余文件。
+foreach ($dependency in $tsf32Dependencies) { Copy-Item -LiteralPath $dependency -Destination $targetTsf32 -Force }
+foreach ($dependency in $tsf64Dependencies) { Copy-Item -LiteralPath $dependency -Destination $targetTsf64 -Force }
 Copy-Item -LiteralPath $appIcon -Destination (Join-Path $PSScriptRoot 'MetasequoiaIME.ico') -Force
 # rime-ice is GPL-3.0 and requires attribution, and its content forms the bulk of msime-pinyin.db, so the
 # notice has to reach the user's disk rather than only exist in the source repository.

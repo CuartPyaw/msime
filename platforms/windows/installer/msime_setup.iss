@@ -89,7 +89,7 @@ Source: "{#MySourceRoot}\LICENSE.txt"; \
     DestDir: "{commonpf64}\{#MyEditionInstallDir}"; Flags: ignoreversion
 
 ; TSF DLL 使用版本独立目录，避免升级时覆盖仍被进程加载的 DLL。
-; PDB 与对应 DLL 放在同一目录，调试器可按二进制的内嵌路径自动找到符号。
+; PDB 不随安装包分发：Collect-Symbols.ps1（release-windows.yml 和 Package-SimplySign.ps1 都调用它）把暂存的符号打成单独的 msime-windows-<edition>-<version>-symbols.zip 发布，分析崩溃时让调试器指向解压出的目录。
 ; Install Host API and ordinary dependencies before registering the TIP.
 Source: "{#MySourceRoot}\tsf_dll\32\*.dll"; \
     Excludes: "MetasequoiaImeTsf.dll"; \
@@ -109,16 +109,15 @@ Source: "{#MySourceRoot}\tsf_dll\64\MetasequoiaImeTsf.dll"; \
     DestDir: "{commonpf64}\{#MyEditionInstallDir}\{code:GetVersionDir}"; \
     Flags: ignoreversion regserver
 
-Source: "{#MySourceRoot}\tsf_dll\32\*.pdb"; \
-    DestDir: "{commonpf32}\{#MyEditionInstallDir}\{code:GetVersionDir}"; \
+; Server、设置窗口和 MCP 服务需要与 64 位 TIP 相同的 x64 宿主 DLL 和运行时 DLL。Prepare-PackageFiles.ps1 只把它们暂存在 tsf_dll\64 下，而 Inno 对同一个源文件无论有几条安装条目都只存一份，所以包里只有一份。
+Source: "{#MySourceRoot}\tsf_dll\64\*.dll"; \
+    Excludes: "MetasequoiaImeTsf.dll"; \
+    DestDir: "{commonpf64}\{#MyEditionInstallDir}\server"; \
     Flags: ignoreversion
 
-Source: "{#MySourceRoot}\tsf_dll\64\*.pdb"; \
-    DestDir: "{commonpf64}\{#MyEditionInstallDir}\{code:GetVersionDir}"; \
-    Flags: ignoreversion
-
-; server_exe 含本地语音识别运行时（sherpa-onnx-c-api.dll、onnxruntime.dll、onnxruntime_providers_shared.dll）。Server 从自身目录 LoadLibrary 加载它们，因此必须与 MetasequoiaImeServer.exe 同目录；ignoreversion 保证升级时换成本包锁定的版本。
+; server_exe 含本地语音识别运行时（sherpa-onnx-c-api.dll、onnxruntime.dll、onnxruntime_providers_shared.dll）。Server 从自身目录 LoadLibrary 加载它们，因此必须与 MetasequoiaImeServer.exe 同目录；ignoreversion 保证升级时换成本包锁定的版本。PDB 和链接器的 .ilk 不装，见上面 TSF 一节。
 Source: "{#MySourceRoot}\server_exe\*"; \
+    Excludes: "*.pdb,*.ilk"; \
     DestDir: "{commonpf64}\{#MyEditionInstallDir}\server"; \
     Flags: ignoreversion recursesubdirs createallsubdirs
 
@@ -133,6 +132,12 @@ Source: "{#MySourceRoot}\app_data\config.default.toml"; \
     DestDir: "{code:GetDataDir}"; DestName: "config.toml"; \
     Flags: onlyifdoesntexist uninsneveruninstall
 #endif
+
+[InstallDelete]
+; 符号改为单独发布资产之前的包会把所有 PDB、设置程序增量链接的 .ilk 和一份多余的 TSF DLL 装进 Server 目录，而升级沿用这个目录；这里删掉它们，让升级收回空间。那里的 TSF DLL 从未被加载或注册：TIP 从版本目录运行。
+Type: files; Name: "{commonpf64}\{#MyEditionInstallDir}\server\*.pdb"
+Type: files; Name: "{commonpf64}\{#MyEditionInstallDir}\server\*.ilk"
+Type: files; Name: "{commonpf64}\{#MyEditionInstallDir}\server\MetasequoiaImeTsf.dll"
 
 [Icons]
 Name: "{group}\{#MyAppName}"; \

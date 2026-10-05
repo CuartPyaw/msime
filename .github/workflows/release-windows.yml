@@ -152,6 +152,14 @@ jobs:
           -Tsf32ReleaseDirectory target/windows-$env:EDITION/x86/bin
           -Tsf64ReleaseDirectory target/windows-$env:EDITION/x64/bin
           -DesktopExecutable target/windows-$env:EDITION/x64/bin/msime-client-settings.exe
+      # 安装包不带 PDB（msime_setup.iss），这次构建的符号作为单独的发布资产放在安装包旁边，收集逻辑和布局见 Collect-Symbols.ps1。维护者用 Package-SimplySign.ps1 打出签名安装包时，同一脚本会写出对应的符号包，连同安装包一起替换到发布上。
+      - name: Collect debug symbols
+        shell: pwsh
+        env: {VERSION: "${{ steps.version.outputs.value }}", EDITION: "${{ matrix.edition }}"}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./platforms/windows/installer/Collect-Symbols.ps1 -Edition $env:EDITION -Version $env:VERSION -OutputDirectory dist-symbols
+          Get-ChildItem dist-symbols | Format-Table Name, Length
       - name: Compile installer
         shell: pwsh
         env: {VERSION: "${{ steps.version.outputs.value }}", EDITION: "${{ matrix.edition }}"}
@@ -185,6 +193,12 @@ jobs:
         with:
           name: msime-windows-${{ matrix.edition }}-${{ steps.version.outputs.value }}
           path: dist/
+          if-no-files-found: error
+      # 单独的产物，名字不匹配下面的 msime-windows-* 模式，所以 coexistence 任务不会下载符号；publish 两个都取。
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: msime-symbols-windows-${{ matrix.edition }}-${{ steps.version.outputs.value }}
+          path: dist-symbols/
           if-no-files-found: error
       # The runner is a disposable elevated Windows machine, so install the built package on it and uninstall it again before anything is published. The artifact is uploaded first so a failing package can still be inspected.
       - name: Install and uninstall the package
@@ -231,6 +245,11 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: msime-windows-*-${{ needs.release.outputs.version }}
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: msime-symbols-windows-*-${{ needs.release.outputs.version }}
           path: dist
           merge-multiple: true
       - name: Publish independent Windows release
