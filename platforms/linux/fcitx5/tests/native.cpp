@@ -233,8 +233,9 @@ int main(int argc, char **argv) {
     modeBadgeTheme();
     classicuiTakeoverRecord();
     require(argc == 2 || (argc == 3 && (std::string(argv[2]) == "--ai" ||
-                                       std::string(argv[2]) == "--ctrl-space")),
-            "usage: fcitx5-native-test <verified-resources> [--ai|--ctrl-space]");
+                                       std::string(argv[2]) == "--ctrl-space" ||
+                                       std::string(argv[2]) == "--local-modes")),
+            "usage: fcitx5-native-test <verified-resources> [--ai|--ctrl-space|--local-modes]");
     const bool ai = argc == 3 && std::string(argv[2]) == "--ai";
     const std::string suggestion = ai ? "合成候选" : "在线";
     char temporary[] = "/tmp/msime-fcitx5-test-XXXXXX";
@@ -466,7 +467,7 @@ int main(int argc, char **argv) {
         const auto outdated = std::filesystem::path(directory) / "outdated";
         std::filesystem::create_directories(outdated / "resources");
         std::filesystem::create_directories(outdated / "state");
-        std::ofstream(outdated / "resources/msime.db") << "previous generation";
+        std::ofstream(outdated / "resources/msime-pinyin.db") << "previous generation";
         const auto outdatedOptions = outdated / "state/runtime-options.json";
         const auto document = Json{{"api_version", 1},
                                    {"resources", (outdated / "resources").string()},
@@ -550,6 +551,45 @@ int main(int argc, char **argv) {
     require(!state->voice_hotkey_hold_space_lock_,
             "initial voice context reads the hold-to-lock preference");
     require(state->view_.contains("candidates"), "focus must unpack transition view");
+    // 真实 KeyEvent 会把 Shift+字母规范化成大写并移除 Shift 位；快捷模式必须仍能进入，
+    // 不能把普通大写或 CapsLock 当快捷键，也不能在组合键末尾松开 Shift 时切到英文。
+    {
+      const auto press = [&](fcitx::KeySym sym, fcitx::KeyStates states = fcitx::KeyStates(), bool release = false) {
+        fcitx::KeyEvent event(&ic, fcitx::Key(sym, states), release);
+        engine.keyEvent(entry, event);
+        return event.accepted();
+      };
+      const fcitx::KeyStates shiftState{fcitx::KeyState::Shift};
+      const auto before = ic.committed;
+      for (const auto &[sym, mode] : std::array<std::pair<fcitx::KeySym, const char *>, 8>{{
+               {FcitxKey_T, "date_time"}, {FcitxKey_U, "unicode"},
+               {FcitxKey_K, "quick_phrase"}, {FcitxKey_E, "emoji"},
+               {FcitxKey_M, "kaomoji"}, {FcitxKey_J, "super_jianpin"},
+               {FcitxKey_Y, "temporary_english"}, {FcitxKey_R, "temporary_japanese"}}}) {
+        require(!press(sym) && !press(sym, fcitx::KeyState::CapsLock),
+                "Uppercase without Shift must pass through");
+        require(state->view_.value("local_mode", std::string("none")) == "none",
+                "Uppercase without Shift must not enter a local mode");
+        press(FcitxKey_Shift_L, shiftState);
+        require(press(sym, shiftState), "Shift local-mode shortcut must be consumed");
+        require(state->view_.value("local_mode", std::string("none")) == mode,
+                "Shift local-mode shortcut must enter its mode");
+        press(sym, shiftState, true);
+        press(FcitxKey_Shift_L, fcitx::KeyStates(), true);
+        require(state->input_enabled_, "Shift chord release must not switch to English");
+        require(press(FcitxKey_Escape) &&
+                    state->view_.value("local_mode", std::string("none")) == "none",
+                "Escape must leave the local mode");
+      }
+      require(!press(FcitxKey_V, shiftState), "Disabled expression mode must pass through");
+      require(ic.committed == before, "Mode shortcuts must not commit uppercase letters");
+      if (argc == 3 && std::string(argv[2]) == "--local-modes") {
+        state->close();
+        std::filesystem::remove_all(directory);
+        std::cout << "Fcitx5 Shift local modes, uppercase passthrough and modifier release passed\n";
+        return 0;
+      }
+    }
     auto changedPreferences = options["preferences"];
     changedPreferences["number_row_selection"] = false;
     changedPreferences["candidate_layout"] = "horizontal";
@@ -2020,7 +2060,7 @@ int main(int argc, char **argv) {
               "Korean leaves the last Chinese scheme alone");
       require(state->modeIndicatorLabel() == "한", "the status area labels Korean input");
       // The 输入方案 menu picks a scheme directly and marks the one in use.
-      // Cantonese and Zhuyin are listed only with their dictionaries, which this fixture does not install.
+      // Cantonese, Zhuyin and Stroke are listed only with their dictionaries, which this fixture does not install.
       require(engine.scheme_menu_.actions().size() == 6, "scheme menu lists the six schemes that need no dictionary");
       require(engine.scheme_korean_action_.isChecked(&ic) && !engine.scheme_japanese_action_.isChecked(&ic) &&
                   !engine.scheme_quanpin_action_.isChecked(&ic),
@@ -2396,7 +2436,7 @@ int main(int argc, char **argv) {
       state->close();
       state->clearPanel();
     }
-    // Zhuyin needs its language dictionary: saved as the scheme while the dictionary is missing, the last Chinese scheme runs and the menu leaves Zhuyin out. Installed, the Dachen digit row spells, Space is the first tone and converts without a list, and the list opens only on request. Vietnamese then composes inline with VNI digits and is never widened.
+    // 注音需要语言词库：词库缺失时即使偏好存的是注音，也运行最后使用的中文方案，菜单不列出注音。装好词库后大千键盘的数字行用来拼写，空格是一声，转换时不打开列表，列表只在用户要求时打开。接着越南文用 VNI 数字内嵌组字，从不变成全角；最后藏文用威利转写内嵌组字，空格带音节点、斜杠带垂符上屏。
     {
       const auto dictionaries = std::filesystem::path(directory) / "language-dictionaries";
       std::filesystem::create_directory(dictionaries);
@@ -2433,16 +2473,19 @@ int main(int argc, char **argv) {
         return std::find(actions.begin(), actions.end(), action) != actions.end();
       };
       require(state->ensure(), "session with Zhuyin saved and its dictionary missing");
-      require(state->effectiveScheme() == "quanpin" && state->view_.value("scheme", 9u) == 0 &&
+      require(state->effectiveScheme() == "quanpin" && state->view_.value("scheme", 10u) == 0 &&
                   state->modeIndicatorLabel() == "中",
               "a missing Zhuyin dictionary falls back to the last Chinese scheme");
       require(!offered(&engine.scheme_zhuyin_action_) && !offered(&engine.scheme_cantonese_action_) &&
-                  offered(&engine.scheme_quanpin_action_) && offered(&engine.scheme_vietnamese_action_),
+                  !offered(&engine.scheme_stroke_action_) && offered(&engine.scheme_quanpin_action_) &&
+                  offered(&engine.scheme_vietnamese_action_),
               "the scheme menu leaves out a scheme whose dictionary is missing");
       require(engine.scheme_quanpin_action_.isChecked(&ic) && !engine.scheme_zhuyin_action_.isChecked(&ic),
               "the scheme menu marks the fallback in use");
-      require(!state->selectScheme("zhuyin") && state->view_.value("scheme", 9u) == 0,
+      require(!state->selectScheme("zhuyin") && state->view_.value("scheme", 10u) == 0,
               "Zhuyin cannot be selected without its dictionary");
+      require(!state->selectScheme("stroke") && state->view_.value("scheme", 10u) == 0,
+              "Stroke cannot be selected without its dictionary");
       const auto fixture =
           std::string("python3 '") + MSIME_ZHUYIN_DICTIONARY_FIXTURE + "' '" + dictionaries.string() + "'";
       require(std::system(fixture.c_str()) == 0, "Zhuyin dictionary fixture written");
@@ -2525,6 +2568,132 @@ int main(int argc, char **argv) {
       engine.activate(entry, focus);
       require(press(FcitxKey_a) && preedit() == "a" && ic.committed == before + "Avivi",
               "the next field starts a new word");
+      // 藏文：威利原文内嵌显示为转换后的藏文，从不打开列表。空格和斜杠分别带音节点、垂符上屏并被吞掉，回车只上屏藏文，同样被吞掉。
+      require(offered(&engine.scheme_tibetan_action_), "the scheme menu offers Tibetan");
+      require(state->selectScheme("tibetan") && state->view_.value("scheme", 0u) == 8 &&
+                  engine.scheme_tibetan_action_.isChecked(&ic) && !engine.scheme_vietnamese_action_.isChecked(&ic) &&
+                  state->modeIndicatorLabel() == "藏",
+              "the scheme menu selects Tibetan");
+      before = ic.committed;
+      require(!press(FcitxKey_1) && ic.committed == before, "an idle digit is the application's in Tibetan");
+      for (const auto sym : {FcitxKey_b, FcitxKey_k, FcitxKey_r, FcitxKey_a})
+        require(press(sym), "Wylie letters compose");
+      require(preedit() == "བཀྲ" && candidates().empty() && ic.committed == before, "Wylie composes བཀྲ inline");
+      require(press(FcitxKey_space) && ic.committed == before + "བཀྲ་" && preedit().empty(),
+              "Space commits the syllable with a tsheg and keeps the key");
+      for (const auto sym : {FcitxKey_s, FcitxKey_h, FcitxKey_i, FcitxKey_s})
+        require(press(sym), "Wylie letters compose");
+      require(press(FcitxKey_slash) && ic.committed == before + "བཀྲ་ཤིས།" && preedit().empty(),
+              "the slash commits the syllable with a shad");
+      require(press(FcitxKey_slash) && ic.committed == before + "བཀྲ་ཤིས།།", "an idle slash writes a shad");
+      // 撇号在空闲时也是拼写（achung 开头的音节），加号是叠写；带 Shift 或 CapsLock 的大写字母是另一个字母。
+      before = ic.committed;
+      require(press(FcitxKey_apostrophe) && press(FcitxKey_o) && press(FcitxKey_d) && preedit() == "འོད" &&
+                  ic.committed == before,
+              "an apostrophe starts an achung syllable");
+      require(press(FcitxKey_Return) && ic.committed == before + "འོད" && preedit().empty(),
+              "Return commits the syllable without a tsheg and keeps the key");
+      before = ic.committed;
+      require(press(FcitxKey_p) && press(FcitxKey_a) && press(FcitxKey_d) &&
+                  press(FcitxKey_plus, fcitx::KeyStates(fcitx::KeyState::Shift)) && press(FcitxKey_m) &&
+                  press(FcitxKey_a) && preedit() == "པདྨ" && ic.committed == before,
+              "the plus stacks the Wylie letters");
+      require(press(FcitxKey_Return) && ic.committed == before + "པདྨ", "Return commits the stacked syllable");
+      before = ic.committed;
+      require(press(FcitxKey_T, fcitx::KeyStates(fcitx::KeyState::Shift)) && press(FcitxKey_a) && preedit() == "ཊ" &&
+                  ic.committed == before,
+              "Shift types the uppercase Wylie letter");
+      require(press(FcitxKey_Return) && ic.committed == before + "ཊ", "Return commits the retroflex letter");
+      before = ic.committed;
+      require(press(FcitxKey_D, fcitx::KeyStates(fcitx::KeyState::CapsLock)) && press(FcitxKey_a) &&
+                  preedit() == "ཌ" && ic.committed == before,
+              "Caps Lock starts a syllable with the uppercase Wylie letter");
+      require(press(FcitxKey_Return) && ic.committed == before + "ཌ", "Return commits the Caps Lock syllable");
+      // 第一次 Esc 把显示退回威利原文，第二次丢弃组字；Backspace 删一个原文按键。
+      before = ic.committed;
+      require(press(FcitxKey_k) && press(FcitxKey_a) && preedit() == "ཀ" && press(FcitxKey_Escape) &&
+                  preedit() == "ka" && ic.committed == before,
+              "Escape restores the raw Wylie");
+      require(press(FcitxKey_Escape) && preedit().empty() && ic.committed == before,
+              "a second Escape discards the composition");
+      require(press(FcitxKey_k) && press(FcitxKey_a) && press(FcitxKey_BackSpace) && preedit() == "ཀ" &&
+                  ic.committed == before,
+              "Backspace takes back one Wylie key");
+      require(press(FcitxKey_Escape) && press(FcitxKey_Escape) && preedit().empty(), "the composition is discarded");
+      // 其他标点跟在藏文后面写成 ASCII，全角输出打开时也一样；空闲的标点和空格都交给应用，不变全角。
+      require(state->toggleWidth() && state->fullwidthOutput(), "fullwidth output on");
+      before = ic.committed;
+      require(press(FcitxKey_k) && press(FcitxKey_a) && press(FcitxKey_comma) && ic.committed == before + "ཀ," &&
+                  preedit().empty(),
+              "the comma after a syllable commits with it as ASCII");
+      require(!press(FcitxKey_comma) && !press(FcitxKey_space) && ic.committed == before + "ཀ,",
+              "an idle comma or space reaches the application unwidened");
+      require(state->toggleWidth() && !state->fullwidthOutput(), "fullwidth output off");
+      // 导航键先把藏文按显示写出去（不带音节点），再交给应用；切换输入法同样把组字写出去。
+      before = ic.committed;
+      require(press(FcitxKey_k) && press(FcitxKey_a) && !press(FcitxKey_Left) && ic.committed == before + "ཀ" &&
+                  preedit().empty(),
+              "Left writes the syllable out without a tsheg and reaches the application");
+      require(press(FcitxKey_g) && press(FcitxKey_a) && preedit() == "ག", "Tibetan composes before the switch");
+      fcitx::InputContextEvent tibetanSwitch(&ic, fcitx::EventType::InputContextSwitchInputMethod);
+      engine.deactivate(entry, tibetanSwitch);
+      require(ic.committed == before + "ཀག", "switching input methods commits the open syllable");
+      engine.activate(entry, focus);
+      // 装好 msime-stroke.db 并重新读取选项后，笔画进入菜单；它是中文方案，选中后记为最后使用的中文方案。
+      const auto strokeFixture =
+          std::string("python3 '") + MSIME_STROKE_DICTIONARY_FIXTURE + "' '" + dictionaries.string() + "'";
+      require(std::system(strokeFixture.c_str()) == 0, "Stroke dictionary fixture written");
+      state->close();
+      state->clearPanel();
+      require(state->ensure() && offered(&engine.scheme_stroke_action_) && offered(&engine.scheme_zhuyin_action_) &&
+                  !engine.scheme_stroke_action_.isChecked(&ic),
+              "the scheme menu offers Stroke with its dictionary installed");
+      require(engine.scheme_menu_.actions().size() == 9, "the menu lists Zhuyin and Stroke beside the seven base schemes");
+      engine.scheme_stroke_action_.activate(&ic);
+      require(state->effectiveScheme() == "stroke" && state->view_.value("scheme", 0u) == 9 &&
+                  engine.scheme_stroke_action_.isChecked(&ic) && state->modeIndicatorLabel() == "笔",
+              "the scheme menu selects Stroke");
+      {
+        const auto stored = response(msime_client_load_preferences(
+            reinterpret_cast<const uint8_t *>(preferenceDirectory.data()), preferenceDirectory.size()));
+        require(stored.at("preferences").value("last_chinese_scheme", std::string()) == "stroke",
+                "Stroke is recorded as the last Chinese scheme");
+      }
+      // 空闲时只有五个笔画字母开始组合：通配符 x 和其他字母都交给应用。
+      before = ic.committed;
+      require(!press(FcitxKey_x) && !press(FcitxKey_a) && preedit().empty() && ic.committed == before,
+              "an idle Stroke wildcard or other letter is the application's");
+      // 原样预编辑样式从 `reading` 画出笔画字形；editing_text 保留字母。
+      require(press(FcitxKey_h) && preedit() == "一" && !candidates().empty() &&
+                  candidates().at(0).value("text", std::string()) == "一" &&
+                  state->view_.value("editing_text", std::string()) == "h",
+              "h composes the stroke 一");
+      require(press(FcitxKey_s) && preedit() == "一丨" && candidates().size() >= 3 &&
+                  candidates().at(0).value("text", std::string()) == "十" &&
+                  candidates().at(1).value("text", std::string()) == "木" &&
+                  candidates().at(2).value("text", std::string()) == "古",
+              "h s lists 十 exactly and then its completions");
+      require(press(FcitxKey_q) && preedit() == "一丨" && ic.committed == before,
+              "a letter that is no stroke is swallowed while composing");
+      require(press(FcitxKey_space) && ic.committed == before + "十" && preedit().empty(),
+              "Space commits the highlighted Stroke candidate");
+      before = ic.committed;
+      require(press(FcitxKey_h) && press(FcitxKey_x) && preedit() == "一＊" && candidates().size() >= 2 &&
+                  candidates().at(0).value("text", std::string()) == "十" &&
+                  candidates().at(1).value("text", std::string()) == "二",
+              "the wildcard x matches any one stroke");
+      require(press(FcitxKey_2) && ic.committed == before + "二" && preedit().empty(),
+              "a digit picks the Stroke candidate");
+      before = ic.committed;
+      require(press(FcitxKey_h) && press(FcitxKey_s) && press(FcitxKey_BackSpace) && preedit() == "一" &&
+                  ic.committed == before,
+              "Backspace removes the last stroke");
+      require(press(FcitxKey_s) && press(FcitxKey_Return) && ic.committed == before + "hs" && preedit().empty(),
+              "Return commits the typed stroke letters");
+      before = ic.committed;
+      require(press(FcitxKey_p) && press(FcitxKey_n) && preedit() == "丿丶" && press(FcitxKey_Escape) &&
+                  preedit().empty() && ic.committed == before,
+              "Escape clears the Stroke composition");
       state->close();
       state->clearPanel();
     }

@@ -53,6 +53,7 @@ pub unsafe extern "C" fn msime_client_create(options: *const u8, length: usize) 
             options.sound_packs.as_deref(),
             &options.resources,
         );
+        let edition = options.edition();
         let mut options = options.into_engine_options();
         let plugin_tables = plugin_tables::PluginTables::stamp(
             plugin_roots.installed.as_deref(),
@@ -124,6 +125,7 @@ pub unsafe extern "C" fn msime_client_create(options: *const u8, length: usize) 
                 HostSession {
                     runtime,
                     options,
+                    edition,
                     applied,
                     requested: None,
                     preferences_pending: false,
@@ -161,7 +163,7 @@ pub extern "C" fn msime_client_focus(handle: u64, focused: bool) -> *mut c_char 
                 msime_engine::flush_personal_learning();
             } else {
                 session.refresh_plugin_tables()?;
-                // 设置应用可能刚下载好日文、粤拼或注音的资源包；Engine 在随后的 `complete_transition` 里空闲时重建。
+                // 设置应用可能刚下载好日文、粤拼、注音或笔画的资源包；Engine 在随后的 `complete_transition` 里空闲时重建。
                 session.refresh_resource_packs();
                 // The settings page may have imported the pack in use again, or removed it, since this session last looked.
                 session.sound.restamp();

@@ -17,6 +17,9 @@ struct PresentationCandidate {
   size_t index;
   std::string text;
   bool highlighted;
+  // Engine-corrected spellings are marked for the user, while `text` remains
+  // the exact value selected by the candidate identity.
+  bool corrected = false;
   std::string annotation;
   std::string badge;
   uint8_t fixed_position = 0;
@@ -45,6 +48,11 @@ inline std::string candidate_secondary_text(const PresentationCandidate &candida
   if (candidate.translation.empty())
     return candidate.gloss;
   return candidate.gloss + "\n" + candidate.translation;
+}
+// The correction marker is display-only: keep it out of the text used for
+// selection, dictionary actions and candidate identity.
+inline std::string candidate_primary_text(const PresentationCandidate &candidate) {
+  return candidate.text + (candidate.corrected ? "*" : "") + candidate.badge;
 }
 // How many lines candidate_secondary_text starts with before any wrapping. The Engine refuses control characters in a translation, and the 훈음 table has none, so the only line break is the one joining them.
 inline size_t candidate_secondary_lines(const PresentationCandidate &candidate) {
@@ -128,6 +136,7 @@ candidate_presentation_from_view(const FocusLease &lease,
         simplified_to_traditional(candidate.at("text").get<std::string>(),
                                   traditional_output),
         candidate.at("highlighted").get<bool>(),
+        candidate.value("corrected", false),
         candidate.value("annotation", std::string{}),
         candidate_source == 2 ? " ☁️" : candidate_source == 3 ? " 🤖" : "",
         candidate.value("fixed_position", uint8_t{}),
@@ -194,6 +203,7 @@ candidate_presentation(const FocusLease &lease, const PendingReply &reply,
         simplified_to_traditional(candidate.at("text").get<std::string>(),
                                   reply.traditional_output),
         candidate.at("highlighted").get<bool>(),
+        candidate.value("corrected", false),
         candidate.value("annotation", std::string{}),
         candidate_source == 2 ? " ☁️" : candidate_source == 3 ? " 🤖" : "",
         candidate.value("fixed_position", uint8_t{}),

@@ -1,5 +1,8 @@
-import { useEffect, useRef, useState } from "react";
-import { runAsyncAction } from "../core/async-action";
+import { SettingsGroupNote } from "./settings-group-note";
+import { SettingsManagerNote } from "./settings-manager-note";
+import { SettingsManagerActions } from "./settings-manager-actions";
+import { useRef, useState } from "react";
+import { useAsyncActionRunner } from "../core/use-async-action";
 import {
   parsePersonalDictionaryImport,
   personalDictionaryExample,
@@ -10,8 +13,11 @@ import { GroupList } from "../core/platform-controls";
 import { rowTitle } from "../core/platform-controls-style";
 import { personalDictionaryKindTitle } from "../dictionary/dictionary-messages";
 import * as settings from "./settings-style";
-import { useMountedRef } from "./use-mounted-ref";
+import { SettingsManagerBlock } from "./settings-manager-block";
 import { ActionButton } from "./action-button";
+import { ErrorAlert } from "../core/error-alert";
+import { SettingsNotice } from "./settings-notice";
+import { StatusMessage } from "../core/status-message";
 
 export interface PersonalDictionaryImportClient {
   importPersonal?: (
@@ -36,46 +42,9 @@ export function PersonalDictionaryImportCard({
   const input = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState("");
   const [entries, setEntries] = useState<PersonalDictionaryImportEntry[] | null>(null);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const mounted = useMountedRef();
-  const dictionaryGeneration = useRef(0);
-  const actionRunning = useRef(false);
-
-  useEffect(() => {
-    dictionaryGeneration.current++;
-    actionRunning.current = false;
-    setBusy(false);
-    return () => {
-      actionRunning.current = false;
-      dictionaryGeneration.current++;
-    };
-  }, [dictionary]);
-
-  async function runDictionaryAction(
-    operation: (isCurrent: () => boolean) => Promise<void>,
-    formatError: (error: unknown) => string,
-  ) {
-    if (actionRunning.current || !mounted.current) return;
-    actionRunning.current = true;
-    const generation = dictionaryGeneration.current;
-    try {
-      await runAsyncAction(
-        {
-          busy: false,
-          isCurrent: () => mounted.current && generation === dictionaryGeneration.current,
-          setBusy,
-          setError,
-          setNotice,
-        },
-        operation,
-        { formatError },
-      );
-    } finally {
-      actionRunning.current = false;
-    }
-  }
+  const { busy, run: runDictionaryAction } = useAsyncActionRunner(setError, setNotice, dictionary);
 
   const chooseFile = async (file: File | undefined) => {
     if (!file || busy) return;
@@ -88,7 +57,10 @@ export function PersonalDictionaryImportCard({
         if (!isCurrent()) return;
         setEntries(parsed);
       },
-      (cause) => (cause instanceof Error ? cause.message : "无法读取所选文件，请重新选择。"),
+      {
+        formatError: (cause) =>
+          cause instanceof Error ? cause.message : "无法读取所选文件，请重新选择。",
+      },
     );
   };
 
@@ -106,7 +78,9 @@ export function PersonalDictionaryImportCard({
         setEntries(null);
         setFileName("");
       },
-      (cause) => (cause instanceof Error ? cause.message : "导入失败，请稍后重试。"),
+      {
+        formatError: (cause) => (cause instanceof Error ? cause.message : "导入失败，请稍后重试。"),
+      },
     );
   };
 
@@ -138,7 +112,7 @@ export function PersonalDictionaryImportCard({
   );
   const content = (
     <>
-      <div className={settings.managerActions}>
+      <SettingsManagerActions>
         <ActionButton
           action={() => input.current?.click()}
           disabled={busy}
@@ -156,8 +130,8 @@ export function PersonalDictionaryImportCard({
             event.currentTarget.value = "";
           }}
         />
-      </div>
-      {busy && <p role="status">正在读取或加入同步队列…</p>}
+      </SettingsManagerActions>
+      {busy && <StatusMessage role="status">正在读取或加入同步队列…</StatusMessage>}
       {fileName && entries && (
         <div className={settings.importPreview}>
           <strong>{fileName}</strong>
@@ -174,16 +148,8 @@ export function PersonalDictionaryImportCard({
           ))}
         </div>
       )}
-      {error && (
-        <p role="alert" className="error">
-          {error}
-        </p>
-      )}
-      {notice && (
-        <p role="status" className="notice">
-          {notice}
-        </p>
-      )}
+      {error && <ErrorAlert>{error}</ErrorAlert>}
+      {notice && <SettingsNotice role="status">{notice}</SettingsNotice>}
       {entries && (
         <ActionButton
           action={() => void importEntries()}
@@ -196,21 +162,21 @@ export function PersonalDictionaryImportCard({
   );
   if (embedded) {
     return (
-      <div className={settings.managerBlock} role="group" aria-label="个人词库文件">
+      <SettingsManagerBlock role="group" aria-label="个人词库文件">
         <div>
           <span className={rowTitle} data-row-title="">
             个人词库文件
           </span>
-          <p className={settings.managerNote}>{note}</p>
+          <SettingsManagerNote>{note}</SettingsManagerNote>
         </div>
         {content}
-      </div>
+      </SettingsManagerBlock>
     );
   }
   return (
     <GroupList title="个人词库文件">
-      <p className={settings.groupNote}>{note}</p>
-      <div className={settings.managerBlock}>{content}</div>
+      <SettingsGroupNote>{note}</SettingsGroupNote>
+      <SettingsManagerBlock>{content}</SettingsManagerBlock>
     </GroupList>
   );
 }

@@ -13,7 +13,8 @@ try {
         'resources/helpcodes/NOTICE.md', 'target/handwriting-model/HandwritingModel-LICENSE.txt',
         'resources/licenses/Zinnia-LICENSE.txt', 'resources/licenses/Administrative-divisions-of-China-WTFPL.txt',
         'resources/licenses/libhangul-hanja-BSD-3-Clause.txt', 'resources/licenses/rime-cantonese-CC-BY-4.0.txt',
-        'resources/licenses/libchewing-data-LGPL-2.1.txt', 'resources/licenses/vi-MIT.txt',
+        'resources/licenses/libchewing-data-LGPL-2.1.txt', 'resources/licenses/rime-stroke-LGPL-3.0.txt',
+        'resources/licenses/vi-MIT.txt', 'resources/licenses/ewts-MIT.txt',
         'platforms/windows/third_party/miniaudio/LICENSE',
         'crates/client-core/data/opencc/LICENSE')
     foreach ($relative in $repositoryNotices) {
@@ -32,6 +33,10 @@ try {
         New-Item -ItemType Directory -Force (Split-Path -Parent $path) | Out-Null
         [IO.File]::WriteAllText($path, "synthetic voice runtime notice $relative")
     }
+    # The edition table decides whether the handwriting model's licence belongs in the collection.
+    $editionTable = Join-Path $root 'shared/contracts/editions.json'
+    New-Item -ItemType Directory -Force (Split-Path -Parent $editionTable) | Out-Null
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot '../../../../shared/contracts/editions.json') -Destination $editionTable
     $entry = Join-Path $PSScriptRoot '../../Collect-Notices.ps1'
     & $entry -RepoRoot $root -DependencyPrefixes @($prefix) -SupplementalNotices @($supplement)
     $output = Join-Path $root 'target/windows-notices/THIRD_PARTY_NOTICES.txt'
@@ -55,6 +60,20 @@ try {
     if ([IO.File]::ReadAllText($output) -ne $first) { throw 'Notice generation is not deterministic' }
     $dictionaryNotice = Join-Path $root 'resources/licenses/msime-engine-dictionary-NOTICE.md'
     $handwritingNotice = Join-Path $root 'target/handwriting-model/HandwritingModel-LICENSE.txt'
+    # An edition without handwriting (features.handwriting false) ships no model, so its collection neither lists the model's licence nor needs it fetched; the other notices stay.
+    $trimmedOutput = Join-Path $root 'trimmed-notices'
+    Remove-Item -LiteralPath $handwritingNotice
+    & $entry -RepoRoot $root -DependencyPrefixes @($prefix) -SupplementalNotices @($supplement) -Edition vietnamese -OutputDirectory $trimmedOutput
+    $trimmed = [IO.File]::ReadAllText((Join-Path $trimmedOutput 'THIRD_PARTY_NOTICES.txt'))
+    if ($trimmed.Contains('HandwritingModel-LICENSE') -or $trimmed.Contains('handwriting-zh_CN.model')) { throw 'Edition without handwriting lists the handwriting model' }
+    foreach ($relative in @($repositoryNotices | Where-Object { -not $_.StartsWith('target/handwriting-model/') })) {
+        if (-not $trimmed.Contains("synthetic committed notice $relative")) { throw "Repository notice not collected for edition without handwriting: $relative" }
+    }
+    [IO.File]::WriteAllText($handwritingNotice, 'synthetic committed notice target/handwriting-model/HandwritingModel-LICENSE.txt')
+    # An edition the table does not give a Windows section is refused.
+    $rejected = $false
+    try { & $entry -RepoRoot $root -DependencyPrefixes @($prefix) -Edition nosuchedition } catch { $rejected = $true }
+    if (-not $rejected -or [IO.File]::ReadAllText($output) -ne $first) { throw 'Unknown edition accepted' }
     foreach ($failure in @('notice', 'license', 'handwriting', 'voice')) {
         # A missing repository notice is refused; the file is restored before the next case.
         if ($failure -eq 'notice') { Remove-Item -LiteralPath $dictionaryNotice }

@@ -80,6 +80,8 @@ export enum HardwareKeyAction {
   COMMIT_THEN_RELEASE,
   /** Korean: list the Hanja of the composing syllable, or close the open list (MSIME_CONVERT_HANJA). */
   CONVERT_HANJA,
+  /** 藏文：把 `character` 交给引擎，引擎没处理时在上屏内容之后插入它（空格结束音节串时由引擎补音节点；Esc 锁定原文后引擎只上屏原文，空格照常输入）。 */
+  PRESS_THEN_TYPE,
 }
 
 export interface HardwareKeyDecision {
@@ -113,6 +115,7 @@ export interface HardwareSpelling {
   readonly editing: string;
   /** Index into `editing`, which is ASCII. */
   readonly caret: number;
+  /** 编码没有音节可分的方案（五笔、笔画），见 HardwareKeyRouter.spellsWithoutSyllables；字段名沿用最早只有五笔时的叫法。 */
   readonly wubi: boolean;
   readonly microsoftShuangpin: boolean;
   /** Ctrl+Shift+E's English candidate mode, where the Engine spells letters only. */
@@ -270,6 +273,11 @@ export class HardwareKeyRouter {
     return editing.length > 0 || phrasePrefix.length > 0;
   }
 
+  /** 编码里没有音节的方案（按方案的 wire name）：五笔字根码和笔画笔顺码都不分音节，硬件 `'` 不当分隔符送给引擎，引擎对这两个方案也不接（`accepts_apostrophe`）。 */
+  static spellsWithoutSyllables(schemeName: string): boolean {
+    return schemeName === "wubi" || schemeName === "stroke";
+  }
+
   /**
    * @param composing whether the Engine is holding a composition right now, as `composing` answers it
    * @param chinese whether the Engine would spell with a letter rather than pass it through
@@ -277,7 +285,7 @@ export class HardwareKeyRouter {
    * @param chinesePunctuationInEnglish whether punctuation is still the keyboard's in English mode, which the Windows host does when `punctuation_lock` is Chinese (`ResolvePunctuationOpen`)
    * @param korean whether letters go to the Korean Hangul automaton, which routes on rules of its own; see routeKorean
    * @param hanjaList whether the scheme's openable candidate list is open: the composing Korean syllable's Hanja, or the Zhuyin list
-   * @param scheme the Engine scheme number whose own key rules are in force, or -1 while English or a local mode takes the keys; Zhuyin and Vietnamese route on rules of their own, see routeZhuyin and routeKorean
+   * @param scheme 当前按自身按键规则处理的引擎方案编号；英文或本地模式接管按键时为 -1。注音、越南语和藏文各有自己的路由规则，见 routeZhuyin 和 routeKorean
    */
   static route(
     key: HardwareKey,
@@ -309,7 +317,7 @@ export class HardwareKeyRouter {
     // resolves nothing, which is why the chord matches on the code, but candidate selection reads
     // the character and a keypad digit does not always carry one.
     key = HardwareKeyRouter.normalizeNumpad(key);
-    if (korean || scheme === SchemeTraits.VIETNAMESE) {
+    if (korean || scheme === SchemeTraits.VIETNAMESE || scheme === SchemeTraits.TIBETAN) {
       return HardwareKeyRouter.routeKorean(
         key,
         composing,
@@ -318,6 +326,7 @@ export class HardwareKeyRouter {
         navigation,
         spelling,
         korean,
+        scheme === SchemeTraits.TIBETAN,
       );
     }
     if (scheme === SchemeTraits.ZHUYIN) {
@@ -431,6 +440,7 @@ export class HardwareKeyRouter {
       const spellingDecision: HardwareKeyDecision | undefined = HardwareKeyRouter.spellingKey(
         key,
         spelling,
+        scheme === SchemeTraits.ZHUYIN,
       );
       if (spellingDecision !== undefined) {
         return spellingDecision;
@@ -580,6 +590,8 @@ export class HardwareKeyRouter {
    *
    * Vietnamese takes the same path with `korean` false: a word composes from its letters in the case they were typed, VNI's mark digits spell while a word is composing (the Engine lists them as spelling symbols), punctuation is ASCII, and every other key ends the word the way it ends a syllable. It has no list, so the Hanja key is not claimed.
    *
+   * 藏文同样走这条路径（`korean` 为 false，`tibetan` 为 true），威利转写的字母按输入时的大小写进入组字。与越南语不同的有三处：引擎列出的拼写符号在没有组字时也是输入（`'` 开头 achung 音节，`/` 单独上屏垂符），所以先于「没有组字就交给应用」判断；组字时空格作为字符交给引擎，由引擎上屏藏文加音节点（Esc 锁定原文后引擎只上屏原文、不处理空格，空格再由键盘插入）；回车发 MSIME_COMMIT_RAW，只上屏藏文、不换行，由引擎吞掉（msime_client.h）。
+   *
    * Letters always compose, in the case the caller normalized them to (Shift gives ㄲ ㄸ ㅃ ㅆ ㅉ ㅒ ㅖ). With nothing composed every other key is the application's, punctuation included: Korean writes it as half-width ASCII, so the application typing the key is exactly right, and fullwidth does not apply. With a syllable open, Backspace takes one jamo back and Escape discards the syllable; a punctuation mark goes through the Engine, which commits the syllable and the mark as one; Space and the other printable keys commit the syllable and are typed after it by the keyboard, so their order against the commit is not left to the editor; and Return, the caret keys, Delete, Tab and the page keys, with or without a modifier, commit the syllable and then do their own work in the application. Any other chord, and a modifier on its own, leaves the syllable open, as it does for every other scheme.
    *
    * The Hanja key (a Korean keyboard's own, or F9 as on the Linux and Android hosts) lists the composing syllable's Hanja and closes the list again; see routeHanjaList for the keys that reach the list while it is open. With nothing composed the Hanja key is the application's like every other key.
@@ -592,12 +604,17 @@ export class HardwareKeyRouter {
     navigation: HardwareNavigationPreferences,
     spelling: HardwareSpelling = PLAIN_SPELLING,
     korean: boolean = true,
+    tibetan: boolean = false,
   ): HardwareKeyDecision {
     const character: number = key.unicodeChar;
     const modified: boolean = key.ctrlKey || key.altKey || key.logoKey;
     const letter: boolean =
       (character >= 0x61 && character <= 0x7a) || (character >= 0x41 && character <= 0x5a);
     if (!modified && letter) {
+      return decision(HardwareKeyAction.COMPOSE, character);
+    }
+    // 藏文空闲时的拼写符号（`'` 和 `/`）也交给引擎，否则 achung 开头的音节打不出来，`/` 也会变成 ASCII 斜杠。
+    if (tibetan && !modified && HardwareKeyRouter.spells(spelling, character)) {
       return decision(HardwareKeyAction.COMPOSE, character);
     }
     if (!composing) {
@@ -626,6 +643,13 @@ export class HardwareKeyRouter {
       }
     }
     if (!modified) {
+      // 藏文组字时空格由引擎上屏藏文加音节点，回车只上屏藏文，两者都由引擎吞掉，不再交给应用。
+      if (tibetan && key.keyCode === KEYCODE_SPACE) {
+        return decision(HardwareKeyAction.PRESS_THEN_TYPE, 0x20);
+      }
+      if (tibetan && (key.keyCode === KEYCODE_ENTER || key.keyCode === KEYCODE_NUMPAD_ENTER)) {
+        return decision(HardwareKeyAction.COMMIT_RAW);
+      }
       if (key.keyCode === KEYCODE_DEL) {
         return decision(HardwareKeyAction.BACKSPACE);
       }
@@ -707,6 +731,14 @@ export class HardwareKeyRouter {
     return RELEASE;
   }
 
+  /** 触屏符号键是否作为字符交给 Engine：组字中或本地模式里 Engine 列为拼写的符号（网址模式的数字和网址符号、`www` 之后的 `.`、U/V 模式的数字）。标点入口 `msime_client_punctuation_with_context` 只收 ASCII 标点，数字走那条路会被拒绝而丢掉。没有组字时列出的 `/` 和 `@` 不在此列，照旧走标点路由。 */
+  static touchSpells(spelling: HardwareSpelling, character: number): boolean {
+    return (
+      (spelling.localMode !== "none" || spelling.editing.length > 0) &&
+      HardwareKeyRouter.spells(spelling, character)
+    );
+  }
+
   /** Whether the Engine takes `character` as input in this state. Never in the English candidate mode, which spells letters only. */
   private static spells(spelling: HardwareSpelling, character: number): boolean {
     return (
@@ -720,17 +752,24 @@ export class HardwareKeyRouter {
   private static spellingKey(
     key: HardwareKey,
     spelling: HardwareSpelling,
+    zhuyin: boolean,
   ): HardwareKeyDecision | undefined {
     // An English word has no syllables, code points or shuangpin finals; the Engine takes letters only there, so these keys stay punctuation.
     if (spelling.englishCandidates) {
       return undefined;
     }
     if (spelling.spellingSymbols.length > 0) {
-      // A local mode that spells with more than letters: U mode's hexadecimal digits, V mode's digits and operators. What the Engine lists is input, decided by the character the key typed, so V mode's Shift+9 is its `(`. Shift+1..9 picks otherwise, as on Windows, since the plain digits are taken.
+      // 引擎列出的符号就是输入，按键打出的字符决定，所以 V 模式的 Shift+9 是它的 `(`：U 模式的十六进制数字、V 模式的数字和运算符、网址模式的网址字符，以及组字原文是网址触发词时的 `.` `:`。
       if (HardwareKeyRouter.spells(spelling, key.unicodeChar)) {
         return decision(HardwareKeyAction.COMPOSE, key.unicodeChar);
       }
-      if (key.shiftKey && key.keyCode >= KEYCODE_1 && key.keyCode <= KEYCODE_9) {
+      // 只有这个键自己的数字被列为拼写时 Shift+1..9 才改为选候选（数字键已被占用），与 macOS 的 ShouldRouteSpellingShiftCandidateDigit 逐键判断一致；只列了 `.` 这类符号、或注音选单打开时只列了 `0`，Shift+1 仍是它打出的 `!`。
+      if (
+        key.shiftKey &&
+        key.keyCode >= KEYCODE_1 &&
+        key.keyCode <= KEYCODE_9 &&
+        spelling.spellingSymbols.indexOf(String.fromCharCode(0x31 + key.keyCode - KEYCODE_1)) >= 0
+      ) {
         return decision(HardwareKeyAction.SELECT, 0, key.keyCode - KEYCODE_1);
       }
       // `U+1F600` as well as `u1f600`: the plus is only part of the spelling straight after the U.
@@ -741,7 +780,10 @@ export class HardwareKeyRouter {
       ) {
         return decision(HardwareKeyAction.COMPOSE, PLUS);
       }
-      return undefined;
+      // 本地模式的拼写完全由列出的符号决定。没有本地模式时列出的只是个别键（网址触发键、粤拼的 `'`），没被它们接住的键继续走下面的撇号分隔和微软双拼 `;`，否则组字原文恰好是 `www` 时 `xi'an` 式的撇号和双拼 `;` 会变成标点。注音没有音节撇号，它的符号表就是全部拼写，没列出的 `'` 照旧走标点路由。
+      if (spelling.localMode !== "none" || zhuyin) {
+        return undefined;
+      }
     }
     if (key.shiftKey) {
       return undefined;

@@ -1,4 +1,4 @@
-import type { Preferences } from "../index";
+import type { InputScheme, Preferences } from "../index";
 import { isChineseScheme } from "./input-scheme-options";
 
 export type TouchKeyboardScheme =
@@ -12,15 +12,43 @@ export type TouchKeyboardScheme =
   | "japanese_nine_key"
   | "japanese"
   | "handwriting"
-  | "thoughtful_reply"
   | "korean"
   | "cantonese"
   | "zhuyin"
-  | "vietnamese";
+  | "vietnamese"
+  | "tibetan"
+  | "stroke";
 export type TouchKeyboardSchemePreferences = {
   enabled: TouchKeyboardScheme[];
   selected?: TouchKeyboardScheme;
 };
+
+/** 触屏键盘背后的输入方案；手写不属于任何方案（由平台的手写识别器识别），返回 null，它只在提供中文方案的版本里有。与 client-core 的 `Edition::offers_touch_scheme` 一致。 */
+export function touchKeyboardSchemeInputScheme(scheme: TouchKeyboardScheme): InputScheme | null {
+  switch (scheme) {
+    case "handwriting":
+      return null;
+    case "quanpin":
+    case "nine_key":
+      return "quanpin";
+    case "xiaohe":
+    case "ziranma":
+    case "microsoft":
+    case "shoudao":
+      return "shuangpin";
+    case "japanese":
+    case "japanese_nine_key":
+      return "japanese";
+    case "wubi":
+    case "korean":
+    case "cantonese":
+    case "zhuyin":
+    case "vietnamese":
+    case "tibetan":
+    case "stroke":
+      return scheme;
+  }
+}
 
 /** 五笔触屏方案的标题：只有一个五笔键盘，标题跟随 `wubi_profile`。 */
 export function wubiProfileTitle(profile: Preferences["wubi_profile"]): string {
@@ -42,18 +70,21 @@ export function touchKeyboardSchemeTitle(preferences: Preferences): string {
       japanese_nine_key: "日语 9 键",
       japanese: "日语 26 键",
       handwriting: "手写",
-      thoughtful_reply: "高情商回复",
       korean: "韩语 26 键",
       cantonese: "粤拼 26 键",
       zhuyin: "大千注音",
       vietnamese: "越南语 26 键",
+      tibetan: "藏文 26 键",
+      stroke: "笔画",
     }[selected];
   }
-  // Korean, Cantonese, Zhuyin and Vietnamese each have one keyboard, whatever layout the document carries.
+  // 韩语、粤拼、注音、越南语、藏文和笔画各只有一个键盘，不管文档里记的是哪种布局。
   if (preferences.scheme === "korean") return "韩语 26 键";
   if (preferences.scheme === "cantonese") return "粤拼 26 键";
   if (preferences.scheme === "zhuyin") return "大千注音";
   if (preferences.scheme === "vietnamese") return "越南语 26 键";
+  if (preferences.scheme === "tibetan") return "藏文 26 键";
+  if (preferences.scheme === "stroke") return "笔画";
   if (preferences.touch_keyboard_layout === "handwriting") return "手写";
   if (preferences.touch_keyboard_layout === "nine_key")
     return preferences.scheme === "japanese" ? "日语 9 键" : "全拼 9 键";
@@ -74,39 +105,55 @@ export const touchKeyboardSchemeOptions: [TouchKeyboardScheme, string][] = [
   ["japanese_nine_key", "日语 9 键"],
   ["japanese", "日语 26 键"],
   ["handwriting", "手写"],
-  ["thoughtful_reply", "高情商回复"],
   ["korean", "韩语 26 键"],
   ["cantonese", "粤拼 26 键"],
   ["zhuyin", "大千注音"],
   ["vietnamese", "越南语 26 键"],
+  ["tibetan", "藏文 26 键"],
+  ["stroke", "笔画"],
 ];
 /** Every touch scheme in picker order; schemes are appended, never reordered. Mirrors `TouchKeyboardScheme::ALL` in client-core. */
 export const allTouchKeyboardSchemes = touchKeyboardSchemeOptions.map(([scheme]) => scheme);
-/** The schemes a document without a stored list shows. Cantonese, Zhuyin and Vietnamese are opt-in so that adding them changes no existing keyboard. Mirrors `TouchKeyboardScheme::DEFAULT_ENABLED` in client-core. */
+/** 没有存过列表的文档显示的方案。粤拼、注音、越南语、藏文和笔画需要用户自己打开，这样新增它们不会改变已有的键盘。对应 client-core 的 `TouchKeyboardScheme::DEFAULT_ENABLED`。 */
 export const defaultTouchKeyboardSchemes: TouchKeyboardScheme[] = allTouchKeyboardSchemes.filter(
-  (scheme) => scheme !== "cantonese" && scheme !== "zhuyin" && scheme !== "vietnamese",
+  (scheme) =>
+    scheme !== "cantonese" &&
+    scheme !== "zhuyin" &&
+    scheme !== "vietnamese" &&
+    scheme !== "tibetan" &&
+    scheme !== "stroke",
 );
 
-export function inferredTouchKeyboardScheme(preferences: Preferences): TouchKeyboardScheme {
+/**
+ * `handwritingScheme` 是手写写进偏好 `scheme` 的方案，即运行中版本的默认方案（`HostCapabilities.edition.default_scheme`），缺省是全拼。手写识别由平台识别器完成，不经过 Engine 的方案；五笔版里手写写 `wubi`，免得 host-api 把全拼当作本版本不含的方案回退。与 Android 的 `KeyboardScheme.engineScheme` 一致。
+ */
+export function inferredTouchKeyboardScheme(
+  preferences: Preferences,
+  handwritingScheme: InputScheme = "quanpin",
+): TouchKeyboardScheme {
   const enabled = preferences.touch_keyboard_schemes?.enabled ?? defaultTouchKeyboardSchemes;
   const selected = preferences.touch_keyboard_schemes?.selected;
   if (selected && enabled.includes(selected)) return selected;
   const scheme = preferences.scheme;
-  // Cantonese, Zhuyin and Vietnamese have their own touch keyboard; while it is not enabled they show the remembered Chinese scheme's.
+  // 粤拼、注音、越南语、藏文和笔画有各自的触屏键盘（笔画键盘在 26 键和九键布局下都显示）；键盘没打开时显示记住的中文方案的键盘。
   if (
-    (scheme === "cantonese" || scheme === "zhuyin" || scheme === "vietnamese") &&
+    (scheme === "cantonese" ||
+      scheme === "zhuyin" ||
+      scheme === "vietnamese" ||
+      scheme === "tibetan" ||
+      scheme === "stroke") &&
     enabled.includes(scheme)
   )
     return scheme;
   let inferred = touchSchemeOf(preferences, scheme);
-  if (preferences.touch_keyboard_layout === "handwriting" && scheme === "quanpin")
+  if (preferences.touch_keyboard_layout === "handwriting" && scheme === handwritingScheme)
     inferred = "handwriting";
   else if (preferences.touch_keyboard_layout === "nine_key" && scheme !== "korean")
     inferred = scheme === "japanese" ? "japanese_nine_key" : "nine_key";
   return enabled.includes(inferred) ? inferred : (enabled[0] ?? "quanpin");
 }
 
-/** The touch scheme for a document scheme. Cantonese, Zhuyin and Vietnamese map to the remembered Chinese scheme's touch scheme, or 全拼 when that has none either, for documents that have not enabled their own touch keyboard. */
+/** 文档方案对应的触屏方案。对没打开自己触屏键盘的文档，粤拼、注音、越南语、藏文和笔画对应记住的中文方案的触屏方案，那个也没有时用全拼。 */
 function touchSchemeOf(
   preferences: Preferences,
   scheme: Preferences["scheme"],
@@ -121,7 +168,9 @@ function touchSchemeOf(
       return scheme;
     case "cantonese":
     case "zhuyin":
-    case "vietnamese": {
+    case "vietnamese":
+    case "tibetan":
+    case "stroke": {
       const remembered = preferences.last_chinese_scheme;
       return remembered === "quanpin" || remembered === "shuangpin" || remembered === "wubi"
         ? touchSchemeOf(preferences, remembered)
@@ -130,19 +179,31 @@ function touchSchemeOf(
   }
 }
 
-/** The Chinese scheme a Japanese, Korean or Vietnamese selection returns to; switching among those keeps the one already remembered. */
+/** 选日文、韩文、越南语或藏文后要回到的中文方案；在这几个之间切换时保留已经记住的那个。 */
 function rememberedChineseScheme(preferences: Preferences): Preferences["last_chinese_scheme"] {
   return isChineseScheme(preferences.scheme) ? preferences.scheme : preferences.last_chinese_scheme;
 }
 
+/** 选中一个触屏方案后的偏好；`handwritingScheme` 见 {@link inferredTouchKeyboardScheme}。 */
 export function selectTouchKeyboardScheme(
   preferences: Preferences,
   selected: TouchKeyboardScheme,
+  handwritingScheme: InputScheme = "quanpin",
 ): Preferences {
   const touch_keyboard_schemes = {
     enabled: preferences.touch_keyboard_schemes?.enabled ?? defaultTouchKeyboardSchemes,
     selected,
   };
+  if (selected === "handwriting" && handwritingScheme !== "quanpin")
+    return {
+      ...preferences,
+      scheme: handwritingScheme,
+      last_chinese_scheme: isChineseScheme(handwritingScheme)
+        ? handwritingScheme
+        : rememberedChineseScheme(preferences),
+      touch_keyboard_layout: "handwriting",
+      touch_keyboard_schemes,
+    };
   if (["xiaohe", "ziranma", "microsoft", "shoudao"].includes(selected))
     return {
       ...preferences,
@@ -168,15 +229,15 @@ export function selectTouchKeyboardScheme(
       touch_keyboard_layout: "twenty_six_key",
       touch_keyboard_schemes,
     };
-  if (selected === "vietnamese")
+  if (selected === "vietnamese" || selected === "tibetan")
     return {
       ...preferences,
-      scheme: "vietnamese",
+      scheme: selected,
       last_chinese_scheme: rememberedChineseScheme(preferences),
       touch_keyboard_layout: "twenty_six_key",
       touch_keyboard_schemes,
     };
-  if (selected === "cantonese" || selected === "zhuyin")
+  if (selected === "cantonese" || selected === "zhuyin" || selected === "stroke")
     return {
       ...preferences,
       scheme: selected,
@@ -212,6 +273,7 @@ export function updateTouchKeyboardSchemeEnabled(
   scheme: TouchKeyboardScheme,
   enabled: boolean,
   selectedTouchKeyboardScheme = inferredTouchKeyboardScheme(preferences),
+  handwritingScheme: InputScheme = "quanpin",
 ): Preferences | null {
   const visible = new Set(
     preferences.touch_keyboard_schemes?.enabled ?? defaultTouchKeyboardSchemes,
@@ -223,7 +285,7 @@ export function updateTouchKeyboardSchemeEnabled(
   const selected = visible.has(selectedTouchKeyboardScheme)
     ? selectedTouchKeyboardScheme
     : ordered[0];
-  const next = selectTouchKeyboardScheme(preferences, selected);
+  const next = selectTouchKeyboardScheme(preferences, selected, handwritingScheme);
   return { ...next, touch_keyboard_schemes: { enabled: ordered, selected } };
 }
 
@@ -231,12 +293,13 @@ export function updateTouchKeyboardSchemeEnabled(
 export function selectHomeTouchKeyboardScheme(
   preferences: Preferences,
   scheme: TouchKeyboardScheme,
+  handwritingScheme: InputScheme = "quanpin",
 ): Preferences {
   const visible = new Set(
     preferences.touch_keyboard_schemes?.enabled ?? defaultTouchKeyboardSchemes,
   );
   visible.add(scheme);
   const enabled = allTouchKeyboardSchemes.filter((value) => visible.has(value));
-  const next = selectTouchKeyboardScheme(preferences, scheme);
+  const next = selectTouchKeyboardScheme(preferences, scheme, handwritingScheme);
   return { ...next, touch_keyboard_schemes: { enabled, selected: scheme } };
 }

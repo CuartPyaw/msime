@@ -6,10 +6,17 @@ import type { SkinFontReader } from "./skin-font";
 import { useSelectedBarPalette } from "./skin-palette";
 export { selectedBarCss } from "./skin-palette";
 import { useToolbarCss, type ToolbarCssReader } from "./use-toolbar-css";
+import { SkinCardHeader } from "./skin-card-header";
+import { SkinPreviewStage } from "./skin-preview-stage";
+import { SkinPreviewSurface } from "./skin-preview-surface";
 import * as settings from "../settings/settings-style";
+import { SettingsExternalMeta } from "../settings/settings-external-meta";
+import { SettingsGroupBlock } from "../settings/settings-group-block";
 import { Row } from "../core/platform-controls";
 import { ActionButton } from "../core/action-button";
+import { StatusMessage } from "../core/status-message";
 import { subscribeSkinCatalogChanges } from "./skin-catalog-changes";
+import { useAsyncGeneration } from "../settings/use-async-generation";
 import {
   customCandidateStyle,
   normalizedColor,
@@ -231,57 +238,57 @@ export function ExternalSkinCard({
       // `external-skin-decorated` is the `@utility` that lays out the decoration band inside the preview.
       className={`${settings.skinCard(selected)}${decorated ? " external-skin-decorated" : ""}`}
     >
-      <div className={settings.skinCardHeader} data-skin-card-header="">
-        <div className={settings.skinCardBody}>
-          <span className={settings.skinCardTitle}>
-            {skin.name}（{theme === "dark" ? "深色" : "浅色"}）
-            {selected && <span className={settings.skinCardInUse}>使用中</span>}
-          </span>
-          <span className={settings.skinCardDescription}>
-            {compatible
-              ? skin.description || `基于 ${themeEntry(skin.base).title}`
-              : `当前布局或明暗模式不受支持（${skin.layouts.join("/")}，${skin.themes.join("/")}）`}
-          </span>
-          <span className={settings.externalMeta}>
+      <SkinCardHeader
+        title={skin.name}
+        theme={theme}
+        selected={selected}
+        description={
+          compatible
+            ? skin.description || `基于 ${themeEntry(skin.base).title}`
+            : `当前布局或明暗模式不受支持（${skin.layouts.join("/")}，${skin.themes.join("/")}）`
+        }
+        details={
+          <SettingsExternalMeta as="span">
             {[skin.id, skin.version && `v${skin.version}`, skin.author].filter(Boolean).join(" · ")}
-          </span>
-        </div>
-        <div className={settings.skinCardActions}>
-          <ActionButton
-            action={() => onSelect(skin.id, skin.base)}
-            ariaChecked={selected}
-            ariaLabel={skin.name}
-            className={settings.skinSwitch(selected)}
-            disabled={!compatible}
-            label={<span className={settings.skinSwitchKnob(selected)} />}
-            role="switch"
-          />
-          {fixed === null && (
+          </SettingsExternalMeta>
+        }
+        actions={
+          <>
             <ActionButton
-              action={() => setOverride(theme === "dark" ? "light" : "dark")}
-              className={settings.skinPreviewSwitch}
-              label={theme === "dark" ? "预览浅色" : "预览深色"}
+              action={() => onSelect(skin.id, skin.base)}
+              ariaChecked={selected}
+              ariaLabel={skin.name}
+              className={settings.skinSwitch(selected)}
+              disabled={!compatible}
+              label={<span className={settings.skinSwitchKnob(selected)} />}
+              role="switch"
             />
-          )}
-          {onPublish && (
-            <ActionButton
-              action={() => onPublish(skin.id)}
-              className={settings.skinPreviewSwitch}
-              label="发布到社区"
-            />
-          )}
-        </div>
-      </div>
-      <div
-        data-skin-preview=""
-        className={`${settings.skinCardPreview} ${scope}${theme === "light" ? " theme-light" : ""}`}
+            {fixed === null && (
+              <ActionButton
+                action={() => setOverride(theme === "dark" ? "light" : "dark")}
+                className={settings.skinPreviewSwitch}
+                label={theme === "dark" ? "预览浅色" : "预览深色"}
+              />
+            )}
+            {onPublish && (
+              <ActionButton
+                action={() => onPublish(skin.id)}
+                className={settings.skinPreviewSwitch}
+                label="发布到社区"
+              />
+            )}
+          </>
+        }
+      />
+      <SkinPreviewSurface
+        className={`${scope}${theme === "light" ? " theme-light" : ""}`}
         style={geometry}
         data-preview-theme={theme}
         data-decoration-align={skin.decorationAlign ?? "right"}
         aria-hidden="true"
       >
         <div className={settings.skinCandidateStages}>
-          <div className={settings.skinPreviewStage} data-skin-stage="">
+          <SkinPreviewStage>
             <SkinCandidatePreview
               orientation="horizontal"
               decorated={decorated}
@@ -290,8 +297,8 @@ export function ExternalSkinCard({
               background={background.drawn}
               onBackgroundError={background.onError}
             />
-          </div>
-          <div className={settings.skinPreviewStage} data-skin-stage="">
+          </SkinPreviewStage>
+          <SkinPreviewStage>
             <SkinCandidatePreview
               orientation="vertical"
               decorated={decorated}
@@ -300,23 +307,23 @@ export function ExternalSkinCard({
               background={background.drawn}
               onBackgroundError={background.onError}
             />
-          </div>
+          </SkinPreviewStage>
         </div>
         {toolbarPreview && (
-          <div className={settings.skinPreviewStage} data-skin-stage="">
+          <SkinPreviewStage>
             <SkinToolbarPreview />
-          </div>
+          </SkinPreviewStage>
         )}
-      </div>
+      </SkinPreviewSurface>
       {paletteFailed && (
-        <p role="status" className={note}>
+        <StatusMessage role="status" className={note}>
           当前浏览器无法隐藏皮肤的选中条，其余配色照常预览。
-        </p>
+        </StatusMessage>
       )}
       {(image?.failed || decodeFailed || background.failed) && (
-        <p role="status" className={note}>
+        <StatusMessage role="status" className={note}>
           皮肤图片加载失败，保留基础预览。可刷新皮肤重试。
-        </p>
+        </StatusMessage>
       )}
       {(decoration || skin.background) && !readImage && (
         <p className={note}>当前宿主不支持皮肤图片预览。</p>
@@ -325,14 +332,14 @@ export function ExternalSkinCard({
         <p className={note}>当前宿主不支持外部工具栏样式。</p>
       )}
       {toolbarState === "failed" && (
-        <p role="status" className={note}>
+        <StatusMessage role="status" className={note}>
           工具栏样式加载失败，保留基础预览。可刷新皮肤重试。
-        </p>
+        </StatusMessage>
       )}
       {toolbarState === "partial" && (
-        <p role="status" className={note}>
+        <StatusMessage role="status" className={note}>
           已应用工具栏基础样式；关联资源及部分规则尚未支持。
-        </p>
+        </StatusMessage>
       )}
     </article>
   );
@@ -369,7 +376,7 @@ export function useSkinCatalog(
   const [revision, setRevision] = useState(0);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
-  const generation = useRef(0);
+  const generation = useAsyncGeneration(scan);
   const pending = useRef(false);
   // 扫描进行中又收到目录改动的通知：进行中的那次可能读不到新皮肤，结束后再补扫一次。
   const queued = useRef(false);
@@ -377,15 +384,13 @@ export function useSkinCatalog(
   const latest = useRef<SkinCatalog | null>(null);
   const [opening, setOpening] = useState(false);
   const [openFailed, setOpenFailed] = useState(false);
-  const openGeneration = useRef(0);
+  const openGeneration = useAsyncGeneration(openDirectory);
   const openPending = useRef(false);
   useEffect(() => {
-    openGeneration.current++;
     openPending.current = false;
     setOpening(false);
     setOpenFailed(false);
     return () => {
-      openGeneration.current++;
       openPending.current = false;
     };
   }, [openDirectory]);
@@ -409,7 +414,6 @@ export function useSkinCatalog(
     }
   }
   useEffect(() => {
-    generation.current++;
     pending.current = false;
     queued.current = false;
     latest.current = null;
@@ -419,7 +423,6 @@ export function useSkinCatalog(
     // Scan as the page opens, as the native fallback page (SkinSettingsView) does. Waiting for a manual refresh left the carousel without the package in use, so the skin in use looked missing.
     void run(true);
     return () => {
-      generation.current++;
       pending.current = false;
       queued.current = false;
     };
@@ -560,16 +563,16 @@ export function ExternalSkinDirectoryRow({
         />
       </Row>
       {(skins.openFailed || skins.failed || !!skins.catalog?.issues.length) && (
-        <div className={settings.groupBlock}>
+        <SettingsGroupBlock>
           {skins.openFailed && (
-            <p role="alert" className={settings.externalMeta}>
+            <SettingsExternalMeta role="alert">
               {importsSkin ? "导入皮肤失败，请重试。" : "无法打开皮肤目录，请重试。"}
-            </p>
+            </SettingsExternalMeta>
           )}
           {skins.failed && (
-            <p role="alert" className={settings.externalMeta}>
+            <SettingsExternalMeta role="alert">
               读取皮肤目录失败，请重试。{skins.catalog && "仍显示上次扫描结果。"}
-            </p>
+            </SettingsExternalMeta>
           )}
           {!!skins.catalog?.issues.length && (
             <details className={settings.externalDiagnostics}>
@@ -583,7 +586,7 @@ export function ExternalSkinDirectoryRow({
               </ul>
             </details>
           )}
-        </div>
+        </SettingsGroupBlock>
       )}
     </>
   );

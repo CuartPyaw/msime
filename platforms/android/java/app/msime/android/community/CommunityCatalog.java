@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import javax.net.ssl.HttpsURLConnection;
@@ -180,7 +181,7 @@ public final class CommunityCatalog {
      * <p>要求登录水杉账号：匿名身份发布不了皮肤，也就不可能是作者。服务端回显的分类和请求的不一致，说明修改没有生效，按失败处理。
      */
     public Update setCategory(Item item, CommunityRequest.Category category) {
-        if (item.kind() != CommunityRequest.Kind.SKIN || category == null) {
+        if (item == null || item.kind() != CommunityRequest.Kind.SKIN || category == null) {
             return new Update(null, "这类作品没有分类。");
         }
         String token = new BackendAccount(context).accessToken();
@@ -239,7 +240,7 @@ public final class CommunityCatalog {
             if (item == null) {
                 return new Page(List.of(), false, CommunityRequest.message(null, 500));
             }
-            if (!ids.add(item.id())) {
+            if (!ids.add(idKey(item.id()))) {
                 return new Page(List.of(), false, CommunityRequest.message(null, 500));
             }
             items.add(item);
@@ -250,11 +251,17 @@ public final class CommunityCatalog {
         return new Page(List.copyOf(items), hasMore, "");
     }
 
+    static String idKey(String value) {
+        return value.toLowerCase(Locale.ROOT);
+    }
+
     /** 一个条目，读不出或不合规时为 null。 */
     private static Item item(CommunityRequest.Kind kind, JSONObject value) {
         boolean skin = kind == CommunityRequest.Kind.SKIN;
-        String id = value.optString("id", "");
-        String name = value.optString("name", "").trim();
+        String id = strictString(value.opt("id"));
+        String name = strictString(value.opt("name"));
+        if (id == null || name == null) return null;
+        name = name.trim();
         JSONObject payload = skin ? value.optJSONObject("design") : value.optJSONObject("content");
         Long saves = count(value, "saves", skin ? "downloads" : null);
         Long ratings = count(value, "rating_count", null);
@@ -266,10 +273,22 @@ public final class CommunityCatalog {
             category = CommunityRequest.Category.parse(raw == JSONObject.NULL ? null : raw);
             if (category == null) return null;
         }
-        Item item = new Item(id, kind, name, value.optString("description", "").trim(),
-            value.optString("author", "").trim(), saves, ratings, average, payload, category,
-            value.optBoolean("owned", false));
+        String description = value.has("description") ? strictString(value.opt("description")) : "";
+        String author = value.has("author") ? strictString(value.opt("author")) : "";
+        Boolean owned = value.has("owned") ? strictBoolean(value.opt("owned")) : Boolean.FALSE;
+        if (description == null || author == null || owned == null) return null;
+        Item item = new Item(id, kind, name, description.trim(), author.trim(), saves, ratings,
+            average, payload, category, owned);
         return validItem(item, kind) ? item : null;
+    }
+
+    /** org.json's optString/optBoolean coerce numbers and booleans; community responses are a typed contract. */
+    static String strictString(Object value) {
+        return value instanceof String ? (String) value : null;
+    }
+
+    static Boolean strictBoolean(Object value) {
+        return value instanceof Boolean ? (Boolean) value : null;
     }
 
     /** A malformed page is a backend fault, not more results to show. Kept apart from parse so the JVM smoke can check it: the smokes run against android.jar, whose org.json classes are stubs that throw. */
@@ -331,11 +350,14 @@ public final class CommunityCatalog {
         Object raw = value.opt(primary);
         if ((raw == null || raw == JSONObject.NULL) && fallback != null) raw = value.opt(fallback);
         if (raw == null || raw == JSONObject.NULL) return 0L;
+        return countNumber(raw);
+    }
+
+    static Long countNumber(Object raw) {
         if (!(raw instanceof Number number)) return null;
-        double decimal = number.doubleValue();
+        if (!(raw instanceof Integer) && !(raw instanceof Long)) return null;
         long integer = number.longValue();
-        return Double.isFinite(decimal) && decimal >= 0 && decimal == integer
-            && integer <= MAX_JAVASCRIPT_INTEGER ? integer : null;
+        return integer >= 0 && integer <= MAX_JAVASCRIPT_INTEGER ? integer : null;
     }
 
     private static Double decimal(JSONObject value, String key) {

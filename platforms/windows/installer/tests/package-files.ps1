@@ -14,6 +14,9 @@ try {
     Copy-Item (Join-Path $PSScriptRoot '../msime_setup.iss') $installer
     Copy-Item (Join-Path $PSScriptRoot '../config.default.toml') $installer
     Copy-Item (Join-Path $PSScriptRoot '../assets') $installer -Recurse
+    # Prepare-PackageFiles.ps1 从版本表取本次打包的版本，fixture 用仓库里的那一份。
+    New-Item -ItemType Directory -Force -Path (Join-Path $fixture 'shared/contracts') | Out-Null
+    Copy-Item (Join-Path $PSScriptRoot '../../../../shared/contracts/editions.json') (Join-Path $fixture 'shared/contracts/editions.json')
     foreach ($file in @(
         'server/build-release/bin/Release/MetasequoiaImeServer.exe',
         'server/build-release/bin/Release/MetasequoiaImeServer.pdb',
@@ -34,6 +37,7 @@ try {
         'server/build-release/bin/Release/msime-client-settings.pdb',
         'server/build-release/bin/Release/MSIME.exe',
         'server/build-release/bin/Release/MSIME.pdb',
+        'server/build-release/bin/Release/RestartAgent.exe',
         'windows/build32-release/Release/MetasequoiaImeTsf.dll',
         'windows/build32-release/Release/MetasequoiaImeTsf.pdb',
         'windows/build64-release/Release/MetasequoiaImeTsf.dll',
@@ -43,25 +47,30 @@ try {
         'target/release/msime-desktop.exe',
         'target/handwriting-model/handwriting-zh_CN.model',
         'target/handwriting-model/HandwritingModel-LICENSE.txt',
-        'target/language-dictionaries/zhuyin.db',
-        'target/language-dictionaries/libchewing_data_LICENSE.txt',
+        'target/language-dictionaries/msime-zhuyin.db',
+        'target/language-dictionaries/msime-libchewing_data_LICENSE.txt',
+        'target/language-dictionaries/msime-stroke.db',
+        'target/language-dictionaries/msime-rime_stroke_LICENSE.txt',
         'resources/helpcodes/helpcode.txt',
         'resources/helpcodes/NOTICE.md',
         'resources/sound-packs/default/plugin.toml',
-        'resources/sound-packs/default/key.wav'
+        'resources/sound-packs/default/key.wav',
+        'target/offline-glosses/zh-fr.db',
+        'target/offline-glosses/offline-glosses-NOTICE.txt'
     )) { Write-Fixture $file }
     Write-Fixture 'windows/build32-release/Release/msime_host_api.dll' 'synthetic x86 host'
     Write-Fixture 'windows/build64-release/Release/msime_host_api.dll' 'synthetic x64 host'
     Write-Fixture 'windows/build32-release/Release/synthetic-runtime.dll' 'synthetic x86 dependency'
     Write-Fixture 'windows/build64-release/Release/synthetic-runtime.dll' 'synthetic x64 dependency'
-    $english = Join-Path $fixture 'target/desktop-resources/english.db'
+    $english = Join-Path $fixture 'target/desktop-resources/msime-english.db'
     New-Item -ItemType Directory -Force (Split-Path -Parent $english) | Out-Null
     python -c "import sqlite3,sys; sqlite3.connect(sys.argv[1]).execute('CREATE TABLE english_words(word TEXT,display TEXT,weight INTEGER,PRIMARY KEY(word,display))')" $english
     if ($LASTEXITCODE -ne 0) { throw 'Failed to create packaging fixture' }
     $artifacts = @(
-        foreach ($name in @('msime.db', 'english.db', 'others.db', 'dict_japanese.dat',
-                            'mozc_dictionary_oss_README.txt', 'dictionary-manifest.json')) {
-            if ($name -ne 'english.db') { Write-Fixture "target/desktop-resources/$name" "synthetic pinned $name" }
+        foreach ($name in @('msime-pinyin.db', 'msime-english.db', 'msime-scowl_Copyright.txt', 'msime-others.db',
+                            'msime-japanese.dat', 'msime-mozc_dictionary_oss_README.txt', 'msime-mozc_LICENSE.txt',
+                            'msime-dictionary-manifest.json')) {
+            if ($name -ne 'msime-english.db') { Write-Fixture "target/desktop-resources/$name" "synthetic pinned $name" }
             $path = Join-Path $fixture "target/desktop-resources/$name"
             @{ name = $name; size = (Get-Item $path).Length; sha256 = (Get-FileHash $path).Hash.ToLowerInvariant() }
         }
@@ -82,14 +91,14 @@ try {
     if (Test-Path (Join-Path $installer 'server_exe/resources/stale.txt')) {
         throw 'Packaged unverified native build resources'
     }
-    $pinned = Join-Path $fixture 'target/desktop-resources/msime.db'
+    $pinned = Join-Path $fixture 'target/desktop-resources/msime-pinyin.db'
     $originalPinned = [IO.File]::ReadAllText($pinned)
     foreach ($bad in @('short', ('x' * $originalPinned.Length))) {
         [IO.File]::WriteAllText($pinned, $bad)
         $rejected = $false
         try { & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture } catch { $rejected = $true }
         if (-not $rejected) { throw 'Invalid pinned resource accepted' }
-        if ([IO.File]::ReadAllText((Join-Path $installer 'server_exe/resources/msime.db')) -ne $originalPinned) {
+        if ([IO.File]::ReadAllText((Join-Path $installer 'server_exe/resources/msime-pinyin.db')) -ne $originalPinned) {
             throw 'Failed resource preflight damaged previous staging'
         }
     }
@@ -107,24 +116,27 @@ try {
                          'server_exe/MSIME.pdb',
                          'server_exe/msime-client-prepare.exe',
                          'server_exe/msime-client-prepare.pdb',
+                         'server_exe/RestartAgent.exe',
                          'server_exe/handwriting/handwriting-zh_CN.model',
                          'server_exe/handwriting/HandwritingModel-LICENSE.txt',
+                         'server_exe/offline-glosses/zh-fr.db',
+                         'server_exe/offline-glosses/offline-glosses-NOTICE.txt',
                          'app_data/helpcodes/helpcode.txt',
                          'app_data/sound-packs/default/plugin.toml', 'app_data/sound-packs/default/key.wav',
                          'THIRD_PARTY_NOTICES.txt', 'LICENSE.txt')) {
         if (-not (Test-Path (Join-Path $installer $file))) { throw "Missing packaged file: $file" }
     }
     if (Test-Path (Join-Path $installer 'app_data/helpcodes/NOTICE.md')) { throw 'Staged a helpcode notice as a table' }
-    # The Zhuyin dictionary travels beside resources with its licence; the absent Cantonese one leaves that scheme unavailable, and a dictionary without its licence is refused.
-    foreach ($name in @('zhuyin.db', 'libchewing_data_LICENSE.txt')) {
+    # The Zhuyin and Stroke dictionaries travel beside resources with their licences; the absent Cantonese one leaves that scheme unavailable, and a dictionary without its licence is refused.
+    foreach ($name in @('msime-zhuyin.db', 'msime-libchewing_data_LICENSE.txt', 'msime-stroke.db', 'msime-rime_stroke_LICENSE.txt')) {
         if (-not (Test-Path (Join-Path $installer "server_exe/language-dictionaries/$name"))) { throw "Missing language dictionary file: $name" }
     }
-    if (Test-Path (Join-Path $installer 'server_exe/language-dictionaries/cantonese.db')) { throw 'Packaged a Cantonese dictionary that was not provided' }
-    Write-Fixture 'target/language-dictionaries/cantonese.db'
+    if (Test-Path (Join-Path $installer 'server_exe/language-dictionaries/msime-cantonese.db')) { throw 'Packaged a Cantonese dictionary that was not provided' }
+    Write-Fixture 'target/language-dictionaries/msime-cantonese.db'
     $rejected = $false
     try { & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture } catch { $rejected = $_.Exception.Message -match 'rime_cantonese_LICENSE' }
     if (-not $rejected) { throw 'A language dictionary without its licence was accepted' }
-    Remove-Item (Join-Path $fixture 'target/language-dictionaries/cantonese.db') -Force
+    Remove-Item (Join-Path $fixture 'target/language-dictionaries/msime-cantonese.db') -Force
     & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture
     foreach ($testFile in @(
         'server_exe/MetasequoiaImeServerTests.exe',
@@ -355,7 +367,54 @@ try {
             throw 'Partial voice runtime damaged previous staging'
         }
     }
-    Write-Host 'Full/light package contracts, provenance, exclusions and failure staging passed'
+    # 版本：五笔版按自己的资源锁只带它的词库、不带语言词库，host DLL 用版本表里的名字，Server 目录里放版本声明；再打一次 full，声明就不在了。
+    foreach ($partial in @($serverOutput, 'target/voice-runtime/windows-x64')) {
+        foreach ($library in $voiceRuntimeLibraries) {
+            Remove-Item -LiteralPath (Join-Path $fixture "$partial/$library") -ErrorAction SilentlyContinue
+        }
+    }
+    Write-Fixture 'windows/build32-release/Release/msime_host_api_wubi.dll' 'synthetic x86 wubi host'
+    Write-Fixture 'windows/build64-release/Release/msime_host_api_wubi.dll' 'synthetic x64 wubi host'
+    $wubiArtifacts = @($artifacts | Where-Object { $_.name -in @('msime-pinyin.db', 'msime-wubi.db', 'msime-english.db', 'msime-scowl_Copyright.txt', 'msime-others.db', 'msime-dictionary-manifest.json') })
+    Write-Fixture 'resources/editions/wubi.lock.json' (@{
+        source_commit = ('a' * 40); artifacts = $wubiArtifacts
+    } | ConvertTo-Json -Depth 5)
+    & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture -Edition wubi
+    $declared = Get-Content -LiteralPath (Join-Path $installer 'server_exe/edition.json') -Raw | ConvertFrom-Json
+    if ($declared.edition -ne 'wubi') { throw 'Edition package declaration missing or wrong' }
+    $staged = @(Get-ChildItem -LiteralPath (Join-Path $installer 'server_exe/resources') -File | ForEach-Object Name | Sort-Object)
+    if (($staged -join ',') -ne ((@($wubiArtifacts | ForEach-Object { $_.name }) | Sort-Object) -join ',')) {
+        throw "Edition resources do not follow its lock: $($staged -join ', ')"
+    }
+    if (Test-Path (Join-Path $installer 'server_exe/language-dictionaries')) { throw 'Edition without Zhuyin packaged the Zhuyin dictionary' }
+    foreach ($arch in @('32', '64')) {
+        if (-not (Test-Path (Join-Path $installer "tsf_dll/$arch/msime_host_api_wubi.dll")) -or
+            (Test-Path (Join-Path $installer "tsf_dll/$arch/msime_host_api.dll"))) {
+            throw "Edition host DLL not packaged under its own name ($arch)"
+        }
+    }
+    # 五笔版提供中文方案，手写模型和非英文离线释义照常装。
+    foreach ($file in @('server_exe/handwriting/handwriting-zh_CN.model', 'server_exe/offline-glosses/zh-fr.db')) {
+        if (-not (Test-Path (Join-Path $installer $file))) { throw "Chinese edition lost $file" }
+    }
+    # 越南文版没有中文方案（版本表 features.handwriting 和 features.offline_glosses 为 false）：手写模型和非英文离线释义都不装，即使构建目录里有它们。
+    Write-Fixture 'windows/build32-release/Release/msime_host_api_vietnamese.dll' 'synthetic x86 vietnamese host'
+    Write-Fixture 'windows/build64-release/Release/msime_host_api_vietnamese.dll' 'synthetic x64 vietnamese host'
+    $vietnameseArtifacts = @($artifacts | Where-Object { $_.name -in @('msime-english.db', 'msime-scowl_Copyright.txt', 'msime-others.db', 'msime-dictionary-manifest.json') })
+    Write-Fixture 'resources/editions/vietnamese.lock.json' (@{
+        source_commit = ('a' * 40); artifacts = $vietnameseArtifacts
+    } | ConvertTo-Json -Depth 5)
+    & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture -Edition vietnamese
+    foreach ($absent in @('server_exe/handwriting', 'server_exe/offline-glosses', 'server_exe/language-dictionaries')) {
+        if (Test-Path (Join-Path $installer $absent)) { throw "Edition without a Chinese scheme packaged $absent" }
+    }
+    $rejected = $false
+    try { & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture -Edition klingon }
+    catch { $rejected = $_.Exception.Message -match 'klingon' }
+    if (-not $rejected) { throw 'Unknown edition accepted' }
+    & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture
+    if (Test-Path (Join-Path $installer 'server_exe/edition.json')) { throw 'Full package carries an edition declaration' }
+    Write-Host 'Full/light package contracts, provenance, exclusions and failure staging and the per-edition packages passed'
 } finally {
     if (Test-Path $fixture) { Remove-Item $fixture -Recurse -Force }
 }

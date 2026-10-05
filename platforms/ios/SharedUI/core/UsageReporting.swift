@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 import Darwin
 
 private typealias UsageByte = UInt8
@@ -80,19 +81,7 @@ enum UsageReporting {
   }
 
   private static func rejectsSymlinkAncestors(_ path: URL) -> Bool {
-    var current = path.standardizedFileURL
-    while true {
-      if current.path == "/" || current.path == "/var" || current.path == "/tmp" { return false }
-      var status = stat()
-      if lstat(current.path, &status) == 0 {
-        if status.st_mode & S_IFMT == S_IFLNK { return true }
-      } else if errno != ENOENT {
-        return true
-      }
-      let parent = current.deletingLastPathComponent()
-      if parent == current { return false }
-      current = parent
-    }
+    SafePath.hasRefusedSymbolicLink(path)
   }
 
   /// A crash the system reported later (MetricKit), outside any session: written as a crash record under a fresh id, so the next keyboard start queues it as a crash event without counting a session_crash.
@@ -118,12 +107,20 @@ enum UsageReporting {
     while let frame = pending.first, lines.count < limit {
       pending.removeFirst()
       let binary = (frame["binaryName"] as? String).map { ($0 as NSString).lastPathComponent } ?? "???"
-      let offset = (frame["offsetIntoBinaryTextSegment"] as? NSNumber)?.uint64Value ?? 0
+      let offset = unsignedInteger(frame["offsetIntoBinaryTextSegment"])
       lines.append("\(lines.count) \(binary) + \(offset)")
       // A frame's caller is its first sub-frame.
       pending.insert(contentsOf: (frame["subFrames"] as? [[String: Any]]) ?? [], at: 0)
     }
     return lines.joined(separator: "\n")
+  }
+
+  private static func unsignedInteger(_ value: Any?) -> UInt64 {
+    guard let number = value as? NSNumber,
+          CFGetTypeID(number) != CFBooleanGetTypeID(),
+          let integer = UInt64(number.stringValue),
+          NSNumber(value: integer).compare(number) == .orderedSame else { return 0 }
+    return integer
   }
 
   /// The value of the {ok,value} envelope, or nil on any failure; reporting never affects the host.

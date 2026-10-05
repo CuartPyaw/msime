@@ -82,6 +82,7 @@ import {
   type PluginClient,
   type PluginPackage,
   UNBATCHED_DICTIONARY_FILE_BYTES,
+  StatusMessage,
 } from "@msime/ui";
 import "@msime/ui/styles.css";
 import { subscribeWindowState } from "./input/window-state";
@@ -212,7 +213,7 @@ const macosInputModes: NonNullable<SettingsClient["macosInputModes"]> = {
   enabled: () => invoke("enabled_input_modes"),
   openSettings: () => invoke("open_input_source_settings"),
 };
-// macOS 按需下载的资源包（日文词库、粤语与注音词库、手写模型）；这些命令只在 macOS 宿主上注册，所以只在宿主报告 macOS 时提供给页面。
+// macOS 按需下载的资源包（日文词库、「粤语、注音与笔画词库」、手写模型）；这些命令只在 macOS 宿主上注册，所以只在宿主报告 macOS 时提供给页面。
 const resourcePacks: ResourcePackClient = {
   list: () => invoke<ResourcePackStatus[]>("resource_packs"),
   install: (id) => invoke<string>("resource_pack_install", { id }),
@@ -481,6 +482,8 @@ function DesktopSettings() {
   const [linuxSetup, setLinuxSetup] = useState<LinuxSetupStatus | null>(null);
   const [macosInstall, setMacosInstall] = useState(false);
   const [replayOnboarding, setReplayOnboarding] = useState(false);
+  // 首启引导准备资源之后重新读到的版本：第一次启动时 HostOptions 由这一步写下，发现宿主能力时还读不到版本。
+  const [preparedEdition, setPreparedEdition] = useState<HostCapabilities["edition"]>();
   const [mobilePanel, setMobilePanel] = useState<
     | "voice"
     | "emoji"
@@ -887,7 +890,10 @@ function DesktopSettings() {
     platform: onboardingPlatform === "ios" ? "ios" : "android",
     prepareResources:
       onboardingPlatform === "android" || !onboardingPlatform
-        ? () => invoke("android_prepare_bootstrap").then(() => undefined)
+        ? async () => {
+            await invoke("android_prepare_bootstrap");
+            setPreparedEdition((await discoverHostCapabilities())?.edition);
+          }
         : async () => undefined,
     openSystemKeyboardSettings:
       onboardingPlatform === "ios"
@@ -941,6 +947,7 @@ function DesktopSettings() {
         onSkip={skipOnboarding}
         // The splash belongs to a first launch; replaying the flow from settings skips it.
         splash={Boolean(bootstrapRequired) && !replayOnboarding}
+        edition={preparedEdition ?? settingsClient?.host?.edition}
       />
     );
   if (!settingsClient)
@@ -1072,7 +1079,7 @@ function DesktopCloudDictionarySurface() {
       active = false;
     };
   }, []);
-  if (host === undefined) return <p role="status">正在连接云词库…</p>;
+  if (host === undefined) return <StatusMessage role="status">正在连接云词库…</StatusMessage>;
   const capabilities = cloudDictionaryCapabilities(host?.platform);
   const cloudDictionary = {
     ...panelClients.cloudDictionary,
@@ -1130,7 +1137,7 @@ function DesktopEmojiPanel({
   return emojiClient ? (
     <EmojiPanel client={emojiClient} theme={theme} initialPage={initialPage} />
   ) : (
-    <p role="status">正在连接面板…</p>
+    <StatusMessage role="status">正在连接面板…</StatusMessage>
   );
 }
 

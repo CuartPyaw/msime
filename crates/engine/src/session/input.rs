@@ -3,7 +3,6 @@
 use std::borrow::Cow;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
 
 use super::chain::CommitChain;
 use super::clock::Clock;
@@ -18,12 +17,16 @@ use crate::helpcode::{is_supported_helpcode_schema, load_helpcode_keymap, Shared
 use crate::ime::queries::CandidateQueries;
 use crate::ime::ImeSession;
 use crate::local::date_time::LocalDateTime;
+use crate::local::url;
 use crate::local::GENERATED_MODE_INPUT_LIMIT;
 use crate::paths::RuntimePaths;
 use crate::punctuation::PunctuationPolicy;
 use crate::quanpin::QuanpinEngine;
 use crate::shuangpin::profile::profile;
 use crate::shuangpin::ShuangpinProfile;
+use crate::stroke;
+use crate::tibetan::{SHAD, TSHEG};
+use crate::time::Instant;
 use crate::types::{
     CandidateSource, Command, CommandTableEntry, EnglishInputOptions, FrequencyAdjustmentOptions,
     KeyResult, LocalInputMode, LocalModeOptions, MentionEntry, MixedExpressiveOptions,
@@ -35,7 +38,7 @@ use crate::user_dictionary::typo_profile::PersonalTypoProfile;
 use crate::zhuyin;
 use crate::zhuyin::scheme::ZhuyinKey;
 
-/// The weight an English word typed out and committed raw enters `english.db` with (user_dictionary_journal.h:137).
+/// The weight an English word typed out and committed raw enters `msime-english.db` with (user_dictionary_journal.h:137).
 const ENTERED_ENGLISH_WORD_WEIGHT: i64 = 10;
 
 /// A phrase being composed from consecutive partial selections.
@@ -103,10 +106,12 @@ impl InputSession {
         let journal = paths.user(assets::USER_JOURNAL);
         let mut engine = ImeSession::new(
             options.scheme,
+            options.enabled_schemes,
             options.shuangpin_profile,
             &paths,
             options.cantonese_dictionary.clone(),
             options.zhuyin_dictionary.clone(),
+            options.stroke_dictionary.clone(),
             options.japanese_dictionary.clone(),
         )?;
         engine.set_autocorrect_types(0);
@@ -235,8 +240,14 @@ impl InputSession {
         if self.is_vietnamese() {
             return self.handle_vietnamese_character(value);
         }
+        if self.is_tibetan() {
+            return self.handle_tibetan_character(value);
+        }
         if self.is_zhuyin() {
             return self.handle_zhuyin_character(value);
+        }
+        if self.is_stroke() {
+            return self.handle_stroke_character(value);
         }
         if !self.has_composition() && self.scheme().opens_local_modes() {
             let entry = if shift_only {
@@ -248,6 +259,11 @@ impl InputSession {
             if let Some(mode) = entry {
                 return KeyResult::handled().with_diagnostic(self.enter_local_mode(mode, value));
             }
+        }
+        // 组字原文是 `www`、`http` 等时，`.` `:`（五笔还有 `http` 后的 `s`）把组字转成网址，必须在下面的接受过滤之前判断。
+        if let Some(text) = self.url_entry(value) {
+            self.enter_url_mode(text);
+            return KeyResult::handled();
         }
 
         let scheme = self.scheme();
@@ -359,6 +375,13 @@ impl InputSession {
                     && (value.is_ascii_lowercase()
                         || (value == b'\'' && self.command_takes_word_separator()))
             }
+            LocalInputMode::Url => {
+                // 网址不收的符号（`"` `<` `|` 等）和空格结束网址：交还 runtime，由它先上屏网址再处理这个键。
+                if !url::accepts(value) {
+                    return KeyResult::unhandled();
+                }
+                self.local_preedit.len() < url::INPUT_LIMIT
+            }
             LocalInputMode::None => return KeyResult::unhandled(),
         };
         if !accepted {
@@ -441,6 +464,30 @@ impl InputSession {
         KeyResult::handled()
     }
 
+    /// 笔画键：`hspnz` 追加一笔，组合中 `x` 追加通配。空组合时其他键（含 `x`）交还宿主；组合中其他字母被吞掉，组合不变，非字母键（数字、空格、标点）照常不处理，由选词和标点路径接手。
+    fn handle_stroke_character(&mut self, value: u8) -> KeyResult {
+        if !self.has_composition() {
+            if !stroke::is_stroke(value) {
+                // The host inserts the key itself, so the next word no longer follows the last one.
+                self.reset_commit_context();
+                return KeyResult::unhandled();
+            }
+            // A long pause before a new composition usually means the user moved to another field or application.
+            if self.chain.previous.is_some() && self.chain.paused(self.steady_now()) {
+                self.chain.reset();
+            }
+        } else if !value.is_ascii_alphabetic() {
+            return KeyResult::unhandled();
+        }
+        let previous = self.engine.request().raw_input.len();
+        self.engine.handle_key(SchemeKey::Letter(value));
+        self.update_mixed_candidates();
+        if self.engine.request().raw_input.len() != previous {
+            self.online_requests.invalidate();
+        }
+        KeyResult::handled()
+    }
+
     /// The Vietnamese word goes to the host as displayed, and the key that ended it does not: the result is unhandled, so Space, Enter, a caret key or Tab still does its own work after the commit. Nothing is learned.
     fn commit_vietnamese_composition(&mut self) -> KeyResult {
         let text = self.preedit();
@@ -448,6 +495,99 @@ impl InputSession {
         self.chain.reset();
         KeyResult {
             handled: false,
+            commit: Some(text),
+            diagnostic: None,
+        }
+    }
+
+    /// 藏文按键：威利能拼写的字母和当前状态的拼写符号（威利读不了的字母见 `commit_unspelled_tibetan_letter`）（`'` 随时，`+` `.` `-` 在组字时）进入威利原文，都算已处理。空格带音节点、`/` 带垂符上屏音节串（以 ང 结尾时垂符前补音节点），并且已处理；没有组字时 `/` 单独输出垂符，其他按键交给宿主。有组字时标点保持未处理且不碰组字，因为标点路由会先上屏音节串再输出标点；其他按键上屏音节串并保持未处理，由宿主在上屏后插入该键。
+    fn handle_tibetan_character(&mut self, value: u8) -> KeyResult {
+        if value == b'/' {
+            return self.end_tibetan_syllables(SHAD, value);
+        }
+        if value == b' ' && self.has_composition() {
+            return self.end_tibetan_syllables(TSHEG, value);
+        }
+        if value.is_ascii_alphabetic() && !self.engine.tibetan_claims_letter(value) {
+            return self.commit_unspelled_tibetan_letter(value);
+        }
+        let spells = self.engine.tibetan_claims_letter(value)
+            || self
+                .engine
+                .tibetan_spelling_symbols()
+                .as_bytes()
+                .contains(&value);
+        if !spells {
+            if !self.has_composition() {
+                self.reset_commit_context();
+                return KeyResult::unhandled();
+            }
+            if value.is_ascii_punctuation() {
+                return KeyResult::unhandled();
+            }
+            return self.commit_tibetan_composition(false);
+        }
+        // 新音节串前的长时间停顿通常意味着用户换到了别的输入框或应用。
+        if !self.has_composition()
+            && self.chain.previous.is_some()
+            && self.chain.paused(self.steady_now())
+        {
+            self.chain.reset();
+        }
+        let key = if value.is_ascii_alphabetic() {
+            SchemeKey::Letter(value)
+        } else {
+            SchemeKey::Symbol(value)
+        };
+        self.engine.handle_key(key);
+        self.update_mixed_candidates();
+        self.online_requests.invalidate();
+        KeyResult::handled()
+    }
+
+    /// 威利读不了的字母（大写锁定或误按 Shift 打出的 `B` `O`，以及 `q` `x`）不进原文：先上屏转换出的藏文（如果有组字），再把这个字母原样跟在后面，按键已处理。由会话自己写出字母，宿主不需要区分哪些字母被接收，拉丁字母也不会混进转换结果。不学习任何东西。
+    fn commit_unspelled_tibetan_letter(&mut self, letter: u8) -> KeyResult {
+        let mut text = if self.has_composition() {
+            self.preedit()
+        } else {
+            String::new()
+        };
+        text.push(char::from(letter));
+        self.reset_composition();
+        self.chain.reset();
+        KeyResult::committed(text)
+    }
+
+    /// 空格（`mark` 为音节点）或 `/`（`mark` 为垂符）结束藏文音节串：转换出的藏文连同 `mark` 一起上屏，按键已处理；没有组字时只上屏 `mark`。Esc 锁定原文后组字只是拉丁字母：空格只上屏原文并交回宿主插入空格，`/` 上屏原文加 `/`。不学习任何东西。
+    fn end_tibetan_syllables(&mut self, mark: char, key: u8) -> KeyResult {
+        if self.engine.tibetan_raw_locked() {
+            if key == b' ' {
+                return self.commit_tibetan_composition(false);
+            }
+            let mut text = self.preedit();
+            text.push(char::from(key));
+            self.reset_composition();
+            self.chain.reset();
+            return KeyResult::committed(text);
+        }
+        let mut text = self.preedit();
+        // 藏文正字法在以 ང 结尾的音节和垂符之间保留音节点（ང་།）。
+        if mark == SHAD && text.ends_with('\u{0F44}') {
+            text.push(TSHEG);
+        }
+        text.push(mark);
+        self.reset_composition();
+        self.chain.reset();
+        KeyResult::committed(text)
+    }
+
+    /// 藏文音节串按显示上屏，不附加音节点或垂符。`handled` 为 false 时结束它的按键（光标键、Tab、数字）在上屏后仍由宿主处理；回车为 true，只确认组字。不学习任何东西。
+    fn commit_tibetan_composition(&mut self, handled: bool) -> KeyResult {
+        let text = self.preedit();
+        self.reset_composition();
+        self.chain.reset();
+        KeyResult {
+            handled,
             commit: Some(text),
             diagnostic: None,
         }
@@ -593,6 +733,24 @@ impl InputSession {
                 _ => {}
             }
         }
+        // 藏文音节串内部没有光标，也没有列表：CommitCandidate（空格）带音节点上屏，CommitRaw（回车）只上屏藏文并吞掉按键，其余提交和光标命令按显示上屏并把按键交回宿主。第一次 Cancel 把显示切回威利原文，第二次走共用路径丢弃组字。Backspace 经共用路径删一个原文按键。
+        if self.tibetan_rules_apply() {
+            match command {
+                Command::CommitCandidate => return self.end_tibetan_syllables(TSHEG, b' '),
+                Command::CommitRaw => return self.commit_tibetan_composition(true),
+                Command::CommitReading
+                | Command::MoveLeft
+                | Command::MoveRight
+                | Command::MoveHome
+                | Command::MoveEnd
+                | Command::DeleteForward => return self.commit_tibetan_composition(false),
+                Command::Cancel if self.engine.restore_tibetan_raw() => {
+                    self.update_mixed_candidates();
+                    return KeyResult::handled();
+                }
+                _ => {}
+            }
+        }
         match command {
             Command::MoveLeft
             | Command::MoveRight
@@ -717,6 +875,10 @@ impl InputSession {
         {
             return self.handle_character(value, false);
         }
+        // 网址触发键（`www` 后的 `.` 等）直接走到这里的调用方（golden、单测）也进入网址模式；真实宿主经 runtime 按 `spelling_symbols` 先送到 `handle_character`。
+        if self.url_entry(value).is_some() {
+            return self.handle_character(value, false);
+        }
         // A Zhuyin phonetic key (`,` `.` `/` `;` `-`) spells, and a Shift punctuation key (`<` `?` `[` ...) commits the conversion with its full-width mark through the editor, whatever the Chinese punctuation switches say.
         if self.zhuyin_rules_apply()
             && (self
@@ -727,6 +889,16 @@ impl InputSession {
                 || zhuyin::layout::SHIFT_PUNCTUATION
                     .iter()
                     .any(|(key, _)| *key == value))
+        {
+            return self.handle_character(value, false);
+        }
+        // 藏文的拼写符号和 `/` 是输入，不是结束组字的标点：`/` 由 `handle_character` 变成垂符。
+        if self.tibetan_rules_apply()
+            && self
+                .engine
+                .tibetan_spelling_symbols()
+                .as_bytes()
+                .contains(&value)
         {
             return self.handle_character(value, false);
         }
@@ -833,6 +1005,9 @@ impl InputSession {
         if self.vietnamese_rules_apply() {
             return self.engine.vietnamese_spelling_symbols().to_owned();
         }
+        if self.tibetan_rules_apply() {
+            return self.engine.tibetan_spelling_symbols().to_owned();
+        }
         if self.zhuyin_rules_apply() {
             return self.engine.zhuyin_spelling_symbols().to_owned();
         }
@@ -843,6 +1018,10 @@ impl InputSession {
             } else {
                 String::new()
             };
+        }
+        // 组字原文是网址触发词时发布触发键，runtime 才会把它当作字符送进来，而不是先结束组字。发布的键必须正是 `url_entry` 接受的键。
+        if let Some(keys) = self.url_entry_keys() {
+            return keys.to_owned();
         }
         if self.has_composition() || !self.scheme().opens_local_modes() {
             return String::new();
@@ -1118,6 +1297,15 @@ impl InputSession {
         self.is_vietnamese() && self.local_mode == LocalInputMode::None && !self.dedicated_english
     }
 
+    pub(super) fn is_tibetan(&self) -> bool {
+        self.engine.current_scheme_type() == SchemeType::Tibetan
+    }
+
+    /// 藏文方案自己的规则生效：专用英文和本地模式在其中仍按各自的规则。
+    pub(super) fn tibetan_rules_apply(&self) -> bool {
+        self.is_tibetan() && self.local_mode == LocalInputMode::None && !self.dedicated_english
+    }
+
     pub(super) fn is_cantonese(&self) -> bool {
         self.engine.current_scheme_type() == SchemeType::Cantonese
     }
@@ -1125,6 +1313,15 @@ impl InputSession {
     /// The Cantonese scheme's own rules are in force: dedicated English keeps its own inside it.
     pub(super) fn cantonese_rules_apply(&self) -> bool {
         self.is_cantonese() && self.local_mode == LocalInputMode::None && !self.dedicated_english
+    }
+
+    pub(super) fn is_stroke(&self) -> bool {
+        self.engine.current_scheme_type() == SchemeType::Stroke
+    }
+
+    /// 笔画方案自己的规则生效：专用英文模式和本地模式内按它们自己的规则。
+    pub(super) fn stroke_rules_apply(&self) -> bool {
+        self.is_stroke() && self.local_mode == LocalInputMode::None && !self.dedicated_english
     }
 
     pub(super) fn is_zhuyin(&self) -> bool {
@@ -1155,7 +1352,9 @@ impl InputSession {
             | SchemeType::Korean
             | SchemeType::Cantonese
             | SchemeType::Zhuyin
-            | SchemeType::Vietnamese => false,
+            | SchemeType::Vietnamese
+            | SchemeType::Tibetan
+            | SchemeType::Stroke => false,
         }
     }
 
@@ -1250,9 +1449,14 @@ impl InputSession {
             b'M' => (LocalInputMode::Kaomoji, options.kaomoji),
             b'J' => (LocalInputMode::SuperJianpin, options.super_jianpin),
             b'Y' => (LocalInputMode::TemporaryEnglish, options.temporary_english),
+            // 临时日文切到日文方案，日文不在会话允许的方案里时这个模式进不去，`R` 照常当字母处理。
             b'R' => (
                 LocalInputMode::TemporaryJapanese,
-                options.temporary_japanese,
+                options.temporary_japanese
+                    && self
+                        .engine
+                        .enabled_schemes()
+                        .contains(SchemeType::JapaneseRomaji),
             ),
             b'V' => (LocalInputMode::Expression, options.expression),
             _ => return None,
@@ -1272,6 +1476,43 @@ impl InputSession {
             _ => return None,
         };
         enabled.then_some(mode)
+    }
+
+    /// 当前组字能否进入网址模式：方案识别网址、不在本地模式或专用英文、有组字、光标在末尾。
+    fn url_entry_ready(&self) -> bool {
+        !self.dedicated_english
+            && self.local_mode == LocalInputMode::None
+            && self.scheme().detects_urls()
+            && self.has_composition()
+            && self.caret_position() >= self.editing_text().len()
+    }
+
+    /// 当前组字的网址触发键；组字原文不是触发词或条件不满足时为 `None`。
+    fn url_entry_keys(&self) -> Option<&'static str> {
+        if !self.url_entry_ready() {
+            return None;
+        }
+        Some(url::entry_keys(self.raw_with_cases())).filter(|keys| !keys.is_empty())
+    }
+
+    /// 按下 `value` 会进入网址模式时，进入后的预编辑：组字原文加上这个键。
+    fn url_entry(&self, value: u8) -> Option<String> {
+        if !self.url_entry_ready() {
+            return None;
+        }
+        let raw = self.raw_with_cases();
+        let opens = url::opens(raw, value)
+            || (self.scheme() == SchemeType::Wubi && url::wubi_continues(raw, value));
+        opens.then(|| format!("{raw}{}", char::from(value)))
+    }
+
+    /// 丢弃组字（连同引擎里的原文和候选），以 `text` 为预编辑进入网址模式。
+    fn enter_url_mode(&mut self, text: String) {
+        self.reset_composition();
+        self.local_mode = LocalInputMode::Url;
+        self.local_preedit = text;
+        self.chain.reset();
+        self.add_local_fallback_candidate();
     }
 
     fn enter_local_mode(&mut self, mode: LocalInputMode, letter: u8) -> Option<String> {
@@ -1310,6 +1551,10 @@ impl InputSession {
             self.update_dedicated_english_candidates();
             return KeyResult::handled();
         }
+        // 网址模式的退格与光标处删除共用一条路径（光标在行末）。
+        if self.local_mode == LocalInputMode::Url {
+            return self.edit_at_caret(Command::Backspace);
+        }
         if self.local_mode != LocalInputMode::None {
             // Backspacing the bare prefix letter leaves the mode.
             if self.local_preedit.len() <= 1 {
@@ -1331,8 +1576,34 @@ impl InputSession {
         KeyResult::handled()
     }
 
+    /// 网址模式删掉 `removed` 后剩下 `remaining` 时是否退回组字：恰为进入网址模式的逆操作，即组字原文 `remaining` 按下 `removed` 正好会进入网址模式（`www.` 删掉 `.`、五笔 `https` 删掉 `s`），误触发后还能选回原来的字（五笔 `www` 的“众”）。`www.example` 删掉中间的 `.` 不满足，留在网址模式。退格和光标处的删除走同一条规则。
+    pub(super) fn url_reverts(&self, remaining: &str, removed: char) -> bool {
+        let Ok(key) = u8::try_from(removed) else {
+            return false;
+        };
+        url::opens(remaining, key)
+            || (self.scheme() == SchemeType::Wubi && url::wubi_continues(remaining, key))
+    }
+
+    /// 把网址模式剩下的字母重新作为组字原文。方案装不下全部字母时留在网址模式。
+    pub(super) fn restore_composition_from_url(&mut self, letters: String) {
+        self.reset_composition();
+        self.pending_sequence = Some(letters.clone());
+        self.pending_sequence_with_cases = Some(letters.clone());
+        self.apply_pending_sequence();
+        // 方案装不下全部字母（五笔不开混拼时码长 4，`https:` 删掉 `:` 剩 5 个字母）时留在网址模式，不能悄悄丢掉用户键入的字母。
+        if self.raw_with_cases() != letters {
+            self.enter_url_mode(letters);
+        }
+    }
+
     fn commit_raw(&mut self) -> KeyResult {
-        let mut raw = self.preedit();
+        // 笔画的预编辑是字形，Enter 上屏的是键入的字母串（与粤拼一致）。
+        let mut raw = if self.stroke_rules_apply() {
+            self.engine.request().raw_input.clone()
+        } else {
+            self.preedit()
+        };
         // The temporary modes' prefix letter is a mode marker, not text; every other local mode commits it (core-session.md §15.5).
         if matches!(
             self.local_mode,
@@ -1366,7 +1637,7 @@ impl InputSession {
         item.scheme == SchemeType::Wubi
     }
 
-    /// Whether a row came from a dictionary a pin, fixed position or removal can write to. Japanese rows come from a read-only model, Korean Hanja rows from the embedded table, Cantonese rows from the read-only `cantonese.db` and Zhuyin rows from the read-only `zhuyin.db`; keyed by their letters, any of them would land in the pinyin user dictionary.
+    /// Whether a row came from a dictionary a pin, fixed position or removal can write to. Japanese rows come from a read-only model, Korean Hanja rows from the embedded table, Cantonese rows from the read-only `msime-cantonese.db`, Zhuyin rows from the read-only `msime-zhuyin.db` and Stroke rows from the read-only `msime-stroke.db`; keyed by their letters, any of them would land in the pinyin user dictionary.
     pub(super) fn is_editable_source(&self, item: &WordItem) -> bool {
         item.source == CandidateSource::EnglishDictionary
             || (item.source.is_dictionary()
@@ -1376,6 +1647,7 @@ impl InputSession {
                         | SchemeType::Korean
                         | SchemeType::Cantonese
                         | SchemeType::Zhuyin
+                        | SchemeType::Stroke
                 ))
     }
 }
@@ -1402,5 +1674,7 @@ fn local_mode_enabled(options: LocalModeOptions, mode: LocalInputMode) -> bool {
         LocalInputMode::Expression => options.expression,
         LocalInputMode::Command => options.command,
         LocalInputMode::Mention => options.mention,
+        // 网址模式默认开启，没有开关。
+        LocalInputMode::Url => true,
     }
 }

@@ -43,6 +43,9 @@ struct Row {
 /// The user's library as the server keeps it. Downloads return every image with one byte appended, standing in for the server's re-encoding, so a downloaded package never has the uploaded bytes.
 struct Library {
     user: RefCell<Option<String>>,
+    generation: Cell<u64>,
+    relogin_after_list: Cell<bool>,
+    relogin_on_publish: Cell<bool>,
     rows: RefCell<BTreeMap<Uuid, Row>>,
     clock: Cell<u32>,
     calls: RefCell<Vec<String>>,
@@ -55,6 +58,9 @@ impl Library {
     fn new() -> Self {
         Self {
             user: RefCell::new(Some("user-1".into())),
+            generation: Cell::new(1),
+            relogin_after_list: Cell::new(false),
+            relogin_on_publish: Cell::new(false),
             rows: RefCell::new(BTreeMap::new()),
             clock: Cell::new(0),
             calls: RefCell::new(Vec::new()),
@@ -144,8 +150,14 @@ impl CandidateSkinSyncRemote for Library {
     fn user_id(&self) -> Result<Option<String>, AccountError> {
         Ok(self.user.borrow().clone())
     }
+    fn session_generation(&self) -> Result<Option<u64>, AccountError> {
+        Ok(self.user.borrow().as_ref().map(|_| self.generation.get()))
+    }
     fn sync_list(&self) -> Result<Vec<CandidateSkinSyncEntry>, AccountError> {
         self.log("list");
+        if self.relogin_after_list.replace(false) {
+            self.generation.set(self.generation.get() + 1);
+        }
         let mut rows: Vec<_> = self
             .rows
             .borrow()
@@ -199,6 +211,9 @@ impl CandidateSkinSyncRemote for Library {
                 category: request.category,
             },
         );
+        if self.relogin_on_publish.replace(false) {
+            self.generation.set(self.generation.get() + 1);
+        }
         self.item(request.id)
     }
     fn replace(
@@ -341,6 +356,19 @@ fn a_local_package_is_uploaded_private_under_its_manifest_name_once() {
 
     assert_eq!(fixture.sync(), CandidateSkinSyncReport::default());
     assert_eq!(fixture.library.calls(), ["list"]);
+}
+
+#[test]
+fn sync_reports_state_storage_failure_after_remote_success() {
+    let fixture = Fixture::new();
+    write_skin(&fixture.root, "sakura", "樱花", 1);
+    fs::create_dir(&fixture.state).unwrap();
+
+    assert_eq!(
+        sync_candidate_skins(&fixture.root, &fixture.state, &fixture.library),
+        Err(AccountError::Storage),
+    );
+    assert_eq!(fixture.library.rows.borrow().len(), 1);
 }
 
 #[test]
@@ -588,7 +616,7 @@ fn a_failed_download_skips_only_that_package() {
 fn someone_elses_package_installed_from_the_gallery_is_left_alone() {
     let fixture = Fixture::new();
     write_skin(&fixture.root, "sakura", "樱花", 1);
-    record_install(&fixture.state, "sakura", Uuid::new_v4());
+    record_install(&fixture.state, "sakura", Uuid::new_v4()).unwrap();
     assert_eq!(fixture.sync(), CandidateSkinSyncReport::default());
     assert_eq!(fixture.library.calls(), ["list"]);
     // Once it is gone locally the record goes too, and a package of that name is the user's own again.
@@ -599,12 +627,23 @@ fn someone_elses_package_installed_from_the_gallery_is_left_alone() {
 }
 
 #[test]
+fn recording_a_gallery_install_reports_state_storage_failure() {
+    let fixture = Fixture::new();
+    fs::create_dir(&fixture.state).unwrap();
+
+    assert_eq!(
+        record_install(&fixture.state, "sakura", Uuid::new_v4()),
+        Err(STORAGE),
+    );
+}
+
+#[test]
 fn the_users_own_package_installed_from_the_gallery_is_compared_afresh() {
     let fixture = Fixture::new();
     write_skin(&fixture.root, "sakura", "樱花", 1);
     fixture.sync();
     let id = *fixture.library.rows.borrow().keys().next().unwrap();
-    record_install(&fixture.state, "sakura", id);
+    record_install(&fixture.state, "sakura", id).unwrap();
     fixture.library.calls();
     assert_eq!(fixture.sync(), CandidateSkinSyncReport::default());
     assert_eq!(fixture.library.calls(), ["list", "detail"]);
@@ -631,6 +670,33 @@ fn a_signed_out_run_is_refused_before_any_request() {
         Err(AccountError::Unauthorized)
     );
     assert!(fixture.library.calls().is_empty());
+}
+
+#[test]
+fn a_same_user_relogin_after_listing_cancels_the_sync() {
+    let fixture = Fixture::new();
+    write_skin(&fixture.root, "sakura", "樱花", 1);
+    fixture.library.relogin_after_list.set(true);
+
+    assert_eq!(
+        sync_candidate_skins(&fixture.root, &fixture.state, &fixture.library),
+        Err(AccountError::Cancelled)
+    );
+    assert!(fixture.library.rows.borrow().is_empty());
+    assert!(!fixture.state.exists());
+}
+
+#[test]
+fn a_same_user_relogin_after_upload_does_not_save_stale_sync_state() {
+    let fixture = Fixture::new();
+    write_skin(&fixture.root, "sakura", "樱花", 1);
+    fixture.library.relogin_on_publish.set(true);
+
+    assert_eq!(
+        sync_candidate_skins(&fixture.root, &fixture.state, &fixture.library),
+        Err(AccountError::Cancelled)
+    );
+    assert!(!fixture.state.exists());
 }
 
 #[test]
@@ -704,6 +770,52 @@ fn publishing_a_synced_package_updates_its_row_in_place() {
 }
 
 #[test]
+fn publishing_cancels_when_same_user_relogs_in_before_state_save() {
+    let fixture = Fixture::new();
+    write_skin(&fixture.root, "sakura", "樱花", 1);
+    fixture.library.relogin_on_publish.set(true);
+
+    assert_eq!(
+        publish(
+            &fixture.root,
+            &fixture.state,
+            &fixture.library,
+            "sakura",
+            Uuid::new_v4(),
+            "樱花".into(),
+            String::new(),
+            CandidateSkinVisibility::Private,
+            None,
+        ),
+        Err(CandidateSkinPublishError::Account(AccountError::Cancelled))
+    );
+    assert!(!fixture.state.exists());
+}
+
+#[test]
+fn publishing_reports_state_storage_failure_after_remote_success() {
+    let fixture = Fixture::new();
+    write_skin(&fixture.root, "sakura", "樱花", 1);
+    fs::create_dir(&fixture.state).unwrap();
+
+    assert_eq!(
+        publish(
+            &fixture.root,
+            &fixture.state,
+            &fixture.library,
+            "sakura",
+            Uuid::new_v4(),
+            "樱花".into(),
+            String::new(),
+            CandidateSkinVisibility::Private,
+            None,
+        ),
+        Err(CandidateSkinPublishError::Account(AccountError::Storage))
+    );
+    assert_eq!(fixture.library.rows.borrow().len(), 1);
+}
+
+#[test]
 fn publishing_a_new_package_creates_a_row_that_sync_then_knows() {
     let fixture = Fixture::new();
     write_skin(&fixture.root, "sakura", "樱花", 1);
@@ -761,18 +873,52 @@ fn an_unpublished_row_is_uploaded_again_rather_than_deleted_locally() {
 }
 
 #[test]
-fn a_failed_unpublish_keeps_the_row_remembered() {
+fn an_unrelated_missing_unpublish_keeps_the_row_remembered() {
     let fixture = Fixture::new();
     write_skin(&fixture.root, "sakura", "樱花", 1);
     fixture.sync();
     assert_eq!(
         unpublish(&fixture.state, &fixture.library, Uuid::new_v4()),
-        Err(AccountError::NotFound)
+        Ok(())
     );
     assert_eq!(
         synced_packages(&fixture.state).keys().collect::<Vec<_>>(),
         ["sakura"]
     );
+}
+
+#[test]
+fn a_successful_unpublish_reports_state_storage_failure() {
+    let fixture = Fixture::new();
+    write_skin(&fixture.root, "sakura", "樱花", 1);
+    fixture.sync();
+    let id = *fixture.library.rows.borrow().keys().next().unwrap();
+    fs::remove_file(&fixture.state).unwrap();
+    fs::create_dir(&fixture.state).unwrap();
+
+    assert_eq!(
+        unpublish(&fixture.state, &fixture.library, id),
+        Err(AccountError::Storage),
+    );
+    assert!(fixture.library.rows.borrow().is_empty());
+}
+
+#[test]
+fn an_unpublish_retry_cleans_state_after_remote_success_was_persisted_late() {
+    let fixture = Fixture::new();
+    write_skin(&fixture.root, "sakura", "樱花", 1);
+    fixture.sync();
+    let id = *fixture.library.rows.borrow().keys().next().unwrap();
+    fs::remove_file(&fixture.state).unwrap();
+    fs::create_dir(&fixture.state).unwrap();
+
+    assert_eq!(
+        unpublish(&fixture.state, &fixture.library, id),
+        Err(AccountError::Storage)
+    );
+    fs::remove_dir(&fixture.state).unwrap();
+    assert_eq!(unpublish(&fixture.state, &fixture.library, id), Ok(()));
+    assert!(synced_packages(&fixture.state).is_empty());
 }
 
 #[test]
@@ -841,9 +987,12 @@ fn a_symlinked_sync_state_does_not_delete_a_local_skin() {
     symlink(&external_state, &fixture.state).unwrap();
 
     // 外部同步状态不能让同步删除本地皮肤，且外部文件不能被改写。
-    let report = fixture.sync();
-    assert_eq!(report.uploaded, ids(&["sakura"]));
+    assert_eq!(
+        sync_candidate_skins(&fixture.root, &fixture.state, &fixture.library),
+        Err(AccountError::Storage)
+    );
     assert!(fixture.installed("sakura"));
+    assert_eq!(fixture.library.rows.borrow().len(), 1);
     assert_eq!(fs::read(&external_state).unwrap(), bytes);
 }
 
@@ -860,10 +1009,13 @@ fn a_symlinked_sync_state_parent_does_not_write_outside() {
     let state_path = linked_parent.join(STATE_FILE);
 
     // 状态文件父目录是外部链接时，保存不能在外部目录留下同步状态。
-    let report = sync_candidate_skins(&fixture.root, &state_path, &fixture.library).unwrap();
-    assert_eq!(report.uploaded, ids(&["sakura"]));
+    assert_eq!(
+        sync_candidate_skins(&fixture.root, &state_path, &fixture.library),
+        Err(AccountError::Storage)
+    );
     assert!(!outside.path().join(STATE_FILE).exists());
     assert!(fixture.installed("sakura"));
+    assert_eq!(fixture.library.rows.borrow().len(), 1);
 }
 
 #[cfg(unix)]

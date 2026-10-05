@@ -15,8 +15,10 @@ import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 import app.msime.android.AiPolishConfiguration;
+import app.msime.android.AppEdition;
 import app.msime.android.InputFeatureToggle;
 import app.msime.android.KeyboardGeometry;
+import app.msime.android.PreferencesRevisionPolicy;
 import app.msime.android.KeyboardScheme;
 import app.msime.android.KeyboardSkin;
 import app.msime.android.R;
@@ -252,20 +254,21 @@ public final class KeyboardSheets {
         Context context = fragment.requireContext();
         JSONObject preferences = preferences(snapshot);
         if (preferences == null) return;
+        AppEdition edition = AppEdition.current();
         KeyboardScheme current = KeyboardScheme.fromPreferences(
-            preferences.optString("scheme", "quanpin"),
+            preferences.optString("scheme", edition.defaultScheme()),
             preferences.optString("shuangpin_profile", "xiaohe"),
-            preferences.optString("touch_keyboard_layout", "twenty_six_key"));
+            preferences.optString("touch_keyboard_layout", "twenty_six_key"), edition);
         SettingsSheet sheet = new SettingsSheet(context, "输入方案",
             "换方案会同时换掉键盘布局。已经学到的词不受影响。");
         TextView status = sheet.addStatus();
-        // Cantonese and Zhuyin are offered only once their dictionary is installed: without it host-api falls back from them, so picking one would change nothing.
+        // Cantonese, Zhuyin and Stroke are offered only once their dictionary is installed: without it host-api falls back from them, so picking one would change nothing.
         String languageDictionaries = HostStore.languageDictionaries(context);
         String currentWubi = KeyboardScheme.normalizedWubiProfile(
             preferences.optString("wubi_profile", KeyboardScheme.WUBI_86));
         for (KeyboardScheme scheme : KeyboardScheme.values()) {
-            if (scheme == KeyboardScheme.THOUGHTFUL_REPLY) continue;
-            if (!scheme.installed(languageDictionaries)) continue;
+            // 本版本没有的方案不列：五笔版只有五笔和手写，拼音版没有五笔和各语言方案。
+            if (!scheme.offeredBy(edition) || !scheme.installed(languageDictionaries)) continue;
             if (scheme == KeyboardScheme.WUBI) {
                 // 五笔只有一个方案，86 与 98 是它的两个版本：各列一行，选中哪行就同时写 `scheme` 和 `wubi_profile`。
                 for (String profile : List.of(KeyboardScheme.WUBI_86, KeyboardScheme.WUBI_98)) {
@@ -295,20 +298,22 @@ public final class KeyboardSheets {
 
         slider(context, sheet, "按键间距",
             KeyboardGeometry.MIN_KEY_SPACING_TENTHS, KeyboardGeometry.MAX_KEY_SPACING_TENTHS,
-            KeyboardGeometry.keySpacing(preferences.optInt("touch_key_spacing_tenths", -1)),
+            KeyboardGeometry.keySpacing(KeyboardGeometry.strictInt(
+                preferences, "touch_key_spacing_tenths", -1)),
             KeyboardGeometry::display,
             value -> save(fragment, snapshot, "touch_key_spacing_tenths", value, status, null,
                 changed));
         slider(context, sheet, "行间距",
             KeyboardGeometry.MIN_ROW_SPACING_TENTHS, KeyboardGeometry.MAX_ROW_SPACING_TENTHS,
-            KeyboardGeometry.rowSpacing(preferences.optInt("touch_row_spacing_tenths", -1)),
+            KeyboardGeometry.rowSpacing(KeyboardGeometry.strictInt(
+                preferences, "touch_row_spacing_tenths", -1)),
             KeyboardGeometry::display,
             value -> save(fragment, snapshot, "touch_row_spacing_tenths", value, status, null,
                 changed));
         slider(context, sheet, "键盘高度",
             KeyboardGeometry.MIN_HEIGHT_ADJUSTMENT_DP, KeyboardGeometry.MAX_HEIGHT_ADJUSTMENT_DP,
             KeyboardGeometry.heightAdjustment(
-                preferences.optInt("touch_keyboard_height_adjustment", Integer.MIN_VALUE)),
+                KeyboardGeometry.strictInt(preferences, "touch_keyboard_height_adjustment", Integer.MIN_VALUE)),
             KeyboardGeometry::displayHeight,
             value -> save(fragment, snapshot, "touch_keyboard_height_adjustment", value, status,
                 null, changed));
@@ -478,9 +483,10 @@ public final class KeyboardSheets {
             @Nullable String wubiProfile) {
         JSONObject preferences = preferences(snapshot);
         if (preferences == null) return null;
+        AppEdition edition = AppEdition.current();
         KeyboardScheme.PreferenceMapping mapping = scheme.mapping(
-            preferences.optString("last_chinese_scheme", "quanpin"),
-            preferences.optString("shuangpin_profile", "xiaohe"));
+            preferences.optString("last_chinese_scheme", edition.defaultScheme()),
+            preferences.optString("shuangpin_profile", "xiaohe"), edition);
         try {
             JSONObject pending = new JSONObject(snapshot.toString());
             JSONObject values = pending.getJSONObject("preferences");
@@ -545,7 +551,9 @@ public final class KeyboardSheets {
             // The snapshot this sheet opened with is now a revision behind; refresh it in place so
             // a second edit in the same sheet is not rejected by the compare-and-swap.
             try {
-                snapshot.put("revision", saved.optLong("revision"));
+                long revision = PreferencesRevisionPolicy.read(saved.opt("revision"), -1);
+                if (revision < 0) throw new JSONException("Invalid preferences revision");
+                snapshot.put("revision", revision);
                 snapshot.put("preferences", saved.optJSONObject("preferences"));
             } catch (JSONException ignored) {
                 // The next edit reloads instead; the write itself already succeeded.

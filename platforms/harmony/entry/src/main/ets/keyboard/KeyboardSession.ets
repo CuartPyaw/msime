@@ -15,12 +15,15 @@ import {
   CandidateColors, CustomThemeDocument, GlobalTheme, ResolvedTheme, ResolveThemeRequest, ThemeCatalogEntry
 } from './skin/GlobalTheme';
 import { KeyboardFormFactor } from './KeyboardFormFactor';
+import { AppEdition } from './AppEdition';
 import { KeyboardScheme, PreferenceMapping, SchemeDefinition } from './KeyboardScheme';
 import { EditorPolicy, EditorTraits } from './input/EditorPolicy';
+import { EditEchoLedger } from './input/EditEchoLedger';
 import { JapaneseSpacePolicy } from './input/JapaneseSpacePolicy';
 import { KoreanCompositionPolicy } from './input/KoreanCompositionPolicy';
 import { SchemeCompositionPolicy } from './input/SchemeCompositionPolicy';
 import { SchemeTraits } from './SchemeTraits';
+import { StrokeLayout } from './input/StrokeLayout';
 import {
   CapitalizationMode, EnglishCapitalizationPolicy
 } from './input/EnglishCapitalizationPolicy';
@@ -82,6 +85,7 @@ import pasteboard from '@ohos.pasteboard';
 import abilityAccessCtrl from '@ohos.abilityAccessCtrl';
 import bundleManager from '@ohos.bundle.bundleManager';
 import http from '@ohos.net.http';
+import { installNoRedirectGuard } from '../network/HarmonyHttpSecurity';
 import {
   ClipboardHistoryStore, ClipboardHistoryItem, ClipboardHistoryError, ClipboardFailure
 } from './clipboard/ClipboardHistoryStore';
@@ -123,6 +127,7 @@ import { InlinePreeditPolicy, InlinePreeditStyle } from './input/InlinePreeditPo
 import {
   CompositionBoundary, CompositionBoundaryAction, CompositionBoundaryPolicy
 } from './input/CompositionBoundaryPolicy';
+import { EngineViewNumericFields, EngineViewValuePolicy } from './input/EngineViewValuePolicy';
 
 // Shapes of the JSON the shared C ABI answers with. Only the fields this minimal surface reads are
 // declared; the responses carry considerably more.
@@ -160,7 +165,7 @@ export interface CandidateEntry {
   readonly translation: string | null;
 }
 
-interface EngineView {
+interface EngineView extends EngineViewNumericFields {
   candidates: Candidate[];
   editing_text: string;
   /**
@@ -296,7 +301,7 @@ export interface ClipboardHistoryMutation {
   readonly failure: ClipboardFailure | null;
 }
 
-// The local emoji catalog lives in others.db beside the dictionaries, so the query carries the
+// The local emoji catalog lives in msime-others.db beside the dictionaries, so the query carries the
 // resource directory rather than going through a session.
 /** `{prefix,limit}` as the shared ABI reads it; the prefix is ASCII letters and the limit 1..32. */
 interface EnglishCompletionRequest {
@@ -640,9 +645,10 @@ interface SkinToolbarStylesheetResponse {
 }
 
 // ArkTS rejects untyped object literals, so the request prepareHost takes gets a shape too.
-interface PrepareRequest {
+export interface PrepareRequest {
   resources: string;
   state_root: string;
+  edition?: string;
 }
 
 interface SnapshotQueueProcessAction {
@@ -892,7 +898,6 @@ export interface KeyboardPreferences {
   readonly rowSpacingTenths: number;
   readonly heightAdjustment: number;
   readonly voiceShortcut: boolean;
-  readonly thoughtfulReply: boolean;
 }
 
 interface PreparedOptions {
@@ -993,10 +998,8 @@ export class KeyboardSession implements HardwareKeyTarget {
   // Bumped only by attach/detach: an idle Engine restart (which bumps editorGeneration) must not
   // drop the focused editor's attribute.
   private attributeGeneration: number = 0;
-  // Editor mutations are echoed asynchronously through KeyboardDelegate.textChange. Keep the
-  // count raised until those callbacks arrive so our own commit cannot be mistaken for a host edit
-  // and finish a residual composition that the Engine deliberately left active.
-  private pendingOwnEdits: number = 0;
+  // 编辑器把每次改动异步回报为 `KeyboardDelegate.textChange`。自己的每次写入都在这里记一笔，等到回声才消掉，免得输入法自己的写入被当成宿主修改，结束引擎有意留着的组字；没等来回声的记录到时作废，见 `EditEchoLedger`。
+  private readonly ownEdits: EditEchoLedger = new EditEchoLedger();
   private inlinePreeditStyle: InlinePreeditStyle = 'raw';
   /** Whether the focused editor said it takes preview text; learned from its attribute. */
   private previewSupported: boolean = false;
@@ -1045,7 +1048,8 @@ export class KeyboardSession implements HardwareKeyTarget {
   // The grid is the Engine's business too: it decides what a 2 means, and it only reads them as
   // nine-key spellings once it has been told the grid is up.
   private nineKeyMode: boolean = false;
-  private schemeName: string = 'quanpin';
+  // 还没读到 Engine 的视图时按本版本的默认方案算（full 是全拼）。
+  private schemeName: string = AppEdition.current().defaultScheme;
   private profileName: string = 'xiaohe';
   private clipboardHistoryEnabled: boolean = false;
   // The two optional candidate annotations. Held here rather than in KeyboardPreferences because the
@@ -1099,7 +1103,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     enabledSchemes: KeyboardScheme.DEFAULT_ENABLED.map(
       (candidate: SchemeDefinition): string => candidate.preferenceId),
     selectedScheme: null,
-    scheme: 'quanpin',
+    scheme: AppEdition.current().defaultScheme,
     shuangpinProfile: 'xiaohe',
     wubiProfile: KeyboardScheme.WUBI_86,
     layout: 'twenty_six_key',
@@ -1121,8 +1125,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     keySpacingTenths: KeyboardGeometry.DEFAULT_KEY_SPACING_TENTHS,
     rowSpacingTenths: KeyboardGeometry.DEFAULT_ROW_SPACING_TENTHS,
     heightAdjustment: KeyboardGeometry.DEFAULT_HEIGHT_ADJUSTMENT_VP,
-    voiceShortcut: false,
-    thoughtfulReply: false
+    voiceShortcut: false
   };
   private voiceInput: VoiceInputConfiguration = DEFAULT_VOICE_INPUT_CONFIGURATION;
   /**
@@ -1387,8 +1390,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       rowSpacingTenths: KeyboardGeometry.rowSpacing(preferences.touch_row_spacing_tenths),
       heightAdjustment:
         KeyboardGeometry.heightAdjustment(preferences.touch_keyboard_height_adjustment),
-      voiceShortcut: preferences.touch_voice_shortcut,
-      thoughtfulReply: preferences.touch_keyboard_schemes?.selected === 'thoughtful_reply'
+      voiceShortcut: preferences.touch_voice_shortcut
     };
     // The theme's bar, then the package's `[toolbar]` colours for that mode, then its stylesheet.
     const toolbarColors: CandidateColors = GlobalTheme.candidateColors(
@@ -1457,7 +1459,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     this.systemDark = systemDark;
     this.feedbackSettings = this.feedback();
     this.preferencesRevision = this.storedRevision(stateRoot);
-    const request: PrepareRequest = { resources: resources, state_root: stateRoot };
+    const request: PrepareRequest = KeyboardSession.prepareRequest(resources, stateRoot);
     let options: string;
     try {
       const prepared: PrepareResponse =
@@ -2291,6 +2293,8 @@ export class KeyboardSession implements HardwareKeyTarget {
       japanese: !this.englishMode && this.schemeName === 'japanese',
       korean: !this.englishMode && this.schemeName === 'korean',
       vietnamese: !this.englishMode && this.schemeName === 'vietnamese',
+      tibetan: !this.englishMode && this.schemeName === 'tibetan',
+      stroke: !this.englishMode && this.schemeName === 'stroke',
       capsLock: this.capsLock,
       // Korean and Vietnamese write ASCII punctuation whatever the switch says (`uses_chinese_punctuation`), and the face reports what is written.
       chinesePunctuation: this.chinesePunctuation && !this.writesAsciiPunctuation(),
@@ -2520,11 +2524,24 @@ export class KeyboardSession implements HardwareKeyTarget {
    * with every value, ENTER_KEY_TYPE_NEW_LINE included. Measured, not assumed: replacing this with
    * the split put insertText("\n") into a WebView textarea that ignored it, and the same key with
    * the same editor (enter=8) had produced a newline the moment before.
+   *
+   * 多行编辑器里这一键插入换行，编辑器照样回报一次 `textChange`，所以和插入一样先记一笔；GO、SEARCH 这类动作不一定改动文字，没有回声的那一笔到时作废。
    */
   submit(): void {
-    if (this.inputClient !== undefined) {
-      this.inputClient.sendKeyFunction(this.enterKey);
-    }
+    const inputClient: inputMethodEngine.InputClient | undefined = this.inputClient;
+    if (inputClient === undefined) return;
+    const generation: number = this.editorGeneration;
+    this.ownEdits.reserve(Date.now());
+    inputClient.sendKeyFunction(this.enterKey).then((handled: boolean): void => {
+      if (!handled && generation === this.editorGeneration && this.inputClient === inputClient) {
+        this.ownEdits.release();
+      }
+    }).catch((error: Object): void => {
+      if (generation === this.editorGeneration && this.inputClient === inputClient) {
+        this.ownEdits.release();
+      }
+      KeyboardLog.error(`editor key function unavailable: ${describeError(error)}`);
+    });
   }
 
   /** Begin one host-independent voice generation, so late platform callbacks can be rejected. */
@@ -2543,7 +2560,11 @@ export class KeyboardSession implements HardwareKeyTarget {
   }
 
   voiceInputConfiguration(): VoiceInputConfiguration {
-    return this.voiceInput;
+    const root: string = this.clipboardRoot();
+    return {
+      ...this.voiceInput,
+      local_model_root: root.length > 0 ? `${root}/voice-models` : ''
+    };
   }
 
   /** The prepared host options the on-device recognizer reads the user's own words through, or null before the host has been prepared. */
@@ -2659,7 +2680,7 @@ export class KeyboardSession implements HardwareKeyTarget {
   attach(inputClient: inputMethodEngine.InputClient): void {
     const editorGeneration: number = ++this.editorGeneration;
     const attributeGeneration: number = ++this.attributeGeneration;
-    this.pendingOwnEdits = 0;
+    this.ownEdits.clear();
     this.previewSupported = false;
     this.previewText = '';
     this.invalidateReplyContext();
@@ -2727,7 +2748,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     this.editorGeneration++;
     this.attributeGeneration++;
     this.manualLanguageGeneration = -1;
-    this.pendingOwnEdits = 0;
+    this.ownEdits.clear();
     this.modeScope.deactivate();
     this.clearEnglishSuggestions();
     this.invalidateReplyContext();
@@ -2750,7 +2771,7 @@ export class KeyboardSession implements HardwareKeyTarget {
 
   stop(): void {
     this.editorGeneration++;
-    this.pendingOwnEdits = 0;
+    this.ownEdits.clear();
     this.invalidateReplyContext();
     this.clearSmartPunctuationRepeat();
     this.cancelOnlineProviders();
@@ -2831,8 +2852,7 @@ export class KeyboardSession implements HardwareKeyTarget {
   /** Reconcile a document mutation reported by the editor with keyboard-owned edit echoes. */
   editorTextChanged(): void {
     this.invalidateReplyContext();
-    if (!EditorPolicy.isExternalTextChange(this.pendingOwnEdits)) {
-      this.pendingOwnEdits--;
+    if (this.ownEdits.acknowledge(Date.now())) {
       if (this.onEditorChanged !== undefined) {
         this.onEditorChanged();
       }
@@ -2872,11 +2892,10 @@ export class KeyboardSession implements HardwareKeyTarget {
       return;
     }
     const generation: number = this.editorGeneration;
-    this.pendingOwnEdits++;
+    this.ownEdits.reserve(Date.now());
     inputClient.insertText(text).catch((error: Object): void => {
-      if (generation === this.editorGeneration && this.inputClient === inputClient
-          && this.pendingOwnEdits > 0) {
-        this.pendingOwnEdits--;
+      if (generation === this.editorGeneration && this.inputClient === inputClient) {
+        this.ownEdits.release();
       }
       KeyboardLog.error(`editor insertion unavailable: ${describeError(error)}`);
     });
@@ -2884,40 +2903,45 @@ export class KeyboardSession implements HardwareKeyTarget {
 
   /** Synchronous insert variant for an atomic read/replace editor operation. */
   private insertEditorTextSync(text: string): void {
-    if (this.inputClient === undefined) return;
-    this.pendingOwnEdits++;
-    try {
-      this.inputClient.insertTextSync(text);
-    } catch (error) {
-      this.pendingOwnEdits--;
-      throw new Error(describeError(error));
-    }
+    const inputClient: inputMethodEngine.InputClient | undefined = this.inputClient;
+    if (inputClient === undefined) return;
+    this.editEditorSync((): void => inputClient.insertTextSync(text));
     // An insertion replaces preview text and ends the preview.
     this.previewText = '';
+  }
+
+  /** 同步改动一次编辑器，并为它的 `textChange` 回声记一笔；调用抛错说明编辑器没有改动，那一笔随即撤回。 */
+  private editEditorSync(edit: () => void): void {
+    this.ownEdits.reserve(Date.now());
+    try {
+      edit();
+    } catch (error) {
+      this.ownEdits.release();
+      throw new Error(describeError(error));
+    }
   }
 
   /**
    * Bring the editor's preview text in line with the composition the Engine last reported.
    *
-   * Every change is a document edit the editor echoes back like an insertion, so it is reserved the same way; otherwise the echo would read as the user editing the field and end the composition it came from.
+   * Every change is a document edit the editor echoes back like an insertion, so it is reserved the same way; otherwise the echo would read as the user editing the field and end the composition it came from. 设置预上屏文字和结束预上屏是两次调用，各记一笔：结束时文字没变就不会有回声，多记的那一笔到时作废。
    */
   private syncPreview(): void {
     const inputClient: inputMethodEngine.InputClient | undefined = this.inputClient;
     const view: EngineView | undefined = this.lastView;
+    // 拼写一栏传的是候选条画出来的那一串：多数方案就是 editing_text，笔画方案是笔画字形，文档里不出现键入的字母。
     const wanted: string = view === undefined ? '' : InlinePreeditPolicy.text(this.inlinePreeditStyle,
-      KeyboardFormFactor.isDesktop(), this.previewSupported, view.editing_text, view.preedit,
+      KeyboardFormFactor.isDesktop(), this.previewSupported, KeyboardSession.drawnReading(view), view.preedit,
       view.phrase_prefix ?? '', SchemeCompositionPolicy.drawsPreedit(SchemeCompositionPolicy.rulesScheme(
         view.scheme, view.dedicated_english, view.local_mode)));
     if (inputClient === undefined || wanted === this.previewText) return;
     const shown: string = this.previewText;
-    this.pendingOwnEdits++;
     try {
-      inputClient.setPreviewTextSync(wanted, PREVIEW_REPLACE_CURRENT);
-      if (wanted.length === 0) inputClient.finishTextPreviewSync();
+      this.editEditorSync((): void => inputClient.setPreviewTextSync(wanted, PREVIEW_REPLACE_CURRENT));
+      if (wanted.length === 0) this.editEditorSync((): void => inputClient.finishTextPreviewSync());
       this.previewText = wanted;
       return;
     } catch (error) {
-      this.pendingOwnEdits--;
       KeyboardLog.error(`editor preview unavailable: ${describeError(error)}`);
     }
     // The editor refused preview text after saying it took it; stop offering it for this focus.
@@ -2926,7 +2950,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     if (shown.length === 0) return;
     // Letters of a composition must not stay behind in the document: end the preview and take them out, the way a cancelled composition leaves nothing.
     try {
-      inputClient.finishTextPreviewSync();
+      this.editEditorSync((): void => inputClient.finishTextPreviewSync());
       // Only when the letters are still there as plain text: an editor that dropped them with the preview must not lose what precedes them.
       if (inputClient.getForwardSync(shown.length) === shown) {
         this.deleteEditorBackwardSync(shown.length);
@@ -2938,14 +2962,9 @@ export class KeyboardSession implements HardwareKeyTarget {
 
   /** Delete through the editor while reserving the asynchronous text-change echo it produces. */
   private deleteEditorBackwardSync(count: number): void {
-    if (this.inputClient === undefined) return;
-    this.pendingOwnEdits++;
-    try {
-      this.inputClient.deleteBackwardSync(count);
-    } catch (error) {
-      this.pendingOwnEdits--;
-      throw new Error(describeError(error));
-    }
+    const inputClient: inputMethodEngine.InputClient | undefined = this.inputClient;
+    if (inputClient === undefined) return;
+    this.editEditorSync((): void => inputClient.deleteBackwardSync(count));
   }
 
   /** Resume one durable cloud snapshot before a shared Engine session takes the read lock. */
@@ -2998,7 +3017,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     }
     let result: string;
     try {
-      const bootstrap: PrepareRequest = { resources: resources, state_root: stateRoot };
+      const bootstrap: PrepareRequest = KeyboardSession.prepareRequest(resources, stateRoot);
       const prepared: PrepareResponse =
         JSON.parse(client.prepareHost(JSON.stringify(bootstrap))) as PrepareResponse;
       if (!prepared.ok) {
@@ -3072,7 +3091,10 @@ export class KeyboardSession implements HardwareKeyTarget {
     const consumed: boolean = handled || this.editing !== before;
     // A capital with nothing composed is declined by design and handed back to the application, so only a lower-case letter that composed nothing is a failure worth reporting.
     const capital: boolean = ascii >= 0x41 && ascii <= 0x5a;
-    if (!consumed && before.length === 0 && !capital) {
+    // 笔画方案空组合时只有 h s p n z 开始组字，通配键 x 和其它字母按约定交回宿主，同样不是故障。
+    const strokeDeclined: boolean = this.rulesScheme() === SchemeTraits.STROKE
+      && !StrokeLayout.startsComposition(String.fromCharCode(ascii));
+    if (!consumed && before.length === 0 && !capital && !strokeDeclined) {
       KeyboardLog.error(`composing key produced no composition: scheme=${this.schemeName}`
         + ` local=${this.localMode} english=${this.englishMode} candidates=${this.currentCandidates.length}`
         + ` shift=${shift} caps=${this.capsLock}`);
@@ -3182,7 +3204,9 @@ export class KeyboardSession implements HardwareKeyTarget {
           KeyboardLog.error(`book-title punctuation balance refused: ${balanceResponse.error}`);
         }
       }
-      this.inputClient.moveCursorSync(inputMethodEngine.Direction.CURSOR_LEFT);
+      // 移动光标同样会回报一次 `textChange`。
+      const inputClient: inputMethodEngine.InputClient = this.inputClient;
+      this.editEditorSync((): void => inputClient.moveCursorSync(inputMethodEngine.Direction.CURSOR_LEFT));
     } catch (error) {
       KeyboardLog.error(`paired punctuation completion unavailable: ${describeError(error)}`);
     }
@@ -3216,7 +3240,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       localMode: this.localMode,
       editing: this.editing,
       caret: this.editingCaret,
-      wubi: this.schemeName === 'wubi',
+      wubi: HardwareKeyRouter.spellsWithoutSyllables(this.schemeName),
       microsoftShuangpin: this.lastView?.microsoft_shuangpin === true,
       englishCandidates: this.isEnglishCandidates(),
       spellingSymbols: this.lastView?.spelling_symbols ?? '',
@@ -3307,6 +3331,23 @@ export class KeyboardSession implements HardwareKeyTarget {
    */
   commitThenType(ascii: number): void {
     this.commitThenInsert(String.fromCharCode(ascii));
+  }
+
+  /**
+   * 藏文的空格：先把键交给引擎，有组字时引擎上屏藏文加音节点并吞掉这个键；引擎没处理时（没有组字，或 Esc 锁定原文后只上屏原文），由键盘在上屏内容之后插入这个键本身，和硬件键盘把未处理的键交回应用的效果一致。
+   */
+  pressThenType(ascii: number): void {
+    if (!this.composes() || this.handle === 0) {
+      this.press(ascii, false);
+      return;
+    }
+    this.clearSmartPunctuationRepeat();
+    this.tapFeedback();
+    const handled: boolean = this.apply(client.character(this.handle, ascii, false));
+    if (handled || this.inputClient === undefined) return;
+    const text: string = String.fromCharCode(ascii);
+    this.insertEditorText(text);
+    this.recordTypingStatistics(text, this.typingSource());
   }
 
   /** `commitThenType` for text the keyboard chose rather than a key's own character: a Zhuyin symbol-layer mark whose ASCII key the Dachen editor would take as a phonetic or tone key. */
@@ -3511,6 +3552,10 @@ export class KeyboardSession implements HardwareKeyTarget {
       return false;
     }
     const value: EngineValue = response.value;
+    if (!EngineViewValuePolicy.isValid(value.view)) {
+      KeyboardLog.error('engine view has malformed numeric fields');
+      return false;
+    }
     // Bounded before it reaches the surface: a diagnostic is a message, not a place to print a
     // stack trace into a keyboard four rows tall.
     this.editing = value.view.editing_text;
@@ -3551,6 +3596,10 @@ export class KeyboardSession implements HardwareKeyTarget {
     }
     if (!response.ok) {
       KeyboardLog.error(`engine refused: ${response.error}`);
+      return;
+    }
+    if (!EngineViewValuePolicy.isValid(response.value)) {
+      KeyboardLog.error('engine view has malformed numeric fields');
       return;
     }
     this.render(response.value);
@@ -3617,6 +3666,10 @@ export class KeyboardSession implements HardwareKeyTarget {
   private englishCandidates: boolean = false;
 
   private render(view: EngineView): void {
+    if (!EngineViewValuePolicy.isValid(view)) {
+      KeyboardLog.error('engine view has malformed numeric fields');
+      return;
+    }
     this.generation = view.generation;
     this.currentCandidates = view.candidates.slice();
     this.lastView = view;
@@ -3878,6 +3931,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       return false;
     }
     const request = http.createHttp();
+    installNoRedirectGuard(request);
     this.onlineRequests.add(request);
     try {
       const response: http.HttpResponse = await request.request(url, {
@@ -3915,6 +3969,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       return false;
     }
     const request = http.createHttp();
+    installNoRedirectGuard(request);
     this.onlineRequests.add(request);
     try {
       const response: http.HttpResponse = await request.request(descriptor.url, {
@@ -4339,6 +4394,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       || !TextPolicy.validSecureAuthority(descriptor.url, allowHttp)) return null;
     if (descriptor.max_response_bytes > TranslationPolicy.MAX_RESPONSE_BYTES) return null;
     const request = http.createHttp();
+    installNoRedirectGuard(request);
     this.translationRequests.add(request);
     try {
       const response: http.HttpResponse = await request.request(descriptor.url, {
@@ -4383,7 +4439,8 @@ export class KeyboardSession implements HardwareKeyTarget {
   static feedbackIn(stateRoot: string): FeedbackSettings {
     try {
       const path: string = KeyboardSession.feedbackFileIn(stateRoot);
-      if (!fs.accessSync(path) || fs.statSync(path).size > KeyboardFeedback.MAX_BYTES) {
+      if (!KeyboardSession.safeStateDirectory(stateRoot)
+        || KeyboardSession.safePrivateFile(path, KeyboardFeedback.MAX_BYTES) === null) {
         return KeyboardFeedback.DEFAULTS;
       }
       return KeyboardFeedback.parse(fs.readTextSync(path));
@@ -4393,9 +4450,23 @@ export class KeyboardSession implements HardwareKeyTarget {
     }
   }
 
+  /** `prepareHost` 的请求。full 不带版本，与引入版本之前相同；其他版本让 host-api 按本版本收窄方案、按本版本的资源锁校验词库。 */
+  static prepareRequest(resources: string, stateRoot: string): PrepareRequest {
+    const request: PrepareRequest = { resources: resources, state_root: stateRoot };
+    const edition: AppEdition = AppEdition.current();
+    if (!edition.isFull()) {
+      request.edition = edition.id;
+    }
+    return request;
+  }
+
   static saveFeedbackIn(stateRoot: string, settings: FeedbackSettings): boolean {
     try {
-      const handle = fs.openSync(KeyboardSession.feedbackFileIn(stateRoot),
+      const path: string = KeyboardSession.feedbackFileIn(stateRoot);
+      if (!KeyboardSession.safeStateDirectory(stateRoot) || KeyboardSession.isSymbolicLink(path)) {
+        return false;
+      }
+      const handle = fs.openSync(path,
         fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
       try {
         fs.writeSync(handle.fd, KeyboardFeedback.serialize(settings));
@@ -4412,8 +4483,7 @@ export class KeyboardSession implements HardwareKeyTarget {
   /** How keys should feel on this device, which is not something the shared preferences carry. */
   feedback(): FeedbackSettings {
     try {
-      if (!fs.accessSync(this.feedbackFile())
-        || fs.statSync(this.feedbackFile()).size > KeyboardFeedback.MAX_BYTES) {
+      if (KeyboardSession.safePrivateFile(this.feedbackFile(), KeyboardFeedback.MAX_BYTES) === null) {
         return KeyboardFeedback.DEFAULTS;
       }
       return KeyboardFeedback.parse(fs.readTextSync(this.feedbackFile()));
@@ -4425,7 +4495,11 @@ export class KeyboardSession implements HardwareKeyTarget {
 
   saveFeedback(settings: FeedbackSettings): boolean {
     try {
-      const handle = fs.openSync(this.feedbackFile(),
+      const path: string = this.feedbackFile();
+      if (!KeyboardSession.safeStateDirectory(this.stateDirectory) || KeyboardSession.isSymbolicLink(path)) {
+        return false;
+      }
+      const handle = fs.openSync(path,
         fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
       try {
         fs.writeSync(handle.fd, KeyboardFeedback.serialize(settings));
@@ -4641,7 +4715,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     }
     const file: string = this.emojiRecentsFile();
     try {
-      if (!fs.accessSync(file) || fs.statSync(file).size > EMOJI_RECENTS_MAX_BYTES) {
+      if (KeyboardSession.safePrivateFile(file, EMOJI_RECENTS_MAX_BYTES) === null) {
         return [];
       }
       return EmojiCatalogModel.parseRecents(fs.readTextSync(file));
@@ -4663,7 +4737,11 @@ export class KeyboardSession implements HardwareKeyTarget {
       return recents;
     }
     try {
-      const handle = fs.openSync(this.emojiRecentsFile(),
+      const path: string = this.emojiRecentsFile();
+      if (!KeyboardSession.safeStateDirectory(this.stateDirectory) || KeyboardSession.isSymbolicLink(path)) {
+        return recents;
+      }
+      const handle = fs.openSync(path,
         fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
       try {
         fs.writeSync(handle.fd, EmojiCatalogModel.serializeRecents(recents));
@@ -4681,7 +4759,11 @@ export class KeyboardSession implements HardwareKeyTarget {
       return false;
     }
     try {
-      const handle = fs.openSync(this.emojiRecentsFile(),
+      const path: string = this.emojiRecentsFile();
+      if (!KeyboardSession.safeStateDirectory(this.stateDirectory) || KeyboardSession.isSymbolicLink(path)) {
+        return false;
+      }
+      const handle = fs.openSync(path,
         fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
       try {
         fs.writeSync(handle.fd, '[]');
@@ -4746,13 +4828,42 @@ export class KeyboardSession implements HardwareKeyTarget {
     // its explicit library one level above, at files/CommunityLibrary.json.
     const file: string = `${this.stateDirectory}/../CommunityLibrary.json`;
     try {
-      if (!fs.accessSync(file) || fs.statSync(file).size > CommunityReplyLibraryPolicy.MAX_BYTES) {
+      const parent: string = this.stateDirectory.substring(0, this.stateDirectory.lastIndexOf('/'));
+      if (!KeyboardSession.safeStateDirectory(this.stateDirectory)
+        || !KeyboardSession.safeStateDirectory(parent)
+        || KeyboardSession.safePrivateFile(file, CommunityReplyLibraryPolicy.MAX_BYTES) === null) {
         return [];
       }
       return CommunityReplyLibraryPolicy.parse(fs.readTextSync(file));
     } catch (error) {
       KeyboardLog.error(`community reply library unavailable: ${describeError(error)}`);
       return [];
+    }
+  }
+
+  private static safeStateDirectory(directory: string): boolean {
+    try {
+      const stat: fs.Stat = fs.lstatSync(directory);
+      return !stat.isSymbolicLink() && stat.isDirectory();
+    } catch {
+      return false;
+    }
+  }
+
+  private static safePrivateFile(path: string, maximumBytes: number): fs.Stat | null {
+    try {
+      const stat: fs.Stat = fs.lstatSync(path);
+      return !stat.isSymbolicLink() && stat.isFile() && stat.size <= maximumBytes ? stat : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private static isSymbolicLink(path: string): boolean {
+    try {
+      return fs.lstatSync(path).isSymbolicLink();
+    } catch {
+      return false;
     }
   }
 
@@ -4787,6 +4898,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       return [];
     }
     const requestHttp = http.createHttp();
+    installNoRedirectGuard(requestHttp);
     this.replyRequest = requestHttp;
     try {
       const response: http.HttpResponse = await requestHttp.request(descriptor.url, {
@@ -4883,7 +4995,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     if (!this.changePreferences(changes)) {
       return false;
     }
-    this.useScheme(selected.engineScheme, selected.shuangpinProfile);
+    this.useScheme(KeyboardScheme.engineSchemeOf(selected), selected.shuangpinProfile);
     KeyboardLog.info(`scheme fell back to ${selected.preferenceId}: `
       + `${applied.preferenceId} is no longer enabled`);
     return true;
@@ -4984,7 +5096,7 @@ export class KeyboardSession implements HardwareKeyTarget {
   /**
    * One page of the local emoji catalog.
    *
-   * Reads others.db directly rather than through the session: the catalog is a property of the
+   * Reads msime-others.db directly rather than through the session: the catalog is a property of the
    * installed dictionary, not of what is being typed, and nothing about it changes with focus.
    */
   emojiPage(group: string, offset: number, limit: number): EmojiPage | null {
@@ -5078,7 +5190,7 @@ export class KeyboardSession implements HardwareKeyTarget {
   /**
    * 已安装符号集插件的组，读自 `<stateDirectory>/plugins`，与设置页交给插件管理的是同一个目录。
    *
-   * 不依赖 `others.db`；读不出来时返回空表，表情面板照旧只显示内置内容。
+   * 不依赖 `msime-others.db`；读不出来时返回空表，表情面板照旧只显示内置内容。
    */
   pluginSymbolGroups(): PluginSymbolGroup[] {
     if (this.stateDirectory.length === 0 || this.resourceDirectory.length === 0) {
@@ -5548,6 +5660,11 @@ export class KeyboardSession implements HardwareKeyTarget {
         JSON.parse(client.allCandidates(this.handle)) as SnapshotCandidates;
       if (!response.ok) {
         KeyboardLog.error(`candidate list refused: ${response.error}`);
+        return [];
+      }
+      if (response.value === undefined || response.value === null
+        || !EngineViewValuePolicy.isGeneration(response.value.generation)) {
+        KeyboardLog.error('candidate list has malformed generation');
         return [];
       }
       // The generation identifies the composition these belong to; selecting against a stale one

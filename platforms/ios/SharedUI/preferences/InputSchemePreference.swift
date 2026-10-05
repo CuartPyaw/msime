@@ -1,10 +1,11 @@
 import Foundation
 
 enum ChineseInputScheme: String, CaseIterable {
-  case quanpin, nineKey, shuangpin, ziranma, microsoft, shoudao, wubi, japaneseNineKey, japanese, korean, handwriting, thoughtfulReply, cantonese, zhuyin, vietnamese
+  // 「高情商回复」已改为工具栏入口，不再是方案。旧版存下的 `thoughtfulReply`（App Group）或 `thoughtful_reply`（共享文档）在这里认不出来，与其他未知值一样走 `InputSchemePreference` 的回退：已选的落到全拼 26 键或第一个可用方案，启用列表里直接忽略。
+  case quanpin, nineKey, shuangpin, ziranma, microsoft, shoudao, wubi, japaneseNineKey, japanese, korean, handwriting, cantonese, zhuyin, vietnamese, tibetan, stroke
 
-  /// The schemes a fresh install leaves off until the user enables them, as the settings host does (`optInSchemes` in MobilePlatformPlugin).
-  static let optInSchemes: [ChineseInputScheme] = [.cantonese, .zhuyin, .vietnamese]
+  /// 全新安装默认不打开、要用户自己启用的方案，与设置宿主一致（MobilePlatformPlugin 里的 `optInSchemes`）。
+  static let optInSchemes: [ChineseInputScheme] = [.cantonese, .zhuyin, .vietnamese, .tibetan, .stroke]
 
   var isJapanese: Bool { self == .japanese || self == .japaneseNineKey }
 
@@ -20,23 +21,63 @@ enum ChineseInputScheme: String, CaseIterable {
   /// Vietnamese Telex or VNI on the 26 letter keys: the Engine composes the word in place and offers no candidates.
   var isVietnamese: Bool { self == .vietnamese }
 
-  /// Whether the scheme takes the Mandarin feature set: traditional output conversion, candidate glosses, the local input modes and the candidate menu. Japanese, Korean and Vietnamese write their own scripts, and Cantonese and Zhuyin write Traditional Chinese straight from their own dictionaries without any of these.
-  var writesChinese: Bool { !isJapanese && !isKorean && !isCantonese && !isZhuyin && !isVietnamese }
+  /// 26 个字母键上的藏文 EWTS（扩展威利转写）：组字是当前音节的威利原文，Engine 就地显示转出的藏文，不给候选。威利转写区分大小写，大写字母是拼写的一部分。
+  var isTibetan: Bool { self == .tibetan }
 
-  /// Whether the scheme writes half-width ASCII punctuation, as Korean and Vietnamese do; every other scheme offers Chinese or Japanese marks.
-  var writesAsciiPunctuation: Bool { isKorean || isVietnamese }
+  /// 笔画输入：五个笔画键 h s p n z 加通配 x，从笔画词库按笔顺查单字，候选只读、不学习。键面和预编辑都画笔画字形 一丨丿丶乛＊，ASCII 字母只是发给 Engine 的键。
+  var isStroke: Bool { self == .stroke }
 
-  /// Whether the composition is a letter spelling with a caret the user can move: the Mandarin schemes and Cantonese. A Japanese reading converts as a whole, and the in-place schemes have no caret inside what they compose.
+  /// 预编辑是否是按键的字形而不是按键的拼写：笔画的 一丨丿丶乛＊ 代表字母 h s p n z x。`editing_text` 里的字母只是按键发出的内容，所以无论行内还是候选栏，都不显示这些字母（msime_client.h）。
+  var drawsKeysAsGlyphs: Bool { isStroke }
+
+  /// 方案是否使用普通话那一套功能：繁体输出转换、候选释义、本地输入模式和候选菜单。日语、韩语、越南语和藏文写的是各自的文字，粤拼和注音直接从各自的词库写出繁体中文，笔画从自己的词库按笔顺查单字，这些功能都不用。
+  var writesChinese: Bool { !isJapanese && !isKorean && !isCantonese && !isZhuyin && !isVietnamese && !isTibetan && !isStroke }
+
+  /// 方案是否写半角 ASCII 标点，韩语、越南语和藏文是这样；其他方案给出中文或日文标点。
+  var writesAsciiPunctuation: Bool { isKorean || isVietnamese || isTibetan }
+
+  /// Whether the composition is a letter spelling with a caret the user can move: the Mandarin schemes and Cantonese. A Japanese reading converts as a whole, the in-place schemes have no caret inside what they compose, and a stroke sequence is drawn as glyphs whose letters the user never sees.
   var hasSpellingCaret: Bool { writesChinese || isCantonese }
 
-  /// Whether what the Engine composes is already the text: a Korean syllable, a Zhuyin conversion or a Vietnamese word. It is marked inline whatever the preedit setting says, and leaving the scheme or the composition commits it rather than throwing it away.
-  var composesInPlace: Bool { isKorean || isZhuyin || isVietnamese }
+  /// Engine 组出来的是否已经就是正文：韩语音节、注音转换结果、越南语单词或藏文音节。无论预编辑设置如何都写在输入框里，离开方案或结束组字时上屏而不是丢掉。
+  var composesInPlace: Bool { isKorean || isZhuyin || isVietnamese || isTibetan }
+
+  /// 字母键是否按 Shift 和大写锁定给出的大小写直接交给 Engine，而不是把 Shift 当成切到英文：越南语的大写就是大写字母，藏文威利转写的大写字母（T D N Sh A I U M H 等）是不同的拼写。
+  var typesCasedLetters: Bool { isVietnamese || isTibetan }
 
   /// Whether the scheme reads a dictionary that ships apart from the resource set, and so is offered only where it is installed.
-  var needsLanguageDictionary: Bool { isCantonese || isZhuyin }
+  var needsLanguageDictionary: Bool { isCantonese || isZhuyin || isStroke }
 
   /// Whether a held backspace and a quick space-bar flick edit the spelling a syllable at a time. Only a lettered pinyin spelling has syllables to step over: a nine-key digit run is still ambiguous, and a wubi code is not made of syllables, so those keep a hold that clears the composition.
   var editsBySyllable: Bool { self == .quanpin || shuangpinProfile != nil }
+
+  /// 这个入口背后的输入方案，即版本表和共享偏好 `scheme` 里的方案名。手写的识别由平台识别器完成，不属于任何一个方案，这里的 `quanpin` 只用来归类；它写进偏好的方案见 `MetasequoiaInputSessionBridge.schemeMapping`。
+  var engineScheme: String {
+    switch self {
+    case .quanpin, .nineKey, .handwriting: "quanpin"
+    case .shuangpin, .ziranma, .microsoft, .shoudao: "shuangpin"
+    case .wubi: "wubi"
+    case .japanese, .japaneseNineKey: "japanese"
+    case .korean: "korean"
+    case .cantonese: "cantonese"
+    case .zhuyin: "zhuyin"
+    case .vietnamese: "vietnamese"
+    case .tibetan: "tibetan"
+    case .stroke: "stroke"
+    }
+  }
+
+  /// 本版本是否提供这个入口：入口背后的方案在本版本里时提供。手写面板写出的是汉字，所以只在提供中文方案的版本里有（full、拼音版、五笔版），日文、越南文和藏文版没有。与 client-core 的 `Edition::offers_touch_scheme` 一致。
+  var isOfferedByEdition: Bool {
+    guard self == .handwriting else { return MSIMEAppEdition.offers(engineScheme) }
+    return Self.chineseEngineSchemes.contains(where: MSIMEAppEdition.offers)
+  }
+
+  /// 写中文的方案（版本表里的方案名），与 client-core 的 `ChineseScheme::of` 相同；提供其中任何一个的版本才有手写。
+  static let chineseEngineSchemes = ["quanpin", "shuangpin", "wubi", "cantonese", "zhuyin", "stroke"]
+
+  /// 偏好里的方案本版本没有、或一个入口都没剩下时退回的入口：本版本默认方案的 26 键入口。full 是全拼 26 键，与引入版本之前相同。
+  static var editionFallback: ChineseInputScheme { ChineseInputScheme(rawValue: MSIMEAppEdition.defaultScheme) ?? .quanpin }
 
   var shuangpinProfile: String? {
     switch self {
@@ -61,10 +102,22 @@ enum ChineseInputScheme: String, CaseIterable {
     case .japanese: "japanese"
     case .korean: "korean"
     case .handwriting: "handwriting"
-    case .thoughtfulReply: "thoughtful_reply"
     case .cantonese: "cantonese"
     case .zhuyin: "zhuyin"
     case .vietnamese: "vietnamese"
+    case .tibetan: "tibetan"
+    case .stroke: "stroke"
+    }
+  }
+  /// 这个方案在云端设置文档里的 `input.schema`，云端带不了的方案为 nil。云端只认 quanpin、shuangpin、wubi、japanese 和 korean，任何设备收到其他值都会拒绝整份文档（`IOSPreferencePlan`），所以粤拼、注音、越南语、藏文和笔画不写这个字段，保留账号里的方案，与 Tauri 的 `local_account_preferences` 一致。
+  var cloudSchema: String? {
+    switch self {
+    case .quanpin, .nineKey, .handwriting: "quanpin"
+    case .shuangpin, .ziranma, .microsoft, .shoudao: "shuangpin"
+    case .wubi: "wubi"
+    case .japanese, .japaneseNineKey: "japanese"
+    case .korean: "korean"
+    case .cantonese, .zhuyin, .vietnamese, .tibetan, .stroke: nil
     }
   }
   static func scheme(sharedIdentifier value: String) -> ChineseInputScheme? {
@@ -83,10 +136,11 @@ enum ChineseInputScheme: String, CaseIterable {
     case .japaneseNineKey: "日语 9 键"
     case .korean: "韩语 26 键"
     case .handwriting: "手写"
-    case .thoughtfulReply: "高情商回复"
     case .cantonese: "粤拼 26 键"
     case .zhuyin: "大千注音"
     case .vietnamese: "越南语 26 键"
+    case .tibetan: "藏文 26 键"
+    case .stroke: "笔画"
     }
   }
 }
@@ -141,30 +195,35 @@ enum InputSchemePreference {
 
   static var enabledSchemes: [ChineseInputScheme] {
     get {
+      // 本版本不提供的入口（比如 full 那边存下的拼音落到五笔版）不算启用，一个都不剩时退回本版本的默认入口。没存过列表时，要用户自己打开的那几个不启用；只有一个方案的版本例外，越南文版、藏文版的入口就是这个版本本身，与 client-core 的 `TouchKeyboardSchemePreferences::for_edition` 一致。
       guard let stored = defaults.stringArray(forKey: enabledSchemesKey) else {
-        return ChineseInputScheme.allCases.filter { !ChineseInputScheme.optInSchemes.contains($0) }
+        let optInEnabled = (MSIMEAppEdition.inputSchemes?.count ?? .max) <= 1
+        let initial = ChineseInputScheme.allCases.filter {
+          (optInEnabled || !ChineseInputScheme.optInSchemes.contains($0)) && $0.isOfferedByEdition
+        }
+        return initial.isEmpty ? [.editionFallback] : initial
       }
-      let enabled = ChineseInputScheme.allCases.filter { stored.contains($0.rawValue) }
-      return enabled.isEmpty ? [.quanpin] : enabled
+      let enabled = ChineseInputScheme.allCases.filter { stored.contains($0.rawValue) && $0.isOfferedByEdition }
+      return enabled.isEmpty ? [.editionFallback] : enabled
     }
     set {
-      let ordered = ChineseInputScheme.allCases.filter { newValue.contains($0) }
-      let enabled = ordered.isEmpty ? [.quanpin] : ordered
+      let ordered = ChineseInputScheme.allCases.filter { newValue.contains($0) && $0.isOfferedByEdition }
+      let enabled = ordered.isEmpty ? [.editionFallback] : ordered
       defaults.set(enabled.map(\.rawValue), forKey: enabledSchemesKey)
       scheme = scheme
     }
   }
 
-  /// The enabled schemes this process can run: an enabled Cantonese or Zhuyin whose dictionary is not installed is left out, because the Engine would answer it with another scheme. The enabled list itself keeps it, so the choice holds once the dictionary arrives. A process that carries no Engine (the App) cannot tell and leaves every enabled scheme in, so its settings never rewrite a selection the keyboard can run.
+  /// The enabled schemes this process can run: an enabled Cantonese, Zhuyin or Stroke whose dictionary is not installed is left out, because the Engine would answer it with another scheme. The enabled list itself keeps it, so the choice holds once the dictionary arrives. A process that carries no Engine (the App) cannot tell and leaves every enabled scheme in, so its settings never rewrite a selection the keyboard can run.
   static var offeredSchemes: [ChineseInputScheme] {
     offeredSchemes(enabled: enabledSchemes, installed: installedLanguageSchemes)
   }
 
-  /// `enabled` without the Cantonese and Zhuyin schemes missing from `installed`; nil `installed` means unknown and filters nothing.
+  /// `enabled` without the Cantonese, Zhuyin and Stroke schemes missing from `installed`; nil `installed` means unknown and filters nothing.
   static func offeredSchemes(enabled: [ChineseInputScheme], installed: Set<ChineseInputScheme>?) -> [ChineseInputScheme] {
     guard let installed else { return enabled }
     let offered = enabled.filter { !$0.needsLanguageDictionary || installed.contains($0) }
-    return offered.isEmpty ? [.quanpin] : offered
+    return offered.isEmpty ? [.editionFallback] : offered
   }
 
   /// The language dictionary directory host-api reads: `language-dictionaries/` beside the bundle's EngineResources, or nil for a bundle without EngineResources. Only the keyboard extension and its test host carry them; the App bundle runs no Engine.
@@ -178,7 +237,7 @@ enum InputSchemePreference {
   /// The schemes whose dictionary `directory` holds, by the file names host-api looks for; nil when there is no directory to look in, which `offeredSchemes` reads as unknown.
   static func installedLanguageSchemes(in directory: URL?) -> Set<ChineseInputScheme>? {
     guard let directory else { return nil }
-    let files: [(ChineseInputScheme, String)] = [(.cantonese, "cantonese.db"), (.zhuyin, "zhuyin.db")]
+    let files: [(ChineseInputScheme, String)] = [(.cantonese, "msime-cantonese.db"), (.zhuyin, "msime-zhuyin.db"), (.stroke, "msime-stroke.db")]
     return Set(files.filter { FileManager.default.fileExists(atPath: directory.appendingPathComponent($0.1).path) }.map(\.0))
   }
 
@@ -190,7 +249,7 @@ enum InputSchemePreference {
     get {
       let defaults = UserDefaults(suiteName: appGroupIdentifier) ?? .standard
       let offered = offeredSchemes
-      let stored = defaults.string(forKey: schemeKey).flatMap(ChineseInputScheme.init(rawValue:)) ?? .quanpin
+      let stored = defaults.string(forKey: schemeKey).flatMap(ChineseInputScheme.init(rawValue:)) ?? .editionFallback
       return offered.contains(stored) ? stored : offered[0]
     }
     set {
@@ -212,5 +271,5 @@ enum InputSchemePreference {
     return true
   }
 
-  static let appGroupIdentifier = "group.app.msime.ios"
+  static let appGroupIdentifier = MSIMEAppEdition.appGroupIdentifier
 }

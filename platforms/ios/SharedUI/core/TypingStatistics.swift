@@ -1,8 +1,9 @@
 import Foundation
 import Darwin
+import CoreFoundation
 
 enum TypingSource: String, CaseIterable {
-  case quanpin, nineKey, shuangpin, ziranma, microsoft, shoudao, wubi, japanese, korean, cantonese, zhuyin, vietnamese, handwriting, english, local, ai, reply, voice, unknown
+  case quanpin, nineKey, shuangpin, ziranma, microsoft, shoudao, wubi, japanese, korean, cantonese, zhuyin, vietnamese, tibetan, stroke, handwriting, english, local, ai, reply, voice, unknown
   var title: String {
     switch self {
     case .quanpin: "全拼 26 键"
@@ -18,6 +19,8 @@ enum TypingSource: String, CaseIterable {
     case .cantonese: "粤语"
     case .zhuyin: "注音"
     case .vietnamese: "越南语"
+    case .tibetan: "藏文"
+    case .stroke: "笔画"
     case .handwriting: "手写"
     case .english: "英文键盘"
     case .local: "本地输入"
@@ -561,7 +564,7 @@ struct TypingStatisticsStore {
 
   init() {
     directory = FileManager.default.containerURL(
-      forSecurityApplicationGroupIdentifier: "group.app.msime.ios")?.appendingPathComponent("MSIME", isDirectory: true)
+      forSecurityApplicationGroupIdentifier: MSIMEAppEdition.appGroupIdentifier)?.appendingPathComponent("MSIME", isDirectory: true)
   }
 
   init(directory: URL?) {
@@ -577,19 +580,7 @@ struct TypingStatisticsStore {
   private static var prepared = Set<String>()
 
   private static func rejectsSymlinkAncestors(_ path: URL) -> Bool {
-    var current = path.standardizedFileURL
-    while true {
-      if current.path == "/" || current.path == "/var" || current.path == "/tmp" { return false }
-      var status = stat()
-      if lstat(current.path, &status) == 0 {
-        if status.st_mode & S_IFMT == S_IFLNK { return true }
-      } else if errno != ENOENT {
-        return true
-      }
-      let parent = current.deletingLastPathComponent()
-      if parent == current { return false }
-      current = parent
-    }
+    SafePath.hasRefusedSymbolicLink(path)
   }
 
   private func call(_ action: [String: Any]) throws -> Any {
@@ -692,8 +683,24 @@ struct TypingStatisticsStore {
   func recordKeys(_ keys: [String: Int], day: String) throws -> Int {
     guard !keys.isEmpty else { return 0 }
     let value = try call(["operation": "record_keys", "day": day, "keys": keys])
-    guard let recorded = (value as? [String: Any])?["recorded"] as? NSNumber else { throw TypingStatisticsError.invalidResponse }
-    return recorded.intValue
+    let maximum = keys.values.filter { $0 > 0 }.reduce(0) { partial, count in
+      partial > Int.max - count ? Int.max : partial + count
+    }
+    guard let recorded = Self.strictRecordedCount((value as? [String: Any])?["recorded"], maximum: maximum) else {
+      throw TypingStatisticsError.invalidResponse
+    }
+    return recorded
+  }
+
+  /// Native JSON must return a non-negative integral count that cannot exceed the submitted batch.
+  static func strictRecordedCount(_ value: Any?, maximum: Int) -> Int? {
+    guard let number = value as? NSNumber,
+          CFGetTypeID(number) != CFBooleanGetTypeID(),
+          let integer = Int(number.stringValue),
+          integer >= 0,
+          integer <= maximum,
+          NSNumber(value: integer).compare(number) == .orderedSame else { return nil }
+    return integer
   }
 
   /// Whether the user has statistics on. The keyboard asks once per appearance so that, while they are off, it does not even keep key counts in memory.

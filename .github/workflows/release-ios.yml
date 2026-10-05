@@ -5,7 +5,6 @@ on:
       version: {description: Semantic version (defaults to platforms/ios/version.txt), required: false, type: string}
       prerelease: {description: Mark as prerelease, required: false, default: false, type: boolean}
       publish: {description: Publish the build as an ios-v release (otherwise it is only uploaded as a workflow artifact), required: false, default: true, type: boolean}
-      ref: {description: 要构建并发布的分支、标签或提交（默认 main；触发时选的分支只决定用哪份 workflow 文件）, required: false, default: main, type: string}
       testflight: {description: 签名归档并上传 App Store Connect（内部测试组自动拿到）, required: false, default: true, type: boolean}
       testflight_external: {description: 上传后加入外部测试组并提交 TestFlight 审核, required: false, default: true, type: boolean}
 permissions: {contents: write}
@@ -20,7 +19,7 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: {ref: "${{ inputs.ref }}", fetch-depth: 0, persist-credentials: false}
+        with: {fetch-depth: 0, persist-credentials: false}
       - id: version
         name: Resolve independent iOS version
         env: {REQUESTED: "${{ inputs.version }}"}
@@ -40,7 +39,7 @@ jobs:
           set -euo pipefail
           brew install xcodegen
           rustup target add aarch64-apple-ios-sim
-      # build-app.sh fetches the Cantonese and Zhuyin dictionaries pinned by resources/language-dictionaries.lock.json itself; a release must carry both, so stage-resources.sh fails rather than staging fewer.
+      # build-app.sh fetches the Cantonese, Zhuyin and Stroke dictionaries pinned by resources/language-dictionaries.lock.json itself; a release must carry all three, so stage-resources.sh fails rather than staging fewer.
       - name: Build native iOS host
         env: {MSIME_REQUIRE_LANGUAGE_DICTIONARIES: "1"}
         run: |
@@ -155,11 +154,10 @@ jobs:
       # than implied. Without the gate a dispatch on a feature branch cuts a real public release.
       - name: Publish independent iOS release
         if: ${{ inputs.publish }}
-        env: {GH_TOKEN: "${{ github.token }}", VERSION: "${{ steps.version.outputs.value }}", PRERELEASE: "${{ inputs.prerelease }}"}
+        env: {GH_TOKEN: "${{ github.token }}", VERSION: "${{ steps.version.outputs.value }}", PRERELEASE: "${{ inputs.prerelease }}", EVERYAPI_RELEASE_NOTES_TOKEN: "${{ secrets.EVERYAPI_RELEASE_NOTES_TOKEN }}", EVERYAPI_RELEASE_NOTES_MODEL: "${{ vars.EVERYAPI_RELEASE_NOTES_MODEL }}"}
         run: |
           tag="ios-v${VERSION}"
-          # --generate-notes otherwise starts from whichever tag in the repository is newest, and the six platforms interleave prefixes, so a macOS release could be described by the diff since an ios-v tag. fetch-depth: 0 above is what makes this list complete.
           start=$(git tag --list 'ios-v*' --sort=-v:refname | head -1)
           flags=(); [[ "$PRERELEASE" == true ]] && flags+=(--prerelease)
-          [[ -n "$start" ]] && flags+=(--notes-start-tag "$start")
-          gh release create "$tag" "dist/msime-ios-${VERSION}.tar.gz" --target "$(git rev-parse HEAD)" --title "iOS ${VERSION}" --generate-notes "${flags[@]}"
+          python3 scripts/generate-release-notes.py --platform ios --version "$VERSION" --start-tag "$start" --end-ref "$(git rev-parse HEAD)" --output release-notes.md
+          gh release create "$tag" "dist/msime-ios-${VERSION}.tar.gz" --target "$(git rev-parse HEAD)" --title "iOS ${VERSION}" --notes-file release-notes.md "${flags[@]}"

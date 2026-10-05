@@ -12,7 +12,7 @@ settings:
   base:
     SWIFT_VERSION: 5.0
     DEVELOPMENT_TEAM: LXCL4Z68GU
-    MARKETING_VERSION: 0.51.5
+    MARKETING_VERSION: 0.52.0
     CURRENT_PROJECT_VERSION: 1
     PRODUCT_NAME: "$(TARGET_NAME)"
 schemes:
@@ -66,7 +66,7 @@ targets:
       - path: SharedUI
       - path: App/Resources/Assets.xcassets
       - path: App/Resources/LaunchScreen.storyboard
-      - path: ../../target/ios/EngineResources/dictionary-manifest.json
+      - path: ../../target/ios/EngineResources/msime-dictionary-manifest.json
         buildPhase: resources
       - path: SharedResources/MLKit-NOTICES.txt
         buildPhase: resources
@@ -84,6 +84,14 @@ targets:
       - path: ../../resources/licenses/rime-cantonese-CC-BY-4.0.txt
         buildPhase: resources
       - path: ../../resources/licenses/libchewing-data-LGPL-2.1.txt
+        buildPhase: resources
+      # The Stroke scheme's stroke orders come from rime-stroke (LGPL-3.0, with the CNS11643 attribution); its notice travels the same way.
+      - path: ../../resources/licenses/rime-stroke-LGPL-3.0.txt
+        buildPhase: resources
+      # 同一个 Engine 的越南文和藏文方案编入了 vi crate（MIT）和 ewts crate（MIT OR Apache-2.0，按 MIT 使用），它们的许可证全文随每个 Engine 构建分发。
+      - path: ../../resources/licenses/vi-MIT.txt
+        buildPhase: resources
+      - path: ../../resources/licenses/ewts-MIT.txt
         buildPhase: resources
       - path: SharedResources/PrivacyInfo.xcprivacy
         buildPhase: resources
@@ -258,6 +266,9 @@ targets:
       - path: App/Services/DoubaoWebSocketTransport.swift
       - path: App/Services/KeyboardAIService.swift
       - path: App/Services/SkinCommunityAPI.swift
+      - path: App/Sources/dictionary/TauriPersonalDictionaryBridge.swift
+      - path: App/Sources/settings/CandidateOptionsSettingsView.swift
+      - path: App/Sources/settings/CandidatePreviewCard.swift
       - path: ../../shared/backend
         excludes:
           - Tests/**

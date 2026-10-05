@@ -5,12 +5,14 @@
 #include <fstream>
 #include <functional>
 #ifdef _WIN32
+#include "StateRootLease.h"
 #include <windows.h>
 #else
 #include <fcntl.h>
 #include <unistd.h>
 #endif
 #include <nlohmann/json.hpp>
+#include "../../../../shared/contracts/msime_edition.h"
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -24,15 +26,13 @@ inline bool write_new_file(const std::filesystem::path &path,
                               FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
                               nullptr);
   if (handle == INVALID_HANDLE_VALUE) return false;
-  BY_HANDLE_FILE_INFORMATION info{};
-  bool ok = GetFileInformationByHandle(handle, &info) &&
-            !(info.dwFileAttributes &
-              (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY));
+  bool ok = handle_is_trusted_file(handle);
   std::size_t offset = 0;
   while (ok && offset < contents.size()) {
-    const DWORD chunk = static_cast<DWORD>(std::min<std::size_t>(
+    // Parenthesized so windows.h's min/max macros cannot expand them; this header includes windows.h itself and some including targets do not define NOMINMAX.
+    const DWORD chunk = static_cast<DWORD>((std::min<std::size_t>)(
         contents.size() - offset,
-        static_cast<std::size_t>(std::numeric_limits<DWORD>::max())));
+        static_cast<std::size_t>((std::numeric_limits<DWORD>::max)())));
     DWORD written = 0;
     ok = WriteFile(handle, contents.data() + offset, chunk, &written, nullptr) &&
          written == chunk;
@@ -80,9 +80,13 @@ inline std::filesystem::path prepare_host_state_in_directory(
       !std::filesystem::is_directory(resources))
     throw std::runtime_error("Absolute resource and new state paths required");
   const auto state = requested_state.lexically_normal();
-  const auto request = nlohmann::json{
+  auto request_document = nlohmann::json{
       {"resources", std::filesystem::canonical(resources).u8string()},
-      {"state_root", state.u8string()}}.dump();
+      {"state_root", state.u8string()}};
+  // 不是 full 的版本带上版本 id，宿主库按它选资源锁、收窄方案并在状态根里记下版本；full 的请求与引入版本之前相同。
+  if constexpr (!MSIME_EDITION_IS_FULL)
+    request_document["edition"] = MSIME_EDITION_ID;
+  const auto request = request_document.dump();
   if (request.size() > 16384)
     throw std::runtime_error("Preparation request oversized");
   const auto response = nlohmann::json::parse(prepare(request));

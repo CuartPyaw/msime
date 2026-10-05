@@ -2,6 +2,7 @@
 //!
 //! The digits stay the composition: a chosen spelling only rewrites its span of digits and is remembered in `locked`, and every candidate's `pinyin` is the run of digits it consumes, so selection advances the same way whichever reading produced the row.
 
+use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
@@ -48,19 +49,22 @@ pub struct NineKeySession {
     spellings: Vec<String>,
     candidates: Vec<WordItem>,
     english_only: bool,
+    /// 会话允许全拼时为真。为假时九宫格只拼英文，拼音词库永远不打开。
+    pinyin: bool,
     /// Opened on first use.
     dictionary: Option<QuanpinDictionary>,
     english: Option<EnglishDictionary>,
 }
 
 impl NineKeySession {
-    /// English options are fixed here; the reference never updated them afterwards.
+    /// English options are fixed here; the reference never updated them afterwards. `pinyin` 是会话的 `enabled_schemes` 是否含全拼：九宫格拼的是全拼音节，不含全拼时只给英文行，也不打开拼音词库。
     pub fn new(
         paths: &RuntimePaths,
         learning: bool,
         frequency: FrequencyAdjustmentOptions,
         fuzzy: FuzzyPinyinOptions,
         english: EnglishInputOptions,
+        pinyin: bool,
     ) -> Self {
         Self {
             paths: paths.clone(),
@@ -73,6 +77,7 @@ impl NineKeySession {
             spellings: Vec::new(),
             candidates: Vec::new(),
             english_only: false,
+            pinyin,
             dictionary: None,
             english: None,
         }
@@ -298,7 +303,7 @@ impl NineKeySession {
         if !self.active() {
             return;
         }
-        if self.english_only {
+        if self.english_only || !self.pinyin {
             // No syllables to offer and no pinyin to look up: the digits stand for letters only.
             self.candidates = self.english_candidates();
             return;
@@ -322,11 +327,14 @@ impl NineKeySession {
         };
 
         let locked_key = self.locked.join("'");
-        let dictionary = self
+        let mut dictionary = self
             .dictionary
-            .get_or_insert_with(|| QuanpinDictionary::new(&self.paths));
+            .get_or_insert_with(|| QuanpinDictionary::new(&self.paths))
+            .row_cache_batch();
         let mut queried = HashSet::with_capacity(alternatives.len());
         let mut candidates = Vec::with_capacity(CANDIDATE_LIMIT);
+        // 各条切分的前缀组彼此大量重复，一次刷新会推入上万行，见 `push_ranked`。
+        let mut leading: HashMap<String, RankKey> = HashMap::with_capacity(CANDIDATE_LIMIT);
         for path in alternatives {
             let mut full = self.locked.clone();
             full.extend(path);
@@ -360,10 +368,11 @@ impl NineKeySession {
                 }
                 candidate.pinyin = self.digits[..code.len().min(self.digits.len())].to_string();
                 candidate.canonical_pinyin = canonical;
-                candidates.push(candidate);
+                push_ranked(&mut candidates, &mut leading, candidate);
             }
             queried.insert(key);
         }
+        drop(dictionary);
         rank_candidates(&mut candidates);
 
         let mut english = self.english_candidates();
@@ -425,7 +434,10 @@ impl NineKeySession {
         for prefix in prefixes {
             for word in english.query_prefix(&prefix, ENGLISH_LIMIT) {
                 // Only a whole code that starts with the digits counts; otherwise letters beyond the expanded prefix leak in.
-                if !digits_for_word(&word.word).starts_with(&digits)
+                // The database lookup key is the lowercase spelling in `pinyin`; `word` is the
+                // display form and may intentionally contain punctuation or spaces (for example
+                // the custom entry `dont` displayed as `don't`).
+                if !digits_for_word(&word.pinyin).starts_with(&digits)
                     || has_candidate_word(&words, &word.word)
                 {
                     continue;
@@ -437,7 +449,7 @@ impl NineKeySession {
         words
     }
 
-    /// `english.db` is optional; a missing file means no English rows and is looked for again on the next refresh (NK:179-186).
+    /// `msime-english.db` is optional; a missing file means no English rows and is looked for again on the next refresh (NK:179-186).
     fn open_english(&mut self) -> Option<&EnglishDictionary> {
         if self.english.is_none() {
             let path = self.paths.dictionary(assets::ENGLISH_DICTIONARY);
@@ -541,20 +553,39 @@ fn is_unseen_query_key(queried: &HashSet<String>, key: &str) -> bool {
     !queried.contains(key)
 }
 
-/// More digits covered first. Synthesised rows (whole-sentence Generated, Fallback) score on a different scale from dictionary weights, so within one coverage bucket dictionary rows lead; then exact before fuzzy, then weight. Dedup by word, capped (NK:283-307).
+/// `rank_candidates` 的排序键，小的在前。
+type RankKey = (Reverse<usize>, bool, bool, Reverse<i64>);
+
+/// More digits covered first. Synthesised rows (whole-sentence Generated, Fallback) score on a different scale from dictionary weights, so within one coverage bucket dictionary rows lead; then exact before fuzzy, then weight.
+fn rank_key(item: &WordItem) -> RankKey {
+    (
+        Reverse(item.pinyin.len()),
+        item.source.is_generated_or_fallback(),
+        item.fuzzy,
+        Reverse(item.weight),
+    )
+}
+
+/// 推入一行，除非同一个词已有一行排得不比它靠后。`leading` 记着每个词目前排得最靠前的那一行的排序键。被跳过的行在稳定排序后必然落在那一行之后（键更大，或键相同而推入更晚），会被 `retain_unique_words` 删掉；它也不会让别的行多删或少删，因为它能挡住的行那一行同样挡得住。所以跳过与全部推入再 `rank_candidates`，结果完全相同。
+fn push_ranked(
+    candidates: &mut Vec<WordItem>,
+    leading: &mut HashMap<String, RankKey>,
+    candidate: WordItem,
+) {
+    let key = rank_key(&candidate);
+    match leading.get_mut(candidate.word.as_str()) {
+        Some(best) if *best <= key => return,
+        Some(best) => *best = key,
+        None => {
+            leading.insert(candidate.word.clone(), key);
+        }
+    }
+    candidates.push(candidate);
+}
+
+/// Stable sort by `rank_key`, dedup by word, capped (NK:283-307).
 fn rank_candidates(candidates: &mut Vec<WordItem>) {
-    candidates.sort_by(|a, b| {
-        b.pinyin
-            .len()
-            .cmp(&a.pinyin.len())
-            .then_with(|| {
-                a.source
-                    .is_generated_or_fallback()
-                    .cmp(&b.source.is_generated_or_fallback())
-            })
-            .then_with(|| a.fuzzy.cmp(&b.fuzzy))
-            .then_with(|| b.weight.cmp(&a.weight))
-    });
+    candidates.sort_by_key(rank_key);
     retain_unique_words(candidates);
     candidates.truncate(CANDIDATE_LIMIT);
 }
@@ -879,6 +910,47 @@ mod tests {
     }
 
     #[test]
+    fn skipping_outranked_rows_ranks_like_pushing_everything() {
+        let sources = [
+            CandidateSource::Database,
+            CandidateSource::UserDatabase,
+            CandidateSource::Generated,
+            CandidateSource::Fallback,
+        ];
+        let mut state = 0x2545_F491_4F6C_DD1D_u64;
+        let mut next = |bound: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % bound
+        };
+        for round in 0..200 {
+            let mut rows = Vec::new();
+            for _ in 0..(1 + next(300)) {
+                let digits = &"64426646"[..1 + next(8) as usize];
+                let mut row = item(
+                    &format!("w{}", next(40)),
+                    digits,
+                    next(5) as i64 * 10,
+                    sources[next(4) as usize],
+                );
+                row.fuzzy = next(3) == 0;
+                row.canonical_pinyin = format!("c{}", next(3));
+                rows.push(row);
+            }
+            let mut everything = rows.clone();
+            rank_candidates(&mut everything);
+            let mut skipped = Vec::new();
+            let mut leading = HashMap::new();
+            for row in rows {
+                push_ranked(&mut skipped, &mut leading, row);
+            }
+            rank_candidates(&mut skipped);
+            assert_eq!(skipped, everything, "round {round}");
+        }
+    }
+
+    #[test]
     fn english_exact_code_leads_only_with_a_weight() {
         let english =
             |word: &str, weight| item(word, word, weight, CandidateSource::EnglishDictionary);
@@ -917,6 +989,7 @@ mod tests {
             FrequencyAdjustmentOptions::default(),
             FuzzyPinyinOptions::default(),
             EnglishInputOptions::default(),
+            true,
         )
     }
 
@@ -1000,6 +1073,7 @@ mod tests {
             frequency,
             FuzzyPinyinOptions::default(),
             english,
+            true,
         )
     }
 
@@ -1074,6 +1148,32 @@ mod tests {
             "mixed English waits for the minimum prefix"
         );
         assert_eq!(session.snapshot().candidates[0].pinyin, "6");
+    }
+
+    #[test]
+    fn english_t9_uses_the_lookup_word_when_display_has_punctuation() {
+        let fixture = fixture();
+        Connection::open(fixture.paths.dictionary(assets::ENGLISH_DICTIONARY))
+            .unwrap()
+            .execute(
+                "INSERT INTO english_words(word, display, weight) VALUES ('dont', 'don''t', 100)",
+                [],
+            )
+            .unwrap();
+        let mut session = open(
+            &fixture.paths,
+            false,
+            EnglishInputOptions {
+                mixed_candidates: false,
+                ..EnglishInputOptions::default()
+            },
+        );
+        session.set_english_only(true);
+        type_digits(&mut session, "3668");
+        assert!(
+            words(&session).contains(&"don't".to_owned()),
+            "T9 should match the lookup key even when the displayed word contains punctuation"
+        );
     }
 
     #[test]
@@ -1356,11 +1456,34 @@ mod tests {
     fn a_missing_english_dictionary_means_no_english_rows() {
         let fixture = fixture();
         std::fs::remove_file(fixture.paths.dictionary(assets::ENGLISH_DICTIONARY))
-            .expect("remove english.db");
+            .expect("remove msime-english.db");
         let mut session = open(&fixture.paths, false, mixed());
         type_digits(&mut session, "64");
         assert_eq!(words(&session), ["你", "米"]);
         session.set_english_only(true);
         assert!(words(&session).is_empty());
+    }
+
+    /// 会话不允许全拼时九宫格只拼英文：没有音节、没有拼音行，拼音词库也不打开。
+    #[test]
+    fn without_quanpin_the_grid_spells_english_only() {
+        let fixture = fixture();
+        let mut session = NineKeySession::new(
+            &fixture.paths,
+            false,
+            FrequencyAdjustmentOptions::default(),
+            FuzzyPinyinOptions::default(),
+            mixed(),
+            false,
+        );
+        type_digits(&mut session, "64");
+        assert!(session.snapshot().nine_key_spellings.is_empty());
+        assert!(!words(&session).contains(&"你".to_owned()));
+        assert!(session.dictionary.is_none());
+
+        let mut pinyin = open(&fixture.paths, false, mixed());
+        type_digits(&mut pinyin, "64");
+        assert!(words(&pinyin).contains(&"你".to_owned()));
+        assert!(pinyin.dictionary.is_some());
     }
 }

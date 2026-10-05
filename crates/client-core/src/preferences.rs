@@ -27,12 +27,16 @@ pub enum InputScheme {
     Japanese,
     /// Korean Hangul on the Dubeolsik layout. The Engine ordinal is 4.
     Korean,
-    /// Cantonese in toneless Jyutping, read from `cantonese.db`. A Chinese scheme. The Engine ordinal is 5.
+    /// Cantonese in toneless Jyutping, read from `msime-cantonese.db`. A Chinese scheme. The Engine ordinal is 5.
     Cantonese,
-    /// Bopomofo on the Dachen layout, read from `zhuyin.db`. A Chinese scheme. The Engine ordinal is 6.
+    /// Bopomofo on the Dachen layout, read from `msime-zhuyin.db`. A Chinese scheme. The Engine ordinal is 6.
     Zhuyin,
     /// Vietnamese through Telex or VNI, set in `vietnamese`. The Engine ordinal is 7.
     Vietnamese,
+    /// 藏文：在拉丁字母键盘上按 EWTS（扩展威利转写）输入，不用词库，也不是中文方案。Engine 序号为 8。
+    Tibetan,
+    /// 笔画：按横竖撇点折（h s p n z，x 为通配）笔顺输入单字，读取 `msime-stroke.db`。是中文方案。Engine 序号为 9。
+    Stroke,
 }
 
 /// Presentation layout for touch keyboard hosts. Desktop hosts preserve but ignore it.
@@ -347,7 +351,6 @@ pub enum TouchKeyboardScheme {
     JapaneseNineKey,
     Japanese,
     Handwriting,
-    ThoughtfulReply,
     Korean,
     /// 粤拼 26 键: toneless Jyutping on the pinyin 26-key letters (`InputScheme::Cantonese`).
     Cantonese,
@@ -355,11 +358,15 @@ pub enum TouchKeyboardScheme {
     Zhuyin,
     /// 越南语 26 键: Vietnamese on the Latin 26-key letters, composed by the method in `Preferences::vietnamese` (`InputScheme::Vietnamese`).
     Vietnamese,
+    /// 藏文 26 键：在拉丁 26 键字母上按 EWTS 威利转写输入藏文，字母区分大小写（`InputScheme::Tibetan`）。
+    Tibetan,
+    /// 笔画键盘：横竖撇点折加一个通配键，每个键发送对应的笔画字母 h s p n z 或 x（`InputScheme::Stroke`）。不论选的是 26 键还是九键布局，宿主都画这个笔画键盘。
+    Stroke,
 }
 
 impl TouchKeyboardScheme {
     /// Every touch scheme in picker order. Schemes are appended, never reordered.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::Quanpin,
         Self::NineKey,
         Self::Xiaohe,
@@ -370,15 +377,16 @@ impl TouchKeyboardScheme {
         Self::JapaneseNineKey,
         Self::Japanese,
         Self::Handwriting,
-        Self::ThoughtfulReply,
         Self::Korean,
         Self::Cantonese,
         Self::Zhuyin,
         Self::Vietnamese,
+        Self::Tibetan,
+        Self::Stroke,
     ];
 
-    /// The schemes a keyboard shows before the user picks any: all but Cantonese, Zhuyin and Vietnamese, which the user turns on, as on macOS where their input modes start disabled. A document without `touch_keyboard_schemes` therefore keeps the keyboard it always had.
-    pub const DEFAULT_ENABLED: [Self; 12] = [
+    /// 用户还没挑选时键盘显示的方案：除粤拼、注音、越南文、藏文和笔画以外的全部，这五个由用户自己打开，和 macOS 上它们的输入模式默认停用一样。因此没有 `touch_keyboard_schemes` 的文档仍然保持原来的键盘。
+    pub const DEFAULT_ENABLED: [Self; 11] = [
         Self::Quanpin,
         Self::NineKey,
         Self::Xiaohe,
@@ -389,18 +397,73 @@ impl TouchKeyboardScheme {
         Self::JapaneseNineKey,
         Self::Japanese,
         Self::Handwriting,
-        Self::ThoughtfulReply,
         Self::Korean,
     ];
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(from = "StoredTouchKeyboardSchemePreferences")]
 pub struct TouchKeyboardSchemePreferences {
-    #[serde(default = "default_touch_keyboard_schemes")]
     pub enabled: BTreeSet<TouchKeyboardScheme>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub selected: Option<TouchKeyboardScheme>,
+}
+
+/// 文档里可能出现的方案取值：现行方案，加上已经退役的 `thoughtful_reply`。高情商回复曾是一个触屏方案，现在改为键盘工具栏上的工具，旧文档里留下的这个取值在读入时迁移掉，而不是让整份偏好读取失败。其它不认识的取值（比如更新版本写入的方案）仍然报错，保持文档原样不动。
+#[derive(Deserialize)]
+enum StoredTouchKeyboardScheme {
+    #[serde(rename = "thoughtful_reply")]
+    RetiredThoughtfulReply,
+    #[serde(untagged)]
+    Current(TouchKeyboardScheme),
+}
+
+impl StoredTouchKeyboardScheme {
+    fn current(self) -> Option<TouchKeyboardScheme> {
+        match self {
+            Self::RetiredThoughtfulReply => None,
+            Self::Current(scheme) => Some(scheme),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoredTouchKeyboardSchemePreferences {
+    #[serde(default)]
+    enabled: Option<Vec<StoredTouchKeyboardScheme>>,
+    #[serde(default)]
+    selected: Option<StoredTouchKeyboardScheme>,
+}
+
+impl From<StoredTouchKeyboardSchemePreferences> for TouchKeyboardSchemePreferences {
+    fn from(stored: StoredTouchKeyboardSchemePreferences) -> Self {
+        let enabled = match stored.enabled {
+            None => default_touch_keyboard_schemes(),
+            Some(stored_enabled) => {
+                let stored_count = stored_enabled.len();
+                let mut enabled: BTreeSet<_> = stored_enabled
+                    .into_iter()
+                    .filter_map(StoredTouchKeyboardScheme::current)
+                    .collect();
+                // 列表里只剩退役方案时，按各平台对空列表的约定回到全拼 26 键；原本就存成空列表的文档不在这里补，仍由 `validate` 拒绝。
+                if enabled.is_empty() && stored_count > 0 {
+                    enabled.insert(TouchKeyboardScheme::Quanpin);
+                }
+                enabled
+            }
+        };
+        let mut preferences = Self {
+            enabled,
+            selected: None,
+        };
+        preferences.selected = stored.selected.map(|selected| {
+            selected
+                .current()
+                .unwrap_or_else(|| preferences.first_enabled())
+        });
+        preferences
+    }
 }
 
 fn default_touch_keyboard_schemes() -> BTreeSet<TouchKeyboardScheme> {
@@ -419,6 +482,41 @@ impl Default for TouchKeyboardSchemePreferences {
 impl TouchKeyboardSchemePreferences {
     fn is_default(&self) -> bool {
         self == &Self::default()
+    }
+
+    /// `edition` 的触屏键盘还没被用户改过时启用的方案：[`TouchKeyboardScheme::DEFAULT_ENABLED`] 里本版本提供的那些（见 `Edition::offers_touch_scheme`）。full 得到的就是 `Default`。
+    ///
+    /// 手写只在提供中文方案的版本里有（手写识别器只认汉字），手写入口写进偏好的 `scheme` 是本版本的默认方案，五笔版里就是五笔。
+    ///
+    /// 只有一个方案的版本启用这个方案的全部触屏入口：越南文和藏文在 full 里默认停用，单独成为一个版本时它们就是这个版本本身。启用的入口按 `ALL` 顺序第一个是手写时，第一个不是手写的入口同时设为选中，否则第一次打开键盘看到的是手写；现有版本里手写要么没有、要么排在本版本的方案后面，选中留空，与只取缺省集合相同。
+    pub fn for_edition(edition: &crate::edition::Edition) -> Self {
+        let single_scheme = edition.input_schemes.len() == 1;
+        let mut preferences = Self {
+            enabled: TouchKeyboardScheme::ALL
+                .into_iter()
+                .filter(|scheme| {
+                    edition.offers_touch_scheme(*scheme)
+                        && (single_scheme || TouchKeyboardScheme::DEFAULT_ENABLED.contains(scheme))
+                })
+                .collect(),
+            selected: None,
+        };
+        if preferences.first_enabled() == TouchKeyboardScheme::Handwriting {
+            preferences.selected = preferences
+                .enabled
+                .iter()
+                .copied()
+                .find(|scheme| *scheme != TouchKeyboardScheme::Handwriting);
+        }
+        preferences
+    }
+
+    /// 选中的方案不可用时退回的方案：按 `ALL` 顺序第一个启用的方案，一个都没有时是全拼 26 键。
+    pub fn first_enabled(&self) -> TouchKeyboardScheme {
+        TouchKeyboardScheme::ALL
+            .into_iter()
+            .find(|scheme| self.enabled.contains(scheme))
+            .unwrap_or(TouchKeyboardScheme::Quanpin)
     }
 }
 
@@ -460,6 +558,25 @@ pub enum ChineseScheme {
     Wubi,
     Cantonese,
     Zhuyin,
+    Stroke,
+}
+
+impl ChineseScheme {
+    /// `scheme` 是中文方案时对应的 `ChineseScheme`，日文、韩文、越南文等方案没有。
+    pub fn of(scheme: InputScheme) -> Option<Self> {
+        match scheme {
+            InputScheme::Quanpin => Some(Self::Quanpin),
+            InputScheme::Shuangpin => Some(Self::Shuangpin),
+            InputScheme::Wubi => Some(Self::Wubi),
+            InputScheme::Cantonese => Some(Self::Cantonese),
+            InputScheme::Zhuyin => Some(Self::Zhuyin),
+            InputScheme::Stroke => Some(Self::Stroke),
+            InputScheme::Japanese
+            | InputScheme::Korean
+            | InputScheme::Vietnamese
+            | InputScheme::Tibetan => None,
+        }
+    }
 }
 
 impl From<ChineseScheme> for InputScheme {
@@ -470,6 +587,7 @@ impl From<ChineseScheme> for InputScheme {
             ChineseScheme::Wubi => Self::Wubi,
             ChineseScheme::Cantonese => Self::Cantonese,
             ChineseScheme::Zhuyin => Self::Zhuyin,
+            ChineseScheme::Stroke => Self::Stroke,
         }
     }
 }
@@ -659,7 +777,7 @@ pub struct Preferences {
     /// The optional buttons on the touch keyboard's toolbar, the counterpart of the floating toolbar's component switches. The voice entry stays under `touch_voice_shortcut`.
     #[serde(default)]
     pub touch_toolbar: TouchToolbarPreferences,
-    /// Retained when the active scheme is Japanese, Korean or Vietnamese.
+    /// 当前方案是日文、韩文、越南文或藏文时保留，记住要回到的中文方案。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_chinese_scheme: Option<ChineseScheme>,
     #[serde(default)]
@@ -2017,6 +2135,22 @@ impl Preferences {
         }
     }
 
+    /// `edition` 的默认偏好：在 `Default` 之上换成本版本的默认方案，叠加版本表的 `preference_defaults`，并把触屏键盘的方案收窄到本版本提供的那些。full 得到的就是 `Default`。
+    ///
+    /// 默认方案不是全拼时，`last_chinese_scheme` 也指向它：从日文等方案切回中文、或偏好里的方案不可用而回退时，回到的是本版本的方案。
+    pub fn for_edition(edition: &crate::edition::Edition) -> Self {
+        let mut preferences = Self::default();
+        if edition.default_scheme != preferences.scheme {
+            preferences.scheme = edition.default_scheme;
+            preferences.last_chinese_scheme = ChineseScheme::of(edition.default_scheme);
+        }
+        if let Some(mixed) = edition.preference_defaults.wubi_mixed_pinyin {
+            preferences.wubi_mixed_pinyin = mixed;
+        }
+        preferences.touch_keyboard_schemes = TouchKeyboardSchemePreferences::for_edition(edition);
+        preferences
+    }
+
     /// Every setting back to its default, except what the user cannot simply retype.
     ///
     /// The source window's 恢复默认设置 clears a fixed list of preference keys, and that list does
@@ -2030,7 +2164,12 @@ impl Preferences {
     /// `fuzzy_pinyin.seeded` is not a setting at all -- it records that the one-time seeding has
     /// happened -- so clearing it would silently re-seed rules the user had turned off.
     pub fn restored_to_defaults(&self) -> Self {
-        let mut next = Self::default();
+        self.restored_to_defaults_for(crate::edition::Edition::full())
+    }
+
+    /// [`Preferences::restored_to_defaults`]，只是回到的是 `edition` 的默认偏好（[`Preferences::for_edition`]）。
+    pub fn restored_to_defaults_for(&self, edition: &crate::edition::Edition) -> Self {
+        let mut next = Self::for_edition(edition);
 
         next.voice_input.asr_provider = self.voice_input.asr_provider.clone();
         next.voice_input.asr_app_key = self.voice_input.asr_app_key.clone();
@@ -2208,6 +2347,16 @@ impl Default for PreferencesSnapshot {
     }
 }
 
+impl PreferencesSnapshot {
+    /// 还没有偏好文件时 `edition` 读到的快照：修订号 0，内容是 [`Preferences::for_edition`]。
+    pub fn for_edition(edition: &crate::edition::Edition) -> Self {
+        Self {
+            preferences: Preferences::for_edition(edition),
+            ..Self::default()
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum PreferencesError {
     #[error("floating toolbar settings are invalid")]
@@ -2302,12 +2451,50 @@ enum RecoveryScope {
 
 pub struct PreferencesStore {
     directory: PathBuf,
+    /// 构造时指定的版本；`None` 时以状态目录里的版本记录为准（[`crate::edition::Edition::recorded_in`]），没有记录就是 full。只影响没有偏好文件时读到的默认值和修复时垫底的默认值。
+    edition: Option<&'static crate::edition::Edition>,
 }
 
 impl PreferencesStore {
+    /// `directory` 的偏好存储，版本取自目录里的版本记录（准备宿主时写下，见 [`crate::edition::Edition::record_in`]）：各平台读写偏好的 C ABI 和设置应用只拿到这个目录，不必各自知道版本，偏好文件不见了或被修复时也回到本版本的默认偏好。full 的状态目录没有记录，行为与引入版本之前相同。
     pub fn new(directory: impl Into<PathBuf>) -> Self {
         Self {
             directory: directory.into(),
+            edition: None,
+        }
+    }
+
+    /// `edition` 的偏好存储，不看目录里的版本记录。版本之间完全隔离，每个版本有自己的状态目录；这里只决定还没有偏好文件时读到的是哪个版本的默认值（[`PreferencesSnapshot::for_edition`]），以及修复损坏文件时以哪份默认值垫底。
+    pub fn for_edition(
+        directory: impl Into<PathBuf>,
+        edition: &'static crate::edition::Edition,
+    ) -> Self {
+        Self {
+            directory: directory.into(),
+            edition: Some(edition),
+        }
+    }
+
+    /// 这个存储所属的版本：构造时指定的，否则是目录里记录的，都没有时是 full。
+    pub fn edition(&self) -> &'static crate::edition::Edition {
+        self.edition
+            .or_else(|| crate::edition::Edition::recorded_in(&self.directory))
+            .unwrap_or_else(crate::edition::Edition::full)
+    }
+
+    /// 还没有偏好文件时读到的快照。
+    fn missing_document(&self) -> PreferencesSnapshot {
+        match self.edition() {
+            edition if edition.is_full() => PreferencesSnapshot::default(),
+            edition => PreferencesSnapshot::for_edition(edition),
+        }
+    }
+
+    /// 修复损坏文件时垫底的默认偏好。
+    fn default_preferences(&self) -> Preferences {
+        match self.edition() {
+            edition if edition.is_full() => Preferences::default(),
+            edition => Preferences::for_edition(edition),
         }
     }
 
@@ -2342,7 +2529,7 @@ impl PreferencesStore {
         let metadata = match std::fs::symlink_metadata(&path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(PreferencesSnapshot::default())
+                return Ok(self.missing_document())
             }
             Err(error) => return Err(error.into()),
         };
@@ -2498,8 +2685,8 @@ impl PreferencesStore {
         }
         let backup_path = self.write_backup(&bytes)?;
         let (preferences, salvaged) = match &document {
-            Some(document) => salvage_preferences(document)?,
-            None => (Preferences::default(), false),
+            Some(document) => salvage_preferences(document, self.default_preferences())?,
+            None => (self.default_preferences(), false),
         };
         let revision = match document
             .as_ref()
@@ -2578,10 +2765,12 @@ fn acceptable_preferences(candidate: &serde_json::Map<String, serde_json::Value>
 }
 
 /// Carry every setting of a damaged document that the current schema accepts onto the defaults, one top-level key at a time, retrying a rejected section one field at a time. Returns the result and whether anything was kept.
+///
+/// `default` 是垫底的默认偏好，即存储所属版本的默认值。
 fn salvage_preferences(
     document: &serde_json::Value,
+    default: Preferences,
 ) -> Result<(Preferences, bool), PreferencesError> {
-    let default = Preferences::default();
     let serde_json::Value::Object(mut salvaged) = serde_json::to_value(&default)? else {
         return Ok((default, false));
     };

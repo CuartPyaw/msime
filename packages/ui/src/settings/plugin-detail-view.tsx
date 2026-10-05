@@ -1,6 +1,9 @@
+import { SettingsGroupNote } from "./settings-group-note";
+import { SettingsManagerNote } from "./settings-manager-note";
+import { SettingsManagerActions } from "./settings-manager-actions";
+import { SettingsManagerBlock } from "./settings-manager-block";
 import type { ReactNode } from "react";
 import { GroupList, Row } from "../core/platform-controls";
-import * as settings from "./settings-style";
 import {
   MAX_COMMAND_TABLES,
   MAX_PHRASE_TABLES,
@@ -30,10 +33,10 @@ import { ActionButton } from "./action-button";
 
 function ActionBlock({ note, children }: { note?: ReactNode; children?: ReactNode }) {
   return (
-    <div className={settings.managerBlock}>
-      {note && <p className={settings.managerNote}>{note}</p>}
-      {children && <div className={settings.managerActions}>{children}</div>}
-    </div>
+    <SettingsManagerBlock>
+      {note && <SettingsManagerNote>{note}</SettingsManagerNote>}
+      {children && <SettingsManagerActions>{children}</SettingsManagerActions>}
+    </SettingsManagerBlock>
   );
 }
 
@@ -110,7 +113,7 @@ export function PluginDetailView({
             内置，不能删除
           </SummaryRow>
         )}
-        {pack.description && <p className={settings.groupNote}>{pack.description}</p>}
+        {pack.description && <SettingsGroupNote>{pack.description}</SettingsGroupNote>}
       </GroupList>
       <PackContent pack={pack} />
       <GroupList title="使用">
@@ -160,10 +163,10 @@ function PackContent({ pack }: { pack: PluginPackage }) {
             key={`${index}/${group.title}`}
             title={`${group.tab === "kaomoji" ? "颜文字" : "符号"} · ${group.title}（${group.items.length}）`}
           >
-            <p className={`${settings.groupNote} break-anywhere`}>
+            <SettingsGroupNote className="break-anywhere">
               {group.items.slice(0, SYMBOL_PREVIEW_ITEMS).join(" ")}
               {group.items.length > SYMBOL_PREVIEW_ITEMS ? " …" : ""}
-            </p>
+            </SettingsGroupNote>
           </GroupList>
         ))}
       </>
@@ -177,7 +180,7 @@ function PackContent({ pack }: { pack: PluginPackage }) {
           <Row key={word} title={word} />
         ))}
         {(pack.word_count ?? 0) > words.length && (
-          <p className={settings.groupNote}>只显示前 {words.length} 个单词。</p>
+          <SettingsGroupNote>只显示前 {words.length} 个单词。</SettingsGroupNote>
         )}
       </GroupList>
     );
@@ -190,7 +193,7 @@ function PackContent({ pack }: { pack: PluginPackage }) {
           <Row key={entry.character} title={entry.character} description={entry.code} />
         ))}
         {(pack.entries ?? 0) > preview.length && (
-          <p className={settings.groupNote}>只显示前 {preview.length} 个字。</p>
+          <SettingsGroupNote>只显示前 {preview.length} 个字。</SettingsGroupNote>
         )}
       </GroupList>
     );
@@ -204,7 +207,7 @@ function PackContent({ pack }: { pack: PluginPackage }) {
           <Row key={`${index}/${phrase.key}`} title={phrase.key} description={phrase.text} />
         ))}
         {phrases.length > shown.length && (
-          <p className={settings.groupNote}>只显示前 {PHRASE_PREVIEW_ROWS} 条。</p>
+          <SettingsGroupNote>只显示前 {PHRASE_PREVIEW_ROWS} 条。</SettingsGroupNote>
         )}
       </GroupList>
     );
@@ -214,7 +217,7 @@ function PackContent({ pack }: { pack: PluginPackage }) {
     return (
       <GroupList title={`曲目（${tracks.length}）`}>
         {tracks.length === 0 ? (
-          <p className={settings.groupNote}>没有曲目。</p>
+          <SettingsGroupNote>没有曲目。</SettingsGroupNote>
         ) : (
           tracks.map((track, index) => <Row key={`${index}/${track}`} title={track} />)
         )}
@@ -226,7 +229,7 @@ function PackContent({ pack }: { pack: PluginPackage }) {
     return (
       <GroupList title={`指令（${commands.length}）`}>
         {commands.length === 0 ? (
-          <p className={settings.groupNote}>没有指令。</p>
+          <SettingsGroupNote>没有指令。</SettingsGroupNote>
         ) : (
           commands.map((command) => (
             <Row key={command.trigger} title={`/${command.trigger}`} description={command.title} />

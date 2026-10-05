@@ -3,7 +3,9 @@ import type { DictionaryEntry, LocalDictionaryKind } from "../dictionary/diction
 import { dictionaryKindKeyHint } from "../dictionary/dictionary-messages";
 import { localDictionaryKinds } from "../dictionary/dictionary-kinds";
 import * as settings from "./settings-style";
+import { SettingsPhraseForm } from "./settings-phrase-form";
 import { ActionButton } from "./action-button";
+import { SettingsEmptyMessage } from "./settings-empty-message";
 
 export interface DictionaryPhraseForm {
   key: string;
@@ -41,7 +43,7 @@ export function DictionaryEntries({
   return (
     <>
       {form && (
-        <div className={settings.phraseForm}>
+        <SettingsPhraseForm>
           <label>
             编码{" "}
             <input
@@ -69,13 +71,13 @@ export function DictionaryEntries({
           </label>
           <ActionButton action={onSave} ariaBusy={busy} className="" disabled={busy} label="保存" />
           <ActionButton action={onCancel} disabled={busy} label="取消" />
-        </div>
+        </SettingsPhraseForm>
       )}
       {entries.length === 0 ? (
-        <p className={settings.empty}>
+        <SettingsEmptyMessage compact>
           点击查询后查看
           {localDictionaryKinds.find(([value]) => value === kind)?.[1] ?? "词库"}词条
-        </p>
+        </SettingsEmptyMessage>
       ) : (
         <ul ref={listRef} className={settings.phraseList} aria-label="词库查询结果">
           {entries.map((entry, index) => (

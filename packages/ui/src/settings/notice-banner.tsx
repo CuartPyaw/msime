@@ -1,6 +1,8 @@
 import MarkdownIt from "markdown-it";
 import { useEffect, useState, type MouseEvent } from "react";
 import { ActionButton } from "../core/action-button";
+import { formatZhDate } from "../core/format-date";
+import { useAsyncGeneration } from "./use-async-generation";
 
 /** One live console notice, client-core's `notices::Notice`. */
 export type AppNotice = {
@@ -32,8 +34,7 @@ export function noticeBodyHtml(body: string): string {
 const externalLink = /^(https?:|mailto:)/i;
 
 function publishedDate(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("zh-CN");
+  return formatZhDate(value);
 }
 
 /** The console's notices as dismissible cards at the top of the settings window. The feed is read once when the window opens; a failure shows nothing, since a notice is never needed to use the settings. */
@@ -45,18 +46,16 @@ export function NoticeBanner({
   openExternalUrl: (url: string) => void | Promise<void>;
 }) {
   const [notices, setNotices] = useState<AppNotice[]>([]);
+  const generation = useAsyncGeneration(client);
   useEffect(() => {
-    let active = true;
+    const requestGeneration = generation.current;
     client
       .list()
       .then((items) => {
-        if (active) setNotices(items);
+        if (generation.current === requestGeneration) setNotices(items);
       })
       .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, [client]);
+  }, [client, generation]);
   if (notices.length === 0) return null;
   const dismiss = (id: string) => {
     setNotices((current) => current.filter((notice) => notice.id !== id));

@@ -12,6 +12,7 @@ import {
 } from "./use-settings-persistence";
 import { useFlushOnWindowLeave } from "./use-flush-on-window-leave";
 import { useMountedRef } from "./use-mounted-ref";
+import { useAsyncGeneration } from "./use-async-generation";
 
 export interface CustomTranslationsClient {
   load(): Promise<string>;
@@ -36,33 +37,43 @@ export function useCustomTranslations({ client }: UseCustomTranslationsOptions) 
     : "还没有自定义释义。";
 
   const mounted = useMountedRef();
+  const generation = useAsyncGeneration(client);
   const clientRef = useRef(client);
   clientRef.current = client;
   // The text as last edited, and whether it differs from what was last written; the save loop reads these so edits made while a save is in flight are not lost.
   const textRef = useRef("");
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
+  const saveTokenRef = useRef(0);
   const autosaveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const savedStatusTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
+    clearAutosave();
+    clearTimeout(savedStatusTimer.current);
+    saveTokenRef.current += 1;
+    savingRef.current = false;
+    dirtyRef.current = false;
+    textRef.current = "";
+    setTextState("");
+    setNotice("");
+    setSaveState("idle");
+    setSaveError("");
     if (!client) return;
-    let active = true;
+    const requestGeneration = generation.current;
     void client
       .load()
       .then((value) => {
         // An edit made before the file arrived wins over it rather than being overwritten.
-        if (!active || dirtyRef.current) return;
+        if (generation.current !== requestGeneration) return;
+        if (dirtyRef.current) return;
         textRef.current = value;
         setTextState(value);
       })
       .catch(() => {
         // An unreadable overlay stays empty; saving it creates a fresh valid file.
       });
-    return () => {
-      active = false;
-    };
-  }, [client]);
+  }, [client, generation]);
 
   function clearAutosave() {
     if (autosaveTimer.current === undefined) return;
@@ -81,19 +92,29 @@ export function useCustomTranslations({ client }: UseCustomTranslationsOptions) 
       setSaveState("idle");
       return;
     }
+    const saveClient = current;
+    const saveToken = ++saveTokenRef.current;
+    // 卸载后仍完成当前草稿；宿主切换则使旧保存失效，即使后来切回同一个客户端也如此。
+    const isCurrent = () => clientRef.current === saveClient && saveTokenRef.current === saveToken;
     savingRef.current = true;
     clearTimeout(savedStatusTimer.current);
     setSaveState("saving");
     setSaveError("");
     let failed = false;
     try {
-      while (mounted.current && dirtyRef.current) {
+      // Keep draining edits even if the component unmounts while the current write is in flight.
+      // The client call itself is independent of React state, and dropping this loop on unmount
+      // would lose text entered after the first request started.
+      while (dirtyRef.current) {
+        if (!isCurrent()) break;
         const sent = textRef.current;
         if (!customTranslationsWithinBounds(sent)) break;
         dirtyRef.current = false;
         try {
           await current.save(sent);
+          if (!isCurrent()) break;
         } catch (reason) {
+          if (!isCurrent()) break;
           // The edit is still unsaved; 重试 or the next edit writes it again.
           dirtyRef.current = true;
           throw reason;
@@ -101,14 +122,15 @@ export function useCustomTranslations({ client }: UseCustomTranslationsOptions) 
       }
     } catch (reason) {
       failed = true;
-      if (mounted.current) {
+      if (mounted.current && isCurrent()) {
         setSaveState("failed");
         setSaveError(errorMessage(reason));
       }
     } finally {
-      savingRef.current = false;
+      if (saveTokenRef.current === saveToken) savingRef.current = false;
     }
     if (!mounted.current || failed) return;
+    if (!isCurrent()) return;
     if (dirtyRef.current) {
       // Only an oversized edit made during the save stops the loop early; say so instead of claiming it was saved.
       setNotice(oversizedNotice);

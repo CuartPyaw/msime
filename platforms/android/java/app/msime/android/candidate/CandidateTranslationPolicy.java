@@ -1,6 +1,9 @@
 package app.msime.android;
 
 import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -79,7 +82,9 @@ public final class CandidateTranslationPolicy {
         for (String target : targets) {
             String code = normalize(target);
             if (OFFLINE_GLOSS_LANGUAGES.contains(code)
-                    && new File(parent, "offline-glosses/zh-" + code + ".db").isFile()) result.add(code);
+                    && Files.isRegularFile(
+                        new File(parent, "offline-glosses/zh-" + code + ".db").toPath(),
+                        LinkOption.NOFOLLOW_LINKS)) result.add(code);
         }
         return List.copyOf(result);
     }
@@ -112,13 +117,13 @@ public final class CandidateTranslationPolicy {
     }
 
     /**
-     * Rows the candidate strip reserves above its base height for {@code glossLines} gloss rows.
+     * 候选条在基础高度之上为 {@code glossLines} 行释义预留的行数。
      *
-     * <p>Elsewhere the first gloss sits inline after the candidate, so only rows after it add height. On Korean Hanja rows the 훈음 takes a row of its own under the Hanja and every gloss row follows it, so the scheme reserves one more row than it has glosses, whether or not the Hanja list is open, and the strip does not grow when the list opens.
+     * <p>每行释义都在候选下面另起一行，所以有几行释义就预留几行。韩语汉字行的 훈음 也独占一行、排在释义之前，因此该方案再多预留一行；不论汉字列表是否展开都一样，列表展开时候选条不会变高。
      */
     public static int reservedGlossRows(int glossLines, boolean hanjaRows) {
         int lines = Math.max(0, glossLines);
-        return hanjaRows ? lines + 1 : Math.max(0, lines - 1);
+        return hanjaRows ? lines + 1 : lines;
     }
 
     private static String normalize(String value) {

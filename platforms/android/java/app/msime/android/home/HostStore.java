@@ -41,7 +41,7 @@ public final class HostStore {
         return runtimeOption(context, "preferences_directory");
     }
 
-    /** The runtime options' `language_dictionaries` directory, the one the keyboard reads Cantonese and Zhuyin from, or an empty string when the configuration names none. */
+    /** The runtime options' `language_dictionaries` directory, the one the keyboard reads Cantonese, Zhuyin and Stroke from, or an empty string when the configuration names none. */
     public static String languageDictionaries(Context context) {
         return runtimeOption(context, "language_dictionaries");
     }
@@ -90,7 +90,8 @@ public final class HostStore {
         final String document;
         try {
             JSONObject pending = new JSONObject(snapshot.toString());
-            revision = pending.getLong("revision");
+            revision = PreferencesRevisionPolicy.read(pending.opt("revision"), -1);
+            if (revision < 0) return null;
             pending.put("format_version", FORMAT_VERSION);
             document = pending.toString();
         } catch (JSONException error) {

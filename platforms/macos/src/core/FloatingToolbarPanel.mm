@@ -31,7 +31,7 @@ constexpr CGFloat kToolbarLogoMarkSide = 22.0;
         NSString *path = [[NSBundle bundleForClass:self.class] pathForResource:@"MSIMEClientInputMethod" ofType:@"icns"];
         _image = path == nil ? nil : [[NSImage alloc] initWithContentsOfFile:path];
         self.accessibilityIdentifier = @"MetasequoiaFloatingToolbarLogo";
-        self.accessibilityLabel = @"水杉输入法";
+        self.accessibilityLabel = MSIMEEditionDisplayName();
     }
     return self;
 }
@@ -370,7 +370,7 @@ NSRect MetasequoiaFloatingToolbarFrame(NSRect proposedFrame, NSRect visibleFrame
 
 NSMenu *CreateMetasequoiaFloatingToolbarUtilityMenu(id target)
 {
-    NSMenu *menu = [[NSMenu alloc] initWithTitle:@"水杉输入法"];
+    NSMenu *menu = [[NSMenu alloc] initWithTitle:MSIMEEditionDisplayName()];
     // Every item targets the panel, an NSWindow subclass, and NSMenu's automatic enabling asks
     // NSWindow's own -validateMenuItem: about each one. NSWindow implements -hideToolbar: for real
     // toolbars and answers NO when the window has none, which greyed out 隐藏悬浮状态栏 and swallowed
@@ -397,7 +397,7 @@ NSMenu *CreateMetasequoiaFloatingToolbarUtilityMenu(id target)
     [menu addItem:website];
     for (NSMenuItem *item in @[
              [[NSMenuItem alloc] initWithTitle:@"使用帮助…" action:@selector(openHelp:) keyEquivalent:@""],
-             [[NSMenuItem alloc] initWithTitle:@"关于水杉输入法…" action:@selector(openAbout:) keyEquivalent:@""],
+             [[NSMenuItem alloc] initWithTitle:[NSString stringWithFormat:@"关于%@…", MSIMEEditionDisplayName()] action:@selector(openAbout:) keyEquivalent:@""],
              [[NSMenuItem alloc] initWithTitle:@"问题反馈…" action:@selector(openFeedback:) keyEquivalent:@""],
          ])
     {
@@ -544,7 +544,7 @@ static void MSIMELogToolbarAction(const char *action, BOOL hasDelegate, id sende
     self.contentView = _chrome;
 
     _inputModeButton = ToolbarButton(@"中", @"MetasequoiaFloatingToolbarInputMode", self, @selector(toggleInputMode:));
-    // 点开列出可用的输入方案。macOS 27 上粤、注这类菜单栏入口只能由用户自己去系统设置添加，有了它不加入口也能切换。
+    // 点开列出可用的输入方案。macOS 27 上粤、注、笔这类菜单栏入口只能由用户自己去系统设置添加，有了它不加入口也能切换。
     _inputSchemeButton = ToolbarButton(@"", @"MetasequoiaFloatingToolbarInputScheme", self, @selector(showInputSchemeMenu:));
     _inputSchemeButton.image = [NSImage imageWithSystemSymbolName:@"list.bullet" accessibilityDescription:@"输入方案"];
     _inputSchemeButton.accessibilityLabel = @"切换输入方案";
@@ -574,7 +574,7 @@ static void MSIMELogToolbarAction(const char *action, BOOL hasDelegate, id sende
     _settingsButton = ToolbarButton(@"", @"MetasequoiaFloatingToolbarSettings", self, @selector(openSettings:));
     _settingsButton.image = [NSImage imageWithSystemSymbolName:@"gearshape" accessibilityDescription:@"设置"];
     _settingsButton.menu = CreateMetasequoiaFloatingToolbarUtilityMenu(self);
-    _settingsButton.accessibilityLabel = @"打开水杉输入法设置";
+    _settingsButton.accessibilityLabel = [NSString stringWithFormat:@"打开%@设置", MSIMEEditionDisplayName()];
     _settingsButton.toolTip = _settingsButton.accessibilityLabel;
 
     NSStackView *actions = [NSStackView stackViewWithViews:@[
@@ -693,7 +693,9 @@ static void MSIMELogToolbarAction(const char *action, BOOL hasDelegate, id sende
         // Keep optional utility buttons off when an older or partial settings
         // snapshot omits their keys. They can still be enabled explicitly.
         const BOOL defaultEnabled = ![@[@"emoji", @"handwriting", @"voice", @"screen_keyboard"] containsObject:keys[index]];
-        const BOOL enabled = [value isKindOfClass:NSNumber.class] ? [value boolValue] : defaultEnabled;
+        // 不提供手写的版本（日文、越南文和藏文版）不放手写按钮，偏好里同步来的开关也不算。
+        const BOOL offered = ![keys[index] isEqualToString:@"handwriting"] || MSIMEEditionOffersHandwriting();
+        const BOOL enabled = offered && ([value isKindOfClass:NSNumber.class] ? [value boolValue] : defaultEnabled);
         if (enabled) { mask |= 1u << index; ++count; }
     }
     if (scale == _appliedScale && fontSize == _appliedFontSize && mask == _appliedComponentMask) return;
@@ -868,7 +870,7 @@ static void MSIMELogToolbarAction(const char *action, BOOL hasDelegate, id sende
     traditionalChineseOutputEnabled:(BOOL)traditionalChineseOutputEnabled
 {
     NSDictionary<NSString *, NSString *> *schemeBadges =
-        @{@"shuangpin": @"双", @"wubi": @"五", @"japanese": @"日", @"korean": @"한", @"cantonese": @"粤", @"zhuyin": @"注", @"vietnamese": @"越"};
+        @{@"shuangpin": @"双", @"wubi": @"五", @"japanese": @"日", @"korean": @"한", @"cantonese": @"粤", @"zhuyin": @"注", @"vietnamese": @"越", @"tibetan": @"ཀ", @"stroke": @"笔"};
     NSString *inputModeTitle = capsLock ? @"A" :
         (englishInputMode ? @"英" : (englishCandidateMode ? @"En" : (schemeBadges[scheme] ?: @"中")));
     _inputModeButton.title = inputModeTitle;

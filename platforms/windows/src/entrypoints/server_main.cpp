@@ -190,7 +190,7 @@ std::filesystem::path production_state_directory() {
   return {};
 #endif
 }
-// The anonymous account's secret and tokens belong to the Windows user running this Server, so they live in that user's %LOCALAPPDATA%\MSIME\account. The state root is no place for them: an installed Server's is the installer's DataDir, one directory for the whole machine that every user may modify.
+// The anonymous account's secret and tokens belong to the Windows user running this Server, so they live in that user's %LOCALAPPDATA%\<本版本的用户目录>\account（full 是 %LOCALAPPDATA%\MSIME\account，版本表 platforms.windows.user_data_directory）。The state root is no place for them: an installed Server's is the installer's DataDir, one directory for the whole machine that every user may modify. 每个版本各自登录，退出一个版本的账号不会删掉另一个版本的令牌。
 std::filesystem::path anonymous_account_directory() {
 #ifdef _WIN32
   PWSTR local = nullptr;
@@ -198,12 +198,19 @@ std::filesystem::path anonymous_account_directory() {
     CoTaskMemFree(local);
     return {};
   }
-  const auto directory = std::filesystem::path(local) / L"MSIME" / L"account";
+  const auto directory = std::filesystem::path(local) / MSIME_EDITION_USER_DATA_DIRECTORY / L"account";
   CoTaskMemFree(local);
   return directory;
 #else
   return {};
 #endif
+}
+// 使用统计的目录：msime::telemetry::default_directory() 是 %LOCALAPPDATA%\MSIME，本版本换成同级的用户目录（版本表 platforms.windows.user_data_directory），各版本的安装 id 和事件队列互不相干。full 的目录名就是 MSIME，结果与 default_directory() 相同。
+std::filesystem::path edition_telemetry_directory() {
+  const auto shared = msime::telemetry::default_directory();
+  if (shared.empty())
+    return {};
+  return shared.parent_path() / MSIME_EDITION_USER_DATA_DIRECTORY;
 }
 std::string read_document(const std::filesystem::path &path) {
   std::ifstream input(path, std::ios::binary);
@@ -384,7 +391,7 @@ bool toggle_stored_flag(const std::filesystem::path &directory,
     return false;
   }
 }
-// Select an input scheme through the revisioned store, keeping last_chinese_scheme the way the settings page does: a Chinese scheme (Cantonese and Zhuyin included) is also the one Japanese, Korean and Vietnamese return to, and choosing one of those languages remembers the Chinese scheme it replaces. Moving between them keeps the remembered one, because none is a Chinese scheme the store would accept there.
+// 通过带版本的存储选择输入方案，并像设置页一样维护 last_chinese_scheme：中文方案（包括粤拼、注音和笔画）也是日文、韩文、越南文和藏文切回时回到的方案，选择这些语言之一时记住被替换的中文方案。在它们之间切换保留记住的方案，因为它们都不是存储会接受的中文方案。
 bool store_input_scheme(const std::filesystem::path &directory,
                         const std::string &scheme) {
   try {
@@ -407,7 +414,7 @@ bool store_input_scheme(const std::filesystem::path &directory,
             : std::string("quanpin");
     if (current == scheme)
       return true;
-    // Cantonese and Zhuyin are Chinese schemes, remembered like the others; Japanese, Korean and Vietnamese are languages of their own (client-core's ChineseScheme).
+    // 粤拼、注音和笔画是中文方案，和其他中文方案一样被记住；日文、韩文、越南文和藏文各是独立的语言（client-core 的 ChineseScheme）。
     if (msime::windows::scheme::is_chinese_scheme_name(scheme))
       preferences["last_chinese_scheme"] = scheme;
     else if (msime::windows::scheme::is_chinese_scheme_name(current))
@@ -429,13 +436,14 @@ bool store_input_scheme(const std::filesystem::path &directory,
     return false;
   }
 }
-// The Cantonese and Zhuyin dictionaries the package installed beside the resources, where host-api looks for them (language_dictionaries_beside). They arrive with a package, so one look at startup holds for the process.
+// The Cantonese, Zhuyin and Stroke dictionaries the package installed beside the resources, where host-api looks for them (language_dictionaries_beside). They arrive with a package, so one look at startup holds for the process.
 msime::windows::scheme::LanguageDictionaryPresence
 installed_language_dictionaries(const std::filesystem::path &resources) {
   const auto directory = resources.parent_path() / L"language-dictionaries";
   std::error_code error;
-  return {std::filesystem::is_regular_file(directory / L"cantonese.db", error),
-          std::filesystem::is_regular_file(directory / L"zhuyin.db", error)};
+  return {std::filesystem::is_regular_file(directory / L"msime-cantonese.db", error),
+          std::filesystem::is_regular_file(directory / L"msime-zhuyin.db", error),
+          std::filesystem::is_regular_file(directory / L"msime-stroke.db", error)};
 }
 // The scheme the Engine runs for the stored preferences, which is the stored one unless it needs a dictionary that is not installed.
 std::string running_scheme(
@@ -460,7 +468,7 @@ TrayMenuPreferences tray_menu_preferences(
     msime::windows::scheme::LanguageDictionaryPresence installed) {
   TrayMenuPreferences result;
   result.translations = preferences.value("candidate_translations", true);
-  // The scheme that runs, so a Cantonese or Zhuyin choice made before its dictionary was installed checks the scheme the Engine fell back to, as the macOS input menu does.
+  // The scheme that runs, so a Cantonese, Zhuyin or Stroke choice made before its dictionary was installed checks the scheme the Engine fell back to, as the macOS input menu does.
   result.scheme = running_scheme(preferences, installed);
   result.shuangpin_profile =
       preferences.value("shuangpin_profile", std::string("xiaohe"));
@@ -486,7 +494,7 @@ msime::windows::TsfLocalConfig tsf_local_config(
     const nlohmann::json &preferences,
     msime::windows::scheme::LanguageDictionaryPresence installed) {
   msime::windows::TsfLocalConfig config;
-  // The TIP keys the scheme the Engine runs: Zhuyin chosen without zhuyin.db runs a pinyin scheme, and keying it as Zhuyin would swallow the tone digits.
+  // The TIP keys the scheme the Engine runs: Zhuyin chosen without msime-zhuyin.db runs a pinyin scheme, and keying it as Zhuyin would swallow the tone digits.
   const auto scheme = running_scheme(preferences, installed);
   const auto navigation =
       preferences.value("navigation", nlohmann::json::object());
@@ -571,22 +579,59 @@ std::string production_preview_document(const std::string &runtime_document,
   }
   return document.dump();
 }
+// 本版本的 TIP 有没有活动的输入模式，用一个命名的手动重置事件告诉别的版本的 Server：有信号表示活动。名字后面接版本后缀（full 是空串）。只有生产 Server 发布它，预览实例不碰。
+constexpr wchar_t server_mode_active_event_prefix[] = L"Local\\MetasequoiaImeServer_ModeActive";
+// 另一个版本的 TIP 是否有活动的输入模式：看那个版本的 Server 发布的事件。那个版本没在运行时事件不存在，按不活动处理。
+bool other_edition_mode_active() {
+  for (const wchar_t *suffix : {MSIME_EDITIONS_NAME_SUFFIXES}) {
+    if (std::wstring_view(suffix) == MSIME_EDITION_NAME_SUFFIX)
+      continue;
+    const std::wstring name = std::wstring(server_mode_active_event_prefix) + suffix;
+    if (HANDLE event = OpenEventW(SYNCHRONIZE, FALSE, name.c_str())) {
+      const bool active = WaitForSingleObject(event, 0) == WAIT_OBJECT_0;
+      CloseHandle(event);
+      if (active)
+        return true;
+    }
+  }
+  return false;
+}
 class ProductionInstance final {
 public:
   ProductionInstance() {
     handle_ = CreateMutexW(nullptr, FALSE,
-                           L"Local\\MetasequoiaImeServer_SingleInstance");
+                           L"Local\\MetasequoiaImeServer_SingleInstance" MSIME_EDITION_NAME_SUFFIX);
     if (!handle_)
       throw std::runtime_error("Server instance guard unavailable");
     already_running_ = GetLastError() == ERROR_ALREADY_EXISTS;
+    // 建不出来时别的版本只是看不到本版本的模式，维护快捷键在没有任何版本活动时照样有人处理，所以不算启动失败。
+    if (!already_running_)
+      mode_active_ = CreateEventW(nullptr, TRUE, FALSE,
+                                  (std::wstring(server_mode_active_event_prefix) + MSIME_EDITION_NAME_SUFFIX).c_str());
   }
   ~ProductionInstance() {
+    if (mode_active_) {
+      ResetEvent(mode_active_);
+      CloseHandle(mode_active_);
+    }
     if (handle_)
       CloseHandle(handle_);
   }
   bool already_running() const { return already_running_; }
+  // 主循环每一轮发布一次本版本的模式是否活动，只在变化时改事件。
+  void publish_mode_active(bool active) {
+    if (!mode_active_ || active == mode_active_published_)
+      return;
+    mode_active_published_ = active;
+    if (active)
+      SetEvent(mode_active_);
+    else
+      ResetEvent(mode_active_);
+  }
 private:
   HANDLE handle_ = nullptr;
+  HANDLE mode_active_ = nullptr;
+  bool mode_active_published_ = false;
   bool already_running_ = false;
 };
 // A Server that TSF revived after a crash (--production) has no Watchdog above it, so it starts the one packaged beside it, as the reference Server does. The Watchdog adopts this running Server instead of launching a second one, holds its own single-instance mutex, and exits on its own when the TIP profile is not enabled.
@@ -681,10 +726,13 @@ int wmain(int argc, wchar_t **argv) {
       diagnostic_log.server(line);
     };
     ConsoleControl console;
-    const auto bootstrap =
+    auto bootstrap_document =
         nlohmann::json{{"resources", config.resources.u8string()},
-                       {"state_root", config.state_root.u8string()}}
-            .dump();
+                       {"state_root", config.state_root.u8string()}};
+    // 不是 full 的版本把版本 id 交给宿主库：它按版本选资源锁、收窄方案，并在状态根里记下版本。full 不带这个键，请求与引入版本之前相同。
+    if constexpr (!MSIME_EDITION_IS_FULL)
+      bootstrap_document["edition"] = MSIME_EDITION_ID;
+    const auto bootstrap = bootstrap_document.dump();
     std::unique_ptr<char, decltype(&msime_client_string_free)> response(
         msime_client_prepare_host(
             reinterpret_cast<const uint8_t *>(bootstrap.data()),
@@ -700,7 +748,7 @@ int wmain(int argc, wchar_t **argv) {
     apply_diagnostic_log(diagnostic_log, prepared.at("value").at("preferences"));
     // Usage reporting, on unless the user turned usage_reporting off: one session per Server process, kept in this Windows user's %LOCALAPPDATA%\MSIME. begin closes the previous session (session_crash only when it left a crash record) and queues today's active; it is file I/O only. Delivery runs on a thread that is never joined, so an unreachable endpoint cannot delay the Server and exiting mid-request only leaves the events queued for the next start.
     const bool usage_reporting = msime::windows::usage_reporting_enabled(prepared.at("value").at("preferences"));
-    if (const auto telemetry_directory = msime::telemetry::default_directory(); !telemetry_directory.empty()) {
+    if (const auto telemetry_directory = edition_telemetry_directory(); !telemetry_directory.empty()) {
       msime::telemetry::begin({"windows", MSIME_WINDOWS_VERSION, telemetry_directory, usage_reporting, {}});
       msime::telemetry::start_flushing();
     }
@@ -1235,12 +1283,14 @@ int wmain(int argc, wchar_t **argv) {
     });
     TrayMenuCapabilities menu_capabilities;
     menu_capabilities.emoji_panel = preview_shell.has_value();
-    menu_capabilities.handwriting_panel = preview_shell.has_value();
+    // 手写模型只认汉字，不提供手写的版本（日文、越南文和藏文版）托盘菜单里没有手写，安装包里也没有手写模型。
+    menu_capabilities.handwriting_panel = preview_shell.has_value() && MSIME_EDITION_HANDWRITING != 0;
     menu_capabilities.keyboard_panel = preview_shell.has_value();
     menu_capabilities.voice_input = true;
     menu_capabilities.settings = settings_shell.has_value();
     menu_capabilities.cantonese = language_dictionaries.cantonese;
     menu_capabilities.zhuyin = language_dictionaries.zhuyin;
+    menu_capabilities.stroke = language_dictionaries.stroke;
     const auto themes = theme_catalog();
     TrayMenuWindow tray(
         menu_capabilities,
@@ -1477,6 +1527,10 @@ int wmain(int argc, wchar_t **argv) {
     // while another application has focus, so they sit on a low-level keyboard
     // hook rather than the TSF key sink.
     MaintenanceHotkeyController maintenance([&](MaintenanceHotkey hotkey) {
+      // 几个版本的 Server 同时运行时，各自的低级键盘钩子都会看到这个按键，后装的钩子先看到，处理了就吞掉。焦点上的 TIP 属于别的版本时交给下一个钩子，让那个版本的 Server 处理；没有任何版本的模式活动时（焦点在别的输入法上，或 TIP 会话在崩溃后断开，正是要用重启快捷键的时候）谁先看到谁处理，不能都放过。只装一个版本时与引入版本之前相同。
+      if (hotkey.action != MaintenanceAction::DeleteCandidate &&
+          !server.mode_active() && other_edition_mode_active())
+        return false;
       switch (hotkey.action) {
       case MaintenanceAction::Restart:
         restart_requested.store(true);
@@ -1665,7 +1719,7 @@ int wmain(int argc, wchar_t **argv) {
           follow_cursor->load(std::memory_order_acquire));
       candidates.set_effect_intensity(
           effect_intensity->load(std::memory_order_acquire));
-      // The language button shows 'A' while Caps Lock is on, 日 in Japanese mode, 한 in Korean mode, 粤, 注 or 越 in Cantonese, Zhuyin or Vietnamese, and an underlined "En" in the Engine's own English mode, so it has to follow all of them. Showing 中 with Caps Lock on tells the user the wrong thing about what the next letter key will do.
+      // 语言按钮在 Caps Lock 开着时显示 'A'，日文模式显示 日，韩文模式显示 한，粤拼、注音、越南文、藏文、笔画分别显示 粤、注、越、藏、笔，引擎自己的英文模式显示带下划线的 "En"，所以它要跟随这些状态。Caps Lock 开着时显示 中 会让用户误判下一个字母键的作用。
       {
         ToolbarLanguageState language;
         language.caps_lock = caps_lock.load(std::memory_order_acquire);
@@ -1745,6 +1799,8 @@ int wmain(int argc, wchar_t **argv) {
                                 GetForegroundWindow() != tray_foreground))
           tray.hide();
       }
+      if (instance)
+        instance->publish_mode_active(server.mode_active());
       if (MsgWaitForMultipleObjectsEx(0, nullptr, 50, QS_ALLINPUT,
                                       MWMO_INPUTAVAILABLE) == WAIT_FAILED)
         throw std::runtime_error("Candidate message wait failed");

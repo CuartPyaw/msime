@@ -1,7 +1,12 @@
+import { SettingsGroupNote } from "./settings-group-note";
+import { SettingsManagerNote } from "./settings-manager-note";
+import { SettingsManagerActions } from "./settings-manager-actions";
 import { useId } from "react";
 import { GroupList } from "../core/platform-controls";
 import * as controls from "../core/platform-controls-style";
 import * as settings from "./settings-style";
+import { SettingsEmptyMessage } from "./settings-empty-message";
+import { SettingsManagerBlock } from "./settings-manager-block";
 import { MAX_COMMAND_TABLES, type PluginPreferences } from "./plugin-preferences";
 import {
   kindLabels,
@@ -137,37 +142,35 @@ export function PluginListView({
       )}
       <div className={settings.subViewStack} aria-label="已安装的插件">
         {hasClient && catalogState === "loading" && (
-          <p className={settings.clipboardEmpty} role="status">
-            正在读取插件…
-          </p>
+          <SettingsEmptyMessage role="status">正在读取插件…</SettingsEmptyMessage>
         )}
         {hasClient && catalogState === "failed" && (
-          <p className={settings.clipboardEmpty}>
+          <SettingsEmptyMessage>
             插件列表没有读取成功，重新打开这个页面会再试一次。
-          </p>
+          </SettingsEmptyMessage>
         )}
         {hasClient && catalogState === "loaded" && groups.length === 0 && (
-          <p className={settings.clipboardEmpty}>没有插件</p>
+          <SettingsEmptyMessage>没有插件</SettingsEmptyMessage>
         )}
         {groups.map(({ kind, packs, gone }) => (
           <GroupList key={kind} title={kindLabels[kind]}>
             {kind === "command_table" && triggers && (
-              <p className={settings.groupNote}>
+              <SettingsGroupNote>
                 在「输入 → 快捷模式」打开 / 指令后，按 /
                 再输入指令字母即可使用。启用的指令表按启用顺序排列，同一指令以靠前的表为准；最多启用{" "}
                 {MAX_COMMAND_TABLES} 个。
-              </p>
+              </SettingsGroupNote>
             )}
             {kind === "command_table" &&
               triggers &&
               packs.length === 0 &&
               gone.length === 0 &&
               (!hasClient || catalogState === "loaded") && (
-                <p className={settings.groupNote}>
+                <SettingsGroupNote>
                   {hasClient
                     ? "还没有导入指令表。"
                     : "这台设备还不能导入指令表，内置的 rq、sj、xq 指令照常可用。"}
-                </p>
+                </SettingsGroupNote>
               )}
             {packs.map((pack) => (
               <PluginNavRow
@@ -209,7 +212,7 @@ export function PluginListView({
                 只含音频、指令模板等数据，不含可执行内容，每个包须声明许可证
               </span>
             </span>
-            <span className={`${settings.managerActions} shrink-0`}>
+            <SettingsManagerActions as="span" className="shrink-0">
               <ActionButton
                 action={() => onImport("folder")}
                 disabled={working}
@@ -220,28 +223,20 @@ export function PluginListView({
                 disabled={working}
                 label="导入 .zip"
               />
-            </span>
+            </SettingsManagerActions>
           </div>
-          {notice && (
-            <p className={settings.groupNote} role="status">
-              {notice}
-            </p>
-          )}
+          {notice && <SettingsGroupNote role="status">{notice}</SettingsGroupNote>}
         </GroupList>
       )}
       {catalog.issues.length > 0 && (
         <GroupList title="无法载入的插件">
-          <div className={settings.managerBlock} role="list" aria-label="无法载入的插件">
+          <SettingsManagerBlock role="list" aria-label="无法载入的插件">
             {catalog.issues.map((issue) => (
-              <p
-                className={settings.managerNote}
-                role="listitem"
-                key={`${issue.kind}/${issue.folder}`}
-              >
+              <SettingsManagerNote role="listitem" key={`${issue.kind}/${issue.folder}`}>
                 {kindLabels[issue.kind]} {issue.folder || "目录"} 无法载入：{issue.reason}
-              </p>
+              </SettingsManagerNote>
             ))}
-          </div>
+          </SettingsManagerBlock>
         </GroupList>
       )}
     </>

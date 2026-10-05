@@ -1,5 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 import * as settings from "./settings-style";
+import { SettingsGroupBlock } from "./settings-group-block";
 import type {
   Preferences,
   ProviderCredentialClient,
@@ -33,6 +34,7 @@ import {
 import type { ProviderPresetControlFactory } from "./provider-preset-control";
 import type { useProviderCredentials } from "./use-provider-credentials";
 import { GroupList } from "../core/platform-controls";
+import { SettingsPageFieldset } from "./settings-page-fieldset";
 
 export interface VoiceSettingsContentProps {
   disabled: boolean;
@@ -300,7 +302,7 @@ export function VoiceSettingsContent({
           {asrCredentialVisible && credentialControl("asr")}
           {doubaoOptionsVisible && <DoubaoOptionsRows {...doubaoOptionsProps} />}
           {localModelSettings}
-          {asrCredentialTest && <div className={settings.groupBlock}>{asrCredentialTest}</div>}
+          {asrCredentialTest && <SettingsGroupBlock>{asrCredentialTest}</SettingsGroupBlock>}
           <VoiceAsrServiceTestSection
             available={windowsPlatform || macosPlatform || harmonyPlatform}
             voiceInput={voiceInput}
@@ -328,8 +330,8 @@ export function VoiceSettingsContent({
     </>
   );
   return (
-    <fieldset disabled={disabled} hidden={hidden} aria-label="语音输入">
-      <div className={settings.groups}>{content}</div>
-    </fieldset>
+    <SettingsPageFieldset disabled={disabled} hidden={hidden} ariaLabel="语音输入">
+      {content}
+    </SettingsPageFieldset>
   );
 }

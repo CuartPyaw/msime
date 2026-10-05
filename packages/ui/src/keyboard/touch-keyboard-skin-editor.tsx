@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { errorCode } from "../core/error-code";
+import { StatusMessage } from "../core/status-message";
+import { ErrorAlert } from "../core/error-alert";
 import { runAsyncAction } from "../core/async-action";
 import { aiSkinMessage, libraryError } from "./touch-keyboard-skin-errors";
 import { createAiSkinPrompt } from "./touch-keyboard-skin-ai";
@@ -37,6 +39,8 @@ import * as skin from "./touch-skin-style";
 import * as doc from "../settings/document-style";
 import * as community from "../community/community-style";
 import { ActionButton } from "../core/action-button";
+import { useAsyncGeneration } from "../settings/use-async-generation";
+import { useMountedRef } from "../settings/use-mounted-ref";
 
 type Category = "背景" | "按键" | "文本" | "设计" | "我的";
 type NameEditor = { operation: "create" } | { operation: "rename"; id: string };
@@ -70,33 +74,27 @@ function AiSkinGeneration({
   const generateRunning = useRef(false);
   const saveRunning = useRef(false);
   const requestRef = useRef("");
-  const mounted = useRef(true);
-
-  useEffect(
-    () => () => {
-      mounted.current = false;
-    },
-    [],
-  );
+  const mounted = useMountedRef();
+  const progressGeneration = useAsyncGeneration(client, requestId);
 
   useEffect(() => {
+    const generation = progressGeneration.current;
     requestRef.current = requestId;
     if (!client.onProgress) return;
-    let active = true;
     let unsubscribe: (() => void) | undefined;
     void client
       .onProgress((progress) => {
-        if (active && progress.requestId === requestRef.current) setCompleted(progress.completed);
+        if (generation === progressGeneration.current && progress.requestId === requestRef.current)
+          setCompleted(progress.completed);
       })
       .then((value) => {
-        if (active) unsubscribe = value;
+        if (generation === progressGeneration.current) unsubscribe = value;
         else value();
       });
     return () => {
-      active = false;
       unsubscribe?.();
     };
-  }, [client, requestId]);
+  }, [client, progressGeneration, requestId]);
 
   useEffect(
     () => () => {
@@ -245,16 +243,16 @@ function AiSkinGeneration({
           AI 随机搭配插画、键帽造型与材质。抽到的皮肤可以继续编辑、保存或分享。
         </p>
         {busy && (
-          <p role="status">
+          <StatusMessage role="status">
             主题插画已完成 {completed}/3，可能需要几分钟…{" "}
             <ActionButton
               action={() => client.cancel(requestRef.current)}
               className="secondary"
               label="取消"
             />
-          </p>
+          </StatusMessage>
         )}
-        {message && <p role="status">{message}</p>}
+        {message && <StatusMessage role="status">{message}</StatusMessage>}
         <div className={doc.cardList}>
           {proposals.map((proposal) => {
             const item = saved[proposal.name];
@@ -351,28 +349,22 @@ function AiSkinGeneration({
               我拥有发布所用素材的权利，并同意其他用户免费下载使用
             </label>
             <p>发布后插画背景将公开，请勿包含私人或敏感资料。</p>
-            <button
-              type="button"
+            <ActionButton
+              action={() => publish()}
               className="primary"
               disabled={!publishAgreed || publishBusy}
-              onClick={() => void publish()}
-            >
-              公开发布
-            </button>
-            <button
-              type="button"
+              label="公开发布"
+            />
+            <ActionButton
+              action={() => setPublishing(null)}
               className="secondary"
               disabled={publishBusy}
-              onClick={() => setPublishing(null)}
-            >
-              取消
-            </button>
+              label="取消"
+            />
           </div>
         )}
         <div className={community.dialogActions}>
-          <button type="button" className="secondary" disabled={busy} onClick={onClose}>
-            完成
-          </button>
+          <ActionButton action={onClose} className="secondary" disabled={busy} label="完成" />
         </div>
       </section>
     </div>
@@ -413,22 +405,12 @@ export function TouchKeyboardSkinEditor({
   const [skinName, setSkinName] = useState("");
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [aiGenerationOpen, setAiGenerationOpen] = useState(false);
-  const mounted = useRef(true);
-  const libraryGeneration = useRef(0);
+  const mounted = useMountedRef();
+  const libraryGeneration = useAsyncGeneration(library);
   const libraryActionBusy = useRef(false);
-  useEffect(
-    () => () => {
-      mounted.current = false;
-      libraryGeneration.current += 1;
-      libraryActionBusy.current = false;
-    },
-    [],
-  );
-  useEffect(() => {
-    const generation = ++libraryGeneration.current;
-    if (!library) return;
-    libraryActionBusy.current = true;
-    void runAsyncAction(
+  const runLibraryAction = (operation: (isCurrent: () => boolean) => Promise<void>) => {
+    const generation = libraryGeneration.current;
+    return runAsyncAction(
       {
         busy: false,
         isCurrent: () => mounted.current && generation === libraryGeneration.current,
@@ -438,17 +420,21 @@ export function TouchKeyboardSkinEditor({
         },
         setError: setLibraryNotice,
       },
-      async (isCurrent) => {
-        const items = await library.load();
-        if (isCurrent()) setSaved(items);
-      },
+      operation,
       { formatError: libraryError },
     );
+  };
+  useEffect(() => {
+    if (!library) return;
+    libraryActionBusy.current = true;
+    void runLibraryAction(async (isCurrent) => {
+      const items = await library.load();
+      if (isCurrent()) setSaved(items);
+    });
     return () => {
-      if (generation === libraryGeneration.current) libraryGeneration.current += 1;
       libraryActionBusy.current = false;
     };
-  }, [library]);
+  }, [library, libraryGeneration]);
   const apply = (next: TouchKeyboardSkinDesign, record = true) => {
     const normalized = normalizeTouchKeyboardSkinDesign(next);
     if (JSON.stringify(normalized) === JSON.stringify(design)) return;
@@ -491,27 +477,14 @@ export function TouchKeyboardSkinEditor({
   const mutateLibrary = async (action: CustomSkinLibraryAction, success: string) => {
     if (!library || libraryActionBusy.current) return false;
     libraryActionBusy.current = true;
-    const generation = libraryGeneration.current;
     let succeeded = false;
-    await runAsyncAction(
-      {
-        busy: false,
-        isCurrent: () => mounted.current && generation === libraryGeneration.current,
-        setBusy: (busy) => {
-          libraryActionBusy.current = busy;
-          setLibraryBusy(busy);
-        },
-        setError: setLibraryNotice,
-      },
-      async (isCurrent) => {
-        const items = await library.mutate(action);
-        if (!isCurrent()) return;
-        setSaved(items);
-        setLibraryNotice(success);
-        succeeded = true;
-      },
-      { formatError: libraryError },
-    );
+    await runLibraryAction(async (isCurrent) => {
+      const items = await library.mutate(action);
+      if (!isCurrent()) return;
+      setSaved(items);
+      setLibraryNotice(success);
+      succeeded = true;
+    });
     libraryActionBusy.current = false;
     return succeeded;
   };
@@ -774,11 +747,7 @@ export function TouchKeyboardSkinEditor({
                   }}
                 />
               </label>
-              {photoError && (
-                <p role="alert" className={skin.warning}>
-                  {photoError}
-                </p>
-              )}
+              {photoError && <ErrorAlert className={skin.warning}>{photoError}</ErrorAlert>}
               {design.photo && (
                 <div className={skin.formGrid}>
                   <label>

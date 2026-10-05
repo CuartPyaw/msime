@@ -14,6 +14,9 @@ public final class DiagnosticPolicySmoke {
             InputDiagnosticPolicy.MAX_LENGTH + 20));
         check(bounded.length() == InputDiagnosticPolicy.MAX_LENGTH);
         check(bounded.endsWith("…"));
+        String splitEmoji = "x".repeat(InputDiagnosticPolicy.MAX_LENGTH - 2) + "😀tail";
+        String boundedEmoji = InputDiagnosticPolicy.normalize(splitEmoji);
+        check(boundedEmoji.equals("x".repeat(InputDiagnosticPolicy.MAX_LENGTH - 2) + "…"));
         check(InputDiagnosticPolicy.visible("提示"));
         check(!InputDiagnosticPolicy.visible("   "));
         check(InputDiagnosticPolicy.DISMISS_DELAY_MILLIS == 4_000L);

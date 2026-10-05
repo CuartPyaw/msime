@@ -152,7 +152,7 @@ public final class VoiceResultStore {
                         && !Files.isRegularFile(lockPath, LinkOption.NOFOLLOW_LINKS)))
                 throw new Failure(Reason.UNAVAILABLE);
             try (FileChannel channel = FileChannel.open(lockPath, StandardOpenOption.CREATE,
-                    StandardOpenOption.READ, StandardOpenOption.WRITE)) {
+                    StandardOpenOption.READ, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)) {
                 FileLock lock;
                 try { lock = channel.tryLock(); }
                 catch (OverlappingFileLockException error) { throw new Failure(Reason.BUSY, error); }
@@ -168,16 +168,7 @@ public final class VoiceResultStore {
     }
 
     private static void rejectSymlinkComponents(Path path) throws IOException {
-        Path absolute = path.toAbsolutePath().normalize();
-        Path current = absolute.getRoot();
-        if (current == null) throw new IOException("voice result path unavailable");
-        for (Path component : absolute) {
-            current = current.resolve(component);
-            // macOS 的临时目录通过受信任的 /var 别名暴露。
-            if (!current.toString().equals("/var") && !current.toString().equals("/tmp")
-                    && Files.isSymbolicLink(current))
-                throw new IOException("voice result path contains a symbolic link");
-        }
+        SafePaths.rejectSymlinkComponents(path);
     }
 
     private static Entry readFile(Path result, long nowMillis) throws Failure, IOException {
@@ -196,8 +187,9 @@ public final class VoiceResultStore {
                 || !validText(entry.text())
                 || entry.expiresAtMillis() - entry.createdAtMillis() != LIFETIME_MILLIS)
             throw new Failure(Reason.INVALID);
-        if (entry.expiresAtMillis() <= nowMillis
-                || entry.createdAtMillis() > nowMillis + FUTURE_TOLERANCE_MILLIS) {
+        boolean tooFarInFuture = entry.createdAtMillis() > nowMillis
+            && entry.createdAtMillis() - nowMillis > FUTURE_TOLERANCE_MILLIS;
+        if (entry.expiresAtMillis() <= nowMillis || tooFarInFuture) {
             Files.delete(result);
             return null;
         }

@@ -2562,46 +2562,6 @@ fn character_width_conversion_preserves_non_ascii_and_roundtrips_ascii() {
     assert_eq!(crate::character_width::to_fullwidth("中文"), "中文");
 }
 
-#[test]
-fn rerank_context_that_fits_is_handed_over_whole() {
-    // Short contexts are what the sentence eval measured, so they must reach the model untouched.
-    assert_eq!(crate::rerank_context("你好世界", 64, 10), "你好世界");
-    assert_eq!(crate::rerank_context("", 64, 10), "");
-}
-
-#[test]
-fn rerank_context_holds_still_while_a_candidate_grows() {
-    // A long context used to slide by one character per keystroke, which made the reranker rerun its prefix every time.
-    let context: String = "今天天气很好我们一起去公园散步".repeat(8);
-    let windows: Vec<&str> = (1..=40)
-        .map(|longest| crate::rerank_context(&context, 64, longest))
-        .collect();
-    let mut distinct = windows.clone();
-    distinct.dedup();
-    assert!(
-        distinct.len() <= 64 / crate::RERANK_CONTEXT_STEP + 1,
-        "{}",
-        distinct.len()
-    );
-    for (longest, window) in (1..=40).zip(&windows) {
-        let count = window.chars().count();
-        assert!(count + longest < 64, "longest {longest} kept {count}");
-        assert_eq!(count % crate::RERANK_CONTEXT_STEP, 0);
-        // Always the most recent text, never the start of it.
-        assert!(context.ends_with(window));
-    }
-}
-
-#[test]
-fn rerank_context_cuts_on_a_character_boundary_and_can_empty() {
-    let context = "a中b文".repeat(40);
-    let window = crate::rerank_context(&context, 64, 20);
-    assert_eq!(window.chars().count(), 32);
-    assert!(context.ends_with(window));
-    // A candidate that fills the window leaves no room, and the answer is an empty context rather than a panic.
-    assert_eq!(crate::rerank_context(&context, 64, 70), "");
-}
-
 /// `move_to_back` is the whole of the demotion rule that can be tested without an engine, and
 /// the version this replaced shipped with no test at all — which is how it reached `develop`
 /// dropping Japanese katakana and, separately, the model's own runner-up choices.
@@ -2610,13 +2570,6 @@ fn demotion_moves_flagged_items_to_the_end_and_keeps_both_orders() {
     let mut items = vec!["a", "b", "c", "d", "e"];
     crate::move_to_back(&mut items, &[false, true, false, true, false]);
     assert_eq!(items, vec!["a", "c", "e", "b", "d"]);
-}
-
-#[test]
-fn in_place_order_applies_candidate_permutations() {
-    let mut values = vec!["zero", "one", "two", "three", "four"];
-    apply_order(&mut values, &[2, 4, 1, 0, 3]);
-    assert_eq!(values, vec!["two", "four", "one", "zero", "three"]);
 }
 
 #[test]
@@ -2647,17 +2600,6 @@ fn a_short_flag_list_leaves_the_tail_in_place() {
     let mut items = vec![1, 2, 3, 4];
     crate::move_to_back(&mut items, &[true]);
     assert_eq!(items, vec![2, 3, 4, 1]);
-}
-
-/// Only `CandidateSource::Generated` names alternative readings of one key. Every other source
-/// is plural by design — English words, emoji, kaomoji, quick phrases, AI suggestions — and an
-/// earlier version of this rule kept one of each and dropped the rest.
-#[test]
-fn only_the_lattice_source_is_treated_as_alternative_readings() {
-    assert_eq!(crate::LATTICE_SOURCE, 8);
-    for plural in [2u8, 3, 4, 5, 6, 7] {
-        assert_ne!(crate::LATTICE_SOURCE, plural);
-    }
 }
 
 /// A runtime over an engine answering `rows` (text, source) in that order, with one key typed.
@@ -2949,6 +2891,7 @@ fn real_engine_options(root: &std::path::Path) -> msime_engine::host::EngineOpti
         cache: path("cache"),
         dictionaries: path("dictionaries"),
         scheme: 0,
+        enabled_schemes: msime_engine::SchemeSet::ALL,
         shuangpin_profile: 0,
         shuangpin_preedit_uses_raw: true,
         learning: false,
@@ -2996,6 +2939,7 @@ fn real_engine_options(root: &std::path::Path) -> msime_engine::host::EngineOpti
         vietnamese_tone_style: 0,
         cantonese_dictionary: String::new(),
         zhuyin_dictionary: String::new(),
+        stroke_dictionary: String::new(),
         japanese_dictionary: String::new(),
     }
 }
@@ -5106,12 +5050,192 @@ fn vietnamese_uppercase_comes_through() {
     assert_eq!(space.commit.as_deref(), Some("Việt"));
 }
 
+const TIBETAN_SCHEME: u8 = 8;
+
+/// 藏文方案上已获得焦点的真实 Engine。
+fn tibetan_runtime(directory: &std::path::Path) -> Runtime {
+    let mut options = real_engine_options(directory);
+    options.scheme = TIBETAN_SCHEME;
+    let session = msime_engine::host::Session::new(&options).unwrap();
+    let mut runtime = Runtime::new(session, 5).unwrap();
+    runtime.focus(true).unwrap();
+    runtime
+}
+
+/// 把 `keys` 当作普通字符逐个输入，大写字母不带 Shift（威利转写的大写是拼写），每个键都只组字、不上屏。
+fn compose_tibetan(runtime: &mut Runtime, keys: &str) -> Transition {
+    let mut last = None;
+    for value in keys.bytes() {
+        let transition = runtime
+            .dispatch(Action::Character {
+                value,
+                shift: false,
+            })
+            .unwrap();
+        assert!(
+            transition.handled && transition.commit.is_none(),
+            "{keys}: {}",
+            value as char
+        );
+        last = Some(transition);
+    }
+    last.unwrap()
+}
+
+/// 威利原文组字时显示转换后的藏文、没有候选；空格键上屏藏文加音节点并吞掉空格，`/` 上屏藏文加垂符，空闲时 `/` 单独上屏垂符。方案不是中文：不做繁简转换，宿主也没有智能标点可用。
+#[test]
+fn a_tibetan_syllable_commits_with_its_tsheg_and_shad() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = tibetan_runtime(directory.path());
+    assert!(!runtime.punctuation_host_context_available(false));
+    assert_eq!(runtime.view().spelling_symbols, "'/");
+
+    let typed = compose_tibetan(&mut runtime, "bkra");
+    assert_eq!(typed.view.scheme, TIBETAN_SCHEME);
+    assert_eq!(typed.view.editing_text, "བཀྲ");
+    assert!(typed.view.candidates.is_empty());
+    assert!(!typed.view.candidate_list_open);
+    assert!(!typed.view.chinese_text);
+    assert!(!typed.view.script_conversion);
+    assert_eq!(typed.view.spelling_symbols, "'+-./");
+    assert!(runtime.online_query().unwrap().is_none());
+
+    // 空格键（宿主的确认命令）上屏音节和音节点，空格本身被吞掉。
+    let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert!(space.handled);
+    assert_eq!(space.commit.as_deref(), Some("བཀྲ་"));
+    let context = space.commit_context.unwrap();
+    assert_eq!(context.scheme, TIBETAN_SCHEME);
+    assert!(!context.script_conversion);
+    assert_eq!(space.view.editing_text, "");
+
+    // 作为字符送来的空格也一样。
+    compose_tibetan(&mut runtime, "bkra");
+    let space = character(&mut runtime, b' ');
+    assert!(space.handled);
+    assert_eq!(space.commit.as_deref(), Some("བཀྲ་"));
+
+    // 无论宿主走字符、标点还是 ASCII 标点路由，`/` 都交给 Engine 上屏垂符。
+    compose_tibetan(&mut runtime, "shis");
+    let shad = character(&mut runtime, b'/');
+    assert!(shad.handled);
+    assert_eq!(shad.commit.as_deref(), Some("ཤིས།"));
+    compose_tibetan(&mut runtime, "shis");
+    let shad = runtime.dispatch(Action::Punctuation(b'/')).unwrap();
+    assert_eq!(shad.commit.as_deref(), Some("ཤིས།"));
+    compose_tibetan(&mut runtime, "shis");
+    let shad = runtime.dispatch(Action::PunctuationAscii(b'/')).unwrap();
+    assert_eq!(shad.commit.as_deref(), Some("ཤིས།"));
+    for action in [
+        Action::Character {
+            value: b'/',
+            shift: false,
+        },
+        Action::Punctuation(b'/'),
+        Action::PunctuationAscii(b'/'),
+    ] {
+        let alone = runtime.dispatch(action).unwrap();
+        assert!(alone.handled);
+        assert_eq!(alone.commit.as_deref(), Some("།"));
+        assert_eq!(alone.view.local_mode, "none");
+    }
+
+    // 其他标点先上屏藏文，再跟半角标点；空闲时交回宿主。
+    compose_tibetan(&mut runtime, "ka");
+    let comma = runtime.dispatch(Action::Punctuation(b',')).unwrap();
+    assert_eq!(comma.commit.as_deref(), Some("ཀ,"));
+    let idle = runtime.dispatch(Action::Punctuation(b',')).unwrap();
+    assert!(!idle.handled && idle.commit.is_none());
+
+    // 回车只上屏藏文，不加音节点。
+    compose_tibetan(&mut runtime, "ka");
+    let enter = runtime
+        .dispatch(Action::Command(Command::CommitRaw))
+        .unwrap();
+    assert!(enter.handled);
+    assert_eq!(enter.commit.as_deref(), Some("ཀ"));
+}
+
+/// 拼写符号在组字时是输入：`+` 叠写、`.` 消歧、`'` 小阿、`-` 分隔都进入原文；大写字母不论 Caps Lock 还是 Shift 都是拼写。
+#[test]
+fn tibetan_spelling_symbols_and_capitals_compose() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = tibetan_runtime(directory.path());
+
+    let stacked = compose_tibetan(&mut runtime, "pad+ma");
+    assert_eq!(stacked.view.editing_text, "པདྨ");
+    runtime.dispatch(Action::SelectHighlighted).unwrap();
+
+    let disambiguated = compose_tibetan(&mut runtime, "g.yag");
+    assert_eq!(disambiguated.view.editing_text, "གཡག");
+    runtime.dispatch(Action::SelectHighlighted).unwrap();
+
+    // 空闲时 `'` 也是拼写符号，用来打以小阿开头的音节。
+    let achung = compose_tibetan(&mut runtime, "'od");
+    assert_eq!(achung.view.editing_text, "འོད");
+    runtime.dispatch(Action::SelectHighlighted).unwrap();
+
+    let retroflex = compose_tibetan(&mut runtime, "Ta");
+    assert_eq!(retroflex.view.editing_text, "ཊ");
+    runtime.dispatch(Action::SelectHighlighted).unwrap();
+    let shifted = runtime
+        .dispatch(Action::Character {
+            value: b'D',
+            shift: true,
+        })
+        .unwrap();
+    assert!(shifted.handled && shifted.commit.is_none());
+    let vowel = compose_tibetan(&mut runtime, "a");
+    assert_eq!(vowel.view.editing_text, "ཌ");
+
+    // 数字结束组字并交回宿主，不转成藏文数字。
+    let digit = character(&mut runtime, b'1');
+    assert!(!digit.handled);
+    assert_eq!(digit.commit.as_deref(), Some("ཌ"));
+    let idle = character(&mut runtime, b'1');
+    assert!(!idle.handled && idle.commit.is_none());
+}
+
+/// 退格删一个威利原文按键；离开客户端时按显示上屏；第一次 Esc 显示回原文并继续组字，第二次丢弃组字。
+#[test]
+fn tibetan_backspace_blur_and_escape() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = tibetan_runtime(directory.path());
+
+    compose_tibetan(&mut runtime, "sangs");
+    let backspace = runtime
+        .dispatch(Action::Command(Command::Backspace))
+        .unwrap();
+    assert!(backspace.handled && backspace.commit.is_none());
+    assert_eq!(backspace.view.editing_text, "སང");
+
+    let left = runtime.focus(false).unwrap();
+    assert_eq!(left.commit.as_deref(), Some("སང"));
+    assert_eq!(left.view.editing_text, "");
+    runtime.focus(true).unwrap();
+
+    // 接入新客户端时丢弃上一个客户端里没打完的音节。
+    compose_tibetan(&mut runtime, "bkra");
+    let attached = runtime.focus(true).unwrap();
+    assert!(attached.commit.is_none());
+    assert_eq!(attached.view.editing_text, "");
+
+    compose_tibetan(&mut runtime, "bkra");
+    let restored = runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+    assert!(restored.handled && restored.commit.is_none());
+    assert_eq!(restored.view.editing_text, "bkra");
+    let cancelled = runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+    assert!(cancelled.handled && cancelled.commit.is_none());
+    assert_eq!(cancelled.view.editing_text, "");
+    assert_eq!(runtime.view().editing_text, "");
+}
+
 const CANTONESE_SCHEME: u8 = 5;
 
-/// A `cantonese.db` with a few Jyutping rows, written with the shipped schema.
+/// A `msime-cantonese.db` with a few Jyutping rows, written with the shipped schema.
 fn cantonese_dictionary(directory: &std::path::Path) -> String {
     use msime_engine::language_dictionary::{FORMAT_VERSION, METADATA_FORMAT_VERSION, SCHEMA};
-    let path = directory.join("cantonese.db");
+    let path = directory.join("msime-cantonese.db");
     let connection = rusqlite::Connection::open(&path).unwrap();
     connection.execute_batch(SCHEMA).unwrap();
     connection
@@ -5329,7 +5453,7 @@ fn a_cantonese_partial_selection_commits_at_once_and_learns_nothing() {
     assert_eq!(database_rows(directory.path()), before);
 }
 
-/// The sentence model and the runner-up demotion reorder Chinese lattice readings; a Cantonese list comes from its own dictionary in its own order, so neither touches it.
+/// The sentence model and the runner-up demotion reorder Chinese lattice readings; a Cantonese or Stroke list comes from its own dictionary in its own order, so neither touches it.
 #[test]
 fn cantonese_lists_are_never_reranked_or_demoted() {
     let reordered = |scheme: u8, words: &[&str], sources: Vec<u8>, model: Option<SentenceModel>| {
@@ -5368,6 +5492,11 @@ fn cantonese_lists_are_never_reranked_or_demoted() {
         reordered(CANTONESE_SCHEME, &rows, vec![LATTICE_SOURCE; 3], favours()),
         rows
     );
+    // Stroke lists come from msime-stroke.db in its own order as well.
+    assert_eq!(
+        reordered(STROKE_SCHEME, &rows, vec![LATTICE_SOURCE; 3], favours()),
+        rows
+    );
     let sentences = ["你好嗎", "妳好嗎", "尼好嗎", "你號嗎", "妳號嗎", "你", "好"];
     let sources = || {
         let mut sources = vec![LATTICE_SOURCE; 5];
@@ -5386,10 +5515,10 @@ fn cantonese_lists_are_never_reranked_or_demoted() {
 
 const ZHUYIN_SCHEME: u8 = 6;
 
-/// A `zhuyin.db` with a few bopomofo rows, written with the shipped schema.
+/// A `msime-zhuyin.db` with a few bopomofo rows, written with the shipped schema.
 fn zhuyin_dictionary(directory: &std::path::Path) -> String {
     use msime_engine::language_dictionary::{FORMAT_VERSION, METADATA_FORMAT_VERSION, SCHEMA};
-    let path = directory.join("zhuyin.db");
+    let path = directory.join("msime-zhuyin.db");
     let connection = rusqlite::Connection::open(&path).unwrap();
     connection.execute_batch(SCHEMA).unwrap();
     connection
@@ -5700,4 +5829,415 @@ fn zhuyin_spelling_symbols_stay_visible_with_phrase_preedit() {
         .unwrap();
     assert_eq!(enter.commit.as_deref(), Some("你郝"));
     assert_eq!(enter.view.phrase_prefix, "");
+}
+
+const STROKE_SCHEME: u8 = 9;
+
+/// A `msime-stroke.db` with a few single characters keyed by their stroke letters, written with the shipped schema. `土` has two codes, as characters with variant stroke orders do in the real data. The weights are made up.
+fn stroke_dictionary(directory: &std::path::Path) -> String {
+    use msime_engine::language_dictionary::{FORMAT_VERSION, METADATA_FORMAT_VERSION, SCHEMA};
+    let path = directory.join("msime-stroke.db");
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection.execute_batch(SCHEMA).unwrap();
+    connection
+        .execute(
+            "INSERT INTO metadata VALUES (?1, ?2)",
+            (METADATA_FORMAT_VERSION, FORMAT_VERSION.to_string()),
+        )
+        .unwrap();
+    connection
+        .execute_batch(
+            "INSERT INTO syllables VALUES ('h'),('s'),('p'),('n'),('z');\
+             INSERT INTO entries VALUES ('h','一',9000),('hh','二',5000),('hhh','三',4000),('hs','十',4500),('hsh','土',2000),('hshh','土',10),('hhsh','王',2500),('hpn','大',5500),('pn','人',6000),('szh','口',3500);",
+        )
+        .unwrap();
+    path.to_str().unwrap().to_owned()
+}
+
+/// A real Engine on the Stroke scheme with learning on, so a learning path the scheme failed to skip would write. Focused.
+fn stroke_runtime(directory: &std::path::Path) -> Runtime {
+    let mut options = real_engine_options(directory);
+    options.scheme = STROKE_SCHEME;
+    options.learning = true;
+    options.stroke_dictionary = stroke_dictionary(directory);
+    let session = msime_engine::host::Session::new(&options).unwrap();
+    let mut runtime = Runtime::new(session, 5).unwrap();
+    runtime.focus(true).unwrap();
+    runtime
+}
+
+/// Types `keys` as plain characters, each one composing without a commit.
+fn compose_stroke(runtime: &mut Runtime, keys: &str) -> Transition {
+    let mut last = None;
+    for value in keys.bytes() {
+        let transition = character(runtime, value);
+        assert!(
+            transition.handled && transition.commit.is_none(),
+            "{keys}: {}",
+            value as char
+        );
+        last = Some(transition);
+    }
+    last.unwrap()
+}
+
+/// The stroke letters compose on the character route and the preedit draws their glyphs while editing_text keeps the letters; exact matches lead and completions follow, each character once. Digits 1-9 pick from the visible page, since the scheme spells with no digit or symbol. The text is written as stored, so nothing is script-converted.
+#[test]
+fn stroke_letters_compose_and_digits_select() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = stroke_runtime(directory.path());
+    let idle = runtime.view();
+    assert_eq!(idle.scheme, STROKE_SCHEME);
+    assert_eq!(idle.spelling_symbols, "");
+    assert!(idle.chinese_text);
+    assert!(!idle.script_conversion);
+
+    let typed = compose_stroke(&mut runtime, "hs");
+    assert_eq!(typed.view.scheme, STROKE_SCHEME);
+    assert_eq!(typed.view.editing_text, "hs");
+    assert_eq!(typed.view.caret_position, 2);
+    assert_eq!(typed.view.preedit, "一丨");
+    assert_eq!(typed.view.reading, "一丨");
+    assert_eq!(texts(&typed.view), ["十", "土"]);
+    assert_eq!(typed.view.spelling_symbols, "");
+    assert!(!typed.view.candidate_list_open);
+    assert!(typed.view.chinese_text);
+    assert!(!typed.view.script_conversion);
+
+    let picked = character(&mut runtime, b'2');
+    assert!(picked.handled);
+    assert_eq!(picked.commit.as_deref(), Some("土"));
+    let context = picked.commit_context.unwrap();
+    assert_eq!(context.scheme, STROKE_SCHEME);
+    assert!(!context.script_conversion);
+    assert_eq!(picked.view.editing_text, "");
+    assert_eq!(picked.view.preedit, "");
+
+    // A digit past the end of the page is swallowed rather than typed into the document.
+    compose_stroke(&mut runtime, "szh");
+    let beyond = character(&mut runtime, b'9');
+    assert!(beyond.handled && beyond.commit.is_none());
+    assert_eq!(beyond.view.editing_text, "szh");
+    runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+}
+
+/// With nothing composed only h s p n z start a composition: the wildcard, the other letters and the digits go back to the host to type. While composing the wildcard appends a stroke that matches any one, other letters are swallowed without touching the composition, Backspace drops the last stroke and Escape clears it all.
+#[test]
+fn stroke_wildcard_and_other_letters_follow_the_composition() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = stroke_runtime(directory.path());
+
+    for value in *b"xa1" {
+        let typed = character(&mut runtime, value);
+        assert!(
+            !typed.handled && typed.commit.is_none(),
+            "{}",
+            value as char
+        );
+        assert_eq!(typed.view.editing_text, "", "{}", value as char);
+    }
+
+    compose_stroke(&mut runtime, "hs");
+    for value in *b"aqy" {
+        let swallowed = character(&mut runtime, value);
+        assert!(
+            swallowed.handled && swallowed.commit.is_none(),
+            "{}",
+            value as char
+        );
+        assert_eq!(swallowed.view.editing_text, "hs", "{}", value as char);
+        assert_eq!(swallowed.view.preedit, "一丨", "{}", value as char);
+    }
+
+    let wildcard = character(&mut runtime, b'x');
+    assert!(wildcard.handled && wildcard.commit.is_none());
+    assert_eq!(wildcard.view.editing_text, "hsx");
+    assert_eq!(wildcard.view.preedit, "一丨＊");
+    assert_eq!(texts(&wildcard.view), ["土"]);
+
+    let back = runtime
+        .dispatch(Action::Command(Command::Backspace))
+        .unwrap();
+    assert!(back.handled && back.commit.is_none());
+    assert_eq!(back.view.editing_text, "hs");
+    assert_eq!(texts(&back.view), ["十", "土"]);
+
+    // A wildcard in the middle matches any one stroke there.
+    let middle = compose_stroke(&mut runtime, "xh");
+    assert_eq!(middle.view.preedit, "一丨＊一");
+    assert_eq!(texts(&middle.view), ["土"]);
+
+    let cleared = runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+    assert!(cleared.handled && cleared.commit.is_none());
+    assert_eq!(cleared.view.editing_text, "");
+    assert!(cleared.view.candidates.is_empty());
+}
+
+/// Space takes the highlighted row, Enter commits the typed letters, and a composition with no match commits its letters on Space as well. Leaving the client commits nothing.
+#[test]
+fn stroke_space_picks_and_enter_commits_the_letters() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = stroke_runtime(directory.path());
+
+    compose_stroke(&mut runtime, "hh");
+    runtime.dispatch(Action::NextCandidate).unwrap();
+    let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert!(space.handled);
+    assert_eq!(space.commit.as_deref(), Some("三"));
+    assert_eq!(space.commit_context.unwrap().scheme, STROKE_SCHEME);
+    assert_eq!(space.view.editing_text, "");
+
+    compose_stroke(&mut runtime, "pn");
+    let enter = runtime
+        .dispatch(Action::Command(Command::CommitRaw))
+        .unwrap();
+    assert!(enter.handled);
+    assert_eq!(enter.commit.as_deref(), Some("pn"));
+    assert_eq!(enter.view.editing_text, "");
+
+    let unmatched = compose_stroke(&mut runtime, "zzz");
+    assert!(unmatched.view.candidates.is_empty());
+    let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert!(space.handled);
+    assert_eq!(space.commit.as_deref(), Some("zzz"));
+    assert_eq!(space.view.editing_text, "");
+
+    compose_stroke(&mut runtime, "hs");
+    let left = runtime.focus(false).unwrap();
+    assert!(left.commit.is_none());
+}
+
+/// Punctuation while composing commits the top row followed by the full-width mark.
+#[test]
+fn stroke_punctuation_commits_the_top_row_then_the_mark() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = stroke_runtime(directory.path());
+
+    compose_stroke(&mut runtime, "pn");
+    let comma = runtime
+        .dispatch(Action::Character {
+            value: b',',
+            shift: false,
+        })
+        .unwrap();
+    assert!(comma.handled);
+    assert_eq!(comma.commit.as_deref(), Some("人，"));
+    assert_eq!(comma.view.editing_text, "");
+
+    compose_stroke(&mut runtime, "hpn");
+    let question = runtime.dispatch(Action::Punctuation(b'?')).unwrap();
+    assert!(question.handled);
+    assert_eq!(question.commit.as_deref(), Some("大？"));
+    assert_eq!(question.view.editing_text, "");
+
+    // The apostrophe separates no syllables under Stroke, so it is punctuation like the rest: the Windows Server and the Linux hosts send it here rather than as composition input.
+    compose_stroke(&mut runtime, "pn");
+    let apostrophe = runtime.dispatch(Action::Punctuation(b'\'')).unwrap();
+    assert!(apostrophe.handled);
+    let written = apostrophe.commit.unwrap();
+    assert!(
+        written.starts_with('人') && written.chars().count() == 2,
+        "{written}"
+    );
+    assert_eq!(apostrophe.view.editing_text, "");
+}
+
+/// Picking a lower row again and again does not lift it, and nothing the user picks is written to any database.
+#[test]
+fn stroke_selections_learn_nothing() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = stroke_runtime(directory.path());
+    let first = compose_stroke(&mut runtime, "hh");
+    assert_eq!(texts(&first.view), ["二", "三", "王"]);
+    runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+    let before = database_rows(directory.path());
+
+    for _ in 0..3 {
+        compose_stroke(&mut runtime, "hh");
+        assert_eq!(character(&mut runtime, b'3').commit.as_deref(), Some("王"));
+    }
+    let again = compose_stroke(&mut runtime, "hh");
+    assert_eq!(texts(&again.view), ["二", "三", "王"]);
+    runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+
+    drop(runtime);
+    msime_engine::flush_personal_learning();
+    assert_eq!(database_rows(directory.path()), before);
+}
+
+// ---- 网址模式 ----
+
+/// 用真实引擎（空词库）建一个指定方案的 runtime。
+fn url_runtime(directory: &std::path::Path, scheme: u8) -> Runtime {
+    let mut options = real_engine_options(directory);
+    options.scheme = scheme;
+    let session = msime_engine::host::Session::new(&options).unwrap();
+    let mut runtime = Runtime::new(session, 5).unwrap();
+    runtime.focus(true).unwrap();
+    runtime
+}
+
+fn type_characters(runtime: &mut Runtime, text: &str) {
+    for value in text.bytes() {
+        let transition = character(runtime, value);
+        assert!(
+            transition.handled && transition.commit.is_none(),
+            "{:?} of {text:?}: {transition:?}",
+            value as char
+        );
+    }
+}
+
+// runtime 在把标点交给引擎前会先结束组字；只有引擎在 `spelling_symbols` 里列出的触发键才改走 `character`，所以 `www` 后的 `.` 能进入网址模式而不是先上屏。
+#[test]
+fn url_mode_opens_on_the_punctuation_route() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = url_runtime(directory.path(), 0);
+    type_characters(&mut runtime, "www");
+    assert_eq!(runtime.view().spelling_symbols, ".");
+    let opened = runtime.dispatch(Action::Punctuation(b'.')).unwrap();
+    assert!(opened.handled && opened.commit.is_none(), "{opened:?}");
+    assert_eq!(opened.view.local_mode, "url");
+    assert_eq!(opened.view.editing_text, "www.");
+    type_characters(&mut runtime, "google");
+    let dot = runtime.dispatch(Action::Punctuation(b'.')).unwrap();
+    assert!(dot.handled && dot.commit.is_none(), "{dot:?}");
+    type_characters(&mut runtime, "com");
+    let committed = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert_eq!(committed.commit.as_deref(), Some("www.google.com"));
+    let context = committed.commit_context.unwrap();
+    assert_eq!(context.local_mode, "url");
+    // 网址是用户打出来的，计入打字统计。
+    assert!(context.typing_statistics);
+    assert_eq!(committed.view.local_mode, "none");
+    assert!(committed.view.editing_text.is_empty());
+}
+
+// 宿主把 `:` 当作字符送来（Character 路由）时同样进入网址模式。
+#[test]
+fn url_mode_opens_on_the_character_route() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = url_runtime(directory.path(), 0);
+    type_characters(&mut runtime, "https");
+    let colon = character(&mut runtime, b':');
+    assert!(colon.handled && colon.commit.is_none(), "{colon:?}");
+    assert_eq!(colon.view.local_mode, "url");
+    type_characters(&mut runtime, "//x.com:8080/a?b=1");
+    let enter = runtime
+        .dispatch(Action::Command(Command::CommitRaw))
+        .unwrap();
+    assert_eq!(enter.commit.as_deref(), Some("https://x.com:8080/a?b=1"));
+}
+
+// 字面标点路由（PunctuationAscii）不负责入口：宿主在这条路由上要的是字面符号，组字中的 `.` 照旧结束组字。进入网址模式后，这条路由上的网址符号都是输入。
+#[test]
+fn url_mode_takes_symbols_on_the_punctuation_ascii_route() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = url_runtime(directory.path(), 0);
+    type_characters(&mut runtime, "www");
+    let literal = runtime.dispatch(Action::PunctuationAscii(b'.')).unwrap();
+    assert!(literal
+        .commit
+        .as_deref()
+        .is_some_and(|text| text.ends_with('.')));
+    assert_eq!(literal.view.local_mode, "none");
+
+    type_characters(&mut runtime, "www");
+    runtime.dispatch(Action::Punctuation(b'.')).unwrap();
+    type_characters(&mut runtime, "a");
+    for value in *b"./?=&#" {
+        let transition = runtime.dispatch(Action::PunctuationAscii(value)).unwrap();
+        assert!(
+            transition.handled && transition.commit.is_none(),
+            "{:?}: {transition:?}",
+            value as char
+        );
+    }
+    assert_eq!(runtime.view().editing_text, "www.a./?=&#");
+    assert_eq!(runtime.view().local_mode, "url");
+}
+
+#[test]
+fn url_digit_is_input_not_a_pick() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = url_runtime(directory.path(), 0);
+    type_characters(&mut runtime, "www");
+    runtime.dispatch(Action::Punctuation(b'.')).unwrap();
+    for value in *b"1234567890" {
+        let transition = character(&mut runtime, value);
+        assert!(
+            transition.handled && transition.commit.is_none(),
+            "{value} picked a candidate: {transition:?}"
+        );
+    }
+    assert_eq!(runtime.view().editing_text, "www.1234567890");
+    assert_eq!(runtime.view().local_mode, "url");
+}
+
+// 网址不收的符号结束网址：先上屏网址，再接上中文标点。
+#[test]
+fn url_mark_outside_the_url_commits_it_before_the_mark() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = url_runtime(directory.path(), 0);
+    type_characters(&mut runtime, "www");
+    runtime.dispatch(Action::Punctuation(b'.')).unwrap();
+    type_characters(&mut runtime, "a");
+    let quote = character(&mut runtime, b'"');
+    assert_eq!(quote.commit.as_deref(), Some("www.a\u{201c}"));
+    assert_eq!(quote.view.local_mode, "none");
+}
+
+// 五笔码长上限是 4，`http` 后的 `s` 本会被拒绝；这里直接进入网址模式，空码的 `http` 也不会被顶字上屏。
+#[test]
+fn url_https_opens_on_the_fifth_wubi_letter() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = url_runtime(directory.path(), 2);
+    type_characters(&mut runtime, "http");
+    assert_eq!(runtime.view().editing_text, "http");
+    let s = character(&mut runtime, b's');
+    assert!(s.handled && s.commit.is_none(), "{s:?}");
+    assert_eq!(s.view.local_mode, "url");
+    assert_eq!(s.view.editing_text, "https");
+    let colon = runtime.dispatch(Action::Punctuation(b':')).unwrap();
+    assert!(colon.handled && colon.commit.is_none(), "{colon:?}");
+    assert_eq!(runtime.view().editing_text, "https:");
+}
+
+// 删掉触发键退回组字。
+#[test]
+fn url_backspace_past_the_trigger_returns_to_the_composition() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = url_runtime(directory.path(), 0);
+    type_characters(&mut runtime, "www");
+    runtime.dispatch(Action::Punctuation(b'.')).unwrap();
+    let back = runtime
+        .dispatch(Action::Command(Command::Backspace))
+        .unwrap();
+    assert!(back.handled && back.commit.is_none());
+    assert_eq!(back.view.local_mode, "none");
+    assert_eq!(back.view.editing_text, "www");
+    assert_eq!(back.view.spelling_symbols, ".");
+}
+
+// 空格上屏网址本身，不在末尾带空格；Esc 丢弃网址不上屏，回到没有本地模式的状态。
+#[test]
+fn url_space_commits_the_url_alone_and_escape_discards_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = url_runtime(directory.path(), 0);
+    type_characters(&mut runtime, "www");
+    runtime.dispatch(Action::Punctuation(b'.')).unwrap();
+    type_characters(&mut runtime, "a");
+    let space = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert!(space.handled, "{space:?}");
+    assert_eq!(space.commit.as_deref(), Some("www.a"));
+    assert_eq!(space.view.local_mode, "none");
+    assert!(space.view.editing_text.is_empty());
+
+    type_characters(&mut runtime, "www");
+    runtime.dispatch(Action::Punctuation(b'.')).unwrap();
+    type_characters(&mut runtime, "a");
+    let escape = runtime.dispatch(Action::Command(Command::Cancel)).unwrap();
+    assert!(escape.commit.is_none(), "{escape:?}");
+    assert_eq!(escape.view.local_mode, "none");
+    assert!(escape.view.editing_text.is_empty());
 }

@@ -21,16 +21,22 @@ pub mod language_dictionary;
 mod lattice;
 mod local;
 mod nine_key;
+pub mod ordering;
 mod paths;
 mod pinyin;
 mod punctuation;
 mod quanpin;
 mod session;
 mod shuangpin;
+pub mod stroke;
 mod text;
+mod tibetan;
+pub mod time;
 mod types;
 mod user_dictionary;
 pub mod vietnamese;
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+pub mod web;
 mod wubi;
 pub mod zhuyin;
 
@@ -45,8 +51,8 @@ pub use types::{
     Command, CommandTranslationQuery, EnglishInputOptions, FrequencyAdjustmentMode,
     FrequencyAdjustmentOptions, FuzzyPinyinOptions, KeyResult, LocalInputMode, LocalModeOptions,
     MixedExpressiveOptions, OnlineQuery, PersonalDictionaryEntry, PersonalDictionaryKind,
-    SchemeType, SentenceAssociationOptions, ShuangpinProfileKind, WordItem, WubiInputOptions,
-    WubiProfileKind,
+    SchemeSet, SchemeType, SentenceAssociationOptions, ShuangpinProfileKind, WordItem,
+    WubiInputOptions, WubiProfileKind,
 };
 pub use user_dictionary::bundled::{
     dictionary_table_entries, edit_bundled_dictionary_entry, DictionaryTableEntry,
@@ -65,8 +71,9 @@ pub use user_dictionary::state::{
 };
 
 pub use local::date_time::LocalDateTime;
+pub use local::url;
 
-/// Create or migrate an `english.db` to the schema the engine reads. Fixtures without one need it; `prepare_runtime_paths` copies both dictionaries.
+/// Create or migrate an `msime-english.db` to the schema the engine reads. Fixtures without one need it; `prepare_runtime_paths` copies both dictionaries.
 pub fn ensure_english_schema(path: &std::path::Path) -> Result<()> {
     dictionary::english::ensure_english_schema(path)
 }

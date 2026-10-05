@@ -7,8 +7,8 @@ use crate::paths::RuntimePaths;
 use crate::types::{
     CandidateSource, CommandTableEntry, EnglishInputOptions, FrequencyAdjustmentOptions,
     FuzzyPinyinOptions, LocalInputMode, LocalModeOptions, MentionEntry, MixedExpressiveOptions,
-    QuickPhraseEntry, SchemeType, SentenceAssociationOptions, ShuangpinProfileKind, WordItem,
-    WubiInputOptions,
+    QuickPhraseEntry, SchemeSet, SchemeType, SentenceAssociationOptions, ShuangpinProfileKind,
+    WordItem, WubiInputOptions,
 };
 use crate::vietnamese::{InputMethod as VietnameseInputMethod, ToneStyle as VietnameseToneStyle};
 
@@ -17,6 +17,8 @@ use crate::vietnamese::{InputMethod as VietnameseInputMethod, ToneStyle as Vietn
 pub struct SessionOptions {
     pub paths: RuntimePaths,
     pub scheme: SchemeType,
+    /// 会话允许运行的方案，缺省全部。`scheme` 和之后的 `switch_scheme` 都必须在其中；只为其中的方案构造 provider（见 [`SchemeSet`]）。
+    pub enabled_schemes: SchemeSet,
     pub shuangpin_profile: ShuangpinProfileKind,
     /// Shuangpin preedit shows the typed keys rather than the decoded quanpin.
     pub shuangpin_preedit_uses_raw: bool,
@@ -24,11 +26,13 @@ pub struct SessionOptions {
     pub vietnamese_input_method: VietnameseInputMethod,
     /// Where the Vietnamese scheme puts the tone on `oa`, `oe` and `uy`.
     pub vietnamese_tone_style: VietnameseToneStyle,
-    /// Where `cantonese.db` is; empty when the host has none. Read only when Cantonese is activated, which fails without it.
+    /// Where `msime-cantonese.db` is; empty when the host has none. Read only when Cantonese is activated, which fails without it.
     pub cantonese_dictionary: PathBuf,
-    /// Where `zhuyin.db` is; empty when the host has none. Read only when Zhuyin is activated, which fails without it.
+    /// Where `msime-zhuyin.db` is; empty when the host has none. Read only when Zhuyin is activated, which fails without it.
     pub zhuyin_dictionary: PathBuf,
-    /// `dict_japanese.dat` 的位置；为空时读资源目录里的那份。文件缺失时日文只给假名行。
+    /// Where `msime-stroke.db` is; empty when the host has none. Read only when Stroke is activated, which fails without it.
+    pub stroke_dictionary: PathBuf,
+    /// `msime-japanese.dat` 的位置；为空时读资源目录里的那份。文件缺失时日文只给假名行。
     pub japanese_dictionary: PathBuf,
     pub helpcode_schema: String,
     /// 宿主给的辅助码表；有它时直接装上它，不再按 `helpcode_schema` 读表（名字仍然要合法）。`Session::set_helpcode_table` 可以实时替换。
@@ -68,12 +72,14 @@ impl SessionOptions {
         Self {
             paths,
             scheme: SchemeType::Quanpin,
+            enabled_schemes: SchemeSet::ALL,
             shuangpin_profile: ShuangpinProfileKind::Xiaohe,
             shuangpin_preedit_uses_raw: true,
             vietnamese_input_method: VietnameseInputMethod::Telex,
             vietnamese_tone_style: VietnameseToneStyle::Modern,
             cantonese_dictionary: PathBuf::new(),
             zhuyin_dictionary: PathBuf::new(),
+            stroke_dictionary: PathBuf::new(),
             japanese_dictionary: PathBuf::new(),
             helpcode_schema: "lantian".to_owned(),
             helpcode_table: None,

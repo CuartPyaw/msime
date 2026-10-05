@@ -37,7 +37,11 @@ with tempfile.TemporaryDirectory() as scratch:
     system_config = scratch / "system/runtime-options.json"
     script = scratch / "bin/msime-linux-settings"
     script.parent.mkdir()
-    script.write_text(launcher.replace("@MSIME_SETTINGS_SYSTEM_CONFIG@", str(system_config)))
+    # 首行换成 /bin/sh：模板的 `#!/usr/bin/env sh` 在没有 FHS 布局的环境（Nix 构建沙箱）里找不到 env，
+    # 装出去的那份由打包时的 patchShebangs 改写；这里测的是脚本内容。
+    body = launcher.replace("@MSIME_SETTINGS_SYSTEM_CONFIG@", str(system_config))
+    assert body.startswith("#!/usr/bin/env sh\n"), body.splitlines()[0]
+    script.write_text("#!/bin/sh\n" + body.split("\n", 1)[1])
     desktop_binary = scratch / "bin/msime-linux-desktop"
     desktop_binary.write_text('#!/bin/sh\nprintf %s "$MSIME_CLIENT_HOST_OPTIONS"\n')
     for path in (script, desktop_binary):
@@ -70,5 +74,17 @@ with tempfile.TemporaryDirectory() as scratch:
     assert subprocess.run([str(script), "--route=emoji"], env=environment, check=True, capture_output=True, text=True).stdout == "--route=emoji"
     usage = subprocess.run([str(script), "--help"], env=environment, check=True, capture_output=True, text=True).stdout
     assert "|help|feedback|" in usage
+
+    # 所有窗口入口默认禁用 WebKit 合成，不改变调用方的 GTK 后端；显式值仍可用于排查上游问题。
+    desktop_binary.write_text('#!/bin/sh\nprintf "%s\\n" "$WEBKIT_DISABLE_COMPOSITING_MODE" "$GDK_BACKEND" "$@"\n')
+    environment.pop("WEBKIT_DISABLE_COMPOSITING_MODE", None)
+    environment["GDK_BACKEND"] = "wayland"
+    for arguments in ([], ["--panel", "settings"], ["--panel", "voice"], ["--route=settings:about"]):
+        output = subprocess.run([str(script), *arguments], env=environment, check=True, capture_output=True, text=True).stdout
+        assert output.splitlines()[:2] == ["1", "wayland"], (arguments, output)
+    for value, expected in (("", "1"), ("0", "0"), ("1", "1")):
+        environment["WEBKIT_DISABLE_COMPOSITING_MODE"] = value
+        output = launched()
+        assert output.splitlines()[:2] == [expected, "wayland"], output
 
 print("settings launcher contract: ok")

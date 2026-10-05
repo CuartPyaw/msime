@@ -1,49 +1,10 @@
 use std::fs;
 use std::io;
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 
-/// Reject an existing symbolic link before a storage operation follows it.
+/// 在存储操作跟随已有的符号链接之前先拒绝它。每个应用的存储都会经过的系统链接，以 `msime-path-trust` 列出的为准。
 pub(crate) fn reject_symlink(path: &Path) -> io::Result<()> {
-    let mut current = PathBuf::new();
-    let mut saw_prefix_alias = false;
-    let mut saw_real_component = false;
-    let components: Vec<_> = path.components().collect();
-    for (index, component) in components.iter().enumerate() {
-        match component {
-            Component::Prefix(_) | Component::RootDir => current.push(component),
-            Component::CurDir => continue,
-            Component::ParentDir => current.push(component),
-            Component::Normal(_) => {
-                current.push(component);
-                match fs::symlink_metadata(&current) {
-                    Ok(metadata) if metadata.file_type().is_symlink() => {
-                        let system_alias = path.is_absolute()
-                            && !saw_real_component
-                            && !saw_prefix_alias
-                            && matches!(component, Component::Normal(name) if *name == std::ffi::OsStr::new("tmp") || *name == std::ffi::OsStr::new("var"));
-                        if index + 1 == components.len()
-                            || saw_real_component
-                            || saw_prefix_alias
-                            || !system_alias
-                        {
-                            return Err(io::Error::new(
-                                io::ErrorKind::InvalidInput,
-                                "storage path is a symbolic link",
-                            ));
-                        }
-                        // The first component under a system alias such as macOS /tmp or /var
-                        // may itself be a symlink. Once a real component exists below it, stop
-                        // looking above that boundary; descendants are still checked.
-                        saw_prefix_alias = true;
-                    }
-                    Ok(_) => saw_real_component = true,
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error),
-                }
-            }
-        }
-    }
-    Ok(())
+    msime_path_trust::reject_symlinked_components(path)
 }
 
 /// Create a directory and report whether the path itself is a real directory.
@@ -60,7 +21,7 @@ pub(crate) fn create_directory_and_check(path: &Path) -> io::Result<bool> {
     loop {
         match fs::symlink_metadata(current) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
-                if current == Path::new("/tmp") || current == Path::new("/var") {
+                if msime_path_trust::is_trusted_system_alias(current) {
                     break;
                 }
                 return Err(io::Error::new(

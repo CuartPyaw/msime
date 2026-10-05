@@ -7,6 +7,10 @@ add_executable(desktop-input-session-test tests/input/DesktopInputSessionTest.mm
 target_compile_options(desktop-input-session-test PRIVATE -fobjc-arc -UNDEBUG -Wall -Wextra -Werror)
 target_link_libraries(desktop-input-session-test PRIVATE "-framework AppKit")
 add_test(NAME desktop-input-session COMMAND desktop-input-session-test)
+add_executable(bounded-file-reader-test tests/core/BoundedFileReaderTest.mm src/core/BoundedFileReader.mm)
+target_compile_options(bounded-file-reader-test PRIVATE -fobjc-arc -UNDEBUG -Wall -Wextra -Werror)
+target_link_libraries(bounded-file-reader-test PRIVATE "-framework Foundation")
+add_test(NAME bounded-file-reader COMMAND bounded-file-reader-test)
 add_executable(voice-provider-socket-test tests/voice/VoiceProviderSocketTest.mm)
 target_compile_options(voice-provider-socket-test PRIVATE -fobjc-arc -UNDEBUG -Wall -Wextra -Werror)
 target_link_libraries(voice-provider-socket-test PRIVATE "-framework Foundation")
@@ -18,6 +22,8 @@ add_test(NAME input-mode-hud-panel COMMAND input-mode-hud-panel-test)
 # The selected input mode (中, 英, 日 or 한) follows the controller's state; this checks the mapping to the plist's mode identifiers and that a switch made by either side is not echoed back by the other.
 add_executable(input-mode-identifiers-test tests/input/InputModeIdentifiersTest.mm)
 target_compile_options(input-mode-identifiers-test PRIVATE -fobjc-arc -UNDEBUG -Wall -Wextra -Werror)
+# InputModeIdentifiers.h 经 src/core/SystemPathAlias.h 用到 std::filesystem，而这个目标定义在下面统一设置 C++17 之前，所以单独指定。
+set_target_properties(input-mode-identifiers-test PROPERTIES OBJCXX_STANDARD 17)
 target_link_libraries(input-mode-identifiers-test PRIVATE "-framework Foundation")
 add_test(NAME input-mode-identifiers COMMAND input-mode-identifiers-test)
 add_executable(desktop-input-interop-test tests/input/DesktopInputInteropTest.mm src/core/DesktopInputSession.mm)
@@ -90,7 +96,13 @@ if(TARGET shared-doubao-auth)
   # The Rust archive needs the same Apple/system dependencies in shared ABI tests.
   target_link_libraries(shared-doubao-auth PRIVATE ${SQLITE_TARGET} ${MSIME_HOST_LIBRARY_FRAMEWORKS})
 endif()
-add_executable(MSIMEClientInputMethod MACOSX_BUNDLE src/cloud/CloudFileTransfer.mm src/input/input_method_main.mm src/cloud/CloudClipboardWindowController.mm src/cloud/CloudClipboardClient.mm src/cloud/CloudURLSession.mm src/core/AccountSessionManager.mm src/core/AccountAuthClient.mm src/core/AccountWindowController.mm src/core/AccountKeychain.mm src/cloud/CloudDictionaryClient.mm src/settings/PreferencesWindowController.mm src/core/SupportWindowController.mm src/voice/VoiceInputService.mm src/voice/VoiceWaveOverlay.mm src/voice/VoiceCuePlayer.mm src/voice/VoiceAudioMuter.mm src/voice/VoiceSettings.mm src/voice/VoiceProviderSettings.mm src/input/InputController.mm src/input/InputModeHUDPanel.mm src/candidate/CandidateSkinAppearance.mm src/settings/AppearancePreferences.mm src/core/DiagnosticLog.cpp src/candidate/CandidateSkin.cpp src/candidate/CandidateSkinPreviewView.mm src/candidate/SkinSettingsView.mm src/core/ChineseTextConversion.mm src/settings/ShuangpinKeymapPanel.mm src/input/InputSourceRegistration.mm src/core/FloatingToolbarPanel.mm src/core/UpdateController.mm src/dictionary/DictionaryWindowController.mm src/core/ClientDictionaryRuntime.mm src/dictionary/DictionaryInstaller.mm ../../crates/host-macos/native/uninstaller.mm)
+# UsageReporting.mm 引用 msime_client.h 并调用宿主的 msime_client_telemetry_*，所以测试要链接 apple-client（带上头文件路径和 Rust 宿主库），且须定义在它之后。原先只链 AppKit，CI 在编译这个文件时就报 'msime_client.h' file not found。
+add_executable(usage-reporting-path-test tests/core/UsageReportingPathTest.mm src/core/UsageReporting.mm)
+target_compile_options(usage-reporting-path-test PRIVATE -fobjc-arc -UNDEBUG -Wall -Wextra -Werror)
+target_compile_definitions(usage-reporting-path-test PRIVATE MSIME_USAGE_REPORTING_TEST_SUPPORT="/tmp/msime-usage-reporting-path-test")
+target_link_libraries(usage-reporting-path-test PRIVATE apple-client)
+add_test(NAME usage-reporting-path COMMAND usage-reporting-path-test)
+add_executable(MSIMEClientInputMethod MACOSX_BUNDLE src/cloud/CloudFileTransfer.mm src/input/input_method_main.mm src/cloud/CloudClipboardWindowController.mm src/cloud/CloudClipboardClient.mm src/cloud/CloudURLSession.mm src/core/AccountSessionManager.mm src/core/AccountAuthClient.mm src/core/AccountWindowController.mm src/core/AccountKeychain.mm src/cloud/CloudDictionaryClient.mm src/settings/PreferencesWindowController.mm src/core/SupportWindowController.mm src/voice/VoiceInputService.mm src/voice/VoiceWaveOverlay.mm src/voice/VoiceCuePlayer.mm src/voice/VoiceAudioMuter.mm src/voice/VoiceSettings.mm src/voice/VoiceProviderSettings.mm src/input/InputController.mm src/input/InputModeHUDPanel.mm src/candidate/CandidateSkinAppearance.mm src/settings/AppearancePreferences.mm src/core/DiagnosticLog.cpp src/core/BoundedFileReader.mm src/candidate/CandidateSkin.cpp src/candidate/CandidateSkinPreviewView.mm src/candidate/SkinSettingsView.mm src/core/ChineseTextConversion.mm src/settings/ShuangpinKeymapPanel.mm src/input/InputSourceRegistration.mm src/core/FloatingToolbarPanel.mm src/core/UpdateController.mm src/dictionary/DictionaryWindowController.mm src/core/ClientDictionaryRuntime.mm src/dictionary/DictionaryInstaller.mm ../../crates/host-macos/native/uninstaller.mm)
 target_sources(MSIMEClientInputMethod PRIVATE src/core/AISettingsWindow.mm src/core/ScreenKeyboardPanel.mm src/cloud/CloudCandidateRequest.mm src/core/CustomTranslationBatch.mm src/voice/VoicePCMBuffer.mm src/voice/HTTPVoiceRequest.mm)
 target_sources(MSIMEClientInputMethod PRIVATE src/voice/DoubaoVoiceRequest.mm src/voice/LocalVoiceRequest.mm)
 target_sources(MSIMEClientInputMethod PRIVATE src/core/DesktopInputSession.mm)
@@ -129,7 +141,49 @@ if(NOT MSIME_BUILD_NUMBER MATCHES "^[1-9][0-9]*$")
 endif()
 set(MACOSX_BUNDLE_BUNDLE_VERSION "${MSIME_BUILD_NUMBER}")
 message(STATUS "Bundle build number: ${MACOSX_BUNDLE_BUNDLE_VERSION}")
-set_target_properties(MSIMEClientInputMethod PROPERTIES MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in")
+# 版本（edition）是 shared/contracts/editions.json 里的 id。full 用 Info.plist.in 和 resources/<语言>.lproj/InfoPlist.strings 原样构建，产物与引入版本之前相同；其他版本由 scripts/edition_bundle.py 在配置时从同样的模板生成该版本的 Info.plist 和 InfoPlist.strings（bundle id、模式、版本键），可执行文件也改成该版本的名字。原生代码在运行时从 Info.plist 读版本身份（src/core/EditionIdentity.h），所以除了这几个文件，各版本编出来的东西完全一样；发布包只编 full，再用同一个脚本把 bundle 改成各个版本（package-release.sh）。
+set(MSIME_EDITION "full" CACHE STRING "Edition id from shared/contracts/editions.json")
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(MSIME_EDITION_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/scripts/edition_bundle.py")
+if(MSIME_EDITION STREQUAL "full")
+  set(MSIME_INFO_PLIST_TEMPLATE "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in")
+  set(MSIME_LOCALIZED_RESOURCES "${CMAKE_CURRENT_SOURCE_DIR}/resources")
+  set(MSIME_INPUT_METHOD_NAME "水杉输入法")
+else()
+  set(MSIME_EDITION_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/edition-${MSIME_EDITION}")
+  set(MSIME_INFO_PLIST_TEMPLATE "${MSIME_EDITION_DIRECTORY}/Info.plist.in")
+  set(MSIME_LOCALIZED_RESOURCES "${MSIME_EDITION_DIRECTORY}/resources")
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${MSIME_EDITION_SCRIPT}" plist --edition "${MSIME_EDITION}"
+            --template "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in" --output "${MSIME_INFO_PLIST_TEMPLATE}"
+    RESULT_VARIABLE MSIME_EDITION_RESULT)
+  if(NOT MSIME_EDITION_RESULT EQUAL 0)
+    message(FATAL_ERROR "Cannot generate the Info.plist of edition ${MSIME_EDITION}")
+  endif()
+  foreach(MSIME_BUNDLE_LOCALE zh-Hans en)
+    execute_process(
+      COMMAND "${Python3_EXECUTABLE}" "${MSIME_EDITION_SCRIPT}" strings --edition "${MSIME_EDITION}"
+              --input "${CMAKE_CURRENT_SOURCE_DIR}/resources/${MSIME_BUNDLE_LOCALE}.lproj/InfoPlist.strings"
+              --output "${MSIME_LOCALIZED_RESOURCES}/${MSIME_BUNDLE_LOCALE}.lproj/InfoPlist.strings"
+      RESULT_VARIABLE MSIME_EDITION_RESULT)
+    if(NOT MSIME_EDITION_RESULT EQUAL 0)
+      message(FATAL_ERROR "Cannot generate the ${MSIME_BUNDLE_LOCALE} InfoPlist.strings of edition ${MSIME_EDITION}")
+    endif()
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+      "${CMAKE_CURRENT_SOURCE_DIR}/resources/${MSIME_BUNDLE_LOCALE}.lproj/InfoPlist.strings")
+  endforeach()
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${MSIME_EDITION_SCRIPT}" field --edition "${MSIME_EDITION}" input_method_name
+    OUTPUT_VARIABLE MSIME_INPUT_METHOD_NAME OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE MSIME_EDITION_RESULT)
+  if(NOT MSIME_EDITION_RESULT EQUAL 0)
+    message(FATAL_ERROR "Cannot read the input method name of edition ${MSIME_EDITION}")
+  endif()
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in" "${MSIME_EDITION_SCRIPT}" "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/contracts/editions.json")
+endif()
+message(STATUS "Edition: ${MSIME_EDITION} (${MSIME_INPUT_METHOD_NAME}.app)")
+set_target_properties(MSIMEClientInputMethod PROPERTIES MACOSX_BUNDLE_INFO_PLIST "${MSIME_INFO_PLIST_TEMPLATE}")
 set(MSIME_LEGAL_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Licenses")
 file(MAKE_DIRECTORY "${MSIME_LEGAL_DIRECTORY}")
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../LICENSE" "${MSIME_LEGAL_DIRECTORY}/GPL-3.0.txt" COPYONLY)
@@ -146,8 +200,12 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../resources/licenses/libhangul-h
 # The Cantonese and Zhuyin schemes, whose syllables and words come from the dictionaries in language-dictionaries/ (when installed), built from rime-cantonese (CC BY 4.0, which requires attribution) and libchewing-data (LGPL-2.1-or-later, which requires the licence text and a source pointer).
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../resources/licenses/rime-cantonese-CC-BY-4.0.txt" "${MSIME_LEGAL_DIRECTORY}/rime-cantonese-CC-BY-4.0.txt" COPYONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../resources/licenses/libchewing-data-LGPL-2.1.txt" "${MSIME_LEGAL_DIRECTORY}/libchewing-data-LGPL-2.1.txt" COPYONLY)
+# The Stroke scheme, whose stroke orders come from msime-stroke.db in language-dictionaries/ (when installed), built from rime-stroke (LGPL-3.0, which requires the licence text and a source pointer; its main table also carries the CNS11643 attribution).
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../resources/licenses/rime-stroke-LGPL-3.0.txt" "${MSIME_LEGAL_DIRECTORY}/rime-stroke-LGPL-3.0.txt" COPYONLY)
 # The vi crate the engine links for Vietnamese Telex and VNI; MIT requires its copyright and permission notice in every copy, and macOS is where the Vietnamese scheme ships.
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../resources/licenses/vi-MIT.txt" "${MSIME_LEGAL_DIRECTORY}/vi-MIT.txt" COPYONLY)
+# 引擎为藏文方案链接的 ewts crate（EWTS 威利转写转藏文）；它以 MIT OR Apache-2.0 双许可发布，这里选 MIT，MIT 要求每份副本都带上版权和许可声明。
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../resources/licenses/ewts-MIT.txt" "${MSIME_LEGAL_DIRECTORY}/ewts-MIT.txt" COPYONLY)
 # symphonia and triple_buffer, which host-api links in for key sounds and music, and rink-core, which the engine links in for V-mode unit conversion, are MPL-2.0: the licence text ships with the binary, and THIRD_PARTY_NOTICES.txt says where their source is.
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../resources/licenses/MPL-2.0.txt" "${MSIME_LEGAL_DIRECTORY}/MPL-2.0.txt" COPYONLY)
 # The on-device speech runtime staged into Contents/Frameworks below. The upstream archive carries no license file, so the texts come from the copies the other desktops ship: sherpa-onnx's beside its vendored C header, ONNX Runtime's pinned under platforms/linux.
@@ -159,13 +217,13 @@ target_sources(MSIMEClientInputMethod PRIVATE ${MSIME_LEGAL_RESOURCES})
 set_source_files_properties(${MSIME_LEGAL_RESOURCES} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/Licenses")
 # The Dock takes its label from the bundle's filename — not CFBundleDisplayName, CFBundleName or a
 # localized InfoPlist.strings, all of which it ignores here. Naming the product is the only lever.
-set_target_properties(MSIMEClientInputMethod PROPERTIES OUTPUT_NAME "水杉输入法")
+set_target_properties(MSIMEClientInputMethod PROPERTIES OUTPUT_NAME "${MSIME_INPUT_METHOD_NAME}")
 # The preferences window runs under NSApplicationActivationPolicyRegular, so the bundle appears in
 # the Dock and needs an icon; without CFBundleIconFile plus the file itself it shows the generic one.
 target_sources(MSIMEClientInputMethod PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/resources/MSIMEClientInputMethod.icns")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/resources/MSIMEClientInputMethod.icns"
   PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
-# 输入菜单自己的图标，是模板 TIFF 而不是应用图标：bundle 的标志（切换 HUD 也显示它），以及九个输入模式各自的大字图标。标志为什么不能和应用图标是同一个文件，见 Info.plist.in 里 tsInputMethodIconFileKey 旁的注释。
+# 输入菜单自己的图标，是模板 TIFF 而不是应用图标：bundle 的标志（切换 HUD 也显示它），以及十一个输入模式各自的大字图标。标志为什么不能和应用图标是同一个文件，见 Info.plist.in 里 tsInputMethodIconFileKey 旁的注释。
 set(MSIME_MENU_ICON_RESOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/resources/MSIMEClientInputMethodMenuIcon.tiff"
   "${CMAKE_CURRENT_SOURCE_DIR}/resources/MSIMEClientInputMethodMenuIconChinese.tiff"
@@ -176,6 +234,8 @@ set(MSIME_MENU_ICON_RESOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/resources/MSIMEClientInputMethodMenuIconJapanese.tiff"
   "${CMAKE_CURRENT_SOURCE_DIR}/resources/MSIMEClientInputMethodMenuIconKorean.tiff"
   "${CMAKE_CURRENT_SOURCE_DIR}/resources/MSIMEClientInputMethodMenuIconVietnamese.tiff"
+  "${CMAKE_CURRENT_SOURCE_DIR}/resources/MSIMEClientInputMethodMenuIconTibetan.tiff"
+  "${CMAKE_CURRENT_SOURCE_DIR}/resources/MSIMEClientInputMethodMenuIconStroke.tiff"
   "${CMAKE_CURRENT_SOURCE_DIR}/resources/MSIMEClientInputMethodMenuIconEnglish.tiff")
 target_sources(MSIMEClientInputMethod PRIVATE ${MSIME_MENU_ICON_RESOURCES})
 set_source_files_properties(${MSIME_MENU_ICON_RESOURCES} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
@@ -206,8 +266,8 @@ endforeach()
 # carries only the English names and the input menu loses 水杉输入法. bundle-contents checks each locale.
 foreach(MSIME_BUNDLE_LOCALE zh-Hans en)
   target_sources(MSIMEClientInputMethod
-    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/resources/${MSIME_BUNDLE_LOCALE}.lproj/InfoPlist.strings")
-  set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/resources/${MSIME_BUNDLE_LOCALE}.lproj/InfoPlist.strings"
+    PRIVATE "${MSIME_LOCALIZED_RESOURCES}/${MSIME_BUNDLE_LOCALE}.lproj/InfoPlist.strings")
+  set_source_files_properties("${MSIME_LOCALIZED_RESOURCES}/${MSIME_BUNDLE_LOCALE}.lproj/InfoPlist.strings"
     PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/${MSIME_BUNDLE_LOCALE}.lproj")
 endforeach()
 # On-device recognition runs in its own process: the input method spawns Contents/MacOS/msime-voice-local (see src/voice/LocalVoiceRequest.h) and the helper loads the pinned sherpa-onnx runtime from Contents/Frameworks, where shared/voice/LocalAsr.cpp looks beside an executable in Contents/MacOS. The runtime is the prebuilt upstream library pinned in resources/voice-runtime.lock.json; scripts/fetch_voice_runtime.py downloads and verifies it once into MSIME_VOICE_RUNTIME_DIR and reuses its cached archive afterwards, and the stamp reruns it whenever the lock or the script changes.
@@ -490,6 +550,9 @@ add_executable(macos-diagnostic-log-test tests/core/DiagnosticLogTest.cpp src/co
 target_compile_options(macos-diagnostic-log-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(macos-diagnostic-log-test PRIVATE src)
 add_test(NAME macos-diagnostic-log COMMAND macos-diagnostic-log-test)
+add_executable(system-path-alias-test tests/core/SystemPathAliasTest.cpp)
+target_compile_options(system-path-alias-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+add_test(NAME system-path-alias COMMAND system-path-alias-test)
 add_executable(shared-voice-preferences-test tests/voice/SharedVoicePreferencesTest.mm)
 target_compile_options(shared-voice-preferences-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(shared-voice-preferences-test PRIVATE "-framework Foundation")
@@ -580,19 +643,19 @@ add_executable(typing-statistics-notification-test
 target_compile_options(typing-statistics-notification-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(typing-statistics-notification-test PRIVATE "-framework Foundation")
 add_test(NAME typing-statistics-notification COMMAND typing-statistics-notification-test)
-add_executable(toolbar-visibility-preferences-test tests/settings/ToolbarVisibilityPreferencesTest.mm src/settings/AppearancePreferences.mm src/candidate/CandidateSkin.cpp src/candidate/CandidateSkinPreviewView.mm src/candidate/SkinSettingsView.mm src/settings/PreferencesWindowController.mm src/candidate/CandidateSkinAppearance.mm src/core/AISettingsWindow.mm)
+add_executable(toolbar-visibility-preferences-test tests/settings/ToolbarVisibilityPreferencesTest.mm src/settings/AppearancePreferences.mm src/core/BoundedFileReader.mm src/candidate/CandidateSkin.cpp src/candidate/CandidateSkinPreviewView.mm src/candidate/SkinSettingsView.mm src/settings/PreferencesWindowController.mm src/candidate/CandidateSkinAppearance.mm src/core/AISettingsWindow.mm)
 target_compile_options(toolbar-visibility-preferences-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(toolbar-visibility-preferences-test PRIVATE "-framework AppKit")
 add_test(NAME toolbar-visibility-preferences COMMAND toolbar-visibility-preferences-test)
-add_executable(scheme-round-trip-preferences-test tests/settings/SchemeRoundTripPreferencesTest.mm src/settings/AppearancePreferences.mm src/candidate/CandidateSkin.cpp src/candidate/CandidateSkinPreviewView.mm src/candidate/SkinSettingsView.mm src/settings/PreferencesWindowController.mm src/candidate/CandidateSkinAppearance.mm src/core/AISettingsWindow.mm)
+add_executable(scheme-round-trip-preferences-test tests/settings/SchemeRoundTripPreferencesTest.mm src/settings/AppearancePreferences.mm src/core/BoundedFileReader.mm src/candidate/CandidateSkin.cpp src/candidate/CandidateSkinPreviewView.mm src/candidate/SkinSettingsView.mm src/settings/PreferencesWindowController.mm src/candidate/CandidateSkinAppearance.mm src/core/AISettingsWindow.mm)
 target_compile_options(scheme-round-trip-preferences-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(scheme-round-trip-preferences-test PRIVATE "-framework AppKit")
 add_test(NAME scheme-round-trip-preferences COMMAND scheme-round-trip-preferences-test)
-add_executable(local-mode-preferences-test tests/settings/LocalModePreferencesTest.mm src/settings/AppearancePreferences.mm src/candidate/CandidateSkin.cpp src/candidate/CandidateSkinPreviewView.mm src/candidate/SkinSettingsView.mm src/candidate/CandidateSkinAppearance.mm)
+add_executable(local-mode-preferences-test tests/settings/LocalModePreferencesTest.mm src/settings/AppearancePreferences.mm src/core/BoundedFileReader.mm src/candidate/CandidateSkin.cpp src/candidate/CandidateSkinPreviewView.mm src/candidate/SkinSettingsView.mm src/candidate/CandidateSkinAppearance.mm)
 target_compile_options(local-mode-preferences-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(local-mode-preferences-test PRIVATE apple-client "-framework AppKit")
 add_test(NAME local-mode-preferences COMMAND local-mode-preferences-test)
-add_executable(preferences-lifecycle-test tests/settings/PreferencesLifecycleTest.mm src/settings/AppearancePreferences.mm src/candidate/CandidateSkin.cpp src/candidate/CandidateSkinPreviewView.mm src/candidate/SkinSettingsView.mm src/settings/PreferencesWindowController.mm src/candidate/CandidateSkinAppearance.mm src/core/AISettingsWindow.mm)
+add_executable(preferences-lifecycle-test tests/settings/PreferencesLifecycleTest.mm src/settings/AppearancePreferences.mm src/core/BoundedFileReader.mm src/candidate/CandidateSkin.cpp src/candidate/CandidateSkinPreviewView.mm src/candidate/SkinSettingsView.mm src/settings/PreferencesWindowController.mm src/candidate/CandidateSkinAppearance.mm src/core/AISettingsWindow.mm)
 target_compile_options(preferences-lifecycle-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(preferences-lifecycle-test PRIVATE "-framework AppKit")
 add_test(NAME preferences-lifecycle COMMAND preferences-lifecycle-test)
@@ -726,7 +789,7 @@ add_executable(voice-session-delivery-test tests/voice/VoiceSessionDeliveryTest.
 target_compile_options(voice-session-delivery-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(voice-session-delivery-test PRIVATE apple-client "-framework AVFoundation" "-framework Speech" "-framework CoreAudio" "-framework AudioToolbox")
 add_test(NAME voice-session-delivery COMMAND voice-session-delivery-test)
-add_executable(shortcut-test tests/input/ShortcutTest.mm src/core/DiagnosticLog.cpp src/core/UpdateController.mm src/settings/AppearancePreferences.mm src/candidate/CandidateSkin.cpp src/candidate/CandidateSkinPreviewView.mm src/candidate/SkinSettingsView.mm src/core/ChineseTextConversion.mm src/settings/ShuangpinKeymapPanel.mm src/input/InputSourceRegistration.mm src/core/FloatingToolbarPanel.mm src/dictionary/DictionaryWindowController.mm src/core/ClientDictionaryRuntime.mm)
+add_executable(shortcut-test tests/input/ShortcutTest.mm src/core/DiagnosticLog.cpp src/core/BoundedFileReader.mm src/core/UpdateController.mm src/settings/AppearancePreferences.mm src/candidate/CandidateSkin.cpp src/candidate/CandidateSkinPreviewView.mm src/candidate/SkinSettingsView.mm src/core/ChineseTextConversion.mm src/settings/ShuangpinKeymapPanel.mm src/input/InputSourceRegistration.mm src/core/FloatingToolbarPanel.mm src/dictionary/DictionaryWindowController.mm src/core/ClientDictionaryRuntime.mm)
 target_compile_options(shortcut-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(shortcut-test PRIVATE apple-client "-framework AppKit" "-framework InputMethodKit" "-framework Carbon")
 target_compile_options(shortcut-test PRIVATE "-F${MSIME_SPARKLE_ROOT}")
@@ -877,12 +940,12 @@ target_compile_options(dictionary-runtime-test PRIVATE -fobjc-arc -Wall -Wextra 
 target_include_directories(dictionary-runtime-test PRIVATE ../../shared/apple ../../crates/host-api/include)
 target_link_libraries(dictionary-runtime-test PRIVATE apple-client "-framework Foundation")
 add_test(NAME dictionary-runtime COMMAND dictionary-runtime-test)
-add_executable(skin-preview-test tests/candidate/SkinPreviewTest.mm src/settings/AppearancePreferences.mm src/candidate/CandidateSkin.cpp src/candidate/CandidateSkinPreviewView.mm src/candidate/SkinSettingsView.mm src/core/ChineseTextConversion.mm src/settings/PreferencesWindowController.mm src/candidate/CandidateSkinAppearance.mm)
+add_executable(skin-preview-test tests/candidate/SkinPreviewTest.mm src/settings/AppearancePreferences.mm src/core/BoundedFileReader.mm src/candidate/CandidateSkin.cpp src/candidate/CandidateSkinPreviewView.mm src/candidate/SkinSettingsView.mm src/core/ChineseTextConversion.mm src/settings/PreferencesWindowController.mm src/candidate/CandidateSkinAppearance.mm)
 target_include_directories(skin-preview-test PRIVATE src)
 target_compile_options(skin-preview-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(skin-preview-test PRIVATE "-framework AppKit" "-framework CoreText")
 add_test(NAME skin-preview COMMAND skin-preview-test)
-add_executable(skin-settings-test tests/candidate/SkinSettingsTest.mm src/settings/AppearancePreferences.mm src/candidate/CandidateSkin.cpp src/candidate/CandidateSkinPreviewView.mm src/candidate/SkinSettingsView.mm src/candidate/CandidateSkinAppearance.mm src/core/ChineseTextConversion.mm)
+add_executable(skin-settings-test tests/candidate/SkinSettingsTest.mm src/settings/AppearancePreferences.mm src/core/BoundedFileReader.mm src/candidate/CandidateSkin.cpp src/candidate/CandidateSkinPreviewView.mm src/candidate/SkinSettingsView.mm src/candidate/CandidateSkinAppearance.mm src/core/ChineseTextConversion.mm)
 foreach(translation_settings_consumer MSIMEClientInputMethod toolbar-visibility-preferences-test scheme-round-trip-preferences-test local-mode-preferences-test preferences-lifecycle-test shortcut-test skin-preview-test skin-settings-test)
   target_sources(${translation_settings_consumer} PRIVATE src/cloud/TranslationSettingsWindow.mm)
 endforeach()
@@ -950,21 +1013,21 @@ add_test(
   NAME info-plist-icons
   COMMAND "${Python3_EXECUTABLE}"
           "${CMAKE_CURRENT_SOURCE_DIR}/tests/settings/info_plist_icons.py"
-          "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
+          "${MSIME_INFO_PLIST_TEMPLATE}"
           "${CMAKE_CURRENT_SOURCE_DIR}/resources")
 add_test(
   NAME info-plist-usage
   COMMAND "${Python3_EXECUTABLE}"
           "${CMAKE_CURRENT_SOURCE_DIR}/tests/settings/info_plist_usage.py"
-          "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
+          "${MSIME_INFO_PLIST_TEMPLATE}"
           "${CMAKE_CURRENT_SOURCE_DIR}/src")
 # The input source identifiers and the names the input menu shows for them live in different files, so renaming the bundle leaves the names keyed on an identifier nothing declares any more - and the menu then prints the identifier itself.
 add_test(
   NAME info-plist-names
   COMMAND "${Python3_EXECUTABLE}"
           "${CMAKE_CURRENT_SOURCE_DIR}/tests/settings/info_plist_names.py"
-          "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
-          "${CMAKE_CURRENT_SOURCE_DIR}/resources"
+          "${MSIME_INFO_PLIST_TEMPLATE}"
+          "${MSIME_LOCALIZED_RESOURCES}"
           "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 add_test(
   NAME entitlements-guard

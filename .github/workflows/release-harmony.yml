@@ -5,7 +5,6 @@ on:
       version: {description: Semantic version (defaults to platforms/harmony/version.txt), required: false, type: string}
       prerelease: {description: Mark as prerelease, required: false, default: false, type: boolean}
       publish: {description: Publish the build as a harmony-v release (otherwise it is only uploaded as a workflow artifact), required: false, default: true, type: boolean}
-      ref: {description: 要构建并发布的分支、标签或提交（默认 main；触发时选的分支只决定用哪份 workflow 文件）, required: false, default: main, type: string}
 permissions: {contents: write}
 concurrency: {group: release-harmony, cancel-in-progress: false}
 jobs:
@@ -19,7 +18,7 @@ jobs:
       HARMONY_TOOLCHAIN_SHA256: b9caf7b73c541b90e6c8f3c7c3de7f2bea9b35e41e80cd3525f2f759ebf16cf4
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: {ref: "${{ inputs.ref }}", fetch-depth: 0, persist-credentials: false}
+        with: {fetch-depth: 0, persist-credentials: false}
       - id: version
         env: {REQUESTED: "${{ inputs.version }}"}
         run: |
@@ -33,7 +32,7 @@ jobs:
           corepack enable
           pnpm install --frozen-lockfile --ignore-scripts
           bash platforms/harmony/stage-settings.sh
-      # The HAP carries the engine resources only if stage-resources.sh put them in resfile/ (without them the keyboard logs "no packaged resources at /engine"). It takes the directory install_resources verified and unpacked, and stages target/language-dictionaries (Cantonese and Zhuyin, with their licences); a release must carry both, so it fails rather than staging fewer.
+      # The HAP carries the engine resources only if stage-resources.sh put them in resfile/ (without them the keyboard logs "no packaged resources at /engine"). It takes the directory install_resources verified and unpacked, and stages target/language-dictionaries (Cantonese, Zhuyin and Stroke, with their licences); a release must carry all three, so it fails rather than staging fewer.
       - name: Fetch the locked language dictionaries
         run: python3 scripts/fetch_language_dictionaries.py
       - name: Stage the HarmonyOS engine resources
@@ -90,10 +89,9 @@ jobs:
       # than implied. Without the gate a dispatch on a feature branch cuts a real public release.
       - name: Publish independent HarmonyOS release
         if: ${{ inputs.publish }}
-        env: {GH_TOKEN: "${{ github.token }}", VERSION: "${{ steps.version.outputs.value }}", PRERELEASE: "${{ inputs.prerelease }}", HAP: "${{ steps.hap.outputs.path }}"}
+        env: {GH_TOKEN: "${{ github.token }}", VERSION: "${{ steps.version.outputs.value }}", PRERELEASE: "${{ inputs.prerelease }}", HAP: "${{ steps.hap.outputs.path }}", EVERYAPI_RELEASE_NOTES_TOKEN: "${{ secrets.EVERYAPI_RELEASE_NOTES_TOKEN }}", EVERYAPI_RELEASE_NOTES_MODEL: "${{ vars.EVERYAPI_RELEASE_NOTES_MODEL }}"}
         run: |
-          # --generate-notes otherwise starts from whichever tag in the repository is newest, and the six platforms interleave prefixes, so a macOS release could be described by the diff since an ios-v tag. fetch-depth: 0 above is what makes this list complete.
           start=$(git tag --list 'harmony-v*' --sort=-v:refname | head -1)
           tag="harmony-v${VERSION}"; flags=(); [[ "$PRERELEASE" == true ]] && flags+=(--prerelease)
-          [[ -n "$start" ]] && flags+=(--notes-start-tag "$start")
-          gh release create "$tag" "$HAP" --target "$(git rev-parse HEAD)" --title "HarmonyOS ${VERSION}" --generate-notes "${flags[@]}"
+          python3 scripts/generate-release-notes.py --platform harmony --version "$VERSION" --start-tag "$start" --end-ref "$(git rev-parse HEAD)" --output release-notes.md
+          gh release create "$tag" "$HAP" --target "$(git rev-parse HEAD)" --title "HarmonyOS ${VERSION}" --notes-file release-notes.md "${flags[@]}"

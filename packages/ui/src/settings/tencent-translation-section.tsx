@@ -1,7 +1,10 @@
+import { SettingsGroupNote } from "./settings-group-note";
+import { SettingsWarning } from "./settings-warning";
 import type { ReactNode } from "react";
-import * as settings from "./settings-style";
 import { SecretSettingRow } from "./secret-setting-row";
 import { TextInputRow } from "./text-input-row";
+import { SettingsGroupBlock } from "./settings-group-block";
+import { SettingsRowStack } from "./settings-row-stack";
 
 export interface TencentTranslationSectionProps {
   available: boolean;
@@ -30,8 +33,8 @@ export function TencentTranslationSection({
   children,
 }: TencentTranslationSectionProps) {
   return (
-    <div role="group" aria-label="腾讯云机器翻译" className={settings.rowStack}>
-      <p className={settings.groupNote}>需要填入你自己的腾讯云 API 凭据。</p>
+    <SettingsRowStack role="group" aria-label="腾讯云机器翻译">
+      <SettingsGroupNote>需要填入你自己的腾讯云 API 凭据。</SettingsGroupNote>
       <TextInputRow
         title="SecretId"
         label="腾讯云 SecretId"
@@ -61,22 +64,20 @@ export function TencentTranslationSection({
         onChange={onRegionChange}
         placeholder="ap-guangzhou"
       />
-      {children && <div className={settings.groupBlock}>{children}</div>}
+      {children && <SettingsGroupBlock>{children}</SettingsGroupBlock>}
       {available && credentialIssue && (
-        <div className={settings.groupBlock}>
-          <p className={settings.settingsWarning} role="status">
-            {credentialIssue}
-          </p>
-        </div>
+        <SettingsGroupBlock>
+          <SettingsWarning>{credentialIssue}</SettingsWarning>
+        </SettingsGroupBlock>
       )}
       {available && !credentialIssue && showMissingCredentialsWarning && (
-        <div className={settings.groupBlock}>
-          <p className={settings.settingsWarning} role="status">
+        <SettingsGroupBlock>
+          <SettingsWarning>
             未填写腾讯云凭据，候选词翻译不会有任何结果。请填入 SecretId 与
             SecretKey，或在上面的翻译服务中改选其他服务。
-          </p>
-        </div>
+          </SettingsWarning>
+        </SettingsGroupBlock>
       )}
-    </div>
+    </SettingsRowStack>
   );
 }

@@ -4,6 +4,12 @@ import Darwin
 
 @MainActor
 final class NineKeyKeyboardTests: XCTestCase {
+  func testSharedFrequencyPreferenceRejectsFractionalAndBooleanCounts() {
+    XCTAssertNil(KeyboardViewController.sharedPreferenceInt(NSNumber(value: 2.5), range: 1...10))
+    XCTAssertNil(KeyboardViewController.sharedPreferenceInt(NSNumber(value: true), range: 1...10))
+    XCTAssertEqual(KeyboardViewController.sharedPreferenceInt(NSNumber(value: 4), range: 1...10), 4)
+  }
+
   // Claims every scheme so an assignment to InputSchemePreference.scheme is not downgraded to
   // whatever the app group was left holding. See InputSchemeTestSupport.
   private var savedKeyboardPreferences: [String: Any] = [:]
@@ -193,7 +199,27 @@ final class NineKeyKeyboardTests: XCTestCase {
     XCTAssertTrue(bridge.setFuzzyPinyinRules(0))
   }
 
-  func testThoughtfulReplySchemeShowsDedicatedKeyboardAndCanBeDisabled() throws {
+  func testThoughtfulReplyIsNoLongerAnInputScheme() throws {
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: InputSchemePreference.appGroupIdentifier))
+    let previousEnabled = defaults.object(forKey: InputSchemePreference.enabledSchemesKey)
+    let previousScheme = defaults.object(forKey: "chineseInputScheme")
+    defer {
+      defaults.set(previousEnabled, forKey: InputSchemePreference.enabledSchemesKey)
+      defaults.set(previousScheme, forKey: "chineseInputScheme")
+    }
+    XCTAssertNil(ChineseInputScheme(rawValue: "thoughtfulReply"))
+    XCTAssertNil(ChineseInputScheme.scheme(sharedIdentifier: "thoughtful_reply"))
+    XCTAssertFalse(ChineseInputScheme.allCases.map(\.title).contains("高情商回复"))
+    // 旧版存下的选择和启用列表：选择回退到全拼 26 键，启用列表里直接忽略。
+    defaults.set(["quanpin", "thoughtfulReply"], forKey: InputSchemePreference.enabledSchemesKey)
+    defaults.set("thoughtfulReply", forKey: "chineseInputScheme")
+    XCTAssertEqual(InputSchemePreference.enabledSchemes, [.quanpin])
+    XCTAssertEqual(InputSchemePreference.scheme, .quanpin)
+    defaults.set(["thoughtfulReply"], forKey: InputSchemePreference.enabledSchemesKey)
+    XCTAssertEqual(InputSchemePreference.enabledSchemes, [.quanpin])
+  }
+
+  func testReplyShortcutOpensAndClosesReplyKeyboardOverAnyScheme() throws {
     let defaults = try XCTUnwrap(UserDefaults(suiteName: InputSchemePreference.appGroupIdentifier))
     let previousEnabled = defaults.object(forKey: InputSchemePreference.enabledSchemesKey)
     let previous = InputSchemePreference.scheme
@@ -201,33 +227,39 @@ final class NineKeyKeyboardTests: XCTestCase {
       defaults.set(previousEnabled, forKey: InputSchemePreference.enabledSchemesKey)
       InputSchemePreference.scheme = previous
     }
-    InputSchemePreference.enabledSchemes = [.quanpin, .thoughtfulReply]
-    InputSchemePreference.scheme = .thoughtfulReply
+    InputSchemePreference.enabledSchemes = [.quanpin, .nineKey]
+    InputSchemePreference.scheme = .nineKey
     let controller = KeyboardViewController()
     controller.loadViewIfNeeded()
-    XCTAssertEqual(try button("schemeButton", in: controller).accessibilityValue, "高情商回复")
-    XCTAssertTrue(descendants(controller.view).contains { $0.accessibilityIdentifier == "replyKeyboard" })
+    let hasReply = { self.descendants(controller.view).contains { $0.accessibilityIdentifier == "replyKeyboard" } }
+    let shortcut = try button("replyShortcut", in: controller)
+    XCTAssertFalse(shortcut.isHidden)
+    XCTAssertFalse(hasReply())
+
+    shortcut.sendActions(for: .primaryActionTriggered)
+    XCTAssertTrue(hasReply())
+    XCTAssertEqual(shortcut.accessibilityValue, "已打开")
     let reply = try XCTUnwrap(descendants(controller.view).first { $0.accessibilityIdentifier == "replyKeyboard" })
     let strip = try XCTUnwrap(descendants(controller.view).first { $0.accessibilityIdentifier == "candidateStrip" })
     controller.view.layoutIfNeeded()
     XCTAssertGreaterThanOrEqual(reply.convert(reply.bounds, to: controller.view).minY,
                                 strip.convert(strip.bounds, to: controller.view).maxY - 0.5)
-    XCTAssertFalse(descendants(controller.view).contains { $0.accessibilityIdentifier == "replySchemes" })
-    XCTAssertTrue(try XCTUnwrap(button("nineKey6", in: controller).superview).isHidden)
-    InputSchemePreference.enabledSchemes = [.quanpin]
-    controller.viewWillAppear(false)
-    XCTAssertEqual(InputSchemePreference.scheme, .quanpin)
-    XCTAssertTrue(try button("layoutVoiceShortcut", in: controller).isHidden)
-    XCTAssertFalse(descendants(controller.view).contains { $0.accessibilityIdentifier == "replyKeyboard" })
+    // 面板只是盖在键区上，方案不变。
+    XCTAssertEqual(InputSchemePreference.scheme, .nineKey)
+    XCTAssertEqual(try button("schemeButton", in: controller).accessibilityValue, "全拼 9 键")
 
-    // Inserting a reply takes the panel away so the text it just wrote, and the backspace that
-    // edits it, are reachable. The reply shortcut is what brings it back, so that path has to work
-    // even when the panel is already gone.
-    InputSchemePreference.enabledSchemes = [.quanpin, .thoughtfulReply]
-    InputSchemePreference.scheme = .thoughtfulReply
+    // 再点一次收起，回到原来的九键键盘。
+    shortcut.sendActions(for: .primaryActionTriggered)
+    XCTAssertFalse(hasReply())
+    XCTAssertNil(shortcut.accessibilityValue)
+    XCTAssertFalse(try XCTUnwrap(button("nineKey6", in: controller).superview).isHidden)
+
+    // 键盘收起时面板一起关掉，下次出现是原来的键盘。
+    shortcut.sendActions(for: .primaryActionTriggered)
+    XCTAssertTrue(hasReply())
+    controller.viewWillDisappear(false)
     controller.viewWillAppear(false)
-    try button("replyShortcut", in: controller).sendActions(for: .primaryActionTriggered)
-    XCTAssertTrue(descendants(controller.view).contains { $0.accessibilityIdentifier == "replyKeyboard" })
+    XCTAssertFalse(hasReply())
   }
 
   func testDisabledSchemesAreHiddenAndCurrentSchemeFallsBack() throws {
@@ -646,7 +678,7 @@ final class NineKeyKeyboardTests: XCTestCase {
       XCTAssertEqual(visible.compactMap(\.accessibilityIdentifier), [
         "moreShortcut", "layoutShortcut",
       ] + (KeyboardLayoutPreference.voiceShortcutEnabled ? ["layoutVoiceShortcut"] : []) + [
-        "emojiShortcut", "skinShortcut", "schemeButton", "dismissShortcut",
+        "replyShortcut", "emojiShortcut", "skinShortcut", "schemeButton", "dismissShortcut",
       ])
       for item in visible {
         XCTAssertGreaterThanOrEqual(item.bounds.width, 42)
@@ -1174,7 +1206,7 @@ final class NineKeyKeyboardTests: XCTestCase {
       XCTAssertGreaterThanOrEqual(brandSlot.bounds.width - brand.frame.maxX, 6)
       XCTAssertLessThan(brand.convert(brand.bounds, to: toolbar).maxX,
                         try button("schemeButton", in: controller).convert(try button("schemeButton", in: controller).bounds, to: toolbar).minX)
-      for id in ["layoutShortcut", "schemeButton", "emojiShortcut",
+      for id in ["layoutShortcut", "replyShortcut", "schemeButton", "emojiShortcut",
                  "skinShortcut", "moreShortcut", "dismissShortcut"] {
         let control = try button(id, in: controller)
         XCTAssertGreaterThanOrEqual(control.bounds.width, 44)
@@ -1319,7 +1351,13 @@ final class NineKeyKeyboardTests: XCTestCase {
 
   func testKeyLayoutsKeepNineKeyHeight() throws {
     let previous = InputSchemePreference.scheme
-    defer { InputSchemePreference.scheme = previous }
+    let previousEnabled = InputSchemePreference.enabledSchemes
+    defer {
+      InputSchemePreference.enabledSchemes = previousEnabled
+      InputSchemePreference.scheme = previous
+    }
+    // 粤拼、注音、笔画等是要用户自己启用的方案，全新模拟器上默认不在启用列表里；不先全部启用，下面选不上它们，各自的布局分支就永远走不到。
+    InputSchemePreference.enabledSchemes = ChineseInputScheme.allCases
     for width in [320.0, 414.0] {
       InputSchemePreference.scheme = .nineKey
       let controller = KeyboardViewController()
@@ -1333,6 +1371,12 @@ final class NineKeyKeyboardTests: XCTestCase {
       for scheme in ChineseInputScheme.allCases
       where scheme != .handwriting && scheme != .japaneseNineKey {
         InputSchemePreference.scheme = scheme
+        // 笔画和注音只在测试宿主带了 msime-stroke.db、msime-zhuyin.db 时才能选上（CI 不带）；没带时上面的赋值落到别的方案，那个方案已经单独测过。
+        if [.stroke, .zhuyin].contains(scheme) && InputSchemePreference.scheme != scheme { continue }
+        // 韩语方案在候选栏里常留一行训音（2758a0ebc，#2615），键盘为这一行长高而不是从按键里扣，所以视图要按方案自己要的高度给，按键才保持九键高度。
+        let keyboardHeight = 260 + KeyboardViewController.stripExtraHeight(
+          glossLines: KeyboardViewController.stripGlossLines(scheme: scheme, fullAccess: false, onlineRoute: false))
+        controller.view.frame.size.height = keyboardHeight
         controller.viewWillAppear(false)
         for symbols in [false, true] {
           if symbols { try button("layoutToggleButton", in: controller).sendActions(for: .primaryActionTriggered) }
@@ -1346,7 +1390,17 @@ final class NineKeyKeyboardTests: XCTestCase {
           } else {
             XCTAssertEqual(try button("returnKey", in: controller).bounds.height, reference, accuracy: 0.5)
           }
-          XCTAssertEqual(controller.view.constraints.first { $0.identifier == "keyboardHeight" }?.constant, 260 + KeyboardViewController.stripExtraHeight)
+          if scheme == .stroke {
+            // 笔画键在九键外框里占九键网格的位置：两行键填满三行的高度，数字层回到九键网格。
+            let shown = { (view: UIView) in sequence(first: view, next: \.superview).allSatisfy { !$0.isHidden } }
+            let stroke = try button("strokeKeyh", in: controller)
+            XCTAssertEqual(shown(stroke), !symbols)
+            XCTAssertEqual(shown(try button("nineKey6", in: controller)), symbols)
+            if !symbols { XCTAssertGreaterThan(stroke.bounds.height, reference) }
+            XCTAssertTrue(shown(try button("nineKeyDelete", in: controller)))
+            XCTAssertEqual(try button("layoutToggleButton", in: controller).configuration?.title, symbols ? "笔画" : "123")
+          }
+          XCTAssertEqual(controller.view.constraints.first { $0.identifier == "keyboardHeight" }?.constant, keyboardHeight, "\(scheme)")
           if !symbols && [.nineKey, .quanpin].contains(scheme) {
             let selector = try button("schemeButton", in: controller)
             XCTAssertGreaterThanOrEqual(selector.bounds.width, 44)
@@ -1366,7 +1420,7 @@ final class NineKeyKeyboardTests: XCTestCase {
             }
           }
           let punctuation = try button("quickPunctuationKey", in: controller)
-          XCTAssertEqual(punctuation.isHidden, symbols || [.nineKey, .japaneseNineKey, .handwriting].contains(scheme))
+          XCTAssertEqual(punctuation.isHidden, symbols || [.nineKey, .japaneseNineKey, .handwriting, .stroke].contains(scheme))
           if !punctuation.isHidden {
             XCTAssertEqual(punctuation.configuration?.title, scheme.isJapanese ? "、" : scheme.writesAsciiPunctuation ? "," : "，")
             XCTAssertEqual(punctuation.bounds.width, 44, accuracy: 0.5)
@@ -1376,7 +1430,7 @@ final class NineKeyKeyboardTests: XCTestCase {
           // The Japanese nine-key owns its delete key inside the kana grid, including its digit
           // layer; the shared action-row delete remains hidden in both states.
           XCTAssertEqual(try button("symbolDeleteKey", in: controller).isHidden, !symbols || scheme == .japaneseNineKey)
-          if !symbols && ![.nineKey, .japaneseNineKey, .handwriting, .zhuyin].contains(scheme) {
+          if !symbols && ![.nineKey, .japaneseNineKey, .handwriting, .zhuyin, .stroke].contains(scheme) {
             let delete = try button("letterDeleteKey", in: controller)
             let shift = try button("shiftButton", in: controller)
             // Korean keys are named by the jamo they type.
@@ -1782,7 +1836,7 @@ final class NineKeyKeyboardTests: XCTestCase {
       XCTAssertFalse(snapshot.candidates.isEmpty, "Provider \(trigger)")
       // Temporary English completes what was typed. This used to ask for more than one answer,
       // which counted rows in the pinned dictionary rather than describing the product: the
-      // release `english.db` now holds exactly one word beginning with "hello", so the count
+      // release `msime-english.db` now holds exactly one word beginning with "hello", so the count
       // moved while the behaviour did not.
       if trigger == "Y" {
         XCTAssertTrue(snapshot.candidates.contains { $0.lowercased().hasPrefix(input) },

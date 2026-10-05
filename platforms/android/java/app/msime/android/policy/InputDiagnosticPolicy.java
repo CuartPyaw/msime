@@ -12,7 +12,10 @@ public final class InputDiagnosticPolicy {
         String normalized = value.trim();
         if (normalized.isEmpty()) return "";
         if (normalized.length() <= MAX_LENGTH) return normalized;
-        return normalized.substring(0, MAX_LENGTH - 1) + "…";
+        int end = MAX_LENGTH - 1;
+        // 避免截断 emoji 时把孤立的高代理项带入诊断提示。
+        if (end > 0 && Character.isHighSurrogate(normalized.charAt(end - 1))) end--;
+        return normalized.substring(0, end) + "…";
     }
 
     public static boolean visible(String value) {

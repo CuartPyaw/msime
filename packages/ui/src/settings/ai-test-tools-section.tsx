@@ -1,7 +1,9 @@
 import { GroupList } from "../core/platform-controls";
 import { SettingsTextareaField } from "./settings-textarea-field";
-import * as settings from "./settings-style";
+import { SettingsManagerActions } from "./settings-manager-actions";
+import { SettingsManagerBlock } from "./settings-manager-block";
 import { ActionButton } from "./action-button";
+import { StatusMessage } from "../core/status-message";
 
 export function AiTestToolsSection({
   input,
@@ -22,7 +24,7 @@ export function AiTestToolsSection({
 }) {
   const result = (
     <>
-      {status && <p role="status">{status}</p>}
+      {status && <StatusMessage role="status">{status}</StatusMessage>}
       {output && (
         <div className="ai-test-result">
           <div>{output}</div>
@@ -33,7 +35,7 @@ export function AiTestToolsSection({
   );
   return (
     <GroupList title="测试工具">
-      <div className={settings.managerBlock}>
+      <SettingsManagerBlock>
         <SettingsTextareaField
           label="AI 润色测试"
           description="仅在点击发送时请求当前配置；测试文字不会写入日志。"
@@ -42,15 +44,15 @@ export function AiTestToolsSection({
           value={input}
           onChange={onInputChange}
         />
-        <div className={settings.managerActions}>
+        <SettingsManagerActions>
           <ActionButton
             action={onTest}
             disabled={busy || !input.trim()}
             label={busy ? "发送中…" : "发送并润色"}
           />
-        </div>
+        </SettingsManagerActions>
         {result}
-      </div>
+      </SettingsManagerBlock>
     </GroupList>
   );
 }

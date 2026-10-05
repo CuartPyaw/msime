@@ -84,6 +84,11 @@ class AccountPlugin(activity: Activity) : Plugin(activity) {
     private val storage = AndroidAccountSessionStorage(activity)
     private val bootstrapWorker: ExecutorService = Executors.newSingleThreadExecutor()
 
+    override fun onDestroy() {
+        bootstrapWorker.shutdownNow()
+        super.onDestroy()
+    }
+
     private fun snapshotQueue(): DictionarySnapshotQueue {
         val files = hostActivity.filesDir
             ?: throw IllegalStateException("private files unavailable")
@@ -128,7 +133,8 @@ class AccountPlugin(activity: Activity) : Plugin(activity) {
     )
 
     private fun appIconComponent(className: String?): ComponentName {
-        return className?.let { ComponentName(hostActivity.packageName, "${hostActivity.packageName}.$it") }
+        // The aliases are declared under the namespace, which differs from the package name in every edition but full: the package names the app, the namespace names the class.
+        return className?.let { ComponentName(hostActivity.packageName, "${AppIconStyle.namespace()}.$it") }
             ?: ComponentName(hostActivity, hostActivity.javaClass)
     }
 

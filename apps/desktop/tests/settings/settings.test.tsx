@@ -2,6 +2,7 @@
 import { testHost } from "../support/host";
 import { settingsFormReady, saveSettingsNow } from "../support/settings-form";
 import { afterEach, expect, test, vi } from "vitest";
+import { StrictMode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import minimizeIcon from "../../../../packages/ui/src/assets/minimize.svg";
 import maximizeIcon from "../../../../packages/ui/src/assets/maximize.svg";
@@ -313,7 +314,6 @@ const touchSchemeLabels = [
   "日语 9 键",
   "日语 26 键",
   "手写",
-  "高情商回复",
   "韩语 26 键",
 ];
 const touchSchemeIds = [
@@ -327,7 +327,6 @@ const touchSchemeIds = [
   "japanese_nine_key",
   "japanese",
   "handwriting",
-  "thoughtful_reply",
   "korean",
 ];
 
@@ -344,14 +343,16 @@ test("Android touch schemes follow Apple order and stay absent on hosts without 
       .getAllByRole("button")
       .map((button) => button.textContent?.replace("✓", "")),
   ).toEqual(touchSchemeLabels);
-  expect(within(group).getAllByRole("switch")).toHaveLength(12);
+  // 高情商回复是键盘工具栏上的工具，不是输入方案。
+  expect(within(group).queryByText("高情商回复")).toBeNull();
+  expect(within(group).getAllByRole("switch")).toHaveLength(11);
   enabled.unmount();
   render(<SettingsPage client={{ load: async () => initial, save: vi.fn() }} />);
   fireEvent.click(await screen.findByRole("button", { name: "输入" }));
   expect(screen.queryByRole("switch", { name: "显示输入方案 全拼 26 键" })).toBeNull();
 });
 
-test("touch hosts offering Cantonese, Zhuyin and Vietnamese list their touch schemes last and off", async () => {
+test("touch hosts offering Cantonese, Zhuyin, Vietnamese, Tibetan and Stroke list their touch schemes last and off", async () => {
   const host = testHost({
     platform: "android",
     input_schemes: [
@@ -363,6 +364,8 @@ test("touch hosts offering Cantonese, Zhuyin and Vietnamese list their touch sch
       "cantonese",
       "zhuyin",
       "vietnamese",
+      "tibetan",
+      "stroke",
     ],
   });
   render(
@@ -376,9 +379,9 @@ test("touch hosts offering Cantonese, Zhuyin and Vietnamese list their touch sch
     within(group)
       .getAllByRole("button")
       .map((button) => button.textContent?.replace("✓", "")),
-  ).toEqual([...touchSchemeLabels, "粤拼 26 键", "大千注音", "越南语 26 键"]);
-  expect(within(group).getAllByRole("switch")).toHaveLength(15);
-  for (const label of ["粤拼 26 键", "大千注音", "越南语 26 键"]) {
+  ).toEqual([...touchSchemeLabels, "粤拼 26 键", "大千注音", "越南语 26 键", "藏文 26 键", "笔画"]);
+  expect(within(group).getAllByRole("switch")).toHaveLength(16);
+  for (const label of ["粤拼 26 键", "大千注音", "越南语 26 键", "藏文 26 键", "笔画"]) {
     expect(
       (screen.getByRole("switch", { name: `显示输入方案 ${label}` }) as HTMLInputElement).checked,
     ).toBe(false);
@@ -397,7 +400,10 @@ test("a touch host without the Cantonese dictionary does not list the Cantonese 
   );
   fireEvent.click(await screen.findByRole("button", { name: "输入" }));
   expect(screen.queryByRole("switch", { name: "显示输入方案 粤拼 26 键" })).toBeNull();
+  expect(screen.queryByRole("switch", { name: "显示输入方案 笔画" })).toBeNull();
   expect(screen.getByRole("switch", { name: "显示输入方案 大千注音" })).toBeTruthy();
+  // 宿主没有列出藏文时也不显示藏文触屏键盘。
+  expect(screen.queryByRole("switch", { name: "显示输入方案 藏文 26 键" })).toBeNull();
 });
 
 test("offline candidate gloss is host-enabled, defaults off and persists", async () => {
@@ -543,7 +549,7 @@ test("mobile input settings expose the keyboard AI entry", async () => {
     />,
   );
   fireEvent.click(await screen.findByRole("button", { name: "标点与翻译" }));
-  expect(screen.getByText(/切换到高情商回复键盘/)).toBeDefined();
+  expect(screen.getByText(/点键盘工具栏上的回复/)).toBeDefined();
   fireEvent.click(screen.getByRole("button", { name: "配置键盘 AI" }));
   expect(await screen.findByText("启用 AI 辅助")).toBeDefined();
 });
@@ -1761,6 +1767,38 @@ test("the 输入 page offers installed helpcode packs as helpcode schemes", asyn
   expect(within(shuangpin).getByRole("option", { name: "部首码（插件）" })).toBeTruthy();
 });
 
+test("clears helpcode packs when the active host has no plugin catalog", async () => {
+  const catalog = vi.fn().mockResolvedValue({
+    packages: [{ id: "radicals", kind: "helpcode", name: "部首码" }],
+    issues: [],
+  });
+  const withPlugins: SettingsClient = {
+    load: vi.fn().mockResolvedValue(initial),
+    save: vi.fn(),
+    plugins: {
+      catalog,
+      importPack: vi.fn(),
+      remove: vi.fn(),
+      loadMentions: vi.fn().mockResolvedValue([]),
+      saveMentions: vi.fn(),
+    } as never,
+  };
+  const withoutPlugins: SettingsClient = {
+    load: vi.fn().mockResolvedValue(initial),
+    save: vi.fn(),
+  };
+  const view = render(<SettingsPage initialPage="input" client={withPlugins} />);
+  const quanpin = (await view.findByRole("combobox", {
+    name: "全拼辅助码方案",
+  })) as HTMLSelectElement;
+  await waitFor(() => expect(within(quanpin).getByRole("option", { name: "部首码（插件）" })));
+
+  view.rerender(<SettingsPage initialPage="input" client={withoutPlugins} />);
+  await waitFor(() =>
+    expect(within(quanpin).queryByRole("option", { name: "部首码（插件）" })).toBeNull(),
+  );
+});
+
 test("shortcut page reflects enabled navigation shortcuts", async () => {
   render(<SettingsPage client={{ load: vi.fn().mockResolvedValue(initial), save: vi.fn() }} />);
   await settingsReady();
@@ -2386,7 +2424,7 @@ test("macOS offers every local mode switch, downloaded catalogs included", async
   expect(screen.getByRole("switch", { name: /^Unicode/ })).toBeDefined();
   expect(screen.getByRole("switch", { name: /^超级简拼/ })).toBeDefined();
   expect(screen.getByRole("switch", { name: /^临时英文/ })).toBeDefined();
-  // others.db 随 macOS 发布包内置，Emoji 和颜文字一直可用；dict_japanese.dat 改为按需下载，临时日语的开关照常显示，词库下载前由运行时关闭这个模式，输入页另有下载入口。同样依赖 english.db 的临时英文从未隐藏过。
+  // msime-others.db 随 macOS 发布包内置，Emoji 和颜文字一直可用；msime-japanese.dat 改为按需下载，临时日语的开关照常显示，词库下载前由运行时关闭这个模式，输入页另有下载入口。同样依赖 msime-english.db 的临时英文从未隐藏过。
   expect(screen.getByRole("switch", { name: /^Emoji/ })).toBeDefined();
   // 颜文字混输 sits on the same page under 候选与联想, so match the local mode alone.
   expect(screen.getByRole("switch", { name: /^颜文字(?!混输)/ })).toBeDefined();
@@ -4591,15 +4629,17 @@ test("Android AI skin draw prepares artwork, saves a proposal and continues edit
     },
   ]);
   render(
-    <SettingsPage
-      client={{
-        load: async () => initial,
-        save: vi.fn(),
-        customTouchKeyboardSkins: true,
-        aiSkins,
-        customSkinLibrary: { load: async () => [], mutate },
-      }}
-    />,
+    <StrictMode>
+      <SettingsPage
+        client={{
+          load: async () => initial,
+          save: vi.fn(),
+          customTouchKeyboardSkins: true,
+          aiSkins,
+          customSkinLibrary: { load: async () => [], mutate },
+        }}
+      />
+    </StrictMode>,
   );
   fireEvent.click(await screen.findByRole("button", { name: "主题" }));
   fireEvent.click(screen.getByRole("button", { name: "设计我的皮肤" }));
@@ -5722,7 +5762,7 @@ test("the sidebar follows the six titled navigation groups", async () => {
   }
 });
 
-test("Linux Ctrl+Space defaults on, saves independently and reloads disabled", async () => {
+test("Linux Ctrl+Space dropdown preserves legacy defaults, saves exclusively and reloads disabled", async () => {
   let snapshot = initial;
   const save = vi.fn().mockImplementation(async (_revision, preferences) => {
     snapshot = { ...initial, revision: 8, preferences };
@@ -5735,32 +5775,50 @@ test("Linux Ctrl+Space defaults on, saves independently and reloads disabled", a
   };
   const page = render(<SettingsPage initialPage="shortcuts" client={client} />);
   await settingsReady();
-  const toggle = screen.getByRole("switch", { name: "Ctrl+Space 切换中英文" });
-  expect((toggle as HTMLInputElement).checked).toBe(true);
+  const select = screen.getByRole("combobox", { name: "切换中英文" }) as HTMLSelectElement;
+  expect(select.value).toBe("shift");
+  expect(screen.queryByRole("switch", { name: "Ctrl+Space 切换中英文" })).toBeNull();
   expect(screen.getByText(/Fcitx5.*全局快捷键/)).toBeTruthy();
-  fireEvent.click(toggle);
-  fireEvent.change(screen.getByRole("combobox", { name: "切换中英文" }), {
-    target: { value: "ctrl_alt_space" },
-  });
+  expect(save).not.toHaveBeenCalled();
+  fireEvent.change(select, { target: { value: "ctrl_space" } });
   saveSettingsNow();
   await screen.findByText("已保存");
   expect(save).toHaveBeenCalledWith(
     7,
     expect.objectContaining({
       keybindings: expect.objectContaining({
-        switch_language_ctrl_space: false,
+        switch_language_ctrl_space: true,
         switch_language_shift: false,
         switch_language_ctrl: false,
-        switch_language_ctrl_alt_space: true,
+        switch_language_ctrl_alt_space: false,
       }),
     }),
   );
   page.unmount();
+  const reloaded = render(<SettingsPage initialPage="shortcuts" client={client} />);
+  await settingsReady();
+  const reloadedSelect = screen.getByRole("combobox", { name: "切换中英文" }) as HTMLSelectElement;
+  expect(reloadedSelect.value).toBe("ctrl_space");
+  fireEvent.change(reloadedSelect, { target: { value: "none" } });
+  saveSettingsNow();
+  await screen.findByText("已保存");
+  expect(save).toHaveBeenLastCalledWith(
+    8,
+    expect.objectContaining({
+      keybindings: expect.objectContaining({
+        switch_language_ctrl_space: false,
+        switch_language_shift: false,
+        switch_language_ctrl: false,
+        switch_language_ctrl_alt_space: false,
+      }),
+    }),
+  );
+  reloaded.unmount();
   render(<SettingsPage initialPage="shortcuts" client={client} />);
   await settingsReady();
-  expect(
-    (screen.getByRole("switch", { name: "Ctrl+Space 切换中英文" }) as HTMLInputElement).checked,
-  ).toBe(false);
+  expect((screen.getByRole("combobox", { name: "切换中英文" }) as HTMLSelectElement).value).toBe(
+    "none",
+  );
 });
 
 test.each(["macos", "windows"] as const)(
@@ -8191,6 +8249,35 @@ test("a late preference save is ignored after settings unmounts", async () => {
     preferences: { ...initial.preferences, candidate_page_size: 9 },
   });
   await Promise.resolve();
+});
+
+test("an edit made during a preference save is written before settings unmounts", async () => {
+  const finishes: ((snapshot: Snapshot) => void)[] = [];
+  const client: SettingsClient = {
+    load: vi.fn().mockResolvedValue(initial),
+    save: vi.fn(
+      (revision, preferences) =>
+        new Promise<Snapshot>((resolve) => {
+          finishes.push(() => resolve({ ...initial, revision: revision + 1, preferences }));
+        }),
+    ),
+  };
+  const view = render(<SettingsPage initialPage="appearance" client={client} />);
+  const size = await screen.findByLabelText("每页候选项数量");
+  fireEvent.change(size, { target: { value: "9" } });
+  saveSettingsNow();
+  fireEvent.change(screen.getByLabelText("字号"), { target: { value: "20" } });
+  view.unmount();
+
+  expect(client.save).toHaveBeenCalledOnce();
+  await act(async () => finishes[0](initial));
+  await waitFor(() => expect(client.save).toHaveBeenCalledTimes(2));
+  expect(client.save).toHaveBeenLastCalledWith(8, {
+    ...initial.preferences,
+    candidate_page_size: 9,
+    candidate_font_size: 20,
+  });
+  await act(async () => finishes[1](initial));
 });
 
 test("macOS offers the same candidate page sizes as every other host and keeps the saved one", async () => {

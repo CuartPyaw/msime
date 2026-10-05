@@ -30,7 +30,8 @@ import app.msime.android.clipboard.CloudClipboardTextPolicy;
 public final class BackendAccount {
     private static final String ORIGIN = "https://api.msime.app";
     private static final String SESSION_STORE = "msime_account_session_v2";
-    private static final int MAX_RESPONSE_BYTES = 64 * 1024;
+    /** Matches client-core's account JSON response ceiling; a full cloud clipboard page can exceed 64 KiB. */
+    private static final int MAX_RESPONSE_BYTES = 1024 * 1024;
     private static final long MAX_SESSION_MILLISECONDS = AccountTokenPolicy.MAX_SESSION_SECONDS * 1000L;
     private static final Object SESSION_LOCK = new Object();
     private static FutureTask<String> refreshFlight;
@@ -135,8 +136,8 @@ public final class BackendAccount {
         JSONObject body = new JSONObject().put("provider", provider).put("purpose", "login");
         if (target != null && !target.isEmpty()) body.put("target", target);
         JSONObject response = request("POST", "/v1/auth/challenges", body, null);
-        String id = response.optString("challenge_id", "");
-        String nonce = response.optString("nonce", "");
+        String id = optionalStringField(response.opt("challenge_id"), "");
+        String nonce = optionalStringField(response.opt("nonce"), "");
         if (id.length() != 64 || nonce.isEmpty()) {
             throw new IllegalStateException("challenge unavailable");
         }
@@ -145,12 +146,13 @@ public final class BackendAccount {
 
     /** Finish it with the provider's ID token, and keep the session this device is now signed in on. */
     public void login(Challenge challenge, String idToken) throws Exception {
+        if (ownerProcess != null) throw new IllegalStateException("account session owner");
         JSONObject tokens = request("POST", "/v1/auth/login",
             new JSONObject().put("challenge_id", challenge.id()).put("credential", idToken), null);
-        String access = tokens.optString("access_token", "");
-        long expires = tokens.optLong("expires_in", 0);
-        if (!AccountTokenPolicy.validSession(tokens.optString("token_type", ""), access,
-                tokens.optString("refresh_token", ""), expires)) {
+        String access = optionalStringField(tokens.opt("access_token"), "");
+        long expires = AccountTokenPolicy.strictSeconds(tokens.opt("expires_in"));
+        if (!AccountTokenPolicy.validSession(optionalStringField(tokens.opt("token_type"), ""), access,
+                optionalStringField(tokens.opt("refresh_token"), ""), expires)) {
             throw new IllegalStateException("login refused");
         }
         String saved = new JSONObject().put("tokens", tokens)
@@ -187,20 +189,20 @@ public final class BackendAccount {
             if (saved == null) return "";
             JSONObject session = new JSONObject(saved);
             JSONObject tokens = session.getJSONObject("tokens");
-            if (!AccountTokenPolicy.validSession(tokens.optString("token_type", ""),
-                    tokens.optString("access_token", ""), tokens.optString("refresh_token", ""),
-                    tokens.optLong("expires_in", 0))) return "";
+            if (!AccountTokenPolicy.validSession(optionalStringField(tokens.opt("token_type"), ""),
+                    optionalStringField(tokens.opt("access_token"), ""), optionalStringField(tokens.opt("refresh_token"), ""),
+                    AccountTokenPolicy.strictSeconds(tokens.opt("expires_in")))) return "";
             long now = System.currentTimeMillis();
-            long expiry = session.optLong("expires_at_unix_ms", 0);
+            long expiry = AccountTokenPolicy.strictLong(session.opt("expires_at_unix_ms"), 0);
             if (expiry > now + MAX_SESSION_MILLISECONDS) return "";
             if (expiry > now + 30_000L) {
-                return tokens.optString("access_token", "");
+                return optionalStringField(tokens.opt("access_token"), "");
             }
             if (refreshFlight != null) {
                 flight = refreshFlight;
             } else {
                 long generation = sessionGeneration;
-                String refresh = tokens.optString("refresh_token", "");
+                String refresh = optionalStringField(tokens.opt("refresh_token"), "");
                 flight = new FutureTask<>(() -> refresh(refresh, generation));
                 refreshFlight = flight;
                 owner = true;
@@ -244,7 +246,7 @@ public final class BackendAccount {
         List<ChatModel> models = new ArrayList<>();
         for (int index = 0; index < data.length(); index++) {
             JSONObject item = data.optJSONObject(index);
-            String id = item == null ? "" : item.optString("id", "").trim();
+            String id = item == null ? "" : optionalStringField(item.opt("id"), "").trim();
             if (id.isEmpty() || id.length() > 256) throw new IllegalStateException("invalid model catalogue");
             models.add(new ChatModel(id));
         }
@@ -274,7 +276,7 @@ public final class BackendAccount {
         org.json.JSONArray choices = response.optJSONArray("choices");
         JSONObject first = choices == null || choices.length() == 0 ? null : choices.optJSONObject(0);
         JSONObject message = first == null ? null : first.optJSONObject("message");
-        String content = message == null ? "" : message.optString("content", "");
+        String content = message == null ? "" : requiredStringField(message.opt("content"));
         if (content.isEmpty() || content.length() > 10_000) throw new IllegalStateException("invalid chat response");
         return content;
     }
@@ -291,16 +293,28 @@ public final class BackendAccount {
         for (int index = 0; index < values.length(); index++) {
             JSONObject item = values.optJSONObject(index);
             if (item == null) throw new IllegalStateException("invalid clipboard response");
-            String id = item.optString("id", "");
-            String text = item.optString("text", "");
-            String updated = item.optString("updated_at", "");
-            if (!id.matches("[0-9a-f]{64}") || !CloudClipboardTextPolicy.valid(text)
-                    || updated.isEmpty() || updated.length() > 128
-                    || TextPolicy.hasControl(updated))
+            String id = optionalStringField(item.opt("id"), "");
+            String text = optionalStringField(item.opt("text"), "");
+            String updated = optionalStringField(item.opt("updated_at"), "");
+            if (!validClipboardItem(new ClipboardItem(id, text, updated)))
                 throw new IllegalStateException("invalid clipboard response");
             items.add(new ClipboardItem(id, text, updated));
         }
-        return new ClipboardPage(response.optBoolean("enabled", false), List.copyOf(items));
+        return new ClipboardPage(requiredBooleanField(response.opt("enabled")), List.copyOf(items));
+    }
+
+    static boolean requiredBooleanField(Object value) {
+        if (!(value instanceof Boolean)) throw new IllegalStateException("invalid clipboard response");
+        return (Boolean) value;
+    }
+
+    static String requiredStringField(Object value) {
+        if (!(value instanceof String)) throw new IllegalStateException("invalid account response");
+        return (String) value;
+    }
+
+    static String optionalStringField(Object value, String fallback) {
+        return value == null ? fallback : requiredStringField(value);
     }
 
     public void setClipboardEnabled(boolean enabled) throws Exception {
@@ -314,11 +328,20 @@ public final class BackendAccount {
         if (token.isEmpty() || !CloudClipboardTextPolicy.valid(text))
             throw new IllegalStateException("invalid clipboard request");
         JSONObject item = request("POST", "/v1/users/me/clipboard", new JSONObject().put("text", text), token);
-        String id = item.optString("id", "");
-        String updated = item.optString("updated_at", "");
-        if (!id.matches("[0-9a-f]{64}") || updated.isEmpty() || updated.length() > 128)
+        String id = optionalStringField(item.opt("id"), "");
+        String returnedText = optionalStringField(item.opt("text"), text);
+        String updated = optionalStringField(item.opt("updated_at"), "");
+        ClipboardItem result = new ClipboardItem(id, returnedText, updated);
+        if (!validClipboardItem(result))
             throw new IllegalStateException("invalid clipboard response");
-        return new ClipboardItem(id, item.optString("text", text), updated);
+        return result;
+    }
+
+    static boolean validClipboardItem(ClipboardItem item) {
+        return item != null && item.id() != null && item.id().matches("[0-9a-f]{64}")
+            && CloudClipboardTextPolicy.valid(item.text()) && item.updatedAt() != null
+            && !item.updatedAt().isEmpty() && TextPolicy.utf8Length(item.updatedAt()) <= 128
+            && !TextPolicy.hasControl(item.updatedAt());
     }
 
     public void deleteClipboard(String id) throws Exception {
@@ -331,13 +354,15 @@ public final class BackendAccount {
 
     /** Forget the session on this device. The account itself is untouched. */
     public void signOut() {
+        if (ownerProcess != null) return;
         try {
             synchronized (SESSION_LOCK) {
                 sessionGeneration++;
                 sessions.clear();
             }
         } catch (Exception | LinkageError error) {
-            // 清不掉也不要抛：调用方要的是「退出」，而过期的令牌本来就用不了。
+            // 清除失败时会话仍可能有效，必须把失败交给界面，不能按退出成功处理。
+            throw new IllegalStateException("account sign-out unavailable");
         }
     }
 
@@ -363,10 +388,10 @@ public final class BackendAccount {
             }
             throw error;
         }
-        String access = tokens.optString("access_token", "");
-        long expires = tokens.optLong("expires_in", 0);
-        if (!AccountTokenPolicy.validSession(tokens.optString("token_type", ""), access,
-                tokens.optString("refresh_token", ""), expires)) {
+        String access = optionalStringField(tokens.opt("access_token"), "");
+        long expires = AccountTokenPolicy.strictSeconds(tokens.opt("expires_in"));
+        if (!AccountTokenPolicy.validSession(optionalStringField(tokens.opt("token_type"), ""), access,
+                optionalStringField(tokens.opt("refresh_token"), ""), expires)) {
             throw new IllegalStateException("refresh refused");
         }
         String saved = new JSONObject().put("tokens", tokens)

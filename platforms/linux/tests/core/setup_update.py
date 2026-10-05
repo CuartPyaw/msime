@@ -21,8 +21,8 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/msime-linux-setup"
 
 # Stands in for msime-linux-prepare. --refresh points the options at a new generation, the observable effect of the real command, unless STUB_REFRESH_EXIT asks for a failure. It also records what the hosts would see at that moment: whether the quiesce lease is live and whether the session lock is held exclusively, and which resource directory it was asked to prepare.
-PREPARE_STUB = r'''#!/usr/bin/env python3
-import fcntl, json, os, sys, time
+# 首行用跑测试的同一个解释器，不经 /usr/bin/env：没有 FHS 布局的环境（Nix 构建沙箱）里没有它。
+PREPARE_STUB = f"#!{sys.executable}\n" + r'''import fcntl, json, os, sys, time
 from pathlib import Path
 
 with open(os.environ["STUB_LOG"], "a") as log:
@@ -210,6 +210,21 @@ def check_setup(harness: Harness) -> None:
     assert (state / "runtime-options.json").read_bytes() == before
     assert leftovers(state) == [], leftovers(state)
     assert (harness.staged(Path(options(state)["resources"])) / "b.db").read_bytes() == harness.current["b.db"]
+
+    # A replaced access lock must not redirect the update's exclusive lock to an
+    # unrelated file. The host and setup script share this lock, so accepting a
+    # symlink here would let a hostile state directory make the refresh wait on
+    # or lock an external inode.
+    state = harness.installed("state-linked-access-lock")
+    access_lock = state / "user/.msime-dictionary-access.lock"
+    outside_lock = harness.scratch / "outside-access.lock"
+    outside_lock.write_bytes(b"keep")
+    access_lock.symlink_to(outside_lock)
+    result = harness.run("--update", "--download", "--state", str(state))
+    assert result.returncode == 1, result
+    assert "切换词库失败" in result.stderr, result.stderr
+    assert outside_lock.read_bytes() == b"keep"
+    assert harness.prepare_calls() == []
 
     # Without --download an outdated dictionary is reported and left alone, and nothing switches.
     state = harness.installed("state-no-download")

@@ -3,6 +3,7 @@
 //! Same `mod tests` as before, so `use super::*` still names the parent.
 
 use super::*;
+use msime_client_core::host_surface::compiled_input_schemes;
 use sha2::{Digest, Sha256};
 
 #[test]
@@ -132,7 +133,7 @@ fn resource_verification_rejects_an_existing_state_root_below_a_symlink() {
 #[test]
 fn local_mode_resource_gates_preserve_unrelated_modes() {
     let root = tempfile::tempdir().unwrap();
-    for name in ["others.db", "english.db", "dict_japanese.dat"] {
+    for name in ["msime-others.db", "msime-english.db", "msime-japanese.dat"] {
         std::fs::write(root.path().join(name), b"fixture").unwrap();
     }
     let mut options = EngineOptions {
@@ -141,6 +142,7 @@ fn local_mode_resource_gates_preserve_unrelated_modes() {
         cache: root.path().to_string_lossy().into_owned(),
         dictionaries: root.path().to_string_lossy().into_owned(),
         scheme: 0,
+        enabled_schemes: msime_engine::SchemeSet::ALL,
         shuangpin_profile: 0,
         shuangpin_preedit_uses_raw: true,
         learning: false,
@@ -188,9 +190,10 @@ fn local_mode_resource_gates_preserve_unrelated_modes() {
         vietnamese_tone_style: 0,
         cantonese_dictionary: String::new(),
         zhuyin_dictionary: String::new(),
+        stroke_dictionary: String::new(),
         japanese_dictionary: String::new(),
     };
-    apply_local_mode_resource_gates(&mut options);
+    apply_local_mode_resource_gates(&mut options, Edition::full());
     assert!(options.local_unicode);
     assert!(options.local_date_time);
     assert!(options.local_quick_phrase);
@@ -200,9 +203,9 @@ fn local_mode_resource_gates_preserve_unrelated_modes() {
     assert!(options.local_temporary_english);
     assert!(options.local_temporary_japanese);
 
-    std::fs::remove_file(root.path().join("others.db")).unwrap();
-    std::fs::remove_file(root.path().join("dict_japanese.dat")).unwrap();
-    apply_local_mode_resource_gates(&mut options);
+    std::fs::remove_file(root.path().join("msime-others.db")).unwrap();
+    std::fs::remove_file(root.path().join("msime-japanese.dat")).unwrap();
+    apply_local_mode_resource_gates(&mut options, Edition::full());
     assert!(!options.local_emoji);
     assert!(!options.local_kaomoji);
     assert!(!options.local_temporary_japanese);
@@ -1009,6 +1012,108 @@ fn japanese_commands_apply_to_the_twenty_six_key_scheme() {
     read(msime_client_destroy(handle));
 }
 
+// 藏文经过宿主边界：大写字母是拼写，组字时显示转换后的藏文，空格加音节点、`/` 加垂符上屏，回车不加音节点，拼写符号随组字状态变化。
+#[test]
+fn tibetan_scheme_crosses_the_host_boundary() {
+    let dir = tempfile::tempdir().unwrap();
+    let handle = test_host_preferences(
+        dir.path(),
+        Preferences {
+            scheme: InputScheme::Tibetan,
+            ..chinese_preferences()
+        },
+    );
+    read(msime_client_focus(handle, true));
+    let idle = read(msime_client_command(handle, 3));
+    assert_eq!(idle["value"]["view"]["spelling_symbols"], "'/");
+    let mut typed = Value::Null;
+    for character in b"bkra" {
+        typed = read(msime_client_character(handle, *character, false));
+        assert_eq!(typed["value"]["handled"], true);
+    }
+    let view = &typed["value"]["view"];
+    assert_eq!(view["scheme"], 8);
+    assert_eq!(view["preedit"], "བཀྲ");
+    assert_eq!(view["candidates"], json!([]));
+    assert_eq!(view["spelling_symbols"], "'+-./");
+    let space = read(msime_client_character(handle, b' ', false));
+    assert_eq!(space["value"]["handled"], true);
+    assert_eq!(space["value"]["commit"], "བཀྲ་");
+    assert_eq!(space["value"]["commit_context"]["scheme"], 8);
+
+    for character in b"shis" {
+        read(msime_client_character(handle, *character, false));
+    }
+    let shad = read(msime_client_character(handle, b'/', false));
+    assert_eq!(shad["value"]["handled"], true);
+    assert_eq!(shad["value"]["commit"], "ཤིས།");
+    let alone = read(msime_client_character(handle, b'/', false));
+    assert_eq!(alone["value"]["handled"], true);
+    assert_eq!(alone["value"]["commit"], "།");
+
+    // 大写字母是拼写而不是 Shift 命令：`Ta` 是反写字母 ཊ。
+    read(msime_client_character(handle, b'T', true));
+    let retroflex = read(msime_client_character(handle, b'a', false));
+    assert_eq!(retroflex["value"]["view"]["preedit"], "ཊ");
+    let enter = read(msime_client_command(handle, 2));
+    assert_eq!(enter["value"]["handled"], true);
+    assert_eq!(enter["value"]["commit"], "ཊ");
+    read(msime_client_destroy(handle));
+}
+
+// 全角输出开着时，中文方案的上屏都转成全角，网址例外：上屏后 view 已回到 `none`，所以按上屏前的 `commit_context.local_mode` 豁免。
+#[test]
+fn url_commits_stay_half_width_in_full_width_mode() {
+    let directory = tempfile::tempdir().unwrap();
+    let handle = test_host(directory.path());
+    assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+    read(msime_client_set_character_width(handle, true));
+
+    // 对照：同样的 ASCII 字母不在网址模式时照旧变成全角。
+    for character in b"abc" {
+        read(msime_client_character(handle, *character, false));
+    }
+    let plain = read(msime_client_command(handle, 2));
+    assert_eq!(plain["value"]["commit"], "ａｂｃ");
+
+    for character in b"www" {
+        read(msime_client_character(handle, *character, false));
+    }
+    let opened = read(msime_client_punctuation(handle, b'.'));
+    assert!(opened["value"]["commit"].is_null());
+    assert_eq!(opened["value"]["view"]["local_mode"], "url");
+    for character in b"a1" {
+        read(msime_client_character(handle, *character, false));
+    }
+    read(msime_client_punctuation(handle, b'/'));
+    let committed = read(msime_client_command(handle, 2));
+    assert_eq!(committed["value"]["commit"], "www.a1/");
+    assert_eq!(committed["value"]["commit_context"]["local_mode"], "url");
+    assert_eq!(committed["value"]["view"]["local_mode"], "none");
+
+    // 空格上屏同样保持半角，末尾不带空格。
+    for character in b"www" {
+        read(msime_client_character(handle, *character, false));
+    }
+    read(msime_client_punctuation(handle, b'.'));
+    read(msime_client_character(handle, b'a', false));
+    let spaced = read(msime_client_command(handle, 1));
+    assert_eq!(spaced["value"]["commit"], "www.a");
+    assert_eq!(spaced["value"]["commit_context"]["local_mode"], "url");
+
+    // 结束网址的英文标点不属于网址，和普通组字后的同一个键一样转全角。
+    read(msime_client_set_chinese_punctuation(handle, false));
+    for character in b"www" {
+        read(msime_client_character(handle, *character, false));
+    }
+    read(msime_client_punctuation(handle, b'.'));
+    read(msime_client_character(handle, b'a', false));
+    let finished = read(msime_client_punctuation(handle, b'<'));
+    assert_eq!(finished["value"]["commit_context"]["local_mode"], "url");
+    assert_eq!(finished["value"]["commit"], "www.a\u{ff1c}");
+    assert_eq!(read(msime_client_destroy(handle))["ok"], true);
+}
+
 #[test]
 fn korean_scheme_crosses_the_host_boundary() {
     let dir = tempfile::tempdir().unwrap();
@@ -1345,7 +1450,7 @@ fn nine_key_mode_follows_only_the_scheme_the_grid_spells() {
 
 #[test]
 fn the_repeat_gesture_arms_except_in_schemes_that_write_no_chinese_marks() {
-    // The repeat gesture turns an ASCII mark into a Chinese one. It never arms in Korean or Vietnamese, which write only ASCII marks, or in Zhuyin, whose punctuation keys spell bopomofo; Japanese arms as it did before the new schemes. Cantonese and Zhuyin are left out because this host installs no language dictionaries, so the runtime would not run them.
+    // The repeat gesture turns an ASCII mark into a Chinese one. It never arms in Korean or Vietnamese, which write only ASCII marks, or in Zhuyin, whose punctuation keys spell bopomofo; Japanese arms as it did before the new schemes. Cantonese, Zhuyin and Stroke are left out because this host installs no language dictionaries, so the runtime would not run them; Stroke writes Chinese marks like Cantonese and is not on the engine's disarm list.
     for (scheme, arms) in [
         (InputScheme::Quanpin, true),
         (InputScheme::Shuangpin, true),
@@ -1353,6 +1458,7 @@ fn the_repeat_gesture_arms_except_in_schemes_that_write_no_chinese_marks() {
         (InputScheme::Japanese, true),
         (InputScheme::Korean, false),
         (InputScheme::Vietnamese, false),
+        (InputScheme::Tibetan, false),
     ] {
         let dir = tempfile::tempdir().unwrap();
         let handle = test_host_preferences(
@@ -1414,6 +1520,39 @@ fn japanese_candidates_ask_for_no_translation() {
     }
 }
 
+// 网址可能带着私密路径和参数，网址模式不向翻译服务要候选翻译。对照组是同一偏好下的 Unicode 候选，确认拦下它的是网址模式本身。
+#[test]
+fn url_candidates_ask_for_no_translation() {
+    let dir = tempfile::tempdir().unwrap();
+    let handle = test_host_preferences(
+        dir.path(),
+        Preferences {
+            candidate_translations: true,
+            ..chinese_preferences()
+        },
+    );
+    read(msime_client_focus(handle, true));
+    for byte in b"U4e2d" {
+        read(msime_client_character(
+            handle,
+            *byte,
+            byte.is_ascii_uppercase(),
+        ));
+    }
+    assert!(!read(msime_client_translation_query(handle))["value"].is_null());
+    read(msime_client_command(handle, 3));
+
+    for byte in b"www" {
+        read(msime_client_character(handle, *byte, false));
+    }
+    read(msime_client_punctuation(handle, b'.'));
+    let view = read(msime_client_character(handle, b'a', false))["value"]["view"].clone();
+    assert_eq!(view["local_mode"], "url");
+    assert!(!view["candidates"].as_array().unwrap().is_empty());
+    assert!(read(msime_client_translation_query(handle))["value"].is_null());
+    read(msime_client_destroy(handle));
+}
+
 #[test]
 fn the_c_header_aliases_the_candidate_list_command_and_extends_the_scheme_legend() {
     const HEADER: &str = include_str!("../include/msime_client.h");
@@ -1422,7 +1561,13 @@ fn the_c_header_aliases_the_candidate_list_command_and_extends_the_scheme_legend
     assert!(HEADER.contains("MSIME_OPEN_CANDIDATE_LIST = 16,"));
     // platforms/android/check-host.sh greps the Korean legend line, so it stays as it was.
     assert!(HEADER.contains("4 korean (preferences scheme \"korean\")"));
-    for legend in ["5 cantonese", "6 zhuyin", "7 vietnamese"] {
+    for legend in [
+        "5 cantonese",
+        "6 zhuyin",
+        "7 vietnamese",
+        "8 tibetan",
+        "9 stroke",
+    ] {
         assert!(HEADER.contains(legend), "{legend} missing from the legend");
     }
 }
@@ -1434,7 +1579,7 @@ fn nine_key_digits_offer_ranked_english_across_the_host_boundary() {
     let dir = tempfile::tempdir().unwrap();
     let dictionaries = dir.path().join("dictionaries");
     std::fs::create_dir_all(&dictionaries).unwrap();
-    let db = rusqlite::Connection::open(dictionaries.join("english.db")).unwrap();
+    let db = rusqlite::Connection::open(dictionaries.join("msime-english.db")).unwrap();
     db.execute_batch(
         "CREATE TABLE english_words(word TEXT,display TEXT,weight INTEGER);
          INSERT INTO english_words VALUES('ok','ok',900);
@@ -1517,7 +1662,7 @@ fn english_completion_boundary_is_read_only_and_case_insensitive() {
     let dir = tempfile::tempdir().unwrap();
     let dictionaries = dir.path().join("dictionaries");
     std::fs::create_dir_all(&dictionaries).unwrap();
-    let db = rusqlite::Connection::open(dictionaries.join("english.db")).unwrap();
+    let db = rusqlite::Connection::open(dictionaries.join("msime-english.db")).unwrap();
     db.execute_batch(
         "CREATE TABLE english_words(word TEXT,display TEXT,weight INTEGER);
          INSERT INTO english_words VALUES('hello','hello',1000);
@@ -3220,7 +3365,7 @@ fn test_host_with_pinyin_fixture(root: &std::path::Path, preferences: Preference
                    CREATE TABLE quick_parases(key TEXT,value TEXT,weight INTEGER);
                    CREATE INDEX idx_quick_parases_key_weight ON quick_parases(key,weight DESC);";
     for directory in [&resources, &dictionaries] {
-        rusqlite::Connection::open(directory.join("msime.db"))
+        rusqlite::Connection::open(directory.join("msime-pinyin.db"))
             .unwrap()
             .execute_batch(fixture)
             .unwrap();
@@ -3853,7 +3998,11 @@ fn translation_queries_follow_active_japanese_mode() {
             // placeholder so it exercises the shortcut's generated kana
             // path without depending on a packaged model.
             std::fs::create_dir_all(dir.path().join("resources")).unwrap();
-            std::fs::write(dir.path().join("resources/dict_japanese.dat"), b"synthetic").unwrap();
+            std::fs::write(
+                dir.path().join("resources/msime-japanese.dat"),
+                b"synthetic",
+            )
+            .unwrap();
         }
         let preferences = Preferences {
             scheme: if temporary {
@@ -4793,6 +4942,63 @@ fn cloud_candidate_requires_an_existing_local_candidate_page() {
 }
 
 #[test]
+fn direct_cloud_callbacks_follow_a_pending_disable() {
+    for batch in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let preferences = Preferences {
+            scheme: InputScheme::Quanpin,
+            cloud_candidates: true,
+            ..chinese_preferences()
+        };
+        let handle = test_host_with_pinyin_fixture(dir.path(), preferences.clone());
+        read(msime_client_focus(handle, true));
+        for byte in b"nihao" {
+            read(msime_client_character(handle, *byte, false));
+        }
+        let old_query = read(msime_client_online_query(handle))["value"].clone();
+        assert_eq!(old_query["cloud_candidates"], true);
+        let before = read(msime_client_view(handle))["value"].clone();
+        assert!(!before["candidates"].as_array().unwrap().is_empty());
+
+        let disabled = Preferences {
+            cloud_candidates: false,
+            ..preferences
+        };
+        assert_eq!(update(handle, 1, &disabled)["value"]["deferred"], true);
+
+        let query = old_query.to_string();
+        let result = if batch {
+            let candidates = serde_json::to_vec(&json!(["云候选"])).unwrap();
+            read(unsafe {
+                msime_client_apply_online_candidates(
+                    handle,
+                    query.as_ptr(),
+                    query.len(),
+                    candidates.as_ptr(),
+                    candidates.len(),
+                    0,
+                )
+            })
+        } else {
+            let candidate = "云候选";
+            read(unsafe {
+                msime_client_apply_online_candidate(
+                    handle,
+                    query.as_ptr(),
+                    query.len(),
+                    candidate.as_ptr(),
+                    candidate.len(),
+                    0,
+                )
+            })
+        };
+        assert_eq!(result["value"]["applied"], false, "batch={batch}: {result}");
+        assert_eq!(result["value"]["view"], before, "batch={batch}: {result}");
+        read(msime_client_destroy(handle));
+    }
+}
+
+#[test]
 fn an_ai_credential_handed_over_in_memory_signs_requests_without_being_stored() {
     let dir = tempfile::tempdir().unwrap();
     let mut preferences = Preferences {
@@ -5225,8 +5431,12 @@ fn incomplete_local_mode_input_shows_the_raw_text_as_a_fallback_space_commits() 
     // Windows' PrepareCandidateList shows the raw composition as a Fallback row whenever a special mode has nothing else, and Space commits it; a bare Y or R prefix included.
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("resources")).unwrap();
-    std::fs::write(dir.path().join("resources/english.db"), b"fixture").unwrap();
-    std::fs::write(dir.path().join("resources/dict_japanese.dat"), b"synthetic").unwrap();
+    std::fs::write(dir.path().join("resources/msime-english.db"), b"fixture").unwrap();
+    std::fs::write(
+        dir.path().join("resources/msime-japanese.dat"),
+        b"synthetic",
+    )
+    .unwrap();
     let handle = test_host(dir.path());
     read(msime_client_focus(handle, true));
     let only_fallback = |transition: &Value, text: &str| {
@@ -5348,7 +5558,7 @@ fn complete_candidate_abi_keeps_view_paged_and_selects_a_later_entry() {
     assert_eq!(read(msime_client_destroy(handle))["ok"], true);
 }
 
-/// 表情目录请求列出插件符号组：不需要 others.db，没传插件目录时为空，相对路径被拒绝。
+/// 表情目录请求列出插件符号组：不需要 msime-others.db，没传插件目录时为空，相对路径被拒绝。
 #[test]
 #[cfg(unix)]
 fn emoji_catalog_lists_plugin_symbol_groups() {
@@ -5418,7 +5628,7 @@ fn emoji_catalog_pagination_preserves_legacy_defaults() {
 #[cfg(unix)]
 fn emoji_catalog_cursor_advances_over_invalid_rows_and_preserves_duplicates() {
     let directory = tempfile::tempdir().unwrap();
-    let db = rusqlite::Connection::open(directory.path().join("others.db")).unwrap();
+    let db = rusqlite::Connection::open(directory.path().join("msime-others.db")).unwrap();
     db.execute_batch(
         "CREATE TABLE emoji(emoji TEXT,category TEXT,keywords TEXT,pinyin TEXT,sort_order INTEGER);
          CREATE TABLE kaomoji_catalog(kaomoji TEXT,keywords TEXT,sort_order INTEGER);
@@ -5497,7 +5707,7 @@ fn emoji_catalog_cursor_advances_over_invalid_rows_and_preserves_duplicates() {
 #[cfg(unix)]
 fn emoji_catalog_cursor_skips_invalid_groups_without_stalling() {
     let directory = tempfile::tempdir().unwrap();
-    let db = rusqlite::Connection::open(directory.path().join("others.db")).unwrap();
+    let db = rusqlite::Connection::open(directory.path().join("msime-others.db")).unwrap();
     db.execute_batch(
         "CREATE TABLE emoji(emoji TEXT,category TEXT,keywords TEXT,pinyin TEXT,sort_order INTEGER);
          INSERT INTO emoji VALUES ('synthetic-invalid',NULL,'','',0);
@@ -5530,7 +5740,7 @@ fn emoji_catalog_cursor_skips_invalid_groups_without_stalling() {
 #[cfg(unix)]
 fn emoji_catalog_ffi_reads_beyond_first_page() {
     let directory = tempfile::tempdir().unwrap();
-    let db = rusqlite::Connection::open(directory.path().join("others.db")).unwrap();
+    let db = rusqlite::Connection::open(directory.path().join("msime-others.db")).unwrap();
     db.execute_batch(
         "CREATE TABLE emoji(emoji TEXT,category TEXT,keywords TEXT,pinyin TEXT,sort_order INTEGER);
          CREATE TABLE kaomoji_catalog(kaomoji TEXT,keywords TEXT,sort_order INTEGER);
@@ -5620,7 +5830,7 @@ fn emoji_catalog_errors_are_not_empty_results() {
     };
     let unavailable = json!({"ok":false,"error":"local emoji catalog unavailable"});
     assert_eq!(request(""), unavailable);
-    let path = directory.path().join("others.db");
+    let path = directory.path().join("msime-others.db");
     assert!(!path.exists(), "read-only query must not create resources");
     std::fs::write(&path, b"synthetic invalid sqlite file").unwrap();
     for category in ["", "kaomoji", "symbols"] {
@@ -5649,7 +5859,7 @@ fn emoji_catalog_errors_are_not_empty_results() {
 #[cfg(unix)]
 fn emoji_groups_preserve_catalog_order_and_filter_before_paging() {
     let directory = tempfile::tempdir().unwrap();
-    let db = rusqlite::Connection::open(directory.path().join("others.db")).unwrap();
+    let db = rusqlite::Connection::open(directory.path().join("msime-others.db")).unwrap();
     db.execute_batch("CREATE TABLE emoji(emoji TEXT,category TEXT,keywords TEXT,pinyin TEXT,sort_order INTEGER);
         INSERT INTO emoji VALUES ('one','Z','match','',1),('two','A','match','',2),('three','Z','match','',3),('four','Z','other','',4);
         CREATE TABLE symbol_catalog(symbol TEXT,category TEXT,parent_category TEXT,keywords TEXT,sort_order INTEGER);
@@ -5829,7 +6039,7 @@ fn candidate_gloss_requests_reject_control_keys() {
 #[test]
 fn candidate_gloss_request_uses_packaged_dictionary_and_bounds_input() {
     let directory = tempfile::tempdir().unwrap();
-    let db = rusqlite::Connection::open(directory.path().join("english.db")).unwrap();
+    let db = rusqlite::Connection::open(directory.path().join("msime-english.db")).unwrap();
     db.execute_batch(
         "CREATE TABLE english_words(word TEXT COLLATE BINARY NOT NULL,display TEXT NOT NULL,weight INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(word,display)) WITHOUT ROWID;
          CREATE TABLE en_zh_glosses(english TEXT COLLATE BINARY PRIMARY KEY,chinese_gloss TEXT NOT NULL) WITHOUT ROWID;
@@ -5962,13 +6172,13 @@ fn candidate_gloss_request_uses_packaged_dictionary_and_bounds_input() {
         ),
         json!({"ok":false,"error":"candidate gloss dictionary unavailable"})
     );
-    assert!(!missing.path().join("english.db").exists());
+    assert!(!missing.path().join("msime-english.db").exists());
 }
 
 #[test]
 fn english_completion_request_queries_dictionary_and_rejects_invalid_input() {
     let directory = tempfile::tempdir().unwrap();
-    let database = rusqlite::Connection::open(directory.path().join("english.db")).unwrap();
+    let database = rusqlite::Connection::open(directory.path().join("msime-english.db")).unwrap();
     database
         .execute_batch(
             "CREATE TABLE english_words(word TEXT COLLATE BINARY NOT NULL,display TEXT NOT NULL,weight INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(word,display)) WITHOUT ROWID;
@@ -6010,7 +6220,7 @@ fn english_completion_request_queries_dictionary_and_rejects_invalid_input() {
         call(json!({"prefix":"he","limit":1}), b"relative")["error"],
         "resources path must be absolute"
     );
-    assert!(!directory.path().join("english.db-journal").exists());
+    assert!(!directory.path().join("msime-english.db-journal").exists());
 }
 
 /// The settled model is found beside a resource bundle, and its absence is not an error.
@@ -6055,24 +6265,43 @@ fn language_dictionaries_beside_the_resources_are_discovered() {
 
     let beside = root.path().join("language-dictionaries");
     // A directory of the right name is not a dictionary.
-    std::fs::create_dir_all(beside.join("zhuyin.db")).expect("decoy");
-    std::fs::write(beside.join("cantonese.db"), b"sqlite").expect("cantonese");
+    std::fs::create_dir_all(beside.join("msime-zhuyin.db")).expect("decoy");
+    std::fs::write(beside.join("msime-cantonese.db"), b"sqlite").expect("cantonese");
     assert_eq!(
         super::language_dictionaries_beside(&resources),
         LanguageDictionaries {
-            cantonese: Some(beside.join("cantonese.db")),
+            cantonese: Some(beside.join("msime-cantonese.db")),
             zhuyin: None,
+            stroke: None,
         }
     );
 
-    std::fs::remove_dir(beside.join("zhuyin.db")).expect("decoy");
-    std::fs::write(beside.join("zhuyin.db"), b"sqlite").expect("zhuyin");
+    std::fs::remove_dir(beside.join("msime-zhuyin.db")).expect("decoy");
+    std::fs::write(beside.join("msime-zhuyin.db"), b"sqlite").expect("zhuyin");
     assert_eq!(
         super::language_dictionaries_beside(&resources),
         LanguageDictionaries {
-            cantonese: Some(beside.join("cantonese.db")),
-            zhuyin: Some(beside.join("zhuyin.db")),
+            cantonese: Some(beside.join("msime-cantonese.db")),
+            zhuyin: Some(beside.join("msime-zhuyin.db")),
+            stroke: None,
         }
+    );
+
+    // msime-stroke.db alone is enough for the directory to count as installed.
+    std::fs::remove_file(beside.join("msime-cantonese.db")).expect("cantonese");
+    std::fs::remove_file(beside.join("msime-zhuyin.db")).expect("zhuyin");
+    std::fs::write(beside.join("msime-stroke.db"), b"sqlite").expect("stroke");
+    assert_eq!(
+        super::language_dictionaries_beside(&resources),
+        LanguageDictionaries {
+            cantonese: None,
+            zhuyin: None,
+            stroke: Some(beside.join("msime-stroke.db")),
+        }
+    );
+    assert_eq!(
+        super::installed_language_dictionaries(&resources).as_deref(),
+        beside.to_str()
     );
 }
 
@@ -6081,17 +6310,24 @@ fn effective_scheme_falls_back_to_the_last_chinese_scheme_then_quanpin() {
     use msime_client_core::preferences::ChineseScheme;
     use InputScheme::*;
     let all = [
-        Quanpin, Shuangpin, Wubi, Japanese, Korean, Cantonese, Zhuyin, Vietnamese,
+        Quanpin, Shuangpin, Wubi, Japanese, Korean, Cantonese, Zhuyin, Vietnamese, Tibetan, Stroke,
     ];
     let base = &all[..5];
     let none = LanguageDictionaries::default();
     let cantonese_only = LanguageDictionaries {
-        cantonese: Some("/dictionaries/cantonese.db".into()),
+        cantonese: Some("/dictionaries/msime-cantonese.db".into()),
         zhuyin: None,
+        stroke: None,
     };
     let both = LanguageDictionaries {
-        cantonese: Some("/dictionaries/cantonese.db".into()),
-        zhuyin: Some("/dictionaries/zhuyin.db".into()),
+        cantonese: Some("/dictionaries/msime-cantonese.db".into()),
+        zhuyin: Some("/dictionaries/msime-zhuyin.db".into()),
+        stroke: None,
+    };
+    let stroke_only = LanguageDictionaries {
+        cantonese: None,
+        zhuyin: None,
+        stroke: Some("/dictionaries/msime-stroke.db".into()),
     };
     const OFFERED: Option<&str> = None;
     const NOT_OFFERED: Option<&str> = Some("this host does not offer it");
@@ -6100,6 +6336,7 @@ fn effective_scheme_falls_back_to_the_last_chinese_scheme_then_quanpin() {
         // A scheme that can run is kept.
         (Wubi, None, base, &none, Wubi, OFFERED),
         (Vietnamese, None, &all[..], &none, Vietnamese, OFFERED),
+        (Tibetan, None, &all[..], &none, Tibetan, OFFERED),
         (Cantonese, None, &all[..], &both, Cantonese, OFFERED),
         (
             Zhuyin,
@@ -6119,6 +6356,14 @@ fn effective_scheme_falls_back_to_the_last_chinese_scheme_then_quanpin() {
             NOT_OFFERED,
         ),
         (Vietnamese, None, base, &both, Quanpin, NOT_OFFERED),
+        (
+            Tibetan,
+            Some(ChineseScheme::Shuangpin),
+            base,
+            &both,
+            Shuangpin,
+            NOT_OFFERED,
+        ),
         (
             Wubi,
             Some(ChineseScheme::Wubi),
@@ -6178,13 +6423,56 @@ fn effective_scheme_falls_back_to_the_last_chinese_scheme_then_quanpin() {
             Quanpin,
             NO_DICTIONARY,
         ),
+        // Stroke runs only with msime-stroke.db, and is itself a Chinese scheme to return to.
+        (
+            Stroke,
+            Some(ChineseScheme::Wubi),
+            &all[..],
+            &stroke_only,
+            Stroke,
+            OFFERED,
+        ),
+        (
+            Stroke,
+            Some(ChineseScheme::Wubi),
+            &all[..],
+            &both,
+            Wubi,
+            NO_DICTIONARY,
+        ),
+        (
+            Stroke,
+            Some(ChineseScheme::Stroke),
+            &all[..],
+            &both,
+            Quanpin,
+            NO_DICTIONARY,
+        ),
+        (
+            Japanese,
+            Some(ChineseScheme::Stroke),
+            &all[..],
+            &stroke_only,
+            Japanese,
+            OFFERED,
+        ),
+        (
+            Zhuyin,
+            Some(ChineseScheme::Stroke),
+            &all[..],
+            &stroke_only,
+            Stroke,
+            NO_DICTIONARY,
+        ),
+        (Stroke, None, base, &stroke_only, Quanpin, NOT_OFFERED),
     ] {
         let preferences = Preferences {
             scheme,
             last_chinese_scheme: last,
             ..Preferences::default()
         };
-        let (effective, diagnostic) = effective_scheme(&preferences, supported, dictionaries);
+        let (effective, diagnostic) =
+            effective_scheme(&preferences, supported, dictionaries, InputScheme::Quanpin);
         assert_eq!(effective, expected, "{scheme:?} after {last:?}");
         match (diagnostic, reason, effective == scheme) {
             (None, _, true) => {}
@@ -6205,7 +6493,8 @@ fn host_options_carry_vietnamese_settings_and_language_dictionaries_to_the_engin
     let root = tempfile::tempdir().expect("tempdir");
     let directory = root.path().join("language-dictionaries");
     std::fs::create_dir_all(&directory).expect("directory");
-    std::fs::write(directory.join("cantonese.db"), b"sqlite").expect("cantonese");
+    std::fs::write(directory.join("msime-cantonese.db"), b"sqlite").expect("cantonese");
+    std::fs::write(directory.join("msime-stroke.db"), b"sqlite").expect("stroke");
     let preferences = Preferences {
         scheme: InputScheme::Vietnamese,
         last_chinese_scheme: Some(msime_client_core::preferences::ChineseScheme::Wubi),
@@ -6223,9 +6512,13 @@ fn host_options_carry_vietnamese_settings_and_language_dictionaries_to_the_engin
     assert_eq!(options.vietnamese_tone_style, 1);
     assert_eq!(
         options.cantonese_dictionary,
-        directory.join("cantonese.db").to_str().unwrap()
+        directory.join("msime-cantonese.db").to_str().unwrap()
     );
     assert_eq!(options.zhuyin_dictionary, "");
+    assert_eq!(
+        options.stroke_dictionary,
+        directory.join("msime-stroke.db").to_str().unwrap()
+    );
     // Production passes `compiled_input_schemes()`, which offers the scheme or returns to the last Chinese one.
     let expected = if compiled_input_schemes().contains(&InputScheme::Vietnamese) {
         7
@@ -6250,6 +6543,7 @@ fn host_options_carry_vietnamese_settings_and_language_dictionaries_to_the_engin
         .into_engine_options();
     assert_eq!(options.cantonese_dictionary, "");
     assert_eq!(options.zhuyin_dictionary, "");
+    assert_eq!(options.stroke_dictionary, "");
     assert_eq!(options.vietnamese_input_method, 0);
     assert_eq!(options.vietnamese_tone_style, 0);
     // Cantonese with no dictionary never reaches the Engine; the 全拼 helpcode comes with the fallback.
@@ -6260,7 +6554,7 @@ fn host_options_carry_vietnamese_settings_and_language_dictionaries_to_the_engin
     );
 }
 
-/// Cantonese and Zhuyin run on every build once their dictionary is installed beside the resources, and fall back without it; Vietnamese needs no data and runs regardless.
+/// Cantonese, Zhuyin and Stroke run on every build once their dictionary is installed beside the resources, and fall back without it; Vietnamese needs no data and runs regardless.
 #[test]
 fn installed_language_dictionaries_enable_their_schemes() {
     let root = tempfile::tempdir().expect("tempdir");
@@ -6282,19 +6576,26 @@ fn installed_language_dictionaries_enable_their_schemes() {
     assert_eq!(super::installed_language_dictionaries(&resources), None);
     assert_eq!(engine_scheme(InputScheme::Cantonese), 2);
     assert_eq!(engine_scheme(InputScheme::Zhuyin), 2);
+    assert_eq!(engine_scheme(InputScheme::Stroke), 2);
     assert_eq!(engine_scheme(InputScheme::Vietnamese), 7);
+    assert_eq!(engine_scheme(InputScheme::Tibetan), 8);
 
     let beside = root.path().join("language-dictionaries");
     std::fs::create_dir_all(&beside).expect("beside");
-    std::fs::write(beside.join("cantonese.db"), b"sqlite").expect("cantonese");
-    std::fs::write(beside.join("zhuyin.db"), b"sqlite").expect("zhuyin");
+    std::fs::write(beside.join("msime-cantonese.db"), b"sqlite").expect("cantonese");
+    std::fs::write(beside.join("msime-zhuyin.db"), b"sqlite").expect("zhuyin");
     assert_eq!(
         super::installed_language_dictionaries(&resources).as_deref(),
         beside.to_str()
     );
     assert_eq!(engine_scheme(InputScheme::Cantonese), 5);
     assert_eq!(engine_scheme(InputScheme::Zhuyin), 6);
+    assert_eq!(engine_scheme(InputScheme::Stroke), 2);
     assert_eq!(engine_scheme(InputScheme::Vietnamese), 7);
+    assert_eq!(engine_scheme(InputScheme::Tibetan), 8);
+
+    std::fs::write(beside.join("msime-stroke.db"), b"sqlite").expect("stroke");
+    assert_eq!(engine_scheme(InputScheme::Stroke), 9);
 }
 
 #[test]
@@ -6330,6 +6631,884 @@ fn a_scheme_this_build_does_not_run_falls_back_and_says_why() {
     read(msime_client_destroy(handle));
 }
 
+/// 五笔版的 HostOptions 文档即使带着写着全拼的偏好（例如从 full 同步来的），会话跑的也是五笔，之后的偏好更新同样回退到五笔；full 拿到同一份偏好仍跑全拼。
+#[test]
+fn the_wubi_edition_runs_wubi_whatever_scheme_the_preferences_name() {
+    let quanpin = Preferences {
+        scheme: InputScheme::Quanpin,
+        last_chinese_scheme: Some(msime_client_core::preferences::ChineseScheme::Quanpin),
+        ..chinese_preferences()
+    };
+    let document = |edition: Option<&str>| {
+        let mut document = json!({ "api_version": 1, "resources": "/r", "user_data": "/u", "cache": "/c", "dictionaries": "/d", "preferences": quanpin });
+        if let Some(edition) = edition {
+            document["edition"] = json!(edition);
+        }
+        document
+    };
+    let engine_scheme = |document: Value| {
+        HostOptions::from_document(document)
+            .expect("host options")
+            .into_engine_options()
+            .scheme
+    };
+    assert_eq!(engine_scheme(document(None)), 0);
+    assert_eq!(engine_scheme(document(Some("full"))), 0);
+    assert_eq!(engine_scheme(document(Some("wubi"))), 2);
+    assert_eq!(engine_scheme(document(Some("pinyin"))), 0);
+    // 拼音版不含五笔：写着五笔的偏好回退到拼音版的默认方案全拼。
+    let mut wubi_preferences = document(Some("pinyin"));
+    wubi_preferences["preferences"]["scheme"] = json!("wubi");
+    wubi_preferences["preferences"]["last_chinese_scheme"] = json!("wubi");
+    assert_eq!(engine_scheme(wubi_preferences), 0);
+    // 不认识的版本不猜成 full，整份文档被拒。
+    assert!(HostOptions::from_document(document(Some("klingon"))).is_none());
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = |name| {
+        let path = dir.path().join(name);
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    };
+    let options = json!({ "api_version": 1, "resources": path("resources"), "user_data": path("user"), "cache": path("cache"), "dictionaries": path("dictionaries"), "preferences": quanpin, "edition": "wubi" }).to_string();
+    let created = read(unsafe { msime_client_create(options.as_ptr(), options.len()) });
+    assert_eq!(created["ok"], true, "{created}");
+    let handle = created["value"]["session"].as_u64().unwrap();
+    SESSIONS.with(|sessions| assert_eq!(sessions.borrow()[&handle].options.scheme, 2));
+
+    let shuangpin = Preferences {
+        scheme: InputScheme::Shuangpin,
+        last_chinese_scheme: Some(msime_client_core::preferences::ChineseScheme::Quanpin),
+        ..chinese_preferences()
+    };
+    let updated = update(handle, 1, &shuangpin);
+    assert_eq!(updated["ok"], true, "{updated}");
+    let diagnostic = updated["value"]["diagnostic"].as_str().unwrap();
+    assert!(diagnostic.contains("does not offer"), "{diagnostic}");
+    assert!(diagnostic.contains("Wubi"), "{diagnostic}");
+    SESSIONS.with(|sessions| assert_eq!(sessions.borrow()[&handle].options.scheme, 2));
+    read(msime_client_destroy(handle));
+}
+
+/// Engine 的 `enabled_schemes` 跟着文档记录的版本走：full（含缺省）是全部方案；五笔版只有五笔；拼音版是全拼、双拼，加上临时日文要切到的日文。
+#[test]
+fn engine_schemes_follow_the_documents_edition() {
+    let enabled = |edition: Option<&str>| {
+        let mut document = json!({ "api_version": 1, "resources": "/r", "user_data": "/u", "cache": "/c", "dictionaries": "/d", "preferences": chinese_preferences() });
+        if let Some(edition) = edition {
+            document["edition"] = json!(edition);
+        }
+        HostOptions::from_document(document)
+            .expect("host options")
+            .into_engine_options()
+            .enabled_schemes
+    };
+    assert_eq!(enabled(None), SchemeSet::ALL);
+    assert_eq!(enabled(Some("full")), SchemeSet::ALL);
+    assert_eq!(enabled(Some("wubi")), SchemeSet::of(&[SchemeType::Wubi]));
+    // 日文、越南文和藏文版只有各自的方案：不带临时日文，不读 msime-pinyin.db。
+    for (id, scheme) in [
+        ("japanese", SchemeType::JapaneseRomaji),
+        ("vietnamese", SchemeType::Vietnamese),
+        ("tibetan", SchemeType::Tibetan),
+    ] {
+        let set = enabled(Some(id));
+        assert_eq!(set, SchemeSet::of(&[scheme]), "{id}");
+        assert!(!set.reads_main_dictionary(), "{id}");
+    }
+    assert_eq!(
+        enabled(Some("pinyin")),
+        SchemeSet::of(&[
+            SchemeType::Quanpin,
+            SchemeType::Shuangpin,
+            SchemeType::JapaneseRomaji,
+        ])
+    );
+}
+
+/// 回退到的方案在 full 是全拼，在别的版本是该版本的默认方案；能跑的上一次中文方案仍然优先。
+#[test]
+fn the_fallback_scheme_is_the_edition_default() {
+    use msime_client_core::preferences::ChineseScheme;
+    let none = LanguageDictionaries::default();
+    let wubi = Edition::by_id("wubi").unwrap();
+    let offered = msime_client_core::host_surface::offered_input_schemes(wubi);
+    for (scheme, last) in [
+        (InputScheme::Quanpin, None),
+        (InputScheme::Quanpin, Some(ChineseScheme::Quanpin)),
+        (InputScheme::Shuangpin, Some(ChineseScheme::Shuangpin)),
+        (InputScheme::Japanese, Some(ChineseScheme::Quanpin)),
+        (InputScheme::Cantonese, Some(ChineseScheme::Zhuyin)),
+    ] {
+        let preferences = Preferences {
+            scheme,
+            last_chinese_scheme: last,
+            ..Preferences::default()
+        };
+        let (effective, diagnostic) =
+            effective_scheme(&preferences, &offered, &none, wubi.default_scheme);
+        assert_eq!(effective, InputScheme::Wubi, "{scheme:?} after {last:?}");
+        assert!(diagnostic.unwrap().contains("does not offer"));
+        // full 拿到同样的偏好：除了要词库的粤拼，都照原样跑；粤拼没有词库时回退到全拼。
+        let (full, _) = effective_scheme(
+            &preferences,
+            compiled_input_schemes(),
+            &none,
+            Edition::full().default_scheme,
+        );
+        let expected = if scheme == InputScheme::Cantonese {
+            InputScheme::Quanpin
+        } else {
+            scheme
+        };
+        assert_eq!(full, expected, "{scheme:?} after {last:?}");
+    }
+    let wubi_preferences = Preferences {
+        scheme: InputScheme::Wubi,
+        ..Preferences::default()
+    };
+    assert_eq!(
+        effective_scheme(&wubi_preferences, &offered, &none, wubi.default_scheme),
+        (InputScheme::Wubi, None)
+    );
+}
+
+/// full 准备出的文档没有 `edition` 键，也不替用户写偏好文件，与引入版本之前相同；五笔版的文档记下版本，第一次准备时把五笔版的默认偏好（五笔、混拼打开）写成第一份偏好文件，之后不再覆盖用户的修改。
+#[test]
+fn prepared_options_record_only_a_non_full_edition_and_seed_its_first_preferences() {
+    let root = tempfile::tempdir().unwrap();
+    let resources = root.path().join("resources");
+    let specification = synthetic_desktop_lock(&resources);
+    let prepare = |state: &Path, edition: &'static Edition| -> Value {
+        serde_json::from_str(
+            &prepare_shipped_host_configuration(&resources, state, &specification, &[], edition)
+                .unwrap(),
+        )
+        .unwrap()
+    };
+
+    let full_state = root.path().join("full");
+    let full = prepare(&full_state, Edition::full());
+    assert!(full.get("edition").is_none(), "{full}");
+    assert_eq!(full["preferences"], json!(Preferences::default()));
+    assert!(!full_state.join("preferences.json").exists());
+    assert!(!full_state.join(Edition::STATE_RECORD_FILE).exists());
+    assert!(HostOptions::from_document(full.clone()).is_some());
+
+    let wubi = Edition::by_id("wubi").unwrap();
+    let wubi_state = root.path().join("wubi");
+    let prepared = prepare(&wubi_state, wubi);
+    assert_eq!(prepared["edition"], "wubi");
+    assert_eq!(prepared["preferences"]["scheme"], "wubi");
+    assert_eq!(prepared["preferences"]["last_chinese_scheme"], "wubi");
+    assert_eq!(prepared["preferences"]["wubi_mixed_pinyin"], true);
+    let options = HostOptions::from_document(prepared).unwrap();
+    assert_eq!(options.edition().id, "wubi");
+    assert_eq!(options.into_engine_options().scheme, 2);
+
+    // 平台宿主经 C 接口按目录读偏好，不知道版本；第一次读到的已经是五笔版的默认值。
+    let stored = PreferencesStore::new(&wubi_state).load().unwrap();
+    assert_eq!(stored.revision, 1);
+    assert_eq!(stored.preferences, Preferences::for_edition(wubi));
+    assert!(stored.preferences.wubi_mixed_pinyin);
+
+    // 用户关掉混拼之后再准备（例如升级后），不会被版本默认值改回去。
+    let mut off = stored.preferences.clone();
+    off.wubi_mixed_pinyin = false;
+    PreferencesStore::new(&wubi_state).save(1, off).unwrap();
+    let again = prepare(&wubi_state, wubi);
+    assert_eq!(again["preferences"]["wubi_mixed_pinyin"], false);
+    assert_eq!(
+        PreferencesStore::new(&wubi_state).load().unwrap().revision,
+        2
+    );
+}
+
+/// 平台宿主经 C 接口只按目录读写偏好，不知道版本：五笔版的偏好文件损坏或被删掉之后，修复和读取回到的仍是五笔版的默认值（准备宿主时记在状态目录里的版本），不是 full 的。
+#[test]
+#[cfg(not(target_os = "android"))]
+fn the_c_abi_repairs_and_reloads_a_non_full_state_root_to_its_own_defaults() {
+    let root = tempfile::tempdir().unwrap();
+    let resources = root.path().join("resources");
+    let specification = synthetic_desktop_lock(&resources);
+    let wubi = Edition::by_id("wubi").unwrap();
+    let state = root.path().join("wubi");
+    prepare_shipped_host_configuration(&resources, &state, &specification, &[], wubi).unwrap();
+    assert_eq!(
+        Edition::recorded_in(&state).map(|e| e.id.as_str()),
+        Some("wubi")
+    );
+    let path = state.to_str().unwrap();
+    let document = state.join("preferences.json");
+
+    // 写到一半断电：修复后的文件是五笔版的默认偏好，混拼是开的。
+    std::fs::write(&document, "{\"format_version\":1,").unwrap();
+    let repaired = read(unsafe { msime_client_recover_preferences(path.as_ptr(), path.len()) });
+    assert_eq!(repaired["value"]["recovered"], true, "{repaired}");
+    let restored: Preferences =
+        serde_json::from_value(repaired["value"]["snapshot"]["preferences"].clone()).unwrap();
+    assert_eq!(restored, Preferences::for_edition(wubi));
+    assert!(restored.wubi_mixed_pinyin);
+
+    // 用户删掉了偏好文件：读到的同样是五笔版的默认值。
+    std::fs::remove_file(&document).unwrap();
+    let loaded = read(unsafe { msime_client_load_preferences(path.as_ptr(), path.len()) });
+    assert_eq!(loaded["value"]["revision"], 0);
+    assert_eq!(
+        serde_json::from_value::<Preferences>(loaded["value"]["preferences"].clone()).unwrap(),
+        Preferences::for_edition(wubi)
+    );
+}
+
+/// 按 `edition` 的资源锁合成一个资源目录：文件名取自真实的版本锁，内容是小 fixture，清单按实际内容计算长度与 SHA-256。`msime-pinyin.db` 带 `nihao` 的拼音行，`msime-wubi.db` 带 `wq` 的五笔行（与词库发布的拆分布局相同，准备代次时并回工作主词库），`msime-english.db` 带一个英文词，`msime-bigram.bin`、`msime-trigram.bin` 不是合法的表（Engine 会当作没有表），其余文件只要存在。
+fn synthetic_edition_lock(edition: &Edition, resources: &Path) -> ResourceSet {
+    std::fs::create_dir_all(resources).unwrap();
+    let pinned = edition.resource_set().unwrap();
+    let artifacts = pinned
+        .artifacts
+        .iter()
+        .map(|artifact| {
+            let path = resources.join(&artifact.name);
+            match artifact.name.as_str() {
+                "msime-pinyin.db" => rusqlite::Connection::open(&path)
+                    .unwrap()
+                    .execute_batch(
+                        "CREATE TABLE tbl_2_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);
+                         INSERT INTO tbl_2_n VALUES('ni''hao','nh','你好',100),('ni''hao','nh','拟好',80);
+                         CREATE TABLE quick_parases(key TEXT,value TEXT,weight INTEGER);
+                         CREATE INDEX idx_quick_parases_key_weight ON quick_parases(key,weight DESC);",
+                    )
+                    .unwrap(),
+                "msime-wubi.db" => rusqlite::Connection::open(&path)
+                    .unwrap()
+                    .execute_batch(
+                        "CREATE TABLE wubi86(key TEXT,value TEXT,weight INTEGER);
+                         INSERT INTO wubi86 VALUES('wq','你',100),('wqvb','你好',90);",
+                    )
+                    .unwrap(),
+                "msime-english.db" => rusqlite::Connection::open(&path)
+                    .unwrap()
+                    .execute_batch(
+                        "CREATE TABLE english_words(word TEXT,display TEXT,weight INTEGER);
+                         INSERT INTO english_words VALUES('hello','hello',900);",
+                    )
+                    .unwrap(),
+                "msime-others.db" => rusqlite::Connection::open(&path)
+                    .unwrap()
+                    .execute_batch("CREATE TABLE fixture(value TEXT);")
+                    .unwrap(),
+                "msime-dictionary-manifest.json" => std::fs::write(&path, b"{}").unwrap(),
+                other => std::fs::write(&path, other.as_bytes()).unwrap(),
+            }
+            let bytes = std::fs::read(&path).unwrap();
+            msime_client_core::resources::Artifact {
+                name: artifact.name.clone(),
+                url: format!("https://example.invalid/{}", artifact.name),
+                sha256: hex::encode(Sha256::digest(&bytes)),
+                size: bytes.len() as u64,
+            }
+        })
+        .collect();
+    ResourceSet {
+        source_commit: "a".repeat(40),
+        artifacts,
+    }
+}
+
+/// 五笔版的锁接受一个没有日文词典和整句模型的资源目录，同一个目录按 full 的文件清单校验会失败；准备出的配置里临时日文是关的，其余本地模式照常。下载来的日文词典也打不开五笔版的临时日文。
+#[test]
+fn the_wubi_lock_accepts_resources_without_japanese_and_gates_temporary_japanese_off() {
+    let root = tempfile::tempdir().unwrap();
+    let resources = root.path().join("resources");
+    let wubi = Edition::by_id("wubi").unwrap();
+    let specification = synthetic_edition_lock(wubi, &resources);
+    for absent in [
+        "msime-japanese.dat",
+        "msime-mozc_dictionary_oss_README.txt",
+        "msime-mozc_LICENSE.txt",
+        "sentence-model.safetensors",
+    ] {
+        assert!(!resources.join(absent).exists(), "{absent}");
+    }
+    ResourceStore::new(&resources)
+        .verify(&resources, &specification)
+        .unwrap();
+    // 同一个目录按 full 的文件清单（多出日文词典和整句模型）校验不过：能通过只是因为用了五笔版的锁。
+    let mut full_names = specification.clone();
+    for artifact in &Edition::full().resource_set().unwrap().artifacts {
+        if !full_names
+            .artifacts
+            .iter()
+            .any(|kept| kept.name == artifact.name)
+        {
+            full_names.artifacts.push(artifact.clone());
+        }
+    }
+    assert_eq!(full_names.artifacts.len(), 12);
+    assert!(ResourceStore::new(&resources)
+        .verify(&resources, &full_names)
+        .is_err());
+
+    let state = root.path().join("state");
+    let prepared: Value = serde_json::from_str(
+        &prepare_shipped_host_configuration(
+            &resources,
+            &state,
+            &specification,
+            ON_DEMAND_ARTIFACTS,
+            wubi,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(prepared["edition"], "wubi");
+    // 偏好里临时日文是开的，关掉它的是资源门控，不是偏好。
+    assert_eq!(
+        prepared["preferences"]["local_modes"]["temporary_japanese"],
+        true
+    );
+    let mut options = HostOptions::from_document(prepared)
+        .unwrap()
+        .into_engine_options();
+    assert!(!options.local_temporary_japanese);
+    assert!(options.local_emoji);
+    assert!(options.local_temporary_english);
+
+    // 状态目录里有一份下载来的日文词典时，full 会打开临时日文，五笔版仍然不会。
+    let downloaded = root.path().join("msime-japanese.dat");
+    std::fs::write(&downloaded, b"japanese").unwrap();
+    options.japanese_dictionary = downloaded.to_str().unwrap().to_owned();
+    options.local_temporary_japanese = true;
+    let mut full_options = options.clone();
+    apply_local_mode_resource_gates(&mut options, wubi);
+    assert!(!options.local_temporary_japanese);
+    apply_local_mode_resource_gates(&mut full_options, Edition::full());
+    assert!(full_options.local_temporary_japanese);
+
+    // 五笔版不带键盘神经联想的模型，偏好打开了也不交给 Engine；full 照旧。
+    options.sentence_association.neural_keyboard = true;
+    full_options.sentence_association.neural_keyboard = true;
+    apply_local_mode_resource_gates(&mut options, wubi);
+    assert!(!options.sentence_association.neural_keyboard);
+    apply_local_mode_resource_gates(&mut full_options, Edition::full());
+    assert!(full_options.sentence_association.neural_keyboard);
+}
+
+/// 用五笔版的资源集准备出的宿主默认就是五笔混拼：`nihao` 由全拼给出「你好」，`wq` 由五笔码表给出「你」。
+#[test]
+fn wubi_resources_type_mixed_pinyin_and_wubi_codes() {
+    let root = tempfile::tempdir().unwrap();
+    let resources = root.path().join("resources");
+    let wubi = Edition::by_id("wubi").unwrap();
+    let specification = synthetic_edition_lock(wubi, &resources);
+    let mut prepared: Value = serde_json::from_str(
+        &prepare_shipped_host_configuration(
+            &resources,
+            &root.path().join("state"),
+            &specification,
+            ON_DEMAND_ARTIFACTS,
+            wubi,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(prepared["preferences"]["scheme"], "wubi");
+    assert_eq!(prepared["preferences"]["wubi_mixed_pinyin"], true);
+    prepared["preferences"]["default_ime_mode"] = json!("chinese");
+    let document = prepared.to_string();
+    let typed = |input: &[u8]| -> Value {
+        let created = read(unsafe { msime_client_create(document.as_ptr(), document.len()) });
+        assert_eq!(created["ok"], true, "{created}");
+        let handle = created["value"]["session"].as_u64().unwrap();
+        SESSIONS.with(|sessions| {
+            let options = &sessions.borrow()[&handle].options;
+            assert_eq!(options.scheme, 2);
+            // 五笔版的 Engine 不构造双拼和日文 provider，拼音行仍由混拼用的全拼 provider 给出。
+            assert_eq!(options.enabled_schemes, SchemeSet::of(&[SchemeType::Wubi]));
+        });
+        assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+        let mut view = Value::Null;
+        for byte in input {
+            view = read(msime_client_character(handle, *byte, false))["value"]["view"].clone();
+        }
+        read(msime_client_destroy(handle));
+        view
+    };
+    let texts = |view: &Value| -> Vec<String> {
+        view["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|candidate| candidate["text"].as_str().unwrap().to_owned())
+            .collect()
+    };
+
+    let pinyin = typed(b"nihao");
+    assert!(texts(&pinyin).contains(&"你好".to_owned()), "{pinyin}");
+    let code = typed(b"wq");
+    assert_eq!(
+        texts(&code).first().map(String::as_str),
+        Some("你"),
+        "{code}"
+    );
+}
+
+/// 日文、越南文和藏文版用各自的资源集准备宿主：资源目录只有核心资源（日文版另有日文词典），没有 msime-pinyin.db、n-gram 表和整句模型，按 full 的清单校验不过。准备出的代次里没有 msime-pinyin.db；第一次运行的偏好就是本版本唯一的方案；即使偏好写着全拼（例如从 full 同步来的），Engine 跑的仍是本版本的方案，也只构造这一个方案。
+#[test]
+fn language_editions_prepare_and_type_with_only_their_own_resources() {
+    let root = tempfile::tempdir().unwrap();
+    for (id, scheme, code, input) in [
+        ("japanese", SchemeType::JapaneseRomaji, 3, &b"ka"[..]),
+        ("vietnamese", SchemeType::Vietnamese, 7, &b"tieengs"[..]),
+        ("tibetan", SchemeType::Tibetan, 8, &b"bkra"[..]),
+    ] {
+        let edition = Edition::by_id(id).unwrap();
+        let resources = root.path().join(id).join("resources");
+        let specification = synthetic_edition_lock(edition, &resources);
+        for absent in [
+            "msime-pinyin.db",
+            "msime-bigram.bin",
+            "msime-trigram.bin",
+            "sentence-model.safetensors",
+        ] {
+            assert!(!resources.join(absent).exists(), "{id}: {absent}");
+        }
+        assert_eq!(
+            resources.join("msime-japanese.dat").exists(),
+            id == "japanese",
+            "{id}"
+        );
+        assert!(
+            ResourceStore::new(&resources)
+                .verify(&resources, &Edition::full().resource_set().unwrap())
+                .is_err(),
+            "{id}"
+        );
+        let state = root.path().join(id).join("state");
+        let prepare = || -> Value {
+            serde_json::from_str(
+                &prepare_shipped_host_configuration(
+                    &resources,
+                    &state,
+                    &specification,
+                    ON_DEMAND_ARTIFACTS,
+                    edition,
+                )
+                .unwrap(),
+            )
+            .unwrap()
+        };
+        let mut prepared = prepare();
+        assert_eq!(prepared["edition"], id);
+        assert_eq!(prepared["preferences"]["scheme"], id);
+        assert!(
+            prepared["preferences"]["last_chinese_scheme"].is_null(),
+            "{id}"
+        );
+        let dictionaries = PathBuf::from(prepared["dictionaries"].as_str().unwrap());
+        assert!(dictionaries.join("msime-english.db").is_file(), "{id}");
+        assert!(!dictionaries.join("msime-pinyin.db").exists(), "{id}");
+        assert_eq!(
+            Edition::recorded_in(&state).map(|e| e.id.as_str()),
+            Some(id)
+        );
+        // 第二次准备（例如重启或升级后）遇到的是已经准备好的代次，同样不要求 msime-pinyin.db。
+        assert_eq!(prepare()["dictionaries"], prepared["dictionaries"], "{id}");
+
+        let options = HostOptions::from_document(prepared.clone())
+            .unwrap()
+            .into_engine_options();
+        assert_eq!(options.scheme, code, "{id}");
+        assert_eq!(options.enabled_schemes, SchemeSet::of(&[scheme]), "{id}");
+        assert!(!options.enabled_schemes.reads_main_dictionary(), "{id}");
+        assert!(!options.local_temporary_japanese, "{id}");
+        assert!(!options.sentence_association.neural_keyboard, "{id}");
+
+        // 偏好写着全拼：回退到本版本的方案。
+        prepared["preferences"]["default_ime_mode"] = json!("chinese");
+        prepared["preferences"]["scheme"] = json!("quanpin");
+        prepared["preferences"]["last_chinese_scheme"] = json!("quanpin");
+        let document = prepared.to_string();
+        let created = read(unsafe { msime_client_create(document.as_ptr(), document.len()) });
+        assert_eq!(created["ok"], true, "{id}: {created}");
+        let handle = created["value"]["session"].as_u64().unwrap();
+        SESSIONS.with(|sessions| {
+            let session = &sessions.borrow()[&handle];
+            assert_eq!(session.edition.id, id);
+            assert_eq!(session.options.scheme, code, "{id}");
+        });
+        assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+        let mut view = Value::Null;
+        for byte in input {
+            let response = read(msime_client_character(handle, *byte, false));
+            assert_eq!(response["ok"], true, "{id}: {response}");
+            assert_eq!(response["value"]["handled"], true, "{id}: {response}");
+            view = response["value"]["view"].clone();
+        }
+        assert_eq!(view["scheme"], code, "{id}: {view}");
+        match id {
+            "japanese" => {
+                assert_eq!(view["reading"], "か", "{view}");
+                let committed = read(msime_client_command(handle, 11));
+                assert_eq!(committed["value"]["commit"], "か", "{committed}");
+            }
+            "vietnamese" => assert_eq!(view["preedit"], "tiếng", "{view}"),
+            _ => assert_eq!(view["preedit"], "བཀྲ", "{view}"),
+        }
+        assert_eq!(read(msime_client_destroy(handle))["ok"], true);
+        // 打字之后代次里仍然没有 msime-pinyin.db。
+        assert!(!dictionaries.join("msime-pinyin.db").exists(), "{id}");
+    }
+}
+
+/// 没有中文词库的版本里，词库工具只管英文词：英文词照常添加、列出、改权重和删除，重新准备代次后还在；拼音、五笔和快捷短语的编辑和导入直接说明本版本没有中文词库，列表是空的；候选查询说明本版本没有拼音和五笔，什么也不写。
+#[test]
+#[cfg(not(target_os = "android"))]
+fn dictionary_tools_keep_only_english_words_without_the_chinese_dictionary() {
+    let root = tempfile::tempdir().unwrap();
+    let japanese = Edition::by_id("japanese").unwrap();
+    let resources = root.path().join("resources");
+    let specification = synthetic_edition_lock(japanese, &resources);
+    let state = root.path().join("state");
+    let prepare = || -> Value {
+        serde_json::from_str(
+            &prepare_shipped_host_configuration(
+                &resources,
+                &state,
+                &specification,
+                ON_DEMAND_ARTIFACTS,
+                japanese,
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+    let prepared = prepare();
+    let options = DictionaryOptions::from_host_document(prepared.clone()).unwrap();
+    let new_word = |code: &str, word: &str| NewWord {
+        code: Some(code.into()),
+        word: word.into(),
+        weight: None,
+    };
+
+    edit_dictionary_word(
+        &options,
+        &WordEdit::Add(WordKind::English, new_word("zzfixture", "Zzfixture")),
+        "add-english",
+    )
+    .unwrap();
+    let listed = |options: &DictionaryOptions| {
+        dictionary_words(options, WordKind::English, "", false, 0, 10)
+            .unwrap()
+            .words
+    };
+    let words = listed(&options);
+    assert_eq!(words.len(), 1, "{words:?}");
+    assert_eq!(words[0].code, "zzfixture");
+    assert_eq!(words[0].word, "Zzfixture");
+    assert!(!words[0].bundled);
+    edit_dictionary_word(
+        &options,
+        &WordEdit::SetWeight {
+            kind: WordKind::English,
+            code: "zzfixture".into(),
+            word: "Zzfixture".into(),
+            weight: 77,
+        },
+        "weigh-english",
+    )
+    .unwrap();
+    assert_eq!(listed(&options)[0].weight, 77);
+
+    // 拼音、五笔和快捷短语在这里无处可存：编辑、导入都直接说明原因。
+    let refused = crate::NO_CHINESE_DICTIONARY;
+    assert_eq!(
+        edit_dictionary_word(
+            &options,
+            &WordEdit::Add(WordKind::Pinyin, new_word("ni'hao", "你好")),
+            "add-pinyin",
+        )
+        .unwrap_err(),
+        refused
+    );
+    assert_eq!(
+        edit_dictionary_word(
+            &options,
+            &WordEdit::Remove {
+                kind: WordKind::Wubi,
+                code: "wq".into(),
+                word: "你".into(),
+            },
+            "remove-wubi",
+        )
+        .unwrap_err(),
+        refused
+    );
+    assert_eq!(
+        import_dictionary_words(
+            &options,
+            WordKind::Wubi98,
+            &[new_word("wq", "你")],
+            "import-wubi"
+        )
+        .unwrap_err(),
+        refused
+    );
+    assert_eq!(
+        edit_user_quick_phrase(
+            &options,
+            &QuickPhraseEdit::Add(QuickPhrase {
+                code: "dh".into(),
+                text: "电话".into(),
+            }),
+            "add-quick",
+        )
+        .unwrap_err(),
+        refused
+    );
+    let quick = user_quick_phrases(&options, "", 0, 10).unwrap();
+    assert!(quick.phrases.is_empty() && !quick.has_more);
+    for kind in [WordKind::Pinyin, WordKind::Wubi, WordKind::Wubi98] {
+        assert!(dictionary_words(&options, kind, "ni", true, 0, 10)
+            .unwrap()
+            .words
+            .is_empty());
+    }
+
+    // 英文词可以批量导入。
+    let imported = import_dictionary_words(
+        &options,
+        WordKind::English,
+        &[
+            new_word("zzother", "Zzother"),
+            new_word("zzfixture", "Zzfixture"),
+        ],
+        "import-english",
+    )
+    .unwrap();
+    assert_eq!((imported.added, imported.existing), (1, 1));
+    assert!(imported.rejected.is_empty(), "{:?}", imported.rejected);
+
+    // 候选查询只认拼音和五笔，本版本两样都没有。
+    assert_eq!(
+        lookup_candidates(&options, None, "ka", 5).unwrap_err(),
+        "candidates can only be looked up in pinyin, double pinyin or wubi"
+    );
+    assert_eq!(
+        lookup_candidates(&options, Some(LookupScheme::Quanpin), "nihao", 5).unwrap_err(),
+        "this edition does not offer that scheme"
+    );
+
+    // 重新准备已有的代次会再回放一次日志：英文词还在，代次里仍然没有 msime-pinyin.db。
+    let again = prepare();
+    assert_eq!(again["dictionaries"], prepared["dictionaries"]);
+    let dictionaries = PathBuf::from(again["dictionaries"].as_str().unwrap());
+    assert!(!dictionaries.join("msime-pinyin.db").exists());
+    let options = DictionaryOptions::from_host_document(again).unwrap();
+    let words = listed(&options);
+    assert_eq!(
+        words
+            .iter()
+            .map(|word| (word.code.as_str(), word.weight))
+            .collect::<Vec<_>>(),
+        [("zzfixture", 77), ("zzother", 10)]
+    );
+    edit_dictionary_word(
+        &options,
+        &WordEdit::Remove {
+            kind: WordKind::English,
+            code: "zzother".into(),
+            word: "Zzother".into(),
+        },
+        "remove-english",
+    )
+    .unwrap();
+    assert_eq!(listed(&options).len(), 1);
+}
+
+/// Linux 的 Fcitx5 只有一个进程，两个版本的插件会把宿主库加载进同一个进程（`RTLD_LOCAL` 下各自一份，但也可能被系统合并成一份）。这里在同一个进程、同一个线程里同时开着 full 和五笔版两个状态目录的会话，交替输入、选词和更新偏好，确认它们互不影响：方案各按各的版本，学习只写进自己的用户词库，一边更新偏好不改另一边的会话。进程级的静态缓存要么按路径做键（词库连接、n-gram、整句模型、用户日志），要么与状态目录无关（单位换算的 rink 上下文、拼音音节表），所以两个状态目录可以并存。
+#[test]
+fn two_editions_with_their_own_state_roots_share_one_process() {
+    let root = tempfile::tempdir().unwrap();
+    let wubi = Edition::by_id("wubi").unwrap();
+    let prepare = |name: &str, edition: &'static Edition| -> (std::path::PathBuf, String) {
+        let resources = root.path().join(name).join("resources");
+        let specification = synthetic_edition_lock(edition, &resources);
+        let state = root.path().join(name).join("state");
+        let mut prepared: Value = serde_json::from_str(
+            &prepare_shipped_host_configuration(
+                &resources,
+                &state,
+                &specification,
+                ON_DEMAND_ARTIFACTS,
+                edition,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        prepared["preferences"]["default_ime_mode"] = json!("chinese");
+        (state, prepared.to_string())
+    };
+    let (full_state, full_document) = prepare("full", Edition::full());
+    let (wubi_state, wubi_document) = prepare("wubi", wubi);
+    let create = |document: &str| -> u64 {
+        let created = read(unsafe { msime_client_create(document.as_ptr(), document.len()) });
+        assert_eq!(created["ok"], true, "{created}");
+        let handle = created["value"]["session"].as_u64().unwrap();
+        assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+        handle
+    };
+    let full = create(&full_document);
+    let wubi_handle = create(&wubi_document);
+    SESSIONS.with(|sessions| {
+        let sessions = sessions.borrow();
+        let (full_options, wubi_options) =
+            (&sessions[&full].options, &sessions[&wubi_handle].options);
+        assert_eq!(sessions[&full].edition.id, "full");
+        assert_eq!(sessions[&wubi_handle].edition.id, "wubi");
+        assert_eq!(full_options.scheme, 0);
+        assert_eq!(wubi_options.scheme, 2);
+        assert!(Path::new(&full_options.user_data).starts_with(&full_state));
+        assert!(Path::new(&wubi_options.user_data).starts_with(&wubi_state));
+        assert!(Path::new(&full_options.dictionaries).starts_with(&full_state));
+        assert!(Path::new(&wubi_options.dictionaries).starts_with(&wubi_state));
+    });
+    let typed = |handle: u64, input: &[u8]| -> Value {
+        let mut view = Value::Null;
+        for byte in input {
+            let response = read(msime_client_character(handle, *byte, false));
+            assert_eq!(response["ok"], true, "{response}");
+            view = response["value"]["view"].clone();
+        }
+        view
+    };
+    let texts = |view: &Value| -> Vec<String> {
+        view["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|candidate| candidate["text"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let escape = |handle: u64| {
+        assert_eq!(read(msime_client_command(handle, 3))["ok"], true);
+    };
+
+    // 交替输入：五笔版的 `wq` 出五笔码表的「你」，full 的同一串按全拼走，不出五笔码。
+    let wubi_code = typed(wubi_handle, b"wq");
+    assert_eq!(
+        texts(&wubi_code).first().map(String::as_str),
+        Some("你"),
+        "{wubi_code}"
+    );
+    let full_code = typed(full, b"wq");
+    assert_ne!(
+        texts(&full_code).first().map(String::as_str),
+        Some("你"),
+        "{full_code}"
+    );
+    escape(wubi_handle);
+    escape(full);
+
+    // full 里反复选第二个候选「拟好」，学到 full 自己的用户词库里，直到它排到第一。
+    let mut learned = false;
+    for _ in 0..8 {
+        let view = typed(full, b"nihao");
+        let list = texts(&view);
+        if list.first().map(String::as_str) == Some("拟好") {
+            learned = true;
+            escape(full);
+            break;
+        }
+        let index = list
+            .iter()
+            .position(|text| text == "拟好")
+            .expect("拟好 is offered");
+        let generation = view["generation"].as_u64().unwrap();
+        let selected = read(msime_client_select(full, generation, index));
+        assert_eq!(selected["value"]["commit"], "拟好", "{selected}");
+    }
+    assert!(learned, "full never learned 拟好");
+    // 五笔版的混拼没有学到 full 的选择：「你好」仍在「拟好」前面。
+    let mixed = texts(&typed(wubi_handle, b"nihao"));
+    let position = |text: &str| mixed.iter().position(|candidate| candidate == text);
+    assert!(
+        position("你好").unwrap() < position("拟好").unwrap(),
+        "{mixed:?}"
+    );
+    escape(wubi_handle);
+
+    // 一边更新偏好，另一边的会话不变：full 切到双拼，五笔版仍是五笔、混拼仍开着。
+    let shuangpin = Preferences {
+        scheme: InputScheme::Shuangpin,
+        ..Preferences::default()
+    };
+    assert_eq!(update(full, 1, &shuangpin)["ok"], true);
+    // 让挂起的偏好在下一次按键时生效。
+    typed(full, b"n");
+    escape(full);
+    SESSIONS.with(|sessions| {
+        let sessions = sessions.borrow();
+        assert_eq!(sessions[&full].options.scheme, 1);
+        assert_eq!(sessions[&wubi_handle].options.scheme, 2);
+        assert!(sessions[&wubi_handle].options.wubi_mixed_pinyin);
+    });
+    assert_eq!(read(msime_client_destroy(full))["ok"], true);
+    // full 的会话关掉之后，五笔版照常输入。
+    let after = typed(wubi_handle, b"wq");
+    assert_eq!(
+        texts(&after).first().map(String::as_str),
+        Some("你"),
+        "{after}"
+    );
+    assert_eq!(read(msime_client_destroy(wubi_handle))["ok"], true);
+}
+
+/// 刷新按文档记录的版本的锁比较代次：五笔版的文档停在五笔锁的代次上就是最新的，不会被当成过期重新准备；记成 full 的代次则要重新准备（这里资源目录是空的，所以准备失败）。
+#[test]
+fn refresh_compares_the_generation_of_the_documents_edition() {
+    let directory = tempfile::tempdir().unwrap();
+    let resources = directory.path().join("resources");
+    std::fs::create_dir(&resources).unwrap();
+    let state = directory.path().join("state");
+    std::fs::create_dir(&state).unwrap();
+    let wubi = Edition::by_id("wubi").unwrap();
+    let document = |generation: String| {
+        json!({
+            "api_version": 1,
+            "resources": resources,
+            "user_data": state.join("user"),
+            "cache": state.join("cache"),
+            "dictionaries": state.join("user").join("dictionaries").join(generation),
+            "preferences_directory": state,
+            "preferences": Preferences::for_edition(wubi),
+            "edition": "wubi",
+        })
+    };
+    let options = state.join("runtime-options.json");
+
+    let current = document(wubi.resource_set().unwrap().generation().unwrap());
+    std::fs::write(&options, serde_json::to_vec(&current).unwrap()).unwrap();
+    assert!(!refresh_host_options(&options).unwrap());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&std::fs::read(&options).unwrap()).unwrap(),
+        current
+    );
+
+    let full_generation = Edition::full()
+        .resource_set()
+        .unwrap()
+        .generation()
+        .unwrap();
+    let stale = document(full_generation);
+    std::fs::write(&options, serde_json::to_vec(&stale).unwrap()).unwrap();
+    assert!(refresh_host_options(&options).is_err());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&std::fs::read(&options).unwrap()).unwrap(),
+        stale
+    );
+}
+
 #[test]
 fn translation_queries_only_clear_chinese_candidates_for_the_network() {
     // A gloss model has nothing to say about a Latin letter, a digit or an emoji, and asking spends the
@@ -6349,7 +7528,7 @@ fn translation_queries_only_clear_chinese_candidates_for_the_network() {
         // Kaomoji mode stays disabled until the catalog it reads from exists.
         let resources = dir.path().join("resources");
         std::fs::create_dir_all(&resources).unwrap();
-        rusqlite::Connection::open(resources.join("others.db"))
+        rusqlite::Connection::open(resources.join("msime-others.db"))
             .unwrap()
             .execute_batch(
                 "CREATE TABLE kaomoji(pinyin TEXT,jianpin TEXT,kaomoji TEXT,sort_order INTEGER);
@@ -6805,7 +7984,7 @@ fn the_dictionary_manifest_answers_what_is_installed_or_says_it_cannot() {
     // The real shape, with every field the packaged manifest carries. Only two come back — the
     // page is asking what is installed and where it came from, not for journal modes.
     std::fs::write(
-        resources.join("dictionary-manifest.json"),
+        resources.join("msime-dictionary-manifest.json"),
         json!({
             "manifest_version": 1,
             "profile": "desktop",
@@ -6839,13 +8018,13 @@ fn the_dictionary_manifest_answers_what_is_installed_or_says_it_cannot() {
         json!({"source": {"commit": commit}}),
     ] {
         std::fs::write(
-            resources.join("dictionary-manifest.json"),
+            resources.join("msime-dictionary-manifest.json"),
             broken.to_string(),
         )
         .unwrap();
         assert_eq!(read_manifest()["ok"], false, "accepted {broken}");
     }
-    std::fs::write(resources.join("dictionary-manifest.json"), "not json").unwrap();
+    std::fs::write(resources.join("msime-dictionary-manifest.json"), "not json").unwrap();
     assert_eq!(read_manifest()["ok"], false);
 
     // A relative directory is refused rather than resolved against whatever the process happens
@@ -6949,7 +8128,7 @@ fn refresh_keeps_the_language_dictionaries_in_step_with_the_installed_package() 
     std::fs::create_dir_all(&beside).expect("beside");
     assert_eq!(refresh(&current), None);
 
-    std::fs::write(beside.join("zhuyin.db"), b"sqlite").expect("zhuyin");
+    std::fs::write(beside.join("msime-zhuyin.db"), b"sqlite").expect("zhuyin");
     let mut installed = current.clone();
     installed["language_dictionaries"] = json!(beside);
     assert_eq!(refresh(&current), Some(installed.clone()));
@@ -6971,7 +8150,13 @@ fn refresh_keeps_the_language_dictionaries_in_step_with_the_installed_package() 
     moved["user_data"] = json!("/t/user");
     assert_eq!(refresh(&moved), None);
 
-    std::fs::remove_file(beside.join("zhuyin.db")).expect("uninstall");
+    std::fs::remove_file(beside.join("msime-zhuyin.db")).expect("uninstall");
+    assert_eq!(refresh(&installed), Some(current.clone()));
+
+    // msime-stroke.db alone records the directory as well.
+    std::fs::write(beside.join("msime-stroke.db"), b"sqlite").expect("stroke");
+    assert_eq!(refresh(&current), Some(installed.clone()));
+    std::fs::remove_file(beside.join("msime-stroke.db")).expect("uninstall");
     assert_eq!(refresh(&installed), Some(current.clone()));
 }
 
@@ -6985,7 +8170,7 @@ fn a_prepared_generation_records_the_language_dictionaries_beside_its_new_resour
     std::fs::create_dir_all(&new).expect("new");
     let beside = root.path().join("new").join("language-dictionaries");
     std::fs::create_dir_all(&beside).expect("beside");
-    std::fs::write(beside.join("cantonese.db"), b"sqlite").expect("cantonese");
+    std::fs::write(beside.join("msime-cantonese.db"), b"sqlite").expect("cantonese");
     let stale = json!({
         "resources": old,
         "user_data": "/s/user",
@@ -7016,7 +8201,7 @@ fn only_the_input_method_refresh_records_the_language_dictionaries() {
     std::fs::create_dir(&resources).unwrap();
     let beside = directory.path().join("language-dictionaries");
     std::fs::create_dir(&beside).unwrap();
-    std::fs::write(beside.join("zhuyin.db"), b"sqlite").unwrap();
+    std::fs::write(beside.join("msime-zhuyin.db"), b"sqlite").unwrap();
     let state = directory.path().join("state");
     std::fs::create_dir(&state).unwrap();
     let generation = serde_json::from_str::<ResourceSet>(include_str!(
@@ -7056,11 +8241,11 @@ fn an_outdated_generation_still_records_the_installed_language_dictionaries() {
     // 与 Application Support 里手工暂存的布局相同：资源目录和语言词库都在状态目录里。
     let resources = state.join("EngineResources");
     std::fs::create_dir_all(&resources).unwrap();
-    std::fs::write(resources.join("msime.db"), b"previous generation").unwrap();
+    std::fs::write(resources.join("msime-pinyin.db"), b"previous generation").unwrap();
     let beside = state.join("language-dictionaries");
     std::fs::create_dir(&beside).unwrap();
-    std::fs::write(beside.join("cantonese.db"), b"sqlite").unwrap();
-    std::fs::write(beside.join("zhuyin.db"), b"sqlite").unwrap();
+    std::fs::write(beside.join("msime-cantonese.db"), b"sqlite").unwrap();
+    std::fs::write(beside.join("msime-zhuyin.db"), b"sqlite").unwrap();
     let document = json!({
         "api_version": 1,
         "cache": state.join("cache"),
@@ -7338,7 +8523,7 @@ fn refresh_reports_outdated_resources_and_leaves_the_options_alone() {
     let resources = directory.path().join("resources");
     std::fs::create_dir(&resources).unwrap();
     // A file the previous lock pinned; the compiled lock names none of it.
-    std::fs::write(resources.join("msime.db"), b"previous generation").unwrap();
+    std::fs::write(resources.join("msime-pinyin.db"), b"previous generation").unwrap();
     let state = directory.path().join("state");
     std::fs::create_dir(&state).unwrap();
     let options = state.join("runtime-options.json");
@@ -7632,6 +8817,41 @@ fn voice_hotword_correction_rewrites_homophones() {
 }
 
 #[test]
+fn voice_hotword_correction_rejects_unbounded_work() {
+    let hotwords = (0..1_001)
+        .map(|_| json!({"text": "明天", "pinyin": "ming tian"}))
+        .collect::<Vec<_>>();
+    let too_many_hotwords = json!({ "text": "名天", "hotwords": hotwords }).to_string();
+    assert_eq!(
+        read(unsafe {
+            msime_client_voice_hotword_correct(too_many_hotwords.as_ptr(), too_many_hotwords.len())
+        })["ok"],
+        false,
+        "the correction boundary must cap hotword count"
+    );
+
+    let too_long_text = json!({ "text": "中".repeat(65_537), "hotwords": [] }).to_string();
+    assert_eq!(
+        read(unsafe {
+            msime_client_voice_hotword_correct(too_long_text.as_ptr(), too_long_text.len())
+        })["ok"],
+        false,
+        "the correction boundary must cap transcript size"
+    );
+
+    let too_long_pinyin =
+        json!({ "text": "名天", "hotwords": [{"text": "明天", "pinyin": "m".repeat(1_025)}] })
+            .to_string();
+    assert_eq!(
+        read(unsafe {
+            msime_client_voice_hotword_correct(too_long_pinyin.as_ptr(), too_long_pinyin.len())
+        })["ok"],
+        false,
+        "the correction boundary must cap each hotword field"
+    );
+}
+
+#[test]
 fn voice_local_models_list_install_cancel_and_remove_validate_their_requests() {
     let root = tempfile::tempdir().unwrap();
     let request = json!({ "root": root.path() }).to_string();
@@ -7885,7 +9105,7 @@ fn phrase_tables_reach_the_quick_phrase_mode_from_the_plugins_directory() {
     for name in ["resources", "dictionaries"] {
         let directory = dir.path().join(name);
         std::fs::create_dir_all(&directory).unwrap();
-        rusqlite::Connection::open(directory.join("msime.db"))
+        rusqlite::Connection::open(directory.join("msime-pinyin.db"))
             .unwrap()
             .execute_batch(
                 "CREATE TABLE quick_parases(key TEXT,value TEXT,weight INTEGER);
@@ -8662,22 +9882,28 @@ fn community_moderation_abi_lists_reasons_builds_reports_and_words_refusals() {
     assert!(generic["message"].is_null());
 }
 
-/// 合成的桌面词库锁：`msime.db` 与 `english.db` 是可以复制进代次的 SQLite 小库，另有日文词典与 Mozc 说明这一对 macOS 按需下载的文件。文件写在 `resources` 里，清单按实际内容计算长度与 SHA-256。
+/// 合成的桌面词库锁：`msime-pinyin.db` 与 `msime-english.db` 是可以复制进代次的 SQLite 小库，另有日文词典与两份 Mozc 许可文本这一组 macOS 按需下载的文件。文件写在 `resources` 里，清单按实际内容计算长度与 SHA-256。
 pub(crate) fn synthetic_desktop_lock(resources: &Path) -> ResourceSet {
     std::fs::create_dir_all(resources).unwrap();
-    for name in ["msime.db", "english.db"] {
+    for name in ["msime-pinyin.db", "msime-english.db"] {
         rusqlite::Connection::open(resources.join(name))
             .unwrap()
             .execute_batch("CREATE TABLE fixture(value TEXT);")
             .unwrap();
     }
-    std::fs::write(resources.join("dict_japanese.dat"), b"japanese").unwrap();
-    std::fs::write(resources.join("mozc_dictionary_oss_README.txt"), b"readme").unwrap();
+    std::fs::write(resources.join("msime-japanese.dat"), b"japanese").unwrap();
+    std::fs::write(
+        resources.join("msime-mozc_dictionary_oss_README.txt"),
+        b"readme",
+    )
+    .unwrap();
+    std::fs::write(resources.join("msime-mozc_LICENSE.txt"), b"license").unwrap();
     let artifacts = [
-        "msime.db",
-        "english.db",
-        "dict_japanese.dat",
-        "mozc_dictionary_oss_README.txt",
+        "msime-pinyin.db",
+        "msime-english.db",
+        "msime-japanese.dat",
+        "msime-mozc_dictionary_oss_README.txt",
+        "msime-mozc_LICENSE.txt",
     ]
     .into_iter()
     .map(|name| {
@@ -8703,7 +9929,11 @@ fn publish_resource_pack(state_root: &Path, pack: ResourcePack, files: &[&str]) 
     for name in files {
         std::fs::write(directory.join(name), b"downloaded").unwrap();
     }
-    std::fs::write(directory.join("msime-model.json"), b"{}").unwrap();
+    std::fs::write(
+        directory.join("msime-model.json"),
+        serde_json::to_vec(&pack.manifest()).unwrap(),
+    )
+    .unwrap();
     directory
 }
 
@@ -8713,13 +9943,15 @@ fn downloaded_language_dictionaries_win_over_the_recorded_directory() {
     let state = root.path().join("state");
     let recorded = root.path().join("language-dictionaries");
     std::fs::create_dir_all(&recorded).unwrap();
-    std::fs::write(recorded.join("cantonese.db"), b"bundled").unwrap();
-    std::fs::write(recorded.join("zhuyin.db"), b"bundled").unwrap();
+    std::fs::write(recorded.join("msime-cantonese.db"), b"bundled").unwrap();
+    std::fs::write(recorded.join("msime-zhuyin.db"), b"bundled").unwrap();
+    std::fs::write(recorded.join("msime-stroke.db"), b"bundled").unwrap();
 
     // 没有资源包：用记录的（随包内置的）那份。
     let bundled = LanguageDictionaries {
-        cantonese: Some(recorded.join("cantonese.db")),
-        zhuyin: Some(recorded.join("zhuyin.db")),
+        cantonese: Some(recorded.join("msime-cantonese.db")),
+        zhuyin: Some(recorded.join("msime-zhuyin.db")),
+        stroke: Some(recorded.join("msime-stroke.db")),
     };
     assert_eq!(
         LanguageDictionaries::resolve(Some(&state), Some(&recorded)),
@@ -8739,31 +9971,33 @@ fn downloaded_language_dictionaries_win_over_the_recorded_directory() {
         .join(".staging-language-dictionaries-abc")
         .join("model");
     std::fs::create_dir_all(&staging).unwrap();
-    std::fs::write(staging.join("cantonese.db"), b"partial").unwrap();
+    std::fs::write(staging.join("msime-cantonese.db"), b"partial").unwrap();
     std::fs::write(staging.join("msime-model.json"), b"{}").unwrap();
     assert_eq!(
         LanguageDictionaries::resolve(Some(&state), Some(&recorded)),
         bundled
     );
 
-    // 资源包里的粤拼词库优先，资源包缺的注音词库退回记录的那份。
+    // 资源包里的粤拼词库优先，资源包缺的注音与笔画词库退回记录的那份。
     let pack = publish_resource_pack(
         &state,
         ResourcePack::LanguageDictionaries,
-        &["cantonese.db"],
+        &["msime-cantonese.db"],
     );
     assert_eq!(
         LanguageDictionaries::resolve(Some(&state), Some(&recorded)),
         LanguageDictionaries {
-            cantonese: Some(pack.join("cantonese.db")),
-            zhuyin: Some(recorded.join("zhuyin.db")),
+            cantonese: Some(pack.join("msime-cantonese.db")),
+            zhuyin: Some(recorded.join("msime-zhuyin.db")),
+            stroke: Some(recorded.join("msime-stroke.db")),
         }
     );
     assert_eq!(
         LanguageDictionaries::resolve(Some(&state), None),
         LanguageDictionaries {
-            cantonese: Some(pack.join("cantonese.db")),
+            cantonese: Some(pack.join("msime-cantonese.db")),
             zhuyin: None,
+            stroke: None,
         }
     );
 
@@ -8778,11 +10012,15 @@ fn downloaded_language_dictionaries_win_over_the_recorded_directory() {
         .into_engine_options();
     assert_eq!(
         options.cantonese_dictionary,
-        pack.join("cantonese.db").to_str().unwrap()
+        pack.join("msime-cantonese.db").to_str().unwrap()
     );
     assert_eq!(
         options.zhuyin_dictionary,
-        recorded.join("zhuyin.db").to_str().unwrap()
+        recorded.join("msime-zhuyin.db").to_str().unwrap()
+    );
+    assert_eq!(
+        options.stroke_dictionary,
+        recorded.join("msime-stroke.db").to_str().unwrap()
     );
     assert_eq!(options.scheme, 5);
 }
@@ -8812,25 +10050,29 @@ fn a_downloaded_japanese_pack_keeps_temporary_japanese_available() {
         .join(".staging-japanese-abc")
         .join("model");
     std::fs::create_dir_all(&staging).unwrap();
-    std::fs::write(staging.join("dict_japanese.dat"), b"partial").unwrap();
+    std::fs::write(staging.join("msime-japanese.dat"), b"partial").unwrap();
     std::fs::write(staging.join("msime-model.json"), b"{}").unwrap();
     assert_eq!(options().japanese_dictionary, "");
 
     let pack = publish_resource_pack(
         &state,
         ResourcePack::Japanese,
-        &["dict_japanese.dat", "mozc_dictionary_oss_README.txt"],
+        &[
+            "msime-japanese.dat",
+            "msime-mozc_dictionary_oss_README.txt",
+            "msime-mozc_LICENSE.txt",
+        ],
     );
     let with = options();
     assert_eq!(
         with.japanese_dictionary,
-        pack.join("dict_japanese.dat").to_str().unwrap()
+        pack.join("msime-japanese.dat").to_str().unwrap()
     );
     assert!(with.local_temporary_japanese);
 
     // 资源目录内置的那份照旧可用，字段为空时 Engine 读它。
     std::fs::remove_dir_all(resource_packs::root(&state)).unwrap();
-    std::fs::write(resources.join("dict_japanese.dat"), b"bundled").unwrap();
+    std::fs::write(resources.join("msime-japanese.dat"), b"bundled").unwrap();
     let bundled = options();
     assert_eq!(bundled.japanese_dictionary, "");
     assert!(bundled.local_temporary_japanese);
@@ -8854,8 +10096,18 @@ fn verification_accepts_resources_shipped_without_the_on_demand_pair() {
     )
     .unwrap();
 
-    // 只缺一半：两种规则都拒绝。
-    std::fs::remove_file(resources.join("mozc_dictionary_oss_README.txt")).unwrap();
+    // 只缺 Mozc 许可：两种规则都拒绝。
+    std::fs::remove_file(resources.join("msime-mozc_LICENSE.txt")).unwrap();
+    assert!(verify_resources_once(
+        &resources,
+        &specification,
+        &fresh_state("no-license"),
+        &MACOS_ON_DEMAND_ARTIFACTS,
+    )
+    .is_err());
+
+    // 只剩词典：两种规则都拒绝。
+    std::fs::remove_file(resources.join("msime-mozc_dictionary_oss_README.txt")).unwrap();
     assert!(verify_resources_once(
         &resources,
         &specification,
@@ -8864,8 +10116,8 @@ fn verification_accepts_resources_shipped_without_the_on_demand_pair() {
     )
     .is_err());
 
-    // 整对缺席：macOS 的发货规则通过，完整规则仍然拒绝。
-    std::fs::remove_file(resources.join("dict_japanese.dat")).unwrap();
+    // 整组缺席：macOS 的发货规则通过，完整规则仍然拒绝。
+    std::fs::remove_file(resources.join("msime-japanese.dat")).unwrap();
     assert!(verify_resources_once(&resources, &specification, &fresh_state("slim"), &[]).is_err());
     verify_resources_once(
         &resources,
@@ -8883,6 +10135,7 @@ fn verification_accepts_resources_shipped_without_the_on_demand_pair() {
             &state,
             &specification,
             &MACOS_ON_DEMAND_ARTIFACTS,
+            Edition::full(),
         )
         .unwrap(),
     )
@@ -8892,7 +10145,7 @@ fn verification_accepts_resources_shipped_without_the_on_demand_pair() {
         dictionaries.file_name().unwrap().to_str().unwrap(),
         specification.generation().unwrap()
     );
-    assert!(dictionaries.join("msime.db").is_file());
+    assert!(dictionaries.join("msime-pinyin.db").is_file());
 }
 
 /// 平台默认的按需清单：macOS 接受不含日文词典的发布包，其余平台仍要求完整的锁文件。
@@ -8901,13 +10154,15 @@ fn the_platform_shipping_rule_decides_whether_a_slim_bundle_prepares() {
     let root = tempfile::tempdir().unwrap();
     let resources = root.path().join("resources");
     let specification = synthetic_desktop_lock(&resources);
-    std::fs::remove_file(resources.join("dict_japanese.dat")).unwrap();
-    std::fs::remove_file(resources.join("mozc_dictionary_oss_README.txt")).unwrap();
+    std::fs::remove_file(resources.join("msime-japanese.dat")).unwrap();
+    std::fs::remove_file(resources.join("msime-mozc_dictionary_oss_README.txt")).unwrap();
+    std::fs::remove_file(resources.join("msime-mozc_LICENSE.txt")).unwrap();
     let prepared = prepare_shipped_host_configuration(
         &resources,
         &root.path().join("state"),
         &specification,
         ON_DEMAND_ARTIFACTS,
+        Edition::full(),
     );
     #[cfg(target_os = "macos")]
     {
@@ -8937,7 +10192,7 @@ fn a_resource_pack_installed_after_the_session_opened_is_picked_up_on_focus() {
     };
     let state = path("state");
     let resources = path("resources");
-    rusqlite::Connection::open(resources.join("msime.db"))
+    rusqlite::Connection::open(resources.join("msime-pinyin.db"))
         .unwrap()
         .execute_batch(
             "CREATE TABLE tbl_2_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);
@@ -8945,7 +10200,11 @@ fn a_resource_pack_installed_after_the_session_opened_is_picked_up_on_focus() {
         )
         .unwrap();
     let dictionaries = path("dictionaries");
-    std::fs::copy(resources.join("msime.db"), dictionaries.join("msime.db")).unwrap();
+    std::fs::copy(
+        resources.join("msime-pinyin.db"),
+        dictionaries.join("msime-pinyin.db"),
+    )
+    .unwrap();
     let options = json!({ "api_version": 1, "resources": resources, "user_data": path("user"), "cache": path("cache"), "dictionaries": dictionaries, "preferences": chinese_preferences(), "preferences_directory": state }).to_string();
     let created = read(unsafe { msime_client_create(options.as_ptr(), options.len()) });
     assert_eq!(created["ok"], true, "{created}");
@@ -8970,9 +10229,9 @@ fn a_resource_pack_installed_after_the_session_opened_is_picked_up_on_focus() {
     let language = publish_resource_pack(
         &state,
         ResourcePack::LanguageDictionaries,
-        &["cantonese.db"],
+        &["msime-cantonese.db"],
     );
-    let japanese = publish_resource_pack(&state, ResourcePack::Japanese, &["dict_japanese.dat"]);
+    let japanese = publish_resource_pack(&state, ResourcePack::Japanese, &["msime-japanese.dat"]);
     // 组字中途不重建：变化先记下，等输入空闲。
     SESSIONS.with(|sessions| {
         let mut sessions = sessions.borrow_mut();
@@ -8988,13 +10247,14 @@ fn a_resource_pack_installed_after_the_session_opened_is_picked_up_on_focus() {
     assert_eq!(
         after,
         LanguageDictionaries {
-            cantonese: Some(language.join("cantonese.db")),
+            cantonese: Some(language.join("msime-cantonese.db")),
             zhuyin: None,
+            stroke: None,
         }
     );
     assert_eq!(
         japanese_path,
-        japanese.join("dict_japanese.dat").to_str().unwrap()
+        japanese.join("msime-japanese.dat").to_str().unwrap()
     );
     assert!(!pending, "an idle session rebuilds at once");
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "InputSchemeTraits.h"
+#include "LinuxEdition.h"
 
 #include <nlohmann/json.hpp>
 
@@ -14,8 +15,18 @@
 namespace msime::linux_host {
 
 // Every preferences scheme id in Engine order: the index is the number a view reports as `scheme`.
-inline constexpr std::array<std::string_view, 8> kInputSchemeIds = {
-    "quanpin", "shuangpin", "wubi", "japanese", "korean", "cantonese", "zhuyin", "vietnamese"};
+inline constexpr std::array<std::string_view, 10> kInputSchemeIds = {
+    "quanpin", "shuangpin", "wubi", "japanese", "korean", "cantonese", "zhuyin", "vietnamese", "tibetan", "stroke"};
+
+// 本版本提供的方案（版本表的 input_schemes）和回退到的默认方案。不在列表里的方案在本版本中不存在：菜单不列它，偏好里写着它时与宿主库的 effective_scheme 一样回退。
+inline constexpr std::string_view kEditionInputSchemes[] = {MSIME_EDITION_INPUT_SCHEMES};
+inline constexpr std::string_view kEditionDefaultScheme = MSIME_EDITION_DEFAULT_SCHEME;
+
+inline bool edition_offers_scheme(std::string_view id) {
+  for (const auto scheme : kEditionInputSchemes)
+    if (scheme == id) return true;
+  return false;
+}
 
 // The Engine number of a preferences scheme id, or -1 for an id this host does not know.
 inline int scheme_number(std::string_view id) {
@@ -62,10 +73,11 @@ inline bool zhuyin_list_down_key(const nlohmann::json &view) {
   return scheme_rules(view) == scheme::Zhuyin && candidate_list_composition(view) && !opened_candidate_list(view);
 }
 
-// Which language dictionaries the `language_dictionaries` directory named by a HostOptions document holds: Cantonese and Zhuyin need theirs, and host-api falls back from either when it is missing, so offering it would select a scheme that never takes effect. Mirrors host-api's `LanguageDictionaries::serve`. This looks at the disk, so a host works it out once whenever it loads the options and keeps the result, keeping file checks off the key path and the scheme steady for the life of a session, as host-api decides it once when the session opens.
+// Which language dictionaries the `language_dictionaries` directory named by a HostOptions document holds: Cantonese, Zhuyin and Stroke need theirs, and host-api falls back from each of them when it is missing, so offering it would select a scheme that never takes effect. Mirrors host-api's `LanguageDictionaries::serve`. This looks at the disk, so a host works it out once whenever it loads the options and keeps the result, keeping file checks off the key path and the scheme steady for the life of a session, as host-api decides it once when the session opens.
 struct LanguageDictionaryAvailability {
   bool cantonese = false;
   bool zhuyin = false;
+  bool stroke = false;
 };
 
 inline LanguageDictionaryAvailability language_dictionary_availability(const nlohmann::json &options) {
@@ -74,26 +86,29 @@ inline LanguageDictionaryAvailability language_dictionary_availability(const nlo
   if (directory == options.end() || !directory->is_string() || directory->get_ref<const std::string &>().empty()) return {};
   const std::filesystem::path root = directory->get<std::string>();
   std::error_code error;
-  const bool cantonese = std::filesystem::is_regular_file(root / "cantonese.db", error);
-  const bool zhuyin = std::filesystem::is_regular_file(root / "zhuyin.db", error);
-  return {cantonese, zhuyin};
+  const bool cantonese = std::filesystem::is_regular_file(root / "msime-cantonese.db", error);
+  const bool zhuyin = std::filesystem::is_regular_file(root / "msime-zhuyin.db", error);
+  const bool stroke = std::filesystem::is_regular_file(root / "msime-stroke.db", error);
+  return {cantonese, zhuyin, stroke};
 }
 
-// Whether a scheme can run with these dictionaries: every known scheme but Cantonese and Zhuyin needs no data beyond the resource set.
+// Whether a scheme can run with these dictionaries: every known scheme but Cantonese, Zhuyin and Stroke needs no data beyond the resource set. 本版本不提供的方案一律不能跑。
 inline bool input_scheme_available(std::string_view id, LanguageDictionaryAvailability dictionaries) {
+  if (!edition_offers_scheme(id)) return false;
   if (id == "cantonese") return dictionaries.cantonese;
   if (id == "zhuyin") return dictionaries.zhuyin;
+  if (id == "stroke") return dictionaries.stroke;
   return scheme_number(id) >= 0;
 }
 
-// The scheme the Engine actually runs for this preferences scheme, mirroring host-api's `effective_scheme`: a scheme that cannot run here gives way to the last Chinese scheme when that one can, and to quanpin otherwise. The menus check this one and the indicator shows its mode, so neither claims a scheme the user is not typing in.
+// The scheme the Engine actually runs for this preferences scheme, mirroring host-api's `effective_scheme`: a scheme that cannot run here gives way to the last Chinese scheme when that one can, and to the edition's default scheme otherwise (quanpin in full). The menus check this one and the indicator shows its mode, so neither claims a scheme the user is not typing in.
 inline std::string effective_input_scheme(std::string_view id, std::string_view last_chinese_scheme,
                                           LanguageDictionaryAvailability dictionaries) {
   if (input_scheme_available(id, dictionaries)) return std::string(id);
   const int last = scheme_number(last_chinese_scheme);
   if (last >= 0 && scheme::IsChinese(last) && input_scheme_available(last_chinese_scheme, dictionaries))
     return std::string(last_chinese_scheme);
-  return "quanpin";
+  return std::string(kEditionDefaultScheme);
 }
 
 } // namespace msime::linux_host

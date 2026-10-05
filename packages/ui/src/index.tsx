@@ -119,6 +119,7 @@ import { useWindowState } from "./settings/use-window-state";
 import { useAppVersion } from "./settings/use-app-version";
 import { supportDiagnostics } from "./settings/support-diagnostics";
 import { useMountedRef } from "./settings/use-mounted-ref";
+import { useAsyncGeneration } from "./settings/use-async-generation";
 export {
   useProviderCredentials,
   type ProviderCredentialBusy,
@@ -204,6 +205,10 @@ export {
   type UseSettingsDictionaryStateOptions,
 } from "./settings/use-settings-dictionary-state";
 export { SettingsFormFrame, type SettingsFormFrameProps } from "./settings/settings-form-frame";
+export {
+  SettingsPageFieldset,
+  type SettingsPageFieldsetProps,
+} from "./settings/settings-page-fieldset";
 export {
   NoticeBanner,
   noticeBodyHtml,
@@ -305,6 +310,7 @@ export { useMacosSettings, type UseMacosSettingsOptions } from "./settings/use-m
 export {
   MacosInputModeEntriesSection,
   macosInputModeEntries,
+  macosInputModeEntriesFor,
   type MacosInputModesClient,
 } from "./settings/macos-input-mode-entries-section";
 export { useWindowState, type UseWindowStateOptions } from "./settings/use-window-state";
@@ -470,6 +476,9 @@ export {
   dailySpeeds,
   formatActiveTime,
   longestStreak,
+  statisticDayKeys,
+  statisticsOverviewMetrics,
+  statisticsOverviewDetails,
   usualHours,
   type ActivityMetrics,
   type DailyDetailRow,
@@ -477,6 +486,7 @@ export {
   type TypingStatistics,
   type TypingStatisticsClient,
   type TypingStatisticsStatus,
+  type StatisticsOverviewMetric,
 } from "./settings/typing-statistics";
 export {
   keyboardHeatmapLayout,
@@ -531,13 +541,28 @@ export {
   AccountIdentityDetails,
   type AccountIdentityDetailsProps,
 } from "./account/account-identity-details";
+export { AccountInputField, type AccountInputFieldProps } from "./account/account-input-field";
+export {
+  AccountStatusMessages,
+  type AccountStatusMessagesProps,
+} from "./account/account-status-messages";
 export { copyAccountId, type AccountIdCopyOptions } from "./account/account-id-copy";
-export { runAccountOperation, type AccountOperationState } from "./account/account-operation";
+export {
+  runAccountOperation,
+  useAccountAction,
+  type AccountActionState,
+  type AccountOperationState,
+} from "./account/account-operation";
 export {
   runAsyncAction,
   type AsyncActionOptions,
   type AsyncActionState,
 } from "./core/async-action";
+export {
+  useAsyncActionRunner,
+  type AsyncActionOperation,
+  type AsyncActionRunner,
+} from "./core/use-async-action";
 export {
   ChatPage,
   type ChatClient,
@@ -1046,6 +1071,7 @@ export {
   SettingsTextareaField,
   type SettingsTextareaFieldProps,
 } from "./settings/settings-textarea-field";
+export { SettingsInputField, type SettingsInputFieldProps } from "./settings/settings-input-field";
 export { ModelSelect, type ModelSelectProps } from "./settings/model-select";
 export {
   AiCredentialSection,
@@ -1160,15 +1186,33 @@ export {
   type CommunityErrorAlertProps,
 } from "./community/community-error-alert";
 export {
+  CommunityGalleryFeedback,
+  type CommunityGalleryFeedbackProps,
+} from "./community/community-gallery-feedback";
+export {
   CommunityDialogActions,
   type CommunityDialogActionsProps,
+  CommunityDialogFrame,
+  type CommunityDialogFrameProps,
   CommunityDialogHeader,
   type CommunityDialogHeaderProps,
 } from "./community/community-dialog";
 export {
+  CommunityConfirmation,
+  type CommunityConfirmationProps,
+} from "./community/community-confirmation";
+export {
   CommunityDetailStatus,
   type CommunityDetailStatusProps,
 } from "./community/community-detail-status";
+export {
+  CommunityRatingMetrics,
+  type CommunityRatingMetricsProps,
+} from "./community/community-rating-metrics";
+export {
+  CommunityDetailFrame,
+  type CommunityDetailFrameProps,
+} from "./community/community-detail-frame";
 export {
   communityDestinationView,
   type CommunityDestination,
@@ -1221,13 +1265,92 @@ export {
   type CommunityGalleryLoadMoreProps,
 } from "./community/community-gallery-load-more";
 export {
+  CommunityGalleryGrid,
+  type CommunityGalleryGridProps,
+} from "./community/community-gallery-grid";
+export { CommunityPageShell, type CommunityPageShellProps } from "./community/community-page-shell";
+export {
   CommunityCardAuthor,
   type CommunityCardAuthorProps,
 } from "./community/community-card-author";
 export {
+  CommunityConfirmationActions,
+  type CommunityConfirmationActionsProps,
+} from "./community/community-confirmation-actions";
+export { CommunityMetrics, type CommunityMetricsProps } from "./community/community-metrics";
+export { CommunityCard, type CommunityCardProps } from "./community/community-card";
+export {
   CommunitySkinPublicationFields,
   type CommunitySkinPublicationFieldsProps,
 } from "./community/community-skin-publication-fields";
+export {
+  CommunityPublicationMetadataFields,
+  type CommunityPublicationMetadataFieldsProps,
+} from "./community/community-publication-metadata-fields";
+export {
+  CommunityPublicationWarning,
+  type CommunityPublicationWarningProps,
+} from "./community/community-publication-warning";
+export { CommunityNotice, type CommunityNoticeProps } from "./community/community-notice";
+export { SettingsGroupNote, type SettingsGroupNoteProps } from "./settings/settings-group-note";
+export { SettingsGroupBlock, type SettingsGroupBlockProps } from "./settings/settings-group-block";
+export { SettingsRowStack, type SettingsRowStackProps } from "./settings/settings-row-stack";
+export {
+  SettingsManagerActions,
+  type SettingsManagerActionsProps,
+} from "./settings/settings-manager-actions";
+export {
+  SettingsManagerBlock,
+  type SettingsManagerBlockProps,
+} from "./settings/settings-manager-block";
+export {
+  SettingsPreviewBlock,
+  type SettingsPreviewBlockProps,
+} from "./settings/settings-preview-block";
+export {
+  SettingsPreviewLabel,
+  type SettingsPreviewLabelProps,
+} from "./settings/settings-preview-label";
+export {
+  SettingsEmptyMessage,
+  type SettingsEmptyMessageProps,
+} from "./settings/settings-empty-message";
+export { SettingsServiceRow, type SettingsServiceRowProps } from "./settings/settings-service-row";
+export { SettingsPhraseForm, type SettingsPhraseFormProps } from "./settings/settings-phrase-form";
+export {
+  SettingsShortcutKey,
+  type SettingsShortcutKeyProps,
+} from "./settings/settings-shortcut-key";
+export { SkinCardHeader, type SkinCardHeaderProps } from "./skin/skin-card-header";
+export { SkinPreviewStage, type SkinPreviewStageProps } from "./skin/skin-preview-stage";
+export { SkinPreviewSurface, type SkinPreviewSurfaceProps } from "./skin/skin-preview-surface";
+export {
+  SettingsInputDescription,
+  type SettingsInputDescriptionProps,
+} from "./settings/settings-input-description";
+export { SettingsWarning, type SettingsWarningProps } from "./settings/settings-warning";
+export { ErrorAlert, type ErrorAlertProps } from "./core/error-alert";
+export { formatZhDate, formatZhMonthDay } from "./core/format-date";
+export { formatZhNumber, formatZhPercent } from "./core/format-number";
+export { StatusMessage, type StatusMessageProps } from "./core/status-message";
+export { SettingsNotice, type SettingsNoticeProps } from "./settings/settings-notice";
+export {
+  SettingsManagerNote,
+  type SettingsManagerNoteProps,
+} from "./settings/settings-manager-note";
+export {
+  useCommunityPublicationDraft,
+  type CommunityPublicationDraft,
+} from "./community/use-community-publication-draft";
+export {
+  useCommunityClientLifecycle,
+  type CommunityClientLifecycle,
+} from "./community/use-community-client-lifecycle";
+export {
+  useCommunityDetailHistory,
+  type CommunityDetailHistoryOptions,
+} from "./community/use-community-detail-history";
+export { useMobilePopState, type MobilePopStateHandler } from "./settings/use-mobile-pop-state";
 export {
   CommunityRightsAgreement,
   type CommunityRightsAgreementProps,
@@ -1236,6 +1359,15 @@ export {
   CommunityTextareaField,
   type CommunityTextareaFieldProps,
 } from "./community/community-textarea-field";
+export { CommunityField, type CommunityFieldProps } from "./community/community-field";
+export {
+  CommunityActionNotice,
+  type CommunityActionNoticeProps,
+} from "./community/community-action-notice";
+export {
+  CommunityGalleryHeading,
+  type CommunityGalleryHeadingProps,
+} from "./community/community-gallery-heading";
 export {
   CommunityInputField,
   type CommunityInputFieldProps,
@@ -1300,6 +1432,7 @@ export {
   type CandidateOrientation,
 } from "./candidate/candidate-themes";
 import { describeInstallerTrust } from "./settings/update-manifest";
+import { editionUsesHelpcode } from "./settings/input-scheme-options";
 export {
   serializeWindowHostMessage,
   type WindowControl,
@@ -1346,6 +1479,15 @@ export {
   type CloudDictionaryEntryFormProps,
   type CloudDictionaryEntryFormValue,
 } from "./keyboard/cloud-dictionary-entry-form";
+export {
+  CloudDictionaryEntryCard,
+  type CloudDictionaryEntryCardEntry,
+  type CloudDictionaryEntryCardProps,
+} from "./keyboard/cloud-dictionary-entry-card";
+export {
+  CloudDictionaryItem,
+  type CloudDictionaryItemProps,
+} from "./keyboard/cloud-dictionary-item";
 export { CloudPanelHeader, type CloudPanelHeaderProps } from "./keyboard/cloud-panel-header";
 export {
   CloudDictionaryPagination,
@@ -1418,9 +1560,11 @@ export type InputScheme =
   | "korean"
   | "cantonese"
   | "zhuyin"
-  | "vietnamese";
-/** Mirrors `client-core::preferences::ChineseScheme`: the schemes a Japanese, Korean or Vietnamese selection returns to. */
-export type ChineseScheme = "quanpin" | "shuangpin" | "wubi" | "cantonese" | "zhuyin";
+  | "vietnamese"
+  | "tibetan"
+  | "stroke";
+/** 对应 `client-core::preferences::ChineseScheme`：选日文、韩文、越南文或藏文后要回到的中文方案。 */
+export type ChineseScheme = "quanpin" | "shuangpin" | "wubi" | "cantonese" | "zhuyin" | "stroke";
 /** Mirrors `client-core::preferences::VietnamesePreferences`. Absent from a document left at its defaults: Telex with modern tone placement. */
 export type VietnamesePreferences = {
   input_method?: "telex" | "vni";
@@ -1511,6 +1655,29 @@ export interface HostCapabilities {
   symbol_set_packs: boolean;
   /** The input schemes this host offers; the others are shown disabled. */
   input_schemes: InputScheme[];
+  /** 运行中的版本，不是 full 时才有。缺省就是 full：所有方案都属于本版本，`input_schemes` 之外的方案只是这个宿主暂不支持，显示为禁用；有它时，`edition.input_schemes` 之外的方案在本版本里不存在，设置页直接不列出。 */
+  edition?: EditionInfo;
+}
+
+/** Mirrors `client-core::host_surface::EditionInfo`. */
+export interface EditionInfo {
+  id: string;
+  /** 版本的中文产品名，例如「水杉五笔」。缺省时按 full 的「水杉输入法」。 */
+  display_name?: string;
+  /** 本版本提供的方案，顺序与全部方案的顺序一致。 */
+  input_schemes: InputScheme[];
+  /** 本版本的默认方案，偏好里的方案不可用时 host-api 回退到它。 */
+  default_scheme: InputScheme;
+  /** 本版本是否带临时日文。 */
+  temporary_japanese: boolean;
+  /** 本版本是否带键盘神经联想用的模型。不带时触屏宿主不列出神经联想开关；桌面的神经联想用另一份模型，不归这一项管。 */
+  neural_keyboard: boolean;
+  /** 本版本是否带非英文目标语言的离线候选释义。它们按中文候选查，所以只有提供中文方案的版本带。 */
+  offline_glosses: boolean;
+  /** 本版本是否提供手写。手写模型只认汉字，不提供中文方案的版本（日文、越南文和藏文版）没有手写：设置页不列出手写页，宿主也不打开手写面板、不下载模型。 */
+  handwriting: boolean;
+  /** 本版本里五笔混拼的默认值。 */
+  wubi_mixed_pinyin_default: boolean;
 }
 
 export { useCandidatePreviewTheme } from "./candidate/candidate-preview-theme";
@@ -2009,7 +2176,7 @@ export interface SettingsClient {
   pickVoiceModelPath?: () => Promise<string | null>;
   /** The host's on-device speech model store; hosts that provide it offer the `local` provider with a model manager. */
   localVoiceModels?: LocalVoiceModelClient;
-  /** 按需下载的资源包（日文词库、粤语与注音词库、手写模型）。只有 macOS 提供：发布包不再内置它们，选用对应方案时由设置页下载。 */
+  /** 按需下载的资源包（日文词库、「粤语、注音与笔画词库」、手写模型）。只有 macOS 提供：发布包不再内置它们，选用对应方案时由设置页下载。 */
   resourcePacks?: ResourcePackClient;
   windowControl?: (action: "minimize" | "maximize" | "restore" | "close") => Promise<void>;
   beginWindowDrag?: () => Promise<void>;
@@ -2083,25 +2250,21 @@ function useCustomHelpcodeSchemas(
   reader: SettingsClient["listHelpcodeSchemas"],
 ): CustomHelpcodeSchema[] {
   const [schemas, setSchemas] = useState<CustomHelpcodeSchema[]>([]);
+  const generation = useAsyncGeneration(reader);
   useEffect(() => {
-    let active = true;
+    const current = generation.current;
     if (!reader) {
       setSchemas([]);
-      return () => {
-        active = false;
-      };
+      return;
     }
     void reader()
       .then((next) => {
-        if (active) setSchemas(next);
+        if (generation.current === current) setSchemas(next);
       })
       .catch(() => {
-        if (active) setSchemas([]);
+        if (generation.current === current) setSchemas([]);
       });
-    return () => {
-      active = false;
-    };
-  }, [reader]);
+  }, [reader, generation]);
   return schemas;
 }
 
@@ -2111,12 +2274,16 @@ function useHelpcodePacks(
   inputPageOpen: boolean,
 ): HelpcodePackOption[] {
   const [packs, setPacks] = useState<HelpcodePackOption[]>([]);
+  const generation = useAsyncGeneration(catalog, inputPageOpen);
   useEffect(() => {
-    if (!catalog || !inputPageOpen) return;
-    let active = true;
+    if (!catalog || !inputPageOpen) {
+      setPacks([]);
+      return;
+    }
+    const current = generation.current;
     void catalog()
       .then((next) => {
-        if (!active) return;
+        if (generation.current !== current) return;
         setPacks(
           next.packages
             .filter((pack) => pack.kind === "helpcode")
@@ -2124,12 +2291,9 @@ function useHelpcodePacks(
         );
       })
       .catch(() => {
-        if (active) setPacks([]);
+        if (generation.current === current) setPacks([]);
       });
-    return () => {
-      active = false;
-    };
-  }, [catalog, inputPageOpen]);
+  }, [catalog, inputPageOpen, generation]);
   return packs;
 }
 
@@ -2463,6 +2627,7 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
   } = useUpdateCheck({
     clientHostedPlatform,
     releasePlatform: client.host?.platform ?? null,
+    edition: client.host?.edition?.id,
     releasePageUrl: platformReleasesPageUrl,
     currentAppVersion,
   });
@@ -2519,10 +2684,14 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     select: selectTouchKeyboardScheme,
     selectHome: selectHomeScheme,
     setEnabled: setTouchKeyboardSchemeEnabled,
-  } = useTouchKeyboardSchemeSelection({ draft, setDraft });
-  // 每个平台都显示全部快捷模式的开关。macOS 以前以发布包只带 msime.db 和 english.db 为由隐藏 Emoji、颜文字和临时日语，但 others.db 早已在 resources/desktop-dictionary.lock.json 里并随包发布，隐藏开关只是藏起了能用的功能；同样依赖 english.db 的临时英文却一直显示，前后并不一致。
+  } = useTouchKeyboardSchemeSelection({
+    draft,
+    setDraft,
+    handwritingScheme: client.host?.edition?.default_scheme,
+  });
+  // 每个平台都显示全部快捷模式的开关。macOS 以前以发布包只带 msime-pinyin.db 和 msime-english.db 为由隐藏 Emoji、颜文字和临时日语，但 msime-others.db 早已在 resources/desktop-dictionary.lock.json 里并随包发布，隐藏开关只是藏起了能用的功能；同样依赖 msime-english.db 的临时英文却一直显示，前后并不一致。
   //
-  // 现在 macOS 发布包不再内置 dict_japanese.dat，改为按需下载（输入页「临时日语」开关下方提供下载）。缺资源的情况仍由运行时处理，而且比隐藏开关处理得更好：资源不在时运行时关闭对应模式（临时日语在日文词库下载前不可用），触发键照常输入大写字母而不是被吞掉。
+  // 现在 macOS 发布包不再内置 msime-japanese.dat，改为按需下载（输入页「临时日语」开关下方提供下载）。缺资源的情况仍由运行时处理，而且比隐藏开关处理得更好：资源不在时运行时关闭对应模式（临时日语在日文词库下载前不可用），触发键照常输入大写字母而不是被吞掉。
   const clipboardHistory = clipboardHistoryEnabled(iosPlatform, draft);
   const toggleClipboardHistory = useClipboardHistoryToggle({
     draft,
@@ -2592,10 +2761,16 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
   const touchKeyboardHeightAdjustment =
     draft?.touch_keyboard_height_adjustment ?? defaultTouchKeyboardGeometry.heightAdjustment;
   const installerTrust = availableUpdate
-    ? describeInstallerTrust(availableUpdate, client.host?.platform ?? null)
+    ? describeInstallerTrust(
+        availableUpdate,
+        client.host?.platform ?? null,
+        client.host?.edition?.id,
+      )
     : null;
   // Helper codes are per-host rather than per-form-factor. The Android keyboard sends them: Shift during a quanpin or shuangpin composition passes the next letter to the Engine as a helper code, and the Engine reads the schema and the candidate-row hint from these very preferences. Hiding the group left that shipping feature with no way to pick a schema or turn it off. The iOS keyboard extension marks a helper code the same way, and HarmonyOS ships the same input (its ChineseHelpcodePolicy is the Android one, ported), so on a mobile host the group follows the host's `helpcode_shift_entry`.
-  const showHelpcode = !mobilePlatform || showHelpcodeShiftEntry;
+  // 只有五笔的版本里辅助码没有用处（五笔不用辅助码），不显示这一组；模糊音照常显示，五笔混拼查全拼时会用到。
+  const showHelpcode =
+    (!mobilePlatform || showHelpcodeShiftEntry) && editionUsesHelpcode(client.host?.edition);
   // 维护与诊断页收纳输入法服务（重启、重新注册）、诊断日志、数据目录、本地 MCP 服务和 macOS 的卸载；这些一样都没有的宿主不显示这一页。
   const showDeveloperPage =
     Boolean(client.mcpServerStatus) ||
@@ -2635,6 +2810,8 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
           showMusic ||
           showPluginTriggers ||
           showTypingEffects),
+      // full 不带版本信息，手写一直都在。
+      hasHandwriting: client.host?.edition?.handwriting ?? true,
       mobileHiddenPageIds,
       mobilePageTitle,
     });
@@ -2992,7 +3169,6 @@ export function SettingsPage(props: SettingsPageProps) {
     restoreDefaults,
     recoverPreferences,
     dirty,
-    selectHomeScheme,
     keyboardPreviewTheme,
     availablePages,
     sidebarGroups,
@@ -3259,7 +3435,6 @@ export function SettingsPage(props: SettingsPageProps) {
                 preferences={draft}
                 actions={client.home}
                 onOpenPage={onOpenPage}
-                onSelectScheme={selectHomeScheme}
                 onOpenChat={onOpenChat}
                 touchLayout={mobilePlatform}
                 ios={iosPlatform}

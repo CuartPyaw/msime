@@ -8,6 +8,7 @@ import font from '@ohos.font';
 import vibrator from '@ohos.vibrator';
 import deviceInfo from '@ohos.deviceInfo';
 import http from '@ohos.net.http';
+import { installNoRedirectGuard } from '../network/HarmonyHttpSecurity';
 import webSocket from '@ohos.net.webSocket';
 import util from '@ohos.util';
 import fs from '@ohos.file.fs';
@@ -697,7 +698,7 @@ class SettingsBridge {
     // it too, and two staging rules for one directory is how it came to hold a set matching neither.
     StagedResources.stage(`${context.resourceDir}/engine`, `${context.filesDir}/engine`,
       `${context.filesDir}/engine.ready`);
-    // Here as well as in the keyboard, so the page offers Cantonese and Zhuyin (see hostCapabilities) before the keyboard has ever run.
+    // Here as well as in the keyboard, so the page offers Cantonese, Zhuyin and Stroke (see hostCapabilities) before the keyboard has ever run.
     StagedResources.stageLanguageDictionaries(context.resourceDir, context.filesDir);
   }
 
@@ -813,15 +814,20 @@ class SettingsBridge {
     }
     const destination: string = `${this.stateDirectory}/skins/${name}`;
     try {
-      if (!fs.accessSync(`${this.stateDirectory}/skins`)) {
-        fs.mkdirSync(`${this.stateDirectory}/skins`, true);
+      const skinsDirectory: string = `${this.stateDirectory}/skins`;
+      if (!this.safeDirectory(this.stateDirectory)) {
+        return JSON.stringify({ ok: false, error: '导入失败' });
+      }
+      if (!fs.accessSync(skinsDirectory)) fs.mkdirSync(skinsDirectory, true);
+      if (!this.safeDirectory(skinsDirectory)) {
+        return JSON.stringify({ ok: false, error: '导入失败' });
       }
       if (fs.accessSync(destination)) {
         // Replacing rather than merging: a half-overwritten skin is a skin whose stylesheet and
         // assets come from two different versions, which the catalog would list and then draw wrong.
         StagedResources.removeDirectory(destination);
       }
-      fs.copyDirSync(picked[0], `${this.stateDirectory}/skins`, 1);
+      fs.copyDirSync(picked[0], skinsDirectory, 1);
     } catch (error) {
       KeyboardLog.error(`skin import failed: ${describeError(error)}`);
       return JSON.stringify({ ok: false, error: '导入失败' } as TextReply);
@@ -924,8 +930,12 @@ class SettingsBridge {
     const staging: string = `${directory}/${util.generateRandomUUID(false)}.txt`;
     let destination: string = '';
     try {
-      if (!fs.accessSync(directory)) {
-        fs.mkdirSync(directory, true);
+      if (!this.safeDirectory(this.stateDirectory)) {
+        return JSON.stringify({ ok: false, error: 'export_storage' });
+      }
+      if (!fs.accessSync(directory)) fs.mkdirSync(directory, true);
+      if (!this.safeDirectory(directory) || this.symbolicLink(staging)) {
+        return JSON.stringify({ ok: false, error: 'export_storage' });
       }
       const file: fs.File = fs.openSync(staging, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
       try {
@@ -1084,7 +1094,18 @@ class SettingsBridge {
     }
     const staging: string = `${context.cacheDir}/plugin-import/${util.generateRandomUUID(false)}`;
     try {
+      const pluginRoot: string = `${context.cacheDir}/plugin-import`;
+      if (!this.safeDirectory(context.cacheDir)) {
+        return JSON.stringify({ ok: false, error: 'storage' });
+      }
+      if (!fs.accessSync(pluginRoot)) fs.mkdirSync(pluginRoot, true);
+      if (!this.safeDirectory(pluginRoot)) {
+        return JSON.stringify({ ok: false, error: 'storage' });
+      }
       fs.mkdirSync(staging, true);
+      if (!this.safeDirectory(staging)) {
+        return JSON.stringify({ ok: false, error: 'storage' });
+      }
       let source: string;
       if (folder) {
         source = `${staging}/${PluginImportPolicy.FOLDER_NAME}`;
@@ -1118,9 +1139,7 @@ class SettingsBridge {
       return JSON.stringify({ ok: false, error: 'storage' });
     } finally {
       try {
-        if (fs.accessSync(staging)) {
-          fs.rmdirSync(staging);
-        }
+        StagedResources.removeDirectory(staging);
       } catch (error) {
         KeyboardLog.error(`plugin import staging not removed: ${describeError(error)}`);
       }
@@ -1444,7 +1463,7 @@ class SettingsBridge {
       if (release !== null) {
         value['os_version'] = release;
       }
-      // Cantonese and Zhuyin are offered only with their dictionary installed, as the desktop app's `drop_uninstalled_language_schemes` does; the keyboard leaves such a scheme out of its picker by the same rule.
+      // Cantonese, Zhuyin and Stroke are offered only with their dictionary installed, as the desktop app's `drop_uninstalled_language_schemes` does; the keyboard leaves such a scheme out of its picker by the same rule.
       const schemes: Object | undefined = value['input_schemes'];
       if (Array.isArray(schemes)) {
         value['input_schemes'] = (schemes as string[]).filter((scheme: string): boolean =>
@@ -1656,6 +1675,7 @@ class SettingsBridge {
     let cursor: string = '';
     for (let pageNumber: number = 0; pageNumber < 10; pageNumber += 1) {
       const httpRequest = http.createHttp();
+      installNoRedirectGuard(httpRequest);
       try {
         const headers: AiModelHeaders = anthropic
           ? {
@@ -1731,6 +1751,7 @@ class SettingsBridge {
     const header: Record<string, string> = AiAuthenticationPolicy.headers(endpoint, token);
     header['Content-Type'] = 'application/json';
     const httpRequest = http.createHttp();
+    installNoRedirectGuard(httpRequest);
     try {
       const response: http.HttpResponse = await httpRequest.request(endpoint, {
         method: http.RequestMethod.POST,
@@ -1817,6 +1838,7 @@ class SettingsBridge {
     };
     if (apiKey.length > 0) headers.Authorization = `Bearer ${apiKey}`;
     const request = http.createHttp();
+    installNoRedirectGuard(request);
     try {
       const response: http.HttpResponse = await request.request(endpoint, {
         method: http.RequestMethod.POST,
@@ -1862,6 +1884,7 @@ class SettingsBridge {
     const authorization: string = await tencentAuthorization(
       secretId, secretKey, timestamp, date, bodyDocument);
     const request = http.createHttp();
+    installNoRedirectGuard(request);
     try {
       const response: http.HttpResponse = await request.request('https://tmt.tencentcloudapi.com', {
         method: http.RequestMethod.POST,
@@ -1911,6 +1934,7 @@ class SettingsBridge {
       `authStr=${encodeURIComponent(authStr)}`
     ].join('&');
     const request = http.createHttp();
+    installNoRedirectGuard(request);
     try {
       const response: http.HttpResponse = await request.request(
         'https://api.niutrans.com/v2/text/translate', {
@@ -1957,6 +1981,7 @@ class SettingsBridge {
     if (provider === 'deepseek') body.thinking = { type: 'disabled' };
     if (provider === 'siliconflow') body.enable_thinking = false;
     const request = http.createHttp();
+    installNoRedirectGuard(request);
     try {
       const response: http.HttpResponse = await request.request(endpoint, {
         method: http.RequestMethod.POST,
@@ -1997,6 +2022,7 @@ class SettingsBridge {
     const boundary: string = '----MSIMEHarmonyCredentialProbe';
     const body: ArrayBuffer = this.silentMultipart(boundary, model);
     const request = http.createHttp();
+    installNoRedirectGuard(request);
     try {
       const response: http.HttpResponse = await request.request(endpoint, {
         method: http.RequestMethod.POST,
@@ -2332,7 +2358,14 @@ class SettingsBridge {
         return JSON.stringify({ ok: false, value: '', error: '自定义释义过大' } as TextReply);
       }
       try {
-        fs.mkdirSync(`${this.stateDirectory}/user`, true);
+        const userDirectory: string = `${this.stateDirectory}/user`;
+        if (!this.safeDirectory(this.stateDirectory)) {
+          return JSON.stringify({ ok: false, value: '', error: '自定义释义未能保存' } as TextReply);
+        }
+        fs.mkdirSync(userDirectory, true);
+        if (!this.safeDirectory(userDirectory) || this.symbolicLink(file)) {
+          return JSON.stringify({ ok: false, value: '', error: '自定义释义未能保存' } as TextReply);
+        }
         if (text.trim().length === 0) {
           // An empty document means "no overlay"; the bridge removes the file rather than leaving
           // one the Engine would read as an empty set every session.
@@ -2355,11 +2388,40 @@ class SettingsBridge {
       }
     }
     try {
-      const text: string = fs.accessSync(file) ? fs.readTextSync(file) : '';
+      if (!this.safeDirectory(this.stateDirectory)) {
+        return JSON.stringify({ ok: false, value: '', error: '自定义释义无法读取' } as TextReply);
+      }
+      let stat: fs.Stat;
+      try {
+        stat = fs.lstatSync(file);
+      } catch {
+        return JSON.stringify({ ok: true, value: '', error: '' } as TextReply);
+      }
+      if (stat.isSymbolicLink() || !stat.isFile() || stat.size > CUSTOM_TRANSLATIONS_MAX_BYTES) {
+        return JSON.stringify({ ok: false, value: '', error: '自定义释义无法读取' } as TextReply);
+      }
+      const text: string = fs.readTextSync(file);
       return JSON.stringify({ ok: true, value: text, error: '' } as TextReply);
     } catch (error) {
       KeyboardLog.error(`custom translations unreadable: ${describeError(error)}`);
       return JSON.stringify({ ok: false, value: '', error: '自定义释义无法读取' } as TextReply);
+    }
+  }
+
+  private safeDirectory(directory: string): boolean {
+    try {
+      const stat: fs.Stat = fs.lstatSync(directory);
+      return !stat.isSymbolicLink() && stat.isDirectory();
+    } catch {
+      return false;
+    }
+  }
+
+  private symbolicLink(path: string): boolean {
+    try {
+      return fs.lstatSync(path).isSymbolicLink();
+    } catch {
+      return false;
     }
   }
 

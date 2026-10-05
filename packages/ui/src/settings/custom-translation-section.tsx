@@ -1,8 +1,10 @@
+import { SettingsGroupNote } from "./settings-group-note";
+import { SettingsWarning } from "./settings-warning";
 import type { ReactNode } from "react";
-import { Row } from "../core/platform-controls";
-import * as settings from "./settings-style";
 import { SecretSettingRow } from "./secret-setting-row";
 import { EndpointSettingRow } from "./endpoint-setting-row";
+import { SettingsGroupBlock } from "./settings-group-block";
+import { SettingsRowStack } from "./settings-row-stack";
 
 export interface CustomTranslationSectionProps {
   available: boolean;
@@ -25,8 +27,8 @@ export function CustomTranslationSection({
   children,
 }: CustomTranslationSectionProps) {
   return (
-    <div role="group" aria-label="自定义翻译服务" className={settings.rowStack}>
-      <p className={settings.groupNote}>使用自建的兼容 DeepLX 的 HTTPS 服务。</p>
+    <SettingsRowStack role="group" aria-label="自定义翻译服务">
+      <SettingsGroupNote>使用自建的兼容 DeepLX 的 HTTPS 服务。</SettingsGroupNote>
       <EndpointSettingRow
         title="翻译 Endpoint"
         inputLabel="自定义翻译 Endpoint"
@@ -36,11 +38,9 @@ export function CustomTranslationSection({
         placeholder="https://example.com/translate"
       />
       {available && endpointIssue && (
-        <div className={settings.groupBlock}>
-          <p className={settings.settingsWarning} role="status">
-            {endpointIssue}
-          </p>
-        </div>
+        <SettingsGroupBlock>
+          <SettingsWarning>{endpointIssue}</SettingsWarning>
+        </SettingsGroupBlock>
       )}
       <SecretSettingRow
         title="API Key"
@@ -49,7 +49,7 @@ export function CustomTranslationSection({
         disabled={!available}
         onChange={onApiKeyChange}
       />
-      {children && <div className={settings.groupBlock}>{children}</div>}
-    </div>
+      {children && <SettingsGroupBlock>{children}</SettingsGroupBlock>}
+    </SettingsRowStack>
   );
 }

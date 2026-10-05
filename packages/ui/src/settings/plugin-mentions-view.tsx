@@ -1,9 +1,14 @@
 import type { Dispatch, SetStateAction } from "react";
 import { GroupList } from "../core/platform-controls";
-import * as settings from "./settings-style";
 import { PluginViewHeader } from "./plugin-view-header";
 import type { MentionEntry } from "./plugin-types";
 import { ActionButton } from "./action-button";
+import { SettingsInputField } from "./settings-input-field";
+import { SettingsManagerNote } from "./settings-manager-note";
+import { SettingsManagerActions } from "./settings-manager-actions";
+import { SettingsPhraseForm } from "./settings-phrase-form";
+import { SettingsManagerBlock } from "./settings-manager-block";
+import { SettingsWarning } from "./settings-warning";
 
 /** `client-core::plugins::mentions::MAX_ENTRIES`. */
 export const MAX_MENTIONS = 1000;
@@ -65,34 +70,30 @@ export function PluginMentionsView({
     <>
       <PluginViewHeader title="@ 名单" onBack={onBack} />
       <GroupList>
-        <div className={settings.managerBlock}>
-          <p className={settings.managerNote}>
+        <SettingsManagerBlock>
+          <SettingsManagerNote>
             在「输入 → 快捷模式」打开 @ 名字与地点后，按 @
             再输入拼音或首字母，就会从这份名单里出候选。名单只保存在本机，不随账号同步，也不会读取通讯录或位置。拼音可以留空，中文名字会自动取读音。
-          </p>
+          </SettingsManagerNote>
           {mentions.map((entry, index) => (
-            <div className={settings.phraseForm} key={index}>
-              <label className={settings.field}>
-                名字或地点
-                <input
-                  className={settings.fieldInput}
-                  value={entry.text}
-                  maxLength={MAX_MENTION_TEXT_UTF16}
-                  onChange={(event) => updateMention(index, { text: event.target.value })}
-                />
-              </label>
-              <label className={settings.field}>
-                拼音
-                <input
-                  className={settings.fieldInput}
-                  value={entry.key}
-                  placeholder="zhang'san"
-                  maxLength={MAX_MENTION_KEY_BYTES}
-                  autoCapitalize="off"
-                  spellCheck={false}
-                  onChange={(event) => updateMention(index, { key: event.target.value })}
-                />
-              </label>
+            <SettingsPhraseForm key={index}>
+              <SettingsInputField
+                label="名字或地点"
+                ariaLabel="名字或地点"
+                value={entry.text}
+                maxLength={MAX_MENTION_TEXT_UTF16}
+                onChange={(value) => updateMention(index, { text: value })}
+              />
+              <SettingsInputField
+                label="拼音"
+                ariaLabel="拼音"
+                value={entry.key}
+                placeholder="zhang'san"
+                maxLength={MAX_MENTION_KEY_BYTES}
+                autoCapitalize="off"
+                spellCheck={false}
+                onChange={(value) => updateMention(index, { key: value })}
+              />
               <ActionButton
                 action={() =>
                   setMentions((current) => current.filter((_, position) => position !== index))
@@ -100,14 +101,10 @@ export function PluginMentionsView({
                 ariaLabel={`删除第 ${index + 1} 行`}
                 label="删除"
               />
-            </div>
+            </SettingsPhraseForm>
           ))}
-          {issue && dirty && (
-            <p className={settings.settingsWarning} role="alert">
-              {issue}
-            </p>
-          )}
-          <div className={settings.managerActions}>
+          {issue && dirty && <SettingsWarning role="alert">{issue}</SettingsWarning>}
+          <SettingsManagerActions>
             <ActionButton
               action={() => setMentions((current) => [...current, { text: "", key: "" }])}
               disabled={mentions.length >= MAX_MENTIONS}
@@ -119,8 +116,8 @@ export function PluginMentionsView({
               disabled={working || !dirty || issue !== null}
               label="保存名单"
             />
-          </div>
-        </div>
+          </SettingsManagerActions>
+        </SettingsManagerBlock>
       </GroupList>
     </>
   );

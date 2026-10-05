@@ -113,6 +113,22 @@ final class LocalSpeechModelTests: XCTestCase {
     XCTAssertThrowsError(try LocalSpeechModelManifest(directory: symlinkModel).file("model"))
   }
 
+  func testManifestRejectsASymlinkedManifest() throws {
+    let model = try makeModel(id: "manifest-link", manifest: [
+      "kind": "online_transducer", "files": [:],
+    ], files: [])
+    let outside = try makeModel(id: "manifest-outside", manifest: [
+      "kind": "online_transducer", "files": [:],
+    ], files: [])
+    let manifest = model.appendingPathComponent(LocalSpeechModelManifest.fileName)
+    try FileManager.default.removeItem(at: manifest)
+    try FileManager.default.createSymbolicLink(at: manifest,
+                                               withDestinationURL: outside.appendingPathComponent(LocalSpeechModelManifest.fileName))
+
+    XCTAssertThrowsError(try LocalSpeechModelManifest(directory: model))
+    XCTAssertFalse(LocalSpeechModelManifest.isModelDirectory(model))
+  }
+
   func testStoredPathFollowsTheModelIntoAMovedContainer() throws {
     let root = scratch.appendingPathComponent("voice-models", isDirectory: true)
     let model = try makeModel(id: "zipformer", manifest: ["kind": "online_transducer", "files": [:]], files: [], root: root)
@@ -121,10 +137,12 @@ final class LocalSpeechModelTests: XCTestCase {
     let old = "/private/var/mobile/Containers/Data/Application/OLD/Library/Application Support/voice-models/zipformer"
     XCTAssertEqual(LocalSpeechModelLocation.resolve(storedPath: old, root: root)?.standardizedFileURL, model.standardizedFileURL)
     XCTAssertNil(LocalSpeechModelLocation.resolve(storedPath: old, root: nil))
+    XCTAssertNil(LocalSpeechModelLocation.resolve(storedPath: "zipformer", root: root))
     XCTAssertNil(LocalSpeechModelLocation.resolve(storedPath: "", root: root))
     XCTAssertNil(LocalSpeechModelLocation.resolve(storedPath: root.appendingPathComponent("gone").path, root: root))
     XCTAssertTrue(LocalSpeechModelLocation.names(old, model: "zipformer"))
     XCTAssertFalse(LocalSpeechModelLocation.names(old, model: "sense-voice"))
+    XCTAssertFalse(LocalSpeechModelLocation.names("zipformer", model: "zipformer"))
     XCTAssertFalse(LocalSpeechModelLocation.names(" ", model: "zipformer"))
   }
 

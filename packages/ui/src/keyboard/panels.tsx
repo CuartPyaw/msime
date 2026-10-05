@@ -26,7 +26,11 @@ import * as cloud from "./cloud-panel-style";
 import * as surface from "./panel-surface-style";
 import { normalizeHandwritingCandidates } from "./handwriting";
 import { validVoiceLanguage } from "./voice-panel";
+import { StatusMessage } from "../core/status-message";
 import { VoiceLanguageOptions } from "../voice/voice-language-options";
+import { useAsyncGeneration } from "../settings/use-async-generation";
+import { useMountedRef } from "../settings/use-mounted-ref";
+import { useLatestRef } from "../core/use-latest-ref";
 import {
   isImeCommitKey,
   keyboardKeyWeight,
@@ -37,6 +41,8 @@ import {
 import { keyboardSkinStyles } from "./keyboard-skin-styles";
 import { keyboardRows, nineKeyRows } from "./panel-keyboard-layouts";
 import { CloudDictionaryEntryForm } from "./cloud-dictionary-entry-form";
+import { CloudDictionaryEntryCard } from "./cloud-dictionary-entry-card";
+import { CloudDictionaryItem } from "./cloud-dictionary-item";
 import { CloudPanelHeader } from "./cloud-panel-header";
 import { CloudDictionaryPagination } from "./cloud-dictionary-pagination";
 import { NativePanelHeader } from "./native-panel-header";
@@ -66,6 +72,7 @@ import {
   cloudClipboardItems,
   cloudDictionaryCatalogEntries,
   cloudDictionaryEntries,
+  cloudResponseInteger,
   cloudResponseRequest,
   cloudResponseText,
 } from "./cloud-response";
@@ -875,14 +882,14 @@ export function HandwritingPanel({
   const [candidates, setCandidates] = useState<string[]>([]);
   const [notice, setNotice] = useState("请在左侧书写，松开鼠标后自动识别");
   const drag = usePanelDrag(client, () => setNotice("无法移动窗口，请重试。"));
-  const recognitionRevision = useRef(0);
+  const recognitionRevision = useAsyncGeneration();
   const [recognizing, setRecognizing] = useState(false);
   const recognitionQueue = useRef<{
     active: boolean;
     running: boolean;
     pending: { revision: number; strokes: InkStroke[] } | null;
   }>({ active: true, running: false, pending: null });
-  const submissionRevision = useRef(0);
+  const submissionRevision = useAsyncGeneration();
   const closingRef = useRef(false);
   const [closing, setClosing] = useState(false);
   const submittingRef = useRef(false);
@@ -1360,7 +1367,7 @@ export function HandwritingPanel({
             ))}
           </div>
           {handwritingPack && <HandwritingModelNotice packs={packs} />}
-          <p role="status">{notice}</p>
+          <StatusMessage role="status">{notice}</StatusMessage>
         </section>
       </div>
     </main>
@@ -1420,7 +1427,7 @@ export function VoicePanel({
   const [text, setText] = useState("");
   const exceedsSubmitLimit =
     client.maxSubmitBytes !== undefined && utf8ByteLength(text) > client.maxSubmitBytes;
-  const textRevision = useRef(0);
+  const textRevision = useAsyncGeneration();
   function updateText(value: string) {
     textRevision.current++;
     setText(value);
@@ -1428,39 +1435,34 @@ export function VoicePanel({
   const [submitting, setSubmitting] = useState(false);
   const [copying, setCopying] = useState(false);
   const submittingRef = useRef(false);
-  const submissionRevision = useRef(0);
+  const submissionRevision = useAsyncGeneration();
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [stopping, setStopping] = useState(false);
   const stoppingRef = useRef(false);
-  const recognitionRevision = useRef(0);
+  const recognitionRevision = useAsyncGeneration();
   const [notice, setNotice] = useState("点击开始后由宿主录音并进行语音识别");
   const drag = usePanelDrag(client, () => setNotice("无法移动窗口，请重试。"));
+  const voiceGeneration = useAsyncGeneration(client);
 
   useEffect(() => {
-    let active = true;
+    const generation = voiceGeneration.current;
     if (!client.loadVoiceLanguage) return;
     void client
       .loadVoiceLanguage()
       .then((next) => {
-        if (active && validVoiceLanguage(next)) setLanguage(next);
+        if (generation === voiceGeneration.current && validVoiceLanguage(next)) setLanguage(next);
       })
       .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, [client]);
+  }, [client, voiceGeneration]);
 
   useEffect(() => {
-    let active = true;
+    const generation = voiceGeneration.current;
     if (!client.rememberInputTarget) return;
     void client.rememberInputTarget().catch(() => {
-      if (active) setNotice("未能记录前台输入窗口");
+      if (generation === voiceGeneration.current) setNotice("未能记录前台输入窗口");
     });
-    return () => {
-      active = false;
-    };
-  }, [client]);
+  }, [client, voiceGeneration]);
 
   useEffect(() => {
     submittingRef.current = false;
@@ -1481,11 +1483,11 @@ export function VoicePanel({
 
   useEffect(() => {
     if (!client.onVoiceUpdate) return;
-    let active = true;
+    const generation = voiceGeneration.current;
     let unlisten: (() => void) | undefined;
     void client
       .onVoiceUpdate((update) => {
-        if (!active || !busyRef.current) return;
+        if (generation !== voiceGeneration.current || !busyRef.current) return;
         if (update.level !== undefined) {
           if (
             !stoppingRef.current &&
@@ -1522,15 +1524,14 @@ export function VoicePanel({
         );
       })
       .then((stop) => {
-        if (active) unlisten = stop;
+        if (generation === voiceGeneration.current) unlisten = stop;
         else stop();
       })
       .catch(() => undefined);
     return () => {
-      active = false;
       unlisten?.();
     };
-  }, [client]);
+  }, [client, voiceGeneration]);
 
   async function recognize() {
     if (busyRef.current || submittingRef.current) return;
@@ -1809,8 +1810,9 @@ export function CloudClipboardPanel({ client }: { client: CloudClipboardPanelCli
     run,
     invalidate,
   } = usePanelAction(setNotice);
-  const draftRevision = useRef(0);
-  const searchRef = useRef("");
+  const draftRevision = useAsyncGeneration();
+  const searchRef = useLatestRef(search);
+  const cloudGeneration = useAsyncGeneration(client);
 
   async function load(revision: number, nextSearch: string) {
     let result;
@@ -1836,7 +1838,7 @@ export function CloudClipboardPanel({ client }: { client: CloudClipboardPanelCli
   }
 
   useEffect(() => {
-    let active = true;
+    const generation = cloudGeneration.current;
     busyRef.current = false;
     setItems([]);
     setLoaded(false);
@@ -1845,21 +1847,21 @@ export function CloudClipboardPanel({ client }: { client: CloudClipboardPanelCli
       void client
         .canSendText()
         .then((available) => {
-          if (active) setInputAvailable(available && Boolean(client.sendText));
+          if (generation === cloudGeneration.current)
+            setInputAvailable(available && Boolean(client.sendText));
         })
         .catch(() => {
-          if (active) setInputAvailable(false);
+          if (generation === cloudGeneration.current) setInputAvailable(false);
         });
     if (client.rememberInputTarget)
       void client.rememberInputTarget().catch(() => {
-        if (active) setNotice("未能记录前台输入窗口");
+        if (generation === cloudGeneration.current) setNotice("未能记录前台输入窗口");
       });
     void refresh(searchRef.current);
     return () => {
-      active = false;
       invalidate();
     };
-  }, [client, invalidate]);
+  }, [client, cloudGeneration, invalidate]);
 
   function add() {
     if (!enabled || draft.trim().length === 0 || draft.length > 4000) {
@@ -1971,7 +1973,6 @@ export function CloudClipboardPanel({ client }: { client: CloudClipboardPanelCli
             aria-label="搜索云端历史"
             value={search}
             onChange={(event) => {
-              searchRef.current = event.target.value;
               setSearch(event.target.value);
             }}
             onKeyDown={(event) => {
@@ -2065,7 +2066,7 @@ export function CloudDictionaryPanel({ client }: { client: CloudDictionaryPanelC
   } | null>(null);
   const [notice, setNotice] = useState("管理当前账号的云端词条");
   const { busy, busyRef, run, invalidate, isCurrent } = usePanelAction(setNotice);
-  const searchRef = useRef("");
+  const searchRef = useLatestRef(search);
 
   async function load(
     revision: number,
@@ -2091,7 +2092,7 @@ export function CloudDictionaryPanel({ client }: { client: CloudDictionaryPanelC
     }
     if (!isCurrent(revision)) return;
     setEntries(cloudDictionaryEntries<CloudDictionaryEntry>(result));
-    setOffset(typeof result.offset === "number" ? result.offset : nextOffset);
+    setOffset(cloudResponseInteger(result.offset) ? result.offset : nextOffset);
     setHasMore(result.has_more === true);
   }
 
@@ -2231,7 +2232,6 @@ export function CloudDictionaryPanel({ client }: { client: CloudDictionaryPanelC
           inputClassName={cloud.dictionaryInput}
           onKindChange={changeKind}
           onQueryChange={(value) => {
-            searchRef.current = value;
             setSearch(value);
           }}
           onQuery={() => void refresh(0)}
@@ -2278,49 +2278,15 @@ export function CloudDictionaryPanel({ client }: { client: CloudDictionaryPanelC
         <div className={cloud.dictionaryList} aria-label="云词条">
           {entries.length ? (
             entries.map((entry) => (
-              <article className={cloud.dictionaryItem} key={entry.id}>
-                <button
-                  type="button"
-                  className={cloud.dictionaryItemMain}
-                  aria-label={`编辑云词条 ${entry.word}`}
-                  onClick={() => beginEdit(entry)}
-                  disabled={busy}
-                >
-                  <strong>{entry.word}</strong>
-                  <small>
-                    {entry.code} · 权重 {entry.weight}
-                  </small>
-                </button>
-                <div className={cloud.dictionaryItemActions}>
-                  {client.downloadToLocal && (
-                    <button
-                      type="button"
-                      className="secondary"
-                      aria-label={`下载到本机 ${entry.word}`}
-                      onClick={() => void downloadToLocal(entry)}
-                      disabled={busy}
-                    >
-                      下载到本机
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => beginEdit(entry)}
-                    disabled={busy}
-                  >
-                    编辑
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => confirmRemove(entry)}
-                    disabled={busy}
-                  >
-                    删除
-                  </button>
-                </div>
-              </article>
+              <CloudDictionaryEntryCard
+                key={entry.id}
+                entry={entry}
+                editLabel={`编辑云词条 ${entry.word}`}
+                busy={busy}
+                onEdit={() => beginEdit(entry)}
+                onRemove={() => void confirmRemove(entry)}
+                onDownload={client.downloadToLocal ? () => void downloadToLocal(entry) : undefined}
+              />
             ))
           ) : (
             <p className={cloud.dictionaryEmpty}>暂无词条</p>
@@ -2361,26 +2327,18 @@ export function CloudDictionaryFilesPanel({ client }: { client: CloudDictionaryP
     snapshot: CloudDictionarySnapshotMetadata;
     expectedRevision: number;
   } | null>(null);
-  const mounted = useRef(true);
-  const lifecycleRevision = useRef(0);
+  const mounted = useMountedRef();
+  const lifecycleRevision = useAsyncGeneration(client);
 
   useEffect(() => {
-    const current = ++lifecycleRevision.current;
     invalidate();
     setSnapshotBusy(false);
     setRestorePreview(null);
     return () => {
-      if (current === lifecycleRevision.current) lifecycleRevision.current++;
       invalidate();
       if (client.snapshotNative) void client.request({ operation: "snapshot_restore_cancel" });
     };
   }, [client, invalidate]);
-
-  useEffect(() => {
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
 
   function changeKind(next: CloudDictionaryKind) {
     if (busyRef.current || next === kind) return;
@@ -2783,7 +2741,7 @@ export function CloudDictionaryApplyPanel({ client }: { client: CloudDictionaryP
     invalidate,
     isCurrent,
   } = usePanelAction(setNotice);
-  const lifecycleRevision = useRef(0);
+  const lifecycleRevision = useAsyncGeneration(client);
 
   async function refreshStatus() {
     if (busyRef.current) return;
@@ -2861,7 +2819,6 @@ export function CloudDictionaryApplyPanel({ client }: { client: CloudDictionaryP
   }
 
   useEffect(() => {
-    const lifecycle = ++lifecycleRevision.current;
     invalidate();
     setPreview(null);
     setPreviewToken(null);
@@ -2870,7 +2827,6 @@ export function CloudDictionaryApplyPanel({ client }: { client: CloudDictionaryP
       void refreshStatus();
     }, 2000);
     return () => {
-      if (lifecycle === lifecycleRevision.current) lifecycleRevision.current++;
       invalidate();
       window.clearInterval(timer);
     };
@@ -3040,9 +2996,9 @@ export function CloudDictionaryCatalogPanel({ client }: { client: CloudDictionar
     }
     if (!isCurrent(current)) return;
     setEntries(cloudDictionaryCatalogEntries<CloudDictionaryCatalogEntry>(result));
-    setOffset(typeof result.offset === "number" ? result.offset : nextOffset);
+    setOffset(cloudResponseInteger(result.offset) ? result.offset : nextOffset);
     setHasMore(result.has_more === true);
-    setRevision(typeof result.revision === "number" ? result.revision : 0);
+    setRevision(cloudResponseInteger(result.revision) ? result.revision : 0);
     setNormalized(typeof result.normalized === "string" ? result.normalized : query.code);
     setConfirmed(query);
   }
@@ -3214,41 +3170,14 @@ export function CloudDictionaryCatalogPanel({ client }: { client: CloudDictionar
             </p>
             {entries.length ? (
               entries.map((entry) => (
-                <article
-                  className={cloud.dictionaryItem}
+                <CloudDictionaryEntryCard
                   key={`${entry.kind}:${entry.code}:${entry.word}`}
-                >
-                  <button
-                    type="button"
-                    className={cloud.dictionaryItemMain}
-                    aria-label={`编辑完整目录词条 ${entry.word}`}
-                    onClick={() => beginEdit(entry)}
-                    disabled={busy}
-                  >
-                    <strong>{entry.word}</strong>
-                    <small>
-                      {entry.code} · 权重 {entry.weight}
-                    </small>
-                  </button>
-                  <div className={cloud.dictionaryItemActions}>
-                    <button
-                      type="button"
-                      className="secondary"
-                      onClick={() => beginEdit(entry)}
-                      disabled={busy}
-                    >
-                      编辑
-                    </button>
-                    <button
-                      type="button"
-                      className="secondary"
-                      onClick={() => confirmRemove(entry)}
-                      disabled={busy}
-                    >
-                      删除
-                    </button>
-                  </div>
-                </article>
+                  entry={entry}
+                  editLabel={`编辑完整目录词条 ${entry.word}`}
+                  busy={busy}
+                  onEdit={() => beginEdit(entry)}
+                  onRemove={() => void confirmRemove(entry)}
+                />
               ))
             ) : (
               <p className={cloud.dictionaryEmpty}>没有匹配的词条</p>
@@ -3314,7 +3243,7 @@ export function CloudCandidatesPanel({ client }: { client: CloudDictionaryPanelC
   const [revision, setRevision] = useState(0);
   const [notice, setNotice] = useState("仅在点击查询时发送编码；修改只保存到当前账号");
   const { busy, busyRef, run, invalidate, isCurrent } = usePanelAction(setNotice);
-  const textRef = useRef("");
+  const textRef = useLatestRef(text);
 
   useEffect(() => {
     invalidate();
@@ -3363,7 +3292,7 @@ export function CloudCandidatesPanel({ client }: { client: CloudDictionaryPanelC
     // (or make a fast query appear to have timed out on touch hosts).
     setCandidates(nextCandidates);
     setContext(typeof result.context === "string" ? result.context : "");
-    setRevision(typeof result.revision === "number" ? result.revision : 0);
+    setRevision(cloudResponseInteger(result.revision) ? result.revision : 0);
     setPositions([]);
     setQuery(nextQuery);
     if (nextQuery.kind !== "quick" && typeof result.context === "string" && result.context) {
@@ -3526,7 +3455,6 @@ export function CloudCandidatesPanel({ client }: { client: CloudDictionaryPanelC
           queryDisabled={!text.trim()}
           onKindChange={changeKind}
           onQueryChange={(value) => {
-            textRef.current = value;
             setText(value);
           }}
           onQuery={() => void queryCandidates()}
@@ -3641,55 +3569,52 @@ export function CloudCandidatesPanel({ client }: { client: CloudDictionaryPanelC
             </p>
             {candidates.length ? (
               candidates.map((candidate, index) => (
-                <article
-                  className={cloud.dictionaryItem}
+                <CloudDictionaryItem
                   key={`${candidateMutationCode(candidate)}:${candidate.word}`}
+                  ariaLabel={`调频候选 ${candidate.word}`}
+                  busy={busy}
+                  disabled={kind === "quick"}
+                  onClick={() => void rank(candidate)}
+                  actions={
+                    kind !== "quick" && (
+                      <>
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() => void rank(candidate)}
+                          disabled={busy}
+                        >
+                          调频
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() => void setFixed(candidate, position)}
+                          disabled={busy}
+                        >
+                          固定
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() => void remove(candidate)}
+                          disabled={
+                            busy || (kind !== "english" && Array.from(candidate.word).length <= 1)
+                          }
+                        >
+                          删除
+                        </button>
+                      </>
+                    )
+                  }
                 >
-                  <button
-                    type="button"
-                    className={cloud.dictionaryItemMain}
-                    aria-label={`调频候选 ${candidate.word}`}
-                    onClick={() => void rank(candidate)}
-                    disabled={busy || kind === "quick"}
-                  >
-                    <strong>
-                      {index + 1}. <span className="break-anywhere">{candidate.word}</span>
-                    </strong>
-                    <small>
-                      {candidate.code} · 权重 {candidate.weight}
-                    </small>
-                  </button>
-                  {kind !== "quick" && (
-                    <div className={cloud.dictionaryItemActions}>
-                      <button
-                        type="button"
-                        className="secondary"
-                        onClick={() => void rank(candidate)}
-                        disabled={busy}
-                      >
-                        调频
-                      </button>
-                      <button
-                        type="button"
-                        className="secondary"
-                        onClick={() => void setFixed(candidate, position)}
-                        disabled={busy}
-                      >
-                        固定
-                      </button>
-                      <button
-                        type="button"
-                        className="secondary"
-                        onClick={() => void remove(candidate)}
-                        disabled={
-                          busy || (kind !== "english" && Array.from(candidate.word).length <= 1)
-                        }
-                      >
-                        删除
-                      </button>
-                    </div>
-                  )}
-                </article>
+                  <strong>
+                    {index + 1}. <span className="break-anywhere">{candidate.word}</span>
+                  </strong>
+                  <small>
+                    {candidate.code} · 权重 {candidate.weight}
+                  </small>
+                </CloudDictionaryItem>
               ))
             ) : (
               <p className={cloud.dictionaryEmpty}>没有匹配的候选</p>
@@ -3836,14 +3761,18 @@ export function EmojiPanel({
     }
   });
   const [clipboard, setClipboard] = useState<string[]>([]);
-  const [clipboardBusy, setClipboardBusy] = useState(false);
+  const {
+    busy: clipboardBusy,
+    busyRef: clipboardMutation,
+    revisionRef: operationRevision,
+    run: runOperation,
+    invalidate,
+  } = usePanelAction(setNotice);
   const [clipboardLoadFailed, setClipboardLoadFailed] = useState(false);
   const [clipboardRefresh, setClipboardRefresh] = useState(0);
   const [activationMode, setActivationMode] = useState<"copy" | "input">("copy");
-  const operationRevision = useRef(0);
   const [clipboardEnabled, setClipboardEnabled] = useState<boolean | null>(null);
-  const clipboardMutation = useRef(false);
-  const clipboardGeneration = useRef(0);
+  const clipboardGeneration = useAsyncGeneration();
   const deletedRowFocus = useRef<{ element: HTMLElement; index: number; query: string } | null>(
     null,
   );
@@ -3859,6 +3788,8 @@ export function EmojiPanel({
   );
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogRetry, setCatalogRetry] = useState(0);
+  const catalogGeneration = useAsyncGeneration(client, catalogRetry);
+  const clipboardLifecycle = useAsyncGeneration(client, page, clipboardRefresh);
 
   function setNotice(message: string, temporary = false) {
     if (noticeTimer.current !== null) clearTimeout(noticeTimer.current);
@@ -3875,31 +3806,13 @@ export function EmojiPanel({
   useEffect(() => {
     clipboardMutation.current = false;
     deletedRowFocus.current = null;
-    setClipboardBusy(false);
     setNotice("");
     return () => {
-      operationRevision.current++;
+      invalidate();
       if (noticeTimer.current !== null) clearTimeout(noticeTimer.current);
       noticeTimer.current = null;
     };
-  }, [client]);
-
-  async function runOperation(action: (revision: number) => Promise<void>, failure: string) {
-    if (clipboardMutation.current) return;
-    const revision = ++operationRevision.current;
-    clipboardMutation.current = true;
-    setClipboardBusy(true);
-    try {
-      await action(revision);
-    } catch {
-      if (revision === operationRevision.current) setNotice(failure);
-    } finally {
-      if (revision === operationRevision.current) {
-        clipboardMutation.current = false;
-        setClipboardBusy(false);
-      }
-    }
-  }
+  }, [client, invalidate]);
 
   useEffect(() => {
     try {
@@ -3928,12 +3841,12 @@ export function EmojiPanel({
       setCatalogLoading(false);
       return;
     }
-    let active = true;
+    const generation = catalogGeneration.current;
     setCatalogLoading(true);
     void Promise.resolve()
       .then(() => client.loadCatalog!())
       .then((next) => {
-        if (!active) return;
+        if (generation !== catalogGeneration.current) return;
         const unavailable = next.unavailable ?? [];
         setCatalog((current) => ({
           emoji: unavailable.includes("emoji") ? current.emoji : next.emoji,
@@ -3943,28 +3856,27 @@ export function EmojiPanel({
         setCatalogUnavailable(unavailable);
       })
       .catch(() => {
-        if (active) setCatalogUnavailable(["emoji", "kaomoji", "symbols"]);
+        if (generation === catalogGeneration.current)
+          setCatalogUnavailable(["emoji", "kaomoji", "symbols"]);
       })
       .finally(() => {
-        if (active) setCatalogLoading(false);
+        if (generation === catalogGeneration.current) setCatalogLoading(false);
       });
-    return () => {
-      active = false;
-    };
-  }, [client, catalogRetry]);
+  }, [client, catalogRetry, catalogGeneration]);
 
   useEffect(() => {
     if (!client.clipboard?.list) {
       setClipboardLoadFailed(false);
       return;
     }
-    let active = true;
+    const generation = clipboardLifecycle.current;
+    const isCurrent = () => generation === clipboardLifecycle.current;
     let unsubscribe: (() => void) | undefined;
     let poll: ReturnType<typeof setInterval> | undefined;
     let inFlight = 0;
     let refreshPending = false;
     const refresh = () => {
-      if (!active) return;
+      if (!isCurrent()) return;
       if (inFlight !== 0) {
         refreshPending = true;
         // A newer notification invalidates the current snapshot, but only
@@ -3982,14 +3894,14 @@ export function EmojiPanel({
           ]),
         )
         .then(([value, enabled]) => {
-          if (active && request === clipboardGeneration.current) {
+          if (isCurrent() && request === clipboardGeneration.current) {
             setClipboard(enabled ? value : []);
             setClipboardEnabled(enabled);
             setClipboardLoadFailed(false);
           }
         })
         .catch(() => {
-          if (active && request === clipboardGeneration.current) {
+          if (isCurrent() && request === clipboardGeneration.current) {
             setClipboard([]);
             setClipboardEnabled(null);
             setClipboardLoadFailed(true);
@@ -3997,7 +3909,7 @@ export function EmojiPanel({
         })
         .finally(() => {
           inFlight--;
-          if (active && refreshPending) {
+          if (isCurrent() && refreshPending) {
             refreshPending = false;
             refresh();
           }
@@ -4005,7 +3917,7 @@ export function EmojiPanel({
     };
     const pollVisible = () => {
       if (
-        active &&
+        isCurrent() &&
         document.visibilityState === "visible" &&
         !clipboardMutation.current &&
         inFlight === 0
@@ -4015,7 +3927,7 @@ export function EmojiPanel({
     const start = async () => {
       try {
         const stop = await client.clipboard?.onChanged?.(refresh);
-        if (!active) {
+        if (!isCurrent()) {
           stop?.();
           return;
         }
@@ -4023,7 +3935,7 @@ export function EmojiPanel({
       } catch {
         /* Keep polling if host notification registration fails. */
       }
-      if (!active) return;
+      if (!isCurrent()) return;
       // Close the gap between the initial snapshot and subscription setup.
       refresh();
       if (unsubscribe && poll !== undefined) {
@@ -4041,14 +3953,13 @@ export function EmojiPanel({
     }
     void start();
     return () => {
-      active = false;
       refreshPending = false;
       ++clipboardGeneration.current;
       if (poll !== undefined) clearInterval(poll);
       document.removeEventListener("visibilitychange", pollVisible);
       unsubscribe?.();
     };
-  }, [client, page, clipboardRefresh]);
+  }, [client, page, clipboardLifecycle, clipboardRefresh]);
 
   type DisplayGroup = EmojiCatalogGroup & { moreTarget?: EmojiPage; flow?: boolean };
   const groups =

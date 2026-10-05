@@ -39,9 +39,11 @@ constexpr UINT CONNECT_NAMEDPIPE_RETRY_INTERVAL_MS = 50;
 constexpr UINT CONNECT_NAMEDPIPE_MAX_RETRY_INTERVAL_MS = 2000;
 constexpr UINT IPC_FAILURES_BEFORE_SERVER_LAUNCH = 6;
 constexpr UINT SERVER_LAUNCH_RECONNECT_DELAY_MS = 500;
-constexpr wchar_t SERVER_MUTEX_NAME[] = L"Local\\MetasequoiaImeServer_SingleInstance";
-constexpr wchar_t SERVER_LAUNCH_MUTEX_NAME[] = L"Local\\MetasequoiaImeServer.Launch";
-constexpr wchar_t INSTALL_REGISTRY_KEY[] = L"Software\\Metasequoia\\MetasequoiaIME";
+// 互斥量带版本后缀、注册表键按版本取（shared/contracts/msime_edition.h）：TIP 只认、只拉起自己版本的 Server。full 的名字与引入版本之前相同。
+constexpr wchar_t SERVER_MUTEX_NAME[] = L"Local\\MetasequoiaImeServer_SingleInstance" MSIME_EDITION_NAME_SUFFIX;
+constexpr wchar_t SERVER_LAUNCH_MUTEX_NAME[] = L"Local\\MetasequoiaImeServer.Launch" MSIME_EDITION_NAME_SUFFIX;
+constexpr wchar_t INSTALL_REGISTRY_KEY[] = MSIME_EDITION_REGISTRY_KEY;
+constexpr wchar_t WORKER_WINDOW_CLASS[] = L"MetasequoiaIMEWorkerWnd" MSIME_EDITION_NAME_SUFFIX;
 constexpr wchar_t SERVER_PATH_REGISTRY_VALUE[] = L"ServerPath";
 std::atomic<UINT> nextWindowMessageToken{0};
 std::atomic<bool> serverLaunchInFlight{false};
@@ -486,6 +488,7 @@ CMetasequoiaIME::CMetasequoiaIME()
     _deferredProjectedCaret = 0;
     _deferredProjectedCandidateActive = false;
     _deferredProjectedUnicodeMode = false;
+    _deferredProjectedUrlMode = false;
     _deferredProjectedKoreanHanjaListOpen = false;
     _deferredKeyFocusGeneration = 1;
     _deferredKeyDrainPosted = false;
@@ -967,6 +970,7 @@ void CMetasequoiaIME::_ClearAsyncKeyRequests()
     std::vector<uint64_t> deferredReplayTokens;
     {
         std::lock_guard<std::mutex> lock(_pendingCommitCandidateMutex);
+        deferredReplayTokens.reserve(_pendingAsyncKeyMessages.size());
         for (const auto &entry : _pendingAsyncKeyMessages)
         {
             if (entry.second.deferredReplayToken != 0)
@@ -1151,7 +1155,7 @@ void CMetasequoiaIME::_RequestLocalSessionReset(_In_opt_ ITfContext *preferredCo
     {
         _KEYSTROKE_STATE keyState = {};
         keyState.Category = CATEGORY_COMPOSING;
-        // A Korean syllable, a Zhuyin conversion or a Vietnamese word is text the user already wrote (scheme::CommitsOnBlur), so leaving the context commits it where every other composition is discarded.
+        // 韩文音节、注音转换、越南文词和藏文音节串是用户已经写下的文字（scheme::CommitsOnBlur），所以离开上下文时上屏它们，其他组字则被丢弃。
         keyState.Function =
             msime::windows::scheme::CommitsOnBlur(Global::InputModeScheme.load(std::memory_order_relaxed))
                 ? FUNCTION_COMMIT_SYLLABLE
@@ -1384,15 +1388,15 @@ STDAPI CMetasequoiaIME::ActivateEx(ITfThreadMgr *pThreadMgr, TfClientId tfClient
         wcex.cbSize = sizeof(WNDCLASSEX);
         wcex.lpfnWndProc = CMetasequoiaIME_WindowProc;
         wcex.hInstance = Global::dllInstanceHandle;
-        wcex.lpszClassName = L"MetasequoiaIMEWorkerWnd";
+        wcex.lpszClassName = WORKER_WINDOW_CLASS;
         wcex.cbWndExtra = sizeof(LONG_PTR);
         RegisterClassEx(&wcex);
     }
 
     _msgWndHandle = CreateWindowEx( //
         0,                          //
-        L"MetasequoiaIMEWorkerWnd", //
-        L"MetasequoiaIMEWorkerWnd", //
+        WORKER_WINDOW_CLASS,        //
+        WORKER_WINDOW_CLASS,        //
         0, 0, 0, 0, 0,              //
         HWND_MESSAGE,               //
         nullptr,                    //
@@ -1651,7 +1655,7 @@ STDAPI CMetasequoiaIME::Deactivate()
         }
         _msgWndHandle = nullptr;
     }
-    UnregisterClass(L"MetasequoiaIMEWorkerWnd", Global::dllInstanceHandle);
+    UnregisterClass(WORKER_WINDOW_CLASS, Global::dllInstanceHandle);
 
     UnbindNamedpipeFocusState(this);
     _focusResetPending = false;
@@ -1818,7 +1822,8 @@ void CMetasequoiaIME::IpcWorkerThread(CMetasequoiaIME *pIME)
              buf.msg_type == Global::DataToTsfWorkerThreadMsgType::PairedPunctuationChanged ||
              buf.msg_type == Global::DataToTsfWorkerThreadMsgType::MicrosoftShuangpinChanged ||
              buf.msg_type == Global::DataToTsfWorkerThreadMsgType::CapsLockChanged ||
-             buf.msg_type == Global::DataToTsfWorkerThreadMsgType::TsfDiagnosticLogChanged))
+             buf.msg_type == Global::DataToTsfWorkerThreadMsgType::TsfDiagnosticLogChanged ||
+             buf.msg_type == Global::DataToTsfWorkerThreadMsgType::DedicatedEnglishChanged))
         {
             bool hasTerminator = false;
             for (const wchar_t ch : buf.data)
@@ -1906,6 +1911,7 @@ void CMetasequoiaIME::IpcWorkerThread(CMetasequoiaIME *pIME)
                 buf.msg_type == Global::DataToTsfWorkerThreadMsgType::InputModeChanged ||
                 buf.msg_type == Global::DataToTsfWorkerThreadMsgType::CapsLockChanged ||
                 buf.msg_type == Global::DataToTsfWorkerThreadMsgType::TsfDiagnosticLogChanged ||
+                buf.msg_type == Global::DataToTsfWorkerThreadMsgType::DedicatedEnglishChanged ||
                 buf.msg_type == Global::DataToTsfWorkerThreadMsgType::PunctuationLockChanged ||
                 buf.msg_type == Global::DataToTsfWorkerThreadMsgType::PipeReady ||
                 buf.msg_type == Global::DataToTsfWorkerThreadMsgType::FocusSessionReady ||
@@ -2009,6 +2015,10 @@ void CMetasequoiaIME::IpcWorkerThread(CMetasequoiaIME *pIME)
             Global::ExpressionModeEnabled.store(triggers.expression, std::memory_order_relaxed);
             Global::CommandModeEnabled.store(triggers.command, std::memory_order_relaxed);
             Global::MentionModeEnabled.store(triggers.mention, std::memory_order_relaxed);
+        }
+        else if (buf.msg_type == Global::DataToTsfWorkerThreadMsgType::DedicatedEnglishChanged)
+        {
+            Global::DedicatedEnglish.server(buf.data[0] == L'1');
         }
         else if (buf.msg_type == Global::DataToTsfWorkerThreadMsgType::InputModeChanged)
         {
@@ -2444,7 +2454,7 @@ LRESULT CALLBACK CMetasequoiaIME_WindowProc(HWND hWnd, UINT message, WPARAM wPar
                                ? static_cast<int>(result.view.scheme)
                                : -1;
                 };
-                // A scheme switch discards the Engine's composition, but a Korean syllable, a Zhuyin conversion or a Vietnamese word is already on screen as text (scheme::CommitsOnBlur). Commit what the composition shows once the switch has happened, or the next key would replace it.
+                // 切换方案会丢弃引擎的组字，但韩文音节、注音转换、越南文词和藏文音节串已经作为文字显示在屏幕上（scheme::CommitsOnBlur）。切换完成后上屏组字显示的内容，否则下一个键会替换掉它。
                 const int composingScheme = pIME->_IsComposing() && pIME->_pContext ? hostScheme() : -1;
                 std::string ignored, error;
                 (void)host->reload_preferences(msime::tsf::default_state_directory(), &ignored, &error);
@@ -3023,15 +3033,29 @@ HRESULT CMetasequoiaIME::GetDisplayName(_Out_ BSTR *pbstrDisplayName)
 //+---------------------------------------------------------------------------
 //
 // ITfFnGetPreferredTouchKeyboardLayout::GetLayout
-// The tkblayout will be Optimized layout.
+// The touch keyboard layout for the language this edition registers under (TEXTSERVICE_LANGID): the optimized Simplified Chinese Pinyin layout for the Chinese editions, the optimized Japanese layout for the Japanese edition, and the classic layout of the user's keyboard otherwise, since Windows has no optimized layout for Vietnamese or Tibetan.
 //----------------------------------------------------------------------------
 HRESULT CMetasequoiaIME::GetLayout(_Out_ TKBLayoutType *ptkblayoutType, _Out_ WORD *pwPreferredLayoutId)
 {
     HRESULT hr = E_INVALIDARG;
     if ((ptkblayoutType != nullptr) && (pwPreferredLayoutId != nullptr))
     {
-        *ptkblayoutType = TKBLT_OPTIMIZED;
-        *pwPreferredLayoutId = TKBL_OPT_SIMPLIFIED_CHINESE_PINYIN;
+        constexpr WORD language = PRIMARYLANGID(TEXTSERVICE_LANGID);
+        if constexpr (language == LANG_CHINESE)
+        {
+            *ptkblayoutType = TKBLT_OPTIMIZED;
+            *pwPreferredLayoutId = TKBL_OPT_SIMPLIFIED_CHINESE_PINYIN;
+        }
+        else if constexpr (language == LANG_JAPANESE)
+        {
+            *ptkblayoutType = TKBLT_OPTIMIZED;
+            *pwPreferredLayoutId = TKBL_OPT_JAPANESE_ABC;
+        }
+        else
+        {
+            *ptkblayoutType = TKBLT_CLASSIC;
+            *pwPreferredLayoutId = TKBL_UNDEFINED;
+        }
         hr = S_OK;
     }
     return hr;

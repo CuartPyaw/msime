@@ -21,6 +21,9 @@
 #include <utility>
 #include <vector>
 
+#include "../core/LinuxEdition.h"
+#include "../core/SafePath.h"
+
 namespace msime::linux_host {
 
 // The shared desktop panels (screen keyboard, handwriting, emoji, clipboard, voice) are ordinary Tauri windows with no input context of their own. Windows hands their output to SendInput, which passes through the active IME before it reaches the editor; the Linux equivalent that works on every session type is the input method itself, which already owns a connection to the focused editor. The panel process sends one JSON line over a user-private socket and the host commits the text, or runs the key through its own key handling first (see deliver_panel_key_stroke), into the focused context. xdotool, wtype and ydotool stay as the fallback for sessions where the MSIME host is not the active one.
@@ -141,7 +144,7 @@ void deliver_panel_key_stroke(Process process, Forward forward) {
 // Holds requests until a context can take them. A request that cannot be delivered within kPanelInputWaitUs is answered no_focus and dropped, so a focus that arrives later can never type it a second time after the panel has already fallen back to another route. The pending count is capped so a same-user client cannot retain an arbitrary number of open request connections while focus is unavailable.
 class PanelInputBroker {
 public:
-  PanelInputBroker() = default;
+  PanelInputBroker() { pending_.reserve(kPanelInputPendingLimit); }
   PanelInputBroker(const PanelInputBroker &) = delete;
   PanelInputBroker &operator=(const PanelInputBroker &) = delete;
   ~PanelInputBroker() {
@@ -202,36 +205,12 @@ private:
 inline std::string panel_input_socket_path() {
   const char *runtime = std::getenv("XDG_RUNTIME_DIR");
   if (!runtime || runtime[0] != '/') return {};
-  return std::string(runtime) + "/msime-client/panel-input.sock";
+  return std::string(runtime) + "/" MSIME_EDITION_CLIENT_DIRECTORY "/panel-input.sock";
 }
 
 // 逐组件检查 socket 目录，避免 mkdir 沿着中间符号链接在外部创建目录。
 inline bool panel_input_directory_is_safe(const std::filesystem::path &directory) {
-  if (!directory.is_absolute()) return false;
-  std::filesystem::path current = directory.root_path();
-  bool saw_prefix_alias = false;
-  bool saw_real_component = false;
-  std::error_code error;
-  for (const auto &component : directory) {
-    if (component == directory.root_name() || component == directory.root_directory()) continue;
-    current /= component;
-    const auto status = std::filesystem::symlink_status(current, error);
-    if (!error) {
-      if (std::filesystem::is_symlink(status)) {
-        const bool system_alias = !saw_real_component && !saw_prefix_alias &&
-                                  (component == "tmp" || component == "var");
-        if (!system_alias) return false;
-        saw_prefix_alias = true;
-        continue;
-      }
-      if (!std::filesystem::is_directory(status)) return false;
-      saw_real_component = true;
-      continue;
-    }
-    if (error != std::errc::no_such_file_or_directory) return false;
-    error.clear();
-  }
-  return true;
+  return directory.is_absolute() && storage_directory_path_is_safe(directory);
 }
 
 // The listening socket. IBus and Fcitx5 may both be installed; whichever host binds first serves the panels, and the other leaves a live socket alone rather than stealing it.

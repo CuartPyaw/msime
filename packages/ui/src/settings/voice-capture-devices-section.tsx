@@ -1,8 +1,9 @@
+import { SettingsGroupNote } from "./settings-group-note";
 import { VoiceDevicePicker, type VoiceDeviceReader } from "../voice/voice-device-picker";
-import { GroupList, Row } from "../core/platform-controls";
-import * as settings from "./settings-style";
+import { GroupList } from "../core/platform-controls";
 import { SelectRow } from "./select-row";
 import { TextInputRow } from "./text-input-row";
+import { SettingsGroupBlock } from "./settings-group-block";
 
 export type VoiceCaptureBackendOption = readonly [string, string];
 export type VoiceCaptureBackend =
@@ -39,7 +40,7 @@ export function VoiceCaptureDevicesSection({
 }: VoiceCaptureDevicesSectionProps) {
   return (
     <GroupList title="录音设备">
-      <p className={settings.groupNote}>保存后从下一次录音生效，不打断当前录音</p>
+      <SettingsGroupNote>保存后从下一次录音生效，不打断当前录音</SettingsGroupNote>
       <SelectRow
         title="录音后端"
         aria-label="录音后端"
@@ -58,14 +59,14 @@ export function VoiceCaptureDevicesSection({
           </option>
         )}
       </SelectRow>
-      <div className={settings.groupBlock}>
+      <SettingsGroupBlock>
         <VoiceDevicePicker
           read={readDevices}
           backend={backend}
           device={device}
           choose={onBackendChange}
         />
-      </div>
+      </SettingsGroupBlock>
       <TextInputRow
         title="麦克风设备"
         description={

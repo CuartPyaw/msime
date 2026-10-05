@@ -15,10 +15,12 @@ import androidx.annotation.StringRes;
 import androidx.core.content.ContextCompat;
 import androidx.core.widget.NestedScrollView;
 import android.widget.LinearLayout;
+import app.msime.android.AppEdition;
 import app.msime.android.FirstRunPreparation;
+import app.msime.android.InputFeatureToggle;
+import app.msime.android.KeyboardGeometry;
 import app.msime.android.KeyboardScheme;
 import app.msime.android.KeyboardSkin;
-import app.msime.android.InputFeatureToggle;
 import app.msime.android.R;
 import com.google.android.material.button.MaterialButton;
 import java.util.ArrayList;
@@ -42,6 +44,7 @@ public final class KeyboardFragment extends HomeTabFragment {
     };
     private boolean loaded;
     private boolean prepared = true;
+    @Nullable private FirstRunPreparation.Listener preparationListener;
     /** A settings row and the text the search pill matches it by. */
     private record SearchEntry(View row, String text) {}
     private final List<SearchEntry> searchable = new ArrayList<>();
@@ -91,7 +94,7 @@ public final class KeyboardFragment extends HomeTabFragment {
         // when the keyboard cannot reach the Engine, which is the one case the user has to know.
         TextView preparation = view.findViewById(R.id.keyboard_preparation);
         preparation.setOnClickListener(ignored -> FirstRunPreparation.retry(requireContext()));
-        FirstRunPreparation.observe(status -> {
+        preparationListener = status -> {
             if (!isAdded()) return;
             switch (status) {
                 case RUNNING -> {
@@ -111,11 +114,13 @@ public final class KeyboardFragment extends HomeTabFragment {
                     reload();
                 }
             }
-        });
+        };
+        FirstRunPreparation.observe(preparationListener);
     }
 
     @Override public void onDestroyView() {
-        FirstRunPreparation.observe(null);
+        if (preparationListener != null) FirstRunPreparation.stopObserving(preparationListener);
+        preparationListener = null;
         View view = getView();
         if (view != null) view.getViewTreeObserver().removeOnWindowFocusChangeListener(focusWatch);
         super.onDestroyView();
@@ -163,9 +168,10 @@ public final class KeyboardFragment extends HomeTabFragment {
             // The page's own night mode stands in for the system's, as the keyboard's does: with `theme` on 跟随系统 the host follows the system, and with it forced the resolver never asks.
             KeyboardSkin resolved = HostStore.keyboardSkin(preferences, AppMode.dark(requireContext()));
             String layout = preferences.optString("touch_keyboard_layout", "twenty_six_key");
+            AppEdition edition = AppEdition.current();
             KeyboardScheme selected = KeyboardScheme.fromPreferences(
-                preferences.optString("scheme", "quanpin"),
-                preferences.optString("shuangpin_profile", "xiaohe"), layout);
+                preferences.optString("scheme", edition.defaultScheme()),
+                preferences.optString("shuangpin_profile", "xiaohe"), layout, edition);
             String wubiProfile = preferences.optString("wubi_profile", KeyboardScheme.WUBI_86);
             skin = resolved.title();
             scheme = selected.title(wubiProfile);
@@ -261,11 +267,13 @@ public final class KeyboardFragment extends HomeTabFragment {
 
     private static String schemeTerms() {
         StringBuilder terms = new StringBuilder("输入方案 拼音 键盘布局");
+        AppEdition edition = AppEdition.current();
         for (KeyboardScheme candidate : KeyboardScheme.values()) {
-            if (candidate != KeyboardScheme.THOUGHTFUL_REPLY) terms.append(' ').append(candidate.title());
+            if (candidate.offeredBy(edition)) terms.append(' ').append(candidate.title());
         }
         // 「98 五笔」在输入方案里同样可选，搜得到它才找得到这一行。
-        terms.append(' ').append(KeyboardScheme.WUBI.title(KeyboardScheme.WUBI_98));
+        if (KeyboardScheme.WUBI.offeredBy(edition))
+            terms.append(' ').append(KeyboardScheme.WUBI.title(KeyboardScheme.WUBI_98));
         return terms.toString();
     }
 
@@ -372,7 +380,7 @@ public final class KeyboardFragment extends HomeTabFragment {
 
     private String keysSummary(@Nullable JSONObject preferences) {
         if (preferences == null) return !loaded ? "读取中…" : prepared ? "读取失败" : "尚未准备";
-        int height = preferences.optInt("touch_keyboard_height_adjustment", 0);
+        int height = KeyboardGeometry.strictInt(preferences, "touch_keyboard_height_adjustment", 0);
         return height == 0 ? "标准高度" : "高度 " + (height > 0 ? "+" : "") + height;
     }
 

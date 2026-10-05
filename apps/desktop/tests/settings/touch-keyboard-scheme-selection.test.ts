@@ -78,7 +78,26 @@ test("selecting a visible scheme updates the draft through the shared hook", () 
 });
 
 test("the helper exposes the complete stable scheme order", () => {
-  expect(allTouchKeyboardSchemes).toContain("thoughtful_reply");
+  expect(allTouchKeyboardSchemes).toEqual([
+    "quanpin",
+    "nine_key",
+    "xiaohe",
+    "ziranma",
+    "microsoft",
+    "shoudao",
+    "wubi",
+    "japanese_nine_key",
+    "japanese",
+    "handwriting",
+    "korean",
+    "cantonese",
+    "zhuyin",
+    "vietnamese",
+    "tibetan",
+    "stroke",
+  ]);
+  // 高情商回复是键盘工具栏上的工具，不再是输入方案。
+  expect(allTouchKeyboardSchemes as string[]).not.toContain("thoughtful_reply");
 });
 
 test("applies queued scheme changes to the latest draft", () => {
@@ -130,7 +149,7 @@ test("switching from Japanese to Korean keeps the remembered Chinese scheme", ()
   expect(next.last_chinese_scheme).toBe("shuangpin");
 });
 
-test.each(["cantonese", "zhuyin", "vietnamese"] as const)(
+test.each(["cantonese", "zhuyin", "vietnamese", "tibetan", "stroke"] as const)(
   "%s, which has no touch keyboard, maps to the remembered Chinese touch scheme",
   (scheme) => {
     const untouched = { ...preferences, scheme, touch_keyboard_schemes: undefined };
@@ -160,15 +179,17 @@ test("selecting Japanese from Vietnamese keeps the remembered Chinese scheme", (
   expect(next.last_chinese_scheme).toBe("cantonese");
 });
 
-test("Cantonese, Zhuyin and Vietnamese are appended after Korean and are opt-in", () => {
-  expect(allTouchKeyboardSchemes).toHaveLength(15);
-  expect(allTouchKeyboardSchemes.slice(11)).toEqual([
+test("Cantonese, Zhuyin, Vietnamese, Tibetan and Stroke are appended after Korean and are opt-in", () => {
+  expect(allTouchKeyboardSchemes).toHaveLength(16);
+  expect(allTouchKeyboardSchemes.slice(10)).toEqual([
     "korean",
     "cantonese",
     "zhuyin",
     "vietnamese",
+    "tibetan",
+    "stroke",
   ]);
-  expect(defaultTouchKeyboardSchemes).toEqual(allTouchKeyboardSchemes.slice(0, 12));
+  expect(defaultTouchKeyboardSchemes).toEqual(allTouchKeyboardSchemes.slice(0, 11));
 });
 
 test("a document without a stored list does not show the opt-in schemes", () => {
@@ -186,7 +207,7 @@ test("a document without a stored list does not show the opt-in schemes", () => 
   ).toEqual([...defaultTouchKeyboardSchemes, "zhuyin"]);
 });
 
-test.each(["cantonese", "zhuyin"] as const)(
+test.each(["cantonese", "zhuyin", "stroke"] as const)(
   "selecting %s selects and remembers it as the Chinese scheme on the 26-key layout",
   (scheme) => {
     const next = selectHomeTouchKeyboardScheme(
@@ -216,7 +237,20 @@ test("selecting Vietnamese remembers the Chinese scheme and uses the 26-key layo
   expect(next.touch_keyboard_schemes?.selected).toBe("vietnamese");
 });
 
-test.each(["cantonese", "zhuyin", "vietnamese"] as const)(
+test("selecting Tibetan from Vietnamese keeps the remembered Chinese scheme on the 26-key layout", () => {
+  const next = selectHomeTouchKeyboardScheme(
+    { ...preferences, scheme: "vietnamese", last_chinese_scheme: "wubi" },
+    "tibetan",
+  );
+
+  expect(next.scheme).toBe("tibetan");
+  expect(next.last_chinese_scheme).toBe("wubi");
+  expect(next.touch_keyboard_layout).toBe("twenty_six_key");
+  expect(next.touch_keyboard_schemes?.selected).toBe("tibetan");
+  expect(touchKeyboardSchemeTitle(next)).toBe("藏文 26 键");
+});
+
+test.each(["cantonese", "zhuyin", "vietnamese", "tibetan", "stroke"] as const)(
   "%s infers its own touch scheme once that is enabled",
   (scheme) => {
     expect(
@@ -242,4 +276,62 @@ test("the single Wubi touch scheme is titled by the Wubi profile and keeps it wh
   expect(
     touchKeyboardSchemeTitle({ ...wubi98, scheme: "wubi", touch_keyboard_schemes: undefined }),
   ).toBe("98 五笔");
+});
+
+test("handwriting writes the edition's default scheme, so the wubi edition keeps it", () => {
+  const wubi: Preferences = {
+    ...preferences,
+    scheme: "wubi",
+    last_chinese_scheme: "wubi",
+    touch_keyboard_schemes: { enabled: ["wubi", "handwriting"], selected: "wubi" },
+  };
+  const next = selectHomeTouchKeyboardScheme(wubi, "handwriting", "wubi");
+
+  expect(next.scheme).toBe("wubi");
+  expect(next.last_chinese_scheme).toBe("wubi");
+  expect(next.touch_keyboard_layout).toBe("handwriting");
+  expect(inferredTouchKeyboardScheme({ ...next, touch_keyboard_schemes: undefined }, "wubi")).toBe(
+    "handwriting",
+  );
+  // full 的手写照旧写全拼，五笔加手写布局在 full 里不是手写。
+  expect(selectHomeTouchKeyboardScheme(preferences, "handwriting").scheme).toBe("quanpin");
+  expect(inferredTouchKeyboardScheme({ ...next, touch_keyboard_schemes: undefined })).toBe("wubi");
+});
+
+test("the selection hook writes the edition's handwriting scheme", () => {
+  let draft: Preferences | undefined = {
+    ...preferences,
+    scheme: "wubi",
+    touch_keyboard_schemes: { enabled: ["wubi", "handwriting"], selected: "wubi" },
+  };
+  const setDraft = vi.fn((update) => {
+    draft = typeof update === "function" ? update(draft) : update;
+  });
+  const { result } = renderHook(() =>
+    useTouchKeyboardSchemeSelection({ draft, setDraft, handwritingScheme: "wubi" }),
+  );
+
+  act(() => result.current.select("handwriting"));
+
+  expect(draft?.scheme).toBe("wubi");
+  expect(draft?.touch_keyboard_layout).toBe("handwriting");
+});
+
+test("the Stroke keypad keeps its own title under either layout", () => {
+  for (const layout of ["twenty_six_key", "nine_key"] as const) {
+    const stroke: Preferences = {
+      ...preferences,
+      scheme: "stroke",
+      touch_keyboard_layout: layout,
+      touch_keyboard_schemes: { enabled: ["quanpin", "stroke"] },
+    };
+    expect(inferredTouchKeyboardScheme(stroke)).toBe("stroke");
+    expect(touchKeyboardSchemeTitle({ ...stroke, touch_keyboard_schemes: undefined })).toBe("笔画");
+    expect(
+      touchKeyboardSchemeTitle({
+        ...stroke,
+        touch_keyboard_schemes: { enabled: [], selected: "stroke" },
+      }),
+    ).toBe("笔画");
+  }
 });

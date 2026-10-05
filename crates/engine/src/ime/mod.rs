@@ -23,8 +23,8 @@ use crate::shuangpin::query::{
 };
 use crate::shuangpin::ShuangpinProfile;
 use crate::types::{
-    autocorrect_type, CandidateSource, FuzzyPinyinOptions, QueryRequest, SchemeKey, SchemeType,
-    SentenceAssociationOptions, ShuangpinProfileKind, WordItem, WubiInputOptions,
+    autocorrect_type, CandidateSource, FuzzyPinyinOptions, QueryRequest, SchemeKey, SchemeSet,
+    SchemeType, SentenceAssociationOptions, ShuangpinProfileKind, WordItem, WubiInputOptions,
 };
 use crate::user_dictionary::typo_profile::PersonalTypoProfile;
 use crate::vietnamese::{
@@ -41,6 +41,8 @@ pub struct CompositionState {
     pub preedit: String,
     pub request: QueryRequest,
     pub candidates: Vec<WordItem>,
+    /// 候选对应的完整五笔 86 编码，仅供宿主显示反查提示。
+    pub wubi_codes: Vec<String>,
 }
 
 /// One decode of a request, before it is stored as the live state.
@@ -71,20 +73,25 @@ pub struct ImeSession {
 }
 
 impl ImeSession {
-    /// ime_session.cpp:42-49. `cantonese_dictionary` and `zhuyin_dictionary` are where `cantonese.db` and `zhuyin.db` are, each read only when its scheme is activated; starting in Cantonese or Zhuyin fails as `switch_scheme` does when its file cannot be opened. `japanese_dictionary` 是 `dict_japanese.dat` 的位置，为空时读资源目录里的那份。
+    /// ime_session.cpp:42-49. `cantonese_dictionary`, `zhuyin_dictionary` and `stroke_dictionary` are where `msime-cantonese.db`, `msime-zhuyin.db` and `msime-stroke.db` are, each read only when its scheme is activated; starting in Cantonese, Zhuyin or Stroke fails as `switch_scheme` does when its file cannot be opened. `japanese_dictionary` 是 `msime-japanese.dat` 的位置，为空时读资源目录里的那份。`enabled` 是会话允许运行的方案，`scheme` 不在其中时报 `INPUT_SCHEME_NOT_ENABLED`。
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         scheme: SchemeType,
+        enabled: SchemeSet,
         profile: ShuangpinProfileKind,
         paths: &RuntimePaths,
         cantonese_dictionary: PathBuf,
         zhuyin_dictionary: PathBuf,
+        stroke_dictionary: PathBuf,
         japanese_dictionary: PathBuf,
     ) -> Result<Self> {
         let mut registry = ProviderRegistry::new(
+            enabled,
             profile,
             paths,
             cantonese_dictionary,
             zhuyin_dictionary,
+            stroke_dictionary,
             japanese_dictionary,
         );
         registry.activate(scheme)?;
@@ -122,6 +129,15 @@ impl ImeSession {
         &self.state.candidates
     }
 
+    pub fn candidate_wubi_code(&self, word: &str) -> Option<&str> {
+        self.state
+            .candidates
+            .iter()
+            .zip(&self.state.wubi_codes)
+            .find(|(candidate, _)| candidate.word == word)
+            .and_then(|(_, code)| (!code.is_empty()).then_some(code.as_str()))
+    }
+
     pub fn request(&self) -> &QueryRequest {
         &self.state.request
     }
@@ -134,6 +150,11 @@ impl ImeSession {
         self.scheme.scheme_type()
     }
 
+    /// 会话允许运行的方案。
+    pub fn enabled_schemes(&self) -> SchemeSet {
+        self.registry.enabled()
+    }
+
     /// `scheme.handle_key` then `refresh_candidates`; `SchemeKey::Requery` only refreshes.
     pub fn handle_key(&mut self, key: SchemeKey) {
         if key != SchemeKey::Requery {
@@ -142,7 +163,7 @@ impl ImeSession {
         self.refresh_candidates();
     }
 
-    /// Opens what `scheme` reads (`cantonese.db` for Cantonese, `zhuyin.db` for Zhuyin) without switching to it, so a caller can learn that the scheme is unavailable before it discards anything; `switch_scheme` to an activated scheme cannot fail. A live Zhuyin scheme already holds `zhuyin.db`, so activating Zhuyin again opens nothing.
+    /// Opens what `scheme` reads (`msime-cantonese.db` for Cantonese, `msime-zhuyin.db` for Zhuyin, `msime-stroke.db` for Stroke) without switching to it, so a caller can learn that the scheme is unavailable before it discards anything; `switch_scheme` to an activated scheme cannot fail. A live Zhuyin scheme already holds `msime-zhuyin.db`, so activating Zhuyin again opens nothing.
     pub fn activate(&mut self, scheme: SchemeType) -> Result<()> {
         if scheme == SchemeType::Zhuyin && self.scheme.as_zhuyin().is_some() {
             return Ok(());
@@ -150,7 +171,7 @@ impl ImeSession {
         self.registry.activate(scheme)
     }
 
-    /// A new scheme and an empty state. Cantonese and Zhuyin open their dictionary the first time they are activated and keep it for the session; when that fails (`LANGUAGE_DICTIONARY_UNAVAILABLE`, `LANGUAGE_DICTIONARY_VERSION_UNSUPPORTED`) the scheme is unavailable and the current scheme and its composition stay as they were.
+    /// A new scheme and an empty state. Cantonese, Zhuyin and Stroke open their dictionary the first time they are activated and keep it for the session; when that fails (`LANGUAGE_DICTIONARY_UNAVAILABLE`, `LANGUAGE_DICTIONARY_VERSION_UNSUPPORTED`) the scheme is unavailable and the current scheme and its composition stay as they were. 不在 `enabled_schemes` 里的方案同样不可用（`INPUT_SCHEME_NOT_ENABLED`），当前方案和组合保持不变。
     pub fn switch_scheme(&mut self, scheme: SchemeType) -> Result<()> {
         self.activate(scheme)?;
         if let Some(zhuyin) = self
@@ -158,7 +179,7 @@ impl ImeSession {
             .as_zhuyin_mut()
             .filter(|_| scheme == SchemeType::Zhuyin)
         {
-            // The live editor holds `zhuyin.db`; an idle editor over the same connection is the new scheme.
+            // The live editor holds `msime-zhuyin.db`; an idle editor over the same connection is the new scheme.
             zhuyin.reset();
         } else {
             let next = Scheme::new(
@@ -295,6 +316,36 @@ impl ImeSession {
         }
     }
 
+    /// 藏文音节串的第一次 Esc：显示切换为威利原文。其他方案、没有组字或原文已在显示时返回 false，由调用方取消组字。
+    pub fn restore_tibetan_raw(&mut self) -> bool {
+        let Scheme::Tibetan(tibetan) = &mut self.scheme else {
+            return false;
+        };
+        if !tibetan.restore_raw() {
+            return false;
+        }
+        self.refresh_candidates();
+        true
+    }
+
+    /// 藏文组字已被 Esc 锁定为原文：此时它只是拉丁字母，结束键不再附加音节点或垂符。其他方案为 false。
+    pub fn tibetan_raw_locked(&self) -> bool {
+        matches!(&self.scheme, Scheme::Tibetan(tibetan) if tibetan.raw_locked())
+    }
+
+    /// 藏文当前状态下这个字母是否进入威利原文（威利读不了的字母不接收，由会话原样写出）；其他方案为 false。
+    pub fn tibetan_claims_letter(&self, letter: u8) -> bool {
+        matches!(&self.scheme, Scheme::Tibetan(tibetan) if tibetan.claims_letter(letter))
+    }
+
+    /// 藏文当前状态下要作为字符交给会话的非字母键（拼写符号和 `/`）；其他方案为空。
+    pub fn tibetan_spelling_symbols(&self) -> &'static str {
+        match &self.scheme {
+            Scheme::Tibetan(tibetan) => tibetan.spelling_symbols(),
+            _ => "",
+        }
+    }
+
     /// Takes the letters a selected Cantonese row covers out of the composition and answers what is left; returns whether letters are left composing.
     pub fn select_cantonese(&mut self, item: &WordItem) -> bool {
         let composing = self.scheme.select_cantonese(item);
@@ -381,7 +432,7 @@ impl ImeSession {
                 .expand_initial_candidates(&request, candidates)
     }
 
-    /// The request a scratch scheme of the current type builds for `raw`, with the session's switches applied. The current scheme was activated before it became current, so building its scratch twin cannot fail, except for Zhuyin, whose `zhuyin.db` connection belongs to the live editor: an invalid request stands for both, and Zhuyin keeps its caret at the end, so it never decodes a caret prefix.
+    /// The request a scratch scheme of the current type builds for `raw`, with the session's switches applied. The current scheme was activated before it became current, so building its scratch twin cannot fail, except for Zhuyin, whose `msime-zhuyin.db` connection belongs to the live editor: an invalid request stands for both, and Zhuyin keeps its caret at the end, so it never decodes a caret prefix.
     fn raw_request(&self, raw: &str, raw_with_cases: &str) -> QueryRequest {
         let Ok(mut scratch) = Scheme::new(
             self.current_scheme_type(),
@@ -463,8 +514,13 @@ impl ImeSession {
     }
 
     pub fn expand_initial_candidates(&mut self) -> bool {
-        self.registry
-            .expand_initial_candidates(&self.state.request, &mut self.state.candidates)
+        let grew = self
+            .registry
+            .expand_initial_candidates(&self.state.request, &mut self.state.candidates);
+        if grew {
+            self.refresh_wubi_codes();
+        }
+        grew
     }
 
     /// Insert online rows for the current request and refresh; false when the provider could not take them.
@@ -488,6 +544,7 @@ impl ImeSession {
             self.pinyin_tail = false;
             self.state.request = request;
             self.state.candidates.clear();
+            self.state.wubi_codes.clear();
             return;
         }
 
@@ -506,6 +563,16 @@ impl ImeSession {
         }
         self.state.request = request;
         self.state.candidates = decoded.candidates;
+        self.refresh_wubi_codes();
+    }
+
+    /// 宿主只在五笔方案里显示反查编码（含混输拼音的候选），其他方案的每次刷新都不必逐个候选去查五笔表。
+    fn refresh_wubi_codes(&mut self) {
+        self.state.wubi_codes = if self.current_scheme_type() == SchemeType::Wubi {
+            self.registry.reverse_wubi_codes(&self.state.candidates)
+        } else {
+            Vec::new()
+        };
     }
 
     /// The scheme's request with the session's switches, autocorrect suppression and the shuangpin double-helpcode segmentation applied.

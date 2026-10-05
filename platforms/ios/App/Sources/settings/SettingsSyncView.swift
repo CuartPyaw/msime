@@ -3,12 +3,9 @@ import SwiftUI
 private enum IOSCloudSettings {
   static func snapshot() throws -> [String: BackendPreferenceValue] {
     let scheme = InputSchemePreference.scheme
-    let name = scheme.isJapanese ? "japanese" : scheme.shuangpinProfile != nil ? "shuangpin" : ((scheme == .nineKey || scheme == .thoughtfulReply || scheme == .handwriting) ? "quanpin" : scheme.rawValue)
     let document = MetasequoiaInputSessionBridge.loadSharedPreferences()
     var settings: [String: BackendPreferenceValue] = [
-      "input.schema": .string(name),
       "input.character_set": .string(ChineseOutputPreference.usesTraditional ? "traditional" : "simplified"),
-      "platform.ios.nine_key": .boolean(scheme == .nineKey || scheme == .japaneseNineKey),
       "platform.ios.sound_enabled": .boolean(KeyboardFeedbackPreference.soundEnabled),
       "platform.ios.haptics_enabled": .boolean(KeyboardFeedbackPreference.hapticsEnabled),
       "platform.ios.haptic_strength": .string(KeyboardFeedbackPreference.hapticStrength.rawValue),
@@ -21,12 +18,22 @@ private enum IOSCloudSettings {
     if let design = document == nil ? CustomKeyboardSkinStore.stored : GlobalThemePreference.design(in: document) {
       settings["platform.ios.custom_keyboard_skin"] = .string(String(decoding: try JSONEncoder().encode(design), as: UTF8.self))
     }
+    // A scheme the cloud cannot carry (Cantonese, Zhuyin, Vietnamese, Tibetan, Stroke) leaves the account's scheme as it is: every other device would reject the whole document over an `input.schema` it does not know.
+    if let name = scheme.cloudSchema {
+      settings["input.schema"] = .string(name)
+      settings["platform.ios.nine_key"] = .boolean(scheme == .nineKey || scheme == .japaneseNineKey)
+    }
     if let profile = scheme.shuangpinProfile { settings["input.shuangpin_schema"] = .string(profile) }
     // `input.wubi_schema` 是 `wubi_profile` 在云端的名字，与双拼版本一样只在当前方案是五笔时上传。
     if scheme == .wubi { settings["input.wubi_schema"] = .string(document.map(WubiProfilePreference.profile(in:)) ?? WubiProfilePreference.profile) }
+    // 单方案版本不上传方案，多方案版本只上传本版本提供的方案；full 什么也不去掉。
+    IOSPreferencePlan.filterUploaded(&settings, offered: MSIMEAppEdition.inputSchemes)
     return settings
   }
-  static func apply(_ values: [String: BackendPreferenceValue]) throws {
+  static func apply(_ cloud: [String: BackendPreferenceValue]) throws {
+    // 单方案版本不应用账号里的方案，多方案版本把本版本没有的方案当作缺失；full 什么也不去掉。
+    var values = cloud
+    IOSPreferencePlan.filterDownloaded(&values, offered: MSIMEAppEdition.inputSchemes)
     let plan = try IOSPreferencePlan(values, themes: Set(GlobalThemeCatalog.ids))
     let custom = try plan.customSkinJSON.map { try JSONDecoder().decode(CustomKeyboardSkin.self, from: Data($0.utf8)).normalized }
     let design = try custom.map { skin -> [String: Any] in

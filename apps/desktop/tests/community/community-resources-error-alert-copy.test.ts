@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-test("resource pages reuse the shared error alert", () => {
+test("resource pages reuse the shared gallery feedback", () => {
   const resources = Object.values(
     import.meta.glob<string>("../../../../packages/ui/src/community/community-resources.tsx", {
       eager: true,
@@ -9,6 +9,10 @@ test("resource pages reuse the shared error alert", () => {
     }),
   )[0];
 
-  expect(resources).toContain("CommunityErrorAlert");
+  expect(resources).toContain(
+    'import { CommunityGalleryFeedback } from "./community-gallery-feedback";',
+  );
+  expect(resources).toContain("<CommunityGalleryFeedback");
+  expect(resources).not.toContain("CommunityErrorAlert");
   expect(resources).not.toContain('<p role="alert" className="error">');
 });

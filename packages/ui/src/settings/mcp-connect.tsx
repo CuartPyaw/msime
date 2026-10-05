@@ -1,11 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useConfirm } from "../core/confirm";
 import { errorCode } from "../core/error-code";
-import * as settings from "./settings-style";
+import { SettingsServiceRow } from "./settings-service-row";
 import { GroupList, Segmented, Switch } from "../core/platform-controls";
 import { mcpFailureMessage } from "./mcp-errors";
+import { useMountedRef } from "./use-mounted-ref";
 import { jsonTokens, plain, SyntaxBlock, type SyntaxToken, tokensText } from "./mcp-syntax";
 import { ActionButton } from "./action-button";
+import { SettingsManagerNote } from "./settings-manager-note";
+import { SettingsManagerActions } from "./settings-manager-actions";
+import { SettingsManagerBlock } from "./settings-manager-block";
+import { SettingsNotice } from "./settings-notice";
+import { StatusMessage } from "../core/status-message";
+import { ErrorAlert } from "../core/error-alert";
+import { useAsyncGeneration } from "./use-async-generation";
 
 /** The assistants the host can write the entry for. */
 export type McpClientId = "claude_desktop" | "cursor";
@@ -230,21 +238,14 @@ export function McpConnectSection({
   const [preferred, setPreferred] = useState<McpFlag[]>(savedFlags);
   // 已连接的助手页上，开关先显示它现有条目的权限；用户改过之后记在这里，直到写入。
   const [drafts, setDrafts] = useState<Partial<Record<McpClientId, McpFlag[]>>>({});
-  const mounted = useRef(true);
-  const refreshGeneration = useRef(0);
-  const clientGeneration = useRef(0);
+  const mounted = useMountedRef();
+  const refreshGeneration = useAsyncGeneration(status, install, copyText);
+  const clientGeneration = useAsyncGeneration(status, install, copyText);
   const actionRunning = useRef(false);
 
   useEffect(() => {
-    const generation = ++clientGeneration.current;
-    mounted.current = true;
     actionRunning.current = false;
     setBusy(undefined);
-    return () => {
-      mounted.current = false;
-      refreshGeneration.current += 1;
-      if (generation === clientGeneration.current) clientGeneration.current++;
-    };
   }, [status, install, copyText]);
 
   const refresh = useCallback(() => {
@@ -364,22 +365,22 @@ export function McpConnectSection({
     if (!copyText) return null;
     const text = tokensText(tokens);
     return (
-      <div className={settings.managerActions}>
+      <SettingsManagerActions>
         <ActionButton action={() => copy(key, text)} label={copied === key ? "已复制" : label} />
-      </div>
+      </SettingsManagerActions>
     );
   }
 
   return (
     <GroupList title="连接 AI 助手">
-      <div className={settings.managerBlock} role="group" aria-label="连接 AI 助手">
-        <p className={settings.managerNote}>
+      <SettingsManagerBlock role="group" aria-label="连接 AI 助手">
+        <SettingsManagerNote>
           连接后，把输入法的问题（卡顿、候选窗口不见了）直接告诉 AI
           助手：它会打开诊断日志、请你重做一遍出问题的操作，再读日志找原因；也能读取快捷短语、设置、打字统计和已安装的候选窗口皮肤。通过
           MCP
           在本机运行，不联网。助手还能做什么由下面两个开关决定，默认都开；复制的命令、配置和一键写入都带上开着的权限。两个都关时只读，除了开关诊断日志不改动任何设置。
-        </p>
-        {loadFailed && <p role="alert">无法读取 MCP 服务器的状态。</p>}
+        </SettingsManagerNote>
+        {loadFailed && <ErrorAlert>无法读取 MCP 服务器的状态。</ErrorAlert>}
         {server &&
           (server.config ? (
             <>
@@ -394,10 +395,10 @@ export function McpConnectSection({
               />
               {(shownTab === "claude_code" || shownTab === "codex") && (
                 <>
-                  <p className={settings.managerNote}>
+                  <SettingsManagerNote>
                     在终端运行下面的命令，然后重新启动{" "}
                     {shownTab === "claude_code" ? "Claude Code" : "Codex"}：
-                  </p>
+                  </SettingsManagerNote>
                   <SyntaxBlock
                     className={command}
                     aria-label={
@@ -406,7 +407,7 @@ export function McpConnectSection({
                     tokens={installCommand(shownTab, server, flags)}
                   />
                   {copyButton(shownTab, "复制命令", installCommand(shownTab, server, flags))}
-                  <p className={settings.managerNote}>之前添加过的，先运行这条：</p>
+                  <SettingsManagerNote>之前添加过的，先运行这条：</SettingsManagerNote>
                   <SyntaxBlock
                     className={command}
                     aria-label={
@@ -419,11 +420,11 @@ export function McpConnectSection({
               )}
               {shownTab === "terminal" && (
                 <>
-                  <p className={settings.managerNote}>
+                  <SettingsManagerNote>
                     不注册 MCP 也可以：能在终端里运行命令的助手（Claude Code、Codex
                     等）直接调用同一组工具，权限开关相同，不用重启助手。把下面这段话告诉助手，或放进项目的
                     AGENTS.md / CLAUDE.md：
-                  </p>
+                  </SettingsManagerNote>
                   <SyntaxBlock
                     className={command}
                     aria-label="命令行用法"
@@ -434,18 +435,18 @@ export function McpConnectSection({
               )}
               {client && (
                 <>
-                  <p className={settings.managerNote}>
+                  <SettingsManagerNote>
                     写入 <code>{client.path}</code>
                     {client.configured ? "（已连接）" : ""}，重新启动 {clientNames[client.id]}{" "}
                     后生效。
-                  </p>
+                  </SettingsManagerNote>
                   {outdated && (
-                    <p className="notice">
+                    <SettingsNotice>
                       下面的权限和 {clientNames[client.id]} 现在的配置不同，点「更新{" "}
                       {clientNames[client.id]}」写入。
-                    </p>
+                    </SettingsNotice>
                   )}
-                  <div className={settings.managerActions}>
+                  <SettingsManagerActions>
                     <ActionButton
                       action={() => void write(client.id, flags)}
                       disabled={busy !== undefined || (client.configured && !outdated)}
@@ -456,12 +457,12 @@ export function McpConnectSection({
                           : `${outdated ? "更新" : "写入"} ${clientNames[client.id]}`
                       }
                     />
-                  </div>
+                  </SettingsManagerActions>
                 </>
               )}
               {shownTab === "json" && (
                 <>
-                  <p className={settings.managerNote}>粘贴到任意支持 MCP 的助手的配置中：</p>
+                  <SettingsManagerNote>粘贴到任意支持 MCP 的助手的配置中：</SettingsManagerNote>
                   <SyntaxBlock
                     className={code}
                     aria-label="MCP 配置"
@@ -470,9 +471,9 @@ export function McpConnectSection({
                   {copyButton("json", "复制配置", configWithFlags(server.config, flags))}
                 </>
               )}
-              {result && <p role="status">{result}</p>}
+              {result && <StatusMessage role="status">{result}</StatusMessage>}
               {permissionFlags.map((permission) => (
-                <div className={settings.serviceRow} key={permission.flag}>
+                <SettingsServiceRow key={permission.flag}>
                   <span>
                     {permission.title}
                     <small>
@@ -484,21 +485,21 @@ export function McpConnectSection({
                     checked={flags.includes(permission.flag)}
                     onChange={(on) => setFlag(permission.flag, on)}
                   />
-                </div>
+                </SettingsServiceRow>
               ))}
-              <p className={settings.managerNote}>
+              <SettingsManagerNote>
                 只在你信任该助手时保留这两项权限，用不上就关掉。
-              </p>
-              <p className={settings.managerNote}>
+              </SettingsManagerNote>
+              <SettingsManagerNote>
                 服务器程序 <code>{server.command}</code>
                 {server.installed ? "" : "（未找到，请重新安装输入法）"}
-              </p>
+              </SettingsManagerNote>
             </>
           ) : (
-            <p className="notice">输入法尚未完成初始化，完成设置向导后即可连接。</p>
+            <SettingsNotice>输入法尚未完成初始化，完成设置向导后即可连接。</SettingsNotice>
           ))}
         {confirmation}
-      </div>
+      </SettingsManagerBlock>
     </GroupList>
   );
 }

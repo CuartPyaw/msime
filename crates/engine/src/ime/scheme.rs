@@ -1,4 +1,4 @@
-//! The active input scheme. Eight concrete schemes with the same five operations: an enum, not a trait object.
+//! 当前输入方案。十个具体方案共用同样的五个操作：用枚举，不用 trait 对象。
 
 use std::sync::Arc;
 
@@ -11,6 +11,8 @@ use crate::language_dictionary::LanguageDictionary;
 use crate::quanpin::QuanpinScheme;
 use crate::shuangpin::profile::profile;
 use crate::shuangpin::ShuangpinScheme;
+use crate::stroke::StrokeScheme;
+use crate::tibetan::TibetanScheme;
 use crate::types::{QueryRequest, SchemeKey, SchemeType, ShuangpinProfileKind, WordItem};
 use crate::vietnamese::{InputMethod, ToneStyle, VietnameseScheme};
 use crate::wubi::scheme::WubiScheme;
@@ -26,10 +28,12 @@ pub enum Scheme {
     /// Boxed: the editor's state is several times the size of every other scheme's.
     Zhuyin(Box<ZhuyinScheme>),
     Vietnamese(VietnameseScheme),
+    Tibetan(TibetanScheme),
+    Stroke(StrokeScheme),
 }
 
 impl Scheme {
-    /// ime_session.cpp:371-386; the profile only matters for shuangpin, the input method and tone style only for Vietnamese, the syllable inventory only for Cantonese and the open `zhuyin.db` only for Zhuyin. Neither can be built without its dictionary (`LANGUAGE_DICTIONARY_UNAVAILABLE`), which exists once the scheme has been activated.
+    /// ime_session.cpp:371-386; the profile only matters for shuangpin, the input method and tone style only for Vietnamese, the syllable inventory only for Cantonese and the open `msime-zhuyin.db` only for Zhuyin. Neither can be built without its dictionary (`LANGUAGE_DICTIONARY_UNAVAILABLE`), which exists once the scheme has been activated.
     pub fn new(
         scheme: SchemeType,
         profile_kind: ShuangpinProfileKind,
@@ -56,6 +60,9 @@ impl Scheme {
             SchemeType::Vietnamese => {
                 Self::Vietnamese(VietnameseScheme::new(vietnamese_method, vietnamese_style))
             }
+            SchemeType::Tibetan => Self::Tibetan(TibetanScheme::new()),
+            // 笔画方案自己不持有 `msime-stroke.db`：词典留在 registry，查询时按请求读。
+            SchemeType::Stroke => Self::Stroke(StrokeScheme::new()),
         })
     }
 
@@ -69,6 +76,8 @@ impl Scheme {
             Self::Cantonese(_) => SchemeType::Cantonese,
             Self::Zhuyin(_) => SchemeType::Zhuyin,
             Self::Vietnamese(_) => SchemeType::Vietnamese,
+            Self::Tibetan(_) => SchemeType::Tibetan,
+            Self::Stroke(_) => SchemeType::Stroke,
         }
     }
 
@@ -82,6 +91,8 @@ impl Scheme {
             Self::Cantonese(scheme) => scheme.reset(),
             Self::Zhuyin(scheme) => scheme.reset(),
             Self::Vietnamese(scheme) => scheme.reset(),
+            Self::Tibetan(scheme) => scheme.reset(),
+            Self::Stroke(scheme) => scheme.reset(),
         }
     }
 
@@ -93,9 +104,11 @@ impl Scheme {
             Self::Japanese(scheme) => scheme.handle_key(key),
             Self::Korean(scheme) => scheme.handle_key(key),
             Self::Cantonese(scheme) => scheme.handle_key(key),
-            // The session drives Zhuyin through `ImeSession::handle_zhuyin_key`, which reports whether the editor claimed a key and whether reading `zhuyin.db` failed; a scheme key reaching it here changes nothing.
+            // The session drives Zhuyin through `ImeSession::handle_zhuyin_key`, which reports whether the editor claimed a key and whether reading `msime-zhuyin.db` failed; a scheme key reaching it here changes nothing.
             Self::Zhuyin(_) => {}
             Self::Vietnamese(scheme) => scheme.handle_key(key),
+            Self::Tibetan(scheme) => scheme.handle_key(key),
+            Self::Stroke(scheme) => scheme.handle_key(key),
         }
     }
 
@@ -109,6 +122,8 @@ impl Scheme {
             Self::Cantonese(scheme) => scheme.build_request(),
             Self::Zhuyin(scheme) => scheme.build_request(),
             Self::Vietnamese(scheme) => scheme.build_request(),
+            Self::Tibetan(scheme) => scheme.build_request(),
+            Self::Stroke(scheme) => scheme.build_request(),
         }
     }
 
@@ -122,10 +137,12 @@ impl Scheme {
             Self::Cantonese(scheme) => scheme.preedit(),
             Self::Zhuyin(scheme) => scheme.preedit(),
             Self::Vietnamese(scheme) => scheme.preedit(),
+            Self::Tibetan(scheme) => scheme.preedit(),
+            Self::Stroke(scheme) => scheme.preedit(),
         }
     }
 
-    /// Wubi and Cantonese keep no case, so they only take the plain letters. Zhuyin keeps the caret at the end and has no host edit to take.
+    /// Wubi, Cantonese and Stroke keep no case, so they only take the plain letters. Zhuyin keeps the caret at the end and has no host edit to take.
     pub fn set_raw_input(&mut self, raw: &str, raw_with_cases: &str) {
         match self {
             Self::Quanpin(scheme) => scheme.set_raw_input(raw, raw_with_cases),
@@ -136,6 +153,8 @@ impl Scheme {
             Self::Cantonese(scheme) => scheme.set_raw_input(raw),
             Self::Zhuyin(_) => {}
             Self::Vietnamese(scheme) => scheme.set_raw_input(raw, raw_with_cases),
+            Self::Tibetan(scheme) => scheme.set_raw_input(raw, raw_with_cases),
+            Self::Stroke(scheme) => scheme.set_raw_input(raw),
         }
     }
 
@@ -167,7 +186,7 @@ impl Scheme {
         }
     }
 
-    /// The `zhuyin.db` connection a Zhuyin scheme holds, `None` for every other scheme.
+    /// The `msime-zhuyin.db` connection a Zhuyin scheme holds, `None` for every other scheme.
     pub fn into_zhuyin_dictionary(self) -> Option<LanguageDictionary> {
         match self {
             Self::Zhuyin(scheme) => Some(scheme.into_dictionary()),

@@ -3,30 +3,39 @@ param(
     [Parameter(Mandatory)][string[]]$DependencyPrefixes,
     [string[]]$SupplementalNotices = @(),
     [string]$RepoRoot = (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)),
-    [string]$OutputDirectory = ''
+    [string]$OutputDirectory = '',
+    # The product edition (an id with a Windows section in shared/contracts/editions.json) whose installer the notices go into. Editions whose features.handwriting is false (Japanese, Vietnamese, Tibetan) do not ship the handwriting model, so their collection neither lists its LGPL-2.1 licence nor needs target/handwriting-model. Defaults to full.
+    [ValidatePattern('^[a-z][a-z0-9]*$')][string]$Edition = 'full'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $RepoRoot 'target/windows-notices' }
 if (-not [IO.Path]::IsPathRooted($OutputDirectory)) { throw 'Notice output directory must be absolute' }
+$editionTable = Get-Content -LiteralPath (Join-Path $RepoRoot 'shared/contracts/editions.json') -Raw | ConvertFrom-Json
+$editionEntry = @($editionTable.editions | Where-Object { $_.id -ceq $Edition -and $null -ne $_.platforms.windows })
+if ($editionEntry.Count -ne 1) { throw "Edition $Edition has no Windows section in shared/contracts/editions.json" }
+$editionHandwriting = [bool]$editionEntry[0].features.handwriting
 $documents = [Collections.Generic.List[string]]::new()
 $documents.Add("MSIME third-party notice collection`nThis collection is not a license-completeness or redistribution-authorization assessment. Nested third-party archives, Rust/frontend and other distribution-specific notices must also be supplied and reviewed.`n")
-# Notices committed with the data and code they cover, plus the handwriting model's LGPL-2.1 text, which scripts/fetch_handwriting_model.py downloads with the model into target/handwriting-model as resources/handwriting-model.lock.json pins. The input engine is the repository's own Rust crate under the root LICENSE, which the package carries as LICENSE.txt, so it has no separate entry.
+# Notices committed with the data and code they cover, plus, for editions that ship the handwriting model, its LGPL-2.1 text, which scripts/fetch_handwriting_model.py downloads with the model into target/handwriting-model as resources/handwriting-model.lock.json pins. The input engine is the repository's own Rust crate under the root LICENSE, which the package carries as LICENSE.txt, so it has no separate entry.
 foreach ($notice in @(
-    @('resources/licenses/msime-engine-dictionary-NOTICE.md', 'Dictionary data (msime.db, english.db, others.db, bigram.bin, trigram.bin)'),
+    @('resources/licenses/msime-engine-dictionary-NOTICE.md', 'Dictionary data (msime-pinyin.db, msime-wubi.db, msime-english.db, msime-others.db, msime-bigram.bin, msime-trigram.bin)'),
     @('resources/helpcodes/ENGINE-NOTICE.md', 'Helpcode tables (lantian, ziranma, shouyou2_0, shouyouplus, xiaohe)'),
     @('resources/helpcodes/NOTICE.md', 'Helpcode table (jiajia)'),
     @('target/handwriting-model/HandwritingModel-LICENSE.txt', 'Tegaki Simplified Chinese handwriting model (handwriting-zh_CN.model), LGPL-2.1'),
     @('resources/licenses/Zinnia-LICENSE.txt', 'zinnia, whose recognizer the host library ports, BSD License'),
     @('resources/licenses/Administrative-divisions-of-China-WTFPL.txt', 'Chinese administrative divisions compiled into the host library for @ mode, modood/Administrative-divisions-of-China @ c49d495b40ac73eb1a66f6eeae5f8fd10696f035, WTFPL'),
     @('resources/licenses/libhangul-hanja-BSD-3-Clause.txt', 'Korean Hanja table compiled into the host library for Hanja conversion, libhangul data/hanja/hanja.txt @ 717409ce61524bb3d8426060a384822f21354c62, BSD-3-Clause'),
-    @('resources/licenses/rime-cantonese-CC-BY-4.0.txt', 'Jyutping syllables and words of the Cantonese scheme in the host library, rime/rime-cantonese @ 259f0e48bba840c3a2e0d117539e96937f3d89bc, CC BY 4.0'),
-    @('resources/licenses/libchewing-data-LGPL-2.1.txt', 'Bopomofo syllables and words of the Zhuyin scheme in the host library, chewing/libchewing-data @ c44e81aef24b06f1509f19e1be54c99812d0c43f, LGPL-2.1-or-later'),
+    @('resources/licenses/rime-cantonese-CC-BY-4.0.txt', 'Jyutping syllables and words of the Cantonese scheme in the host library, rime/rime-cantonese @ 259f0e48bba840c3a2e0d117539e96937f3d89bc, CC BY 4.0, with word weights from fcbond/hkcancor @ 39aeadf920e0b5ca93d0ad7792c59e740e7bdd65, CC BY 4.0'),
+    @('resources/licenses/libchewing-data-LGPL-2.1.txt', 'Bopomofo syllables and words of the Zhuyin scheme in the host library, chewing/libchewing-data @ c44e81aef24b06f1509f19e1be54c99812d0c43f, LGPL-2.1-or-later, with phrase weights from openvanilla/McBopomofo @ be6564acad6c4d3265c34a2e1a872d80f9db6068 phrase.occ, MIT'),
+    @('resources/licenses/rime-stroke-LGPL-3.0.txt', 'Stroke orders of the Stroke scheme in the host library, rime/rime-stroke @ 1e8fff9b9494ddec23b0cbc526bcfd8171a6fd48 (main table from CNS11643, 數位發展部，CNS11643中文標準交換碼全字庫網站，https://www.cns11643.gov.tw), LGPL-3.0'),
     @('resources/licenses/vi-MIT.txt', 'vi crate behind the Vietnamese scheme in the host library, ZeroX-DG/vi-rs 0.8.0, MIT'),
+    @('resources/licenses/ewts-MIT.txt', 'ewts crate behind the Tibetan scheme in the host library, emgyrz/ewts-rs 0.1.3, MIT OR Apache-2.0 used under MIT'),
     @('platforms/windows/third_party/miniaudio/LICENSE', 'miniaudio (Server microphone capture and cue sounds)'),
     @('crates/client-core/data/opencc/LICENSE', 'OpenCC dictionaries, BYVoid/OpenCC @ 26753884f1984add422f3b0249ccee8613deaff6'))) {
     $relative = $notice[0]
+    if ($relative.StartsWith('target/handwriting-model/') -and -not $editionHandwriting) { continue }
     $noticePath = Join-Path $RepoRoot $relative
     if (-not (Test-Path -LiteralPath $noticePath -PathType Leaf)) {
         if ($relative.StartsWith('target/handwriting-model/')) { throw "Missing handwriting model notice: $relative; run scripts/fetch_handwriting_model.py" }

@@ -129,6 +129,60 @@ test("a save response from a replaced mobile feedback client is ignored", async 
   expect(result.current.value).toEqual(nextValue);
 });
 
+test("clears the previous mobile feedback while a replacement client is loading", async () => {
+  const pendingLoad = deferred<MobileKeyboardFeedback>();
+  const oldClient = {
+    load: vi.fn().mockResolvedValue(value),
+    save: vi.fn().mockResolvedValue(value),
+  };
+  const nextClient = {
+    load: vi.fn().mockReturnValue(pendingLoad.promise),
+    save: vi.fn().mockResolvedValue(value),
+  };
+  const { result, rerender } = renderHook(
+    ({ client }) => useMobileKeyboardFeedback({ mobile: true, client, onError: vi.fn() }),
+    { initialProps: { client: oldClient } },
+  );
+  await waitFor(() => expect(result.current.value).toEqual(value));
+
+  rerender({ client: nextClient });
+
+  expect(result.current.value).toBeUndefined();
+  expect(result.current.busy).toBe(true);
+
+  pendingLoad.resolve(value);
+  await waitFor(() => expect(result.current.value).toEqual(value));
+  expect(result.current.busy).toBe(false);
+});
+
+test("a late mobile feedback preview failure is ignored after unmount", async () => {
+  let rejectPreview!: (reason: unknown) => void;
+  const pendingPreview = new Promise<void>((_resolve, reject) => {
+    rejectPreview = reject;
+  });
+  const preview = vi.fn().mockReturnValue(pendingPreview);
+  const onError = vi.fn();
+  const client = {
+    load: vi.fn().mockResolvedValue(value),
+    save: vi.fn().mockResolvedValue(value),
+    preview,
+  };
+  const { result, unmount } = renderHook(() =>
+    useMobileKeyboardFeedback({ mobile: true, client, onError }),
+  );
+  await waitFor(() => expect(result.current.value).toEqual(value));
+
+  let pending!: Promise<void>;
+  act(() => {
+    pending = result.current.preview();
+  });
+  onError.mockClear();
+  unmount();
+  rejectPreview(new Error("fixture failure"));
+  await act(async () => pending);
+  expect(onError).not.toHaveBeenCalled();
+});
+
 test("ignores a same-tick duplicate mobile feedback save", async () => {
   const pendingSave = deferred<MobileKeyboardFeedback>();
   const save = vi.fn().mockReturnValue(pendingSave.promise);

@@ -5,6 +5,8 @@ import { ActionButton } from "../core/action-button";
 import * as chat from "./chat-style";
 import { boundedHistory, chatMessageByteLength, MAX_MESSAGE_BYTES } from "./chat-history";
 import { chatError } from "./chat-errors";
+import { useAsyncGeneration } from "../settings/use-async-generation";
+import { useMountedRef } from "../settings/use-mounted-ref";
 
 export type ChatMessage = {
   role: "user" | "assistant" | "system";
@@ -48,9 +50,9 @@ export function ChatPage({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [loginNeeded, setLoginNeeded] = useState(false);
-  const generation = useRef(0);
-  const modelGeneration = useRef(0);
-  const mounted = useRef(true);
+  const generation = useAsyncGeneration(client);
+  const modelGeneration = useAsyncGeneration(client);
+  const mounted = useMountedRef();
   const sendingRef = useRef(false);
   const modelsRunning = useRef(false);
   const nextMessageId = useRef(1);
@@ -59,7 +61,7 @@ export function ChatPage({
   const loadModels = async () => {
     if (!mounted.current || modelsRunning.current) return;
     modelsRunning.current = true;
-    const current = ++modelGeneration.current;
+    const current = modelGeneration.current;
     setLoadingModels(true);
     setError("");
     setLoginNeeded(false);
@@ -82,12 +84,8 @@ export function ChatPage({
   };
 
   useEffect(() => {
-    mounted.current = true;
     void loadModels();
     return () => {
-      mounted.current = false;
-      modelGeneration.current += 1;
-      generation.current += 1;
       sendingRef.current = false;
       modelsRunning.current = false;
     };

@@ -232,11 +232,64 @@ impl AccountSessionStorage for MemoryStorage {
     }
 }
 
+#[derive(Clone, Default)]
+struct SharedMemoryStorage(MemoryStorage);
+
+impl AccountSessionStorage for SharedMemoryStorage {
+    fn load(&self) -> Result<Option<SavedAccountSession>, AccountError> {
+        self.0.load()
+    }
+
+    fn save(&self, session: &SavedAccountSession) -> Result<(), AccountError> {
+        self.0.save(session)
+    }
+
+    fn clear(&self) -> Result<(), AccountError> {
+        self.0.clear()
+    }
+
+    fn shared_across_processes(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Clone, Default)]
+struct FailingLockStorage(MemoryStorage);
+
+impl AccountSessionStorage for FailingLockStorage {
+    fn load(&self) -> Result<Option<SavedAccountSession>, AccountError> {
+        self.0.load()
+    }
+
+    fn save(&self, session: &SavedAccountSession) -> Result<(), AccountError> {
+        self.0.save(session)
+    }
+
+    fn clear(&self) -> Result<(), AccountError> {
+        self.0.clear()
+    }
+
+    fn shared_across_processes(&self) -> bool {
+        true
+    }
+
+    fn with_refresh_lock<T>(
+        &self,
+        _body: impl FnOnce() -> Result<T, AccountError>,
+    ) -> Result<T, AccountError> {
+        Err(AccountError::Unavailable)
+    }
+}
+
 #[derive(Clone)]
 struct FakeApi {
     refreshes: Arc<AtomicUsize>,
     reject_refresh: Arc<AtomicBool>,
     refresh_gate: Option<Arc<(Mutex<bool>, Condvar)>>,
+    preferences_started: Arc<AtomicBool>,
+    preferences_gate: Option<Arc<(Mutex<bool>, Condvar)>>,
+    put_preferences_started: Arc<AtomicBool>,
+    put_preferences_gate: Option<Arc<(Mutex<bool>, Condvar)>>,
     logins: Arc<Mutex<Vec<(String, String)>>>,
 }
 
@@ -246,6 +299,10 @@ impl FakeApi {
             refreshes: Arc::new(AtomicUsize::new(0)),
             reject_refresh: Arc::new(AtomicBool::new(false)),
             refresh_gate: None,
+            preferences_started: Arc::new(AtomicBool::new(false)),
+            preferences_gate: None,
+            put_preferences_started: Arc::new(AtomicBool::new(false)),
+            put_preferences_gate: None,
             logins: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -360,6 +417,14 @@ impl AccountApi for FakeApi {
         if access_token == token(b'a') {
             return Err(AccountError::Unauthorized);
         }
+        self.preferences_started.store(true, Ordering::SeqCst);
+        if let Some(gate) = &self.preferences_gate {
+            let (lock, ready) = &**gate;
+            let mut open = lock.lock().map_err(|_| AccountError::Unavailable)?;
+            while !*open {
+                open = ready.wait(open).map_err(|_| AccountError::Unavailable)?;
+            }
+        }
         Ok(AccountPreferences {
             revision: 42,
             settings: BTreeMap::from([
@@ -382,6 +447,14 @@ impl AccountApi for FakeApi {
     ) -> Result<AccountPreferences, AccountError> {
         if access_token == token(b'a') {
             return Err(AccountError::Unauthorized);
+        }
+        self.put_preferences_started.store(true, Ordering::SeqCst);
+        if let Some(gate) = &self.put_preferences_gate {
+            let (lock, ready) = &**gate;
+            let mut open = lock.lock().map_err(|_| AccountError::Unavailable)?;
+            while !*open {
+                open = ready.wait(open).map_err(|_| AccountError::Unavailable)?;
+            }
         }
         Ok(AccountPreferences {
             revision: preferences.revision + 1,
@@ -658,6 +731,26 @@ fn late_refresh_cannot_restore_forgotten_session() {
 }
 
 #[test]
+fn sign_out_does_not_clear_when_shared_lock_cannot_be_taken() {
+    let storage = FailingLockStorage::default();
+    storage
+        .0
+        .save(&SavedAccountSession {
+            tokens: tokens(b'a', b'b', 900),
+            expires_at_unix_ms: valid_future_expiry(),
+        })
+        .unwrap();
+    let session = BackendAccountSession::new(FakeApi::new(), storage.clone());
+
+    assert_eq!(session.forget(), Err(AccountError::Unavailable));
+    assert_eq!(
+        storage.load().unwrap().unwrap().tokens.refresh_token,
+        token(b'b'),
+        "an unlocked clear could race an in-flight refresh and resurrect the session"
+    );
+}
+
+#[test]
 fn generation_exhaustion_refuses_async_account_operations() {
     let storage = MemoryStorage::default();
     installed(&storage, 0);
@@ -685,6 +778,130 @@ fn logout_clears_local_session_before_remote_result() {
     session.logout(true).unwrap();
     assert!(storage.load().unwrap().is_none());
     assert_eq!(session.status().unwrap(), None);
+}
+
+#[test]
+fn authenticated_operation_is_cancelled_when_session_changes_before_completion() {
+    let storage = MemoryStorage::default();
+    installed(&storage, valid_future_expiry());
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let mut api = FakeApi::new();
+    let started = Arc::clone(&api.preferences_started);
+    api.preferences_gate = Some(Arc::clone(&gate));
+    let session = Arc::new(BackendAccountSession::new(api, storage));
+    let worker = {
+        let session = Arc::clone(&session);
+        thread::spawn(move || session.preferences())
+    };
+    while !started.load(Ordering::SeqCst) {
+        thread::yield_now();
+    }
+    session.forget().unwrap();
+    let (lock, ready) = &*gate;
+    *lock.lock().unwrap() = true;
+    ready.notify_all();
+    assert_eq!(worker.join().unwrap(), Err(AccountError::Cancelled));
+}
+
+#[test]
+fn account_request_is_cancelled_when_same_user_signs_in_again_before_completion() {
+    let storage = MemoryStorage::default();
+    installed(&storage, valid_future_expiry());
+    let session = Arc::new(BackendAccountSession::new(FakeApi::new(), storage));
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let started = Arc::new(AtomicBool::new(false));
+    let worker = {
+        let session = Arc::clone(&session);
+        let gate = Arc::clone(&gate);
+        let started = Arc::clone(&started);
+        thread::spawn(move || {
+            request_with_account_session(&FakeApi::new(), &session, true, |_api, _token| {
+                started.store(true, Ordering::SeqCst);
+                let (lock, ready) = &*gate;
+                let mut open = lock.lock().map_err(|_| AccountError::Unavailable)?;
+                while !*open {
+                    open = ready.wait(open).map_err(|_| AccountError::Unavailable)?;
+                }
+                Ok::<_, AccountError>("stale result")
+            })
+        })
+    };
+    while !started.load(Ordering::SeqCst) {
+        thread::yield_now();
+    }
+    session.forget().unwrap();
+    session.sign_in("synthetic-challenge", "123456").unwrap();
+    let (lock, ready) = &*gate;
+    *lock.lock().unwrap() = true;
+    ready.notify_all();
+    assert_eq!(worker.join().unwrap(), Err(AccountError::Cancelled));
+}
+
+#[test]
+fn a_generation_guard_rejects_a_same_user_relogin_before_local_write() {
+    let storage = MemoryStorage::default();
+    installed(&storage, valid_future_expiry());
+    let session = BackendAccountSession::new(FakeApi::new(), storage);
+    let (_, _, generation) = session
+        .credentials_with_generation(None, Some("fixture-user"))
+        .unwrap();
+
+    session.forget().unwrap();
+    session.sign_in("synthetic-challenge", "123456").unwrap();
+
+    let mut wrote = false;
+    assert_eq!(
+        session.with_generation(generation, Some("fixture-user"), || {
+            wrote = true;
+            Ok::<_, AccountError>(())
+        }),
+        Err(AccountError::Cancelled)
+    );
+    assert!(
+        !wrote,
+        "a stale account operation must not reach its local write"
+    );
+
+    let cloud = AccountPreferences {
+        revision: 1,
+        settings: BTreeMap::new(),
+    };
+    assert_eq!(
+        session.put_preferences_with_generation(&cloud, generation, "fixture-user"),
+        Err(AccountError::Cancelled)
+    );
+}
+
+#[test]
+fn a_shared_logout_during_preference_upload_reports_cancellation() {
+    let storage = SharedMemoryStorage::default();
+    installed(&storage.0, valid_future_expiry());
+    let api = FakeApi::new();
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let mut api_for_request = api.clone();
+    api_for_request.put_preferences_gate = Some(Arc::clone(&gate));
+    let session = Arc::new(BackendAccountSession::new(api_for_request, storage.clone()));
+    let (_, _, generation) = session
+        .credentials_with_generation(None, Some("fixture-user"))
+        .unwrap();
+    let cloud = AccountPreferences {
+        revision: 1,
+        settings: BTreeMap::new(),
+    };
+    let request_session = Arc::clone(&session);
+    let request = thread::spawn(move || {
+        request_session.put_preferences_with_generation(&cloud, generation, "fixture-user")
+    });
+    while !api.put_preferences_started.load(Ordering::SeqCst) {
+        thread::yield_now();
+    }
+    storage.clear().unwrap();
+    {
+        let (lock, ready) = &*gate;
+        *lock.lock().unwrap() = true;
+        ready.notify_all();
+    }
+    assert_eq!(request.join().unwrap(), Err(AccountError::Cancelled));
 }
 
 fn serve_once(response: Vec<u8>) -> String {

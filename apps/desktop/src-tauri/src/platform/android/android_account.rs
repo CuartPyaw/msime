@@ -9,10 +9,10 @@ use crate::platform::mobile::mobile_account_helpers::{
     account_profile as shared_account_profile, account_rename as shared_account_rename,
     account_request_code as shared_account_request_code, account_status as shared_account_status,
     call_session, cleanup_stale_snapshot_previews, clear_snapshot_previews,
-    clear_snapshot_previews_after, cloud_dictionary_account_request, replace_pending_snapshot,
-    snapshot_command_error, snapshot_response_without_account, snapshot_text_within_limit,
-    take_pending_snapshot, valid_mobile_haptic_strength, validate_pending_snapshot,
-    PendingSnapshot, SnapshotMetadata,
+    clear_snapshot_previews_after, cloud_dictionary_account_request, prepare_snapshot_directory,
+    replace_pending_snapshot, snapshot_command_error, snapshot_response_without_account,
+    snapshot_text_within_limit, take_pending_snapshot, valid_mobile_haptic_strength,
+    validate_pending_snapshot, PendingSnapshot, SnapshotMetadata,
 };
 use crate::platform::mobile::mobile_account_preferences::{
     frequency_account_preferences, insert_bool, insert_integer, insert_string,
@@ -31,6 +31,9 @@ use msime_client_core::cloud::dictionary::DictionaryKind;
 use msime_client_core::cloud::snapshot_validation::{
     has_keys as snapshot_has_keys, parse_strict_object, required_integer as snapshot_integer,
     required_text as snapshot_text, valid_timestamp as snapshot_timestamp,
+};
+use msime_client_core::edition::{
+    filter_downloaded_account_settings, filter_uploaded_account_settings,
 };
 use msime_client_core::preferences::{
     FrequencyMode, InputScheme, Preferences, PreferencesSnapshot, PreferencesStore,
@@ -168,7 +171,7 @@ pub fn init() -> TauriPlugin<Wry> {
                 .path()
                 .app_data_dir()?
                 .join("files/bootstrap/state/dictionary-snapshots");
-            fs::create_dir_all(&snapshot_directory)?;
+            prepare_snapshot_directory(&snapshot_directory)?;
             cleanup_stale_snapshot_previews(&snapshot_directory)?;
             app.manage(AccountState {
                 session,
@@ -543,7 +546,7 @@ async fn dictionary_snapshot_preview(
     // copy rather than the value the pending entry below is keyed on.
     let file_token = token.clone();
     let (account_id, path, metadata) = tauri::async_runtime::spawn_blocking(move || {
-        fs::create_dir_all(&directory).map_err(|_| AccountError::Unavailable)?;
+        prepare_snapshot_directory(&directory).map_err(|_| AccountError::Unavailable)?;
         let profile = session.profile()?;
         let path = directory.join(format!("download-{file_token}.ndjson"));
         let result = session
@@ -624,7 +627,7 @@ async fn dictionary_snapshot_export(
     let directory = state.snapshot_directory.clone();
     let token = Uuid::new_v4().to_string();
     tauri::async_runtime::spawn_blocking(move || {
-        fs::create_dir_all(&directory).map_err(|_| AccountError::Unavailable)?;
+        prepare_snapshot_directory(&directory).map_err(|_| AccountError::Unavailable)?;
         let path = directory.join(format!("export-{token}.ndjson"));
         let result = session
             .dictionary_snapshot_to_file(&path)
@@ -658,7 +661,7 @@ async fn dictionary_snapshot_restore_preview(
     let directory = state.snapshot_directory.clone();
     let token = Uuid::new_v4().to_string();
     tauri::async_runtime::spawn_blocking(move || {
-        fs::create_dir_all(&directory).map_err(|_| AccountError::Unavailable)?;
+        prepare_snapshot_directory(&directory).map_err(|_| AccountError::Unavailable)?;
         let path = directory.join(format!("restore-{token}.ndjson"));
         let result = fs::write(&path, text.as_bytes())
             .map_err(|_| AccountError::Unavailable)
@@ -696,7 +699,7 @@ async fn dictionary_snapshot_restore(
     let directory = state.snapshot_directory.clone();
     let token = Uuid::new_v4().to_string();
     tauri::async_runtime::spawn_blocking(move || {
-        fs::create_dir_all(&directory).map_err(|_| AccountError::Unavailable)?;
+        prepare_snapshot_directory(&directory).map_err(|_| AccountError::Unavailable)?;
         let path = directory.join(format!("restore-{token}.ndjson"));
         let result = fs::write(&path, text.as_bytes())
             .map_err(|_| AccountError::Unavailable)
@@ -1090,7 +1093,7 @@ pub async fn app_icon_set(
     .map_err(|_| crate::CommandError { code: "app_icon" })?
 }
 
-/// The account value for a scheme, or none for a scheme the account schema does not name yet. Cantonese, Zhuyin and Vietnamese are left out rather than mapped to a neighbour, so the account keeps the scheme it last recorded instead of being overwritten with one the user did not choose.
+/// 方案在账号里的取值；账号 schema 还没有收录的方案为空。粤拼、注音、越南文、藏文和笔画不写，而不是映射到相近的方案，这样账号保留上次记录的方案，不会被改成用户没选过的方案。
 fn account_input_schema(scheme: InputScheme) -> Option<&'static str> {
     match scheme {
         InputScheme::Quanpin => Some("quanpin"),
@@ -1098,7 +1101,11 @@ fn account_input_schema(scheme: InputScheme) -> Option<&'static str> {
         InputScheme::Wubi => Some("wubi"),
         InputScheme::Japanese => Some("japanese"),
         InputScheme::Korean => Some("korean"),
-        InputScheme::Cantonese | InputScheme::Zhuyin | InputScheme::Vietnamese => None,
+        InputScheme::Cantonese
+        | InputScheme::Zhuyin
+        | InputScheme::Vietnamese
+        | InputScheme::Tibetan
+        | InputScheme::Stroke => None,
     }
 }
 
@@ -1326,7 +1333,7 @@ fn apply_input_scheme(
 ) -> Result<(), AccountError> {
     if let Some(value) = string_setting(values, "input.schema")? {
         if supports_schema_field(schema, "input.schema", "string")? {
-            // A scheme this host does not offer (a newer device's Cantonese, Zhuyin or Vietnamese) keeps the local one rather than refusing the whole sync, so the rest of the document still applies.
+            // A scheme this host does not offer (a newer device's Cantonese, Zhuyin, Vietnamese or Stroke) keeps the local one rather than refusing the whole sync, so the rest of the document still applies.
             preferences.scheme = match value.as_str() {
                 "quanpin" => InputScheme::Quanpin,
                 "shuangpin" => InputScheme::Shuangpin,
@@ -1557,17 +1564,23 @@ pub async fn account_preferences_load(
 
 #[tauri::command]
 pub async fn account_preferences_upload(
+    app: tauri::AppHandle,
     state: State<'_, AccountState>,
     store: State<'_, Arc<PreferencesStore>>,
 ) -> Result<AccountPreferences, crate::CommandError> {
     let session = Arc::clone(&state.session);
     let feedback = state.feedback.clone();
     let store = store.inner().clone();
+    let edition = crate::host_edition(&app);
     tauri::async_runtime::spawn_blocking(move || {
+        let (user_id, _, generation) = session.credentials_with_generation(None, None)?;
         let schema = session.preference_schema()?;
         let cloud = session.preferences()?;
         let local = store.load().map_err(|_| AccountError::Storage)?;
-        let values = local_account_preferences(&local, &feedback)?
+        let mut values = local_account_preferences(&local, &feedback)?;
+        // 单方案版本不上传方案，多方案版本只上传本版本提供的方案。
+        filter_uploaded_account_settings(edition, &mut values);
+        let values = values
             .into_iter()
             .filter(|(key, _)| schema.fields.contains_key(key))
             .collect::<BTreeMap<_, _>>();
@@ -1575,7 +1588,7 @@ pub async fn account_preferences_upload(
             return Err(AccountError::Unavailable);
         }
         let merged = merge_account_preferences(&cloud, &values, &schema)?;
-        session.put_preferences(&merged)
+        session.put_preferences_with_generation(&merged, generation, &user_id)
     })
     .await
     .map_err(|_| crate::CommandError {
@@ -1586,22 +1599,27 @@ pub async fn account_preferences_upload(
 
 #[tauri::command]
 pub async fn account_preferences_apply(
+    app: tauri::AppHandle,
     state: State<'_, AccountState>,
     store: State<'_, Arc<PreferencesStore>>,
     user_id: String,
-    preferences: AccountPreferences,
+    mut preferences: AccountPreferences,
 ) -> Result<(), crate::CommandError> {
     let session = Arc::clone(&state.session);
     let feedback = state.feedback.clone();
     let store = store.inner().clone();
+    // 单方案版本不应用账号里的方案，多方案版本把本版本没有的方案当作缺失。
+    filter_downloaded_account_settings(crate::host_edition(&app), &mut preferences.settings);
     tauri::async_runtime::spawn_blocking(move || {
-        session.credentials(None, Some(&user_id))?;
+        let (_, _, generation) = session.credentials_with_generation(None, Some(&user_id))?;
         let schema = session.preference_schema()?;
         let local = store.load().map_err(|_| AccountError::Storage)?;
-        let next = apply_local_account_preferences(&local, &preferences, &schema, &feedback)?;
-        store
-            .save(local.revision, next)
-            .map_err(|_| AccountError::Storage)?;
+        session.with_generation(generation, Some(&user_id), || {
+            let next = apply_local_account_preferences(&local, &preferences, &schema, &feedback)?;
+            store
+                .save(local.revision, next)
+                .map_err(|_| AccountError::Storage)
+        })?;
         Ok::<(), AccountError>(())
     })
     .await
@@ -1783,6 +1801,8 @@ mod tests {
             (InputScheme::Cantonese, None),
             (InputScheme::Zhuyin, None),
             (InputScheme::Vietnamese, None),
+            (InputScheme::Tibetan, None),
+            (InputScheme::Stroke, None),
         ] {
             assert_eq!(account_input_schema(scheme), schema, "{scheme:?}");
         }
@@ -1797,7 +1817,14 @@ mod tests {
                 value_type: "string".into(),
             },
         );
-        for unknown in ["cantonese", "zhuyin", "vietnamese", "esperanto"] {
+        for unknown in [
+            "cantonese",
+            "zhuyin",
+            "vietnamese",
+            "tibetan",
+            "stroke",
+            "esperanto",
+        ] {
             let mut values = frequency_account_preferences(&FrequencyPreferences {
                 mode: FrequencyMode::Linear,
                 trigger_count: 7,

@@ -4,7 +4,6 @@ import {
   communityPublishFields,
   handleCommunityPublishKeyDown,
 } from "./community-publish-validation";
-import { randomUuid } from "../core/random-id";
 import {
   kindLabels,
   type PluginCatalogResult,
@@ -12,25 +11,26 @@ import {
   type PluginPackage,
 } from "../settings/plugins-section";
 import { packKindLabel } from "../settings/plugin-catalog-helpers";
+import { StatusMessage } from "../core/status-message";
 import {
   candidateSkinMegabytes,
   communityNeedsSignIn,
   communityPluginMessage,
+  communityPublishLoginAction,
   runCommunityPublishAction,
 } from "./community-helpers";
 import { useCommunityGallery, type CommunityGalleryClient } from "./community-gallery";
-import { CommunityErrorAlert } from "./community-error-alert";
-import { CommunityDialogActions, CommunityDialogHeader } from "./community-dialog";
+import { CommunityDialogActions, CommunityDialogFrame } from "./community-dialog";
 import { CommunityDetailStatus } from "./community-detail-status";
 import { CommunityDetailHeader } from "./community-detail-header";
 import * as style from "./community-style";
 import { CommunitySearchForm } from "./community-search-form";
 import { CommunityModerationSection } from "./community-moderation-section";
 import { CommunityScopeButtons } from "./community-scope-buttons";
-import { CommunityRightsAgreement } from "./community-rights-agreement";
-import { CommunityInputField } from "./community-input-field";
 import { CommunitySelectField } from "./community-select-field";
-import { CommunityTextareaField } from "./community-textarea-field";
+import { CommunityPublicationMetadataFields } from "./community-publication-metadata-fields";
+import { CommunityPublicationWarning } from "./community-publication-warning";
+import { CommunityNotice } from "./community-notice";
 import {
   CommunityReportSection,
   type CommunityModeration,
@@ -38,11 +38,22 @@ import {
 } from "./community-report";
 import { CommunityCardMetrics } from "./community-card-metrics";
 import { CommunityCardAuthor } from "./community-card-author";
+import { CommunityCard } from "./community-card";
+import { CommunityMetrics } from "./community-metrics";
 import { CommunityInstallButton } from "./community-install-button";
 import { CommunityReplaceConfirmation } from "./community-replace-confirmation";
-import { CommunityBackButton } from "./community-gallery-controls";
 import { CommunityGalleryLoadMore } from "./community-gallery-load-more";
+import { CommunityGalleryFeedback } from "./community-gallery-feedback";
+import { CommunityDetailFrame } from "./community-detail-frame";
 import { ActionButton } from "../core/action-button";
+import { useCommunityPublicationDraft } from "./use-community-publication-draft";
+import { useCommunityClientLifecycle } from "./use-community-client-lifecycle";
+import { useAsyncGeneration } from "../settings/use-async-generation";
+import { CommunityActionNotice } from "./community-action-notice";
+import { CommunityGalleryHeading } from "./community-gallery-heading";
+import { CommunityGalleryGrid } from "./community-gallery-grid";
+import { CommunityPageShell } from "./community-page-shell";
+import { useCommunityInstallState } from "./community-install-state";
 
 /** The kinds a pack can be shared as; effect packs stay local for now. Mirrors `client-core::plugins::community::PUBLISHABLE_KINDS`. */
 export type CommunityPluginKind = Exclude<PluginKind, "effect">;
@@ -136,12 +147,7 @@ function isCommunityKind(kind: PluginKind): kind is CommunityPluginKind {
 
 function CommunityPluginCard({ plugin, open }: { plugin: CommunityPlugin; open: () => void }) {
   return (
-    <button
-      type="button"
-      className={style.card}
-      aria-label={`查看插件 ${plugin.name}`}
-      onClick={open}
-    >
+    <CommunityCard aria-label={`查看插件 ${plugin.name}`} onClick={open}>
       <strong className={style.cardTitle}>{plugin.name}</strong>
       <CommunityCardAuthor
         prefix={kindLabels[plugin.kind]}
@@ -157,7 +163,7 @@ function CommunityPluginCard({ plugin, open }: { plugin: CommunityPlugin; open: 
         ratingCount={plugin.rating_count}
         ratingAverage={plugin.rating_average}
       />
-    </button>
+    </CommunityCard>
   );
 }
 
@@ -228,9 +234,9 @@ export function CommunityPluginsPage({
   } = gallery;
   const [search, setSearch] = useState("");
   const [kind, setKind] = useState<CommunityPluginKind | null>(null);
-  const [installed, setInstalled] = useState(false);
-  const [confirmReplace, setConfirmReplace] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
+  const { installed, setInstalled, confirmReplace, setConfirmReplace, closeDetail } =
+    useCommunityInstallState(actionBusy, closeGalleryDetail);
 
   const changeKind = async (next: CommunityPluginKind | null) => {
     const previous = kindFilter.current;
@@ -243,13 +249,6 @@ export function CommunityPluginsPage({
       kindFilter.current = previous;
       setKind(previous);
     }
-  };
-
-  const closeDetail = () => {
-    if (actionBusy) return;
-    closeGalleryDetail();
-    setInstalled(false);
-    setConfirmReplace(false);
   };
 
   const install = async (replace: boolean) => {
@@ -287,132 +286,122 @@ export function CommunityPluginsPage({
     await requestList(activeSearch, false);
   };
 
-  const errorAlert = error && (
-    <CommunityErrorAlert message={error} signInRequired={signInRequired} onLogin={onLogin} />
-  );
-
   if (selected) {
     return (
-      <div className={style.page}>
-        <CommunityBackButton disabled={actionBusy} onClick={closeDetail} />
-        {errorAlert}
-        <section className={`section ${style.detail}`}>
-          <CommunityDetailHeader
-            title={selected.name}
-            note={[
-              kindLabels[selected.kind],
-              selected.author,
-              selected.version && `v${selected.version}`,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-            owned={selected.owned}
-            moderation={selected.moderation}
-            description={selected.description}
-          />
-          <p className={style.metrics}>
-            {[
-              selected.plugin_id,
-              selected.license && `授权 ${selected.license}`,
-              candidateSkinMegabytes(selected.size),
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
-          <CommunityDetailStatus
-            downloads={selected.downloads}
-            ratingCount={selected.rating_count}
-            ratingAverage={selected.rating_average}
-            myRating={selected.my_rating}
-            detailBusy={detailBusy}
-            actionNotice={actionNotice}
-            loadingText="正在读取插件详情…"
-          />
-          {installed ? (
-            <p role="status" className={style.actionNotice}>
-              已安装到插件目录，可在「我的插件」中选用。
-            </p>
-          ) : (
-            <CommunityInstallButton
-              actionBusy={actionBusy}
-              detailBusy={detailBusy}
-              confirmReplace={confirmReplace}
-              onInstall={() => void install(false)}
-            />
-          )}
-          {confirmReplace && (
-            <CommunityReplaceConfirmation
-              ariaLabel="确认替换插件"
-              message={
-                <>
-                  已安装同 id 的{kindLabels[selected.kind]}“{selected.plugin_id}
-                  ”，安装会整体替换它。
-                </>
-              }
-              actionBusy={actionBusy}
-              onConfirm={() => void install(true)}
-              onCancel={() => setConfirmReplace(false)}
-            />
-          )}
-          <CommunityModerationSection
-            owned={selected.owned}
+      <CommunityDetailFrame
+        backDisabled={actionBusy}
+        onBack={closeDetail}
+        error={error}
+        signInRequired={signInRequired}
+        onLogin={onLogin}
+      >
+        <CommunityDetailHeader
+          title={selected.name}
+          note={[
+            kindLabels[selected.kind],
+            selected.author,
+            selected.version && `v${selected.version}`,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+          owned={selected.owned}
+          moderation={selected.moderation}
+          description={selected.description}
+        />
+        <CommunityMetrics>
+          {[
+            selected.plugin_id,
+            selected.license && `授权 ${selected.license}`,
+            candidateSkinMegabytes(selected.size),
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </CommunityMetrics>
+        <CommunityDetailStatus
+          downloads={selected.downloads}
+          ratingCount={selected.rating_count}
+          ratingAverage={selected.rating_average}
+          myRating={selected.my_rating}
+          detailBusy={detailBusy}
+          actionNotice={actionNotice}
+          loadingText="正在读取插件详情…"
+        />
+        {installed ? (
+          <CommunityActionNotice>已安装到插件目录，可在「我的插件」中选用。</CommunityActionNotice>
+        ) : (
+          <CommunityInstallButton
             actionBusy={actionBusy}
-            ratingDescription="我的评分（安装后可评，可重新选择）"
-            unpublishMessage={`下架后其他用户无法再下载，下载数和评分会清空；已安装的插件会保留。确定下架“${selected.name}”吗？`}
-            confirmUnpublish={confirmUnpublish}
-            onRate={(stars) => void rateSelected(stars)}
-            onRequestUnpublish={() => setConfirmUnpublish(true)}
-            onUnpublish={() =>
-              void unpublishSelected("已下架这个插件；其他用户将无法再下载。已安装的插件会保留。")
-            }
-            onCancelUnpublish={() => setConfirmUnpublish(false)}
-            confirmationActionsClassName={style.confirmationActions}
-            unpublishLabel="下架这个插件"
-            unpublishConfirmLabel="确认下架插件"
+            detailBusy={detailBusy}
+            confirmReplace={confirmReplace}
+            onInstall={() => void install(false)}
           />
-          {!selected.owned && client.report && (
-            <CommunityReportSection actionBusy={actionBusy} onReport={reportSelected} />
-          )}
-        </section>
-      </div>
+        )}
+        {confirmReplace && (
+          <CommunityReplaceConfirmation
+            ariaLabel="确认替换插件"
+            message={
+              <>
+                已安装同 id 的{kindLabels[selected.kind]}“{selected.plugin_id}
+                ”，安装会整体替换它。
+              </>
+            }
+            actionBusy={actionBusy}
+            onConfirm={() => void install(true)}
+            onCancel={() => setConfirmReplace(false)}
+          />
+        )}
+        <CommunityModerationSection
+          owned={selected.owned}
+          actionBusy={actionBusy}
+          ratingDescription="我的评分（安装后可评，可重新选择）"
+          unpublishMessage={`下架后其他用户无法再下载，下载数和评分会清空；已安装的插件会保留。确定下架“${selected.name}”吗？`}
+          confirmUnpublish={confirmUnpublish}
+          onRate={(stars) => void rateSelected(stars)}
+          onRequestUnpublish={() => setConfirmUnpublish(true)}
+          onUnpublish={() =>
+            void unpublishSelected("已下架这个插件；其他用户将无法再下载。已安装的插件会保留。")
+          }
+          onCancelUnpublish={() => setConfirmUnpublish(false)}
+          unpublishLabel="下架这个插件"
+          unpublishConfirmLabel="确认下架插件"
+        />
+        {!selected.owned && client.report && (
+          <CommunityReportSection actionBusy={actionBusy} onReport={reportSelected} />
+        )}
+      </CommunityDetailFrame>
     );
   }
 
   return (
-    <div className={style.page}>
+    <CommunityPageShell>
       <CommunitySearchForm
         label="搜索插件"
         value={search}
         onChange={setSearch}
         onSubmit={() => void requestList(search, false)}
       />
-      <div className={style.heading}>
-        <div className={style.headingBody}>
-          <h2 className={style.headingTitle}>社区插件</h2>
-          <p className={style.headingNote}>
-            音效、音乐、指令表、短语表、辅助码表、单词本与符号集，安装后在「我的插件」中选用
-          </p>
-        </div>
-        <div className={style.headingActions}>
-          <CommunityScopeButtons
-            ariaLabel="插件范围"
-            mineOnly={mineOnly}
-            allLabel="全部插件"
-            mineLabel="我的作品"
-            onMineOnlyChange={(nextMineOnly) => {
-              setMineOnly(nextMineOnly);
-              void requestList(activeSearch, false, nextMineOnly);
-            }}
+      <CommunityGalleryHeading
+        title="社区插件"
+        note="音效、音乐、指令表、短语表、辅助码表、单词本与符号集，安装后在「我的插件」中选用"
+      >
+        <CommunityScopeButtons
+          ariaLabel="插件范围"
+          mineOnly={mineOnly}
+          allLabel="全部插件"
+          mineLabel="我的作品"
+          onMineOnlyChange={(nextMineOnly) => {
+            setMineOnly(nextMineOnly);
+            void requestList(activeSearch, false, nextMineOnly);
+          }}
+        />
+        {localPlugins && (
+          <ActionButton
+            action={() => setPublishOpen(true)}
+            className="primary"
+            label="发布我的插件"
           />
-          {localPlugins && (
-            <ActionButton
-              action={() => setPublishOpen(true)}
-              className="primary"
-              label="发布我的插件"
-            />
-          )}
-        </div>
-      </div>
+        )}
+      </CommunityGalleryHeading>
       <div className={style.kindFilter} role="group" aria-label="插件类型">
         <ActionButton
           action={() => changeKind(null)}
@@ -430,35 +419,38 @@ export function CommunityPluginsPage({
           />
         ))}
       </div>
-      {errorAlert}
-      {actionNotice && (
-        <p role="status" className={style.actionNotice}>
-          {actionNotice}
-        </p>
-      )}
-      {!listBusy && !error && plugins.length === 0 && hasMore && (
-        <p className={style.notice}>
-          {activeSearch || kind
-            ? "前面的插件这台设备都不能安装，点「加载更多」继续查找。"
-            : "前面的插件这台设备都不能安装，点「加载更多」查看更早发布的插件。"}
-        </p>
-      )}
-      {!listBusy && !error && plugins.length === 0 && !hasMore && (
-        <p className={style.notice}>
-          {mineOnly
-            ? "你还没有发布过插件。"
-            : activeSearch || kind
-              ? "没有匹配的插件。"
-              : localPlugins
-                ? "社区里还没有插件，安装或制作插件后可以点「发布我的插件」分享出来。"
-                : "社区里还没有插件。"}
-        </p>
-      )}
-      <div className={style.grid}>
+      <CommunityGalleryFeedback
+        error={error}
+        signInRequired={signInRequired}
+        onLogin={onLogin}
+        notice={actionNotice && <CommunityActionNotice>{actionNotice}</CommunityActionNotice>}
+        empty={
+          !listBusy && !error && plugins.length === 0 ? (
+            hasMore ? (
+              <CommunityNotice>
+                {activeSearch || kind
+                  ? "前面的插件这台设备都不能安装，点「加载更多」继续查找。"
+                  : "前面的插件这台设备都不能安装，点「加载更多」查看更早发布的插件。"}
+              </CommunityNotice>
+            ) : (
+              <CommunityNotice>
+                {mineOnly
+                  ? "你还没有发布过插件。"
+                  : activeSearch || kind
+                    ? "没有匹配的插件。"
+                    : localPlugins
+                      ? "社区里还没有插件，安装或制作插件后可以点「发布我的插件」分享出来。"
+                      : "社区里还没有插件。"}
+              </CommunityNotice>
+            )
+          ) : undefined
+        }
+      />
+      <CommunityGalleryGrid>
         {plugins.map((plugin) => (
           <CommunityPluginCard key={plugin.id} plugin={plugin} open={() => open(plugin)} />
         ))}
-      </div>
+      </CommunityGalleryGrid>
       <CommunityGalleryLoadMore
         hasMore={hasMore}
         busy={listBusy}
@@ -471,16 +463,10 @@ export function CommunityPluginsPage({
           localPlugins={localPlugins}
           onClose={() => setPublishOpen(false)}
           onPublished={publishDone}
-          onLogin={
-            onLogin &&
-            (() => {
-              setPublishOpen(false);
-              onLogin();
-            })
-          }
+          onLogin={communityPublishLoginAction(() => setPublishOpen(false), onLogin)}
         />
       )}
-    </div>
+    </CommunityPageShell>
   );
 }
 
@@ -521,26 +507,31 @@ export function CommunityPluginPublishDialog({
   const [pack, setPack] = useState<CommunityPluginPackPreview | null>(null);
   const [packError, setPackError] = useState("");
   const [packLoading, setPackLoading] = useState(false);
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [agreed, setAgreed] = useState(false);
+  const {
+    name,
+    description,
+    agreed,
+    publicationId,
+    setName,
+    setDescription,
+    setAgreed,
+    onNameChange,
+    onDescriptionChange,
+    onAgreedChange,
+    resetPublication,
+  } = useCommunityPublicationDraft();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [signInRequired, setSignInRequired] = useState(false);
-  const [publicationId, setPublicationId] = useState(randomUuid);
-  const clientGeneration = useRef(0);
-  const packGeneration = useRef(0);
-  const actionRunning = useRef(false);
+  const { clientGeneration, actionRunning } = useCommunityClientLifecycle(client, localPlugins);
 
   useEffect(() => {
-    const generation = ++clientGeneration.current;
-    let active = true;
-    actionRunning.current = false;
+    const generation = clientGeneration.current;
     setBusy(false);
     setOptionsLoading(true);
     void localPlugins()
       .then((catalog) => {
-        if (!active) return;
+        if (generation !== clientGeneration.current) return;
         const loaded: LocalPluginOption[] = [];
         for (const item of catalog.packages) {
           if (item.builtin || !isCommunityKind(item.kind)) continue;
@@ -558,28 +549,25 @@ export function CommunityPluginPublishDialog({
         );
       })
       .catch(() => {
-        if (active) setError("读取本地插件失败，请重试。");
+        if (generation === clientGeneration.current) setError("读取本地插件失败，请重试。");
       })
       .finally(() => {
-        if (active) setOptionsLoading(false);
+        if (generation === clientGeneration.current) setOptionsLoading(false);
       });
-    return () => {
-      active = false;
-      if (generation === clientGeneration.current) clientGeneration.current++;
-    };
-  }, [client, localPlugins]);
+  }, [client, localPlugins, clientGeneration]);
 
   const chosen = useMemo(
     () => options.find((item) => item.key === selection) ?? null,
     [options, selection],
   );
+  const packGeneration = useAsyncGeneration(chosen);
 
   useEffect(() => {
-    const generation = ++packGeneration.current;
+    const generation = packGeneration.current;
     setPack(null);
     setPackError("");
     setAgreed(false);
-    setPublicationId(randomUuid());
+    resetPublication();
     if (!chosen) {
       setPackLoading(false);
       return;
@@ -600,10 +588,7 @@ export function CommunityPluginPublishDialog({
       .finally(() => {
         if (generation === packGeneration.current) setPackLoading(false);
       });
-    return () => {
-      packGeneration.current++;
-    };
-  }, [client, chosen]);
+  }, [client, chosen, packGeneration]);
 
   const { normalizedName, normalizedDescription, nameValid, descriptionValid } =
     communityPublishFields(name, description);
@@ -636,107 +621,84 @@ export function CommunityPluginPublishDialog({
   };
 
   return (
-    <div className={style.backdrop}>
-      <div
-        className={style.dialog}
-        role="dialog"
-        aria-modal="true"
-        aria-label="发布插件"
-        onKeyDown={(event) => handleCommunityPublishKeyDown(event, () => void submit())}
-      >
-        <CommunityDialogHeader
-          title="发布插件"
-          titleClassName={style.dialogTitle}
-          busy={busy}
-          onClose={onClose}
-        />
-        {error && (
-          <CommunityErrorAlert message={error} signInRequired={signInRequired} onLogin={onLogin} />
+    <CommunityDialogFrame
+      title="发布插件"
+      titleClassName={style.dialogTitle}
+      ariaLabel="发布插件"
+      busy={busy}
+      onClose={onClose}
+      error={error}
+      signInRequired={signInRequired}
+      onLogin={onLogin}
+      onKeyDown={(event) => handleCommunityPublishKeyDown(event, () => void submit())}
+    >
+      {optionsLoading && <StatusMessage role="status">正在读取本地插件…</StatusMessage>}
+      {!optionsLoading && options.length === 0 && (
+        <CommunityNotice>
+          还没有可发布的插件。内置插件和特效包不能发布，请先在「我的插件」中导入自己的音效包、音乐包、指令表、短语表、辅助码表、单词本或符号集。
+        </CommunityNotice>
+      )}
+      {options.length > 0 && (
+        <CommunitySelectField
+          label="发布插件"
+          ariaLabel="发布插件"
+          value={selection}
+          disabled={busy}
+          onChange={setSelection}
+        >
+          {options.map((item) => (
+            <option key={item.key} value={item.key}>
+              {item.label} · {item.name === item.id ? item.id : `${item.name}（${item.id}）`}
+            </option>
+          ))}
+        </CommunitySelectField>
+      )}
+      {packLoading && <StatusMessage role="status">正在检查插件…</StatusMessage>}
+      {packError && (
+        <div className={style.confirmation} role="alert">
+          <p>{packError}</p>
+        </div>
+      )}
+      {pack && (
+        <>
+          <CommunityMetrics>
+            {[
+              `v${pack.version}`,
+              pack.license && `授权 ${pack.license}`,
+              `${pack.fileCount} 个文件`,
+              `${candidateSkinMegabytes(pack.size)} / ${archiveLimit}`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </CommunityMetrics>
+          <CommunityPublicationMetadataFields
+            name={name}
+            description={description}
+            agreed={agreed}
+            busy={busy}
+            nameLabel="名称"
+            nameAriaLabel="发布插件名称"
+            descriptionLabel="说明"
+            descriptionAriaLabel="发布插件说明"
+            agreementText="我拥有插件中音频与文字的发布权利，并同意其他用户按包内授权免费下载使用"
+            agreementClassName={style.agreementBox}
+            onNameChange={onNameChange}
+            onDescriptionChange={onDescriptionChange}
+            onAgreedChange={onAgreedChange}
+          />
+          <CommunityPublicationWarning>{publishWarning}</CommunityPublicationWarning>
+        </>
+      )}
+      <CommunityDialogActions busy={busy} onClose={onClose}>
+        {!packError && (
+          <ActionButton
+            action={() => submit()}
+            className="primary"
+            disabled={busy || !ready}
+            label={busy ? "正在发布…" : "公开发布"}
+          />
         )}
-        {optionsLoading && <p role="status">正在读取本地插件…</p>}
-        {!optionsLoading && options.length === 0 && (
-          <p className={style.notice}>
-            还没有可发布的插件。内置插件和特效包不能发布，请先在「我的插件」中导入自己的音效包、音乐包、指令表、短语表、辅助码表、单词本或符号集。
-          </p>
-        )}
-        {options.length > 0 && (
-          <CommunitySelectField
-            label="发布插件"
-            ariaLabel="发布插件"
-            value={selection}
-            disabled={busy}
-            onChange={setSelection}
-          >
-            {options.map((item) => (
-              <option key={item.key} value={item.key}>
-                {item.label} · {item.name === item.id ? item.id : `${item.name}（${item.id}）`}
-              </option>
-            ))}
-          </CommunitySelectField>
-        )}
-        {packLoading && <p role="status">正在检查插件…</p>}
-        {packError && (
-          <div className={style.confirmation} role="alert">
-            <p>{packError}</p>
-          </div>
-        )}
-        {pack && (
-          <>
-            <p className={style.metrics}>
-              {[
-                `v${pack.version}`,
-                pack.license && `授权 ${pack.license}`,
-                `${pack.fileCount} 个文件`,
-                `${candidateSkinMegabytes(pack.size)} / ${archiveLimit}`,
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </p>
-            <CommunityInputField
-              label="名称"
-              ariaLabel="发布插件名称"
-              maxLength={32}
-              value={name}
-              disabled={busy}
-              onChange={(value) => {
-                setPublicationId(randomUuid());
-                setName(boundedGraphemes(value, 32));
-              }}
-            />
-            <CommunityTextareaField
-              label="说明"
-              ariaLabel="发布插件说明"
-              maxLength={280}
-              rows={4}
-              value={description}
-              disabled={busy}
-              onChange={(value) => {
-                setPublicationId(randomUuid());
-                setDescription(value);
-              }}
-            />
-            <CommunityRightsAgreement
-              agreementText="我拥有插件中音频与文字的发布权利，并同意其他用户按包内授权免费下载使用"
-              ariaLabel="确认拥有发布内容权利"
-              checked={agreed}
-              disabled={busy}
-              checkboxClassName={style.agreementBox}
-              onChange={setAgreed}
-            />
-            <p className={style.warning}>{publishWarning}</p>
-          </>
-        )}
-        <CommunityDialogActions busy={busy} onClose={onClose}>
-          {!packError && (
-            <ActionButton
-              action={() => submit()}
-              className="primary"
-              disabled={busy || !ready}
-              label={busy ? "正在发布…" : "公开发布"}
-            />
-          )}
-        </CommunityDialogActions>
-      </div>
-    </div>
+      </CommunityDialogActions>
+    </CommunityDialogFrame>
   );
 }

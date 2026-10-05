@@ -113,6 +113,17 @@ fn snapshot_restore_preflight_rejects_text_larger_than_native_limit() {
     assert!(!crate::platform::account_helpers::snapshot_text_within_limit(512 * 1024 * 1024 + 1));
 }
 
+#[test]
+fn external_url_allows_encoded_query_parameters() {
+    assert!(super::external_url_is_safe(
+        "https://github.com/metasequoiaime/msime/issues/new?title=bug&body=synthetic%20report"
+    ));
+    assert!(!super::external_url_is_safe("javascript:alert(1)"));
+    assert!(!super::external_url_is_safe(
+        "https://example.com/path|whoami"
+    ));
+}
+
 #[cfg(unix)]
 #[test]
 fn runtime_options_reject_a_symlinked_file() {
@@ -226,13 +237,13 @@ fn runtime_options_reader_rejects_oversized_documents_without_allocating_them() 
 }
 
 #[test]
-fn cantonese_and_zhuyin_are_offered_only_with_their_installed_dictionary() {
+fn cantonese_zhuyin_and_stroke_are_offered_only_with_their_installed_dictionary() {
     use msime_client_core::host_surface::{HostCapabilities, HostPlatform};
     use msime_client_core::preferences::InputScheme;
     let root = tempfile::tempdir().unwrap();
     let directory = root.path().join("language-dictionaries");
     std::fs::create_dir_all(&directory).unwrap();
-    std::fs::write(directory.join("zhuyin.db"), b"sqlite").unwrap();
+    std::fs::write(directory.join("msime-zhuyin.db"), b"sqlite").unwrap();
     // Every host narrows the schemes the same way.
     for platform in [
         HostPlatform::Macos,
@@ -241,9 +252,11 @@ fn cantonese_and_zhuyin_are_offered_only_with_their_installed_dictionary() {
         HostPlatform::Android,
         HostPlatform::Ios,
     ] {
-        let cantonese = directory.join("cantonese.db");
-        if cantonese.exists() {
-            std::fs::remove_file(&cantonese).unwrap();
+        for name in ["msime-cantonese.db", "msime-stroke.db"] {
+            let dictionary = directory.join(name);
+            if dictionary.exists() {
+                std::fs::remove_file(&dictionary).unwrap();
+            }
         }
         let offered = |host_options: Option<&serde_json::Value>| {
             let mut capabilities = HostCapabilities::for_platform(platform);
@@ -257,6 +270,7 @@ fn cantonese_and_zhuyin_are_offered_only_with_their_installed_dictionary() {
             InputScheme::Japanese,
             InputScheme::Korean,
             InputScheme::Vietnamese,
+            InputScheme::Tibetan,
         ];
         assert_eq!(offered(None), without_both, "{platform:?}");
         assert_eq!(
@@ -276,7 +290,11 @@ fn cantonese_and_zhuyin_are_offered_only_with_their_installed_dictionary() {
         let mut with_zhuyin = without_both.clone();
         with_zhuyin.insert(5, InputScheme::Zhuyin);
         assert_eq!(offered(Some(&named)), with_zhuyin, "{platform:?}");
-        std::fs::write(directory.join("cantonese.db"), b"sqlite").unwrap();
+        std::fs::write(directory.join("msime-cantonese.db"), b"sqlite").unwrap();
+        let mut without_stroke = HostCapabilities::for_platform(platform).input_schemes;
+        without_stroke.retain(|scheme| *scheme != InputScheme::Stroke);
+        assert_eq!(offered(Some(&named)), without_stroke, "{platform:?}");
+        std::fs::write(directory.join("msime-stroke.db"), b"sqlite").unwrap();
         assert_eq!(
             offered(Some(&named)),
             HostCapabilities::for_platform(platform).input_schemes,
@@ -289,6 +307,31 @@ fn cantonese_and_zhuyin_are_offered_only_with_their_installed_dictionary() {
     super::drop_uninstalled_language_schemes(&mut capabilities, Some(&resources_only), false);
     assert!(!capabilities.input_schemes.contains(&InputScheme::Cantonese));
     assert!(!capabilities.input_schemes.contains(&InputScheme::Zhuyin));
+    assert!(!capabilities.input_schemes.contains(&InputScheme::Stroke));
+}
+
+#[test]
+fn macos_offers_only_the_language_schemes_its_download_can_install() {
+    use msime_client_core::host_surface::{HostCapabilities, HostPlatform};
+    use msime_client_core::preferences::InputScheme;
+    use msime_client_core::resource_packs::ResourcePack;
+    let mut capabilities = HostCapabilities::for_platform(HostPlatform::Macos);
+    super::drop_unpinned_language_schemes(&mut capabilities);
+    let pinned = ResourcePack::LanguageDictionaries.schemes();
+    for (scheme, name) in [
+        (InputScheme::Cantonese, "cantonese"),
+        (InputScheme::Zhuyin, "zhuyin"),
+        (InputScheme::Stroke, "stroke"),
+    ] {
+        assert_eq!(
+            capabilities.input_schemes.contains(&scheme),
+            pinned.contains(&name),
+            "{name}"
+        );
+    }
+    // 其余方案不需要语言词库，不受影响。
+    assert!(capabilities.input_schemes.contains(&InputScheme::Quanpin));
+    assert!(capabilities.input_schemes.contains(&InputScheme::Tibetan));
 }
 
 #[test]
@@ -298,7 +341,7 @@ fn windows_finds_language_dictionaries_beside_resources_its_options_file_does_no
     let root = tempfile::tempdir().unwrap();
     let directory = root.path().join("language-dictionaries");
     std::fs::create_dir_all(&directory).unwrap();
-    std::fs::write(directory.join("cantonese.db"), b"sqlite").unwrap();
+    std::fs::write(directory.join("msime-cantonese.db"), b"sqlite").unwrap();
     let offered = |host_options: &serde_json::Value| {
         let mut capabilities = HostCapabilities::for_platform(HostPlatform::Windows);
         super::drop_uninstalled_language_schemes(&mut capabilities, Some(host_options), true);
@@ -307,7 +350,12 @@ fn windows_finds_language_dictionaries_beside_resources_its_options_file_does_no
     let schemes = offered(&serde_json::json!({ "resources": root.path().join("resources") }));
     assert!(schemes.contains(&InputScheme::Cantonese));
     assert!(!schemes.contains(&InputScheme::Zhuyin));
+    assert!(!schemes.contains(&InputScheme::Stroke));
     assert!(schemes.contains(&InputScheme::Vietnamese));
+    assert!(schemes.contains(&InputScheme::Tibetan));
+    std::fs::write(directory.join("msime-stroke.db"), b"sqlite").unwrap();
+    let schemes = offered(&serde_json::json!({ "resources": root.path().join("resources") }));
+    assert!(schemes.contains(&InputScheme::Stroke));
     // A relative resources directory is not trusted to locate the installed dictionaries.
     let relative = offered(&serde_json::json!({ "resources": "resources" }));
     assert!(!relative.contains(&InputScheme::Cantonese));
@@ -319,6 +367,7 @@ fn windows_finds_language_dictionaries_beside_resources_its_options_file_does_no
         "language_dictionaries": elsewhere,
     }));
     assert!(!named.contains(&InputScheme::Cantonese));
+    assert!(!named.contains(&InputScheme::Stroke));
 }
 
 #[test]
@@ -394,27 +443,22 @@ fn windows_restart_payload_is_exact_utf16_without_terminator() {
 
 #[test]
 fn linux_restart_targets_the_running_input_method_framework() {
+    let command = |fcitx5_running, addon| {
+        let (program, arguments) = super::linux_input_method_restart_command(fcitx5_running, addon);
+        (program, arguments.join(" "))
+    };
     assert_eq!(
-        super::linux_input_method_restart_command(true),
+        command(true, "msime"),
         (
             "gdbus",
-            &[
-                "call",
-                "--session",
-                "--dest",
-                "org.fcitx.Fcitx5",
-                "--object-path",
-                "/controller",
-                "--method",
-                "org.fcitx.Fcitx.Controller1.ReloadAddonConfig",
-                "'msime'",
-            ][..]
+            "call --session --dest org.fcitx.Fcitx5 --object-path /controller --method org.fcitx.Fcitx.Controller1.ReloadAddonConfig 'msime'".to_owned()
         )
     );
-    assert_eq!(
-        super::linux_input_method_restart_command(false),
-        ("ibus", &["restart"][..])
-    );
+    // 五笔版只重置自己的插件。
+    assert!(command(true, "msime-wubi")
+        .1
+        .ends_with("ReloadAddonConfig 'msime-wubi'"));
+    assert_eq!(command(false, "msime"), ("ibus", "restart".to_owned()));
 }
 
 #[test]
@@ -422,6 +466,7 @@ fn external_links_require_clean_https_urls() {
     for url in [
         "https://example.com/help",
         "https://updates.example.com/v1?channel=stable",
+        "https://example.com/a&b",
     ] {
         assert!(super::external_url_is_safe(url));
     }
@@ -432,7 +477,6 @@ fn external_links_require_clean_https_urls() {
         "https://example.com/help path",
         "https://user:secret@example.com/help",
         "https://example.com:bad/help",
-        "https://example.com/a&b",
         "https://example.com/\"quoted\"",
         "https://example.com/\\escape",
     ] {
@@ -507,7 +551,7 @@ fn ios_first_run_host_options_name_the_bundled_language_dictionaries() {
     let empty = super::ios_host_options_document(None, &resources, bundle.path())
         .expect("first-run options");
     assert!(empty.get("language_dictionaries").is_none());
-    std::fs::write(dictionaries.join("zhuyin.db"), b"fixture").expect("zhuyin.db");
+    std::fs::write(dictionaries.join("msime-zhuyin.db"), b"fixture").expect("msime-zhuyin.db");
     let document = super::ios_host_options_document(None, &resources, bundle.path())
         .expect("first-run options");
     assert_eq!(
@@ -1000,6 +1044,8 @@ fn dictionary_mutations_quiesce_but_reads_do_not() {
     ));
 }
 
+// The bundle id comes from the edition's macOS identity, which only the macOS build compiles.
+#[cfg(target_os = "macos")]
 #[test]
 fn macos_restart_targets_the_input_method_bundle() {
     assert_eq!(
@@ -2483,4 +2529,54 @@ fn sway_container_owner_is_read_from_the_matching_view() {
     // A container without a pid, or one that is not in the tree, has no owner to compare against.
     assert_eq!(crate::panel_input::sway_pid_for_container(&tree, 2), None);
     assert_eq!(crate::panel_input::sway_pid_for_container(&tree, 9), None);
+}
+
+/// 不提供手写的版本（日文、越南文和藏文版）不打开手写面板和手写设置页，别的界面照常；提供中文方案的版本什么都不少。
+#[test]
+fn editions_without_handwriting_open_no_handwriting_surface() {
+    use msime_client_core::edition::Edition;
+    use msime_client_core::host_surface::{SettingsCategory, SurfaceRoute};
+
+    let handwriting = [
+        SurfaceRoute::Handwriting,
+        SurfaceRoute::Settings(Some(SettingsCategory::Handwriting)),
+    ];
+    let others = [
+        SurfaceRoute::Keyboard,
+        SurfaceRoute::Emoji,
+        SurfaceRoute::Voice,
+        SurfaceRoute::Settings(None),
+        SurfaceRoute::Settings(Some(SettingsCategory::Input)),
+    ];
+    for edition in Edition::all() {
+        for route in handwriting {
+            assert_eq!(
+                super::edition_offers_route(edition, route),
+                edition.features.handwriting,
+                "{} {route:?}",
+                edition.id
+            );
+        }
+        for route in others {
+            assert!(
+                super::edition_offers_route(edition, route),
+                "{} {route:?}",
+                edition.id
+            );
+        }
+    }
+    for id in ["japanese", "vietnamese", "tibetan"] {
+        let edition = Edition::by_id(id).unwrap();
+        assert!(
+            !super::edition_offers_route(edition, SurfaceRoute::Handwriting),
+            "{id}"
+        );
+    }
+    for id in ["full", "pinyin", "wubi"] {
+        let edition = Edition::by_id(id).unwrap();
+        assert!(
+            super::edition_offers_route(edition, SurfaceRoute::Handwriting),
+            "{id}"
+        );
+    }
 }

@@ -29,7 +29,7 @@ final class VoiceTextHandoffStore: @unchecked Sendable {
   static let lifetime: TimeInterval = 600
 
   static var defaultDirectory: URL? {
-    let group = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.app.msime.ios")
+    let group = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: MSIMEAppEdition.appGroupIdentifier)
     #if DEBUG && targetEnvironment(simulator)
     let arguments = ProcessInfo.processInfo.arguments
     if let index = arguments.firstIndex(of: "-voiceHandoffTestID"), index + 1 < arguments.count,
@@ -45,17 +45,7 @@ final class VoiceTextHandoffStore: @unchecked Sendable {
   }
 
   private func rejectSymlinkAncestors(_ path: URL) throws {
-    var current = path.standardizedFileURL
-    while current.path != "/" {
-      if current.path == "/var" || current.path == "/tmp" { break }
-      var status = stat()
-      if lstat(current.path, &status) == 0 {
-        guard status.st_mode & S_IFMT != S_IFLNK else { throw Failure.unavailable }
-      } else if errno != ENOENT {
-        throw Failure.unavailable
-      }
-      current = current.deletingLastPathComponent()
-    }
+    guard !SafePath.hasRefusedSymbolicLink(path) else { throw Failure.unavailable }
   }
 
   private func rejectSymlinkFile(_ path: URL) throws {

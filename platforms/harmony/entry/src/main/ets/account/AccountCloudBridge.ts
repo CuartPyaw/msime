@@ -85,6 +85,7 @@ const MAX_COMMUNITY_RESOURCE_PAGE_BYTES = 48 * 1024 * 1024;
 const MAX_COMMUNITY_RESOURCE_DETAIL_BYTES = 3 * 1024 * 1024;
 const MAX_SESSION_SECONDS = 86_400 * 30;
 const MAX_SESSION_MILLISECONDS = MAX_SESSION_SECONDS * 1000;
+const MAX_SESSION_BYTES = 64 * 1024;
 const MAX_SEARCH = 256;
 
 /**
@@ -109,6 +110,12 @@ const MAX_COMMUNITY_SEARCH = 128;
 export const MAX_DICTIONARY_EXPORT_BYTES = 384 * 1024 * 1024;
 export const MAX_SNAPSHOT_DOWNLOAD_BYTES = 512 * 1024 * 1024;
 
+export function parseResponseContentLength(raw: string): number {
+  if (!/^[0-9]+$/.test(raw)) return -1;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) ? parsed : -1;
+}
+
 /**
  * A publication id, checked before it is put in a path.
  *
@@ -119,6 +126,7 @@ export const MAX_SNAPSHOT_DOWNLOAD_BYTES = 512 * 1024 * 1024;
 function validUuid(value: unknown): value is string {
   return (
     typeof value === "string" &&
+    value.toLowerCase() !== "00000000-0000-0000-0000-000000000000" &&
     /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(value)
   );
 }
@@ -691,8 +699,7 @@ function validateSession(value: unknown): value is Session {
     validToken(session.access_token) &&
     validToken(session.refresh_token) &&
     session.token_type === "Bearer" &&
-    typeof session.expires_at === "number" &&
-    Number.isFinite(session.expires_at) &&
+    safeInteger(session.expires_at) &&
     session.expires_at <= Date.now() + MAX_SESSION_MILLISECONDS &&
     validateUser(session.user)
   );
@@ -703,8 +710,7 @@ function sessionFromTokens(value: Action): Session | null {
     !validToken(value.access_token) ||
     !validToken(value.refresh_token) ||
     value.token_type !== "Bearer" ||
-    typeof value.expires_in !== "number" ||
-    !Number.isFinite(value.expires_in) ||
+    !safeInteger(value.expires_in) ||
     value.expires_in <= 0 ||
     value.expires_in > MAX_SESSION_SECONDS ||
     !validateUser(value.user)
@@ -731,7 +737,7 @@ export class AccountCloudBridge {
     this.transport = transport;
     this.store = store;
     const saved = store.load();
-    if (saved !== null) {
+    if (saved !== null && utf8Length(saved) <= MAX_SESSION_BYTES) {
       try {
         const value: unknown = JSON.parse(saved);
         if (validateSession(value)) this.session = value;
@@ -739,6 +745,8 @@ export class AccountCloudBridge {
       } catch {
         store.clear();
       }
+    } else if (saved !== null) {
+      store.clear();
     }
   }
 
@@ -801,6 +809,11 @@ export class AccountCloudBridge {
   currentUserId(): string | null {
     const session = this.session;
     return session?.user.id ?? null;
+  }
+
+  /** A marker for native operations that may write after several asynchronous account calls. */
+  sessionGeneration(): number {
+    return this.generation;
   }
 
   /**
@@ -989,8 +1002,8 @@ export class AccountCloudBridge {
       // Under the lock, so a refresh the keyboard is in the middle of cannot write the previous session over this one.
       return await this.locked(async (): Promise<string> => {
         if (generation !== this.generation) return error("account_cancelled");
-        this.session = session;
         this.store.save(JSON.stringify(session));
+        this.session = session;
         return success({ user: session.user });
       });
     } catch {
@@ -1555,7 +1568,7 @@ export class AccountCloudBridge {
       if (parsed.ok !== true) return catalog;
       const value = parsed.value as Action;
       const revision = value.revision;
-      if (typeof revision !== "number" || !Number.isInteger(revision) || revision < 0) {
+      if (!safeInteger(revision) || revision < 0) {
         return error("community_unavailable");
       }
       dictionaryRevision = revision;
@@ -1906,7 +1919,7 @@ export class AccountCloudBridge {
 
   private storedSession(): Session | null {
     const saved: string | null = this.store.load();
-    if (saved === null) return null;
+    if (saved === null || utf8Length(saved) > MAX_SESSION_BYTES) return null;
     try {
       const value: unknown = JSON.parse(saved);
       return validateSession(value) ? value : null;

@@ -8,14 +8,10 @@ protocol BackendSessionAPI: Sendable {
 }
 extension BackendAccountClient: BackendSessionAPI {}
 
-// Check every existing directory component before an operation can create or
-// open a shared account file. `/var` and `/tmp` are system aliases on macOS;
-// other symlinks would let a user-data path escape its intended container.
+// 在任何操作创建或打开共享账号文件之前，检查每一级已存在的目录：除了 `SafePath` 放行的受信任系统别名外不能有符号链接，并且每一级已存在的路径都必须是目录。
 private func backendDirectoryPathIsSafe(_ url: URL) -> Bool {
-  guard url.isFileURL, url.path.hasPrefix("/") else { return false }
+  guard url.isFileURL, url.path.hasPrefix("/"), !SafePath.hasRefusedSymbolicLink(url) else { return false }
   var current = URL(fileURLWithPath: "/")
-  var sawPrefixAlias = false
-  var sawRealComponent = false
   for component in url.standardizedFileURL.pathComponents.dropFirst() {
     current.appendPathComponent(component, isDirectory: true)
     var info = stat()
@@ -23,15 +19,9 @@ private func backendDirectoryPathIsSafe(_ url: URL) -> Bool {
       if errno == ENOENT { continue }
       return false
     }
-    if (info.st_mode & S_IFMT) == S_IFLNK {
-      let systemAlias = !sawRealComponent && !sawPrefixAlias &&
-        (current.path == "/var" || current.path == "/tmp")
-      if !systemAlias { return false }
-      sawPrefixAlias = true
-    } else {
-      guard (info.st_mode & S_IFMT) == S_IFDIR else { return false }
-      sawRealComponent = true
-    }
+    // 走到这里还可能出现的链接，只有 `SafePath` 已经信任的系统别名。
+    let type = info.st_mode & S_IFMT
+    guard type == S_IFLNK || type == S_IFDIR else { return false }
   }
   return true
 }
@@ -63,7 +53,7 @@ protocol BackendSessionStorage: Sendable {
 struct BackendKeychain: BackendSessionStorage {
   /// On iOS the session lives in the App Group's keychain access group, which the app and the keyboard extension both already hold as an entitlement, so the keyboard can reach the signed-in account (cloud clipboard) without the token ever being written to a file. Other platforms keep the item in the process's default access group.
   #if os(iOS)
-  static let defaultAccessGroup: String? = "group.app.msime.ios"
+  static let defaultAccessGroup: String? = MSIMEAppEdition.appGroupIdentifier
   #else
   static let defaultAccessGroup: String? = nil
   #endif
@@ -124,9 +114,13 @@ struct BackendKeychain: BackendSessionStorage {
 struct BackendDesktopSessionFile: BackendSessionStorage {
   static let fileName = "account-session.json"
   static let maximumBytes = 64 * 1024
+  /// 状态目录随版本而变：输入法的 Info.plist 声明了版本（`MSIMEEdition`）时取它的 `MSIMESettingsBundleIdentifier`，否则是 full 的 `app.msime.macos`。与 platforms/macos/src/core/EditionIdentity.h 一致。
   static var standardDirectory: URL? {
-    FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
-      .appendingPathComponent("app.msime.macos", isDirectory: true)
+    let edition = Bundle.main.object(forInfoDictionaryKey: "MSIMEEdition") as? String
+    let declared = edition.map { !$0.isEmpty && $0 != "full" } ?? false
+    let identifier = declared ? (Bundle.main.object(forInfoDictionaryKey: "MSIMESettingsBundleIdentifier") as? String ?? "app.msime.macos") : "app.msime.macos"
+    return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+      .appendingPathComponent(identifier, isDirectory: true)
   }
   static var refreshLock: BackendFileRefreshLock {
     BackendFileRefreshLock(url: standardDirectory?.appendingPathComponent("account-refresh.lock", isDirectory: false))
@@ -207,7 +201,7 @@ struct BackendFileRefreshLock: BackendRefreshLock {
   /// iOS: the App Group container, opened by both the app and the keyboard extension.
   static var appGroup: BackendFileRefreshLock {
     BackendFileRefreshLock(url: FileManager.default
-      .containerURL(forSecurityApplicationGroupIdentifier: "group.app.msime.ios")?
+      .containerURL(forSecurityApplicationGroupIdentifier: MSIMEAppEdition.appGroupIdentifier)?
       .appendingPathComponent("backend-account-refresh.lock", isDirectory: false))
   }
 

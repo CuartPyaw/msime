@@ -4,7 +4,7 @@ import { groupTitle } from "../core/platform-controls-style";
 import { keyboardThemeId, themeEntry } from "../theme/global-theme";
 import { useCandidatePreviewTheme } from "../candidate/candidate-preview-theme";
 import { ActionButton } from "../core/action-button";
-import type { Preferences, TouchKeyboardScheme } from "../index";
+import type { Preferences } from "../index";
 import { touchKeyboardSchemeTitle } from "../settings/touch-keyboard-scheme-helpers";
 
 // Every tappable surface on this page is the same card: full width, a hairline that strengthens on
@@ -131,7 +131,6 @@ export function HomePage({
   preferences,
   actions,
   onOpenPage,
-  onSelectScheme,
   onOpenChat,
   touchLayout = false,
   ios = false,
@@ -140,7 +139,6 @@ export function HomePage({
   actions?: HomePageActions;
   onOpenPage: (page: string) => void;
   onOpenChat?: () => void;
-  onSelectScheme?: (scheme: TouchKeyboardScheme) => void;
   touchLayout?: boolean;
   /** iOS opens the keyboard extension's settings, where 完全访问 lives; Android and HarmonyOS open the system input method settings. */
   ios?: boolean;
@@ -288,14 +286,7 @@ export function HomePage({
           <small className={quickNote}>{ios ? "启用与完全访问" : "启用与设为默认"}</small>
         </button>
       </div>
-      <button
-        type="button"
-        className={rowCard}
-        onClick={() => {
-          onSelectScheme?.("thoughtful_reply");
-          onOpenPage("input");
-        }}
-      >
+      <button type="button" className={rowCard} onClick={() => onOpenPage("ai")}>
         <span
           className="grid size-[34px] shrink-0 grow-0 basis-[34px] place-items-center rounded-[10px] bg-accent-soft text-[18px] text-accent"
           aria-hidden="true"
@@ -304,7 +295,7 @@ export function HomePage({
         </span>
         <span className={rowBody}>
           <strong className={cardTitle}>高情商回复</strong>
-          <small className={cardNote}>切换回复键盘，试试更合适的表达</small>
+          <small className={cardNote}>点键盘工具栏上的回复，试试更合适的表达</small>
         </span>
         <span className={rowChevron} aria-hidden="true">
           ↗

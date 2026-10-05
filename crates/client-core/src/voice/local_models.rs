@@ -321,8 +321,8 @@ fn check_root(root: &Path) -> Result<(), LocalModelError> {
         current = path.parent();
     }
     for path in ancestors.into_iter().rev() {
-        // macOS 的临时目录通过受信任的 /var 别名暴露。
-        if path == Path::new("/var") || path == Path::new("/tmp") {
+        // 系统自己的符号链接（macOS 的 /var、Android 的 /data/user/0）由 msime-path-trust 列出。
+        if msime_path_trust::is_trusted_system_alias(path) {
             continue;
         }
         match fs::symlink_metadata(path) {
@@ -618,7 +618,7 @@ pub fn install_files(
     )
 }
 
-/// 不变量：已经发布的文件永远不会被重新打开写入。输入法会内存映射 dict_japanese.dat，原地改写会让正在使用的映射读到半新半旧的内容甚至触发 SIGBUS；所以新文件一律写进暂存目录，再整体改名替换旧目录，旧文件只被改名和删除，已打开的句柄仍能读到原来的字节。
+/// 不变量：已经发布的文件永远不会被重新打开写入。输入法会内存映射 msime-japanese.dat，原地改写会让正在使用的映射读到半新半旧的内容甚至触发 SIGBUS；所以新文件一律写进暂存目录，再整体改名替换旧目录，旧文件只被改名和删除，已打开的句柄仍能读到原来的字节。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn install_files_with(
     root: &Path,
@@ -698,6 +698,9 @@ pub(crate) fn install_files_with(
 
 /// 读取 `<root>/<id>/msime-model.json`。只接受不超过 64 KiB 的普通文件，符号链接、目录或无法解析的内容都视为没有。
 pub fn installed_manifest(root: &Path, id: &str) -> Option<Value> {
+    if check_root(root).is_err() {
+        return None;
+    }
     if single_component(id).is_none_or(|single| single != id) || id.starts_with('.') {
         return None;
     }

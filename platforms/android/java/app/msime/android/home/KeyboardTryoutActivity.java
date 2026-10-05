@@ -86,12 +86,13 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) { }
             @Override public void afterTextChanged(@NonNull Editable text) {
                 if (text.length() > DRAFT_LIMIT) text.delete(DRAFT_LIMIT, text.length());
-                sendAi.setEnabled(!sending && !models.isEmpty() && text.length() > 0);
+                // 请求进行中按钮是「停止」，继续编辑或清空草稿都不能禁用取消操作。
+                sendAi.setEnabled(sending || (!models.isEmpty() && text.length() > 0));
             }
         });
 
         loadAi.setOnClickListener(ignored -> {
-            if (models.isEmpty()) loadModels(loadAi, sendAi);
+            if (models.isEmpty()) loadModels(field, loadAi, sendAi);
             else showModelMenu(loadAi, sendAi);
         });
         sendAi.setOnClickListener(ignored -> {
@@ -104,7 +105,7 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
         WindowCompat.getInsetsController(getWindow(), field).show(WindowInsetsCompat.Type.ime());
     }
 
-    private void loadModels(MaterialButton load, MaterialButton send) {
+    private void loadModels(TextInputEditText field, MaterialButton load, MaterialButton send) {
         load.setEnabled(false);
         load.setText("加载中…");
         operation = worker.submit(() -> {
@@ -114,8 +115,16 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
                     if (isFinishing() || isDestroyed()) return;
                     models.clear();
                     models.addAll(loaded);
-                    load.setText("模型 " + models.get(0).id());
-                    send.setEnabled(false);
+                    load.setEnabled(true);
+                    if (models.isEmpty()) {
+                        load.setText("重新加载 AI");
+                        send.setEnabled(false);
+                    } else {
+                        load.setText("模型 " + models.get(0).id());
+                        // The draft may have been typed while the catalogue was loading. Refresh
+                        // the action state here instead of waiting for another edit notification.
+                        send.setEnabled(field.length() > 0);
+                    }
                 });
             } catch (Exception error) {
                 runOnUiThread(() -> {

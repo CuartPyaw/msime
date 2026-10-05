@@ -110,12 +110,12 @@ Windows 与 HarmonyOS 除了你主动提交的[社区举报](#社区举报与审
 
 首次准备词库时从 GitHub Releases 拉取固定版本的资源，地址、长度和 SHA-256 全部写死在 `resources/desktop-dictionary.lock.json` 里，逐一校验，全部成功才发布到内容标识目录。下载的是公开发布物，不上传任何东西。检查更新只在点击「检查更新」时进行，向 `https://api.github.com/repos/metasequoiaime/msime/releases` 发起 GET 请求并在本地按平台标签前缀筛选（识别不出宿主平台时改为读取 `https://msime.app/update.json`）；请求除 IP 地址和防缓存时间戳外不携带标识，适用 GitHub 隐私条款。
 
-macOS 发布包只内置打中文所需的核心词库，日文词典、粤拼与注音词库、手写模型三个资源包由设置应用在首次用到时下载，之后从本机读取：
+macOS 发布包只内置打中文所需的核心词库，日文词典、粤拼注音与笔画词库、手写模型三个资源包由设置应用在首次用到时下载，之后从本机读取：
 
 | | |
 | --- | --- |
-| 触发 | 只在这几种情况下发生：在设置里选日文、粤拼或注音方案；第一次打开手写面板；设置应用启动时发现已保存的方案（或上一次的中文方案）需要的资源包还没装；在「临时日语」一行点「下载」 |
-| 目的地 | GitHub Releases（`https://github.com/metasequoiaime/msime/releases/download/dict-v.../`、`.../langdict-v.../`，下载时会被重定向到 GitHub 的文件存储域名）与 `https://raw.githubusercontent.com/metasequoiaime/msime-engine/<固定提交>/...`（手写模型）；配置了镜像时改为镜像地址 |
+| 触发 | 只在这几种情况下发生：在设置里选日文、粤拼、注音或笔画方案；第一次打开手写面板；设置应用启动时发现已保存的方案（或上一次的中文方案）需要的资源包还没装；在「临时日语」一行点「下载」 |
+| 目的地 | GitHub Releases（`https://github.com/metasequoiaime/msime-dictionary/releases/download/dict-v.../`，下载时会被重定向到 GitHub 的文件存储域名）与 `https://raw.githubusercontent.com/metasequoiaime/msime-engine/<固定提交>/...`（手写模型）；配置了镜像时改为镜像地址 |
 | 发送内容 | 对固定文件的 HTTPS GET 请求，不携带任何输入内容、账号或设备标识 |
 | 需要凭据 | 否 |
 | 偏好字段 | 沿用 `voice_input.asr_model_mirror`，默认空字符串，表示直接访问 GitHub |
@@ -151,7 +151,7 @@ Android 的手写识别使用 ML Kit，**首次使用需要联网下载识别模
 
 - **Windows**（`platforms/windows/src/entrypoints/server_main.cpp`，包装层 `platforms/common/Telemetry.cpp`）：会话是 Server 进程从启动到消息循环结束；开关读自偏好里的 `usage_reporting`（`platforms/windows/src/system/TelemetryConsent.h`：缺省算开启，显式 `false` 算关闭，读不出来的值或文件算关闭），设置页保存后立即生效。启动时发送一次，之后每 30 分钟一次。崩溃来源：`std::terminate` 记录异常类型和 `what()` 的第一行（JSON 解析异常只记类型和编号，因为其文本可能引用用户文件的内容）；未处理的结构化异常由 `SetUnhandledExceptionFilter` 记录异常名与代码、出错模块文件名+偏移和逐帧的模块+偏移（例如 `EXCEPTION_ACCESS_VIOLATION (0xc0000005) in module.dll+0x…`）。文件在 `%LOCALAPPDATA%\MSIME\` 下：`telemetry.json`、`telemetry-state.json`、`telemetry-session.json`、`telemetry-crashes\`。安装器的「联网功能」页说明了这项统计默认开启（`platforms/windows/installer/msime_setup.iss`）。
 - **Linux**：IBus 宿主（`platforms/linux/src/entrypoints/ibus_main.cpp`）的会话是 `msime-linux-ibus` 从启动到主循环返回，崩溃守护以 `--recovered` 重启的进程同样如此；Fcitx5 插件（`platforms/linux/fcitx5/FcitxEngine.cpp`）的会话是插件实例的生存期，发送在后台任务里进行，不占用事件循环。崩溃来源：`std::terminate`（规则同 Windows），以及 SIGSEGV、SIGBUS、SIGILL、SIGFPE、SIGABRT 的信号处理程序，写下 `SIGSEGV: segmentation fault (code N)` 这样的摘要和 `backtrace_symbols_fd` 的栈帧，然后交回原先的处理程序（Fcitx5 自己的崩溃日志照常工作）。启动时发送一次，之后每 30 分钟一次。开关是共享偏好 `preferences.json` 里的 `usage_reporting`。文件在 `$XDG_STATE_HOME/msime/`（未设时为 `~/.local/state/msime/`）下，文件名同 Windows；Fcitx5 用自己的子目录 `$XDG_STATE_HOME/msime/fcitx5/`，因此有自己的 `install_id`，同一台机器上两种框架都用会被算成两个安装。
-- **macOS**（`platforms/macos/src/core/UsageReporting.mm`，由 `input_method_main.mm` 调用）：会话是输入法进程的生存期，单独打开的设置窗口不算。崩溃来源：`NSSetUncaughtExceptionHandler`（异常名、原因和 `callStackSymbols`）和 SIGSEGV、SIGBUS、SIGILL、SIGFPE、SIGABRT、SIGTRAP 的信号处理程序（`backtrace_symbols_fd`：二进制文件名、地址、符号+偏移）。启动时发送一次，之后每 3 小时一次。开关是共享设置页的「匿名使用统计」。文件在 `~/Library/Application Support/MSIME/telemetry/`。
+- **macOS**（`platforms/macos/src/core/UsageReporting.mm`，由 `input_method_main.mm` 调用）：会话是输入法进程的生存期，单独打开的设置窗口不算。崩溃来源：`NSSetUncaughtExceptionHandler`（异常名、原因和 `callStackSymbols`）和 SIGSEGV、SIGBUS、SIGILL、SIGFPE、SIGABRT、SIGTRAP 的信号处理程序（`backtrace_symbols_fd`：二进制文件名、地址、符号+偏移）。启动时发送一次，之后每 3 小时一次。开关是共享设置页的「匿名使用统计」。文件在 `~/Library/Application Support/MSIME/telemetry/`；水杉五笔、水杉拼音等其他版本各用 `~/Library/Application Support/MSIME/<版本 id>/telemetry/`，同时安装的版本互不共享 `install_id`。
 - **iOS**（`platforms/ios/SharedUI/core/UsageReporting.swift`）：会话是键盘的一次弹出到收起（`KeyboardExtension/Sources/core/KeyboardUsageReporting.swift`），App 本身不产生会话。崩溃来源：键盘里的信号处理程序（`CrashSignalRecorder.c`，信号名和 `backtrace_symbols_fd` 的栈帧）和未捕获异常处理程序（异常名、原因和 `callStackSymbols`）；App 的崩溃来自系统的 MetricKit 诊断（`CrashDiagnostics.swift`），只取异常类型、代码、信号、ObjC 异常名、系统给出的终止原因和「二进制名+偏移」形式的栈帧，从不取 ObjC 的 `composedMessage`。键盘只有在「允许完全访问」打开时才发送，最多每 15 分钟一次；否则由 App 在回到前台时发送。文件在 App Group 容器的 `MSIME/telemetry/` 下，App 与键盘共用一个 `install_id`。`PrivacyInfo.xcprivacy` 声明了 CrashData、ProductInteraction 与 DeviceID（随机安装 id），均为不关联身份、不用于跟踪。
 - **Android**（`platforms/android/java/app/msime/android/core/Telemetry.java`，经 `platforms/android/native/client_jni.cpp` 调用共享层）：会话只在 `:ime` 进程里，是 `MSIMEInputService` 从 `onCreate` 到 `onDestroy`。崩溃来源：两个进程的未捕获异常处理程序，记录 `Throwable.toString()` 的第一行（**可能包含异常自带的消息文本**）和 Java 栈帧（类、方法、源文件名与行号，最多 4 层 Caused by）；App 进程的崩溃在键盘下次启动时作为单独的 `crash` 发送。原生（信号）崩溃目前不捕获。App 打开时发送，键盘弹出时最多每 6 小时发送一次。文件在应用私有目录 `files/telemetry/`。
 - **HarmonyOS**（`platforms/harmony/entry/src/main/ets/telemetry/Telemetry.ets`，经 `platforms/harmony/native/client_napi.cpp` 调用共享层）：会话是键盘进程从 `KeyboardExtensionAbility.onCreate` 到 `onDestroy`，设置应用只发送不产生会话。崩溃来源只有系统在下次启动时投递的 HiAppEvent `APP_CRASH`：JS 崩溃取错误名、消息第一行和引擎调用栈；原生崩溃取信号名与代码和「文件名+pc+符号」形式的栈帧，不含故障地址和目录。键盘启动时与之后每 6 小时（打字时检查）发送一次，设置应用打开时也发送。文件在 `files/state/telemetry/` 下，另有只存键盘进程号的 `harmony-keyboard-process.json`。

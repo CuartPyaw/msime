@@ -1,4 +1,5 @@
 import { CommunityLoadMoreButton } from "./community-gallery-controls";
+import { StatusMessage } from "../core/status-message";
 import * as style from "./community-style";
 
 export interface CommunityGalleryLoadMoreProps {
@@ -15,14 +16,14 @@ export function CommunityGalleryLoadMore({
   loadingText,
   onLoadMore,
 }: CommunityGalleryLoadMoreProps) {
-  if (!hasMore) return null;
+  if (!hasMore && !busy) return null;
   return (
     <>
-      <CommunityLoadMoreButton disabled={busy} onClick={onLoadMore} />
+      {hasMore && <CommunityLoadMoreButton disabled={busy} onClick={onLoadMore} />}
       {busy && (
-        <p role="status" className={style.notice}>
+        <StatusMessage role="status" className={style.notice}>
           {loadingText}
-        </p>
+        </StatusMessage>
       )}
     </>
   );

@@ -1,7 +1,9 @@
+import { SettingsGroupNote } from "./settings-group-note";
 import * as settings from "./settings-style";
 import { GroupList, Row } from "../core/platform-controls";
 import type { NavigationPreferences, WordCharacterPreferences } from "./word-character-section";
 import { ShortcutRow } from "./shortcut-row";
+import { SettingsShortcutKey } from "./settings-shortcut-key";
 import { SwitchRow } from "./switch-row";
 
 export interface CandidateShortcutsSectionProps {
@@ -40,7 +42,7 @@ export function CandidateShortcutsSection({
   const paging = pagingKeys.filter(([option]) => navigation[option]);
   return (
     <GroupList title="候选操作">
-      <p className={settings.groupNote}>输入和选取候选词时使用</p>
+      <SettingsGroupNote>输入和选取候选词时使用</SettingsGroupNote>
       {showNumberRowSelection && (
         <SwitchRow
           title="数字键选词"
@@ -58,9 +60,7 @@ export function CandidateShortcutsSection({
           description={
             <span className={settings.shortcutKeys}>
               {paging.map(([option, chord]) => (
-                <kbd key={option} className={settings.shortcutKey}>
-                  {chord}
-                </kbd>
+                <SettingsShortcutKey key={option}>{chord}</SettingsShortcutKey>
               ))}
             </span>
           }

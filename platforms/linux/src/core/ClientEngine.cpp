@@ -1,4 +1,5 @@
 #include "ClientEngine.h"
+#include "LinuxEdition.h"
 #include "KeyRouterAdapter.h"
 #include "BackspaceHoldPolicy.h"
 #include "../clipboard/ClipboardText.h"
@@ -278,7 +279,7 @@ std::string provider_socket_fallback(const Json &options, const char *option,
   const auto *runtime = g_get_user_runtime_dir();
   if (!runtime || !*runtime)
     return {};
-  const auto candidate = std::filesystem::path(runtime) / "msime-client" / filename;
+  const auto candidate = std::filesystem::path(runtime) / MSIME_EDITION_CLIENT_DIRECTORY / filename;
   std::error_code error;
   return std::filesystem::is_socket(candidate, error) ? candidate.string() : std::string{};
 }
@@ -1109,14 +1110,14 @@ struct State {
       preferences["learning"] = false;
   }
 };
-// The scheme the Engine runs for this context: the menu's choice or the configured one, given way to the last Chinese scheme as host-api does when Cantonese or Zhuyin has no dictionary installed here (InputSchemes.h). The menus, the indicator and the key rules follow this one, so none of them claims a scheme the user is not typing in.
+// The scheme the Engine runs for this context: the menu's choice or the configured one, given way to the last Chinese scheme as host-api does when Cantonese, Zhuyin or Stroke has no dictionary installed here (InputSchemes.h). The menus, the indicator and the key rules follow this one, so none of them claims a scheme the user is not typing in.
 std::string effective_scheme(const State &s) {
   const auto &preferences = configured.at("preferences");
   return msime::linux_host::effective_input_scheme(
       s.scheme_override.value_or(preferences.value("scheme", std::string("quanpin"))),
       preferences.value("last_chinese_scheme", std::string("quanpin")), configured_dictionaries);
 }
-// Only the base Chinese schemes are converted: kana, Hangul and Vietnamese are not Chinese text, and Cantonese and Zhuyin are written in traditional characters already (`script_conversion_applies`).
+// 只转换基础中文方案：假名、谚文、越南文和藏文不是中文，粤拼和注音本来就写繁体字，笔画候选按 msime-stroke.db 里存的字形原样取用（`script_conversion_applies`）。
 bool script_conversion_applies(const Json &context) {
   return context.is_object() &&
          msime::linux_host::scheme::ScriptConversionApplies(context.value("scheme", 255)) &&
@@ -1168,9 +1169,7 @@ bool clipboard_delete(const std::string &path, const std::optional<std::string> 
   bool removed = false;
   try {
     if (!text) {
-      std::error_code error;
-      std::filesystem::remove(path, error);
-      removed = !error;
+      removed = msime::linux_host::remove_clipboard_file(std::filesystem::path(path));
     } else {
       auto value = read_clipboard_store(std::filesystem::path(path));
       if (value && value->is_array()) {
@@ -1367,7 +1366,7 @@ void voice_cancel(IBusEngine *engine);
 bool launch_desktop_panel(const char *panel) {
   const auto *command = g_getenv("MSIME_CLIENT_SETTINGS_COMMAND");
   if (!command || !*command)
-    command = "msime-linux-settings";
+    command = MSIME_EDITION_SETTINGS_PROGRAM;
   const std::string requested = panel ? panel : "";
   // About, help, feedback and the local dictionary are settings sections rather than desktop surfaces, so each travels as "settings:<category>"; the bare section name is not a route head and would be rejected by the shared parser.
   const bool settings_page = requested == "about" || requested == "help" ||
@@ -1414,10 +1413,15 @@ constexpr DesktopPanelAction desktop_panel_actions[] = {
     {"DesktopTools/CloudClipboard", "cloud-clipboard", "云剪贴板", false},
     {"DesktopTools/Dictionary", "dictionary", "词库…", true},
     {"DesktopTools/Settings", "settings", "设置…", true},
-    {"DesktopTools/About", "about", "关于水杉输入法", true},
+    {"DesktopTools/About", "about", "关于" MSIME_EDITION_DISPLAY_NAME, true},
     {"DesktopTools/Help", "help", "帮助", false},
     {"DesktopTools/Feedback", "feedback", "反馈", false},
 };
+
+// 本版本是否提供这个面板。手写识别器只认汉字，不提供手写的版本（日文、越南文和藏文版的 `MSIME_EDITION_HANDWRITING` 为 0，它们的安装包里也没有手写模型）既不在菜单里列出，也不打开手写识别板。
+constexpr bool desktop_panel_offered(const DesktopPanelAction &action) {
+  return MSIME_EDITION_HANDWRITING != 0 || std::string_view(action.panel) != "handwriting";
+}
 
 // A menu separator. ibus-ui-gtk3 draws it as a rule and ends the radio group before it; keys must stay unique because panels find properties by key.
 IBusProperty *menu_separator(const char *key) {
@@ -1476,7 +1480,8 @@ IBusProperty *desktop_tools_property(IBusEngine *engine) {
           !directory.empty() && directory.front() == '/',
       TRUE, toolbar_enabled ? PROP_STATE_CHECKED : PROP_STATE_UNCHECKED, nullptr));
   for (const auto &action : desktop_panel_actions)
-    if (!action.design_menu) ibus_prop_list_append(items, desktop_panel_property(engine, action));
+    if (!action.design_menu && desktop_panel_offered(action))
+      ibus_prop_list_append(items, desktop_panel_property(engine, action));
   ibus_prop_list_append(items, ibus_property_new(
       "DesktopTools/VoiceEnabled", PROP_TYPE_TOGGLE,
       ibus_text_new_from_static_string("启用语音输入"), "",
@@ -1534,7 +1539,7 @@ IBusProperty *toolbar_property(IBusEngine *engine) {
                 available && toolbar.value("emoji", true));
   append_action("Toolbar/ScreenKeyboard", "屏幕键盘", "打开屏幕键盘面板",
                 available && toolbar.value("screen_keyboard", false));
-  append_action("Toolbar/Settings", "设置", "打开水杉输入法设置",
+  append_action("Toolbar/Settings", "设置", "打开" MSIME_EDITION_DISPLAY_NAME "设置",
                 available && toolbar.value("settings", true));
   return ibus_property_new(
       "LinuxToolbar", PROP_TYPE_MENU,
@@ -1862,6 +1867,7 @@ Json prefer_online_translations(const Json &glosses, const Json &online) {
   std::vector<std::pair<std::string, std::string>> merged, answers;
   const auto read = [](const Json &values, auto &into) {
     if (!values.is_array()) return;
+    into.reserve(into.size() + values.size());
     for (const auto &item : values)
       if (item.is_object())
         into.emplace_back(item.value("text", std::string{}),
@@ -2188,6 +2194,7 @@ void online_dispatch(IBusEngine *engine, uint8_t only_source, bool ai_cache_only
     // Keep the original Engine identity for application, while each transport
     // request enables only one source. Fast cloud results need not wait for AI.
     std::vector<std::unique_ptr<OnlineTask>> requests;
+    requests.reserve(2);
     for (uint8_t source = 0; source < 2; ++source) {
       if (source != only_source) continue;
       // Each source has one in-flight request and its own duplicate guard. A pending AI result must not delay cloud for a newer composition.
@@ -2548,8 +2555,9 @@ IBusProperty *candidate_actions(IBusEngine *engine) {
     ibus_prop_list_append(items, entry);
     const auto fixed_position = candidate.value("fixed_position", 0);
     // The parent entry already names the slot ("N. preview"), so the items carry only the action, worded like the Windows candidate menu.
-    std::vector<std::pair<const char *, std::string>> candidate_commands = {
-        {"CandidatePin", msime::linux_host::candidate_pin_label}};
+    std::vector<std::pair<const char *, std::string>> candidate_commands;
+    candidate_commands.reserve(7);
+    candidate_commands.emplace_back("CandidatePin", msime::linux_host::candidate_pin_label);
     if (msime::linux_host::candidate_dictionary_removal_available(
             scheme, source, candidate_text))
       candidate_commands.emplace_back("CandidateRemove", "删除候选");
@@ -2655,7 +2663,9 @@ IBusProperty *input_mode_property(IBusEngine *engine) {
   case msime::linux_host::InputModeIndicator::Korean: symbol = "한"; break;
   case msime::linux_host::InputModeIndicator::Cantonese: symbol = "粤"; break;
   case msime::linux_host::InputModeIndicator::Zhuyin: symbol = "注"; break;
+  case msime::linux_host::InputModeIndicator::Stroke: symbol = "笔"; break;
   case msime::linux_host::InputModeIndicator::Vietnamese: symbol = "越"; break;
+  case msime::linux_host::InputModeIndicator::Tibetan: symbol = "藏"; break;
   case msime::linux_host::InputModeIndicator::English: symbol = "A"; break;
   case msime::linux_host::InputModeIndicator::CapsLock: symbol = "⇪"; break;
   }
@@ -2671,7 +2681,7 @@ IBusProperty *gnome_settings_property(IBusEngine *engine) {
   return ibus_property_new(
       "DesktopTools/Settings", PROP_TYPE_NORMAL,
       ibus_text_new_from_static_string("设置"), "",
-      ibus_text_new_from_static_string("打开水杉输入法设置"),
+      ibus_text_new_from_static_string("打开" MSIME_EDITION_DISPLAY_NAME "设置"),
       s.focused && !s.blocked, TRUE, PROP_STATE_UNCHECKED, nullptr);
 }
 void publish_mode(IBusEngine *engine, bool registration) {
@@ -2703,12 +2713,13 @@ void publish_mode(IBusEngine *engine, bool registration) {
   }
   clipboard_schedule(engine);
   auto toolbar = toolbar_property(engine);
-  // The scheme the Engine runs: a Cantonese or Zhuyin preference without its dictionary falls back, and the menu checks the fallback.
+  // The scheme the Engine runs: a Cantonese, Zhuyin or Stroke preference without its dictionary falls back, and the menu checks the fallback.
   const auto active_scheme = effective_scheme(s);
   const int active_scheme_number = msime::linux_host::scheme_number(active_scheme);
   const bool japanese_scheme = active_scheme_number == msime::linux_host::scheme::Japanese;
   const bool korean_scheme = active_scheme_number == msime::linux_host::scheme::Korean;
   const bool vietnamese_scheme = active_scheme_number == msime::linux_host::scheme::Vietnamese;
+  const bool tibetan_scheme = active_scheme_number == msime::linux_host::scheme::Tibetan;
   const bool chinese_scheme = msime::linux_host::scheme::IsChinese(active_scheme_number);
   const auto mixed_input = configured.at("preferences").value(
       "mixed_input", Json::object());
@@ -3141,6 +3152,8 @@ void publish_mode(IBusEngine *engine, bool registration) {
       {"command", "指令（/ 模式）"},
       {"mention", "名单（@ 模式）"}};
   for (const auto &[key, label] : local_mode_options) {
+    // 不带临时日文的版本（五笔版）不列这个本地模式：宿主库在这些版本里总是把它关掉，列出来也打不开。
+    if (!MSIME_EDITION_TEMPORARY_JAPANESE && std::string_view(key) == "temporary_japanese") continue;
     const bool enabled = s.local_mode_overrides.contains(key)
                              ? s.local_mode_overrides.at(key).get<bool>()
                              : configured_local_modes.value(
@@ -3178,13 +3191,14 @@ void publish_mode(IBusEngine *engine, bool registration) {
     ibus_prop_list_append(preedit_menu, item);
   }
   ibus_property_set_sub_props(preedit_property, preedit_menu);
+  // 双拼原始预编辑和五笔剩余编码只在各自的方案下生效，本版本没有那个方案就隐藏。
   auto shuangpin_preedit_property = ibus_property_new(
       "ShuangpinPreedit", PROP_TYPE_TOGGLE,
       ibus_text_new_from_static_string("双拼原始预编辑"), "",
       ibus_text_new_from_static_string("双拼输入时显示原始双拼编码"),
       s.focused && !s.blocked && s.input_enabled && active_scheme == "shuangpin" &&
           !menu_save_pending,
-      TRUE, s.shuangpin_preedit_uses_raw ? PROP_STATE_CHECKED : PROP_STATE_UNCHECKED,
+      msime::linux_host::edition_offers_scheme("shuangpin"), s.shuangpin_preedit_uses_raw ? PROP_STATE_CHECKED : PROP_STATE_UNCHECKED,
       nullptr);
   auto wubi_code_hint_property = ibus_property_new(
       "WubiCodeHint", PROP_TYPE_TOGGLE,
@@ -3192,7 +3206,7 @@ void publish_mode(IBusEngine *engine, bool registration) {
       ibus_text_new_from_static_string("在五笔候选后显示尚未输入的编码"),
       s.focused && !s.blocked && s.input_enabled && active_scheme == "wubi" &&
           !menu_save_pending,
-      TRUE, s.wubi_code_hint ? PROP_STATE_CHECKED : PROP_STATE_UNCHECKED, nullptr);
+      msime::linux_host::edition_offers_scheme("wubi"), s.wubi_code_hint ? PROP_STATE_CHECKED : PROP_STATE_UNCHECKED, nullptr);
   auto theme_property = ibus_property_new(
       "CandidateTheme", PROP_TYPE_MENU,
       ibus_text_new_from_static_string("候选明暗"), "",
@@ -3226,39 +3240,40 @@ void publish_mode(IBusEngine *engine, bool registration) {
         !menu_save_pending, TRUE,
         global_theme == entry.id ? PROP_STATE_CHECKED : PROP_STATE_UNCHECKED, nullptr));
   ibus_property_set_sub_props(global_theme_property, global_theme_menu);
+  // 输入语言（日文、韩文、越南文、藏文）只列本版本提供的；一个都没有时（五笔版、拼音版）也不列「中文」和分隔线，菜单里只剩中文方案。
+  const std::tuple<const char *, const char *, const char *, const char *, bool> scheme_languages[] = {
+      {"japanese", "Scheme/Japanese", "日文", "使用日语罗马字方案", japanese_scheme},
+      {"korean", "Scheme/Korean", "韩文", "使用韩语两套式方案", korean_scheme},
+      {"vietnamese", "Scheme/Vietnamese", "越南文", "使用越南语输入方案", vietnamese_scheme},
+      {"tibetan", "Scheme/Tibetan", "藏文", "使用藏文威利转写方案", tibetan_scheme}};
+  bool scheme_languages_offered = false;
+  for (const auto &language : scheme_languages)
+    scheme_languages_offered = scheme_languages_offered || msime::linux_host::edition_offers_scheme(std::get<0>(language));
   auto scheme = ibus_property_new(
       "Scheme", PROP_TYPE_MENU,
       ibus_text_new_from_static_string("输入方案"), "",
-      ibus_text_new_from_static_string("选择中文、日文、韩文或越南文输入方案"),
+      ibus_text_new_from_static_string(scheme_languages_offered ? "选择中文、日文、韩文、越南文或藏文输入方案"
+                                                                : "选择中文输入方案"),
       s.focused && !s.blocked && !menu_save_pending, TRUE, PROP_STATE_UNCHECKED, nullptr);
   auto scheme_menu = ibus_prop_list_new();
-  auto chinese = ibus_property_new(
-      "Scheme/Chinese", PROP_TYPE_RADIO,
-      ibus_text_new_from_static_string("中文"), "",
-      ibus_text_new_from_static_string("使用当前中文方案"), !menu_save_pending, TRUE,
-      chinese_scheme ? PROP_STATE_CHECKED : PROP_STATE_UNCHECKED, nullptr);
-  auto japanese = ibus_property_new(
-      "Scheme/Japanese", PROP_TYPE_RADIO,
-      ibus_text_new_from_static_string("日文"), "",
-      ibus_text_new_from_static_string("使用日语罗马字方案"), !menu_save_pending, TRUE,
-      japanese_scheme ? PROP_STATE_CHECKED : PROP_STATE_UNCHECKED, nullptr);
-  auto korean = ibus_property_new(
-      "Scheme/Korean", PROP_TYPE_RADIO,
-      ibus_text_new_from_static_string("韩文"), "",
-      ibus_text_new_from_static_string("使用韩语两套式方案"), !menu_save_pending, TRUE,
-      korean_scheme ? PROP_STATE_CHECKED : PROP_STATE_UNCHECKED, nullptr);
-  auto vietnamese = ibus_property_new(
-      "Scheme/Vietnamese", PROP_TYPE_RADIO,
-      ibus_text_new_from_static_string("越南文"), "",
-      ibus_text_new_from_static_string("使用越南语输入方案"), !menu_save_pending, TRUE,
-      vietnamese_scheme ? PROP_STATE_CHECKED : PROP_STATE_UNCHECKED, nullptr);
-  ibus_prop_list_append(scheme_menu, chinese);
-  ibus_prop_list_append(scheme_menu, japanese);
-  ibus_prop_list_append(scheme_menu, korean);
-  ibus_prop_list_append(scheme_menu, vietnamese);
-  // The input languages and the Chinese schemes are two radio groups; without the rule ibus-ui-gtk3 joins them and marks only one of the two checked entries.
-  ibus_prop_list_append(scheme_menu, menu_separator("Scheme/Separator"));
-  // Cantonese and Zhuyin are offered only when their dictionary is installed: host-api would fall back from either without it.
+  if (scheme_languages_offered) {
+    ibus_prop_list_append(scheme_menu, ibus_property_new(
+        "Scheme/Chinese", PROP_TYPE_RADIO,
+        ibus_text_new_from_static_string("中文"), "",
+        ibus_text_new_from_static_string("使用当前中文方案"), !menu_save_pending, TRUE,
+        chinese_scheme ? PROP_STATE_CHECKED : PROP_STATE_UNCHECKED, nullptr));
+    for (const auto &[value, name, label, tooltip, checked] : scheme_languages) {
+      if (!msime::linux_host::edition_offers_scheme(value)) continue;
+      ibus_prop_list_append(scheme_menu, ibus_property_new(
+          name, PROP_TYPE_RADIO,
+          ibus_text_new_from_static_string(label), "",
+          ibus_text_new_from_static_string(tooltip), !menu_save_pending, TRUE,
+          checked ? PROP_STATE_CHECKED : PROP_STATE_UNCHECKED, nullptr));
+    }
+    // The input languages and the Chinese schemes are two radio groups; without the rule ibus-ui-gtk3 joins them and marks only one of the two checked entries.
+    ibus_prop_list_append(scheme_menu, menu_separator("Scheme/Separator"));
+  }
+  // Cantonese, Zhuyin and Stroke are offered only when their dictionary is installed: host-api would fall back from each of them without it.
   // 五笔一项跟随存储的码表版本显示「86 五笔」或「98 五笔」。
   const char *wubi_label = msime::linux_host::wubi_scheme_label(
       configured.at("preferences").value("wubi_profile", std::string("wubi86")));
@@ -3266,7 +3281,8 @@ void publish_mode(IBusEngine *engine, bool registration) {
                                            std::tuple{"shuangpin", "Scheme/Shuangpin", "双拼"},
                                            std::tuple{"wubi", "Scheme/Wubi", wubi_label},
                                            std::tuple{"cantonese", "Scheme/Cantonese", "粤拼"},
-                                           std::tuple{"zhuyin", "Scheme/Zhuyin", "注音"}}) {
+                                           std::tuple{"zhuyin", "Scheme/Zhuyin", "注音"},
+                                           std::tuple{"stroke", "Scheme/Stroke", "笔画"}}) {
     if (!msime::linux_host::input_scheme_available(value, configured_dictionaries)) continue;
     auto item = ibus_property_new(
         name, PROP_TYPE_RADIO,
@@ -3277,11 +3293,13 @@ void publish_mode(IBusEngine *engine, bool registration) {
     ibus_prop_list_append(scheme_menu, item);
   }
   ibus_property_set_sub_props(scheme, scheme_menu);
+  // 不带双拼的版本（五笔版）隐藏双拼键位方案。
   auto profile = ibus_property_new(
       "ShuangpinProfile", PROP_TYPE_MENU,
       ibus_text_new_from_static_string("双拼方案"), "",
       ibus_text_new_from_static_string("选择双拼键位方案"),
-      s.focused && !s.blocked && !menu_save_pending, TRUE, PROP_STATE_UNCHECKED, nullptr);
+      s.focused && !s.blocked && !menu_save_pending,
+      msime::linux_host::edition_offers_scheme("shuangpin"), PROP_STATE_UNCHECKED, nullptr);
   auto profile_menu = ibus_prop_list_new();
   const auto configured_profile = s.shuangpin_profile_override.value_or(
       configured.at("preferences").value("shuangpin_profile", "xiaohe"));
@@ -3297,6 +3315,7 @@ void publish_mode(IBusEngine *engine, bool registration) {
   ibus_property_set_sub_props(profile, profile_menu);
   // The design menu: 中文/英文; 全角/标点/译文; 输入方案; 主题/词库…/设置…/关于, then the tools that depend on the moment (voice, candidate actions, nine-key spellings, clipboard history) and the three option groups holding every other switch. 中文/英文 is the one InputMode toggle Shift flips, labelled 中文 and checked while letters compose; the Engine's dedicated English mode (EnglishMode, Ctrl+Shift+E) is a different feature and sits in 输入选项 beside 英文候选. Nesting keeps each key, so activation and the by-key updates below do not change.
   std::vector<IBusProperty *> design_panel_actions;
+  design_panel_actions.reserve(3);
   for (const auto &action : desktop_panel_actions)
     if (action.design_menu) design_panel_actions.push_back(desktop_panel_property(engine, action));
   if (registration) {
@@ -3602,7 +3621,7 @@ void render(IBusEngine *engine, const Json &view) {
     state(engine).wave_overlay_surface->hide();
     state(engine).wave_overlay_visible = false;
   }
-  // A Korean, Zhuyin or Vietnamese composition is text the user already wrote, so it is always drawn inline in the pinyin style with the caret after it, whatever the preedit style: until a candidate list opens there is no candidate window to show it in. IBus commits a preedit in COMMIT mode itself when the client loses focus, which is how the open composition reaches the client being left (see focus_out).
+  // 韩文、注音、越南文或藏文的组字是用户已经写下的文字，所以不论预编辑样式如何，都按拼音样式内嵌显示，光标在末尾：在候选列表打开之前没有候选窗可以显示它。客户端失焦时 IBus 会自己上屏 COMMIT 模式的预编辑，打开的组字就是这样到达被离开的客户端的（见 focus_out）。
   const int rules_scheme = msime::linux_host::scheme_rules(view);
   const bool always_inline = rules_scheme >= 0 && msime::linux_host::scheme::AlwaysInlinePreedit(rules_scheme);
   auto text = style == "pinyin" || always_inline ? view.at("preedit").get<std::string>()
@@ -3851,7 +3870,7 @@ bool apply(IBusEngine *engine, char *raw, PunctuationPairMode pair_mode,
       s.last_smart_punctuation = 0;
       s.last_smart_punctuation_time = 0;
     }
-    // Korean and Vietnamese commits are half-width ASCII punctuation beside Hangul or Latin letters, which the runtime already leaves unconverted; the host must not widen them either. The dedicated English mode keeps its own rules in every scheme, so its commits are widened as usual.
+    // 韩文、越南文和藏文上屏的是谚文、拉丁字母或藏文旁边的半角 ASCII 标点，运行时已经不转换它们，宿主也不能把它们变成全角。专用英文模式在每个方案里都保持自己的规则，所以它的上屏照常变成全角。
     const auto &commit_context = result.contains("commit_context") ? result.at("commit_context") : Json(nullptr);
     const auto narrow_scheme = [](int scheme) {
       return scheme >= 0 && scheme < static_cast<int>(msime::linux_host::kInputSchemeIds.size()) &&
@@ -3980,7 +3999,7 @@ void render_after_voice(IBusEngine *engine) {
   s.wave_overlay.reset();
   clear(engine);
 }
-// The scheme decides whether the traditional-output conversion applies. Without an Engine view (English mode) it comes from the scheme the Engine would run, so Japanese, Korean, Cantonese, Zhuyin and Vietnamese text is still left alone.
+// 由方案决定繁体输出转换是否适用。没有 Engine 视图时（英文模式）取 Engine 将要运行的方案，所以日文、韩文、粤拼、注音、越南文、藏文和笔画的文字仍然不被改动。
 Json voice_commit_context(const State &s) {
   if (s.view.is_object())
     return Json{{"scheme", s.view.value("scheme", 0)}, {"local_mode", "none"}};
@@ -4605,7 +4624,7 @@ void focus_out(IBusEngine *engine) {
     s.smart_punctuation_rejected = 0;
     s.paired_tracker.clear();
     sync_music(engine);
-    // Leaving the client commits an open Korean syllable, Zhuyin conversion or Vietnamese word (`commits_on_blur`). render() draws it in IBUS_ENGINE_PREEDIT_COMMIT mode, so IBus has already handed that preedit to the client being left; committing the runtime's copy here as well would type it twice, or into the client that takes the focus next. The session still finishes it, so nothing of it is left composing.
+    // 离开客户端时上屏打开的韩文音节、注音转换、越南文单词或藏文音节串（`commits_on_blur`）。render() 用 IBUS_ENGINE_PREEDIT_COMMIT 模式画它，所以 IBus 已经把这段预编辑交给了被离开的客户端；这里再上屏运行时的副本会打两遍，或者打进下一个获得焦点的客户端。会话仍然结束它，不留下任何正在组字的内容。
     const int blur_scheme = msime::linux_host::scheme_rules(s.view);
     const bool blur_composition =
         s.session && blur_scheme >= 0 && msime::linux_host::scheme::CommitsOnBlur(blur_scheme) &&
@@ -4761,6 +4780,7 @@ void property_activate(IBusEngine *engine, const gchar *name, guint value) {
     }
     for (const auto &action : desktop_panel_actions) {
       if (property_name == action.property) {
+        if (!desktop_panel_offered(action)) return;
         if (!launch_desktop_panel(action.panel))
           g_warning("Cannot start MSIME desktop panel launcher");
         return;
@@ -4848,7 +4868,8 @@ void property_activate(IBusEngine *engine, const gchar *name, guint value) {
        property_name != "Scheme/Quanpin" &&
        property_name != "Scheme/Shuangpin" && property_name != "Scheme/Wubi" &&
        property_name != "Scheme/Cantonese" && property_name != "Scheme/Zhuyin" &&
-       property_name != "Scheme/Vietnamese" &&
+       property_name != "Scheme/Vietnamese" && property_name != "Scheme/Tibetan" &&
+       property_name != "Scheme/Stroke" &&
        property_name.rfind("ShuangpinProfile/", 0) != 0) ||
       !s.focused || s.blocked ||
       (value != PROP_STATE_CHECKED && value != PROP_STATE_UNCHECKED))
@@ -5568,9 +5589,11 @@ void property_activate(IBusEngine *engine, const gchar *name, guint value) {
           : property_name == "Scheme/Wubi" ? std::string("wubi")
           : property_name == "Scheme/Cantonese" ? std::string("cantonese")
           : property_name == "Scheme/Zhuyin" ? std::string("zhuyin")
+          : property_name == "Scheme/Stroke" ? std::string("stroke")
           : property_name == "Scheme/Vietnamese" ? std::string("vietnamese")
+          : property_name == "Scheme/Tibetan" ? std::string("tibetan")
           : configured.at("preferences").value("last_chinese_scheme", std::string("quanpin"));
-      // A scheme this host does not know, or Cantonese and Zhuyin once their dictionary is gone, is saved as the scheme host-api would run instead.
+      // A scheme this host does not know, or Cantonese, Zhuyin and Stroke once their dictionary is gone, is saved as the scheme host-api would run instead.
       selected = msime::linux_host::effective_input_scheme(
           selected, configured.at("preferences").value("last_chinese_scheme", std::string("quanpin")), configured_dictionaries);
       if (s.scheme_override.value_or(
@@ -6247,16 +6270,17 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
     s.space_convert_preceding.clear();
   }
   bool handled = false;
-  // Korean types half-width ASCII punctuation and none of the Chinese punctuation helpers apply to it; its letters are jamo whose case Shift alone decides. See the MsimeCommand notes in msime_client.h. Vietnamese types the same half-width marks beside its Latin letters, and Zhuyin takes Chinese punctuation from the Engine without the host's smart and paired helpers (`host_smart_punctuation`). All three write their composition out rather than discard it when a key leaves it (`commits_on_blur`) and keep the caret at its end (`locks_caret`). The dedicated English mode keeps its own rules in every scheme.
+  // 韩文输入半角 ASCII 标点，中文标点的各项辅助都不适用；它的字母是谚文字母，大小写只由 Shift 决定（见 msime_client.h 的 MsimeCommand 说明）。越南文和藏文在拉丁字母或藏文旁边输入同样的半角标点，注音则从 Engine 取中文标点，不用宿主的智能标点和成对标点辅助（`host_smart_punctuation`）。这四个方案在按键离开组字时都把组字写出去而不是丢弃（`commits_on_blur`），并让光标停在末尾（`locks_caret`）。专用英文模式在每个方案里都保持自己的规则。
   const auto active_input_scheme = effective_scheme(s);
   const int key_scheme = s.english_mode ? -1 : msime::linux_host::scheme_number(active_input_scheme);
   const bool korean_scheme = key_scheme == msime::linux_host::scheme::Korean;
   const bool zhuyin_scheme = key_scheme == msime::linux_host::scheme::Zhuyin;
   const bool vietnamese_scheme = key_scheme == msime::linux_host::scheme::Vietnamese;
-  const bool commits_on_blur = korean_scheme || zhuyin_scheme || vietnamese_scheme;
+  const bool tibetan_scheme = key_scheme == msime::linux_host::scheme::Tibetan;
+  const bool commits_on_blur = korean_scheme || zhuyin_scheme || vietnamese_scheme || tibetan_scheme;
   const bool locks_caret = commits_on_blur;
-  const bool narrow_scheme = korean_scheme || vietnamese_scheme;
-  const bool without_host_punctuation = korean_scheme || zhuyin_scheme || vietnamese_scheme;
+  const bool narrow_scheme = korean_scheme || vietnamese_scheme || tibetan_scheme;
+  const bool without_host_punctuation = korean_scheme || zhuyin_scheme || vietnamese_scheme || tibetan_scheme;
   const auto fullwidth_idle_commit = [&](guint value) {
     if (!s.fullwidth || narrow_scheme || value < 0x21 || value > 0x7e)
       return false;
@@ -6482,7 +6506,7 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
         key == IBUS_Page_Down || key == IBUS_KP_Page_Down || key == IBUS_Tab ||
         key == IBUS_KP_Tab || key == IBUS_ISO_Left_Tab)
       s.paired_tracker.clear();
-    // Match Windows TSF: with CapsLock enabled, an uppercase letter at the beginning of a fresh composition belongs to the editor. IBus exposes the lock state in the modifier mask while preserving the uppercase keysym, so leave that stroke untouched instead of opening a pinyin composition. Korean letters are jamo whatever CapsLock says, and a Vietnamese word starts in capitals, so both still compose.
+    // 与 Windows TSF 一致：CapsLock 打开时，新组字开头的大写字母属于编辑器。IBus 在修饰键掩码里给出锁定状态并保留大写 keysym，所以这一击原样放过，不开始拼音组字。韩文按键不论 CapsLock 如何都是谚文字母，越南文单词可以以大写开头，藏文威利转写的大写字母是另一个字母，所以这三个方案仍然组字。
     if (!(key_scheme >= 0 && msime::linux_host::scheme::CapsLockBypassExempt(key_scheme)) && (flags & IBUS_LOCK_MASK) && key >= 'A' && key <= 'Z' &&
         s.view.at("editing_text").get<std::string>().empty() &&
         s.view.at("candidates").empty())
@@ -6563,7 +6587,7 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
                                   key == IBUS_Right || key == IBUS_KP_Right;
     const auto active_editing = s.view.value("editing_text", std::string{});
     const auto active_candidates = s.view.value("candidates", Json::array());
-    // A Korean syllable, Zhuyin conversion or Vietnamese word has no segments: a Ctrl chord finishes it below and stays the application's shortcut.
+    // 韩文音节、注音转换、越南文单词和藏文音节串都没有分段：Ctrl 组合键在下面结束它，并仍然作为应用的快捷键。
     if (!locks_caret && ctrl_only && segment_edit_key &&
         (!active_editing.empty() ||
          (active_candidates.is_array() && !active_candidates.empty()))) {
@@ -6622,11 +6646,11 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
         msime::linux_host::navigation_key(key)) {
       const bool binding_enabled = s.navigation.command(
           key, (flags & IBUS_SHIFT_MASK) != 0).has_value();
-      // A Korean syllable has no candidate page for a binding to act on unless its Hanja list is open, so the key always finishes it and goes to the application. With the list open an enabled binding was taken above; a disabled one is the application's as for any list, and FINISH writes the Hangul, where the candidate command would write the highlighted Hanja. A Zhuyin conversion and a Vietnamese word are finished the same way: FINISH writes what is composed, never a candidate.
+      // 韩文音节除非打开了汉字列表，否则没有候选页可供绑定操作，所以这个键总是结束它并交给应用。列表打开时，已启用的绑定在上面已经处理；未启用的和任何列表一样属于应用，FINISH 写出谚文，而候选命令会写出高亮的汉字。注音转换、越南文单词和藏文音节串也这样结束：FINISH 写出组字内容，从不写候选；藏文若改发候选命令会多带一个音节点。
       if ((!binding_enabled || commits_on_blur) &&
           (!s.view.at("editing_text").get<std::string>().empty() ||
            !s.view.at("candidates").empty()))
-        apply(engine, msime_client_command(s.session, korean_hanja_list || zhuyin_scheme || vietnamese_scheme
+        apply(engine, msime_client_command(s.session, korean_hanja_list || zhuyin_scheme || vietnamese_scheme || tibetan_scheme
                                                           ? MSIME_FINISH_COMPOSITION
                                                           : MSIME_COMMIT_CANDIDATE));
       return;
@@ -6657,7 +6681,7 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
     if (flags &
         (IBUS_CONTROL_MASK | IBUS_MOD1_MASK | IBUS_MOD4_MASK | IBUS_SUPER_MASK |
          IBUS_META_MASK | IBUS_HYPER_MASK | IBUS_MOD5_MASK)) {
-      // A Korean syllable, Zhuyin conversion or Vietnamese word is already text, so a shortcut finishes it rather than throwing it away.
+      // 韩文音节、注音转换、越南文单词或藏文音节串已经是文字，所以快捷键结束它而不是丢弃它。
       if (commits_on_blur && !s.view.at("editing_text").get<std::string>().empty())
         apply(engine, msime_client_command(s.session, MSIME_FINISH_COMPOSITION));
       else
@@ -6890,7 +6914,7 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
     const bool accepted_apostrophe =
         key == IBUS_apostrophe && has_composition && caret_position != 0 &&
         ((local_mode == "none" && active_scheme != "wubi" && active_scheme != "zhuyin" &&
-          active_scheme != "vietnamese") ||
+          active_scheme != "vietnamese" && active_scheme != "tibetan" && active_scheme != "stroke") ||
          local_mode == "emoji" || local_mode == "kaomoji" ||
          local_mode == "temporary_japanese");
     const bool candidate_input =
@@ -6923,7 +6947,7 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
       return;
     }
     const char ascii = static_cast<char>(key);
-    // An apostrophe inside a spelling is an Engine input character, except in Korean, Zhuyin and Vietnamese, where it is a mark that follows the open composition like any other.
+    // 拼写中的撇号是 Engine 的输入字符，但韩文、注音和越南文除外：在这些方案里它和别的标点一样跟在打开的组字后面。藏文的撇号列在 spelling_symbols 里，在前面已经作为字符交给 Engine。
     if (key >= 0x21 && key <= 0x7e &&
         std::ispunct(static_cast<unsigned char>(ascii)) != 0 &&
         (ascii != '\'' || !has_composition || commits_on_blur)) {
@@ -7122,7 +7146,7 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
       apply(engine, msime_client_command(s.session, MSIME_COMMIT_RAW));
       handled = false;
     } else if (commits_on_blur && has_composition)
-      // Any other key ends a Korean syllable the way Space does, and a Zhuyin conversion or Vietnamese word the same way: the composition is kept and the key goes to the application.
+      // 其他按键像空格那样结束韩文音节，注音转换、越南文单词和藏文音节串也一样：组字内容保留下来，按键交给应用。
       apply(engine, msime_client_command(s.session, MSIME_FINISH_COMPOSITION));
     else
       apply(engine, msime_client_command(s.session, MSIME_CANCEL));
@@ -7595,7 +7619,7 @@ void save_menu_preference(IBusEngine *engine, MenuPreference preference, Json va
             break;
           case MenuPreference::InputScheme:
             snapshot["preferences"]["scheme"] = request.value;
-            // Only a Chinese scheme is the one 中文 returns to; Japanese, Korean and Vietnamese are input languages beside it.
+            // 只有中文方案才是「中文」入口要回到的方案；日文、韩文、越南文和藏文是与它并列的输入语言。
             if (msime::linux_host::scheme::IsChinese(
                     msime::linux_host::scheme_number(request.value.get<std::string>())))
               snapshot["preferences"]["last_chinese_scheme"] = request.value;

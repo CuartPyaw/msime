@@ -154,6 +154,100 @@ test("typing saves once, after the edits pause", async () => {
   expect(result.current.saveState).toBe("saved");
 });
 
+test("clears the previous overlay while a replacement client is loading", async () => {
+  vi.useFakeTimers();
+  let resolveNext!: (value: string) => void;
+  const oldClient = {
+    load: vi.fn().mockResolvedValue("旧释义"),
+    save: vi.fn().mockResolvedValue(undefined),
+  };
+  const nextClient = {
+    load: vi.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveNext = resolve;
+        }),
+    ),
+    save: vi.fn().mockResolvedValue(undefined),
+  };
+  const { result, rerender } = renderHook(({ client }) => useCustomTranslations({ client }), {
+    initialProps: { client: oldClient },
+  });
+  await advance(0);
+  expect(result.current.text).toBe("旧释义");
+
+  rerender({ client: nextClient });
+  expect(result.current.text).toBe("");
+
+  resolveNext("新释义");
+  await advance(0);
+  expect(result.current.text).toBe("新释义");
+});
+
+test("does not save the previous overlay's pending edit into a replacement client", async () => {
+  vi.useFakeTimers();
+  const oldClient = overlayClient(vi.fn().mockResolvedValue(undefined));
+  const nextClient = {
+    load: vi.fn().mockResolvedValue("new\tfixture"),
+    save: vi.fn().mockResolvedValue(undefined),
+  };
+  const { result, rerender } = renderHook(
+    ({ client }: { client?: CustomTranslationsClient }) => useCustomTranslations({ client }),
+    { initialProps: { client: oldClient as CustomTranslationsClient | undefined } },
+  );
+  await advance(0);
+  act(() => result.current.setText("old\tedit"));
+  rerender({ client: undefined });
+  expect(result.current.text).toBe("");
+  rerender({ client: nextClient });
+  await advance(SETTINGS_AUTOSAVE_DELAY_MS);
+  expect(result.current.text).toBe("new\tfixture");
+  expect(nextClient.save).not.toHaveBeenCalled();
+});
+
+test.each([false, true])(
+  "ignores an old overlay save after a host switch (failure=%s)",
+  async (failure) => {
+    vi.useFakeTimers();
+    let resolveOld!: () => void;
+    let rejectOld!: (reason: unknown) => void;
+    const oldClient = overlayClient(
+      vi.fn(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            resolveOld = resolve;
+            rejectOld = reject;
+          }),
+      ),
+    );
+    const nextClient = {
+      load: vi.fn().mockResolvedValue("new\tfixture"),
+      save: vi.fn().mockResolvedValue(undefined),
+    };
+    const { result, rerender } = renderHook(({ client }) => useCustomTranslations({ client }), {
+      initialProps: { client: oldClient },
+    });
+    await advance(0);
+    act(() => result.current.setText("old\tedit"));
+    await advance(SETTINGS_AUTOSAVE_DELAY_MS);
+    expect(result.current.saveState).toBe("saving");
+    rerender({ client: nextClient });
+    await advance(0);
+    act(() => result.current.setText("new\tedit"));
+    await advance(SETTINGS_AUTOSAVE_DELAY_MS);
+    expect(nextClient.save).toHaveBeenCalledExactlyOnceWith("new\tedit");
+    await act(async () => {
+      if (failure) rejectOld(new Error("synthetic old failure"));
+      else resolveOld();
+    });
+    expect(result.current.saveState).toBe("saved");
+    expect(result.current.saveError).toBe("");
+    await act(() => result.current.flush());
+    expect(nextClient.save).toHaveBeenCalledOnce();
+    expect(oldClient.save).toHaveBeenCalledOnce();
+  },
+);
+
 test("a failed save keeps the edit and 重试 writes it again", async () => {
   vi.useFakeTimers();
   const save = vi.fn().mockRejectedValueOnce(new Error("磁盘已满")).mockResolvedValue(undefined);
@@ -192,6 +286,28 @@ test("an edit made while a save is in flight is saved after it", async () => {
   expect(save).toHaveBeenCalledTimes(2);
   expect(save).toHaveBeenLastCalledWith("a\tc");
   expect(result.current.saveState).toBe("saved");
+});
+
+test("an edit made during a save is not lost when the page closes", async () => {
+  vi.useFakeTimers();
+  let finish: () => void = () => undefined;
+  const save = vi
+    .fn()
+    .mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)))
+    .mockResolvedValue(undefined);
+  const client = overlayClient(save);
+  const { result, unmount } = renderHook(() => useCustomTranslations({ client }));
+  await advance(0);
+
+  act(() => result.current.setText("a\tb"));
+  await advance(SETTINGS_AUTOSAVE_DELAY_MS);
+  expect(save).toHaveBeenCalledExactlyOnceWith("a\tb");
+  act(() => result.current.setText("a\tc"));
+  unmount();
+
+  await act(async () => finish());
+  expect(save).toHaveBeenCalledTimes(2);
+  expect(save).toHaveBeenLastCalledWith("a\tc");
 });
 
 test("leaving the page saves the pending edit at once", async () => {

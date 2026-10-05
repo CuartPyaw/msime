@@ -29,7 +29,10 @@ size_t find(const std::vector<TrayMenuItem> &items, TrayMenuCommand command) {
   throw std::runtime_error("Tray menu row missing");
 }
 int main() {
-  TrayMenuCapabilities all{true, true, true, true, true, true, true, true};
+  TrayMenuCapabilities all{true, true, true, true, true, true, true, true, true};
+  // full 的卡片：全部方案、产品名「水杉输入法」。写明而不是取本次构建的版本，这个测试在哪个版本的构建里都查同一张卡片。
+  all.schemes = scheme::all_schemes();
+  all.product_name = "水杉输入法";
   TrayMenuState state;
   state.chinese = true;
   state.fullwidth = false;
@@ -64,6 +67,8 @@ int main() {
         {K::Item, C::SelectCantonese},
         {K::Item, C::SelectZhuyin},
         {K::Item, C::SelectVietnamese},
+        {K::Item, C::SelectTibetan},
+        {K::Item, C::SelectStroke},
         {K::Separator, C::OpenSettings},
         {K::Tool, C::ToggleFloatingToolbar},
         {K::Tool, C::OpenEmojiPanel},
@@ -90,9 +95,36 @@ int main() {
     require(items[10].label == "全拼" && items[11].label == "双拼（小鹤）" &&
             items[12].label == "五笔 86" && items[13].label == "日文" &&
             items[14].label == "韩文" && items[15].label == "粤拼" &&
-            items[16].label == "注音" && items[17].label == "越南文");
-    require(items[25].label == "主题" && items[26].label == "词库…" &&
-            items[27].label == "设置…" && items[28].label == "关于水杉输入法");
+            items[16].label == "注音" && items[17].label == "越南文" &&
+            items[18].label == "藏文" && items[19].label == "笔画");
+    require(items[27].label == "主题" && items[28].label == "词库…" &&
+            items[29].label == "设置…" && items[30].label == "关于水杉输入法");
+  }
+
+  // 只提供五笔的版本：方案组只剩五笔一行，标题和「关于」用这个版本的名字。
+  {
+    auto wubi = all;
+    wubi.schemes = scheme::OfferedSchemes{};
+    wubi.schemes.offered[scheme::Wubi] = true;
+    wubi.schemes.fallback = scheme::Wubi;
+    wubi.product_name = "水杉五笔";
+    auto wubi_state = state;
+    wubi_state.scheme = "wubi";
+    const auto rows = tray_menu_items(wubi, wubi_state);
+    require(rows.size() == items.size() - 9);
+    require(rows[0].label == "水杉五笔" && rows.back().label == "关于水杉五笔");
+    require(rows[find(rows, TrayMenuCommand::SelectWubi)].checked);
+    for (auto command : {TrayMenuCommand::SelectQuanpin, TrayMenuCommand::SelectShuangpin,
+                         TrayMenuCommand::SelectJapanese, TrayMenuCommand::SelectTibetan,
+                         TrayMenuCommand::SelectStroke}) {
+      bool present = true;
+      try {
+        find(rows, command);
+      } catch (const std::runtime_error &) {
+        present = false;
+      }
+      require(!present);
+    }
   }
 
   // Hints: the configured CN/EN key, the TIP's own shortcuts and the theme name.
@@ -128,7 +160,7 @@ int main() {
           !checked(items, TrayMenuCommand::SelectKorean));
   // Exactly one scheme is marked, whichever it is.
   for (const char *scheme : {"quanpin", "shuangpin", "wubi", "japanese", "korean", "cantonese", "zhuyin",
-                             "vietnamese"}) {
+                             "vietnamese", "tibetan", "stroke"}) {
     auto next = state;
     next.scheme = scheme;
     const auto rows = tray_menu_items(all, next);
@@ -137,9 +169,19 @@ int main() {
          {TrayMenuCommand::SelectQuanpin, TrayMenuCommand::SelectShuangpin,
           TrayMenuCommand::SelectWubi, TrayMenuCommand::SelectJapanese,
           TrayMenuCommand::SelectKorean, TrayMenuCommand::SelectCantonese,
-          TrayMenuCommand::SelectZhuyin, TrayMenuCommand::SelectVietnamese})
+          TrayMenuCommand::SelectZhuyin, TrayMenuCommand::SelectVietnamese,
+          TrayMenuCommand::SelectTibetan, TrayMenuCommand::SelectStroke})
       marked += checked(rows, command) ? 1 : 0;
     require(marked == 1);
+  }
+  // Every scheme row names the stored value it selects, and the stroke row is 笔画.
+  require(std::string(tray_menu_scheme(TrayMenuCommand::SelectStroke)) == "stroke");
+  {
+    auto stroke = state;
+    stroke.scheme = "stroke";
+    const auto rows = tray_menu_items(all, stroke);
+    require(checked(rows, TrayMenuCommand::SelectStroke) &&
+            !checked(rows, TrayMenuCommand::SelectQuanpin));
   }
   {
     // Japanese is the language of the Japanese scheme, as the toolbar's 日 shows.
@@ -158,13 +200,19 @@ int main() {
     require(checked(rows, TrayMenuCommand::SelectKorean));
   }
   {
-    // Vietnamese is a language of its own; Cantonese and Zhuyin write Chinese, so the language row stays 中文 for them.
+    // Vietnamese is a language of its own; Cantonese, Zhuyin and Stroke write Chinese, so the language row stays 中文 for them.
     auto vietnamese = state;
     vietnamese.scheme = "vietnamese";
     auto rows = tray_menu_items(all, vietnamese);
     require(rows[find(rows, TrayMenuCommand::SelectChinese)].label == "越南文");
     require(checked(rows, TrayMenuCommand::SelectVietnamese));
-    for (const char *chinese : {"cantonese", "zhuyin"}) {
+    // 藏文同样是独立的语言，语言行显示「藏文」。
+    auto tibetan = state;
+    tibetan.scheme = "tibetan";
+    rows = tray_menu_items(all, tibetan);
+    require(rows[find(rows, TrayMenuCommand::SelectChinese)].label == "藏文");
+    require(checked(rows, TrayMenuCommand::SelectTibetan));
+    for (const char *chinese : {"cantonese", "zhuyin", "stroke"}) {
       auto next = state;
       next.scheme = chinese;
       rows = tray_menu_items(all, next);
@@ -244,6 +292,7 @@ int main() {
 
   // A host without a capability shows the row disabled rather than hiding it or accepting a click that would do nothing.
   TrayMenuCapabilities server_only;
+  server_only.schemes = scheme::all_schemes();
   const auto limited = tray_menu_items(server_only, state);
   require(limited.size() == items.size());
   require(available(limited, TrayMenuCommand::ToggleFloatingToolbar));
@@ -253,15 +302,26 @@ int main() {
         TrayMenuCommand::OpenTheme, TrayMenuCommand::OpenDictionary,
         TrayMenuCommand::OpenSettings, TrayMenuCommand::OpenAbout})
     require(!available(limited, command));
-  // Cantonese and Zhuyin need their dictionary beside the resources; without it the Engine would run another scheme, so the row is disabled. Vietnamese needs no data.
+  // 粤拼、注音和笔画需要资源旁边的词库，缺少时引擎会运行别的方案，所以这一行禁用。越南文和藏文不需要数据。
   require(!available(limited, TrayMenuCommand::SelectCantonese) &&
           !available(limited, TrayMenuCommand::SelectZhuyin) &&
-          available(limited, TrayMenuCommand::SelectVietnamese));
+          !available(limited, TrayMenuCommand::SelectStroke) &&
+          available(limited, TrayMenuCommand::SelectVietnamese) &&
+          available(limited, TrayMenuCommand::SelectTibetan));
   {
     auto cantonese_only = server_only;
     cantonese_only.cantonese = true;
     const auto rows = tray_menu_items(cantonese_only, state);
     require(available(rows, TrayMenuCommand::SelectCantonese) &&
+            !available(rows, TrayMenuCommand::SelectZhuyin) &&
+            !available(rows, TrayMenuCommand::SelectStroke));
+  }
+  {
+    auto stroke_only = server_only;
+    stroke_only.stroke = true;
+    const auto rows = tray_menu_items(stroke_only, state);
+    require(available(rows, TrayMenuCommand::SelectStroke) &&
+            !available(rows, TrayMenuCommand::SelectCantonese) &&
             !available(rows, TrayMenuCommand::SelectZhuyin));
   }
   // Modes and stored switches need no shell.
@@ -280,11 +340,11 @@ int main() {
   require(near(geometry.size.width, 260.0));
   const double expected_height =
       metrics.padding * 2.0 + metrics.header_height +
-      metrics.separator_height * 5.0 + metrics.row_height * 17.0 +
+      metrics.separator_height * 5.0 + metrics.row_height * 19.0 +
       metrics.label_height + metrics.tool_height;
   require(near(geometry.size.height, expected_height));
   require(near(tray_menu_size(items, metrics).height, expected_height));
-  // Eight schemes make the design's card taller than a 1080p work area at 150% scaling; fitted to it, the command rows shorten and nothing is clipped. A card that fits keeps the design's metrics.
+  // 十个方案让设计尺寸的卡片高过 150% 缩放下 1080p 的工作区；按工作区适配后命令行变矮，什么都不被裁掉。放得下的卡片保持设计尺寸。
   {
     const double work = 1040.0 / 1.5;
     require(geometry.size.height > work);
@@ -418,7 +478,7 @@ int main() {
     selected.scheme = scheme;
     require(checked(tray_menu_items(all, selected), row.command));
   }
-  require(scheme_rows == 8);
+  require(scheme_rows == 10);
   require(!tray_menu_scheme(TrayMenuCommand::SelectChinese));
   require(!tray_menu_scheme(TrayMenuCommand::OpenSettings));
 }

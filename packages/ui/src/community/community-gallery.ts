@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { runAsyncAction } from "../core/async-action";
 import { appendUniqueById } from "./community-helpers";
 import { communityReportedNotice, type CommunityReportReason } from "./community-report";
+import { useCommunityClientLifecycle } from "./use-community-client-lifecycle";
+import { useAsyncGeneration } from "../settings/use-async-generation";
 
 export type CommunityGalleryPage<T> = {
   items: T[];
@@ -56,14 +58,17 @@ export function useCommunityGallery<T extends { id: string }>({
   const [mineOnly, setMineOnly] = useState(initialMine);
   const [signInRequired, setSignInRequired] = useState(false);
   const [confirmUnpublish, setConfirmUnpublish] = useState(false);
-  const listGeneration = useRef(0);
-  const detailGeneration = useRef(0);
+  const listGeneration = useAsyncGeneration();
+  const detailGeneration = useAsyncGeneration();
   const nextOffset = useRef(0);
   const activeSearch = useRef("");
   const activeMine = useRef(initialMine);
-  const mounted = useRef(true);
-  const clientGeneration = useRef(0);
-  const actionBusyRef = useRef(false);
+  const {
+    mounted,
+    clientGeneration,
+    actionRunning: actionBusyRef,
+    isCurrent,
+  } = useCommunityClientLifecycle(client, errorMessage, needsSignIn);
 
   const fail = useCallback(
     (failure: unknown) => {
@@ -77,6 +82,7 @@ export function useCommunityGallery<T extends { id: string }>({
   /** Resolves false only when this request was the latest and failed, which leaves the list as it was; true when it succeeded or a newer request superseded it. */
   const requestList = useCallback(
     async (query: string, append: boolean, mine = activeMine.current): Promise<boolean> => {
+      const currentClient = clientGeneration.current;
       const generation = ++listGeneration.current;
       const offset = append ? nextOffset.current : 0;
       setListBusy(true);
@@ -94,11 +100,11 @@ export function useCommunityGallery<T extends { id: string }>({
           (page.skipped ?? 0) > 0;
           extra++
         ) {
-          if (generation !== listGeneration.current) return true;
+          if (!isCurrent(currentClient) || generation !== listGeneration.current) return true;
           pageOffset += page.skipped ?? 0;
           page = await client.list(pageOffset, query, mine);
         }
-        if (generation !== listGeneration.current) return true;
+        if (!isCurrent(currentClient) || generation !== listGeneration.current) return true;
         const items = page.items;
         setItems((current) => (append ? appendUniqueById(current, items) : items));
         nextOffset.current = pageOffset + page.items.length + (page.skipped ?? 0);
@@ -109,33 +115,25 @@ export function useCommunityGallery<T extends { id: string }>({
         setHasMore(page.has_more);
         return true;
       } catch (requestError) {
-        if (generation !== listGeneration.current) return true;
+        if (!isCurrent(currentClient) || generation !== listGeneration.current) return true;
         fail(requestError);
         if (!append) setMineOnly(activeMine.current);
         return false;
       } finally {
-        if (generation === listGeneration.current) setListBusy(false);
+        if (isCurrent(currentClient) && generation === listGeneration.current) setListBusy(false);
       }
     },
-    [client, fail],
+    [client, clientGeneration, fail, isCurrent],
   );
 
   useEffect(() => {
-    const currentClient = ++clientGeneration.current;
-    mounted.current = true;
-    actionBusyRef.current = false;
     setActionBusy(false);
     void requestList("", false, activeMine.current);
-    return () => {
-      mounted.current = false;
-      if (clientGeneration.current === currentClient) clientGeneration.current++;
-      listGeneration.current += 1;
-      detailGeneration.current += 1;
-    };
   }, [client, requestList]);
 
   const open = useCallback(
     (item: T) => {
+      const currentClient = clientGeneration.current;
       const generation = ++detailGeneration.current;
       setSelected(item);
       setDetailBusy(true);
@@ -146,16 +144,19 @@ export function useCommunityGallery<T extends { id: string }>({
       void client
         .detail(item.id)
         .then((value) => {
-          if (generation === detailGeneration.current) setSelected(value);
+          if (isCurrent(currentClient) && generation === detailGeneration.current)
+            setSelected(value);
         })
         .catch((detailError) => {
-          if (generation === detailGeneration.current) fail(detailError);
+          if (isCurrent(currentClient) && generation === detailGeneration.current)
+            fail(detailError);
         })
         .finally(() => {
-          if (generation === detailGeneration.current) setDetailBusy(false);
+          if (isCurrent(currentClient) && generation === detailGeneration.current)
+            setDetailBusy(false);
         });
     },
-    [client, fail],
+    [client, clientGeneration, fail, isCurrent],
   );
 
   const closeDetail = useCallback(() => {
@@ -168,6 +169,11 @@ export function useCommunityGallery<T extends { id: string }>({
     setConfirmUnpublish(false);
   }, [actionBusy]);
 
+  const replaceSelected = useCallback((updated: T) => {
+    setSelected(updated);
+    setItems((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+  }, []);
+
   const beginAction = useCallback(() => {
     if (!selected || actionBusy) return null;
     if (actionBusyRef.current) return null;
@@ -175,11 +181,6 @@ export function useCommunityGallery<T extends { id: string }>({
     setActionBusy(true);
     return clientGeneration.current;
   }, [actionBusy, selected]);
-
-  const isCurrent = useCallback(
-    (generation: number) => mounted.current && generation === clientGeneration.current,
-    [],
-  );
 
   const endAction = useCallback(
     (generation: number) => {
@@ -288,6 +289,7 @@ export function useCommunityGallery<T extends { id: string }>({
     activeSearch: activeSearch.current,
     setItems,
     setSelected,
+    replaceSelected,
     setError,
     setActionNotice,
     setMineOnly,

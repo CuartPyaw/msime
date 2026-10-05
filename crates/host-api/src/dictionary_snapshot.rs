@@ -22,7 +22,7 @@ use std::{
     collections::{HashMap, HashSet},
     ffi::{c_char, c_void},
     io::{BufRead, BufReader, Write},
-    path::{Component, Path, PathBuf},
+    path::Path,
     sync::{
         atomic::{AtomicU64, Ordering},
         Mutex, OnceLock,
@@ -279,40 +279,7 @@ fn inspect_snapshot_record(
 }
 
 fn reject_symlinked_snapshot_path(path: &Path) -> Result<(), &'static str> {
-    let mut current = PathBuf::new();
-    let mut saw_prefix_alias = false;
-    let mut saw_real_component = false;
-    let components: Vec<_> = path.components().collect();
-    for (index, component) in components.iter().enumerate() {
-        match component {
-            Component::Prefix(_) | Component::RootDir => current.push(component),
-            Component::CurDir => {}
-            Component::ParentDir => current.push(component),
-            Component::Normal(_) => {
-                current.push(component);
-                match std::fs::symlink_metadata(&current) {
-                    Ok(metadata) if metadata.file_type().is_symlink() => {
-                        let system_alias = path.is_absolute()
-                            && !saw_real_component
-                            && !saw_prefix_alias
-                            && matches!(component, Component::Normal(name) if *name == std::ffi::OsStr::new("tmp") || *name == std::ffi::OsStr::new("var"));
-                        if index + 1 == components.len()
-                            || saw_real_component
-                            || saw_prefix_alias
-                            || !system_alias
-                        {
-                            return Err("snapshot file unavailable");
-                        }
-                        saw_prefix_alias = true;
-                    }
-                    Ok(_) => saw_real_component = true,
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(_) => return Err("snapshot file unavailable"),
-                }
-            }
-        }
-    }
-    Ok(())
+    msime_path_trust::reject_symlinked_components(path).map_err(|_| "snapshot file unavailable")
 }
 
 /// Validate the complete NDJSON envelope before a host calls the expensive Engine staging path.
@@ -553,7 +520,8 @@ fn version(options: &EngineOptions) -> Result<String, &'static str> {
 
 fn activation_receipt(options: &EngineOptions) -> Result<Option<String>, &'static str> {
     let path = Path::new(&options.user_data).join(ACTIVATION_RECEIPT_NAME);
-    let file = match std::fs::File::open(path) {
+    reject_symlinked_snapshot_path(&path).map_err(|_| "snapshot activation receipt unavailable")?;
+    let file = match std::fs::File::open(&path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => return Err("snapshot activation receipt unavailable"),
@@ -1082,10 +1050,11 @@ fn snapshot_queue_process(
         .map_err(snapshot_queue_error)?
         .to_owned();
     let stream = SnapshotFileRecords::open(&path).map_err(str::to_owned)?;
-    let specification: ResourceSet = serde_json::from_str(include_str!(
-        "../../../resources/desktop-dictionary.lock.json"
-    ))
-    .map_err(|_| "snapshot resources rejected".to_owned())?;
+    // 与准备宿主时相同：按文档记录的版本的锁校验资源、计算代次。
+    let specification = options
+        .edition()
+        .resource_set()
+        .map_err(|_| "snapshot resources rejected".to_owned())?;
     let prepared = prepare(
         PrepareRequest {
             options,
@@ -1299,10 +1268,12 @@ pub unsafe extern "C" fn msime_client_snapshot_prepare(
         let request: PrepareRequest =
             serde_json::from_slice(unsafe { std::slice::from_raw_parts(request, length) })
                 .map_err(|_| "invalid snapshot request")?;
-        let specification: ResourceSet = serde_json::from_str(include_str!(
-            "../../../resources/desktop-dictionary.lock.json"
-        ))
-        .map_err(|_| "snapshot resources rejected")?;
+        // 与准备宿主时相同：按文档记录的版本的锁校验资源、计算代次。
+        let specification = request
+            .options
+            .edition()
+            .resource_set()
+            .map_err(|_| "snapshot resources rejected")?;
         let mut buffer = vec![0; BUFFER_LIMIT];
         let stream = std::iter::from_fn(move || {
             let length = unsafe { next(context, buffer.as_mut_ptr(), buffer.len()) };

@@ -22,8 +22,10 @@ import { ReservedCandidatePreview, type PreviewReserve } from "./skin-candidate-
 import { candidateFontSize, candidateFontStyle } from "../candidate/candidate-font-size";
 import { candidateFamilyStyle } from "../candidate/candidate-font-family";
 import { candidateOpacityPercent, candidateWindowStyle } from "../candidate/candidate-window-style";
-import * as settings from "../settings/settings-style";
 import { ActionButton } from "../core/action-button";
+import { StatusMessage } from "../core/status-message";
+import { SkinPreviewStage } from "./skin-preview-stage";
+import { SkinPreviewSurface } from "./skin-preview-surface";
 
 /** The host's own `resolve()` answer for `request`, when the host has a theme call; `undefined` until it arrives, when it fails, and for a request it was not asked for. */
 function useResolvedTheme(
@@ -108,16 +110,15 @@ function LoadedPreview({
   };
   return (
     <div className={decorated ? "external-skin-decorated" : undefined}>
-      <div
-        data-skin-preview=""
-        className={`${settings.skinCardPreview} appearance-candidate-preview ${scope}`}
+      <SkinPreviewSurface
+        className={`appearance-candidate-preview ${scope}`}
         style={geometry}
         data-preview-theme={theme}
         data-decoration-align={skin.decorationAlign ?? "right"}
         data-font-size={candidateFontSize(preferences.candidate_font_size)}
         aria-hidden="true"
       >
-        <div className={settings.skinPreviewStage} data-skin-stage="">
+        <SkinPreviewStage>
           <ReservedCandidatePreview
             reserve={reserve}
             orientation={layout}
@@ -130,14 +131,20 @@ function LoadedPreview({
             background={drawnBackground}
             onBackgroundError={background.onError}
           />
-        </div>
-      </div>
-      {paletteFailed && <p role="status">当前浏览器无法隐藏皮肤的选中条，其余配色照常预览。</p>}
+        </SkinPreviewStage>
+      </SkinPreviewSurface>
+      {paletteFailed && (
+        <StatusMessage role="status">
+          当前浏览器无法隐藏皮肤的选中条，其余配色照常预览。
+        </StatusMessage>
+      )}
       {(image?.failed || decodeFailed || background.failed) && (
-        <p role="status">皮肤图片加载失败，保留基础预览。可刷新预览重试。</p>
+        <StatusMessage role="status">
+          皮肤图片加载失败，保留基础预览。可刷新预览重试。
+        </StatusMessage>
       )}
       {(decoration || skin.background) && !readImage && (
-        <p role="status">当前宿主不支持皮肤图片预览。</p>
+        <StatusMessage role="status">当前宿主不支持皮肤图片预览。</StatusMessage>
       )}
     </div>
   );
@@ -186,7 +193,10 @@ export function ExternalAppearancePreview({
     };
   }, [key, active, scan, id]);
   if (!active) return null;
-  if (!scan) return <p role="status">当前宿主不支持扫描外部皮肤，无法预览所选皮肤。</p>;
+  if (!scan)
+    return (
+      <StatusMessage role="status">当前宿主不支持扫描外部皮肤，无法预览所选皮肤。</StatusMessage>
+    );
   const current = result?.key === key ? result : undefined;
   const skin = current?.skin;
   // A built-in base fixes the mode whatever the host draws in, as `resolve()` does: the package palette for that mode is used when the package declares it, and the base alone is drawn when it does not.
@@ -204,13 +214,15 @@ export function ExternalAppearancePreview({
         label="刷新预览"
       />
       {!current ? (
-        <p role="status">正在读取所选皮肤。</p>
+        <StatusMessage role="status">正在读取所选皮肤。</StatusMessage>
       ) : current.failed ? (
-        <p role="status">读取所选皮肤失败，请刷新预览重试。</p>
+        <StatusMessage role="status">读取所选皮肤失败，请刷新预览重试。</StatusMessage>
       ) : !skin ? (
-        <p role="status">未找到所选皮肤，请检查皮肤目录后刷新预览。</p>
+        <StatusMessage role="status">未找到所选皮肤，请检查皮肤目录后刷新预览。</StatusMessage>
       ) : !compatible ? (
-        <p role="status">所选皮肤不支持当前布局或{theme === "dark" ? "深色" : "浅色"}模式。</p>
+        <StatusMessage role="status">
+          所选皮肤不支持当前布局或{theme === "dark" ? "深色" : "浅色"}模式。
+        </StatusMessage>
       ) : (
         <LoadedPreview
           skin={skin}

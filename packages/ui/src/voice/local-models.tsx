@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import * as settings from "../settings/settings-style";
+import { SettingsManagerBlock } from "../settings/settings-manager-block";
+import { SettingsManagerNote } from "../settings/settings-manager-note";
 import { rowTitle } from "../core/platform-controls-style";
 import { ActionButton } from "../core/action-button";
 import {
@@ -11,6 +12,9 @@ import {
   localModelStageLabel,
   visibleLocalModels,
 } from "./local-model-helpers";
+import { StatusMessage } from "../core/status-message";
+import { useAsyncGeneration } from "../settings/use-async-generation";
+import { useMountedRef } from "../settings/use-mounted-ref";
 export {
   formatModelBytes,
   localModelErrorMessage,
@@ -97,7 +101,8 @@ export function LocalModelManager({
   const [progress, setProgress] = useState<Record<string, LocalVoiceModelProgress>>({});
   const [installing, setInstalling] = useState<Record<string, boolean>>({});
   const [removing, setRemoving] = useState<Record<string, boolean>>({});
-  const mounted = useRef(true);
+  const mounted = useMountedRef();
+  const clientGeneration = useAsyncGeneration(client);
   const activeClient = useRef(client);
   activeClient.current = client;
   // A download takes minutes; what it finishes into is the page as it is then, not as it was on
@@ -118,26 +123,32 @@ export function LocalModelManager({
   };
 
   useEffect(() => {
-    mounted.current = true;
+    const generation = clientGeneration.current;
+    setList(undefined);
+    setNotice("");
+    setProgress({});
+    setInstalling({});
+    setRemoving({});
     void refresh();
     let unlisten: (() => void) | undefined;
-    let cancelled = false;
     void client
       .onProgress((event) => {
-        if (mounted.current && activeClient.current === client)
+        if (
+          mounted.current &&
+          activeClient.current === client &&
+          generation === clientGeneration.current
+        )
           setProgress((current) => ({ ...current, [event.id]: event }));
       })
       .then((stop) => {
-        if (cancelled) stop();
+        if (generation !== clientGeneration.current) stop();
         else unlisten = stop;
       })
       .catch(() => undefined);
     return () => {
-      mounted.current = false;
-      cancelled = true;
       unlisten?.();
     };
-  }, [client]);
+  }, [client, clientGeneration]);
 
   const install = async (model: LocalVoiceModel) => {
     setNotice("");
@@ -197,12 +208,12 @@ export function LocalModelManager({
 
   const models = list ? visibleLocalModels(list.models, mobile, modelPath) : [];
   return (
-    <div className={settings.managerBlock} role="group" aria-label="本地识别模型">
+    <SettingsManagerBlock role="group" aria-label="本地识别模型">
       <div>
         <span className={rowTitle} data-row-title="">
           本地识别模型
         </span>
-        <p className={settings.managerNote}>{localModelNote}</p>
+        <SettingsManagerNote>{localModelNote}</SettingsManagerNote>
       </div>
       {!list && !notice && <p>正在读取模型列表…</p>}
       <ul className="grid gap-3" aria-label="可用的本地模型">
@@ -291,7 +302,7 @@ export function LocalModelManager({
           );
         })}
       </ul>
-      {notice && <p role="status">{notice}</p>}
-    </div>
+      {notice && <StatusMessage role="status">{notice}</StatusMessage>}
+    </SettingsManagerBlock>
   );
 }

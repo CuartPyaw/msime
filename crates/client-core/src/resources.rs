@@ -27,9 +27,12 @@ pub struct ResourceSet {
     pub artifacts: Vec<Artifact>,
 }
 
-/// macOS 发布包不内置、改为按需下载的桌面词库文件。两者作为一个整体出现或缺席：日文词典与它的 Mozc 许可说明必须同时在场，只有一个在场时按原规则校验失败。
-pub const MACOS_ON_DEMAND_ARTIFACTS: [&str; 2] =
-    ["dict_japanese.dat", "mozc_dictionary_oss_README.txt"];
+/// macOS 发布包不内置、改为按需下载的桌面词库文件。三者作为一个整体出现或缺席：日文词典与它的两份许可文本（Mozc 词典说明里的 IPAdic/ICOT 条款、Mozc 的 BSD 许可）必须同时在场，只缺一部分时按原规则校验失败。
+pub const MACOS_ON_DEMAND_ARTIFACTS: [&str; 3] = [
+    "msime-japanese.dat",
+    "msime-mozc_dictionary_oss_README.txt",
+    "msime-mozc_LICENSE.txt",
+];
 
 #[derive(Debug, thiserror::Error)]
 pub enum ResourceError {
@@ -465,8 +468,8 @@ mod tests {
         ResourceSet {
             source_commit: "a".repeat(40),
             artifacts: vec![Artifact {
-                name: "msime.db".into(),
-                url: "https://example.invalid/msime.db".into(),
+                name: "msime-pinyin.db".into(),
+                url: "https://example.invalid/msime-pinyin.db".into(),
                 sha256: hex::encode(Sha256::digest(b"fixture")),
                 size: 7,
             }],
@@ -485,7 +488,7 @@ mod tests {
         }
     }
 
-    /// 在现有夹具上追加两个按需下载的文件，夹在核心文件中间，用来检查顺序保持不变。
+    /// 在现有夹具上追加三个按需下载的文件，夹在核心文件中间，用来检查顺序保持不变。
     fn desktop_specification() -> ResourceSet {
         let mut set = specification();
         set.artifacts
@@ -493,13 +496,15 @@ mod tests {
         set.artifacts
             .push(fixture_artifact(MACOS_ON_DEMAND_ARTIFACTS[1], b"readme"));
         set.artifacts
-            .push(fixture_artifact("english.db", b"english"));
+            .push(fixture_artifact(MACOS_ON_DEMAND_ARTIFACTS[2], b"license"));
+        set.artifacts
+            .push(fixture_artifact("msime-english.db", b"english"));
         set
     }
 
     fn write_core(directory: &Path) {
-        fs::write(directory.join("msime.db"), b"fixture").unwrap();
-        fs::write(directory.join("english.db"), b"english").unwrap();
+        fs::write(directory.join("msime-pinyin.db"), b"fixture").unwrap();
+        fs::write(directory.join("msime-english.db"), b"english").unwrap();
     }
 
     fn names(set: &ResourceSet) -> Vec<&str> {
@@ -513,9 +518,13 @@ mod tests {
         let core = spec.without(&MACOS_ON_DEMAND_ARTIFACTS);
         assert_eq!(
             names(&on_demand),
-            ["dict_japanese.dat", "mozc_dictionary_oss_README.txt"]
+            [
+                "msime-japanese.dat",
+                "msime-mozc_dictionary_oss_README.txt",
+                "msime-mozc_LICENSE.txt"
+            ]
         );
-        assert_eq!(names(&core), ["msime.db", "english.db"]);
+        assert_eq!(names(&core), ["msime-pinyin.db", "msime-english.db"]);
         assert_eq!(on_demand.source_commit, spec.source_commit);
         assert_eq!(core.source_commit, spec.source_commit);
         assert!(on_demand.validate().is_ok() && core.validate().is_ok());
@@ -527,7 +536,7 @@ mod tests {
         write_core(directory.path());
         let spec = desktop_specification();
         let shipped = spec.as_shipped_in(directory.path(), &MACOS_ON_DEMAND_ARTIFACTS);
-        assert_eq!(names(&shipped), ["msime.db", "english.db"]);
+        assert_eq!(names(&shipped), ["msime-pinyin.db", "msime-english.db"]);
         let store = ResourceStore::new(directory.path());
         assert!(store.verify(directory.path(), &shipped).is_ok());
         assert_ne!(spec.generation().unwrap(), shipped.generation().unwrap());
@@ -537,7 +546,7 @@ mod tests {
     fn a_half_present_pair_is_verified_against_the_full_set() {
         let directory = tempfile::tempdir().unwrap();
         write_core(directory.path());
-        fs::write(directory.path().join("dict_japanese.dat"), b"japanese").unwrap();
+        fs::write(directory.path().join("msime-japanese.dat"), b"japanese").unwrap();
         let spec = desktop_specification();
         let shipped = spec.as_shipped_in(directory.path(), &MACOS_ON_DEMAND_ARTIFACTS);
         assert_eq!(names(&shipped), names(&spec));
@@ -545,7 +554,7 @@ mod tests {
             .verify(directory.path(), &shipped)
             .unwrap_err();
         assert!(
-            matches!(&error, ResourceError::ExistingGeneration(message) if message.contains("mozc_dictionary_oss_README.txt")),
+            matches!(&error, ResourceError::ExistingGeneration(message) if message.contains("msime-mozc_dictionary_oss_README.txt") && message.contains("msime-mozc_LICENSE.txt")),
             "{error}"
         );
     }
@@ -554,12 +563,15 @@ mod tests {
     fn a_complete_directory_ships_the_full_set() {
         let directory = tempfile::tempdir().unwrap();
         write_core(directory.path());
-        fs::write(directory.path().join("dict_japanese.dat"), b"japanese").unwrap();
+        fs::write(directory.path().join("msime-japanese.dat"), b"japanese").unwrap();
         fs::write(
-            directory.path().join("mozc_dictionary_oss_README.txt"),
+            directory
+                .path()
+                .join("msime-mozc_dictionary_oss_README.txt"),
             b"readme",
         )
         .unwrap();
+        fs::write(directory.path().join("msime-mozc_LICENSE.txt"), b"license").unwrap();
         let spec = desktop_specification();
         let shipped = spec.as_shipped_in(directory.path(), &MACOS_ON_DEMAND_ARTIFACTS);
         assert_eq!(names(&shipped), names(&spec));
@@ -581,8 +593,8 @@ mod tests {
         let _ = lock.without(&MACOS_ON_DEMAND_ARTIFACTS);
         let shipped = lock.as_shipped_in(empty.path(), &MACOS_ON_DEMAND_ARTIFACTS);
         assert_eq!(lock.generation().unwrap(), before);
-        assert_eq!(lock.artifacts.len(), 9);
-        assert_eq!(shipped.artifacts.len(), 7);
+        assert_eq!(lock.artifacts.len(), 12);
+        assert_eq!(shipped.artifacts.len(), 9);
     }
 
     #[cfg(unix)]
@@ -591,9 +603,9 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         write_core(directory.path());
         let outside = tempfile::tempdir().unwrap();
-        let target = outside.path().join("dict_japanese.dat");
+        let target = outside.path().join("msime-japanese.dat");
         fs::write(&target, b"japanese").unwrap();
-        std::os::unix::fs::symlink(&target, directory.path().join("dict_japanese.dat")).unwrap();
+        std::os::unix::fs::symlink(&target, directory.path().join("msime-japanese.dat")).unwrap();
         let spec = desktop_specification();
         let shipped = spec.as_shipped_in(directory.path(), &MACOS_ON_DEMAND_ARTIFACTS);
         assert_eq!(names(&shipped), names(&spec));
@@ -630,14 +642,14 @@ mod tests {
         let store = ResourceStore::new(root.path());
         let spec = specification();
         let path = store.install(&spec, |_| Ok(source(b"fixture"))).unwrap();
-        assert_eq!(fs::read(path.join("msime.db")).unwrap(), b"fixture");
+        assert_eq!(fs::read(path.join("msime-pinyin.db")).unwrap(), b"fixture");
         assert_eq!(
             store
                 .install(&spec, |_| panic!("must not fetch cached resources"))
                 .unwrap(),
             path
         );
-        fs::write(path.join("msime.db"), b"damaged").unwrap();
+        fs::write(path.join("msime-pinyin.db"), b"damaged").unwrap();
         assert!(matches!(
             store.install(&spec, |_| panic!("must not overwrite active resources")),
             Err(ResourceError::Integrity)
@@ -680,7 +692,7 @@ mod tests {
         let spec = specification();
         let stale = root.path().join("incoming-abandoned");
         fs::create_dir(&stale).unwrap();
-        fs::write(stale.join("msime.db"), b"fix").unwrap();
+        fs::write(stale.join("msime-pinyin.db"), b"fix").unwrap();
         let path = store.install(&spec, |_| Ok(source(b"fixture"))).unwrap();
         assert!(!stale.exists());
         assert_eq!(fs::read_dir(root.path()).unwrap().count(), 2);
@@ -706,7 +718,7 @@ mod tests {
         assert!(store
             .install(&spec, |_| Err(std::io::Error::other("offline")))
             .is_err());
-        assert_eq!(fs::read(old.join("msime.db")).unwrap(), b"fixture");
+        assert_eq!(fs::read(old.join("msime-pinyin.db")).unwrap(), b"fixture");
     }
     #[test]
     fn verification_admits_the_engine_helpcode_directory_only() {
@@ -734,7 +746,7 @@ mod tests {
             "a\\b",
             "CON",
             "nul.db",
-            "msime.db.",
+            "msime-pinyin.db.",
             ".hidden",
         ] {
             let mut spec = specification();
@@ -743,7 +755,7 @@ mod tests {
         }
         let mut spec = specification();
         let mut duplicate = spec.artifacts[0].clone();
-        duplicate.name = "MSIME.DB".into();
+        duplicate.name = "MSIME-PINYIN.DB".into();
         spec.artifacts.push(duplicate);
         assert!(spec.validate().is_err());
     }
@@ -758,7 +770,7 @@ mod tests {
     fn a_recorded_verification_only_matches_the_files_it_recorded() {
         let directory = tempfile::tempdir().unwrap();
         let spec = specification();
-        fs::write(directory.path().join("msime.db"), b"fixture").unwrap();
+        fs::write(directory.path().join("msime-pinyin.db"), b"fixture").unwrap();
 
         let recorded = VerifiedMarker::describe(directory.path(), &spec)
             .unwrap()
@@ -780,7 +792,7 @@ mod tests {
 
         // Same length, written again: the modification time moves and the record stops matching.
         std::thread::sleep(std::time::Duration::from_millis(20));
-        fs::write(directory.path().join("msime.db"), b"FIXTURE").unwrap();
+        fs::write(directory.path().join("msime-pinyin.db"), b"FIXTURE").unwrap();
         assert_ne!(
             VerifiedMarker::describe(directory.path(), &spec).unwrap(),
             Some(recorded.clone()),
@@ -788,14 +800,18 @@ mod tests {
         );
 
         // A different length is caught whatever the clock did.
-        fs::write(directory.path().join("msime.db"), b"fixture-and-more").unwrap();
+        fs::write(
+            directory.path().join("msime-pinyin.db"),
+            b"fixture-and-more",
+        )
+        .unwrap();
         let grown = VerifiedMarker::describe(directory.path(), &spec)
             .unwrap()
             .expect("still present");
         assert_ne!(grown.files[0].1, recorded.files[0].1);
 
         // A missing artifact is not describable, so there is nothing to compare and it is hashed.
-        fs::remove_file(directory.path().join("msime.db")).unwrap();
+        fs::remove_file(directory.path().join("msime-pinyin.db")).unwrap();
         assert_eq!(
             VerifiedMarker::describe(directory.path(), &spec).unwrap(),
             None
@@ -806,7 +822,7 @@ mod tests {
     fn marker_misses_unpinned_entries_and_symlinked_artifacts() {
         let directory = tempfile::tempdir().unwrap();
         let spec = specification();
-        fs::write(directory.path().join("msime.db"), b"fixture").unwrap();
+        fs::write(directory.path().join("msime-pinyin.db"), b"fixture").unwrap();
         assert!(VerifiedMarker::describe(directory.path(), &spec)
             .unwrap()
             .is_some());
@@ -825,8 +841,8 @@ mod tests {
             use std::os::unix::fs::symlink;
             let target = directory.path().join("target.db");
             fs::write(&target, b"fixture").unwrap();
-            fs::remove_file(directory.path().join("msime.db")).unwrap();
-            symlink(&target, directory.path().join("msime.db")).unwrap();
+            fs::remove_file(directory.path().join("msime-pinyin.db")).unwrap();
+            symlink(&target, directory.path().join("msime-pinyin.db")).unwrap();
             assert_eq!(
                 VerifiedMarker::describe(directory.path(), &spec).unwrap(),
                 None
@@ -848,7 +864,7 @@ mod tests {
         let spec = specification();
         let resources = directory.path().join("resources");
         fs::create_dir(&resources).unwrap();
-        fs::write(resources.join("msime.db"), b"fixture").unwrap();
+        fs::write(resources.join("msime-pinyin.db"), b"fixture").unwrap();
         let marker = VerifiedMarker::describe(&resources, &spec)
             .unwrap()
             .unwrap();
@@ -895,7 +911,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let resources = root.path().join("resources");
         fs::create_dir(&resources).unwrap();
-        fs::write(resources.join("msime.db"), b"fixture").unwrap();
+        fs::write(resources.join("msime-pinyin.db"), b"fixture").unwrap();
         let marker = VerifiedMarker::describe(&resources, &specification())
             .unwrap()
             .unwrap();
@@ -917,7 +933,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let resources = root.path().join("resources");
         fs::create_dir(&resources).unwrap();
-        fs::write(resources.join("msime.db"), b"fixture").unwrap();
+        fs::write(resources.join("msime-pinyin.db"), b"fixture").unwrap();
         let marker = VerifiedMarker::describe(&resources, &specification())
             .unwrap()
             .unwrap();

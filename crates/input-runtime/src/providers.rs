@@ -80,8 +80,7 @@ fn provider_path_has_no_symlink_ancestors(path: &Path) -> bool {
         }
         match std::fs::symlink_metadata(ancestor) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
-                #[cfg(target_os = "macos")]
-                if ancestor == Path::new("/tmp") || ancestor == Path::new("/var") {
+                if msime_path_trust::is_trusted_system_alias(ancestor) {
                     continue;
                 }
                 return false;

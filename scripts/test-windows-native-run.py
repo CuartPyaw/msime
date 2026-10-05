@@ -62,7 +62,8 @@ HOST_DIFFERENCES = {
 # Sources whose `main` takes an argument the build system supplies.
 ARGUMENTS = {
     "core/installer_launch.cpp": ["platforms/windows/installer/msime_setup.iss"],
-    "input/zhuyin_keys.cpp": ["platforms/windows/tests/input/fixtures/zhuyin.db"],
+    "input/zhuyin_keys.cpp": ["platforms/windows/tests/input/fixtures/msime-zhuyin.db"],
+    "input/stroke_keys.cpp": ["platforms/windows/tests/input/fixtures/msime-stroke.db"],
 }
 
 # The three online workers are the exception to "one translation unit": their
@@ -107,8 +108,28 @@ COMPANIONS: dict[str, tuple[list[str], bool]] = {
         ],
         True,
     ),
+    # The Server side of the Stroke scheme, against a real Engine session and a checked-in synthetic dictionary.
+    "input/stroke_keys.cpp": (
+        [
+            "src/ipc/ReplyComposer.cpp",
+            "src/ipc/ReplyCodec.cpp",
+            "src/ipc/ServerSession.cpp",
+            "src/input/ChineseTextConversion.cpp",
+        ],
+        True,
+    ),
     # The Server side of the Vietnamese scheme, against a real Engine session.
     "input/vietnamese_keys.cpp": (
+        [
+            "src/ipc/ReplyComposer.cpp",
+            "src/ipc/ReplyCodec.cpp",
+            "src/ipc/ServerSession.cpp",
+            "src/input/ChineseTextConversion.cpp",
+        ],
+        True,
+    ),
+    # 藏文方案的 Server 端，对真实 Engine 会话运行。
+    "input/tibetan_keys.cpp": (
         [
             "src/ipc/ReplyComposer.cpp",
             "src/ipc/ReplyCodec.cpp",
@@ -213,6 +234,8 @@ def include_flags() -> list[str]:
         directories += [path for path in sorted(tsf.iterdir()) if path.is_dir() and path.name != "tests"]
     flags = [f"-I{path}" for path in directories if path.exists()]
     flags += [f"-I{path}" for path in EXTRA_INCLUDES if pathlib.Path(path).exists()]
+    # shared/contracts/msime_edition.h 要求构建选定一个版本；Windows 的 CMake 缺省编 full，这里照做。
+    flags += ["-DMSIME_EDITION_FULL"]
     return flags
 
 

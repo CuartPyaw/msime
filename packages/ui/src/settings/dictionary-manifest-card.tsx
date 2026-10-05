@@ -1,7 +1,8 @@
+import { SettingsGroupNote } from "./settings-group-note";
 import { useEffect, useState } from "react";
 import { GroupList } from "../core/platform-controls";
-import * as settings from "./settings-style";
 import { SummaryRow } from "./summary-row";
+import { useAsyncGeneration } from "./use-async-generation";
 
 export interface DictionaryManifest {
   profile: string;
@@ -16,34 +17,32 @@ export interface DictionaryManifestCardProps {
 export function DictionaryManifestCard({ read }: DictionaryManifestCardProps) {
   const [manifest, setManifest] = useState<DictionaryManifest | null>(null);
   const [failed, setFailed] = useState(false);
+  const generation = useAsyncGeneration(read);
 
   useEffect(() => {
-    let active = true;
+    const requestGeneration = generation.current;
     void read()
       .then((value) => {
-        if (active) setManifest(value);
+        if (generation.current === requestGeneration) setManifest(value);
       })
       .catch(() => {
-        if (active) setFailed(true);
+        if (generation.current === requestGeneration) setFailed(true);
       });
-    return () => {
-      active = false;
-    };
-  }, [read]);
+  }, [read, generation]);
 
   if (failed) {
     return (
       <GroupList title="词库信息">
-        <p className={settings.groupNote}>无法读取随应用安装的词库清单，请重新安装后再试。</p>
+        <SettingsGroupNote>无法读取随应用安装的词库清单，请重新安装后再试。</SettingsGroupNote>
       </GroupList>
     );
   }
   if (!manifest) return null;
   return (
     <GroupList title="词库信息">
-      <p className={settings.groupNote}>
+      <SettingsGroupNote>
         词库保存在设备上，日常输入不需要联网；它随应用更新，不单独下载。
-      </p>
+      </SettingsGroupNote>
       <SummaryRow title="规格">
         <code>{manifest.profile}</code>
       </SummaryRow>

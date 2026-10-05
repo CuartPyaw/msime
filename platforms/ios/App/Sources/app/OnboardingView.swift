@@ -49,7 +49,7 @@ struct InputSettingsView: View {
   @AppStorage(KeyboardFeedbackPreference.strengthKey, store: KeyboardFeedbackPreference.defaults)
   private var hapticStrength = KeyboardHapticStrength.medium.rawValue
   @AppStorage(WubiMixedPinyinPreference.enabledKey, store: WubiMixedPinyinPreference.defaults)
-  private var wubiMixedPinyin = false
+  private var wubiMixedPinyin = MSIMEAppEdition.wubiMixedPinyinDefault
   @AppStorage(WubiCodeHintPreference.enabledKey, store: WubiCodeHintPreference.defaults)
   private var wubiCodeHint = true
   @State private var previewFeedback: UIImpactFeedbackGenerator?
@@ -76,7 +76,8 @@ struct InputSettingsView: View {
         .listRowBackground(Color.clear)
         .listRowInsets(EdgeInsets())
         Section {
-          ForEach(ChineseInputScheme.allCases, id: \.self) { scheme in
+          // 只列本版本提供的入口；full 列出全部方案。
+          ForEach(ChineseInputScheme.allCases.filter(\.isOfferedByEdition), id: \.self) { scheme in
             HStack {
               Button {
                 schemeSaveFailed = !InputSchemePreference.save(scheme: scheme, enabled: enabledSchemes)
@@ -114,11 +115,11 @@ struct InputSettingsView: View {
         } footer: {
           Text(schemeSaveFailed
             ? "设置没有保存，键盘可能正在写入同一份设置，请再试一次。"
-            : "开启的方案会显示在键盘快捷切换中，至少保留一种。点击名称设为当前方案。粤拼和大千注音读取随安装包附带的语言词库，没有词库时键盘不会显示这两个方案；越南语切换回来时仍是原来的中文方案。左右滑动空格可移动光标；滑动前会先完成当前输入。")
+            : "开启的方案会显示在键盘快捷切换中，至少保留一种。点击名称设为当前方案。粤拼、大千注音和笔画读取随安装包附带的语言词库，没有词库时键盘不会显示对应方案；越南语和藏文切换回来时仍是原来的中文方案；藏文按威利转写（EWTS）输入，空格加音节点、斜杠加垂符。左右滑动空格可移动光标；滑动前会先完成当前输入。")
         }
 
         Section("高情商回复") {
-          Text("复制对方的话，切换到高情商回复键盘，点“粘贴”后选择九宫格里的回复风格。支持帮你回、帮润色和换一句，点选回复插入聊天输入框。")
+          Text("复制对方的话，点键盘工具栏上的回复按钮打开高情商回复面板，点“粘贴”后选择九宫格里的回复风格。支持帮你回、帮润色和换一句，点选回复插入聊天输入框。")
             .font(.footnote).foregroundStyle(.secondary)
           NavigationLink(destination: ServiceSettingsView(kind: .ai)) {
             Label("配置键盘 AI", systemImage: "sparkles")

@@ -70,7 +70,7 @@ bash platforms/macos/stage-resources.sh target/resources/<上一步返回的目�
 mkdir -p target/macos && find target/macos-isolated -maxdepth 1 -name "*.app" -exec cp -R {} target/macos/ \;
 ```
 
-开发构建照旧暂存全部资源（含日文词典，和 `target/language-dictionaries` 里有的粤拼、注音词库），它们是按需下载之外的内置兜底，所以开发包里这几个方案装好就能用。发布包只带核心词库，日文词典、粤拼/注音词库和手写模型由设置应用下载到 `~/Library/Application Support/app.msime.macos/resource-packs/<id>/`。要在本机测试下载流程，暂存时改用 `MSIME_MACOS_OMIT_ON_DEMAND=1 bash platforms/macos/stage-resources.sh <目录>`（不准备 `target/language-dictionaries`），并先删掉 `resource-packs/` 下已装的资源包；`cargo run --quiet --locked -p msime-client-core --example install_resource_pack -- <绝对路径的 state_root> [japanese|language-dictionaries|handwriting]` 用 App 同一个安装器直接装资源包。
+开发构建照旧暂存全部资源（含日文词典，和 `target/language-dictionaries` 里有的粤拼、注音、笔画词库），它们是按需下载之外的内置兜底，所以开发包里这几个方案装好就能用。发布包只带核心词库，日文词典、粤拼/注音/笔画词库和手写模型由设置应用下载到 `~/Library/Application Support/app.msime.macos/resource-packs/<id>/`。要在本机测试下载流程，暂存时改用 `MSIME_MACOS_OMIT_ON_DEMAND=1 bash platforms/macos/stage-resources.sh <目录>`（不准备 `target/language-dictionaries`），并先删掉 `resource-packs/` 下已装的资源包；`cargo run --quiet --locked -p msime-client-core --example install_resource_pack -- <绝对路径的 state_root> [japanese|language-dictionaries|handwriting]` 用 App 同一个安装器直接装资源包。
 
 ## iOS
 
@@ -89,7 +89,7 @@ cargo run --quiet -p msime-client-core --example install_resources --locked -- t
 ```
 
 - scheme 是 `MSIMEClientTests`，`MSIMEKeyboardTests` 是 target 名，直接用它报 "does not contain a scheme"。`xcodebuild -list` 查全部。
-- `xcodegen generate` 会做 spec 校验，缺 `target/ios/EngineResources` 及其中的 `dictionary-manifest.json` 直接失败——先 stage 再生成工程。
+- `xcodegen generate` 会做 spec 校验，缺 `target/ios/EngineResources` 及其中的 `msime-dictionary-manifest.json` 直接失败——先 stage 再生成工程。
 - 改了 `App/Sources`、`SharedUI`、`KeyboardTests` 下的文件要 `xcodegen generate` 并提交 `project.pbxproj`：它逐个列出源文件，不重新生成，新文件不会被编译。
 - Xcode 27 的模拟器界面是 `DeviceHub.app`，`Simulator.app` 已不存在；`xcrun simctl` 一切照常，设备状态以 `xcrun simctl list devices` 为准。
 

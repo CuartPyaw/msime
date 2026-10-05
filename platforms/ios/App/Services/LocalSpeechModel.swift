@@ -25,6 +25,11 @@ struct LocalSpeechModelManifest: Equatable {
   init(directory: URL) throws {
     let url = directory.appendingPathComponent(Self.fileName)
     let invalidManifest = ServiceFailure(message: "本地语音模型的描述文件已损坏，请删除后重新下载。")
+    var manifestStatus = stat()
+    guard lstat(url.path, &manifestStatus) == 0,
+          (manifestStatus.st_mode & S_IFMT) == S_IFREG else {
+      throw invalidManifest
+    }
     guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
       throw ServiceFailure(message: "所选目录不是已安装的本地语音模型。")
     }
@@ -72,8 +77,12 @@ struct LocalSpeechModelManifest: Equatable {
 
   static func isModelDirectory(_ url: URL) -> Bool {
     var directory: ObjCBool = false
+    let manifest = url.appendingPathComponent(fileName)
+    var manifestStatus = stat()
     return FileManager.default.fileExists(atPath: url.path, isDirectory: &directory) && directory.boolValue
-      && FileManager.default.isReadableFile(atPath: url.appendingPathComponent(fileName).path)
+      && lstat(manifest.path, &manifestStatus) == 0
+      && (manifestStatus.st_mode & S_IFMT) == S_IFREG
+      && FileManager.default.isReadableFile(atPath: manifest.path)
   }
 
   /// Resolve a manifest member and keep symlinks and traversal from escaping the installed model.
@@ -282,7 +291,7 @@ enum LocalSpeechModelLocation {
   /// The installed model the stored path names. iOS moves an app's container on update, so a stored path that no longer exists is looked up again by its model id under the current root.
   static func resolve(storedPath: String, root: URL?) -> URL? {
     let trimmed = storedPath.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return nil }
+    guard !trimmed.isEmpty, trimmed.hasPrefix("/") else { return nil }
     let stored = URL(fileURLWithPath: trimmed, isDirectory: true)
     guard let root, !rejectsSymlinkAncestors(root) else { return nil }
     let managedRoot = root.resolvingSymlinksInPath().standardizedFileURL
@@ -301,7 +310,7 @@ enum LocalSpeechModelLocation {
   /// Whether `storedPath` points at the model `id`, wherever the container was when it was written.
   static func names(_ storedPath: String, model id: String) -> Bool {
     let trimmed = storedPath.trimmingCharacters(in: .whitespacesAndNewlines)
-    return !trimmed.isEmpty && URL(fileURLWithPath: trimmed).lastPathComponent == id
+    return !trimmed.isEmpty && trimmed.hasPrefix("/") && URL(fileURLWithPath: trimmed).lastPathComponent == id
   }
 
   private static func isWithin(_ child: URL, root: URL) -> Bool {
@@ -311,18 +320,6 @@ enum LocalSpeechModelLocation {
 
   /// 模型根目录由应用管理；先解析再检查包含关系会让被替换的根目录暴露受管范围外的文件。
   private static func rejectsSymlinkAncestors(_ path: URL) -> Bool {
-    var current = path.standardizedFileURL
-    while true {
-      if current.path == "/" || current.path == "/var" || current.path == "/tmp" { return false }
-      var status = stat()
-      if lstat(current.path, &status) == 0 {
-        if status.st_mode & S_IFMT == S_IFLNK { return true }
-      } else if errno != ENOENT {
-        return true
-      }
-      let parent = current.deletingLastPathComponent()
-      if parent == current { return false }
-      current = parent
-    }
+    SafePath.hasRefusedSymbolicLink(path)
   }
 }

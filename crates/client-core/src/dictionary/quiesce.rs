@@ -9,7 +9,7 @@
 use std::ffi::OsStr;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -26,43 +26,7 @@ pub const BUSY: &str = "dictionary maintenance busy";
 const MAX_LEASE_BYTES: u64 = 4096;
 
 fn reject_symlinked_path_ancestors(path: &Path) -> std::io::Result<()> {
-    let mut current = PathBuf::new();
-    let mut saw_prefix_alias = false;
-    let mut saw_real_component = false;
-    let components: Vec<_> = path.components().collect();
-    for (index, component) in components.iter().enumerate() {
-        match component {
-            Component::Prefix(_) | Component::RootDir => current.push(component),
-            Component::CurDir => continue,
-            Component::ParentDir => current.push(component),
-            Component::Normal(_) => {
-                current.push(component);
-                match std::fs::symlink_metadata(&current) {
-                    Ok(metadata) if metadata.file_type().is_symlink() => {
-                        let system_alias = path.is_absolute()
-                            && !saw_real_component
-                            && !saw_prefix_alias
-                            && matches!(component, Component::Normal(name) if *name == std::ffi::OsStr::new("tmp") || *name == std::ffi::OsStr::new("var"));
-                        if index + 1 == components.len()
-                            || saw_real_component
-                            || saw_prefix_alias
-                            || !system_alias
-                        {
-                            return Err(std::io::Error::new(
-                                std::io::ErrorKind::InvalidInput,
-                                "dictionary lease path is a symbolic link",
-                            ));
-                        }
-                        saw_prefix_alias = true;
-                    }
-                    Ok(_) => saw_real_component = true,
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error),
-                }
-            }
-        }
-    }
-    Ok(())
+    msime_path_trust::reject_symlinked_components(path)
 }
 
 fn read_lease(path: &Path) -> Option<String> {
@@ -226,7 +190,15 @@ impl<'a, Announce: FnMut()> QuiescedHosts<'a, Announce> {
 /// The Windows Server's release, asked for over its auxiliary pipe with the UTF-16LE message `DictionaryQuiesce` and given back with `DictionaryResume` (`platforms/windows/common/AuxMessage.h`). It answers "OK" only once its sessions really are gone, so that reply, not a write getting through, is what makes the exclusive lock safe to take. It gives the sessions back by itself 30 seconds after the last `DictionaryQuiesce`, so a writer that dies mid-import cannot leave input off for longer, and a long one renews the release before each request.
 #[cfg(any(windows, test))]
 pub mod server {
-    pub const PIPE_NAME: &str = r"\\.\pipe\FanyImeAuxNamedPipe";
+    /// Server 的辅助管道名，不带 `\\.\pipe\` 前缀和版本后缀；与 `shared/contracts/windows_ipc.h` 的 `FANY_IME_AUX_NAMED_PIPE` 一致。
+    pub const PIPE_BASE_NAME: &str = "FanyImeAuxNamedPipe";
+
+    /// `edition` 的 Server 的辅助管道：full 是 `\\.\pipe\FanyImeAuxNamedPipe`，其他版本带 `.<id>` 后缀。几个版本同时安装时，词库维护只让本版本的 Server 放开会话。
+    pub fn pipe_name(edition: &crate::edition::Edition) -> Option<String> {
+        edition
+            .windows()
+            .map(|identity| identity.pipe_name(PIPE_BASE_NAME))
+    }
 
     pub fn message(verb: &str) -> Vec<u8> {
         verb.encode_utf16().flat_map(u16::to_le_bytes).collect()
@@ -243,12 +215,19 @@ pub mod server {
         use std::io::{Read, Write};
         /// Every instance of the pipe is serving another client.
         const ERROR_PIPE_BUSY: i32 = 231;
+        // 本进程所在安装包的版本（Server 目录里的 edition.json）。声明坏了时报错，而不是去叫 full 的 Server 放开会话。
+        let name = crate::edition::Edition::of_windows_package()
+            .ok()
+            .and_then(pipe_name)
+            .ok_or_else(|| {
+                std::io::Error::other("the package declares an edition this build does not know")
+            })?;
         let mut attempt = 0;
         let mut pipe = loop {
             match std::fs::OpenOptions::new()
                 .read(true)
                 .write(true)
-                .open(PIPE_NAME)
+                .open(&name)
             {
                 Ok(pipe) => break pipe,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -590,6 +569,14 @@ mod tests {
 
     #[test]
     fn the_windows_server_is_spoken_to_in_utf16() {
+        assert_eq!(
+            server::pipe_name(crate::edition::Edition::full()).unwrap(),
+            r"\\.\pipe\FanyImeAuxNamedPipe"
+        );
+        assert_eq!(
+            server::pipe_name(crate::edition::Edition::by_id("wubi").unwrap()).unwrap(),
+            r"\\.\pipe\FanyImeAuxNamedPipe.wubi"
+        );
         assert_eq!(server::message("DictionaryResume")[..4], *b"D\x00i\x00");
         assert_eq!(
             server::message("DictionaryQuiesce").len(),

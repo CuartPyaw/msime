@@ -9,6 +9,7 @@
 #include "WindowShadow.h"
 #include <algorithm>
 #include <iterator>
+#include "../../../../shared/contracts/msime_edition.h"
 
 namespace msime::windows {
 namespace {
@@ -33,7 +34,7 @@ bool installed_font(const std::wstring &family) {
   ReleaseDC(nullptr, dc);
   return found;
 }
-constexpr wchar_t class_name[] = L"MSIME.Client.Preview.Candidates";
+constexpr wchar_t class_name[] = L"MSIME.Client.Preview.Candidates" MSIME_EDITION_NAME_SUFFIX;
 // The typing flash repaints at about 30 frames a second while it fades, then its timer is killed; the combo timer fires once, when the count it shows goes stale.
 constexpr UINT_PTR typing_flash_timer = 0x4501;
 constexpr UINT_PTR typing_combo_timer = 0x4502;
@@ -324,6 +325,7 @@ bool CandidateWindow::set_fonts(const CandidateFontSettings &settings) {
     // Resolve all names before replacing any live display state.
     auto primary = wide(settings.family);
     std::vector<std::wstring> fallback;
+    fallback.reserve(settings.fallback.size());
     for (const auto &name : settings.fallback)
       fallback.push_back(wide(name));
     if (!installed_font(primary)) {
@@ -577,7 +579,7 @@ CandidateWindow::measure_items(const CandidatePresentation &value) {
       return measured_width(device_, wide(text), font_family_,
                             static_cast<float>(size), font_fallback_.Get());
     };
-    items.push_back({width(candidate.text + candidate.badge, font_size_),
+    items.push_back({width(candidate_primary_text(candidate), font_size_),
                      width(candidate.annotation, font_size_),
                      width(candidate_secondary_text(candidate),
                            metrics.translation_font),
@@ -596,7 +598,7 @@ CandidateWindow::wrap_measure(const CandidatePresentation &value) {
   std::vector<Runs> runs;
   runs.reserve(value.candidates.size());
   for (const auto &candidate : value.candidates)
-    runs.push_back({wide(candidate.text + candidate.badge),
+    runs.push_back({wide(candidate_primary_text(candidate)),
                     wide(candidate.annotation),
                     wide(candidate_secondary_text(candidate))});
   return [this, runs = std::move(runs), font = static_cast<float>(font_size_),
@@ -937,7 +939,7 @@ void CandidateWindow::paint() {
                       D2D1_RECT_F{rect.left, rect.top, rect.left + number,
                                   rect.top + first_line},
                       brush(number_color));
-    const auto text = wide(value->candidates[i].text + value->candidates[i].badge);
+    const auto text = wide(candidate_primary_text(value->candidates[i]));
     // Text wider than its column was laid out wrapped (wrapped_height() at this same width), and the row already grew by that height, so it wraps here inside the row that hit testing uses. Text that fits keeps the single-line format, so rounding cannot wrap what was laid out as one line. Still clipped to the row as a guard: without it anything the layout did not account for would paint past the card edge onto the transparent shadow margin.
     target->DrawText(
         text.c_str(), static_cast<UINT32>(text.size()),

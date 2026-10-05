@@ -445,8 +445,11 @@ void ApplyToolbarStylesheet(const std::filesystem::path &skinsRoot, const SkinPa
         if ((lowered.find("dark") != std::string::npos && !dark) ||
             (lowered.find("light") != std::string::npos && dark))
             continue;
+        const std::string blockText = css.substr(open + 1, close - open - 1);
         std::vector<std::pair<std::string, std::string>> declarations;
-        std::stringstream block(css.substr(open + 1, close - open - 1));
+        declarations.reserve(
+            static_cast<std::size_t>(std::count(blockText.begin(), blockText.end(), ';')) + 1);
+        std::stringstream block(blockText);
         std::string declaration;
         while (std::getline(block, declaration, ';'))
         {
@@ -514,6 +517,7 @@ std::vector<SkinListEntry> ListSkins(const std::filesystem::path &skinsRoot)
 {
     std::vector<SkinListEntry> entries;
     const SkinCatalog catalog = ScanSkinCatalog(skinsRoot);
+    entries.reserve(catalog.packages.size());
     for (const SkinPackage &package : catalog.packages)
     {
         entries.push_back({package.id, package.name, false});
@@ -534,7 +538,7 @@ std::filesystem::path DefaultSkinsRoot()
     {
         return {};
     }
-    // The same directory as MSIMEDefaultClientStateDirectory in RuntimeOptions.h.
+    // 与 RuntimeOptions.h 的 MSIMEDefaultClientStateDirectory 是同一个目录。这里是 full 的目录名；其他版本的输入法启动时经 SetDefaultSkinsRoot 换成自己的状态目录（input_method_main.mm 的 MSIMEConfigureMovableState）。
     return std::filesystem::path(home) / "Library" / "Application Support" / "app.msime.macos" / "skins";
 }
 
