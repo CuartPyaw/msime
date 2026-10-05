@@ -89,6 +89,23 @@ code {
   color: var(--accent-ink);
 }
 
+/* ---- 嵌入模式：只留演练场 ---- */
+
+.embed-bar { display: none; }
+
+html[data-embed] body { background-image: none; }
+html[data-embed] main { padding: 0 2px 4px; }
+html[data-embed] main > :not(.playground, .embed-bar), html[data-embed] .topbar, html[data-embed] .footer { display: none; }
+html[data-embed] .footer { margin: 0; }
+html[data-embed] .options-lead { display: none; }
+
+html[data-embed] .embed-bar {
+  display: block;
+  margin: 0 0 10px;
+  text-align: right;
+  font-size: 13px;
+}
+
 /* ---- 顶栏 ---- */
 
 .topbar {
@@ -249,7 +266,20 @@ h1 {
   transition: border-color .15s, box-shadow .15s;
 }
 
-.editor:focus {
+/* 接收按键的密码框：不可见、不占位置，但能获得焦点。 */
+.keysink {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.editor-wrap:focus-within .editor {
   border-color: var(--accent);
   box-shadow: 0 0 0 4px var(--accent-soft);
 }
@@ -270,7 +300,7 @@ h1 {
   visibility: hidden;
 }
 
-.editor:focus .caret { visibility: visible; animation: blink 1.06s steps(1) infinite; }
+.editor-wrap:focus-within .caret { visibility: visible; animation: blink 1.06s steps(1) infinite; }
 
 @keyframes blink { 50% { opacity: 0; } }
 
@@ -840,6 +870,16 @@ h1 {
 }
 
 .code pre code { padding: 0; background: none; color: inherit; font-size: inherit; }
+
+/* Prism 的高亮配色，配代码面板的深色底，沿用水杉绿系。 */
+.code .token.comment { color: #7E9886; font-style: italic; }
+.code .token.keyword, .code .token.boolean, .code .token.important { color: #7FE08E; }
+.code .token.string, .code .token.attr-value, .code .token.template-string { color: #F2C97D; }
+.code .token.function, .code .token.class-name, .code .token.builtin { color: #8FD3FF; }
+.code .token.number { color: #D7A8FF; }
+.code .token.property, .code .token.attr-name, .code .token.parameter, .code .token.literal-property { color: #FFB38A; }
+.code .token.tag { color: #FF9C8F; }
+.code .token.punctuation, .code .token.operator { color: #9FB5A3; }
 
 .more { margin: 14px 0 0; font-size: 15px; }
 
