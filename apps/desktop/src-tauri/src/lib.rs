@@ -3507,6 +3507,13 @@ async fn uninstall_input_source(
     tauri::async_runtime::spawn_blocking(move || {
         // Wait for a start-time refresh or a manual install that is still writing the bundle.
         let _guard = macos_input_source::install_lock();
+        // macOS 27 lets only System Settings change the enabled input source list: TISDisableInputSource from any other process, the input method's own IMK server included, ends in cfprefsd refusing the write to com.apple.inputsources, and so does writing that domain directly. Once the bundle is gone TIS no longer knows its sources, and their entries stay in System Settings until the user removes each one. So the user removes them first, while the bundle can still answer for them, and the uninstall waits until the list no longer has this input method.
+        if macos_input_source::input_source_enabled() == Some(true) {
+            let _ = open_input_source_settings();
+            return Err(HostActionError {
+                code: "input_source_listed",
+            });
+        }
         msime_host_macos::uninstall_input_source(&bundle, &state, remove_user_data).map_err(|_| {
             HostActionError {
                 code: "unavailable",
@@ -3517,6 +3524,16 @@ async fn uninstall_input_source(
     .map_err(|_| HostActionError {
         code: "unavailable",
     })??;
+    // Trashing the bundle does not stop the IMK process: it keeps serving input from the trashed copy until the user logs out, and keeps this edition's sources live meanwhile. Stop it now that the bundle is gone, so imklaunchagent has nothing to relaunch. The uninstall has already happened, so a process that refuses to quit does not turn it into a failure.
+    let (send, received) = std::sync::mpsc::sync_channel(1);
+    if app
+        .run_on_main_thread(move || {
+            let _ = send.send(msime_host_macos::stop_input_method());
+        })
+        .is_ok()
+    {
+        let _ = received.recv();
+    }
     // The installed bundle is gone after a successful operation. Exit the
     // settings shell too, matching the native Apple flow and avoiding a UI
     // process that can no longer repair the removed installation.
