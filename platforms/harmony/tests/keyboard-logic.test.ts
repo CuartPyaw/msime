@@ -359,6 +359,7 @@ import {
   AiModelCatalogPolicy,
 } from "../entry/src/main/ets/keyboard/settings/AiModelCatalogPolicy";
 import { HttpAsrConfigurationPolicy } from "../entry/src/main/ets/keyboard/input/HttpAsrConfigurationPolicy";
+import { DoubaoHeaderPolicy } from "../entry/src/main/ets/keyboard/input/DoubaoHeaderPolicy";
 import { VoicePolishRequestPolicy } from "../entry/src/main/ets/keyboard/input/VoicePolishRequestPolicy";
 import { SkinImportPolicy } from "../entry/src/main/ets/keyboard/skin/SkinImportPolicy";
 import {
@@ -11813,6 +11814,47 @@ group("Harmony batch transcription accepts every shared cloud preset", () => {
   );
 });
 
+group("Harmony Doubao handshake headers reject unsafe settings", () => {
+  check(
+    DoubaoHeaderPolicy.validConfiguration(
+      "api_key", "synthetic-token", "fixture-resource", "",
+    ),
+    "API-key mode accepts a complete synthetic configuration",
+  );
+  check(
+    DoubaoHeaderPolicy.validConfiguration(
+      "legacy", "synthetic-token", "fixture-resource", "synthetic-app",
+    ),
+    "legacy mode requires and accepts its app key",
+  );
+  for (const value of ["injected\r\nheader", "line\nvalue", "bad\u007fvalue", "bad\u0085value"]) {
+    check(
+      !DoubaoHeaderPolicy.validConfiguration(
+        "api_key", value, "fixture-resource", "",
+      ),
+      "control characters never enter a Doubao request header",
+    );
+    check(
+      !DoubaoHeaderPolicy.validConfiguration(
+        "api_key", "synthetic-token", value, "",
+      ),
+      "resource IDs cannot inject a Doubao request header",
+    );
+  }
+  check(
+    !DoubaoHeaderPolicy.validConfiguration(
+      "legacy", "synthetic-token", "fixture-resource", "bad\rapp",
+    ),
+    "legacy app keys are checked before the handshake",
+  );
+  check(
+    !DoubaoHeaderPolicy.validConfiguration(
+      "unexpected", "synthetic-token", "fixture-resource", "",
+    ),
+    "unknown auth modes are rejected instead of silently changing schemes",
+  );
+});
+
 group("the 2in1 draws the composition inline as tsf_preedit_style says", () => {
   check(
     InlinePreeditPolicy.style(undefined) === "raw",
@@ -15240,6 +15282,8 @@ group("notices are shown from client-core's answer and their links leave the app
         items: [
           { id: "n2", title: "新版本", body: "**粗体**", html: "<p><strong>粗体</strong></p>" },
           { id: "", title: "no id", html: "" },
+          { id: "bad id", title: "bad id", html: "" },
+          { id: "x".repeat(65), title: "long id", html: "" },
           { id: "n1", title: "维护", html: "<p>今晚维护</p>" },
         ],
       },

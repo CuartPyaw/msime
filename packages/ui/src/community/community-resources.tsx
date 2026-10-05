@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useAsyncActionRunner } from "../core/use-async-action";
 import { randomUuid } from "../core/random-id";
 import { formatZhNumber } from "../core/format-number";
 import { pushMobileSettingsState } from "../settings/mobile-navigation";
@@ -8,7 +9,6 @@ import {
   communityRating,
   resourceKindTitle,
   resourceMessage,
-  runCommunityAction,
 } from "./community-helpers";
 import type { CustomSkinLibraryClient } from "../keyboard/touch-keyboard-skin-design";
 import * as style from "./community-style";
@@ -166,12 +166,12 @@ function ResourceEditor({
   const [word, setWord] = useState("");
   const [weight, setWeight] = useState("100000");
   const [agreed, setAgreed] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const { clientGeneration, actionRunning, isCurrent } = useCommunityClientLifecycle(client);
-  useEffect(() => {
-    setBusy(false);
-  }, [client]);
+  const {
+    busy,
+    running: actionRunning,
+    run: runAsyncAction,
+  } = useAsyncActionRunner(setError, undefined, client);
   const addEntry = () => {
     const value = { kind: entryKind, code: code.trim(), word, weight: Number(weight) };
     if (
@@ -210,17 +210,8 @@ function ResourceEditor({
       );
       return;
     }
-    const generation = clientGeneration.current;
-    await runCommunityAction({
-      busy,
-      generation,
-      clientGeneration,
-      actionRunning,
-      setBusy,
-      setError,
-      isCurrent: () => isCurrent(generation),
-      formatError: resourceMessage,
-      operation: async (isCurrent) => {
+    await runAsyncAction(
+      async (isCurrent) => {
         await client.publish(
           id,
           kind,
@@ -232,7 +223,8 @@ function ResourceEditor({
         if (!isCurrent()) return;
         await onPublished();
       },
-    });
+      { formatError: resourceMessage },
+    );
   };
   return (
     <CommunityDialogFrame
@@ -356,37 +348,25 @@ function ResourceDetail({
   localDictionary?: CommunityLocalDictionaryClient;
 }) {
   const [item, setItem] = useState(initial);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const {
+    busy,
     mounted,
-    clientGeneration,
-    actionRunning: actionBusyRef,
-    isCurrent,
-  } = useCommunityClientLifecycle(client, initial.id);
+    generation: clientGeneration,
+    run: runAsyncAction,
+  } = useAsyncActionRunner(setError, setNotice, client, initial.id);
   const renderGeneration = clientGeneration.current;
-  const run = async (action: (generation: number) => Promise<void>) => {
-    if (actionBusyRef.current || busy) return;
+  const run = (action: (generation: number) => Promise<void>) => {
     const generation = clientGeneration.current;
-    await runCommunityAction({
-      busy,
-      generation,
-      clientGeneration,
-      actionRunning: actionBusyRef,
-      setBusy,
-      setError,
-      setNotice,
-      isCurrent: () => isCurrent(generation),
+    return runAsyncAction(() => action(generation), {
       formatError: resourceMessage,
-      operation: () => action(generation),
     });
   };
   useEffect(() => {
     const generation = clientGeneration.current;
-    setBusy(false);
     void client
       .detail(initial.id)
       .then((value) => {

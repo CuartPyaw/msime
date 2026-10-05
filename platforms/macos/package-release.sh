@@ -254,11 +254,11 @@ check_app() {
   test ! -e "$resources_dir/language-dictionaries"
   test ! -e "$resources_dir/handwriting/handwriting-zh_CN.model"
   test -f "$resources_dir/handwriting/Zinnia-LICENSE.txt"
-  # 核心词库的体积预算（KiB）。按需资源包被误放回 EngineResources，或者核心词库意外变大，都会在这里报出来。dict-v2.0.5 把五笔码表拆进单独的 msime-wubi.db，它与 msime-pinyin.db 合计比 dict-v2.0.2 的 msime.db 大约 5.7 MB，当时核心文件加 helpcodes/ 约 116900 KiB，预算 121000 KiB。dict-v2.0.7 的 msime-english.db 并入 SCOWL 英文词表，从 1626112 字节涨到 4521984 字节（约 +2.8 MB），另加 4 KiB 的 msime-scowl_Copyright.txt；核心文件按锁文件大小逐个向上取整到 4 KiB 合计 119224 KiB，加上 helpcodes/ 的 528 KiB 约 119752 KiB，原预算只剩约 1.2 MB 余量，所以抬到 124000 KiB，保持与此前相同的约 4 MB 余量。
+  # 核心词库的体积预算（KiB）。按需资源包被误放回 EngineResources，或者核心词库意外变大，都会在这里报出来。dict-v2.0.5 把五笔码表拆进单独的 msime-wubi.db，它与 msime-pinyin.db 合计比 dict-v2.0.2 的 msime.db 大约 5.7 MB，当时核心文件加 helpcodes/ 约 116900 KiB，预算 121000 KiB。dict-v2.0.7 的 msime-english.db 并入 SCOWL 英文词表，从 1626112 字节涨到 4521984 字节（约 +2.8 MB），另加 4 KiB 的 msime-scowl_Copyright.txt；核心文件按锁文件大小逐个向上取整到 4 KiB 合计 119224 KiB，加上 helpcodes/ 的 528 KiB 约 119752 KiB，原预算只剩约 1.2 MB 余量，所以抬到 124000 KiB，保持与此前相同的约 4 MB 余量。dict-v2.0.10 的 msime-wubi.db 并入 86 五笔词组补充表，从 13688832 字节涨到 15720448 字节（约 +2.0 MB），拼音库与二元、三元模型也略有变化，核心文件合计 121208 KiB，加上 helpcodes/ 约 121736 KiB，余量只剩约 2.2 MB，所以再抬到 126000 KiB，仍保持约 4 MB 余量。
   local engine_kib
   engine_kib="$(du -sk "$resources_dir/EngineResources" | cut -f1)"
-  test "$engine_kib" -le 124000 || {
-    echo "EngineResources is ${engine_kib} KiB, over the 124000 KiB core-dictionary budget: $resources_dir/EngineResources" >&2
+  test "$engine_kib" -le 126000 || {
+    echo "EngineResources is ${engine_kib} KiB, over the 126000 KiB core-dictionary budget: $resources_dir/EngineResources" >&2
     exit 1
   }
   test -f "$resources_dir/Licenses/THIRD_PARTY_NOTICES.txt"
@@ -315,11 +315,11 @@ ln -s /Applications "$stage/Applications"
 printf '%s\n' \
   "$display_name macOS 安装说明" \
   '' \
-  "1. 把「$display_name」拖到「应用程序」文件夹。" \
-  "2. 打开「应用程序」里的「$display_name」，点「立即安装」把输入法安装到本机，再按设置页的提示在「系统设置」→「键盘」→「文字输入」→「输入法」中添加它。" \
-  "3. 添加后在菜单栏的输入法菜单中选「$display_name」，或按 Control+空格 切换。" \
+  "1. 把「${display_name}」拖到「应用程序」文件夹。" \
+  "2. 打开「应用程序」里的「${display_name}」，点「立即安装」把输入法安装到本机，再按设置页的提示在「系统设置」→「键盘」→「文字输入」→「输入法」中添加它。" \
+  "3. 添加后在菜单栏的输入法菜单中选「${display_name}」，或按 Control+空格 切换。" \
   '' \
-  "只把「$display_name」拖进「应用程序」而不打开它，系统里不会出现这个输入法。" \
+  "只把「${display_name}」拖进「应用程序」而不打开它，系统里不会出现这个输入法。" \
   > "$stage/安装说明.txt"
 dmg="$out_dir/$dmg_prefix-$version-$arch.dmg"
 rm -f "$dmg"
@@ -347,7 +347,8 @@ hdiutil detach -quiet "$mount_point"
 mount_point=""
 
 # 体积报告：DMG 本身和 App 的 Contents/Resources。在 GitHub Actions 里同时写进这一步的摘要，方便逐次对比。
-dmg_bytes="$(stat -f %z "$dmg")"
+# /usr/bin/stat, not whatever is first on PATH: a GNU coreutils stat reads -f as --file-system and fails, after the package is already built.
+dmg_bytes="$(/usr/bin/stat -f %z "$dmg")"
 resources_kib="$(du -sk "$app/Contents/Resources" | cut -f1)"
 echo "DMG size: $dmg_bytes bytes; Contents/Resources: $resources_kib KiB"
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then

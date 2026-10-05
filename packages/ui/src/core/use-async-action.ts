@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import { useAsyncGeneration } from "../settings/use-async-generation";
 import { useMountedRef } from "../settings/use-mounted-ref";
 import { runAsyncAction, type AsyncActionOptions } from "./async-action";
@@ -7,8 +7,10 @@ export type AsyncActionOperation = (isCurrent: () => boolean) => Promise<void>;
 
 export interface AsyncActionRunner {
   busy: boolean;
+  mounted: MutableRefObject<boolean>;
   running: MutableRefObject<boolean>;
   generation: MutableRefObject<number>;
+  invalidate: () => void;
   run: (operation: AsyncActionOperation, options: AsyncActionOptions) => Promise<void> | undefined;
 }
 
@@ -31,28 +33,37 @@ export function useAsyncActionRunner(
     };
   }, owners);
 
-  function run(operation: AsyncActionOperation, options: AsyncActionOptions) {
-    if (running.current || !mounted.current) return undefined;
-    running.current = true;
-    const current = generation.current;
-    const promise = runAsyncAction(
-      {
-        busy: false,
-        isCurrent: () => mounted.current && current === generation.current,
-        setBusy: (value) => {
-          running.current = value;
-          setBusy(value);
+  const run = useCallback(
+    (operation: AsyncActionOperation, options: AsyncActionOptions) => {
+      if (running.current || !mounted.current) return undefined;
+      running.current = true;
+      const current = generation.current;
+      const promise = runAsyncAction(
+        {
+          busy: false,
+          isCurrent: () => mounted.current && current === generation.current,
+          setBusy: (value) => {
+            running.current = value;
+            setBusy(value);
+          },
+          setError,
+          setNotice,
         },
-        setError,
-        setNotice,
-      },
-      operation,
-      options,
-    );
-    return promise.finally(() => {
-      if (current === generation.current) running.current = false;
-    });
-  }
+        operation,
+        options,
+      );
+      return promise.finally(() => {
+        if (current === generation.current) running.current = false;
+      });
+    },
+    [setError, setNotice],
+  );
 
-  return { busy, running, generation, run };
+  const invalidate = useCallback(() => {
+    generation.current++;
+    running.current = false;
+    setBusy(false);
+  }, []);
+
+  return { busy, mounted, running, generation, invalidate, run };
 }

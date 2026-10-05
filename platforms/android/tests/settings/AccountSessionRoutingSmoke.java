@@ -24,6 +24,10 @@ public final class AccountSessionRoutingSmoke {
         check(AccountSessionRoutingPolicy.accepts("access_token", 10123, 10123), "our own uid gets the token");
         check(!AccountSessionRoutingPolicy.accepts("access_token", 10124, 10123), "another uid is refused");
         check(!AccountSessionRoutingPolicy.accepts("refresh_token", 10123, 10123), "no other method is answered");
+        check(AccountSessionRoutingPolicy.accepts("anonymous_access_token", 10123, 10123),
+            "our own uid gets the anonymous token");
+        check(!AccountSessionRoutingPolicy.accepts("anonymous_access_token", 10124, 10123),
+            "another uid cannot get the anonymous token");
         check(!AccountSessionRoutingPolicy.accepts(null, 10123, 10123), "a missing method is refused");
 
         check(AccountSessionRoutingPolicy.source(true, true) == AccountSessionRoutingPolicy.Source.OWN, "a native sign-in session wins");
@@ -42,6 +46,14 @@ public final class AccountSessionRoutingSmoke {
             "a saturated Rust expiry is not treated as an eternal token");
         check(AccountSessionRoutingPolicy.legacyToken("E".repeat(64), now + 60_000L, now).isEmpty(), "a malformed Rust token is not used");
         check(AccountSessionRoutingPolicy.legacyToken(null, now + 60_000L, now).isEmpty(), "a missing Rust token is not used");
+        check(AccountSessionProvider.legacyAccessToken(TOKEN).equals(TOKEN),
+            "a string Rust token is read");
+        for (Object invalid : new Object[] {
+                null, Boolean.TRUE, 42, new java.math.BigInteger("1".repeat(64)),
+                java.util.List.of(TOKEN), java.util.Map.of("token", TOKEN)}) {
+            check(AccountSessionProvider.legacyAccessToken(invalid).isEmpty(),
+                "a non-string Rust token is not converted to a string");
+        }
         check(AccountTokenPolicy.strictSeconds(900) == 900,
             "integer account lifetimes are accepted");
         check(AccountTokenPolicy.strictSeconds(900.5) == 0,
@@ -75,6 +87,9 @@ public final class AccountSessionRoutingSmoke {
         check(AccountSessionRoutingPolicy.stateFor("").equals(AccountSessionRoutingPolicy.STATE_SIGNED_OUT), "no token is reported as signed out");
         check(AccountSessionRoutingPolicy.tokenFromReply(AccountSessionRoutingPolicy.STATE_SIGNED_IN, TOKEN).equals(TOKEN), "a signed-in reply yields its token");
         check(AccountSessionRoutingPolicy.tokenFromReply(AccountSessionRoutingPolicy.STATE_SIGNED_OUT, "").isEmpty(), "a signed-out reply yields no token");
+        check(AccountSessionRoutingPolicy.anonymousTokenFromReply(
+                AccountSessionRoutingPolicy.STATE_SIGNED_IN, TOKEN).equals(TOKEN),
+            "an anonymous signed-in reply yields its token");
         for (String[] reply : new String[][] {
                 {AccountSessionRoutingPolicy.STATE_UNAVAILABLE, ""},
                 {AccountSessionRoutingPolicy.STATE_SIGNED_IN, ""},
@@ -88,6 +103,20 @@ public final class AccountSessionRoutingSmoke {
                 unavailable = true;
             }
             check(unavailable, "reply " + reply[0] + " is a retry, not a sign-out");
+        }
+        for (String[] reply : new String[][] {
+                {AccountSessionRoutingPolicy.STATE_UNAVAILABLE, ""},
+                {AccountSessionRoutingPolicy.STATE_SIGNED_OUT, ""},
+                {AccountSessionRoutingPolicy.STATE_SIGNED_IN, "not-a-token"},
+                {null, TOKEN},
+                {"unknown", TOKEN}}) {
+            boolean unavailable = false;
+            try {
+                AccountSessionRoutingPolicy.anonymousTokenFromReply(reply[0], reply[1]);
+            } catch (IllegalStateException expected) {
+                unavailable = true;
+            }
+            check(unavailable, "anonymous reply " + reply[0] + " is unavailable");
         }
 
         // A process that does not own the session neither reads nor writes the store and never calls the service; the token comes from the owner alone.
@@ -121,6 +150,17 @@ public final class AccountSessionRoutingSmoke {
         check(retry, "an owner that cannot tell is reported to callers that word a retry");
         check(storeTouches.get() == 0, "a non-owning process never touches the session store");
         check(requests.get() == 0, "a non-owning process never refreshes");
+
+        BackendAccount.TokenSource rotatingOwner = new BackendAccount.TokenSource() {
+            @Override public String accessToken() { return TOKEN; }
+            @Override public String accessToken(String rejectedToken) {
+                check(TOKEN.equals(rejectedToken), "the rejected token reaches the owner process");
+                return "f".repeat(64);
+            }
+        };
+        check("f".repeat(64).equals(
+            new BackendAccount(store, requester, rotatingOwner).currentAccessToken(TOKEN)),
+            "a secondary process can request one owner refresh after a 401");
 
         AtomicInteger loginRequests = new AtomicInteger();
         BackendAccount.SessionStore loginStore = new BackendAccount.SessionStore() {

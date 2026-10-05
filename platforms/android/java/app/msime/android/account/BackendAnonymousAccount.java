@@ -1,6 +1,9 @@
 package app.msime.android;
 
+import android.app.Application;
 import android.content.Context;
+import android.net.Uri;
+import android.os.Bundle;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -48,18 +51,31 @@ final class BackendAnonymousAccount {
     private static long nextAttemptAtMillis;
     private final AndroidAccountSessionStorage sessions;
     private final AndroidAccountSessionStorage credentials;
+    private final Context application;
 
     BackendAnonymousAccount(Context context) {
-        sessions = new AndroidAccountSessionStorage(context, SESSION_STORE);
-        credentials = new AndroidAccountSessionStorage(context, CREDENTIAL_STORE);
+        application = context.getApplicationContext();
+        sessions = new AndroidAccountSessionStorage(application, SESSION_STORE);
+        credentials = new AndroidAccountSessionStorage(application, CREDENTIAL_STORE);
     }
 
     String accessToken() throws Exception {
+        return accessToken(null);
+    }
+
+    /** Return a token, forcing anonymous re-authentication when the supplied token was rejected. */
+    String accessToken(String rejectedToken) throws Exception {
+        if (!AccountSessionRoutingPolicy.ownsSession(
+                Application.getProcessName(), application.getPackageName())) {
+            return ownerToken(rejectedToken);
+        }
         synchronized (LOCK) {
             String saved = sessions.load();
             if (saved != null) {
                 String token = tokenFromSession(saved);
-                if (token != null) return token;
+                if (token != null && !AccountSessionRoutingPolicy.needsReauthentication(token, rejectedToken)) {
+                    return token;
+                }
             }
             // 身份先落盘再谈联网：账号是本机自己生成的，不需要后端点头，后端只是发令牌的。
             JSONObject identity = loadOrCreateIdentity();
@@ -92,6 +108,23 @@ final class BackendAnonymousAccount {
             sessions.save(savedSession.toString());
             return token;
         }
+    }
+
+    /** 从主进程取匿名令牌，避免跨进程 SharedPreferences 缓存和 refresh rotation 竞态。 */
+    private String ownerToken(String rejectedToken) throws Exception {
+        Uri uri = Uri.parse("content://"
+            + AccountSessionRoutingPolicy.authority(application.getPackageName()));
+        Bundle extras = null;
+        if (AccountTokenPolicy.validToken(rejectedToken)) {
+            extras = new Bundle();
+            extras.putString(AccountSessionRoutingPolicy.KEY_REJECTED_ACCESS_TOKEN, rejectedToken);
+        }
+        Bundle reply = application.getContentResolver().call(
+            uri, AccountSessionRoutingPolicy.METHOD_ANONYMOUS_ACCESS_TOKEN, null, extras);
+        if (reply == null) throw new IllegalStateException("anonymous account unavailable");
+        return AccountSessionRoutingPolicy.anonymousTokenFromReply(
+            reply.getString(AccountSessionRoutingPolicy.KEY_STATE),
+            reply.getString(AccountSessionRoutingPolicy.KEY_ACCESS_TOKEN));
     }
 
     /**

@@ -58,6 +58,8 @@ public final class CommunityCatalog {
     }
 
     private final Context context;
+    private record PageResponse(Page page, int status) {}
+    private record ListingToken(String value, boolean anonymous) {}
 
     public CommunityCatalog(Context context) {
         this.context = context.getApplicationContext();
@@ -73,7 +75,31 @@ public final class CommunityCatalog {
         // 目录本身是公开的：不带令牌也能读到完整列表，令牌只决定 owned / my_rating 这些跟人
         // 有关的字段。把它当成硬前提，就会在登录端点被限流（429）或暂时关闭时，把一页本来读得到
         // 的作品报成「连不上社区」——那句话既不对，也让人去查一个没有问题的网络。
-        String token = listingToken();
+        ListingToken selected = listingToken();
+        String token = selected.value();
+        for (int attempt = 0; ; attempt++) {
+            PageResponse response = requestPage(kind, search, offset, category, token);
+            if (!shouldRetryListing(response.status(), token, attempt)) return response.page();
+            try {
+                String fresh = selected.anonymous()
+                    ? new BackendAnonymousAccount(context).accessToken(token)
+                    : new BackendAccount(context).currentAccessToken(token);
+                if (fresh.isEmpty()) return response.page();
+                token = fresh;
+            } catch (Exception | LinkageError error) {
+                android.util.Log.i("MSIMECommunity", "Account refresh for catalogue failed", error);
+                return response.page();
+            }
+        }
+    }
+
+    /** 登录令牌被服务端拒绝时只允许刷新并重试一次，避免重复提交或循环请求。 */
+    static boolean shouldRetryListing(int status, String token, int attempt) {
+        return status == 401 && token != null && !token.isEmpty() && attempt == 0;
+    }
+
+    private PageResponse requestPage(CommunityRequest.Kind kind, String search, int offset,
+            CommunityRequest.Category category, String token) {
         HttpsURLConnection connection = null;
         try {
             connection = (HttpsURLConnection) new URL(ORIGIN
@@ -88,16 +114,17 @@ public final class CommunityCatalog {
             int status = connection.getResponseCode();
             if (status != 200) {
                 String code = errorCode(connection.getErrorStream());
-                return new Page(List.of(), false, CommunityRequest.message(code, status));
+                return new PageResponse(
+                    new Page(List.of(), false, CommunityRequest.message(code, status)), status);
             }
             try (InputStream input = connection.getInputStream()) {
-                return parse(kind, new JSONObject(
-                    new String(readBounded(input, maximumResponseBytes(kind)), StandardCharsets.UTF_8)));
+                return new PageResponse(parse(kind, new JSONObject(
+                    new String(readBounded(input, maximumResponseBytes(kind)), StandardCharsets.UTF_8))), 200);
             }
         } catch (Exception | LinkageError error) {
             // 说出是哪一步断的。界面上仍然只有那一句，但把原因扔掉，下一次就还得从头猜。
             android.util.Log.w("MSIMECommunity", "Catalogue request failed", error);
-            return new Page(List.of(), false, CommunityRequest.message(null, 0));
+            return new PageResponse(new Page(List.of(), false, CommunityRequest.message(null, 0)), 0);
         } finally {
             if (connection != null) connection.disconnect();
         }
@@ -115,10 +142,13 @@ public final class CommunityCatalog {
         if (item == null || !CommunityRequest.validReport(reason, text)) {
             return CommunityRequest.message("invalid_report_reason", 400);
         }
-        String token = new BackendAccount(context).accessToken();
+        BackendAccount account = new BackendAccount(context);
+        String token = account.accessToken();
+        boolean anonymous = false;
         if (token.isEmpty()) {
             try {
                 token = new BackendAnonymousAccount(context).accessToken();
+                anonymous = true;
             } catch (Exception | LinkageError error) {
                 android.util.Log.i("MSIMECommunity", "No identity to report with", error);
                 return CommunityRequest.message(null, error instanceof BackendAnonymousAccount.RateLimited ? 429 : 0);
@@ -146,6 +176,12 @@ public final class CommunityCatalog {
             }
             int status = connection.getResponseCode();
             if (status == 200 || status == 201) return "";
+            if (status == 401) {
+                String fresh = anonymous
+                    ? new BackendAnonymousAccount(context).accessToken(token)
+                    : account.currentAccessToken(token);
+                if (!fresh.isEmpty()) return reportWithToken(item, reason, text, fresh);
+            }
             return CommunityRequest.message(errorCode(connection.getErrorStream()), status);
         } catch (Exception | LinkageError error) {
             android.util.Log.w("MSIMECommunity", "Report failed", error);
@@ -155,23 +191,55 @@ public final class CommunityCatalog {
         }
     }
 
+    private String reportWithToken(Item item, String reason, String text, String token) {
+        HttpsURLConnection connection = null;
+        try {
+            JSONObject body = new JSONObject()
+                .put("kind", CommunityRequest.reportKind(item.kind()))
+                .put("item_id", item.id())
+                .put("reason", reason);
+            if (!text.isEmpty()) body.put("detail", text);
+            connection = (HttpsURLConnection) new URL(ORIGIN + CommunityRequest.REPORT_PATH).openConnection();
+            connection.setInstanceFollowRedirects(false);
+            connection.setRequestMethod("POST");
+            connection.setConnectTimeout(TIMEOUT_MILLIS);
+            connection.setReadTimeout(TIMEOUT_MILLIS);
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Accept", "application/json");
+            connection.setRequestProperty("Content-Type", "application/json");
+            connection.setRequestProperty("User-Agent", "MSIME/Android");
+            connection.setRequestProperty("Authorization", "Bearer " + token);
+            try (java.io.OutputStream output = connection.getOutputStream()) {
+                output.write(body.toString().getBytes(StandardCharsets.UTF_8));
+            }
+            int status = connection.getResponseCode();
+            if (status == 200 || status == 201) return "";
+            return CommunityRequest.message(errorCode(connection.getErrorStream()), status);
+        } catch (Exception | LinkageError error) {
+            android.util.Log.w("MSIMECommunity", "Report retry failed", error);
+            return CommunityRequest.message(null, 0);
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
     /**
      * 读目录用的令牌：登录了水杉账号就用账号的，这样服务端才能把作者自己发布的皮肤标成 `owned`，作者才看得到修改分类的入口；没登录用键盘的匿名身份；两者都拿不到就不带令牌。
      */
-    private String listingToken() {
+    private ListingToken listingToken() {
         try {
             String account = new BackendAccount(context).accessToken();
-            if (!account.isEmpty()) return account;
+            if (!account.isEmpty()) return new ListingToken(account, false);
         } catch (Exception | LinkageError error) {
             android.util.Log.i("MSIMECommunity", "Account session unavailable; trying anonymous",
                 error);
         }
         try {
-            return new BackendAnonymousAccount(context).accessToken();
+            return new ListingToken(new BackendAnonymousAccount(context).accessToken(), true);
         } catch (Exception | LinkageError error) {
             android.util.Log.i("MSIMECommunity", "Anonymous identity unavailable; listing anyway",
                 error);
-            return null;
+            return new ListingToken(null, true);
         }
     }
 
@@ -184,47 +252,62 @@ public final class CommunityCatalog {
         if (item == null || item.kind() != CommunityRequest.Kind.SKIN || category == null) {
             return new Update(null, "这类作品没有分类。");
         }
-        String token = new BackendAccount(context).accessToken();
+        BackendAccount account = new BackendAccount(context);
+        String token = account.accessToken();
         if (token.isEmpty()) return new Update(null, "请先登录水杉账号，再修改分类。");
-        HttpsURLConnection connection = null;
-        try {
-            connection = (HttpsURLConnection) new URL(
-                ORIGIN + CommunityRequest.skinPath(item.id())).openConnection();
-            connection.setInstanceFollowRedirects(false);
-            connection.setRequestMethod("PATCH");
-            connection.setConnectTimeout(TIMEOUT_MILLIS);
-            connection.setReadTimeout(TIMEOUT_MILLIS);
-            connection.setDoOutput(true);
-            connection.setRequestProperty("Accept", "application/json");
-            connection.setRequestProperty("Content-Type", "application/json");
-            connection.setRequestProperty("User-Agent", "MSIME/Android");
-            connection.setRequestProperty("Authorization", "Bearer " + token);
-            byte[] body = CommunityRequest.categoryBody(category).getBytes(StandardCharsets.UTF_8);
-            connection.setFixedLengthStreamingMode(body.length);
-            try (java.io.OutputStream output = connection.getOutputStream()) {
-                output.write(body);
+        for (int attempt = 0; ; attempt++) {
+            HttpsURLConnection connection = null;
+            try {
+                connection = (HttpsURLConnection) new URL(
+                    ORIGIN + CommunityRequest.skinPath(item.id())).openConnection();
+                connection.setInstanceFollowRedirects(false);
+                connection.setRequestMethod("PATCH");
+                connection.setConnectTimeout(TIMEOUT_MILLIS);
+                connection.setReadTimeout(TIMEOUT_MILLIS);
+                connection.setDoOutput(true);
+                connection.setRequestProperty("Accept", "application/json");
+                connection.setRequestProperty("Content-Type", "application/json");
+                connection.setRequestProperty("User-Agent", "MSIME/Android");
+                connection.setRequestProperty("Authorization", "Bearer " + token);
+                byte[] body = CommunityRequest.categoryBody(category).getBytes(StandardCharsets.UTF_8);
+                connection.setFixedLengthStreamingMode(body.length);
+                try (java.io.OutputStream output = connection.getOutputStream()) {
+                    output.write(body);
+                }
+                int status = connection.getResponseCode();
+                if (shouldRetryCategory(status, token, attempt)) {
+                    String fresh = account.currentAccessToken(token);
+                    if (!fresh.isEmpty() && !fresh.equals(token)) {
+                        token = fresh;
+                        continue;
+                    }
+                }
+                if (status != 200) {
+                    String code = errorCode(connection.getErrorStream());
+                    return new Update(null, CommunityRequest.message(code, status));
+                }
+                Item updated;
+                try (InputStream input = connection.getInputStream()) {
+                    updated = item(CommunityRequest.Kind.SKIN, new JSONObject(new String(
+                        readBounded(input, MAX_RESPONSE_BYTES), StandardCharsets.UTF_8)));
+                }
+                if (updated == null || !updated.id().equalsIgnoreCase(item.id())
+                        || updated.category() != category) {
+                    return new Update(null, CommunityRequest.message(null, 500));
+                }
+                return new Update(updated, "");
+            } catch (Exception | LinkageError error) {
+                android.util.Log.w("MSIMECommunity", "Category update failed", error);
+                return new Update(null, CommunityRequest.message(null, 0));
+            } finally {
+                if (connection != null) connection.disconnect();
             }
-            int status = connection.getResponseCode();
-            if (status != 200) {
-                String code = errorCode(connection.getErrorStream());
-                return new Update(null, CommunityRequest.message(code, status));
-            }
-            Item updated;
-            try (InputStream input = connection.getInputStream()) {
-                updated = item(CommunityRequest.Kind.SKIN, new JSONObject(new String(
-                    readBounded(input, MAX_RESPONSE_BYTES), StandardCharsets.UTF_8)));
-            }
-            if (updated == null || !updated.id().equalsIgnoreCase(item.id())
-                    || updated.category() != category) {
-                return new Update(null, CommunityRequest.message(null, 500));
-            }
-            return new Update(updated, "");
-        } catch (Exception | LinkageError error) {
-            android.util.Log.w("MSIMECommunity", "Category update failed", error);
-            return new Update(null, CommunityRequest.message(null, 0));
-        } finally {
-            if (connection != null) connection.disconnect();
         }
+    }
+
+    /** A category mutation may refresh its rejected account token exactly once. */
+    static boolean shouldRetryCategory(int status, String token, int attempt) {
+        return status == 401 && token != null && !token.isEmpty() && attempt == 0;
     }
 
     private static Page parse(CommunityRequest.Kind kind, JSONObject root) {
