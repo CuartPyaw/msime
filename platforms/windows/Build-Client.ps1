@@ -93,6 +93,8 @@ try {
         # 现在就把 PDB 取到它所属的 DLL 旁边：后面的 MCP 和桌面端构建共用这个 target 目录，可能重建 host-api，用同一个名字改写 PDB。复制时保留 DLL 内嵌的文件名；Collect-Symbols.ps1 把它打进符号包。
         Invoke-ClientBuild cmake @('-E', 'copy_if_different', (Join-Path $release 'msime_host_api.pdb'), (Join-Path $bin 'msime_host_api.pdb'))
         if ($arch -eq 'x64') {
+            # msime-mcp --version 和 MCP 握手报告的版本（crates/mcp-server/build.rs）；没给 TargetVersion 时它读 platforms/windows/version.txt。
+            if ($TargetVersion -ne '') { $env:MSIME_VERSION = $TargetVersion }
             Invoke-ClientBuild cargo @('build', '--locked', '--release', '--target', $triple,
                 '-p', 'msime-mcp-server', '--bin', 'msime-mcp')
             Invoke-ClientBuild cmake @('-E', 'copy_if_different', (Join-Path $release 'msime-mcp.exe'), $bin)
