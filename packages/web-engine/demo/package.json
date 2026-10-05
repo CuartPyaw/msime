@@ -1,0 +1,11 @@
+{
+  "name": "msime-web-engine-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "msime-web-engine copy site/msime --clean && cp ../../ui/src/assets/msime.svg site/msime.svg"
+  },
+  "dependencies": {
+    "@msime/web-engine": "0.1.3"
+  }
+}
