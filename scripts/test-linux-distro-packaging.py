@@ -25,6 +25,8 @@ RULES = ROOT / "platforms/linux/packaging/debian/rules"
 RENDER = ROOT / "platforms/linux/packaging/render-sources.py"
 PKGBUILD = ROOT / "platforms/linux/packaging/arch/msime/PKGBUILD"
 DEBIAN_REGISTER = ROOT / "platforms/linux/packaging/debian/postinst-register"
+DEBIAN_PREINST = ROOT / "platforms/linux/packaging/debian/msime.preinst"
+DEBIAN_POSTRM = ROOT / "platforms/linux/packaging/debian/msime.postrm"
 CONTROL = ROOT / "platforms/linux/packaging/debian/control"
 ARCH_INSTALL = ROOT / "platforms/linux/packaging/arch/msime/msime.install"
 SETUP = ROOT / "platforms/linux/scripts/msime-linux-setup"
@@ -70,6 +72,12 @@ def main() -> int:
         if options != expected_options - (optional - options):
             failures.append(f"{path.relative_to(ROOT)}: CMake options differ from package-container.sh; missing {sorted(expected_options - options)}, extra {sorted(options - expected_options)}")
 
+    # 编译器下限：RPM 与 Debian 用发行版的 rust，下限要一致；Cargo.toml 的 rust-version 只是下界，锁定依赖（tauri 2.12 等）要求得更高，所以这里不拿它比。
+    spec_floor = set(re.findall(r"(?m)^BuildRequires:\s+(?:cargo|rust) >= (\S+)$", SPEC.read_text(encoding="utf-8")))
+    control_floor = set(re.findall(r"(?m)^ (?:cargo|rustc) \(>= (\S+)\)", CONTROL.read_text(encoding="utf-8")))
+    if len(spec_floor) != 1 or spec_floor != control_floor:
+        failures.append(f"rpm/msime.spec ({sorted(spec_floor)}) and debian/control ({sorted(control_floor)}) disagree on the Rust compiler floor")
+
     # 替换之后恢复：先确认这几份定义确实替换别的包，再确认它们在替换之后运行 --register，且 msime-linux-setup 有这个选项。
     register = 'msime-linux-setup --register </dev/null'
     if '"--register"' not in SETUP.read_text(encoding="utf-8"):
@@ -82,8 +90,15 @@ def main() -> int:
     if "\nReplaces: msime-linux," in CONTROL.read_text(encoding="utf-8"):
         rules = RULES.read_text(encoding="utf-8")
         fragment = DEBIAN_REGISTER.read_text(encoding="utf-8")
-        if "cat debian/postinst-register" not in rules or register not in fragment or '[ -z "$2" ]' not in fragment:
-            failures.append("debian/ replaces msime-linux but its postinst does not run msime-linux-setup --register on first configuration")
+        marker = "/var/lib/msime/register-users"
+        preinst = DEBIAN_PREINST.read_text(encoding="utf-8") if DEBIAN_PREINST.is_file() else ""
+        if "cat debian/postinst-register" not in rules or register not in fragment or f'[ -e {marker} ]' not in fragment:
+            failures.append("debian/ replaces msime-linux but its postinst does not run msime-linux-setup --register after an install")
+        # 从 config-files 状态重装时 postinst 的 $2 不为空，和升级一样；只有 preinst 的 `install` 分得出来，所以靠它留下的标记。
+        if '[ "$1" = install ]' not in preinst or marker not in preinst or '[ -z "$2" ]' in fragment:
+            failures.append(f"debian/msime.preinst must leave {marker} on every install (including reinstalls from config-files) and postinst-register must key on it, not on an empty $2")
+        if not DEBIAN_POSTRM.is_file() or marker not in DEBIAN_POSTRM.read_text(encoding="utf-8"):
+            failures.append(f"debian/msime.postrm does not remove {marker} on purge or abort-install")
     if "\nconflicts=('msime-bin')\n" in PKGBUILD.read_text(encoding="utf-8"):
         install = ARCH_INSTALL.read_text(encoding="utf-8")
         post_install = install.split("\npost_install() {\n", 1)[-1].split("\n}\n", 1)[0]
