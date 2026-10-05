@@ -36,7 +36,8 @@ jobs:
           set -euo pipefail
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "version must be X.Y.Z or X.Y.Z-pre, got '$VERSION'" >&2; exit 1; }
           if [[ -z "$NODE_AUTH_TOKEN" ]]; then echo "::warning::NPM_TOKEN is not set; @msime/web-engine $VERSION was not published to npm."; exit 0; fi
-          if npm view "@msime/web-engine@${VERSION}" version > /dev/null 2>&1; then echo "@msime/web-engine $VERSION is already on npm."; exit 0; fi
+          # npm never lets a published version be replaced, so a re-published release (scripts/publish-release.sh overwrites it) leaves npm on the build first published under this version.
+          if npm view "@msime/web-engine@${VERSION}" version > /dev/null 2>&1; then echo "::warning::@msime/web-engine $VERSION is already on npm, which cannot replace it; npm keeps the build first published as $VERSION."; exit 0; fi
           mkdir -p npm
           gh release download "web-engine-v${VERSION}" --pattern "msime-web-engine-${VERSION}.tgz" --dir npm
           tag=latest
