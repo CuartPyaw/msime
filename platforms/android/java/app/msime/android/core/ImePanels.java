@@ -80,7 +80,7 @@ final class ImePanels {
         ViewPolicy.clearMinimumWidth(tab);
         tab.setMinHeight(0);
         tab.setMinimumHeight(0);
-        tab.setIncludeFontPadding(false);
+        ViewPolicy.clearFontPadding(tab);
         tab.setSelected(s.emojiSelectedCategory == category);
         tab.setContentDescription("表情分类 " + entry.title());
         if (Build.VERSION.SDK_INT >= 30)
@@ -587,7 +587,7 @@ final class ImePanels {
         s.replyStatus = new TextView(s);
         s.replyStatus.setSingleLine(true);
         s.replyStatus.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        s.replyStatus.setIncludeFontPadding(false);
+        ViewPolicy.clearFontPadding(s.replyStatus);
         KeyboardGeometry.setKeyTextSize(s.replyStatus, 11);
         s.replyStatus.setContentDescription("高情商回复键盘状态");
         footer.addView(s.replyStatus, KeyboardGeometry.weightedWrapParams(1));
@@ -626,7 +626,7 @@ final class ImePanels {
         button.setMinHeight(0);
         button.setMinimumHeight(0);
         ViewPolicy.setHorizontalPadding(button, horizontalPadding);
-        button.setIncludeFontPadding(false);
+        ViewPolicy.clearFontPadding(button);
         button.setStateListAnimator(null);
     }
 
