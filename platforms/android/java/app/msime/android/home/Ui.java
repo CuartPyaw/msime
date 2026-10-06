@@ -15,6 +15,7 @@ import android.view.animation.PathInterpolator;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ImageView;
+import android.widget.EditText;
 import android.widget.TextView;
 import app.msime.android.KeyboardGeometry;
 import app.msime.android.ViewPolicy;
@@ -544,6 +545,13 @@ public final class Ui {
                                        @ColorInt int color) {
         TextView view = new TextView(context);
         view.setText(text);
+        style(view, sizeSp, weight, color);
+        return view;
+    }
+
+    /** Create an editable field with the shared size, weight, and colour policy. */
+    public static EditText styledInput(Context context, int sizeSp, int weight, @ColorInt int color) {
+        EditText view = new EditText(context);
         style(view, sizeSp, weight, color);
         return view;
     }
