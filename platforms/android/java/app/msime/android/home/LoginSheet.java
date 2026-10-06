@@ -250,13 +250,12 @@ final class LoginSheet {
             return true;
         });
         TextView again = Ui.textButton(activity, "换个邮箱或重新发送", 14, 500,
-            Ui.accent(activity), Ui.ripple(activity), 40);
-        again.setOnClickListener(ignored -> {
-            if (busy) return;
-            email.removeAllViews();
-            status.setVisibility(View.GONE);
-            expandEmail();
-        });
+            Ui.accent(activity), Ui.ripple(activity), 40, () -> {
+                if (busy) return;
+                email.removeAllViews();
+                status.setVisibility(View.GONE);
+                expandEmail();
+            });
         email.addView(again, Ui.matchWidth(activity, 4));
         status.setVisibility(View.GONE);
         code.requestFocus();
