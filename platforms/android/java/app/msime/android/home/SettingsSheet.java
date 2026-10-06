@@ -9,7 +9,6 @@ import app.msime.android.ViewPolicy;
 import androidx.annotation.Nullable;
 import androidx.core.widget.NestedScrollView;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
-import com.google.android.material.bottomsheet.BottomSheetDragHandleView;
 
 /**
  * 设置项的 M3 modal bottom sheet：拖动条、一个标题、可选的说明，下面一列内容。
@@ -29,8 +28,7 @@ public final class SettingsSheet {
         Ui.setPaddingDp(root, context, 24, 0, 24, 24);
 
         // 拖动条既是可见的把手，也给读屏提供「收起面板」的操作。
-        BottomSheetDragHandleView handle = new BottomSheetDragHandleView(context);
-        root.addView(handle, Ui.matchWidth());
+        root.addView(Ui.sheetDragHandle(context));
 
         // M3 headline small：面板标题是标题，不是加粗的标签。
         TextView heading = Ui.styledLabel(context, title, Ui.TEXT_BAR_TITLE, 400, Ui.text(context));

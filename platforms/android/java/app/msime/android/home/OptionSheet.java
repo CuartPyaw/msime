@@ -9,7 +9,6 @@ import androidx.annotation.Nullable;
 import androidx.core.widget.NestedScrollView;
 import app.msime.android.ViewPolicy;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
-import com.google.android.material.bottomsheet.BottomSheetDragHandleView;
 import java.util.function.Supplier;
 
 /**
@@ -30,7 +29,7 @@ public final class OptionSheet {
         dialog = new BottomSheetDialog(context);
         LinearLayout root = new LinearLayout(context);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.addView(new BottomSheetDragHandleView(context), Ui.matchWidth());
+        root.addView(Ui.sheetDragHandle(context));
 
         LinearLayout header = new LinearLayout(context);
         header.setOrientation(LinearLayout.VERTICAL);

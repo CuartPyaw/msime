@@ -37,7 +37,6 @@ import app.msime.android.CloudApi;
 import app.msime.android.ViewPolicy;
 import app.msime.android.keyboard.KeyboardGeometry;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
-import com.google.android.material.bottomsheet.BottomSheetDragHandleView;
 import java.util.function.Consumer;
 
 /**
@@ -106,7 +105,7 @@ final class LoginSheet {
         LinearLayout root = new LinearLayout(activity);
         root.setOrientation(LinearLayout.VERTICAL);
         Ui.setPaddingDp(root, activity, 24, 0, 24, 20);
-        root.addView(new BottomSheetDragHandleView(activity), Ui.matchWidth());
+        root.addView(Ui.sheetDragHandle(activity));
 
         LinearLayout header = new LinearLayout(activity);
         header.setOrientation(LinearLayout.HORIZONTAL);

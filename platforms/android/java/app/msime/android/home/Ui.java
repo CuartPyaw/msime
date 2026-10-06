@@ -23,6 +23,7 @@ import androidx.annotation.AttrRes;
 import androidx.annotation.ColorInt;
 import app.msime.android.ColorPolicy;
 import com.google.android.material.color.MaterialColors;
+import com.google.android.material.bottomsheet.BottomSheetDragHandleView;
 
 /**
  * 宿主界面共用的尺寸、时长和颜色读取。
@@ -342,6 +343,13 @@ public final class Ui {
         view.setBackgroundColor(page(context));
         view.setLayoutParams(matchWidthHeight(context, 8));
         return view;
+    }
+
+    /** Create the full-width Material bottom-sheet drag handle. */
+    public static BottomSheetDragHandleView sheetDragHandle(Context context) {
+        BottomSheetDragHandleView handle = new BottomSheetDragHandleView(context);
+        handle.setLayoutParams(matchWidth());
+        return handle;
     }
 
     /** Layout parameters for a weighted child that wraps its height. */
