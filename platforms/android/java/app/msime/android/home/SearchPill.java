@@ -28,7 +28,7 @@ public final class SearchPill extends LinearLayout {
         super(context, attrs);
         setOrientation(HORIZONTAL);
         setGravity(Gravity.CENTER_VERTICAL);
-        setMinimumHeight(Ui.dp(context, Ui.SEARCH_HEIGHT));
+        Ui.setMinimumHeightDp(this, context, Ui.SEARCH_HEIGHT);
         Ui.setHorizontalPaddingDp(this, context, 18);
         setBackground(Ui.pill(Ui.card(context)));
 
