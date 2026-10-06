@@ -172,6 +172,12 @@ final class KeyboardSheets {
     /** 设计里语言卡那种行：左边一个字的徽标，标题和副标题，行尾是值和 ›。 */
     static View badgeNavRow(Context context, String badge, String title, @Nullable String subtitle,
             @Nullable String value, Runnable action) {
+        return badgeNavRow(context, badge, title, subtitle, value, Ui.subText(context), action);
+    }
+
+    /** 徽标导航行的尾部值可使用强调色，供已启用状态等页面复用。 */
+    static View badgeNavRow(Context context, String badge, String title, @Nullable String subtitle,
+            @Nullable String value, int valueColor, Runnable action) {
         LinearLayout row = baseRow(context);
         row.addView(badge(context, badge));
         row.addView(texts(context, title, subtitle, Ui.text(context)),
@@ -180,7 +186,7 @@ final class KeyboardSheets {
             TextView state = new TextView(context);
             state.setText(value);
             state.setSingleLine(true);
-            Ui.style(state, Ui.TEXT_ROW_TITLE, 400, Ui.subText(context));
+            Ui.style(state, Ui.TEXT_ROW_TITLE, 400, valueColor);
             LinearLayout.LayoutParams params = Ui.wrap();
             params.setMarginStart(Ui.dp(context, Ui.ROW_GAP));
             row.addView(state, params);
@@ -196,7 +202,9 @@ final class KeyboardSheets {
         row.setClickable(true);
         row.setFocusable(true);
         row.setOnClickListener(ignored -> action.run());
-        row.setContentDescription(title + (value == null || value.isEmpty() ? "" : "，" + value));
+        row.setContentDescription(title
+            + (subtitle == null || subtitle.isEmpty() ? "" : "，" + subtitle)
+            + (value == null || value.isEmpty() ? "" : "，" + value));
         return row;
     }
 
