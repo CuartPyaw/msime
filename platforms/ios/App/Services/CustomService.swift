@@ -155,6 +155,7 @@ struct ServiceFailure: LocalizedError {
 }
 
 struct CustomServiceConfiguration: Codable, Sendable, Equatable {
+  private static let maximumPromptBytes = 32 * 1024
   var provider: AIProviderPreset = .custom
   var voiceProvider: VoiceProviderPreset = .custom
   var voiceAppKey = ""
@@ -239,6 +240,9 @@ struct CustomServiceConfiguration: Codable, Sendable, Equatable {
   }
 
   func save(_ kind: CustomServiceKind, token: String, defaults: UserDefaults = .standard) throws {
+    guard prompt.utf8.count <= Self.maximumPromptBytes else {
+      throw ServiceFailure(message: "润色提示词过长。")
+    }
     if kind == .voice && voiceProvider.isOnDevice {
       // Only the choice is saved; the cloud endpoint, model and key stay as they were, and each cloud service's own preset, for switching back.
       defaults.set(voiceProvider.rawValue, forKey: "service.voice.provider")
