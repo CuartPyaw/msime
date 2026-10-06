@@ -51,10 +51,8 @@ public final class InputDialog {
         root.setBackground(Ui.rounded(Ui.sheetBackground(context), Ui.dp(context, Ui.DIALOG_RADIUS)));
         root.setClipToOutline(true);
 
-        TextView heading = new TextView(context);
-        heading.setText(title);
+        TextView heading = Ui.styledLabel(context, title, Ui.TEXT_DIALOG_TITLE, 600, Ui.text(context));
         heading.setGravity(Gravity.CENTER);
-        Ui.style(heading, Ui.TEXT_DIALOG_TITLE, 600, Ui.text(context));
         heading.setAccessibilityHeading(true);
         LinearLayout.LayoutParams headingParams = Ui.matchWidth();
         headingParams.topMargin = Ui.dp(context, 20);
@@ -63,10 +61,8 @@ public final class InputDialog {
         root.addView(heading, headingParams);
 
         if (message != null && message.length() > 0) {
-            TextView note = new TextView(context);
-            note.setText(message);
+            TextView note = Ui.styledLabel(context, message, Ui.TEXT_SHEET_HEADER, 400, Ui.subText(context));
             note.setGravity(Gravity.CENTER);
-            Ui.style(note, Ui.TEXT_SHEET_HEADER, 400, Ui.subText(context));
             LinearLayout.LayoutParams params = Ui.matchWidth();
             params.topMargin = Ui.dp(context, 4);
             params.leftMargin = Ui.dp(context, 20);
