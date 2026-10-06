@@ -54,6 +54,11 @@ public final class KeyboardGeometry {
 
     private KeyboardGeometry() { }
 
+    /** Return the shorter of two dimensions for proportional control sizing. */
+    public static float shorterSide(float width, float height) {
+        return Math.min(width, height);
+    }
+
     /** Return the current display width in physical pixels. */
     public static int screenWidthPixels(Context context) {
         return context.getResources().getDisplayMetrics().widthPixels;
