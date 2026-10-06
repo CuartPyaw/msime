@@ -301,8 +301,16 @@ public final class UpdateApi {
     }
 
     private File downloadLocked(Update update, File cacheDir, Progress progress, String expected) throws Failure {
+        if (cacheDir == null) throw new Failure("没有空间存放安装包");
+        java.nio.file.Path cachePath = cacheDir.toPath();
+        if (Files.isSymbolicLink(cachePath)) throw new Failure("更新目录不安全");
         File directory = new File(cacheDir, CACHE_DIRECTORY);
-        if (!directory.isDirectory() && !directory.mkdirs()) throw new Failure("没有空间存放安装包");
+        java.nio.file.Path directoryPath = directory.toPath();
+        if (Files.isSymbolicLink(directoryPath)) throw new Failure("更新目录不安全");
+        if (!Files.isDirectory(directoryPath, LinkOption.NOFOLLOW_LINKS)
+                && !directory.mkdirs()) throw new Failure("没有空间存放安装包");
+        if (!Files.isDirectory(directoryPath, LinkOption.NOFOLLOW_LINKS))
+            throw new Failure("更新目录不安全");
         File[] stale = directory.listFiles();
         if (stale != null) {
             for (File file : stale) {

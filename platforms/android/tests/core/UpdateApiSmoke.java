@@ -97,6 +97,19 @@ public final class UpdateApiSmoke {
         File symlinkTarget = new File(symlinkDirectory, "msime-client.apk");
         check(!Files.isSymbolicLink(symlinkTarget.toPath()), "update target must not be a symlink");
 
+        // The updates directory itself must not redirect writes outside the cache.
+        File directorySymlinkCache = Files.createTempDirectory("update-smoke-directory-link").toFile();
+        File directoryOutside = Files.createTempDirectory("update-smoke-directory-outside").toFile();
+        File linkedUpdates = new File(directorySymlinkCache, "updates");
+        check(Files.createSymbolicLink(linkedUpdates.toPath(), directoryOutside.toPath()) != null,
+            "updates directory symlink created");
+        try {
+            symlinkApi.download(update, directorySymlinkCache, null);
+            throw new AssertionError("a symlinked updates directory must fail");
+        } catch (UpdateApi.Failure expected) { }
+        check(!new File(directoryOutside, update.fileName()).exists(),
+            "a symlinked updates directory must not receive the APK");
+
         // 关于页和每日任务同时下载：排队进行，后一次直接用前一次已经核对过的文件，不互删 .part、也不再下一遍。
         java.util.concurrent.atomic.AtomicInteger apkFetches = new java.util.concurrent.atomic.AtomicInteger();
         UpdateApi racing = new UpdateApi(url -> {
