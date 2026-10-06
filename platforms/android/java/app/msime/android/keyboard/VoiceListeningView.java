@@ -122,7 +122,8 @@ public final class VoiceListeningView extends TextView {
             cy - mic / 2f, mic, onAccent);
         float titleBaseline = cy + radius + gap - titleMetrics.ascent;
         // 两行居中绘制，左右各留 16 dp；放不下时省略：标题省略结尾，提示里是滚动中的识别文字，省略开头留住最新说的那段。
-        float available = Math.max(0f, getWidth() - getPaddingLeft() - getPaddingRight() - 32 * density);
+        float available = Math.max(0f, getWidth() - getPaddingLeft() - getPaddingRight()
+            - KeyboardGeometry.floatPixels(getContext(), 32));
         String titleText = String.valueOf(getText());
         if (!titleText.equals(fittedTitleSource) || available != fittedWidth
                 || title.getTextSize() != fittedTitleSize) {
@@ -143,7 +144,7 @@ public final class VoiceListeningView extends TextView {
                 fittedHintSize = hint.getTextSize();
             }
             canvas.drawText(fittedHint, cx, titleBaseline + titleMetrics.descent
-                + 6 * density - hintMetrics.ascent, hint);
+                + KeyboardGeometry.floatPixels(getContext(), 6) - hintMetrics.ascent, hint);
         }
     }
 
