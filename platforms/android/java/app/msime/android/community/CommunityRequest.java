@@ -155,7 +155,7 @@ public final class CommunityRequest {
     public static String path(Kind kind, String scope, String search, int offset,
             Category category) {
         String bounded = search == null ? "" : search.trim();
-        int page = Math.max(0, offset);
+        int page = BoundsPolicy.nonNegative(offset);
         if (kind == Kind.SKIN) {
             return "/v1/community/skins?offset=" + page + "&q=" + encode(bounded)
                 + (category == null ? "" : "&category=" + category.id())
@@ -202,7 +202,7 @@ public final class CommunityRequest {
 
     /** 皮肤卡上的使用次数：一万以下照写，一万起按「万」取一位小数（去掉 `.0`），如「15.8 万 次使用」。 */
     public static String usesLabel(long downloads) {
-        long count = Math.max(0, downloads);
+        long count = BoundsPolicy.nonNegative(downloads);
         if (count < 10_000) return count + " 次使用";
         long tenths = Math.round(count / 1_000.0);
         String value = tenths % 10 == 0 ? Long.toString(tenths / 10) : (tenths / 10) + "." + (tenths % 10);
@@ -211,7 +211,7 @@ public final class CommunityRequest {
 
     /** 条数按千位分隔，如「4,812 条」。 */
     public static String entriesLabel(int count) {
-        return String.format(java.util.Locale.ROOT, "%,d 条", Math.max(0, count));
+        return String.format(java.util.Locale.ROOT, "%,d 条", BoundsPolicy.nonNegative(count));
     }
 
     /**
