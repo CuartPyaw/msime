@@ -189,7 +189,8 @@ public final class DictionaryCollectionsStore {
         try {
             JSONObject value = dictionary(context, action("count").put("kind", kind));
             if (value == null) return Result.failed(failureMessage(""));
-            return Result.of(value.optLong("count", 0));
+            Long count = strictLong(value.opt("count"));
+            return Result.of(count == null || count < 0 ? 0L : count);
         } catch (JSONException error) {
             return Result.failed(failureMessage(""));
         }
@@ -262,7 +263,8 @@ public final class DictionaryCollectionsStore {
             JSONObject value = value(response);
             if (value == null) return Result.failed(failureMessage(errorOf(response)));
             SyncSignals.markDirty(context, SyncSwitch.DICTIONARY);
-            return Result.of(value.optInt("pending_count", 0));
+            Integer pending = nonNegativeInteger(value.opt("pending_count"));
+            return Result.of(pending == null ? 0 : pending);
         } catch (JSONException | RuntimeException | LinkageError error) {
             return Result.failed(failureMessage(""));
         }
@@ -400,8 +402,8 @@ public final class DictionaryCollectionsStore {
                 String name = strictString(item.opt("name"));
                 String kind = strictString(item.opt("kind"));
                 Boolean enabled = strictBoolean(item.opt("enabled"));
-                Integer entryCount = strictInteger(item.opt("entry_count"));
-                Integer pending = strictInteger(item.opt("pending"));
+                Integer entryCount = nonNegativeInteger(item.opt("entry_count"));
+                Integer pending = nonNegativeInteger(item.opt("pending"));
                 String type = source == null ? "user" : strictString(source.opt("type"));
                 String resource = source == null || !source.has("resource_id")
                     ? "" : strictString(source.opt("resource_id"));
@@ -422,8 +424,8 @@ public final class DictionaryCollectionsStore {
         }
         JSONObject report = value.optJSONObject("import");
         ImportReport importReport = report == null ? null : new ImportReport(
-            strictInteger(report.opt("imported"), 0), strictInteger(report.opt("duplicates"), 0),
-            strictInteger(report.opt("failed"), 0), Boolean.TRUE.equals(strictBoolean(report.opt("truncated"))));
+            nonNegativeInteger(report.opt("imported"), 0), nonNegativeInteger(report.opt("duplicates"), 0),
+            nonNegativeInteger(report.opt("failed"), 0), Boolean.TRUE.equals(strictBoolean(report.opt("truncated"))));
         return new View(Collections.unmodifiableList(collections), Collections.unmodifiableList(formats), importReport);
     }
 
@@ -526,8 +528,14 @@ public final class DictionaryCollectionsStore {
         return null;
     }
 
-    static int strictInteger(Object value, int fallback) {
+    /** 词库计数必须是非负 JSON 整数；非法值按调用方的缺省值处理。 */
+    public static Integer nonNegativeInteger(Object value) {
         Integer parsed = strictInteger(value);
+        return parsed == null || parsed < 0 ? null : parsed;
+    }
+
+    static int nonNegativeInteger(Object value, int fallback) {
+        Integer parsed = nonNegativeInteger(value);
         return parsed == null ? fallback : parsed;
     }
 

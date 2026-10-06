@@ -9,6 +9,7 @@ import app.msime.android.BoundsPolicy;
 import app.msime.android.CloudApi;
 import app.msime.android.CommonPhrasesStore;
 import app.msime.android.CustomSkinLibrary;
+import app.msime.android.DictionaryCollectionsStore;
 import app.msime.android.DictionarySnapshotQueue;
 import app.msime.android.KeyboardFeedbackPreferences;
 import app.msime.android.KeyboardFeedbackStore;
@@ -552,7 +553,8 @@ public final class CloudSync {
             JSONObject value = nativeValue(NativeClient.dictionary(new JSONObject()
                 .put("options", new JSONObject(hostOptions()))
                 .put("action", new JSONObject().put("operation", "count").put("user_only", true)).toString()));
-            return value.optInt("count", 0);
+            Integer count = DictionaryCollectionsStore.nonNegativeInteger(value.opt("count"));
+            return count == null ? 0 : count;
         }
 
         private int pendingQueueCount() throws IOException, JSONException {
@@ -560,7 +562,8 @@ public final class CloudSync {
                 .put("options", new JSONObject(hostOptions()))
                 .put("action", new JSONObject().put("operation", "list").put("offset", 0).put("limit", 1)
                     .put("user_only", true)).toString()));
-            return value.optInt("pending_count", 0);
+            Integer pending = DictionaryCollectionsStore.nonNegativeInteger(value.opt("pending_count"));
+            return pending == null ? 0 : pending;
         }
 
         private void exportSnapshot(Path destination) throws IOException, JSONException {

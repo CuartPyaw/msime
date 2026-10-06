@@ -46,6 +46,9 @@ public final class DictionaryCollectionsStoreSmoke {
         check(DictionaryCollectionsStore.strictInteger("7") == null);
         check(DictionaryCollectionsStore.strictLong(Long.valueOf(7)) == 7L);
         check(DictionaryCollectionsStore.strictLong(7.0) == null);
+        check(DictionaryCollectionsStore.nonNegativeInteger(Integer.valueOf(7)) == 7);
+        check(DictionaryCollectionsStore.nonNegativeInteger(Integer.valueOf(-1)) == null);
+        check(DictionaryCollectionsStore.nonNegativeInteger(Double.valueOf(7.5)) == null);
 
         List<DictionaryCollectionsStore.ImportSource> sources = DictionaryCollectionsStore.importSources(
             List.of("txt", "standard", "windows", "hans", "rime"));
