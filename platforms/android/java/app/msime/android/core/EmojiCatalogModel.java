@@ -63,7 +63,7 @@ public final class EmojiCatalogModel {
 
     /** 丢弃设备字体画不成单个字形的条目（系统 emoji 字体比目录的 Unicode 版本旧时会出现方框或被拆开的 ZWJ 序列），游标仍按扫描行前进。 */
     public static Page renderable(Page page, Predicate<String> drawable) {
-        ArrayList<Item> kept = new ArrayList<>();
+        ArrayList<Item> kept = new ArrayList<>(page.items().size());
         for (Item item : page.items()) if (drawable.test(item.text())) kept.add(item);
         return new Page(kept, page.nextOffset(), page.complete());
     }
