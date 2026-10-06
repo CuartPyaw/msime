@@ -120,6 +120,17 @@ final class CustomServiceTests: XCTestCase {
     XCTAssertEqual(CustomServiceConfiguration.loadPreset(.custom, defaults: defaults).model, custom.model)
   }
 
+  func testSavingAnOversizedPolishPromptIsRejectedBeforeItReachesSharedDefaults() throws {
+    let suite = "msime-provider-limit-tests-\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    var configuration = CustomServiceConfiguration()
+    configuration.endpoint = "https://custom.invalid/v1/chat/completions"
+    configuration.model = "custom-model"
+    configuration.prompt = String(repeating: "提示", count: 16_385)
+    XCTAssertThrowsError(try configuration.save(.ai, token: "", defaults: defaults))
+  }
+
   func testVoicePresetsPreserveCustomAndDoNotChangeAI() throws {
     let suite = "msime-voice-tests-\(UUID().uuidString)"
     let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
