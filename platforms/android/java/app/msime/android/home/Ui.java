@@ -538,6 +538,15 @@ public final class Ui {
         return view;
     }
 
+    /** Create a text label with the shared size, weight, and colour policy. */
+    public static TextView styledLabel(Context context, CharSequence text, int sizeSp, int weight,
+                                       @ColorInt int color) {
+        TextView view = new TextView(context);
+        view.setText(text);
+        style(view, sizeSp, weight, color);
+        return view;
+    }
+
     /** Create the centered title used by option-style bottom sheets. */
     public static TextView sheetHeading(Context context, CharSequence text) {
         TextView heading = new TextView(context);

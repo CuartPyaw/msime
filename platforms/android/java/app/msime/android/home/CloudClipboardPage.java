@@ -120,9 +120,7 @@ public final class CloudClipboardPage extends DetailPage {
         retention.setGravity(Gravity.CENTER_VERTICAL);
         Ui.setRowMinimumHeight(retention, context);
         Ui.setRowPadding(retention, context);
-        TextView label = new TextView(context);
-        label.setText("保留时长");
-        Ui.style(label, Ui.TEXT_ROW_TITLE, 400, Ui.text(context));
+        TextView label = Ui.styledLabel(context, "保留时长", Ui.TEXT_ROW_TITLE, 400, Ui.text(context));
         retention.addView(label, Ui.weightWrap(1f));
         SegmentedControl segments = new SegmentedControl(context);
         int selected = current == null ? -1 : CloudClipboardApi.RETENTION_DAYS.indexOf(current.retentionDays());
@@ -166,14 +164,11 @@ public final class CloudClipboardPage extends DetailPage {
             empty.setOrientation(LinearLayout.VERTICAL);
             empty.setGravity(Gravity.CENTER_HORIZONTAL);
             Ui.setSymmetricPaddingDp(empty, context, 16, 32);
-            TextView title = new TextView(context);
-            title.setText("还没有同步内容");
-            Ui.style(title, Ui.TEXT_ROW_TITLE, 500, Ui.text(context));
+            TextView title = Ui.styledLabel(context, "还没有同步内容", Ui.TEXT_ROW_TITLE, 500, Ui.text(context));
             empty.addView(title);
-            TextView hint = new TextView(context);
-            hint.setText("在任一设备上复制文字，这里就会出现");
+            TextView hint = Ui.styledLabel(context, "在任一设备上复制文字，这里就会出现",
+                Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));
             hint.setGravity(Gravity.CENTER);
-            Ui.style(hint, Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));
             LinearLayout.LayoutParams hintParams = Ui.wrap();
             hintParams.topMargin = Ui.dp(context, 4);
             empty.addView(hint, hintParams);

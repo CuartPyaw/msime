@@ -48,9 +48,7 @@ public final class DownloadPage extends DetailPage {
         getRow(mobile, R.drawable.ic_ms_smartphone, "iOS", "TestFlight 测试版", "ios");
         getRow(mobile, R.drawable.ic_ms_tablet, "iPadOS", "与 iPhone 共用同一个 TestFlight", "ios");
         GroupCard.Row android = row(mobile, R.drawable.ic_ms_smartphone, "Android", "各版本的 APK 在 GitHub 发布页");
-        TextView current = new TextView(context);
-        current.setText("当前设备");
-        Ui.style(current, Ui.TEXT_BUTTON_SMALL, 500, Ui.text(context));
+        TextView current = Ui.styledLabel(context, "当前设备", Ui.TEXT_BUTTON_SMALL, 500, Ui.text(context));
         LinearLayout.LayoutParams currentParams = Ui.rowGapParams(context);
         ((LinearLayout) android.view()).addView(current, currentParams);
         getRow(mobile, R.drawable.ic_ms_smartphone, "HarmonyOS", "从源码构建", "harmony");
@@ -78,13 +76,9 @@ public final class DownloadPage extends DetailPage {
 
         LinearLayout texts = new LinearLayout(context);
         texts.setOrientation(LinearLayout.VERTICAL);
-        TextView title = new TextView(context);
-        title.setText("在电脑上打开");
-        Ui.style(title, Ui.TEXT_ROW_TITLE, 600, Ui.text(context));
+        TextView title = Ui.styledLabel(context, "在电脑上打开", Ui.TEXT_ROW_TITLE, 600, Ui.text(context));
         texts.addView(title);
-        TextView link = new TextView(context);
-        link.setText(DOWNLOAD_LABEL);
-        Ui.style(link, Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));
+        TextView link = Ui.styledLabel(context, DOWNLOAD_LABEL, Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));
         texts.addView(link);
         LinearLayout.LayoutParams textParams = Ui.weightWrap(1f);
         textParams.setMarginStart(Ui.dp(context, 14));
