@@ -295,7 +295,7 @@ public final class BackendAccount {
     }
 
     private static String agentPart(String value, String fallback) {
-        StringBuilder result = new StringBuilder();
+        StringBuilder result = new StringBuilder(64);
         String raw = value == null ? "" : value.trim();
         for (int index = 0; index < raw.length() && result.length() < 64; index++) {
             char c = raw.charAt(index);
