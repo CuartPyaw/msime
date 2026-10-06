@@ -8,8 +8,6 @@ import android.graphics.RectF;
 import android.graphics.Path;
 import android.graphics.Typeface;
 import android.view.View;
-import app.msime.android.keyboard.KeyboardGeometry;
-
 /**
  * Small deterministic keyboard miniature used by the in-keyboard skin picker.
  *
