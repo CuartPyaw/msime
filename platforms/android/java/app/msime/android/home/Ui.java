@@ -142,6 +142,16 @@ public final class Ui {
         return value * context.getResources().getDisplayMetrics().density;
     }
 
+    /** Parse a theme or skin colour, returning the supplied fallback for missing or invalid input. */
+    public static int parseColor(String value, int fallback) {
+        if (value == null || value.isEmpty()) return fallback;
+        try {
+            return Color.parseColor(value);
+        } catch (IllegalArgumentException error) {
+            return fallback;
+        }
+    }
+
     /** Layout parameters for a view that fills the parent width at its measured height. */
     public static LinearLayout.LayoutParams matchWidth() {
         return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,

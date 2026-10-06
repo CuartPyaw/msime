@@ -89,7 +89,7 @@ public final class KeyboardPreview extends View {
 
     private void applyBackground() {
         int radius = Ui.dp(getContext(), cornerRadiusDp);
-        int base = skin == null ? Ui.card(getContext()) : parse(skin.background(), Ui.card(getContext()));
+        int base = skin == null ? Ui.card(getContext()) : Ui.parseColor(skin.background(), Ui.card(getContext()));
         android.graphics.drawable.GradientDrawable surface = Ui.rounded(base, radius);
         // 设计皮肤的底是一道渐变，和键盘本身一样画出来；只画纯色时，深色设计上的功能键和回车显得格外跳。
         String end = skin != null && skin.designed() ? skin.gradientEnd() : null;
@@ -97,7 +97,7 @@ public final class KeyboardPreview extends View {
             surface.setOrientation(skin.gradientHorizontal()
                 ? android.graphics.drawable.GradientDrawable.Orientation.LEFT_RIGHT
                 : android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM);
-            surface.setColors(new int[] {base, parse(end, base)});
+            surface.setColors(new int[] {base, Ui.parseColor(end, base)});
         }
         setBackground(surface);
         setClipToOutline(true);
@@ -110,38 +110,29 @@ public final class KeyboardPreview extends View {
         return Color.argb(alpha, Color.red(colour), Color.green(colour), Color.blue(colour));
     }
 
-    private static int parse(@Nullable String colour, int fallback) {
-        if (colour == null || colour.isEmpty()) return fallback;
-        try {
-            return Color.parseColor(colour);
-        } catch (IllegalArgumentException error) {
-            return fallback;
-        }
-    }
-
     private int ink() {
-        return skin == null ? Ui.text(getContext()) : parse(skin.keyForeground(), Ui.text(getContext()));
+        return skin == null ? Ui.text(getContext()) : Ui.parseColor(skin.keyForeground(), Ui.text(getContext()));
     }
 
     private int letterCap() {
-        return skin == null ? Ui.page(getContext()) : parse(skin.keyBackground(), Color.WHITE);
+        return skin == null ? Ui.page(getContext()) : Ui.parseColor(skin.keyBackground(), Color.WHITE);
     }
 
     private int functionCap() {
         return skin == null ? Ui.accentSoft(getContext())
-            : parse(skin.functionBackground(), letterCap());
+            : Ui.parseColor(skin.functionBackground(), letterCap());
     }
 
     private int returnCap() {
-        return skin == null ? Ui.accent(getContext()) : parse(skin.returnBackground(), Ui.accent(getContext()));
+        return skin == null ? Ui.accent(getContext()) : Ui.parseColor(skin.returnBackground(), Ui.accent(getContext()));
     }
 
     private int returnLabel() {
-        return skin == null ? Ui.onAccent(getContext()) : parse(skin.returnForeground(), Color.WHITE);
+        return skin == null ? Ui.onAccent(getContext()) : Ui.parseColor(skin.returnForeground(), Color.WHITE);
     }
 
     private int secondary() {
-        return skin == null ? Ui.subText(getContext()) : parse(skin.secondary(), Ui.subText(getContext()));
+        return skin == null ? Ui.subText(getContext()) : Ui.parseColor(skin.secondary(), Ui.subText(getContext()));
     }
 
     /** 参考键盘的宽度：6 dp 边距 ×2、10 列 32 dp 键宽、9 个 5 dp 键距。 */
