@@ -153,12 +153,15 @@ public final class DiagnosticsApi {
             CloudApi.Auth.ACCOUNT_OR_ANONYMOUS);
         try {
             JSONObject root = response.json();
-            String id = root.optString("id", "");
-            String token = root.optString("token", "");
-            if (id.isEmpty() || token.isEmpty()) {
+            String id = strictString(root.opt("id"));
+            String token = strictString(root.opt("token"));
+            if (id == null || token == null || id.isEmpty() || token.isEmpty()) {
                 throw new CloudApi.Failure(response.status(), "invalid_response", "snapshot id or token missing", 0);
             }
-            return new Created(id, root.optString("mcp_url", mcpUrl(id)), token, root.optString("expires_at", ""));
+            String url = strictString(root.opt("mcp_url"));
+            String expiresAt = strictString(root.opt("expires_at"));
+            return new Created(id, url == null || url.isEmpty() ? mcpUrl(id) : url, token,
+                expiresAt == null ? "" : expiresAt);
         } catch (JSONException malformed) {
             throw new CloudApi.Failure(response.status(), "invalid_response", "malformed JSON response", 0);
         }
@@ -173,8 +176,8 @@ public final class DiagnosticsApi {
     /** 换一枚访问令牌，旧令牌立即作废；返回新令牌（只出现这一次）。 */
     public String regenerateToken() throws CloudApi.Failure {
         JSONObject root = api.json("POST", PATH + "/token", new JSONObject(), CloudApi.Auth.ACCOUNT_OR_ANONYMOUS);
-        String token = root.optString("token", "");
-        if (token.isEmpty()) throw new CloudApi.Failure(200, "invalid_response", "token missing", 0);
+        String token = strictString(root.opt("token"));
+        if (token == null || token.isEmpty()) throw new CloudApi.Failure(200, "invalid_response", "token missing", 0);
         return token;
     }
 
@@ -389,5 +392,10 @@ public final class DiagnosticsApi {
             }
         }
         out.append('"');
+    }
+
+    /** org.json's optString coerces numbers; credentials and identifiers must stay JSON strings. */
+    static String strictString(Object value) {
+        return value instanceof String ? (String) value : null;
     }
 }

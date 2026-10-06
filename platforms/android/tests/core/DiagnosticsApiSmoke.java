@@ -47,6 +47,16 @@ public final class DiagnosticsApiSmoke {
         String clipped = DiagnosticsApi.CrashLog.of("", longMessage, "").message();
         check(clipped.length() == 682, "2 KiB of three-byte characters is 682 of them, got " + clipped.length());
         check(DiagnosticsApi.CrashLog.of(null, null, null).stack().isEmpty(), "missing fields become empty");
+        try {
+            java.lang.reflect.Method strictString = DiagnosticsApi.class.getDeclaredMethod("strictString", Object.class);
+            strictString.setAccessible(true);
+            check("synthetic".equals(strictString.invoke(null, "synthetic")),
+                "diagnostics identifiers accept strings");
+            check(strictString.invoke(null, 7) == null,
+                "diagnostics identifiers reject numbers instead of coercing them");
+        } catch (ReflectiveOperationException error) {
+            throw new AssertionError("diagnostics response string policy missing", error);
+        }
 
         check("https://api.msime.app/mcp/s/abc".equals(DiagnosticsApi.mcpUrl("abc")), "remote address");
 
