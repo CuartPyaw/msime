@@ -98,7 +98,7 @@ public final class CommunityRequest {
 
     /** Copy at most {@code limit} catalogue entries for a bounded discovery section. */
     public static <T> List<T> limitedCopy(List<T> values, int limit) {
-        if (values == null || values.isEmpty() || limit <= 0) return new ArrayList<>(0);
+        if (values == null || values.isEmpty() || limit <= 0) return List.of();
         return new ArrayList<>(values.subList(0, Math.min(limit, values.size())));
     }
 
