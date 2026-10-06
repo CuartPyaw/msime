@@ -132,10 +132,13 @@ public final class AiPolishModelCatalog {
 
     static URI withAnthropicQuery(URI base, String cursor)
             throws AiPolishClient.Failure {
-        StringBuilder query = new StringBuilder();
-        appendPreservedQuery(base.getRawQuery(), query);
+        String preserved = base.getRawQuery();
+        String encodedCursor = cursor == null ? null : encode(cursor);
+        StringBuilder query = new StringBuilder((preserved == null ? 0 : preserved.length())
+            + 16 + (encodedCursor == null ? 0 : encodedCursor.length()));
+        appendPreservedQuery(preserved, query);
         appendQueryPart(query, "limit=1000");
-        if (cursor != null) appendQueryPart(query, "after_id=" + encode(cursor));
+        if (encodedCursor != null) appendQueryPart(query, "after_id=" + encodedCursor);
         return withQuery(base, query.toString());
     }
 
