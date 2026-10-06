@@ -1,6 +1,5 @@
 package app.msime.android.home;
 
-import android.content.res.ColorStateList;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -17,6 +16,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import app.msime.android.ColorPolicy;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
@@ -102,7 +102,7 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
             return true;
         });
         int accent = Ui.accent(this);
-        sendAi.setBackgroundTintList(new ColorStateList(
+        sendAi.setBackgroundTintList(ColorPolicy.stateList(
             new int[][] {{-android.R.attr.state_enabled}, {}},
             new int[] {Ui.withAlpha(accent, 0.38f), accent}));
 
