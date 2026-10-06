@@ -48,7 +48,7 @@ public final class KeyboardPagerDots extends View {
         int next = Math.max(0, value);
         if (count == next) return;
         count = next;
-        active = Math.min(active, Math.max(0, count - 1));
+        active = KeyboardGeometry.bounded(active, 0, Math.max(0, count - 1));
         previous = active;
         progress = 1f;
         setVisibility(count > 1 ? VISIBLE : GONE);
