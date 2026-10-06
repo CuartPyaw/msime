@@ -313,6 +313,11 @@ final class CustomServiceTests: XCTestCase {
       "fixture", prompt: "润色", text: String(repeating: "😀", count: 8_193)))
   }
 
+  func testTranscriptionBodyRejectsOversizedAudioBeforeBuildingTheRequest() {
+    XCTAssertThrowsError(try AppServicesBridge.transcriptionBody(
+      Data(repeating: 0x2A, count: 2_100_001), model: "asr-fixture"))
+  }
+
   func testTransportUsesConfiguredEndpointAndReportsHTTPFailure() async throws {
     let session = URLSessionConfiguration.ephemeral
     session.protocolClasses = [FixtureProtocol.self]
