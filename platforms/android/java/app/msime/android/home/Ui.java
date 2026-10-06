@@ -160,6 +160,11 @@ public final class Ui {
         view.setPadding(horizontal, vertical, horizontal, vertical);
     }
 
+    /** Apply the standard minimum height for a detail row. */
+    public static void setRowMinimumHeight(View view, Context context) {
+        view.setMinimumHeight(dp(context, ROW_MIN_HEIGHT));
+    }
+
     /** Apply the standard compact action-button insets to a view. */
     public static void setButtonPadding(View view, Context context) {
         int horizontal = dp(context, BUTTON_PADDING_H);
