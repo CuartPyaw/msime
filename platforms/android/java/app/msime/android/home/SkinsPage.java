@@ -4,7 +4,6 @@ import android.content.Context;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
-import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
@@ -15,6 +14,7 @@ import androidx.core.view.ViewCompat;
 import app.msime.android.CustomKeyboardSkin;
 import app.msime.android.CustomSkinLibrary;
 import app.msime.android.KeyboardSkin;
+import app.msime.android.ViewPolicy;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
@@ -148,7 +148,7 @@ public final class SkinsPage extends DetailPage {
     private View card(Context context, Card card) {
         LinearLayout cell = new LinearLayout(context);
         cell.setOrientation(LinearLayout.VERTICAL);
-        cell.setGravity(Gravity.CENTER_HORIZONTAL);
+        ViewPolicy.setCenteredHorizontally(cell);
 
         FrameLayout tile = new FrameLayout(context);
         int ring = Ui.dp(context, 2);
@@ -167,7 +167,7 @@ public final class SkinsPage extends DetailPage {
         TextView name = Ui.styledLabel(context, card.selected() ? "✓ " + card.title() : card.title(),
             Ui.TEXT_ROW_SUBTITLE + 1, card.selected() ? 600 : 400,
             card.selected() ? Ui.accent(context) : Ui.text(context));
-        name.setGravity(Gravity.CENTER);
+        ViewPolicy.setCentered(name);
         name.setSingleLine(true);
         name.setEllipsize(android.text.TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams nameParams = Ui.matchWidth();
@@ -186,24 +186,24 @@ public final class SkinsPage extends DetailPage {
     private View aiCard(Context context) {
         LinearLayout cell = new LinearLayout(context);
         cell.setOrientation(LinearLayout.VERTICAL);
-        cell.setGravity(Gravity.CENTER_HORIZONTAL);
+        ViewPolicy.setCenteredHorizontally(cell);
         LinearLayout tile = new LinearLayout(context);
         tile.setOrientation(LinearLayout.VERTICAL);
-        tile.setGravity(Gravity.CENTER);
+        ViewPolicy.setCentered(tile);
         GradientDrawable dashed = Ui.outlinedDashed(Ui.accentSoft(context), Ui.dp(context, 14),
             Ui.atLeastOnePx(context, 1.5f), Ui.accent(context), Ui.dp(context, 6),
             Ui.dp(context, 4));
         tile.setBackground(dashed);
         TextView spark = Ui.styledLabel(context, "✦", 22, 400, Ui.accent(context));
-        spark.setGravity(Gravity.CENTER);
+        ViewPolicy.setCentered(spark);
         tile.addView(spark);
         TextView hint = Ui.styledLabel(context, "描述一句话生成", 12, 400, Ui.accent(context));
-        hint.setGravity(Gravity.CENTER);
+        ViewPolicy.setCentered(hint);
         tile.addView(hint);
         cell.addView(tile, Ui.matchWidthHeightPx(Ui.dp(context, 76) + Ui.dp(context, 6)));
         TextView name = Ui.styledLabel(context, "AI 设计皮肤", Ui.TEXT_ROW_SUBTITLE + 1, 500,
             Ui.accent(context));
-        name.setGravity(Gravity.CENTER);
+        ViewPolicy.setCentered(name);
         LinearLayout.LayoutParams nameParams = Ui.matchWidth();
         nameParams.topMargin = Ui.dp(context, 8);
         cell.addView(name, nameParams);
