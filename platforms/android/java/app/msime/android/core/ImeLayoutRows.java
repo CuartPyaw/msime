@@ -629,7 +629,7 @@ final class ImeLayoutRows {
         LinearLayout options = new LinearLayout(s);
         options.setOrientation(LinearLayout.HORIZONTAL);
         int padding = s.pixels(5);
-        options.setPadding(padding, padding, padding, padding);
+        ViewPolicy.setSymmetricPadding(options, padding, padding);
         GradientDrawable surface = DrawablePolicy.outlined(
             Color.parseColor(s.skin.background()), s.pixels(10),
             KeyboardGeometry.atLeastOnePixel(s, 1), Color.parseColor(s.skin.accent()));
@@ -644,7 +644,7 @@ final class ImeLayoutRows {
             Button option = s.keyboardKey(choice, "输入 " + choice,
                 () -> commitNineKeyHoldOption(choice));
             option.setContentDescription("输入 " + choice);
-            option.setPadding(0, 0, 0, 0);
+            ViewPolicy.clearPadding(option);
             LinearLayout.LayoutParams params = KeyboardGeometry.linearParamsPx(
                 s.pixels(36), s.pixels(38));
             if (options.getChildCount() > 0) params.setMarginStart(s.pixels(2));
