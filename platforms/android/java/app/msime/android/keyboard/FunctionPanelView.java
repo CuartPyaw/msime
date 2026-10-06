@@ -167,7 +167,7 @@ public final class FunctionPanelView extends LinearLayout {
             this.panel = panel;
             this.entry = entry;
             setText(entry.label);
-            setAllCaps(false);
+            ViewPolicy.setAllCapsFalse(this);
             setBackground(null);
             ViewPolicy.clearPadding(this);
             setMinWidth(0);

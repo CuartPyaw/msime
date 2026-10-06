@@ -23,7 +23,7 @@ public final class NineKeyDigitButton extends KeyboardPressButton {
         KeyboardGeometry.normalizeKeyCap(this);
         basePaddingTop = getPaddingTop();
         digitPaint.setTextAlign(Paint.Align.CENTER);
-        setAllCaps(false);
+        ViewPolicy.setAllCapsFalse(this);
     }
 
     /** The digit printed above the letters; empty on the digit layer, where the face is the digit. */

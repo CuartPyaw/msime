@@ -34,7 +34,7 @@ public final class CandidateChevronButton extends Button {
     public CandidateChevronButton(Context context) {
         super(context);
         setText("展开");
-        setAllCaps(false);
+        ViewPolicy.setAllCapsFalse(this);
         setBackground(null);
         ViewPolicy.clearPadding(this);
         ViewPolicy.clearMinimumWidth(this);

@@ -78,7 +78,7 @@ public final class InlineHeightBar extends LinearLayout {
     private static Button textButton(Context context, String label) {
         Button button = new BarButton(context);
         button.setText(label);
-        button.setAllCaps(false);
+        ViewPolicy.setAllCapsFalse(button);
         button.setBackground(null);
         ViewPolicy.clearMinimumWidth(button);
         button.setMinHeight(0);

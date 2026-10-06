@@ -33,7 +33,7 @@ public class KeyHintButton extends KeyboardPressButton {
         basePaddingBottom = getPaddingBottom();
         hintPaint.setTextAlign(Paint.Align.CENTER);
         cornerPaint.setTextAlign(Paint.Align.RIGHT);
-        setAllCaps(false);
+        ViewPolicy.setAllCapsFalse(this);
     }
 
     /** 底部的双拼提示；空串表示不画，并收回为它预留的底边距。 */
