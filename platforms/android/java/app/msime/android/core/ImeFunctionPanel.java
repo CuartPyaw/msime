@@ -298,7 +298,8 @@ final class ImeFunctionPanel {
         segments.addView(polish, second);
         s.moreToolsPanel.addView(segments, KeyboardGeometry.matchWidthWrapParams());
         TextView hint = new TextView(s);
-        hint.setText("回复：粘贴对方的话，生成几种语气的回复。润色：先选中要改的文字。");
+        ViewPolicy.setTextSizeLabel(hint,
+            "回复：粘贴对方的话，生成几种语气的回复。润色：先选中要改的文字。", 12);
         KeyboardGeometry.setKeyTextSize(hint, 12);
         KeyboardGeometry.setPaddingDp(hint, s, 4, 10, 4, 0);
         s.moreToolsPanel.addView(hint);
