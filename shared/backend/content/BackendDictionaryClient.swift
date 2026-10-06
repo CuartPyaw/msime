@@ -115,6 +115,7 @@ extension BackendAccountClient {
   }
   struct DictionaryImportResult: Decodable, Sendable { let imported: Int; let revision: Int64 }
   func importDictionary(_ kind: DictionaryKind, text: String, format: DictionaryFileFormat, token: String) async throws -> DictionaryImportResult {
+    guard Self.validDictionaryImportText(text) else { throw Failure(status: 400) }
     let body: Data
     let suffix: String
     if format == .hans {
@@ -125,7 +126,6 @@ extension BackendAccountClient {
       struct Body: Encodable { let text: String; let format: String }
       body = try JSONEncoder().encode(Body(text: text, format: format.rawValue)); suffix = "/import"
     }
-    guard !text.isEmpty, body.count <= 65536 else { throw Failure(status: 400) }
     let result: DictionaryImportResult = try await json("POST", "/v1/users/me/dictionaries/" + kind.rawValue + suffix, token: token, body: body)
     guard (0...1_000_000).contains(result.imported), result.revision >= 0 else { throw Failure(status: 0) }
     return result
@@ -204,6 +204,14 @@ extension BackendAccountClient {
       && !entry.word.unicodeScalars.contains { $0.properties.generalCategory == .control }
       && entry.weight >= 0
       && entry.revision > 0
+  }
+
+  private static func validDictionaryImportText(_ value: String) -> Bool {
+    !value.isEmpty
+      && value.utf8.count <= 64 * 1024
+      && !value.unicodeScalars.contains { scalar in
+        scalar.properties.generalCategory == .control && ![9, 10, 13].contains(scalar.value)
+      }
   }
 
   static func dictionaryKind(forCandidateKind kind: String) -> DictionaryKind? {
