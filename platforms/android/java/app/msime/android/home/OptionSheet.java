@@ -121,7 +121,7 @@ public final class OptionSheet {
     private View optionView(CharSequence label, boolean selected, boolean checkable, boolean nested,
             int color, boolean bold, Runnable action) {
         FrameLayout row = new FrameLayout(context);
-        row.setMinimumHeight(Ui.dp(context, Ui.SHEET_OPTION_HEIGHT));
+        Ui.setMinimumHeightDp(row, context, Ui.SHEET_OPTION_HEIGHT);
         row.setBackground(Ui.ripple(context));
         row.setClickable(true);
         row.setFocusable(true);
