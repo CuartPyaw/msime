@@ -2,8 +2,6 @@ package app.msime.android;
 
 import android.content.Context;
 import app.msime.android.policy.HostOptionsPolicy;
-import java.io.File;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -556,14 +554,6 @@ public final class DictionaryCollectionsStore {
 
     /** runtime-options.json 原文，就是 `msime_client_dictionary` 要的 HostOptions；首次设置之前为空串。 */
     static String hostOptions(Context context) {
-        File files = context.getFilesDir();
-        if (files == null) return "";
-        File options = new File(files, "runtime-options.json");
-        if (!options.isFile()) return "";
-        try {
-            return HostOptionsPolicy.read(options);
-        } catch (IOException | SecurityException error) {
-            return "";
-        }
+        return HostOptionsPolicy.readRuntimeOptions(context.getFilesDir());
     }
 }
