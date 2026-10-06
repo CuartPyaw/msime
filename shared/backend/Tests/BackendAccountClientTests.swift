@@ -230,6 +230,17 @@ final class BackendAccountClientTests: XCTestCase {
     try await client.logout(token: "session")
     try await client.deleteAccount(token: "session")
   }
+  func testRenameRejectsInvalidDisplayNamesBeforeSending() async throws {
+    let client = client()
+    for name in ["", " leading", "trailing ", String(repeating: "x", count: 65), "bad\u{0001}name"] {
+      do {
+        try await client.rename(name, token: "session")
+        XCTFail("invalid display name sent: \(name.debugDescription)")
+      } catch let failure as BackendAccountClient.Failure {
+        XCTAssertEqual(failure.status, 400)
+      }
+    }
+  }
   func testFailuresDoNotExposeServerText() async throws {
     do { _ = try await client().profile(token: "wrong"); XCTFail("must reject") }
     catch let error as BackendAccountClient.Failure {
