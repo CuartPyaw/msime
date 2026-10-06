@@ -14,6 +14,11 @@ public final class CommonPhrasesStoreSmoke {
         } catch (ReflectiveOperationException error) {
             throw new AssertionError("common phrases response policy missing", error);
         }
+        check(CommonPhrasesStore.strictString("synthetic") != null);
+        check(CommonPhrasesStore.strictString(7) == null);
+        check(CommonPhrasesStore.strictInteger(Integer.valueOf(7)) == 7);
+        check(CommonPhrasesStore.strictInteger("7") == null);
+        check(CommonPhrasesStore.strictInteger(Double.valueOf(7)) == null);
         check(CommonPhrasesStore.validText("好的，收到"));
         check(CommonPhrasesStore.validText("第一行\n第二行"));
         check(!CommonPhrasesStore.validText(null));
