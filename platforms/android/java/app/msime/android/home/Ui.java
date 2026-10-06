@@ -588,6 +588,14 @@ public final class Ui {
         return button;
     }
 
+    /** Apply the standard ripple and keyboard-accessible click behavior to a view. */
+    public static void makeClickable(View view, Context context, Runnable action) {
+        view.setBackground(ripple(context));
+        view.setClickable(true);
+        view.setFocusable(true);
+        view.setOnClickListener(ignored -> action.run());
+    }
+
     /** Create a vertically arranged rounded surface for page cards. */
     public static LinearLayout verticalCard(Context context, float radiusDp) {
         LinearLayout card = new LinearLayout(context);
