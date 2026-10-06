@@ -66,8 +66,7 @@ public final class SymbolPanelView extends LinearLayout {
         Button delete = buttons.create("⌫", "删除", listener::delete, true);
         delete.setLayoutParams(KeyboardGeometry.linearParams(getContext(), 56, 42));
         title.addView(delete);
-        addView(title, new LinearLayout.LayoutParams(
-            LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        addView(title, KeyboardGeometry.matchWidthWrapParams());
 
         LinearLayout body = new LinearLayout(context);
         body.setOrientation(HORIZONTAL);
