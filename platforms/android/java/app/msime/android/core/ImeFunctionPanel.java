@@ -73,8 +73,8 @@ final class ImeFunctionPanel {
             for (int column = 0; column < columns; column++) {
                 int index = start + column;
                 View child = index < cards.length ? cards[index] : new View(s);
-                LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                    0, s.pixels(section.height()), 1);
+                LinearLayout.LayoutParams params = KeyboardGeometry.weightedHeightPxParams(
+                    s.pixels(section.height()), 1);
                 if (column > 0) params.setMarginStart(s.pixels(MoreToolsLayout.CARD_SPACING_DP));
                 row.addView(child, params);
             }
@@ -123,8 +123,7 @@ final class ImeFunctionPanel {
         KeyboardSkin skin = s.skin;
         panel.setColors(Color.parseColor(skin.keyForeground()), Color.parseColor(skin.accent()),
             Color.parseColor(skin.background()), Color.parseColor(skin.hairline()));
-        s.moreToolsPanel.addView(panel, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT));
+        s.moreToolsPanel.addView(panel, KeyboardGeometry.matchParentParams());
         s.imeStyler.applySkin();
     }
 
