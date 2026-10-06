@@ -102,9 +102,8 @@ public final class SymbolPanelView extends LinearLayout {
             final int category = index;
             Button button = buttons.create(values.get(index).title(),
                 "符号分类 " + values.get(index).title(), () -> select(category), true);
-            ViewPolicy.setCentered(button);
-            button.setMinHeight(0);
-            button.setMinimumHeight(0);
+            ViewPolicy.setCenteredTextSizeSp(button, 13);
+            ViewPolicy.clearMinimumHeight(button);
             ViewPolicy.clearPadding(button);
             KeyboardGeometry.setKeyTextSize(button, 13);
             categoryButtons.add(button);
