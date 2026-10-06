@@ -69,8 +69,7 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
         addView(bar, barParams());
 
         resetButton = button("恢复默认", "恢复键盘布局默认值", listener::reset);
-        bar.addView(resetButton, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT));
+        bar.addView(resetButton, KeyboardGeometry.wrapMatchParentParams());
 
         hint = new TextView(context);
         hint.setGravity(android.view.Gravity.CENTER);
@@ -83,12 +82,10 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
         voiceShortcut.setText("语音");
         voiceShortcut.setContentDescription("顶部语音入口");
         voiceShortcut.setOnCheckedChangeListener((ignored, checked) -> listener.voiceShortcut(checked));
-        bar.addView(voiceShortcut, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT));
+        bar.addView(voiceShortcut, KeyboardGeometry.wrapMatchParentParams());
 
         Button close = button("完成", "返回键盘", listener::close);
-        bar.addView(close, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT));
+        bar.addView(close, KeyboardGeometry.wrapMatchParentParams());
         update(KeyboardGeometry.DEFAULT_KEY_SPACING_TENTHS,
             KeyboardGeometry.DEFAULT_ROW_SPACING_TENTHS,
             KeyboardGeometry.DEFAULT_HEIGHT_ADJUSTMENT_DP, false);

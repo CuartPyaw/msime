@@ -482,7 +482,7 @@ final class ImePanels {
     /** 分页网格加下方页点：皮肤面板与输入方式面板共用。 */
     private void addPagedGrid(LinearLayout parent, PagedTileGrid grid, int initialPage) {
         parent.addView(grid, KeyboardGeometry.matchWidthWrapParams());
-        parent.addView(new View(s), new LinearLayout.LayoutParams(0, 0, 1));
+        parent.addView(new View(s), KeyboardGeometry.weightedZeroParams(1));
         KeyboardPagerDots dots = new KeyboardPagerDots(s);
         dots.setTag(PAGER_DOTS_TAG);
         dots.setCount(grid.pageCount());
@@ -527,7 +527,7 @@ final class ImePanels {
         s.replyPolishModeButton = replySegment("帮润色", "帮润色模式", ReplyKeyboardModel.Mode.POLISH);
         s.replyHeader.addView(s.replyModeControl, new LinearLayout.LayoutParams(
             s.pixels(200), LinearLayout.LayoutParams.MATCH_PARENT));
-        s.replyHeader.addView(new View(s), new LinearLayout.LayoutParams(0, 1, 1));
+        s.replyHeader.addView(new View(s), KeyboardGeometry.weightedHeightPxParams(1, 1));
         s.replyTemplateButton = s.shortcutButton(s.replyHeader, "模板",
             KeyboardShortcutIconPolicy.Icon.BOOKMARK, this::showReplyTemplates);
         s.replyTemplateButton.setContentDescription("回复模板");
@@ -554,8 +554,7 @@ final class ImePanels {
         s.replyPasteButton.setContentDescription("粘贴回复源文字");
         KeyboardGeometry.setKeyTextSize(s.replyPasteButton, 13);
         compactReplyControl(s.replyPasteButton, s.pixels(10));
-        LinearLayout.LayoutParams pasteParams = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT);
+        LinearLayout.LayoutParams pasteParams = KeyboardGeometry.wrapMatchParentParams();
         pasteParams.setMarginStart(s.pixels(6));
         s.replyPasteButton.setLayoutParams(pasteParams);
         root.addView(s.replySourceCard, KeyboardGeometry.matchWidthHeightPx(s.pixels(38)));
@@ -601,8 +600,7 @@ final class ImePanels {
         s.replyStyleResetButton.setContentDescription("重新选择回复风格");
         KeyboardGeometry.setKeyTextSize(s.replyStyleResetButton, 12);
         compactReplyControl(s.replyStyleResetButton, s.pixels(6));
-        s.replyStyleResetButton.setLayoutParams(new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT));
+        s.replyStyleResetButton.setLayoutParams(KeyboardGeometry.wrapMatchParentParams());
         s.replyStyleResetButton.setVisibility(View.GONE);
         root.addView(footer, KeyboardGeometry.matchWidthHeightPx(s.pixels(18)));
         return root;
@@ -1204,7 +1202,7 @@ final class ImePanels {
             addClipboardTab(header, CloudClipboardPanelPolicy.TAB_LOCAL, CloudClipboardPanelPolicy.Tab.LOCAL);
             addClipboardTab(header, CloudClipboardPanelPolicy.TAB_CLOUD, CloudClipboardPanelPolicy.Tab.CLOUD);
         }
-        header.addView(new View(s), new LinearLayout.LayoutParams(0, 0, 1));
+        header.addView(new View(s), KeyboardGeometry.weightedZeroParams(1));
         if (cloud) {
             Button refresh = clipboardAction(header, "刷新", this::refreshCloudClipboard);
             refresh.setEnabled(s.cloudClipboardStatus != CloudClipboardPanelPolicy.Status.LOADING);
@@ -1245,8 +1243,7 @@ final class ImePanels {
         Button button = MSIMEInputService.role(s.button(header, label, action), KeyboardKeyRole.GLYPH);
         KeyboardGeometry.setKeyTextSize(button, 13);
         compactReplyControl(button, s.pixels(10));
-        button.setLayoutParams(new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT));
+        button.setLayoutParams(KeyboardGeometry.wrapMatchParentParams());
         return button;
     }
 
