@@ -126,7 +126,7 @@ public final class SyncMergePolicy {
     public record LocalPlan(List<String> add, List<String> remove) {}
 
     public static LocalPlan localPlan(Map<String, String> local, List<Phrase> target) {
-        Set<String> wanted = new HashSet<>();
+        Set<String> wanted = new HashSet<>(target.size());
         for (Phrase phrase : target) wanted.add(phrase.text());
         Set<String> present = new HashSet<>(local.values());
         List<String> add = new ArrayList<>(target.size());
