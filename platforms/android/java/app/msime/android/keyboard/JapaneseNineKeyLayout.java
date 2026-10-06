@@ -56,6 +56,16 @@ public final class JapaneseNineKeyLayout {
     public static List<Key> keys() { return KEYS; }
     public static List<Key> digitKeys() { return DIGIT_KEYS; }
     public static List<String> digitBrackets() { return DIGIT_BRACKETS; }
+    /** The longest stroke a key sends (`shi`, `chi`, `tsu`): one kana never takes more deletes than this. */
+    public static final int LONGEST_STROKE = 3;
+
+    /** Whether the composed reading ends in romaji the Engine has not turned into kana yet (`こんch`, `こn'`): a nine-key delete keeps going until it does not, so one press removes one whole kana. */
+    public static boolean endsWithPendingRomaji(String reading) {
+        if (reading == null || reading.isEmpty()) return false;
+        char last = reading.charAt(reading.length() - 1);
+        return (last >= 'a' && last <= 'z') || (last >= 'A' && last <= 'Z') || last == '\'';
+    }
+
     /** Center, left, up, right and down use the same direction indices as the Apple host. */
     public static int direction(float offsetX, float offsetY, float threshold) {
         if (threshold < 0) throw new IllegalArgumentException("Flick threshold cannot be negative");

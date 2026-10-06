@@ -32,6 +32,15 @@ public final class JapaneseNineKeyLayoutSmoke {
         check(JapaneseNineKeyLayout.direction(1, -13, 12) == 2);
         check(JapaneseNineKeyLayout.direction(13, 2, 12) == 3);
         check(JapaneseNineKeyLayout.direction(1, 13, 12) == 4);
+        check(!JapaneseNineKeyLayout.endsWithPendingRomaji(""));
+        check(!JapaneseNineKeyLayout.endsWithPendingRomaji(null));
+        check(!JapaneseNineKeyLayout.endsWithPendingRomaji("こんち"));
+        check(!JapaneseNineKeyLayout.endsWithPendingRomaji("こー"));
+        check(JapaneseNineKeyLayout.endsWithPendingRomaji("こんch"));
+        check(JapaneseNineKeyLayout.endsWithPendingRomaji("こn'"));
+        check(JapaneseNineKeyLayout.endsWithPendingRomaji("c"));
+        check(keys.stream().flatMap(key -> key.strokes().stream())
+            .allMatch(stroke -> stroke.length() <= JapaneseNineKeyLayout.LONGEST_STROKE));
         try {
             keys.get(0).kana().add("bad");
             throw new AssertionError();

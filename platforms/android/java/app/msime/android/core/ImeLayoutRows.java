@@ -721,6 +721,19 @@ final class ImeLayoutRows {
         for (int index = 0; index < input.length(); index++) s.character(input.charAt(index));
     }
 
+    /** 九键的一个假名背后是一串罗马字（ち 是 chi），引擎的退格一次只删一个字母；接着删到读音末尾不再挂着半截罗马字，按一次就删掉一整个假名。 */
+    void deleteJapaneseKana() {
+        if (s.connection == null) return;
+        if (!s.command(0)) {
+            s.deleteCodePointBeforeCursor();
+            return;
+        }
+        for (int extra = 1; extra < JapaneseNineKeyLayout.LONGEST_STROKE && s.view != null
+                && JapaneseNineKeyLayout.endsWithPendingRomaji(s.view.optString("reading", "")); extra++) {
+            if (!s.command(0)) return;
+        }
+    }
+
     void selectJapaneseKey(JapaneseNineKeyLayout.Key key, int direction) {
         if (direction < 0 || direction >= key.kana().size()) return;
         if (key.kana().get(direction).isEmpty()) return;
@@ -925,9 +938,7 @@ final class ImeLayoutRows {
 
         LinearLayout side = new LinearLayout(s);
         side.setOrientation(LinearLayout.VERTICAL);
-        Runnable deleteAction = () -> {
-            if (s.connection != null && !s.command(0)) s.deleteCodePointBeforeCursor();
-        };
+        Runnable deleteAction = this::deleteJapaneseKana;
         Button delete = s.keyId(s.keyboardKey("⌫", "删除", deleteAction), "Backspace");
         s.imeLetterRows.bindBackspaceRepeat(delete, deleteAction);
         addJapaneseSideKey(side, delete, 1);
