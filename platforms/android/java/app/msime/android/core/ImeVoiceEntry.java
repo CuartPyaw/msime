@@ -270,7 +270,7 @@ final class ImeVoiceEntry {
     private String statisticsDirectory() {
         if (s.preferencesDirectory != null && !s.preferencesDirectory.isEmpty()) return s.preferencesDirectory;
         File files = s.getFilesDir();
-        return files == null ? "" : new File(files, "bootstrap/state").getAbsolutePath();
+        return HostOptionsPolicy.bootstrapStateDirectory(files);
     }
 
     private void recordVoice(long milliseconds) {
