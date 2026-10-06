@@ -190,25 +190,36 @@ public final class UpdateApi {
             if (!padWithZero && (index >= a.length || index >= b.length)) return Integer.compare(a.length, b.length);
             String x = index < a.length ? a[index] : "0";
             String y = index < b.length ? b[index] : "0";
-            long nx = number(x);
-            long ny = number(y);
+            boolean numericX = numeric(x);
+            boolean numericY = numeric(y);
             int order;
-            if (nx >= 0 && ny >= 0) order = Long.compare(nx, ny);
-            else if (nx >= 0) order = -1;
-            else if (ny >= 0) order = 1;
+            if (numericX && numericY) order = compareNumeric(x, y);
+            else if (numericX) order = -1;
+            else if (numericY) order = 1;
             else order = x.compareTo(y);
             if (order != 0) return order;
         }
         return 0;
     }
 
-    private static long number(String segment) {
-        if (segment.isEmpty() || segment.length() > 18) return -1;
+    private static boolean numeric(String segment) {
+        if (segment.isEmpty()) return false;
         for (int index = 0; index < segment.length(); index++) {
             char c = segment.charAt(index);
-            if (c < '0' || c > '9') return -1;
+            if (c < '0' || c > '9') return false;
         }
-        return Long.parseLong(segment);
+        return true;
+    }
+
+    /** Compare non-empty decimal strings without converting them to a fixed-width integer. */
+    private static int compareNumeric(String left, String right) {
+        int leftStart = 0;
+        while (leftStart + 1 < left.length() && left.charAt(leftStart) == '0') leftStart++;
+        int rightStart = 0;
+        while (rightStart + 1 < right.length() && right.charAt(rightStart) == '0') rightStart++;
+        int length = Integer.compare(left.length() - leftStart, right.length() - rightStart);
+        if (length != 0) return length;
+        return left.substring(leftStart).compareTo(right.substring(rightStart));
     }
 
     /** 从列表里挑出通道接受、比 `currentVersion` 新的最高版本；没有时返回 null。 */
