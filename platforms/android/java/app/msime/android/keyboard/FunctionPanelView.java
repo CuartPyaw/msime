@@ -167,12 +167,7 @@ public final class FunctionPanelView extends LinearLayout {
             this.entry = entry;
             setText(entry.label);
             ViewPolicy.setAllCapsFalse(this);
-            ViewPolicy.clearBackground(this);
-            ViewPolicy.clearPadding(this);
-            setMinWidth(0);
-            setMinimumWidth(0);
-            setMinHeight(0);
-            setMinimumHeight(0);
+            ViewPolicy.clearChrome(this);
             setContentDescription(entry.description == null || entry.description.isEmpty()
                 ? entry.label : entry.description);
             textPaint.setTextAlign(Paint.Align.CENTER);
