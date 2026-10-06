@@ -688,7 +688,8 @@ public final class MSIMEInputService extends InputMethodService {
 
     private JSONObject value(String response) throws JSONException {
         JSONObject envelope = new JSONObject(response);
-        if (!envelope.getBoolean("ok")) throw new JSONException("Shared runtime rejected operation");
+        if (!Boolean.TRUE.equals(envelope.opt("ok")))
+            throw new JSONException("Shared runtime rejected operation");
         return envelope.getJSONObject("value");
     }
 
