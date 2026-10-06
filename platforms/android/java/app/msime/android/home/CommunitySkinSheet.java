@@ -41,7 +41,6 @@ public final class CommunitySkinSheet {
             Consumer<CommunityRequest.Category> onChangeCategory) {
         KeyboardSkin skin = CommunityAdapter.preview(item);
         SettingsSheet sheet = new SettingsSheet(context, item.name(), subtitle(item));
-        float density = context.getResources().getDisplayMetrics().density;
 
         if (skin != null) {
             KeyboardPreview preview = new KeyboardPreview(context);
@@ -108,7 +107,7 @@ public final class CommunitySkinSheet {
         LinearLayout.LayoutParams reportParams = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         reportParams.gravity = android.view.Gravity.END;
-        reportParams.topMargin = Math.round(4 * density);
+        reportParams.topMargin = Ui.dp(context, 4);
         sheet.content().addView(report, reportParams);
 
         sheet.addNote(note(item));
