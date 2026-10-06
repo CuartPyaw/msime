@@ -335,8 +335,7 @@ final class ImeLetterRows {
             block = new LinearLayout(s);
             block.setOrientation(LinearLayout.VERTICAL);
             s.imeStyler.adjustThreeRowBlockHeight(block);
-            s.keyRows.addView(block, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
+            s.keyRows.addView(block, KeyboardGeometry.matchWidthHeightPx(
                 s.pixels(KeyboardGeometry.KEY_ROW_HEIGHT_DP * 3)));
         }
         for (int rowIndex = 0; rowIndex < rows.size(); rowIndex++) {
