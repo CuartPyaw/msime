@@ -89,6 +89,8 @@ public final class Ui {
     public static final int NAV_ROW_PADDING_H = 20;
     /** 行尾的 › 。 */
     public static final int CHEVRON_SIZE = 16;
+    /** 缩略图的标准边长。 */
+    public static final int THUMBNAIL_SIZE = 64;
 
     /** 搜索框高度。 */
     public static final int SEARCH_HEIGHT = 52;
