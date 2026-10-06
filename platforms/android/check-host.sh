@@ -364,6 +364,14 @@ if sed -n '/private boolean queueImport(String options, List<SyncMergePolicy.Wor
   echo "Android cloud sync imports must require a typed boolean ok field" >&2
   exit 1
 fi
+# Typing statistics writes are optional, but their acknowledgement still controls failure
+# reporting. Do not let org.json coerce a malformed status into success.
+if sed -n '/private void submitTypingStatistics(String request, Runnable nothingRecorded/,/^    }$/p' \
+    "$repo_root/platforms/android/java/app/msime/android/core/MSIMEInputService.java" \
+    | rg -n 'getBoolean\("ok"\)|optBoolean\("ok"'; then
+  echo "Android typing statistics responses must require a typed boolean ok field" >&2
+  exit 1
+fi
 # Sync rounds download over any section that is not dirty, so a preference write that forgets to mark settings dirty is reverted by the next cloud change. HostStore.savePreferences owns that mark for every caller.
 if ! rg -qU 'NativeClient\.savePreferences\(directory, revision, document\)\)\);\s*(//[^\n]*\s*)?if \(saved != null\) SyncSignals\.markDirty\(context, SyncSwitch\.SETTINGS\);' \
     "$repo_root/platforms/android/java/app/msime/android/home/HostStore.java"; then
