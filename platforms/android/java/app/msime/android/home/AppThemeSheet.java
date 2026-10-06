@@ -176,7 +176,7 @@ final class AppThemeSheet {
 
     private static View option(Context context, CharSequence label, boolean selected, int color, Runnable action) {
         FrameLayout row = new FrameLayout(context);
-        row.setMinimumHeight(Ui.dp(context, Ui.SHEET_OPTION_HEIGHT));
+        Ui.setMinimumHeightDp(row, context, Ui.SHEET_OPTION_HEIGHT);
         row.setBackground(Ui.ripple(context));
         row.setClickable(true);
         row.setFocusable(true);

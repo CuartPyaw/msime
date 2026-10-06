@@ -179,7 +179,12 @@ public final class Ui {
 
     /** Apply the standard minimum height for a detail row. */
     public static void setRowMinimumHeight(View view, Context context) {
-        view.setMinimumHeight(dp(context, ROW_MIN_HEIGHT));
+        setMinimumHeightDp(view, context, ROW_MIN_HEIGHT);
+    }
+
+    /** Set a view's minimum height from a density-independent value. */
+    public static void setMinimumHeightDp(View view, Context context, float heightDp) {
+        view.setMinimumHeight(dp(context, heightDp));
     }
 
     /** Apply the standard compact action-button insets to a view. */
