@@ -123,7 +123,7 @@ public final class CandidateTranslationPolicy {
      */
     public static int reservedGlossRows(int glossLines, boolean hanjaRows) {
         int lines = BoundsPolicy.nonNegative(glossLines);
-        return hanjaRows ? Math.max(1, lines) : lines;
+        return hanjaRows ? BoundsPolicy.bounded(lines, 1, Integer.MAX_VALUE) : lines;
     }
 
     private static String normalize(String value) {
