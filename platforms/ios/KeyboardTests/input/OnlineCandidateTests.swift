@@ -42,6 +42,16 @@ final class OnlineCandidateTests: XCTestCase {
     XCTAssertNil(MetasequoiaInputSessionBridge.strictUInt64(NSNumber(value: -1)))
   }
 
+  func testBridgeRejectsMalformedPreferenceUpdateStatus() {
+    XCTAssertTrue(try MetasequoiaInputSessionBridge.preferencesUpdateSucceeded(["deferred": false]))
+    XCTAssertFalse(try MetasequoiaInputSessionBridge.preferencesUpdateSucceeded(["deferred": true]))
+    for invalid: Any in [1, 0, "false", NSNull()] {
+      XCTAssertThrowsError(try MetasequoiaInputSessionBridge.preferencesUpdateSucceeded(["deferred": invalid]),
+                           "deferred: \(invalid)")
+    }
+    XCTAssertThrowsError(try MetasequoiaInputSessionBridge.preferencesUpdateSucceeded([:]))
+  }
+
   func testTransportRejectsUnsafeURLComponents() {
     for value in [
       "https://user:password@example.invalid/translate",

@@ -1271,7 +1271,7 @@ final class MetasequoiaInputSessionBridge: @unchecked Sendable {
     let snapshot: [String: Any] = ["format_version": 1, "revision": revision, "preferences": prefs]
     do {
       let response = try Self.callUpdate(msimeClientUpdatePreferences, handle, snapshot)
-      return response["deferred"] as? Bool != true
+      return try Self.preferencesUpdateSucceeded(response)
     } catch {
       options["preferences"] = previous
       revision &-= 1
@@ -1323,6 +1323,15 @@ final class MetasequoiaInputSessionBridge: @unchecked Sendable {
   static func strictUInt64(_ value: Any?) -> UInt64? {
     guard let number = value as? NSNumber else { return nil }
     return CandidateGlossModel.integerValue(number, maximum: UInt64.max)
+  }
+
+  /// The runtime always reports whether a preference update was deferred. A missing or
+  /// non-boolean field is a malformed protocol response, not an applied update.
+  static func preferencesUpdateSucceeded(_ response: [String: Any]) throws -> Bool {
+    guard let deferred = response["deferred"] as? Bool else {
+      throw InputBridgeFailure.invalidResponse
+    }
+    return !deferred
   }
 
   /// Runtime state flags are protocol booleans. Keep absent optional fields on
