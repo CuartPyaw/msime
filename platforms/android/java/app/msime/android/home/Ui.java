@@ -717,6 +717,14 @@ public final class Ui {
         return view;
     }
 
+    /** Create a decorative image without applying a tint. */
+    public static ImageView decorativeIcon(Context context, @DrawableRes int icon) {
+        ImageView view = new ImageView(context);
+        view.setImageResource(icon);
+        hideFromAccessibility(view);
+        return view;
+    }
+
     /** Return the first Unicode code point of a name, or the caller's fallback when empty. */
     public static String initial(CharSequence name, String fallback) {
         if (name == null || name.length() == 0) return fallback;
