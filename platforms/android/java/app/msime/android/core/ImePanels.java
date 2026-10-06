@@ -116,7 +116,8 @@ final class ImePanels {
         s.emojiGrid.removeAllViews();
         // 每行固定八等分，网格可见区放三行；不足一行时格子保持原宽，不会被拉满整行。
         int visible = s.emojiGridScroll == null ? 0 : s.emojiGridScroll.getHeight();
-        int rowHeight = visible > 0 ? Math.max(s.pixels(40), visible / 3) : s.pixels(48);
+        int rowHeight = visible > 0
+            ? BoundsPolicy.atLeast(s.pixels(40), visible / 3) : s.pixels(48);
         LinearLayout row = null;
         for (EmojiCatalogModel.Item item : s.emojiItems) {
             if (row == null || row.getChildCount() == EmojiCatalogModel.COLUMNS) {
