@@ -2155,8 +2155,9 @@ public final class MSIMEInputService extends InputMethodService {
         JSONArray entries = view.optJSONArray("candidates");
         long generation = CandidateGlossPolicy.strictOr(view.opt("generation"), -1);
         if (entries == null || entries.length() == 0 || generation < 0) return;
-        java.util.ArrayList<String> words = new java.util.ArrayList<>(Math.min(entries.length(), 32));
-        for (int index = 0; index < Math.min(entries.length(), 32); index++) {
+        int candidateCount = Math.min(entries.length(), 32);
+        java.util.ArrayList<String> words = new java.util.ArrayList<>(candidateCount);
+        for (int index = 0; index < candidateCount; index++) {
             JSONObject candidate = entries.optJSONObject(index);
             if (candidate != null) words.add(candidate.optString("text", ""));
         }
@@ -5720,7 +5721,7 @@ public final class MSIMEInputService extends InputMethodService {
                 paint.setColor(selected ? accentColor : keyColor);
                 canvas.drawRoundRect(x, y, x + cellWidth, y + cellHeight, radius, radius, paint);
                 paint.setStyle(Paint.Style.STROKE);
-                paint.setStrokeWidth(Math.max(1, density));
+                paint.setStrokeWidth(BoundsPolicy.bounded(density, 1f, Float.MAX_VALUE));
                 paint.setColor(hairlineColor);
                 canvas.drawRoundRect(x, y, x + cellWidth, y + cellHeight, radius, radius, paint);
                 paint.setStyle(Paint.Style.FILL);
