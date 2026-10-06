@@ -15,6 +15,7 @@ import app.msime.android.BoundsPolicy;
 import app.msime.android.DrawablePolicy;
 import app.msime.android.KeyboardSkin;
 import app.msime.android.R;
+import app.msime.android.ViewPolicy;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -188,7 +189,7 @@ public final class CommunityAdapter extends RecyclerView.Adapter<CommunityAdapte
         Action action = action(item);
         if (item.kind() == CommunityRequest.Kind.SKIN) bindSkin(holder, item);
         else bindRow(holder, item, position);
-        holder.itemView.setOnClickListener(ignored -> onOpen.accept(item));
+        ViewPolicy.bindClick(holder.itemView, () -> onOpen.accept(item));
         bindPill(holder.itemView.getContext(), holder.action, item, action);
     }
 
@@ -264,7 +265,7 @@ public final class CommunityAdapter extends RecyclerView.Adapter<CommunityAdapte
         pill.setClickable(enabled);
         pill.setFocusable(enabled);
         pill.setAlpha(action == Action.BUSY ? 0.6f : 1f);
-        if (enabled) pill.setOnClickListener(ignored -> onAction.accept(item));
+        if (enabled) ViewPolicy.bindClick(pill, () -> onAction.accept(item));
         else pill.setOnClickListener(null);
         pill.setAccessibilityDelegate(KeyboardSheets.buttonDelegate(label + "，" + item.name()));
     }

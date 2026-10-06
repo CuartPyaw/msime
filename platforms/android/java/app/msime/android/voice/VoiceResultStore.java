@@ -262,7 +262,7 @@ public final class VoiceResultStore {
 
     private static boolean validText(String text) {
         return text != null && !text.strip().isEmpty()
-            && text.codePointCount(0, text.length()) <= MAXIMUM_CHARACTERS
+            && TextPolicy.withinCodePoints(text, MAXIMUM_CHARACTERS)
             && !TextPolicy.hasControlExceptWhitespace(text)
             && TextPolicy.validUnicode(text);
     }
