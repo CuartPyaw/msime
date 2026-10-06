@@ -324,8 +324,7 @@ final class ImeBottomRow {
             else if (role == KeyboardKeyRole.ACCENT)
                 KeyboardGeometry.setKeyTextSize(key, 15);
             key.setVisibility(View.VISIBLE);
-            s.actionRow.addView(key, new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.MATCH_PARENT, entry.weight()));
+            s.actionRow.addView(key, KeyboardGeometry.weightedMatchParentParams(entry.weight()));
         }
         // The quick punctuation key hides itself when the scheme has no punctuation to offer, and
         // the loop above just told every slot it was visible.
