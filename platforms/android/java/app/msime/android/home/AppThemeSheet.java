@@ -12,7 +12,6 @@ import app.msime.android.SyncSignals;
 import app.msime.android.SyncSwitch;
 import app.msime.android.ViewPolicy;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
-import com.google.android.material.bottomsheet.BottomSheetDragHandleView;
 import java.util.List;
 import org.json.JSONObject;
 
@@ -51,7 +50,7 @@ final class AppThemeSheet {
         BottomSheetDialog dialog = new BottomSheetDialog(context);
         LinearLayout root = new LinearLayout(context);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.addView(new BottomSheetDragHandleView(context), Ui.matchWidth());
+        root.addView(Ui.sheetDragHandle(context));
 
         LinearLayout header = new LinearLayout(context);
         header.setOrientation(LinearLayout.VERTICAL);
