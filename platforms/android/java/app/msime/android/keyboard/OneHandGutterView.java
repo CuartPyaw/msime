@@ -32,8 +32,8 @@ public final class OneHandGutterView extends LinearLayout {
         exit = new GutterButton(context, KeyboardIconPaths.Icon.EXIT_ONE_HAND, false);
         exit.setContentDescription("退出单手模式");
         int size = KeyboardGeometry.pixels(context, BUTTON_DP);
-        LinearLayout.LayoutParams swapParams = KeyboardGeometry.squareParamsPx(size);
-        LinearLayout.LayoutParams exitParams = KeyboardGeometry.squareParamsPx(size);
+        LinearLayout.LayoutParams swapParams = KeyboardGeometry.linearParamsPx(size, size);
+        LinearLayout.LayoutParams exitParams = KeyboardGeometry.linearParamsPx(size, size);
         exitParams.topMargin = KeyboardGeometry.pixels(context, 24);
         addView(swap, swapParams);
         addView(exit, exitParams);
