@@ -90,7 +90,8 @@ final class AppThemeSheet {
         for (int index = 0; index < THEMES.length; index++) {
             if (index > 0) root.addView(rule(context));
             String id = THEMES[index][0];
-            root.addView(option(context, THEMES[index][1], id.equals(current), Ui.accent(context), () -> {
+            root.addView(SheetOptionView.create(context, THEMES[index][1], id.equals(current), false,
+                Ui.accent(context), id.equals(current), () -> {
                 dialog.dismiss();
                 if (!id.equals(current)) saveAppTheme(host, id, refresh);
             }));
@@ -99,7 +100,8 @@ final class AppThemeSheet {
         View band = new View(context);
         band.setBackgroundColor(Ui.page(context));
         root.addView(band, Ui.matchWidthHeight(context, 8));
-        root.addView(option(context, "取消", false, Ui.accent(context), dialog::cancel));
+        root.addView(SheetOptionView.create(context, "取消", false, false, Ui.accent(context), false,
+            dialog::cancel));
         dialog.setContentView(root);
         dialog.show();
     }
@@ -164,10 +166,6 @@ final class AppThemeSheet {
             case "winter": return "冬雪";
             default: return "秋杉";
         }
-    }
-
-    private static View option(Context context, CharSequence label, boolean selected, int color, Runnable action) {
-        return SheetOptionView.create(context, label, selected, false, color, selected, action);
     }
 
     private static View rule(Context context) {

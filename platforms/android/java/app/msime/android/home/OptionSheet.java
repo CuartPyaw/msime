@@ -65,26 +65,29 @@ public final class OptionSheet {
         View band = new View(context);
         band.setBackgroundColor(Ui.page(context));
         root.addView(band, Ui.matchWidthHeight(context, 8));
-        root.addView(optionView("取消", false, false, Ui.accent(context), true, dialog::cancel));
+        root.addView(SheetOptionView.create(context, "取消", false, false, Ui.accent(context), true,
+            dialog::cancel));
         dialog.setContentView(root);
     }
 
     /** 一个普通选项；`selected` 为真时加粗并打 ✓。 */
     public OptionSheet option(CharSequence label, boolean selected, Runnable action) {
-        addOption(optionView(label, selected, false, Ui.accent(context), selected, then(action)));
+        addOption(SheetOptionView.create(context, label, selected, false, Ui.accent(context), selected,
+            then(action)));
         return this;
     }
 
     /** 一个带下一级的选项：文字后面跟 ›，点了关掉本面板并打开 `next` 给出的面板。 */
     public OptionSheet submenu(CharSequence label, boolean selected, Supplier<OptionSheet> next) {
-        addOption(optionView(label, selected, true, Ui.accent(context), selected,
+        addOption(SheetOptionView.create(context, label, selected, true, Ui.accent(context), selected,
             then(() -> next.get().show())));
         return this;
     }
 
     /** 一个破坏性选项，红色。 */
     public OptionSheet destructive(CharSequence label, Runnable action) {
-        addOption(optionView(label, false, false, Ui.danger(context), false, then(action)));
+        addOption(SheetOptionView.create(context, label, false, false, Ui.danger(context), false,
+            then(action)));
         return this;
     }
 
@@ -106,11 +109,6 @@ public final class OptionSheet {
         }
         options.addView(view);
         count++;
-    }
-
-    private View optionView(CharSequence label, boolean selected, boolean nested,
-            int color, boolean bold, Runnable action) {
-        return SheetOptionView.create(context, label, selected, nested, color, bold, action);
     }
 
 }
