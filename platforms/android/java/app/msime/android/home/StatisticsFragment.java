@@ -228,13 +228,13 @@ public final class StatisticsFragment extends HomeTabFragment {
         hero.addView(label(context, "近 7 天共输入", 13, Ui.subText(context)));
         TextView total = new TextView(context);
         total.setText(figure(context, TypingStatisticsSummary.grouped(overview.weekTotal()), 40, "字"));
-        total.setPadding(0, Ui.dp(context, 4), 0, 0);
+        Ui.setPaddingDp(total, context, 0, 4, 0, 0);
         hero.addView(total);
         String delta = TypingStatisticsSummary.weekDelta(overview.weekTotal(), overview.previousWeekTotal());
         if (delta != null) {
             TextView change = label(context, delta, 13, Ui.accent(context));
             change.setTypeface(Typeface.DEFAULT_BOLD);
-            change.setPadding(0, Ui.dp(context, 4), 0, 0);
+        Ui.setPaddingDp(change, context, 0, 4, 0, 0);
             hero.addView(change);
         }
         TrendChart chart = new TrendChart(context);
@@ -463,7 +463,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         tile.addView(label(context, title, 13, Ui.text(context)));
         TextView number = new TextView(context);
         number.setText(figure(context, value, 24, "—".equals(value) ? "" : unit));
-        number.setPadding(0, Ui.dp(context, 6), 0, Ui.dp(context, 6));
+        Ui.setPaddingDp(number, context, 0, 6, 0, 6);
         tile.addView(number);
         tile.addView(label(context, note, 12, highlight ? Ui.accent(context) : Ui.subText(context)));
         tile.setContentDescription(title + " " + value + ("—".equals(value) ? "" : " " + unit) + "，" + note);
