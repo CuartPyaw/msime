@@ -6,7 +6,6 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import javax.net.ssl.HttpsURLConnection;
 import org.json.JSONArray;
@@ -70,15 +69,7 @@ public final class AiPolishHttpTransport implements AiPolishClient.Transport {
     }
 
     static Map<String, String> authenticationHeaders(URI endpoint, String token) {
-        Map<String, String> headers = new LinkedHashMap<>();
-        if (token == null || token.isEmpty()) return headers;
-        if ("api.anthropic.com".equalsIgnoreCase(endpoint.getHost())) {
-            headers.put("x-api-key", token);
-            headers.put("anthropic-version", "2023-06-01");
-        } else {
-            headers.put("Authorization", "Bearer " + token);
-        }
-        return headers;
+        return AiProviderHeaders.forHost(endpoint.getHost(), token);
     }
 
     /** Chat completions carry text; do not let org.json coerce malformed values into prose. */
