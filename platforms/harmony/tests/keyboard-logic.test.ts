@@ -22,6 +22,7 @@ import {
 } from "../entry/src/main/ets/keyboard/input/LocalAsrTextReader";
 import { CaptureGeneration } from "../entry/src/main/ets/keyboard/input/CaptureGeneration";
 import { KeyboardMetrics } from "../entry/src/main/ets/keyboard/KeyboardMetrics";
+import { NativeReplyPolicy } from "../entry/src/main/ets/keyboard/NativeReplyPolicy";
 import {
   KeyboardLayoutDragAxis,
   KeyboardLayoutDragPolicy,
@@ -757,6 +758,12 @@ group("bounds and deduplicates asynchronous online AI candidates", () => {
     OnlineCandidatePolicy.acceptsCloudBody("你".repeat(128 * 1024)) === false,
     "oversized UTF-8 cloud responses are rejected by byte size",
   );
+});
+
+group("native success replies require a value", () => {
+  check(NativeReplyPolicy.hasValue({}), "an object value is present");
+  check(!NativeReplyPolicy.hasValue(undefined) && !NativeReplyPolicy.hasValue(null),
+    "missing native values are refused");
 });
 
 group("bounds persisted account sessions by UTF-8 bytes", () => {

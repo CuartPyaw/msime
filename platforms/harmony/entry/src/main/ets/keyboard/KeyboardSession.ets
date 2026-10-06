@@ -75,6 +75,7 @@ import { CandidatePagerPolicy } from './candidate/CandidatePagerPolicy';
 import { CandidateLogoPolicy } from './candidate/CandidateLogoPolicy';
 import { CandidateNumberFontPolicy } from './candidate/CandidateNumberFontPolicy';
 import { KeyboardMetrics } from './KeyboardMetrics';
+import { NativeReplyPolicy } from './NativeReplyPolicy';
 import { OnlineCandidatePolicy, OnlineQuery } from './candidate/OnlineCandidatePolicy';
 import {
   TranslationPolicy, TranslationQuery, TranslationPlanItem, TranslationEntry,
@@ -3856,7 +3857,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       KeyboardLog.error(`online query unavailable: ${describeError(error)}`);
       return;
     }
-    if (reply.ok !== true || reply.value === null) {
+    if (reply.ok !== true || !NativeReplyPolicy.hasValue(reply.value)) {
       this.onlineSignature = '';
       return;
     }
@@ -3944,8 +3945,10 @@ export class KeyboardSession implements HardwareKeyTarget {
         || !OnlineCandidatePolicy.acceptsCloudBody(response.result)) return false;
       const applied: NativeReply<OnlineApplyValue> = JSON.parse(client.applyCloudResponse(
         handle, queryDocument, response.result)) as NativeReply<OnlineApplyValue>;
-      if (applied.ok === true && applied.value.applied) this.render(applied.value.view);
-      return applied.ok === true && applied.value.applied;
+      if (applied.ok === true && NativeReplyPolicy.hasValue(applied.value)
+        && applied.value.applied) this.render(applied.value.view);
+      return applied.ok === true && NativeReplyPolicy.hasValue(applied.value)
+        && applied.value.applied;
     } catch (error) {
       KeyboardLog.error(`cloud candidate unavailable: ${describeError(error)}`);
       return false;
@@ -3961,7 +3964,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     try {
       const reply: NativeReply<AiHttpDescriptor | null> = JSON.parse(
         client.aiRequestForQuery(handle, queryDocument)) as NativeReply<AiHttpDescriptor | null>;
-      if (reply.ok !== true || reply.value === null) return false;
+      if (reply.ok !== true || !NativeReplyPolicy.hasValue(reply.value)) return false;
       descriptor = reply.value;
     } catch (error) {
       KeyboardLog.error(`AI query unavailable: ${describeError(error)}`);
@@ -3984,8 +3987,10 @@ export class KeyboardSession implements HardwareKeyTarget {
       if (candidates === null || candidates.length === 0) return false;
       const applied: NativeReply<OnlineApplyValue> = JSON.parse(client.applyOnlineCandidates(
         handle, queryDocument, JSON.stringify(candidates), 1)) as NativeReply<OnlineApplyValue>;
-      if (applied.ok === true && applied.value.applied) this.render(applied.value.view);
-      return applied.ok === true && applied.value.applied;
+      if (applied.ok === true && NativeReplyPolicy.hasValue(applied.value)
+        && applied.value.applied) this.render(applied.value.view);
+      return applied.ok === true && NativeReplyPolicy.hasValue(applied.value)
+        && applied.value.applied;
     } catch (error) {
       KeyboardLog.error(`AI candidate unavailable: ${describeError(error)}`);
       return false;
@@ -4004,7 +4009,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       KeyboardLog.error(`translation query unavailable: ${describeError(error)}`);
       return;
     }
-    if (reply.ok !== true || reply.value === null) {
+    if (reply.ok !== true || !NativeReplyPolicy.hasValue(reply.value)) {
       this.translationSignature = '';
       return;
     }
@@ -4379,7 +4384,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     try {
       const reply: NativeReply<TranslationHttpDescriptor | null> =
         JSON.parse(raw) as NativeReply<TranslationHttpDescriptor | null>;
-      return reply.ok === true && reply.value !== null ? reply.value : null;
+      return reply.ok === true && NativeReplyPolicy.hasValue(reply.value) ? reply.value : null;
     } catch {
       return null;
     }
