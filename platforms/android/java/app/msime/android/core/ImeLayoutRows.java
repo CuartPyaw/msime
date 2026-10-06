@@ -746,10 +746,11 @@ final class ImeLayoutRows {
         toggleKey = null;
     }
 
-    /** 上一次连点留下的假名还原样在那里：组字没被别的输入改过，或标点仍是光标前那一个字。中间打过别的字、删过、选过候选，都从新的一个假名开始。 */
-    private boolean japaneseToggleCurrent() {
+    /** 上一次连点留下的假名还原样在那里：组字没被别的输入改过，或标点仍是光标前那一个字。中间打过别的字、删过、选过候选，都从新的一个假名开始。时间窗只管「再点同一个键算不算接着切换」（`withinWindow`）；↶ 和 → 是明确的意图，不受它限制。 */
+    private boolean japaneseToggleCurrent(boolean withinWindow) {
         if (toggleKey == null || s.connection == null || s.view == null) return false;
-        if (android.os.SystemClock.uptimeMillis() - toggleAt > JapaneseNineKeyLayout.TOGGLE_WINDOW_MS) return false;
+        if (withinWindow && android.os.SystemClock.uptimeMillis() - toggleAt
+                > JapaneseNineKeyLayout.TOGGLE_WINDOW_MS) return false;
         String editing = s.view.optString("editing_text", "");
         if (toggleLiteral.isEmpty()) return editing.equals(toggleEditing);
         CharSequence before = s.connection.getTextBeforeCursor(toggleLiteral.length(), 0);
@@ -775,7 +776,7 @@ final class ImeLayoutRows {
             selectJapaneseKey(key, 0);
             return;
         }
-        if (key == toggleKey && japaneseToggleCurrent()) {
+        if (key == toggleKey && japaneseToggleCurrent(true)) {
             stepJapaneseToggle(1);
             return;
         }
@@ -802,12 +803,12 @@ final class ImeLayoutRows {
 
     /** ↶：连点切换中往回退一个假名（え→う）；不在切换中时什么也不做。 */
     void reverseJapaneseToggle() {
-        if (toggleKey != null && japaneseToggleCurrent()) stepJapaneseToggle(-1);
+        if (japaneseToggleCurrent(false)) stepJapaneseToggle(-1);
     }
 
     /** →：结束连点切换，下一次轻点同一个键打新的假名（ああ）；不在切换、也没有组字时把光标右移一格。 */
     void advanceJapaneseToggle() {
-        boolean toggling = toggleKey != null && japaneseToggleCurrent();
+        boolean toggling = japaneseToggleCurrent(false);
         resetJapaneseToggle();
         if (toggling || s.connection == null) return;
         if (s.view == null || s.view.optString("editing_text", "").isEmpty())
