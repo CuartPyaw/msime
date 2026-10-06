@@ -344,7 +344,8 @@ public final class CommonPhrasesStore {
         }
         try {
             JSONObject root = new JSONObject(response == null ? "" : response);
-            if (!root.optBoolean("ok", false)) return Result.failed(failureMessage(root.optString("error", "")));
+            if (!Boolean.TRUE.equals(strictBoolean(root.opt("ok"))))
+                return Result.failed(failureMessage(root.optString("error", "")));
             JSONObject value = root.optJSONObject("value");
             if (value == null) return Result.failed(failureMessage(""));
             Document document = parse(value);
@@ -361,6 +362,11 @@ public final class CommonPhrasesStore {
         } catch (JSONException error) {
             return null;
         }
+    }
+
+    /** Native response status must remain a JSON boolean; reject org.json string coercion. */
+    static Boolean strictBoolean(Object value) {
+        return value instanceof Boolean ? (Boolean) value : null;
     }
 
     /** Bootstrap 写进 runtime-options.json 的偏好目录，首次设置之前为空串。两个进程都从这里读，所以不会各自用一份。 */

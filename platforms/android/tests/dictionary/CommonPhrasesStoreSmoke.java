@@ -5,6 +5,15 @@ public final class CommonPhrasesStoreSmoke {
     static void check(boolean condition) { if (!condition) throw new AssertionError(); }
 
     public static void main(String[] args) {
+        try {
+            java.lang.reflect.Method strictBoolean = CommonPhrasesStore.class.getDeclaredMethod(
+                "strictBoolean", Object.class);
+            strictBoolean.setAccessible(true);
+            check(Boolean.TRUE.equals(strictBoolean.invoke(null, Boolean.TRUE)));
+            check(strictBoolean.invoke(null, "true") == null);
+        } catch (ReflectiveOperationException error) {
+            throw new AssertionError("common phrases response policy missing", error);
+        }
         check(CommonPhrasesStore.validText("好的，收到"));
         check(CommonPhrasesStore.validText("第一行\n第二行"));
         check(!CommonPhrasesStore.validText(null));
