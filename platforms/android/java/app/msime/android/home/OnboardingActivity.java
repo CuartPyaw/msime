@@ -525,8 +525,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         heading.setTypeface(Typeface.create(Typeface.DEFAULT, 600, false));
         text.addView(heading);
         TextView detail = text(option.detail(), 13, Ui.subText(this));
-        LinearLayout.LayoutParams detailParams = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams detailParams = Ui.wrap();
         detailParams.topMargin = Ui.dp(this, 2);
         text.addView(detail, detailParams);
         card.addView(text, Ui.weightWrap(1f));
