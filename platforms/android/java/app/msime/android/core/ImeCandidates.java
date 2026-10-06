@@ -221,8 +221,18 @@ final class ImeCandidates {
 
     void renderExpandedCandidates() {
         if (s.expandedCandidates == null || s.expandedCandidateScroll == null) return;
+        if (!s.candidatePanelOpen) {
+            // The normal keyboard render reaches this method on every keystroke. The panel is
+            // normally already hidden by closeCandidatePanel(); avoid traversing and clearing an
+            // empty subtree until the next open actually needs to rebuild it.
+            if (s.expandedCandidates.getVisibility() != View.GONE) {
+                s.expandedCandidates.setVisibility(View.GONE);
+                s.expandedCandidateScroll.setVisibility(View.GONE);
+            }
+            return;
+        }
         s.expandedCandidates.removeAllViews();
-        if (!s.candidatePanelOpen || s.view == null || s.candidatePanelSnapshot == null
+        if (s.view == null || s.candidatePanelSnapshot == null
                 || CandidateGlossPolicy.strictOr(s.candidatePanelSnapshot.opt("session"), Long.MIN_VALUE)
                     != s.session
                 || !MSIMEInputService.sameCandidateVersion(s.candidatePanelSnapshot, s.view)) {
