@@ -74,7 +74,7 @@ final class ImePanels {
         KeyboardPressButton tab = new KeyboardPressButton(s);
         tab.setKeyboardRole(KeyboardKeyRole.PLAIN);
         ViewPolicy.setAllCapsFalse(tab);
-        tab.setText(entry.icon());
+        ViewPolicy.setTextSizeLabel(tab, entry.icon(), 17);
         KeyboardGeometry.setKeyTextSize(tab, 17);
         compactEmojiButton(tab);
         ViewPolicy.clearFontPadding(tab);
