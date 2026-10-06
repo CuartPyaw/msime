@@ -324,6 +324,16 @@ public final class Ui {
         return view;
     }
 
+    /** Create a theme-coloured one-pixel divider in either orientation. */
+    public static View divider(Context context, boolean horizontal) {
+        View view = hairlineView(context);
+        int thin = hairlinePx(context);
+        view.setLayoutParams(horizontal
+            ? matchWidthHeightPx(thin)
+            : new LinearLayout.LayoutParams(thin, ViewGroup.LayoutParams.MATCH_PARENT));
+        return view;
+    }
+
     /** Layout parameters for a weighted child that wraps its height. */
     public static LinearLayout.LayoutParams weightWrap(float weight) {
         return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, weight);
