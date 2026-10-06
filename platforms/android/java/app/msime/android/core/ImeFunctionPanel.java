@@ -35,8 +35,7 @@ final class ImeFunctionPanel {
 
     Button moreToolsCard(String title, MoreToolsLayout.Section section, boolean active,
                                  boolean enabled, boolean playBeforeAction, Runnable action) {
-        Button card = new KeyboardPressButton(s);
-        ViewPolicy.setAllCapsFalse(card);
+        Button card = toolButton();
         String state = enabled ? MoreToolsLayout.state(section, active) : "不可用";
         boolean navigates = section == MoreToolsLayout.Section.LOCAL_INPUT_BACK;
         String label = MoreToolsLayout.icon(title) + "  " + title;
@@ -302,8 +301,7 @@ final class ImeFunctionPanel {
     }
 
     private Button segment(String label, String description, boolean enabled, Runnable action) {
-        KeyboardPressButton button = new KeyboardPressButton(s);
-        ViewPolicy.setAllCapsFalse(button);
+        KeyboardPressButton button = toolButton();
         button.setText(label);
         KeyboardGeometry.setKeyTextSize(button, 15);
         button.setContentDescription(description);
@@ -312,6 +310,12 @@ final class ImeFunctionPanel {
         s.applyToolCardState(button, enabled);
         if (Build.VERSION.SDK_INT >= 30) button.setStateDescription(enabled ? null : "不可用");
         bindToolAction(button, action, true);
+        return button;
+    }
+
+    private KeyboardPressButton toolButton() {
+        KeyboardPressButton button = new KeyboardPressButton(s);
+        ViewPolicy.setAllCapsFalse(button);
         return button;
     }
 
