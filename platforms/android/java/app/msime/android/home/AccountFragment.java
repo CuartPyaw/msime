@@ -361,7 +361,8 @@ public final class AccountFragment extends HomeTabFragment {
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setMinimumHeight(Ui.dp(context, subtitle == null ? 52 : Ui.ROW_MIN_HEIGHT));
+        row.setMinimumHeight(Ui.dp(context,
+            subtitle == null ? Ui.COMPACT_ROW_MIN_HEIGHT : Ui.ROW_MIN_HEIGHT));
         Ui.setRowPadding(row, context);
 
         ImageView glyph = new ImageView(context);
