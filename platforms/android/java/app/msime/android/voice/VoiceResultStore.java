@@ -178,8 +178,7 @@ public final class VoiceResultStore {
         byte[] bytes;
         try {
             try (InputStream input = Files.newInputStream(result)) {
-                bytes = HttpBodyPolicy.readBounded(input, MAXIMUM_FILE_BYTES);
-                if (bytes == null) throw new IOException("voice result too large");
+                bytes = HttpBodyPolicy.readRequired(input, MAXIMUM_FILE_BYTES);
             }
         } catch (IOException error) {
             throw new Failure(Reason.INVALID, error);
