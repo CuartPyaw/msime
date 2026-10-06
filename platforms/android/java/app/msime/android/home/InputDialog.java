@@ -175,8 +175,7 @@ public final class InputDialog {
 
     private void refresh() {
         boolean ok = valid.test(values());
-        primary.setEnabled(ok);
-        primary.setAlpha(ok ? 1f : 0.38f);
+        Ui.setEnabledLook(primary, ok);
     }
 
     private void submit() {
