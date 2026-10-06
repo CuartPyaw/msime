@@ -89,7 +89,7 @@ final class ImePanels {
             s.imeKeyFeedback.playFeedback(tab);
             s.selectEmojiCategory(category);
         });
-        s.emojiTabs.addView(tab, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
+        s.emojiTabs.addView(tab, KeyboardGeometry.weightedMatchParentParams(1));
     }
 
     /** 共享换肤遍历之后再画底栏分类：选中的分类是键帽色药丸，其余只是半透明图标。 */
@@ -133,7 +133,7 @@ final class ImePanels {
             ViewPolicy.clearMinimumWidth(cell);
             cell.setMinHeight(0);
             cell.setMinimumHeight(0);
-            row.addView(cell, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
+            row.addView(cell, KeyboardGeometry.weightedMatchParentParams(1));
         }
         renderEmojiStatus();
         s.imeStyler.applySkin();
@@ -595,8 +595,7 @@ final class ImePanels {
         s.replyStatus.setIncludeFontPadding(false);
         KeyboardGeometry.setKeyTextSize(s.replyStatus, 11);
         s.replyStatus.setContentDescription("高情商回复键盘状态");
-        footer.addView(s.replyStatus, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        footer.addView(s.replyStatus, KeyboardGeometry.weightedWrapParams(1));
         // 「选风格」只在已有回复时出现，点它回到风格九宫格。
         s.replyStyleResetButton = MSIMEInputService.role(s.button(footer, "选风格", () -> {
             s.replyModel.chooseStyle();
@@ -904,8 +903,7 @@ final class ImePanels {
         title.setText(s.aiOutputText.isEmpty() ? "AI 润色" : "润色结果");
         KeyboardGeometry.setKeyTextSize(title, 15);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        header.addView(title, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        header.addView(title, KeyboardGeometry.weightedWrapParams(1));
         Button back = MSIMEInputService.role(s.button(header, "返回键盘", s::closeAiPolish), KeyboardKeyRole.GLYPH);
         KeyboardGeometry.setKeyTextSize(back, 13);
         compactReplyControl(back, s.pixels(8));
