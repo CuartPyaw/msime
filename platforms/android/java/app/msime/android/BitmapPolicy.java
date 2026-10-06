@@ -1,7 +1,10 @@
 package app.msime.android;
 
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 
 /** Shared bitmap geometry for host image-processing flows. */
 public final class BitmapPolicy {
@@ -15,6 +18,24 @@ public final class BitmapPolicy {
     /** Return a bitmap's longer edge, or zero for a null bitmap. */
     public static int longestEdge(Bitmap bitmap) {
         return bitmap == null ? 0 : longestEdge(bitmap.getWidth(), bitmap.getHeight());
+    }
+
+    /** Decode only image dimensions from an in-memory payload, or return null when invalid. */
+    public static BitmapFactory.Options decodeBounds(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) return null;
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
+        return bounds.outWidth <= 0 || bounds.outHeight <= 0 ? null : bounds;
+    }
+
+    /** Decode only image dimensions from a stream, or return null when invalid. */
+    public static BitmapFactory.Options decodeBounds(InputStream input) throws IOException {
+        if (input == null) return null;
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeStream(input, null, bounds);
+        return bounds.outWidth <= 0 || bounds.outHeight <= 0 ? null : bounds;
     }
 
     /** Scale a bitmap down proportionally when its longest edge exceeds the requested limit. */

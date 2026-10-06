@@ -275,10 +275,8 @@ public final class FeedbackPage extends DetailPage {
             source = FeedbackImagePolicy.readSource(in);
         }
         if (source == null) return null;
-        BitmapFactory.Options bounds = new BitmapFactory.Options();
-        bounds.inJustDecodeBounds = true;
-        BitmapFactory.decodeByteArray(source, 0, source.length, bounds);
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
+        BitmapFactory.Options bounds = BitmapPolicy.decodeBounds(source);
+        if (bounds == null) return null;
         int sample = BitmapPolicy.sampleSizeForEdge(bounds.outWidth, bounds.outHeight, MAX_EDGE);
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inSampleSize = sample;
