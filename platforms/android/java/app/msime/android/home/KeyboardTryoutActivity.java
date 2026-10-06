@@ -18,6 +18,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import app.msime.android.ColorPolicy;
 import app.msime.android.BoundsPolicy;
+import app.msime.android.TextPolicy;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
@@ -376,7 +377,7 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
 
     /** AI 与水杉的气泡按 Markdown 渲染（加粗、列表、标题、引用、代码、链接）；自己发的那句原样显示。 */
     private void setBubbleText(TextView bubble, String text, boolean markdown) {
-        String shown = text.length() > 8_000 ? text.substring(0, 8_000) : text;
+        String shown = TextPolicy.clip(text, 8_000);
         if (markdown) markwon().setMarkdown(bubble, shown);
         else bubble.setText(shown);
     }
