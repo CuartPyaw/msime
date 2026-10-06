@@ -117,6 +117,12 @@ public final class CommunityCatalogSmoke {
             "community boolean fields accept booleans");
         check(strictBoolean.invoke(null, "true") == null,
             "community boolean fields reject strings instead of coercing them");
+        Method pageFlag = CommunityCatalog.class.getDeclaredMethod("pageHasMore", Object.class);
+        pageFlag.setAccessible(true);
+        check(Boolean.TRUE.equals(pageFlag.invoke(null, Boolean.TRUE)),
+            "community pagination accepts JSON booleans");
+        check(Boolean.FALSE.equals(pageFlag.invoke(null, "true")),
+            "community pagination rejects strings instead of coercing them");
         Method confirmedReport = CommunityCatalog.class.getDeclaredMethod("confirmedReport", Object.class);
         confirmedReport.setAccessible(true);
         check((boolean) confirmedReport.invoke(null, Boolean.TRUE),

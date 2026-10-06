@@ -326,7 +326,7 @@ public final class CommunityCatalog {
         if (rawLength > CommunityRequest.PAGE_SIZE) {
             return new Page(List.of(), false, CommunityRequest.message(null, 500));
         }
-        boolean hasMore = root.optBoolean("has_more", false);
+        boolean hasMore = pageHasMore(root.opt("has_more"));
         List<Item> items = new ArrayList<>(rawLength);
         Set<String> ids = new HashSet<>(rawLength);
         for (int index = 0; index < rawLength; index++) {
@@ -401,6 +401,11 @@ public final class CommunityCatalog {
 
     static Boolean strictBoolean(Object value) {
         return value instanceof Boolean ? (Boolean) value : null;
+    }
+
+    /** Pagination controls must be JSON booleans; malformed values mean there is no next page. */
+    static boolean pageHasMore(Object value) {
+        return Boolean.TRUE.equals(strictBoolean(value));
     }
 
     /** A successful HTTP status is not enough: the backend must confirm that it recorded the report. */
