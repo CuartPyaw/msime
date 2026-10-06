@@ -91,7 +91,7 @@ final class ImeToolbar {
         s.status.setMaxLines(1);
         ViewPolicy.clearFontPadding(s.status);
         ViewPolicy.setMaxLinesEllipsized(s.status, 1);
-        s.status.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
+        ViewPolicy.setEndCenteredVertically(s.status);
         KeyboardGeometry.setPaddingDp(s.status, s, 6, 0, 2, 0);
         candidateHeader.addView(s.status, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
