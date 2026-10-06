@@ -220,6 +220,20 @@ public final class KeyboardGeometry {
         return pixels(dp, density(context));
     }
 
+    /** Create a vertical container for stacked keyboard content. */
+    public static LinearLayout column(Context context) {
+        LinearLayout view = new LinearLayout(context);
+        view.setOrientation(LinearLayout.VERTICAL);
+        return view;
+    }
+
+    /** Create a horizontal container for inline keyboard content. */
+    public static LinearLayout row(Context context) {
+        LinearLayout view = new LinearLayout(context);
+        view.setOrientation(LinearLayout.HORIZONTAL);
+        return view;
+    }
+
     /** Create linear layout parameters from density-independent dimensions. */
     public static LinearLayout.LayoutParams linearParams(Context context, float widthDp, float heightDp) {
         return new LinearLayout.LayoutParams(pixels(context, widthDp), pixels(context, heightDp));
