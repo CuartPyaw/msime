@@ -76,7 +76,7 @@ final class AppThemeSheet {
         note.setText("四季会随季节自动更换配色");
         note.setGravity(Gravity.CENTER);
         Ui.style(note, Ui.TEXT_SHEET_HEADER, 400, Ui.subText(context));
-        LinearLayout.LayoutParams noteParams = wrap();
+        LinearLayout.LayoutParams noteParams = Ui.wrap();
         noteParams.topMargin = Ui.dp(context, 2);
         header.addView(note, noteParams);
 
@@ -91,7 +91,7 @@ final class AppThemeSheet {
             dialog.dismiss();
             save(host, "theme", MODES[index][0], refresh);
         });
-        LinearLayout.LayoutParams modeParams = wrap();
+        LinearLayout.LayoutParams modeParams = Ui.wrap();
         modeParams.topMargin = Ui.dp(context, 12);
         header.addView(modes, modeParams);
         root.addView(header);
@@ -220,10 +220,6 @@ final class AppThemeSheet {
         rule.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
             Math.max(1, Ui.dp(context, 0.5f))));
         return rule;
-    }
-
-    private static LinearLayout.LayoutParams wrap() {
-        return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
 }

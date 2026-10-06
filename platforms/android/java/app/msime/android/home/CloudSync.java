@@ -22,6 +22,7 @@ import java.io.InputStream;
 import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.MessageDigest;
@@ -435,7 +436,7 @@ public final class CloudSync {
 
         /** 本机列表换成云端格式；同一正文在云端有分组时沿用云端的分组。 */
         private List<SyncMergePolicy.Phrase> asPhrases(Map<String, String> local, List<SyncMergePolicy.Phrase> cloud) {
-            HashMap<String, String> groups = new HashMap<>();
+            HashMap<String, String> groups = new HashMap<>(cloud.size());
             for (SyncMergePolicy.Phrase phrase : cloud) groups.putIfAbsent(phrase.text(), phrase.group());
             List<SyncMergePolicy.Phrase> result = new ArrayList<>(local.size());
             for (Map.Entry<String, String> entry : local.entrySet()) {
@@ -455,7 +456,7 @@ public final class CloudSync {
                 else Log.w(TAG, "phrase remove skipped: " + removed.failure());
             }
             String duplicate = CommonPhrasesStore.failureMessage("common_phrases_duplicate");
-            Set<String> unheld = new HashSet<>();
+            Set<String> unheld = new HashSet<>(plan.add().size());
             for (String text : plan.add()) {
                 if (!CommonPhrasesStore.validText(text)) {
                     unheld.add(text);
@@ -627,7 +628,7 @@ public final class CloudSync {
     }
 
     private static Map<String, Object> map(JSONObject settings) {
-        LinkedHashMap<String, Object> result = new LinkedHashMap<>();
+        LinkedHashMap<String, Object> result = new LinkedHashMap<>(settings.length());
         Iterator<String> keys = settings.keys();
         while (keys.hasNext()) {
             String key = keys.next();
@@ -645,7 +646,7 @@ public final class CloudSync {
             throw new IllegalStateException(impossible);
         }
         byte[] buffer = new byte[16 * 1024];
-        try (InputStream input = Files.newInputStream(file)) {
+        try (InputStream input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
             int read;
             while ((read = input.read(buffer)) != -1) digest.update(buffer, 0, read);
         }
