@@ -604,13 +604,11 @@ final class ImePanels {
     }
 
     Button replySegment(String label, String description, ReplyKeyboardModel.Mode mode) {
-        Button segment = MSIMEInputService.role(s.button(s.replyModeControl, label, () -> {
+        Button segment = replyButton(s.replyModeControl, label, description, () -> {
             s.replyModel.setMode(mode);
             s.clearReplyRequestReferences();
             renderReplyKeyboard();
-        }), KeyboardKeyRole.PLAIN);
-        segment.setContentDescription(description);
-        KeyboardGeometry.setKeyTextSize(segment, 14);
+        });
         compactReplyControl(segment, 0);
         segment.setLayoutParams(new LinearLayout.LayoutParams(
             0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
@@ -626,11 +624,17 @@ final class ImePanels {
     }
 
     Button replyAction(String label, String description, Runnable action) {
-        Button button = MSIMEInputService.role(s.button(s.replyActions, label, action), KeyboardKeyRole.PLAIN);
-        button.setContentDescription(description);
-        KeyboardGeometry.setKeyTextSize(button, 14);
+        Button button = replyButton(s.replyActions, label, description, action);
         compactReplyControl(button, 0);
         button.setLayoutParams(KeyboardGeometry.weightedWidthParams(1));
+        return button;
+    }
+
+    private Button replyButton(LinearLayout parent, String label, String description,
+            Runnable action) {
+        Button button = MSIMEInputService.role(s.button(parent, label, action), KeyboardKeyRole.PLAIN);
+        button.setContentDescription(description);
+        KeyboardGeometry.setKeyTextSize(button, 14);
         return button;
     }
 
