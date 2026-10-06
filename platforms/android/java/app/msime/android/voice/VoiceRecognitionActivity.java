@@ -383,12 +383,11 @@ public final class VoiceRecognitionActivity extends Activity {
         root.setPadding(pad, pad, pad, pad);
         TextView title = new TextView(this);
         recordingTitle = title;
-        title.setText("正在录音");
-        ViewPolicy.setTextSizeSp(title, 18);
+        ViewPolicy.setTextSizeLabel(title, "正在录音", 18);
         root.addView(title);
         TextView hint = new TextView(this);
         recordingHint = hint;
-        hint.setText("说完后点「完成」开始转写；「取消」会丢弃这次录音。");
+        ViewPolicy.setTextSizeLabel(hint, "说完后点「完成」开始转写；「取消」会丢弃这次录音。", 14);
         hint.setPadding(0, pad / 2, 0, pad);
         root.addView(hint);
         LinearLayout actions = new LinearLayout(this);
