@@ -149,10 +149,9 @@ final class ImeStyler {
         int edge = BoundsPolicy.nonNegative(
             s.pixels(KeyboardGeometry.DESIGN_PADDING_HORIZONTAL_DP)
                 - s.halfSpacingPixels(layoutKeySpacingTenths()));
-        s.keyRows.setPadding(edge, s.keyRows.getPaddingTop(), edge, s.keyRows.getPaddingBottom());
+        ViewPolicy.setHorizontalPaddingPreservingVertical(s.keyRows, edge);
         if (s.actionRow != null)
-            s.actionRow.setPadding(edge, s.actionRow.getPaddingTop(), edge,
-                s.actionRow.getPaddingBottom());
+            ViewPolicy.setHorizontalPaddingPreservingVertical(s.actionRow, edge);
         s.keyRows.requestLayout();
         if (s.keyboardRoot != null) {
             s.keyboardRoot.requestLayout();

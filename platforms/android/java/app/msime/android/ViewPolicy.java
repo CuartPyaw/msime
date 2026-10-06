@@ -74,6 +74,11 @@ public final class ViewPolicy {
         view.setPadding(view.getPaddingLeft(), 0, view.getPaddingRight(), 0);
     }
 
+    /** Set equal horizontal padding while preserving the current vertical padding. */
+    public static void setHorizontalPaddingPreservingVertical(View view, int horizontal) {
+        view.setPadding(horizontal, view.getPaddingTop(), horizontal, view.getPaddingBottom());
+    }
+
     /** Keep a button label in its authored casing instead of applying the platform default. */
     public static void setAllCapsFalse(Button button) {
         button.setAllCaps(false);
