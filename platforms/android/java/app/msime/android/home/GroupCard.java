@@ -168,8 +168,7 @@ public final class GroupCard {
     /** 按钮行：行尾一个 tonal 胶囊按钮（accentSoft 底、强调色字，13sp）。 */
     public Row button(CharSequence title, @Nullable CharSequence subtitle, CharSequence label, Runnable action) {
         Row row = new Row(this, title, subtitle, false);
-        TextView button = KeyboardSheets.tonalButton(context, label, label + "，" + title, 500);
-        button.setOnClickListener(ignored -> action.run());
+        TextView button = KeyboardSheets.tonalButton(context, label, label + "，" + title, 500, action);
         LinearLayout.LayoutParams params = Ui.wrap();
         params.setMarginStart(Ui.dp(context, Ui.ROW_GAP));
         row.view.addView(button, params);
