@@ -232,8 +232,8 @@ public final class ProfilePage extends DetailPage {
 
         FrameLayout avatar = new FrameLayout(context);
         avatar.addView(avatarView(context, 88, profile.displayName(), image));
-        ImageView camera = new ImageView(context);
-        camera.setImageResource(app.msime.android.R.drawable.ms_w5_me_camera);
+        ImageView camera = Ui.decorativeIcon(context, app.msime.android.R.drawable.ms_w5_me_camera,
+            Ui.text(context));
         GradientDrawable badge = Ui.circle(Ui.card(context));
         camera.setBackground(badge);
         int pad = Ui.dp(context, 6);
