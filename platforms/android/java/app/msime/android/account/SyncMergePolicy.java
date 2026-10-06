@@ -125,9 +125,9 @@ public final class SyncMergePolicy {
         Set<String> wanted = new HashSet<>();
         for (Phrase phrase : target) wanted.add(phrase.text());
         Set<String> present = new HashSet<>(local.values());
-        List<String> add = new ArrayList<>();
+        List<String> add = new ArrayList<>(target.size());
         for (Phrase phrase : target) if (!present.contains(phrase.text())) add.add(phrase.text());
-        List<String> remove = new ArrayList<>();
+        List<String> remove = new ArrayList<>(local.size());
         for (Map.Entry<String, String> entry : local.entrySet()) {
             if (!wanted.contains(entry.getValue())) remove.add(entry.getKey());
         }
