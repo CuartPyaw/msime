@@ -8,7 +8,6 @@ import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.style.AbsoluteSizeSpan;
 import android.text.style.ForegroundColorSpan;
-import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.MenuItem;
 import android.view.SubMenu;
@@ -31,6 +30,7 @@ import app.msime.android.TypingStatisticsSummary.Habits;
 import app.msime.android.TypingStatisticsSummary.Keys;
 import app.msime.android.TypingStatisticsSummary.Overview;
 import app.msime.android.TypingStatisticsSummary.Share;
+import app.msime.android.ViewPolicy;
 import app.msime.android.policy.HostOptionsPolicy;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import java.io.File;
@@ -421,7 +421,7 @@ public final class StatisticsFragment extends HomeTabFragment {
             @Nullable String trailing) {
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(row);
         Ui.setHorizontalPaddingDp(row, context, 4);
         TextView heading = Ui.label(context, title, 13, Ui.subText(context));
         heading.setAccessibilityHeading(true);
