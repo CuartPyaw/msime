@@ -55,25 +55,28 @@ final class ImeLetterRows {
     void ensureIconKeys() {
         if (s.shiftButton != null && !(s.shiftButton instanceof KeyboardIconKey)) {
             Button original = s.shiftButton;
-            KeyboardIconKey key = new KeyboardIconKey(s, KeyboardIconKey.Kind.SHIFT);
-            key.setText(original.getText());
-            key.setContentDescription(original.getContentDescription());
-            key.setOnClickListener(ignored -> original.performClick());
-            s.keyId(key, "ShiftLeft");
-            s.imeKeyFeedback.stageFace(original, key);
+            KeyboardIconKey key = iconKey(original, KeyboardIconKey.Kind.SHIFT,
+                original.getText(), original.getContentDescription(), "ShiftLeft");
             s.shiftButton = key;
         }
         if (s.deleteButton != null && !(s.deleteButton instanceof KeyboardIconKey)) {
             Button original = s.deleteButton;
-            KeyboardIconKey key = new KeyboardIconKey(s, KeyboardIconKey.Kind.BACKSPACE);
-            key.setText("⌫");
-            key.setContentDescription("删除");
-            key.setOnClickListener(ignored -> original.performClick());
-            s.keyId(key, "Backspace");
-            s.imeKeyFeedback.stageFace(original, key);
+            KeyboardIconKey key = iconKey(original, KeyboardIconKey.Kind.BACKSPACE,
+                "⌫", "删除", "Backspace");
             bindBackspaceRepeat(key, s::deleteFromHandwriting);
             s.deleteButton = key;
         }
+    }
+
+    private KeyboardIconKey iconKey(Button original, KeyboardIconKey.Kind kind,
+            CharSequence text, CharSequence description, String keyId) {
+        KeyboardIconKey key = new KeyboardIconKey(s, kind);
+        key.setText(text);
+        key.setContentDescription(description);
+        key.setOnClickListener(ignored -> original.performClick());
+        s.keyId(key, keyId);
+        s.imeKeyFeedback.stageFace(original, key);
+        return key;
     }
 
     /** 按键气泡；第一次用时加进覆盖层。 */
