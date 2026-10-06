@@ -113,7 +113,7 @@ public final class OnboardingActivity extends AppCompatActivity {
                 float dx = end.getX() - start.getX();
                 float dy = end.getY() - start.getY();
                 // The design's rule: at least 50 px across, and clearly more across than down, so a vertical scroll never turns the page.
-                if (Math.abs(dx) < pixels(50) || Math.abs(dx) < Math.abs(dy) * 1.5f) return false;
+                if (Math.abs(dx) < Ui.dp(this, 50) || Math.abs(dx) < Math.abs(dy) * 1.5f) return false;
                 if (dx < 0 && page < pages - 1) go(page + 1);
                 else if (dx > 0 && page > 0) go(page - 1);
                 return true;
@@ -255,15 +255,15 @@ public final class OnboardingActivity extends AppCompatActivity {
         // A still of the candidate strip, drawn from the design's sample: what the switch below changes, before anyone has to open a text field to see it.
         LinearLayout strip = new LinearLayout(this);
         strip.setOrientation(LinearLayout.HORIZONTAL);
-        strip.setPadding(pixels(10), pixels(12), pixels(10), pixels(12));
-        strip.setBackground(rounded(Ui.accentSoft(this), pixels(20)));
+        strip.setPadding(Ui.dp(this, 10), Ui.dp(this, 12), Ui.dp(this, 10), Ui.dp(this, 12));
+        strip.setBackground(rounded(Ui.accentSoft(this), Ui.dp(this, 20)));
         strip.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
         String[][] samples = {{"候选", "candidate"}, {"后选", "choice"}, {"侯选", "option"}, {"候", "wait"}};
         for (int index = 0; index < samples.length; index++) {
             LinearLayout cell = new LinearLayout(this);
             cell.setOrientation(LinearLayout.VERTICAL);
             cell.setGravity(Gravity.CENTER_HORIZONTAL);
-            cell.setPadding(pixels(10), 0, pixels(10), 0);
+            cell.setPadding(Ui.dp(this, 10), 0, Ui.dp(this, 10), 0);
             TextView word = text(samples[index][0], 19, index == 0 ? Ui.accent(this) : Ui.text(this));
             if (index == 0) word.setTypeface(Typeface.create(Typeface.DEFAULT, 600, false));
             cell.addView(word);
@@ -275,8 +275,8 @@ public final class OnboardingActivity extends AppCompatActivity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(pixels(14), pixels(12), pixels(14), pixels(12));
-        row.setBackground(rounded(Ui.card(this), pixels(20)));
+        row.setPadding(Ui.dp(this, 14), Ui.dp(this, 12), Ui.dp(this, 14), Ui.dp(this, 12));
+        row.setBackground(rounded(Ui.card(this), Ui.dp(this, 20)));
         TextView label = text("显示译文", 16, Ui.text(this));
         row.addView(label, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
         MaterialSwitch toggle = new MaterialSwitch(this);
@@ -434,7 +434,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         glyph.setImageTintList(ColorStateList.valueOf(Ui.accent(this)));
         glyph.setScaleType(ImageView.ScaleType.FIT_START);
         glyph.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        column.addView(glyph, new LinearLayout.LayoutParams(pixels(36), pixels(36)));
+        column.addView(glyph, new LinearLayout.LayoutParams(Ui.dp(this, 36), Ui.dp(this, 36)));
 
         TextView kick = text(kicker, 13, Ui.accent(this));
         kick.setTypeface(Typeface.create(Typeface.DEFAULT, 600, false));
@@ -454,7 +454,7 @@ public final class OnboardingActivity extends AppCompatActivity {
     private LinearLayout card(LinearLayout column, int top) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(rounded(Ui.card(this), pixels(20)));
+        card.setBackground(rounded(Ui.card(this), Ui.dp(this, 20)));
         column.addView(card, blockParams(14 + top));
         return card;
     }
@@ -466,13 +466,13 @@ public final class OnboardingActivity extends AppCompatActivity {
             View line = new View(this);
             line.setBackgroundColor(Ui.hairline(this));
             card.addView(line, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, Math.max(1, pixels(1) / 2)));
+                LinearLayout.LayoutParams.MATCH_PARENT, Math.max(1, Ui.dp(this, 1) / 2)));
         }
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setMinimumHeight(pixels(52));
-        row.setPadding(pixels(14), pixels(6), pixels(8), pixels(6));
+        row.setMinimumHeight(Ui.dp(this, 52));
+        row.setPadding(Ui.dp(this, 14), Ui.dp(this, 6), Ui.dp(this, 8), Ui.dp(this, 6));
 
         TextView mark = new TextView(this);
         mark.setGravity(Gravity.CENTER);
@@ -484,25 +484,25 @@ public final class OnboardingActivity extends AppCompatActivity {
         disc.setColor(done ? Ui.accent(this) : Ui.color(this, R.attr.msWarn));
         mark.setBackground(disc);
         mark.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        row.addView(mark, new LinearLayout.LayoutParams(pixels(24), pixels(24)));
+        row.addView(mark, new LinearLayout.LayoutParams(Ui.dp(this, 24), Ui.dp(this, 24)));
 
         TextView text = text(label, 16, Ui.text(this));
         LinearLayout.LayoutParams textParams =
             new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
-        textParams.setMarginStart(pixels(12));
+        textParams.setMarginStart(Ui.dp(this, 12));
         row.addView(text, textParams);
         text.setContentDescription(label + (done ? "，已完成" : "，未完成"));
 
         if (!done) {
             TextView button = text(action, 15, Ui.accent(this));
             button.setGravity(Gravity.CENTER);
-            button.setPadding(pixels(8), 0, pixels(8), 0);
+            button.setPadding(Ui.dp(this, 8), 0, Ui.dp(this, 8), 0);
             android.util.TypedValue ripple = new android.util.TypedValue();
             getTheme().resolveAttribute(android.R.attr.selectableItemBackground, ripple, true);
             button.setBackgroundResource(ripple.resourceId);
             button.setOnClickListener(ignored -> fix.run());
             row.addView(button, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, pixels(40)));
+                LinearLayout.LayoutParams.WRAP_CONTENT, Ui.dp(this, 40)));
         }
         card.addView(row);
     }
@@ -513,9 +513,9 @@ public final class OnboardingActivity extends AppCompatActivity {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.HORIZONTAL);
         card.setGravity(Gravity.CENTER_VERTICAL);
-        card.setPadding(pixels(16), pixels(14), pixels(16), pixels(14));
-        GradientDrawable face = rounded(Ui.card(this), pixels(20));
-        if (selected) face.setStroke(pixels(2), Ui.accent(this));
+        card.setPadding(Ui.dp(this, 16), Ui.dp(this, 14), Ui.dp(this, 16), Ui.dp(this, 14));
+        GradientDrawable face = rounded(Ui.card(this), Ui.dp(this, 20));
+        if (selected) face.setStroke(Ui.dp(this, 2), Ui.accent(this));
         card.setBackground(face);
 
         LinearLayout text = new LinearLayout(this);
@@ -526,7 +526,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         TextView detail = text(option.detail(), 13, Ui.subText(this));
         LinearLayout.LayoutParams detailParams = new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        detailParams.topMargin = pixels(2);
+        detailParams.topMargin = Ui.dp(this, 2);
         text.addView(detail, detailParams);
         card.addView(text, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
 
@@ -535,15 +535,15 @@ public final class OnboardingActivity extends AppCompatActivity {
         dot.setShape(GradientDrawable.OVAL);
         if (selected) {
             dot.setColor(Ui.page(this));
-            dot.setStroke(pixels(6), Ui.accent(this));
+            dot.setStroke(Ui.dp(this, 6), Ui.accent(this));
         } else {
             dot.setColor(0);
             dot.setStroke(Math.max(1, Math.round(1.5f * getResources().getDisplayMetrics().density)),
                 Ui.subText(this));
         }
         radio.setBackground(dot);
-        LinearLayout.LayoutParams radioParams = new LinearLayout.LayoutParams(pixels(22), pixels(22));
-        radioParams.setMarginStart(pixels(12));
+        LinearLayout.LayoutParams radioParams = new LinearLayout.LayoutParams(Ui.dp(this, 22), Ui.dp(this, 22));
+        radioParams.setMarginStart(Ui.dp(this, 12));
         card.addView(radio, radioParams);
 
         card.setContentDescription(option.label() + "，" + option.detail()
@@ -559,19 +559,19 @@ public final class OnboardingActivity extends AppCompatActivity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(pixels(14), pixels(12), pixels(14), pixels(12));
-        row.setBackground(rounded(Ui.card(this), pixels(20)));
+        row.setPadding(Ui.dp(this, 14), Ui.dp(this, 12), Ui.dp(this, 14), Ui.dp(this, 12));
+        row.setBackground(rounded(Ui.card(this), Ui.dp(this, 20)));
         ImageView badge = new ImageView(this);
         badge.setImageResource(icon);
         badge.setImageTintList(ColorStateList.valueOf(Ui.accent(this)));
-        badge.setPadding(pixels(7), pixels(7), pixels(7), pixels(7));
-        badge.setBackground(rounded(Ui.accentSoft(this), pixels(9)));
+        badge.setPadding(Ui.dp(this, 7), Ui.dp(this, 7), Ui.dp(this, 7), Ui.dp(this, 7));
+        badge.setBackground(rounded(Ui.accentSoft(this), Ui.dp(this, 9)));
         badge.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        row.addView(badge, new LinearLayout.LayoutParams(pixels(32), pixels(32)));
+        row.addView(badge, new LinearLayout.LayoutParams(Ui.dp(this, 32), Ui.dp(this, 32)));
         TextView text = text(label, 15, Ui.text(this));
         LinearLayout.LayoutParams textParams =
             new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
-        textParams.setMarginStart(pixels(12));
+        textParams.setMarginStart(Ui.dp(this, 12));
         row.addView(text, textParams);
         column.addView(row, blockParams(14 + top - 10));
     }
@@ -593,7 +593,7 @@ public final class OnboardingActivity extends AppCompatActivity {
     private LinearLayout.LayoutParams blockParams(int top) {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        params.topMargin = pixels(top);
+        params.topMargin = Ui.dp(this, top);
         return params;
     }
 
@@ -619,7 +619,4 @@ public final class OnboardingActivity extends AppCompatActivity {
         }, "msime-onboarding").start();
     }
 
-    private int pixels(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
-    }
 }
