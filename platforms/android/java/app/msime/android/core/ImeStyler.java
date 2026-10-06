@@ -301,9 +301,8 @@ final class ImeStyler {
                 key.setBackground(new KeyboardSkinKeyDrawable(target,
                     color(background), !on, density));
             } else {
-                GradientDrawable drawable = new GradientDrawable();
-                drawable.setColor(color(background));
-                drawable.setCornerRadius(s.pixels(target.cornerRadius()));
+                GradientDrawable drawable = DrawablePolicy.rounded(color(background),
+                    s.pixels(target.cornerRadius()));
                 int borderWidth = s.pixels(target.borderWidth());
                 if (borderWidth > 0)
                     drawable.setStroke(borderWidth, color(target.borderColor()));
