@@ -94,11 +94,13 @@ public final class TypingPage extends DetailPage {
 
     /** host capabilities 的 `helpcode_schemas`（字符串 id，或 `{id|schema, name|title}`）；没有或读不懂时是内置列表。 */
     private static List<String[]> helpcodeSchemas() {
+        // catch 和返回都要用到它，所以声明在 try 外面；读到列表后再按它的长度预留容量。
+        List<String[]> schemas = new ArrayList<>();
         try {
             JSONObject root = new JSONObject(NativeClient.hostCapabilities("android"));
             JSONObject value = root.optBoolean("ok", false) ? root.optJSONObject("value") : null;
             JSONArray listed = value == null ? null : value.optJSONArray("helpcode_schemas");
-            List<String[]> schemas = new ArrayList<>(listed == null ? 0 : listed.length());
+            if (listed != null) schemas = new ArrayList<>(listed.length());
             if (listed != null) {
                 for (int index = 0; index < listed.length(); index++) {
                     Object entry = listed.opt(index);
