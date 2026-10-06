@@ -139,7 +139,7 @@ public final class KeyboardSchemeCard extends FrameLayout {
         selected = isSelected;
         if (check.getLayoutParams() != checkCornerParams) check.setLayoutParams(checkCornerParams);
         ViewPolicy.show(badge);
-        title.setTypeface(android.graphics.Typeface.DEFAULT);
+        setTitleTypeface(false);
         // 选中与未选中的差别落在底色和这一档透明度上，不落在色相上。
         int face = isSelected ? accent : ColorPolicy.withAlpha(accent, .78f);
         setBackground(rounded(isSelected ? ColorPolicy.withAlpha(accent, .12f) : Color.TRANSPARENT,
@@ -165,11 +165,15 @@ public final class KeyboardSchemeCard extends FrameLayout {
         glyph.setBackground(outlined(face, KeyboardGeometry.pixels(getContext(), GLYPH_RADIUS_DP), KeyboardGeometry.pixels(getContext(), GLYPH_BORDER_DP)));
         badge.setBackgroundColor(panelBackground);
         badge.setVisibility(isSelected || badge.getText().length() == 0 ? View.INVISIBLE : View.VISIBLE);
-        title.setTypeface(isSelected ? android.graphics.Typeface.DEFAULT_BOLD
-            : android.graphics.Typeface.DEFAULT);
+        setTitleTypeface(isSelected);
         if (check.getLayoutParams() != checkBadgeParams) check.setLayoutParams(checkBadgeParams);
         check.setBackground(checkMark(accent, panelBackground));
         check.setVisibility(isSelected ? View.VISIBLE : View.GONE);
+    }
+
+    private void setTitleTypeface(boolean bold) {
+        title.setTypeface(bold ? android.graphics.Typeface.DEFAULT_BOLD
+            : android.graphics.Typeface.DEFAULT);
     }
 
     private void setFaceTextColor(int face) {
