@@ -3,7 +3,6 @@ package app.msime.android;
 import android.graphics.Color;
 import android.os.Build;
 import android.util.TypedValue;
-import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -43,7 +42,8 @@ final class ImeFunctionPanel {
         String label = MoreToolsLayout.icon(title) + "  " + title;
         card.setText(navigates ? label + "  ›" : label);
         KeyboardGeometry.setKeyTextSize(card, 14);
-        card.setGravity(navigates ? Gravity.CENTER_VERTICAL | Gravity.START : Gravity.CENTER);
+        if (navigates) ViewPolicy.setStartCenteredVertically(card);
+        else ViewPolicy.setCentered(card);
         KeyboardGeometry.setPaddingDp(card, s, 12, 5, 12, 5);
         card.setContentDescription(title);
         card.setSelected(active);
