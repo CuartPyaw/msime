@@ -260,6 +260,11 @@ public final class KeyboardGeometry {
         return new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, heightPixels);
     }
 
+    /** Create frame layout parameters for a pixel-sized square. */
+    public static FrameLayout.LayoutParams squareFrameParamsPx(int size) {
+        return new FrameLayout.LayoutParams(size, size);
+    }
+
     /** Create weighted linear layout parameters with a fixed height in dp. */
     public static LinearLayout.LayoutParams weightedHeightParams(Context context, float heightDp,
             float weight) {

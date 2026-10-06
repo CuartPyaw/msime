@@ -85,7 +85,7 @@ public final class KeyboardSchemeCard extends FrameLayout {
         int checkSize = KeyboardGeometry.pixels(getContext(), CHECK_SIZE_DP);
         int top = KeyboardGeometry.pixels(getContext(), OVERHANG_TOP_DP);
 
-        FrameLayout.LayoutParams glyphParams = new FrameLayout.LayoutParams(glyphSize, glyphSize);
+        FrameLayout.LayoutParams glyphParams = KeyboardGeometry.squareFrameParamsPx(glyphSize);
         glyphParams.topMargin = top;
         cluster.addView(glyph, glyphParams);
 
@@ -95,10 +95,10 @@ public final class KeyboardSchemeCard extends FrameLayout {
         badgeParams.topMargin = top + glyphSize + KeyboardGeometry.pixels(getContext(), OVERHANG_BOTTOM_DP) - badgeHeight;
         cluster.addView(badge, badgeParams);
 
-        FrameLayout.LayoutParams checkParams = new FrameLayout.LayoutParams(checkSize, checkSize);
+        FrameLayout.LayoutParams checkParams = KeyboardGeometry.squareFrameParamsPx(checkSize);
         checkParams.leftMargin = glyphSize + KeyboardGeometry.pixels(getContext(), 1);
         checkCornerParams = checkParams;
-        checkBadgeParams = new FrameLayout.LayoutParams(checkSize, checkSize);
+        checkBadgeParams = KeyboardGeometry.squareFrameParamsPx(checkSize);
         checkBadgeParams.leftMargin = glyphSize + KeyboardGeometry.pixels(getContext(), 4) - checkSize;
         checkBadgeParams.topMargin = top + glyphSize + KeyboardGeometry.pixels(getContext(), OVERHANG_BOTTOM_DP) - checkSize;
         cluster.addView(check, checkParams);
