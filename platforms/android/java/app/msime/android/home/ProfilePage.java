@@ -280,7 +280,7 @@ public final class ProfilePage extends DetailPage {
             chip.setText("通过 " + providerName(kind) + " 登录");
             Ui.style(chip, 12, 500, Ui.accent(context));
             chip.setBackground(Ui.pill(Ui.accentSoft(context)));
-            chip.setPadding(Ui.dp(context, 10), Ui.dp(context, 3), Ui.dp(context, 10), Ui.dp(context, 3));
+            Ui.setSymmetricPaddingDp(chip, context, 10, 3);
             LinearLayout.LayoutParams chipParams = Ui.wrap();
             chipParams.topMargin = Ui.dp(context, 8);
             header.addView(chip, chipParams);

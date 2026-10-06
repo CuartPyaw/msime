@@ -256,7 +256,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         // A still of the candidate strip, drawn from the design's sample: what the switch below changes, before anyone has to open a text field to see it.
         LinearLayout strip = new LinearLayout(this);
         strip.setOrientation(LinearLayout.HORIZONTAL);
-        strip.setPadding(Ui.dp(this, 10), Ui.dp(this, 12), Ui.dp(this, 10), Ui.dp(this, 12));
+        Ui.setSymmetricPaddingDp(strip, this, 10, 12);
         strip.setBackground(Ui.rounded(Ui.accentSoft(this), Ui.dp(this, 20)));
         strip.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
         String[][] samples = {{"候选", "candidate"}, {"后选", "choice"}, {"侯选", "option"}, {"候", "wait"}};
@@ -514,7 +514,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.HORIZONTAL);
         card.setGravity(Gravity.CENTER_VERTICAL);
-        card.setPadding(Ui.dp(this, 16), Ui.dp(this, 14), Ui.dp(this, 16), Ui.dp(this, 14));
+        Ui.setSymmetricPaddingDp(card, this, 16, 14);
         GradientDrawable face = selected
             ? Ui.outlined(Ui.card(this), Ui.dp(this, 20), Ui.dp(this, 2), Ui.accent(this))
             : Ui.rounded(Ui.card(this), Ui.dp(this, 20));
@@ -559,7 +559,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         ImageView badge = new ImageView(this);
         badge.setImageResource(icon);
         Ui.setImageTint(badge, Ui.accent(this));
-        badge.setPadding(Ui.dp(this, 7), Ui.dp(this, 7), Ui.dp(this, 7), Ui.dp(this, 7));
+        Ui.setSymmetricPaddingDp(badge, this, 7, 7);
         badge.setBackground(Ui.rounded(Ui.accentSoft(this), Ui.dp(this, 9)));
         badge.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         row.addView(badge, new LinearLayout.LayoutParams(Ui.dp(this, 32), Ui.dp(this, 32)));

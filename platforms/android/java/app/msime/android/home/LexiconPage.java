@@ -93,7 +93,7 @@ public final class LexiconPage extends DetailPage {
         int fill = filled ? Ui.accent(context) : Ui.accentSoft(context);
         Ui.style(pill, Ui.TEXT_BUTTON_SMALL, 500, filled ? Ui.onAccent(context) : Ui.accent(context));
         pill.setBackground(Ui.pillRipple(context, fill));
-        pill.setPadding(Ui.dp(context, 12), Ui.dp(context, 6), Ui.dp(context, 12), Ui.dp(context, 6));
+        Ui.setSymmetricPaddingDp(pill, context, 12, 6);
         pill.setMinHeight(Ui.dp(context, Ui.COMPACT_BUTTON_MIN_HEIGHT));
         pill.setClickable(true);
         pill.setFocusable(true);

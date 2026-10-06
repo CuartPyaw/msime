@@ -195,6 +195,14 @@ public final class Ui {
         view.setPadding(horizontal, 0, horizontal, dp(context, 12));
     }
 
+    /** Apply symmetric padding expressed in density-independent pixels. */
+    public static void setSymmetricPaddingDp(View view, Context context,
+                                             float horizontalDp, float verticalDp) {
+        int horizontal = dp(context, horizontalDp);
+        int vertical = dp(context, verticalDp);
+        view.setPadding(horizontal, vertical, horizontal, vertical);
+    }
+
     /** Apply a single tint to an image view through the platform state-list wrapper. */
     public static void setImageTint(ImageView view, int color) {
         view.setImageTintList(ColorStateList.valueOf(color));
