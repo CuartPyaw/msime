@@ -279,7 +279,7 @@ public final class DiagnosticsApi {
 
     /** 每条 jsonl 都按枚举重建，只取三个数值/枚举字段；坏行和不认识的种类丢弃。 */
     static List<Event> eventLines(String text, boolean durationRequired) {
-        List<Event> events = new ArrayList<>();
+        List<Event> events = new ArrayList<>(MAX_EVENTS);
         for (String line : text.split("\n")) {
             String trimmed = line.trim();
             if (trimmed.isEmpty()) continue;
