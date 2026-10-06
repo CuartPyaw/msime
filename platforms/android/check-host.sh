@@ -280,6 +280,13 @@ if rg -n 'optBoolean\("ok"' \
   echo "Android key-sound responses must require a typed boolean ok field" >&2
   exit 1
 fi
+# Bootstrap controls first install and package refresh. A coerced status could accept a malformed
+# preparation response and persist incomplete runtime options.
+if rg -n 'getBoolean\("ok"\)|optBoolean\("ok"' \
+    "$repo_root/platforms/android/java/app/msime/android/core/Bootstrap.java"; then
+  echo "Android bootstrap responses must require a typed boolean ok field" >&2
+  exit 1
+fi
 # Sync rounds download over any section that is not dirty, so a preference write that forgets to mark settings dirty is reverted by the next cloud change. HostStore.savePreferences owns that mark for every caller.
 if ! rg -qU 'NativeClient\.savePreferences\(directory, revision, document\)\)\);\s*(//[^\n]*\s*)?if \(saved != null\) SyncSignals\.markDirty\(context, SyncSwitch\.SETTINGS\);' \
     "$repo_root/platforms/android/java/app/msime/android/home/HostStore.java"; then
