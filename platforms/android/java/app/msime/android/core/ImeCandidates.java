@@ -152,7 +152,7 @@ final class ImeCandidates {
         // HorizontalScrollView cancels the child on a drag, so the button keeps immediate tap
         // feedback without changing the existing scroll-versus-select boundary.
         Button button = new KeyboardPressButton(s);
-        button.setAllCaps(false);
+        ViewPolicy.setAllCapsFalse(button);
         button.setOnClickListener(ignored -> s.selectVisibleCandidate(button, slot));
         button.setOnLongClickListener(ignored -> {
             JSONObject current = s.visibleCandidate(slot);
@@ -172,7 +172,7 @@ final class ImeCandidates {
         String typed = s.candidatePanelSnapshot == null ? ""
             : s.candidatePanelSnapshot.optString("preedit", "");
         String annotation = s.candidateAnnotation(candidate, typed);
-        button.setAllCaps(false);
+        ViewPolicy.setAllCapsFalse(button);
         button.setText(s.candidateLabel("", text, annotation, highlighted));
         int labelLines = MSIMEInputService.candidateLabelLines(annotation);
         button.setMinLines(labelLines);
@@ -265,7 +265,7 @@ final class ImeCandidates {
         footer.setOrientation(LinearLayout.HORIZONTAL);
         KeyboardPressButton close = new KeyboardPressButton(s);
         close.setKeyboardRole(KeyboardKeyRole.ACCENT);
-        close.setAllCaps(false);
+        ViewPolicy.setAllCapsFalse(close);
         close.setText("返回");
         KeyboardGeometry.setKeyTextSize(close, 15);
         close.setContentDescription("收起候选面板");
@@ -276,7 +276,7 @@ final class ImeCandidates {
         });
         KeyboardPressButton delete = new KeyboardPressButton(s);
         delete.setKeyboardRole(KeyboardKeyRole.ACCENT);
-        delete.setAllCaps(false);
+        ViewPolicy.setAllCapsFalse(delete);
         delete.setText("⌫");
         KeyboardGeometry.setKeyTextSize(delete, 16);
         delete.setContentDescription("候选面板 删除");

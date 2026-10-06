@@ -1,6 +1,7 @@
 package app.msime.android;
 
 import android.view.View;
+import android.widget.Button;
 import android.widget.TextView;
 
 /** Shared view configuration for host controls whose widget defaults need resetting. */
@@ -69,5 +70,10 @@ public final class ViewPolicy {
     /** Clear vertical padding while preserving horizontal padding. */
     public static void clearVerticalPadding(View view) {
         view.setPadding(view.getPaddingLeft(), 0, view.getPaddingRight(), 0);
+    }
+
+    /** Keep a button label in its authored casing instead of applying the platform default. */
+    public static void setAllCapsFalse(Button button) {
+        button.setAllCaps(false);
     }
 }
