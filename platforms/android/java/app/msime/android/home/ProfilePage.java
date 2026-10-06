@@ -257,17 +257,14 @@ public final class ProfilePage extends DetailPage {
         avatar.setOnClickListener(ignored -> chooseAvatar());
         header.addView(avatar, Ui.squareParams(context, 92));
 
-        TextView name = new TextView(context);
-        name.setText(profile.displayName());
-        Ui.style(name, 22, 700, Ui.text(context));
+        TextView name = Ui.styledLabel(context, profile.displayName(), 22, 700, Ui.text(context));
         LinearLayout.LayoutParams nameParams = Ui.wrap();
         nameParams.topMargin = Ui.dp(context, 10);
         header.addView(name, nameParams);
 
         if (!profile.email().isEmpty()) {
-            TextView email = new TextView(context);
-            email.setText(profile.email());
-            Ui.style(email, Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));
+            TextView email = Ui.styledLabel(context, profile.email(), Ui.TEXT_ROW_SUBTITLE, 400,
+                Ui.subText(context));
             LinearLayout.LayoutParams emailParams = Ui.wrap();
             emailParams.topMargin = Ui.dp(context, 2);
             header.addView(email, emailParams);
