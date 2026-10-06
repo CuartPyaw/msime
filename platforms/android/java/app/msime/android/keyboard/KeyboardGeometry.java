@@ -228,6 +228,14 @@ public final class KeyboardGeometry {
         return new LinearLayout.LayoutParams(0, pixels(context, heightDp), weight);
     }
 
+    /** Apply symmetric horizontal and vertical padding expressed in dp. */
+    public static void setSymmetricPaddingDp(View view, Context context, float horizontalDp,
+            float verticalDp) {
+        int horizontal = pixels(context, horizontalDp);
+        int vertical = pixels(context, verticalDp);
+        view.setPadding(horizontal, vertical, horizontal, vertical);
+    }
+
     /** Convert a fractional density-independent size to pixels without rounding. */
     public static float floatPixels(double dp, float density) {
         return (float) dp * density;

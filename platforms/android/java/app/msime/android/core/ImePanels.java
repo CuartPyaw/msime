@@ -523,7 +523,7 @@ final class ImePanels {
         s.replyHeader = new LinearLayout(s);
         s.replyHeader.setGravity(Gravity.CENTER_VERTICAL);
         s.replyModeControl = new LinearLayout(s);
-        s.replyModeControl.setPadding(s.pixels(2), s.pixels(2), s.pixels(2), s.pixels(2));
+        KeyboardGeometry.setSymmetricPaddingDp(s.replyModeControl, s, 2, 2);
         s.replyReplyModeButton = replySegment("帮你回", "帮你回模式", ReplyKeyboardModel.Mode.REPLY);
         s.replyPolishModeButton = replySegment("帮润色", "帮润色模式", ReplyKeyboardModel.Mode.POLISH);
         s.replyHeader.addView(s.replyModeControl, new LinearLayout.LayoutParams(
@@ -693,7 +693,7 @@ final class ImePanels {
                 ViewPolicy.clearMinimumWidth(candidate);
                 candidate.setMinHeight(0);
                 candidate.setMinimumHeight(0);
-                candidate.setPadding(s.pixels(10), s.pixels(10), s.pixels(10), s.pixels(10));
+                KeyboardGeometry.setSymmetricPaddingDp(candidate, s, 10, 10);
                 candidate.setLayoutParams(new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
             }
@@ -898,7 +898,7 @@ final class ImePanels {
         if (s.aiPolishPanel == null || s.aiPolishActions == null) return;
         s.aiPolishPanel.removeAllViews();
         s.aiPolishActions.removeAllViews();
-        s.aiPolishPanel.setPadding(s.pixels(10), s.pixels(6), s.pixels(10), s.pixels(6));
+        KeyboardGeometry.setSymmetricPaddingDp(s.aiPolishPanel, s, 10, 6);
         s.aiPolishActions.setPadding(s.pixels(10), 0, s.pixels(10), s.pixels(8));
         LinearLayout header = new LinearLayout(s);
         header.setGravity(Gravity.CENTER_VERTICAL);
@@ -941,7 +941,7 @@ final class ImePanels {
         TextView content = new TextView(s);
         content.setText(s.aiOutputText.isEmpty() ? s.aiSourceText : s.aiOutputText);
         KeyboardGeometry.setKeyTextSize(content, 15);
-        content.setPadding(s.pixels(12), s.pixels(10), s.pixels(12), s.pixels(10));
+        KeyboardGeometry.setSymmetricPaddingDp(content, s, 12, 10);
         content.setContentDescription(s.aiOutputText.isEmpty() ? "待润色文字" : "AI 润色结果");
         s.aiPolishPanel.addView(content, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -1205,7 +1205,7 @@ final class ImePanels {
     void renderClipboardHistory() {
         if (s.clipboardPanel == null || s.clipboardHistory == null) return;
         s.clipboardPanel.removeAllViews();
-        s.clipboardPanel.setPadding(s.pixels(8), s.pixels(8), s.pixels(8), s.pixels(8));
+        KeyboardGeometry.setSymmetricPaddingDp(s.clipboardPanel, s, 8, 8);
         boolean cloudAllowed = cloudClipboardAllowed();
         if (!cloudAllowed) s.clipboardTab = CloudClipboardPanelPolicy.Tab.LOCAL;
         boolean cloud = s.clipboardTab == CloudClipboardPanelPolicy.Tab.CLOUD;
@@ -1269,7 +1269,7 @@ final class ImePanels {
         note.setText(text);
         KeyboardGeometry.setKeyTextSize(note, 13);
         note.setGravity(Gravity.CENTER);
-        note.setPadding(s.pixels(12), s.pixels(20), s.pixels(12), s.pixels(20));
+        KeyboardGeometry.setSymmetricPaddingDp(note, s, 12, 20);
         s.clipboardPanel.addView(note, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         return note;
@@ -1295,7 +1295,7 @@ final class ImePanels {
         card.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         card.setMaxLines(3);
         card.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        card.setPadding(s.pixels(12), s.pixels(8), s.pixels(12), s.pixels(8));
+        KeyboardGeometry.setSymmetricPaddingDp(card, s, 12, 8);
         card.setMinHeight(0);
         card.setMinimumHeight(0);
         card.setStateListAnimator(null);
@@ -1446,7 +1446,7 @@ final class ImePanels {
             row.setMaxLines(2);
             row.setEllipsize(android.text.TextUtils.TruncateAt.END);
             ViewPolicy.setMinimumHeight(row, s.pixels(44));
-            row.setPadding(s.pixels(12), s.pixels(8), s.pixels(12), s.pixels(8));
+            KeyboardGeometry.setSymmetricPaddingDp(row, s, 12, 8);
             row.setStateListAnimator(null);
             row.setContentDescription("常用语 " + (phrase.length() > 20 ? phrase.substring(0, 20) : phrase));
             row.setOnClickListener(ignored -> {
@@ -1526,7 +1526,7 @@ final class ImePanels {
         // 设计：盖在键区上、不盖顶部一行；上面是每行八个的表情网格（可见三行，可滚动），底栏是 ABC | 分类 | ⌫。高度由 PanelSurface 限定为键区高度。
         s.emojiPanel = new LinearLayout(s);
         s.emojiPanel.setOrientation(LinearLayout.VERTICAL);
-        s.emojiPanel.setPadding(s.pixels(6), s.pixels(4), s.pixels(6), s.pixels(4));
+        KeyboardGeometry.setSymmetricPaddingDp(s.emojiPanel, s, 6, 4);
         s.emojiPanel.setBackgroundColor(Color.parseColor(s.skin.background()));
         s.emojiPanel.setContentDescription("表情面板");
         s.emojiPanel.setFocusable(true);
