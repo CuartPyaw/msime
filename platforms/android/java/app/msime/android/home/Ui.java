@@ -184,6 +184,11 @@ public final class Ui {
             dp(context, heightDp));
     }
 
+    /** Convert a density-independent size while guaranteeing at least one physical pixel. */
+    public static int atLeastOnePx(Context context, float value) {
+        return Math.max(1, dp(context, value));
+    }
+
     /** Return the minimum one-pixel thickness for a 0.5 dp separator. */
     public static int hairlinePx(Context context) {
         return Math.max(1, dp(context, 0.5f));

@@ -119,7 +119,7 @@ public final class InputDialog {
         Ui.style(input, 15, 400, Ui.text(context));
         input.setHintTextColor(Ui.subText(context));
         GradientDrawable field = Ui.rounded(Ui.rowBackground(context), Ui.dp(context, 10));
-        field.setStroke(Math.max(1, Ui.dp(context, 1)), Ui.hairline(context));
+        field.setStroke(Ui.atLeastOnePx(context, 1), Ui.hairline(context));
         input.setBackground(field);
         input.setPadding(Ui.dp(context, 12), 0, Ui.dp(context, 12), 0);
         input.addTextChangedListener(new TextWatcher() {
