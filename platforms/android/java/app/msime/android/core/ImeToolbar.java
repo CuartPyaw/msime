@@ -177,8 +177,7 @@ final class ImeToolbar {
         LinearLayout line = new LinearLayout(s);
         line.setOrientation(LinearLayout.HORIZONTAL);
         line.setGravity(Gravity.CENTER_VERTICAL);
-        line.addView(viewport, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.MATCH_PARENT, 1));
+        line.addView(viewport, KeyboardGeometry.weightedMatchParentParams(1));
         CandidateChevronButton expand = new CandidateChevronButton(s);
         s.expandCandidates = expand;
         expand.setContentDescription("展开候选");
