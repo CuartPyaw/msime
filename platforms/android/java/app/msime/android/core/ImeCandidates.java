@@ -18,9 +18,31 @@ import org.json.JSONObject;
 /** 候选按钮的构建与样式、展开的候选面板和候选长按菜单；从 MSIMEInputService 原样搬出，状态仍在服务里。 */
 final class ImeCandidates {
     private final MSIMEInputService s;
+    private String styleCacheKey;
+    private int selectedBackground;
+    private int selectedText;
+    private int keyBackground;
+    private int keyForeground;
+    private int accentSoft;
+    private int accentText;
+    private Typeface candidateTypeface;
 
     ImeCandidates(MSIMEInputService s) {
         this.s = s;
+    }
+
+    /** Resolve skin strings once per appearance; candidate rows can contain many buttons. */
+    private void ensureStyleCache() {
+        String key = s.skin.key() + ":" + s.candidateAppearance.key();
+        if (key.equals(styleCacheKey)) return;
+        styleCacheKey = key;
+        selectedBackground = android.graphics.Color.parseColor(s.skin.candidateSelectedBackground());
+        selectedText = android.graphics.Color.parseColor(s.skin.candidateSelectedForeground());
+        keyBackground = android.graphics.Color.parseColor(s.skin.keyBackground());
+        keyForeground = android.graphics.Color.parseColor(s.skin.keyForeground());
+        accentSoft = android.graphics.Color.parseColor(s.skin.accentSoft());
+        accentText = android.graphics.Color.parseColor(s.skin.accentText());
+        candidateTypeface = s.imeStyler.candidateTypeface();
     }
 
     /** 首选候选 chip：字母键的底（kb.key）、圆角 9，皮肤强调色 600 字重；其余候选不画底。 */
@@ -32,12 +54,11 @@ final class ImeCandidates {
     }
 
     void styleCandidateButton(Button button) {
+        ensureStyleCache();
         if (expandedCells.contains(button)) {
             styleExpandedCell(button);
             return;
         }
-        int selectedBackground = android.graphics.Color.parseColor(s.skin.candidateSelectedBackground());
-        int selectedText = android.graphics.Color.parseColor(s.skin.candidateSelectedForeground());
         StateListDrawable states = new StateListDrawable();
         states.addState(new int[] {android.R.attr.state_selected}, chip(selectedBackground, 9));
         states.addState(new int[] {android.R.attr.state_pressed},
@@ -50,8 +71,8 @@ final class ImeCandidates {
         button.setBackground(states);
         button.setTextColor(new ColorStateList(
             new int[][] {{android.R.attr.state_selected}, {}},
-            new int[] {selectedText, android.graphics.Color.parseColor(s.skin.keyForeground())}));
-        button.setTypeface(s.imeStyler.candidateTypeface(), button.isSelected() ? Typeface.BOLD : Typeface.NORMAL);
+            new int[] {selectedText, keyForeground}));
+        button.setTypeface(candidateTypeface, button.isSelected() ? Typeface.BOLD : Typeface.NORMAL);
         button.setMinWidth(s.pixels(30));
         button.setMinimumWidth(s.pixels(30));
         button.setMinHeight(0);
@@ -68,18 +89,15 @@ final class ImeCandidates {
 
     /** 展开网格的单元：44 dp 高、圆角 8，平时 kb.key 底，当前高亮的那个 accentSoft 底 + 强调色字。 */
     private void styleExpandedCell(Button button) {
-        int key = android.graphics.Color.parseColor(s.skin.keyBackground());
-        int soft = android.graphics.Color.parseColor(s.skin.accentSoft());
         StateListDrawable states = new StateListDrawable();
-        states.addState(new int[] {android.R.attr.state_selected}, chip(soft, 8));
+        states.addState(new int[] {android.R.attr.state_selected}, chip(accentSoft, 8));
         states.addState(new int[] {android.R.attr.state_pressed}, chip(s.candidateAppearance.hover(), 8));
-        states.addState(new int[0], chip(key, 8));
+        states.addState(new int[0], chip(keyBackground, 8));
         button.setBackground(states);
         button.setTextColor(new ColorStateList(
             new int[][] {{android.R.attr.state_selected}, {}},
-            new int[] {android.graphics.Color.parseColor(s.skin.accentText()),
-                android.graphics.Color.parseColor(s.skin.keyForeground())}));
-        button.setTypeface(s.imeStyler.candidateTypeface(), button.isSelected() ? Typeface.BOLD : Typeface.NORMAL);
+            new int[] {accentText, keyForeground}));
+        button.setTypeface(candidateTypeface, button.isSelected() ? Typeface.BOLD : Typeface.NORMAL);
         button.setElevation(0);
     }
 
