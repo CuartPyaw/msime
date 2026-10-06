@@ -208,8 +208,7 @@ public final class SkinsPage extends DetailPage {
         hint.setGravity(Gravity.CENTER);
         Ui.style(hint, 12, 400, Ui.accent(context));
         tile.addView(hint);
-        cell.addView(tile, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-            Ui.dp(context, 76) + Ui.dp(context, 6)));
+        cell.addView(tile, Ui.matchWidthHeightPx(Ui.dp(context, 76) + Ui.dp(context, 6)));
         TextView name = new TextView(context);
         name.setText("AI 设计皮肤");
         name.setGravity(Gravity.CENTER);
