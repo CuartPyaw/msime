@@ -51,8 +51,7 @@ public final class DownloadPage extends DetailPage {
         TextView current = new TextView(context);
         current.setText("当前设备");
         Ui.style(current, Ui.TEXT_BUTTON_SMALL, 500, Ui.text(context));
-        LinearLayout.LayoutParams currentParams = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams currentParams = Ui.wrap();
         currentParams.setMarginStart(Ui.dp(context, Ui.ROW_GAP));
         ((LinearLayout) android.view()).addView(current, currentParams);
         getRow(mobile, R.drawable.ic_ms_smartphone, "HarmonyOS", "从源码构建", "harmony");
@@ -104,8 +103,7 @@ public final class DownloadPage extends DetailPage {
         copy.setFocusable(true);
         copy.setContentDescription("复制下载页链接");
         copy.setOnClickListener(ignored -> copyLink(context));
-        LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams copyParams = Ui.wrap();
         copyParams.setMarginStart(Ui.dp(context, 12));
         card.addView(copy, copyParams);
         return card;
@@ -151,8 +149,7 @@ public final class DownloadPage extends DetailPage {
     }
 
     private static void attach(GroupCard.Row row, TextView button) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams params = Ui.wrap();
         params.setMarginStart(Ui.dp(button.getContext(), Ui.ROW_GAP));
         ((LinearLayout) row.view()).addView(button, params);
     }
