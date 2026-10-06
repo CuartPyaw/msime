@@ -53,7 +53,7 @@ public final class SymbolPanelView extends LinearLayout {
         setFocusable(true);
 
         LinearLayout title = new LinearLayout(context);
-        title.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(title);
         // 这个键只是关掉面板，回到打开它的那一层（字母、#+= 或手写），不一定是字母键盘。
         Button back = buttons.create("‹", "关闭符号面板", listener::close, true);
         back.setLayoutParams(KeyboardGeometry.linearParams(getContext(), 56, 42));

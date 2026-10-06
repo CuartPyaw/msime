@@ -82,4 +82,9 @@ public final class ViewPolicy {
     public static void setCentered(View view) {
         ViewPolicy.setCentered(view);
     }
+
+    /** Center a view's content along the vertical axis. */
+    public static void setCenteredVertically(View view) {
+        ViewPolicy.setCenteredVertically(view);
+    }
 }

@@ -520,7 +520,7 @@ final class ImePanels {
         root.setContentDescription("高情商回复键盘");
 
         s.replyHeader = new LinearLayout(s);
-        s.replyHeader.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(s.replyHeader);
         s.replyModeControl = new LinearLayout(s);
         KeyboardGeometry.setSymmetricPaddingDp(s.replyModeControl, s, 2, 2);
         s.replyReplyModeButton = replySegment("帮你回", "帮你回模式", ReplyKeyboardModel.Mode.REPLY);
@@ -537,7 +537,7 @@ final class ImePanels {
 
         // 源文字和「粘贴」在同一张卡片里：点文字和点「粘贴」都是粘贴，与 iOS 相同。
         s.replySourceCard = new LinearLayout(s);
-        s.replySourceCard.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(s.replySourceCard);
         KeyboardGeometry.setPaddingDp(s.replySourceCard, s, 10, 0, 6, 0);
         s.replySourceButton = MSIMEInputService.role(s.button(s.replySourceCard, MSIMEInputService.REPLY_SOURCE_PLACEHOLDER,
             this::pasteReplySource), KeyboardKeyRole.PLAIN);
@@ -575,7 +575,7 @@ final class ImePanels {
         root.addView(s.replyBody, KeyboardGeometry.weightedWidthParams(1));
 
         LinearLayout footer = new LinearLayout(s);
-        footer.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(footer);
         s.replyProgress = new android.widget.ProgressBar(s, null,
             android.R.attr.progressBarStyleSmall);
         s.replyProgress.setIndeterminate(true);
@@ -889,7 +889,7 @@ final class ImePanels {
         KeyboardGeometry.setSymmetricPaddingDp(s.aiPolishPanel, s, 10, 6);
         KeyboardGeometry.setPaddingDp(s.aiPolishActions, s, 10, 0, 10, 8);
         LinearLayout header = new LinearLayout(s);
-        header.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(header);
         TextView title = new TextView(s);
         title.setText(s.aiOutputText.isEmpty() ? "AI 润色" : "润色结果");
         KeyboardGeometry.setKeyTextSize(title, 15);
@@ -1197,7 +1197,7 @@ final class ImePanels {
         java.util.List<TextView> notes = new java.util.ArrayList<>(1);
         // 顶部一行小号操作：本机 / 云端分段（云端可用时）、刷新或清空；返回由工具栏的「返回键盘」负责。
         LinearLayout header = new LinearLayout(s);
-        header.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(header);
         if (cloudAllowed) {
             addClipboardTab(header, CloudClipboardPanelPolicy.TAB_LOCAL, CloudClipboardPanelPolicy.Tab.LOCAL);
             addClipboardTab(header, CloudClipboardPanelPolicy.TAB_CLOUD, CloudClipboardPanelPolicy.Tab.CLOUD);
@@ -1527,7 +1527,7 @@ final class ImePanels {
         s.emojiPanel.addView(s.emojiGridScroll, KeyboardGeometry.weightedWidthParams(1));
         LinearLayout bar = new LinearLayout(s);
         bar.setOrientation(LinearLayout.HORIZONTAL);
-        bar.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(bar);
         Button abc = MSIMEInputService.role(s.button(bar, "ABC", s::closeEmojiPicker), KeyboardKeyRole.ACCENT);
         KeyboardGeometry.setKeyTextSize(abc, 14);
         compactReplyControl(abc, 0);
