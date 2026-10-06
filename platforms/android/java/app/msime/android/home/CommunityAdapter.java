@@ -11,6 +11,7 @@ import androidx.annotation.Nullable;
 import androidx.recyclerview.widget.RecyclerView;
 import app.msime.android.CommunityCatalog;
 import app.msime.android.CommunityRequest;
+import app.msime.android.DrawablePolicy;
 import app.msime.android.KeyboardSkin;
 import app.msime.android.R;
 import java.util.ArrayList;
@@ -303,10 +304,8 @@ public final class CommunityAdapter extends RecyclerView.Adapter<CommunityAdapte
         float radius = Ui.dpFloat(row.getContext(), GROUP_RADIUS_DP);
         float top = first ? radius : 0f;
         float bottom = last ? radius : 0f;
-        GradientDrawable card = new GradientDrawable();
-        card.setColor(Ui.card(row.getContext()));
-        card.setCornerRadii(new float[] {top, top, top, top, bottom, bottom, bottom, bottom});
-        return card;
+        return DrawablePolicy.rounded(Ui.card(row.getContext()),
+            new float[] {top, top, top, top, bottom, bottom, bottom, bottom});
     }
 
     /** 皮肤卡上的作者行：设计写「@作者」，没写作者时是「匿名作者」。 */
