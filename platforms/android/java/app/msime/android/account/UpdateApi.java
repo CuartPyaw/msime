@@ -245,7 +245,7 @@ public final class UpdateApi {
             JSONObject root = new JSONObject(json);
             JSONArray items = root.optJSONArray("items");
             if (items == null) throw new Failure("发行版列表格式不对");
-            List<Release> releases = new ArrayList<>();
+            List<Release> releases = new ArrayList<>(items.length());
             for (int index = 0; index < items.length(); index++) {
                 JSONObject item = items.optJSONObject(index);
                 if (item == null) continue;
