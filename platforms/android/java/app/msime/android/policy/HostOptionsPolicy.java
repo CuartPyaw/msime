@@ -7,6 +7,8 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 /** Bounded access to the small runtime-options document shared by the Android processes. */
 public final class HostOptionsPolicy {
@@ -30,6 +32,17 @@ public final class HostOptionsPolicy {
         try {
             return read(new File(files, "runtime-options.json"));
         } catch (IOException error) {
+            return "";
+        }
+    }
+
+    /** Read one string field from the host options document, or empty when unavailable. */
+    public static String readOption(File files, String key) {
+        String raw = readRuntimeOptions(files);
+        if (raw.isEmpty()) return "";
+        try {
+            return new JSONObject(raw).optString(key, "");
+        } catch (JSONException error) {
             return "";
         }
     }
