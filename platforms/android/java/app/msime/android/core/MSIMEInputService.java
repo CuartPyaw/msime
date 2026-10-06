@@ -693,6 +693,13 @@ public final class MSIMEInputService extends InputMethodService {
         return envelope.getJSONObject("value");
     }
 
+    /** Read a native protocol flag without accepting org.json's string coercion. */
+    private static boolean strictBoolean(JSONObject object, String key) throws JSONException {
+        Object value = object.opt(key);
+        if (!(value instanceof Boolean)) throw new JSONException("Invalid boolean: " + key);
+        return (Boolean) value;
+    }
+
     private EditorBridge.Sink sink(TypingSource source) {
         final InputConnection target = connection;
         return new EditorBridge.Sink() {
@@ -1859,7 +1866,8 @@ public final class MSIMEInputService extends InputMethodService {
         renderLayoutSettingsState();
         if (voiceResultScroll != null && voiceResultScroll.getVisibility() == View.VISIBLE)
             renderVoiceResult();
-        preferencesNotice = result.getBoolean("deferred") ? " · 设置将在组词结束后应用" : "";
+        preferencesNotice = strictBoolean(result, "deferred")
+            ? " · 设置将在组词结束后应用" : "";
     }
 
     boolean apply(String response) throws JSONException {
@@ -1895,7 +1903,7 @@ public final class MSIMEInputService extends InputMethodService {
             letterCase.reset();
         if (rebuildLayout) imeLetterRows.rebuildKeyRows();
         render();
-        return result.getBoolean("handled");
+        return strictBoolean(result, "handled");
     }
 
     private boolean englishNineKeyActive() {
@@ -3879,7 +3887,7 @@ public final class MSIMEInputService extends InputMethodService {
         }
         try {
             return EmojiCatalogModel.validatePage(items, offset, EmojiCatalogModel.PAGE_SIZE,
-                nextOffset(value), value.getBoolean("complete"));
+                nextOffset(value), strictBoolean(value, "complete"));
         } catch (IllegalArgumentException error) {
             throw new JSONException("Invalid emoji catalog cursor");
         }

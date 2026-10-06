@@ -379,6 +379,14 @@ if sed -n '/private EmojiCatalogModel.Page decodeEmojiPage/,/^    }$/p' \
   echo "Android emoji catalog responses must require a typed boolean ok field" >&2
   exit 1
 fi
+# Transition acknowledgements are native protocol values too. Do not let org.json accept strings
+# for deferred/handled flags or for the emoji page cursor's completion marker.
+if sed -n '/private void reloadPreferences/,/^    }$/p;/boolean apply(String response)/,/^    }$/p;/private EmojiCatalogModel.Page decodeEmojiPage/,/^    }$/p' \
+    "$repo_root/platforms/android/java/app/msime/android/core/MSIMEInputService.java" \
+    | rg -n 'getBoolean\("(deferred|handled|complete)"\)|optBoolean\("(deferred|handled|complete)"'; then
+  echo "Android transition and emoji cursor flags must require typed booleans" >&2
+  exit 1
+fi
 # The keyboard skin save writes the local animation only after a successful native CAS response;
 # keep that acknowledgement strict to avoid persisting a change after malformed JSON.
 if sed -n '/void saveKeyboardSkin(String identifier, JSONObject design)/,/^    }$/p' \
