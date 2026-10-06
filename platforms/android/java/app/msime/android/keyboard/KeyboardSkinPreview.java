@@ -246,7 +246,7 @@ public final class KeyboardSkinPreview extends View {
     }
 
     private static int withOpacity(int colour, double opacity) {
-        float factor = (float) Math.max(0d, Math.min(1d, opacity));
+        float factor = (float) KeyboardGeometry.bounded(opacity, 0, 1);
         return ColorPolicy.withAlpha(colour, factor);
     }
 
