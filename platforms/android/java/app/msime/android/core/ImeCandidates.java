@@ -47,10 +47,7 @@ final class ImeCandidates {
 
     /** 首选候选 chip：字母键的底（kb.key）、圆角 9，皮肤强调色 600 字重；其余候选不画底。 */
     private android.graphics.drawable.GradientDrawable chip(int color, int radiusDp) {
-        android.graphics.drawable.GradientDrawable drawable = new android.graphics.drawable.GradientDrawable();
-        drawable.setColor(color);
-        drawable.setCornerRadius(s.pixels(radiusDp));
-        return drawable;
+        return DrawablePolicy.rounded(color, s.pixels(radiusDp));
     }
 
     void styleCandidateButton(Button button) {
