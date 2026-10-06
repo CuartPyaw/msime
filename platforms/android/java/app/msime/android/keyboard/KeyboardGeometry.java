@@ -228,6 +228,16 @@ public final class KeyboardGeometry {
             LinearLayout.LayoutParams.WRAP_CONTENT);
     }
 
+    /** Create weighted linear layout parameters that fill the parent's height. */
+    public static LinearLayout.LayoutParams weightedMatchParentParams(float weight) {
+        return new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, weight);
+    }
+
+    /** Create weighted linear layout parameters with content-sized height. */
+    public static LinearLayout.LayoutParams weightedWrapParams(float weight) {
+        return new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, weight);
+    }
+
     /** Create weighted linear layout parameters with a fixed height in dp. */
     public static LinearLayout.LayoutParams weightedHeightParams(Context context, float heightDp,
             float weight) {
