@@ -28,4 +28,26 @@ public final class ViewPolicy {
         view.setMinHeight(height);
         view.setMinimumHeight(height);
     }
+
+    /** Remove both legacy and platform minimum-width constraints from a view. */
+    public static void clearMinimumWidth(View view) {
+        view.setMinimumWidth(0);
+    }
+
+    /** Remove both minimum-width constraints from a text widget. */
+    public static void clearMinimumWidth(TextView view) {
+        view.setMinWidth(0);
+        view.setMinimumWidth(0);
+    }
+
+    /** Apply a minimum width to a generic view. */
+    public static void setMinimumWidth(View view, int width) {
+        view.setMinimumWidth(width);
+    }
+
+    /** Apply a minimum width to both text-widget constraints. */
+    public static void setMinimumWidth(TextView view, int width) {
+        view.setMinWidth(width);
+        view.setMinimumWidth(width);
+    }
 }

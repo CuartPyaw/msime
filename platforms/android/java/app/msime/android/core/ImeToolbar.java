@@ -52,8 +52,7 @@ final class ImeToolbar {
             params.setMarginStart(s.pixels(1));
             params.setMarginEnd(s.pixels(1));
             s.shortcutBar.addView(button, params);
-            button.setMinWidth(s.pixels(40));
-            button.setMinimumWidth(s.pixels(40));
+            ViewPolicy.setMinimumWidth(button, s.pixels(40));
         }
         // 旧的回复、语音、简繁、AI 润色、⚙ 入口不在新工具栏上：AI 在功能面板第 2 页，语音由长按空格进入，设置在功能面板里。按钮对象保留，服务里其余代码照常更新它们的状态。
         for (Button retired : new Button[] {s.scriptShortcutButton, s.aiPolishShortcutButton,

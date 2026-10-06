@@ -77,8 +77,7 @@ final class ImePanels {
         tab.setText(entry.icon());
         KeyboardGeometry.setKeyTextSize(tab, 17);
         tab.setPadding(0, 0, 0, 0);
-        tab.setMinWidth(0);
-        tab.setMinimumWidth(0);
+        ViewPolicy.clearMinimumWidth(tab);
         tab.setMinHeight(0);
         tab.setMinimumHeight(0);
         tab.setIncludeFontPadding(false);
@@ -131,8 +130,7 @@ final class ImePanels {
             ((KeyboardPressButton) cell).setKeyboardRole(KeyboardKeyRole.PLAIN);
             KeyboardGeometry.setKeyTextSize(cell, 26);
             cell.setPadding(0, 0, 0, 0);
-            cell.setMinWidth(0);
-            cell.setMinimumWidth(0);
+            ViewPolicy.clearMinimumWidth(cell);
             cell.setMinHeight(0);
             cell.setMinimumHeight(0);
             row.addView(cell, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
@@ -633,8 +631,7 @@ final class ImePanels {
 
     /** 去掉 Button 自带的最小尺寸、内边距和按下抬升，让回复面板里的控件按自己给定的尺寸排布。 */
     static void compactReplyControl(Button button, int horizontalPadding) {
-        button.setMinWidth(0);
-        button.setMinimumWidth(0);
+        ViewPolicy.clearMinimumWidth(button);
         button.setMinHeight(0);
         button.setMinimumHeight(0);
         button.setPadding(horizontalPadding, 0, horizontalPadding, 0);
@@ -673,8 +670,7 @@ final class ImePanels {
                     choice.setContentDescription("回复风格 " + style.label());
                     choice.setEnabled(!busy);
                     choice.setAlpha(busy ? .45f : 1f);
-                    choice.setMinWidth(0);
-                    choice.setMinimumWidth(0);
+                    ViewPolicy.clearMinimumWidth(choice);
                     choice.setMinHeight(0);
                     choice.setMinimumHeight(0);
                     choice.setPadding(s.pixels(4), 0, s.pixels(4), 0);
@@ -694,8 +690,7 @@ final class ImePanels {
                 candidate.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
                 candidate.setContentDescription("回复候选，点按插入");
                 KeyboardGeometry.setKeyTextSize(candidate, 15);
-                candidate.setMinWidth(0);
-                candidate.setMinimumWidth(0);
+                ViewPolicy.clearMinimumWidth(candidate);
                 candidate.setMinHeight(0);
                 candidate.setMinimumHeight(0);
                 candidate.setPadding(s.pixels(10), s.pixels(10), s.pixels(10), s.pixels(10));
