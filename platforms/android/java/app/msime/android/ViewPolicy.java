@@ -100,6 +100,11 @@ public final class ViewPolicy {
         view.setGravity(Gravity.CENTER_HORIZONTAL);
     }
 
+    /** Align a view's content to the start edge and center it vertically. */
+    public static void setStartCenteredVertically(View view) {
+        view.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+    }
+
     /** Set a text view's size in scalable pixels. */
     public static void setTextSizeSp(TextView view, float sizeSp) {
         view.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp);
