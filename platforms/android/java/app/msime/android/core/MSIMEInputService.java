@@ -2200,7 +2200,7 @@ public final class MSIMEInputService extends InputMethodService {
         int textCapacity = entries == null ? 0 : Math.min(entries.length(), 32);
         for (java.util.Map<String, String> glosses : offline.values()) textCapacity += glosses.size();
         java.util.LinkedHashSet<String> texts = new java.util.LinkedHashSet<>(textCapacity);
-        for (int index = 0; entries != null && index < Math.min(entries.length(), 32); index++) {
+        for (int index = 0; entries != null && index < BoundsPolicy.atMost(entries.length(), 32); index++) {
             JSONObject candidate = entries.optJSONObject(index);
             if (candidate != null) texts.add(candidate.optString("text", ""));
         }
