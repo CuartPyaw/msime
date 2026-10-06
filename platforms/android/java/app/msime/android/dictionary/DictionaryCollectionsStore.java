@@ -400,8 +400,8 @@ public final class DictionaryCollectionsStore {
 
     /** 解析一页词条（`value`）。 */
     static WordPage parseWords(JSONObject value) {
-        List<Word> words = new ArrayList<>();
         JSONArray raw = value.optJSONArray("entries");
+        List<Word> words = new ArrayList<>(raw == null ? 0 : raw.length());
         if (raw != null) {
             for (int index = 0; index < raw.length(); index++) {
                 JSONObject item = raw.optJSONObject(index);
