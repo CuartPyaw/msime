@@ -291,8 +291,7 @@ final class ImeCandidates {
         deleteParams.setMarginStart(s.pixels(6));
         footer.addView(close, closeParams);
         footer.addView(delete, deleteParams);
-        LinearLayout.LayoutParams footerParams = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams footerParams = KeyboardGeometry.matchWidthWrapParams();
         footerParams.topMargin = s.pixels(6);
         s.expandedCandidates.addView(footer, footerParams);
     }
