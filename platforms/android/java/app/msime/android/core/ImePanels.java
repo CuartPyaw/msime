@@ -77,9 +77,7 @@ final class ImePanels {
         tab.setText(entry.icon());
         KeyboardGeometry.setKeyTextSize(tab, 17);
         ViewPolicy.clearPadding(tab);
-        ViewPolicy.clearMinimumWidth(tab);
-        tab.setMinHeight(0);
-        tab.setMinimumHeight(0);
+        ViewPolicy.clearMinimumSize(tab);
         ViewPolicy.clearFontPadding(tab);
         tab.setSelected(s.emojiSelectedCategory == category);
         tab.setContentDescription("表情分类 " + entry.title());
@@ -129,9 +127,7 @@ final class ImePanels {
             ((KeyboardPressButton) cell).setKeyboardRole(KeyboardKeyRole.PLAIN);
             KeyboardGeometry.setKeyTextSize(cell, 26);
             ViewPolicy.clearPadding(cell);
-            ViewPolicy.clearMinimumWidth(cell);
-            cell.setMinHeight(0);
-            cell.setMinimumHeight(0);
+            ViewPolicy.clearMinimumSize(cell);
             row.addView(cell, KeyboardGeometry.weightedMatchParentParams(1));
         }
         renderEmojiStatus();
@@ -619,9 +615,7 @@ final class ImePanels {
 
     /** 去掉 Button 自带的最小尺寸、内边距和按下抬升，让回复面板里的控件按自己给定的尺寸排布。 */
     static void compactReplyControl(Button button, int horizontalPadding) {
-        ViewPolicy.clearMinimumWidth(button);
-        button.setMinHeight(0);
-        button.setMinimumHeight(0);
+        ViewPolicy.clearMinimumSize(button);
         ViewPolicy.setHorizontalPadding(button, horizontalPadding);
         ViewPolicy.clearFontPadding(button);
         ViewPolicy.clearStateListAnimator(button);
@@ -657,9 +651,7 @@ final class ImePanels {
                     choice.setContentDescription("回复风格 " + style.label());
                     choice.setEnabled(!busy);
                     ViewPolicy.setActiveAlpha(choice, !busy, .45f);
-                    ViewPolicy.clearMinimumWidth(choice);
-                    choice.setMinHeight(0);
-                    choice.setMinimumHeight(0);
+                    ViewPolicy.clearMinimumSize(choice);
                     KeyboardGeometry.setHorizontalPaddingDp(choice, s, 4);
                     choice.setMaxLines(1);
                     choice.setAutoSizeTextTypeUniformWithConfiguration(
@@ -676,9 +668,7 @@ final class ImePanels {
                 candidate.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
                 candidate.setContentDescription("回复候选，点按插入");
                 KeyboardGeometry.setKeyTextSize(candidate, 15);
-                ViewPolicy.clearMinimumWidth(candidate);
-                candidate.setMinHeight(0);
-                candidate.setMinimumHeight(0);
+                ViewPolicy.clearMinimumSize(candidate);
                 KeyboardGeometry.setSymmetricPaddingDp(candidate, s, 10, 10);
                 candidate.setLayoutParams(KeyboardGeometry.matchWidthWrapParams());
             }
