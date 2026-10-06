@@ -161,6 +161,11 @@ public final class KeyboardGeometry {
         return Math.max(0, Math.round(tenths * density / 20f));
     }
 
+    /** Convert an integer density-independent size to pixels using Android's rounding rule. */
+    public static int pixels(int dp, float density) {
+        return Math.round(dp * density);
+    }
+
     public static int bounded(int value, int minimum, int maximum) {
         return Math.max(minimum, Math.min(value, maximum));
     }
