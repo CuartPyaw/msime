@@ -75,10 +75,25 @@ public final class KeyboardSkinBackgroundDrawable extends Drawable {
         if (bytes == null) return null;
         DecodedPhoto cached = photoCache.get();
         if (cached != null && Arrays.equals(bytes, cached.bytes())) return cached;
-        DecodedPhoto decoded = new DecodedPhoto(bytes,
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.length));
-        photoCache = new WeakReference<>(decoded);
-        return decoded;
+        try {
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
+            int sample = PhotoDecodePolicy.sampleSize(bounds.outWidth, bounds.outHeight);
+            if (sample == 0) return null;
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inSampleSize = sample;
+            Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length, options);
+            if (bitmap == null || !PhotoDecodePolicy.withinBounds(bitmap.getWidth(), bitmap.getHeight())) {
+                if (bitmap != null) bitmap.recycle();
+                return null;
+            }
+            DecodedPhoto decoded = new DecodedPhoto(bytes, bitmap);
+            photoCache = new WeakReference<>(decoded);
+            return decoded;
+        } catch (RuntimeException invalidPhoto) {
+            return null;
+        }
     }
 
     /** 这块底图是否正是按 `target` 和 `targetDensity` 画的；`KeyboardSkin` 不可变，同一个对象画出来就完全相同。 */

@@ -15,6 +15,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import androidx.annotation.AttrRes;
 import androidx.annotation.ColorInt;
+import app.msime.android.ColorPolicy;
 import com.google.android.material.color.MaterialColors;
 
 /**
@@ -158,6 +159,12 @@ public final class Ui {
         LinearLayout.LayoutParams params = matchWidth();
         params.topMargin = dp(context, topMarginDp);
         return params;
+    }
+
+    /** Full-width layout parameters with a height expressed in dp. */
+    public static LinearLayout.LayoutParams matchWidthHeight(Context context, int heightDp) {
+        return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+            dp(context, heightDp));
     }
 
     /** Layout parameters for a view that wraps both its content dimensions. */

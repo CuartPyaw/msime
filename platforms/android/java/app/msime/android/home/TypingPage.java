@@ -273,7 +273,7 @@ public final class TypingPage extends DetailPage {
             KeyboardScheme quanpinChoice = applied == KeyboardScheme.QUANPIN_NINE_KEY
                 ? KeyboardScheme.QUANPIN_NINE_KEY : KeyboardScheme.QUANPIN;
             if (offered.contains(quanpinChoice)) sheet.option("全拼", quanpin, () -> applyScheme(quanpinChoice, null));
-            List<KeyboardScheme> shuangpin = new ArrayList<>(SHUANGPIN.length);
+            List<KeyboardScheme> shuangpin = new ArrayList<>(SHUANGPIN.size());
             for (KeyboardScheme scheme : SHUANGPIN) {
                 if (offered.contains(scheme)) shuangpin.add(scheme);
             }

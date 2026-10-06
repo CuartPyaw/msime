@@ -8,7 +8,7 @@ final class AiProviderHeaders {
     private AiProviderHeaders() {}
 
     static Map<String, String> forHost(String host, String token) {
-        Map<String, String> headers = new LinkedHashMap<>();
+        Map<String, String> headers = new LinkedHashMap<>(2);
         if (token == null || token.isEmpty()) return headers;
         if ("api.anthropic.com".equalsIgnoreCase(host)) {
             headers.put("x-api-key", token);

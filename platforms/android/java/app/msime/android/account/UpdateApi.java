@@ -374,7 +374,7 @@ public final class UpdateApi {
     }
 
     private static Set<String> fingerprints(Signature[] signatures) {
-        Set<String> result = new HashSet<>();
+        Set<String> result = new HashSet<>(signatures == null ? 0 : signatures.length);
         if (signatures == null) return result;
         for (Signature signature : signatures) result.add(hex(sha256().digest(signature.toByteArray())));
         return result;

@@ -3585,7 +3585,7 @@ public final class MSIMEInputService extends InputMethodService {
             String text = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
             writtenSkinHint = text;
             return new JSONObject(text);
-        } catch (java.io.IOException | JSONException | RuntimeException error) {
+        } catch (Exception ignored) {
             return null;
         }
     }
