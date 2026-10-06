@@ -297,9 +297,7 @@ public final class CommunityAdapter extends RecyclerView.Adapter<CommunityAdapte
 
     /** The glyph in the badge: the first character of the name, as the design's 网/码/医 boxes. */
     static String glyph(CommunityCatalog.Item item) {
-        String name = item.name().trim();
-        if (name.isEmpty()) return "?";
-        return name.substring(0, name.offsetByCodePoints(0, 1));
+        return Ui.trimmedInitial(item.name(), "?");
     }
 
     /** The slice of the grouped card behind one row: rounded where the group starts and ends. */
