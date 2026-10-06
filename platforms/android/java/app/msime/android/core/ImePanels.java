@@ -1506,8 +1506,7 @@ final class ImePanels {
                 @Override public void close() { s.closeSymbolPanel(); }
             });
         s.symbolPanel.setVisibility(View.GONE);
-        s.keyboardSurface.addView(s.symbolPanel, new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        s.keyboardSurface.addView(s.symbolPanel, KeyboardGeometry.frameMatchParentParams());
     }
 
     void buildEmojiPanel() {
@@ -1562,7 +1561,6 @@ final class ImePanels {
         s.emojiPanel.addView(bar, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, s.pixels(46)));
         s.emojiPanel.setVisibility(View.GONE);
-        s.keyboardSurface.addView(s.emojiPanel, new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        s.keyboardSurface.addView(s.emojiPanel, KeyboardGeometry.frameMatchParentParams());
     }
 }
