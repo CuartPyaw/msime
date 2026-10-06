@@ -81,6 +81,11 @@ public final class ViewPolicy {
         view.setPadding(horizontal, view.getPaddingTop(), horizontal, view.getPaddingBottom());
     }
 
+    /** Apply explicit pixel padding on all four sides. */
+    public static void setPadding(View view, int left, int top, int right, int bottom) {
+        view.setPadding(left, top, right, bottom);
+    }
+
     /** Keep a button label in its authored casing instead of applying the platform default. */
     public static void setAllCapsFalse(Button button) {
         button.setAllCaps(false);
