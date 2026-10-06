@@ -225,6 +225,17 @@ final class CustomServiceTests: XCTestCase {
     XCTAssertEqual(try configuration.validatedURL().path, "/v1/chat/completions")
   }
 
+  func testConfigurationRejectsOverlongModelAndEndpoint() {
+    var configuration = CustomServiceConfiguration()
+    configuration.endpoint = "https://example.invalid/v1/chat/completions"
+    configuration.model = String(repeating: "m", count: 257)
+    XCTAssertThrowsError(try configuration.validatedURL())
+
+    configuration.model = "fixture"
+    configuration.endpoint = "https://example.invalid/" + String(repeating: "a", count: 2_048)
+    XCTAssertThrowsError(try configuration.validatedURL())
+  }
+
   func testEngineCodecsPreserveTextAndAudioAndRejectMalformedResponses() throws {
     let text = "你好\n\"测试\""
     let data = try AppServicesBridge.polishBody("fixture", prompt: "润色", text: text)
