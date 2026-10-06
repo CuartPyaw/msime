@@ -156,8 +156,7 @@ public final class CloudClipboardPage extends DetailPage {
         GroupCard list = GroupCard.add(target, null).withDividers(Ui.ROW_PADDING_H);
         ((LinearLayout.LayoutParams) list.view().getLayoutParams()).topMargin = Ui.dp(context, 2);
         if (current.items().isEmpty()) {
-            LinearLayout empty = new LinearLayout(context);
-            empty.setOrientation(LinearLayout.VERTICAL);
+            LinearLayout empty = Ui.column(context);
             ViewPolicy.setCenteredHorizontally(empty);
             Ui.setSymmetricPaddingDp(empty, context, 16, 32);
             TextView title = Ui.styledLabel(context, "还没有同步内容", Ui.TEXT_ROW_TITLE, 500, Ui.text(context));
@@ -179,8 +178,7 @@ public final class CloudClipboardPage extends DetailPage {
         ViewPolicy.setCenteredVertically(row);
         Ui.setPaddingDp(row, context, 16, 12, 8, 12);
 
-        LinearLayout texts = new LinearLayout(context);
-        texts.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout texts = Ui.column(context);
         TextView text = Ui.styledLabel(context, item.text(), 15, 400, Ui.text(context));
         text.setMaxLines(3);
         text.setEllipsize(TextUtils.TruncateAt.END);

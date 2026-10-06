@@ -449,8 +449,7 @@ public final class StatisticsFragment extends HomeTabFragment {
     /** 一张 KPI 卡：标题、大数字和单位、一行说明；`highlight` 时说明用 accent（环比）。 */
     private static View tile(Context context, String title, String value, String unit, String note,
             boolean highlight) {
-        LinearLayout tile = new LinearLayout(context);
-        tile.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout tile = Ui.column(context);
         int pad = Ui.dp(context, 14);
         Ui.setSymmetricPaddingPx(tile, pad);
         tile.setBackground(Ui.rounded(Ui.card(context), Ui.dp(context, 20)));

@@ -145,8 +145,7 @@ public final class SkinsPage extends DetailPage {
     }
 
     private View card(Context context, Card card) {
-        LinearLayout cell = new LinearLayout(context);
-        cell.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout cell = Ui.column(context);
         ViewPolicy.setCenteredHorizontally(cell);
 
         FrameLayout tile = new FrameLayout(context);
@@ -183,11 +182,9 @@ public final class SkinsPage extends DetailPage {
 
     /** 虚线卡：「✦ 描述一句话生成」，名字是「AI 设计皮肤」，点了进 AI 设计页。 */
     private View aiCard(Context context) {
-        LinearLayout cell = new LinearLayout(context);
-        cell.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout cell = Ui.column(context);
         ViewPolicy.setCenteredHorizontally(cell);
-        LinearLayout tile = new LinearLayout(context);
-        tile.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout tile = Ui.column(context);
         ViewPolicy.setCentered(tile);
         GradientDrawable dashed = Ui.outlinedDashed(Ui.accentSoft(context), Ui.dp(context, 14),
             Ui.atLeastOnePx(context, 1.5f), Ui.accent(context), Ui.dp(context, 6),
