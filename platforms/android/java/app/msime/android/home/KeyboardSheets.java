@@ -189,10 +189,7 @@ final class KeyboardSheets {
             LinearLayout.LayoutParams params = Ui.rowGapParams(context);
             row.addView(state, params);
         }
-        ImageView chevron = new ImageView(context);
-        chevron.setImageResource(R.drawable.ms_w1_a2_chevron);
-        Ui.setImageTint(chevron, Ui.subText(context));
-        chevron.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        ImageView chevron = chevron(context);
         LinearLayout.LayoutParams chevronParams = Ui.squareParams(context, Ui.CHEVRON_SIZE);
         chevronParams.setMarginStart(Ui.dp(context, 6));
         row.addView(chevron, chevronParams);
@@ -362,16 +359,21 @@ final class KeyboardSheets {
             row.addView(trailing, valueParams);
         }
         if (action != null) {
-            ImageView chevron = new ImageView(context);
-            chevron.setImageResource(R.drawable.ms_w1_a2_chevron);
-            Ui.setImageTint(chevron, Ui.subText(context));
-            chevron.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            ImageView chevron = chevron(context);
             LinearLayout.LayoutParams chevronParams = Ui.squareParams(context, Ui.CHEVRON_SIZE);
             chevronParams.setMarginStart(Ui.dp(context, 6));
             row.addView(chevron, chevronParams);
             Ui.makeClickable(row, context, action);
         }
         return row;
+    }
+
+    private static ImageView chevron(Context context) {
+        ImageView view = new ImageView(context);
+        view.setImageResource(R.drawable.ms_w1_a2_chevron);
+        Ui.setImageTint(view, Ui.subText(context));
+        view.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        return view;
     }
 
     /** 构造详情卡片行尾的 tonal 胶囊按钮；调用方只需绑定业务点击行为。 */
