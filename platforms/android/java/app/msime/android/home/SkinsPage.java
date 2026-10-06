@@ -125,7 +125,7 @@ public final class SkinsPage extends DetailPage {
     private static void grid(LinearLayout target, String title, List<View> cards) {
         GroupCard group = GroupCard.add(target, title);
         LinearLayout holder = group.card();
-        holder.setBackground(null);
+        ViewPolicy.clearBackground(holder);
         holder.setClipToOutline(false);
         Context context = target.getContext();
         for (int start = 0; start < cards.size(); start += 2) {
