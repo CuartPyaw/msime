@@ -236,6 +236,12 @@ public final class KeyboardGeometry {
             LinearLayout.LayoutParams.WRAP_CONTENT);
     }
 
+    /** Create linear layout parameters that fill both dimensions. */
+    public static LinearLayout.LayoutParams matchParentParams() {
+        return new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.MATCH_PARENT);
+    }
+
     /** Create linear layout parameters that wrap both dimensions. */
     public static LinearLayout.LayoutParams wrapParams() {
         return new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
