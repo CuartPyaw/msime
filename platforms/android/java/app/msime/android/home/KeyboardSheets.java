@@ -278,18 +278,11 @@ final class KeyboardSheets {
 
     /** 页面底部的大按钮：主按钮是实心强调色，次按钮是卡片底、正文色；52dp 高、r16。 */
     static TextView bigButton(Context context, String label, boolean primary, Runnable action) {
-        TextView button = new TextView(context);
-        button.setText(label);
-        button.setGravity(Gravity.CENTER);
-        button.setSingleLine(true);
-        Ui.style(button, Ui.TEXT_ROW_TITLE, 600, primary ? Ui.onAccent(context) : Ui.text(context));
-        button.setBackground(Ui.rippleOn(context, primary ? Ui.accent(context) : Ui.card(context),
-            Ui.dp(context, 16)));
-        Ui.setTextMinHeightDp(button, context, Ui.ACTION_BUTTON_MIN_HEIGHT);
+        TextView button = Ui.textButton(context, label, Ui.TEXT_ROW_TITLE, 600,
+            primary ? Ui.onAccent(context) : Ui.text(context),
+            Ui.rippleOn(context, primary ? Ui.accent(context) : Ui.card(context), Ui.dp(context, 16)),
+            Ui.ACTION_BUTTON_MIN_HEIGHT, action);
         Ui.setHorizontalPaddingDp(button, context, 16);
-        button.setClickable(true);
-        button.setFocusable(true);
-        button.setOnClickListener(ignored -> action.run());
         button.setAccessibilityDelegate(buttonDelegate(label));
         return button;
     }
