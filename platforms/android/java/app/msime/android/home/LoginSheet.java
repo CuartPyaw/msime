@@ -111,9 +111,8 @@ final class LoginSheet {
         LinearLayout header = new LinearLayout(activity);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = new TextView(activity);
-        title.setText("link".equals(purpose) ? "添加登录方式" : "登录水杉");
-        Ui.style(title, 22, 700, Ui.text(activity));
+        TextView title = Ui.styledLabel(activity, "link".equals(purpose) ? "添加登录方式" : "登录水杉",
+            22, 700, Ui.text(activity));
         title.setAccessibilityHeading(true);
         header.addView(title, Ui.weightWrap(1f));
         ImageView close = new ImageView(activity);
@@ -125,9 +124,8 @@ final class LoginSheet {
         header.addView(close, Ui.squareParams(activity, 40));
         root.addView(header);
 
-        TextView subtitle = new TextView(activity);
-        subtitle.setText("在手机、平板和电脑之间同步词库、皮肤和云剪贴板");
-        Ui.style(subtitle, 14, 400, Ui.subText(activity));
+        TextView subtitle = Ui.styledLabel(activity, "在手机、平板和电脑之间同步词库、皮肤和云剪贴板",
+            14, 400, Ui.subText(activity));
         root.addView(subtitle, Ui.matchWidth(activity, 2));
 
         options = new LinearLayout(activity);
@@ -155,8 +153,7 @@ final class LoginSheet {
         }
             root.addView(options, Ui.matchWidth(activity, 0));
 
-        status = new TextView(activity);
-        Ui.style(status, 13, 400, Ui.subText(activity));
+        status = Ui.styledLabel(activity, "", 13, 400, Ui.subText(activity));
         status.setGravity(Gravity.CENTER_HORIZONTAL);
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         status.setVisibility(View.GONE);
@@ -232,11 +229,9 @@ final class LoginSheet {
 
     private void showCodeEntry() {
         email.removeAllViews();
-        TextView sent = new TextView(activity);
-        sent.setText("验证码已发到 " + emailAddress + "，"
+        TextView sent = Ui.styledLabel(activity, "验证码已发到 " + emailAddress + "，"
             + BoundsPolicy.bounded(challenge.expiresIn() / 60, 1, Integer.MAX_VALUE)
-            + " 分钟内有效");
-        Ui.style(sent, 13, 400, Ui.subText(activity));
+            + " 分钟内有效", 13, 400, Ui.subText(activity));
         email.addView(sent, Ui.matchWidth(activity, 12));
         EditText code = field("6 位验证码", InputType.TYPE_CLASS_NUMBER, 6);
         code.setImeOptions(EditorInfo.IME_ACTION_DONE);
