@@ -276,7 +276,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(Ui.dp(this, 14), Ui.dp(this, 12), Ui.dp(this, 14), Ui.dp(this, 12));
+        Ui.setSymmetricPaddingDp(row, this, 14, 12);
         row.setBackground(Ui.rounded(Ui.card(this), Ui.dp(this, 20)));
         TextView label = text("显示译文", 16, Ui.text(this));
         row.addView(label, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
@@ -554,7 +554,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(Ui.dp(this, 14), Ui.dp(this, 12), Ui.dp(this, 14), Ui.dp(this, 12));
+        Ui.setSymmetricPaddingDp(row, this, 14, 12);
         row.setBackground(Ui.rounded(Ui.card(this), Ui.dp(this, 20)));
         ImageView badge = new ImageView(this);
         badge.setImageResource(icon);

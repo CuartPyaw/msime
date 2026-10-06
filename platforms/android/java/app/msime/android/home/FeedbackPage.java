@@ -90,7 +90,7 @@ public final class FeedbackPage extends DetailPage {
         input.setBackground(null);
         Ui.style(input, Ui.TEXT_ROW_TITLE, 400, Ui.text(context));
         input.setHintTextColor(Ui.subText(context));
-        input.setPadding(Ui.dp(requireContext(), 16), Ui.dp(requireContext(), 14), Ui.dp(requireContext(), 16), Ui.dp(requireContext(), 14));
+        Ui.setSymmetricPaddingDp(input, requireContext(), 16, 14);
         input.setText(draft);
         input.setContentDescription("描述");
         card.addView(input, Ui.matchWidth());
@@ -237,7 +237,7 @@ public final class FeedbackPage extends DetailPage {
             Ui.setImageTint(remove,
                 Ui.color(context, com.google.android.material.R.attr.colorOnSurfaceInverse));
             remove.setBackground(Ui.pill(Ui.color(context, com.google.android.material.R.attr.colorSurfaceInverse)));
-            remove.setPadding(Ui.dp(requireContext(), 3), Ui.dp(requireContext(), 3), Ui.dp(requireContext(), 3), Ui.dp(requireContext(), 3));
+            Ui.setSymmetricPaddingDp(remove, requireContext(), 3, 3);
             remove.setContentDescription("移除截图 " + (index + 1));
             remove.setOnClickListener(ignored -> {
                 if (sending) return;

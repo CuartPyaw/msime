@@ -118,7 +118,7 @@ final class LoginSheet {
         header.addView(title, Ui.weightWrap(1f));
         ImageView close = new ImageView(activity);
         close.setImageDrawable(new PathIcon(24, new String[] {CLOSE_PATH}, new int[] {Ui.text(activity)}));
-        close.setPadding(Ui.dp(activity, 8), Ui.dp(activity, 8), Ui.dp(activity, 8), Ui.dp(activity, 8));
+        Ui.setSymmetricPaddingDp(close, activity, 8, 8);
         close.setBackground(Ui.ripple(activity));
         close.setContentDescription("关闭");
         close.setOnClickListener(ignored -> dialog.cancel());

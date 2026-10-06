@@ -203,7 +203,7 @@ public final class GroupCard {
         TextView note = new TextView(context);
         note.setText(text);
         Ui.style(note, Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));
-        note.setPadding(Ui.dp(context, Ui.ROW_PADDING_H), Ui.dp(context, 12), Ui.dp(context, Ui.ROW_PADDING_H), Ui.dp(context, 12));
+        Ui.setSymmetricPaddingDp(note, context, Ui.ROW_PADDING_H, 12);
         addDivider();
         card.addView(note, Ui.matchWidth());
         return note;

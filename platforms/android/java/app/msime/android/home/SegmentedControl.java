@@ -54,7 +54,7 @@ public final class SegmentedControl extends LinearLayout {
             segment.setGravity(Gravity.CENTER);
             segment.setSingleLine(true);
             segment.setMinHeight(Ui.dp(context, 28));
-            segment.setPadding(Ui.dp(context, 12), Ui.dp(context, 4), Ui.dp(context, 12), Ui.dp(context, 4));
+            Ui.setSymmetricPaddingDp(segment, context, 12, 4);
             segment.setClickable(true);
             segment.setFocusable(true);
             segment.setOnClickListener(ignored -> select(index, true));
