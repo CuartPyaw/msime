@@ -32,8 +32,7 @@ public final class GroupCard {
 
     private GroupCard(ViewGroup parent, @Nullable CharSequence title) {
         context = parent.getContext();
-        group = new LinearLayout(context);
-        group.setOrientation(LinearLayout.VERTICAL);
+        group = Ui.column(context);
         LinearLayout.LayoutParams groupParams = Ui.matchWidth();
         if (parent.getChildCount() > 0) groupParams.topMargin = Ui.dp(context, Ui.GROUP_GAP);
 
@@ -240,8 +239,7 @@ public final class GroupCard {
             Ui.setRowMinimumHeight(view, owner.context);
             Ui.setRowPadding(view, owner.context);
 
-            LinearLayout texts = new LinearLayout(context);
-            texts.setOrientation(LinearLayout.VERTICAL);
+            LinearLayout texts = Ui.column(context);
             title = Ui.styledLabel(context, titleText, Ui.TEXT_ROW_TITLE, 400, Ui.text(context));
             texts.addView(title);
             subtitle = Ui.styledLabel(context, subtitleText, Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));

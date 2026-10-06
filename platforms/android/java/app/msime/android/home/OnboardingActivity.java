@@ -253,15 +253,13 @@ public final class OnboardingActivity extends AppCompatActivity {
         boolean on = preferences != null && preferences.optBoolean(GLOSS, false);
 
         // A still of the candidate strip, drawn from the design's sample: what the switch below changes, before anyone has to open a text field to see it.
-        LinearLayout strip = new LinearLayout(this);
-        strip.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout strip = Ui.row(this);
         Ui.setSymmetricPaddingDp(strip, this, 10, 12);
         strip.setBackground(Ui.rounded(Ui.accentSoft(this), Ui.dp(this, 20)));
         strip.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
         String[][] samples = {{"候选", "candidate"}, {"后选", "choice"}, {"侯选", "option"}, {"候", "wait"}};
         for (int index = 0; index < samples.length; index++) {
-            LinearLayout cell = new LinearLayout(this);
-            cell.setOrientation(LinearLayout.VERTICAL);
+            LinearLayout cell = Ui.column(this);
             ViewPolicy.setCenteredHorizontally(cell);
             Ui.setHorizontalPaddingDp(cell, this, 10);
             TextView word = Ui.label(this, samples[index][0], 19, index == 0 ? Ui.accent(this) : Ui.text(this));
@@ -272,8 +270,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         }
         column.addView(strip, Ui.matchWidth(this, 6));
 
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout row = Ui.row(this);
         ViewPolicy.setCenteredVertically(row);
         Ui.setSymmetricPaddingDp(row, this, 14, 12);
         row.setBackground(Ui.rounded(Ui.card(this), Ui.dp(this, 20)));
@@ -466,8 +463,7 @@ public final class OnboardingActivity extends AppCompatActivity {
             card.addView(line, Ui.matchWidthHeightPx(
                 BoundsPolicy.bounded(Ui.dp(this, 1) / 2, 1, Integer.MAX_VALUE)));
         }
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout row = Ui.row(this);
         ViewPolicy.setCenteredVertically(row);
         Ui.setMinimumHeightDp(row, this, Ui.COMPACT_ROW_MIN_HEIGHT);
         Ui.setPaddingDp(row, this, 14, 6, 8, 6);
@@ -502,8 +498,7 @@ public final class OnboardingActivity extends AppCompatActivity {
     /** A scheme card: label and supporting line, a radio disc on the right, a 2dp accent ring when chosen. */
     private void schemeCard(LinearLayout column, SchemeCard option, boolean selected, int top) {
         boolean usable = snapshot != null && !saving;
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout card = Ui.row(this);
         ViewPolicy.setCenteredVertically(card);
         Ui.setSymmetricPaddingDp(card, this, 16, 14);
         GradientDrawable face = selected
@@ -511,8 +506,7 @@ public final class OnboardingActivity extends AppCompatActivity {
             : Ui.rounded(Ui.card(this), Ui.dp(this, 20));
         card.setBackground(face);
 
-        LinearLayout text = new LinearLayout(this);
-        text.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout text = Ui.column(this);
         TextView heading = Ui.label(this, option.label(), 16, Ui.text(this));
         ViewPolicy.setTypefaceStyle(heading, 600);
         text.addView(heading);
@@ -541,8 +535,7 @@ public final class OnboardingActivity extends AppCompatActivity {
     }
 
     private void perk(LinearLayout column, @DrawableRes int icon, String label, int top) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout row = Ui.row(this);
         ViewPolicy.setCenteredVertically(row);
         Ui.setSymmetricPaddingDp(row, this, 14, 12);
         row.setBackground(Ui.rounded(Ui.card(this), Ui.dp(this, 20)));
