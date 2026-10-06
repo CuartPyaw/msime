@@ -188,8 +188,7 @@ final class KeyboardSheets {
             state.setText(value);
             state.setSingleLine(true);
             Ui.style(state, Ui.TEXT_ROW_TITLE, 400, valueColor);
-            LinearLayout.LayoutParams params = Ui.wrap();
-            params.setMarginStart(Ui.dp(context, Ui.ROW_GAP));
+            LinearLayout.LayoutParams params = Ui.rowGapParams(context);
             row.addView(state, params);
         }
         ImageView chevron = new ImageView(context);
@@ -273,8 +272,7 @@ final class KeyboardSheets {
             button.setEnabled(false);
         }
         button.setAccessibilityDelegate(buttonDelegate(label + "，" + title));
-        LinearLayout.LayoutParams params = Ui.wrap();
-        params.setMarginStart(Ui.dp(context, Ui.ROW_GAP));
+        LinearLayout.LayoutParams params = Ui.rowGapParams(context);
         row.addView(button, params);
         return row;
     }
@@ -378,8 +376,7 @@ final class KeyboardSheets {
             trailing.setText(value);
             trailing.setSingleLine(true);
             Ui.style(trailing, Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));
-            LinearLayout.LayoutParams valueParams = Ui.wrap();
-            valueParams.setMarginStart(Ui.dp(context, Ui.ROW_GAP));
+            LinearLayout.LayoutParams valueParams = Ui.rowGapParams(context);
             row.addView(trailing, valueParams);
         }
         if (action != null) {

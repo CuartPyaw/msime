@@ -216,8 +216,7 @@ public final class LexiconPage extends DetailPage {
         button.setFocusable(enabled);
         if (enabled) button.setOnClickListener(ignored -> install(item));
         button.setAccessibilityDelegate(KeyboardSheets.buttonDelegate(button.getText() + "，" + item.name()));
-        LinearLayout.LayoutParams params = Ui.wrap();
-        params.setMarginStart(Ui.dp(context, Ui.ROW_GAP));
+        LinearLayout.LayoutParams params = Ui.rowGapParams(context);
         row.addView(button, params);
         return row;
     }
