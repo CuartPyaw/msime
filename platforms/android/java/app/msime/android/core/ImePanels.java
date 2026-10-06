@@ -99,9 +99,8 @@ final class ImePanels {
         for (int index = 0; index < s.emojiTabs.getChildCount(); index++) {
             View tab = s.emojiTabs.getChildAt(index);
             if (tab.isSelected()) {
-                GradientDrawable face = new GradientDrawable();
-                face.setColor(Color.parseColor(s.emojiSkin.keyBackground()));
-                face.setCornerRadius(s.pixels(8));
+                GradientDrawable face = DrawablePolicy.rounded(
+                    Color.parseColor(s.emojiSkin.keyBackground()), s.pixels(8));
                 tab.setBackground(new InsetDrawable(face, s.pixels(2), s.pixels(3), s.pixels(2), s.pixels(3)));
                 tab.setAlpha(1f);
             } else {
