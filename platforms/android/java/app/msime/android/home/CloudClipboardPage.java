@@ -172,7 +172,7 @@ public final class CloudClipboardPage extends DetailPage {
             LinearLayout empty = new LinearLayout(context);
             empty.setOrientation(LinearLayout.VERTICAL);
             empty.setGravity(Gravity.CENTER_HORIZONTAL);
-            empty.setPadding(Ui.dp(context, 16), Ui.dp(context, 32), Ui.dp(context, 16), Ui.dp(context, 32));
+            Ui.setSymmetricPaddingDp(empty, context, 16, 32);
             TextView title = new TextView(context);
             title.setText("还没有同步内容");
             Ui.style(title, Ui.TEXT_ROW_TITLE, 500, Ui.text(context));
