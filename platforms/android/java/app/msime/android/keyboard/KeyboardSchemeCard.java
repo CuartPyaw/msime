@@ -96,8 +96,7 @@ public final class KeyboardSchemeCard extends FrameLayout {
         checkBadgeParams.topMargin = top + glyphSize + KeyboardGeometry.pixels(getContext(), OVERHANG_BOTTOM_DP) - checkSize;
         cluster.addView(check, checkParams);
 
-        LinearLayout column = new LinearLayout(context);
-        column.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout column = KeyboardGeometry.column(context);
         ViewPolicy.setCenteredHorizontally(column);
 
         LinearLayout.LayoutParams clusterParams = KeyboardGeometry.linearParamsPx(
