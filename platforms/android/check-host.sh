@@ -259,6 +259,13 @@ if rg -n 'optBoolean\("ok"' \
   echo "Android app theme responses must require a typed boolean ok field" >&2
   exit 1
 fi
+# The keyboard-side resolver has the same native envelope contract as the settings app. Keep its
+# fallback path from accepting string booleans and caching an untrusted palette.
+if rg -n 'optBoolean\("ok"' \
+    "$repo_root/platforms/android/java/app/msime/android/core/ImeStyler.java"; then
+  echo "Android keyboard theme responses must require a typed boolean ok field" >&2
+  exit 1
+fi
 # Sync rounds download over any section that is not dirty, so a preference write that forgets to mark settings dirty is reverted by the next cloud change. HostStore.savePreferences owns that mark for every caller.
 if ! rg -qU 'NativeClient\.savePreferences\(directory, revision, document\)\)\);\s*(//[^\n]*\s*)?if \(saved != null\) SyncSignals\.markDirty\(context, SyncSwitch\.SETTINGS\);' \
     "$repo_root/platforms/android/java/app/msime/android/home/HostStore.java"; then
