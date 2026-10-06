@@ -36,8 +36,6 @@ public final class SkinSwatchView extends View {
         invalidate();
     }
 
-    private float dp(float value) { return value * getResources().getDisplayMetrics().density; }
-
     private int parse(String colour, int fallback) {
         if (colour == null || colour.isEmpty()) return fallback;
         try {
@@ -56,17 +54,18 @@ public final class SkinSwatchView extends View {
     @Override protected void onDraw(Canvas canvas) {
         KeyboardSkin value = skin;
         if (value == null || getWidth() <= 0 || getHeight() <= 0) return;
-        float radius = dp(10);
+        float radius = Ui.dpFloat(getContext(), 10);
         paint.setColor(parse(value.background(), Color.LTGRAY));
         box.set(0, 0, getWidth(), getHeight());
         canvas.drawRoundRect(box, radius, radius, paint);
 
-        float pad = dp(5);
-        float gap = dp(2.5f);
+        float pad = Ui.dpFloat(getContext(), 5);
+        float gap = Ui.dpFloat(getContext(), 2.5f);
         float cellWidth = (getWidth() - pad * 2 - gap * (COLUMNS - 1)) / COLUMNS;
         float cellHeight = (getHeight() - pad * 2 - gap * (ROWS - 1)) / ROWS;
         if (cellWidth <= 0 || cellHeight <= 0) return;
-        float capRadius = Math.min(dp((float) value.cornerRadius()) / 2f, cellHeight / 2.5f);
+        float capRadius = Math.min(Ui.dpFloat(getContext(), (float) value.cornerRadius()) / 2f,
+            cellHeight / 2.5f);
         int cap = parse(value.keyBackground(), Color.WHITE);
         int function = parse(value.functionBackground(), cap);
         int action = parse(value.returnBackground(), parse(value.actionBackground(), Color.DKGRAY));

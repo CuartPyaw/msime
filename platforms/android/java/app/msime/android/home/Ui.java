@@ -137,6 +137,11 @@ public final class Ui {
         return Math.round(value * context.getResources().getDisplayMetrics().density);
     }
 
+    /** Convert a density-independent dimension without rounding, for canvas geometry. */
+    public static float dpFloat(Context context, float value) {
+        return value * context.getResources().getDisplayMetrics().density;
+    }
+
     /** Layout parameters for a view that fills the parent width at its measured height. */
     public static LinearLayout.LayoutParams matchWidth() {
         return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
