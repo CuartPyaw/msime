@@ -295,10 +295,8 @@ final class KeyboardSheets {
 
     /** 32dp 的圆角方块徽标，供词库和语言行共用。 */
     static TextView badge(Context context, String text) {
-        TextView badge = new TextView(context);
-        badge.setText(text);
+        TextView badge = Ui.styledLabel(context, text, 15, 600, Ui.accent(context));
         ViewPolicy.setCentered(badge);
-        Ui.style(badge, 15, 600, Ui.accent(context));
         badge.setBackground(Ui.rounded(Ui.accentSoft(context), Ui.dp(context, 8)));
         badge.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         LinearLayout.LayoutParams params = Ui.squareParams(context, 32);
