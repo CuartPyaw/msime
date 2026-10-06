@@ -9,7 +9,6 @@ import android.provider.OpenableColumns;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import androidx.activity.result.ActivityResultLauncher;
@@ -20,7 +19,6 @@ import app.msime.android.CommunityRequest;
 import app.msime.android.DictionaryCollectionsStore;
 import app.msime.android.InputFeatureToggle;
 import app.msime.android.HttpBodyPolicy;
-import app.msime.android.R;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -152,18 +150,20 @@ public final class LexiconPage extends DetailPage {
         LinearLayout target = column;
         Model current = model;
         if (target == null || current == null) return;
+        Context context = requireContext();
         target.removeAllViews();
 
         GroupCard installed = GroupCard.add(target, "已安装").withDividers(58);
         String builtinCount = current.builtinCount() < 0 ? null
             : DictionaryCollectionsStore.countLabel(current.builtinCount());
-        installed.addView(badgeRow("汉", "拼音词库", builtinCount, "已启用", true,
-            () -> openDetail(DictionaryCollectionsStore.BUILTIN_PINYIN, "拼音词库")));
+        installed.addView(KeyboardSheets.badgeNavRow(context, "汉", "拼音词库", builtinCount, "已启用",
+            Ui.accent(context), () -> openDetail(DictionaryCollectionsStore.BUILTIN_PINYIN, "拼音词库")));
         for (DictionaryCollectionsStore.Collection collection : current.view().collections()) {
             String subtitle = DictionaryCollectionsStore.countLabel(collection.entryCount())
                 + ("community".equals(collection.sourceType()) ? " · 社区" : "");
-            installed.addView(badgeRow(initial(collection.name()), collection.name(), subtitle,
-                collection.enabled() ? "已启用" : "已停用", collection.enabled(),
+            installed.addView(KeyboardSheets.badgeNavRow(context, initial(collection.name()), collection.name(),
+                subtitle, collection.enabled() ? "已启用" : "已停用",
+                collection.enabled() ? Ui.accent(context) : Ui.subText(context),
                 () -> openDetail(collection.id(), collection.name())));
         }
         installed.footer("点进词库可以启用、停用和编辑词条。已启用的词库会一起参与候选。");
@@ -194,34 +194,6 @@ public final class LexiconPage extends DetailPage {
             more.nav("背单词", "在管理界面里复习收藏的单词", null, this::openVocabularyReview);
             more.nav("云词库", "在管理界面里管理云端词库", null, this::openCloudDictionary);
         }
-    }
-
-    private View badgeRow(String badge, String title, @Nullable String subtitle, String value, boolean active,
-            Runnable action) {
-        Context context = requireContext();
-        LinearLayout row = KeyboardSheets.baseRow(context);
-        row.addView(KeyboardSheets.badge(context, badge));
-        LinearLayout texts = KeyboardSheets.texts(context, title, subtitle, Ui.text(context));
-        row.addView(texts, Ui.weightWrap(1f));
-        TextView state = new TextView(context);
-        state.setText(value);
-        Ui.style(state, Ui.TEXT_ROW_SUBTITLE, 500, active ? Ui.accent(context) : Ui.subText(context));
-        LinearLayout.LayoutParams stateParams = Ui.wrap();
-        stateParams.setMarginStart(Ui.dp(context, Ui.ROW_GAP));
-        row.addView(state, stateParams);
-        ImageView chevron = new ImageView(context);
-        chevron.setImageResource(R.drawable.ms_w1_a2_chevron);
-        Ui.setImageTint(chevron, Ui.subText(context));
-        chevron.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        LinearLayout.LayoutParams chevronParams = Ui.squareParams(context, Ui.CHEVRON_SIZE);
-        chevronParams.setMarginStart(Ui.dp(context, 6));
-        row.addView(chevron, chevronParams);
-        row.setBackground(Ui.ripple(context));
-        row.setClickable(true);
-        row.setFocusable(true);
-        row.setOnClickListener(ignored -> action.run());
-        row.setContentDescription(title + (subtitle == null ? "" : "，" + subtitle) + "，" + value);
-        return row;
     }
 
     private View discoverRow(CommunityCatalog.Item item, DictionaryCollectionsStore.View view) {
