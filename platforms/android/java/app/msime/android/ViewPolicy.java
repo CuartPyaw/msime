@@ -128,6 +128,11 @@ public final class ViewPolicy {
         view.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
     }
 
+    /** Apply a typeface style while preserving the text view's current family. */
+    public static void setTypefaceStyle(TextView view, int style) {
+        view.setTypeface(view.getTypeface(), style);
+    }
+
     /** Set a text view's size in scalable pixels. */
     public static void setTextSizeSp(TextView view, float sizeSp) {
         view.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp);

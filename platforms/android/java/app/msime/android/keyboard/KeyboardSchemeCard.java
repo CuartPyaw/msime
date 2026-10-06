@@ -56,13 +56,13 @@ public final class KeyboardSchemeCard extends FrameLayout {
         // "EN" is two characters wide in a box sized for one, so it takes the smaller face.
         // 字形和角标都画在固定 dp 的方框里，字号也按 dp，不随系统字体变化，否则放大后会溢出方框。
         glyph.setTextSize(TypedValue.COMPLEX_UNIT_DIP, glyphText.length() > 1 ? 15 : 20);
-        glyph.setTypeface(glyph.getTypeface(), android.graphics.Typeface.BOLD);
+        ViewPolicy.setTypefaceStyle(glyph, android.graphics.Typeface.BOLD);
 
         badge = new TextView(context);
         badge.setText(badgeText);
         ViewPolicy.setCentered(badge);
         badge.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 9);
-        badge.setTypeface(badge.getTypeface(), android.graphics.Typeface.BOLD);
+        ViewPolicy.setTypefaceStyle(badge, android.graphics.Typeface.BOLD);
 
         check = new View(context);
         ViewPolicy.hide(check);
