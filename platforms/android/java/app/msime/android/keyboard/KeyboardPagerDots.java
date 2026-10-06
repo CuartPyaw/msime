@@ -61,7 +61,7 @@ public final class KeyboardPagerDots extends View {
     public int active() { return active; }
 
     public void setActive(int value, boolean animate) {
-        int next = Math.max(0, Math.min(value, Math.max(0, count - 1)));
+        int next = KeyboardGeometry.bounded(value, 0, Math.max(0, count - 1));
         if (next == active) return;
         previous = active;
         active = next;
