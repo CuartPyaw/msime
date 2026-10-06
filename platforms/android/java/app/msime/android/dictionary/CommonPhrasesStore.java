@@ -412,12 +412,6 @@ public final class CommonPhrasesStore {
     static String preferencesDirectory(Context context) {
         File files = context.getFilesDir();
         if (files == null) return "";
-        File options = new File(files, "runtime-options.json");
-        if (!options.isFile()) return "";
-        try {
-            return new JSONObject(HostOptionsPolicy.read(options)).optString("preferences_directory", "");
-        } catch (JSONException | IOException | SecurityException error) {
-            return "";
-        }
+        return HostOptionsPolicy.readOption(files, "preferences_directory");
     }
 }

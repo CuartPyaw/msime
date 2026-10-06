@@ -259,13 +259,7 @@ public final class Telemetry {
 
     /** Where the shared preferences live, as Bootstrap wrote it into runtime-options.json; empty before first-run preparation. */
     private static String preferencesDirectory(Context app) {
-        File options = new File(app.getFilesDir(), "runtime-options.json");
-        if (!options.isFile()) return "";
-        try {
-            return new JSONObject(HostOptionsPolicy.read(options)).optString("preferences_directory", "");
-        } catch (Exception error) {
-            return "";
-        }
+        return HostOptionsPolicy.readOption(app.getFilesDir(), "preferences_directory");
     }
 
     private interface Call {
