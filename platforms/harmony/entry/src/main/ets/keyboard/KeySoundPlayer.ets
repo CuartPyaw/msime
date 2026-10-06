@@ -312,7 +312,7 @@ export class KeySoundPlayer {
     };
     const response: KeySoundPackResponse =
       JSON.parse(client.keySoundPack(JSON.stringify(request))) as KeySoundPackResponse;
-    if (!response.ok) {
+    if (response.ok !== true) {
       KeyboardLog.error(`sound pack unavailable: ${response.error}`);
       return null;
     }

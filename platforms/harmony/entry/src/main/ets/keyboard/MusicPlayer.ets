@@ -198,7 +198,7 @@ export class MusicPlayer {
     };
     const response: MusicPackResponse =
       JSON.parse(client.musicPack(JSON.stringify(request))) as MusicPackResponse;
-    if (!response.ok) {
+    if (response.ok !== true) {
       this.stop(`music off until the settings change: ${response.error}`);
       return null;
     }
