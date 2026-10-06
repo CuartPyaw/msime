@@ -117,6 +117,12 @@ public final class BackendAccountResponseSmoke {
         check(!BackendAccount.validChatResponse("assistant", "bad\u0000reply"),
             "chat response rejects disallowed controls");
 
+        String longAsciiReply = "a".repeat(12_000);
+        check(BackendAccount.validChatReplyText(longAsciiReply),
+            "chat accepts a valid response up to the shared UTF-8 byte bound");
+        check(!BackendAccount.validChatReplyText(" \n"),
+            "chat rejects a whitespace-only streaming response");
+
         check(!BackendAccount.validClipboardItem(new BackendAccount.ClipboardItem(
             "a".repeat(64), "safe\u0000hidden", "2026-10-04T00:00:00Z")),
             "add clipboard rejects control characters in the returned text");

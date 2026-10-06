@@ -39,8 +39,8 @@ public final class BackendAccount {
     private static final String DEFAULT_USER_AGENT = "MSIME/Android";
     /** Matches client-core's account JSON response ceiling; a full cloud clipboard page can exceed 64 KiB. */
     private static final int MAX_RESPONSE_BYTES = 1024 * 1024;
-    /** 一条 AI 回复的字符上限，流式与非流式相同。 */
-    public static final int MAX_CHAT_REPLY_CHARS = 10_000;
+    /** 一条 AI 回复的 UTF-8 字节上限，流式与非流式相同。 */
+    public static final int MAX_CHAT_REPLY_BYTES = 16 * 1024;
     /** 流式回复整个响应体的上限：最多 2048 个 token 的增量块，每块几十到一两百字节的 JSON 外壳。 */
     static final int MAX_STREAM_BYTES = 4 * 1024 * 1024;
     /** SSE 单行上限；一个增量块远小于它。 */
@@ -474,6 +474,11 @@ public final class BackendAccount {
             && !TextPolicy.hasControlExceptWhitespace(content);
     }
 
+    static boolean validChatReplyText(String content) {
+        return content != null && !content.trim().isEmpty()
+            && TextPolicy.utf8Length(content) <= MAX_CHAT_REPLY_BYTES;
+    }
+
     /** Sends one bounded non-streaming chat request; callers must run it off the UI thread. */
     public String chat(List<ChatMessage> messages, String model) throws Exception {
         String token = accessToken();
@@ -565,14 +570,14 @@ public final class BackendAccount {
         return new JSONObject().put("messages", payloadMessages).put("model", model).put("max_tokens", 2048);
     }
 
-    /** 非流式回复里的 choices[0].message.content：按 {@link #validChatResponse} 校验，并且不超过 {@link #MAX_CHAT_REPLY_CHARS}。 */
+    /** 非流式回复里的 choices[0].message.content：按 {@link #validChatResponse} 校验。 */
     private static String chatContent(JSONObject response) {
         org.json.JSONArray choices = response.optJSONArray("choices");
         JSONObject first = choices == null || choices.length() == 0 ? null : choices.optJSONObject(0);
         JSONObject message = first == null ? null : first.optJSONObject("message");
         String content = message == null ? "" : requiredStringField(message.opt("content"));
         String role = message == null ? "" : optionalStringField(message.opt("role"), "");
-        if (!validChatResponse(role, content) || content.length() > MAX_CHAT_REPLY_CHARS)
+        if (!validChatResponse(role, content) || !validChatReplyText(content))
             throw new IllegalStateException("invalid chat response");
         return content;
     }
@@ -686,7 +691,8 @@ public final class BackendAccount {
                     listener.onDelta(reply);
                     return reply;
                 }
-                StringBuilder reply = new StringBuilder(MAX_CHAT_REPLY_CHARS);
+                StringBuilder reply = new StringBuilder(MAX_CHAT_REPLY_BYTES);
+                int replyBytes = 0;
                 EventLines lines = new EventLines(input);
                 String line;
                 while ((line = lines.next()) != null) {
@@ -695,7 +701,8 @@ public final class BackendAccount {
                     String data = eventData(line);
                     if (data == null) continue;
                     if ("[DONE]".equals(data)) {
-                        if (reply.length() == 0) throw new IllegalStateException("invalid chat response");
+                        if (!validChatReplyText(reply.toString()))
+                            throw new IllegalStateException("invalid chat response");
                         return reply.toString();
                     }
                     // 空的或不是 JSON 对象的 data 行（例如中间层发来的空 data 行或心跳）跳过，不让一行杂音废掉已经收到的整段回复；`[DONE]` 和带 error 的对象照旧处理。
@@ -704,9 +711,13 @@ public final class BackendAccount {
                     if (chunk.has("error")) throw new IllegalStateException("chat stream failed");
                     String delta = chunkDelta(chunk);
                     if (delta.isEmpty()) continue;
-                    if (reply.length() + delta.length() > MAX_CHAT_REPLY_CHARS)
+                    if (TextPolicy.hasControlExceptWhitespace(delta))
+                        throw new IllegalStateException("invalid chat response");
+                    int deltaBytes = TextPolicy.utf8Length(delta);
+                    if (deltaBytes > MAX_CHAT_REPLY_BYTES - replyBytes)
                         throw new IllegalStateException("invalid chat response");
                     reply.append(delta);
+                    replyBytes += deltaBytes;
                     listener.onDelta(delta);
                 }
                 // 没等到 [DONE] 流就断了：回复不完整，按失败处理，已经交出去的增量由调用方决定是否保留。
