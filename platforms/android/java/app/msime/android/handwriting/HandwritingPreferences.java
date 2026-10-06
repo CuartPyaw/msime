@@ -44,8 +44,8 @@ public record HandwritingPreferences(Mode mode, int delayMillis, boolean showPin
             default -> "follow_skin";
         };
         return new HandwritingPreferences(Mode.fromPreference(mode),
-            Math.max(DELAY_MIN, Math.min(DELAY_MAX, delayMillis)), showPinyin, color,
-            Math.max(WIDTH_MIN, Math.min(WIDTH_MAX, strokeWidth)));
+            BoundsPolicy.bounded(delayMillis, DELAY_MIN, DELAY_MAX), showPinyin, color,
+            BoundsPolicy.bounded(strokeWidth, WIDTH_MIN, WIDTH_MAX));
     }
 
     /** 笔迹颜色（ARGB）；跟随皮肤时为 null。蓝色取 Material Blue 700。 */

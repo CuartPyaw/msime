@@ -69,7 +69,7 @@ public final class TypingStatisticsSummary {
         public double progress() {
             if (unlocked()) return 1d;
             if (target <= 0) return 0d;
-            return Math.max(0d, Math.min(1d, (double) current / target));
+            return BoundsPolicy.bounded((double) current / target, 0d, 1d);
         }
     }
 

@@ -223,15 +223,15 @@ public final class KeyboardGeometry {
     }
 
     public static int bounded(int value, int minimum, int maximum) {
-        return Math.max(minimum, Math.min(value, maximum));
+        return BoundsPolicy.bounded(value, minimum, maximum);
     }
 
     public static long bounded(long value, long minimum, long maximum) {
-        return Math.max(minimum, Math.min(value, maximum));
+        return BoundsPolicy.bounded(value, minimum, maximum);
     }
 
     public static double bounded(double value, double minimum, double maximum) {
-        return Math.max(minimum, Math.min(value, maximum));
+        return BoundsPolicy.bounded(value, minimum, maximum);
     }
 
     public static double bounded(double value, double minimum, double maximum, double fallback) {
@@ -239,7 +239,7 @@ public final class KeyboardGeometry {
     }
 
     public static float bounded(float value, float minimum, float maximum) {
-        return Math.max(minimum, Math.min(value, maximum));
+        return BoundsPolicy.bounded(value, minimum, maximum);
     }
 
     private static int clamp(int value, int minimum, int maximum, int fallback) {
