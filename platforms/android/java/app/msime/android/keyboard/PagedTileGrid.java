@@ -54,7 +54,8 @@ public final class PagedTileGrid extends ViewGroup {
 
     /** 每页条目数。 */
     public static int perPage(int columns, int rows) {
-        return Math.max(1, columns) * Math.max(1, rows);
+        return BoundsPolicy.bounded(columns, 1, Integer.MAX_VALUE)
+            * BoundsPolicy.bounded(rows, 1, Integer.MAX_VALUE);
     }
 
     /** 页数：至少一页。 */
@@ -65,7 +66,8 @@ public final class PagedTileGrid extends ViewGroup {
 
     /** 第 {@code index} 个条目所在的页。 */
     public static int pageOf(int index, int perPage) {
-        return BoundsPolicy.nonNegative(index) / Math.max(1, perPage);
+        return BoundsPolicy.nonNegative(index)
+            / BoundsPolicy.bounded(perPage, 1, Integer.MAX_VALUE);
     }
 
     /**
@@ -87,8 +89,8 @@ public final class PagedTileGrid extends ViewGroup {
     }
 
     public void setGrid(int columnCount, int rowCount) {
-        columns = Math.max(1, columnCount);
-        rows = Math.max(1, rowCount);
+        columns = BoundsPolicy.bounded(columnCount, 1, Integer.MAX_VALUE);
+        rows = BoundsPolicy.bounded(rowCount, 1, Integer.MAX_VALUE);
         requestLayout();
     }
 
