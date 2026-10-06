@@ -50,26 +50,20 @@ public final class KeyboardSchemeCard extends FrameLayout {
         setClickable(true);
         setFocusable(true);
 
-        glyph = new TextView(context);
-        glyph.setText(glyphText);
-        ViewPolicy.setCentered(glyph);
+        glyph = centeredLabel(context, glyphText, glyphText.length() > 1 ? 15 : 20, true);
         // "EN" is two characters wide in a box sized for one, so it takes the smaller face.
         // 字形和角标都画在固定 dp 的方框里，字号也按 dp，不随系统字体变化，否则放大后会溢出方框。
         glyph.setTextSize(TypedValue.COMPLEX_UNIT_DIP, glyphText.length() > 1 ? 15 : 20);
         ViewPolicy.setTypefaceStyle(glyph, android.graphics.Typeface.BOLD);
 
-        badge = new TextView(context);
-        badge.setText(badgeText);
-        ViewPolicy.setCentered(badge);
+        badge = centeredLabel(context, badgeText, 9, true);
         badge.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 9);
         ViewPolicy.setTypefaceStyle(badge, android.graphics.Typeface.BOLD);
 
         check = new View(context);
         ViewPolicy.hide(check);
 
-        title = new TextView(context);
-        title.setText(titleText);
-        ViewPolicy.setCentered(title);
+        title = centeredLabel(context, titleText, 12, false);
         title.setMaxLines(1);
         KeyboardGeometry.setKeyTextSize(title, 12);
         // 卡片格子只有 56 dp，字形区占去 44 dp；去掉字体留白，标题在 1.15 倍字体下仍放得下。
@@ -127,6 +121,16 @@ public final class KeyboardSchemeCard extends FrameLayout {
         for (View child : new View[] {glyph, badge, title, check, cluster, column}) {
             child.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         }
+    }
+
+    private static TextView centeredLabel(Context context, CharSequence text, float sizeSp,
+            boolean bold) {
+        TextView view = new TextView(context);
+        view.setText(text);
+        ViewPolicy.setCentered(view);
+        ViewPolicy.setTextSizeSp(view, sizeSp);
+        if (bold) ViewPolicy.setTypefaceStyle(view, android.graphics.Typeface.BOLD);
+        return view;
     }
 
     /**
