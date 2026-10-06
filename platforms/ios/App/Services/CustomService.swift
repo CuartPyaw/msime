@@ -156,6 +156,7 @@ struct ServiceFailure: LocalizedError {
 
 struct CustomServiceConfiguration: Codable, Sendable, Equatable {
   private static let maximumPromptBytes = 32 * 1024
+  private static let maximumDoubaoFieldBytes = 8 * 1024
   var provider: AIProviderPreset = .custom
   var voiceProvider: VoiceProviderPreset = .custom
   var voiceAppKey = ""
@@ -232,6 +233,18 @@ struct CustomServiceConfiguration: Codable, Sendable, Equatable {
     return url
   }
 
+  private static func validDoubaoField(_ value: String) -> Bool {
+    value.utf8.count <= maximumDoubaoFieldBytes
+      && !value.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
+  }
+
+  private func validateDoubaoFields() throws {
+    guard Self.validDoubaoField(voiceAppKey), Self.validDoubaoField(voiceResourceID),
+          Self.validDoubaoField(doubaoBoostingTableID) else {
+      throw ServiceFailure(message: "豆包服务字段过长或包含非法字符。")
+    }
+  }
+
   func validatedURL(requiresModel: Bool = true, allowWebSocket: Bool = false) throws -> URL {
     guard let url = Self.validatedEndpoint(endpoint, allowWebSocket: allowWebSocket, maximumCharacters: 2_048),
       (!requiresModel || (!model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.utf8.count <= 256))
@@ -248,6 +261,7 @@ struct CustomServiceConfiguration: Codable, Sendable, Equatable {
       defaults.set(voiceProvider.rawValue, forKey: "service.voice.provider")
       return
     }
+    if kind == .voice && voiceProvider == .doubao { try validateDoubaoFields() }
     let url = try validatedURL(allowWebSocket: kind == .voice && voiceProvider == .doubao)
     if !token.isEmpty { try ServiceTokenStore.write(token, kind: kind, url: url) }
     if kind == .ai {
@@ -275,7 +289,11 @@ extension CustomServiceConfiguration {
   /// the separately stored access key. Credentials are returned only to the
   /// caller and are never logged or serialized into diagnostics.
   func doubaoHandshake(accessKey: String, requestID: String = UUID().uuidString) throws -> DoubaoHandshake {
-    try DoubaoHandshake(
+    try validateDoubaoFields()
+    guard Self.validDoubaoField(accessKey) else {
+      throw ServiceFailure(message: "豆包服务字段过长或包含非法字符。")
+    }
+    return try DoubaoHandshake(
       appKey: voiceAppKey,
       accessKey: accessKey,
       resourceID: voiceResourceID,
