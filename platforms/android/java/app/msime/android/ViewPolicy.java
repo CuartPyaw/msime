@@ -2,6 +2,7 @@ package app.msime.android;
 
 import android.view.Gravity;
 import android.view.View;
+import android.util.TypedValue;
 import android.widget.Button;
 import android.widget.TextView;
 
@@ -86,5 +87,10 @@ public final class ViewPolicy {
     /** Center a view's content along the vertical axis. */
     public static void setCenteredVertically(View view) {
         ViewPolicy.setCenteredVertically(view);
+    }
+
+    /** Set a text view's size in scalable pixels. */
+    public static void setTextSizeSp(TextView view, float sizeSp) {
+        view.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp);
     }
 }
