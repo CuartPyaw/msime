@@ -890,7 +890,7 @@ final class ImeLayoutRows {
         spanned.setSpan(new android.text.style.RelativeSizeSpan(0.5f), lineBreak + 1, label.length(),
             android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         button.setIncludeFontPadding(false);
-        button.setPadding(button.getPaddingLeft(), 0, button.getPaddingRight(), 0);
+        ViewPolicy.clearVerticalPadding(button);
         button.setText(spanned);
     }
 

@@ -25,7 +25,7 @@ public final class CenteredGlyphSpan extends ReplacementSpan {
      */
     public static void apply(android.widget.TextView view, String text, float scale) {
         view.setIncludeFontPadding(false);
-        view.setPadding(view.getPaddingLeft(), 0, view.getPaddingRight(), 0);
+        ViewPolicy.clearVerticalPadding(view);
         view.setText(of(text, scale));
     }
 
