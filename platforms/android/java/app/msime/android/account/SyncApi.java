@@ -247,8 +247,9 @@ public final class SyncApi {
         try {
             JSONObject root = new JSONObject(new String(exchange.body(), StandardCharsets.UTF_8));
             Object next = root.opt("revision");
-            if (!(next instanceof Number) || ((Number) next).longValue() <= revision) throw invalid("snapshot revision");
-            return ((Number) next).longValue();
+            long nextRevision = snapshotRevisionValue(next);
+            if (nextRevision <= revision) throw invalid("snapshot revision");
+            return nextRevision;
         } catch (JSONException malformed) {
             throw invalid("malformed snapshot response");
         }
@@ -261,11 +262,16 @@ public final class SyncApi {
             if (first == null) throw invalid("empty snapshot");
             JSONObject header = new JSONObject(first);
             Object revision = header.opt("revision");
-            if (!"header".equals(header.opt("type")) || !(revision instanceof Number)) throw invalid("snapshot header");
-            return ((Number) revision).longValue();
+            if (!"header".equals(header.opt("type"))) throw invalid("snapshot header");
+            return snapshotRevisionValue(revision);
         } catch (JSONException malformed) {
             throw invalid("snapshot header");
         }
+    }
+
+    /** Snapshot headers and restore responses carry the same integer revision contract. */
+    static long snapshotRevisionValue(Object value) throws CloudApi.Failure {
+        return preferenceRevision(value);
     }
 
     /**
