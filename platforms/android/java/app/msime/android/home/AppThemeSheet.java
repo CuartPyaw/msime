@@ -56,16 +56,9 @@ final class AppThemeSheet {
         header.setOrientation(LinearLayout.VERTICAL);
         header.setGravity(Gravity.CENTER_HORIZONTAL);
         Ui.setSheetHeaderPadding(header, context);
-        TextView heading = new TextView(context);
-        heading.setText("应用主题");
-        heading.setGravity(Gravity.CENTER);
-        Ui.style(heading, Ui.TEXT_SHEET_HEADER, 600, Ui.subText(context));
-        heading.setAccessibilityHeading(true);
+        TextView heading = Ui.sheetHeading(context, "应用主题");
         header.addView(heading);
-        TextView note = new TextView(context);
-        note.setText("四季会随季节自动更换配色");
-        note.setGravity(Gravity.CENTER);
-        Ui.style(note, Ui.TEXT_SHEET_HEADER, 400, Ui.subText(context));
+        TextView note = Ui.sheetSubtitle(context, "四季会随季节自动更换配色");
         LinearLayout.LayoutParams noteParams = Ui.wrap();
         noteParams.topMargin = Ui.dp(context, 2);
         header.addView(note, noteParams);
