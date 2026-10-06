@@ -134,8 +134,7 @@ public final class KeyboardShortcutButton extends KeyboardPressButton {
         }
         int color = iconColor();
         if (color == Color.TRANSPARENT) color = Color.WHITE;
-        if (!isEnabled()) color = Color.argb(Math.round(Color.alpha(color) * 96f / 255f),
-            Color.red(color), Color.green(color), Color.blue(color));
+        if (!isEnabled()) color = ColorPolicy.withAlpha(color, 96f / 255f);
         KeyboardIconPaths.Icon path = switch (icon) {
             case EMOJI -> KeyboardIconPaths.Icon.TOOLBAR_EMOJI;
             case PHRASE -> KeyboardIconPaths.Icon.TOOLBAR_PHRASE;

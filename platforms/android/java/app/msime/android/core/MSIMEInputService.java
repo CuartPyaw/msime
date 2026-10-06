@@ -5139,8 +5139,7 @@ public final class MSIMEInputService extends InputMethodService {
         label.setSpan(new RelativeSizeSpan(0.62f), annotationStart, label.length(),
             Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         int foreground = candidateAppearance.textFor(highlighted);
-        int secondary = Color.argb(Math.round(Color.alpha(foreground) * 0.58f),
-            Color.red(foreground), Color.green(foreground), Color.blue(foreground));
+        int secondary = ColorPolicy.withAlpha(foreground, 0.58f);
         label.setSpan(new ForegroundColorSpan(secondary), annotationStart, label.length(),
             Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         return label;

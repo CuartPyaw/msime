@@ -135,8 +135,7 @@ public final class InlineHeightBar extends LinearLayout {
         pill.setCornerRadius(KeyboardGeometry.floatPixels(getContext(), 16));
         pill.setColor(accent);
         ((BarButton) done).setColors(onAccent, pill);
-        handle.barColor = Color.argb(Math.round(Color.alpha(foreground) * .35f),
-            Color.red(foreground), Color.green(foreground), Color.blue(foreground));
+        handle.barColor = ColorPolicy.withAlpha(foreground, .35f);
         handle.textColor = secondary;
         handle.invalidate();
     }
