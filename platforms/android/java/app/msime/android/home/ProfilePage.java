@@ -293,7 +293,7 @@ public final class ProfilePage extends DetailPage {
         button.setText(label);
         button.setGravity(Gravity.CENTER);
         Ui.style(button, Ui.TEXT_ROW_TITLE, 500, Ui.danger(context));
-        button.setMinHeight(Ui.dp(context, 52));
+        button.setMinHeight(Ui.dp(context, Ui.ACTION_BUTTON_MIN_HEIGHT));
         button.setBackground(Ui.ripple(context));
         button.setClickable(true);
         button.setFocusable(true);
