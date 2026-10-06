@@ -116,8 +116,7 @@ final class ImeFrame {
             return;
         }
         float gutterWeight = OneHandGutterView.GUTTER_FRACTION;
-        LinearLayout.LayoutParams gutterParams = new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.MATCH_PARENT, gutterWeight);
+        LinearLayout.LayoutParams gutterParams = KeyboardGeometry.weightedMatchParentParams(gutterWeight);
         boolean left = gutterOnLeft(mode);
         gutter.setKeyboardOnRight(left);
         gutter.setVisibility(View.VISIBLE);
