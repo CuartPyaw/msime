@@ -729,8 +729,7 @@ public final class Ui {
 
     /** Create a vertically arranged rounded surface for page cards. */
     public static LinearLayout verticalCard(Context context, float radiusDp) {
-        LinearLayout card = new LinearLayout(context);
-        card.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout card = column(context);
         card.setBackground(rounded(card(context), dp(context, radiusDp)));
         return card;
     }
