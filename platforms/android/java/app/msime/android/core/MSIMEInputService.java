@@ -5857,8 +5857,7 @@ public final class MSIMEInputService extends InputMethodService {
         // ordinary key rows and controls are hidden while this weighted child is visible.
         replyKeyboard = imePanels.createReplyKeyboard();
         replyKeyboard.setVisibility(View.GONE);
-        keyboard.addView(replyKeyboard, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+        keyboard.addView(replyKeyboard, KeyboardGeometry.weightedWidthParams(1));
         // 键距是键的外边距；这两个容器把落在空隙里的按下交给拥有那段空隙的键，画面不变（见 KeyboardKeyArea）。
         keyRows = new KeyboardKeyArea(this, this::followsKeySpacing);
         keyRows.setOrientation(LinearLayout.VERTICAL);
@@ -6113,8 +6112,7 @@ public final class MSIMEInputService extends InputMethodService {
         aiPolishScroll = new ScrollView(this);
         aiPolishScroll.setFillViewport(true);
         aiPolishScroll.addView(aiPolishPanel);
-        aiPolishContainer.addView(aiPolishScroll, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+        aiPolishContainer.addView(aiPolishScroll, KeyboardGeometry.weightedWidthParams(1));
         aiPolishActions = new LinearLayout(this);
         aiPolishActions.setOrientation(LinearLayout.VERTICAL);
         aiPolishActions.setPadding(24, 0, 24, 16);
