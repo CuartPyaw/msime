@@ -204,8 +204,8 @@ public final class KeyboardSkinPreview extends View {
     }
 
     private static int withOpacity(int colour, double opacity) {
-        int alpha = (int) Math.round(Color.alpha(colour) * Math.max(0d, Math.min(1d, opacity)));
-        return Color.argb(alpha, Color.red(colour), Color.green(colour), Color.blue(colour));
+        float factor = (float) Math.max(0d, Math.min(1d, opacity));
+        return ColorPolicy.withAlpha(colour, factor);
     }
 
     /** MiniKb 字母键右上角的提示字，与设计的 HINT 表一一对应。 */
