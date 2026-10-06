@@ -86,7 +86,7 @@ export class LocalAsrPolicy {
   static correctedText(value: unknown, fallback: string): string {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return fallback;
     const text: Object | undefined = (value as Record<string, Object>).text;
-    return typeof text === "string" ? text as string : fallback;
+    return typeof text === "string" && text.length > 0 ? text as string : fallback;
   }
 
   /** Accept a bounded native hotword list, or null when the response crosses its contract. */

@@ -13021,8 +13021,9 @@ group("LocalAsrPolicy", () => {
   check(
     LocalAsrPolicy.correctedText({ text: "水杉" }, "原文") === "水杉" &&
       LocalAsrPolicy.correctedText({ text: 42 }, "原文") === "原文" &&
+      LocalAsrPolicy.correctedText({ text: "" }, "原文") === "原文" &&
       LocalAsrPolicy.correctedText(null, "原文") === "原文",
-    "malformed hotword correction values keep the original text",
+    "malformed or empty hotword correction values keep the original text",
   );
   check(LocalAsrPolicy.senseVoiceLanguage("zh-HK") === "yue", "Hong Kong Chinese pins Cantonese");
   check(LocalAsrPolicy.senseVoiceLanguage("ja-JP") === "ja", "Japanese is pinned");
