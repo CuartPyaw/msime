@@ -32,10 +32,7 @@ public final class SearchPill extends LinearLayout {
         Ui.setHorizontalPaddingDp(this, context, 18);
         setBackground(Ui.pill(Ui.card(context)));
 
-        ImageView glyph = new ImageView(context);
-        glyph.setImageResource(R.drawable.ic_search);
-        Ui.setImageTint(glyph, Ui.subText(context));
-        Ui.hideFromAccessibility(glyph);
+        ImageView glyph = Ui.decorativeIcon(context, R.drawable.ic_search, Ui.subText(context));
         int icon = Ui.dp(context, 16);
         addView(glyph, new LayoutParams(icon, icon));
 

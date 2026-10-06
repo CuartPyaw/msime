@@ -22,6 +22,7 @@ import app.msime.android.ViewPolicy;
 import androidx.annotation.AttrRes;
 import androidx.annotation.ColorInt;
 import app.msime.android.ColorPolicy;
+import androidx.annotation.DrawableRes;
 import com.google.android.material.color.MaterialColors;
 import com.google.android.material.bottomsheet.BottomSheetDragHandleView;
 
@@ -704,6 +705,16 @@ public final class Ui {
         button.setLayoutParams(squareParamsPx(size));
         setSymmetricPaddingPx(button, size / 5);
         return button;
+    }
+
+    /** Create a non-interactive, accessibility-hidden image tinted for a surrounding surface. */
+    public static ImageView decorativeIcon(Context context, @DrawableRes int icon,
+                                           @ColorInt int tint) {
+        ImageView view = new ImageView(context);
+        view.setImageResource(icon);
+        setImageTint(view, tint);
+        hideFromAccessibility(view);
+        return view;
     }
 
     /** Create the muted, accessibility-hidden chevron used by navigable rows. */

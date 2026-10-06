@@ -65,10 +65,7 @@ public final class DownloadPage extends DetailPage {
 
         FrameLayout tile = new FrameLayout(context);
         tile.setBackground(Ui.rounded(Ui.accent(context), Ui.dp(context, 12)));
-        ImageView icon = new ImageView(context);
-        icon.setImageResource(R.drawable.ic_ms_link);
-        Ui.setImageTint(icon, Ui.onAccent(context));
-        Ui.hideFromAccessibility(icon);
+        ImageView icon = Ui.decorativeIcon(context, R.drawable.ic_ms_link, Ui.onAccent(context));
         int iconSize = Ui.dp(context, 24);
         tile.addView(icon, Ui.squareFrameParamsPx(iconSize, Gravity.CENTER));
         int tileSize = Ui.dp(context, 44);
@@ -103,10 +100,7 @@ public final class DownloadPage extends DetailPage {
     private static GroupCard.Row row(GroupCard group, @DrawableRes int icon, String title, String subtitle) {
         GroupCard.Row row = group.value(title, subtitle, null);
         Context context = row.view().getContext();
-        ImageView image = new ImageView(context);
-        image.setImageResource(icon);
-        Ui.setImageTint(image, Ui.text(context));
-        Ui.hideFromAccessibility(image);
+        ImageView image = Ui.decorativeIcon(context, icon, Ui.text(context));
         int size = Ui.dp(context, 24);
         LinearLayout.LayoutParams params = Ui.squareParamsPx(size);
         params.setMarginEnd(Ui.dp(context, 18));
