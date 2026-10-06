@@ -327,6 +327,12 @@ public final class KeyboardGeometry {
             ScrollView.LayoutParams.MATCH_PARENT);
     }
 
+    /** Create scroll-view child parameters that fill width and wrap content height. */
+    public static ScrollView.LayoutParams scrollMatchWidthWrapParams() {
+        return new ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT,
+            ScrollView.LayoutParams.WRAP_CONTENT);
+    }
+
     /** Create weighted linear layout parameters with a fixed height in dp. */
     public static LinearLayout.LayoutParams weightedHeightParams(Context context, float heightDp,
             float weight) {

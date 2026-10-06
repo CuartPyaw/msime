@@ -1510,8 +1510,7 @@ final class ImePanels {
         s.emojiGridScroll.setFillViewport(false);
         s.emojiGridScroll.setVerticalScrollBarEnabled(false);
         s.emojiGridScroll.setContentDescription("表情网格；每行八个");
-        s.emojiGridScroll.addView(s.emojiGrid, new ScrollView.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        s.emojiGridScroll.addView(s.emojiGrid, KeyboardGeometry.scrollMatchWidthWrapParams());
         s.emojiGridScroll.setOnScrollChangeListener((view, scrollX, scrollY, oldX, oldY) -> {
             if (scrollY > oldY && !view.canScrollVertically(1)) s.loadEmojiPage();
         });
