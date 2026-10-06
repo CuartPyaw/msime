@@ -8,6 +8,7 @@ import java.io.OutputStream;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
@@ -357,7 +358,7 @@ public final class SyncApi {
                 connection.setRequestProperty("Content-Type", contentType);
                 connection.setDoOutput(true);
                 connection.setFixedLengthStreamingMode(length);
-                try (InputStream input = Files.newInputStream(file); OutputStream output = connection.getOutputStream()) {
+                try (InputStream input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS); OutputStream output = connection.getOutputStream()) {
                     copy(input, output);
                 }
                 int status = connection.getResponseCode();
