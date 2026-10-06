@@ -76,7 +76,7 @@ public final class Telemetry {
         WORKER.execute(() -> {
             JSONObject value = call(() -> NativeClient.telemetryBegin(request(app)));
             if (value != null) {
-                enabled = value.optBoolean("enabled", false);
+                enabled = booleanValue(value.opt("enabled"), false);
                 String path = value.optString("crash_record_path", "");
                 sessionCrashRecord = enabled && !path.isEmpty() ? new File(path) : null;
             }
@@ -221,7 +221,7 @@ public final class Telemetry {
 
     private static void flush(Context app) {
         JSONObject value = call(() -> NativeClient.telemetryFlush(request(app)));
-        if (value != null) enabled = value.optBoolean("enabled", enabled);
+        if (value != null) enabled = booleanValue(value.opt("enabled"), enabled);
     }
 
     private static File directory(Context app) {
@@ -276,7 +276,7 @@ public final class Telemetry {
     private static JSONObject call(Call call) {
         try {
             JSONObject root = new JSONObject(call.run());
-            if (root.optBoolean("ok", false)) {
+            if (Boolean.TRUE.equals(root.opt("ok"))) {
                 JSONObject value = root.optJSONObject("value");
                 return value == null ? new JSONObject() : value;
             }
@@ -285,5 +285,10 @@ public final class Telemetry {
             Log.i(TAG, "Reporter unavailable", error);
         }
         return null;
+    }
+
+    /** Reporter status and consent are typed JSON booleans; reject org.json string coercion. */
+    static boolean booleanValue(Object value, boolean fallback) {
+        return value instanceof Boolean ? (Boolean) value : fallback;
     }
 }

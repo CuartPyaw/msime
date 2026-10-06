@@ -11,6 +11,8 @@ public final class TelemetryHandlerSmoke {
     }
 
     public static void main(String[] args) throws Exception {
+        check(!Telemetry.booleanValue("true", false), "string consent must not enable telemetry");
+        check(Telemetry.booleanValue(Boolean.TRUE, false), "typed consent is accepted");
         Thread.UncaughtExceptionHandler previous = Thread.getDefaultUncaughtExceptionHandler();
         try {
             check(Telemetry.installCrashHandler(null), "first installation must succeed");
