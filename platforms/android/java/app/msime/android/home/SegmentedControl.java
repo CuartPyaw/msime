@@ -35,7 +35,7 @@ public final class SegmentedControl extends LinearLayout {
         setOrientation(HORIZONTAL);
         setGravity(Gravity.CENTER_VERTICAL);
         int pad = Ui.dp(context, 2);
-        setPadding(pad, pad, pad, pad);
+        Ui.setSymmetricPaddingPx(this, pad);
         GradientDrawable frame = Ui.outlined(Color.TRANSPARENT, 9999f, Ui.dp(context, 1),
             Ui.outline(context));
         setBackground(frame);

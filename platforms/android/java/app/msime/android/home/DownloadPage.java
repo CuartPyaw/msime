@@ -65,7 +65,7 @@ public final class DownloadPage extends DetailPage {
         card.setGravity(Gravity.CENTER_VERTICAL);
         card.setBackground(Ui.rounded(Ui.accentSoft(context), Ui.dp(context, 20)));
         int pad = Ui.dp(context, 16);
-        card.setPadding(pad, pad, pad, pad);
+        Ui.setSymmetricPaddingPx(card, pad);
 
         FrameLayout tile = new FrameLayout(context);
         tile.setBackground(Ui.rounded(Ui.accent(context), Ui.dp(context, 12)));

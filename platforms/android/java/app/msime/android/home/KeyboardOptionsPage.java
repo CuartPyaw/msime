@@ -153,7 +153,7 @@ public final class KeyboardOptionsPage extends DetailPage {
         strip.setOrientation(LinearLayout.HORIZONTAL);
         strip.setGravity(Gravity.CENTER_VERTICAL);
         int pad = Ui.dp(context, 12);
-        strip.setPadding(pad, pad, pad, pad);
+        Ui.setSymmetricPaddingPx(strip, pad);
         LinearLayout plate = new LinearLayout(context);
         plate.setOrientation(LinearLayout.HORIZONTAL);
         plate.setGravity(Gravity.CENTER_VERTICAL);
