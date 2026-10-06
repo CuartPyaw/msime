@@ -340,9 +340,7 @@ final class ImeStyler {
     }
 
     GradientDrawable candidateDrawable(int color) {
-        GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(color);
-        drawable.setCornerRadius(s.pixels(6));
+        GradientDrawable drawable = DrawablePolicy.rounded(color, s.pixels(6));
         if (Color.alpha(s.candidateAppearance.border()) > 0)
             drawable.setStroke(Math.max(1, s.pixels(1)), s.candidateAppearance.border());
         return drawable;
