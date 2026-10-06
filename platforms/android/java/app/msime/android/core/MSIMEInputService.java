@@ -3395,9 +3395,14 @@ public final class MSIMEInputService extends InputMethodService {
 
     /** 九键、注音、笔画、手写和日语九键的 ⌫：和 {@link #keyboardKey} 一样的键，只是画 26 键那个 22 dp 的删除图标，不再用排版字号的「⌫」字符，那样比 26 键的小一圈。 */
     Button backspaceKey(Runnable action) {
-        KeyboardIconKey button = new KeyboardIconKey(this, KeyboardIconKey.Kind.BACKSPACE);
-        button.setText("⌫");
-        button.setContentDescription("按键 删除");
+        return iconKey(KeyboardIconKey.Kind.BACKSPACE, "⌫", "删除", action);
+    }
+
+    /** {@link #keyboardKey} 的图标版：节点文字仍是 `label`，键面画 `kind` 的描边图标。 */
+    Button iconKey(KeyboardIconKey.Kind kind, String label, String description, Runnable action) {
+        KeyboardIconKey button = new KeyboardIconKey(this, kind);
+        button.setText(label);
+        button.setContentDescription("按键 " + description);
         imeStyler.styleButton(button, false);
         button.setOnClickListener(ignored -> {
             imeKeyFeedback.playFeedback(button);

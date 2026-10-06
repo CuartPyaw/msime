@@ -978,8 +978,10 @@ final class ImeLayoutRows {
             s.render();
         }), "SoftLayer");
         // 日语 12 键的标准左列：↶ 逆向切换、→ 结束切换（或光标右移），再是 123、☺（工具栏没有表情时）、英、切换，各占一格。
-        addJapaneseSideKey(modeColumn, s.keyboardKey("↶", "连点切换时退回上一个假名", this::reverseJapaneseToggle), 1);
-        addJapaneseSideKey(modeColumn, s.keyboardKey("→", "结束连点切换，开始下一个假名；没有组字时光标右移", this::advanceJapaneseToggle), 1);
+        addJapaneseSideKey(modeColumn, s.iconKey(KeyboardIconKey.Kind.TOGGLE_BACK, "↶",
+            "连点切换时退回上一个假名", this::reverseJapaneseToggle), 1);
+        addJapaneseSideKey(modeColumn, s.iconKey(KeyboardIconKey.Kind.TOGGLE_NEXT, "→",
+            "结束连点切换，开始下一个假名；没有组字时光标右移", this::advanceJapaneseToggle), 1);
         addJapaneseSideKey(modeColumn, s.japaneseSymbolsKey, 1);
         boolean emojiKey = s.japaneseSideEmojiKey();
         if (emojiKey) {
