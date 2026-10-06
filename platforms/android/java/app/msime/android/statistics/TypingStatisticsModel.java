@@ -191,8 +191,9 @@ public final class TypingStatisticsModel {
 
     /** The pressed keys of a scope, most pressed first, titled the way the page prints them. */
     private List<Slice> rankedKeys(String day) {
-        List<Slice> slices = new ArrayList<>();
-        for (Map.Entry<String, Long> entry : keys(day).entrySet()) {
+        Map<String, Long> counts = keys(day);
+        List<Slice> slices = new ArrayList<>(counts.size());
+        for (Map.Entry<String, Long> entry : counts.entrySet()) {
             if (entry.getValue() > 0) {
                 slices.add(new Slice(entry.getKey(), KeyPressIds.label(entry.getKey()),
                     entry.getValue()));
