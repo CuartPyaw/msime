@@ -7,6 +7,7 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import app.msime.android.keyboard.KeyboardGeometry;
 
 /**
  * 字母键区（26 键、新设计的 123 层与 #+= 层）的行、删除键连删、按键气泡与下滑输入提示符。
@@ -125,18 +126,18 @@ final class ImeLetterRows {
     private void bindLetterGestures(Button key, String face, String hint) {
         final float[] downY = new float[1];
         final boolean[] swiped = new boolean[1];
-        final float density = s.getResources().getDisplayMetrics().density;
         key.setOnTouchListener((view, event) -> {
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN -> {
-                    downY[0] = event.getY() / density;
+                    downY[0] = KeyboardGeometry.fromPixels(s, event.getY());
                     swiped[0] = false;
                     if (touchPreference(AndroidLocalSettings.KEY_POPUP)) showKeyPreview(key, face);
                     return false;
                 }
                 case MotionEvent.ACTION_MOVE -> {
                     if (hint != null && !swiped[0] && touchPreference(AndroidLocalSettings.SWIPE_DOWN_SYMBOLS)
-                            && SwipeDownHintPolicy.swiped(downY[0], event.getY() / density)) {
+                            && SwipeDownHintPolicy.swiped(downY[0],
+                                KeyboardGeometry.fromPixels(s, event.getY()))) {
                         swiped[0] = true;
                         if (keyPreview != null && keyPreviewOwner == key) keyPreview.setLabel(hint);
                     }
