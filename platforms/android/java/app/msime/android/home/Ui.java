@@ -292,6 +292,12 @@ public final class Ui {
         return new LinearLayout.LayoutParams(size, size);
     }
 
+    /** Frame layout parameters for a square child with a size expressed in dp. */
+    public static FrameLayout.LayoutParams squareFrameParams(Context context, float sizeDp) {
+        int size = dp(context, sizeDp);
+        return new FrameLayout.LayoutParams(size, size);
+    }
+
     /** Layout parameters for a weighted child with a fixed height in dp. */
     public static LinearLayout.LayoutParams weightedHeight(Context context, float heightDp, float weight) {
         return new LinearLayout.LayoutParams(0, dp(context, heightDp), weight);
