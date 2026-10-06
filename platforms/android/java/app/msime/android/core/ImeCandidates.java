@@ -9,6 +9,7 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
 import app.msime.android.CandidateTranslationPolicy;
+import app.msime.android.core.InputViewValuePolicy;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -172,7 +173,7 @@ final class ImeCandidates {
         JSONObject id = candidate.optJSONObject("id");
         Button button = candidateButton();
         String text = s.chineseOutput(candidate.optString("text"), s.view);
-        boolean highlighted = candidate.optBoolean("highlighted");
+        boolean highlighted = InputViewValuePolicy.booleanValue(candidate, "highlighted", false);
         String typed = s.candidatePanelSnapshot == null ? ""
             : s.candidatePanelSnapshot.optString("preedit", "");
         String annotation = s.candidateAnnotation(candidate, typed);

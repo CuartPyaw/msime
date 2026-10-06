@@ -1883,14 +1883,16 @@ public final class MSIMEInputService extends InputMethodService {
         }
         // Korean marks the composing Hangul, not the key letters editing_text holds; a transition may carry the syllable the key finished and the next one together, and the bridge writes the commit first. Zhuyin's editing_text is the Dachen keys too, and it marks the reading (the conversion and the pending bopomofo) by the same rule.
         int nextViewScheme = InputViewValuePolicy.scheme(next, -1);
-        boolean nextDedicatedEnglish = next.optBoolean("dedicated_english", dedicatedEnglish);
+        boolean nextDedicatedEnglish = InputViewValuePolicy.booleanValue(
+            next, "dedicated_english", dedicatedEnglish);
         // 笔画的 editing_text 是字母 hspnzx，reading 才是用户按下的笔画字形（一丨丿丶乛＊），所以同样标记 reading。日语的 editing_text 是罗马字（九键的 ち 送的是 chi），reading 才是假名。哪些方案这样做由引擎的 `draws_reading` 决定。
         String composing = KoreanInputPolicy.composing(
             InputSchemeTraits.drawsReading(nextViewScheme) && !nextDedicatedEnglish,
             next.optString("phrase_prefix", ""), next.getString("editing_text"),
             next.optString("reading", ""));
         // 九键的 editing_text 是按下的数字键（64426），写进输入框对用户没有意义；和 iOS 默认一样不在输入框里标记组词，组词只显示在键盘自己的预编辑栏上（选过的音节显示为拼音，如 ni'426）。注音 9 键例外：上面已经按大千的规则标记 reading（转换结果加未完成的数字），照常留在输入框里。
-        if (ZhuyinInputPolicy.hidesNineKeyComposing(next.optBoolean("nine_key", false),
+        if (ZhuyinInputPolicy.hidesNineKeyComposing(InputViewValuePolicy.booleanValue(
+                next, "nine_key", false),
                 ZhuyinInputPolicy.active(nextViewScheme, nextDedicatedEnglish))) composing = "";
         if (connection != null
                 && !bridge.apply(sink(typingSource()), commit, composing)) {
@@ -2793,7 +2795,7 @@ public final class MSIMEInputService extends InputMethodService {
     private boolean strokeCompositionMarked() {
         return view != null && !view.optString("editing_text", "").isEmpty()
             && StrokeInputPolicy.active(InputViewValuePolicy.scheme(view, -1), dedicatedEnglish)
-            && !view.optBoolean("nine_key", false);
+            && !InputViewValuePolicy.booleanValue(view, "nine_key", false);
     }
 
     private boolean vietnameseSchemeActive() {
@@ -3039,7 +3041,7 @@ public final class MSIMEInputService extends InputMethodService {
         if (value == null) return STANDARD_TOUCH_LAYOUT;
         return KeyboardLayout.resolveTouchLayout(
             "handwriting".equals(value.optString("touch_keyboard_layout")),
-            value.optBoolean("nine_key", false), InputViewValuePolicy.scheme(value, -1),
+            InputViewValuePolicy.booleanValue(value, "nine_key", false), InputViewValuePolicy.scheme(value, -1),
             value.optString("touch_keyboard_layout"));
     }
 
@@ -5192,7 +5194,7 @@ public final class MSIMEInputService extends InputMethodService {
         return WubiCodeHintPolicy.hint(candidate.optString("code", ""), typed, wubiCodeHint,
             context == null ? -1 : InputViewValuePolicy.scheme(context, -1),
             context == null ? "none" : context.optString("local_mode", "none"),
-            context != null && context.optBoolean("answered_by_pinyin_fallback", false));
+            InputViewValuePolicy.booleanValue(context, "answered_by_pinyin_fallback", false));
     }
 
     String candidateAnnotation(JSONObject candidate, String typed) {
@@ -5242,7 +5244,7 @@ public final class MSIMEInputService extends InputMethodService {
         if (entries == null) return null;
         for (int index = 0; index < entries.length(); index++) {
             JSONObject candidate = entries.optJSONObject(index);
-            if (candidate != null && candidate.optBoolean("highlighted")) return candidate;
+            if (candidate != null && InputViewValuePolicy.booleanValue(candidate, "highlighted", false)) return candidate;
         }
         return null;
     }
@@ -5323,7 +5325,7 @@ public final class MSIMEInputService extends InputMethodService {
 
     private void updateCandidateButton(Button button, JSONObject candidate, int slot) {
         String text = chineseOutput(candidate.optString("text"), view);
-        boolean highlighted = candidate.optBoolean("highlighted");
+        boolean highlighted = InputViewValuePolicy.booleanValue(candidate, "highlighted", false);
         String typed = view == null ? "" : view.optString("preedit", "");
         String annotation = candidateAnnotation(candidate, typed);
         // 开着释义时每个候选都占两行：还没有释义（或这个候选没有）的那行用不换行空格占住。否则带释义的 chip 是两行、不带的是一行，居中后候选字一高一低，释义异步到达或候选一换，候选字就上下跳。
