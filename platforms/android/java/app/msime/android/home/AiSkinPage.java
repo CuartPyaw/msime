@@ -531,8 +531,18 @@ public final class AiSkinPage extends DetailPage {
         } catch (IllegalArgumentException error) {
             return CustomKeyboardSkin.from(design).toJson(true);
         }
-        Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-        if (bitmap == null) return CustomKeyboardSkin.from(design).toJson(true);
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
+        int sample = PhotoDecodePolicy.sampleSize(bounds.outWidth, bounds.outHeight);
+        if (sample == 0) return CustomKeyboardSkin.from(design).toJson(true);
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inSampleSize = sample;
+        Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length, options);
+        if (bitmap == null || !PhotoDecodePolicy.withinBounds(bitmap.getWidth(), bitmap.getHeight())) {
+            if (bitmap != null) bitmap.recycle();
+            return CustomKeyboardSkin.from(design).toJson(true);
+        }
         int edge = Math.max(bitmap.getWidth(), bitmap.getHeight());
         if (edge > MAX_PHOTO_EDGE) {
             float scale = MAX_PHOTO_EDGE / (float) edge;
