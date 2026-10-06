@@ -183,6 +183,11 @@ public final class ViewPolicy {
         view.setStateListAnimator(null);
     }
 
+    /** Remove any platform elevation from a view. */
+    public static void clearElevation(View view) {
+        view.setElevation(0);
+    }
+
     /** Apply full opacity to an active view and a caller-selected opacity otherwise. */
     public static void setActiveAlpha(View view, boolean active, float inactiveAlpha) {
         view.setAlpha(active ? 1f : inactiveAlpha);

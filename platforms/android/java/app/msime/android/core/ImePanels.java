@@ -106,7 +106,7 @@ final class ImePanels {
                 ViewPolicy.clearBackground(tab);
                 ViewPolicy.setActiveAlpha(tab, false, .6f);
             }
-            tab.setElevation(0);
+            ViewPolicy.clearElevation(tab);
         }
     }
 
@@ -770,7 +770,7 @@ final class ImePanels {
                 Math.max(0f, radius - s.pixels(2))) : null);
             segment.setTextColor(foreground);
             segment.setTypeface(Typeface.create(base, selected ? Typeface.BOLD : Typeface.NORMAL));
-            segment.setElevation(0);
+            ViewPolicy.clearElevation(segment);
         }
         s.replySourceCard.setBackground(replySurface(Color.parseColor(s.skin.keyBackground()), radius));
         s.replySourceButton.setTextColor(s.replyModel.source().isEmpty()
@@ -780,13 +780,13 @@ final class ImePanels {
         // setBackground 会把 InsetDrawable 的内边距（左右为 0）套到按钮上，冲掉前面设的左右留白，文字就贴着色块边缘；换完背景再设回来。
         KeyboardGeometry.setHorizontalPaddingDp(s.replyPasteButton, s, 12);
         s.replyPasteButton.setTextColor(onAccent);
-        s.replyPasteButton.setElevation(0);
+        ViewPolicy.clearElevation(s.replyPasteButton);
         for (int index = 0; index < s.replyActions.getChildCount(); index++) {
             if (!(s.replyActions.getChildAt(index) instanceof Button action)) continue;
             boolean primary = action == s.replyPrimaryAction;
             action.setBackground(replySurface(primary ? accent : ImeStyler.fade(s.skin.keyBackground(), .7), radius));
             action.setTextColor(primary ? onAccent : foreground);
-            action.setElevation(0);
+            ViewPolicy.clearElevation(action);
         }
         s.replyStatus.setTextColor(ImeStyler.fade(s.skin.keyForeground(), .7));
         s.replyProgress.setIndeterminateTintList(ColorStateList.valueOf(accent));
@@ -963,7 +963,7 @@ final class ImePanels {
             : Color.parseColor(s.skin.accent()), radius));
         primary.setTextColor(busy ? Color.parseColor(s.skin.keyForeground()) : Color.parseColor(s.skin.onAccent()));
         ViewPolicy.setActiveAlpha(primary, primary.isEnabled(), .45f);
-        primary.setElevation(0);
+        ViewPolicy.clearElevation(primary);
     }
 
     void showSchemePicker() {
