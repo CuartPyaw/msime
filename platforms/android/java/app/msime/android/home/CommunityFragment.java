@@ -299,7 +299,7 @@ public final class CommunityFragment extends Fragment {
         if (view == null) return;
         TextView state = view.findViewById(R.id.community_state);
         state.setText(message);
-        state.setVisibility(message.isEmpty() ? View.GONE : View.VISIBLE);
+        Ui.setVisibilityForText(state, message);
         view.findViewById(R.id.community_retry)
             .setVisibility(retryable ? View.VISIBLE : View.GONE);
     }
