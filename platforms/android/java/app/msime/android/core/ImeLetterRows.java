@@ -453,8 +453,7 @@ final class ImeLetterRows {
             press.setKeyboardRole(KeyboardKeyRole.ACCENT);
         s.imeStyler.styleButton(key, KeyboardKeyRole.ACCENT, s.skin);
         key.setVisibility(View.VISIBLE);
-        row.addView(key, index, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.MATCH_PARENT, weight));
+        row.addView(key, index, KeyboardGeometry.weightedMatchParentParams(weight));
     }
 
     /**
@@ -479,8 +478,7 @@ final class ImeLetterRows {
                 if (key == null) continue;
                 if (key.getParent() instanceof android.view.ViewGroup parent) parent.removeView(key);
                 key.setVisibility(View.VISIBLE);
-                row.addView(key, new LinearLayout.LayoutParams(0,
-                    LinearLayout.LayoutParams.MATCH_PARENT, layerKey.weight()));
+                row.addView(key, KeyboardGeometry.weightedMatchParentParams(layerKey.weight()));
             }
         }
     }
