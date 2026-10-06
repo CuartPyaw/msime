@@ -156,8 +156,7 @@ final class ImeCandidates {
         // Apple uses the same press-feedback button for candidate chips as for keys. Android's
         // HorizontalScrollView cancels the child on a drag, so the button keeps immediate tap
         // feedback without changing the existing scroll-versus-select boundary.
-        Button button = new KeyboardPressButton(s);
-        ViewPolicy.setAllCapsFalse(button);
+        Button button = candidateButton();
         button.setOnClickListener(ignored -> s.selectVisibleCandidate(button, slot));
         button.setOnLongClickListener(ignored -> {
             JSONObject current = s.visibleCandidate(slot);
@@ -171,13 +170,12 @@ final class ImeCandidates {
 
     Button expandedCandidateButton(JSONObject candidate) {
         JSONObject id = candidate.optJSONObject("id");
-        Button button = new KeyboardPressButton(s);
+        Button button = candidateButton();
         String text = s.chineseOutput(candidate.optString("text"), s.view);
         boolean highlighted = candidate.optBoolean("highlighted");
         String typed = s.candidatePanelSnapshot == null ? ""
             : s.candidatePanelSnapshot.optString("preedit", "");
         String annotation = s.candidateAnnotation(candidate, typed);
-        ViewPolicy.setAllCapsFalse(button);
         button.setText(s.candidateLabel("", text, annotation, highlighted));
         int labelLines = MSIMEInputService.candidateLabelLines(annotation);
         ViewPolicy.setFixedLines(button, labelLines);
@@ -221,9 +219,8 @@ final class ImeCandidates {
 
     private KeyboardPressButton expandedActionButton(String label, float sizeSp,
             String description, Runnable action) {
-        KeyboardPressButton button = new KeyboardPressButton(s);
+        KeyboardPressButton button = candidateButton();
         button.setKeyboardRole(KeyboardKeyRole.ACCENT);
-        ViewPolicy.setAllCapsFalse(button);
         ViewPolicy.setTextSizeLabel(button, label, sizeSp);
         KeyboardGeometry.setKeyTextSize(button, sizeSp);
         button.setContentDescription(description);
@@ -231,6 +228,12 @@ final class ImeCandidates {
             s.imeKeyFeedback.playFeedback(button);
             action.run();
         });
+        return button;
+    }
+
+    private KeyboardPressButton candidateButton() {
+        KeyboardPressButton button = new KeyboardPressButton(s);
+        ViewPolicy.setAllCapsFalse(button);
         return button;
     }
 
