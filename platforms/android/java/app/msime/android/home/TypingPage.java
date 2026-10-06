@@ -389,8 +389,9 @@ public final class TypingPage extends DetailPage {
     private static List<String> effectiveIds(JSONObject preferences, AppEdition edition) {
         List<String> stored = enabledIds(preferences);
         if (stored != null) return new ArrayList<>(stored);
-        List<String> ids = new ArrayList<>();
-        for (KeyboardScheme scheme : KeyboardScheme.enabledFromPreferenceIds(null, edition)) ids.add(scheme.preferenceId());
+        List<KeyboardScheme> enabled = KeyboardScheme.enabledFromPreferenceIds(null, edition);
+        List<String> ids = new ArrayList<>(enabled.size());
+        for (KeyboardScheme scheme : enabled) ids.add(scheme.preferenceId());
         return ids;
     }
 
