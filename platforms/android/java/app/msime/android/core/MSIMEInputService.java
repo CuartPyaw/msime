@@ -2133,7 +2133,7 @@ public final class MSIMEInputService extends InputMethodService {
         try {
             JSONObject applied = value(NativeClient.applyTranslations(
                 token.session(), token.generation(), translations));
-            if (!applied.optBoolean("applied", false)) return;
+            if (!CandidateGlossPolicy.isApplied(applied.opt("applied"))) return;
             JSONObject next = applied.getJSONObject("view");
             if (CandidateGlossPolicy.strictOr(next.opt("session"), Long.MIN_VALUE) != token.session()
                     || CandidateGlossPolicy.strictOr(next.opt("generation"), -1) != token.generation()) return;
@@ -2185,7 +2185,7 @@ public final class MSIMEInputService extends InputMethodService {
         try {
             JSONObject applied = value(NativeClient.applyTranslations(session, generation,
                 translations.toString()));
-            if (!applied.optBoolean("applied", false)) return;
+            if (!CandidateGlossPolicy.isApplied(applied.opt("applied"))) return;
             JSONObject next = applied.getJSONObject("view");
             if (CandidateGlossPolicy.strictOr(next.opt("session"), Long.MIN_VALUE) != session
                     || CandidateGlossPolicy.strictOr(next.opt("generation"), -1) != generation) return;
@@ -2467,7 +2467,7 @@ public final class MSIMEInputService extends InputMethodService {
             try {
                 if (epoch != onlineEpoch || targetSession != session) return;
                 JSONObject applied = value(call.get());
-                if (!applied.optBoolean("applied", false)) return;
+                if (!CandidateGlossPolicy.isApplied(applied.opt("applied"))) return;
                 JSONObject next = applied.getJSONObject("view");
                 if (CandidateGlossPolicy.strictOr(next.opt("session"), Long.MIN_VALUE)
                         != targetSession) return;
