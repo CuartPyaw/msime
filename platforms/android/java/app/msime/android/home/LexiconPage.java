@@ -289,8 +289,7 @@ public final class LexiconPage extends DetailPage {
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setMinimumHeight(Ui.dp(context, Ui.ROW_MIN_HEIGHT));
-        row.setPadding(Ui.dp(context, Ui.ROW_PADDING_H), Ui.dp(context, Ui.ROW_PADDING_V),
-            Ui.dp(context, Ui.ROW_PADDING_H), Ui.dp(context, Ui.ROW_PADDING_V));
+        Ui.setRowPadding(row, context);
         return row;
     }
 

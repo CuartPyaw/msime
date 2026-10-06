@@ -149,6 +149,13 @@ public final class Ui {
         return KeyboardGeometry.pixels(context, value);
     }
 
+    /** Apply the standard detail-row horizontal and vertical insets to a view. */
+    public static void setRowPadding(View view, Context context) {
+        int horizontal = dp(context, ROW_PADDING_H);
+        int vertical = dp(context, ROW_PADDING_V);
+        view.setPadding(horizontal, vertical, horizontal, vertical);
+    }
+
     /** Return whether the supplied context currently uses the system night configuration. */
     public static boolean isNight(Context context) {
         return KeyboardGeometry.isNight(context);

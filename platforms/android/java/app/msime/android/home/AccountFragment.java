@@ -363,8 +363,7 @@ public final class AccountFragment extends HomeTabFragment {
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setMinimumHeight(Ui.dp(context, subtitle == null ? 52 : Ui.ROW_MIN_HEIGHT));
-        row.setPadding(Ui.dp(context, Ui.ROW_PADDING_H), Ui.dp(context, Ui.ROW_PADDING_V),
-            Ui.dp(context, Ui.ROW_PADDING_H), Ui.dp(context, Ui.ROW_PADDING_V));
+        Ui.setRowPadding(row, context);
 
         ImageView glyph = new ImageView(context);
         glyph.setImageResource(icon);

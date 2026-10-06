@@ -278,8 +278,7 @@ public final class GroupCard {
             view.setOrientation(LinearLayout.HORIZONTAL);
             view.setGravity(Gravity.CENTER_VERTICAL);
             view.setMinimumHeight(Ui.dp(owner.context, Ui.ROW_MIN_HEIGHT));
-            view.setPadding(Ui.dp(owner.context, Ui.ROW_PADDING_H), Ui.dp(owner.context, Ui.ROW_PADDING_V),
-                Ui.dp(owner.context, Ui.ROW_PADDING_H), Ui.dp(owner.context, Ui.ROW_PADDING_V));
+            Ui.setRowPadding(view, owner.context);
 
             LinearLayout texts = new LinearLayout(context);
             texts.setOrientation(LinearLayout.VERTICAL);
