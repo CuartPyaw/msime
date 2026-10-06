@@ -98,7 +98,8 @@ final class ImeLetterRows {
             keyPreviewBackground = Color.parseColor(skin.keyBackground());
             keyPreviewForeground = Color.parseColor(skin.keyForeground());
         }
-        preview.setColors(keyPreviewBackground, keyPreviewForeground, Color.argb(20, 0, 0, 0));
+        preview.setColors(keyPreviewBackground, keyPreviewForeground,
+            ColorPolicy.withAlpha(Color.BLACK, 20));
         key.getLocationInWindow(keyPreviewKeyLocation);
         keyPreviewLayer.getLocationInWindow(keyPreviewLayerLocation);
         float weight = key.getLayoutParams() instanceof LinearLayout.LayoutParams params
