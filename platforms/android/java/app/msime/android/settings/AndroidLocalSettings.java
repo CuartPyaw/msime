@@ -261,7 +261,7 @@ public final class AndroidLocalSettings {
     }
 
     public static Snapshot put(Context context, String key, Object value) throws IOException {
-        Map<String, Object> edits = new LinkedHashMap<>();
+        Map<String, Object> edits = new LinkedHashMap<>(1);
         edits.put(key, value);
         return update(file(context), edits);
     }
