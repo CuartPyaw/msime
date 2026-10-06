@@ -19,6 +19,9 @@ public final class CommonPhrasesStoreSmoke {
         check(CommonPhrasesStore.strictInteger(Integer.valueOf(7)) == 7);
         check(CommonPhrasesStore.strictInteger("7") == null);
         check(CommonPhrasesStore.strictInteger(Double.valueOf(7)) == null);
+        check(CommonPhrasesStore.nonNegativeInteger(Integer.valueOf(7)) == 7);
+        check(CommonPhrasesStore.nonNegativeInteger(Integer.valueOf(-1)) == null);
+        check(CommonPhrasesStore.nonNegativeInteger(Double.valueOf(7)) == null);
         check(CommonPhrasesStore.validText("好的，收到"));
         check(CommonPhrasesStore.validText("第一行\n第二行"));
         check(!CommonPhrasesStore.validText(null));
