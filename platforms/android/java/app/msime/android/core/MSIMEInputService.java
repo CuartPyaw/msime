@@ -5952,8 +5952,8 @@ public final class MSIMEInputService extends InputMethodService {
         expandedCandidates.setVisibility(View.GONE);
         expandedCandidateScroll = new ScrollView(this);
         expandedCandidateScroll.setFillViewport(true);
-        expandedCandidateScroll.addView(expandedCandidates, new ScrollView.LayoutParams(
-            ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.MATCH_PARENT));
+        expandedCandidateScroll.addView(expandedCandidates,
+            KeyboardGeometry.scrollMatchParentParams());
         expandedCandidateScroll.setVisibility(View.GONE);
         keyboardSurface.addView(expandedCandidateScroll, KeyboardGeometry.frameMatchParentParams());
         clipboardPanel = new LinearLayout(this);
@@ -5971,8 +5971,7 @@ public final class MSIMEInputService extends InputMethodService {
         schemePanel.setBackgroundColor(Color.parseColor(skin.background()));
         schemePanel.setContentDescription("输入方案选择器");
         schemeScroll = new ScrollView(this);
-        schemeScroll.addView(schemePanel, new ScrollView.LayoutParams(
-            ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.MATCH_PARENT));
+        schemeScroll.addView(schemePanel, KeyboardGeometry.scrollMatchParentParams());
         schemeScroll.setFillViewport(true);
         schemeScroll.setVisibility(View.GONE);
         keyboardSurface.addView(schemeScroll, KeyboardGeometry.frameMatchParentParams());
@@ -5982,8 +5981,7 @@ public final class MSIMEInputService extends InputMethodService {
         skinPanel.setBackgroundColor(Color.parseColor(skin.background()));
         skinPanel.setContentDescription("键盘皮肤选择器");
         skinScroll = new ScrollView(this);
-        skinScroll.addView(skinPanel, new ScrollView.LayoutParams(
-            ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.MATCH_PARENT));
+        skinScroll.addView(skinPanel, KeyboardGeometry.scrollMatchParentParams());
         skinScroll.setFillViewport(true);
         skinScroll.setVisibility(View.GONE);
         keyboardSurface.addView(skinScroll, KeyboardGeometry.frameMatchParentParams());
@@ -6123,8 +6121,7 @@ public final class MSIMEInputService extends InputMethodService {
         moreToolsScroll = new ScrollView(this);
         moreToolsScroll.setFillViewport(true);
         moreToolsScroll.setVerticalScrollBarEnabled(false);
-        moreToolsScroll.addView(moreToolsPanel, new ScrollView.LayoutParams(
-            ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.MATCH_PARENT));
+        moreToolsScroll.addView(moreToolsPanel, KeyboardGeometry.scrollMatchParentParams());
         moreToolsScroll.setVisibility(View.GONE);
         keyboardSurface.addView(moreToolsScroll, KeyboardGeometry.frameMatchParentParams());
         phrasePanel = new LinearLayout(this);
@@ -6132,8 +6129,7 @@ public final class MSIMEInputService extends InputMethodService {
         phrasePanel.setContentDescription("常用语面板");
         phraseScroll = new ScrollView(this);
         // 与皮肤、剪贴板面板一样铺满键盘区：只按内容高度时，没有常用语的那一行提示只盖住第一排键，空白处的触摸还会穿到下面的键上。
-        phraseScroll.addView(phrasePanel, new ScrollView.LayoutParams(
-            ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.MATCH_PARENT));
+        phraseScroll.addView(phrasePanel, KeyboardGeometry.scrollMatchParentParams());
         phraseScroll.setFillViewport(true);
         phraseScroll.setClickable(true);
         phraseScroll.setVisibility(View.GONE);
