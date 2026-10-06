@@ -42,6 +42,18 @@ final class OnlineCandidateTests: XCTestCase {
     XCTAssertNil(MetasequoiaInputSessionBridge.strictUInt64(NSNumber(value: -1)))
   }
 
+  func testTransportRejectsUnsafeURLComponents() {
+    for value in [
+      "https://user:password@example.invalid/translate",
+      "https://example.invalid/translate#fragment",
+      "https:///translate",
+    ] {
+      XCTAssertFalse(URLSessionOnlineCandidateTransport.validURL(URL(string: value)), value)
+    }
+    XCTAssertTrue(URLSessionOnlineCandidateTransport.validURL(
+      URL(string: "https://example.invalid/translate")))
+  }
+
   func testSnapshotRejectsCandidateRowsWithoutText() throws {
     let bridge = MetasequoiaInputSessionBridge(stateRoot: state)
     let malformed: [String: Any] = [
@@ -213,6 +225,22 @@ final class OnlineCandidateTests: XCTestCase {
     var get = descriptor
     get["method"] = "GET"
     XCTAssertNil(OnlineCandidateProvider.aiRequest(get))
+  }
+
+  func testTheAIDescriptorRejectsCredentialsFragmentsAndMissingHosts() {
+    let descriptor: [String: Any] = [
+      "url": "https://example.invalid/v1/chat/completions", "method": "POST",
+      "body": ["model": "m"],
+    ]
+    for url in [
+      "https://user:password@example.invalid/v1/chat/completions",
+      "https://example.invalid/v1/chat/completions#fragment",
+      "https:///v1/chat/completions",
+    ] {
+      var malformed = descriptor
+      malformed["url"] = url
+      XCTAssertNil(OnlineCandidateProvider.aiRequest(malformed), "must reject \(url)")
+    }
   }
 
   func testAIDescriptorRejectsMalformedNumericFields() {
