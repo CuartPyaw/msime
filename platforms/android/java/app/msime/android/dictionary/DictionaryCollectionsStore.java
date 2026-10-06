@@ -204,7 +204,7 @@ public final class DictionaryCollectionsStore {
     public static Result<WordPage> words(Context context, String kind, String query, int offset, int limit) {
         try {
             JSONObject request = action("list").put("kind", kind).put("offset", Math.max(0, offset))
-                .put("limit", Math.max(1, Math.min(1000, limit)));
+                .put("limit", KeyboardGeometry.bounded(limit, 1, 1000));
             if (query != null && !query.isEmpty()) request.put("query", query);
             JSONObject value = dictionary(context, request);
             if (value == null) return Result.failed(failureMessage(""));
