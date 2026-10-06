@@ -19,6 +19,7 @@ public final class SyncApiSmoke {
         check(!SyncApi.conflict(null), "null failure");
         check(SyncApi.preferenceRevision(42L) == 42L, "integer preference revision");
         check(SyncApi.phraseRevision(42L) == 42L, "integer phrase revision");
+        check(SyncApi.snapshotRevisionValue(42L) == 42L, "integer snapshot revision");
         check(SyncApi.changesRevision(42L, 7L) == 42L, "integer dictionary revision");
 
         // Cloud preference revisions are non-negative integers. Fractional JSON numbers
@@ -30,6 +31,15 @@ public final class SyncApiSmoke {
             } catch (CloudApi.Failure expected) {
                 check(expected.status == 500 && "invalid_response".equals(expected.code),
                     "invalid preference revision failure");
+            }
+        }
+        for (Number invalid : new Number[] {1.5d, -1L}) {
+            try {
+                SyncApi.snapshotRevisionValue(invalid);
+                throw new AssertionError("invalid snapshot revision must be refused: " + invalid);
+            } catch (CloudApi.Failure expected) {
+                check(expected.status == 500 && "invalid_response".equals(expected.code),
+                    "invalid snapshot revision failure");
             }
         }
         for (Number invalid : new Number[] {2.5d, -2L}) {
