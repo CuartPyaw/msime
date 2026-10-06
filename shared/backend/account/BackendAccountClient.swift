@@ -155,6 +155,7 @@ struct BackendAccountClient: Sendable {
   func providers() async throws -> [String: Bool] {
     struct Response: Decodable { let providers: [String: Bool] }
     let response: Response = try await json("GET", "/v1/auth/providers")
+    guard Self.validProviders(response.providers) else { throw Failure(status: 0) }
     return response.providers
   }
   func challenge(provider: String, target: String = "", linkToken: String? = nil) async throws -> Challenge {
@@ -359,6 +360,12 @@ struct BackendAccountClient: Sendable {
       && user.display_name.unicodeScalars.count <= 64
       && !user.display_name.unicodeScalars.contains { $0.properties.generalCategory == .control }
       && validSingleLine(user.created_at, maximumBytes: 128)
+  }
+  private static func validProviders(_ providers: [String: Bool]) -> Bool {
+    providers.count <= 16 && providers.keys.allSatisfy { key in
+      !key.isEmpty && key.utf8.count <= 32
+        && key.utf8.allSatisfy { (97...122).contains($0) || $0 == 95 || $0 == 45 }
+    }
   }
   private static func validSingleLine(_ value: String, maximumBytes: Int, empty: Bool = true) -> Bool {
     (empty || !value.isEmpty) && value.utf8.count <= maximumBytes
