@@ -90,7 +90,7 @@ public final class KeyboardSkinCard extends KeyboardPressButton {
             KeyboardSkinPreview.drawTile(canvas, tile, radius, skin, density, tileDrawState);
         }
         int accent = themed ? accentColor : Color.parseColor(skin.accent());
-        int hairline = themed ? hairlineColor : Color.argb(31, 0, 0, 0);
+        int hairline = themed ? hairlineColor : ColorPolicy.withAlpha(Color.BLACK, 31);
         int label = themed ? labelColor : Color.parseColor(skin.keyForeground());
         boolean selected = isSelected();
         paint.setStyle(Paint.Style.STROKE);
