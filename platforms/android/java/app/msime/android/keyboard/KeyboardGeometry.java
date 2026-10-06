@@ -223,6 +223,11 @@ public final class KeyboardGeometry {
         return new LinearLayout.LayoutParams(pixels(context, widthDp), pixels(context, heightDp));
     }
 
+    /** Create linear layout parameters from already pixel-sized dimensions. */
+    public static LinearLayout.LayoutParams linearParamsPx(int widthPixels, int heightPixels) {
+        return new LinearLayout.LayoutParams(widthPixels, heightPixels);
+    }
+
     /** Create full-width linear layout parameters with content-sized height. */
     public static LinearLayout.LayoutParams matchWidthWrapParams() {
         return new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
