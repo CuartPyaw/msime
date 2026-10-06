@@ -38,7 +38,7 @@ public final class TrendChart extends View {
     public TrendChart(Context context, @Nullable AttributeSet attributes) {
         super(context, attributes);
         label.setTextAlign(Paint.Align.CENTER);
-        label.setTextSize(Ui.dp(context, LABEL_SIZE));
+        label.setTextSize(Ui.sp(context, LABEL_SIZE));
     }
 
     /** 换一组 7 天；最后一项是今天。 */

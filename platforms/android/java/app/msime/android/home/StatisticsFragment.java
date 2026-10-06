@@ -425,7 +425,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         row.setPadding(Ui.dp(context, 4), 0, Ui.dp(context, 4), 0);
         TextView heading = label(context, title, 13, Ui.subText(context));
         heading.setAccessibilityHeading(true);
-        row.addView(heading, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(heading, Ui.weightWrap(1f));
         if (trailing != null) row.addView(label(context, trailing, 13, Ui.subText(context)));
         LinearLayout.LayoutParams params = Ui.matchWidth();
         params.topMargin = Ui.dp(context, 22);
@@ -489,11 +489,7 @@ public final class StatisticsFragment extends HomeTabFragment {
     }
 
     private static TextView label(Context context, String text, int sizeSp, int colour) {
-        TextView view = new TextView(context);
-        view.setText(text);
-        view.setTextSize(sizeSp);
-        view.setTextColor(colour);
-        return view;
+        return Ui.label(context, text, sizeSp, colour);
     }
 
     private static Map<String, String> retentions() {

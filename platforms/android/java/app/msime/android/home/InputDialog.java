@@ -96,7 +96,7 @@ public final class InputDialog {
         if (window != null) {
             window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
             window.setLayout(Math.min(Ui.dp(context, Ui.DIALOG_WIDTH),
-                context.getResources().getDisplayMetrics().widthPixels - Ui.dp(context, 48)),
+                Ui.screenWidthPixels(context) - Ui.dp(context, 48)),
                 ViewGroup.LayoutParams.WRAP_CONTENT);
             window.setDimAmount(0.35f);
             window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE
@@ -119,7 +119,7 @@ public final class InputDialog {
         Ui.style(input, 15, 400, Ui.text(context));
         input.setHintTextColor(Ui.subText(context));
         GradientDrawable field = Ui.rounded(Ui.rowBackground(context), Ui.dp(context, 10));
-        field.setStroke(Math.max(1, Ui.dp(context, 1)), Ui.hairline(context));
+        field.setStroke(Ui.atLeastOnePx(context, 1), Ui.hairline(context));
         input.setBackground(field);
         input.setPadding(Ui.dp(context, 12), 0, Ui.dp(context, 12), 0);
         input.addTextChangedListener(new TextWatcher() {
@@ -203,9 +203,8 @@ public final class InputDialog {
 
     /** 分隔线：横的在按钮上方，竖的在两个按钮之间。 */
     private View rule(boolean horizontal) {
-        View rule = new View(context);
-        rule.setBackgroundColor(Ui.hairline(context));
-        int thin = Math.max(1, Ui.dp(context, 0.5f));
+        View rule = Ui.hairlineView(context);
+        int thin = Ui.hairlinePx(context);
         rule.setLayoutParams(horizontal
             ? new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, thin)
             : new LinearLayout.LayoutParams(thin, ViewGroup.LayoutParams.MATCH_PARENT));

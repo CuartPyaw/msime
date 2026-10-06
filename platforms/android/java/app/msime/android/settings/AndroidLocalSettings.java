@@ -117,7 +117,7 @@ public final class AndroidLocalSettings {
         }
     }
 
-    private static final Map<String, Spec> SPECS = new LinkedHashMap<>();
+    private static final Map<String, Spec> SPECS = new LinkedHashMap<>(27);
 
     static {
         choice(APP_THEME, "siji", true, "siji", "chunya", "xiayin", "qiushan", "dongxue");
@@ -261,7 +261,7 @@ public final class AndroidLocalSettings {
     }
 
     public static Snapshot put(Context context, String key, Object value) throws IOException {
-        Map<String, Object> edits = new LinkedHashMap<>();
+        Map<String, Object> edits = new LinkedHashMap<>(1);
         edits.put(key, value);
         return update(file(context), edits);
     }
@@ -328,7 +328,7 @@ public final class AndroidLocalSettings {
 
     /** 「恢复出厂设置」：删掉全部显式写过的值，每一项回到默认值。 */
     public static Snapshot restoreDefaults(Path file) throws IOException {
-        Map<String, Object> edits = new LinkedHashMap<>();
+        Map<String, Object> edits = new LinkedHashMap<>(SPECS.size());
         for (String key : SPECS.keySet()) edits.put(key, null);
         return update(file, edits);
     }
@@ -339,7 +339,7 @@ public final class AndroidLocalSettings {
 
     /** 写回云端文档里属于本地设置的值（`msime_client_account_settings_apply` 返回的 `android_local`）：只收参与同步、取值合规的键，其余忽略；没有可写的就不碰文件。 */
     public static Snapshot applySynced(Path file, Map<String, ?> cloud) throws IOException {
-        Map<String, Object> edits = new LinkedHashMap<>();
+        Map<String, Object> edits = new LinkedHashMap<>(cloud.size());
         for (Map.Entry<String, ?> entry : cloud.entrySet()) {
             Spec spec = SPECS.get(entry.getKey());
             if (spec == null || !spec.synced) continue;

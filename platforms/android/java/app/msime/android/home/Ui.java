@@ -13,6 +13,7 @@ import android.view.ViewGroup;
 import android.view.animation.PathInterpolator;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import app.msime.android.KeyboardGeometry;
 import androidx.annotation.AttrRes;
 import androidx.annotation.ColorInt;
 import app.msime.android.ColorPolicy;
@@ -135,12 +136,28 @@ public final class Ui {
     // ---- 读取 ----
 
     public static int dp(Context context, float value) {
-        return Math.round(value * context.getResources().getDisplayMetrics().density);
+        return KeyboardGeometry.pixels(context, value);
+    }
+
+    /** Return whether the supplied context currently uses the system night configuration. */
+    public static boolean isNight(Context context) {
+        return KeyboardGeometry.isNight(context);
+    }
+
+    /** Return the current display width in physical pixels. */
+    public static int screenWidthPixels(Context context) {
+        return context.getResources().getDisplayMetrics().widthPixels;
     }
 
     /** Convert a density-independent dimension without rounding, for canvas geometry. */
     public static float dpFloat(Context context, float value) {
-        return value * context.getResources().getDisplayMetrics().density;
+        return KeyboardGeometry.floatPixels(context, value);
+    }
+
+    /** Convert scalable text units to pixels using the context display metrics. */
+    public static float sp(Context context, float value) {
+        return TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, value,
+            context.getResources().getDisplayMetrics());
     }
 
     /** Parse a theme or skin colour, returning the supplied fallback for missing or invalid input. */
@@ -165,6 +182,28 @@ public final class Ui {
     public static LinearLayout.LayoutParams matchWidthHeight(Context context, int heightDp) {
         return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
             dp(context, heightDp));
+    }
+
+    /** Convert a density-independent size while guaranteeing at least one physical pixel. */
+    public static int atLeastOnePx(Context context, float value) {
+        return Math.max(1, dp(context, value));
+    }
+
+    /** Return the minimum one-pixel thickness for a 0.5 dp separator. */
+    public static int hairlinePx(Context context) {
+        return Math.max(1, dp(context, 0.5f));
+    }
+
+    /** Create a view filled with the standard hairline colour for separators. */
+    public static View hairlineView(Context context) {
+        View view = new View(context);
+        view.setBackgroundColor(hairline(context));
+        return view;
+    }
+
+    /** Layout parameters for a weighted child that wraps its height. */
+    public static LinearLayout.LayoutParams weightWrap(float weight) {
+        return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, weight);
     }
 
     /** Layout parameters for a view that wraps both its content dimensions. */
@@ -267,6 +306,15 @@ public final class Ui {
             current = wrapper.getBaseContext();
         }
         return null;
+    }
+
+    /** Create a text label with the supplied text, size in sp, and colour. */
+    public static TextView label(Context context, CharSequence text, float sizeSp, @ColorInt int color) {
+        TextView view = new TextView(context);
+        view.setText(text);
+        view.setTextSize(sizeSp);
+        view.setTextColor(color);
+        return view;
     }
 
     /** 设置字号（sp）与字重。 */

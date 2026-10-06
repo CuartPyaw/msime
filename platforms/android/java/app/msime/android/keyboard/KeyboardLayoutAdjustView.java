@@ -113,7 +113,7 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
         GradientDrawable surface = new GradientDrawable();
         surface.setColor(keyBackground);
         surface.setCornerRadius(KeyboardGeometry.pixels(getContext(), 10));
-        surface.setStroke(Math.max(1, KeyboardGeometry.pixels(getContext(), 1)), accent);
+        surface.setStroke(KeyboardGeometry.atLeastOnePixel(getContext(), 1), accent);
         bar.setBackground(surface);
         hint.setTextColor(foreground);
         voiceShortcut.setTextColor(foreground);

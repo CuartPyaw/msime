@@ -115,8 +115,8 @@ public final class KeyboardPreview extends View {
     /** 设计皮肤的字母键与功能键按其键帽不透明度叠在背景上，与键盘的 KeyboardSkinKeyDrawable 一致；回车不透明。 */
     private int withKeyOpacity(int colour) {
         if (skin == null || !skin.designed()) return colour;
-        int alpha = (int) Math.round(Color.alpha(colour) * Math.max(0d, Math.min(1d, skin.keyOpacity())));
-        return Color.argb(alpha, Color.red(colour), Color.green(colour), Color.blue(colour));
+        float opacity = (float) Math.max(0d, Math.min(1d, skin.keyOpacity()));
+        return Ui.withAlpha(colour, opacity);
     }
 
     private int ink() {
@@ -229,10 +229,10 @@ public final class KeyboardPreview extends View {
         // 候选条：一个拼音和两枚候选，首选用强调色。
         float baseline = pad + stripHeight * 0.68f;
         paint.setTextAlign(Paint.Align.LEFT);
-        paint.setTextSize(Ui.dpFloat(getContext(), 12) * s);
+        paint.setTextSize(Ui.sp(getContext(), 12) * s);
         paint.setColor(secondary());
         canvas.drawText("ni hao", pad + Ui.dpFloat(getContext(), 6) * s, baseline, paint);
-        paint.setTextSize(Ui.dpFloat(getContext(), 13) * s);
+        paint.setTextSize(Ui.sp(getContext(), 13) * s);
         paint.setColor(returnCap());
         canvas.drawText("你好", pad + Ui.dpFloat(getContext(), 52) * s, baseline, paint);
         paint.setColor(ink());

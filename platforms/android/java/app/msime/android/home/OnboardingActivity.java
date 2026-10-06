@@ -538,7 +538,7 @@ public final class OnboardingActivity extends AppCompatActivity {
             dot.setStroke(Ui.dp(this, 6), Ui.accent(this));
         } else {
             dot.setColor(0);
-            dot.setStroke(Math.max(1, Ui.dp(this, 1.5f)),
+            dot.setStroke(Ui.atLeastOnePx(this, 1.5f),
                 Ui.subText(this));
         }
         radio.setBackground(dot);
@@ -583,11 +583,7 @@ public final class OnboardingActivity extends AppCompatActivity {
     }
 
     private TextView text(String value, int size, int colour) {
-        TextView view = new TextView(this);
-        view.setText(value);
-        view.setTextSize(size);
-        view.setTextColor(colour);
-        return view;
+        return Ui.label(this, value, size, colour);
     }
 
     private static GradientDrawable rounded(int colour, int radius) {

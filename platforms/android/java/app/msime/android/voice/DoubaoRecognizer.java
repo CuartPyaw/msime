@@ -294,7 +294,7 @@ public final class DoubaoRecognizer {
 
     /** Read exactly the response head, leaving any frame bytes that followed it in the stream. */
     private static String readHandshake(InputStream in) throws IOException {
-        StringBuilder head = new StringBuilder();
+        StringBuilder head = new StringBuilder(8192);
         int matched = 0;
         while (head.length() < 8192) {
             int value = in.read();
