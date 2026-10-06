@@ -174,8 +174,7 @@ final class ImeToolbar {
 
     /** 候选那一行：候选滚动区占满剩余宽度，右端是分隔线加展开键。 */
     void addCandidateLine(LinearLayout candidateRegion, FrameLayout viewport, int height) {
-        LinearLayout line = new LinearLayout(s);
-        line.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout line = KeyboardGeometry.row(s);
         ViewPolicy.setCenteredVertically(line);
         line.addView(viewport, KeyboardGeometry.weightedMatchParentParams(1));
         CandidateChevronButton expand = new CandidateChevronButton(s);
