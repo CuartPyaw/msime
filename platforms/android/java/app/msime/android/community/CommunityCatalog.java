@@ -66,6 +66,23 @@ public final class CommunityCatalog {
         this.context = context.getApplicationContext();
     }
 
+    /** Open a catalogue request with the shared transport defaults. */
+    private static HttpsURLConnection open(URL url, String method, boolean output)
+            throws java.io.IOException {
+        HttpsURLConnection connection = (HttpsURLConnection) url.openConnection();
+        connection.setInstanceFollowRedirects(false);
+        connection.setRequestMethod(method);
+        connection.setConnectTimeout(TIMEOUT_MILLIS);
+        connection.setReadTimeout(TIMEOUT_MILLIS);
+        connection.setRequestProperty("Accept", "application/json");
+        connection.setRequestProperty("User-Agent", "MSIME/Android");
+        if (output) {
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", "application/json");
+        }
+        return connection;
+    }
+
     /**
      * One page of the catalogue. Never throws: a failure is a page that says why.
      *
@@ -103,14 +120,8 @@ public final class CommunityCatalog {
             CommunityRequest.Category category, String token) {
         HttpsURLConnection connection = null;
         try {
-            connection = (HttpsURLConnection) new URL(ORIGIN
-                + CommunityRequest.path(kind, "", search, offset, category)).openConnection();
-            connection.setInstanceFollowRedirects(false);
-            connection.setRequestMethod("GET");
-            connection.setConnectTimeout(TIMEOUT_MILLIS);
-            connection.setReadTimeout(TIMEOUT_MILLIS);
-            connection.setRequestProperty("Accept", "application/json");
-            connection.setRequestProperty("User-Agent", "MSIME/Android");
+            connection = open(new URL(ORIGIN
+                + CommunityRequest.path(kind, "", search, offset, category)), "GET", false);
             if (token != null) connection.setRequestProperty("Authorization", "Bearer " + token);
             int status = connection.getResponseCode();
             if (status != 200) {
@@ -163,15 +174,7 @@ public final class CommunityCatalog {
                 .put("item_id", item.id())
                 .put("reason", reason);
             if (!text.isEmpty()) body.put("detail", text);
-            connection = (HttpsURLConnection) new URL(ORIGIN + CommunityRequest.REPORT_PATH).openConnection();
-            connection.setInstanceFollowRedirects(false);
-            connection.setRequestMethod("POST");
-            connection.setConnectTimeout(TIMEOUT_MILLIS);
-            connection.setReadTimeout(TIMEOUT_MILLIS);
-            connection.setDoOutput(true);
-            connection.setRequestProperty("Accept", "application/json");
-            connection.setRequestProperty("Content-Type", "application/json");
-            connection.setRequestProperty("User-Agent", "MSIME/Android");
+            connection = open(new URL(ORIGIN + CommunityRequest.REPORT_PATH), "POST", true);
             connection.setRequestProperty("Authorization", "Bearer " + token);
             try (java.io.OutputStream output = connection.getOutputStream()) {
                 output.write(body.toString().getBytes(StandardCharsets.UTF_8));
@@ -204,15 +207,7 @@ public final class CommunityCatalog {
                 .put("item_id", item.id())
                 .put("reason", reason);
             if (!text.isEmpty()) body.put("detail", text);
-            connection = (HttpsURLConnection) new URL(ORIGIN + CommunityRequest.REPORT_PATH).openConnection();
-            connection.setInstanceFollowRedirects(false);
-            connection.setRequestMethod("POST");
-            connection.setConnectTimeout(TIMEOUT_MILLIS);
-            connection.setReadTimeout(TIMEOUT_MILLIS);
-            connection.setDoOutput(true);
-            connection.setRequestProperty("Accept", "application/json");
-            connection.setRequestProperty("Content-Type", "application/json");
-            connection.setRequestProperty("User-Agent", "MSIME/Android");
+            connection = open(new URL(ORIGIN + CommunityRequest.REPORT_PATH), "POST", true);
             connection.setRequestProperty("Authorization", "Bearer " + token);
             try (java.io.OutputStream output = connection.getOutputStream()) {
                 output.write(body.toString().getBytes(StandardCharsets.UTF_8));
@@ -266,16 +261,8 @@ public final class CommunityCatalog {
         for (int attempt = 0; ; attempt++) {
             HttpsURLConnection connection = null;
             try {
-                connection = (HttpsURLConnection) new URL(
-                    ORIGIN + CommunityRequest.skinPath(item.id())).openConnection();
-                connection.setInstanceFollowRedirects(false);
-                connection.setRequestMethod("PATCH");
-                connection.setConnectTimeout(TIMEOUT_MILLIS);
-                connection.setReadTimeout(TIMEOUT_MILLIS);
-                connection.setDoOutput(true);
-                connection.setRequestProperty("Accept", "application/json");
-                connection.setRequestProperty("Content-Type", "application/json");
-                connection.setRequestProperty("User-Agent", "MSIME/Android");
+                connection = open(new URL(
+                    ORIGIN + CommunityRequest.skinPath(item.id())), "PATCH", true);
                 connection.setRequestProperty("Authorization", "Bearer " + token);
                 byte[] body = CommunityRequest.categoryBody(category).getBytes(StandardCharsets.UTF_8);
                 connection.setFixedLengthStreamingMode(body.length);
@@ -582,16 +569,8 @@ public final class CommunityCatalog {
     private static int postDownload(String id, String token) throws java.io.IOException {
         HttpsURLConnection connection = null;
         try {
-            connection = (HttpsURLConnection) new URL(
-                ORIGIN + CommunityRequest.skinDownloadPath(id)).openConnection();
-            connection.setInstanceFollowRedirects(false);
-            connection.setRequestMethod("POST");
-            connection.setConnectTimeout(TIMEOUT_MILLIS);
-            connection.setReadTimeout(TIMEOUT_MILLIS);
-            connection.setDoOutput(true);
-            connection.setRequestProperty("Accept", "application/json");
-            connection.setRequestProperty("Content-Type", "application/json");
-            connection.setRequestProperty("User-Agent", "MSIME/Android");
+            connection = open(new URL(
+                ORIGIN + CommunityRequest.skinDownloadPath(id)), "POST", true);
             connection.setRequestProperty("Authorization", "Bearer " + token);
             try (java.io.OutputStream output = connection.getOutputStream()) {
                 output.write("{}".getBytes(StandardCharsets.UTF_8));
