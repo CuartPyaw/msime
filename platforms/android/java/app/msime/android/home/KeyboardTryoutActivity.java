@@ -76,7 +76,8 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
         ViewCompat.setOnApplyWindowInsetsListener(root, (view, windowInsets) -> {
             Insets bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars());
             Insets ime = windowInsets.getInsets(WindowInsetsCompat.Type.ime());
-            view.setPadding(bars.left, bars.top, bars.right, Math.max(bars.bottom, ime.bottom));
+            view.setPadding(bars.left, bars.top, bars.right,
+                Ui.bottomContentInset(bars.bottom, 0, ime.bottom, 0));
             return windowInsets;
         });
 
