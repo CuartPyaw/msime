@@ -675,6 +675,15 @@ public final class Ui {
         return button;
     }
 
+    /** Create the muted, accessibility-hidden chevron used by navigable rows. */
+    public static ImageView chevron(Context context) {
+        ImageView view = new ImageView(context);
+        view.setImageResource(app.msime.android.R.drawable.ms_w1_a2_chevron);
+        setImageTint(view, subText(context));
+        view.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        return view;
+    }
+
     /** Apply the standard ripple and keyboard-accessible click behavior to a view. */
     public static void makeClickable(View view, Context context, Runnable action) {
         view.setBackground(ripple(context));

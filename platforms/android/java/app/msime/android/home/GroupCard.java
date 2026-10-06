@@ -75,10 +75,7 @@ public final class GroupCard {
             @Nullable Runnable action) {
         Row row = new Row(this, title, subtitle, false);
         row.value = trailingValue(row, value);
-        ImageView chevron = new ImageView(context);
-        chevron.setImageResource(R.drawable.ms_w1_a2_chevron);
-        Ui.setImageTint(chevron, Ui.subText(context));
-        chevron.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        ImageView chevron = Ui.chevron(context);
         LinearLayout.LayoutParams params = Ui.squareParams(context, Ui.CHEVRON_SIZE);
         params.setMarginStart(Ui.dp(context, 6));
         row.view.addView(chevron, params);
