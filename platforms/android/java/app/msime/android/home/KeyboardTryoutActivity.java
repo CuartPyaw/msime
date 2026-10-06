@@ -17,6 +17,7 @@ import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import app.msime.android.ColorPolicy;
+import app.msime.android.BoundsPolicy;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
@@ -304,7 +305,8 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
                 received.append(delta);
             }
             if (scheduled.compareAndSet(false, true)) {
-                long wait = Math.max(0, shownAt + STREAM_FRAME_MS - SystemClock.uptimeMillis());
+                long wait = BoundsPolicy.nonNegative(
+                    shownAt + STREAM_FRAME_MS - SystemClock.uptimeMillis());
                 mainHandler.postDelayed(this::render, wait);
             }
         }
