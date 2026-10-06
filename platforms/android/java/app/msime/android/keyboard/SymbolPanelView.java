@@ -130,7 +130,7 @@ public final class SymbolPanelView extends LinearLayout {
         grid.removeAllViews();
         List<String> symbols = values.get(category).symbols();
         for (int start = 0; start < symbols.size(); start += SymbolPanelModel.COLUMNS) {
-            int end = Math.min(start + SymbolPanelModel.COLUMNS, symbols.size());
+            int end = BoundsPolicy.atMost(start + SymbolPanelModel.COLUMNS, symbols.size());
             for (int index = start; index < end; index++) {
                 String symbol = symbols.get(index);
                 Button button = buttons.create(symbol, "符号 " + symbol,
