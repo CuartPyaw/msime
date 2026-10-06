@@ -416,4 +416,10 @@ final class BackendAccountClientTests: XCTestCase {
       catch let error as BackendAccountClient.Failure { XCTAssertEqual(error.status, 0) }
     }
   }
+  func testCredentialsCannotEscapeVersionedApiPathWithDotSegments() async throws {
+    for path in ["/v1/../auth/logout", "/v1/users/../auth/logout", "/v1/%2e%2e/auth/logout"] {
+      do { _ = try await client().request("GET", path, token: "session"); XCTFail(path) }
+      catch let error as BackendAccountClient.Failure { XCTAssertEqual(error.status, 0) }
+    }
+  }
 }

@@ -258,6 +258,7 @@ struct BackendAccountClient: Sendable {
 
   private func makeRequest(_ method: String, _ path: String, token: String?, body: Data?, timeout: TimeInterval = 30) throws -> URLRequest {
     guard path.hasPrefix("/v1/"), !path.contains("\\"),
+          !Self.containsDotSegment(path),
           let url = URL(string: path, relativeTo: origin)?.absoluteURL,
           url.scheme == "https", url.host == origin.host, url.port == nil,
           url.user == nil, url.password == nil, url.fragment == nil,
@@ -273,6 +274,11 @@ struct BackendAccountClient: Sendable {
     if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
     if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
     return request
+  }
+
+  private static func containsDotSegment(_ path: String) -> Bool {
+    guard let decoded = path.removingPercentEncoding else { return true }
+    return decoded.split(separator: "/", omittingEmptySubsequences: false).contains { $0 == "." || $0 == ".." }
   }
 
   // Export directly to a private temporary file. Keep the ordinary JSON transport's
