@@ -43,7 +43,7 @@ public final class LexiconDetailPage extends DetailPage {
     @Nullable private LinearLayout column;
     @Nullable private GroupCard entries;
     @Nullable private Model model;
-    private List<DictionaryCollectionsStore.Word> shown = new ArrayList<>();
+    private List<DictionaryCollectionsStore.Word> shown = new ArrayList<>(PAGE_SIZE);
     private String query = "";
     private int searchGeneration;
 
