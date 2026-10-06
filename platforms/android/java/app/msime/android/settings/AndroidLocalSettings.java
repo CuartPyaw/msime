@@ -271,7 +271,7 @@ public final class AndroidLocalSettings {
      */
     public static Snapshot update(Path file, Map<String, Object> edits) throws IOException {
         if (file == null) throw new IllegalArgumentException("settings file");
-        Map<String, Object> accepted = new LinkedHashMap<>();
+        Map<String, Object> accepted = new LinkedHashMap<>(edits.size());
         for (Map.Entry<String, Object> edit : edits.entrySet()) {
             Spec spec = spec(edit.getKey());
             if (edit.getValue() == null) {
