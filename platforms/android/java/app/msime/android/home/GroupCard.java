@@ -1,7 +1,6 @@
 package app.msime.android.home;
 
 import android.content.Context;
-import android.content.res.ColorStateList;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -83,7 +82,7 @@ public final class GroupCard {
         row.value = trailingValue(row, value);
         ImageView chevron = new ImageView(context);
         chevron.setImageResource(R.drawable.ms_w1_a2_chevron);
-        chevron.setImageTintList(ColorStateList.valueOf(Ui.subText(context)));
+        Ui.setImageTint(chevron, Ui.subText(context));
         chevron.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(Ui.dp(context, Ui.CHEVRON_SIZE), Ui.dp(context, Ui.CHEVRON_SIZE));
         params.setMarginStart(Ui.dp(context, 6));

@@ -2,7 +2,6 @@ package app.msime.android.home;
 
 import android.content.Context;
 import android.content.Intent;
-import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
 import android.os.Bundle;
 import android.view.Gravity;
@@ -367,7 +366,7 @@ public final class AccountFragment extends HomeTabFragment {
 
         ImageView glyph = new ImageView(context);
         glyph.setImageResource(icon);
-        glyph.setImageTintList(ColorStateList.valueOf(Ui.subText(context)));
+        Ui.setImageTint(glyph, Ui.subText(context));
         glyph.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         LinearLayout.LayoutParams glyphParams = new LinearLayout.LayoutParams(Ui.dp(context, 22), Ui.dp(context, 22));
         glyphParams.setMarginEnd(Ui.dp(context, 18));
@@ -400,7 +399,7 @@ public final class AccountFragment extends HomeTabFragment {
         if (action != null) {
             ImageView chevron = new ImageView(context);
             chevron.setImageResource(R.drawable.ms_w1_a2_chevron);
-            chevron.setImageTintList(ColorStateList.valueOf(Ui.subText(context)));
+            Ui.setImageTint(chevron, Ui.subText(context));
             chevron.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             LinearLayout.LayoutParams chevronParams = new LinearLayout.LayoutParams(
                 Ui.dp(context, Ui.CHEVRON_SIZE), Ui.dp(context, Ui.CHEVRON_SIZE));

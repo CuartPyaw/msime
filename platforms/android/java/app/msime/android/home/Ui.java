@@ -13,6 +13,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.PathInterpolator;
 import android.widget.LinearLayout;
+import android.widget.ImageView;
 import android.widget.TextView;
 import app.msime.android.KeyboardGeometry;
 import androidx.annotation.AttrRes;
@@ -176,6 +177,11 @@ public final class Ui {
     public static void setSheetHeaderPadding(View view, Context context) {
         int horizontal = dp(context, 16);
         view.setPadding(horizontal, 0, horizontal, dp(context, 12));
+    }
+
+    /** Apply a single tint to an image view through the platform state-list wrapper. */
+    public static void setImageTint(ImageView view, int color) {
+        view.setImageTintList(ColorStateList.valueOf(color));
     }
 
     /** Return whether the supplied context currently uses the system night configuration. */
