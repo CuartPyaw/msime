@@ -89,6 +89,12 @@ public final class CommunitySkinCache {
     }
 
     private static String text(JSONObject value, String key) {
-        return value.isNull(key) ? "" : value.optString(key, "");
+        String text = strictString(value.opt(key));
+        return text == null ? "" : text;
+    }
+
+    /** org.json's optString coerces numbers and booleans; cache text must remain JSON strings. */
+    static String strictString(Object value) {
+        return value instanceof String ? (String) value : null;
     }
 }
