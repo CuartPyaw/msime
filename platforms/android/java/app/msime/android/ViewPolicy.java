@@ -110,4 +110,9 @@ public final class ViewPolicy {
         view.setMaxLines(maxLines);
         view.setEllipsize(TextUtils.TruncateAt.END);
     }
+
+    /** Remove Android's extra font top and bottom padding from a text view. */
+    public static void clearFontPadding(TextView view) {
+        view.setIncludeFontPadding(false);
+    }
 }

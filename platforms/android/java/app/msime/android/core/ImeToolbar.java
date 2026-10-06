@@ -72,7 +72,7 @@ final class ImeToolbar {
         s.preedit = new TextView(s);
         KeyboardGeometry.setKeyTextSize(s.preedit, 12);
         s.preedit.setMaxLines(1);
-        s.preedit.setIncludeFontPadding(false);
+        ViewPolicy.clearFontPadding(s.preedit);
         ViewPolicy.setMaxLinesEllipsized(s.preedit, 1);
         // 胶囊紧挨着候选栏和按键，轻点很容易误触，所以只在长按时打开本地模式菜单。
         s.preedit.setOnLongClickListener(ignored -> {
@@ -89,7 +89,7 @@ final class ImeToolbar {
         s.status = new TextView(s);
         KeyboardGeometry.setKeyTextSize(s.status, 10);
         s.status.setMaxLines(1);
-        s.status.setIncludeFontPadding(false);
+        ViewPolicy.clearFontPadding(s.status);
         ViewPolicy.setMaxLinesEllipsized(s.status, 1);
         s.status.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
         KeyboardGeometry.setPaddingDp(s.status, s, 6, 0, 2, 0);
@@ -97,7 +97,7 @@ final class ImeToolbar {
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         s.candidatePage = new TextView(s);
         KeyboardGeometry.setKeyTextSize(s.candidatePage, 10);
-        s.candidatePage.setIncludeFontPadding(false);
+        ViewPolicy.clearFontPadding(s.candidatePage);
         candidateHeader.addView(s.candidatePage, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         s.shortcutBar = new LinearLayout(s);

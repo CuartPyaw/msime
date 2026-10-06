@@ -77,7 +77,7 @@ final class ImeCandidates {
         button.setMinimumHeight(0);
         KeyboardGeometry.setHorizontalPaddingDp(button, s, 11);
         button.setLineSpacing(0, 1.0f);
-        button.setIncludeFontPadding(false);
+        ViewPolicy.clearFontPadding(button);
         button.setElevation(0);
     }
 
