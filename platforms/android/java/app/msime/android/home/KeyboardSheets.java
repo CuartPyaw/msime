@@ -222,10 +222,8 @@ final class KeyboardSheets {
         LinearLayout row = baseRow(context);
         Ui.setMinimumHeightDp(row, context, Ui.COMPACT_ROW_MIN_HEIGHT);
         if (glyph != null) {
-            TextView icon = new TextView(context);
-            icon.setText(glyph);
+            TextView icon = Ui.styledLabel(context, glyph, 22, 400, Ui.accent(context));
             ViewPolicy.setCentered(icon);
-            Ui.style(icon, 22, 400, Ui.accent(context));
             icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             LinearLayout.LayoutParams iconParams = Ui.squareParams(context, iconSize);
             iconParams.setMarginEnd(Ui.dp(context, iconMarginEnd));
