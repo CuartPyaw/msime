@@ -82,17 +82,10 @@ public final class LexiconPage extends DetailPage {
 
     private TextView headerPill(String glyph, String label, boolean filled, Runnable action) {
         Context context = requireContext();
-        TextView pill = new TextView(context);
-        pill.setText(glyph + " " + label);
-        pill.setGravity(Gravity.CENTER);
-        pill.setSingleLine(true);
         int fill = filled ? Ui.accent(context) : Ui.accentSoft(context);
-        Ui.style(pill, Ui.TEXT_BUTTON_SMALL, 500, filled ? Ui.onAccent(context) : Ui.accent(context));
-        pill.setBackground(Ui.pillRipple(context, fill));
-        Ui.setSymmetricPaddingDp(pill, context, 12, 6);
-        Ui.setTextMinHeightDp(pill, context, Ui.COMPACT_BUTTON_MIN_HEIGHT);
-        pill.setClickable(true);
-        pill.setFocusable(true);
+        TextView pill = Ui.pillButton(context, glyph + " " + label, Ui.TEXT_BUTTON_SMALL, 500,
+            fill, filled ? Ui.onAccent(context) : Ui.accent(context), 12, 6,
+            Ui.COMPACT_BUTTON_MIN_HEIGHT, 0);
         pill.setContentDescription(label);
         pill.setOnClickListener(ignored -> action.run());
         LinearLayout.LayoutParams params = Ui.wrap();
