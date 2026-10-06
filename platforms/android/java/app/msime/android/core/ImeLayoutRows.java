@@ -746,7 +746,7 @@ final class ImeLayoutRows {
         toggleKey = null;
     }
 
-    /** 上一次连点留下的假名还原样在那里：组字没被别的输入改过，或标点仍是光标前那一个字。中间打过别的字、删过、选过候选，都从新的一个假名开始。时间窗只管「再点同一个键算不算接着切换」（`withinWindow`）；↶ 和 → 是明确的意图，不受它限制。 */
+    /** 上一次连点留下的假名还原样在那里：组字没被别的输入改过，或标点仍是光标前那一个字。中间打过别的字、删过、选过候选，都从新的一个假名开始。时间窗只管「再点同一个键算不算接着切换」（`withinWindow`）；→ 是明确的意图，不受它限制。 */
     private boolean japaneseToggleCurrent(boolean withinWindow) {
         if (toggleKey == null || s.connection == null || s.view == null) return false;
         if (withinWindow && android.os.SystemClock.uptimeMillis() - toggleAt
@@ -785,7 +785,7 @@ final class ImeLayoutRows {
         recordJapaneseToggle(key, 0);
     }
 
-    /** 撤掉上一次连点打出的假名（组字里删掉它的罗马字，标点删掉光标前那个字），换成循环里前后 `step` 位的那个。 */
+    /** 撤掉上一次连点打出的假名（组字里删掉它的罗马字，标点删掉光标前那个字），换成循环里后 `step` 位的那个。 */
     private void stepJapaneseToggle(int step) {
         JapaneseNineKeyLayout.Key key = toggleKey;
         int next = JapaneseNineKeyLayout.toggleStep(JapaneseNineKeyLayout.toggleCycle(key), toggleDirection, step);
@@ -801,9 +801,12 @@ final class ImeLayoutRows {
         recordJapaneseToggle(key, next);
     }
 
-    /** ↶：连点切换中往回退一个假名（え→う）；不在切换中时什么也不做。 */
-    void reverseJapaneseToggle() {
-        if (japaneseToggleCurrent(false)) stepJapaneseToggle(-1);
+    /** ◀：结束连点切换；没有组字时把光标左移一格。组字里的光标按罗马字移动，会停在半个假名里，所以组字时不动。 */
+    void moveJapaneseCaretLeft() {
+        resetJapaneseToggle();
+        if (s.connection == null) return;
+        if (s.view == null || s.view.optString("editing_text", "").isEmpty())
+            s.sendDownUpKeyEvents(android.view.KeyEvent.KEYCODE_DPAD_LEFT);
     }
 
     /** →：结束连点切换，下一次轻点同一个键打新的假名（ああ）；不在切换、也没有组字时把光标右移一格。 */
@@ -978,9 +981,9 @@ final class ImeLayoutRows {
             s.imeLetterRows.rebuildKeyRows();
             s.render();
         }), "SoftLayer");
-        // 日语 12 键的标准左列：↶ 逆向切换、→ 结束切换（或光标右移），再是 123、☺（工具栏没有表情时）、英、切换，各占一格。
-        addJapaneseSideKey(modeColumn, s.iconKey(KeyboardIconKey.Kind.TOGGLE_BACK, "↶",
-            "连点切换时退回上一个假名", this::reverseJapaneseToggle), 1);
+        // 左列：◀ 光标左移、→ 结束连点切换（或光标右移），再是 123、☺（工具栏没有表情时）、英、切换，各占一格。
+        addJapaneseSideKey(modeColumn, s.iconKey(KeyboardIconKey.Kind.CURSOR_LEFT, "◀",
+            "光标左移", this::moveJapaneseCaretLeft), 1);
         addJapaneseSideKey(modeColumn, s.iconKey(KeyboardIconKey.Kind.TOGGLE_NEXT, "→",
             "结束连点切换，开始下一个假名；没有组字时光标右移", this::advanceJapaneseToggle), 1);
         addJapaneseSideKey(modeColumn, s.japaneseSymbolsKey, 1);

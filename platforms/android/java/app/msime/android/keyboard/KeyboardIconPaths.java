@@ -73,8 +73,8 @@ public final class KeyboardIconPaths {
         CLIPBOARD_HISTORY(true, 1.7f),
         /** Lucide-style chevron-left (单手换边) */
         SWAP_SIDE(true, 1.8f),
-        /** Lucide-style undo-2 (日语九键 连点退回) */
-        TOGGLE_BACK(true, 1.7f),
+        /** Lucide-style arrow-left (日语九键 光标左移) */
+        CURSOR_LEFT(true, 1.7f),
         /** Lucide-style arrow-right (日语九键 结束连点) */
         TOGGLE_NEXT(true, 1.7f),
         /** Lucide-style maximize-2 (退出单手) */
@@ -167,7 +167,7 @@ public final class KeyboardIconPaths {
             case VIBRATION_STRENGTH -> appendVibrationStrength(p);
             case CLIPBOARD_HISTORY -> appendClipboardHistory(p);
             case SWAP_SIDE -> appendSwapSide(p);
-            case TOGGLE_BACK -> appendToggleBack(p);
+            case CURSOR_LEFT -> appendCursorLeft(p);
             case TOGGLE_NEXT -> appendToggleNext(p);
             case EXIT_ONE_HAND -> appendExitOneHand(p);
         }
@@ -780,15 +780,12 @@ public final class KeyboardIconPaths {
         p.lineTo(15f, 6f);
     }
 
-    private static void appendToggleBack(Path p) {
-        p.moveTo(9f, 14f);
-        p.lineTo(4f, 9f);
-        p.lineTo(9f, 4f);
-        p.moveTo(4f, 9f);
-        p.lineTo(14.5f, 9f);
-        p.cubicTo(17.5376f, 9f, 20f, 11.4624f, 20f, 14.5f);
-        p.cubicTo(20f, 17.5376f, 17.5376f, 20f, 14.5f, 20f);
-        p.lineTo(11f, 20f);
+    private static void appendCursorLeft(Path p) {
+        p.moveTo(19f, 12f);
+        p.lineTo(5f, 12f);
+        p.moveTo(12f, 19f);
+        p.lineTo(5f, 12f);
+        p.lineTo(12f, 5f);
     }
 
     private static void appendToggleNext(Path p) {
