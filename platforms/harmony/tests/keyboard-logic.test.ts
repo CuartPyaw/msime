@@ -12993,6 +12993,31 @@ group("LocalAsrPolicy", () => {
       .length === 30,
     "at most 30 FunASR hotwords",
   );
+  const validHotwords = LocalAsrPolicy.hotwords([
+    { text: "水杉", pinyin: "shui shan" },
+    { text: "输入法", pinyin: "shu ru fa" },
+  ]);
+  check(
+    validHotwords !== null && validHotwords.length === 2 && validHotwords[0].text === "水杉",
+    "well-formed hotwords are accepted",
+  );
+  check(
+    LocalAsrPolicy.hotwords({ hotwords: [] }) === null,
+    "a hotword response value must itself be an array",
+  );
+  check(
+    LocalAsrPolicy.hotwords([{ text: "水杉", pinyin: 42 }]) === null,
+    "a hotword entry with a non-string pinyin is refused",
+  );
+  check(
+    LocalAsrPolicy.hotwords([{ text: "x".repeat(257), pinyin: "x" }]) === null &&
+      LocalAsrPolicy.hotwords([{ text: "x", pinyin: "x".repeat(1025) }]) === null,
+    "oversized hotword fields are refused",
+  );
+  check(
+    LocalAsrPolicy.hotwords(Array.from({ length: 201 }, () => ({ text: "水杉", pinyin: "shui shan" }))) === null,
+    "more than 200 hotwords are refused",
+  );
   check(LocalAsrPolicy.senseVoiceLanguage("zh-HK") === "yue", "Hong Kong Chinese pins Cantonese");
   check(LocalAsrPolicy.senseVoiceLanguage("ja-JP") === "ja", "Japanese is pinned");
   check(LocalAsrPolicy.senseVoiceLanguage("zh-cn") === "auto", "Mandarin is left to the model");
