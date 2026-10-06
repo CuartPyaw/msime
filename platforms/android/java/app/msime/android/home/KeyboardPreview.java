@@ -229,10 +229,10 @@ public final class KeyboardPreview extends View {
         // 候选条：一个拼音和两枚候选，首选用强调色。
         float baseline = pad + stripHeight * 0.68f;
         paint.setTextAlign(Paint.Align.LEFT);
-        paint.setTextSize(Ui.dpFloat(getContext(), 12) * s);
+        paint.setTextSize(Ui.sp(getContext(), 12) * s);
         paint.setColor(secondary());
         canvas.drawText("ni hao", pad + Ui.dpFloat(getContext(), 6) * s, baseline, paint);
-        paint.setTextSize(Ui.dpFloat(getContext(), 13) * s);
+        paint.setTextSize(Ui.sp(getContext(), 13) * s);
         paint.setColor(returnCap());
         canvas.drawText("你好", pad + Ui.dpFloat(getContext(), 52) * s, baseline, paint);
         paint.setColor(ink());
