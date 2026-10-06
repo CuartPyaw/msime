@@ -164,13 +164,12 @@ public final class SkinsPage extends DetailPage {
         tile.addView(swatch, Ui.frameMatchWidthHeight(context, 76));
         cell.addView(tile, Ui.matchWidth());
 
-        TextView name = new TextView(context);
-        name.setText(card.selected() ? "✓ " + card.title() : card.title());
+        TextView name = Ui.styledLabel(context, card.selected() ? "✓ " + card.title() : card.title(),
+            Ui.TEXT_ROW_SUBTITLE + 1, card.selected() ? 600 : 400,
+            card.selected() ? Ui.accent(context) : Ui.text(context));
         name.setGravity(Gravity.CENTER);
         name.setSingleLine(true);
         name.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        Ui.style(name, Ui.TEXT_ROW_SUBTITLE + 1, card.selected() ? 600 : 400,
-            card.selected() ? Ui.accent(context) : Ui.text(context));
         LinearLayout.LayoutParams nameParams = Ui.matchWidth();
         nameParams.topMargin = Ui.dp(context, 8);
         cell.addView(name, nameParams);
@@ -195,21 +194,16 @@ public final class SkinsPage extends DetailPage {
             Ui.atLeastOnePx(context, 1.5f), Ui.accent(context), Ui.dp(context, 6),
             Ui.dp(context, 4));
         tile.setBackground(dashed);
-        TextView spark = new TextView(context);
-        spark.setText("✦");
+        TextView spark = Ui.styledLabel(context, "✦", 22, 400, Ui.accent(context));
         spark.setGravity(Gravity.CENTER);
-        Ui.style(spark, 22, 400, Ui.accent(context));
         tile.addView(spark);
-        TextView hint = new TextView(context);
-        hint.setText("描述一句话生成");
+        TextView hint = Ui.styledLabel(context, "描述一句话生成", 12, 400, Ui.accent(context));
         hint.setGravity(Gravity.CENTER);
-        Ui.style(hint, 12, 400, Ui.accent(context));
         tile.addView(hint);
         cell.addView(tile, Ui.matchWidthHeightPx(Ui.dp(context, 76) + Ui.dp(context, 6)));
-        TextView name = new TextView(context);
-        name.setText("AI 设计皮肤");
+        TextView name = Ui.styledLabel(context, "AI 设计皮肤", Ui.TEXT_ROW_SUBTITLE + 1, 500,
+            Ui.accent(context));
         name.setGravity(Gravity.CENTER);
-        Ui.style(name, Ui.TEXT_ROW_SUBTITLE + 1, 500, Ui.accent(context));
         LinearLayout.LayoutParams nameParams = Ui.matchWidth();
         nameParams.topMargin = Ui.dp(context, 8);
         cell.addView(name, nameParams);
