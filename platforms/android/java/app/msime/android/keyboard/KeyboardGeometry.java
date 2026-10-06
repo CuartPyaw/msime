@@ -60,7 +60,7 @@ public final class KeyboardGeometry {
 
     /** Return the shorter of two dimensions for proportional control sizing. */
     public static float shorterSide(float width, float height) {
-        return Math.min(width, height);
+        return BoundsPolicy.atMost(width, height);
     }
 
     /** Return the current display width in physical pixels. */
