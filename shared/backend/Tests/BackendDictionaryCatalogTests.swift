@@ -98,4 +98,20 @@ final class BackendDictionaryCatalogTests: XCTestCase {
       }
     }
   }
+
+  func testDictionaryCatalogRejectsOversizedSchemeAndProfileLocally() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [DictionaryCatalogProtocol.self]
+    let client = BackendAccountClient(configuration: configuration)
+    for (scheme, profile) in [(String(repeating: "s", count: 65), "xiaohe"),
+                               ("pinyin", String(repeating: "p", count: 65))] {
+      do {
+        _ = try await client.dictionaryCatalog(.pinyin, code: "ni", scheme: scheme,
+                                               profile: profile, token: "session")
+        XCTFail("oversized catalog query parameter accepted")
+      } catch let error as BackendAccountClient.Failure {
+        XCTAssertEqual(error.status, 400)
+      }
+    }
+  }
 }
