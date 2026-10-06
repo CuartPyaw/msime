@@ -577,7 +577,7 @@ final class ImePanels {
         s.replyProgress = new android.widget.ProgressBar(s, null,
             android.R.attr.progressBarStyleSmall);
         s.replyProgress.setIndeterminate(true);
-        s.replyProgress.setVisibility(View.GONE);
+        ViewPolicy.hide(s.replyProgress);
         LinearLayout.LayoutParams progressParams = KeyboardGeometry.linearParamsPx(
             s.pixels(12), s.pixels(12));
         progressParams.setMarginEnd(s.pixels(4));
@@ -598,7 +598,7 @@ final class ImePanels {
         KeyboardGeometry.setKeyTextSize(s.replyStyleResetButton, 12);
         compactReplyControl(s.replyStyleResetButton, s.pixels(6));
         s.replyStyleResetButton.setLayoutParams(KeyboardGeometry.wrapMatchParentParams());
-        s.replyStyleResetButton.setVisibility(View.GONE);
+        ViewPolicy.hide(s.replyStyleResetButton);
         root.addView(footer, KeyboardGeometry.matchWidthHeightPx(s.pixels(18)));
         return root;
     }
@@ -1488,7 +1488,7 @@ final class ImePanels {
 
                 @Override public void close() { s.closeSymbolPanel(); }
             });
-        s.symbolPanel.setVisibility(View.GONE);
+        ViewPolicy.hide(s.symbolPanel);
         s.keyboardSurface.addView(s.symbolPanel, KeyboardGeometry.frameMatchParentParams());
     }
 
@@ -1540,7 +1540,7 @@ final class ImePanels {
         deleteEmoji.setContentDescription("删除");
         deleteEmoji.setLayoutParams(KeyboardGeometry.linearParams(s, 60, 40));
         s.emojiPanel.addView(bar, KeyboardGeometry.matchWidthHeightPx(s.pixels(46)));
-        s.emojiPanel.setVisibility(View.GONE);
+        ViewPolicy.hide(s.emojiPanel);
         s.keyboardSurface.addView(s.emojiPanel, KeyboardGeometry.frameMatchParentParams());
     }
 }
