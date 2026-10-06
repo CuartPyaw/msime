@@ -284,7 +284,7 @@ public final class TypingStatisticsSummary {
     // ---- 内部 ----
 
     private static List<Share> shares(Map<String, Long> groups) {
-        List<Share> result = new ArrayList<>();
+        List<Share> result = new ArrayList<>(groups.size());
         for (Map.Entry<String, Long> entry : groups.entrySet()) {
             if (entry.getValue() > 0) result.add(new Share(entry.getKey(), entry.getValue()));
         }
