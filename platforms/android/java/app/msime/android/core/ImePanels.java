@@ -144,9 +144,8 @@ final class ImePanels {
     }
 
     private KeyboardPressButton emojiButton(KeyboardKeyRole role, boolean counted, Runnable action) {
-        KeyboardPressButton button = new KeyboardPressButton(s);
+        KeyboardPressButton button = ViewPolicy.newPressButton(s);
         button.setKeyboardRole(role);
-        ViewPolicy.setAllCapsFalse(button);
         compactEmojiButton(button);
         if (counted) {
             s.imeStyler.styleButton(button, false);
@@ -1259,9 +1258,8 @@ final class ImePanels {
 
     /** 剪贴板卡片：键帽色圆角卡，第一行是文字（最多两行），第二行是『已置顶 · 设备 · 时间』，元信息用次要色的小号字（经 span，换肤遍历刷字色时不受影响）。 */
     private Button clipboardCard(String text, String meta, Runnable action) {
-        KeyboardPressButton card = new KeyboardPressButton(s);
+        KeyboardPressButton card = ViewPolicy.newPressButton(s);
         card.setKeyboardRole(KeyboardKeyRole.KEY);
-        ViewPolicy.setAllCapsFalse(card);
         android.text.SpannableStringBuilder label = new android.text.SpannableStringBuilder(text);
         if (!meta.isEmpty()) {
             label.append('\n');
@@ -1428,9 +1426,8 @@ final class ImePanels {
 
     private KeyboardPressButton phraseButton(KeyboardKeyRole role, String text,
             String description, Runnable action) {
-        KeyboardPressButton button = new KeyboardPressButton(s);
+        KeyboardPressButton button = ViewPolicy.newPressButton(s);
         button.setKeyboardRole(role);
-        ViewPolicy.setAllCapsFalse(button);
         button.setText(text);
         KeyboardGeometry.setKeyTextSize(button, 15);
         ViewPolicy.setMinimumHeight(button, s.pixels(44));
@@ -1460,8 +1457,7 @@ final class ImePanels {
     void buildSymbolPanel() {
         s.symbolPanel = new SymbolPanelView(s,
             (title, description, action, actionStyle) -> {
-                Button button = new KeyboardPressButton(s);
-                ViewPolicy.setAllCapsFalse(button);
+                Button button = ViewPolicy.newPressButton(s);
                 button.setText(title);
                 button.setContentDescription(actionStyle ? description : "按键 " + description);
                 s.imeStyler.styleButton(button, actionStyle);

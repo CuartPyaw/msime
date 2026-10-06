@@ -110,6 +110,13 @@ public final class ViewPolicy {
         button.setAllCaps(false);
     }
 
+    /** Create a keyboard press button with authored casing preserved. */
+    public static KeyboardPressButton newPressButton(android.content.Context context) {
+        KeyboardPressButton button = new KeyboardPressButton(context);
+        setAllCapsFalse(button);
+        return button;
+    }
+
     /** Center a view's content on both axes. */
     public static void setCentered(View view) {
         if (view instanceof TextView text) {
