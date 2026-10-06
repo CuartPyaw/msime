@@ -180,6 +180,11 @@ public final class Ui {
             dp(context, heightDp));
     }
 
+    /** Layout parameters for a weighted child that wraps its height. */
+    public static LinearLayout.LayoutParams weightWrap(float weight) {
+        return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, weight);
+    }
+
     /** Layout parameters for a view that wraps both its content dimensions. */
     public static LinearLayout.LayoutParams wrap() {
         return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,

@@ -176,7 +176,7 @@ final class KeyboardSheets {
         LinearLayout row = baseRow(context);
         row.addView(LexiconPage.badge(context, badge));
         row.addView(texts(context, title, subtitle, Ui.text(context)),
-            new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            Ui.weightWrap(1f));
         if (value != null && !value.isEmpty()) {
             TextView state = new TextView(context);
             state.setText(value);
@@ -217,7 +217,7 @@ final class KeyboardSheets {
         TextView label = new TextView(context);
         label.setText(title);
         Ui.style(label, Ui.TEXT_ROW_TITLE, 400, Ui.accent(context));
-        row.addView(label, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(label, Ui.weightWrap(1f));
         row.setBackground(Ui.ripple(context));
         row.setClickable(true);
         row.setFocusable(true);
@@ -236,7 +236,7 @@ final class KeyboardSheets {
         LinearLayout row = baseRow(context);
         row.addView(LexiconPage.badge(context, badge));
         row.addView(texts(context, title, subtitle, Ui.text(context)),
-            new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            Ui.weightWrap(1f));
         boolean enabled = action != null;
         TextView button = new TextView(context);
         button.setText(label);
