@@ -1285,8 +1285,10 @@ public final class MSIMEInputService extends InputMethodService {
             if (generation != engineStartGeneration || connection == null || session != 0) return;
             startEngineSession(options);
         };
+        boolean suppressLearning = learningSuppressed();
         try {
             preferencesWorker.execute(() -> {
+                String startOptions = withLivePreferences(options, suppressLearning);
                 String notice = "";
                 try {
                     JSONObject sync = value(NativeClient.personalDictionarySync(options));
@@ -1300,12 +1302,32 @@ public final class MSIMEInputService extends InputMethodService {
                 main.post(() -> {
                     if (generation != engineStartGeneration || connection == null || session != 0) return;
                     if (!finalNotice.isEmpty()) preferencesNotice = finalNotice;
-                    complete.run();
+                    startEngineSession(startOptions);
                 });
             });
         } catch (RuntimeException ignored) {
             // A worker shutdown must not leave a still-valid editor without its session.
             main.post(complete);
+        }
+    }
+
+    /**
+     * runtime-options.json 里的偏好是首次安装时写下的出厂默认（见 Bootstrap.prepare），拿它建会话，引擎先按默认方案（全拼 26 键）起来，过一两秒实时偏好重载后才换成用户的方案，九键用户每次都看到键盘从 26 键跳成九键。建会话前在工作线程上读一次实时偏好换进去；读不到时照旧用原来那份。不允许学习的输入框照样把 learning 关掉。
+     */
+    private static String withLivePreferences(String optionsText, boolean suppressLearning) {
+        try {
+            JSONObject options = new JSONObject(optionsText);
+            String directory = options.optString("preferences_directory", "");
+            if (directory.isEmpty() || !new File(directory).isAbsolute()) return optionsText;
+            JSONObject envelope = new JSONObject(NativeClient.loadPreferences(directory));
+            JSONObject live = envelope.optBoolean("ok", false)
+                ? envelope.getJSONObject("value").optJSONObject("preferences") : null;
+            if (live == null) return optionsText;
+            if (suppressLearning) live.put("learning", false);
+            options.put("preferences", live);
+            return options.toString();
+        } catch (JSONException | RuntimeException | LinkageError error) {
+            return optionsText;
         }
     }
 
