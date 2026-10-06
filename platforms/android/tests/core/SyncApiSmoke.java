@@ -17,6 +17,19 @@ public final class SyncApiSmoke {
         check(!SyncApi.conflict(new CloudApi.Failure(409, "other", "", 0)), "other 409");
         check(!SyncApi.conflict(new CloudApi.Failure(412, "revision_conflict", "", 0)), "other status");
         check(!SyncApi.conflict(null), "null failure");
+        check(SyncApi.preferenceRevision(42L) == 42L, "integer preference revision");
+
+        // Cloud preference revisions are non-negative integers. Fractional JSON numbers
+        // must not be truncated by Number.longValue(), and negative revisions are invalid.
+        for (Number invalid : new Number[] {1.5d, -1L}) {
+            try {
+                SyncApi.preferenceRevision(invalid);
+                throw new AssertionError("invalid preference revision must be refused: " + invalid);
+            } catch (CloudApi.Failure expected) {
+                check(expected.status == 500 && "invalid_response".equals(expected.code),
+                    "invalid preference revision failure");
+            }
+        }
 
         check("/v1/users/me/dictionary/changes?after=7&limit=1".equals(SyncApi.changesPath(7)), "changes path");
         check(SyncApi.changesPath(-3).endsWith("after=0&limit=1"), "negative cursor clamps");

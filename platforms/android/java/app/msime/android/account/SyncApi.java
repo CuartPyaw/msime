@@ -5,6 +5,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.math.BigInteger;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -106,8 +107,7 @@ public final class SyncApi {
     }
 
     static Preferences parsePreferences(JSONObject root) throws CloudApi.Failure {
-        Object revision = root.opt("revision");
-        if (!(revision instanceof Number)) throw invalid("preferences revision missing");
+        long revision = preferenceRevision(root.opt("revision"));
         JSONObject raw = root.optJSONObject("settings");
         LinkedHashMap<String, Object> settings = new LinkedHashMap<>(raw == null ? 0 : raw.length());
         if (raw != null) {
@@ -118,7 +118,20 @@ public final class SyncApi {
                 if (value instanceof String || value instanceof Boolean || value instanceof Number) settings.put(key, value);
             }
         }
-        return new Preferences(((Number) revision).longValue(), Collections.unmodifiableMap(settings));
+        return new Preferences(revision, Collections.unmodifiableMap(settings));
+    }
+
+    /** Account preference revisions are JSON integers in the non-negative long range. */
+    static long preferenceRevision(Object value) throws CloudApi.Failure {
+        if (!(value instanceof Number)
+            || value instanceof Float || value instanceof Double
+            || value instanceof java.math.BigDecimal
+            || value instanceof BigInteger) {
+            throw invalid("preferences revision must be an integer");
+        }
+        long revision = ((Number) value).longValue();
+        if (revision < 0) throw invalid("preferences revision must be non-negative");
+        return revision;
     }
 
     // ---- 常用语 ----
