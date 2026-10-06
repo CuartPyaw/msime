@@ -38,6 +38,14 @@ public final class DrawablePolicy {
         return shape;
     }
 
+    /** Create a filled rounded rectangle with a visible outline. */
+    public static GradientDrawable outlined(int fillColor, float radiusPx, int strokeWidth,
+                                            int strokeColor) {
+        GradientDrawable shape = rounded(fillColor, radiusPx);
+        shape.setStroke(Math.max(1, strokeWidth), strokeColor);
+        return shape;
+    }
+
     /** Build a drawable state list while keeping the supplied state precedence. */
     public static StateListDrawable stateList(int[][] states, Drawable... drawables) {
         if (states == null || drawables == null || states.length != drawables.length) {
