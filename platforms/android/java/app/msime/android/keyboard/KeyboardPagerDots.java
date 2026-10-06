@@ -107,19 +107,12 @@ public final class KeyboardPagerDots extends View {
         for (int index = 0; index < count; index++) {
             float weight = index == active ? progress : index == previous ? 1f - progress : 0f;
             float width = dot + (wide - dot) * weight;
-            paint.setColor(blend(inactiveColor, activeColor, weight));
+            paint.setColor(ColorPolicy.blend(inactiveColor, activeColor,
+                KeyboardGeometry.bounded(weight, 0f, 1f)));
             rect.set(x, top, x + width, top + dot);
             canvas.drawRoundRect(rect, dot / 2f, dot / 2f, paint);
             x += width + gap;
         }
     }
 
-    private static int blend(int from, int to, float amount) {
-        float t = KeyboardGeometry.bounded(amount, 0f, 1f);
-        int a = Math.round(((from >>> 24) & 0xFF) + (((to >>> 24) & 0xFF) - ((from >>> 24) & 0xFF)) * t);
-        int r = Math.round(((from >> 16) & 0xFF) + (((to >> 16) & 0xFF) - ((from >> 16) & 0xFF)) * t);
-        int g = Math.round(((from >> 8) & 0xFF) + (((to >> 8) & 0xFF) - ((from >> 8) & 0xFF)) * t);
-        int b = Math.round((from & 0xFF) + ((to & 0xFF) - (from & 0xFF)) * t);
-        return (a << 24) | (r << 16) | (g << 8) | b;
-    }
 }
