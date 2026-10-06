@@ -334,8 +334,7 @@ final class ImeLetterRows {
         // 键盘在各布局间切换时总高度不变：字母行多于三行（大千注音四行）时，整组挤进三行的高度里，而不是每行照标准键高再多出一行。
         LinearLayout block = null;
         if (rows.size() > 3) {
-            block = new LinearLayout(s);
-            block.setOrientation(LinearLayout.VERTICAL);
+            block = KeyboardGeometry.column(s);
             s.imeStyler.adjustThreeRowBlockHeight(block);
             s.keyRows.addView(block, KeyboardGeometry.matchWidthHeightPx(
                 s.pixels(KeyboardGeometry.KEY_ROW_HEIGHT_DP * 3)));
