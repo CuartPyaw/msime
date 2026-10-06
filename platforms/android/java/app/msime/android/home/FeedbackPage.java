@@ -91,7 +91,7 @@ public final class FeedbackPage extends DetailPage {
         input.setPadding(Ui.dp(requireContext(), 16), Ui.dp(requireContext(), 14), Ui.dp(requireContext(), 16), Ui.dp(requireContext(), 14));
         input.setText(draft);
         input.setContentDescription("描述");
-        card.addView(input, matchWidth());
+        card.addView(input, Ui.matchWidth());
         detail = input;
 
         View rule = new View(context);
@@ -107,7 +107,7 @@ public final class FeedbackPage extends DetailPage {
         shots.setOrientation(LinearLayout.HORIZONTAL);
         shots.setPadding(Ui.dp(requireContext(), 16), Ui.dp(requireContext(), 10), Ui.dp(requireContext(), 16), 0);
         strip.addView(shots);
-        card.addView(strip, matchWidth());
+        card.addView(strip, Ui.matchWidth());
         thumbnails = shots;
 
         LinearLayout add = new LinearLayout(context);
@@ -130,13 +130,13 @@ public final class FeedbackPage extends DetailPage {
         labelParams.setMarginStart(Ui.dp(requireContext(), 10));
         add.addView(label, labelParams);
         add.setOnClickListener(ignored -> picker.launch("image/*"));
-        card.addView(add, matchWidth());
+        card.addView(add, Ui.matchWidth());
         addShot = add;
 
         TextView count = new TextView(context);
         Ui.style(count, 13, 400, Ui.subText(context));
         count.setPadding(Ui.dp(requireContext(), Ui.GROUP_TITLE_INSET), Ui.dp(requireContext(), 6), Ui.dp(requireContext(), Ui.GROUP_TITLE_INSET), 0);
-        description.view().addView(count, matchWidth());
+        description.view().addView(count, Ui.matchWidth());
         counter = count;
 
         TextView button = new TextView(context);
@@ -147,7 +147,7 @@ public final class FeedbackPage extends DetailPage {
         button.setFocusable(true);
         button.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         button.setOnClickListener(ignored -> submit());
-        LinearLayout.LayoutParams buttonParams = matchWidth();
+        LinearLayout.LayoutParams buttonParams = Ui.matchWidth();
         buttonParams.topMargin = Ui.dp(requireContext(), Ui.GROUP_GAP);
         column.addView(button, buttonParams);
         submit = button;
@@ -398,7 +398,4 @@ public final class FeedbackPage extends DetailPage {
         }
     }
 
-    private static LinearLayout.LayoutParams matchWidth() {
-        return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-    }
 }
