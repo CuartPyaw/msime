@@ -176,7 +176,7 @@ public final class StatisticsFragment extends HomeTabFragment {
                 .put("action", new JSONObject().put("operation", "count").put("kind", "pinyin")
                     .put("user_only", true));
             JSONObject root = new JSONObject(NativeClient.dictionary(request.toString()));
-            if (!root.optBoolean("ok", false)) return null;
+            if (!Boolean.TRUE.equals(root.opt("ok"))) return null;
             JSONObject value = root.optJSONObject("value");
             if (value == null || !value.has("count")) return null;
             Long count = DictionaryCollectionsStore.strictLong(value.opt("count"));
