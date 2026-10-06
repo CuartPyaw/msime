@@ -325,11 +325,11 @@ public final class SkinJobsApi {
         if (raw != null) {
             Object data = raw.opt("b64_json");
             Object mime = raw.opt("mime_type");
-            int width = raw.optInt("width", 0);
-            int height = raw.optInt("height", 0);
+            Integer width = strictArtworkDimension(raw.opt("width"));
+            Integer height = strictArtworkDimension(raw.opt("height"));
             if (!(data instanceof String base64) || !(mime instanceof String type)
                     || !("image/png".equals(type) || "image/jpeg".equals(type))
-                    || width < 1 || width > 2048 || height < 1 || height > 2048
+                    || width == null || height == null
                     || base64.length() > 11 * 1024 * 1024 || !planner.artworkValid(raw))
                 throw invalid("ai_skin_response");
             artwork = new Artwork(base64, type, width, height);
@@ -347,6 +347,15 @@ public final class SkinJobsApi {
 
     private static CloudApi.Failure invalid(String code) {
         return new CloudApi.Failure(0, code, code, 0);
+    }
+
+    /** Artwork dimensions must be JSON integers in the decoded image bounds. */
+    public static Integer strictArtworkDimension(Object value) {
+        if (value instanceof Integer integer && integer >= 1 && integer <= 2048) return integer;
+        if (value instanceof Long longValue && longValue >= 1L && longValue <= 2048L) {
+            return longValue.intValue();
+        }
+        return null;
     }
 
     /** Native planner responses must keep status flags as JSON booleans. */
