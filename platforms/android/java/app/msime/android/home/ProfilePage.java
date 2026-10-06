@@ -154,7 +154,7 @@ public final class ProfilePage extends DetailPage {
             Ui.hideFromAccessibility(picture);
             frame.addView(picture, Ui.squareFrameParams(context, sizeDp));
         } else {
-            TextView letter = Ui.styledLabel(context, initial(name), Math.round(sizeDp * 0.4f), 600,
+            TextView letter = Ui.styledLabel(context, Ui.trimmedInitial(name, "?"), Math.round(sizeDp * 0.4f), 600,
                 Ui.onAccent(context));
             ViewPolicy.setCentered(letter);
             letter.setBackground(circle);
@@ -162,13 +162,6 @@ public final class ProfilePage extends DetailPage {
             frame.addView(letter, Ui.squareFrameParams(context, sizeDp));
         }
         return frame;
-    }
-
-    /** 昵称的第一个字（按码点取，不会把表情劈成两半）；没有昵称时是「?」。 */
-    static String initial(String name) {
-        String trimmed = name == null ? "" : name.trim();
-        if (trimmed.isEmpty()) return "?";
-        return new String(Character.toChars(trimmed.codePointAt(0)));
     }
 
     private void render() {
