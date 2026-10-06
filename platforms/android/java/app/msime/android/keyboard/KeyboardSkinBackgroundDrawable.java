@@ -56,10 +56,9 @@ public final class KeyboardSkinBackgroundDrawable extends Drawable {
         gradientHorizontal = skin.gradientHorizontal();
         background.setColor(backgroundStart);
         int accent = Color.parseColor(skin.accent());
-        patternAlpha = Color.alpha(ColorPolicy.withAlpha(accent,
-            (float) skin.patternOpacity()));
-        pattern.setColor(ColorPolicy.withAlpha(accent,
-            (float) skin.patternOpacity()));
+        int patternColor = ColorPolicy.withAlpha(accent, (float) skin.patternOpacity());
+        patternAlpha = Color.alpha(patternColor);
+        pattern.setColor(patternColor);
         pattern.setStyle(Paint.Style.FILL);
         decodedPhoto = decodedPhoto(skin.photo());
         photo = decodedPhoto == null ? null : decodedPhoto.bitmap();
