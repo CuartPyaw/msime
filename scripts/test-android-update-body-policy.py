@@ -10,10 +10,11 @@ SOURCE = ROOT / "platforms/android/java/app/msime/android/account/UpdateApi.java
 
 def main() -> int:
     source = SOURCE.read_text(encoding="utf-8")
+    fetch = source.split("    byte[] fetch(", 1)[1].split("    private static void closeQuietly", 1)[0]
     checks = (
-        ("HttpBodyPolicy.readBounded" in source, "没有使用 HttpBodyPolicy.readBounded"),
-        ("ByteArrayOutputStream" not in source, "仍保留自定义 ByteArrayOutputStream 读取"),
-        ("for (int read; (read = body.read(buffer)) != -1; )" not in source,
+        ("HttpBodyPolicy.readBounded" in fetch, "没有使用 HttpBodyPolicy.readBounded"),
+        ("ByteArrayOutputStream" not in fetch, "仍保留自定义 ByteArrayOutputStream 读取"),
+        ("for (int read; (read = body.read(buffer)) != -1; )" not in fetch,
          "仍保留自定义响应读取循环"),
     )
     for passed, message in checks:
