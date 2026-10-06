@@ -65,7 +65,7 @@ public final class FunctionPanelView extends LinearLayout {
 
     private final PagedTileGrid grid;
     private final KeyboardPagerDots dots;
-    private final ArrayList<Tile> tiles = new ArrayList<>();
+    private final ArrayList<Tile> tiles = new ArrayList<>(FunctionPanelModel.items().size());
     private int foreground = Color.BLACK;
     private int accent = Color.BLUE;
     private int panelBackground = Color.WHITE;
