@@ -99,7 +99,7 @@ public final class CandidateChevronButton extends Button {
 
     @Override protected void onDraw(Canvas canvas) {
         float height = getHeight();
-        float dividerHeight = Math.min(height,
+        float dividerHeight = BoundsPolicy.atMost(height,
             KeyboardGeometry.floatPixels(getContext(), DIVIDER_HEIGHT_DP));
         divider.setColor(hairlineColor);
         float lineWidth = BoundsPolicy.bounded(
