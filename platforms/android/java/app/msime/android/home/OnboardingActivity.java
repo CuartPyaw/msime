@@ -21,7 +21,6 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.widget.NestedScrollView;
 import app.msime.android.AppEdition;
-import app.msime.android.DrawablePolicy;
 import app.msime.android.FirstRunPreparation;
 import app.msime.android.KeyboardScheme;
 import app.msime.android.R;
@@ -226,8 +225,8 @@ public final class OnboardingActivity extends AppCompatActivity {
         };
         // 说明里的简称与上面的卡片一一对应，只列本版本有的那几张。
         String[] names = {"全拼", "9 键", "双拼", "五笔"};
-        java.util.List<SchemeCard> cards = new java.util.ArrayList<>();
-        java.util.List<String> offered = new java.util.ArrayList<>();
+        java.util.List<SchemeCard> cards = new java.util.ArrayList<>(all.length);
+        java.util.List<String> offered = new java.util.ArrayList<>(all.length);
         for (int index = 0; index < all.length; index++) {
             if (!all[index].scheme().offeredBy(edition)) continue;
             cards.add(all[index]);
@@ -533,7 +532,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         card.addView(text, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
 
         View radio = new View(this);
-        GradientDrawable dot = DrawablePolicy.circleOutlined(selected ? Ui.page(this) : 0,
+        GradientDrawable dot = Ui.circleOutlined(selected ? Ui.page(this) : 0,
             selected ? Ui.dp(this, 6) : Ui.atLeastOnePx(this, 1.5f),
             selected ? Ui.accent(this) : Ui.subText(this));
         radio.setBackground(dot);

@@ -1,6 +1,5 @@
 package app.msime.android.home;
 
-import android.content.res.ColorStateList;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -17,6 +16,8 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import app.msime.android.ColorPolicy;
+import app.msime.android.BoundsPolicy;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
@@ -51,7 +52,7 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
     private static final String FAILURE = "请求失败，请检查登录状态或稍后重试。";
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
-    private final ArrayList<BackendAccount.ChatModel> models = new ArrayList<>();
+    private final ArrayList<BackendAccount.ChatModel> models = new ArrayList<>(BackendAccount.MAX_CHAT_MODELS);
     private final List<BackendAccount.ChatMessage> messages = new ArrayList<>(13);
     private Future<?> operation;
     private int generation;
@@ -102,7 +103,7 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
             return true;
         });
         int accent = Ui.accent(this);
-        sendAi.setBackgroundTintList(new ColorStateList(
+        sendAi.setBackgroundTintList(ColorPolicy.stateList(
             new int[][] {{-android.R.attr.state_enabled}, {}},
             new int[] {Ui.withAlpha(accent, 0.38f), accent}));
 
@@ -304,7 +305,8 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
                 received.append(delta);
             }
             if (scheduled.compareAndSet(false, true)) {
-                long wait = Math.max(0, shownAt + STREAM_FRAME_MS - SystemClock.uptimeMillis());
+                long wait = BoundsPolicy.nonNegative(
+                    shownAt + STREAM_FRAME_MS - SystemClock.uptimeMillis());
                 mainHandler.postDelayed(this::render, wait);
             }
         }

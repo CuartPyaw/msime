@@ -1,6 +1,5 @@
 package app.msime.android;
 
-import android.content.res.ColorStateList;
 import android.graphics.Typeface;
 import android.os.Build;
 import android.util.TypedValue;
@@ -69,7 +68,7 @@ final class ImeCandidates {
             chip(selectedBackground, 9), pressed, focused, hovered,
             chip(android.graphics.Color.TRANSPARENT, 9));
         button.setBackground(states);
-        button.setTextColor(new ColorStateList(
+        button.setTextColor(ColorPolicy.stateList(
             new int[][] {{android.R.attr.state_selected}, {}},
             new int[] {selectedText, keyForeground}));
         button.setTypeface(candidateTypeface, button.isSelected() ? Typeface.BOLD : Typeface.NORMAL);
@@ -95,7 +94,7 @@ final class ImeCandidates {
             },
             chip(accentSoft, 8), chip(s.candidateAppearance.hover(), 8), chip(keyBackground, 8));
         button.setBackground(states);
-        button.setTextColor(new ColorStateList(
+        button.setTextColor(ColorPolicy.stateList(
             new int[][] {{android.R.attr.state_selected}, {}},
             new int[] {accentText, keyForeground}));
         button.setTypeface(candidateTypeface, button.isSelected() ? Typeface.BOLD : Typeface.NORMAL);

@@ -51,7 +51,7 @@ public final class KeyboardKeyPreview extends View {
     public static float bubbleLeft(float keyLeft, float keyWidth, float bubbleWidth,
             float parentWidth) {
         float left = keyLeft + keyWidth / 2f - bubbleWidth / 2f;
-        float max = Math.max(0f, parentWidth - bubbleWidth);
+        float max = BoundsPolicy.nonNegative(parentWidth - bubbleWidth);
         return KeyboardGeometry.bounded(left, 0f, max);
     }
 
