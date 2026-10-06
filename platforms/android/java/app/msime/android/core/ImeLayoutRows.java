@@ -105,8 +105,7 @@ final class ImeLayoutRows {
         cardFrame.addOnLayoutChangeListener((view, left, top, right, bottom,
                 oldLeft, oldTop, oldRight, oldBottom) -> s.handwritingCanvas.setCardRect(
                     left, top, right, bottom));
-        cardFrame.addView(s.handwritingStatus, new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+        cardFrame.addView(s.handwritingStatus, KeyboardGeometry.frameMatchWidthWrapParams(
             Gravity.CENTER));
 
         s.handwritingDownload = new Button(s);
