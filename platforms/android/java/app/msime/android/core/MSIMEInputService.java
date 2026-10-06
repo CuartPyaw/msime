@@ -3362,11 +3362,7 @@ public final class MSIMEInputService extends InputMethodService {
         ViewPolicy.setAllCapsFalse(button);
         button.setText(label);
         imeStyler.styleButton(button, true);
-        button.setOnClickListener(ignored -> {
-            imeKeyFeedback.playFeedback(button);
-            countKey(button);
-            action.run();
-        });
+        bindCountedAction(button, action);
         row.addView(button, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
         return button;
     }
@@ -3383,11 +3379,7 @@ public final class MSIMEInputService extends InputMethodService {
         ViewPolicy.setAllCapsFalse(button);
         button.setText(label);
         imeStyler.styleButton(button, true);
-        button.setOnClickListener(ignored -> {
-            imeKeyFeedback.playFeedback(button);
-            countKey(button);
-            action.run();
-        });
+        bindCountedAction(button, action);
         row.addView(button, KeyboardGeometry.weightedWrapParams(1));
         return button;
     }
@@ -3398,10 +3390,7 @@ public final class MSIMEInputService extends InputMethodService {
         ViewPolicy.setAllCapsFalse(button);
         button.setText("更多");
         imeStyler.styleButton(button, true);
-        button.setOnClickListener(ignored -> {
-            imeKeyFeedback.playFeedback(button);
-            action.run();
-        });
+        bindAction(button, action);
         row.addView(button, KeyboardGeometry.weightedWrapParams(1));
         return button;
     }
@@ -3414,10 +3403,7 @@ public final class MSIMEInputService extends InputMethodService {
         button.setText(label);
         KeyboardGeometry.setKeyTextSize(button, 13);
         imeStyler.styleButton(button, KeyboardKeyRole.PILL, skin);
-        button.setOnClickListener(ignored -> {
-            imeKeyFeedback.playFeedback(button);
-            action.run();
-        });
+        bindAction(button, action);
         row.addView(button, KeyboardGeometry.weightedWrapParams(1));
         return button;
     }
@@ -3427,10 +3413,7 @@ public final class MSIMEInputService extends InputMethodService {
         ViewPolicy.setAllCapsFalse(button);
         button.setText(label);
         imeStyler.styleButton(button, true);
-        button.setOnClickListener(ignored -> {
-            imeKeyFeedback.playFeedback(button);
-            action.run();
-        });
+        bindAction(button, action);
         row.addView(button, KeyboardGeometry.weightedWrapParams(1));
         return button;
     }
@@ -3443,7 +3426,7 @@ public final class MSIMEInputService extends InputMethodService {
         button.setText(label);
         button.setContentDescription("按键 " + description);
         imeStyler.styleButton(button, false);
-        return bindKeyAction(button, action);
+        return bindCountedAction(button, action);
     }
 
     /** 九键、注音、笔画、手写和日语九键的 ⌫：和 {@link #keyboardKey} 一样的键，只是画 26 键那个 22 dp 的删除图标，不再用排版字号的「⌫」字符，那样比 26 键的小一圈。 */
@@ -3473,13 +3456,21 @@ public final class MSIMEInputService extends InputMethodService {
         button.setText(label);
         button.setContentDescription("按键 " + description);
         imeStyler.styleButton(button, false);
-        return bindKeyAction(button, action);
+        return bindCountedAction(button, action);
     }
 
-    private <T extends Button> T bindKeyAction(T button, Runnable action) {
+    private <T extends Button> T bindCountedAction(T button, Runnable action) {
         button.setOnClickListener(ignored -> {
             imeKeyFeedback.playFeedback(button);
             countKey(button);
+            action.run();
+        });
+        return button;
+    }
+
+    private <T extends Button> T bindAction(T button, Runnable action) {
+        button.setOnClickListener(ignored -> {
+            imeKeyFeedback.playFeedback(button);
             action.run();
         });
         return button;
@@ -3492,7 +3483,7 @@ public final class MSIMEInputService extends InputMethodService {
         button.setText(label);
         button.setContentDescription("按键 " + description);
         imeStyler.styleButton(button, false);
-        return bindKeyAction(button, action);
+        return bindCountedAction(button, action);
     }
 
     /**
