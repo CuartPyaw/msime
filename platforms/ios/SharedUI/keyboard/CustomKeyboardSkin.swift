@@ -210,8 +210,15 @@ extension CustomKeyboardSkin {
 
 // Decode only a bounded thumbnail, even when the chosen original is a large panorama.
 enum SkinPhotoData {
+  static let maximumSourceBytes = 16 * 1024 * 1024
+
+  static func sourceData(at url: URL) -> Data? {
+    try? BoundedFileReader.read(from: url, maximumBytes: maximumSourceBytes)
+  }
+
   static func thumbnail(at url: URL) -> Data? {
-    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+    guard let data = sourceData(at: url),
+          let source = CGImageSourceCreateWithData(data as CFData, nil),
           let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
