@@ -93,14 +93,12 @@ final class ImeLayoutRows {
         s.handwritingCanvas.applySkin(s.handwritingSkin);
         s.handwritingCanvas.setInk(handwritingPreferences.inkColor(),
             s.pixels(handwritingPreferences.strokeWidth()));
-        area.addView(s.handwritingCanvas, new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        area.addView(s.handwritingCanvas, KeyboardGeometry.frameMatchParentParams());
 
         FrameLayout cardFrame = new FrameLayout(s);
         cardFrame.setClickable(false);
         cardFrame.setFocusable(false);
-        FrameLayout.LayoutParams cardParams = new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
+        FrameLayout.LayoutParams cardParams = KeyboardGeometry.frameMatchParentParams();
         int inset = s.pixels(3);
         cardParams.setMargins(inset, inset, inset, inset);
         area.addView(cardFrame, cardParams);
@@ -320,14 +318,12 @@ final class ImeLayoutRows {
         FrameLayout sidebar = new FrameLayout(s);
         s.nineKeySidebar = sidebar;
         applySidebarRail();
-        sidebar.addView(punctuation, new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        sidebar.addView(punctuation, KeyboardGeometry.frameMatchParentParams());
         if (s.nineKeySpellingScroll != null) {
             // 拼音选择条只在创建键盘视图时建一次，每次重建九键都会换一个新的侧栏；偏好变化触发第二次重建时它还挂在上一个侧栏上，不先摘下来，addView 会抛 IllegalStateException 让键盘进程崩溃。
             if (s.nineKeySpellingScroll.getParent() instanceof android.view.ViewGroup previous)
                 previous.removeView(s.nineKeySpellingScroll);
-            sidebar.addView(s.nineKeySpellingScroll, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+            sidebar.addView(s.nineKeySpellingScroll, KeyboardGeometry.frameMatchParentParams());
             placeSpellingRow(false);
         }
         container.addView(sidebar, KeyboardGeometry.weightedMatchParentParams(0.7f));
@@ -420,8 +416,7 @@ final class ImeLayoutRows {
         FrameLayout sidebar = new FrameLayout(s);
         s.nineKeySidebar = sidebar;
         applySidebarRail();
-        sidebar.addView(punctuation, new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        sidebar.addView(punctuation, KeyboardGeometry.frameMatchParentParams());
         container.addView(sidebar, KeyboardGeometry.weightedMatchParentParams(0.7f));
 
         LinearLayout grid = new LinearLayout(s);
@@ -578,8 +573,8 @@ final class ImeLayoutRows {
             // 选择条只在创建键盘视图时建一次，拼音九键会把它挂进自己的侧栏；先从原来的父视图摘下再挂到候选行，否则 addView 会抛 IllegalStateException。挂在最后，盖在候选滚动区上面。
             if (s.nineKeySpellingScroll.getParent() instanceof android.view.ViewGroup previous)
                 previous.removeView(s.nineKeySpellingScroll);
-            s.candidateViewport.addView(s.nineKeySpellingScroll, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+                s.candidateViewport.addView(s.nineKeySpellingScroll,
+                    KeyboardGeometry.frameMatchParentParams());
             placeSpellingRow(true);
         }
     }
