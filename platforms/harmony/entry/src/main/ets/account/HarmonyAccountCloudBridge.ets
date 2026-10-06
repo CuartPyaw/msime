@@ -7,7 +7,7 @@ import client from 'libmsimeclient.so';
 import {
   AccountCloudBridge, AccountDownloadResponse, AccountTransportResponse,
   MAX_DICTIONARY_EXPORT_BYTES, MAX_SNAPSHOT_DOWNLOAD_BYTES, dictionaryChangePageChanged,
-  strictAccountOk
+  accountReplyValue, strictAccountOk
 } from './AccountCloudBridge';
 import { KeyboardSession } from '../keyboard/KeyboardSession';
 import { KeyboardFeedbackBridge } from '../keyboard/KeyboardFeedbackBridge';
@@ -225,7 +225,8 @@ class HarmonyTransport extends HarmonyAccountTransport {
         revision: revision, expected_sha256: expectedSha256, access_token: token
       }), source);
       const reply: SnapshotReply = JSON.parse(raw) as SnapshotReply;
-      if (strictAccountOk(reply.ok)) return { status: 200, body: JSON.stringify(reply.value) };
+      const value: SnapshotValue | null = accountReplyValue(reply);
+      if (value !== null) return { status: 200, body: JSON.stringify(value) };
       switch (reply.error) {
         case 'account_invalid': return { status: 400, body: '' };
         case 'account_unauthorized': return { status: 401, body: '' };
@@ -654,7 +655,7 @@ export class HarmonyAccountCloudBridge {
     try {
       const reply: SnapshotReply = JSON.parse(client.prepareHost(JSON.stringify(
         KeyboardSession.prepareRequest(resources, stateRoot)))) as SnapshotReply;
-      return strictAccountOk(reply.ok) ? reply.value : null;
+      return accountReplyValue(reply);
     } catch {
       return null;
     }
@@ -675,7 +676,7 @@ export class HarmonyAccountCloudBridge {
       };
       const reply: SnapshotQueueReply =
         JSON.parse(client.snapshotQueue(JSON.stringify(action))) as SnapshotQueueReply;
-      return strictAccountOk(reply.ok) && reply.value !== undefined ? reply.value : null;
+      return accountReplyValue(reply);
     } catch {
       return null;
     }
@@ -750,7 +751,7 @@ export class HarmonyAccountCloudBridge {
   private inspectSnapshot(file: string): SnapshotMetadata | null {
     try {
       const reply: SnapshotInspectReply = JSON.parse(client.snapshotInspect(file)) as SnapshotInspectReply;
-      return strictAccountOk(reply.ok) && reply.value !== undefined ? reply.value : null;
+      return accountReplyValue(reply);
     } catch {
       return null;
     }
@@ -932,10 +933,11 @@ export class HarmonyAccountCloudBridge {
       };
       const reply: SnapshotQueueReply =
         JSON.parse(client.snapshotQueue(JSON.stringify(action))) as SnapshotQueueReply;
-      if (!strictAccountOk(reply.ok) || reply.value === undefined) {
+      const queueValue: SnapshotQueueState | null = accountReplyValue(reply);
+      if (queueValue === null) {
         return this.failure(reply.error ?? 'snapshot_unavailable');
       }
-      const request: SnapshotRequest | null = this.publicRequest(reply.value.request);
+      const request: SnapshotRequest | null = this.publicRequest(queueValue.request);
       this.clearSnapshotPreview();
       return this.success({ request: request });
     } catch {
@@ -952,11 +954,12 @@ export class HarmonyAccountCloudBridge {
       };
       const reply: SnapshotQueueReply =
         JSON.parse(client.snapshotQueue(JSON.stringify(action))) as SnapshotQueueReply;
-      if (!strictAccountOk(reply.ok) || reply.value === undefined) {
+      const queueValue: SnapshotQueueState | null = accountReplyValue(reply);
+      if (queueValue === null) {
         return this.failure(reply.error ?? 'snapshot_unavailable');
       }
       this.clearSnapshotPreview();
-      return this.success({ request: this.publicRequest(reply.value.request) });
+      return this.success({ request: this.publicRequest(queueValue.request) });
     } catch {
       return this.failure('snapshot_unavailable');
     }

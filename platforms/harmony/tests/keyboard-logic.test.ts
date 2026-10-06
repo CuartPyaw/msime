@@ -233,6 +233,7 @@ import {
   COMMUNITY_REPORT_REASONS,
   dictionaryChangePageChanged,
   parseResponseContentLength,
+  accountReplyValue,
   strictAccountOk,
 } from "../entry/src/main/ets/account/AccountCloudBridge";
 import {
@@ -7464,6 +7465,17 @@ group("account success envelopes require a real boolean", () => {
   for (const malformed of [false, 0, 1, "true", "false", {}, []]) {
     check(!strictAccountOk(malformed), `malformed account ok value is rejected: ${String(malformed)}`);
   }
+});
+
+group("account native success envelopes require a value", () => {
+  check(accountReplyValue({ ok: true, value: { id: "synthetic" } })?.id === "synthetic",
+    "account success exposes its object value");
+  check(accountReplyValue({ ok: true }) === null,
+    "account success without a value is refused");
+  check(accountReplyValue({ ok: true, value: null }) === null,
+    "account success with a null value is refused");
+  check(accountReplyValue({ ok: false, value: { id: "stale" } }) === null,
+    "account failure never exposes a value");
 });
 
 group("account and cloud clipboard bridge keeps secrets native", () => {

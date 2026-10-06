@@ -605,6 +605,12 @@ export function strictAccountOk(value: unknown): value is true {
   return value === true;
 }
 
+/** 原生账号成功信封必须同时带有非空 value，避免缺失值流入后续请求。 */
+export function accountReplyValue<T>(reply: { ok?: unknown; value?: T | null }): T | null {
+  return strictAccountOk(reply.ok) && reply.value !== undefined && reply.value !== null
+    ? reply.value : null;
+}
+
 function validString(value: unknown, maximum: number, allowEmpty = false): value is string {
   return (
     typeof value === "string" &&
