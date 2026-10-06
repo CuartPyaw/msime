@@ -94,7 +94,7 @@ public final class KeyboardBrandButton extends KeyboardPressButton {
             bounds.set(centerX - side / 2f, centerY - side / 2f, centerX + side / 2f,
                 centerY + side / 2f);
             fill.setColor(panelOpenFill);
-            float radius = Math.min(side / 2f,
+            float radius = BoundsPolicy.atMost(side / 2f,
                 KeyboardGeometry.floatPixels(getContext(), ACTIVE_RADIUS_DP));
             canvas.drawRoundRect(bounds, radius, radius, fill);
         }
