@@ -143,6 +143,12 @@ public final class Ui {
             ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
+    /** Layout parameters for a view that wraps both its content dimensions. */
+    public static LinearLayout.LayoutParams wrap() {
+        return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT);
+    }
+
     /** 读一个颜色主题属性；属性缺失时退回洋红，让漏配的属性在截图里一眼可见，而不是悄悄显示成别的颜色。 */
     @ColorInt public static int color(Context context, @AttrRes int attr) {
         return MaterialColors.getColor(context, attr, Color.MAGENTA);

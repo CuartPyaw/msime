@@ -268,7 +268,7 @@ public final class ProfilePage extends DetailPage {
         TextView name = new TextView(context);
         name.setText(profile.displayName());
         Ui.style(name, 22, 700, Ui.text(context));
-        LinearLayout.LayoutParams nameParams = wrap();
+        LinearLayout.LayoutParams nameParams = Ui.wrap();
         nameParams.topMargin = Ui.dp(context, 10);
         header.addView(name, nameParams);
 
@@ -276,7 +276,7 @@ public final class ProfilePage extends DetailPage {
             TextView email = new TextView(context);
             email.setText(profile.email());
             Ui.style(email, Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));
-            LinearLayout.LayoutParams emailParams = wrap();
+            LinearLayout.LayoutParams emailParams = Ui.wrap();
             emailParams.topMargin = Ui.dp(context, 2);
             header.addView(email, emailParams);
         }
@@ -289,7 +289,7 @@ public final class ProfilePage extends DetailPage {
             Ui.style(chip, 12, 500, Ui.accent(context));
             chip.setBackground(Ui.pill(Ui.accentSoft(context)));
             chip.setPadding(Ui.dp(context, 10), Ui.dp(context, 3), Ui.dp(context, 10), Ui.dp(context, 3));
-            LinearLayout.LayoutParams chipParams = wrap();
+            LinearLayout.LayoutParams chipParams = Ui.wrap();
             chipParams.topMargin = Ui.dp(context, 8);
             header.addView(chip, chipParams);
         }
@@ -562,7 +562,4 @@ public final class ProfilePage extends DetailPage {
         return "没有完成，请稍后再试";
     }
 
-    private static LinearLayout.LayoutParams wrap() {
-        return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-    }
 }
