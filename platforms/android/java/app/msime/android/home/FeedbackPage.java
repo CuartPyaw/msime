@@ -114,9 +114,6 @@ public final class FeedbackPage extends DetailPage {
         add.setOrientation(LinearLayout.HORIZONTAL);
         add.setGravity(Gravity.CENTER_VERTICAL);
         Ui.setPaddingDp(add, requireContext(), 16, 12, 16, 14);
-        add.setBackground(Ui.ripple(context));
-        add.setClickable(true);
-        add.setFocusable(true);
         add.setContentDescription("添加截图，最多 " + FeedbackApi.MAX_SCREENSHOTS + " 张");
         ImageView icon = new ImageView(context);
         icon.setImageResource(R.drawable.ms_w4_me2_image);
@@ -128,7 +125,7 @@ public final class FeedbackPage extends DetailPage {
         LinearLayout.LayoutParams labelParams = Ui.wrap();
         labelParams.setMarginStart(Ui.dp(requireContext(), 10));
         add.addView(label, labelParams);
-        add.setOnClickListener(ignored -> picker.launch("image/*"));
+        Ui.makeClickable(add, context, () -> picker.launch("image/*"));
         card.addView(add, Ui.matchWidth());
         addShot = add;
 
