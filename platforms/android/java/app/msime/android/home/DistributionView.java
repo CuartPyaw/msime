@@ -9,7 +9,7 @@ import android.graphics.Typeface;
 import android.util.AttributeSet;
 import android.view.View;
 import androidx.annotation.Nullable;
-import androidx.core.graphics.ColorUtils;
+import app.msime.android.ColorPolicy;
 import app.msime.android.TypingStatisticsSummary;
 import app.msime.android.TypingStatisticsSummary.Share;
 import java.util.List;
@@ -70,7 +70,7 @@ public final class DistributionView extends View {
         Context context = getContext();
         int accent = Ui.accent(context);
         int mix = MIX[Math.min(index, MIX.length - 1)];
-        return ColorUtils.blendARGB(Ui.card(context), accent, mix / 100f);
+        return ColorPolicy.blend(Ui.card(context), accent, mix / 100f);
     }
 
     private int track() {
