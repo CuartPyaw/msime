@@ -21,7 +21,6 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.widget.NestedScrollView;
 import app.msime.android.AppEdition;
-import app.msime.android.DrawablePolicy;
 import app.msime.android.FirstRunPreparation;
 import app.msime.android.KeyboardScheme;
 import app.msime.android.R;
@@ -533,7 +532,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         card.addView(text, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
 
         View radio = new View(this);
-        GradientDrawable dot = DrawablePolicy.circleOutlined(selected ? Ui.page(this) : 0,
+        GradientDrawable dot = Ui.circleOutlined(selected ? Ui.page(this) : 0,
             selected ? Ui.dp(this, 6) : Ui.atLeastOnePx(this, 1.5f),
             selected ? Ui.accent(this) : Ui.subText(this));
         radio.setBackground(dot);
