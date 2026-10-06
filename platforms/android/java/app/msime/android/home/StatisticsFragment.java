@@ -407,11 +407,9 @@ public final class StatisticsFragment extends HomeTabFragment {
 
     /** 一张统计卡：andCard 底、20dp 圆角，加在 `parent` 末尾。 */
     private static LinearLayout card(Context context, LinearLayout parent, int padding) {
-        LinearLayout card = new LinearLayout(context);
-        card.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout card = Ui.verticalCard(context, 20);
         int pad = Ui.dp(context, padding);
         Ui.setSymmetricPaddingPx(card, pad);
-        card.setBackground(Ui.rounded(Ui.card(context), Ui.dp(context, 20)));
         LinearLayout.LayoutParams params = Ui.matchWidth();
         params.topMargin = Ui.dp(context, parent.getChildCount() == 0 ? 16 : 10);
         parent.addView(card, params);

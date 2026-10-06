@@ -563,6 +563,14 @@ public final class Ui {
         return button;
     }
 
+    /** Create a vertically arranged rounded surface for page cards. */
+    public static LinearLayout verticalCard(Context context, float radiusDp) {
+        LinearLayout card = new LinearLayout(context);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(rounded(card(context), dp(context, radiusDp)));
+        return card;
+    }
+
     /** 设置字号（sp）与字重。 */
     public static void style(TextView view, int sizeSp, int weight, @ColorInt int color) {
         view.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp);
