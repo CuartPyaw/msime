@@ -418,4 +418,12 @@ final class KeyboardSheets {
         button.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         return button;
     }
+
+    /** 构造并绑定详情卡片行尾的 tonal 胶囊按钮。 */
+    static TextView tonalButton(Context context, CharSequence label, CharSequence description, int weight,
+            Runnable action) {
+        TextView button = tonalButton(context, label, description, weight);
+        button.setOnClickListener(ignored -> action.run());
+        return button;
+    }
 }

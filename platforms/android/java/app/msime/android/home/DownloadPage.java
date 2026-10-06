@@ -126,8 +126,8 @@ public final class DownloadPage extends DetailPage {
     private void getRow(GroupCard group, @DrawableRes int icon, String title, String subtitle, String platform) {
         GroupCard.Row row = row(group, icon, title, subtitle);
         Context context = row.view().getContext();
-        TextView button = KeyboardSheets.tonalButton(context, "获取", "获取，" + title, 600);
-        button.setOnClickListener(ignored -> AboutPage.openLink(context, DOWNLOAD + "?release=" + platform));
+        TextView button = KeyboardSheets.tonalButton(context, "获取", "获取，" + title, 600,
+            () -> AboutPage.openLink(context, DOWNLOAD + "?release=" + platform));
         attach(row, button);
     }
 
