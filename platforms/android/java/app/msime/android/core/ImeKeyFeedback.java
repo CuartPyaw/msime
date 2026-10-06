@@ -211,8 +211,8 @@ final class ImeKeyFeedback {
             : files == null ? null : HostOptionsPolicy.bootstrapStateDirectory(files);
         JSONObject request = new JSONObject();
         request.put("state_root", state == null ? JSONObject.NULL : state);
-        request.put("sound_packs", files == null ? JSONObject.NULL
-            : new File(files, "sound-packs").getAbsolutePath());
+        File soundPacks = HostOptionsPolicy.soundPacksDirectory(files);
+        request.put("sound_packs", soundPacks == null ? JSONObject.NULL : soundPacks.getAbsolutePath());
         request.put("pack", pack);
         return request.toString();
     }
