@@ -22,6 +22,7 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 import app.msime.android.AppEdition;
+import app.msime.android.BoundsPolicy;
 import app.msime.android.HttpBodyPolicy;
 import app.msime.android.R;
 import app.msime.android.UpdateApi;
@@ -283,7 +284,7 @@ public final class AboutPage extends DetailPage {
                 if (Thread.currentThread().isInterrupted())
                     throw new java.util.concurrent.CancellationException("update download cancelled");
                 if (total <= 0) return;
-                int value = (int) Math.min(100, done * 100 / total);
+                int value = (int) BoundsPolicy.atMost(done * 100 / total, 100L);
                 MAIN.post(() -> {
                     if (value == percent || state != State.DOWNLOADING) return;
                     percent = value;
