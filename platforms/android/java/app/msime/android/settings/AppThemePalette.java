@@ -193,7 +193,7 @@ public final class AppThemePalette {
 
     /** 同一颜色换成指定的 alpha（0–255）。 */
     public static int withAlpha(int color, int alpha) {
-        return (color & 0x00FFFFFF) | ((alpha & 0xFF) << 24);
+        return ColorPolicy.withAlpha(color, alpha);
     }
 
     /** `#AARRGGBB` 形式，供日志和测试比对。 */

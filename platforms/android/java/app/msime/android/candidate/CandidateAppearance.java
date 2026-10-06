@@ -42,8 +42,8 @@ public final class CandidateAppearance {
                                    List<String> fallbackFonts) {
         int text = parseColor(strip.keyForeground(), 0xff000000);
         return new Palette(strip.id(), text,
-            parseColor(strip.secondary(), withAlpha(text, 0x9d)),
-            parseColor(strip.accent(), text), 0, withAlpha(text, 0x0f),
+            parseColor(strip.secondary(), ColorPolicy.withAlpha(text, 0x9d)),
+            parseColor(strip.accent(), text), 0, ColorPolicy.withAlpha(text, 0x0f),
             parseColor(strip.background(), 0xffffffff), 0,
             safeFont(fontFamily, "Noto Sans SC"), safeFont(englishFont, ""),
             safeFallbackFonts(fallbackFonts),
@@ -59,10 +59,6 @@ public final class CandidateAppearance {
         if (value == null || !value.matches("#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8}")) return fallback;
         long parsed = Long.parseLong(value.substring(1), 16);
         return value.length() == 7 ? 0xff000000 | (int) parsed : (int) parsed;
-    }
-
-    private static int withAlpha(int color, int alpha) {
-        return (alpha << 24) | (color & 0x00ffffff);
     }
 
     private static List<String> fallbackFonts(JSONArray values) {
