@@ -238,6 +238,11 @@ public final class KeyboardGeometry {
         return new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, weight);
     }
 
+    /** Create weighted linear layout parameters with an already pixel-sized height. */
+    public static LinearLayout.LayoutParams weightedHeightPxParams(int heightPixels, float weight) {
+        return new LinearLayout.LayoutParams(0, heightPixels, weight);
+    }
+
     /** Create weighted linear layout parameters with a fixed height in dp. */
     public static LinearLayout.LayoutParams weightedHeightParams(Context context, float heightDp,
             float weight) {

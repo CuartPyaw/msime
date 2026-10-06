@@ -1549,7 +1549,7 @@ final class ImePanels {
         s.emojiTabs = new LinearLayout(s);
         s.emojiTabs.setOrientation(LinearLayout.HORIZONTAL);
         s.emojiTabs.setContentDescription("表情分类");
-        LinearLayout.LayoutParams tabsParams = new LinearLayout.LayoutParams(0, s.pixels(40), 1);
+        LinearLayout.LayoutParams tabsParams = KeyboardGeometry.weightedHeightPxParams(s.pixels(40), 1);
         tabsParams.setMarginStart(s.pixels(6));
         tabsParams.setMarginEnd(s.pixels(6));
         bar.addView(s.emojiTabs, tabsParams);
