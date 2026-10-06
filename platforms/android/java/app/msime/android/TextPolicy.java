@@ -69,6 +69,11 @@ public final class TextPolicy {
         return value.getBytes(StandardCharsets.UTF_8).length;
     }
 
+    /** Decode UTF-8 response bytes with the shared text policy. */
+    public static String utf8(byte[] value) {
+        return value == null ? "" : new String(value, StandardCharsets.UTF_8);
+    }
+
     /** Return the number of Unicode code points in text, or zero for null. */
     public static int codePointLength(String value) {
         return value == null ? 0 : value.codePointCount(0, value.length());

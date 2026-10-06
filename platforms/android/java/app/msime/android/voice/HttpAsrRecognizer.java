@@ -165,8 +165,8 @@ public final class HttpAsrRecognizer {
             if (status < 200 || status >= 300) throw new Refused(Failure.NETWORK);
             String text;
             try (InputStream input = opened.getInputStream()) {
-                String response = new String(
-                    HttpBodyPolicy.readRequired(input, MAX_RESPONSE_BYTES), StandardCharsets.UTF_8);
+                String response = TextPolicy.utf8(
+                    HttpBodyPolicy.readRequired(input, MAX_RESPONSE_BYTES));
                 text = text(response);
             }
             if (text.isEmpty()) throw new Refused(Failure.EMPTY);

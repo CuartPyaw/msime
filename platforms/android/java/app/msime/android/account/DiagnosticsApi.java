@@ -394,8 +394,7 @@ public final class DiagnosticsApi {
     }
 
     private static String entryText(InputStream stream) throws IOException {
-        return new String(HttpBodyPolicy.readRequired(stream, MAX_BODY_BYTES * 4),
-            StandardCharsets.UTF_8);
+        return TextPolicy.utf8(HttpBodyPolicy.readRequired(stream, MAX_BODY_BYTES * 4));
     }
 
     private static String baseName(String path) {
