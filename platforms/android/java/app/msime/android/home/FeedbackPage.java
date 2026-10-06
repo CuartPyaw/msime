@@ -55,7 +55,7 @@ public final class FeedbackPage extends DetailPage {
     private FeedbackApi.Type type = FeedbackApi.Type.BUG;
     private boolean diagnostics;
     private String draft = "";
-    private final List<byte[]> screenshots = new ArrayList<>();
+    private final List<byte[]> screenshots = new ArrayList<>(FeedbackApi.MAX_SCREENSHOTS);
     private boolean sending;
     private boolean sent;
 
