@@ -346,7 +346,7 @@ public final class AiSkinPage extends DetailPage {
         }
 
         GroupCard describe = GroupCard.add(target, "描述");
-        EditText input = new EditText(context);
+        EditText input = Ui.styledInput(context, Ui.TEXT_ROW_TITLE, 400, Ui.text(context));
         input.setText(s.prompt);
         input.setHint("写下你想要的样子，例如「雨后竹林」");
         input.setHintTextColor(Ui.subText(context));
@@ -355,7 +355,6 @@ public final class AiSkinPage extends DetailPage {
         ViewPolicy.setTopStart(input);
         input.setFilters(new InputFilter[] {new InputFilter.LengthFilter(SkinJobsApi.MAX_PROMPT_CHARACTERS)});
         ViewPolicy.clearBackground(input);
-        Ui.style(input, Ui.TEXT_ROW_TITLE, 400, Ui.text(context));
         Ui.setPaddingDp(input, context, 16, 12, 16, 4);
         input.setEnabled(!s.busy);
         describe.card().addView(input, Ui.matchWidth());

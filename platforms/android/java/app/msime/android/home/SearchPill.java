@@ -39,13 +39,12 @@ public final class SearchPill extends LinearLayout {
         int icon = Ui.dp(context, 16);
         addView(glyph, new LayoutParams(icon, icon));
 
-        field = new EditText(context);
+        field = Ui.styledInput(context, Ui.TEXT_ROW_TITLE, 400, Ui.text(context));
         ViewPolicy.clearBackground(field);
         ViewPolicy.clearPadding(field);
         field.setSingleLine(true);
         field.setInputType(InputType.TYPE_CLASS_TEXT);
         field.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
-        Ui.style(field, Ui.TEXT_ROW_TITLE, 400, Ui.text(context));
         field.setHintTextColor(Ui.subText(context));
         field.setHint("搜索");
         LayoutParams params = new LayoutParams(0, Ui.dp(context, Ui.SEARCH_HEIGHT), 1f);
