@@ -1,6 +1,7 @@
 package app.msime.android;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -94,6 +95,12 @@ public final class CommunityRequest {
 
     /** 社区页顶部的三个分段，顺序即展示顺序；回复模板放在「短语」分段里作为第二个小节「AI 回复模板」。 */
     public static List<Kind> segments() { return List.of(Kind.SKIN, Kind.DICTIONARY, Kind.PHRASE); }
+
+    /** Copy at most {@code limit} catalogue entries for a bounded discovery section. */
+    public static <T> List<T> limitedCopy(List<T> values, int limit) {
+        if (values == null || values.isEmpty() || limit <= 0) return new ArrayList<>();
+        return new ArrayList<>(values.subList(0, Math.min(limit, values.size())));
+    }
 
     /** 一个短语包最多 200 条。 */
     public static final int MAX_PHRASES = 200;
