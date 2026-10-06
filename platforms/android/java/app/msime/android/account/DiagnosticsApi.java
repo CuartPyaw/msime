@@ -262,14 +262,14 @@ public final class DiagnosticsApi {
                 if (entry.isDirectory()) continue;
                 String name = baseName(entry.getName());
                 if (include.configSnapshot() && name.equals("config_snapshot.json")) {
-                    config = configSnapshot(readEntry(stream));
+                    config = configSnapshot(entryText(stream));
                 } else if (input != null && (name.equals("input_events.jsonl") || name.equals("input-events.jsonl"))) {
-                    input.addAll(eventLines(readEntry(stream), false));
+                    input.addAll(eventLines(entryText(stream), false));
                 } else if (perf != null && (name.equals("perf.jsonl") || name.equals("perf_trace.jsonl")
                         || name.equals("performance_logs.jsonl"))) {
-                    perf.addAll(eventLines(readEntry(stream), true));
+                        perf.addAll(eventLines(entryText(stream), true));
                 } else if (crashes != null && name.endsWith(".crash") && crashes.size() < MAX_CRASH_LOGS) {
-                    crashes.add(crashRecord(readEntry(stream), entry.getTime()));
+                    crashes.add(crashRecord(entryText(stream), entry.getTime()));
                 }
             }
         }
@@ -347,10 +347,9 @@ public final class DiagnosticsApi {
         return new State(snapshot, Collections.unmodifiableList(accesses));
     }
 
-    private static String readEntry(InputStream stream) throws IOException {
-        byte[] bytes = HttpBodyPolicy.readBounded(stream, MAX_BODY_BYTES * 4);
-        if (bytes == null) throw new IOException("diagnostics bundle entry too large");
-        return new String(bytes, StandardCharsets.UTF_8);
+    private static String entryText(InputStream stream) throws IOException {
+        return new String(HttpBodyPolicy.readRequired(stream, MAX_BODY_BYTES * 4),
+            StandardCharsets.UTF_8);
     }
 
     private static String baseName(String path) {
