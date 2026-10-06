@@ -336,6 +336,14 @@ public final class Ui {
         return view;
     }
 
+    /** Create the page-coloured separation band used between sheet options and the cancel row. */
+    public static View sheetSeparator(Context context) {
+        View view = new View(context);
+        view.setBackgroundColor(page(context));
+        view.setLayoutParams(matchWidthHeight(context, 8));
+        return view;
+    }
+
     /** Layout parameters for a weighted child that wraps its height. */
     public static LinearLayout.LayoutParams weightWrap(float weight) {
         return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, weight);
