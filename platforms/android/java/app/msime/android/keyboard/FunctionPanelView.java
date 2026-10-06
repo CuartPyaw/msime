@@ -196,7 +196,7 @@ public final class FunctionPanelView extends LinearLayout {
 
         /** 条目不画底色；键盘的整树样式通道会给每个 Button 套键帽，这里一律挡掉，免得开启态被画成实心色块。 */
         @Override public void setBackground(Drawable background) {
-            ViewPolicy.clearBackground(super);
+            super.setBackground(null);
         }
 
         @Override public void setPressed(boolean pressed) {

@@ -44,7 +44,7 @@ public final class CandidateChevronButton extends Button {
 
     /** 展开键只画分隔线和 chevron；键盘的整树样式通道会给每个 Button 套键帽，这里挡掉。 */
     @Override public void setBackground(Drawable background) {
-        ViewPolicy.clearBackground(super);
+        super.setBackground(null);
     }
 
     public void setColors(int chevron, int hairline) {

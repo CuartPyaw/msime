@@ -8,7 +8,7 @@ public final class KeyboardBorderlessButton extends KeyboardPressButton {
     public KeyboardBorderlessButton(Context context) {
         super(context);
         setKeyboardRole(KeyboardKeyRole.GLYPH);
-        ViewPolicy.clearBackground(super);
+        super.setBackground(null);
     }
 
     @Override public void setBackground(Drawable background) {
