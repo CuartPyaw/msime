@@ -181,10 +181,11 @@ public final class DeviceDataApi {
             for (int index = 0; index < rows.length(); index++) {
                 JSONObject row = rows.optJSONObject(index);
                 if (row == null || string(row, "id").isEmpty()) continue;
-                sections.add(new DataSection(string(row, "id"), count(row.opt("bytes")), count(row.opt("items"))));
+                sections.add(new DataSection(string(row, "id"), strictCount(row.opt("bytes")),
+                    strictCount(row.opt("items"))));
             }
         }
-        return new DataSummary(count(root.opt("bytes")), Collections.unmodifiableList(sections));
+        return new DataSummary(strictCount(root.opt("bytes")), Collections.unmodifiableList(sections));
     }
 
     /**
@@ -350,8 +351,13 @@ public final class DeviceDataApi {
         return value instanceof String text ? text : "";
     }
 
-    private static long count(Object value) {
-        return value instanceof Number number ? BoundsPolicy.nonNegative(number.longValue()) : 0L;
+    /** Data summary counters are JSON integers; reject coercion and negative values. */
+    public static long strictCount(Object value) throws CloudApi.Failure {
+        if (!(value instanceof Integer) && !(value instanceof Long))
+            throw new CloudApi.Failure(500, "invalid_response", "invalid data count", 0);
+        long count = ((Number) value).longValue();
+        if (count < 0) throw new CloudApi.Failure(500, "invalid_response", "invalid data count", 0);
+        return count;
     }
 
     /** 数一数写了多少字节，原样转给下游。 */
