@@ -411,7 +411,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         LinearLayout card = new LinearLayout(context);
         card.setOrientation(LinearLayout.VERTICAL);
         int pad = Ui.dp(context, padding);
-        card.setPadding(pad, pad, pad, pad);
+        Ui.setSymmetricPaddingPx(card, pad);
         card.setBackground(Ui.rounded(Ui.card(context), Ui.dp(context, 20)));
         LinearLayout.LayoutParams params = Ui.matchWidth();
         params.topMargin = Ui.dp(context, parent.getChildCount() == 0 ? 16 : 10);
@@ -458,7 +458,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         LinearLayout tile = new LinearLayout(context);
         tile.setOrientation(LinearLayout.VERTICAL);
         int pad = Ui.dp(context, 14);
-        tile.setPadding(pad, pad, pad, pad);
+        Ui.setSymmetricPaddingPx(tile, pad);
         tile.setBackground(Ui.rounded(Ui.card(context), Ui.dp(context, 20)));
         tile.addView(label(context, title, 13, Ui.text(context)));
         TextView number = new TextView(context);
