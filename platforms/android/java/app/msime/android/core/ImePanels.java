@@ -753,10 +753,7 @@ final class ImePanels {
     }
 
     static GradientDrawable replySurface(int color, float radius) {
-        GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(color);
-        drawable.setCornerRadius(radius);
-        return drawable;
+        return DrawablePolicy.rounded(color, radius);
     }
 
     /**
