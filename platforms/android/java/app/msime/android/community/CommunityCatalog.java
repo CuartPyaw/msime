@@ -141,7 +141,7 @@ public final class CommunityCatalog {
      */
     public String report(Item item, String reason, String detail) {
         String text = detail == null ? "" : detail.trim();
-        if (item == null || !CommunityRequest.validReport(reason, text)) {
+        if (!validReportItem(item) || !CommunityRequest.validReport(reason, text)) {
             return CommunityRequest.message("invalid_report_reason", 400);
         }
         BackendAccount account = new BackendAccount(context);
@@ -406,6 +406,11 @@ public final class CommunityCatalog {
     /** A successful HTTP status is not enough: the backend must confirm that it recorded the report. */
     static boolean confirmedReport(Object value) {
         return Boolean.TRUE.equals(value);
+    }
+
+    /** Keep the report endpoint safe even when a caller bypasses catalogue parsing. */
+    static boolean validReportItem(Item item) {
+        return item != null && validUuid(item.id());
     }
 
     private static boolean confirmedReport(HttpsURLConnection connection) throws Exception {

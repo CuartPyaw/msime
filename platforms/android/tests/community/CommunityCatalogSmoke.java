@@ -72,6 +72,11 @@ public final class CommunityCatalogSmoke {
         validUuid.setAccessible(true);
         check(!(boolean) validUuid.invoke(null, "00000000-0000-0000-0000-000000000000"),
             "nil UUIDs must not be accepted as community item IDs");
+        Method validReportItem = CommunityCatalog.class.getDeclaredMethod(
+            "validReportItem", CommunityCatalog.Item.class);
+        validReportItem.setAccessible(true);
+        check(!(boolean) validReportItem.invoke(null, nilId),
+            "reporting must reject an item with a nil ID even when bypassing catalogue parsing");
         CommunityCatalog.Item invalidRating = new CommunityCatalog.Item(
             UUID.randomUUID().toString(), CommunityRequest.Kind.SKIN, "名称", "说明", "作者",
             0, 0, 1, null, CommunityRequest.Category.OTHER, false, 0, null);
