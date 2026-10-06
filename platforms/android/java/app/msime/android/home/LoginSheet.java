@@ -22,7 +22,6 @@ import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.method.LinkMovementMethod;
 import android.text.style.ClickableSpan;
-import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
@@ -35,6 +34,7 @@ import androidx.core.widget.NestedScrollView;
 import app.msime.android.BackendAccount;
 import app.msime.android.BoundsPolicy;
 import app.msime.android.CloudApi;
+import app.msime.android.ViewPolicy;
 import app.msime.android.keyboard.KeyboardGeometry;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.google.android.material.bottomsheet.BottomSheetDragHandleView;
@@ -110,7 +110,7 @@ final class LoginSheet {
 
         LinearLayout header = new LinearLayout(activity);
         header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(header);
         TextView title = Ui.styledLabel(activity, "link".equals(purpose) ? "添加登录方式" : "登录水杉",
             22, 700, Ui.text(activity));
         title.setAccessibilityHeading(true);
@@ -154,7 +154,7 @@ final class LoginSheet {
             root.addView(options, Ui.matchWidth(activity, 0));
 
         status = Ui.styledLabel(activity, "", 13, 400, Ui.subText(activity));
-        status.setGravity(Gravity.CENTER_HORIZONTAL);
+        ViewPolicy.setCenteredHorizontally(status);
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         status.setVisibility(View.GONE);
         root.addView(status, Ui.matchWidth(activity, 12));
@@ -317,7 +317,7 @@ final class LoginSheet {
     private View button(Drawable icon, String label, int fill, int ink, int stroke, Runnable action) {
         LinearLayout button = new LinearLayout(activity);
         button.setOrientation(LinearLayout.HORIZONTAL);
-        button.setGravity(Gravity.CENTER);
+        ViewPolicy.setCentered(button);
         Ui.setMinimumHeightDp(button, activity, 50);
         GradientDrawable face = stroke == 0
             ? Ui.rounded(fill, Ui.dp(activity, 12))
@@ -357,7 +357,7 @@ final class LoginSheet {
         field.setBackground(face);
         Ui.setHorizontalPaddingDp(field, activity, 14);
         Ui.setTextMinHeightDp(field, activity, 50);
-        field.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(field);
         field.setContentDescription(hint);
         return field;
     }
@@ -384,7 +384,7 @@ final class LoginSheet {
         view.setText(spanned);
         view.setMovementMethod(LinkMovementMethod.getInstance());
         Ui.style(view, 12, 400, Ui.subText(activity));
-        view.setGravity(Gravity.CENTER_HORIZONTAL);
+        ViewPolicy.setCenteredHorizontally(view);
         return view;
     }
 
