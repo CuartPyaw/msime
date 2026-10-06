@@ -204,14 +204,18 @@ public final class FunctionPanelView extends LinearLayout {
             if (changed) invalidate();
         }
 
+        private void configureLabelPaint(boolean on) {
+            textPaint.setTextSize(KeyboardGeometry.keySp(getContext(), LABEL_SP));
+            textPaint.setTypeface(on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+        }
+
         @Override protected void onDraw(Canvas canvas) {
             float density = KeyboardGeometry.density(getContext());
             boolean on = state == State.ON;
             int color = on ? panel.accent : panel.foreground;
             if (isPressed()) color = ColorPolicy.withAlpha(color,
                 Color.alpha(color) * PRESSED_ALPHA / 255);
-            textPaint.setTextSize(KeyboardGeometry.keySp(getContext(), LABEL_SP));
-            textPaint.setTypeface(on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+            configureLabelPaint(on);
             Paint.FontMetrics label = textPaint.getFontMetrics();
             float labelHeight = label.descent - label.ascent;
             float area = ICON_AREA_DP * density;
@@ -240,8 +244,7 @@ public final class FunctionPanelView extends LinearLayout {
                     iconCenterY - (metrics.ascent + metrics.descent) / 2f, glyph);
                 iconRight = centerX + box / 2f;
                 iconBottom = iconCenterY + box / 2f;
-                textPaint.setTextSize(KeyboardGeometry.keySp(getContext(), LABEL_SP));
-                textPaint.setTypeface(on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+                configureLabelPaint(on);
             } else {
                 float size = ICON_DP * density;
                 if (entry.icon != null) {
