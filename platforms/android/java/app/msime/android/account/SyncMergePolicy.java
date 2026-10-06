@@ -168,7 +168,7 @@ public final class SyncMergePolicy {
      */
     public static long skinBudget(long otherDocumentBytes) {
         long overhead = SKINS_KEY.length() + 8L;
-        long room = DOCUMENT_LIMIT_BYTES - Math.max(0L, otherDocumentBytes) - overhead;
+        long room = DOCUMENT_LIMIT_BYTES - BoundsPolicy.nonNegative(otherDocumentBytes) - overhead;
         return BoundsPolicy.bounded(room, 0L, SKIN_FIELD_LIMIT);
     }
 
