@@ -401,16 +401,9 @@ final class KeyboardSheets {
 
     /** 构造详情卡片行尾的 tonal 胶囊按钮；调用方只需绑定业务点击行为。 */
     static TextView tonalButton(Context context, CharSequence label, CharSequence description, int weight) {
-        TextView button = new TextView(context);
-        button.setText(label);
-        button.setGravity(Gravity.CENTER);
-        button.setSingleLine(true);
-        Ui.style(button, Ui.TEXT_BUTTON_SMALL, weight, Ui.accent(context));
-        button.setBackground(Ui.pillRipple(context, Ui.accentSoft(context)));
-        Ui.setButtonPadding(button, context);
-        Ui.setTextMinHeightDp(button, context, Ui.COMPACT_BUTTON_MIN_HEIGHT);
-        button.setClickable(true);
-        button.setFocusable(true);
+        TextView button = Ui.pillButton(context, label, Ui.TEXT_BUTTON_SMALL, weight,
+            Ui.accentSoft(context), Ui.accent(context), Ui.BUTTON_PADDING_H, Ui.BUTTON_PADDING_V,
+            Ui.COMPACT_BUTTON_MIN_HEIGHT, 0);
         button.setAccessibilityDelegate(buttonDelegate(description));
         button.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         return button;
