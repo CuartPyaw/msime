@@ -317,9 +317,7 @@ final class LoginSheet {
         int pressed = Ui.withAlpha(fill == Color.BLACK ? Color.WHITE : Ui.text(activity), 0.12f);
         button.setBackground(new RippleDrawable(android.content.res.ColorStateList.valueOf(pressed), face, mask));
         if (icon != null) {
-            ImageView glyph = new ImageView(activity);
-            glyph.setImageDrawable(icon);
-            Ui.hideFromAccessibility(glyph);
+            ImageView glyph = Ui.decorativeIcon(activity, icon);
             LinearLayout.LayoutParams params = Ui.squareParams(activity, 20);
             params.setMarginEnd(Ui.dp(activity, 8));
             button.addView(glyph, params);
