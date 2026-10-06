@@ -88,7 +88,7 @@ public final class FeedbackPage extends DetailPage {
             | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         input.setGravity(Gravity.TOP | Gravity.START);
         input.setMinLines(4);
-        input.setBackground(null);
+        ViewPolicy.clearBackground(input);
         Ui.style(input, Ui.TEXT_ROW_TITLE, 400, Ui.text(context));
         input.setHintTextColor(Ui.subText(context));
         Ui.setSymmetricPaddingDp(input, requireContext(), 16, 14);

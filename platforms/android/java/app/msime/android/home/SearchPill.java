@@ -40,7 +40,7 @@ public final class SearchPill extends LinearLayout {
         addView(glyph, new LayoutParams(icon, icon));
 
         field = new EditText(context);
-        field.setBackground(null);
+        ViewPolicy.clearBackground(field);
         ViewPolicy.clearPadding(field);
         field.setSingleLine(true);
         field.setInputType(InputType.TYPE_CLASS_TEXT);
