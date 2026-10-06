@@ -119,9 +119,7 @@ public final class FeedbackPage extends DetailPage {
         icon.setImageResource(R.drawable.ms_w4_me2_image);
         Ui.setImageTint(icon, Ui.accent(context));
         add.addView(icon, Ui.squareParams(requireContext(), 20));
-        TextView label = new TextView(context);
-        label.setText("添加截图");
-        Ui.style(label, Ui.TEXT_ROW_TITLE, 400, Ui.accent(context));
+        TextView label = Ui.styledLabel(context, "添加截图", Ui.TEXT_ROW_TITLE, 400, Ui.accent(context));
         LinearLayout.LayoutParams labelParams = Ui.wrap();
         labelParams.setMarginStart(Ui.dp(requireContext(), 10));
         add.addView(label, labelParams);
@@ -129,8 +127,7 @@ public final class FeedbackPage extends DetailPage {
         card.addView(add, Ui.matchWidth());
         addShot = add;
 
-        TextView count = new TextView(context);
-        Ui.style(count, 13, 400, Ui.subText(context));
+        TextView count = Ui.styledLabel(context, "", 13, 400, Ui.subText(context));
         Ui.setPaddingDp(count, requireContext(), Ui.GROUP_TITLE_INSET, 6,
             Ui.GROUP_TITLE_INSET, 0);
         description.view().addView(count, Ui.matchWidth());
