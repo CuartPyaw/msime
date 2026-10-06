@@ -380,11 +380,11 @@ public final class VoiceRecognitionActivity extends Activity {
         LinearLayout root = KeyboardGeometry.column(this);
         int pad = KeyboardGeometry.pixels(this, 20);
         root.setPadding(pad, pad, pad, pad);
-        TextView title = new TextView(this);
+        TextView title = ViewPolicy.newTextView(this, "正在录音");
         recordingTitle = title;
         ViewPolicy.setTextSizeLabel(title, "正在录音", 18);
         root.addView(title);
-        TextView hint = new TextView(this);
+        TextView hint = ViewPolicy.newTextView(this, "说完后点「完成」开始转写；「取消」会丢弃这次录音。");
         recordingHint = hint;
         ViewPolicy.setTextSizeLabel(hint, "说完后点「完成」开始转写；「取消」会丢弃这次录音。", 14);
         hint.setPadding(0, pad / 2, 0, pad);

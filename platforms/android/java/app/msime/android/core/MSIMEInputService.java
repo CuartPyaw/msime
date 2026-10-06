@@ -4494,12 +4494,10 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     private TextView textView(CharSequence text) {
-        TextView view = new TextView(this);
+        TextView view = ViewPolicy.newTextView(this, text);
         KeyboardGeometry.setKeyTextSize(view, KeyboardGeometry.DEFAULT_KEY_TEXT_SP);
-        view.setText(text);
         return view;
     }
-
     private void renderLayoutSettingsState() {
         if (keySpacingSlider != null && rowSpacingSlider != null && keyboardHeightSlider != null
                 && keySpacingValue != null && rowSpacingValue != null && keyboardHeightValue != null
