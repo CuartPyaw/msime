@@ -581,7 +581,7 @@ final class ImePanels {
             android.R.attr.progressBarStyleSmall);
         s.replyProgress.setIndeterminate(true);
         s.replyProgress.setVisibility(View.GONE);
-        LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams progressParams = KeyboardGeometry.linearParamsPx(
             s.pixels(12), s.pixels(12));
         progressParams.setMarginEnd(s.pixels(4));
         footer.addView(s.replyProgress, progressParams);

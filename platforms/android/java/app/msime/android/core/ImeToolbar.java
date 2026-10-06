@@ -188,7 +188,7 @@ final class ImeToolbar {
             s.render();
         });
         expand.setVisibility(View.GONE);
-        line.addView(expand, new LinearLayout.LayoutParams(
+        line.addView(expand, KeyboardGeometry.linearParamsPx(
             s.pixels(CandidateChevronButton.WIDTH_DP), s.pixels(CandidateChevronButton.BUTTON_DP)));
         s.candidateLine = line;
         line.setVisibility(View.GONE);
