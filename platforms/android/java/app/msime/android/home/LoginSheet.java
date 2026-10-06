@@ -423,7 +423,7 @@ final class LoginSheet {
             for (int index = 0; index < paths.length; index++) {
                 scaled.reset();
                 paths[index].transform(matrix, scaled);
-                paint.setColor(colors[Math.min(index, colors.length - 1)]);
+            paint.setColor(colors[BoundsPolicy.atMost(index, colors.length - 1)]);
                 canvas.drawPath(scaled, paint);
             }
         }

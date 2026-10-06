@@ -481,7 +481,8 @@ public final class AiSkinPage extends DetailPage {
         if (view == null) return;
         Context context = requireContext();
         State s = state();
-        Result result = s.results.isEmpty() ? null : s.results.get(Math.min(s.chosen, s.results.size() - 1));
+        Result result = s.results.isEmpty() ? null
+            : s.results.get(BoundsPolicy.atMost(s.chosen, s.results.size() - 1));
         KeyboardSkin skin = result == null ? currentSkin
             : KeyboardSkin.custom(result.design(), AppMode.dark(context));
         view.setKeyboard(skin, s.nineKey);
@@ -577,7 +578,7 @@ public final class AiSkinPage extends DetailPage {
     private void useResult() {
         State s = state();
         if (s.busy || saving || s.results.isEmpty()) return;
-        Result result = s.results.get(Math.min(s.chosen, s.results.size() - 1));
+        Result result = s.results.get(BoundsPolicy.atMost(s.chosen, s.results.size() - 1));
         JSONObject design = CustomKeyboardSkin.from(result.design())
             .withFeedback(SOUND_PACKS[s.sound], ANIMATIONS[s.animation]).toJson(true);
         String name = result.name();

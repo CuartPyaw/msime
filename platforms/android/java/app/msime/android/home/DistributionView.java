@@ -75,7 +75,7 @@ public final class DistributionView extends View {
     private int colour(int index) {
         Context context = getContext();
         int accent = Ui.accent(context);
-        int mix = MIX[Math.min(index, MIX.length - 1)];
+        int mix = MIX[BoundsPolicy.atMost(index, MIX.length - 1)];
         return ColorPolicy.blend(Ui.card(context), accent, mix / 100f);
     }
 
