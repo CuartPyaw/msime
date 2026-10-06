@@ -6442,8 +6442,8 @@ public final class MSIMEInputService extends InputMethodService {
                 : PhrasePreeditPolicy.title(phrasePrefix, localModeTitle,
                                             !"none".equals(localModeKey));
             preedit.setText(displayText);
-            preedit.setContentDescription(offersLocalModes ? "本地输入模式" : displayText);
-            preedit.setClickable(offersLocalModes);
+            preedit.setContentDescription(offersLocalModes ? "长按打开本地输入模式" : displayText);
+            preedit.setLongClickable(offersLocalModes);
             preedit.setFocusable(offersLocalModes);
         }
         if (exitLocalModeButton != null) {

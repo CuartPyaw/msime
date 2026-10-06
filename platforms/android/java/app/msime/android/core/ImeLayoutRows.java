@@ -827,10 +827,20 @@ final class ImeLayoutRows {
             symbols ? "括号；长按选择其他括号" : "小假名、浊音和半浊音", () -> {});
         s.japaneseVariantsButton = variants;
         if (variants instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.KEY);
+        // 符号层上轻点直接输入第一个括号，长按才弹出全部括号；假名层不接长按，松手照常切换变体。
         variants.setOnClickListener(ignored -> {
             s.imeKeyFeedback.playFeedback(variants);
-            if (s.keyboardLayer == KeyboardLayout.Layer.SYMBOLS) showJapaneseBracketOptions(variants);
-            else s.command(MSIMEInputService.CYCLE_KANA_VARIANT_COMMAND);
+            if (s.keyboardLayer == KeyboardLayout.Layer.SYMBOLS) {
+                commitNineKeyLiteral(JapaneseNineKeyLayout.digitBrackets().get(0));
+            } else {
+                s.command(MSIMEInputService.CYCLE_KANA_VARIANT_COMMAND);
+            }
+        });
+        variants.setOnLongClickListener(ignored -> {
+            if (s.keyboardLayer != KeyboardLayout.Layer.SYMBOLS) return false;
+            s.imeKeyFeedback.playFeedback(variants);
+            showJapaneseBracketOptions(variants);
+            return true;
         });
         return variants;
     }
