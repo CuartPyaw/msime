@@ -49,8 +49,8 @@ public final class SegmentedControl extends LinearLayout {
         Context context = getContext();
         for (int i = 0; i < labels.size(); i++) {
             int index = i;
-            TextView segment = new TextView(context);
-            segment.setText(labels.get(i));
+            TextView segment = Ui.styledLabel(context, labels.get(i), Ui.TEXT_SEGMENT, 400,
+                Ui.subText(context));
             segment.setGravity(Gravity.CENTER);
             segment.setSingleLine(true);
             Ui.setTextMinHeightDp(segment, context, 28);
