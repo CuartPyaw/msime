@@ -317,7 +317,7 @@ final class ImeStyler {
 
     private void applyShadow(View view, KeyboardSkin target) {
         int shadowAlpha = (int) Math.round(255 * target.shadowOpacity());
-        int shadowColor = Color.argb(shadowAlpha, 0, 0, 0);
+        int shadowColor = ColorPolicy.withAlpha(Color.BLACK, shadowAlpha);
         view.setOutlineAmbientShadowColor(shadowColor);
         view.setOutlineSpotShadowColor(shadowColor);
         view.setElevation(target.shadowOpacity() > 0
