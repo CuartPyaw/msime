@@ -4,6 +4,17 @@ import app.msime.android.SkinJobsApi;
 /** AI 设计皮肤的失败分类与提示文案；请求本身走 org.json，在 check-host 的桩 classpath 下跑不了，留给设备上验证。 */
 public final class SkinJobsApiSmoke {
     public static void main(String[] arguments) {
+        try {
+            java.lang.reflect.Method strictBoolean = SkinJobsApi.class.getDeclaredMethod(
+                "strictBoolean", Object.class);
+            strictBoolean.setAccessible(true);
+            check(Boolean.TRUE.equals(strictBoolean.invoke(null, Boolean.TRUE)),
+                "skin jobs responses accept JSON booleans");
+            check(strictBoolean.invoke(null, "true") == null,
+                "skin jobs responses reject boolean strings instead of coercing them");
+        } catch (ReflectiveOperationException error) {
+            throw new AssertionError("skin jobs response policy missing", error);
+        }
         CloudApi.Failure quota = new CloudApi.Failure(429, "rate_limit_exceeded", "", 7200);
         check(SkinJobsApi.quotaExhausted(quota), "429 is the daily quota");
         check(SkinJobsApi.message(quota).startsWith("今天的生成次数已用完"), "quota wording");
