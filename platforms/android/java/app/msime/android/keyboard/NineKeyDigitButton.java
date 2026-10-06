@@ -4,7 +4,6 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
-import android.util.TypedValue;
 
 /**
  * 九键键帽：字母下面是它送进引擎的数字，所以数字印在上沿。
@@ -43,15 +42,10 @@ public final class NineKeyDigitButton extends KeyboardPressButton {
         invalidate();
     }
 
-    private float sp(float value) {
-        return TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, value,
-            getResources().getDisplayMetrics());
-    }
-
     @Override protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
         if (digitText.isEmpty() || getWidth() <= 0 || getHeight() <= 0) return;
-        digitPaint.setTextSize(sp(10));
+        digitPaint.setTextSize(KeyboardGeometry.sp(getContext(), 10));
         digitPaint.setColor(digitColor);
         digitPaint.setAlpha(isEnabled() ? 204 : 96);
         Paint.FontMetrics metrics = digitPaint.getFontMetrics();
