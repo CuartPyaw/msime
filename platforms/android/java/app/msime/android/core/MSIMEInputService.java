@@ -4458,23 +4458,23 @@ public final class MSIMEInputService extends InputMethodService {
         if (voiceResultPanel == null) return;
         voiceResultPanel.removeAllViews();
         LinearLayout header = KeyboardGeometry.row(this);
-        TextView title = voiceText("语音结果");
+        TextView title = textView("语音结果");
         ViewPolicy.setTextSizeLabel(title, "语音结果", 18);
         KeyboardGeometry.setKeyTextSize(title, 18);
         header.addView(title, KeyboardGeometry.weightedWrapParams(1));
         button(header, "返回键盘", this::closeVoiceResult);
         voiceResultPanel.addView(header);
         if (voiceResultEntry == null) {
-            TextView empty = voiceText("暂无待插入结果。点击下方按钮开始语音识别；只保留最新一条，10 分钟内有效。");
+            TextView empty = textView("暂无待插入结果。点击下方按钮开始语音识别；只保留最新一条，10 分钟内有效。");
             // Neutral about which engine runs: since the keyboard entry honours a configured
             // provider, naming the system recognizer here was wrong exactly for the users who had
             // configured one. Which service is used is the settings page's to explain.
             voiceResultPanel.addView(empty);
         } else {
-            TextView recognized = voiceText(voiceResultEntry.text());
+            TextView recognized = textView(voiceResultEntry.text());
             recognized.setContentDescription("待插入语音结果");
             voiceResultPanel.addView(recognized);
-            TextView hint = voiceText("点击插入后清除待插入结果；输入位置变化时会拒绝插入。");
+            TextView hint = textView("点击插入后清除待插入结果；输入位置变化时会拒绝插入。");
             voiceResultPanel.addView(hint);
             Button insert = button(voiceResultPanel, "插入语音结果", this::insertVoiceResult);
             insert.setContentDescription("插入并清除语音结果");
@@ -4490,14 +4490,7 @@ public final class MSIMEInputService extends InputMethodService {
         imeStyler.applySkin();
     }
 
-    private TextView voiceText(CharSequence text) {
-        TextView view = new TextView(this);
-        KeyboardGeometry.setKeyTextSize(view, KeyboardGeometry.DEFAULT_KEY_TEXT_SP);
-        view.setText(text);
-        return view;
-    }
-
-    private TextView layoutText(CharSequence text) {
+    private TextView textView(CharSequence text) {
         TextView view = new TextView(this);
         KeyboardGeometry.setKeyTextSize(view, KeyboardGeometry.DEFAULT_KEY_TEXT_SP);
         view.setText(text);
@@ -5974,7 +5967,7 @@ public final class MSIMEInputService extends InputMethodService {
         layoutSettingsPanel.setBackgroundColor(Color.parseColor(skin.background()));
         layoutSettingsPanel.setContentDescription("键盘设置");
         LinearLayout layoutHeader = KeyboardGeometry.row(this);
-        TextView layoutTitle = layoutText("键盘设置");
+        TextView layoutTitle = textView("键盘设置");
         ViewPolicy.setTextSizeLabel(layoutTitle, "键盘设置", 18);
         KeyboardGeometry.setKeyTextSize(layoutTitle, 18);
         layoutHeader.addView(layoutTitle, KeyboardGeometry.weightedWrapParams(1));
@@ -5982,9 +5975,9 @@ public final class MSIMEInputService extends InputMethodService {
         closeLayout.setContentDescription("返回键盘");
         layoutSettingsPanel.addView(layoutHeader);
         LinearLayout keyboardHeightHeader = KeyboardGeometry.row(this);
-        TextView keyboardHeightLabel = layoutText("键盘高度");
+        TextView keyboardHeightLabel = textView("键盘高度");
         keyboardHeightHeader.addView(keyboardHeightLabel, KeyboardGeometry.weightedWrapParams(1));
-        keyboardHeightValue = layoutText("");
+        keyboardHeightValue = textView("");
         keyboardHeightHeader.addView(keyboardHeightValue);
         layoutSettingsPanel.addView(keyboardHeightHeader);
         keyboardHeightSlider = new SeekBar(this);
@@ -5992,9 +5985,9 @@ public final class MSIMEInputService extends InputMethodService {
         configureHeightSlider(keyboardHeightSlider);
         layoutSettingsPanel.addView(keyboardHeightSlider);
         LinearLayout keySpacingHeader = KeyboardGeometry.row(this);
-        TextView keySpacingLabel = layoutText("按键间距");
+        TextView keySpacingLabel = textView("按键间距");
         keySpacingHeader.addView(keySpacingLabel, KeyboardGeometry.weightedWrapParams(1));
-        keySpacingValue = layoutText("");
+        keySpacingValue = textView("");
         keySpacingHeader.addView(keySpacingValue);
         layoutSettingsPanel.addView(keySpacingHeader);
         keySpacingSlider = new SeekBar(this);
@@ -6002,9 +5995,9 @@ public final class MSIMEInputService extends InputMethodService {
         configureSpacingSlider(keySpacingSlider, true);
         layoutSettingsPanel.addView(keySpacingSlider);
         LinearLayout rowSpacingHeader = KeyboardGeometry.row(this);
-        TextView rowSpacingLabel = layoutText("行间距");
+        TextView rowSpacingLabel = textView("行间距");
         rowSpacingHeader.addView(rowSpacingLabel, KeyboardGeometry.weightedWrapParams(1));
-        rowSpacingValue = layoutText("");
+        rowSpacingValue = textView("");
         rowSpacingHeader.addView(rowSpacingValue);
         layoutSettingsPanel.addView(rowSpacingHeader);
         rowSpacingSlider = new SeekBar(this);
@@ -6025,7 +6018,7 @@ public final class MSIMEInputService extends InputMethodService {
         layoutSettingsPanel.addView(voiceShortcutSwitch);
         resetLayoutSettingsButton = button(layoutSettingsPanel, "恢复默认", this::resetTouchGeometry);
         resetLayoutSettingsButton.setContentDescription("恢复默认");
-        TextView layoutHint = layoutText("高度和间距只改变键位外观，不改变输入方案；松手后自动保存。");
+        TextView layoutHint = textView("高度和间距只改变键位外观，不改变输入方案；松手后自动保存。");
         layoutSettingsPanel.addView(layoutHint);
         layoutSettingsScroll = new ScrollView(this);
         layoutSettingsScroll.addView(layoutSettingsPanel);
