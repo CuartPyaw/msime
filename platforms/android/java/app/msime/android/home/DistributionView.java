@@ -90,7 +90,7 @@ public final class DistributionView extends View {
         float height = switch (style) {
             case STACK -> STACK_HEIGHT + 12 + LEGEND_ROW * ((rows + 1) / 2);
             case BARS -> BAR_ROW * rows;
-            case DONUT -> Math.max(DONUT, LEGEND_ROW * rows);
+            case DONUT -> BoundsPolicy.atLeast(LEGEND_ROW * rows, DONUT);
         };
         setMeasuredDimension(MeasureSpec.getSize(widthSpec),
             resolveSize(Ui.dp(context, height), heightSpec));
