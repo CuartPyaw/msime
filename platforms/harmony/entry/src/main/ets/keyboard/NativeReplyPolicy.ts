@@ -5,7 +5,10 @@ export class NativeReplyPolicy {
   }
 
   /** 只有成功且带有非空 value 的信封才能进入后续业务逻辑。 */
-  static successfulValue<T>(reply: { ok: boolean; value?: T | null }): T | null {
-    return reply.ok === true && NativeReplyPolicy.hasValue(reply.value) ? reply.value : null;
+  static successfulValue<T>(reply: unknown): T | null {
+    if (reply === null || typeof reply !== 'object' || Array.isArray(reply)) return null;
+    const value: unknown = (reply as { ok?: unknown; value?: unknown }).value;
+    return (reply as { ok?: unknown }).ok === true && NativeReplyPolicy.hasValue(value)
+      ? value as T : null;
   }
 }

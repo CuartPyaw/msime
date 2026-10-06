@@ -3864,11 +3864,11 @@ export class KeyboardSession implements HardwareKeyTarget {
       KeyboardLog.error(`online query unavailable: ${describeError(error)}`);
       return;
     }
-    if (reply.ok !== true || !NativeReplyPolicy.hasValue(reply.value)) {
+    const query: OnlineQuery | null = NativeReplyPolicy.successfulValue<OnlineQuery>(reply);
+    if (query === null) {
       this.onlineSignature = '';
       return;
     }
-    const query: OnlineQuery = reply.value;
     const signature: string = OnlineCandidatePolicy.signature(query);
     if (signature === this.onlineSignature) return;
     this.onlineSignature = signature;
@@ -4017,11 +4017,11 @@ export class KeyboardSession implements HardwareKeyTarget {
       KeyboardLog.error(`translation query unavailable: ${describeError(error)}`);
       return;
     }
-    if (reply.ok !== true || !NativeReplyPolicy.hasValue(reply.value)) {
+    const query: TranslationQuery | null = NativeReplyPolicy.successfulValue<TranslationQuery>(reply);
+    if (query === null) {
       this.translationSignature = '';
       return;
     }
-    const query: TranslationQuery = reply.value;
     const signature: string = TranslationPolicy.signature(query);
     if (signature === this.translationSignature) return;
     this.translationSignature = signature;
