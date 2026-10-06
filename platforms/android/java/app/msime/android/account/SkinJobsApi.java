@@ -128,6 +128,11 @@ public final class SkinJobsApi {
         return failure.status == 503;
     }
 
+    /** A planner response must stay within the number of designs this flow can own and display. */
+    public static boolean validPlanCount(int count) {
+        return count >= 1 && count <= MAX_DESIGNS;
+    }
+
     /** 失败给用户看的一句话。 */
     public static String message(CloudApi.Failure failure) {
         if (quotaExhausted(failure)) {
@@ -163,7 +168,7 @@ public final class SkinJobsApi {
         check(cancelled);
         String answer = chat(planner.compose(trimmed, model));
         JSONArray plans = planner.parse(answer);
-        if (plans.length() == 0) throw invalid("ai_skin_response");
+        if (plans == null || !validPlanCount(plans.length())) throw invalid("ai_skin_response");
         check(cancelled);
 
         ExecutorService pool = Executors.newFixedThreadPool(BoundsPolicy.atMost(plans.length(), MAX_DESIGNS), runnable -> {
