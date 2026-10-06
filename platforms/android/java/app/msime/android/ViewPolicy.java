@@ -102,7 +102,7 @@ public final class ViewPolicy {
     }
 
     /** Align a view's content to the start edge and center it vertically. */
-    public static void setStartCenteredVertically(View view) {
+    public static void setStartCenteredVertically(LinearLayout view) {
         view.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
     }
 
