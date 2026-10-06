@@ -1,5 +1,6 @@
 package app.msime.android;
 
+import android.content.Context;
 import android.view.Gravity;
 import android.view.View;
 import android.util.TypedValue;
@@ -108,6 +109,13 @@ public final class ViewPolicy {
     /** Keep a button label in its authored casing instead of applying the platform default. */
     public static void setAllCapsFalse(Button button) {
         button.setAllCaps(false);
+    }
+
+    /** Create a text view with its initial content assigned. */
+    public static TextView newTextView(Context context, CharSequence text) {
+        TextView view = new TextView(context);
+        view.setText(text);
+        return view;
     }
 
     /** Create a keyboard press button with authored casing preserved. */

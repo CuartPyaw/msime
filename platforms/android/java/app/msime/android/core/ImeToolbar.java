@@ -165,7 +165,7 @@ final class ImeToolbar {
     }
 
     private TextView toolbarText(float sizeSp) {
-        TextView text = new TextView(s);
+        TextView text = ViewPolicy.newTextView(s, null);
         KeyboardGeometry.setKeyTextSize(text, sizeSp);
         ViewPolicy.clearFontPadding(text);
         return text;

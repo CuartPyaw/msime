@@ -318,7 +318,7 @@ final class ImeFunctionPanel {
     }
 
     private TextView textLabel(CharSequence text, float sizeSp) {
-        TextView view = new TextView(s);
+        TextView view = ViewPolicy.newTextView(s, text);
         ViewPolicy.setTextSizeLabel(view, text, sizeSp);
         return view;
     }
