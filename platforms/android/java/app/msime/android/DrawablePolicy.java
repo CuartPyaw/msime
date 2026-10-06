@@ -1,7 +1,9 @@
 package app.msime.android;
 
 import android.graphics.Color;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.StateListDrawable;
 
 /** Shared drawable factories for host UI surfaces. */
 public final class DrawablePolicy {
@@ -34,5 +36,17 @@ public final class DrawablePolicy {
         GradientDrawable shape = rounded(Color.TRANSPARENT, radiusPx);
         shape.setStroke(Math.max(1, strokeWidth), strokeColor);
         return shape;
+    }
+
+    /** Build a drawable state list while keeping the supplied state precedence. */
+    public static StateListDrawable stateList(int[][] states, Drawable... drawables) {
+        if (states == null || drawables == null || states.length != drawables.length) {
+            throw new IllegalArgumentException("state and drawable counts differ");
+        }
+        StateListDrawable result = new StateListDrawable();
+        for (int index = 0; index < states.length; index++) {
+            result.addState(states[index], drawables[index]);
+        }
+        return result;
     }
 }
