@@ -28,6 +28,7 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.Nullable;
 import app.msime.android.AppEdition;
 import app.msime.android.CloudApi;
+import app.msime.android.BitmapPolicy;
 import app.msime.android.FeedbackApi;
 import app.msime.android.FeedbackImagePolicy;
 import app.msime.android.R;
@@ -297,14 +298,7 @@ public final class FeedbackPage extends DetailPage {
         Bitmap bitmap = BitmapFactory.decodeByteArray(source, 0, source.length, options);
         if (bitmap == null) return null;
         try {
-            int edge = Math.max(bitmap.getWidth(), bitmap.getHeight());
-            if (edge > MAX_EDGE) {
-                float scale = MAX_EDGE / (float) edge;
-                Bitmap scaled = Bitmap.createScaledBitmap(bitmap, Math.round(bitmap.getWidth() * scale),
-                    Math.round(bitmap.getHeight() * scale), true);
-                if (scaled != bitmap) bitmap.recycle();
-                bitmap = scaled;
-            }
+            bitmap = BitmapPolicy.scaleToEdge(bitmap, MAX_EDGE);
             for (int quality = 85; quality >= 40; quality -= 15) {
                 ByteArrayOutputStream out = new ByteArrayOutputStream();
                 bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out);
