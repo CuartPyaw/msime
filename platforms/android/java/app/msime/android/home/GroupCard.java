@@ -257,7 +257,7 @@ public final class GroupCard {
 
     private static void setText(TextView view, @Nullable CharSequence text) {
         view.setText(text);
-        view.setVisibility(text == null || text.length() == 0 ? View.GONE : View.VISIBLE);
+        Ui.setVisibilityForText(view, text);
     }
 
     /** 一行设置；保留各部件的引用，页面在数据变化后原地改写它们。 */
