@@ -306,7 +306,7 @@ final class LoginSheet {
                 setEnabled(nested, enabled);
             } else {
                 child.setEnabled(enabled);
-                child.setAlpha(enabled ? 1f : 0.6f);
+                ViewPolicy.setActiveAlpha(child, enabled, 0.6f);
             }
         }
     }
