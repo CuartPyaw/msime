@@ -108,7 +108,7 @@ final class AppThemeSheet {
 
         View band = new View(context);
         band.setBackgroundColor(Ui.page(context));
-        root.addView(band, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(context, 8)));
+        root.addView(band, Ui.matchWidthHeight(context, 8));
         root.addView(option(context, "取消", false, Ui.accent(context), dialog::cancel));
         dialog.setContentView(root);
         dialog.show();
