@@ -249,12 +249,8 @@ final class LoginSheet {
             verify(code.getText().toString());
             return true;
         });
-        TextView again = new TextView(activity);
-        again.setText("换个邮箱或重新发送");
-        Ui.style(again, 14, 500, Ui.accent(activity));
-        again.setGravity(Gravity.CENTER);
-        Ui.setTextMinHeightDp(again, activity, 40);
-        again.setBackground(Ui.ripple(activity));
+        TextView again = Ui.textButton(activity, "换个邮箱或重新发送", 14, 500,
+            Ui.accent(activity), Ui.ripple(activity), 40);
         again.setOnClickListener(ignored -> {
             if (busy) return;
             email.removeAllViews();
