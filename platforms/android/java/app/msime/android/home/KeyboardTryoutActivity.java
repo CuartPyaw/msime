@@ -366,8 +366,7 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
         bubble.setBackground(Ui.rounded(mine ? Ui.accent(this) : Ui.card(this), Ui.dp(this, 18)));
         Ui.setSymmetricPaddingDp(bubble, this, 14, 10);
         bubble.setMaxWidth(Math.round(Ui.screenWidthPixels(this) * 0.8f));
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams params = Ui.wrap();
         params.gravity = mine ? Gravity.END : Gravity.START;
         if (chat.getChildCount() > 0) params.topMargin = Ui.dp(this, 10);
         chat.addView(bubble, params);
