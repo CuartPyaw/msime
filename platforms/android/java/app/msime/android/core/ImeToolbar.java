@@ -63,9 +63,11 @@ final class ImeToolbar {
         s.preedit.setMaxLines(1);
         s.preedit.setIncludeFontPadding(false);
         s.preedit.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        s.preedit.setOnClickListener(ignored -> {
+        // 胶囊紧挨着候选栏和按键，轻点很容易误触，所以只在长按时打开本地模式菜单。
+        s.preedit.setOnLongClickListener(ignored -> {
             s.imeKeyFeedback.playFeedback(s.preedit);
             s.imePanels.showLocalInputMenu();
+            return true;
         });
         LinearLayout preeditFrame = new LinearLayout(s);
         preeditFrame.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);

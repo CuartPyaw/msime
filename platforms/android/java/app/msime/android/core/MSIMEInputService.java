@@ -1417,6 +1417,11 @@ public final class MSIMEInputService extends InputMethodService {
             && preferences.optBoolean("touch_voice_shortcut", false);
     }
 
+    /** 日语九键侧列的 ☺：顶部工具栏有表情按钮时两处入口重复，不放；工具栏关掉表情或整条隐藏时才放回来，空出的格给「英」。 */
+    boolean japaneseSideEmojiKey() {
+        return !toolbarEmoji || toolbarHidden;
+    }
+
     /** `touch_toolbar` 的按钮开关，以及功能面板直接切换的模糊音、单手、隐私三项；缺键时按 Android 的默认值读。 */
     private void applyToolbarPreferences(JSONObject preferences) {
         JSONObject toolbar = preferences == null ? null : preferences.optJSONObject("touch_toolbar");
@@ -1759,7 +1764,9 @@ public final class MSIMEInputService extends InputMethodService {
         voiceLanguage = nextVoiceLanguage;
         applyAiPreferences(preferences);
         clipboardHistoryEnabled = nextClipboard;
+        boolean previousJapaneseEmojiKey = japaneseSideEmojiKey();
         applyToolbarPreferences(preferences);
+        boolean japaneseEmojiKeyChanged = previousJapaneseEmojiKey != japaneseSideEmojiKey();
         traditionalChineseOutput = nextTraditional;
         if (candidateEnglishGloss != nextCandidateGloss) invalidateCandidateGlosses();
         candidateEnglishGloss = nextCandidateGloss;
@@ -1799,7 +1806,8 @@ public final class MSIMEInputService extends InputMethodService {
         defaultImeMode = nextDefaultImeMode;
         imeModeScope = nextImeModeScope;
         JSONObject nextView = result.getJSONObject("view");
-        boolean rebuildLayout = displayedTouchLayout(view) != displayedTouchLayout(nextView);
+        boolean rebuildLayout = displayedTouchLayout(view) != displayedTouchLayout(nextView)
+            || japaneseEmojiKeyChanged;
         enabledSchemes = nextSchemeConfiguration.enabled();
         visibleSchemes = nextSchemeConfiguration.visible();
         selectedScheme = nextSchemeConfiguration.selected();
@@ -3518,11 +3526,6 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     /**
-     * The global theme's keyboard resolved for one panel's own light/dark setting.
-     *
-     * <p>An explicit `dark` or `light` on the surface wins; `follow` inherits the app mode (`theme`), and a `system` app mode follows the Android night mode. A missing or unknown value is `follow`, so an older snapshot keeps the keyboard's appearance rather than jumping to light. A theme with a fixed appearance then overrides that mode, which is what the shared resolver's `appearance` says.
-     */
-    /**
      * 候选条的配色。皮肤和键盘、表情、手写一样要经 {@link ImeStyler#themed} 按应用主题着色：「跟随系统」不着色时取的是经典绿种子，暖色主题下候选条铺一层淡绿底、页码也是绿的。键盘里换皮肤时也要跟着重算，否则候选条停在旧皮肤上。
      */
     CandidateAppearance.Palette candidateAppearanceFor(JSONObject preferences) {
@@ -3530,6 +3533,11 @@ public final class MSIMEInputService extends InputMethodService {
         return CandidateAppearance.from(preferences, imeStyler == null ? strip : imeStyler.themed(strip));
     }
 
+    /**
+     * The global theme's keyboard resolved for one panel's own light/dark setting.
+     *
+     * <p>An explicit `dark` or `light` on the surface wins; `follow` inherits the app mode (`theme`), and a `system` app mode follows the Android night mode. A missing or unknown value is `follow`, so an older snapshot keeps the keyboard's appearance rather than jumping to light. A theme with a fixed appearance then overrides that mode, which is what the shared resolver's `appearance` says.
+     */
     private KeyboardSkin surfaceSkin(JSONObject preferences, String key) {
         String surfaceMode = preferences == null ? "follow" : preferences.optString(key, "follow");
         String appMode = preferences == null ? "system"
@@ -6442,8 +6450,8 @@ public final class MSIMEInputService extends InputMethodService {
                 : PhrasePreeditPolicy.title(phrasePrefix, localModeTitle,
                                             !"none".equals(localModeKey));
             preedit.setText(displayText);
-            preedit.setContentDescription(offersLocalModes ? "本地输入模式" : displayText);
-            preedit.setClickable(offersLocalModes);
+            preedit.setContentDescription(offersLocalModes ? "长按打开本地输入模式" : displayText);
+            preedit.setLongClickable(offersLocalModes);
             preedit.setFocusable(offersLocalModes);
         }
         if (exitLocalModeButton != null) {

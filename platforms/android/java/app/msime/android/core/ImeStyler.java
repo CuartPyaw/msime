@@ -24,7 +24,7 @@ final class ImeStyler {
         this.s = s;
     }
 
-    /** 偏好里没有 `app_theme` 时的默认值，与 Rust 的 `AppTheme::default()` 一致。 */
+    // 偏好里没有 `app_theme` 时的默认值，与 Rust 的 `AppTheme::default()` 一致。
     /** 换季检查的最短间隔：每次渲染都会问一次，但月份一分钟内不会变。 */
     private static final long SEASON_CHECK_INTERVAL_MS = 60_000;
     private String seedTheme;
@@ -49,18 +49,18 @@ final class ImeStyler {
         return seededLight;
     }
 
-    /**
-     * 重新解析应用主题（`app_theme` + 本地月份），种子变了时丢掉已推导的键盘色。
-     *
-     * @param force 为假时一分钟内只检查一次
-     * @return 种子是否因此变了
-     */
     /** 当前应用主题的种子；还没解析过时先解析一次。 */
     AppThemePalette.Seed appThemeSeed() {
         if (seed == null) refreshAppTheme(true);
         return seed;
     }
 
+    /**
+     * 重新解析应用主题（`app_theme` + 本地月份），种子变了时丢掉已推导的键盘色。
+     *
+     * @param force 为假时一分钟内只检查一次
+     * @return 种子是否因此变了
+     */
     boolean refreshAppTheme(boolean force) {
         long now = android.os.SystemClock.uptimeMillis();
         if (!force && seedCheckedAt != Long.MIN_VALUE && now - seedCheckedAt < SEASON_CHECK_INTERVAL_MS)

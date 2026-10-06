@@ -1,7 +1,6 @@
 package app.msime.android;
 
 import android.content.Context;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -391,13 +390,8 @@ public final class CloudApi {
     }
 
     static byte[] readBounded(InputStream input) throws IOException {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        byte[] buffer = new byte[8192];
-        int count;
-        while ((count = input.read(buffer)) != -1) {
-            if (output.size() + count > MAX_RESPONSE_BYTES) throw new IOException("response too large");
-            output.write(buffer, 0, count);
-        }
-        return output.toByteArray();
+        byte[] response = HttpBodyPolicy.readBounded(input, MAX_RESPONSE_BYTES);
+        if (response == null) throw new IOException("response too large");
+        return response;
     }
 }
