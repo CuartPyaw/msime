@@ -43,7 +43,8 @@ public final class GroupCard {
             heading.setText(title);
             Ui.style(heading, Ui.TEXT_GROUP_TITLE, 500, Ui.accent(context));
             heading.setAccessibilityHeading(true);
-            heading.setPadding(Ui.dp(context, Ui.GROUP_TITLE_INSET), 0, Ui.dp(context, Ui.GROUP_TITLE_INSET), Ui.dp(context, 2));
+            Ui.setPaddingDp(heading, context, Ui.GROUP_TITLE_INSET, 0,
+                Ui.GROUP_TITLE_INSET, 2);
             LinearLayout.LayoutParams params = Ui.matchWidth();
             params.bottomMargin = Ui.dp(context, 2);
             group.addView(heading, params);
@@ -214,7 +215,8 @@ public final class GroupCard {
         TextView note = new TextView(context);
         note.setText(text);
         Ui.style(note, 13, 400, Ui.subText(context));
-        note.setPadding(Ui.dp(context, Ui.GROUP_TITLE_INSET), Ui.dp(context, 8), Ui.dp(context, Ui.GROUP_TITLE_INSET), 0);
+        Ui.setPaddingDp(note, context, Ui.GROUP_TITLE_INSET, 8,
+            Ui.GROUP_TITLE_INSET, 0);
         group.addView(note, Ui.matchWidth());
         return note;
     }

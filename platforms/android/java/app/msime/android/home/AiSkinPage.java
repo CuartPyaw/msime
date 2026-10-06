@@ -276,7 +276,7 @@ public final class AiSkinPage extends DetailPage {
 
         GroupCard previewGroup = GroupCard.add(target, null);
         LinearLayout card = previewGroup.card();
-        card.setPadding(Ui.dp(context, 14), Ui.dp(context, 14), Ui.dp(context, 14), Ui.dp(context, 12));
+        Ui.setPaddingDp(card, context, 14, 14, 14, 12);
         LinearLayout header = new LinearLayout(context);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
@@ -362,14 +362,14 @@ public final class AiSkinPage extends DetailPage {
         input.setFilters(new InputFilter[] {new InputFilter.LengthFilter(SkinJobsApi.MAX_PROMPT_CHARACTERS)});
         input.setBackground(null);
         Ui.style(input, Ui.TEXT_ROW_TITLE, 400, Ui.text(context));
-        input.setPadding(Ui.dp(context, 16), Ui.dp(context, 12), Ui.dp(context, 16), Ui.dp(context, 4));
+        Ui.setPaddingDp(input, context, 16, 12, 16, 4);
         input.setEnabled(!s.busy);
         describe.card().addView(input, Ui.matchWidth());
         HorizontalScrollView chipScroll = new HorizontalScrollView(context);
         chipScroll.setHorizontalScrollBarEnabled(false);
         LinearLayout chips = new LinearLayout(context);
         chips.setOrientation(LinearLayout.HORIZONTAL);
-        chips.setPadding(Ui.dp(context, 12), Ui.dp(context, 4), Ui.dp(context, 12), Ui.dp(context, 12));
+        Ui.setPaddingDp(chips, context, 12, 4, 12, 12);
         List<TextView> chipViews = new ArrayList<>(SUGGESTIONS.length);
         for (String suggestion : SUGGESTIONS) {
             TextView chip = new TextView(context);

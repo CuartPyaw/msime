@@ -105,7 +105,7 @@ final class LoginSheet {
 
         LinearLayout root = new LinearLayout(activity);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(Ui.dp(activity, 24), 0, Ui.dp(activity, 24), Ui.dp(activity, 20));
+        Ui.setPaddingDp(root, activity, 24, 0, 24, 20);
         root.addView(new BottomSheetDragHandleView(activity), Ui.matchWidth());
 
         LinearLayout header = new LinearLayout(activity);
