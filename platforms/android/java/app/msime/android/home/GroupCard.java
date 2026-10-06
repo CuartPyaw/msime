@@ -46,7 +46,7 @@ public final class GroupCard {
             Ui.style(heading, Ui.TEXT_GROUP_TITLE, 500, Ui.accent(context));
             heading.setAccessibilityHeading(true);
             heading.setPadding(Ui.dp(context, Ui.GROUP_TITLE_INSET), 0, Ui.dp(context, Ui.GROUP_TITLE_INSET), Ui.dp(context, 2));
-            LinearLayout.LayoutParams params = matchWidth();
+            LinearLayout.LayoutParams params = Ui.matchWidth();
             params.bottomMargin = Ui.dp(context, 2);
             group.addView(heading, params);
         }
@@ -56,7 +56,7 @@ public final class GroupCard {
         card.setBackground(Ui.rounded(Ui.card(context), Ui.dp(context, Ui.GROUP_RADIUS)));
         // 行的按压波纹裁在卡片圆角里，首尾两行不会露出直角。
         card.setClipToOutline(true);
-        group.addView(card, matchWidth());
+        group.addView(card, Ui.matchWidth());
         parent.addView(group, groupParams);
     }
 
@@ -207,7 +207,7 @@ public final class GroupCard {
         Ui.style(note, Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));
         note.setPadding(Ui.dp(context, Ui.ROW_PADDING_H), Ui.dp(context, 12), Ui.dp(context, Ui.ROW_PADDING_H), Ui.dp(context, 12));
         addDivider();
-        card.addView(note, matchWidth());
+        card.addView(note, Ui.matchWidth());
         return note;
     }
 
@@ -217,20 +217,20 @@ public final class GroupCard {
         note.setText(text);
         Ui.style(note, 13, 400, Ui.subText(context));
         note.setPadding(Ui.dp(context, Ui.GROUP_TITLE_INSET), Ui.dp(context, 8), Ui.dp(context, Ui.GROUP_TITLE_INSET), 0);
-        group.addView(note, matchWidth());
+        group.addView(note, Ui.matchWidth());
         return note;
     }
 
     /** 放一个自定义的行（例如语言卡的行、词条行），按需要在它前面画分隔线。 */
     public <T extends View> T addView(T row) {
         addDivider();
-        card.addView(row, matchWidth());
+        card.addView(row, Ui.matchWidth());
         return row;
     }
 
     private Row add(Row row) {
         addDivider();
-        card.addView(row.view, matchWidth());
+        card.addView(row.view, Ui.matchWidth());
         return row;
     }
 
@@ -259,11 +259,6 @@ public final class GroupCard {
     private static void setText(TextView view, @Nullable CharSequence text) {
         view.setText(text);
         view.setVisibility(text == null || text.length() == 0 ? View.GONE : View.VISIBLE);
-    }
-
-    private static LinearLayout.LayoutParams matchWidth() {
-        return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
     /** 一行设置；保留各部件的引用，页面在数据变化后原地改写它们。 */

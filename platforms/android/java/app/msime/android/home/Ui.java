@@ -9,7 +9,9 @@ import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.util.TypedValue;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.animation.PathInterpolator;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import androidx.annotation.AttrRes;
 import androidx.annotation.ColorInt;
@@ -133,6 +135,12 @@ public final class Ui {
 
     public static int dp(Context context, float value) {
         return Math.round(value * context.getResources().getDisplayMetrics().density);
+    }
+
+    /** Layout parameters for a view that fills the parent width at its measured height. */
+    public static LinearLayout.LayoutParams matchWidth() {
+        return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
     /** 读一个颜色主题属性；属性缺失时退回洋红，让漏配的属性在截图里一眼可见，而不是悄悄显示成别的颜色。 */
