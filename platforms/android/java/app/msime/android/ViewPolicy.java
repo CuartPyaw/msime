@@ -111,6 +111,12 @@ public final class ViewPolicy {
         view.setEllipsize(TextUtils.TruncateAt.END);
     }
 
+    /** Keep a text view on one line and truncate overflowing text at the end. */
+    public static void setSingleLineEllipsized(TextView view) {
+        view.setSingleLine(true);
+        view.setEllipsize(TextUtils.TruncateAt.END);
+    }
+
     /** Remove Android's extra font top and bottom padding from a text view. */
     public static void clearFontPadding(TextView view) {
         view.setIncludeFontPadding(false);

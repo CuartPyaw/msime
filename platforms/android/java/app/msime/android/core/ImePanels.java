@@ -540,8 +540,7 @@ final class ImePanels {
         KeyboardGeometry.setPaddingDp(s.replySourceCard, s, 10, 0, 6, 0);
         s.replySourceButton = MSIMEInputService.role(s.button(s.replySourceCard, MSIMEInputService.REPLY_SOURCE_PLACEHOLDER,
             this::pasteReplySource), KeyboardKeyRole.PLAIN);
-        s.replySourceButton.setSingleLine(true);
-        s.replySourceButton.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        ViewPolicy.setSingleLineEllipsized(s.replySourceButton);
         s.replySourceButton.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         KeyboardGeometry.setKeyTextSize(s.replySourceButton, 15);
         s.replySourceButton.setContentDescription("回复源文字");
@@ -584,8 +583,7 @@ final class ImePanels {
         progressParams.setMarginEnd(s.pixels(4));
         footer.addView(s.replyProgress, progressParams);
         s.replyStatus = new TextView(s);
-        s.replyStatus.setSingleLine(true);
-        s.replyStatus.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        ViewPolicy.setSingleLineEllipsized(s.replyStatus);
         ViewPolicy.clearFontPadding(s.replyStatus);
         KeyboardGeometry.setKeyTextSize(s.replyStatus, 11);
         s.replyStatus.setContentDescription("高情商回复键盘状态");
