@@ -174,7 +174,7 @@ public final class Telemetry {
     /** The record format the shared store reads: the summary line, '\n', then the frames. Java frames name classes and source files, never a path. */
     static String crashRecord(Throwable error) {
         String summary = clipCodePoints(firstLine(String.valueOf(error)), MAX_MESSAGE_CODE_POINTS);
-        StringBuilder stack = new StringBuilder();
+        StringBuilder stack = new StringBuilder(MAX_STACK_CODE_POINTS);
         Throwable current = error;
         for (int depth = 0; current != null && depth <= MAX_CAUSES; depth++) {
             if (depth > 0) stack.append("Caused by: ").append(firstLine(String.valueOf(current))).append('\n');
