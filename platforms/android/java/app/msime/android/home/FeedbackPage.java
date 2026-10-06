@@ -356,7 +356,7 @@ public final class FeedbackPage extends DetailPage {
 
     /** 白名单里的诊断字段；只有用户打开开关时才调用。 */
     private static Map<String, String> collectDiagnostics(Context context) {
-        Map<String, String> values = new LinkedHashMap<>();
+        Map<String, String> values = new LinkedHashMap<>(FeedbackApi.DIAGNOSTIC_KEYS.size());
         values.put("device", Build.MANUFACTURER + " " + Build.MODEL);
         values.put("os", "Android " + Build.VERSION.RELEASE + "（API " + Build.VERSION.SDK_INT + "）");
         values.put("app_version", appVersion(context));
