@@ -72,7 +72,7 @@ public final class DownloadPage extends DetailPage {
         tile.setBackground(Ui.rounded(Ui.accent(context), Ui.dp(context, 12)));
         ImageView icon = new ImageView(context);
         icon.setImageResource(R.drawable.ic_ms_link);
-        icon.setImageTintList(ColorStateList.valueOf(Ui.onAccent(context)));
+        Ui.setImageTint(icon, Ui.onAccent(context));
         icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         int iconSize = Ui.dp(context, 24);
         tile.addView(icon, new FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER));

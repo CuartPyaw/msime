@@ -1,7 +1,6 @@
 package app.msime.android.home;
 
 import android.content.Context;
-import android.content.res.ColorStateList;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -144,7 +143,7 @@ public final class OptionSheet {
         if (selected) {
             ImageView check = new ImageView(context);
             check.setImageResource(R.drawable.ms_w1_a2_check);
-            check.setImageTintList(ColorStateList.valueOf(Ui.accent(context)));
+            Ui.setImageTint(check, Ui.accent(context));
             check.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             FrameLayout.LayoutParams checkParams = new FrameLayout.LayoutParams(Ui.dp(context, 18), Ui.dp(context, 18),
                 Gravity.CENTER_VERTICAL | Gravity.END);

@@ -2,7 +2,6 @@ package app.msime.android.home;
 
 import app.msime.android.KeyboardGeometry;
 import android.content.Context;
-import android.content.res.ColorStateList;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
@@ -433,7 +432,7 @@ public final class OnboardingActivity extends AppCompatActivity {
             String body) {
         ImageView glyph = new ImageView(this);
         glyph.setImageResource(icon);
-        glyph.setImageTintList(ColorStateList.valueOf(Ui.accent(this)));
+        Ui.setImageTint(glyph, Ui.accent(this));
         glyph.setScaleType(ImageView.ScaleType.FIT_START);
         glyph.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         column.addView(glyph, new LinearLayout.LayoutParams(Ui.dp(this, 36), Ui.dp(this, 36)));
@@ -559,7 +558,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         row.setBackground(Ui.rounded(Ui.card(this), Ui.dp(this, 20)));
         ImageView badge = new ImageView(this);
         badge.setImageResource(icon);
-        badge.setImageTintList(ColorStateList.valueOf(Ui.accent(this)));
+        Ui.setImageTint(badge, Ui.accent(this));
         badge.setPadding(Ui.dp(this, 7), Ui.dp(this, 7), Ui.dp(this, 7), Ui.dp(this, 7));
         badge.setBackground(Ui.rounded(Ui.accentSoft(this), Ui.dp(this, 9)));
         badge.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);

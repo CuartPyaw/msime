@@ -121,7 +121,7 @@ public final class FeedbackPage extends DetailPage {
         add.setContentDescription("添加截图，最多 " + FeedbackApi.MAX_SCREENSHOTS + " 张");
         ImageView icon = new ImageView(context);
         icon.setImageResource(R.drawable.ms_w4_me2_image);
-        icon.setImageTintList(android.content.res.ColorStateList.valueOf(Ui.accent(context)));
+        Ui.setImageTint(icon, Ui.accent(context));
         add.addView(icon, new LinearLayout.LayoutParams(Ui.dp(requireContext(), 20), Ui.dp(requireContext(), 20)));
         TextView label = new TextView(context);
         label.setText("添加截图");

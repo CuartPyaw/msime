@@ -34,7 +34,7 @@ public final class SearchPill extends LinearLayout {
 
         ImageView glyph = new ImageView(context);
         glyph.setImageResource(R.drawable.ic_search);
-        glyph.setImageTintList(android.content.res.ColorStateList.valueOf(Ui.subText(context)));
+        Ui.setImageTint(glyph, Ui.subText(context));
         glyph.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
         int icon = Ui.dp(context, 16);
         addView(glyph, new LayoutParams(icon, icon));
