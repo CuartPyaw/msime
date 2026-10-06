@@ -173,11 +173,22 @@ public final class SyncApi {
                 Object position = value.opt("position");
                 phrases.add(new SyncMergePolicy.Phrase((String) id, (String) text,
                     group instanceof String ? (String) group : "",
-                    position instanceof Number ? ((Number) position).intValue() : index));
+                    strictPhrasePosition(position, index)));
             }
         }
         phrases.sort((left, right) -> Integer.compare(left.position(), right.position()));
         return new Phrases(revision, Collections.unmodifiableList(phrases));
+    }
+
+    /** Common phrase positions are bounded JSON integers; malformed values keep response order. */
+    public static int strictPhrasePosition(Object value, int fallback) {
+        if (value instanceof Integer integer
+                && integer >= 0 && integer < SyncMergePolicy.MAX_PHRASES) return integer;
+        if (value instanceof Long longValue
+                && longValue >= 0L && longValue < SyncMergePolicy.MAX_PHRASES) {
+            return longValue.intValue();
+        }
+        return fallback;
     }
 
     /** Common phrase revisions use the same non-negative integer CAS contract as preferences. */
