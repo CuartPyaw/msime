@@ -311,8 +311,7 @@ final class ImeLayoutRows {
             // The punctuation keys share one rail rather than wearing caps of their own.
             if (key instanceof KeyboardPressButton press)
                 press.setKeyboardRole(KeyboardKeyRole.PLAIN);
-            punctuation.addView(key, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+            punctuation.addView(key, KeyboardGeometry.weightedWidthParams(1));
         }
         FrameLayout sidebar = new FrameLayout(s);
         s.nineKeySidebar = sidebar;
@@ -357,8 +356,7 @@ final class ImeLayoutRows {
                 }
                 addNineKey(row, keyButton);
             }
-            grid.addView(row, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+            grid.addView(row, KeyboardGeometry.weightedWidthParams(1));
         }
         container.addView(grid, KeyboardGeometry.weightedMatchParentParams(3));
 
@@ -409,8 +407,7 @@ final class ImeLayoutRows {
             if ("，".equals(symbol) || "。".equals(symbol)) CenteredGlyphSpan.apply(key, symbol, 1.3f);
             if (key instanceof KeyboardPressButton press)
                 press.setKeyboardRole(KeyboardKeyRole.PLAIN);
-            punctuation.addView(key, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+            punctuation.addView(key, KeyboardGeometry.weightedWidthParams(1));
         }
         FrameLayout sidebar = new FrameLayout(s);
         s.nineKeySidebar = sidebar;
@@ -435,8 +432,7 @@ final class ImeLayoutRows {
                 if (key.input() == StrokeKeyboardLayout.WILDCARD) s.strokeWildcardKey = keyButton;
                 addNineKey(row, keyButton);
             }
-            grid.addView(row, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+            grid.addView(row, KeyboardGeometry.weightedWidthParams(1));
         }
         LinearLayout lastRow = new LinearLayout(s);
         Button symbolsKey = s.keyId(s.keyboardKey("@#", "符号", s.imePanels::showSymbolPanel), KeyPressIds.forNineKeyDigit(1));
@@ -446,8 +442,7 @@ final class ImeLayoutRows {
             if (key instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.KEY);
             addNineKey(lastRow, key);
         }
-        grid.addView(lastRow, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+        grid.addView(lastRow, KeyboardGeometry.weightedWidthParams(1));
         container.addView(grid, KeyboardGeometry.weightedMatchParentParams(3));
 
         LinearLayout actions = new LinearLayout(s);
@@ -525,8 +520,7 @@ final class ImeLayoutRows {
         for (java.util.List<ZhuyinNineKeyLayout.Key> keys : ZhuyinNineKeyLayout.rows()) {
             LinearLayout row = new LinearLayout(s);
             for (ZhuyinNineKeyLayout.Key key : keys) addNineKey(row, zhuyinNineKeySoundKey(key));
-            grid.addView(row, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+            grid.addView(row, KeyboardGeometry.weightedWidthParams(1));
         }
         // 最后一行：123（数字与符号层，？！ 和其他符号都在那里）、0（仍在 8 的正下方）、逗号和句号各占半格。
         LinearLayout lastRow = new LinearLayout(s);
@@ -549,8 +543,7 @@ final class ImeLayoutRows {
             addNineKey(marks, key);
         }
         lastRow.addView(marks, KeyboardGeometry.weightedMatchParentParams(1));
-        grid.addView(lastRow, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+        grid.addView(lastRow, KeyboardGeometry.weightedWidthParams(1));
         container.addView(grid, KeyboardGeometry.weightedMatchParentParams(3));
 
         // 右列与网格的四行对齐：⌫、中/英、空格、换行。后三个是底栏那几个常驻键，连同它们的手势、图标和「确认」状态一起挪过来。
@@ -1012,8 +1005,7 @@ final class ImeLayoutRows {
                 addNineKey(row, s.keyId(japaneseKey(keys.get(9)), KeyPressIds.forJapaneseKeyIndex(9)));
                 addNineKey(row, s.keyId(japaneseKey(keys.get(10)), KeyPressIds.forJapaneseKeyIndex(10)));
             }
-            grid.addView(row, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+            grid.addView(row, KeyboardGeometry.weightedWidthParams(1));
         }
         container.addView(grid, KeyboardGeometry.weightedMatchParentParams(0.64f));
 
