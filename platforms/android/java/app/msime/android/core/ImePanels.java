@@ -101,10 +101,10 @@ final class ImePanels {
                 GradientDrawable face = DrawablePolicy.rounded(
                     Color.parseColor(s.emojiSkin.keyBackground()), s.pixels(8));
                 tab.setBackground(new InsetDrawable(face, s.pixels(2), s.pixels(3), s.pixels(2), s.pixels(3)));
-                tab.setAlpha(1f);
+                ViewPolicy.setActiveAlpha(tab, true, .6f);
             } else {
                 ViewPolicy.clearBackground(tab);
-                tab.setAlpha(.6f);
+                ViewPolicy.setActiveAlpha(tab, false, .6f);
             }
             tab.setElevation(0);
         }
@@ -658,7 +658,7 @@ final class ImePanels {
                         () -> generateReply(style.label())), KeyboardKeyRole.KEY);
                     choice.setContentDescription("回复风格 " + style.label());
                     choice.setEnabled(!busy);
-                    choice.setAlpha(busy ? .45f : 1f);
+                    ViewPolicy.setActiveAlpha(choice, !busy, .45f);
                     ViewPolicy.clearMinimumWidth(choice);
                     choice.setMinHeight(0);
                     choice.setMinimumHeight(0);
@@ -964,7 +964,7 @@ final class ImePanels {
         primary.setBackground(replySurface(busy ? ImeStyler.fade(s.skin.keyBackground(), .7)
             : Color.parseColor(s.skin.accent()), radius));
         primary.setTextColor(busy ? Color.parseColor(s.skin.keyForeground()) : Color.parseColor(s.skin.onAccent()));
-        primary.setAlpha(primary.isEnabled() ? 1f : .45f);
+        ViewPolicy.setActiveAlpha(primary, primary.isEnabled(), .45f);
         primary.setElevation(0);
     }
 
@@ -1316,7 +1316,7 @@ final class ImePanels {
         button.setContentDescription("剪贴板分类 " + title);
         if (Build.VERSION.SDK_INT >= 30)
             button.setStateDescription(button.isSelected() ? "已选中" : "未选中");
-        button.setAlpha(button.isSelected() ? 1f : .55f);
+        ViewPolicy.setActiveAlpha(button, button.isSelected(), .55f);
     }
 
     void renderCloudClipboard(java.util.List<TextView> notes) {

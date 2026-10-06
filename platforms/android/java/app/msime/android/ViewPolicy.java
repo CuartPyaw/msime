@@ -126,4 +126,9 @@ public final class ViewPolicy {
     public static void clearStateListAnimator(View view) {
         view.setStateListAnimator(null);
     }
+
+    /** Apply full opacity to an active view and a caller-selected opacity otherwise. */
+    public static void setActiveAlpha(View view, boolean active, float inactiveAlpha) {
+        view.setAlpha(active ? 1f : inactiveAlpha);
+    }
 }
