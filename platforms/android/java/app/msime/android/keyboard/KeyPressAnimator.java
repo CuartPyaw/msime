@@ -1,7 +1,5 @@
 package app.msime.android;
 
-import app.msime.android.keyboard.KeyboardGeometry;
-
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.ObjectAnimator;
