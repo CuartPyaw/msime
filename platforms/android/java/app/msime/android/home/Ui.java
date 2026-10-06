@@ -308,6 +308,15 @@ public final class Ui {
         return null;
     }
 
+    /** Create a text label with the supplied text, size in sp, and colour. */
+    public static TextView label(Context context, CharSequence text, float sizeSp, @ColorInt int color) {
+        TextView view = new TextView(context);
+        view.setText(text);
+        view.setTextSize(sizeSp);
+        view.setTextColor(color);
+        return view;
+    }
+
     /** 设置字号（sp）与字重。 */
     public static void style(TextView view, int sizeSp, int weight, @ColorInt int color) {
         view.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp);
