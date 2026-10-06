@@ -377,8 +377,7 @@ public final class VoiceRecognitionActivity extends Activity {
      * the wording to drift out of step with what the buttons do.
      */
     private void showRecordingControls() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout root = KeyboardGeometry.column(this);
         int pad = KeyboardGeometry.pixels(this, 20);
         root.setPadding(pad, pad, pad, pad);
         TextView title = new TextView(this);
@@ -390,8 +389,7 @@ public final class VoiceRecognitionActivity extends Activity {
         ViewPolicy.setTextSizeLabel(hint, "说完后点「完成」开始转写；「取消」会丢弃这次录音。", 14);
         hint.setPadding(0, pad / 2, 0, pad);
         root.addView(hint);
-        LinearLayout actions = new LinearLayout(this);
-        actions.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout actions = KeyboardGeometry.row(this);
         actions.setGravity(Gravity.END);
         Button cancel = new Button(this);
         cancel.setText("取消");
