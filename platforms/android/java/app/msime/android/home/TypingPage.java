@@ -236,7 +236,7 @@ public final class TypingPage extends DetailPage {
     }
 
     private static List<KeyboardScheme> offered(Language language, AppEdition edition, String dictionaries) {
-        List<KeyboardScheme> offered = new ArrayList<>();
+        List<KeyboardScheme> offered = new ArrayList<>(language.schemes.size());
         for (KeyboardScheme scheme : language.schemes) {
             if (scheme.offeredBy(edition) && scheme.installed(dictionaries)) offered.add(scheme);
         }
@@ -271,7 +271,7 @@ public final class TypingPage extends DetailPage {
             KeyboardScheme quanpinChoice = applied == KeyboardScheme.QUANPIN_NINE_KEY
                 ? KeyboardScheme.QUANPIN_NINE_KEY : KeyboardScheme.QUANPIN;
             if (offered.contains(quanpinChoice)) sheet.option("全拼", quanpin, () -> applyScheme(quanpinChoice, null));
-            List<KeyboardScheme> shuangpin = new ArrayList<>();
+            List<KeyboardScheme> shuangpin = new ArrayList<>(SHUANGPIN.length);
             for (KeyboardScheme scheme : SHUANGPIN) {
                 if (offered.contains(scheme)) shuangpin.add(scheme);
             }
