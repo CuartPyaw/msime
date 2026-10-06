@@ -143,7 +143,7 @@ public final class FeedbackPage extends DetailPage {
         TextView button = new TextView(context);
         button.setGravity(Gravity.CENTER);
         Ui.style(button, 16, 600, Ui.onAccent(context));
-        button.setMinHeight(Ui.dp(requireContext(), Ui.ACTION_BUTTON_MIN_HEIGHT));
+        Ui.setTextMinHeightDp(button, requireContext(), Ui.ACTION_BUTTON_MIN_HEIGHT);
         button.setClickable(true);
         button.setFocusable(true);
         button.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);

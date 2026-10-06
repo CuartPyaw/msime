@@ -265,7 +265,7 @@ final class KeyboardSheets {
         Ui.style(button, Ui.TEXT_ROW_TITLE, 600, primary ? Ui.onAccent(context) : Ui.text(context));
         button.setBackground(Ui.rippleOn(context, primary ? Ui.accent(context) : Ui.card(context),
             Ui.dp(context, 16)));
-        button.setMinHeight(Ui.dp(context, Ui.ACTION_BUTTON_MIN_HEIGHT));
+        Ui.setTextMinHeightDp(button, context, Ui.ACTION_BUTTON_MIN_HEIGHT);
         Ui.setHorizontalPaddingDp(button, context, 16);
         button.setClickable(true);
         button.setFocusable(true);
