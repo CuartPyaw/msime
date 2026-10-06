@@ -76,8 +76,7 @@ public final class SymbolPanelView extends LinearLayout {
         // 分类列放进可滚动的容器、每类固定 40 dp：键盘区扣掉标题和底栏只剩百来 dp，五类按权重平分时每类二十来 dp，按钮默认的 48 dp 最小高度和内边距把字挤没了，只剩选中那块底色。
         ScrollView categoryScroll = new ScrollView(context);
         categoryScroll.setVerticalScrollBarEnabled(false);
-        categoryScroll.addView(categories, new ScrollView.LayoutParams(
-            LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        categoryScroll.addView(categories, KeyboardGeometry.scrollMatchWidthWrapParams());
         body.addView(categoryScroll, KeyboardGeometry.linearParamsPx(
             KeyboardGeometry.pixels(getContext(), 76), LayoutParams.MATCH_PARENT));
         grid.setColumnCount(SymbolPanelModel.COLUMNS);
@@ -85,8 +84,7 @@ public final class SymbolPanelView extends LinearLayout {
         grid.setAlignmentMode(GridLayout.ALIGN_BOUNDS);
         gridScroll.setVerticalScrollBarEnabled(true);
         gridScroll.setContentDescription("符号网格；每行五个");
-        gridScroll.addView(grid, new ScrollView.LayoutParams(
-            LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        gridScroll.addView(grid, KeyboardGeometry.scrollMatchWidthWrapParams());
         body.addView(gridScroll, KeyboardGeometry.weightedMatchParentParams(1));
         addView(body, KeyboardGeometry.weightedWidthParams(1));
 
