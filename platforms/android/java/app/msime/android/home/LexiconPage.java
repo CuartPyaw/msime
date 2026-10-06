@@ -171,8 +171,10 @@ public final class LexiconPage extends DetailPage {
         if (!current.failure().isEmpty()) installed.note(current.failure());
 
         GroupCard manage = GroupCard.add(target, null).withDividers(58);
-        manage.addView(actionRow("+", "新建词库", this::showCreateDialog));
-        manage.addView(actionRow("⇪", "导入词库", this::showImportSources));
+        manage.addView(KeyboardSheets.actionRow(context, "+", "新建词库", this::showCreateDialog,
+            28, 0, Ui.ROW_GAP));
+        manage.addView(KeyboardSheets.actionRow(context, "⇪", "导入词库", this::showImportSources,
+            28, 0, Ui.ROW_GAP));
 
         GroupCard community = GroupCard.add(target, "发现词库").withDividers(58);
         List<CommunityCatalog.Item> items = discover;
@@ -220,30 +222,6 @@ public final class LexiconPage extends DetailPage {
         row.setFocusable(true);
         row.setOnClickListener(ignored -> action.run());
         row.setContentDescription(title + (subtitle == null ? "" : "，" + subtitle) + "，" + value);
-        return row;
-    }
-
-    private View actionRow(String glyph, String title, Runnable action) {
-        Context context = requireContext();
-        LinearLayout row = KeyboardSheets.baseRow(context);
-        Ui.setMinimumHeightDp(row, context, Ui.COMPACT_ROW_MIN_HEIGHT);
-        TextView icon = new TextView(context);
-        icon.setText(glyph);
-        icon.setGravity(Gravity.CENTER);
-        Ui.style(icon, 22, 400, Ui.accent(context));
-        icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        row.addView(icon, Ui.squareParams(context, 28));
-        TextView label = new TextView(context);
-        label.setText(title);
-        Ui.style(label, Ui.TEXT_ROW_TITLE, 400, Ui.accent(context));
-        LinearLayout.LayoutParams params = Ui.weightWrap(1f);
-        params.setMarginStart(Ui.dp(context, Ui.ROW_GAP));
-        row.addView(label, params);
-        row.setBackground(Ui.ripple(context));
-        row.setClickable(true);
-        row.setFocusable(true);
-        row.setOnClickListener(ignored -> action.run());
-        row.setAccessibilityDelegate(KeyboardSheets.buttonDelegate(title));
         return row;
     }
 
