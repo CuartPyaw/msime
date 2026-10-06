@@ -3503,7 +3503,7 @@ public final class MSIMEInputService extends InputMethodService {
 
     int pixels(double value) {
         if (value <= 0) return 0;
-        return Math.max(1, KeyboardGeometry.pixels(this, (float) value));
+        return KeyboardGeometry.atLeastOnePixel(this, (float) value);
     }
 
     int halfSpacingPixels(int tenths) {
