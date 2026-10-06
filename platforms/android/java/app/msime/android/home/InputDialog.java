@@ -204,12 +204,7 @@ public final class InputDialog {
 
     /** 分隔线：横的在按钮上方，竖的在两个按钮之间。 */
     private View rule(boolean horizontal) {
-        View rule = Ui.hairlineView(context);
-        int thin = Ui.hairlinePx(context);
-        rule.setLayoutParams(horizontal
-            ? Ui.matchWidthHeightPx(thin)
-            : new LinearLayout.LayoutParams(thin, ViewGroup.LayoutParams.MATCH_PARENT));
-        return rule;
+        return Ui.divider(context, horizontal);
     }
 
 }

@@ -88,7 +88,7 @@ final class AppThemeSheet {
 
         String current = theme(context);
         for (int index = 0; index < THEMES.length; index++) {
-            if (index > 0) root.addView(rule(context));
+            if (index > 0) root.addView(Ui.divider(context, true));
             String id = THEMES[index][0];
             root.addView(SheetOptionView.create(context, THEMES[index][1], id.equals(current), false,
                 Ui.accent(context), id.equals(current), () -> {
@@ -166,12 +166,6 @@ final class AppThemeSheet {
             case "winter": return "冬雪";
             default: return "秋杉";
         }
-    }
-
-    private static View rule(Context context) {
-        View rule = Ui.hairlineView(context);
-        rule.setLayoutParams(Ui.matchWidthHeightPx(Ui.hairlinePx(context)));
-        return rule;
     }
 
 }
