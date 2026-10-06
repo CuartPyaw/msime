@@ -386,7 +386,7 @@ public final class ProfilePage extends DetailPage {
             if (DeviceDataApi.avatarType(image) == null) return "头像只支持 PNG 或 JPEG 图片";
             BitmapFactory.Options size = bounds(image);
             if (size == null) return "读不到这张图片";
-            if (Math.max(size.outWidth, size.outHeight) > MAX_AVATAR_UPLOAD_EDGE) return "图片尺寸太大，请换一张小一些的";
+            if (BitmapPolicy.longestEdge(size.outWidth, size.outHeight) > MAX_AVATAR_UPLOAD_EDGE) return "图片尺寸太大，请换一张小一些的";
             new DeviceDataApi(context).uploadAvatar(image);
             return "";
         }, "头像已更新");
