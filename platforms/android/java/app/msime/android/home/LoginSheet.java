@@ -333,9 +333,7 @@ final class LoginSheet {
             params.setMarginEnd(Ui.dp(activity, 8));
             button.addView(glyph, params);
         }
-        TextView text = new TextView(activity);
-        text.setText(label);
-        Ui.style(text, 16, 600, ink);
+        TextView text = Ui.styledLabel(activity, label, 16, 600, ink);
         button.addView(text);
         button.setContentDescription(label);
         button.setClickable(true);

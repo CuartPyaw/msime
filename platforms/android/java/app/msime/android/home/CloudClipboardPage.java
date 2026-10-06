@@ -146,9 +146,7 @@ public final class CloudClipboardPage extends DetailPage {
         TextView recent = Ui.groupHeading(context, "最近");
         header.addView(recent, Ui.weightWrap(1f));
         if (!current.items().isEmpty()) {
-            TextView clear = new TextView(context);
-            clear.setText("清空");
-            Ui.style(clear, Ui.TEXT_GROUP_TITLE, 500, Ui.accent(context));
+            TextView clear = Ui.styledLabel(context, "清空", Ui.TEXT_GROUP_TITLE, 500, Ui.accent(context));
         Ui.setPaddingDp(clear, context, 8, 4, 0, 4);
             Ui.makeClickable(clear, context, this::confirmClear);
             header.addView(clear);
