@@ -1,6 +1,5 @@
 package app.msime.android;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -40,7 +39,9 @@ public final class OnlineCandidateTransport {
             int status = connection.getResponseCode();
             if (status < 200 || status >= 300) return null;
             try (InputStream input = connection.getInputStream()) {
-                return readBounded(input, OnlineCandidatePolicy.MAX_CLOUD_RESPONSE_BYTES);
+                byte[] body = HttpBodyPolicy.readBounded(input,
+                    OnlineCandidatePolicy.MAX_CLOUD_RESPONSE_BYTES);
+                return body == null ? null : new String(body, StandardCharsets.UTF_8);
             }
         } catch (IOException | RuntimeException error) {
             return null;
@@ -79,23 +80,14 @@ public final class OnlineCandidateTransport {
             int status = connection.getResponseCode();
             if (status < 200 || status >= 300) return null;
             try (InputStream input = connection.getInputStream()) {
-                return readBounded(input, OnlineCandidatePolicy.MAX_AI_RESPONSE_BYTES);
+                byte[] body = HttpBodyPolicy.readBounded(input,
+                    OnlineCandidatePolicy.MAX_AI_RESPONSE_BYTES);
+                return body == null ? null : new String(body, StandardCharsets.UTF_8);
             }
         } catch (IOException | JSONException | RuntimeException error) {
             return null;
         } finally {
             if (connection != null) connection.disconnect();
         }
-    }
-
-    private static String readBounded(InputStream input, int limit) throws IOException {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        byte[] buffer = new byte[8192];
-        int count;
-        while ((count = input.read(buffer)) != -1) {
-            if (output.size() + count > limit) return null;
-            output.write(buffer, 0, count);
-        }
-        return output.toString(StandardCharsets.UTF_8.name());
     }
 }
