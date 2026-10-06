@@ -318,7 +318,7 @@ public final class CommunityCatalog {
         if (values == null) return new Page(List.of(), false, CommunityRequest.message(null, 500));
         boolean hasMore = root.optBoolean("has_more", false);
         List<Item> items = new ArrayList<>(values.length());
-        Set<String> ids = new HashSet<>();
+        Set<String> ids = new HashSet<>(values.length());
         for (int index = 0; index < values.length(); index++) {
             JSONObject value = values.optJSONObject(index);
             Item item = value == null ? null : item(kind, value);
