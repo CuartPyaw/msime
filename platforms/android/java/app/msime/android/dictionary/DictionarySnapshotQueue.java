@@ -413,8 +413,7 @@ public final class DictionarySnapshotQueue {
                 throw new Failure(Reason.INVALID);
             byte[] bytes;
             try (InputStream input = Files.newInputStream(stateFile)) {
-                bytes = HttpBodyPolicy.readBounded(input, MAXIMUM_STATE_BYTES);
-                if (bytes == null) throw new IOException("snapshot state too large");
+                bytes = HttpBodyPolicy.readRequired(input, MAXIMUM_STATE_BYTES);
             }
             if (bytes.length == 0) throw new Failure(Reason.INVALID);
             DataInputStream input = new DataInputStream(new ByteArrayInputStream(bytes));
