@@ -369,6 +369,12 @@ public final class Ui {
             dp(context, heightDp));
     }
 
+    /** Frame layout parameters for a content-sized child with explicit gravity. */
+    public static FrameLayout.LayoutParams frameWrap(int gravity) {
+        return new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT, gravity);
+    }
+
     /** Layout parameters for a weighted child with a fixed height in dp. */
     public static LinearLayout.LayoutParams weightedHeight(Context context, float heightDp, float weight) {
         return new LinearLayout.LayoutParams(0, dp(context, heightDp), weight);

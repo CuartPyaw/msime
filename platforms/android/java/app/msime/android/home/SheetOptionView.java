@@ -30,8 +30,7 @@ final class SheetOptionView {
         text.setText(nested ? label + " ›" : label);
         text.setGravity(Gravity.CENTER);
         Ui.style(text, Ui.TEXT_SHEET_OPTION, bold ? 600 : 400, color);
-        FrameLayout.LayoutParams textParams = new FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
+        FrameLayout.LayoutParams textParams = Ui.frameWrap(Gravity.CENTER);
         textParams.leftMargin = Ui.dp(context, Ui.SHEET_OPTION_TEXT_INSET);
         textParams.rightMargin = Ui.dp(context, Ui.SHEET_OPTION_TEXT_INSET);
         textParams.topMargin = Ui.dp(context, Ui.SHEET_OPTION_TEXT_VERTICAL_INSET);
