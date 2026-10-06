@@ -124,8 +124,7 @@ public final class KeyboardSchemeCard extends FrameLayout {
 
     private static TextView centeredLabel(Context context, CharSequence text, float sizeSp,
             boolean bold) {
-        TextView view = new TextView(context);
-        view.setText(text);
+        TextView view = ViewPolicy.newTextView(context, text);
         ViewPolicy.setCenteredTextSizeSp(view, sizeSp);
         if (bold) ViewPolicy.setTypefaceStyle(view, android.graphics.Typeface.BOLD);
         return view;
