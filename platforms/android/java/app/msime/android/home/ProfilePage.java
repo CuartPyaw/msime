@@ -226,8 +226,7 @@ public final class ProfilePage extends DetailPage {
     }
 
     private View header(Context context, DeviceDataApi.Profile profile, @Nullable Bitmap image) {
-        LinearLayout header = new LinearLayout(context);
-        header.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout header = Ui.column(context);
         ViewPolicy.setCenteredHorizontally(header);
         Ui.setPaddingDp(header, context, 0, 8, 0, 4);
 

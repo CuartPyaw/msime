@@ -74,8 +74,7 @@ public final class DownloadPage extends DetailPage {
         int tileSize = Ui.dp(context, 44);
         card.addView(tile, Ui.squareParamsPx(tileSize));
 
-        LinearLayout texts = new LinearLayout(context);
-        texts.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout texts = Ui.column(context);
         TextView title = Ui.styledLabel(context, "在电脑上打开", Ui.TEXT_ROW_TITLE, 600, Ui.text(context));
         texts.addView(title);
         TextView link = Ui.styledLabel(context, DOWNLOAD_LABEL, Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));

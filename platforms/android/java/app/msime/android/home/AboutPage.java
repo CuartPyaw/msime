@@ -170,8 +170,7 @@ public final class AboutPage extends DetailPage {
 
     /** 居中的标、应用名、版本，以及检查更新药丸（Play 安装时没有）。 */
     private View header(Context context, boolean play) {
-        LinearLayout header = new LinearLayout(context);
-        header.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout header = Ui.column(context);
         ViewPolicy.setCenteredHorizontally(header);
         Ui.setPaddingDp(header, context, 0, 8, 0, 20);
 

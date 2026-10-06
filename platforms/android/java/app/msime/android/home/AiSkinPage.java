@@ -276,11 +276,9 @@ public final class AiSkinPage extends DetailPage {
         GroupCard previewGroup = GroupCard.add(target, null);
         LinearLayout card = previewGroup.card();
         Ui.setPaddingDp(card, context, 14, 14, 14, 12);
-        LinearLayout header = new LinearLayout(context);
-        header.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout header = Ui.row(context);
         ViewPolicy.setCenteredVertically(header);
-        LinearLayout heading = new LinearLayout(context);
-        heading.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout heading = Ui.column(context);
         title = Ui.styledLabel(context, "", 17, 600, Ui.text(context));
         title.setSingleLine(true);
         heading.addView(title);
@@ -300,8 +298,7 @@ public final class AiSkinPage extends DetailPage {
         preview = new KeyboardPreview(context);
         preview.setContentDescription("皮肤预览");
         stage.addView(preview, Ui.frameMatchWidthHeight(context, 200));
-        LinearLayout overlay = new LinearLayout(context);
-        overlay.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout overlay = Ui.column(context);
         ViewPolicy.setCentered(overlay);
         ProgressBar spinner = new ProgressBar(context);
         spinner.setIndeterminateTintList(ColorStateList.valueOf(Ui.accent(context)));
@@ -315,13 +312,11 @@ public final class AiSkinPage extends DetailPage {
         stageParams.topMargin = Ui.dp(context, 12);
         card.addView(stage, stageParams);
 
-        LinearLayout colours = new LinearLayout(context);
-        colours.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout colours = Ui.row(context);
         ViewPolicy.setCenteredVertically(colours);
         TextView label = Ui.styledLabel(context, "配色", 13, 400, Ui.subText(context));
         colours.addView(label);
-        palette = new LinearLayout(context);
-        palette.setOrientation(LinearLayout.HORIZONTAL);
+        palette = Ui.row(context);
         LinearLayout.LayoutParams paletteParams = Ui.wrap();
         paletteParams.setMarginStart(Ui.dp(context, 10));
         colours.addView(palette, paletteParams);
@@ -359,8 +354,7 @@ public final class AiSkinPage extends DetailPage {
         describe.card().addView(input, Ui.matchWidth());
         HorizontalScrollView chipScroll = new HorizontalScrollView(context);
         chipScroll.setHorizontalScrollBarEnabled(false);
-        LinearLayout chips = new LinearLayout(context);
-        chips.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout chips = Ui.row(context);
         Ui.setPaddingDp(chips, context, 12, 4, 12, 12);
         List<TextView> chipViews = new ArrayList<>(SUGGESTIONS.length);
         for (String suggestion : SUGGESTIONS) {
@@ -403,8 +397,7 @@ public final class AiSkinPage extends DetailPage {
         animations.setOnSelect(index -> s.animation = index);
         animationGroup.card().addView(animations, Ui.matchWidth());
 
-        LinearLayout actions = new LinearLayout(context);
-        actions.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout actions = Ui.row(context);
         LinearLayout.LayoutParams actionsParams = Ui.matchWidth();
         actionsParams.topMargin = Ui.dp(context, Ui.GROUP_GAP);
         if (unavailable) {
