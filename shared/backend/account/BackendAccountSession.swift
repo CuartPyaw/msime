@@ -140,10 +140,26 @@ struct BackendDesktopSessionFile: BackendSessionStorage {
     guard status.st_mode & S_IFMT == S_IFREG, status.st_mode & 0o077 == 0, status.st_uid == geteuid(),
           status.st_size <= Self.maximumBytes else { throw BackendAccountClient.Failure(status: 0) }
     let data: Data
-    do { data = try Data(contentsOf: url) } catch { throw BackendAccountClient.Failure(status: 0) }
-    guard data.count <= Self.maximumBytes else { throw BackendAccountClient.Failure(status: 0) }
+    do { data = try Self.readBounded(url, maximumBytes: Self.maximumBytes) }
+    catch { throw BackendAccountClient.Failure(status: 0) }
     do { return try BackendSavedSession.validated(JSONDecoder().decode(BackendSavedSession.self, from: data)) }
     catch { throw BackendAccountClient.Failure(status: 0) }
+  }
+
+  /// 上面的元数据检查只能快速拒绝超限文件。分块读取确保检查后被替换的文件不会让会话加载器无限分配内存。
+  static func readBounded(_ url: URL, maximumBytes: Int) throws -> Data {
+    guard maximumBytes >= 0 else { throw BackendAccountClient.Failure(status: 0) }
+    let handle = try FileHandle(forReadingFrom: url)
+    defer { try? handle.close() }
+    var data = Data()
+    data.reserveCapacity(min(maximumBytes, 64 * 1024))
+    while true {
+      let remaining = maximumBytes - data.count
+      let chunk = try handle.read(upToCount: min(64 * 1024, remaining + 1)) ?? Data()
+      if chunk.isEmpty { return data }
+      guard chunk.count <= remaining else { throw BackendAccountClient.Failure(status: 0) }
+      data.append(chunk)
+    }
   }
 
   func save(_ session: BackendSavedSession) throws {

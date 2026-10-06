@@ -373,13 +373,14 @@ public final class AboutPage extends DetailPage {
 
     /** APK 里随包带的许可通知文件（相对 assets 的路径），按名字排序。 */
     private static List<String> listNotices(AssetManager assets) throws IOException {
-        List<String> found = new ArrayList<>();
         String[] abis = assets.list("native-notices");
+        List<String> found = new ArrayList<>();
         if (abis != null && abis.length > 0) {
             // 每个 ABI 一份同样的清单，列一份就够。
             java.util.Arrays.sort(abis);
             String[] files = assets.list("native-notices/" + abis[0]);
             if (files != null) {
+                found = new ArrayList<>(files.length);
                 for (String file : files) found.add("native-notices/" + abis[0] + "/" + file);
             }
         }
