@@ -134,7 +134,7 @@ public final class DownloadPage extends DetailPage {
     private void getRow(GroupCard group, @DrawableRes int icon, String title, String subtitle, String platform) {
         GroupCard.Row row = row(group, icon, title, subtitle);
         Context context = row.view().getContext();
-        TextView button = tonal(context, "获取", title);
+        TextView button = KeyboardSheets.tonalButton(context, "获取", "获取，" + title, 600);
         button.setOnClickListener(ignored -> AboutPage.openLink(context, DOWNLOAD + "?release=" + platform));
         attach(row, button);
     }
@@ -142,7 +142,8 @@ public final class DownloadPage extends DetailPage {
     private void sendRow(GroupCard group, @DrawableRes int icon, String title, String subtitle, String platform) {
         GroupCard.Row row = row(group, icon, title, subtitle);
         Context context = row.view().getContext();
-        TextView button = tonal(context, sentPlatforms.contains(platform) ? "已发送" : "发送链接", title);
+        String label = sentPlatforms.contains(platform) ? "已发送" : "发送链接";
+        TextView button = KeyboardSheets.tonalButton(context, label, label + "，" + title, 600);
         button.setEnabled(!sentPlatforms.contains(platform));
         button.setOnClickListener(ignored -> send(platform, button));
         attach(row, button);
@@ -152,11 +153,6 @@ public final class DownloadPage extends DetailPage {
         LinearLayout.LayoutParams params = Ui.wrap();
         params.setMarginStart(Ui.dp(button.getContext(), Ui.ROW_GAP));
         ((LinearLayout) row.view()).addView(button, params);
-    }
-
-    /** 行尾的 tonal 胶囊：accentSoft 底、强调色字。 */
-    private static TextView tonal(Context context, String label, String title) {
-        return KeyboardSheets.tonalButton(context, label, label + "，" + title, 600);
     }
 
     private void send(String platform, TextView button) {
