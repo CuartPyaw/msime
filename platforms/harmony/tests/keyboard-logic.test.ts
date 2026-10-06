@@ -7472,14 +7472,18 @@ group("account success envelopes require a real boolean", () => {
 });
 
 group("account native success envelopes require a value", () => {
-  check(accountReplyValue({ ok: true, value: { id: "synthetic" } })?.id === "synthetic",
+  check(accountReplyValue<{ id: string }>({ ok: true, value: { id: "synthetic" } })?.id === "synthetic",
     "account success exposes its object value");
   check(accountReplyValue({ ok: true }) === null,
     "account success without a value is refused");
   check(accountReplyValue({ ok: true, value: null }) === null,
     "account success with a null value is refused");
-  check(accountReplyValue({ ok: false, value: { id: "stale" } }) === null,
+  check(accountReplyValue<{ id: string }>({ ok: false, value: { id: "stale" } }) === null,
     "account failure never exposes a value");
+  check(accountReplyValue(null) === null,
+    "a JSON null account reply is refused without throwing");
+  check(accountReplyValue([]) === null,
+    "a JSON array account reply is refused without throwing");
 });
 
 group("account and cloud clipboard bridge keeps secrets native", () => {

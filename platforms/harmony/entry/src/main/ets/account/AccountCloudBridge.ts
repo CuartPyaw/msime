@@ -606,9 +606,11 @@ export function strictAccountOk(value: unknown): value is true {
 }
 
 /** 原生账号成功信封必须同时带有非空 value，避免缺失值流入后续请求。 */
-export function accountReplyValue<T>(reply: { ok?: unknown; value?: T | null }): T | null {
-  return strictAccountOk(reply.ok) && reply.value !== undefined && reply.value !== null
-    ? reply.value : null;
+export function accountReplyValue<T>(reply: unknown): T | null {
+  if (reply === null || typeof reply !== "object" || Array.isArray(reply)) return null;
+  const value: unknown = (reply as { value?: unknown }).value;
+  return strictAccountOk((reply as { ok?: unknown }).ok) && value !== undefined && value !== null
+    ? value as T : null;
 }
 
 function validString(value: unknown, maximum: number, allowEmpty = false): value is string {
