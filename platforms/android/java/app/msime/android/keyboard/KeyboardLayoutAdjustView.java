@@ -59,9 +59,8 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
         setContentDescription("键盘布局调整；键盘上左右拖动调整按键间距，上下拖动调整行间距");
         setBackgroundColor(Color.TRANSPARENT);
 
-        bar = new LinearLayout(context);
-        bar.setOrientation(LinearLayout.HORIZONTAL);
-        bar.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        bar = KeyboardGeometry.row(context);
+        ViewPolicy.setCenteredVertically(bar);
         KeyboardGeometry.setSymmetricPaddingDp(bar, getContext(), 8, 4);
         bar.setContentDescription("键盘高度调整工具栏");
         bar.setFocusable(true);
