@@ -210,8 +210,8 @@ public final class FunctionPanelView extends LinearLayout {
             float density = KeyboardGeometry.density(getContext());
             boolean on = state == State.ON;
             int color = on ? panel.accent : panel.foreground;
-            if (isPressed()) color = Color.argb(Color.alpha(color) * PRESSED_ALPHA / 255,
-                Color.red(color), Color.green(color), Color.blue(color));
+            if (isPressed()) color = ColorPolicy.withAlpha(color,
+                Color.alpha(color) * PRESSED_ALPHA / 255);
             textPaint.setTextSize(KeyboardGeometry.keySp(getContext(), LABEL_SP));
             textPaint.setTypeface(on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
             Paint.FontMetrics label = textPaint.getFontMetrics();
