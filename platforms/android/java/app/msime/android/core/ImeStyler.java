@@ -482,7 +482,7 @@ final class ImeStyler {
         int widthDp = KeyboardFormFactorPolicy.surfaceWidthDp(
             configuration.smallestScreenWidthDp, configuration.screenWidthDp);
         int width = widthDp == 0 ? FrameLayout.LayoutParams.MATCH_PARENT : s.pixels(widthDp);
-        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+        FrameLayout.LayoutParams params = KeyboardGeometry.frameParamsPx(
             width, FrameLayout.LayoutParams.MATCH_PARENT, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         s.keyboardSurface.setLayoutParams(params);
         s.keyboardSurface.setElevation(widthDp == 0 ? 0 : s.pixels(10));
