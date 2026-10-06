@@ -33,7 +33,7 @@ public final class KeyboardKeyPreview extends View {
 
     public KeyboardKeyPreview(Context context) {
         super(context);
-        setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        ViewPolicy.hideFromAccessibility(this);
         setWillNotDraw(false);
         ViewPolicy.setNonInteractive(this);
         text.setTextAlign(Paint.Align.CENTER);

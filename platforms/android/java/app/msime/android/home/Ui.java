@@ -263,7 +263,7 @@ public final class Ui {
 
     /** Exclude a decorative view from the accessibility tree. */
     public static void hideFromAccessibility(View view) {
-        view.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        ViewPolicy.hideFromAccessibility(view);
     }
 
     /** Return whether the supplied context currently uses the system night configuration. */
@@ -596,7 +596,7 @@ public final class Ui {
         mark.setText(done ? "✓" : "!");
         mark.setTextColor(done ? onAccent(context) : 0xFFFFFFFF);
         mark.setBackground(circle(done ? accent(context) : color(context, app.msime.android.R.attr.msWarn)));
-        mark.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        ViewPolicy.hideFromAccessibility(mark);
     }
 
     /** Create the centered title used by option-style bottom sheets. */
@@ -711,7 +711,7 @@ public final class Ui {
         ImageView view = new ImageView(context);
         view.setImageResource(app.msime.android.R.drawable.ms_w1_a2_chevron);
         setImageTint(view, subText(context));
-        view.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        ViewPolicy.hideFromAccessibility(view);
         return view;
     }
 

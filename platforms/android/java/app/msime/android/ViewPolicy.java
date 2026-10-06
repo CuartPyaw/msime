@@ -264,6 +264,11 @@ public final class ViewPolicy {
         view.setFocusable(false);
     }
 
+    /** Exclude a decorative view from the accessibility tree. */
+    public static void hideFromAccessibility(View view) {
+        view.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+    }
+
     /** Remove the platform state-list animator from a view. */
     public static void clearStateListAnimator(View view) {
         view.setStateListAnimator(null);

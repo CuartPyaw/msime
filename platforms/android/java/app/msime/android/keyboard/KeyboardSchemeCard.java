@@ -118,7 +118,7 @@ public final class KeyboardSchemeCard extends FrameLayout {
         addView(column, columnParams);
 
         for (View child : new View[] {glyph, badge, title, check, cluster, column}) {
-            child.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            ViewPolicy.hideFromAccessibility(child);
         }
     }
 

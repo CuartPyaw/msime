@@ -230,7 +230,7 @@ public final class InlineHeightBar extends LinearLayout {
             super(context);
             this.bar = bar;
             text.setTextAlign(Paint.Align.CENTER);
-            setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+            ViewPolicy.hideFromAccessibility(this);
         }
 
         // 拖动柄只换算拖动距离，没有点击语义；无障碍用户经整条的 RangeInfo 与滚动动作调整。
