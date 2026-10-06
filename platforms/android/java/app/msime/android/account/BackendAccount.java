@@ -418,7 +418,7 @@ public final class BackendAccount {
         org.json.JSONArray data = response.optJSONArray("data");
         if (data == null || data.length() == 0 || data.length() > 64)
             throw new IllegalStateException("invalid model catalogue");
-        List<ChatModel> models = new ArrayList<>();
+        List<ChatModel> models = new ArrayList<>(data.length());
         for (int index = 0; index < data.length(); index++) {
             JSONObject item = data.optJSONObject(index);
             String id = item == null ? "" : optionalStringField(item.opt("id"), "").trim();
