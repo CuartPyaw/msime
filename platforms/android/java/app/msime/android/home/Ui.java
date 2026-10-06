@@ -359,6 +359,13 @@ public final class Ui {
         return view;
     }
 
+    /** Create a horizontal linear container for inline host content. */
+    public static LinearLayout row(Context context) {
+        LinearLayout view = new LinearLayout(context);
+        view.setOrientation(LinearLayout.HORIZONTAL);
+        return view;
+    }
+
     /** Layout parameters for a weighted child that wraps its height. */
     public static LinearLayout.LayoutParams weightWrap(float weight) {
         return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, weight);

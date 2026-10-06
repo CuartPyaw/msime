@@ -57,8 +57,7 @@ public final class DownloadPage extends DetailPage {
 
     /** 「在电脑上打开」卡：accentSoft 底的 r20 卡片，左边强调色圆角方块里一枚链接图标。 */
     private View hero(Context context) {
-        LinearLayout card = new LinearLayout(context);
-        card.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout card = Ui.row(context);
         ViewPolicy.setCenteredVertically(card);
         card.setBackground(Ui.rounded(Ui.accentSoft(context), Ui.dp(context, 20)));
         int pad = Ui.dp(context, 16);

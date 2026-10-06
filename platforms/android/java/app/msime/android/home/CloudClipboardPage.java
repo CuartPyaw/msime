@@ -115,8 +115,7 @@ public final class CloudClipboardPage extends DetailPage {
         GroupCard.Row toggle = settings.toggle("云剪贴板", DESCRIPTION, current != null && current.enabled(), this::setEnabled);
         toggle.setEnabled(current != null);
 
-        LinearLayout retention = new LinearLayout(context);
-        retention.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout retention = Ui.row(context);
         ViewPolicy.setCenteredVertically(retention);
         Ui.setRowMinimumHeight(retention, context);
         Ui.setRowPadding(retention, context);
@@ -138,8 +137,7 @@ public final class CloudClipboardPage extends DetailPage {
 
         if (current == null) return;
 
-        LinearLayout header = new LinearLayout(context);
-        header.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout header = Ui.row(context);
         ViewPolicy.setCenteredVertically(header);
         Ui.setPaddingDp(header, context, Ui.GROUP_TITLE_INSET, 0,
             Ui.GROUP_TITLE_INSET, 2);
@@ -177,8 +175,7 @@ public final class CloudClipboardPage extends DetailPage {
     }
 
     private View itemRow(Context context, CloudClipboardApi.Item item) {
-        LinearLayout row = new LinearLayout(context);
-        row.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout row = Ui.row(context);
         ViewPolicy.setCenteredVertically(row);
         Ui.setPaddingDp(row, context, 16, 12, 8, 12);
 
