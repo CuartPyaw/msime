@@ -71,7 +71,7 @@ final class ImeCandidates {
         button.setTextColor(ColorPolicy.stateList(
             new int[][] {{android.R.attr.state_selected}, {}},
             new int[] {selectedText, keyForeground}));
-        button.setTypeface(candidateTypeface, button.isSelected() ? Typeface.BOLD : Typeface.NORMAL);
+        applyCandidateTypeface(button);
         ViewPolicy.setMinimumWidth(button, s.pixels(30));
         button.setMinHeight(0);
         button.setMinimumHeight(0);
@@ -79,6 +79,11 @@ final class ImeCandidates {
         button.setLineSpacing(0, 1.0f);
         ViewPolicy.clearFontPadding(button);
         button.setElevation(0);
+    }
+
+    private void applyCandidateTypeface(Button button) {
+        button.setTypeface(candidateTypeface,
+            button.isSelected() ? Typeface.BOLD : Typeface.NORMAL);
     }
 
     /** 展开网格里的单元：样式通道重走整棵树时按网格单元上色，而不是按候选条的 chip。 */
@@ -96,7 +101,7 @@ final class ImeCandidates {
         button.setTextColor(ColorPolicy.stateList(
             new int[][] {{android.R.attr.state_selected}, {}},
             new int[] {accentText, keyForeground}));
-        button.setTypeface(candidateTypeface, button.isSelected() ? Typeface.BOLD : Typeface.NORMAL);
+        applyCandidateTypeface(button);
         button.setElevation(0);
     }
 
