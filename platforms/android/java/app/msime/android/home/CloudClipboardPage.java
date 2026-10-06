@@ -182,8 +182,7 @@ public final class CloudClipboardPage extends DetailPage {
             hint.setText("在任一设备上复制文字，这里就会出现");
             hint.setGravity(Gravity.CENTER);
             Ui.style(hint, Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));
-            LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            LinearLayout.LayoutParams hintParams = Ui.wrap();
             hintParams.topMargin = Ui.dp(context, 4);
             empty.addView(hint, hintParams);
             list.addView(empty);
@@ -212,8 +211,7 @@ public final class CloudClipboardPage extends DetailPage {
         TextView meta = new TextView(context);
         meta.setText(meta(item));
         Ui.style(meta, 12, 400, Ui.subText(context));
-        LinearLayout.LayoutParams metaParams = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams metaParams = Ui.wrap();
         metaParams.topMargin = Ui.dp(context, 4);
         texts.addView(meta, metaParams);
         row.addView(texts, Ui.weightWrap(1f));
