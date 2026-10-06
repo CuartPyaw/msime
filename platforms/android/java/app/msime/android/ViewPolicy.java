@@ -28,6 +28,18 @@ public final class ViewPolicy {
         view.setMinimumHeight(height);
     }
 
+    /** Remove both minimum width and height constraints from a generic view. */
+    public static void clearMinimumSize(View view) {
+        clearMinimumWidth(view);
+        clearMinimumHeight(view);
+    }
+
+    /** Remove both minimum width and height constraints from a text widget. */
+    public static void clearMinimumSize(TextView view) {
+        clearMinimumWidth(view);
+        clearMinimumHeight(view);
+    }
+
     /** Apply a minimum height to both text-widget constraints. */
     public static void setMinimumHeight(TextView view, int height) {
         view.setMinHeight(height);

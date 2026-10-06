@@ -80,9 +80,7 @@ public final class InlineHeightBar extends LinearLayout {
         button.setText(label);
         ViewPolicy.setAllCapsFalse(button);
         ViewPolicy.clearBackground(button);
-        ViewPolicy.clearMinimumWidth(button);
-        button.setMinHeight(0);
-        button.setMinimumHeight(0);
+        ViewPolicy.clearMinimumSize(button);
         int horizontal = KeyboardGeometry.pixels(context, 12);
         ViewPolicy.setHorizontalPadding(button, horizontal);
         KeyboardGeometry.setKeyTextSize(button, 14);
