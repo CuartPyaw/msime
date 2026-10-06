@@ -1,3 +1,4 @@
+import app.msime.android.BoundsPolicy;
 import app.msime.android.KeyboardGapPolicy;
 import app.msime.android.KeyboardGeometry;
 import app.msime.android.KeyboardLayout;
@@ -8,6 +9,8 @@ public final class KeyboardGeometrySmoke {
     public static void main(String[] args) {
         // 与 crates/client-core 的 default_touch_key_spacing_tenths / default_touch_row_spacing_tenths 同值。
         check(KeyboardGeometry.keySpacing(-1) == 60);
+        check(BoundsPolicy.nonNegative(-1) == 0 && BoundsPolicy.nonNegative(7) == 7);
+        check(BoundsPolicy.nonNegative(-1L) == 0L && BoundsPolicy.nonNegative(7L) == 7L);
         check(KeyboardGeometry.rowSpacing(-1) == 70);
         check(KeyboardGeometry.DESIGN_KEY_GAP_DP == 5 && KeyboardGeometry.DESIGN_ROW_GAP_DP == 8);
         check(KeyboardGeometry.DESIGN_PADDING_TOP_DP == 8
