@@ -1275,8 +1275,7 @@ final class ImePanels {
         card.setText(label);
         KeyboardGeometry.setKeyTextSize(card, 15);
         card.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        card.setMaxLines(3);
-        card.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        ViewPolicy.setMaxLinesEllipsized(card, 3);
         KeyboardGeometry.setSymmetricPaddingDp(card, s, 12, 8);
         card.setMinHeight(0);
         card.setMinimumHeight(0);
@@ -1423,8 +1422,7 @@ final class ImePanels {
             row.setText(phrase);
             KeyboardGeometry.setKeyTextSize(row, 15);
             row.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-            row.setMaxLines(2);
-            row.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            ViewPolicy.setMaxLinesEllipsized(row, 2);
             ViewPolicy.setMinimumHeight(row, s.pixels(44));
             KeyboardGeometry.setSymmetricPaddingDp(row, s, 12, 8);
             row.setStateListAnimator(null);

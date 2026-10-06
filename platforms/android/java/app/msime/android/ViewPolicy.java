@@ -3,6 +3,7 @@ package app.msime.android;
 import android.view.Gravity;
 import android.view.View;
 import android.util.TypedValue;
+import android.text.TextUtils;
 import android.widget.Button;
 import android.widget.TextView;
 
@@ -102,5 +103,11 @@ public final class ViewPolicy {
     /** Remove a view's default background drawable. */
     public static void clearBackground(View view) {
         view.setBackground(null);
+    }
+
+    /** Limit a text view to a fixed number of lines and truncate at the end. */
+    public static void setMaxLinesEllipsized(TextView view, int maxLines) {
+        view.setMaxLines(maxLines);
+        view.setEllipsize(TextUtils.TruncateAt.END);
     }
 }
