@@ -102,15 +102,13 @@ public final class FeedbackPage extends DetailPage {
 
         HorizontalScrollView strip = new HorizontalScrollView(context);
         strip.setHorizontalScrollBarEnabled(false);
-        LinearLayout shots = new LinearLayout(context);
-        shots.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout shots = Ui.row(context);
         Ui.setPaddingDp(shots, requireContext(), 16, 10, 16, 0);
         strip.addView(shots);
         card.addView(strip, Ui.matchWidth());
         thumbnails = shots;
 
-        LinearLayout add = new LinearLayout(context);
-        add.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout add = Ui.row(context);
         ViewPolicy.setCenteredVertically(add);
         Ui.setPaddingDp(add, requireContext(), 16, 12, 16, 14);
         add.setContentDescription("添加截图，最多 " + FeedbackApi.MAX_SCREENSHOTS + " 张");

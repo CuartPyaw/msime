@@ -418,8 +418,7 @@ public final class StatisticsFragment extends HomeTabFragment {
     /** 卡片上方的一行：左边小标题，右边可选的说明；返回这一行，按键页往右边再放分段控件。 */
     private static LinearLayout header(Context context, LinearLayout parent, String title,
             @Nullable String trailing) {
-        LinearLayout row = new LinearLayout(context);
-        row.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout row = Ui.row(context);
         ViewPolicy.setCenteredVertically(row);
         Ui.setHorizontalPaddingDp(row, context, 4);
         TextView heading = Ui.label(context, title, 13, Ui.subText(context));
@@ -436,8 +435,7 @@ public final class StatisticsFragment extends HomeTabFragment {
 
     /** 并排两张 KPI 卡。 */
     private static void tiles(Context context, LinearLayout parent, View left, View right) {
-        LinearLayout row = new LinearLayout(context);
-        row.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout row = Ui.row(context);
         LinearLayout.LayoutParams leftParams = Ui.weightedMatchParent(1f);
         LinearLayout.LayoutParams rightParams = Ui.weightedMatchParent(1f);
         rightParams.setMarginStart(Ui.dp(context, 10));
