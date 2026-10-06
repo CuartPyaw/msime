@@ -46,6 +46,15 @@ public final class DrawablePolicy {
         return shape;
     }
 
+    /** Create a filled rounded rectangle with a dashed outline. */
+    public static GradientDrawable outlinedDashed(int fillColor, float radiusPx, int strokeWidth,
+                                                  int strokeColor, float dashWidth,
+                                                  float dashGap) {
+        GradientDrawable shape = rounded(fillColor, radiusPx);
+        shape.setStroke(Math.max(1, strokeWidth), strokeColor, dashWidth, dashGap);
+        return shape;
+    }
+
     /** Build a drawable state list while keeping the supplied state precedence. */
     public static StateListDrawable stateList(int[][] states, Drawable... drawables) {
         if (states == null || drawables == null || states.length != drawables.length) {

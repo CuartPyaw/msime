@@ -153,8 +153,8 @@ public final class SkinsPage extends DetailPage {
 
         FrameLayout tile = new FrameLayout(context);
         int ring = Ui.dp(context, 2);
-        GradientDrawable frame = Ui.rounded(Color.TRANSPARENT, Ui.dp(context, 14));
-        frame.setStroke(card.selected() ? ring : Ui.atLeastOnePx(context, 1),
+        GradientDrawable frame = Ui.outlined(Color.TRANSPARENT, Ui.dp(context, 14),
+            card.selected() ? ring : Ui.atLeastOnePx(context, 1),
             card.selected() ? Ui.accent(context) : Ui.outline(context));
         tile.setBackground(frame);
         tile.setPadding(ring + Ui.dp(context, 1), ring + Ui.dp(context, 1), ring + Ui.dp(context, 1),
@@ -195,8 +195,9 @@ public final class SkinsPage extends DetailPage {
         LinearLayout tile = new LinearLayout(context);
         tile.setOrientation(LinearLayout.VERTICAL);
         tile.setGravity(Gravity.CENTER);
-        GradientDrawable dashed = Ui.rounded(Ui.accentSoft(context), Ui.dp(context, 14));
-        dashed.setStroke(Ui.atLeastOnePx(context, 1.5f), Ui.accent(context), Ui.dp(context, 6), Ui.dp(context, 4));
+        GradientDrawable dashed = Ui.outlinedDashed(Ui.accentSoft(context), Ui.dp(context, 14),
+            Ui.atLeastOnePx(context, 1.5f), Ui.accent(context), Ui.dp(context, 6),
+            Ui.dp(context, 4));
         tile.setBackground(dashed);
         TextView spark = new TextView(context);
         spark.setText("✦");
