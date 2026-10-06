@@ -83,7 +83,7 @@ public final class PagedTileGrid extends ViewGroup {
         } else {
             target = Math.round(scrollX / pageWidth);
         }
-        return Math.max(0, Math.min(pageCount - 1, target));
+        return KeyboardGeometry.bounded(target, 0, pageCount - 1);
     }
 
     public void setGrid(int columnCount, int rowCount) {
@@ -108,7 +108,7 @@ public final class PagedTileGrid extends ViewGroup {
     public int pageCount() { return pageCount(getChildCount(), perPage(columns, rows)); }
 
     public void setPage(int value, boolean animate) {
-        int target = Math.max(0, Math.min(pageCount() - 1, value));
+        int target = KeyboardGeometry.bounded(value, 0, pageCount() - 1);
         int width = getWidth();
         if (!animate || width <= 0) {
             scroller.forceFinished(true);
