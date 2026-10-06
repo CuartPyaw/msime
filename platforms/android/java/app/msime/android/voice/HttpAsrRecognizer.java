@@ -119,7 +119,9 @@ public final class HttpAsrRecognizer {
             // Two bytes per sample: the byte budget is the time budget.
             int limit = WavAudio.SAMPLE_RATE * 2 / 1000 * MAX_MILLIS;
             while (!stopped.get() && captured.size() < limit) {
-                int read = recorder.read(chunk, 0, chunk.length);
+                int requested = VoiceCapturePolicy.readLength(limit, captured.size(), chunk.length);
+                if (requested == 0) break;
+                int read = recorder.read(chunk, 0, requested);
                 if (read < 0) throw new Refused(Failure.UNAVAILABLE);
                 captured.write(chunk, 0, read);
             }
