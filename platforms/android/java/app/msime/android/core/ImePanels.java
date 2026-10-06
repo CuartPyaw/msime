@@ -126,11 +126,7 @@ final class ImePanels {
                 row.setWeightSum(EmojiCatalogModel.COLUMNS);
                 s.emojiGrid.addView(row, KeyboardGeometry.matchWidthHeightPx(rowHeight));
             }
-            Button cell = s.keyboardKey(item.text(), "表情 " + item.text(),
-                () -> insertEmoji(item.text()));
-            ((KeyboardPressButton) cell).setKeyboardRole(KeyboardKeyRole.PLAIN);
-            KeyboardGeometry.setKeyTextSize(cell, 26);
-            compactEmojiButton(cell);
+            Button cell = emojiCell(item);
             row.addView(cell, KeyboardGeometry.weightedMatchParentParams(1));
         }
         renderEmojiStatus();
@@ -142,6 +138,15 @@ final class ImePanels {
         if (!s.commitText(text, TypingSource.LOCAL)) return;
         s.emojiRecents = EmojiCatalogModel.recordRecent(s.emojiRecents, text);
         s.saveEmojiRecents();
+    }
+
+    private Button emojiCell(EmojiCatalogModel.Item item) {
+        Button cell = s.keyboardKey(item.text(), "表情 " + item.text(),
+            () -> insertEmoji(item.text()));
+        ((KeyboardPressButton) cell).setKeyboardRole(KeyboardKeyRole.PLAIN);
+        KeyboardGeometry.setKeyTextSize(cell, 26);
+        compactEmojiButton(cell);
+        return cell;
     }
 
     void deleteFromEmojiPicker() {
