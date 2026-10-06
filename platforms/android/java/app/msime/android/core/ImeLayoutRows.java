@@ -71,11 +71,9 @@ final class ImeLayoutRows {
         s.handwritingStatus.setContentDescription("手写状态");
         ViewPolicy.setNonInteractive(s.handwritingStatus);
 
-        LinearLayout row = new LinearLayout(s);
-        row.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout row = KeyboardGeometry.row(s);
 
-        LinearLayout punctuation = new LinearLayout(s);
-        punctuation.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout punctuation = KeyboardGeometry.column(s);
         for (String symbol : NineKeyLayout.punctuation()) {
             Button key = s.keyId(s.keyboardKey(symbol, "符号 " + symbol,
                 () -> commitNineKeyLiteral(symbol)), "SoftPunctuation");
@@ -120,8 +118,7 @@ final class ImeLayoutRows {
         cardFrame.addView(s.handwritingDownload, downloadParams);
         row.addView(area, KeyboardGeometry.weightedMatchParentParams(3f));
 
-        LinearLayout tools = new LinearLayout(s);
-        tools.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout tools = KeyboardGeometry.column(s);
         Button delete = s.keyId(s.backspaceKey(s::deleteFromHandwriting), "Backspace");
         if (delete instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.ACCENT);
         addNineKey(tools, delete);
@@ -287,14 +284,12 @@ final class ImeLayoutRows {
 
     void rebuildNineKeyRows() {
         dismissNineKeyHoldOptions();
-        LinearLayout container = new LinearLayout(s);
-        container.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout container = KeyboardGeometry.row(s);
         s.imeStyler.adjustThreeRowBlockHeight(container);
         s.keyRows.addView(container, KeyboardGeometry.matchWidthHeightPx(
             s.pixels(KeyboardGeometry.KEY_ROW_HEIGHT_DP * 3)));
 
-        LinearLayout punctuation = new LinearLayout(s);
-        punctuation.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout punctuation = KeyboardGeometry.column(s);
         // 设计里左列是 ，。？ 三个，！ 放在右列最下面，和 3×3 网格逐行对齐。
         java.util.List<String> symbols = NineKeyLayout.punctuation();
         for (String symbol : symbols.subList(0, symbols.size() - 1)) {
@@ -320,11 +315,10 @@ final class ImeLayoutRows {
         }
         container.addView(sidebar, KeyboardGeometry.weightedMatchParentParams(0.7f));
 
-        LinearLayout grid = new LinearLayout(s);
-        grid.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout grid = KeyboardGeometry.column(s);
         boolean digits = s.keyboardLayer == KeyboardLayout.Layer.SYMBOLS;
         for (java.util.List<NineKeyLayout.Key> keys : NineKeyLayout.rows()) {
-            LinearLayout row = new LinearLayout(s);
+            LinearLayout row = KeyboardGeometry.row(s);
             for (NineKeyLayout.Key key : keys) {
                 String description = NineKeyLayout.description(key, digits);
                 // On the digit layer the grid is a numeric keypad, so a tap commits the number
@@ -354,8 +348,7 @@ final class ImeLayoutRows {
         }
         container.addView(grid, KeyboardGeometry.weightedMatchParentParams(3));
 
-        LinearLayout actions = new LinearLayout(s);
-        actions.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout actions = KeyboardGeometry.column(s);
         Runnable deleteAction = () -> {
             if (s.connection != null && !s.command(0)) s.deleteCodePointBeforeCursor();
         };
@@ -384,14 +377,12 @@ final class ImeLayoutRows {
      */
     void rebuildStrokeRows() {
         dismissNineKeyHoldOptions();
-        LinearLayout container = new LinearLayout(s);
-        container.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout container = KeyboardGeometry.row(s);
         s.imeStyler.adjustThreeRowBlockHeight(container);
         s.keyRows.addView(container, KeyboardGeometry.matchWidthHeightPx(
             s.pixels(KeyboardGeometry.KEY_ROW_HEIGHT_DP * 3)));
 
-        LinearLayout punctuation = new LinearLayout(s);
-        punctuation.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout punctuation = KeyboardGeometry.column(s);
         // 外框和拼音九键一样三行对齐：左列 ，。？，！ 在右列最下；中间两行笔画下面再一行 @#、0、句点。原来左列四个、中间两行、右列三个，三列互不对齐，看起来像少了一行。
         java.util.List<String> symbols = NineKeyLayout.punctuation();
         for (String symbol : symbols.subList(0, symbols.size() - 1)) {
@@ -409,10 +400,9 @@ final class ImeLayoutRows {
         sidebar.addView(punctuation, KeyboardGeometry.frameMatchParentParams());
         container.addView(sidebar, KeyboardGeometry.weightedMatchParentParams(0.7f));
 
-        LinearLayout grid = new LinearLayout(s);
-        grid.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout grid = KeyboardGeometry.column(s);
         for (java.util.List<StrokeKeyboardLayout.Key> keys : StrokeKeyboardLayout.rows()) {
-            LinearLayout row = new LinearLayout(s);
+            LinearLayout row = KeyboardGeometry.row(s);
             for (StrokeKeyboardLayout.Key key : keys) {
                 Button keyButton = s.keyboardKey(StrokeKeyboardLayout.face(key),
                     StrokeKeyboardLayout.accessibilityLabel(key), () -> strokeKey(key));
@@ -428,7 +418,7 @@ final class ImeLayoutRows {
             }
             grid.addView(row, KeyboardGeometry.weightedWidthParams(1));
         }
-        LinearLayout lastRow = new LinearLayout(s);
+        LinearLayout lastRow = KeyboardGeometry.row(s);
         Button symbolsKey = s.keyId(s.keyboardKey("@#", "符号", s.imePanels::showSymbolPanel), KeyPressIds.forNineKeyDigit(1));
         Button zero = s.keyId(s.keyboardKey("0", "数字 0", () -> commitNineKeyLiteral("0")), "Nine0");
         Button period = s.keyId(s.keyboardKey(".", "句点", this::commitNineKeyPeriod), "Period");
@@ -439,8 +429,7 @@ final class ImeLayoutRows {
         grid.addView(lastRow, KeyboardGeometry.weightedWidthParams(1));
         container.addView(grid, KeyboardGeometry.weightedMatchParentParams(3));
 
-        LinearLayout actions = new LinearLayout(s);
-        actions.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout actions = KeyboardGeometry.column(s);
         Runnable deleteAction = () -> {
             if (s.connection != null && !s.command(0)) s.connection.deleteSurroundingTextInCodePoints(1, 0);
         };
@@ -483,15 +472,13 @@ final class ImeLayoutRows {
      */
     void rebuildZhuyinNineKeyRows() {
         dismissNineKeyHoldOptions();
-        LinearLayout container = new LinearLayout(s);
-        container.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout container = KeyboardGeometry.row(s);
         // 和日语九键一样不要底栏，四行都在这一块里，总高度是三行九键加一条底栏，与其他九键键盘一样高：四行挤进三行高时键太扁。底栏的 123、中/英、空格、换行挪进两侧的列。
         s.imeStyler.adjustBottomRowBlockHeight(container);
         s.keyRows.addView(container, KeyboardGeometry.matchWidthHeightPx(
             s.pixels(KeyboardGeometry.KEY_ROW_HEIGHT_DP * 3 + KeyboardGeometry.STANDARD_ROW_HEIGHT_DP)));
 
-        LinearLayout tones = new LinearLayout(s);
-        tones.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout tones = KeyboardGeometry.column(s);
         for (ZhuyinNineKeyLayout.Tone tone : ZhuyinNineKeyLayout.tones()) {
             String label = ZhuyinNineKeyLayout.accessibilityLabel(tone);
             Button key = s.keyId(s.keyboardKey(tone.face(), label, () -> {
@@ -508,19 +495,17 @@ final class ImeLayoutRows {
         }
         container.addView(tones, KeyboardGeometry.weightedMatchParentParams(0.7f));
 
-        LinearLayout grid = new LinearLayout(s);
-        grid.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout grid = KeyboardGeometry.column(s);
         for (java.util.List<ZhuyinNineKeyLayout.Key> keys : ZhuyinNineKeyLayout.rows()) {
-            LinearLayout row = new LinearLayout(s);
+            LinearLayout row = KeyboardGeometry.row(s);
             for (ZhuyinNineKeyLayout.Key key : keys) addNineKey(row, zhuyinNineKeySoundKey(key));
             grid.addView(row, KeyboardGeometry.weightedWidthParams(1));
         }
         // 最后一行：123（数字与符号层，？！ 和其他符号都在那里）、0（仍在 8 的正下方）、逗号和句号各占半格。
-        LinearLayout lastRow = new LinearLayout(s);
+        LinearLayout lastRow = KeyboardGeometry.row(s);
         adoptBarKey(lastRow, s.layerButton, KeyboardKeyRole.ACCENT);
         addNineKey(lastRow, zhuyinNineKeySoundKey(ZhuyinNineKeyLayout.zero()));
-        LinearLayout marks = new LinearLayout(s);
-        marks.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout marks = KeyboardGeometry.row(s);
         boolean chinese = s.sendsChinesePunctuation();
         String commaFace = ChineseSymbolFaces.face(",", chinese);
         Button comma = s.keyId(s.keyboardKey(commaFace, "逗号", () -> {
@@ -540,8 +525,7 @@ final class ImeLayoutRows {
         container.addView(grid, KeyboardGeometry.weightedMatchParentParams(3));
 
         // 右列与网格的四行对齐：⌫、中/英、空格、换行。后三个是底栏那几个常驻键，连同它们的手势、图标和「确认」状态一起挪过来。
-        LinearLayout actions = new LinearLayout(s);
-        actions.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout actions = KeyboardGeometry.column(s);
         Runnable deleteAction = () -> {
             if (s.connection != null && !s.command(0)) s.deleteCodePointBeforeCursor();
         };
@@ -621,8 +605,7 @@ final class ImeLayoutRows {
         dismissNineKeyHoldOptions();
         if (s.keyboardRoot == null) return;
         s.imeKeyFeedback.playFeedback(anchor);
-        LinearLayout options = new LinearLayout(s);
-        options.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout options = KeyboardGeometry.row(s);
         int padding = s.pixels(5);
         ViewPolicy.setSymmetricPadding(options, padding, padding);
         GradientDrawable surface = DrawablePolicy.outlined(
@@ -944,15 +927,13 @@ final class ImeLayoutRows {
     }
 
     void rebuildJapaneseNineKeyRows() {
-        LinearLayout container = new LinearLayout(s);
-        container.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout container = KeyboardGeometry.row(s);
         // 日语九键没有底栏，四行（あ行到わ行加 小゛゜ 那一行）都在这一块里：按三行算高度时每行只剩三十来 dp，假名被裁掉下半截，底栏的位置又空着。
         s.imeStyler.adjustBottomRowBlockHeight(container);
         s.keyRows.addView(container, KeyboardGeometry.matchWidthHeightPx(
             s.pixels(KeyboardGeometry.KEY_ROW_HEIGHT_DP * 3 + KeyboardGeometry.STANDARD_ROW_HEIGHT_DP)));
 
-        LinearLayout modeColumn = new LinearLayout(s);
-        modeColumn.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout modeColumn = KeyboardGeometry.column(s);
         s.japaneseSymbolsKey = s.keyId(s.keyboardKey("123", "切换到数字和符号", () -> {
             s.keyboardLayer = s.keyboardLayer == KeyboardLayout.Layer.SYMBOLS
                 ? KeyboardLayout.Layer.LETTERS : KeyboardLayout.Layer.SYMBOLS;
@@ -979,12 +960,11 @@ final class ImeLayoutRows {
         }
         container.addView(modeColumn, KeyboardGeometry.weightedMatchParentParams(0.17f));
 
-        LinearLayout grid = new LinearLayout(s);
-        grid.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout grid = KeyboardGeometry.column(s);
         java.util.List<JapaneseNineKeyLayout.Key> keys = s.keyboardLayer == KeyboardLayout.Layer.SYMBOLS
             ? JapaneseNineKeyLayout.digitKeys() : JapaneseNineKeyLayout.keys();
         for (int rowIndex = 0; rowIndex < 4; rowIndex++) {
-            LinearLayout row = new LinearLayout(s);
+            LinearLayout row = KeyboardGeometry.row(s);
             if (rowIndex < 3) {
                 for (int column = 0; column < 3; column++) {
                     int index = rowIndex * 3 + column;
@@ -1000,8 +980,7 @@ final class ImeLayoutRows {
         }
         container.addView(grid, KeyboardGeometry.weightedMatchParentParams(0.64f));
 
-        LinearLayout side = new LinearLayout(s);
-        side.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout side = KeyboardGeometry.column(s);
         Runnable deleteAction = this::deleteJapaneseKana;
         Button delete = s.keyId(s.backspaceKey(deleteAction), "Backspace");
         s.imeLetterRows.bindBackspaceRepeat(delete, deleteAction);
