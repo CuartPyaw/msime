@@ -192,7 +192,7 @@ public final class KeyboardGeometry {
 
     /** Convert a density-independent size to rounded pixels using the context's density. */
     public static int pixels(Context context, float dp) {
-        return pixels(dp, context.getResources().getDisplayMetrics().density);
+        return pixels(dp, density(context));
     }
 
     /** Convert a fractional density-independent size to pixels without rounding. */
@@ -202,7 +202,7 @@ public final class KeyboardGeometry {
 
     /** Convert a fractional density-independent size to pixels using the context's density. */
     public static float floatPixels(Context context, double dp) {
-        return floatPixels(dp, context.getResources().getDisplayMetrics().density);
+        return floatPixels(dp, density(context));
     }
 
     /** Convert pixels back to density-independent units using the context's density. */
