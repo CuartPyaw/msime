@@ -1046,7 +1046,7 @@ final class ImeLayoutRows {
         if (!visible) {
             s.nineKeySpellingIndices = java.util.List.of();
             s.nineKeySpellingGeneration = -1;
-            for (Button key : s.nineKeySpellingButtons) key.setVisibility(View.GONE);
+            for (Button key : s.nineKeySpellingButtons) ViewPolicy.hide(key);
             return;
         }
         s.nineKeySpellingGeneration = CandidateGlossPolicy.strictOr(s.view.opt("generation"), -1);

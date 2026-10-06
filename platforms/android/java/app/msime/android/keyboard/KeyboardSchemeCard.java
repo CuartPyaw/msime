@@ -65,7 +65,7 @@ public final class KeyboardSchemeCard extends FrameLayout {
         badge.setTypeface(badge.getTypeface(), android.graphics.Typeface.BOLD);
 
         check = new View(context);
-        check.setVisibility(View.GONE);
+        ViewPolicy.hide(check);
 
         title = new TextView(context);
         title.setText(titleText);
