@@ -139,7 +139,7 @@ public final class TypingPage extends DetailPage {
         List<KeyboardScheme> enabled = enabled(preferences, edition);
 
         GroupCard languages = GroupCard.add(target, "语言与方案").withDividers(58);
-        List<Language> addable = new ArrayList<>();
+        List<Language> addable = new ArrayList<>(Language.values().length);
         for (Language language : Language.values()) {
             List<KeyboardScheme> offered = offered(language, edition, state.languageDictionaries());
             if (offered.isEmpty()) continue;
