@@ -146,8 +146,9 @@ final class ImeStyler {
             s.actionRow.requestLayout();
         }
         // 设计的键区左右外边距 6 dp 量到键的边缘；键自己带半个键距的外边距，所以容器只补差值。
-        int edge = Math.max(0, s.pixels(KeyboardGeometry.DESIGN_PADDING_HORIZONTAL_DP)
-            - s.halfSpacingPixels(layoutKeySpacingTenths()));
+        int edge = BoundsPolicy.nonNegative(
+            s.pixels(KeyboardGeometry.DESIGN_PADDING_HORIZONTAL_DP)
+                - s.halfSpacingPixels(layoutKeySpacingTenths()));
         s.keyRows.setPadding(edge, s.keyRows.getPaddingTop(), edge, s.keyRows.getPaddingBottom());
         if (s.actionRow != null)
             s.actionRow.setPadding(edge, s.actionRow.getPaddingTop(), edge,
