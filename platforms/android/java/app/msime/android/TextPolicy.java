@@ -82,6 +82,13 @@ public final class TextPolicy {
         return value.length() <= maxChars ? value : value.substring(0, maxChars);
     }
 
+    /** Truncate text to at most {@code maxCodePoints} without splitting a surrogate pair. */
+    public static String clipCodePoints(String value, int maxCodePoints) {
+        if (value == null || maxCodePoints <= 0) return "";
+        if (value.codePointCount(0, value.length()) <= maxCodePoints) return value;
+        return value.substring(0, value.offsetByCodePoints(0, maxCodePoints));
+    }
+
     /** Truncate text and append an ellipsis only when the character limit is exceeded. */
     public static String clipWithEllipsis(String value, int maxChars) {
         if (value == null || maxChars <= 0) return "";
