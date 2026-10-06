@@ -1236,11 +1236,16 @@ final class ImePanels {
     }
 
     private TextView clipboardNote(String text) {
-        TextView note = new TextView(s);
-        note.setText(text);
-        ViewPolicy.setCenteredKeyTextSizeSp(note, 13);
+        TextView note = centeredNote(text, 13);
+        KeyboardGeometry.setKeyTextSize(note, 13);
         KeyboardGeometry.setSymmetricPaddingDp(note, s, 12, 20);
         s.clipboardPanel.addView(note, KeyboardGeometry.matchWidthWrapParams());
+        return note;
+    }
+
+    private TextView centeredNote(String text, float sizeSp) {
+        TextView note = new TextView(s);
+        ViewPolicy.setCenteredText(note, text, sizeSp);
         return note;
     }
 
@@ -1372,9 +1377,8 @@ final class ImePanels {
         s.imeStyler.applySkinBackground(panel);
         TextView note = null;
         if (message != null) {
-            note = new TextView(s);
-            note.setText(message);
-            ViewPolicy.setCenteredKeyTextSizeSp(note, 14);
+            note = centeredNote(message, 14);
+            KeyboardGeometry.setKeyTextSize(note, 14);
             KeyboardGeometry.setPaddingDp(note, s, 12, 24, 12, 24);
             panel.addView(note, KeyboardGeometry.matchWidthWrapParams());
         }
