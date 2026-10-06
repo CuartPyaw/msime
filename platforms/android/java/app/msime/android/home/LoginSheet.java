@@ -328,7 +328,7 @@ final class LoginSheet {
         button.setContentDescription(label);
         button.setClickable(true);
         button.setFocusable(true);
-        button.setOnClickListener(ignored -> action.run());
+        ViewPolicy.bindClick(button, action);
         return button;
     }
 
