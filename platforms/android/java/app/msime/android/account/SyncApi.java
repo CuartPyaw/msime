@@ -105,7 +105,7 @@ public final class SyncApi {
         Object revision = root.opt("revision");
         if (!(revision instanceof Number)) throw invalid("preferences revision missing");
         JSONObject raw = root.optJSONObject("settings");
-        LinkedHashMap<String, Object> settings = new LinkedHashMap<>();
+        LinkedHashMap<String, Object> settings = new LinkedHashMap<>(raw == null ? 0 : raw.length());
         if (raw != null) {
             Iterator<String> keys = raw.keys();
             while (keys.hasNext()) {
