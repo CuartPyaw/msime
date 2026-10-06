@@ -8,7 +8,6 @@ import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
 import android.view.Gravity;
-import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
@@ -80,13 +79,13 @@ public final class InputDialog {
         Ui.setPaddingDp(fields, context, 16, 6, 16, 16);
         root.addView(fields, Ui.matchWidth());
 
-        root.addView(rule(true));
+        root.addView(Ui.divider(context, true));
         LinearLayout buttons = new LinearLayout(context);
         buttons.setOrientation(LinearLayout.HORIZONTAL);
         TextView cancel = button("取消", 400, Ui.accent(context));
         cancel.setOnClickListener(ignored -> dialog.cancel());
         buttons.addView(cancel, Ui.weightedHeight(context, 48, 1f));
-        buttons.addView(rule(false));
+        buttons.addView(Ui.divider(context, false));
         primary = button("确定", 600, Ui.text(context));
         primary.setOnClickListener(ignored -> submit());
         buttons.addView(primary, Ui.weightedHeight(context, 48, 1f));
@@ -203,8 +202,4 @@ public final class InputDialog {
     }
 
     /** 分隔线：横的在按钮上方，竖的在两个按钮之间。 */
-    private View rule(boolean horizontal) {
-        return Ui.divider(context, horizontal);
-    }
-
 }
