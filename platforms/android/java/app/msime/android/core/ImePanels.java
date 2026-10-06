@@ -587,10 +587,9 @@ final class ImePanels {
             s.pixels(12), s.pixels(12));
         progressParams.setMarginEnd(s.pixels(4));
         footer.addView(s.replyProgress, progressParams);
-        s.replyStatus = new TextView(s);
+        s.replyStatus = aiText("", 11);
         ViewPolicy.setSingleLineEllipsized(s.replyStatus);
         ViewPolicy.clearFontPadding(s.replyStatus);
-        KeyboardGeometry.setKeyTextSize(s.replyStatus, 11);
         s.replyStatus.setContentDescription("高情商回复键盘状态");
         footer.addView(s.replyStatus, KeyboardGeometry.weightedWrapParams(1));
         // 「选风格」只在已有回复时出现，点它回到风格九宫格。
