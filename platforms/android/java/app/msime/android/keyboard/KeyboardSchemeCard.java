@@ -137,7 +137,7 @@ public final class KeyboardSchemeCard extends FrameLayout {
     public void paint(int accent, int keyBackground, boolean isSelected) {
         selected = isSelected;
         if (check.getLayoutParams() != checkCornerParams) check.setLayoutParams(checkCornerParams);
-        badge.setVisibility(View.VISIBLE);
+        ViewPolicy.show(badge);
         title.setTypeface(android.graphics.Typeface.DEFAULT);
         // 选中与未选中的差别落在底色和这一档透明度上，不落在色相上。
         int face = isSelected ? accent : ColorPolicy.withAlpha(accent, .78f);

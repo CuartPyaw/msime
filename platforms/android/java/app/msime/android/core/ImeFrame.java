@@ -119,7 +119,7 @@ final class ImeFrame {
         LinearLayout.LayoutParams gutterParams = KeyboardGeometry.weightedMatchParentParams(gutterWeight);
         boolean left = gutterOnLeft(mode);
         gutter.setKeyboardOnRight(left);
-        gutter.setVisibility(View.VISIBLE);
+        ViewPolicy.show(gutter);
         row.addView(gutter, left ? 0 : 1, gutterParams);
         column.setLayoutParams(KeyboardGeometry.weightedWrapParams(1f - gutterWeight));
         row.requestLayout();
