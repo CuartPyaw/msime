@@ -82,8 +82,7 @@ public final class KeyboardIconKey extends KeyboardPressButton {
             KeyboardGeometry.floatPixels(getContext(), ICON_DP));
         if (size <= 0) return;
         int color = getCurrentTextColor();
-        if (!isEnabled()) color = Color.argb(96, Color.red(color), Color.green(color),
-            Color.blue(color));
+        if (!isEnabled()) color = ColorPolicy.withAlpha(color, 96f / 255f);
         KeyboardIconPaths.draw(canvas, paint, iconFor(kind),
             getPaddingLeft() + (width - size) / 2f, getPaddingTop() + (height - size) / 2f,
             size, color);

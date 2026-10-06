@@ -116,7 +116,7 @@ public final class CandidateChevronButton extends Button {
         int saved = canvas.save();
         canvas.rotate(rotation, centerX, centerY);
         int color = isEnabled() ? iconColor
-            : Color.argb(96, Color.red(iconColor), Color.green(iconColor), Color.blue(iconColor));
+            : ColorPolicy.withAlpha(iconColor, 96f / 255f);
         KeyboardIconPaths.draw(canvas, icon, KeyboardIconPaths.Icon.CHEVRON,
             centerX - size / 2f, centerY - size / 2f, size, color);
         canvas.restoreToCount(saved);
