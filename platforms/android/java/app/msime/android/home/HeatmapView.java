@@ -37,7 +37,7 @@ public final class HeatmapView extends View {
 
     public HeatmapView(Context context, @Nullable AttributeSet attributes) {
         super(context, attributes);
-        label.setTextSize(Ui.dp(context, 11));
+        label.setTextSize(Ui.sp(context, 11));
     }
 
     /** 换一组 84 天，最早的在前。 */
