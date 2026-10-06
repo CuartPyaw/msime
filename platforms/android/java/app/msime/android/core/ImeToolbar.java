@@ -69,10 +69,7 @@ final class ImeToolbar {
         ViewPolicy.setCenteredVertically(candidateHeader);
         KeyboardGeometry.setPaddingDp(candidateHeader, s, 10, 0, 6, 0);
         s.candidateHeader = candidateHeader;
-        s.preedit = new TextView(s);
-        KeyboardGeometry.setKeyTextSize(s.preedit, 12);
-        s.preedit.setMaxLines(1);
-        ViewPolicy.clearFontPadding(s.preedit);
+        s.preedit = toolbarText(12);
         ViewPolicy.setMaxLinesEllipsized(s.preedit, 1);
         // 胶囊紧挨着候选栏和按键，轻点很容易误触，所以只在长按时打开本地模式菜单。
         s.preedit.setOnLongClickListener(ignored -> {
@@ -86,18 +83,13 @@ final class ImeToolbar {
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         candidateHeader.addView(preeditFrame, KeyboardGeometry.weightedWrapParams(1));
         // 宿主提示通道：正常为空，只有准备中、失败或提示时才有文字。
-        s.status = new TextView(s);
-        KeyboardGeometry.setKeyTextSize(s.status, 10);
-        s.status.setMaxLines(1);
-        ViewPolicy.clearFontPadding(s.status);
+        s.status = toolbarText(10);
         ViewPolicy.setMaxLinesEllipsized(s.status, 1);
         ViewPolicy.setEndCenteredVertically(s.status);
         KeyboardGeometry.setPaddingDp(s.status, s, 6, 0, 2, 0);
         candidateHeader.addView(s.status, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        s.candidatePage = new TextView(s);
-        KeyboardGeometry.setKeyTextSize(s.candidatePage, 10);
-        ViewPolicy.clearFontPadding(s.candidatePage);
+        s.candidatePage = toolbarText(10);
         candidateHeader.addView(s.candidatePage, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         s.shortcutBar = new LinearLayout(s);
@@ -171,6 +163,13 @@ final class ImeToolbar {
             s.imeKeyFeedback.playFeedback(button);
             action.run();
         });
+    }
+
+    private TextView toolbarText(float sizeSp) {
+        TextView text = new TextView(s);
+        KeyboardGeometry.setKeyTextSize(text, sizeSp);
+        ViewPolicy.clearFontPadding(text);
+        return text;
     }
 
     /** 候选那一行：候选滚动区占满剩余宽度，右端是分隔线加展开键。 */
