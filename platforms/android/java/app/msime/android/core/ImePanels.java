@@ -481,8 +481,7 @@ final class ImePanels {
 
     /** 分页网格加下方页点：皮肤面板与输入方式面板共用。 */
     private void addPagedGrid(LinearLayout parent, PagedTileGrid grid, int initialPage) {
-        parent.addView(grid, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        parent.addView(grid, KeyboardGeometry.matchWidthWrapParams());
         parent.addView(new View(s), new LinearLayout.LayoutParams(0, 0, 1));
         KeyboardPagerDots dots = new KeyboardPagerDots(s);
         dots.setTag(PAGER_DOTS_TAG);
@@ -694,8 +693,7 @@ final class ImePanels {
                 candidate.setMinHeight(0);
                 candidate.setMinimumHeight(0);
                 KeyboardGeometry.setSymmetricPaddingDp(candidate, s, 10, 10);
-                candidate.setLayoutParams(new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+                candidate.setLayoutParams(KeyboardGeometry.matchWidthWrapParams());
             }
         }
         replyAction("⌫", "删除源文字", () -> {
@@ -943,8 +941,7 @@ final class ImePanels {
         KeyboardGeometry.setKeyTextSize(content, 15);
         KeyboardGeometry.setSymmetricPaddingDp(content, s, 12, 10);
         content.setContentDescription(s.aiOutputText.isEmpty() ? "待润色文字" : "AI 润色结果");
-        s.aiPolishPanel.addView(content, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        s.aiPolishPanel.addView(content, KeyboardGeometry.matchWidthWrapParams());
         Button primary;
         if (s.aiBusy) {
             TextView progress = new TextView(s);
@@ -1270,8 +1267,7 @@ final class ImePanels {
         KeyboardGeometry.setKeyTextSize(note, 13);
         note.setGravity(Gravity.CENTER);
         KeyboardGeometry.setSymmetricPaddingDp(note, s, 12, 20);
-        s.clipboardPanel.addView(note, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        s.clipboardPanel.addView(note, KeyboardGeometry.matchWidthWrapParams());
         return note;
     }
 
@@ -1303,8 +1299,7 @@ final class ImePanels {
             s.imeKeyFeedback.playFeedback(card);
             action.run();
         });
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams params = KeyboardGeometry.matchWidthWrapParams();
         params.topMargin = s.pixels(6);
         s.clipboardPanel.addView(card, params);
         return card;
@@ -1411,8 +1406,7 @@ final class ImePanels {
             KeyboardGeometry.setKeyTextSize(note, 14);
             note.setGravity(Gravity.CENTER);
             KeyboardGeometry.setPaddingDp(note, s, 12, 24, 12, 24);
-            panel.addView(note, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            panel.addView(note, KeyboardGeometry.matchWidthWrapParams());
         }
         if (EMPTY_PHRASES.equals(message)) {
             // 空的时候给一条去处：直接打开应用的常用语页去添加，而不是让人自己退出键盘去找。
@@ -1457,8 +1451,7 @@ final class ImePanels {
                 s.closeCommonPhrases();
                 s.render();
             });
-            panel.addView(row, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            panel.addView(row, KeyboardGeometry.matchWidthWrapParams());
             View hairline = new View(s);
             LinearLayout.LayoutParams line = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, Math.max(1, s.pixels(1)));
