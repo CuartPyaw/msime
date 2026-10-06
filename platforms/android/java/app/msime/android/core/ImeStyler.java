@@ -332,14 +332,14 @@ final class ImeStyler {
 
     /** The outlined badge the keyboard wears while nothing is being composed. */
     GradientDrawable brandPillDrawable() {
-        return DrawablePolicy.outlined(s.pixels(14), Math.max(1, s.pixels(1)),
+        return DrawablePolicy.outlined(s.pixels(14), KeyboardGeometry.atLeastOnePixel(s, 1),
             fade(s.skin.accent(), .45));
     }
 
     GradientDrawable candidateDrawable(int color) {
         GradientDrawable drawable = DrawablePolicy.rounded(color, s.pixels(6));
         if (Color.alpha(s.candidateAppearance.border()) > 0)
-            drawable.setStroke(Math.max(1, s.pixels(1)), s.candidateAppearance.border());
+            drawable.setStroke(KeyboardGeometry.atLeastOnePixel(s, 1), s.candidateAppearance.border());
         return drawable;
     }
 
