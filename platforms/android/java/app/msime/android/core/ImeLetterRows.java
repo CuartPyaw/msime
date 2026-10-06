@@ -513,11 +513,7 @@ final class ImeLetterRows {
             case EMOJI -> {
                 KeyboardIconKey icon = new KeyboardIconKey(s, KeyboardIconKey.Kind.EMOJI);
                 icon.setText(text);
-                icon.setOnClickListener(ignored -> {
-                    s.imeKeyFeedback.playFeedback(icon);
-                    s.countKey(icon);
-                    s.imePanels.showEmojiPicker();
-                });
+                s.bindCountedAction(icon, s.imePanels::showEmojiPicker);
                 key = icon;
             }
             case SYMBOL_PANEL -> {
