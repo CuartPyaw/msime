@@ -280,7 +280,7 @@ public final class TypingStatisticsModel {
     }
 
     private static Map<String, String> kinds() {
-        Map<String, String> titles = new LinkedHashMap<>();
+        Map<String, String> titles = new LinkedHashMap<>(8);
         titles.put("han", "汉字");
         titles.put("latin", "拉丁字母");
         titles.put("otherLetter", "其他文字");
@@ -294,7 +294,7 @@ public final class TypingStatisticsModel {
     }
 
     private static Map<String, String> sources() {
-        Map<String, String> titles = new LinkedHashMap<>();
+        Map<String, String> titles = new LinkedHashMap<>(21);
         titles.put("quanpin", "全拼 26 键");
         titles.put("nineKey", "全拼 9 键");
         titles.put("shuangpin", "小鹤双拼");
