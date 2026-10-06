@@ -51,10 +51,7 @@ final class ImeFunctionPanel {
         s.applyToolCardState(card, enabled);
         if (Build.VERSION.SDK_INT >= 30) card.setStateDescription(state);
         s.imeStyler.styleButton(card, KeyboardKeyRole.ACCENT, s.skin);
-        card.setOnClickListener(ignored -> {
-            if (playBeforeAction) s.imeKeyFeedback.playFeedback(card);
-            action.run();
-        });
+        bindToolAction(card, action, playBeforeAction);
         return card;
     }
 
@@ -315,10 +312,14 @@ final class ImeFunctionPanel {
         button.setEnabled(enabled);
         s.applyToolCardState(button, enabled);
         if (Build.VERSION.SDK_INT >= 30) button.setStateDescription(enabled ? null : "不可用");
+        bindToolAction(button, action, true);
+        return button;
+    }
+
+    private void bindToolAction(Button button, Runnable action, boolean playFeedback) {
         button.setOnClickListener(ignored -> {
-            s.imeKeyFeedback.playFeedback(button);
+            if (playFeedback) s.imeKeyFeedback.playFeedback(button);
             action.run();
         });
-        return button;
     }
 }
