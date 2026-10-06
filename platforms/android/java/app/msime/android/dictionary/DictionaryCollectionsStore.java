@@ -230,7 +230,11 @@ public final class DictionaryCollectionsStore {
                 if (text == null) text = new StringBuilder(Math.max(16, page.length()));
                 text.append(page);
                 bytes = nextBytes;
-                if (!value.optBoolean("has_more", false)) break;
+                Object rawHasMore = value.opt("has_more");
+                if (rawHasMore == null || rawHasMore == JSONObject.NULL) break;
+                Boolean hasMore = strictBoolean(rawHasMore);
+                if (hasMore == null) return Result.failed(failureMessage(""));
+                if (!hasMore) break;
                 offset += EXPORT_PAGE;
             }
         } catch (JSONException error) {
@@ -483,10 +487,16 @@ public final class DictionaryCollectionsStore {
         if (response == null) return null;
         try {
             JSONObject root = new JSONObject(response);
-            return root.optBoolean("ok", false) ? root.optJSONObject("value") : null;
+            return Boolean.TRUE.equals(strictBoolean(root.opt("ok")))
+                ? root.optJSONObject("value") : null;
         } catch (JSONException error) {
             return null;
         }
+    }
+
+    /** JSON response flags must remain booleans; org.json otherwise coerces strings. */
+    static Boolean strictBoolean(Object value) {
+        return value instanceof Boolean ? (Boolean) value : null;
     }
 
     private static String errorOf(String response) {
