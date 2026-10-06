@@ -139,6 +139,13 @@ public final class Ui {
         return KeyboardGeometry.pixels(context, value);
     }
 
+    /** Return whether the supplied context currently uses the system night configuration. */
+    public static boolean isNight(Context context) {
+        return (context.getResources().getConfiguration().uiMode
+            & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+            == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+    }
+
     /** Return the current display width in physical pixels. */
     public static int screenWidthPixels(Context context) {
         return context.getResources().getDisplayMetrics().widthPixels;

@@ -2,7 +2,6 @@ package app.msime.android.home;
 
 import android.animation.ValueAnimator;
 import android.content.Context;
-import android.content.res.Configuration;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
@@ -212,8 +211,7 @@ public final class BadgeGridView extends View {
     }
 
     private boolean dark() {
-        return (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
-            == Configuration.UI_MODE_NIGHT_YES;
+        return Ui.isNight(getContext());
     }
 
     /** 分组的两种颜色：深色端和浅色端。 */

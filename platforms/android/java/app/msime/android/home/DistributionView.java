@@ -1,7 +1,6 @@
 package app.msime.android.home;
 
 import android.content.Context;
-import android.content.res.Configuration;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -75,8 +74,7 @@ public final class DistributionView extends View {
     }
 
     private int track() {
-        boolean dark = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
-            == Configuration.UI_MODE_NIGHT_YES;
+        boolean dark = Ui.isNight(getContext());
         return dark ? Ui.withAlpha(Color.WHITE, .1f) : Ui.withAlpha(Color.BLACK, .07f);
     }
 

@@ -4,7 +4,6 @@ import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
-import android.content.res.Configuration;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.ColorFilter;
@@ -131,8 +130,7 @@ final class LoginSheet {
 
         options = new LinearLayout(activity);
         options.setOrientation(LinearLayout.VERTICAL);
-        boolean night = (activity.getResources().getConfiguration().uiMode
-            & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+        boolean night = Ui.isNight(activity);
         if (providers.appleWeb()) {
             // Apple 的规范按钮：浅色下黑底白字，深色下白底黑字；这是 Apple 的品牌色，不随季节主题变。
             int fill = night ? Color.WHITE : Color.BLACK;
