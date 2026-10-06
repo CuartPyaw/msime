@@ -6,6 +6,7 @@
 #import "../candidate/SkinSettingsView.h"
 #import "../cloud/CloudAppearanceSettings.h"
 #import "RuntimeOptions.h"
+#import "../input/InputModeIdentifiers.h"
 #import "../dictionary/DictionaryWindowController.h"
 
 extern "C" bool msime_macos_uninstall_input_source(const char *bundle_path,
@@ -18,10 +19,16 @@ extern "C" bool msime_macos_uninstall_input_source(const char *bundle_path,
 #import "../core/SharedVoicePreferences.h"
 #import "../core/UpdateController.h"
 #import "../core/SupportWindowController.h"
+#import "../core/BoundedFileReader.h"
 #import "../voice/VoiceSettingsEntry.h"
 #import "../core/WindowPresentation.h"
 #include "ShuangpinProfileNames.h"
 #include "../candidate/CandidatePageSize.h"
+
+@interface MSIMETranslationSettingsWindow (Lifecycle)
+- (void)invalidatePendingCallbacks;
+@end
+
 
 /// The voice form, looked up at runtime. Linking it here would drag the voice module — and the
 /// keychain and CoreAudio with it — into every test executable that builds this window.
@@ -31,6 +38,7 @@ extern "C" bool msime_macos_uninstall_input_source(const char *bundle_path,
 
 extern "C" NSView *MSIMEAccountPaneView(void) __attribute__((weak_import));
 extern "C" void MSIMEAccountPaneAttach(NSWindow *window) __attribute__((weak_import));
+BOOL (*MSIMEInputModeEnabledProbe)(NSString *identifier) = nullptr;
 extern "C" void MSIMEAccountPaneClose(void) __attribute__((weak_import));
 
 NSNotificationName const MSIMEAppearanceDidChangeNotification = @"MSIMEClientAppearanceDidChange";
@@ -40,8 +48,11 @@ static NSString *const LayoutKey = @"MSIMEClientCandidatePanelStyle";
 static NSString *const CandidateFollowCursorKey = @"MSIMEClientCandidateFollowCursor";
 static NSString *const InputModeHUDKey = @"MSIMEClientInputModeHUD";
 static NSString *const SchemeKey = @"MSIMEClientInputScheme";
+static NSString *const LastSyncedSchemeKey = @"MSIMEClientLastSyncedInputScheme";
 static NSString *const ShuangpinProfileKey = @"MSIMEClientShuangpinProfile";
 static NSString *const ShuangpinPreeditKey = @"MSIMEClientShuangpinPreeditUsesRaw";
+/// 五笔码表版本：`wubi86` 或 `wubi98`，写进共享偏好文档的 `wubi_profile`。
+static NSString *const WubiProfileKey = @"MSIMEClientWubiProfile";
 static NSString *const LocalModesKey = @"MSIMEClientLocalModes";
 static NSArray<NSArray<NSString *> *> *LocalModeControls() {
     return @[@[@"quick_phrase", @"快捷短语（K 模式）"], @[@"date_time", @"日期与时间（T 模式）"],
@@ -123,12 +134,8 @@ static BOOL ValidFontFamily(id value) {
            [value lengthOfBytesUsingEncoding:NSUTF8StringEncoding] <= 128 &&
            [value rangeOfCharacterFromSet:[NSCharacterSet controlCharacterSet]].location == NSNotFound;
 }
-/// How many supplementary families the candidate window will carry. The validator, the 添加 action and the line the page prints under 补充字体 all have to agree on it, and they only do while they are reading the same number.
+/// How many supplementary families the candidate window will carry, as crates/client-core validates.
 static const NSUInteger kFallbackFontLimit = 32;
-/// A row of 补充字体优先顺序 being dragged to another position in the same list. The order is the setting, so the list is its own drag source and destination and nothing outside this table is offered the type.
-static NSPasteboardType const MSIMEFallbackFontRowType = @"app.msime.client.fallback-font-row";
-/// The reuse identifier of a row view in 补充字体优先顺序. Every row is one family name, so there is one kind of view and one identifier.
-static NSUserInterfaceItemIdentifier const MSIMEFallbackFontCellIdentifier = @"MSIMEFallbackFontCell";
 /// The two columns of 应用例外 and the reuse identifier of a cell in each: an application's name, and the mode it is to start in.
 static NSUserInterfaceItemIdentifier const MSIMEAppRuleApplicationColumn = @"application";
 static NSUserInterfaceItemIdentifier const MSIMEAppRuleModeColumn = @"mode";
@@ -138,6 +145,29 @@ static BOOL ValidFallbackFonts(id value) {
     return YES;
 }
 static NSString *const PreeditFontKey = @"MSIMEClientCandidatePreeditFontSize";
+/// The window's own size, card opacity and corner radius: candidate_scale_percent, candidate_opacity_percent and candidate_corner_radius. The radius is stored as a number of points, or as an empty string once the user has asked to follow the skin again, the same marker 候选窗英文字体 uses, because NSUserDefaults cannot hold NSNull and an absent entry has to keep meaning "never chosen here".
+static NSString *const CandidateScaleKey = @"MSIMEClientCandidateScalePercent";
+static NSString *const CandidateOpacityKey = @"MSIMEClientCandidateOpacityPercent";
+static NSString *const CandidateCornerRadiusKey = @"MSIMEClientCandidateCornerRadius";
+/// A whole number in [minimum, maximum], as the shared document's integer fields are: a boolean or a fraction is not one.
+static BOOL ValidCandidateStyleInteger(id value, NSInteger minimum, NSInteger maximum) {
+    return [value isKindOfClass:NSNumber.class] && CFGetTypeID((__bridge CFTypeRef)value) != CFBooleanGetTypeID() &&
+           !CFNumberIsFloatType((__bridge CFNumberRef)value) && [value integerValue] >= minimum && [value integerValue] <= maximum;
+}
+/// The ranges crates/client-core validates. The sliders offer less of them (75-150% and 0-16pt), but a value another surface wrote inside the shared range is honoured rather than refused.
+static BOOL ValidCandidateScale(id value) { return ValidCandidateStyleInteger(value, 50, 200); }
+static BOOL ValidCandidateOpacity(id value) { return ValidCandidateStyleInteger(value, 50, 100); }
+static BOOL ValidCandidateCornerRadius(id value) { return ValidCandidateStyleInteger(value, 0, 32); }
+/// The 候选字体 presets in the order the popup lists them: a title, then the families the preset writes. The first family is the one this host puts in 候选字体; all of them go to the front of the fallback list, because the document is shared and the Windows and Linux names are what those hosts will find there. 默认 is the shared default pair (crates/client-core) rather than a preset of its own.
+static NSArray<NSArray<NSString *> *> *CandidateFontPresets() {
+    return @[
+        @[ @"默认", @"Noto Sans SC", @"Microsoft YaHei" ],
+        @[ @"宋体", @"Songti SC", @"SimSun", @"Noto Serif CJK SC", @"Noto Serif SC" ],
+        @[ @"黑体", @"PingFang SC", @"Microsoft YaHei", @"Noto Sans CJK SC", @"Noto Sans SC" ],
+        @[ @"楷体", @"Kaiti SC", @"KaiTi", @"STKaiti", @"AR PL UKai CN" ],
+        @[ @"圆体", @"Yuanti SC", @"Noto Sans SC" ],
+    ];
+}
 static NSString *const CandidatePreeditKey = @"MSIMEClientCandidatePreeditStyle";
 static NSString *const PageShortcutKey = @"MSIMEClientCandidatePageShortcut";
 static NSString *const NavigationKey = @"MSIMEClientNavigation";
@@ -179,7 +209,6 @@ static NSString *const SmartPunctuationSpaceConvertKey = @"MSIMEClientSmartPunct
 static NSString *const PairedPunctuationKey = @"MSIMEClientPairedPunctuation";
 static NSString *const PunctuationLockKey = @"MSIMEClientPunctuationLock";
 static NSString *const MixedInputKey = @"MSIMEClientMixedInput";
-static NSString *const AutocorrectKey = @"MSIMEClientAutocorrect";
 static NSString *const CandidateLearningKey = @"MSIMEClientCandidateLearning";
 static NSString *const FrequencyModeKey = @"MSIMEClientFrequencyAdjustmentMode";
 static NSString *const FrequencyTriggerCountKey = @"MSIMEClientFrequencyTriggerCount";
@@ -220,7 +249,6 @@ static NSString *const CandidateTranslationsKey = @"MSIMEClientCandidateTranslat
 static NSString *const CandidateEnglishGlossKey = @"MSIMEClientCandidateEnglishGloss";
 static NSString *const TranspositionKey = @"MSIMEClientAutocorrectTransposition";
 static NSString *const NeighborKey = @"MSIMEClientAutocorrectNeighbor";
-static NSString *const HelpcodeKey = @"MSIMEClientHelpcodeEnabled";
 static NSString *const HelpcodeOptionsKey = @"MSIMEClientHelpcodeOptions";
 static NSArray<NSString *> *HelpcodeSchemas() { return @[@"lantian", @"ziranma", @"shouyou2_0", @"shouyouplus", @"xiaohe", @"jiajia"]; }
 static BOOL ValidHelpcodeOption(NSString *key, id value) {
@@ -252,7 +280,7 @@ static NSString *const VoiceHotkeyCtrlOptionKey = @"MSIMEClientVoiceHotkeyCtrlOp
 static NSString *const FloatingToolbarKey = @"MSIMEClientFloatingToolbarEnabled";
 static NSString *const FloatingToolbarOptionsKey = @"MSIMEClientFloatingToolbarOptions";
 static NSArray<NSString *> *FloatingToolbarComponentKeys() {
-    return @[@"english_mode", @"punctuation", @"fullwidth", @"character_set", @"emoji", @"handwriting",
+    return @[@"english_mode", @"input_scheme", @"punctuation", @"fullwidth", @"character_set", @"emoji", @"handwriting",
              @"screen_keyboard", @"voice", @"settings"];
 }
 static BOOL ValidToolbarScale(id value) {
@@ -285,6 +313,7 @@ static NSDictionary<NSString *, NSString *> *SharedOverrideProperties() {
         SchemeKey : @"sharedInputScheme",
         ShuangpinProfileKey : @"sharedShuangpinProfile",
         ShuangpinPreeditKey : @"sharedShuangpinPreeditUsesRaw",
+        WubiProfileKey : @"sharedWubiProfile",
         WubiMixedPinyinKey : @"sharedWubiMixedPinyin",
         LocalModesKey : @"sharedLocalModes",
         FontKey : @"sharedFontSize",
@@ -305,6 +334,9 @@ static NSDictionary<NSString *, NSString *> *SharedOverrideProperties() {
         ToolbarThemeKey : @"sharedToolbarTheme",
         FallbackFontsKey : @"sharedFallbackFonts",
         PreeditFontKey : @"sharedPreeditFontSize",
+        CandidateScaleKey : @"sharedCandidateScale",
+        CandidateOpacityKey : @"sharedCandidateOpacity",
+        CandidateCornerRadiusKey : @"sharedCandidateCornerRadius",
         CandidatePreeditKey : @"sharedCandidatePreedit",
         NavigationKey : @"sharedNavigation",
         WordCharacterKey : @"sharedWordCharacter",
@@ -370,10 +402,10 @@ static NSDictionary<NSString *, MSIMESettingProbe> *SettingProbes() {
             SchemeKey : ^id(MSIMEAppearancePreferences *p) { return p.inputScheme ?: NSNull.null; },
             ShuangpinProfileKey : ^id(MSIMEAppearancePreferences *p) { return p.shuangpinProfile ?: NSNull.null; },
             ShuangpinPreeditKey : ^id(MSIMEAppearancePreferences *p) { return @(p.shuangpinPreeditUsesRaw); },
+            WubiProfileKey : ^id(MSIMEAppearancePreferences *p) { return p.wubiProfile ?: NSNull.null; },
             KeymapKey : ^id(MSIMEAppearancePreferences *p) { return @(p.shuangpinKeymap); },
             WubiKey : ^id(MSIMEAppearancePreferences *p) { return @(p.wubiAutoCommitUnique); },
             WubiMixedPinyinKey : ^id(MSIMEAppearancePreferences *p) { return @(p.wubiMixedPinyinEnabled); },
-            HelpcodeKey : ^id(MSIMEAppearancePreferences *p) { return @(p.helpcodeEnabled); },
             QuanpinHelpcodeKey : ^id(MSIMEAppearancePreferences *p) { return @(p.quanpinHelpcodeEnabled); },
             ShuangpinHelpcodeKey : ^id(MSIMEAppearancePreferences *p) { return @(p.shuangpinHelpcodeEnabled); },
             HelpcodeOptionsKey : ^id(MSIMEAppearancePreferences *p) {
@@ -409,6 +441,9 @@ static NSDictionary<NSString *, MSIMESettingProbe> *SettingProbes() {
             PageSizeKey : ^id(MSIMEAppearancePreferences *p) { return @(p.pageSize); },
             FontKey : ^id(MSIMEAppearancePreferences *p) { return @(p.fontSize); },
             PreeditFontKey : ^id(MSIMEAppearancePreferences *p) { return @(p.preeditFontSize); },
+            CandidateScaleKey : ^id(MSIMEAppearancePreferences *p) { return @(p.candidateScalePercent); },
+            CandidateOpacityKey : ^id(MSIMEAppearancePreferences *p) { return @(p.candidateOpacityPercent); },
+            CandidateCornerRadiusKey : ^id(MSIMEAppearancePreferences *p) { return p.candidateCornerRadius ?: NSNull.null; },
             CandidatePreeditKey : ^id(MSIMEAppearancePreferences *p) { return @(p.showsCandidatePreedit); },
             CandidateFollowCursorKey : ^id(MSIMEAppearancePreferences *p) { return @(p.candidateFollowCursor); },
             InputModeHUDKey : ^id(MSIMEAppearancePreferences *p) { return @(p.inputModeHUD); },
@@ -454,7 +489,8 @@ static NSDictionary<NSString *, MSIMESettingProbe> *SettingProbes() {
             WordCharacterKey : ^id(MSIMEAppearancePreferences *p) { return p.wordCharacterOptions ?: NSNull.null; },
             FloatingToolbarKey : ^id(MSIMEAppearancePreferences *p) { return @(p.floatingToolbarEnabled); },
             FloatingToolbarOptionsKey : ^id(MSIMEAppearancePreferences *p) {
-                return @{@"english_mode" : @(p.floatingToolbarEnglishMode), @"punctuation" : @(p.floatingToolbarPunctuation),
+                return @{@"english_mode" : @(p.floatingToolbarEnglishMode), @"input_scheme" : @(p.floatingToolbarInputScheme),
+                         @"punctuation" : @(p.floatingToolbarPunctuation),
                          @"fullwidth" : @(p.floatingToolbarFullWidth), @"character_set" : @(p.floatingToolbarCharacterSet),
                          @"emoji" : @(p.floatingToolbarEmoji), @"handwriting" : @(p.floatingToolbarHandwriting),
                          @"screen_keyboard" : @(p.floatingToolbarScreenKeyboard), @"voice" : @(p.floatingToolbarVoice),
@@ -826,6 +862,9 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     NSBox *_wubiCard;
     NSInteger _selectedPageIndex;
     NSArray<NSButton *> *_schemeButtons;
+    // 当前方案的菜单栏入口还没加入输入法列表时，输入方式卡片底部说明去哪里添加。
+    NSView *_inputModeHintRow;
+    NSTextField *_inputModeHintLabel;
     NSPopUpButton *_shuangpinSchemeButton;
     NSPopUpButton *_wubiSchemeButton;
     NSTextField *_versionLabel;
@@ -863,6 +902,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     NSButton *_toolbarCharacterSetButton;
     NSButton *_toolbarEmojiButton;
     NSButton *_toolbarHandwritingButton;
+    NSButton *_toolbarInputSchemeButton;
     NSButton *_toolbarScreenKeyboardButton;
     NSButton *_toolbarVoiceButton;
     NSButton *_toolbarSettingsButton;
@@ -896,7 +936,6 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     NSSwitch *_mixedKaomojiToggle;
     NSNumber *_sharedTraditionalOutput;
     NSNumber *_sharedFullWidthInput;
-    NSNumber *_sharedAutocorrect;
     NSNumber *_sharedCloudCandidates;
     NSSwitch *_cloudCandidatesToggle;
     NSNumber *_sharedCandidateTranslations;
@@ -933,6 +972,18 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     NSMutableDictionary<NSString *, NSColorWell *> *_candidateColorWells;
     NSMutableDictionary<NSString *, NSButton *> *_candidateColorResets;
     NSNumber *_sharedPreeditFontSize;
+    NSNumber *_sharedCandidateScale;
+    NSNumber *_sharedCandidateOpacity;
+    /// A radius in points, or NSNull for a document that follows the skin.
+    id _sharedCandidateCornerRadius;
+    NSSlider *_candidateScaleSlider;
+    NSTextField *_candidateScaleLabel;
+    NSSlider *_candidateOpacitySlider;
+    NSTextField *_candidateOpacityLabel;
+    NSSlider *_candidateCornerRadiusSlider;
+    NSTextField *_candidateCornerRadiusLabel;
+    NSButton *_candidateCornerRadiusReset;
+    NSPopUpButton *_candidateFontPresetButton;
     NSString *_sharedCandidatePreedit;
     NSNumber *_sharedPageSize;
     NSString *_sharedTheme;
@@ -950,6 +1001,8 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     NSString *_lastChineseScheme;
     NSString *_sharedShuangpinProfile;
     NSNumber *_sharedShuangpinPreeditUsesRaw;
+    NSString *_sharedWubiProfile;
+    NSTextField *_wubiProfileLabel;
     NSNumber *_sharedWubiMixedPinyin;
     NSString *_sharedInlinePreeditStyle;
     NSMutableDictionary *_sharedLocalModes;
@@ -960,9 +1013,6 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     NSPopUpButton *_fontButton;
     NSComboBox *_englishFontFamilyControl;
     NSComboBox *_fontFamilyControl;
-    NSTableView *_fallbackTable;
-    NSComboBox *_fallbackFamilyControl;
-    NSTextField *_fallbackStatusLabel;
     NSPopUpButton *_preeditFontButton;
     NSPopUpButton *_candidatePreeditButton;
     NSPopUpButton *_pageShortcutButton;
@@ -1069,7 +1119,11 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
 - (NSURL *)skinsRoot { return _skinsRoot; }
 - (void)setTranslationPreferencesDirectory:(NSString *)directory {
     if ([_translationPreferencesDirectory isEqual:directory]) return;
-    [_translationWindow close]; _translationWindow = nil;
+    MSIMETranslationSettingsWindow *translationWindow = _translationWindow;
+    [translationWindow close];
+    [translationWindow invalidatePendingCallbacks];
+    _translationWindow = nil;
+    [_aiWindow close]; _aiWindow = nil;
     _translationPreferencesDirectory = [directory copy];
 }
 - (void)showTranslationSettings:(id)sender {
@@ -1157,10 +1211,11 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     merged[@"candidate_follow_cursor"] = @(self.candidateFollowCursor);
     merged[@"input_mode_hud"] = @(self.inputModeHUD);
     merged[@"scheme"] = self.inputScheme;
-    // Leaving for Japanese has to leave a way back. `last_chinese_scheme` is what every other host writes when the scheme changes - Fcitx5, IBus, iOS and HarmonyOS all do - and what the shared settings page reads to put the user back on 五笔 rather than 全拼. This window sets the scheme itself, Japanese included, so without this the field keeps whatever a different surface wrote and the way back points at the wrong scheme. While japanese is active the scheme it was entered from is written too, once one is known, since the input menu's 中 entry leaves japanese the same way.
-    if (![self.inputScheme isEqual:@"japanese"] || _lastChineseScheme) merged[@"last_chinese_scheme"] = self.lastChineseScheme;
+    // 切到日文、韩文、越南文或藏文时要留一条回去的路。`last_chinese_scheme` 是其他宿主在方案变化时都会写的字段——Fcitx5、IBus、iOS 和 HarmonyOS 都写——共享设置页也靠它把用户送回五笔而不是全拼。这个窗口自己也会设置方案，包括这四个，所以不写的话这个字段会停在别的界面写下的值，回去的路就指错了方案。在这四个方案之一生效期间，只要知道是从哪个方案进来的，也照样写进去，因为输入菜单的 中 也是这样离开它们的。
+    if (![@[@"japanese", @"korean", @"vietnamese", @"tibetan"] containsObject:self.inputScheme] || _lastChineseScheme) merged[@"last_chinese_scheme"] = self.lastChineseScheme;
     merged[@"shuangpin_profile"] = self.shuangpinProfile;
     merged[@"shuangpin_preedit_uses_raw"] = @(self.shuangpinPreeditUsesRaw);
+    merged[@"wubi_profile"] = self.wubiProfile;
     merged[@"wubi_mixed_pinyin"] = @(self.wubiMixedPinyinEnabled);
     NSMutableDictionary *qh = [merged[@"quanpin_helpcode"] mutableCopy] ?: [NSMutableDictionary dictionary];
     qh[@"enabled"] = @(self.quanpinHelpcodeEnabled);
@@ -1214,6 +1269,10 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     if (_sharedToolbarTheme || [_defaults objectForKey:ToolbarThemeKey]) merged[@"toolbar_theme"] = self.toolbarTheme;
     if (_sharedFallbackFonts || [_defaults objectForKey:FallbackFontsKey]) merged[@"candidate_fallback_fonts"] = self.fallbackFonts;
     if (_sharedPreeditFontSize || [_defaults objectForKey:PreeditFontKey]) merged[@"candidate_preedit_font_size"] = @(self.preeditFontSize);
+    // Published every time, as candidate_font_size beside them is: what this host reads is either what the document said or what the user has since set here, and a restored section has neither, which has to reach the document as 100% and as following the skin rather than leave it holding the value just undone. The shared serializer drops a value at its default, so an untouched profile writes the same document it always did. The radius is cleared with an explicit null, because MSIMEMergePreferenceSnapshot keeps the old value for a missing key.
+    merged[@"candidate_scale_percent"] = @(self.candidateScalePercent);
+    merged[@"candidate_opacity_percent"] = @(self.candidateOpacityPercent);
+    merged[@"candidate_corner_radius"] = self.candidateCornerRadius ?: (id)NSNull.null;
     if (_sharedCandidatePreedit || [_defaults objectForKey:CandidatePreeditKey]) merged[@"candidate_preedit_style"] = self.showsCandidatePreedit ? @"pinyin" : @"empty";
     merged[@"chinese_punctuation"] = @(self.chinesePunctuation);
     merged[@"smart_punctuation"] = @(self.smartPunctuation);
@@ -1227,7 +1286,6 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
         @"emoji": @(self.mixedEmojiInput),
         @"kaomoji": @(self.mixedKaomojiInput)
     };
-    merged[@"autocorrect"] = @(self.autocorrect);
     if ([_defaults objectForKey:CandidateLearningKey] != nil || _sharedCandidateLearning != nil)
         merged[@"learning"] = @(self.candidateLearningEnabled);
     if ([_defaults objectForKey:FrequencyModeKey] != nil || [_defaults objectForKey:FrequencyTriggerCountKey] != nil ||
@@ -1266,6 +1324,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     toolbar[@"character_set"] = @(self.floatingToolbarCharacterSet);
     toolbar[@"emoji"] = @(self.floatingToolbarEmoji);
     toolbar[@"handwriting"] = @(self.floatingToolbarHandwriting);
+    toolbar[@"input_scheme"] = @(self.floatingToolbarInputScheme);
     toolbar[@"screen_keyboard"] = @(self.floatingToolbarScreenKeyboard);
     toolbar[@"voice"] = @(self.floatingToolbarVoice);
     toolbar[@"settings"] = @(self.floatingToolbarSettings);
@@ -1341,7 +1400,6 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     _sharedSmartPunctuationSpaceConvert = nil;
     _sharedTraditionalOutput = nil;
     _sharedFullWidthInput = nil;
-    _sharedAutocorrect = nil;
     _sharedToolbarEnabled = nil;
     _sharedCandidateLearning = nil;
     _sharedQuanpinHelpcode = nil;
@@ -1371,9 +1429,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     snapshot[@"platform.macos.candidate_page_shortcut"] = @([self storedPageShortcutForCurrentBindings]);
     NSArray *schemes = @[@"quanpin", @"shuangpin", @"wubi"];
     NSUInteger schemeIndex = [schemes indexOfObject:self.inputScheme];
-    // The fixed Apple cloud contract has no Japanese entry. Keep its
-    // historical Chinese fallback instead of serializing NSNotFound when a
-    // shared Tauri snapshot currently uses the Japanese Engine scheme.
+    // 固定的 Apple 云端契约只认 quanpin、shuangpin 和 wubi。共享的 Tauri 快照正在用其他引擎方案（japanese、korean、cantonese、zhuyin、vietnamese、tibetan、stroke）时，保留它历来的全拼回退，而不是把 NSNotFound 序列化出去。
     snapshot[@"platform.macos.input_scheme"] = @(schemeIndex == NSNotFound ? 0 : schemeIndex);
     snapshot[@"platform.macos.quanpin_helpcode_schema"] = @([MSIMECloudHelpcodeSchemas() indexOfObject:[self helpcodeOptionsForScheme:@"quanpin"][@"schema"]]);
     snapshot[@"platform.macos.shuangpin_helpcode_schema"] = @([MSIMECloudHelpcodeSchemas() indexOfObject:[self helpcodeOptionsForScheme:@"shuangpin"][@"schema"]]);
@@ -1383,10 +1439,10 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     snapshot[@"platform.macos.shuangpin_preedit_uses_raw"] = @(self.shuangpinPreeditUsesRaw);
     snapshot[@"platform.macos.chinese_punctuation"] = @(self.chinesePunctuation);
     snapshot[@"platform.macos.traditional_chinese_output"] = @(self.traditionalOutput);
-    snapshot[@"platform.macos.autocorrect"] = @(self.autocorrect);
     snapshot[@"platform.macos.candidate_learning"] = @(self.candidateLearningEnabled);
     snapshot[@"platform.macos.floating_toolbar"] = @(self.floatingToolbarEnabled);
-    return [snapshot copy];
+    // 本版本不同步的键不导出，规则见 CloudAppearanceSettings.h；full 什么也不去掉。
+    return [MSIMENarrowCloudAppearance(snapshot, MSIMEEditionInputSchemes()) copy];
 }
 /// The custom theme as this window stores it, for the host resolver.
 - (msime::mac::CustomTheme)customTheme {
@@ -1453,7 +1509,6 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     [_defaults setBool:value forKey:InputModeHUDKey];
     [self preferencesChanged];
 }
-- (BOOL)autocorrect { if (_sharedAutocorrect) return _sharedAutocorrect.boolValue; return [_defaults objectForKey:AutocorrectKey] == nil ? YES : [_defaults boolForKey:AutocorrectKey]; }
 - (BOOL)candidateLearningEnabled {
     if (_sharedCandidateLearning) return _sharedCandidateLearning.boolValue;
     return [_defaults objectForKey:CandidateLearningKey] == nil ? YES : [_defaults boolForKey:CandidateLearningKey];
@@ -1534,7 +1589,8 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
 - (void)fuzzyPinyinRuleChanged:(NSButton *)sender {
     [self setFuzzyPinyinRule:sender.identifier enabled:sender.state == NSControlStateValueOn];
 }
-- (BOOL)cloudCandidates { if (_sharedCloudCandidates) return _sharedCloudCandidates.boolValue; return [_defaults objectForKey:CloudCandidatesKey] == nil ? YES : [_defaults boolForKey:CloudCandidatesKey]; }
+// 没有任何已存选择时与共享默认值一致（关闭），否则设置开关会显示开启而输入法实际不发请求。
+- (BOOL)cloudCandidates { if (_sharedCloudCandidates) return _sharedCloudCandidates.boolValue; return [_defaults boolForKey:CloudCandidatesKey]; }
 - (void)setCloudCandidates:(BOOL)value { _sharedCloudCandidates = nil; [_defaults setBool:value forKey:CloudCandidatesKey]; [self preferencesChanged]; }
 - (void)resolveCloudCandidatesConsentWithPreferencesDirectory:(NSString *)directory userDataDirectory:(NSString *)userDataDirectory {
     if ([_defaults objectForKey:CloudCandidatesConsentKey] != nil) return;
@@ -1558,33 +1614,21 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
 - (void)setCandidateTranslations:(BOOL)value { _sharedCandidateTranslations = nil; [_defaults setBool:value forKey:CandidateTranslationsKey]; [self preferencesChanged]; }
 - (BOOL)candidateEnglishGloss { if (_sharedCandidateEnglishGloss) return _sharedCandidateEnglishGloss.boolValue; return [_defaults boolForKey:CandidateEnglishGlossKey]; }
 - (void)setCandidateEnglishGloss:(BOOL)value { _sharedCandidateEnglishGloss = nil; [_defaults setBool:value forKey:CandidateEnglishGlossKey]; [self preferencesChanged]; }
-- (void)setAutocorrect:(BOOL)value { _sharedAutocorrect = nil; [_defaults setBool:value forKey:AutocorrectKey]; [self preferencesChanged]; }
 - (BOOL)autocorrectTransposition { id value = _sharedTransposition ?: [_defaults objectForKey:TranspositionKey]; return LocalModeBoolean(value) ? [value boolValue] : YES; }
 - (BOOL)autocorrectNeighbor { id value = _sharedNeighbor ?: [_defaults objectForKey:NeighborKey]; return LocalModeBoolean(value) ? [value boolValue] : YES; }
 - (void)setAutocorrectTransposition:(BOOL)value { _sharedTransposition = nil; [_defaults setBool:value forKey:TranspositionKey]; [self preferencesChanged]; }
 - (void)setAutocorrectNeighbor:(BOOL)value { _sharedNeighbor = nil; [_defaults setBool:value forKey:NeighborKey]; [self preferencesChanged]; }
-- (BOOL)helpcodeEnabled { return [_defaults objectForKey:HelpcodeKey] == nil ? YES : [_defaults boolForKey:HelpcodeKey]; }
-- (void)setHelpcodeEnabled:(BOOL)value {
-    _sharedQuanpinHelpcode = nil;
-    _sharedShuangpinHelpcode = nil;
-    [_defaults setBool:value forKey:HelpcodeKey];
-    [_defaults setBool:value forKey:QuanpinHelpcodeKey];
-    [_defaults setBool:value forKey:ShuangpinHelpcodeKey];
-    [self preferencesChanged];
-}
-- (BOOL)quanpinHelpcodeEnabled { if (_sharedQuanpinHelpcode) return _sharedQuanpinHelpcode.boolValue; return [_defaults objectForKey:QuanpinHelpcodeKey] ? [_defaults boolForKey:QuanpinHelpcodeKey] : self.helpcodeEnabled; }
-- (BOOL)shuangpinHelpcodeEnabled { if (_sharedShuangpinHelpcode) return _sharedShuangpinHelpcode.boolValue; return [_defaults objectForKey:ShuangpinHelpcodeKey] ? [_defaults boolForKey:ShuangpinHelpcodeKey] : self.helpcodeEnabled; }
+- (BOOL)quanpinHelpcodeEnabled { if (_sharedQuanpinHelpcode) return _sharedQuanpinHelpcode.boolValue; return [_defaults objectForKey:QuanpinHelpcodeKey] ? [_defaults boolForKey:QuanpinHelpcodeKey] : YES; }
+- (BOOL)shuangpinHelpcodeEnabled { if (_sharedShuangpinHelpcode) return _sharedShuangpinHelpcode.boolValue; return [_defaults objectForKey:ShuangpinHelpcodeKey] ? [_defaults boolForKey:ShuangpinHelpcodeKey] : YES; }
 - (void)setQuanpinHelpcodeEnabled:(BOOL)value { _sharedQuanpinHelpcode = nil; [_defaults setBool:value forKey:QuanpinHelpcodeKey]; [self preferencesChanged]; }
 - (void)setShuangpinHelpcodeEnabled:(BOOL)value { _sharedShuangpinHelpcode = nil; [_defaults setBool:value forKey:ShuangpinHelpcodeKey]; [self preferencesChanged]; }
 - (void)applySharedAssistancePreferences:(NSDictionary *)preferences {
     if (![preferences isKindOfClass:NSDictionary.class]) return;
-    id autocorrect = preferences[@"autocorrect"];
     id learning = preferences[@"learning"];
     NSDictionary *frequency = preferences[@"frequency"];
     NSDictionary *fuzzy = preferences[@"fuzzy_pinyin"];
     id quanpin = preferences[@"quanpin_helpcode"];
     id shuangpin = preferences[@"shuangpin_helpcode"];
-    if (LocalModeBoolean(autocorrect)) _sharedAutocorrect = autocorrect;
     if (LocalModeBoolean(learning)) _sharedCandidateLearning = learning;
     if ([frequency isKindOfClass:NSDictionary.class]) {
         if (ValidFrequencyMode(frequency[@"mode"])) _sharedFrequencyMode = [frequency[@"mode"] copy];
@@ -1596,12 +1640,10 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
         if (ValidFuzzyPinyinRules(fuzzy[@"rules"])) _sharedFuzzyPinyinRules = [fuzzy[@"rules"] copy];
     }
     id correction = preferences[@"quanpin"];
-    if (!correction && LocalModeBoolean(autocorrect)) correction = @{};
     if ([correction isKindOfClass:NSDictionary.class]) {
         id transposition = correction[@"autocorrect_transposition"];
         id neighbor = correction[@"autocorrect_neighbor"];
-        // Missing optional fields inherit the legacy default, including when
-        // a new shared snapshot removes a previously explicit override.
+        // A missing field inherits the default, including when a new shared snapshot removes a previously explicit override.
         if (!transposition || transposition == NSNull.null || LocalModeBoolean(transposition)) _sharedTransposition = transposition ?: NSNull.null;
         if (!neighbor || neighbor == NSNull.null || LocalModeBoolean(neighbor)) _sharedNeighbor = neighbor ?: NSNull.null;
     }
@@ -1648,19 +1690,26 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
 - (void)helpcodeDisplayChanged:(NSSwitch *)sender {
     [self setHelpcodeOption:@"show_in_candidate_window" value:@(sender.state == NSControlStateValueOn) scheme:sender.identifier];
 }
-- (NSString *)inputScheme { NSString *value = _sharedInputScheme ?: [_defaults stringForKey:SchemeKey]; return [@[@"quanpin", @"shuangpin", @"wubi", @"japanese"] containsObject:value] ? value : @"quanpin"; }
-- (void)setInputScheme:(NSString *)value { if (![@[@"quanpin", @"shuangpin", @"wubi", @"japanese"] containsObject:value]) value = @"quanpin"; if (![self.inputScheme isEqual:@"japanese"]) _lastChineseScheme = self.inputScheme; _sharedInputScheme = nil; [_defaults setObject:value forKey:SchemeKey]; [self preferencesChanged]; }
+// 不是本版本的方案（包括引擎不认识的值）读作本版本的默认方案，full 是全拼。
+- (NSString *)inputScheme { NSString *value = _sharedInputScheme ?: [_defaults stringForKey:SchemeKey]; return MSIMEEditionOffersScheme(value) ? value : MSIMEEditionDefaultScheme(); }
+- (void)setInputScheme:(NSString *)value { if (!MSIMEEditionOffersScheme(value)) value = MSIMEEditionDefaultScheme(); if (![@[@"japanese", @"korean", @"vietnamese", @"tibetan"] containsObject:self.inputScheme]) _lastChineseScheme = self.inputScheme; _sharedInputScheme = nil; [_defaults setObject:value forKey:SchemeKey]; [self preferencesChanged]; }
 - (NSString *)lastChineseScheme {
     NSString *scheme = self.inputScheme;
-    if (![scheme isEqual:@"japanese"]) return scheme;
-    return _lastChineseScheme ?: @"quanpin";
+    if (![@[@"japanese", @"korean", @"vietnamese", @"tibetan"] containsObject:scheme]) return scheme;
+    return _lastChineseScheme ?: MSIMEEditionDefaultScheme();
 }
+- (NSString *)lastSyncedInputScheme { return [_defaults stringForKey:LastSyncedSchemeKey]; }
+- (void)setLastSyncedInputScheme:(NSString *)value { [_defaults setObject:value forKey:LastSyncedSchemeKey]; }
 - (NSString *)shuangpinProfile { NSString *value = _sharedShuangpinProfile ?: [_defaults stringForKey:ShuangpinProfileKey]; return [@[@"xiaohe", @"ziranma", @"shoudao", @"microsoft"] containsObject:value] ? value : @"xiaohe"; }
 - (void)setShuangpinProfile:(NSString *)value { if (![@[@"xiaohe", @"ziranma", @"shoudao", @"microsoft"] containsObject:value]) value = @"xiaohe"; _sharedShuangpinProfile = nil; [_defaults setObject:value forKey:ShuangpinProfileKey]; [self preferencesChanged]; }
+- (NSString *)wubiProfile { NSString *value = _sharedWubiProfile ?: [_defaults stringForKey:WubiProfileKey]; return [@[@"wubi86", @"wubi98"] containsObject:value] ? value : @"wubi86"; }
+- (void)setWubiProfile:(NSString *)value { if (![@[@"wubi86", @"wubi98"] containsObject:value]) value = @"wubi86"; _sharedWubiProfile = nil; [_defaults setObject:value forKey:WubiProfileKey]; [self preferencesChanged]; }
 - (BOOL)shuangpinPreeditUsesRaw { if (_sharedShuangpinPreeditUsesRaw) return _sharedShuangpinPreeditUsesRaw.boolValue; return [_defaults objectForKey:ShuangpinPreeditKey] == nil ? YES : [_defaults boolForKey:ShuangpinPreeditKey]; }
 - (void)setShuangpinPreeditUsesRaw:(BOOL)value { _sharedShuangpinPreeditUsesRaw = nil; [_defaults setBool:value forKey:ShuangpinPreeditKey]; [self preferencesChanged]; }
+// 从没设置过时取本版本的默认值：五笔版默认打开混拼，full 默认关闭（与 client-core 的版本默认偏好一致）。它会被合并进共享偏好文档，所以缺省值不能是一个固定的 NO。
 - (BOOL)wubiMixedPinyinEnabled {
-    return _sharedWubiMixedPinyin ? _sharedWubiMixedPinyin.boolValue : [_defaults boolForKey:WubiMixedPinyinKey];
+    if (_sharedWubiMixedPinyin) return _sharedWubiMixedPinyin.boolValue;
+    return [_defaults objectForKey:WubiMixedPinyinKey] == nil ? MSIMEEditionWubiMixedPinyinDefault() : [_defaults boolForKey:WubiMixedPinyinKey];
 }
 - (void)setWubiMixedPinyinEnabled:(BOOL)value {
     _sharedWubiMixedPinyin = nil;
@@ -1732,12 +1781,14 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     id profile = preferences[@"shuangpin_profile"];
     id raw = preferences[@"shuangpin_preedit_uses_raw"];
     id wubiMixedPinyin = preferences[@"wubi_mixed_pinyin"];
-    if ([@[@"quanpin", @"shuangpin", @"wubi", @"japanese"] containsObject:scheme]) _sharedInputScheme = [scheme copy];
+    id wubiProfile = preferences[@"wubi_profile"];
+    if (MSIMEEditionOffersScheme(scheme)) _sharedInputScheme = [scheme copy];
     id lastChinese = preferences[@"last_chinese_scheme"];
-    if ([@[@"quanpin", @"shuangpin", @"wubi"] containsObject:lastChinese]) _lastChineseScheme = [lastChinese copy];
+    if ([@[@"quanpin", @"shuangpin", @"wubi", @"cantonese", @"zhuyin", @"stroke"] containsObject:lastChinese] && MSIMEEditionOffersScheme(lastChinese)) _lastChineseScheme = [lastChinese copy];
     if ([@[@"xiaohe", @"ziranma", @"shoudao", @"microsoft"] containsObject:profile]) _sharedShuangpinProfile = [profile copy];
     if (LocalModeBoolean(raw)) _sharedShuangpinPreeditUsesRaw = raw;
     if (LocalModeBoolean(wubiMixedPinyin)) _sharedWubiMixedPinyin = wubiMixedPinyin;
+    if ([@[@"wubi86", @"wubi98"] containsObject:wubiProfile]) _sharedWubiProfile = [wubiProfile copy];
     id inlinePreedit = preferences[@"tsf_preedit_style"];
     if ([@[@"raw", @"pinyin", @"empty"] containsObject:inlinePreedit]) _sharedInlinePreeditStyle = [inlinePreedit copy];
     [self refreshControls];
@@ -1893,6 +1944,9 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
 - (BOOL)floatingToolbarEmoji { return [self floatingToolbarBoolean:@"emoji" defaultValue:NO]; }
 - (void)setFloatingToolbarEmoji:(BOOL)value { [self setFloatingToolbarBoolean:@"emoji" value:value]; }
 // The handwriting panel and voice buttons, which the reference's toolbar does not have.
+// 切换输入方案的按钮默认开启，与 client-core 的 FloatingToolbarPreferences::default() 一致。
+- (BOOL)floatingToolbarInputScheme { return [self floatingToolbarBoolean:@"input_scheme" defaultValue:YES]; }
+- (void)setFloatingToolbarInputScheme:(BOOL)value { [self setFloatingToolbarBoolean:@"input_scheme" value:value]; }
 - (BOOL)floatingToolbarHandwriting { return [self floatingToolbarBoolean:@"handwriting" defaultValue:NO]; }
 - (void)setFloatingToolbarHandwriting:(BOOL)value { [self setFloatingToolbarBoolean:@"handwriting" value:value]; }
 - (BOOL)floatingToolbarVoice { return [self floatingToolbarBoolean:@"voice" defaultValue:NO]; }
@@ -2351,6 +2405,72 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     [_defaults setInteger:value >= 12 && value <= 32 ? value : 16 forKey:PreeditFontKey];
     [self preferencesChanged];
 }
+- (NSInteger)candidateScalePercent {
+    id value = _sharedCandidateScale ?: [_defaults objectForKey:CandidateScaleKey];
+    return ValidCandidateScale(value) ? [value integerValue] : 100;
+}
+- (void)setCandidateScalePercent:(NSInteger)value {
+    if (!ValidCandidateScale(@(value))) { [self refreshControls]; return; }
+    _sharedCandidateScale = nil;
+    [_defaults setInteger:value forKey:CandidateScaleKey];
+    [self preferencesChanged];
+}
+- (NSInteger)candidateOpacityPercent {
+    id value = _sharedCandidateOpacity ?: [_defaults objectForKey:CandidateOpacityKey];
+    return ValidCandidateOpacity(value) ? [value integerValue] : 100;
+}
+- (void)setCandidateOpacityPercent:(NSInteger)value {
+    if (!ValidCandidateOpacity(@(value))) { [self refreshControls]; return; }
+    _sharedCandidateOpacity = nil;
+    [_defaults setInteger:value forKey:CandidateOpacityKey];
+    [self preferencesChanged];
+}
+- (NSNumber *)candidateCornerRadius {
+    id value = _sharedCandidateCornerRadius ?: [_defaults objectForKey:CandidateCornerRadiusKey];
+    return ValidCandidateCornerRadius(value) ? @([value integerValue]) : nil;
+}
+- (void)setCandidateCornerRadius:(NSNumber *)value {
+    if (value && !ValidCandidateCornerRadius(value)) { [self refreshControls]; return; }
+    _sharedCandidateCornerRadius = nil;
+    [_defaults setObject:value ? @(value.integerValue) : @"" forKey:CandidateCornerRadiusKey];
+    [self preferencesChanged];
+}
+- (msime::mac::CandidateWindowStyle)candidateWindowStyle {
+    msime::mac::CandidateWindowStyle style;
+    style.scale = self.candidateScalePercent / 100.0;
+    style.opacity = self.candidateOpacityPercent / 100.0;
+    if (NSNumber *radius = self.candidateCornerRadius) style.cornerRadius = radius.doubleValue;
+    return style;
+}
+- (msime::mac::ResolvedSkin)candidateWindowSkinForDark:(BOOL)dark {
+    return msime::mac::StyledCandidateSkin([self resolvedSkinForDark:dark], [self candidateWindowStyle]);
+}
+- (NSInteger)candidateFontPreset {
+    NSString *family = self.fontFamily;
+    NSArray<NSArray<NSString *> *> *presets = CandidateFontPresets();
+    // 默认 first: Noto Sans SC is also the last resort of 黑体 and 圆体, and on its own it is the shared default.
+    for (NSUInteger index = 0; index < presets.count; ++index) {
+        NSArray<NSString *> *families = [presets[index] subarrayWithRange:NSMakeRange(1, presets[index].count - 1)];
+        if (index == 0 ? [family isEqual:families.firstObject] : [families containsObject:family]) return (NSInteger)index;
+    }
+    return -1;
+}
+- (void)setCandidateFontPreset:(NSInteger)value {
+    NSArray<NSArray<NSString *> *> *presets = CandidateFontPresets();
+    if (value < 0 || value >= (NSInteger)presets.count) { [self refreshControls]; return; }
+    NSArray<NSString *> *families = [presets[(NSUInteger)value] subarrayWithRange:NSMakeRange(1, presets[(NSUInteger)value].count - 1)];
+    NSMutableArray<NSString *> *fallbacks = [families mutableCopy];
+    // 默认 is the shared default pair as it stands; a preset goes in front of what the user already had, so the families added by hand are still tried after it.
+    if (value != 0)
+        for (NSString *family in self.fallbackFonts)
+            if (fallbacks.count < kFallbackFontLimit && ![fallbacks containsObject:family]) [fallbacks addObject:family];
+    // Both fields in one change, so the window redraws and the document is saved once.
+    _sharedFontFamily = nil;
+    _sharedFallbackFonts = nil;
+    [_defaults setObject:families.firstObject forKey:FontFamilyKey];
+    [_defaults setObject:fallbacks forKey:FallbackFontsKey];
+    [self preferencesChanged];
+}
 - (BOOL)showsCandidatePreedit {
     return ![(_sharedCandidatePreedit ?: [_defaults stringForKey:CandidatePreeditKey]) isEqual:@"empty"];
 }
@@ -2498,12 +2618,22 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     if (ValidFallbackFonts(fallbacks)) _sharedFallbackFonts = [[NSArray alloc] initWithArray:fallbacks copyItems:YES];
     id preeditFont = preferences[@"candidate_preedit_font_size"];
     id preeditStyle = preferences[@"candidate_preedit_style"];
-    if ([preeditFont isKindOfClass:NSNumber.class] && !LocalModeBoolean(preeditFont) && [preeditFont doubleValue] == [preeditFont integerValue] && [preeditFont integerValue] >= 12 && [preeditFont integerValue] <= 32) _sharedPreeditFontSize = preeditFont;
+    if (ValidCandidateStyleInteger(preeditFont, 12, 32)) _sharedPreeditFontSize = preeditFont;
     if ([@[@"pinyin", @"empty"] containsObject:preeditStyle]) _sharedCandidatePreedit = preeditStyle;
+    // The shared serializer leaves out a style value at its default, so an omitted key always reads as 100% or as following the skin, on the first document too: these keys are newer than the shared document, so there is no native-only value to keep the way 候选窗英文字体 above does, and a stored value that outlived a reset elsewhere would otherwise draw and then be published back. A value outside the shared ranges is ignored rather than clamped.
+    id scale = preferences[@"candidate_scale_percent"];
+    if (ValidCandidateScale(scale)) _sharedCandidateScale = scale;
+    else if (!scale) _sharedCandidateScale = @100;
+    id opacity = preferences[@"candidate_opacity_percent"];
+    if (ValidCandidateOpacity(opacity)) _sharedCandidateOpacity = opacity;
+    else if (!opacity) _sharedCandidateOpacity = @100;
+    id cornerRadius = preferences[@"candidate_corner_radius"];
+    if (ValidCandidateCornerRadius(cornerRadius)) _sharedCandidateCornerRadius = cornerRadius;
+    else if (!cornerRadius || cornerRadius == NSNull.null) _sharedCandidateCornerRadius = NSNull.null;
     id page = preferences[@"candidate_page_size"];
     // Match the shared integer ranges; booleans and fractions are not sizes.
-    if ([font isKindOfClass:NSNumber.class] && !LocalModeBoolean(font) && [font doubleValue] == [font integerValue] && [font integerValue] >= 12 && [font integerValue] <= 32) _sharedFontSize = font;
-    if ([page isKindOfClass:NSNumber.class] && !LocalModeBoolean(page) && [page doubleValue] == [page integerValue] && [page integerValue] >= 1 && [page integerValue] <= 9)
+    if (ValidCandidateStyleInteger(font, 12, 32)) _sharedFontSize = font;
+    if (ValidCandidateStyleInteger(page, 1, 9))
         _sharedPageSize = @(msime::mac::NormalizeCandidatePageSize([page unsignedIntegerValue]));
     id theme = preferences[@"theme"];
     if ([ThemeModes() containsObject:theme]) _sharedTheme = [theme copy];
@@ -2624,6 +2754,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     _toolbarCharacterSetButton.state = self.floatingToolbarCharacterSet ? NSControlStateValueOn : NSControlStateValueOff;
     _toolbarEmojiButton.state = self.floatingToolbarEmoji ? NSControlStateValueOn : NSControlStateValueOff;
     _toolbarHandwritingButton.state = self.floatingToolbarHandwriting ? NSControlStateValueOn : NSControlStateValueOff;
+    _toolbarInputSchemeButton.state = self.floatingToolbarInputScheme ? NSControlStateValueOn : NSControlStateValueOff;
     _toolbarScreenKeyboardButton.state = self.floatingToolbarScreenKeyboard ? NSControlStateValueOn : NSControlStateValueOff;
     _toolbarVoiceButton.state = self.floatingToolbarVoice ? NSControlStateValueOn : NSControlStateValueOff;
     _toolbarSettingsButton.state = self.floatingToolbarSettings ? NSControlStateValueOn : NSControlStateValueOff;
@@ -2655,12 +2786,12 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     _controlOptionSpaceShortcutToggle.state = self.controlOptionSpaceShortcut ? NSControlStateValueOn : NSControlStateValueOff;
     _characterSetShortcutToggle.state = self.characterSetShortcut ? NSControlStateValueOn : NSControlStateValueOff;
     [_layoutButton selectItemAtIndex:self.vertical ? 1 : 0];
-    NSDictionary *schemeIndexes = @{@"quanpin": @0, @"shuangpin": @1, @"wubi": @2, @"japanese": @3};
-    const NSInteger storedScheme = [schemeIndexes[self.inputScheme] integerValue];
+    const NSInteger storedScheme = (NSInteger)[MSIMEInputSchemeNames() indexOfObject:self.inputScheme];
     // The radios and the scheme popups mirror the same stored value; which of the popups is usable
     // is in the dependency table with every other such rule.
     for (NSInteger index = 0; index < (NSInteger)_schemeButtons.count; ++index)
         _schemeButtons[index].state = index == storedScheme ? NSControlStateValueOn : NSControlStateValueOff;
+    [self refreshInputModeHint];
     // Options that only apply to one scheme are shown only while it is selected. Leaving them
     // editable under another scheme means the change saves, the page says nothing, and the setting
     // does nothing until the user happens to switch back.
@@ -2668,12 +2799,15 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     _shuangpinCard.hidden = storedScheme != 1;
     _wubiCard.hidden = storedScheme != 2;
     // 拼音匹配 is on another page than the scheme that decides whether it does anything, so the card says which scheme is selected rather than leaving a disabled group with no cause in sight.
-    const BOOL pinyinMatching = storedScheme != 3;
-    _pinyinMatchingSchemeLabel.stringValue =
-        pinyinMatching ? @"" : @"当前方案为日语，模糊音与全拼纠错只作用于拼音查询，在日语下不生效。";
+    const BOOL pinyinMatching = storedScheme <= 2;
+    NSString *schemeName = pinyinMatching ? nil : @[@"日语", @"韩语", @"粤拼", @"注音", @"越南语", @"藏文", @"笔画"][storedScheme - 3];
+    _pinyinMatchingSchemeLabel.stringValue = pinyinMatching ? @"" : [NSString stringWithFormat:@"当前方案为%@，模糊音与全拼纠错只作用于拼音查询，在%@下不生效。", schemeName, schemeName];
     _pinyinMatchingSchemeLabel.hidden = pinyinMatching;
     NSDictionary *profileIndexes = @{@"xiaohe": @0, @"ziranma": @1, @"shoudao": @2, @"microsoft": @3};
     [_profileButton selectItemAtIndex:[profileIndexes[self.shuangpinProfile] integerValue]];
+    const BOOL wubi98 = [self.wubiProfile isEqual:@"wubi98"];
+    [_wubiSchemeButton selectItemAtIndex:wubi98 ? 1 : 0];
+    _wubiProfileLabel.stringValue = wubi98 ? @"98 五笔" : @"86 五笔";
     [_preeditButton selectItemAtIndex:self.shuangpinPreeditUsesRaw ? 1 : 0];
     [_fontButton selectItemAtIndex:self.fontSize - 12];
     _englishFontFamilyControl.stringValue = self.candidateEnglishFont ?: @"";
@@ -2691,14 +2825,21 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     for (NSString *property in _candidateColorWells)
         _candidateColorWells[property].color =
             CandidateColor([self valueForKey:property], [self candidateSkinColorForProperty:property]);
-    // A reload keeps the row number the user had picked, which is the row they were still looking at unless the list has shrunk past it. The actions that change the list put the selection where the change left it, and they do that after the write that brings this reload with it.
-    const NSInteger fallbackSelection = _fallbackTable.selectedRow;
-    [_fallbackTable reloadData];
-    if (fallbackSelection >= 0) [self selectFallbackRow:fallbackSelection];
-    _fallbackStatusLabel.stringValue =
-        [NSString stringWithFormat:@"已添加 %lu 项，最多 %lu 项。", (unsigned long)self.fallbackFonts.count,
-                                   (unsigned long)kFallbackFontLimit];
     [_preeditFontButton selectItemAtIndex:self.preeditFontSize - 12];
+    _candidateScaleSlider.integerValue = self.candidateScalePercent;
+    _candidateScaleLabel.stringValue = [NSString stringWithFormat:@"%ld%%", (long)self.candidateScalePercent];
+    _candidateOpacitySlider.integerValue = self.candidateOpacityPercent;
+    _candidateOpacityLabel.stringValue = [NSString stringWithFormat:@"%ld%%", (long)self.candidateOpacityPercent];
+    // Following the skin, the slider and the figure show the radius the skin draws, and only a radius of the user's own can be put back.
+    NSNumber *cornerRadius = self.candidateCornerRadius;
+    if (_candidateCornerRadiusSlider != nil && cornerRadius == nil) {
+        NSAppearanceName match = [NSApp.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]];
+        cornerRadius = @(lround([self resolvedSkinForDark:[match isEqual:NSAppearanceNameDarkAqua]].tokens.radius));
+    }
+    _candidateCornerRadiusSlider.integerValue = cornerRadius.integerValue;
+    _candidateCornerRadiusLabel.stringValue = [NSString stringWithFormat:@"%ld pt", (long)cornerRadius.integerValue];
+    _candidateCornerRadiusReset.enabled = self.candidateCornerRadius != nil;
+    [_candidateFontPresetButton selectItemAtIndex:self.candidateFontPreset];
     [_candidatePreeditButton selectItemAtIndex:self.showsCandidatePreedit ? 0 : 1];
     // -1 deselects, which is what the menu has to show for a state none of its three items describes: an NSPopUpButton showing 「Page Up / Page Down」 over an unticked Page Up / Page Down box is the menu naming a binding the user does not have. The line under it says where the setting actually is, so the empty menu is not the whole answer.
     const NSInteger pagingPreset = self.pageShortcut;
@@ -2723,8 +2864,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     // Every control below is nil until the pages are built, and -refreshControls runs long before
     // that: every setter calls it, including the ones the input method uses with no window open.
     if (_preferencePages == nil) return @[];
-    NSDictionary *schemeIndexes = @{@"quanpin": @0, @"shuangpin": @1, @"wubi": @2, @"japanese": @3};
-    const NSInteger scheme = [schemeIndexes[self.inputScheme] integerValue];
+    const NSInteger scheme = (NSInteger)[MSIMEInputSchemeNames() indexOfObject:self.inputScheme];
     const BOOL learning = self.candidateLearningEnabled;
     const BOOL toolbar = self.floatingToolbarEnabled;
     const BOOL voice = self.voiceInputEnabled;
@@ -2734,9 +2874,9 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
         // configuring the scheme that is actually in use.
         @[ @(scheme == 1), @[_shuangpinSchemeButton] ],
         @[ @(scheme == 2), @[_wubiSchemeButton] ],
-        // Fuzzy rules and the two quanpin corrections reach the candidates of every scheme but Japanese. refresh_candidates (crates/engine/src/ime/mod.rs) puts all three into the query request whatever the scheme is, and only the quanpin and shuangpin engines read them back out (crates/engine/src/quanpin/engine.rs, crates/engine/src/shuangpin/engine.rs); the Japanese provider never looks. 五笔 is not in this rule even though its own table ignores them too, because the same method builds a second, quanpin request carrying the same three values when 编码打不出时用拼音候选 is on and the table cannot answer the code — so under 五笔 they decide what that fallback offers.
-        @[ @(scheme != 3), @[_fuzzyPinyinToggle, _transpositionToggle, _neighborToggle] ],
-        @[ @(self.fuzzyPinyinEnabled && scheme != 3), _fuzzyPinyinRuleButtons.allValues ],
+        // Fuzzy rules and the two quanpin corrections reach the candidates of quanpin, shuangpin and wubi only: Japanese, Korean, Cantonese, Zhuyin and Vietnamese answer false to the Engine's `supports_fuzzy` and `supports_autocorrect`, and Korean's only candidates are the Hanja of the composing syllable, which no spelling rule reaches. refresh_candidates (crates/engine/src/ime/mod.rs) puts all three into the query request whatever the scheme is, and only the quanpin and shuangpin engines read them back out (crates/engine/src/quanpin/engine.rs, crates/engine/src/shuangpin/engine.rs); the Japanese provider never looks. 五笔 keeps them even though its own table ignores them too, because the same method builds a second, quanpin request carrying the same three values when 编码打不出时用拼音候选 is on and the table cannot answer the code — so under 五笔 they decide what that fallback offers.
+        @[ @(scheme <= 2), @[_fuzzyPinyinToggle, _transpositionToggle, _neighborToggle] ],
+        @[ @(self.fuzzyPinyinEnabled && scheme <= 2), _fuzzyPinyinRuleButtons.allValues ],
         // Both places the space conversion is read — InputController.mm, where a space after a
         // just-committed mark is rewritten — ask for 智能标点 first, so it does nothing without it.
         @[ @(self.smartPunctuation), @[_smartPunctuationSpaceToggle] ],
@@ -2744,7 +2884,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
         @[ @(learning), @[_frequencyModeButton, _frequencyTriggerButton] ],
         // The step is read only by the linear mode — host-api passes frequency_linear_step to the engine whatever the mode is (crates/host-api/src/lib.rs) and the engine then ignores it — so it is live only where it does something.
         @[ @(learning && [self.frequencyAdjustmentMode isEqual:@"linear"]), @[_frequencyStepButton] ],
-        @[ @(toolbar), @[_toolbarEnglishModeButton, _toolbarPunctuationButton, _toolbarFullWidthButton,
+        @[ @(toolbar), @[_toolbarEnglishModeButton, _toolbarInputSchemeButton, _toolbarPunctuationButton, _toolbarFullWidthButton,
                          _toolbarCharacterSetButton, _toolbarEmojiButton, _toolbarHandwritingButton,
                          _toolbarScreenKeyboardButton, _toolbarVoiceButton, _toolbarSettingsButton,
                          _toolbarThemeButton, _toolbarScaleButton, _toolbarFontSizeButton] ],
@@ -2853,7 +2993,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
                                                              NSWindowStyleMaskFullSizeContentView
                                                      backing:NSBackingStoreBuffered
                                                        defer:NO];
-    window.title = @"水杉输入法设置";
+    window.title = [MSIMEEditionDisplayName() stringByAppendingString:@"设置"];
     // A window the user is expected to come back to, at the size and place they left it. The
     // identifier is what makes restorable more than a flag: AppKit keys a window's saved state by
     // it, and a window without one is encoded into the saved-state bundle and then cannot be found
@@ -2946,69 +3086,68 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     }
     _themeModeButton = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
     [_themeModeButton addItemsWithTitles:@[@"跟随系统", @"深色", @"浅色"]];
-    _themeModeButton.accessibilityLabel = @"主题模式";
+    _themeModeButton.accessibilityLabel = @"颜色模式";
     _themeModeButton.target = self;
     _themeModeButton.action = @selector(themeModeChanged:);
     _candidateThemeButton = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
-    [_candidateThemeButton addItemsWithTitles:@[@"跟随全局", @"深色", @"浅色"]];
+    [_candidateThemeButton addItemsWithTitles:@[@"跟随颜色模式", @"深色", @"浅色"]];
     _candidateThemeButton.accessibilityLabel = @"候选窗口主题";
     _candidateThemeButton.target = self;
     _candidateThemeButton.action = @selector(candidateThemeChanged:);
     _toolbarThemeButton = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
-    [_toolbarThemeButton addItemsWithTitles:@[@"跟随全局", @"深色", @"浅色"]];
+    [_toolbarThemeButton addItemsWithTitles:@[@"跟随颜色模式", @"深色", @"浅色"]];
     _toolbarThemeButton.accessibilityLabel = @"悬浮工具栏主题";
     _toolbarThemeButton.target = self;
     _toolbarThemeButton.action = @selector(toolbarThemeChanged:);
     _inputModeHUDToggle = MSIMESettingSwitch(self, @selector(inputModeHUDChanged:), @"切换中英文时显示提示");
-    // The order these families are tried in is the entire setting, and a popup showed one of them at a time: the list existed only while its menu was open, and the three buttons under it moved a row nobody could see. A table shows the order as an order — every family, in the order the candidate window will try them — and a row can be dragged to its place as well as stepped there.
-    _fallbackTable = [[NSTableView alloc] initWithFrame:NSZeroRect];
-    _fallbackTable.accessibilityLabel = @"补充字体顺序";
-    _fallbackTable.headerView = nil;
-    _fallbackTable.allowsMultipleSelection = NO;
-    _fallbackTable.rowHeight = 20.0;
-    _fallbackTable.style = NSTableViewStyleFullWidth;
-    NSTableColumn *fallbackColumn = [[NSTableColumn alloc] initWithIdentifier:@"family"];
-    fallbackColumn.resizingMask = NSTableColumnAutoresizingMask;
-    [_fallbackTable addTableColumn:fallbackColumn];
-    _fallbackTable.dataSource = self;
-    _fallbackTable.delegate = self;
-    [_fallbackTable registerForDraggedTypes:@[ MSIMEFallbackFontRowType ]];
-    [_fallbackTable setDraggingSourceOperationMask:NSDragOperationMove forLocal:YES];
-    NSScrollView *fallbackScroll = [[NSScrollView alloc] initWithFrame:NSZeroRect];
-    fallbackScroll.documentView = _fallbackTable;
-    fallbackScroll.hasVerticalScroller = YES;
-    fallbackScroll.borderType = NSBezelBorder;
-    fallbackScroll.translatesAutoresizingMaskIntoConstraints = NO;
-    // About five rows at once: enough of the list to read an order rather than a row, and short enough that the card it sits in is still a card.
-    [fallbackScroll.heightAnchor constraintEqualToConstant:112.0].active = YES;
-    [fallbackScroll.widthAnchor constraintGreaterThanOrEqualToConstant:msime::mac::layout::kControlMinWidth].active = YES;
-    _fallbackFamilyControl = [[NSComboBox alloc] initWithFrame:NSZeroRect];
-    [_fallbackFamilyControl addItemsWithObjectValues:_fontFamilyControl.objectValues];
-    _fallbackFamilyControl.completes = YES;
-    _fallbackFamilyControl.accessibilityLabel = @"添加补充字体";
-    _fallbackFamilyControl.placeholderString = @"字体家族名称";
-    [_fallbackFamilyControl.widthAnchor constraintEqualToConstant:176].active = YES;
-    NSButton *addFallback = [NSButton buttonWithTitle:@"添加" target:self action:@selector(addFallbackFont:)];
-    NSStackView *fallbackAdd = [NSStackView stackViewWithViews:@[_fallbackFamilyControl, addFallback]];
-    fallbackAdd.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-    // How full the list is, and why an 添加 that did nothing did nothing. The cap and the refusals used to be a beep and a 最多 32 项 in the row's own name, which says what the limit is but never how close to it the list already is.
-    _fallbackStatusLabel = MSIMEDetailLabel(@"");
-    NSStackView *fallbackButtons = [NSStackView stackViewWithViews:@[
-        [NSButton buttonWithTitle:@"上移" target:self action:@selector(moveFallbackFontUp:)],
-        [NSButton buttonWithTitle:@"下移" target:self action:@selector(moveFallbackFontDown:)],
-        [NSButton buttonWithTitle:@"移除" target:self action:@selector(removeFallbackFont:)]]];
-    fallbackButtons.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-    NSStackView *fallbackOrder = [NSStackView stackViewWithViews:@[ fallbackScroll, fallbackButtons ]];
-    fallbackOrder.orientation = NSUserInterfaceLayoutOrientationVertical;
-    fallbackOrder.alignment = NSLayoutAttributeLeading;
-    fallbackOrder.spacing = 6.0;
-    [fallbackScroll.widthAnchor constraintEqualToAnchor:fallbackOrder.widthAnchor].active = YES;
     _preeditFontButton = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
     for (NSUInteger size = 12; size <= 32; ++size)
         [_preeditFontButton addItemWithTitle:[NSString stringWithFormat:@"%lu pt", (unsigned long)size]];
     _preeditFontButton.accessibilityLabel = @"候选窗拼音字号";
     _preeditFontButton.target = self;
     _preeditFontButton.action = @selector(preeditFontChanged:);
+    // The three style settings are a size, a fade and a curve the user judges by looking at the preview above, so they are sliders that stop on the steps the shared settings page offers, each with the value it stands at printed beside it.
+    NSSlider *(^styleSlider)(double, double, double, NSString *) = ^NSSlider *(double minimum, double maximum, double step, NSString *label) {
+        NSSlider *slider = [NSSlider sliderWithValue:minimum minValue:minimum maxValue:maximum target:self action:@selector(candidateStyleSliderChanged:)];
+        slider.numberOfTickMarks = (NSInteger)lround((maximum - minimum) / step) + 1;
+        slider.allowsTickMarkValuesOnly = YES;
+        slider.continuous = YES;
+        slider.accessibilityLabel = label;
+        [slider.widthAnchor constraintEqualToConstant:180.0].active = YES;
+        return slider;
+    };
+    NSTextField *(^styleValueLabel)(void) = ^NSTextField * {
+        NSTextField *label = [NSTextField labelWithString:@""];
+        label.font = [NSFont monospacedDigitSystemFontOfSize:msime::mac::layout::kBodyFontSize weight:NSFontWeightRegular];
+        label.alignment = NSTextAlignmentRight;
+        [label.widthAnchor constraintEqualToConstant:52.0].active = YES;
+        return label;
+    };
+    _candidateScaleSlider = styleSlider(75.0, 150.0, 5.0, @"整体大小");
+    _candidateScaleLabel = styleValueLabel();
+    NSStackView *scaleControls = [NSStackView stackViewWithViews:@[ _candidateScaleSlider, _candidateScaleLabel ]];
+    scaleControls.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    _candidateOpacitySlider = styleSlider(50.0, 100.0, 5.0, @"不透明度");
+    _candidateOpacityLabel = styleValueLabel();
+    NSStackView *opacityControls = [NSStackView stackViewWithViews:@[ _candidateOpacitySlider, _candidateOpacityLabel ]];
+    opacityControls.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    _candidateCornerRadiusSlider = styleSlider(0.0, 16.0, 1.0, @"圆角大小");
+    _candidateCornerRadiusLabel = styleValueLabel();
+    _candidateCornerRadiusReset = [NSButton buttonWithTitle:@"跟随皮肤" target:self action:@selector(resetCandidateCornerRadius:)];
+    _candidateCornerRadiusReset.accessibilityLabel = @"圆角大小跟随皮肤";
+    NSStackView *cornerRadiusControls = [NSStackView stackViewWithViews:@[ _candidateCornerRadiusSlider, _candidateCornerRadiusLabel, _candidateCornerRadiusReset ]];
+    cornerRadiusControls.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    _candidateFontPresetButton = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
+    NSArray<NSArray<NSString *> *> *fontPresets = CandidateFontPresets();
+    for (NSUInteger index = 0; index < fontPresets.count; ++index) {
+        // 默认 is whatever the shared default resolves to; a named preset whose family this Mac does not have says so, because choosing it then draws the fallback list rather than the face its name promises.
+        NSArray<NSString *> *preset = fontPresets[index];
+        const BOOL missing = index > 0 && MSIMEInstalledFontFamilyDescriptor(preset[1]) == nil;
+        [_candidateFontPresetButton addItemWithTitle:missing ? [preset[0] stringByAppendingString:@"（未安装）"] : preset[0]];
+    }
+    _candidateFontPresetButton.accessibilityLabel = @"字体预设";
+    _candidateFontPresetButton.target = self;
+    _candidateFontPresetButton.action = @selector(candidateFontPresetChanged:);
     _candidatePreeditButton = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
     [_candidatePreeditButton addItemsWithTitles:@[@"显示拼音", @"隐藏"]];
     _candidatePreeditButton.accessibilityLabel = @"候选窗预编辑";
@@ -3134,14 +3273,14 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     _mixedEmojiToggle = MSIMESettingSwitch(self, @selector(mixedEmojiChanged:), @"Emoji 混输");
     _mixedKaomojiToggle = MSIMESettingSwitch(self, @selector(mixedKaomojiChanged:), @"颜文字混输");
     _toolbarToggle = MSIMESettingSwitch(self, @selector(toolbarChanged:), @"显示浮动工具栏");
-    // Nine checkboxes for the nine buttons MSIMEFloatingToolbarPanel draws. Three of them are new:
-    // without them the 中/英, 手写 and 语音 buttons were on the toolbar with no way to take them off.
+    // 十个复选框，对应 MSIMEFloatingToolbarPanel 画的十个按钮。中/英、手写和语音三个曾经没有开关，按钮在工具栏上却无法去掉；切换方案按钮是后加的，默认开启。
     _toolbarEnglishModeButton = [NSButton checkboxWithTitle:@"中英文按钮" target:self action:@selector(toolbarEnglishModeChanged:)];
     _toolbarPunctuationButton = [NSButton checkboxWithTitle:@"标点按钮" target:self action:@selector(toolbarPunctuationChanged:)];
     _toolbarFullWidthButton = [NSButton checkboxWithTitle:@"全半角按钮" target:self action:@selector(toolbarFullWidthChanged:)];
     _toolbarCharacterSetButton = [NSButton checkboxWithTitle:@"简繁按钮" target:self action:@selector(toolbarCharacterSetChanged:)];
     _toolbarEmojiButton = [NSButton checkboxWithTitle:@"Emoji 按钮" target:self action:@selector(toolbarEmojiChanged:)];
     _toolbarHandwritingButton = [NSButton checkboxWithTitle:@"手写按钮" target:self action:@selector(toolbarHandwritingChanged:)];
+    _toolbarInputSchemeButton = [NSButton checkboxWithTitle:@"切换方案按钮" target:self action:@selector(toolbarInputSchemeChanged:)];
     _toolbarScreenKeyboardButton = [NSButton checkboxWithTitle:@"屏幕键盘按钮" target:self action:@selector(toolbarScreenKeyboardChanged:)];
     _toolbarVoiceButton = [NSButton checkboxWithTitle:@"语音按钮" target:self action:@selector(toolbarVoiceChanged:)];
     _toolbarSettingsButton = [NSButton checkboxWithTitle:@"设置按钮" target:self action:@selector(toolbarSettingsChanged:)];
@@ -3204,25 +3343,49 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
 
     // The scheme is one choice, so it reads as radios with each scheme's own popup trailing it,
     // disabled until that scheme is selected. The stored value stays the same scheme string.
-    NSArray<NSString *> *schemeTitles = @[@"全拼输入", @"双拼输入", @"五笔输入", @"日语输入"];
+    // In MSIMEInputSchemeNames order, which is also each radio's tag. Cantonese, Zhuyin and Stroke need their dictionary installed beside the resources; without it the radio is disabled and says why, since the Engine would fall back to another scheme.
+    NSArray<NSString *> *schemeTitles = @[@"全拼输入", @"双拼输入", @"五笔输入", @"日语输入", @"韩语输入", @"粤拼输入", @"注音输入", @"越南语输入", @"藏文输入", @"笔画输入"];
+    NSDictionary *hostOptions = MSIMELoadRuntimeOptions();
     NSMutableArray<NSButton *> *schemeButtons = [NSMutableArray array];
     NSMutableArray<NSView *> *schemeRows = [NSMutableArray arrayWithObjects:MSIMECardHeader(@"输入方式"), MSIMECardSeparator(), nil];
     _shuangpinSchemeButton = _profileButton;
     _wubiSchemeButton = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
-    [_wubiSchemeButton addItemWithTitle:@"86 五笔"];
+    [_wubiSchemeButton addItemsWithTitles:@[@"86 五笔", @"98 五笔"]];
     _wubiSchemeButton.accessibilityLabel = @"五笔方案";
+    _wubiSchemeButton.target = self;
+    _wubiSchemeButton.action = @selector(wubiProfileChanged:);
     for (NSInteger index = 0; index < (NSInteger)schemeTitles.count; ++index) {
         NSButton *button = [NSButton radioButtonWithTitle:schemeTitles[index] target:self action:@selector(schemeRadioChanged:)];
         button.tag = index;
         button.font = [NSFont systemFontOfSize:13.0 weight:NSFontWeightMedium];
         button.accessibilityLabel = schemeTitles[index];
+        if (!MSIMEInputSchemeAvailable(MSIMEInputSchemeNames()[index], hostOptions)) {
+            button.enabled = NO;
+            button.toolTip = @"未安装该方案的词库，暂不可用";
+        }
         [schemeButtons addObject:button];
         NSView *accessory = index == 1 ? _shuangpinSchemeButton : (index == 2 ? _wubiSchemeButton : nil);
+        // 本版本没有的方案不列出来（而不是显示为不可用）；按钮照样建好，_schemeButtons 仍按方案编号取。
+        if (!MSIMEEditionOffersScheme(MSIMEInputSchemeNames()[index])) continue;
         [self registerSearchRow:button named:schemeTitles[index] aka:@[@"输入方案"]];
+        if (schemeRows.count > 2) [schemeRows addObject:MSIMECardSeparator()];
         [schemeRows addObject:SchemeChoiceRow(button, accessory)];
-        if (index < (NSInteger)schemeTitles.count - 1) [schemeRows addObject:MSIMECardSeparator()];
     }
     _schemeButtons = schemeButtons;
+    // macOS 27 不允许进程启用键盘输入模式，选中粤拼、注音、笔画这类方案后菜单栏里不会自动出现对应入口；这一行说明它在系统设置「添加」对话框的哪个语言下。
+    _inputModeHintLabel = MSIMEDetailLabel(@"");
+    NSButton *inputModeHintButton = [NSButton buttonWithTitle:@"打开键盘设置" target:self action:@selector(openInputSourceSettings:)];
+    inputModeHintButton.controlSize = NSControlSizeSmall;
+    NSStackView *inputModeHint = [NSStackView stackViewWithViews:@[_inputModeHintLabel, inputModeHintButton]];
+    inputModeHint.orientation = NSUserInterfaceLayoutOrientationVertical;
+    inputModeHint.alignment = NSLayoutAttributeLeading;
+    inputModeHint.spacing = 6.0;
+    inputModeHint.edgeInsets = NSEdgeInsetsMake(8.0, 0.0, 8.0, 0.0);
+    inputModeHint.accessibilityLabel = @"菜单栏入口提示";
+    [_inputModeHintLabel.widthAnchor constraintEqualToAnchor:inputModeHint.widthAnchor].active = YES;
+    inputModeHint.hidden = YES;
+    _inputModeHintRow = inputModeHint;
+    [schemeRows addObject:inputModeHint];
     NSBox *schemeCard = MSIMECardWithViews(schemeRows, 0.0);
     schemeCard.accessibilityLabel = @"输入方式卡片";
 
@@ -3274,10 +3437,11 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     [shuangpinRows addObjectsFromArray:shuangpinHelpcodeRows];
     _shuangpinCard = MSIMECardWithViews(shuangpinRows, 0.0);
     _shuangpinCard.accessibilityLabel = @"双拼选项卡片";
-    NSTextField *wubiSchemeLabel = [NSTextField labelWithString:@"86 五笔"];
-    wubiSchemeLabel.textColor = [NSColor secondaryLabelColor];
+    // 版本在「五笔输入」旁的弹出菜单里选，这里只显示当前所用的码表。
+    _wubiProfileLabel = [NSTextField labelWithString:[self.wubiProfile isEqual:@"wubi98"] ? @"98 五笔" : @"86 五笔"];
+    _wubiProfileLabel.textColor = [NSColor secondaryLabelColor];
     _wubiCard = MSIMECardWithViews(@[
-        [self settingRow:@"编码方案" control:wubiSchemeLabel],
+        [self settingRow:@"编码方案" control:_wubiProfileLabel aka:@[@"86 五笔", @"98 五笔", @"五笔版本"]],
         [self settingRow:@"四码唯一候选自动上屏" control:_wubiToggle],
         [self settingRow:@"编码打不出时用拼音候选"
                   detail:@"五笔词库无法回答当前编码时，用同一串字母查询全拼；词库能回答时不影响。"
@@ -3295,8 +3459,8 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
         [self sectionHeader:@"输入模式" keys:@[DefaultImeModeKey, ImeModeScopeKey]], inputModeCard,
         [self sectionHeader:@"应用例外" keys:@[AppInputModeRulesKey]], appRuleCard,
         [self sectionHeader:@"中文输入方案"
-                       keys:@[SchemeKey, ShuangpinProfileKey, ShuangpinPreeditKey, KeymapKey, WubiKey,
-                              WubiMixedPinyinKey, HelpcodeKey, HelpcodeOptionsKey, QuanpinHelpcodeKey,
+                       keys:@[SchemeKey, ShuangpinProfileKey, ShuangpinPreeditKey, KeymapKey, WubiKey, WubiProfileKey,
+                              WubiMixedPinyinKey, HelpcodeOptionsKey, QuanpinHelpcodeKey,
                               ShuangpinHelpcodeKey]],
         schemeCard, _quanpinCard, _shuangpinCard, _wubiCard,
     ]];
@@ -3346,9 +3510,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
         [self settingRow:@"全拼邻键纠错" detail:@"例如把 shang 输入为 shabg。" control:_neighborToggle aka:@[@"打错"]],
     ], 0.0);
     correctionCard.accessibilityLabel = @"拼音纠错卡片";
-    // Quanpin correction is enabled by default and is no longer exposed as a native setting.
-    // Keep the controls attached for older automation and explicit shared-preference compatibility,
-    // but keep the card out of the visible and accessible settings page.
+    // Quanpin correction is enabled by default and is not exposed as a native setting, so the card stays out of the visible and accessible settings page while its controls keep reflecting the shared preferences in -refreshControls.
     correctionCard.hidden = YES;
     correctionCard.accessibilityHidden = YES;
     NSMutableArray<NSButton *> *fuzzyRuleBoxes = [NSMutableArray array];
@@ -3378,11 +3540,11 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
         MSIMEDetailLabel(@"未组词时按 Shift 加一个字母，临时切到另一种输入方式。"),
         [self settingCheckboxes:_localModeButtons columns:2],
     ], 8.0);
-    localModesCard.accessibilityLabel = @"扩展输入卡片";
+    localModesCard.accessibilityLabel = @"快捷模式卡片";
 
     NSScrollView *habitsPage = [self page:MSIMESettingsPageInputHabits
                                     title:@"输入习惯"
-                                  summary:@"标点、混输、拼音匹配，以及 Shift 加一个字母的扩展输入。"
+                                  summary:@"标点、混输、拼音匹配，以及 Shift 加一个字母的快捷模式。"
                                   content:@[
         [self sectionHeader:@"标点与字符"
                        keys:@[ChinesePunctuationKey, SmartPunctuationKey, SmartPunctuationRepeatToChineseKey,
@@ -3396,7 +3558,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
         [self sectionHeader:@"拼音匹配（全拼与双拼）"
                        keys:@[TranspositionKey, NeighborKey, FuzzyPinyinKey, FuzzyPinyinRulesKey]],
         correctionCard, fuzzyCard,
-        [self sectionHeader:@"扩展输入模式" keys:@[LocalModesKey]], localModesCard,
+        [self sectionHeader:@"快捷模式" keys:@[LocalModesKey]], localModesCard,
     ]];
 
     // ---- 候选窗口 ---------------------------------------------------------------------------
@@ -3420,6 +3582,18 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
         [self settingRow:@"候选排列" control:_layoutButton aka:@[@"横排", @"竖排"]],
         [self settingRow:@"每页候选" control:_pageSizeButton aka:@[@"候选个数"]],
         [self settingRow:@"候选字号" control:_fontButton aka:@[@"字体大小"]],
+        [self settingRow:@"整体大小"
+                  detail:@"候选文字与窗口的边距、行高和圆角一同缩放。"
+                 control:scaleControls
+                     aka:@[@"缩放", @"候选窗大小"]],
+        [self settingRow:@"不透明度"
+                  detail:@"只淡化候选框底色、边框与皮肤背景图，文字和焦点高亮保持不透明。"
+                 control:opacityControls
+                     aka:@[@"透明度"]],
+        [self settingRow:@"圆角大小"
+                  detail:@"跟随皮肤时显示皮肤自带的圆角；拖动后以此值覆盖皮肤的圆角。"
+                 control:cornerRadiusControls
+                     aka:@[@"圆角"]],
         [self settingRow:@"候选窗拼音字号" control:_preeditFontButton],
         [self settingRow:@"候选窗预编辑" control:_candidatePreeditButton],
         [self settingRow:@"候选窗口跟随光标" control:_candidateFollowCursorToggle],
@@ -3436,28 +3610,27 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     // placed against the trailing edge rather than pinned to a width, so the card keeps one control
     // edge without the second fixed width these rows used to ask for.
     NSBox *fontCard = MSIMECardWithViews(@[
+        [self settingRow:@"字体预设"
+                  detail:@"写入候选字体；本机未安装时使用同类字体，最后使用系统字体。"
+                 control:_candidateFontPresetButton
+                     aka:@[@"宋体", @"黑体", @"楷体", @"圆体"]],
         [self settingRow:@"候选字体"
-                  detail:@"可选择本机字体或输入字体家族名称；未安装时按补充字体顺序回退，最后使用系统字体，并保留原设置。"
+                  detail:@"可选择本机字体或输入字体家族名称；未安装或缺字时使用系统字体，并保留原设置。"
                  control:_fontFamilyControl],
         [self settingRow:@"候选窗英文字体"
-                  detail:@"优先用于拉丁字符；未安装时回退到候选主字体和补充字体，留空表示不设置独立英文字体。"
+                  detail:@"优先用于拉丁字符；未安装时使用候选字体，留空表示不设置独立英文字体。"
                  control:_englishFontFamilyControl],
-        [self settingRow:@"补充字体" detailLabel:_fallbackStatusLabel control:fallbackAdd],
-        [self settingRow:@"补充字体优先顺序"
-                  detail:@"从上往下依次尝试；拖动一行可以改变顺序。"
-                 control:fallbackOrder
-                     aka:@[@"回退字体"]],
     ], 0.0);
     fontCard.accessibilityLabel = @"候选字体卡片";
     // 候选文字颜色 leaves the font card for this one, which is the only row that moves: it is a colour,
     // the other six are colours, and a card holding one of the seven while a card under it holds the
     // rest is a worse place to look for any of them than either card alone.
     NSMutableArray<NSView *> *colorRows = [NSMutableArray arrayWithObjects:
-        [self settingRow:@"主题模式"
+        [self settingRow:@"颜色模式"
                   detail:@"候选窗口、悬浮工具栏、屏幕键盘与输入法菜单的默认明暗；设置窗口始终跟随系统。"
                  control:_themeModeButton
                      aka:@[@"深色", @"浅色", @"暗黑"]],
-        [self settingRow:@"候选窗口主题" detail:@"覆盖主题模式，只影响候选窗口。" control:_candidateThemeButton],
+        [self settingRow:@"候选窗口主题" detail:@"覆盖颜色模式，只影响候选窗口。" control:_candidateThemeButton],
         [self settingRow:@"候选文字颜色" control:textColorControls], nil];
     [colorRows addObjectsFromArray:candidateColorRows];
     NSBox *colorCard = MSIMECardWithViews(colorRows, 0.0);
@@ -3469,7 +3642,8 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
         // The preview writes nothing: 预览深色, the showcase checkbox and the sample text are ways of looking at the settings below, not settings, so this section has nothing to restore and nothing here outlives the window.
         [self sectionHeader:@"效果预览" keys:@[]], _preview, previewControls,
         [self sectionHeader:@"候选窗口"
-                       keys:@[LayoutKey, PageSizeKey, FontKey, PreeditFontKey, CandidatePreeditKey,
+                       keys:@[LayoutKey, PageSizeKey, FontKey, CandidateScaleKey, CandidateOpacityKey,
+                              CandidateCornerRadiusKey, PreeditFontKey, CandidatePreeditKey,
                               CandidateFollowCursorKey, InputModeHUDKey]],
         candidateWindowCard,
         [self sectionHeader:@"候选字体" keys:@[FontFamilyKey, CandidateEnglishFontKey, FallbackFontsKey]],
@@ -3584,7 +3758,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     _uninstallButton = [NSButton buttonWithTitle:@"卸载…" target:self action:@selector(uninstallInputSource:)];
     _uninstallButton.bezelStyle = NSBezelStyleRounded;
     _uninstallButton.contentTintColor = NSColor.systemRedColor;
-    _uninstallButton.accessibilityLabel = @"卸载水杉输入法";
+    _uninstallButton.accessibilityLabel = [@"卸载" stringByAppendingString:MSIMEEditionDisplayName()];
     _uninstallButton.enabled = msime_macos_uninstall_input_source != nullptr;
     // The checkbox goes above the button, because it changes what the button does: below it, it
     // read as a consequence of a press that had already happened.
@@ -3606,7 +3780,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     logo.translatesAutoresizingMaskIntoConstraints = NO;
     [logo.widthAnchor constraintEqualToConstant:52.0].active = YES;
     [logo.heightAnchor constraintEqualToConstant:52.0].active = YES;
-    NSTextField *brand = [NSTextField labelWithString:@"水杉输入法"];
+    NSTextField *brand = [NSTextField labelWithString:MSIMEEditionDisplayName()];
     brand.font = [NSFont systemFontOfSize:17.0 weight:NSFontWeightSemibold];
     NSTextField *tagline = [NSTextField labelWithString:@"Metasequoia IME"];
     tagline.font = [NSFont systemFontOfSize:kBodyFontSize];
@@ -3707,14 +3881,12 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     // ---- 状态栏 -----------------------------------------------------------------------------
     NSBox *toolbarCard = MSIMECardWithViews(@[
         [self settingRow:@"显示浮动工具栏" control:_toolbarToggle aka:@[@"状态栏", @"悬浮工具栏"]],
-        [self settingRow:@"悬浮工具栏主题" detail:@"覆盖主题模式，只影响悬浮工具栏。" control:_toolbarThemeButton],
+        [self settingRow:@"悬浮工具栏主题" detail:@"覆盖颜色模式，只影响悬浮工具栏。" control:_toolbarThemeButton],
         MSIMECardSeparator(),
         MSIMECardHeader(@"工具栏按钮"),
-        // In the order the toolbar draws them, so that the grid reads left to right as the toolbar
-        // does — MSIMEFloatingToolbarPanel lays its nine buttons out in the order of
-        // FloatingToolbarComponentKeys().
+        // 按工具栏画它们的顺序排列，网格从左到右读起来和工具栏一致——MSIMEFloatingToolbarPanel 按 FloatingToolbarComponentKeys() 的顺序排它的十个按钮。
         [self settingCheckboxes:@[
-            _toolbarEnglishModeButton, _toolbarPunctuationButton, _toolbarFullWidthButton,
+            _toolbarEnglishModeButton, _toolbarInputSchemeButton, _toolbarPunctuationButton, _toolbarFullWidthButton,
             _toolbarCharacterSetButton, _toolbarEmojiButton, _toolbarHandwritingButton,
             _toolbarScreenKeyboardButton, _toolbarVoiceButton, _toolbarSettingsButton,
         ] columns:2],
@@ -4071,6 +4243,8 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
 /// page restored while the window was being built gets its turn.
 - (void)preferencesWindowDidBecomeKey:(NSNotification *)notification {
     (void)notification;
+    // 用户多半是从系统设置添加完回来的，每次回到窗口都重读一次。
+    [self refreshInputModeHint];
     if (_windowHasAppeared) return;
     _windowHasAppeared = YES;
     [self performPageEntrySideEffects];
@@ -4318,6 +4492,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
 - (void)quanpinHelpcodeChanged:(NSSwitch *)sender { self.quanpinHelpcodeEnabled = sender.state == NSControlStateValueOn; }
 - (void)shuangpinHelpcodeChanged:(NSSwitch *)sender { self.shuangpinHelpcodeEnabled = sender.state == NSControlStateValueOn; }
 - (void)profileChanged:(NSPopUpButton *)sender { self.shuangpinProfile = @[@"xiaohe", @"ziranma", @"shoudao", @"microsoft"][sender.indexOfSelectedItem]; }
+- (void)wubiProfileChanged:(NSPopUpButton *)sender { self.wubiProfile = sender.indexOfSelectedItem == 1 ? @"wubi98" : @"wubi86"; }
 - (void)preeditChanged:(NSPopUpButton *)sender { self.shuangpinPreeditUsesRaw = sender.indexOfSelectedItem == 1; }
 - (void)inputModeShortcutChanged:(NSSwitch *)sender { self.inputModeShortcut = sender.state == NSControlStateValueOn; }
 - (void)defaultImeModeChanged:(NSPopUpButton *)sender { self.defaultImeMode = sender.indexOfSelectedItem == 1 ? @"english" : @"chinese"; }
@@ -4354,6 +4529,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
 - (void)mixedKaomojiChanged:(NSSwitch *)sender { self.mixedKaomojiInput = sender.state == NSControlStateValueOn; }
 - (void)toolbarChanged:(NSSwitch *)sender { self.floatingToolbarEnabled = sender.state == NSControlStateValueOn; }
 - (void)toolbarEnglishModeChanged:(NSButton *)sender { self.floatingToolbarEnglishMode = sender.state == NSControlStateValueOn; }
+- (void)toolbarInputSchemeChanged:(NSButton *)sender { self.floatingToolbarInputScheme = sender.state == NSControlStateValueOn; }
 - (void)toolbarHandwritingChanged:(NSButton *)sender { self.floatingToolbarHandwriting = sender.state == NSControlStateValueOn; }
 - (void)toolbarVoiceChanged:(NSButton *)sender { self.floatingToolbarVoice = sender.state == NSControlStateValueOn; }
 - (void)toolbarThemeChanged:(NSPopUpButton *)sender { self.toolbarTheme = SurfaceThemes()[sender.indexOfSelectedItem]; }
@@ -4648,7 +4824,21 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     [_searchToolbarItem beginSearchInteraction];
 }
 - (void)schemeRadioChanged:(NSButton *)sender {
-    self.inputScheme = @[@"quanpin", @"shuangpin", @"wubi", @"japanese"][sender.tag];
+    self.inputScheme = MSIMEInputSchemeNames()[sender.tag];
+}
+// 当前方案在菜单栏的入口还没加入输入法列表时显示提示；没有探针（测试与其它链接了设置窗口的程序）时不显示。
+// 「添加」对话框读的输入源缓存在替换 bundle 后不会刷新，由设置应用和 install.sh 在装好输入法后清掉（见 platforms/macos/README.md），所以新版本加的模式不用重新登录就能添加，提示里不叫用户注销。
+- (void)refreshInputModeHint {
+    if (!_inputModeHintRow) return;
+    NSString *mode = MSIMEInputModeIDForSchemeIn(MSIMEEditionInfo(), self.inputScheme);
+    const BOOL missing = MSIMEInputModeEnabledProbe != nullptr && !MSIMEInputModeEnabledProbe(mode);
+    _inputModeHintRow.hidden = !missing;
+    if (!missing) return;
+    _inputModeHintLabel.stringValue = [NSString stringWithFormat:@"菜单栏里还没有「%@」，要先把它加进输入法列表才能从菜单栏切过去。macOS 只允许你自己添加：点「打开键盘设置」，在「输入法」一行点「编辑…」，再点左下角「+」，在左栏选或搜索「%@」后添加。", MSIMEInputModeMenuName(mode), MSIMEInputModeAddDialogLanguage(mode)];
+}
+- (void)openInputSourceSettings:(id)sender {
+    (void)sender;
+    [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.Keyboard-Settings.extension"]];
 }
 - (void)showBackendAccount:(id)sender {
     (void)sender;
@@ -4684,7 +4874,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     if (msime_macos_uninstall_input_source == nullptr) return;
     NSAlert *confirmation = [NSAlert new];
     confirmation.alertStyle = NSAlertStyleWarning;
-    confirmation.messageText = @"确认卸载水杉输入法？";
+    confirmation.messageText = [NSString stringWithFormat:@"确认卸载%@？", MSIMEEditionDisplayName()];
     confirmation.informativeText = _removeUserDataButton.state == NSControlStateValueOn
         ? @"输入法会移到废纸篓，并删除本机词库、学习记录、偏好与语音密钥。"
         : @"输入法会移到废纸篓；本机词库、学习记录和偏好会保留。";
@@ -4702,14 +4892,10 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
                                             create:NO
                                              error:nil];
     NSURL *inputMethods = [library URLByAppendingPathComponent:@"Input Methods" isDirectory:YES];
-    NSURL *bundle = [inputMethods URLByAppendingPathComponent:@"水杉输入法.app" isDirectory:YES];
-    // A copy installed by the previous preview build may be the one that is there.
-    // Uninstalling has to remove what exists rather than a path that was never written; both carry
-    // the same bundle identifier, so only one of them can be installed.
-    if (![NSFileManager.defaultManager fileExistsAtPath:bundle.path]) {
-        NSURL *other = [inputMethods URLByAppendingPathComponent:@"水杉输入法（预览）.app" isDirectory:YES];
-        if ([NSFileManager.defaultManager fileExistsAtPath:other.path]) bundle = other;
-    }
+    // 只卸载本版本的 bundle，同时安装的其他版本不动。
+    NSString *bundleName = MSIMEInputMethodBundleName();
+    if (!bundleName) return;
+    NSURL *bundle = [inputMethods URLByAppendingPathComponent:bundleName isDirectory:YES];
     NSDictionary *runtime = MSIMELoadRuntimeOptions();
     NSString *configuredState = [runtime[ @"preferences_directory"] isKindOfClass:NSString.class]
         && [runtime[@"preferences_directory"] isAbsolutePath] ? runtime[@"preferences_directory"] : nil;
@@ -4717,7 +4903,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     NSString *userData = configuredState ?: defaultState.path;
     BOOL ok = msime_macos_uninstall_input_source(bundle.path.fileSystemRepresentation,
                                                   userData.fileSystemRepresentation,
-                                                  "app.msime.inputmethod.MetasequoiaIME",
+                                                  MSIMEInputMethodBundleIdentifier().UTF8String,
                                                   _removeUserDataButton.state == NSControlStateValueOn);
     if (!ok) {
         NSAlert *failure = [NSAlert new];
@@ -4819,6 +5005,7 @@ static NSString *const MSIMESettingsDocumentSettingsField = @"settings";
 /// The scope of the document, said in the two panels rather than left to be discovered. The payload is -cloudSettingsSnapshot, which is the set of settings that already travels between machines through the account; it is not everything this window holds, and a user about to reinstall should know that before they rely on the file.
 static NSString *const MSIMESettingsDocumentScope =
     @"包含可跨机器同步的那部分设置：皮肤、候选排列与字号、每页候选、输入方案与辅助码方案、翻页键组，以及标点、简繁、云候选等开关。字体、配色、主题、快捷键、语音与应用例外不在其中。";
+static const NSUInteger MSIMESettingsDocumentLimit = 1 << 20;
 
 /// Writes the snapshot the account sync already speaks to a file the user keeps.
 - (void)exportSettings:(id)sender {
@@ -4854,7 +5041,7 @@ static NSString *const MSIMESettingsDocumentScope =
     panel.prompt = @"导入";
     panel.message = MSIMESettingsDocumentScope;
     if ([panel runModal] != NSModalResponseOK || panel.URL == nil) return;
-    NSData *data = [NSData dataWithContentsOfURL:panel.URL];
+    NSData *data = MSIMEReadFileUpTo(panel.URL, MSIMESettingsDocumentLimit, nil);
     id document = data == nil ? nil : [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
     if (![document isKindOfClass:NSDictionary.class] ||
         ![document[MSIMESettingsDocumentFormatField] isEqual:MSIMESettingsDocumentFormat]) {
@@ -4862,7 +5049,8 @@ static NSString *const MSIMESettingsDocumentScope =
                                      reason:@"它不是水杉输入法导出的设置文件。"];
         return;
     }
-    id values = document[MSIMESettingsDocumentSettingsField];
+    // 另一个版本导出的文件先收窄到本版本，见 MSIMEAdoptCloudAppearance。
+    id values = MSIMEAdoptCloudAppearance(document[MSIMESettingsDocumentSettingsField], [self cloudSettingsSnapshot], MSIMEEditionInputSchemes());
     // The same check the account sync puts a downloaded snapshot through — +[MSIMEPreferencesWindowController validateCloudSettingsSnapshot:] is one line around this function — asked here first so that a document this host cannot read is told apart from one it can read and still has to refuse.
     if (![values isKindOfClass:NSDictionary.class] || !MSIMEValidateCloudAppearance(values)) {
         [self reportSettingsDocumentFailure:@"无法导入这个文件"
@@ -4972,122 +5160,32 @@ static NSString *CandidateColorHex(NSColor *color) {
 - (void)inputModeHUDChanged:(NSSwitch *)sender { self.inputModeHUD = sender.state == NSControlStateValueOn; }
 - (void)themeModeChanged:(NSPopUpButton *)sender { self.themeMode = ThemeModes()[sender.indexOfSelectedItem]; }
 - (void)candidateThemeChanged:(NSPopUpButton *)sender { self.candidateTheme = SurfaceThemes()[sender.indexOfSelectedItem]; }
-/// Puts the selection of 补充字体优先顺序 on a row, or clears it when the list has no such row to offer. Every caller runs it after writing the property, because that write reloads the table.
-- (void)selectFallbackRow:(NSInteger)row {
-    const NSInteger rows = (NSInteger)self.fallbackFonts.count;
-    if (row < 0 || rows == 0) {
-        [_fallbackTable deselectAll:nil];
-        return;
-    }
-    const NSInteger selected = MIN(row, rows - 1);
-    [_fallbackTable selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)selected] byExtendingSelection:NO];
-    [_fallbackTable scrollRowToVisible:selected];
-}
-- (void)addFallbackFont:(id)sender {
-    (void)sender;
-    NSString *family = _fallbackFamilyControl.stringValue;
-    // Both refusals used to be one beep, and a beep from a window with a list on it does not say which of the two it is — that the list is full, or that what was typed is not a family name.
-    if (self.fallbackFonts.count >= kFallbackFontLimit) {
-        _fallbackStatusLabel.stringValue =
-            [NSString stringWithFormat:@"已经有 %lu 项，达到上限；先移除一项再添加。", (unsigned long)kFallbackFontLimit];
-        return;
-    }
-    if (!ValidFontFamily(family)) {
-        _fallbackStatusLabel.stringValue = @"请填写字体家族名称：不能为空或含控制字符，最长 128 字节。";
-        return;
-    }
-    self.fallbackFonts = [self.fallbackFonts arrayByAddingObject:family];
-    [self selectFallbackRow:(NSInteger)self.fallbackFonts.count - 1];
-    _fallbackFamilyControl.stringValue = @"";
-}
-/// Deleting a row leaves the selection on the row number it had, which is now the family that moved up into it — or on the last row, when what went was the bottom one. Leaving the selection behind is what made the second press of 移除 delete a font the user was not looking at: the row number survived the deletion, the font under it did not.
-- (void)removeFallbackFont:(id)sender {
-    (void)sender;
-    NSInteger index = _fallbackTable.selectedRow;
-    if (index < 0 || (NSUInteger)index >= self.fallbackFonts.count) return;
-    NSMutableArray *fonts = [self.fallbackFonts mutableCopy];
-    [fonts removeObjectAtIndex:index];
-    self.fallbackFonts = fonts;
-    [self selectFallbackRow:index];
-}
-- (void)moveFallbackFontBy:(NSInteger)delta {
-    NSInteger index = _fallbackTable.selectedRow;
-    NSInteger next = index + delta;
-    if (index < 0 || next < 0 || (NSUInteger)index >= self.fallbackFonts.count || (NSUInteger)next >= self.fallbackFonts.count) return;
-    NSMutableArray *fonts = [self.fallbackFonts mutableCopy];
-    [fonts exchangeObjectAtIndex:index withObjectAtIndex:next];
-    self.fallbackFonts = fonts;
-    [self selectFallbackRow:next];
-}
-- (void)moveFallbackFontUp:(id)sender { (void)sender; [self moveFallbackFontBy:-1]; }
-- (void)moveFallbackFontDown:(id)sender { (void)sender; [self moveFallbackFontBy:1]; }
 - (void)preeditFontChanged:(NSPopUpButton *)sender { self.preeditFontSize = sender.indexOfSelectedItem + 12; }
+- (void)candidateStyleSliderChanged:(NSSlider *)sender {
+    const NSInteger value = sender.integerValue;
+    NSString *unit = sender == _candidateCornerRadiusSlider ? @" pt" : @"%";
+    NSTextField *label = sender == _candidateScaleSlider ? _candidateScaleLabel
+                       : sender == _candidateOpacitySlider ? _candidateOpacityLabel : _candidateCornerRadiusLabel;
+    label.stringValue = [NSString stringWithFormat:@"%ld%@", (long)value, unit];
+    // While the knob is dragged only the figure follows it. The value is written when the knob is let go, or at once from the keyboard, so one drag redraws the candidate window and saves the shared document once rather than at every step it passes.
+    if (NSApp.currentEvent.type == NSEventTypeLeftMouseDragged) return;
+    if (sender == _candidateScaleSlider) { if (value != self.candidateScalePercent) self.candidateScalePercent = value; }
+    else if (sender == _candidateOpacitySlider) { if (value != self.candidateOpacityPercent) self.candidateOpacityPercent = value; }
+    else if (sender == _candidateCornerRadiusSlider && ![self.candidateCornerRadius isEqual:@(value)]) self.candidateCornerRadius = @(value);
+}
+- (void)resetCandidateCornerRadius:(id)sender { (void)sender; self.candidateCornerRadius = nil; }
+- (void)candidateFontPresetChanged:(NSPopUpButton *)sender { self.candidateFontPreset = sender.indexOfSelectedItem; }
 - (void)candidatePreeditChanged:(NSPopUpButton *)sender { self.showsCandidatePreedit = sender.indexOfSelectedItem == 0; }
 
-#pragma mark - Fallback font order and application exception tables
+#pragma mark - Application exception table
 // This object is the sidebar's data source as well, and an NSOutlineView is an NSTableView, so each of these answers for the one table it was written for and says so rather than assuming it can only have been called by that table.
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView {
-    if (tableView == _fallbackTable) return (NSInteger)self.fallbackFonts.count;
     if (tableView == _appRuleTable) return (NSInteger)_appRuleIdentifiers.count;
     return 0;
 }
 - (NSView *)tableView:(NSTableView *)tableView viewForTableColumn:(NSTableColumn *)tableColumn row:(NSInteger)row {
     if (tableView == _appRuleTable) return [self applicationRuleCellForColumn:tableColumn row:row];
-    (void)tableColumn;
-    if (tableView != _fallbackTable || row < 0 || (NSUInteger)row >= self.fallbackFonts.count) return nil;
-    NSTableCellView *cell = [tableView makeViewWithIdentifier:MSIMEFallbackFontCellIdentifier owner:self];
-    if (cell == nil) {
-        cell = [[NSTableCellView alloc] initWithFrame:NSZeroRect];
-        cell.identifier = MSIMEFallbackFontCellIdentifier;
-        NSTextField *label = [NSTextField labelWithString:@""];
-        label.font = [NSFont systemFontOfSize:msime::mac::layout::kBodyFontSize weight:NSFontWeightRegular];
-        label.translatesAutoresizingMaskIntoConstraints = NO;
-        [cell addSubview:label];
-        cell.textField = label;
-        [NSLayoutConstraint activateConstraints:@[
-            [label.leadingAnchor constraintEqualToAnchor:cell.leadingAnchor constant:4.0],
-            [label.trailingAnchor constraintLessThanOrEqualToAnchor:cell.trailingAnchor],
-            [label.centerYAnchor constraintEqualToAnchor:cell.centerYAnchor],
-        ]];
-    }
-    cell.textField.stringValue = self.fallbackFonts[(NSUInteger)row];
-    return cell;
-}
-- (id<NSPasteboardWriting>)tableView:(NSTableView *)tableView pasteboardWriterForRow:(NSInteger)row {
-    if (tableView != _fallbackTable) return nil;
-    NSPasteboardItem *item = [[NSPasteboardItem alloc] init];
-    // What is being carried is the position, not the family: two rows may well name the same font, and it is the one that was picked up that has to move.
-    [item setString:[@(row) stringValue] forType:MSIMEFallbackFontRowType];
-    return item;
-}
-- (NSDragOperation)tableView:(NSTableView *)tableView
-                validateDrop:(id<NSDraggingInfo>)info
-                 proposedRow:(NSInteger)row
-       proposedDropOperation:(NSTableViewDropOperation)dropOperation {
-    if (tableView != _fallbackTable || info.draggingSource != _fallbackTable) return NSDragOperationNone;
-    // A row dropped on top of another row is still someone asking for it to go there, so it is retargeted to the gap above instead of refused.
-    if (dropOperation == NSTableViewDropOn) [tableView setDropRow:row dropOperation:NSTableViewDropAbove];
-    return NSDragOperationMove;
-}
-- (BOOL)tableView:(NSTableView *)tableView
-       acceptDrop:(id<NSDraggingInfo>)info
-              row:(NSInteger)row
-    dropOperation:(NSTableViewDropOperation)dropOperation {
-    (void)dropOperation;
-    if (tableView != _fallbackTable) return NO;
-    NSString *carried = [info.draggingPasteboard stringForType:MSIMEFallbackFontRowType];
-    if (carried == nil) return NO;
-    const NSInteger source = carried.integerValue;
-    NSMutableArray<NSString *> *fonts = [self.fallbackFonts mutableCopy];
-    if (source < 0 || (NSUInteger)source >= fonts.count || row < 0 || (NSUInteger)row > fonts.count) return NO;
-    // The drop row is a gap in the list as it stands now, and taking the dragged row out first closes every gap after it by one.
-    NSString *family = fonts[(NSUInteger)source];
-    [fonts removeObjectAtIndex:(NSUInteger)source];
-    const NSInteger destination = row > source ? row - 1 : row;
-    [fonts insertObject:family atIndex:(NSUInteger)destination];
-    self.fallbackFonts = fonts;
-    [self selectFallbackRow:destination];
-    return YES;
+    return nil;
 }
 /// One row of 应用例外: the application on the leading edge, the mode it is to start in trailing it.
 ///

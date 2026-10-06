@@ -1,6 +1,6 @@
 //! Typo edges for the lattice's typo sentence (quanpin.md §10.5, QD:1056-1182): legal-to-legal syllable swaps, weak positions first, priced by kind and discounted by how often the user accepted that typo.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::cache::FifoCache;
 use crate::dictionary::pinyin::PinyinDatabase;
@@ -37,7 +37,7 @@ pub fn collect_typo_edges(
     let planned = plan_keys(profile, segments, literal_best, autocorrect_types);
 
     let mut rows: HashMap<String, Vec<DictRow>> = HashMap::with_capacity(planned.len());
-    let mut misses = Vec::new();
+    let mut misses = Vec::with_capacity(planned.len());
     for entry in &planned {
         match span_cache.get(&entry.key) {
             Some(cached) => {
@@ -55,7 +55,7 @@ pub fn collect_typo_edges(
         }
     }
 
-    let mut edges = Vec::new();
+    let mut edges = Vec::with_capacity(planned.len() * TYPO_ROWS_PER_KEY);
     for entry in &planned {
         let Some(found) = rows.get(&entry.key) else {
             continue;
@@ -101,18 +101,20 @@ fn plan_keys(
         .filter(|&i| weak[i])
         .chain((0..n).filter(|&i| !weak[i]));
 
-    let mut planned = Vec::new();
-    let mut seen = HashSet::new();
+    let mut planned = Vec::with_capacity(TYPO_KEY_BUDGET);
     'positions: for position in positions {
         if planned.len() >= TYPO_KEY_BUDGET {
             break;
         }
         let typed = &segments[position];
-        let mut variants: Vec<_> = syllable_typos(typed)
-            .iter()
-            .filter(|typo| autocorrect_types & autocorrect_bit(typo.kind) != 0)
-            .map(|typo| (typo, profile.accepted(typed, &typo.syllable)))
-            .collect();
+        let typos = syllable_typos(typed);
+        let mut variants = Vec::with_capacity(typos.len());
+        variants.extend(
+            typos
+                .iter()
+                .filter(|typo| autocorrect_types & autocorrect_bit(typo.kind) != 0)
+                .map(|typo| (typo, profile.accepted(typed, &typo.syllable))),
+        );
         // Kinds are already cheapest first, so a stable sort on the personal count keeps that as the tie-break.
         variants.sort_by_key(|variant| std::cmp::Reverse(variant.1));
         for (typo, accepted) in variants {
@@ -126,7 +128,7 @@ fn plan_keys(
                     let mut span = segments[start..start + length].to_vec();
                     span[position - start] = typo.syllable.clone();
                     let key = join_segments(&span);
-                    if !seen.insert(key.clone()) {
+                    if contains_planned_key(&planned, &key) {
                         continue;
                     }
                     planned.push(PlannedKey {
@@ -143,4 +145,25 @@ fn plan_keys(
         }
     }
     planned
+}
+
+fn contains_planned_key(planned: &[PlannedKey], key: &str) -> bool {
+    planned.iter().any(|entry| entry.key == key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn planned_key_lookup_scans_owned_keys() {
+        let planned = vec![PlannedKey {
+            start: 0,
+            end: 2,
+            key: "ni'hao".to_owned(),
+            penalty: 1.0,
+        }];
+        assert!(contains_planned_key(&planned, "ni'hao"));
+        assert!(!contains_planned_key(&planned, "ni'he"));
+    }
 }

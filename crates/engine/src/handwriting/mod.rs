@@ -26,7 +26,7 @@ pub fn contains_cjk(text: &str) -> bool {
 
 /// Drop empty, oversized and duplicate entries, move the CJK ones first keeping order within each group, keep 12.
 pub fn order_handwriting_candidates(candidates: &[String]) -> Vec<String> {
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::with_capacity(candidates.len());
     let (cjk, other): (Vec<&String>, Vec<&String>) = candidates
         .iter()
         .filter(|candidate| !candidate.is_empty() && candidate.len() <= MAX_CANDIDATE_BYTES)

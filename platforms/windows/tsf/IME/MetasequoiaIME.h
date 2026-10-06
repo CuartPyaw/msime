@@ -22,7 +22,6 @@ const DWORD WM_CheckGlobalCompartment = WM_USER;
 const DWORD WM_ConnectNamedpipe = WM_USER + 1;
 const DWORD WM_DisconnectNamedpipe = WM_USER + 2;
 const DWORD WM_ConnectToTsfNamedpipe = WM_USER + 3;
-const DWORD WM_IMEActivation = WM_USER + 4;
 const DWORD WM_ThreadFocus = WM_USER + 5;
 const DWORD WM_UpdateIMEStatus = WM_USER + 6;
 const DWORD WM_UpdateDoubleSingleByte = WM_USER + 7;
@@ -48,13 +47,17 @@ const DWORD WM_CancelVoiceComposition = WM_USER + 26;
 const DWORD WM_ApplyPunctuationLock = WM_USER + 27;
 const DWORD WM_CancelKeyboardComposition = WM_USER + 28;
 const DWORD WM_CommitCandidateAndContinue = WM_USER + 29;
+const DWORD WM_ReplayKoreanSyllableKey = WM_USER + 30;
 constexpr ULONG_PTR SMART_PUNCTUATION_SENDINPUT_EXTRA_INFO = 0x4D535050u;
 // Marker for caret movement synthesized by paired punctuation. Key sinks and
 // the bare-Shift hook must pass these events through to the host.
 constexpr ULONG_PTR PAIRED_PUNCTUATION_SENDINPUT_EXTRA_INFO = 0x4D535051u;
+// Marker for a caret or editing key replayed after a queued Korean syllable commit. Key sinks and the bare-Shift hook must pass these events through to the host.
+constexpr ULONG_PTR KOREAN_SYLLABLE_SENDINPUT_EXTRA_INFO = 0x4D535052u;
 constexpr bool IsSelfGeneratedSendInputExtraInfo(ULONG_PTR extraInfo)
 {
-    return extraInfo == SMART_PUNCTUATION_SENDINPUT_EXTRA_INFO || extraInfo == PAIRED_PUNCTUATION_SENDINPUT_EXTRA_INFO;
+    return extraInfo == SMART_PUNCTUATION_SENDINPUT_EXTRA_INFO || extraInfo == PAIRED_PUNCTUATION_SENDINPUT_EXTRA_INFO ||
+           extraInfo == KOREAN_SYLLABLE_SENDINPUT_EXTRA_INFO;
 }
 constexpr ULONGLONG SMART_PUNCTUATION_REPEAT_INTERVAL_MS = 2000;
 // How long a queued rewrite stays valid. Unlike the interval above this is not
@@ -182,8 +185,31 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
     // key event handlers for composition/candidate/phrase common objects.
     HRESULT _HandleComplete(TfEditCookie ec, _In_ ITfContext *pContext);
     HRESULT _HandleHostRawCommit(TfEditCookie ec, _In_ ITfContext *pContext);
+    // 韩文、注音、越南文和藏文：上屏当前组字，`wch` 是可打印 ASCII 时再插入它；注音的标点键改为连同组字一起走中文标点表。`code` 是结束组字的按键，没有按键结束时（焦点或方案切换）为 0。
+    HRESULT _HandleSyllableCommit(TfEditCookie ec, _In_ ITfContext *pContext, UINT code, WCHAR wch,
+                                  bool replayKey = false);
+    // Korean and Zhuyin: the key that opens the list (the Hanja key, which also closes it; Zhuyin's Down) and a key the open list takes, which chooses, moves or closes. Both are applied to the host session, which the Server's session follows from the same key; with no list open by the time the key runs, it does what it does without one.
+    HRESULT _HandleKoreanHanjaKey(TfEditCookie ec, _In_ ITfContext *pContext, UINT code, WCHAR wch, uint64_t requestId);
+    // Whether the host session's composing Korean syllable or Zhuyin conversion has its list open.
+    bool _IsKoreanHanjaListOpen() const;
+    // 注音、越南文和藏文的按键分类从宿主会话视图读取的内容：列表是否打开、是否正在组字（藏文的空格只在组字时属于组字），以及组字拼写用的非字母键。没有宿主会话时为空。
+    struct HostComposedView
+    {
+        bool listOpen = false;
+        bool composing = false;
+        std::string spellingSymbols;
+    };
+    HostComposedView _ReadHostComposedView() const;
+    // A lone right Ctrl tap while a Korean syllable composes converts it as the Hanja key does: on the release the tap is queued as that key and true is returned. Checked ahead of the single-Ctrl language toggle, which it takes precedence over only in that state.
+    bool _QueueKoreanHanjaTap(_In_ ITfContext *pContext, WPARAM wParam, LPARAM lParam);
+    // 向宿主会话发 MSIME_CANCEL；第一次只关闭了韩文或注音的列表、或只把越南文词或藏文音节串重新显示为原文时再发一次，所以组字无论如何都会被丢弃。没有宿主会话时返回 true。
+    bool _CancelHostComposition();
+    // A caret or editing key that ended a Korean syllable behind the deferred-key barrier was eaten to keep its place in the queue; once the syllable is committed it is sent again through the input queue so the application still does its own work with it.
+    void _QueueKoreanSyllableKeyReplay(UINT virtualKey);
+    void _RunKoreanSyllableKeyReplay(UINT virtualKey);
     HRESULT _HandleCompleteCommitFirst(TfEditCookie ec, _In_ ITfContext *pContext);
     HRESULT _HandleCancel(TfEditCookie ec, _In_ ITfContext *pContext);
+    HRESULT _HandleEscape(TfEditCookie ec, _In_ ITfContext *pContext);
     HRESULT _HandleToogleIMEMode(TfEditCookie ec, _In_ ITfContext *pContext);
     HRESULT _HandleInsertText(TfEditCookie ec, _In_ ITfContext *pContext, const std::wstring &text);
     HRESULT _HandleCommitCandidateAndContinue(TfEditCookie ec, _In_ ITfContext *pContext,
@@ -240,6 +266,7 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
     bool _QueueRepeatedSmartPunctuationReplacement(WCHAR wch);
     void _NoteKeyForSmartPunctuation(UINT code, WCHAR wch, bool isEaten);
     void _NotePassthroughStatistics(UINT virtualKey, WCHAR wch, bool keyboardKnownEnabled);
+    void _NoteKeyPressStatistics(WPARAM wParam, LPARAM lParam);
     void _ResetSmartPunctuationHistory();
     // Focus-loss counterpart of the reference's _ClearSmartPunctuationAction: forgets the armed space/revert history and drops a queued repeated-punctuation rewrite, whose Backspace would otherwise land in whatever gains focus next.
     void _ClearSmartPunctuationAction();
@@ -403,7 +430,7 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
     bool _HasDeferredKeyBarrier() const;
     bool _DeferredKeyQueueHasCapacity() const;
     void _EnsureDeferredKeyProjection();
-    void _ApplyDeferredKeyProjection(const _KEYSTROKE_STATE &keyState, WCHAR wch);
+    void _ApplyDeferredKeyProjection(const _KEYSTROKE_STATE &keyState, WCHAR wch, UINT code);
     void _ApplyDeferredPreservedKeyProjection(REFGUID preservedKey);
     bool _RefreshDeferredRecoveryPrefix(_In_ ITfContext *pContext);
     void _ArmDeferredRecoveryForTransport(_In_opt_ ITfContext *pContext);
@@ -585,6 +612,9 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
     // The key event last counted by _NotePassthroughStatistics; a host can query the same event more than once.
     UINT _passthroughStatsVirtualKey = 0;
     LONG _passthroughStatsMessageTime = 0;
+    // The key press last counted by _NoteKeyPressStatistics (scan code plus extended bit) and its message time; the Test and Key probes of one press share both.
+    UINT _keyPressStatsKey = 0;
+    LONG _keyPressStatsMessageTime = 0;
     WCHAR _smartPunctuationKey = 0;
     WCHAR _smartPunctuationPrecedingChar = 0;
     bool _smartPunctuationCommittedAscii = false;
@@ -638,6 +668,7 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
         std::wstring previousWord;
     };
     std::vector<CreatingWordRestoreEntry> _creatingWordRestoreHistory;
+    uint64_t _koreanKeyReplayFocusToken = 0;
     int _pendingPairedCaretDelta = 0;
     uint64_t _pendingPairedCaretFocusToken = 0;
     ULONGLONG _pendingPairedCaretDeadline = 0;
@@ -675,6 +706,8 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
     wchar_t _voiceCompositionAssembleGeneration = 0;
     bool _voiceCompositionAssembleActive = false;
     bool _voiceCompositionActive = false;
+    // Set while _TerminateComposition ends a composition itself, so a re-entrant OnCompositionTerminated can tell that ending from one the application made.
+    bool _terminatingOwnComposition = false;
     std::atomic<bool> _localSessionResetPending;
     std::atomic<UINT> _localSessionResetToken;
     bool _localResetEditSessionQueued;
@@ -702,6 +735,8 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
     size_t _deferredProjectedCaret;
     bool _deferredProjectedCandidateActive;
     bool _deferredProjectedUnicodeMode;
+    bool _deferredProjectedUrlMode;
+    bool _deferredProjectedKoreanHanjaListOpen;
     uint64_t _deferredKeyFocusGeneration;
     bool _deferredKeyDrainPosted;
     bool _serverUnavailableFallbackActive;

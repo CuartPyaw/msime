@@ -21,6 +21,8 @@ fn user() -> AccountUser {
         id: "fixture-user".into(),
         display_name: "Fixture".into(),
         created_at: "2026-01-01T00:00:00Z".into(),
+        email: None,
+        avatar_url: None,
     }
 }
 
@@ -230,11 +232,65 @@ impl AccountSessionStorage for MemoryStorage {
     }
 }
 
+#[derive(Clone, Default)]
+struct SharedMemoryStorage(MemoryStorage);
+
+impl AccountSessionStorage for SharedMemoryStorage {
+    fn load(&self) -> Result<Option<SavedAccountSession>, AccountError> {
+        self.0.load()
+    }
+
+    fn save(&self, session: &SavedAccountSession) -> Result<(), AccountError> {
+        self.0.save(session)
+    }
+
+    fn clear(&self) -> Result<(), AccountError> {
+        self.0.clear()
+    }
+
+    fn shared_across_processes(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Clone, Default)]
+struct FailingLockStorage(MemoryStorage);
+
+impl AccountSessionStorage for FailingLockStorage {
+    fn load(&self) -> Result<Option<SavedAccountSession>, AccountError> {
+        self.0.load()
+    }
+
+    fn save(&self, session: &SavedAccountSession) -> Result<(), AccountError> {
+        self.0.save(session)
+    }
+
+    fn clear(&self) -> Result<(), AccountError> {
+        self.0.clear()
+    }
+
+    fn shared_across_processes(&self) -> bool {
+        true
+    }
+
+    fn with_refresh_lock<T>(
+        &self,
+        _body: impl FnOnce() -> Result<T, AccountError>,
+    ) -> Result<T, AccountError> {
+        Err(AccountError::Unavailable)
+    }
+}
+
 #[derive(Clone)]
 struct FakeApi {
     refreshes: Arc<AtomicUsize>,
     reject_refresh: Arc<AtomicBool>,
     refresh_gate: Option<Arc<(Mutex<bool>, Condvar)>>,
+    preferences_started: Arc<AtomicBool>,
+    preferences_gate: Option<Arc<(Mutex<bool>, Condvar)>>,
+    put_preferences_started: Arc<AtomicBool>,
+    put_preferences_gate: Option<Arc<(Mutex<bool>, Condvar)>>,
+    logins: Arc<Mutex<Vec<(String, String)>>>,
 }
 
 impl FakeApi {
@@ -243,8 +299,29 @@ impl FakeApi {
             refreshes: Arc::new(AtomicUsize::new(0)),
             reject_refresh: Arc::new(AtomicBool::new(false)),
             refresh_gate: None,
+            preferences_started: Arc::new(AtomicBool::new(false)),
+            preferences_gate: None,
+            put_preferences_started: Arc::new(AtomicBool::new(false)),
+            put_preferences_gate: None,
+            logins: Arc::new(Mutex::new(Vec::new())),
         }
     }
+}
+
+const GOOGLE_FIXTURE_STATE: &str = "fixture-state_0123456789";
+
+fn google_authorization_url(target: &str, state: &str) -> String {
+    let mut url = Url::parse("https://accounts.google.com/o/oauth2/v2/auth").unwrap();
+    url.query_pairs_mut()
+        .append_pair("client_id", "fixture-client.apps.googleusercontent.com")
+        .append_pair("redirect_uri", target)
+        .append_pair("response_type", "code")
+        .append_pair("scope", "openid email profile")
+        .append_pair("nonce", "fixture-nonce")
+        .append_pair("state", state)
+        .append_pair("code_challenge", "fixture-challenge")
+        .append_pair("code_challenge_method", "S256");
+    url.to_string()
 }
 
 impl AccountApi for FakeApi {
@@ -252,16 +329,21 @@ impl AccountApi for FakeApi {
         Ok(HashMap::from([("email".into(), true)]))
     }
 
-    fn challenge(&self, _provider: &str, _target: &str) -> Result<AccountChallenge, AccountError> {
+    fn challenge(&self, provider: &str, target: &str) -> Result<AccountChallenge, AccountError> {
         Ok(AccountChallenge {
             challenge_id: "fixture-challenge".into(),
             expires_in: 300,
             nonce: None,
-            authorization_url: None,
+            authorization_url: (provider == "google")
+                .then(|| google_authorization_url(target, GOOGLE_FIXTURE_STATE)),
         })
     }
 
-    fn login(&self, _challenge: &str, _credential: &str) -> Result<AccountTokens, AccountError> {
+    fn login(&self, challenge: &str, credential: &str) -> Result<AccountTokens, AccountError> {
+        self.logins
+            .lock()
+            .unwrap()
+            .push((challenge.into(), credential.into()));
         Ok(tokens(b'a', b'b', 900))
     }
 
@@ -335,6 +417,14 @@ impl AccountApi for FakeApi {
         if access_token == token(b'a') {
             return Err(AccountError::Unauthorized);
         }
+        self.preferences_started.store(true, Ordering::SeqCst);
+        if let Some(gate) = &self.preferences_gate {
+            let (lock, ready) = &**gate;
+            let mut open = lock.lock().map_err(|_| AccountError::Unavailable)?;
+            while !*open {
+                open = ready.wait(open).map_err(|_| AccountError::Unavailable)?;
+            }
+        }
         Ok(AccountPreferences {
             revision: 42,
             settings: BTreeMap::from([
@@ -357,6 +447,14 @@ impl AccountApi for FakeApi {
     ) -> Result<AccountPreferences, AccountError> {
         if access_token == token(b'a') {
             return Err(AccountError::Unauthorized);
+        }
+        self.put_preferences_started.store(true, Ordering::SeqCst);
+        if let Some(gate) = &self.put_preferences_gate {
+            let (lock, ready) = &**gate;
+            let mut open = lock.lock().map_err(|_| AccountError::Unavailable)?;
+            while !*open {
+                open = ready.wait(open).map_err(|_| AccountError::Unavailable)?;
+            }
         }
         Ok(AccountPreferences {
             revision: preferences.revision + 1,
@@ -407,6 +505,25 @@ fn validates_public_inputs_and_tokens() {
         validate_apple_login("challenge", "identity-token\n"),
         Err(AccountError::Invalid)
     );
+    assert_eq!(
+        validate_google_login("challenge", "4/0Afixture-code"),
+        Ok(())
+    );
+    for code in ["", "4/0A fixture", "4/0A\u{1}", "码"] {
+        assert_eq!(
+            validate_google_login("challenge", code),
+            Err(AccountError::Invalid)
+        );
+    }
+    assert_eq!(
+        validate_google_login("challenge", &"a".repeat(2049)),
+        Err(AccountError::Invalid)
+    );
+    assert_eq!(
+        validate_login_request("challenge", "4/0Afixture-code"),
+        Ok(())
+    );
+    assert_eq!(validate_login_request("challenge", "123456"), Ok(()));
     let mut invalid = tokens(b'a', b'b', 900);
     invalid.access_token = token(b'A');
     assert_eq!(validate_tokens(&invalid), Err(AccountError::Unavailable));
@@ -614,6 +731,26 @@ fn late_refresh_cannot_restore_forgotten_session() {
 }
 
 #[test]
+fn sign_out_does_not_clear_when_shared_lock_cannot_be_taken() {
+    let storage = FailingLockStorage::default();
+    storage
+        .0
+        .save(&SavedAccountSession {
+            tokens: tokens(b'a', b'b', 900),
+            expires_at_unix_ms: valid_future_expiry(),
+        })
+        .unwrap();
+    let session = BackendAccountSession::new(FakeApi::new(), storage.clone());
+
+    assert_eq!(session.forget(), Err(AccountError::Unavailable));
+    assert_eq!(
+        storage.load().unwrap().unwrap().tokens.refresh_token,
+        token(b'b'),
+        "an unlocked clear could race an in-flight refresh and resurrect the session"
+    );
+}
+
+#[test]
 fn generation_exhaustion_refuses_async_account_operations() {
     let storage = MemoryStorage::default();
     installed(&storage, 0);
@@ -641,6 +778,130 @@ fn logout_clears_local_session_before_remote_result() {
     session.logout(true).unwrap();
     assert!(storage.load().unwrap().is_none());
     assert_eq!(session.status().unwrap(), None);
+}
+
+#[test]
+fn authenticated_operation_is_cancelled_when_session_changes_before_completion() {
+    let storage = MemoryStorage::default();
+    installed(&storage, valid_future_expiry());
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let mut api = FakeApi::new();
+    let started = Arc::clone(&api.preferences_started);
+    api.preferences_gate = Some(Arc::clone(&gate));
+    let session = Arc::new(BackendAccountSession::new(api, storage));
+    let worker = {
+        let session = Arc::clone(&session);
+        thread::spawn(move || session.preferences())
+    };
+    while !started.load(Ordering::SeqCst) {
+        thread::yield_now();
+    }
+    session.forget().unwrap();
+    let (lock, ready) = &*gate;
+    *lock.lock().unwrap() = true;
+    ready.notify_all();
+    assert_eq!(worker.join().unwrap(), Err(AccountError::Cancelled));
+}
+
+#[test]
+fn account_request_is_cancelled_when_same_user_signs_in_again_before_completion() {
+    let storage = MemoryStorage::default();
+    installed(&storage, valid_future_expiry());
+    let session = Arc::new(BackendAccountSession::new(FakeApi::new(), storage));
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let started = Arc::new(AtomicBool::new(false));
+    let worker = {
+        let session = Arc::clone(&session);
+        let gate = Arc::clone(&gate);
+        let started = Arc::clone(&started);
+        thread::spawn(move || {
+            request_with_account_session(&FakeApi::new(), &session, true, |_api, _token| {
+                started.store(true, Ordering::SeqCst);
+                let (lock, ready) = &*gate;
+                let mut open = lock.lock().map_err(|_| AccountError::Unavailable)?;
+                while !*open {
+                    open = ready.wait(open).map_err(|_| AccountError::Unavailable)?;
+                }
+                Ok::<_, AccountError>("stale result")
+            })
+        })
+    };
+    while !started.load(Ordering::SeqCst) {
+        thread::yield_now();
+    }
+    session.forget().unwrap();
+    session.sign_in("synthetic-challenge", "123456").unwrap();
+    let (lock, ready) = &*gate;
+    *lock.lock().unwrap() = true;
+    ready.notify_all();
+    assert_eq!(worker.join().unwrap(), Err(AccountError::Cancelled));
+}
+
+#[test]
+fn a_generation_guard_rejects_a_same_user_relogin_before_local_write() {
+    let storage = MemoryStorage::default();
+    installed(&storage, valid_future_expiry());
+    let session = BackendAccountSession::new(FakeApi::new(), storage);
+    let (_, _, generation) = session
+        .credentials_with_generation(None, Some("fixture-user"))
+        .unwrap();
+
+    session.forget().unwrap();
+    session.sign_in("synthetic-challenge", "123456").unwrap();
+
+    let mut wrote = false;
+    assert_eq!(
+        session.with_generation(generation, Some("fixture-user"), || {
+            wrote = true;
+            Ok::<_, AccountError>(())
+        }),
+        Err(AccountError::Cancelled)
+    );
+    assert!(
+        !wrote,
+        "a stale account operation must not reach its local write"
+    );
+
+    let cloud = AccountPreferences {
+        revision: 1,
+        settings: BTreeMap::new(),
+    };
+    assert_eq!(
+        session.put_preferences_with_generation(&cloud, generation, "fixture-user"),
+        Err(AccountError::Cancelled)
+    );
+}
+
+#[test]
+fn a_shared_logout_during_preference_upload_reports_cancellation() {
+    let storage = SharedMemoryStorage::default();
+    installed(&storage.0, valid_future_expiry());
+    let api = FakeApi::new();
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let mut api_for_request = api.clone();
+    api_for_request.put_preferences_gate = Some(Arc::clone(&gate));
+    let session = Arc::new(BackendAccountSession::new(api_for_request, storage.clone()));
+    let (_, _, generation) = session
+        .credentials_with_generation(None, Some("fixture-user"))
+        .unwrap();
+    let cloud = AccountPreferences {
+        revision: 1,
+        settings: BTreeMap::new(),
+    };
+    let request_session = Arc::clone(&session);
+    let request = thread::spawn(move || {
+        request_session.put_preferences_with_generation(&cloud, generation, "fixture-user")
+    });
+    while !api.put_preferences_started.load(Ordering::SeqCst) {
+        thread::yield_now();
+    }
+    storage.clear().unwrap();
+    {
+        let (lock, ready) = &*gate;
+        *lock.lock().unwrap() = true;
+        ready.notify_all();
+    }
+    assert_eq!(request.join().unwrap(), Err(AccountError::Cancelled));
 }
 
 fn serve_once(response: Vec<u8>) -> String {
@@ -787,6 +1048,25 @@ fn streams_dictionary_snapshot_file_with_exact_body_and_media_type() {
     assert_eq!(&request[header_end + 4..], contents);
 }
 
+#[cfg(unix)]
+#[test]
+fn dictionary_snapshot_to_file_rejects_symlinked_parent() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempfile::tempdir().unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let linked = directory.path().join("linked");
+    symlink(target.path(), &linked).unwrap();
+    let destination = linked.join("snapshot.ndjson");
+    let client = BackendAccountClient::loopback("http://127.0.0.1:9").unwrap();
+
+    assert_eq!(
+        client.dictionary_snapshot_to_file(&destination, &token(b'a')),
+        Err(AccountError::Invalid)
+    );
+    assert!(!target.path().join("snapshot.ndjson").exists());
+}
+
 #[test]
 fn dictionary_snapshot_file_restore_validates_file_and_revision_bounds() {
     let directory = tempfile::tempdir().unwrap();
@@ -815,6 +1095,47 @@ fn dictionary_snapshot_file_restore_validates_file_and_revision_bounds() {
     );
     assert_eq!(
         client.restore_dictionary_snapshot_file(&empty, 7, "short"),
+        Err(AccountError::Invalid)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn dictionary_snapshot_file_restore_rejects_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempfile::tempdir().unwrap();
+    let target = directory.path().join("target.ndjson");
+    std::fs::write(&target, b"synthetic snapshot\n").unwrap();
+    let link = directory.path().join("link.ndjson");
+    symlink(&target, &link).unwrap();
+    let client = BackendAccountClient::loopback("http://127.0.0.1:9").unwrap();
+
+    assert_eq!(
+        client.restore_dictionary_snapshot_file(&link, 7, &token(b'a')),
+        Err(AccountError::Invalid)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn dictionary_snapshot_file_restore_rejects_symlinked_parent() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempfile::tempdir().unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let linked = directory.path().join("linked");
+    symlink(target.path(), &linked).unwrap();
+    let snapshot = linked.join("snapshot.ndjson");
+    std::fs::write(
+        target.path().join("snapshot.ndjson"),
+        b"synthetic snapshot\n",
+    )
+    .unwrap();
+    let client = BackendAccountClient::loopback("http://127.0.0.1:9").unwrap();
+
+    assert_eq!(
+        client.restore_dictionary_snapshot_file(&snapshot, 7, &token(b'a')),
         Err(AccountError::Invalid)
     );
 }
@@ -1168,4 +1489,778 @@ fn account_candidate_transport_maps_canonical_and_fixed_state() {
         .set_fixed_position("server:context", "ni'hao", "你好", None, 43, &token(b'a'))
         .unwrap();
     assert_eq!(revision.revision, 44);
+}
+
+#[test]
+fn google_target_accepts_only_the_loopback_callback() {
+    for target in [
+        "http://127.0.0.1:1024/callback",
+        "http://127.0.0.1:53682/callback",
+        "http://127.0.0.1:65535/callback",
+        "http://[::1]:49152/callback",
+    ] {
+        assert_eq!(
+            validate_provider_target("google", target),
+            Ok(()),
+            "{target}"
+        );
+    }
+    for target in [
+        "",
+        "http://127.0.0.1/callback",
+        "http://127.0.0.1:1023/callback",
+        "http://127.0.0.1:65536/callback",
+        "http://127.0.0.1:080/callback",
+        "http://127.0.0.1:+8080/callback",
+        "http://127.0.0.1:8080/callback/",
+        "http://127.0.0.1:8080/callback?next=1",
+        "http://127.0.0.1:8080/callback#fragment",
+        "http://127.0.0.1:8080/other",
+        "http://localhost:8080/callback",
+        "http://127.0.0.2:8080/callback",
+        "http://user@127.0.0.1:8080/callback",
+        "https://127.0.0.1:8080/callback",
+        " http://127.0.0.1:8080/callback",
+    ] {
+        assert_eq!(
+            validate_provider_target("google", target),
+            Err(AccountError::Invalid),
+            "{target}"
+        );
+    }
+    assert_eq!(
+        validate_provider_target("email", "http://127.0.0.1:8080/callback"),
+        Ok(())
+    );
+    assert_eq!(
+        validate_provider_target("apple", "http://127.0.0.1:8080/callback"),
+        Err(AccountError::Invalid)
+    );
+}
+
+#[test]
+fn google_authorization_url_must_redirect_to_this_listener() {
+    let target = "http://127.0.0.1:53682/callback";
+    let url = google_authorization_url(target, GOOGLE_FIXTURE_STATE);
+    assert_eq!(
+        google::google_authorization_state(&url, target).as_deref(),
+        Ok(GOOGLE_FIXTURE_STATE)
+    );
+    assert_eq!(
+        google::google_authorization_state(&url, "http://127.0.0.1:53683/callback"),
+        Err(AccountError::Unavailable)
+    );
+    for url in [
+        google_authorization_url(target, GOOGLE_FIXTURE_STATE)
+            .replace("accounts.google.com", "accounts.google.com.evil.test"),
+        google_authorization_url(target, GOOGLE_FIXTURE_STATE).replace("https://", "http://"),
+        google_authorization_url(target, GOOGLE_FIXTURE_STATE)
+            .replace("accounts.google.com/", "accounts.google.com:8443/"),
+        google_authorization_url(target, GOOGLE_FIXTURE_STATE) + "#fragment",
+        google_authorization_url(target, GOOGLE_FIXTURE_STATE) + "&state=second",
+        google_authorization_url(target, ""),
+        google_authorization_url(target, GOOGLE_FIXTURE_STATE).replace("state=", "other="),
+        google_authorization_url(target, GOOGLE_FIXTURE_STATE) + "&x=\"quoted\"",
+        "https://evil.test/o/oauth2/v2/auth?state=fixture".into(),
+    ] {
+        assert_eq!(
+            google::google_authorization_state(&url, target),
+            Err(AccountError::Unavailable),
+            "{url}"
+        );
+    }
+}
+
+#[test]
+fn google_callback_requires_the_path_and_matching_state() {
+    use google::{parse_google_callback, GoogleCallback};
+    let state = GOOGLE_FIXTURE_STATE;
+    assert_eq!(
+        parse_google_callback(
+            &format!("GET /callback?state={state}&code=4%2F0Afixture&scope=openid HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"),
+            state
+        ),
+        GoogleCallback::Code("4/0Afixture".into())
+    );
+    assert_eq!(
+        parse_google_callback(
+            &format!("GET /callback?error=access_denied&state={state} HTTP/1.1\r\n\r\n"),
+            state
+        ),
+        GoogleCallback::Failed(AccountError::Cancelled)
+    );
+    assert_eq!(
+        parse_google_callback(
+            &format!("GET /callback?state={state} HTTP/1.1\r\n\r\n"),
+            state
+        ),
+        GoogleCallback::Failed(AccountError::Unavailable)
+    );
+    assert_eq!(
+        parse_google_callback(
+            &format!("GET /callback?state={state}&code=bad%20code HTTP/1.1\r\n\r\n"),
+            state
+        ),
+        GoogleCallback::Failed(AccountError::Unavailable)
+    );
+    for head in [
+        "GET /favicon.ico HTTP/1.1\r\n\r\n".to_string(),
+        format!("GET /callback/extra?state={state}&code=fixture HTTP/1.1\r\n\r\n"),
+        format!("POST /callback?state={state}&code=fixture HTTP/1.1\r\n\r\n"),
+        "GET /callback?state=other-state&code=fixture HTTP/1.1\r\n\r\n".to_string(),
+        "GET /callback?state=other-state&error=access_denied HTTP/1.1\r\n\r\n".to_string(),
+        "GET /callback?code=fixture HTTP/1.1\r\n\r\n".to_string(),
+        format!("GET /callback?state={state}&state={state}&code=fixture HTTP/1.1\r\n\r\n"),
+        format!("GET http://127.0.0.1/callback?state={state}&code=fixture HTTP/1.1\r\n\r\n"),
+        String::new(),
+        "garbage".to_string(),
+    ] {
+        assert_eq!(
+            parse_google_callback(&head, state),
+            GoogleCallback::Ignored,
+            "{head}"
+        );
+    }
+}
+
+fn browser_request(target: &str, path_and_query: &str) -> String {
+    let address = target
+        .strip_prefix("http://")
+        .and_then(|rest| rest.strip_suffix("/callback"))
+        .unwrap()
+        .to_string();
+    let mut stream = std::net::TcpStream::connect(address).unwrap();
+    std::io::Write::write_all(
+        &mut stream,
+        format!("GET {path_and_query} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").as_bytes(),
+    )
+    .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    response
+}
+
+#[test]
+fn google_sign_in_waits_for_the_matching_loopback_redirect() {
+    let storage = MemoryStorage::default();
+    let api = FakeApi::new();
+    let session = BackendAccountSession::new(api.clone(), storage.clone());
+    let signed_in = session
+        .sign_in_google_with_browser(|url| {
+            let parsed = Url::parse(url).unwrap();
+            let target = parsed
+                .query_pairs()
+                .find(|(key, _)| key == "redirect_uri")
+                .unwrap()
+                .1
+                .into_owned();
+            thread::spawn(move || {
+                let favicon = browser_request(&target, "/favicon.ico");
+                assert!(favicon.starts_with("HTTP/1.1 404 "));
+                let forged = browser_request(&target, "/callback?state=forged&code=attacker");
+                assert!(forged.starts_with("HTTP/1.1 404 "));
+                let page = browser_request(
+                    &target,
+                    &format!("/callback?state={GOOGLE_FIXTURE_STATE}&code=4%2F0Afixture-code"),
+                );
+                assert!(page.starts_with("HTTP/1.1 200 OK\r\n"));
+                assert!(page.contains("Content-Type: text/html; charset=utf-8"));
+                assert!(page.contains("已收到 Google 授权"));
+                assert!(page.contains("请回到水杉输入法"));
+                assert!(!page.contains("{{"), "every template placeholder is filled");
+                // The page is self-contained: no script runs and nothing is fetched.
+                assert!(page.contains("Content-Security-Policy: default-src 'none';"));
+                assert!(!page.contains("<script"));
+                // The code has not been exchanged yet, so the page must not claim success.
+                assert!(!page.contains("登录已完成"));
+                assert!(!page.contains("4/0Afixture-code"));
+            });
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(signed_in, user());
+    assert_eq!(
+        api.logins.lock().unwrap().as_slice(),
+        [(
+            "fixture-challenge".to_string(),
+            "4/0Afixture-code".to_string()
+        )]
+    );
+    assert!(storage.load().unwrap().is_some());
+}
+
+#[test]
+fn google_sign_in_treats_denial_and_timeout_as_cancellation() {
+    let api = FakeApi::new();
+    let session = BackendAccountSession::new(api.clone(), MemoryStorage::default());
+    let denied = session.sign_in_google_with_browser(|url| {
+        let parsed = Url::parse(url).unwrap();
+        let target = parsed
+            .query_pairs()
+            .find(|(key, _)| key == "redirect_uri")
+            .unwrap()
+            .1
+            .into_owned();
+        thread::spawn(move || {
+            let page = browser_request(
+                &target,
+                &format!("/callback?error=access_denied&state={GOOGLE_FIXTURE_STATE}"),
+            );
+            assert!(page.contains("已取消"));
+        });
+        Ok(())
+    });
+    assert_eq!(denied, Err(AccountError::Cancelled));
+
+    let timed_out = session.sign_in_google_with_timeout(|_| Ok(()), Duration::from_millis(200));
+    assert_eq!(timed_out, Err(AccountError::Cancelled));
+
+    let unopened = session.sign_in_google_with_browser(|_| Err(AccountError::Unavailable));
+    assert_eq!(unopened, Err(AccountError::Unavailable));
+    assert!(api.logins.lock().unwrap().is_empty());
+}
+
+#[test]
+fn google_sign_in_can_be_cancelled_while_waiting_for_the_browser() {
+    let api = FakeApi::new();
+    let session = BackendAccountSession::new(api.clone(), MemoryStorage::default());
+    let (opened, browser_opened) = mpsc::channel();
+    let started = std::time::Instant::now();
+    let result = thread::scope(|scope| {
+        let session = &session;
+        scope.spawn(move || {
+            browser_opened.recv().unwrap();
+            thread::sleep(Duration::from_millis(200));
+            session.cancel_google_sign_in();
+        });
+        session.sign_in_google_with_browser(|_| {
+            opened.send(()).unwrap();
+            Ok(())
+        })
+    });
+    assert_eq!(result, Err(AccountError::Cancelled));
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert!(api.logins.lock().unwrap().is_empty());
+    // Cancelling with nothing in progress is harmless and does not poison the next sign-in.
+    session.cancel_google_sign_in();
+    let timed_out = session.sign_in_google_with_timeout(|_| Ok(()), Duration::from_millis(200));
+    assert_eq!(timed_out, Err(AccountError::Cancelled));
+}
+
+#[test]
+fn google_wait_leaves_room_for_the_backend_before_the_challenge_expires() {
+    use google::google_callback_window;
+    assert_eq!(
+        google_callback_window(300, GOOGLE_SIGN_IN_TIMEOUT),
+        Some(Duration::from_secs(270))
+    );
+    assert_eq!(
+        google_callback_window(3600, GOOGLE_SIGN_IN_TIMEOUT),
+        Some(GOOGLE_SIGN_IN_TIMEOUT)
+    );
+    assert_eq!(
+        google_callback_window(300, Duration::from_millis(200)),
+        Some(Duration::from_millis(200))
+    );
+    assert_eq!(google_callback_window(30, GOOGLE_SIGN_IN_TIMEOUT), None);
+    assert_eq!(google_callback_window(1, GOOGLE_SIGN_IN_TIMEOUT), None);
+}
+
+#[test]
+fn a_trickling_loopback_client_cannot_hold_the_listener_past_its_budget() {
+    use google::receive_google_callback;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let trickle = {
+        let stop = Arc::clone(&stop);
+        thread::spawn(move || {
+            let mut stream = std::net::TcpStream::connect(address).unwrap();
+            while !stop.load(Ordering::SeqCst) {
+                if std::io::Write::write_all(&mut stream, b"G").is_err() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+        })
+    };
+    let started = std::time::Instant::now();
+    let result = receive_google_callback(
+        &listener,
+        GOOGLE_FIXTURE_STATE,
+        started + Duration::from_millis(500),
+        &AtomicBool::new(false),
+    );
+    let elapsed = started.elapsed();
+    stop.store(true, Ordering::SeqCst);
+    trickle.join().unwrap();
+    assert_eq!(result, Err(AccountError::Cancelled));
+    assert!(elapsed < Duration::from_secs(2), "{elapsed:?}");
+}
+
+#[test]
+fn backend_login_forwards_a_google_authorization_code() {
+    let body = serde_json::to_string(&tokens(b'a', b'b', 900)).unwrap();
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    let (origin, request) = serve_once_and_capture(response.into_bytes());
+    let client = BackendAccountClient::loopback(&origin).unwrap();
+    client
+        .login("fixture-challenge", "4/0Afixture-code")
+        .unwrap();
+    let request = String::from_utf8(request.recv().unwrap()).unwrap();
+    assert!(request.starts_with("POST /v1/auth/login "));
+    assert!(request
+        .ends_with(r#"{"challenge_id":"fixture-challenge","credential":"4/0Afixture-code"}"#));
+}
+
+#[test]
+fn avatar_urls_only_reach_the_bucket_and_google() {
+    for url in [
+        "https://media.msime.app/avatars/abc.jpg",
+        "https://lh3.googleusercontent.com/a/person=s96-c",
+        "https://googleusercontent.com/a",
+    ] {
+        assert!(account_avatar_url_allowed(url), "{url}");
+    }
+    for url in [
+        "http://media.msime.app/avatars/abc.jpg",
+        "https://media.msime.app:8443/avatars/abc.jpg",
+        "https://user@media.msime.app/avatars/abc.jpg",
+        "https://evilgoogleusercontent.com/a",
+        "https://msime.app/avatars/abc.jpg",
+        "https://example.test/a.png",
+        "not a url",
+    ] {
+        assert!(!account_avatar_url_allowed(url), "{url}");
+    }
+    assert!(account_avatar_is_uploaded(
+        "https://media.msime.app/avatars/abc.jpg"
+    ));
+    assert!(!account_avatar_is_uploaded(
+        "https://lh3.googleusercontent.com/a/person=s96-c"
+    ));
+}
+
+#[test]
+fn avatar_uploads_are_read_by_their_contents() {
+    let directory = tempfile::tempdir().unwrap();
+    let png = directory.path().join("picked.png");
+    std::fs::write(&png, b"\x89PNG\r\n\x1a\nrest-of-png").unwrap();
+    // A JPEG named .png is still a JPEG: the bytes decide, not the name.
+    let jpeg = directory.path().join("photo.png");
+    std::fs::write(&jpeg, [0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]).unwrap();
+    assert_eq!(
+        read_account_avatar_upload(&png).unwrap().content_type,
+        "image/png"
+    );
+    assert_eq!(
+        read_account_avatar_upload(&jpeg).unwrap().content_type,
+        "image/jpeg"
+    );
+    let gif = directory.path().join("anim.gif");
+    std::fs::write(&gif, b"GIF89a....").unwrap();
+    let webp = directory.path().join("still.webp");
+    std::fs::write(&webp, b"RIFF\0\0\0\0WEBPVP8 ").unwrap();
+    let large = directory.path().join("large.png");
+    let mut oversized = b"\x89PNG\r\n\x1a\n".to_vec();
+    oversized.resize(MAX_ACCOUNT_AVATAR_UPLOAD_BYTES as usize + 1, 0);
+    std::fs::write(&large, oversized).unwrap();
+    let empty = directory.path().join("empty.png");
+    std::fs::write(&empty, b"").unwrap();
+    let link = directory.path().join("link.png");
+    msime_path_trust::untrusted_symlink(&png, &link).unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let outside_png = outside.path().join("outside.png");
+    std::fs::write(&outside_png, b"\x89PNG\r\n\x1a\nexternal").unwrap();
+    let linked_parent = directory.path().join("linked-parent");
+    msime_path_trust::untrusted_symlink(outside.path(), &linked_parent).unwrap();
+    let nested_link = linked_parent.join("outside.png");
+    for path in [&gif, &webp, &large, &empty, &link, directory.path()] {
+        assert_eq!(
+            read_account_avatar_upload(path),
+            Err(AccountError::Invalid),
+            "{path:?}"
+        );
+    }
+    assert_eq!(
+        read_account_avatar_upload(&nested_link),
+        Err(AccountError::Invalid)
+    );
+    assert_eq!(
+        read_account_avatar_upload(Path::new("relative.png")),
+        Err(AccountError::Invalid)
+    );
+}
+
+#[test]
+fn avatar_upload_sends_the_image_itself_and_removal_deletes() {
+    let image = AccountAvatarImage {
+        content_type: "image/png",
+        bytes: b"\x89PNG\r\n\x1a\nsynthetic".to_vec(),
+    };
+    let body = r#"{"user":{"id":"u","display_name":"n","created_at":"c"},"identities":[]}"#;
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    let (origin, request) = serve_once_and_capture(response.into_bytes());
+    let client = BackendAccountClient::loopback(&origin).unwrap();
+    client.upload_avatar(&image, &token(b'a')).unwrap();
+    let request = request.recv().unwrap();
+    let text = String::from_utf8_lossy(&request).to_lowercase();
+    assert!(
+        text.starts_with("put /v1/users/me/avatar http/1.1\r\n"),
+        "{text}"
+    );
+    assert!(text.contains("\r\ncontent-type: image/png\r\n"));
+    assert!(text.contains(&format!("\r\nauthorization: bearer {}\r\n", token(b'a'))));
+    assert!(request.ends_with(&image.bytes));
+
+    // Refused locally before any request: a GIF, an empty body and an oversized one.
+    for bad in [
+        AccountAvatarImage {
+            content_type: "image/gif",
+            bytes: b"GIF89a".to_vec(),
+        },
+        AccountAvatarImage {
+            content_type: "image/png",
+            bytes: Vec::new(),
+        },
+        AccountAvatarImage {
+            content_type: "image/jpeg",
+            bytes: vec![0; MAX_ACCOUNT_AVATAR_UPLOAD_BYTES as usize + 1],
+        },
+    ] {
+        assert_eq!(
+            client.upload_avatar(&bad, &token(b'a')),
+            Err(AccountError::Invalid)
+        );
+    }
+
+    // A DELETE has no body and so no Content-Length, which `serve_once_and_capture` expects; reading up to the end of the headers is enough here.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let (sender, received) = mpsc::channel();
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 1024];
+        while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+            let read = stream.read(&mut buffer).unwrap();
+            assert_ne!(read, 0, "request ended before its headers");
+            request.extend_from_slice(&buffer[..read]);
+        }
+        sender.send(request).unwrap();
+        std::io::Write::write_all(
+            &mut stream,
+            b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n",
+        )
+        .unwrap();
+    });
+    let client = BackendAccountClient::loopback(&origin).unwrap();
+    client.delete_avatar(&token(b'b')).unwrap();
+    let request = String::from_utf8(received.recv().unwrap()).unwrap();
+    assert!(
+        request.starts_with("DELETE /v1/users/me/avatar HTTP/1.1\r\n"),
+        "{request}"
+    );
+}
+
+#[test]
+fn user_profile_fields_are_optional_and_bounded() {
+    // A session saved before the fields existed still loads.
+    let old: AccountUser =
+        serde_json::from_str(r#"{"id":"u","display_name":"n","created_at":"c"}"#).unwrap();
+    assert_eq!((old.email, old.avatar_url), (None, None));
+    let current: AccountUser = serde_json::from_str(
+        r#"{"id":"u","display_name":"n","created_at":"c","email":"a@example.test","avatar_url":"https://media.msime.app/avatars/x.jpg"}"#,
+    )
+    .unwrap();
+    assert_eq!(current.email.as_deref(), Some("a@example.test"));
+    // Absent fields stay absent when the session is written back.
+    let written = serde_json::to_value(user()).unwrap();
+    assert!(written.get("email").is_none() && written.get("avatar_url").is_none());
+    let mut long = user();
+    long.avatar_url = Some(format!("https://media.msime.app/{}", "a".repeat(2048)));
+    assert_eq!(validate_user(&long), Err(AccountError::Invalid));
+    let image = AccountAvatarImage {
+        content_type: "image/jpeg",
+        bytes: vec![1, 2, 3],
+    };
+    assert_eq!(image.data_url(), "data:image/jpeg;base64,AQID");
+}
+
+/// The backend's refresh contract: each refresh token works once, and presenting a spent one revokes the session (`msime-cloud` `Store.Refresh`).
+#[derive(Clone)]
+struct RotatingBackend {
+    state: Arc<Mutex<RotatingState>>,
+    /// Runs inside `refresh` before it answers, standing in for another process that writes the store without taking the lock.
+    during_refresh: Option<Arc<dyn Fn() + Send + Sync>>,
+}
+
+struct RotatingState {
+    current: Option<String>,
+    next: u8,
+    refreshes: usize,
+    revoked: bool,
+}
+
+impl RotatingBackend {
+    fn new(refresh_token: &str) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(RotatingState {
+                current: Some(refresh_token.into()),
+                next: 0,
+                refreshes: 0,
+                revoked: false,
+            })),
+            during_refresh: None,
+        }
+    }
+}
+
+impl AccountApi for RotatingBackend {
+    fn providers(&self) -> Result<HashMap<String, bool>, AccountError> {
+        Ok(HashMap::new())
+    }
+
+    fn challenge(&self, _provider: &str, _target: &str) -> Result<AccountChallenge, AccountError> {
+        Err(AccountError::Unavailable)
+    }
+
+    fn login(&self, _challenge: &str, _credential: &str) -> Result<AccountTokens, AccountError> {
+        Err(AccountError::Unavailable)
+    }
+
+    fn refresh(&self, refresh_token: &str) -> Result<AccountTokens, AccountError> {
+        if let Some(hook) = &self.during_refresh {
+            hook();
+        }
+        let mut state = self.state.lock().unwrap();
+        state.refreshes += 1;
+        if state.current.as_deref() != Some(refresh_token) {
+            state.current = None;
+            state.revoked = true;
+            return Err(AccountError::Unauthorized);
+        }
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let access = HEX[usize::from(state.next % 16)];
+        let refresh = HEX[usize::from((state.next + 8) % 16)];
+        state.next += 1;
+        state.current = Some(token(refresh));
+        Ok(tokens(access, refresh, 900))
+    }
+
+    fn profile(&self, _access_token: &str) -> Result<AccountProfile, AccountError> {
+        Err(AccountError::Unavailable)
+    }
+
+    fn rename(&self, _display_name: &str, _access_token: &str) -> Result<(), AccountError> {
+        Err(AccountError::Unavailable)
+    }
+
+    fn logout(&self, _access_token: &str, _all: bool) -> Result<(), AccountError> {
+        Ok(())
+    }
+
+    fn delete_account(&self, _access_token: &str) -> Result<(), AccountError> {
+        Err(AccountError::Unavailable)
+    }
+}
+
+fn expired_session() -> SavedAccountSession {
+    SavedAccountSession {
+        tokens: tokens(b'a', b'b', 900),
+        expires_at_unix_ms: 1,
+    }
+}
+
+fn session_file(directory: &Path) -> FileAccountSessionStorage {
+    FileAccountSessionStorage::new(directory, AccountSessionFileLayout::Apple)
+}
+
+#[test]
+fn a_session_shared_through_the_file_is_not_refreshed_from_a_spent_token() {
+    let directory = tempfile::tempdir().unwrap();
+    session_file(directory.path())
+        .save(&expired_session())
+        .unwrap();
+    let backend = RotatingBackend::new(&token(b'b'));
+    // The settings app and the input method, each with its own copy of the session in memory.
+    let settings = BackendAccountSession::new(backend.clone(), session_file(directory.path()));
+    let input_method = BackendAccountSession::new(backend.clone(), session_file(directory.path()));
+    assert!(settings.status().unwrap().is_some());
+
+    let rotated = input_method.access_token(None).unwrap();
+    // Before the fix the settings app refreshed from the token the input method had already spent, the backend revoked the session, and the settings app deleted it.
+    assert_eq!(settings.access_token(None).unwrap(), rotated);
+
+    let state = backend.state.lock().unwrap();
+    assert_eq!(state.refreshes, 1);
+    assert!(!state.revoked);
+    drop(state);
+    assert!(session_file(directory.path()).load().unwrap().is_some());
+}
+
+#[test]
+fn a_rejected_refresh_keeps_a_session_another_process_saved_meanwhile() {
+    let directory = tempfile::tempdir().unwrap();
+    session_file(directory.path())
+        .save(&expired_session())
+        .unwrap();
+    let mut backend = RotatingBackend::new(&token(b'f'));
+    let other = directory.path().to_path_buf();
+    backend.during_refresh = Some(Arc::new(move || {
+        session_file(&other)
+            .save(&SavedAccountSession {
+                tokens: tokens(b'c', b'f', 900),
+                expires_at_unix_ms: valid_future_expiry(),
+            })
+            .unwrap();
+    }));
+    let session = BackendAccountSession::new(backend, session_file(directory.path()));
+
+    assert_eq!(session.access_token(None).unwrap(), token(b'c'));
+    let kept = session_file(directory.path()).load().unwrap().unwrap();
+    assert_eq!(kept.tokens.refresh_token, token(b'f'));
+}
+
+#[test]
+fn signing_out_in_one_process_signs_out_the_other() {
+    let directory = tempfile::tempdir().unwrap();
+    session_file(directory.path())
+        .save(&expired_session())
+        .unwrap();
+    let backend = RotatingBackend::new(&token(b'b'));
+    let settings = BackendAccountSession::new(backend.clone(), session_file(directory.path()));
+    let input_method = BackendAccountSession::new(backend, session_file(directory.path()));
+    assert!(settings.status().unwrap().is_some());
+
+    input_method.forget().unwrap();
+    assert!(settings.status().unwrap().is_none());
+    assert!(matches!(
+        settings.access_token(None),
+        Err(AccountError::Unauthorized)
+    ));
+}
+
+#[test]
+fn session_file_layouts_round_trip_and_read_each_other() {
+    let directory = tempfile::tempdir().unwrap();
+    let session = SavedAccountSession {
+        tokens: tokens(b'a', b'b', 900),
+        expires_at_unix_ms: 1_790_000_000_123,
+    };
+    let apple = session_file(directory.path());
+    apple.save(&session).unwrap();
+    let text = std::fs::read_to_string(directory.path().join(ACCOUNT_SESSION_FILE)).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert!(value.get("expiresAt").is_some());
+    assert!(value.get("expires_at_unix_ms").is_none());
+
+    let native = FileAccountSessionStorage::new(directory.path(), AccountSessionFileLayout::Native);
+    assert_eq!(
+        native.load().unwrap().unwrap().expires_at_unix_ms,
+        session.expires_at_unix_ms
+    );
+    native.save(&session).unwrap();
+    assert_eq!(
+        apple.load().unwrap().unwrap().expires_at_unix_ms,
+        session.expires_at_unix_ms
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn session_file_is_owner_only_and_a_widened_one_is_refused() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().join("state");
+    let storage = session_file(&directory);
+    storage.save(&expired_session()).unwrap();
+    let file = directory.join(ACCOUNT_SESSION_FILE);
+    let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&directory), 0o700);
+    assert_eq!(mode(&file), 0o600);
+
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(matches!(storage.load(), Err(AccountError::Storage)));
+}
+
+#[test]
+fn oversized_session_file_is_refused() {
+    let directory = tempfile::tempdir().unwrap();
+    let storage = session_file(directory.path());
+    storage.save(&expired_session()).unwrap();
+    std::fs::write(
+        directory.path().join(ACCOUNT_SESSION_FILE),
+        vec![b' '; 64 * 1024 + 1],
+    )
+    .unwrap();
+    assert!(matches!(storage.load(), Err(AccountError::Storage)));
+}
+
+#[test]
+fn moderation_refusals_are_told_apart_by_the_error_code() {
+    for (status, code, expected) in [
+        (
+            "422 Unprocessable Entity",
+            "blocked_content",
+            AccountError::BlockedContent,
+        ),
+        (
+            "400 Bad Request",
+            "blocked_content",
+            AccountError::BlockedContent,
+        ),
+        (
+            "503 Service Unavailable",
+            "screening_unavailable",
+            AccountError::ScreeningUnavailable,
+        ),
+        ("403 Forbidden", "account_banned", AccountError::Banned),
+        ("403 Forbidden", "forbidden", AccountError::Forbidden),
+        (
+            "503 Service Unavailable",
+            "auth_unavailable",
+            AccountError::Unavailable,
+        ),
+    ] {
+        let body = format!(r#"{{"error":{{"code":"{code}","message":"{code}"}}}}"#);
+        let response = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nRetry-After: 30\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let client = BackendAccountClient::loopback(&serve_once(response.into_bytes())).unwrap();
+        let result = client.json::<serde_json::Value, ()>(
+            Method::POST,
+            "/v1/community/resources",
+            Some(&token(b'a')),
+            None,
+        );
+        assert_eq!(result, Err(expected.clone()), "{status} {code}");
+    }
+    // A body that is not the server's error document falls back to the status.
+    let response =
+        b"HTTP/1.1 422 Unprocessable Entity\r\nContent-Length: 2\r\nConnection: close\r\n\r\nno"
+            .to_vec();
+    let client = BackendAccountClient::loopback(&serve_once(response)).unwrap();
+    assert_eq!(
+        client.json::<serde_json::Value, ()>(Method::GET, "/v1/community/skins", None, None),
+        Err(AccountError::Unavailable)
+    );
+    assert_eq!(
+        AccountError::BlockedContent.code(),
+        "account_blocked_content"
+    );
+    assert_eq!(
+        AccountError::ScreeningUnavailable.code(),
+        "account_screening_unavailable"
+    );
+    assert_eq!(AccountError::Banned.code(), "account_banned");
 }

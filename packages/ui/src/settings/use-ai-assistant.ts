@@ -1,6 +1,8 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { runAsyncAction } from "../core/async-action";
 import { aiCredentialOrigin } from "./credential-utils";
 import { aiPolishTestPrompt } from "./ai-assistant-defaults";
+import { useAsyncGeneration } from "./use-async-generation";
 import type { AiAssistantClient, AiAssistantPreferences } from "../index";
 
 export interface UseAiAssistantOptions {
@@ -24,12 +26,63 @@ export function useAiAssistant({
   const [testOutput, setTestOutput] = useState("");
   const [testStatus, setTestStatus] = useState("");
   const [testBusy, setTestBusy] = useState(false);
-  const requestGeneration = useRef(0);
+  const requestGeneration = useAsyncGeneration(client);
+  const modelsActionBusy = useRef(false);
+  const modelsActionOwner = useAsyncGeneration();
+  const testActionBusy = useRef(false);
+  const testActionOwner = useAsyncGeneration();
   const origin = aiCredentialOrigin(ai.endpoint);
   const token = origin ? (ai.tokens?.[origin] ?? "") : "";
 
+  const runAction = async (
+    busyRef: { current: boolean },
+    ownerRef: { current: number },
+    busy: boolean,
+    setBusy: (value: boolean) => void,
+    setError: (message: string) => void,
+    generation: number,
+    operation: (isCurrent: () => boolean) => Promise<void>,
+    formatError: (error: unknown) => string,
+  ) => {
+    if (busyRef.current || busy) return;
+    const owner = ++ownerRef.current;
+    busyRef.current = true;
+    await runAsyncAction(
+      {
+        busy: false,
+        isCurrent: () => generation === requestGeneration.current && owner === ownerRef.current,
+        setBusy: (value) => {
+          if (owner !== ownerRef.current) return;
+          busyRef.current = value;
+          setBusy(value);
+        },
+        setError,
+      },
+      operation,
+      { formatError },
+    );
+    if (owner === ownerRef.current) busyRef.current = false;
+  };
+
+  useEffect(() => {
+    modelsActionOwner.current += 1;
+    modelsActionBusy.current = false;
+    testActionOwner.current += 1;
+    testActionBusy.current = false;
+    setModels(null);
+    setModelsStatus("");
+    setModelsBusy(false);
+    setTestOutput("");
+    setTestStatus("");
+    setTestBusy(false);
+  }, [client]);
+
   const updateAi = (patch: Partial<AiAssistantPreferences>) => {
     requestGeneration.current += 1;
+    modelsActionOwner.current += 1;
+    modelsActionBusy.current = false;
+    testActionOwner.current += 1;
+    testActionBusy.current = false;
     setModelsBusy(false);
     setTestBusy(false);
     setTestOutput("");
@@ -43,6 +96,10 @@ export function useAiAssistant({
 
   const updateToken = (value: string) => {
     requestGeneration.current += 1;
+    modelsActionOwner.current += 1;
+    modelsActionBusy.current = false;
+    testActionOwner.current += 1;
+    testActionBusy.current = false;
     setModelsBusy(false);
     setTestBusy(false);
     setTestOutput("");
@@ -61,25 +118,27 @@ export function useAiAssistant({
       return;
     }
     const generation = requestGeneration.current;
-    setModelsBusy(true);
-    setModelsStatus("");
-    try {
-      const available = await client.fetchModels({
-        endpoint: ai.endpoint,
-        token,
-        provider: ai.provider,
-      });
-      if (generation !== requestGeneration.current) return;
-      setModels(available);
-      setModelsStatus(`已获取 ${available.length} 个可用模型。`);
-      if (available.length && !available.includes(ai.model)) updateAi({ model: available[0] });
-    } catch (cause) {
-      setModelsStatus(
+    await runAction(
+      modelsActionBusy,
+      modelsActionOwner,
+      modelsBusy,
+      setModelsBusy,
+      setModelsStatus,
+      generation,
+      async (isCurrent) => {
+        const available = await client.fetchModels({
+          endpoint: ai.endpoint,
+          token,
+          provider: ai.provider,
+        });
+        if (!isCurrent()) return;
+        setModels(available);
+        setModelsStatus(`已获取 ${available.length} 个可用模型。`);
+        if (available.length && !available.includes(ai.model)) updateAi({ model: available[0] });
+      },
+      (cause) =>
         cause instanceof Error ? cause.message : "获取模型失败，请检查地址、密钥和网络。",
-      );
-    } finally {
-      if (generation === requestGeneration.current) setModelsBusy(false);
-    }
+    );
   };
 
   const test = async () => {
@@ -96,29 +155,32 @@ export function useAiAssistant({
       );
       return;
     }
+    if (testActionBusy.current || testBusy) return;
     const generation = ++requestGeneration.current;
-    setTestBusy(true);
-    setTestStatus("");
     setTestOutput("");
-    try {
-      const result = await client.test({
-        endpoint: ai.endpoint,
-        model: ai.model,
-        provider: ai.provider,
-        prompt: aiPolishTestPrompt,
-        token,
-        text: testInput,
-      });
-      if (generation !== requestGeneration.current) return;
-      setTestOutput(result);
-      setTestStatus("已完成");
-    } catch (cause) {
-      setTestStatus(
+    await runAction(
+      testActionBusy,
+      testActionOwner,
+      testBusy,
+      setTestBusy,
+      setTestStatus,
+      generation,
+      async (isCurrent) => {
+        const result = await client.test({
+          endpoint: ai.endpoint,
+          model: ai.model,
+          provider: ai.provider,
+          prompt: aiPolishTestPrompt,
+          token,
+          text: testInput,
+        });
+        if (!isCurrent()) return;
+        setTestOutput(result);
+        setTestStatus("已完成");
+      },
+      (cause) =>
         cause instanceof Error ? cause.message : "AI 请求失败，请检查地址、模型、密钥和网络。",
-      );
-    } finally {
-      if (generation === requestGeneration.current) setTestBusy(false);
-    }
+    );
   };
 
   return {

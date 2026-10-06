@@ -1,5 +1,7 @@
 //! The candidate merge pipeline and candidate actions (core-session.md §7.2-§7.3): personal rerank, mixed rows, fixed positions (split per producer in mixed wubi), pin, removal and position fixing.
 
+use std::borrow::Cow;
+
 use super::input::InputSession;
 use crate::assets;
 use crate::diagnostics;
@@ -18,6 +20,23 @@ use crate::user_dictionary::positions::{
     set_fixed_position,
 };
 use crate::user_dictionary::removal::delete_dictionary_candidate;
+
+fn english_position_context(input: &str) -> String {
+    let mut context = String::with_capacity("english:".len() + input.len());
+    context.push_str("english:");
+    context.extend(
+        input
+            .chars()
+            .map(|character| character.to_ascii_lowercase()),
+    );
+    context
+}
+
+fn plain_position_context(context: &str) -> String {
+    let mut plain = String::with_capacity(context.len());
+    plain.extend(context.chars().filter(|character| *character != '\''));
+    plain
+}
 
 impl InputSession {
     /// Prefix or engine rows, then personal context rerank, mixed English / emoji / kaomoji, fixed positions (input_session.cpp:1057-1078).
@@ -65,8 +84,11 @@ impl InputSession {
     }
 
     pub(super) fn update_local_candidates(&mut self) -> Option<String> {
-        // Only the date/time mode reads the wall clock; the other modes would pay a local-offset lookup per key for nothing.
-        let now = if self.local_mode == LocalInputMode::DateTime {
+        // Only the date/time and command modes read the wall clock; the other modes would pay a local-offset lookup per key for nothing.
+        let now = if matches!(
+            self.local_mode,
+            LocalInputMode::DateTime | LocalInputMode::Command
+        ) {
             self.local_now()
         } else {
             LocalDateTime::default()
@@ -132,7 +154,14 @@ impl InputSession {
         let journal = self.journal_path();
         let regular = self.local_mode == LocalInputMode::None
             && !self.dedicated_english
-            && self.scheme() != SchemeType::JapaneseRomaji;
+            && !matches!(
+                self.scheme(),
+                SchemeType::JapaneseRomaji
+                    | SchemeType::Korean
+                    | SchemeType::Cantonese
+                    | SchemeType::Zhuyin
+                    | SchemeType::Stroke
+            );
         let include_missing = self.engine.request().raw_input.len() == 1;
         let keep_dynamic = self.has_active_helpcode();
         let engine = &self.engine;
@@ -146,7 +175,7 @@ impl InputSession {
                     |key: &str, word: &str| engine.find_candidate(SchemeType::Wubi, key, word);
                 apply_fixed_positions(
                     &journal,
-                    &context,
+                    context.as_ref(),
                     &mut wubi_items,
                     include_missing,
                     Some(&mut finder),
@@ -159,7 +188,7 @@ impl InputSession {
                     |key: &str, word: &str| engine.find_candidate(SchemeType::Quanpin, key, word);
                 apply_fixed_positions(
                     &journal,
-                    &context,
+                    context.as_ref(),
                     &mut pinyin_items,
                     include_missing,
                     Some(&mut finder),
@@ -174,7 +203,7 @@ impl InputSession {
             let mut finder = |key: &str, word: &str| engine.find_candidate(scheme, key, word);
             apply_fixed_positions(
                 &journal,
-                &context,
+                context.as_ref(),
                 items,
                 include_missing,
                 Some(&mut finder),
@@ -182,19 +211,19 @@ impl InputSession {
             );
         } else if self.local_mode == LocalInputMode::SuperJianpin {
             let context = self.position_context(false, false);
-            apply_fixed_positions(&journal, &context, items, false, None, false);
+            apply_fixed_positions(&journal, context.as_ref(), items, false, None, false);
         }
         if items
             .iter()
             .any(|item| item.source == CandidateSource::EnglishDictionary)
         {
             let context = self.position_context(true, false);
-            apply_fixed_positions(&journal, &context, items, false, None, true);
+            apply_fixed_positions(&journal, context.as_ref(), items, false, None, true);
         }
     }
 
     /// input_session_candidates.cpp:21-44.
-    pub(super) fn position_context(&self, english: bool, wubi: bool) -> String {
+    pub(super) fn position_context(&self, english: bool, wubi: bool) -> Cow<'_, str> {
         let request = self.engine.request();
         if english {
             let input = if self.dedicated_english {
@@ -204,30 +233,34 @@ impl InputSession {
             } else {
                 &request.raw_input_with_cases
             };
-            return format!("english:{}", input.to_ascii_lowercase());
+            return Cow::Owned(english_position_context(input));
         }
         if self.local_mode == LocalInputMode::SuperJianpin {
-            return jianpin_ranking_context(
+            return Cow::Owned(jianpin_ranking_context(
                 &self.local_preedit[1..],
                 self.scheme(),
                 self.shuangpin_profile(),
-            );
+            ));
         }
         if wubi {
-            return request.raw_input.clone();
+            return Cow::Borrowed(&request.raw_input);
         }
-        let context = if request.normalized_input.is_empty() {
-            self.pinyin_segmentation()
+        let context: Cow<'_, str> = if request.normalized_input.is_empty() {
+            Cow::Owned(self.pinyin_segmentation())
         } else {
-            request.normalized_input.clone()
+            Cow::Borrowed(&request.normalized_input)
         };
         if request.raw_input.len() == 1 {
             return context;
         }
         // Positions are stored under one canonical cut, so the same letters typed with or without apostrophes share them.
-        let plain: String = context.chars().filter(|c| *c != '\'').collect();
+        let plain = if context.contains('\'') {
+            Cow::Owned(plain_position_context(context.as_ref()))
+        } else {
+            Cow::Borrowed(context.as_ref())
+        };
         match cut_pinyin_by_mode(&plain, CutMode::Correction).first() {
-            Some(cut) => join_segments(cut),
+            Some(cut) => Cow::Owned(join_segments(cut)),
             None => context,
         }
     }
@@ -272,9 +305,9 @@ impl InputSession {
         }
         let journal = self.journal_path();
         let written = if position == 0 {
-            clear_fixed_position(&journal, &context, key, &selected.word)
+            clear_fixed_position(&journal, context.as_ref(), key, &selected.word)
         } else {
-            set_fixed_position(&journal, &context, key, &selected.word, position)
+            set_fixed_position(&journal, context.as_ref(), key, &selected.word, position)
         };
         if written.is_err() {
             return KeyResult::handled()
@@ -334,7 +367,7 @@ impl InputSession {
         let kind = if english {
             PersonalDictionaryKind::English
         } else if wubi {
-            PersonalDictionaryKind::Wubi
+            self.engine.wubi_input_options().profile.dictionary_kind()
         } else {
             PersonalDictionaryKind::Pinyin
         };
@@ -394,5 +427,25 @@ impl InputSession {
         );
         self.apply_candidate_positions(&mut mixed);
         mixed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{english_position_context, plain_position_context};
+
+    #[test]
+    fn english_position_context_preserves_non_ascii_while_lowercasing_ascii() {
+        assert_eq!(english_position_context("HeLLo 世界"), "english:hello 世界");
+    }
+
+    #[test]
+    fn plain_position_context_reserves_source_capacity() {
+        let source: String = (0..100)
+            .map(|index| if index % 5 == 0 { '\'' } else { 'a' })
+            .collect();
+        let plain = plain_position_context(&source);
+        assert_eq!(plain, source.replace('\'', ""));
+        assert_eq!(plain.capacity(), source.len());
     }
 }

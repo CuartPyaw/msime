@@ -20,6 +20,15 @@ final class KeyboardClipboardView: UIView, UITableViewDataSource, UITableViewDel
   private let status = UILabel()
   private let onInsert: (String) -> Void
   private var confirmingClear = false
+  /// The account's cloud clipboard; `nil` in password and one-time-code fields, where the panel stays local only.
+  private let cloud: KeyboardCloudClipboard?
+  private let source = UISegmentedControl(items: ["本机", "云端"])
+  private let searchButton = UIButton(type: .system)
+  private let clearButton = UIButton(type: .system)
+  private let refresh = UIButton(type: .system)
+  private let hasFullAccess: Bool
+  /// Whether the 云端 tab is showing.
+  var showsCloud: Bool { cloud != nil && source.selectedSegmentIndex == 1 }
   /// Windows' 搜索剪贴板 box. A keyboard cannot type into a text field of its own, so the panel brings a letter and digit pad; `nil` while not searching.
   private(set) var searchQuery: String?
   /// What the table shows: the whole history, or the matches while searching.
@@ -34,10 +43,12 @@ final class KeyboardClipboardView: UIView, UITableViewDataSource, UITableViewDel
   private lazy var tableAbovePad = table.bottomAnchor.constraint(equalTo: letterPad.topAnchor, constant: -4)
   static let searchLimit = 32
 
-  init(hasFullAccess: Bool, store: ClipboardHistoryStore = ClipboardHistoryStore(),
+  init(hasFullAccess: Bool, store: ClipboardHistoryStore = ClipboardHistoryStore(), cloud: KeyboardCloudClipboard? = nil,
        onInsert: @escaping (String) -> Void, onClose: @escaping () -> Void) {
     self.store = store
     self.onInsert = onInsert
+    self.cloud = cloud
+    self.hasFullAccess = hasFullAccess
     super.init(frame: .zero)
     accessibilityIdentifier = "keyboardClipboardHistory"
     backgroundColor = .systemBackground
@@ -45,7 +56,7 @@ final class KeyboardClipboardView: UIView, UITableViewDataSource, UITableViewDel
     title.font = .boldSystemFont(ofSize: 16)
     title.lineBreakMode = .byTruncatingHead
     title.accessibilityIdentifier = "clipboardTitle"
-    let search = UIButton(type: .system)
+    let search = searchButton
     search.setImage(UIImage(systemName: "magnifyingglass"), for: .normal)
     search.accessibilityLabel = "搜索剪贴板"
     search.accessibilityIdentifier = "clipboardSearch"
@@ -60,7 +71,7 @@ final class KeyboardClipboardView: UIView, UITableViewDataSource, UITableViewDel
     close.addAction(UIAction { [weak self] _ in
       if self?.searchQuery != nil { self?.endSearch() } else { onClose() }
     }, for: .primaryActionTriggered)
-    let clear = UIButton(type: .system)
+    let clear = clearButton
     clear.setTitle("清空", for: .normal)
     clear.accessibilityIdentifier = "clearClipboardHistory"
     clear.addAction(UIAction { [weak self, weak clear] _ in
@@ -75,7 +86,18 @@ final class KeyboardClipboardView: UIView, UITableViewDataSource, UITableViewDel
         clear?.setTitle("清空", for: .normal)
       }
     }, for: .primaryActionTriggered)
-    let header = UIStackView(arrangedSubviews: [title, search, clear, close])
+    source.selectedSegmentIndex = 0
+    source.accessibilityIdentifier = "clipboardSource"
+    source.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    source.isHidden = cloud == nil
+    title.isHidden = cloud != nil
+    source.addAction(UIAction { [weak self] _ in self?.showSource() }, for: .valueChanged)
+    refresh.setImage(UIImage(systemName: "arrow.clockwise"), for: .normal)
+    refresh.accessibilityLabel = "刷新云端内容"
+    refresh.accessibilityIdentifier = "refreshCloudClipboard"
+    refresh.isHidden = true
+    refresh.addAction(UIAction { [weak self] _ in self?.cloud?.refresh() }, for: .primaryActionTriggered)
+    let header = UIStackView(arrangedSubviews: [source, title, search, refresh, clear, close])
     header.spacing = 8
     title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     let pasteboard = UIPasteboard.general
@@ -127,7 +149,7 @@ final class KeyboardClipboardView: UIView, UITableViewDataSource, UITableViewDel
       header.topAnchor.constraint(equalTo: topAnchor), header.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
       header.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12), header.heightAnchor.constraint(equalToConstant: 44),
       close.widthAnchor.constraint(equalToConstant: 44), clear.widthAnchor.constraint(equalToConstant: 76),
-      search.widthAnchor.constraint(equalToConstant: 36),
+      search.widthAnchor.constraint(equalToConstant: 36), refresh.widthAnchor.constraint(equalToConstant: 36),
       capture.topAnchor.constraint(equalTo: header.bottomAnchor), capture.leadingAnchor.constraint(equalTo: header.leadingAnchor),
       capture.trailingAnchor.constraint(equalTo: header.trailingAnchor), captureHeight,
       status.topAnchor.constraint(equalTo: capture.bottomAnchor, constant: 4), status.leadingAnchor.constraint(equalTo: header.leadingAnchor),
@@ -141,20 +163,74 @@ final class KeyboardClipboardView: UIView, UITableViewDataSource, UITableViewDel
     ])
     if hasFullAccess { reload() }
     else { status.text = "请在系统键盘设置中开启「允许完全访问」，再使用剪贴板历史。" }
+    if let cloud {
+      cloud.onChange = { [weak self] in self?.cloudChanged() }
+      // The panel opening is the one moment the list is fetched without the user pressing refresh.
+      cloud.refresh()
+    }
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+  override func willMove(toSuperview newSuperview: UIView?) {
+    super.willMove(toSuperview: newSuperview)
+    // Closing the panel drops whatever the cloud fetch still brings back.
+    if newSuperview == nil { cloud?.close() }
+  }
+
   private func reload() {
     do {
       items = try store.load()
-      status.text = items.isEmpty ? "暂无历史。保存后点按插入；记录仅保存在本机。" : "\(items.count)/50 条 · 点按插入 · 右侧菜单可固定或删除"
-      if searchQuery != nil { showSearch() } else { table.reloadData() }
+      localStatus()
+      if searchQuery != nil { showSearch() } else if !showsCloud { table.reloadData() }
     } catch { status.text = error.localizedDescription }
+  }
+  private func localStatus() {
+    guard !showsCloud else { return }
+    if let notice = cloud?.notice { status.text = notice; return }
+    status.text = items.isEmpty ? "暂无历史。保存后点按插入；记录仅保存在本机。" : "\(items.count)/50 条 · 点按插入 · 右侧菜单可固定或删除"
+  }
+
+  /// Switch between the local history and the 云端 list. The capture button, search and clear belong to the local history and fold away on the cloud side, where refresh takes their place.
+  private func showSource() {
+    confirmingClear = false
+    clearButton.setTitle("清空", for: .normal)
+    let cloudSide = showsCloud
+    captureHeight.constant = cloudSide ? 0 : 44
+    capture.isHidden = cloudSide
+    searchButton.isHidden = cloudSide
+    clearButton.isHidden = cloudSide
+    refresh.isHidden = !cloudSide
+    setNeedsLayout()
+    if cloudSide { cloudChanged() }
+    else if hasFullAccess { reload() }
+    else { status.text = "请在系统键盘设置中开启「允许完全访问」，再使用剪贴板历史。"; table.reloadData() }
+  }
+
+  private func cloudChanged() {
+    guard let cloud else { return }
+    if showsCloud {
+      let allowed = cloud.fieldAllowsCloud()
+      status.text = allowed ? cloud.message : "当前输入框不显示云端内容。"
+      refresh.isEnabled = allowed
+      table.backgroundView = nil
+      table.reloadData()
+    } else {
+      // The upload notice and whether 发到云剪贴板 is offered live in the local rows.
+      localStatus()
+      if searchQuery != nil { showSearch() } else { table.reloadData() }
+    }
+  }
+  private var cloudItems: [BackendAccountClient.ClipboardItem] {
+    guard let cloud, cloud.fieldAllowsCloud() else { return [] }
+    return cloud.items
   }
   /// Open the search with an empty query. The capture button and the status line fold away, since a phone-height panel with a pad under it has room for the rows and little else, and the title carries the query.
   func beginSearch() {
     guard searchQuery == nil else { return }
     confirmingClear = false
     searchQuery = ""
+    source.isHidden = true
+    title.isHidden = false
     captureHeight.constant = 0
     capture.isHidden = true
     statusHeight.constant = 0
@@ -178,7 +254,10 @@ final class KeyboardClipboardView: UIView, UITableViewDataSource, UITableViewDel
     tableAboveBottom.isActive = true
     setNeedsLayout()
     title.text = "剪贴板历史"
+    source.isHidden = cloud == nil
+    title.isHidden = cloud != nil
     table.backgroundView = nil
+    localStatus()
     table.reloadData()
   }
 
@@ -246,9 +325,20 @@ final class KeyboardClipboardView: UIView, UITableViewDataSource, UITableViewDel
     do { try action(); reload() }
     catch { status.text = error.localizedDescription }
   }
-  func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { shown.count }
+  func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+    showsCloud ? cloudItems.count : shown.count
+  }
   func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
     let cell = UITableViewCell(style: .subtitle, reuseIdentifier: nil)
+    if showsCloud {
+      let item = cloudItems[indexPath.row]
+      cell.textLabel?.text = item.text
+      cell.textLabel?.numberOfLines = 2
+      cell.textLabel?.font = .systemFont(ofSize: 15)
+      cell.detailTextLabel?.text = Self.cloudDate(item.updated_at)
+      cell.accessibilityIdentifier = "cloudClipboardItem"
+      return cell
+    }
     let item = shown[indexPath.row]
     cell.textLabel?.text = item.text
     cell.textLabel?.numberOfLines = 2
@@ -266,7 +356,7 @@ final class KeyboardClipboardView: UIView, UITableViewDataSource, UITableViewDel
       UIAction(title: "删除", image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self] _ in
         self?.change(item, delete: true)
       }
-    ])
+    ] + uploadAction(item))
     cell.accessoryView = menu
     return cell
   }
@@ -276,8 +366,32 @@ final class KeyboardClipboardView: UIView, UITableViewDataSource, UITableViewDel
       else { try store.setPinned(!item.pinned, text: item.text) }
     }
   }
+  /// 发到云剪贴板, offered wherever the 云端 tab is, and enabled once the panel has found a signed-in account whose cloud clipboard is on.
+  private func uploadAction(_ item: ClipboardHistoryItem) -> [UIMenuElement] {
+    guard let cloud else { return [] }
+    return [UIAction(title: "发到云剪贴板", image: UIImage(systemName: "icloud.and.arrow.up"),
+                     attributes: cloud.canUpload ? [] : .disabled) { [weak cloud] _ in cloud?.upload(item.text) }]
+  }
+
+  /// The server's timestamp in the same form as the local rows; anything that does not parse is shown as sent.
+  static func cloudDate(_ value: String) -> String {
+    let parser = ISO8601DateFormatter()
+    parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let date = parser.date(from: value) ?? {
+      parser.formatOptions = [.withInternetDateTime]
+      return parser.date(from: value)
+    }()
+    return "云端 · " + (date?.formatted(date: .abbreviated, time: .shortened) ?? value)
+  }
+
   func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
     tableView.deselectRow(at: indexPath, animated: true)
+    if showsCloud {
+      let items = cloudItems
+      guard indexPath.row < items.count else { return }
+      onInsert(items[indexPath.row].text)
+      return
+    }
     onInsert(shown[indexPath.row].text)
   }
 }

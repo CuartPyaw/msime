@@ -56,6 +56,21 @@ private final class SharedStoreAPI: BackendSessionAPI, @unchecked Sendable {
     return try onRefresh(token)
   }
 }
+
+private struct FailingRefreshLock: BackendRefreshLock {
+  var sharedAcrossProcesses: Bool { true }
+  func run<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T {
+    throw BackendAccountClient.Failure(status: 0)
+  }
+}
+
+private final class AttemptCounter: @unchecked Sendable {
+  private let lock = NSLock()
+  private var value = 0
+  func increment() -> Int { lock.lock(); defer { lock.unlock() }; value += 1; return value }
+  var count: Int { lock.lock(); defer { lock.unlock() }; return value }
+}
+
 final class BackendAccountSessionTests: XCTestCase {
   func testSignInRejectsUnboundedExpiryFromAPI() async throws {
     let invalid = BackendAccountClient.Tokens(access_token: String(repeating: "a", count: 64),
@@ -129,6 +144,69 @@ final class BackendAccountSessionTests: XCTestCase {
     let count = await api.refreshCount
     XCTAssertEqual(count, 0)
   }
+
+  func testAuthenticatedRequestRefreshesRejectedAccessTokenOnce() async throws {
+    let original = BackendSavedSession(tokens: SharedStoreAPI.tokens("a", "f"),
+                                       expiresAt: Date().addingTimeInterval(600))
+    let storage = MemorySessions(original)
+    let api = SharedStoreAPI { _ in SharedStoreAPI.tokens("b", "c") }
+    let session = BackendAccountSession(api: api, storage: storage)
+    let attempts = AttemptCounter()
+
+    let result = try await session.authenticated(matchingUserID: "synthetic-user") { token in
+      if attempts.increment() == 1 {
+        throw BackendAccountClient.Failure(status: 401)
+      }
+      return token
+    }
+
+    XCTAssertEqual(result.value, String(repeating: "b", count: 64))
+    XCTAssertEqual(result.token, result.value)
+    XCTAssertEqual(attempts.count, 2)
+    XCTAssertEqual(api.refreshCount, 1)
+    XCTAssertEqual(try storage.load()?.tokens.access_token, result.value)
+  }
+  func testAuthenticatedRequestPropagatesSecondRejectionAndOtherFailures() async throws {
+    for status in [401, 403, 409, 503] {
+      let storage = MemorySessions(.init(tokens: SharedStoreAPI.tokens("a", "f"),
+                                         expiresAt: Date().addingTimeInterval(600)))
+      let api = SharedStoreAPI { _ in SharedStoreAPI.tokens("b", "c") }
+      let session = BackendAccountSession(api: api, storage: storage)
+      let attempts = AttemptCounter()
+      do {
+        _ = try await session.authenticated(matchingUserID: "synthetic-user") { _ -> String in
+          _ = attempts.increment()
+          throw BackendAccountClient.Failure(status: status)
+        }
+        XCTFail("must propagate rejected request")
+      } catch let error as BackendAccountClient.Failure {
+        XCTAssertEqual(error.status, status)
+      }
+      XCTAssertEqual(attempts.count, status == 401 ? 2 : 1)
+      XCTAssertEqual(api.refreshCount, status == 401 ? 1 : 0)
+    }
+  }
+  func testAuthenticatedRequestNeverRetriesAfterAccountSwitch() async throws {
+    let storage = MemorySessions(.init(tokens: SharedStoreAPI.tokens("a", "f"),
+                                       expiresAt: Date().addingTimeInterval(600)))
+    let api = SharedStoreAPI { _ in SharedStoreAPI.tokens("b", "c") }
+    let session = BackendAccountSession(api: api, storage: storage)
+    let attempts = AttemptCounter()
+    let other = BackendAccountClient.Tokens(access_token: String(repeating: "d", count: 64),
+      refresh_token: String(repeating: "e", count: 64), token_type: "Bearer", expires_in: 900,
+      user: .init(id: "other-synthetic-user", display_name: "另一个账号", created_at: "2026-09-08"))
+    do {
+      _ = try await session.authenticated(matchingUserID: "synthetic-user") { _ -> String in
+        _ = attempts.increment()
+        try storage.save(BackendSavedSession.forTokens(other))
+        throw BackendAccountClient.Failure(status: 401)
+      }
+      XCTFail("must not retry as another account")
+    } catch is CancellationError { }
+    XCTAssertEqual(attempts.count, 1)
+    XCTAssertEqual(api.refreshCount, 0)
+    XCTAssertEqual(try storage.load()?.tokens.user.id, "other-synthetic-user")
+  }
   func testBoundCredentialsRejectLogoutDuringRefresh() async throws {
     let storage = MemorySessions(.init(tokens: RefreshAPI.tokens(), expiresAt: .distantPast))
     let api = RefreshAPI()
@@ -193,6 +271,149 @@ final class BackendAccountSessionTests: XCTestCase {
     catch let failure as BackendAccountClient.Failure { XCTAssertEqual(failure.status, 401) }
     XCTAssertNil(try storage.load())
   }
+  /// The app and the keyboard extension each hold their own session over one stored item. The server revokes the session when a used refresh token comes back, so the second process must wait for the first and adopt its rotation.
+  func testProcessesSharingAStoreRefreshOneAtATimeUnderTheFileLock() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let lockURL = directory.appendingPathComponent("refresh.lock")
+    let storage = MemorySessions(.init(tokens: SharedStoreAPI.tokens("a", "f"), expiresAt: .distantPast))
+    let used = NSLock()
+    var presented: Set<String> = []
+    let api = SharedStoreAPI { token in
+      used.lock(); defer { used.unlock() }
+      // A refresh token works once; presenting it again revokes the session, as the server does.
+      guard presented.insert(token).inserted else { throw BackendAccountClient.Failure(status: 401) }
+      Thread.sleep(forTimeInterval: 0.1)
+      return SharedStoreAPI.tokens("b", "c")
+    }
+    let app = BackendAccountSession(api: api, storage: storage, refreshLock: BackendFileRefreshLock(url: lockURL))
+    let keyboard = BackendAccountSession(api: api, storage: storage, refreshLock: BackendFileRefreshLock(url: lockURL))
+    _ = try await app.user(); _ = try await keyboard.user()
+    async let first = app.accessToken()
+    async let second = keyboard.accessToken()
+    let tokens = try await [first, second]
+    XCTAssertEqual(tokens[0], tokens[1])
+    XCTAssertEqual(api.refreshCount, 1)
+    XCTAssertEqual(try storage.load()?.tokens.refresh_token, String(repeating: "c", count: 64))
+  }
+  /// A refresh the keyboard has in flight when the app signs out or switches accounts. The refresh request is held open until the app's write has been attempted.
+  private final class GatedRefreshAPI: BackendSessionAPI, @unchecked Sendable {
+    private let lock = NSLock()
+    private var waiting: CheckedContinuation<Void, Never>?
+    private var started: CheckedContinuation<Void, Never>?
+    private var isStarted = false
+    let loginResult: BackendAccountClient.Tokens
+    init(loginResult: BackendAccountClient.Tokens) { self.loginResult = loginResult }
+    func login(challenge: String, credential: String, linkToken: String?) async throws -> BackendAccountClient.Tokens { loginResult }
+    func logout(token: String, all: Bool) async throws { }
+    func refresh(_ token: String) async throws -> BackendAccountClient.Tokens {
+      await withCheckedContinuation { continuation in
+        let notify = lock.withLock { () -> CheckedContinuation<Void, Never>? in
+          waiting = continuation; isStarted = true
+          defer { started = nil }
+          return started
+        }
+        notify?.resume()
+      }
+      return SharedStoreAPI.tokens("b", "c")
+    }
+    func waitUntilRefreshing() async {
+      await withCheckedContinuation { continuation in
+        let already = lock.withLock { () -> Bool in
+          if isStarted { return true }
+          started = continuation
+          return false
+        }
+        if already { continuation.resume() }
+      }
+    }
+    func finish() { lock.withLock { () -> CheckedContinuation<Void, Never>? in defer { waiting = nil }; return waiting }?.resume() }
+  }
+  private func sharedLock() throws -> BackendFileRefreshLock {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+    return BackendFileRefreshLock(url: directory.appendingPathComponent("refresh.lock"))
+  }
+
+  func testSignOutDuringAnotherProcessRefreshIsNotUndone() async throws {
+    let lock = try sharedLock()
+    let storage = MemorySessions(.init(tokens: SharedStoreAPI.tokens("a", "f"), expiresAt: .distantPast))
+    let api = GatedRefreshAPI(loginResult: SharedStoreAPI.tokens("x", "y"))
+    let app = BackendAccountSession(api: api, storage: storage, refreshLock: lock)
+    let keyboard = BackendAccountSession(api: api, storage: storage, refreshLock: lock)
+    let refresh = Task { try await keyboard.accessToken() }
+    await api.waitUntilRefreshing()
+    let signOut = Task { try await app.forget() }
+    try await Task.sleep(nanoseconds: 100_000_000)
+    api.finish()
+    _ = try? await refresh.value
+    try await signOut.value
+    XCTAssertNil(try storage.load(), "the keyboard's refresh resurrected a signed-out session")
+    let keyboardUser = try await keyboard.user()
+    XCTAssertNil(keyboardUser)
+  }
+
+  func testAccountSwitchDuringAnotherProcessRefreshKeepsTheNewAccount() async throws {
+    let lock = try sharedLock()
+    let storage = MemorySessions(.init(tokens: SharedStoreAPI.tokens("a", "f"), expiresAt: .distantPast))
+    let other = BackendAccountClient.Tokens(access_token: String(repeating: "d", count: 64),
+      refresh_token: String(repeating: "e", count: 64), token_type: "Bearer", expires_in: 900,
+      user: .init(id: "synthetic-other", display_name: "另一个", created_at: "2026-09-08"))
+    let api = GatedRefreshAPI(loginResult: other)
+    let app = BackendAccountSession(api: api, storage: storage, refreshLock: lock)
+    let keyboard = BackendAccountSession(api: api, storage: storage, refreshLock: lock)
+    let refresh = Task { try await keyboard.accessToken() }
+    await api.waitUntilRefreshing()
+    let switchAccount = Task { try await app.signIn(challenge: "challenge", credential: "synthetic") }
+    try await Task.sleep(nanoseconds: 100_000_000)
+    api.finish()
+    _ = try? await refresh.value
+    try await switchAccount.value
+    XCTAssertEqual(try storage.load()?.tokens.user.id, "synthetic-other", "the keyboard wrote the old account over the new one")
+    let token = try await keyboard.accessToken()
+    XCTAssertEqual(token, other.access_token)
+  }
+
+  func testEmptySharedStoreSignsOutASessionHeldInMemory() async throws {
+    let storage = MemorySessions(.init(tokens: SharedStoreAPI.tokens("a", "f"), expiresAt: Date().addingTimeInterval(600)))
+    let api = SharedStoreAPI { _ in SharedStoreAPI.tokens("b", "c") }
+    let keyboard = BackendAccountSession(api: api, storage: storage, refreshLock: try sharedLock())
+    let first = try await keyboard.accessToken()
+    XCTAssertEqual(first, String(repeating: "a", count: 64))
+    try storage.clear()
+    let user = try await keyboard.user()
+    XCTAssertNil(user)
+    do { _ = try await keyboard.accessToken(); XCTFail("a session the app forgot must not be used") }
+    catch let failure as BackendAccountClient.Failure { XCTAssertEqual(failure.status, 401) }
+    XCTAssertEqual(api.refreshCount, 0)
+  }
+  func testRefreshWithoutASharedLockDirectoryIsRefused() async throws {
+    let storage = MemorySessions(.init(tokens: SharedStoreAPI.tokens("a", "f"), expiresAt: .distantPast))
+    let api = SharedStoreAPI { _ in SharedStoreAPI.tokens("b", "c") }
+    let session = BackendAccountSession(api: api, storage: storage, refreshLock: BackendFileRefreshLock(url: nil))
+    do { _ = try await session.accessToken(); XCTFail("must not refresh unlocked") }
+    catch let failure as BackendAccountClient.Failure { XCTAssertEqual(failure.status, 0) }
+    XCTAssertEqual(api.refreshCount, 0)
+    XCTAssertEqual(try storage.load()?.tokens.refresh_token, String(repeating: "f", count: 64), "the stored session is kept")
+  }
+
+  func testSignOutDoesNotClearWhenTheSharedLockCannotBeTaken() async throws {
+    let stored = BackendSavedSession(tokens: SharedStoreAPI.tokens("a", "f"), expiresAt: Date().addingTimeInterval(600))
+    let storage = MemorySessions(stored)
+    let session = BackendAccountSession(api: SharedStoreAPI { _ in SharedStoreAPI.tokens("b", "c") },
+                                        storage: storage, refreshLock: FailingRefreshLock())
+    do {
+      try await session.forget()
+      XCTFail("sign-out must report a lock failure")
+    } catch let failure as BackendAccountClient.Failure {
+      XCTAssertEqual(failure.status, 0)
+    }
+    XCTAssertEqual(try storage.load()?.tokens.refresh_token, stored.tokens.refresh_token,
+                   "an unlocked clear could race an in-flight refresh and resurrect the session")
+  }
+
   func testActorThatLoadedNothingSeesLaterSignIn() async throws {
     let storage = MemorySessions(nil)
     let api = SharedStoreAPI { _ in throw BackendAccountClient.Failure(status: 401) }

@@ -62,6 +62,90 @@ private final class OversizedAccountProtocol: URLProtocol {
   }
   override func stopLoading() {}
 }
+private final class MalformedAccountPayloadProtocol: URLProtocol {
+  override class func canInit(with request: URLRequest) -> Bool {
+    ["/v1/auth/challenges", "/v1/auth/login", "/v1/users/me"].contains(request.url?.path)
+  }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+  override func startLoading() {
+    let path = request.url!.path
+    let object: [String: Any]
+    switch path {
+    case "/v1/auth/challenges":
+      object = ["challenge_id": "bad\u{0001}challenge", "expires_in": 300, "nonce": "server"]
+    case "/v1/auth/login":
+      let token = String(repeating: "a", count: 64)
+      object = ["access_token": token, "refresh_token": token, "token_type": "Bearer", "expires_in": 900,
+        "user": ["id": "synthetic", "display_name": String(repeating: "x", count: 65), "created_at": "2026-09-08"]]
+    default:
+      object = ["user": ["id": "synthetic", "display_name": "ok", "created_at": "2026-09-08"],
+        "identities": [["provider": "Bad Provider", "subject": "subject"]]]
+    }
+    let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+      headerFields: ["Content-Type": "application/json"])!
+    client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didLoad: try! JSONSerialization.data(withJSONObject: object))
+    client?.urlProtocolDidFinishLoading(self)
+  }
+  override func stopLoading() {}
+}
+private final class MalformedClipboardProtocol: URLProtocol {
+  override class func canInit(with request: URLRequest) -> Bool { request.url?.path == "/v1/users/me/clipboard" }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+  override func startLoading() {
+    let search = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "q" }?.value ?? ""
+    let validID = String(repeating: "a", count: 64)
+    let item: [String: Any]
+    switch request.httpMethod == "POST" ? "bad-id" : search {
+    case "bad-id": item = ["id": "../logout", "text": "fixture", "updated_at": "2026-09-08"]
+    case "bad-text": item = ["id": validID, "text": "\u{0000}fixture", "updated_at": "2026-09-08"]
+    case "bad-time": item = ["id": validID, "text": "fixture", "updated_at": String(repeating: "t", count: 129)]
+    default: item = ["id": validID, "text": "fixture", "updated_at": "2026-09-08"]
+    }
+    let body = try! JSONSerialization.data(withJSONObject: ["enabled": true, "items": [item]])
+    let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+      headerFields: ["Content-Type": "application/json"])!
+    client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didLoad: body)
+    client?.urlProtocolDidFinishLoading(self)
+  }
+  override func stopLoading() {}
+}
+private final class MalformedDictionaryProtocol: URLProtocol {
+  override class func canInit(with request: URLRequest) -> Bool { request.url?.path == "/v1/users/me/dictionaries/pinyin" }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+  override func startLoading() {
+    let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "q" }?.value ?? ""
+    let entry: [String: Any]
+    switch query {
+    case "bad-id": entry = ["id": "../logout", "kind": "pinyin", "code": "ni", "word": "你", "weight": 1, "revision": 1]
+    case "bad-kind": entry = ["id": String(repeating: "a", count: 64), "kind": "wubi", "code": "ni", "word": "你", "weight": 1, "revision": 1]
+    case "bad-offset": entry = ["id": String(repeating: "a", count: 64), "kind": "pinyin", "code": "ni", "word": "你", "weight": 1, "revision": 1]
+    case "bad-weight": entry = ["id": String(repeating: "a", count: 64), "kind": "pinyin", "code": "ni", "word": "你", "weight": -1, "revision": 1]
+    default: entry = ["id": String(repeating: "a", count: 64), "kind": "pinyin", "code": "ni", "word": "你", "weight": 1, "revision": 1]
+    }
+    let object: [String: Any] = ["entries": [entry], "has_more": false, "offset": query == "bad-offset" ? 100 : 0]
+    let body = try! JSONSerialization.data(withJSONObject: object)
+    let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+      headerFields: ["Content-Type": "application/json"])!
+    client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didLoad: body)
+    client?.urlProtocolDidFinishLoading(self)
+  }
+  override func stopLoading() {}
+}
+private final class MalformedImportProtocol: URLProtocol {
+  override class func canInit(with request: URLRequest) -> Bool { request.url?.path.hasSuffix("/import") == true }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+  override func startLoading() {
+    let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+      headerFields: ["Content-Type":"application/json"])!
+    client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didLoad: Data(#"{"imported":1000001,"revision":-1}"#.utf8))
+    client?.urlProtocolDidFinishLoading(self)
+  }
+  override func stopLoading() {}
+}
 
 final class BackendAccountClientTests: XCTestCase {
   func testDefaultNicknameIsStableAndPreservesChosenName() {
@@ -111,6 +195,23 @@ final class BackendAccountClientTests: XCTestCase {
       XCTFail("must reject")
     } catch let error as BackendAccountClient.Failure { XCTAssertEqual(error.status, 0) }
   }
+  func testMalformedChallengeProfileAndTokenUsersAreRejected() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [MalformedAccountPayloadProtocol.self]
+    let client = BackendAccountClient(configuration: configuration)
+    do {
+      _ = try await client.challenge(provider: "apple")
+      XCTFail("malformed challenge accepted")
+    } catch let error as BackendAccountClient.Failure { XCTAssertEqual(error.status, 0) }
+    do {
+      _ = try await client.profile(token: "session")
+      XCTFail("malformed profile accepted")
+    } catch let error as BackendAccountClient.Failure { XCTAssertEqual(error.status, 0) }
+    do {
+      _ = try await client.login(challenge: "challenge", credential: "synthetic")
+      XCTFail("malformed token user accepted")
+    } catch let error as BackendAccountClient.Failure { XCTAssertEqual(error.status, 0) }
+  }
   func testClipboardSearchIsEncodedAsOneQueryValue() async throws {
     let search = "学习 & q=other + % #"
     let page = try await client().clipboard(token: "session", search: search)
@@ -119,11 +220,64 @@ final class BackendAccountClientTests: XCTestCase {
     try await client().setClipboardEnabled(false, token: "session")
     try await client().deleteClipboard(token: "session")
   }
+  func testClipboardSearchRejectsOversizedAndUnsafeValues() async throws {
+    for search in [String(repeating: "a", count: 1025), "safe\u{0007}query"] {
+      do {
+        _ = try await client().clipboard(token: "session", search: search)
+        XCTFail("unsafe search")
+      } catch let error as BackendAccountClient.Failure {
+        XCTAssertEqual(error.status, 400)
+      }
+    }
+  }
   func testClipboardRejectsOversizedUTF16AndUnsafeID() async throws {
     do { _ = try await client().addClipboard(String(repeating: "😀", count: 2001), token: "session"); XCTFail("too long") }
     catch let error as BackendAccountClient.Failure { XCTAssertEqual(error.status, 400) }
+    do { _ = try await client().addClipboard("safe\u{0007}text", token: "session"); XCTFail("control character") }
+    catch let error as BackendAccountClient.Failure { XCTAssertEqual(error.status, 400) }
     do { try await client().deleteClipboard(id: "../auth/logout", token: "session"); XCTFail("unsafe id") }
     catch let error as BackendAccountClient.Failure { XCTAssertEqual(error.status, 400) }
+  }
+  func testClipboardRejectsMalformedServerItems() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [MalformedClipboardProtocol.self]
+    let client = BackendAccountClient(configuration: configuration)
+    for search in ["bad-id", "bad-text", "bad-time"] {
+      do {
+        _ = try await client.clipboard(token: "session", search: search)
+        XCTFail("malformed clipboard item accepted: \(search)")
+      } catch let error as BackendAccountClient.Failure {
+        XCTAssertEqual(error.status, 0)
+      }
+    }
+    do {
+      _ = try await client.addClipboard("fixture", token: "session")
+      XCTFail("malformed added clipboard item accepted")
+    } catch let error as BackendAccountClient.Failure {
+      XCTAssertEqual(error.status, 0)
+    }
+  }
+  func testDictionaryImportRejectsMalformedServerResult() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [MalformedImportProtocol.self]
+    do {
+      _ = try await BackendAccountClient(configuration: configuration).importDictionary(
+        .pinyin, text: "ni\t你", format: .standard, token: "session")
+      XCTFail("malformed dictionary import result accepted")
+    } catch let failure as BackendAccountClient.Failure { XCTAssertEqual(failure.status, 0) }
+  }
+  func testDictionaryRejectsMalformedServerEntries() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [MalformedDictionaryProtocol.self]
+    let client = BackendAccountClient(configuration: configuration)
+    for search in ["bad-id", "bad-kind", "bad-offset", "bad-weight"] {
+      do {
+        _ = try await client.dictionary(.pinyin, search: search, token: "session")
+        XCTFail("malformed dictionary entry accepted: \(search)")
+      } catch let error as BackendAccountClient.Failure {
+        XCTAssertEqual(error.status, 0)
+      }
+    }
   }
   func testDictionarySearchCannotInjectAnotherQueryParameter() async throws {
     let text = "合成 & q=other + % #"
@@ -145,4 +299,3 @@ final class BackendAccountClientTests: XCTestCase {
     }
   }
 }
-

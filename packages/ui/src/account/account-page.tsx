@@ -1,21 +1,40 @@
 import { useEffect, useRef, useState } from "react";
-import { GroupList } from "../core/platform-controls";
+import { ActionButton } from "../core/action-button";
+import { errorCode } from "../core/error-code";
+import { GroupList, Row } from "../core/platform-controls";
 import * as doc from "../settings/document-style";
 import * as account from "./account-style";
-import { accountProviderName, preferredAccountName } from "./account-labels";
+import { AccountAvatar } from "./account-avatar";
+import { isValidAccountName, normalizeAccountName, preferredAccountName } from "./account-labels";
 import { accountMessage, isAccountCancellation } from "./account-errors";
+import { AccountConfirmation } from "./account-confirmation";
+import { AccountNicknameField } from "./account-nickname-field";
+import { AccountInputField } from "./account-input-field";
+import { AccountStatusMessages } from "./account-status-messages";
+import { AccountIdentityDetails } from "./account-identity-details";
 import { pushMobileSettingsState } from "../settings/mobile-navigation";
+import { StatusMessage } from "../core/status-message";
+import { copyAccountId as copyAccountIdToClipboard } from "./account-id-copy";
+import { useAccountAction } from "./account-operation";
+import { useMobilePopState } from "../settings/use-mobile-pop-state";
 
 export type AccountUser = {
   id: string;
   displayName: string;
   createdAt: string;
+  /** The verified email of a linked Google account. */
+  email?: string;
+  /** Changes whenever the avatar does; the image itself comes from `AccountClient.avatar`, since the page loads no remote image. */
+  avatarUrl?: string;
+  /** The avatar is one the user uploaded, which they can remove, rather than their Google picture. */
+  avatarUploaded?: boolean;
 };
 
 export type AccountProviders = {
   email: boolean;
   phone: boolean;
   apple?: boolean;
+  google?: boolean;
 };
 
 export type AccountChallenge = {
@@ -66,8 +85,18 @@ export interface AccountClient {
   login(challengeId: string, code: string): Promise<{ user?: AccountUser | null }>;
   /** iOS performs the nonce and AuthenticationServices exchange natively. */
   appleLogin?: () => Promise<{ user?: AccountUser | null }>;
+  /** Desktop hosts run the Google browser and loopback redirect natively; the page never sees the authorization code. */
+  googleLogin?: () => Promise<{ user?: AccountUser | null }>;
+  /** Ends a pending googleLogin, which then rejects as cancelled. The browser cannot report a closed Google tab, so this is how the user gives up without waiting for the timeout. */
+  googleCancel?: () => Promise<void>;
   profile(): Promise<AccountProfile>;
   rename(displayName: string): Promise<AccountProfile>;
+  /** The signed-in user's avatar as a `data:` URL, or null without one. Absent on hosts that do not fetch avatars, which show the name's first character. */
+  avatar?: () => Promise<string | null>;
+  /** Opens the platform's file dialog for a PNG or JPEG and uploads it; null when the user closes the dialog. The page never names a path. */
+  chooseAvatar?: () => Promise<AccountProfile | null>;
+  /** Removes the uploaded avatar; the Google picture, if any, shows again. */
+  removeAvatar?: () => Promise<AccountProfile>;
   logout(all: boolean): Promise<void>;
   deleteAccount(): Promise<void>;
   clearExpired(): Promise<void>;
@@ -101,50 +130,20 @@ function MobileAccountProfilePage({
   onProfileUpdated: (profile: AccountProfile) => void;
 }) {
   const [name, setName] = useState(user.displayName);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [confirmation, setConfirmation] = useState<
     "logout" | "logout-all" | "relogin" | "delete" | null
   >(null);
   const [copied, setCopied] = useState(false);
-  const mounted = useRef(true);
-  const clientGeneration = useRef(0);
-  const normalizedName = name.trim();
-  const validName =
-    Boolean(normalizedName) &&
-    [...normalizedName].length <= 64 &&
-    !/[\u0000-\u001f\u007f]/.test(normalizedName);
+  const { busy, mounted, clientGeneration, perform } = useAccountAction(
+    client,
+    setError,
+    setNotice,
+  );
+  const normalizedName = normalizeAccountName(name);
+  const validName = isValidAccountName(name);
 
-  useEffect(() => {
-    const generation = ++clientGeneration.current;
-    mounted.current = true;
-    setBusy(false);
-    return () => {
-      mounted.current = false;
-      if (generation === clientGeneration.current) clientGeneration.current++;
-    };
-  }, [client]);
-
-  const perform = async (operation: () => Promise<void>) => {
-    if (busy || !mounted.current) return;
-    const generation = clientGeneration.current;
-    setBusy(true);
-    setError("");
-    setNotice("");
-    try {
-      await operation();
-    } catch (cause) {
-      if (
-        mounted.current &&
-        generation === clientGeneration.current &&
-        !isAccountCancellation(cause)
-      )
-        setError(accountMessage(cause));
-    } finally {
-      if (mounted.current && generation === clientGeneration.current) setBusy(false);
-    }
-  };
   const rename = () =>
     void perform(async () => {
       const generation = clientGeneration.current;
@@ -185,59 +184,39 @@ function MobileAccountProfilePage({
     else if (action === "delete") deleteAccount();
   };
   const copyId = () => {
-    if (!navigator.clipboard?.writeText) return;
-    void navigator.clipboard
-      .writeText(user.id)
-      .then(() => {
-        if (!mounted.current) return;
-        setCopied(true);
-        window.setTimeout(() => {
-          if (mounted.current) setCopied(false);
-        }, 1800);
-      })
-      .catch(() => {
-        if (mounted.current) setError("账号 ID 暂时无法复制，请稍后重试。");
-      });
+    copyAccountIdToClipboard({
+      id: user.id,
+      isMounted: () => mounted.current,
+      setCopied,
+      setError,
+    });
   };
 
   return (
     <div className={account.page}>
       <div className={account.profilePageHeader}>
-        <button type="button" className="secondary" disabled={busy} onClick={onBack}>
-          ‹ 返回
-        </button>
+        <ActionButton action={onBack} className="secondary" disabled={busy} label="‹ 返回" />
         <h2 className={account.heading}>编辑资料</h2>
       </div>
-      {error && (
-        <p role="alert" className="error">
-          {error}
-        </p>
-      )}
-      {notice && (
-        <p role="status" className="notice">
-          {notice}
-        </p>
-      )}
+      <AccountStatusMessages error={error} notice={notice} />
       <section className={`${account.section} ${account.profilePreviewLarge}`}>
-        <div className={account.avatar("large")} aria-hidden="true">
-          {(normalizedName || "水杉用户").slice(0, 1)}
-        </div>
+        <AccountAvatar
+          user={user}
+          name={normalizedName || "水杉用户"}
+          load={client.avatar}
+          size="large"
+        />
         <h2 className={account.heading}>{normalizedName || "你的昵称"}</h2>
         <p className={account.muted}>在水杉，留下你的名字</p>
       </section>
       <section className={`${account.section} ${account.stack}`}>
         <h2 className={account.heading}>社区昵称</h2>
-        <label className={account.field}>
-          社区昵称
-          <input
-            className={account.input}
-            aria-label="编辑社区昵称"
-            maxLength={64}
-            value={name}
-            disabled={busy}
-            onChange={(event) => setName(event.target.value)}
-          />
-        </label>
+        <AccountNicknameField
+          value={name}
+          disabled={busy}
+          ariaLabel="编辑社区昵称"
+          onChange={setName}
+        />
         <p className={`account-muted${!validName && normalizedName ? " error" : ""}`}>
           {normalizedName
             ? validName
@@ -247,116 +226,60 @@ function MobileAccountProfilePage({
         </p>
         <p className={account.muted}>{[...normalizedName].length}/64</p>
         <div className={account.actionRow}>
-          <button
-            type="button"
+          <ActionButton
+            action={rename}
             className={account.primary}
             disabled={busy || !validName || normalizedName === user.displayName}
-            onClick={rename}
-          >
-            保存昵称
-          </button>
+            label="保存昵称"
+          />
         </div>
       </section>
       <section className={`${account.section} ${account.stack}`}>
         <h2 className={account.heading}>账号信息</h2>
-        <dl className={account.details}>
-          <div>
-            <dt>账号 ID</dt>
-            <dd>
-              <button type="button" className={account.copyId} onClick={copyId}>
-                {copied ? "已复制" : `#${user.id.slice(0, 6).toUpperCase()}`}
-              </button>
-            </dd>
-          </div>
-          <div>
-            <dt>登录方式</dt>
-            <dd>{profile?.providers.map(accountProviderName).join("、") || "正在读取"}</dd>
-          </div>
-          <div>
-            <dt>加入水杉</dt>
-            <dd>{new Date(user.createdAt).toLocaleDateString("zh-CN")}</dd>
-          </div>
-        </dl>
+        <AccountIdentityDetails
+          user={user}
+          providers={profile?.providers ?? []}
+          copied={copied}
+          onCopy={copyId}
+        />
       </section>
       <section className={`${account.section} ${account.stack}`}>
         <h2 className={account.heading}>账号操作</h2>
         <div className={account.actionRow}>
-          <button
-            type="button"
+          <ActionButton
+            action={() => setConfirmation("logout")}
             className="secondary"
             disabled={busy}
-            onClick={() => setConfirmation("logout")}
-          >
-            退出登录
-          </button>
-          <button
-            type="button"
+            label="退出登录"
+          />
+          <ActionButton
+            action={() => setConfirmation("logout-all")}
             className="secondary"
             disabled={busy}
-            onClick={() => setConfirmation("logout-all")}
-          >
-            退出所有设备
-          </button>
-          <button
-            type="button"
+            label="退出所有设备"
+          />
+          <ActionButton
+            action={() => setConfirmation("relogin")}
             className="secondary"
             disabled={busy}
-            onClick={() => setConfirmation("relogin")}
-          >
-            重新登录
-          </button>
-          <button
-            type="button"
+            label="重新登录"
+          />
+          <ActionButton
+            action={() => setConfirmation("delete")}
             className="danger-text"
             disabled={busy}
-            onClick={() => setConfirmation("delete")}
-          >
-            注销账号
-          </button>
+            label="注销账号"
+          />
         </div>
       </section>
       {confirmation && (
-        <div
-          className={account.confirmation}
-          role="alertdialog"
-          aria-label={
-            confirmation === "delete"
-              ? "确认注销账号"
-              : confirmation === "logout-all"
-                ? "确认退出所有设备"
-                : confirmation === "relogin"
-                  ? "确认重新登录"
-                  : "确认退出登录"
-          }
-        >
-          <p className={account.note}>
-            {confirmation === "delete"
-              ? "注销账号将删除已发布皮肤、评分及其他云端账号数据，无法撤销。"
-              : confirmation === "logout-all"
-                ? "退出所有设备后，所有设备都需要重新登录。"
-                : confirmation === "relogin"
-                  ? "清除本机登录状态后需要重新登录。"
-                  : "退出登录后，社区功能需要重新登录才能使用。"}
-          </p>
-          <div>
-            <button
-              type="button"
-              className={confirmation === "delete" ? "danger-text" : "account-primary"}
-              disabled={busy}
-              onClick={confirmAction}
-            >
-              确认
-            </button>
-            <button
-              type="button"
-              className="secondary"
-              disabled={busy}
-              onClick={() => setConfirmation(null)}
-            >
-              取消
-            </button>
-          </div>
-        </div>
+        <AccountConfirmation
+          action={confirmation}
+          busy={busy}
+          confirmLabel="确认"
+          onConfirm={confirmAction}
+          onCancel={() => setConfirmation(null)}
+        />
       )}
     </div>
   );
@@ -380,55 +303,53 @@ function AppIconSettingsCard({
   const [info, setInfo] = useState<AppIconInfo | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const mounted = useRef(true);
-  const generation = useRef(0);
+  const { busy, mounted, clientGeneration, perform } = useAccountAction(client, setError, () => {});
 
   useEffect(() => {
-    let active = true;
-    const current = ++generation.current;
-    mounted.current = true;
     setInfo(null);
     setError("");
-    void client
-      .info()
-      .then((value) => {
-        if (active && mounted.current && generation.current === current) setInfo(value);
-      })
-      .catch(() => {
-        if (active && mounted.current && generation.current === current)
-          setError("暂时无法读取 App 图标状态，请稍后重试。");
-      });
-    return () => {
-      active = false;
-      mounted.current = false;
-    };
+    void perform(
+      async () => {
+        const current = clientGeneration.current;
+        try {
+          const value = await client.info();
+          if (mounted.current && clientGeneration.current === current) setInfo(value);
+        } catch {
+          if (mounted.current && clientGeneration.current === current)
+            setError("暂时无法读取 App 图标状态，请稍后重试。");
+        }
+      },
+      { allowBusy: true },
+    );
   }, [client]);
 
-  const choose = async (style: string) => {
-    if (!info?.supported || pending || info.selected === style) return;
-    const current = generation.current;
+  const choose = (style: string) => {
+    if (!info?.supported || pending || busy || info.selected === style) return;
+    const current = clientGeneration.current;
     setPending(style);
     setError("");
-    try {
-      const updated = await client.set(style);
-      if (!mounted.current || generation.current !== current) return;
-      setInfo(updated);
-      if (updated.selected !== style) setError("图标未能更换，请稍后重试。");
-    } catch {
-      // Android launchers and the iOS Simulator can report an error after
-      // applying the icon. Read the OS state again before showing a failure.
+    void perform(async () => {
       try {
-        const updated = await client.info();
-        if (!mounted.current || generation.current !== current) return;
+        const updated = await client.set(style);
+        if (!mounted.current || clientGeneration.current !== current) return;
         setInfo(updated);
         if (updated.selected !== style) setError("图标未能更换，请稍后重试。");
       } catch {
-        if (mounted.current && generation.current === current)
-          setError("图标未能更换，请稍后重试。");
+        // Android launchers and the iOS Simulator can report an error after
+        // applying the icon. Read the OS state again before showing a failure.
+        try {
+          const updated = await client.info();
+          if (!mounted.current || clientGeneration.current !== current) return;
+          setInfo(updated);
+          if (updated.selected !== style) setError("图标未能更换，请稍后重试。");
+        } catch {
+          if (mounted.current && clientGeneration.current === current)
+            setError("图标未能更换，请稍后重试。");
+        }
+      } finally {
+        if (mounted.current && clientGeneration.current === current) setPending(null);
       }
-    } finally {
-      if (mounted.current && generation.current === current) setPending(null);
-    }
+    });
   };
 
   return (
@@ -444,12 +365,8 @@ function AppIconSettingsCard({
               : "系统会使用平台提供的图标切换能力保存选择。"}
         </p>
       </div>
-      {info === null && !error && <p role="status">正在读取图标状态…</p>}
-      {error && (
-        <p role="alert" className="error">
-          {error}
-        </p>
-      )}
+      {info === null && !error && <StatusMessage role="status">正在读取图标状态…</StatusMessage>}
+      <AccountStatusMessages error={error} />
       {info && !info.supported && <p className={account.muted}>当前设备暂不支持更换 App 图标。</p>}
       {info && (
         <div className={account.iconGrid}>
@@ -457,30 +374,32 @@ function AppIconSettingsCard({
             const selected = info.selected === option.id;
             const changing = pending === option.id;
             return (
-              <button
-                type="button"
+              <ActionButton
+                action={() => void choose(option.id)}
+                ariaLabel={`${option.title}，${option.detail}`}
+                ariaPressed={selected}
                 className={account.iconCard(selected)}
                 key={option.id}
                 disabled={!info.supported || pending !== null}
-                aria-label={`${option.title}，${option.detail}`}
-                aria-pressed={selected}
-                onClick={() => void choose(option.id)}
-              >
-                <span
-                  className={account.iconPreview}
-                  style={{ backgroundColor: option.color }}
-                  aria-hidden="true"
-                >
-                  杉
-                </span>
-                <span className={account.iconCopy}>
-                  <strong>{option.title}</strong>
-                  <small>{option.detail}</small>
-                </span>
-                <span className={account.iconState(selected)}>
-                  {changing ? "更换中" : selected ? "使用中" : "使用此图标"}
-                </span>
-              </button>
+                label={
+                  <>
+                    <span
+                      className={account.iconPreview}
+                      style={{ backgroundColor: option.color }}
+                      aria-hidden="true"
+                    >
+                      杉
+                    </span>
+                    <span className={account.iconCopy}>
+                      <strong>{option.title}</strong>
+                      <small>{option.detail}</small>
+                    </span>
+                    <span className={account.iconState(selected)}>
+                      {changing ? "更换中" : selected ? "使用中" : "使用此图标"}
+                    </span>
+                  </>
+                }
+              />
             );
           })}
         </div>
@@ -493,95 +412,62 @@ function AppIconSettingsCard({
 function SettingsSyncCard({ client, userId }: { client: SettingsSyncClient; userId: string }) {
   const [schema, setSchema] = useState<AccountPreferenceSchema | null>(null);
   const [cloud, setCloud] = useState<AccountPreferences | null>(null);
-  const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [confirmation, setConfirmation] = useState<"upload" | "apply" | null>(null);
-  const mounted = useRef(true);
-  const generation = useRef(0);
+  const { busy, mounted, clientGeneration, perform } = useAccountAction(
+    client,
+    setMessage,
+    setMessage,
+    userId,
+  );
 
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
-
-  const load = async () => {
+  const load = () => {
     if (busy || !mounted.current) return;
-    const current = generation.current;
-    setBusy(true);
-    setMessage("");
-    try {
+    void perform(async () => {
+      const current = clientGeneration.current;
       const [nextSchema, nextCloud] = await Promise.all([client.schema(), client.load()]);
-      if (!mounted.current || generation.current !== current) return;
+      if (!mounted.current || clientGeneration.current !== current) return;
       setSchema(nextSchema);
       setCloud(nextCloud);
-    } catch (error) {
-      if (mounted.current && generation.current === current && !isAccountCancellation(error))
-        setMessage(accountMessage(error));
-    } finally {
-      if (mounted.current && generation.current === current) setBusy(false);
-    }
+    });
   };
 
   useEffect(() => {
-    let active = true;
-    const current = ++generation.current;
     setSchema(null);
     setCloud(null);
     setMessage("");
-    setBusy(true);
-    void Promise.all([client.schema(), client.load()])
-      .then(([nextSchema, nextCloud]) => {
-        if (!active || !mounted.current || generation.current !== current) return;
+    void perform(
+      async () => {
+        const current = clientGeneration.current;
+        const [nextSchema, nextCloud] = await Promise.all([client.schema(), client.load()]);
+        if (!mounted.current || clientGeneration.current !== current) return;
         setSchema(nextSchema);
         setCloud(nextCloud);
-      })
-      .catch((error) => {
-        if (
-          active &&
-          mounted.current &&
-          generation.current === current &&
-          !isAccountCancellation(error)
-        )
-          setMessage(accountMessage(error));
-      })
-      .finally(() => {
-        if (active && mounted.current && generation.current === current) setBusy(false);
-      });
-    return () => {
-      active = false;
-    };
+      },
+      { allowBusy: true },
+    );
   }, [client, userId]);
 
-  const runConfirmed = async () => {
+  const runConfirmed = () => {
     if (!cloud || !schema || !confirmation || busy) return;
-    const current = generation.current;
-    setBusy(true);
-    setMessage("");
     const operation = confirmation;
     setConfirmation(null);
-    try {
+    void perform(async () => {
+      const current = clientGeneration.current;
       if (operation === "upload") {
         const next = await client.upload();
-        if (!mounted.current || generation.current !== current) return;
+        if (!mounted.current || clientGeneration.current !== current) return;
         setCloud(next);
       } else {
         await client.apply(userId, cloud);
-        if (!mounted.current || generation.current !== current) return;
+        if (!mounted.current || clientGeneration.current !== current) return;
       }
-      if (mounted.current && generation.current === current)
-        setMessage(
-          operation === "upload"
-            ? "本机设置已上传。"
-            : "已应用云端设置。请重新打开键盘使部分设置生效。",
-        );
-    } catch (error) {
-      if (mounted.current && generation.current === current && !isAccountCancellation(error))
-        setMessage(accountMessage(error));
-    } finally {
-      if (mounted.current && generation.current === current) setBusy(false);
-    }
+      setMessage(
+        operation === "upload"
+          ? "本机设置已上传。"
+          : "已应用云端设置。请重新打开键盘使部分设置生效。",
+      );
+    });
   };
 
   const hasCloudSettings = Boolean(cloud && Object.keys(cloud.settings).length > 0);
@@ -589,32 +475,34 @@ function SettingsSyncCard({ client, userId }: { client: SettingsSyncClient; user
     <section className={`${account.section} ${account.stack}`}>
       <h2 className={account.heading}>设置同步</h2>
       <p className={account.note}>
-        同步输入方案、简繁体、键盘声音与触感、词库学习开关和皮肤。凭据、联网授权及输入内容不会随设置上传。
+        同步输入方案、繁体输出、键盘声音与触感、词库学习开关和皮肤。凭据、联网授权及输入内容不会随设置上传。
       </p>
       {cloud && <p className={account.muted}>云端版本：{cloud.revision}</p>}
       <div className={account.actionRow}>
-        <button type="button" className="secondary" disabled={busy} onClick={() => void load()}>
-          刷新云端设置
-        </button>
-        <button
-          type="button"
+        <ActionButton
+          action={() => void load()}
+          ariaBusy={busy}
+          className="secondary"
+          disabled={busy}
+          label="刷新云端设置"
+        />
+        <ActionButton
+          action={() => setConfirmation("upload")}
+          ariaBusy={busy}
           className={account.primary}
           disabled={busy || !cloud || !schema}
-          onClick={() => setConfirmation("upload")}
-        >
-          上传本机设置
-        </button>
-        <button
-          type="button"
+          label="上传本机设置"
+        />
+        <ActionButton
+          action={() => setConfirmation("apply")}
+          ariaBusy={busy}
           className="secondary"
           disabled={busy || !cloud || !schema || !hasCloudSettings}
-          onClick={() => setConfirmation("apply")}
-        >
-          下载并应用云端设置
-        </button>
+          label="下载并应用云端设置"
+        />
       </div>
-      {busy && <p role="status">正在处理…</p>}
-      {message && <p role="status">{message}</p>}
+      {busy && <StatusMessage role="status">正在处理…</StatusMessage>}
+      {message && <StatusMessage role="status">{message}</StatusMessage>}
       {confirmation && (
         <div
           className={account.confirmation}
@@ -626,23 +514,21 @@ function SettingsSyncCard({ client, userId }: { client: SettingsSyncClient; user
               ? "将更新云端对应设置，并保留其他平台专属设置。版本冲突时不会自动覆盖。"
               : "将替换本机对应设置，不会下载词库或开启数据上传。"}
           </p>
-          <div>
-            <button
-              type="button"
+          <div className={account.actionRow}>
+            <ActionButton
+              action={() => void runConfirmed()}
+              ariaBusy={busy}
               className={account.primary}
               disabled={busy}
-              onClick={() => void runConfirmed()}
-            >
-              {confirmation === "upload" ? "确认上传" : "确认应用"}
-            </button>
-            <button
-              type="button"
+              label={confirmation === "upload" ? "确认上传" : "确认应用"}
+            />
+            <ActionButton
+              action={() => setConfirmation(null)}
+              ariaBusy={busy}
               className="secondary"
               disabled={busy}
-              onClick={() => setConfirmation(null)}
-            >
-              取消
-            </button>
+              label="取消"
+            />
           </div>
         </div>
       )}
@@ -803,7 +689,6 @@ function AccountDetailsPage({
   const mobile =
     mobileOverride ?? (platform === "android" || platform === "ios" || platform === "harmony");
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [providers, setProviders] = useState<AccountProviders>({ email: false, phone: false });
@@ -821,30 +706,37 @@ function AccountDetailsPage({
   const [editingProfile, setEditingProfile] = useState(false);
   const [mobileProfilePage, setMobileProfilePage] = useState(false);
   const [copiedAccountId, setCopiedAccountId] = useState(false);
-  const mounted = useRef(true);
-  const clientGeneration = useRef(0);
+  const [googleWaiting, setGoogleWaiting] = useState(false);
+  const googleWaitingRef = useRef(false);
+  const { busy, mounted, clientGeneration, perform } = useAccountAction(
+    client,
+    setError,
+    setNotice,
+  );
 
   useEffect(() => {
-    const generation = ++clientGeneration.current;
-    mounted.current = true;
-    setBusy(false);
-    return () => {
-      mounted.current = false;
-      if (generation === clientGeneration.current) clientGeneration.current++;
-    };
+    googleWaitingRef.current = false;
+    setGoogleWaiting(false);
   }, [client]);
+
+  const cancelGoogle = () => {
+    if (!googleWaitingRef.current || !client.googleCancel) return;
+    // The pending googleLogin reports the outcome; a failed cancel only means there was nothing left to cancel.
+    void client.googleCancel().catch(() => undefined);
+  };
+
+  // Leaving the page must not leave the loopback listener waiting for a browser the user abandoned.
+  useEffect(() => () => cancelGoogle(), [client]);
 
   useEffect(() => {
     if (!mobile || typeof window === "undefined") return;
-    const onPopState = (event: PopStateEvent) => {
-      setMobileProfilePage(
-        event.state?.msimeSettings === true && event.state.accountSubpage === "profile",
-      );
-    };
     setMobileProfilePage(window.history.state?.accountSubpage === "profile");
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
   }, [mobile]);
+  useMobilePopState(mobile, (event) => {
+    setMobileProfilePage(
+      event.state?.msimeSettings === true && event.state.accountSubpage === "profile",
+    );
+  });
 
   const applyProfile = (value: AccountProfile) => {
     setProfile(value);
@@ -858,9 +750,9 @@ function AccountDetailsPage({
   };
 
   useEffect(() => {
-    let active = true;
+    const generation = clientGeneration.current;
     void Promise.allSettled([client.status(), client.providers()]).then(async (results) => {
-      if (!active) return;
+      if (!mounted.current || generation !== clientGeneration.current) return;
       const [status, available] = results;
       if (available.status === "fulfilled") setProviders(available.value);
       else if (!isAccountCancellation(available.reason)) setError(accountMessage(available.reason));
@@ -871,21 +763,22 @@ function AccountDetailsPage({
           setName(nextUser.displayName);
           try {
             const value = await client.profile();
-            if (active) applyProfile(value);
+            if (mounted.current && generation === clientGeneration.current) applyProfile(value);
           } catch (profileError) {
-            if (active && !isAccountCancellation(profileError))
+            if (
+              mounted.current &&
+              generation === clientGeneration.current &&
+              !isAccountCancellation(profileError)
+            )
               setError(accountMessage(profileError));
           }
         }
       } else {
         if (!isAccountCancellation(status.reason)) setError(accountMessage(status.reason));
       }
-      if (active) setLoading(false);
+      if (mounted.current && generation === clientGeneration.current) setLoading(false);
     });
-    return () => {
-      active = false;
-    };
-  }, [client]);
+  }, [client, clientGeneration, mounted]);
 
   useEffect(() => {
     if (!challenge) return;
@@ -893,22 +786,8 @@ function AccountDetailsPage({
     return () => window.clearInterval(timer);
   }, [challenge]);
 
-  const perform = async (operation: () => Promise<void>) => {
-    if (busy || !mounted.current) return;
-    setBusy(true);
-    setError("");
-    setNotice("");
-    try {
-      await operation();
-    } catch (operationError) {
-      if (mounted.current && !isAccountCancellation(operationError))
-        setError(accountMessage(operationError));
-    } finally {
-      if (mounted.current) setBusy(false);
-    }
-  };
-
   const chooseChannel = (value: Channel) => {
+    cancelGoogle();
     setChannel(value);
     setTarget("");
     setCode("");
@@ -919,11 +798,12 @@ function AccountDetailsPage({
 
   const requestCode = () =>
     void perform(async () => {
+      const generation = clientGeneration.current;
       if (!channel) return;
       const normalized = target.trim();
       if (!normalized) throw { code: "account_invalid" };
       const value = await client.requestCode(channel, normalized);
-      if (!mounted.current) return;
+      if (!mounted.current || generation !== clientGeneration.current) return;
       const timestamp = Date.now();
       setNow(timestamp);
       setChallenge(value);
@@ -953,8 +833,9 @@ function AccountDetailsPage({
 
   const signOut = (all: boolean) =>
     void perform(async () => {
+      const generation = clientGeneration.current;
       await client.logout(all);
-      if (!mounted.current) return;
+      if (!mounted.current || generation !== clientGeneration.current) return;
       setUser(null);
       setProfile(null);
       setName("");
@@ -964,8 +845,9 @@ function AccountDetailsPage({
 
   const deleteAccount = () =>
     void perform(async () => {
+      const generation = clientGeneration.current;
       await client.deleteAccount();
-      if (!mounted.current) return;
+      if (!mounted.current || generation !== clientGeneration.current) return;
       setUser(null);
       setProfile(null);
       setName("");
@@ -975,8 +857,9 @@ function AccountDetailsPage({
 
   const clearExpired = () =>
     void perform(async () => {
+      const generation = clientGeneration.current;
       await client.clearExpired();
-      if (!mounted.current) return;
+      if (!mounted.current || generation !== clientGeneration.current) return;
       setUser(null);
       setProfile(null);
       setName("");
@@ -985,29 +868,54 @@ function AccountDetailsPage({
 
   const rename = () =>
     void perform(async () => {
-      const normalized = name.trim();
-      if (!normalized || [...normalized].length > 64 || /[\u0000-\u001f\u007f]/.test(normalized))
-        throw { code: "account_invalid" };
+      const generation = clientGeneration.current;
+      const normalized = normalizeAccountName(name);
+      if (!isValidAccountName(name)) throw { code: "account_invalid" };
       const updated = await client.rename(normalized);
-      if (!mounted.current) return;
+      if (!mounted.current || generation !== clientGeneration.current) return;
       applyProfile(updated);
       setNotice("昵称已更新。");
     });
 
+  // Only the user and profile change: the nickname field keeps whatever is being typed in the dialog.
+  const applyAvatar = (updated: AccountProfile) => {
+    setProfile(updated);
+    setUser(updated.user);
+  };
+
+  const chooseAvatar = () =>
+    void perform(async () => {
+      const generation = clientGeneration.current;
+      let updated: AccountProfile | null | undefined;
+      try {
+        updated = await client.chooseAvatar?.();
+      } catch (error) {
+        // The host refuses a file that is not a small PNG or JPEG as an invalid request; say what was wrong with it rather than with "the input".
+        if (errorCode(error) === "account_invalid") throw { code: "account_avatar_invalid" };
+        throw error;
+      }
+      if (!updated || !mounted.current || generation !== clientGeneration.current) return;
+      applyAvatar(updated);
+      setNotice("头像已更新。");
+    });
+
+  const removeAvatar = () =>
+    void perform(async () => {
+      const generation = clientGeneration.current;
+      if (!client.removeAvatar) return;
+      const updated = await client.removeAvatar();
+      if (!mounted.current || generation !== clientGeneration.current) return;
+      applyAvatar(updated);
+      setNotice("已移除头像。");
+    });
+
   const copyAccountId = () => {
-    if (!user || !navigator.clipboard?.writeText) return;
-    void navigator.clipboard
-      .writeText(user.id)
-      .then(() => {
-        if (!mounted.current) return;
-        setCopiedAccountId(true);
-        window.setTimeout(() => {
-          if (mounted.current) setCopiedAccountId(false);
-        }, 1800);
-      })
-      .catch(() => {
-        if (mounted.current) setError("账号 ID 暂时无法复制，请稍后重试。");
-      });
+    copyAccountIdToClipboard({
+      id: user?.id,
+      isMounted: () => mounted.current,
+      setCopied: setCopiedAccountId,
+      setError,
+    });
   };
 
   const openPublishedSkins = onOpenCommunity
@@ -1017,7 +925,7 @@ function AccountDetailsPage({
   if (loading)
     return (
       <div className={account.page}>
-        <p role="status">正在读取账号状态…</p>
+        <StatusMessage role="status">正在读取账号状态…</StatusMessage>
       </div>
     );
 
@@ -1044,16 +952,49 @@ function AccountDetailsPage({
 
   const resendSeconds = Math.max(0, Math.ceil((resendAt - now) / 1000));
   const expired = Boolean(challenge) && expiresAt <= now;
+  // Count only providers this host can render; the backend may enable Apple or Google for hosts without a native client for them.
+  const appleAvailable = providers.apple === true && Boolean(client.appleLogin);
+  const googleAvailable = providers.google === true && Boolean(client.googleLogin);
   const enabledProviders =
-    Number(providers.email) + Number(providers.phone) + Number(providers.apple === true);
+    Number(providers.email) +
+    Number(providers.phone) +
+    Number(appleAvailable) +
+    Number(googleAvailable);
 
   const signInWithApple = () =>
     void perform(async () => {
+      const generation = clientGeneration.current;
       if (!client.appleLogin) throw { code: "account_unavailable" };
       const result = await client.appleLogin();
+      if (!mounted.current || generation !== clientGeneration.current) return;
       if (!result.user) throw { code: "account_unavailable" };
       setUser(result.user);
-      await loadProfile();
+      await loadProfile(generation);
+      if (!mounted.current || generation !== clientGeneration.current) return;
+      setNotice("登录成功。");
+      onLoginComplete?.();
+    });
+
+  const signInWithGoogle = () =>
+    void perform(async () => {
+      const generation = clientGeneration.current;
+      if (!client.googleLogin) throw { code: "account_unavailable" };
+      googleWaitingRef.current = true;
+      setGoogleWaiting(true);
+      let result: { user?: AccountUser | null };
+      try {
+        result = await client.googleLogin();
+      } finally {
+        if (mounted.current && generation === clientGeneration.current) {
+          googleWaitingRef.current = false;
+          setGoogleWaiting(false);
+        }
+      }
+      if (!mounted.current || generation !== clientGeneration.current) return;
+      if (!result.user) throw { code: "account_unavailable" };
+      setUser(result.user);
+      await loadProfile(generation);
+      if (!mounted.current || generation !== clientGeneration.current) return;
       setNotice("登录成功。");
       onLoginComplete?.();
     });
@@ -1062,459 +1003,380 @@ function AccountDetailsPage({
     <div className={account.page}>
       {!user && onCancelLogin && (
         <div className={account.profilePageHeader}>
-          <button type="button" className="secondary" disabled={busy} onClick={onCancelLogin}>
-            取消
-          </button>
+          <ActionButton
+            action={() => {
+              cancelGoogle();
+              onCancelLogin();
+            }}
+            className="secondary"
+            disabled={busy && !(googleWaiting && client.googleCancel)}
+            label="取消"
+          />
           <h2 className={account.heading}>登录水杉</h2>
         </div>
       )}
-      {error && (
-        <p role="alert" className="error">
-          {error}
-        </p>
-      )}
-      {notice && (
-        <p role="status" className="notice">
-          {notice}
-        </p>
-      )}
-      <button
-        type="button"
-        className={`${account.section} ${account.hero} ${account.profileCard}`}
-        disabled={!user || busy}
-        aria-label={user ? "编辑个人资料" : undefined}
-        onClick={() => {
-          if (!user) return;
-          if (mobile && typeof window !== "undefined") {
-            pushMobileSettingsState({ page: "account", accountSubpage: "profile" });
-            setMobileProfilePage(true);
-          } else setEditingProfile(true);
-        }}
-      >
-        <div className={account.avatar("medium")} aria-hidden="true">
-          {user ? preferredAccountName(user).slice(0, 1) : "杉"}
-        </div>
-        <div>
-          <h2 className={account.heading}>{user ? preferredAccountName(user) : "欢迎来到水杉"}</h2>
-          <p className={account.note}>{user ? "水杉账号已登录" : "登录，分享你的键盘设计"}</p>
-        </div>
-        {user && (
+      <AccountStatusMessages
+        error={error}
+        notice={notice}
+        noticeClassName={`notice ${account.status}`}
+      />
+      {user ? (
+        <button
+          type="button"
+          className={`${account.section} ${account.hero} ${account.profileCard}`}
+          disabled={busy}
+          aria-label="编辑个人资料"
+          onClick={() => {
+            if (mobile && typeof window !== "undefined") {
+              pushMobileSettingsState({ page: "account", accountSubpage: "profile" });
+              setMobileProfilePage(true);
+            } else {
+              setName(user.displayName);
+              setEditingProfile(true);
+            }
+          }}
+        >
+          <AccountAvatar user={user} load={client.avatar} size="medium" />
+          <div>
+            <h2 className={account.heading}>{preferredAccountName(user)}</h2>
+            <p className={account.note}>{user.email ?? "水杉账号已登录"}</p>
+          </div>
           <span className={account.profileChevron} aria-hidden="true">
             ›
           </span>
-        )}
-      </button>
+        </button>
+      ) : (
+        <section className={`${account.section} ${account.signIn}`}>
+          <div className={account.signInHeader}>
+            <div className={account.avatar("large")} aria-hidden="true">
+              杉
+            </div>
+            <div>
+              <h2 className={account.heading}>
+                {channel === "email"
+                  ? "邮箱登录"
+                  : channel === "phone"
+                    ? "手机号登录"
+                    : "欢迎来到水杉"}
+              </h2>
+              <p className={account.note}>
+                {channel
+                  ? "我们会发送一个 6 位验证码完成登录"
+                  : mobile
+                    ? "登录，分享你的键盘设计"
+                    : "登录后在设备之间同步设置和词库，还可以发布你的候选窗口皮肤"}
+              </p>
+            </div>
+          </div>
+          {!channel ? (
+            <>
+              <div className={account.signInBody}>
+                {appleAvailable && (
+                  <ActionButton
+                    action={signInWithApple}
+                    className={account.provider}
+                    disabled={busy}
+                    label="使用 Apple 登录"
+                  />
+                )}
+                {googleAvailable && (
+                  <ActionButton
+                    action={signInWithGoogle}
+                    className={account.provider}
+                    disabled={busy}
+                    label={googleWaiting ? "正在等待浏览器完成 Google 登录…" : "使用 Google 登录"}
+                  />
+                )}
+                {googleWaiting && client.googleCancel && (
+                  <ActionButton
+                    action={cancelGoogle}
+                    className={account.link}
+                    label="取消 Google 登录"
+                  />
+                )}
+                {providers.email && (
+                  <ActionButton
+                    action={() => chooseChannel("email")}
+                    className={account.provider}
+                    label="邮箱登录"
+                  />
+                )}
+                {providers.phone && (
+                  <ActionButton
+                    action={() => chooseChannel("phone")}
+                    className={account.provider}
+                    label="手机号登录"
+                  />
+                )}
+                {enabledProviders === 0 && (
+                  <p className={`${account.muted} text-center`}>
+                    当前没有可用的验证码登录方式，请稍后重试。
+                  </p>
+                )}
+              </div>
+              <div className={account.signInFooter}>
+                <ActionButton
+                  action={() =>
+                    void perform(async () => {
+                      const generation = clientGeneration.current;
+                      const value = await client.providers();
+                      if (!mounted.current || generation !== clientGeneration.current) return;
+                      setProviders(value);
+                    })
+                  }
+                  className={account.link}
+                  disabled={busy}
+                  label="刷新登录方式"
+                />
+                <ActionButton
+                  action={clearExpired}
+                  className={account.link}
+                  disabled={busy}
+                  label="清除失效登录状态"
+                />
+              </div>
+            </>
+          ) : (
+            <div className={account.signInBody}>
+              <AccountInputField
+                label={channel === "email" ? "邮箱地址" : "手机号（含国家区号）"}
+                ariaLabel={channel === "email" ? "邮箱地址" : "手机号（含国家区号）"}
+                type={channel === "email" ? "email" : "tel"}
+                autoComplete={channel === "email" ? "email" : "tel"}
+                maxLength={320}
+                value={target}
+                disabled={busy}
+                onChange={(value) => {
+                  setTarget(value);
+                  setChallenge(null);
+                  setCode("");
+                }}
+              />
+              <ActionButton
+                action={requestCode}
+                className={challenge ? account.provider : account.submit}
+                disabled={busy || !target.trim() || resendSeconds > 0}
+                label={resendSeconds > 0 ? `${resendSeconds} 秒后可重新发送` : "获取验证码"}
+              />
+              {challenge && (
+                <div className={account.code}>
+                  <AccountInputField
+                    label="6 位验证码"
+                    ariaLabel="6 位验证码"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    value={code}
+                    disabled={busy}
+                    onChange={(value) => setCode(value.replace(/\D/g, "").slice(0, 6))}
+                  />
+                  <ActionButton
+                    action={signIn}
+                    className={account.submit}
+                    disabled={busy || expired || !/^\d{6}$/.test(code)}
+                    label={expired ? "验证码已过期，请重新获取" : busy ? "正在登录…" : "登录"}
+                  />
+                </div>
+              )}
+              <p className={`${account.muted} m-0 text-center`}>
+                验证码只用于本次登录，请勿向他人透露。
+              </p>
+              <div className={account.signInFooter}>
+                <ActionButton
+                  action={() => setChannel(null)}
+                  className={account.link}
+                  disabled={busy}
+                  label="取消"
+                />
+              </div>
+            </div>
+          )}
+        </section>
+      )}
       {appIcon && (
         <AppIconSettingsCard
           client={appIcon}
           platform={platform === "harmony" ? undefined : platform}
         />
       )}
-      {!mobile && onOpenLocalDesigns && (
-        <section className={`${account.section} ${account.communityActions}`}>
-          <div>
-            <h2 className={account.heading}>我的设计</h2>
-            <p className={account.note}>保存在本机的键盘皮肤，不会因登录账号而上传。</p>
-          </div>
-          <button type="button" className="secondary" disabled={busy} onClick={onOpenLocalDesigns}>
-            打开设计器
-          </button>
-        </section>
-      )}
-      {user ? (
-        <>
-          {!mobile && (
-            <section className={`${account.section} ${account.stack}`}>
-              <div>
-                <h2 className={account.heading}>个人资料</h2>
-                <p className={account.note}>昵称会显示在社区作品中，已发布的作品也会同步更新。</p>
-              </div>
-              <label className={account.field}>
-                社区昵称
-                <input
-                  className={account.input}
-                  aria-label="社区昵称"
-                  maxLength={64}
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  disabled={busy}
-                />
-              </label>
-              <div className={account.actionRow}>
-                <button
-                  type="button"
-                  className={account.primary}
-                  disabled={busy || name.trim() === user.displayName}
-                  onClick={rename}
-                >
-                  {busy ? "正在处理…" : "保存昵称"}
-                </button>
-              </div>
-              <dl className={account.details}>
-                <div>
-                  <dt>账号 ID</dt>
-                  <dd>#{user.id.slice(0, 6).toUpperCase()}</dd>
-                </div>
-                <div>
-                  <dt>登录方式</dt>
-                  <dd>{profile?.providers.map(accountProviderName).join("、") || "正在读取"}</dd>
-                </div>
-              </dl>
-            </section>
-          )}
-          {!mobile && editingProfile && (
-            <div
-              className={account.modalBackdrop}
-              role="presentation"
-              onMouseDown={(event) => {
-                if (event.target === event.currentTarget && !busy) setEditingProfile(false);
-              }}
-            >
-              <section
-                className={account.modal}
-                role="dialog"
-                aria-modal="true"
-                aria-label="编辑个人资料"
-              >
-                <div className={account.modalHeading}>
-                  <h2 className={account.heading}>编辑资料</h2>
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={busy}
-                    onClick={() => setEditingProfile(false)}
-                  >
-                    关闭
-                  </button>
-                </div>
-                <div className={account.profilePreview}>
-                  <div className={account.avatar("small")} aria-hidden="true">
-                    {preferredAccountName(user).slice(0, 1)}
-                  </div>
-                  <strong>{name.trim() || "你的昵称"}</strong>
-                </div>
-                <label className={account.field}>
-                  社区昵称
-                  <input
-                    className={account.input}
-                    aria-label="编辑社区昵称"
-                    maxLength={64}
-                    value={name}
-                    disabled={busy}
-                    onChange={(event) => setName(event.target.value)}
-                  />
-                </label>
-                <p className={account.muted}>昵称会显示在社区作品中，已发布的作品也会同步更新。</p>
-                <dl className={account.details}>
-                  <div>
-                    <dt>账号 ID</dt>
-                    <dd>
-                      <button type="button" className={account.copyId} onClick={copyAccountId}>
-                        {copiedAccountId ? "已复制" : `#${user.id.slice(0, 6).toUpperCase()}`}
-                      </button>
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>登录方式</dt>
-                    <dd>{profile?.providers.map(accountProviderName).join("、") || "正在读取"}</dd>
-                  </div>
-                  <div>
-                    <dt>加入水杉</dt>
-                    <dd>{new Date(user.createdAt).toLocaleDateString("zh-CN")}</dd>
-                  </div>
-                </dl>
-                <div className={account.actionRow}>
-                  <button
-                    type="button"
-                    className={account.primary}
-                    disabled={busy || name.trim() === user.displayName}
-                    onClick={() => {
-                      rename();
-                      setEditingProfile(false);
-                    }}
-                  >
-                    保存修改
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={busy}
-                    onClick={() => setEditingProfile(false)}
-                  >
-                    取消
-                  </button>
-                </div>
-              </section>
-            </div>
-          )}
-          {!mobile && (
-            <section className={`${account.section} ${account.stack}`}>
-              <h2 className={account.heading}>账号</h2>
-              <div>
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={busy}
-                  onClick={() => signOut(false)}
-                >
-                  退出登录
-                </button>
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={busy}
-                  onClick={() => setConfirmation("logout-all")}
-                >
-                  退出所有设备
-                </button>
-                <button
-                  type="button"
-                  className="danger-text"
-                  disabled={busy}
-                  onClick={() => setConfirmation("delete")}
-                >
-                  注销账号
-                </button>
-              </div>
-              {confirmation && (
-                <div
-                  className={account.confirmation}
-                  role="alertdialog"
-                  aria-label={confirmation === "delete" ? "确认注销账号" : "确认退出所有设备"}
-                >
-                  <p className={account.note}>
-                    {confirmation === "delete"
-                      ? "注销账号将删除已发布皮肤、评分及其他云端账号数据，无法撤销。"
-                      : "退出所有设备后，所有设备都需要重新登录。"}
-                  </p>
-                  <div>
-                    <button
-                      type="button"
-                      className={confirmation === "delete" ? "danger-text" : "account-primary"}
-                      disabled={busy}
-                      onClick={() => (confirmation === "delete" ? deleteAccount() : signOut(true))}
-                    >
-                      {confirmation === "delete" ? "确认注销账号" : "确认退出所有设备"}
-                    </button>
-                    <button
-                      type="button"
-                      className="secondary"
-                      disabled={busy}
-                      onClick={() => setConfirmation(null)}
-                    >
-                      取消
-                    </button>
-                  </div>
-                </div>
-              )}
-            </section>
-          )}
-          {!mobile && client.settingsSync && (
-            <SettingsSyncCard client={client.settingsSync} userId={user.id} />
-          )}
-          {!mobile && (onOpenCloudDictionary || onOpenCloudClipboard) && (
-            <section className={`${account.section} ${account.communityActions}`}>
-              <div>
-                <h2 className={account.heading}>云端</h2>
-                <p className={account.note}>访问账号中的云词库和云剪贴板。</p>
-              </div>
-              {onOpenCloudDictionary && (
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={busy}
-                  onClick={onOpenCloudDictionary}
-                >
-                  云词库
-                </button>
-              )}
-              {onOpenCloudClipboard && (
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={busy}
-                  onClick={onOpenCloudClipboard}
-                >
-                  云剪贴板
-                </button>
-              )}
-            </section>
-          )}
-          {!mobile && (openPublishedSkins || onOpenCommunity) && (
-            <section className={`${account.section} ${account.communityActions}`}>
-              <div>
-                <h2 className={account.heading}>我的社区作品</h2>
-                <p className={account.note}>管理你公开发布或收藏的社区作品。</p>
-              </div>
-              {openPublishedSkins && (
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={busy}
-                  onClick={openPublishedSkins}
-                >
-                  我发布的皮肤
-                </button>
-              )}
-              {onOpenCommunity && (
-                <>
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={busy}
-                    onClick={() => onOpenCommunity("published-dictionary")}
-                  >
-                    我发布的词库
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={busy}
-                    onClick={() => onOpenCommunity("published-reply")}
-                  >
-                    我发布的回复
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={busy}
-                    onClick={() => onOpenCommunity("saved-dictionary")}
-                  >
-                    收藏的词库
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={busy}
-                    onClick={() => onOpenCommunity("saved-reply")}
-                  >
-                    收藏的回复
-                  </button>
-                </>
-              )}
-            </section>
-          )}
-        </>
-      ) : (
-        <section className={`${account.section} ${account.stack}`}>
-          <h2 className={account.heading}>
-            {channel === "email" ? "邮箱登录" : channel === "phone" ? "手机号登录" : "登录方式"}
-          </h2>
-          {!channel ? (
-            <>
-              <div className={account.actionRow}>
-                {providers.apple && client.appleLogin && (
-                  <button
-                    type="button"
-                    className={account.primary}
-                    disabled={busy}
-                    onClick={signInWithApple}
-                  >
-                    使用 Apple 登录
-                  </button>
-                )}
-                {providers.email && (
-                  <button
-                    type="button"
-                    className={account.primary}
-                    onClick={() => chooseChannel("email")}
-                  >
-                    邮箱登录
-                  </button>
-                )}
-                {providers.phone && (
-                  <button
-                    type="button"
-                    className={account.primary}
-                    onClick={() => chooseChannel("phone")}
-                  >
-                    手机号登录
-                  </button>
-                )}
-              </div>
-              {enabledProviders === 0 && (
-                <p className={account.muted}>当前没有可用的验证码登录方式，请稍后重试。</p>
-              )}
-              <button
-                type="button"
+      {user && !mobile && editingProfile && (
+        <div
+          className={account.modalBackdrop}
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !busy) setEditingProfile(false);
+          }}
+        >
+          <section
+            className={account.modal}
+            role="dialog"
+            aria-modal="true"
+            aria-label="编辑个人资料"
+          >
+            <div className={account.modalHeading}>
+              <h2 className={account.heading}>编辑资料</h2>
+              <ActionButton
+                action={() => setEditingProfile(false)}
                 className="secondary"
                 disabled={busy}
-                onClick={() => void perform(async () => setProviders(await client.providers()))}
-              >
-                刷新登录方式
-              </button>
-              <button type="button" className="secondary" disabled={busy} onClick={clearExpired}>
-                清除失效登录状态
-              </button>
-            </>
-          ) : (
-            <>
-              <label className={account.field}>
-                {channel === "email" ? "邮箱地址" : "手机号（含国家区号）"}
-                <input
-                  className={account.input}
-                  aria-label={channel === "email" ? "邮箱地址" : "手机号（含国家区号）"}
-                  type={channel === "email" ? "email" : "tel"}
-                  autoComplete={channel === "email" ? "email" : "tel"}
-                  maxLength={320}
-                  value={target}
-                  disabled={busy}
-                  onChange={(event) => {
-                    setTarget(event.target.value);
-                    setChallenge(null);
-                    setCode("");
-                  }}
-                />
-              </label>
-              <div className={account.actionRow}>
+                label="关闭"
+              />
+            </div>
+            <div className={account.profilePreview}>
+              {client.chooseAvatar ? (
                 <button
                   type="button"
-                  className={account.primary}
-                  disabled={busy || !target.trim() || resendSeconds > 0}
-                  onClick={requestCode}
-                >
-                  {resendSeconds > 0 ? `${resendSeconds} 秒后可重新发送` : "获取验证码"}
-                </button>
-                <button
-                  type="button"
-                  className="secondary"
+                  className={account.avatarButton}
                   disabled={busy}
-                  onClick={() => setChannel(null)}
+                  aria-label="更换头像"
+                  title="更换头像"
+                  onClick={chooseAvatar}
                 >
-                  取消
+                  <AccountAvatar user={user} load={client.avatar} size="small" />
                 </button>
-              </div>
-              {challenge && (
-                <div className={account.code}>
-                  <label className={account.field}>
-                    6 位验证码
-                    <input
-                      className={account.input}
-                      aria-label="6 位验证码"
-                      inputMode="numeric"
-                      autoComplete="one-time-code"
-                      maxLength={6}
-                      value={code}
-                      disabled={busy}
-                      onChange={(event) =>
-                        setCode(event.target.value.replace(/\D/g, "").slice(0, 6))
-                      }
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    className={account.primary}
-                    disabled={busy || expired || !/^\d{6}$/.test(code)}
-                    onClick={signIn}
-                  >
-                    {expired ? "验证码已过期，请重新获取" : busy ? "正在登录…" : "登录"}
-                  </button>
-                </div>
+              ) : (
+                <AccountAvatar user={user} load={client.avatar} size="small" />
               )}
-              <p className={account.muted}>验证码只用于本次登录，请勿向他人透露。</p>
+              <strong>{name.trim() || "你的昵称"}</strong>
+              {user.avatarUploaded && client.removeAvatar && (
+                <ActionButton
+                  action={removeAvatar}
+                  className={account.link}
+                  disabled={busy}
+                  label="移除头像"
+                />
+              )}
+            </div>
+            {client.chooseAvatar && (
+              <p className={account.muted}>点头像可更换，支持 1 MiB 以内的 PNG 或 JPEG。</p>
+            )}
+            <AccountNicknameField
+              value={name}
+              disabled={busy}
+              ariaLabel="编辑社区昵称"
+              onChange={setName}
+            />
+            <p className={account.muted}>昵称会显示在社区作品中，已发布的作品也会同步更新。</p>
+            <AccountIdentityDetails
+              user={user}
+              providers={profile?.providers ?? []}
+              copied={copiedAccountId}
+              onCopy={copyAccountId}
+            />
+            <div className={account.actionRow}>
+              <ActionButton
+                action={() => {
+                  rename();
+                  setEditingProfile(false);
+                }}
+                className={account.primary}
+                disabled={busy || normalizeAccountName(name) === user.displayName}
+                label="保存修改"
+              />
+              <ActionButton
+                action={() => setEditingProfile(false)}
+                className="secondary"
+                disabled={busy}
+                label="取消"
+              />
+            </div>
+          </section>
+        </div>
+      )}
+      {user && !mobile && client.settingsSync && (
+        <SettingsSyncCard client={client.settingsSync} userId={user.id} />
+      )}
+      {user && !mobile && (onOpenCloudDictionary || onOpenCloudClipboard) && (
+        <GroupList title="云端">
+          {onOpenCloudDictionary && (
+            <MeRow title="云词库" disabled={busy} onClick={onOpenCloudDictionary} />
+          )}
+          {onOpenCloudClipboard && (
+            <MeRow title="云剪贴板" disabled={busy} onClick={onOpenCloudClipboard} />
+          )}
+        </GroupList>
+      )}
+      {!mobile && (onOpenLocalDesigns || (user && (openPublishedSkins || onOpenCommunity))) && (
+        <GroupList title="我的内容">
+          {onOpenLocalDesigns && (
+            <Row title="我的设计" description="保存在本机的键盘皮肤，不会因登录账号而上传。">
+              <ActionButton
+                action={onOpenLocalDesigns}
+                className={account.rowButton}
+                disabled={busy}
+                label="打开设计器"
+              />
+            </Row>
+          )}
+          {user && openPublishedSkins && (
+            <MeRow title="我发布的皮肤" disabled={busy} onClick={openPublishedSkins} />
+          )}
+          {user && onOpenCommunity && (
+            <>
+              <MeRow
+                title="我发布的词库"
+                disabled={busy}
+                onClick={() => onOpenCommunity("published-dictionary")}
+              />
+              <MeRow
+                title="我发布的回复模板"
+                disabled={busy}
+                onClick={() => onOpenCommunity("published-reply")}
+              />
+              <MeRow
+                title="收藏的词库"
+                disabled={busy}
+                onClick={() => onOpenCommunity("saved-dictionary")}
+              />
+              <MeRow
+                title="收藏的回复模板"
+                disabled={busy}
+                onClick={() => onOpenCommunity("saved-reply")}
+              />
             </>
           )}
-        </section>
+        </GroupList>
+      )}
+      {user && !mobile && (
+        <GroupList title="账号">
+          <Row
+            title="这台设备"
+            description="退出后，设置同步、云词库、云剪贴板和发布作品都需要重新登录才能使用。"
+          >
+            <ActionButton
+              action={() => signOut(false)}
+              className={account.rowButton}
+              disabled={busy}
+              label="退出登录"
+            />
+          </Row>
+          <Row title="所有设备" description="所有已登录的设备都需要重新登录。">
+            <ActionButton
+              action={() => setConfirmation("logout-all")}
+              className={account.rowButton}
+              disabled={busy}
+              label="退出所有设备"
+            />
+          </Row>
+          <Row title="注销账号" description="删除账号及已发布的作品、评分等云端数据，无法撤销。">
+            <ActionButton
+              action={() => setConfirmation("delete")}
+              className={account.rowDanger}
+              disabled={busy}
+              label="注销账号"
+            />
+          </Row>
+          {confirmation && (
+            <div className={account.rowBlock}>
+              <AccountConfirmation
+                action={confirmation}
+                busy={busy}
+                onConfirm={() => (confirmation === "delete" ? deleteAccount() : signOut(true))}
+                onCancel={() => setConfirmation(null)}
+              />
+            </div>
+          )}
+        </GroupList>
       )}
       {mobile && (
         // The design's 我的 groups (dc.html `meGroups`), less the rows with nothing behind them (我的设备, 隐私, 开屏动画) and the ones the 设置 list already holds (词库, 自造词). The account's own settings stay on the profile page behind the card above.
@@ -1551,7 +1413,7 @@ function AccountDetailsPage({
                     onClick={() => onOpenCommunity("published-dictionary")}
                   />
                   <MeRow
-                    title="我发布的回复"
+                    title="我发布的回复模板"
                     disabled={busy}
                     onClick={() => onOpenCommunity("published-reply")}
                   />
@@ -1561,7 +1423,7 @@ function AccountDetailsPage({
                     onClick={() => onOpenCommunity("saved-dictionary")}
                   />
                   <MeRow
-                    title="收藏的回复"
+                    title="收藏的回复模板"
                     disabled={busy}
                     onClick={() => onOpenCommunity("saved-reply")}
                   />
@@ -1577,44 +1439,29 @@ function AccountDetailsPage({
           />
         </>
       )}
-      {!mobile && (onOpenAbout || onOpenDesktopDownload) && (
-        <section className={`${account.section} ${account.communityActions}`}>
-          <div>
-            <h2 className={account.heading}>关于</h2>
-            <p className={account.note}>查看水杉版本信息、开源说明和其他平台下载指南。</p>
-          </div>
-          <div className={account.actionRow}>
-            {onOpenAbout && (
-              <button type="button" className="secondary" disabled={busy} onClick={onOpenAbout}>
-                关于水杉
-              </button>
-            )}
-            {onOpenDesktopDownload && (
-              <button
-                type="button"
-                className="secondary"
-                disabled={busy}
-                onClick={onOpenDesktopDownload}
-              >
-                电脑版下载
-              </button>
-            )}
-          </div>
-        </section>
+      {!mobile && (onOpenAbout || onOpenDesktopDownload || onReplayOnboarding) && (
+        <GroupList title="关于">
+          {onOpenAbout && <MeRow title="关于水杉" disabled={busy} onClick={onOpenAbout} />}
+          {onOpenDesktopDownload && (
+            <MeRow title="电脑版下载" disabled={busy} onClick={onOpenDesktopDownload} />
+          )}
+          {onReplayOnboarding && (
+            <MeRow title="重新查看新手引导" disabled={busy} onClick={onReplayOnboarding} />
+          )}
+        </GroupList>
       )}
-      {!mobile && onReplayOnboarding && (
-        <section className={`${account.section} ${account.actionRow}`}>
-          <button type="button" className="secondary" disabled={busy} onClick={onReplayOnboarding}>
-            重新查看新手引导
-          </button>
+      {mobile ? (
+        <section className={`${account.section} ${account.stack}`}>
+          <h2 className={account.heading}>本地数据与云端作品</h2>
+          <p className={account.note}>
+            皮肤设计和打字统计保存在本机。只有你主动发布的作品会分享至社区；账号登录不会自动上传本地设计或输入记录。
+          </p>
         </section>
-      )}
-      <section className={`${account.section} ${account.stack}`}>
-        <h2 className={account.heading}>本地数据与云端作品</h2>
-        <p className={account.note}>
+      ) : (
+        <p className={account.footnote}>
           皮肤设计和打字统计保存在本机。只有你主动发布的作品会分享至社区；账号登录不会自动上传本地设计或输入记录。
         </p>
-      </section>
+      )}
     </div>
   );
 }

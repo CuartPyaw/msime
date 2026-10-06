@@ -1,13 +1,18 @@
 //! The matrix search the provider uses for sentence conversion (schemes-lang.md §5.6, `japanese_matrix_search.cpp`), modelled on Google Pinyin's MatrixSearch: one row per mora of the converted reading, k-best nodes per row extended by lemmas whose reading covers the next morae, plus a single unknown-kana backoff so every reading has a path.
 
-use std::collections::HashSet;
-
 use super::decoder::JapaneseDictionary;
 use super::romaji::{kana_for_romaji_prefix, RomajiConversion};
 
 pub const MAX_NODES_PER_ROW: usize = 8;
 pub const MAX_LEMMA_MORA: usize = 16;
 pub const UNKNOWN_KANA_COST: i32 = 12_000;
+
+fn join_text(first: &str, second: &str) -> String {
+    let mut text = String::with_capacity(first.len() + second.len());
+    text.push_str(first);
+    text.push_str(second);
+    text
+}
 
 /// A converted text and its cost (sentence cost or lemma word cost).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,16 +31,14 @@ struct Node {
 /// Unique by text, never empty, at most `limit`.
 struct Output {
     items: Vec<JapaneseConversion>,
-    seen: HashSet<String>,
     limit: usize,
 }
 
 impl Output {
     fn push(&mut self, text: &str, cost: i64) {
-        if text.is_empty() || self.full() || self.seen.contains(text) {
+        if text.is_empty() || self.full() || self.items.iter().any(|item| item.text == text) {
             return;
         }
-        self.seen.insert(text.to_owned());
         self.items.push(JapaneseConversion {
             text: text.to_owned(),
             cost,
@@ -65,8 +68,7 @@ pub fn search_converted(
     let reading = conversion.hiragana.as_str();
     let pending = conversion.pending.as_str();
     let mut output = Output {
-        items: Vec::new(),
-        seen: HashSet::new(),
+        items: Vec::with_capacity(limit),
         limit,
     };
     if limit == 0 {
@@ -91,7 +93,9 @@ pub fn search_converted(
         .chain(std::iter::once(reading.len()))
         .collect();
     let mora_count = boundaries.len() - 1;
-    let mut rows: Vec<Vec<Node>> = vec![Vec::new(); mora_count + 1];
+    let mut rows: Vec<Vec<Node>> = (0..=mora_count)
+        .map(|_| Vec::with_capacity(MAX_NODES_PER_ROW))
+        .collect();
     rows[0].push(Node {
         text: String::new(),
         cost: 0,
@@ -113,7 +117,7 @@ pub fn search_converted(
                         + i64::from(lemma.word_cost)
                         + i64::from(dictionary.connection_cost(previous.right_id, lemma.left_id));
                     rows[end].push(Node {
-                        text: format!("{}{}", previous.text, lemma.surface),
+                        text: join_text(&previous.text, &lemma.surface),
                         cost,
                         right_id: lemma.right_id,
                     });
@@ -124,7 +128,7 @@ pub fn search_converted(
         let kana = &reading[start_byte..boundaries[start + 1]];
         for previous in &previous_row {
             rows[start + 1].push(Node {
-                text: format!("{}{kana}", previous.text),
+                text: join_text(&previous.text, kana),
                 cost: previous.cost + i64::from(UNKNOWN_KANA_COST),
                 right_id: 0,
             });
@@ -147,7 +151,7 @@ pub fn search_converted(
 
     if !pending.is_empty() {
         for kana in &pending_kana {
-            for lemma in dictionary.exact_lemmas(&format!("{reading}{kana}"), 16) {
+            for lemma in dictionary.exact_lemmas(&join_text(reading, kana), 16) {
                 output.push(&lemma.surface, i64::from(lemma.word_cost));
             }
         }
@@ -186,13 +190,20 @@ mod tests {
         matrix: &[i16],
     ) -> JapaneseDictionary {
         let root = tempfile::tempdir().expect("temporary directory");
-        let path = root.path().join("dict_japanese.dat");
+        let path = root.path().join("msime-japanese.dat");
         std::fs::write(&path, test_model::bytes(entries, size, matrix)).expect("write model");
         JapaneseDictionary::load(&path).expect("model loads")
     }
 
     fn texts(results: &[JapaneseConversion]) -> Vec<&str> {
         results.iter().map(|result| result.text.as_str()).collect()
+    }
+
+    #[test]
+    fn join_text_allocates_only_result_bytes() {
+        let text = super::join_text("蚊", "な");
+        assert_eq!(text, "蚊な");
+        assert_eq!(text.capacity(), text.len());
     }
 
     fn search(

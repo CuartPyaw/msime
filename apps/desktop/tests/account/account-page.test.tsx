@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
+import { testHost } from "../support/host";
+import { settingsFormReady } from "../support/settings-form";
 import { useState } from "react";
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import {
   AccountPage,
   SettingsPage,
@@ -40,6 +42,14 @@ function account(overrides: Partial<AccountClient> = {}): AccountClient {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((accept) => {
+    resolve = accept;
+  });
+  return { promise, resolve };
+}
+
 test("code login trims the target, requires six ASCII digits and loads the profile", async () => {
   const client = account();
   const onLoginComplete = vi.fn();
@@ -64,8 +74,33 @@ test("code login trims the target, requires six ASCII digits and loads the profi
   await waitFor(() => expect(client.login).toHaveBeenCalledWith("fixture-challenge", "123456"));
   expect(await screen.findByText("水杉测试用户")).not.toBeNull();
   expect(onLoginComplete).toHaveBeenCalledOnce();
-  expect(screen.getByText("邮箱")).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "编辑个人资料" }));
+  expect(
+    within(screen.getByRole("dialog", { name: "编辑个人资料" })).getByText("邮箱"),
+  ).not.toBeNull();
   expect(screen.queryByText("fixture-challenge")).toBeNull();
+});
+
+test("ignores a same-tick duplicate verification-code request", async () => {
+  const pending = deferred<{ challengeId: string; expiresIn: number }>();
+  const requestCode = vi.fn().mockReturnValue(pending.promise);
+  const client = account({
+    providers: vi.fn().mockResolvedValue({ email: true, phone: false }),
+    requestCode,
+  });
+  render(<AccountPage client={client} />);
+  fireEvent.click(await screen.findByRole("button", { name: "邮箱登录" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "邮箱地址" }), {
+    target: { value: "fixture@example.test" },
+  });
+  const request = screen.getByRole("button", { name: "获取验证码" });
+  act(() => {
+    fireEvent.click(request);
+    fireEvent.click(request);
+  });
+  expect(requestCode).toHaveBeenCalledOnce();
+  pending.resolve({ challengeId: "fixture-challenge", expiresIn: 300 });
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "6 位验证码" })).not.toBeNull());
 });
 
 test("profile rename, logout-all confirmation and account deletion use explicit actions", async () => {
@@ -75,10 +110,14 @@ test("profile rename, logout-all confirmation and account deletion use explicit 
     rename: vi.fn().mockResolvedValue({ user: renamed, providers: ["email"] }),
   });
   render(<AccountPage client={client} />);
-  const name = await screen.findByRole("textbox", { name: "社区昵称" });
+  fireEvent.click(await screen.findByRole("button", { name: "编辑个人资料" }));
+  // The profile dialog is the only place the nickname is edited; the page itself has no second nickname field.
+  expect(screen.getAllByRole("textbox", { name: /社区昵称/ })).toHaveLength(1);
+  const name = screen.getByRole("textbox", { name: "编辑社区昵称" });
   fireEvent.change(name, { target: { value: "  新昵称  " } });
-  fireEvent.click(screen.getByRole("button", { name: "保存昵称" }));
+  fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
   await waitFor(() => expect(client.rename).toHaveBeenCalledWith("新昵称"));
+  expect(await screen.findByText("昵称已更新。")).not.toBeNull();
 
   fireEvent.click(screen.getByRole("button", { name: "退出所有设备" }));
   expect(screen.getByRole("alertdialog", { name: "确认退出所有设备" })).not.toBeNull();
@@ -111,6 +150,39 @@ test("a late profile mutation is ignored after the profile page unmounts", async
   await Promise.resolve();
 });
 
+test("a desktop profile rename response from a replaced client is ignored", async () => {
+  let resolveOld!: (value: AccountProfile) => void;
+  const oldClient = account({
+    status: vi.fn().mockResolvedValue({ user }),
+    rename: vi.fn(
+      () =>
+        new Promise<AccountProfile>((resolve) => {
+          resolveOld = resolve;
+        }),
+    ),
+  });
+  const nextClient = account({
+    status: vi.fn().mockResolvedValue({ user }),
+  });
+  const view = render(<AccountPage client={oldClient} />);
+  fireEvent.click(await screen.findByRole("button", { name: "编辑个人资料" }));
+  const name = screen.getByRole("textbox", { name: "编辑社区昵称" });
+  fireEvent.change(name, { target: { value: "旧客户端昵称" } });
+  fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+  await waitFor(() => expect(oldClient.rename).toHaveBeenCalledWith("旧客户端昵称"));
+
+  view.rerender(<AccountPage client={nextClient} />);
+  await screen.findByRole("button", { name: "编辑个人资料" });
+  await act(async () => {
+    resolveOld({ user: { ...user, displayName: "响应旧昵称" }, providers: ["email"] });
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(screen.queryByText("响应旧昵称")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "编辑个人资料" }));
+  expect(screen.queryByDisplayValue("响应旧昵称")).toBeNull();
+});
+
 test("mobile accounts keep profile editing and session actions on the pushed profile page", async () => {
   window.history.replaceState({ msimeSettings: true, page: "account" }, "");
   const client = account({ status: vi.fn().mockResolvedValue({ user }) });
@@ -125,6 +197,27 @@ test("mobile accounts keep profile editing and session actions on the pushed pro
   expect(screen.getByRole("alertdialog", { name: "确认重新登录" })).not.toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "确认" }));
   await waitFor(() => expect(client.clearExpired).toHaveBeenCalledTimes(1));
+});
+
+test("mobile profile ignores a same-tick duplicate nickname save", async () => {
+  const pending = deferred<AccountProfile>();
+  const rename = vi.fn().mockReturnValue(pending.promise);
+  const client = account({
+    status: vi.fn().mockResolvedValue({ user }),
+    rename,
+  });
+  render(<AccountPage client={client} platform="ios" />);
+  fireEvent.click(await screen.findByRole("button", { name: "编辑个人资料" }));
+  const name = screen.getByRole("textbox", { name: "编辑社区昵称" });
+  fireEvent.change(name, { target: { value: "移动端新昵称" } });
+  const save = screen.getByRole("button", { name: "保存昵称" });
+  act(() => {
+    fireEvent.click(save);
+    fireEvent.click(save);
+  });
+  expect(rename).toHaveBeenCalledOnce();
+  pending.resolve({ user: { ...user, displayName: "移动端新昵称" }, providers: ["email"] });
+  await waitFor(() => expect(screen.getByText("昵称已更新。")).not.toBeNull());
 });
 
 test("a mobile profile rename response from a replaced client is ignored", async () => {
@@ -164,9 +257,7 @@ test("Harmony 2-in-1 uses desktop account controls even though its platform is H
   const client = account({ status: vi.fn().mockResolvedValue({ user }) });
   render(<AccountPage client={client} platform="harmony" mobile={false} />);
 
-  expect(await screen.findByRole("heading", { name: "个人资料" })).not.toBeNull();
-  expect(screen.getByRole("heading", { name: "账号" })).not.toBeNull();
-  expect(screen.getByRole("button", { name: "保存昵称" })).not.toBeNull();
+  expect(await screen.findByRole("heading", { name: "账号" })).not.toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "编辑个人资料" }));
   expect(await screen.findByRole("dialog", { name: "编辑个人资料" })).not.toBeNull();
 });
@@ -179,14 +270,14 @@ test("settings passes the Harmony 2-in-1 form factor into the account page", asy
       client={{
         load: async () => preferences,
         save: vi.fn(),
-        host: { platform: "harmony", mobile_settings: false } as never,
+        host: testHost({ platform: "harmony", mobile_settings: false }),
         account: client,
       }}
     />,
   );
 
-  expect(await screen.findByRole("heading", { name: "个人资料" })).not.toBeNull();
-  expect(screen.getByRole("heading", { name: "账号" })).not.toBeNull();
+  expect(await screen.findByRole("heading", { name: "账号" })).not.toBeNull();
+  expect(screen.getByRole("button", { name: "编辑个人资料" })).not.toBeNull();
 });
 
 test("the mobile login sheet exposes its caller's cancel action", async () => {
@@ -206,7 +297,7 @@ test("Harmony chat login focuses the tryout and cancel returns to it", async () 
       client={{
         load: async () => preferences,
         save: vi.fn(),
-        host: { platform: "harmony" } as never,
+        host: testHost({ platform: "harmony" }),
         home: {},
         chat: {
           models: vi.fn().mockRejectedValue({ code: "account_unauthorized" }),
@@ -250,9 +341,9 @@ test("profile card opens the shared editor and copies the complete account ID", 
   const client = account({ status: vi.fn().mockResolvedValue({ user }) });
   render(<AccountPage client={client} />);
   fireEvent.click(await screen.findByRole("button", { name: "编辑个人资料" }));
-  expect(screen.getByRole("dialog", { name: "编辑个人资料" })).not.toBeNull();
-  expect(screen.getByText("加入水杉")).not.toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "#FIXTUR" }));
+  const dialog = screen.getByRole("dialog", { name: "编辑个人资料" });
+  expect(within(dialog).getByText("加入水杉")).not.toBeNull();
+  fireEvent.click(within(dialog).getByRole("button", { name: "#FIXTUR" }));
   await waitFor(() => expect(writeText).toHaveBeenCalledWith("fixture-user-id"));
   fireEvent.click(screen.getByRole("button", { name: "关闭" }));
   expect(screen.queryByRole("dialog", { name: "编辑个人资料" })).toBeNull();
@@ -270,6 +361,173 @@ test("iOS Apple sign-in stays behind the native account client boundary", async 
   expect(screen.queryByText(/token|nonce/i)).toBeNull();
 });
 
+test("an Apple sign-in response from a replaced account client is ignored", async () => {
+  let resolveOld!: (value: { user?: AccountUser | null }) => void;
+  const oldClient = account({
+    providers: vi.fn().mockResolvedValue({ email: false, phone: false, apple: true }),
+    appleLogin: vi.fn(
+      () =>
+        new Promise<{ user?: AccountUser | null }>((resolve) => {
+          resolveOld = resolve;
+        }),
+    ),
+  });
+  const nextClient = account({
+    providers: vi.fn().mockResolvedValue({ email: true, phone: false }),
+    status: vi.fn().mockResolvedValue({ user: null }),
+  });
+  const view = render(<AccountPage client={oldClient} />);
+  fireEvent.click(await screen.findByRole("button", { name: "使用 Apple 登录" }));
+  await waitFor(() => expect(oldClient.appleLogin).toHaveBeenCalledTimes(1));
+
+  view.rerender(<AccountPage client={nextClient} />);
+  await screen.findByRole("button", { name: "邮箱登录" });
+  await act(async () => {
+    resolveOld({ user });
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(oldClient.profile).not.toHaveBeenCalled();
+  expect(screen.queryByText("水杉测试用户")).toBeNull();
+});
+
+test("an Apple-only backend without a native Apple client shows the empty login state", async () => {
+  const client = account({
+    providers: vi.fn().mockResolvedValue({ email: false, phone: false, apple: true }),
+  });
+  render(<AccountPage client={client} />);
+  expect(await screen.findByText("当前没有可用的验证码登录方式，请稍后重试。")).not.toBeNull();
+  expect(screen.queryByRole("button", { name: "使用 Apple 登录" })).toBeNull();
+});
+
+test("desktop Google sign-in runs through the native account client", async () => {
+  const googleLogin = vi.fn().mockResolvedValue({ user });
+  const onLoginComplete = vi.fn();
+  const client = account({
+    providers: vi.fn().mockResolvedValue({ email: true, phone: false, google: true }),
+    profile: vi.fn().mockResolvedValue({ user, providers: ["google"] }),
+    googleLogin,
+  });
+  render(<AccountPage client={client} onLoginComplete={onLoginComplete} />);
+  fireEvent.click(await screen.findByRole("button", { name: "使用 Google 登录" }));
+  await waitFor(() => expect(googleLogin).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(onLoginComplete).toHaveBeenCalledTimes(1));
+  expect(client.profile).toHaveBeenCalled();
+  fireEvent.click(await screen.findByRole("button", { name: "编辑个人资料" }));
+  expect(
+    await within(screen.getByRole("dialog", { name: "编辑个人资料" })).findByText("Google"),
+  ).not.toBeNull();
+  expect(client.requestCode).not.toHaveBeenCalled();
+  expect(screen.queryByText(/token|code|state/i)).toBeNull();
+});
+
+test("a Google sign-in response from a replaced account client is ignored", async () => {
+  let resolveOld!: (value: { user?: AccountUser | null }) => void;
+  const oldClient = account({
+    providers: vi.fn().mockResolvedValue({ email: false, phone: false, google: true }),
+    googleLogin: vi.fn(
+      () =>
+        new Promise<{ user?: AccountUser | null }>((resolve) => {
+          resolveOld = resolve;
+        }),
+    ),
+  });
+  const nextClient = account({
+    providers: vi.fn().mockResolvedValue({ email: true, phone: false }),
+    status: vi.fn().mockResolvedValue({ user: null }),
+  });
+  const view = render(<AccountPage client={oldClient} />);
+  fireEvent.click(await screen.findByRole("button", { name: "使用 Google 登录" }));
+  await waitFor(() => expect(oldClient.googleLogin).toHaveBeenCalledTimes(1));
+
+  view.rerender(<AccountPage client={nextClient} />);
+  await screen.findByRole("button", { name: "邮箱登录" });
+  await act(async () => {
+    resolveOld({ user });
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(oldClient.profile).not.toHaveBeenCalled();
+  expect(screen.queryByText("水杉测试用户")).toBeNull();
+});
+
+test("Google sign-in needs both the backend provider and a native Google client", async () => {
+  const withoutClient = account({
+    providers: vi.fn().mockResolvedValue({ email: false, phone: false, google: true }),
+  });
+  render(<AccountPage client={withoutClient} />);
+  expect(await screen.findByText("当前没有可用的验证码登录方式，请稍后重试。")).not.toBeNull();
+  expect(screen.queryByRole("button", { name: "使用 Google 登录" })).toBeNull();
+  cleanup();
+
+  const googleLogin = vi.fn();
+  const withoutProvider = account({
+    providers: vi.fn().mockResolvedValue({ email: true, phone: false, google: false }),
+    googleLogin,
+  });
+  render(<AccountPage client={withoutProvider} />);
+  expect(await screen.findByRole("button", { name: "邮箱登录" })).not.toBeNull();
+  expect(screen.queryByRole("button", { name: "使用 Google 登录" })).toBeNull();
+  expect(googleLogin).not.toHaveBeenCalled();
+});
+
+test("a cancelled Google sign-in stays silent", async () => {
+  const googleLogin = vi.fn().mockRejectedValue({ code: "account_cancelled" });
+  const client = account({
+    providers: vi.fn().mockResolvedValue({ email: false, phone: false, google: true }),
+    googleLogin,
+  });
+  render(<AccountPage client={client} />);
+  fireEvent.click(await screen.findByRole("button", { name: "使用 Google 登录" }));
+  await waitFor(() => expect(googleLogin).toHaveBeenCalledTimes(1));
+  await waitFor(() =>
+    expect(
+      (screen.getByRole("button", { name: "使用 Google 登录" }) as HTMLButtonElement).disabled,
+    ).toBe(false),
+  );
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("a pending Google sign-in can be abandoned without waiting for the browser", async () => {
+  let rejectLogin: (reason: unknown) => void = () => undefined;
+  const googleLogin = vi.fn(
+    () =>
+      new Promise<{ user?: null }>((_, reject) => {
+        rejectLogin = reject;
+      }),
+  );
+  const googleCancel = vi.fn(async () => rejectLogin({ code: "account_cancelled" }));
+  const onCancelLogin = vi.fn();
+  const client = account({
+    providers: vi.fn().mockResolvedValue({ email: true, phone: false, google: true }),
+    googleLogin,
+    googleCancel,
+  });
+  render(<AccountPage client={client} onCancelLogin={onCancelLogin} />);
+  fireEvent.click(await screen.findByRole("button", { name: "使用 Google 登录" }));
+  const cancel = await screen.findByRole("button", { name: "取消 Google 登录" });
+  expect(
+    (screen.getByRole("button", { name: "正在等待浏览器完成 Google 登录…" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  expect((screen.getByRole("button", { name: "取消" }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(cancel);
+  expect(googleCancel).toHaveBeenCalledTimes(1);
+  await waitFor(() =>
+    expect(
+      (screen.getByRole("button", { name: "使用 Google 登录" }) as HTMLButtonElement).disabled,
+    ).toBe(false),
+  );
+  expect(screen.queryByRole("button", { name: "取消 Google 登录" })).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "使用 Google 登录" }));
+  await screen.findByRole("button", { name: "取消 Google 登录" });
+  fireEvent.click(screen.getByRole("button", { name: "取消" }));
+  expect(googleCancel).toHaveBeenCalledTimes(2);
+  expect(onCancelLogin).toHaveBeenCalledTimes(1);
+});
+
 test("mobile profile card opens a back-stack page with account actions", async () => {
   window.history.replaceState({ msimeSettings: true, page: "account" }, "");
   const client = account({ status: vi.fn().mockResolvedValue({ user }) });
@@ -283,7 +541,7 @@ test("mobile profile card opens a back-stack page with account actions", async (
 test("account deletion requires its destructive confirmation", async () => {
   const client = account({ status: vi.fn().mockResolvedValue({ user }) });
   render(<AccountPage client={client} />);
-  await screen.findByRole("textbox", { name: "社区昵称" });
+  await screen.findByRole("button", { name: "编辑个人资料" });
   fireEvent.click(screen.getByRole("button", { name: "注销账号" }));
   expect(client.deleteAccount).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "确认注销账号" }));
@@ -306,7 +564,7 @@ test("account cancellation does not show a stale error alert", async () => {
     status: vi.fn().mockRejectedValue({ code: "account_cancelled" }),
   });
   render(<AccountPage client={client} />);
-  expect(await screen.findByRole("heading", { name: "登录方式" })).not.toBeNull();
+  expect(await screen.findByRole("heading", { name: "欢迎来到水杉" })).not.toBeNull();
   expect(screen.queryByRole("alert")).toBeNull();
 });
 
@@ -318,7 +576,7 @@ test("an aborted profile request leaves the account page quiet", async () => {
       .mockRejectedValue(new DOMException("The user aborted a request.", "AbortError")),
   });
   render(<AccountPage client={client} />);
-  expect(await screen.findByRole("heading", { name: "个人资料" })).not.toBeNull();
+  expect(await screen.findByRole("heading", { name: "账号" })).not.toBeNull();
   expect(screen.queryByRole("alert")).toBeNull();
 });
 
@@ -337,6 +595,35 @@ test("settings sync cancellation does not become a visible account error", async
   expect(await screen.findByRole("heading", { name: "设置同步" })).not.toBeNull();
   await waitFor(() => expect(screen.queryByText("操作已取消，请重试。")).toBeNull());
   expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("ignores a same-tick duplicate cloud settings refresh", async () => {
+  const schema = {
+    fields: { "input.schema": { type: "string" } },
+    maximumBytes: 65536,
+    updateMode: "replace" as const,
+    revisionRequired: true,
+  };
+  const load = vi.fn().mockResolvedValue({ revision: 7, settings: { "input.schema": "quanpin" } });
+  const client = account({
+    status: vi.fn().mockResolvedValue({ user }),
+    settingsSync: {
+      schema: vi.fn().mockResolvedValue(schema),
+      load,
+      upload: vi.fn(),
+      apply: vi.fn(),
+    },
+  });
+  render(<AccountPage client={client} />);
+  expect(await screen.findByText("云端版本：7")).not.toBeNull();
+  const refresh = screen.getByRole("button", { name: "刷新云端设置" });
+
+  act(() => {
+    fireEvent.click(refresh);
+    fireEvent.click(refresh);
+  });
+  expect(load).toHaveBeenCalledTimes(2);
+  await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
 });
 
 test("logged-in accounts can open their published skin list", async () => {
@@ -361,9 +648,9 @@ test("logged-in accounts expose local designs and every community collection", a
   fireEvent.click(await screen.findByRole("button", { name: "打开设计器" }));
   fireEvent.click(screen.getByRole("button", { name: "我发布的皮肤" }));
   fireEvent.click(screen.getByRole("button", { name: "我发布的词库" }));
-  fireEvent.click(screen.getByRole("button", { name: "我发布的回复" }));
+  fireEvent.click(screen.getByRole("button", { name: "我发布的回复模板" }));
   fireEvent.click(screen.getByRole("button", { name: "收藏的词库" }));
-  fireEvent.click(screen.getByRole("button", { name: "收藏的回复" }));
+  fireEvent.click(screen.getByRole("button", { name: "收藏的回复模板" }));
   expect(openLocalDesigns).toHaveBeenCalledTimes(1);
   expect(openCommunity.mock.calls).toEqual([
     ["published-skins"],
@@ -419,7 +706,7 @@ test("mobile settings return to My after replaying and skipping onboarding", asy
   const client = {
     load: async () => preferences,
     save: vi.fn(),
-    host: { platform: "harmony" } as never,
+    host: testHost({ platform: "harmony" }),
     home: {},
     account: account(),
   };
@@ -463,9 +750,9 @@ test("mobile accounts group published and saved community resources", async () =
   const content = within(await screen.findByRole("region", { name: "我的内容" }));
   fireEvent.click(content.getByRole("button", { name: "我发布的皮肤" }));
   fireEvent.click(content.getByRole("button", { name: "我发布的词库" }));
-  fireEvent.click(content.getByRole("button", { name: "我发布的回复" }));
+  fireEvent.click(content.getByRole("button", { name: "我发布的回复模板" }));
   fireEvent.click(content.getByRole("button", { name: "收藏的词库" }));
-  fireEvent.click(content.getByRole("button", { name: "收藏的回复" }));
+  fireEvent.click(content.getByRole("button", { name: "收藏的回复模板" }));
   expect(openCommunity.mock.calls).toEqual([
     ["published-skins"],
     ["published-dictionary"],
@@ -559,6 +846,30 @@ test("mobile app icon choices read system state and use an explicit selection", 
   expect(
     screen.getByRole("button", { name: "杉林，杉叶青绿，沉静自然" }).getAttribute("aria-pressed"),
   ).toBe("true");
+});
+
+test("app icon selection ignores a same-tick duplicate", async () => {
+  const pending = deferred<{ supported: boolean; selected: string }>();
+  const set = vi.fn().mockReturnValue(pending.promise);
+  render(
+    <AccountPage
+      client={account({
+        appIcon: {
+          info: vi.fn().mockResolvedValue({ supported: true, selected: "classic" }),
+          set,
+        },
+      })}
+    />,
+  );
+  await screen.findByRole("button", { name: "原版，经典黑白，简洁如初" });
+  const forest = screen.getByRole("button", { name: "杉林，杉叶青绿，沉静自然" });
+  act(() => {
+    fireEvent.click(forest);
+    fireEvent.click(forest);
+  });
+  expect(set).toHaveBeenCalledOnce();
+  pending.resolve({ supported: true, selected: "forest" });
+  await waitFor(() => expect(forest.getAttribute("aria-pressed")).toBe("true"));
 });
 
 test("app icon errors are ignored only when the reread system state matches", async () => {
@@ -656,6 +967,41 @@ test("settings sync requires confirmation and preserves a remote conflict error"
   expect(await screen.findByText("云端设置已被其他设备更新，请刷新后重新确认。")).not.toBeNull();
 });
 
+test("ignores a second settings upload while the first is pending", async () => {
+  let resolveUpload!: (value: { revision: number; settings: Record<string, string> }) => void;
+  const upload = vi.fn(
+    () =>
+      new Promise<{ revision: number; settings: Record<string, string> }>((resolve) => {
+        resolveUpload = resolve;
+      }),
+  );
+  const client = account({
+    status: vi.fn().mockResolvedValue({ user }),
+    settingsSync: {
+      schema: vi.fn().mockResolvedValue({
+        fields: { "input.schema": { type: "string" } },
+        maximumBytes: 65536,
+        updateMode: "replace",
+        revisionRequired: true,
+      }),
+      load: vi.fn().mockResolvedValue({ revision: 7, settings: { "input.schema": "quanpin" } }),
+      upload,
+      apply: vi.fn(),
+    },
+  });
+  render(<AccountPage client={client} />);
+  expect(await screen.findByText("云端版本：7")).not.toBeNull();
+  fireEvent.click(await screen.findByRole("button", { name: "上传本机设置" }));
+  const confirm = screen.getByRole("button", { name: "确认上传" });
+  act(() => {
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+  });
+  expect(upload).toHaveBeenCalledOnce();
+  resolveUpload({ revision: 8, settings: { "input.schema": "quanpin" } });
+  await waitFor(() => expect(upload).toHaveBeenCalledOnce());
+});
+
 const preferences: Snapshot = {
   format_version: 1,
   revision: 1,
@@ -672,8 +1018,8 @@ test("settings expose My only with a personal capability and omit preference act
   const without = render(
     <SettingsPage client={{ load: async () => preferences, save: vi.fn() }} />,
   );
-  await screen.findByRole("button", { name: "保存设置" });
-  expect(screen.queryByRole("button", { name: "账户与同步" })).toBeNull();
+  await settingsFormReady();
+  expect(screen.queryByRole("button", { name: "账号与同步" })).toBeNull();
   without.unmount();
 
   render(
@@ -682,9 +1028,9 @@ test("settings expose My only with a personal capability and omit preference act
       initialPage="account"
     />,
   );
-  expect(await screen.findByRole("heading", { name: "账户与同步" })).not.toBeNull();
+  expect(await screen.findByRole("heading", { name: "账号与同步" })).not.toBeNull();
   await screen.findByText("欢迎来到水杉");
-  expect(screen.queryByRole("button", { name: "保存设置" })).toBeNull();
+  expect(screen.queryByRole("form", { name: "设置" })).toBeNull();
   expect(screen.queryByRole("button", { name: "重新读取" })).toBeNull();
 });
 
@@ -698,7 +1044,7 @@ test("iOS exposes My and alternate icons without a fake account client", async (
       client={{
         load: async () => preferences,
         save: vi.fn(),
-        host: { platform: "ios" } as never,
+        host: testHost({ platform: "ios" }),
         appIcon,
       }}
       initialPage="account"
@@ -712,4 +1058,142 @@ test("iOS exposes My and alternate icons without a fake account client", async (
     screen.getByRole("button", { name: "晴空，清透蓝调，轻盈明亮" }).getAttribute("aria-pressed"),
   ).toBe("true");
   expect(screen.queryByText("欢迎来到水杉")).toBeNull();
+});
+
+test("macOS settings offer no setup guide to replay; the status notice covers the input source", async () => {
+  const replay = vi.fn();
+  render(
+    <SettingsPage
+      client={{
+        load: async () => preferences,
+        save: vi.fn(),
+        account: account(),
+        host: testHost({ platform: "macos" }),
+        inputSourceStartup: {
+          status: vi.fn().mockResolvedValue(null),
+          openSettings: vi.fn().mockResolvedValue(undefined),
+        },
+      }}
+      initialPage="account"
+      onReplayOnboarding={replay}
+    />,
+  );
+  await screen.findByText("欢迎来到水杉");
+  expect(screen.queryByRole("button", { name: "重新查看新手引导" })).toBeNull();
+});
+
+const avatarImage = "data:image/png;base64,iVBORw0KGgo=";
+
+test("a signed-in card shows the avatar the host fetched and the Google email", async () => {
+  const signedIn: AccountUser = {
+    ...user,
+    email: "person@example.test",
+    avatarUrl: "https://lh3.googleusercontent.com/a/card",
+  };
+  const avatar = vi.fn().mockResolvedValue(avatarImage);
+  render(
+    <AccountPage
+      client={account({
+        status: vi.fn().mockResolvedValue({ user: signedIn }),
+        profile: vi.fn().mockResolvedValue({ user: signedIn, providers: ["google"] }),
+        avatar,
+      })}
+    />,
+  );
+  const card = await screen.findByRole("button", { name: "编辑个人资料" });
+  expect(within(card).getByText("person@example.test")).not.toBeNull();
+  await waitFor(() => expect(card.querySelector("img")?.getAttribute("src")).toBe(avatarImage));
+  // The dialog shows the same avatar without asking the host again.
+  fireEvent.click(card);
+  const dialog = screen.getByRole("dialog", { name: "编辑个人资料" });
+  await waitFor(() => expect(dialog.querySelector("img")?.getAttribute("src")).toBe(avatarImage));
+  expect(avatar).toHaveBeenCalledOnce();
+  expect(within(dialog).getByText("person@example.test")).not.toBeNull();
+});
+
+test("without an avatar, or on a host that does not fetch one, the name's first character stands in", async () => {
+  render(
+    <AccountPage
+      client={account({
+        status: vi.fn().mockResolvedValue({
+          user: { ...user, avatarUrl: "https://lh3.googleusercontent.com/a/no-loader" },
+        }),
+      })}
+    />,
+  );
+  const card = await screen.findByRole("button", { name: "编辑个人资料" });
+  expect(card.querySelector("img")).toBeNull();
+  expect(within(card).getByText("水")).not.toBeNull();
+  expect(within(card).getByText("水杉账号已登录")).not.toBeNull();
+});
+
+test("the edit dialog uploads and removes a custom avatar without losing the name being typed", async () => {
+  const google = "https://lh3.googleusercontent.com/a/dialog";
+  const uploaded = "https://media.msime.app/avatars/dialog.jpg";
+  const signedIn: AccountUser = { ...user, avatarUrl: google };
+  const withUpload: AccountProfile = {
+    user: { ...signedIn, avatarUrl: uploaded, avatarUploaded: true },
+    providers: ["google"],
+  };
+  const avatar = vi.fn().mockImplementation(async () => avatarImage);
+  const chooseAvatar = vi.fn().mockResolvedValue(withUpload);
+  const removeAvatar = vi.fn().mockResolvedValue({ user: signedIn, providers: ["google"] });
+  render(
+    <AccountPage
+      client={account({
+        status: vi.fn().mockResolvedValue({ user: signedIn }),
+        profile: vi.fn().mockResolvedValue({ user: signedIn, providers: ["google"] }),
+        avatar,
+        chooseAvatar,
+        removeAvatar,
+      })}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "编辑个人资料" }));
+  const dialog = screen.getByRole("dialog", { name: "编辑个人资料" });
+  // Only an uploaded avatar can be removed.
+  expect(within(dialog).queryByRole("button", { name: "移除头像" })).toBeNull();
+  fireEvent.change(within(dialog).getByLabelText("编辑社区昵称"), {
+    target: { value: "正在输入的昵称" },
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "更换头像" }));
+  expect(await screen.findByText("头像已更新。")).not.toBeNull();
+  expect(chooseAvatar).toHaveBeenCalledOnce();
+  // The new URL asks the host for the new image.
+  await waitFor(() => expect(avatar).toHaveBeenCalledTimes(2));
+  expect((within(dialog).getByLabelText("编辑社区昵称") as HTMLInputElement).value).toBe(
+    "正在输入的昵称",
+  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "移除头像" }));
+  expect(await screen.findByText("已移除头像。")).not.toBeNull();
+  expect(removeAvatar).toHaveBeenCalledOnce();
+  expect(within(dialog).queryByRole("button", { name: "移除头像" })).toBeNull();
+});
+
+test("closing the file dialog changes nothing, and a file the host refuses says what to pick", async () => {
+  const chooseAvatar = vi
+    .fn()
+    .mockResolvedValueOnce(null)
+    .mockRejectedValueOnce({ code: "account_invalid" });
+  render(
+    <AccountPage client={account({ status: vi.fn().mockResolvedValue({ user }), chooseAvatar })} />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "编辑个人资料" }));
+  const dialog = screen.getByRole("dialog", { name: "编辑个人资料" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "更换头像" }));
+  await waitFor(() => expect(chooseAvatar).toHaveBeenCalledOnce());
+  expect(screen.queryByText("头像已更新。")).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
+  fireEvent.click(within(dialog).getByRole("button", { name: "更换头像" }));
+  expect((await screen.findByRole("alert")).textContent).toBe(
+    "请选择 1 MiB 以内的 PNG 或 JPEG 图片。",
+  );
+});
+
+test("a host without avatar upload offers no avatar button", async () => {
+  render(<AccountPage client={account({ status: vi.fn().mockResolvedValue({ user }) })} />);
+  fireEvent.click(await screen.findByRole("button", { name: "编辑个人资料" }));
+  const dialog = screen.getByRole("dialog", { name: "编辑个人资料" });
+  expect(within(dialog).queryByRole("button", { name: "更换头像" })).toBeNull();
+  expect(within(dialog).queryByText(/点头像可更换/)).toBeNull();
 });

@@ -86,6 +86,7 @@ impl BackendAccountClient {
             path,
             token,
             body,
+            MAX_JSON_BYTES,
             maximum_response_bytes,
             timeout,
             "application/json",
@@ -99,6 +100,7 @@ impl BackendAccountClient {
         path: &str,
         token: Option<&str>,
         body: Option<Vec<u8>>,
+        maximum_request_bytes: usize,
         maximum_response_bytes: usize,
         timeout: Duration,
         accept: &str,
@@ -108,7 +110,7 @@ impl BackendAccountClient {
         }
         if body
             .as_ref()
-            .is_some_and(|value| value.len() > MAX_JSON_BYTES)
+            .is_some_and(|value| value.len() > maximum_request_bytes)
             || token.is_some_and(|value| value.is_empty() || value.chars().any(char::is_whitespace))
         {
             return Err(AccountError::Invalid);
@@ -195,6 +197,65 @@ impl BackendAccountClient {
             timeout,
         )?;
         serde_json::from_slice(&bytes).map_err(|_| AccountError::Unavailable)
+    }
+
+    /// Like [`Self::json_with_limit_timeout`], for the few requests whose body may exceed the 1 MiB every other account request is held to. The caller names the request bound explicitly, so nothing else inherits it.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn json_with_limits_timeout<T: DeserializeOwned, B: Serialize>(
+        &self,
+        method: Method,
+        path: &str,
+        token: Option<&str>,
+        body: Option<&B>,
+        maximum_request_bytes: usize,
+        maximum_response_bytes: usize,
+        timeout: Duration,
+    ) -> Result<T, AccountError> {
+        let body = body
+            .map(serde_json::to_vec)
+            .transpose()
+            .map_err(|_| AccountError::Invalid)?;
+        let bytes = self.request_with_limit_timeout_accept(
+            method,
+            path,
+            token,
+            body,
+            maximum_request_bytes,
+            maximum_response_bytes,
+            timeout,
+            "application/json",
+        )?;
+        serde_json::from_slice(&bytes).map_err(|_| AccountError::Unavailable)
+    }
+
+    /// POSTs a JSON `body` to `path` without credentials and reports the response status with its `Retry-After` delay (seconds form only), for callers whose handling depends on the status itself rather than on a decoded document, such as telemetry delivery. The response body is discarded. A request that never got a response is `Err(Unavailable)`.
+    pub(crate) fn post_for_status(
+        &self,
+        path: &str,
+        body: Vec<u8>,
+        maximum_request_bytes: usize,
+        timeout: Duration,
+    ) -> Result<(StatusCode, Option<Duration>), AccountError> {
+        if !path.starts_with("/v1/") || path.contains('\\') || body.len() > maximum_request_bytes {
+            return Err(AccountError::Invalid);
+        }
+        let url = self.origin.join(path).map_err(|_| AccountError::Invalid)?;
+        let response = self
+            .client
+            .post(url)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body)
+            .timeout(timeout)
+            .send()
+            .map_err(|_| AccountError::Unavailable)?;
+        let retry_after = response
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.trim().parse::<u64>().ok())
+            .map(Duration::from_secs);
+        Ok((response.status(), retry_after))
     }
 
     fn empty<B: Serialize>(
@@ -361,6 +422,7 @@ impl BackendAccountClient {
             "/v1/users/me/dictionary/snapshot",
             Some(access_token),
             None,
+            MAX_JSON_BYTES,
             MAX_DICTIONARY_SNAPSHOT_BYTES,
             Duration::from_secs(120),
             "application/x-ndjson",
@@ -375,6 +437,11 @@ impl BackendAccountClient {
         if !destination.is_absolute() || !crate::text::is_lower_hex(access_token, 64) {
             return Err(AccountError::Invalid);
         }
+        let parent = destination.parent().ok_or(AccountError::Invalid)?;
+        if !parent.is_absolute() {
+            return Err(AccountError::Invalid);
+        }
+        crate::storage::reject_symlink(parent).map_err(|_| AccountError::Invalid)?;
         let url = self
             .origin
             .join("/v1/users/me/dictionary/snapshot")
@@ -388,17 +455,13 @@ impl BackendAccountClient {
             .send()
             .map_err(|_| AccountError::Unavailable)?;
         if !response.status().is_success() {
-            return Err(AccountError::from_status(response.status()));
+            return Err(error_from_response(response));
         }
         if response
             .content_length()
             .is_some_and(|length| length > MAX_DICTIONARY_SNAPSHOT_BYTES as u64)
         {
             return Err(AccountError::Unavailable);
-        }
-        let parent = destination.parent().ok_or(AccountError::Invalid)?;
-        if !parent.is_absolute() {
-            return Err(AccountError::Invalid);
         }
         let mut temporary = tempfile::Builder::new()
             .prefix("msime-snapshot-")
@@ -466,6 +529,15 @@ impl BackendAccountClient {
         access_token: &str,
     ) -> Result<AccountDictionarySnapshotRestore, AccountError> {
         if revision < 0 || !snapshot.is_absolute() || !crate::text::is_lower_hex(access_token, 64) {
+            return Err(AccountError::Invalid);
+        }
+        let parent = snapshot.parent().ok_or(AccountError::Invalid)?;
+        if !parent.is_absolute() {
+            return Err(AccountError::Invalid);
+        }
+        crate::storage::reject_symlink(parent).map_err(|_| AccountError::Invalid)?;
+        let metadata = std::fs::symlink_metadata(snapshot).map_err(|_| AccountError::Invalid)?;
+        if !metadata.file_type().is_file() {
             return Err(AccountError::Invalid);
         }
         let file = std::fs::File::open(snapshot).map_err(|_| AccountError::Invalid)?;
@@ -888,6 +960,7 @@ impl BackendAccountClient {
             &path,
             Some(access_token),
             None,
+            MAX_JSON_BYTES,
             MAX_DICTIONARY_EXPORT_BYTES,
             Duration::from_secs(600),
             "text/plain",
@@ -939,7 +1012,7 @@ impl AccountApi for BackendAccountClient {
     }
 
     fn login(&self, challenge: &str, credential: &str) -> Result<AccountTokens, AccountError> {
-        validate_login(challenge, credential)?;
+        validate_login_request(challenge, credential)?;
         #[derive(Serialize)]
         struct Body<'a> {
             challenge_id: &'a str,
@@ -1015,6 +1088,45 @@ impl AccountApi for BackendAccountClient {
 
     fn delete_account(&self, access_token: &str) -> Result<(), AccountError> {
         self.empty::<()>(Method::DELETE, "/v1/users/me", Some(access_token), None)
+    }
+
+    fn upload_avatar(
+        &self,
+        image: &AccountAvatarImage,
+        access_token: &str,
+    ) -> Result<(), AccountError> {
+        if !crate::text::is_lower_hex(access_token, 64)
+            || !matches!(image.content_type, "image/png" | "image/jpeg")
+            || image.bytes.is_empty()
+            || image.bytes.len() as u64 > MAX_ACCOUNT_AVATAR_UPLOAD_BYTES
+        {
+            return Err(AccountError::Invalid);
+        }
+        let url = self
+            .origin
+            .join("/v1/users/me/avatar")
+            .map_err(|_| AccountError::Invalid)?;
+        // The body is the image itself, not JSON, so this does not go through `request`, which only sends JSON.
+        let response = self
+            .client
+            .put(url)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .header(reqwest::header::CONTENT_TYPE, image.content_type)
+            .bearer_auth(access_token)
+            .timeout(Duration::from_secs(60))
+            .body(image.bytes.clone())
+            .send()
+            .map_err(|_| AccountError::Unavailable)?;
+        read_bounded_response(response, MAX_JSON_BYTES).map(|_| ())
+    }
+
+    fn delete_avatar(&self, access_token: &str) -> Result<(), AccountError> {
+        self.empty::<()>(
+            Method::DELETE,
+            "/v1/users/me/avatar",
+            Some(access_token),
+            None,
+        )
     }
 
     fn chat_models(&self, access_token: &str) -> Result<AccountChatModels, AccountError> {

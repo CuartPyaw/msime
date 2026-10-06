@@ -12,7 +12,8 @@ test("explains mobile keyboard AI and opens its settings", () => {
   const onOpenAi = vi.fn();
   render(<MobileInputAiNotice onOpenAi={onOpenAi} />);
 
-  expect(screen.getByText("高情商回复", { selector: ".section-title" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "高情商回复" })).toBeTruthy();
+  expect(screen.getByText(/复制对方的话，点键盘工具栏上的回复/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "配置键盘 AI" }));
   expect(onOpenAi).toHaveBeenCalledOnce();
 });

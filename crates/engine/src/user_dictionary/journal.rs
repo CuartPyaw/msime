@@ -13,6 +13,7 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
 use crate::error::Result;
 use crate::format::build_table_name;
+use crate::pinyin::segment::split_segments;
 use crate::types::PersonalDictionaryKind;
 
 pub const BUSY_TIMEOUT_MS: u64 = 5_000;
@@ -122,12 +123,55 @@ impl Drop for JournalConnection {
 
 /// `sqlite3_open_v2` with the reference's flags plus the 5 s busy timeout every engine connection uses (J:65-76). Without CREATE a missing file stays missing.
 pub(crate) fn open_database(path: &Path, flags: OpenFlags) -> Result<Connection> {
+    reject_database_parent(path)?;
+    if let Ok(metadata) = std::fs::symlink_metadata(path) {
+        if !metadata.file_type().is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "database path is not a regular file",
+            )
+            .into());
+        }
+    }
     let connection = Connection::open_with_flags(path, flags | OpenFlags::SQLITE_OPEN_FULL_MUTEX)?;
     connection.busy_timeout(Duration::from_millis(BUSY_TIMEOUT_MS))?;
     Ok(connection)
 }
 
-/// A dictionary (`msime.db`, `english.db`) opened for writing; a missing dictionary is an error, never a new empty file.
+fn reject_database_parent(path: &Path) -> std::io::Result<()> {
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "database path has no parent directory",
+        )
+    })?;
+    let mut current = PathBuf::new();
+    for component in parent.components() {
+        current.push(component.as_os_str());
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                if !crate::paths::is_trusted_system_alias(&current) {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "database path has a symbolic-link parent",
+                    ));
+                }
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotADirectory,
+                    "database path parent is not a directory",
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+/// A dictionary (`msime-pinyin.db`, `msime-english.db`) opened for writing; a missing dictionary is an error, never a new empty file.
 pub(crate) fn open_dictionary_for_writing(path: &Path) -> Result<Connection> {
     open_database(path, OpenFlags::SQLITE_OPEN_READ_WRITE)
 }
@@ -211,12 +255,16 @@ pub fn ensure_schema(connection: &Connection) -> Result<()> {
 /// Open the journal and drop pinyin upserts with weight below 1, left by the old rebalance staircase (J:521-533).
 pub fn ensure_user_database(path: &Path) -> Result<()> {
     let journal = open_journal(path)?;
-    // Drop ranking rows left by the old rebalance staircase so installer replay cannot bury shipped frequencies such as 先/xian under negative weights. The reference ignores this statement's result (J:528-531): replay skips those rows anyway, so a busy journal must not fail the operation that asked for the journal.
-    let _ = journal.execute(
+    drop_stale_pinyin_upserts(&journal);
+    Ok(())
+}
+
+/// Drop ranking rows left by the old rebalance staircase so installer replay cannot bury shipped frequencies such as 先/xian under negative weights. The reference ignores this statement's result (J:528-531): replay skips those rows anyway, so a busy journal must not fail the operation that asked for the journal.
+pub(crate) fn drop_stale_pinyin_upserts(connection: &Connection) {
+    let _ = connection.execute(
         "DELETE FROM user_dictionary_operations WHERE dictionary='pinyin' AND operation='upsert' AND weight < 1",
         [],
     );
-    Ok(())
 }
 
 /// Invalidate every thread's cached journal connection, release the personal n-gram stores and the local-mode connections. Call before deleting or replacing a data directory.
@@ -243,7 +291,7 @@ pub(crate) fn thread_holds_journal() -> bool {
 
 /// The syllables of a journal key; empty when the key or any segment is empty, which means the key cannot be stored (J:182-199).
 pub(crate) fn pinyin_segments(key: &str) -> Vec<String> {
-    let segments: Vec<String> = key.split('\'').map(str::to_owned).collect();
+    let segments = split_segments(key);
     if segments.iter().any(String::is_empty) {
         return Vec::new();
     }
@@ -370,11 +418,11 @@ pub(crate) mod test_support {
         }
 
         pub fn main_db(&self) -> PathBuf {
-            self.root.path().join("msime.db")
+            self.root.path().join("msime-pinyin.db")
         }
 
         pub fn english_db(&self) -> PathBuf {
-            self.root.path().join("english.db")
+            self.root.path().join("msime-english.db")
         }
 
         /// Pinyin rows `(key, word, weight)`, each into the table its key names.
@@ -487,6 +535,35 @@ mod tests {
             .unwrap();
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn opening_a_journal_rejects_a_symlinked_path() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let external = root.path().join("external.db");
+        let linked = root.path().join("msime_user.db");
+        symlink(&external, &linked).unwrap();
+
+        assert!(open_journal(&linked).is_err());
+        assert!(!external.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opening_a_journal_rejects_a_symlinked_parent() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        let linked = root.path().join("user");
+        symlink(external.path(), &linked).unwrap();
+        let journal = linked.join("msime_user.db");
+
+        assert!(open_journal(&journal).is_err());
+        assert!(!external.path().join("msime_user.db").exists());
+    }
+
     #[test]
     fn table_names_follow_the_key() {
         assert_eq!(pinyin_table("ni'hao").as_deref(), Some("tbl_2_n"));
@@ -498,6 +575,16 @@ mod tests {
         assert_eq!(pinyin_table("ni''hao"), None);
         assert_eq!(pinyin_table("'ni"), None);
         assert_eq!(pinyin_table("ni'"), None);
+    }
+
+    #[test]
+    fn pinyin_segments_reserves_key_capacity() {
+        let key: String = (0..100)
+            .map(|index| if index % 5 == 3 { '\'' } else { 'a' })
+            .collect();
+        let segments = pinyin_segments(&key);
+        assert_eq!(segments.len(), 21);
+        assert_eq!(segments.capacity(), 21);
     }
 
     /// test_typo_correction_input_session.cpp:381-403: a journal written by the shipped engine (v3, four tables) is upgraded in place.

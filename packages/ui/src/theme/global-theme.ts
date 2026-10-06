@@ -173,7 +173,8 @@ export function normalizedColor(value: string): string | null {
   const hex = (channel: number) => channel.toString(16).toUpperCase().padStart(2, "0");
   const rgb = `#${channels.map(hex).join("")}`;
   if (!alpha) return rgb;
-  if (!/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/.test(parts[3])) return null;
+  // 写成 `\d+(\.\d*)?` 而不是 `\d+\.?\d*`：两者接受的串相同，后者在一长串数字后跟非法字符时要回溯平方次，恶意皮肤的颜色能卡住页面。
+  if (!/^[+-]?(\d+(\.\d*)?|\.\d+)(e[+-]?\d+)?$/.test(parts[3])) return null;
   const opacity = Number(parts[3]);
   if (!(opacity >= 0 && opacity <= 1)) return null;
   return `${rgb}${hex(Math.round(opacity * 255))}`;
@@ -184,7 +185,17 @@ function withAlpha(color: string, alpha: string): string {
   return `${color.slice(0, 7)}${alpha}`;
 }
 
-/** The candidate palette `resolve()` gives a custom theme over `base`, layered the same way: the base palette, then `packagePalette` (the package's palette for the drawn mode, only when the package is drawn in that layout and mode), then the pickers. A text picker also sets the numbers at `9D` alpha unless the number picker is set, the secondary text is the package's translation colour or else the numbers, and over a built-in base the selected row, hover fill, selected text and selected numbers follow the final accent, text and numbers unless set. `null` when nothing is set, like the Rust palette. `custom-theme-parity.json`, written by the Rust tests, pins this to `resolve()`. */
+/** `ai::readable_text`: black or white, whichever reads on `background` (`#RRGGBB` or `#RRGGBBAA`; the alpha is ignored), split at the same relative luminance. */
+function readableText(background: string): string {
+  const channel = (offset: number) => {
+    const value = parseInt(background.slice(offset, offset + 2), 16) / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+  return luminance > 0.179 ? "#000000" : "#FFFFFF";
+}
+
+/** The candidate palette `resolve()` gives a custom theme over `base`, layered the same way: the base palette, then `packagePalette` (the package's palette for the drawn mode, only when the package is drawn in that layout and mode), then the pickers. A text picker also sets the numbers at `9D` alpha unless the number picker is set, the secondary text is the package's translation colour or else the numbers, and over a built-in base the selected row, hover fill, selected text and selected numbers follow the final accent, text and numbers unless set. A selected-row picker instead gives the selected text black or white by the row's luminance, with the selected numbers that colour at `9D` alpha, so a chosen highlight stays readable. `null` when nothing is set, like the Rust palette. `custom-theme-parity.json`, written by the Rust tests, pins this to `resolve()`. */
 export function customCandidatePalette(
   base: GlobalTheme | undefined,
   colors: CustomCandidateColors | undefined,
@@ -203,6 +214,8 @@ export function customCandidatePalette(
   const text = slot("text") ?? basePalette?.text ?? null;
   const number = explicitNumber ?? basePalette?.number ?? null;
   const accent = slot("accent") ?? basePalette?.accent ?? null;
+  const pickedSelected = picked(colors?.selected);
+  const pickedSelectedText = pickedSelected ? readableText(pickedSelected) : null;
   const palette: CandidateThemePalette = {
     surface: slot("surface") ?? basePalette?.surface ?? null,
     border: slot("border") ?? basePalette?.border ?? null,
@@ -211,8 +224,12 @@ export function customCandidatePalette(
     secondary: fromPackage(packagePalette?.translation) ?? number,
     accent,
     selected: slot("selected") ?? (derived && accent ? withAlpha(accent, "24") : null),
-    selected_text: derived ? accent : null,
-    selected_number: derived ? number : null,
+    selected_text: pickedSelectedText ?? (derived ? accent : null),
+    selected_number: pickedSelectedText
+      ? withAlpha(pickedSelectedText, "9D")
+      : derived
+        ? number
+        : null,
     hover: slot("hover") ?? (derived && text ? withAlpha(text, "0F") : null),
     show_selected_bar:
       typeof packagePalette?.showSelectedBar === "boolean" ? packagePalette.showSelectedBar : null,

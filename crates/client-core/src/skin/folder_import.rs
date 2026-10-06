@@ -1,6 +1,17 @@
 //! Copying a picked skin folder into a host's skin root.
 
 use std::path::Path;
+use std::sync::{Mutex, MutexGuard};
+
+/// Serializes every write to a skin root in this process: folder import and community install share the `.replaced-<id>` backup name, and community install shares one staging folder, so two overlapping writes would otherwise delete each other's helpers or both pass the "already installed" check.
+static SKIN_ROOT_WRITES: Mutex<()> = Mutex::new(());
+
+/// Hold the skin-root write lock. A write that panicked leaves nothing the next one relies on, since each write clears its own helpers first, so a poisoned lock is taken over rather than failing every later write.
+pub(crate) fn lock_skin_root() -> MutexGuard<'static, ()> {
+    SKIN_ROOT_WRITES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 /// Copy a skin folder the user picked into `root`, under the folder's own name, and return that name.
 ///
@@ -21,41 +32,68 @@ pub fn import(source: &Path, root: &Path) -> Result<String, &'static str> {
     if !manifest_metadata.is_file() || manifest_metadata.file_type().is_symlink() {
         return Err("skin_manifest");
     }
+    let source_parent = source.parent().ok_or("skin_manifest")?;
+    super::catalog::load_package(source_parent, &name).map_err(|_| "skin_manifest")?;
     // A linked root would publish the import into an unrelated directory. Check before creating
     // it because `create_dir_all` follows a final-component symlink.
     if !crate::storage::create_directory_and_check(root).map_err(|_| "storage")? {
         return Err("storage");
     }
+    let _writes = lock_skin_root();
     // The leading dot keeps both helpers out of the catalog, which lists only names starting with a letter or digit.
     let staging = root.join(format!(".import-{name}"));
     let replaced = root.join(format!(".replaced-{name}"));
     for leftover in [&staging, &replaced] {
-        if leftover.exists() {
-            std::fs::remove_dir_all(leftover).map_err(|_| "storage")?;
-        }
+        remove_leftover(leftover)?;
     }
     let mut budget = ImportBudget::default();
     if copy_tree(source, &staging, 0, &mut budget).is_err() {
         let _ = std::fs::remove_dir_all(&staging);
         return Err("storage");
     }
-    let target = root.join(&name);
-    let had_previous = target.exists();
-    if had_previous && std::fs::rename(&target, &replaced).is_err() {
-        let _ = std::fs::remove_dir_all(&staging);
+    replace_directory(&staging, &root.join(&name), &replaced)?;
+    Ok(name)
+}
+
+fn remove_leftover(path: &Path) -> Result<(), &'static str> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(_) => return Err("storage"),
+    };
+    if metadata.is_dir() {
+        std::fs::remove_dir_all(path).map_err(|_| "storage")?;
+    } else {
+        std::fs::remove_file(path).map_err(|_| "storage")?;
+    }
+    Ok(())
+}
+
+/// Swap a fully written `staging` directory in as `target`, replacing any existing `target` whole. The previous directory is first moved aside to `backup` and restored if the swap fails, so a failure never leaves a half-replaced skin; `staging` is removed on failure and `backup` after success. Every error is `storage`.
+pub(crate) fn replace_directory(
+    staging: &Path,
+    target: &Path,
+    backup: &Path,
+) -> Result<(), &'static str> {
+    // `exists()` follows links and reports false for a dangling link, even though the
+    // destination name still blocks the publish rename. Inspect the directory entry itself so
+    // files and links are moved aside just like an existing directory.
+    let had_previous = std::fs::symlink_metadata(target).is_ok();
+    if had_previous && std::fs::rename(target, backup).is_err() {
+        let _ = std::fs::remove_dir_all(staging);
         return Err("storage");
     }
-    if std::fs::rename(&staging, &target).is_err() {
+    if std::fs::rename(staging, target).is_err() {
         if had_previous {
-            let _ = std::fs::rename(&replaced, &target);
+            let _ = std::fs::rename(backup, target);
         }
-        let _ = std::fs::remove_dir_all(&staging);
+        let _ = std::fs::remove_dir_all(staging);
         return Err("storage");
     }
     if had_previous {
-        let _ = std::fs::remove_dir_all(&replaced);
+        let _ = remove_leftover(backup);
     }
-    Ok(name)
+    Ok(())
 }
 
 /// Bounds on one import, so a mistakenly picked folder (a photo library, a whole drive) fails instead of filling the device.
@@ -114,7 +152,13 @@ mod tests {
     fn picked(parent: &Path, name: &str) -> PathBuf {
         let skin = parent.join(name);
         std::fs::create_dir_all(skin.join("images")).unwrap();
-        std::fs::write(skin.join("skin.toml"), b"id = 'synthetic'").unwrap();
+        std::fs::write(
+            skin.join("skin.toml"),
+            format!(
+                "schema_version = 1\nid = '{name}'\nname = 'Sample'\nversion = '1.0'\nbase = 'night'\n[supports]\nlayouts = ['vertical']\nthemes = ['light']\n[candidate_window]\nmin_width_dip = 10\n"
+            ),
+        )
+        .unwrap();
         std::fs::write(skin.join("images").join("bg.png"), b"new").unwrap();
         skin
     }
@@ -149,6 +193,68 @@ mod tests {
         assert!(!root.join("sakura").join("stale.css").exists());
         assert!(root.join("sakura").join("skin.toml").is_file());
         assert!(!root.join(".replaced-sakura").exists());
+    }
+
+    #[test]
+    fn import_cleans_the_backup_when_an_existing_skin_slot_is_a_file() {
+        let files = tempfile::tempdir().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let root = state.path().join("skins");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("sakura"), b"stray slot").unwrap();
+
+        import(&picked(files.path(), "sakura"), &root).unwrap();
+
+        assert!(root.join("sakura").join("skin.toml").is_file());
+        assert!(!root.join(".replaced-sakura").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn import_replaces_a_dangling_skin_slot_link_without_following_it() {
+        let files = tempfile::tempdir().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let root = state.path().join("skins");
+        std::fs::create_dir_all(&root).unwrap();
+        std::os::unix::fs::symlink(outside.path().join("missing"), root.join("sakura")).unwrap();
+
+        import(&picked(files.path(), "sakura"), &root).unwrap();
+
+        assert!(root.join("sakura").join("skin.toml").is_file());
+        assert!(!root.join(".replaced-sakura").exists());
+        assert!(!outside.path().join("missing").exists());
+    }
+
+    #[test]
+    fn import_clears_a_stray_file_left_by_an_interrupted_import() {
+        let files = tempfile::tempdir().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let root = state.path().join("skins");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(".replaced-sakura"), b"stray leftover").unwrap();
+
+        import(&picked(files.path(), "sakura"), &root).unwrap();
+
+        assert!(root.join("sakura").join("skin.toml").is_file());
+        assert!(!root.join(".replaced-sakura").exists());
+    }
+
+    #[test]
+    fn import_rejects_an_invalid_manifest_before_replacing_existing_skin() {
+        let files = tempfile::tempdir().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let root = state.path().join("skins");
+        std::fs::create_dir_all(root.join("sakura")).unwrap();
+        std::fs::write(root.join("sakura").join("skin.toml"), b"old").unwrap();
+        let source = picked(files.path(), "sakura");
+        std::fs::write(source.join("skin.toml"), b"not valid skin metadata").unwrap();
+
+        assert_eq!(import(&source, &root), Err("skin_manifest"));
+        assert_eq!(
+            std::fs::read(root.join("sakura").join("skin.toml")).unwrap(),
+            b"old"
+        );
     }
 
     #[test]

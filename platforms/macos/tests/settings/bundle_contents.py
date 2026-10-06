@@ -129,6 +129,12 @@ def main() -> int:
         if not staged.is_file() or staged.stat().st_size == 0:
             failures.append(f"audios/{cue} was not staged; the voice cue falls back to a system sound")
 
+    # The built-in sound packs are what a fresh profile selects; without them key sounds have nothing to play. Every folder in the repository's resources/sound-packs has to arrive, since client-core lists each one as built in.
+    packs = Path(__file__).resolve().parents[4] / "resources/sound-packs"
+    for pack in sorted(path.name for path in packs.iterdir() if path.is_dir()):
+        if not (resources / "sound-packs" / pack / "plugin.toml").is_file():
+            failures.append(f"sound-packs/{pack} was not staged; the built-in sound pack is missing")
+
     # A macOS framework is mostly symlinks - Headers, Resources and the binary all point into
     # Versions/Current. A copy that follows them produces a directory codesign calls ambiguous and refuses
     # to seal, and an input method that cannot be signed cannot be registered as an input source at all.
@@ -156,13 +162,35 @@ def main() -> int:
     for notice in ("sherpa-onnx-Apache-2.0.txt", "onnxruntime-MIT.txt", "onnxruntime-ThirdPartyNotices.txt"):
         if not (contents / "Resources" / "Licenses" / notice).is_file():
             failures.append(f"Contents/Resources/Licenses/{notice} is missing; the bundled speech runtime ships without its licence")
+    # The sound player links MPL-2.0 crates (symphonia, triple_buffer) into the input method, and the engine links rink-core.
+    if not (contents / "Resources" / "Licenses" / "MPL-2.0.txt").is_file():
+        failures.append("Contents/Resources/Licenses/MPL-2.0.txt is missing; the MPL-2.0 crates of the sound player and unit conversion ship without their licence")
+    # The engine embeds the place names `@` mode offers from modood/Administrative-divisions-of-China.
+    if not (contents / "Resources" / "Licenses" / "Administrative-divisions-of-China-WTFPL.txt").is_file():
+        failures.append("Contents/Resources/Licenses/Administrative-divisions-of-China-WTFPL.txt is missing; the built-in place names ship without their licence")
+    # The engine embeds the Korean Hanja table from libhangul, whose BSD-3-Clause licence requires the notice in binary distributions.
+    if not (contents / "Resources" / "Licenses" / "libhangul-hanja-BSD-3-Clause.txt").is_file():
+        failures.append("Contents/Resources/Licenses/libhangul-hanja-BSD-3-Clause.txt is missing; the built-in Korean Hanja table ships without its licence")
+    # Cantonese and Zhuyin read dictionaries built from rime-cantonese (CC BY 4.0) and libchewing-data (LGPL-2.1-or-later). The notices ship unconditionally, so a build that later gains the dictionaries is never without them.
+    for notice in ("rime-cantonese-CC-BY-4.0.txt", "libchewing-data-LGPL-2.1.txt"):
+        if not (contents / "Resources" / "Licenses" / notice).is_file():
+            failures.append(f"Contents/Resources/Licenses/{notice} is missing; Cantonese and Zhuyin ship without the licence of their data")
+    # Stroke reads a dictionary built from rime-stroke (LGPL-3.0, with the CNS11643 attribution); its notice ships unconditionally as well.
+    if not (contents / "Resources" / "Licenses" / "rime-stroke-LGPL-3.0.txt").is_file():
+        failures.append("Contents/Resources/Licenses/rime-stroke-LGPL-3.0.txt is missing; Stroke ships without the licence of its data")
+    # Vietnamese links the MIT-licensed vi crate, whose copyright and permission notice has to travel with the binary.
+    if not (contents / "Resources" / "Licenses" / "vi-MIT.txt").is_file():
+        failures.append("Contents/Resources/Licenses/vi-MIT.txt is missing; the vi crate Vietnamese mode links ships without its licence")
+    # 藏文方案链接 MIT 许可的 ewts crate，它的版权和许可声明必须随二进制一起发布。
+    if not (contents / "Resources" / "Licenses" / "ewts-MIT.txt").is_file():
+        failures.append("Contents/Resources/Licenses/ewts-MIT.txt is missing; the ewts crate Tibetan mode links ships without its licence")
 
     if failures:
         for failure in failures:
             print(failure, file=sys.stderr)
         return 1
     print(f"{bundle.name}: icons staged, {len(usage)} usage descriptions and {len(identifiers)} input source names "
-          f"localised in {len(lprojs)} languages, voice cues staged, local voice helper, runtime and its licences staged.")
+          f"localised in {len(lprojs)} languages, voice cues and sound packs staged, local voice helper, runtime and its licences staged.")
     return 0
 
 

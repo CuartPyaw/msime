@@ -1,16 +1,20 @@
 //! Selection advancement, segmentation getters and preedit display (core-session.md §5.8, §5.10-§5.11), including the wubi mixed routing rules that key advancement on the selected row's producer (overlays.md §3.3).
 
+use std::borrow::Cow;
+
 use super::input::{CreatingWordProgress, InputSession};
 use crate::helpcode::compute_helpcodes;
 use crate::japanese::romaji::convert_romaji;
 use crate::pinyin::active_helpcode::{
     detect_active_helpcode_length, strip_active_helpcodes, strip_active_helpcodes_with_cases,
 };
-use crate::pinyin::autocorrect::{autocorrect_cut_detail, looks_like_syllable_with_jianpin_tail};
+use crate::pinyin::autocorrect::{
+    autocorrect_cut_detail, looks_like_syllable_with_jianpin_tail, AutocorrectCutSegment,
+};
 use crate::pinyin::segment::{is_complete_pinyin_input, join_segments, split_segments};
 use crate::shuangpin::query::{
-    detect_active_double_helpcode_length, is_complete_input, raw_length_for_effective_prefix,
-    remove_manual_delimiters,
+    detect_active_double_helpcode_length, effective_input_length, is_complete_input,
+    raw_length_for_effective_prefix, remove_manual_delimiters,
 };
 use crate::shuangpin::ShuangpinProfile;
 use crate::text::count_han_chars;
@@ -31,28 +35,35 @@ pub(super) struct SelectionTransition {
 
 /// A shuangpin composition split into the pinyin keys and a trailing helpcode (input_session_composition.cpp:111-163).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(super) struct ShuangpinCompositionBase {
-    pub raw_input: String,
-    pub raw_input_with_cases: String,
+pub(super) struct ShuangpinCompositionBase<'a> {
+    pub raw_input: Cow<'a, str>,
+    pub raw_input_with_cases: Cow<'a, str>,
     /// Manual delimiters removed.
-    pub effective_raw_input: String,
-    pub effective_raw_input_with_cases: String,
+    pub effective_raw_input: Cow<'a, str>,
+    pub effective_raw_input_with_cases: Cow<'a, str>,
     pub helpcode_length: usize,
 }
 
-pub(super) fn resolve_shuangpin_composition_base(
-    request: &QueryRequest,
+pub(super) fn resolve_shuangpin_composition_base<'a>(
+    request: &'a QueryRequest,
     profile: &ShuangpinProfile,
-) -> ShuangpinCompositionBase {
-    let raw_input = request.raw_input.clone();
+) -> ShuangpinCompositionBase<'a> {
+    let raw_input = Cow::Borrowed(request.raw_input.as_str());
     let raw_input_with_cases = if request.raw_input_with_cases.is_empty() {
-        request.raw_input.clone()
+        Cow::Borrowed(request.raw_input.as_str())
     } else {
-        request.raw_input_with_cases.clone()
+        Cow::Borrowed(request.raw_input_with_cases.as_str())
     };
+    let effective_raw_input = remove_manual_delimiters_cow(request.raw_input.as_str());
+    let raw_input_with_cases_source = if request.raw_input_with_cases.is_empty() {
+        request.raw_input.as_str()
+    } else {
+        request.raw_input_with_cases.as_str()
+    };
+    let effective_raw_input_with_cases = remove_manual_delimiters_cow(raw_input_with_cases_source);
     let mut base = ShuangpinCompositionBase {
-        effective_raw_input: remove_manual_delimiters(&raw_input),
-        effective_raw_input_with_cases: remove_manual_delimiters(&raw_input_with_cases),
+        effective_raw_input,
+        effective_raw_input_with_cases,
         raw_input,
         raw_input_with_cases,
         helpcode_length: 0,
@@ -78,13 +89,52 @@ pub(super) fn resolve_shuangpin_composition_base(
     base
 }
 
+fn remove_manual_delimiters_cow(raw: &str) -> Cow<'_, str> {
+    if raw.contains('\'') {
+        Cow::Owned(remove_manual_delimiters(raw))
+    } else {
+        Cow::Borrowed(raw)
+    }
+}
+
 fn remove_delimiters(segmented: &str) -> String {
-    segmented.chars().filter(|c| *c != '\'').collect()
+    let mut result = String::with_capacity(segmented.len());
+    result.extend(segmented.chars().filter(|c| *c != '\''));
+    result
 }
 
 /// A consumed prefix can leave the remainder starting with the separator that followed it.
 fn remove_consumed_leading_separators(raw: &str) -> &str {
     raw.trim_start_matches('\'')
+}
+
+/// Detect an active shuangpin helpcode without constructing the owned composition base. The
+/// candidate refresh path only needs this length to decide whether dynamic rows can move.
+fn active_shuangpin_helpcode_length(request: &QueryRequest, profile: &ShuangpinProfile) -> usize {
+    if !request.enable_shuangpin_helpcode {
+        return 0;
+    }
+    let raw = &request.raw_input;
+    let raw_with_cases = if request.raw_input_with_cases.is_empty() {
+        raw
+    } else {
+        &request.raw_input_with_cases
+    };
+    if effective_input_length(raw) == 0 {
+        return 0;
+    }
+    if detect_active_double_helpcode_length(raw, raw_with_cases, profile) == 2 {
+        return 2;
+    }
+    let length = effective_input_length(raw);
+    if length % 2 == 1 && length > 1 {
+        let raw_prefix_length = raw_length_for_effective_prefix(raw, length - 1);
+        let separated = raw.as_bytes().get(raw_prefix_length) == Some(&b'\'');
+        if !separated && is_complete_input(&raw[..raw_prefix_length], profile) {
+            return 1;
+        }
+    }
+    0
 }
 
 /// The canonical reading of a selected word, if it has one complete syllable per character (input_session_composition.cpp:76-96).
@@ -113,7 +163,11 @@ pub(super) fn append_canonical_pinyin(prefix: &str, suffix: &str) -> String {
     if suffix.is_empty() {
         return String::new();
     }
-    format!("{prefix}'{suffix}")
+    let mut result = String::with_capacity(prefix.len() + 1 + suffix.len());
+    result.push_str(prefix);
+    result.push('\'');
+    result.push_str(suffix);
+    result
 }
 
 /// Lowercased letters without delimiters, with the `v` spelling of ü folded onto `u`, so that length-preserving aliases (jv -> ju, nue -> nve) count as explained by the cut. It only compares two derived strings; the dictionary's `corrected_from` treats v and u as distinct on purpose.
@@ -125,6 +179,30 @@ pub(super) fn fold_autocorrect_letters(text: &str) -> String {
             lower => lower as char,
         })
         .collect()
+}
+
+fn folded_autocorrect_byte(byte: u8) -> Option<u8> {
+    if byte == b'\'' {
+        None
+    } else {
+        Some(match byte.to_ascii_lowercase() {
+            b'v' => b'u',
+            lower => lower,
+        })
+    }
+}
+
+fn folded_letters_equal(left: &str, right: &str) -> bool {
+    left.bytes()
+        .filter_map(folded_autocorrect_byte)
+        .eq(right.bytes().filter_map(folded_autocorrect_byte))
+}
+
+fn folded_segments_equal(segments: &[AutocorrectCutSegment], text: &str) -> bool {
+    segments
+        .iter()
+        .flat_map(|segment| segment.syllable.bytes().filter_map(folded_autocorrect_byte))
+        .eq(text.bytes().filter_map(folded_autocorrect_byte))
 }
 
 /// The preedit must always show the letters the user typed. Two layers can rewrite them into canonical pinyin: the scheme's alias table (sahng -> shang, baked into raw_segmentation) and the dictionary's correction search (shabg -> shang, which only re-separates). Both are redrawn here from the raw letters with separators at the cut positions; when the search cannot explain a rewrite (length-changing aliases such as mihng -> ming) the raw letters are shown without separators (input_session_composition.cpp:286-333).
@@ -146,9 +224,7 @@ pub(super) fn build_quanpin_autocorrect_display(request: &QueryRequest) -> Strin
         request.enable_quanpin_autocorrect_transposition,
         request.enable_quanpin_autocorrect_neighbor,
     );
-    let folded_input = fold_autocorrect_letters(cased);
-    let folded_base = fold_autocorrect_letters(base);
-    let letters_rewritten = folded_base != folded_input;
+    let letters_rewritten = !folded_letters_equal(base, cased);
     // The scheme kept the typed letters and no correction can apply, so there are no other separators to draw.
     if !letters_rewritten && (types == 0 || is_complete_pinyin_input(&request.raw_input)) {
         return base.clone();
@@ -157,11 +233,11 @@ pub(super) fn build_quanpin_autocorrect_display(request: &QueryRequest) -> Strin
     if looks_like_syllable_with_jianpin_tail(&request.raw_input) {
         return base.clone();
     }
+    let folded_input = fold_autocorrect_letters(cased);
     let cut = autocorrect_cut_detail(&folded_input, types).filter(|cut| !cut.is_empty());
     if let Some(cut) = cut {
         // When the scheme rewrote the letters, the query went through the alias reading, so separators may only come from the cut when both layers read the letters the same way (sahnghao -> shang'hao).
-        let cut_letters = fold_autocorrect_letters(&cut.syllables().concat());
-        if !letters_rewritten || cut_letters == folded_base {
+        if !letters_rewritten || folded_segments_equal(&cut.segments, base) {
             let boundary_count = cut.segments.len() - 1;
             let mut display = String::with_capacity(cased.len() + cut.segments.len());
             let mut letter_index = 0;
@@ -195,8 +271,10 @@ impl InputSession {
         word: &str,
         selected_scheme: SchemeType,
     ) -> bool {
-        // Japanese and native wubi selections always finish: their advancement never continues.
-        if self.is_japanese() || selected_scheme == SchemeType::Wubi {
+        // Japanese, Korean and native wubi selections always finish: their advancement never continues.
+        if self.engine.current_scheme_type().selection_completes()
+            || selected_scheme == SchemeType::Wubi
+        {
             return true;
         }
         let request = self.engine.request();
@@ -263,7 +341,7 @@ impl InputSession {
                 if base.helpcode_length > 0 && total >= base.helpcode_length {
                     base.effective_raw_input[..total - base.helpcode_length].to_owned()
                 } else {
-                    base.effective_raw_input.clone()
+                    base.effective_raw_input.clone().into_owned()
                 };
             if transition.continues_composition {
                 let (start, end) = if base.helpcode_length > 0 {
@@ -337,7 +415,9 @@ impl InputSession {
         selected_word: &str,
         transition: &SelectionTransition,
     ) -> CreatingWordProgress {
-        let word = format!("{current_word}{selected_word}");
+        let mut word = String::with_capacity(current_word.len() + selected_word.len());
+        word.push_str(current_word);
+        word.push_str(selected_word);
         if transition.wubi_native {
             // Wubi phrases are not composed from partial selections: a wubi code is one word.
             return CreatingWordProgress {
@@ -365,8 +445,12 @@ impl InputSession {
         let completed = !transition.continues_composition;
         let can_store =
             completed && !normalize_canonical_pinyin_for_word(&pinyin, &word).is_empty();
+        let mut preedit =
+            String::with_capacity(word.len() + transition.current_segmentation_with_cases.len());
+        preedit.push_str(&word);
+        preedit.push_str(&transition.current_segmentation_with_cases);
         CreatingWordProgress {
-            preedit: format!("{word}{}", transition.current_segmentation_with_cases),
+            preedit,
             pinyin,
             word,
             completed,
@@ -395,7 +479,13 @@ impl InputSession {
         };
         match self.engine.current_scheme_type() {
             SchemeType::Wubi => request.raw_input.clone(),
-            SchemeType::JapaneseRomaji => self.raw_with_cases().to_owned(),
+            SchemeType::JapaneseRomaji
+            | SchemeType::Korean
+            | SchemeType::Cantonese
+            | SchemeType::Zhuyin
+            | SchemeType::Vietnamese
+            | SchemeType::Tibetan
+            | SchemeType::Stroke => self.raw_with_cases().to_owned(),
             SchemeType::Shuangpin if self.shuangpin_preedit_uses_raw => {
                 with_trailing_separator(if request.raw_segmentation.is_empty() {
                     request.raw_input.clone()
@@ -414,6 +504,13 @@ impl InputSession {
         match self.engine.current_scheme_type() {
             SchemeType::Wubi => request.valid,
             SchemeType::JapaneseRomaji => convert_romaji(&request.raw_input).complete,
+            // 韩文、粤拼、注音、越南文、藏文和笔画都不是拼音。
+            SchemeType::Korean
+            | SchemeType::Cantonese
+            | SchemeType::Zhuyin
+            | SchemeType::Vietnamese
+            | SchemeType::Tibetan
+            | SchemeType::Stroke => false,
             SchemeType::Shuangpin => {
                 let profile = self.shuangpin_profile();
                 let base = resolve_shuangpin_composition_base(request, profile);
@@ -433,25 +530,30 @@ impl InputSession {
         }
     }
 
-    /// Four native letters answered by exactly one wubi row.
+    /// Four native letters whose whole list is one wubi row, the rule the shipped engine applied (input_session_composition.cpp:483-490).
     pub(super) fn wubi_unique_four_code(&self) -> bool {
         if self.dedicated_english || self.local_mode != LocalInputMode::None {
             return false;
         }
-        // Only the wubi rows count: quanpin rows beside them do not make the code ambiguous (overlays.md §3.3).
+        // The whole list counts, not only the wubi rows. In mixed Wubi four letters are often pinyin as well — `jixu` is the wubi code of 曳光弹 and the pinyin of 继续 — and committing the one wubi row on the fourth key takes the pinyin away from someone typing it. The wubi_mixed_routing overlay counted wubi rows only; it never applied to the shipped engine, and that rule is what auto-committed 曳光弹 for jixu.
         self.wubi_candidates_are_native()
             && self.engine.wubi_has_complete_code()
-            && self.wubi_native_candidate_count() == 1
+            && self.candidates().len() == 1
     }
 
     pub(super) fn has_active_helpcode(&self) -> bool {
         let request = self.engine.request();
         match self.engine.current_scheme_type() {
-            SchemeType::Wubi | SchemeType::JapaneseRomaji => false,
+            SchemeType::Wubi
+            | SchemeType::JapaneseRomaji
+            | SchemeType::Korean
+            | SchemeType::Cantonese
+            | SchemeType::Zhuyin
+            | SchemeType::Vietnamese
+            | SchemeType::Tibetan
+            | SchemeType::Stroke => false,
             SchemeType::Shuangpin => {
-                resolve_shuangpin_composition_base(request, self.shuangpin_profile())
-                    .helpcode_length
-                    > 0
+                active_shuangpin_helpcode_length(request, self.shuangpin_profile()) > 0
             }
             SchemeType::Quanpin => {
                 request.enable_quanpin_helpcode
@@ -465,6 +567,33 @@ impl InputSession {
 
     /// input_session.cpp:775-793.
     pub(super) fn candidate_annotations(&self) -> Vec<String> {
+        // Rows the engine generated are not spelled by pinyin, so a helpcode would say nothing about them; a command row shows its command's title instead, and a place offered in `@` mode the division it belongs to.
+        if self.local_mode.generates_text() {
+            return self
+                .candidates()
+                .iter()
+                .map(|item| match self.local_mode {
+                    LocalInputMode::Command => self
+                        .queries
+                        .command_title(&item.pinyin)
+                        .unwrap_or_default()
+                        .to_owned(),
+                    LocalInputMode::Mention => {
+                        self.queries.mention_annotation(&item.word).to_owned()
+                    }
+                    _ => String::new(),
+                })
+                .collect();
+        }
+        // A Hanja row shows its 훈음 (나라 이름 한), the reading a Korean user picks a Hanja by.
+        if self.korean_rules_apply() {
+            let syllable = &self.engine.request().normalized_segmentation;
+            return self
+                .candidates()
+                .iter()
+                .map(|item| crate::korean::hanja::gloss(syllable, &item.word).to_owned())
+                .collect();
+        }
         let enabled = self.helpcode_enabled();
         let uppercase_all = self.scheme() == SchemeType::Quanpin;
         let keymap = self.helpcode_keymap.as_deref();
@@ -528,16 +657,12 @@ impl InputSession {
         self.is_wubi() && self.candidates().iter().any(Self::is_wubi_native_candidate)
     }
 
-    pub(super) fn wubi_native_candidate_count(&self) -> usize {
-        self.candidates()
-            .iter()
-            .filter(|item| Self::is_wubi_native_candidate(item))
-            .count()
-    }
-
     /// Whether the list reads the composition as pinyin, so selections advance and learn as pinyin.
     pub(super) fn candidates_follow_pinyin(&self) -> bool {
-        self.engine.current_scheme_type().is_pinyin() || !self.wubi_candidates_are_native()
+        self.engine
+            .current_scheme_type()
+            .follows_pinyin_candidates()
+            || !self.wubi_candidates_are_native()
     }
 }
 
@@ -560,8 +685,43 @@ mod tests {
     fn canonical_readings_append_and_empty_on_a_gap() {
         assert_eq!(append_canonical_pinyin("", "ni"), "ni");
         assert_eq!(append_canonical_pinyin("ni", "hao"), "ni'hao");
+        let result = append_canonical_pinyin("shan", "shui");
+        assert_eq!(result.capacity(), result.len());
         assert_eq!(append_canonical_pinyin("ni", ""), "");
-        assert_eq!(append_canonical_pinyin("shan", "shui"), "shan'shui");
+        assert_eq!(result, "shan'shui");
+    }
+
+    /// test_input_session.cpp:600-609: a phrase is storable only when every picked piece had a canonical reading.
+    #[test]
+    fn an_unknown_earlier_reading_makes_the_phrase_unstorable() {
+        let last = SelectionTransition {
+            selected_canonical_pinyin: "te'le".into(),
+            ..SelectionTransition::default()
+        };
+        let known = InputSession::update_creating_word_progress("xi", "西", "特乐", &last);
+        assert!(known.completed && known.can_store);
+        assert_eq!(known.pinyin, "xi'te'le");
+        assert_eq!(known.word, "西特乐");
+        assert_eq!(known.word.capacity(), known.word.len());
+        assert_eq!(known.preedit.capacity(), known.preedit.len());
+        let with_tail = SelectionTransition {
+            selected_canonical_pinyin: "te'le".into(),
+            current_segmentation_with_cases: "hao".into(),
+            ..SelectionTransition::default()
+        };
+        let with_tail = InputSession::update_creating_word_progress("xi", "西", "特乐", &with_tail);
+        assert_eq!(with_tail.preedit, "西特乐hao");
+        assert_eq!(with_tail.preedit.capacity(), with_tail.preedit.len());
+
+        let unknown = InputSession::update_creating_word_progress("", "西", "特乐", &last);
+        assert!(unknown.completed);
+        assert!(!unknown.can_store);
+        assert!(unknown.pinyin.is_empty());
+        assert_eq!(unknown.word, "西特乐");
+        // Without the guard a piece with no Han character and no reading would pass the one-syllable-per-character check.
+        let unknown = InputSession::update_creating_word_progress("", "abc", "特乐", &last);
+        assert!(!unknown.can_store);
+        assert!(unknown.pinyin.is_empty());
     }
 
     #[test]
@@ -576,6 +736,32 @@ mod tests {
         assert_eq!(fold_autocorrect_letters("Nv'E"), "nue");
         assert_eq!(fold_autocorrect_letters("sa'Hng"), "sahng");
         assert_eq!(fold_autocorrect_letters("Nv'e"), "nue");
+    }
+
+    #[test]
+    fn folded_letter_comparison_matches_owned_folding() {
+        for (left, right, equal) in [
+            ("Nv'E", "nue", true),
+            ("sa'Hng", "sahng", true),
+            ("sahng", "shang", false),
+            ("", "'", true),
+        ] {
+            assert_eq!(folded_letters_equal(left, right), equal, "{left}/{right}");
+            assert_eq!(
+                fold_autocorrect_letters(left) == fold_autocorrect_letters(right),
+                equal,
+                "owned {left}/{right}"
+            );
+        }
+    }
+
+    #[test]
+    fn folded_cut_comparison_reads_segment_syllables_directly() {
+        let segments = vec![crate::pinyin::autocorrect::AutocorrectCutSegment {
+            syllable: "NvE".to_owned(),
+            ..Default::default()
+        }];
+        assert!(folded_segments_equal(&segments, "nue"));
     }
 
     /// The request a quanpin session builds for `typed` under the two user switches (test_pinyin.cpp P38).
@@ -627,5 +813,54 @@ mod tests {
             ..QueryRequest::default()
         };
         assert_eq!(build_quanpin_autocorrect_display(&request), "x");
+    }
+
+    #[test]
+    fn helpcode_length_matches_the_composition_base() {
+        let profile =
+            crate::shuangpin::profile::profile(crate::types::ShuangpinProfileKind::Xiaohe);
+        for (raw, raw_with_cases, enabled) in [
+            ("nihcAB", "nihcAB", true),
+            ("uiu", "uiu", true),
+            ("ui'u", "ui'u", true),
+            ("uiu", "uiu", false),
+        ] {
+            let request = QueryRequest {
+                raw_input: raw.to_owned(),
+                raw_input_with_cases: raw_with_cases.to_owned(),
+                enable_shuangpin_helpcode: enabled,
+                ..QueryRequest::default()
+            };
+            assert_eq!(
+                active_shuangpin_helpcode_length(&request, profile),
+                resolve_shuangpin_composition_base(&request, profile).helpcode_length,
+                "{raw}/{raw_with_cases}/{enabled}"
+            );
+        }
+    }
+
+    #[test]
+    fn shuangpin_composition_base_borrows_unseparated_input() {
+        let request = QueryRequest {
+            raw_input: "nihc".to_owned(),
+            raw_input_with_cases: "nihc".to_owned(),
+            ..QueryRequest::default()
+        };
+        let profile =
+            crate::shuangpin::profile::profile(crate::types::ShuangpinProfileKind::Xiaohe);
+        let base = resolve_shuangpin_composition_base(&request, profile);
+        assert!(matches!(base.raw_input, std::borrow::Cow::Borrowed(_)));
+        assert!(matches!(
+            base.raw_input_with_cases,
+            std::borrow::Cow::Borrowed(_)
+        ));
+        assert!(matches!(
+            base.effective_raw_input,
+            std::borrow::Cow::Borrowed(_)
+        ));
+        assert!(matches!(
+            base.effective_raw_input_with_cases,
+            std::borrow::Cow::Borrowed(_)
+        ));
     }
 }

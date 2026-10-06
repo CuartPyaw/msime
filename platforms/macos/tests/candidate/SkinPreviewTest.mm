@@ -48,16 +48,16 @@ static bool TokenIs(msime::mac::Rgba color, NSString *hex, CGFloat alpha = 1) {
 }
 
 static void TestFallbackFonts(MSIMEAppearancePreferences *preferences, NSUserDefaults *defaults) {
-    NSComboBox *entry = (id)FindControl(preferences.window.contentView, @"添加补充字体");
-    NSTableView *list = (id)FindControl(preferences.window.contentView, @"补充字体顺序");
-    assert(entry && list);
+    // The list has no editor on the page: the 字体预设 popup writes it, and the shared document carries it between hosts.
+    assert(FindControl(preferences.window.contentView, @"候选字体卡片"));
+    assert(!FindControl(preferences.window.contentView, @"添加补充字体") && !FindControl(preferences.window.contentView, @"补充字体顺序"));
     NSString *sans = [NSFont fontWithName:@"PingFangSC-Regular" size:18].familyName;
     NSString *serif = [NSFont fontWithName:@"STSongti-SC-Regular" size:18].familyName;
     assert(sans && serif);
     __block NSUInteger notifications = 0;
     id observer = [NSNotificationCenter.defaultCenter addObserverForName:MSIMEAppearanceDidChangeNotification object:preferences queue:nil usingBlock:^(NSNotification *note) { (void)note; ++notifications; }];
     [preferences applySharedCandidatePreferences:@{@"candidate_font_family": @"Menlo", @"candidate_english_font": @"Helvetica", @"candidate_fallback_fonts": @[sans, serif]}];
-    assert(notifications == 0 && list.numberOfRows == 2);
+    assert(notifications == 0 && ([preferences.fallbackFonts isEqual:@[sans, serif]]));
     assert([preferences.candidateEnglishFont isEqual:@"Helvetica"]);
     NSDictionary *fontMerge = [preferences sharedPreferencesByMerging:@{}];
     assert([fontMerge[@"candidate_english_font"] isEqual:@"Helvetica"]);
@@ -66,17 +66,9 @@ static void TestFallbackFonts(MSIMEAppearancePreferences *preferences, NSUserDef
     assert(!preferences.candidateEnglishFont);
     [preferences applySharedCandidatePreferences:@{@"candidate_english_font": @"Helvetica"}];
     assert([RenderedFamily([preferences candidateFontOfSize:18]) isEqual:sans]);
-    [list selectRowIndexes:[NSIndexSet indexSetWithIndex:1] byExtendingSelection:NO];
-    [NSApp sendAction:NSSelectorFromString(@"moveFallbackFontUp:") to:preferences from:nil];
-    assert([preferences.fallbackFonts.firstObject isEqual:serif]);
+    preferences.fallbackFonts = @[serif, sans];
     assert([RenderedFamily([preferences candidateFontOfSize:18]) isEqual:serif]);
-    [NSApp sendAction:NSSelectorFromString(@"moveFallbackFontDown:") to:preferences from:nil];
-    assert([preferences.fallbackFonts.firstObject isEqual:sans]);
-    entry.stringValue = @"MSIME Synthetic Unavailable Supplement";
-    [NSApp sendAction:NSSelectorFromString(@"addFallbackFont:") to:preferences from:entry];
-    assert(preferences.fallbackFonts.count == 3 && list.selectedRow == 2);
-    [NSApp sendAction:NSSelectorFromString(@"removeFallbackFont:") to:preferences from:nil];
-    assert(preferences.fallbackFonts.count == 2);
+    preferences.fallbackFonts = @[sans, serif];
     MSIMEAppearancePreferences *reloaded = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults skinsRoot:preferences.skinsRoot];
     assert([reloaded.fallbackFonts isEqual:preferences.fallbackFonts]);
     NSArray *saved = preferences.fallbackFonts;
@@ -91,14 +83,10 @@ static void TestFallbackFonts(MSIMEAppearancePreferences *preferences, NSUserDef
     NSMutableArray *limit = [NSMutableArray array];
     for (NSUInteger i = 0; i < 32; ++i) [limit addObject:sans];
     preferences.fallbackFonts = limit;
-    assert(preferences.fallbackFonts.count == 32 && list.numberOfRows == 32);
+    assert(preferences.fallbackFonts.count == 32);
     [limit addObject:serif];
     preferences.fallbackFonts = limit;
     assert(preferences.fallbackFonts.count == 32);
-    NSUInteger countAtLimit = notifications;
-    entry.stringValue = serif;
-    [NSApp sendAction:NSSelectorFromString(@"addFallbackFont:") to:preferences from:entry];
-    assert(preferences.fallbackFonts.count == 32 && notifications == countAtLimit);
     NSMutableString *mutableFamily = [sans mutableCopy];
     NSMutableArray *mutableFonts = [NSMutableArray arrayWithObject:mutableFamily];
     [preferences applySharedCandidatePreferences:@{@"candidate_fallback_fonts": mutableFonts}];
@@ -119,6 +107,11 @@ static void TestCloudImportCache(MSIMEAppearancePreferences *preferences, NSUser
     NSDictionary *original = MSIMECloudAppearanceSnapshot(defaults);
     [preferences applySharedCandidatePreferences:@{@"candidate_font_size": @12, @"candidate_page_size": @1,
         @"candidate_layout": @"vertical", @"candidate_font_family": @"Menlo", @"candidate_preedit_font_size": @28}];
+    [preferences applySharedCandidatePreferences:@{
+        @"candidate_font_size": [NSDecimalNumber decimalNumberWithString:@"13.0000000000000001"],
+        @"candidate_page_size": [NSDecimalNumber decimalNumberWithString:@"2.0000000000000001"],
+        @"candidate_preedit_font_size": [NSDecimalNumber decimalNumberWithString:@"27.0000000000000001"]}];
+    assert(preferences.fontSize == 12 && preferences.pageSize == 1 && preferences.preeditFontSize == 28);
     [preferences applySharedInputPreferences:@{@"scheme": @"wubi", @"shuangpin_profile": @"microsoft", @"shuangpin_preedit_uses_raw": @NO, @"chinese_punctuation": @NO}];
     assert(preferences.inlinePreeditStyle == MSIMEInlinePreeditStyleRaw);
     [preferences applySharedInputPreferences:@{@"tsf_preedit_style": @"raw"}];
@@ -129,9 +122,9 @@ static void TestCloudImportCache(MSIMEAppearancePreferences *preferences, NSUser
     assert(preferences.inlinePreeditStyle == MSIMEInlinePreeditStyleEmpty);
     [preferences applySharedInputPreferences:@{@"tsf_preedit_style": @"invalid"}];
     assert(preferences.inlinePreeditStyle == MSIMEInlinePreeditStyleEmpty);
-    [preferences applySharedAssistancePreferences:@{@"autocorrect": @NO, @"quanpin": @{@"autocorrect_neighbor": @NO}}];
+    [preferences applySharedAssistancePreferences:@{@"quanpin": @{@"autocorrect_neighbor": @NO}}];
     [preferences applySharedToolbarVisibility:NO];
-    assert(!preferences.chinesePunctuation && !preferences.autocorrect && !preferences.shuangpinPreeditUsesRaw && !preferences.floatingToolbarEnabled);
+    assert(!preferences.chinesePunctuation && !preferences.shuangpinPreeditUsesRaw && !preferences.floatingToolbarEnabled);
     NSDictionary *effective = [preferences cloudSettingsSnapshot];
     assert(MSIMEValidateCloudAppearance(effective));
     // The theme is exported as the host draws it, which the shared document supplied and defaults never saw.
@@ -147,7 +140,7 @@ static void TestCloudImportCache(MSIMEAppearancePreferences *preferences, NSUser
     assert([effective[@"platform.macos.candidate_page_size"] isEqual:@1]);
     assert([effective[@"platform.macos.candidate_panel_style"] isEqual:@1]);
     assert([effective[@"platform.macos.input_scheme"] isEqual:@2]);
-    for (NSString *key in @[@"autocorrect", @"chinese_punctuation", @"shuangpin_preedit_uses_raw", @"floating_toolbar"])
+    for (NSString *key in @[@"chinese_punctuation", @"shuangpin_preedit_uses_raw", @"floating_toolbar"])
         assert([effective[[@"platform.macos." stringByAppendingString:key]] isEqual:@NO]);
     assert([MSIMECloudAppearanceSnapshot(defaults) isEqual:original]);
     NSMutableDictionary *imported = [original mutableCopy];
@@ -176,7 +169,7 @@ static void TestCloudImportCache(MSIMEAppearancePreferences *preferences, NSUser
     assert([[preferences cloudSettingsSnapshot] isEqual:imported]);
     assert(notifications == 1); // Export is read-only and must not schedule a save.
     assert([effective[@"platform.macos.candidate_font_size"] isEqual:@12]); // Earlier snapshot stays immutable.
-    assert(preferences.shuangpinPreeditUsesRaw && preferences.autocorrect && preferences.chinesePunctuation && preferences.floatingToolbarEnabled);
+    assert(preferences.shuangpinPreeditUsesRaw && preferences.chinesePunctuation && preferences.floatingToolbarEnabled);
     assert([preferences.inputScheme isEqual:@"shuangpin"]);
     assert([preferences.fontFamily isEqual:@"Menlo"] && preferences.preeditFontSize == 28);
     assert([preferences.shuangpinProfile isEqual:@"microsoft"] && !preferences.autocorrectNeighbor);
@@ -199,6 +192,124 @@ static NSBitmapImageRep *Draw(MSIMECandidatePreviewView *preview) {
     assert(corner.alphaComponent > .99);
     assert(std::abs(corner.redComponent - expected.redComponent) < .03);
     return bitmap;
+}
+
+// 整体大小, 不透明度 and 圆角大小 travel through the shared document like the font settings beside them, the sliders write them, and the preview draws them; 字体预设 writes the family and the front of the fallback list in one change.
+static void TestCandidateWindowStyle(MSIMEAppearancePreferences *preferences, NSUserDefaults *defaults) {
+    NSView *root = preferences.window.contentView;
+    MSIMECandidatePreviewView *preview = (id)MSIMEFindPreferenceViewOfClass(root, MSIMECandidatePreviewView.class);
+    NSSlider *scale = (id)FindControl(root, @"整体大小");
+    NSSlider *opacity = (id)FindControl(root, @"不透明度");
+    NSSlider *radius = (id)FindControl(root, @"圆角大小");
+    NSButton *followSkin = (id)FindControl(root, @"圆角大小跟随皮肤");
+    NSPopUpButton *presets = (id)FindControl(root, @"字体预设");
+    assert(preview && [scale isKindOfClass:NSSlider.class] && [opacity isKindOfClass:NSSlider.class] && [radius isKindOfClass:NSSlider.class]);
+    assert([followSkin isKindOfClass:NSButton.class] && [presets isKindOfClass:NSPopUpButton.class] && presets.numberOfItems == 5);
+    assert(scale.minValue == 75 && scale.maxValue == 150 && opacity.minValue == 50 && opacity.maxValue == 100 && radius.minValue == 0 && radius.maxValue == 16);
+
+    // Untouched: 100%, 100% and the skin's own radius, published as such so that a restored section reaches the document too.
+    assert(preferences.candidateScalePercent == 100 && preferences.candidateOpacityPercent == 100 && preferences.candidateCornerRadius == nil);
+    NSDictionary *merged = [preferences sharedPreferencesByMerging:@{}];
+    assert([merged[@"candidate_scale_percent"] isEqual:@100] && [merged[@"candidate_opacity_percent"] isEqual:@100]);
+    assert(merged[@"candidate_corner_radius"] == NSNull.null && !followSkin.enabled);
+    const CGFloat baseHeight = preview.previewContentHeight;
+
+    // A document's values are honoured across the shared ranges, which are wider than the sliders'; anything outside them, or not a whole number, leaves the setting alone.
+    NSDictionary *valid = @{@"candidate_scale_percent": @200, @"candidate_opacity_percent": @50, @"candidate_corner_radius": @32};
+    [preferences applySharedCandidatePreferences:valid];
+    assert(preferences.candidateScalePercent == 200 && preferences.candidateOpacityPercent == 50 && [preferences.candidateCornerRadius isEqual:@32]);
+    for (NSArray *entry in @[ @[@"candidate_scale_percent", @49], @[@"candidate_scale_percent", @201], @[@"candidate_scale_percent", @YES],
+                              @[@"candidate_scale_percent", @120.5],
+                              @[@"candidate_scale_percent", [NSDecimalNumber decimalNumberWithString:@"199.0000000000000001"]],
+                              @[@"candidate_opacity_percent", @49], @[@"candidate_opacity_percent", @101],
+                              @[@"candidate_opacity_percent", [NSDecimalNumber decimalNumberWithString:@"51.0000000000000001"]],
+                              @[@"candidate_corner_radius", @33], @[@"candidate_corner_radius", @(-1)], @[@"candidate_corner_radius", @"8"],
+                              @[@"candidate_corner_radius", [NSDecimalNumber decimalNumberWithString:@"31.0000000000000001"]] ]) {
+        NSMutableDictionary *document = [valid mutableCopy];
+        document[entry[0]] = entry[1];
+        [preferences applySharedCandidatePreferences:document];
+        assert(preferences.candidateScalePercent == 200 && preferences.candidateOpacityPercent == 50 && [preferences.candidateCornerRadius isEqual:@32]);
+    }
+    // The shared serializer leaves a default out, so an omitted field is 100% or following the skin again, and so is an explicit null radius.
+    [preferences applySharedCandidatePreferences:@{}];
+    assert(preferences.candidateScalePercent == 100 && preferences.candidateOpacityPercent == 100 && preferences.candidateCornerRadius == nil);
+    [preferences applySharedCandidatePreferences:@{@"candidate_corner_radius": @8}];
+    assert([preferences.candidateCornerRadius isEqual:@8] && followSkin.enabled && radius.integerValue == 8);
+    [preferences applySharedCandidatePreferences:@{@"candidate_corner_radius": NSNull.null}];
+    assert(preferences.candidateCornerRadius == nil && !followSkin.enabled);
+
+    // The candidate window's skin carries the style; the resolved skin the toolbar and the colour wells read does not.
+    [preferences applySharedCandidatePreferences:@{@"candidate_scale_percent": @150, @"candidate_opacity_percent": @60, @"candidate_corner_radius": @4}];
+    assert(scale.integerValue == 150 && opacity.integerValue == 60 && radius.integerValue == 4);
+    const auto plain = [preferences resolvedSkinForDark:NO];
+    const auto styled = [preferences candidateWindowSkinForDark:NO];
+    assert(styled.tokens.radius == 6.0f && styled.tokens.pad == plain.tokens.pad * 1.5f);
+    assert(std::abs(styled.tokens.surface.a - plain.tokens.surface.a * 0.6f) < 0.0001f);
+    assert(styled.tokens.text.a == plain.tokens.text.a && styled.tokens.selected.a == plain.tokens.selected.a);
+    // The preview draws the panel at the window's scale, so it grows with it.
+    assert(preview.previewContentHeight > baseHeight);
+    Draw(preview);
+
+    // The sliders write the setting, stored here so it outlives the window, and 跟随皮肤 hands the radius back to the skin with an explicit null.
+    scale.integerValue = 125;
+    [NSApp sendAction:scale.action to:scale.target from:scale];
+    opacity.integerValue = 80;
+    [NSApp sendAction:opacity.action to:opacity.target from:opacity];
+    radius.integerValue = 12;
+    [NSApp sendAction:radius.action to:radius.target from:radius];
+    assert(preferences.candidateScalePercent == 125 && preferences.candidateOpacityPercent == 80 && [preferences.candidateCornerRadius isEqual:@12]);
+    MSIMEAppearancePreferences *reloaded = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults skinsRoot:preferences.skinsRoot];
+    assert(reloaded.candidateScalePercent == 125 && reloaded.candidateOpacityPercent == 80 && [reloaded.candidateCornerRadius isEqual:@12]);
+    // A fresh process whose first document has these at their defaults (reset on another surface) draws the defaults rather than the stale stored values, and publishes them as such.
+    [reloaded applySharedCandidatePreferences:@{}];
+    assert(reloaded.candidateScalePercent == 100 && reloaded.candidateOpacityPercent == 100 && reloaded.candidateCornerRadius == nil);
+    NSDictionary *fresh = [reloaded sharedPreferencesByMerging:@{}];
+    assert([fresh[@"candidate_scale_percent"] isEqual:@100] && fresh[@"candidate_corner_radius"] == NSNull.null);
+    NSDictionary *document = MSIMEMergePreferenceSnapshot(@{@"candidate_corner_radius": @3, @"unrelated": @7}, [preferences sharedPreferencesByMerging:@{}]);
+    assert([document[@"candidate_scale_percent"] isEqual:@125] && [document[@"candidate_opacity_percent"] isEqual:@80]);
+    assert([document[@"candidate_corner_radius"] isEqual:@12] && [document[@"unrelated"] isEqual:@7]);
+    [NSApp sendAction:followSkin.action to:followSkin.target from:followSkin];
+    assert(preferences.candidateCornerRadius == nil);
+    document = MSIMEMergePreferenceSnapshot(document, [preferences sharedPreferencesByMerging:@{}]);
+    assert(document[@"candidate_corner_radius"] == NSNull.null);
+    [preferences applySharedCandidatePreferences:document];
+    assert(preferences.candidateCornerRadius == nil && preferences.candidateScalePercent == 125);
+    // The setters refuse what the shared document would refuse.
+    preferences.candidateScalePercent = 49;
+    preferences.candidateOpacityPercent = 101;
+    preferences.candidateCornerRadius = @33;
+    assert(preferences.candidateScalePercent == 125 && preferences.candidateOpacityPercent == 80 && preferences.candidateCornerRadius == nil);
+
+    // 字体预设: this host's family for the preset, all of the preset's names at the front of the fallback list, then what the user had, without repeats.
+    preferences.fallbackFonts = @[@"Menlo", @"SimSun"];
+    [presets selectItemAtIndex:1];
+    [NSApp sendAction:presets.action to:presets.target from:presets];
+    assert([preferences.fontFamily isEqual:@"Songti SC"] && preferences.candidateFontPreset == 1 && presets.indexOfSelectedItem == 1);
+    assert(([preferences.fallbackFonts isEqual:@[@"Songti SC", @"SimSun", @"Noto Serif CJK SC", @"Noto Serif SC", @"Menlo"]]));
+    assert([[preferences sharedPreferencesByMerging:@{}][@"candidate_font_family"] isEqual:@"Songti SC"]);
+    // A full list keeps its length: the preset goes in front and the tail gives way.
+    NSMutableArray<NSString *> *full = [NSMutableArray array];
+    for (NSUInteger index = 0; index < 32; ++index) [full addObject:[NSString stringWithFormat:@"Synthetic Family %lu", (unsigned long)index]];
+    preferences.fallbackFonts = full;
+    preferences.candidateFontPreset = 3;
+    assert([preferences.fontFamily isEqual:@"Kaiti SC"] && preferences.fallbackFonts.count == 32);
+    assert(([[preferences.fallbackFonts subarrayWithRange:NSMakeRange(0, 5)] isEqual:@[@"Kaiti SC", @"KaiTi", @"STKaiti", @"AR PL UKai CN", @"Synthetic Family 0"]]));
+    // Another platform's name for a preset reads as that preset; any other family is no preset at all.
+    preferences.fontFamily = @"Microsoft YaHei";
+    assert(preferences.candidateFontPreset == 2 && presets.indexOfSelectedItem == 2);
+    preferences.fontFamily = @"Menlo";
+    assert(preferences.candidateFontPreset == -1 && presets.indexOfSelectedItem == -1);
+    // 默认 is the shared default pair as it stands, whatever was there before.
+    [presets selectItemAtIndex:0];
+    [NSApp sendAction:presets.action to:presets.target from:presets];
+    assert([preferences.fontFamily isEqual:@"Noto Sans SC"] && preferences.candidateFontPreset == 0);
+    assert(([preferences.fallbackFonts isEqual:@[@"Noto Sans SC", @"Microsoft YaHei"]]));
+
+    preferences.candidateScalePercent = 100;
+    preferences.candidateOpacityPercent = 100;
+    preferences.fallbackFonts = @[];
+    preferences.fontFamily = @"Segoe UI";
+    assert(std::abs(preview.previewContentHeight - baseHeight) < .01);
 }
 
 static void TestCandidateSurfaceTheme(MSIMEAppearancePreferences *preferences) {
@@ -422,6 +533,7 @@ int main(int argc, const char **argv) {
         preferences.fontFamily = @"Segoe UI";
         TestFallbackFonts(preferences, defaults);
         TestCloudImportCache(preferences, defaults);
+        TestCandidateWindowStyle(preferences, defaults);
         [preferences applySharedCandidatePreferences:@{@"navigation": @{@"minus_equal": @NO, @"brackets": @YES, @"tab": @NO}}];
         assert(![preferences navigationEnabled:@"minus_equal"] && [preferences navigationEnabled:@"brackets"] && ![preferences navigationEnabled:@"tab"]);
         NSButton *tabControl = (id)FindControl(preferences.window.contentView, @"Tab / Shift-Tab 翻页");
@@ -529,7 +641,9 @@ int main(int argc, const char **argv) {
         NSUInteger beforeShared = notifications;
         [preferences applySharedCandidatePreferences:@{@"candidate_preedit_font_size": @32, @"candidate_preedit_style": @"empty"}];
         assert(notifications == beforeShared && preferences.preeditFontSize == 32 && !preferences.showsCandidatePreedit);
-        for (id invalid in @[@YES, @11, @33, @12.5, @"20", NSNull.null]) {
+        for (id invalid in @[@YES, @11, @33, @12.5,
+                             [NSDecimalNumber decimalNumberWithString:@"31.0000000000000001"],
+                             @"20", NSNull.null]) {
             [preferences applySharedCandidatePreferences:@{@"candidate_preedit_font_size": invalid, @"candidate_preedit_style": invalid}];
             assert(preferences.preeditFontSize == 32 && !preferences.showsCandidatePreedit);
         }
@@ -624,7 +738,8 @@ surface = "#123456"
         NSBitmapImageRep *withDecoration = Draw(preview);
         const CGFloat scale = withDecoration.pixelsWide / preview.bounds.size.width;
         if (argc == 2) assert([[withDecoration representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@(argv[1]) atomically:YES]);
-        NSColor *red = [[withDecoration colorAtX:(preview.bounds.size.width - 60) * scale y:80 * scale] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+        // The square image keeps its aspect at 120pt wide, so it fills the lower part of the 180pt band down to 6pt over the card (y 96-216 below the panel's top at 30).
+        NSColor *red = [[withDecoration colorAtX:(preview.bounds.size.width - 60) * scale y:150 * scale] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
         // ColorSync may convert the fixture through the display profile; test visible red,
         // not byte identity between an image profile and the window's backing color space.
         assert(red.alphaComponent > .99 && red.redComponent > .8 &&
@@ -681,13 +796,17 @@ background = "#FF00FF"
                styledSkin.decorationAlign == msime::mac::DecorationAlign::left && !styledSkin.backgroundPath.empty());
         NSBitmapImageRep *styledBitmap = Draw(preview);
         const CGFloat styledScale = styledBitmap.pixelsWide / preview.bounds.size.width;
-        // The 横排候选 panel starts 30pt down at the 14pt inset: the decoration band, then the card.
-        NSColor *mascot = [[styledBitmap colorAtX:(14 + 60) * styledScale y:80 * styledScale] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+        // The 横排候选 panel starts 30pt down at the 14pt inset: the transparent decoration band, then the card at 210. The left-aligned mascot is 6pt in from the card's edge and spans y 96-216, over the card's top edge.
+        NSColor *mascot = [[styledBitmap colorAtX:(14 + 60) * styledScale y:150 * styledScale] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
         // Visible green, allowing for the ColorSync conversion noted above (a pure green fixture lands near 0.5, 0.97, 0.37 on a wide-gamut display).
         assert(mascot.greenComponent > .8 && mascot.greenComponent - mascot.redComponent > .3 && mascot.greenComponent - mascot.blueComponent > .3);
         NSColor *rightOfBand = [[styledBitmap colorAtX:(preview.bounds.size.width - 60) * styledScale y:80 * styledScale] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
         assert(!(rightOfBand.greenComponent - rightOfBand.redComponent > .3));
         const CGFloat cardTop = 30 + 180;
+        NSColor *overCard = [[styledBitmap colorAtX:(14 + 60) * styledScale y:(cardTop + 3) * styledScale] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+        assert(overCard.greenComponent > .8 && overCard.greenComponent - overCard.blueComponent > .3);
+        NSColor *aboveMascot = [[styledBitmap colorAtX:(14 + 60) * styledScale y:60 * styledScale] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+        assert(!(aboveMascot.greenComponent - aboveMascot.redComponent > .3) && !(aboveMascot.blueComponent - aboveMascot.redComponent > .5));
         NSColor *background = [[styledBitmap colorAtX:(preview.bounds.size.width / 2) * styledScale y:(cardTop + 3) * styledScale] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
         assert(background.blueComponent > .8 && background.blueComponent - background.redComponent > .5);
         // Clipped to the 24pt corner: the card's own top-left pixel is the canvas, not the image.

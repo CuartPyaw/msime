@@ -19,8 +19,11 @@
   "bundle": {
     "active": true,
     "targets": ["app"],
+    "icon": ["icons/icon.icns"],
     "macOS": { "minimumSystemVersion": "13.0" },
     "resources": {
+      "macos/en.lproj/InfoPlist.strings": "en.lproj/InfoPlist.strings",
+      "macos/zh-Hans.lproj/InfoPlist.strings": "zh-Hans.lproj/InfoPlist.strings",
       "../../../target/macos/EngineResources": "EngineResources",
       "../../../target/macos/水杉输入法.app": "水杉输入法.app",
       "../../../resources/licenses/Zinnia-LICENSE.txt": "handwriting/Zinnia-LICENSE.txt",

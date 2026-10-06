@@ -43,6 +43,23 @@ pub extern "C" fn msime_client_destroy(handle: u64) -> *mut c_char {
     })
 }
 
+/// Write what would otherwise wait: the selection counts of every session on the calling thread and every queued personal-context transition of the process. The C++ Engine wrote its queue from `atexit` (personal_ngram_store.cpp:254-255); a host that can exit without a focus-out or a destroy, such as macOS `[NSApp terminate:]`, calls this from its will-terminate hook on the thread that owns its sessions. Sessions stay usable.
+#[no_mangle]
+pub extern "C" fn msime_client_flush_all() -> *mut c_char {
+    response(|| {
+        SESSIONS.with(|sessions| {
+            // A reentrant call (from inside another host call on this thread) cannot reach the sessions; the Engine's queue is still written.
+            if let Ok(mut sessions) = sessions.try_borrow_mut() {
+                for session in sessions.values_mut() {
+                    session.flush_selections();
+                }
+            }
+        });
+        msime_engine::flush_personal_learning();
+        Ok(Value::Null)
+    })
+}
+
 /// # Safety
 /// `value` must be null or an allocation returned by this library, not yet freed.
 #[no_mangle]

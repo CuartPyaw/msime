@@ -147,8 +147,12 @@ public final class VoiceResultStore {
             if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS))
                 throw new Failure(Reason.UNAVAILABLE);
             Path lockPath = directory.resolve(LOCK_NAME);
+            if (Files.isSymbolicLink(lockPath)
+                    || (Files.exists(lockPath, LinkOption.NOFOLLOW_LINKS)
+                        && !Files.isRegularFile(lockPath, LinkOption.NOFOLLOW_LINKS)))
+                throw new Failure(Reason.UNAVAILABLE);
             try (FileChannel channel = FileChannel.open(lockPath, StandardOpenOption.CREATE,
-                    StandardOpenOption.READ, StandardOpenOption.WRITE)) {
+                    StandardOpenOption.READ, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)) {
                 FileLock lock;
                 try { lock = channel.tryLock(); }
                 catch (OverlappingFileLockException error) { throw new Failure(Reason.BUSY, error); }
@@ -164,14 +168,7 @@ public final class VoiceResultStore {
     }
 
     private static void rejectSymlinkComponents(Path path) throws IOException {
-        if (Files.isSymbolicLink(path))
-            throw new IOException("voice result directory is a symbolic link");
-        Path parent = path.getParent();
-        if (parent != null && Files.isSymbolicLink(parent))
-            throw new IOException("voice result parent is a symbolic link");
-        if (Files.exists(path, LinkOption.NOFOLLOW_LINKS)
-                && !Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS))
-            throw new IOException("voice result directory is not a directory");
+        SafePaths.rejectSymlinkComponents(path);
     }
 
     private static Entry readFile(Path result, long nowMillis) throws Failure, IOException {
@@ -190,8 +187,9 @@ public final class VoiceResultStore {
                 || !validText(entry.text())
                 || entry.expiresAtMillis() - entry.createdAtMillis() != LIFETIME_MILLIS)
             throw new Failure(Reason.INVALID);
-        if (entry.expiresAtMillis() <= nowMillis
-                || entry.createdAtMillis() > nowMillis + FUTURE_TOLERANCE_MILLIS) {
+        boolean tooFarInFuture = entry.createdAtMillis() > nowMillis
+            && entry.createdAtMillis() - nowMillis > FUTURE_TOLERANCE_MILLIS;
+        if (entry.expiresAtMillis() <= nowMillis || tooFarInFuture) {
             Files.delete(result);
             return null;
         }

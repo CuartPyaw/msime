@@ -38,7 +38,9 @@ pub fn cvt_single_sp_to_pinyin(code: &str, profile: &ShuangpinProfile) -> String
         } else {
             final_unit
         };
-        let syllable = format!("{initial}{normalized}");
+        let mut syllable = String::with_capacity(initial.len() + normalized.len());
+        syllable.push_str(initial);
+        syllable.push_str(normalized);
         if accepted.contains(syllable.as_str()) {
             result = syllable;
         }
@@ -53,12 +55,16 @@ pub fn is_accepted_syllable_code(code: &str, profile: &ShuangpinProfile) -> bool
 /// Whether the two keys at `position` form an accepted syllable, case-insensitively.
 pub(crate) fn takes_two_keys(input: &[u8], position: usize, profile: &ShuangpinProfile) -> bool {
     input.len() >= position + 2 && {
-        let pair: String = input[position..position + 2]
-            .iter()
-            .map(|byte| char::from(byte.to_ascii_lowercase()))
-            .collect();
-        is_accepted_syllable_code(&pair, profile)
+        let pair = lowercase_pair(input, position);
+        std::str::from_utf8(&pair).is_ok_and(|pair| is_accepted_syllable_code(pair, profile))
     }
+}
+
+fn lowercase_pair(input: &[u8], position: usize) -> [u8; 2] {
+    [
+        input[position].to_ascii_lowercase(),
+        input[position + 1].to_ascii_lowercase(),
+    ]
 }
 
 /// Forward-greedy two-then-one split, case kept (:118-158).
@@ -67,24 +73,39 @@ pub fn pinyin_segmentation(input: &str, profile: &ShuangpinProfile) -> String {
         return input.to_string();
     }
     let bytes = input.as_bytes();
-    let mut pieces: Vec<&[u8]> = Vec::new();
-    let mut position = 0;
-    while position < bytes.len() {
-        let width = if takes_two_keys(bytes, position, profile) {
+    let width_at = |position: usize| {
+        if takes_two_keys(bytes, position, profile) {
             2
         } else {
             1
-        };
-        pieces.push(&bytes[position..position + width]);
+        }
+    };
+    let mut piece_count = 0usize;
+    let mut position = 0;
+    while position < bytes.len() {
+        let width = width_at(position);
+        piece_count += 1;
         position += width;
     }
-    let mut result = String::with_capacity(bytes.len() * 2);
-    for piece in pieces {
-        result.push('\'');
-        result.extend(piece.iter().map(|&byte| char::from(byte)));
+    let leading_apostrophes = bytes.iter().take_while(|&&byte| byte == b'\'').count();
+    let copied_bytes = bytes.len() - leading_apostrophes;
+    let separators = piece_count.saturating_sub(leading_apostrophes + 1);
+    let mut result = String::with_capacity(copied_bytes + separators);
+    position = 0;
+    while position < bytes.len() {
+        let width = width_at(position);
+        if !result.is_empty() {
+            result.push('\'');
+        }
+        for &byte in &bytes[position..position + width] {
+            if !result.is_empty() || byte != b'\'' {
+                result.push(char::from(byte));
+            }
+        }
+        position += width;
     }
-    // The reference strips leading `'` only; its trailing strip read past the end and never fired, and no trailing `'` is ever produced. A chunk containing `'` (the single-helpcode reread of a delimited input) can lead with more than one.
-    result.trim_start_matches('\'').to_string()
+    // A chunk containing `'` can be reread for single-helpcode matching. Its leading delimiters are stripped, while delimiters after the first key stay in the output.
+    result
 }
 
 /// Even length and every chunk exactly two keys (:221-234).
@@ -153,10 +174,10 @@ pub fn get_full_help_codes(pinyin_with_cases: &str) -> String {
     } else {
         (first, second)
     };
-    [first, second]
-        .iter()
-        .map(|byte| char::from(byte.to_ascii_lowercase()))
-        .collect()
+    let mut result = String::with_capacity(2);
+    result.push(char::from(first.to_ascii_lowercase()));
+    result.push(char::from(second.to_ascii_lowercase()));
+    result
 }
 
 #[cfg(test)]
@@ -201,6 +222,25 @@ mod tests {
     }
 
     #[test]
+    fn converted_syllable_uses_exact_string_capacity() {
+        let result = cvt_single_sp_to_pinyin("vs", xiaohe());
+        assert_eq!(result, "zhong");
+        assert_eq!(result.capacity(), result.len());
+    }
+
+    #[test]
+    fn key_pair_lowering_stays_on_the_stack() {
+        assert_eq!(lowercase_pair(b"NI", 0), [b'n', b'i']);
+    }
+
+    #[test]
+    fn full_help_codes_use_exact_string_capacity() {
+        let result = get_full_help_codes("xxAb");
+        assert_eq!(result, "ba");
+        assert_eq!(result.capacity(), result.len());
+    }
+
+    #[test]
     fn every_profile_accepts_yo_as_one_syllable() {
         for kind in ALL {
             let selected = profile(kind);
@@ -212,13 +252,17 @@ mod tests {
     #[test]
     fn segments_forward_greedy_keeping_case() {
         assert_eq!(pinyin_segmentation("nihaoma", xiaohe()), "ni'ha'o'ma");
-        assert_eq!(pinyin_segmentation("nihcc", xiaohe()), "ni'hc'c");
+        let segmentation = pinyin_segmentation("nihcc", xiaohe());
+        assert_eq!(segmentation, "ni'hc'c");
+        assert_eq!(segmentation.capacity(), segmentation.len());
         assert_eq!(pinyin_segmentation("NiHc", xiaohe()), "Ni'Hc");
         assert_eq!(pinyin_segmentation("n", xiaohe()), "n");
         assert_eq!(pinyin_segmentation("cls", xiaohe()), "c'ls");
         assert_eq!(pinyin_segmentation("", xiaohe()), "");
         // A delimited input read as one chunk (the single-helpcode tail) treats `'` as a key that forms nothing.
         assert_eq!(pinyin_segmentation("ni'hck", xiaohe()), "ni'''hc'k");
+        assert_eq!(pinyin_segmentation("''ni", xiaohe()), "ni");
+        assert_eq!(pinyin_segmentation("ni''hc", xiaohe()), "ni'''''hc");
     }
 
     #[test]

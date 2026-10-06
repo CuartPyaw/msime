@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { testHost } from "../support/host";
+import { settingsFormReady } from "../support/settings-form";
 import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { SettingsPage, type Snapshot } from "@msime/ui";
@@ -26,7 +28,7 @@ function renderSettings(platform: string, host: Record<string, unknown> = {}) {
       client={{
         load: vi.fn().mockResolvedValue(initial),
         save: vi.fn(),
-        host: { platform, ...host } as never,
+        host: testHost({ platform, ...host }),
         openSystemKeyboardSettings: vi.fn(),
         home: { openKeyboard: vi.fn(), openSystemKeyboardSettings: vi.fn() },
       }}
@@ -37,7 +39,7 @@ function renderSettings(platform: string, host: Record<string, unknown> = {}) {
 // Reached through the 键盘 tab's 全部设置 page, which is where the phone bar's `更多设置` dropdown
 // went — the bar is the source's four tabs and nothing else.
 async function handwritingPage(mobile = true) {
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   const { fireEvent } = await import("@testing-library/react");
   const list = mobile
     ? (fireEvent.click(screen.getByRole("button", { name: /全部设置/ })),
@@ -80,7 +82,7 @@ test("a desktop host still gets the launch button", async () => {
   // handwriting panel from the settings window.
   renderSettings("windows");
   const { fireEvent } = await import("@testing-library/react");
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   fireEvent.click(screen.getByRole("button", { name: "手写输入" }));
   const page = screen.getByRole("group", { name: "手写输入" });
   expect(within(page).getByText("打开手写识别板")).toBeTruthy();

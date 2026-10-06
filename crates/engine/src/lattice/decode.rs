@@ -6,7 +6,9 @@
 //!
 //! A trigram cannot be searched the same way without carrying two words of history in every beam entry, so it is applied after the search: the n best paths are rescored with what the third word adds over the second, then reordered. That is the reason to decode more paths than are shown.
 
-use std::collections::{HashMap, HashSet};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 use std::sync::Arc;
 
 use super::cxx_sort;
@@ -29,7 +31,7 @@ pub struct LatticeOptions<'a> {
     /// Cap on rows per span. The DB lookup already applies the same cap.
     pub span_limit: usize,
     pub max_phrase_syllables: usize,
-    /// Heuristic unigram normaliser against a phrase-length bonus: single-character msime.db weights are corpus counts, phrase weights are on a smaller scale.
+    /// Heuristic unigram normaliser against a phrase-length bonus: single-character msime-pinyin.db weights are corpus counts, phrase weights are on a smaller scale.
     pub unigram_z: f64,
     /// The bonus was 3.0, which was never measured against the eval sets: a plausible number for a term whose only job was to stop the decoder spelling a sentence out character by character. Swept through the client's convert_eval with the n-gram tables present, whole-sentence top-1 rises monotonically up to 20 and stops moving after it: sentences-v1 0.850 -> 0.900, sentences-v2 0.125 -> 0.189, quanpin-words-v1 unchanged at 0.768. Raising it further trades sentences-v1 away for nothing.
     pub phrase_length_bonus: f64,
@@ -54,6 +56,8 @@ pub struct LatticeOptions<'a> {
     pub trigram: Option<Arc<NgramTable>>,
     /// Borrowed while the caller holds the owning store's read lock. `None`, or a model with nothing recorded, scores every path exactly as without it.
     pub personal: Option<&'a PersonalNgram>,
+    /// 二元分的备忘，只影响速度不影响结果；`None` 时每次直接查表。
+    pub bigram_memo: Option<&'a RefCell<BigramMemo>>,
     /// With neural rerankers: whether the unreranked best still gets a Generated row.
     pub include_lattice_best: bool,
     /// With neural rerankers: take a source's next distinct path when its first pick is already listed.
@@ -80,6 +84,7 @@ impl Default for LatticeOptions<'_> {
             bigram: None,
             trigram: None,
             personal: None,
+            bigram_memo: None,
             include_lattice_best: true,
             show_next_on_duplicate: false,
         }
@@ -98,6 +103,58 @@ pub fn make_sentence_lattice_options<'a>(
         bigram: NgramTable::shared(&paths.dictionary(assets::BIGRAM_TABLE)),
         trigram: NgramTable::shared(&paths.dictionary(assets::TRIGRAM_TABLE)),
         ..LatticeOptions::default()
+    }
+}
+
+/// 备忘最多存的二元分条数，满了整个清空重来，约 0.5 MB。
+const BIGRAM_MEMO_CAPACITY: usize = 1 << 15;
+
+/// 二元分的备忘。九键一次刷新要对几十条切分各解一次词网格，它们的前后词对大量重复，而每次查表要在 12 MB 的映射里跳几次。值就是表里查到的分数（查不到为 0），只要表不变就永远正确；表换了（按 `Arc` 的地址判断）就清空。
+#[derive(Default)]
+pub struct BigramMemo {
+    table: usize,
+    scores: HashMap<u64, f32, BuildHasherDefault<KeyHasher>>,
+}
+
+impl BigramMemo {
+    fn score(&mut self, table: &Arc<NgramTable>, previous: &str, next: &str) -> f32 {
+        let Some(key) = table.bigram_key(previous, next) else {
+            return 0.0;
+        };
+        let address = Arc::as_ptr(table) as usize;
+        if self.table != address {
+            self.scores.clear();
+            self.table = address;
+        }
+        if let Some(&score) = self.scores.get(&key) {
+            return score;
+        }
+        if self.scores.len() >= BIGRAM_MEMO_CAPACITY {
+            self.scores.clear();
+        }
+        let score = table.score(key);
+        self.scores.insert(key, score);
+        score
+    }
+}
+
+/// 备忘的键本身就是 FNV-1a 散列，直接拿来当散列值，不再过一遍 SipHash。
+#[derive(Default)]
+pub struct KeyHasher(u64);
+
+impl Hasher for KeyHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        self.0 = bytes.iter().fold(self.0, |state, &byte| {
+            (state ^ u64::from(byte)).wrapping_mul(0x0100_0000_01B3)
+        });
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        self.0 = value;
     }
 }
 
@@ -144,7 +201,7 @@ impl TypoSentence {
     }
 }
 
-/// WL:56-68. Single-character rows in msime.db are raw corpus counts (often 1e6+) while multi-syllable rows are phrase weights on a much smaller scale; libpinyin stores comparable log probabilities, approximated here by down-projecting unigrams and giving dictionary phrases a length bonus.
+/// WL:56-68. Single-character rows in msime-pinyin.db are raw corpus counts (often 1e6+) while multi-syllable rows are phrase weights on a much smaller scale; libpinyin stores comparable log probabilities, approximated here by down-projecting unigrams and giving dictionary phrases a length bonus.
 pub fn edge_log_prob(weight: i64, syllables: usize, options: &LatticeOptions<'_>) -> f64 {
     let weight = if weight > 0 { weight as f64 } else { 1.0 };
     let z = if options.unigram_z > 1.0 {
@@ -213,7 +270,10 @@ pub(super) fn build_graph(
     let max_len = options.max_phrase_syllables.max(1);
     let mut graph: Graph = (0..n).map(|_| Vec::new()).collect();
     // A key repeated in the input (ma'ma'ma) is looked up once.
-    let mut span_cache: HashMap<String, Vec<LatticeLexeme>> = HashMap::new();
+    let span_capacity = (0..n)
+        .map(|start| n.min(start.saturating_add(max_len)) - start)
+        .sum();
+    let mut span_cache: HashMap<String, Vec<LatticeLexeme>> = HashMap::with_capacity(span_capacity);
     for (start, edges) in graph.iter_mut().enumerate() {
         for end in start + 1..=n.min(start + max_len) {
             let span = &syllables[start..end];
@@ -221,6 +281,7 @@ pub(super) fn build_graph(
             let rows = span_cache
                 .entry(span_key.clone())
                 .or_insert_with(|| lookup(span));
+            edges.reserve(rows.len().min(options.span_limit));
             for row in rows.iter().take(options.span_limit) {
                 if row.value.is_empty() {
                     continue;
@@ -266,6 +327,37 @@ fn keep_beam(column: &mut Vec<Hyp<'_>>, beam: usize) {
     column.truncate(beam);
 }
 
+/// The maximum number of hypotheses a column can receive before it is pruned: one per incoming edge for each surviving hypothesis at its source.
+fn column_capacities(
+    graph: &Graph,
+    extra: Option<&Graph>,
+    beam: usize,
+    nbest: usize,
+) -> Vec<usize> {
+    let floor = beam.max(nbest);
+    let mut incoming_edges = vec![0usize; graph.len() + 1];
+    for edges in graph {
+        for edge in edges {
+            if edge.end <= graph.len() {
+                incoming_edges[edge.end] = incoming_edges[edge.end].saturating_add(1);
+            }
+        }
+    }
+    if let Some(extra) = extra {
+        for edges in extra {
+            for edge in edges {
+                if edge.end <= graph.len() {
+                    incoming_edges[edge.end] = incoming_edges[edge.end].saturating_add(1);
+                }
+            }
+        }
+    }
+    incoming_edges
+        .into_iter()
+        .map(|count| floor.max(count.saturating_mul(beam)))
+        .collect()
+}
+
 /// Null when the options carry no personal data worth consulting, so the decode keeps its exact prior arithmetic (WL:71-76).
 fn active_personal<'a>(options: &LatticeOptions<'a>) -> Option<&'a PersonalNgram> {
     options
@@ -298,8 +390,11 @@ pub(super) fn decode_graph(
 ) -> Vec<SentencePath> {
     let n = graph.len();
     let personal = active_personal(options);
+    let bigram_table = options.bigram.as_ref();
     let bigram = options.bigram.as_deref();
-    let mut columns: Vec<Vec<Hyp<'_>>> = (0..=n).map(|_| Vec::new()).collect();
+    let mut memo = options.bigram_memo.map(RefCell::borrow_mut);
+    let capacities = column_capacities(graph, extra, options.beam, options.nbest);
+    let mut columns: Vec<Vec<Hyp<'_>>> = capacities.into_iter().map(Vec::with_capacity).collect();
     columns[0].push(Hyp {
         score: 0.0,
         prev: None,
@@ -307,13 +402,44 @@ pub(super) fn decode_graph(
         typo_edges: 0,
     });
 
+    // 同一列里很多假设经由同一个词到达，只是更早的历史不同；它们对每条出边查到的二元分完全一样。按前一个词把这一列所有出边的二元分记下来，同一个词只查一遍表。
+    let mut bigram_rows: Vec<(&str, Vec<f32>)> = Vec::new();
+    // 这一列的出边，按原来的顺序（先图里的，再 `extra` 的）收集一次，每个假设都按这个顺序展开。
+    let mut outgoing: Vec<&Edge> = Vec::new();
     for pos in 0..n {
         keep_beam(&mut columns[pos], options.beam);
         let (done, ahead) = columns.split_at_mut(pos + 1);
         let current = &done[pos];
+        bigram_rows.clear();
+        outgoing.clear();
+        outgoing.extend(
+            graph[pos]
+                .iter()
+                .chain(extra.into_iter().flat_map(|extra| extra[pos].iter())),
+        );
         for (index, hyp) in current.iter().enumerate() {
             // Column 0 has no predecessor, so the start token carries what the corpus knows about how sentences open; every later column uses the word the hypothesis arrived on.
             let previous = hyp.edge.map_or(SENTENCE_START, |edge| edge.word.as_str());
+            let bonuses = bigram_table.map(|table| {
+                let row = match bigram_rows.iter().position(|(word, _)| *word == previous) {
+                    Some(row) => row,
+                    None => {
+                        let scores = match memo.as_deref_mut() {
+                            Some(memo) => outgoing
+                                .iter()
+                                .map(|edge| memo.score(table, previous, &edge.word))
+                                .collect(),
+                            None => outgoing
+                                .iter()
+                                .map(|edge| table.bigram(previous, &edge.word))
+                                .collect(),
+                        };
+                        bigram_rows.push((previous, scores));
+                        bigram_rows.len() - 1
+                    }
+                };
+                &bigram_rows[row].1
+            });
             // The column a hypothesis points back into was pruned before this one was expanded and is never touched again, so the word two back is stable here.
             let context = personal.map(|personal| {
                 let earlier = match hyp.prev {
@@ -324,13 +450,9 @@ pub(super) fn decode_graph(
                 };
                 personal.context(earlier, Some(previous))
             });
-            let outgoing = graph[pos]
-                .iter()
-                .chain(extra.into_iter().flat_map(|extra| extra[pos].iter()));
-            for edge in outgoing {
+            for (at, &edge) in outgoing.iter().enumerate() {
                 let mut score = hyp.score + edge.log_prob;
-                let static_bonus =
-                    bigram.map_or(0.0, |table| f64::from(table.bigram(previous, &edge.word)));
+                let static_bonus = bonuses.map_or(0.0, |bonuses| f64::from(bonuses[at]));
                 if bigram.is_some() {
                     score += options.bigram_weight * static_bonus;
                 }
@@ -365,13 +487,12 @@ pub(super) fn decode_graph(
     let take = options.nbest.min(last.len());
 
     let mut paths = Vec::with_capacity(take);
-    let mut seen = HashSet::new();
     for hyp in &last {
         if paths.len() >= take {
             break;
         }
-        let mut words = Vec::new();
-        let mut keys = Vec::new();
+        let mut words = Vec::with_capacity(n);
+        let mut keys = Vec::with_capacity(n);
         let mut cursor = Some(hyp);
         while let Some(step) = cursor {
             let Some(edge) = step.edge else { break };
@@ -382,7 +503,7 @@ pub(super) fn decode_graph(
         words.reverse();
         keys.reverse();
         let sentence = words.concat();
-        if sentence.is_empty() || !seen.insert(sentence.clone()) {
+        if sentence.is_empty() || contains_sentence(&paths, &sentence) {
             continue;
         }
         paths.push(SentencePath {
@@ -395,6 +516,10 @@ pub(super) fn decode_graph(
     }
     rescore_with_trigram(&mut paths, options);
     paths
+}
+
+fn contains_sentence(paths: &[SentencePath], sentence: &str) -> bool {
+    paths.iter().any(|path| path.sentence == sentence)
 }
 
 /// WL:168-186. The beam carries one word of history, so a third word of context cannot be searched without widening every hypothesis into (position, last two words); the survivors are rescored instead. Each entry holds what the third word adds over the second, so summing it onto a path that already carries its bigram score is the whole model, not a second opinion.
@@ -433,7 +558,13 @@ pub(super) fn decode_typo_on_graph(
     edges: &[TypoEdge],
 ) -> Option<TypoSentence> {
     let n = graph.len();
-    let mut extra: Graph = (0..n).map(|_| Vec::new()).collect();
+    let mut capacities = vec![0usize; n];
+    for typo in edges {
+        if typo.start < typo.end && typo.end <= n && !typo.value.is_empty() {
+            capacities[typo.start] = capacities[typo.start].saturating_add(1);
+        }
+    }
+    let mut extra: Graph = capacities.into_iter().map(Vec::with_capacity).collect();
     let mut any = false;
     for typo in edges {
         if typo.start >= typo.end || typo.end > n || typo.value.is_empty() {
@@ -476,6 +607,8 @@ pub(super) fn decode_typo_on_graph(
 
 #[cfg(test)]
 pub(super) mod tests {
+    use std::collections::HashSet;
+
     use super::super::ngram::tests::{pair_table, triple_table};
     use super::super::personal::tests::record_run;
     use super::*;
@@ -524,6 +657,19 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn sentence_lookup_scans_existing_paths() {
+        let paths = vec![SentencePath {
+            sentence: "你好".to_owned(),
+            key: "ni'hao".to_owned(),
+            log_prob: 0.0,
+            words: vec!["你".to_owned(), "好".to_owned()],
+            typo_edges: 0,
+        }];
+        assert!(contains_sentence(&paths, "你好"));
+        assert!(!contains_sentence(&paths, "泥好"));
+    }
+
+    #[test]
     fn edge_log_prob_projects_unigrams_and_rewards_phrases() {
         let options = LatticeOptions::default();
         assert!((edge_log_prob(1_000_000, 1, &options) - 0.0).abs() < 1e-12);
@@ -538,6 +684,21 @@ pub(super) mod tests {
             ..LatticeOptions::default()
         };
         assert_eq!(edge_log_prob(10, 1, &odd), edge_log_prob(10, 1, &options));
+    }
+
+    #[test]
+    fn columns_reserve_their_incoming_beam_fanout() {
+        let edge = |end| Edge {
+            end,
+            word: "词".to_owned(),
+            key: "ci".to_owned(),
+            log_prob: 0.0,
+            typo: false,
+        };
+        let graph = vec![vec![edge(1), edge(2)], vec![edge(2)], vec![]];
+        let extra = vec![vec![], vec![edge(2)], vec![]];
+
+        assert_eq!(column_capacities(&graph, Some(&extra), 4, 2), [4, 4, 12, 4]);
     }
 
     /// test_pinyin.cpp:540-548, like the other fake-lookup lattice cases of `test_word_lattice` (:534-677) ported here and in merge.rs; the SQLite lookup case (:641-666) is in dictionary/pinyin.rs.

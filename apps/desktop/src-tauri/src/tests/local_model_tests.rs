@@ -1,7 +1,9 @@
 //! The on-device model commands and the hotword plumbing a `local` voice session starts with.
 use crate::voice::local_models::{self, LocalModelInstalls};
 use msime_client_core::voice::local_models::LocalModelError;
-use serde_json::{json, Value};
+use serde_json::json;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use serde_json::Value;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn invoke(command: &str, body: Value) -> Result<Value, Value> {
@@ -100,6 +102,18 @@ fn installs_run_once_per_model_and_cancel_only_their_own_flag() {
     installs.finish("x-asr-zh-en-streaming");
     assert!(!installs.running("x-asr-zh-en-streaming"));
     assert!(!installs.cancel("x-asr-zh-en-streaming"));
+    assert!(installs.begin("x-asr-zh-en-streaming").is_some());
+}
+
+#[test]
+fn removing_reserves_a_model_slot_against_a_new_install() {
+    let installs = LocalModelInstalls::default();
+    assert!(installs.begin_remove("x-asr-zh-en-streaming"));
+    assert!(installs.begin("x-asr-zh-en-streaming").is_none());
+    assert!(installs.running("x-asr-zh-en-streaming"));
+
+    installs.finish("x-asr-zh-en-streaming");
+    assert!(!installs.running("x-asr-zh-en-streaming"));
     assert!(installs.begin("x-asr-zh-en-streaming").is_some());
 }
 

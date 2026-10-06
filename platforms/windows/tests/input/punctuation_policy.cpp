@@ -64,6 +64,25 @@ int main() {
     REQUIRE(!candidate_punctuation(key(0x6B, '+'), no_paging, true));
     REQUIRE(!candidate_punctuation(key(0xBB, '='), no_paging));
 
+    // Korean never pages on punctuation, even with a Hanja list open, so every ASCII mark is punctuation there, whatever the paging bindings say, and '-' and '=' among them. Letters, digits and marks above ASCII are not.
+    {
+      NavigationBindings paging = no_paging;
+      paging.comma_period = true;
+      paging.brackets = true;
+      paging.minus_equal = true;
+      for (const char character : "`~!@#$%^&*()-_=+[]{}\\|;:'\",<.>/?")
+        if (character != '\0')
+          REQUIRE(candidate_punctuation(key(unrelated_key, character), paging, false, true));
+      REQUIRE(candidate_punctuation(key(0xBD, '-'), paging, false, true));
+      REQUIRE(candidate_punctuation(key(0xBB, '='), paging, false, true));
+      REQUIRE(candidate_punctuation(key(0xBC, ','), paging, false, true));
+      REQUIRE(candidate_punctuation(key(0x6B, '+'), paging, false, true));
+      REQUIRE(!candidate_punctuation(key('A', 'a'), paging, false, true));
+      REQUIRE(!candidate_punctuation(key('7', '7'), paging, false, true));
+      REQUIRE(!candidate_punctuation(key(0x20, ' '), paging, false, true));
+      REQUIRE(!candidate_punctuation(key(unrelated_key, L'。'), paging, false, true));
+    }
+
     // Comma and period are on the list, until they are bound as paging keys.
     NavigationBindings comma_period = no_paging;
     comma_period.comma_period = true;

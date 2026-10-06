@@ -14,7 +14,7 @@ pub enum RuntimeError {
     IdentityExhausted,
     #[error("cannot replace an engine while composition is active")]
     CompositionActive,
-    #[error("nine-key mode requires the quanpin scheme")]
+    #[error("nine-key mode requires the quanpin or zhuyin scheme")]
     InvalidNineKeyScheme,
     #[error("punctuation action requires an ASCII punctuation character")]
     InvalidPunctuation,
@@ -35,6 +35,22 @@ pub trait InputEngine {
     }
     fn pending_suffix(&self) -> String {
         String::new()
+    }
+    /// Whether an apostrophe is input to the open local mode (`3jin'g`, `/fyhello'world`) rather than punctuation that ends it. Engines without such modes answer no.
+    fn takes_local_separator(&self) -> bool {
+        false
+    }
+    /// The `/fy` translation request, the only request a local mode makes. Engines without the command answer none.
+    fn command_translation_query(&self) -> Option<CommandTranslationQuery> {
+        None
+    }
+    /// Put a translation of the live `/fy` text first; false for a stale query. Engines without the command refuse it.
+    fn apply_command_translation(
+        &mut self,
+        _query: &CommandTranslationQuery,
+        _translation: &str,
+    ) -> bool {
+        false
     }
     fn reset_cache(&mut self) -> Result<(), RuntimeError> {
         Err(RuntimeError::Engine(
@@ -58,6 +74,26 @@ pub trait InputEngine {
     }
     fn set_nine_key_enabled(&mut self, _enabled: bool) -> Result<(), RuntimeError> {
         Err(RuntimeError::Engine("Nine-key mode is unsupported".into()))
+    }
+    /// Replace the `/` mode's command table. Engines without the mode ignore it.
+    fn set_command_table(&mut self, _table: &[CommandTableEntry]) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    /// 替换宿主给的辅助码表；`None` 回到方案自己的表。没有辅助码的引擎忽略它。
+    fn set_helpcode_table(&mut self, _table: Option<SharedKeymap>) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    /// 替换 K 模式的宿主短语表。没有这个模式的引擎忽略它。
+    fn set_quick_phrase_table(&mut self, _table: &[QuickPhraseEntry]) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    /// Replace the `@` mode's name list. Engines without the mode ignore it.
+    fn set_mention_entries(&mut self, _entries: &[MentionEntry]) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    /// Offer the places after the `@` mode's name list. Engines without the mode ignore it.
+    fn set_mention_places(&mut self, _enabled: bool) -> Result<(), RuntimeError> {
+        Ok(())
     }
     /// Ask for candidates withheld from the first answer, reporting whether the list grew. The
     /// default answers no, which is what an engine that already returns everything it has means.
@@ -171,6 +207,19 @@ impl InputEngine for Session {
     fn pending_suffix(&self) -> String {
         Session::pending_suffix(self)
     }
+    fn takes_local_separator(&self) -> bool {
+        Session::takes_local_separator(self)
+    }
+    fn command_translation_query(&self) -> Option<CommandTranslationQuery> {
+        Session::command_translation_query(self)
+    }
+    fn apply_command_translation(
+        &mut self,
+        query: &CommandTranslationQuery,
+        translation: &str,
+    ) -> bool {
+        Session::apply_command_translation(self, query, translation)
+    }
     fn reset_cache(&mut self) -> Result<(), RuntimeError> {
         Session::reset_cache(self);
         Ok(())
@@ -196,6 +245,22 @@ impl InputEngine for Session {
     fn set_nine_key_enabled(&mut self, enabled: bool) -> Result<(), RuntimeError> {
         Session::set_nine_key_enabled(self, enabled)
             .map_err(|e| RuntimeError::Engine(e.to_string()))
+    }
+    fn set_command_table(&mut self, table: &[CommandTableEntry]) -> Result<(), RuntimeError> {
+        Session::set_command_table(self, table).map_err(|e| RuntimeError::Engine(e.to_string()))
+    }
+    fn set_quick_phrase_table(&mut self, table: &[QuickPhraseEntry]) -> Result<(), RuntimeError> {
+        Session::set_quick_phrase_table(self, table)
+            .map_err(|e| RuntimeError::Engine(e.to_string()))
+    }
+    fn set_helpcode_table(&mut self, table: Option<SharedKeymap>) -> Result<(), RuntimeError> {
+        Session::set_helpcode_table(self, table).map_err(|e| RuntimeError::Engine(e.to_string()))
+    }
+    fn set_mention_entries(&mut self, entries: &[MentionEntry]) -> Result<(), RuntimeError> {
+        Session::set_mention_entries(self, entries).map_err(|e| RuntimeError::Engine(e.to_string()))
+    }
+    fn set_mention_places(&mut self, enabled: bool) -> Result<(), RuntimeError> {
+        Session::set_mention_places(self, enabled).map_err(|e| RuntimeError::Engine(e.to_string()))
     }
     fn expand_initial_candidates(&mut self) -> Result<bool, RuntimeError> {
         Session::expand_initial_candidates(self).map_err(|e| RuntimeError::Engine(e.to_string()))

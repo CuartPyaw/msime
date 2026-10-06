@@ -5,6 +5,7 @@ import { KeyboardSession, KeyboardPreferences } from '../keyboard/KeyboardSessio
 import { CandidateAnchor, CandidateAnchorPolicy } from './CandidateAnchorPolicy';
 import { KeyboardLog, describeError } from '../keyboard/KeyboardLog';
 import fs from '@ohos.file.fs';
+import client from 'libmsimeclient.so';
 import display from '@ohos.display';
 import window from '@ohos.window';
 import ConfigurationConstant from '@ohos.app.ability.ConfigurationConstant';
@@ -17,12 +18,14 @@ import { InputModeRouting, ModeGesture, ModeKey } from '../keyboard/InputModeRou
 import { VoiceKey } from '../keyboard/input/VoiceHotkeyPolicy';
 import { CandidateTextEdge } from '../keyboard/input/CandidateTextPolicy';
 import { FloatingToolbarLayout } from '../keyboard/FloatingToolbarLayout';
+import { InputModeHudPolicy, InputModeHudSize } from '../keyboard/InputModeHudPolicy';
 import { FloatingToolbarDragPolicy } from '../keyboard/FloatingToolbarDragPolicy';
 import { DesktopSurface } from '../keyboard/DesktopSurface';
 import type { KeyEvent as InputKeyEvent } from '@ohos.multimodalInput.keyEvent';
 import { Action as KeyAction } from '@ohos.multimodalInput.keyEvent';
 import { StagedResources } from '../keyboard/StagedResources';
 import { HardwareKeyDispatch } from '../keyboard/HardwareKeyDispatch';
+import { SchemeTraits } from '../keyboard/SchemeTraits';
 import { PanelShortcutKey, PanelShortcutPolicy, PanelSurfaceAction }
   from '../keyboard/input/PanelShortcutPolicy';
 import { ToolbarButton } from '../keyboard/FloatingToolbarLayout';
@@ -30,11 +33,10 @@ import { AttachedInputDevice, DeviceChange, HardwareKeyboardPolicy, KeyRoutingTr
   from '../keyboard/input/HardwareKeyboardPolicy';
 import { HarmonyHardwareKeyboards } from '../keyboard/input/HarmonyHardwareKeyboards';
 import { HardwareBackspaceGuard } from '../keyboard/input/BackspaceHoldPolicy';
+import { HeldKeys, KeyIdPolicy } from '../keyboard/KeyIdPolicy';
+import { HarmonyTelemetry } from '../telemetry/Telemetry';
 
-// The badge's own geometry, from platforms/macos/src/InputModeHUDPanel.mm: a capsule that carries
-// the logo and one character side by side, shown long enough to read and gone before the next word.
-const HUD_WIDTH_VP: number = 100;
-const HUD_HEIGHT_VP: number = 56;
+// Where the badge goes and how long it stays, from platforms/macos/src/input/InputModeHUDPanel.mm: shown long enough to read and gone before the next word. Its size is the floating toolbar's, from InputModeHudPolicy.sizeVp.
 const HUD_SCREEN_MARGIN_VP: number = 8;
 const HUD_CARET_GAP_VP: number = 10;
 const HUD_VISIBLE_MS: number = 780;
@@ -76,6 +78,8 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
   private hudTimer: number = -1;
   private readonly modeKeys: InputModeRouting = new InputModeRouting();
   private readonly backspaceHold: HardwareBackspaceGuard = new HardwareBackspaceGuard();
+  // Physical keys that are down, so the key heatmap counts a held key once rather than once per repeat.
+  private readonly heldKeys: HeldKeys = new HeldKeys();
   // The bar that says what mode the keyboard is in. Another window of its own, because it outlives
   // every composition and every editor: it is on screen whenever the keyboard is running at all.
   private toolbar: inputMethodEngine.Panel | undefined = undefined;
@@ -172,6 +176,9 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
     }
     if (wantBadge && this.hud === undefined) {
       await this.openModeBadge(generation);
+    } else if (this.hud !== undefined) {
+      // The toolbar's font size or scale may be what changed, and the badge is sized by them.
+      await this.resizeModeBadge(this.hud);
     }
   }
 
@@ -265,8 +272,7 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
         return;
       }
       this.hud = hud;
-      await hud.resize(Math.round(HUD_WIDTH_VP * this.density),
-        Math.round(HUD_HEIGHT_VP * this.density));
+      await this.resizeModeBadge(hud);
       if (this.tornDown || generation !== this.statusPanelGeneration) {
         if (this.hud !== hud) {
           await engine.destroyPanel(hud);
@@ -281,6 +287,17 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
         engine.destroyPanel(hud);
       }
     }
+  }
+
+  /** The badge's size in vp: the floating toolbar's font size and scale, fitted to the mark and one character. */
+  private modeBadgeSize(): InputModeHudSize {
+    return InputModeHudPolicy.sizeVp(KeyboardSession.shared.toolbarFontSize(),
+      KeyboardSession.shared.toolbarScale());
+  }
+
+  private async resizeModeBadge(hud: inputMethodEngine.Panel): Promise<void> {
+    const size: InputModeHudSize = this.modeBadgeSize();
+    await hud.resize(Math.round(size.widthVp * this.density), Math.round(size.heightVp * this.density));
   }
 
   private closeModeBadge(): void {
@@ -459,8 +476,9 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
     if (this.hud === undefined) {
       return;
     }
-    const width: number = HUD_WIDTH_VP * this.density;
-    const height: number = HUD_HEIGHT_VP * this.density;
+    const size: InputModeHudSize = this.modeBadgeSize();
+    const width: number = size.widthVp * this.density;
+    const height: number = size.heightVp * this.density;
     const margin: number = HUD_SCREEN_MARGIN_VP * this.density;
     let x: number = this.caret[2] > 0
       ? this.caret[0] + this.caret[2] / 2 - width / 2
@@ -527,6 +545,8 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
                              inputClient: inputMethodEngine.InputClient) => void =
     (kbController: inputMethodEngine.KeyboardController,
      inputClient: inputMethodEngine.InputClient): void => {
+      // A keyboard process can live for days; this sends the new day's active at most every few hours, off this thread.
+      HarmonyTelemetry.keyboardShown();
       if (this.panel === undefined) {
         this.pending = inputClient;
         return;
@@ -571,6 +591,7 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
     // An editor that stops while the panel is still being built must not be attached once it is.
     this.pending = undefined;
     this.backspaceHold.reset();
+    this.heldKeys.reset();
     KeyboardSession.shared.detach();
     if (this.panel !== undefined) {
       this.panel.hide();
@@ -590,11 +611,24 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
   private readonly panelKeys: Set<number> = new Set<number>();
 
   private readonly typed: (event: InputKeyEvent) => boolean = (event: InputKeyEvent): boolean => {
+    const session: KeyboardSession = KeyboardSession.shared;
+    // Whether this key-down is a new press rather than a repeat of a key still held, which OpenHarmony delivers as another key-down.
+    let newPress: boolean = false;
+    // Counted for the key heatmap before anything claims or releases the key, so a key the application types counts the same as one the Engine composes, and a modifier or shortcut chord counts as the presses it is. The session declines for a password field.
+    if (event.action === KeyAction.DOWN) {
+      newPress = this.heldKeys.press(event.key.code);
+      if (newPress) {
+        session.recordKey(KeyIdPolicy.hardware(event.key.code));
+      }
+    } else {
+      this.heldKeys.release(event.key.code);
+    }
+    // 韩语用字母大小写区分字母本身（Shift+R 是 ㄲ），所以只看 Shift：忘了关的 Caps Lock 不能把每个 ㄱ 都变成 ㄲ。越南语和藏文（威利转写区分大小写）按输入时的大小写写字母，所以 Caps Lock 在那里就是大写，和任何编辑器一样。
     const key: HardwareKey = HardwareKeyRouter.normalizeLetterCase({
       keyCode: event.key.code, unicodeChar: event.unicodeChar, ctrlKey: event.ctrlKey,
       altKey: event.altKey, logoKey: event.logoKey, shiftKey: event.shiftKey
-    }, event.capsLock);
-    const session: KeyboardSession = KeyboardSession.shared;
+    }, event.capsLock && !session.isKorean() && session.rulesScheme() !== SchemeTraits.VIETNAMESE
+      && session.rulesScheme() !== SchemeTraits.TIBETAN);
     session.setCapsLock(event.capsLock);
     const mode: ModeKey = {
       keyCode: event.key.code, down: event.action === KeyAction.DOWN, shiftKey: event.shiftKey,
@@ -697,7 +731,15 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
     } else if (event.action === KeyAction.DOWN) {
       this.backspaceHold.reset();
     }
+    // A key sound belongs to the typing, not to what became of the key, so every key-down from here on has one: composed, handed back or released to the application. Only a 2in1 has sounds configured, and the session leaves password fields and English mode silent.
+    const sound = (): void => {
+      if (event.action === KeyAction.DOWN && KeyboardFormFactor.isDesktop()) {
+        session.hardwareKeySound(event.key.code, event.unicodeChar, event.ctrlKey, event.altKey,
+          event.logoKey);
+      }
+    };
     if (!session.composes()) {
+      sound();
       return false;
     }
     const decision: HardwareKeyDecision =
@@ -706,18 +748,27 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
       KeyboardSession.shared.preferences().navigation,
         session.hasHighlightedTranslation(), session.isJapanese(),
         session.wordCharacterBinding(), session.hasHighlightedCandidate(), session.hardwareSpelling(),
-        session.isFullWidth(), session.punctuationLockedChinese());
+        session.isFullWidth(), session.punctuationLockedChinese(), session.isKorean(),
+        session.candidateListOpen(), session.rulesScheme());
     if (decision.action === HardwareKeyAction.RELEASE) {
       // What the application types is still the user's typing, and Windows counts it (`stats_passthrough.h`).
       if (event.action === KeyAction.DOWN) {
         session.recordPassthrough(event.unicodeChar, event.ctrlKey, event.altKey, event.logoKey);
       }
+      sound();
       return false;
     }
     if (event.action !== KeyAction.DOWN) {
       return true;
     }
-    if (!HardwareKeyDispatch.apply(decision, key.shiftKey, session)) {
+    // A held Hanja key converts once rather than opening and closing the list with every repeat.
+    if (decision.action === HardwareKeyAction.CONVERT_HANJA && !newPress) {
+      return true;
+    }
+    const applied: boolean = HardwareKeyDispatch.apply(decision, key.shiftKey, session);
+    // After the key has done its work, so a commit it caused is heard with it.
+    sound();
+    if (!applied) {
       // Declined rather than swallowed, the way TSF treats a key the Windows host did not eat: a capital letter with nothing composed is the application's to type.
       this.releasedKeys.add(event.key.code);
       session.recordPassthrough(event.unicodeChar, event.ctrlKey, event.altKey, event.logoKey);
@@ -800,6 +851,12 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
     if (!fs.accessSync(state)) {
       fs.mkdirSync(state, true);
     }
+    // Covers a keyboard enabled without the app ever being opened; the app's first launch does the same, and whichever runs first registers the account.
+    client.ensureAnonymousAccount(state).catch((error: Error): void => {
+      KeyboardLog.error(`anonymous account: ${describeError(error)}`);
+    });
+    // One usage-reporting session per keyboard process, started before the early returns below so a process that never gets a panel still has one.
+    HarmonyTelemetry.keyboardStarted(state);
     if (!StagedResources.stage(`${this.context.resourceDir}/engine`, resources,
         `${files}/engine.ready`)) {
       return;
@@ -811,11 +868,14 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
     } else {
       StagedResources.unstage(`${files}/offline-glosses`, `${files}/offline-glosses.ready`);
     }
+    StagedResources.stageLanguageDictionaries(this.context.resourceDir, files);
     // The extension context knows the system colour mode; the view has no context of its own to ask.
     const systemDark: boolean =
       this.context.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
     // The packaged recording tones are read through this context, which the session has none of.
     KeyboardSession.shared.useVoiceContext(this.context);
+    // The built-in sound packs are read from, and pitched notes written under, this context's directories.
+    KeyboardSession.shared.useSoundContext(this.context);
     const started: boolean = KeyboardSession.shared.start(resources, state, systemDark);
     if (!started) {
       // Without a session there is nothing to show. Leaving the panel uncreated keeps the framework
@@ -989,6 +1049,8 @@ export default class KeyboardExtensionAbility extends InputMethodExtensionAbilit
 
   onDestroy(): void {
     this.teardown();
+    // Here rather than in teardown, which a failed onCreate also runs: only the framework destroying the extension ends the session normally.
+    HarmonyTelemetry.keyboardStopped();
   }
 
   /** Undoes everything onCreate installed. Safe to run twice: a failed onCreate and then onDestroy. */

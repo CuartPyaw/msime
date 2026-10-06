@@ -1,42 +1,40 @@
-import {
-  touchKeyboardSchemeOptions,
-  selectTouchKeyboardScheme,
-} from "../touch-keyboard-scheme-helpers";
-import { defaultNavigation } from "../navigation-section";
-import type { Preferences, TouchKeyboardScheme } from "../../index";
+import { NavigationSection, defaultNavigation } from "../navigation-section";
 import { useSettingsForm } from "../settings-form-context";
-import * as settings from "../settings-style";
-import { GroupList, Row, Segmented, Select, Switch } from "../../core/platform-controls";
-import { InputModeSection } from "../input-mode-section";
-import { TouchKeyboardSchemesSection } from "../touch-keyboard-schemes-section";
-import { WubiSection } from "../wubi-section";
-import { WordCharacterSection } from "../word-character-section";
-import { LearningSection } from "../learning-section";
-import { DefaultImeModeSection } from "../default-ime-mode-section";
-import { ImeModeScopeSection } from "../ime-mode-scope-section";
-import { TraditionalChineseOutputSection } from "../traditional-chinese-output-section";
-import { CloudCandidatesSection } from "../cloud-candidates-section";
-import { FrequencySection } from "../frequency-section";
+import { GroupList } from "../../core/platform-controls";
+import { InputSchemeSettingsContent } from "../input-scheme-settings-content";
+import { supportedInputSchemes } from "../input-scheme-options";
+import { InputSharedSettingsSection } from "../input-shared-settings-section";
 import { LocalModesSection } from "../local-modes-section";
 import { CharacterWidthRow } from "../punctuation-section";
-import { InputModeHudSection } from "../input-mode-hud-section";
+import { FuzzyPinyinSection } from "../fuzzy-pinyin-section";
+import { SentenceAssociationSection } from "../sentence-association-section";
+import { MobileEnglishSuggestionsRow } from "../mobile-keyboard-feedback-section";
+import { HelpcodeSettingsGroup } from "./helpcode-page";
 import { createUtilitiesSettingsActions } from "../utilities-settings-actions";
-import {
-  chineseInputSchemeOptions,
-  japaneseInputSchemeOptions,
-} from "../input-scheme-options";
-
+import { createSettingsDraftActions } from "../settings-draft-actions";
+import { createHelpcodeSettingsActions } from "../helpcode-settings-actions";
+import { ResourcePackRow, resourcePackStatus, useResourcePacks } from "../resource-packs";
+import { SettingsPageFieldset } from "../settings-page-fieldset";
 
 /** The 输入 page of the settings form. */
 export function InputSettingsPage() {
   const {
     client,
+    confirm,
+    host,
     iosPlatform,
+    linuxPlatform,
     mobilePlatform,
     macosPlatform,
     showModeScope,
     showCharacterWidth,
     showInputModeHUD,
+    showPluginTriggers,
+    showHelpcode,
+    showHelpcodeShiftEntry,
+    customHelpcodeSchemas,
+    helpcodePacks,
+    translationProvider,
     draft,
     setDraft,
     busy,
@@ -47,203 +45,160 @@ export function InputSettingsPage() {
     setWubiAutoCommitUnique,
     wordCharacter,
     frequency,
+    fuzzyPinyin,
+    mixedInput,
     touchKeyboardSchemes,
     selectedTouchKeyboardScheme,
+    selectTouchKeyboardScheme,
     setTouchKeyboardSchemeEnabled,
     localModes,
+    mobileKeyboardFeedback,
+    mobileKeyboardFeedbackBusy,
+    saveMobileKeyboardFeedback,
+    setError,
+    retrySave,
   } = useSettingsForm();
-  const { onLocalModesChange } = createUtilitiesSettingsActions({ draft, setDraft });
-  const chineseSchemes = draft.scheme !== "japanese";
+  const { onLocalModesChange } = createUtilitiesSettingsActions({ setDraft });
+  const { onPreferencesChange, onVoiceChange } = createSettingsDraftActions({ setDraft });
+  const { onChange: onHelpcodeChange } = createHelpcodeSettingsActions({ setDraft });
   const navigation = draft.navigation ?? defaultNavigation;
+  // 升级后补齐已保存偏好需要的资源包由宿主在启动时完成，这里挂载时不自动下载，只在用户选用方案、打开桌面神经联想或点「下载」时下载。提供哪些资源包由宿主的列表决定：日文和语言词库只有 macOS 列出。
+  const resourcePacks = useResourcePacks(client.resourcePacks, {
+    value: draft.voice_input?.asr_model_mirror ?? "",
+    onChange: (asr_model_mirror) => onVoiceChange({ asr_model_mirror }),
+    flush: retrySave,
+  });
+  const japanesePack = resourcePackStatus(resourcePacks, "japanese");
+  // 不带临时日文的版本（host-api 也始终把它关掉）不列出这个开关和它的词库。
+  const temporaryJapanese = host?.edition?.temporary_japanese ?? true;
+  // 不带键盘神经模型的版本（host-api 也始终把它关掉）在触屏宿主上不列出神经联想开关。
+  const neuralKeyboard = host?.edition?.neural_keyboard ?? true;
   return (
-    <fieldset disabled={busy} hidden={page !== "input"} aria-label="输入">
-      {/* The groups keep the reference window's order of these settings; each row is present whenever the reference shows it and hidden, not removed, while the chosen scheme makes it moot, as the reference does. */}
-      <div className={settings.groups}>
-        <GroupList title="方案">
-          <InputModeSection
-            scheme={draft.scheme}
-            lastChineseScheme={draft.last_chinese_scheme}
-            hidden={client.touchKeyboardSchemes}
-            onChange={(patch) => setDraft({ ...draft, ...patch })}
-          />
-          {client.touchKeyboardSchemes && (
-            <TouchKeyboardSchemesSection
-              options={touchKeyboardSchemeOptions}
-              enabled={touchKeyboardSchemes.enabled}
-              selected={selectedTouchKeyboardScheme}
-              onSelect={(scheme) =>
-                setDraft(selectTouchKeyboardScheme(draft, scheme as TouchKeyboardScheme))
-              }
-              onToggle={(scheme, enabled) =>
-                setTouchKeyboardSchemeEnabled(scheme as TouchKeyboardScheme, enabled)
-              }
-            />
-          )}
-          <Row title="输入方案" hidden={client.touchKeyboardSchemes || !chineseSchemes}>
-            <Segmented
-              options={chineseInputSchemeOptions}
-              value={
-                draft.scheme === "shuangpin" || draft.scheme === "wubi" ? draft.scheme : "quanpin"
-              }
-              onChange={(scheme) => setDraft({ ...draft, scheme, last_chinese_scheme: scheme })}
-            />
-          </Row>
-          <Row title="双拼方案" hidden={client.touchKeyboardSchemes || !chineseSchemes}>
-            {/* The source disables this menu unless Shuangpin is the active scheme (`_shuangpinSchemeButton.enabled = storedScheme == 1`): until then the choice changes nothing, and a live control that does nothing reads as a setting being ignored. Other hosts keep it always editable. */}
-            <Select
-              disabled={macosPlatform && draft.scheme !== "shuangpin"}
-              value={draft.shuangpin_profile}
-              onChange={(event) =>
-                setDraft({
-                  ...draft,
-                  shuangpin_profile: event.target.value as Preferences["shuangpin_profile"],
-                })
-              }
-            >
-              <option value="xiaohe">小鹤双拼</option>
-              <option value="ziranma">自然码双拼</option>
-              <option value="shoudao">首道双拼</option>
-              <option value="microsoft">微软双拼</option>
-            </Select>
-          </Row>
-          {macosPlatform &&
-            client.loadMacosShuangpinKeymap &&
-            macosShuangpinKeymap !== undefined && (
-              <Row
-                title="输入时显示双拼键位提示"
-                description="双拼输入时显示当前方案的键位图，完成上屏后自动隐藏。"
-                hidden={client.touchKeyboardSchemes || draft.scheme !== "shuangpin"}
-              >
-                <Switch checked={macosShuangpinKeymap} onChange={setShuangpinKeymap} />
-              </Row>
-            )}
-          <Row title="五笔方案" hidden={client.touchKeyboardSchemes || !chineseSchemes}>
-            <Select value="wubi86" onChange={() => {}}>
-              <option value="wubi86">86 五笔</option>
-            </Select>
-          </Row>
-          {((client.touchKeyboardSchemes && touchKeyboardSchemes.enabled.includes("wubi")) ||
-            draft.scheme === "wubi") && (
-            <WubiSection
-              preferences={draft}
-              autoCommitUnique={macosPlatform ? macosWubiAutoCommitUnique : undefined}
-              onChange={(patch) => setDraft({ ...draft, ...patch })}
-              onAutoCommitUniqueChange={setWubiAutoCommitUnique}
-            />
-          )}
-          <Row
-            title="日语方案"
-            description="直接输入罗马音，提供平假名、片假名及日语词库候选"
-            hidden={client.touchKeyboardSchemes || chineseSchemes}
-          >
-            <Segmented options={japaneseInputSchemeOptions} value="romaji" onChange={() => {}} />
-          </Row>
-        </GroupList>
-        <GroupList title="选词">
-          <WordCharacterSection
-            preferences={wordCharacter}
+    <SettingsPageFieldset disabled={busy} hidden={page !== "input"} ariaLabel="输入">
+      {/* 组的顺序按「基础 → 进阶」排：先选方案，再是每次打字都会碰到的中英文、选词与翻页，然后是候选从哪来（含中英混输）、以什么形式输出，最后是少数人才调的快捷模式、模糊音、辅助码和调频。这里不再沿用参考窗口的顺序，不要按参考窗口把它们挪回去。方案相关的行在当前方案用不到时隐藏而不删除，换方案时原样出现。 */}
+
+      <InputSchemeSettingsContent
+        preferences={draft}
+        hasTouchKeyboardSchemes={Boolean(client.touchKeyboardSchemes)}
+        touchKeyboardSchemes={touchKeyboardSchemes}
+        selectedTouchKeyboardScheme={selectedTouchKeyboardScheme}
+        macos={macosPlatform}
+        inputSchemes={supportedInputSchemes(host)}
+        edition={host?.edition}
+        macosShuangpinKeymap={
+          macosPlatform && client.loadMacosShuangpinKeymap && macosShuangpinKeymap !== undefined
+            ? macosShuangpinKeymap
+            : undefined
+        }
+        macosWubiAutoCommitUnique={macosWubiAutoCommitUnique}
+        macosInputModes={client.macosInputModes}
+        onError={setError}
+        onPreferencesChange={onPreferencesChange}
+        onSelectTouchKeyboardScheme={(scheme) => selectTouchKeyboardScheme(scheme)}
+        onToggleTouchKeyboardScheme={(scheme, enabled) =>
+          setTouchKeyboardSchemeEnabled(scheme, enabled)
+        }
+        onMacosShuangpinKeymapChange={setShuangpinKeymap}
+        onMacosWubiAutoCommitUniqueChange={setWubiAutoCommitUnique}
+        resourcePacks={resourcePacks}
+      />
+      <InputSharedSettingsSection
+        preferences={draft}
+        wordCharacter={wordCharacter}
+        navigation={navigation}
+        frequency={frequency}
+        ios={iosPlatform}
+        // 中英文切换提示在所有平台都放在这里；macOS 以前把它放在快捷键页。
+        showInputModeHUD={showInputModeHUD}
+        showModeScope={showModeScope}
+        mixedInput={mixedInput}
+        onMixedInputChange={(mixed_input) => onPreferencesChange({ mixed_input })}
+        paging={
+          <NavigationSection
             navigation={navigation}
-            ios={iosPlatform}
+            wordCharacter={wordCharacter}
+            linux={linuxPlatform}
             onChange={(next) =>
-              setDraft({
-                ...draft,
-                word_character: next.wordCharacter,
+              onPreferencesChange({
+                // 只有占用了「以词定字」按键的翻页键才会改动它；否则未设置的值保持未设置。
+                ...(next.wordCharacter !== wordCharacter
+                  ? { word_character: next.wordCharacter }
+                  : {}),
                 navigation: next.navigation,
               })
             }
           />
-          <LearningSection
-            value={draft.learning}
-            onChange={(checked) => setDraft({ ...draft, learning: checked })}
+        }
+        beforeLearning={
+          <SentenceAssociationSection
+            value={draft.sentence_association}
+            mobile={mobilePlatform}
+            neuralKeyboard={neuralKeyboard}
+            resourcePacks={resourcePacks}
+            onChange={(sentence_association) => onPreferencesChange({ sentence_association })}
           />
-        </GroupList>
-        <GroupList title="中英文">
-          <DefaultImeModeSection
-            value={draft.default_ime_mode}
-            onChange={(mode) => setDraft({ ...draft, default_ime_mode: mode })}
-          />
-          {showModeScope && (
-            <ImeModeScopeSection
-              value={draft.ime_mode_scope}
-              onChange={(scope) => setDraft({ ...draft, ime_mode_scope: scope })}
+        }
+        afterLearning={
+          // iOS 的英文建议存在原生 App Group 里，读写走 mobileKeyboardFeedback，与屏幕键盘页的按键反馈同一个来源。
+          iosPlatform &&
+          client.mobileKeyboardFeedback &&
+          mobileKeyboardFeedback && (
+            <MobileEnglishSuggestionsRow
+              value={mobileKeyboardFeedback}
+              busy={mobileKeyboardFeedbackBusy}
+              onChange={(value) => void saveMobileKeyboardFeedback(value)}
             />
-          )}
-          {/* macOS keeps this with the chords that trigger it, on the shortcut page. */}
-          {showInputModeHUD && !macosPlatform && (
-            <InputModeHudSection
-              value={draft.input_mode_hud}
-              onChange={(checked) => setDraft({ ...draft, input_mode_hud: checked })}
+          )
+        }
+        outputExtra={
+          showCharacterWidth ? (
+            <CharacterWidthRow preferences={draft} onChange={onPreferencesChange} />
+          ) : null
+        }
+        beforeFrequency={
+          <>
+            <LocalModesSection
+              preferences={localModes}
+              ios={iosPlatform}
+              triggers={showPluginTriggers}
+              mentions={showPluginTriggers && Boolean(client.plugins)}
+              translationService={translationProvider !== "none"}
+              temporaryJapanese={temporaryJapanese}
+              onChange={onLocalModesChange}
             />
-          )}
-        </GroupList>
-        <GroupList title="输出">
-          {showCharacterWidth && (
-            <CharacterWidthRow
-              preferences={draft}
-              onChange={(patch) => setDraft({ ...draft, ...patch })}
-            />
-          )}
-          <TraditionalChineseOutputSection
-            value={draft.traditional_chinese_output}
-            onChange={(checked) => setDraft({ ...draft, traditional_chinese_output: checked })}
-          />
-          <CloudCandidatesSection
-            value={draft.cloud_candidates}
-            onChange={(checked) => setDraft({ ...draft, cloud_candidates: checked })}
-          />
-        </GroupList>
-        <GroupList title="整句联想">
-          <Row
-            title="本地整句联想"
-            description="把词库组合出的整句加入候选；关闭后仍保留单词候选。"
-          >
-            <Switch
-              checked={draft.sentence_association?.word_lattice ?? true}
-              onChange={(checked) =>
-                setDraft({
-                  ...draft,
-                  sentence_association: {
-                    ...draft.sentence_association,
-                    word_lattice: checked,
-                  },
-                })
-              }
-            />
-          </Row>
-          <Row
-            title={mobilePlatform ? "键盘神经联想" : "桌面神经联想"}
-            description="使用随包的神经模型重排整句候选；没有模型时保持现有候选。"
-          >
-            <Switch
-              checked={
-                mobilePlatform
-                  ? (draft.sentence_association?.neural_keyboard ?? false)
-                  : (draft.sentence_association?.neural_desktop ?? false)
-              }
-              onChange={(checked) =>
-                setDraft({
-                  ...draft,
-                  sentence_association: {
-                    ...draft.sentence_association,
-                    ...(mobilePlatform
-                      ? { neural_keyboard: checked }
-                      : { neural_desktop: checked }),
-                  },
-                })
-              }
-            />
-          </Row>
-        </GroupList>
-        <FrequencySection
-          preferences={frequency}
-          onChange={(next) => setDraft({ ...draft, frequency: next })}
-        />
-        <LocalModesSection
-          preferences={localModes}
-          ios={iosPlatform}
-          onChange={onLocalModesChange}
-        />
-      </div>
-    </fieldset>
+            {/* 临时日语只是一个快捷模式，不为它自动下载 60 多 MB 的词库，由用户手动下载。当前方案是日文时方案组里已有同一行，这里不再重复。 */}
+            {temporaryJapanese &&
+              localModes.temporary_japanese &&
+              draft.scheme !== "japanese" &&
+              japanesePack &&
+              japanesePack.state !== "installed" && (
+                <GroupList title="临时日语词库">
+                  <ResourcePackRow packs={resourcePacks} id="japanese" note="临时日语需要它" />
+                </GroupList>
+              )}
+            {client.fuzzyPinyin && (
+              <GroupList title="模糊音">
+                <FuzzyPinyinSection
+                  preferences={fuzzyPinyin}
+                  onChange={(fuzzy_pinyin) => onPreferencesChange({ fuzzy_pinyin })}
+                  confirm={confirm}
+                />
+              </GroupList>
+            )}
+            {showHelpcode && (
+              <HelpcodeSettingsGroup
+                value={draft}
+                customSchemas={customHelpcodeSchemas}
+                packs={helpcodePacks}
+                mobile={mobilePlatform}
+                showShiftEntry={showHelpcodeShiftEntry}
+                onChange={onHelpcodeChange}
+              />
+            )}
+          </>
+        }
+        onPreferencesChange={onPreferencesChange}
+      />
+    </SettingsPageFieldset>
   );
 }

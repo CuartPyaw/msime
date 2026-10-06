@@ -1,9 +1,4 @@
 //! Parsing and validation helpers for DeepLX-compatible custom translation services.
-//!
-//! The learned-translation store lives in [`store`]; this module is the
-//! translation request contract itself.
-
-pub mod store;
 
 use hmac::{Hmac, KeyInit, Mac};
 use md5::Md5;
@@ -163,6 +158,10 @@ pub fn usable_credential(value: &str) -> bool {
     !trimmed.is_empty()
         && !(trimmed.starts_with('<') && trimmed.ends_with('>'))
         && !trimmed.starts_with("FAKESECRET_")
+}
+
+pub fn is_valid_credential(value: &str) -> bool {
+    usable_credential(value) && crate::text::is_bounded_text(value, 4096)
 }
 
 /// NiuTrans v2 authStr is the lower-case MD5 of the lexicographically sorted

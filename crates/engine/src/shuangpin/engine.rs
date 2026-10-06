@@ -191,12 +191,21 @@ impl ShuangpinEngine {
             1 => reorder_candidates_with_single_helpcode(fuzzy, help_codes, keymap),
             _ => fuzzy,
         };
-        let mut seen: HashSet<String> = exact.iter().map(|item| item.word.clone()).collect();
-        for item in fuzzy {
-            if seen.insert(item.word.clone()) {
-                exact.push(item);
-            }
-        }
+        // Keep deduplication keys borrowed until fuzzy rows are ready to move into the exact list.
+        let mut seen: HashSet<&str> = exact.iter().map(|item| item.word.as_str()).collect();
+        let unique = fuzzy
+            .iter()
+            .map(|item| seen.insert(item.word.as_str()))
+            .collect::<Vec<_>>();
+        drop(seen);
+        let unique_count = unique.iter().filter(|&&is_unique| is_unique).count();
+        exact.reserve(unique_count);
+        exact.extend(
+            fuzzy
+                .into_iter()
+                .zip(unique)
+                .filter_map(|(item, unique)| unique.then_some(item)),
+        );
         exact.sort_by_key(|item| std::cmp::Reverse(item.pinyin.len()));
         exact
     }

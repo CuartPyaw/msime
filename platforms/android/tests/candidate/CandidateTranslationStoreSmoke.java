@@ -39,6 +39,36 @@ public final class CandidateTranslationStoreSmoke {
             worker.shutdownNow();
         }
 
+        FakeScheduler retryScheduler = new FakeScheduler();
+        ExecutorService retryWorker = Executors.newSingleThreadExecutor();
+        AtomicInteger retryCalls = new AtomicInteger();
+        CountDownLatch firstRetryCall = new CountDownLatch(1);
+        CountDownLatch releaseRetryCall = new CountDownLatch(1);
+        CountDownLatch secondRetryCall = new CountDownLatch(1);
+        CandidateTranslationStore retryStore = new CandidateTranslationStore(
+            (texts, target) -> {
+                if (retryCalls.incrementAndGet() == 1) {
+                    firstRetryCall.countDown();
+                    releaseRetryCall.await(2, TimeUnit.SECONDS);
+                } else {
+                    secondRetryCall.countDown();
+                }
+                return List.of("retry translation");
+            }, retryWorker, retryScheduler, generation -> { });
+        try {
+            retryStore.refresh(List.of("你好"), List.of("en"), 4);
+            retryScheduler.runDelayed();
+            check(firstRetryCall.await(2, TimeUnit.SECONDS), "first retry request started");
+            retryStore.refresh(List.of("你好"), List.of("en"), 4);
+            retryScheduler.runDelayed();
+            releaseRetryCall.countDown();
+            check(secondRetryCall.await(2, TimeUnit.SECONDS),
+                "cancelled request can retry with the same signature");
+        } finally {
+            releaseRetryCall.countDown();
+            retryWorker.shutdownNow();
+        }
+
         FakeScheduler normalizationScheduler = new FakeScheduler();
         ExecutorService normalizationWorker = Executors.newSingleThreadExecutor();
         AtomicInteger normalizationArrivals = new AtomicInteger();
@@ -84,10 +114,44 @@ public final class CandidateTranslationStoreSmoke {
         } finally {
             collisionWorker.shutdownNow();
         }
+
+        CountDownLatch firstCapacityResponse = new CountDownLatch(1);
+        FakeScheduler capacityScheduler = new FakeScheduler() {
+            @Override public void post(Runnable action) {
+                super.post(action);
+                firstCapacityResponse.countDown();
+            }
+        };
+        ExecutorService capacityWorker = Executors.newSingleThreadExecutor();
+        AtomicInteger capacityCalls = new AtomicInteger();
+        CountDownLatch firstCapacityCall = new CountDownLatch(1);
+        CountDownLatch secondCapacityCall = new CountDownLatch(1);
+        List<String> capacityWords = new java.util.ArrayList<>();
+        for (int index = 0; index < 257; index++) capacityWords.add("合成词" + index);
+        CandidateTranslationStore capacityStore = new CandidateTranslationStore(
+            (texts, target) -> {
+                if (capacityCalls.incrementAndGet() == 1) firstCapacityCall.countDown();
+                else secondCapacityCall.countDown();
+                return texts.stream().map(text -> text + " translation").toList();
+            }, capacityWorker, capacityScheduler, generation -> { });
+        try {
+            capacityStore.refresh(capacityWords, List.of("en"), 7);
+            capacityScheduler.runDelayed();
+            check(firstCapacityCall.await(2, TimeUnit.SECONDS), "capacity request started");
+            check(firstCapacityResponse.await(2, TimeUnit.SECONDS), "capacity response posted");
+            capacityScheduler.runPosted();
+            capacityStore.refresh(List.of(capacityWords.get(0)), List.of("en"), 8);
+            capacityScheduler.runDelayed();
+            check(secondCapacityCall.await(2, TimeUnit.SECONDS),
+                "evicted translation can be requested again");
+        } finally {
+            capacityWorker.shutdownNow();
+        }
+        check(capacityCalls.get() == 2, "translation cache evicts old entries");
         System.out.println("Android candidate translation store: stale request fencing passed");
     }
 
-    private static final class FakeScheduler implements CandidateTranslationStore.Scheduler {
+    private static class FakeScheduler implements CandidateTranslationStore.Scheduler {
         private final Queue<Runnable> delayed = new ArrayDeque<>();
         private final Queue<Runnable> posted = new ArrayDeque<>();
 

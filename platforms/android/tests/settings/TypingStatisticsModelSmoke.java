@@ -15,9 +15,12 @@ public final class TypingStatisticsModelSmoke {
         return new TypingStatisticsModel(true, 120, "90d",
             Map.of("2026-09-18", 20L, "2026-09-20", 100L),
             Map.of("han", 70L, "latin", 20L, "punctuation", 10L),
-            Map.of("nineKey", 60L, "english", 20L, "voice", 10L, "handwriting", 10L),
+            Map.of("nineKey", 50L, "korean", 10L, "english", 20L, "voice", 10L, "handwriting", 10L),
             Map.of("2026-09-20", Map.of("han", 70L)),
-            Map.of("2026-09-20", Map.of("nineKey", 60L)));
+            Map.of("2026-09-20", Map.of("nineKey", 60L)),
+            // 2026-09-21 has presses and no committed character: everything typed was deleted again.
+            Map.of("2026-09-20", Map.of("KeyA", 5L, "Space", 9L, "Nine2", 2L),
+                "2026-09-21", Map.of("KeyA", 4L, "Tab", 1L)));
     }
 
     public static void main(String[] args) {
@@ -52,15 +55,33 @@ public final class TypingStatisticsModelSmoke {
         check(TypingStatisticsModel.sum(kinds) == model.total(), "kinds sum to the total");
 
         List<Slice> schemes = model.slices(Section.SCHEME, null);
-        check(schemes.size() == 15 && "quanpin".equals(schemes.get(0).id()), "schemes are ordered");
+        check(schemes.size() == 21 && "quanpin".equals(schemes.get(0).id()), "schemes are ordered");
+        check("korean".equals(schemes.get(8).id()) && "韩语".equals(schemes.get(8).title())
+            && schemes.get(8).count() == 10, "Korean is its own source, after Japanese");
         check(TypingStatisticsModel.sum(schemes) == model.total(), "schemes sum to the total");
 
         List<Slice> modes = model.slices(Section.MODE, null);
-        check(count(modes, "chinese") == 60, "the pinyin schemes fold into one Chinese mode");
+        check(count(modes, "chinese") == 50, "the pinyin schemes fold into one Chinese mode");
+        check(count(modes, "korean") == 10, "Korean is its own mode rather than Chinese");
         check(count(modes, "english") == 20 && count(modes, "voice") == 10, "modes read their own");
         check(count(modes, "handwriting") == 10,
             "handwriting is its own mode rather than being dropped");
         check(TypingStatisticsModel.sum(modes) == model.total(), "modes sum to the total");
+
+        // 粤拼、注音和笔画是中文方案，并入中文模式；越南语和藏文各自是一种语言。
+        TypingStatisticsModel languages = new TypingStatisticsModel(true, 150, "90d", Map.of(), Map.of(),
+            Map.of("cantonese", 10L, "zhuyin", 20L, "vietnamese", 30L, "tibetan", 40L, "stroke", 50L), Map.of(), Map.of(), Map.of());
+        List<Slice> languageSchemes = languages.slices(Section.SCHEME, null);
+        check("粤拼".equals(title(languageSchemes, "cantonese")) && "注音".equals(title(languageSchemes, "zhuyin"))
+            && "越南语".equals(title(languageSchemes, "vietnamese")) && "藏文".equals(title(languageSchemes, "tibetan"))
+            && "笔画".equals(title(languageSchemes, "stroke")),
+            "the new schemes carry their own titles");
+        List<Slice> languageModes = languages.slices(Section.MODE, null);
+        check(count(languageModes, "chinese") == 80 && count(languageModes, "vietnamese") == 30
+            && "越南语模式".equals(title(languageModes, "vietnamese")), "Vietnamese is its own mode rather than Chinese");
+        check(count(languageModes, "tibetan") == 40 && "藏文模式".equals(title(languageModes, "tibetan")),
+            "Tibetan is its own mode rather than Chinese");
+        check(TypingStatisticsModel.sum(languageModes) == languages.total(), "language modes sum to the total");
 
         List<Slice> day = model.slices(Section.KIND, "2026-09-20");
         check(count(day, "han") == 70 && count(day, "unknown") == 30,
@@ -71,6 +92,25 @@ public final class TypingStatisticsModelSmoke {
             "a day with no detail is entirely unclassified");
         check(model.slices(Section.TREND, null).isEmpty(), "the trend is a series, not a pie");
 
+        // Keys rank by presses, and the lifetime scope sums every retained day.
+        List<Slice> keys = model.slices(Section.KEYS, null);
+        check(keys.size() == 4, "every pressed key is a row");
+        check("KeyA".equals(keys.get(0).id()) && keys.get(0).count() == 9 && "A".equals(keys.get(0).title()),
+            "the lifetime scope sums a key over its days");
+        check("Space".equals(keys.get(1).id()) && "空格".equals(keys.get(1).title()),
+            "keys are ordered by presses, most first");
+        check(TypingStatisticsModel.sum(keys) == 21, "key slices sum to the presses, not the characters");
+        check(model.keys("2026-09-21").equals(Map.of("KeyA", 4L, "Tab", 1L)),
+            "a day with presses and no characters still has its keys");
+        check(model.slices(Section.KEYS, "2026-09-18").isEmpty(), "a day without presses has no keys");
+        List<Slice> day21 = model.slices(Section.KEYS, "2026-09-21");
+        check(day21.size() == 2 && "KeyA".equals(day21.get(0).id()), "a day scopes the keys to itself");
+        check("按键".equals(Section.KEYS.tab()), "the key heatmap is its own tab");
+        TypingStatisticsModel empty = new TypingStatisticsModel(false, 0, "forever", Map.of(), Map.of(),
+            Map.of(), Map.of(), Map.of(), Map.of());
+        check(empty.keys(null).isEmpty() && empty.slices(Section.KEYS, null).isEmpty(),
+            "a document from before key counts has none");
+
         check("趋势".equals(Section.TREND.tab()) && "每日趋势".equals(Section.TREND.heading()),
             "the tab label is short and the heading is not");
         System.out.println("Android typing statistics model: series, scoping and distributions passed");
@@ -80,6 +120,11 @@ public final class TypingStatisticsModelSmoke {
 
     private static long count(List<Slice> slices, String id) {
         for (Slice slice : slices) if (slice.id().equals(id)) return slice.count();
+        throw new AssertionError("Missing slice: " + id);
+    }
+
+    private static String title(List<Slice> slices, String id) {
+        for (Slice slice : slices) if (slice.id().equals(id)) return slice.title();
         throw new AssertionError("Missing slice: " + id);
     }
 

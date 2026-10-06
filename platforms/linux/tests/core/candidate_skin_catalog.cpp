@@ -7,6 +7,8 @@
 
 using Json = nlohmann::json;
 using msime::linux_host::apply_theme_choice;
+using msime::linux_host::candidate_corner_radius;
+using msime::linux_host::candidate_corner_radius_preference;
 using msime::linux_host::candidate_skin_corner_radius;
 using msime::linux_host::candidate_skin_package;
 using msime::linux_host::CandidateSkinAlign;
@@ -42,6 +44,13 @@ int main() {
   assert(!safe_skin_id("unsafe/id"));
   assert(!safe_skin_id(""));
   assert(safe_skin_id("solarized"));
+  Json oversized = Json{{"candidate_skin_catalog", { {"packages", Json::array()} }}};
+  for (int index = 0; index < 40; ++index) {
+    oversized["candidate_skin_catalog"]["packages"].push_back(
+        Json{{"id", "skin" + std::to_string(index)}, {"title", "Skin"},
+             {"base", "system"}, {"layouts", Json::array({"vertical"})}});
+  }
+  assert(parse_configured_skins(oversized).size() == 32);
   assert(parse_configured_skins(Json::object()).empty());
   assert(parse_configured_skins(Json{{"candidate_skin_catalog", {{"packages", Json::object()}}}}).empty());
 
@@ -181,5 +190,17 @@ int main() {
     rounded["corner_radius_dip"] = value;
     assert(!candidate_skin_corner_radius(nlohmann::json{{"packages", nlohmann::json::array({rounded})}}, "sakura"));
   }
+  // The user's radius from the settings wins over the drawn skin's; unset or out of range leaves it to the skin, and with neither the host keeps its own.
+  assert(candidate_corner_radius_preference(Json{{"candidate_corner_radius", 4}}) == 4.0);
+  assert(candidate_corner_radius_preference(Json{{"candidate_corner_radius", 0}}) == 0.0);
+  assert(!candidate_corner_radius_preference(Json::object()));
+  assert(!candidate_corner_radius_preference(Json()));
+  for (const Json &value : {Json(33), Json(-1), Json("8"), Json(nullptr)})
+    assert(!candidate_corner_radius_preference(Json{{"candidate_corner_radius", value}}));
+  assert(candidate_corner_radius(Json{{"candidate_corner_radius", 0}}, rounded_catalog, "sakura") == 0.0);
+  assert(candidate_corner_radius(Json{{"candidate_corner_radius", 20}}, decorated_catalog, "sakura") == 20.0);
+  assert(candidate_corner_radius(Json::object(), rounded_catalog, "sakura") == 12.0);
+  assert(candidate_corner_radius(Json{{"candidate_corner_radius", 40}}, rounded_catalog, "sakura") == 12.0);
+  assert(!candidate_corner_radius(Json::object(), decorated_catalog, "sakura"));
   return 0;
 }

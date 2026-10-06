@@ -56,7 +56,8 @@ pub fn cut_one_piece_min_segments(pinyin: &str, intact_only: bool) -> Vec<String
         }
         best[index] = chosen;
     }
-    let mut segments = Vec::new();
+    let segment_count = best[0].map_or(0, |(_, count)| count);
+    let mut segments = Vec::with_capacity(segment_count);
     let mut index = 0;
     while index < length {
         let Some((end, _)) = best[index] else {
@@ -76,7 +77,7 @@ pub fn cut_pinyin_greedy(pinyin: &str, intact_only: bool) -> Vec<String> {
     if !pinyin.contains('\'') {
         return cut_one_piece_min_segments(pinyin, intact_only);
     }
-    let mut merged = Vec::new();
+    let mut merged = Vec::with_capacity(pinyin.len());
     for part in pinyin.split('\'') {
         let cut = cut_one_piece_min_segments(part, intact_only);
         if !cut.is_empty() {
@@ -173,7 +174,7 @@ fn cut_one_piece_with_corrections(pinyin: &str) -> Vec<Vec<&'static str>> {
         correction_ranks: Vec::new(),
     }];
     for index in (0..length).rev() {
-        let mut ranked = Vec::new();
+        let mut ranked = Vec::with_capacity(CORRECTION_PATH_LIMIT);
         for end in (index + 1..=length.min(index + max_piece)).rev() {
             let Ok(typed) = std::str::from_utf8(&bytes[index..end]) else {
                 continue;
@@ -236,10 +237,12 @@ pub fn cut_pinyin_with_corrections(pinyin: &str) -> Vec<Vec<String>> {
         if part_paths.is_empty() {
             return Vec::new();
         }
-        let mut combined = Vec::new();
+        let capacity = CORRECTION_PATH_LIMIT.min(merged.len().saturating_mul(part_paths.len()));
+        let mut combined = Vec::with_capacity(capacity);
         'product: for head in &merged {
             for tail in &part_paths {
-                let mut path = head.clone();
+                let mut path = Vec::with_capacity(head.len() + tail.len());
+                path.extend_from_slice(head);
                 path.extend_from_slice(tail);
                 combined.push(path);
                 if combined.len() == CORRECTION_PATH_LIMIT {
@@ -276,7 +279,10 @@ pub fn split_segments(segmentation: &str) -> Vec<String> {
     if segmentation.is_empty() {
         return Vec::new();
     }
-    segmentation.split('\'').map(str::to_owned).collect()
+    let count = segmentation.bytes().filter(|&byte| byte == b'\'').count() + 1;
+    let mut segments = Vec::with_capacity(count);
+    segments.extend(segmentation.split('\'').map(str::to_owned));
+    segments
 }
 
 /// Join with `'` (QQ:988-1000).
@@ -294,10 +300,13 @@ pub fn is_complete_pinyin_input(pinyin: &str) -> bool {
 
 /// The first letter of each non-empty segment (QQ:245-256).
 pub fn segments_to_jianpin(segments: &[String]) -> String {
-    segments
-        .iter()
-        .filter_map(|segment| segment.chars().next())
-        .collect()
+    let mut result = String::with_capacity(segments.len());
+    for segment in segments {
+        if let Some(initial) = segment.chars().next() {
+            result.push(initial);
+        }
+    }
+    result
 }
 
 #[cfg(test)]
@@ -459,7 +468,15 @@ mod tests {
     #[test]
     fn utilities_follow_the_reference() {
         assert!(split_segments("").is_empty());
-        assert_eq!(split_segments("ni''hao'"), ["ni", "", "hao", ""]);
+        let segments = split_segments("ni''hao'");
+        assert_eq!(segments, ["ni", "", "hao", ""]);
+        assert_eq!(segments.capacity(), segments.len());
+        let many = split_segments("a'a'a'a'a");
+        assert_eq!(many.len(), 5);
+        assert_eq!(many.capacity(), many.len());
+        let minimum = cut_one_piece_min_segments("zhong", true);
+        assert_eq!(minimum, ["zhong"]);
+        assert_eq!(minimum.capacity(), minimum.len());
         assert_eq!(join_segments(&split_segments("ni'hao")), "ni'hao");
         assert_eq!(segments_to_jianpin(&split_segments("ni''hao")), "nh");
         // Spellings only a minimum-segment cut can split are complete (test_input_session.cpp:978-986).

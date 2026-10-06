@@ -11,18 +11,16 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn online_candidate_response_preserves_legacy_first_candidate_and_batch() {
+    fn online_candidate_response_carries_only_the_batch() {
         let value =
             online_candidate_response(vec![("first".to_owned(), 0), ("second".to_owned(), 1)]);
 
-        assert_eq!(value["text"], json!("first"));
-        assert_eq!(value["source"], json!(0));
         assert_eq!(
-            value["candidates"],
-            json!([
+            value,
+            json!({"candidates": [
                 {"text": "first", "source": 0},
                 {"text": "second", "source": 1},
-            ])
+            ]})
         );
     }
 }
@@ -32,10 +30,7 @@ fn online_candidate_response(candidates: Vec<(String, u8)>) -> Value {
     for (text, source) in candidates {
         rows.push(json!({"text": text, "source": source}));
     }
-    // Preserve the single-result fields for older CLI consumers.
-    let mut value = rows.first().cloned().unwrap_or(json!({}));
-    value["candidates"] = json!(rows);
-    value
+    json!({"candidates": rows})
 }
 
 #[no_mangle]
@@ -139,6 +134,75 @@ pub unsafe extern "C" fn msime_client_set_ai_credential(
     })
 }
 
+/// The online translation service a query names, with the configuration of the services it may reach. `account_allowed` says whether the hosted account may be chosen at all: candidate glosses reach it only with candidate translation on, and the `/fy` request, which the account cannot answer, asks with it allowed so an explicit account choice is still recognised and never falls back to another service.
+struct TranslationServices {
+    provider: TranslationService,
+    translation_account: bool,
+    custom_translation: Option<Value>,
+    tencent_tmt: Option<Value>,
+    niutrans: Option<Value>,
+}
+
+fn selected_translation_services(
+    preferences: &msime_client_core::preferences::Preferences,
+    account_allowed: bool,
+) -> Result<TranslationServices, &'static str> {
+    let custom_translation = &preferences.custom_translation;
+    let tencent = &preferences.tencent_tmt;
+    // The MSIME account gloss endpoint (api.msime.app) is used only when the user explicitly chose it and no service of their own takes precedence. Tencent counts only with usable secrets, because its default `enabled: true` is not a user choice.
+    let translation_account = account_allowed
+        && preferences.translation_account
+        && !preferences.niutrans.enabled
+        && !custom_translation.enabled
+        && !(tencent.enabled
+            && msime_client_core::translation::usable_credential(&tencent.secret_id)
+            && msime_client_core::translation::usable_credential(&tencent.secret_key));
+    // The selected service, derived from the enable flags alone so an incomplete NiuTrans or custom configuration stays selected instead of reading as Tencent. A host whose Tencent secret lives outside preferences (Linux keeps it in the provider's own file) relies on this to honour 关闭.
+    let provider = if translation_account {
+        TranslationService::Account
+    } else if preferences.niutrans.enabled {
+        TranslationService::NiuTrans
+    } else if custom_translation.enabled {
+        TranslationService::Custom
+    } else if tencent.enabled {
+        TranslationService::Tencent
+    } else {
+        TranslationService::Off
+    };
+    // Selecting custom translation must never silently fall back to TMT.
+    let tencent_tmt = (!custom_translation.enabled
+        && !preferences.niutrans.enabled
+        && tencent.enabled
+        && msime_client_core::translation::usable_credential(&tencent.secret_id)
+        && msime_client_core::translation::usable_credential(&tencent.secret_key))
+    .then(|| serde_json::to_value(tencent))
+    .transpose()
+    .map_err(|_| "invalid Tencent translation configuration")?;
+    let custom_translation = (custom_translation.enabled
+        && !preferences.niutrans.enabled
+        && !custom_translation.endpoint.is_empty())
+    .then(|| {
+        json!({
+            "enabled": true,
+            "endpoint": &custom_translation.endpoint,
+            "api_key": &custom_translation.api_key,
+        })
+    });
+    let niutrans = (preferences.niutrans.enabled
+        && msime_client_core::translation::usable_credential(&preferences.niutrans.app_id)
+        && msime_client_core::translation::usable_credential(&preferences.niutrans.apikey))
+    .then(|| serde_json::to_value(&preferences.niutrans))
+    .transpose()
+    .map_err(|_| "invalid NiuTrans translation configuration")?;
+    Ok(TranslationServices {
+        provider,
+        translation_account,
+        custom_translation,
+        tencent_tmt,
+        niutrans,
+    })
+}
+
 /// Return the visible candidate texts that may receive asynchronous translations.
 /// The generation must be echoed to `msime_client_apply_translations`.
 #[no_mangle]
@@ -190,6 +254,32 @@ pub extern "C" fn msime_client_translation_query(handle: u64) -> *mut c_char {
                 } else {
                     Vec::new()
                 };
+            // `/fy` asks the selected service whatever the gloss switches say: it is the user's explicit request, a single English text translated into Chinese that comes back as a row which commits it. Nothing else rides it, so no offline dictionary is consulted and nothing is persisted.
+            if let Some(command) = session.runtime.command_translation() {
+                // The hosted account only glosses Chinese candidates, so `/fy` needs a service of the user's own.
+                let services = selected_translation_services(preferences, true)?;
+                if matches!(
+                    services.provider,
+                    TranslationService::Off | TranslationService::Account
+                ) {
+                    return Ok(Value::Null);
+                }
+                return Ok(json!({
+                    "generation": command.generation,
+                    "sentence": true,
+                    "target_language": "zh",
+                    "target_languages": ["zh"],
+                    "candidates": [{"text": command.text, "online_gloss": false}],
+                    "provider": services.provider,
+                    "translation_account": false,
+                    "custom_translation": services.custom_translation,
+                    "tencent_tmt": services.tencent_tmt,
+                    "niutrans": services.niutrans,
+                    "english_gloss": false,
+                    "resources": Value::Null,
+                    "user_data": Value::Null,
+                }));
+            }
             if !preferences.candidate_translations
                 && !english_gloss
                 && offline_gloss_languages.is_empty()
@@ -199,9 +289,13 @@ pub extern "C" fn msime_client_translation_query(handle: u64) -> *mut c_char {
             let Some(candidates_view) = session.runtime.translation_candidates() else {
                 return Ok(Value::Null);
             };
-            // Windows does not request glosses for Japanese candidates. Use
-            // Engine's active mode, including temporary Japanese composition.
-            if candidates_view.scheme == 3 || candidates_view.local_mode == "temporary_japanese" {
+            // 只有显示释义的方案才请求释义：Windows 不为日文候选请求释义，而韩文的汉字候选和中文一样带释义：훈음 由宿主自己画出，与这里的回答无关，翻译或释义画在它下面一行。按引擎当前的本地模式判断，临时日文组字同样不请求。网址模式也不请求：网址可能带着私密路径和参数，不能发给翻译服务。
+            if !SchemeType::from_u8(candidates_view.scheme).is_some_and(SchemeType::shows_glosses)
+                || matches!(
+                    candidates_view.local_mode.as_str(),
+                    "temporary_japanese" | "url"
+                )
+            {
                 return Ok(Value::Null);
             }
             // Whether the online gloss endpoint may be asked about each candidate,
@@ -230,53 +324,8 @@ pub extern "C" fn msime_client_translation_query(handle: u64) -> *mut c_char {
                         ),
                 })
             }));
-            let custom_translation = &preferences.custom_translation;
-            let tencent = &preferences.tencent_tmt;
-            // The MSIME account gloss endpoint (api.msime.app) is used only when the user explicitly chose it and no service of their own takes precedence. Tencent counts only with usable secrets, because its default `enabled: true` is not a user choice.
-            let translation_account = preferences.candidate_translations
-                && preferences.translation_account
-                && !preferences.niutrans.enabled
-                && !custom_translation.enabled
-                && !(tencent.enabled
-                    && msime_client_core::translation::usable_credential(&tencent.secret_id)
-                    && msime_client_core::translation::usable_credential(&tencent.secret_key));
-            // The selected service, derived from the enable flags alone so an incomplete NiuTrans or custom configuration stays selected instead of reading as Tencent. A host whose Tencent secret lives outside preferences (Linux keeps it in the provider's own file) relies on this to honour 关闭.
-            let provider = if translation_account {
-                TranslationService::Account
-            } else if preferences.niutrans.enabled {
-                TranslationService::NiuTrans
-            } else if custom_translation.enabled {
-                TranslationService::Custom
-            } else if tencent.enabled {
-                TranslationService::Tencent
-            } else {
-                TranslationService::Off
-            };
-            // Selecting custom translation must never silently fall back to TMT.
-            let tencent_tmt = (!custom_translation.enabled
-                && !preferences.niutrans.enabled
-                && tencent.enabled
-                && msime_client_core::translation::usable_credential(&tencent.secret_id)
-                && msime_client_core::translation::usable_credential(&tencent.secret_key))
-            .then(|| serde_json::to_value(tencent))
-            .transpose()
-            .map_err(|_| "invalid Tencent translation configuration")?;
-            let custom_translation = (custom_translation.enabled
-                && !preferences.niutrans.enabled
-                && !custom_translation.endpoint.is_empty())
-            .then(|| {
-                json!({
-                    "enabled": true,
-                    "endpoint": &custom_translation.endpoint,
-                    "api_key": &custom_translation.api_key,
-                })
-            });
-            let niutrans = (preferences.niutrans.enabled
-                && msime_client_core::translation::usable_credential(&preferences.niutrans.app_id)
-                && msime_client_core::translation::usable_credential(&preferences.niutrans.apikey))
-            .then(|| serde_json::to_value(&preferences.niutrans))
-            .transpose()
-            .map_err(|_| "invalid NiuTrans translation configuration")?;
+            let services =
+                selected_translation_services(preferences, preferences.candidate_translations)?;
             let mut query = json!({
                 "generation": candidates_view.generation,
                 "target_language": serde_json::to_value(preferences.translation_target_language)
@@ -286,11 +335,11 @@ pub extern "C" fn msime_client_translation_query(handle: u64) -> *mut c_char {
                     .map(|language| serde_json::to_value(language).map_err(|e| e.to_string()))
                     .collect::<Result<Vec<_>, _>>()?,
                 "candidates": candidates,
-                "provider": provider,
-                "translation_account": translation_account,
-                "custom_translation": custom_translation,
-                "tencent_tmt": tencent_tmt,
-                "niutrans": niutrans,
+                "provider": services.provider,
+                "translation_account": services.translation_account,
+                "custom_translation": services.custom_translation,
+                "tencent_tmt": services.tencent_tmt,
+                "niutrans": services.niutrans,
                 "english_gloss": english_gloss,
                 // The packaged resource path is only needed for offline
                 // lookup. The user path is also needed by a background host
@@ -594,9 +643,14 @@ pub(crate) struct EmojiCatalogQuery {
     pub(crate) parent: String,
     #[serde(default)]
     pub(crate) cursor: bool,
+    /// 插件目录的绝对路径，`list_plugin_symbol_groups` 从这里读符号集。
+    #[serde(default)]
+    pub(crate) plugins: Option<String>,
+    #[serde(default)]
+    pub(crate) list_plugin_symbol_groups: bool,
 }
 
-/// Query the local verified `others.db` Emoji catalog without a provider socket.
+/// Query the local verified `msime-others.db` Emoji catalog without a provider socket.
 /// Success contains `{items:[{text,annotation,group}]}` in the response envelope.
 /// With `cursor:true`, also returns `next_offset` and `complete`, preserves
 /// duplicate entries, and advances past invalid rows without treating them as EOF.
@@ -637,6 +691,17 @@ pub unsafe extern "C" fn msime_client_emoji_catalog_request(
             let groups = msime_engine::host::emoji_catalog_groups(resources, &query.panel.category)
                 .map_err(|_| "local emoji catalog unavailable")?;
             return Ok(json!({"groups": groups}));
+        }
+        if query.list_plugin_symbol_groups {
+            // 符号集插件不依赖 msime-others.db：目录不可用时内置符号读不出来，插件组照样给。没传插件目录时没有插件组。
+            let groups = match query.plugins.as_deref() {
+                None => Vec::new(),
+                Some(plugins) if std::path::Path::new(plugins).is_absolute() => {
+                    crate::plugin_symbol_groups(std::path::Path::new(plugins))
+                }
+                Some(_) => return Err("plugins path must be absolute".into()),
+            };
+            return Ok(json!({ "plugin_symbol_groups": groups }));
         }
         if query.list_symbol_groups {
             let groups = msime_engine::host::emoji_symbol_groups(resources)

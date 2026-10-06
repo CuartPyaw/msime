@@ -19,7 +19,7 @@ pub struct LocalDateTime {
     pub second: u32,
 }
 
-const WEEKDAYS: [&str; 7] = [
+pub(crate) const WEEKDAYS: [&str; 7] = [
     "星期日",
     "星期一",
     "星期二",
@@ -50,6 +50,13 @@ const BRANCHES: [&str; 12] = [
 ];
 
 /// The wall clock in the local offset, via `time`; zeros when the offset cannot be determined, as the reference did on a `localtime` failure.
+#[cfg_attr(
+    all(target_family = "wasm", target_os = "unknown", not(test)),
+    expect(
+        dead_code,
+        reason = "wasm 上 `now_local` 会 panic，`Clock::default` 改读宿主注入的 UTC 时钟"
+    )
+)]
 pub fn current_local_date_time() -> LocalDateTime {
     // A clock that cannot be read still yields well-formed rows (date_time_query.cpp:312-328), so there is nothing to report.
     let Ok(now) = OffsetDateTime::now_local() else {
@@ -205,7 +212,7 @@ fn week_candidates(now: &LocalDateTime) -> Vec<String> {
     results
 }
 
-fn year_digits(value: u32) -> String {
+pub(crate) fn year_digits(value: u32) -> String {
     value
         .to_string()
         .bytes()
@@ -214,7 +221,7 @@ fn year_digits(value: u32) -> String {
 }
 
 /// 0 is the empty string, 10 is 十, 11-19 are 十X, other multiples of ten X十, the rest X十Y (date_time_query.cpp:58-78). Only month, day, hour and minute values reach it.
-fn chinese_number(value: u32) -> String {
+pub(crate) fn chinese_number(value: u32) -> String {
     let digit = |index: u32| NUMBER_DIGITS[index as usize];
     match value {
         0..=9 => digit(value).to_owned(),
@@ -233,7 +240,7 @@ fn financial_digits(value: u32, minimum_digits: usize) -> String {
 }
 
 /// `<stem><branch>年[闰]<month>月<day>日` of the lunar year, or `None` outside what the calendar covers (lunar years 1850..=2150) or for an impossible date such as the zero clock.
-fn lunar_date(now: &LocalDateTime) -> Option<String> {
+pub(crate) fn lunar_date(now: &LocalDateTime) -> Option<String> {
     let solar = SolarDate {
         year: now.year,
         month: u8::try_from(now.month).ok()?,

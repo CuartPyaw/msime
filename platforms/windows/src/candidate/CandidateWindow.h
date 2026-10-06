@@ -8,6 +8,9 @@
 #include "CandidatePresentation.h"
 #include "CandidateShadow.h"
 #include "CandidateSkin.h"
+#include "TypingEffectPolicy.h"
+#include "CandidateWindowStyle.h"
+#include "ComponentFailure.h"
 #include <functional>
 #include <memory>
 // windows.h first: its DrawText macro has to reach the Direct2D declarations,
@@ -72,13 +75,21 @@ public:
   }
   // The card radius a package asks for; none keeps the theme's.
   void set_skin_corner_radius(std::optional<float> radius) { skin_radius_ = radius; }
+  // preferences.plugins.effect_intensity, 0-100: how bright the typing flash is until a session publishes its resolved effect settings. The style, the combo and those settings come with each key from the input thread (TypingEffectSignal).
+  void set_effect_intensity(uint32_t intensity) { effect_intensity_ = (std::min)(intensity, 100u); }
+  // The user's scale, opacity and corner radius. Scale changes the card's size, so the next refresh lays it out again. Invalid values leave the previous style intact.
+  bool set_style(const CandidateWindowStyle &style);
   void hide();
   bool failed() const { return failed_; }
+  // 第一次失败的位置，只有固定标签和数字，可以写进诊断日志。
+  const std::optional<ComponentFailureSite> &failure_site() const { return failure_site_; }
   HWND handle() const { return window_; }
 
 private:
   static LRESULT CALLBACK procedure(HWND, UINT, WPARAM, LPARAM) noexcept;
   void reposition();
+  // 记下第一次失败并隐藏；error 由 catch 现场先取，免得隐藏窗口时被改写。
+  void fail(ComponentFailureSite site);
   void invalidate_geometry();
   CandidateBounds card_bounds(const CandidatePresentation &value,
                               const RECT &work, unsigned dpi);
@@ -86,6 +97,16 @@ private:
   std::vector<CandidateItemWidths> measure_items(const CandidatePresentation &value);
   CandidateWrapMeasure wrap_measure(const CandidatePresentation &value);
   void paint();
+  // UI thread: adopt the waiting typing effect and start its flash and combo timers.
+  void take_typing_effect();
+  // Repaint for the next flash frame, and stop the timer once the flash has faded.
+  void typing_effect_tick(UINT_PTR timer);
+  // Device pixels per DIP for a window DPI, including the user's scale. Layout, rendering, the logo and hit testing all read this one factor.
+  double layout_scale(unsigned dpi) const {
+    return static_cast<double>(dpi ? dpi : 96) / 96.0 * style_.scale();
+  }
+  // The brand mark leading the preedit row, loaded at `pixels` square. Null when the icon will not load, and the row then draws no mark.
+  ID2D1Bitmap *logo_bitmap(int pixels);
   std::optional<CandidateClick> hit(int x, int y);
   // The pager arrow under a client point: true for the previous page, false for the next. None over anything else, over the previous arrow on the first page, or without a page callback.
   std::optional<bool> pager_hit(int x, int y);
@@ -108,6 +129,7 @@ private:
   std::optional<size_t> hovered_;
   unsigned painted_dpi_ = 0;
   bool failed_ = false;
+  std::optional<ComponentFailureSite> failure_site_;
   unsigned font_size_ = 16;
   unsigned preedit_font_size_ = 16;
   // Direct2D's imaging factory is a COM server, and this thread is the Server's
@@ -121,6 +143,8 @@ private:
   } apartment_;
   // Direct2D through the shared UI stack; no second renderer in this tree.
   msimeui::DeviceResources device_;
+  HICON logo_ = nullptr;
+  int logo_pixels_ = 0;
   CandidatePalette palette_;
   std::wstring font_family_;
   std::optional<CandidateFontSettings> font_settings_;
@@ -142,6 +166,7 @@ private:
   CandidateSkinAlign decoration_align_ = CandidateSkinAlign::right;
   CandidateSkinBackground background_;
   std::optional<float> skin_radius_;
+  CandidateWindowStyle style_;
   // Pixels reserved above the card for the artwork, computed when the card is
   // sized and reused when it is painted so the two cannot disagree.
   float decoration_offset_ = 0.0f;
@@ -160,5 +185,12 @@ private:
   // than being swallowed by this NOACTIVATE window.
   bool mouse_wheel_ = false;
   int wheel_accumulator_ = 0;
+  // The typing effect last taken from the input thread, when it arrived (GetTickCount64), and whether its flash is still fading. The combo count outlives the flash: it stays on the card until the library's idle window ends it.
+  uint32_t effect_intensity_ = 50;
+  TypingEffect effect_{};
+  // The settings the current flash is drawn with, adopted with it so a flash keeps its length and colour while it fades.
+  TypingEffectSettings effect_settings_{};
+  uint64_t effect_started_ = 0;
+  bool effect_flashing_ = false;
 };
 } // namespace msime::windows

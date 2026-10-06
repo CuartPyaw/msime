@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <functional>
+#include <optional>
 #include <vector>
 
 namespace msime::mac
@@ -142,6 +143,51 @@ inline double CandidateItemNaturalWidth(const CandidateItemWidths &item, const C
     return content + metrics.chrome;
 }
 
+// The narrowest a horizontal page's columns can be on one line: each candidate's line (text and annotation) with its chrome, the glosses left to wrap under them. The card may grow past its usual cap to this width so a page of long candidates still stays on one line.
+inline double SingleLineMinimumWidth(const std::vector<CandidateItemWidths> &items, const CandidateLayoutMetrics &metrics)
+{
+    double total = 0.0;
+    for (const auto &item : items)
+    {
+        CandidateItemWidths line = item;
+        line.translation = 0.0;
+        const double wide = CandidateItemNaturalWidth(item, metrics, true);
+        if (wide > 0.0)
+            total += std::min(std::max(CandidateItemNaturalWidth(line, metrics, true), metrics.chrome), wide);
+    }
+    return total;
+}
+
+// The columns of a horizontal page on a single line `lineWidth` wide. Columns that fit keep their natural widths. Otherwise each column whose gloss is wider than its candidate line gives up room, never below that line and in proportion to how much it could give, so the glosses wrap under their text instead of the page starting a second line. None when the candidate lines alone do not fit.
+inline std::optional<std::vector<double>> SingleLineColumns(const std::vector<CandidateItemWidths> &items, double lineWidth,
+                                                            const CandidateLayoutMetrics &metrics)
+{
+    std::vector<double> natural, firm;
+    natural.reserve(items.size());
+    firm.reserve(items.size());
+    double naturalTotal = 0.0, firmTotal = 0.0;
+    for (const auto &item : items)
+    {
+        CandidateItemWidths line = item;
+        line.translation = 0.0;
+        const double wide = CandidateItemNaturalWidth(item, metrics, true);
+        // A gloss-only candidate still needs a column; its line is the chrome.
+        const double narrow = wide > 0.0 ? std::max(CandidateItemNaturalWidth(line, metrics, true), metrics.chrome) : 0.0;
+        natural.push_back(wide);
+        firm.push_back(std::min(narrow, wide));
+        naturalTotal += wide;
+        firmTotal += firm.back();
+    }
+    if (naturalTotal <= lineWidth)
+        return natural;
+    if (firmTotal > lineWidth || !(naturalTotal > firmTotal))
+        return std::nullopt;
+    const double keep = (lineWidth - firmTotal) / (naturalTotal - firmTotal);
+    for (std::size_t index = 0; index < natural.size(); ++index)
+        natural[index] = firm[index] + (natural[index] - firm[index]) * keep;
+    return natural;
+}
+
 // One laid out row, in the card's content area: x from its left edge, y downwards from its top.
 struct CandidateRowLayout
 {
@@ -155,7 +201,7 @@ struct CandidateRowLayout
 // Height of candidate `index`'s run once wrapped to `width` points.
 using CandidatePageMeasure = std::function<double(std::size_t index, CandidateRun run, double width)>;
 
-// Rows for a whole page at the width the rows actually get. A vertical list stacks full-width rows of their own heights. A horizontal list is CandidateList::Measure: each column is its candidate's natural width, columns run left to right, and one that would pass the line's end starts a new line; only a candidate wider than a whole line is narrowed to it, and its text and runs wrap inside that. Every column on a line takes the line's tallest height, so the selection fills evenly. `minimumHeight` raises every row (vertical) or line (horizontal) to at least that height.
+// Rows for a whole page at the width the rows actually get. A vertical list stacks full-width rows of their own heights. A horizontal list keeps every candidate on one line: SingleLineColumns narrows the glosses to fit, and only when the candidate lines themselves do not fit does it fall back to CandidateList::Measure, where each column is its candidate's natural width and one that would pass the line's end starts a new line (a candidate wider than a whole line is narrowed to it, and its text and runs wrap inside that). Every column on a line takes the line's tallest height, so the selection fills evenly. `minimumHeight` raises every row (vertical) or line (horizontal) to at least that height.
 inline std::vector<CandidateRowLayout> LayoutCandidatePage(const std::vector<CandidateItemWidths> &items,
                                                            double lineWidth, const CandidateLayoutMetrics &metrics,
                                                            bool horizontal, const CandidatePageMeasure &wrapped = {},
@@ -175,14 +221,15 @@ inline std::vector<CandidateRowLayout> LayoutCandidatePage(const std::vector<Can
             rows[index].height = tallest;
         lineStart = end;
     };
+    const auto singleLine = horizontal ? SingleLineColumns(items, lineWidth, metrics) : std::nullopt;
     for (std::size_t index = 0; index < items.size(); ++index)
     {
         CandidateRowLayout row;
         if (horizontal)
         {
             const double natural = CandidateItemNaturalWidth(items[index], metrics, true);
-            const double column = natural > 0.0 ? std::min(natural, lineWidth) : 0.0;
-            if (x > 0.0 && x + column > lineWidth)
+            const double column = singleLine ? (*singleLine)[index] : natural > 0.0 ? std::min(natural, lineWidth) : 0.0;
+            if (!singleLine && x > 0.0 && x + column > lineWidth)
             {
                 closeLine(index);
                 top += tallest;

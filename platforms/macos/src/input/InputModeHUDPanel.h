@@ -4,8 +4,6 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-FOUNDATION_EXPORT NSColor *MSIMEInputModeHUDForestColor(void);
-FOUNDATION_EXPORT NSColor *MSIMEInputModeHUDOnForestColor(void);
 FOUNDATION_EXPORT NSString *MSIMEInputModeHUDText(BOOL englishInputMode);
 FOUNDATION_EXPORT BOOL MSIMEInputModeHUDUsableCaretRect(NSRect caretRect);
 FOUNDATION_EXPORT NSRect MSIMEInputModeHUDFrame(NSRect caretRect, NSSize panelSize, NSRect visibleFrame);
@@ -14,6 +12,16 @@ FOUNDATION_EXPORT NSRect MSIMEInputModeHUDFrame(NSRect caretRect, NSSize panelSi
 @interface MSIMEInputModeHUDPanel : NSPanel
 + (instancetype)sharedPanel;
 - (void)showEnglishInputMode:(BOOL)englishInputMode nearCaretRect:(NSRect)caretRect;
+/// The badge's fill, outline and glyph colour: the floating toolbar's, so it follows the selected theme and skin. Pass dynamic colours to follow the appearance. Until set, the system window colours.
+- (void)setSurfaceColor:(NSColor *)surface borderColor:(NSColor *)border textColor:(NSColor *)text;
+/// The light or dark mode the badge is drawn in. It wears the floating toolbar's palette, so it takes the toolbar's rule: `toolbar_theme` when it names a mode, otherwise `theme`, and the system appearance for `system` or neither. The controller passes the dictionary it gives the toolbar, whose `toolbar_theme` is pinned when the theme has a mode of its own.
+- (void)applyThemePreferences:(NSDictionary *)preferences;
+/// The badge's size, the floating toolbar's: `floating_toolbar.font_size` and `scale_percent` set the height, the character, the brand mark and the corner radius exactly as they set the toolbar's. Missing or unknown values fall back to the toolbar's 24pt at 100%.
+- (void)applySizingPreferences:(NSDictionary *)preferences;
+@property(nonatomic, readonly) NSSize panelSize;
+@property(nonatomic, readonly) NSColor *surfaceColor;
+@property(nonatomic, readonly) NSColor *borderColor;
+@property(nonatomic, readonly) NSColor *textColor;
 @property(nonatomic, copy, readonly, nullable) NSString *displayedText;
 @property(nonatomic, readonly) BOOL showsLogo;
 @end

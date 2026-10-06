@@ -8,15 +8,13 @@ const draft: Preferences = {
   learning: true,
   chinese_punctuation: true,
   diagnostic_log: { server: false, tsf: false },
-  telemetry_enabled: false,
+  usage_reporting: true,
 };
 
 test("creates about maintenance and preference actions", () => {
   const setDraft = vi.fn();
   const selectPage = vi.fn();
   const actions = createAboutSettingsActions({
-    draft,
-    diagnosticLog: { server: false, tsf: false },
     checkForUpdate: vi.fn().mockResolvedValue(undefined),
     chooseDataDirectory: vi.fn().mockResolvedValue(undefined),
     confirmUninstall: vi.fn().mockResolvedValue(undefined),
@@ -25,17 +23,35 @@ test("creates about maintenance and preference actions", () => {
   });
 
   actions.onDiagnosticLogChange({ server: true });
-  actions.onTelemetryChange(true);
+  actions.onTelemetryChange(false);
   actions.onHelp();
   actions.onFeedback();
 
-  expect(setDraft).toHaveBeenNthCalledWith(
-    1,
-    expect.objectContaining({ diagnostic_log: { server: true, tsf: false } }),
-  );
-  expect(setDraft).toHaveBeenNthCalledWith(2, expect.objectContaining({ telemetry_enabled: true }));
+  const diagnosticUpdater = setDraft.mock.calls[0][0] as (value: Preferences) => Preferences;
+  const telemetryUpdater = setDraft.mock.calls[1][0] as (value: Preferences) => Preferences;
+  expect(diagnosticUpdater(draft)).toMatchObject({ diagnostic_log: { server: true, tsf: false } });
+  expect(telemetryUpdater(draft)).toMatchObject({ usage_reporting: false });
   expect(selectPage).toHaveBeenNthCalledWith(1, "help");
   expect(selectPage).toHaveBeenNthCalledWith(2, "feedback");
+});
+
+test("applies diagnostic updates to the latest draft", () => {
+  const setDraft = vi.fn();
+  const actions = createAboutSettingsActions({
+    checkForUpdate: vi.fn().mockResolvedValue(undefined),
+    chooseDataDirectory: vi.fn().mockResolvedValue(undefined),
+    confirmUninstall: vi.fn().mockResolvedValue(undefined),
+    selectPage: vi.fn(),
+    setDraft,
+  });
+
+  actions.onDiagnosticLogChange({ server: true });
+
+  const updater = setDraft.mock.calls[0][0] as (value: Preferences) => Preferences;
+  expect(updater({ ...draft, candidate_page_size: 9 })).toMatchObject({
+    candidate_page_size: 9,
+    diagnostic_log: { server: true, tsf: false },
+  });
 });
 
 test("wraps async maintenance operations", () => {
@@ -43,7 +59,6 @@ test("wraps async maintenance operations", () => {
   const chooseDataDirectory = vi.fn().mockResolvedValue(undefined);
   const confirmUninstall = vi.fn().mockResolvedValue(undefined);
   const actions = createAboutSettingsActions({
-    diagnosticLog: { server: false, tsf: false },
     checkForUpdate,
     chooseDataDirectory,
     confirmUninstall,

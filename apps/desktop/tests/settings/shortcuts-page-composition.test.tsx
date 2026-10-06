@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { testHost } from "../support/host";
+import { settingsFormReady } from "../support/settings-form";
 import { expect, test, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
@@ -28,11 +30,11 @@ test("the shortcuts settings page composes the shared shortcuts section", async 
       client={{
         load: async () => snapshot,
         save: vi.fn(),
-        host: { platform: "windows" } as never,
+        host: testHost({ platform: "windows" }),
       }}
     />,
   );
 
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   expect(screen.getByRole("region", { name: "共享快捷键设置" })).toBeTruthy();
 });

@@ -8,6 +8,9 @@ FOUNDATION_EXPORT NSNotificationName const MSIMETranslationPreferencesDidSaveNot
 /// Set to @YES in the userInfo of an MSIMEAppearanceDidChangeNotification that only moved the Chinese/English mode. The mode is not part of the shared preferences document, so observers refresh what they show but have nothing to save.
 FOUNDATION_EXPORT NSString *const MSIMEAppearanceInputModeOnlyKey;
 
+/// 某个输入源是否已在用户的输入法列表里。输入法进程启动时把它设成 `MSIMEInputSourceIsEnabled`；测试和其它链接了设置窗口的程序不设，「菜单栏入口」提示就不出现，设置窗口也因此不必链接 Carbon。
+extern BOOL (*MSIMEInputModeEnabledProbe)(NSString *identifier);
+
 // macOS-only presentation settings; never change Engine composition/configuration.
 @interface MSIMEAppearancePreferences : NSWindowController
 + (instancetype)sharedPreferences;
@@ -35,10 +38,14 @@ FOUNDATION_EXPORT NSString *const MSIMEAppearanceInputModeOnlyKey;
 /// Show the short non-activating Chinese/English mode badge near the caret.
 @property(nonatomic) BOOL inputModeHUD;
 @property(nonatomic, copy) NSString *inputScheme;
-/// The Chinese scheme to go back to when leaving japanese: the current scheme while it is Chinese, otherwise the one left for japanese here or the shared `last_chinese_scheme`, 全拼 when neither is known.
+/// The Chinese scheme to go back to when leaving japanese or korean: the current scheme while it is Chinese, otherwise the one left for japanese or korean here or the shared `last_chinese_scheme`, 全拼 when neither is known.
 @property(nonatomic, readonly) NSString *lastChineseScheme;
+/// The scheme the input method last showed a system input mode for, kept in this Mac's defaults and never in the shared document. The input controller compares the scheme running now with it, so a scheme picked while the input method was not running, or one whose dictionary was installed after it was picked, still reads as a change on the next sync and gets its opt-in mode enabled; the scheme it already names enables nothing.
+@property(nonatomic, copy) NSString *lastSyncedInputScheme;
 @property(nonatomic, copy) NSString *shuangpinProfile;
 @property(nonatomic) BOOL shuangpinPreeditUsesRaw;
+/// 五笔码表版本：`wubi86`（缺省）或 `wubi98`，对应共享偏好的 `wubi_profile`。
+@property(nonatomic, copy) NSString *wubiProfile;
 /// Allow Pinyin fallback when a Wubi code has no Wubi candidates.
 @property(nonatomic) BOOL wubiMixedPinyinEnabled;
 /// Shared inline composition display: raw keys, formatted pinyin, or hidden.
@@ -52,6 +59,15 @@ FOUNDATION_EXPORT NSString *const MSIMEAppearanceInputModeOnlyKey;
 - (NSFont *)candidateFontOfSize:(CGFloat)size englishFirst:(BOOL)englishFirst;
 @property(nonatomic) NSUInteger preeditFontSize;
 @property(nonatomic) BOOL showsCandidatePreedit;
+/// The candidate window's own style: `candidate_scale_percent` (50-200, 100 by default), which multiplies the candidate fonts and every length of the window; `candidate_opacity_percent` (50-100, 100 by default), which fades only the card surface, its border and a package background; and `candidate_corner_radius` (0-32 points), nil to keep the theme's or the package's card radius. A value outside its range is refused and leaves the setting as it was.
+@property(nonatomic) NSInteger candidateScalePercent;
+@property(nonatomic) NSInteger candidateOpacityPercent;
+@property(nonatomic, copy) NSNumber *candidateCornerRadius;
+- (msime::mac::CandidateWindowStyle)candidateWindowStyle;
+/// -resolvedSkinForDark: with -candidateWindowStyle laid over it, which is what the candidate window draws. The floating toolbar and the colour wells read the skin as resolved.
+- (msime::mac::ResolvedSkin)candidateWindowSkinForDark:(BOOL)dark;
+/// The 候选字体 preset: 0 默认, 1 宋体, 2 黑体, 3 楷体, 4 圆体, read back from `fontFamily`, or -1 for a family none of them writes. Setting one writes the preset's family for this host into `fontFamily` and puts all of its families, the other platforms' names included, at the front of `fallbackFonts`; 默认 restores the shared default pair.
+@property(nonatomic) NSInteger candidateFontPreset;
 @property(nonatomic, copy) NSString *candidateTextColor;
 /// The six other candidate pickers of `custom_theme.candidate_colors`, as the same 「#rrggbb」 strings, or nil while the theme's own colour is in use. Setting one selects the custom theme (a theme that was on screen becomes its base); setting nil clears only that slot. The candidate window draws with -resolvedSkinForDark:, which already has them applied.
 @property(nonatomic, copy) NSString *candidateNumberColor;
@@ -113,7 +129,6 @@ FOUNDATION_EXPORT NSString *const MSIMEAppearanceInputModeOnlyKey;
 @property(nonatomic) NSInteger mixedEnglishMinimumPrefix;
 @property(nonatomic) BOOL mixedEmojiInput;
 @property(nonatomic) BOOL mixedKaomojiInput;
-@property(nonatomic) BOOL autocorrect;
 @property(nonatomic) BOOL candidateLearningEnabled;
 @property(nonatomic, copy) NSString *frequencyAdjustmentMode;
 @property(nonatomic) NSInteger frequencyTriggerCount;
@@ -135,8 +150,6 @@ FOUNDATION_EXPORT NSString *const MSIMEAppearanceInputModeOnlyKey;
 @property(nonatomic) BOOL candidateEnglishGloss;
 @property(nonatomic) BOOL autocorrectTransposition;
 @property(nonatomic) BOOL autocorrectNeighbor;
-// Legacy fallback for both schemes; setting it explicitly still sets both.
-@property(nonatomic) BOOL helpcodeEnabled;
 @property(nonatomic) BOOL quanpinHelpcodeEnabled;
 @property(nonatomic) BOOL shuangpinHelpcodeEnabled;
 - (void)applySharedAssistancePreferences:(NSDictionary *)preferences;
@@ -166,6 +179,7 @@ FOUNDATION_EXPORT NSString *const MSIMEAppearanceInputModeOnlyKey;
 @property(nonatomic) BOOL floatingToolbarEmoji;
 /// The handwriting panel and voice buttons, which only this client's toolbar has.
 @property(nonatomic) BOOL floatingToolbarHandwriting;
+@property(nonatomic) BOOL floatingToolbarInputScheme;
 @property(nonatomic) BOOL floatingToolbarScreenKeyboard;
 @property(nonatomic) BOOL floatingToolbarVoice;
 @property(nonatomic) BOOL floatingToolbarSettings;

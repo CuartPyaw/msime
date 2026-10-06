@@ -5,6 +5,8 @@
 use crate::config::Config;
 use crate::diagnostics::{self, LogRequest, LogView, SwitchRequest, SwitchView};
 use crate::preferences::{self, PreferencesChange, PreferencesView};
+use crate::prompts::WRITE_PROMPTS;
+use crate::skins::{self, CreateSkinRequest, CreatedSkin, SkinList};
 use crate::statistics::{self, StatisticsRequest, StatisticsView};
 use crate::words;
 use crate::words::{
@@ -12,16 +14,20 @@ use crate::words::{
     WordListRequest,
 };
 use msime_client_core::dictionary::quiesce::QuiescedHosts;
+use msime_client_core::file_lock;
 use msime_host_api::{DictionaryOptions, QuickPhrase, QuickPhraseEdit, WordEdit};
+use rmcp::handler::server::router::prompt::PromptRouter;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{Implementation, ServerCapabilities, ServerConfig};
 use rmcp::schemars::JsonSchema;
-use rmcp::{tool, tool_handler, tool_router, Json, ServerHandler};
+use rmcp::{prompt_handler, tool, tool_handler, tool_router, Json, ServerHandler};
 use serde::{Deserialize, Serialize};
+use std::fs::File;
+use std::io::{Seek, SeekFrom, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_PAGE: usize = 100;
 const MAX_PAGE: usize = 1000;
@@ -29,14 +35,22 @@ const MAX_PAGE: usize = 1000;
 const MAX_EDITS: usize = 50;
 /// The shortest gap between two writing calls, so an agent stuck in a loop cannot rewrite the dictionary or the preferences many times a second.
 const WRITE_INTERVAL: Duration = Duration::from_secs(1);
+/// In the state directory: when the last write began, shared by every server and command line on this computer.
+const WRITE_LOCK: &str = "mcp-write.lock";
+/// 写锁只保存一个毫秒时间戳，拒绝异常膨胀的内容以免无界分配内存。
+const WRITE_LOCK_READ_LIMIT: u64 = 128;
 
-const WRITE_TOOLS: [&str; 2] = ["edit_quick_phrases", "update_preferences"];
+const WRITE_TOOLS: [&str; 3] = [
+    "create_candidate_skin",
+    "edit_quick_phrases",
+    "update_preferences",
+];
 /// Offered with --allow-dictionary-read.
 const DICTIONARY_READ_TOOLS: [&str; 2] = ["list_dictionary_words", "lookup_candidates"];
 /// Offered with --allow-write and --allow-dictionary-read together: an edit or import also tells whether a word is there.
 const DICTIONARY_WRITE_TOOLS: [&str; 2] = ["edit_dictionary_words", "import_dictionary_words"];
 
-const INSTRUCTIONS: &str = "Manages 水杉输入法 (MSIME), a Chinese input method: its quick phrases (a short code the user types that expands to a longer text), a few of its preferences, and aggregate typing statistics. With --allow-dictionary-read it also lists the user's own dictionary words and shows which candidates a code offers and why, which is how to explain a candidate's rank; with --allow-write as well it adds, reweights, removes and imports words. To import a word list the user gives you, read it yourself and send the words, 200 at a time. It also helps with problems the user runs into: lag, a candidate window that is missing or in the wrong place, the input method stopping or switching by itself. The user may not be technical, so do the steps yourself rather than asking them to open files, settings or a terminal: read the log with read_diagnostic_log; if it is off, turn it on with set_diagnostic_log, ask the user in plain words to do again what went wrong and to tell you when they have, then read the log again and explain what you found in plain words. Turn the log off with set_diagnostic_log when you are done. Changes take effect in the input method within a few seconds. Apart from set_diagnostic_log, writing tools are only offered when the user started the server with --allow-write.";
+const INSTRUCTIONS: &str = "Manages 水杉输入法 (MSIME), a Chinese input method: its quick phrases (a short code the user types that expands to a longer text), a few of its preferences, and aggregate typing statistics. With --allow-dictionary-read it also lists the user's own dictionary words and shows which candidates a code offers and why, which is how to explain a candidate's rank; with --allow-write as well it adds, reweights, removes and imports words. To import a word list the user gives you, read it yourself and send the words, 200 at a time. It also helps with problems the user runs into: lag, a candidate window that is missing or in the wrong place, the input method stopping or switching by itself. The user may not be technical, so do the steps yourself rather than asking them to open files, settings or a terminal: read the log with read_diagnostic_log; if it is off, turn it on with set_diagnostic_log, ask the user in plain words to do again what went wrong and to tell you when they have, then read the log again and explain what you found in plain words. Turn the log off with set_diagnostic_log when you are done. It also lists the user's candidate-window skins and, with --allow-write, makes new ones: write a skin.toml and PNG or JPEG images yourself and pass them to create_candidate_skin. The desktop app then syncs every skin made this way to the user's cloud library as a private package, from where the user can publish it to the community; this server never signs in to the account itself. Changes take effect in the input method within a few seconds. Apart from set_diagnostic_log, writing tools are only offered when the user started the server with --allow-write.";
 
 #[derive(Clone)]
 pub struct MsimeServer {
@@ -45,6 +59,7 @@ pub struct MsimeServer {
     /// Set while a write runs. rmcp runs each request as its own task and a write can outlast the interval, so spacing alone would let two overlap on the quiesce lease and on a check-then-write edit.
     writing: Arc<AtomicBool>,
     tool_router: ToolRouter<Self>,
+    prompt_router: PromptRouter<Self>,
 }
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
@@ -165,11 +180,18 @@ impl MsimeServer {
         {
             tool_router.remove_route(name);
         }
+        let mut prompt_router = Self::prompt_router();
+        if !config.allow_write {
+            for name in WRITE_PROMPTS {
+                prompt_router.remove_route(name);
+            }
+        }
         Self {
             config: Arc::new(config),
             last_write: Arc::new(Mutex::new(None)),
             writing: Arc::new(AtomicBool::new(false)),
             tool_router,
+            prompt_router,
         }
     }
 
@@ -188,7 +210,7 @@ impl MsimeServer {
         }
         let config = self.config.clone();
         blocking(move || {
-            let options = DictionaryOptions::from_host_document(config.read_options()?)?;
+            let options = DictionaryOptions::from_host_document(config.read_host_options()?)?;
             let page = msime_host_api::user_quick_phrases(
                 &options,
                 request.code_prefix.as_deref().unwrap_or(""),
@@ -225,7 +247,8 @@ impl MsimeServer {
         let edits: Vec<QuickPhraseEdit> = request.edits.into_iter().map(Into::into).collect();
         let outcome = blocking(move || {
             let _guard = guard;
-            let options = DictionaryOptions::from_host_document(config.read_options()?)?;
+            let _shared = claim_shared_write(&config)?;
+            let options = DictionaryOptions::from_host_document(config.read_host_options()?)?;
             Ok(apply_edits(
                 &options,
                 &edits,
@@ -253,15 +276,16 @@ impl MsimeServer {
     async fn get_preferences(&self) -> Result<Json<PreferencesView>, String> {
         let config = self.config.clone();
         blocking(move || {
-            let state_dir = config.state_dir(&config.read_options()?)?;
-            preferences::load(&state_dir).map(Json)
+            let document = config.read_options()?;
+            let state_dir = config.state_dir(&document)?;
+            preferences::load(&state_dir, config.edition(&document)?).map(Json)
         })
         .await
     }
 
     #[tool(
         name = "update_preferences",
-        description = "Change some of the preferences get_preferences returns. Only the fields given change. Refused when the preferences changed since expected_revision was read.",
+        description = "Change some of the preferences get_preferences returns. Only the fields given change. Refused when the preferences changed since expected_revision was read, and for a scheme the installed edition of the input method does not offer.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -281,13 +305,64 @@ impl MsimeServer {
         let config = self.config.clone();
         let result = blocking(move || {
             let _guard = guard;
-            let state_dir = config.state_dir(&config.read_options()?)?;
-            preferences::update(&state_dir, &config.options, &change).map(Json)
+            let _shared = claim_shared_write(&config)?;
+            let document = config.read_options()?;
+            let state_dir = config.state_dir(&document)?;
+            let edition = config.edition(&document)?;
+            preferences::update(&state_dir, &config.options, edition, &change).map(Json)
         })
         .await;
         eprintln!(
             "msime-mcp: update_preferences {}",
             if result.is_ok() { "saved" } else { "refused" }
+        );
+        result
+    }
+
+    #[tool(
+        name = "list_candidate_skins",
+        description = "List the candidate-window skins installed as folders in the input method's skin directory: id, name, version, the layouts and colour modes each supports, and whether the desktop app has synced it to the user's cloud library. Folders that are not a usable skin are listed with the reason.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn list_candidate_skins(&self) -> Result<Json<SkinList>, String> {
+        let config = self.config.clone();
+        blocking(move || {
+            let state_dir = config.state_dir(&config.read_options()?)?;
+            Ok(Json(skins::list(&state_dir)))
+        })
+        .await
+    }
+
+    #[tool(
+        name = "create_candidate_skin",
+        description = "Install a candidate-window skin from a skin.toml and its images. The manifest is TOML: schema_version = 1; id (equal to package_id); name (at most 80 bytes); version; base, the look drawn under it: a built-in theme (system, shuishan, light, paper, night or ink) or an msime-windows built-in look (fluent, wechat, graphite, willow_green, autumn_osmanthus or microsoft), whose colours fill the ones the manifest leaves out; preview, the path of a PNG or JPEG shown in the skin list; optional author, description and [license] code, assets and source; [supports] layouts (horizontal, vertical) and themes (dark, light); [candidate_window] min_width_dip (0-1000), optional corner_radius_dip (0-32), optional [candidate_window.decoration] top_inset_dip, width_dip, image and align (left, center, right), optional [candidate_window.background] image, fit (cover, contain, stretch) and opacity (0-1); [candidate.dark] and [candidate.light] colours accent, selected, hover, surface, border, text, number and translation as #RRGGBB or #RRGGBBAA, plus show_selected_bar. images must hold exactly the images the manifest references. A stylesheet is not accepted, so the skin can be synced and shared. Refused when the skin exists, unless replace is true.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn create_candidate_skin(
+        &self,
+        Parameters(request): Parameters<CreateSkinRequest>,
+    ) -> Result<Json<CreatedSkin>, String> {
+        let guard = self.claim_write()?;
+        let config = self.config.clone();
+        let result = blocking(move || {
+            let _guard = guard;
+            let _shared = claim_shared_write(&config)?;
+            let state_dir = config.state_dir(&config.read_options()?)?;
+            skins::create(&state_dir, &request).map(Json)
+        })
+        .await;
+        eprintln!(
+            "msime-mcp: create_candidate_skin {}",
+            match &result {
+                Ok(created) if created.0.replaced => "replaced",
+                Ok(_) => "installed",
+                Err(_) => "refused",
+            }
         );
         result
     }
@@ -344,8 +419,11 @@ impl MsimeServer {
         let config = self.config.clone();
         let result = blocking(move || {
             let _guard = guard;
-            let state_dir = config.state_dir(&config.read_options()?)?;
-            diagnostics::set(&state_dir, &config.options, request.enabled).map(Json)
+            let _shared = claim_shared_write(&config)?;
+            let document = config.read_options()?;
+            let state_dir = config.state_dir(&document)?;
+            let edition = config.edition(&document)?;
+            diagnostics::set(&state_dir, &config.options, edition, request.enabled).map(Json)
         })
         .await;
         eprintln!(
@@ -379,7 +457,7 @@ impl MsimeServer {
         }
         let config = self.config.clone();
         blocking(move || {
-            let options = DictionaryOptions::from_host_document(config.read_options()?)?;
+            let options = DictionaryOptions::from_host_document(config.read_host_options()?)?;
             let page = msime_host_api::dictionary_words(
                 &options,
                 request.dictionary.into(),
@@ -418,7 +496,8 @@ impl MsimeServer {
         let edits: Vec<WordEdit> = request.edits.into_iter().map(Into::into).collect();
         let outcome = blocking(move || {
             let _guard = guard;
-            let options = DictionaryOptions::from_host_document(config.read_options()?)?;
+            let _shared = claim_shared_write(&config)?;
+            let options = DictionaryOptions::from_host_document(config.read_host_options()?)?;
             Ok(apply_edits(
                 &options,
                 &edits,
@@ -461,7 +540,8 @@ impl MsimeServer {
         let new_words = request.new_words();
         let result = blocking(move || {
             let _guard = guard;
-            let options = DictionaryOptions::from_host_document(config.read_options()?)?;
+            let _shared = claim_shared_write(&config)?;
+            let options = DictionaryOptions::from_host_document(config.read_host_options()?)?;
             let request_id = msime_client_core::uuid::Uuid::new_v4().simple().to_string();
             let mut hosts = QuiescedHosts::new(Some(options.user_data()), || {});
             hosts.run(|| {
@@ -493,7 +573,7 @@ impl MsimeServer {
         let limit = request.limit.unwrap_or(words::DEFAULT_LOOKUP);
         let config = self.config.clone();
         blocking(move || {
-            let options = DictionaryOptions::from_host_document(config.read_options()?)?;
+            let options = DictionaryOptions::from_host_document(config.read_host_options()?)?;
             let candidates = msime_host_api::lookup_candidates(
                 &options,
                 request.scheme.map(Into::into),
@@ -509,11 +589,20 @@ impl MsimeServer {
 }
 
 #[tool_handler(router = self.tool_router)]
+#[prompt_handler(router = self.prompt_router)]
 impl ServerHandler for MsimeServer {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(Implementation::new("msime", env!("CARGO_PKG_VERSION")))
-            .with_instructions(INSTRUCTIONS)
+        ServerConfig::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_prompts()
+                .build(),
+        )
+        .with_server_info(Implementation::new(
+            self.config.server_name(),
+            env!("MSIME_APP_VERSION"),
+        ))
+        .with_instructions(INSTRUCTIONS)
     }
 }
 
@@ -539,6 +628,32 @@ impl MsimeServer {
         *last = Some(now);
         Ok(guard)
     }
+}
+
+/// Space writes across processes as `claim_write` spaces them within one: each `msime-mcp call` is a process of its own, and a server may run beside it. The returned file holds the lock for the whole write, so two processes never overlap on a check-then-write edit either. Waits for a write another process is running, then refuses when that one began less than the interval ago.
+fn claim_shared_write(config: &Config) -> Result<File, String> {
+    let state_dir = config.state_dir(&config.read_options()?)?;
+    let mut file = file_lock::open_private_lock_file(state_dir.join(WRITE_LOCK))
+        .map_err(|_| "cannot open the write lock in the state directory")?;
+    file_lock::exclusive(&file).map_err(|_| "cannot take the write lock")?;
+    let bytes = crate::bounded::read(&file, WRITE_LOCK_READ_LIMIT)
+        .map_err(|_| "cannot read the write lock")?;
+    let text = std::str::from_utf8(&bytes).map_err(|_| "cannot read the write lock")?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| "the system clock is before 1970")?
+        .as_millis();
+    // A time ahead of the clock is a clock set back, not a recent write.
+    if let Ok(previous) = text.trim().parse::<u128>() {
+        if previous <= now && now - previous < WRITE_INTERVAL.as_millis() {
+            return Err("writes are limited to one a second; try again shortly".into());
+        }
+    }
+    file.set_len(0)
+        .and_then(|()| file.seek(SeekFrom::Start(0)))
+        .and_then(|_| file.write_all(now.to_string().as_bytes()))
+        .map_err(|_| "cannot record the write")?;
+    Ok(file)
 }
 
 /// Clears the write-in-progress flag when the write it covers ends, however it ends.
@@ -618,6 +733,7 @@ mod tests {
             [
                 "get_preferences",
                 "get_typing_statistics",
+                "list_candidate_skins",
                 "list_quick_phrases",
                 "read_diagnostic_log",
                 "set_diagnostic_log"
@@ -626,9 +742,11 @@ mod tests {
         assert_eq!(
             names(&server(true)),
             [
+                "create_candidate_skin",
                 "edit_quick_phrases",
                 "get_preferences",
                 "get_typing_statistics",
+                "list_candidate_skins",
                 "list_quick_phrases",
                 "read_diagnostic_log",
                 "set_diagnostic_log",
@@ -640,6 +758,7 @@ mod tests {
             [
                 "get_preferences",
                 "get_typing_statistics",
+                "list_candidate_skins",
                 "list_dictionary_words",
                 "list_quick_phrases",
                 "lookup_candidates",
@@ -650,11 +769,13 @@ mod tests {
         assert_eq!(
             names(&server_with(true, true)),
             [
+                "create_candidate_skin",
                 "edit_dictionary_words",
                 "edit_quick_phrases",
                 "get_preferences",
                 "get_typing_statistics",
                 "import_dictionary_words",
+                "list_candidate_skins",
                 "list_dictionary_words",
                 "list_quick_phrases",
                 "lookup_candidates",
@@ -683,6 +804,25 @@ mod tests {
         // The refusal did not take the slot.
         drop(guard);
         server.claim_write().unwrap();
+    }
+
+    #[test]
+    fn oversized_shared_write_lock_is_rejected() {
+        let directory = tempfile::tempdir().unwrap();
+        let options = directory.path().join("runtime-options.json");
+        std::fs::write(&options, b"{}").unwrap();
+        std::fs::write(directory.path().join(WRITE_LOCK), vec![b'x'; 129]).unwrap();
+        let config = Config {
+            options,
+            state_dir: Some(directory.path().to_owned()),
+            allow_write: true,
+            allow_dictionary_read: false,
+        };
+
+        assert_eq!(
+            claim_shared_write(&config).unwrap_err(),
+            "cannot read the write lock"
+        );
     }
 
     #[tokio::test]

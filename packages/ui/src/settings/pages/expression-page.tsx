@@ -1,37 +1,19 @@
-import * as settings from "../settings-style";
 import { useSettingsForm } from "../settings-form-context";
-import { SubPageEntries } from "./sub-page-entries";
-import { GroupList, Row, Select, Switch } from "../../core/platform-controls";
-import { FuzzyPinyinSection } from "../fuzzy-pinyin-section";
-import { MixedInputSection } from "../mixed-input-section";
-import { CandidateEnglishGlossSection } from "../candidate-english-gloss-section";
-import { EnglishSuggestionsSection } from "../english-suggestions-section";
+import { createSettingsDraftActions } from "../settings-draft-actions";
+import { GroupList } from "../../core/platform-controls";
+import { InputLanguageOptionsSection } from "../input-language-options-section";
 import { PunctuationSection } from "../punctuation-section";
-import { NiuTransSection } from "../niutrans-section";
-import { TencentTranslationSection } from "../tencent-translation-section";
-import { CustomTranslationsSection } from "../custom-translations-section";
-import { CustomTranslationSection } from "../custom-translation-section";
-import { LinuxTencentCredentialsSection } from "../linux-tencent-credentials-section";
-import { CandidateTranslationOptionsSection } from "../candidate-translation-options-section";
-import { tencentCredentialIssue, translationEndpointIssue } from "../translation-validation";
-import { tencentSecretConfigured } from "../credential-utils";
-import { OnDeviceTranslationNotice } from "../on-device-translation-notice";
-import {
-  customTranslationCredentialTestConfig,
-  customTranslationCredentialTestDisabled,
-  niutransCredentialTestConfig,
-  niutransCredentialTestDisabled,
-  tencentTranslationCredentialTestConfig,
-  tencentTranslationCredentialTestDisabled,
-} from "../translation-credential-test-config";
+import { TranslationSettingsContent } from "../translation-settings-content";
+import { createTranslationSettingsBindings } from "../translation-settings-bindings";
+import { MobileInputAiNotice } from "../mobile-input-ai-notice";
+import { SettingsPageFieldset } from "../settings-page-fieldset";
 
 /**
- * The 表达 page: how what is typed comes out -- punctuation, spelling tolerance, the candidates in other languages and the mixed-in English, emoji and kaomoji -- and the AI features that rewrite it, which open as pages of their own from here.
+ * 标点与翻译页：打出来的内容以什么形式出现——标点、其他语言的候选与释义、翻译服务。混入的英文与表情颜文字是候选来源，模糊音改的是拼音怎么解析，两者都在输入页；AI 功能在「工具」组的「AI 辅助」页。
  */
 export function ExpressionSettingsPage() {
   const {
     client,
-    confirm,
     linuxPlatform,
     androidPlatform,
     iosPlatform,
@@ -44,19 +26,10 @@ export function ExpressionSettingsPage() {
     setDraft,
     busy,
     page,
-    customTranslationsText,
-    setCustomTranslationsText,
-    customTranslationsNotice,
-    customTranslationsPlaceholder,
-    customTranslationsBusy,
-    customTranslationsSummary,
     providerCredentials,
     tencentCredentialInput,
-    setTencentCredentialInput,
+    updateTencentCredentialInput,
     providerCredentialBusy,
-    saveCustomTranslations,
-    mixedInput,
-    fuzzyPinyin,
     candidateTranslations,
     candidateEnglishGloss,
     englishSuggestions,
@@ -76,287 +49,68 @@ export function ExpressionSettingsPage() {
     credentialTestControl,
     selectPage,
   } = useSettingsForm();
-  const translationControlsDisabled = !candidateTranslations;
-  const tencentIssue = tencentCredentialIssue(
-    tencentTranslation.secret_id,
-    tencentTranslation.secret_key,
-    tencentTranslation.region,
-  );
+  const { onPreferencesChange } = createSettingsDraftActions({ setDraft });
+  const translation = createTranslationSettingsBindings({
+    grouped: true,
+    client,
+    candidateTranslations,
+    linux: linuxPlatform,
+    windows: windowsPlatform,
+    macos: macosPlatform,
+    customTranslation,
+    tencentTranslation,
+    niutrans,
+    translationProvider,
+    providerCredentials,
+    tencentCredentialInput,
+    updateTencentCredentialInput,
+    providerCredentialBusy,
+    providerCredentialMessages,
+    runProviderCredential,
+    credentialTestControl,
+    onPreferencesChange,
+    setTranslationProvider,
+    android: androidPlatform,
+    ios: iosPlatform,
+    harmony: harmonyPlatform,
+    translationAccount: draft.translation_account ?? false,
+    translationTargetLanguage,
+    translationSecondaryLanguage: draft.translation_secondary_language,
+    candidateGlossLanguagesEnabled,
+    visibleTranslationLanguages,
+    visibleSecondaryLanguages,
+    onDeviceMissingLanguages,
+    openSettings: client.onDeviceTranslation?.openSettings,
+    onError: setError,
+  });
   return (
-    <fieldset disabled={busy} hidden={page !== "expression"} aria-label="表达">
-      <div className={settings.groups}>
-        <GroupList title="标点">
-          <PunctuationSection
-            preferences={draft}
-            showCharacterWidth={false}
-            onChange={(patch) => setDraft({ ...draft, ...patch })}
-          />
-        </GroupList>
-        {client.fuzzyPinyin && (
-          <GroupList title="拼写纠错">
-            <FuzzyPinyinSection
-              preferences={fuzzyPinyin}
-              onChange={(fuzzy_pinyin) => setDraft({ ...draft, fuzzy_pinyin })}
-              confirm={confirm}
-            />
-          </GroupList>
-        )}
-        <GroupList title="多语言候选">
-          <MixedInputSection
-            preferences={mixedInput}
-            onChange={(mixed_input) => setDraft({ ...draft, mixed_input })}
-          />
-          {client.candidateEnglishGloss && (
-            <CandidateEnglishGlossSection
-              value={candidateEnglishGloss}
-              onChange={(checked) => setDraft({ ...draft, candidate_english_gloss: checked })}
-            />
-          )}
-          {showEnglishSuggestions && (
-            <EnglishSuggestionsSection
-              value={englishSuggestions}
-              onChange={(checked) => setDraft({ ...draft, english_suggestions: checked })}
-            />
-          )}
-        </GroupList>
-        <GroupList title="候选词翻译">
-          <CandidateTranslationOptionsSection
-            enabled={candidateTranslations}
-            targetLanguage={translationTargetLanguage}
-            secondaryLanguage={draft.translation_secondary_language ?? ""}
-            candidateGlossLanguagesEnabled={candidateGlossLanguagesEnabled}
-            visibleLanguages={visibleTranslationLanguages}
-            visibleSecondaryLanguages={visibleSecondaryLanguages}
-            showSecondaryLanguage={
-              androidPlatform || iosPlatform || macosPlatform || harmonyPlatform
-            }
-            showAccountTranslation={androidPlatform}
-            accountTranslation={draft.translation_account ?? false}
-            onEnabledChange={(candidate_translations) =>
-              setDraft({ ...draft, candidate_translations })
-            }
-            onTargetLanguageChange={(translation_target_language) =>
-              setDraft({ ...draft, translation_target_language })
-            }
-            onSecondaryLanguageChange={(value) =>
-              setDraft({
-                ...draft,
-                translation_secondary_language: value === "" ? null : value,
-              })
-            }
-            onAccountTranslationChange={(enabled) =>
-              enabled
-                ? setTranslationProvider("account")
-                : setDraft({ ...draft, translation_account: undefined })
-            }
-          />
-          {onDeviceMissingLanguages.length > 0 && (
-            <div className={settings.groupBlock}>
-              <OnDeviceTranslationNotice
-                languages={onDeviceMissingLanguages.map(([, label]) => label)}
-                openSettings={client.onDeviceTranslation?.openSettings}
-                onError={setError}
-              />
-            </div>
-          )}
-          {!androidPlatform && (
-            <div role="group" aria-label="候选词翻译服务" className={settings.rowStack}>
-              <Row title="翻译服务">
-                <Select
-                  aria-label="候选词翻译服务"
-                  disabled={translationControlsDisabled}
-                  value={translationProvider}
-                  onChange={(event) =>
-                    setTranslationProvider(
-                      event.target.value as "none" | "custom" | "tencent" | "niutrans" | "account",
-                    )
-                  }
-                >
-                  <option value="none">关闭</option>
-                  <option value="tencent">腾讯云机器翻译</option>
-                  <option value="niutrans">小牛翻译（NiuTrans）</option>
-                  <option value="custom">自定义 DeepLX 兼容服务</option>
-                  {(macosPlatform || linuxPlatform) && (
-                    <option value="account">水杉账号（候选词发送到 api.msime.app）</option>
-                  )}
-                </Select>
-              </Row>
-            </div>
-          )}
-        </GroupList>
-        {!androidPlatform && (
-          <>
-            <GroupList title="小牛翻译">
-              <NiuTransSection
-                enabled={niutrans.enabled}
-                available={candidateTranslations}
-                appId={niutrans.app_id}
-                apiKey={niutrans.apikey}
-                onToggle={(enabled) => setTranslationProvider(enabled ? "niutrans" : "none")}
-                onAppIdChange={(app_id) =>
-                  setDraft({ ...draft, niutrans: { ...niutrans, app_id } })
-                }
-                onApiKeyChange={(apikey) =>
-                  setDraft({ ...draft, niutrans: { ...niutrans, apikey } })
-                }
-              >
-                {credentialTestControl(
-                  "translation.niutrans",
-                  "测试 NiuTrans 配置",
-                  niutransCredentialTestConfig(niutrans),
-                  niutransCredentialTestDisabled(candidateTranslations, niutrans),
-                )}
-              </NiuTransSection>
-            </GroupList>
-            <GroupList title="腾讯云机器翻译">
-              {linuxPlatform ? (
-                <LinuxTencentCredentialsSection
-                  available={Boolean(client.providerCredentials)}
-                  status={
-                    providerCredentials
-                      ? {
-                          tencent: providerCredentials.tencent,
-                          tencentInvalid: providerCredentials.tencentInvalid,
-                        }
-                      : undefined
-                  }
-                  input={tencentCredentialInput}
-                  busy={providerCredentialBusy === "tencent"}
-                  message={providerCredentialMessages.tencent}
-                  onInputChange={(patch) =>
-                    setTencentCredentialInput({ ...tencentCredentialInput, ...patch })
-                  }
-                  onSave={(credential) =>
-                    void runProviderCredential(
-                      "tencent",
-                      (credentials) => credentials.saveTencent(credential),
-                      "凭据已保存，provider 服务下次请求时生效。",
-                    )
-                  }
-                  onClear={() =>
-                    void runProviderCredential(
-                      "tencent",
-                      (credentials) => credentials.clearTencent(),
-                      "凭据已清除。",
-                    )
-                  }
-                >
-                  {translationProvider === "tencent" &&
-                    credentialTestControl(
-                      "translation.tencent",
-                      "测试腾讯云翻译配置",
-                      {},
-                      translationControlsDisabled,
-                    )}
-                </LinuxTencentCredentialsSection>
-              ) : (
-                <TencentTranslationSection
-                  enabled={tencentTranslation.enabled}
-                  available={candidateTranslations}
-                  secretId={tencentTranslation.secret_id}
-                  secretKey={tencentTranslation.secret_key}
-                  region={tencentTranslation.region}
-                  credentialIssue={tencentIssue}
-                  showMissingCredentialsWarning={
-                    !customTranslation.enabled &&
-                    !tencentSecretConfigured(tencentTranslation.secret_id) &&
-                    !tencentSecretConfigured(tencentTranslation.secret_key)
-                  }
-                  onToggle={(enabled) =>
-                    setDraft({
-                      ...draft,
-                      tencent_tmt: { ...tencentTranslation, enabled },
-                      // Turning on a service of the user's own ends the account choice, so the account never keeps receiving candidates behind a visible selection.
-                      ...(enabled ? { translation_account: undefined } : {}),
-                    })
-                  }
-                  onSecretIdChange={(secret_id) =>
-                    setDraft({ ...draft, tencent_tmt: { ...tencentTranslation, secret_id } })
-                  }
-                  onSecretKeyChange={(secret_key) =>
-                    setDraft({ ...draft, tencent_tmt: { ...tencentTranslation, secret_key } })
-                  }
-                  onRegionChange={(region) =>
-                    setDraft({ ...draft, tencent_tmt: { ...tencentTranslation, region } })
-                  }
-                >
-                  {(windowsPlatform || macosPlatform) &&
-                    credentialTestControl(
-                      "translation.tencent",
-                      "测试腾讯云翻译配置",
-                      tencentTranslationCredentialTestConfig(tencentTranslation),
-                      tencentTranslationCredentialTestDisabled(candidateTranslations, tencentIssue),
-                    )}
-                </TencentTranslationSection>
-              )}
-            </GroupList>
-            <GroupList title="自定义服务">
-              {client.customTranslations && (
-                <CustomTranslationsSection
-                  mobile={mobilePlatform}
-                  value={customTranslationsText}
-                  placeholder={customTranslationsPlaceholder}
-                  notice={customTranslationsNotice}
-                  summary={customTranslationsSummary}
-                  busy={customTranslationsBusy}
-                  onChange={setCustomTranslationsText}
-                  onSave={() => void saveCustomTranslations()}
-                />
-              )}
-              <CustomTranslationSection
-                enabled={customTranslation.enabled}
-                available={candidateTranslations}
-                endpoint={customTranslation.endpoint}
-                apiKey={customTranslation.api_key}
-                endpointIssue={translationEndpointIssue(customTranslation.endpoint)}
-                onToggle={(enabled) =>
-                  setDraft({
-                    ...draft,
-                    custom_translation: { ...customTranslation, enabled },
-                    // Same rule as the Tencent switch: a service of the user's own ends the account choice.
-                    ...(enabled ? { translation_account: undefined } : {}),
-                  })
-                }
-                onEndpointChange={(endpoint) =>
-                  setDraft({ ...draft, custom_translation: { ...customTranslation, endpoint } })
-                }
-                onApiKeyChange={(api_key) =>
-                  setDraft({ ...draft, custom_translation: { ...customTranslation, api_key } })
-                }
-              >
-                {credentialTestControl(
-                  "translation.custom",
-                  "测试自定义翻译配置",
-                  customTranslationCredentialTestConfig(customTranslation),
-                  customTranslationCredentialTestDisabled(
-                    candidateTranslations,
-                    translationEndpointIssue(customTranslation.endpoint),
-                  ),
-                )}
-              </CustomTranslationSection>
-            </GroupList>
-          </>
-        )}
-        {mobilePlatform && (
-          <GroupList title="高情商回复">
-            <Row
-              title="高情商回复"
-              description="复制对方的话，切换到高情商回复键盘，点“粘贴”后选择回复风格。支持帮你回、帮润色和换一句，点选回复插入聊天输入框。"
-            >
-              <button type="button" className="secondary" onClick={() => selectPage("ai")}>
-                配置键盘 AI
-              </button>
-            </Row>
-          </GroupList>
-        )}
-        <SubPageEntries
-          title="AI"
-          pages={[
-            { id: "ai", description: "联想、回复与润色使用的模型服务" },
-            { id: "chat", description: "与 AI 对话，结果可以直接用于输入" },
-          ]}
+    <SettingsPageFieldset disabled={busy} hidden={page !== "expression"} ariaLabel="标点与翻译">
+      <GroupList title="标点">
+        <PunctuationSection
+          preferences={draft}
+          showCharacterWidth={false}
+          onChange={onPreferencesChange}
         />
-      </div>
-    </fieldset>
+      </GroupList>
+      <InputLanguageOptionsSection
+        grouped
+        includeCandidateControls
+        showCandidateEnglishGloss={client.candidateEnglishGloss}
+        candidateEnglishGloss={candidateEnglishGloss}
+        onCandidateEnglishGlossChange={(candidate_english_gloss) =>
+          onPreferencesChange({ candidate_english_gloss })
+        }
+        showEnglishSuggestions={showEnglishSuggestions}
+        englishSuggestions={englishSuggestions}
+        onEnglishSuggestionsChange={(english_suggestions) =>
+          onPreferencesChange({ english_suggestions })
+        }
+      />
+      <TranslationSettingsContent
+        candidate={translation.candidate}
+        providers={translation.providers}
+      />
+      {mobilePlatform && <MobileInputAiNotice onOpenAi={() => selectPage("ai")} />}
+    </SettingsPageFieldset>
   );
 }

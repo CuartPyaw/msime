@@ -100,6 +100,31 @@ fn prefix_groups_list_a_word_once() {
     assert_eq!(words(&rows), ["你", "拟"]);
 }
 
+#[test]
+fn prefix_groups_reserve_their_candidate_rows() {
+    let mut sql = String::from(
+        "CREATE TABLE tbl_1_n(key TEXT, jp TEXT, value TEXT, weight INTEGER);CREATE TABLE tbl_2_n(key TEXT, jp TEXT, value TEXT, weight INTEGER);",
+    );
+    for index in 0..10 {
+        sql.push_str(&format!(
+            "INSERT INTO tbl_1_n VALUES('ni','n','单{index}',{});INSERT INTO tbl_2_n VALUES('ni''hao','nh','双{index}',{});",
+            1000 - index,
+            2000 - index
+        ));
+    }
+    let fixture = Fixture::new(&sql);
+    let mut dictionary = super::dictionary::ShuangpinDictionary::new(
+        profile(ShuangpinProfileKind::Xiaohe),
+        &fixture.paths,
+    );
+
+    let segmentation = super::query::segment_input("nihcma", profile(ShuangpinProfileKind::Xiaohe));
+    let rows = dictionary.generate_series("nihcma", &segmentation, "");
+
+    assert_eq!(rows.len(), 20, "{rows:?}");
+    assert_eq!(rows.capacity(), 20);
+}
+
 const TRAILING_HELPCODE: &str = "BEGIN;CREATE TABLE tbl_1_s(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_1_s VALUES('shi', 's', '使', 200);INSERT INTO tbl_1_s VALUES('shi', 's', '是', 100);COMMIT;";
 
 /// Xiaohe reads `ui` as shi, so `uiu` is a complete syllable plus the single helpcode `u`, while `ui'u` is the same syllable followed by a user-delimited segment (test_shuangpin.cpp:129-158, golden sp_xiaohe_trailing_helpcode).
@@ -171,6 +196,18 @@ fn single_and_double_helpcodes_filter_the_base() {
     assert!(!engine
         .query(&request("nihcAE", false), Some(&codes))
         .is_empty());
+}
+
+#[test]
+fn single_helpcode_capacity_includes_whole_and_unmatched_rows() {
+    let fixture = Fixture::new(&format!(
+        "CREATE TABLE tbl_1_n(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_1_n VALUES('ni','n','前缀',50);{HELPCODE_FILTER}"
+    ));
+    let codes = helpcode_filter_keymap();
+    let mut engine = fixture.engine(ShuangpinProfileKind::Xiaohe);
+
+    let candidates = engine.query(&request("nihcc", true), Some(&codes));
+    assert!(candidates.capacity() >= 11);
 }
 
 #[test]
@@ -278,6 +315,30 @@ fn fuzzy_rows_take_the_typed_keys() {
     assert_eq!(words(&fuzzy), ["字", "之"]);
     assert_eq!(fuzzy[1].pinyin, "zi");
     assert!(fuzzy[1].fuzzy);
+}
+
+#[test]
+fn fuzzy_rows_reserve_unique_results_before_appending() {
+    let mut sql = String::from(
+        "CREATE TABLE tbl_1_z(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_1_z VALUES('zi','z','精确',100);",
+    );
+    for index in 0..20 {
+        sql.push_str(&format!(
+            "INSERT INTO tbl_1_z VALUES('zhi','z','模糊{index:02}',{});",
+            99 - index
+        ));
+    }
+    let fixture = Fixture::new(&sql);
+    let mut engine = fixture.engine(ShuangpinProfileKind::Xiaohe);
+    let mut typed = request("zi", false);
+    typed.fuzzy_pinyin = FuzzyPinyinOptions {
+        rules: fuzzy_rule::Z_ZH,
+    };
+
+    let fuzzy = engine.query(&typed, None);
+
+    assert_eq!(fuzzy.len(), 21);
+    assert_eq!(fuzzy.capacity(), fuzzy.len());
 }
 
 /// A fixed row missing from the list is looked up by its canonical quanpin key (user_dictionary positions).
@@ -437,4 +498,58 @@ fn a_loaded_model_keys_the_series_cache_by_context() {
     assert!(!words(&engine.query(&typed, None)).contains(&"甲"));
     typed.rescoring_context = "上文".into();
     assert!(words(&engine.query(&typed, None)).contains(&"甲"));
+}
+
+/// SD:89-99: series answers scored with the personal model are dropped once the tables changed under it. The version is compared only after reading the model, which is what reloads it; a bare version read would keep the stale answer.
+#[test]
+fn a_changed_personal_model_drops_the_scored_series() {
+    use crate::user_dictionary::ngram_store::PersonalNgramStore;
+    let fixture = Fixture::new(
+        "CREATE TABLE tbl_1_n(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_1_n VALUES('ni','n','你',10000),('ni','n','拟',9000);CREATE TABLE tbl_1_h(key TEXT, jp TEXT, value TEXT, weight INTEGER);INSERT INTO tbl_1_h VALUES('hao','h','好',10000),('hao','h','号',9000);",
+    );
+    let xiaohe = profile(ShuangpinProfileKind::Xiaohe);
+    let mut dictionary = super::dictionary::ShuangpinDictionary::new(xiaohe, &fixture.paths);
+    let segmentation = super::utils::pinyin_segmentation("nihc", xiaohe);
+    let before = dictionary.generate_series("nihc", &segmentation, "");
+    let store = PersonalNgramStore::for_journal(&fixture.paths.user(assets::USER_JOURNAL));
+    let version = store.version();
+    let journal = Connection::open(fixture.paths.user(assets::USER_JOURNAL)).unwrap();
+    crate::user_dictionary::journal::ensure_schema(&journal).unwrap();
+    journal
+        .execute_batch("INSERT INTO personal_bigram VALUES(char(1),'拟',400),('拟','号',400);INSERT INTO personal_trigram VALUES(char(1),'拟','号',400);")
+        .unwrap();
+    store.invalidate_for_tests();
+    let after = dictionary.generate_series("nihc", &segmentation, "");
+    assert!(
+        store.version() > version,
+        "the query did not reload the model"
+    );
+    assert!(
+        words(&after).contains(&"拟号") && !words(&before).contains(&"拟号"),
+        "the answer scored with the old model was kept: {:?} then {:?}",
+        words(&before),
+        words(&after)
+    );
+}
+
+/// neural-association.patch:3080-3095: an association change resets the caches, so a cached online row does not survive a lattice off/on round trip; quanpin behaves the same (`association_switch_resets_the_series_cache`).
+#[test]
+fn association_switch_resets_the_series_cache() {
+    let fixture = Fixture::new(HELPCODE_FILTER);
+    let mut engine = fixture.engine(ShuangpinProfileKind::Xiaohe);
+    let mut typed = request("nihc", false);
+    engine.query(&typed, None);
+    assert!(engine.insert_online_words(
+        &typed,
+        &["甲".to_string()],
+        CandidateSource::CloudSuggestion
+    ));
+    assert!(words(&engine.query(&typed, None)).contains(&"甲"));
+    typed.sentence_association = SentenceAssociationOptions {
+        word_lattice: false,
+        ..SentenceAssociationOptions::default()
+    };
+    assert!(!words(&engine.query(&typed, None)).contains(&"甲"));
+    typed.sentence_association = SentenceAssociationOptions::default();
+    assert!(!words(&engine.query(&typed, None)).contains(&"甲"));
 }

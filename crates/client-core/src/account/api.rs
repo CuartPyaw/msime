@@ -13,6 +13,20 @@ pub trait AccountApi: Send + Sync + 'static {
     fn logout(&self, access_token: &str, all: bool) -> Result<(), AccountError>;
     fn delete_account(&self, access_token: &str) -> Result<(), AccountError>;
 
+    /// Replaces the user's uploaded avatar with `image`, a PNG or JPEG already read by [`read_account_avatar_upload`].
+    fn upload_avatar(
+        &self,
+        _image: &AccountAvatarImage,
+        _access_token: &str,
+    ) -> Result<(), AccountError> {
+        Err(AccountError::Unavailable)
+    }
+
+    /// Removes the user's uploaded avatar; the Google picture, if any, shows again.
+    fn delete_avatar(&self, _access_token: &str) -> Result<(), AccountError> {
+        Err(AccountError::Unavailable)
+    }
+
     fn chat_models(&self, _access_token: &str) -> Result<AccountChatModels, AccountError> {
         Err(AccountError::Unavailable)
     }
@@ -253,4 +267,20 @@ pub trait AccountSessionStorage: Send + Sync + 'static {
     fn load(&self) -> Result<Option<SavedAccountSession>, AccountError>;
     fn save(&self, session: &SavedAccountSession) -> Result<(), AccountError>;
     fn clear(&self) -> Result<(), AccountError>;
+
+    /// Whether other processes read and write this store. The backend rotates the refresh token on every refresh and revokes the whole session when a used one is presented again, so a session that holds a shared store in memory would refresh from a token another process already spent. A shared store is therefore read on every access, and refreshed only under [`Self::with_refresh_lock`].
+    fn shared_across_processes(&self) -> bool {
+        false
+    }
+
+    /// Runs `body` holding the lock every process sharing this store takes around a refresh, a sign-in and a sign-out, so none of them can rotate the session between another's read and its save. A store no other process opens needs no lock.
+    fn with_refresh_lock<T>(
+        &self,
+        body: impl FnOnce() -> Result<T, AccountError>,
+    ) -> Result<T, AccountError>
+    where
+        Self: Sized,
+    {
+        body()
+    }
 }

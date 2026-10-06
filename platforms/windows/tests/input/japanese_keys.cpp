@@ -91,4 +91,32 @@ int main() {
     assert(japanese.editing().empty());
     assert(japanese.session.view().at("generation") != generation);
   }
+
+  // In V mode '-' is an operator the Engine spells, so minus/equals word-to-character must leave it to the composition; in a pinyin composition it still takes a character.
+  {
+    auto pinyin = test_host_options(root);
+    pinyin["preferences"]["scheme"] = "quanpin";
+    pinyin["preferences"]["local_modes"] = {
+        {"unicode", true},          {"date_time", true},         {"quick_phrase", true},
+        {"emoji", true},            {"kaomoji", true},           {"super_jianpin", true},
+        {"temporary_english", true}, {"temporary_japanese", true}, {"expression", true}};
+    Fixture expression(pinyin.dump());
+    const auto opened = expression.press('V', u'V', WordCharacterBinding::MinusEqual, 1);
+    assert(opened && !opened->committed_text);
+    assert(expression.session.view().at("local_mode") == "expression");
+    assert(expression.press('5', u'5', WordCharacterBinding::MinusEqual));
+    const auto minus = expression.press(0xBD, u'-', WordCharacterBinding::MinusEqual);
+    assert(minus && !minus->committed_text);
+    assert(expression.editing() == "V5-");
+    assert(expression.press('2', u'2', WordCharacterBinding::MinusEqual));
+    assert(expression.editing() == "V5-2");
+
+    Fixture word(pinyin.dump());
+    assert(word.press('N', u'n', WordCharacterBinding::MinusEqual));
+    assert(word.press('I', u'i', WordCharacterBinding::MinusEqual));
+    // This fixture has no dictionary, so the highlighted row the key takes a character from is empty; the key still ends the composition with a commit.
+    const auto first = word.press(0xBD, u'-', WordCharacterBinding::MinusEqual);
+    assert(first && first->committed_text);
+    assert(word.editing().empty());
+  }
 }

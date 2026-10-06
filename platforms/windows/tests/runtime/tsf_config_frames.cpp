@@ -4,6 +4,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 using namespace msime::windows;
 namespace {
@@ -41,7 +42,7 @@ int main() {
     auto frames = tsf_config_frames(config);
     // Every setting the TIP consumes gets a frame; it kept compiled defaults
     // because the Server encoded none of them.
-    require(frames.size() == 8);
+    require(frames.size() == 10);
     for (const auto &frame : frames)
       require(frame.size() == sizeof(FanyImeNamedpipeDataToTsfWorkerThread));
 
@@ -54,7 +55,9 @@ int main() {
         FanyImeWorkerReplyType::MicrosoftShuangpinChanged,
         FanyImeWorkerReplyType::InputModeChanged,
         FanyImeWorkerReplyType::TsfDiagnosticLogChanged,
-        FanyImeWorkerReplyType::PunctuationLockChanged};
+        FanyImeWorkerReplyType::PunctuationLockChanged,
+        FanyImeWorkerReplyType::LocalModeTriggersChanged,
+        FanyImeWorkerReplyType::DedicatedEnglishChanged};
     for (size_t i = 0; i < frames.size(); ++i)
       require(frame_type(frames[i]) == expected[i]);
 
@@ -71,6 +74,22 @@ int main() {
     require(frame_text(tsf_config_frames(config)[2]) == L"1");
     require(frame_text(frames[3]) == L"1"); // paired punctuation on
     require(frame_text(frames[4]) == L"1"); // Microsoft shuangpin on
+
+    // 输入模式帧给出方案所属的族："0" 全拼、双拼或五笔，"1" 日文，"2" 韩文，"3" 粤拼，"4" 注音，"5" 越南文，"6" 藏文，"7" 笔画。
+    require(frame_text(frames[5]) == L"0");
+    const std::pair<msime::windows::scheme::InputMode, const wchar_t *> modes[] = {
+        {msime::windows::scheme::InputMode::Japanese, L"1"},
+        {msime::windows::scheme::InputMode::Korean, L"2"},
+        {msime::windows::scheme::InputMode::Cantonese, L"3"},
+        {msime::windows::scheme::InputMode::Zhuyin, L"4"},
+        {msime::windows::scheme::InputMode::Vietnamese, L"5"},
+        {msime::windows::scheme::InputMode::Tibetan, L"6"},
+        {msime::windows::scheme::InputMode::Stroke, L"7"},
+        {msime::windows::scheme::InputMode::Chinese, L"0"}};
+    for (const auto &[mode, code] : modes) {
+      config.input_mode = mode;
+      require(frame_text(tsf_config_frames(config)[5]) == code);
+    }
 
     // The preedit style rides along with the paging frame after a '|'; there is
     // no separate message type for it, which is why it stayed stuck at raw.
@@ -112,6 +131,33 @@ int main() {
       config.punctuation_lock = lock;
       require(frame_text(tsf_config_frames(config)[7]) == L"0|s0d0l1");
     }
+
+    // The V, "/" and "@" switches travel as one frame of three flags in that order, all off until the Server says otherwise, so a TIP never routes a mode's keys the Engine will not open.
+    require(frame_text(tsf_config_frames(TsfLocalConfig{})[8]) == L"000");
+    config.expression_mode = true;
+    require(frame_text(tsf_config_frames(config)[8]) == L"100");
+    config.expression_mode = false;
+    config.command_mode = true;
+    require(frame_text(tsf_config_frames(config)[8]) == L"010");
+    config.command_mode = false;
+    config.mention_mode = true;
+    require(frame_text(tsf_config_frames(config)[8]) == L"001");
+    config.expression_mode = config.command_mode = true;
+    require(frame_text(tsf_config_frames(config)[8]) == L"111");
+    // In the Engine's own English mode V is a letter, so the TIP is told the V mode is off and a word starting with V keeps digit selection and paging. "/" and "@" go off too: the Engine opens neither there, so a "/" the TIP composed would never reach it.
+    config.dedicated_english = true;
+    require(frame_text(tsf_config_frames(config)[8]) == L"000");
+    config.dedicated_english = false;
+    require(frame_text(tsf_config_frames(config)[8]) == L"111");
+    // The TIP drops every type above MaxKnown, so the new type has to be inside it.
+    require(FanyImeWorkerReplyType::LocalModeTriggersChanged <=
+            FanyImeWorkerReplyType::MaxKnown);
+    // The Engine's own English mode travels on its own frame too, after every older one: the TIP keeps reporting Chinese there, and under Stroke it would otherwise hand an idle non-stroke letter (the 'a' of "apple") to the application instead of the Engine.
+    require(frame_text(tsf_config_frames(TsfLocalConfig{})[9]) == L"0");
+    config.dedicated_english = true;
+    require(frame_text(tsf_config_frames(config)[9]) == L"1");
+    config.dedicated_english = false;
+    require(FanyImeWorkerReplyType::DedicatedEnglishChanged == FanyImeWorkerReplyType::MaxKnown);
 
     // Caps Lock travels on its own frame rather than in the configuration set:
     // the Server owns the indicator because the TIP only sampled GetKeyState at

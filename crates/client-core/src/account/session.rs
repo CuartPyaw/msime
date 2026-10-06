@@ -1,8 +1,10 @@
 //! `BackendAccountSession`: token refresh, single-flight, and the saved session
 //! the host persists.
 
+use super::google::*;
 use super::validate::*;
 use super::*;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 struct SessionState {
     loaded: bool,
@@ -47,6 +49,8 @@ pub struct BackendAccountSession<A: AccountApi, S: AccountSessionStorage> {
     api: A,
     storage: S,
     state: Mutex<SessionState>,
+    /// Cancel flag of the Google browser sign-in in progress, if any. It lives outside `state` because the sign-in waits on the browser for minutes without holding the session lock.
+    google_sign_in: Mutex<Option<Arc<AtomicBool>>>,
 }
 
 impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
@@ -60,6 +64,7 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
                 generation: 0,
                 refresh: None,
             }),
+            google_sign_in: Mutex::new(None),
         }
     }
 
@@ -85,16 +90,21 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
         Ok(next)
     }
 
+    /// A store other processes share is read every time: another process may have refreshed, signed out or switched accounts, and the copy held here would then be stale. A refresh from a stale copy presents a refresh token the backend has already rotated, and the backend answers that by revoking the session for every process.
     fn load_locked(&self, state: &mut SessionState) -> Result<(), AccountError> {
-        if !state.loaded {
-            let saved = self.storage.load()?;
-            if let Some(value) = &saved {
-                validate_saved_session(value)?;
-            }
-            state.saved = saved;
+        if !state.loaded || self.storage.shared_across_processes() {
+            state.saved = self.stored()?;
             state.loaded = true;
         }
         Ok(())
+    }
+
+    fn stored(&self) -> Result<Option<SavedAccountSession>, AccountError> {
+        let saved = self.storage.load()?;
+        if let Some(value) = &saved {
+            validate_saved_session(value)?;
+        }
+        Ok(saved)
     }
 
     pub fn status(&self) -> Result<Option<AccountUser>, AccountError> {
@@ -121,6 +131,16 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
         self.sign_in_validated(challenge, credential)
     }
 
+    /// Signs in the device's anonymous account: the subject is presented as the challenge target and the secret answers it. Only `anonymous::ensure_anonymous_account` holds those values.
+    pub(super) fn sign_in_anonymous(
+        &self,
+        subject: &str,
+        secret: &str,
+    ) -> Result<AccountUser, AccountError> {
+        let challenge = self.request_code("anonymous", subject)?;
+        self.sign_in_validated(&challenge.challenge_id, secret)
+    }
+
     /// Completes an Apple challenge using the identity token returned by the
     /// native AuthenticationServices flow. The token never crosses the UI
     /// boundary; platform hosts pass it directly into the session.
@@ -131,6 +151,102 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
     ) -> Result<AccountUser, AccountError> {
         validate_apple_login(challenge, credential)?;
         self.sign_in_validated(challenge, credential)
+    }
+
+    /// Completes a Google challenge with the authorization code the system browser delivered to the loopback redirect. The backend holds the PKCE verifier and the client secret and performs the exchange; this process only forwards the code.
+    pub fn sign_in_google(
+        &self,
+        challenge: &str,
+        credential: &str,
+    ) -> Result<AccountUser, AccountError> {
+        validate_google_login(challenge, credential)?;
+        self.sign_in_validated(challenge, credential)
+    }
+
+    /// Runs the desktop Google sign-in (RFC 8252 loopback redirect): binds a loopback listener, requests a challenge for its redirect URI, hands the backend's authorization URL to `open_browser`, waits for the redirect, and signs in with the returned code. `open_browser` receives a URL already checked to be a Google authorization URL for this listener. The wait lasts at most [`GOOGLE_SIGN_IN_TIMEOUT`] and ends early enough for the code to reach the backend before the challenge expires; [`Self::cancel_google_sign_in`] or starting another Google sign-in ends it with [`AccountError::Cancelled`].
+    pub fn sign_in_google_with_browser<F>(
+        &self,
+        open_browser: F,
+    ) -> Result<AccountUser, AccountError>
+    where
+        F: FnOnce(&str) -> Result<(), AccountError>,
+    {
+        self.sign_in_google_with_timeout(open_browser, GOOGLE_SIGN_IN_TIMEOUT)
+    }
+
+    pub(super) fn sign_in_google_with_timeout<F>(
+        &self,
+        open_browser: F,
+        timeout: Duration,
+    ) -> Result<AccountUser, AccountError>
+    where
+        F: FnOnce(&str) -> Result<(), AccountError>,
+    {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let previous = self
+            .google_sign_in
+            .lock()
+            .map_err(|_| AccountError::Unavailable)?
+            .replace(Arc::clone(&cancelled));
+        if let Some(previous) = previous {
+            previous.store(true, Ordering::SeqCst);
+        }
+        let result = self.run_google_sign_in(open_browser, timeout, &cancelled);
+        if let Ok(mut current) = self.google_sign_in.lock() {
+            if current
+                .as_ref()
+                .is_some_and(|flag| Arc::ptr_eq(flag, &cancelled))
+            {
+                *current = None;
+            }
+        }
+        result
+    }
+
+    /// Ends the Google browser sign-in in progress, which then returns [`AccountError::Cancelled`]. The browser tab cannot report that the user closed it, so the page offers this instead of leaving the user waiting for the timeout. Does nothing when no Google sign-in is running.
+    pub fn cancel_google_sign_in(&self) {
+        if let Ok(current) = self.google_sign_in.lock() {
+            if let Some(flag) = current.as_ref() {
+                flag.store(true, Ordering::SeqCst);
+            }
+        }
+    }
+
+    fn run_google_sign_in<F>(
+        &self,
+        open_browser: F,
+        timeout: Duration,
+        cancelled: &AtomicBool,
+    ) -> Result<AccountUser, AccountError>
+    where
+        F: FnOnce(&str) -> Result<(), AccountError>,
+    {
+        let requested = std::time::Instant::now();
+        let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .map_err(|_| AccountError::Unavailable)?;
+        let port = listener
+            .local_addr()
+            .map_err(|_| AccountError::Unavailable)?
+            .port();
+        let target = google_loopback_target(port);
+        let challenge = self.request_code("google", &target)?;
+        let url = challenge
+            .authorization_url
+            .as_deref()
+            .ok_or(AccountError::Unavailable)?;
+        let state = google_authorization_state(url, &target)?;
+        // The challenge clock started when the backend created it, so the wait is measured from before the request.
+        let window = google_callback_window(challenge.expires_in, timeout)
+            .ok_or(AccountError::Unavailable)?;
+        if cancelled.load(Ordering::SeqCst) {
+            return Err(AccountError::Cancelled);
+        }
+        open_browser(url)?;
+        let code = receive_google_callback(&listener, &state, requested + window, cancelled)?;
+        if cancelled.load(Ordering::SeqCst) {
+            return Err(AccountError::Cancelled);
+        }
+        self.sign_in_google(&challenge.challenge_id, &code)
     }
 
     fn sign_in_validated(
@@ -148,14 +264,16 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
         validate_tokens(&tokens)?;
         let value = saved_session(tokens)?;
         let user = value.tokens.user.clone();
-        let mut state = self.lock()?;
-        if state.generation != version {
-            return Err(AccountError::Cancelled);
-        }
-        self.storage.save(&value)?;
-        state.saved = Some(value);
-        state.loaded = true;
-        Ok(user)
+        self.storage.with_refresh_lock(|| {
+            let mut state = self.lock()?;
+            if state.generation != version {
+                return Err(AccountError::Cancelled);
+            }
+            self.storage.save(&value)?;
+            state.saved = Some(value);
+            state.loaded = true;
+            Ok(user)
+        })
     }
 
     pub fn access_token(&self, rejected_token: Option<&str>) -> Result<String, AccountError> {
@@ -183,35 +301,10 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
             (flight, version, refresh_token)
         };
 
-        let api_result = self.api.refresh(&refresh_token);
-        let result = {
-            let mut state = self.lock()?;
-            let result = if state.generation != version {
-                Err(AccountError::Cancelled)
-            } else {
-                match api_result {
-                    Ok(tokens) => {
-                        match validate_tokens(&tokens).and_then(|_| saved_session(tokens)) {
-                            Ok(value) => match self.storage.save(&value) {
-                                Ok(()) => {
-                                    let token = value.tokens.access_token.clone();
-                                    state.saved = Some(value);
-                                    state.loaded = true;
-                                    Ok(token)
-                                }
-                                Err(error) => Err(error),
-                            },
-                            Err(error) => Err(error),
-                        }
-                    }
-                    Err(AccountError::Unauthorized) => {
-                        state.saved = None;
-                        state.loaded = true;
-                        self.storage.clear().and(Err(AccountError::Unauthorized))
-                    }
-                    Err(error) => Err(error),
-                }
-            };
+        let result = self.storage.with_refresh_lock(|| {
+            self.refresh_holding_lock(&refresh_token, rejected_token, version)
+        });
+        if let Ok(mut state) = self.lock() {
             if state
                 .refresh
                 .as_ref()
@@ -219,10 +312,105 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
             {
                 state.refresh = None;
             }
-            result
-        };
+        }
         flight.finish(result.clone());
         result
+    }
+
+    /// Runs with the store's refresh lock held, so no other process sharing the store can rotate the session between the read below and the save after the refresh.
+    fn refresh_holding_lock(
+        &self,
+        expected: &str,
+        rejected_token: Option<&str>,
+        version: u64,
+    ) -> Result<String, AccountError> {
+        let shared = self.storage.shared_across_processes();
+        let mut refresh_token = expected.to_owned();
+        if shared {
+            let stored = self.stored()?;
+            let mut state = self.lock()?;
+            if state.generation != version {
+                return Err(AccountError::Cancelled);
+            }
+            match stored {
+                // Another process signed out while this one waited for the lock.
+                None => {
+                    state.saved = None;
+                    state.loaded = true;
+                    return Err(AccountError::Unauthorized);
+                }
+                // Another process refreshed while this one waited; refreshing from the token it already spent would revoke the session.
+                Some(stored) if stored.tokens.refresh_token != expected => {
+                    let usable = usable_session(&stored, rejected_token);
+                    let access_token = stored.tokens.access_token.clone();
+                    refresh_token = stored.tokens.refresh_token.clone();
+                    state.saved = Some(stored);
+                    state.loaded = true;
+                    if usable {
+                        return Ok(access_token);
+                    }
+                }
+                Some(_) => {}
+            }
+        }
+
+        let api_result = self.api.refresh(&refresh_token);
+        let mut state = self.lock()?;
+        if state.generation != version {
+            return Err(AccountError::Cancelled);
+        }
+        match api_result {
+            Ok(tokens) => {
+                validate_tokens(&tokens)?;
+                let value = saved_session(tokens)?;
+                if shared {
+                    // A writer that does not take the lock can still change the store. Tokens for a session that is no longer the stored one are discarded rather than resurrecting it.
+                    match self.stored()? {
+                        None => {
+                            state.saved = None;
+                            state.loaded = true;
+                            return Err(AccountError::Unauthorized);
+                        }
+                        Some(current)
+                            if current.tokens.refresh_token != refresh_token
+                                || current.tokens.user.id != value.tokens.user.id =>
+                        {
+                            state.saved = Some(current);
+                            state.loaded = true;
+                            return Err(AccountError::Cancelled);
+                        }
+                        Some(_) => {}
+                    }
+                }
+                self.storage.save(&value)?;
+                let token = value.tokens.access_token.clone();
+                state.saved = Some(value);
+                state.loaded = true;
+                Ok(token)
+            }
+            Err(AccountError::Unauthorized) => {
+                // Clear only the session that was rejected; one another process saved meanwhile is adopted instead.
+                if shared {
+                    if let Ok(Some(stored)) = self.stored() {
+                        if stored.tokens.refresh_token != refresh_token {
+                            let usable = usable_session(&stored, rejected_token);
+                            let access_token = stored.tokens.access_token.clone();
+                            state.saved = Some(stored);
+                            state.loaded = true;
+                            return if usable {
+                                Ok(access_token)
+                            } else {
+                                Err(AccountError::Unauthorized)
+                            };
+                        }
+                    }
+                }
+                state.saved = None;
+                state.loaded = true;
+                self.storage.clear().and(Err(AccountError::Unauthorized))
+            }
+            Err(error) => Err(error),
+        }
     }
 
     pub fn credentials(
@@ -230,6 +418,20 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
         rejected_token: Option<&str>,
         expected_user_id: Option<&str>,
     ) -> Result<(String, String), AccountError> {
+        self.credentials_with_generation(rejected_token, expected_user_id)
+            .map(|(user_id, token, _)| (user_id, token))
+    }
+
+    /// Returns credentials together with the session generation that authorized them.
+    ///
+    /// Hosts that perform a local write after reading account data use the generation to reject a
+    /// sign-out and re-login of the same user. The user id alone cannot distinguish those two
+    /// sessions.
+    pub fn credentials_with_generation(
+        &self,
+        rejected_token: Option<&str>,
+        expected_user_id: Option<&str>,
+    ) -> Result<(String, String, u64), AccountError> {
         {
             let mut state = self.lock()?;
             self.load_locked(&mut state)?;
@@ -252,16 +454,47 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
         {
             return Err(AccountError::Cancelled);
         }
-        Ok((saved.tokens.user.id.clone(), token))
+        Ok((saved.tokens.user.id.clone(), token, state.generation))
+    }
+
+    /// Runs a local side effect while the account generation is held stable.
+    ///
+    /// The session mutex remains held for `operation`, so logout or a new login cannot invalidate
+    /// the check between validation and the host's write. The closure must not call this session
+    /// again; it is intended for platform preference stores and other local account state.
+    pub fn with_generation<T, F>(
+        &self,
+        generation: u64,
+        expected_user_id: Option<&str>,
+        operation: F,
+    ) -> Result<T, AccountError>
+    where
+        F: FnOnce() -> Result<T, AccountError>,
+    {
+        let mut state = self.lock()?;
+        self.load_locked(&mut state)?;
+        if state.generation != generation
+            || expected_user_id.is_some_and(|expected| {
+                state
+                    .saved
+                    .as_ref()
+                    .map(|saved| saved.tokens.user.id.as_str())
+                    != Some(expected)
+            })
+        {
+            return Err(AccountError::Cancelled);
+        }
+        operation()
     }
 
     pub fn profile(&self) -> Result<AccountProfile, AccountError> {
-        let (user_id, profile) = self.authenticated_with_user(|api, token| api.profile(token))?;
+        let (user_id, profile, generation) =
+            self.authenticated_with_user(|api, token| api.profile(token))?;
         validate_profile(&profile)?;
         if profile.user.id != user_id {
             return Err(AccountError::Cancelled);
         }
-        self.update_user(profile.user.clone())?;
+        self.update_user(profile.user.clone(), generation)?;
         Ok(profile)
     }
 
@@ -269,6 +502,27 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
         validate_display_name(display_name)?;
         self.authenticated(|api, token| api.rename(display_name, token))?;
         self.profile()
+    }
+
+    /// Uploads the PNG or JPEG at `path` as the user's avatar and returns the refreshed profile, whose `avatar_url` now names it.
+    pub fn upload_avatar(&self, path: &Path) -> Result<AccountProfile, AccountError> {
+        let image = read_account_avatar_upload(path)?;
+        self.authenticated(|api, token| api.upload_avatar(&image, token))?;
+        self.profile()
+    }
+
+    /// Removes the user's uploaded avatar and returns the refreshed profile.
+    pub fn remove_avatar(&self) -> Result<AccountProfile, AccountError> {
+        self.authenticated(|api, token| api.delete_avatar(token))?;
+        self.profile()
+    }
+
+    /// The signed-in user's avatar, or `None` when they are signed out or have none. Reads the saved user, so it needs no backend round trip beyond the image itself.
+    pub fn avatar(&self) -> Result<Option<AccountAvatarImage>, AccountError> {
+        match self.status()?.and_then(|user| user.avatar_url) {
+            Some(url) => fetch_account_avatar(&url).map(Some),
+            None => Ok(None),
+        }
     }
 
     pub fn logout(&self, all: bool) -> Result<(), AccountError> {
@@ -305,14 +559,14 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
         F: Fn(&A, &str) -> Result<T, AccountError>,
     {
         self.authenticated_with_user(operation)
-            .map(|(_, result)| result)
+            .map(|(_, result, _)| result)
     }
 
-    fn authenticated_with_user<T, F>(&self, operation: F) -> Result<(String, T), AccountError>
+    fn authenticated_with_user<T, F>(&self, operation: F) -> Result<(String, T, u64), AccountError>
     where
         F: Fn(&A, &str) -> Result<T, AccountError>,
     {
-        let (user_id, token) = self.credentials(None, None)?;
+        let (user_id, token, generation) = self.credentials_with_generation(None, None)?;
         let result = match operation(&self.api, &token) {
             Err(AccountError::Unauthorized) => {
                 let (_, replacement) = self.credentials(Some(&token), Some(&user_id))?;
@@ -320,7 +574,18 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
             }
             result => result,
         }?;
-        Ok((user_id, result))
+        let mut state = self.lock()?;
+        self.load_locked(&mut state)?;
+        if state.generation != generation
+            || state
+                .saved
+                .as_ref()
+                .map(|saved| saved.tokens.user.id.as_str())
+                != Some(user_id.as_str())
+        {
+            return Err(AccountError::Cancelled);
+        }
+        Ok((user_id, result, generation))
     }
 
     pub fn preference_schema(&self) -> Result<AccountPreferenceSchema, AccountError> {
@@ -342,6 +607,50 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
         validate_account_preferences(preferences)?;
         let updated = self.authenticated(|api, token| api.put_preferences(preferences, token))?;
         validate_account_preferences(&updated)?;
+        Ok(updated)
+    }
+
+    /// Uploads preferences only for the generation that read them.
+    ///
+    /// A same-user re-login has a different generation even though its user id is unchanged. The
+    /// ordinary method is still correct for a fresh request, while this variant protects a
+    /// read/merge/write sequence owned by a settings page.
+    pub fn put_preferences_with_generation(
+        &self,
+        preferences: &AccountPreferences,
+        expected_generation: u64,
+        expected_user_id: &str,
+    ) -> Result<AccountPreferences, AccountError> {
+        validate_account_preferences(preferences)?;
+        let (user_id, token, generation) =
+            self.credentials_with_generation(None, Some(expected_user_id))?;
+        if generation != expected_generation || user_id != expected_user_id {
+            return Err(AccountError::Cancelled);
+        }
+        let updated = match self.api.put_preferences(preferences, &token) {
+            Err(AccountError::Unauthorized) => {
+                let (_, replacement, replacement_generation) =
+                    self.credentials_with_generation(Some(&token), Some(expected_user_id))?;
+                if replacement_generation != expected_generation {
+                    return Err(AccountError::Cancelled);
+                }
+                self.api.put_preferences(preferences, &replacement)?
+            }
+            result => result?,
+        };
+        validate_account_preferences(&updated)?;
+        let mut state = self.lock()?;
+        // 移动端会话文件与键盘进程共享，接受云端写入前重新读取，避免另一进程退出账号被本地缓存遮住。
+        self.load_locked(&mut state)?;
+        if state.generation != expected_generation
+            || state
+                .saved
+                .as_ref()
+                .map(|saved| saved.tokens.user.id.as_str())
+                != Some(expected_user_id)
+        {
+            return Err(AccountError::Cancelled);
+        }
         Ok(updated)
     }
 
@@ -537,26 +846,34 @@ impl<A: AccountApi, S: AccountSessionStorage> BackendAccountSession<A, S> {
     }
 
     pub fn forget(&self) -> Result<(), AccountError> {
-        let mut state = self.lock()?;
-        // No asynchronous operation can be running at the terminal value:
-        // next_generation refuses to issue it there. Keep the value stable
-        // while still clearing the account state.
-        state.generation = state.generation.saturating_add(1);
-        state.refresh = None;
-        state.saved = None;
-        state.loaded = true;
-        self.storage.clear()
+        {
+            let mut state = self.lock()?;
+            // No asynchronous operation can be running at the terminal value:
+            // next_generation refuses to issue it there. Keep the value stable
+            // while still clearing the account state.
+            state.generation = state.generation.saturating_add(1);
+            state.refresh = None;
+            state.saved = None;
+            state.loaded = true;
+        }
+        // 必须在刷新锁内清理，避免另一个进程的刷新在退出后写回 token。拿不到锁时保持存储不变；无锁清理会与进行中的刷新竞争并恢复会话。
+        self.storage.with_refresh_lock(|| self.storage.clear())
     }
 
-    fn update_user(&self, user: AccountUser) -> Result<(), AccountError> {
-        let mut state = self.lock()?;
-        self.load_locked(&mut state)?;
-        let current = state.saved.as_mut().ok_or(AccountError::Cancelled)?;
-        if current.tokens.user.id != user.id {
-            return Err(AccountError::Cancelled);
-        }
-        current.tokens.user = user;
-        self.storage.save(current)
+    fn update_user(&self, user: AccountUser, generation: u64) -> Result<(), AccountError> {
+        self.storage.with_refresh_lock(|| {
+            let mut state = self.lock()?;
+            self.load_locked(&mut state)?;
+            if state.generation != generation {
+                return Err(AccountError::Cancelled);
+            }
+            let current = state.saved.as_mut().ok_or(AccountError::Cancelled)?;
+            if current.tokens.user.id != user.id {
+                return Err(AccountError::Cancelled);
+            }
+            current.tokens.user = user;
+            self.storage.save(current)
+        })
     }
 }
 
@@ -571,7 +888,7 @@ where
     S: AccountSessionStorage,
 {
     let identity = if session.status()?.is_some() {
-        Some(session.credentials(None, None)?)
+        Some(session.credentials_with_generation(None, None)?)
     } else {
         None
     };
@@ -590,7 +907,13 @@ where
     }?;
     let expected = identity.as_ref().map(|value| value.0.as_str());
     let current = session.status()?.map(|user| user.id);
-    if current.as_deref() != expected {
+    let generation_matches = identity.as_ref().is_none_or(|(_, _, generation)| {
+        session
+            .lock()
+            .map(|state| state.generation == *generation)
+            .unwrap_or(false)
+    });
+    if current.as_deref() != expected || !generation_matches {
         return Err(AccountError::Cancelled);
     }
     Ok(result)
@@ -626,6 +949,12 @@ fn unix_ms() -> Result<u64, AccountError> {
         .map_err(|_| AccountError::Unavailable)?
         .as_millis();
     u64::try_from(millis).map_err(|_| AccountError::Unavailable)
+}
+
+/// Whether `saved` can be used as is: not about to expire, and not the access token the caller was just refused with.
+fn usable_session(saved: &SavedAccountSession, rejected_token: Option<&str>) -> bool {
+    saved.expires_at_unix_ms > refresh_deadline_ms()
+        && rejected_token != Some(saved.tokens.access_token.as_str())
 }
 
 fn refresh_deadline_ms() -> u64 {

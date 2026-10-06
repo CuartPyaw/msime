@@ -1,8 +1,11 @@
 #include "ServerSession.h"
 #include "CandidateCompletionPolicy.h"
+#include "EditPolicy.h"
+#include "InputSchemeTraits.h"
 #include "input/CandidateTextPolicy.h"
 #include "KeyEvent.h"
 #include "PunctuationPolicy.h"
+#include <algorithm>
 #include <memory>
 #include <stdexcept>
 
@@ -37,6 +40,9 @@ ServerSession::~ServerSession() {
   // session. Ownership cannot be transferred to a pipe I/O worker.
   if (std::this_thread::get_id() != thread_)
     std::terminate();
+  // The player outlives every session, so music this session let play would otherwise go on with no input method in front of it.
+  if (music_active_)
+    (void)msime_client_music_set_active(session_, false);
   msime_client_string_free(msime_client_destroy(session_));
 }
 void ServerSession::check_thread() const {
@@ -57,6 +63,7 @@ nlohmann::json ServerSession::activate(uint64_t epoch) {
   auto result = response(msime_client_focus(session_, input_enabled_));
   epoch_ = epoch;
   active_ = true;
+  refresh_typing_effect_settings();
   return result;
 }
 nlohmann::json ServerSession::deactivate(uint64_t epoch) {
@@ -72,13 +79,32 @@ void ServerSession::set_input_enabled(uint64_t epoch, bool enabled) {
     input_enabled_ = enabled;
   }
 }
+nlohmann::json ServerSession::cancel_again(nlohmann::json result) {
+  // 韩文汉字列表或注音列表打开时，MSIME_CANCEL 只关闭列表、组字保留（msime_client.h）；越南文词和藏文音节串上的第一次只把原文重新显示出来；第二次才丢弃它。
+  if (result.at("commit").is_null() &&
+      scheme::AlwaysInlinePreedit(static_cast<int>(result.at("view").value("scheme", 0u))) &&
+      !result.at("view").at("editing_text").get<std::string>().empty())
+    return response(msime_client_command(session_, MSIME_CANCEL));
+  return result;
+}
 void ServerSession::cancel_composition(uint64_t epoch) {
   check_active(epoch);
   auto result = response(msime_client_command(session_, MSIME_CANCEL));
+  result = cancel_again(std::move(result));
   if (!result.at("commit").is_null() ||
       !result.at("view").at("editing_text").get<std::string>().empty() ||
       !result.at("view").at("candidates").empty())
     throw std::logic_error("Shared host did not cancel composition");
+}
+nlohmann::json ServerSession::finish_composition(uint64_t epoch) {
+  check_active(epoch);
+  return response(msime_client_command(session_, MSIME_FINISH_COMPOSITION));
+}
+nlohmann::json ServerSession::command(uint64_t epoch, uint32_t command) {
+  check_active(epoch);
+  if (!input_enabled_)
+    throw std::logic_error("Session command while input disabled");
+  return response(msime_client_command(session_, command));
 }
 void ServerSession::reset_cache() {
   check_thread();
@@ -145,13 +171,18 @@ KeyResult ServerSession::key(const FanyImeNamedpipeData &packet,
   // more candidates would have been worse, committing candidate 17 for a
   // letter press. Typing shuangpin through this path could not work at all,
   // and nothing noticed because these suites had never been run.
-  const bool selection_digit = digit_key >= '1' && digit_key <= '9';
+  // 韩文和注音只在列表打开时有候选，这时数字从中选择；越南文和藏文没有候选。其他情况下数字是文字，引擎作为字符收到时要么拼写它，要么让它结束组字。
+  const bool selection_digit =
+      digit_key >= '1' && digit_key <= '9' &&
+      !(current.is_object() &&
+        scheme::AlwaysInlinePreedit(static_cast<int>(current.value("scheme", 0u))) &&
+        current.at("candidates").empty());
   if (selection_digit && !current.is_null() &&
-      current.at("local_mode") != "unknown" &&
-      ((current.at("local_mode") == "unicode" && modifiers == 1) ||
-       (current.at("local_mode") != "unicode" && modifiers == 0))) {
-    // TSF selects by VK digit, regardless of layout-produced text. Unicode
-    // requires Shift; ordinary modes use unmodified digits. Use current IDs.
+      digit_selects_candidate(
+          current.at("local_mode").get<std::string>(),
+          current.value("spelling_symbols", std::string{}),
+          static_cast<uint32_t>(packet.wch), modifiers)) {
+    // TSF selects by VK digit. Unicode requires Shift, a digit the Engine spells (V) is input, and ordinary modes use unmodified digits; see digit_selects_candidate. Use current IDs.
     const auto slot = static_cast<size_t>(digit_key - '1');
     const auto &page = current.at("candidates");
     if (slot < page.size()) {
@@ -180,6 +211,11 @@ KeyResult ServerSession::key(const FanyImeNamedpipeData &packet,
       return {client_, epoch_, packet.request_id, false, std::move(result)};
     }
     result = response(msime_client_command(session_, action.value));
+    // A reset discards the composition, as the TIP discards it from its own host session. Escape on a word whose first cancel only shows its raw keys again stops there, as the TIP does (scheme::CancelRestoresRaw).
+    if (action.kind == KeyKind::LocalReset &&
+        !(packet.keycode == kVirtualKeyEscape &&
+          scheme::CancelRestoresRaw(static_cast<int>(result.at("view").value("scheme", 0u)))))
+      result = cancel_again(std::move(result));
     if (action.kind == KeyKind::CancelAndForward ||
         action.kind == KeyKind::LocalReset)
       result["handled"] = false;
@@ -220,10 +256,11 @@ ServerSession::navigate(const FanyImeNamedpipeData &packet, uint64_t epoch,
   const auto current = view();
   if (current.at("editing_text").get<std::string>().empty())
     return std::nullopt;
-  // Japanese is a scheme (3), not a local mode; no local mode is ever named "japanese".
+  // 日文、韩文、注音、越南文和藏文是方案，不是本地模式，没有本地模式以它们命名。它们把 '-' 和 '=' 当作文字而不是翻页键：注音列表用 Page Up/Down 和方向键翻页（KoreanHanjaKey.h），藏文的 '-' 是威利拼写符号。
+  const int scheme = static_cast<int>(current.value("scheme", 0u));
   action = navigation_action(packet, bindings,
                              current.at("local_mode").get<std::string>() == "unicode",
-                             current.value("scheme", 0u) == 3u);
+                             scheme == scheme::Japanese || scheme::AlwaysInlinePreedit(scheme));
   if (!action)
     return std::nullopt;
   auto result = action->command
@@ -437,6 +474,10 @@ nlohmann::json ServerSession::update_preferences(uint64_t epoch,
   const auto document = nlohmann::json::parse(snapshot);
   traditional_output_ = document.at("preferences").value(
       "traditional_chinese_output", false);
+  // With nothing switched on the library starts no player, so it has not kept the earlier "active". Say it again, so music switched on while this client holds the focus starts now rather than at the next focus change.
+  if (music_active_)
+    (void)msime_client_music_set_active(session_, true);
+  refresh_typing_effect_settings();
   return result;
 }
 nlohmann::json ServerSession::page_candidate(uint64_t epoch, uint64_t session,
@@ -463,6 +504,42 @@ nlohmann::json ServerSession::page_candidate(uint64_t epoch, uint64_t session,
 nlohmann::json ServerSession::view() const {
   check_thread();
   return response(msime_client_view(session_));
+}
+bool ServerSession::key_sound(uint32_t key_class) {
+  check_thread();
+  return msime_client_key_sound(session_, key_class);
+}
+bool ServerSession::commit_sound() {
+  check_thread();
+  return msime_client_commit_sound(session_);
+}
+uint32_t ServerSession::typing_effect(uint32_t event) {
+  check_thread();
+  return msime_client_typing_effect(session_, event);
+}
+void ServerSession::refresh_typing_effect_settings() {
+  // A settings answer that cannot be read leaves the effect as the preferences alone describe it rather than failing the focus change or the preference update it follows.
+  TypingEffectSettings settings;
+  try {
+    const auto value = response(msime_client_typing_effect_settings(session_));
+    const auto intensity = value.value("intensity", 50.0);
+    std::optional<uint32_t> duration;
+    if (value.contains("duration_ms") && value.at("duration_ms").is_number())
+      duration = static_cast<uint32_t>((std::max)(0.0, value.at("duration_ms").get<double>()));
+    std::optional<uint32_t> color;
+    if (value.contains("colors") && value.at("colors").is_array() && !value.at("colors").empty() &&
+        value.at("colors").front().is_string())
+      color = typing_effect_rgb(value.at("colors").front().get<std::string>());
+    settings = resolve_typing_effect_settings(static_cast<uint32_t>((std::max)(0.0, intensity)), duration, color);
+  } catch (...) {
+    settings = TypingEffectSettings{};
+  }
+  typing_effect_settings_ = settings;
+}
+void ServerSession::set_music_active(bool active) {
+  check_thread();
+  (void)msime_client_music_set_active(session_, active);
+  music_active_ = active;
 }
 KeyResult ServerSession::punctuation(const FanyImeNamedpipeData &packet,
                                      uint64_t epoch) {
@@ -500,8 +577,13 @@ ServerSession::word_character(const FanyImeNamedpipeData &packet,
   if (!input_enabled_)
     return std::nullopt;
   const auto current = view();
+  // 不论汉字列表是否打开，韩文的 '-'、'='、'[' 和 ']' 都是标点：引擎关闭列表，把韩文连同标点写出，和其他宿主一样，而不是取单个汉字的首尾字。注音、越南文和藏文同样在 TIP 自己的宿主会话里组字，所以也不取首尾字。
+  // A key the Engine spells in its current state (V mode's '-') is input, as `edit_kind` routes it; taking it here first would commit the highlighted row instead.
   if (current.at("local_mode") == "unknown" ||
       current.at("editing_text").get<std::string>().empty() ||
+      scheme::AlwaysInlinePreedit(static_cast<int>(current.value("scheme", 0u))) ||
+      spelled_by_engine(current.value("spelling_symbols", std::string{}),
+                        static_cast<uint32_t>(packet.wch)) ||
       !word_character_edge(packet, binding, current.value("scheme", 0u) == 3u))
     return std::nullopt;
   std::string fallback;

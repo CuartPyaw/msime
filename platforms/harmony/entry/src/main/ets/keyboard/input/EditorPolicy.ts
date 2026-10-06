@@ -25,11 +25,6 @@ export interface EditorTraits {
 }
 
 export class EditorPolicy {
-  /** A text-change echo is external only when no keyboard-owned mutation is waiting for it. */
-  static isExternalTextChange(pendingOwnEdits: number): boolean {
-    return pendingOwnEdits <= 0;
-  }
-
   /** A late editor-attribute callback must not reset text typed while the query was in flight. */
   static appliesDelayedLanguage(
     composing: boolean,
@@ -46,6 +41,13 @@ export class EditorPolicy {
    */
   static useEngine(traits: EditorTraits): boolean {
     return traits.text && !traits.password && !traits.noSuggestions;
+  }
+
+  /**
+   * Whether the key heatmap must not count presses in this editor: a password field only. A number, phone, date or no-suggestions field is still the user's typing and counts, as on Android (`EditorPolicy.excludesKeyStatistics`); HarmonyOS's editor attribute carries no incognito or no-learning signal to add to it.
+   */
+  static excludesKeyStatistics(traits: EditorTraits): boolean {
+    return traits.password;
   }
 
   /** The keyboard opens in Latin for fields where Chinese input would only be in the way. */

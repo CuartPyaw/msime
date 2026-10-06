@@ -2,6 +2,7 @@ package app.msime.android;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.net.URL;
 
 /**
  * Bounds and identifies asynchronous cloud and AI results before they return to Engine.
@@ -26,6 +27,18 @@ public final class OnlineCandidatePolicy {
 
     private OnlineCandidatePolicy() {}
 
+    public static boolean validURL(URL target) {
+        return target != null && "https".equalsIgnoreCase(target.getProtocol())
+            && target.getHost() != null && !target.getHost().isEmpty()
+            && target.getUserInfo() == null && target.getRef() == null;
+    }
+
+    /** Read the positive host session id without JSONObject's lossy numeric conversions. */
+    public static long sessionId(Object raw, long fallback) {
+        long value = KeyboardGeometry.strictLong(raw, fallback);
+        return value > 0 ? value : fallback;
+    }
+
     /**
      * Identity of one online request.
      *
@@ -39,6 +52,14 @@ public final class OnlineCandidatePolicy {
         return "session=" + sessionId + "|cache=" + field(cacheKey)
             + "|identity=" + field(identity) + "|cloud=" + cloudCandidates
             + "|assistant=" + field(assistant);
+    }
+
+    /** 判断失败请求是否仍可释放当前签名，让同一输入在下一次渲染时重试。 */
+    public static boolean shouldReleaseAfterFailure(String requestSignature,
+            String currentSignature, long requestEpoch, long currentEpoch,
+            long targetSession, long currentSession) {
+        return requestEpoch == currentEpoch && targetSession == currentSession
+            && requestSignature != null && requestSignature.equals(currentSignature);
     }
 
     /** Whether the cloud provider should be asked for this query. */

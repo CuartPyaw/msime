@@ -1,6 +1,7 @@
 //! Correction resolution, series keys, alternative-segmentation merging and autocorrect marking (quanpin.md §4.2-§4.3, §7.5, §7.7, §11.1-§11.2). Pure functions over rows; the dictionary drives them.
 
 use std::collections::HashSet;
+use std::fmt::Write;
 
 use crate::pinyin::autocorrect::{
     autocorrect_cut_kbest, looks_like_syllable_with_jianpin_tail, AutocorrectCut,
@@ -50,7 +51,7 @@ pub fn resolve_series_query(
         let cuts = autocorrect_cut_kbest(raw, autocorrect_types, AUTOCORRECT_CUT_KBEST);
         if !cuts.is_empty() {
             result.corrected_input = true;
-            populate_from_cuts(&mut result, &cuts, "");
+            populate_from_cuts(&mut result, cuts, "");
         } else {
             // The k-best search only reaches the end when every segment is a complete syllable, so "hauzh" (hau typo + zh jianpin) fails outright. Retry on the head without a trailing incomplete syllable, shortest tail first so the correction explains as much of the input as possible. Neighbor corrections are left out of the head: they have the widest false-positive surface, and stacking them on a speculative jianpin boundary turns deletion-shaped input into noise (shng -> sun + g -> 笋干).
             let head_types = autocorrect_types & !autocorrect_type::NEIGHBOR;
@@ -66,7 +67,7 @@ pub fn resolve_series_query(
                     continue;
                 }
                 result.corrected_input = true;
-                populate_from_cuts(&mut result, &head_cuts, tail);
+                populate_from_cuts(&mut result, head_cuts, tail);
                 break;
             }
         }
@@ -79,51 +80,92 @@ pub fn resolve_series_query(
     } else {
         join_segments(segments)
     };
-    let prefix = if result.corrected_input { "C:" } else { "" };
-    result.cache_key = format!(
-        "{prefix}{}",
-        series_cache_key(raw, &result.segmentation, autocorrect_types)
+    result.cache_key = series_cache_key_with_prefix(
+        raw,
+        &result.segmentation,
+        autocorrect_types,
+        result.corrected_input,
     );
     result
 }
 
 /// The primary cut defines the cost tier; same-cost readings compete with it on frequency, costlier ones stay behind it.
-fn populate_from_cuts(result: &mut SeriesResolution, cuts: &[AutocorrectCut], jianpin_tail: &str) {
-    let to_segments = |cut: &AutocorrectCut| {
-        let mut segments = cut.syllables();
+fn populate_from_cuts(
+    result: &mut SeriesResolution,
+    cuts: Vec<AutocorrectCut>,
+    jianpin_tail: &str,
+) {
+    let to_segments = |cut: AutocorrectCut| {
+        let mut segments = cut.into_syllables();
         if !jianpin_tail.is_empty() {
             segments.push(jianpin_tail.to_string());
         }
         segments
     };
-    let primary = &cuts[0];
-    result.corrected = to_segments(primary);
-    for cut in &cuts[1..] {
-        if cut.same_cost_as(primary) {
+    let mut cuts = cuts.into_iter();
+    let primary = cuts.next().expect("autocorrect cuts are non-empty");
+    for cut in cuts {
+        if cut.same_cost_as(&primary) {
             result.alternative_corrected_cuts.push(to_segments(cut));
         } else {
             result.costlier_corrected_cuts.push(to_segments(cut));
         }
     }
+    result.corrected = to_segments(primary);
 }
 
 /// `"T<types>:" + ("M:" | "A:") + (segmentation or raw)` (QD:63-67). The mask is part of the key because correction alternatives and typo sentences depend on it, and one input can be asked with different masks in a session (a suppressed input clears it for that input only).
 pub fn series_cache_key(raw: &str, segmentation: &str, autocorrect_types: u32) -> String {
+    series_cache_key_with_prefix(raw, segmentation, autocorrect_types, false)
+}
+
+fn series_cache_key_with_prefix(
+    raw: &str,
+    segmentation: &str,
+    autocorrect_types: u32,
+    corrected: bool,
+) -> String {
     let mode = if raw.contains('\'') { "M:" } else { "A:" };
     let reading = if segmentation.is_empty() {
         raw
     } else {
         segmentation
     };
-    format!("T{autocorrect_types}:{mode}{reading}")
+    // Reserve the complete key once: `resolve_series_query` used to format around a second
+    // already-allocated key when adding the correction marker.
+    let type_digits = if autocorrect_types == 0 {
+        1
+    } else {
+        autocorrect_types.ilog10() as usize + 1
+    };
+    let mut key =
+        String::with_capacity(reading.len() + 4 + type_digits + usize::from(corrected) * 2);
+    if corrected {
+        key.push_str("C:");
+    }
+    write!(&mut key, "T{autocorrect_types}:{mode}{reading}")
+        .expect("writing a series cache key to String cannot fail");
+    key
 }
 
 /// Lowercase, drop `'`, keep `v` distinct from `u` (QD:75-88). The ü alias rewrite is a marking source by product decision: a typed `nue` whose primary segmentation is `nve` must compare as different.
 pub fn fold_reading(text: &str) -> String {
-    text.chars()
-        .filter(|&c| c != '\'')
-        .map(|c| c.to_ascii_lowercase())
-        .collect()
+    let capacity = text.bytes().filter(|&byte| byte != b'\'').count();
+    let mut folded = String::with_capacity(capacity);
+    for character in text.chars().filter(|&character| character != '\'') {
+        folded.push(character.to_ascii_lowercase());
+    }
+    folded
+}
+
+fn folded_reading_equal(left: &str, right: &str) -> bool {
+    left.chars()
+        .filter(|&character| character != '\'')
+        .map(|character| character.to_ascii_lowercase())
+        .eq(right
+            .chars()
+            .filter(|&character| character != '\'')
+            .map(|character| character.to_ascii_lowercase()))
 }
 
 /// QD:1006-1054: rows read from a corrected cut get `corrected_from = fold(raw)`.
@@ -134,25 +176,22 @@ pub fn mark_autocorrect_candidates(
     corrected_cuts: &[String],
 ) {
     // A row comes from a corrected reading exactly when its letters equal some correction cut's letters while those differ from the typed letters. Comparing letters alone would also sweep up prefix rows the user spelled correctly (keneng -> ke, single-letter jianpin expansions); both rules together keep those unmarked.
-    let letter_sets: Vec<String> = std::iter::once(primary_segmentation)
-        .chain(corrected_cuts.iter().map(String::as_str))
-        .map(fold_reading)
-        .filter(|letters| !letters.is_empty())
-        .collect();
+    let cuts =
+        || std::iter::once(primary_segmentation).chain(corrected_cuts.iter().map(String::as_str));
     let raw_letters = fold_reading(raw);
-    if letter_sets.iter().all(|letters| *letters == raw_letters) {
+    if cuts().all(|cut| cut.is_empty() || folded_reading_equal(cut, raw)) {
         return;
     }
     for item in candidates
         .iter_mut()
         .filter(|item| item.corrected_from.is_empty())
     {
-        let item_letters = fold_reading(&item.pinyin);
         // A cut can fold back to exactly the typed letters; matching that set would label a row the user spelled correctly, so only the sets that differ count.
-        if letter_sets
-            .iter()
-            .any(|letters| *letters != raw_letters && *letters == item_letters)
-        {
+        if cuts().any(|cut| {
+            !cut.is_empty()
+                && !folded_reading_equal(cut, raw)
+                && folded_reading_equal(cut, &item.pinyin)
+        }) {
             item.corrected_from = raw_letters.clone();
         }
     }
@@ -173,10 +212,15 @@ pub fn merge_alternative_segmentations(
         >= primary_full.first().map_or(0, |item| item.weight);
     let best_word = best_alternative.word.clone();
 
-    let mut merged: Vec<WordItem> = primary_full.into_iter().chain(alternatives).collect();
+    let capacity = result
+        .len()
+        .saturating_add(primary_full.len())
+        .saturating_add(alternatives.len());
+    let mut merged = Vec::with_capacity(capacity);
+    merged.extend(primary_full);
+    merged.extend(alternatives);
     merged.sort_by_key(|item| std::cmp::Reverse(item.weight));
-    let mut seen = HashSet::new();
-    merged.retain(|item| seen.insert(item.word.clone()));
+    retain_unique_sorted_rows(&mut merged);
 
     if promote {
         if let Some(at) = merged.iter().position(|item| item.word == best_word) {
@@ -192,14 +236,39 @@ pub fn merge_alternative_segmentations(
     merged
 }
 
+/// Deduplicate rows that are already sorted by weight while keeping the merged vector's allocation.
+fn retain_unique_sorted_rows(rows: &mut Vec<WordItem>) {
+    // Borrow words while calculating each first occurrence, then retain in place after releasing the set.
+    let mut seen = HashSet::with_capacity(rows.len());
+    let unique = rows
+        .iter()
+        .map(|item| seen.insert(item.word.as_str()))
+        .collect::<Vec<_>>();
+    drop(seen);
+    let mut index = 0;
+    rows.retain(|_| {
+        let keep = unique[index];
+        index += 1;
+        keep
+    });
+}
+
 /// Append the rows whose word is not already present (QD:993-1004). A row repeated inside `rows` is kept once, as the reference's scan over the growing list does.
 pub fn append_unique_words(result: &mut Vec<WordItem>, rows: Vec<WordItem>) {
-    let mut seen: HashSet<String> = result.iter().map(|item| item.word.clone()).collect();
-    for item in rows {
-        if seen.insert(item.word.clone()) {
-            result.push(item);
-        }
-    }
+    // Borrow words while checking duplicates, then release the borrows before moving rows into the result.
+    let mut seen = HashSet::with_capacity(result.len().saturating_add(rows.len()));
+    seen.extend(result.iter().map(|item| item.word.as_str()));
+    let unique = rows
+        .iter()
+        .map(|item| seen.insert(item.word.as_str()))
+        .collect::<Vec<_>>();
+    drop(seen);
+    result.reserve(rows.len());
+    result.extend(
+        rows.into_iter()
+            .zip(unique)
+            .filter_map(|(item, unique)| unique.then_some(item)),
+    );
 }
 
 #[cfg(test)]
@@ -220,6 +289,18 @@ mod tests {
         assert_eq!(series_cache_key("nihao", "ni'hao", 0), "T0:A:ni'hao");
         assert_eq!(series_cache_key("ni'hao", "ni'hao", 15), "T15:M:ni'hao");
         assert_eq!(series_cache_key("xyz", "", 3), "T3:A:xyz");
+    }
+
+    #[test]
+    fn series_cache_key_can_add_correction_prefix_in_one_build() {
+        assert_eq!(
+            series_cache_key_with_prefix("gau", "gua", 3, true),
+            "C:T3:A:gua"
+        );
+        assert_eq!(
+            series_cache_key_with_prefix("gau", "gua", 3, false),
+            "T3:A:gua"
+        );
     }
 
     fn owned(segments: &[&str]) -> Vec<String> {
@@ -266,9 +347,22 @@ mod tests {
 
     #[test]
     fn fold_keeps_v_distinct_from_u() {
-        assert_eq!(fold_reading("Sa'Hng"), "sahng");
+        let folded = fold_reading("Sa'Hng");
+        assert_eq!(folded, "sahng");
+        assert_eq!(folded.capacity(), folded.len());
         assert_eq!(fold_reading("nve"), "nve");
         assert_ne!(fold_reading("nve"), fold_reading("nue"));
+    }
+
+    #[test]
+    fn folded_reading_comparison_matches_owned_folding() {
+        for (left, right) in [("Sa'Hng", "sahng"), ("nve", "nue"), ("", "'")] {
+            assert_eq!(
+                folded_reading_equal(left, right),
+                fold_reading(left) == fold_reading(right),
+                "{left}/{right}"
+            );
+        }
     }
 
     #[test]
@@ -330,6 +424,21 @@ mod tests {
     }
 
     #[test]
+    fn alternative_dedup_keeps_sorted_storage() {
+        let mut rows = vec![
+            row("xian", "甲", 3),
+            row("xi'an", "乙", 2),
+            row("xian", "甲", 1),
+        ];
+        let pointer = rows.as_ptr();
+
+        retain_unique_sorted_rows(&mut rows);
+
+        assert_eq!(rows.as_ptr(), pointer);
+        assert_eq!(words(&rows), ["甲", "乙"]);
+    }
+
+    #[test]
     fn rare_alternative_is_not_promoted() {
         let primary: Vec<WordItem> = (0..10)
             .map(|i| row("xie", &format!("写{i}"), 1_000_000 - i))
@@ -384,5 +493,19 @@ mod tests {
         );
         assert_eq!(words(&result), ["啊", "阿"]);
         assert_eq!(result[1].weight, 3);
+    }
+
+    #[test]
+    fn append_unique_words_reserves_the_incoming_rows() {
+        let mut result = Vec::with_capacity(1);
+        result.push(row("a", "啊", 1));
+        let rows: Vec<WordItem> = (0..10)
+            .map(|index| row("a", &format!("词{index}"), index))
+            .collect();
+
+        append_unique_words(&mut result, rows);
+
+        assert_eq!(result.len(), 11);
+        assert_eq!(result.capacity(), 11);
     }
 }

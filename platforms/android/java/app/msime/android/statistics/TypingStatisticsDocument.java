@@ -35,6 +35,16 @@ public final class TypingStatisticsDocument {
         if (root == null || !root.has("days")) return null;
         JSONObject detail = root.optJSONObject("detail");
         JSONObject dailyDetails = root.optJSONObject("dailyDetails");
+        // Absent in documents written before key counts existed; the store defaults it to empty, and so does this.
+        JSONObject dailyKeyCounts = root.optJSONObject("dailyKeys");
+        Map<String, Map<String, Long>> dailyKeys = new LinkedHashMap<>();
+        if (dailyKeyCounts != null) {
+            for (Iterator<String> keys = dailyKeyCounts.keys(); keys.hasNext();) {
+                String day = keys.next();
+                Map<String, Long> counts = counts(dailyKeyCounts.optJSONObject(day));
+                if (!counts.isEmpty()) dailyKeys.put(day, counts);
+            }
+        }
         Map<String, Map<String, Long>> dailyCharacters = new LinkedHashMap<>();
         Map<String, Map<String, Long>> dailySources = new LinkedHashMap<>();
         if (dailyDetails != null) {
@@ -47,14 +57,18 @@ public final class TypingStatisticsDocument {
             }
         }
         return new TypingStatisticsModel(
-            root.optBoolean("enabled", true),
-            Math.max(0, root.optLong("total", 0)),
+            // The shared Rust store defaults a missing field to false. Keep old or partially
+            // written documents opt-in on Android as well; showing them as enabled would expose
+            // statistics the user never turned on.
+            root.optBoolean("enabled", false),
+            Math.max(0, KeyboardGeometry.strictLong(root.opt("total"), 0)),
             root.optString("retention", "forever"),
             counts(root.optJSONObject("days")),
             detail == null ? Map.of() : counts(detail.optJSONObject("characters")),
             detail == null ? Map.of() : counts(detail.optJSONObject("sources")),
             Map.copyOf(dailyCharacters),
-            Map.copyOf(dailySources));
+            Map.copyOf(dailySources),
+            Map.copyOf(dailyKeys));
     }
 
     private static Map<String, Long> counts(JSONObject value) {
@@ -62,7 +76,7 @@ public final class TypingStatisticsDocument {
         Map<String, Long> result = new LinkedHashMap<>();
         for (Iterator<String> keys = value.keys(); keys.hasNext();) {
             String key = keys.next();
-            long count = value.optLong(key, 0);
+            long count = KeyboardGeometry.strictLong(value.opt(key), 0);
             if (count > 0) result.put(key, count);
         }
         return Map.copyOf(result);

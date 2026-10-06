@@ -84,15 +84,17 @@ fn expand_code(code: &str, scheme: SchemeType, profile: &ShuangpinProfile) -> Op
     Some(
         code.bytes()
             .map(|byte| {
-                let key = char::from(byte.to_ascii_lowercase()).to_string();
-                if scheme != SchemeType::Shuangpin {
-                    return key;
+                let key = byte.to_ascii_lowercase();
+                if scheme == SchemeType::Shuangpin {
+                    if let Some((initial, _)) = profile
+                        .initials
+                        .iter()
+                        .find(|(_, mapped)| mapped.as_bytes() == [key])
+                    {
+                        return (*initial).to_owned();
+                    }
                 }
-                profile
-                    .initials
-                    .iter()
-                    .find(|(_, mapped)| *mapped == key)
-                    .map_or(key, |(initial, _)| (*initial).to_owned())
+                char::from(key).to_string()
             })
             .collect(),
     )
@@ -106,9 +108,7 @@ fn read(
     limit: usize,
     filter_initials: bool,
 ) -> rusqlite::Result<Vec<WordItem>> {
-    let sql = format!(
-        "SELECT \"key\",\"value\",\"weight\" FROM \"{table}\" WHERE \"jp\"=?1 ORDER BY \"weight\" DESC LIMIT ?2"
-    );
+    let sql = jianpin_sql(table);
     let jianpin: String = initials
         .iter()
         .filter_map(|initial| initial.get(..1))
@@ -116,7 +116,7 @@ fn read(
     let matched_code = initials.join("'");
     let mut statement = connection.prepare_cached(&sql)?;
     let mut rows = statement.query(rusqlite::params![jianpin, super::sql_limit(scan_limit)])?;
-    let mut candidates = Vec::new();
+    let mut candidates = Vec::with_capacity(limit);
     while let Some(row) = rows.next()? {
         let Some(value) = row.get::<_, Option<String>>(1)? else {
             continue;
@@ -139,13 +139,21 @@ fn read(
     Ok(candidates)
 }
 
+fn jianpin_sql(table: &str) -> String {
+    let mut sql = String::with_capacity(table.len() + 83);
+    sql.push_str("SELECT \"key\",\"value\",\"weight\" FROM \"");
+    sql.push_str(table);
+    sql.push_str("\" WHERE \"jp\"=?1 ORDER BY \"weight\" DESC LIMIT ?2");
+    sql
+}
+
 fn key_matches_initials(key: &str, initials: &[String]) -> bool {
-    let syllables: Vec<&str> = key.split('\'').collect();
-    syllables.len() == initials.len()
-        && syllables
-            .iter()
-            .zip(initials)
-            .all(|(syllable, initial)| syllable_initial(syllable) == initial)
+    let mut syllables = key.split('\'');
+    initials.iter().all(|initial| {
+        syllables
+            .next()
+            .is_some_and(|syllable| syllable_initial(syllable) == initial)
+    }) && syllables.next().is_none()
 }
 
 fn syllable_initial(syllable: &str) -> &str {
@@ -187,8 +195,18 @@ mod tests {
         finals: &[],
     };
 
+    #[test]
+    fn jianpin_sql_writes_the_lookup_statement_directly() {
+        let sql = jianpin_sql("tbl_2_n");
+        assert_eq!(
+            sql,
+            "SELECT \"key\",\"value\",\"weight\" FROM \"tbl_2_n\" WHERE \"jp\"=?1 ORDER BY \"weight\" DESC LIMIT ?2"
+        );
+        assert_eq!(sql.capacity(), sql.len());
+    }
+
     fn fixture(dir: &Path) -> PathBuf {
-        let path = dir.join("msime.db");
+        let path = dir.join("msime-pinyin.db");
         Connection::open(&path)
             .unwrap()
             .execute_batch(
@@ -342,7 +360,7 @@ mod tests {
     #[test]
     fn missing_corrupt_and_tableless_databases() {
         let dir = tempfile::tempdir().unwrap();
-        let missing = dir.path().join("missing").join("msime.db");
+        let missing = dir.path().join("missing").join("msime-pinyin.db");
         let result = query_jianpin("nh", SchemeType::Quanpin, &missing, 50, &XIAOHE);
         assert!(result.candidates.is_empty());
         assert_eq!(

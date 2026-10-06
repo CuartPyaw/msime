@@ -7,7 +7,7 @@ pub const SYLLABLE_GRAPH_PATH_LIMIT: usize = 32;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyllableEdge {
     pub end: usize,
-    pub syllable: String,
+    pub syllable: &'static str,
 }
 
 /// `edges[start]` lists the intact syllables starting at `start`, longest first, pruned to those from which the end is reachable. Empty input or input containing `'` has no edges.
@@ -29,12 +29,14 @@ pub fn build_syllable_graph(pinyin: &str) -> SyllableGraph {
         return graph;
     }
     for start in 0..length {
+        let bucket_capacity = MAX_SYLLABLE_LENGTH.min(length - start);
         for end in (start + 1..=length.min(start + MAX_SYLLABLE_LENGTH)).rev() {
             if let Some(syllable) = intact_piece(&bytes[start..end]) {
-                graph.edges[start].push(SyllableEdge {
-                    end,
-                    syllable: syllable.to_owned(),
-                });
+                let edges = &mut graph.edges[start];
+                if edges.capacity() == 0 {
+                    edges.reserve(bucket_capacity);
+                }
+                edges.push(SyllableEdge { end, syllable });
             }
         }
     }
@@ -68,7 +70,7 @@ pub fn enumerate_complete_segmentations(
             return;
         }
         for edge in &graph.edges[position] {
-            current.push(edge.syllable.clone());
+            current.push(edge.syllable.to_owned());
             visit(graph, edge.end, path_limit, current, result);
             current.pop();
             if result.len() >= path_limit {
@@ -77,11 +79,17 @@ pub fn enumerate_complete_segmentations(
         }
     }
 
-    let mut result = Vec::new();
+    let mut result = Vec::with_capacity(path_limit);
     if path_limit == 0 || graph.input_length == 0 || graph.edges.len() != graph.input_length + 1 {
         return result;
     }
-    visit(graph, 0, path_limit, &mut Vec::new(), &mut result);
+    visit(
+        graph,
+        0,
+        path_limit,
+        &mut Vec::with_capacity(graph.input_length),
+        &mut result,
+    );
     result
 }
 
@@ -119,12 +127,32 @@ mod tests {
         assert_eq!(graph.edges.len(), 5);
         assert!(graph.edges.iter().all(Vec::is_empty));
         let graph = build_syllable_graph("zhonge");
-        let from_start: Vec<_> = graph.edges[0]
-            .iter()
-            .map(|edge| edge.syllable.as_str())
-            .collect();
+        let from_start: Vec<_> = graph.edges[0].iter().map(|edge| edge.syllable).collect();
         // `zhong` is the only syllable at the start (`zhon`, `zho` and `zh` are prefixes), and it reaches `e`.
         assert_eq!(from_start, ["zhong"]);
+    }
+
+    #[test]
+    fn edge_buckets_reserve_the_candidate_window() {
+        let graph = build_syllable_graph("xianxian");
+
+        for (start, edges) in graph.edges.iter().enumerate() {
+            let expected = MAX_SYLLABLE_LENGTH.min(graph.input_length.saturating_sub(start));
+            if !edges.is_empty() {
+                assert!(
+                    edges.capacity() >= expected,
+                    "edge bucket at {start} has capacity {}, expected at least {expected}",
+                    edges.capacity()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn unreadable_input_does_not_allocate_edge_buckets() {
+        let graph = build_syllable_graph(&"z".repeat(256));
+
+        assert!(graph.edges.iter().all(|edges| edges.capacity() == 0));
     }
 
     #[test]

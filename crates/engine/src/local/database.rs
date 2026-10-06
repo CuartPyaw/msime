@@ -1,6 +1,6 @@
-//! Read-only connections for the local mode queries. The reference opened a fresh connection per query for every generation path (local_database.cpp:14-97), which costs a file open per keystroke; this keeps one per path for the process instead, dropped by `close_cached_local_databases` before directories are replaced.
+//! Read-only connections for the local mode queries. The reference opened a fresh connection per query for every generation path (local_database.cpp:14-97), which costs a file open per keystroke; this keeps one per path instead, for as long as a session uses the directory holding it. When the last `LocalDatabaseLease` on a directory goes, its connections close, so as in the reference nothing holds a generation's `msime-pinyin.db` once the sessions are gone: a reset or snapshot restore that replaces the file then (Windows cannot rename it while open) is read by the next session, not the old inode. `close_cached_local_databases` drops every connection before directories are replaced in-process.
 //!
-//! At most one connection is kept per file name, as the reference did for the shipped dictionaries (local_database.cpp:75-80): opening the next generation's `msime.db` releases the previous one, so a long-running host never holds a deleted generation open and a test process that creates hundreds of temporary directories never accumulates descriptors. Callers hold an `Arc`, so an evicted connection stays valid until its last in-flight query ends.
+//! At most one connection is kept per file name, as the reference did for the shipped dictionaries (local_database.cpp:75-80): opening the next generation's `msime-pinyin.db` releases the previous one, so a long-running host never holds a deleted generation open and a test process that creates hundreds of temporary directories never accumulates descriptors. Callers hold an `Arc`, so an evicted connection stays valid until its last in-flight query ends.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -20,6 +20,52 @@ struct CachedConnection {
 /// Keyed by file name; the entry remembers which full path it belongs to.
 static CACHE: LazyLock<Mutex<HashMap<OsString, CachedConnection>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// How many live sessions use each directory; `LocalDatabaseLease` keeps it.
+static USERS: LazyLock<Mutex<HashMap<PathBuf, usize>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Held by a session for the directories its local-mode queries read. Dropping the last lease on a directory closes the cached connections of the files in it; callers already holding one keep it until their query ends.
+pub(crate) struct LocalDatabaseLease {
+    directories: Vec<PathBuf>,
+}
+
+impl LocalDatabaseLease {
+    pub(crate) fn new(directories: impl IntoIterator<Item = PathBuf>) -> Self {
+        let directories: Vec<PathBuf> = directories.into_iter().collect();
+        let mut users = lock(&USERS);
+        for directory in &directories {
+            *users.entry(directory.clone()).or_default() += 1;
+        }
+        Self { directories }
+    }
+}
+
+impl Drop for LocalDatabaseLease {
+    fn drop(&mut self) {
+        let mut users = lock(&USERS);
+        let mut released = Vec::new();
+        for directory in &self.directories {
+            if let Some(count) = users.get_mut(directory) {
+                *count -= 1;
+                if *count == 0 {
+                    users.remove(directory);
+                    released.push(directory);
+                }
+            }
+        }
+        if released.is_empty() {
+            return;
+        }
+        // Lock order: USERS, then CACHE; `open_local_database` takes only CACHE.
+        lock(&CACHE).retain(|_, cached| {
+            !cached
+                .path
+                .parent()
+                .is_some_and(|parent| released.iter().any(|directory| *directory == parent))
+        });
+    }
+}
 
 /// READONLY, busy timeout 1000 ms. `None` when the file cannot be opened.
 pub fn open_local_database(path: &Path) -> Option<Arc<Mutex<Connection>>> {
@@ -110,6 +156,25 @@ mod tests {
         let cache = lock(&CACHE);
         let cached = cache.get(OsStr::new("generation-local.db"));
         assert!(cached.is_none_or(|cached| cached.path == second_path));
+    }
+
+    #[test]
+    fn the_last_lease_on_a_directory_closes_its_connections() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = fixture(dir.path(), "leased-local.db");
+        let first = LocalDatabaseLease::new([dir.path().to_path_buf()]);
+        let second = LocalDatabaseLease::new([dir.path().to_path_buf()]);
+        let opened = open_local_database(&path).unwrap();
+        drop(first);
+        let cached = || {
+            lock(&CACHE)
+                .get(OsStr::new("leased-local.db"))
+                .is_some_and(|cached| Arc::ptr_eq(&cached.connection, &opened))
+        };
+        drop(second);
+        assert!(!cached(), "the last lease left the connection cached");
+        assert_eq!(Arc::strong_count(&opened), 1);
+        assert!(!lock(&USERS).contains_key(dir.path()));
     }
 
     #[test]

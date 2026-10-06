@@ -1104,6 +1104,13 @@ STDAPI CMetasequoiaIME::OnCompositionTerminated(TfEditCookie ecWrite, _In_ ITfCo
         _compositionEpoch.fetch_add(1, std::memory_order_acq_rel);
     }
 
+    // 应用结束韩文、注音、越南文或藏文的组字时，文字留在文档里（scheme::AlwaysInlinePreedit 不论预编辑偏好如何都把它画在那里）。宿主会话也必须放开它，否则下一个键会在这段文字上继续组字，再上屏一次。TIP 自己结束的组字已经处理过宿主，那时宿主可能已经在组下一段。
+    if (!_terminatingOwnComposition &&
+        msime::windows::scheme::AlwaysInlinePreedit(Global::InputModeScheme.load(std::memory_order_relaxed)))
+    {
+        (void)_CancelHostComposition();
+    }
+
     // Detach and end the old candidate/session before the COM cleanup calls
     // below can re-enter and create a presenter for a newer composition.
     _DeleteCandidateList(FALSE, ownerContext);

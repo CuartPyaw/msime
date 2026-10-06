@@ -11,6 +11,12 @@ private enum StatisticsSymbol {
     case .shuangpin, .ziranma, .microsoft, .shoudao: return "square.on.square"
     case .wubi: return "scribble"
     case .japanese: return "character.bubble"
+    case .korean: return "character.bubble.fill"
+    case .cantonese: return "character.book.closed"
+    case .zhuyin: return "character.phonetic"
+    case .vietnamese: return "textformat.abc.dottedunderline"
+    case .tibetan: return "character"
+    case .stroke: return "pencil.line"
     case .handwriting: return "hand.draw"
     case .english: return "abc"
     case .local: return "clock.arrow.circlepath"
@@ -47,8 +53,8 @@ struct TypingStatisticsView: View {
 
   /// 三块内容轮流占这一屏,不再一路往下滚。
   private enum Tab: String, CaseIterable {
-    case trend, rhythm, kind, mode, scheme
-    /// 标签只给两个字 —— 四格分段控件上放「语言模式」「输入方案」会挤成一行小字;全名在下面的分组标题里。
+    case trend, rhythm, kind, mode, scheme, keys
+    /// 标签只给两个字 —— 六格分段控件上放「语言模式」「输入方案」会挤成一行小字;全名在下面的分组标题里。
     var title: String {
       switch self {
       case .trend: return "趋势"
@@ -56,6 +62,7 @@ struct TypingStatisticsView: View {
       case .kind: return "类型"
       case .mode: return "模式"
       case .scheme: return "方案"
+      case .keys: return "按键"
       }
     }
   }
@@ -85,7 +92,7 @@ struct TypingStatisticsView: View {
   /// 扇区颜色:品牌绿的一条明度梯度,不是八个互不相干的色相。
   ///
   /// 原先是 `.teal .blue .indigo .orange .pink .purple .brown .gray`。图表确实需要相邻扇区能分开,但八种色相除了"彼此不同"之外什么都没说,而且这一页因此和应用其余部分不是一套配色。梯度按同一顺序排进图例,所以哪一档对应哪一项仍然读得出来。
-  private let colors: [Color] = MetasequoiaTheme.chartRamp(8)
+  private let colors: [Color] = MetasequoiaTheme.chartRamp(11)
   @State private var availability = TypingStatisticsStore.Availability.neverWritten
   // The old copy asked for Full Access unconditionally, so it said the same thing whether the
   // setting was the problem or not and carried no information. Each case here is a different
@@ -112,6 +119,7 @@ struct TypingStatisticsView: View {
   /// 点了某一天就只看那一天,否则看累计。
   private var scopeDates: [Date]? { selectedDay.map { [$0] } }
   private var breakdown: TypingBreakdown { statistics.breakdown(on: scopeDates) }
+  private var keyHeatmap: TypingKeyHeatmap { TypingKeyHeatmap(counts: statistics.keyCounts(on: scopeDates)) }
   private var scopeTotal: Int { scopeDates?.reduce(0) { $0 + statistics.count(on: $1) } ?? statistics.total }
   private var scopeTitle: String {
     if let selectedDay { return selectedDay.formatted(.dateTime.month().day()) }
@@ -132,14 +140,17 @@ struct TypingStatisticsView: View {
   private var languageSlices: [StatisticsSlice] {
     let sources = breakdown.sources
     return [
-      StatisticsSlice(id: "chinese", title: "中文模式", count: ["quanpin", "nineKey", "shuangpin", "ziranma", "microsoft", "shoudao", "wubi"].reduce(0) { $0 + (sources[$1] ?? 0) }, color: colors[0], symbol: "character.textbox"),
+      StatisticsSlice(id: "chinese", title: "中文模式", count: ["quanpin", "nineKey", "shuangpin", "ziranma", "microsoft", "shoudao", "wubi", "cantonese", "zhuyin", "stroke"].reduce(0) { $0 + (sources[$1] ?? 0) }, color: colors[0], symbol: "character.textbox"),
       StatisticsSlice(id: "japanese", title: "日语模式", count: sources["japanese"] ?? 0, color: colors[1], symbol: "character.bubble"),
-      StatisticsSlice(id: "english", title: "英文模式", count: sources["english"] ?? 0, color: colors[2], symbol: "abc"),
-      StatisticsSlice(id: "local", title: "本地输入", count: sources["local"] ?? 0, color: colors[3], symbol: "clock.arrow.circlepath"),
-      StatisticsSlice(id: "ai", title: "AI 润色", count: sources["ai"] ?? 0, color: colors[4], symbol: "sparkles"),
-      StatisticsSlice(id: "reply", title: "高情商回复", count: sources["reply"] ?? 0, color: colors[5], symbol: "bubble.left.and.bubble.right"),
-      StatisticsSlice(id: "voice", title: "语音输入", count: sources["voice"] ?? 0, color: colors[6], symbol: "waveform"),
-      StatisticsSlice(id: "unknown", title: "历史未分类", count: sources["unknown"] ?? 0, color: colors[7], symbol: "questionmark.circle"),
+      StatisticsSlice(id: "korean", title: "韩语模式", count: sources["korean"] ?? 0, color: colors[2], symbol: "character.bubble.fill"),
+      StatisticsSlice(id: "vietnamese", title: "越南语模式", count: sources["vietnamese"] ?? 0, color: colors[3], symbol: "textformat.abc.dottedunderline"),
+      StatisticsSlice(id: "tibetan", title: "藏文模式", count: sources["tibetan"] ?? 0, color: colors[4], symbol: "character"),
+      StatisticsSlice(id: "english", title: "英文模式", count: sources["english"] ?? 0, color: colors[5], symbol: "abc"),
+      StatisticsSlice(id: "local", title: "本地输入", count: sources["local"] ?? 0, color: colors[6], symbol: "clock.arrow.circlepath"),
+      StatisticsSlice(id: "ai", title: "AI 润色", count: sources["ai"] ?? 0, color: colors[7], symbol: "sparkles"),
+      StatisticsSlice(id: "reply", title: "高情商回复", count: sources["reply"] ?? 0, color: colors[8], symbol: "bubble.left.and.bubble.right"),
+      StatisticsSlice(id: "voice", title: "语音输入", count: sources["voice"] ?? 0, color: colors[9], symbol: "waveform"),
+      StatisticsSlice(id: "unknown", title: "历史未分类", count: sources["unknown"] ?? 0, color: colors[10], symbol: "questionmark.circle"),
     ]
   }
 
@@ -180,17 +191,19 @@ struct TypingStatisticsView: View {
         Section {
           distribution(languageSlices, chart: .donut)
         } header: { Text("语言模式") }
-          footer: { Text("按提交时使用的键盘模式统计，不推测文本语言；中文模式下输入的数字仍计入中文模式。AI 润色和语音输入单独按来源统计。") }
+          footer: { Text("按提交时使用的键盘模式统计，不推测文本语言；粤拼、大千注音和笔画计入中文模式，中文模式下输入的数字仍计入中文模式。AI 润色和语音输入单独按来源统计。") }
       case .scheme:
         Section {
           distribution(sourceSlices, chart: .rank)
         } header: { Text("输入方案") }
-          footer: { Text("拼音方案统计其上屏字符数，不计未上屏的拼音按键。旧版本总数保留为历史未分类，新输入开始记录细分。") }
+          footer: { Text("拼音方案统计其上屏字符数，拼写时的按键另计在“按键”页。来源无法归类的字数计入历史未分类。") }
+      case .keys:
+        keySections
       }
       // 开关、刷新和清空挪到了右上角的菜单:这一页是给人看数的,三个管理项挂在每一屏下面,每换一个标签都要再滚过它们一次。说明留在原处 —— 它解释的是屏幕上这些数字怎么来的。
       Section {
       } footer: {
-        Text("仅统计水杉键盘提交的字符，含标点及表情，不含空格、换行和未上屏拼音。组合表情计为一个字符，删除文字不扣减。仅在本机保存分类计数，不保存输入内容。每日明细默认永久保留，可在右上角菜单里缩短为 30 至 365 天，超期的每日记录随即删除，并同时从累计总数和分类中扣除；要全部删除请用“清空统计”。")
+        Text("字数只统计水杉键盘提交的字符，含标点及表情，不含空格和换行。组合表情计为一个字符，删除文字不扣减。按键热力图另计每个键的按下次数，拼音拼写、删除和功能键都算，密码框里的按键不计；按键热力图只保存每个键每天被按下的次数，不保存按键顺序和输入内容。所有统计仅在本机保存计数，不保存输入内容。每日明细默认永久保留，可在右上角菜单里缩短为 30 至 365 天，超期的每日记录随即删除，并同时从累计总数和分类中扣除；要全部删除请用“清空统计”。")
       }
       if let advice = storageAdvice {
         Section("统计没有数据") {
@@ -240,7 +253,7 @@ struct TypingStatisticsView: View {
     .alert("清空所有打字统计？", isPresented: $confirmsReset) {
       Button("取消", role: .cancel) {}
       Button("清空", role: .destructive) { update { try store.reset() }; selectedDay = nil }
-    } message: { Text("累计字数、分类和每日记录将被删除，无法恢复。") }
+    } message: { Text("累计字数、分类、按键次数和每日记录将被删除，无法恢复。") }
   }
 
   private var trendChart: some View {
@@ -259,6 +272,42 @@ struct TypingStatisticsView: View {
         selectedDay = selectedDay == date ? nil : date
       }
     }.padding(.vertical, 8).accessibilityElement(children: .contain).accessibilityIdentifier("statisticsTrend")
+  }
+
+  /// 按键:键盘热力图、按得最多的五个键,以及键盘上画不出位置的键。和其他标签一样跟着选中的那一天走。
+  @ViewBuilder private var keySections: some View {
+    let heatmap = keyHeatmap
+    Section {
+      StatisticsKeyboardHeatmap(heatmap: heatmap, accent: MetasequoiaTheme.accent)
+        .padding(.vertical, 8)
+      if heatmap.total == 0 {
+        Text("暂无按键记录").font(.subheadline).foregroundStyle(.secondary)
+      }
+    } header: { Text(selectedDay == nil ? "按键热力 · 累计" : "按键热力 · \(scopeTitle)") }
+      footer: { Text("每个键按下一次计一次，按住删除键连删也只算一次。只保存每个键每天被按下的次数，不保存按键顺序和输入内容。") }
+    if heatmap.total > 0 {
+      Section {
+        keyRows(heatmap.top())
+      } header: { Text("最常按的键") }
+    }
+    if !heatmap.others.isEmpty {
+      Section {
+        keyRows(heatmap.others)
+      } header: { Text("其他键") }
+        footer: { Text("数字、标点、符号键等键盘图上没有位置的键。符号按产生它的英文键盘按键计，例如“！”计入 1 键。") }
+    }
+  }
+
+  private func keyRows(_ keys: [TypingKeyHeatmap.Key]) -> some View {
+    ForEach(keys, id: \.id) { key in
+      HStack {
+        Text(key.label)
+        Spacer()
+        Text("\(key.count.formatted()) 次").monospacedDigit().foregroundStyle(.secondary)
+      }
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel(TypingKeyHeatmap.accessibilityLabel(key.id, count: key.count))
+    }
   }
 
   private var activity: TypingActivity { statistics.activity(todayKey: TypingStatistics.dayKey(Date())) }

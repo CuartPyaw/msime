@@ -23,11 +23,12 @@ public final class CandidateTranslationStore {
         void onArrival(long generation);
     }
     public static final long QUIET_INTERVAL_MILLIS = 350;
+    private static final int MAX_CACHE_ENTRIES = 256;
     private final Service service;
     private final ExecutorService worker;
     private final Scheduler scheduler;
     private final Listener listener;
-    private final Map<String, String> cache = new LinkedHashMap<>();
+    private final Map<String, String> cache = new LinkedHashMap<>(16, 0.75f, true);
     private Runnable pending;
     private String signature;
     private long requestEpoch;
@@ -90,6 +91,10 @@ public final class CandidateTranslationStore {
         requestEpoch = requestEpoch == Long.MAX_VALUE ? 0 : requestEpoch + 1;
         if (pending != null) scheduler.removeCallbacks(pending);
         pending = null;
+        // Any in-flight request is fenced by the new epoch. Its signature must
+        // be released too, otherwise an identical refresh would be deduplicated
+        // even though the old response can no longer populate the cache.
+        signature = null;
     }
 
     public void clear() {
@@ -150,10 +155,17 @@ public final class CandidateTranslationStore {
             value = trimWhitespace(value);
             if (value == null || value.isEmpty() || value.equals(words.get(index))
                     || TextPolicy.utf8Length(value) > 4096) continue;
-            cache.put(key(target, words.get(index)), value);
+            remember(key(target, words.get(index)), value);
             arrived = true;
         }
         if (arrived) listener.onArrival(generation);
+    }
+
+    private void remember(String cacheKey, String value) {
+        if (!cache.containsKey(cacheKey) && cache.size() >= MAX_CACHE_ENTRIES) {
+            cache.remove(cache.keySet().iterator().next());
+        }
+        cache.put(cacheKey, value);
     }
 
     /** Match Apple's whitespace/newline normalization before a gloss enters the cache. */

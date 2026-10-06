@@ -30,6 +30,27 @@ bool store_parent_is_safe(const std::filesystem::path &store) {
   return true;
 }
 
+bool store_leaf_is_safe(const std::filesystem::path &store) {
+#ifdef _WIN32
+  HANDLE handle = CreateFileW(
+      store.c_str(), FILE_READ_ATTRIBUTES,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+      nullptr);
+  if (handle == INVALID_HANDLE_VALUE) {
+    const auto error = GetLastError();
+    return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
+  }
+  const bool safe = handle_is_trusted_file(handle);
+  CloseHandle(handle);
+  return safe;
+#else
+  (void)store;
+  return true;
+#endif
+}
+
+#ifndef _WIN32
 bool read_store_payload(std::ifstream &input, std::string &payload) {
   std::array<char, 8192> buffer{};
   while (input) {
@@ -42,6 +63,23 @@ bool read_store_payload(std::ifstream &input, std::string &payload) {
   }
   return input.eof();
 }
+#else
+bool read_store_payload(HANDLE input, std::string &payload) {
+  std::array<char, 8192> buffer{};
+  for (;;) {
+    DWORD count = 0;
+    if (!ReadFile(input, buffer.data(), static_cast<DWORD>(buffer.size()),
+                  &count, nullptr))
+      return false;
+    if (count == 0)
+      return true;
+    const auto bytes = static_cast<size_t>(count);
+    if (payload.size() > max_store_bytes - bytes)
+      return false;
+    payload.append(buffer.data(), bytes);
+  }
+}
+#endif
 
 class StoreLock final {
 public:
@@ -52,9 +90,16 @@ public:
     auto lock_path = store;
     lock_path += ".lock";
     handle_ = CreateFileW(lock_path.c_str(), GENERIC_READ | GENERIC_WRITE,
-                          FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                          nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+                          FILE_SHARE_READ | FILE_SHARE_WRITE,
+                          nullptr, OPEN_ALWAYS,
+                          FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+                          nullptr);
     if (handle_ == INVALID_HANDLE_VALUE) {
+      handle_ = nullptr;
+      return;
+    }
+    if (!handle_is_trusted_file(handle_)) {
+      CloseHandle(handle_);
       handle_ = nullptr;
       return;
     }
@@ -90,13 +135,38 @@ private:
 #endif
 };
 std::vector<std::string> read_store(const std::filesystem::path &path) {
-  std::ifstream input(path, std::ios::binary); if (!input) return {};
+#ifdef _WIN32
+  HANDLE input = CreateFileW(
+      path.c_str(), GENERIC_READ,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+      nullptr);
+  if (input == INVALID_HANDLE_VALUE)
+    return {};
+  LARGE_INTEGER size{};
+  if (!handle_is_trusted_file(input) ||
+      !GetFileSizeEx(input, &size) || size.QuadPart < 0 ||
+      static_cast<ULONGLONG>(size.QuadPart) > max_store_bytes) {
+    CloseHandle(input);
+    return {};
+  }
+#else
+  std::ifstream input(path, std::ios::binary);
+  if (!input)
+    return {};
+#endif
   std::string payload;
-  if (!read_store_payload(input, payload)) return {};
-  try { const auto value = nlohmann::json::parse(payload); if (!value.is_array()) return {}; std::vector<std::string> result; for (const auto &item : value) { if (!item.is_string()) continue; auto text = normalize_clipboard_text(item.get<std::string>()); if (!text.empty() && result.size() < ClipboardHistory::max_items) result.push_back(std::move(text)); } return result; } catch (...) { return {}; }
+#ifdef _WIN32
+  const bool read = read_store_payload(input, payload);
+  CloseHandle(input);
+#else
+  const bool read = read_store_payload(input, payload);
+#endif
+  if (!read) return {};
+  try { const auto value = nlohmann::json::parse(payload); if (!value.is_array()) return {}; std::vector<std::string> result; result.reserve(ClipboardHistory::max_items); for (const auto &item : value) { if (!item.is_string()) continue; auto text = normalize_clipboard_text(item.get<std::string>()); if (!text.empty() && result.size() < ClipboardHistory::max_items) result.push_back(std::move(text)); } return result; } catch (...) { return {}; }
 }
 bool write_store(const std::filesystem::path &path, const std::vector<std::string> &items) {
-  if (!store_parent_is_safe(path)) return false;
+  if (!store_parent_is_safe(path) || !store_leaf_is_safe(path)) return false;
   std::error_code error;
   std::filesystem::create_directories(path.parent_path(), error);
   if (error) return false;

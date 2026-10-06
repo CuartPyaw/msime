@@ -19,6 +19,8 @@
 - (void)floatingToolbarDidRequestCheckForUpdates:(MetasequoiaFloatingToolbarPanel *)toolbar;
 - (void)floatingToolbarDidRequestOpenWebsite:(MetasequoiaFloatingToolbarPanel *)toolbar;
 - (void)floatingToolbarDidRequestHide:(MetasequoiaFloatingToolbarPanel *)toolbar;
+/// 切换输入方案按钮弹出的菜单：可用的方案，正在用的那个打勾，选中即切换。
+- (NSMenu *)floatingToolbarInputSchemeMenu:(MetasequoiaFloatingToolbarPanel *)toolbar;
 @end
 
 FOUNDATION_EXPORT NSRect MetasequoiaFloatingToolbarFrame(NSRect proposedFrame, NSRect visibleFrame, BOOL hasSavedFrame);
@@ -28,6 +30,8 @@ FOUNDATION_EXPORT BOOL MetasequoiaFloatingToolbarShouldShow(BOOL configuredEnabl
 /// Return whether a foreground window covers the complete display rectangle, allowing a
 /// small coordinate tolerance for the borderless edge used by native full-screen windows.
 FOUNDATION_EXPORT BOOL MetasequoiaWindowCoversDisplay(CGRect windowBounds, CGRect displayBounds);
+/// Return whether the foreground application, other than this process, has a window covering a whole display. Walks the on-screen window list: not for every key press.
+FOUNDATION_EXPORT BOOL MetasequoiaFrontmostApplicationOwnsFullscreenDisplay(void);
 FOUNDATION_EXPORT NSMenu *CreateMetasequoiaFloatingToolbarUtilityMenu(id target);
 
 @interface MetasequoiaFloatingToolbarPanel : NSPanel
@@ -37,9 +41,11 @@ FOUNDATION_EXPORT NSMenu *CreateMetasequoiaFloatingToolbarUtilityMenu(id target)
           chinesePunctuationEnabled:(BOOL)chinesePunctuationEnabled
                    fullWidthEnabled:(BOOL)fullWidthEnabled
     traditionalChineseOutputEnabled:(BOOL)traditionalChineseOutputEnabled;
+/// 模式按钮在大写锁定时显示 A，英文模式显示 英，英文候选显示 En，其余情况显示方案徽标——全拼 中、双拼 双、五笔 五、日语 日、韩语 한、粤拼 粤、注音 注、越南语 越、藏文 ཀ、笔画 笔，与输入菜单一致。一个字分不出双拼键位或五笔版本，所以 `schemeTitle`（小鹤双拼、五笔 86、五笔 98 等）放在按钮提示和辅助功能标签的开头；传 nil 时只写动作。
 - (void)updateEnglishInputMode:(BOOL)englishInputMode
          englishCandidateMode:(BOOL)englishCandidateMode
-             japaneseInputMode:(BOOL)japaneseInputMode
+                        scheme:(NSString *)scheme
+                   schemeTitle:(NSString *)schemeTitle
                       capsLock:(BOOL)capsLock
           chinesePunctuationEnabled:(BOOL)chinesePunctuationEnabled
                    fullWidthEnabled:(BOOL)fullWidthEnabled

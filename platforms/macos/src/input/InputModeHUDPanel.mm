@@ -1,13 +1,18 @@
 #import "InputModeHUDPanel.h"
 
+#import <algorithm>
 #import <cmath>
 
 namespace {
-constexpr CGFloat kPanelWidth = 100.0;
-constexpr CGFloat kPanelHeight = 56.0;
-constexpr CGFloat kLogoSide = 30.0;
+// The badge is the floating toolbar's size, read from the same floating_toolbar.font_size and scale_percent (FloatingToolbarPanel.mm -applySizingPreferences:): the toolbar's (font + 20) x scale height, its 0.95 x font glyphs, its 22pt brand mark and its 10pt native corner radius, all scaled.
+constexpr CGFloat kDefaultFontSize = 24.0;
+constexpr CGFloat kGlyphScale = 0.95;
+constexpr CGFloat kHeightPadding = 20.0;
+constexpr CGFloat kLogoSide = 22.0;
+constexpr CGFloat kCornerRadius = 10.0;
+constexpr CGFloat kHorizontalInset = 12.0;
 constexpr CGFloat kContentSpacing = 6.0;
-constexpr CGFloat kCornerRadius = 16.0;
+constexpr CGFloat kBorderWidth = 1.0;
 constexpr CGFloat kScreenMargin = 8.0;
 constexpr CGFloat kCaretGap = 10.0;
 constexpr NSTimeInterval kVisibleDuration = 0.6;
@@ -17,24 +22,6 @@ CGFloat Clamp(CGFloat value, CGFloat minimum, CGFloat maximum) {
     if (maximum < minimum) return minimum;
     return value < minimum ? minimum : (value > maximum ? maximum : value);
 }
-}
-
-// The HUD is a brand badge rather than a themed surface, so it takes the brand accent (#2C7A4B light, #5FBF84 dark) the native candidate selection uses, not the retired forest #185C48 / #61B491.
-NSColor *MSIMEInputModeHUDForestColor(void) {
-    return [NSColor colorWithName:@"MSIMEInputModeHUDForest" dynamicProvider:^NSColor *(NSAppearance *appearance) {
-        const BOOL dark = [appearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]] == NSAppearanceNameDarkAqua;
-        return dark ? [NSColor colorWithSRGBRed:0x5F / 255.0 green:0xBF / 255.0 blue:0x84 / 255.0 alpha:1.0]
-                    : [NSColor colorWithSRGBRed:0x2C / 255.0 green:0x7A / 255.0 blue:0x4B / 255.0 alpha:1.0];
-    }];
-}
-
-// White on the light accent; the dark accent is too light for white glyphs, so it keeps the dark ink, as the contract's readable_text(accent) would pick.
-NSColor *MSIMEInputModeHUDOnForestColor(void) {
-    return [NSColor colorWithName:@"MSIMEInputModeHUDOnForest" dynamicProvider:^NSColor *(NSAppearance *appearance) {
-        const BOOL dark = [appearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]] == NSAppearanceNameDarkAqua;
-        return dark ? [NSColor colorWithSRGBRed:20.0 / 255.0 green:35.0 / 255.0 blue:29.0 / 255.0 alpha:1.0]
-                    : [NSColor whiteColor];
-    }];
 }
 
 NSString *MSIMEInputModeHUDText(BOOL englishInputMode) { return englishInputMode ? @"英" : @"中"; }
@@ -64,6 +51,14 @@ NSRect MSIMEInputModeHUDFrame(NSRect caretRect, NSSize panelSize, NSRect visible
     NSTextField *_label;
     NSImageView *_logoView;
     NSTimer *_dismissTimer;
+    NSColor *_surfaceColor;
+    NSColor *_borderColor;
+    NSColor *_textColor;
+    NSStackView *_content;
+    NSLayoutConstraint *_logoWidth;
+    NSLayoutConstraint *_logoHeight;
+    CGFloat _fontSize;
+    CGFloat _scale;
 }
 
 + (instancetype)sharedPanel {
@@ -74,7 +69,7 @@ NSRect MSIMEInputModeHUDFrame(NSRect caretRect, NSSize panelSize, NSRect visible
 }
 
 - (instancetype)init {
-    self = [super initWithContentRect:NSMakeRect(0, 0, kPanelWidth, kPanelHeight)
+    self = [super initWithContentRect:NSMakeRect(0, 0, 1, 1)
                               styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
                                 backing:NSBackingStoreBuffered defer:YES];
     if (!self) return nil;
@@ -90,42 +85,92 @@ NSRect MSIMEInputModeHUDFrame(NSRect caretRect, NSSize panelSize, NSRect visible
                               NSWindowCollectionBehaviorTransient | NSWindowCollectionBehaviorIgnoresCycle;
     self.animationBehavior = NSWindowAnimationBehaviorNone;
 
-    NSView *background = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, kPanelWidth, kPanelHeight)];
+    NSView *background = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 1, 1)];
     background.wantsLayer = YES;
-    background.layer.cornerRadius = kCornerRadius;
     background.layer.masksToBounds = YES;
     background.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    NSImage *logo = [[NSBundle bundleForClass:self.class] imageForResource:@"MSIMEClientInputMethodMenuIcon"];
-    [logo setTemplate:YES];
+    // The full-colour brand mark the floating toolbar leads with, not the monochrome menu bar template.
+    NSString *logoPath = [[NSBundle bundleForClass:self.class] pathForResource:@"MSIMEClientInputMethod" ofType:@"icns"];
+    NSImage *logo = logoPath ? [[NSImage alloc] initWithContentsOfFile:logoPath] : nil;
     _logoView = [NSImageView imageViewWithImage:logo ?: [[NSImage alloc] initWithSize:NSZeroSize]];
     _logoView.hidden = logo == nil;
+    _logoView.imageScaling = NSImageScaleProportionallyUpOrDown;
     _logoView.translatesAutoresizingMaskIntoConstraints = NO;
     _label = [NSTextField labelWithString:@""];
     _label.alignment = NSTextAlignmentCenter;
-    _label.font = [NSFont systemFontOfSize:30.0 weight:NSFontWeightSemibold];
     _label.translatesAutoresizingMaskIntoConstraints = NO;
-    NSStackView *content = [NSStackView stackViewWithViews:logo ? @[_logoView, _label] : @[_label]];
-    content.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-    content.alignment = NSLayoutAttributeCenterY;
-    content.spacing = kContentSpacing;
-    content.translatesAutoresizingMaskIntoConstraints = NO;
-    [background addSubview:content];
+    _content = [NSStackView stackViewWithViews:logo ? @[_logoView, _label] : @[_label]];
+    _content.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    _content.alignment = NSLayoutAttributeCenterY;
+    _content.translatesAutoresizingMaskIntoConstraints = NO;
+    [background addSubview:_content];
+    _logoWidth = [_logoView.widthAnchor constraintEqualToConstant:kLogoSide];
+    _logoHeight = [_logoView.heightAnchor constraintEqualToConstant:kLogoSide];
     [NSLayoutConstraint activateConstraints:@[
-        [content.centerXAnchor constraintEqualToAnchor:background.centerXAnchor],
-        [content.centerYAnchor constraintEqualToAnchor:background.centerYAnchor],
-        [_logoView.widthAnchor constraintEqualToConstant:kLogoSide],
-        [_logoView.heightAnchor constraintEqualToConstant:kLogoSide],
+        [_content.centerXAnchor constraintEqualToAnchor:background.centerXAnchor],
+        [_content.centerYAnchor constraintEqualToAnchor:background.centerYAnchor],
+        _logoWidth,
+        _logoHeight,
     ]];
     self.contentView = background;
+    [self applySizingPreferences:@{}];
     [self applyThemeColors];
     return self;
 }
 
+- (void)applySizingPreferences:(NSDictionary *)preferences {
+    id toolbar = preferences[@"floating_toolbar"];
+    if (![toolbar isKindOfClass:NSDictionary.class]) toolbar = @{};
+    id scaleValue = toolbar[@"scale_percent"] ?: @100;
+    id fontValue = toolbar[@"font_size"] ?: @(kDefaultFontSize);
+    _scale = [@[@75, @100, @125, @150] containsObject:scaleValue] ? [scaleValue doubleValue] / 100.0 : 1.0;
+    _fontSize = [@[@16, @18, @20, @22, @24, @26, @28] containsObject:fontValue] ? [fontValue doubleValue] : kDefaultFontSize;
+    _label.font = [NSFont systemFontOfSize:_fontSize * _scale * kGlyphScale weight:NSFontWeightSemibold];
+    _logoWidth.constant = kLogoSide * _scale;
+    _logoHeight.constant = kLogoSide * _scale;
+    _content.spacing = kContentSpacing * _scale;
+    self.contentView.layer.cornerRadius = kCornerRadius * _scale;
+    [self setContentSize:self.panelSize];
+}
+
+- (NSSize)panelSize {
+    // The wider of the two characters, so switching modes never changes the badge's width.
+    CGFloat glyph = 0.0;
+    for (NSString *text in @[MSIMEInputModeHUDText(NO), MSIMEInputModeHUDText(YES)])
+        glyph = std::max(glyph, [text sizeWithAttributes:@{NSFontAttributeName : _label.font}].width);
+    const CGFloat logo = _logoView.hidden ? 0.0 : (kLogoSide + kContentSpacing) * _scale;
+    // NSWindow rounds fractional point sizes; round outward so nothing is clipped, as the toolbar does.
+    return NSMakeSize(std::ceil(2.0 * kHorizontalInset * _scale + logo + glyph), std::ceil((_fontSize + kHeightPadding) * _scale));
+}
+
+- (void)setSurfaceColor:(NSColor *)surface borderColor:(NSColor *)border textColor:(NSColor *)text {
+    _surfaceColor = [surface copy];
+    _borderColor = [border copy];
+    _textColor = [text copy];
+    [self applyThemeColors];
+}
+
+- (void)applyThemePreferences:(NSDictionary *)preferences {
+    id surface = preferences[@"toolbar_theme"];
+    id global = preferences[@"theme"];
+    id resolved = ([surface isEqual:@"dark"] || [surface isEqual:@"light"]) ? surface : global;
+    if ([resolved isEqual:@"light"]) self.appearance = [NSAppearance appearanceNamed:NSAppearanceNameAqua];
+    else if (resolved == nil || [resolved isEqual:@"system"]) self.appearance = nil;
+    else self.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+    [self applyThemeColors];
+}
+
+- (NSColor *)surfaceColor { return _surfaceColor ?: NSColor.windowBackgroundColor; }
+- (NSColor *)borderColor { return _borderColor ?: NSColor.separatorColor; }
+- (NSColor *)textColor { return _textColor ?: NSColor.labelColor; }
+
+// Layer colours are resolved once, so they are taken again in the panel's current appearance each time it is shown.
 - (void)applyThemeColors {
     [self.effectiveAppearance performAsCurrentDrawingAppearance:^{
-        self.contentView.layer.backgroundColor = MSIMEInputModeHUDForestColor().CGColor;
-        self->_label.textColor = MSIMEInputModeHUDOnForestColor();
-        self->_logoView.contentTintColor = MSIMEInputModeHUDOnForestColor();
+        self.contentView.layer.backgroundColor = self.surfaceColor.CGColor;
+        self.contentView.layer.borderColor = self.borderColor.CGColor;
+        self.contentView.layer.borderWidth = kBorderWidth;
+        self->_label.textColor = self.textColor;
     }];
 }
 
@@ -141,7 +186,7 @@ NSRect MSIMEInputModeHUDFrame(NSRect caretRect, NSSize panelSize, NSRect visible
         if (NSPointInRect(NSMakePoint(NSMidX(caretRect), NSMidY(caretRect)), candidate.frame)) { screen = candidate; break; }
     }
     NSRect visible = screen ? screen.visibleFrame : NSMakeRect(0, 0, 1440, 900);
-    [self setFrame:MSIMEInputModeHUDFrame(caretRect, NSMakeSize(kPanelWidth, kPanelHeight), visible) display:YES];
+    [self setFrame:MSIMEInputModeHUDFrame(caretRect, self.panelSize, visible) display:YES];
     [self applyThemeColors];
     [_dismissTimer invalidate];
     self.alphaValue = 1.0;

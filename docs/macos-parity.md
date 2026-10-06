@@ -60,7 +60,7 @@
 
 第四次按行为核对之后又补了一轮，针对的是「两边都有、但目标这边用户够不着」这一类。找出并修掉两个：
 
-- **#3216** macOS 设置页隐藏了表情、颜文字、临时日语三个本地模式开关，理由写的是「预览包只发 msime.db 和 english.db」。但 `others.db` 与 `dict_japanese.dat` 自 `780a9381b`（2026-09-09）就在 `resources/desktop-dictionary.lock.json` 里，比那条过滤早十天，而 `tauri.macos.conf.json` 整目录打包已校验的资源集——三个能用的模式在设置里没有任何办法打开。同样受资源门控的「临时英文」一直显示着，这个不一致本身就说明前提错了。资源真缺时由 `apply_local_mode_resource_gates` 关掉该模式、触发键原样插入大写字母，比隐藏开关更好。
+- **#3216** macOS 设置页隐藏了表情、颜文字、临时日语三个本地模式开关，理由写的是「预览包只发 msime-pinyin.db 和 msime-english.db」。但 `msime-others.db` 与 `msime-japanese.dat` 自 `780a9381b`（2026-09-09）就在 `resources/desktop-dictionary.lock.json` 里，比那条过滤早十天，而 `tauri.macos.conf.json` 整目录打包已校验的资源集——三个能用的模式在设置里没有任何办法打开。同样受资源门控的「临时英文」一直显示着，这个不一致本身就说明前提错了。资源真缺时由 `apply_local_mode_resource_gates` 关掉该模式、触发键原样插入大写字母，比隐藏开关更好。
 - **#3212** 本地 Whisper 模型只能手填绝对路径，而来源有 `browseVoiceModel:` 文件选择器。webview 的 file input 给的是内容不是路径，所以共享设置页答不了，改为向宿主要一个可选能力（`pickVoiceModelPath`），原生实现放在 `crates/host-macos/native/`，不引入新依赖；宿主不提供就不显示按钮，手填照旧。
 
 本轮核过且确认等价或目标更强的：来源 12 个共享后端文件目标全有（另有 `BackendAiClient`）；四个原生视图（剪贴板、词库、账号、设置同步）文案差集为空；云词库备份视图逐字一致；输入法菜单条目集合一致；引擎选项写入面一致（来源的嵌套字段对应目标的扁平字段，自动纠错来源是一个总开关、目标拆成换位与邻键两项，覆盖引擎仅有的两个位）；`HostSurface` 各能力位 macOS 均已开启，唯一未开的 `number_row_selection` 来源没有该功能；`platforms/macos/tests/settings/preference_coverage.py` 的「不适用」清单双向校验、无陈旧项。
@@ -156,7 +156,7 @@
 | 软件更新 | `UpdateController.mm`（Sparkle 2.9.6） | 共享 About 页检查本仓库发行版；`core/UpdateController.mm` 仅在应用 bundle 配置 `SUFeedURL` 时启动 Sparkle，无 feed 的原生降级会说明限制并经用户确认打开固定的官方发布页；非应用进程不显示更新 UI | 有强制检查（`update-controller` 覆盖三种路由、确认、取消与打开失败） |
 | 卸载 | `Uninstaller.mm` | `crates/host-macos/native/uninstaller.mm`，`shared-uninstaller` CTest | 有强制检查 |
 | 输入菜单图标、本地化、TCC 权限 | `MetasequoiaIMEMenuIcon.tiff`、`render_menu_icon.swift`、`Info.plist` 用途字符串 | `platforms/macos/resources/MSIMEClientInputMethodMenuIcon.{svg,tiff}` 与三个模式带角标的 `MSIMEClientInputMethodMenuIcon{Chinese,Japanese,English}.tiff`、`platforms/macos/scripts/render_menu_icon.swift`（#3021）；语音识别用途字符串及其本地化（#3015、#3052）；输入源名称的本地化键与 bundle id 配对 | 有强制检查（`info-plist-icons`、`info-plist-usage`、`info-plist-names`、`bundle-contents`） |
-| 账号、云剪贴板、云词典、快照、社区 | `shared/backend/*.swift` | `shared/backend/` 为来源的超集（另有 `BackendAiClient.swift`），并带 Swift 测试 | 有调用链 |
+| 账号、云剪贴板、云词库、快照、社区 | `shared/backend/*.swift` | `shared/backend/` 为来源的超集（另有 `BackendAiClient.swift`），并带 Swift 测试 | 有调用链 |
 
 ## 目标具备而来源没有的部分
 
@@ -186,7 +186,7 @@
 控制项标识和运行时偏好键这两条比对，看的都是「参考的设置窗口摆出了什么」。还有一层它们都看不见：参考在测试里钉住的行为契约。把 `platforms/macos/tests` 下 93 条 `require(...)` 的断言说明逐条读过来，对着目标找对应实现，这是找出真缺口最有效的一条轴——前两条都没有发现的东西，它发现了一个。逐条结果见 [macos-assertion-audit.md](macos-assertion-audit.md)。
 
 - **「The settings footer restore button was not found.」→ 真缺口，已补（#3280）。** 参考每一页底部都有「恢复默认设置」，目标只有「保存设置」。补的时候有一处必须反着做：参考清的那串偏好键里没有翻译和语音服务，因为在那边密钥不在这份文档里；在这边密钥就在文档里，所以 `Preferences::restored_to_defaults` 是从 `Default` 出发把服务配置搬回来，而且 endpoint / provider / model / 本地模型路径跟着密钥一起搬——留一个密钥指着默认 endpoint 比两个都留或都清更糟。Rust 侧的测试不逐字段列密钥，而是把恢复后的文档序列化出来找哨兵串，以后加了新密钥字段却忘了搬会被它挡住。
-- **输入菜单**当时逐项对齐过 Apple 来源（中文输入 / 英文输入 / 简体输出 / 繁体输出 / 表情与符号… / 检查更新… / 水杉输入法设置… / 开始或结束语音输入 / 语音输入设置…），之后按 MSIME-Windows 的托盘菜单重排：现在是 中文输入 / 英文输入 / 英文候选模式 / 简体输出 / 繁体输出 / 悬浮工具栏 / 水杉表情面板… / 水杉屏幕键盘… / 手写输入… / 开始/结束语音输入 / 水杉输入法设置… / 关于水杉输入法…，与 Windows 托盘菜单的七项（悬浮工具栏、表情/符号面板、手写识别板、屏幕键盘、语音输入、设置、关于）一一对应，检查更新与语音设置收进设置窗与悬浮工具栏。现状以 `platforms/macos/tests/input/ShortcutTest.mm` 对 `-[MSIMEInputController menu]` 的断言为准。
+- **输入菜单**当时逐项对齐过 Apple 来源（中文输入 / 英文输入 / 简体输出 / 繁体输出 / 表情与符号… / 检查更新… / 水杉输入法设置… / 开始或结束语音输入 / 语音输入设置…），之后按 MSIME-Windows 的托盘菜单重排：现在是 中文输入 / 英文输入 / 英文候选模式（⌃⇧E）/ 繁体输出 / 全角字符 / 中文标点 / 显示译文 / 输入方案（当前方案）▸ / 主题（当前主题）▸ / 悬浮工具栏 / 水杉表情面板… / 云剪贴板… / 水杉屏幕键盘… / 手写输入… / 开始/结束语音输入 / 水杉输入法设置… / 关于水杉输入法…，其中与 Windows 托盘菜单的七项（悬浮工具栏、表情/符号面板、手写识别板、屏幕键盘、语音输入、设置、关于）一一对应，检查更新与语音设置收进设置窗与悬浮工具栏。现状以 `platforms/macos/tests/input/ShortcutTest.mm` 对 `-[MSIMEInputController menu]` 的断言为准。
 - **「New apps must use the default input mode.」** 已实现：`platforms/macos/src/settings/AppearancePreferences.mm` 里没有记忆的应用回落到 `defaultImeMode`。
 - 其余关于卸载、更新控制器、候选面板、五笔自动上屏、学习数据清除确认的断言，逐条都有对应实现。
 

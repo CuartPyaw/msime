@@ -80,13 +80,26 @@ pub(crate) fn default_root() -> Option<PathBuf> {
         std::env::var_os("XDG_CONFIG_HOME").as_deref(),
         std::env::var_os("HOME").as_deref(),
     )?;
-    Some(base.join("msime-client"))
+    // 目录名随本安装包所属的版本（full 是 msime-client）。
+    Some(base.join(
+        &msime_client_core::edition::Edition::linux_package_identity_or_full().client_directory,
+    ))
 }
 
 fn atomic_write(path: &Path, contents: &[u8]) -> io::Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    crate::shared::atomic_file::check_directory_ancestors(parent)?;
+    if fs::symlink_metadata(path)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "locator is a symbolic link",
+        ));
+    }
     let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
     temporary.write_all(contents)?;
     temporary.as_file().sync_all()?;
@@ -121,7 +134,18 @@ fn state_entries(source: &Path) -> Result<Vec<OsString>, MoveError> {
 /// A target may already hold the marker and leftover staging directories. The default root, as a target when moving back, may also hold its pinned files, and nothing else.
 fn target_is_empty(target: &Path, default_root: &Path) -> Result<bool, MoveError> {
     for entry in fs::read_dir(target).map_err(|_| MoveError::InvalidTarget)? {
-        let name = entry.map_err(|_| MoveError::InvalidTarget)?.file_name();
+        let entry = entry.map_err(|_| MoveError::InvalidTarget)?;
+        // The marker and staging names are normally tolerated so an interrupted move can be
+        // resumed. They must still be real entries: fs::write(marker) below follows a symlink,
+        // which could otherwise overwrite a file outside the selected data directory.
+        if entry
+            .file_type()
+            .map_err(|_| MoveError::InvalidTarget)?
+            .is_symlink()
+        {
+            return Err(MoveError::InvalidTarget);
+        }
+        let name = entry.file_name();
         if name == DATA_DIRECTORY_MARKER
             || is_staging(&name)
             || (target == default_root && is_pinned(&name))
@@ -168,6 +192,15 @@ fn rebased_locator(
     written_source: &Path,
     target: &Path,
 ) -> Result<(LocatorBackup, Vec<u8>), MoveError> {
+    let parent = path.parent().ok_or(MoveError::Publish)?;
+    crate::shared::atomic_file::check_directory_ancestors(parent)
+        .map_err(|_| MoveError::Publish)?;
+    if fs::symlink_metadata(path)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err(MoveError::Publish);
+    }
     let file = fs::File::open(path).map_err(|_| MoveError::Publish)?;
     let mut contents =
         Vec::with_capacity((MAX_OPTIONS_BYTES as usize).min(INITIAL_OPTIONS_READ_CAPACITY));
@@ -1059,6 +1092,63 @@ mod tests {
             fs::read(layout.target.join("unrelated.txt")).unwrap(),
             b"keep"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_symlinked_marker_without_following_it() {
+        use std::os::unix::fs::symlink;
+
+        let layout = setup();
+        let outside = layout._root.path().join("outside-marker");
+        fs::write(&outside, b"keep").unwrap();
+        symlink(&outside, layout.target.join(DATA_DIRECTORY_MARKER)).unwrap();
+
+        assert_eq!(
+            relocate_state(
+                &layout.default,
+                &layout.default,
+                &layout.target,
+                &layout.default,
+                std::slice::from_ref(&layout.locator),
+            ),
+            Err(MoveError::InvalidTarget)
+        );
+        assert_eq!(fs::read(&outside).unwrap(), b"keep");
+        assert!(layout.default.join("preferences.json").is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_symlinked_locator_without_replacing_it() {
+        use std::os::unix::fs::symlink;
+
+        let layout = setup();
+        let outside = layout._root.path().join("outside-locator");
+        fs::write(&outside, fs::read(&layout.locator).unwrap()).unwrap();
+        fs::remove_file(&layout.locator).unwrap();
+        symlink(&outside, &layout.locator).unwrap();
+
+        assert_eq!(
+            relocate_state(
+                &layout.default,
+                &layout.default,
+                &layout.target,
+                &layout.default,
+                std::slice::from_ref(&layout.locator),
+            ),
+            Err(MoveError::Publish)
+        );
+        assert!(fs::symlink_metadata(&layout.locator)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            fs::read(&outside).unwrap(),
+            fs::read(&layout.locator).unwrap()
+        );
+        assert!(layout.default.join("preferences.json").is_file());
+        assert!(layout.target.read_dir().unwrap().next().is_none());
     }
 
     #[test]

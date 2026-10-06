@@ -9,6 +9,18 @@ static BOOL MSIMEPreeditSeparator(unichar character) {
     return character == '\'' || character == ' ';
 }
 
+static BOOL MSIMEStrictCaretPosition(id value, NSUInteger *result) {
+    if (![value isKindOfClass:NSNumber.class] ||
+        CFGetTypeID((__bridge CFTypeRef)value) == CFBooleanGetTypeID() ||
+        CFNumberIsFloatType((__bridge CFNumberRef)value)) return NO;
+    NSNumber *number = (NSNumber *)value;
+    if ([number compare:@0] == NSOrderedAscending) return NO;
+    uint64_t position = number.unsignedLongLongValue;
+    if ([number compare:@(position)] != NSOrderedSame || position > NSUIntegerMax) return NO;
+    if (result) *result = (NSUInteger)position;
+    return YES;
+}
+
 static NSString *MSIMEPreeditLetters(NSString *text) {
     NSMutableString *letters = [NSMutableString string];
     for (NSUInteger i = 0; i < text.length; ++i) {
@@ -21,8 +33,9 @@ static NSString *MSIMEPreeditLetters(NSString *text) {
 }
 
 NSUInteger MSIMEPreeditCaretPosition(NSString *editing, NSString *preedit, id position) {
-    if (![position isKindOfClass:NSNumber.class]) return preedit.length;
-    NSUInteger rawCaret = MIN([position unsignedIntegerValue], editing.length);
+    NSUInteger rawCaret = 0;
+    if (!MSIMEStrictCaretPosition(position, &rawCaret)) return preedit.length;
+    rawCaret = MIN(rawCaret, editing.length);
     if ([preedit isEqual:editing]) return rawCaret;
     // Only map lossless separator formatting. Expanded shuangpin, converted words
     // and corrections need an Engine-provided offset map, not host-side guesses.
@@ -83,6 +96,12 @@ void MSIMEApplyTransitionWithPreeditStyle(NSDictionary *transition, id<MSIMEText
 
 void MSIMEApplyTransitionWithPendingClosing(NSDictionary *transition, id<MSIMETextClient> client,
                                             MSIMEInlinePreeditStyle style, NSString *closing) {
+    MSIMEApplyTransitionTrackingMarkedText(transition, client, style, closing, NULL);
+}
+
+void MSIMEApplyTransitionTrackingMarkedText(NSDictionary *transition, id<MSIMETextClient> client,
+                                            MSIMEInlinePreeditStyle style, NSString *closing,
+                                            BOOL *clientHasMarkedText) {
     if (!closing.length) closing = nil;
     id commit = transition[@"commit"];
     // A commit ends the pair: the closing mark goes in with the text it was holding open, and the
@@ -97,7 +116,7 @@ void MSIMEApplyTransitionWithPendingClosing(NSDictionary *transition, id<MSIMETe
     NSString *preedit = view[@"preedit"];
     if (![preedit isKindOfClass:NSString.class]) preedit = editing;
     id position = view[@"caret_position"];
-    // A Japanese composition is かな, not romaji.
+    // A Japanese composition is かな, not romaji, and a Korean one is Hangul, not the Dubeolsik key letters in `editing_text`.
     //
     // The Engine hands over both - `editing_text` is the letters that were typed and `reading` the
     // kana they convert to - and every Japanese input method shows the kana: it is what the user
@@ -110,20 +129,21 @@ void MSIMEApplyTransitionWithPendingClosing(NSDictionary *transition, id<MSIMETe
     // the wrong place, that case keeps showing what the caret belongs to. Typing never reaches it:
     // the caret sits at the end until an arrow key moves it.
     NSString *reading = view[@"reading"];
+    NSUInteger rawCaret = 0;
+    BOOL validCaret = MSIMEStrictCaretPosition(position, &rawCaret);
     if ([reading isKindOfClass:NSString.class] && reading.length &&
-        (![position isKindOfClass:NSNumber.class] ||
-         [position unsignedIntegerValue] >= editing.length)) {
+        (!validCaret || rawCaret >= editing.length)) {
         editing = reading;
         preedit = reading;
         position = @(reading.length);
+        rawCaret = reading.length;
+        validCaret = YES;
     }
     NSString *marked = preedit;
     NSUInteger caret = MSIMEPreeditCaretPosition(editing, preedit, position);
     if (style == MSIMEInlinePreeditStyleRaw) {
         marked = editing;
-        caret = [position isKindOfClass:NSNumber.class]
-            ? MIN([position unsignedIntegerValue], editing.length)
-            : editing.length;
+        caret = validCaret ? MIN(rawCaret, editing.length) : editing.length;
     } else if (style == MSIMEInlinePreeditStyleEmpty) {
         marked = @"";
         caret = 0;
@@ -165,6 +185,10 @@ void MSIMEApplyTransitionWithPendingClosing(NSDictionary *transition, id<MSIMETe
         displayed = clauses;
     }
 #endif
+    // Only the clear of a composition that is not there is skipped; after a commit the clear still goes out, as it always has.
+    if (clientHasMarkedText && !*clientHasMarkedText && !marked.length && ![commit isKindOfClass:NSString.class]) return;
+    // Recorded before the write: IMK can service the next key inside it, and that nested write lands in the client after this one, so it must also be the one whose state is left recorded.
+    if (clientHasMarkedText) *clientHasMarkedText = marked.length > 0;
     [client setMarkedText:displayed selectionRange:NSMakeRange(caret, 0) replacementRange:NSMakeRange(NSNotFound, NSNotFound)];
 }
 

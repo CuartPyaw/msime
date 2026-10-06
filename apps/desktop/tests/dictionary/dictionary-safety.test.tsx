@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
+import { settingsFormReady } from "../support/settings-form";
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { SettingsPage, type DictionaryEntry, type Snapshot } from "@msime/ui";
 import { answerConfirm } from "../support/confirm";
 // Not re-exported from the package root; take it from the module that owns it.
@@ -52,7 +53,7 @@ async function openDictionary(dictionary: ReturnType<typeof dictionaryClient>) {
       client={{ load: async () => snapshot, save: vi.fn(), dictionary: dictionary as never }}
     />,
   );
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   fireEvent.click(screen.getByRole("button", { name: "词库" }));
   // The page lists on demand rather than on open.
   fireEvent.click(await screen.findByRole("button", { name: "查询" }));
@@ -141,7 +142,7 @@ test("Android personal dictionary JSON import previews and queues only after con
       client={{ load: async () => snapshot, save: vi.fn(), dictionary: dictionary as never }}
     />,
   );
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   fireEvent.click(screen.getByRole("button", { name: "词库" }));
 
   const file = new File(
@@ -171,6 +172,45 @@ test("Android personal dictionary JSON import previews and queues only after con
   expect(await screen.findByText(/已加入本机同步队列/)).not.toBeNull();
 });
 
+test("personal dictionary import ignores a duplicate confirmation while pending", async () => {
+  let resolveImport!: (value: { queued: boolean; pending_count: number }) => void;
+  const importPersonal = vi.fn(
+    () =>
+      new Promise<{ queued: boolean; pending_count: number }>(
+        (resolve) => (resolveImport = resolve),
+      ),
+  );
+  const dictionary = dictionaryClient({ importPersonal });
+  render(
+    <SettingsPage
+      client={{ load: async () => snapshot, save: vi.fn(), dictionary: dictionary as never }}
+    />,
+  );
+  await settingsFormReady();
+  fireEvent.click(screen.getByRole("button", { name: "词库" }));
+  const file = new File(
+    [
+      JSON.stringify({
+        format: "msime-personal-dictionary",
+        version: 1,
+        entries: [{ kind: "pinyin", key: "ni", value: "你", weight: 1 }],
+      }),
+    ],
+    "pending.json",
+    { type: "application/json" },
+  );
+  fireEvent.change(screen.getByLabelText("选择个人词库 JSON 文件"), { target: { files: [file] } });
+  await screen.findByText(/已校验 1 条/);
+  const confirm = screen.getByRole("button", { name: "确认导入" });
+  await act(async () => {
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+  });
+  expect(importPersonal).toHaveBeenCalledTimes(1);
+  resolveImport({ queued: true, pending_count: 1 });
+  await screen.findByText(/已加入本机同步队列/);
+});
+
 test("personal dictionary import ignores a response from a replaced dictionary client", async () => {
   let resolveImport!: (value: { queued: boolean; pending_count: number }) => void;
   const oldImport = vi.fn(
@@ -185,7 +225,7 @@ test("personal dictionary import ignores a response from a replaced dictionary c
       client={{ load: async () => snapshot, save: vi.fn(), dictionary: oldDictionary as never }}
     />,
   );
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   fireEvent.click(screen.getByRole("button", { name: "词库" }));
   const file = new File(
     [

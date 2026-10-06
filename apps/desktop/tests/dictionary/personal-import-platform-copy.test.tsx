@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { testHost } from "../support/host";
+import { settingsFormReady } from "../support/settings-form";
 import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SettingsPage, type Snapshot } from "@msime/ui";
@@ -28,7 +30,7 @@ async function openDictionary(platform: string) {
       client={{
         load: async () => snapshot,
         save: vi.fn(),
-        host: { platform } as never,
+        host: testHost({ platform }),
         dictionary: {
           list: vi.fn().mockResolvedValue({ entries: [], total: 0 }),
           edit: vi.fn(),
@@ -41,9 +43,10 @@ async function openDictionary(platform: string) {
       }}
     />,
   );
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   fireEvent.click(screen.getByRole("button", { name: "词库" }));
-  return screen.getByRole("region", { name: "个人词库文件" });
+  // 个人词库文件是词库页「导入与导出」组里带名字的一块。
+  return screen.getByRole("group", { name: "个人词库文件" });
 }
 
 test("iOS is told its own keyboard drains the queue", async () => {

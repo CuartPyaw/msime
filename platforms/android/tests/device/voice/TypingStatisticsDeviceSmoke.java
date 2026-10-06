@@ -8,6 +8,8 @@ import android.util.AtomicFile;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
+import app.msime.android.TypingStatisticsDocument;
+import app.msime.android.TypingStatisticsModel;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -38,6 +40,18 @@ public final class TypingStatisticsDeviceSmoke extends DeviceSmoke {
     }
 
     @Override protected void runChecks() throws Exception {
+        stage = "legacy statistics default";
+        TypingStatisticsModel legacy = TypingStatisticsDocument.parse("{\"days\":{}}");
+        if (legacy == null || legacy.enabled())
+            throw new AssertionError("Missing enabled field must keep statistics disabled");
+        TypingStatisticsModel malformed = TypingStatisticsDocument.parse(
+            "{\"total\":7.5,\"days\":{\"fractional\":2.5,\"valid\":3},"
+                + "\"detail\":{\"characters\":{\"fractional\":1.5,\"valid\":4}}}");
+        if (malformed == null || malformed.total() != 0 || malformed.count("fractional") != 0
+                || malformed.count("valid") != 3
+                || malformed.slices(TypingStatisticsModel.Section.KIND, null).stream()
+                    .anyMatch(slice -> "fractional".equals(slice.id())))
+            throw new AssertionError("Fractional statistics counts were accepted");
         File root = getTargetContext().getFilesDir().getCanonicalFile();
         JSONObject options = new JSONObject(new String(
             Files.readAllBytes(new File(root, "runtime-options.json").toPath()), StandardCharsets.UTF_8));

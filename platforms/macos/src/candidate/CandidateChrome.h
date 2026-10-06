@@ -10,6 +10,8 @@ static const CGFloat MSIMECandidateTranslationOpacity = 0.62;
 static const CGFloat MSIMECandidateTranslationPointSize = 12.0;
 // The top row of the card: the reading on the left, then 「1 / 3」 and the two page arrows on the right.
 static const CGFloat MSIMECandidateHeaderHeight = 26.0;
+// Room kept between a horizontal card that grows past half the screen and each edge of the visible area.
+static const CGFloat MSIMECandidateScreenMargin = 16.0;
 // 「1 / 3」 is set at the design's 13pt in the secondary colour (dc.html L1324), a point above the translation run.
 static const CGFloat MSIMECandidatePageIndicatorPointSize = 13.0;
 static const CGFloat MSIMECandidatePageArrowWidth = 28.0;
@@ -19,9 +21,10 @@ static const CGFloat MSIMECandidateRowPadding = 12.0;
 static const CGFloat MSIMECandidateGlossPadding = 4.0;
 static const CGFloat MSIMECandidateTextRight = 8.0;
 
-static inline CGFloat MSIMECandidateTextLeft(BOOL showSelectedBar)
+// Every length below is the window at 100%; `scale` is candidate_scale_percent as a factor, which the candidate fonts are already set at.
+static inline CGFloat MSIMECandidateTextLeft(BOOL showSelectedBar, CGFloat scale = 1.0)
 {
-    return 8.0 + (showSelectedBar ? 6.0 : 0.0);
+    return (8.0 + (showSelectedBar ? 6.0 : 0.0)) * scale;
 }
 
 // One set of attributes for measuring and drawing a run, so a wrapped run is drawn in exactly the height the layout measured for it. A run that fits clips instead of wrapping.
@@ -49,53 +52,60 @@ static inline CGFloat MSIMECandidateSingleLineWidth(NSString *text, NSFont *font
 }
 
 // Height of a gloss drawn without wrapping, one line per target language, with its padding.
-static inline CGFloat MSIMECandidateGlossHeight(NSString *text, NSFont *font)
+static inline CGFloat MSIMECandidateGlossHeight(NSString *text, NSFont *font, CGFloat scale = 1.0)
 {
     if (text.length == 0) return 0.0;
     const NSRect bounds = [text boundingRectWithSize:NSMakeSize(CGFLOAT_MAX, CGFLOAT_MAX)
                                              options:NSStringDrawingUsesLineFragmentOrigin
                                           attributes:@{NSFontAttributeName : font}];
-    return ceil(bounds.size.height) + MSIMECandidateGlossPadding;
+    return ceil(bounds.size.height) + MSIMECandidateGlossPadding * scale;
 }
 
 // Metrics of a candidate row. The annotation is drawn at the candidate font, the gloss at glossFont; `chrome` is the width of the number, bar and paddings around the content.
-static inline msime::mac::CandidateLayoutMetrics MSIMECandidateLayoutMetrics(NSFont *font, NSFont *glossFont, CGFloat candidateRow, CGFloat chrome)
+static inline msime::mac::CandidateLayoutMetrics MSIMECandidateLayoutMetrics(NSFont *font, NSFont *glossFont, CGFloat candidateRow, CGFloat chrome, CGFloat scale = 1.0)
 {
     msime::mac::CandidateLayoutMetrics metrics;
     metrics.candidateRow = candidateRow;
     metrics.chrome = chrome;
-    metrics.annotationGap = 4.0;
+    metrics.annotationGap = 4.0 * scale;
     metrics.annotationLine = MSIMECandidateTextHeight(@"", font);
     metrics.translationGap = font.pointSize * 0.65;
-    metrics.translationLine = MSIMECandidateGlossHeight(@"X", glossFont);
+    metrics.translationLine = MSIMECandidateGlossHeight(@"X", glossFont, scale);
     return metrics;
 }
 
-static inline msime::mac::CandidateItemWidths MSIMECandidateItemWidths(NSString *text, NSString *annotation, NSString *translation, NSFont *font, NSFont *glossFont)
+static inline msime::mac::CandidateItemWidths MSIMECandidateItemWidths(NSString *text, NSString *annotation, NSString *translation, NSFont *font, NSFont *glossFont, CGFloat scale = 1.0)
 {
     msime::mac::CandidateItemWidths widths;
     widths.text = MSIMECandidateSingleLineWidth(text, font);
     widths.annotation = MSIMECandidateSingleLineWidth(annotation, font);
     widths.translation = MSIMECandidateSingleLineWidth(translation, glossFont);
-    widths.translationHeight = MSIMECandidateGlossHeight(translation, glossFont);
+    widths.translationHeight = MSIMECandidateGlossHeight(translation, glossFont, scale);
     return widths;
 }
 
 // Wrapped height of each run, as the layout asks for it: the text keeps the row's padding, a gloss its own.
-static inline msime::mac::CandidateRunMeasure MSIMECandidateRunMeasure(NSString *text, NSString *annotation, NSString *translation, NSFont *font, NSFont *glossFont)
+static inline msime::mac::CandidateRunMeasure MSIMECandidateRunMeasure(NSString *text, NSString *annotation, NSString *translation, NSFont *font, NSFont *glossFont, CGFloat scale = 1.0)
 {
-    return [text = [text copy], annotation = [annotation copy], translation = [translation copy], font, glossFont](msime::mac::CandidateRun run, double width) -> double {
+    return [text = [text copy], annotation = [annotation copy], translation = [translation copy], font, glossFont, scale](msime::mac::CandidateRun run, double width) -> double {
         switch (run)
         {
         case msime::mac::CandidateRun::text:
-            return MSIMECandidateWrappedHeight(text, font, width) + MSIMECandidateRowPadding;
+            return MSIMECandidateWrappedHeight(text, font, width) + MSIMECandidateRowPadding * scale;
         case msime::mac::CandidateRun::annotation:
             return MSIMECandidateWrappedHeight(annotation, font, width);
         case msime::mac::CandidateRun::translation:
-            return MSIMECandidateWrappedHeight(translation, glossFont, width) + MSIMECandidateGlossPadding;
+            return MSIMECandidateWrappedHeight(translation, glossFont, width) + MSIMECandidateGlossPadding * scale;
         }
         return 0.0;
     };
+}
+
+// The text of a row's gloss run: the reading lines drawn first (a Korean Hanja's 훈음), then the translation, one line each. The reading is shown but never committed, so it stays out of the candidate's `translation`, and an armed translation column is counted from the first line after it.
+static inline NSString *MSIMECandidateGlossRun(NSString *reading, NSString *translation)
+{
+    if (reading.length == 0) return translation ?: @"";
+    return translation.length ? [NSString stringWithFormat:@"%@\n%@", reading, translation] : reading;
 }
 
 @interface MSIMECandidateButton : NSButton
@@ -109,6 +119,8 @@ static inline msime::mac::CandidateRunMeasure MSIMECandidateRunMeasure(NSString 
 @property(nonatomic) BOOL translationBelow;
 // The 辅助码 or engine annotation, drawn as its own run after the text and moved under it when it does not fit.
 @property(nonatomic, copy) NSString *annotation;
+// A reading drawn on the gloss run above the translation, in the gloss style, and never committed: a Korean Hanja's 훈음. Empty for every other row.
+@property(nonatomic, copy) NSString *glossReading;
 // Geometry from the panel's page layout; frames, drawing and hit testing all come from it. Without one the button lays itself out in its bounds.
 @property(nonatomic) msime::mac::CandidateItemLayout itemLayout;
 @property(nonatomic) BOOL hasItemLayout;
@@ -124,6 +136,8 @@ static inline msime::mac::CandidateRunMeasure MSIMECandidateRunMeasure(NSString 
 @property(nonatomic) BOOL candidateHovered;
 @property(nonatomic) CGFloat cornerRadius;
 @property(nonatomic) CGFloat selectionLeftInset;
+// candidate_scale_percent as a factor, for the lengths the row draws itself: the text insets and the selection bar. Zero draws at 100%.
+@property(nonatomic) CGFloat chromeScale;
 @end
 @implementation MSIMECandidateButton
 {
@@ -176,6 +190,7 @@ static inline msime::mac::CandidateRunMeasure MSIMECandidateRunMeasure(NSString 
     if (self.tag < 0) { [super drawRect:dirtyRect]; return; }
     (void)dirtyRect;
     NSRectClip(self.bounds);
+    const CGFloat scale = self.chromeScale > 0.0 ? self.chromeScale : 1.0;
     NSColor *background = self.candidateHighlighted ? self.fillColor
                                                      : (self.candidateHovered ? self.hoverColor : nil);
     if (background != nil && background.alphaComponent > 0.01)
@@ -185,14 +200,14 @@ static inline msime::mac::CandidateRunMeasure MSIMECandidateRunMeasure(NSString 
     }
     if (self.candidateHighlighted && self.showSelectedBar)
     {
-        const CGFloat barHeight = MAX(10.0, self.font.pointSize * 0.8);
+        const CGFloat barHeight = MAX(10.0 * scale, self.font.pointSize * 0.8);
         [self.barColor setFill];
         [[NSBezierPath
             bezierPathWithRoundedRect:NSMakeRect(MAX(1.0, self.selectionLeftInset),
                                                  (self.bounds.size.height - barHeight) / 2.0,
-                                                 3.0, barHeight)
-                              xRadius:1.5
-                              yRadius:1.5] fill];
+                                                 3.0 * scale, barHeight)
+                              xRadius:1.5 * scale
+                              yRadius:1.5 * scale] fill];
     }
     NSDictionary *numberAttributes = @{
         NSFontAttributeName : self.numberFont ?: MSIMECandidateNumberFont(self.font),
@@ -203,7 +218,8 @@ static inline msime::mac::CandidateRunMeasure MSIMECandidateRunMeasure(NSString 
     NSDictionary *titleAttributes = MSIMECandidateRunAttributes(self.font, titleColor, NO);
     NSString *title = self.title;
     NSRange split = [title rangeOfString:@"  "];
-    const CGFloat textLeft = MSIMECandidateTextLeft(self.showSelectedBar);
+    const CGFloat textLeft = MSIMECandidateTextLeft(self.showSelectedBar, scale);
+    const CGFloat textRight = MSIMECandidateTextRight * scale;
     const BOOL flipped = self.isFlipped;
     const CGFloat boundsHeight = self.bounds.size.height;
     // Layout boxes run downwards from the row top; convert them for either orientation of the view.
@@ -213,7 +229,7 @@ static inline msime::mac::CandidateRunMeasure MSIMECandidateRunMeasure(NSString 
     if (split.location == NSNotFound)
     {
         const NSSize size = [title sizeWithAttributes:titleAttributes];
-        const CGFloat maxWidth = MAX(0.0, self.bounds.size.width - textLeft - MSIMECandidateTextRight);
+        const CGFloat maxWidth = MAX(0.0, self.bounds.size.width - textLeft - textRight);
         [title drawInRect:NSMakeRect(textLeft, (boundsHeight - size.height) / 2, maxWidth, size.height)
             withAttributes:titleAttributes];
         return;
@@ -221,21 +237,22 @@ static inline msime::mac::CandidateRunMeasure MSIMECandidateRunMeasure(NSString 
     NSString *number = [title substringToIndex:split.location];
     NSString *word = [title substringFromIndex:NSMaxRange(split)];
     NSString *annotation = self.annotation ?: @"";
-    NSString *translation = self.translation ?: @"";
+    NSString *glossReading = self.glossReading ?: @"";
+    NSString *translation = MSIMECandidateGlossRun(glossReading, self.translation);
     const NSSize numberSize = [number sizeWithAttributes:numberAttributes];
     const NSSize wordSize = [word sizeWithAttributes:titleAttributes];
-    NSFont *glossFont = self.translationFont ?: [NSFont systemFontOfSize:MSIMECandidateTranslationPointSize];
-    const CGFloat contentLeft = self.contentLeft > 0.0 ? self.contentLeft : textLeft + numberSize.width + MSIMECandidateNumberGap;
+    NSFont *glossFont = self.translationFont ?: [NSFont systemFontOfSize:MSIMECandidateTranslationPointSize * scale];
+    const CGFloat contentLeft = self.contentLeft > 0.0 ? self.contentLeft : textLeft + numberSize.width + MSIMECandidateNumberGap * scale;
     msime::mac::CandidateItemLayout layout = self.itemLayout;
     if (!self.hasItemLayout)
     {
         // A button nobody laid out lays itself out in its own bounds, with the same rule the panel uses.
         const msime::mac::CandidateLayoutMetrics metrics =
-            MSIMECandidateLayoutMetrics(self.font, glossFont, MAX(boundsHeight, MSIMECandidateTextHeight(word, self.font) + MSIMECandidateRowPadding),
-                                        contentLeft + MSIMECandidateTextRight);
-        layout = msime::mac::LayoutCandidateItem(MSIMECandidateItemWidths(word, annotation, translation, self.font, glossFont),
-                                                 self.bounds.size.width - contentLeft - MSIMECandidateTextRight, metrics,
-                                                 self.translationBelow, MSIMECandidateRunMeasure(word, annotation, translation, self.font, glossFont));
+            MSIMECandidateLayoutMetrics(self.font, glossFont, MAX(boundsHeight, MSIMECandidateTextHeight(word, self.font) + MSIMECandidateRowPadding * scale),
+                                        contentLeft + textRight, scale);
+        layout = msime::mac::LayoutCandidateItem(MSIMECandidateItemWidths(word, annotation, translation, self.font, glossFont, scale),
+                                                 self.bounds.size.width - contentLeft - textRight, metrics,
+                                                 self.translationBelow, MSIMECandidateRunMeasure(word, annotation, translation, self.font, glossFont, scale));
     }
     // The number sits on the text's first line.
     CGFloat textTop = (layout.textHeight - wordSize.height) / 2;
@@ -272,7 +289,9 @@ static inline msime::mac::CandidateRunMeasure MSIMECandidateRunMeasure(NSString 
             attributes:MSIMECandidateRunAttributes(glossFont, glossColor, run.below)];
         if (self.armedGlossColumn > 0) {
             NSArray<NSString *> *parts = [translation componentsSeparatedByString:@"\n"];
+            // The reading's lines come first in the run and are no column of their own.
             NSUInteger selected = (NSUInteger)(self.armedGlossColumn - 1);
+            if (glossReading.length) selected += [glossReading componentsSeparatedByString:@"\n"].count;
             if (selected < parts.count && parts[selected].length) {
                 NSUInteger location = 0;
                 for (NSUInteger index = 0; index < selected; ++index)
@@ -299,6 +318,8 @@ static inline msime::mac::CandidateRunMeasure MSIMECandidateRunMeasure(NSString 
 @property(nonatomic, strong) NSImage *backgroundImage;
 @property(nonatomic) msime::mac::BackgroundFit backgroundFit;
 @property(nonatomic) CGFloat backgroundOpacity;
+// The transparent band above the card that a skin's decoration stands in. The fill, background image and stroke cover only the card below it.
+@property(nonatomic) CGFloat cardTopInset;
 @end
 @implementation MSIMECandidateChromeView
 - (BOOL)isOpaque { return NO; }
@@ -322,13 +343,15 @@ static inline msime::mac::CandidateRunMeasure MSIMECandidateRunMeasure(NSString 
 - (void)drawRect:(NSRect)dirtyRect
 {
     (void)dirtyRect;
-    NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect:self.bounds
+    // Not flipped: the band is the top of the bounds, the card everything under it.
+    const NSRect bounds = NSMakeRect(NSMinX(self.bounds), NSMinY(self.bounds), NSWidth(self.bounds),
+                                     MAX(0.0, NSHeight(self.bounds) - MAX(0.0, self.cardTopInset)));
+    NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect:bounds
                                                          xRadius:self.cornerRadius
                                                          yRadius:self.cornerRadius];
     [(self.fillColor != nil ? self.fillColor : NSColor.windowBackgroundColor) setFill];
     [path fill];
     NSImage *background = self.backgroundImage;
-    const NSRect bounds = self.bounds;
     const auto rects = background != nil && self.backgroundOpacity > 0.0
         ? msime::mac::BackgroundRects(self.backgroundFit, {NSMinX(bounds), NSMinY(bounds), NSWidth(bounds), NSHeight(bounds)},
                                       background.size.width, background.size.height)

@@ -1,6 +1,7 @@
 // Real Fcitx input contexts and the real Host API. All input is synthetic.
 #include "../FcitxEngine.cpp"
 #include <array>
+#include <cstdlib>
 #include <iostream>
 #include <filesystem>
 #include <thread>
@@ -37,7 +38,7 @@ void autocorrectMarker() {
   };
   const auto row = [](Json candidate, bool traditional = false) {
     candidate["id"] = Json{{"session", 1}, {"generation", 1}, {"index", 0}};
-    return FcitxCandidate(nullptr, candidate, traditional, false);
+    return FcitxCandidate(nullptr, candidate, traditional, false, std::string());
   };
   const auto corrected = row(Json{{"text", "你好"}, {"corrected", true}});
   require(shown(corrected) == "你好*", "corrected candidate shows the marker");
@@ -48,6 +49,37 @@ void autocorrectMarker() {
           "marker comes before the cloud badge");
   require(shown(row(Json{{"text", "汉语"}, {"corrected", true}}, true)) == "漢語*",
           "marker follows the traditional-converted word");
+}
+// A Hanja row's 훈음 is drawn as the row's secondary gloss: its own italic, uncommittable segment where a translation goes, shown whatever the annotation and translation settings say, with a translation after it. Any other annotation stays plain text gated by the annotation setting. Runs before the resource fixture.
+void koreanHanjaGlossRow() {
+  const auto word = [](Json candidate, bool annotations, const std::string &gloss) {
+    candidate["id"] = Json{{"session", 1}, {"generation", 1}, {"index", 0}};
+    return FcitxCandidate(nullptr, candidate, false, annotations, gloss);
+  };
+  const auto shown = [](const FcitxCandidate &candidate) -> const fcitx::Text & {
+    return static_cast<const fcitx::CandidateWord &>(candidate).text();
+  };
+  const fcitx::TextFormatFlags secondary{fcitx::TextFormatFlag::Italic, fcitx::TextFormatFlag::DontCommit};
+  const Json hanja{{"text", "韓"}, {"annotation", "나라 이름 한, 한나라 한"}};
+  const auto plain = word(hanja, false, "나라 이름 한, 한나라 한");
+  require(shown(plain).toString() == "韓  나라 이름 한, 한나라 한", "a Hanja row shows its 훈음 even with annotations off");
+  require(shown(plain).size() == 2 && shown(plain).stringAt(0) == "韓" &&
+              shown(plain).formatAt(0) == fcitx::TextFormatFlags(fcitx::TextFormatFlag::NoFlag) &&
+              shown(plain).stringAt(1) == "  나라 이름 한, 한나라 한" && shown(plain).formatAt(1) == secondary,
+          "the 훈음 is a separate italic segment, never committed");
+  require(plain.text() == "韓", "the 훈음 stays out of the selected text");
+  auto translated = hanja;
+  translated["translation"] = "Korea";
+  const auto glossed = word(translated, true, "나라 이름 한, 한나라 한");
+  require(shown(glossed).toString() == "韓  나라 이름 한, 한나라 한  Korea" && shown(glossed).size() == 3 &&
+              shown(glossed).formatAt(1) == secondary &&
+              shown(glossed).formatAt(2) == fcitx::TextFormatFlags(fcitx::TextFormatFlag::NoFlag),
+          "a translation follows the 훈음 and the annotation is not drawn twice");
+  const auto helpcode = word(Json{{"text", "你"}, {"annotation", "ab"}}, true, std::string());
+  require(shown(helpcode).toString() == "你  ab" && shown(helpcode).size() == 1, "a helpcode stays plain row text");
+  require(word(Json{{"text", "你"}, {"annotation", "ab"}}, false, std::string()).text() == "你" &&
+              shown(word(Json{{"text", "你"}, {"annotation", "ab"}}, false, std::string())).toString() == "你",
+          "annotations off still hide a helpcode");
 }
 // An installed skin's decoration reaches the classic UI as the msime theme's overlay, with the image copied beside theme.conf; a built-in skin, or a switch back to one, leaves no image behind. This composes the theme exactly as applyCandidatePanelTheme does, against the shared layer's built-in catalogue, but writes it without the classic UI addon, which the fixture instance does not load. Runs before the resource fixture.
 void candidateThemeDecoration() {
@@ -93,11 +125,13 @@ void candidateThemeDecoration() {
   const auto copy = decorated.substr(named + 9, decorated.find('\n', named + 1) - named - 9);
   require(copies() == std::vector<std::string>{copy}, "overlay image staged beside theme.conf");
   require(std::filesystem::file_size(themeDirectory / copy) == std::filesystem::file_size(image), "overlay is the skin's image");
-  require(decorated.find("Gravity=Top Right\nOverlayOffsetX=13\nOverlayOffsetY=15\nHideOverlayIfOversize=False\n") !=
+  require(decorated.find("Gravity=Top Right\nOverlayOffsetX=19\nOverlayOffsetY=28\nHideOverlayIfOversize=False\n") !=
               std::string::npos,
-          "overlay pinned top right inside the card and centred in the band");
+          "overlay pinned top right, its bottom one padding below the card top (8 + 25 + 7 - 12)");
   require(decorated.find("[InputPanel/ContentMargin]\nLeft=19\nRight=19\nTop=40\n") != std::string::npos,
           "band reserved above the candidates");
+  require(decorated.find("[InputPanel/ShadowMargin]\nLeft=12\nRight=12\nTop=33\n") != std::string::npos,
+          "band counted in the shadow margin, so X11 places the card at the cursor");
   // The rounded card is an image generated beside theme.conf.
   const auto card = decorated.find("[InputPanel/Background]\nImage=shape-");
   require(card != std::string::npos, "card drawn from a generated image");
@@ -108,22 +142,36 @@ void candidateThemeDecoration() {
   require(copies().empty(), "previous skin's overlay removed");
   std::filesystem::remove_all(root);
 }
-// The mode badge draws in the candidate panel's appearance. The default candidate_theme "follow" and global "system" on a light desktop used to give a dark badge, because only an explicit "light" counted. Runs before the resource fixture.
+// The mode badge takes the macOS badge's mode rule and the resolved theme's palette. Runs before the resource fixture.
 void modeBadgeTheme() {
-  require(fcitx_mode_badge_light_theme(Json{{"candidate_theme", "follow"}}, false, Json()),
-          "follow on a light desktop gives a light badge");
-  require(!fcitx_mode_badge_light_theme(Json{{"candidate_theme", "follow"}}, true, Json()),
-          "follow on a dark desktop gives a dark badge");
-  require(fcitx_mode_badge_light_theme(Json::object(), false, Json()), "absent keys follow a light desktop");
-  require(!fcitx_mode_badge_light_theme(Json{{"theme", "dark"}, {"candidate_theme", "follow"}}, false, Json()),
-          "follow defers to a dark global theme");
-  require(fcitx_mode_badge_light_theme(Json{{"theme", "dark"}, {"candidate_theme", "light"}}, true, Json()),
-          "an explicit light candidate theme wins");
-  require(!fcitx_mode_badge_light_theme(Json{{"theme", "light"}, {"candidate_theme", "dark"}}, false, Json()),
-          "an explicit dark candidate theme wins");
+  const auto dark = [](const Json &preferences, bool system_dark) {
+    return fcitx_mode_badge_theme(preferences, system_dark, Json()).dark;
+  };
+  // toolbar_theme "follow" defers to the global mode, whose "system" follows the desktop, so a light desktop gets a light badge.
+  require(!dark(Json{{"toolbar_theme", "follow"}, {"theme", "system"}}, false), "follow on a light desktop gives a light badge");
+  require(dark(Json{{"toolbar_theme", "follow"}, {"theme", "system"}}, true), "follow on a dark desktop gives a dark badge");
+  require(dark(Json{{"toolbar_theme", "follow"}, {"theme", "dark"}}, false), "follow defers to a dark global theme");
+  // An explicit toolbar mode wins over the global mode and over the candidate mode.
+  require(!dark(Json{{"toolbar_theme", "light"}, {"theme", "dark"}, {"candidate_theme", "dark"}}, true),
+          "an explicit light toolbar theme wins");
+  require(dark(Json{{"toolbar_theme", "dark"}, {"theme", "light"}, {"candidate_theme", "light"}}, false),
+          "an explicit dark toolbar theme wins");
+  require(!dark(Json{{"toolbar_theme", "follow"}, {"theme", "system"}, {"candidate_theme", "dark"}}, false),
+          "the candidate mode does not colour the badge when toolbar_theme is present");
   // A global theme with a fixed appearance draws the panel in it, so the badge follows it too.
-  require(!fcitx_mode_badge_light_theme(Json{{"global_theme", "ink"}}, false, Json()), "a dark global theme gives a dark badge");
-  require(fcitx_mode_badge_light_theme(Json{{"global_theme", "paper"}}, true, Json()), "a light global theme gives a light badge");
+  require(dark(Json{{"global_theme", "ink"}, {"toolbar_theme", "light"}}, false), "a dark global theme gives a dark badge");
+  require(!dark(Json{{"global_theme", "paper"}, {"toolbar_theme", "dark"}}, true), "a light global theme gives a light badge");
+  // The colours are the resolved theme's card, the same the candidate panel draws in that mode.
+  for (const auto &preferences : {Json{{"global_theme", "ink"}}, Json{{"global_theme", "paper"}}, Json::object()}) {
+    const auto badge = msime::linux_host::floating_surface_colors(fcitx_mode_badge_theme(preferences, false, Json()));
+    const auto panel = resolveCandidateTheme(preferences, false, Json()).colors;
+    require(badge.surface == *panel.background && badge.text == *panel.text && badge.accent == *panel.accent,
+            "the badge draws the panel's surface, text and accent");
+    require(badge.border == (panel.border_width > 0 ? panel.border : std::nullopt), "the badge outline is the panel's");
+  }
+  // The voice overlay resolves the same theme in its own mode.
+  const auto voice = resolveVoiceOverlayTheme(Json{{"global_theme", "ink"}, {"voice_theme", "light"}}, false, Json());
+  require(voice.dark, "a fixed-appearance theme overrides the voice overlay's mode too");
 }
 // classicui's options belong to every input method, so the first takeover records what it replaced for msime-linux-setup --unregister, and a later write keeps that value while the option still holds MSIME's. Runs against a scratch XDG_STATE_HOME before the resource fixture; the fixture instance does not load classicui, so this drives the recording step the addon's writes go through.
 void classicuiTakeoverRecord() {
@@ -180,12 +228,15 @@ void classicuiTakeoverRecord() {
 int main(int argc, char **argv) {
   try {
     autocorrectMarker();
+    koreanHanjaGlossRow();
     candidateThemeDecoration();
     modeBadgeTheme();
     classicuiTakeoverRecord();
-    require(argc == 2 || (argc == 3 && std::string(argv[2]) == "--ai"),
-            "usage: fcitx5-native-test <verified-resources> [--ai]");
-    const bool ai = argc == 3;
+    require(argc == 2 || (argc == 3 && (std::string(argv[2]) == "--ai" ||
+                                       std::string(argv[2]) == "--ctrl-space" ||
+                                       std::string(argv[2]) == "--local-modes")),
+            "usage: fcitx5-native-test <verified-resources> [--ai|--ctrl-space|--local-modes]");
+    const bool ai = argc == 3 && std::string(argv[2]) == "--ai";
     const std::string suggestion = ai ? "合成候选" : "在线";
     char temporary[] = "/tmp/msime-fcitx5-test-XXXXXX";
     const auto *directory = mkdtemp(temporary);
@@ -202,6 +253,7 @@ int main(int argc, char **argv) {
     const auto clipboardPath = std::filesystem::path(options.at("preferences_directory").get<std::string>()) /
                                "clipboard_history.json";
     std::ofstream(clipboardPath) << Json::array({"剪贴板合成测试", "第二条"}).dump();
+    options["clipboard_history_path"] = clipboardPath.string();
     options["preferences"]["cloud_candidates"] = !ai;
     options["preferences"]["ai_assistant"]["enabled"] = ai;
     options["preferences"]["ai_assistant"]["candidate_limit"] = 1;
@@ -247,7 +299,7 @@ int main(int argc, char **argv) {
     // The online, cloud clipboard and voice steps come many seconds after these providers start listening (the whole run takes 8 to 15 seconds in the build-gate container, more under load), and the Fcitx5 host only dispatches the online request once the test polls for it, so each accept window spans the run instead of its first few seconds.
     constexpr int kProviderAcceptMs = 30000;
     std::thread provider([providerServer, ai, suggestion] {
-      const auto reply = Json{{"text", suggestion}, {"source", ai ? 1 : 0}}.dump() + "\n";
+      const auto reply = Json{{"candidates", Json::array({Json{{"text", suggestion}, {"source", ai ? 1 : 0}}})}}.dump() + "\n";
       // AI input sends a cache-only probe on every change before the real request (#594). The probe is answered with no candidates, as the provider does on a cache miss, and does not use up the one real request this fixture serves; the connection cap only bounds a runaway host.
       for (int served = 0, connections = 0; served < 1 && connections < 64; ++connections) {
         pollfd descriptor{providerServer, POLLIN, 0};
@@ -288,7 +340,7 @@ int main(int argc, char **argv) {
       if (client < 0) { close(cloudServer); return false; }
       char request[4096]{};
       const auto count = read(client, request, sizeof(request) - 1);
-      const auto reply = "{\"entries\":[{\"id\":\"synthetic-1\",\"text\":\"云剪贴板测试\"},{\"id\":\"synthetic-2\",\"text\":\"云剪贴板第二条\"}]}\n";
+      const auto reply = "{\"enabled\":true,\"items\":[{\"id\":\"synthetic-1\",\"text\":\"云剪贴板测试\",\"updated_at\":\"2026-01-01T00:00:00Z\"},{\"id\":\"synthetic-2\",\"text\":\"云剪贴板第二条\",\"updated_at\":\"2026-01-01T00:00:01Z\"}]}\n";
       const bool valid = count > 0 && std::string(request, count).find("cloud_clipboard") != std::string::npos;
       const bool sent = send(client, reply, std::strlen(reply), MSG_NOSIGNAL) == static_cast<ssize_t>(std::strlen(reply));
       close(client); close(cloudServer);
@@ -415,7 +467,7 @@ int main(int argc, char **argv) {
         const auto outdated = std::filesystem::path(directory) / "outdated";
         std::filesystem::create_directories(outdated / "resources");
         std::filesystem::create_directories(outdated / "state");
-        std::ofstream(outdated / "resources/msime.db") << "previous generation";
+        std::ofstream(outdated / "resources/msime-pinyin.db") << "previous generation";
         const auto outdatedOptions = outdated / "state/runtime-options.json";
         const auto document = Json{{"api_version", 1},
                                    {"resources", (outdated / "resources").string()},
@@ -499,6 +551,45 @@ int main(int argc, char **argv) {
     require(!state->voice_hotkey_hold_space_lock_,
             "initial voice context reads the hold-to-lock preference");
     require(state->view_.contains("candidates"), "focus must unpack transition view");
+    // 真实 KeyEvent 会把 Shift+字母规范化成大写并移除 Shift 位；快捷模式必须仍能进入，
+    // 不能把普通大写或 CapsLock 当快捷键，也不能在组合键末尾松开 Shift 时切到英文。
+    {
+      const auto press = [&](fcitx::KeySym sym, fcitx::KeyStates states = fcitx::KeyStates(), bool release = false) {
+        fcitx::KeyEvent event(&ic, fcitx::Key(sym, states), release);
+        engine.keyEvent(entry, event);
+        return event.accepted();
+      };
+      const fcitx::KeyStates shiftState{fcitx::KeyState::Shift};
+      const auto before = ic.committed;
+      for (const auto &[sym, mode] : std::array<std::pair<fcitx::KeySym, const char *>, 8>{{
+               {FcitxKey_T, "date_time"}, {FcitxKey_U, "unicode"},
+               {FcitxKey_K, "quick_phrase"}, {FcitxKey_E, "emoji"},
+               {FcitxKey_M, "kaomoji"}, {FcitxKey_J, "super_jianpin"},
+               {FcitxKey_Y, "temporary_english"}, {FcitxKey_R, "temporary_japanese"}}}) {
+        require(!press(sym) && !press(sym, fcitx::KeyState::CapsLock),
+                "Uppercase without Shift must pass through");
+        require(state->view_.value("local_mode", std::string("none")) == "none",
+                "Uppercase without Shift must not enter a local mode");
+        press(FcitxKey_Shift_L, shiftState);
+        require(press(sym, shiftState), "Shift local-mode shortcut must be consumed");
+        require(state->view_.value("local_mode", std::string("none")) == mode,
+                "Shift local-mode shortcut must enter its mode");
+        press(sym, shiftState, true);
+        press(FcitxKey_Shift_L, fcitx::KeyStates(), true);
+        require(state->input_enabled_, "Shift chord release must not switch to English");
+        require(press(FcitxKey_Escape) &&
+                    state->view_.value("local_mode", std::string("none")) == "none",
+                "Escape must leave the local mode");
+      }
+      require(!press(FcitxKey_V, shiftState), "Disabled expression mode must pass through");
+      require(ic.committed == before, "Mode shortcuts must not commit uppercase letters");
+      if (argc == 3 && std::string(argv[2]) == "--local-modes") {
+        state->close();
+        std::filesystem::remove_all(directory);
+        std::cout << "Fcitx5 Shift local modes, uppercase passthrough and modifier release passed\n";
+        return 0;
+      }
+    }
     auto changedPreferences = options["preferences"];
     changedPreferences["number_row_selection"] = false;
     changedPreferences["candidate_layout"] = "horizontal";
@@ -506,6 +597,67 @@ int main(int argc, char **argv) {
     changedPreferences["smart_punctuation_repeat"] = true;
     changedPreferences["learning"] = true;
     const auto preferenceDirectory = options["preferences_directory"].get<std::string>();
+    if (argc == 3 && std::string(argv[2]) == "--ctrl-space") {
+      const auto press = [&](bool release = false, bool ctrl = true) {
+        fcitx::KeyEvent event(&ic, fcitx::Key(FcitxKey_space,
+            ctrl ? fcitx::KeyStates(fcitx::KeyState::Ctrl) : fcitx::KeyStates()), release);
+        engine.keyEvent(entry, event);
+        return event.accepted();
+      };
+      const auto chord = [&] {
+        const bool accepted = press();
+        require(press(true) == accepted, "Ctrl+Space press and release have different ownership");
+        return accepted;
+      };
+      require(chord() && !state->input_enabled_ && chord() && state->input_enabled_,
+              "Default Ctrl+Space does not switch in both directions");
+      const auto set_binding = [&](bool enabled) {
+        auto snapshot = response(msime_client_load_preferences(
+            reinterpret_cast<const uint8_t *>(preferenceDirectory.data()), preferenceDirectory.size()));
+        const auto revision = snapshot.at("revision").get<uint64_t>();
+        snapshot["preferences"]["keybindings"]["switch_language_ctrl_space"] = enabled;
+        const auto document = snapshot.dump();
+        response(msime_client_save_preferences(
+            reinterpret_cast<const uint8_t *>(preferenceDirectory.data()), preferenceDirectory.size(),
+            revision, reinterpret_cast<const uint8_t *>(document.data()), document.size()));
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        do {
+          state->refreshPreferences();
+          if (state->preferences_.at("keybindings").value("switch_language_ctrl_space", true) == enabled)
+            return;
+          std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        } while (std::chrono::steady_clock::now() < deadline);
+        require(false, "Ctrl+Space preference did not hot-reload");
+      };
+      set_binding(false);
+      for (bool chinese : {true, false}) {
+        if (state->input_enabled_ != chinese) engine.input_mode_action_.activate(&ic);
+        for (int repeat = 0; repeat < 3; ++repeat)
+          require(!press() && state->input_enabled_ == chinese,
+                  "Disabled Ctrl+Space press was intercepted or switched mode");
+        require(!press(true), "Disabled Ctrl+Space release was intercepted");
+      }
+      engine.input_mode_action_.activate(&ic);
+      fcitx::KeyEvent letter(&ic, fcitx::Key(FcitxKey_n));
+      engine.keyEvent(entry, letter);
+      const auto preedit = ic.inputPanel().clientPreedit().toString();
+      const auto committed = ic.committed;
+      require(letter.accepted() && !preedit.empty() && !chord() &&
+                  ic.inputPanel().clientPreedit().toString() == preedit && ic.committed == committed,
+              "Disabled Ctrl+Space changed the active composition");
+      fcitx::KeyEvent cancel(&ic, fcitx::Key(FcitxKey_Escape));
+      engine.keyEvent(entry, cancel);
+      set_binding(true);
+      for (int repeat = 0; repeat < 3; ++repeat)
+        require(press() && !state->input_enabled_, "Held Ctrl+Space toggled more than once");
+      require(press(true, false) && !state->input_enabled_,
+              "Consumed Ctrl+Space release escaped after Ctrl was released");
+      require(chord() && state->input_enabled_, "Ctrl+Space did not restore Chinese mode");
+      state->close();
+      std::filesystem::remove_all(directory);
+      std::cout << "Fcitx5 Ctrl+Space defaults, passthrough, hot-reload and repeat passed\n";
+      return 0;
+    }
     // The host's statistics gate, not the store, is what keeps an opt-out from reaching the statistics file. First with statistics off after a preference tick, then with them turned on in the store while the host has not ticked since: a commit or passthrough key that slipped past the host would be recorded by that open store and replace the document, so only the host's cached switch can keep it untouched. The preference reload below is the tick that opens the gate, and the check after it proves recording resumes.
     const auto setStatistics = [&](bool enabled) {
       const auto request = Json{{"directory", preferenceDirectory},
@@ -620,7 +772,7 @@ int main(int argc, char **argv) {
     engine.candidate_layout_action_.activate(&ic);
     require(state->preferences_.value("candidate_layout", std::string{}) == "horizontal",
             "candidate layout action cycles back to horizontal");
-    require(engine.candidate_theme_action_.shortText(&ic) == "候选主题：跟随全局",
+    require(engine.candidate_theme_action_.shortText(&ic) == "候选明暗：跟随颜色模式",
             "candidate theme action reads the preference snapshot");
     engine.candidate_theme_action_.activate(&ic);
     require(state->preferences_.value("candidate_theme", std::string{}) == "light",
@@ -879,12 +1031,10 @@ int main(int argc, char **argv) {
     const auto routeScript = std::string(directory) + "/route-helper.sh";
     const auto routeOutput = std::string(directory) + "/route-output";
     // The helper renames a finished file into place so the poll below never reads a half-written one.
-    std::ofstream(routeScript) << "#!/bin/sh\nprintf '%s\\n%s\\n%s\\n' \"$MSIME_CLIENT_ROUTE\" \"$MSIME_CLIENT_PANEL\" \"${MSIME_CLIENT_SETTINGS_PAGE:-}\" > \"$MSIME_TEST_ROUTE_OUTPUT.tmp\" && mv \"$MSIME_TEST_ROUTE_OUTPUT.tmp\" \"$MSIME_TEST_ROUTE_OUTPUT\"\n";
+    std::ofstream(routeScript) << "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$MSIME_TEST_ROUTE_OUTPUT.tmp\" && mv \"$MSIME_TEST_ROUTE_OUTPUT.tmp\" \"$MSIME_TEST_ROUTE_OUTPUT\"\n";
     require(chmod(routeScript.c_str(), 0700) == 0, "desktop route helper permissions");
     setenv("MSIME_CLIENT_SETTINGS_COMMAND", routeScript.c_str(), 1);
     setenv("MSIME_TEST_ROUTE_OUTPUT", routeOutput.c_str(), 1);
-    // A page inherited from the addon's own environment must not leak into a surface launch.
-    setenv("MSIME_CLIENT_SETTINGS_PAGE", "stale", 1);
     const auto launchedRoute = [&](FcitxDesktopPanelAction &action, const std::string &label) {
       std::filesystem::remove(routeOutput);
       action.activate(&ic);
@@ -893,24 +1043,21 @@ int main(int argc, char **argv) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
       require(std::filesystem::exists(routeOutput), (label + " desktop route helper launched").c_str());
       std::ifstream routeFile(routeOutput);
-      std::array<std::string, 3> fields;
-      for (auto &field : fields) std::getline(routeFile, field);
-      return fields;
+      std::string arguments;
+      std::getline(routeFile, arguments);
+      return arguments;
     };
-    require(launchedRoute(engine.handwriting_action_, "handwriting") ==
-                std::array<std::string, 3>{"handwriting", "handwriting", ""},
-            "desktop route environment propagated");
+    require(launchedRoute(engine.handwriting_action_, "handwriting") == "--route=handwriting",
+            "desktop route argument propagated");
     // About, help, feedback and the local dictionary are settings sections: each opens its own page, as the IBus host and Windows do, rather than the settings home page.
     for (auto *action : {&engine.about_action_, &engine.help_action_, &engine.feedback_action_, &engine.dictionary_action_}) {
       const auto page = action == &engine.about_action_      ? std::string("about")
                         : action == &engine.help_action_     ? std::string("help")
                         : action == &engine.feedback_action_ ? std::string("feedback")
                                                              : std::string("dictionary");
-      require(launchedRoute(*action, page) ==
-                  std::array<std::string, 3>{"settings:" + page, "settings", page},
+      require(launchedRoute(*action, page) == "--route=settings:" + page,
               (page + " menu opens its settings section").c_str());
     }
-    unsetenv("MSIME_CLIENT_SETTINGS_PAGE");
     engine.emoji_action_.activate(&ic);
     const auto emojiDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (state->emoji_items_.empty() && std::chrono::steady_clock::now() < emojiDeadline) {
@@ -923,11 +1070,11 @@ int main(int argc, char **argv) {
     require(!firstEmoji.empty() && !state->emoji_complete_, "emoji page exposes continuation");
     engine.emoji_next_action_.activate(&ic);
     const auto nextEmojiDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (state->emoji_offset_ == 0 && std::chrono::steady_clock::now() < nextEmojiDeadline) {
+    while (state->emoji_offset_.offset == 0 && std::chrono::steady_clock::now() < nextEmojiDeadline) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
       state->refreshEmoji();
     }
-    require(state->emoji_offset_ > 0 && !state->emoji_items_.empty(),
+    require(state->emoji_offset_.offset > 0 && !state->emoji_items_.empty(),
             "emoji next page loaded");
     require(state->emoji_items_.front().value("text", std::string{}).size() > 0,
             "emoji pagination returns catalog entries");
@@ -1053,6 +1200,12 @@ int main(int argc, char **argv) {
     require(state->input_enabled_, "Ctrl+Alt+Space restores Chinese input");
     const auto key = [&](fcitx::KeySym sym) {
       fcitx::KeyEvent event(&ic, fcitx::Key(sym));
+      engine.keyEvent(entry, event);
+      return event.accepted();
+    };
+    // The same press with modifiers held; Fcitx normalises the raw key exactly as it does for a real keyboard.
+    const auto keyWith = [&](fcitx::KeySym sym, fcitx::KeyStates states) {
+      fcitx::KeyEvent event(&ic, fcitx::Key(sym, states));
       engine.keyEvent(entry, event);
       return event.accepted();
     };
@@ -1488,6 +1641,92 @@ int main(int argc, char **argv) {
     require(key(FcitxKey_minus), "configured minus previous-page binding");
     require(key(FcitxKey_equal), "configured equal next-page binding");
     require(key(FcitxKey_Escape), "cancel after navigation");
+    // Tab and Shift+Tab page the candidates by default (navigation.tab), as on macOS, Windows and IBus. A real keyboard sends Shift+Tab as Shift+ISO_Left_Tab, and Fcitx normalises both to Tab with Shift; a back-tab without Shift must still go back.
+    {
+      const auto candidatePage = [&] { return state->view_.value("page", size_t{0}); };
+      const auto preedit = [&] { return ic.inputPanel().clientPreedit().toString(); };
+      const fcitx::KeyStates shiftState(fcitx::KeyState::Shift);
+      require(state->navigation_.value("tab", true), "Tab paging is on by default");
+      require(!key(FcitxKey_Tab), "an idle Tab belongs to the application");
+      const auto beforeTab = ic.committed;
+      require(key(FcitxKey_n) && key(FcitxKey_i) && candidatePage() == 0 &&
+                  state->view_.value("page_count", size_t{0}) >= 3,
+              "Tab paging test composes a multi-page ni");
+      require(key(FcitxKey_Tab) && candidatePage() == 1, "Tab moves to the next candidate page");
+      require(key(FcitxKey_Tab) && candidatePage() == 2, "a second Tab moves on again");
+      require(keyWith(FcitxKey_Tab, shiftState) && candidatePage() == 1, "Shift+Tab moves to the previous page");
+      require(keyWith(FcitxKey_ISO_Left_Tab, shiftState) && candidatePage() == 0,
+              "Shift+ISO_Left_Tab moves to the previous page");
+      require(key(FcitxKey_Tab) && candidatePage() == 1 && key(FcitxKey_ISO_Left_Tab) && candidatePage() == 0,
+              "a back-tab without Shift still moves to the previous page");
+      require(ic.committed == beforeTab && preedit() == "ni", "Tab paging commits nothing and keeps the spelling");
+      // The temporary page of a candidate's translation senses (Ctrl+Enter) pages with Tab as well, instead of leaving the senses and paging the hidden Engine list.
+      require(state->enterTranslationCandidates("一; 二; 三; 四; 五") && state->translationCandidatesActive() &&
+                  candidatePage() == 0 && state->view_.value("page_count", size_t{0}) == 3,
+              "translation senses open on a three-page overlay");
+      require(key(FcitxKey_Tab) && state->translationCandidatesActive() && state->translation_page_ == 1 && candidatePage() == 1,
+              "Tab pages the translation senses forward");
+      require(state->translation_saved_view_.value("page", size_t{1}) == 0,
+              "Tab leaves the Engine's own candidate page alone");
+      require(keyWith(FcitxKey_Tab, shiftState) && state->translationCandidatesActive() && state->translation_page_ == 0,
+              "Shift+Tab pages the translation senses back");
+      require(key(FcitxKey_Tab) && keyWith(FcitxKey_ISO_Left_Tab, shiftState) &&
+                  state->translationCandidatesActive() && state->translation_page_ == 0,
+              "Shift+ISO_Left_Tab pages the translation senses back");
+      require(key(FcitxKey_Tab) && key(FcitxKey_ISO_Left_Tab) && state->translationCandidatesActive() &&
+                  state->translation_page_ == 0,
+              "a back-tab without Shift pages the translation senses back");
+      require(key(FcitxKey_Page_Down) && state->translationCandidatesActive() && state->translation_page_ == 1 &&
+                  key(FcitxKey_Page_Up) && state->translation_page_ == 0,
+              "Page Down and Page Up still page the translation senses");
+      require(ic.committed == beforeTab, "paging the translation senses commits nothing");
+      require(key(FcitxKey_Escape) && !state->translationCandidatesActive() && preedit().empty(),
+              "Escape leaves the translation senses and the composition");
+      // Turning navigation.tab off through the store reaches the open context on the next preference tick, the same reload the settings page triggers.
+      const auto loadStore = [&] {
+        return response(msime_client_load_preferences(
+            reinterpret_cast<const uint8_t *>(preferenceDirectory.data()), preferenceDirectory.size()));
+      };
+      const auto setTabPaging = [&](bool enabled) {
+        auto snapshot = loadStore();
+        const auto revision = snapshot.at("revision").get<uint64_t>();
+        snapshot["preferences"]["navigation"]["tab"] = enabled;
+        snapshot["revision"] = revision + 1;
+        const auto document = snapshot.dump();
+        const auto saved = response(msime_client_save_preferences(
+            reinterpret_cast<const uint8_t *>(preferenceDirectory.data()), preferenceDirectory.size(),
+            revision, reinterpret_cast<const uint8_t *>(document.data()), document.size()));
+        require(saved.value("revision", uint64_t{}) > revision, "navigation.tab saved");
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (state->navigation_.value("tab", true) != enabled && std::chrono::steady_clock::now() < deadline) {
+          state->refreshPreferences();
+          std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        return state->navigation_.value("tab", true) == enabled;
+      };
+      require(setTabPaging(false), "navigation.tab off reloads into the open context");
+      require(!key(FcitxKey_Tab), "an idle Tab belongs to the application with Tab paging off");
+      // With candidates showing, a disabled Tab finishes the composition with the highlighted candidate and then reaches the application, which is the Linux behaviour this pins; it does not page.
+      require(key(FcitxKey_n) && key(FcitxKey_i) && candidatePage() == 0, "disabled Tab test composes ni");
+      const auto beforeDisabledTab = ic.committed;
+      require(!key(FcitxKey_Tab), "a disabled Tab is handed to the application");
+      require(ic.committed.size() > beforeDisabledTab.size() && preedit().empty() &&
+                  state->view_.value("editing_text", std::string()).empty(),
+              "a disabled Tab commits the composition instead of paging");
+      // Ctrl+Tab is an application shortcut whatever the preference: it drops the spelling and passes through.
+      require(key(FcitxKey_n) && key(FcitxKey_i), "Ctrl+Tab test composes ni");
+      const auto beforeCtrlTab = ic.committed;
+      require(!keyWith(FcitxKey_Tab, fcitx::KeyStates(fcitx::KeyState::Ctrl)), "Ctrl+Tab is handed to the application");
+      require(ic.committed == beforeCtrlTab && preedit().empty() &&
+                  state->view_.value("editing_text", std::string()).empty(),
+              "Ctrl+Tab cancels the composition without committing it");
+      require(setTabPaging(true), "navigation.tab restored");
+      require(key(FcitxKey_n) && key(FcitxKey_i), "Ctrl+Tab test with Tab paging on composes ni");
+      const auto beforeEnabledCtrlTab = ic.committed;
+      require(!keyWith(FcitxKey_Tab, fcitx::KeyStates(fcitx::KeyState::Ctrl)) && candidatePage() == 0 &&
+                  ic.committed == beforeEnabledCtrlTab && preedit().empty(),
+              "Ctrl+Tab cancels and passes through with Tab paging on as well");
+    }
     const auto beforePunctuation = ic.committed;
     ic.surroundingText().setText("😀A", 2, 2);
     require(!key(FcitxKey_comma), "ASCII punctuation remains with editor");
@@ -1642,6 +1881,13 @@ int main(int argc, char **argv) {
     require(key(FcitxKey_n), "restart composition");
     ic.setCapabilityFlags(fcitx::CapabilityFlag::Password);
     require(state->session_ == 0, "password capability immediately closes session");
+    state->cloud_clipboard_items_ = Json::array({Json{{"id", "synthetic-3"}, {"text", "云剪贴板受限"}}});
+    require(engine.cloud_clipboard_item1_.shortText(&ic) == "云剪贴板 1",
+            "password context does not preview cloud clipboard text");
+    const auto beforeRestrictedCloud = ic.committed;
+    engine.cloud_clipboard_item1_.activate(&ic);
+    require(ic.committed == beforeRestrictedCloud, "password context does not commit cloud clipboard text");
+    state->cloud_clipboard_items_ = Json::array();
     engine.english_action_.activate(&ic);
     require(state->session_ == 0, "status action cannot reopen password context");
     require(ic.inputPanel().clientPreedit().empty(), "password immediately clears preedit");
@@ -1779,9 +2025,7 @@ int main(int argc, char **argv) {
       state->close();
       state->clearPanel();
     }
-    // Cycling through the schemes has to leave a way back to Chinese: the
-    // shared settings page and the IBus host both offer "中文", and it returns
-    // to last_chinese_scheme. Leaving for Japanese must not overwrite it.
+    // Cycling through the schemes has to leave a way back to Chinese: the shared settings page and the IBus host both offer "中文", and it returns to last_chinese_scheme. Leaving for Japanese or Korean must not overwrite it.
     {
       const auto savedScheme = [&](const char *key) {
         const auto snapshot = response(msime_client_load_preferences(
@@ -1810,15 +2054,27 @@ int main(int argc, char **argv) {
       require(state->cycleScheme() && savedSchemeBecomes("scheme", "japanese") &&
                   savedSchemeBecomes("last_chinese_scheme", "wubi"),
               "Japanese leaves the last Chinese scheme alone");
+      require(state->cycleScheme() && state->view_.value("scheme", 0u) == 4 &&
+                  savedSchemeBecomes("scheme", "korean") &&
+                  savedSchemeBecomes("last_chinese_scheme", "wubi"),
+              "Korean leaves the last Chinese scheme alone");
+      require(state->modeIndicatorLabel() == "한", "the status area labels Korean input");
       // The 输入方案 menu picks a scheme directly and marks the one in use.
-      require(engine.scheme_menu_.actions().size() == 4, "scheme menu lists the four schemes");
-      require(engine.scheme_japanese_action_.isChecked(&ic) && !engine.scheme_quanpin_action_.isChecked(&ic),
+      // Cantonese, Zhuyin and Stroke are listed only with their dictionaries, which this fixture does not install.
+      require(engine.scheme_menu_.actions().size() == 6, "scheme menu lists the six schemes that need no dictionary");
+      require(engine.scheme_korean_action_.isChecked(&ic) && !engine.scheme_japanese_action_.isChecked(&ic) &&
+                  !engine.scheme_quanpin_action_.isChecked(&ic),
               "scheme menu marks the scheme in use");
+      engine.scheme_japanese_action_.activate(&ic);
+      require(state->view_.value("scheme", 0u) == 3 && savedSchemeBecomes("scheme", "japanese") &&
+                  engine.scheme_japanese_action_.isChecked(&ic) && !engine.scheme_korean_action_.isChecked(&ic),
+              "scheme menu selects Japanese directly");
       engine.scheme_shuangpin_action_.activate(&ic);
       require(state->view_.value("scheme", 0u) == 1 && savedSchemeBecomes("scheme", "shuangpin") &&
                   savedSchemeBecomes("last_chinese_scheme", "shuangpin"),
               "scheme menu selects shuangpin directly");
-      require(engine.scheme_shuangpin_action_.isChecked(&ic) && !engine.scheme_japanese_action_.isChecked(&ic),
+      require(engine.scheme_shuangpin_action_.isChecked(&ic) && !engine.scheme_japanese_action_.isChecked(&ic) &&
+                  !engine.scheme_korean_action_.isChecked(&ic),
               "scheme menu follows the choice");
       engine.scheme_quanpin_action_.activate(&ic);
       require(state->view_.value("scheme", 0u) == 0 && savedSchemeBecomes("scheme", "quanpin"),
@@ -1860,9 +2116,7 @@ int main(int argc, char **argv) {
       require(state->view_.value("scheme", 0u) == 2 && !state->scheme_override_,
               "a later settings page scheme replaces the status bar choice on reload");
       // The same change made while the context had no session, as when the settings window has the focus.
-      require(state->cycleScheme() && state->cycleScheme() && state->cycleScheme() &&
-                  state->view_.value("scheme", 0u) == 1,
-              "status bar back to shuangpin");
+      while (state->view_.value("scheme", 0u) != 1) require(state->cycleScheme(), "status bar back to shuangpin");
       state->close();
       state->clearPanel();
       settingsPageSetsScheme("wubi");
@@ -2047,6 +2301,402 @@ int main(int argc, char **argv) {
     require(key(FcitxKey_Escape), "cancel Japanese composition");
     state->close();
     state->clearPanel();
+    // Korean composes Dubeolsik jamo into a Hangul syllable drawn inline. Starting a new syllable commits the previous one, the keys that end a syllable commit it and still do their own work in the application, and punctuation stays ASCII.
+    {
+      options["preferences"]["scheme"] = "korean";
+      std::ofstream(path) << options.dump();
+      const auto press = [&](fcitx::KeySym sym, fcitx::KeyStates states = fcitx::KeyStates()) {
+        fcitx::KeyEvent event(&ic, fcitx::Key(sym, states));
+        engine.keyEvent(entry, event);
+        return event.accepted();
+      };
+      const auto preedit = [&] { return ic.inputPanel().clientPreedit().toString(); };
+      auto before = ic.committed;
+      require(press(FcitxKey_d) && press(FcitxKey_k) && press(FcitxKey_s), "Korean letters compose");
+      require(state->view_.at("scheme") == 4 && preedit() == "안" && ic.committed == before,
+              "the syllable is drawn inline while it composes");
+      require(state->view_.at("candidates").empty(), "Korean offers no candidates before the Hanja key");
+      require(ic.inputPanel().clientPreedit().cursor() == static_cast<int>(std::string("안").size()),
+              "the caret follows the syllable");
+      require(press(FcitxKey_s) && ic.committed == before + "안" && preedit() == "ㄴ",
+              "starting a new syllable commits the previous one");
+      require(press(FcitxKey_u) && press(FcitxKey_d) && preedit() == "녕" &&
+                  state->view_.at("editing_text") == "sud",
+              "the open syllable keeps its key letters");
+      require(press(FcitxKey_BackSpace) && preedit() == "녀", "Backspace removes one jamo");
+      require(!press(FcitxKey_space) && ic.committed == before + "안녀" && preedit().empty(),
+              "Space commits the syllable and still reaches the application");
+      before = ic.committed;
+      require(press(FcitxKey_R, fcitx::KeyStates(fcitx::KeyState::Shift)) && preedit() == "ㄲ" &&
+                  state->view_.value("local_mode", std::string("none")) == "none",
+              "Shift+R types ㄲ rather than opening a local mode");
+      require(press(FcitxKey_Escape) && preedit().empty() && ic.committed == before, "Escape discards the syllable");
+      require(press(FcitxKey_R, fcitx::KeyStates(fcitx::KeyState::CapsLock)) && preedit() == "ㄱ",
+              "CapsLock does not shift a jamo");
+      require(press(FcitxKey_k) && press(FcitxKey_period) && ic.committed == before + "가." && preedit().empty(),
+              "a mark follows the open syllable in one commit");
+      before = ic.committed;
+      require(!press(FcitxKey_period) && !press(FcitxKey_period) && ic.committed == before,
+              "an idle mark is left to the application as ASCII, and repeating it never makes it Chinese");
+      require(press(FcitxKey_r) && press(FcitxKey_k) && !press(FcitxKey_1) && ic.committed == before + "가" &&
+                  preedit().empty(),
+              "a digit ends the syllable and reaches the application");
+      require(press(FcitxKey_r) && press(FcitxKey_k) && !press(FcitxKey_Return) && ic.committed == before + "가가",
+              "Enter commits the syllable and reaches the application");
+      require(press(FcitxKey_r) && press(FcitxKey_apostrophe) && ic.committed == before + "가가ㄱ'",
+              "an apostrophe is a mark after the syllable");
+      // Hangul_Hanja or a bare F9 converts the composing syllable to Hanja (msime_client.h, MSIME_CONVERT_HANJA). With the list open the candidate keys choose, Escape and Backspace only close it, a letter closes it and composes, a mark writes the Hangul with it, and a trigger is never passed on while a syllable composes.
+      {
+        const auto candidates = [&] { return state->view_.value("candidates", Json::array()); };
+        const auto first = [&] {
+          const auto list = candidates();
+          return list.empty() ? std::string() : list.at(0).value("text", std::string());
+        };
+        const auto hangul = [&] { return press(FcitxKey_g) && press(FcitxKey_k) && press(FcitxKey_s); };
+        state->preferences_["number_row_selection"] = true;
+        before = ic.committed;
+        require(!press(FcitxKey_F9) && !press(FcitxKey_Hangul_Hanja) && ic.committed == before,
+                "with nothing composing the trigger is the application's");
+        require(hangul() && press(FcitxKey_Hangul_Hanja) && first() == "韓" && preedit() == "한" &&
+                    ic.committed == before,
+                "Hangul_Hanja opens the Hanja list of the composing syllable");
+        require(candidates().at(0).value("annotation", std::string()) == "나라 이름 한, 한나라 한",
+                "a Hanja carries its 훈음 as the annotation");
+        {
+          const auto *list = ic.inputPanel().candidateList().get();
+          require(list && list->size() > 0 && list->candidate(0).text().toString() == "韓  나라 이름 한, 한나라 한" &&
+                      list->candidate(0).text().size() == 2 &&
+                      list->candidate(0).text().formatAt(1) ==
+                          fcitx::TextFormatFlags{fcitx::TextFormatFlag::Italic, fcitx::TextFormatFlag::DontCommit},
+                  "the panel draws the 훈음 as the Hanja row's italic gloss");
+        }
+        require(press(FcitxKey_F9) && candidates().empty() && preedit() == "한", "the trigger again closes the list");
+        require(press(FcitxKey_F9) && first() == "韓", "a bare F9 opens it too");
+        require(press(FcitxKey_Down) && press(FcitxKey_Return) && ic.committed == before + "漢" &&
+                    preedit().empty() && candidates().empty(),
+                "Return chooses the highlighted Hanja instead of breaking the line");
+        before = ic.committed;
+        require(hangul() && press(FcitxKey_F9) && press(FcitxKey_space) && ic.committed == before + "韓",
+                "Space chooses the highlighted Hanja");
+        before = ic.committed;
+        require(hangul() && press(FcitxKey_F9) && press(FcitxKey_2) && ic.committed == before + "漢",
+                "a digit chooses from the page");
+        before = ic.committed;
+        require(hangul() && press(FcitxKey_F9) && press(FcitxKey_Escape) && candidates().empty() &&
+                    preedit() == "한" && ic.committed == before,
+                "Escape closes the list and keeps the syllable");
+        require(press(FcitxKey_F9) && press(FcitxKey_BackSpace) && candidates().empty() && preedit() == "한" &&
+                    ic.committed == before,
+                "Backspace closes the list and keeps the syllable");
+        require(press(FcitxKey_F9) && press(FcitxKey_period) && ic.committed == before + "한." &&
+                    preedit().empty() && candidates().empty(),
+                "a paging mark is punctuation that writes the Hangul, not a page turn");
+        before = ic.committed;
+        require(press(FcitxKey_r) && press(FcitxKey_k) && press(FcitxKey_F9) && press(FcitxKey_r) &&
+                    preedit() == "각" && candidates().empty() && ic.committed == before,
+                "a letter closes the list and composes");
+        require(press(FcitxKey_Escape) && press(FcitxKey_r) && press(FcitxKey_F9) && preedit() == "ㄱ" &&
+                    candidates().empty() && ic.committed == before,
+                "a lone jamo has no Hanja, and its trigger is still not passed on");
+        require(press(FcitxKey_Escape) && preedit().empty(), "Escape discards the lone jamo");
+        state->preferences_["number_row_selection"] = false;
+        require(hangul() && press(FcitxKey_F9) && !press(FcitxKey_1) && ic.committed == before + "한" &&
+                    preedit().empty() && candidates().empty(),
+                "with number-row selection off a digit writes the Hangul and reaches the application");
+        state->preferences_["number_row_selection"] = true;
+        before = ic.committed;
+        require(hangul() && press(FcitxKey_F9) && !press(FcitxKey_c, fcitx::KeyStates(fcitx::KeyState::Ctrl)) &&
+                    ic.committed == before + "한" && preedit().empty() && candidates().empty(),
+                "a shortcut writes the Hangul, never a Hanja");
+        // Traditional output is for Chinese text, so it leaves the Hanja list alone: s2t maps 后 to 後, and a row drawn through it would show 後 while committing 后.
+        state->traditional_ = true;
+        before = ic.committed;
+        require(press(FcitxKey_g) && press(FcitxKey_n) && press(FcitxKey_F9) && preedit() == "후" &&
+                    candidates().size() > 3 && candidates().at(3).value("text", std::string()) == "后",
+                "the Hanja list of 후 holds 后 fourth");
+        const auto *panel = ic.inputPanel().candidateList().get();
+        require(panel && panel->size() == static_cast<int>(candidates().size()), "the panel shows the Hanja list");
+        for (int row = 0; row < panel->size(); ++row)
+          require(panel->candidate(row).text().toString().rfind(
+                      candidates().at(row).value("text", std::string()), 0) == 0,
+                  "with traditional output on a Hanja row shows the character it commits");
+        require(press(FcitxKey_4) && ic.committed == before + "后", "the row showing 后 commits 后");
+        state->traditional_ = false;
+      }
+      before = ic.committed;
+      require(press(FcitxKey_r) && press(FcitxKey_k) && !press(FcitxKey_c, fcitx::KeyStates(fcitx::KeyState::Ctrl)) &&
+                  ic.committed == before + "가" && preedit().empty(),
+              "a shortcut finishes the syllable instead of discarding it");
+      // Switching to another input method keeps what was typed.
+      require(press(FcitxKey_r) && press(FcitxKey_k), "Korean composes before the switch");
+      fcitx::InputContextEvent switched(&ic, fcitx::EventType::InputContextSwitchInputMethod);
+      engine.deactivate(entry, switched);
+      require(ic.committed == before + "가가", "switching input methods commits the open syllable");
+      engine.activate(entry, focus);
+      state->close();
+      state->clearPanel();
+    }
+    // 注音需要语言词库：词库缺失时即使偏好存的是注音，也运行最后使用的中文方案，菜单不列出注音。装好词库后大千键盘的数字行用来拼写，空格是一声，转换时不打开列表，列表只在用户要求时打开。接着越南文用 VNI 数字内嵌组字，从不变成全角；最后藏文用威利转写内嵌组字，空格带音节点、斜杠带垂符上屏。
+    {
+      const auto dictionaries = std::filesystem::path(directory) / "language-dictionaries";
+      std::filesystem::create_directory(dictionaries);
+      options["language_dictionaries"] = dictionaries.string();
+      options["preferences"]["scheme"] = "zhuyin";
+      options["preferences"]["last_chinese_scheme"] = "quanpin";
+      options["preferences"]["character_width"] = "halfwidth";
+      options["preferences"]["number_row_selection"] = true;
+      options["preferences"]["vietnamese"]["input_method"] = "vni";
+      std::ofstream(path) << options.dump();
+      // The store outranks the options file for the scheme and the width, as the status bar saves them there.
+      {
+        auto snapshot = response(msime_client_load_preferences(
+            reinterpret_cast<const uint8_t *>(preferenceDirectory.data()), preferenceDirectory.size()));
+        const auto revision = snapshot.at("revision").get<uint64_t>();
+        snapshot["preferences"]["scheme"] = "zhuyin";
+        snapshot["preferences"]["character_width"] = "halfwidth";
+        snapshot["revision"] = revision + 1;
+        const auto document = snapshot.dump();
+        const auto saved = response(msime_client_save_preferences(
+            reinterpret_cast<const uint8_t *>(preferenceDirectory.data()), preferenceDirectory.size(), revision,
+            reinterpret_cast<const uint8_t *>(document.data()), document.size()));
+        require(saved.value("revision", uint64_t{}) > revision, "Zhuyin saved as the scheme");
+      }
+      const auto press = [&](fcitx::KeySym sym, fcitx::KeyStates states = fcitx::KeyStates()) {
+        fcitx::KeyEvent event(&ic, fcitx::Key(sym, states));
+        engine.keyEvent(entry, event);
+        return event.accepted();
+      };
+      const auto preedit = [&] { return ic.inputPanel().clientPreedit().toString(); };
+      const auto candidates = [&] { return state->view_.value("candidates", Json::array()); };
+      const auto offered = [&](fcitx::Action *action) {
+        const auto actions = engine.scheme_menu_.actions();
+        return std::find(actions.begin(), actions.end(), action) != actions.end();
+      };
+      require(state->ensure(), "session with Zhuyin saved and its dictionary missing");
+      require(state->effectiveScheme() == "quanpin" && state->view_.value("scheme", 10u) == 0 &&
+                  state->modeIndicatorLabel() == "中",
+              "a missing Zhuyin dictionary falls back to the last Chinese scheme");
+      require(!offered(&engine.scheme_zhuyin_action_) && !offered(&engine.scheme_cantonese_action_) &&
+                  !offered(&engine.scheme_stroke_action_) && offered(&engine.scheme_quanpin_action_) &&
+                  offered(&engine.scheme_vietnamese_action_),
+              "the scheme menu leaves out a scheme whose dictionary is missing");
+      require(engine.scheme_quanpin_action_.isChecked(&ic) && !engine.scheme_zhuyin_action_.isChecked(&ic),
+              "the scheme menu marks the fallback in use");
+      require(!state->selectScheme("zhuyin") && state->view_.value("scheme", 10u) == 0,
+              "Zhuyin cannot be selected without its dictionary");
+      require(!state->selectScheme("stroke") && state->view_.value("scheme", 10u) == 0,
+              "Stroke cannot be selected without its dictionary");
+      const auto fixture =
+          std::string("python3 '") + MSIME_ZHUYIN_DICTIONARY_FIXTURE + "' '" + dictionaries.string() + "'";
+      require(std::system(fixture.c_str()) == 0, "Zhuyin dictionary fixture written");
+      state->close();
+      state->clearPanel();
+      require(state->ensure() && state->effectiveScheme() == "zhuyin" && state->view_.value("scheme", 0u) == 6 &&
+                  state->modeIndicatorLabel() == "注",
+              "the saved Zhuyin runs once its dictionary is installed");
+      require(offered(&engine.scheme_zhuyin_action_) && engine.scheme_zhuyin_action_.isChecked(&ic) &&
+                  !offered(&engine.scheme_cantonese_action_),
+              "the scheme menu offers and marks Zhuyin with its dictionary installed");
+      auto before = ic.committed;
+      require(press(FcitxKey_1) && press(FcitxKey_8) && ic.committed == before,
+              "the digit row spells ㄅㄚ rather than choosing a candidate");
+      require(press(FcitxKey_space) && preedit() == "八" && candidates().empty() && ic.committed == before,
+              "Space gives the first tone and converts without opening a list");
+      require(press(FcitxKey_Down) && candidates().size() == 2 &&
+                  candidates().at(0).value("text", std::string()) == "八" &&
+                  candidates().at(1).value("text", std::string()) == "巴",
+              "Down opens the Zhuyin list");
+      require(press(FcitxKey_2) && preedit() == "巴" && candidates().empty() && ic.committed == before,
+              "a digit picks from the open list without committing");
+      require(press(FcitxKey_Down) && !candidates().empty() && press(FcitxKey_1) && preedit() == "八" &&
+                  ic.committed == before,
+              "1 picks the first row of the list");
+      require(press(FcitxKey_Return) && ic.committed == before + "八" && preedit().empty(),
+              "Return commits the conversion");
+      before = ic.committed;
+      require(press(FcitxKey_1) && press(FcitxKey_8) && press(FcitxKey_space) && press(FcitxKey_F9) &&
+                  !candidates().empty(),
+              "F9 opens the Zhuyin list");
+      require(press(FcitxKey_Escape) && candidates().empty() && preedit() == "八",
+              "Escape closes the list and keeps the conversion");
+      require(press(FcitxKey_Escape) && preedit().empty() && ic.committed == before,
+              "a second Escape discards the conversion");
+      require(press(FcitxKey_comma) && press(FcitxKey_space) && preedit() == "欸" && ic.committed == before,
+              "the comma spells ㄝ rather than writing Chinese punctuation");
+      require(press(FcitxKey_Return) && ic.committed == before + "欸", "Return commits 欸");
+      // Vietnamese with VNI: the digits after a word place its marks inline and never open a list.
+      require(state->selectScheme("vietnamese") && state->view_.value("scheme", 0u) == 7 &&
+                  engine.scheme_vietnamese_action_.isChecked(&ic) && state->modeIndicatorLabel() == "越",
+              "the scheme menu selects Vietnamese");
+      before = ic.committed;
+      require(!press(FcitxKey_6) && ic.committed == before, "an idle VNI digit is the application's");
+      for (const auto sym : {FcitxKey_v, FcitxKey_i, FcitxKey_e, FcitxKey_t, FcitxKey_6, FcitxKey_5})
+        require(press(sym), "VNI keys compose");
+      require(preedit() == "việt" && candidates().empty() && ic.committed == before,
+              "VNI digits compose việt inline");
+      // A mark follows the word as ASCII, with fullwidth output on too, and an idle mark is left to the application unwidened.
+      require(state->toggleWidth() && state->fullwidthOutput() && preedit() == "việt", "fullwidth output on");
+      require(press(FcitxKey_comma) && ic.committed == before + "việt," && preedit().empty(),
+              "the comma after a word commits with it as ASCII");
+      require(!press(FcitxKey_comma) && ic.committed == before + "việt,",
+              "an idle comma reaches the application as ASCII");
+      require(press(FcitxKey_a) && preedit() == "a" && !press(FcitxKey_space) && ic.committed == before + "việt,a",
+              "Space commits the word unwidened and reaches the application");
+      require(state->toggleWidth() && !state->fullwidthOutput(), "fullwidth output off");
+      // Caps Lock types a capital that starts a word.
+      before = ic.committed;
+      require(press(FcitxKey_A, fcitx::KeyStates(fcitx::KeyState::CapsLock)) && preedit() == "A" &&
+                  ic.committed == before,
+              "Caps Lock starts a Vietnamese word with a capital");
+      require(!press(FcitxKey_Return) && ic.committed == before + "A" && preedit().empty(),
+              "Return commits the word and reaches the application");
+      // Switching input methods, and leaving a client that draws no preedit of its own, write the word out.
+      require(press(FcitxKey_v) && press(FcitxKey_i) && preedit() == "vi", "Vietnamese composes before the switch");
+      fcitx::InputContextEvent switched(&ic, fcitx::EventType::InputContextSwitchInputMethod);
+      engine.deactivate(entry, switched);
+      require(ic.committed == before + "Avi", "switching input methods commits the open word");
+      engine.activate(entry, focus);
+      ic.setCapabilityFlags(fcitx::CapabilityFlag::NoFlag);
+      require(press(FcitxKey_v) && press(FcitxKey_i) && ic.inputPanel().preedit().toString() == "vi" &&
+                  state->view_.value("scheme", 0u) == 7,
+              "Vietnamese composes in the panel for a client without preedit");
+      ic.focusOut();
+      require(ic.committed == before + "Avivi" && state->session_ == 0, "focus out commits the open word");
+      ic.setCapabilityFlags(fcitx::CapabilityFlags{fcitx::CapabilityFlag::Preedit,
+                                                 fcitx::CapabilityFlag::SurroundingText});
+      ic.focusIn();
+      engine.activate(entry, focus);
+      require(press(FcitxKey_a) && preedit() == "a" && ic.committed == before + "Avivi",
+              "the next field starts a new word");
+      // 藏文：威利原文内嵌显示为转换后的藏文，从不打开列表。空格和斜杠分别带音节点、垂符上屏并被吞掉，回车只上屏藏文，同样被吞掉。
+      require(offered(&engine.scheme_tibetan_action_), "the scheme menu offers Tibetan");
+      require(state->selectScheme("tibetan") && state->view_.value("scheme", 0u) == 8 &&
+                  engine.scheme_tibetan_action_.isChecked(&ic) && !engine.scheme_vietnamese_action_.isChecked(&ic) &&
+                  state->modeIndicatorLabel() == "藏",
+              "the scheme menu selects Tibetan");
+      before = ic.committed;
+      require(!press(FcitxKey_1) && ic.committed == before, "an idle digit is the application's in Tibetan");
+      for (const auto sym : {FcitxKey_b, FcitxKey_k, FcitxKey_r, FcitxKey_a})
+        require(press(sym), "Wylie letters compose");
+      require(preedit() == "བཀྲ" && candidates().empty() && ic.committed == before, "Wylie composes བཀྲ inline");
+      require(press(FcitxKey_space) && ic.committed == before + "བཀྲ་" && preedit().empty(),
+              "Space commits the syllable with a tsheg and keeps the key");
+      for (const auto sym : {FcitxKey_s, FcitxKey_h, FcitxKey_i, FcitxKey_s})
+        require(press(sym), "Wylie letters compose");
+      require(press(FcitxKey_slash) && ic.committed == before + "བཀྲ་ཤིས།" && preedit().empty(),
+              "the slash commits the syllable with a shad");
+      require(press(FcitxKey_slash) && ic.committed == before + "བཀྲ་ཤིས།།", "an idle slash writes a shad");
+      // 撇号在空闲时也是拼写（achung 开头的音节），加号是叠写；带 Shift 或 CapsLock 的大写字母是另一个字母。
+      before = ic.committed;
+      require(press(FcitxKey_apostrophe) && press(FcitxKey_o) && press(FcitxKey_d) && preedit() == "འོད" &&
+                  ic.committed == before,
+              "an apostrophe starts an achung syllable");
+      require(press(FcitxKey_Return) && ic.committed == before + "འོད" && preedit().empty(),
+              "Return commits the syllable without a tsheg and keeps the key");
+      before = ic.committed;
+      require(press(FcitxKey_p) && press(FcitxKey_a) && press(FcitxKey_d) &&
+                  press(FcitxKey_plus, fcitx::KeyStates(fcitx::KeyState::Shift)) && press(FcitxKey_m) &&
+                  press(FcitxKey_a) && preedit() == "པདྨ" && ic.committed == before,
+              "the plus stacks the Wylie letters");
+      require(press(FcitxKey_Return) && ic.committed == before + "པདྨ", "Return commits the stacked syllable");
+      before = ic.committed;
+      require(press(FcitxKey_T, fcitx::KeyStates(fcitx::KeyState::Shift)) && press(FcitxKey_a) && preedit() == "ཊ" &&
+                  ic.committed == before,
+              "Shift types the uppercase Wylie letter");
+      require(press(FcitxKey_Return) && ic.committed == before + "ཊ", "Return commits the retroflex letter");
+      before = ic.committed;
+      require(press(FcitxKey_D, fcitx::KeyStates(fcitx::KeyState::CapsLock)) && press(FcitxKey_a) &&
+                  preedit() == "ཌ" && ic.committed == before,
+              "Caps Lock starts a syllable with the uppercase Wylie letter");
+      require(press(FcitxKey_Return) && ic.committed == before + "ཌ", "Return commits the Caps Lock syllable");
+      // 第一次 Esc 把显示退回威利原文，第二次丢弃组字；Backspace 删一个原文按键。
+      before = ic.committed;
+      require(press(FcitxKey_k) && press(FcitxKey_a) && preedit() == "ཀ" && press(FcitxKey_Escape) &&
+                  preedit() == "ka" && ic.committed == before,
+              "Escape restores the raw Wylie");
+      require(press(FcitxKey_Escape) && preedit().empty() && ic.committed == before,
+              "a second Escape discards the composition");
+      require(press(FcitxKey_k) && press(FcitxKey_a) && press(FcitxKey_BackSpace) && preedit() == "ཀ" &&
+                  ic.committed == before,
+              "Backspace takes back one Wylie key");
+      require(press(FcitxKey_Escape) && press(FcitxKey_Escape) && preedit().empty(), "the composition is discarded");
+      // 其他标点跟在藏文后面写成 ASCII，全角输出打开时也一样；空闲的标点和空格都交给应用，不变全角。
+      require(state->toggleWidth() && state->fullwidthOutput(), "fullwidth output on");
+      before = ic.committed;
+      require(press(FcitxKey_k) && press(FcitxKey_a) && press(FcitxKey_comma) && ic.committed == before + "ཀ," &&
+                  preedit().empty(),
+              "the comma after a syllable commits with it as ASCII");
+      require(!press(FcitxKey_comma) && !press(FcitxKey_space) && ic.committed == before + "ཀ,",
+              "an idle comma or space reaches the application unwidened");
+      require(state->toggleWidth() && !state->fullwidthOutput(), "fullwidth output off");
+      // 导航键先把藏文按显示写出去（不带音节点），再交给应用；切换输入法同样把组字写出去。
+      before = ic.committed;
+      require(press(FcitxKey_k) && press(FcitxKey_a) && !press(FcitxKey_Left) && ic.committed == before + "ཀ" &&
+                  preedit().empty(),
+              "Left writes the syllable out without a tsheg and reaches the application");
+      require(press(FcitxKey_g) && press(FcitxKey_a) && preedit() == "ག", "Tibetan composes before the switch");
+      fcitx::InputContextEvent tibetanSwitch(&ic, fcitx::EventType::InputContextSwitchInputMethod);
+      engine.deactivate(entry, tibetanSwitch);
+      require(ic.committed == before + "ཀག", "switching input methods commits the open syllable");
+      engine.activate(entry, focus);
+      // 装好 msime-stroke.db 并重新读取选项后，笔画进入菜单；它是中文方案，选中后记为最后使用的中文方案。
+      const auto strokeFixture =
+          std::string("python3 '") + MSIME_STROKE_DICTIONARY_FIXTURE + "' '" + dictionaries.string() + "'";
+      require(std::system(strokeFixture.c_str()) == 0, "Stroke dictionary fixture written");
+      state->close();
+      state->clearPanel();
+      require(state->ensure() && offered(&engine.scheme_stroke_action_) && offered(&engine.scheme_zhuyin_action_) &&
+                  !engine.scheme_stroke_action_.isChecked(&ic),
+              "the scheme menu offers Stroke with its dictionary installed");
+      require(engine.scheme_menu_.actions().size() == 9, "the menu lists Zhuyin and Stroke beside the seven base schemes");
+      engine.scheme_stroke_action_.activate(&ic);
+      require(state->effectiveScheme() == "stroke" && state->view_.value("scheme", 0u) == 9 &&
+                  engine.scheme_stroke_action_.isChecked(&ic) && state->modeIndicatorLabel() == "笔",
+              "the scheme menu selects Stroke");
+      {
+        const auto stored = response(msime_client_load_preferences(
+            reinterpret_cast<const uint8_t *>(preferenceDirectory.data()), preferenceDirectory.size()));
+        require(stored.at("preferences").value("last_chinese_scheme", std::string()) == "stroke",
+                "Stroke is recorded as the last Chinese scheme");
+      }
+      // 空闲时只有五个笔画字母开始组合：通配符 x 和其他字母都交给应用。
+      before = ic.committed;
+      require(!press(FcitxKey_x) && !press(FcitxKey_a) && preedit().empty() && ic.committed == before,
+              "an idle Stroke wildcard or other letter is the application's");
+      // 原样预编辑样式从 `reading` 画出笔画字形；editing_text 保留字母。
+      require(press(FcitxKey_h) && preedit() == "一" && !candidates().empty() &&
+                  candidates().at(0).value("text", std::string()) == "一" &&
+                  state->view_.value("editing_text", std::string()) == "h",
+              "h composes the stroke 一");
+      require(press(FcitxKey_s) && preedit() == "一丨" && candidates().size() >= 3 &&
+                  candidates().at(0).value("text", std::string()) == "十" &&
+                  candidates().at(1).value("text", std::string()) == "木" &&
+                  candidates().at(2).value("text", std::string()) == "古",
+              "h s lists 十 exactly and then its completions");
+      require(press(FcitxKey_q) && preedit() == "一丨" && ic.committed == before,
+              "a letter that is no stroke is swallowed while composing");
+      require(press(FcitxKey_space) && ic.committed == before + "十" && preedit().empty(),
+              "Space commits the highlighted Stroke candidate");
+      before = ic.committed;
+      require(press(FcitxKey_h) && press(FcitxKey_x) && preedit() == "一＊" && candidates().size() >= 2 &&
+                  candidates().at(0).value("text", std::string()) == "十" &&
+                  candidates().at(1).value("text", std::string()) == "二",
+              "the wildcard x matches any one stroke");
+      require(press(FcitxKey_2) && ic.committed == before + "二" && preedit().empty(),
+              "a digit picks the Stroke candidate");
+      before = ic.committed;
+      require(press(FcitxKey_h) && press(FcitxKey_s) && press(FcitxKey_BackSpace) && preedit() == "一" &&
+                  ic.committed == before,
+              "Backspace removes the last stroke");
+      require(press(FcitxKey_s) && press(FcitxKey_Return) && ic.committed == before + "hs" && preedit().empty(),
+              "Return commits the typed stroke letters");
+      before = ic.committed;
+      require(press(FcitxKey_p) && press(FcitxKey_n) && preedit() == "丿丶" && press(FcitxKey_Escape) &&
+                  preedit().empty() && ic.committed == before,
+              "Escape clears the Stroke composition");
+      state->close();
+      state->clearPanel();
+    }
     std::filesystem::remove_all(directory);
     std::cout << "Fcitx5 native context tests passed\n";
   } catch (const std::exception &error) {

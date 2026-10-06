@@ -3,6 +3,7 @@ import {
   EmojiPage, EmojiRow, ClipboardHistoryMutation
 } from './KeyboardSession';
 import { KeyboardScheme, SchemeDefinition } from './KeyboardScheme';
+import { KeyIdPolicy } from './KeyIdPolicy';
 import { VoiceHotkeyAction } from './input/VoiceHotkeyPolicy';
 import { BusinessErrorPolicy } from './BusinessErrorPolicy';
 import { VoiceRecordingBehaviourPolicy } from './input/VoiceRecordingBehaviourPolicy';
@@ -25,6 +26,13 @@ import {
 } from './input/JapaneseNineKeyLayout';
 import { JapaneseNineKeyActions } from './input/JapaneseNineKeyActions';
 import { JapaneseVariantPolicy } from './input/JapaneseVariantPolicy';
+import { DubeolsikLayout } from './input/DubeolsikLayout';
+import { ZhuyinLayout } from './input/ZhuyinLayout';
+import { StrokeKey, StrokeLayout } from './input/StrokeLayout';
+import { SchemeCompositionPolicy } from './input/SchemeCompositionPolicy';
+import { SchemeTraits } from './SchemeTraits';
+import { HardwareKeyRouter } from './HardwareKeyRouter';
+import { KoreanCompositionPolicy } from './input/KoreanCompositionPolicy';
 import { CandidateManagementAction, ManagementAction } from './candidate/CandidateManagementAction';
 import { CandidateFontFamilyPolicy } from './candidate/CandidateFontFamilyPolicy';
 import { CandidateChipWidth } from './candidate/CandidateChipWidth';
@@ -33,21 +41,29 @@ import { CandidateContextMenuPolicy, PointerAction, PointerButton }
 import { CandidateNumberFontPolicy } from './candidate/CandidateNumberFontPolicy';
 import { CandidateWidthPolicy } from './candidate/CandidateWidthPolicy';
 import { CandidatePagerPolicy } from './candidate/CandidatePagerPolicy';
+import { CandidateLogoPolicy } from './candidate/CandidateLogoPolicy';
+import { CandidateDecorationLayout, CandidateDecorationRect } from './candidate/CandidateDecorationLayout';
 import { PreeditCaretPolicy } from './candidate/PreeditCaretPolicy';
 import { CandidatePreeditStylePolicy, VisibleComposition } from './candidate/CandidatePreeditStylePolicy';
 import { CandidateTranslationStyle } from './candidate/CandidateTranslationStyle';
 import { CandidateSkinPolicy } from './candidate/CandidateSkinPolicy';
 import { CandidateWheelPolicy } from './candidate/CandidateWheelPolicy';
 import { KeyboardMetrics } from './KeyboardMetrics';
-import { KeyboardGeometry } from './KeyboardGeometry';
+import {
+  COMBO_IDLE_RESET_MILLIS, TypingEffect, TypingEffectPolicy, TypingEffectSettings
+} from './TypingEffectPolicy';
+import { HitOffset, KeyboardGeometry } from './KeyboardGeometry';
 import {
   KeyboardLayoutDragAxis, KeyboardLayoutDragPolicy
 } from './input/KeyboardLayoutDragPolicy';
 import { NineKeyLayout, NineKey } from './input/NineKeyLayout';
 import { SpaceCursorMovement } from './input/SpaceCursorMovement';
 import {
-  EmojiCatalogModel, EmojiCategory, EmojiItem, EmojiSymbolGroup, EMOJI_PAGE_SIZE
+  EmojiCatalogModel, EmojiCategory, EmojiItem, EMOJI_PAGE_SIZE
 } from './emoji/EmojiCatalogModel';
+import {
+  EmojiPanelGroupTab, PluginSymbolGroup, PluginSymbolGroupPolicy
+} from './emoji/PluginSymbolGroupPolicy';
 import {
   EmojiPanelKey, EmojiPanelKeyAction, EmojiPanelKeyDecision, EmojiPanelKeyPolicy
 } from './emoji/EmojiPanelKeyPolicy';
@@ -57,6 +73,10 @@ import { KeyboardFormFactor } from './KeyboardFormFactor';
 import { DesktopSurface } from './DesktopSurface';
 import { SurfaceRoutingPolicy } from './SurfaceRoutingPolicy';
 import { ClipboardHistoryItem, ClipboardFailure } from './clipboard/ClipboardHistoryStore';
+import {
+  CLOUD_CLIPBOARD_SEND, CLOUD_CLIPBOARD_TAB, CloudClipboardItem, CloudClipboardListing, CloudClipboardPolicy,
+  CloudClipboardSendOutcome, CloudClipboardState
+} from './clipboard/CloudClipboardPolicy';
 import componentSnapshot from '@ohos.arkui.componentSnapshot';
 import { image } from '@kit.ImageKit';
 import { textRecognition } from '@kit.CoreVisionKit';
@@ -69,6 +89,7 @@ import {
 } from './input/HandwritingRecognitionQueue';
 import { HarmonyVoiceRecognizer } from './input/HarmonyVoiceRecognizer';
 import { VoiceRecognitionPolicy } from './input/VoiceRecognitionPolicy';
+import { VoiceInputConfigurationPolicy } from './input/VoiceInputConfiguration';
 import { ReplyKeyboardPolicy, ReplyStyle } from './ReplyKeyboardPolicy';
 import { CommunityReplyTemplate } from './CommunityReplyLibraryPolicy';
 import { SymbolPanelCategory, SymbolPanelPolicy } from './input/SymbolPanelPolicy';
@@ -104,6 +125,10 @@ interface KeyOptions {
   label?: string;
   /** The double-pinyin unit under the letter, or empty when the key does not stand for one. */
   hint?: string;
+  /**
+   * 字母键的小写字母。设了它，键面和读屏文字在绘制时按当前大小写现算，`face` 和 `label` 不再用：自动大写在每次文字变化后异步切换大小写，若把大小写放进 `ForEach` 的键标识，每次切换都会重建全部字母键，手指正按着的那个键也被换掉，这次按键就丢了。
+   */
+  letter?: string;
   size: number;
   /** Filled with the platform accent: a held Shift, or Return while a composition is open. */
   emphasized: boolean;
@@ -255,6 +280,9 @@ const KAOMOJI_PANEL: string = 'kaomoji';
 const SYMBOLS_PANEL: string = 'symbols';
 // The Windows emoji panel's last page (`EmojiPanel::Page::Clipboard`). Only a 2in1 draws it as a tab: the phone reaches clipboard history from its own tools face.
 const CLIPBOARD_PANEL: string = 'clipboard';
+// The clipboard surface's two sections: this device's history, and the account's cloud clipboard.
+const CLIPBOARD_TAB_LOCAL: string = 'local';
+const CLIPBOARD_TAB_CLOUD: string = 'cloud';
 // Enough results to scroll through; a one-letter search would otherwise lay out the whole catalog.
 const EMOJI_SEARCH_LIMIT: number = 512;
 
@@ -303,6 +331,8 @@ struct KeyboardView {
   @State phrasePrefix: string = '';
   @State spellings: string[] = [];
   @State engineScheme: number = 0;
+  /** Whether the scheme's openable candidate list (the Korean Hanja list, the Zhuyin list) is on the strip, as the Engine last reported it. */
+  @State candidateListOpen: boolean = false;
   /** Read-only English completions for the word being typed; empty whenever one is not. */
   @State englishSuggestions: string[] = [];
   @State shuangpinProfile: string = 'xiaohe';
@@ -345,15 +375,21 @@ struct KeyboardView {
   @State emojiShowingRecents: boolean = false;
   @State emojiPanel: string = EMOJI_PANEL;
   @State emojiUnicodeGroup: string = EmojiCatalogModel.categories()[0].group;
-  @State emojiKaomojiGroups: string[] = [];
-  @State emojiSymbolGroups: EmojiSymbolGroup[] = [];
-  @State emojiSymbolParent: string = '';
+  // 颜文字页和符号页的标签：内置组在前，符号集插件的组在后，见 PluginSymbolGroupPolicy。
+  @State emojiKaomojiTabs: EmojiPanelGroupTab[] = [];
+  @State emojiSymbolTabs: EmojiPanelGroupTab[] = [];
+  // 颜文字页或符号页当前选中标签的 key。
+  @State emojiPanelTab: string = '';
   // What the 2in1 panel's search reads and which item the arrows have reached; see EmojiPanelKeyPolicy.
   @State emojiQuery: string = '';
   @State emojiSelected: number = 0;
   @State emojiResults: string[] = [];
   private emojiGridScroller: Scroller = new Scroller();
   private clipListScroller: Scroller = new Scroller();
+  /** Bumped by every cloud fetch and every drop, so only the newest answer is applied. */
+  private cloudRequest: number = 0;
+  /** The editor the cloud listing on screen was fetched for. */
+  private cloudEditor: number = -1;
   // Every item of a panel with its keywords, read once per panel the first time it is searched.
   private emojiSearchIndex: Map<string, EmojiItem[]> = new Map<string, EmojiItem[]>();
   // The keywords of every item the panel has read, so a 2in1 hover can name it; recents that were never read show no name.
@@ -378,13 +414,37 @@ struct KeyboardView {
   @State clips: ClipboardHistoryItem[] = [];
   @State clipboardNotice: string = '';
   @State confirmingClear: boolean = false;
+  /** Which section of the clipboard surface is showing; the cloud one is never offered in a password field. */
+  @State clipboardTab: string = CLIPBOARD_TAB_LOCAL;
+  /** Whether the focused editor may see cloud items, mirrored from the session so the builders redraw when the field changes. */
+  @State cloudVisible: boolean = false;
+  @State cloudClips: CloudClipboardItem[] = [];
+  /** What the last cloud listing said; meaningless until cloudStateKnown. */
+  @State cloudState: CloudClipboardState = CloudClipboardState.FAILED;
+  @State cloudStateKnown: boolean = false;
+  @State cloudLoading: boolean = false;
+  @State cloudSending: boolean = false;
+  /** The local history entry a long press offered to send to the cloud clipboard, or empty. */
+  @State clipSendTarget: string = '';
   @State expanded: ExpandedCandidate[] = [];
   /** Which row of the expanded panel is showing its gloss, or -1. Its own index space. */
   @State expandedGloss: number = -1;
   @State availableWidth: number = 0;
+  /** The candidate card's typing-effect flash: its opacity, animated back to 0 after each key. */
+  @State effectFlash: number = 0;
+  /** The flash colour an effect pack sets, `undefined` for the candidate accent. */
+  @State effectColor: string | undefined = undefined;
+  /** The combo badge's text, empty while there is no combo to show. */
+  @State effectBadge: string = '';
+  /** Power mode swells the badge on each counted key and lets it settle back. */
+  @State effectBadgeScale: number = 1;
+  /** The candidate card's height, so the flash covers exactly the card and not the decoration above it. */
+  @State effectCardHeight: number = 0;
   @State caseMode: LetterCaseMode = LetterCaseMode.LOWERCASE;
   @State skin: KeyboardSkin = KeyboardSkin.fromTheme('system', 'system', null, false);
-  @State scheme: SchemeDefinition = KeyboardScheme.QUANPIN;
+  @State scheme: SchemeDefinition = KeyboardScheme.fallback();
+  /** 五笔版本：方案仍是同一个五笔，只换卡片和工具栏上的「86」「98」字样；单独设成状态，只改版本时也会重绘。 */
+  @State wubiProfile: string = KeyboardScheme.WUBI_86;
   @State handwritingStrokes: HandwritingStroke[] = [];
   @State handwritingRedo: HandwritingStroke[] = [];
   @State handwritingCandidates: string[] = [];
@@ -423,6 +483,8 @@ struct KeyboardView {
   private backspaceRepeated: boolean = false;
   private dragged: boolean = false;
   private diagnosticTimer: number = -1;
+  /** Clears the combo badge once the combo has ended for want of keys. */
+  private effectTimer: number = -1;
   private pendingRemoval: number = -1;
   private flickX: number = 0;
   private flickY: number = 0;
@@ -542,6 +604,7 @@ struct KeyboardView {
       this.english = KeyboardSession.shared.isEnglish();
       this.applyEditorFace();
       this.applyAutomaticCase();
+      this.syncCloudClipboardEditor();
     };
     KeyboardSession.shared.onViewPreferencesReloaded = (): void => {
       // The settings page saved while this view was alive; draw what it saved instead of what the view read when it appeared.
@@ -576,6 +639,7 @@ struct KeyboardView {
       this.phrasePrefix = state.phrasePrefix;
       this.spellings = state.spellings;
       this.engineScheme = state.scheme;
+      this.candidateListOpen = state.candidateListOpen;
       this.japanese = state.scheme === JAPANESE_SCHEME && !state.english
         && this.scheme.touchKeyboardLayout === 'nine_key';
       this.shuangpinProfile = state.shuangpinProfile;
@@ -596,12 +660,61 @@ struct KeyboardView {
         this.show(SURFACE_NONE);
       }
     };
+    KeyboardSession.shared.onTypingEffect =
+      (effect: TypingEffect, settings: TypingEffectSettings, key: boolean): void => {
+        this.showTypingEffect(effect, settings, key);
+      };
+  }
+
+  /** Draw one typing-effect answer: flash the candidate card for a key, swell the badge in power mode, and show the combo until it ends. */
+  private showTypingEffect(effect: TypingEffect, settings: TypingEffectSettings, key: boolean): void {
+    const intensity: number = settings.intensity;
+    const peak: number = key ? TypingEffectPolicy.flashOpacity(effect, intensity) : 0;
+    if (peak > 0) {
+      this.effectColor = settings.color;
+      this.effectFlash = peak;
+      this.getUIContext().animateTo({ duration: settings.flashMillis, curve: Curve.EaseOut }, (): void => {
+        this.effectFlash = 0;
+      });
+    }
+    const scale: number = key ? TypingEffectPolicy.badgeScale(effect, intensity) : 1;
+    if (scale > 1) {
+      this.effectBadgeScale = scale;
+      this.getUIContext().animateTo({ duration: settings.flashMillis * 2, curve: Curve.EaseOut }, (): void => {
+        this.effectBadgeScale = 1;
+      });
+    }
+    this.effectBadge = TypingEffectPolicy.badge(effect.count);
+    // A commit counts nothing, so it neither starts nor extends the idle wait; host-api ends the combo after the same idle time since the last counted key, and the badge goes with it.
+    if (!key) {
+      return;
+    }
+    if (this.effectTimer !== -1) {
+      clearTimeout(this.effectTimer);
+      this.effectTimer = -1;
+    }
+    if (this.effectBadge.length > 0) {
+      this.effectTimer = setTimeout((): void => {
+        this.effectTimer = -1;
+        this.effectBadge = '';
+      }, COMBO_IDLE_RESET_MILLIS);
+    }
+  }
+
+  /** Whether the combo badge sits on the composition line; without that line it is drawn over the card's corner instead. */
+  private comboOnCompositionLine(): boolean {
+    return KeyboardFormFactor.isDesktop() && this.settings.candidateShowPreedit;
   }
 
   aboutToDisappear(): void {
     KeyboardSession.shared.onChanged = undefined;
     KeyboardSession.shared.onClipboardHistoryChanged = undefined;
     KeyboardSession.shared.onVoiceInputChanged = undefined;
+    KeyboardSession.shared.onTypingEffect = undefined;
+    if (this.effectTimer !== -1) {
+      clearTimeout(this.effectTimer);
+      this.effectTimer = -1;
+    }
     KeyboardSession.shared.onEditorChanged = undefined;
     KeyboardSession.shared.onViewPreferencesReloaded = undefined;
     KeyboardSession.shared.onReplyContextChanged = undefined;
@@ -637,6 +750,8 @@ struct KeyboardView {
    * editor when there was no composition; it never crosses that boundary and eats committed text.
    */
   private startBackspace(): void {
+    // Counted once per press here, on the way down, never per repeat of a hold.
+    KeyboardSession.shared.recordKey(KeyIdPolicy.BACKSPACE);
     this.cancelBackspace();
     this.backspaceRepeated = false;
     this.backspaceTimer = setTimeout((): void => {
@@ -645,7 +760,8 @@ struct KeyboardView {
       this.backspaceRepeated = true;
       if (action === BackspaceHoldAction.CANCEL_COMPOSITION) {
         this.backspaceTimer = -1;
-        KeyboardSession.shared.cancel();
+        // The whole composition, a Korean syllable whose Hanja list is open included, which a single cancel would only close.
+        KeyboardSession.shared.discardComposition();
         return;
       }
       KeyboardSession.shared.backspace();
@@ -690,6 +806,13 @@ struct KeyboardView {
    * 本地模式除外 —— 那里敲进去的就是字面的小写字母,键面写大写就是在骗人。
    */
   private letterFace(letter: string): string {
+    if (this.koreanFace()) {
+      return DubeolsikLayout.jamo(letter, this.caseMode !== LetterCaseMode.LOWERCASE);
+    }
+    if (this.vietnameseFace() || this.tibetanFace()) {
+      // 越南语和藏文（威利转写区分大小写）的字母按 Shift 给出的大小写输入，所以键面显示那个大小写，和英文一样。
+      return LetterKeyFacePolicy.face(letter, false, false, this.caseMode !== LetterCaseMode.LOWERCASE);
+    }
     return LetterKeyFacePolicy.face(letter, !this.english, this.localMode !== 'none',
       this.caseMode !== LetterCaseMode.LOWERCASE);
   }
@@ -700,7 +823,171 @@ struct KeyboardView {
       this.engineScheme, this.localMode);
   }
 
+  /**
+   * Whether the letter keys are the Dubeolsik jamo keys: the Korean scheme, with neither English nor a local utility mode taking the letters.
+   *
+   * Read from the keyboard's own scheme rather than from what the Engine last reported, for the reason the kana grid is: the face has to change the moment Korean is picked, before anything has been typed.
+   */
+  private koreanFace(): boolean {
+    return KoreanCompositionPolicy.selected(this.scheme.engineScheme, this.english, this.localMode);
+  }
+
+  /** Whether the Engine last reported a Korean composition under the Korean rules, as opposed to the face the keyboard draws before it has. */
+  private koreanComposition(): boolean {
+    return KoreanCompositionPolicy.active(this.engineScheme, this.english, this.localMode);
+  }
+
+  /** Whether the strip holds the Hanja list of the composing Korean syllable. */
+  private koreanHanjaListOpen(): boolean {
+    return KoreanCompositionPolicy.hanjaListOpen(this.koreanComposition(), this.candidates.length);
+  }
+
+  /** Whether the keys are the Zhuyin Dachen keys: the Zhuyin scheme, with neither English nor a local utility mode taking them, read from the keyboard's own scheme for the reason `koreanFace` is. */
+  private zhuyinFace(): boolean {
+    return SchemeCompositionPolicy.selectedRulesScheme(this.scheme.engineScheme, this.english,
+      this.localMode) === SchemeTraits.ZHUYIN;
+  }
+
+  /** Whether letters go to the Vietnamese composer, which reads their case, read from the keyboard's own scheme for the reason `koreanFace` is. */
+  private vietnameseFace(): boolean {
+    return SchemeCompositionPolicy.selectedRulesScheme(this.scheme.engineScheme, this.english,
+      this.localMode) === SchemeTraits.VIETNAMESE;
+  }
+
+  /** 字母是否交给藏文威利转写组字（区分大小写），和 `koreanFace` 一样读键盘自己的方案。 */
+  private tibetanFace(): boolean {
+    return SchemeCompositionPolicy.selectedRulesScheme(this.scheme.engineScheme, this.english,
+      this.localMode) === SchemeTraits.TIBETAN;
+  }
+
+  /** Whether the Engine last reported a Zhuyin composition under the Zhuyin rules, as opposed to the face the keyboard draws before it has. */
+  private zhuyinComposition(): boolean {
+    return SchemeCompositionPolicy.rulesScheme(this.engineScheme, this.english, this.localMode)
+      === SchemeTraits.ZHUYIN;
+  }
+
+  /** Whether the strip holds the list the button on the composition line opens: the Korean syllable's Hanja or the Zhuyin candidates. */
+  private openableListShowing(): boolean {
+    return this.zhuyinComposition() ? this.candidateListOpen : this.koreanHanjaListOpen();
+  }
+
+  /**
+   * Whether the touch strip offers 漢 or 選: while a Korean syllable or a Zhuyin conversion composes, its list open or not. A 2in1 candidate window does not draw it, since that machine has the hardware Hanja key (or Down for Zhuyin) and the window is sized to its candidates; see HardwareKeyRouter.routeKorean and routeZhuyin.
+   */
+  private showsHanjaButton(): boolean {
+    return !KeyboardFormFactor.isDesktop()
+      && (KoreanCompositionPolicy.convertsHanja(this.koreanComposition(), this.editing)
+        || (this.zhuyinComposition() && this.editing.length > 0));
+  }
+
+  /**
+   * The 漢 button: list the Hanja of the composing syllable, or close the open list and keep the syllable composing. A lone jamo has no Hanja and the Engine leaves it alone, so the strip says why nothing opened, as on iOS. In Zhuyin the same command opens or closes the list over the conversion, the touch counterpart of Down on a hardware keyboard.
+   */
+  private convertKoreanSyllableToHanja(): void {
+    if (!this.showsHanjaButton()) {
+      return;
+    }
+    if (!KeyboardSession.shared.convertHanja()) {
+      this.diagnostic = this.zhuyinComposition() ? '还没有可选的字' : '单个字母没有对应的汉字';
+      this.clearDiagnosticLater();
+    }
+  }
+
+  /**
+   * A Dachen key. The Engine's editor reads the ASCII key, so that is what is sent; with the list open a digit 1-9 would pick a row instead, so the list is closed first and the key types what its face shows.
+   */
+  private tapZhuyinKey(key: string): void {
+    KeyboardSession.shared.recordKey(KeyIdPolicy.character(key));
+    if (ZhuyinLayout.selectsWhileListOpen(key) && KeyboardSession.shared.candidateListOpen()) {
+      KeyboardSession.shared.convertHanja();
+    }
+    KeyboardSession.shared.press(key.charCodeAt(0), false);
+  }
+
+  /**
+   * Zhuyin: a mark whose ASCII key is a Dachen phonetic or tone key would compose rather than be typed, so the conversion is finished and the mark typed after it, in Chinese while the punctuation switch says so.
+   */
+  private typeZhuyinMark(symbol: string): void {
+    const chinese: string | undefined = CHINESE_SYMBOL_FACES.get(symbol);
+    KeyboardSession.shared.commitThenInsert(
+      this.chinesePunctuation && chinese !== undefined ? chinese : symbol);
+  }
+
+  private zhuyinKey(key: string): KeyOptions {
+    return {
+      face: ZhuyinLayout.face(key),
+      label: ZhuyinLayout.label(key),
+      size: KeyboardMetrics.KEY_FONT_SIZE,
+      emphasized: false,
+      width: 0,
+      action: () => this.tapZhuyinKey(key)
+    };
+  }
+
+  /** Each of the four Dachen rows, which share the height of the three letter rows. */
+  private dachenRowHeight(): number {
+    return ZhuyinLayout.rowHeight(this.rowHeight(0) + this.rowHeight(1) + this.rowHeight(2),
+      this.rowSpacing());
+  }
+
+  /** 是否画笔画键盘：笔画方案，且英文和本地工具模式都没有接管按键；与 zhuyinFace 一样按键盘自己选的方案判断，引擎还没回报时也画对。 */
+  private strokeFace(): boolean {
+    return SchemeCompositionPolicy.selectedRulesScheme(this.scheme.engineScheme, this.english,
+      this.localMode) === SchemeTraits.STROKE;
+  }
+
+  /** 笔画键发送它的字母，组字和候选都归引擎。空组合时的通配键不发送，见 StrokeLayout.sends。 */
+  private tapStrokeKey(input: string): void {
+    KeyboardSession.shared.recordKey(KeyIdPolicy.character(input));
+    if (!StrokeLayout.sends(input, KeyboardSession.shared.composing())) {
+      return;
+    }
+    KeyboardSession.shared.press(input.charCodeAt(0), false);
+  }
+
+  private strokeKey(key: StrokeKey): KeyOptions {
+    return {
+      face: key.face,
+      label: key.label,
+      hint: key.hint,
+      size: KeyboardMetrics.KEY_FONT_SIZE,
+      emphasized: false,
+      width: 0,
+      action: () => this.tapStrokeKey(key.input)
+    };
+  }
+
+  /** 底排是否用网格面板那一套（「符」代替逗号，逗号等标点在侧栏）：九键拼音，或不在符号层的笔画键盘。 */
+  private gridActionRow(): boolean {
+    return KeyboardScheme.usesNineKeyFace(this.nineKey, this.localMode)
+      || (this.strokeFace() && !this.symbols);
+  }
+
   private tapLetter(letter: string): void {
+    // The key by its position, so Dubeolsik jamo and a shifted capital count on the same key as the plain letter.
+    KeyboardSession.shared.recordKey(KeyIdPolicy.character(letter));
+    if (this.koreanFace()) {
+      // The Engine reads the jamo from the letter's case, so Shift is sent as an upper-case letter rather than as helpcode.
+      const shifted: boolean = this.caseMode !== LetterCaseMode.LOWERCASE;
+      KeyboardSession.shared.press(DubeolsikLayout.input(letter, shifted).charCodeAt(0), shifted);
+      if (this.caseMode === LetterCaseMode.SHIFTED) {
+        this.letterCase.reset();
+        this.caseMode = this.letterCase.mode();
+      }
+      return;
+    }
+    if (this.vietnameseFace() || this.tibetanFace()) {
+      // 越南语组字和藏文威利转写都保留每个字母的大小写，所以 Shift 直接发大写字母本身，而不是当作辅助码。
+      const automatic: boolean = this.letterCase.isAutomatic();
+      const held: boolean = this.caseMode !== LetterCaseMode.LOWERCASE;
+      KeyboardSession.shared.press(
+        (held ? letter.toUpperCase() : letter.toLowerCase()).charCodeAt(0), false);
+      if (this.caseMode === LetterCaseMode.SHIFTED && !automatic) {
+        this.letterCase.reset();
+        this.caseMode = this.letterCase.mode();
+      }
+      return;
+    }
     // Shift means two different things depending on what is open. Over a pinyin composition an
     // uppercase letter is helpcode for the Engine, which is why the Engine is told the key was
     // shifted; with nothing composing it is only a capital, and in Chinese mode not even that.
@@ -722,7 +1009,7 @@ struct KeyboardView {
   @Builder
   keyFace($$: KeyOptions) {
     Column() {
-      Text($$.face)
+      Text($$.letter === undefined ? $$.face : this.letterFace($$.letter))
         .fontSize($$.size)
         .maxLines(1)
         .fontColor(this.skin.keyLabelColor($$.emphasized, $$.special === true))
@@ -750,7 +1037,7 @@ struct KeyboardView {
     Column() {
       this.keyFace($$)
     }
-    .accessibilityText($$.label ?? $$.face)
+    .accessibilityText($$.letter === undefined ? ($$.label ?? $$.face) : this.letterLabel($$.letter))
     .layoutWeight(1)
     .height('100%')
     .backgroundColor(this.skin.keySurfaceBackground($$.emphasized, $$.special === true))
@@ -761,6 +1048,7 @@ struct KeyboardView {
     .borderColor(this.skin.borderColor)
     .shadow({ radius: this.skin.shadowRadius, color: this.skin.shadowColor(),
       offsetX: 0, offsetY: this.skin.shadowOffset })
+    .responseRegion(this.keyHitRegion())
     .onClick($$.action)
   }
 
@@ -770,7 +1058,7 @@ struct KeyboardView {
     Column() {
       this.keyFace($$)
     }
-    .accessibilityText($$.label ?? $$.face)
+    .accessibilityText($$.letter === undefined ? ($$.label ?? $$.face) : this.letterLabel($$.letter))
     .width($$.width)
     .height('100%')
     .backgroundColor(this.skin.keySurfaceBackground($$.emphasized, $$.special === true))
@@ -781,6 +1069,7 @@ struct KeyboardView {
     .borderColor(this.skin.borderColor)
     .shadow({ radius: this.skin.shadowRadius, color: this.skin.shadowColor(),
       offsetX: 0, offsetY: this.skin.shadowOffset })
+    .responseRegion(this.keyHitRegion())
     .onClick($$.action)
   }
 
@@ -804,6 +1093,36 @@ struct KeyboardView {
     this.resetEmojiSearch();
     this.emojiItems = this.collectEmojiCatalog(category, group, parent)
       .map((item: EmojiItem): string => item.text);
+  }
+
+  /** 打开颜文字页或符号页的一个标签：内置标签向 Engine 分页读取，插件标签直接显示清单里的条目。 */
+  private loadEmojiTab(category: string, tab: EmojiPanelGroupTab): void {
+    this.emojiPanelTab = tab.key;
+    if (!tab.plugin) {
+      this.loadEmojiCatalog(category, tab.catalogGroup, tab.catalogParent);
+      return;
+    }
+    this.emojiShowingRecents = false;
+    this.resetEmojiSearch();
+    // 插件条目没有逐项的注释，组的关键词只用于搜索：这里不写 `emojiKeywords`，与插件条目同字的内置符号保留自己的名字。
+    this.emojiItems = tab.items.map((item: EmojiItem): string => item.text);
+  }
+
+  /** 打开一页时选中它的第一个标签；一个标签都没有时照旧不带分组读取目录。 */
+  private loadFirstEmojiTab(category: string, tabs: EmojiPanelGroupTab[]): void {
+    if (tabs.length > 0) {
+      this.loadEmojiTab(category, tabs[0]);
+      return;
+    }
+    this.emojiPanelTab = '';
+    this.loadEmojiCatalog(category, '', '');
+  }
+
+  /**
+   * 已安装的符号集插件组。插件只能在 2in1 的插件页安装，`symbol_set_packs` 能力也只在 2in1 声明，所以手机面板不去读。
+   */
+  private pluginSymbolGroups(): PluginSymbolGroup[] {
+    return KeyboardFormFactor.isDesktop() ? KeyboardSession.shared.pluginSymbolGroups() : [];
   }
 
   private collectEmojiCatalog(category: string, group: string, parent: string): EmojiItem[] {
@@ -920,11 +1239,13 @@ struct KeyboardView {
         pages = EmojiCatalogModel.categories().map((category: EmojiCategory): EmojiItem[] =>
           this.collectEmojiCatalog(EMOJI_PANEL, category.group, ''));
       } else if (this.emojiPanel === KAOMOJI_PANEL) {
-        pages = this.emojiKaomojiGroups.map((group: string): EmojiItem[] =>
-          this.collectEmojiCatalog(KAOMOJI_PANEL, group, ''));
+        pages = this.emojiKaomojiTabs.filter((tab: EmojiPanelGroupTab): boolean => !tab.plugin)
+          .map((tab: EmojiPanelGroupTab): EmojiItem[] =>
+            this.collectEmojiCatalog(KAOMOJI_PANEL, tab.catalogGroup, ''));
       } else {
-        pages = this.emojiSymbolGroups.map((group: EmojiSymbolGroup): EmojiItem[] =>
-          this.collectEmojiCatalog(SYMBOLS_PANEL, '', group.parent));
+        pages = this.emojiSymbolTabs.filter((tab: EmojiPanelGroupTab): boolean => !tab.plugin)
+          .map((tab: EmojiPanelGroupTab): EmojiItem[] =>
+            this.collectEmojiCatalog(SYMBOLS_PANEL, '', tab.catalogParent));
       }
       const flattened: EmojiItem[] = [];
       for (const page of pages) {
@@ -935,8 +1256,12 @@ struct KeyboardView {
       index = flattened;
       this.emojiSearchIndex.set(this.emojiPanel, index);
     }
+    // 缓存里只有内置目录；插件条目取自这次打开时读到的标签并接在后面，装上或卸下插件后重开面板即可搜到最新内容。
+    const tabs: EmojiPanelGroupTab[] = this.emojiPanel === KAOMOJI_PANEL ? this.emojiKaomojiTabs
+      : this.emojiPanel === SYMBOLS_PANEL ? this.emojiSymbolTabs : [];
+    const searched: EmojiItem[] = index.concat(PluginSymbolGroupPolicy.pluginItems(tabs));
     const results: string[] = [];
-    for (const item of index) {
+    for (const item of searched) {
       if (EmojiPanelKeyPolicy.matches(item.text, item.annotation, query) && !results.includes(item.text)) {
         results.push(item.text);
         if (results.length === EMOJI_SEARCH_LIMIT) {
@@ -950,7 +1275,10 @@ struct KeyboardView {
   /** A hardware key offered to the open 2in1 panel; false leaves it to the editor. */
   private panelKey(key: EmojiPanelKey): boolean {
     const clipboard: boolean = this.emojiPanel === CLIPBOARD_PANEL;
-    const clips: ClipboardHistoryItem[] = clipboard ? this.visibleClips() : [];
+    const cloud: boolean = clipboard && this.cloudTabActive();
+    const clips: string[] = !clipboard ? []
+      : cloud ? this.visibleCloudClips().map((entry: CloudClipboardItem): string => entry.text)
+        : this.visibleClips().map((entry: ClipboardHistoryItem): string => entry.text);
     const items: string[] = clipboard ? [] : this.visibleEmojiItems();
     const decision: EmojiPanelKeyDecision = EmojiPanelKeyPolicy.decide(key,
       clipboard ? clips.length : items.length, clipboard ? 1 : EMOJI_COLUMNS, this.emojiSelected,
@@ -964,8 +1292,10 @@ struct KeyboardView {
       this.searchEmoji(decision.query);
       this.revealEmojiSelection(clipboard);
     } else if (decision.action === EmojiPanelKeyAction.ACTIVATE) {
-      if (clipboard) {
-        KeyboardSession.shared.insert(clips[decision.index].text);
+      if (cloud) {
+        this.insertCloudClip(clips[decision.index]);
+      } else if (clipboard) {
+        KeyboardSession.shared.insert(clips[decision.index]);
       } else {
         this.selectEmoji(items[decision.index]);
       }
@@ -992,6 +1322,7 @@ struct KeyboardView {
       this.clips = this.clipboardEnabled ? KeyboardSession.shared.clipboardHistory() : [];
       this.clipboardNotice = this.clipboardEnabled ? '' : '剪贴板历史已在设置中关闭';
       this.confirmingClear = false;
+      this.openCloudClipboard();
       return;
     }
     if (panel === EMOJI_PANEL) {
@@ -1004,14 +1335,14 @@ struct KeyboardView {
       return;
     }
     if (panel === KAOMOJI_PANEL) {
-      this.emojiKaomojiGroups = KeyboardSession.shared.emojiGroups(KAOMOJI_PANEL);
-      const group: string = this.emojiKaomojiGroups[0] ?? '';
-      this.loadEmojiCatalog(KAOMOJI_PANEL, group);
+      this.emojiKaomojiTabs = PluginSymbolGroupPolicy.kaomojiTabs(
+        KeyboardSession.shared.emojiGroups(KAOMOJI_PANEL), this.pluginSymbolGroups());
+      this.loadFirstEmojiTab(KAOMOJI_PANEL, this.emojiKaomojiTabs);
       return;
     }
-    this.emojiSymbolGroups = KeyboardSession.shared.emojiSymbolGroups();
-    this.emojiSymbolParent = this.emojiSymbolGroups[0]?.parent ?? '';
-    this.loadEmojiCatalog(SYMBOLS_PANEL, '', this.emojiSymbolParent);
+    this.emojiSymbolTabs = PluginSymbolGroupPolicy.symbolTabs(
+      KeyboardSession.shared.emojiSymbolGroups(), this.pluginSymbolGroups());
+    this.loadFirstEmojiTab(SYMBOLS_PANEL, this.emojiSymbolTabs);
   }
 
   private showEmojiRecents(): void {
@@ -1087,7 +1418,7 @@ struct KeyboardView {
   private selectScheme(candidate: SchemeDefinition): void {
     // The composition belongs to the scheme that was current when it was typed; carrying it into a
     // different one would reinterpret letters that were never meant that way.
-    KeyboardSession.shared.cancel();
+    this.leaveComposition();
     if (this.hasHandwritingContext()) {
       this.clearHandwriting();
     }
@@ -1101,7 +1432,8 @@ struct KeyboardView {
     if (!KeyboardSession.shared.changePreferences(changes)) {
       return;
     }
-    KeyboardSession.shared.useScheme(candidate.engineScheme, candidate.shuangpinProfile);
+    KeyboardSession.shared.useScheme(KeyboardScheme.engineSchemeOf(candidate),
+      candidate.shuangpinProfile);
     if (this.english) {
       // Picking a Chinese scheme is a request to compose Chinese with it.
       this.english = KeyboardSession.shared.toggleLanguage();
@@ -1113,10 +1445,22 @@ struct KeyboardView {
     this.japanese = candidate.engineScheme === 'japanese' && candidate.touchKeyboardLayout
       === 'nine_key';
     KeyboardSession.shared.setNineKey(this.nineKey);
-    this.show(candidate === KeyboardScheme.THOUGHTFUL_REPLY ? SURFACE_REPLY : SURFACE_NONE);
+    this.show(SURFACE_NONE);
+  }
+
+  /**
+   * End the composition before the scheme or mode under it changes. A spelling is thrown away, since its letters mean nothing to the next scheme; an open Korean syllable, a Zhuyin conversion or a Vietnamese word is already the user's text (`commits_on_blur`), so it is committed instead.
+   */
+  private leaveComposition(): void {
+    if (SchemeTraits.commitsOnBlur(KeyboardSession.shared.rulesScheme())) {
+      KeyboardSession.shared.finishComposition();
+    } else {
+      KeyboardSession.shared.cancel();
+    }
   }
 
   private toggleSymbolLayer(): void {
+    KeyboardSession.shared.recordKey(KeyIdPolicy.SOFT_LAYER);
     const wasHandwriting: boolean = KeyboardScheme.usesHandwritingFace(
       this.scheme, this.english, this.symbols, this.localMode);
     this.symbols = !this.symbols;
@@ -1187,7 +1531,7 @@ struct KeyboardView {
    * knows, so picking it moves the scheme underneath as well and says so on the card.
    */
   private selectEnglish(nineKey: boolean): void {
-    KeyboardSession.shared.cancel();
+    this.leaveComposition();
     if (this.hasHandwritingContext()) {
       this.clearHandwriting();
     }
@@ -1367,10 +1711,17 @@ struct KeyboardView {
   }
 
   private activateReturn(): void {
+    KeyboardSession.shared.recordKey(KeyIdPolicy.ENTER);
     const dispatch: ReturnDispatch = ReturnKeyAction.dispatch(
       this.japanese, this.editing.length > 0, this.candidates.length,
-      KeyboardSession.shared.japaneseConversionActive());
-    if (dispatch === ReturnDispatch.COMMIT_HIGHLIGHTED) {
+      KeyboardSession.shared.japaneseConversionActive(), this.koreanFace(), this.vietnameseFace(),
+      this.strokeFace());
+    if (dispatch === ReturnDispatch.COMMIT_RAW) {
+      KeyboardSession.shared.commitRaw();
+    } else if (dispatch === ReturnDispatch.FINISH_THEN_EDITOR) {
+      KeyboardSession.shared.finishBeforeKey();
+      KeyboardSession.shared.submit();
+    } else if (dispatch === ReturnDispatch.COMMIT_HIGHLIGHTED) {
       KeyboardSession.shared.commitHighlighted();
     } else if (dispatch === ReturnDispatch.COMMIT_READING) {
       KeyboardSession.shared.commitReading();
@@ -1384,6 +1735,26 @@ struct KeyboardView {
   }
 
   private activateSpace(): void {
+    KeyboardSession.shared.recordKey(KeyIdPolicy.SPACE);
+    if (this.koreanFace()) {
+      // Space ends the open syllable and is still a space, so the keyboard types it after the commit. With the syllable's Hanja list open it chooses the highlighted Hanja instead, as Return does.
+      if (this.koreanHanjaListOpen()) {
+        KeyboardSession.shared.commitHighlighted();
+        return;
+      }
+      KeyboardSession.shared.commitThenType(0x20);
+      return;
+    }
+    if (this.vietnameseFace()) {
+      // Space ends the word and is still a space, as for a Korean syllable. Zhuyin keeps the shared path: there Space is tone 1, opens the list over a conversion and picks the highlighted row of an open one, which the Engine decides.
+      KeyboardSession.shared.commitThenType(0x20);
+      return;
+    }
+    if (this.tibetanFace()) {
+      // 藏文空格由引擎结束音节串并补上音节点；没有组字时引擎不处理，键盘照常输入空格。
+      KeyboardSession.shared.pressThenType(0x20);
+      return;
+    }
     if (this.japanese && this.editing.length > 0
         && KeyboardSession.shared.convertJapanese()) {
       return;
@@ -1419,8 +1790,8 @@ struct KeyboardView {
     this.translations = KeyboardSession.shared.showsCandidateTranslations();
     this.fuzzyPinyin = KeyboardSession.shared.usesFuzzyPinyin();
     this.applySkins();
-    this.scheme = this.settings.thoughtfulReply ? KeyboardScheme.THOUGHTFUL_REPLY
-      : this.enabledScheme();
+    this.wubiProfile = this.settings.wubiProfile;
+    this.scheme = this.enabledScheme();
     this.nineKey = this.scheme.touchKeyboardLayout === 'nine_key';
     this.japanese = this.scheme.engineScheme === 'japanese' && this.nineKey;
     KeyboardSession.shared.setNineKey(this.nineKey);
@@ -1463,7 +1834,45 @@ struct KeyboardView {
   /** A symbol wears the face of what it will insert, which in Chinese is not the ASCII on the cap. */
   private symbolFace(symbol: string): string {
     const chinese: string | undefined = CHINESE_SYMBOL_FACES.get(symbol);
-    return !this.english && chinese !== undefined ? chinese : symbol;
+    // 韩语、越南语和藏文的标点就是键帽上的 ASCII。
+    return !this.english && !this.koreanFace() && !this.vietnameseFace() && !this.tibetanFace()
+      && chinese !== undefined
+      ? chinese : symbol;
+  }
+
+  /**
+   * 符号层按键的行为。数字结束正在组的韩语音节，然后输入在它后面，标点路由做不到这一点，因为它只接受标点。越南语数字也是这样，除非它是组字中单词的 VNI 声调数字，那时它给单词加符号。藏文数字同样先上屏音节串再输入数字本身；藏文的拼写符号（`'` `+` `.` `-` `/`）走标点路由，由运行时按 spelling_symbols 交给引擎，其中 `+` 来自藏文方案下第三排替换 `=` 的键（KeyboardScheme.symbolRowKey）。注音的数字或标点如果是大千的注音键或声调键，由键盘自己输入，因为引擎会把它组进注音。
+   */
+  private tapSymbol(symbol: string): void {
+    KeyboardSession.shared.recordKey(KeyIdPolicy.character(symbol));
+    const character: number = symbol.charCodeAt(0);
+    if (this.koreanFace() && KoreanCompositionPolicy.typesAfterCommit(character)) {
+      KeyboardSession.shared.commitThenType(character);
+      return;
+    }
+    if (this.zhuyinFace() && ZhuyinLayout.claimsSymbol(symbol)) {
+      this.typeZhuyinMark(symbol);
+      return;
+    }
+    if (this.tibetanFace() && character >= 0x30 && character <= 0x39) {
+      KeyboardSession.shared.commitThenType(character);
+      return;
+    }
+    if (this.vietnameseFace() && character >= 0x30 && character <= 0x39) {
+      if (this.editing.length > 0
+          && KeyboardSession.shared.hardwareSpelling().spellingSymbols.includes(symbol)) {
+        KeyboardSession.shared.press(character, false);
+      } else {
+        KeyboardSession.shared.commitThenType(character);
+      }
+      return;
+    }
+    // 组字中 Engine 列为拼写的符号走字符路由；标点入口拒收数字，网址里的数字会被丢掉。
+    if (HardwareKeyRouter.touchSpells(KeyboardSession.shared.hardwareSpelling(), character)) {
+      KeyboardSession.shared.press(character, false);
+      return;
+    }
+    KeyboardSession.shared.punctuation(character);
   }
 
   private symbolKey(symbol: string): KeyOptions {
@@ -1473,7 +1882,7 @@ struct KeyboardView {
       size: KeyboardMetrics.KEY_FONT_SIZE,
       emphasized: false,
       width: 0,
-      action: () => KeyboardSession.shared.punctuation(symbol.charCodeAt(0))
+      action: () => this.tapSymbol(symbol)
     };
   }
 
@@ -1492,6 +1901,27 @@ struct KeyboardView {
 
   private rowSpacing(): number {
     return this.geometryRowSpacing / 10;
+  }
+
+  /** 键的触摸区：左右各扩出半个键距、上下各扩出半个行距，相邻键在空隙中线相接，键与候选栏之间的空隙也只占一半，碰不到候选栏，见 `KeyboardGeometry.hitOffsets`。 */
+  private keyHitRegion(): Rectangle[] {
+    const halfKey: number = this.keySpacing() / 2;
+    const halfRow: number = this.rowSpacing() / 2;
+    return this.hitRegion(halfKey, halfRow, halfKey, halfRow);
+  }
+
+  /** 九键和笔画键盘左侧标点栏的一格：格与格之间没有空隙，只有首格向上、末格向下扩出半个行距，左右照键扩出半个键距。 */
+  private railHitRegion(index: number, count: number): Rectangle[] {
+    const halfKey: number = this.keySpacing() / 2;
+    const halfRow: number = this.rowSpacing() / 2;
+    return this.hitRegion(halfKey, index === 0 ? halfRow : 0, halfKey, index === count - 1 ? halfRow : 0);
+  }
+
+  private hitRegion(left: number, top: number, right: number, bottom: number): Rectangle[] {
+    return KeyboardGeometry.hitOffsets(left, top, right, bottom).map((offset: HitOffset): Rectangle => {
+      const rectangle: Rectangle = { x: offset.x, y: offset.y, width: '100%', height: '100%' };
+      return rectangle;
+    });
   }
 
   /** The adjustment is spread across the key rows so none of them keeps a stray pixel. */
@@ -1514,7 +1944,8 @@ struct KeyboardView {
     if (mode !== null) {
       return mode.title;
     }
-    return this.english ? ENGLISH_TITLES[this.nineKey ? 1 : 0] : this.scheme.title;
+    return this.english ? ENGLISH_TITLES[this.nineKey ? 1 : 0]
+      : KeyboardScheme.title(this.scheme, this.wubiProfile);
   }
 
   private faceKey(): string {
@@ -1522,8 +1953,9 @@ struct KeyboardView {
     // the same characters on both layers, so without it ForEach would judge the subtrees identical
     // and the digit layer would go on reading ABC, DEF, GHI. The twenty-six key rows never needed it
     // because their two layers hold different characters.
-    return `${this.english}:${this.caseMode}:${this.localMode}:${this.shuangpinProfile}:`
-      + `${this.engineScheme}:${this.symbols}:${this.skin.key()}`;
+    // 大小写不在这里：字母键的键面和读屏文字在绘制时按大小写现算（见 `KeyOptions.letter`），自动大写切换时键节点保持不变，正按着的键不会被重建。
+    return `${this.english}:${this.localMode}:${this.shuangpinProfile}:`
+      + `${this.engineScheme}:${this.scheme.preferenceId}:${this.symbols}:${this.skin.key()}`;
   }
 
   /**
@@ -1615,18 +2047,40 @@ struct KeyboardView {
   }
 
   private letterKey(letter: string): KeyOptions {
+    if (this.koreanFace()) {
+      return {
+        face: this.letterFace(letter),
+        label: this.letterLabel(letter),
+        letter: letter,
+        size: KeyboardMetrics.KEY_FONT_SIZE,
+        emphasized: false,
+        width: 0,
+        action: () => this.tapLetter(letter)
+      };
+    }
     return {
       face: this.letterFace(letter),
-      // Ported with the face policy and, until now, computed for nobody: the view attached no
-      // accessibility text at all, so every key on this keyboard was silent to a screen reader.
-      label: LetterKeyFacePolicy.accessibilityLabel(letter, !this.english,
-        this.localMode !== 'none', this.caseMode !== LetterCaseMode.LOWERCASE),
+      label: this.letterLabel(letter),
+      letter: letter,
       hint: this.letterHint(letter),
       size: KeyboardMetrics.KEY_FONT_SIZE,
       emphasized: false,
       width: 0,
       action: () => this.tapLetter(letter)
     };
+  }
+
+  /** What a screen reader says for a letter key under the current case. */
+  private letterLabel(letter: string): string {
+    if (this.koreanFace()) {
+      // The jamo itself, which is what a screen reader set to Korean reads.
+      return this.letterFace(letter);
+    }
+    // Ported with the face policy and, until now, computed for nobody: the view attached no
+    // accessibility text at all, so every key on this keyboard was silent to a screen reader.
+    return LetterKeyFacePolicy.accessibilityLabel(letter,
+      !this.english && !this.vietnameseFace() && !this.tibetanFace(),
+      this.localMode !== 'none', this.caseMode !== LetterCaseMode.LOWERCASE);
   }
 
   /** The shared English/primary/fallback order, as one CSS-style list for a Text modifier. */
@@ -1660,6 +2114,24 @@ struct KeyboardView {
     return colors;
   }
 
+  /** The 2in1 card's radius: the user's, then the package's, then the HarmonyOS PC window's 16. */
+  private candidateCardRadius(): number {
+    return this.settings.candidateCornerRadiusVp ?? KeyboardMetrics.CANDIDATE_CARD_CORNER_VP;
+  }
+
+  /** A 2in1 row's radius: never rounder than a card radius the user chose; a package's radius leaves the rows as they were drawn before the setting existed. */
+  private candidateItemRadius(): number {
+    return this.settings.candidateCornerRadiusUser
+      ? Math.min(KeyboardMetrics.CANDIDATE_ITEM_CORNER_VP, this.candidateCardRadius())
+      : KeyboardMetrics.CANDIDATE_ITEM_CORNER_VP;
+  }
+
+  /** A card fill or border with the user's window opacity applied; the touch strip is part of the keyboard and stays as it is. */
+  private candidateCardColor(colour: string): string {
+    return KeyboardFormFactor.isDesktop()
+      ? GlobalTheme.withOpacity(colour, this.settings.candidateWindowOpacity) : colour;
+  }
+
   private candidateTextColor(): string {
     return this.candidateColors().text;
   }
@@ -1680,6 +2152,11 @@ struct KeyboardView {
   private showsCandidatePager(): boolean {
     return KeyboardFormFactor.isDesktop() && this.settings.candidateShowPreedit
       && this.candidates.length > 0 && CandidatePagerPolicy.visible(this.candidatePageCount);
+  }
+
+  /** A candidate window's composition line leads with the brand mark, as the macOS candidate window's top row does; see CandidateLogoPolicy for why a touch strip's does not. */
+  private showsCandidateLogo(): boolean {
+    return CandidateLogoPolicy.visible(KeyboardFormFactor.isDesktop(), this.settings.candidateShowPreedit);
   }
 
   /** The spelling: the accent in a candidate window, the keyboard's secondary text over a touch strip, where the candidates below carry the accent. */
@@ -1745,10 +2222,15 @@ struct KeyboardView {
    * The composition gets a line of its own. Sharing the candidate row costs it width on the one row
    * where width is worth most, which is the reasoning the iOS implementation records.
    */
-  /** The decoration's place along the card's top edge, as the package aligns it. */
-  candidateDecorationAlignment(): Alignment {
-    const align: string = this.settings.candidateDecorationAlign;
-    return align === 'left' ? Alignment.TopStart : align === 'center' ? Alignment.Top : Alignment.TopEnd;
+  /** The mascot over the card's top edge, placed as every host places it: see CandidateDecorationLayout. The card spans the strip's width, with its top edge below the band. */
+  candidateDecorationRect(): CandidateDecorationRect | null {
+    if (this.settings.candidateDecorationImage === null) {
+      return null;
+    }
+    return CandidateDecorationLayout.rect(this.settings.candidateDecorationAlign, 0, this.availableWidth,
+      this.settings.candidateDecorationTopVp, KeyboardMetrics.CANDIDATE_PADDING_VP,
+      CandidateDecorationLayout.OVERLAP_VP, this.settings.candidateDecorationTopVp,
+      this.settings.candidateDecorationWidthVp, this.settings.candidateDecorationAspectRatio);
   }
 
   /** The package background: over the surface colour, under the candidates, clipped with the card. */
@@ -1760,13 +2242,13 @@ struct KeyboardView {
         .height('100%')
         .objectFit(this.settings.candidateBackgroundFit === 'contain' ? ImageFit.Contain
           : this.settings.candidateBackgroundFit === 'stretch' ? ImageFit.Fill : ImageFit.Cover)
-        .opacity(this.settings.candidateBackgroundOpacity)
+        .opacity(this.settings.candidateBackgroundOpacity * this.settings.candidateWindowOpacity)
     }
   }
 
   @Builder
   candidateStrip() {
-    Stack({ alignContent: this.candidateDecorationAlignment() }) {
+    Stack({ alignContent: Alignment.Top }) {
       Column() {
       // Idle on a touch keyboard the strip is one bar over the height of both lines below: the logo, the switches and the tools. Nothing shifts when a composition starts, because the two lines it gives way to add up to the same height.
       if (this.stripIdle()) {
@@ -1776,6 +2258,16 @@ struct KeyboardView {
       // below it shifts when one starts. Composing it shows the spelling, and a diagnostic takes it
       // over while it lasts.
       Row() {
+        if (this.showsCandidateLogo()) {
+          // The full-colour application mark rather than the keyboard_brand path the touch strip tints: the mark the macOS candidate window, toolbar and mode badge lead with.
+          Image($r('app.media.app_icon'))
+            .width(CandidateLogoPolicy.SIDE_VP)
+            .height(CandidateLogoPolicy.SIDE_VP)
+            .objectFit(ImageFit.Contain)
+            .margin({ right: CandidateLogoPolicy.GAP_VP })
+            .flexShrink(0)
+            .accessibilityText('水杉输入法')
+        }
         if (this.diagnostic.length > 0 || !KeyboardFormFactor.isDesktop()
             || this.settings.candidateShowPreedit) {
           // The caret the segment keys move. The source draws it as a bar inside the composition
@@ -1825,6 +2317,12 @@ struct KeyboardView {
           Blank()
         }
         Blank()
+        if (this.effectBadge.length > 0 && this.comboOnCompositionLine()) {
+          this.comboBadge()
+        }
+        if (this.showsHanjaButton()) {
+          this.hanjaButton()
+        }
         if (this.showsCandidatePager()) {
           this.candidatePager()
         }
@@ -1857,28 +2355,89 @@ struct KeyboardView {
     }
       .width('100%')
       .margin({ top: this.settings.candidateDecorationTopVp })
-      .backgroundColor(this.candidateColors().surface)
+      .backgroundColor(this.candidateCardColor(this.candidateColors().surface))
       .background(this.candidateBackground)
       .clip(this.settings.candidateBackgroundImage !== null)
       .borderRadius(KeyboardFormFactor.isDesktop()
-        ? (this.settings.candidateCornerRadiusVp ?? KeyboardMetrics.CANDIDATE_CARD_CORNER_VP)
+        ? this.candidateCardRadius()
         : KeyboardMetrics.STRIP_CORNER_VP)
       .borderWidth(KeyboardFormFactor.isDesktop() ? 1 : 0)
-      .borderColor(this.candidateColors().border)
+      .borderColor(this.candidateCardColor(this.candidateColors().border))
       .onAreaChange((_old: Area, now: Area): void => {
         this.availableWidth = Number(now.width);
+        this.effectCardHeight = Number(now.height);
       })
-      if (this.settings.candidateDecorationImage !== null
-          && this.settings.candidateDecorationWidthVp > 0) {
+      // The typing-effect flash: an accent wash over the card that fades after each key. Always present on a 2in1 at opacity 0, so a fade is never cut short by the node going away; it takes no touches.
+      if (KeyboardFormFactor.isDesktop()) {
+        Column()
+          .position({ x: 0, y: this.settings.candidateDecorationTopVp })
+          .width('100%')
+          .height(this.effectCardHeight)
+          .backgroundColor(this.effectColor ?? this.candidateAccentColor())
+          .borderRadius(this.settings.candidateCornerRadiusVp ?? KeyboardMetrics.CANDIDATE_CARD_CORNER_VP)
+          .opacity(this.effectFlash)
+          .hitTestBehavior(HitTestMode.Transparent)
+        if (this.effectBadge.length > 0 && !this.comboOnCompositionLine()) {
+          Row() {
+            this.comboBadge()
+          }
+          .position({ x: 0, y: this.settings.candidateDecorationTopVp })
+          .width('100%')
+          .justifyContent(FlexAlign.End)
+          .padding({ right: KeyboardMetrics.CANDIDATE_PADDING_VP })
+          .hitTestBehavior(HitTestMode.Transparent)
+        }
+      }
+      // After the card, so it is drawn over the card's top edge: that overlap is the whole point of the decoration.
+      if (this.settings.candidateDecorationImage !== null && this.candidateDecorationRect() !== null) {
         Image(this.settings.candidateDecorationImage)
-          .width(this.settings.candidateDecorationWidthVp)
-          .height(Math.max(this.settings.candidateDecorationTopVp,
-            this.settings.candidateDecorationWidthVp
-              / Math.max(0.05, this.settings.candidateDecorationAspectRatio)))
+          .position({ x: this.candidateDecorationRect()!.x, y: this.candidateDecorationRect()!.y })
+          .width(this.candidateDecorationRect()!.width)
+          .height(this.candidateDecorationRect()!.height)
           .objectFit(ImageFit.Contain)
+          .hitTestBehavior(HitTestMode.Transparent)
       }
     }
     .width('100%')
+  }
+
+  /**
+   * 漢, the touch counterpart of a Korean keyboard's Hanja key, at the end of the composition line. It sits on that line rather than among the candidates so it stays put while the list it opens fills the row below, and its filled face says the list is open.
+   */
+  @Builder
+  hanjaButton() {
+    Text(this.zhuyinComposition() ? '選' : '漢')
+      .fontSize(this.settings.candidatePreeditFontSize)
+      .fontColor(this.skin.accent)
+      .fontFamily(this.candidateFontFamily())
+      .maxLines(1)
+      .height('100%')
+      .padding({ left: 12, right: 12 })
+      .borderRadius(STRIP_PILL_RADIUS_VP)
+      .backgroundColor(this.openableListShowing() ? this.skin.keyBackground : TRANSPARENT)
+      .flexShrink(0)
+      .accessibilityText(this.zhuyinComposition()
+        ? KeyAccessibilityPolicy.zhuyinList(this.openableListShowing())
+        : KeyAccessibilityPolicy.hanja(this.openableListShowing()))
+      .onClick((): void => {
+        this.convertKoreanSyllableToHanja();
+      })
+  }
+
+  /** The typing combo: its count in the accent colour, swelling in power mode. */
+  @Builder
+  comboBadge() {
+    Text(this.effectBadge)
+      .fontSize(Math.max(this.settings.candidatePreeditFontSize - 2, 10))
+      .fontColor(this.candidateAccentColor())
+      .fontFamily(this.candidateFontFamily())
+      .fontWeight(FontWeight.Medium)
+      .maxLines(1)
+      .flexShrink(0)
+      .margin({ left: CandidateLogoPolicy.GAP_VP, right: CandidateLogoPolicy.GAP_VP })
+      .scale({ x: this.effectBadgeScale, y: this.effectBadgeScale })
+      .hitTestBehavior(HitTestMode.Transparent)
+      .accessibilityText(this.effectBadge)
   }
 
   /** OCR results use the shared candidate lane, but select through the recognizer rather than Engine. */
@@ -2026,6 +2585,12 @@ struct KeyboardView {
         Text(candidate.hint).fontSize(Math.max(KEY_HINT_FONT_SIZE, this.settings.candidateFontSize - 8))
           .fontColor(this.candidateDetailColor()).padding({ left: 2 })
       }
+      // Only where there is no gloss line, the vertical 2in1 list; everywhere else the 훈음 is on the line under the Hanja.
+      if (candidate.hunEum.length > 0 && !this.candidateUsesGlossLine()) {
+        Text(candidate.hunEum)
+          .fontSize(Math.max(KEY_HINT_FONT_SIZE, this.settings.candidateFontSize - 8))
+          .fontColor(this.candidateDetailColor()).padding({ left: 4 })
+      }
       if (candidate.annotation.length > 0 && !this.candidateUsesGlossLine()) {
         if (candidate.annotationIsTranslation) {
           Text(candidate.annotation)
@@ -2057,10 +2622,17 @@ struct KeyboardView {
   private candidateLabel(candidate: CandidateEntry, index: number): string {
     const annotation: string | null =
       candidate.annotation.length > 0 ? candidate.annotation : null;
-    const suffix: string = CandidateGlossPolicy.accessibilitySuffix(
-      candidate.annotationIsTranslation ? null : annotation,
-      candidate.annotationIsTranslation ? annotation : null, true);
+    const suffix: string = CandidateGlossPolicy.hunEumAccessibilitySuffix(candidate.hunEum)
+      + CandidateGlossPolicy.accessibilitySuffix(
+        candidate.annotationIsTranslation ? null : annotation,
+        candidate.annotationIsTranslation ? annotation : null, true);
     return KeyAccessibilityPolicy.candidate(index + 1, candidate.text, candidate.hint, suffix);
+  }
+
+  /** The line under a candidate: a Korean Hanja's 훈음 and then the translation. An Engine annotation is not on it; that stays beside the word. */
+  private candidateGlossLine(candidate: CandidateEntry): string {
+    return CandidateGlossPolicy.glossLine(candidate.hunEum,
+      candidate.annotationIsTranslation ? candidate.annotation : '');
   }
 
   @Builder
@@ -2077,11 +2649,11 @@ struct KeyboardView {
       if (this.candidateUsesGlossLine()) {
         Column() {
           this.candidatePrimaryLine(candidate)
-          Text(candidate.annotationIsTranslation ? candidate.annotation : ' ')
+          Text(this.candidateGlossLine(candidate).length > 0 ? this.candidateGlossLine(candidate) : ' ')
             .fontSize(CandidateTranslationStyle.fontSize(this.settings.candidateFontSize))
             .fontColor(this.candidateDetailColor())
             // The line is reserved whether or not this candidate has a gloss, so the row heights stay level.
-            .opacity(candidate.annotationIsTranslation ? 1 : 0)
+            .opacity(this.candidateGlossLine(candidate).length > 0 ? 1 : 0)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .height(KeyboardMetrics.glossHeightVp(KeyboardSession.shared.glossRows(),
@@ -2097,7 +2669,7 @@ struct KeyboardView {
       .height(this.candidateRowHeight()).width(this.candidateChipWidth(candidate, index))
       .backgroundColor(index === this.hoveredCandidate ? this.candidateColors().hover
         : candidate.highlighted ? this.candidateColors().selected : TRANSPARENT)
-      .borderRadius(KeyboardFormFactor.isDesktop() ? KeyboardMetrics.CANDIDATE_ITEM_CORNER_VP : 0)
+      .borderRadius(KeyboardFormFactor.isDesktop() ? this.candidateItemRadius() : 0)
       .onClick(() => KeyboardSession.shared.choose(index))
       .onHover((isHover: boolean): void => { this.hoveredCandidate = isHover ? index : -1; })
       .gesture(LongPressGesture().onAction(() => this.openTouchCandidateMenu(index)))
@@ -2145,6 +2717,7 @@ struct KeyboardView {
           this.stripPill({
             face: this.english ? '英' : '中', label: KeyAccessibilityPolicy.languageState(this.english), filled: false,
             action: () => {
+              KeyboardSession.shared.recordKey(KeyIdPolicy.SOFT_LANGUAGE);
               this.toggleTouchLanguage();
             }
           });
@@ -2178,23 +2751,24 @@ struct KeyboardView {
       .align(Alignment.Start)
       this.shortcutIcon($r('app.media.tool_emoji'), KeyAccessibilityPolicy.emoji(),
         this.surface === SURFACE_EMOJI, () => {
+          KeyboardSession.shared.recordKey(KeyIdPolicy.SOFT_EMOJI);
           this.openEmojiSurface();
         });
       if (this.touchVoiceShortcut && this.voiceEnabled) {
         this.shortcutText('🎙', KeyAccessibilityPolicy.voice(),
           this.surface === SURFACE_VOICE, () => {
+            KeyboardSession.shared.recordKey(KeyIdPolicy.SOFT_VOICE);
             this.show(SURFACE_VOICE);
             if (!this.voiceBusy && this.voiceText.length === 0) {
               this.startVoice();
             }
           });
       }
-      if (this.scheme === KeyboardScheme.THOUGHTFUL_REPLY) {
-        this.shortcutText('💬', KeyAccessibilityPolicy.reply(),
-          this.surface === SURFACE_REPLY, () => {
-            this.show(SURFACE_REPLY);
-          });
-      }
+      // 高情商回复是工具而不是输入方案：任何方案下都从这里打开回复面板，再点一次或点面板里的「完成」回到原来的键盘。
+      this.shortcutText('💬', KeyAccessibilityPolicy.reply(),
+        this.surface === SURFACE_REPLY, () => {
+          this.toggle(SURFACE_REPLY);
+        });
       this.shortcutIcon($r('app.media.tool_dismiss'), KeyAccessibilityPolicy.dismiss(), false, () => {
         KeyboardSession.shared.dismiss();
       });
@@ -2284,7 +2858,7 @@ struct KeyboardView {
         // One column, two jobs, exactly as the iOS sidebar does it: the readings the digits could
         // stand for while something is being spelled, and the common punctuation when nothing is.
         if (this.symbols) {
-          ForEach(NineKeyLayout.digitPunctuation(), (symbol: string) => {
+          ForEach(NineKeyLayout.digitPunctuation(), (symbol: string, index: number) => {
             Column() {
               Text(symbol)
                 .fontSize(KeyboardMetrics.SMALL_KEY_FONT_SIZE)
@@ -2296,7 +2870,11 @@ struct KeyboardView {
             .justifyContent(FlexAlign.Center)
             .width('100%')
             .accessibilityText(KeyAccessibilityPolicy.symbol(symbol))
-            .onClick(() => KeyboardSession.shared.punctuation(symbol.charCodeAt(0)))
+            .responseRegion(this.railHitRegion(index, NineKeyLayout.digitPunctuation().length))
+            .onClick(() => {
+              KeyboardSession.shared.recordKey(KeyIdPolicy.SOFT_PUNCTUATION);
+              KeyboardSession.shared.punctuation(symbol.charCodeAt(0));
+            })
           }, (symbol: string) => symbol + this.faceKey())
         } else if (this.spellings.length > 0) {
           Scroll() {
@@ -2318,7 +2896,7 @@ struct KeyboardView {
           .width('100%')
           .height('100%')
         } else {
-          ForEach(NineKeyLayout.punctuation(), (symbol: string) => {
+          ForEach(NineKeyLayout.punctuation(), (symbol: string, index: number) => {
             Column() {
               Text(this.symbolFace(symbol))
                 .fontSize(KeyboardMetrics.SMALL_KEY_FONT_SIZE)
@@ -2329,7 +2907,11 @@ struct KeyboardView {
             .layoutWeight(1)
             .justifyContent(FlexAlign.Center)
             .width('100%')
-            .onClick(() => KeyboardSession.shared.punctuation(symbol.charCodeAt(0)))
+            .responseRegion(this.railHitRegion(index, NineKeyLayout.punctuation().length))
+            .onClick(() => {
+              KeyboardSession.shared.recordKey(KeyIdPolicy.SOFT_PUNCTUATION);
+              KeyboardSession.shared.punctuation(symbol.charCodeAt(0));
+            })
           }, (symbol: string) => symbol + this.faceKey())
         }
       }
@@ -2359,18 +2941,28 @@ struct KeyboardView {
 
       Column({ space: this.rowSpacing() }) {
         Column() {
-          this.deleteKey('100%')
+          this.deleteKey('100%', true)
         }
         .layoutWeight(1)
         .width('100%')
         // A period is punctuation while spelling and a decimal point beside the digit grid. Clear
         // is already available by holding Delete, so it no longer spends a permanent key here.
-        this.nineKeyControl('.', '句点', () => KeyboardSession.shared.punctuation(0x2e));
+        this.nineKeyControl('.', '句点', () => {
+          // The period key types '.', so it counts as Period as on iOS and Android; SoftPunctuation is for the side rail's cells.
+          KeyboardSession.shared.recordKey(KeyIdPolicy.character('.'));
+          KeyboardSession.shared.punctuation(0x2e);
+        });
         // 0 is inserted on the digit layer for the same reason the other nine are, and spelled on
         // the letter layer, where the Engine reads it as a candidate position.
         this.nineKeyControl('0', '数字 0', this.symbols
-          ? () => KeyboardSession.shared.punctuation(0x30)
-          : () => KeyboardSession.shared.press(0x30, false));
+          ? () => {
+            KeyboardSession.shared.recordKey(KeyIdPolicy.nineKey('0'));
+            KeyboardSession.shared.punctuation(0x30);
+          }
+          : () => {
+            KeyboardSession.shared.recordKey(KeyIdPolicy.nineKey('0'));
+            KeyboardSession.shared.press(0x30, false);
+          });
       }
       .width(`${NINE_KEY_COLUMN_PERCENT}%`)
       .height('100%')
@@ -2389,8 +2981,14 @@ struct KeyboardView {
       // A digit is inserted, not spelled: the same call the twenty-six key symbol row makes for
       // its own digit row, rather than handing it to the Engine as a candidate position.
       action: this.symbols
-        ? () => KeyboardSession.shared.punctuation(key.input.charCodeAt(0))
-        : () => KeyboardSession.shared.press(key.input.charCodeAt(0), false)
+        ? () => {
+          KeyboardSession.shared.recordKey(KeyIdPolicy.nineKey(key.input));
+          KeyboardSession.shared.punctuation(key.input.charCodeAt(0));
+        }
+        : () => {
+          KeyboardSession.shared.recordKey(KeyIdPolicy.nineKey(key.input));
+          KeyboardSession.shared.press(key.input.charCodeAt(0), false);
+        }
     };
   }
 
@@ -2410,8 +3008,16 @@ struct KeyboardView {
     .borderColor(this.skin.borderColor)
     .shadow({ radius: this.skin.shadowRadius, color: this.skin.shadowColor(),
       offsetX: 0, offsetY: this.skin.shadowOffset })
-    .onClick(() => KeyboardSession.shared.press(key.input.charCodeAt(0), false))
-    .gesture(LongPressGesture().onAction(() => this.openNineKeyHold(key)))
+    .responseRegion(this.keyHitRegion())
+    .onClick(() => {
+      KeyboardSession.shared.recordKey(KeyIdPolicy.nineKey(key.input));
+      KeyboardSession.shared.press(key.input.charCodeAt(0), false);
+    })
+    .gesture(LongPressGesture().onAction(() => {
+      // A hold is still one press of the cell, whichever of its options it ends in.
+      KeyboardSession.shared.recordKey(KeyIdPolicy.nineKey(key.input));
+      this.openNineKeyHold(key);
+    }))
   }
 
   /**
@@ -2435,7 +3041,7 @@ struct KeyboardView {
         width: KeyboardMetrics.LAYOUT_TOGGLE_WIDTH_VP,
         action: () => this.toggleSymbolLayer()
       });
-      if (KeyboardScheme.usesNineKeyFace(this.nineKey, this.localMode)) {
+      if (this.gridActionRow()) {
         this.fixedKey({
           face: '符',
           label: KeyAccessibilityPolicy.symbolPanel(),
@@ -2443,17 +3049,28 @@ struct KeyboardView {
           emphasized: false,
           special: true,
           width: KeyboardMetrics.MODIFIER_WIDTH_VP,
-          action: () => this.openSymbolSurface()
+          action: () => {
+            KeyboardSession.shared.recordKey(KeyIdPolicy.SOFT_SYMBOL);
+            this.openSymbolSurface();
+          }
         });
       } else {
         Column() {
           this.fixedKey({
-            face: '，',
+            face: this.koreanFace() || this.vietnameseFace() || this.tibetanFace() ? ',' : '，',
             label: KeyAccessibilityPolicy.punctuation(),
             size: KeyboardMetrics.KEY_FONT_SIZE,
             emphasized: false,
             width: KeyboardMetrics.MODIFIER_WIDTH_VP,
-            action: () => KeyboardSession.shared.punctuation(0x2c)
+            action: () => {
+              KeyboardSession.shared.recordKey(KeyIdPolicy.character(','));
+              // A Dachen comma is ㄝ, so Zhuyin types the mark itself.
+              if (this.zhuyinFace()) {
+                this.typeZhuyinMark(',');
+              } else {
+                KeyboardSession.shared.punctuation(0x2c);
+              }
+            }
           });
         }
         .width(KeyboardMetrics.MODIFIER_WIDTH_VP)
@@ -2468,14 +3085,18 @@ struct KeyboardView {
       this.fixedKey({
         // The face is the mode it is in, not the pair it toggles between: a key labelled 中/英
         // says nothing about which one is running.
-        face: this.english ? 'En' : '中',
+        face: this.english ? 'En' : (this.koreanFace() ? '한'
+          : (this.vietnameseFace() ? '越' : (this.tibetanFace() ? '藏' : '中'))),
         // Never the mode it is in: a label reading 中 would be the character, not the action.
         label: KeyAccessibilityPolicy.language(),
         size: KeyboardMetrics.SMALL_KEY_FONT_SIZE,
         emphasized: false,
         special: true,
         width: KeyboardMetrics.LANGUAGE_WIDTH_VP,
-        action: () => this.toggleTouchLanguage()
+        action: () => {
+          KeyboardSession.shared.recordKey(KeyIdPolicy.SOFT_LANGUAGE);
+          this.toggleTouchLanguage();
+        }
       });
       this.fixedKey({
         // A composition takes Return before any editor action does: the user is confirming what is being spelled, not submitting the field, and the key turns the platform accent to say so. Otherwise the key says what the field asked for, so it reads 搜索 in a search box rather than 换行 in a box that has no lines, and sits with the other function keys.
@@ -2512,7 +3133,7 @@ struct KeyboardView {
    * ends with the finger somewhere else.
    */
   @Builder
-  deleteKey(width: Length) {
+  deleteKey(width: Length, intoGaps: boolean) {
     Column() {
       Text('⌫')
         .fontSize(KeyboardMetrics.KEY_FONT_SIZE)
@@ -2532,6 +3153,8 @@ struct KeyboardView {
     .borderColor(this.skin.borderColor)
     .shadow({ radius: this.skin.shadowRadius, color: this.skin.shadowColor(),
       offsetX: 0, offsetY: this.skin.shadowOffset })
+    // 表情面板标题栏里的删除键不在键盘的键距里，触摸区不扩。
+    .responseRegion(intoGaps ? this.keyHitRegion() : this.hitRegion(0, 0, 0, 0))
     .onTouch((event: TouchEvent): void => {
       if (event.type === TouchType.Down) {
         this.startBackspace();
@@ -2576,6 +3199,7 @@ struct KeyboardView {
     .borderColor(this.skin.borderColor)
     .shadow({ radius: this.skin.shadowRadius, color: this.skin.shadowColor(),
       offsetX: 0, offsetY: this.skin.shadowOffset })
+    .responseRegion(this.keyHitRegion())
     .onTouch((event: TouchEvent): void => {
       const position: number = event.touches[0].windowX;
       if (event.type === TouchType.Down) {
@@ -2645,6 +3269,171 @@ struct KeyboardView {
     this.clips = KeyboardSession.shared.clipboardHistory();
     this.clipboardNotice = '';
     this.confirmingClear = false;
+    this.openCloudClipboard();
+  }
+
+  /** Whether the clipboard surface is on screen, as the phone's own face or as the 2in1 emoji surface's clipboard tab. */
+  private clipboardShowing(): boolean {
+    return this.surface === SURFACE_CLIPBOARD
+      || (this.desktop === DesktopSurface.EMOJI && this.emojiPanel === CLIPBOARD_PANEL);
+  }
+
+  private cloudTabActive(): boolean {
+    return this.clipboardTab === CLIPBOARD_TAB_CLOUD && this.cloudVisible;
+  }
+
+  /**
+   * Fetches the cloud clipboard as the panel opens.
+   *
+   * This and the refresh button are the only times the keyboard asks: there is no polling, nothing is uploaded on copy, and a signed-out keyboard answers from the session file without a request.
+   */
+  private openCloudClipboard(): void {
+    this.clipSendTarget = '';
+    this.cloudVisible = KeyboardSession.shared.cloudClipboardVisible();
+    this.cloudEditor = KeyboardSession.shared.cloudClipboardEditor();
+    if (!this.cloudVisible) {
+      this.clipboardTab = CLIPBOARD_TAB_LOCAL;
+      this.dropCloudClipboard();
+      return;
+    }
+    this.refreshCloudClipboard();
+  }
+
+  private refreshCloudClipboard(): void {
+    if (!this.cloudVisible) {
+      return;
+    }
+    const request: number = ++this.cloudRequest;
+    this.cloudEditor = KeyboardSession.shared.cloudClipboardEditor();
+    this.cloudLoading = true;
+    KeyboardSession.shared.cloudClipboardItems().then((listing: CloudClipboardListing | null): void => {
+      if (request !== this.cloudRequest) {
+        return;
+      }
+      this.cloudLoading = false;
+      if (listing === null) {
+        // The field changed while the request was out; what came back was fetched for another one.
+        this.cloudClips = [];
+        this.cloudStateKnown = false;
+        return;
+      }
+      this.cloudClips = listing.items;
+      this.cloudState = listing.state;
+      this.cloudStateKnown = true;
+    });
+  }
+
+  /** Forgets the listing on screen and any answer still on its way. */
+  private dropCloudClipboard(): void {
+    this.cloudRequest++;
+    this.cloudClips = [];
+    this.cloudStateKnown = false;
+    this.cloudLoading = false;
+  }
+
+  /**
+   * Follows a focus change into the clipboard surface.
+   *
+   * The editor callback also fires for every text edit, so only a different field, or one whose attributes have just said it is a password field, drops the listing. A listing fetched for the previous field is not this one's, and the cloud section disappears outright from a field that may not see it.
+   */
+  private syncCloudClipboardEditor(): void {
+    const visible: boolean = KeyboardSession.shared.cloudClipboardVisible();
+    const editor: number = KeyboardSession.shared.cloudClipboardEditor();
+    if (visible === this.cloudVisible && editor === this.cloudEditor) {
+      return;
+    }
+    this.cloudVisible = visible;
+    this.cloudEditor = editor;
+    this.clipSendTarget = '';
+    this.dropCloudClipboard();
+    if (!visible) {
+      this.clipboardTab = CLIPBOARD_TAB_LOCAL;
+      return;
+    }
+    if (this.clipboardShowing()) {
+      this.refreshCloudClipboard();
+    }
+  }
+
+  private selectClipboardTab(tab: string): void {
+    if (tab === this.clipboardTab) {
+      return;
+    }
+    this.clipboardTab = tab;
+    this.clipSendTarget = '';
+    this.confirmingClear = false;
+    this.emojiSelected = 0;
+    if (tab === CLIPBOARD_TAB_CLOUD && !this.cloudStateKnown && !this.cloudLoading) {
+      this.refreshCloudClipboard();
+    }
+  }
+
+  /** The cloud items the 2in1 search leaves, matched the way local entries are. */
+  private visibleCloudClips(): CloudClipboardItem[] {
+    if (this.emojiQuery.length === 0) {
+      return this.cloudClips;
+    }
+    return this.cloudClips.filter((entry: CloudClipboardItem): boolean =>
+      EmojiPanelKeyPolicy.matches(entry.text, entry.text, this.emojiQuery));
+  }
+
+  private cloudNotice(): string {
+    return CloudClipboardPolicy.notice(this.cloudStateKnown ? this.cloudState : null, this.cloudLoading,
+      this.cloudClips.length);
+  }
+
+  private insertCloudClip(text: string): void {
+    if (KeyboardSession.shared.insertCloudClipboard(text, this.cloudEditor)) {
+      return;
+    }
+    // The listing was fetched for a field that no longer has focus; fetch again for this one rather than paste into it.
+    this.cloudVisible = KeyboardSession.shared.cloudClipboardVisible();
+    this.dropCloudClipboard();
+    if (this.cloudVisible) {
+      this.refreshCloudClipboard();
+    } else {
+      this.clipboardTab = CLIPBOARD_TAB_LOCAL;
+    }
+  }
+
+  /** A long press on a local entry offers it to the cloud clipboard; nothing is sent until the user taps the action. */
+  private offerCloudSend(text: string): void {
+    if (!this.cloudVisible) {
+      return;
+    }
+    this.clipSendTarget = text;
+  }
+
+  /** Why the offered entry cannot be sent right now, or null when it can. */
+  private cloudSendBlock(): string | null {
+    if (this.cloudLoading) {
+      return CloudClipboardPolicy.sendBlock(null, this.clipSendTarget);
+    }
+    return CloudClipboardPolicy.sendBlock(this.cloudStateKnown ? this.cloudState : null, this.clipSendTarget);
+  }
+
+  private cloudSendHint(): string {
+    const block: string | null = this.cloudSendBlock();
+    return block === null ? this.clipSendTarget : block;
+  }
+
+  private sendClipToCloud(): void {
+    const text: string = this.clipSendTarget;
+    if (this.cloudSending || text.length === 0 || this.cloudSendBlock() !== null) {
+      return;
+    }
+    this.cloudSending = true;
+    KeyboardSession.shared.sendToCloudClipboard(text).then((outcome: CloudClipboardSendOutcome): void => {
+      this.cloudSending = false;
+      if (this.clipSendTarget === text) {
+        this.clipSendTarget = '';
+      }
+      this.clipboardNotice = CloudClipboardPolicy.sendNotice(outcome);
+      // Read the cloud again so its section shows the new item, or the state that refused it.
+      if (this.clipboardShowing()) {
+        this.refreshCloudClipboard();
+      }
+    });
   }
 
   /**
@@ -3468,10 +4257,8 @@ struct KeyboardView {
   }
 
   private voiceDescription(): string {
-    const config = KeyboardSession.shared.voiceInputConfiguration();
-    return config.asr_provider === 'doubao' && config.asr_token.trim().length > 0
-      ? '使用豆包实时语音识别；原始音频只在本次识别期间发送。'
-      : '使用 HarmonyOS 系统语音识别；输入法不会保存原始音频。';
+    return VoiceInputConfigurationPolicy.description(
+      KeyboardSession.shared.voiceInputConfiguration());
   }
 
   @Builder
@@ -3675,7 +4462,8 @@ struct KeyboardView {
                 this.schemeCard(candidate);
               }
             }, (candidate: SchemeDefinition) =>
-              `${candidate.id}:${this.scheme.id}:${this.english}:${this.nineKey}`)
+              // 带上五笔版本：只改 86/98 时卡片也要重建，否则还显示旧的角标。
+              `${candidate.id}:${this.scheme.id}:${this.english}:${this.nineKey}:${this.wubiProfile}`)
           }
           .columnsTemplate('1fr 1fr 1fr 1fr')
           .width('100%')
@@ -3761,7 +4549,7 @@ struct KeyboardView {
           .borderColor(this.isCurrentScheme(candidate)
             ? this.skin.accent : this.skin.keyForeground)
           .borderRadius(5)
-        Text(candidate.badge)
+        Text(KeyboardScheme.badge(candidate, this.wubiProfile))
           .fontSize(SCHEME_BADGE_TEXT_SIZE)
           .fontColor(this.isCurrentScheme(candidate) ? this.skin.accent : this.skin.keyForeground)
           .padding({ left: 1 })
@@ -3769,7 +4557,7 @@ struct KeyboardView {
       .alignItems(VerticalAlign.Bottom)
       .height(SCHEME_BADGE_VP)
 
-      Text(candidate.title)
+      Text(KeyboardScheme.title(candidate, this.wubiProfile))
         .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
         .fontColor(this.isCurrentScheme(candidate) ? this.skin.accent : this.skin.keyForeground)
         .maxLines(1)
@@ -3892,6 +4680,7 @@ struct KeyboardView {
       ? JapaneseVariantPolicy.bracketsLabel()
       : JapaneseVariantPolicy.accessibilityLabel(
         JapaneseVariantPolicy.enabled(this.japanese, this.symbols, this.editing.length > 0)))
+    .responseRegion(this.keyHitRegion())
     .onClick(() => {
       if (JapaneseVariantPolicy.brackets(this.japanese, this.symbols)) {
         // A strip rather than a menu: bindContextMenu does not show inside an input method panel,
@@ -3944,6 +4733,7 @@ struct KeyboardView {
     .borderRadius(KeyboardMetrics.KEY_CORNER_VP)
     .borderWidth(this.skin.borderWidth)
     .borderColor(this.skin.borderColor)
+    .responseRegion(this.keyHitRegion())
     .onTouch((event: TouchEvent): void => {
       if (event.type === TouchType.Down) {
         this.flickX = event.touches[0].windowX;
@@ -3958,6 +4748,10 @@ struct KeyboardView {
         const direction: number = JapaneseNineKeyLayout.direction(
           event.touches[0].windowX - this.flickX, event.touches[0].windowY - this.flickY,
           FLICK_THRESHOLD_VP);
+        // One press of the cell per tap or flick, whichever direction it lands on; a direction with no label types nothing and counts nothing, as on iOS.
+        if ($$.kana[direction].length > 0) {
+          KeyboardSession.shared.recordKey(KeyIdPolicy.japaneseKana(keyIndex));
+        }
         this.sendKana($$, direction);
         this.flickKeyIndex = -1;
         this.flickDirection = DIRECTION_CENTRE;
@@ -4007,6 +4801,12 @@ struct KeyboardView {
     .scrollBar(BarState.Off)
     .width('100%')
     .height(this.surfaceHeight())
+  }
+
+  /** The line under an expanded-panel word, the strip's gloss line with a Korean Hanja's 훈음 ahead of the annotation. */
+  private expandedGlossLine(index: number): string {
+    const row: ExpandedCandidate = this.expanded[index];
+    return CandidateGlossPolicy.glossLine(row.hunEum, row.annotation);
   }
 
   /**
@@ -4202,8 +5002,8 @@ struct KeyboardView {
                       .textOverflow({ overflow: TextOverflow.Ellipsis })
                     // The same line the strip draws under a candidate. It used to be dropped on the
                     // way here, so the panel listed words while the strip beside it explained them.
-                    if (this.expanded[index].annotation.length > 0) {
-                      Text(this.expanded[index].annotation)
+                    if (this.expandedGlossLine(index).length > 0) {
+                      Text(this.expandedGlossLine(index))
                         .fontSize(Math.max(KEY_HINT_FONT_SIZE,
                           this.settings.candidateFontSize - 8))
                         .fontColor(this.candidateDetailColor())
@@ -4359,7 +5159,7 @@ struct KeyboardView {
             Grid() {
               GridItem() {
                 this.toolTile({
-                  glyph: '拼', icon: null, title: this.scheme.title, label: KeyAccessibilityPolicy.scheme(),
+                  glyph: '拼', icon: null, title: KeyboardScheme.title(this.scheme, this.wubiProfile), label: KeyAccessibilityPolicy.scheme(),
                   on: false, toggles: false,
                   enabled: true, action: () => {
                     this.show(SURFACE_SCHEME);
@@ -4639,16 +5439,19 @@ struct KeyboardView {
           .fontSize(KeyboardMetrics.SMALL_KEY_FONT_SIZE)
           .fontColor(this.skin.keyForeground)
           .layoutWeight(1)
-        Text('保存当前')
-          .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
-          .fontColor(this.skin.accent)
-          .padding({ right: 12 })
-          .onClick(() => this.captureClipboard())
-        Text(this.confirmingClear ? '确认清空' : '清空')
-          .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
-          .fontColor(this.skin.accent)
-          .padding({ right: 12 })
-          .onClick(() => this.clearClipboard())
+        // Saving and clearing act on this device's history, so the cloud section does not offer them.
+        if (!this.cloudTabActive()) {
+          Text('保存当前')
+            .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+            .fontColor(this.skin.accent)
+            .padding({ right: 12 })
+            .onClick(() => this.captureClipboard())
+          Text(this.confirmingClear ? '确认清空' : '清空')
+            .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+            .fontColor(this.skin.accent)
+            .padding({ right: 12 })
+            .onClick(() => this.clearClipboard())
+        }
         Text('返回')
           .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
           .fontColor(this.skin.accent)
@@ -4667,70 +5470,177 @@ struct KeyboardView {
     .height(this.surfaceHeight())
   }
 
-  /** The notice and the saved entries, shared by the phone's clipboard surface and the 2in1 emoji surface's clipboard tab. */
+  /** The section tabs, the notice and the entries, shared by the phone's clipboard surface and the 2in1 emoji surface's clipboard tab. */
   @Builder
   clipboardEntries() {
-      if (this.clipboardNotice.length > 0) {
-        Text(this.clipboardNotice)
-          .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
-          .fontColor(this.clipboardSkin().secondary)
-          .maxLines(2)
-          .width('100%')
-          .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
-            right: KeyboardMetrics.CANDIDATE_PADDING_VP })
+      // 本机 and 云端. A password field gets no tabs at all: the cloud section is the only other one, and it is never offered there.
+      if (this.cloudVisible) {
+        Row() {
+          Text('本机')
+            .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+            .fontColor(this.cloudTabActive() ? this.clipboardSkin().keyForeground : this.clipboardSkin().accent)
+            .padding({ right: 16 })
+            .onClick(() => this.selectClipboardTab(CLIPBOARD_TAB_LOCAL))
+          Text(CLOUD_CLIPBOARD_TAB)
+            .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+            .fontColor(this.cloudTabActive() ? this.clipboardSkin().accent : this.clipboardSkin().keyForeground)
+            .onClick(() => this.selectClipboardTab(CLIPBOARD_TAB_CLOUD))
+          Blank()
+          if (this.cloudTabActive()) {
+            Text('刷新')
+              .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+              .fontColor(this.clipboardSkin().accent)
+              .opacity(this.cloudLoading ? 0.4 : 1)
+              .onClick(() => {
+                if (!this.cloudLoading) {
+                  this.refreshCloudClipboard();
+                }
+              })
+          }
+        }
+        .width('100%')
+        .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
+          right: KeyboardMetrics.CANDIDATE_PADDING_VP, top: 4, bottom: 4 })
       }
 
-      if (this.emojiQuery.length > 0 && this.visibleClips().length === 0) {
-        Text('没有匹配的剪贴板记录')
-          .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
-          .fontColor(this.clipboardSkin().secondary)
-          .width('100%')
-          .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
-            right: KeyboardMetrics.CANDIDATE_PADDING_VP })
-      }
-
-      // A List rather than a Column in a Scroll so the 2in1 arrows can bring the selected entry into view.
-      List({ space: KeyboardMetrics.KEY_SPACING_VP, scroller: this.clipListScroller }) {
-          ForEach(this.visibleClips(), (entry: ClipboardHistoryItem, index: number) => {
-            ListItem() {
-            Row() {
-              Text(entry.text)
-                .fontSize(KeyboardMetrics.SMALL_KEY_FONT_SIZE)
-                .fontColor(this.clipboardSkin().keyForeground)
-                .maxLines(2)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .layoutWeight(1)
-                .onClick(() => KeyboardSession.shared.insert(entry.text))
-                .onHover((isHover: boolean): void => this.hoverItem(`clip:${entry.text}`,
-                  EmojiPanelTooltipPolicy.clipboardText(entry.text), isHover))
-                .bindPopup(this.hoverTipKey === `clip:${entry.text}`, this.hoverTipOptions(`clip:${entry.text}`))
-              Text(entry.pinned ? '已固定' : '固定')
-                .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
-                .fontColor(entry.pinned ? this.clipboardSkin().accent : this.clipboardSkin().keyForeground)
-                .opacity(entry.pinned ? 1 : 0.55)
-                .padding({ left: 8, right: 8 })
-                .onClick(() => this.applyClipboardMutation(
-                  KeyboardSession.shared.setClipboardPinned(entry.text, !entry.pinned)))
-              Text('删除')
-                .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
-                .fontColor(this.clipboardSkin().keyForeground)
-                .opacity(0.55)
-                .onClick(() => this.applyClipboardMutation(
-                  KeyboardSession.shared.removeClipboardHistory(entry.text)))
-            }
+      if (this.cloudTabActive()) {
+        if (this.cloudNotice().length > 0) {
+          Text(this.cloudNotice())
+            .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+            .fontColor(this.clipboardSkin().secondary)
+            .maxLines(2)
             .width('100%')
             .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
-              right: KeyboardMetrics.CANDIDATE_PADDING_VP, top: 6, bottom: 6 })
-            .backgroundColor(this.clipboardSkin().keyBackground)
-            .borderRadius(KeyboardMetrics.KEY_CORNER_VP)
-            .border({ width: this.panelKeySelected(index) ? 2 : 0, color: this.clipboardSkin().accent,
-              radius: KeyboardMetrics.KEY_CORNER_VP })
+              right: KeyboardMetrics.CANDIDATE_PADDING_VP })
+        }
+
+        if (this.emojiQuery.length > 0 && this.cloudClips.length > 0 && this.visibleCloudClips().length === 0) {
+          Text('没有匹配的剪贴板记录')
+            .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+            .fontColor(this.clipboardSkin().secondary)
+            .width('100%')
+            .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
+              right: KeyboardMetrics.CANDIDATE_PADDING_VP })
+        }
+
+        List({ space: KeyboardMetrics.KEY_SPACING_VP, scroller: this.clipListScroller }) {
+          ForEach(this.visibleCloudClips(), (entry: CloudClipboardItem, index: number) => {
+            ListItem() {
+              Row() {
+                Text(entry.text)
+                  .fontSize(KeyboardMetrics.SMALL_KEY_FONT_SIZE)
+                  .fontColor(this.clipboardSkin().keyForeground)
+                  .maxLines(2)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .layoutWeight(1)
+              }
+              .width('100%')
+              .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
+                right: KeyboardMetrics.CANDIDATE_PADDING_VP, top: 6, bottom: 6 })
+              .backgroundColor(this.clipboardSkin().keyBackground)
+              .borderRadius(KeyboardMetrics.KEY_CORNER_VP)
+              .border({ width: this.panelKeySelected(index) ? 2 : 0, color: this.clipboardSkin().accent,
+                radius: KeyboardMetrics.KEY_CORNER_VP })
+              .onClick(() => this.insertCloudClip(entry.text))
             }
-          })
+          }, (entry: CloudClipboardItem, index: number): string => `${entry.id}:${index}`)
+        }
+        .scrollBar(BarState.Off)
+        .width('100%')
+        .layoutWeight(1)
+      } else {
+        if (this.clipboardNotice.length > 0) {
+          Text(this.clipboardNotice)
+            .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+            .fontColor(this.clipboardSkin().secondary)
+            .maxLines(2)
+            .width('100%')
+            .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
+              right: KeyboardMetrics.CANDIDATE_PADDING_VP })
+        }
+
+        if (this.emojiQuery.length > 0 && this.visibleClips().length === 0) {
+          Text('没有匹配的剪贴板记录')
+            .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+            .fontColor(this.clipboardSkin().secondary)
+            .width('100%')
+            .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
+              right: KeyboardMetrics.CANDIDATE_PADDING_VP })
+        }
+
+        // A long press on an entry offers it to the cloud clipboard here, in the panel: bindContextMenu does not show inside an input method panel.
+        if (this.clipSendTarget.length > 0 && this.cloudVisible) {
+          Row() {
+            Text(CLOUD_CLIPBOARD_SEND)
+              .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+              .fontColor(this.clipboardSkin().accent)
+              .opacity(this.cloudSendBlock() === null && !this.cloudSending ? 1 : 0.4)
+              .padding({ right: 12 })
+              .onClick(() => this.sendClipToCloud())
+            Text(this.cloudSendHint())
+              .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+              .fontColor(this.clipboardSkin().secondary)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+            Text('取消')
+              .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+              .fontColor(this.clipboardSkin().keyForeground)
+              .opacity(0.55)
+              .padding({ left: 12 })
+              .onClick(() => {
+                this.clipSendTarget = '';
+              })
+          }
+          .width('100%')
+          .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
+            right: KeyboardMetrics.CANDIDATE_PADDING_VP, top: 4, bottom: 4 })
+        }
+
+        // A List rather than a Column in a Scroll so the 2in1 arrows can bring the selected entry into view.
+        List({ space: KeyboardMetrics.KEY_SPACING_VP, scroller: this.clipListScroller }) {
+            ForEach(this.visibleClips(), (entry: ClipboardHistoryItem, index: number) => {
+              ListItem() {
+              Row() {
+                Text(entry.text)
+                  .fontSize(KeyboardMetrics.SMALL_KEY_FONT_SIZE)
+                  .fontColor(this.clipboardSkin().keyForeground)
+                  .maxLines(2)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .layoutWeight(1)
+                  .onClick(() => KeyboardSession.shared.insert(entry.text))
+                  .gesture(LongPressGesture().onAction(() => this.offerCloudSend(entry.text)))
+                  .onHover((isHover: boolean): void => this.hoverItem(`clip:${entry.text}`,
+                    EmojiPanelTooltipPolicy.clipboardText(entry.text), isHover))
+                  .bindPopup(this.hoverTipKey === `clip:${entry.text}`, this.hoverTipOptions(`clip:${entry.text}`))
+                Text(entry.pinned ? '已固定' : '固定')
+                  .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+                  .fontColor(entry.pinned ? this.clipboardSkin().accent : this.clipboardSkin().keyForeground)
+                  .opacity(entry.pinned ? 1 : 0.55)
+                  .padding({ left: 8, right: 8 })
+                  .onClick(() => this.applyClipboardMutation(
+                    KeyboardSession.shared.setClipboardPinned(entry.text, !entry.pinned)))
+                Text('删除')
+                  .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+                  .fontColor(this.clipboardSkin().keyForeground)
+                  .opacity(0.55)
+                  .onClick(() => this.applyClipboardMutation(
+                    KeyboardSession.shared.removeClipboardHistory(entry.text)))
+              }
+              .width('100%')
+              .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
+                right: KeyboardMetrics.CANDIDATE_PADDING_VP, top: 6, bottom: 6 })
+              .backgroundColor(this.clipboardSkin().keyBackground)
+              .borderRadius(KeyboardMetrics.KEY_CORNER_VP)
+              .border({ width: this.panelKeySelected(index) ? 2 : 0, color: this.clipboardSkin().accent,
+                radius: KeyboardMetrics.KEY_CORNER_VP })
+              }
+            })
+        }
+        .scrollBar(BarState.Off)
+        .width('100%')
+        .layoutWeight(1)
       }
-      .scrollBar(BarState.Off)
-      .width('100%')
-      .layoutWeight(1)
   }
 
   /** The hover tooltip itself, in the Windows tooltip's dark plate whatever the panel's theme. */
@@ -4803,7 +5713,7 @@ struct KeyboardView {
         }
         Blank()
         Column() {
-          this.deleteKey(KeyboardMetrics.MODIFIER_WIDTH_VP)
+          this.deleteKey(KeyboardMetrics.MODIFIER_WIDTH_VP, false)
         }
         .width(KeyboardMetrics.MODIFIER_WIDTH_VP)
         .height(KeyboardMetrics.ROW_HEIGHT_VP * 3 / 5)
@@ -4856,46 +5766,46 @@ struct KeyboardView {
                 .onClick(() => this.loadEmoji(category.group))
             }, (category: EmojiCategory) => `${category.group}:${this.emojiGroup}:${this.emojiShowingRecents}`)
           } else if (this.emojiPanel === KAOMOJI_PANEL) {
-            ForEach(this.emojiKaomojiGroups, (group: string) => {
-              Text(group)
+            ForEach(this.emojiKaomojiTabs, (tab: EmojiPanelGroupTab) => {
+              Text(tab.title)
                 .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
-                .fontColor(group === this.emojiGroup
+                .fontColor(tab.key === this.emojiPanelTab
                   ? this.emojiSkin.accent : this.emojiSkin.keyForeground)
                 .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
                   right: KeyboardMetrics.CANDIDATE_PADDING_VP })
                 .height(KeyboardMetrics.ROW_HEIGHT_VP * 3 / 5)
-                .onClick(() => this.loadEmojiCatalog(KAOMOJI_PANEL, group))
-            }, (group: string) => `${group}:${this.emojiGroup}`)
+                .onClick(() => this.loadEmojiTab(KAOMOJI_PANEL, tab))
+            }, (tab: EmojiPanelGroupTab) => `${tab.key}:${this.emojiPanelTab}`)
           } else if (this.emojiPanel === CLIPBOARD_PANEL) {
-            // Nothing is captured in the background (see captureClipboard), so saving is a button here too.
-            Text('保存当前')
-              .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
-              .fontColor(this.emojiSkin.accent)
-              .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
-                right: KeyboardMetrics.CANDIDATE_PADDING_VP })
-              .height(KeyboardMetrics.ROW_HEIGHT_VP * 3 / 5)
-              .onClick(() => this.captureClipboard())
-            Text(this.confirmingClear ? '确认清空' : '清空')
-              .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
-              .fontColor(this.emojiSkin.accent)
-              .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
-                right: KeyboardMetrics.CANDIDATE_PADDING_VP })
-              .height(KeyboardMetrics.ROW_HEIGHT_VP * 3 / 5)
-              .onClick(() => this.clearClipboard())
-          } else {
-            ForEach(this.emojiSymbolGroups, (group: EmojiSymbolGroup) => {
-              Text(group.title)
+            // Saving and clearing act on this device's history, so the cloud section does not offer them.
+            if (!this.cloudTabActive()) {
+              // Nothing is captured in the background (see captureClipboard), so saving is a button here too.
+              Text('保存当前')
                 .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
-                .fontColor(group.parent === this.emojiSymbolParent
+                .fontColor(this.emojiSkin.accent)
+                .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
+                  right: KeyboardMetrics.CANDIDATE_PADDING_VP })
+                .height(KeyboardMetrics.ROW_HEIGHT_VP * 3 / 5)
+                .onClick(() => this.captureClipboard())
+              Text(this.confirmingClear ? '确认清空' : '清空')
+                .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+                .fontColor(this.emojiSkin.accent)
+                .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
+                  right: KeyboardMetrics.CANDIDATE_PADDING_VP })
+                .height(KeyboardMetrics.ROW_HEIGHT_VP * 3 / 5)
+                .onClick(() => this.clearClipboard())
+            }
+          } else {
+            ForEach(this.emojiSymbolTabs, (tab: EmojiPanelGroupTab) => {
+              Text(tab.title)
+                .fontSize(KeyboardMetrics.LANGUAGE_FONT_SIZE)
+                .fontColor(tab.key === this.emojiPanelTab
                   ? this.emojiSkin.accent : this.emojiSkin.keyForeground)
                 .padding({ left: KeyboardMetrics.CANDIDATE_PADDING_VP,
                   right: KeyboardMetrics.CANDIDATE_PADDING_VP })
                 .height(KeyboardMetrics.ROW_HEIGHT_VP * 3 / 5)
-                .onClick(() => {
-                  this.emojiSymbolParent = group.parent;
-                  this.loadEmojiCatalog(SYMBOLS_PANEL, '', group.parent);
-                })
-            }, (group: EmojiSymbolGroup) => `${group.parent}:${this.emojiSymbolParent}`)
+                .onClick(() => this.loadEmojiTab(SYMBOLS_PANEL, tab))
+            }, (tab: EmojiPanelGroupTab) => `${tab.key}:${this.emojiPanelTab}`)
           }
         }
       }
@@ -5099,6 +6009,7 @@ struct KeyboardView {
     .borderWidth(this.skin.borderWidth)
     .borderColor(this.skin.borderColor)
     .accessibilityText(label)
+    .responseRegion(this.keyHitRegion())
     .onClick(action)
   }
 
@@ -5167,7 +6078,15 @@ struct KeyboardView {
 
   build() {
     Stack({ alignContent: Alignment.Top }) {
-      this.skinBackdrop()
+      // On a desktop candidate window with a mascot the backdrop starts at the card's top edge: the band above it is transparent, so the mascot stands on the card rather than on a slab of keyboard colour.
+      Column() {
+        this.skinBackdrop()
+      }
+      .width('100%')
+      .height('100%')
+      .padding({ top: CandidateDecorationLayout.backdropInsetVp(KeyboardFormFactor.isDesktop(),
+        this.settings.candidateDecorationImage !== null, this.settings.candidateDecorationTopVp,
+        KeyboardMetrics.ROOT_VERTICAL_PADDING_VP) })
       this.keyboard()
       if (this.punctuation || this.brackets || this.managing >= 0
         || this.expandedGloss >= 0) {
@@ -5272,6 +6191,10 @@ struct KeyboardView {
         this.handwritingFace()
       } else if (KeyboardScheme.usesNineKeyFace(this.nineKey, this.localMode)) {
         this.nineKeyFace()
+      } else if (this.zhuyinFace() && !this.symbols) {
+        this.dachenFace()
+      } else if (this.strokeFace() && !this.symbols) {
+        this.strokeKeypadFace()
       } else {
         Row({ space: this.keySpacing() }) {
           ForEach(this.symbols ? SYMBOL_ROWS[0] : LETTER_ROWS[0], (key: string) => {
@@ -5285,9 +6208,8 @@ struct KeyboardView {
           ForEach(this.symbols ? SYMBOL_ROWS[1] : LETTER_ROWS[1], (key: string) => {
             this.flexibleKey(this.symbols ? this.symbolKey(key) : this.letterKey(key));
           }, (key: string) => key + this.faceKey())
-          if (!this.symbols) {
-            // Microsoft shuangpin spells ing with a semicolon, so the key has to be reachable from the
-            // letter rows rather than buried behind the symbol layout.
+          if (!this.symbols && !this.koreanFace() && !this.vietnameseFace() && !this.tibetanFace()) {
+            // 微软双拼用分号拼 ing，所以这个键要能在字母行里直接按到，而不是藏在符号层后面。两笔式在那里没有字母，越南语和威利转写也不用它，所以韩语、越南语和藏文把这一行画成九个键。
             this.flexibleKey(this.letterKey(';'));
           }
         }
@@ -5304,20 +6226,125 @@ struct KeyboardView {
               special: true,
               width: KeyboardMetrics.MODIFIER_WIDTH_VP,
               action: () => {
+                KeyboardSession.shared.recordKey(KeyIdPolicy.SHIFT);
                 this.letterCase.toggle(Date.now());
                 this.caseMode = this.letterCase.mode();
               }
             });
           }
           ForEach(this.symbols ? SYMBOL_ROWS[2] : LETTER_ROWS[2], (key: string) => {
-            this.flexibleKey(this.symbols ? this.symbolKey(key) : this.letterKey(key));
+            this.flexibleKey(this.symbols
+              ? this.symbolKey(KeyboardScheme.symbolRowKey(key, this.tibetanFace()))
+              : this.letterKey(key));
           }, (key: string) => key + this.faceKey())
-          this.deleteKey(KeyboardMetrics.MODIFIER_WIDTH_VP);
+          this.deleteKey(KeyboardMetrics.MODIFIER_WIDTH_VP, true);
         }
         .width('100%')
         .height(this.rowHeight(2))
 
         this.actionRow()
       }
+  }
+
+  /** The Zhuyin Dachen keys: four rows in the height of the three letter rows, Delete closing the last, then the shared action row. The symbol layer stays the shared one. */
+  @Builder
+  dachenFace() {
+    Row({ space: this.keySpacing() }) {
+      ForEach(ZhuyinLayout.ROWS[0], (key: string) => {
+        this.flexibleKey(this.zhuyinKey(key));
+      }, (key: string) => key + this.faceKey())
+    }
+    .width('100%')
+    .height(this.dachenRowHeight())
+
+    Row({ space: this.keySpacing() }) {
+      ForEach(ZhuyinLayout.ROWS[1], (key: string) => {
+        this.flexibleKey(this.zhuyinKey(key));
+      }, (key: string) => key + this.faceKey())
+    }
+    .width('100%')
+    .height(this.dachenRowHeight())
+
+    Row({ space: this.keySpacing() }) {
+      ForEach(ZhuyinLayout.ROWS[2], (key: string) => {
+        this.flexibleKey(this.zhuyinKey(key));
+      }, (key: string) => key + this.faceKey())
+    }
+    .width('100%')
+    .height(this.dachenRowHeight())
+
+    Row({ space: this.keySpacing() }) {
+      ForEach(ZhuyinLayout.ROWS[3], (key: string) => {
+        this.flexibleKey(this.zhuyinKey(key));
+      }, (key: string) => key + this.faceKey())
+      this.deleteKey(KeyboardMetrics.MODIFIER_WIDTH_VP, true);
+    }
+    .width('100%')
+    .height(this.dachenRowHeight())
+
+    this.actionRow()
+  }
+
+  /** 笔画键盘：九键的外框，左侧标点栏，中间 2×3 的笔画键，右侧删除键，底排与九键相同。符号层沿用共用的字母面，与大千注音一样。 */
+  @Builder
+  strokeKeypadFace() {
+    Column({ space: this.rowSpacing() }) {
+      this.strokeGrid()
+      this.actionRow()
+    }
+    .width('100%')
+    .height(this.surfaceHeight())
+  }
+
+  @Builder
+  strokeGrid() {
+    Row({ space: this.keySpacing() }) {
+      Column() {
+        ForEach(NineKeyLayout.punctuation(), (symbol: string, index: number) => {
+          Column() {
+            Text(this.symbolFace(symbol))
+              .fontSize(KeyboardMetrics.SMALL_KEY_FONT_SIZE)
+              .fontColor(this.skin.keyForeground)
+              .textAlign(TextAlign.Center)
+              .width('100%')
+          }
+          .layoutWeight(1)
+          .justifyContent(FlexAlign.Center)
+          .width('100%')
+          .accessibilityText(KeyAccessibilityPolicy.symbol(symbol))
+          .responseRegion(this.railHitRegion(index, NineKeyLayout.punctuation().length))
+          .onClick(() => {
+            KeyboardSession.shared.recordKey(KeyIdPolicy.SOFT_PUNCTUATION);
+            KeyboardSession.shared.punctuation(symbol.charCodeAt(0));
+          })
+        }, (symbol: string) => symbol + this.faceKey())
+      }
+      .width(`${NINE_KEY_COLUMN_PERCENT}%`)
+      .height('100%')
+      .backgroundColor(this.skin.keySurfaceBackground(false, true))
+      .borderRadius(KeyboardMetrics.KEY_CORNER_VP)
+
+      Column({ space: this.rowSpacing() }) {
+        ForEach(StrokeLayout.ROWS, (row: StrokeKey[]) => {
+          Row({ space: this.keySpacing() }) {
+            ForEach(row, (key: StrokeKey) => {
+              this.flexibleKey(this.strokeKey(key));
+            }, (key: StrokeKey) => key.input + this.faceKey())
+          }
+          .layoutWeight(1)
+          .width('100%')
+        }, (row: StrokeKey[]) => row[0].input + this.faceKey())
+      }
+      .layoutWeight(1)
+      .height('100%')
+
+      Column() {
+        this.deleteKey('100%', true)
+      }
+      .width(`${NINE_KEY_COLUMN_PERCENT}%`)
+      .height('100%')
+    }
+    .width('100%')
+    .height(this.gridHeight())
   }
 }

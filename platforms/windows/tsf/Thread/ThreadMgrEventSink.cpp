@@ -4,6 +4,7 @@
 #include "MetasequoiaIME.h"
 #include "CandidateListUIPresenter.h"
 #include "Ipc.h"
+#include "KeyPressStatisticsQueue.h"
 
 void CMetasequoiaIME::_SyncHostContextFocus(_In_opt_ ITfContext *context)
 {
@@ -11,11 +12,25 @@ void CMetasequoiaIME::_SyncHostContextFocus(_In_opt_ ITfContext *context)
     if (host && host->valid())
     {
         const bool changed = context && (!_hostFocusContext || !_IsSameComObject(context, _hostFocusContext));
+        bool koreanFinished = false;
         const bool success = _hostFocusState.update(context != nullptr, changed, [&](bool focused) {
             std::string raw, error;
-            return host->focus(focused, &raw, &error);
+            if (!host->focus(focused, &raw, &error)) return false;
+            msime::tsf::EngineResult result;
+            koreanFinished = msime::tsf::EngineSessionAdapter::parse_result(raw, &result, &error) &&
+                             result.has_commit && !result.commit.empty() &&
+                             msime::windows::scheme::CommitsOnBlur(static_cast<int>(result.view.scheme));
+            return true;
         });
         if (!success) context = nullptr;
+        // 焦点变化时，宿主会结束韩文音节、注音转换、越南文词或藏文音节串而不是丢弃它（scheme::CommitsOnBlur）。它已经作为组字显示在屏幕上，所以就地结束这个组字，否则下一个键会替换掉它。
+        if (koreanFinished && _IsComposing() && _pContext)
+        {
+            _KEYSTROKE_STATE keyState = {};
+            keyState.Category = CATEGORY_COMPOSING;
+            keyState.Function = FUNCTION_COMMIT_SYLLABLE;
+            (void)_InvokeKeyHandler(_pContext, 0, L'\0', 0, keyState, FANY_IME_NO_REQUEST_ID);
+        }
     }
     else context = nullptr;
     // Retain COM identity through transient NULL focus and pointer reuse.
@@ -75,6 +90,11 @@ STDAPI CMetasequoiaIME::OnUninitDocumentMgr(_In_ ITfDocumentMgr *pDocMgr)
 
 STDAPI CMetasequoiaIME::OnSetFocus(_In_ ITfDocumentMgr *pDocMgrFocus, _In_ ITfDocumentMgr *pDocMgrPrevFocus)
 {
+    if (pDocMgrFocus == nullptr)
+    {
+        // Document focus left: hand the key counts over now rather than when the timer fires.
+        FlushKeyPressStatistics();
+    }
     if (!IsNamedpipeFocusStateOwner(this))
     {
         return S_OK;

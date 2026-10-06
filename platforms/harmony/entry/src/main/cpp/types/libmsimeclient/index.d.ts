@@ -66,12 +66,59 @@ export const savePreferences: (
 ) => string;
 export const dictionary: (request: string) => string;
 export const updatePreferences: (handle: number, snapshot: string) => string;
+/** `{directory,action}`; a `record` action answers `{recorded,milestone}`, where milestone is the commit count just passed while achievements are switched on, else null. */
 export const typingStatistics: (request: string) => string;
-export const vocabularyReview: (request: string) => string;
 /**
- * Locked mobile history operations. Harmony opts into migration of its original
- * `state/clipboard-history.json`; every mutation answers with the latest complete entry list.
+ * `{state_root,sound_packs,pack}` in, all paths absolute; the validated files of that sound pack out: `{id,name,license,builtin,mode,sounds:{default,space,enter,backspace,commit,achievement},sequence:{sample,semitones,advance}|null,max_sample_millis,melody_idle_reset_millis}` with absolute paths. Reads the pack from disk: not for the key path.
  */
+export const keySoundPack: (request: string) => string;
+/**
+ * `{state_root,sound_packs,pack}` in, as for `keySoundPack`; the validated tracks of that music pack out: `{id,name,license,tracks,max_track_seconds}`, the tracks as absolute paths in play order. Reads the pack from disk: not for the key path.
+ */
+export const musicPack: (request: string) => string;
+/**
+ * The 扩展 page's pack store: `{state_root,sound_packs,action}` in, with `action.operation` one of `catalog`, `import` `{source}` (an absolute path inside this sandbox), `remove` `{kind,id}`, `load_mentions` and `save_mentions` `{entries}`. Answers `{ok,value}` or `{ok:false,error,detail?}`, the error one of the desktop shell's codes and the detail the rule a refused pack or name broke.
+ */
+export const plugins: (request: string) => string;
+/**
+ * `plugins` on a worker thread, for an `import`, which extracts or copies up to a music pack's size and validates it before swapping it into place. Resolves with the same answer `plugins` returns; rejects only when the worker produced no answer.
+ */
+export const pluginsAsync: (request: string) => Promise<string>;
+/**
+ * Registers the device's anonymous MSIME account under `directory` (an absolute path; `anonymous-account.json` and `anonymous-session.json`) unless a session is already there, on a worker thread. Resolves with `{ok,value}` or `{ok:false,error}`; rejects only when the worker produced no answer.
+ */
+export const ensureAnonymousAccount: (directory: string) => Promise<string>;
+/**
+ * Starts the usage-reporting session at keyboard start: `{directory,platform,version,preferences_directory}` in, `{enabled,crash_record_path?,previous_session_crashed?,crashes?}` out. Closes the previous session (`session_crash` only when it left a crash record), queues crash records and today's `active`, writes the new session marker. With `usage_reporting` off it clears instead. Small files only, no network.
+ */
+export const telemetryBegin: (request: string) => string;
+/** `{directory}`: the keyboard is shutting down normally; queues the `session` event. No network. */
+export const telemetryEnd: (request: string) => string;
+/** `{directory,message,stack}` from the crash observer: writes the running session's crash record, sent on the next start. No network. */
+export const telemetryRecordCrash: (request: string) => string;
+/** The same request as `telemetryBegin`; queues today's `active` and sends the queue on a worker thread. Resolves with `{ok,value:{enabled,sent,dropped,remaining,deferred}}`. */
+export const telemetryFlush: (request: string) => Promise<string>;
+/** `{directory}`: the user just turned usage reporting off; drops the queue, the session marker and crash records. */
+export const telemetryClear: (request: string) => string;
+/**
+ * `{directory,platform,channel?}` in; `{items:[{id,title,body,html,targets,channels,published_at}]}` out on a worker thread, newest first, without dismissed ones. `html` is the Markdown body rendered with raw HTML escaped and only http, https and mailto links kept. Fetched at most once a minute; the cached copy answers otherwise.
+ */
+export const notices: (request: string) => Promise<string>;
+/** `{directory,id}`: remembers that the user dismissed notice `id`. */
+export const noticeDismiss: (request: string) => string;
+/**
+ * Decodes the WAV sample at `sample` once per semitone and writes each note to `<directory>/note-<index>.wav` at 48 kHz, pitched as a playback rate. Resolves with the files in semitone order; rejects a sample that is not WAV, lasts longer than `maxMillis`, or decodes past its declared length.
+ */
+export const keySoundRenderNotes: (
+  sample: string,
+  semitones: number[],
+  directory: string,
+  maxMillis: number,
+) => Promise<string[]>;
+/** The statistics master switch under an absolute state directory: 1 on, 0 off or never written, -1 for an invalid directory or unreadable document. */
+export const typingStatisticsEnabled: (directory: string) => number;
+export const vocabularyReview: (request: string) => string;
+/** Locked mobile history operations; every mutation answers with the latest complete entry list. */
 export const mobileClipboardHistory: (request: string) => string;
 export const emojiCatalog: (query: string, resources: string) => string;
 export const candidateGlosses: (request: string, resources: string) => string;
@@ -132,6 +179,14 @@ export const character: (handle: number, ascii: number, shift: boolean) => strin
 export const punctuationWithContext: (handle: number, ascii: number, preceding: number) => string;
 export const balancePairedPunctuationAfterAutoClose: (handle: number, opening: number) => string;
 export const command: (handle: number, command: number) => string;
+/**
+ * `msime_client_typing_effect`: count one key or commit into the session's combo and answer what to draw, packed into one integer. `event` bits 0-7 are 0 any other key, 1 space, 2 enter, 3 backspace, 4 commit, 5 a delete by another route; 0x100 marks an auto-repeat, 0x200 keeps the tier-up sound quiet. The answer's bits 0-15 are the combo count, bit 16 a tier-up, bits 17-19 the style (0 off, 1 flash, 2 sparks, 3 power mode) and bit 20 a tier-up sound this host plays itself; `TypingEffectPolicy.decode` unpacks it. 0 while the effect and the combo counter are both off. No disk, no allocation: safe on the key path.
+ */
+export const typingEffect: (handle: number, event: number) => number;
+/**
+ * `msime_client_typing_effect_settings`: the session's resolved typing effect, `{ok, value: {pack, issue, style, intensity, colors, duration_ms, particles, combo_counter}}`. With an effect pack selected its parameters replace the preference values; a pack that does not load answers style off with `issue` saying why. Read it after the preferences change or a field gains focus, not per key.
+ */
+export const typingEffectSettings: (handle: number) => string;
 
 export const select: (handle: number, generation: number, index: number) => string;
 export const selectEdge: (

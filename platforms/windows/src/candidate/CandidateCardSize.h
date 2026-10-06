@@ -15,6 +15,8 @@ namespace msime::windows {
 // Measured single-line widths of one candidate's three runs, each at its own font size: the text (with its badge) and the annotation at the candidate size, the translation at CandidateCardMetrics::translation_font. All three zero hides the row.
 struct CandidateItemWidths {
   double text = 0.0, annotation = 0.0, translation = 0.0;
+  // Lines the translation run holds before any wrapping, `translation` being the widest of them. More than one (a Korean Hanja's 훈음 with its translation under it) always puts the run under the text, at the height of all its lines.
+  size_t translation_lines = 1;
 };
 enum class CandidateRun { text, annotation, translation };
 // Height of candidate `index`'s run once wrapped to `width` DIPs. The text run is the candidate text with its badge, at the candidate size. The window answers with DirectWrite; without one the layout estimates from the single-line width.
@@ -32,9 +34,11 @@ struct CandidateCardInput {
   // Work area caps. At most one pixel means the axis stays uncapped.
   double max_width = 0.0;
   double max_height = 0.0;
+  // How far a horizontal card may grow past max_width so its candidates' own lines stay on one line, their translations wrapping underneath: the work area less a margin on each side. At most one pixel keeps max_width.
+  double max_single_line_width = 0.0;
   // Minimum card width asked for by an external skin package, in DIPs. Zero keeps the width derived from the font size. A mascot skin needs it: the artwork is drawn against a card of a particular width, and a narrow card makes the decoration overhang.
   double skin_min_width = 0.0;
-  // Measured width of the page indicator ("1 / 3") at CandidateCardMetrics::pager_font. Zero draws no pager; it shares the preedit row, so it is only drawn when that row is.
+  // Measured width of the page indicator ("1 / 3") at CandidateCardMetrics::pager_font. Zero draws no pager. It shares the preedit row, which is drawn even with the preedit hidden, because it carries the brand mark.
   double page_width = 0.0;
 };
 struct CandidateCardSize {
@@ -58,6 +62,8 @@ struct CandidateCardMetrics {
   double item_gap = 2.0;
   // The pager at the right of the preedit row: the page indicator and the previous and next arrows, in the secondary colour at 13 DIP, 12 DIP after the preedit and 12 DIP before the arrows. Each arrow is a square box of pager_arrow for its glyph and its click.
   double pager_font = 13.0, pager_gap = 12.0, pager_arrow = 16.0;
+  // The full-colour brand mark leading the preedit row, as the macOS card and the floating toolbar lead with it: a logo_side square at pad_x, then logo_gap before the preedit. The row is always there so the mark is, at least header_row tall when the preedit is hidden: the mark with 3 DIP above and below.
+  double logo_side = 16.0, logo_gap = 6.0, header_row = 22.0;
 };
 inline CandidateCardMetrics candidate_card_metrics(double font_size,
                                                    double preedit_font_size,
@@ -71,7 +77,9 @@ inline CandidateCardMetrics candidate_card_metrics(double font_size,
   metrics.number_and_bar = font_size * 0.8 + font_size * 0.2 + 8.0;
   // kCandidateMinWidthDip in the shipped presenter (card->SetMinWidth), independent of the font size.
   metrics.min_width = 160.0;
-  metrics.preedit_row = preedit_visible ? preedit_font_size * 1.4 + 6.0 : 0.0;
+  // The top row: the preedit's line when it is shown, never shorter than the brand mark and the pager need.
+  metrics.preedit_row = (std::max)(
+      preedit_visible ? preedit_font_size * 1.4 + 6.0 : 0.0, metrics.header_row);
   // The shipped presenter's CandidateList itemHeight: the minimum height of one candidate row.
   metrics.candidate_row = font_size * 1.35 + 2.0;
   metrics.annotation_line = font_size * 1.25;
@@ -132,6 +140,17 @@ candidate_pager_layout(double width, double indicator_width,
   layout.left = layout.indicator.left;
   return layout;
 }
+// The brand mark's square in the preedit row, in card coordinates: at the row's left padding and centred in the row.
+inline CandidateRowBounds candidate_logo_bounds(const CandidateCardMetrics &metrics) {
+  const double top =
+      metrics.pad_y + (metrics.preedit_row - metrics.logo_side) / 2.0;
+  return {metrics.pad_x, top, metrics.pad_x + metrics.logo_side,
+          top + metrics.logo_side};
+}
+// Where the preedit starts in the preedit row, in card coordinates: after the brand mark and its gap.
+inline double candidate_preedit_left(const CandidateCardMetrics &metrics) {
+  return metrics.pad_x + metrics.logo_side + metrics.logo_gap;
+}
 // Which arrow of a drawn pager a card point falls on: true for the previous page, false for the next. The previous arrow is inert on the first page. The next one is always live, because the Engine hands candidates over lazily and the page count grows as the user pages.
 inline std::optional<bool>
 candidate_pager_hit(double x, double y,
@@ -186,15 +205,16 @@ candidate_item_layout(const CandidateItemWidths &item, double content_width,
   content_width = (std::max)(content_width, 1.0);
   CandidateItemLayout layout;
   layout.text_width = (std::min)(item.text, content_width);
-  // Height of a run of `natural` single-line width once it sits in `width`: one `line` unless it has to wrap.
+  // Height of a run of `natural` width and `lines` lines once it sits in `width`: one `line` each unless it has to wrap. A run of several lines is always measured, because its height is more than one line even when none of them wraps.
   auto run_height = [&](CandidateRun run, double natural, double width,
-                        double line) {
-    double height = line;
-    if (natural > width)
+                        double line, size_t lines = 1) {
+    const double unwrapped = line * static_cast<double>((std::max)(lines, size_t{1}));
+    double height = unwrapped;
+    if (natural > width || lines > 1)
       height = wrapped ? wrapped(run, width)
-                       : std::ceil(natural / width) * line;
-    // A failed or nonsense measurement still reserves the single line.
-    return std::isfinite(height) ? (std::max)(height, line) : line;
+                       : std::ceil(natural / width) * unwrapped;
+    // A failed or nonsense measurement still reserves the lines.
+    return std::isfinite(height) ? (std::max)(height, unwrapped) : unwrapped;
   };
   // Without a measure a wrapped text line is estimated at the candidate size's line height, like an annotation line.
   layout.text_wrapped = item.text > content_width;
@@ -206,8 +226,9 @@ candidate_item_layout(const CandidateItemWidths &item, double content_width,
           : metrics.candidate_row;
   layout.height = layout.text_height;
   double line_end = layout.text_width;
-  auto below = [&](CandidateRun run, double natural, double width, double line) {
-    const double height = run_height(run, natural, width, line);
+  auto below = [&](CandidateRun run, double natural, double width, double line,
+                   size_t lines = 1) {
+    const double height = run_height(run, natural, width, line, lines);
     CandidateRunBox box{0.0, layout.height, width, height, true};
     layout.height += height;
     return box;
@@ -225,17 +246,18 @@ candidate_item_layout(const CandidateItemWidths &item, double content_width,
   }
   if (item.translation > 0.0) {
     const double width = (std::min)(item.translation, content_width);
-    if (!horizontal && !layout.annotation.below &&
+    if (!horizontal && !layout.annotation.below && item.translation_lines <= 1 &&
         line_end + metrics.translation_gap + width <= content_width)
       layout.translation = {line_end + metrics.translation_gap, 0.0, width,
                             metrics.candidate_row, false};
     else
       layout.translation = below(CandidateRun::translation, item.translation,
-                                 width, metrics.translation_line);
+                                 width, metrics.translation_line,
+                                 item.translation_lines);
   }
   return layout;
 }
-// Width a candidate's row asks for with nothing wrapped: its selection number and bar plus the content. A vertical row keeps the translation on the text's line; a horizontal one stacks it under the text, so the wider of the two lines decides. Zero for a hidden candidate, whose three runs all measured zero.
+// Width a candidate's row asks for with nothing wrapped: its selection number and bar plus the content. A vertical row keeps a one-line translation on the text's line; a horizontal one, and a translation of several lines, stack it under the text, so the wider of the two lines decides. Zero for a hidden candidate, whose three runs all measured zero.
 inline double candidate_item_natural_width(const CandidateItemWidths &item,
                                            const CandidateCardMetrics &metrics,
                                            bool horizontal) {
@@ -245,18 +267,71 @@ inline double candidate_item_natural_width(const CandidateItemWidths &item,
       item.text +
       (item.annotation > 0.0 ? metrics.annotation_gap + item.annotation : 0.0);
   const double content =
-      horizontal ? (std::max)(line, item.translation)
-                 : line + (item.translation > 0.0
-                               ? metrics.translation_gap + item.translation
-                               : 0.0);
+      horizontal || item.translation_lines > 1
+          ? (std::max)(line, item.translation)
+          : line + (item.translation > 0.0
+                        ? metrics.translation_gap + item.translation
+                        : 0.0);
   return content + metrics.number_and_bar;
+}
+// The narrowest a horizontal page's columns can be on one line, column gaps included: each candidate's line (text and annotation) with its number and bar, the translations left to wrap under them. The macOS port is SingleLineMinimumWidth.
+inline double
+candidate_single_line_minimum_width(const std::vector<CandidateItemWidths> &items,
+                                    const CandidateCardMetrics &metrics) {
+  double total = 0.0;
+  for (const auto &item : items) {
+    auto line = item;
+    line.translation = 0.0;
+    const double wide = candidate_item_natural_width(item, metrics, true);
+    if (wide > 0.0)
+      total += (std::min)((std::max)(candidate_item_natural_width(
+                                         line, metrics, true),
+                                     metrics.number_and_bar),
+                          wide) +
+               metrics.column_gap;
+  }
+  return total;
+}
+// The columns of a horizontal page on a single line `line_width` wide, each including the column gap. Columns that fit keep their natural widths. Otherwise each column whose translation is wider than its candidate line gives up room, never below that line and in proportion to how much it could give, so the translations wrap under their text instead of the page starting a second line. None when the candidate lines alone do not fit. The macOS port is SingleLineColumns in platforms/macos/src/candidate/CandidateItemLayout.h.
+inline std::optional<std::vector<double>>
+candidate_single_line_columns(const std::vector<CandidateItemWidths> &items,
+                              double line_width,
+                              const CandidateCardMetrics &metrics) {
+  std::vector<double> natural, firm;
+  natural.reserve(items.size());
+  firm.reserve(items.size());
+  double natural_total = 0.0, firm_total = 0.0;
+  for (const auto &item : items) {
+    auto line = item;
+    line.translation = 0.0;
+    const double wide = candidate_item_natural_width(item, metrics, true);
+    // A translation-only candidate still needs a column; its line is the number and bar.
+    const double narrow =
+        wide > 0.0
+            ? (std::max)(candidate_item_natural_width(line, metrics, true),
+                         metrics.number_and_bar)
+            : 0.0;
+    natural.push_back(wide > 0.0 ? wide + metrics.column_gap : 0.0);
+    firm.push_back(wide > 0.0 ? (std::min)(narrow, wide) + metrics.column_gap
+                              : 0.0);
+    natural_total += natural.back();
+    firm_total += firm.back();
+  }
+  if (natural_total <= line_width)
+    return natural;
+  if (firm_total > line_width || !(natural_total > firm_total))
+    return std::nullopt;
+  const double keep = (line_width - firm_total) / (natural_total - firm_total);
+  for (size_t index = 0; index < natural.size(); ++index)
+    natural[index] = firm[index] + (natural[index] - firm[index]) * keep;
+  return natural;
 }
 // One laid out row: its rectangle in card coordinates and the runs inside it.
 struct CandidateRowLayout {
   CandidateRowBounds bounds;
   CandidateItemLayout item;
 };
-// Rows for a whole page at the card width actually drawn. A vertical list stacks rows of their own heights. A horizontal list is the shipped presenter's CandidateList::Measure: each column is its candidate's natural width, columns run left to right, and one that would pass the card's inner edge starts a new line; only a candidate wider than a whole line is narrowed to it, and its text and runs wrap inside that. Every column on a line takes the line's tallest height, so the selection fills evenly. Sizing, painting and hit testing all read this one result.
+// Rows for a whole page at the card width actually drawn. A vertical list stacks rows of their own heights. A horizontal list keeps every candidate on one line: candidate_single_line_columns narrows the translations to fit, and only when the candidate lines themselves do not fit does it fall back to the shipped presenter's CandidateList::Measure, where each column is its candidate's natural width and one that would pass the card's inner edge starts a new line (a candidate wider than a whole line is narrowed to it, and its text and runs wrap inside that). Every column on a line takes the line's tallest height, so the selection fills evenly. Sizing, painting and hit testing all read this one result.
 inline std::vector<CandidateRowLayout>
 candidate_page_layout(const std::vector<CandidateItemWidths> &items,
                       double width, const CandidateCardMetrics &metrics,
@@ -270,6 +345,9 @@ candidate_page_layout(const std::vector<CandidateItemWidths> &items,
   const double line_width = (std::max)(width - metrics.pad_x, 1.0);
   double x = 0.0;
   size_t line_start = 0;
+  const auto single_line =
+      horizontal ? candidate_single_line_columns(items, line_width, metrics)
+                 : std::nullopt;
   auto close_line = [&](size_t end) {
     for (size_t index = line_start; index < end; ++index)
       rows[index].bounds.bottom = rows[index].bounds.top + tallest;
@@ -282,9 +360,11 @@ candidate_page_layout(const std::vector<CandidateItemWidths> &items,
       const double natural =
           candidate_item_natural_width(items[index], metrics, true);
       const double column =
-          natural > 0.0 ? (std::min)(natural + metrics.column_gap, line_width)
-                        : 0.0;
-      if (x > 0.0 && x + column > line_width) {
+          single_line ? (*single_line)[index]
+          : natural > 0.0
+              ? (std::min)(natural + metrics.column_gap, line_width)
+              : 0.0;
+      if (!single_line && x > 0.0 && x + column > line_width) {
         close_line(index);
         top += tallest + metrics.item_gap;
         tallest = 0.0;
@@ -359,9 +439,13 @@ inline CandidateCardSize candidate_card_size(const CandidateCardInput &input) {
 
   double width = 0.0;
   double height = pad_y + slack_y;
-  if (input.preedit_visible) {
+  // The preedit row is always drawn: the brand mark, the preedit when it is shown, and the pager.
+  {
     const double pager = candidate_pager_width(input.page_width, shape);
-    width = (std::max)(width, input.preedit_width + 6.0 +
+    width = (std::max)(width, shape.logo_side + shape.logo_gap +
+                                  (input.preedit_visible
+                                       ? input.preedit_width + 6.0
+                                       : 0.0) +
                                   (pager > 0.0 ? shape.pager_gap + pager : 0.0));
     height += preedit_row;
   }
@@ -384,7 +468,16 @@ inline CandidateCardSize candidate_card_size(const CandidateCardInput &input) {
     value = (std::max)(value, 1.0);
     return cap > 1.0 ? (std::min)(value, cap) : value;
   };
-  width = clamp(width, input.max_width);
+  // Half the work area caps the card, except that a horizontal page grows past it as far as its candidates' own lines need so the page stays on one line.
+  double width_cap = input.max_width;
+  if (input.horizontal && input.max_width > 1.0 &&
+      input.max_single_line_width > 1.0)
+    width_cap = (std::max)(
+        width_cap,
+        (std::min)(input.max_single_line_width,
+                   candidate_single_line_minimum_width(input.items, shape) +
+                       pad_x + slack_x));
+  width = clamp(width, width_cap);
   // Heights come from the width the card will actually get: a capped card wraps the runs that no longer fit, and grows by exactly what the painter will draw.
   const auto rows = candidate_page_layout(input.items, width, shape,
                                           input.horizontal, input.wrapped);

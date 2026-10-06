@@ -6,6 +6,7 @@ use rusqlite::Connection;
 
 use super::glosses::{candidate_gloss_display, candidate_gloss_key};
 use super::*;
+use crate::types::SchemeType;
 
 fn options(root: &Path) -> EngineOptions {
     let path = |name| {
@@ -19,6 +20,7 @@ fn options(root: &Path) -> EngineOptions {
         cache: path("cache"),
         dictionaries: path("dictionaries"),
         scheme: 0,
+        enabled_schemes: crate::types::SchemeSet::ALL,
         shuangpin_profile: 0,
         shuangpin_preedit_uses_raw: true,
         learning: false,
@@ -26,6 +28,7 @@ fn options(root: &Path) -> EngineOptions {
         autocorrect_neighbor: true,
         fuzzy_pinyin_rules: 0,
         wubi_mixed_pinyin: false,
+        wubi_profile: 0,
         helpcode: false,
         show_helpcode: true,
         helpcode_schema: "ziranma".into(),
@@ -47,6 +50,13 @@ fn options(root: &Path) -> EngineOptions {
         local_super_jianpin: true,
         local_temporary_english: true,
         local_temporary_japanese: true,
+        local_expression: false,
+        local_command: false,
+        local_mention: false,
+        command_table: Vec::new(),
+        mention_entries: Vec::new(),
+        quick_phrase_table: Vec::new(),
+        helpcode_table: None,
         sentence_association: SentenceAssociationOptions {
             word_lattice: true,
             neural_keyboard: false,
@@ -54,6 +64,12 @@ fn options(root: &Path) -> EngineOptions {
         },
         rescoring_context: String::new(),
         sentence_alternatives: true,
+        vietnamese_input_method: 0,
+        vietnamese_tone_style: 0,
+        cantonese_dictionary: String::new(),
+        zhuyin_dictionary: String::new(),
+        stroke_dictionary: String::new(),
+        japanese_dictionary: String::new(),
     }
 }
 
@@ -141,7 +157,7 @@ fn learned_glosses_survive_unavailable_packaged_dictionary() {
         candidate_glosses_with_user(resources_path, user_path, &candidates).unwrap(),
         expected
     );
-    let packaged = resources.path().join("english.db");
+    let packaged = resources.path().join("msime-english.db");
     std::fs::write(&packaged, "synthetic damaged database").unwrap();
     assert_eq!(
         candidate_glosses_with_user(resources_path, user_path, &candidates).unwrap(),
@@ -177,7 +193,7 @@ fn learned_glosses_survive_unavailable_packaged_dictionary() {
 fn hand_written_glosses_outrank_learned_and_packaged_ones() {
     let resources = tempfile::tempdir().unwrap();
     let user = tempfile::tempdir().unwrap();
-    Connection::open(resources.path().join("english.db"))
+    Connection::open(resources.path().join("msime-english.db"))
         .unwrap()
         .execute_batch(&format!(
             "{ENGLISH_SCHEMA} INSERT INTO zh_en_glosses VALUES('测试','packaged gloss');"
@@ -212,11 +228,108 @@ fn hand_written_glosses_outrank_learned_and_packaged_ones() {
     );
 }
 
+/// The user's own `custom_translations.txt` outranks every automatic gloss even before any online gloss was saved, which is when `translation-glosses.db` first appears; the file Settings writes must not wait for that store.
+#[test]
+fn hand_written_glosses_apply_without_a_learned_store() {
+    let resources = tempfile::tempdir().unwrap();
+    let user = tempfile::tempdir().unwrap();
+    Connection::open(resources.path().join("msime-english.db"))
+        .unwrap()
+        .execute_batch(&format!(
+            "{ENGLISH_SCHEMA} INSERT INTO zh_en_glosses VALUES('测试','packaged gloss');
+             INSERT INTO en_zh_glosses VALUES('hello','打招呼');"
+        ))
+        .unwrap();
+    std::fs::write(
+        user.path().join("custom_translations.txt"),
+        "测试\thand written gloss\nhello\t你好\n",
+    )
+    .unwrap();
+    let resources_path = resources.path().to_str().unwrap();
+    let user_path = user.path().to_str().unwrap();
+    let candidates = vec![("测试".into(), 0), ("hello".into(), 4)];
+    assert!(!user.path().join("translation-glosses.db").exists());
+    assert_eq!(
+        candidate_glosses_with_user(resources_path, user_path, &candidates).unwrap(),
+        vec!["hand written gloss", "你好"]
+    );
+    // The macOS learned-gloss path asks for the user overlay alone.
+    assert_eq!(
+        candidate_glosses_with_user("", user_path, &candidates).unwrap(),
+        vec!["hand written gloss", "你好"]
+    );
+    assert!(!user.path().join("translation-glosses.db").exists());
+    let empty = tempfile::tempdir().unwrap();
+    assert_eq!(
+        candidate_glosses_with_user("", empty.path().to_str().unwrap(), &candidates)
+            .unwrap_err()
+            .to_string(),
+        crate::diagnostics::CANDIDATE_GLOSS_UNAVAILABLE
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn learned_glosses_reject_a_symlinked_database() {
+    use std::os::unix::fs::symlink;
+
+    let resources = tempfile::tempdir().unwrap();
+    let user = tempfile::tempdir().unwrap();
+    let external = tempfile::tempdir().unwrap();
+    Connection::open(resources.path().join("msime-english.db"))
+        .unwrap()
+        .execute_batch(&format!(
+            "{ENGLISH_SCHEMA} INSERT INTO zh_en_glosses VALUES('测试','packaged gloss');"
+        ))
+        .unwrap();
+    assert!(save_candidate_gloss(
+        external.path().to_str().unwrap(),
+        true,
+        "测试",
+        "external gloss",
+    ));
+    symlink(
+        external.path().join("translation-glosses.db"),
+        user.path().join("translation-glosses.db"),
+    )
+    .unwrap();
+
+    let candidates = vec![("测试".into(), 0)];
+    assert_eq!(
+        candidate_glosses_with_user(
+            resources.path().to_str().unwrap(),
+            user.path().to_str().unwrap(),
+            &candidates,
+        )
+        .unwrap(),
+        vec!["packaged gloss"]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn saving_learned_glosses_rejects_a_symlinked_database() {
+    use std::os::unix::fs::symlink;
+
+    let user = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let external = outside.path().join("external.db");
+    symlink(&external, user.path().join("translation-glosses.db")).unwrap();
+
+    assert!(!save_candidate_gloss(
+        user.path().to_str().unwrap(),
+        true,
+        "测试",
+        "external gloss",
+    ));
+    assert!(!external.exists());
+}
+
 #[test]
 fn unsafe_learned_glosses_fall_back_to_packaged_values() {
     let resources = tempfile::tempdir().unwrap();
     let user = tempfile::tempdir().unwrap();
-    Connection::open(resources.path().join("english.db"))
+    Connection::open(resources.path().join("msime-english.db"))
         .unwrap()
         .execute_batch(&format!(
             "{ENGLISH_SCHEMA} INSERT INTO zh_en_glosses VALUES('测试','packaged gloss');"
@@ -340,7 +453,7 @@ fn reset_learned_data_under_root(component: &str) {
     let value = options(&root);
     let resources = Path::new(&value.resources);
     let dictionaries = Path::new(&value.dictionaries);
-    Connection::open(resources.join("msime.db"))
+    Connection::open(resources.join("msime-pinyin.db"))
         .unwrap()
         .execute_batch(
             "CREATE TABLE tbl_2_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);
@@ -349,7 +462,7 @@ fn reset_learned_data_under_root(component: &str) {
              CREATE TABLE quick_parases(key TEXT,value TEXT,weight INTEGER);",
         )
         .unwrap();
-    Connection::open(resources.join("english.db"))
+    Connection::open(resources.join("msime-english.db"))
         .unwrap()
         .execute_batch(
             "CREATE TABLE english_words(word TEXT,display TEXT,weight INTEGER);
@@ -358,10 +471,14 @@ fn reset_learned_data_under_root(component: &str) {
              INSERT INTO english_words VALUES('word','word',100);",
         )
         .unwrap();
-    std::fs::copy(resources.join("msime.db"), dictionaries.join("msime.db")).unwrap();
     std::fs::copy(
-        resources.join("english.db"),
-        dictionaries.join("english.db"),
+        resources.join("msime-pinyin.db"),
+        dictionaries.join("msime-pinyin.db"),
+    )
+    .unwrap();
+    std::fs::copy(
+        resources.join("msime-english.db"),
+        dictionaries.join("msime-english.db"),
     )
     .unwrap();
     let journal = Path::new(&value.user_data).join("msime_user.db");
@@ -376,14 +493,14 @@ fn reset_learned_data_under_root(component: &str) {
              INSERT INTO candidate_selection_state VALUES('ni''hao','ni''hao','你好',7);",
         )
         .unwrap();
-    Connection::open(dictionaries.join("msime.db"))
+    Connection::open(dictionaries.join("msime-pinyin.db"))
         .unwrap()
         .execute("UPDATE tbl_2_n SET weight=1", [])
         .unwrap();
 
     reset_learned_data(&value).unwrap();
 
-    let weight: i64 = Connection::open(dictionaries.join("msime.db"))
+    let weight: i64 = Connection::open(dictionaries.join("msime-pinyin.db"))
         .unwrap()
         .query_row(
             "SELECT weight FROM tbl_2_n WHERE key='ni''hao'",
@@ -425,7 +542,7 @@ fn prepared_options_disable_quanpin_autocorrect_by_default() {
     let root = tempfile::tempdir().unwrap();
     let resources = root.path().join("resources");
     std::fs::create_dir_all(&resources).unwrap();
-    for name in ["msime.db", "english.db"] {
+    for name in ["msime-pinyin.db", "msime-english.db"] {
         Connection::open(resources.join(name)).unwrap();
     }
     let prepared = prepare_options(
@@ -530,6 +647,36 @@ fn custom_helpcode_table_is_loaded_by_the_engine_session() {
     assert!(session.character(b'A', true).unwrap().handled);
 }
 
+/// 辅助码表插件坏掉后宿主用 `None` 退回方案原来的表；那张表是已被删掉的 `custom/<stem>` 时装上空表，不让宿主的每次聚焦都失败。
+#[test]
+fn a_missing_fallback_schema_gives_an_empty_helpcode_table() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    let custom = Path::new(&value.resources).join("helpcodes").join("custom");
+    std::fs::create_dir_all(&custom).unwrap();
+    std::fs::write(custom.join("synthetic.txt"), "你=ab\n").unwrap();
+    value.helpcode = true;
+    value.helpcode_schema = "custom/synthetic".into();
+    value.helpcode_table = Some(std::sync::Arc::new(HelpcodeKeymap::from_codes(
+        [("你".to_owned(), "cd".to_owned())].into_iter().collect(),
+    )));
+    let mut session = Session::new(&value).unwrap();
+    std::fs::remove_file(custom.join("synthetic.txt")).unwrap();
+
+    session
+        .set_helpcode_table(None)
+        .expect("a missing fallback schema failed the replacement");
+    type_text(&mut session, b"ni");
+    let view = session.snapshot().unwrap();
+    assert!(
+        view.candidate_annotations.iter().all(String::is_empty),
+        "{:?}",
+        view.candidate_annotations
+    );
+    // 回退仍然缺失时再换一次也一样。
+    session.set_helpcode_table(None).unwrap();
+}
+
 /// The jiajia table this repository carries is injected rather than shipped inside a locked archive, so it is the one that can go missing, be truncated by a bad merge or be saved in an encoding the engine reads as nothing. An entry the parser rejects is silently absent at runtime, which is why this loads it through the engine's own loader and counts.
 #[test]
 fn the_carried_jiajia_table_parses_the_way_the_engine_reads_it() {
@@ -556,9 +703,19 @@ fn invalid_options_return_errors_instead_of_unwinding_into_rust() {
     value.shuangpin_profile = 255;
     assert_eq!(message(&value), "Unsupported shuangpin profile");
     value.shuangpin_profile = 0;
+    value.wubi_profile = 2;
+    assert_eq!(message(&value), "Unsupported wubi profile");
+    value.wubi_profile = 1;
     value.frequency_mode = "sometimes".into();
     assert_eq!(message(&value), "Unsupported frequency mode");
     value.frequency_mode = "promote".into();
+    value.vietnamese_input_method = 2;
+    assert_eq!(message(&value), "Unsupported Vietnamese input method");
+    value.vietnamese_input_method = 1;
+    value.vietnamese_tone_style = 2;
+    assert_eq!(message(&value), "Unsupported Vietnamese tone style");
+    value.vietnamese_tone_style = 1;
+    assert!(Session::new(&value).is_ok());
     value.resources = "relative".into();
     assert_eq!(message(&value), "Runtime directories must be absolute");
 }
@@ -765,6 +922,330 @@ fn real_engine_cycles_the_last_japanese_kana_variant() {
     assert_eq!(session.snapshot().unwrap().reading, "か");
 }
 
+/// 录制器的单词条日文模型（读音 かな，词 甲），与 golden 场景 `ri_japanese_model_a` 同一份字节。
+const JAPANESE_MODEL_KANA: &str = "MSJPDT1\u{0}\u{1}\u{0}\u{0}\u{0}\u{1}\u{0}\u{0}\u{0}\u{1}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}8\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}L\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}N\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\t\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{0}\u{6}\u{0}\u{6}\u{0}\u{0}\u{0}\u{3}\u{0}\u{0}\u{0}\u{0}\u{0}\u{1}\u{0}\u{0}\u{0}\u{0}\u{0}かな甲";
+
+fn japanese_candidates(value: &EngineOptions) -> Vec<String> {
+    let mut session = Session::new(value).unwrap();
+    type_text(&mut session, b"kana");
+    session.snapshot().unwrap().candidates
+}
+
+/// `japanese_dictionary` 指向资源目录之外的模型时读那一份；为空时仍读资源目录里的 `msime-japanese.dat`，两处都没有就只给假名行。
+#[test]
+fn the_japanese_model_path_overrides_the_resource_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.scheme = 3;
+
+    let empty = japanese_candidates(&value);
+    assert!(empty.iter().any(|word| word == "かな"));
+    assert!(!empty.iter().any(|word| word == "甲"));
+
+    let downloaded = dir.path().join("packs").join(crate::assets::JAPANESE_MODEL);
+    std::fs::create_dir_all(downloaded.parent().unwrap()).unwrap();
+    std::fs::write(&downloaded, JAPANESE_MODEL_KANA).unwrap();
+    value.japanese_dictionary = downloaded.to_str().unwrap().to_owned();
+    assert!(japanese_candidates(&value).iter().any(|word| word == "甲"));
+
+    let other = tempfile::tempdir().unwrap();
+    let mut value = options(other.path());
+    value.scheme = 3;
+    std::fs::write(
+        Path::new(&value.resources).join(crate::assets::JAPANESE_MODEL),
+        JAPANESE_MODEL_KANA,
+    )
+    .unwrap();
+    assert!(japanese_candidates(&value).iter().any(|word| word == "甲"));
+}
+
+#[test]
+fn real_engine_composes_korean_with_the_hangul_as_its_reading() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.scheme = 4;
+    let mut session = Session::new(&value).unwrap();
+    let mut committed = String::new();
+    for character in b"gksrmf" {
+        let result = session.character(*character, false).unwrap();
+        assert!(result.handled);
+        committed.push_str(&result.commit);
+    }
+    assert_eq!(committed, "한");
+    let snapshot = session.snapshot().unwrap();
+    assert_eq!(snapshot.scheme, 4);
+    assert_eq!(snapshot.preedit, "글");
+    assert_eq!(snapshot.reading, "글");
+    assert_eq!(snapshot.editing_text, "rmf");
+    assert_eq!(snapshot.caret_position, 3);
+    assert!(snapshot.candidates.is_empty() && snapshot.candidate_sources.is_empty());
+    assert!(snapshot.segment_raw_boundaries.is_empty());
+    assert!(!session.online_query().unwrap().available);
+
+    // Enter commits the syllable and leaves the key to the host; nothing is learned as an English word.
+    let result = session.command(Command::CommitRaw).unwrap();
+    assert!(!result.handled);
+    assert!(result.has_commit);
+    assert_eq!(result.commit, "글");
+    assert_eq!(result.diagnostic, "");
+    assert!(!Path::new(&value.dictionaries)
+        .join("msime-english.db")
+        .exists());
+
+    // The raw commit without learning behaves the same, and punctuation stays ASCII.
+    session.character(b'r', false).unwrap();
+    let result = session.command(Command::CommitRawWithoutLearning).unwrap();
+    assert_eq!((result.handled, result.commit.as_str()), (false, "ㄱ"));
+    session.character(b'r', false).unwrap();
+    session.character(b'k', false).unwrap();
+    let result = session.punctuation(b',').unwrap();
+    assert_eq!((result.handled, result.commit.as_str()), (true, "가,"));
+}
+
+#[test]
+fn the_korean_hanja_list_reports_itself_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.scheme = 4;
+    let mut session = Session::new(&value).unwrap();
+    type_text(&mut session, b"gks");
+    let snapshot = session.snapshot().unwrap();
+    assert!(!snapshot.candidate_list_open);
+    assert!(snapshot.candidates.is_empty());
+
+    assert!(session.command(Command::ConvertHanja).unwrap().handled);
+    let snapshot = session.snapshot().unwrap();
+    assert!(snapshot.candidate_list_open);
+    assert!(snapshot
+        .candidates
+        .iter()
+        .any(|candidate| candidate == "韓"));
+
+    // The same command closes it again.
+    assert!(session.command(Command::ConvertHanja).unwrap().handled);
+    let snapshot = session.snapshot().unwrap();
+    assert!(!snapshot.candidate_list_open);
+    assert!(snapshot.candidates.is_empty());
+}
+
+#[test]
+fn schemes_without_an_openable_list_never_report_one_open() {
+    let dir = tempfile::tempdir().unwrap();
+    for scheme in 0..4 {
+        let mut value = options(dir.path());
+        value.scheme = scheme;
+        let mut session = Session::new(&value).unwrap();
+        type_text(&mut session, b"ka");
+        assert!(!session.command(Command::ConvertHanja).unwrap().handled);
+        assert!(!session.snapshot().unwrap().candidate_list_open);
+    }
+}
+
+#[test]
+fn cantonese_is_unavailable_without_its_dictionary() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.scheme = 5;
+    let error = Session::new(&value).err().expect("no msime-cantonese.db");
+    assert_eq!(
+        error.to_string(),
+        crate::diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE
+    );
+    value.cantonese_dictionary = dir.path().join("missing.db").to_str().unwrap().to_owned();
+    let error = Session::new(&value)
+        .err()
+        .expect("missing msime-cantonese.db");
+    assert_eq!(
+        error.to_string(),
+        crate::diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE
+    );
+    assert!(!dir.path().join("missing.db").exists());
+}
+
+#[test]
+fn scheme_eight_is_tibetan_and_needs_no_dictionary() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.scheme = 8;
+    let mut session = Session::new(&value).unwrap();
+    type_text(&mut session, b"bod");
+    let snapshot = session.snapshot().unwrap();
+    assert_eq!(snapshot.preedit, "བོད");
+    assert_eq!(snapshot.scheme, 8);
+    let space = session.command(Command::CommitCandidate).unwrap();
+    assert!(space.handled);
+    assert_eq!(space.commit, "བོད་");
+    value.scheme = 10;
+    let error = Session::new(&value).err().expect("scheme ten");
+    assert_eq!(
+        error.to_string(),
+        crate::diagnostics::UNSUPPORTED_INPUT_SCHEME
+    );
+}
+
+#[test]
+fn zhuyin_is_unavailable_without_its_dictionary() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.scheme = 6;
+    let error = Session::new(&value).err().expect("no msime-zhuyin.db");
+    assert_eq!(
+        error.to_string(),
+        crate::diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE
+    );
+    value.zhuyin_dictionary = dir.path().join("missing.db").to_str().unwrap().to_owned();
+    let error = Session::new(&value).err().expect("missing msime-zhuyin.db");
+    assert_eq!(
+        error.to_string(),
+        crate::diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE
+    );
+    assert!(!dir.path().join("missing.db").exists());
+}
+
+#[test]
+fn stroke_is_unavailable_without_its_dictionary() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.scheme = 9;
+    let error = Session::new(&value).err().expect("no msime-stroke.db");
+    assert_eq!(
+        error.to_string(),
+        crate::diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE
+    );
+    value.stroke_dictionary = dir.path().join("missing.db").to_str().unwrap().to_owned();
+    let error = Session::new(&value).err().expect("missing msime-stroke.db");
+    assert_eq!(
+        error.to_string(),
+        crate::diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE
+    );
+    assert!(!dir.path().join("missing.db").exists());
+}
+
+// 笔画的快照：`preedit` 与 `reading` 是笔画字形，`editing_text` 与光标是键入的 ASCII 字母；Enter 上屏字母串，两条 CommitRaw 都不学习。
+#[test]
+fn stroke_snapshot_draws_glyphs_and_edits_letters() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("msime-stroke.db");
+    crate::stroke::fixture::build(&path);
+    let mut value = options(dir.path());
+    value.scheme = 9;
+    value.stroke_dictionary = path.to_str().unwrap().to_owned();
+    let mut session = Session::new(&value).unwrap();
+    type_text(&mut session, b"hsx");
+    let snapshot = session.snapshot().unwrap();
+    assert_eq!(snapshot.scheme, 9);
+    assert_eq!(snapshot.preedit, "一丨＊");
+    assert_eq!(snapshot.reading, "一丨＊");
+    assert_eq!(snapshot.editing_text, "hsx");
+    assert_eq!(snapshot.caret_position, 3);
+    assert!(snapshot.segment_raw_boundaries.is_empty());
+    assert!(!snapshot.candidate_list_open);
+    assert_eq!(snapshot.candidates, ["土"]);
+    assert_eq!(snapshot.candidate_codes, ["hsx"]);
+
+    let result = session.command(Command::CommitRaw).unwrap();
+    assert_eq!((result.handled, result.commit.as_str()), (true, "hsx"));
+    type_text(&mut session, b"pn");
+    let result = session.command(Command::CommitRawWithoutLearning).unwrap();
+    assert_eq!((result.handled, result.commit.as_str()), (true, "pn"));
+    assert!(session.snapshot().unwrap().reading.is_empty());
+}
+
+#[test]
+fn zhuyin_command_sixteen_opens_a_list_whose_selection_commits_nothing() {
+    use crate::language_dictionary::{FORMAT_VERSION, METADATA_FORMAT_VERSION, SCHEMA};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("msime-zhuyin.db");
+    let connection = Connection::open(&path).unwrap();
+    connection.execute_batch(SCHEMA).unwrap();
+    connection
+        .execute(
+            "INSERT INTO metadata VALUES (?1, ?2)",
+            (METADATA_FORMAT_VERSION, FORMAT_VERSION.to_string()),
+        )
+        .unwrap();
+    connection
+        .execute_batch(
+            "INSERT INTO syllables VALUES ('ㄋㄧˇ');\
+             INSERT INTO entries VALUES ('ㄋㄧˇ','你',1000),('ㄋㄧˇ','妳',300);",
+        )
+        .unwrap();
+    drop(connection);
+    let mut value = options(dir.path());
+    value.scheme = 6;
+    value.zhuyin_dictionary = path.to_str().unwrap().to_owned();
+    let mut session = Session::new(&value).unwrap();
+    type_text(&mut session, b"su3");
+    let snapshot = session.snapshot().unwrap();
+    assert_eq!(snapshot.preedit, "你");
+    assert_eq!(snapshot.reading, "你");
+    assert_eq!(snapshot.editing_text, "su3");
+    assert!(!snapshot.candidate_list_open);
+
+    assert!(session.command(Command::ConvertHanja).unwrap().handled);
+    let snapshot = session.snapshot().unwrap();
+    assert!(snapshot.candidate_list_open);
+    assert_eq!(snapshot.candidates, ["你", "妳"]);
+
+    let result = session.select(1).unwrap();
+    assert!(result.handled);
+    assert!(!result.has_commit);
+    let snapshot = session.snapshot().unwrap();
+    assert!(!snapshot.candidate_list_open);
+    assert_eq!(snapshot.preedit, "妳");
+
+    let result = session.command(Command::CommitRaw).unwrap();
+    assert_eq!((result.handled, result.commit.as_str()), (true, "妳"));
+}
+
+// 注音九键经宿主接口开启：数字拼音节，`nine_key_spellings` 给出候选读音，越界下标 unhandled，合法下标钉读音。
+#[test]
+fn zhuyin_nine_key_exposes_reading_choices() {
+    use crate::language_dictionary::{FORMAT_VERSION, METADATA_FORMAT_VERSION, SCHEMA};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("msime-zhuyin.db");
+    let connection = Connection::open(&path).unwrap();
+    connection.execute_batch(SCHEMA).unwrap();
+    connection
+        .execute(
+            "INSERT INTO metadata VALUES (?1, ?2)",
+            (METADATA_FORMAT_VERSION, FORMAT_VERSION.to_string()),
+        )
+        .unwrap();
+    connection
+        .execute_batch(
+            "INSERT INTO syllables VALUES ('ㄋㄧˇ'),('ㄌㄧˇ');\
+             INSERT INTO entries VALUES ('ㄋㄧˇ','你',1000),('ㄌㄧˇ','李',1200);",
+        )
+        .unwrap();
+    drop(connection);
+    let mut value = options(dir.path());
+    value.scheme = 6;
+    value.zhuyin_dictionary = path.to_str().unwrap().to_owned();
+    let mut session = Session::new(&value).unwrap();
+    session.set_nine_key_enabled(true).unwrap();
+    assert!(session.snapshot().unwrap().nine_key);
+    type_text(&mut session, b"28c");
+    let snapshot = session.snapshot().unwrap();
+    assert_eq!(snapshot.reading, "李");
+    assert_eq!(snapshot.editing_text, "28c");
+    assert_eq!(snapshot.nine_key_spellings, ["ㄌㄧˇ", "ㄋㄧˇ"]);
+    assert!(
+        !session
+            .choose_nine_key_spelling(snapshot.nine_key_spellings.len())
+            .unwrap()
+            .handled
+    );
+    assert!(session.choose_nine_key_spelling(1).unwrap().handled);
+    let snapshot = session.snapshot().unwrap();
+    assert_eq!(snapshot.reading, "你");
+    assert!(snapshot.nine_key_spellings.is_empty());
+    let result = session.command(Command::CommitRaw).unwrap();
+    assert_eq!((result.handled, result.commit.as_str()), (true, "你"));
+    session.set_nine_key_enabled(false).unwrap();
+    assert!(!session.snapshot().unwrap().nine_key);
+}
+
 #[test]
 fn commit_raw_applies_windows_english_learning_policy() {
     let dir = tempfile::tempdir().unwrap();
@@ -777,7 +1258,7 @@ fn commit_raw_applies_windows_english_learning_policy() {
     let result = session.command(Command::CommitRaw).unwrap();
     assert_eq!(result.commit, "hello");
     assert_eq!(result.diagnostic, "");
-    let learned: String = Connection::open(Path::new(&value.dictionaries).join("english.db"))
+    let learned: String = Connection::open(Path::new(&value.dictionaries).join("msime-english.db"))
         .unwrap()
         .query_row(
             "SELECT display FROM english_words WHERE word='hello'",
@@ -788,7 +1269,7 @@ fn commit_raw_applies_windows_english_learning_policy() {
     assert_eq!(learned, "hello");
 }
 
-// The shipped english.db weighs its words by Google unigram counts while the pinyin tables use their own scale, so an English weight says nothing about a Chinese one. Mixed input therefore never seats an English word ahead of the leading Chinese candidate: not on its shipped weight, not after it is committed, not after it is pinned. Pinning only reorders it among the English words.
+// The shipped msime-english.db weighs its words by Google unigram counts while the pinyin tables use their own scale, so an English weight says nothing about a Chinese one. Mixed input therefore never seats an English word ahead of the leading Chinese candidate: not on its shipped weight, not after it is committed, not after it is pinned. Pinning only reorders it among the English words.
 #[test]
 fn mixed_english_never_takes_the_first_seat_from_chinese() {
     const ENGLISH: u8 = 4;
@@ -798,7 +1279,7 @@ fn mixed_english_never_takes_the_first_seat_from_chinese() {
     value.english_minimum_prefix = 2;
     for directory in [&value.resources, &value.dictionaries] {
         let directory = Path::new(directory);
-        Connection::open(directory.join("msime.db"))
+        Connection::open(directory.join("msime-pinyin.db"))
             .unwrap()
             .execute_batch(
                 "CREATE TABLE tbl_1_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);
@@ -808,7 +1289,7 @@ fn mixed_english_never_takes_the_first_seat_from_chinese() {
                  CREATE TABLE quick_parases(key TEXT,value TEXT,weight INTEGER);",
             )
             .unwrap();
-        Connection::open(directory.join("english.db"))
+        Connection::open(directory.join("msime-english.db"))
             .unwrap()
             .execute_batch(&format!(
                 "{ENGLISH_SCHEMA}
@@ -858,7 +1339,7 @@ fn mixed_english_never_takes_the_first_seat_from_chinese() {
 }
 
 fn english_word_count(value: &EngineOptions, word: &str) -> i64 {
-    let database = Path::new(&value.dictionaries).join("english.db");
+    let database = Path::new(&value.dictionaries).join("msime-english.db");
     if !database.exists() {
         return 0;
     }
@@ -909,7 +1390,7 @@ fn complete_pinyin_raw_commit_does_not_learn_as_english() {
         assert!(session.character(*character, false).unwrap().handled);
     }
     assert_eq!(session.command(Command::CommitRaw).unwrap().commit, "ni");
-    let database = Path::new(&value.dictionaries).join("english.db");
+    let database = Path::new(&value.dictionaries).join("msime-english.db");
     if database.exists() {
         let count: i64 = Connection::open(database)
             .unwrap()
@@ -933,6 +1414,100 @@ fn incomplete_pinyin_raw_commit_is_learned_as_an_english_word() {
     assert_eq!(result.commit, "xyz");
     assert_eq!(result.diagnostic, "");
     assert_eq!(english_word_count(&value, "xyz"), 1);
+}
+
+/// bridge.cpp:1332-1359: Enter in any local mode learns the committed letters as an English word. Local modes are entered only from the pinyin schemes, whose segmentation is empty while one is active, so the incomplete-pinyin rule would learn the word too; this pins the outcome the two rules share.
+#[test]
+fn local_mode_raw_commit_is_learned_as_an_english_word() {
+    let dir = tempfile::tempdir().unwrap();
+    let value = options(dir.path());
+    let mut session = Session::new(&value).unwrap();
+    assert!(session.character(b'Y', true).unwrap().handled);
+    type_text(&mut session, b"rustacean");
+    assert_eq!(session.snapshot().unwrap().local_mode, "temporary_english");
+    let result = session.command(Command::CommitRaw).unwrap();
+    assert!(result.has_commit);
+    assert_eq!(result.commit, "rustacean");
+    assert_eq!(result.diagnostic, "");
+    assert_eq!(english_word_count(&value, "rustacean"), 1);
+}
+
+/// 网址不是英文单词：网址模式下 Enter 上屏整段网址，不写进英文词库。五笔 `http` 加 `s` 进入网址模式，预编辑 `https` 全是字母，没有排除时会被当作英文单词学进词库。
+#[test]
+fn url_enter_is_not_learned_as_english() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.scheme = 2;
+    let mut session = Session::new(&value).unwrap();
+    type_text(&mut session, b"https");
+    let snapshot = session.snapshot().unwrap();
+    assert_eq!(snapshot.local_mode, "url");
+    assert_eq!(snapshot.preedit, "https");
+    let result = session.command(Command::CommitRaw).unwrap();
+    assert!(result.has_commit);
+    assert_eq!(result.commit, "https");
+    assert_eq!(result.diagnostic, "");
+    assert_eq!(english_word_count(&value, "https"), 0);
+}
+
+/// 网址模式下 Esc 丢弃网址，不上屏，回到没有本地模式的状态。
+#[test]
+fn url_escape_discards_without_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    let value = options(dir.path());
+    let mut session = Session::new(&value).unwrap();
+    type_text(&mut session, b"www");
+    assert!(session.punctuation(b'.').unwrap().handled);
+    type_text(&mut session, b"a");
+    assert_eq!(session.snapshot().unwrap().local_mode, "url");
+    let result = session.command(Command::Cancel).unwrap();
+    assert!(result.handled);
+    assert!(!result.has_commit, "{:?}", result.commit);
+    let snapshot = session.snapshot().unwrap();
+    assert_eq!(snapshot.local_mode, "none");
+    assert!(snapshot.preedit.is_empty());
+}
+
+/// bridge.cpp:1345-1348: in temporary Japanese the word is learned with its `R` trigger put back in front, so the letters typed in that mode stay apart from the same letters typed as English.
+#[test]
+fn temporary_japanese_raw_commit_learns_with_the_r_prefix() {
+    let dir = tempfile::tempdir().unwrap();
+    let value = options(dir.path());
+    let mut session = Session::new(&value).unwrap();
+    assert!(session.character(b'R', true).unwrap().handled);
+    type_text(&mut session, b"kk");
+    assert_eq!(session.snapshot().unwrap().local_mode, "temporary_japanese");
+    let result = session.command(Command::CommitRaw).unwrap();
+    assert!(result.has_commit);
+    assert!(!result.commit.starts_with('R'), "{:?}", result.commit);
+    assert!(
+        result.commit.bytes().all(|byte| byte.is_ascii_alphabetic()),
+        "{:?}",
+        result.commit
+    );
+    assert_eq!(result.diagnostic, "");
+    let learned = format!("r{}", result.commit).to_ascii_lowercase();
+    assert_eq!(english_word_count(&value, &learned), 1);
+    assert_eq!(english_word_count(&value, &result.commit), 0);
+}
+
+/// bridge.cpp:1349-1357: a local-mode commit that is not an English word (here the Unicode mode's hex digits) is still committed; the failed learning is reported beside it rather than undoing it.
+#[test]
+fn unlearnable_local_mode_raw_commit_reports_the_diagnostic_but_still_commits() {
+    let dir = tempfile::tempdir().unwrap();
+    let value = options(dir.path());
+    let mut session = Session::new(&value).unwrap();
+    assert!(session.character(b'U', true).unwrap().handled);
+    type_text(&mut session, b"4e2d");
+    let result = session.command(Command::CommitRaw).unwrap();
+    assert!(result.handled && result.has_commit);
+    assert!(!result.commit.is_empty());
+    assert_eq!(
+        result.diagnostic,
+        crate::diagnostics::ENGLISH_WORD_NOT_LEARNED
+    );
+    assert_eq!(result.diagnostic, "English word could not be learned.");
+    assert!(session.snapshot().unwrap().preedit.is_empty());
 }
 
 #[test]
@@ -998,8 +1573,18 @@ fn session_options_map_every_host_field() {
     value.sentence_association.neural_keyboard = true;
     value.rescoring_context = "上文".into();
     value.sentence_alternatives = false;
+    value.vietnamese_input_method = 1;
+    value.vietnamese_tone_style = 1;
     let mapped = super::options::session_options(&value).unwrap();
     assert_eq!(mapped.paths.dictionaries, Path::new(&value.dictionaries));
+    assert_eq!(
+        mapped.vietnamese_input_method,
+        crate::vietnamese::InputMethod::Vni
+    );
+    assert_eq!(
+        mapped.vietnamese_tone_style,
+        crate::vietnamese::ToneStyle::Classic
+    );
     assert_eq!(mapped.scheme, crate::SchemeType::Shuangpin);
     assert_eq!(
         mapped.shuangpin_profile,
@@ -1030,6 +1615,41 @@ fn session_options_map_every_host_field() {
     assert_eq!(mapped.rescoring_context, "上文");
     assert!(!mapped.sentence_alternatives);
     assert!(mapped.personal_context);
+    assert_eq!(mapped.enabled_schemes, crate::SchemeSet::ALL);
+}
+
+/// `enabled_schemes` 原样交给会话。双拼不在其中时双拼键位不校验，不合法的值按小鹤处理；双拼在其中时照旧报错。
+#[test]
+fn session_options_skip_the_shuangpin_profile_without_shuangpin() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.scheme = crate::SchemeType::Wubi as u8;
+    value.shuangpin_profile = 200;
+    assert_eq!(
+        super::options::session_options(&value)
+            .unwrap_err()
+            .to_string(),
+        "Unsupported shuangpin profile"
+    );
+
+    value.enabled_schemes = crate::SchemeSet::of(&[crate::SchemeType::Wubi]);
+    let mapped = super::options::session_options(&value).unwrap();
+    assert_eq!(mapped.enabled_schemes, value.enabled_schemes);
+    assert_eq!(
+        mapped.shuangpin_profile,
+        crate::ShuangpinProfileKind::Xiaohe
+    );
+    let session = Session::new(&value).unwrap();
+    let snapshot = session.snapshot().unwrap();
+    assert_eq!(snapshot.scheme, crate::SchemeType::Wubi as u8);
+    assert_eq!(snapshot.shuangpin_profile, "xiaohe");
+    assert!(!snapshot.microsoft_shuangpin);
+
+    value.scheme = crate::SchemeType::Quanpin as u8;
+    assert_eq!(
+        Session::new(&value).err().unwrap().to_string(),
+        "Input scheme is not enabled"
+    );
 }
 
 #[test]
@@ -1052,6 +1672,100 @@ fn translation_sidecar_prefers_the_user_file_and_is_removed_without_one() {
 }
 
 #[test]
+fn translation_sidecar_copy_rejects_an_oversized_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let value = options(dir.path());
+    let resource = Path::new(&value.resources).join("custom_translations.txt");
+    std::fs::File::create(&resource)
+        .unwrap()
+        .set_len(1024 * 1024 + 1)
+        .unwrap();
+
+    assert_eq!(
+        super::options::prepare_translation_sidecar(&value)
+            .unwrap_err()
+            .to_string(),
+        "Unable to prepare custom translation sidecar"
+    );
+    assert!(!Path::new(&value.dictionaries)
+        .join("custom_translations.txt")
+        .exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn translation_sidecar_copy_rejects_a_symlinked_user_file() {
+    use std::os::unix::fs::symlink;
+
+    let dir = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let value = options(dir.path());
+    let target = Path::new(&value.dictionaries).join("custom_translations.txt");
+    let user = Path::new(&value.user_data).join("custom_translations.txt");
+    let resource = Path::new(&value.resources).join("custom_translations.txt");
+    std::fs::write(&resource, "天\tpackaged\n").unwrap();
+    std::fs::write(
+        outside.path().join("custom_translations.txt"),
+        "天\texternal\n",
+    )
+    .unwrap();
+    symlink(outside.path().join("custom_translations.txt"), &user).unwrap();
+
+    super::options::prepare_translation_sidecar(&value).unwrap();
+    assert_eq!(std::fs::read_to_string(target).unwrap(), "天\tpackaged\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn translation_sidecar_copy_rejects_a_symlinked_target() {
+    use std::os::unix::fs::symlink;
+
+    let dir = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let value = options(dir.path());
+    let target = Path::new(&value.dictionaries).join("custom_translations.txt");
+    let user = Path::new(&value.user_data).join("custom_translations.txt");
+    let external = outside.path().join("target.txt");
+    std::fs::write(&user, "天\tuser\n").unwrap();
+    std::fs::write(&external, "keep\n").unwrap();
+    symlink(&external, &target).unwrap();
+
+    assert_eq!(
+        super::options::prepare_translation_sidecar(&value)
+            .unwrap_err()
+            .to_string(),
+        "Unable to prepare custom translation sidecar"
+    );
+    assert_eq!(std::fs::read_to_string(external).unwrap(), "keep\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn translation_sidecar_copy_rejects_a_symlinked_target_parent() {
+    use std::os::unix::fs::symlink;
+
+    let dir = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let value = options(dir.path());
+    let dictionaries = Path::new(&value.dictionaries).to_path_buf();
+    std::fs::remove_dir(&dictionaries).unwrap();
+    symlink(outside.path(), &dictionaries).unwrap();
+    std::fs::write(
+        Path::new(&value.resources).join("custom_translations.txt"),
+        "天\tpackaged\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        super::options::prepare_translation_sidecar(&value)
+            .unwrap_err()
+            .to_string(),
+        "Unable to prepare custom translation sidecar"
+    );
+    assert!(!outside.path().join("custom_translations.txt").exists());
+}
+
+#[test]
 fn english_completions_validate_and_lowercase_the_prefix() {
     let dir = tempfile::tempdir().unwrap();
     let resources = dir.path().to_str().unwrap();
@@ -1068,7 +1782,7 @@ fn english_completions_validate_and_lowercase_the_prefix() {
         Vec::<String>::new()
     );
     assert_eq!(message("he", 5), "English dictionary unavailable");
-    Connection::open(dir.path().join("english.db"))
+    Connection::open(dir.path().join("msime-english.db"))
         .unwrap()
         .execute_batch(&format!(
             "{ENGLISH_SCHEMA}
@@ -1112,6 +1826,9 @@ fn gloss_keys_follow_the_bridge_rules() {
 #[test]
 fn gloss_display_keeps_two_senses_and_withholds_control_characters() {
     assert_eq!(candidate_gloss_display("a; b; c"), "a; b");
+    let joined = candidate_gloss_display("alpha;beta");
+    assert_eq!(joined, "alpha; beta");
+    assert_eq!(joined.capacity(), joined.len());
     assert_eq!(candidate_gloss_display("甲；乙;丙"), "甲; 乙");
     assert_eq!(
         candidate_gloss_display(";; first ;  ; second"),
@@ -1133,7 +1850,7 @@ fn gloss_display_keeps_two_senses_and_withholds_control_characters() {
 fn emoji_catalog_wrappers_page_through_others_db() {
     let dir = tempfile::tempdir().unwrap();
     let resources = dir.path().to_str().unwrap();
-    Connection::open(dir.path().join("others.db"))
+    Connection::open(dir.path().join("msime-others.db"))
         .unwrap()
         .execute_batch(
             "CREATE TABLE emoji(emoji TEXT, category TEXT, keywords TEXT, pinyin TEXT, sort_order INTEGER);
@@ -1185,7 +1902,7 @@ fn emoji_catalog_wrappers_page_through_others_db() {
 fn hanzi_to_pinyin_reads_the_generation_dictionary() {
     let dir = tempfile::tempdir().unwrap();
     let value = options(dir.path());
-    Connection::open(Path::new(&value.dictionaries).join("msime.db"))
+    Connection::open(Path::new(&value.dictionaries).join("msime-pinyin.db"))
         .unwrap()
         .execute_batch(
             "CREATE TABLE tbl_2_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);
@@ -1201,7 +1918,7 @@ fn helpcode_fixture(root: &Path, extra_sql: &str, helpcodes: &str) -> EngineOpti
     let mut options = options(root);
     for directory in [&options.resources, &options.dictionaries] {
         let directory = Path::new(directory);
-        Connection::open(directory.join("msime.db"))
+        Connection::open(directory.join("msime-pinyin.db"))
             .unwrap()
             .execute_batch(&format!(
                 "CREATE TABLE tbl_2_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);
@@ -1212,13 +1929,32 @@ fn helpcode_fixture(root: &Path, extra_sql: &str, helpcodes: &str) -> EngineOpti
                  {extra_sql}"
             ))
             .unwrap();
-        crate::ensure_english_schema(&directory.join("english.db")).unwrap();
+        crate::ensure_english_schema(&directory.join("msime-english.db")).unwrap();
     }
     let directory = Path::new(&options.resources).join("helpcodes");
     std::fs::create_dir_all(&directory).unwrap();
     std::fs::write(directory.join("zrm_helpcode_big_unique.txt"), helpcodes).unwrap();
     options.helpcode = true;
     options
+}
+
+/// helpcode_utils.cpp:57-67: a table that exists but cannot be read gives an empty keymap, so the host still gets a session, only without helpcode annotations.
+#[test]
+fn an_unreadable_helpcode_table_still_creates_the_session() {
+    let root = tempfile::tempdir().unwrap();
+    let options = helpcode_fixture(root.path(), "", "");
+    let table = Path::new(&options.resources).join("helpcodes/zrm_helpcode_big_unique.txt");
+    std::fs::remove_file(&table).unwrap();
+    std::fs::create_dir(&table).unwrap();
+    let mut session = Session::new(&options).expect("an unreadable table failed the session");
+    type_text(&mut session, b"nihao");
+    let view = session.snapshot().unwrap();
+    assert!(!view.candidates.is_empty());
+    assert!(
+        view.candidate_annotations.iter().all(String::is_empty),
+        "{:?}",
+        view.candidate_annotations
+    );
 }
 
 #[test]
@@ -1245,6 +1981,109 @@ fn helpcode_display_toggle_keeps_candidates_and_filtering_enabled() {
             view.candidate_annotations
         );
         assert!(session.character(b'A', true).unwrap().handled);
+    }
+}
+
+#[test]
+fn wubi_reverse_codes_are_shown_only_in_the_wubi_scheme() {
+    let extra = "INSERT INTO wubi86 VALUES('wqvb','你好',300);";
+
+    let quanpin_root = tempfile::tempdir().unwrap();
+    let mut quanpin = helpcode_fixture(quanpin_root.path(), extra, "");
+    quanpin.show_helpcode = false;
+    let mut session = Session::new(&quanpin).unwrap();
+    type_text(&mut session, b"nihao");
+    let view = session.snapshot().unwrap();
+    let index = view
+        .candidates
+        .iter()
+        .position(|word| word == "你好")
+        .unwrap();
+    // 全拼方案不附五笔反查码。
+    assert!(!view.candidate_annotations[index].contains("wqvb"));
+
+    let mixed_root = tempfile::tempdir().unwrap();
+    let mut mixed = helpcode_fixture(mixed_root.path(), extra, "");
+    mixed.scheme = SchemeType::Wubi as u8;
+    mixed.wubi_mixed_pinyin = true;
+    let mut session = Session::new(&mixed).unwrap();
+    type_text(&mut session, b"nihao");
+    let view = session.snapshot().unwrap();
+    let index = view
+        .candidates
+        .iter()
+        .position(|word| word == "你好")
+        .unwrap();
+    assert!(view.candidate_annotations[index].contains("wqvb"));
+
+    let native_root = tempfile::tempdir().unwrap();
+    let mut native = helpcode_fixture(native_root.path(), extra, "");
+    native.scheme = SchemeType::Wubi as u8;
+    let mut session = Session::new(&native).unwrap();
+    type_text(&mut session, b"wqvb");
+    let view = session.snapshot().unwrap();
+    let index = view
+        .candidates
+        .iter()
+        .position(|word| word == "你好")
+        .unwrap();
+    assert!(view.candidate_annotations[index].contains("wqvb"));
+}
+
+#[test]
+fn wubi_reverse_codes_follow_the_selected_profile() {
+    let root = tempfile::tempdir().unwrap();
+    let mut options = helpcode_fixture(
+        root.path(),
+        "CREATE TABLE wubi98(key TEXT,value TEXT,weight INTEGER);
+         INSERT INTO wubi86 VALUES('wqvb','你好',300);
+         INSERT INTO wubi98 VALUES('abcd','你好',300);",
+        "",
+    );
+    options.wubi_profile = 1;
+    // 反查只在五笔方案里显示，所以用五笔混输拼音来看拼音候选按所选版本反查。
+    options.scheme = SchemeType::Wubi as u8;
+    options.wubi_mixed_pinyin = true;
+    let mut session = Session::new(&options).unwrap();
+    type_text(&mut session, b"nihao");
+    let view = session.snapshot().unwrap();
+    let index = view
+        .candidates
+        .iter()
+        .position(|word| word == "你好")
+        .unwrap();
+    assert!(view.candidate_annotations[index].contains("abcd"));
+    assert!(!view.candidate_annotations[index].contains("wqvb"));
+}
+
+#[test]
+fn wubi_reverse_codes_are_looked_up_only_in_the_wubi_scheme() {
+    // 宿主只在五笔方案里显示反查编码，所以全拼方案的刷新连查都不查；五笔混输拼音照查。
+    let root = tempfile::tempdir().unwrap();
+    let mut options = helpcode_fixture(
+        root.path(),
+        "INSERT INTO wubi86 VALUES('wqvb','你好',300);",
+        "",
+    );
+    options.show_helpcode = false;
+    for (scheme, mixed, expected) in [
+        (SchemeType::Quanpin, false, None),
+        (SchemeType::Wubi, true, Some("wqvb")),
+    ] {
+        options.scheme = scheme as u8;
+        options.wubi_mixed_pinyin = mixed;
+        let mut session =
+            crate::session::Session::new(super::options::session_options(&options).unwrap())
+                .unwrap();
+        for byte in b"nihao" {
+            session.character(*byte, false);
+        }
+        assert!(session
+            .snapshot()
+            .candidates
+            .iter()
+            .any(|item| item.word == "你好"));
+        assert_eq!(session.candidate_wubi_code("你好"), expected, "{scheme:?}");
     }
 }
 
@@ -1305,6 +2144,46 @@ fn snapshot_vectors_stay_parallel_to_the_candidates() {
     assert!(!view.microsoft_shuangpin);
 }
 
+/// 98 五笔会话读 `wubi98`，选词的学习记录归入 `wubi98`，不碰 `wubi86`。
+#[test]
+fn a_wubi98_session_reads_and_learns_into_wubi98() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.scheme = 2;
+    value.wubi_profile = 1;
+    value.learning = true;
+    for directory in [&value.resources, &value.dictionaries] {
+        Connection::open(Path::new(directory).join("msime-pinyin.db"))
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE wubi86(key TEXT,value TEXT,weight INTEGER);
+                 INSERT INTO wubi86 VALUES('kg','甲',300);
+                 CREATE TABLE wubi98(key TEXT,value TEXT,weight INTEGER);
+                 INSERT INTO wubi98 VALUES('kg','乙',300),('kg','丙',100);
+                 CREATE TABLE quick_parases(key TEXT,value TEXT,weight INTEGER);",
+            )
+            .unwrap();
+    }
+    let mut session = Session::new(&value).unwrap();
+    type_text(&mut session, b"kg");
+    let snapshot = session.snapshot().unwrap();
+    assert_eq!(snapshot.candidates, vec!["乙", "丙"]);
+    assert!(session.select(1).unwrap().has_commit);
+    drop(session);
+    let journal = Connection::open(Path::new(&value.user_data).join("msime_user.db")).unwrap();
+    let count = |dictionary: &str| -> i64 {
+        journal
+            .query_row(
+                "SELECT count(*) FROM user_dictionary_operations WHERE dictionary=?1",
+                [dictionary],
+                |row| row.get(0),
+            )
+            .unwrap()
+    };
+    assert_eq!(count("wubi98"), 1);
+    assert_eq!(count("wubi"), 0);
+}
+
 // The C++ wrote the queued personal context from `atexit`; here the dropped session writes it, so a host that quits within the ~2 s flush delay of its last pick keeps it.
 #[test]
 fn dropping_a_session_writes_its_queued_personal_context() {
@@ -1318,7 +2197,7 @@ fn dropping_a_session_writes_its_queued_personal_context() {
         ("hao", "寅", 100),
     ];
     for directory in [&value.resources, &value.dictionaries] {
-        let main = Connection::open(Path::new(directory).join("msime.db")).unwrap();
+        let main = Connection::open(Path::new(directory).join("msime-pinyin.db")).unwrap();
         main.execute_batch(
             "CREATE TABLE wubi86(key TEXT,value TEXT,weight INTEGER);
              CREATE TABLE quick_parases(key TEXT,value TEXT,weight INTEGER);",
@@ -1360,6 +2239,83 @@ fn dropping_a_session_writes_its_queued_personal_context() {
     assert_eq!(count, 2);
 }
 
+/// test_personal_context_input_session.cpp:816-827: a journal that cannot be written keeps the commit and reports the personal context, without any of the input text. Frequency learning is off so its own diagnostic cannot take the slot first.
+#[test]
+fn a_failed_personal_context_write_keeps_the_commit_with_a_diagnostic() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = options(dir.path());
+    value.learning = true;
+    value.frequency_mode = "disabled".into();
+    for directory in [&value.resources, &value.dictionaries] {
+        Connection::open(Path::new(directory).join("msime-pinyin.db"))
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE tbl_1_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);
+                 INSERT INTO tbl_1_n VALUES('ni','n','甲',300),('ni','n','丙',100);
+                 CREATE TABLE wubi86(key TEXT,value TEXT,weight INTEGER);
+                 CREATE TABLE quick_parases(key TEXT,value TEXT,weight INTEGER);",
+            )
+            .unwrap();
+    }
+    std::fs::create_dir(Path::new(&value.user_data).join("msime_user.db")).unwrap();
+    let mut session = Session::new(&value).unwrap();
+    type_text(&mut session, b"ni");
+    let snapshot = session.snapshot().unwrap();
+    let index = snapshot
+        .candidates
+        .iter()
+        .position(|candidate| candidate == "甲")
+        .unwrap_or_else(|| panic!("甲 is not offered: {:?}", snapshot.candidates));
+    let result = session.select(index).unwrap();
+    assert!(result.handled && result.has_commit);
+    assert_eq!(result.commit, "甲");
+    assert_eq!(
+        result.diagnostic,
+        crate::diagnostics::PERSONAL_CONTEXT_NOT_PERSISTED
+    );
+    assert!(!result.diagnostic.contains('甲') && !result.diagnostic.contains("ni"));
+}
+
+/// local_database.cpp:34-38,63-66 opened msime's generation dictionary once per local-mode query, so nothing held it after the sessions were gone. A reset or snapshot restore replaces `msime-pinyin.db` at the same path once every session is dropped (Windows needs the handle closed to rename it), and the next session must read the new file.
+#[test]
+fn local_mode_reads_follow_a_dictionary_replaced_after_the_sessions_are_gone() {
+    let dir = tempfile::tempdir().unwrap();
+    let value = options(dir.path());
+    let dictionary = |path: &Path, phrase: &str| {
+        Connection::open(path)
+            .unwrap()
+            .execute_batch(&format!(
+                "CREATE TABLE wubi86(key TEXT,value TEXT,weight INTEGER);
+                 CREATE TABLE quick_parases(key TEXT,value TEXT,weight INTEGER);
+                 INSERT INTO quick_parases VALUES('kx','{phrase}',10);"
+            ))
+            .unwrap();
+    };
+    let main = Path::new(&value.dictionaries).join("msime-pinyin.db");
+    dictionary(
+        &Path::new(&value.resources).join("msime-pinyin.db"),
+        "旧短语",
+    );
+    dictionary(&main, "旧短语");
+    let phrases = || {
+        let mut session = Session::new(&value).unwrap();
+        assert!(session.character(b'K', true).unwrap().handled);
+        type_text(&mut session, b"kx");
+        let snapshot = session.snapshot().unwrap();
+        assert_eq!(snapshot.local_mode, "quick_phrase");
+        snapshot.candidates
+    };
+    assert!(phrases().contains(&"旧短语".to_owned()));
+    let staged = dir.path().join("replacement.db");
+    dictionary(&staged, "新短语");
+    std::fs::rename(&staged, &main).unwrap();
+    let candidates = phrases();
+    assert!(
+        candidates.contains(&"新短语".to_owned()) && !candidates.contains(&"旧短语".to_owned()),
+        "the replaced dictionary is still read: {candidates:?}"
+    );
+}
+
 /// user_dictionary_journal.cpp:445-452: the reference opened msime's journal per call, so no thread kept it open. A one-shot call releases its thread's cached journal on return, a dropped session releases it too, and a live session keeps it for the keystroke path.
 #[test]
 fn journal_handles_are_released_when_a_thread_is_done_with_them() {
@@ -1368,7 +2324,7 @@ fn journal_handles_are_released_when_a_thread_is_done_with_them() {
     let mut value = options(dir.path());
     value.learning = true;
     for directory in [&value.resources, &value.dictionaries] {
-        Connection::open(Path::new(directory).join("msime.db"))
+        Connection::open(Path::new(directory).join("msime-pinyin.db"))
             .unwrap()
             .execute_batch(
                 "CREATE TABLE tbl_2_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);
@@ -1419,7 +2375,7 @@ fn a_session_dropped_while_its_thread_exits_does_not_abort() {
     let mut value = options(dir.path());
     value.learning = true;
     for directory in [&value.resources, &value.dictionaries] {
-        Connection::open(Path::new(directory).join("msime.db"))
+        Connection::open(Path::new(directory).join("msime-pinyin.db"))
             .unwrap()
             .execute_batch(
                 "CREATE TABLE tbl_2_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);
@@ -1427,6 +2383,7 @@ fn a_session_dropped_while_its_thread_exits_does_not_abort() {
             )
             .unwrap();
     }
+    let journal = Path::new(&value.user_data).join("msime_user.db");
     std::thread::spawn(move || {
         // The map is registered before the journal cache, so thread exit destroys the cache first.
         HELD.with(|held| {
@@ -1447,4 +2404,317 @@ fn a_session_dropped_while_its_thread_exits_does_not_abort() {
     })
     .join()
     .unwrap();
+    // The drop during thread exit wrote the queued pick, not merely survived.
+    let written: i64 = Connection::open(&journal)
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM personal_bigram WHERE previous=char(1) AND word='拟好'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(written, 1);
+}
+
+fn generated_mode_options(root: &Path) -> EngineOptions {
+    let mut value = options(root);
+    value.local_expression = true;
+    value.local_command = true;
+    value.local_mention = true;
+    value.command_table = vec![CommandTableEntry {
+        trigger: "hi".into(),
+        title: "问候".into(),
+        template: "你好".into(),
+    }];
+    value.mention_entries = vec![MentionEntry {
+        text: "Alice".into(),
+        key: String::new(),
+    }];
+    value.quick_phrase_table = vec![QuickPhraseEntry {
+        key: "dh".into(),
+        text: "电话".into(),
+    }];
+    value
+}
+
+#[test]
+fn generated_local_modes_map_through_the_options() {
+    let dir = tempfile::tempdir().unwrap();
+    let resources = dir.path().join("resources");
+    std::fs::create_dir_all(&resources).unwrap();
+    for name in ["msime-pinyin.db", "msime-english.db"] {
+        Connection::open(resources.join(name)).unwrap();
+    }
+    let defaults = prepare_options(
+        resources.to_str().unwrap(),
+        dir.path().join("user").to_str().unwrap(),
+        dir.path().join("cache").to_str().unwrap(),
+        "generated-modes",
+    )
+    .unwrap();
+    assert!(!defaults.local_expression && !defaults.local_command && !defaults.local_mention);
+    assert!(defaults.command_table.is_empty() && defaults.mention_entries.is_empty());
+    assert!(defaults.quick_phrase_table.is_empty());
+    let value = generated_mode_options(dir.path());
+    let mapped = super::options::session_options(&value).unwrap();
+    assert!(
+        mapped.local_modes.expression && mapped.local_modes.command && mapped.local_modes.mention
+    );
+    assert_eq!(mapped.command_table, value.command_table);
+    assert_eq!(mapped.mention_entries, value.mention_entries);
+    assert_eq!(mapped.quick_phrase_table, value.quick_phrase_table);
+    let off = super::options::session_options(&options(dir.path())).unwrap();
+    assert!(!off.local_modes.expression && !off.local_modes.command && !off.local_modes.mention);
+}
+
+#[test]
+fn generated_local_modes_publish_their_spelling_symbols_and_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = Session::new(&generated_mode_options(dir.path())).unwrap();
+    assert_eq!(session.snapshot().unwrap().spelling_symbols, "/@");
+    assert!(session.character(b'V', true).unwrap().handled);
+    type_text(&mut session, b"2*3");
+    let view = session.snapshot().unwrap();
+    assert_eq!(view.local_mode, "expression");
+    assert_eq!(view.spelling_symbols, "0123456789+-*/.()%^");
+    assert_eq!(view.candidates[0], "6");
+    assert!(!session.online_query().unwrap().available);
+    session.command(Command::Cancel).unwrap();
+
+    assert!(session.character(b'/', false).unwrap().handled);
+    type_text(&mut session, b"h");
+    let view = session.snapshot().unwrap();
+    assert_eq!(view.local_mode, "command");
+    assert_eq!(view.candidates, ["你好"]);
+    assert_eq!(view.candidate_codes, ["hi"]);
+    assert_eq!(view.candidate_annotations, ["问候"]);
+    session.command(Command::Cancel).unwrap();
+
+    assert!(session.character(b'@', false).unwrap().handled);
+    type_text(&mut session, b"al");
+    assert_eq!(session.snapshot().unwrap().candidates, ["Alice"]);
+    session
+        .set_mention_entries(&[MentionEntry {
+            text: "Alan".into(),
+            key: String::new(),
+        }])
+        .unwrap();
+    assert_eq!(session.snapshot().unwrap().candidates, ["Alan"]);
+    session.command(Command::Cancel).unwrap();
+    session
+        .set_command_table(&[CommandTableEntry {
+            trigger: "yo".into(),
+            title: "招呼".into(),
+            template: "哟".into(),
+        }])
+        .unwrap();
+    session.character(b'/', false).unwrap();
+    type_text(&mut session, b"y");
+    assert_eq!(session.snapshot().unwrap().candidates, ["哟"]);
+}
+
+/// Enter in the expression, command and mention modes commits what was typed, and unlike the other local modes learns none of it as an English word: arithmetic, a trigger or a mention key is not a word the user spelled.
+#[test]
+fn generated_local_mode_raw_commits_are_not_learned() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut value = generated_mode_options(dir.path());
+    value.learning = true;
+    let mut session = Session::new(&value).unwrap();
+    for (entry, shift, input, expected) in [
+        (b'V', true, &b"1+"[..], "V1+"),
+        (b'/', false, &b"xyz"[..], "/xyz"),
+        (b'@', false, &b"bob"[..], "@bob"),
+    ] {
+        assert!(session.character(entry, shift).unwrap().handled);
+        type_text(&mut session, input);
+        let result = session.command(Command::CommitRaw).unwrap();
+        assert_eq!(result.commit, expected);
+        assert_eq!(result.diagnostic, "");
+        for word in [expected, &expected[1..]] {
+            assert_eq!(english_word_count(&value, word), 0, "{word}");
+        }
+    }
+}
+
+#[test]
+fn generated_rows_carry_no_helpcode() {
+    let root = tempfile::tempdir().unwrap();
+    let mut options = helpcode_fixture(root.path(), "", "一=ab\n二=cd\n三=ef\n");
+    options.local_expression = true;
+    let mut session = Session::new(&options).unwrap();
+    session.character(b'V', true).unwrap();
+    type_text(&mut session, b"123");
+    let view = session.snapshot().unwrap();
+    assert_eq!(view.candidates[0], "一百二十三");
+    assert!(
+        view.candidate_annotations.iter().all(String::is_empty),
+        "{:?}",
+        view.candidate_annotations
+    );
+}
+
+#[test]
+fn only_generated_modes_are_left_out_of_typing_statistics() {
+    for mode in ["expression", "command", "mention"] {
+        assert!(!local_mode_counts_as_typing(mode), "{mode}");
+    }
+    for mode in [
+        "none",
+        "unicode",
+        "date_time",
+        "temporary_english",
+        "unknown",
+        "",
+    ] {
+        assert!(local_mode_counts_as_typing(mode), "{mode}");
+    }
+}
+
+/// 只有日文、越南文或藏文的方案集合不读 msime-pinyin.db：资源目录里只有 `msime-english.db` 也能准备代次、建会话、打字，代次里始终没有 msime-pinyin.db。个人词库只收英文词，拼音和快捷短语直接说明没有中文词库；重置和快照导入都只换回、回放英文词库。
+#[test]
+fn schemes_without_the_main_dictionary_run_on_english_alone() {
+    let root = tempfile::tempdir().unwrap();
+    let resources = root.path().join("resources");
+    std::fs::create_dir_all(&resources).unwrap();
+    Connection::open(resources.join("msime-english.db"))
+        .unwrap()
+        .execute_batch(&format!(
+            "{ENGLISH_SCHEMA} INSERT INTO english_words VALUES('word','word',100);"
+        ))
+        .unwrap();
+    for (content_id, scheme, code, input, preedit) in [
+        ("japanese", SchemeType::JapaneseRomaji, 3, &b"ka"[..], ""),
+        (
+            "vietnamese",
+            SchemeType::Vietnamese,
+            7,
+            &b"tieengs"[..],
+            "tiếng",
+        ),
+        ("tibetan", SchemeType::Tibetan, 8, &b"bod"[..], "བོད"),
+    ] {
+        let set = crate::types::SchemeSet::of(&[scheme]);
+        let user = root.path().join(content_id).join("user");
+        let mut prepared = prepare_options_for(
+            resources.to_str().unwrap(),
+            user.to_str().unwrap(),
+            root.path().join(content_id).join("cache").to_str().unwrap(),
+            content_id,
+            set,
+        )
+        .unwrap();
+        assert_eq!(prepared.enabled_schemes, set);
+        let dictionaries = Path::new(&prepared.dictionaries).to_owned();
+        assert!(dictionaries.join("msime-english.db").is_file());
+        assert!(!dictionaries.join("msime-pinyin.db").exists());
+        // 集合外的方案（缺省的全拼）建不了会话；本版本的方案照常。
+        assert!(Session::new(&prepared).is_err());
+        prepared.scheme = code;
+        let mut session = Session::new(&prepared).unwrap();
+        type_text(&mut session, input);
+        let snapshot = session.snapshot().unwrap();
+        assert_eq!(snapshot.scheme, code, "{content_id}");
+        if scheme == SchemeType::JapaneseRomaji {
+            assert_eq!(snapshot.reading, "か");
+        } else {
+            assert_eq!(snapshot.preedit, preedit, "{content_id}");
+        }
+        drop(session);
+        assert!(!dictionaries.join("msime-pinyin.db").exists());
+
+        let entry = |kind, key: &str, value: &str| DictionaryEntry {
+            kind,
+            key: key.into(),
+            value: value.into(),
+            weight: 10,
+        };
+        dictionary_edit(
+            &prepared,
+            None,
+            Some(&entry(DictionaryKind::English, "zzfixture", "Zzfixture")),
+            "add-english",
+        )
+        .unwrap();
+        for kind in [DictionaryKind::Pinyin, DictionaryKind::QuickPhrase] {
+            let key = if kind == DictionaryKind::Pinyin {
+                "ni'hao"
+            } else {
+                "dh"
+            };
+            assert_eq!(
+                dictionary_edit(&prepared, None, Some(&entry(kind, key, "你好")), "")
+                    .unwrap_err()
+                    .to_string(),
+                "This input method has no Chinese dictionary; only English words can be edited"
+            );
+        }
+        let listed = dictionary_entries(&prepared, 0, 10).unwrap();
+        assert_eq!(listed.entries.len(), 1);
+        assert_eq!(listed.entries[0].kind, DictionaryKind::English);
+        assert!(
+            dictionary_table_entries(&prepared, DictionaryKind::Pinyin, "nihao", 0, 10)
+                .unwrap()
+                .entries
+                .is_empty()
+        );
+
+        // 快照导入：拼音行收进日志但不回放，英文行回放进新代次的英文词库。
+        let generation = root.path().join(content_id).join("snapshot");
+        let staged = stage_dictionary_state(
+            &prepared,
+            generation.to_str().unwrap(),
+            "restored",
+            10,
+            [
+                DictionaryStateRecord::Entry {
+                    kind: DictionaryKind::Pinyin,
+                    key: "ni'hao".into(),
+                    value: "你好".into(),
+                    weight: 50,
+                    display: String::new(),
+                    deleted: false,
+                    user_inserted: true,
+                },
+                DictionaryStateRecord::Entry {
+                    kind: DictionaryKind::English,
+                    key: "zzrestored".into(),
+                    value: "Zzrestored".into(),
+                    weight: 60,
+                    display: "Zzrestored".into(),
+                    deleted: false,
+                    user_inserted: true,
+                },
+            ]
+            .into_iter()
+            .map(Ok),
+        )
+        .unwrap();
+        let staged_dictionaries = Path::new(&staged.dictionaries);
+        assert!(!staged_dictionaries.join("msime-pinyin.db").exists());
+        let restored: i64 = Connection::open(staged_dictionaries.join("msime-english.db"))
+            .unwrap()
+            .query_row(
+                "SELECT weight FROM english_words WHERE word='zzrestored' AND display='Zzrestored'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(restored, 60);
+        let listed = dictionary_entries(&staged, 0, 10).unwrap();
+        assert_eq!(
+            listed
+                .entries
+                .iter()
+                .map(|entry| entry.key.as_str())
+                .collect::<Vec<_>>(),
+            ["zzrestored"]
+        );
+
+        reset_learned_data(&prepared).unwrap();
+        assert!(dictionary_entries(&prepared, 0, 10)
+            .unwrap()
+            .entries
+            .is_empty());
+        assert!(!dictionaries.join("msime-pinyin.db").exists());
+    }
 }

@@ -1,7 +1,9 @@
-//! `english.db` (schemes-lang.md §4, data-formats.md §5): prefix completion, the en↔zh gloss tables, the custom translations sidecar and the learned-gloss store. English weights exceed `i32` in the shipped data.
+//! `msime-english.db` (schemes-lang.md §4, data-formats.md §5): prefix completion, the en↔zh gloss tables, the custom translations sidecar and the learned-gloss store. English weights exceed `i32` in the shipped data.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -20,12 +22,18 @@ pub struct CustomTranslations {
     pub zh_en: HashMap<String, String>,
 }
 
-const PREFIX_SQL: &str = "SELECT word,display,weight FROM english_words WHERE word >= ?1 AND word < ?2 ORDER BY CASE WHEN word = ?1 THEN 0 ELSE 1 END, weight DESC, length(word), word, display LIMIT ?3";
+/// 行数上限接在末尾写成字面量：`LIMIT ?` 会让 SQLite 每次执行都重新解析和规划整条语句，九键一键要查几十个前缀（见 `pinyin` 里的同一说明）。
+const PREFIX_SQL: &str = "SELECT word,display,weight FROM english_words WHERE word >= ?1 AND word < ?2 ORDER BY CASE WHEN word = ?1 THEN 0 ELSE 1 END, weight DESC, length(word), word, display LIMIT ";
 const EN_ZH_SQL: &str = "SELECT chinese_gloss FROM en_zh_glosses WHERE english=?1";
 const ZH_EN_SQL: &str = "SELECT english_gloss FROM zh_en_glosses WHERE chinese=?1";
 const ENGLISH_WORDS_DDL: &str = "CREATE TABLE english_words(word TEXT COLLATE BINARY NOT NULL,display TEXT NOT NULL,weight INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(word,display)) WITHOUT ROWID;";
 const GLOSS_TABLES_DDL: &str = "CREATE TABLE IF NOT EXISTS en_zh_glosses(english TEXT COLLATE BINARY PRIMARY KEY,chinese_gloss TEXT NOT NULL) WITHOUT ROWID;CREATE TABLE IF NOT EXISTS zh_en_glosses(chinese TEXT COLLATE BINARY PRIMARY KEY,english_gloss TEXT NOT NULL) WITHOUT ROWID;PRAGMA user_version=3;";
 const GLOSS_BUSY_TIMEOUT: Duration = Duration::from_millis(250);
+/// The settings UI accepts a 1 MiB sidecar; keep direct Engine callers from allocating for a
+/// larger user supplied file as well.
+const MAX_CUSTOM_TRANSLATION_BYTES: u64 = 1024 * 1024;
+/// The reference never set a busy timeout on its read connections (english_dictionary.cpp:325,371), so SQLite's default of none applied: a locked file answers "no rows" at once instead of stalling the keystroke. rusqlite would otherwise wait 5 s.
+const READ_BUSY_TIMEOUT: Duration = Duration::ZERO;
 
 pub struct EnglishDictionary {
     connection: Option<Connection>,
@@ -78,14 +86,14 @@ impl EnglishDictionary {
         if !is_lower_ascii_word(prefix) || limit == 0 {
             return Vec::new();
         }
-        let upper_bound = format!("{prefix}{{");
-        let Ok(mut statement) = connection.prepare_cached(PREFIX_SQL) else {
+        let upper_bound = prefix_upper_bound(prefix);
+        let Ok(mut statement) = connection.prepare_cached(&prefix_sql(sql_limit(limit))) else {
             return Vec::new();
         };
-        let Ok(mut rows) = statement.query((prefix, upper_bound.as_str(), sql_limit(limit))) else {
+        let Ok(mut rows) = statement.query([prefix, upper_bound.as_str()]) else {
             return Vec::new();
         };
-        let mut candidates = Vec::new();
+        let mut candidates = Vec::with_capacity(limit);
         loop {
             match rows.next() {
                 Ok(Some(row)) => {
@@ -165,8 +173,17 @@ impl EnglishDictionary {
     }
 }
 
-/// Create or migrate `english_words` to the composite-key, weighted shape, create the gloss tables, `user_version = 3` (english_dictionary.cpp:242-315). The golden harness calls this for fixtures without an `english.db`.
+/// Create or migrate `english_words` to the composite-key, weighted shape, create the gloss tables, `user_version = 3` (english_dictionary.cpp:242-315). The golden harness calls this for fixtures without an `msime-english.db`.
 pub fn ensure_english_schema(path: &Path) -> Result<()> {
+    if let Ok(metadata) = std::fs::symlink_metadata(path) {
+        if !metadata.file_type().is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "English dictionary path is not a regular file",
+            )
+            .into());
+        }
+    }
     let mut connection = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_WRITE
@@ -239,9 +256,30 @@ fn write_gloss(path: &Path, chinese_to_english: bool, key: &str, gloss: &str) ->
 pub fn load_custom_translations(path: &Path) -> CustomTranslations {
     let mut translations = CustomTranslations::default();
     // An unreadable sidecar is the same as none (english_dictionary.cpp:189-191).
-    let Ok(text) = std::fs::read(path) else {
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
         return translations;
     };
+    if !metadata.file_type().is_file() {
+        return translations;
+    }
+    let Ok(file) = File::open(path) else {
+        return translations;
+    };
+    let Ok(size) = file.metadata().map(|metadata| metadata.len()) else {
+        return translations;
+    };
+    if size > MAX_CUSTOM_TRANSLATION_BYTES {
+        return translations;
+    }
+    let mut text = Vec::with_capacity(size as usize);
+    if file
+        .take(MAX_CUSTOM_TRANSLATION_BYTES + 1)
+        .read_to_end(&mut text)
+        .is_err()
+        || text.len() as u64 > MAX_CUSTOM_TRANSLATION_BYTES
+    {
+        return translations;
+    }
     let text = text.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&text);
     for line in split_lines(text) {
         let line = trim_start(trim_end(line));
@@ -274,10 +312,14 @@ pub fn load_custom_translations(path: &Path) -> CustomTranslations {
 /// Opens the dictionary and checks the prefix statement prepares, which is what the reference's `ready()` meant: a file without `english_words` is not a dictionary (english_dictionary.cpp:317-343).
 fn open_prefix_connection(path: &Path) -> Option<Connection> {
     let connection = open_read_only(path)?;
-    if connection.prepare_cached(PREFIX_SQL).is_err() {
+    if connection.prepare(&prefix_sql(1)).is_err() {
         return None;
     }
     Some(connection)
+}
+
+fn prefix_sql(limit: i64) -> String {
+    format!("{PREFIX_SQL}{limit}")
 }
 
 fn open_read_only(path: &Path) -> Option<Connection> {
@@ -285,11 +327,13 @@ fn open_read_only(path: &Path) -> Option<Connection> {
     if path.as_os_str().is_empty() {
         return None;
     }
-    Connection::open_with_flags(
+    let connection = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
-    .ok()
+    .ok()?;
+    connection.busy_timeout(READ_BUSY_TIMEOUT).ok()?;
+    Some(connection)
 }
 
 /// The first row's gloss, "" for none, or `None` when the gloss tables cannot be prepared. Both are prepared together, so a store with only one of them answers neither, as in the reference (english_dictionary.cpp:345-361).
@@ -304,6 +348,13 @@ fn lookup_gloss(connection: &Connection, chinese_to_english: bool, key: &str) ->
         Ok(Some(row)) => column_text(row, 0).unwrap_or_default(),
         _ => String::new(),
     })
+}
+
+fn prefix_upper_bound(prefix: &str) -> String {
+    let mut result = String::with_capacity(prefix.len() + 1);
+    result.push_str(prefix);
+    result.push('{');
+    result
 }
 
 fn is_lower_ascii_word(value: &str) -> bool {
@@ -373,6 +424,43 @@ mod tests {
     }
 
     #[test]
+    fn prefix_upper_bound_allocates_only_result_bytes() {
+        let prefix = "hello";
+        let result = prefix_upper_bound(prefix);
+        assert_eq!(result, "hello{");
+        assert_eq!(result.capacity(), result.len());
+    }
+
+    /// english_dictionary.cpp:325,371 set no busy timeout on the read connections, so a file another connection holds locked answers "no rows" at once instead of stalling the keystroke for rusqlite's default 5 s.
+    #[test]
+    fn a_locked_dictionary_answers_empty_at_once() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = english_db(directory.path(), &[("hello", "hello", 10)], &[], &[]);
+        let gloss_directory = tempfile::tempdir().unwrap();
+        let gloss_path = gloss_directory.path().join("translation-glosses.db");
+        assert!(upsert_gloss(&gloss_path, false, "hello", "你好"));
+        let dictionary = EnglishDictionary::open(&path, None, Some(&gloss_path));
+        assert_eq!(dictionary.query_prefix("hel", 5).len(), 1);
+        assert_eq!(dictionary.query_chinese_gloss("hello"), "你好");
+        let english_lock = Connection::open(&path).unwrap();
+        english_lock.execute_batch("BEGIN EXCLUSIVE;").unwrap();
+        let gloss_lock = Connection::open(&gloss_path).unwrap();
+        gloss_lock.execute_batch("BEGIN EXCLUSIVE;").unwrap();
+        let start = std::time::Instant::now();
+        assert!(dictionary.query_prefix("hel", 5).is_empty());
+        assert_eq!(dictionary.query_chinese_gloss("hello"), "");
+        assert!(
+            start.elapsed() < Duration::from_millis(1_000),
+            "locked lookups took {:?}",
+            start.elapsed()
+        );
+        english_lock.execute_batch("ROLLBACK;").unwrap();
+        gloss_lock.execute_batch("ROLLBACK;").unwrap();
+        assert_eq!(dictionary.query_prefix("hel", 5).len(), 1);
+        assert_eq!(dictionary.query_chinese_gloss("hello"), "你好");
+    }
+
+    #[test]
     fn prefix_completion_puts_the_exact_word_first_then_weight_then_length() {
         let directory = tempfile::tempdir().unwrap();
         let path = english_db(
@@ -433,7 +521,7 @@ mod tests {
     #[test]
     fn a_missing_or_foreign_file_is_not_ready_and_is_never_created() {
         let directory = tempfile::tempdir().unwrap();
-        let missing = directory.path().join("english.db");
+        let missing = directory.path().join("msime-english.db");
         let dictionary = EnglishDictionary::open(&missing, None, None);
         assert!(!dictionary.ready());
         assert!(dictionary.query_prefix("he", 5).is_empty());
@@ -456,7 +544,7 @@ mod tests {
         assert!(dictionary.query_prefix("ni", 5).is_empty());
     }
 
-    // test_runtime_isolation.cpp:665-705: the sidecar outranks english.db, which outranks the learned store, and a gloss learned after opening is visible to the open dictionary.
+    // test_runtime_isolation.cpp:665-705: the sidecar outranks msime-english.db, which outranks the learned store, and a gloss learned after opening is visible to the open dictionary.
     #[test]
     fn glosses_follow_sidecar_then_dictionary_then_learned_store() {
         let directory = tempfile::tempdir().unwrap();
@@ -541,7 +629,7 @@ mod tests {
     #[test]
     fn a_dictionary_without_gloss_tables_falls_through_to_the_learned_store() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("english.db");
+        let path = directory.path().join("msime-english.db");
         Connection::open(&path)
             .unwrap()
             .execute_batch(ENGLISH_WORDS_DDL)
@@ -557,7 +645,7 @@ mod tests {
     #[test]
     fn schema_setup_creates_a_missing_database_and_is_idempotent() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("english.db");
+        let path = directory.path().join("msime-english.db");
         ensure_english_schema(&path).unwrap();
         assert!(path.exists());
         assert_eq!(user_version(&path), 3);
@@ -638,7 +726,7 @@ mod tests {
         assert!(!cache.exists());
         assert!(upsert_gloss(&cache, false, "hello", "你好"));
         assert_eq!(user_version(&cache), 3);
-        // The store carries the full english.db schema, including an empty word table.
+        // The store carries the full msime-english.db schema, including an empty word table.
         assert!(EnglishDictionary::open(&cache, None, None).ready());
         assert!(!upsert_gloss(
             &directory.path().join("no/such/dir.db"),
@@ -682,6 +770,36 @@ hello\tlast wins\n\
         assert_eq!(translations.zh_en.len(), 1);
         assert_eq!(
             load_custom_translations(&directory.path().join("absent.txt")),
+            CustomTranslations::default()
+        );
+    }
+
+    #[test]
+    fn oversized_sidecar_is_treated_as_unreadable() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(assets::TRANSLATIONS);
+        std::fs::write(&path, vec![b'x'; MAX_CUSTOM_TRANSLATION_BYTES as usize + 1]).unwrap();
+
+        assert_eq!(
+            load_custom_translations(&path),
+            CustomTranslations::default()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sidecar_loading_rejects_symlinked_files() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let external = outside.path().join("translations.txt");
+        std::fs::write(&external, "hello\t外部内容\n").unwrap();
+        let linked = directory.path().join(assets::TRANSLATIONS);
+        symlink(&external, &linked).unwrap();
+
+        assert_eq!(
+            load_custom_translations(&linked),
             CustomTranslations::default()
         );
     }

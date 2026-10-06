@@ -15,6 +15,7 @@ using msime::linux_host::mapped_file_state;
 using msime::linux_host::maps_line_path;
 using msime::linux_host::ProgramFileState;
 using msime::linux_host::running_executable_state;
+using msime::linux_host::user_service_unit;
 
 namespace {
 
@@ -115,6 +116,22 @@ void maps_parsing() {
   assert(!maps_line_path("zz-2000 r--p 0 0 0 /x", 0x1000));
 }
 
+// Only a systemd user service other than a desktop's autostart wrapper changes how fcitx5 is restarted.
+void service_unit_detection() {
+  assert(user_service_unit("0::/user.slice/user-1000.slice/user@1000.service/app.slice/omarchy-fcitx5.service\n") ==
+         "omarchy-fcitx5.service");
+  // A hybrid hierarchy lists the named controllers first.
+  assert(user_service_unit("1:name=systemd:/x.service\n0::/user.slice/user-1000.slice/user@1000.service/app.slice/fcitx5.service\n") ==
+         "fcitx5.service");
+  assert(!user_service_unit("0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-org.fcitx.Fcitx5@autostart.service\n"));
+  assert(!user_service_unit("0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-Hyprland-fcitx5-1234.scope\n"));
+  assert(!user_service_unit("0::/user.slice/user-1000.slice/session-2.scope\n"));
+  // A system service is not the user's to restart.
+  assert(!user_service_unit("0::/system.slice/fcitx5.service\n"));
+  assert(!user_service_unit("0::/user.slice/user-1000.slice/user@1000.service/init.scope\n"));
+  assert(!user_service_unit(""));
+}
+
 void mapped_file_replaced_and_removed() {
   char pattern[] = "/tmp/msime-replaced-mapping-XXXXXX";
   const char *created = mkdtemp(pattern);
@@ -181,6 +198,7 @@ int main(int argc, char **argv) {
     return report_executable_state();
   classification();
   maps_parsing();
+  service_unit_detection();
   mapped_file_replaced_and_removed();
   running_executable_replaced_and_removed();
   return 0;

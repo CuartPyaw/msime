@@ -1,6 +1,46 @@
 import XCTest
 
 final class TypingStatisticsTests: XCTestCase {
+  func testPrepareRejectsASymlinkedStatisticsLock() throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("stats-lock-test-\(UUID().uuidString)")
+    let outsideDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("stats-lock-target-\(UUID().uuidString)")
+    defer {
+      try? FileManager.default.removeItem(at: directory)
+      try? FileManager.default.removeItem(at: outsideDirectory)
+    }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: outsideDirectory, withIntermediateDirectories: true)
+    let outsideLock = outsideDirectory.appendingPathComponent("outside.lock")
+    try Data("synthetic-lock-target".utf8).write(to: outsideLock)
+    try FileManager.default.createSymbolicLink(
+      at: directory.appendingPathComponent("typing-statistics.lock"), withDestinationURL: outsideLock)
+
+    XCTAssertThrowsError(try TypingStatisticsStore(directory: directory).setEnabled(true))
+    XCTAssertEqual(try Data(contentsOf: outsideLock), Data("synthetic-lock-target".utf8))
+    XCTAssertFalse(FileManager.default.fileExists(
+      atPath: directory.appendingPathComponent("typing-statistics.json").path))
+  }
+
+  func testPrepareRejectsASymlinkedStatisticsDirectory() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("stats-directory-symlink-root-(UUID().uuidString)")
+    let outside = FileManager.default.temporaryDirectory
+      .appendingPathComponent("stats-directory-symlink-target-(UUID().uuidString)")
+    let linked = root.appendingPathComponent("linked", isDirectory: true)
+    defer {
+      try? FileManager.default.removeItem(at: root)
+      try? FileManager.default.removeItem(at: outside)
+    }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(at: linked, withDestinationURL: outside)
+
+    XCTAssertThrowsError(try TypingStatisticsStore(directory: linked).setEnabled(true))
+    XCTAssertTrue(try FileManager.default.contentsOfDirectory(at: outside, includingPropertiesForKeys: nil).isEmpty)
+  }
+
   func testCountsCommittedCharactersAcrossDaysAndPreservesPauseOnReset() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -114,44 +154,5 @@ final class TypingStatisticsTests: XCTestCase {
       return XCTFail("A written store still reported that the keyboard had never written.")
     }
     XCTAssertNotNil(lastWritten)
-  }
-
-  func testMovesLegacyAppGroupStatisticsIntoTheSharedTauriStateDirectory() throws {
-    let container = FileManager.default.temporaryDirectory
-      .appendingPathComponent("stats-migration-\(UUID().uuidString)")
-    let sharedState = container.appendingPathComponent("MSIME", isDirectory: true)
-    try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: container) }
-
-    let legacy = TypingStatisticsStore(directory: container)
-    try legacy.setEnabled(true)
-    try legacy.record("迁移", source: .quanpin)
-    let store = TypingStatisticsStore(directory: sharedState, legacyDirectory: container)
-    guard case .ready = store.availability() else {
-      return XCTFail("Legacy statistics should be reported before the first migration read.")
-    }
-    let snapshot = try store.load()
-
-    XCTAssertEqual(snapshot.total, 2)
-    XCTAssertEqual(snapshot.detail.sources["quanpin"], 2)
-    XCTAssertTrue(FileManager.default.fileExists(
-      atPath: sharedState.appendingPathComponent("typing-statistics.json").path))
-    XCTAssertFalse(FileManager.default.fileExists(
-      atPath: container.appendingPathComponent("typing-statistics.json").path))
-  }
-
-  func testRejectsAnOversizedStatisticsDocumentBeforeMigration() throws {
-    let directory = FileManager.default.temporaryDirectory
-      .appendingPathComponent("stats-too-large-\(UUID().uuidString)")
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: directory) }
-    let url = directory.appendingPathComponent("typing-statistics.json")
-    FileManager.default.createFile(atPath: url.path, contents: nil)
-    let handle = try FileHandle(forWritingTo: url)
-    try handle.seek(toOffset: UInt64(TypingStatisticsStore.maximumDocumentBytes))
-    try handle.write(contentsOf: Data([0]))
-    try handle.close()
-
-    XCTAssertThrowsError(try TypingStatisticsStore(directory: directory).load())
   }
 }

@@ -2,10 +2,11 @@ import Foundation
 
 extension BackendAccountClient {
   enum DictionaryKind: String, CaseIterable, Identifiable, Codable, Sendable {
-    case pinyin, wubi, quick, english
+    /// `wubi98` 是 98 五笔码表的词条，云端路径同名；`wubi` 仍是 86 五笔。
+    case pinyin, wubi, wubi98, quick, english
     var id: String { rawValue }
     var title: String {
-      switch self { case .pinyin: return "拼音"; case .wubi: return "五笔"; case .quick: return "快捷短语"; case .english: return "英文" }
+      switch self { case .pinyin: return "拼音"; case .wubi: return "86 五笔"; case .wubi98: return "98 五笔"; case .quick: return "快捷短语"; case .english: return "英文" }
     }
   }
   struct DictionaryEntry: Decodable, Identifiable, Sendable {
@@ -63,7 +64,7 @@ extension BackendAccountClient {
     var cursor = after
     guard page.changes.count <= limit else { throw Failure(status: 502) }
     for change in page.changes {
-      guard change.revision > cursor else { throw Failure(status: 502) }
+      guard change.revision > cursor, Self.validDictionaryChangePageChange(change) else { throw Failure(status: 502) }
       cursor = change.revision
     }
     guard page.next == cursor, !page.has_more || !page.changes.isEmpty else { throw Failure(status: 502) }
@@ -80,19 +81,30 @@ extension BackendAccountClient {
     url.path = "/v1/users/me/dictionaries/" + kind.rawValue
     url.queryItems = [.init(name: "q", value: search), .init(name: "offset", value: String(offset)), .init(name: "limit", value: "100")]
     guard let path = Self.encodedPath(url) else { throw Failure(status: 400) }
-    return try await json("GET", path, token: token)
+    let page: DictionaryPage = try await json("GET", path, token: token)
+    guard page.entries.count <= 100, page.offset == offset,
+          page.entries.allSatisfy({ entry in
+            entry.kind == kind && Self.validDictionaryEntry(entry)
+          }) else { throw Failure(status: 0) }
+    return page
   }
   func addDictionary(_ kind: DictionaryKind, value: DictionaryValue, token: String) async throws -> DictionaryChange {
-    try await json("POST", "/v1/users/me/dictionaries/" + kind.rawValue, token: token, body: JSONEncoder().encode(value))
+    let change: DictionaryChange = try await json("POST", "/v1/users/me/dictionaries/" + kind.rawValue, token: token, body: JSONEncoder().encode(value))
+    guard Self.validDictionaryChange(change, expectedKind: kind) else { throw Failure(status: 0) }
+    return change
   }
   func updateDictionary(_ entry: DictionaryEntry, value: DictionaryValue, token: String) async throws -> DictionaryChange {
     struct Body: Encodable { let code: String; let word: String; let weight: Int64; let revision: Int64 }
-    return try await json("PUT", dictionaryEntryPath(entry), token: token,
+    let change: DictionaryChange = try await json("PUT", dictionaryEntryPath(entry), token: token,
       body: JSONEncoder().encode(Body(code: value.code, word: value.word, weight: value.weight, revision: entry.revision)))
+    guard Self.validDictionaryChange(change, expectedKind: entry.kind) else { throw Failure(status: 0) }
+    return change
   }
   func deleteDictionary(_ entry: DictionaryEntry, token: String) async throws -> DictionaryChange {
     struct Body: Encodable { let revision: Int64 }
-    return try await json("DELETE", dictionaryEntryPath(entry), token: token, body: JSONEncoder().encode(Body(revision: entry.revision)))
+    let change: DictionaryChange = try await json("DELETE", dictionaryEntryPath(entry), token: token, body: JSONEncoder().encode(Body(revision: entry.revision)))
+    guard Self.validDictionaryChange(change, expectedKind: entry.kind) else { throw Failure(status: 0) }
+    return change
   }
   enum DictionaryFileFormat: String, CaseIterable, Identifiable, Sendable {
     case standard, windows, hans
@@ -114,7 +126,9 @@ extension BackendAccountClient {
       body = try JSONEncoder().encode(Body(text: text, format: format.rawValue)); suffix = "/import"
     }
     guard !text.isEmpty, body.count <= 65536 else { throw Failure(status: 400) }
-    return try await json("POST", "/v1/users/me/dictionaries/" + kind.rawValue + suffix, token: token, body: body)
+    let result: DictionaryImportResult = try await json("POST", "/v1/users/me/dictionaries/" + kind.rawValue + suffix, token: token, body: body)
+    guard (0...1_000_000).contains(result.imported), result.revision >= 0 else { throw Failure(status: 0) }
+    return result
   }
   func exportDictionary(_ kind: DictionaryKind, format: DictionaryFileFormat, token: String) async throws -> URL {
     guard format != .hans else { throw Failure(status: 400) }
@@ -142,7 +156,14 @@ extension BackendAccountClient {
     components.path = "/v1/users/me/dictionaries/" + kind.rawValue + "/catalog"
     components.queryItems = [.init(name: "q", value: code), .init(name: "offset", value: String(offset)), .init(name: "limit", value: "100"), .init(name: "scheme", value: scheme), .init(name: "profile", value: profile)]
     guard let path = Self.encodedPath(components) else { throw Failure(status: 400) }
-    return try await json("GET", path, token: token)
+    let page: DictionaryCatalog = try await json("GET", path, token: token)
+    guard page.entries.count <= 100, page.offset == offset, page.revision >= 0,
+          Self.validCatalogText(page.normalized, maximum: 256, empty: true),
+          page.entries.allSatisfy({ entry in
+            entry.kind == kind && Self.validCatalogText(entry.code, maximum: 256)
+              && Self.validCatalogText(entry.word, maximum: 1024) && entry.weight >= 0
+          }) else { throw Failure(status: 0) }
+    return page
   }
   func editCatalog(_ entry: CatalogEntry, revision: Int64, replacement: DictionaryValue?, token: String) async throws -> DictionaryChange {
     guard revision >= 0 else { throw Failure(status: 400) }
@@ -160,13 +181,78 @@ extension BackendAccountClient {
         try values.encode(replacement, forKey: .replacement)
       }
     }
-    return try await json("POST", "/v1/users/me/dictionaries/" + entry.kind.rawValue + "/edit", token: token,
+    let change: DictionaryChange = try await json("POST", "/v1/users/me/dictionaries/" + entry.kind.rawValue + "/edit", token: token,
       body: JSONEncoder().encode(Body(revision: revision, previous: .init(code: entry.code, word: entry.word), replacement: replacement)))
+    guard Self.validDictionaryChange(change, expectedKind: entry.kind) else { throw Failure(status: 0) }
+    return change
   }
   private func dictionaryEntryPath(_ entry: DictionaryEntry) throws -> String {
     guard entry.revision > 0, entry.id.utf8.count == 64,
           entry.id.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else { throw Failure(status: 400) }
     return "/v1/users/me/dictionaries/" + entry.kind.rawValue + "/" + entry.id
   }
-}
 
+  private static func validDictionaryEntry(_ entry: DictionaryEntry) -> Bool {
+    entry.id.utf8.count == 64
+      && entry.id.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
+      && !entry.code.isEmpty
+      && entry.code.utf8.count <= 256
+      && !entry.code.unicodeScalars.contains { $0.properties.generalCategory == .control }
+      && !entry.word.isEmpty
+      && entry.word.utf8.count <= 1024
+      && !entry.word.unicodeScalars.contains { $0.properties.generalCategory == .control }
+      && entry.weight >= 0
+      && entry.revision > 0
+  }
+
+  static func dictionaryKind(forCandidateKind kind: String) -> DictionaryKind? {
+    switch kind {
+    case "pinyin", "jianpin": return .pinyin
+    case "wubi": return .wubi
+    case "wubi98": return .wubi98
+    case "english": return .english
+    default: return nil
+    }
+  }
+
+  static func validDictionaryChange(_ change: DictionaryChange, expectedKind: DictionaryKind) -> Bool {
+    guard change.revision > 0 else { return false }
+    return [change.previous, change.replacement].compactMap({ $0 }).allSatisfy {
+      $0.kind == expectedKind && validDictionaryEntry($0) && $0.revision <= change.revision
+    }
+  }
+
+  private static func validDictionaryChangePageChange(_ change: DictionaryChangePage.Change) -> Bool {
+    guard change.revision > 0,
+          [change.previous, change.replacement].compactMap({ $0 }).allSatisfy({ validDictionaryChangePageEntry($0) && $0.revision <= change.revision }),
+          (change.ranking ?? []).count <= 100,
+          (change.ranking ?? []).allSatisfy({ validDictionaryChangePageEntry($0) && $0.revision <= change.revision }) else { return false }
+    if let selection = change.selection {
+      guard validCatalogText(selection.context, maximum: 1024, empty: true),
+            validCatalogText(selection.code, maximum: 256),
+            validCatalogText(selection.word, maximum: 1024), selection.count >= 0 else { return false }
+    }
+    if let position = change.position {
+      guard (0...5).contains(position.position),
+            validCatalogText(position.context, maximum: 1024, empty: true),
+            validCatalogText(position.code, maximum: 256),
+            validCatalogText(position.word, maximum: 1024) else { return false }
+    }
+    return true
+  }
+
+  private static func validDictionaryChangePageEntry(_ entry: DictionaryChangePage.Entry) -> Bool {
+    entry.id.utf8.count == 64
+      && entry.id.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
+      && validCatalogText(entry.code, maximum: 256)
+      && validCatalogText(entry.word, maximum: 1024)
+      && entry.weight >= 0
+      && entry.revision > 0
+  }
+
+  private static func validCatalogText(_ value: String, maximum: Int, empty: Bool = false) -> Bool {
+    (empty || !value.isEmpty)
+      && value.utf8.count <= maximum
+      && !value.unicodeScalars.contains { $0.properties.generalCategory == .control }
+  }
+}

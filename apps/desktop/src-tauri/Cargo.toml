@@ -25,6 +25,7 @@ serde.workspace = true
 msime-client-core = { path = "../../../crates/client-core" }
 msime-host-api = { path = "../../../crates/host-api" }
 msime-input-runtime = { path = "../../../crates/input-runtime" }
+msime-path-trust = { path = "../../../crates/path-trust" }
 hex = "0.4"
 serde_json.workspace = true
 tempfile.workspace = true
@@ -39,7 +40,7 @@ msime-tauri-mobile-platform = { path = "../../../crates/tauri-mobile-platform" }
 [target.'cfg(target_os = "ios")'.dependencies]
 msime-ios-native-ffi = { path = "../../../crates/ios-native-ffi" }
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 rustix = { workspace = true, features = ["fs", "process"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -49,6 +50,8 @@ tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", rev = "c9ec21
 [target.'cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))'.dependencies]
 # Desktop shells reuse one settings process and hand off surface routes to it. On macOS only settings launches join it; panel launches stay one process per input session.
 tauri-plugin-single-instance = "2.4"
+# The platform's own open dialog for the 插件 page's pack import, driven from Rust only. Held below 2.8, which needs tauri 2.12.
+tauri-plugin-dialog = "~2.8"
 
 [target.'cfg(windows)'.dependencies]
 # Foreground capture, synthetic input and shell access for the shared panels.
@@ -57,6 +60,7 @@ msime-host-windows = { path = "../../../crates/host-windows" }
 [dev-dependencies]
 tauri = { workspace = true, features = ["test"] }
 msime-tauri-mobile-platform = { path = "../../../crates/tauri-mobile-platform" }
+msime-path-trust = { path = "../../../crates/path-trust", features = ["test-support"] }
 
 [lints]
 workspace = true

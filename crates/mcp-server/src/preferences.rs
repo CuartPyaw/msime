@@ -2,9 +2,10 @@
 //!
 //! An allowlist rather than the whole document: the document also holds API keys, account tokens and endpoints, none of which an agent should read, and most of its fields are choices only the settings page can present properly. The enums are mirrored here so the tool schema names exactly the values the store accepts; `the_mirrors_serialize_as_the_store_does` keeps the two in step.
 
+use msime_client_core::edition::Edition;
 use msime_client_core::preferences::{
     CandidateLayout, CharacterWidthPreference, ChineseScheme, DefaultImeMode, InputScheme,
-    Preferences, PreferencesSnapshot, PreferencesStore, ShuangpinProfile,
+    Preferences, PreferencesSnapshot, PreferencesStore, ShuangpinProfile, WubiProfile,
 };
 use rmcp::schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -19,9 +20,15 @@ pub enum Scheme {
     Shuangpin,
     Wubi,
     Japanese,
+    Korean,
+    Cantonese,
+    Zhuyin,
+    Vietnamese,
+    Tibetan,
+    Stroke,
 }
 
-/// The schemes an agent may switch to. Japanese is left to the user: it needs its own dictionary and a way back that the agent cannot see.
+/// 代理可以切换到的方案。日文、韩文、粤拼、注音、越南文、藏文和笔画留给用户自己切换：日文、粤拼、注音和笔画需要各自的词库，宿主不一定装了；而且这几个方案都需要一条代理看不到的退路。
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[schemars(crate = "rmcp::schemars")]
 #[serde(rename_all = "snake_case")]
@@ -39,6 +46,16 @@ pub enum Profile {
     Ziranma,
     Shoudao,
     Microsoft,
+}
+
+/// 五笔码表版本。
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[schemars(crate = "rmcp::schemars")]
+pub enum WubiVersion {
+    #[serde(rename = "wubi86")]
+    Wubi86,
+    #[serde(rename = "wubi98")]
+    Wubi98,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
@@ -72,6 +89,12 @@ impl From<InputScheme> for Scheme {
             InputScheme::Shuangpin => Self::Shuangpin,
             InputScheme::Wubi => Self::Wubi,
             InputScheme::Japanese => Self::Japanese,
+            InputScheme::Korean => Self::Korean,
+            InputScheme::Cantonese => Self::Cantonese,
+            InputScheme::Zhuyin => Self::Zhuyin,
+            InputScheme::Vietnamese => Self::Vietnamese,
+            InputScheme::Tibetan => Self::Tibetan,
+            InputScheme::Stroke => Self::Stroke,
         }
     }
 }
@@ -104,6 +127,24 @@ impl From<Profile> for ShuangpinProfile {
             Profile::Ziranma => Self::Ziranma,
             Profile::Shoudao => Self::Shoudao,
             Profile::Microsoft => Self::Microsoft,
+        }
+    }
+}
+
+impl From<WubiProfile> for WubiVersion {
+    fn from(value: WubiProfile) -> Self {
+        match value {
+            WubiProfile::Wubi86 => Self::Wubi86,
+            WubiProfile::Wubi98 => Self::Wubi98,
+        }
+    }
+}
+
+impl From<WubiVersion> for WubiProfile {
+    fn from(value: WubiVersion) -> Self {
+        match value {
+            WubiVersion::Wubi86 => Self::Wubi86,
+            WubiVersion::Wubi98 => Self::Wubi98,
         }
     }
 }
@@ -174,6 +215,12 @@ pub struct PreferencesView {
     pub candidate_page_size: u8,
     /// Candidate font size in points, 12 to 32.
     pub candidate_font_size: u8,
+    /// Overall size of the floating candidate window in percent, 50 to 200; the font size and the window's geometry are both multiplied by it (Windows and macOS).
+    pub candidate_scale_percent: u16,
+    /// Opacity of the candidate window's background, border and skin image in percent, 50 to 100; the text stays opaque.
+    pub candidate_opacity_percent: u8,
+    /// Corner radius of the candidate window in points, 0 to 32. Null means the skin's or the platform's own radius.
+    pub candidate_corner_radius: Option<u8>,
     pub candidate_layout: Layout,
     pub candidate_follow_cursor: bool,
     /// Select candidates with the number row.
@@ -191,6 +238,8 @@ pub struct PreferencesView {
     pub smart_punctuation: bool,
     /// Output Traditional Chinese.
     pub traditional_chinese_output: bool,
+    /// 五笔用 86 还是 98 码表。
+    pub wubi_profile: WubiVersion,
     /// In Wubi, answer a code with no match with candidates from the same pinyin spelling.
     pub wubi_mixed_pinyin: bool,
     /// In Wubi, show the rest of each candidate's code after the typed keys.
@@ -212,6 +261,9 @@ impl From<&PreferencesSnapshot> for PreferencesView {
             shuangpin_profile: preferences.shuangpin_profile.into(),
             candidate_page_size: preferences.candidate_page_size,
             candidate_font_size: preferences.candidate_font_size,
+            candidate_scale_percent: preferences.candidate_scale_percent,
+            candidate_opacity_percent: preferences.candidate_opacity_percent,
+            candidate_corner_radius: preferences.candidate_corner_radius,
             candidate_layout: preferences.candidate_layout.into(),
             candidate_follow_cursor: preferences.candidate_follow_cursor,
             number_row_selection: preferences.number_row_selection,
@@ -222,9 +274,9 @@ impl From<&PreferencesSnapshot> for PreferencesView {
             chinese_punctuation: preferences.chinese_punctuation,
             smart_punctuation: preferences.smart_punctuation,
             traditional_chinese_output: preferences.traditional_chinese_output,
+            wubi_profile: preferences.wubi_profile.into(),
             wubi_mixed_pinyin: preferences.wubi_mixed_pinyin,
-            // Absent means on: documents written before the switch existed keep the hint.
-            wubi_code_hint: preferences.wubi_code_hint.unwrap_or(true),
+            wubi_code_hint: preferences.wubi_code_hint,
             diagnostic_log_server: preferences.diagnostic_log.server,
             diagnostic_log_tsf: preferences.diagnostic_log.tsf,
             learning: preferences.learning,
@@ -245,6 +297,13 @@ pub struct PreferencesChange {
     pub candidate_page_size: Option<u8>,
     /// 12 to 32.
     pub candidate_font_size: Option<u8>,
+    /// 50 to 200.
+    pub candidate_scale_percent: Option<u16>,
+    /// 50 to 100.
+    pub candidate_opacity_percent: Option<u8>,
+    /// 0 to 32, or null to return to the skin's or the platform's own radius.
+    #[serde(default, deserialize_with = "present")]
+    pub candidate_corner_radius: Option<Option<u8>>,
     pub candidate_layout: Option<Layout>,
     pub candidate_follow_cursor: Option<bool>,
     pub number_row_selection: Option<bool>,
@@ -256,6 +315,7 @@ pub struct PreferencesChange {
     pub chinese_punctuation: Option<bool>,
     pub smart_punctuation: Option<bool>,
     pub traditional_chinese_output: Option<bool>,
+    pub wubi_profile: Option<WubiVersion>,
     pub wubi_mixed_pinyin: Option<bool>,
     pub wubi_code_hint: Option<bool>,
     /// Turn on to look into a problem the user reports, and off again once it is understood.
@@ -270,6 +330,9 @@ impl PreferencesChange {
             && self.shuangpin_profile.is_none()
             && self.candidate_page_size.is_none()
             && self.candidate_font_size.is_none()
+            && self.candidate_scale_percent.is_none()
+            && self.candidate_opacity_percent.is_none()
+            && self.candidate_corner_radius.is_none()
             && self.candidate_layout.is_none()
             && self.candidate_follow_cursor.is_none()
             && self.number_row_selection.is_none()
@@ -280,6 +343,7 @@ impl PreferencesChange {
             && self.chinese_punctuation.is_none()
             && self.smart_punctuation.is_none()
             && self.traditional_chinese_output.is_none()
+            && self.wubi_profile.is_none()
             && self.wubi_mixed_pinyin.is_none()
             && self.wubi_code_hint.is_none()
             && self.diagnostic_log_server.is_none()
@@ -301,6 +365,15 @@ impl PreferencesChange {
         }
         if let Some(size) = self.candidate_font_size {
             preferences.candidate_font_size = size;
+        }
+        if let Some(scale) = self.candidate_scale_percent {
+            preferences.candidate_scale_percent = scale;
+        }
+        if let Some(opacity) = self.candidate_opacity_percent {
+            preferences.candidate_opacity_percent = opacity;
+        }
+        if let Some(radius) = self.candidate_corner_radius {
+            preferences.candidate_corner_radius = radius;
         }
         if let Some(layout) = self.candidate_layout {
             preferences.candidate_layout = layout.into();
@@ -332,11 +405,14 @@ impl PreferencesChange {
         if let Some(value) = self.traditional_chinese_output {
             preferences.traditional_chinese_output = value;
         }
+        if let Some(value) = self.wubi_profile {
+            preferences.wubi_profile = value.into();
+        }
         if let Some(value) = self.wubi_mixed_pinyin {
             preferences.wubi_mixed_pinyin = value;
         }
         if let Some(value) = self.wubi_code_hint {
-            preferences.wubi_code_hint = Some(value);
+            preferences.wubi_code_hint = value;
         }
         if let Some(value) = self.diagnostic_log_server {
             preferences.diagnostic_log.server = value;
@@ -347,23 +423,48 @@ impl PreferencesChange {
     }
 }
 
-pub fn load(state_dir: &Path) -> Result<PreferencesView, String> {
-    let snapshot = PreferencesStore::new(state_dir)
+/// A field that was given, even as null, is `Some`; only an absent field is `None`, so null can clear a value rather than leave it alone.
+fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
+}
+
+/// `edition` 是运行时选项记录的版本：状态目录里还没有偏好文件时，读到的是这个版本的默认值。
+pub fn load(state_dir: &Path, edition: &'static Edition) -> Result<PreferencesView, String> {
+    let snapshot = PreferencesStore::for_edition(state_dir, edition)
         .load()
         .map_err(|error| error.to_string())?;
     Ok(PreferencesView::from(&snapshot))
 }
 
 /// Save `change` with compare-and-swap, and on Linux publish the result into the runtime-options document the IBus and Fcitx5 hosts read their preferences from, as the settings page does.
+///
+/// `edition` 是运行时选项记录的版本：本版本不提供的方案被拒绝，例如五笔版只能选五笔。
 pub fn update(
     state_dir: &Path,
     options: &Path,
+    edition: &'static Edition,
     change: &PreferencesChange,
 ) -> Result<PreferencesView, String> {
     if change.is_empty() {
         return Err("no preference to change".into());
     }
-    let store = PreferencesStore::new(state_dir);
+    if let Some(choice) = change.scheme {
+        let (scheme, _): (InputScheme, ChineseScheme) = choice.into();
+        if !edition.offers(scheme) {
+            let offered: Vec<Value> = edition
+                .input_schemes
+                .iter()
+                .filter_map(|scheme| serde_json::to_value(scheme).ok())
+                .collect();
+            return Err(format!(
+                "this edition of the input method does not offer that scheme; it offers {}",
+                Value::Array(offered)
+            ));
+        }
+    }
+    let store = PreferencesStore::for_edition(state_dir, edition);
     let previous = store.load().map_err(|error| error.to_string())?;
     if previous.revision != change.expected_revision {
         return Err("the preferences changed since they were read; read them again".into());
@@ -376,9 +477,7 @@ pub fn update(
     if cfg!(target_os = "linux") {
         if let Err(error) = publish_to_runtime_options(options, &snapshot.preferences) {
             // A document the hosts could not read is refused along with the save that produced it, so the store and the hosts do not disagree. A concurrent writer wins over the rollback.
-            if error == TOO_LARGE {
-                let _ = store.save(snapshot.revision, previous.preferences);
-            }
+            let _ = store.save(snapshot.revision, previous.preferences);
             return Err(error);
         }
     }
@@ -443,6 +542,12 @@ mod tests {
             InputScheme::Shuangpin,
             InputScheme::Wubi,
             InputScheme::Japanese,
+            InputScheme::Korean,
+            InputScheme::Cantonese,
+            InputScheme::Zhuyin,
+            InputScheme::Vietnamese,
+            InputScheme::Tibetan,
+            InputScheme::Stroke,
         ] {
             same(json!(Scheme::from(scheme)), json!(scheme));
         }
@@ -463,6 +568,10 @@ mod tests {
         ] {
             same(json!(Profile::from(profile)), json!(profile));
             assert_eq!(ShuangpinProfile::from(Profile::from(profile)), profile);
+        }
+        for profile in [WubiProfile::Wubi86, WubiProfile::Wubi98] {
+            same(json!(WubiVersion::from(profile)), json!(profile));
+            assert_eq!(WubiProfile::from(WubiVersion::from(profile)), profile);
         }
         for layout in [CandidateLayout::Horizontal, CandidateLayout::Vertical] {
             same(json!(Layout::from(layout)), json!(layout));
@@ -497,16 +606,23 @@ mod tests {
             br#"{"api_version":1,"candidate_skin_catalog":[{"id":"kept"}]}"#,
         )
         .unwrap();
-        let before = load(directory.path()).unwrap();
+        let before = load(directory.path(), Edition::full()).unwrap();
         let untouched = PreferencesStore::new(directory.path()).load().unwrap();
 
         assert_eq!(
-            update(directory.path(), &options, &change(before.revision)).unwrap_err(),
+            update(
+                directory.path(),
+                &options,
+                Edition::full(),
+                &change(before.revision)
+            )
+            .unwrap_err(),
             "no preference to change"
         );
         let updated = update(
             directory.path(),
             &options,
+            Edition::full(),
             &PreferencesChange {
                 scheme: Some(ChineseSchemeChoice::Shuangpin),
                 shuangpin_profile: Some(Profile::Ziranma),
@@ -545,7 +661,7 @@ mod tests {
         expected.candidate_page_size = 7;
         expected.character_width = CharacterWidthPreference::Fullwidth;
         expected.traditional_chinese_output = true;
-        expected.wubi_code_hint = Some(false);
+        expected.wubi_code_hint = false;
         expected.diagnostic_log.server = true;
         expected.fuzzy_pinyin = stored.preferences.fuzzy_pinyin.clone();
         assert_eq!(json!(stored.preferences), json!(expected));
@@ -555,13 +671,13 @@ mod tests {
             candidate_page_size: Some(5),
             ..change(before.revision)
         };
-        assert!(update(directory.path(), &options, &stale).is_err());
+        assert!(update(directory.path(), &options, Edition::full(), &stale).is_err());
         let invalid = PreferencesChange {
             candidate_page_size: Some(10),
             ..change(updated.revision)
         };
-        assert!(update(directory.path(), &options, &invalid).is_err());
-        assert_eq!(load(directory.path()).unwrap(), updated);
+        assert!(update(directory.path(), &options, Edition::full(), &invalid).is_err());
+        assert_eq!(load(directory.path(), Edition::full()).unwrap(), updated);
 
         // Linux hosts read their preferences from the runtime options; the rest of that document is kept.
         let document: Value = serde_json::from_slice(&std::fs::read(&options).unwrap()).unwrap();
@@ -571,6 +687,103 @@ mod tests {
             assert!(document.get("preferences").is_none());
         }
         assert_eq!(document["candidate_skin_catalog"][0]["id"], "kept");
+    }
+
+    /// 五笔版只能选五笔：别的方案被拒绝，偏好不动；还没有偏好文件时读到的是五笔版的默认值。
+    #[test]
+    fn the_wubi_edition_refuses_a_scheme_it_does_not_offer() {
+        let wubi = Edition::by_id("wubi").unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let options = directory.path().join("runtime-options.json");
+        std::fs::write(&options, br#"{"api_version":1,"edition":"wubi"}"#).unwrap();
+        let before = load(directory.path(), wubi).unwrap();
+        assert_eq!(before.scheme, Scheme::Wubi);
+        assert!(before.wubi_mixed_pinyin);
+
+        for refused in [ChineseSchemeChoice::Quanpin, ChineseSchemeChoice::Shuangpin] {
+            let error = update(
+                directory.path(),
+                &options,
+                wubi,
+                &PreferencesChange {
+                    scheme: Some(refused),
+                    candidate_page_size: Some(7),
+                    ..change(before.revision)
+                },
+            )
+            .unwrap_err();
+            assert!(error.contains("does not offer"), "{error}");
+            assert!(error.contains("\"wubi\""), "{error}");
+        }
+        assert_eq!(load(directory.path(), wubi).unwrap(), before);
+
+        let updated = update(
+            directory.path(),
+            &options,
+            wubi,
+            &PreferencesChange {
+                scheme: Some(ChineseSchemeChoice::Wubi),
+                wubi_mixed_pinyin: Some(false),
+                ..change(before.revision)
+            },
+        )
+        .unwrap();
+        assert_eq!(updated.scheme, Scheme::Wubi);
+        assert!(!updated.wubi_mixed_pinyin);
+        // 第一次保存写下的是五笔版的默认值加上这次的修改。
+        let stored = PreferencesStore::new(directory.path()).load().unwrap();
+        assert_eq!(
+            stored.preferences.last_chinese_scheme,
+            Some(ChineseScheme::Wubi)
+        );
+    }
+
+    #[test]
+    fn the_candidate_window_style_is_set_and_its_radius_returned_to_the_skin() {
+        let directory = tempfile::tempdir().unwrap();
+        let options = directory.path().join("runtime-options.json");
+        std::fs::write(&options, br#"{"api_version":1}"#).unwrap();
+        let before = load(directory.path(), Edition::full()).unwrap();
+        assert_eq!(before.candidate_scale_percent, 100);
+        assert_eq!(before.candidate_opacity_percent, 100);
+        assert_eq!(before.candidate_corner_radius, None);
+
+        let styled: PreferencesChange = serde_json::from_value(json!({
+            "expected_revision": before.revision,
+            "candidate_scale_percent": 125,
+            "candidate_opacity_percent": 80,
+            "candidate_corner_radius": 12,
+        }))
+        .unwrap();
+        let updated = update(directory.path(), &options, Edition::full(), &styled).unwrap();
+        assert_eq!(updated.candidate_scale_percent, 125);
+        assert_eq!(updated.candidate_opacity_percent, 80);
+        assert_eq!(updated.candidate_corner_radius, Some(12));
+
+        // An absent radius leaves it alone; null hands it back to the skin.
+        let untouched: PreferencesChange = serde_json::from_value(json!({
+            "expected_revision": updated.revision,
+            "candidate_scale_percent": 150,
+        }))
+        .unwrap();
+        assert_eq!(untouched.candidate_corner_radius, None);
+        let updated = update(directory.path(), &options, Edition::full(), &untouched).unwrap();
+        assert_eq!(updated.candidate_corner_radius, Some(12));
+        let cleared: PreferencesChange = serde_json::from_value(json!({
+            "expected_revision": updated.revision,
+            "candidate_corner_radius": null,
+        }))
+        .unwrap();
+        assert!(!cleared.is_empty());
+        let updated = update(directory.path(), &options, Edition::full(), &cleared).unwrap();
+        assert_eq!(updated.candidate_corner_radius, None);
+        assert_eq!(updated.candidate_scale_percent, 150);
+
+        let invalid = PreferencesChange {
+            candidate_opacity_percent: Some(30),
+            ..change(updated.revision)
+        };
+        assert!(update(directory.path(), &options, Edition::full(), &invalid).is_err());
     }
 
     #[test]
@@ -614,5 +827,23 @@ mod tests {
             publish_to_runtime_options(&options, &Preferences::default()).unwrap_err(),
             TOO_LARGE
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_unreadable_runtime_options_document_does_not_leave_preferences_saved() {
+        let directory = tempfile::tempdir().unwrap();
+        // 目录无法作为 runtime-options 文档打开，因此发布步骤会在偏好存储接受修改后失败。
+        let before = load(directory.path(), Edition::full()).unwrap();
+        let change = PreferencesChange {
+            candidate_page_size: Some(7),
+            ..change(before.revision)
+        };
+
+        assert_eq!(
+            update(directory.path(), directory.path(), Edition::full(), &change).unwrap_err(),
+            "cannot read the runtime options"
+        );
+        assert_eq!(load(directory.path(), Edition::full()).unwrap(), before);
     }
 }

@@ -3,6 +3,7 @@
 #include "../../../../shared/input/GlossSenses.h"
 
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -60,6 +61,7 @@ inline std::vector<std::string> untranslated_texts(
 inline void fill_offline_glosses(
     std::vector<std::pair<std::string, std::string>> &answered,
     const std::vector<std::pair<std::string, std::string>> &offline) {
+  answered.reserve(answered.size() + offline.size());
   for (const auto &entry : offline) {
     if (entry.first.empty() || entry.second.empty())
       continue;
@@ -71,6 +73,24 @@ inline void fill_offline_glosses(
     else if (existing->second.empty())
       existing->second = entry.second;
   }
+}
+
+// The one item a `/fy` request (command mode) asks the translator about.
+struct CommandTranslationItem {
+  std::string text;
+  std::string source_language;
+  std::string target_language;
+};
+
+// Whether a translation query is the `/fy` command's, and if so what to ask. The shared query marks it with `sentence` and carries exactly one candidate, the English typed after the command, and its own target language (Chinese). It goes to the service the user selected whatever the gloss switches say, and its answer becomes the command's first row rather than a gloss. The candidate plan cannot carry it - it refuses a Chinese target and judges single words, not sentences - so the worker asks this item directly, with no packaged gloss in front of it and no gloss cache behind it. Anything else, including a malformed sentence query, is not a command request.
+inline std::optional<CommandTranslationItem>
+command_translation_item(bool sentence, const std::vector<std::string> &texts,
+                         std::string_view target_language) {
+  if (!sentence || texts.size() != 1 || texts.front().empty() ||
+      target_language.empty())
+    return std::nullopt;
+  return CommandTranslationItem{texts.front(), "en",
+                                std::string(target_language)};
 }
 
 } // namespace msime::windows

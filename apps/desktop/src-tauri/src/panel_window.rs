@@ -6,11 +6,13 @@
 
 #[cfg(target_os = "linux")]
 use crate::panel_input::panel_position;
-#[cfg(any(target_os = "linux", target_os = "windows"))]
-use crate::panel_input::remember_panel_input_target;
 #[cfg(target_os = "windows")]
 use crate::panel_input::windows_panel_position;
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+use crate::panel_input::{
+    forget_cloud_clipboard_input_target, remember_opening_panel_target, CLOUD_CLIPBOARD_PANEL,
+};
+#[cfg(target_os = "macos")]
 use crate::platform::macos::macos_keyboard;
 #[cfg(target_os = "macos")]
 use crate::platform::macos::macos_panel_session;
@@ -26,6 +28,7 @@ pub(crate) fn panel_accepts_focus(label: &str) -> bool {
 }
 
 /// The screen keyboard's height for the shared `touch_keyboard_height_adjustment`, the same `base + adjustment` (clamped to -12..=48) the settings preview draws, so the window matches what the slider showed.
+#[cfg(any(target_os = "windows", test))]
 pub(crate) fn keyboard_panel_height(base: f64, adjustment: i8) -> f64 {
     base + f64::from(adjustment.clamp(-12, 48))
 }
@@ -228,6 +231,12 @@ pub(crate) fn open_route_panel(
     state: &tauri::State<'_, PanelInputState>,
     route: SurfaceRoute,
 ) -> Result<(), HostActionError> {
+    // 设置页的按钮和菜单都走这里：本版本没有的面板（不提供手写的版本里的手写面板）一律不开。
+    if !crate::edition_offers_route(crate::package_edition(), route) {
+        return Err(HostActionError {
+            code: "unavailable",
+        });
+    }
     open_surface_panel(app, state, panel_surface(route)?)
 }
 
@@ -242,14 +251,14 @@ pub(crate) fn open_surface_panel(
     let _ = state;
     #[cfg(target_os = "linux")]
     let position = {
-        let _ = remember_panel_input_target(state, surface.label, true);
+        remember_opening_panel_target(app, state, surface.label);
         panel_position(state, surface.label, width, height)
     };
     #[cfg(target_os = "windows")]
     let height = windows_panel_height(app, surface.label, height);
     #[cfg(target_os = "windows")]
     let position = {
-        let _ = remember_panel_input_target(state);
+        remember_opening_panel_target(app, state, surface.label);
         windows_panel_position(width, height, surface.placement)
     };
     #[cfg(not(any(target_os = "linux", target_os = "windows")))]
@@ -389,6 +398,10 @@ pub(crate) fn close_panel(
             code: "unavailable",
         });
     if result.is_ok() {
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
+        if label == CLOUD_CLIPBOARD_PANEL {
+            forget_cloud_clipboard_input_target(&app);
+        }
         if let Ok(mut target) = state.0.lock() {
             #[cfg(target_os = "linux")]
             {

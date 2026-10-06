@@ -6,7 +6,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension};
 
 use crate::assets;
 use crate::diagnostics;
-use crate::dictionary::english::{upsert_gloss, EnglishDictionary};
+use crate::dictionary::english::{load_custom_translations, upsert_gloss, EnglishDictionary};
 use crate::error::{EngineError, Result};
 use crate::types::CandidateSource;
 
@@ -59,19 +59,25 @@ pub fn candidate_glosses_with_user(
     user_data: &str,
     candidates: &[(String, u8)],
 ) -> Result<Vec<String>> {
-    // An empty resource path requests only the user overlay, never a relative `english.db` (bridge.cpp:1161-1162).
+    // An empty resource path requests only the user overlay, never a relative `msime-english.db` (bridge.cpp:1161-1162).
     let packaged = if resources.is_empty() {
         None
     } else {
         open_gloss_dictionary(&Path::new(resources).join(assets::ENGLISH_DICTIONARY))
     };
-    // No explicit translations path: the learned store reads `custom_translations.txt` from beside itself, which is the user directory, and that is what puts the user's own file above every automatic answer.
+    // The user's own `custom_translations.txt` is read directly. The bridge reached it only as the learned store's sidecar (bridge.cpp:1147-1166), so before the first online gloss created `translation-glosses.db` the file Settings writes was ignored.
+    let custom = if user_data.is_empty() {
+        Default::default()
+    } else {
+        load_custom_translations(&Path::new(user_data).join(assets::TRANSLATIONS))
+    };
     let learned = if user_data.is_empty() {
         None
     } else {
         open_gloss_dictionary(&Path::new(user_data).join(assets::LEARNED_GLOSSES))
     };
-    if packaged.is_none() && learned.is_none() {
+    if packaged.is_none() && learned.is_none() && custom.en_zh.is_empty() && custom.zh_en.is_empty()
+    {
         return Err(EngineError::failed(
             diagnostics::CANDIDATE_GLOSS_UNAVAILABLE,
         ));
@@ -89,6 +95,14 @@ pub fn candidate_glosses_with_user(
             let Some((key, chinese_to_english)) = candidate_gloss_key(text, *source) else {
                 return String::new();
             };
+            let hand_written = if chinese_to_english {
+                custom.zh_en.get(&key)
+            } else {
+                custom.en_zh.get(&key)
+            };
+            if let Some(gloss) = hand_written {
+                return candidate_gloss_display(gloss);
+            }
             let gloss = learned
                 .as_ref()
                 .map(|dictionary| lookup(dictionary, &key, chinese_to_english))
@@ -133,6 +147,10 @@ pub fn candidate_target_glosses(
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_FULL_MUTEX,
     )
     .map_err(|_| EngineError::failed(diagnostics::OFFLINE_GLOSS_UNAVAILABLE))?;
+    // bridge.cpp:1194 set no busy timeout; rusqlite's default 5 s wait is not the reference's behaviour.
+    connection
+        .busy_timeout(std::time::Duration::ZERO)
+        .map_err(|_| EngineError::failed(diagnostics::OFFLINE_GLOSS_UNAVAILABLE))?;
     let unreadable = |_| EngineError::failed(diagnostics::OFFLINE_GLOSS_UNREADABLE);
     // SQLite opens lazily, so a file that is not a database first fails here, as it did in the C++ prepare (bridge.cpp:1198-1206).
     let version = connection
@@ -179,7 +197,7 @@ pub fn candidate_target_glosses(
 
 /// `open_dictionary` (bridge.cpp:1150-1158): only a regular file whose prefix statement prepares.
 fn open_gloss_dictionary(path: &Path) -> Option<EnglishDictionary> {
-    if !path.is_file() {
+    if !std::fs::symlink_metadata(path).ok()?.file_type().is_file() {
         return None;
     }
     Some(EnglishDictionary::open(path, None, None)).filter(EnglishDictionary::ready)
@@ -209,7 +227,8 @@ fn is_gloss_han(character: char) -> bool {
 
 /// `candidate_gloss_display` (bridge.cpp:206-237): senses split on `;` or `；`, ASCII whitespace collapsed, empty senses dropped, at most two joined with `"; "`. A control character anywhere in the result withholds the whole gloss, because a learned gloss came from the network and must not reach the candidate window unfiltered.
 pub(super) fn candidate_gloss_display(text: &str) -> String {
-    let mut output = String::new();
+    // Joining two senses adds at most one byte beyond the source's separators.
+    let mut output = String::with_capacity(text.len() + 1);
     let mut count = 0;
     let mut rest = text;
     while count < MAXIMUM_GLOSS_SENSES {

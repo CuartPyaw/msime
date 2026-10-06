@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { runAsyncAction } from "../core/async-action";
 import { CredentialTestSection, type CredentialTestState } from "./credential-test-section";
 import { providerCredentialErrorMessage } from "./credential-utils";
+import { useAsyncGeneration } from "./use-async-generation";
 import type {
   ApiCredentialTestResult,
   ApiCredentialTestService,
@@ -24,6 +26,12 @@ export interface ProviderCredentialInput {
   endpoint?: string;
 }
 
+export interface TencentCredentialInput {
+  secretId: string;
+  secretKey: string;
+  region?: string;
+}
+
 export type ProviderCredentialBusy = "ai" | "tencent" | VoiceCredentialKind;
 export type ProviderCredentialMessage = { ok: boolean; text: string };
 
@@ -43,7 +51,7 @@ export function useProviderCredentials({ client }: UseProviderCredentialsOptions
   const credentialTestGeneration = useRef<Partial<Record<ApiCredentialTestService, number>>>({});
   const [providerCredentials, setProviderCredentials] = useState<ProviderCredentialStatus>();
   const [aiCredentialInput, setAiCredentialInput] = useState("");
-  const [tencentCredentialInput, setTencentCredentialInput] = useState({
+  const [tencentCredentialInput, setTencentCredentialInput] = useState<TencentCredentialInput>({
     secretId: "",
     secretKey: "",
     region: undefined as string | undefined,
@@ -55,80 +63,130 @@ export function useProviderCredentials({ client }: UseProviderCredentialsOptions
   const [providerCredentialMessages, setProviderCredentialMessages] = useState<
     Partial<Record<ProviderCredentialBusy, ProviderCredentialMessage>>
   >({});
+  const credentialSaveRunning = useRef(false);
+  const credentialTestRunning = useRef<Partial<Record<ApiCredentialTestService, number>>>({});
+  const credentialTestOwner = useAsyncGeneration();
+  const clientGeneration = useAsyncGeneration(client.providerCredentials, client.testApiCredential);
+
+  const updateTencentCredentialInput = (patch: Partial<TencentCredentialInput>) =>
+    setTencentCredentialInput((current) => ({ ...current, ...patch }));
 
   useEffect(() => {
+    const generation = clientGeneration.current;
+    credentialTestGeneration.current = {};
+    credentialTestRunning.current = {};
+    credentialTestOwner.current++;
+    credentialSaveRunning.current = false;
+    setProviderCredentials(undefined);
+    setCredentialTests((current) => (Object.keys(current).length ? {} : current));
+    setProviderCredentialBusy(undefined);
+    setProviderCredentialMessages((current) => (Object.keys(current).length ? {} : current));
     const credentials = client.providerCredentials;
     if (!credentials) return;
-    let active = true;
     void credentials
       .status()
       .then((status) => {
-        if (active) setProviderCredentials(status);
+        if (clientGeneration.current === generation) setProviderCredentials(status);
       })
       .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, [client]);
+  }, [client.providerCredentials, client.testApiCredential]);
 
   const runCredentialTest = async (
     service: ApiCredentialTestService,
     config: Record<string, unknown>,
   ) => {
     if (!client.testApiCredential) return;
+    if (credentialTests[service]?.busy || credentialTestRunning.current[service] !== undefined)
+      return;
+    const clientVersion = clientGeneration.current;
+    const owner = ++credentialTestOwner.current;
+    credentialTestRunning.current[service] = owner;
     const signature = JSON.stringify(config);
     const generation = (credentialTestGeneration.current[service] ?? 0) + 1;
     credentialTestGeneration.current[service] = generation;
-    setCredentialTests((current) => ({
-      ...current,
-      [service]: { signature, busy: true, message: "" },
-    }));
+    const update = (patch: { busy: boolean; ok?: boolean; message: string }) =>
+      setCredentialTests((current) => ({
+        ...current,
+        [service]: { signature, ...patch },
+      }));
     try {
-      const result = await client.testApiCredential(service, config);
-      if (credentialTestGeneration.current[service] !== generation) return;
-      setCredentialTests((current) => ({
-        ...current,
-        [service]: { signature, busy: false, ...result },
-      }));
-    } catch {
-      if (credentialTestGeneration.current[service] !== generation) return;
-      setCredentialTests((current) => ({
-        ...current,
-        [service]: {
-          signature,
+      await runAsyncAction(
+        {
           busy: false,
-          ok: false,
-          message: "无法连接 provider，请确认服务已启动。",
+          isCurrent: () =>
+            clientGeneration.current === clientVersion &&
+            credentialTestGeneration.current[service] === generation,
+          setBusy: (busy) =>
+            setCredentialTests((current) => ({
+              ...current,
+              [service]: {
+                ...(current[service]?.signature === signature ? current[service] : {}),
+                signature,
+                busy,
+              },
+            })),
+          setError: (message) =>
+            update(message ? { busy: true, ok: false, message } : { busy: true, message }),
         },
-      }));
+        async (isCurrent) => {
+          const result = await client.testApiCredential!(service, config);
+          if (!isCurrent()) return;
+          update({ busy: true, ...result });
+        },
+        { formatError: () => "无法连接 provider，请确认服务已启动。" },
+      );
+    } finally {
+      if (credentialTestRunning.current[service] === owner)
+        delete credentialTestRunning.current[service];
     }
   };
+
+  async function runCredentialSave<T>(
+    kind: ProviderCredentialBusy,
+    operation: (credentials: ProviderCredentialClient) => Promise<T>,
+    onSuccess: (result: T) => void,
+  ) {
+    const credentials = client.providerCredentials;
+    if (!credentials || credentialSaveRunning.current) return;
+    const clientVersion = clientGeneration.current;
+    credentialSaveRunning.current = true;
+    try {
+      await runAsyncAction(
+        {
+          busy: false,
+          isCurrent: () => clientGeneration.current === clientVersion,
+          setBusy: (busy) => setProviderCredentialBusy(busy ? kind : undefined),
+          setError: (message) =>
+            setProviderCredentialMessages((current) => ({
+              ...current,
+              [kind]: message ? { ok: false, text: message } : undefined,
+            })),
+        },
+        async (isCurrent) => {
+          const result = await operation(credentials);
+          if (isCurrent()) onSuccess(result);
+        },
+        { formatError: providerCredentialErrorMessage },
+      );
+    } finally {
+      if (clientVersion === clientGeneration.current) credentialSaveRunning.current = false;
+    }
+  }
 
   const runProviderCredential = async (
     kind: "ai" | "tencent",
     operation: (credentials: ProviderCredentialClient) => Promise<ProviderCredentialStatus>,
     success: string,
   ) => {
-    const credentials = client.providerCredentials;
-    if (!credentials) return;
-    setProviderCredentialBusy(kind);
-    setProviderCredentialMessages((current) => ({ ...current, [kind]: undefined }));
-    try {
-      setProviderCredentials(await operation(credentials));
+    await runCredentialSave(kind, operation, (result) => {
+      setProviderCredentials(result);
       if (kind === "ai") setAiCredentialInput("");
       else setTencentCredentialInput({ secretId: "", secretKey: "", region: undefined });
       setProviderCredentialMessages((current) => ({
         ...current,
         [kind]: { ok: true, text: success },
       }));
-    } catch (error) {
-      setProviderCredentialMessages((current) => ({
-        ...current,
-        [kind]: { ok: false, text: providerCredentialErrorMessage(error) },
-      }));
-    } finally {
-      setProviderCredentialBusy(undefined);
-    }
+    });
   };
 
   const runVoiceCredential = async (
@@ -136,12 +194,7 @@ export function useProviderCredentials({ client }: UseProviderCredentialsOptions
     operation: (credentials: ProviderCredentialClient) => Promise<VoiceCredentialSaveResult>,
     success: string,
   ) => {
-    const credentials = client.providerCredentials;
-    if (!credentials) return;
-    setProviderCredentialBusy(kind);
-    setProviderCredentialMessages((current) => ({ ...current, [kind]: undefined }));
-    try {
-      const result = await operation(credentials);
+    await runCredentialSave(kind, operation, (result) => {
       setProviderCredentials(result.status);
       setVoiceCredentialInput((current) => ({ ...current, [kind]: { token: "", appKey: "" } }));
       setProviderCredentialMessages((current) => ({
@@ -153,14 +206,7 @@ export function useProviderCredentials({ client }: UseProviderCredentialsOptions
               text: `${success}但未能更新语音服务，请运行 systemctl --user enable --now msime-linux-voice.socket。`,
             },
       }));
-    } catch (error) {
-      setProviderCredentialMessages((current) => ({
-        ...current,
-        [kind]: { ok: false, text: providerCredentialErrorMessage(error) },
-      }));
-    } finally {
-      setProviderCredentialBusy(undefined);
-    }
+    });
   };
 
   const credentialTestControl = (
@@ -186,6 +232,7 @@ export function useProviderCredentials({ client }: UseProviderCredentialsOptions
     setAiCredentialInput,
     tencentCredentialInput,
     setTencentCredentialInput,
+    updateTencentCredentialInput,
     voiceCredentialInput,
     setVoiceCredentialInput,
     providerCredentialBusy,

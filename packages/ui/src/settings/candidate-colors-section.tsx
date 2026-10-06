@@ -1,8 +1,9 @@
+import { SettingsGroupNote } from "./settings-group-note";
 import type { ReactNode } from "react";
 import { candidateTextColor } from "../candidate/candidate-text-color";
 import { Row } from "../core/platform-controls";
 import type { CustomCandidateColors } from "../theme/global-theme";
-import * as settings from "./settings-style";
+import { ActionButton } from "../core/action-button";
 
 /** A colour slot of the custom theme's candidate palette (`custom_theme.candidate_colors`). */
 export type CandidateColorKey = keyof CustomCandidateColors;
@@ -17,7 +18,7 @@ export interface CandidateColorsSectionProps {
   showSelectionAppearance: boolean;
   showBorderColor: boolean;
   linux: boolean;
-  /** Sets or clears one slot. The settings model's `setCandidateColor` also selects the custom theme when a colour is chosen (see THEME_CONTRACT). */
+  /** Sets or clears one slot. The settings model's `onCandidateColorChange` also selects the custom theme when a colour is chosen (see THEME_CONTRACT). */
   onChange: (key: CandidateColorKey, value: string | null) => void;
 }
 
@@ -25,8 +26,8 @@ export interface CandidateColorsSectionProps {
 const linuxFcitxClassicColorNote =
   "Fcitx5 经典界面中编号跟随正文颜色、固定候选不单独着色，此项仅对 IBus 生效";
 
-/** One colour picker of the custom theme: the swatch, and a button that hands the slot back to the theme underneath. */
-function CandidateColorRow({
+/** 自定义主题的一个颜色选择器：色块，以及一个把该颜色槽交还给底层主题的按钮。 */
+export function CandidateColorRow({
   title,
   slot,
   value,
@@ -57,17 +58,15 @@ function CandidateColorRow({
           value={set ?? fallback}
           onChange={(event) => onChange(slot, event.target.value)}
         />
-        <button
-          type="button"
-          aria-label={resetLabel}
-          className={`candidate-color-reset${set ? "" : " is-active"}`}
-          aria-pressed={pressed ? !set : undefined}
-          onClick={() => {
+        <ActionButton
+          action={() => {
             if (set || !pressed) onChange(slot, null);
           }}
-        >
-          跟随主题
-        </button>
+          ariaLabel={resetLabel}
+          ariaPressed={pressed ? !set : undefined}
+          className={`candidate-color-reset${set ? "" : " is-active"}`}
+          label="跟随主题"
+        />
       </span>
     </Row>
   );
@@ -86,12 +85,31 @@ export function CandidateColorsSection({
   const light = previewTheme === "light";
   return (
     <>
+      {/* 先是背景，然后是写在背景上的内容，再是一行可能处于的各种状态，最后是边框。 */}
+      <CandidateColorRow
+        title="候选表面色"
+        slot="surface"
+        value={preferences.surface}
+        fallback={light ? "#ffffff" : "#202020"}
+        onChange={onChange}
+        resetLabel="候选表面色跟随主题"
+        pressed={false}
+      />
       <CandidateColorRow
         title="候选文字颜色"
         slot="text"
         value={preferences.text}
         fallback={light ? "#1a1a1a" : "#e9e8e8"}
         onChange={onChange}
+      />
+      <CandidateColorRow
+        title="候选编号颜色"
+        slot="number"
+        value={preferences.number}
+        fallback={light ? "#5f6368" : "#bdc1c6"}
+        onChange={onChange}
+        resetLabel="候选编号颜色跟随主题"
+        description={linux ? linuxFcitxClassicColorNote : undefined}
       />
       {showRowColors ? (
         <>
@@ -114,7 +132,7 @@ export function CandidateColorsSection({
           />
         </>
       ) : (
-        <p className={settings.groupNote}>当前宿主的候选面板不支持强调或选中行颜色。</p>
+        <SettingsGroupNote>当前宿主的候选窗口不支持强调或选中行颜色。</SettingsGroupNote>
       )}
       {showSelectionAppearance ? (
         <CandidateColorRow
@@ -126,21 +144,12 @@ export function CandidateColorsSection({
           resetLabel="候选悬停色跟随主题"
         />
       ) : (
-        <p className={settings.groupNote}>
+        <SettingsGroupNote>
           {linux
-            ? "悬停颜色不支持；边框仅在 Fcitx5 经典界面绘制，IBus 候选窗无边框。"
-            : "当前宿主的候选面板不支持悬停或边框颜色。"}
-        </p>
+            ? "悬停颜色不支持；边框仅在 Fcitx5 经典界面绘制，IBus 候选窗口无边框。"
+            : "当前宿主的候选窗口不支持悬停或边框颜色。"}
+        </SettingsGroupNote>
       )}
-      <CandidateColorRow
-        title="候选表面色"
-        slot="surface"
-        value={preferences.surface}
-        fallback={light ? "#ffffff" : "#202020"}
-        onChange={onChange}
-        resetLabel="候选表面色跟随主题"
-        pressed={false}
-      />
       {showBorderColor && (
         <CandidateColorRow
           title="候选边框色"
@@ -152,15 +161,6 @@ export function CandidateColorsSection({
           pressed={false}
         />
       )}
-      <CandidateColorRow
-        title="候选编号颜色"
-        slot="number"
-        value={preferences.number}
-        fallback={light ? "#5f6368" : "#bdc1c6"}
-        onChange={onChange}
-        resetLabel="候选编号颜色跟随主题"
-        description={linux ? linuxFcitxClassicColorNote : undefined}
-      />
     </>
   );
 }

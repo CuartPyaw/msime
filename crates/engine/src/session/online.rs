@@ -4,14 +4,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::composition::resolve_shuangpin_composition_base;
 use super::input::InputSession;
-use crate::ime::online_batch::replace_online_candidate_batch;
+use crate::ime::online_batch::validate_online_candidate_batch;
+use crate::local::command::TEXT_UTF16_LIMIT;
 use crate::pinyin::active_helpcode::strip_active_helpcodes;
 use crate::pinyin::segment::{is_complete_pinyin_input, split_segments};
 use crate::pinyin::syllables::to_google_spelling;
 use crate::shuangpin::query::{
     is_complete_input, normalize_input_with_delimiters, raw_length_for_effective_prefix,
 };
-use crate::types::{CandidateSource, LocalInputMode, OnlineQuery, SchemeType};
+use crate::types::{
+    CandidateSource, CommandTranslationQuery, LocalInputMode, OnlineQuery, SchemeType, WordItem,
+};
 
 /// Session ids are unique for the process, so an answer can never be applied to a different session than the one that asked.
 static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
@@ -21,6 +24,7 @@ static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 pub(super) struct OnlineRequestGuard {
     pub session_id: u64,
     pub generation: u64,
+    exhausted: bool,
 }
 
 impl OnlineRequestGuard {
@@ -28,16 +32,25 @@ impl OnlineRequestGuard {
         Self {
             session_id: NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed),
             generation: 0,
+            exhausted: false,
         }
     }
 
     pub fn invalidate(&mut self) {
-        self.generation += 1;
+        if self.exhausted {
+            return;
+        }
+        let Some(next) = self.generation.checked_add(1) else {
+            self.exhausted = true;
+            return;
+        };
+        self.generation = next;
     }
 
     /// Same session, generation and every query field.
     pub fn matches(&self, live: &OnlineQuery, answered: &OnlineQuery) -> bool {
-        answered.session_id == self.session_id
+        !self.exhausted
+            && answered.session_id == self.session_id
             && answered.generation == self.generation
             && live.scheme == answered.scheme
             && live.identity == answered.identity
@@ -57,10 +70,19 @@ struct CloudQueryState {
     cache_key: String,
 }
 
+fn online_identity(scheme: SchemeType, input: &str) -> String {
+    let mut identity = String::with_capacity(2 + input.len());
+    identity.push(char::from(b'0' + scheme as u8));
+    identity.push(':');
+    identity.push_str(input);
+    identity
+}
+
 impl InputSession {
     /// input_session.cpp:631-667 over `get_cloud_query_state` (input_session_composition.cpp:913-974).
     pub(super) fn online_query(&self) -> Option<OnlineQuery> {
         if self.dedicated_english
+            || self.online_requests.exhausted
             || self.local_mode != LocalInputMode::None
             || !self.has_composition()
         {
@@ -79,7 +101,7 @@ impl InputSession {
         let mut query = OnlineQuery {
             scheme: request.scheme,
             generation: self.online_requests.generation,
-            identity: format!("{}:{}", request.scheme as u8, input),
+            identity: online_identity(request.scheme, input),
             query_text: state.query_text,
             cache_key: state.cache_key,
             session_id: self.online_requests.session_id,
@@ -104,6 +126,60 @@ impl InputSession {
                 .iter()
                 .all(|segment| is_complete_pinyin_input(segment));
         Some(query)
+    }
+
+    /// The `/fy` request, the only one a local mode makes; `None` in every other state, so the cloud and AI path above stays closed to local input, and `None` again once the text has its translation, so a host that asks again for every new view does not send the same text twice.
+    pub(super) fn command_translation_query(&self) -> Option<CommandTranslationQuery> {
+        if self.dedicated_english || self.local_mode != LocalInputMode::Command {
+            return None;
+        }
+        let code = self.local_preedit.get(1..)?;
+        let (_, text) = self.queries.translation_source(code)?;
+        // `query_command` lists the English first; anything ahead of it is the translation.
+        if self
+            .local_candidates
+            .first()
+            .is_some_and(|row| row.word != text)
+        {
+            return None;
+        }
+        Some(CommandTranslationQuery {
+            session_id: self.online_requests.session_id,
+            text,
+        })
+    }
+
+    /// Puts a translation of the live `/fy` text first, as a row that commits the translation; false for an answer to another session or to text no longer typed, and for text a row cannot show.
+    pub(super) fn apply_command_translation(
+        &mut self,
+        query: &CommandTranslationQuery,
+        translation: &str,
+    ) -> bool {
+        let translation = translation.trim();
+        if translation.is_empty()
+            || translation.chars().any(char::is_control)
+            || translation.encode_utf16().count() > TEXT_UTF16_LIMIT
+            || translation == query.text
+            || self.command_translation_query().as_ref() != Some(query)
+        {
+            return false;
+        }
+        let Some((trigger, _)) = self
+            .local_preedit
+            .get(1..)
+            .and_then(|code| self.queries.translation_source(code))
+        else {
+            return false;
+        };
+        let weight = self
+            .local_candidates
+            .first()
+            .map_or(1, |item| item.weight + 1);
+        self.local_candidates.insert(
+            0,
+            WordItem::new(trigger, translation, weight, CandidateSource::Generated, ""),
+        );
+        true
     }
 
     pub(super) fn apply_online_candidate(
@@ -136,8 +212,8 @@ impl InputSession {
         words: &[String],
         source: CandidateSource,
     ) -> bool {
-        // The batch rule is checked on a scratch list first, so a batch the provider could never place is refused before anything reaches its cache.
-        if !replace_online_candidate_batch(&mut Vec::new(), &query.cache_key, words, source) {
+        // The batch rule is checked without constructing rows that would be discarded before anything reaches the provider cache.
+        if !validate_online_candidate_batch(words, source) {
             return false;
         }
         if !self.online_answer_accepted(query, source) {
@@ -174,6 +250,13 @@ impl InputSession {
                     state.query_text = request.raw_input.clone();
                 }
             }
+            // 韩文音节、越南文单词和藏文音节串本身就是文字，没有可交给云端转换的东西。粤拼、注音和笔画只由各自的词库回答。
+            SchemeType::Korean
+            | SchemeType::Cantonese
+            | SchemeType::Zhuyin
+            | SchemeType::Vietnamese
+            | SchemeType::Tibetan
+            | SchemeType::Stroke => {}
             // Wubi codes are not spellings a cloud provider understands, and wubi providers cannot take dynamic rows.
             SchemeType::Wubi => state.cache_key = request.normalized_input.clone(),
             SchemeType::Shuangpin => {
@@ -186,7 +269,7 @@ impl InputSession {
                     base.raw_input[..raw_length_for_effective_prefix(&base.raw_input, base_length)]
                         .to_owned()
                 } else {
-                    base.raw_input.clone()
+                    base.raw_input.clone().into_owned()
                 };
                 if self.has_active_helpcode() {
                     return state;
@@ -269,5 +352,15 @@ mod tests {
         let live = stamped(&guard);
         assert!(!guard.matches(&live, &query));
         assert!(guard.matches(&live, &live));
+    }
+
+    #[test]
+    fn generation_exhaustion_does_not_reuse_online_request_identity() {
+        let mut guard = OnlineRequestGuard::new();
+        let old = stamped(&guard);
+        guard.generation = u64::MAX;
+        guard.invalidate();
+        let live = stamped(&guard);
+        assert!(!guard.matches(&live, &old));
     }
 }

@@ -1,6 +1,5 @@
 //! `E` and `M` modes and the mixed emoji / kaomoji rows (emoji_query.cpp:59-140, kaomoji_query.cpp). Shuangpin also queries the code normalised to quanpin.
 
-use std::collections::HashSet;
 use std::path::Path;
 
 use rusqlite::Connection;
@@ -118,10 +117,10 @@ fn read(
     limit: usize,
 ) -> rusqlite::Result<Vec<(String, i64)>> {
     let mut statement = connection.prepare_cached(sql)?;
-    let mut seen = HashSet::new();
-    let mut entries = Vec::new();
+    let capacity = limit.saturating_mul(prefixes.len());
+    let mut entries = Vec::with_capacity(capacity);
     for prefix in prefixes {
-        let upper_bound = format!("{prefix}\x7f");
+        let upper_bound = prefix_upper_bound(prefix);
         let rows = statement.query_map(
             rusqlite::params![prefix, upper_bound, super::sql_limit(limit)],
             |row| {
@@ -133,7 +132,7 @@ fn read(
         )?;
         for row in rows {
             if let (Some(text), sort_order) = row? {
-                if seen.insert(text.clone()) {
+                if !contains_text(&entries, &text) {
                     entries.push((text, sort_order.unwrap_or(0)));
                 }
             }
@@ -141,6 +140,17 @@ fn read(
     }
     entries.sort_by_key(|(_, sort_order)| *sort_order);
     Ok(entries)
+}
+
+fn prefix_upper_bound(prefix: &str) -> String {
+    let mut upper_bound = String::with_capacity(prefix.len() + 1);
+    upper_bound.push_str(prefix);
+    upper_bound.push('\x7f');
+    upper_bound
+}
+
+fn contains_text(entries: &[(String, i64)], text: &str) -> bool {
+    entries.iter().any(|(entry, _)| entry == text)
 }
 
 #[cfg(test)]
@@ -158,7 +168,7 @@ mod tests {
     };
 
     fn fixture(dir: &Path) -> PathBuf {
-        let path = dir.join("others.db");
+        let path = dir.join("msime-others.db");
         Connection::open(&path)
             .unwrap()
             .execute_batch(
@@ -187,6 +197,21 @@ mod tests {
             .iter()
             .map(|row| row.word.as_str())
             .collect()
+    }
+
+    #[test]
+    fn duplicate_text_lookup_scans_existing_entries() {
+        let entries = vec![("😀".to_owned(), 1)];
+        assert!(contains_text(&entries, "😀"));
+        assert!(!contains_text(&entries, "😄"));
+    }
+
+    #[test]
+    fn prefix_upper_bound_allocates_only_result_bytes() {
+        let prefix = "xiao'lian";
+        let upper_bound = prefix_upper_bound(prefix);
+        assert_eq!(upper_bound, "xiao'lian\x7f");
+        assert_eq!(upper_bound.capacity(), upper_bound.len());
     }
 
     /// test_local_modes.cpp:269-296, the quanpin half.

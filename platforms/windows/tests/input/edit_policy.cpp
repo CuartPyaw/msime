@@ -69,6 +69,9 @@ int main() {
     REQUIRE(edit_kind(key(0xDE, '\''), "none", true) == EditKind::Character);
     REQUIRE(edit_kind(key(0xDE, '\''), "none", false) == EditKind::None);
     REQUIRE(edit_kind(key(0xDE, '\''), "emoji", true) == EditKind::None);
+    // Under Stroke the Engine refuses the separator, so a composing apostrophe is punctuation (scheme::ApostropheIsPunctuationWhileComposing) and not composition input.
+    REQUIRE(edit_kind(key(0xDE, '\''), "none", true, false, {}, 0, false, {}, true) == EditKind::None);
+    REQUIRE(edit_kind(key('A', 'a'), "none", true, false, {}, 0, false, {}, true) == EditKind::Character);
 
     // Japanese reserves the OEM minus key for the long vowel mark. Elsewhere
     // that key is navigation or punctuation and must not reach the composition.
@@ -105,6 +108,77 @@ int main() {
     REQUIRE(edit_kind(key(0xBB, '+', shift), "unicode", true) == EditKind::Character);
     // Outside Unicode mode a digit is a candidate shortcut, not an edit.
     REQUIRE(edit_kind(key('4', '4'), "none", true) == EditKind::None);
+
+    // Elsewhere the Engine's View.spelling_symbols decides: V's digits and operators are input, including the ones typed with Shift and the minus key that pages elsewhere.
+    constexpr std::string_view expression = "0123456789+-*/.()%^";
+    const auto spelled = [&](FanyImeNamedpipeData packet) {
+      return edit_kind(packet, "expression", true, false, {}, 0, false, expression);
+    };
+    REQUIRE(spelled(key('4', '4')) == EditKind::Character);
+    REQUIRE(spelled(key(0x64, '4')) == EditKind::Character);
+    REQUIRE(spelled(key(0xBD, '-')) == EditKind::Character);
+    REQUIRE(spelled(key(0xBB, '+', shift)) == EditKind::Character);
+    REQUIRE(spelled(key('8', '*', shift)) == EditKind::Character);
+    REQUIRE(spelled(key('9', '(', shift)) == EditKind::Character);
+    REQUIRE(spelled(key(0xBE, '.')) == EditKind::Character);
+    REQUIRE(spelled(key(0x6F, '/')) == EditKind::Character);
+    // A key the mode does not spell is not an edit: Shift+1's '!' is a selection, '=' and ',' keep their own routes.
+    REQUIRE(spelled(key('1', '!', shift)) == EditKind::None);
+    REQUIRE(spelled(key(0xBB, '=')) == EditKind::None);
+    REQUIRE(spelled(key(0xBC, ',')) == EditKind::None);
+    REQUIRE(spelled(key('4', '4', control)) == EditKind::None);
+    // On an empty pinyin composition the Engine lists "/" and "@" for the modes that are on; Shift+2's '@' is then the mode's key.
+    REQUIRE(edit_kind(key(0xBF, '/'), "none", false, false, {}, 0, false, "/@") ==
+            EditKind::Character);
+    REQUIRE(edit_kind(key('2', '@', shift), "none", false, false, {}, 0, false, "/@") ==
+            EditKind::Character);
+    REQUIRE(edit_kind(key('2', '@', shift), "none", false, false, {}, 0, false, "/") ==
+            EditKind::None);
+    REQUIRE(edit_kind(key(0xBF, '/'), "none", false) == EditKind::None);
+    // 网址模式：组字 `www` 时 Engine 列出 `.`，它就是输入而不是翻页；进入后网址的数字和符号都是输入，包括 Shift 打出的 `@`、`#` 和在别处翻页的 `,` `=` `[`。
+    REQUIRE(edit_kind(key(0xBE, '.'), "none", true, false, "www", 3, false, ".") == EditKind::Character);
+    REQUIRE(edit_kind(key(0xBE, '.'), "none", true, false, "www", 3, false, {}) == EditKind::None);
+    constexpr std::string_view url = "0123456789-._~:/?#[]@!$&'()*+,;=%^";
+    const auto url_input = [&](FanyImeNamedpipeData packet) {
+      return edit_kind(packet, "url", true, false, {}, 0, false, url);
+    };
+    REQUIRE(url_input(key('1', '1')) == EditKind::Character);
+    REQUIRE(url_input(key('2', '@', shift)) == EditKind::Character);
+    REQUIRE(url_input(key('3', '#', shift)) == EditKind::Character);
+    REQUIRE(url_input(key(0xBC, ',')) == EditKind::Character);
+    REQUIRE(url_input(key(0xBB, '=')) == EditKind::Character);
+    REQUIRE(url_input(key(0xDB, '[')) == EditKind::Character);
+    REQUIRE(url_input(key(0xBA, ':', shift)) == EditKind::Character);
+    REQUIRE(url_input(key(0xBC, '<', shift)) == EditKind::None);
+    REQUIRE(url_input(key(0xDC, '\\')) == EditKind::None);
+    // Unicode keeps its key-based rule whatever the symbols say.
+    REQUIRE(edit_kind(key('4', '$', shift), "unicode", true, false, {}, 0, false,
+                      "0123456789") == EditKind::None);
+
+    // Which digit keys pick a candidate. Ordinary modes: a bare digit.
+    REQUIRE(digit_selects_candidate("none", "", '1', 0));
+    REQUIRE(!digit_selects_candidate("none", "", '!', shift));
+    REQUIRE(digit_selects_candidate("emoji", "", '3', 0));
+    REQUIRE(digit_selects_candidate("none", "/@", '2', 0));
+    REQUIRE(!digit_selects_candidate("none", "/@", '@', shift));
+    // Unicode: Shift+digit, as before.
+    REQUIRE(digit_selects_candidate("unicode", "0123456789", '!', shift));
+    REQUIRE(!digit_selects_candidate("unicode", "0123456789", '1', 0));
+    // V: a digit is input; a digit key printing something the mode does not spell selects, with or without Shift, so layouts whose digit row needs Shift still reach the rows.
+    REQUIRE(!digit_selects_candidate("expression", expression, '1', 0));
+    REQUIRE(digit_selects_candidate("expression", expression, '!', shift));
+    REQUIRE(!digit_selects_candidate("expression", expression, '*', shift));
+    REQUIRE(!digit_selects_candidate("expression", expression, '%', shift));
+    REQUIRE(digit_selects_candidate("expression", expression, '&', 0));
+    REQUIRE(!digit_selects_candidate("expression", expression, '!', control));
+    // 网址模式：Shift+数字行的符号都在表里，数字键不选词；只有打出表外字符的数字键（AZERTY 的裸 2 是 é）选词。
+    REQUIRE(!digit_selects_candidate("url", url, '1', 0));
+    REQUIRE(!digit_selects_candidate("url", url, '!', shift));
+    REQUIRE(!digit_selects_candidate("url", url, '@', shift));
+    REQUIRE(!digit_selects_candidate("url", url, '(', shift));
+    REQUIRE(digit_selects_candidate("url", url, 0xE9, 0));
+    // An unknown mode never selects.
+    REQUIRE(!digit_selects_candidate("unknown", "", '1', 0));
 
     // The preedit style preference maps by name and refuses anything else: a
     // typo must not silently become one of the three.

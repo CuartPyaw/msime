@@ -68,12 +68,24 @@ fn add_variant(
 
 /// ST:56-99. The edits are made on the syllable as written while variants and the typed syllable are compared in their normalised spelling, so no variant is the typed syllable under its other spelling.
 fn compute_typos(syllable: &str) -> Vec<SyllableTypo> {
-    let mut variants = Vec::new();
     let typed = normalized_syllable(syllable);
     if typed.len() < 2 {
-        return variants;
+        return Vec::new();
     }
     let letters = syllable.as_bytes();
+    let neighbor_capacity = letters
+        .iter()
+        .map(|&letter| {
+            (b'a'..=b'z')
+                .filter(|&key| keys_adjacent(key, letter))
+                .count()
+        })
+        .sum::<usize>();
+    let capacity = letters.len().saturating_sub(1)
+        + neighbor_capacity
+        + letters.len()
+        + letters.len().saturating_add(1).saturating_mul(26);
+    let mut variants = Vec::with_capacity(capacity);
     for i in 0..letters.len() - 1 {
         if letters[i] == letters[i + 1] {
             continue;
@@ -196,6 +208,19 @@ pub fn discounted(base: f64, accepted: i32) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// test_typo_correction_input_session.cpp:338-347: the discount never rises with more accepted typos and settles on its 8.0 floor.
+    #[test]
+    fn discount_is_monotonic_down_to_its_floor() {
+        let mut previous = discounted(20.0, 0);
+        assert_eq!(previous, 20.0);
+        for accepted in 1..=2000 {
+            let current = discounted(20.0, accepted);
+            assert!(current <= previous && current >= 8.0 - 1e-9, "{accepted}");
+            previous = current;
+        }
+        assert!(previous < 8.0 + 1e-9);
+    }
 
     #[test]
     fn keyboard_adjacency_includes_the_staggered_diagonals() {

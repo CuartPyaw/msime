@@ -44,7 +44,7 @@ final class DictionarySnapshotQueue: @unchecked Sendable {
   }
   private let directory: URL?
   private static let processLock = NSLock()
-  init(directory: URL? = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.app.msime.ios")) {
+  init(directory: URL? = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: MSIMEAppEdition.appGroupIdentifier)) {
     self.directory = directory?.appendingPathComponent("DictionarySnapshots", isDirectory: true)
   }
   private static func digest(_ value: String) -> Bool {
@@ -55,13 +55,26 @@ final class DictionarySnapshotQueue: @unchecked Sendable {
     guard fields.count == 3, fields[0] == "local-v1", digest(String(fields[2])) else { return false }
     return fields[1] == "legacy" || UUID(uuidString: String(fields[1]))?.uuidString == String(fields[1])
   }
+  private func rejectSymlinkAncestors(_ path: URL) throws {
+    guard !SafePath.hasRefusedSymbolicLink(path) else { throw Failure.unavailable }
+  }
+  private func rejectSymlinkFile(_ path: URL) throws {
+    var status = stat()
+    if lstat(path.standardizedFileURL.path, &status) == 0 {
+      guard status.st_mode & S_IFMT != S_IFLNK else { throw Failure.unavailable }
+    } else if errno != ENOENT {
+      throw Failure.unavailable
+    }
+  }
   private func root() throws -> URL {
     guard let directory else { throw Failure.unavailable }
+    try rejectSymlinkAncestors(directory)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
     return directory
   }
   private func read(_ root: URL) throws -> DictionarySnapshotQueueState {
     let file = root.appendingPathComponent("state.json")
+    try rejectSymlinkFile(file)
     guard FileManager.default.fileExists(atPath: file.path) else { return .init() }
     let handle = try FileHandle(forReadingFrom: file)
     defer { try? handle.close() }
@@ -79,7 +92,7 @@ final class DictionarySnapshotQueue: @unchecked Sendable {
     Self.processLock.lock()
     defer { Self.processLock.unlock() }
     let root = try root()
-    let descriptor = open(root.appendingPathComponent("state.lock").path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+    let descriptor = open(root.appendingPathComponent("state.lock").path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, S_IRUSR | S_IWUSR)
     guard descriptor >= 0 else { throw Failure.unavailable }
     defer { close(descriptor) }
     guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else { throw Failure.busy }
@@ -111,7 +124,7 @@ final class DictionarySnapshotQueue: @unchecked Sendable {
   }
   func acquireWorkerLease() throws -> WorkerLease {
     let root = try root()
-    let descriptor = open(root.appendingPathComponent("worker.lock").path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+    let descriptor = open(root.appendingPathComponent("worker.lock").path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, S_IRUSR | S_IWUSR)
     guard descriptor >= 0 else { throw Failure.unavailable }
     guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else { close(descriptor); throw Failure.busy }
     return WorkerLease(descriptor, owner: root.standardizedFileURL)

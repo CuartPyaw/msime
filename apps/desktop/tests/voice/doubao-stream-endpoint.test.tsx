@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { testHost } from "../support/host";
+import { settingsFormReady } from "../support/settings-form";
 import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SettingsPage, type Snapshot } from "@msime/ui";
@@ -32,11 +34,11 @@ async function openVoice(voice: Record<string, unknown>, platform = "windows") {
       client={{
         load: async () => snapshotWith(voice),
         save: vi.fn(),
-        host: { platform } as never,
+        host: testHost({ platform }),
       }}
     />,
   );
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   fireEvent.click(screen.getByRole("button", { name: "语音输入" }));
 }
 

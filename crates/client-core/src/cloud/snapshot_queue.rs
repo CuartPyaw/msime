@@ -145,6 +145,9 @@ impl DictionarySnapshotQueue {
     }
 
     fn existing_root(&self) -> Result<Option<PathBuf>, SnapshotQueueError> {
+        if let Some(parent) = self.directory.parent() {
+            crate::storage::reject_symlink(parent).map_err(|_| SnapshotQueueError::Unavailable)?;
+        }
         let metadata = match fs::symlink_metadata(&self.directory) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -330,6 +333,7 @@ impl DictionarySnapshotQueue {
         {
             return Err(SnapshotQueueError::Invalid);
         }
+        crate::storage::reject_symlink(source).map_err(|_| SnapshotQueueError::Invalid)?;
         let root = self.root()?;
         let mut incoming =
             tempfile::NamedTempFile::new_in(&root).map_err(|_| SnapshotQueueError::Unavailable)?;
@@ -613,6 +617,50 @@ mod tests {
             Err(SnapshotQueueError::Unavailable | SnapshotQueueError::Invalid)
         ));
         assert!(!target.path().join(STATE_NAME).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_a_symlinked_queue_ancestor_when_reading_existing_state() {
+        use std::os::unix::fs::symlink;
+
+        let target = tempfile::tempdir().unwrap();
+        let queue_root = target.path().join("queue");
+        fs::create_dir(&queue_root).unwrap();
+        fs::write(queue_root.join(STATE_NAME), br#"{"version":1}"#).unwrap();
+        let parent = tempfile::tempdir().unwrap();
+        let linked_parent = parent.path().join("state");
+        symlink(target.path(), &linked_parent).unwrap();
+
+        let queue = DictionarySnapshotQueue::new(linked_parent.join("queue")).unwrap();
+        assert!(matches!(queue.read(), Err(SnapshotQueueError::Unavailable)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn enqueue_rejects_a_snapshot_below_a_symlinked_parent() {
+        use msime_path_trust::untrusted_symlink as symlink;
+
+        let parent = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let linked_parent = parent.path().join("linked");
+        symlink(outside.path(), &linked_parent).unwrap();
+        let source = linked_parent.join("snapshot.ndjson");
+        fs::write(
+            outside.path().join("snapshot.ndjson"),
+            b"synthetic snapshot\n",
+        )
+        .unwrap();
+        let digest = hex::encode(Sha256::digest(b"synthetic snapshot\n"));
+        let queue = DictionarySnapshotQueue::new(parent.path().join("queue")).unwrap();
+        let initial = version("legacy", 'a');
+        queue.publish_local_version(&initial).unwrap();
+
+        assert!(matches!(
+            queue.enqueue(&source, "fixture", 1, &initial, &digest),
+            Err(SnapshotQueueError::Invalid)
+        ));
+        assert_eq!(queue.read().unwrap().request, None);
     }
 
     #[test]

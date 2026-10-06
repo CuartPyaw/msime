@@ -3,9 +3,10 @@ import Foundation
 @MainActor final class SyntheticClipboardAPI: DesktopCloudClipboardAPI {
   var calls = 0
   var uploaded = ""
+  var enabled = true
   func clipboard(token: String, search: String) async throws -> BackendAccountClient.ClipboardPage {
     calls += 1
-    return .init(enabled: true, items: [.init(id: String(repeating: "a", count: 64), text: "synthetic\n\t合成", updated_at: "synthetic-time")])
+    return .init(enabled: enabled, items: [.init(id: String(repeating: "a", count: 64), text: "synthetic\n\t合成", updated_at: "synthetic-time")])
   }
   func addClipboard(_ text: String, token: String) async throws -> BackendAccountClient.ClipboardItem {
     calls += 1; uploaded = text
@@ -57,5 +58,23 @@ import Foundation
     }
     assert(response["ok"] as? Bool == false && api.calls == before)
     assert(response["error"] as? String == "unavailable")
+
+    // Sending a local history entry reads the server flag first and uploads only while it is on.
+    let sending = SyntheticClipboardAPI()
+    let sender = BackendCloudClipboardProvider(client: sending, credentials: { "synthetic-token" })
+    let sent = await sender.send("synthetic\n合成")
+    assert(sent == .sent && sending.uploaded == "synthetic\n合成" && sending.calls == 2)
+    sending.enabled = false
+    sending.uploaded = ""
+    let disabled = await sender.send("synthetic")
+    assert(disabled == .disabled && sending.uploaded.isEmpty && sending.calls == 3)
+    sending.enabled = true
+    let rejected = await sender.send("synthetic\0")
+    assert(rejected == .failed && sending.uploaded.isEmpty && sending.calls == 4)
+    let signedOut = BackendCloudClipboardProvider(client: sending, credentials: { throw CancellationError() })
+    let unauthenticated = await signedOut.send("synthetic")
+    assert(unauthenticated == .failed && sending.calls == 4)
+    assert(BackendCloudClipboardProvider.SendOutcome.signedOut.message == "登录水杉账号后可在设备间同步剪贴板")
+    assert(BackendCloudClipboardProvider.SendOutcome.disabled.message == "云剪贴板未开启")
   }
 }

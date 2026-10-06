@@ -153,24 +153,6 @@ final class TypingStatisticsTests: XCTestCase {
     XCTAssertTrue(cleared.dailyHours.isEmpty)
   }
 
-  func testRetentionTheSwiftStoreWroteSurvivesTheSharedStore() throws {
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: directory) }
-    let key = TypingStatistics.dayKey(Date())
-    let old: [String: Any] = ["enabled": true, "total": 3, "days": [key: 3], "retentionDays": 90]
-    let url = directory.appendingPathComponent("typing-statistics.json")
-    try JSONSerialization.data(withJSONObject: old).write(to: url)
-    let store = TypingStatisticsStore(directory: directory)
-    try store.record("字")
-    let snapshot = try store.load()
-    XCTAssertEqual(snapshot.retentionDays, 90)
-    XCTAssertEqual(snapshot.total, 4)
-    let document = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
-    XCTAssertEqual(document["retention"] as? String, "90d")
-    XCTAssertNil(document["retentionDays"])
-  }
-
   func testLongCommitsAreSplitOnCharacterBoundaries() throws {
     let family = "👨‍👩‍👧‍👦"
     let text = String(repeating: family, count: 1_000)
@@ -265,30 +247,6 @@ final class TypingStatisticsTests: XCTestCase {
     XCTAssertNotNil(lastWritten)
   }
 
-  func testMovesLegacyAppGroupStatisticsIntoTheSharedTauriStateDirectory() throws {
-    let container = FileManager.default.temporaryDirectory
-      .appendingPathComponent("stats-migration-\(UUID().uuidString)")
-    let sharedState = container.appendingPathComponent("MSIME", isDirectory: true)
-    try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: container) }
-
-    let legacy = TypingStatisticsStore(directory: container)
-    try legacy.setEnabled(true)
-    try legacy.record("迁移", source: .quanpin)
-    let store = TypingStatisticsStore(directory: sharedState, legacyDirectory: container)
-    guard case .ready = store.availability() else {
-      return XCTFail("Legacy statistics should be reported before the first migration read.")
-    }
-    let snapshot = try store.load()
-
-    XCTAssertEqual(snapshot.total, 2)
-    XCTAssertEqual(snapshot.detail.sources["quanpin"], 2)
-    XCTAssertTrue(FileManager.default.fileExists(
-      atPath: sharedState.appendingPathComponent("typing-statistics.json").path))
-    XCTAssertFalse(FileManager.default.fileExists(
-      atPath: container.appendingPathComponent("typing-statistics.json").path))
-  }
-
   /// The daily table uses the Windows columns: the four named kinds, everything else under 其他 so a row adds up, and speed over prose only.
   func testDailyRowsFollowTheWindowsColumnsAndExportAsCSV() throws {
     let document = """
@@ -317,5 +275,154 @@ final class TypingStatisticsTests: XCTestCase {
     XCTAssertEqual(lines.count, 4)
     XCTAssertEqual(lines[1], "2026-09-22,30,20,0,0,0,10,0.5,40")
     XCTAssertEqual(lines[3], "2026-09-20,120,60,30,10,8,12,3.0,31")
+  }
+
+  /// The ids are a copy of the shared store's whitelist, which rejects a whole batch for one id it does not know, so every one of them has to be accepted.
+  func testKeyIDsAreTheSharedWhitelist() throws {
+    XCTAssertEqual(TypingKeyID.all.count, 127)
+    XCTAssertEqual(TypingKeyID.known.count, 127)
+    for id in TypingKeyID.all {
+      XCTAssertTrue(id.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }, id)
+    }
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = TypingStatisticsStore(directory: directory)
+    try store.setEnabled(true)
+    let everyKey = Dictionary(uniqueKeysWithValues: TypingKeyID.all.map { ($0, 1) })
+    XCTAssertEqual(try store.recordKeys(everyKey, day: "2026-09-30"), 127)
+    XCTAssertThrowsError(try store.recordKeys(["KeyA": 1, "NineComma": 1], day: "2026-09-30"))
+    XCTAssertEqual(try store.load().dailyKeys["2026-09-30"]?["KeyA"], 1)
+  }
+
+  func testSoftKeysMapToTheKeyThatTypesTheirCharacter() {
+    XCTAssertEqual(TypingKeyID.character("q"), "KeyQ")
+    XCTAssertEqual(TypingKeyID.character("Q"), "KeyQ")
+    XCTAssertEqual(TypingKeyID.character("7"), "Digit7")
+    XCTAssertEqual(TypingKeyID.character("!"), "Digit1")
+    XCTAssertEqual(TypingKeyID.character("@"), "Digit2")
+    XCTAssertEqual(TypingKeyID.character(","), "Comma")
+    XCTAssertEqual(TypingKeyID.character("<"), "Comma")
+    XCTAssertEqual(TypingKeyID.character("？"), "Slash")
+    XCTAssertEqual(TypingKeyID.character("、"), "Backslash")
+    XCTAssertEqual(TypingKeyID.character("——"), "Minus")
+    XCTAssertEqual(TypingKeyID.character("“"), "Quote")
+    XCTAssertEqual(TypingKeyID.character(" "), "Space")
+    // Nothing on a hardware keyboard types these on its own, so they are not counted.
+    XCTAssertNil(TypingKeyID.character("€"))
+    XCTAssertNil(TypingKeyID.character("😀"))
+    XCTAssertNil(TypingKeyID.character("ab"))
+    XCTAssertEqual(TypingKeyID.nineKey(1), "Nine1")
+    XCTAssertEqual(TypingKeyID.nineKey(0), "Nine0")
+    XCTAssertNil(TypingKeyID.nineKey(10))
+    // The quick punctuation key counts as the comma key it sits on, whatever mark it types.
+    XCTAssertEqual(TypingKeyID.quickPunctuation, "Comma")
+    XCTAssertTrue(TypingKeyID.known.contains(TypingKeyID.quickPunctuation))
+    XCTAssertEqual((0...10).map(TypingKeyID.japaneseKana),
+                   ["Nine1", "Nine2", "Nine3", "Nine4", "Nine5", "Nine6", "Nine7", "Nine8", "Nine9", "Nine0", "SoftPunctuation"])
+    XCTAssertNil(TypingKeyID.japaneseKana(11))
+    let mapped = (Array("abcdefghijklmnopqrstuvwxyz0123456789").map(String.init)
+      + [",", ".", "?", "!", ";", ":", "'", "\"", "@", "/", "(", ")", "[", "]", "<", ">", "\\", "-", "_", "="]
+      + ["，", "。", "？", "！", "、", "；", "：", "「", "」"]).map(TypingKeyID.character)
+    // Every key the soft keyboard and its symbol layer draw lands on an id the store accepts.
+    for id in mapped { XCTAssertTrue(TypingKeyID.known.contains(id ?? ""), String(describing: id)) }
+    XCTAssertEqual(TypingKeyID.label("KeyA"), "A")
+    XCTAssertEqual(TypingKeyID.label("Digit0"), "0")
+    XCTAssertEqual(TypingKeyID.label("Nine2"), "九键 2")
+    XCTAssertEqual(TypingKeyID.label("Space"), "空格")
+  }
+
+  /// Counts go out in batches, and a press before midnight stays on the day it was pressed even when the batch is written after it.
+  func testKeyCounterBatchesByDayAndThreshold() {
+    var counter = TypingKeyCounter()
+    XCTAssertEqual(counter.record("KeyA", day: "2026-09-30"), [])
+    XCTAssertEqual(counter.record("KeyA", day: "2026-09-30"), [])
+    XCTAssertEqual(counter.record("Space", day: "2026-09-30"), [])
+    // An id the store would reject the whole batch for is dropped on its own.
+    XCTAssertEqual(counter.record("NotAKey", day: "2026-09-30"), [])
+    XCTAssertEqual(counter.presses, 3)
+    XCTAssertEqual(counter.record("KeyB", day: "2026-10-01"),
+                   [TypingKeyBatch(day: "2026-09-30", keys: ["KeyA": 2, "Space": 1])])
+    XCTAssertEqual(counter.day, "2026-10-01")
+    XCTAssertEqual(counter.counts, ["KeyB": 1])
+    var ready: [TypingKeyBatch] = []
+    for _ in 1..<TypingKeyCounter.flushThreshold { ready += counter.record("Backspace", day: "2026-10-01") }
+    XCTAssertEqual(ready, [TypingKeyBatch(day: "2026-10-01", keys: ["KeyB": 1, "Backspace": TypingKeyCounter.flushThreshold - 1])])
+    XCTAssertEqual(counter.presses, 0)
+    XCTAssertNil(counter.drain())
+    _ = counter.record("Enter", day: "2026-10-01")
+    XCTAssertEqual(counter.drain(), TypingKeyBatch(day: "2026-10-01", keys: ["Enter": 1]))
+    XCTAssertNil(counter.day)
+  }
+
+  func testKeyPressCountsFollowTheSwitchAndReset() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = TypingStatisticsStore(directory: directory)
+    XCTAssertFalse(try store.isEnabled())
+    XCTAssertEqual(try store.recordKeys(["KeyA": 3], day: "2026-09-30"), 0)
+    XCTAssertTrue(try store.load().dailyKeys.isEmpty)
+    try store.setEnabled(true)
+    XCTAssertTrue(try store.isEnabled())
+    XCTAssertEqual(try store.recordKeys([:], day: "2026-09-30"), 0)
+    XCTAssertEqual(try store.recordKeys(["KeyA": 3, "Nine2": 2], day: "2026-09-30"), 5)
+    XCTAssertEqual(try store.recordKeys(["KeyA": 1], day: "2026-09-30"), 1)
+    XCTAssertEqual(try store.recordKeys(["Space": 4], day: "2026-10-01"), 4)
+    let snapshot = try store.load()
+    XCTAssertEqual(snapshot.dailyKeys, ["2026-09-30": ["KeyA": 4, "Nine2": 2], "2026-10-01": ["Space": 4]])
+    // Key presses are not characters: the character total is untouched.
+    XCTAssertEqual(snapshot.total, 0)
+    try store.reset()
+    XCTAssertTrue(try store.load().dailyKeys.isEmpty)
+  }
+
+  func testRecordCountRejectsMalformedNativeNumbers() {
+    XCTAssertEqual(TypingStatisticsStore.strictRecordedCount(NSNumber(value: 3), maximum: 5), 3)
+    XCTAssertNil(TypingStatisticsStore.strictRecordedCount(NSNumber(value: true), maximum: 5))
+    XCTAssertNil(TypingStatisticsStore.strictRecordedCount(NSNumber(value: 3.5), maximum: 5))
+    XCTAssertNil(TypingStatisticsStore.strictRecordedCount(NSNumber(value: -1), maximum: 5))
+    XCTAssertNil(TypingStatisticsStore.strictRecordedCount(NSNumber(value: 6), maximum: 5))
+  }
+
+  /// The 按键 page sums the selected day, or every day, and splits the keys into the drawn keyboard, the nine-key grid, the rest and the top five.
+  func testKeyHeatmapFollowsTheScope() throws {
+    let old = try JSONDecoder().decode(TypingStatistics.self, from: Data(#"{"enabled":true,"total":0}"#.utf8))
+    XCTAssertTrue(old.dailyKeys.isEmpty)
+    let document = """
+    {"enabled":true,"total":0,
+     "dailyKeys":{"2026-09-29":{"KeyA":5,"Space":2,"Digit1":1},
+                  "2026-09-30":{"KeyA":118,"KeyB":40,"Nine5":7,"SoftSymbol":3,"Comma":9,"Backspace":40}}}
+    """
+    let statistics = try JSONDecoder().decode(TypingStatistics.self, from: Data(document.utf8))
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let day = calendar.date(from: DateComponents(year: 2026, month: 9, day: 29))!
+    XCTAssertEqual(statistics.keyCounts(on: [day], calendar: calendar), ["KeyA": 5, "Space": 2, "Digit1": 1])
+    let all = statistics.keyCounts(on: nil)
+    XCTAssertEqual(all["KeyA"], 123)
+    XCTAssertEqual(all["Space"], 2)
+
+    let heatmap = TypingKeyHeatmap(counts: all)
+    XCTAssertEqual(heatmap.total, 225)
+    XCTAssertEqual(heatmap.maximum, 123)
+    XCTAssertEqual(heatmap.level("KeyA"), 1)
+    XCTAssertEqual(heatmap.level("KeyZ"), 0)
+    XCTAssertTrue(heatmap.showsNineKey)
+    XCTAssertFalse(TypingKeyHeatmap(counts: statistics.keyCounts(on: [day], calendar: calendar)).showsNineKey)
+    // Ties keep id order, so Backspace comes before KeyB.
+    XCTAssertEqual(heatmap.top().map(\.id), ["KeyA", "Backspace", "KeyB", "Comma", "Nine5"])
+    XCTAssertEqual(heatmap.others.map(\.id), ["Comma", "SoftSymbol", "Digit1"])
+    XCTAssertEqual(heatmap.others.map(\.label), [",", "符", "1"])
+    XCTAssertEqual(TypingKeyHeatmap.accessibilityLabel("KeyA", count: 123), "A，123 次")
+    // Pinyin and kana presses share the nine-key ids, so a cell names both.
+    XCTAssertEqual(TypingKeyHeatmap.nineKeySubtitle("Nine2"), "ABC か")
+    XCTAssertEqual(TypingKeyHeatmap.nineKeySubtitle("Nine0"), "わ")
+    XCTAssertNil(TypingKeyHeatmap.nineKeySubtitle("KeyA"))
+    XCTAssertEqual(TypingKeyHeatmap.accessibilityLabel("Nine2", count: 7), "九键 2，拼音 ABC，日文 か，7 次")
+    XCTAssertEqual(TypingKeyHeatmap.accessibilityLabel("Nine0", count: 1), "九键 0，日文 わ，1 次")
+    XCTAssertEqual(TypingKeyHeatmap.nineKeyRows.joined().map { TypingKeyHeatmap.nineKeyFaces[$0]?.kana },
+                   ["あ", "か", "さ", "た", "な", "は", "ま", "や", "ら", "わ"])
+    XCTAssertEqual(TypingKeyHeatmap(counts: [:]).level("KeyA"), 0)
   }
 }

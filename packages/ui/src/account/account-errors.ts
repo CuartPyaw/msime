@@ -1,3 +1,4 @@
+import { communityModerationMessage } from "../community/community-helpers";
 import { errorCode } from "../core/error-code";
 
 export function isAccountCancellation(error: unknown): boolean {
@@ -18,9 +19,13 @@ export function isAccountCancellation(error: unknown): boolean {
 }
 
 export function accountMessage(error: unknown): string {
+  const moderation = communityModerationMessage(error);
+  if (moderation) return moderation;
   switch (errorCode(error)) {
     case "account_invalid":
       return "填写的内容无效，请检查后重试。";
+    case "account_avatar_invalid":
+      return "请选择 1 MiB 以内的 PNG 或 JPEG 图片。";
     case "account_unauthorized":
       return "登录已失效，请重新登录。";
     case "account_conflict":

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { StrictMode } from "react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
   LinuxSetupPage,
   type LinuxSetupClient,
@@ -32,7 +33,7 @@ test("Linux first-run page runs setup with the download choice and streams its o
   fireEvent.click(screen.getByRole("button", { name: "开始配置" }));
   await screen.findByRole("heading", { name: "配置完成" });
   expect(client.run).toHaveBeenCalledWith(
-    { download: true, cloudCandidates: true },
+    { download: true, cloudCandidates: false },
     expect.any(Function),
   );
   const log = screen.getByRole("log", { name: "配置输出" });
@@ -42,19 +43,63 @@ test("Linux first-run page runs setup with the download choice and streams its o
   expect(onComplete).toHaveBeenCalled();
 });
 
-test("Linux first-run page discloses cloud candidates and passes a declined choice", async () => {
+test("Linux setup remains available after StrictMode effect replay", async () => {
+  const run = vi.fn().mockResolvedValue({ ...missing, prepared: true });
+  render(
+    <StrictMode>
+      <LinuxSetupPage status={missing} client={{ run }} onComplete={vi.fn()} />
+    </StrictMode>,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "开始配置" }));
+  await waitFor(() => expect(run).toHaveBeenCalledOnce());
+});
+
+test("ignores a same-tick duplicate setup action", async () => {
+  let resolveRun!: (result: LinuxSetupStatus) => void;
+  const run = vi.fn(
+    (_choices: unknown, _onLine: (line: LinuxSetupLine) => void) =>
+      new Promise<LinuxSetupStatus>((resolve) => {
+        resolveRun = resolve;
+      }),
+  );
+  render(<LinuxSetupPage status={missing} client={{ run }} onComplete={vi.fn()} />);
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "开始配置" }));
+    fireEvent.click(screen.getByRole("button", { name: "开始配置" }));
+  });
+  expect(run).toHaveBeenCalledOnce();
+  resolveRun({ ...missing, prepared: true });
+  await screen.findByRole("heading", { name: "配置完成" });
+});
+
+test("Linux first-run setup remains available after StrictMode effect replay", async () => {
+  const run = vi.fn(async () => ({ ...missing, prepared: true }));
+  render(
+    <StrictMode>
+      <LinuxSetupPage status={missing} client={{ run }} onComplete={vi.fn()} />
+    </StrictMode>,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "开始配置" }));
+  await screen.findByRole("heading", { name: "配置完成" });
+  expect(run).toHaveBeenCalledOnce();
+});
+
+test("Linux first-run page discloses cloud candidates, leaves them off, and passes an accepted choice", async () => {
   const client: LinuxSetupClient = {
     run: vi.fn(async () => ({ ...missing, prepared: true })),
   };
   render(<LinuxSetupPage status={missing} client={client} onComplete={vi.fn()} />);
   const cloud = screen.getByRole("checkbox", { name: /启用云候选/ }) as HTMLInputElement;
-  expect(cloud.checked).toBe(true);
+  expect(cloud.checked).toBe(false);
   expect(cloud.closest("label")?.textContent).toContain("inputtools.google.com");
   fireEvent.click(cloud);
   fireEvent.click(screen.getByRole("button", { name: "开始配置" }));
   await screen.findByRole("heading", { name: "配置完成" });
   expect(client.run).toHaveBeenCalledWith(
-    { download: false, cloudCandidates: false },
+    { download: false, cloudCandidates: true },
     expect.any(Function),
   );
 });
@@ -70,7 +115,7 @@ test("Linux first-run page keeps the output and offers a retry when setup fails"
   fireEvent.click(screen.getByRole("button", { name: "开始配置" }));
   expect((await screen.findByRole("alert")).textContent).toContain("查看上面的输出");
   expect(client.run).toHaveBeenCalledWith(
-    { download: false, cloudCandidates: true },
+    { download: false, cloudCandidates: false },
     expect.any(Function),
   );
   expect(screen.getByRole("log").textContent).toContain("词库目录不可用");

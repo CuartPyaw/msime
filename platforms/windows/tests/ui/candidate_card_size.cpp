@@ -42,19 +42,19 @@ int main() {
   require(inline_card.width > stacked.width &&
           inline_card.height < stacked.height);
 
-  // Hiding the preedit drops its row without touching the candidate rows.
+  // Hiding the preedit shrinks its row to the brand mark's without touching the candidate rows: the row stays, so the mark does.
   CandidateCardInput hidden = vertical;
   hidden.preedit_visible = false;
   const auto without_preedit = candidate_card_size(hidden);
   require(near(without_preedit.height,
-               stacked.height - (16.0 * 1.4 + 6.0)));
+               stacked.height - (16.0 * 1.4 + 6.0) + 22.0));
   require(near(without_preedit.width, stacked.width));
 
-  // A wide preedit drives the width once it passes the widest candidate.
+  // A wide preedit drives the width once it passes the widest candidate, after the brand mark and its gap.
   CandidateCardInput long_preedit = vertical;
   long_preedit.preedit_width = 400.0;
   require(near(candidate_card_size(long_preedit).width,
-               400.0 + 6.0 + 12.0 + 14.0));
+               16.0 + 6.0 + 400.0 + 6.0 + 12.0 + 14.0));
 
   // Zero-width entries are measured as hidden and reserve no row.
   CandidateCardInput sparse = vertical;
@@ -62,12 +62,12 @@ int main() {
   require(near(candidate_card_size(sparse).height,
                stacked.height - (row16 + gap) * 2.0));
 
-  // An empty list still reserves one candidate row, and the floor applies: the shipped presenter's kCandidateMinWidthDip, the same at every font size.
+  // An empty list still reserves one candidate row under the brand mark's row, and the floor applies: the shipped presenter's kCandidateMinWidthDip, the same at every font size.
   CandidateCardInput empty;
   empty.preedit_visible = false;
   const auto collapsed = candidate_card_size(empty);
   require(near(collapsed.width, 160.0));
-  require(near(collapsed.height, 6.0 + 6.0 + row16));
+  require(near(collapsed.height, 6.0 + 6.0 + 22.0 + row16));
   for (double font : {12.0, 24.0, 32.0}) {
     CandidateCardInput sized = empty;
     sized.font_size = font;
@@ -100,7 +100,39 @@ int main() {
   require(near(metrics.candidate_row, row16) && near(metrics.item_gap, gap) &&
           near(metrics.preedit_row, 16.0 * 1.4 + 6.0) &&
           near(metrics.number_and_bar, 16.0 + 8.0));
-  require(near(candidate_card_metrics(16.0, 16.0, false).preedit_row, 0.0));
+  // The top row is always there for the brand mark: without the preedit it is the mark's 22 DIP, and a preedit line never makes it shorter.
+  const auto hidden_metrics = candidate_card_metrics(16.0, 16.0, false);
+  require(near(hidden_metrics.preedit_row, 22.0) &&
+          near(hidden_metrics.header_row, 22.0));
+  require(near(candidate_card_metrics(16.0, 12.0, true).preedit_row,
+               12.0 * 1.4 + 6.0));
+  // The mark is a 16 DIP square at the row's left padding, centred in the row, and the preedit starts 6 DIP after it.
+  require(near(metrics.logo_side, 16.0) && near(metrics.logo_gap, 6.0));
+  for (const auto &shape : {metrics, hidden_metrics}) {
+    const auto logo = candidate_logo_bounds(shape);
+    require(near(logo.left, shape.pad_x) &&
+            near(logo.right - logo.left, 16.0) &&
+            near(logo.bottom - logo.top, 16.0));
+    require(near(logo.top - shape.pad_y,
+                 shape.pad_y + shape.preedit_row - logo.bottom));
+    require(logo.top >= shape.pad_y &&
+            logo.bottom <= shape.pad_y + shape.preedit_row);
+    require(near(candidate_preedit_left(shape), logo.right + 6.0));
+  }
+  // The card is wide enough for the mark ahead of the preedit: a card sized for a preedit alone leaves the preedit its measured width after the mark.
+  {
+    CandidateCardInput marked;
+    marked.preedit_width = 300.0;
+    marked.items = {{40.0}};
+    const auto card = candidate_card_size(marked);
+    require(card.width - metrics.pad_x / 2.0 - candidate_preedit_left(metrics) >=
+            300.0);
+    // Without a preedit or a pager the mark alone still gets its row.
+    CandidateCardInput bare;
+    bare.preedit_visible = false;
+    bare.items = {{40.0}};
+    require(near(candidate_card_size(bare).height, 6.0 + 6.0 + 22.0 + row16));
+  }
   for (double font : {11.0, 33.0}) {
     bool caught = false;
     try {
@@ -232,6 +264,53 @@ int main() {
                  200.0 - metrics.pad_x) &&
             near(wide_rows[0].item.text_width,
                  200.0 - metrics.pad_x - metrics.number_and_bar));
+
+    // Translations too wide for the capped card give up room, never below their candidate's line, so the page stays on one line and the translations wrap under their text.
+    CandidateCardInput glossed;
+    glossed.horizontal = true;
+    glossed.items = {{40.0, 0.0, 200.0}, {40.0, 0.0, 200.0}, {40.0}};
+    glossed.max_width = 300.0;
+    const auto glossed_card = candidate_card_size(glossed);
+    const auto glossed_rows =
+        candidate_page_layout(glossed.items, glossed_card.width, metrics, true);
+    const double line_width = glossed_card.width - metrics.pad_x;
+    const auto single_line =
+        candidate_single_line_columns(glossed.items, line_width, metrics);
+    require(single_line.has_value());
+    const double firm = 40.0 + metrics.number_and_bar + metrics.column_gap;
+    require(near((*single_line)[0], (*single_line)[1]) && (*single_line)[0] > firm &&
+            near((*single_line)[2], firm) &&
+            near((*single_line)[0] + (*single_line)[1] + (*single_line)[2], line_width));
+    for (const auto &row : glossed_rows)
+      require(near(row.bounds.top, glossed_rows[0].bounds.top));
+    require(glossed_rows[0].item.translation.below &&
+            glossed_rows[0].item.translation.width < 200.0);
+    // The candidate lines alone past the line leave no single line to keep.
+    require(!candidate_single_line_columns({{400.0}, {400.0}}, 300.0, metrics));
+
+    // Candidates whose own lines pass half the work area widen the card past it, up to the single-line cap, rather than start a second line.
+    CandidateCardInput long_lines;
+    long_lines.horizontal = true;
+    long_lines.items = {{200.0, 0.0, 300.0}, {200.0}, {200.0}};
+    long_lines.max_width = 300.0;
+    long_lines.max_single_line_width = 2000.0;
+    const auto long_card = candidate_card_size(long_lines);
+    const double firm_width =
+        candidate_single_line_minimum_width(long_lines.items, metrics);
+    require(near(firm_width, 3.0 * (200.0 + metrics.number_and_bar +
+                                    metrics.column_gap)));
+    require(long_card.width > 300.0 && long_card.width < 2000.0);
+    const auto long_rows = candidate_page_layout(long_lines.items,
+                                                 long_card.width, metrics, true);
+    for (const auto &row : long_rows)
+      require(near(row.bounds.top, long_rows[0].bounds.top));
+    // The single-line cap still binds: past it the page breaks as before.
+    long_lines.max_single_line_width = 400.0;
+    const auto capped = candidate_card_size(long_lines);
+    require(near(capped.width, 400.0));
+    const auto capped_rows =
+        candidate_page_layout(long_lines.items, capped.width, metrics, true);
+    require(capped_rows[2].bounds.top > capped_rows[0].bounds.top);
   }
 
   // Untrusted measurements and font sizes are rejected before any arithmetic.
@@ -439,6 +518,36 @@ int main() {
                                              metrics, true)[0].item;
     require(!under.annotation.below && under.translation.below);
     require(near(under.translation.x, 0.0) && near(under.translation.y, row));
+
+    // A translation run of two lines (a Korean Hanja's 훈음 with its translation under it) goes under the text even in a vertical row where one line would fit beside it, takes both lines, and widens the row only as far as its widest line.
+    {
+      CandidateCardInput hanja;
+      hanja.preedit_width = 40.0;
+      hanja.items = {{20.0, 0.0, 120.0, 2}};
+      const auto two_lines = candidate_card_size(hanja);
+      require(near(two_lines.height, base + row + 2.0 * translation_line));
+      require(near(two_lines.width, 120.0 + 24.0 + 12.0 + 14.0));
+      require(near(candidate_item_natural_width(hanja.items[0], metrics, false),
+                   120.0 + metrics.number_and_bar));
+      const auto stacked =
+          candidate_page_layout(hanja.items, two_lines.width, metrics, false)[0].item;
+      require(stacked.translation.below && near(stacked.translation.x, 0.0) &&
+              near(stacked.translation.y, row) &&
+              near(stacked.translation.height, 2.0 * translation_line));
+      // The measure is asked even though no line is wider than the column, and its height wins.
+      size_t asked = 0;
+      hanja.wrapped = [&](size_t, CandidateRun run, double) {
+        asked += run == CandidateRun::translation;
+        return 40.0;
+      };
+      require(near(candidate_card_size(hanja).height, base + row + 40.0) && asked > 0);
+      // One line keeps the ordinary rule and stays beside the text.
+      hanja.wrapped = {};
+      hanja.items = {{20.0, 0.0, 120.0}};
+      const auto beside =
+          candidate_page_layout(hanja.items, 400.0, metrics, false)[0].item;
+      require(!beside.translation.below && near(beside.height, row));
+    }
 
     // A capped card wraps the translation under the text instead of clipping it, and grows by the wrapped height. Without a measure the lines are estimated from the single-line width.
     CandidateCardInput capped_runs;
@@ -710,10 +819,12 @@ int main() {
             near(pager->left, pager->indicator.left));
     require(near(pager->next.top, metrics.pad_y) &&
             near(pager->next.bottom, metrics.pad_y + metrics.preedit_row));
-    // No indicator, no preedit row or no card draws no pager.
+    // No indicator or no card draws no pager. A hidden preedit still leaves the row, so the pager stays in it at the row's height.
     require(!candidate_pager_layout(200.0, 0.0, metrics));
-    require(!candidate_pager_layout(
-        200.0, 30.0, candidate_card_metrics(16.0, 16.0, false)));
+    const auto hidden_pager = candidate_pager_layout(
+        200.0, 30.0, candidate_card_metrics(16.0, 16.0, false));
+    require(hidden_pager && near(hidden_pager->next.bottom, 6.0 + 22.0) &&
+            near(hidden_pager->left, pager->left));
     require(!candidate_pager_layout(0.0, 30.0, metrics));
 
     // The arrows are the click targets. The previous one is inert on the first page; the next one is always live, because the page count grows as the user pages.
@@ -734,14 +845,21 @@ int main() {
     paged.page_width = 30.0;
     paged.items = {{40.0}};
     const auto card = candidate_card_size(paged);
-    require(near(card.width, 120.0 + 6.0 + 12.0 + (30.0 + 12.0 + 32.0) + 12.0 + 14.0));
+    require(near(card.width, 16.0 + 6.0 + 120.0 + 6.0 + 12.0 +
+                                 (30.0 + 12.0 + 32.0) + 12.0 + 14.0));
     const auto drawn = candidate_pager_layout(card.width, 30.0, metrics);
-    require(drawn && metrics.pad_x + 120.0 <= drawn->left - metrics.pager_gap);
-    // A hidden preedit row carries no pager and asks for no room.
+    require(drawn && candidate_preedit_left(metrics) + 120.0 <=
+                         drawn->left - metrics.pager_gap);
+    // With the preedit hidden the pager keeps its room after the mark, so a long indicator cannot run over it.
     paged.preedit_visible = false;
-    CandidateCardInput plain = paged;
-    plain.page_width = 0.0;
-    require(near(candidate_card_size(paged).width, candidate_card_size(plain).width));
+    paged.page_width = 200.0;
+    const auto hidden_card = candidate_card_size(paged);
+    require(near(hidden_card.width,
+                 16.0 + 6.0 + 12.0 + (200.0 + 12.0 + 32.0) + 12.0 + 14.0));
+    const auto hidden_drawn = candidate_pager_layout(
+        hidden_card.width, 200.0, candidate_card_metrics(16.0, 16.0, false));
+    require(hidden_drawn &&
+            candidate_logo_bounds(metrics).right <= hidden_drawn->left);
     // An unusable indicator measurement is refused like any other.
     paged.page_width = -1.0;
     require(rejected(paged));

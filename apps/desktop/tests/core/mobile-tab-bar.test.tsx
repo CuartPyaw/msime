@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
+import { testHost } from "../support/host";
+import { settingsFormReady } from "../support/settings-form";
 import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { SettingsPage, type HostCapabilities, type Snapshot } from "@msime/ui";
+import { SettingsPage, type Snapshot } from "@msime/ui";
 
 afterEach(() => {
   cleanup();
@@ -35,7 +37,7 @@ function mount() {
         communitySkins: {
           list: vi.fn().mockResolvedValue({ skins: [], has_more: false }),
         } as never,
-        host: { platform: "harmony" } as HostCapabilities,
+        host: testHost({ platform: "harmony" }),
       }}
     />,
   );
@@ -49,7 +51,7 @@ const tabs = ["设置", "社区", "统计", "我的"];
 // four tabs of an icon over a word and nothing else.
 test("the phone tab bar is the source's four tabs, each an icon over a word", async () => {
   mount();
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
 
   const bar = screen.getByRole("navigation", { name: "主要功能" });
   const buttons = [...bar.querySelectorAll("button")];
@@ -73,7 +75,7 @@ test("the phone tab bar is the source's four tabs, each an icon over a word", as
 // later is covered without anyone remembering to come back here.
 test("every page the sidebar reaches is reachable on a phone", async () => {
   mount();
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
 
   const sidebar = screen.getByRole("navigation", { name: "设置分类" });
   const reachable = new Set(tabs);
@@ -92,12 +94,32 @@ test("every page the sidebar reaches is reachable on a phone", async () => {
   expect(stranded).toEqual([]);
 });
 
+// 「全部设置」按导航分组列出页面，每组上方是组名；在标签栏或「我的」里已有入口的组整组不列。
+test("the 全部设置 list is grouped under the navigation group titles", async () => {
+  mount();
+  await settingsFormReady();
+
+  fireEvent.click(screen.getByRole("button", { name: /全部设置/ }));
+  const list = screen.getByRole("region", { name: "全部设置" });
+  const groups = within(list)
+    .getAllByRole("group")
+    .map((group) => ({
+      title: group.getAttribute("aria-labelledby")
+        ? document.getElementById(group.getAttribute("aria-labelledby")!)?.textContent
+        : undefined,
+      pages: [...group.querySelectorAll("strong")].map((item) => item.textContent),
+    }));
+  expect(groups.map((group) => group.title)).toEqual(["打字", "外观", "键盘、语音与手写", "工具"]);
+  expect(groups[0].pages[0]).toBe("输入");
+  expect(within(list).getByRole("group", { name: "打字" })).toBeTruthy();
+});
+
 // Drilling into a page that has no tab does not leave the bar blank: the page was reached from the
 // 设置 tab, so the 设置 tab is still where you are. The source keeps its first tab selected for
 // everything its navigation stack pushes.
 test("the 设置 tab stays lit on the pages reached from it", async () => {
   mount();
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
 
   const bar = screen.getByRole("navigation", { name: "主要功能" });
   const home = within(bar).getByRole("button", { name: "设置" });
@@ -120,7 +142,7 @@ test("the 设置 tab stays lit on the pages reached from it", async () => {
 // keyboard tab's leaf, so returning after visiting another tab always reset it to 首页.
 test("each phone tab remembers where the user left it", async () => {
   mount();
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
 
   fireEvent.click(screen.getByRole("button", { name: /全部设置/ }));
   const list = screen.getByRole("region", { name: "全部设置" });

@@ -50,6 +50,14 @@ inline float CandidateRowRadius(const SkinTokens &tokens, bool highlighted, bool
     return radius;
 }
 
+// The user's own 候选窗 style from the shared preferences: candidate_scale_percent and candidate_opacity_percent as factors, and candidate_corner_radius in points, none to keep the theme's or the package's card radius. The defaults leave a skin exactly as it was resolved.
+struct CandidateWindowStyle
+{
+    double scale = 1.0;
+    double opacity = 1.0;
+    std::optional<double> cornerRadius;
+};
+
 struct SkinColors
 {
     std::string accent;
@@ -118,14 +126,14 @@ struct SkinLicense
     std::string source;
 };
 
-// The x of a decoration `width` wide in a card `cardWidth` wide, flush with the edge it is aligned to (the macOS placement since the first decorated skin), never left of the card.
-inline double DecorationLeft(DecorationAlign align, double cardWidth, double width)
+// The x of a decoration `width` wide over a card `cardWidth` wide: `pad` in from the edge it is aligned to, or centred, never left of the card. The same rule as the Windows host's candidate_decoration_left.
+inline double DecorationLeft(DecorationAlign align, double cardWidth, double pad, double width)
 {
-    double left = cardWidth - width;
+    double left = cardWidth - pad - width;
     switch (align)
     {
     case DecorationAlign::left:
-        left = 0.0;
+        left = pad;
         break;
     case DecorationAlign::center:
         left = (cardWidth - width) / 2.0;
@@ -134,6 +142,31 @@ inline double DecorationLeft(DecorationAlign align, double cardWidth, double wid
         break;
     }
     return left > 0.0 ? left : 0.0;
+}
+
+// Where the decoration is drawn, in top-down coordinates: x from the card's left edge, top from the window's top edge.
+struct DecorationRect
+{
+    double x = 0.0;
+    double top = 0.0;
+    double width = 0.0;
+    double height = 0.0;
+};
+
+// The decoration as every host draws it: the window is `band` taller than the card and that band is transparent; the image is `width` wide at its own aspect ratio, its bottom `pad` below the card's top edge so it sits over the edge, and it is drawn after the card. An image too tall for the band and the overlap is scaled down whole rather than squashed. None for an empty band, width or image.
+inline std::optional<DecorationRect> DecorationPlacement(DecorationAlign align, double cardWidth, double pad, double band,
+                                                         double width, double imageWidth, double imageHeight)
+{
+    if (!(band > 0.0) || !(width > 0.0) || !(imageWidth > 0.0) || !(imageHeight > 0.0))
+        return std::nullopt;
+    const double room = band + pad;
+    double height = width * imageHeight / imageWidth;
+    if (height > room)
+    {
+        width *= room / height;
+        height = room;
+    }
+    return DecorationRect{DecorationLeft(align, cardWidth, pad, width), room - height, width, height};
 }
 
 struct SkinRect
@@ -285,6 +318,10 @@ bool IsSafeSkinId(std::string_view id);
 SkinTokens NativeCandidateTokens(bool dark);
 // The selected row's foregrounds for a palette that left them to the platform, derived from the fill actually drawn (THEME_CONTRACT §5 step 6): white or near-black on an opaque fill, the number at 0.82 like the native one, and the row's own text and number colours on a translucent fill, where they are what stays readable. On the native solid accent this gives the native white.
 void DeriveSelectedForegrounds(SkinTokens &tokens, bool text, bool number);
+// A resolved candidate skin with the user's style laid over it, for the candidate window and its preview only: the floating toolbar and the colour wells keep the skin as resolved.
+//
+// The radius goes user value, then the package's corner_radius_dip (already in tokens.radius), then the native card radius, and a row is never rounder than the card it sits in. The opacity reaches the card surface, its border and the package background image and nothing else, so text, numbers and the selected fill stay as legible as the theme made them. The scale multiplies every length the skin carries, the radii, the inset and the package's decoration and minimum width, so the card keeps its proportions at any size; the hairline border keeps its width.
+ResolvedSkin StyledCandidateSkin(ResolvedSkin skin, const CandidateWindowStyle &style);
 // The seven global themes in picker order, read once from msime_client_theme_catalog.
 const std::vector<ThemeCatalogEntry> &ThemeCatalog();
 bool IsGlobalThemeId(std::string_view id);

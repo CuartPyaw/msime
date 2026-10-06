@@ -4,6 +4,8 @@
 A stub stands in for gdbus and gsettings: it logs each call and keeps Fcitx5's bus state and the IBus panel keys in a JSON file. Each case runs against a scratch HOME holding a classicui.conf and a restore record, with the record written in the shape the hosts write it (src/candidates/PanelRestoreRecord.h).
 """
 import fcntl
+import importlib.util
+from importlib.machinery import SourceFileLoader
 import json
 import os
 import subprocess
@@ -17,8 +19,14 @@ SCRIPT = ROOT / "scripts/msime-linux-setup"
 PANEL = "org.freedesktop.ibus.panel"
 SET_CONFIG = "org.fcitx.Fcitx.Controller1.SetConfig"
 
-STUB = r'''#!/usr/bin/env python3
-import ast, json, os, re, sys
+_setup_loader = SourceFileLoader("msime_linux_setup", str(SCRIPT))
+_setup_spec = importlib.util.spec_from_loader("msime_linux_setup", _setup_loader)
+assert _setup_spec and _setup_spec.loader
+_setup_module = importlib.util.module_from_spec(_setup_spec)
+_setup_spec.loader.exec_module(_setup_module)
+
+# 首行用跑测试的同一个解释器，不经 /usr/bin/env：没有 FHS 布局的环境（Nix 构建沙箱）里没有它。
+STUB = f"#!{sys.executable}\n" + r'''import ast, json, os, re, sys
 from pathlib import Path
 
 name = Path(sys.argv[0]).name
@@ -172,6 +180,19 @@ def restored_file(**values: str) -> str:
 
 
 def main() -> int:
+    with tempfile.TemporaryDirectory(prefix="msime-panel-lock-") as temporary:
+        root = Path(temporary)
+        target = root / "outside.lock"
+        target.write_text("synthetic-lock-target")
+        linked = root / "panel-restore.lock"
+        linked.symlink_to(target)
+        try:
+            with _setup_module.panel_restore_lock(root / "panel-restore"):
+                raise AssertionError("panel restore lock followed a symlink")
+        except OSError:
+            pass
+        assert target.read_text() == "synthetic-lock-target"
+
     with tempfile.TemporaryDirectory() as name:
         harness = Harness(Path(name))
 

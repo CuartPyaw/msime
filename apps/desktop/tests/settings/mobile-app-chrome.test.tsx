@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { testHost } from "../support/host";
+import { settingsFormReady } from "../support/settings-form";
 import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { SettingsPage, type Snapshot } from "@msime/ui";
@@ -34,7 +36,7 @@ function renderSettings(
       client={{
         load: vi.fn().mockResolvedValue(initial),
         save: vi.fn().mockResolvedValue(undefined),
-        host: { platform, ...host } as never,
+        host: testHost({ platform, ...host }),
         home: { openKeyboard: vi.fn(), openSystemKeyboardSettings: vi.fn() },
         // Both window commands are present here because one Tauri binary serves every platform: the
         // app exposes them on a phone too, which is exactly how the titlebar reached Android.
@@ -50,19 +52,19 @@ function renderSettings(
 // drag handle above the content only steals a row of screen.
 test("a phone host draws no window titlebar", async () => {
   renderSettings("android");
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
 
   expect(screen.queryByRole("banner", { name: "窗口控制" })).toBeNull();
 });
 
 test("Harmony settings follow the actual phone or 2-in-1 form factor", async () => {
   renderSettings("harmony", { mobile_settings: true });
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   expect(screen.getByRole("navigation", { name: "主要功能" })).toBeTruthy();
   cleanup();
 
   renderSettings("harmony", { mobile_settings: false });
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   expect(screen.queryByRole("navigation", { name: "主要功能" })).toBeNull();
   expect(screen.getByRole("navigation", { name: "设置分类" })).toBeTruthy();
   const preview = document.querySelector(".screen-keyboard-artwork");
@@ -91,10 +93,10 @@ test("Harmony capability chrome stays split between phone and 2-in-1", async () 
     ...desktopCapabilities,
     translation_secondary_language: undefined,
   });
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   expect(
     screen.getByText(
-      "在系统设置中启用并选择水杉输入法，再使用实体键盘、候选窗和悬浮工具栏输入。默认是全拼输入法。",
+      "在系统设置中启用并选择水杉输入法，再使用实体键盘、候选窗口和悬浮工具栏输入。默认是全拼输入法。",
     ),
   ).toBeTruthy();
   expect(screen.getByText("为 HarmonyOS 2-in-1 桌面输入体验打造的开放中文输入法。")).toBeTruthy();
@@ -103,7 +105,7 @@ test("Harmony capability chrome stays split between phone and 2-in-1", async () 
   expect(screen.getByRole("group", { name: "输入模式切换快捷键" })).toBeTruthy();
   expect(screen.getByRole("group", { name: "面板快捷键" })).toBeTruthy();
   expect(screen.getByRole("switch", { name: "数字键选词" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "表达" }));
+  fireEvent.click(screen.getByRole("button", { name: "标点与翻译" }));
   expect(screen.getByRole("combobox", { name: "候选词翻译第二种语言" })).toBeTruthy();
 
   cleanup();
@@ -120,7 +122,7 @@ test("Harmony capability chrome stays split between phone and 2-in-1", async () 
     candidate_follow_cursor: false,
     input_mode_hud: false,
   });
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   expect(
     screen.getByText(
       "在系统设置中启用并选择水杉输入法，再从输入法键盘使用语音和触屏输入。默认是全拼输入法。",
@@ -137,7 +139,7 @@ test("Harmony capability chrome stays split between phone and 2-in-1", async () 
   const phoneSettings = screen.getByRole("region", { name: "全部设置" });
   expect(within(phoneSettings).queryByRole("button", { name: "悬浮工具栏" })).toBeNull();
   expect(within(phoneSettings).queryByRole("button", { name: "快捷键" })).toBeNull();
-  fireEvent.click(within(phoneSettings).getByRole("button", { name: "表达" }));
+  fireEvent.click(within(phoneSettings).getByRole("button", { name: "标点与翻译" }));
   expect(screen.getByRole("combobox", { name: "候选词翻译第二种语言" })).toBeTruthy();
 });
 
@@ -148,7 +150,7 @@ test("Harmony appearance names only the surfaces the form factor actually has", 
     floating_toolbar: false,
     candidate_font_controls: true,
   });
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   fireEvent.click(
     within(screen.getByRole("navigation", { name: "主要功能" })).getByRole("button", {
       name: "设置",
@@ -161,11 +163,11 @@ test("Harmony appearance names only the surfaces the form factor actually has", 
     }),
   );
   expect(screen.getByRole("region", { name: "候选栏预览" })).toBeTruthy();
-  expect(screen.getByRole("combobox", { name: "候选栏字号" })).toBeTruthy();
-  expect(screen.getByRole("combobox", { name: "候选栏预编辑字号" })).toBeTruthy();
+  expect(screen.getByRole("combobox", { name: "字号" })).toBeTruthy();
+  expect(screen.getByRole("combobox", { name: "预编辑字号" })).toBeTruthy();
   expect(screen.getByRole("combobox", { name: "候选栏预编辑" })).toBeTruthy();
   expect(screen.queryByText("候选窗口预览")).toBeNull();
-  expect(screen.queryByLabelText("候选窗字号")).toBeNull();
+  expect(screen.queryByRole("combobox", { name: "候选窗口预编辑" })).toBeNull();
 
   // The phone hides the physical-keyboard shortcut page everywhere, the sidebar included: a sidebar entry here was a button `selectPage` refused, and asserting the page's text passed only because the hidden fieldset stays in the DOM.
   expect(screen.queryByRole("button", { name: "快捷键" })).toBeNull();
@@ -182,7 +184,7 @@ test("Harmony appearance names only the surfaces the form factor actually has", 
     },
     "skin",
   );
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   expect(screen.getByRole("combobox", { name: "候选栏主题" })).toBeTruthy();
   expect(screen.queryByRole("combobox", { name: "候选窗口主题" })).toBeNull();
   expect(screen.queryByRole("combobox", { name: "悬浮工具栏主题" })).toBeNull();
@@ -194,11 +196,11 @@ test("Harmony appearance names only the surfaces the form factor actually has", 
     floating_toolbar: true,
     candidate_font_controls: true,
   });
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   expect(screen.getByRole("button", { name: "悬浮工具栏" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "候选窗口" }));
   expect(screen.getByRole("region", { name: "候选窗口预览" })).toBeTruthy();
-  expect(screen.getByRole("combobox", { name: "候选窗预编辑" })).toBeTruthy();
+  expect(screen.getByRole("combobox", { name: "候选窗口预编辑" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "主题" }));
   expect(screen.getByRole("combobox", { name: "候选窗口主题" })).toBeTruthy();
   expect(screen.getByRole("combobox", { name: "悬浮工具栏主题" })).toBeTruthy();
@@ -209,26 +211,26 @@ test("Harmony appearance names only the surfaces the form factor actually has", 
   expect(shortcuts.hidden).toBe(false);
   expect(
     within(shortcuts).getByText(
-      "输入法快捷键仅在对应输入状态或候选窗口显示时生效。翻页方式可在“候选窗口”中启用或关闭。",
+      "输入法快捷键仅在对应输入状态或候选窗口显示时生效。翻页方式和以词定字在「输入 › 选词与翻页」中设置。",
     ),
   ).toBeTruthy();
 });
 
 test("Harmony handwriting instructions do not leak 2-in-1 controls onto phones", async () => {
   renderSettings("harmony", { mobile_settings: true }, "handwriting");
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   expect(screen.getByText(/再从键盘的方案选择器切换到“手写”/)).toBeTruthy();
-  expect(screen.queryByText(/2-in-1|2in1|候选窗不绘制键面/)).toBeNull();
+  expect(screen.queryByText(/2-in-1|2in1|候选窗口不绘制键面/)).toBeNull();
 
   cleanup();
   renderSettings("harmony", { mobile_settings: false }, "handwriting");
-  await screen.findByRole("button", { name: "保存设置" });
-  expect(screen.getByText(/2-in-1 候选窗不绘制键面/)).toBeTruthy();
+  await settingsFormReady();
+  expect(screen.getByText(/2-in-1 候选窗口不绘制键面/)).toBeTruthy();
 });
 
 test("a desktop host keeps its window titlebar", async () => {
   renderSettings("windows");
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
 
   expect(screen.getByRole("banner", { name: "窗口控制" })).toBeTruthy();
 });
@@ -237,7 +239,7 @@ test("a desktop host keeps its window titlebar", async () => {
 // and no Win key, so the desktop artwork misdescribes every touch host.
 test("a phone previews the touch keyboard, not the desktop one", async () => {
   renderSettings("android");
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
 
   const preview = document.querySelector(".screen-keyboard-artwork");
   expect(preview).toBeTruthy();
@@ -252,7 +254,7 @@ test("a phone previews the touch keyboard, not the desktop one", async () => {
 
 test("the desktop home card keeps the full keyboard", async () => {
   renderSettings("windows");
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
 
   const preview = document.querySelector(".screen-keyboard-artwork");
   const keys = Array.from(preview!.querySelectorAll("[data-keyboard-key]")).map((key) =>
@@ -264,14 +266,14 @@ test("the desktop home card keeps the full keyboard", async () => {
 
 test("the phone home surface hides its duplicate page heading", async () => {
   renderSettings("android");
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
 
   const heading = screen.getByRole("heading", { name: "首页" });
   expect(heading.parentElement?.className).toContain("max-phone:sr-only");
 
   cleanup();
   renderSettings("windows");
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   const desktopHeading = screen.getByRole("heading", { name: "首页" });
   expect(desktopHeading.parentElement?.className).not.toContain("max-phone:sr-only");
 });
@@ -285,14 +287,14 @@ test("the phone home surface hides its duplicate page heading", async () => {
 // utilities: a class name there is a styling detail with no reason to stay put.
 test("the home hero image is a desktop-only mark, and resolves", async () => {
   renderSettings("android");
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
 
   const home = screen.getByRole("region", { name: "首页" });
   expect(home.querySelector("header img")).toBeNull();
 
   cleanup();
   renderSettings("windows");
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   fireEvent.click(screen.getByRole("button", { name: "首页" }));
   const desktopHero = screen
     .getByRole("region", { name: "首页" })
@@ -313,7 +315,7 @@ test("the home hero image is a desktop-only mark, and resolves", async () => {
 // at the top, and the utility without the DOM order sends focus to the bottom of the page first.
 test("the phone navigation leads the content but is seated below it", async () => {
   renderSettings("android");
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
 
   const primary = screen.getByRole("navigation", { name: "主要功能" });
   expect(within(primary).getByRole("button", { name: "设置" })).toBeTruthy();
@@ -343,7 +345,7 @@ test("the phone navigation leads the content but is seated below it", async () =
 // A touch host names the keyboard pages the way its own settings do. The route ids do not change, so a host deep-linking `screen-keyboard` still lands on the page.
 test("a touch host calls the keyboard pages by their touch names", async () => {
   renderSettings("android", { mode_switch_shortcuts: true }, "screen-keyboard");
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   expect(screen.getByRole("heading", { level: 1, name: "键盘" })).toBeTruthy();
   const sidebar = screen.getByRole("navigation", { name: "设置分类" });
   expect(within(sidebar).getByRole("button", { name: "外接键盘快捷键" })).toBeTruthy();
@@ -352,7 +354,7 @@ test("a touch host calls the keyboard pages by their touch names", async () => {
 
   cleanup();
   renderSettings("windows", {}, "screen-keyboard");
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   expect(screen.getByRole("heading", { level: 1, name: "屏幕键盘" })).toBeTruthy();
 });
 
@@ -378,7 +380,7 @@ test("a wide iOS host splits the 设置 tab and gives the other tabs the whole w
   });
   try {
     renderSettings("ios", {}, "input", allTabs);
-    await screen.findByRole("button", { name: "保存设置" });
+    await settingsFormReady();
     expect(document.querySelector("[data-platform]")?.getAttribute("data-platform")).toBe("ipad");
     const sidebar = screen.getByRole("navigation", { name: "设置分类" });
     expect(within(sidebar).getByRole("heading", { level: 2, name: "设置" })).toBeTruthy();
@@ -406,7 +408,7 @@ test("a wide iOS host splits the 设置 tab and gives the other tabs the whole w
 // A phone page's large title scrolls away with the content, and a compact bar carrying the same name fades in over it. The bar is decorative (the `h1` still names the page) and belongs only to the 设置 tab's titled pages.
 test("a phone page collapses its large title into a compact bar once scrolled", async () => {
   renderSettings("android", {}, "input", allTabs);
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   const main = document.getElementById("settings-content")!;
   const title = screen.getByRole("heading", { level: 1 }).textContent!;
   const bar = [...main.querySelectorAll('[aria-hidden="true"]')].find(
@@ -449,7 +451,7 @@ test("the phone breakpoint is the 600px one the layout was written for", () => {
 test("a phone is not offered the desktop's modifier-chord voice shortcuts", async () => {
   for (const platform of ["harmony", "ios"]) {
     renderSettings(platform);
-    await screen.findByRole("button", { name: "保存设置" });
+    await settingsFormReady();
     fireEvent.click(screen.getByRole("button", { name: /全部设置/ }));
     const list = screen.getByRole("region", { name: "全部设置" });
     const row = [...list.querySelectorAll("button")].find(
@@ -464,7 +466,7 @@ test("a phone is not offered the desktop's modifier-chord voice shortcuts", asyn
   }
 
   renderSettings("windows");
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   fireEvent.click(screen.getByRole("button", { name: "语音输入" }));
   expect(screen.getByText("语音快捷键")).toBeTruthy();
 });
@@ -472,7 +474,7 @@ test("a phone is not offered the desktop's modifier-chord voice shortcuts", asyn
 // A HarmonyOS phone routes an attached keyboard's voice chords (VoiceHotkeyPolicy has no desktop check), so it declares `voice_hotkeys` and its owner can reach the switches that decide what Right Alt and Ctrl+F9 do there.
 test("a phone that routes an attached keyboard's voice chords offers their switches", async () => {
   renderSettings("harmony", { mobile_settings: true, panel_windows: false, voice_hotkeys: true });
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   fireEvent.click(screen.getByRole("button", { name: /全部设置/ }));
   const list = screen.getByRole("region", { name: "全部设置" });
   const row = [...list.querySelectorAll("button")].find(
@@ -490,17 +492,60 @@ test("a route naming an Object.prototype member pushes no uncloneable history st
   const client = {
     load: vi.fn().mockResolvedValue(initial),
     save: vi.fn().mockResolvedValue(undefined),
-    host: { platform: "android" } as never,
+    host: testHost({ platform: "android" }),
     home: { openKeyboard: vi.fn(), openSystemKeyboardSettings: vi.fn() },
   };
   const view = render(<SettingsPage client={client} />);
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
 
   for (const [nonce, page] of ["toString", "constructor", "hasOwnProperty"].entries()) {
     view.rerender(<SettingsPage route={{ page, nonce: nonce + 1 }} client={client} />);
-    await screen.findByRole("button", { name: "保存设置" });
+    await settingsFormReady();
     const pushed = window.history.state?.page;
     expect(pushed === undefined || typeof pushed === "string").toBe(true);
     expect(() => structuredClone(window.history.state)).not.toThrow();
+  }
+});
+
+// 桌面窗口在侧栏顶部、搜索框之上写出品牌：macOS 和 HarmonyOS 2in1 没有自绘标题栏，品牌放进侧栏；Windows 的标题栏已经带着品牌，手机界面一律不画。HarmonyOS 宿主不提供窗口命令，这里也去掉。
+test("the sidebar brand heads desktop sidebars and stays off phone layouts", async () => {
+  const noWindowCommands = { windowControl: undefined, beginWindowDrag: undefined };
+  for (const [platform, host, client] of [
+    ["macos", {}, {}],
+    ["harmony", { mobile_settings: false }, noWindowCommands],
+  ] as const) {
+    renderSettings(platform, host, undefined, client);
+    await settingsFormReady();
+    const sidebar = screen.getByRole("navigation", { name: "设置分类" });
+    const brand = sidebar.querySelector<HTMLElement>("[data-sidebar-brand]");
+    expect(brand, platform).not.toBeNull();
+    expect(within(brand!).getByText("水杉输入法")).toBeTruthy();
+    // 图标只是装饰，名称由文字给出，也不进 Tab 顺序。
+    expect(brand!.querySelector("img")?.getAttribute("alt")).toBe("");
+    expect(brand!.querySelector("a, button, [tabindex]")).toBeNull();
+    const search = within(sidebar).getByRole("searchbox", { name: "搜索设置" });
+    expect(brand!.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // macOS 的品牌行在红绿灯那一行下面，和那一行一样可以拖动窗口。
+    expect(brand!.hasAttribute("data-window-drag")).toBe(platform === "macos");
+    cleanup();
+  }
+
+  renderSettings("windows");
+  await settingsFormReady();
+  expect(document.querySelector("[data-sidebar-brand]")).toBeNull();
+  expect(
+    within(screen.getByRole("banner", { name: "窗口控制" })).getByText("水杉输入法"),
+  ).toBeTruthy();
+  cleanup();
+
+  for (const [platform, host] of [
+    ["android", {}],
+    ["ios", {}],
+    ["harmony", { mobile_settings: true }],
+  ] as const) {
+    renderSettings(platform, host);
+    await settingsFormReady();
+    expect(document.querySelector("[data-sidebar-brand]"), platform).toBeNull();
+    cleanup();
   }
 });

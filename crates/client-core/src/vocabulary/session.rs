@@ -17,6 +17,7 @@ use super::progress::{
 };
 use super::schedule::ReviewGrade;
 use super::wordbook::{Wordbook, WordbookEntry};
+use crate::plugins::wordbook_pack;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -42,6 +43,9 @@ pub enum ReviewSessionError {
     Builtin(#[from] BuiltinWordbookError),
     #[error("a bundled vocabulary wordbook cannot be deleted")]
     BuiltinNotRemovable,
+    /// 插件词书只能在插件页卸载。
+    #[error("a plugin vocabulary wordbook is removed on the plugins page")]
+    PackNotRemovable,
 }
 
 /// What the page draws.
@@ -90,9 +94,12 @@ pub enum ReviewAction {
 /// `day` is validated before anything is dispatched, not after. Every action ends by assembling
 /// the status for that day, and checking there meant an import wrote a book to disk and only then
 /// reported the day was unreadable — a refused request that had already changed the library.
+///
+/// `plugins` 是插件目录：其中的单词本插件作为 `pack-<插件 id>` 词书列出；没有插件目录的宿主传 `None`，选中的插件词书就当作不在了。
 pub fn apply(
     directory: &Path,
     resources: &Path,
+    plugins: Option<&Path>,
     day: &str,
     action: ReviewAction,
 ) -> Result<ReviewStatus, ReviewSessionError> {
@@ -101,12 +108,14 @@ pub fn apply(
     }
     let library = WordbookLibrary::new(directory);
     let store = VocabularyProgressStore::new(directory);
+    // 作答时已经读过的选中书，交给最后的 `status` 复用：插件书最大 4 MiB，没必要在一次作答里再解析一遍。
+    let mut answered_book = None;
 
     match action {
         ReviewAction::Load => {}
         ReviewAction::Answer { word, known } => {
             let document = store.load()?;
-            let book = selected_book(&library, resources, &document.settings.wordbook)?
+            let book = selected_book(&library, resources, plugins, &document.settings.wordbook)?
                 .ok_or(ReviewSessionError::UnknownWordbook)?;
             let grade = if known {
                 ReviewGrade::Known
@@ -114,6 +123,7 @@ pub fn apply(
                 ReviewGrade::Unknown
             };
             store.answer(&book, &word, grade, day)?;
+            answered_book = Some(book);
         }
         ReviewAction::SetSettings {
             wordbook,
@@ -127,6 +137,10 @@ pub fn apply(
             })?;
         }
         ReviewAction::Import { name, text } => {
+            // Validate the existing progress before writing the new book. Import spans two
+            // stores; if the progress document is damaged, returning an error after the library
+            // write would leave a book behind even though the action failed.
+            let document = store.load()?;
             let report = wordbook_import::parse(&text, MAX_IMPORT_BYTES)?;
             // The id is minted here and never taken from the file. A book keys the review
             // progress, so a file that named its own id could inherit or destroy the schedule of a
@@ -135,24 +149,30 @@ pub fn apply(
             let book = library.import(&name, report.entries, &id)?;
             // Selecting it is the only useful next step; leaving the user to pick the book they
             // just imported out of a list is a step with exactly one right answer.
-            let document = store.load()?;
             store.set_settings(VocabularyReviewSettings {
                 wordbook: book.id,
                 ..document.settings
             })?;
         }
         ReviewAction::Remove { wordbook } => {
+            // Validate progress before deleting the book. Removal spans two stores; if the
+            // progress document is damaged, returning an error after the library write would
+            // still destroy the user's imported material.
+            let document = store.load()?;
             // Checked by name rather than by what is on disk: a host that failed to stage its
             // books would otherwise let the user delete one and find it back after the next
             // install, with its review progress already gone.
             if builtin::is_builtin(&wordbook) {
                 return Err(ReviewSessionError::BuiltinNotRemovable);
             }
+            // 插件词书随插件卸载；它的复习进度保留，升级插件时重新导入的包还能接着用。
+            if wordbook_pack::is_pack_book(&wordbook) {
+                return Err(ReviewSessionError::PackNotRemovable);
+            }
             library.remove(&wordbook)?;
             // The book is gone, so its schedule is unreachable. Leaving it would grow the progress
             // document forever and would silently return if the same id ever came back.
             store.reset_wordbook(&wordbook)?;
-            let document = store.load()?;
             if document.settings.wordbook == wordbook {
                 store.set_settings(VocabularyReviewSettings {
                     wordbook: String::new(),
@@ -169,16 +189,17 @@ pub fn apply(
         }
     }
 
-    status(directory, resources, day)
+    status_with(directory, resources, plugins, day, answered_book)
 }
 
-/// The selected book, bundled or imported. `Ok(None)` when nothing is selected or it has gone.
+/// The selected book, bundled, from a plugin or imported. `Ok(None)` when nothing is selected or it has gone.
 ///
 /// Bundled first, because a bundled id is reserved: an imported book can never take one, so there
-/// is no order in which the two could disagree about which book a stored card belongs to.
+/// is no order in which the two could disagree about which book a stored card belongs to. 插件词书的 id 都以 `pack-` 开头，导入的书是 `user-…`，两者同样不会冲突。
 fn selected_book(
     library: &WordbookLibrary,
     resources: &Path,
+    plugins: Option<&Path>,
     id: &str,
 ) -> Result<Option<Wordbook>, ReviewSessionError> {
     if id.is_empty() {
@@ -187,6 +208,9 @@ fn selected_book(
     if builtin::is_builtin(id) {
         return Ok(builtin::load(resources)?.into_iter().find(|b| b.id == id));
     }
+    if wordbook_pack::is_pack_book(id) {
+        return Ok(plugins.and_then(|root| wordbook_pack::load_book(root, id)));
+    }
     Ok(library.load(id)?)
 }
 
@@ -194,7 +218,19 @@ fn selected_book(
 pub fn status(
     directory: &Path,
     resources: &Path,
+    plugins: Option<&Path>,
     day: &str,
+) -> Result<ReviewStatus, ReviewSessionError> {
+    status_with(directory, resources, plugins, day, None)
+}
+
+/// [`status`]，`loaded` 是调用方刚读过的书：它的 id 仍是选中的那本时直接用它，不再读一遍。
+fn status_with(
+    directory: &Path,
+    resources: &Path,
+    plugins: Option<&Path>,
+    day: &str,
+    loaded: Option<Wordbook>,
 ) -> Result<ReviewStatus, ReviewSessionError> {
     if !crate::calendar::is_valid_day(day) {
         return Err(ReviewSessionError::InvalidDay);
@@ -210,7 +246,12 @@ pub fn status(
         name: book.name.clone(),
         total: book.entries.len(),
         builtin: true,
+        pack: false,
     }));
+    // 插件词书在内置书之后、导入的书之前。
+    if let Some(root) = plugins {
+        wordbooks.extend(wordbook_pack::summaries(root));
+    }
     wordbooks.extend(library.list()?);
     let document = store.load()?;
     let settings = document.settings.clone();
@@ -219,8 +260,10 @@ pub fn status(
     // as an error: the user deleted it, and the page should offer the picker instead of a failure.
     let imported = if settings.wordbook.is_empty() || builtin::is_builtin(&settings.wordbook) {
         None
+    } else if let Some(book) = loaded.filter(|book| book.id == settings.wordbook) {
+        Some(book)
     } else {
-        library.load(&settings.wordbook)?
+        selected_book(&library, resources, plugins, &settings.wordbook)?
     };
     let selected = builtins
         .iter()
@@ -275,6 +318,7 @@ mod tests {
         apply(
             path,
             path,
+            None,
             TODAY,
             ReviewAction::Import {
                 name: name.to_owned(),
@@ -287,7 +331,7 @@ mod tests {
     #[test]
     fn a_fresh_directory_has_no_books_and_no_queue() {
         let root = directory();
-        let status = status(root.path(), root.path(), TODAY).unwrap();
+        let status = status(root.path(), root.path(), None, TODAY).unwrap();
         assert!(status.wordbooks.is_empty());
         assert_eq!(status.settings.wordbook, "");
         assert_eq!(status.due, 0);
@@ -326,6 +370,59 @@ mod tests {
     }
 
     #[test]
+    fn import_does_not_leave_a_book_when_progress_is_corrupt() {
+        let root = directory();
+        std::fs::write(
+            root.path().join("vocabulary-progress.json"),
+            b"corrupt synthetic progress",
+        )
+        .unwrap();
+
+        assert!(matches!(
+            apply(
+                root.path(),
+                root.path(),
+                None,
+                TODAY,
+                ReviewAction::Import {
+                    name: "合成词表".to_owned(),
+                    text: LIST.to_owned(),
+                },
+            ),
+            Err(ReviewSessionError::Progress(_))
+        ));
+        assert!(WordbookLibrary::new(root.path()).list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn remove_does_not_delete_a_book_when_progress_is_corrupt() {
+        let root = directory();
+        let book = import(root.path(), "合成词表").settings.wordbook;
+        std::fs::write(
+            root.path().join("vocabulary-progress.json"),
+            b"corrupt synthetic progress",
+        )
+        .unwrap();
+
+        assert!(matches!(
+            apply(
+                root.path(),
+                root.path(),
+                None,
+                TODAY,
+                ReviewAction::Remove {
+                    wordbook: book.clone(),
+                },
+            ),
+            Err(ReviewSessionError::Progress(_))
+        ));
+        assert!(WordbookLibrary::new(root.path())
+            .load(&book)
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
     fn recall_leaves_todays_queue_and_a_lapse_stays_in_it() {
         let root = directory();
         import(root.path(), "合成词表");
@@ -333,6 +430,7 @@ mod tests {
         let answered = apply(
             root.path(),
             root.path(),
+            None,
             TODAY,
             ReviewAction::Answer {
                 word: "alpha".to_owned(),
@@ -346,6 +444,7 @@ mod tests {
         let failed = apply(
             root.path(),
             root.path(),
+            None,
             TODAY,
             ReviewAction::Answer {
                 word: "beta".to_owned(),
@@ -367,6 +466,7 @@ mod tests {
         apply(
             root.path(),
             root.path(),
+            None,
             TODAY,
             ReviewAction::Answer {
                 word: "alpha".to_owned(),
@@ -375,7 +475,7 @@ mod tests {
         )
         .unwrap();
 
-        let tomorrow = status(root.path(), root.path(), "2026-09-24").unwrap();
+        let tomorrow = status(root.path(), root.path(), None, "2026-09-24").unwrap();
         assert_eq!(tomorrow.answered_today, 0);
         assert_eq!(tomorrow.due, 1);
         assert_eq!(tomorrow.queue[0].word, "alpha");
@@ -388,6 +488,7 @@ mod tests {
         apply(
             root.path(),
             root.path(),
+            None,
             TODAY,
             ReviewAction::Answer {
                 word: "alpha".to_owned(),
@@ -396,7 +497,7 @@ mod tests {
         )
         .unwrap();
 
-        let reset = apply(root.path(), root.path(), TODAY, ReviewAction::Reset).unwrap();
+        let reset = apply(root.path(), root.path(), None, TODAY, ReviewAction::Reset).unwrap();
         assert_eq!(reset.answered_today, 0);
         assert_eq!(reset.settings.wordbook, book, "清空进度 is not 删除词表");
         assert_eq!(reset.wordbooks.len(), 1);
@@ -410,6 +511,7 @@ mod tests {
         apply(
             root.path(),
             root.path(),
+            None,
             TODAY,
             ReviewAction::Answer {
                 word: "alpha".to_owned(),
@@ -421,6 +523,7 @@ mod tests {
         let removed = apply(
             root.path(),
             root.path(),
+            None,
             TODAY,
             ReviewAction::Remove {
                 wordbook: book.clone(),
@@ -444,7 +547,7 @@ mod tests {
         let book = import(root.path(), "合成词表").settings.wordbook;
         WordbookLibrary::new(root.path()).remove(&book).unwrap();
 
-        let status = status(root.path(), root.path(), TODAY).unwrap();
+        let status = status(root.path(), root.path(), None, TODAY).unwrap();
         assert!(status.queue.is_empty());
         assert_eq!(status.due, 0);
     }
@@ -456,6 +559,7 @@ mod tests {
             apply(
                 root.path(),
                 root.path(),
+                None,
                 "2026-13-01",
                 ReviewAction::Import {
                     name: "坏日期".to_owned(),
@@ -465,7 +569,7 @@ mod tests {
             Err(ReviewSessionError::InvalidDay)
         ));
         assert!(
-            status(root.path(), root.path(), TODAY)
+            status(root.path(), root.path(), None, TODAY)
                 .unwrap()
                 .wordbooks
                 .is_empty(),
@@ -480,6 +584,7 @@ mod tests {
             apply(
                 root.path(),
                 root.path(),
+                None,
                 TODAY,
                 ReviewAction::Import {
                     name: "空的".to_owned(),
@@ -488,7 +593,7 @@ mod tests {
             ),
             Err(ReviewSessionError::Import(_))
         ));
-        assert!(status(root.path(), root.path(), TODAY)
+        assert!(status(root.path(), root.path(), None, TODAY)
             .unwrap()
             .wordbooks
             .is_empty());
@@ -501,6 +606,7 @@ mod tests {
             apply(
                 root.path(),
                 root.path(),
+                None,
                 TODAY,
                 ReviewAction::Answer {
                     word: "alpha".to_owned(),
@@ -539,7 +645,7 @@ mod tests {
         stage_builtin(root.path(), "cet4", "CET-4", &["alpha", "beta", "gamma"]);
 
         // 没有任何导入，页面也不该是空的。
-        let listed = status(root.path(), root.path(), TODAY).unwrap();
+        let listed = status(root.path(), root.path(), None, TODAY).unwrap();
         assert_eq!(listed.wordbooks.len(), 1);
         assert_eq!(listed.wordbooks[0].id, "cet4");
         assert!(
@@ -550,6 +656,7 @@ mod tests {
         let chosen = apply(
             root.path(),
             root.path(),
+            None,
             TODAY,
             ReviewAction::SetSettings {
                 wordbook: "cet4".to_owned(),
@@ -564,6 +671,7 @@ mod tests {
         let answered = apply(
             root.path(),
             root.path(),
+            None,
             TODAY,
             ReviewAction::Answer {
                 word: "alpha".to_owned(),
@@ -581,7 +689,7 @@ mod tests {
         stage_builtin(root.path(), "cet4", "CET-4", &["alpha"]);
         import(root.path(), "我的词表");
 
-        let listed = status(root.path(), root.path(), TODAY).unwrap();
+        let listed = status(root.path(), root.path(), None, TODAY).unwrap();
         assert_eq!(
             listed
                 .wordbooks
@@ -596,6 +704,7 @@ mod tests {
             apply(
                 root.path(),
                 root.path(),
+                None,
                 TODAY,
                 ReviewAction::Remove {
                     wordbook: "cet4".to_owned()
@@ -605,7 +714,7 @@ mod tests {
         ));
         // 删不掉，也就不会把进度一起带走。
         assert_eq!(
-            status(root.path(), root.path(), TODAY)
+            status(root.path(), root.path(), None, TODAY)
                 .unwrap()
                 .wordbooks
                 .len(),
@@ -620,6 +729,7 @@ mod tests {
         let status = apply(
             root.path(),
             root.path(),
+            None,
             TODAY,
             ReviewAction::SetSettings {
                 wordbook: book.clone(),
@@ -634,5 +744,85 @@ mod tests {
             status.introducing, 1,
             "the new allowance takes effect immediately"
         );
+    }
+
+    fn install_wordbook_pack(plugins: &Path, id: &str, words: &str) {
+        let pack = plugins.join("wordbook").join(id);
+        std::fs::create_dir_all(&pack).unwrap();
+        std::fs::write(
+            pack.join("plugin.toml"),
+            format!("schema_version = 1\nkind = 'wordbook'\nid = '{id}'\nname = '计算机词汇'\nversion = '1'\nlicense = 'CC0-1.0'\n[wordbook]\nfile = 'words.tsv'\n"),
+        )
+        .unwrap();
+        std::fs::write(pack.join("words.tsv"), words).unwrap();
+    }
+
+    #[test]
+    fn plugin_wordbooks_are_listed_between_bundled_and_imported_books_and_keep_their_progress() {
+        let root = directory();
+        let plugins = root.path().join("plugins");
+        stage_builtin(root.path(), "cet4", "CET-4", &["alpha"]);
+        import(root.path(), "我的词表");
+        install_wordbook_pack(
+            &plugins,
+            "cs-words",
+            "cache\tn. 缓存\ncompiler\tn. 编译器\n",
+        );
+
+        let listed = status(root.path(), root.path(), Some(&plugins), TODAY).unwrap();
+        let ids: Vec<_> = listed.wordbooks.iter().map(|b| b.id.as_str()).collect();
+        assert_eq!(ids[..2], ["cet4", "pack-cs-words"]);
+        assert!(ids[2].starts_with("user-"));
+        let pack = &listed.wordbooks[1];
+        assert!(pack.pack && !pack.builtin);
+        assert_eq!((pack.name.as_str(), pack.total), ("计算机词汇", 2));
+        // 导入的书不带 pack 字段，index.json 不变。
+        assert!(serde_json::to_value(&listed.wordbooks[2])
+            .unwrap()
+            .get("pack")
+            .is_none());
+        // 没有插件目录的宿主看不到它。
+        assert_eq!(
+            status(root.path(), root.path(), None, TODAY)
+                .unwrap()
+                .wordbooks
+                .len(),
+            2
+        );
+
+        let apply_with = |action| apply(root.path(), root.path(), Some(&plugins), TODAY, action);
+        let chosen = apply_with(ReviewAction::SetSettings {
+            wordbook: "pack-cs-words".to_owned(),
+            new_per_day: 20,
+            session_limit: 200,
+        })
+        .unwrap();
+        assert_eq!(chosen.queue[0].word, "cache");
+        let answered = apply_with(ReviewAction::Answer {
+            word: "cache".to_owned(),
+            known: true,
+        })
+        .unwrap();
+        assert_eq!(answered.answered_today, 1);
+        assert!(matches!(
+            apply_with(ReviewAction::Remove {
+                wordbook: "pack-cs-words".to_owned()
+            }),
+            Err(ReviewSessionError::PackNotRemovable)
+        ));
+
+        // 卸载插件：选择退化为书目选择，进度保留；重新装上后接着复习。
+        std::fs::remove_dir_all(plugins.join("wordbook/cs-words")).unwrap();
+        let gone = status(root.path(), root.path(), Some(&plugins), TODAY).unwrap();
+        assert_eq!(gone.settings.wordbook, "pack-cs-words");
+        assert!(gone.queue.is_empty());
+        install_wordbook_pack(
+            &plugins,
+            "cs-words",
+            "cache\tn. 缓存\ncompiler\tn. 编译器\n",
+        );
+        let back = status(root.path(), root.path(), Some(&plugins), TODAY).unwrap();
+        assert_eq!(back.answered_today, 1);
+        assert_eq!(back.queue[0].word, "compiler");
     }
 }

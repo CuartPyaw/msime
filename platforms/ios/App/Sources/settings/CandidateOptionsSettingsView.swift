@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import CoreFoundation
 
 /// The candidate preview, text size and font, what the strip shows while spelling, 以词定字, cloud candidates, and what gets mixed into the Chinese candidates.
 ///
@@ -22,7 +23,6 @@ struct CandidateOptionsSettingsView: View {
   @State private var fontFamily = CandidateFontPreference.defaultFamily
   @State private var englishFamily: String?
   @State private var fontFamilies: [String] = []
-  @State private var fallbackFamilies = CandidateFontPreference.defaultFallbackFamilies
   @State private var preeditStyle = CandidatePreeditStyle.pinyin.rawValue
   @State private var shuangpinRaw = true
   @State private var inlinePreedit = InlinePreeditPreference.style
@@ -76,21 +76,13 @@ struct CandidateOptionsSettingsView: View {
         } label: {
           LabeledContent("英文字体", value: englishFamily.map(familyTitle) ?? "跟随中文字体")
         }.accessibilityIdentifier("candidateEnglishFont")
-        NavigationLink {
-          CandidateFallbackFontList(families: fallbackFamilies) { families in
-            write { $0[CandidateFontPreference.fallbackFamiliesKey] = families }
-            return fallbackFamilies
-          }
-        } label: {
-          LabeledContent("补充字体", value: "\(fallbackFamilies.count) 个")
-        }.accessibilityIdentifier("candidateFallbackFonts")
       } header: {
         Text("字号与字体")
       } footer: {
         Text((tablet
           ? "默认 18 和 15，与桌面端同步。候选栏会随字号变高；浮动的小键盘按手机的上限显示。"
           : "默认 18 和 15，与桌面端同步。候选栏会随字号变高；桌面端设得更大时，手机上最多显示到 24 和 20。")
-          + "字体与桌面端同步；中英文字体缺字时依次使用补充字体。此设备没有的字体会跳过，全都没有时使用系统字体。")
+          + "字体与桌面端同步；此设备没有的字体或缺的字使用系统字体。")
       }
       Section {
         Stepper(value: Binding(get: { CandidatePageSizePreference.clamped(pageSize) }, set: { pageSize = CandidatePageSizePreference.clamped($0) }),
@@ -115,7 +107,7 @@ struct CandidateOptionsSettingsView: View {
       } header: {
         Text("预编辑")
       } footer: {
-        Text("行内预编辑默认关闭；个别 App 显示输入框里的组字不完整时可以关掉。候选栏预编辑选「不显示」时，候选栏不再显示正在拼写的编码，把位置留给候选；已选定的半个词和本地输入模式的名称仍会显示。")
+        Text("行内预编辑默认关闭；个别 App 显示输入框里的组字不完整时可以关掉。韩语正在拼的音节、注音正在转换的文字、越南语正在拼的词和藏文正在拼的音节总是写在输入框里，不受这项影响。笔画方案在「原始按键」下也显示笔画（一丨丿丶乛＊），不显示按键字母。候选栏预编辑选「不显示」时，候选栏不再显示正在拼写的编码，把位置留给候选；已选定的半个词和快捷模式的名称仍会显示。")
       }
       Section {
         Toggle(isOn: stored("word_character", "enabled", $wordCharacter)) {
@@ -217,7 +209,7 @@ struct CandidateOptionsSettingsView: View {
     guard let preferences = MetasequoiaInputSessionBridge.loadSharedPreferences() else { return }
     let mixed = preferences["mixed_input"] as? [String: Any] ?? [:]
     english = mixed["english"] as? Bool ?? english
-    minimumPrefix = (mixed["minimum_prefix"] as? NSNumber)?.intValue ?? minimumPrefix
+    minimumPrefix = Self.minimumPrefix(mixed["minimum_prefix"]) ?? minimumPrefix
     emoji = mixed["emoji"] as? Bool ?? emoji
     kaomoji = mixed["kaomoji"] as? Bool ?? kaomoji
     candidateSize = CandidateFontPreference.candidateSize(in: preferences, tablet: tablet)
@@ -225,51 +217,19 @@ struct CandidateOptionsSettingsView: View {
     fontFamily = preferences[CandidateFontPreference.familyKey] as? String ?? CandidateFontPreference.defaultFamily
     englishFamily = (preferences[CandidateFontPreference.englishFamilyKey] as? String).flatMap { $0.isEmpty ? nil : $0 }
     fontFamilies = CandidateFontPreference.families(in: preferences)
-    fallbackFamilies = CandidateFontPreference.fallbackFamilies(in: preferences)
     preeditStyle = CandidatePreeditStyle(in: preferences).rawValue
     document = preferences
     shuangpinRaw = preferences["shuangpin_preedit_uses_raw"] as? Bool ?? true
     wordCharacter = (preferences["word_character"] as? [String: Any])?["enabled"] as? Bool ?? wordCharacter
   }
-}
 
-/// 「补充字体」, the Windows appearance page's ordered supplementary families: drag to reorder, swipe to remove, and add from the families this device has. A family synced from a desktop that this device lacks stays in the list, marked, because the desktop still uses it.
-private struct CandidateFallbackFontList: View {
-  @State var families: [String]
-  /// Stores the chain and returns what the document now holds, which is the old chain when the write was refused.
-  let save: ([String]) -> [String]
-  var body: some View {
-    List {
-      Section {
-        // A synced document may name a family twice, so rows are keyed by position.
-        ForEach(Array(families.enumerated()), id: \.offset) { _, family in
-          Text(CandidateFontPreference.isInstalled(family) ? family : "\(family)（未安装）")
-            .font(CandidateFontPreference.isInstalled(family)
-              ? .custom(family, size: UIFont.preferredFont(forTextStyle: .body).pointSize, relativeTo: .body) : .body)
-        }
-        .onMove { from, to in
-          var next = families
-          next.move(fromOffsets: from, toOffset: to)
-          families = save(next)
-        }
-        .onDelete { offsets in
-          var next = families
-          next.remove(atOffsets: offsets)
-          families = save(next)
-        }
-        NavigationLink {
-          CandidateFontFamilyList(title: "添加字体", selection: nil, none: nil) { family in
-            if let family { families = save(CandidateFontPreference.appending(family, to: families)) }
-          }
-        } label: { Label("添加字体", systemImage: "plus") }
-          .disabled(families.count >= CandidateFontPreference.maximumFallbackFamilies)
-          .accessibilityIdentifier("addCandidateFallbackFont")
-      } footer: {
-        Text("中英文字体里没有的字，按这里的顺序找下一个字体；都没有时用系统字体。最多 \(CandidateFontPreference.maximumFallbackFamilies) 个，与桌面端同步。")
-      }
-    }
-    .toolbar { EditButton() }
-    .navigationTitle("补充字体").navigationBarTitleDisplayMode(.inline)
+  static func minimumPrefix(_ value: Any?) -> Int? {
+    guard let number = value as? NSNumber,
+          CFGetTypeID(number) != CFBooleanGetTypeID(),
+          let integer = Int(number.stringValue),
+          NSNumber(value: integer).compare(number) == .orderedSame,
+          (1...8).contains(integer) else { return nil }
+    return integer
   }
 }
 

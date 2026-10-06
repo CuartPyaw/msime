@@ -61,6 +61,8 @@ final class CandidateFontSizeTests: XCTestCase {
     XCTAssertEqual(CandidateFontPreference.preeditSize(in: synced, tablet: false), 20)
     XCTAssertEqual(CandidateFontPreference.preeditSize(in: synced, tablet: true), 24)
     XCTAssertEqual(CandidateFontPreference.candidateSize(in: [CandidateFontPreference.candidateKey: 4], tablet: true), 12)
+    XCTAssertEqual(CandidateFontPreference.candidateSize(in: [CandidateFontPreference.candidateKey: 20.5], tablet: false), 18)
+    XCTAssertEqual(CandidateFontPreference.candidateSize(in: [CandidateFontPreference.candidateKey: true], tablet: false), 18)
   }
 
   func testLargerTextGrowsTheStripButSmallerTextKeepsTheTouchTarget() {
@@ -87,6 +89,26 @@ final class CandidateFontSizeTests: XCTestCase {
     let title = try XCTUnwrap(chip.configuration?.attributedTitle)
     let font = try XCTUnwrap(NSAttributedString(title).attribute(.font, at: 0, effectiveRange: nil) as? UIFont)
     XCTAssertGreaterThan(font.pointSize, UIFont.preferredFont(forTextStyle: .body).pointSize)
+  }
+
+  func testTheExpandedPanelHeaderLeadsWithTheBrandMark() throws {
+    let panel = KeyboardCandidatePanelView(
+      candidates: ["水杉"], preedit: "shuishan", display: { $0 }, onSelect: { _ in }, onClose: {})
+    panel.frame = CGRect(x: 0, y: 0, width: 390, height: 300)
+    panel.layoutIfNeeded()
+    let mark = try XCTUnwrap(find("candidatePanelBrandIcon", in: panel) as? UIImageView)
+    let spelling = try XCTUnwrap(find("candidatePanelSpelling", in: panel))
+    let header = try XCTUnwrap(mark.superview as? UIStackView)
+    XCTAssertTrue(header.arrangedSubviews.first === mark, "the mark leads the header")
+    XCTAssertTrue(spelling.superview === header)
+    XCTAssertNotNil(mark.image)
+    XCTAssertEqual(mark.image?.renderingMode, .alwaysTemplate)
+    XCTAssertEqual(mark.tintColor, KeyboardTheme.current.accent)
+    XCTAssertEqual(mark.bounds.width, 16, accuracy: 0.1)
+    XCTAssertEqual(mark.bounds.height, 16, accuracy: 0.1)
+    XCTAssertEqual(spelling.frame.minX - mark.frame.maxX, 6, accuracy: 0.5)
+    XCTAssertFalse(mark.isUserInteractionEnabled)
+    XCTAssertFalse(mark.isAccessibilityElement)
   }
 
   func testTheLiveSessionSeesASizeTheSettingsAppWrote() async {

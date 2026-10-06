@@ -1,12 +1,13 @@
 import { errorCode } from "./error-code";
 
-const unreadablePreferencesMessage = "配置文件无法读取或版本较新，原文件已保留。";
+/** Message shown when the host cannot read the saved preferences document. */
+export const unreadablePreferencesMessage = "配置文件无法读取或版本较新，原文件已保留。";
 
 export function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   switch (errorCode(error)) {
     case "conflict":
-      return "设置已在其他窗口修改。请重新读取后再保存。";
+      return "设置已在其他窗口修改，未能保存。请重试或重新读取。";
     case "invalid":
       return "候选数量必须为 1 到 9。";
     case "frequency_invalid":

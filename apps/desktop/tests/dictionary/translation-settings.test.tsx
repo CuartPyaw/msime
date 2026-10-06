@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
+import { testHost } from "../support/host";
+import { settingsFormReady, saveSettingsNow } from "../support/settings-form";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
   SettingsPage,
   translationEndpointIssue,
-  type HostCapabilities,
   type Preferences,
   type SettingsClient,
   type Snapshot,
@@ -33,10 +34,10 @@ const base: Snapshot = {
 async function mount(preferences: Record<string, unknown> = {}) {
   const snapshot: Snapshot = { ...base, preferences: { ...base.preferences, ...preferences } };
   const mounted = render(<SettingsPage client={{ load: async () => snapshot, save: vi.fn() }} />);
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   // The translation controls live on the 输入 page; other pages are hidden, and
   // hidden subtrees are absent from the accessibility tree.
-  fireEvent.click(screen.getByRole("button", { name: "表达" }));
+  fireEvent.click(screen.getByRole("button", { name: "标点与翻译" }));
   return mounted;
 }
 
@@ -77,12 +78,39 @@ test("translation credentials are disabled while candidate translation is off", 
   await mount({ candidate_translations: false });
   expect(endpointField().disabled).toBe(true);
   expect((screen.getByLabelText("自定义翻译 API Key") as HTMLInputElement).disabled).toBe(true);
-  // The group and its switch share the label, so select the switch by role.
   expect(
-    (screen.getByRole("switch", { name: "自定义翻译服务" }) as HTMLInputElement).disabled,
+    (screen.getByRole("combobox", { name: "候选词翻译服务" }) as HTMLSelectElement).disabled,
   ).toBe(true);
   // A disabled field must not shout about its contents.
   expect(screen.queryByRole("status")).toBeNull();
+});
+
+test("only the chosen service's settings are shown, in the order the select lists them", async () => {
+  await mount();
+  const select = screen.getByRole("combobox", { name: "候选词翻译服务" }) as HTMLSelectElement;
+  expect(Array.from(select.options).map((option) => option.value)).toEqual([
+    "none",
+    "tencent",
+    "niutrans",
+    "custom",
+  ]);
+  const shown = () => ({
+    tencent: screen.queryByLabelText("腾讯云 SecretId") !== null,
+    niutrans: screen.queryByLabelText("NiuTrans App ID") !== null,
+    custom: screen.queryByLabelText("自定义翻译 Endpoint") !== null,
+  });
+  expect(shown()).toEqual({ tencent: false, niutrans: false, custom: true });
+  fireEvent.change(select, { target: { value: "tencent" } });
+  expect(shown()).toEqual({ tencent: true, niutrans: false, custom: false });
+  expect(screen.getByRole("heading", { name: "腾讯云机器翻译" })).toBeTruthy();
+  fireEvent.change(select, { target: { value: "niutrans" } });
+  expect(shown()).toEqual({ tencent: false, niutrans: true, custom: false });
+  fireEvent.change(select, { target: { value: "none" } });
+  expect(shown()).toEqual({ tencent: false, niutrans: false, custom: false });
+  // 下拉框是选择服务的唯一方式；没有哪个组自带开关。
+  for (const name of ["腾讯云机器翻译", "小牛翻译（NiuTrans）", "自定义翻译服务"]) {
+    expect(screen.queryByRole("switch", { name })).toBeNull();
+  }
 });
 
 test("the API key can be revealed to check a pasted value", async () => {
@@ -100,10 +128,11 @@ test("the API key can be revealed to check a pasted value", async () => {
 
 test("NiuTrans provider is mutually exclusive and exposes synthetic credential fields", async () => {
   await mount();
-  fireEvent.click(screen.getByRole("switch", { name: "小牛翻译（NiuTrans）" }));
-  expect((screen.getByRole("switch", { name: "自定义翻译服务" }) as HTMLInputElement).checked).toBe(
-    false,
-  );
+  fireEvent.change(screen.getByRole("combobox", { name: "候选词翻译服务" }), {
+    target: { value: "niutrans" },
+  });
+  // 选择 NiuTrans 会关闭自定义服务，它的设置也随之离开页面。
+  expect(screen.queryByLabelText("自定义翻译 Endpoint")).toBeNull();
   const appId = screen.getByLabelText("NiuTrans App ID") as HTMLInputElement;
   const apiKey = screen.getByLabelText("NiuTrans API Key") as HTMLInputElement;
   expect(appId.disabled).toBe(false);
@@ -128,18 +157,18 @@ describe("the MSIME account translation is an explicit choice", () => {
         client={{
           load: async () => snapshot,
           save,
-          host: { platform } as HostCapabilities,
+          host: testHost({ platform }),
         }}
       />,
     );
-    await screen.findByRole("button", { name: "保存设置" });
+    await settingsFormReady();
     return save;
   }
   const serviceSelect = () =>
     screen.getByRole("combobox", { name: "候选词翻译服务" }) as HTMLSelectElement;
   const optionValues = () => Array.from(serviceSelect().options).map((option) => option.value);
   async function saveAndRead(save: ReturnType<typeof vi.fn>, call: number) {
-    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+    saveSettingsNow();
     await waitFor(() => expect(save).toHaveBeenCalledTimes(call + 1));
     return save.mock.calls[call][1] as Preferences;
   }
@@ -169,17 +198,17 @@ describe("the MSIME account translation is an explicit choice", () => {
   );
 
   test.each(["windows", "linux", "macos"])(
-    "%s: undoing a service change leaves nothing unsaved",
+    "%s: undoing a service change leaves nothing to save",
     async (platform) => {
-      await mountOn(platform, {
+      const save = await mountOn(platform, {
         tencent_tmt: { enabled: false, secret_id: "", secret_key: "", region: "ap-guangzhou" },
         niutrans: { enabled: false, app_id: "", apikey: "" },
       });
       fireEvent.change(serviceSelect(), { target: { value: "niutrans" } });
-      expect(screen.getByText("有未保存的修改")).toBeTruthy();
       fireEvent.change(serviceSelect(), { target: { value: "custom" } });
       // The saved document omits translation_account while it is false, so the draft must not grow the key either.
-      await waitFor(() => expect(screen.queryByText("有未保存的修改")).toBeNull());
+      saveSettingsNow();
+      expect(save).not.toHaveBeenCalled();
     },
   );
 
@@ -197,14 +226,16 @@ describe("the MSIME account translation is an explicit choice", () => {
     expect(serviceSelect().value).toBe("none");
   });
 
-  test("turning on Tencent from its own switch ends the account choice", async () => {
+  test("choosing Tencent ends the account choice", async () => {
     const save = await mountOn("macos", {
       translation_account: true,
       custom_translation: { enabled: false, endpoint: "", api_key: "" },
       tencent_tmt: { enabled: false, secret_id: "", secret_key: "", region: "ap-guangzhou" },
     });
     expect(serviceSelect().value).toBe("account");
-    fireEvent.click(screen.getByRole("switch", { name: "腾讯云机器翻译" }));
+    // 账号不使用用户自己的凭据，所以选中它时下拉框下面什么都不显示。
+    expect(screen.queryByLabelText("腾讯云 SecretId")).toBeNull();
+    fireEvent.change(serviceSelect(), { target: { value: "tencent" } });
     expect(serviceSelect().value).toBe("tencent");
     // Unusable secrets must not leave the account quietly receiving candidates behind the Tencent selection.
     const saved = await saveAndRead(save, 0);
@@ -212,15 +243,34 @@ describe("the MSIME account translation is an explicit choice", () => {
     expect(saved.translation_account).toBeUndefined();
   });
 
-  test("toggling the custom service on and off does not bring the account back", async () => {
+  test("a chosen account shows despite Tencent's credential-less default", async () => {
+    // 显式选了水杉账号的文档旁边还留着腾讯云默认的 `enabled: true`（没有凭据）；宿主走的是账号，页面必须显示账号。
+    await mountOn("macos", {
+      translation_account: true,
+      custom_translation: { enabled: false, endpoint: "", api_key: "" },
+      tencent_tmt: { enabled: true, secret_id: "", secret_key: "", region: "ap-guangzhou" },
+    });
+    expect(serviceSelect().value).toBe("account");
+  });
+
+  test("usable Tencent secrets take precedence over the account", async () => {
+    await mountOn("linux", {
+      translation_account: true,
+      custom_translation: { enabled: false, endpoint: "", api_key: "" },
+      tencent_tmt: { enabled: true, secret_id: "id", secret_key: "key", region: "ap-guangzhou" },
+    });
+    expect(serviceSelect().value).toBe("tencent");
+  });
+
+  test("choosing the custom service and then 关闭 does not bring the account back", async () => {
     const save = await mountOn("macos", {
       translation_account: true,
       custom_translation: { enabled: false, endpoint: "", api_key: "" },
       tencent_tmt: { enabled: false, secret_id: "", secret_key: "", region: "ap-guangzhou" },
     });
-    const custom = screen.getByRole("switch", { name: "自定义翻译服务" });
-    fireEvent.click(custom);
-    fireEvent.click(custom);
+    fireEvent.change(serviceSelect(), { target: { value: "custom" } });
+    expect(serviceSelect().value).toBe("custom");
+    fireEvent.change(serviceSelect(), { target: { value: "none" } });
     expect(serviceSelect().value).toBe("none");
     const saved = await saveAndRead(save, 0);
     expect(saved.translation_account).toBeUndefined();
@@ -275,12 +325,12 @@ describe("macOS points at undownloaded Apple translation languages", () => {
         client={{
           load: async () => snapshot,
           save: vi.fn(),
-          host: { platform: "macos" } as HostCapabilities,
+          host: testHost({ platform: "macos" }),
           onDeviceTranslation,
         }}
       />,
     );
-    await screen.findByRole("button", { name: "保存设置" });
+    await settingsFormReady();
     // Let the host's answer land, so a hidden hint means hidden and not merely not yet shown.
     await waitFor(() => expect(downloadableLanguages).toHaveBeenCalled());
     await act(async () => {});

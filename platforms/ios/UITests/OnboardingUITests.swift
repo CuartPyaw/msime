@@ -198,11 +198,11 @@ final class OnboardingUITests: XCTestCase {
     app.navigationBars.buttons.firstMatch.tap()
     app.buttons["communityCategory-2"].tap()
     app.buttons["communityResource-10000000-0000-4000-8000-000000000003"].tap()
-    XCTAssertTrue(app.buttons["添加到回复键盘"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.buttons["添加到高情商回复键盘"].waitForExistence(timeout: 5))
     let detail = XCTAttachment(screenshot: app.screenshot()); detail.name = "Community reply preview"; detail.lifetime = .deleteOnSuccess; add(detail)
     app.navigationBars.buttons.firstMatch.tap()
     app.buttons["publishCommunityWork"].tap()
-    XCTAssertTrue(app.navigationBars["发布回复"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.navigationBars["发布回复模板"].waitForExistence(timeout: 5))
     XCTAssertTrue(app.textViews["communityPromptEditor"].exists)
     app.buttons["取消"].tap()
     app.buttons["communityCategory-1"].tap()
@@ -483,7 +483,7 @@ final class OnboardingUITests: XCTestCase {
     let search = app.textFields.firstMatch
     search.tap(); search.typeText("reply\n")
     app.buttons["publishCommunityWork"].tap()
-    XCTAssertTrue(app.navigationBars["发布回复"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.navigationBars["发布回复模板"].waitForExistence(timeout: 5))
     app.buttons["取消"].tap()
     XCTAssertTrue(app.navigationBars["社区"].waitForExistence(timeout: 5))
     XCTAssertEqual(search.value as? String, "reply")
@@ -800,7 +800,7 @@ final class OnboardingUITests: XCTestCase {
     tapRevealed("customSkinEditorLink", in: app)
     app.buttons["skinEditorTemplates"].tap()
     let gallery = app.collectionViews.firstMatch.exists ? app.collectionViews.firstMatch : app.tables.firstMatch
-    // Three of the eight curated designs. Walking all of them cost four minutes and asserted the
+    // Three of the nine curated designs. Walking all of them cost four minutes and asserted the
     // same three things each time; what every design contains is checked in KeyboardSkinTests,
     // which reads them directly instead of driving a Simulator. The first is above the fold and the
     // last two need scrolling, so the gallery is still exercised in both states.

@@ -6,11 +6,15 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, LazyLock, Mutex, MutexGuard, RwLock, RwLockReadGuard};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use crate::time::Instant;
 
 use rusqlite::{params, Connection, OpenFlags};
 
-use super::journal::{ensure_user_database, open_database, open_existing_read_only};
+use super::journal::{
+    drop_stale_pinyin_upserts, ensure_schema, open_database, open_existing_read_only,
+};
 use crate::error::{EngineError, Result};
 use crate::lattice::ngram::SENTENCE_START;
 use crate::lattice::personal::{PersonalNgram, PersonalNgramOptions, PersonalTransition};
@@ -25,7 +29,7 @@ const WRITE_FAILED: &str = "Personal context could not be written to the journal
 /// Bumped by `release_all`: every store's model is stale until it reloads from the file now at its path.
 static STORE_GENERATION: AtomicU64 = AtomicU64::new(0);
 
-/// Stores are never freed: sessions on other threads and the flush thread keep using them (NS:39-48).
+/// 注册表保留仍被会话或刷新线程使用的 store；下次打开 journal 时会回收只有注册表自身引用的旧路径。
 static STORES: LazyLock<Mutex<HashMap<PathBuf, Arc<PersonalNgramStore>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
@@ -70,12 +74,13 @@ const NEVER_LOADED: u64 = u64::MAX;
 impl PersonalNgramStore {
     pub fn for_journal(user_db: &Path) -> Arc<PersonalNgramStore> {
         let mut stores = lock(&STORES);
+        stores.retain(|_, store| Arc::strong_count(store) > 1);
         Arc::clone(stores.entry(user_db.to_path_buf()).or_insert_with(|| {
             Arc::new(PersonalNgramStore {
                 model: RwLock::new(PersonalNgram::new(PersonalNgramOptions::default())),
                 path: user_db.to_path_buf(),
                 writer: Mutex::new(Writer::default()),
-                pending: Mutex::new(Vec::new()),
+                pending: Mutex::new(Vec::with_capacity(FLUSH_BATCH)),
                 version: AtomicU64::new(0),
                 invalidations: AtomicU64::new(0),
                 loaded_generation: AtomicU64::new(NEVER_LOADED),
@@ -172,6 +177,12 @@ impl PersonalNgramStore {
         self.version.fetch_add(1, Ordering::AcqRel);
     }
 
+    /// Mark this store's model stale without the process-wide generation bump `release_all` makes, so a test can stand in for another connection changing the tables.
+    #[cfg(test)]
+    pub(crate) fn invalidate_for_tests(&self) {
+        self.invalidations.fetch_add(1, Ordering::AcqRel);
+    }
+
     fn stale(&self) -> bool {
         self.loaded_generation.load(Ordering::Acquire) != STORE_GENERATION.load(Ordering::Acquire)
             || self.loaded_invalidations.load(Ordering::Acquire)
@@ -248,12 +259,14 @@ impl PersonalNgramStore {
 
     fn open_connection<'a>(&self, writer: &'a mut Writer) -> Result<&'a Connection> {
         if writer.connection.is_none() {
-            // The shared schema pass creates the whole journal, not only these two tables.
-            ensure_user_database(&self.path)?;
-            writer.connection = Some(open_database(
+            // The reference ran `ensure_user_database` here, whose connection it opened and closed within the call for any journal but its default one (user_dictionary_journal.cpp:445-452). Going through this thread's journal cache instead would leave the flush thread holding the journal after `close_cached_journals`, so the store's own connection takes the schema pass: it creates the whole journal, not only these two tables.
+            let connection = open_database(
                 &self.path,
                 OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
-            )?);
+            )?;
+            ensure_schema(&connection)?;
+            drop_stale_pinyin_upserts(&connection);
+            writer.connection = Some(connection);
         }
         Ok(writer
             .connection
@@ -530,11 +543,18 @@ pub(crate) fn forget_journal_rows(user_db: &Path, removed: &[PersonalTransition]
 pub fn release_all() {
     STORE_GENERATION.fetch_add(1, Ordering::AcqRel);
     for store in all_stores() {
-        let mut writer = lock(&store.writer);
+        store.close_for_release();
+    }
+}
+
+impl PersonalNgramStore {
+    /// `release_all` for this store alone, without the generation bump that marks every model stale.
+    fn close_for_release(&self) {
+        let mut writer = lock(&self.writer);
         // The queue belongs to the journal being closed, which the caller may replace or delete next; what cannot be written now is dropped rather than written into whatever file takes its place. Transitions recorded while this runs are kept: they were recorded after the close.
-        if store.flush_locked(&mut writer).is_err() {
-            lock(&store.pending).clear();
-            store.write_failed.store(false, Ordering::Release);
+        if self.flush_locked(&mut writer).is_err() {
+            lock(&self.pending).clear();
+            self.write_failed.store(false, Ordering::Release);
         }
         writer.connection = None;
     }
@@ -671,6 +691,36 @@ mod tests {
     }
 
     #[test]
+    fn pending_queue_reserves_one_flush_batch() {
+        let dir = Dir::new();
+        let store = PersonalNgramStore::for_journal(&dir.journal());
+        assert!(lock(&store.pending).capacity() >= FLUSH_BATCH);
+    }
+
+    #[test]
+    fn a_new_journal_releases_an_unused_store() {
+        let directory = Dir::new();
+        let first = PersonalNgramStore::for_journal(&directory.journal());
+        let released = Arc::downgrade(&first);
+        drop(first);
+        let other = Dir::new();
+        let _next = PersonalNgramStore::for_journal(&other.journal());
+        assert!(released.upgrade().is_none(), "空闲仓库仍被注册表永久持有");
+    }
+
+    #[test]
+    fn a_new_journal_keeps_a_store_used_by_another_session() {
+        let directory = Dir::new();
+        let first = PersonalNgramStore::for_journal(&directory.journal());
+        let other = Dir::new();
+        let _next = PersonalNgramStore::for_journal(&other.journal());
+        assert!(Arc::ptr_eq(
+            &first,
+            &PersonalNgramStore::for_journal(&directory.journal()),
+        ));
+    }
+
+    #[test]
     fn the_background_write_lands_without_a_flush() {
         let dir = Dir::new();
         let journal = dir.journal();
@@ -698,7 +748,247 @@ mod tests {
         assert!(store.record(&run(&["甲"], 2)).is_err());
     }
 
-    /// test_personal_context_input_session.cpp:440-470: past the limit the tables halve until three quarters of it remain, and the model follows.
+    /// What `release_all` does to one store's model: the next access must read the file now at the path. Scoped to this store so parallel tests keep theirs.
+    fn simulate_close(store: &PersonalNgramStore) {
+        lock(&store.writer).connection = None;
+        store.loaded_generation.store(
+            STORE_GENERATION.load(Ordering::Acquire).wrapping_sub(1),
+            Ordering::Release,
+        );
+    }
+
+    fn with_limit(store: &PersonalNgramStore, max_transitions: usize) {
+        *store.model_write() = PersonalNgram::new(PersonalNgramOptions {
+            max_transitions,
+            ..PersonalNgramOptions::default()
+        });
+        store
+            .loaded_generation
+            .store(STORE_GENERATION.load(Ordering::Acquire), Ordering::Release);
+    }
+
+    /// test_personal_context_input_session.cpp:376-392: a write the journal rejects stays queued and in memory, is reported by the next record, and lands once the journal accepts writes again.
+    #[test]
+    fn a_rejected_write_stays_queued_and_is_reported_until_the_journal_accepts_it() {
+        let dir = Dir::new();
+        let journal = dir.journal();
+        let store = PersonalNgramStore::for_journal(&journal);
+        store.record(&run(&["我", "想"], 2)).unwrap();
+        store.flush().unwrap();
+        let connection = Connection::open(&journal).unwrap();
+        connection
+            .execute_batch("CREATE TRIGGER reject_personal BEFORE INSERT ON personal_bigram BEGIN SELECT RAISE(FAIL,'injected'); END;")
+            .unwrap();
+        store.record(&[transition("我", "想", "去", 2)]).unwrap();
+        assert!(store.flush().is_err());
+        assert!(
+            store.model().bigram_probability("想", "去") > 0.0,
+            "a rejected write left memory"
+        );
+        let reported = store
+            .record(&[transition("我", "想", "去", 2)])
+            .unwrap_err();
+        assert!(reported.to_string().contains(WRITE_FAILED), "{reported}");
+        connection
+            .execute_batch("DROP TRIGGER reject_personal;")
+            .unwrap();
+        store.flush().unwrap();
+        assert_eq!(
+            count(
+                &journal,
+                "SELECT count FROM personal_bigram WHERE previous='想' AND word='去'"
+            ),
+            4
+        );
+        store.record(&[transition("", "", "好", 1)]).unwrap();
+    }
+
+    /// test_personal_context_input_session.cpp:393-397: a record under one batch is not written at once but scheduled on the background thread about `FLUSH_DELAY_MS` later, and that write lands without anyone flushing. Other tests call `flush_all` at any moment, which may write this store early, so the delay is read from the worker's schedule rather than from when the row appears.
+    #[test]
+    fn a_small_batch_is_written_later_not_synchronously() {
+        let dir = Dir::new();
+        let journal = dir.journal();
+        let store = PersonalNgramStore::for_journal(&journal);
+        let start = Instant::now();
+        store.record(&[transition("", "", "迟", 1)]).unwrap();
+        let due = lock(&FLUSH_WORKER.due).get(&journal).map(|(_, at)| *at);
+        let due = due.expect("a small batch was not scheduled");
+        assert!(
+            due >= start + Duration::from_millis(FLUSH_DELAY_MS),
+            "a small batch was scheduled {:?} after the record",
+            due.saturating_duration_since(start)
+        );
+        let deadline = start + Duration::from_secs(10);
+        while count(&journal, "SELECT count(*) FROM personal_bigram") < 1 {
+            assert!(Instant::now() < deadline, "the delayed write never landed");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// test_personal_context_input_session.cpp:398-413: once the journal was closed, a file at its path that cannot be read must not leave the previous journal's counts in service, and the failed read is not retried on every access.
+    #[test]
+    fn an_unreadable_journal_after_a_close_stops_serving_the_old_counts() {
+        let dir = Dir::new();
+        let journal = dir.journal();
+        let store = PersonalNgramStore::for_journal(&journal);
+        store.record(&run(&["甲"], 2)).unwrap();
+        store.flush().unwrap();
+        assert!(!store.model().is_empty());
+        simulate_close(&store);
+        std::fs::remove_file(&journal).unwrap();
+        std::fs::write(&journal, vec![b'x'; 4096]).unwrap();
+        assert!(
+            store.model().is_empty(),
+            "a journal that could not be read after a close kept serving the previous counts"
+        );
+        assert!(store.stale());
+        assert!(lock(&store.writer).retry_after.is_some());
+        assert!(store.model().is_empty());
+    }
+
+    /// `release_all`: a queue the closing journal refuses is dropped, never written into whatever file takes its place.
+    #[test]
+    fn a_queue_that_cannot_be_written_at_close_is_dropped() {
+        let dir = Dir::new();
+        let journal = dir.journal();
+        let store = PersonalNgramStore::for_journal(&journal);
+        store.record(&run(&["甲"], 2)).unwrap();
+        store.flush().unwrap();
+        let connection = Connection::open(&journal).unwrap();
+        connection
+            .execute_batch("CREATE TRIGGER reject_personal BEFORE INSERT ON personal_bigram BEGIN SELECT RAISE(FAIL,'injected'); END;")
+            .unwrap();
+        store.record(&[transition("", "甲", "丢", 2)]).unwrap();
+        store.close_for_release();
+        assert!(lock(&store.pending).is_empty());
+        assert!(!store.write_failed.load(Ordering::Acquire));
+        assert!(lock(&store.writer).connection.is_none());
+        connection
+            .execute_batch("DROP TRIGGER reject_personal;")
+            .unwrap();
+        store.record(&[transition("", "甲", "留", 2)]).unwrap();
+        store.flush().unwrap();
+        assert_eq!(
+            count(
+                &journal,
+                "SELECT count(*) FROM personal_bigram WHERE word='丢'"
+            ),
+            0
+        );
+        assert_eq!(
+            count(
+                &journal,
+                "SELECT count(*) FROM personal_bigram WHERE word='留'"
+            ),
+            1
+        );
+    }
+
+    /// user_dictionary_journal.cpp:445-452: the reference opened msime's journal per call, so the thread that writes the queue keeps no journal handle of its own afterwards.
+    #[test]
+    fn the_thread_that_writes_the_queue_keeps_no_journal_handle() {
+        use super::super::journal::{release_thread_journal, thread_holds_journal};
+        let dir = Dir::new();
+        let journal = dir.journal();
+        let store = PersonalNgramStore::for_journal(&journal);
+        store.record(&run(&["甲"], 2)).unwrap();
+        release_thread_journal();
+        simulate_close(&store);
+        store.record(&[transition("", "甲", "乙", 2)]).unwrap();
+        let writer = Arc::clone(&store);
+        let held = std::thread::spawn(move || {
+            writer.flush().unwrap();
+            thread_holds_journal()
+        })
+        .join()
+        .unwrap();
+        assert!(!held, "the writing thread cached the journal connection");
+        assert!(!thread_holds_journal());
+        assert_eq!(
+            count(
+                &journal,
+                "SELECT count FROM personal_bigram WHERE previous='甲' AND word='乙'"
+            ),
+            2
+        );
+    }
+
+    /// test_personal_context_input_session.cpp:415-437: pair and triple counts halve together, and the model read back after the decay matches what a fresh read of the journal gives.
+    #[test]
+    fn decay_halves_pairs_and_triples_and_memory_matches_disk() {
+        let dir = Dir::new();
+        let journal = dir.journal();
+        let store = PersonalNgramStore::for_journal(&journal);
+        with_limit(&store, 3);
+        store
+            .record(&[transition("", "", "甲", 4), transition("", "甲", "乙", 3)])
+            .unwrap();
+        assert_eq!(store.model().entries(), 3);
+        store.record(&[transition("甲", "乙", "丙", 1)]).unwrap();
+        store.flush().unwrap();
+        let pair = |previous: &str, word: &str| {
+            count(&journal, &format!("SELECT coalesce(sum(count),0) FROM personal_bigram WHERE previous={previous} AND word='{word}'"))
+        };
+        assert_eq!(pair("char(1)", "甲"), 2);
+        assert_eq!(pair("'甲'", "乙"), 1);
+        assert_eq!(pair("'乙'", "丙"), 0);
+        assert_eq!(
+            count(&journal, "SELECT coalesce(sum(count),0) FROM personal_trigram WHERE earlier=char(1) AND previous='甲' AND word='乙'"),
+            1
+        );
+        assert_eq!(
+            count(
+                &journal,
+                "SELECT count(*) FROM personal_trigram WHERE word='丙'"
+            ),
+            0
+        );
+        let (entries, probability) = {
+            let model = store.model();
+            (
+                model.entries(),
+                model.probability(&model.context(None, Some("甲")), "乙"),
+            )
+        };
+        assert_eq!(entries, 3);
+        let mut fresh = PersonalNgram::new(PersonalNgramOptions {
+            max_transitions: 3,
+            ..PersonalNgramOptions::default()
+        });
+        load_from(&Connection::open(&journal).unwrap(), &mut fresh).unwrap();
+        assert_eq!(fresh.entries(), entries);
+        assert_eq!(
+            fresh.probability(&fresh.context(None, Some("甲")), "乙"),
+            probability
+        );
+    }
+
+    /// test_personal_context_input_session.cpp:439-452: when every count is 2 one halving removes nothing, so the decay repeats until the entries are at most three quarters of the limit.
+    #[test]
+    fn decay_repeats_until_three_quarters_when_every_count_is_two() {
+        let dir = Dir::new();
+        let journal = dir.journal();
+        let store = PersonalNgramStore::for_journal(&journal);
+        with_limit(&store, 4);
+        store
+            .record(&[transition("", "", "甲", 2), transition("", "甲", "乙", 2)])
+            .unwrap();
+        store.record(&[transition("甲", "乙", "丙", 2)]).unwrap();
+        store.flush().unwrap();
+        let rows = count(
+            &journal,
+            "SELECT (SELECT count(*) FROM personal_bigram)+(SELECT count(*) FROM personal_trigram)",
+        );
+        assert!(rows <= 3, "{rows} rows left after the decay");
+        let entries = store.model().entries();
+        assert!(entries <= 3, "{entries} entries left in memory");
+        assert_eq!(entries as i64, rows);
+        let mut fresh = PersonalNgram::new(PersonalNgramOptions::default());
+        load_from(&Connection::open(&journal).unwrap(), &mut fresh).unwrap();
+        assert_eq!(fresh.entries(), entries);
+    }
+
+    /// test_personal_context_input_session.cpp:415-452: past the limit the tables halve until three quarters of it remain, and the model follows.
     #[test]
     fn decay_halves_past_the_limit() {
         let dir = Dir::new();

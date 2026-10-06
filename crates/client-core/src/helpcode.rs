@@ -47,8 +47,11 @@ pub fn is_custom_schema(schema: &str) -> bool {
 /// Return the table path for an available custom schema.
 pub fn custom_helpcode_path(resources: &Path, schema: &str) -> Option<PathBuf> {
     let stem = custom_schema_stem(schema)?;
-    let path = custom_helpcode_directory(resources).join(format!("{stem}.txt"));
-    path.is_file().then_some(path)
+    let directory = custom_helpcode_directory(resources);
+    crate::storage::reject_symlink(&directory).ok()?;
+    let path = directory.join(format!("{stem}.txt"));
+    let metadata = std::fs::symlink_metadata(&path).ok()?;
+    metadata.file_type().is_file().then_some(path)
 }
 
 /// Discover regular `.txt` files in `helpcodes/custom` and read their optional display metadata.
@@ -56,6 +59,9 @@ pub fn custom_helpcode_path(resources: &Path, schema: &str) -> Option<PathBuf> {
 /// semantics. Results are ordered by file stem for stable settings UI presentation.
 pub fn list_custom_helpcode_schemas(resources: &Path) -> Vec<CustomHelpcodeSchema> {
     let directory = custom_helpcode_directory(resources);
+    if crate::storage::reject_symlink(&directory).is_err() {
+        return Vec::new();
+    }
     let Ok(entries) = std::fs::read_dir(directory) else {
         return Vec::new();
     };
@@ -88,7 +94,11 @@ pub fn list_custom_helpcode_schemas(resources: &Path) -> Vec<CustomHelpcodeSchem
 }
 
 fn read_display_names(path: &Path) -> (String, String) {
-    let Ok(bytes) = std::fs::read(path) else {
+    const MAX_HELPCODE_BYTES: u64 = 1024 * 1024;
+    let Ok(file) = std::fs::File::open(path) else {
+        return (String::new(), String::new());
+    };
+    let Ok(bytes) = crate::bounded_io::read_bounded(file, MAX_HELPCODE_BYTES) else {
         return (String::new(), String::new());
     };
     let Ok(text) = std::str::from_utf8(&bytes) else {
@@ -198,5 +208,68 @@ mod tests {
             custom_helpcode_path(resources.path(), "custom/../mine"),
             None
         );
+    }
+
+    #[test]
+    fn oversized_table_has_no_display_metadata() {
+        let resources = tempfile::tempdir().unwrap();
+        let directory = custom_helpcode_directory(resources.path());
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join("oversized.txt"),
+            [b"# name: hidden\n".as_slice(), &vec![b'x'; 1024 * 1024 + 1]].concat(),
+        )
+        .unwrap();
+
+        let schemas = list_custom_helpcode_schemas(resources.path());
+        assert_eq!(schemas.len(), 1);
+        assert_eq!(schemas[0].name, "");
+        assert_eq!(schemas[0].name_en, "");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_custom_tables() {
+        use std::os::unix::fs::symlink;
+
+        let resources = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let directory = custom_helpcode_directory(resources.path());
+        fs::create_dir_all(&directory).unwrap();
+        let external = outside.path().join("mine.txt");
+        fs::write(&external, "你=ab\n").unwrap();
+        symlink(&external, directory.join("mine.txt")).unwrap();
+
+        assert_eq!(custom_helpcode_path(resources.path(), "custom/mine"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_a_symlinked_custom_directory() {
+        use std::os::unix::fs::symlink;
+
+        let resources = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let directory = custom_helpcode_directory(resources.path());
+        fs::create_dir_all(directory.parent().unwrap()).unwrap();
+        fs::write(outside.path().join("mine.txt"), "你=ab\n").unwrap();
+        symlink(outside.path(), &directory).unwrap();
+
+        assert_eq!(custom_helpcode_path(resources.path(), "custom/mine"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn does_not_list_tables_from_a_symlinked_custom_directory() {
+        use std::os::unix::fs::symlink;
+
+        let resources = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let directory = custom_helpcode_directory(resources.path());
+        fs::create_dir_all(directory.parent().unwrap()).unwrap();
+        fs::write(outside.path().join("mine.txt"), "你=ab\n").unwrap();
+        symlink(outside.path(), &directory).unwrap();
+
+        assert!(list_custom_helpcode_schemas(resources.path()).is_empty());
     }
 }

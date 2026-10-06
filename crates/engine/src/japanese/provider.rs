@@ -1,6 +1,5 @@
 //! The Japanese candidate provider (schemes-lang.md §5.5), without the dropped `japanese_lexicon` step. Display order is insertion order; nothing is re-sorted by weight.
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -24,6 +23,13 @@ const SENTENCE_LIMIT: usize = 12;
 /// Two kana: a one-kana reading is already answered by the kana rows and the sentence search.
 const MIN_PREFIX_READING_BYTES: usize = 6;
 
+fn join_reading(prefix: &str, suffix: &str) -> String {
+    let mut reading = String::with_capacity(prefix.len() + suffix.len());
+    reading.push_str(prefix);
+    reading.push_str(suffix);
+    reading
+}
+
 pub struct JapaneseProvider {
     model: PathBuf,
     /// `None` until the first query, then the shared model or `Some(None)` when it is missing or invalid; a failed load is not retried by this provider, as in the reference.
@@ -34,13 +40,20 @@ pub struct JapaneseProvider {
 /// Rows unique by word, in insertion order.
 struct Rows {
     items: Vec<WordItem>,
-    seen: HashSet<String>,
     code: String,
 }
 
 impl Rows {
+    fn reserve(&mut self, additional: usize) {
+        self.items.reserve(additional);
+    }
+
+    fn contains_word(&self, word: &str) -> bool {
+        self.items.iter().any(|item| item.word == word)
+    }
+
     fn push(&mut self, word: &str, weight: i64, source: CandidateSource) {
-        if word.is_empty() || !self.seen.insert(word.to_owned()) {
+        if word.is_empty() || self.contains_word(word) {
             return;
         }
         self.items.push(WordItem::new(
@@ -77,8 +90,7 @@ impl JapaneseProvider {
             return Vec::new();
         }
         let mut rows = Rows {
-            items: Vec::new(),
-            seen: HashSet::new(),
+            items: Vec::with_capacity(2),
             code: request.raw_input_with_cases.clone(),
         };
         // A bare minus opens a composition whose first choice is the long-vowel mark, with the plain hyphen kept as the alternative.
@@ -96,8 +108,15 @@ impl JapaneseProvider {
         if let Some(dictionary) = self.dictionary() {
             if !conversion.hiragana.is_empty() && !conversion.pending.is_empty() {
                 // `kana_for_romaji_prefix` already limits the kana to spellings that start with the pending letters. Re-deriving romaji from each lemma's reading to check the prefix again would drop correct lemmas: a reading has several valid spellings and `hiragana_to_romaji` picks one, so しし reads `shishi` and fails `sis`.
-                for kana in kana_for_romaji_prefix(&conversion.pending) {
-                    let prefix = format!("{}{kana}", conversion.hiragana);
+                let pending_kana = kana_for_romaji_prefix(&conversion.pending);
+                rows.reserve(
+                    pending_kana
+                        .len()
+                        .saturating_mul(PENDING_PREFIX_LEMMAS)
+                        .saturating_add(SENTENCE_LIMIT + 1),
+                );
+                for kana in pending_kana {
+                    let prefix = join_reading(&conversion.hiragana, kana);
                     for lemma in dictionary.prefix_lemmas(&prefix, PENDING_PREFIX_LEMMAS) {
                         rows.push(
                             &lemma.surface,
@@ -109,6 +128,7 @@ impl JapaneseProvider {
             } else if conversion.pending.is_empty()
                 && conversion.hiragana.len() >= MIN_PREFIX_READING_BYTES
             {
+                rows.reserve(READING_PREFIX_LEMMAS + SENTENCE_LIMIT + 1);
                 for lemma in dictionary.prefix_lemmas(&conversion.hiragana, READING_PREFIX_LEMMAS) {
                     rows.push(
                         &lemma.surface,
@@ -116,6 +136,8 @@ impl JapaneseProvider {
                         CandidateSource::Database,
                     );
                 }
+            } else {
+                rows.reserve(SENTENCE_LIMIT + 1);
             }
             for sentence in search_converted(&dictionary, &conversion, SENTENCE_LIMIT) {
                 rows.push(
@@ -133,10 +155,12 @@ impl JapaneseProvider {
         if let Some(dynamic) = self.dynamic.get_ref(&request.raw_input) {
             let mut insertion = rows.items.len().min(if kana_first { 2 } else { 1 });
             for item in dynamic {
-                if rows.seen.insert(item.word.clone()) {
-                    rows.items.insert(insertion, item.clone());
-                    insertion += 1;
+                // Dynamic rows are bounded by the cache quota; scan the already-owned words to avoid cloning a second key into `seen`.
+                if rows.contains_word(&item.word) {
+                    continue;
                 }
+                rows.items.insert(insertion, item.clone());
+                insertion += 1;
             }
         }
         rows.items
@@ -152,7 +176,7 @@ impl JapaneseProvider {
         if code.is_empty() || word.is_empty() || source != CandidateSource::CloudSuggestion {
             return false;
         }
-        let mut items = self.dynamic.get(&code.to_owned()).unwrap_or_default();
+        let mut items = self.dynamic.get_ref_by(code).cloned().unwrap_or_default();
         items.retain(|item| item.source != source);
         items.push(WordItem::new(code, word, 1, source, code));
         self.dynamic.insert(code.to_owned(), items);
@@ -190,6 +214,13 @@ mod tests {
         items.iter().map(|item| item.word.as_str()).collect()
     }
 
+    #[test]
+    fn join_reading_allocates_only_result_bytes() {
+        let reading = join_reading("か", "き");
+        assert_eq!(reading, "かき");
+        assert_eq!(reading.capacity(), reading.len());
+    }
+
     fn provider_with(model: Option<Vec<u8>>) -> (tempfile::TempDir, JapaneseProvider) {
         let root = tempfile::tempdir().expect("temporary directory");
         let path = root.path().join("dict_japanese_test.dat");
@@ -198,6 +229,19 @@ mod tests {
         }
         let provider = JapaneseProvider::new(&path);
         (root, provider)
+    }
+
+    #[test]
+    fn rows_scan_owned_words_when_deduplicating() {
+        let mut rows = Rows {
+            items: Vec::new(),
+            code: "ka".to_owned(),
+        };
+        assert!(!rows.contains_word("かな"));
+        rows.push("かな", KANA_WEIGHT, CandidateSource::Generated);
+        assert!(rows.contains_word("かな"));
+        rows.push("かな", KATAKANA_WEIGHT, CandidateSource::Generated);
+        assert_eq!(words(&rows.items), vec!["かな"]);
     }
 
     // test_engine_smoke.cpp:410-455, on the two-lemma synthetic model.

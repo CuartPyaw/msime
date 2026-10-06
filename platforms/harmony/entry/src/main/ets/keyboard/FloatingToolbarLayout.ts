@@ -1,4 +1,4 @@
-import { KeyboardGeometry } from './KeyboardGeometry';
+import { KeyboardGeometry } from "./KeyboardGeometry";
 
 /**
  * Which buttons the floating toolbar carries, how wide that makes it, and what each one says.
@@ -41,6 +41,14 @@ export interface ToolbarState {
   readonly temporaryEnglish: boolean;
   /** Japanese is a distinct input scheme; English still takes precedence when dedicated mode is on. */
   readonly japanese: boolean;
+  /** Korean, like Japanese, is a scheme of its own with its own face. */
+  readonly korean: boolean;
+  /** Vietnamese is a language of its own too; Cantonese and Zhuyin are Chinese and wear 中 as Shuangpin and Wubi do. */
+  readonly vietnamese?: boolean;
+  /** 藏文同样是独立的语言，显示「藏」。 */
+  readonly tibetan?: boolean;
+  /** 笔画方案：同样是中文，但指示字是「笔」，与其它平台的笔画模式徽标一致。 */
+  readonly stroke?: boolean;
   /** Hardware Caps Lock takes precedence over the language face on desktop keyboards. */
   readonly capsLock: boolean;
   readonly chinesePunctuation: boolean;
@@ -67,6 +75,10 @@ export class FloatingToolbarLayout {
       english: false,
       temporaryEnglish: false,
       japanese: false,
+      korean: false,
+      vietnamese: false,
+      tibetan: false,
+      stroke: false,
       capsLock: false,
       chinesePunctuation: true,
       fullWidth: false,
@@ -140,7 +152,15 @@ export class FloatingToolbarLayout {
               ? "英"
               : state.japanese
                 ? "日"
-                : "中";
+                : state.korean
+                  ? "한"
+                  : state.vietnamese === true
+                    ? "越"
+                    : state.tibetan === true
+                      ? "藏"
+                      : state.stroke === true
+                        ? "笔"
+                        : "中";
       case ToolbarButton.PUNCTUATION:
         return state.chinesePunctuation ? "。" : ".";
       case ToolbarButton.FULL_WIDTH:

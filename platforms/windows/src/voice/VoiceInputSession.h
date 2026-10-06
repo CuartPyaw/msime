@@ -60,7 +60,6 @@ struct VoiceInputConfig {
   std::string polish_endpoint;
   std::string polish_model;
   std::string polish_prompt_id = "cleanup";
-  std::string polish_prompt;
   std::string polish_prompt_custom_1;
   std::string polish_prompt_custom_2;
   std::string polish_prompt_custom_3;
@@ -145,6 +144,10 @@ private:
   // The on-device counterpart of doubao_: the capture callback feeds it, and its recognition task runs from the start of the recording.
   std::mutex local_stream_mutex_;
   std::shared_ptr<LocalAsrStream> local_stream_;
+  // Set by the capture callback when the streaming local recognizer cannot
+  // retain another audio chunk. The control thread turns it into a visible
+  // failed recording; audio is never silently discarded.
+  std::atomic<bool> local_stream_overflow_{false};
   std::atomic<bool> muted_system_audio_{false};
   std::mutex request_mutex_;
   std::vector<std::shared_ptr<std::atomic_bool>> request_cancellations_;

@@ -14,7 +14,9 @@ inline const char *candidate_local_mode_label(std::string_view mode) {
       {"unicode", "U+"},          {"date_time", "日期时间"},
       {"quick_phrase", "短语"},   {"emoji", "Emoji"},
       {"kaomoji", "颜文字"},      {"super_jianpin", "简拼"},
-      {"temporary_english", "EN"}, {"temporary_japanese", "日文"}};
+      {"temporary_english", "EN"}, {"temporary_japanese", "日文"},
+      {"expression", "计算"},     {"command", "指令"},
+      {"mention", "@"},           {"url", "网址"}};
   for (const auto &entry : entries)
     if (entry.name == mode)
       return entry.label;

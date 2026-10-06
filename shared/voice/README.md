@@ -16,7 +16,7 @@ ctest --test-dir build/shared-voice --output-on-failure
 
 The synthetic routing test exercises the platform-neutral entry points and pre-cancelled requests without contacting cloud services. `tests/transport.py` runs the real curl adapter against a loopback fixture server and checks the multipart upload (model, language and WAV parts) as well as rejection, redirect, malformed, oversized and retry answers.
 
-`DoubaoAuth.h` is a thin C++ adapter for `client-core::doubao_auth` through `msime_client_doubao_auth_headers`. It requires the host-api include path and library. Both the Rust credential probe and native Windows recording use this same authentication policy: explicit `api_key` ignores stale App IDs, explicit `legacy` requires an App ID, and missing historical modes infer from a usable App ID. Returned header text contains credentials and must never be logged. Pass an absolute `MSIME_HOST_LIBRARY` when configuring this project to enable the synthetic C++/Rust ABI test `shared-doubao-auth`.
+`DoubaoAuth.h` is a thin C++ adapter for `client-core::doubao_auth` through `msime_client_doubao_auth_headers`. It requires the host-api include path and library. Both the Rust credential probe and native Windows recording use this same authentication policy: an absent or empty mode means `api_key`, and only an explicit `legacy` uses the App ID + access token headers (it requires an App ID). Returned header text contains credentials and must never be logged. Pass an absolute `MSIME_HOST_LIBRARY` when configuring this project to enable the synthetic C++/Rust ABI test `shared-doubao-auth`.
 
 ## On-device recognition (LocalAsr)
 
@@ -52,7 +52,7 @@ On start the helper writes `{"type":"hello","version":1,"available":<bool>,"erro
 | `{"op":"ping","id":X}` | `{"type":"pong","id":X,"available":<bool>}`. |
 
 Any failure produces `{"type":"error","id":X,"message":"..."}` and closes the session; `id` is the request's for a failed `start` and the open session's otherwise. A line that is not JSON gets an error without `id`, and an unknown `op` gets an error too. A failure caused by `cancel` is reported as `cancelled`, so a cancelled session always ends with exactly one `cancelled`.
-Requests are limited to 1 MiB per line. An oversized line gets `{"type":"error","message":"request too large"}` and is discarded through its newline before the next request is read.
+Requests are limited to 1 MiB per line, and the helper retains at most 8 MiB of serialized requests waiting for the worker. An oversized line gets `{"type":"error","message":"request too large"}` and is discarded through its newline before the next request is read. If the queue budget is exceeded, pending requests are discarded and the active session ends with `{"type":"error","id":<session>,"message":"request queue full"}`; this keeps the input writer asynchronous while bounding helper memory.
 
 Requests are handled in order on one worker thread. A loaded model is released after 120 seconds without a session (or `--idle-exit`, if shorter and not 0), and the process exits on stdin EOF or after `--idle-exit` seconds without a request while no session is open. Hosts should respawn it on demand rather than keep it alive.
 

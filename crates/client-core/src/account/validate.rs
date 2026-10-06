@@ -1,6 +1,7 @@
 //! Every value crossing the account boundary is bounded and checked here.
 //! The backend is not trusted to keep its own limits, and neither is the caller.
 
+use super::google::valid_google_loopback_target;
 use super::*;
 
 pub(super) fn validate_clipboard_search(value: &str) -> Result<(), AccountError> {
@@ -49,7 +50,9 @@ pub(super) fn validate_clipboard_page(value: &AccountClipboardPage) -> Result<()
 fn dictionary_code_is_well_formed(kind: DictionaryKind, code: &str) -> bool {
     match kind {
         DictionaryKind::Pinyin => crate::dictionary::pinyin_code_is_well_formed(code, true),
-        DictionaryKind::Wubi => crate::dictionary::wubi_code_is_well_formed(code),
+        DictionaryKind::Wubi | DictionaryKind::Wubi98 => {
+            crate::dictionary::wubi_code_is_well_formed(code)
+        }
         DictionaryKind::Quick => {
             crate::dictionary::quick_phrase_transport_code_is_well_formed(code)
         }
@@ -174,6 +177,7 @@ pub(super) fn dictionary_kind_for_candidate(
     match query.kind.as_str() {
         "pinyin" | "jianpin" => Ok(DictionaryKind::Pinyin),
         "wubi" => Ok(DictionaryKind::Wubi),
+        "wubi98" => Ok(DictionaryKind::Wubi98),
         "quick" => Ok(DictionaryKind::Quick),
         "english" => Ok(DictionaryKind::English),
         _ => Err(AccountError::Invalid),
@@ -279,7 +283,7 @@ pub(super) fn validate_dictionary_value(
     validate_dictionary_fields(kind, code, word)?;
     let code_limit = match kind {
         DictionaryKind::Pinyin => 256,
-        DictionaryKind::Wubi => 4,
+        DictionaryKind::Wubi | DictionaryKind::Wubi98 => 4,
         DictionaryKind::Quick => 32,
         DictionaryKind::English => 64,
     };
@@ -380,7 +384,7 @@ pub(super) fn read_bounded_response(
     maximum_response_bytes: usize,
 ) -> Result<Vec<u8>, AccountError> {
     if !response.status().is_success() {
-        return Err(AccountError::from_status(response.status()));
+        return Err(error_from_response(response));
     }
     if response
         .content_length()
@@ -390,6 +394,15 @@ pub(super) fn read_bounded_response(
     }
     crate::bounded_io::read_bounded(response, maximum_response_bytes as u64)
         .map_err(|_| AccountError::Unavailable)
+}
+
+/// Largest error body read to find the server's error code; the backend's error documents are a few dozen bytes.
+const MAX_ERROR_BODY_BYTES: u64 = 4096;
+
+pub(super) fn error_from_response(response: Response) -> AccountError {
+    let status = response.status();
+    let body = crate::bounded_io::read_bounded(response, MAX_ERROR_BODY_BYTES).unwrap_or_default();
+    AccountError::from_response(status, &body)
 }
 
 pub fn validate_account_preferences(value: &AccountPreferences) -> Result<(), AccountError> {
@@ -481,6 +494,16 @@ pub(super) fn validate_provider_target(provider: &str, target: &str) -> Result<(
     if provider == "apple" {
         return target.is_empty().then_some(()).ok_or(AccountError::Invalid);
     }
+    if provider == "google" {
+        return valid_google_loopback_target(target)
+            .then_some(())
+            .ok_or(AccountError::Invalid);
+    }
+    if provider == "anonymous" {
+        return super::anonymous::valid_anonymous_subject(target)
+            .then_some(())
+            .ok_or(AccountError::Invalid);
+    }
     if !matches!(provider, "email" | "phone")
         || target.is_empty()
         || !crate::text::is_bounded_text(target, 320)
@@ -529,6 +552,29 @@ pub(super) fn validate_apple_login(challenge: &str, credential: &str) -> Result<
         return Err(AccountError::Invalid);
     }
     Ok(())
+}
+
+/// A Google authorization code arrives on the loopback redirect and goes straight to the backend, which exchanges it with the desktop client secret. Codes are opaque printable ASCII, so anything else is refused before it leaves the process.
+pub(super) fn validate_google_login(challenge: &str, credential: &str) -> Result<(), AccountError> {
+    if challenge.is_empty()
+        || !crate::text::is_bounded_text(challenge, 256)
+        || credential.is_empty()
+        || credential.len() > 2048
+        || !credential.bytes().all(|byte| byte.is_ascii_graphic())
+    {
+        return Err(AccountError::Invalid);
+    }
+    Ok(())
+}
+
+/// The transport check for `/v1/auth/login`. The session has already applied the provider's own rule (six digits, an Apple identity token or a Google authorization code), so the client accepts a credential that satisfies any of them.
+pub(super) fn validate_login_request(
+    challenge: &str,
+    credential: &str,
+) -> Result<(), AccountError> {
+    validate_login(challenge, credential)
+        .or_else(|_| validate_apple_login(challenge, credential))
+        .or_else(|_| validate_google_login(challenge, credential))
 }
 
 pub(super) fn validate_display_name(value: &str) -> Result<(), AccountError> {
@@ -589,6 +635,14 @@ pub(super) fn validate_user(user: &AccountUser) -> Result<(), AccountError> {
     .map_err(|_| AccountError::Invalid)?;
     if !crate::text::is_bounded_chars(&user.display_name, 64)
         || !crate::text::is_bounded_text(&user.created_at, 128)
+        || user
+            .email
+            .as_ref()
+            .is_some_and(|email| !crate::text::is_bounded_text(email, 320))
+        || user
+            .avatar_url
+            .as_ref()
+            .is_some_and(|url| !crate::text::is_bounded_text(url, 2048))
     {
         return Err(AccountError::Invalid);
     }

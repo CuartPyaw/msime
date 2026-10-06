@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { testHost } from "../support/host";
+import { settingsFormReady, saveSettingsNow } from "../support/settings-form";
 import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { SettingsPage, type Snapshot } from "@msime/ui";
@@ -28,7 +30,7 @@ function renderSettings(platform: string, save = vi.fn().mockResolvedValue(undef
       client={{
         load: vi.fn().mockResolvedValue(initial),
         save,
-        host: { platform } as never,
+        host: testHost({ platform }),
         home: { openKeyboard: vi.fn(), openSystemKeyboardSettings: vi.fn() },
       }}
     />,
@@ -43,7 +45,7 @@ async function moreSettingsRows() {
   // and then opens one would otherwise wait for a button that this page does not have.
   const open = screen.queryByRole("region", { name: "全部设置" });
   if (open) return [...open.querySelectorAll("button")];
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   fireEvent.click(screen.getByRole("button", { name: /全部设置/ }));
   return [...screen.getByRole("region", { name: "全部设置" }).querySelectorAll("button")];
 }
@@ -58,7 +60,7 @@ async function openMoreSetting(title: string) {
 // The helper-code settings are a group of the 输入 page; the former `helpcode` route opens that page.
 async function openHelpcode() {
   await openMoreSetting("输入");
-  return screen.getByRole("group", { name: "辅助码" });
+  return screen.getByRole("region", { name: "辅助码" });
 }
 
 // The Android keyboard sends helper codes -- Shift during a quanpin or shuangpin
@@ -80,7 +82,7 @@ test("Android saves a helper-code schema into shared preferences", async () => {
   expect(schema.value).toBe("ziranma");
   fireEvent.change(schema, { target: { value: "xiaohe" } });
 
-  fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+  saveSettingsNow();
   await waitFor(() =>
     expect(save).toHaveBeenCalledWith(
       7,
@@ -108,7 +110,7 @@ test("iOS reaches the helper-code settings when its keyboard marks helper codes"
       client={{
         load: vi.fn().mockResolvedValue(initial),
         save: vi.fn(),
-        host: { platform: "ios", helpcode_shift_entry: true } as never,
+        host: testHost({ platform: "ios", helpcode_shift_entry: true }),
         home: { openKeyboard: vi.fn(), openSystemKeyboardSettings: vi.fn() },
       }}
     />,
@@ -119,20 +121,20 @@ test("iOS reaches the helper-code settings when its keyboard marks helper codes"
   expect(screen.getByLabelText("在候选栏中显示全拼辅助码")).toBeTruthy();
 });
 
-// A host that predates the capability says nothing about the gesture, so the group stays hidden there.
+// A host that does not report the Shift helper-code gesture keeps the group hidden.
 test("an iOS host without the capability keeps the helper-code settings hidden", async () => {
   renderSettings("ios");
 
   await openMoreSetting("输入");
-  expect(screen.queryByRole("group", { name: "辅助码" })).toBeNull();
+  expect(screen.queryByRole("region", { name: "辅助码" })).toBeNull();
 });
 
 test("the desktop input page keeps the helper-code settings and their window wording", async () => {
   renderSettings("windows");
 
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   fireEvent.click(screen.getByRole("button", { name: "输入" }));
-  expect(screen.getByRole("group", { name: "辅助码" })).toBeTruthy();
+  expect(screen.getByRole("region", { name: "辅助码" })).toBeTruthy();
   expect(screen.getByLabelText("在候选窗口中显示双拼辅助码")).toBeTruthy();
   expect(screen.getByLabelText("在候选窗口中显示全拼辅助码")).toBeTruthy();
 });
@@ -156,7 +158,7 @@ test("HarmonyOS saves a helper-code schema into shared preferences", async () =>
   expect(schema.value).toBe("ziranma");
   fireEvent.change(schema, { target: { value: "xiaohe" } });
 
-  fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+  saveSettingsNow();
   await waitFor(() =>
     expect(save).toHaveBeenCalledWith(
       7,
@@ -176,7 +178,7 @@ test("the Shift explanation follows the capability, not the platform name", asyn
       client={{
         load: vi.fn().mockResolvedValue(initial),
         save: vi.fn(),
-        host: { platform: "harmony", helpcode_shift_entry: true } as never,
+        host: testHost({ platform: "harmony", helpcode_shift_entry: true }),
         home: { openKeyboard: vi.fn(), openSystemKeyboardSettings: vi.fn() },
       }}
     />,
@@ -191,12 +193,12 @@ test("a host that appends helper codes is not told to hold Shift", async () => {
       client={{
         load: vi.fn().mockResolvedValue(initial),
         save: vi.fn(),
-        host: { platform: "windows", helpcode_shift_entry: false } as never,
+        host: testHost({ platform: "windows", helpcode_shift_entry: false }),
       }}
     />,
   );
-  await screen.findByRole("button", { name: "保存设置" });
+  await settingsFormReady();
   fireEvent.click(screen.getByRole("button", { name: "输入" }));
-  expect(screen.getByRole("group", { name: "辅助码" })).toBeTruthy();
+  expect(screen.getByRole("region", { name: "辅助码" })).toBeTruthy();
   expect(screen.queryByText(/按 Shift\s*再输入的字母作为辅助码/)).toBeNull();
 });

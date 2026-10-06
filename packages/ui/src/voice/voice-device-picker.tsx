@@ -1,4 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { StatusMessage } from "../core/status-message";
+import { useAsyncActionRunner } from "../core/use-async-action";
+import { ActionButton } from "../core/action-button";
+import { SettingActionHeader } from "../settings/setting-action-header";
 
 export type VoiceCaptureDevice = {
   backend: "pulse" | "pipewire" | "alsa" | "windows" | "macos" | "harmony";
@@ -19,46 +23,36 @@ export function VoiceDevicePicker({
   choose: (backend: VoiceCaptureDevice["backend"], device: string) => void;
 }) {
   const [devices, setDevices] = useState<VoiceCaptureDevice[]>([]);
-  const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("点击刷新读取可用录音设备");
-  const pending = useRef(false);
-  const revision = useRef(0);
+  const { busy, run } = useAsyncActionRunner(
+    (message) => {
+      if (message) setNotice(message);
+    },
+    undefined,
+    read,
+  );
   useEffect(() => {
-    pending.current = false;
-    setBusy(false);
     setDevices([]);
-    return () => {
-      revision.current++;
-    };
   }, [read]);
   async function refresh() {
-    if (pending.current) return;
-    const current = ++revision.current;
-    pending.current = true;
-    setBusy(true);
-    try {
-      const result = await read();
-      if (current !== revision.current) return;
-      setDevices(result);
-      setNotice(
-        result.length
-          ? "选择设备后保存设置，从下一次录音生效"
-          : "未发现设备，可手动填写设备名称或使用默认设备",
-      );
-    } catch {
-      if (current === revision.current) setNotice("无法读取设备列表，可重试或手动填写");
-    } finally {
-      if (current === revision.current) {
-        pending.current = false;
-        setBusy(false);
-      }
-    }
+    void run(
+      async (isCurrent) => {
+        const result = await read();
+        if (!isCurrent()) return;
+        setDevices(result);
+        setNotice(
+          result.length
+            ? "选择设备后从下一次录音生效"
+            : "未发现设备，可手动填写设备名称或使用默认设备",
+        );
+      },
+      { formatError: () => "无法读取设备列表，可重试或手动填写" },
+    );
   }
   const selected = devices.findIndex((item) => item.backend === backend && item.id === device);
   return (
     <div>
-      <label className="section-header">
-        <span className="section-title">可用录音设备</span>
+      <SettingActionHeader as="label" title="可用录音设备">
         <select
           aria-label="可用录音设备"
           value={selected < 0 ? "" : String(selected)}
@@ -77,11 +71,15 @@ export function VoiceDevicePicker({
             </option>
           ))}
         </select>
-        <button type="button" disabled={busy} onClick={() => void refresh()}>
-          {busy ? "读取中…" : "刷新设备"}
-        </button>
-      </label>
-      <p role="status">{notice}</p>
+        <ActionButton
+          action={() => void refresh()}
+          ariaBusy={busy}
+          className=""
+          disabled={busy}
+          label={busy ? "读取中…" : "刷新设备"}
+        />
+      </SettingActionHeader>
+      <StatusMessage role="status">{notice}</StatusMessage>
     </div>
   );
 }

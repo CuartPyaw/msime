@@ -1,5 +1,5 @@
 #import "../settings/TestPreferenceSuite.h"
-// The candidate page layout as the panel applies it. CandidateItemLayoutTest covers the arithmetic; this renders real pages through the controller, because what matters is the frame a candidate button ends up with and the runs it draws: the card is at most half the screen's visible width, text, 辅助码 and glosses wider than their column wrap inside it, rows take their own heights, and a horizontal page breaks onto a new line instead of squeezing its candidates.
+// The candidate page layout as the panel applies it. CandidateItemLayoutTest covers the arithmetic; this renders real pages through the controller, because what matters is the frame a candidate button ends up with and the runs it draws: the card is at most half the screen's visible width (a horizontal page may grow past it to keep its glosses on one line), text, 辅助码 and glosses wider than their column wrap inside it, rows take their own heights, and a horizontal page breaks onto a new line instead of squeezing its candidates.
 //
 // It stands apart from shortcut-test, which imports the same controller, so a failure elsewhere in that suite cannot hide the layout assertions.
 #import "../../src/input/InputController.mm"
@@ -97,7 +97,7 @@ int main(void)
                                      withString:@"水杉输入法" startingAtIndex:0];
         };
 
-        // A sentence worth four fifths of the card, then eight candidates that together take far more than what is left: the page no longer fits on one line of a card capped at half the screen.
+        // A sentence worth four fifths of half the screen, then eight candidates that together take far more than a whole screen line: the card grows past half the screen towards the screen less its margins, and the page still breaks onto new lines.
         NSString *sentence = glyphs(halfScreen * 0.8 - 60);
         NSString *shortCandidate = glyphs(halfScreen * 0.24);
         NSMutableArray *page = [NSMutableArray arrayWithObject:@{@"text": sentence, @"highlighted": @YES}];
@@ -121,7 +121,7 @@ int main(void)
             NSRect frame = CandidateButton(panel.contentView, tag).frame;
             assert(NSMinX(frame) >= 0 && NSMaxX(frame) <= panel.frame.size.width + 0.5 && NSMinY(frame) >= 0);
         }
-        assert(panel.frame.size.width <= halfScreen + 0.5);
+        assert(panel.frame.size.width <= MAX(halfScreen, floor(screen.size.width - 2 * MSIMECandidateScreenMargin)) + 0.5);
 
         // A page that fits keeps every candidate at its natural width on one line.
         NSMutableDictionary *narrowView = [singleView mutableCopy];
@@ -137,15 +137,41 @@ int main(void)
         const CGFloat oneLine = shorter.frame.size.height;
 
         // One candidate wider than a whole line is narrowed to the line and wraps inside it rather than being cut off.
-        NSString *paragraph = glyphs(screen.size.width * 1.5);
+        NSString *paragraph = glyphs(screen.size.width * 3);
         NSMutableDictionary *wideView = [singleView mutableCopy];
         wideView[@"candidates"] = @[@{@"text": paragraph, @"highlighted": @YES}, @{@"text": @"测试"}];
         [controller setValue:[wideView copy] forKey:@"view"];
         [controller renderCandidates];
         MSIMECandidateButton *wrapped = CandidateButton(panel.contentView, 0);
         assert(wrapped.itemLayout.textWrapped && wrapped.frame.size.height > oneLine * 1.5);
-        assert(panel.frame.size.width <= halfScreen + 0.5 && NSMaxX(wrapped.frame) <= panel.frame.size.width + 0.5);
+        assert(panel.frame.size.width <= MAX(halfScreen, floor(screen.size.width - 2 * MSIMECandidateScreenMargin)) + 0.5 && NSMaxX(wrapped.frame) <= panel.frame.size.width + 0.5);
         assert(NSMaxY(CandidateButton(panel.contentView, 1).frame) <= NSMinY(wrapped.frame) + 0.5);
+
+        // A horizontal page whose glosses are wider than half the screen grows past it instead of wrapping them, as long as the screen has room: every gloss keeps the single line a short one gets.
+        wideView[@"candidates"] = @[@{@"text": @"汉语", @"translation": @"Chinese", @"highlighted": @YES}];
+        [controller setValue:[wideView copy] forKey:@"view"];
+        [controller renderCandidates];
+        MSIMECandidateButton *shortGloss = CandidateButton(panel.contentView, 0);
+        const CGFloat glossLine = shortGloss.itemLayout.translation.height;
+        assert(glossLine > 0 && shortGloss.translationFont);
+        // Six glosses of a quarter of half the screen each: half again as wide as a half-screen card, still well inside the screen.
+        const CGFloat glossUnit = [@"gloss " sizeWithAttributes:@{NSFontAttributeName: shortGloss.translationFont}].width;
+        NSString *sentenceGloss = [@"" stringByPaddingToLength:(NSUInteger)MAX(8.0, ceil(halfScreen / 4 / glossUnit * 6)) withString:@"gloss " startingAtIndex:0];
+        NSMutableArray *glossPage = [NSMutableArray array];
+        while (glossPage.count < 6) [glossPage addObject:@{@"text": @"测试", @"translation": sentenceGloss}];
+        glossPage[0] = @{@"text": @"测试", @"translation": sentenceGloss, @"highlighted": @YES};
+        wideView[@"candidates"] = [glossPage copy];
+        [controller setValue:[wideView copy] forKey:@"view"];
+        [controller renderCandidates];
+        CGFloat glossTotal = 0;
+        for (NSInteger tag = 0; tag < 6; ++tag) {
+            MSIMECandidateButton *button = CandidateButton(panel.contentView, tag);
+            assert(button && fabs(button.itemLayout.translation.height - glossLine) < 0.5);
+            assert(fabs(NSMinY(button.frame) - NSMinY(CandidateButton(panel.contentView, 0).frame)) < 0.5);
+            glossTotal += button.itemLayout.translation.width;
+        }
+        assert(glossTotal > halfScreen && panel.frame.size.width > halfScreen + 0.5);
+        assert(panel.frame.size.width <= screen.size.width + 0.5);
 
         // Vertical: the card is capped at half the screen, a long sentence wraps into a taller row than its neighbours, and rows stack at their own heights.
         appearance.vertical = YES;
@@ -194,6 +220,68 @@ int main(void)
         NSBitmapImageRep *bitmap = [glossed bitmapImageRepForCachingDisplayInRect:glossed.bounds];
         assert(bitmap);
         [glossed cacheDisplayInRect:glossed.bounds toBitmapImageRep:bitmap];
+
+        // A Korean Hanja row shows only the Hanja on its line. Its 훈음 is drawn on the gloss line under it whatever the translation switches say, never as `translation`, which is what the gloss chords commit; the tooltip and accessibility label keep it apart from the Hanja.
+        appearance.vertical = NO;
+        appearance.candidateTranslations = NO;
+        appearance.candidateEnglishGloss = NO;
+        NSString *reading = @"나라 이름 한, 한나라 한";
+        NSDictionary *hanjaBase = @{@"focused": @YES, @"scheme": @(msime::mac::KoreanScheme), @"local_mode": @"none", @"editing_text": @"한",
+                                    @"candidate_list_open": @YES, @"page": @0, @"page_count": @1};
+        NSMutableDictionary *hanjaView = [hanjaBase mutableCopy];
+        hanjaView[@"candidates"] = @[@{@"text": @"韓", @"annotation": reading, @"highlighted": @YES}, @{@"text": @"漢", @"annotation": @"한수 한"}];
+        [controller setValue:[hanjaView copy] forKey:@"view"];
+        [controller renderCandidates];
+        MSIMECandidateButton *hanja = CandidateButton(panel.contentView, 0);
+        assert(hanja && [hanja.title isEqual:@"1  韓"] && hanja.annotation.length == 0 && hanja.itemLayout.annotation.width == 0);
+        assert([hanja.glossReading isEqual:reading] && hanja.translation.length == 0);
+        assert(hanja.itemLayout.translation.width > 0 && hanja.itemLayout.translation.below && hanja.translationBelow);
+        assert(hanja.itemLayout.translation.y >= hanja.itemLayout.textHeight);
+        assert([hanja.toolTip isEqual:[@"韓\n" stringByAppendingString:reading]]);
+        assert([hanja.accessibilityLabel isEqual:[@"1  韓 " stringByAppendingString:reading]]);
+        // The Hanja's own column is no wider than the reading line under it needs: an inline 훈음 at the candidate size made it several times wider.
+        const CGFloat readingWidth = ceil([reading sizeWithAttributes:@{NSFontAttributeName: hanja.translationFont}].width);
+        const CGFloat inlineWidth = ceil([reading sizeWithAttributes:@{NSFontAttributeName: rowFont}].width);
+        assert(hanja.itemLayout.translation.width <= readingWidth + 0.5 && readingWidth < inlineWidth);
+        bitmap = [hanja bitmapImageRepForCachingDisplayInRect:hanja.bounds];
+        [hanja cacheDisplayInRect:hanja.bounds toBitmapImageRep:bitmap];
+
+        // The 훈음 line is reserved with both translation switches off, so a Hanja with no 훈음 is as tall as one with it and the card does not jump; a Chinese page reserves nothing then.
+        const CGFloat hanjaHeight = NSHeight(hanja.frame);
+        hanjaView[@"candidates"] = @[@{@"text": @"韓", @"highlighted": @YES}];
+        [controller setValue:[hanjaView copy] forKey:@"view"];
+        [controller renderCandidates];
+        MSIMECandidateButton *bare = CandidateButton(panel.contentView, 0);
+        assert(bare.glossReading.length == 0 && fabs(NSHeight(bare.frame) - hanjaHeight) < 0.5);
+        [controller setValue:@{@"focused": @YES, @"editing_text": @"han", @"page": @0, @"page_count": @1,
+                               @"candidates": @[@{@"text": @"韩", @"highlighted": @YES}]} forKey:@"view"];
+        [controller renderCandidates];
+        assert(NSHeight(CandidateButton(panel.contentView, 0).frame) + glossLine * 0.5 < hanjaHeight);
+
+        // A real translation goes on the line after the 훈음, and only it is the row's `translation`.
+        appearance.candidateTranslations = YES;
+        hanjaView[@"candidates"] = @[@{@"text": @"韓", @"annotation": reading, @"translation": @"Korea", @"highlighted": @YES}];
+        [controller setValue:[hanjaView copy] forKey:@"view"];
+        [controller renderCandidates];
+        MSIMECandidateButton *translated = CandidateButton(panel.contentView, 0);
+        assert([translated.translation isEqual:@"Korea"] && [translated.glossReading isEqual:reading]);
+        assert(translated.itemLayout.translation.height > glossLine * 1.5);
+        NSString *translatedTip = [NSString stringWithFormat:@"韓\n%@\nKorea", reading];
+        assert([translated.toolTip isEqual:translatedTip]);
+        // An armed translation column underlines the translation, not the reading above it.
+        translated.armedGlossColumn = 1;
+        bitmap = [translated bitmapImageRepForCachingDisplayInRect:translated.bounds];
+        [translated cacheDisplayInRect:translated.bounds toBitmapImageRep:bitmap];
+
+        // Vertical follows the vertical gloss rule: the 훈음 stays beside the Hanja when it fits, and nothing is reserved.
+        appearance.vertical = YES;
+        appearance.candidateTranslations = NO;
+        hanjaView[@"candidates"] = @[@{@"text": @"韓", @"annotation": reading, @"highlighted": @YES}];
+        [controller setValue:[hanjaView copy] forKey:@"view"];
+        [controller renderCandidates];
+        MSIMECandidateButton *verticalHanja = CandidateButton(panel.contentView, 0);
+        assert(verticalHanja.itemLayout.translation.width > 0 && !verticalHanja.itemLayout.translation.below && !verticalHanja.translationBelow);
+        assert(verticalHanja.annotation.length == 0 && [verticalHanja.glossReading isEqual:reading]);
         MSIMERemoveTestPreferenceSuite(defaults, suite);
     }
     return 0;

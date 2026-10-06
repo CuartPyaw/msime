@@ -46,17 +46,23 @@ pub fn merge_lattice_candidates(
         _ => None,
     };
 
-    let mut already: HashSet<String> = candidates.iter().map(|item| item.word.clone()).collect();
+    // Keep duplicate keys borrowed from the live candidates and paths; sentence rows clone their text only when built.
+    let mut already: HashSet<&str> =
+        HashSet::with_capacity(candidates.len().saturating_add(paths.len()));
+    already.extend(candidates.iter().map(|item| item.word.as_str()));
     let block = if rerankers.is_empty() {
         // Searching several paths and showing fewer is the point of `emit`: the alternatives exist so the trigram has something to reorder, not so the page fills with near-duplicate sentences.
         if options.emit > 0 {
             paths.truncate(options.emit);
         }
-        paths
-            .iter()
-            .filter(|path| already.insert(path.sentence.clone()))
-            .map(|path| sentence_row(typed_pinyin, path, CandidateSource::Generated))
-            .collect()
+        let mut block = Vec::with_capacity(paths.len());
+        block.extend(
+            paths
+                .iter()
+                .filter(|path| already.insert(path.sentence.as_str()))
+                .map(|path| sentence_row(typed_pinyin, path, CandidateSource::Generated)),
+        );
+        block
     } else {
         let mut keyboard = None;
         for reranker in rerankers
@@ -97,29 +103,31 @@ fn sentence_row(typed_pinyin: &str, path: &SentencePath, source: CandidateSource
 }
 
 /// One row per source when the keyboard reranker ran (overlays.md §1.6.2 rules 2-8): the unreranked best as Generated when `include_lattice_best`, then the keyboard model's first path not already listed. The reference's desktop row is gone: the desktop model runs only as the input runtime's settled reranker. The rows carry their words like every sentence row; selecting one stores the sentence as a user phrase (`CandidateSource::is_sentence_learning`), while the personal context chain, which reads Generated and Fallback rows only, starts afresh after it as in the reference.
-fn reranked_block(
-    paths: &[SentencePath],
-    keyboard: Option<&[SentencePath]>,
+fn reranked_block<'a>(
+    paths: &'a [SentencePath],
+    keyboard: Option<&'a [SentencePath]>,
     options: &LatticeOptions<'_>,
     typed_pinyin: &str,
-    already: &mut HashSet<String>,
+    already: &mut HashSet<&'a str>,
 ) -> Vec<WordItem> {
-    let first_distinct = |ranked: &'_ [SentencePath], already: &HashSet<String>| -> Option<usize> {
-        for (index, path) in ranked.iter().enumerate() {
-            if !already.contains(&path.sentence) {
-                return Some(index);
+    let first_distinct =
+        |ranked: &'a [SentencePath], already: &HashSet<&'a str>| -> Option<usize> {
+            for (index, path) in ranked.iter().enumerate() {
+                if !already.contains(path.sentence.as_str()) {
+                    return Some(index);
+                }
+                if !options.show_next_on_duplicate {
+                    return None;
+                }
             }
-            if !options.show_next_on_duplicate {
-                return None;
-            }
-        }
-        None
-    };
-    let take = |ranked: &[SentencePath], source: CandidateSource, already: &mut HashSet<String>| {
-        let path = &ranked[first_distinct(ranked, already)?];
-        already.insert(path.sentence.clone());
-        Some(sentence_row(typed_pinyin, path, source))
-    };
+            None
+        };
+    let take =
+        |ranked: &'a [SentencePath], source: CandidateSource, already: &mut HashSet<&'a str>| {
+            let path = &ranked[first_distinct(ranked, already)?];
+            already.insert(path.sentence.as_str());
+            Some(sentence_row(typed_pinyin, path, source))
+        };
 
     let lattice = if options.include_lattice_best {
         take(paths, CandidateSource::Generated, already)
@@ -128,7 +136,14 @@ fn reranked_block(
     };
     let pick =
         keyboard.and_then(|keyboard| take(keyboard, CandidateSource::NeuralKeyboard, already));
-    lattice.into_iter().chain(pick).collect()
+    let mut block = Vec::with_capacity(2);
+    if let Some(row) = lattice {
+        block.push(row);
+    }
+    if let Some(row) = pick {
+        block.push(row);
+    }
+    block
 }
 
 /// The count of leading dictionary rows that answer the whole key: canonical key equal to the joined syllables, or covering every syllable (WL:625-641, WL:372-381). A prefix-range row with the same character count (滚球 for typed gun'qi) is not an exact hit and must not pin a correctly pronounced sentence behind it.
@@ -579,7 +594,7 @@ mod tests {
         options: &LatticeOptions<'_>,
         listed: &[&str],
     ) -> Vec<(String, CandidateSource)> {
-        let mut already = listed.iter().map(|word| (*word).to_owned()).collect();
+        let mut already = listed.iter().copied().collect();
         reranked_block(lattice, keyboard, options, "ab", &mut already)
             .into_iter()
             .map(|item| {

@@ -62,6 +62,18 @@ std::vector<std::string> files_with(const std::filesystem::path &directory, cons
 
 std::vector<std::string> staged(const std::filesystem::path &directory) { return files_with(directory, "decoration-"); }
 
+struct ShapeNameProbe {
+  std::size_t reserved = 0;
+  std::vector<std::string> names;
+
+  void reserve(std::size_t count) {
+    reserved = count;
+    names.reserve(count);
+  }
+
+  void push_back(std::string name) { names.push_back(std::move(name)); }
+};
+
 // Every Image= value in a theme with the @2x copy of each, sorted.
 std::vector<std::string> shapes_named(const std::string &theme) {
   std::vector<std::string> names;
@@ -247,6 +259,10 @@ int main() {
   // The images: every name the theme gives is generated, with an @2x copy, and they decode as the shapes they stand for.
   const auto files = host::fcitx_candidate_theme_files(wechat_dark, true);
   assert(files.conf == theme);
+  ShapeNameProbe shape_names;
+  host::fcitx_collect_shape_names(files, shape_names);
+  assert(shape_names.reserved == files.images.size());
+  assert(shape_names.names.size() == files.images.size());
   std::vector<std::string> generated;
   for (const auto &image : files.images) generated.push_back(image.file);
   std::sort(generated.begin(), generated.end());
@@ -269,6 +285,86 @@ int main() {
   assert(panel.alpha(23, 49) <= 1 && panel.alpha(0, 25) <= 1);
   const auto doubled = image_of(panel_name.substr(0, panel_name.size() - 4) + "@2x.png");
   assert(doubled.width == 92 && doubled.height == 100 && doubled.rgb(46, 50) == 0x151515u);
+  // A decoration's band makes the panel image taller by its height: those rows are fully transparent, and below them the shadow margin and the card are the same as without a decoration.
+  {
+    const auto banded = host::fcitx_candidate_theme_files(wechat_dark, true, host::FcitxThemeOverlay{"decoration-ab.png", 25, 15});
+    const auto banded_name = image_in(banded.conf, "InputPanel/Background");
+    const auto banded_image = [&](const std::string &name) {
+      for (const auto &image : banded.images)
+        if (image.file == name) return decode(image.bytes);
+      assert(false && "image generated");
+      return Decoded{};
+    };
+    const auto card = banded_image(banded_name);
+    assert(card.width == 46 && card.height == 75);
+    for (std::uint32_t y = 0; y < 25; ++y)
+      for (std::uint32_t x = 0; x < card.width; ++x) assert(card.alpha(x, y) == 0);
+    for (std::uint32_t y = 0; y < 50; ++y)
+      for (std::uint32_t x = 0; x < card.width; ++x)
+        assert(card.alpha(x, y + 25) == panel.alpha(x, y) && (panel.alpha(x, y) == 0 || card.rgb(x, y + 25) == panel.rgb(x, y)));
+    const auto card2x = banded_image(banded_name.substr(0, banded_name.size() - 4) + "@2x.png");
+    assert(card2x.width == 92 && card2x.height == 150);
+    for (std::uint32_t y = 0; y < 50; ++y)
+      for (std::uint32_t x = 0; x < card2x.width; ++x) assert(card2x.alpha(x, y) == 0);
+    assert(card2x.alpha(46, 66) == 255 && card2x.rgb(46, 66) == 0x292929u);
+  }
+  // The brand mark: painted into the card image's top-left corner slice at the content's top-left corner and the first row's text top, with the slices grown to hold it whole, and the content moved right by the mark and its gap. Nothing else in the theme changes.
+  {
+    const auto square = [](int side, float red, float green, float blue) {
+      host::FcitxPixels pixels{side, side, {}};
+      for (int index = 0; index < side * side; ++index) pixels.rgba.insert(pixels.rgba.end(), {red, green, blue, 1.0f});
+      return pixels;
+    };
+    const host::FcitxThemeLogo logo{square(16, 1.0f, 0.0f, 0.0f), square(32, 0.0f, 0.0f, 1.0f)};
+    const auto marked = host::fcitx_candidate_theme_files(wechat_dark, true, std::nullopt, std::nullopt, logo);
+    assert(contains(marked.conf, "[InputPanel/Background/Margin]\nLeft=35\nRight=22\nTop=37\nBottom=26\n\n"
+                                 "[InputPanel/ShadowMargin]\nLeft=12\nRight=12\nTop=8\nBottom=16\n\n"
+                                 "[InputPanel/ContentMargin]\nLeft=41\nRight=19\nTop=15\nBottom=23\n\n"));
+    assert(marked.images.size() == files.images.size());
+    const auto marked_name = image_in(marked.conf, "InputPanel/Background");
+    assert(marked_name != panel_name);
+    const auto marked_image = [&](const std::string &name) {
+      for (const auto &image : marked.images)
+        if (image.file == name) return decode(image.bytes);
+      assert(false && "image generated");
+      return Decoded{};
+    };
+    const auto card = marked_image(marked_name);
+    assert(card.width == 59 && card.height == 65);
+    for (std::uint32_t y = 21; y < 37; ++y)
+      for (std::uint32_t x = 19; x < 35; ++x) assert(card.alpha(x, y) == 255 && card.rgb(x, y) == 0xFF0000u);
+    // Around the mark is the card's own fill; the outline and the shadow are where they are without it.
+    assert(card.rgb(18, 21) == 0x151515u && card.rgb(35, 21) == 0x151515u && card.rgb(19, 20) == 0x151515u && card.rgb(19, 37) == 0x151515u);
+    assert(card.alpha(23, 8) == 255 && card.rgb(23, 8) == 0x292929u && card.alpha(0, 0) == 0);
+    // The 2x image takes the 2x mark, at twice the position.
+    const auto card2x = marked_image(marked_name.substr(0, marked_name.size() - 4) + "@2x.png");
+    assert(card2x.width == 118 && card2x.height == 130);
+    assert(card2x.rgb(38, 42) == 0x0000FFu && card2x.rgb(69, 73) == 0x0000FFu && card2x.rgb(70, 42) == 0x151515u);
+    // A mark that is not opaque is composited over the card.
+    auto faint = logo;
+    for (auto *pixels : {&faint.one, &faint.two})
+      for (std::size_t at = 0; at < pixels->rgba.size(); at += 4) {
+        pixels->rgba[at] = 0.5f;
+        pixels->rgba[at + 1] = pixels->rgba[at + 2] = 0.0f;
+        pixels->rgba[at + 3] = 0.5f;
+      }
+    const auto blended = host::fcitx_candidate_theme_files(wechat_dark, true, std::nullopt, std::nullopt, faint);
+    const auto blended_name = image_in(blended.conf, "InputPanel/Background");
+    for (const auto &image : blended.images)
+      if (image.file == blended_name) {
+        const auto mixed = decode(image.bytes);
+        // Half of 0x80 red over half of the 0x15 fill: 0x8a red, and the fill's 0x0a or 0x0b in the others as the half rounds.
+        const auto mix = mixed.rgb(20, 22);
+        assert(mixed.alpha(20, 22) == 255 && (mix >> 16) == 0x8Au);
+        assert(((mix >> 8) & 0xFFu) >= 0x0Au && ((mix >> 8) & 0xFFu) <= 0x0Bu && (mix & 0xFFu) >= 0x0Au && (mix & 0xFFu) <= 0x0Bu);
+      }
+    // A decoration's band moves the mark down with the card.
+    const auto both = host::fcitx_candidate_theme_files(wechat_dark, true, host::FcitxThemeOverlay{"decoration-ab.png", 25, 15}, std::nullopt, logo);
+    assert(contains(both.conf, "[InputPanel/Background/Margin]\nLeft=35\nRight=22\nTop=62\nBottom=26\n\n"));
+    assert(contains(both.conf, "[InputPanel/ContentMargin]\nLeft=41\nRight=19\nTop=40\nBottom=23\n\n"));
+    // Without a mark the theme is the one drawn before there was one.
+    assert(host::fcitx_candidate_theme(wechat_dark, true, std::nullopt, std::nullopt, std::nullopt) == theme);
+  }
   const auto highlight = image_of(image_in(theme, "InputPanel/Highlight"));
   assert(highlight.width == 24 && highlight.height == 14);
   assert(highlight.alpha(0, 0) < 64 && highlight.alpha(12, 7) == 255 && highlight.rgb(12, 7) == 0x07C160u);
@@ -332,28 +428,34 @@ int main() {
   assert(host::write_fcitx_theme(file, theme));
   assert(read(file) == theme);
 
-  // A plain skin's theme has no overlay and keeps its content margin; one with a decoration names the image, pins it top right just inside the outline, and reserves the band at the top of the card.
+  // A plain skin's theme has no overlay and keeps its content margin; one with a decoration names the image and makes the panel the band taller than the card: the nine-slice top margin, the shadow margin and the content margin all grow by the band (25), so the card starts at 8 + 25 = 33 and the candidates one padding (7) below that. The image's bottom is that padding below the card's top edge (33 + 7 - 15 = 25), its right edge that padding in from the card's side (12 + 7), and it may be drawn from the band's top (8) down to just inside the card's outline.
   assert(!contains(theme, "Overlay"));
   assert(!contains(theme, "Gravity"));
   const auto decorated = host::fcitx_candidate_theme(wechat_dark, true, host::FcitxThemeOverlay{"decoration-ab.png", 25, 15});
   assert(contains(decorated, ".png\nColor=#151515\nBorderColor=#292929\nBorderWidth=1\n"
-                             "Overlay=decoration-ab.png\nGravity=Top Right\nOverlayOffsetX=13\nOverlayOffsetY=14\n"
+                             "Overlay=decoration-ab.png\nGravity=Top Right\nOverlayOffsetX=19\nOverlayOffsetY=25\n"
                              "HideOverlayIfOversize=False\n\n"
-                             "[InputPanel/Background/OverlayClipMargin]\nLeft=13\nRight=13\nTop=9\nBottom=17\n\n"
-                             "[InputPanel/Background/Margin]\nLeft=22\nRight=22\nTop=22\nBottom=26\n\n"));
-  assert(contains(decorated, "[InputPanel/ContentMargin]\nLeft=19\nRight=19\nTop=40\nBottom=23\n\n"));
-  // Taller than the band, the image is anchored to the band's bottom and cut at the card's top; of unknown height it starts at the band's top.
-  assert(contains(host::fcitx_candidate_theme(wechat_dark, true, host::FcitxThemeOverlay{"decoration-ab.png", 25, 40}),
-                  "OverlayOffsetY=-6\n"));
+                             "[InputPanel/Background/OverlayClipMargin]\nLeft=13\nRight=13\nTop=8\nBottom=17\n\n"
+                             "[InputPanel/Background/Margin]\nLeft=22\nRight=22\nTop=47\nBottom=26\n\n"
+                             "[InputPanel/ShadowMargin]\nLeft=12\nRight=12\nTop=33\nBottom=16\n\n"
+                             "[InputPanel/ContentMargin]\nLeft=19\nRight=19\nTop=40\nBottom=23\n\n"));
+  // An image exactly the band plus the padding tall starts at the band's top; a taller one keeps its bottom where it is and is cut at the band's top by the clip margin; of unknown height it starts at the band's top.
+  assert(contains(host::fcitx_candidate_theme(wechat_dark, true, host::FcitxThemeOverlay{"decoration-ab.png", 25, 32}),
+                  "OverlayOffsetY=8\n"));
+  assert(contains(host::fcitx_candidate_theme(wechat_dark, true, host::FcitxThemeOverlay{"decoration-ab.png", 25, 60}),
+                  "OverlayOffsetY=-20\n"));
   assert(contains(host::fcitx_candidate_theme(wechat_dark, true, host::FcitxThemeOverlay{"decoration-ab.svg", 25, std::nullopt}),
-                  "OverlayOffsetY=9\n"));
-  // Without an outline the image keeps the same inset, where the hairline would be.
+                  "OverlayOffsetY=8\n"));
+  // Without an outline the image keeps the same padding, measured from where the hairline would be.
   assert(contains(host::fcitx_candidate_theme(willow, false, host::FcitxThemeOverlay{"decoration-ab.png", 25, 25}),
-                  "OverlayOffsetX=13\nOverlayOffsetY=9\n"));
+                  "OverlayOffsetX=19\nOverlayOffsetY=15\n"));
+  // A wider outline moves the content, and the image's bottom and side with it (inset 3, padding 9).
+  assert(contains(host::fcitx_candidate_theme(wide, true, host::FcitxThemeOverlay{"decoration-ab.png", 25, 15}),
+                  "OverlayOffsetX=21\nOverlayOffsetY=27\n"));
   // A skin aligned to the left or centre moves the gravity, measured from that edge.
   assert(contains(host::fcitx_candidate_theme(wechat_dark, true,
                                               host::FcitxThemeOverlay{"decoration-ab.png", 25, 15, host::CandidateSkinAlign::left}),
-                  "Gravity=Top Left\nOverlayOffsetX=13\n"));
+                  "Gravity=Top Left\nOverlayOffsetX=19\n"));
   assert(contains(host::fcitx_candidate_theme(wechat_dark, true,
                                               host::FcitxThemeOverlay{"decoration-ab.png", 25, 15, host::CandidateSkinAlign::center}),
                   "Gravity=Top Center\nOverlayOffsetX=0\n"));
@@ -365,6 +467,15 @@ int main() {
   assert(host::fcitx_candidate_theme(wechat_dark, true, std::nullopt, std::nullopt) ==
          host::fcitx_candidate_theme(wechat_dark, true));
   assert(host::fcitx_candidate_theme(wechat_dark, true, std::nullopt, 16.0) != host::fcitx_candidate_theme(wechat_dark, true));
+  // The selected row keeps its 6 px corners on any card at least that round, and follows a tighter card the user chose down to square.
+  const auto highlight_at = [&](double radius, bool user_radius = true) {
+    return image_in(host::fcitx_candidate_theme(wechat_dark, true, std::nullopt, radius, std::nullopt, user_radius),
+                    "InputPanel/Highlight");
+  };
+  assert(highlight_at(16.0) == image_in(theme, "InputPanel/Highlight") && highlight_at(6.0) == highlight_at(16.0));
+  assert(highlight_at(3.0) != highlight_at(6.0) && highlight_at(0.0) != highlight_at(3.0));
+  // A skin package's tight radius leaves the highlight at the 6 px it was drawn with before the setting existed.
+  assert(highlight_at(0.0, false) == highlight_at(16.0) && highlight_at(3.0, false) == highlight_at(16.0));
   assert(host::fcitx_png_height(png(48)) == 48);
   assert(!host::fcitx_png_height("GIF89a" + std::string(32, '\0')));
   assert(!host::fcitx_png_height(png(0)));
@@ -391,9 +502,9 @@ int main() {
   assert(ears_copy.rfind("decoration-", 0) == 0 && ears_copy.size() == 11 + 16 + 4);
   assert(ears_copy.compare(ears_copy.size() - 4, 4, ".png") == 0);
   assert(read(directory / ears_copy) == png(15, 'a'));
-  assert(contains(ears_theme, "OverlayOffsetY=14\n") && contains(ears_theme, "Top=40\n"));
+  assert(contains(ears_theme, "OverlayOffsetY=25\n") && contains(ears_theme, "Top=40\n"));
   assert(staged(directory) == std::vector<std::string>{ears_copy});
-  assert(files_with(directory, "shape-") == shapes_named(theme));
+  assert(files_with(directory, "shape-") == shapes_named(ears_theme) && shapes_named(ears_theme) != shapes_named(theme));
   // An unchanged image is not written again.
   const auto copied = std::filesystem::last_write_time(directory / ears_copy);
   assert(host::write_fcitx_candidate_theme(file, wechat_dark, true, ears));
@@ -410,12 +521,12 @@ int main() {
   const auto tall_theme = read(file);
   const auto tall_copy = overlay_of(tall_theme);
   assert(tall_copy.compare(tall_copy.size() - 4, 4, ".png") == 0);
-  assert(contains(tall_theme, "OverlayOffsetY=-6\n"));
+  assert(contains(tall_theme, "OverlayOffsetY=0\n"));
   assert(staged(directory) == std::vector<std::string>{tall_copy});
   const host::CandidateSkinDecoration halo{(skins / "halo.svg").string(), 30, 100};
   assert(host::write_fcitx_candidate_theme(file, wechat_dark, true, halo));
   const auto halo_theme = read(file);
-  assert(contains(halo_theme, "OverlayOffsetY=9\n") && contains(halo_theme, "Top=45\n"));
+  assert(contains(halo_theme, "OverlayOffsetY=8\n") && contains(halo_theme, "Top=45\n"));
   assert(staged(directory) == std::vector<std::string>{overlay_of(halo_theme)});
 
   // A plain skin, or an image that cannot be staged, leaves MSIME's colours with no overlay and no copy behind.
@@ -433,6 +544,16 @@ int main() {
   assert(host::write_fcitx_candidate_theme(file, wechat_dark, true, std::nullopt));
   assert(read(file) == theme && staged(directory).empty());
   assert(files_with(directory, "shape-") == shapes_named(theme));
+
+  const auto outside = root / "outside-theme-state";
+  const auto linked = root / "linked-theme-state";
+  std::filesystem::create_directory(outside);
+  std::filesystem::create_directory_symlink(outside, linked);
+  // 以 root 身份运行时（Linux 容器里就是这样），root 自己不对外开放的目录里的链接会被当成受信任的系统链接（见 `src/core/SafePath.h`）；把目录改成其他人可写，这条链接就成了任何人都可能放进去的链接。
+  std::filesystem::permissions(root, std::filesystem::perms::others_write, std::filesystem::perm_options::add);
+  const auto linked_file = linked / "new-dir" / "theme.conf";
+  assert(!host::write_fcitx_candidate_theme(linked_file, plain, false, std::nullopt));
+  assert(!std::filesystem::exists(outside / "new-dir"));
 
   // The stamp stands in for the image between refreshes: nothing without a decoration, and a different one once the image changes.
   assert(host::fcitx_overlay_stamp(std::nullopt).empty());

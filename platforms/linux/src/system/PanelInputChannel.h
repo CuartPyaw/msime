@@ -5,11 +5,13 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fcntl.h>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <poll.h>
 #include <string>
+#include <system_error>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -18,6 +20,9 @@
 #include <unistd.h>
 #include <utility>
 #include <vector>
+
+#include "../core/LinuxEdition.h"
+#include "../core/SafePath.h"
 
 namespace msime::linux_host {
 
@@ -45,6 +50,7 @@ struct PanelInputRequest {
 
 inline constexpr size_t kPanelInputLineLimit = 16384;
 inline constexpr size_t kPanelInputTextLimit = 4096;
+inline constexpr size_t kPanelInputPendingLimit = 128;
 inline constexpr int64_t kPanelInputWaitUs = 700000;
 
 inline std::optional<PanelInputRequest> parse_panel_input_request(const std::string &line) {
@@ -135,18 +141,20 @@ void deliver_panel_key_stroke(Process process, Forward forward) {
   if (!consumed) forward(true);
 }
 
-// Holds requests until a context can take them. A request that cannot be delivered within kPanelInputWaitUs is answered no_focus and dropped, so a focus that arrives later can never type it a second time after the panel has already fallen back to another route.
+// Holds requests until a context can take them. A request that cannot be delivered within kPanelInputWaitUs is answered no_focus and dropped, so a focus that arrives later can never type it a second time after the panel has already fallen back to another route. The pending count is capped so a same-user client cannot retain an arbitrary number of open request connections while focus is unavailable.
 class PanelInputBroker {
 public:
-  PanelInputBroker() = default;
+  PanelInputBroker() { pending_.reserve(kPanelInputPendingLimit); }
   PanelInputBroker(const PanelInputBroker &) = delete;
   PanelInputBroker &operator=(const PanelInputBroker &) = delete;
   ~PanelInputBroker() {
     for (const auto &entry : pending_) ::close(entry.fd);
   }
 
-  void submit(int fd, PanelInputRequest request, int64_t now_us) {
+  bool submit(int fd, PanelInputRequest request, int64_t now_us) {
+    if (pending_.size() >= kPanelInputPendingLimit) return false;
     pending_.push_back({fd, std::move(request), now_us + kPanelInputWaitUs});
+    return true;
   }
 
   bool empty() const { return pending_.empty(); }
@@ -197,7 +205,12 @@ private:
 inline std::string panel_input_socket_path() {
   const char *runtime = std::getenv("XDG_RUNTIME_DIR");
   if (!runtime || runtime[0] != '/') return {};
-  return std::string(runtime) + "/msime-client/panel-input.sock";
+  return std::string(runtime) + "/" MSIME_EDITION_CLIENT_DIRECTORY "/panel-input.sock";
+}
+
+// 逐组件检查 socket 目录，避免 mkdir 沿着中间符号链接在外部创建目录。
+inline bool panel_input_directory_is_safe(const std::filesystem::path &directory) {
+  return directory.is_absolute() && storage_directory_path_is_safe(directory);
 }
 
 // The listening socket. IBus and Fcitx5 may both be installed; whichever host binds first serves the panels, and the other leaves a live socket alone rather than stealing it.
@@ -218,6 +231,7 @@ public:
     const auto slash = path.rfind('/');
     if (slash == std::string::npos || slash == 0) return false;
     const auto directory = path.substr(0, slash);
+    if (!panel_input_directory_is_safe(std::filesystem::path(directory))) return false;
     if (::mkdir(directory.c_str(), 0700) != 0 && errno != EEXIST) return false;
     struct stat info {};
     // Other session services share this directory. It must belong to this user and admit no one else's writes; the socket itself is 0600 and every peer is checked below as well.

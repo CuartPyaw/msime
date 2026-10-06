@@ -7,6 +7,8 @@ GType msime_ibus_engine_get_type();
 // host-api.
 void msime_ibus_configure(const std::string &options);
 void msime_ibus_set_system_dark(bool dark);
+// Called once the IBus main loop has returned, before the factory and its engines go: writes every engine's pending key presses on this thread, makes any later flush do the same, and waits for the writes still running on worker threads, so the process does not exit under them.
+void msime_ibus_shutdown_key_presses();
 // Exit status of msime-linux-ibus after the Ctrl+Shift+Alt+T maintenance stop. msime-linux-ibus-launcher supervises the process and restarts it after a crash; this status tells it the stop was deliberate. Keep the value in step with stop_status in that script.
 constexpr int msime_ibus_maintenance_stop_exit = 77;
 // True once the maintenance stop shortcut has quit the IBus main loop.

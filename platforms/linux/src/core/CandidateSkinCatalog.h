@@ -10,6 +10,8 @@
 
 namespace msime::linux_host {
 
+inline constexpr std::size_t kMaxCandidateSkins = 32;
+
 // 一款已安装的外部候选皮肤：id 是身份，title 只用于展示，base 是它的清单声明的底色主题（system 或某个内置主题）。选中它就是选中自定义主题，并把 custom_theme.base 换成这个 base，和设置页的皮肤卡片一样。
 struct CandidateSkin {
   std::string id;
@@ -35,6 +37,7 @@ inline bool safe_skin_id(std::string_view id) {
 // 运行配置里 candidate_skin_catalog.packages 的那些外部皮肤。条目原样交给 msime_client_resolve_theme 的 package，而共享层按清单严格读取它（ThemePackage::from_host_catalog_entry），所以这里只收它会接受的条目：安全的 id、非空的 title、字符串 base、只含 horizontal / vertical 的 layouts。base 是否为 system 或某个内置主题由 theme_choices 对照共享层的主题目录再筛一次，宿主不另存主题 id 表。调色板不在这里读——只声明了模式而没有任何颜色的 `{}` 同样是合法条目，由共享层决定画什么。
 inline std::vector<CandidateSkin> parse_configured_skins(const nlohmann::json &options) {
   std::vector<CandidateSkin> skins;
+  skins.reserve(kMaxCandidateSkins);
   const auto catalog = options.find("candidate_skin_catalog");
   if (catalog == options.end() || !catalog->is_object()) return skins;
   const auto packages = catalog->find("packages");
@@ -63,6 +66,7 @@ inline std::vector<CandidateSkin> parse_configured_skins(const nlohmann::json &o
     bool listed = false;
     for (const auto &existing : skins) listed = listed || existing.id == id;
     if (listed) continue;
+    if (skins.size() >= kMaxCandidateSkins) break;
     skins.push_back({std::move(id), std::move(title), std::move(base)});
   }
   return skins;
@@ -130,6 +134,23 @@ inline std::optional<double> candidate_skin_corner_radius(const nlohmann::json &
   const auto radius = value->get<double>();
   if (!std::isfinite(radius) || radius < 0 || radius > 32) return std::nullopt;
   return radius;
+}
+
+// The card radius the user set in the settings (`candidate_corner_radius`, 0-32), or none to leave it to the skin and the host. The shared layer omits the key when it is unset and rejects values out of range; anything else in the file is ignored here rather than trusted.
+inline std::optional<double> candidate_corner_radius_preference(const nlohmann::json &preferences) {
+  if (!preferences.is_object()) return std::nullopt;
+  const auto value = preferences.find("candidate_corner_radius");
+  if (value == preferences.end() || !value->is_number()) return std::nullopt;
+  const auto radius = value->get<double>();
+  if (!std::isfinite(radius) || radius < 0 || radius > 32) return std::nullopt;
+  return radius;
+}
+
+// The card radius Fcitx5 draws: the user's own value wins over the drawn skin's, and with neither the host keeps its design radius.
+inline std::optional<double> candidate_corner_radius(const nlohmann::json &preferences, const nlohmann::json &catalog,
+                                                     std::string_view drawn) {
+  if (const auto radius = candidate_corner_radius_preference(preferences)) return radius;
+  return candidate_skin_corner_radius(catalog, drawn);
 }
 
 }  // namespace msime::linux_host

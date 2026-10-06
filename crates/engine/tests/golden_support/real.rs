@@ -38,7 +38,7 @@ pub fn assert_real_set(file_name: &str) {
     };
     assert!(
         has_recorded_resources(&resources),
-        "{RESOURCES_ENV}={} lacks msime.db, english.db or the n-gram tables",
+        "{RESOURCES_ENV}={} lacks msime-pinyin.db, msime-english.db or the n-gram tables",
         resources.display()
     );
     let failures = replay_real_set(file_name, &resources);
@@ -187,6 +187,9 @@ pub fn product_options(options: &mut SessionOptions) {
         super_jianpin: true,
         temporary_english: true,
         temporary_japanese: true,
+        expression: false,
+        command: false,
+        mention: false,
     };
     options.wubi.mixed_pinyin = false;
     options.sentence_alternatives = true;

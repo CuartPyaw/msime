@@ -23,6 +23,7 @@ import {
   CloudDictionaryFilesPanel,
   CloudDictionaryApplyPanel,
   CloudCandidatesPanel,
+  completeOnboardingPreferences,
   type AccountClient,
   type AccountPreferences,
   type AiSkinClient,
@@ -52,6 +53,10 @@ import {
   type LocalVoiceModelClient,
   type LocalVoiceModelList,
   type LocalVoiceModelProgress,
+  type MentionEntry,
+  type PluginCatalogResult,
+  type PluginClient,
+  type PluginPackage,
   UNBATCHED_DICTIONARY_FILE_BYTES,
 } from "@msime/ui";
 import type {
@@ -115,8 +120,6 @@ interface NativeBridge {
   listFontFamilies(): string;
   /** `{operation:"load"|"save"|"preview",...}`; the reply carries the settings now in force. */
   keyboardFeedback(request: string): string;
-  /** `{operation:"load"|"save",text?}`; the overlay the Engine reads from the user data directory. */
-  customTranslations(request: string): string;
   /**
    * Whether setup still has a step left: not enabled, or enabled but not the current keyboard.
    *
@@ -129,6 +132,10 @@ interface NativeBridge {
   showInputMethodPicker(): string;
   /** Starts the picker and answers at once; the panel's own rescan is what shows the result. */
   importSkinFolder(): string;
+  /**
+   * The 插件 page's pack store and @ name list: `{operation:"catalog"|"remove"|"load_mentions"|"save_mentions",...}`, answered by `msime_client_plugins` as `{ok,value}` or `{ok:false,error,detail?}`. An import waits for the system picker, so it goes through `startRequest` as `plugin_import` instead.
+   */
+  plugins(action: string): string;
 }
 
 declare global {
@@ -431,22 +438,34 @@ function communitySkinClient(native: NativeBridge): CommunitySkinClient {
       JSON.stringify({ operation: "community_skin", ...action }),
     ).then(unwrap<T>);
   return {
-    list: (offset, search) =>
-      request<CommunitySkinPage>({ community_operation: "list", offset, search }),
+    // 我的作品 asks the host for scope "mine", which it sends with the session and fields=moderation so a removed skin carries its 已下架 badge.
+    list: (offset, search, mine, category) =>
+      request<CommunitySkinPage>({
+        community_operation: "list",
+        offset,
+        search,
+        ...(mine ? { scope: "mine" } : {}),
+        category,
+      }),
     detail: (id) => request<CommunitySkin>({ community_operation: "detail", id }),
     download: (id, name) =>
       request<CommunitySkinDownload>({ community_operation: "download", id, name }),
     rate: async (id, stars) => {
       await request({ community_operation: "rate", id, stars });
     },
-    publish: async (id, name, description, design) => {
-      await request({ community_operation: "publish", id, name, description, design });
+    publish: async (id, name, description, design, category) => {
+      await request({ community_operation: "publish", id, name, description, design, category });
     },
+    setCategory: (id, category) =>
+      request<CommunitySkin>({ community_operation: "set_category", id, category }),
     unpublish: async (id) => {
       await request({ community_operation: "unpublish", id });
     },
     finishTrial: async (id, keep) => {
       await request({ community_operation: "finish_trial", id, keep });
+    },
+    report: async (id, reason, detail) => {
+      await request({ community_operation: "report", id, reason, detail });
     },
   };
 }
@@ -511,6 +530,9 @@ function communityResourceClient(native: NativeBridge): CommunityResourceClient 
     removeReply: async (id) => {
       await request({ resource_operation: "remove_reply", id });
     },
+    report: async (kind, id, reason, detail) => {
+      await request({ resource_operation: "report", kind, id, reason, detail });
+    },
   };
 }
 
@@ -572,6 +594,37 @@ globalThis.msimeHarmonyVoiceModelProgress = (document: string) => {
   }
   for (const listener of voiceModelProgressListeners) listener(progress);
 };
+
+/**
+ * Rejects the way the desktop shell's plugin commands reject: `{code, detail}`, where detail is the rule client-core reports for a refused pack or name, so `pluginErrorMessage` can say which file or entry to fix.
+ */
+function unwrapPlugin<T>(raw: string): T {
+  const reply = JSON.parse(raw) as Reply<T> & { detail?: string };
+  if (!reply.ok) throw { code: reply.error, detail: reply.detail ?? null };
+  return reply.value;
+}
+
+/**
+ * The 插件 page's host side. The host fills in the state root and the bundle's built-in sound packs, so the page, as on the desktop, never names a path. An import waits on the system picker for as long as the user leaves it open, so its deadline is the one the export save allows.
+ */
+function pluginClient(native: NativeBridge): PluginClient {
+  const call = <T,>(action: Record<string, unknown>): T =>
+    unwrapPlugin<T>(native.plugins(JSON.stringify(action)));
+  return {
+    catalog: async () => call<PluginCatalogResult>({ operation: "catalog" }),
+    importPack: async (source) =>
+      unwrapPlugin<PluginPackage | null>(
+        await bridgeRequest(native, "plugin_import", JSON.stringify({ source }), 30 * 60 * 1000),
+      ),
+    remove: async (kind, id) => {
+      call<null>({ operation: "remove", kind, id });
+    },
+    loadMentions: async () => call<MentionEntry[]>({ operation: "load_mentions" }),
+    saveMentions: async (entries) => {
+      call<null>({ operation: "save_mentions", entries });
+    },
+  };
+}
 
 function localVoiceModelClient(native: NativeBridge): LocalVoiceModelClient {
   const request = <T,>(action: Record<string, unknown>, timeoutMs?: number): Promise<T> =>
@@ -873,13 +926,6 @@ function makeClient(
     listVoiceCaptureDevices: async () =>
       unwrap<VoiceCaptureDevice[]>(native.listVoiceCaptureDevices()),
     listFontFamilies: async () => unwrap<string[]>(native.listFontFamilies()),
-    customTranslations: {
-      load: async () =>
-        unwrap<string>(native.customTranslations(JSON.stringify({ operation: "load" }))),
-      save: async (text) => {
-        unwrap<string>(native.customTranslations(JSON.stringify({ operation: "save", text })));
-      },
-    },
     mobileKeyboardFeedback: {
       load: async () =>
         unwrap<MobileKeyboardFeedback>(
@@ -946,7 +992,10 @@ function makeClient(
     communityResources: communityResourceClient(native),
     aiSkins: aiSkinClient(native),
     localVoiceModels: localVoiceModelClient(native),
+    // The page is offered only on a 2in1, the form factor that plays packs and routes the / and @ modes; a phone hides it whatever the host supplies.
+    plugins: pluginClient(native),
     openCloudClipboard: async () => openCloudClipboard(),
+    cloudClipboardRequest: cloudClipboardClient(native, () => undefined).request,
     openCloudDictionary: async () => openCloudDictionary(),
   };
 }
@@ -1020,22 +1069,10 @@ function HarmonySettings({
           // the user with a keyboard laid out the way they had just declined. Written the same way
           // the mobile hosts write it, so a profile carried between them means the same thing.
           const snapshot = await client.load();
-          const enabled = [...(snapshot.preferences.touch_keyboard_schemes?.enabled ?? [])];
-          if (!enabled.includes(scheme)) enabled.push(scheme);
-          await client.save(snapshot.revision, {
-            ...snapshot.preferences,
-            ...(choices.candidateEnglishGloss === undefined
-              ? {}
-              : { candidate_english_gloss: choices.candidateEnglishGloss }),
-            scheme: "quanpin",
-            last_chinese_scheme: "quanpin",
-            touch_keyboard_layout: scheme === "nine_key" ? "nine_key" : "twenty_six_key",
-            touch_keyboard_schemes: {
-              ...snapshot.preferences.touch_keyboard_schemes,
-              enabled,
-              selected: scheme,
-            },
-          });
+          await client.save(
+            snapshot.revision,
+            completeOnboardingPreferences(snapshot, scheme, choices),
+          );
           setInitialPage(choices.openAccount ? "account" : undefined);
           setBootstrapRequired(false);
         }}

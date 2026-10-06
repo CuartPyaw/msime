@@ -40,10 +40,10 @@ impl AutocorrectCut {
         self.edge_count == other.edge_count && self.weight == other.weight
     }
 
-    pub fn syllables(&self) -> Vec<String> {
+    pub fn into_syllables(self) -> Vec<String> {
         self.segments
-            .iter()
-            .map(|segment| segment.syllable.clone())
+            .into_iter()
+            .map(|segment| segment.syllable)
             .collect()
     }
 }
@@ -86,9 +86,29 @@ fn neighbors(letter: u8) -> &'static [u8] {
     }
 }
 
+fn insertion_letters_capacity(syllable: &[u8], position: usize) -> usize {
+    let mut capacity = 0;
+    if position > 0 {
+        capacity += 1 + neighbors(syllable[position - 1]).len();
+    }
+    if position < syllable.len() {
+        capacity += 1 + neighbors(syllable[position]).len();
+    }
+    capacity
+}
+
 /// Every one-edit variant of `syllable` a rule produces, duplicates included (GEN:176-224).
 fn rule_variants(syllable: &[u8], correction_type: u32) -> Vec<Vec<u8>> {
-    let mut variants = Vec::new();
+    let capacity = match correction_type {
+        autocorrect_type::TRANSPOSITION => syllable.len().saturating_sub(1),
+        autocorrect_type::NEIGHBOR => syllable.iter().map(|&letter| neighbors(letter).len()).sum(),
+        autocorrect_type::DELETION => syllable.len(),
+        autocorrect_type::INSERTION => (0..=syllable.len())
+            .map(|position| insertion_letters_capacity(syllable, position))
+            .sum(),
+        _ => 0,
+    };
+    let mut variants = Vec::with_capacity(capacity);
     match correction_type {
         autocorrect_type::TRANSPOSITION => {
             for i in 0..syllable.len() - 1 {
@@ -116,7 +136,8 @@ fn rule_variants(syllable: &[u8], correction_type: u32) -> Vec<Vec<u8>> {
         autocorrect_type::INSERTION => {
             // A realistic extra key repeats an adjacent letter or is one of its neighbours; unconstrained insertion would add some 60k mostly implausible keys.
             for position in 0..=syllable.len() {
-                let mut letters = Vec::new();
+                let mut letters =
+                    Vec::with_capacity(insertion_letters_capacity(syllable, position));
                 if position > 0 {
                     let left = syllable[position - 1];
                     letters.push(left);
@@ -248,7 +269,6 @@ struct Hypothesis {
 
 struct Search {
     best: Vec<Vec<Hypothesis>>,
-    finalized: Vec<bool>,
     arrival: usize,
     /// `(parent sequence, syllable) -> sequence`; the seed's empty sequence is 0.
     sequences: HashMap<(usize, &'static str), usize>,
@@ -256,10 +276,16 @@ struct Search {
 }
 
 impl Search {
-    fn finalize(&mut self, position: usize) {
-        if std::mem::replace(&mut self.finalized[position], true) {
-            return;
+    fn new(length: usize, k: usize) -> Self {
+        Self {
+            best: (0..=length).map(|_| Vec::with_capacity(k)).collect(),
+            arrival: 0,
+            sequences: HashMap::with_capacity(length.saturating_mul(k)),
+            k,
         }
+    }
+
+    fn finalize(&mut self, position: usize) {
         let list = &mut self.best[position];
         if list.len() < 2 {
             return;
@@ -331,13 +357,7 @@ pub fn autocorrect_cut_kbest(
     let index = correction_index();
     let bytes = pinyin.as_bytes();
     let length = bytes.len();
-    let mut search = Search {
-        best: vec![Vec::new(); length + 1],
-        finalized: vec![false; length + 1],
-        arrival: 0,
-        sequences: HashMap::new(),
-        k,
-    };
+    let mut search = Search::new(length, k);
     search.best[0].push(Hypothesis {
         edge_count: 0,
         prev_index: NO_PREDECESSOR,
@@ -388,7 +408,7 @@ pub fn autocorrect_cut_kbest(
     search.best[length]
         .iter()
         .map(|hypothesis| {
-            let mut segments = Vec::new();
+            let mut segments = Vec::with_capacity(length);
             let mut position = length;
             let mut current = *hypothesis;
             while current.prev_index != NO_PREDECESSOR {
@@ -462,6 +482,32 @@ mod tests {
     use super::*;
     use crate::types::autocorrect_type::{DELETION, INSERTION, NEIGHBOR, TRANSPOSITION};
 
+    /// test_typo_correction_input_session.cpp:237-253: every neighbour row is one substitution of an adjacent key, by the same adjacency the typo learning uses (`typos::keys_adjacent`), and the two keyboard tables agree in both directions.
+    #[test]
+    fn neighbor_rows_agree_with_keys_adjacent() {
+        for (wrong, correct) in correction_table(NEIGHBOR) {
+            let (w, c) = (wrong.as_bytes(), correct.as_bytes());
+            assert_eq!(w.len(), c.len(), "{wrong} -> {correct}");
+            let diffs: Vec<usize> = (0..w.len()).filter(|&i| w[i] != c[i]).collect();
+            assert_eq!(diffs.len(), 1, "{wrong} -> {correct}");
+            assert!(
+                crate::pinyin::typos::keys_adjacent(w[diffs[0]], c[diffs[0]]),
+                "{wrong} -> {correct}"
+            );
+        }
+        for a in b'a'..=b'z' {
+            for b in b'a'..=b'z' {
+                assert_eq!(
+                    neighbors(a).contains(&b),
+                    crate::pinyin::typos::keys_adjacent(a, b),
+                    "{} {}",
+                    a as char,
+                    b as char
+                );
+            }
+        }
+    }
+
     const BOTH: u32 = TRANSPOSITION | NEIGHBOR;
     const ALL: u32 = BOTH | DELETION;
     const ALL_FOUR: u32 = ALL | INSERTION;
@@ -486,8 +532,31 @@ mod tests {
         tables
     }
 
+    #[test]
+    fn search_allocates_only_position_beams() {
+        let search = Search::new(4, 3);
+        assert_eq!(search.best.len(), 5);
+        assert!(search.best.iter().all(|slot| slot.capacity() >= 3));
+        assert!(search.sequences.capacity() >= 12);
+    }
+
     fn reading(cut: &AutocorrectCut) -> String {
-        cut.syllables().join("'")
+        cut.segments
+            .iter()
+            .map(|segment| segment.syllable.as_str())
+            .collect::<Vec<_>>()
+            .join("'")
+    }
+
+    #[test]
+    fn into_syllables_consumes_the_cut_segments() {
+        let cut = AutocorrectCut {
+            segments: vec![segment("shang", "sahng", 0, true)],
+            edge_count: 1,
+            weight: TRANSPOSITION_WEIGHT,
+        };
+
+        assert_eq!(cut.into_syllables(), ["shang"]);
     }
 
     /// `autocorrect_cut` of the C++ tests: the best cut's syllables.

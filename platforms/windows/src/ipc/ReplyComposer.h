@@ -12,6 +12,8 @@ namespace msime::windows {
 enum class ReplyPath {
   Composition,
   AutoCommitAndContinue,
+  // A Korean key that finished a syllable. The TIP inserts that syllable from its own host session, so the reply carries at most the composition that follows it.
+  SyllableCommit,
   Selection,
   Punctuation,
   CandidatePunctuationFallback,
@@ -103,6 +105,14 @@ public:
                                      uint64_t epoch,
                                      const nlohmann::json &view);
   std::optional<PendingReply> restore_segment(
+      ServerSession &session, const FanyImeNamedpipeData &packet,
+      uint64_t epoch);
+  // The key that opens a scheme's candidate list while it composes (the Korean Hanja key, Zhuyin's Down), and the keys an open Hanja or Zhuyin list takes (KoreanHanjaKey.h), applied to the Server's session exactly as the TIP applies them to its host session. Nothing is sent back: the TIP writes what its own session chose, and the candidate window follows the delivered view. Null for every other key, scheme and state, which keep their routes.
+  std::optional<PendingReply> korean_hanja(
+      ServerSession &session, const FanyImeNamedpipeData &packet,
+      uint64_t epoch);
+  // 韩文、注音、越南文或藏文的光标或编辑键（回车、Tab、方向键、Home/End、Page Up/Down、Delete），因前面的键还在排队而被 TIP 吃掉，或是 TIP 据以上屏的键，会结束当前组字。其他按键和方案返回空。
+  std::optional<PendingReply> korean_syllable_end(
       ServerSession &session, const FanyImeNamedpipeData &packet,
       uint64_t epoch);
   // Null: not an editing key; no Engine action. Non-null may have no frame

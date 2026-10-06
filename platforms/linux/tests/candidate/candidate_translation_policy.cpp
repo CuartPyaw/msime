@@ -30,4 +30,17 @@ int main() {
   Glosses none;
   prefer_online_glosses(none, Glosses{});
   assert(none.empty());
+
+  // Only the command mode's one-sentence query is /fy's; a gloss request, or the sentence the menu action translates outside that mode, keeps the gloss rules.
+  using msime::linux_host::command_translation_query;
+  assert(command_translation_query("command", true));
+  assert(!command_translation_query("command", false));
+  assert(!command_translation_query("none", true));
+  assert(!command_translation_query("mention", true));
+
+  using msime::linux_host::should_retry_translation_after_provider;
+  assert(should_retry_translation_after_provider(true, false, false));
+  assert(should_retry_translation_after_provider(true, true, false));
+  assert(!should_retry_translation_after_provider(true, true, true));
+  assert(!should_retry_translation_after_provider(false, false, false));
 }

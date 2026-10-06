@@ -27,8 +27,56 @@ private struct TruncatingTranslationService: CandidateTranslationService {
   }
 }
 
+private final class BlockingTranslationService: CandidateTranslationService, @unchecked Sendable {
+  private let lock = NSLock()
+  private var count = 0
+
+  var callCount: Int {
+    lock.lock(); defer { lock.unlock() }
+    return count
+  }
+
+  func translate(words: [String], target: String) async throws -> [String] {
+    lock.lock()
+    count += 1
+    lock.unlock()
+    try await Task.sleep(nanoseconds: 5_000_000_000)
+    return words.map { _ in "hello" }
+  }
+}
+
+private final class FlakyTranslationService: CandidateTranslationService, @unchecked Sendable {
+  private let lock = NSLock()
+  private var count = 0
+
+  var callCount: Int {
+    lock.lock(); defer { lock.unlock() }
+    return count
+  }
+
+  func translate(words: [String], target: String) async throws -> [String] {
+    lock.lock()
+    count += 1
+    let call = count
+    lock.unlock()
+    if call == 1 { throw NSError(domain: "CandidateTranslationTests", code: 1) }
+    return words.map { _ in "hello" }
+  }
+}
+
 @MainActor
 final class CandidateTranslationTests: XCTestCase {
+  func testOfflineGlossBridgeRejectsFractionalSourceAndGeneration() {
+    XCTAssertThrowsError(try CandidateGlossModel.request(
+      generation: 1,
+      candidates: [["text": "你好", "source": NSNumber(value: 1.5)]]))
+
+    XCTAssertThrowsError(try CandidateGlossModel.decode([
+      "generation": NSNumber(value: 2.5),
+      "translations": [["text": "你好", "translation": "hello"]],
+    ]))
+  }
+
   func testOnlyCandidatesWithHanCharactersGoOutToTheNetwork() {
     XCTAssertTrue(CandidateTranslationStore.translatable("你好"))
     XCTAssertTrue(CandidateTranslationStore.translatable("啊"))
@@ -108,6 +156,34 @@ final class CandidateTranslationTests: XCTestCase {
     store.cancel()
     try await Task.sleep(nanoseconds: 900_000_000)
     XCTAssertTrue(service.calls.isEmpty)
+  }
+
+  func testCancelledRequestCanBeRetriedForTheSameCandidates() async throws {
+    let service = BlockingTranslationService()
+    let store = CandidateTranslationStore(service: service)
+    store.refresh(words: ["你好"], codes: ["EN"])
+    try await Task.sleep(nanoseconds: 900_000_000)
+    XCTAssertEqual(service.callCount, 1)
+
+    store.cancel()
+    store.refresh(words: ["你好"], codes: ["EN"])
+    try await Task.sleep(nanoseconds: 900_000_000)
+    XCTAssertEqual(service.callCount, 2)
+    store.cancel()
+  }
+
+  func testFailedRequestCanBeRetriedForTheSameCandidates() async throws {
+    let service = FlakyTranslationService()
+    let store = CandidateTranslationStore(service: service)
+    store.refresh(words: ["你好"], codes: ["EN"])
+    try await Task.sleep(nanoseconds: 900_000_000)
+    XCTAssertEqual(service.callCount, 1)
+
+    store.refresh(words: ["你好"], codes: ["EN"])
+    try await Task.sleep(nanoseconds: 900_000_000)
+    XCTAssertEqual(service.callCount, 2)
+    XCTAssertEqual(store.gloss(word: "你好", code: "EN"), "hello")
+    store.cancel()
   }
 
   func testExpandedPanelRendersAnnotationsAndDeferredMenus() throws {
