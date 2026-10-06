@@ -747,7 +747,7 @@ public final class MSIMEInputService extends InputMethodService {
     private String typingStatisticsDirectory() {
         if (!preferencesDirectory.isEmpty()) return preferencesDirectory;
         File files = getFilesDir();
-        return files == null ? "" : new File(files, "bootstrap/state").getAbsolutePath();
+        return files == null ? "" : HostOptionsPolicy.bootstrapStateDirectory(files);
     }
 
     private void recordTypingStatistics(String text, TypingSource source) {
@@ -802,7 +802,7 @@ public final class MSIMEInputService extends InputMethodService {
     private String keyStatisticsDirectory(String preferences) {
         if (!preferences.isEmpty() && new File(preferences).isAbsolute()) return preferences;
         File files = getFilesDir();
-        return files == null ? "" : new File(files, "bootstrap/state").getAbsolutePath();
+        return files == null ? "" : HostOptionsPolicy.bootstrapStateDirectory(files);
     }
 
     /**
