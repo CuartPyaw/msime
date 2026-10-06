@@ -204,7 +204,7 @@ public final class LexiconPage extends DetailPage {
         LinearLayout row = baseRow(context);
         row.addView(badge(context, badge));
         LinearLayout texts = texts(context, title, subtitle);
-        row.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(texts, Ui.weightWrap(1f));
         TextView state = new TextView(context);
         state.setText(value);
         Ui.style(state, Ui.TEXT_ROW_SUBTITLE, 500, active ? Ui.accent(context) : Ui.subText(context));
@@ -240,7 +240,7 @@ public final class LexiconPage extends DetailPage {
         TextView label = new TextView(context);
         label.setText(title);
         Ui.style(label, Ui.TEXT_ROW_TITLE, 400, Ui.accent(context));
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        LinearLayout.LayoutParams params = Ui.weightWrap(1f);
         params.setMarginStart(Ui.dp(context, Ui.ROW_GAP));
         row.addView(label, params);
         row.setBackground(Ui.ripple(context));
@@ -261,7 +261,7 @@ public final class LexiconPage extends DetailPage {
         if (words != null) parts.add(DictionaryCollectionsStore.countLabel(words.length()));
         if (parts.isEmpty() && !item.description().isEmpty()) parts.add(item.description());
         row.addView(texts(context, item.name(), parts.isEmpty() ? null : String.join(" · ", parts)),
-            new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            Ui.weightWrap(1f));
         boolean added = view.installed(item.id());
         boolean busy = installing.contains(item.id());
         TextView button = new TextView(context);

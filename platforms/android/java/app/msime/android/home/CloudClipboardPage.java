@@ -127,7 +127,7 @@ public final class CloudClipboardPage extends DetailPage {
         TextView label = new TextView(context);
         label.setText("保留时长");
         Ui.style(label, Ui.TEXT_ROW_TITLE, 400, Ui.text(context));
-        retention.addView(label, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        retention.addView(label, Ui.weightWrap(1f));
         SegmentedControl segments = new SegmentedControl(context);
         int selected = current == null ? -1 : CloudClipboardApi.RETENTION_DAYS.indexOf(current.retentionDays());
         segments.setOptions(RETENTION_LABELS, selected);
@@ -152,7 +152,7 @@ public final class CloudClipboardPage extends DetailPage {
         recent.setText("最近");
         recent.setAccessibilityHeading(true);
         Ui.style(recent, Ui.TEXT_GROUP_TITLE, 500, Ui.accent(context));
-        header.addView(recent, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        header.addView(recent, Ui.weightWrap(1f));
         if (!current.items().isEmpty()) {
             TextView clear = new TextView(context);
             clear.setText("清空");
@@ -217,7 +217,7 @@ public final class CloudClipboardPage extends DetailPage {
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         metaParams.topMargin = Ui.dp(context, 4);
         texts.addView(meta, metaParams);
-        row.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(texts, Ui.weightWrap(1f));
 
         row.addView(iconButton(context, R.drawable.ic_ms_keep, item.pinned() ? Ui.accent(context) : Ui.subText(context),
             item.pinned() ? "取消置顶" : "置顶", () -> {

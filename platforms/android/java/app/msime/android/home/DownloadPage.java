@@ -89,7 +89,7 @@ public final class DownloadPage extends DetailPage {
         link.setText(DOWNLOAD_LABEL);
         Ui.style(link, Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));
         texts.addView(link);
-        LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        LinearLayout.LayoutParams textParams = Ui.weightWrap(1f);
         textParams.setMarginStart(Ui.dp(context, 14));
         card.addView(texts, textParams);
 

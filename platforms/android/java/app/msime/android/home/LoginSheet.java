@@ -113,7 +113,7 @@ final class LoginSheet {
         title.setText("link".equals(purpose) ? "添加登录方式" : "登录水杉");
         Ui.style(title, 22, 700, Ui.text(activity));
         title.setAccessibilityHeading(true);
-        header.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        header.addView(title, Ui.weightWrap(1f));
         ImageView close = new ImageView(activity);
         close.setImageDrawable(new PathIcon(24, new String[] {CLOSE_PATH}, new int[] {Ui.text(activity)}));
         close.setPadding(Ui.dp(activity, 8), Ui.dp(activity, 8), Ui.dp(activity, 8), Ui.dp(activity, 8));

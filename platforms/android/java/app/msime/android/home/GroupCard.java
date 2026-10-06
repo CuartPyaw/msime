@@ -295,7 +295,7 @@ public final class GroupCard {
             subtitleParams.topMargin = Ui.dp(owner.context, 1);
             texts.addView(subtitle, subtitleParams);
             setText(subtitle, subtitleText);
-            view.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            view.addView(texts, Ui.weightWrap(1f));
         }
 
         private void setAction(@Nullable Runnable action) {
