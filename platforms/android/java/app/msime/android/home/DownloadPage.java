@@ -76,7 +76,7 @@ public final class DownloadPage extends DetailPage {
         int iconSize = Ui.dp(context, 24);
         tile.addView(icon, new FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER));
         int tileSize = Ui.dp(context, 44);
-        card.addView(tile, new LinearLayout.LayoutParams(tileSize, tileSize));
+        card.addView(tile, Ui.squareParamsPx(tileSize));
 
         LinearLayout texts = new LinearLayout(context);
         texts.setOrientation(LinearLayout.VERTICAL);
@@ -127,7 +127,7 @@ public final class DownloadPage extends DetailPage {
         Ui.setImageTint(image, Ui.text(context));
         image.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         int size = Ui.dp(context, 24);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(size, size);
+        LinearLayout.LayoutParams params = Ui.squareParamsPx(size);
         params.setMarginEnd(Ui.dp(context, 18));
         ((LinearLayout) row.view()).addView(image, 0, params);
         return row;

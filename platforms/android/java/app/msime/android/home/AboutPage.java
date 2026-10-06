@@ -182,7 +182,7 @@ public final class AboutPage extends DetailPage {
         int markSize = Ui.dp(context, 60);
         disc.addView(mark, new FrameLayout.LayoutParams(markSize, markSize, Gravity.CENTER));
         int discSize = Ui.dp(context, 116);
-        header.addView(disc, new LinearLayout.LayoutParams(discSize, discSize));
+        header.addView(disc, Ui.squareParamsPx(discSize));
 
         TextView name = new TextView(context);
         name.setText(R.string.app_name);
