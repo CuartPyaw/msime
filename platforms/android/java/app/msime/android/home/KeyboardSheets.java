@@ -199,13 +199,10 @@ final class KeyboardSheets {
         LinearLayout.LayoutParams chevronParams = Ui.squareParams(context, Ui.CHEVRON_SIZE);
         chevronParams.setMarginStart(Ui.dp(context, 6));
         row.addView(chevron, chevronParams);
-        row.setBackground(Ui.ripple(context));
-        row.setClickable(true);
-        row.setFocusable(true);
-        row.setOnClickListener(ignored -> action.run());
         row.setContentDescription(title
             + (subtitle == null || subtitle.isEmpty() ? "" : "，" + subtitle)
             + (value == null || value.isEmpty() ? "" : "，" + value));
+        Ui.makeClickable(row, context, action);
         return row;
     }
 
@@ -400,10 +397,7 @@ final class KeyboardSheets {
             LinearLayout.LayoutParams chevronParams = Ui.squareParams(context, Ui.CHEVRON_SIZE);
             chevronParams.setMarginStart(Ui.dp(context, 6));
             row.addView(chevron, chevronParams);
-            row.setBackground(Ui.ripple(context));
-            row.setClickable(true);
-            row.setFocusable(true);
-            row.setOnClickListener(ignored -> action.run());
+            Ui.makeClickable(row, context, action);
         }
         return row;
     }
