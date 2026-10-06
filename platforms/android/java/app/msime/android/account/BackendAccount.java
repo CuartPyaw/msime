@@ -678,7 +678,7 @@ public final class BackendAccount {
                     listener.onDelta(reply);
                     return reply;
                 }
-                StringBuilder reply = new StringBuilder();
+                StringBuilder reply = new StringBuilder(MAX_CHAT_REPLY_CHARS);
                 EventLines lines = new EventLines(input);
                 String line;
                 while ((line = lines.next()) != null) {
