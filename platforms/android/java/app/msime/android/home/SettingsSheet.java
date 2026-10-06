@@ -88,8 +88,7 @@ public final class SettingsSheet {
         Ui.style(status, 12, 400, Ui.subText(context));
         status.setGravity(Gravity.CENTER_VERTICAL);
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(context, 20));
+        LinearLayout.LayoutParams params = Ui.matchWidthHeight(context, 20);
         params.topMargin = Ui.dp(context, 10);
         content.addView(status, params);
         return status;

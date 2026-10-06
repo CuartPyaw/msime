@@ -53,7 +53,6 @@ final class ListRows {
     /** 设计在两组之间留的空白，代替分隔线。 */
     static void gap(ViewGroup parent) {
         View space = new View(parent.getContext());
-        parent.addView(space, new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(parent.getContext(), Ui.GROUP_GAP)));
+        parent.addView(space, Ui.matchWidthHeight(parent.getContext(), Ui.GROUP_GAP));
     }
 }

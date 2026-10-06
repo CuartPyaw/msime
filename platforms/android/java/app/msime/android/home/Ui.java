@@ -160,6 +160,12 @@ public final class Ui {
         return params;
     }
 
+    /** Full-width layout parameters with a height expressed in dp. */
+    public static LinearLayout.LayoutParams matchWidthHeight(Context context, int heightDp) {
+        return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+            dp(context, heightDp));
+    }
+
     /** Layout parameters for a view that wraps both its content dimensions. */
     public static LinearLayout.LayoutParams wrap() {
         return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
