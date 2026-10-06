@@ -230,8 +230,7 @@ public final class FeedbackPage extends DetailPage {
             image.setBackground(Ui.rounded(Ui.rowBackground(context), Ui.dp(requireContext(), 10)));
             image.setClipToOutline(true);
             image.setContentDescription("截图 " + (index + 1));
-            frame.addView(image, new FrameLayout.LayoutParams(Ui.dp(requireContext(), Ui.THUMBNAIL_SIZE),
-                Ui.dp(requireContext(), Ui.THUMBNAIL_SIZE)));
+            frame.addView(image, Ui.squareFrameParams(requireContext(), Ui.THUMBNAIL_SIZE));
             ImageView remove = new ImageView(context);
             remove.setImageResource(R.drawable.ms_w4_me2_close);
             Ui.setImageTint(remove,
@@ -247,8 +246,7 @@ public final class FeedbackPage extends DetailPage {
             });
             FrameLayout.LayoutParams removeParams = new FrameLayout.LayoutParams(Ui.dp(requireContext(), 20), Ui.dp(requireContext(), 20), Gravity.TOP | Gravity.END);
             frame.addView(remove, removeParams);
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(Ui.dp(requireContext(), Ui.THUMBNAIL_SIZE),
-                Ui.dp(requireContext(), Ui.THUMBNAIL_SIZE));
+            LinearLayout.LayoutParams params = Ui.squareParams(requireContext(), Ui.THUMBNAIL_SIZE);
             params.setMarginEnd(Ui.dp(requireContext(), 8));
             strip.addView(frame, params);
         }
