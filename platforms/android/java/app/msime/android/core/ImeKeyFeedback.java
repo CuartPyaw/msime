@@ -129,6 +129,11 @@ final class ImeKeyFeedback {
         return KeyboardGeometry.bounded(percent, 0, 100) / 100f;
     }
 
+    /** 共享偏好里的音量必须是 JSON 整数；异常值按 100% 处理。 */
+    static int volumePreference(Object raw) {
+        return KeyboardGeometry.strictInt(raw, 100);
+    }
+
     private void refreshPreferences() {
         JSONObject preferences = s.preferencesSnapshot == null ? null
             : s.preferencesSnapshot.optJSONObject("preferences");
@@ -138,7 +143,7 @@ final class ImeKeyFeedback {
         packId = packFor(preferences);
         JSONObject plugins = preferences == null ? null : preferences.optJSONObject("plugins");
         JSONObject keySound = plugins == null ? null : plugins.optJSONObject("key_sound");
-        volume = volumeFor(keySound == null ? 100 : keySound.optInt("volume", 100));
+        volume = volumeFor(volumePreference(keySound == null ? null : keySound.opt("volume")));
         animation = KeyPressAnimator.Style.fromPreference(
             s.localSettings.choice(AndroidLocalSettings.KEY_ANIMATION));
         PackSounds loaded = sounds;
