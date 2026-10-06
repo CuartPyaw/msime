@@ -9,8 +9,6 @@ import android.provider.OpenableColumns;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.accessibility.AccessibilityNodeInfo;
-import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -200,9 +198,9 @@ public final class LexiconPage extends DetailPage {
     private View badgeRow(String badge, String title, @Nullable String subtitle, String value, boolean active,
             Runnable action) {
         Context context = requireContext();
-        LinearLayout row = baseRow(context);
+        LinearLayout row = KeyboardSheets.baseRow(context);
         row.addView(badge(context, badge));
-        LinearLayout texts = texts(context, title, subtitle);
+        LinearLayout texts = KeyboardSheets.texts(context, title, subtitle, Ui.text(context));
         row.addView(texts, Ui.weightWrap(1f));
         TextView state = new TextView(context);
         state.setText(value);
@@ -227,7 +225,7 @@ public final class LexiconPage extends DetailPage {
 
     private View actionRow(String glyph, String title, Runnable action) {
         Context context = requireContext();
-        LinearLayout row = baseRow(context);
+        LinearLayout row = KeyboardSheets.baseRow(context);
         Ui.setMinimumHeightDp(row, context, Ui.COMPACT_ROW_MIN_HEIGHT);
         TextView icon = new TextView(context);
         icon.setText(glyph);
@@ -245,20 +243,21 @@ public final class LexiconPage extends DetailPage {
         row.setClickable(true);
         row.setFocusable(true);
         row.setOnClickListener(ignored -> action.run());
-        row.setAccessibilityDelegate(buttonDelegate(title));
+        row.setAccessibilityDelegate(KeyboardSheets.buttonDelegate(title));
         return row;
     }
 
     private View discoverRow(CommunityCatalog.Item item, DictionaryCollectionsStore.View view) {
         Context context = requireContext();
-        LinearLayout row = baseRow(context);
+        LinearLayout row = KeyboardSheets.baseRow(context);
         row.addView(badge(context, initial(item.name())));
         List<String> parts = new ArrayList<>(2);
         if (!item.author().isEmpty()) parts.add("@" + item.author());
         JSONArray words = item.payload() == null ? null : item.payload().optJSONArray("words");
         if (words != null) parts.add(DictionaryCollectionsStore.countLabel(words.length()));
         if (parts.isEmpty() && !item.description().isEmpty()) parts.add(item.description());
-        row.addView(texts(context, item.name(), parts.isEmpty() ? null : String.join(" · ", parts)),
+        row.addView(KeyboardSheets.texts(context, item.name(), parts.isEmpty() ? null : String.join(" · ", parts),
+                Ui.text(context)),
             Ui.weightWrap(1f));
         boolean added = view.installed(item.id());
         boolean busy = installing.contains(item.id());
@@ -275,19 +274,10 @@ public final class LexiconPage extends DetailPage {
         button.setClickable(enabled);
         button.setFocusable(enabled);
         if (enabled) button.setOnClickListener(ignored -> install(item));
-        button.setAccessibilityDelegate(buttonDelegate(button.getText() + "，" + item.name()));
+        button.setAccessibilityDelegate(KeyboardSheets.buttonDelegate(button.getText() + "，" + item.name()));
         LinearLayout.LayoutParams params = Ui.wrap();
         params.setMarginStart(Ui.dp(context, Ui.ROW_GAP));
         row.addView(button, params);
-        return row;
-    }
-
-    private static LinearLayout baseRow(Context context) {
-        LinearLayout row = new LinearLayout(context);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        Ui.setRowMinimumHeight(row, context);
-        Ui.setRowPadding(row, context);
         return row;
     }
 
@@ -303,34 +293,6 @@ public final class LexiconPage extends DetailPage {
         params.setMarginEnd(Ui.dp(context, Ui.ROW_GAP));
         badge.setLayoutParams(params);
         return badge;
-    }
-
-    private static LinearLayout texts(Context context, String title, @Nullable String subtitle) {
-        LinearLayout texts = new LinearLayout(context);
-        texts.setOrientation(LinearLayout.VERTICAL);
-        TextView heading = new TextView(context);
-        heading.setText(title);
-        heading.setSingleLine(true);
-        Ui.style(heading, Ui.TEXT_ROW_TITLE, 400, Ui.text(context));
-        texts.addView(heading);
-        if (subtitle != null && !subtitle.isEmpty()) {
-            TextView detail = new TextView(context);
-            detail.setText(subtitle);
-            detail.setSingleLine(true);
-            Ui.style(detail, Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));
-            texts.addView(detail);
-        }
-        return texts;
-    }
-
-    private static View.AccessibilityDelegate buttonDelegate(CharSequence description) {
-        return new View.AccessibilityDelegate() {
-            @Override public void onInitializeAccessibilityNodeInfo(View host, AccessibilityNodeInfo info) {
-                super.onInitializeAccessibilityNodeInfo(host, info);
-                info.setClassName(Button.class.getName());
-                info.setContentDescription(description);
-            }
-        };
     }
 
     private static String initial(String name) {
