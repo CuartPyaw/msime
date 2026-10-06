@@ -164,7 +164,7 @@ public final class SkinJobsApi {
         if (plans.length() == 0) throw invalid("ai_skin_response");
         check(cancelled);
 
-        ExecutorService pool = Executors.newFixedThreadPool(Math.min(3, plans.length()), runnable -> {
+        ExecutorService pool = Executors.newFixedThreadPool(BoundsPolicy.atMost(plans.length(), 3), runnable -> {
             Thread thread = new Thread(runnable, "msime-ai-skin");
             thread.setDaemon(true);
             return thread;
