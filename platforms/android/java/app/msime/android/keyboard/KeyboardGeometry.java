@@ -244,6 +244,11 @@ public final class KeyboardGeometry {
         return new LinearLayout.LayoutParams(0, heightPixels, weight);
     }
 
+    /** Create weighted linear layout parameters that fill width with a zero-height basis. */
+    public static LinearLayout.LayoutParams weightedWidthParams(float weight) {
+        return new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, weight);
+    }
+
     /** Create frame layout parameters that fill both parent dimensions. */
     public static FrameLayout.LayoutParams frameMatchParentParams() {
         return new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
