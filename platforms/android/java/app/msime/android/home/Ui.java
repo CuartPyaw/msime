@@ -156,8 +156,7 @@ public final class Ui {
 
     /** Convert scalable text units to pixels using the context display metrics. */
     public static float sp(Context context, float value) {
-        return TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, value,
-            context.getResources().getDisplayMetrics());
+        return KeyboardGeometry.sp(context, value);
     }
 
     /** Parse a theme or skin colour, returning the supplied fallback for missing or invalid input. */
