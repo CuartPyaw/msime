@@ -240,10 +240,7 @@ final class KeyboardSheets {
         LinearLayout.LayoutParams labelParams = Ui.weightWrap(1f);
         labelParams.setMarginStart(Ui.dp(context, labelMarginStart));
         row.addView(label, labelParams);
-        row.setBackground(Ui.ripple(context));
-        row.setClickable(true);
-        row.setFocusable(true);
-        row.setOnClickListener(ignored -> action.run());
+        Ui.makeClickable(row, context, action);
         row.setAccessibilityDelegate(buttonDelegate(title));
         return row;
     }
