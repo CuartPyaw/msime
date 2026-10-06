@@ -274,6 +274,12 @@ public final class KeyboardGeometry {
         return new LinearLayout.LayoutParams(0, 0, weight);
     }
 
+    /** Fill the cross axis while distributing the main axis by weight. */
+    public static LinearLayout.LayoutParams weightedCrossAxisFillParams(boolean horizontal,
+            float weight) {
+        return horizontal ? weightedMatchParentParams(weight) : weightedWidthParams(weight);
+    }
+
     /** Create full-width linear layout parameters with an already pixel-sized height. */
     public static LinearLayout.LayoutParams matchWidthHeightPx(int heightPixels) {
         return new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, heightPixels);

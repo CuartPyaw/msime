@@ -78,7 +78,8 @@ public final class SymbolPanelView extends LinearLayout {
         categoryScroll.setVerticalScrollBarEnabled(false);
         categoryScroll.addView(categories, new ScrollView.LayoutParams(
             LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
-        body.addView(categoryScroll, new LinearLayout.LayoutParams(KeyboardGeometry.pixels(getContext(), 76), LayoutParams.MATCH_PARENT));
+        body.addView(categoryScroll, KeyboardGeometry.linearParamsPx(
+            KeyboardGeometry.pixels(getContext(), 76), LayoutParams.MATCH_PARENT));
         grid.setColumnCount(SymbolPanelModel.COLUMNS);
         grid.setUseDefaultMargins(false);
         grid.setAlignmentMode(GridLayout.ALIGN_BOUNDS);

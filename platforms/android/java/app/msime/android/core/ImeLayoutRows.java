@@ -275,9 +275,7 @@ final class ImeLayoutRows {
 
     void addNineKey(LinearLayout parent, Button key) {
         boolean horizontal = parent.getOrientation() == LinearLayout.HORIZONTAL;
-        parent.addView(key, new LinearLayout.LayoutParams(
-            horizontal ? 0 : LinearLayout.LayoutParams.MATCH_PARENT,
-            horizontal ? LinearLayout.LayoutParams.MATCH_PARENT : 0, 1));
+        parent.addView(key, KeyboardGeometry.weightedCrossAxisFillParams(horizontal, 1));
     }
 
     /** The rail behind the capless punctuation column; it is not a Button, so the skin pass misses it. */
