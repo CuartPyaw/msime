@@ -457,22 +457,13 @@ public final class CommunityCatalog {
 
     private static boolean validName(String value, int maximum) {
         return value != null && !value.isEmpty() && value.trim().equals(value)
-            && value.codePointCount(0, value.length()) <= maximum && !hasDisallowedControl(value, false);
+            && value.codePointCount(0, value.length()) <= maximum
+            && !CommunityTextPolicy.hasDisallowedControl(value, false);
     }
 
     private static boolean validDescription(String value) {
         return value != null && value.codePointCount(0, value.length()) <= MAX_DESCRIPTION_CHARACTERS
-            && !hasDisallowedControl(value, true);
-    }
-
-    private static boolean hasDisallowedControl(String value, boolean multiline) {
-        for (int index = 0; index < value.length();) {
-            int codePoint = value.codePointAt(index);
-            if (Character.isISOControl(codePoint)
-                    && !(multiline && (codePoint == '\n' || codePoint == '\t'))) return true;
-            index += Character.charCount(codePoint);
-        }
-        return false;
+            && !CommunityTextPolicy.hasDisallowedControl(value, true);
     }
 
     private static Long count(JSONObject value, String primary, String fallback) {
