@@ -536,7 +536,15 @@ public final class Ui {
                                       @ColorInt int ink, float horizontalPaddingDp, float verticalPaddingDp,
                                       float minHeightDp, float minWidthDp) {
         return pillButton(context, label, sizeSp, weight, accent(context), ink,
-            horizontalPaddingDp, verticalPaddingDp, minHeightDp, minWidthDp);
+            horizontalPaddingDp, verticalPaddingDp, minHeightDp, minWidthDp, null);
+    }
+
+    /** Create a filled accent pill button and bind its action. */
+    public static TextView pillButton(Context context, CharSequence label, float sizeSp, int weight,
+                                      @ColorInt int ink, float horizontalPaddingDp, float verticalPaddingDp,
+                                      float minHeightDp, float minWidthDp, Runnable action) {
+        return pillButton(context, label, sizeSp, weight, accent(context), ink,
+            horizontalPaddingDp, verticalPaddingDp, minHeightDp, minWidthDp, action);
     }
 
     /** Create a filled accent pill button with an explicit fill colour. */
@@ -544,6 +552,15 @@ public final class Ui {
                                       @ColorInt int fill, @ColorInt int ink,
                                       float horizontalPaddingDp, float verticalPaddingDp,
                                       float minHeightDp, float minWidthDp) {
+        return pillButton(context, label, sizeSp, weight, fill, ink, horizontalPaddingDp, verticalPaddingDp,
+            minHeightDp, minWidthDp, null);
+    }
+
+    /** Create a pill button with an explicit fill colour and bind its action. */
+    public static TextView pillButton(Context context, CharSequence label, float sizeSp, int weight,
+                                      @ColorInt int fill, @ColorInt int ink,
+                                      float horizontalPaddingDp, float verticalPaddingDp,
+                                      float minHeightDp, float minWidthDp, Runnable action) {
         TextView button = new TextView(context);
         button.setText(label);
         button.setGravity(android.view.Gravity.CENTER);
@@ -555,6 +572,7 @@ public final class Ui {
         if (minWidthDp > 0) setTextMinWidthDp(button, context, minWidthDp);
         button.setClickable(true);
         button.setFocusable(true);
+        if (action != null) button.setOnClickListener(ignored -> action.run());
         return button;
     }
 

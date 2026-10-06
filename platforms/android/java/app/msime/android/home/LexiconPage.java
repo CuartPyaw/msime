@@ -85,9 +85,8 @@ public final class LexiconPage extends DetailPage {
         int fill = filled ? Ui.accent(context) : Ui.accentSoft(context);
         TextView pill = Ui.pillButton(context, glyph + " " + label, Ui.TEXT_BUTTON_SMALL, 500,
             fill, filled ? Ui.onAccent(context) : Ui.accent(context), 12, 6,
-            Ui.COMPACT_BUTTON_MIN_HEIGHT, 0);
+            Ui.COMPACT_BUTTON_MIN_HEIGHT, 0, action);
         pill.setContentDescription(label);
-        pill.setOnClickListener(ignored -> action.run());
         LinearLayout.LayoutParams params = Ui.wrap();
         params.setMarginStart(Ui.dp(context, 8));
         pill.setLayoutParams(params);
