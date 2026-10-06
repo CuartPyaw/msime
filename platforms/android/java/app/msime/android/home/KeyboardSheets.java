@@ -279,7 +279,7 @@ final class KeyboardSheets {
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setMinimumHeight(Ui.dp(context, Ui.ROW_MIN_HEIGHT));
+        Ui.setRowMinimumHeight(row, context);
         Ui.setRowPadding(row, context);
         return row;
     }
