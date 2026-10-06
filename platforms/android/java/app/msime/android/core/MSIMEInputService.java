@@ -5963,7 +5963,7 @@ public final class MSIMEInputService extends InputMethodService {
         imeBottomRow.updateActionRow();
         expandedCandidates = new LinearLayout(this);
         expandedCandidates.setOrientation(LinearLayout.VERTICAL);
-        expandedCandidates.setPadding(24, 16, 24, 16);
+        ViewPolicy.setSymmetricPadding(expandedCandidates, 24, 16);
         expandedCandidates.setBackgroundColor(0xfff5f5f5);
         expandedCandidates.setContentDescription("候选面板");
         expandedCandidates.setVisibility(View.GONE);
@@ -5976,7 +5976,7 @@ public final class MSIMEInputService extends InputMethodService {
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         clipboardPanel = new LinearLayout(this);
         clipboardPanel.setOrientation(LinearLayout.VERTICAL);
-        clipboardPanel.setPadding(24, 16, 24, 16);
+        ViewPolicy.setSymmetricPadding(clipboardPanel, 24, 16);
         clipboardPanel.setBackgroundColor(Color.parseColor(skin.background()));
         clipboardPanel.setContentDescription("剪贴板历史");
         clipboardScroll = new ScrollView(this);
@@ -5986,7 +5986,7 @@ public final class MSIMEInputService extends InputMethodService {
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         schemePanel = new LinearLayout(this);
         schemePanel.setOrientation(LinearLayout.VERTICAL);
-        schemePanel.setPadding(24, 16, 24, 16);
+        ViewPolicy.setSymmetricPadding(schemePanel, 24, 16);
         schemePanel.setBackgroundColor(Color.parseColor(skin.background()));
         schemePanel.setContentDescription("输入方案选择器");
         schemeScroll = new ScrollView(this);
@@ -5998,7 +5998,7 @@ public final class MSIMEInputService extends InputMethodService {
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         skinPanel = new LinearLayout(this);
         skinPanel.setOrientation(LinearLayout.VERTICAL);
-        skinPanel.setPadding(24, 16, 24, 16);
+        ViewPolicy.setSymmetricPadding(skinPanel, 24, 16);
         skinPanel.setBackgroundColor(Color.parseColor(skin.background()));
         skinPanel.setContentDescription("键盘皮肤选择器");
         skinScroll = new ScrollView(this);
@@ -6010,7 +6010,7 @@ public final class MSIMEInputService extends InputMethodService {
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         layoutSettingsPanel = new LinearLayout(this);
         layoutSettingsPanel.setOrientation(LinearLayout.VERTICAL);
-        layoutSettingsPanel.setPadding(24, 16, 24, 16);
+        ViewPolicy.setSymmetricPadding(layoutSettingsPanel, 24, 16);
         layoutSettingsPanel.setBackgroundColor(Color.parseColor(skin.background()));
         layoutSettingsPanel.setContentDescription("键盘设置");
         LinearLayout layoutHeader = new LinearLayout(this);
@@ -6118,7 +6118,7 @@ public final class MSIMEInputService extends InputMethodService {
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         voiceResultPanel = new LinearLayout(this);
         voiceResultPanel.setOrientation(LinearLayout.VERTICAL);
-        voiceResultPanel.setPadding(24, 16, 24, 16);
+        ViewPolicy.setSymmetricPadding(voiceResultPanel, 24, 16);
         voiceResultPanel.setBackgroundColor(Color.parseColor(skin.background()));
         voiceResultPanel.setContentDescription("语音结果面板");
         voiceResultScroll = new ScrollView(this);
@@ -6131,7 +6131,7 @@ public final class MSIMEInputService extends InputMethodService {
         aiPolishContainer.setBackgroundColor(Color.parseColor(skin.background()));
         aiPolishPanel = new LinearLayout(this);
         aiPolishPanel.setOrientation(LinearLayout.VERTICAL);
-        aiPolishPanel.setPadding(24, 16, 24, 16);
+        ViewPolicy.setSymmetricPadding(aiPolishPanel, 24, 16);
         aiPolishPanel.setBackgroundColor(Color.parseColor(skin.background()));
         aiPolishPanel.setContentDescription("AI 润色面板");
         aiPolishScroll = new ScrollView(this);
