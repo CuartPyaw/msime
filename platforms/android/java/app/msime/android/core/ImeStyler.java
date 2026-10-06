@@ -227,7 +227,7 @@ final class ImeStyler {
             button.setBackground(new InsetDrawable(pill,
                 s.pixels(2), s.pixels(8), s.pixels(2), s.pixels(8)));
             button.setTextColor(color(target.keyForeground()));
-            button.setTypeface(target.monospaced() ? Typeface.MONOSPACE : Typeface.DEFAULT);
+            applySkinTypeface(button, target);
             button.setElevation(0);
             return;
         }
@@ -239,7 +239,7 @@ final class ImeStyler {
                 if (selected) label = target.accentText();
             }
             button.setTextColor(color(label));
-            button.setTypeface(target.monospaced() ? Typeface.MONOSPACE : Typeface.DEFAULT);
+            applySkinTypeface(button, target);
             button.setElevation(0);
             return;
         }
@@ -280,8 +280,12 @@ final class ImeStyler {
             space.setFaceColor(color(target.toolbarIcon()));
         if (button instanceof NineKeyDigitButton digitButton)
             digitButton.setDigitColor(color(target.accent()));
-        button.setTypeface(target.monospaced() ? Typeface.MONOSPACE : Typeface.DEFAULT);
+        applySkinTypeface(button, target);
         applyShadow(button, target);
+    }
+
+    private void applySkinTypeface(Button button, KeyboardSkin target) {
+        button.setTypeface(target.monospaced() ? Typeface.MONOSPACE : Typeface.DEFAULT);
     }
 
     /**
