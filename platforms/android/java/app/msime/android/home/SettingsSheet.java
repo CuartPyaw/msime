@@ -32,17 +32,13 @@ public final class SettingsSheet {
         BottomSheetDragHandleView handle = new BottomSheetDragHandleView(context);
         root.addView(handle, Ui.matchWidth());
 
-        TextView heading = new TextView(context);
-        heading.setText(title);
         // M3 headline small：面板标题是标题，不是加粗的标签。
-        Ui.style(heading, Ui.TEXT_BAR_TITLE, 400, Ui.text(context));
+        TextView heading = Ui.styledLabel(context, title, Ui.TEXT_BAR_TITLE, 400, Ui.text(context));
         heading.setAccessibilityHeading(true);
         root.addView(heading);
 
         if (subtitle != null && !subtitle.isEmpty()) {
-            TextView note = new TextView(context);
-            note.setText(subtitle);
-            Ui.style(note, Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));
+            TextView note = Ui.styledLabel(context, subtitle, Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));
             LinearLayout.LayoutParams params = Ui.matchWidth(context, 4);
             root.addView(note, params);
         }
@@ -71,9 +67,7 @@ public final class SettingsSheet {
 
     /** 这一列末尾的脚注。 */
     public void addNote(String text) {
-        TextView note = new TextView(context);
-        note.setText(text);
-        Ui.style(note, 12, 400, Ui.subText(context));
+        TextView note = Ui.styledLabel(context, text, 12, 400, Ui.subText(context));
         LinearLayout.LayoutParams params = Ui.matchWidth();
         params.topMargin = Ui.dp(context, 14);
         content.addView(note, params);
@@ -81,8 +75,7 @@ public final class SettingsSheet {
 
     /** 一行状态文字，保存成功或失败后由面板改写。 */
     public TextView addStatus() {
-        TextView status = new TextView(context);
-        Ui.style(status, 12, 400, Ui.subText(context));
+        TextView status = Ui.styledLabel(context, "", 12, 400, Ui.subText(context));
         status.setGravity(Gravity.CENTER_VERTICAL);
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         LinearLayout.LayoutParams params = Ui.matchWidthHeight(context, 20);
