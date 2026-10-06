@@ -500,8 +500,7 @@ public final class OnboardingActivity extends AppCompatActivity {
             getTheme().resolveAttribute(android.R.attr.selectableItemBackground, ripple, true);
             button.setBackgroundResource(ripple.resourceId);
             button.setOnClickListener(ignored -> fix.run());
-            row.addView(button, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, Ui.dp(this, 40)));
+            row.addView(button, Ui.wrapHeight(this, 40));
         }
         card.addView(row);
     }

@@ -294,8 +294,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         SegmentedControl layout = new SegmentedControl(context);
         layout.setOptions(List.of("26 键", "9 键"), nine ? 1 : 0);
         layout.setMinimumHeight(Ui.dp(context, 32));
-        row.addView(layout, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT));
+        row.addView(layout, Ui.wrapHeight(context, 32));
         LinearLayout board = card(context, content, 12);
         KeyHeatmapView heatmap = new KeyHeatmapView(context);
         heatmap.setNineKey(nine);
