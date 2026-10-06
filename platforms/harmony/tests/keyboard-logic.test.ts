@@ -11330,6 +11330,13 @@ group("a malformed candidate size cannot produce an unusable number", () => {
 });
 
 group("malformed Engine view integers are refused", () => {
+  check(
+    !EngineViewValuePolicy.isObject(null) &&
+      !EngineViewValuePolicy.isObject([]) &&
+      !EngineViewValuePolicy.isObject("reply") &&
+      EngineViewValuePolicy.isObject({ ok: true, value: {} }),
+    "malformed engine reply envelopes are safe to inspect",
+  );
   const valid: EngineViewNumericFields = {
     editing_text: "nihao",
     caret_position: 2,
