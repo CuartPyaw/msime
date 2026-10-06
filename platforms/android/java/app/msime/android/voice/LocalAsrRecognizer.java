@@ -230,7 +230,9 @@ public final class LocalAsrRecognizer {
             long captured = 0;
             while (!stopped.get() && captured < limit) {
                 short[] chunk = new short[CHUNK_SAMPLES];
-                int read = recorder.read(chunk, 0, chunk.length);
+                int requested = VoiceCapturePolicy.readLength(limit, captured, chunk.length);
+                if (requested == 0) break;
+                int read = recorder.read(chunk, 0, requested);
                 if (read < 0) {
                     failed.set(true);
                     return;
