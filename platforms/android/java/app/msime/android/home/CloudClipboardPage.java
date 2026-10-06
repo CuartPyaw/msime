@@ -122,8 +122,7 @@ public final class CloudClipboardPage extends DetailPage {
         retention.setOrientation(LinearLayout.HORIZONTAL);
         retention.setGravity(Gravity.CENTER_VERTICAL);
         retention.setMinimumHeight(Ui.dp(context, Ui.ROW_MIN_HEIGHT));
-        retention.setPadding(Ui.dp(context, Ui.ROW_PADDING_H), Ui.dp(context, Ui.ROW_PADDING_V),
-            Ui.dp(context, Ui.ROW_PADDING_H), Ui.dp(context, Ui.ROW_PADDING_V));
+        Ui.setRowPadding(retention, context);
         TextView label = new TextView(context);
         label.setText("保留时长");
         Ui.style(label, Ui.TEXT_ROW_TITLE, 400, Ui.text(context));
