@@ -89,17 +89,7 @@ public final class FeedbackApi {
 
     /** 按 UTF-8 字节截断，不切开代理对。 */
     static String clip(String value, int maxBytes) {
-        if (value.getBytes(StandardCharsets.UTF_8).length <= maxBytes) return value;
-        int bytes = 0;
-        int end = 0;
-        while (end < value.length()) {
-            int codePoint = value.codePointAt(end);
-            int size = new String(Character.toChars(codePoint)).getBytes(StandardCharsets.UTF_8).length;
-            if (bytes + size > maxBytes) break;
-            bytes += size;
-            end += Character.charCount(codePoint);
-        }
-        return value.substring(0, end);
+        return TextPolicy.clipUtf8(value, maxBytes);
     }
 
     /** 截图是 PNG 或 JPEG（看文件头，与声明的类型一致）、非空、不超过 1 MiB 时为真。 */

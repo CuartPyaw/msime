@@ -122,7 +122,7 @@ public final class CommunityReplyLibrary {
 
         private List<Object> array(int depth) {
             index++;
-            List<Object> values = new ArrayList<>();
+            List<Object> values = new ArrayList<>(MAXIMUM_CONTAINER_ITEMS);
             whitespace();
             if (take(']')) return values;
             while (true) {
@@ -136,7 +136,7 @@ public final class CommunityReplyLibrary {
 
         private Map<String, Object> object(int depth) {
             index++;
-            Map<String, Object> values = new LinkedHashMap<>();
+            Map<String, Object> values = new LinkedHashMap<>(MAXIMUM_CONTAINER_ITEMS);
             whitespace();
             if (take('}')) return values;
             while (true) {
