@@ -4473,7 +4473,7 @@ public final class MSIMEInputService extends InputMethodService {
         voiceResultPanel.removeAllViews();
         LinearLayout header = new LinearLayout(this);
         TextView title = new TextView(this);
-        title.setText("语音结果");
+        ViewPolicy.setTextSizeLabel(title, "语音结果", 18);
         KeyboardGeometry.setKeyTextSize(title, 18);
         header.addView(title, KeyboardGeometry.weightedWrapParams(1));
         button(header, "返回键盘", this::closeVoiceResult);
@@ -5991,7 +5991,7 @@ public final class MSIMEInputService extends InputMethodService {
         layoutSettingsPanel.setContentDescription("键盘设置");
         LinearLayout layoutHeader = new LinearLayout(this);
         TextView layoutTitle = new TextView(this);
-        layoutTitle.setText("键盘设置");
+        ViewPolicy.setTextSizeLabel(layoutTitle, "键盘设置", 18);
         KeyboardGeometry.setKeyTextSize(layoutTitle, 18);
         layoutHeader.addView(layoutTitle, KeyboardGeometry.weightedWrapParams(1));
         Button closeLayout = button(layoutHeader, "返回键盘", this::closeLayoutSettings);
