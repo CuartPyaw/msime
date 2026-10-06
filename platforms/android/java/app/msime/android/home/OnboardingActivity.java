@@ -256,7 +256,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         LinearLayout strip = new LinearLayout(this);
         strip.setOrientation(LinearLayout.HORIZONTAL);
         strip.setPadding(Ui.dp(this, 10), Ui.dp(this, 12), Ui.dp(this, 10), Ui.dp(this, 12));
-        strip.setBackground(rounded(Ui.accentSoft(this), Ui.dp(this, 20)));
+        strip.setBackground(Ui.rounded(Ui.accentSoft(this), Ui.dp(this, 20)));
         strip.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
         String[][] samples = {{"候选", "candidate"}, {"后选", "choice"}, {"侯选", "option"}, {"候", "wait"}};
         for (int index = 0; index < samples.length; index++) {
@@ -276,7 +276,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(Ui.dp(this, 14), Ui.dp(this, 12), Ui.dp(this, 14), Ui.dp(this, 12));
-        row.setBackground(rounded(Ui.card(this), Ui.dp(this, 20)));
+        row.setBackground(Ui.rounded(Ui.card(this), Ui.dp(this, 20)));
         TextView label = text("显示译文", 16, Ui.text(this));
         row.addView(label, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
         MaterialSwitch toggle = new MaterialSwitch(this);
@@ -454,7 +454,7 @@ public final class OnboardingActivity extends AppCompatActivity {
     private LinearLayout card(LinearLayout column, int top) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(rounded(Ui.card(this), Ui.dp(this, 20)));
+        card.setBackground(Ui.rounded(Ui.card(this), Ui.dp(this, 20)));
         column.addView(card, Ui.matchWidth(this, 14 + top));
         return card;
     }
@@ -512,7 +512,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         card.setOrientation(LinearLayout.HORIZONTAL);
         card.setGravity(Gravity.CENTER_VERTICAL);
         card.setPadding(Ui.dp(this, 16), Ui.dp(this, 14), Ui.dp(this, 16), Ui.dp(this, 14));
-        GradientDrawable face = rounded(Ui.card(this), Ui.dp(this, 20));
+        GradientDrawable face = Ui.rounded(Ui.card(this), Ui.dp(this, 20));
         if (selected) face.setStroke(Ui.dp(this, 2), Ui.accent(this));
         card.setBackground(face);
 
@@ -558,12 +558,12 @@ public final class OnboardingActivity extends AppCompatActivity {
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(Ui.dp(this, 14), Ui.dp(this, 12), Ui.dp(this, 14), Ui.dp(this, 12));
-        row.setBackground(rounded(Ui.card(this), Ui.dp(this, 20)));
+        row.setBackground(Ui.rounded(Ui.card(this), Ui.dp(this, 20)));
         ImageView badge = new ImageView(this);
         badge.setImageResource(icon);
         badge.setImageTintList(ColorStateList.valueOf(Ui.accent(this)));
         badge.setPadding(Ui.dp(this, 7), Ui.dp(this, 7), Ui.dp(this, 7), Ui.dp(this, 7));
-        badge.setBackground(rounded(Ui.accentSoft(this), Ui.dp(this, 9)));
+        badge.setBackground(Ui.rounded(Ui.accentSoft(this), Ui.dp(this, 9)));
         badge.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         row.addView(badge, new LinearLayout.LayoutParams(Ui.dp(this, 32), Ui.dp(this, 32)));
         TextView text = text(label, 15, Ui.text(this));
@@ -582,13 +582,6 @@ public final class OnboardingActivity extends AppCompatActivity {
 
     private TextView text(String value, int size, int colour) {
         return Ui.label(this, value, size, colour);
-    }
-
-    private static GradientDrawable rounded(int colour, int radius) {
-        GradientDrawable shape = new GradientDrawable();
-        shape.setCornerRadius(radius);
-        shape.setColor(colour);
-        return shape;
     }
 
     /**
