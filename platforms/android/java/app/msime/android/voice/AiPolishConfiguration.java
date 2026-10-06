@@ -55,7 +55,7 @@ public final class AiPolishConfiguration {
 
     public static boolean acceptableText(String text) {
         if (text == null || text.trim().isEmpty() || !TextPolicy.validUnicode(text)) return false;
-        return text.codePointCount(0, text.length()) <= MAXIMUM_TEXT_CODE_POINTS;
+        return TextPolicy.withinCodePoints(text, MAXIMUM_TEXT_CODE_POINTS);
     }
 
     private static URI validatedEndpoint(String value) {

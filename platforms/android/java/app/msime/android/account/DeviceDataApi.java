@@ -253,7 +253,7 @@ public final class DeviceDataApi {
     /** 昵称：去掉首尾空白后不超过 64 个码点，不含控制字符。空字符串合法（恢复默认昵称）。 */
     public static boolean validDisplayName(String name) {
         if (name == null) return false;
-        if (name.codePointCount(0, name.length()) > MAX_DISPLAY_NAME) return false;
+        if (!TextPolicy.withinCodePoints(name, MAX_DISPLAY_NAME)) return false;
         for (int index = 0; index < name.length(); index++) {
             char c = name.charAt(index);
             if (c < 0x20 || c == 0x7F) return false;

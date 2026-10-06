@@ -162,7 +162,7 @@ public final class SkinJobsApi {
      */
     public List<Proposal> generate(String prompt, AtomicBoolean cancelled) throws CloudApi.Failure {
         String trimmed = prompt == null ? "" : prompt.trim();
-        if (trimmed.isEmpty() || trimmed.codePointCount(0, trimmed.length()) > MAX_PROMPT_CHARACTERS)
+        if (trimmed.isEmpty() || !TextPolicy.withinCodePoints(trimmed, MAX_PROMPT_CHARACTERS))
             throw invalid("ai_skin_invalid");
         check(cancelled);
         String model = defaultModel();

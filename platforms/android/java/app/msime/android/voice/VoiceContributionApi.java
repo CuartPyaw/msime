@@ -37,7 +37,7 @@ public final class VoiceContributionApi {
         if (contribution.durationMillis() <= 0 || contribution.durationMillis() > MAX_DURATION_MILLIS) return false;
         String transcript = contribution.transcript();
         if (transcript == null || transcript.trim().isEmpty()) return false;
-        if (transcript.codePointCount(0, transcript.length()) > MAX_TRANSCRIPT
+        if (!TextPolicy.withinCodePoints(transcript, MAX_TRANSCRIPT)
                 || TextPolicy.hasControlExceptWhitespace(transcript)
                 || !TextPolicy.validUnicode(transcript)) return false;
         return nonEmpty(contribution.language()) && nonEmpty(contribution.provider())
