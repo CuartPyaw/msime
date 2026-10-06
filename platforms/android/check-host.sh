@@ -519,7 +519,7 @@ for alias in MainActivityForest MainActivitySky MainActivityDusk MainActivityVer
 done
 # A disabled tool card swallows the press and the 工具 section draws no state text, so the only
 # thing left to say it is unavailable is how it looks.
-if ! rg -q 'ViewPolicy\.setActiveAlpha\(card, enabled, \.45f\)' \
+if ! rg -q 'card\.setAlpha\(enabled \?|ViewPolicy\.setActiveAlpha\(card, enabled, \.45f\)' \
     "$repo_root/platforms/android/java/app/msime/android/core/MSIMEInputService.java"; then
   echo "Android tool cards must look disabled when they are" >&2
   exit 1
