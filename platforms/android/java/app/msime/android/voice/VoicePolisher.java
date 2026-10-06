@@ -98,7 +98,7 @@ public final class VoicePolisher {
 
     /** Chat completions carry text; do not let org.json turn malformed values into visible prose. */
     static String strictContent(Object value) {
-        return value instanceof String ? (String) value : "";
+        return AiProviderResponse.strictContent(value);
     }
 
     /** Authentication headers for the provider endpoint, matching the shared AI transport. */
