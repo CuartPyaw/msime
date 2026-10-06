@@ -3,7 +3,6 @@ package app.msime.android.home;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
-import android.content.res.ColorStateList;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.view.Gravity;
@@ -241,7 +240,7 @@ public final class CloudClipboardPage extends DetailPage {
     private static View iconButton(Context context, @DrawableRes int icon, int tint, String label, Runnable action) {
         ImageView button = new ImageView(context);
         button.setImageResource(icon);
-        button.setImageTintList(ColorStateList.valueOf(tint));
+        Ui.setImageTint(button, tint);
         button.setScaleType(ImageView.ScaleType.CENTER);
         button.setBackground(Ui.ripple(context));
         button.setContentDescription(label);

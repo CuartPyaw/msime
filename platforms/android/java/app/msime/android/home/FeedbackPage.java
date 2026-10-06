@@ -233,8 +233,8 @@ public final class FeedbackPage extends DetailPage {
             frame.addView(image, new FrameLayout.LayoutParams(Ui.dp(requireContext(), 64), Ui.dp(requireContext(), 64)));
             ImageView remove = new ImageView(context);
             remove.setImageResource(R.drawable.ms_w4_me2_close);
-            remove.setImageTintList(android.content.res.ColorStateList.valueOf(
-                Ui.color(context, com.google.android.material.R.attr.colorOnSurfaceInverse)));
+            Ui.setImageTint(remove,
+                Ui.color(context, com.google.android.material.R.attr.colorOnSurfaceInverse));
             remove.setBackground(Ui.pill(Ui.color(context, com.google.android.material.R.attr.colorSurfaceInverse)));
             remove.setPadding(Ui.dp(requireContext(), 3), Ui.dp(requireContext(), 3), Ui.dp(requireContext(), 3), Ui.dp(requireContext(), 3));
             remove.setContentDescription("移除截图 " + (index + 1));

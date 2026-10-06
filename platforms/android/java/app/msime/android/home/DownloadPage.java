@@ -3,7 +3,6 @@ package app.msime.android.home;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
-import android.content.res.ColorStateList;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
@@ -125,7 +124,7 @@ public final class DownloadPage extends DetailPage {
         Context context = row.view().getContext();
         ImageView image = new ImageView(context);
         image.setImageResource(icon);
-        image.setImageTintList(ColorStateList.valueOf(Ui.text(context)));
+        Ui.setImageTint(image, Ui.text(context));
         image.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         int size = Ui.dp(context, 24);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(size, size);
