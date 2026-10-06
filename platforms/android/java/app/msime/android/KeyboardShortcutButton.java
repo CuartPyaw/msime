@@ -95,7 +95,7 @@ public final class KeyboardShortcutButton extends KeyboardPressButton {
         int color = iconColor();
         if (color == Color.TRANSPARENT) color = Color.WHITE;
         paint.setColor(color);
-        paint.setAlpha(isEnabled() ? 255 : 96);
+        paint.setAlpha(ColorPolicy.enabledAlpha(isEnabled(), 255, 96));
         paint.setStrokeWidth(7f);
         canvas.save();
         canvas.translate(getPaddingLeft() + (width - size) / 2f,

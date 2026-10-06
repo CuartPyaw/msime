@@ -78,7 +78,7 @@ public final class KeyboardBrandButton extends KeyboardPressButton {
             color = Color.WHITE;
         }
         mark.setColor(color);
-        mark.setAlpha(isEnabled() ? 255 : 96);
+        mark.setAlpha(ColorPolicy.enabledAlpha(isEnabled(), 255, 96));
         KeyboardBrandMark.draw(canvas, mark, getPaddingLeft(), getPaddingTop(), width, height,
             MARK_SCALE);
     }
@@ -140,7 +140,7 @@ public final class KeyboardBrandButton extends KeyboardPressButton {
         stroke.setStrokeCap(Paint.Cap.ROUND);
         stroke.setStrokeJoin(Paint.Join.ROUND);
         stroke.setColor(Color.WHITE);
-        stroke.setAlpha(isEnabled() ? 255 : 96);
+        stroke.setAlpha(ColorPolicy.enabledAlpha(isEnabled(), 255, 96));
         canvas.drawPath(logoStroke, stroke);
         canvas.restoreToCount(saved);
     }
