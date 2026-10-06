@@ -177,7 +177,7 @@ public final class VoiceResultStore {
             throw new Failure(Reason.INVALID);
         byte[] bytes;
         try {
-            try (InputStream input = Files.newInputStream(result)) {
+            try (InputStream input = Files.newInputStream(result, LinkOption.NOFOLLOW_LINKS)) {
                 bytes = HttpBodyPolicy.readRequired(input, MAXIMUM_FILE_BYTES);
             }
         } catch (IOException error) {
