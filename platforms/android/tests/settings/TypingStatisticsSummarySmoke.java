@@ -30,6 +30,12 @@ public final class TypingStatisticsSummarySmoke {
             "statistics position rates reject values above one");
         check(TypingStatisticsSummary.strictPositionRate(-0.1d) == 0d,
             "statistics position rates reject negative values");
+        check(TypingStatisticsSummary.strictRate(0.25d) == 0.25d,
+            "summary rates accept values in range");
+        check(TypingStatisticsSummary.strictRate(1.5d) == null,
+            "summary rates reject values above one");
+        check(TypingStatisticsSummary.strictRate(-0.1d) == null,
+            "summary rates reject negative values");
         check("—".equals(TypingStatisticsSummary.whole(null)), "null speed is a dash");
         check("52".equals(TypingStatisticsSummary.whole(51.6)), "speed rounds");
         check("91".equals(TypingStatisticsSummary.percent(0.912)), "percent rounds");

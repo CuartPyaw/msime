@@ -132,8 +132,8 @@ public final class TypingStatisticsSummary {
         return new TypingStatisticsSummary(
             new Overview(count(overview.opt("week_total")), count(overview.opt("previous_week_total")),
                 days(overview.optJSONArray("last7")), number(overview, "average_speed"),
-                number(overview, "previous_average_speed"), number(overview, "first_candidate_rate"),
-                number(overview, "keystrokes_saved_rate"), count(overview.opt("current_streak")),
+                number(overview, "previous_average_speed"), rate(overview, "first_candidate_rate"),
+                rate(overview, "keystrokes_saved_rate"), count(overview.opt("current_streak")),
                 count(overview.opt("longest_streak"))),
             new Habits(days(habits.optJSONArray("weeks12")), hours(habits.optJSONArray("hours24")),
                 peak == null ? null : new PeakWindow((int) count(peak.opt("start")),
@@ -142,7 +142,7 @@ public final class TypingStatisticsSummary {
                 breakdown == null ? Map.of() : counts(breakdown.optJSONObject("characters")),
                 breakdown == null ? Map.of() : counts(breakdown.optJSONObject("sources"))),
             new Keys(number(keys, "per_character_keys"), number(keys, "previous_per_character_keys"),
-                number(keys, "backspace_rate"), number(keys, "prediction_rate"),
+                rate(keys, "backspace_rate"), rate(keys, "prediction_rate"),
                 run == null ? null : new Run(count(run.opt("characters")), run.optString("day", "")),
                 positions(keys.optJSONArray("positions"))),
             badges);
@@ -354,6 +354,18 @@ public final class TypingStatisticsSummary {
         if (!(value instanceof Number number)) return null;
         double result = number.doubleValue();
         return Double.isFinite(result) ? result : null;
+    }
+
+    /** 统计比例字段必须是 0–1 的有限 JSON 数字；越界值按缺省的无数据处理。 */
+    public static Double strictRate(Object value) {
+        if (!(value instanceof Number number) || value instanceof Boolean) return null;
+        double rate = number.doubleValue();
+        return Double.isFinite(rate) && rate >= 0d && rate <= 1d ? rate : null;
+    }
+
+    private static Double rate(JSONObject object, String key) {
+        if (object.isNull(key)) return null;
+        return strictRate(object.opt(key));
     }
 
     /** Statistics counters are JSON unsigned integers; reject fractional and negative values. */
