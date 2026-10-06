@@ -26,7 +26,6 @@ import app.msime.android.CustomSkinLibrary;
 import app.msime.android.DictionaryCollectionsStore;
 import app.msime.android.R;
 import app.msime.android.SyncSignals;
-import app.msime.android.ViewPolicy;
 import app.msime.android.SyncSwitch;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.button.MaterialButtonToggleGroup;
@@ -182,7 +181,7 @@ public final class CommunityFragment extends Fragment {
         });
 
         MaterialButton retry = view.findViewById(R.id.community_retry);
-        ViewPolicy.bindClick(retry, () -> load(true));
+        retry.setOnClickListener(ignored -> load(true));
 
         load(true);
         updateSearchHint();
