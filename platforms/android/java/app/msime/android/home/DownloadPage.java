@@ -16,6 +16,7 @@ import androidx.annotation.Nullable;
 import app.msime.android.CloudApi;
 import app.msime.android.DownloadLinkApi;
 import app.msime.android.R;
+import app.msime.android.ViewPolicy;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -58,7 +59,7 @@ public final class DownloadPage extends DetailPage {
     private View hero(Context context) {
         LinearLayout card = new LinearLayout(context);
         card.setOrientation(LinearLayout.HORIZONTAL);
-        card.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(card);
         card.setBackground(Ui.rounded(Ui.accentSoft(context), Ui.dp(context, 20)));
         int pad = Ui.dp(context, 16);
         Ui.setSymmetricPaddingPx(card, pad);
