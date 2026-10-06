@@ -71,13 +71,13 @@ public final class CandidateTranslationStore {
     public void refresh(List<String> words, List<String> targets, long generation) {
         cancel();
         if (words == null || targets == null || targets.isEmpty()) return;
-        ArrayList<String> requestedTargets = new ArrayList<>();
+        ArrayList<String> requestedTargets = new ArrayList<>(targets.size());
         for (String target : targets) {
             if (target != null && !target.isEmpty() && !requestedTargets.contains(target))
                 requestedTargets.add(target);
         }
         if (requestedTargets.isEmpty()) return;
-        ArrayList<String> wanted = new ArrayList<>();
+        ArrayList<String> wanted = new ArrayList<>(words.size());
         for (String word : words) {
             if (translatable(word) && !wanted.contains(word)) wanted.add(word);
         }
@@ -109,9 +109,9 @@ public final class CandidateTranslationStore {
         String stamp = "targets=" + signature(targets) + "|generation=" + generation
             + "|words=" + signature(words);
         if (stamp.equals(signature)) return;
-        Map<String, ArrayList<String>> requests = new LinkedHashMap<>();
+        Map<String, ArrayList<String>> requests = new LinkedHashMap<>(targets.size());
         for (String target : targets) {
-            ArrayList<String> missing = new ArrayList<>();
+            ArrayList<String> missing = new ArrayList<>(words.size());
             for (String word : words) {
                 if (!cache.containsKey(key(target, word))) missing.add(word);
             }

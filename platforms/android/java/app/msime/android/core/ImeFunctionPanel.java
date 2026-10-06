@@ -105,9 +105,10 @@ final class ImeFunctionPanel {
         if (s.functionPanel == null) s.functionPanel = new FunctionPanelView(s);
         FunctionPanelView panel = s.functionPanel;
         if (panel.getParent() instanceof LinearLayout parent) parent.removeView(panel);
-        List<FunctionPanelView.Entry> entries = new ArrayList<>();
-        List<FunctionPanelView.State> states = new ArrayList<>();
-        List<Boolean> enabled = new ArrayList<>();
+        int itemCapacity = FunctionPanelModel.items().size();
+        List<FunctionPanelView.Entry> entries = new ArrayList<>(itemCapacity);
+        List<FunctionPanelView.State> states = new ArrayList<>(itemCapacity);
+        List<Boolean> enabled = new ArrayList<>(itemCapacity);
         for (FunctionPanelModel.Item item : FunctionPanelModel.items()) {
             addEntry(item, entries, states, enabled);
         }

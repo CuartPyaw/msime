@@ -115,7 +115,7 @@ public final class TypingStatisticsSummary {
         JSONObject breakdown = habits.optJSONObject("breakdown");
         JSONObject peak = habits.optJSONObject("peak_window");
         JSONObject run = keys.optJSONObject("longest_run");
-        List<Achievement> badges = new ArrayList<>();
+        List<Achievement> badges = new ArrayList<>(achievements.length());
         for (int index = 0; index < achievements.length(); index++) {
             JSONObject badge = achievements.optJSONObject(index);
             if (badge == null) continue;

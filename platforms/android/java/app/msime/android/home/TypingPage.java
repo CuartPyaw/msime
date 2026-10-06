@@ -94,11 +94,11 @@ public final class TypingPage extends DetailPage {
 
     /** host capabilities 的 `helpcode_schemas`（字符串 id，或 `{id|schema, name|title}`）；没有或读不懂时是内置列表。 */
     private static List<String[]> helpcodeSchemas() {
-        List<String[]> schemas = new ArrayList<>();
         try {
             JSONObject root = new JSONObject(NativeClient.hostCapabilities("android"));
             JSONObject value = root.optBoolean("ok", false) ? root.optJSONObject("value") : null;
             JSONArray listed = value == null ? null : value.optJSONArray("helpcode_schemas");
+            List<String[]> schemas = new ArrayList<>(listed == null ? 0 : listed.length());
             if (listed != null) {
                 for (int index = 0; index < listed.length(); index++) {
                     Object entry = listed.opt(index);
@@ -228,7 +228,7 @@ public final class TypingPage extends DetailPage {
         JSONObject schemes = preferences.optJSONObject("touch_keyboard_schemes");
         JSONArray enabled = schemes == null ? null : schemes.optJSONArray("enabled");
         if (enabled == null) return null;
-        List<String> ids = new ArrayList<>();
+        List<String> ids = new ArrayList<>(enabled.length());
         for (int index = 0; index < enabled.length(); index++) {
             if (!enabled.isNull(index)) ids.add(enabled.optString(index, ""));
         }

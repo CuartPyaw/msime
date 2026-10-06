@@ -370,8 +370,8 @@ public final class DictionaryCollectionsStore {
 
     /** 解析集合视图（`value`）。 */
     static View parseView(JSONObject value) {
-        List<Collection> collections = new ArrayList<>();
         JSONArray raw = value.optJSONArray("collections");
+        List<Collection> collections = new ArrayList<>(raw == null ? 0 : raw.length());
         if (raw != null) {
             for (int index = 0; index < raw.length(); index++) {
                 JSONObject item = raw.optJSONObject(index);
@@ -384,8 +384,8 @@ public final class DictionaryCollectionsStore {
                     item.optInt("entry_count", 0), item.optInt("pending", 0)));
             }
         }
-        List<String> formats = new ArrayList<>();
         JSONArray rawFormats = value.optJSONArray("formats");
+        List<String> formats = new ArrayList<>(rawFormats == null ? 0 : rawFormats.length());
         if (rawFormats != null) {
             for (int index = 0; index < rawFormats.length(); index++) {
                 String format = rawFormats.optString(index, "");
@@ -400,8 +400,8 @@ public final class DictionaryCollectionsStore {
 
     /** 解析一页词条（`value`）。 */
     static WordPage parseWords(JSONObject value) {
-        List<Word> words = new ArrayList<>();
         JSONArray raw = value.optJSONArray("entries");
+        List<Word> words = new ArrayList<>(raw == null ? 0 : raw.length());
         if (raw != null) {
             for (int index = 0; index < raw.length(); index++) {
                 JSONObject item = raw.optJSONObject(index);

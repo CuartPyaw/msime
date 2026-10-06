@@ -35,7 +35,7 @@ public final class KeyboardActionRow {
     public static List<Entry> entries(int touchLayout, boolean globe) {
         if (touchLayout == KeyboardLayout.JAPANESE_NINE_KEY_LAYOUT) return List.of();
         boolean zhuyinNineKey = touchLayout == KeyboardLayout.ZHUYIN_NINE_KEY_LAYOUT;
-        List<Entry> entries = new ArrayList<>();
+        List<Entry> entries = new ArrayList<>(7);
         // 注音 9 键的网格最后一行已经有 @# 和逗号句号。
         if (!zhuyinNineKey) entries.add(new Entry(Slot.SYMBOL_PANEL, NARROW));
         entries.add(new Entry(Slot.LAYER, NARROW));
@@ -129,7 +129,7 @@ public final class KeyboardActionRow {
                 || touchLayout == KeyboardLayout.ZHUYIN_NINE_KEY_LAYOUT) return List.of();
         boolean sidebarPunctuation = touchLayout == KeyboardLayout.QUANPIN_NINE_KEY_LAYOUT
             || touchLayout == KeyboardLayout.STROKE_LAYOUT;
-        List<DesignEntry> entries = new ArrayList<>();
+        List<DesignEntry> entries = new ArrayList<>(7);
         entries.add(new DesignEntry(DesignSlot.LAYER, DESIGN_LAYER_WEIGHT));
         entries.add(new DesignEntry(DesignSlot.LANGUAGE, DESIGN_LANGUAGE_WEIGHT));
         if (globe) entries.add(new DesignEntry(DesignSlot.GLOBE, DESIGN_GLOBE_WEIGHT));
