@@ -6,6 +6,7 @@ import android.util.TypedValue;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import java.util.Locale;
 import java.math.BigDecimal;
 import org.json.JSONObject;
@@ -312,6 +313,12 @@ public final class KeyboardGeometry {
     public static FrameLayout.LayoutParams frameMatchWidthWrapParams(int gravity) {
         return new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.WRAP_CONTENT, gravity);
+    }
+
+    /** Create scroll-view child parameters that fill both dimensions. */
+    public static ScrollView.LayoutParams scrollMatchParentParams() {
+        return new ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT,
+            ScrollView.LayoutParams.MATCH_PARENT);
     }
 
     /** Create weighted linear layout parameters with a fixed height in dp. */
