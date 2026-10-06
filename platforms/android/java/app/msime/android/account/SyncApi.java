@@ -157,8 +157,7 @@ public final class SyncApi {
     }
 
     static Phrases parsePhrases(JSONObject root) throws CloudApi.Failure {
-        Object revision = root.opt("revision");
-        if (!(revision instanceof Number)) throw invalid("phrases revision missing");
+        long revision = phraseRevision(root.opt("revision"));
         JSONArray raw = root.optJSONArray("phrases");
         if (raw != null && raw.length() > SyncMergePolicy.MAX_PHRASES)
             throw invalid("too many phrases");
@@ -178,7 +177,12 @@ public final class SyncApi {
             }
         }
         phrases.sort((left, right) -> Integer.compare(left.position(), right.position()));
-        return new Phrases(((Number) revision).longValue(), Collections.unmodifiableList(phrases));
+        return new Phrases(revision, Collections.unmodifiableList(phrases));
+    }
+
+    /** Common phrase revisions use the same non-negative integer CAS contract as preferences. */
+    static long phraseRevision(Object value) throws CloudApi.Failure {
+        return preferenceRevision(value);
     }
 
     // ---- 词库快照 ----
