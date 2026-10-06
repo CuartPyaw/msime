@@ -5808,7 +5808,7 @@ public final class MSIMEInputService extends InputMethodService {
         diagnosticView = new TextView(this);
         KeyboardGeometry.setKeyTextSize(diagnosticView, 12);
         diagnosticView.setContentDescription("输入提示");
-        diagnosticView.setVisibility(View.GONE);
+        ViewPolicy.hide(diagnosticView);
         candidateRegion.addView(diagnosticView, KeyboardGeometry.matchWidthWrapParams());
         candidateRegion.addView(shortcutScroll, KeyboardGeometry.matchWidthHeightPx(
             pixels(KeyboardGeometry.DESIGN_TOOLBAR_ROW_HEIGHT_DP)));
@@ -5818,7 +5818,7 @@ public final class MSIMEInputService extends InputMethodService {
         nineKeySpellingScroll.setHorizontalScrollBarEnabled(false);
         nineKeySpellingScroll.setContentDescription("九键拼音选择");
         nineKeySpellingScroll.addView(nineKeySpellings);
-        nineKeySpellingScroll.setVisibility(View.GONE);
+        ViewPolicy.hide(nineKeySpellingScroll);
         candidates = new LinearLayout(this);
         candidates.setOrientation(LinearLayout.HORIZONTAL);
         horizontalCandidateScroll = new HorizontalScrollView(this);
@@ -5830,7 +5830,7 @@ public final class MSIMEInputService extends InputMethodService {
         candidateViewport = new FrameLayout(this);
         candidateViewport.addView(horizontalCandidateScroll, KeyboardGeometry.frameMatchParentParams());
         candidateViewport.addView(verticalCandidateScroll, KeyboardGeometry.frameMatchParentParams());
-        candidateViewport.setVisibility(View.GONE);
+        ViewPolicy.hide(candidateViewport);
         imeToolbar.addCandidateLine(candidateRegion, candidateViewport,
             pixels(ImeToolbar.CANDIDATE_LINE_DP));
         imeToolbar.addInlineHeightBar(candidateRegion);
@@ -5853,7 +5853,7 @@ public final class MSIMEInputService extends InputMethodService {
         // Like Apple, keep the shared candidate/shortcut strip above the reply surface. The
         // ordinary key rows and controls are hidden while this weighted child is visible.
         replyKeyboard = imePanels.createReplyKeyboard();
-        replyKeyboard.setVisibility(View.GONE);
+        ViewPolicy.hide(replyKeyboard);
         keyboard.addView(replyKeyboard, KeyboardGeometry.weightedWidthParams(1));
         // 键距是键的外边距；这两个容器把落在空隙里的按下交给拥有那段空隙的键，画面不变（见 KeyboardKeyArea）。
         keyRows = new KeyboardKeyArea(this, this::followsKeySpacing);
