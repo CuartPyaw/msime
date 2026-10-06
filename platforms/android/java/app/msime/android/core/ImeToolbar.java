@@ -256,7 +256,7 @@ final class ImeToolbar {
         if (s.preedit != null) {
             s.preedit.setTextColor(hintColor);
             KeyboardGeometry.setKeyTextSize(s.preedit, 12);
-            s.preedit.setBackground(null);
+            ViewPolicy.clearBackground(s.preedit);
             ViewPolicy.clearPadding(s.preedit);
         }
     }

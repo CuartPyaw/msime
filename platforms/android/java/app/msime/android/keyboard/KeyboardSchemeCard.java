@@ -161,7 +161,7 @@ public final class KeyboardSchemeCard extends FrameLayout {
     public void paintTile(int accent, int foreground, int panelBackground, boolean isSelected) {
         selected = isSelected;
         int face = isSelected ? accent : foreground;
-        setBackground(null);
+        ViewPolicy.clearBackground(this);
         glyph.setTextColor(face);
         glyph.setBackground(outlined(face, KeyboardGeometry.pixels(getContext(), GLYPH_RADIUS_DP), KeyboardGeometry.pixels(getContext(), GLYPH_BORDER_DP)));
         badge.setTextColor(face);
