@@ -717,6 +717,12 @@ public final class Ui {
         return view;
     }
 
+    /** Return the first Unicode code point of a name, or the caller's fallback when empty. */
+    public static String initial(CharSequence name, String fallback) {
+        if (name == null || name.length() == 0) return fallback;
+        return new String(Character.toChars(Character.codePointAt(name, 0)));
+    }
+
     /** Create the muted, accessibility-hidden chevron used by navigable rows. */
     public static ImageView chevron(Context context) {
         ImageView view = new ImageView(context);
