@@ -72,7 +72,7 @@ public final class SyncMergePolicy {
      * @param other 另一方（云端），只补上 `preferred` 里没有的
      */
     public static List<Phrase> mergePhrases(List<Phrase> preferred, List<Phrase> other) {
-        LinkedHashMap<String, Phrase> byId = new LinkedHashMap<>();
+        LinkedHashMap<String, Phrase> byId = new LinkedHashMap<>(preferred.size() + other.size());
         for (Phrase phrase : preferred) if (usable(phrase)) byId.putIfAbsent(phrase.id(), phrase);
         for (Phrase phrase : other) if (usable(phrase)) byId.putIfAbsent(phrase.id(), phrase);
         return normalized(new ArrayList<>(byId.values()));
@@ -80,7 +80,7 @@ public final class SyncMergePolicy {
 
     /** 按正文去重、重排 position 并截断；上传前对任何一份列表都要过这一步。 */
     public static List<Phrase> normalized(List<Phrase> phrases) {
-        Set<String> texts = new HashSet<>();
+        Set<String> texts = new HashSet<>(phrases.size());
         List<Phrase> result = new ArrayList<>(Math.min(MAX_PHRASES, phrases.size()));
         for (Phrase phrase : phrases) {
             if (!usable(phrase) || !texts.add(phrase.text())) continue;
@@ -143,7 +143,7 @@ public final class SyncMergePolicy {
 
     /** 去掉设备本地且涉及隐私的键（隐私模式、开发者选项、诊断日志、语音贡献）。 */
     public static Map<String, Object> withoutLocalOnly(Map<String, Object> settings) {
-        LinkedHashMap<String, Object> kept = new LinkedHashMap<>();
+        LinkedHashMap<String, Object> kept = new LinkedHashMap<>(settings.size());
         for (Map.Entry<String, Object> entry : settings.entrySet()) {
             if (!localOnly(entry.getKey())) kept.put(entry.getKey(), entry.getValue());
         }
