@@ -120,8 +120,7 @@ public final class KeyboardSchemeCard extends FrameLayout {
         titleParams.rightMargin = KeyboardGeometry.pixels(getContext(), 2);
         column.addView(title, titleParams);
 
-        FrameLayout.LayoutParams columnParams = new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        FrameLayout.LayoutParams columnParams = KeyboardGeometry.frameMatchWidthWrapParams();
         columnParams.gravity = Gravity.CENTER_VERTICAL;
         addView(column, columnParams);
 

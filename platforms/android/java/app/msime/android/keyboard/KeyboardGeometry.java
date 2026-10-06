@@ -270,6 +270,18 @@ public final class KeyboardGeometry {
         return new FrameLayout.LayoutParams(size, size);
     }
 
+    /** Create frame layout parameters that fill width with content-sized height. */
+    public static FrameLayout.LayoutParams frameMatchWidthWrapParams() {
+        return new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT);
+    }
+
+    /** Create frame layout parameters that fill width with content-sized height and gravity. */
+    public static FrameLayout.LayoutParams frameMatchWidthWrapParams(int gravity) {
+        return new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT, gravity);
+    }
+
     /** Create weighted linear layout parameters with a fixed height in dp. */
     public static LinearLayout.LayoutParams weightedHeightParams(Context context, float heightDp,
             float weight) {
