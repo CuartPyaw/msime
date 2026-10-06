@@ -107,12 +107,11 @@ public final class InputDialog {
      * @param inputType `InputType` 的组合；0 表示普通单行文字
      */
     public EditText addField(CharSequence hint, @Nullable CharSequence initial, int inputType) {
-        EditText input = new EditText(context);
+        EditText input = Ui.styledInput(context, 15, 400, Ui.text(context));
         input.setHint(hint);
         input.setText(initial);
         input.setSingleLine(true);
         input.setInputType(inputType == 0 ? InputType.TYPE_CLASS_TEXT : inputType);
-        Ui.style(input, 15, 400, Ui.text(context));
         input.setHintTextColor(Ui.subText(context));
         GradientDrawable field = Ui.outlined(Ui.rowBackground(context), Ui.dp(context, 10),
             Ui.atLeastOnePx(context, 1), Ui.hairline(context));
