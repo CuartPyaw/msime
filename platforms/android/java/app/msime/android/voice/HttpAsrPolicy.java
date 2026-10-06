@@ -75,9 +75,10 @@ public final class HttpAsrPolicy {
      * absent language as "detect", and sending an empty value is not the same thing.
      */
     public static byte[] multipartBody(String boundary, String model, String language, byte[] wav) {
-        StringBuilder head = new StringBuilder();
-        appendField(head, boundary, "model", model);
         String trimmed = language == null ? "" : language.trim();
+        StringBuilder head = new StringBuilder(128 + boundary.length()
+            + textLength(model) + trimmed.length());
+        appendField(head, boundary, "model", model);
         if (!trimmed.isEmpty()) appendField(head, boundary, "language", isoLanguage(trimmed));
         head.append("--").append(boundary).append("\r\n")
             .append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n")
@@ -113,6 +114,10 @@ public final class HttpAsrPolicy {
         body.append("--").append(boundary).append("\r\n")
             .append("Content-Disposition: form-data; name=\"").append(name).append("\"\r\n\r\n")
             .append(value).append("\r\n");
+    }
+
+    private static int textLength(String value) {
+        return value == null ? 4 : value.length();
     }
 
 }
