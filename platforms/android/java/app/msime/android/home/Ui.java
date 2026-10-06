@@ -325,6 +325,11 @@ public final class Ui {
         return new LinearLayout.LayoutParams(size, size);
     }
 
+    /** Layout parameters for a square child when its size is already in pixels. */
+    public static LinearLayout.LayoutParams squareParamsPx(int size) {
+        return new LinearLayout.LayoutParams(size, size);
+    }
+
     /** Frame layout parameters for a square child with a size expressed in dp. */
     public static FrameLayout.LayoutParams squareFrameParams(Context context, float sizeDp) {
         int size = dp(context, sizeDp);
