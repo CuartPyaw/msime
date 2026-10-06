@@ -139,6 +139,11 @@ public final class Ui {
         return KeyboardGeometry.pixels(context, value);
     }
 
+    /** Return the current display width in physical pixels. */
+    public static int screenWidthPixels(Context context) {
+        return context.getResources().getDisplayMetrics().widthPixels;
+    }
+
     /** Convert a density-independent dimension without rounding, for canvas geometry. */
     public static float dpFloat(Context context, float value) {
         return KeyboardGeometry.floatPixels(context, value);

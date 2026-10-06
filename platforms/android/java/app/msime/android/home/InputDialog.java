@@ -96,7 +96,7 @@ public final class InputDialog {
         if (window != null) {
             window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
             window.setLayout(Math.min(Ui.dp(context, Ui.DIALOG_WIDTH),
-                context.getResources().getDisplayMetrics().widthPixels - Ui.dp(context, 48)),
+                Ui.screenWidthPixels(context) - Ui.dp(context, 48)),
                 ViewGroup.LayoutParams.WRAP_CONTENT);
             window.setDimAmount(0.35f);
             window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE
