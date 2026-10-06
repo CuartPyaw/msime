@@ -239,7 +239,8 @@ public final class BackendAccount {
     public void loginWithAppleGrant(String grant, String verifier, boolean link, String userAgent)
             throws Exception {
         if (ownerProcess != null) throw new IllegalStateException("account session owner");
-        if (grant == null || grant.isEmpty() || grant.length() > 128 || verifier == null || verifier.isEmpty()) {
+        if (grant == null || grant.isEmpty() || grant.length() > AppleWebSignIn.MAX_GRANT_LENGTH
+                || verifier == null || verifier.isEmpty()) {
             throw new IllegalArgumentException("invalid grant");
         }
         String token = link ? linkToken("link") : null;
