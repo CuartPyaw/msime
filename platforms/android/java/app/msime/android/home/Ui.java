@@ -709,7 +709,12 @@ public final class Ui {
 
     /** 把一个 view 的透明度和可点按状态一起切换；禁用的行仍然可见，只是变淡且不响应。 */
     public static void setEnabledLook(View view, boolean enabled) {
+        setEnabledLook(view, enabled, 0.38f);
+    }
+
+    /** Apply enabled state and a caller-selected inactive opacity to a home control. */
+    public static void setEnabledLook(View view, boolean enabled, float inactiveAlpha) {
         view.setEnabled(enabled);
-        ViewPolicy.setActiveAlpha(view, enabled, 0.38f);
+        ViewPolicy.setActiveAlpha(view, enabled, inactiveAlpha);
     }
 }
