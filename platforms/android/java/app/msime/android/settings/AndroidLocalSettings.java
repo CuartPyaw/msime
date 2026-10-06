@@ -117,7 +117,7 @@ public final class AndroidLocalSettings {
         }
     }
 
-    private static final Map<String, Spec> SPECS = new LinkedHashMap<>();
+    private static final Map<String, Spec> SPECS = new LinkedHashMap<>(27);
 
     static {
         choice(APP_THEME, "siji", true, "siji", "chunya", "xiayin", "qiushan", "dongxue");
