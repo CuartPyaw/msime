@@ -291,8 +291,7 @@ public final class FeedbackPage extends DetailPage {
         bounds.inJustDecodeBounds = true;
         BitmapFactory.decodeByteArray(source, 0, source.length, bounds);
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
-        int sample = 1;
-        while (Math.max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= MAX_EDGE) sample *= 2;
+        int sample = BitmapPolicy.sampleSizeForEdge(bounds.outWidth, bounds.outHeight, MAX_EDGE);
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inSampleSize = sample;
         Bitmap bitmap = BitmapFactory.decodeByteArray(source, 0, source.length, options);
