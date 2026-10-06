@@ -3443,12 +3443,7 @@ public final class MSIMEInputService extends InputMethodService {
         button.setText(label);
         button.setContentDescription("按键 " + description);
         imeStyler.styleButton(button, false);
-        button.setOnClickListener(ignored -> {
-            imeKeyFeedback.playFeedback(button);
-            countKey(button);
-            action.run();
-        });
-        return button;
+        return bindKeyAction(button, action);
     }
 
     /** 九键、注音、笔画、手写和日语九键的 ⌫：和 {@link #keyboardKey} 一样的键，只是画 26 键那个 22 dp 的删除图标，不再用排版字号的「⌫」字符，那样比 26 键的小一圈。 */
@@ -3478,6 +3473,10 @@ public final class MSIMEInputService extends InputMethodService {
         button.setText(label);
         button.setContentDescription("按键 " + description);
         imeStyler.styleButton(button, false);
+        return bindKeyAction(button, action);
+    }
+
+    private <T extends Button> T bindKeyAction(T button, Runnable action) {
         button.setOnClickListener(ignored -> {
             imeKeyFeedback.playFeedback(button);
             countKey(button);
