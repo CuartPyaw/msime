@@ -1,5 +1,5 @@
 import client from 'libmsimeclient.so';
-import { AccountCloudBridge } from './AccountCloudBridge';
+import { AccountCloudBridge, strictAccountOk } from './AccountCloudBridge';
 import {
   AiSkinCancelled,
   AiSkinFailure,
@@ -125,7 +125,7 @@ export class HarmonyAiSkins {
   private plan(request: PlanRequest): Object | null {
     try {
       const reply: PlanReply = JSON.parse(client.aiSkinPlan(JSON.stringify(request))) as PlanReply;
-      return reply.ok && reply.value !== undefined ? reply.value : null;
+      return strictAccountOk(reply.ok) && reply.value !== undefined ? reply.value : null;
     } catch {
       return null;
     }
