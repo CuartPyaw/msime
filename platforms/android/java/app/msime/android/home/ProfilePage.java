@@ -117,7 +117,7 @@ public final class ProfilePage extends DetailPage {
                 connection.setRequestProperty("User-Agent", CloudApi.USER_AGENT);
                 if (connection.getResponseCode() / 100 != 2) return null;
                 try (InputStream input = connection.getInputStream()) {
-                    byte[] bytes = readAtMost(input, DeviceDataApi.MAX_AVATAR_BYTES);
+                    byte[] bytes = HttpBodyPolicy.readBounded(input, DeviceDataApi.MAX_AVATAR_BYTES);
                     return bytes == null ? null : decodeAvatar(bytes);
                 }
             } finally {
@@ -145,11 +145,6 @@ public final class ProfilePage extends DetailPage {
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inSampleSize = sample;
         return BitmapFactory.decodeByteArray(bytes, 0, bytes.length, options);
-    }
-
-    /** 读完整个流；超过 `limit` 字节时返回 null。 */
-    @Nullable private static byte[] readAtMost(InputStream input, int limit) throws IOException {
-        return HttpBodyPolicy.readBounded(input, limit);
     }
 
     /** 圆形头像：有图片时画图片，否则是强调色底上的昵称首字。 */
@@ -386,7 +381,7 @@ public final class ProfilePage extends DetailPage {
             byte[] image;
             try (InputStream input = context.getContentResolver().openInputStream(uri)) {
                 if (input == null) return "读不到这张图片";
-                image = readAtMost(input, DeviceDataApi.MAX_AVATAR_BYTES);
+                image = HttpBodyPolicy.readBounded(input, DeviceDataApi.MAX_AVATAR_BYTES);
             } catch (IOException | SecurityException unreadable) {
                 return "读不到这张图片";
             }
