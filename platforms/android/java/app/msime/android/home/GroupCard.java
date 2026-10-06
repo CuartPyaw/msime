@@ -245,12 +245,9 @@ public final class GroupCard {
 
             LinearLayout texts = new LinearLayout(context);
             texts.setOrientation(LinearLayout.VERTICAL);
-            title = new TextView(context);
-            Ui.style(title, Ui.TEXT_ROW_TITLE, 400, Ui.text(context));
-            title.setText(titleText);
+            title = Ui.styledLabel(context, titleText, Ui.TEXT_ROW_TITLE, 400, Ui.text(context));
             texts.addView(title);
-            subtitle = new TextView(context);
-            Ui.style(subtitle, Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));
+            subtitle = Ui.styledLabel(context, subtitleText, Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));
             LinearLayout.LayoutParams subtitleParams = Ui.wrap();
             subtitleParams.topMargin = Ui.dp(owner.context, 1);
             texts.addView(subtitle, subtitleParams);
