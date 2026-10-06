@@ -246,7 +246,7 @@ public final class ProfilePage extends DetailPage {
         GradientDrawable badge = Ui.circle(Ui.card(context));
         camera.setBackground(badge);
         int pad = Ui.dp(context, 6);
-        camera.setPadding(pad, pad, pad, pad);
+        Ui.setSymmetricPaddingPx(camera, pad);
         camera.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         FrameLayout.LayoutParams cameraParams = Ui.squareFrameParams(context, 28);
         cameraParams.gravity = Gravity.BOTTOM | Gravity.END;

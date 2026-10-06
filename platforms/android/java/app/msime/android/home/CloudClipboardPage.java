@@ -252,7 +252,7 @@ public final class CloudClipboardPage extends DetailPage {
 
     private static View wrap(ImageView button, int size) {
         button.setLayoutParams(Ui.squareParamsPx(size));
-        button.setPadding(size / 5, size / 5, size / 5, size / 5);
+        Ui.setSymmetricPaddingPx(button, size / 5);
         return button;
     }
 
