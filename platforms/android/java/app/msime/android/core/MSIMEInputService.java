@@ -4457,29 +4457,23 @@ public final class MSIMEInputService extends InputMethodService {
         if (voiceResultPanel == null) return;
         voiceResultPanel.removeAllViews();
         LinearLayout header = new LinearLayout(this);
-        TextView title = new TextView(this);
+        TextView title = voiceText("语音结果");
         ViewPolicy.setTextSizeLabel(title, "语音结果", 18);
         KeyboardGeometry.setKeyTextSize(title, 18);
         header.addView(title, KeyboardGeometry.weightedWrapParams(1));
         button(header, "返回键盘", this::closeVoiceResult);
         voiceResultPanel.addView(header);
         if (voiceResultEntry == null) {
-            TextView empty = new TextView(this);
-        KeyboardGeometry.setKeyTextSize(empty, KeyboardGeometry.DEFAULT_KEY_TEXT_SP);
+            TextView empty = voiceText("暂无待插入结果。点击下方按钮开始语音识别；只保留最新一条，10 分钟内有效。");
             // Neutral about which engine runs: since the keyboard entry honours a configured
             // provider, naming the system recognizer here was wrong exactly for the users who had
             // configured one. Which service is used is the settings page's to explain.
-            empty.setText("暂无待插入结果。点击下方按钮开始语音识别；只保留最新一条，10 分钟内有效。");
             voiceResultPanel.addView(empty);
         } else {
-            TextView recognized = new TextView(this);
-        KeyboardGeometry.setKeyTextSize(recognized, KeyboardGeometry.DEFAULT_KEY_TEXT_SP);
-            recognized.setText(voiceResultEntry.text());
+            TextView recognized = voiceText(voiceResultEntry.text());
             recognized.setContentDescription("待插入语音结果");
             voiceResultPanel.addView(recognized);
-            TextView hint = new TextView(this);
-        KeyboardGeometry.setKeyTextSize(hint, KeyboardGeometry.DEFAULT_KEY_TEXT_SP);
-            hint.setText("点击插入后清除待插入结果；输入位置变化时会拒绝插入。");
+            TextView hint = voiceText("点击插入后清除待插入结果；输入位置变化时会拒绝插入。");
             voiceResultPanel.addView(hint);
             Button insert = button(voiceResultPanel, "插入语音结果", this::insertVoiceResult);
             insert.setContentDescription("插入并清除语音结果");
@@ -4493,6 +4487,13 @@ public final class MSIMEInputService extends InputMethodService {
         recognize.setEnabled(voiceInputEnabled
             && (platformRecognizerAvailable || configured.provider() != null));
         imeStyler.applySkin();
+    }
+
+    private TextView voiceText(CharSequence text) {
+        TextView view = new TextView(this);
+        KeyboardGeometry.setKeyTextSize(view, KeyboardGeometry.DEFAULT_KEY_TEXT_SP);
+        view.setText(text);
+        return view;
     }
 
     private void renderLayoutSettingsState() {
