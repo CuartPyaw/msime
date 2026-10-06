@@ -71,18 +71,15 @@ final class ImePanels {
     }
 
     void addEmojiTab(EmojiCatalogModel.Category entry, int category) {
-        KeyboardPressButton tab = new KeyboardPressButton(s);
-        tab.setKeyboardRole(KeyboardKeyRole.PLAIN);
-        ViewPolicy.setAllCapsFalse(tab);
+        KeyboardPressButton tab = emojiButton(KeyboardKeyRole.PLAIN, false,
+            () -> s.selectEmojiCategory(category));
         ViewPolicy.setTextSizeLabel(tab, entry.icon(), 17);
         KeyboardGeometry.setKeyTextSize(tab, 17);
-        compactEmojiButton(tab);
         ViewPolicy.clearFontPadding(tab);
         tab.setSelected(s.emojiSelectedCategory == category);
         tab.setContentDescription("表情分类 " + entry.title());
         if (Build.VERSION.SDK_INT >= 30)
             tab.setStateDescription(tab.isSelected() ? "已选中" : "未选中");
-        bindFeedbackAction(tab, () -> s.selectEmojiCategory(category));
         s.emojiTabs.addView(tab, KeyboardGeometry.weightedMatchParentParams(1));
     }
 
@@ -138,12 +135,24 @@ final class ImePanels {
     }
 
     private Button emojiCell(EmojiCatalogModel.Item item) {
-        Button cell = s.keyboardKey(item.text(), "表情 " + item.text(),
+        KeyboardPressButton cell = emojiButton(KeyboardKeyRole.PLAIN, true,
             () -> insertEmoji(item.text()));
-        ((KeyboardPressButton) cell).setKeyboardRole(KeyboardKeyRole.PLAIN);
+        cell.setText(item.text());
+        cell.setContentDescription("按键 表情 " + item.text());
         KeyboardGeometry.setKeyTextSize(cell, 26);
-        compactEmojiButton(cell);
         return cell;
+    }
+
+    private KeyboardPressButton emojiButton(KeyboardKeyRole role, boolean counted, Runnable action) {
+        KeyboardPressButton button = new KeyboardPressButton(s);
+        button.setKeyboardRole(role);
+        ViewPolicy.setAllCapsFalse(button);
+        compactEmojiButton(button);
+        if (counted) {
+            s.imeStyler.styleButton(button, false);
+            s.bindCountedAction(button, action);
+        } else bindFeedbackAction(button, action);
+        return button;
     }
 
     void deleteFromEmojiPicker() {
