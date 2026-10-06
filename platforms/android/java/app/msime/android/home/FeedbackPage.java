@@ -125,8 +125,7 @@ public final class FeedbackPage extends DetailPage {
         TextView label = new TextView(context);
         label.setText("添加截图");
         Ui.style(label, Ui.TEXT_ROW_TITLE, 400, Ui.accent(context));
-        LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams labelParams = Ui.wrap();
         labelParams.setMarginStart(Ui.dp(requireContext(), 10));
         add.addView(label, labelParams);
         add.setOnClickListener(ignored -> picker.launch("image/*"));
