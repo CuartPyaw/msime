@@ -197,8 +197,8 @@ final class AppThemeSheet {
             check.setImageResource(R.drawable.ms_w1_a2_check);
         Ui.setImageTint(check, Ui.accent(context));
             check.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            FrameLayout.LayoutParams checkParams = new FrameLayout.LayoutParams(Ui.dp(context, Ui.SHEET_CHECK_SIZE), Ui.dp(context, Ui.SHEET_CHECK_SIZE),
-                Gravity.CENTER_VERTICAL | Gravity.END);
+            FrameLayout.LayoutParams checkParams = Ui.squareFrameParams(context, Ui.SHEET_CHECK_SIZE);
+            checkParams.gravity = Gravity.CENTER_VERTICAL | Gravity.END;
             checkParams.setMarginEnd(Ui.dp(context, Ui.SHEET_CHECK_END_MARGIN));
             row.addView(check, checkParams);
         }
