@@ -224,7 +224,7 @@ final class ImeCandidates {
         KeyboardPressButton button = new KeyboardPressButton(s);
         button.setKeyboardRole(KeyboardKeyRole.ACCENT);
         ViewPolicy.setAllCapsFalse(button);
-        button.setText(label);
+        ViewPolicy.setTextSizeLabel(button, label, sizeSp);
         KeyboardGeometry.setKeyTextSize(button, sizeSp);
         button.setContentDescription(description);
         button.setOnClickListener(ignored -> {
