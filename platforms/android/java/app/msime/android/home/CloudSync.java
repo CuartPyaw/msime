@@ -416,7 +416,7 @@ public final class CloudSync {
             } catch (IOException error) {
                 throw new IllegalStateException("starter phrase record unavailable", error);
             }
-            LinkedHashMap<String, String> own = new LinkedHashMap<>();
+            LinkedHashMap<String, String> own = new LinkedHashMap<>(result.document().phrases().size());
             for (CommonPhrasesStore.Phrase phrase : result.document().phrases()) {
                 if (phrase.own() && !starters.contains(phrase.text())) own.put(phrase.id(), phrase.text());
             }
