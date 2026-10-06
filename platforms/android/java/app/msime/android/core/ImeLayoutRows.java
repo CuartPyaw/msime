@@ -486,11 +486,6 @@ final class ImeLayoutRows {
     }
 
     /**
-     * 注音 9 键：与拼音九键、笔画同一个三行高的外框，左列五个声调键，中间 1-9 三行音键加最后一行 @#、0、，。（四行挤进三行高，和大千的四行一样），右列 ⌫（两格高）、？、！。底行照常是 {@link KeyboardActionRow#designEntries}，逗号句号已在网格里，底行不再放。
-     *
-     * <p>音键和声调键直接走 character()，不走 type()：type() 会套用 Shift 大小写。音键发送数字，声调键发送 z x c v b，Engine 的注音九键编辑器把它们读作 ˉ ˊ ˇ ˋ ˙；底行空格同样是一声。读音选择条不放进左列（声调键在组字时要一直可按），而是叠在候选行上：注音的候选只在打开列表后才出现，列表关着时那一行是空的，render 在选择条显示时把候选滚动区让成不可见。
-     */
-    /**
      * 把底栏的一个常驻键（123、中/英、空格、换行）挂进本布局的一列：先从原来的父视图摘下，按底栏同样的规矩给角色、样式和字号。没有底栏的布局（注音九键）切走时，{@link ImeBottomRow#updateActionRow} 会把它们收回底栏。
      */
     private void adoptBarKey(LinearLayout parent, Button key, KeyboardKeyRole role) {
@@ -503,6 +498,11 @@ final class ImeLayoutRows {
         addNineKey(parent, key);
     }
 
+    /**
+     * 注音 9 键：与拼音九键、笔画同一个三行高的外框，左列五个声调键，中间 1-9 三行音键加最后一行 @#、0、，。（四行挤进三行高，和大千的四行一样），右列 ⌫（两格高）、？、！。底行照常是 {@link KeyboardActionRow#designEntries}，逗号句号已在网格里，底行不再放。
+     *
+     * <p>音键和声调键直接走 character()，不走 type()：type() 会套用 Shift 大小写。音键发送数字，声调键发送 z x c v b，Engine 的注音九键编辑器把它们读作 ˉ ˊ ˇ ˋ ˙；底行空格同样是一声。读音选择条不放进左列（声调键在组字时要一直可按），而是叠在候选行上：注音的候选只在打开列表后才出现，列表关着时那一行是空的，render 在选择条显示时把候选滚动区让成不可见。
+     */
     void rebuildZhuyinNineKeyRows() {
         dismissNineKeyHoldOptions();
         LinearLayout container = new LinearLayout(s);
@@ -827,16 +827,26 @@ final class ImeLayoutRows {
             symbols ? "括号；长按选择其他括号" : "小假名、浊音和半浊音", () -> {});
         s.japaneseVariantsButton = variants;
         if (variants instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.KEY);
+        // 符号层上轻点直接输入第一个括号，长按才弹出全部括号；假名层不接长按，松手照常切换变体。
         variants.setOnClickListener(ignored -> {
             s.imeKeyFeedback.playFeedback(variants);
-            if (s.keyboardLayer == KeyboardLayout.Layer.SYMBOLS) showJapaneseBracketOptions(variants);
-            else s.command(MSIMEInputService.CYCLE_KANA_VARIANT_COMMAND);
+            if (s.keyboardLayer == KeyboardLayout.Layer.SYMBOLS) {
+                commitNineKeyLiteral(JapaneseNineKeyLayout.digitBrackets().get(0));
+            } else {
+                s.command(MSIMEInputService.CYCLE_KANA_VARIANT_COMMAND);
+            }
+        });
+        variants.setOnLongClickListener(ignored -> {
+            if (s.keyboardLayer != KeyboardLayout.Layer.SYMBOLS) return false;
+            s.imeKeyFeedback.playFeedback(variants);
+            showJapaneseBracketOptions(variants);
+            return true;
         });
         return variants;
     }
 
     void addJapaneseSideKey(LinearLayout column, Button button, float weight) {
-        // 侧列是功能键（123、☺、英、切换、⌫、空白）。角色不显式给时由描述推导，假名键的描述被判成功能面、侧列反倒成了字母面，整块配色主次颠倒。回车的角色由 updateReturnKey 跟着组字状态改。
+        // 侧列是功能键（123、☺（工具栏没有表情按钮时）、英、切换、⌫、空白）。角色不显式给时由描述推导，假名键的描述被判成功能面、侧列反倒成了字母面，整块配色主次颠倒。回车的角色由 updateReturnKey 跟着组字状态改。
         if (button instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.ACCENT);
         column.addView(button, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, 0, weight));
@@ -859,12 +869,15 @@ final class ImeLayoutRows {
             s.render();
         }), "SoftLayer");
         addJapaneseSideKey(modeColumn, s.japaneseSymbolsKey, 1);
-        addJapaneseSideKey(modeColumn, s.keyId(s.keyboardKey("☺", "打开表情浏览", s.imePanels::showEmojiPicker),
-            "SoftEmoji"), 1);
+        boolean emojiKey = s.japaneseSideEmojiKey();
+        if (emojiKey) {
+            addJapaneseSideKey(modeColumn, s.keyId(s.keyboardKey("☺", "打开表情浏览", s.imePanels::showEmojiPicker),
+                "SoftEmoji"), 1);
+        }
         Button language = s.keyId(s.keyboardKey("英", "切换到英文输入", s::toggleInputLanguage),
             "SoftLanguage");
         addJapaneseSideKey(modeColumn, language,
-            s.offersGlobeKey() ? 1 : 2);
+            (s.offersGlobeKey() ? 1 : 2) + (emojiKey ? 0 : 1));
         if (s.offersGlobeKey()) {
             addJapaneseSideKey(modeColumn, s.keyId(s.keyboardKey("切换", "切换到下一个输入法",
                 s::switchToNextInputMethodAfterCommit), "SoftGlobe"), 1);
