@@ -23,10 +23,9 @@ final class SheetOptionView {
         Ui.setMinimumHeightDp(row, context, Ui.SHEET_OPTION_HEIGHT);
         Ui.makeClickable(row, context, action);
 
-        TextView text = new TextView(context);
-        text.setText(nested ? label + " ›" : label);
+        TextView text = Ui.styledLabel(context, nested ? label + " ›" : label,
+            Ui.TEXT_SHEET_OPTION, bold ? 600 : 400, color);
         text.setGravity(Gravity.CENTER);
-        Ui.style(text, Ui.TEXT_SHEET_OPTION, bold ? 600 : 400, color);
         FrameLayout.LayoutParams textParams = Ui.frameWrap(Gravity.CENTER);
         textParams.leftMargin = Ui.dp(context, Ui.SHEET_OPTION_TEXT_INSET);
         textParams.rightMargin = Ui.dp(context, Ui.SHEET_OPTION_TEXT_INSET);
