@@ -27,6 +27,7 @@ import androidx.annotation.Nullable;
 import androidx.lifecycle.ViewModel;
 import androidx.lifecycle.ViewModelProvider;
 import app.msime.android.CloudApi;
+import app.msime.android.BitmapPolicy;
 import app.msime.android.BoundsPolicy;
 import app.msime.android.CustomKeyboardSkin;
 import app.msime.android.CustomSkinLibrary;
@@ -547,15 +548,7 @@ public final class AiSkinPage extends DetailPage {
             if (bitmap != null) bitmap.recycle();
             return CustomKeyboardSkin.from(design).toJson(true);
         }
-        int edge = Math.max(bitmap.getWidth(), bitmap.getHeight());
-        if (edge > MAX_PHOTO_EDGE) {
-            float scale = MAX_PHOTO_EDGE / (float) edge;
-            Bitmap scaled = Bitmap.createScaledBitmap(bitmap,
-                BoundsPolicy.bounded(Math.round(bitmap.getWidth() * scale), 1, Integer.MAX_VALUE),
-                BoundsPolicy.bounded(Math.round(bitmap.getHeight() * scale), 1, Integer.MAX_VALUE), true);
-            if (scaled != bitmap) bitmap.recycle();
-            bitmap = scaled;
-        }
+        bitmap = BitmapPolicy.scaleToEdge(bitmap, MAX_PHOTO_EDGE);
         byte[] jpeg = null;
         for (int quality = 85; quality >= 40; quality -= 15) {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
