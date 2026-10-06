@@ -121,4 +121,9 @@ public final class ViewPolicy {
         view.setClickable(false);
         view.setFocusable(false);
     }
+
+    /** Remove the platform state-list animator from a view. */
+    public static void clearStateListAnimator(View view) {
+        view.setStateListAnimator(null);
+    }
 }

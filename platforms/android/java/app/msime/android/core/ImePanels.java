@@ -627,7 +627,7 @@ final class ImePanels {
         button.setMinimumHeight(0);
         ViewPolicy.setHorizontalPadding(button, horizontalPadding);
         ViewPolicy.clearFontPadding(button);
-        button.setStateListAnimator(null);
+        ViewPolicy.clearStateListAnimator(button);
     }
 
     Button replyAction(String label, String description, Runnable action) {
