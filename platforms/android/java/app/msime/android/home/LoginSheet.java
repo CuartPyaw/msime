@@ -106,8 +106,7 @@ final class LoginSheet {
         Ui.setPaddingDp(root, activity, 24, 0, 24, 20);
         root.addView(Ui.sheetDragHandle(activity));
 
-        LinearLayout header = new LinearLayout(activity);
-        header.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout header = Ui.row(activity);
         ViewPolicy.setCenteredVertically(header);
         TextView title = Ui.styledLabel(activity, "link".equals(purpose) ? "添加登录方式" : "登录水杉",
             22, 700, Ui.text(activity));
@@ -311,8 +310,7 @@ final class LoginSheet {
 
     /** 50dp 高、12dp 圆角的整行按钮：可选的 20dp 图标加 16sp 半粗文字，居中。 */
     private View button(Drawable icon, String label, int fill, int ink, int stroke, Runnable action) {
-        LinearLayout button = new LinearLayout(activity);
-        button.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout button = Ui.row(activity);
         ViewPolicy.setCentered(button);
         Ui.setMinimumHeightDp(button, activity, 50);
         GradientDrawable face = stroke == 0

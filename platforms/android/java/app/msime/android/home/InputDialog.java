@@ -74,8 +74,7 @@ public final class InputDialog {
         root.addView(fields, Ui.matchWidth());
 
         root.addView(Ui.divider(context, true));
-        LinearLayout buttons = new LinearLayout(context);
-        buttons.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout buttons = Ui.row(context);
         TextView cancel = button("取消", 400, Ui.accent(context));
         cancel.setOnClickListener(ignored -> dialog.cancel());
         buttons.addView(cancel, Ui.weightedHeight(context, 48, 1f));
