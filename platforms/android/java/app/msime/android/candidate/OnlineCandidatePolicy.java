@@ -1,5 +1,9 @@
 package app.msime.android;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.net.URL;
@@ -18,6 +22,7 @@ import java.net.URL;
 public final class OnlineCandidatePolicy {
     /** How long a composition has to hold still before either provider is asked. */
     public static final long QUIET_INTERVAL_MILLIS = 350;
+    /** 云候选的连接时限和整体时限，与 client-core 的 `CONNECT_TIMEOUT_MS` / `REQUEST_TIMEOUT_MS` 相同，由 scripts/test-cloud-request-budget.py 核对。 */
     public static final int CLOUD_TIMEOUT_MILLIS = 2_000;
     public static final int MAX_CLOUD_RESPONSE_BYTES = 256 * 1024;
     public static final int MAX_AI_RESPONSE_BYTES = 1024 * 1024;
@@ -75,6 +80,24 @@ public final class OnlineCandidatePolicy {
     /** The configured candidate limit, or zero when it is outside what the shared host accepts. */
     public static int aiCandidateLimit(int limit) {
         return limit >= 1 && limit <= MAX_CANDIDATE_LIMIT ? limit : 0;
+    }
+
+    /**
+     * 读云候选的响应体：超过 {@code limit} 字节，或读完之前已经过了 {@code deadlineNanos}（{@link System#nanoTime()} 的时刻），都返回 null。
+     *
+     * <p>HttpURLConnection 的 readTimeout 只限制两次读之间的空闲时间，服务端每隔不到两秒发一小段就永远不会超时，所以整体时限要在这里另算。
+     */
+    public static String readWithin(InputStream input, int limit, long deadlineNanos)
+            throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        int count;
+        while ((count = input.read(buffer)) != -1) {
+            if (System.nanoTime() - deadlineNanos > 0) return null;
+            if (output.size() + count > limit) return null;
+            output.write(buffer, 0, count);
+        }
+        return output.toString(StandardCharsets.UTF_8.name());
     }
 
     /** Whether a cloud body is small enough to hand to the shared parser. */
