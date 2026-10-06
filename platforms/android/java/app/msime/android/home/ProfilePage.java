@@ -26,6 +26,7 @@ import app.msime.android.CloudApi;
 import app.msime.android.DeviceDataApi;
 import app.msime.android.HttpBodyPolicy;
 import app.msime.android.SyncSwitch;
+import app.msime.android.ViewPolicy;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -163,7 +164,7 @@ public final class ProfilePage extends DetailPage {
         } else {
             TextView letter = Ui.styledLabel(context, initial(name), Math.round(sizeDp * 0.4f), 600,
                 Ui.onAccent(context));
-            letter.setGravity(Gravity.CENTER);
+            ViewPolicy.setCentered(letter);
             letter.setBackground(circle);
             letter.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             frame.addView(letter, Ui.squareFrameParams(context, sizeDp));
@@ -235,7 +236,7 @@ public final class ProfilePage extends DetailPage {
     private View header(Context context, DeviceDataApi.Profile profile, @Nullable Bitmap image) {
         LinearLayout header = new LinearLayout(context);
         header.setOrientation(LinearLayout.VERTICAL);
-        header.setGravity(Gravity.CENTER_HORIZONTAL);
+        ViewPolicy.setCenteredHorizontally(header);
         Ui.setPaddingDp(header, context, 0, 8, 0, 4);
 
         FrameLayout avatar = new FrameLayout(context);

@@ -10,6 +10,7 @@ import androidx.fragment.app.Fragment;
 import app.msime.android.AndroidLocalSettings;
 import app.msime.android.SyncSignals;
 import app.msime.android.SyncSwitch;
+import app.msime.android.ViewPolicy;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.google.android.material.bottomsheet.BottomSheetDragHandleView;
 import java.util.List;
@@ -54,7 +55,7 @@ final class AppThemeSheet {
 
         LinearLayout header = new LinearLayout(context);
         header.setOrientation(LinearLayout.VERTICAL);
-        header.setGravity(Gravity.CENTER_HORIZONTAL);
+        ViewPolicy.setCenteredHorizontally(header);
         Ui.setSheetHeaderPadding(header, context);
         TextView heading = Ui.sheetHeading(context, "应用主题");
         header.addView(heading);

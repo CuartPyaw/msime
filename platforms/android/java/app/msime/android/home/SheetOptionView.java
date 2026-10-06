@@ -12,6 +12,7 @@ import androidx.core.view.AccessibilityDelegateCompat;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat;
 import app.msime.android.R;
+import app.msime.android.ViewPolicy;
 
 /** Shared option-row renderer used by the settings bottom sheets. */
 final class SheetOptionView {
@@ -25,7 +26,7 @@ final class SheetOptionView {
 
         TextView text = Ui.styledLabel(context, nested ? label + " ›" : label,
             Ui.TEXT_SHEET_OPTION, bold ? 600 : 400, color);
-        text.setGravity(Gravity.CENTER);
+        ViewPolicy.setCentered(text);
         FrameLayout.LayoutParams textParams = Ui.frameWrap(Gravity.CENTER);
         textParams.leftMargin = Ui.dp(context, Ui.SHEET_OPTION_TEXT_INSET);
         textParams.rightMargin = Ui.dp(context, Ui.SHEET_OPTION_TEXT_INSET);
