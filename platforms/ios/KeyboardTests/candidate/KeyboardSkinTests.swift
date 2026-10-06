@@ -86,6 +86,23 @@ final class KeyboardSkinTests: XCTestCase {
       XCTAssertGreaterThanOrEqual(CustomKeyboardSkin.contrast(CustomKeyboardSkin.readableText(on: background), background), 4.5)
     }
   }
+
+  func testCustomSkinStoreRejectsOversizedPayload() throws {
+    let defaults = KeyboardFeedbackPreference.defaults
+    let previous = defaults.object(forKey: CustomKeyboardSkinStore.key)
+    defer {
+      if let previous { defaults.set(previous, forKey: CustomKeyboardSkinStore.key) }
+      else { defaults.removeObject(forKey: CustomKeyboardSkinStore.key) }
+    }
+    var design = CustomKeyboardSkin()
+    design.background = 0x123456
+    design.photo = Data(repeating: 0, count: 800_000)
+    let data = try JSONEncoder().encode(design)
+    XCTAssertGreaterThan(data.count, 1_000_000)
+    defaults.set(data, forKey: CustomKeyboardSkinStore.key)
+    XCTAssertEqual(CustomKeyboardSkinStore.current, CustomKeyboardSkin())
+  }
+
   func testLegacyDesignsAndLibraryRoundTrip() throws {
     let legacy = Data(#"{"background":15266027,"keyBackground":16777215,"keyForeground":1516829,"accent":1596487,"actionBackground":1596487,"cornerRadius":8,"borderWidth":0,"shadow":0,"pattern":0,"monospaced":false}"#.utf8)
     let old = try JSONDecoder().decode(CustomKeyboardSkin.self, from: legacy)
