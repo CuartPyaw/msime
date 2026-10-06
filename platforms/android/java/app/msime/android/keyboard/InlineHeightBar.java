@@ -130,10 +130,8 @@ public final class InlineHeightBar extends LinearLayout {
     public void setColors(int foreground, int secondary, int accent, int onAccent) {
         ((BarButton) cancel).setColors(foreground, null);
         ((BarButton) reset).setColors(foreground, null);
-        GradientDrawable pill = new GradientDrawable();
-        pill.setShape(GradientDrawable.RECTANGLE);
-        pill.setCornerRadius(KeyboardGeometry.floatPixels(getContext(), 16));
-        pill.setColor(accent);
+        GradientDrawable pill = DrawablePolicy.rounded(accent,
+            KeyboardGeometry.floatPixels(getContext(), 16));
         ((BarButton) done).setColors(onAccent, pill);
         handle.barColor = ColorPolicy.withAlpha(foreground, .35f);
         handle.textColor = secondary;
