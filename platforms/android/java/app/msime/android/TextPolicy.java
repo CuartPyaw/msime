@@ -104,6 +104,14 @@ public final class TextPolicy {
             && value.codePointCount(0, value.length()) <= maxCodePoints;
     }
 
+    /** Keep at most the final Unicode code points without splitting a surrogate pair. */
+    public static String tailCodePoints(String value, int maxCodePoints) {
+        if (value == null || maxCodePoints <= 0) return "";
+        int count = value.codePointCount(0, value.length());
+        return count <= maxCodePoints ? value
+            : value.substring(value.offsetByCodePoints(0, count - maxCodePoints));
+    }
+
     /** Truncate text and append an ellipsis only when the character limit is exceeded. */
     public static String clipWithEllipsis(String value, int maxChars) {
         if (value == null || maxChars <= 0) return "";
