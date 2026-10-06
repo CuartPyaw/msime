@@ -109,7 +109,7 @@ final class ImeLayoutRows {
             Gravity.CENTER));
 
         s.handwritingDownload = new Button(s);
-        s.handwritingDownload.setAllCaps(false);
+        ViewPolicy.setAllCapsFalse(s.handwritingDownload);
         KeyboardGeometry.setKeyTextSize(s.handwritingDownload, KeyboardGeometry.DEFAULT_KEY_TEXT_SP);
         s.handwritingDownload.setSingleLine(true);
         s.handwritingDownload.setOnClickListener(ignored -> {
