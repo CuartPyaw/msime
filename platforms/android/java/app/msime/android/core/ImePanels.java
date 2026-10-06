@@ -76,7 +76,7 @@ final class ImePanels {
         tab.setAllCaps(false);
         tab.setText(entry.icon());
         KeyboardGeometry.setKeyTextSize(tab, 17);
-        tab.setPadding(0, 0, 0, 0);
+        ViewPolicy.clearPadding(tab);
         ViewPolicy.clearMinimumWidth(tab);
         tab.setMinHeight(0);
         tab.setMinimumHeight(0);
@@ -129,7 +129,7 @@ final class ImePanels {
                 () -> insertEmoji(item.text()));
             ((KeyboardPressButton) cell).setKeyboardRole(KeyboardKeyRole.PLAIN);
             KeyboardGeometry.setKeyTextSize(cell, 26);
-            cell.setPadding(0, 0, 0, 0);
+            ViewPolicy.clearPadding(cell);
             ViewPolicy.clearMinimumWidth(cell);
             cell.setMinHeight(0);
             cell.setMinimumHeight(0);

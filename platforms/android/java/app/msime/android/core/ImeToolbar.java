@@ -157,7 +157,7 @@ final class ImeToolbar {
         s.exitLocalModeButton.setText("×");
         KeyboardGeometry.setKeyTextSize(s.exitLocalModeButton, 14);
         s.exitLocalModeButton.setContentDescription("退出本地模式");
-        s.exitLocalModeButton.setPadding(0, 0, 0, 0);
+        ViewPolicy.clearPadding(s.exitLocalModeButton);
         s.imeStyler.styleButton(s.exitLocalModeButton, true);
         s.exitLocalModeButton.setOnClickListener(ignored -> {
             s.imeKeyFeedback.playFeedback(s.exitLocalModeButton);
@@ -257,7 +257,7 @@ final class ImeToolbar {
             s.preedit.setTextColor(hintColor);
             KeyboardGeometry.setKeyTextSize(s.preedit, 12);
             s.preedit.setBackground(null);
-            s.preedit.setPadding(0, 0, 0, 0);
+            ViewPolicy.clearPadding(s.preedit);
         }
     }
 

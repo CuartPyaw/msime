@@ -169,7 +169,7 @@ public final class FunctionPanelView extends LinearLayout {
             setText(entry.label);
             setAllCaps(false);
             setBackground(null);
-            setPadding(0, 0, 0, 0);
+            ViewPolicy.clearPadding(this);
             setMinWidth(0);
             setMinimumWidth(0);
             setMinHeight(0);

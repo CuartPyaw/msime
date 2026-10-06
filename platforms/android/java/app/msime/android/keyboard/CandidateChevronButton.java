@@ -36,7 +36,7 @@ public final class CandidateChevronButton extends Button {
         setText("展开");
         setAllCaps(false);
         setBackground(null);
-        setPadding(0, 0, 0, 0);
+        ViewPolicy.clearPadding(this);
         ViewPolicy.clearMinimumWidth(this);
         setMinHeight(0);
         setMinimumHeight(0);
