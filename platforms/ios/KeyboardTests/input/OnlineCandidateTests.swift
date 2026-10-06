@@ -85,6 +85,18 @@ final class OnlineCandidateTests: XCTestCase {
     XCTAssertThrowsError(try bridge.snapshot(from: ["view": ["editing_text": "ni", "caret_position": 3]]))
   }
 
+  func testSnapshotRejectsMalformedRuntimeBooleans() {
+    let bridge = MetasequoiaInputSessionBridge(stateRoot: state)
+    for field in ["handled", "answered_by_pinyin_fallback"] {
+      for invalid: Any in [1, 0, "true", NSNull()] {
+        let document: [String: Any] = field == "handled"
+          ? [field: invalid]
+          : ["view": [field: invalid]]
+        XCTAssertThrowsError(try bridge.snapshot(from: document), "\(field): \(invalid)")
+      }
+    }
+  }
+
   func testSnapshotPreservesIntegerBoundsAndUTF8CaretOffsets() throws {
     let bridge = MetasequoiaInputSessionBridge(stateRoot: state)
     let snapshot = try bridge.snapshot(from: ["view": [
