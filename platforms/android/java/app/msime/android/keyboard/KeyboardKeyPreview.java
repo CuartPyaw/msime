@@ -52,7 +52,7 @@ public final class KeyboardKeyPreview extends View {
             float parentWidth) {
         float left = keyLeft + keyWidth / 2f - bubbleWidth / 2f;
         float max = Math.max(0f, parentWidth - bubbleWidth);
-        return Math.max(0f, Math.min(max, left));
+        return KeyboardGeometry.bounded(left, 0f, max);
     }
 
     /** 气泡顶边：底边落在键顶以下 {@code overlap} 处。 */
