@@ -428,7 +428,6 @@ public final class AiSkinPage extends DetailPage {
             target.addView(actions, actionsParams);
             bindEnabled(input, again);
             Ui.setEnabledLook(use, !s.busy && !saving);
-            use.setEnabled(!s.busy && !saving);
         }
         input.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) {}
