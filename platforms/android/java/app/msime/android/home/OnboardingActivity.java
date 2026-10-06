@@ -113,7 +113,7 @@ public final class OnboardingActivity extends AppCompatActivity {
                 float dx = end.getX() - start.getX();
                 float dy = end.getY() - start.getY();
                 // The design's rule: at least 50 px across, and clearly more across than down, so a vertical scroll never turns the page.
-                if (Math.abs(dx) < Ui.dp(this, 50) || Math.abs(dx) < Math.abs(dy) * 1.5f) return false;
+                if (Math.abs(dx) < Ui.dp(OnboardingActivity.this, 50) || Math.abs(dx) < Math.abs(dy) * 1.5f) return false;
                 if (dx < 0 && page < pages - 1) go(page + 1);
                 else if (dx > 0 && page > 0) go(page - 1);
                 return true;
