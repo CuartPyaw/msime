@@ -257,18 +257,21 @@ final class KeyboardSheets {
         row.addView(texts(context, title, subtitle, Ui.text(context)),
             Ui.weightWrap(1f));
         boolean enabled = action != null;
-        TextView button = new TextView(context);
-        button.setText(label);
-        button.setGravity(Gravity.CENTER);
-        button.setSingleLine(true);
-        Ui.style(button, Ui.TEXT_BUTTON_SMALL, 500, enabled ? Ui.accent(context) : Ui.subText(context));
-        if (enabled) button.setBackground(Ui.pillRipple(context, Ui.accentSoft(context)));
-        Ui.setButtonPadding(button, context);
-        Ui.setTextMinHeightDp(button, context, Ui.COMPACT_BUTTON_MIN_HEIGHT);
-        button.setEnabled(enabled);
-        button.setClickable(enabled);
-        button.setFocusable(enabled);
-        if (enabled) button.setOnClickListener(ignored -> action.run());
+        TextView button;
+        if (enabled) {
+            button = Ui.pillButton(context, label, Ui.TEXT_BUTTON_SMALL, 500,
+                Ui.accentSoft(context), Ui.accent(context), Ui.BUTTON_PADDING_H, Ui.BUTTON_PADDING_V,
+                Ui.COMPACT_BUTTON_MIN_HEIGHT, 0, action);
+        } else {
+            button = new TextView(context);
+            button.setText(label);
+            button.setGravity(Gravity.CENTER);
+            button.setSingleLine(true);
+            Ui.style(button, Ui.TEXT_BUTTON_SMALL, 500, Ui.subText(context));
+            Ui.setButtonPadding(button, context);
+            Ui.setTextMinHeightDp(button, context, Ui.COMPACT_BUTTON_MIN_HEIGHT);
+            button.setEnabled(false);
+        }
         button.setAccessibilityDelegate(buttonDelegate(label + "，" + title));
         LinearLayout.LayoutParams params = Ui.wrap();
         params.setMarginStart(Ui.dp(context, Ui.ROW_GAP));
