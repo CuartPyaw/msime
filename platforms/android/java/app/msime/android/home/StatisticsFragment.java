@@ -21,6 +21,7 @@ import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
 import app.msime.android.NativeClient;
 import app.msime.android.BoundsPolicy;
+import app.msime.android.DictionaryCollectionsStore;
 import app.msime.android.KeyPressIds;
 import app.msime.android.R;
 import app.msime.android.TypingStatisticsModel;
@@ -177,7 +178,9 @@ public final class StatisticsFragment extends HomeTabFragment {
             JSONObject root = new JSONObject(NativeClient.dictionary(request.toString()));
             if (!root.optBoolean("ok", false)) return null;
             JSONObject value = root.optJSONObject("value");
-            return value == null || !value.has("count") ? null : BoundsPolicy.nonNegative(value.optLong("count", 0));
+            if (value == null || !value.has("count")) return null;
+            Long count = DictionaryCollectionsStore.strictLong(value.opt("count"));
+            return count == null ? null : BoundsPolicy.nonNegative(count);
         } catch (JSONException | java.io.IOException | RuntimeException | LinkageError error) {
             return null;
         }
