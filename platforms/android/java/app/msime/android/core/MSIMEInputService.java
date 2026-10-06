@@ -2269,14 +2269,16 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     private boolean requestsCloud(JSONObject query) {
-        return OnlineCandidatePolicy.requestsCloud(query.optBoolean("cloud_candidates", false),
-            query.optBoolean("cloud_eligible", false));
+        return OnlineCandidatePolicy.requestsCloud(
+            InputViewValuePolicy.booleanValue(query, "cloud_candidates", false),
+            InputViewValuePolicy.booleanValue(query, "cloud_eligible", false));
     }
 
     private boolean requestsAi(JSONObject query) {
         JSONObject assistant = query.optJSONObject("ai_assistant");
-        return OnlineCandidatePolicy.requestsAi(query.optBoolean("ai_eligible", false),
-            assistant != null && assistant.optBoolean("enabled", false));
+        return OnlineCandidatePolicy.requestsAi(
+            InputViewValuePolicy.booleanValue(query, "ai_eligible", false),
+            InputViewValuePolicy.booleanValue(assistant, "enabled", false));
     }
 
     /** Invalidate delayed and in-flight optional provider work at an editor boundary. */
@@ -2370,8 +2372,8 @@ public final class MSIMEInputService extends InputMethodService {
         JSONObject assistant = query.optJSONObject("ai_assistant");
         String signature = OnlineCandidatePolicy.signature(querySession,
             query.optString("cache_key", ""), query.optString("identity", ""),
-            query.optBoolean("cloud_candidates", false),
-            assistant != null && assistant.optBoolean("enabled", false) ? assistant.toString() : "");
+            InputViewValuePolicy.booleanValue(query, "cloud_candidates", false),
+            InputViewValuePolicy.booleanValue(assistant, "enabled", false) ? assistant.toString() : "");
         if (signature.equals(onlineSignature)) return;
         onlineSignature = signature;
         if (onlineTask != null) main.removeCallbacks(onlineTask);
