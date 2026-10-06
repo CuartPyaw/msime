@@ -72,19 +72,10 @@ public final class FeedbackApi {
         for (String key : DIAGNOSTIC_KEYS) {
             String value = raw.get(key);
             if (value == null) continue;
-            String trimmed = clip(stripControls(value).trim(), MAX_DIAGNOSTIC_VALUE_BYTES);
+            String trimmed = clip(TextPolicy.replaceControls(value, ' ').trim(), MAX_DIAGNOSTIC_VALUE_BYTES);
             if (!trimmed.isEmpty()) clean.put(key, trimmed);
         }
         return clean;
-    }
-
-    private static String stripControls(String value) {
-        StringBuilder out = new StringBuilder(value.length());
-        for (int index = 0; index < value.length(); index++) {
-            char c = value.charAt(index);
-            out.append(Character.isISOControl(c) ? ' ' : c);
-        }
-        return out.toString();
     }
 
     /** 按 UTF-8 字节截断，不切开代理对。 */

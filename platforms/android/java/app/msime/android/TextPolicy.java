@@ -22,6 +22,17 @@ public final class TextPolicy {
             && codePoint != '\n' && codePoint != '\r' && codePoint != '\t');
     }
 
+    /** Replace ISO control characters while preserving all other UTF-16 units. */
+    public static String replaceControls(String value, char replacement) {
+        if (value == null || value.isEmpty()) return value == null ? "" : value;
+        StringBuilder result = new StringBuilder(value.length());
+        for (int index = 0; index < value.length(); index++) {
+            char unit = value.charAt(index);
+            result.append(Character.isISOControl(unit) ? replacement : unit);
+        }
+        return result.toString();
+    }
+
     /** Accepts a bounded URL with the requested scheme and a non-empty authority. */
     public static boolean validAuthority(String value, String scheme, int maxBytes) {
         if (value == null || value.isEmpty() || !value.startsWith(scheme)
