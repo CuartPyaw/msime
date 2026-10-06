@@ -772,6 +772,10 @@ group("native success replies require a value", () => {
     "successful replies with a null value are refused");
   check(NativeReplyPolicy.successfulValue({ ok: false, value: "stale" }) === null,
     "failed replies never expose a value");
+  check(NativeReplyPolicy.successfulValue(null) === null,
+    "a JSON null reply is refused without throwing");
+  check(NativeReplyPolicy.successfulValue([]) === null,
+    "a JSON array reply is refused without throwing");
 });
 
 group("bounds persisted account sessions by UTF-8 bytes", () => {
