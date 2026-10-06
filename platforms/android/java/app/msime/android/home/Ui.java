@@ -15,6 +15,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import androidx.annotation.AttrRes;
 import androidx.annotation.ColorInt;
+import app.msime.android.ColorPolicy;
 import com.google.android.material.color.MaterialColors;
 
 /**
