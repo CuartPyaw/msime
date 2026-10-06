@@ -196,6 +196,12 @@ public final class ViewPolicy {
         view.setIncludeFontPadding(false);
     }
 
+    /** Remove font padding and vertical view padding while preserving horizontal padding. */
+    public static void clearFontAndVerticalPadding(TextView view) {
+        clearFontPadding(view);
+        clearVerticalPadding(view);
+    }
+
     /** Make a view passive for touch and focus navigation. */
     public static void setNonInteractive(View view) {
         view.setClickable(false);
