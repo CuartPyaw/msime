@@ -144,12 +144,7 @@ public final class Ui {
 
     /** Parse a theme or skin colour, returning the supplied fallback for missing or invalid input. */
     public static int parseColor(String value, int fallback) {
-        if (value == null || value.isEmpty()) return fallback;
-        try {
-            return Color.parseColor(value);
-        } catch (IllegalArgumentException error) {
-            return fallback;
-        }
+        return ColorPolicy.parse(value, fallback);
     }
 
     /** Layout parameters for a view that fills the parent width at its measured height. */
