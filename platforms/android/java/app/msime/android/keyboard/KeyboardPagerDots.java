@@ -115,7 +115,7 @@ public final class KeyboardPagerDots extends View {
     }
 
     private static int blend(int from, int to, float amount) {
-        float t = Math.max(0f, Math.min(1f, amount));
+        float t = KeyboardGeometry.bounded(amount, 0f, 1f);
         int a = Math.round(((from >>> 24) & 0xFF) + (((to >>> 24) & 0xFF) - ((from >>> 24) & 0xFF)) * t);
         int r = Math.round(((from >> 16) & 0xFF) + (((to >> 16) & 0xFF) - ((from >> 16) & 0xFF)) * t);
         int g = Math.round(((from >> 8) & 0xFF) + (((to >> 8) & 0xFF) - ((from >> 8) & 0xFF)) * t);
