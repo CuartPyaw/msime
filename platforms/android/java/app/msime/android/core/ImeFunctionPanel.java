@@ -40,7 +40,7 @@ final class ImeFunctionPanel {
         String state = enabled ? MoreToolsLayout.state(section, active) : "不可用";
         boolean navigates = section == MoreToolsLayout.Section.LOCAL_INPUT_BACK;
         String label = MoreToolsLayout.icon(title) + "  " + title;
-        card.setText(navigates ? label + "  ›" : label);
+        ViewPolicy.setTextSizeLabel(card, navigates ? label + "  ›" : label, 14);
         KeyboardGeometry.setKeyTextSize(card, 14);
         if (navigates) ViewPolicy.setStartCenteredVertically(card);
         else ViewPolicy.setCentered(card);
