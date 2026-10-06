@@ -20,9 +20,9 @@ import {
   applyAccountPreferences,
   accountPreferencesFromDocument,
   localAccountPreferences,
-  localPreferenceRevision,
   mergeAccountPreferences,
   preferenceSchemaFromDocument,
+  validLocalPreferenceDocument,
 } from './AccountPreferencePlan';
 import {
   ACCOUNT_ORIGIN, FileSessionStore, HarmonyAccountTransport, responseContentLength, responseContentType
@@ -488,13 +488,7 @@ export class HarmonyAccountCloudBridge {
         JSON.parse(client.loadPreferences(stateRoot)) as Record<string, Object>;
       if (reply['ok'] !== true) return null;
       const value: Record<string, Object> = reply['value'] as Record<string, Object>;
-      const preferences: Object | undefined = value['preferences'];
-      const revision: number | null = localPreferenceRevision(value);
-      if (preferences === undefined || typeof preferences !== 'object'
-        || revision === null) {
-        return null;
-      }
-      return value;
+      return validLocalPreferenceDocument(value) ? value : null;
     } catch {
       return null;
     }

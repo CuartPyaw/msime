@@ -270,6 +270,7 @@ import {
   AccountPreferenceSchema,
   AccountPreferences,
   accountPreferencesFromDocument,
+  validLocalPreferenceDocument,
   localPreferenceRevision,
   preferenceSchemaFromDocument,
   applyAccountPreferences,
@@ -9116,6 +9117,21 @@ group("account preference envelopes reject malformed numeric metadata", () => {
     "a fractional local revision is unavailable",
   );
   check(localPreferenceRevision({ revision: 3 }) === 3, "a safe local revision is preserved");
+});
+
+group("local preference documents require an object", () => {
+  const valid = { revision: 3, preferences: { scheme: "quanpin" } };
+  check(validLocalPreferenceDocument(valid), "a local preference object is accepted");
+  for (const preferences of [null, [], "invalid", 1]) {
+    check(
+      !validLocalPreferenceDocument({ revision: 3, preferences }),
+      `a malformed local preference value is rejected: ${String(preferences)}`,
+    );
+  }
+  check(
+    !validLocalPreferenceDocument({ revision: 3.5, preferences: {} }),
+    "a fractional local revision is rejected with its document",
+  );
 });
 
 group("applying writes only what the schema declares", () => {
