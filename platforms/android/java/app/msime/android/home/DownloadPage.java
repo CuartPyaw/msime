@@ -98,7 +98,7 @@ public final class DownloadPage extends DetailPage {
         copy.setSingleLine(true);
         Ui.style(copy, Ui.TEXT_BUTTON_SMALL, 600, Ui.onAccent(context));
         copy.setBackground(Ui.pillRipple(context, Ui.accent(context)));
-        copy.setPadding(Ui.dp(context, 14), Ui.dp(context, 6), Ui.dp(context, 14), Ui.dp(context, 6));
+        Ui.setSymmetricPaddingDp(copy, context, 14, 6);
         copy.setMinHeight(Ui.dp(context, Ui.COMPACT_BUTTON_MIN_HEIGHT));
         copy.setClickable(true);
         copy.setFocusable(true);

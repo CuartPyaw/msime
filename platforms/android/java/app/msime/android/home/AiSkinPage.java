@@ -375,7 +375,7 @@ public final class AiSkinPage extends DetailPage {
             TextView chip = new TextView(context);
             chip.setText(suggestion);
             chip.setSingleLine(true);
-            chip.setPadding(Ui.dp(context, 12), Ui.dp(context, 6), Ui.dp(context, 12), Ui.dp(context, 6));
+            Ui.setSymmetricPaddingDp(chip, context, 12, 6);
             chip.setClickable(true);
             chip.setFocusable(true);
             chip.setOnClickListener(ignored -> {
