@@ -12,6 +12,7 @@ import android.util.TypedValue;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.PathInterpolator;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -360,6 +361,12 @@ public final class Ui {
     /** Frame layout parameters for a pixel-sized square with explicit gravity. */
     public static FrameLayout.LayoutParams squareFrameParamsPx(int size, int gravity) {
         return new FrameLayout.LayoutParams(size, size, gravity);
+    }
+
+    /** Frame layout parameters for a child that fills width and uses a dp height. */
+    public static FrameLayout.LayoutParams frameMatchWidthHeight(Context context, float heightDp) {
+        return new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+            dp(context, heightDp));
     }
 
     /** Layout parameters for a weighted child with a fixed height in dp. */

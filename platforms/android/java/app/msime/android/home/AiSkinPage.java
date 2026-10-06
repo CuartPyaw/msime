@@ -302,7 +302,7 @@ public final class AiSkinPage extends DetailPage {
         FrameLayout stage = new FrameLayout(context);
         preview = new KeyboardPreview(context);
         preview.setContentDescription("皮肤预览");
-        stage.addView(preview, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(context, 200)));
+        stage.addView(preview, Ui.frameMatchWidthHeight(context, 200));
         LinearLayout overlay = new LinearLayout(context);
         overlay.setOrientation(LinearLayout.VERTICAL);
         overlay.setGravity(Gravity.CENTER);
