@@ -29,4 +29,18 @@ public final class HttpBodyPolicy {
         }
         return output.toByteArray();
     }
+
+    /** Reads a bounded body until the monotonic deadline, returning null after it expires. */
+    public static byte[] readWithin(InputStream input, int limit, long deadlineNanos)
+            throws IOException {
+        if (input == null || limit < 0) return null;
+        ByteArrayOutputStream output = new ByteArrayOutputStream(Math.min(limit, 8192));
+        byte[] buffer = new byte[8192];
+        int count;
+        while (System.nanoTime() < deadlineNanos && (count = input.read(buffer)) != -1) {
+            if (System.nanoTime() >= deadlineNanos || output.size() + count > limit) return null;
+            output.write(buffer, 0, count);
+        }
+        return System.nanoTime() < deadlineNanos ? output.toByteArray() : null;
+    }
 }
