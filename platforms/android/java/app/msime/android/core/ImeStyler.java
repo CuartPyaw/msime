@@ -321,7 +321,8 @@ final class ImeStyler {
         view.setOutlineAmbientShadowColor(shadowColor);
         view.setOutlineSpotShadowColor(shadowColor);
         view.setElevation(target.shadowOpacity() > 0
-            ? s.pixels(Math.max(1, target.shadowRadius() + target.shadowOffset())) : 0);
+            ? s.pixels(BoundsPolicy.bounded(target.shadowRadius() + target.shadowOffset(),
+                1d, Double.MAX_VALUE)) : 0);
     }
 
     /** One of the skin's colours at a fraction of its opacity. */
