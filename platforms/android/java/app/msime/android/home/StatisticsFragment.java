@@ -442,10 +442,8 @@ public final class StatisticsFragment extends HomeTabFragment {
     private static void tiles(Context context, LinearLayout parent, View left, View right) {
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams leftParams = new LinearLayout.LayoutParams(0,
-            ViewGroup.LayoutParams.MATCH_PARENT, 1f);
-        LinearLayout.LayoutParams rightParams = new LinearLayout.LayoutParams(0,
-            ViewGroup.LayoutParams.MATCH_PARENT, 1f);
+        LinearLayout.LayoutParams leftParams = Ui.weightedMatchParent(1f);
+        LinearLayout.LayoutParams rightParams = Ui.weightedMatchParent(1f);
         rightParams.setMarginStart(Ui.dp(context, 10));
         row.addView(left, leftParams);
         row.addView(right, rightParams);
