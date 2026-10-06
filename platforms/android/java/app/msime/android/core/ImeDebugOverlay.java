@@ -3,7 +3,6 @@ package app.msime.android;
 import android.graphics.Color;
 import android.os.SystemClock;
 import android.view.View;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -139,16 +138,10 @@ final class ImeDebugOverlay {
         }
 
         private static byte[] read(java.nio.file.Path file) throws IOException {
-            ByteArrayOutputStream bytes = new ByteArrayOutputStream((int) Math.min(MAX_BYTES, 1 << 16));
             try (InputStream input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
-                byte[] buffer = new byte[8192];
-                int count;
-                while ((count = input.read(buffer)) != -1) {
-                    if (bytes.size() > 2 * MAX_BYTES) break;
-                    bytes.write(buffer, 0, count);
-                }
+                byte[] bytes = HttpBodyPolicy.readBounded(input, 2 * MAX_BYTES);
+                return bytes == null ? new byte[0] : bytes;
             }
-            return bytes.toByteArray();
         }
     }
 
