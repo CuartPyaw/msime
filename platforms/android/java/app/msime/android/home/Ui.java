@@ -345,6 +345,13 @@ public final class Ui {
             ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
+    /** Layout parameters for a trailing row control with the standard row gap. */
+    public static LinearLayout.LayoutParams rowGapParams(Context context) {
+        LinearLayout.LayoutParams params = wrap();
+        params.setMarginStart(dp(context, ROW_GAP));
+        return params;
+    }
+
     /** Layout parameters for a view that wraps its width and uses a dp height. */
     public static LinearLayout.LayoutParams wrapHeight(Context context, float heightDp) {
         return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,

@@ -105,8 +105,7 @@ public final class GroupCard {
         control.setClickable(false);
         control.setFocusable(false);
         control.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        LinearLayout.LayoutParams params = Ui.wrap();
-        params.setMarginStart(Ui.dp(context, Ui.ROW_GAP));
+        LinearLayout.LayoutParams params = Ui.rowGapParams(context);
         row.view.addView(control, params);
         row.toggle = control;
         row.view.setOnClickListener(ignored -> {
@@ -169,8 +168,7 @@ public final class GroupCard {
     public Row button(CharSequence title, @Nullable CharSequence subtitle, CharSequence label, Runnable action) {
         Row row = new Row(this, title, subtitle, false);
         TextView button = KeyboardSheets.tonalButton(context, label, label + "，" + title, 500, action);
-        LinearLayout.LayoutParams params = Ui.wrap();
-        params.setMarginStart(Ui.dp(context, Ui.ROW_GAP));
+        LinearLayout.LayoutParams params = Ui.rowGapParams(context);
         row.view.addView(button, params);
         row.button = button;
         return add(row);
@@ -223,8 +221,7 @@ public final class GroupCard {
         TextView text = new TextView(context);
         text.setSingleLine(true);
         Ui.style(text, Ui.TEXT_ROW_TITLE, 400, Ui.subText(context));
-        LinearLayout.LayoutParams params = Ui.wrap();
-        params.setMarginStart(Ui.dp(context, Ui.ROW_GAP));
+        LinearLayout.LayoutParams params = Ui.rowGapParams(context);
         row.view.addView(text, params);
         setText(text, value);
         return text;
