@@ -167,8 +167,8 @@ final class ImeToolbar {
         s.exitLocalModeButton.setMinimumHeight(0);
         candidateHeader.addView(s.exitLocalModeButton, new LinearLayout.LayoutParams(
             s.pixels(32), LinearLayout.LayoutParams.MATCH_PARENT));
-        candidateRegion.addView(candidateHeader, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, s.pixels(READING_ROW_DP)));
+        candidateRegion.addView(candidateHeader, KeyboardGeometry.matchWidthHeightPx(
+            s.pixels(READING_ROW_DP)));
     }
 
     /** 候选那一行：候选滚动区占满剩余宽度，右端是分隔线加展开键。 */
@@ -213,8 +213,7 @@ final class ImeToolbar {
         bar.setVisibility(View.GONE);
         bar.setBasePixels(s.pixels(KeyboardGeometry.HEIGHT_PERCENT_BASE_DP));
         s.inlineHeightBar = bar;
-        candidateRegion.addView(bar, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
+        candidateRegion.addView(bar, KeyboardGeometry.matchWidthHeightPx(
             s.pixels(KeyboardGeometry.DESIGN_TOOLBAR_ROW_HEIGHT_DP)));
     }
 
