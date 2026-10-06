@@ -144,12 +144,10 @@ public final class KeyboardSchemeCard extends FrameLayout {
         int face = isSelected ? accent : ColorPolicy.withAlpha(accent, .78f);
         setBackground(rounded(isSelected ? ColorPolicy.withAlpha(accent, .12f) : Color.TRANSPARENT,
             KeyboardGeometry.pixels(getContext(), CARD_RADIUS_DP)));
-        glyph.setTextColor(face);
+        setFaceTextColor(face);
         glyph.setBackground(outlined(face, KeyboardGeometry.pixels(getContext(), GLYPH_RADIUS_DP), KeyboardGeometry.pixels(getContext(), GLYPH_BORDER_DP)));
-        badge.setTextColor(face);
         // 角标和对勾都压在字形框的边线上，各自带一小块与面板同色的底，把边线断开。
         badge.setBackgroundColor(keyBackground);
-        title.setTextColor(face);
         check.setBackground(checkMark(accent, keyBackground));
         check.setVisibility(isSelected ? View.VISIBLE : View.GONE);
     }
@@ -163,17 +161,21 @@ public final class KeyboardSchemeCard extends FrameLayout {
         selected = isSelected;
         int face = isSelected ? accent : foreground;
         ViewPolicy.clearBackground(this);
-        glyph.setTextColor(face);
+        setFaceTextColor(face);
         glyph.setBackground(outlined(face, KeyboardGeometry.pixels(getContext(), GLYPH_RADIUS_DP), KeyboardGeometry.pixels(getContext(), GLYPH_BORDER_DP)));
-        badge.setTextColor(face);
         badge.setBackgroundColor(panelBackground);
         badge.setVisibility(isSelected || badge.getText().length() == 0 ? View.INVISIBLE : View.VISIBLE);
-        title.setTextColor(face);
         title.setTypeface(isSelected ? android.graphics.Typeface.DEFAULT_BOLD
             : android.graphics.Typeface.DEFAULT);
         if (check.getLayoutParams() != checkBadgeParams) check.setLayoutParams(checkBadgeParams);
         check.setBackground(checkMark(accent, panelBackground));
         check.setVisibility(isSelected ? View.VISIBLE : View.GONE);
+    }
+
+    private void setFaceTextColor(int face) {
+        glyph.setTextColor(face);
+        badge.setTextColor(face);
+        title.setTextColor(face);
     }
 
     public boolean isCardSelected() { return selected; }
