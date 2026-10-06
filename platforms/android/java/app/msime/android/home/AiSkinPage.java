@@ -501,7 +501,7 @@ public final class AiSkinPage extends DetailPage {
                     skin.keyForeground(), skin.returnBackground()};
                 for (String colour : colours) {
                     View dot = new View(context);
-                    android.graphics.drawable.GradientDrawable shape = Ui.pill(parse(colour));
+                    android.graphics.drawable.GradientDrawable shape = Ui.pill(Ui.parseColor(colour, Color.GRAY));
                     shape.setStroke(Math.max(1, Ui.dp(context, 1)), Ui.hairline(context));
                     dot.setBackground(shape);
                     LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(Ui.dp(context, 16), Ui.dp(context, 16));
@@ -602,14 +602,6 @@ public final class AiSkinPage extends DetailPage {
         KeyboardSheets.applyLocalFeedback(context, design);
         KeyboardSheets.recordSkin(context, id);
         return "";
-    }
-
-    private static int parse(String colour) {
-        try {
-            return Color.parseColor(colour);
-        } catch (IllegalArgumentException | NullPointerException error) {
-            return Color.GRAY;
-        }
     }
 
 }
