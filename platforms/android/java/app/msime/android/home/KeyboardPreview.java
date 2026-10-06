@@ -119,10 +119,6 @@ public final class KeyboardPreview extends View {
         }
     }
 
-    private float dp(float value) {
-        return value * getResources().getDisplayMetrics().density;
-    }
-
     private int ink() {
         return skin == null ? Ui.text(getContext()) : parse(skin.keyForeground(), Ui.text(getContext()));
     }
@@ -177,7 +173,8 @@ public final class KeyboardPreview extends View {
      * 边距、键距、候选条和字号是按设置首页那张整宽预览定的；社区皮肤卡上的缩略图只有约 170×106 dp，原样套用这些固定值时每行只剩几 dp 高，键面缩成细条而 13 dp 的字溢出到键外。以参考键盘为基准整体缩小；整宽预览不小于参考尺寸，系数为 1，外观不变。
      */
     private float scale() {
-        return Math.min(1f, Math.min(getWidth() / dp(REFERENCE_WIDTH_DP), getHeight() / dp(REFERENCE_HEIGHT_DP)));
+        return Math.min(1f, Math.min(getWidth() / Ui.dpFloat(getContext(), REFERENCE_WIDTH_DP),
+            getHeight() / Ui.dpFloat(getContext(), REFERENCE_HEIGHT_DP)));
     }
 
     /** 字号取设计值与键面能容下的较小者，保证标签不出键。 */
@@ -193,26 +190,27 @@ public final class KeyboardPreview extends View {
         if (getWidth() <= 0 || getHeight() <= 0) return;
         float s = scale();
         // 缩小时按参考键盘的宽高比等比画，居中放进视图，空出的边露出皮肤底色；只缩不拉，键面不会被卡片的扁长比例压扁。整宽预览（s 为 1）仍铺满视图。
-        float w = s < 1f ? dp(REFERENCE_WIDTH_DP) * s : getWidth();
-        float h = s < 1f ? dp(REFERENCE_HEIGHT_DP) * s : getHeight();
+        float w = s < 1f ? Ui.dpFloat(getContext(), REFERENCE_WIDTH_DP) * s : getWidth();
+        float h = s < 1f ? Ui.dpFloat(getContext(), REFERENCE_HEIGHT_DP) * s : getHeight();
         int saved = canvas.save();
         canvas.translate((getWidth() - w) / 2f, (getHeight() - h) / 2f);
-        float pad = dp(6) * s;
-        float gap = dp(5) * s;
-        float stripHeight = dp(24) * s;
-        float radius = (skin == null ? dp(6) : Math.min(dp((float) skin.cornerRadius()), dp(12))) * s;
+        float pad = Ui.dpFloat(getContext(), 6) * s;
+        float gap = Ui.dpFloat(getContext(), 5) * s;
+        float stripHeight = Ui.dpFloat(getContext(), 24) * s;
+        float radius = (skin == null ? Ui.dpFloat(getContext(), 6)
+            : Math.min(Ui.dpFloat(getContext(), (float) skin.cornerRadius()), Ui.dpFloat(getContext(), 12))) * s;
 
         // 候选条：一个拼音和两枚候选，首选用强调色。
         float baseline = pad + stripHeight * 0.68f;
         paint.setTextAlign(Paint.Align.LEFT);
-        paint.setTextSize(dp(12) * s);
+        paint.setTextSize(Ui.dpFloat(getContext(), 12) * s);
         paint.setColor(secondary());
-        canvas.drawText("ni hao", pad + dp(6) * s, baseline, paint);
-        paint.setTextSize(dp(13) * s);
+        canvas.drawText("ni hao", pad + Ui.dpFloat(getContext(), 6) * s, baseline, paint);
+        paint.setTextSize(Ui.dpFloat(getContext(), 13) * s);
         paint.setColor(returnCap());
-        canvas.drawText("你好", pad + dp(52) * s, baseline, paint);
+        canvas.drawText("你好", pad + Ui.dpFloat(getContext(), 52) * s, baseline, paint);
         paint.setColor(ink());
-        canvas.drawText("拟好", pad + dp(90) * s, baseline, paint);
+        canvas.drawText("拟好", pad + Ui.dpFloat(getContext(), 90) * s, baseline, paint);
 
         float top = pad + stripHeight;
         float available = h - top - pad;
@@ -246,7 +244,7 @@ public final class KeyboardPreview extends View {
                 String label = "空格".equals(face) ? caption : face;
                 if (!label.isEmpty()) {
                     paint.setColor(action ? returnLabel() : "空格".equals(face) ? secondary() : ink());
-                    fitText(label, dp(label.length() > 2 ? 10 : 13) * s, key);
+                    fitText(label, Ui.dpFloat(getContext(), label.length() > 2 ? 10 : 13) * s, key);
                     Paint.FontMetrics metrics = paint.getFontMetrics();
                     canvas.drawText(label, key.centerX(), key.centerY() - (metrics.ascent + metrics.descent) / 2f, paint);
                 }
