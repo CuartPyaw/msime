@@ -9,6 +9,7 @@ import android.util.AttributeSet;
 import android.view.View;
 import androidx.annotation.Nullable;
 import app.msime.android.KeyboardSkin;
+import app.msime.android.keyboard.KeyboardGeometry;
 
 /**
  * A still picture of the keyboard the user actually has.
@@ -115,7 +116,7 @@ public final class KeyboardPreview extends View {
     /** 设计皮肤的字母键与功能键按其键帽不透明度叠在背景上，与键盘的 KeyboardSkinKeyDrawable 一致；回车不透明。 */
     private int withKeyOpacity(int colour) {
         if (skin == null || !skin.designed()) return colour;
-        float opacity = (float) Math.max(0d, Math.min(1d, skin.keyOpacity()));
+        float opacity = (float) KeyboardGeometry.bounded(skin.keyOpacity(), 0, 1);
         return Ui.withAlpha(colour, opacity);
     }
 
