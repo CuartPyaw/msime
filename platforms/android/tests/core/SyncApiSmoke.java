@@ -19,6 +19,7 @@ public final class SyncApiSmoke {
         check(!SyncApi.conflict(null), "null failure");
         check(SyncApi.preferenceRevision(42L) == 42L, "integer preference revision");
         check(SyncApi.phraseRevision(42L) == 42L, "integer phrase revision");
+        check(SyncApi.changesRevision(42L, 7L) == 42L, "integer dictionary revision");
 
         // Cloud preference revisions are non-negative integers. Fractional JSON numbers
         // must not be truncated by Number.longValue(), and negative revisions are invalid.
@@ -39,6 +40,22 @@ public final class SyncApiSmoke {
                 check(expected.status == 500 && "invalid_response".equals(expected.code),
                     "invalid phrase revision failure");
             }
+        }
+        for (Number invalid : new Number[] {1.5d, -1L}) {
+            try {
+                SyncApi.changesRevision(invalid, 0L);
+                throw new AssertionError("invalid dictionary revision must be refused: " + invalid);
+            } catch (CloudApi.Failure expected) {
+                check(expected.status == 500 && "invalid_response".equals(expected.code),
+                    "invalid dictionary revision failure");
+            }
+        }
+        try {
+            SyncApi.changesRevision(6L, 7L);
+            throw new AssertionError("dictionary cursor must not move backwards");
+        } catch (CloudApi.Failure expected) {
+            check(expected.status == 500 && "invalid_response".equals(expected.code),
+                "backwards dictionary revision failure");
         }
 
         check("/v1/users/me/dictionary/changes?after=7&limit=1".equals(SyncApi.changesPath(7)), "changes path");
