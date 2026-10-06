@@ -3857,7 +3857,8 @@ public final class MSIMEInputService extends InputMethodService {
     private EmojiCatalogModel.Page decodeEmojiPage(
             String response, int offset, EmojiCatalogModel.Category category) throws JSONException {
         JSONObject envelope = new JSONObject(response);
-        if (!envelope.getBoolean("ok")) throw new JSONException("Emoji catalog unavailable");
+        if (!Boolean.TRUE.equals(envelope.opt("ok")))
+            throw new JSONException("Emoji catalog unavailable");
         JSONObject value = envelope.getJSONObject("value");
         JSONArray entries = value.getJSONArray("items");
         if (entries.length() > EmojiCatalogModel.PAGE_SIZE)
