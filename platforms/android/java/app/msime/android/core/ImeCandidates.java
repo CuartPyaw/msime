@@ -214,6 +214,21 @@ final class ImeCandidates {
         return button;
     }
 
+    private KeyboardPressButton expandedActionButton(String label, float sizeSp,
+            String description, Runnable action) {
+        KeyboardPressButton button = new KeyboardPressButton(s);
+        button.setKeyboardRole(KeyboardKeyRole.ACCENT);
+        ViewPolicy.setAllCapsFalse(button);
+        button.setText(label);
+        KeyboardGeometry.setKeyTextSize(button, sizeSp);
+        button.setContentDescription(description);
+        button.setOnClickListener(ignored -> {
+            s.imeKeyFeedback.playFeedback(button);
+            action.run();
+        });
+        return button;
+    }
+
     void renderExpandedCandidates() {
         if (s.expandedCandidates == null || s.expandedCandidateScroll == null) return;
         if (!s.candidatePanelOpen) {
@@ -261,25 +276,11 @@ final class ImeCandidates {
         // 底部 返回 + ⌫，各 40 dp 高、功能键底色。
         LinearLayout footer = new LinearLayout(s);
         footer.setOrientation(LinearLayout.HORIZONTAL);
-        KeyboardPressButton close = new KeyboardPressButton(s);
-        close.setKeyboardRole(KeyboardKeyRole.ACCENT);
-        ViewPolicy.setAllCapsFalse(close);
-        close.setText("返回");
-        KeyboardGeometry.setKeyTextSize(close, 15);
-        close.setContentDescription("收起候选面板");
-        close.setOnClickListener(ignored -> {
-            s.imeKeyFeedback.playFeedback(close);
+        KeyboardPressButton close = expandedActionButton("返回", 15, "收起候选面板", () -> {
             s.closeCandidatePanel();
             s.render();
         });
-        KeyboardPressButton delete = new KeyboardPressButton(s);
-        delete.setKeyboardRole(KeyboardKeyRole.ACCENT);
-        ViewPolicy.setAllCapsFalse(delete);
-        delete.setText("⌫");
-        KeyboardGeometry.setKeyTextSize(delete, 16);
-        delete.setContentDescription("候选面板 删除");
-        delete.setOnClickListener(ignored -> {
-            s.imeKeyFeedback.playFeedback(delete);
+        KeyboardPressButton delete = expandedActionButton("⌫", 16, "候选面板 删除", () -> {
             s.closeCandidatePanel();
             s.deleteFromHandwriting();
         });
