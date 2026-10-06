@@ -6,7 +6,6 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
-import android.util.TypedValue;
 import android.view.View;
 
 /**
@@ -76,11 +75,10 @@ public final class KeyboardKeyPreview extends View {
      */
     public void show(String value, float keyLeft, float keyTop, float keyWidth, float weight,
             float parentWidth) {
-        float density = getResources().getDisplayMetrics().density;
         label = value == null ? "" : value;
         float width = bubbleWidth(keyWidth, weight);
-        float height = HEIGHT_DP * density;
-        float margin = SHADOW_MARGIN_DP * density;
+        float height = KeyboardGeometry.floatPixels(getContext(), HEIGHT_DP);
+        float margin = KeyboardGeometry.floatPixels(getContext(), SHADOW_MARGIN_DP);
         int nextWidth = Math.round(width + margin * 2);
         int nextHeight = Math.round(height + margin * 2);
         if (nextWidth != bubbleWidth || nextHeight != bubbleHeight) {
@@ -89,7 +87,8 @@ public final class KeyboardKeyPreview extends View {
             requestLayout();
         }
         setTranslationX(bubbleLeft(keyLeft, keyWidth, width, parentWidth) - margin);
-        setTranslationY(bubbleTop(keyTop, height, OVERLAP_DP * density) - margin);
+        setTranslationY(bubbleTop(keyTop, height,
+            KeyboardGeometry.floatPixels(getContext(), OVERLAP_DP)) - margin);
         setVisibility(VISIBLE);
         invalidate();
     }
@@ -113,23 +112,23 @@ public final class KeyboardKeyPreview extends View {
     }
 
     @Override protected void onDraw(Canvas canvas) {
-        float density = getResources().getDisplayMetrics().density;
-        float margin = SHADOW_MARGIN_DP * density;
+        float margin = KeyboardGeometry.floatPixels(getContext(), SHADOW_MARGIN_DP);
         rect.set(margin, margin, getWidth() - margin, getHeight() - margin);
         if (rect.width() <= 0 || rect.height() <= 0) return;
-        float top = TOP_RADIUS_DP * density;
-        float bottom = BOTTOM_RADIUS_DP * density;
+        float top = KeyboardGeometry.floatPixels(getContext(), TOP_RADIUS_DP);
+        float bottom = KeyboardGeometry.floatPixels(getContext(), BOTTOM_RADIUS_DP);
         radii[0] = radii[1] = radii[2] = radii[3] = top;
         radii[4] = radii[5] = radii[6] = radii[7] = bottom;
         shape.reset();
         shape.addRoundRect(rect, radii, Path.Direction.CW);
-        fill.setShadowLayer(9 * density, 0, 6 * density, Color.argb(56, 0, 0, 0));
+        fill.setShadowLayer(KeyboardGeometry.floatPixels(getContext(), 9), 0,
+            KeyboardGeometry.floatPixels(getContext(), 6), Color.argb(56, 0, 0, 0));
         canvas.drawPath(shape, fill);
-        outline.setStrokeWidth(Math.max(1f, .5f * density));
+        outline.setStrokeWidth(Math.max(1f,
+            KeyboardGeometry.floatPixels(getContext(), .5f)));
         canvas.drawPath(shape, outline);
         if (label.isEmpty()) return;
-        text.setTextSize(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, TEXT_SP,
-            getResources().getDisplayMetrics()));
+        text.setTextSize(KeyboardGeometry.sp(getContext(), TEXT_SP));
         Paint.FontMetrics metrics = text.getFontMetrics();
         canvas.drawText(label, rect.centerX(), rect.centerY() - (metrics.ascent + metrics.descent) / 2f,
             text);
