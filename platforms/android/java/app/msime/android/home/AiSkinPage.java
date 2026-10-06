@@ -293,7 +293,7 @@ public final class AiSkinPage extends DetailPage {
             s.nineKey = index == 1;
             refreshPreview();
         });
-        header.addView(layout, KeyboardSheets.wrap());
+        header.addView(layout, Ui.wrap());
         card.addView(header);
 
         FrameLayout stage = new FrameLayout(context);
@@ -326,7 +326,7 @@ public final class AiSkinPage extends DetailPage {
         colours.addView(label);
         palette = new LinearLayout(context);
         palette.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams paletteParams = KeyboardSheets.wrap();
+        LinearLayout.LayoutParams paletteParams = Ui.wrap();
         paletteParams.setMarginStart(Ui.dp(context, 10));
         colours.addView(palette, paletteParams);
         LinearLayout.LayoutParams coloursParams = Ui.matchWidth();
@@ -381,7 +381,7 @@ public final class AiSkinPage extends DetailPage {
                 input.setSelection(input.length());
             });
             chip.setAccessibilityDelegate(KeyboardSheets.buttonDelegate("建议描述 " + suggestion));
-            LinearLayout.LayoutParams chipParams = KeyboardSheets.wrap();
+            LinearLayout.LayoutParams chipParams = Ui.wrap();
             chipParams.setMarginEnd(Ui.dp(context, 8));
             chips.addView(chip, chipParams);
             chipViews.add(chip);

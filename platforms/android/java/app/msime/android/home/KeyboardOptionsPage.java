@@ -182,7 +182,7 @@ public final class KeyboardOptionsPage extends DetailPage {
         chip.setText(label);
         chip.setSingleLine(true);
         Ui.style(chip, 12, 500, colour);
-        LinearLayout.LayoutParams params = KeyboardSheets.wrap();
+        LinearLayout.LayoutParams params = Ui.wrap();
         params.setMarginEnd(Ui.dp(context, 12));
         plate.addView(chip, params);
     }
