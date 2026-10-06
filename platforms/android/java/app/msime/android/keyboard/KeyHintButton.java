@@ -43,9 +43,8 @@ public class KeyHintButton extends KeyboardPressButton {
         // TextView 把文字裁在内边距围出的框里：在按钮默认的上下内边距之外再留出提示的高度，46 dp 的键只剩不到 30 dp，22 sp 的字母连同字体留白放不下，被裁掉下半截、压在提示上。有提示时上边距归零、去掉字体留白，下边只留提示那一行。
         boolean hinted = !hintText.isEmpty();
         setIncludeFontPadding(!hinted);
-        float density = getResources().getDisplayMetrics().density;
         setPadding(getPaddingLeft(), hinted ? 0 : basePaddingTop, getPaddingRight(),
-            hinted ? KeyboardGeometry.pixels(11, density) : basePaddingBottom);
+            hinted ? KeyboardGeometry.pixels(getContext(), 11) : basePaddingBottom);
         invalidate();
     }
 
@@ -79,21 +78,20 @@ public class KeyHintButton extends KeyboardPressButton {
     }
 
     private void drawCornerHint(Canvas canvas) {
-        float density = getResources().getDisplayMetrics().density;
         cornerPaint.setTextSize(KeyboardGeometry.sp(getContext(), CORNER_HINT_SP));
         cornerPaint.setColor(cornerHintColor);
         if (!isEnabled()) cornerPaint.setAlpha(96);
         Paint.FontMetrics metrics = cornerPaint.getFontMetrics();
-        float baseline = CORNER_HINT_TOP_DP * density - metrics.ascent;
-        canvas.drawText(cornerHint, getWidth() - CORNER_HINT_RIGHT_DP * density, baseline,
+        float baseline = KeyboardGeometry.floatPixels(getContext(), CORNER_HINT_TOP_DP) - metrics.ascent;
+        canvas.drawText(cornerHint,
+            getWidth() - KeyboardGeometry.floatPixels(getContext(), CORNER_HINT_RIGHT_DP), baseline,
             cornerPaint);
     }
 
     private void drawBottomHint(Canvas canvas) {
         float size = KeyboardGeometry.sp(getContext(), 9);
-        float density = getResources().getDisplayMetrics().density;
         float available = Math.max(1, getWidth() - getPaddingLeft() - getPaddingRight()
-            - KeyboardGeometry.pixels(4, density));
+            - KeyboardGeometry.pixels(getContext(), 4));
         hintPaint.setTextSize(size);
         while (size > KeyboardGeometry.sp(getContext(), 6)
                 && hintPaint.measureText(hintText) > available) {
@@ -103,7 +101,7 @@ public class KeyHintButton extends KeyboardPressButton {
         hintPaint.setColor(hintColor);
         hintPaint.setAlpha(isEnabled() ? 204 : 96);
         Paint.FontMetrics metrics = hintPaint.getFontMetrics();
-        float baseline = getHeight() - KeyboardGeometry.pixels(2, density) - metrics.bottom;
+        float baseline = getHeight() - KeyboardGeometry.pixels(getContext(), 2) - metrics.bottom;
         canvas.drawText(hintText, getWidth() / 2f, baseline, hintPaint);
     }
 }
