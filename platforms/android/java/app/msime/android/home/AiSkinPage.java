@@ -282,12 +282,10 @@ public final class AiSkinPage extends DetailPage {
         header.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout heading = new LinearLayout(context);
         heading.setOrientation(LinearLayout.VERTICAL);
-        title = new TextView(context);
+        title = Ui.styledLabel(context, "", 17, 600, Ui.text(context));
         title.setSingleLine(true);
-        Ui.style(title, 17, 600, Ui.text(context));
         heading.addView(title);
-        subtitle = new TextView(context);
-        Ui.style(subtitle, 13, 400, Ui.subText(context));
+        subtitle = Ui.styledLabel(context, "", 13, 400, Ui.subText(context));
         heading.addView(subtitle);
         header.addView(heading, Ui.weightWrap(1f));
         SegmentedControl layout = new SegmentedControl(context);
@@ -309,9 +307,7 @@ public final class AiSkinPage extends DetailPage {
         ProgressBar spinner = new ProgressBar(context);
         spinner.setIndeterminateTintList(ColorStateList.valueOf(Ui.accent(context)));
         overlay.addView(spinner, Ui.squareParams(context, 32));
-        TextView designing = new TextView(context);
-        designing.setText("正在设计…");
-        Ui.style(designing, 14, 500, Ui.text(context));
+        TextView designing = Ui.styledLabel(context, "正在设计…", 14, 500, Ui.text(context));
         overlay.addView(designing);
         busyOverlay = overlay;
         stage.addView(overlay, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
@@ -323,9 +319,7 @@ public final class AiSkinPage extends DetailPage {
         LinearLayout colours = new LinearLayout(context);
         colours.setOrientation(LinearLayout.HORIZONTAL);
         colours.setGravity(Gravity.CENTER_VERTICAL);
-        TextView label = new TextView(context);
-        label.setText("配色");
-        Ui.style(label, 13, 400, Ui.subText(context));
+        TextView label = Ui.styledLabel(context, "配色", 13, 400, Ui.subText(context));
         colours.addView(label);
         palette = new LinearLayout(context);
         palette.setOrientation(LinearLayout.HORIZONTAL);
