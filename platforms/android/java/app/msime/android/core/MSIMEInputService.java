@@ -5336,8 +5336,7 @@ public final class MSIMEInputService extends InputMethodService {
         // session/generation/index identity for accessibility and hardware number-row selection.
         button.setText(candidateLabel("", text, annotation, highlighted));
         int labelLines = candidateLabelLines(annotation);
-        button.setMinLines(labelLines);
-        button.setMaxLines(labelLines);
+        ViewPolicy.setFixedLines(button, labelLines);
         configureCandidateTextLayout(button, labelLines);
         KeyboardGeometry.setKeyTextSize(button, candidateFontSize);
         button.setSelected(highlighted);

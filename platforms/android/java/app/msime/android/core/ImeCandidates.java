@@ -175,8 +175,7 @@ final class ImeCandidates {
         ViewPolicy.setAllCapsFalse(button);
         button.setText(s.candidateLabel("", text, annotation, highlighted));
         int labelLines = MSIMEInputService.candidateLabelLines(annotation);
-        button.setMinLines(labelLines);
-        button.setMaxLines(labelLines);
+        ViewPolicy.setFixedLines(button, labelLines);
         s.configureCandidateTextLayout(button, labelLines);
         KeyboardGeometry.setKeyTextSize(button, 17);
         button.setSelected(highlighted);

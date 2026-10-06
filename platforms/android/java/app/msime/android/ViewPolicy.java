@@ -117,6 +117,12 @@ public final class ViewPolicy {
         view.setEllipsize(TextUtils.TruncateAt.END);
     }
 
+    /** Force a text view to occupy exactly the requested number of lines. */
+    public static void setFixedLines(TextView view, int lines) {
+        view.setMinLines(lines);
+        view.setMaxLines(lines);
+    }
+
     /** Remove Android's extra font top and bottom padding from a text view. */
     public static void clearFontPadding(TextView view) {
         view.setIncludeFontPadding(false);
