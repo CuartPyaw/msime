@@ -324,9 +324,9 @@ public final class StatisticsFragment extends HomeTabFragment {
         if (keys.positions() != null) {
             header(context, content, "选词位置", null);
             LinearLayout positions = card(context, content, 16);
-            List<Share> shares = new ArrayList<>(4);
+            List<Share> shares = new ArrayList<>(TypingStatisticsSummary.POSITION_BUCKETS);
             String[] titles = {"第 1 个", "第 2 个", "第 3 个", "翻页后"};
-            for (int index = 0; index < 4; index++) {
+            for (int index = 0; index < TypingStatisticsSummary.POSITION_BUCKETS; index++) {
                 shares.add(new Share(titles[index], Math.round(keys.positions().get(index) * 1000)));
             }
             DistributionView bars = new DistributionView(context);
