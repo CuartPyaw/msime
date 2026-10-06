@@ -201,7 +201,8 @@ public final class KeyboardPreview extends View {
      * 边距、键距、候选条和字号是按设置首页那张整宽预览定的；社区皮肤卡上的缩略图只有约 170×106 dp，原样套用这些固定值时每行只剩几 dp 高，键面缩成细条而 13 dp 的字溢出到键外。以参考键盘为基准整体缩小；整宽预览不小于参考尺寸，系数为 1，外观不变。
      */
     private float scale() {
-        return BoundsPolicy.atMost(Math.min(getWidth() / Ui.dpFloat(getContext(), REFERENCE_WIDTH_DP),
+        return BoundsPolicy.atMost(KeyboardGeometry.shorterSide(
+            getWidth() / Ui.dpFloat(getContext(), REFERENCE_WIDTH_DP),
             getHeight() / Ui.dpFloat(getContext(), REFERENCE_HEIGHT_DP)), 1f);
     }
 
