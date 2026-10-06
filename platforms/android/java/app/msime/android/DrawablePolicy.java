@@ -16,6 +16,14 @@ public final class DrawablePolicy {
         return shape;
     }
 
+    /** Create a filled circle with a visible outline. */
+    public static GradientDrawable circleOutlined(int fillColor, int strokeWidth,
+                                                  int strokeColor) {
+        GradientDrawable shape = circle(fillColor);
+        shape.setStroke(Math.max(1, strokeWidth), strokeColor);
+        return shape;
+    }
+
     public static GradientDrawable rounded(int color, float radiusPx) {
         GradientDrawable shape = new GradientDrawable();
         shape.setShape(GradientDrawable.RECTANGLE);
