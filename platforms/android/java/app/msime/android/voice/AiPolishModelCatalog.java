@@ -23,6 +23,10 @@ public final class AiPolishModelCatalog {
 
     private AiPolishModelCatalog() {}
 
+    static String strictString(Object value) {
+        return value instanceof String ? (String) value : null;
+    }
+
     public static List<String> fetch(String endpoint, String token) throws AiPolishClient.Failure {
         final AiPolishConfiguration configuration;
         try {
@@ -50,13 +54,15 @@ public final class AiPolishModelCatalog {
             for (int index = 0; index < data.length(); index++) {
                 JSONObject model = data.optJSONObject(index);
                 if (model == null || (model.has("active") && !model.optBoolean("active", true))) continue;
-                String id = model.optString("id", "").trim();
+                String rawId = strictString(model.opt("id"));
+                if (rawId == null) continue;
+                String id = rawId.trim();
                 if (id.isEmpty() || id.length() > MAX_MODEL_ID_LENGTH) continue;
                 JSONArray endpointTypes = model.optJSONArray("supported_endpoint_types");
                 if (endpointTypes != null && endpointTypes.length() > 0) {
                     boolean supported = model.optBoolean("chat_completions_bridge", false);
                     for (int item = 0; item < endpointTypes.length(); item++) {
-                        String type = endpointTypes.optString(item, "");
+                        String type = strictString(endpointTypes.opt(item));
                         if ("openai".equals(type)) supported = true;
                     }
                     if (!supported) continue;
@@ -70,7 +76,9 @@ public final class AiPolishModelCatalog {
                 return new ArrayList<>(models);
             }
             if (!anthropic) throw new AiPolishClient.Failure(AiPolishClient.Reason.INVALID);
-            String next = document.optString("last_id", "").trim();
+            String rawNext = strictString(document.opt("last_id"));
+            if (rawNext == null) throw new AiPolishClient.Failure(AiPolishClient.Reason.INVALID);
+            String next = rawNext.trim();
             if (next.isEmpty() || !cursors.add(next))
                 throw new AiPolishClient.Failure(AiPolishClient.Reason.INVALID);
             cursor = next;
