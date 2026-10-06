@@ -77,7 +77,7 @@ public final class StatisticsFragment extends HomeTabFragment {
     @Override public void onViewCreated(@NonNull View view, @Nullable Bundle state) {
         SegmentedControl sections = view.findViewById(R.id.statistics_sections);
         sections.setFillWidth(true);
-        List<String> labels = new ArrayList<>();
+        List<String> labels = new ArrayList<>(Tab.values().length);
         for (Tab value : Tab.values()) labels.add(value.label);
         sections.setOptions(labels, tab.ordinal());
         sections.setOnSelect(index -> {
@@ -323,7 +323,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         if (keys.positions() != null) {
             header(context, content, "选词位置", null);
             LinearLayout positions = card(context, content, 16);
-            List<Share> shares = new ArrayList<>();
+            List<Share> shares = new ArrayList<>(4);
             String[] titles = {"第 1 个", "第 2 个", "第 3 个", "翻页后"};
             for (int index = 0; index < 4; index++) {
                 shares.add(new Share(titles[index], Math.round(keys.positions().get(index) * 1000)));
