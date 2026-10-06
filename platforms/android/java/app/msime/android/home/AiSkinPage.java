@@ -13,7 +13,6 @@ import android.text.Editable;
 import android.text.InputFilter;
 import android.text.InputType;
 import android.text.TextWatcher;
-import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
@@ -353,7 +352,7 @@ public final class AiSkinPage extends DetailPage {
         input.setHintTextColor(Ui.subText(context));
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         input.setMinLines(2);
-        input.setGravity(Gravity.TOP | Gravity.START);
+        ViewPolicy.setTopStart(input);
         input.setFilters(new InputFilter[] {new InputFilter.LengthFilter(SkinJobsApi.MAX_PROMPT_CHARACTERS)});
         ViewPolicy.clearBackground(input);
         Ui.style(input, Ui.TEXT_ROW_TITLE, 400, Ui.text(context));

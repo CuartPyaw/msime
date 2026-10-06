@@ -152,6 +152,11 @@ public final class ViewPolicy {
         view.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
     }
 
+    /** Align a multi-line text field to the start edge and top. */
+    public static void setTopStart(TextView view) {
+        view.setGravity(Gravity.TOP | Gravity.START);
+    }
+
     /** Apply a typeface style while preserving the text view's current family. */
     public static void setTypefaceStyle(TextView view, int style) {
         view.setTypeface(view.getTypeface(), style);
