@@ -313,8 +313,7 @@ public final class AiSkinPage extends DetailPage {
         busyOverlay = overlay;
         stage.addView(overlay, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT));
-        LinearLayout.LayoutParams stageParams = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams stageParams = Ui.matchWidth();
         stageParams.topMargin = Ui.dp(context, 12);
         card.addView(stage, stageParams);
 
@@ -330,8 +329,7 @@ public final class AiSkinPage extends DetailPage {
         LinearLayout.LayoutParams paletteParams = KeyboardSheets.wrap();
         paletteParams.setMarginStart(Ui.dp(context, 10));
         colours.addView(palette, paletteParams);
-        LinearLayout.LayoutParams coloursParams = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams coloursParams = Ui.matchWidth();
         coloursParams.topMargin = Ui.dp(context, 10);
         card.addView(colours, coloursParams);
 
@@ -413,8 +411,7 @@ public final class AiSkinPage extends DetailPage {
 
         LinearLayout actions = new LinearLayout(context);
         actions.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams actionsParams = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams actionsParams = Ui.matchWidth();
         actionsParams.topMargin = Ui.dp(context, Ui.GROUP_GAP);
         if (unavailable) {
             GroupCard.add(target, null).note("AI 设计皮肤暂不可用，请稍后再来。");
