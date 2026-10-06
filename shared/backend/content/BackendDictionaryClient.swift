@@ -89,11 +89,13 @@ extension BackendAccountClient {
     return page
   }
   func addDictionary(_ kind: DictionaryKind, value: DictionaryValue, token: String) async throws -> DictionaryChange {
+    guard Self.validNewDictionaryValue(value, kind: kind) else { throw Failure(status: 400) }
     let change: DictionaryChange = try await json("POST", "/v1/users/me/dictionaries/" + kind.rawValue, token: token, body: JSONEncoder().encode(value))
     guard Self.validDictionaryChange(change, expectedKind: kind) else { throw Failure(status: 0) }
     return change
   }
   func updateDictionary(_ entry: DictionaryEntry, value: DictionaryValue, token: String) async throws -> DictionaryChange {
+    guard Self.validNewDictionaryValue(value, kind: entry.kind) else { throw Failure(status: 400) }
     struct Body: Encodable { let code: String; let word: String; let weight: Int64; let revision: Int64 }
     let change: DictionaryChange = try await json("PUT", dictionaryEntryPath(entry), token: token,
       body: JSONEncoder().encode(Body(code: value.code, word: value.word, weight: value.weight, revision: entry.revision)))
@@ -167,7 +169,8 @@ extension BackendAccountClient {
     return page
   }
   func editCatalog(_ entry: CatalogEntry, revision: Int64, replacement: DictionaryValue?, token: String) async throws -> DictionaryChange {
-    guard revision >= 0 else { throw Failure(status: 400) }
+    guard revision >= 0,
+          replacement.map({ Self.validNewDictionaryValue($0, kind: entry.kind) }) ?? true else { throw Failure(status: 400) }
     struct Identity: Encodable { let code: String; let word: String }
     struct Body: Encodable {
       let revision: Int64
@@ -212,6 +215,29 @@ extension BackendAccountClient {
       && !value.unicodeScalars.contains { scalar in
         scalar.properties.generalCategory == .control && ![9, 10, 13].contains(scalar.value)
       }
+  }
+
+  private static func validNewDictionaryValue(_ value: DictionaryValue, kind: DictionaryKind) -> Bool {
+    let codeLimit: Int
+    switch kind {
+    case .pinyin: codeLimit = 256
+    case .wubi, .wubi98: codeLimit = 4
+    case .quick: codeLimit = 32
+    case .english: codeLimit = 64
+    }
+    guard validCatalogText(value.code, maximum: codeLimit),
+          validCatalogText(value.word, maximum: 1024), value.weight >= 0 else { return false }
+    switch kind {
+    case .pinyin:
+      return value.code.utf8.allSatisfy { (97...122).contains($0) || $0 == 39 || $0 == 32 }
+    case .wubi, .wubi98:
+      return value.code.utf8.allSatisfy { (97...122).contains($0) }
+    case .quick:
+      return value.code.utf8.allSatisfy { (97...122).contains($0) }
+        && value.word.utf16.count <= 199
+    case .english:
+      return value.code.utf8.allSatisfy { (65...90).contains($0) || (97...122).contains($0) || $0 == 45 || $0 == 39 }
+    }
   }
 
   static func dictionaryKind(forCandidateKind kind: String) -> DictionaryKind? {
