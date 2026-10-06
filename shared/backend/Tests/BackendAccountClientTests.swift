@@ -44,6 +44,20 @@ private final class AccountProtocol: URLProtocol {
   }
   override func stopLoading() {}
 }
+
+private final class AuthInputProtocol: URLProtocol {
+  static var requests = 0
+  override class func canInit(with request: URLRequest) -> Bool { true }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+  override func startLoading() {
+    Self.requests += 1
+    let response = HTTPURLResponse(url: request.url!, statusCode: 204, httpVersion: nil,
+      headerFields: nil)!
+    client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+    client?.urlProtocolDidFinishLoading(self)
+  }
+  override func stopLoading() {}
+}
 private final class OversizedAccountProtocol: URLProtocol {
   override class func canInit(with request: URLRequest) -> Bool { request.url?.path == "/v1/auth/login" }
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -251,6 +265,50 @@ final class BackendAccountClientTests: XCTestCase {
       _ = try await client.login(challenge: "challenge", credential: "synthetic")
       XCTFail("malformed token user accepted")
     } catch let error as BackendAccountClient.Failure { XCTAssertEqual(error.status, 0) }
+  }
+  func testAuthInputsAreRejectedBeforeNetworking() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [AuthInputProtocol.self]
+    let client = BackendAccountClient(configuration: configuration)
+    AuthInputProtocol.requests = 0
+
+    for (provider, target) in [("unknown", ""), ("apple", "unexpected"),
+                               ("email", String(repeating: "a", count: 321)),
+                               ("email", "bad\u{0001}target"),
+                               ("google", "http://127.0.0.1:80/callback")] {
+      do {
+        _ = try await client.challenge(provider: provider, target: target)
+        XCTFail("invalid challenge target was sent")
+      } catch let error as BackendAccountClient.Failure {
+        XCTAssertEqual(error.status, 400)
+      }
+    }
+    for (challenge, credential) in [("", "123456"), ("challenge", "bad\u{0001}credential"),
+                                    ("challenge", String(repeating: "x", count: 16_385))] {
+      do {
+        _ = try await client.login(challenge: challenge, credential: credential)
+        XCTFail("invalid login input was sent")
+      } catch let error as BackendAccountClient.Failure {
+        XCTAssertEqual(error.status, 400)
+      }
+    }
+    for token in [String(repeating: "a", count: 63), String(repeating: "A", count: 64)] {
+      do {
+        _ = try await client.refresh(token)
+        XCTFail("invalid refresh token was sent")
+      } catch let error as BackendAccountClient.Failure {
+        XCTAssertEqual(error.status, 400)
+      }
+    }
+    for name in ["", " leading", String(repeating: "名", count: 65), "bad\nname"] {
+      do {
+        try await client.rename(name, token: "session")
+        XCTFail("invalid display name was sent")
+      } catch let error as BackendAccountClient.Failure {
+        XCTAssertEqual(error.status, 400)
+      }
+    }
+    XCTAssertEqual(AuthInputProtocol.requests, 0)
   }
   func testClipboardSearchIsEncodedAsOneQueryValue() async throws {
     let search = "学习 & q=other + % #"
