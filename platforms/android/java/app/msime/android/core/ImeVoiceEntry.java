@@ -338,7 +338,7 @@ final class ImeVoiceEntry {
         VoiceListeningView view = new VoiceListeningView(s);
         view.setColors(Color.parseColor(s.skin.accent()), Color.parseColor(s.skin.onAccent()),
             Color.parseColor(s.skin.keyForeground()), Color.parseColor(s.skin.toolbarIcon()));
-        view.setOnClickListener(ignored -> cancel());
+        ViewPolicy.bindClick(view, this::cancel);
         view.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
             @Override public void onViewAttachedToWindow(View attached) { }
 
