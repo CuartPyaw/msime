@@ -1,7 +1,6 @@
 package app.msime.android.home;
 
 import android.content.Context;
-import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -18,6 +17,7 @@ import app.msime.android.KeyboardFeedbackStore;
 import app.msime.android.R;
 import app.msime.android.SyncSignals;
 import app.msime.android.SyncSwitch;
+import app.msime.android.ViewPolicy;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -226,7 +226,7 @@ final class KeyboardSheets {
         if (glyph != null) {
             TextView icon = new TextView(context);
             icon.setText(glyph);
-            icon.setGravity(Gravity.CENTER);
+            ViewPolicy.setCentered(icon);
             Ui.style(icon, 22, 400, Ui.accent(context));
             icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             LinearLayout.LayoutParams iconParams = Ui.squareParams(context, iconSize);
@@ -264,7 +264,7 @@ final class KeyboardSheets {
         } else {
             button = new TextView(context);
             button.setText(label);
-            button.setGravity(Gravity.CENTER);
+            ViewPolicy.setCentered(button);
             button.setSingleLine(true);
             Ui.style(button, Ui.TEXT_BUTTON_SMALL, 500, Ui.subText(context));
             Ui.setButtonPadding(button, context);
@@ -291,7 +291,7 @@ final class KeyboardSheets {
     static LinearLayout baseRow(Context context) {
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(row);
         Ui.setRowMinimumHeight(row, context);
         Ui.setRowPadding(row, context);
         return row;
@@ -301,7 +301,7 @@ final class KeyboardSheets {
     static TextView badge(Context context, String text) {
         TextView badge = new TextView(context);
         badge.setText(text);
-        badge.setGravity(Gravity.CENTER);
+        ViewPolicy.setCentered(badge);
         Ui.style(badge, 15, 600, Ui.accent(context));
         badge.setBackground(Ui.rounded(Ui.accentSoft(context), Ui.dp(context, 8)));
         badge.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
@@ -341,7 +341,7 @@ final class KeyboardSheets {
             @Nullable CharSequence subtitle, @Nullable CharSequence value, @Nullable Runnable action) {
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(row);
         Ui.setMinimumHeightDp(row, context,
             subtitle == null ? Ui.COMPACT_ROW_MIN_HEIGHT : Ui.ROW_MIN_HEIGHT);
         Ui.setRowPadding(row, context);
