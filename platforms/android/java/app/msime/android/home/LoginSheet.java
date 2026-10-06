@@ -128,7 +128,7 @@ final class LoginSheet {
         TextView subtitle = new TextView(activity);
         subtitle.setText("在手机、平板和电脑之间同步词库、皮肤和云剪贴板");
         Ui.style(subtitle, 14, 400, Ui.subText(activity));
-        root.addView(subtitle, block(2));
+        root.addView(subtitle, Ui.matchWidth(activity, 2));
 
         options = new LinearLayout(activity);
         options.setOrientation(LinearLayout.VERTICAL);
@@ -139,11 +139,11 @@ final class LoginSheet {
             int fill = night ? Color.WHITE : Color.BLACK;
             int ink = night ? Color.BLACK : Color.WHITE;
             options.addView(button(new PathIcon(24, new String[] {APPLE_PATH}, new int[] {ink}),
-                "通过 Apple 登录", fill, ink, 0, this::apple), block(16));
+                "通过 Apple 登录", fill, ink, 0, this::apple), Ui.matchWidth(activity, 16));
         }
         if (google) {
             options.addView(button(new PathIcon(48, GOOGLE_PATHS, GOOGLE_COLORS), "通过 Google 登录",
-                Color.TRANSPARENT, Ui.text(activity), Ui.outline(activity), this::google), block(12));
+                Color.TRANSPARENT, Ui.text(activity), Ui.outline(activity), this::google), Ui.matchWidth(activity, 12));
         }
         email = new LinearLayout(activity);
         email.setOrientation(LinearLayout.VERTICAL);
@@ -151,19 +151,19 @@ final class LoginSheet {
             int accent = Ui.accent(activity);
             options.addView(button(new PathIcon(24, new String[] {MAIL_PATH}, new int[] {accent}), "使用邮箱登录",
                 Ui.color(activity, com.google.android.material.R.attr.colorSecondaryContainer), accent, 0,
-                this::expandEmail), block(12));
-            options.addView(email, block(0));
+                this::expandEmail), Ui.matchWidth(activity, 12));
+            options.addView(email, Ui.matchWidth(activity, 0));
         }
-        root.addView(options, block(0));
+            root.addView(options, Ui.matchWidth(activity, 0));
 
         status = new TextView(activity);
         Ui.style(status, 13, 400, Ui.subText(activity));
         status.setGravity(Gravity.CENTER_HORIZONTAL);
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         status.setVisibility(View.GONE);
-        root.addView(status, block(12));
+        root.addView(status, Ui.matchWidth(activity, 12));
 
-        root.addView(agreement(), block(16));
+        root.addView(agreement(), Ui.matchWidth(activity, 16));
 
         NestedScrollView scroll = new NestedScrollView(activity);
         scroll.addView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
@@ -198,10 +198,10 @@ final class LoginSheet {
         challenge = null;
         EditText field = field("邮箱地址", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS, 254);
         field.setText(emailAddress);
-        email.addView(field, block(12));
+        email.addView(field, Ui.matchWidth(activity, 12));
         View send = button(null, "发送验证码", Ui.accent(activity), Ui.onAccent(activity), 0,
             () -> sendCode(field.getText().toString()));
-        email.addView(send, block(12));
+        email.addView(send, Ui.matchWidth(activity, 12));
         field.setOnEditorActionListener((view, action, event) -> {
             if (action != EditorInfo.IME_ACTION_SEND) return false;
             sendCode(field.getText().toString());
@@ -236,13 +236,13 @@ final class LoginSheet {
         TextView sent = new TextView(activity);
         sent.setText("验证码已发到 " + emailAddress + "，" + Math.max(1, challenge.expiresIn() / 60) + " 分钟内有效");
         Ui.style(sent, 13, 400, Ui.subText(activity));
-        email.addView(sent, block(12));
+        email.addView(sent, Ui.matchWidth(activity, 12));
         EditText code = field("6 位验证码", InputType.TYPE_CLASS_NUMBER, 6);
         code.setImeOptions(EditorInfo.IME_ACTION_DONE);
         code.setLetterSpacing(0.3f);
-        email.addView(code, block(8));
+        email.addView(code, Ui.matchWidth(activity, 8));
         email.addView(button(null, "登录", Ui.accent(activity), Ui.onAccent(activity), 0,
-            () -> verify(code.getText().toString())), block(12));
+            () -> verify(code.getText().toString())), Ui.matchWidth(activity, 12));
         code.setOnEditorActionListener((view, action, event) -> {
             if (action != EditorInfo.IME_ACTION_DONE) return false;
             verify(code.getText().toString());
@@ -260,7 +260,7 @@ final class LoginSheet {
             status.setVisibility(View.GONE);
             expandEmail();
         });
-        email.addView(again, block(4));
+        email.addView(again, Ui.matchWidth(activity, 4));
         status.setVisibility(View.GONE);
         code.requestFocus();
     }
@@ -394,13 +394,6 @@ final class LoginSheet {
         Ui.style(view, 12, 400, Ui.subText(activity));
         view.setGravity(Gravity.CENTER_HORIZONTAL);
         return view;
-    }
-
-    private LinearLayout.LayoutParams block(int top) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        params.topMargin = Ui.dp(activity, top);
-        return params;
     }
 
     /** 按 SVG path 数据画的图标：每条 path 一种颜色，按 `viewport` 等比缩放到边界里。 */

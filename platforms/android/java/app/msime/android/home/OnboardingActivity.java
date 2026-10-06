@@ -270,7 +270,7 @@ public final class OnboardingActivity extends AppCompatActivity {
             if (on) cell.addView(text(samples[index][1], 11, Ui.subText(this)));
             strip.addView(cell);
         }
-        column.addView(strip, blockParams(6));
+        column.addView(strip, Ui.matchWidth(this, 6));
 
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -288,7 +288,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         });
         row.addView(toggle);
         row.setOnClickListener(ignored -> { if (toggle.isEnabled()) toggle.toggle(); });
-        column.addView(row, blockParams(12));
+        column.addView(row, Ui.matchWidth(this, 12));
 
         if (preferences == null) {
             footnote(column, loaded ? "词库还在准备，暂时不能保存这个开关。稍后可以在「设置 → 词库」里打开。"
@@ -439,23 +439,23 @@ public final class OnboardingActivity extends AppCompatActivity {
         TextView kick = text(kicker, 13, Ui.accent(this));
         kick.setTypeface(Typeface.create(Typeface.DEFAULT, 600, false));
         kick.setLetterSpacing(0.04f);
-        column.addView(kick, blockParams(14 + 6));
+        column.addView(kick, Ui.matchWidth(this, 14 + 6));
 
         TextView heading = text(title, 32, Ui.text(this));
         heading.setLineSpacing(0, 1.1f);
         heading.setAccessibilityHeading(true);
-        column.addView(heading, blockParams(14));
+        column.addView(heading, Ui.matchWidth(this, 14));
 
         TextView line = text(body, 16, Ui.subText(this));
         line.setLineSpacing(0, 1.35f);
-        column.addView(line, blockParams(14));
+        column.addView(line, Ui.matchWidth(this, 14));
     }
 
     private LinearLayout card(LinearLayout column, int top) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setBackground(rounded(Ui.card(this), Ui.dp(this, 20)));
-        column.addView(card, blockParams(14 + top));
+        column.addView(card, Ui.matchWidth(this, 14 + top));
         return card;
     }
 
@@ -552,7 +552,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         card.setAlpha(usable || selected ? 1f : 0.6f);
         card.setOnClickListener(usable && !selected ? ignored -> selectScheme(option.scheme()) : null);
         card.setClickable(usable);
-        column.addView(card, blockParams(top));
+        column.addView(card, Ui.matchWidth(this, top));
     }
 
     private void perk(LinearLayout column, @DrawableRes int icon, String label, int top) {
@@ -573,13 +573,13 @@ public final class OnboardingActivity extends AppCompatActivity {
             new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
         textParams.setMarginStart(Ui.dp(this, 12));
         row.addView(text, textParams);
-        column.addView(row, blockParams(14 + top - 10));
+        column.addView(row, Ui.matchWidth(this, 14 + top - 10));
     }
 
     private void footnote(LinearLayout column, String message) {
         TextView view = text(message, 13, Ui.subText(this));
         view.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        column.addView(view, blockParams(14));
+        column.addView(view, Ui.matchWidth(this, 14));
     }
 
     private TextView text(String value, int size, int colour) {
@@ -588,13 +588,6 @@ public final class OnboardingActivity extends AppCompatActivity {
         view.setTextSize(size);
         view.setTextColor(colour);
         return view;
-    }
-
-    private LinearLayout.LayoutParams blockParams(int top) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        params.topMargin = Ui.dp(this, top);
-        return params;
     }
 
     private static GradientDrawable rounded(int colour, int radius) {
