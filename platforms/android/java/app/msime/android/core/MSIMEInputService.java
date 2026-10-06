@@ -6429,7 +6429,7 @@ public final class MSIMEInputService extends InputMethodService {
     // this 剪贴板历史 and AI 润色 looked exactly like the cards that work and did nothing when
     // pressed. A screen reader was told "不可用"; nobody else was.
     void applyToolCardState(View card, boolean enabled) {
-        card.setAlpha(enabled ? 1f : .45f);
+        ViewPolicy.setActiveAlpha(card, enabled, .45f);
     }
 
     void render() {
