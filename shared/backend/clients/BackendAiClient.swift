@@ -59,7 +59,11 @@ struct BackendAiClient: Sendable {
     guard let content = envelope.choices.first?.message.content.data(using: .utf8) else { throw URLError(.cannotParseResponse) }
     let result = try JSONDecoder().decode(ResultPayload.self, from: content)
     guard result.candidates.count <= candidateLimit,
-          result.candidates.allSatisfy({ !$0.text.isEmpty && $0.text.utf8.count <= 4096 }) else { throw URLError(.cannotParseResponse) }
+          result.candidates.allSatisfy({ candidate in
+            !candidate.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              && candidate.text.utf8.count <= 4096
+              && !candidate.text.unicodeScalars.contains { $0.properties.generalCategory == .control }
+          }) else { throw URLError(.cannotParseResponse) }
     return Result(candidates: result.candidates)
   }
 
