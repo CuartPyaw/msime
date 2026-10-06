@@ -5328,7 +5328,8 @@ public final class MSIMEInputService extends InputMethodService {
         configureCandidateTextLayout(button, labelLines);
         button.setTextSize(TypedValue.COMPLEX_UNIT_SP, candidateFontSize);
         button.setSelected(highlighted);
-        imeCandidates.styleCandidateButton(button);
+        // render() attaches the button and applies the complete skin tree once below.
+        // Avoid creating its candidate drawables before that pass.
         String description = "候选 " + (slot + 1) + "：" + text
             + candidateAccessibilitySuffix(candidate, typed);
         JSONObject id = candidate.optJSONObject("id");

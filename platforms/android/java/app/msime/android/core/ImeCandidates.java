@@ -187,7 +187,8 @@ final class ImeCandidates {
         button.setMinHeight(s.pixels(44));
         button.setMinimumHeight(s.pixels(44));
         button.setPadding(s.pixels(10), 0, s.pixels(10), 0);
-        styleCandidateButton(button);
+        // The completed keyboard tree is styled once by MSIMEInputService.render().
+        // Styling here would be repeated immediately after this button is attached.
         long index = id == null ? -1
             : CandidateGlossPolicy.strictOr(id.opt("index"), -1);
         button.setContentDescription(index < 0 ? "候选" : "候选 " + (index + 1) + "："
