@@ -21,6 +21,7 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.Nullable;
 import androidx.core.content.FileProvider;
+import app.msime.android.BitmapPolicy;
 import app.msime.android.CloudApi;
 import app.msime.android.DeviceDataApi;
 import app.msime.android.HttpBodyPolicy;
@@ -140,8 +141,8 @@ public final class ProfilePage extends DetailPage {
     @Nullable private static Bitmap decodeAvatar(byte[] bytes) {
         BitmapFactory.Options bounds = bounds(bytes);
         if (bounds == null) return null;
-        int sample = 1;
-        while (Math.max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= AVATAR_DECODE_EDGE) sample *= 2;
+        int sample = BitmapPolicy.sampleSizeForEdge(
+            bounds.outWidth, bounds.outHeight, AVATAR_DECODE_EDGE);
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inSampleSize = sample;
         return BitmapFactory.decodeByteArray(bytes, 0, bytes.length, options);
