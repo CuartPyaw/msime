@@ -17,6 +17,7 @@ public final class OnlineCandidatePolicySmoke {
         check(OnlineCandidatePolicy.requestsAi(true, true));
         check(!OnlineCandidatePolicy.requestsAi(false, true));
         check(!OnlineCandidatePolicy.requestsAi(true, false));
+        check(OnlineCandidatePolicy.CLOUD_TIMEOUT_MILLIS == 2_000);
 
         check(OnlineCandidatePolicy.aiCandidateLimit(3) == 3);
         check(OnlineCandidatePolicy.aiCandidateLimit(1) == 1);
