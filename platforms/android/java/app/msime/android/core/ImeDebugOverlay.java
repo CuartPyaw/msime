@@ -49,7 +49,7 @@ final class ImeDebugOverlay {
      * <p>写在单独的后台线程上，写不进去时静默放弃：这是开发者自己打开的诊断记录，不能影响打字。
      */
     static final class EventLog {
-        static final long MAX_BYTES = 1024 * 1024;
+        static final int MAX_BYTES = 1024 * 1024;
         static final String EVENTS_FILE = "input-events.jsonl";
         static final String PERF_FILE = "perf.jsonl";
 
@@ -139,7 +139,7 @@ final class ImeDebugOverlay {
 
         private static byte[] read(java.nio.file.Path file) throws IOException {
             try (InputStream input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
-                byte[] bytes = HttpBodyPolicy.readBounded(input, 2 * MAX_BYTES);
+                byte[] bytes = HttpBodyPolicy.readBounded(input, Math.toIntExact(2 * MAX_BYTES));
                 return bytes == null ? new byte[0] : bytes;
             }
         }
