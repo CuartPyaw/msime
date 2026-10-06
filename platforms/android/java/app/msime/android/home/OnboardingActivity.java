@@ -514,8 +514,9 @@ public final class OnboardingActivity extends AppCompatActivity {
         card.setOrientation(LinearLayout.HORIZONTAL);
         card.setGravity(Gravity.CENTER_VERTICAL);
         card.setPadding(Ui.dp(this, 16), Ui.dp(this, 14), Ui.dp(this, 16), Ui.dp(this, 14));
-        GradientDrawable face = Ui.rounded(Ui.card(this), Ui.dp(this, 20));
-        if (selected) face.setStroke(Ui.dp(this, 2), Ui.accent(this));
+        GradientDrawable face = selected
+            ? Ui.outlined(Ui.card(this), Ui.dp(this, 20), Ui.dp(this, 2), Ui.accent(this))
+            : Ui.rounded(Ui.card(this), Ui.dp(this, 20));
         card.setBackground(face);
 
         LinearLayout text = new LinearLayout(this);
