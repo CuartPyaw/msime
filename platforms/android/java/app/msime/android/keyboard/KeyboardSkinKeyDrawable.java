@@ -117,8 +117,9 @@ public final class KeyboardSkinKeyDrawable extends Drawable {
             boolean glass = "glass".equals(skin.keyMaterial());
             if (!gradientValid || !gradientBounds.equals(face)) {
                 overlayGradient = new LinearGradient(face.centerX(), face.top, face.centerX(), face.bottom,
-                    new int[] {Color.argb((int) (255 * (glass ? .24 : .13)), 255, 255, 255),
-                        Color.TRANSPARENT, Color.argb((int) (255 * (glass ? .03 : .10)), 0, 0, 0)},
+                    new int[] {ColorPolicy.withAlpha(Color.WHITE, (int) (255 * (glass ? .24 : .13))),
+                        Color.TRANSPARENT,
+                        ColorPolicy.withAlpha(Color.BLACK, (int) (255 * (glass ? .03 : .10)))},
                     new float[] {0, .48f, 1}, Shader.TileMode.CLAMP);
                 gradientBounds.set(face);
                 gradientValid = true;
