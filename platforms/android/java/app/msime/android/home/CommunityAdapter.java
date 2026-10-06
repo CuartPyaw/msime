@@ -71,6 +71,7 @@ public final class CommunityAdapter extends RecyclerView.Adapter<CommunityAdapte
     public void append(List<CommunityCatalog.Item> values) {
         if (values.isEmpty()) return;
         int start = entries.size();
+        entries.ensureCapacity(start + values.size());
         for (CommunityCatalog.Item item : values) entries.add(new Entry(item, ""));
         notifyItemRangeInserted(start, values.size());
         // The row that used to close the grouped card is now in the middle of it.
