@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import app.msime.android.KeyboardGeometry;
 
 /**
  * 画描边图标的功能键：⇧（含大写锁定的下划线形）、⌫、↵、123 层的表情键，图标 22 dp，线宽 1.7（viewBox 单位）。
@@ -78,7 +79,7 @@ public final class KeyboardIconKey extends KeyboardPressButton {
         int width = Math.max(0, getWidth() - getPaddingLeft() - getPaddingRight());
         int height = Math.max(0, getHeight() - getPaddingTop() - getPaddingBottom());
         float size = Math.min(Math.min(width, height),
-            ICON_DP * getResources().getDisplayMetrics().density);
+            KeyboardGeometry.floatPixels(getContext(), ICON_DP));
         if (size <= 0) return;
         int color = getCurrentTextColor();
         if (!isEnabled()) color = Color.argb(96, Color.red(color), Color.green(color),

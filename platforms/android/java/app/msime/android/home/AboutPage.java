@@ -369,7 +369,7 @@ public final class AboutPage extends DetailPage {
     /** APK 里随包带的许可通知文件（相对 assets 的路径），按名字排序。 */
     private static List<String> listNotices(AssetManager assets) throws IOException {
         String[] abis = assets.list("native-notices");
-        List<String> found = new ArrayList<>();
+        List<String> found = new ArrayList<>(4);
         if (abis != null && abis.length > 0) {
             // 每个 ABI 一份同样的清单，列一份就够。
             java.util.Arrays.sort(abis);

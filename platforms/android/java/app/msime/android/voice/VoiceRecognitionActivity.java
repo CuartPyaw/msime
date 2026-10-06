@@ -15,6 +15,7 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
+import app.msime.android.KeyboardGeometry;
 import java.io.File;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
@@ -377,7 +378,7 @@ public final class VoiceRecognitionActivity extends Activity {
     private void showRecordingControls() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        int pad = Math.round(getResources().getDisplayMetrics().density * 20);
+        int pad = KeyboardGeometry.pixels(this, 20);
         root.setPadding(pad, pad, pad, pad);
         TextView title = new TextView(this);
         recordingTitle = title;

@@ -14,6 +14,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import app.msime.android.KeyboardGeometry;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -73,8 +74,7 @@ public final class FunctionPanelView extends LinearLayout {
         super(context);
         setOrientation(VERTICAL);
         setContentDescription("更多工具");
-        float density = getResources().getDisplayMetrics().density;
-        setPadding(0, Math.round(10 * density), 0, Math.round(4 * density));
+        setPadding(0, KeyboardGeometry.pixels(context, 10), 0, KeyboardGeometry.pixels(context, 4));
         grid = new PagedTileGrid(context);
         grid.setGrid(4, 2);
         grid.setSpacing(ITEM_HEIGHT_DP, 16f, 4f, 4f);
@@ -86,7 +86,7 @@ public final class FunctionPanelView extends LinearLayout {
         LinearLayout.LayoutParams dotParams = new LinearLayout.LayoutParams(
             LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
         dotParams.gravity = Gravity.CENTER_HORIZONTAL;
-        dotParams.topMargin = Math.round(8 * density);
+        dotParams.topMargin = KeyboardGeometry.pixels(context, 8);
         addView(dots, dotParams);
     }
 
@@ -202,7 +202,7 @@ public final class FunctionPanelView extends LinearLayout {
         }
 
         @Override protected void onDraw(Canvas canvas) {
-            float density = getResources().getDisplayMetrics().density;
+            float density = KeyboardGeometry.density(getContext());
             boolean on = state == State.ON;
             int color = on ? panel.accent : panel.foreground;
             if (isPressed()) color = Color.argb(Color.alpha(color) * PRESSED_ALPHA / 255,

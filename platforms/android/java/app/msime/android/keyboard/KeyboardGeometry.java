@@ -52,6 +52,11 @@ public final class KeyboardGeometry {
 
     private KeyboardGeometry() { }
 
+    /** Read the display density used by keyboard geometry calculations. */
+    public static float density(Context context) {
+        return context.getResources().getDisplayMetrics().density;
+    }
+
     /** 键盘高度百分比对应的高度调整 dp：`round(184 × (p − 100) / 100)`，范围外先钳到 75–130，与 Rust `height_percent_to_adjustment` 同式（向远离零的方向取整）。 */
     public static int heightPercentToAdjustment(int percent) {
         int clamped = bounded(percent, MIN_HEIGHT_PERCENT, MAX_HEIGHT_PERCENT);
@@ -173,9 +178,25 @@ public final class KeyboardGeometry {
         return Math.round(dp * density);
     }
 
+    /** Convert a density-independent size to rounded pixels using the context's density. */
+    public static int pixels(Context context, float dp) {
+        return pixels(dp, context.getResources().getDisplayMetrics().density);
+    }
+
     /** Convert a fractional density-independent size to pixels without rounding. */
     public static float floatPixels(double dp, float density) {
         return (float) dp * density;
+    }
+
+    /** Convert a fractional density-independent size to pixels using the context's density. */
+    public static float floatPixels(Context context, double dp) {
+        return floatPixels(dp, context.getResources().getDisplayMetrics().density);
+    }
+
+    /** Convert pixels back to density-independent units using the context's density. */
+    public static float fromPixels(Context context, float pixels) {
+        float density = density(context);
+        return density <= 0 ? pixels : pixels / density;
     }
 
     /** Convert scalable text units using the view context's display metrics. */

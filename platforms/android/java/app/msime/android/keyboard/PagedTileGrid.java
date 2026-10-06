@@ -123,7 +123,7 @@ public final class PagedTileGrid extends ViewGroup {
         }
     }
 
-    private float px(float dp) { return dp * getResources().getDisplayMetrics().density; }
+    private float px(float dp) { return KeyboardGeometry.floatPixels(getContext(), dp); }
 
     @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         int width = MeasureSpec.getSize(widthMeasureSpec);

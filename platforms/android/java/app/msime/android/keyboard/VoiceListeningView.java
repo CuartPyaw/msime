@@ -91,24 +91,26 @@ public final class VoiceListeningView extends TextView {
 
     @Override protected void onDraw(Canvas canvas) {
         float density = getResources().getDisplayMetrics().density;
-        float radius = ORB_DP * density / 2f;
+        float radius = KeyboardGeometry.floatPixels(getContext(), ORB_DP) / 2f;
         title.setTextSize(KeyboardGeometry.sp(getContext(), 16));
         hint.setTextSize(KeyboardGeometry.sp(getContext(), 13));
         Paint.FontMetrics titleMetrics = title.getFontMetrics();
         Paint.FontMetrics hintMetrics = hint.getFontMetrics();
         float titleHeight = titleMetrics.descent - titleMetrics.ascent;
         float hintHeight = hintMetrics.descent - hintMetrics.ascent;
-        float gap = 16 * density;
-        float total = radius * 2 + gap + titleHeight + 6 * density + hintHeight;
+        float gap = KeyboardGeometry.floatPixels(getContext(), 16);
+        float total = radius * 2 + gap + titleHeight
+            + KeyboardGeometry.floatPixels(getContext(), 6) + hintHeight;
         float top = (getHeight() - total) / 2f;
         float cx = getWidth() / 2f;
         float cy = top + radius;
         ring.setColor(accent);
         ring.setAlpha(pulseAlpha(pulse));
-        canvas.drawCircle(cx, cy, radius + pulseSpread(pulse, PULSE_DP * density), ring);
+        canvas.drawCircle(cx, cy, radius + pulseSpread(pulse,
+            KeyboardGeometry.floatPixels(getContext(), PULSE_DP)), ring);
         orb.setColor(accent);
         canvas.drawCircle(cx, cy, radius, orb);
-        float mic = MIC_DP * density;
+        float mic = KeyboardGeometry.floatPixels(getContext(), MIC_DP);
         KeyboardIconPaths.draw(canvas, icon, KeyboardIconPaths.Icon.MIC, cx - mic / 2f,
             cy - mic / 2f, mic, onAccent);
         float titleBaseline = cy + radius + gap - titleMetrics.ascent;

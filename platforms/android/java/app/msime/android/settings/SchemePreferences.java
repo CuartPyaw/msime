@@ -26,7 +26,7 @@ public final class SchemePreferences {
     public static Map<String, String> schemeValues(KeyboardScheme scheme, String lastChineseScheme,
             String shuangpinProfile, String wubiProfile, AppEdition edition) {
         KeyboardScheme.PreferenceMapping mapping = scheme.mapping(lastChineseScheme, shuangpinProfile, edition);
-        Map<String, String> values = new LinkedHashMap<>();
+        Map<String, String> values = new LinkedHashMap<>(5);
         values.put("scheme", mapping.scheme());
         values.put("last_chinese_scheme", mapping.lastChineseScheme());
         values.put("shuangpin_profile", mapping.shuangpinProfile());

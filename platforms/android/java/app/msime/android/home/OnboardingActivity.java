@@ -538,7 +538,7 @@ public final class OnboardingActivity extends AppCompatActivity {
             dot.setStroke(Ui.dp(this, 6), Ui.accent(this));
         } else {
             dot.setColor(0);
-            dot.setStroke(Math.max(1, Math.round(1.5f * getResources().getDisplayMetrics().density)),
+            dot.setStroke(Math.max(1, Ui.dp(this, 1.5f)),
                 Ui.subText(this));
         }
         radio.setBackground(dot);

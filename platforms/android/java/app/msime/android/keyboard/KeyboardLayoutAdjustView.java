@@ -50,12 +50,10 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
     private int baseRowSpacing;
     private int baseHeight;
     private KeyboardLayoutAdjustPolicy.Axis axis;
-    private final float density;
 
     public KeyboardLayoutAdjustView(android.content.Context context, Listener listener) {
         super(context);
         this.listener = listener;
-        density = getResources().getDisplayMetrics().density;
         setClickable(true);
         setFocusable(true);
         setContentDescription("键盘布局调整；键盘上左右拖动调整按键间距，上下拖动调整行间距");
@@ -64,8 +62,8 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
         bar = new LinearLayout(context);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        bar.setPadding(KeyboardGeometry.pixels(8, density), KeyboardGeometry.pixels(4, density),
-            KeyboardGeometry.pixels(8, density), KeyboardGeometry.pixels(4, density));
+        bar.setPadding(KeyboardGeometry.pixels(getContext(), 8), KeyboardGeometry.pixels(getContext(), 4),
+            KeyboardGeometry.pixels(getContext(), 8), KeyboardGeometry.pixels(getContext(), 4));
         bar.setContentDescription("键盘高度调整工具栏");
         bar.setFocusable(true);
         bar.setOnTouchListener((ignored, event) -> handleHeightGesture(event));
@@ -114,8 +112,8 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
         int accent = color(skin.accent());
         GradientDrawable surface = new GradientDrawable();
         surface.setColor(keyBackground);
-        surface.setCornerRadius(KeyboardGeometry.pixels(10, density));
-        surface.setStroke(Math.max(1, KeyboardGeometry.pixels(1, density)), accent);
+        surface.setCornerRadius(KeyboardGeometry.pixels(getContext(), 10));
+        surface.setStroke(Math.max(1, KeyboardGeometry.pixels(getContext(), 1)), accent);
         bar.setBackground(surface);
         hint.setTextColor(foreground);
         voiceShortcut.setTextColor(foreground);
@@ -223,9 +221,9 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
 
     private FrameLayout.LayoutParams barParams() {
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
-            LayoutParams.MATCH_PARENT, KeyboardGeometry.pixels(BAR_HEIGHT_DP, density));
-        params.setMargins(KeyboardGeometry.pixels(SPACING_MARGIN_DP, density),
-            KeyboardGeometry.pixels(4, density), KeyboardGeometry.pixels(SPACING_MARGIN_DP, density), 0);
+            LayoutParams.MATCH_PARENT, KeyboardGeometry.pixels(getContext(), BAR_HEIGHT_DP));
+        params.setMargins(KeyboardGeometry.pixels(getContext(), SPACING_MARGIN_DP),
+            KeyboardGeometry.pixels(getContext(), 4), KeyboardGeometry.pixels(getContext(), SPACING_MARGIN_DP), 0);
         return params;
     }
 
@@ -237,7 +235,7 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
     }
 
     private float dpFromPixels(float pixels) {
-        return density <= 0 ? pixels : pixels / density;
+        return KeyboardGeometry.fromPixels(getContext(), pixels);
     }
 
     private static int color(String value) {

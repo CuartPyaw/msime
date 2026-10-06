@@ -588,7 +588,7 @@ public final class DeveloperPage extends DetailPage {
         if (raw == null || raw.isEmpty() || "{}".equals(raw)) return "";
         try {
             JSONObject object = new JSONObject(raw);
-            List<String> parts = new ArrayList<>();
+            List<String> parts = new ArrayList<>(object.length());
             for (Iterator<String> keys = object.keys(); keys.hasNext(); ) {
                 String key = keys.next();
                 parts.add(key + "=" + object.opt(key));

@@ -16,6 +16,7 @@ import android.view.View;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import app.msime.android.KeyboardGeometry;
 
 /**
  * 内联的键盘高度调整条，替换工具栏那一行：取消 | 拖动柄「上下拖动调整 · N%」| 重置 | 完成。
@@ -50,19 +51,18 @@ public final class InlineHeightBar extends LinearLayout {
         setOrientation(HORIZONTAL);
         setGravity(Gravity.CENTER_VERTICAL);
         setContentDescription(DESCRIPTION);
-        float density = getResources().getDisplayMetrics().density;
-        setPadding(Math.round(6 * density), 0, Math.round(6 * density), 0);
+        setPadding(KeyboardGeometry.pixels(context, 6), 0, KeyboardGeometry.pixels(context, 6), 0);
         cancel = textButton(context, "取消");
         reset = textButton(context, "重置");
         done = textButton(context, "完成");
         done.setTypeface(Typeface.DEFAULT_BOLD);
         done.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         handle = new Handle(context, this);
-        int pill = Math.round(32 * density);
+        int pill = KeyboardGeometry.pixels(context, 32);
         addView(cancel, new LayoutParams(LayoutParams.WRAP_CONTENT, pill));
         addView(handle, new LayoutParams(0, LayoutParams.MATCH_PARENT, 1f));
         LayoutParams resetParams = new LayoutParams(LayoutParams.WRAP_CONTENT, pill);
-        resetParams.rightMargin = Math.round(4 * density);
+        resetParams.rightMargin = KeyboardGeometry.pixels(context, 4);
         addView(reset, resetParams);
         addView(done, new LayoutParams(LayoutParams.WRAP_CONTENT, pill));
         cancel.setOnClickListener(view -> { if (listener != null) listener.onCancel(); });
@@ -82,7 +82,7 @@ public final class InlineHeightBar extends LinearLayout {
         button.setMinimumWidth(0);
         button.setMinHeight(0);
         button.setMinimumHeight(0);
-        int horizontal = Math.round(12 * context.getResources().getDisplayMetrics().density);
+        int horizontal = KeyboardGeometry.pixels(context, 12);
         button.setPadding(horizontal, 0, horizontal, 0);
         button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         button.setGravity(Gravity.CENTER);
@@ -130,7 +130,7 @@ public final class InlineHeightBar extends LinearLayout {
         ((BarButton) reset).setColors(foreground, null);
         GradientDrawable pill = new GradientDrawable();
         pill.setShape(GradientDrawable.RECTANGLE);
-        pill.setCornerRadius(16 * getResources().getDisplayMetrics().density);
+        pill.setCornerRadius(KeyboardGeometry.floatPixels(getContext(), 16));
         pill.setColor(accent);
         ((BarButton) done).setColors(onAccent, pill);
         handle.barColor = Color.argb(Math.round(Color.alpha(foreground) * .35f),
@@ -263,19 +263,20 @@ public final class InlineHeightBar extends LinearLayout {
         }
 
         @Override protected void onDraw(Canvas canvas) {
-            float density = getResources().getDisplayMetrics().density;
             text.setTextSize(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, LABEL_SP,
                 getResources().getDisplayMetrics()));
             Paint.FontMetrics metrics = text.getFontMetrics();
             float textHeight = metrics.descent - metrics.ascent;
-            float gap = 6 * density;
-            float total = BAR_HEIGHT_DP * density + gap + textHeight;
+            float gap = KeyboardGeometry.floatPixels(getContext(), 6);
+            float total = KeyboardGeometry.floatPixels(getContext(), BAR_HEIGHT_DP) + gap + textHeight;
             float top = (getHeight() - total) / 2f;
             float cx = getWidth() / 2f;
-            rect.set(cx - BAR_WIDTH_DP * density / 2f, top, cx + BAR_WIDTH_DP * density / 2f,
-                top + BAR_HEIGHT_DP * density);
+            float barWidth = KeyboardGeometry.floatPixels(getContext(), BAR_WIDTH_DP);
+            float barHeight = KeyboardGeometry.floatPixels(getContext(), BAR_HEIGHT_DP);
+            rect.set(cx - barWidth / 2f, top, cx + barWidth / 2f, top + barHeight);
             paint.setColor(barColor);
-            canvas.drawRoundRect(rect, BAR_RADIUS_DP * density, BAR_RADIUS_DP * density, paint);
+            float radius = KeyboardGeometry.floatPixels(getContext(), BAR_RADIUS_DP);
+            canvas.drawRoundRect(rect, radius, radius, paint);
             text.setColor(textColor);
             canvas.drawText(label(bar.percent()), cx, rect.bottom + gap - metrics.ascent, text);
         }

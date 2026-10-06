@@ -117,7 +117,7 @@ public final class KeyPressAnimator {
     }
 
     private static void lift(View key, ViewGroup host) {
-        float density = key.getResources().getDisplayMetrics().density;
+        float density = KeyboardGeometry.density(key.getContext());
         unclipUpTo(key, host);
         start(key, ObjectAnimator.ofPropertyValuesHolder(key,
             PropertyValuesHolder.ofFloat(View.TRANSLATION_Y, key.getTranslationY(), -LIFT_DP * density, 0f),
@@ -156,7 +156,7 @@ public final class KeyPressAnimator {
     private static void halo(View key, ViewGroup host, int accent, float spreadDp, boolean glow) {
         if (host == null || !(key.getParent() instanceof ViewGroup parent)) return;
         if (key.getWidth() <= 0 || key.getHeight() <= 0) return;
-        float density = key.getResources().getDisplayMetrics().density;
+        float density = KeyboardGeometry.density(key.getContext());
         float spread = spreadDp * density;
         HaloDrawable halo = new HaloDrawable(accent, glow, density);
         // Untransformed key origin in host coordinates: the key itself may be mid press-scale.

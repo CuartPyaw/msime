@@ -82,8 +82,9 @@ public final class SyncMergePolicy {
 
     /** 按正文去重、重排 position 并截断；上传前对任何一份列表都要过这一步。 */
     public static List<Phrase> normalized(List<Phrase> phrases) {
-        Set<String> texts = new HashSet<>(phrases.size());
-        List<Phrase> result = new ArrayList<>(Math.min(MAX_PHRASES, phrases.size()));
+        int capacity = Math.min(MAX_PHRASES, phrases.size());
+        Set<String> texts = new HashSet<>(capacity);
+        List<Phrase> result = new ArrayList<>(capacity);
         for (Phrase phrase : phrases) {
             if (!usable(phrase) || !texts.add(phrase.text())) continue;
             if (result.size() == MAX_PHRASES) break;
@@ -124,7 +125,7 @@ public final class SyncMergePolicy {
     public record LocalPlan(List<String> add, List<String> remove) {}
 
     public static LocalPlan localPlan(Map<String, String> local, List<Phrase> target) {
-        Set<String> wanted = new HashSet<>();
+        Set<String> wanted = new HashSet<>(target.size());
         for (Phrase phrase : target) wanted.add(phrase.text());
         Set<String> present = new HashSet<>(local.values());
         List<String> add = new ArrayList<>(target.size());
