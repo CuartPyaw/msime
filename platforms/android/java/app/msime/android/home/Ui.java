@@ -13,6 +13,7 @@ import android.view.ViewGroup;
 import android.view.animation.PathInterpolator;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import app.msime.android.KeyboardGeometry;
 import androidx.annotation.AttrRes;
 import androidx.annotation.ColorInt;
 import app.msime.android.ColorPolicy;
@@ -135,12 +136,12 @@ public final class Ui {
     // ---- 读取 ----
 
     public static int dp(Context context, float value) {
-        return Math.round(value * context.getResources().getDisplayMetrics().density);
+        return KeyboardGeometry.pixels(context, value);
     }
 
     /** Convert a density-independent dimension without rounding, for canvas geometry. */
     public static float dpFloat(Context context, float value) {
-        return value * context.getResources().getDisplayMetrics().density;
+        return KeyboardGeometry.floatPixels(context, value);
     }
 
     /** Parse a theme or skin colour, returning the supplied fallback for missing or invalid input. */
