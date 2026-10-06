@@ -3492,12 +3492,7 @@ public final class MSIMEInputService extends InputMethodService {
         button.setText(label);
         button.setContentDescription("按键 " + description);
         imeStyler.styleButton(button, false);
-        button.setOnClickListener(ignored -> {
-            imeKeyFeedback.playFeedback(button);
-            countKey(button);
-            action.run();
-        });
-        return button;
+        return bindKeyAction(button, action);
     }
 
     /**
