@@ -122,7 +122,7 @@ public final class InputDialog {
         GradientDrawable field = Ui.outlined(Ui.rowBackground(context), Ui.dp(context, 10),
             Ui.atLeastOnePx(context, 1), Ui.hairline(context));
         input.setBackground(field);
-        input.setPadding(Ui.dp(context, 12), 0, Ui.dp(context, 12), 0);
+        Ui.setHorizontalPaddingDp(input, context, 12);
         input.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) {}
 

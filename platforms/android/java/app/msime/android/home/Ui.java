@@ -203,6 +203,12 @@ public final class Ui {
         view.setPadding(horizontal, vertical, horizontal, vertical);
     }
 
+    /** Apply equal horizontal dp padding with no vertical padding. */
+    public static void setHorizontalPaddingDp(View view, Context context, float horizontalDp) {
+        int horizontal = dp(context, horizontalDp);
+        view.setPadding(horizontal, 0, horizontal, 0);
+    }
+
     /** Apply a single tint to an image view through the platform state-list wrapper. */
     public static void setImageTint(ImageView view, int color) {
         view.setImageTintList(ColorStateList.valueOf(color));

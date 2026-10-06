@@ -29,7 +29,7 @@ public final class SearchPill extends LinearLayout {
         setOrientation(HORIZONTAL);
         setGravity(Gravity.CENTER_VERTICAL);
         setMinimumHeight(Ui.dp(context, Ui.SEARCH_HEIGHT));
-        setPadding(Ui.dp(context, 18), 0, Ui.dp(context, 18), 0);
+        Ui.setHorizontalPaddingDp(this, context, 18);
         setBackground(Ui.pill(Ui.card(context)));
 
         ImageView glyph = new ImageView(context);

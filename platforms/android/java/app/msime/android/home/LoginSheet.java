@@ -365,7 +365,7 @@ final class LoginSheet {
         GradientDrawable face = Ui.outlined(Ui.rowBackground(activity), Ui.dp(activity, 12),
             Ui.atLeastOnePx(activity, 1), Ui.hairline(activity));
         field.setBackground(face);
-        field.setPadding(Ui.dp(activity, 14), 0, Ui.dp(activity, 14), 0);
+        Ui.setHorizontalPaddingDp(field, activity, 14);
         field.setMinHeight(Ui.dp(activity, 50));
         field.setGravity(Gravity.CENTER_VERTICAL);
         field.setContentDescription(hint);
