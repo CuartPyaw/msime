@@ -164,7 +164,7 @@ public final class DeviceDataApi {
     public DataSummary dataSummary() throws CloudApi.Failure {
         JSONObject root = cloud.json("GET", "/v1/users/me/data", null, CloudApi.Auth.ACCOUNT);
         JSONArray rows = root.optJSONArray("sections");
-        List<DataSection> sections = new ArrayList<>();
+        List<DataSection> sections = new ArrayList<>(rows == null ? 0 : rows.length());
         if (rows != null) {
             for (int index = 0; index < rows.length(); index++) {
                 JSONObject row = rows.optJSONObject(index);
