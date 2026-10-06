@@ -267,8 +267,7 @@ public final class Ui {
 
     /** 按 0–1 的不透明度改写颜色的 alpha，乘在原有 alpha 上。 */
     @ColorInt public static int withAlpha(@ColorInt int color, float alpha) {
-        int base = Color.alpha(color);
-        return (color & 0x00FFFFFF) | (Math.round(base * alpha) << 24);
+        return ColorPolicy.withAlpha(color, alpha);
     }
 
     /** Create a filled circular drawable. */
