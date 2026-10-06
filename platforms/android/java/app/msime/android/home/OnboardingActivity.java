@@ -263,7 +263,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         for (int index = 0; index < samples.length; index++) {
             LinearLayout cell = new LinearLayout(this);
             cell.setOrientation(LinearLayout.VERTICAL);
-            cell.setGravity(Gravity.CENTER_HORIZONTAL);
+            ViewPolicy.setCenteredHorizontally(cell);
             Ui.setHorizontalPaddingDp(cell, this, 10);
             TextView word = Ui.label(this, samples[index][0], 19, index == 0 ? Ui.accent(this) : Ui.text(this));
             if (index == 0) word.setTypeface(Typeface.create(Typeface.DEFAULT, 600, false));
@@ -275,7 +275,7 @@ public final class OnboardingActivity extends AppCompatActivity {
 
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(row);
         Ui.setSymmetricPaddingDp(row, this, 14, 12);
         row.setBackground(Ui.rounded(Ui.card(this), Ui.dp(this, 20)));
         TextView label = Ui.label(this, "显示译文", 16, Ui.text(this));
@@ -469,12 +469,12 @@ public final class OnboardingActivity extends AppCompatActivity {
         }
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(row);
         Ui.setMinimumHeightDp(row, this, Ui.COMPACT_ROW_MIN_HEIGHT);
         Ui.setPaddingDp(row, this, 14, 6, 8, 6);
 
         TextView mark = new TextView(this);
-        mark.setGravity(Gravity.CENTER);
+        ViewPolicy.setCentered(mark);
         // 字形画在固定 dp 的圆里，跟圆一起按 dp 定大小；按 sp 时系统字体一调大，对勾就被圆的边界切掉。
         mark.setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP, 13);
         mark.setText(done ? "✓" : "!");
@@ -492,7 +492,7 @@ public final class OnboardingActivity extends AppCompatActivity {
 
         if (!done) {
             TextView button = Ui.label(this, action, 15, Ui.accent(this));
-            button.setGravity(Gravity.CENTER);
+            ViewPolicy.setCentered(button);
             Ui.setHorizontalPaddingDp(button, this, 8);
             android.util.TypedValue ripple = new android.util.TypedValue();
             getTheme().resolveAttribute(android.R.attr.selectableItemBackground, ripple, true);
@@ -508,7 +508,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         boolean usable = snapshot != null && !saving;
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.HORIZONTAL);
-        card.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(card);
         Ui.setSymmetricPaddingDp(card, this, 16, 14);
         GradientDrawable face = selected
             ? Ui.outlined(Ui.card(this), Ui.dp(this, 20), Ui.dp(this, 2), Ui.accent(this))
@@ -547,7 +547,7 @@ public final class OnboardingActivity extends AppCompatActivity {
     private void perk(LinearLayout column, @DrawableRes int icon, String label, int top) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(row);
         Ui.setSymmetricPaddingDp(row, this, 14, 12);
         row.setBackground(Ui.rounded(Ui.card(this), Ui.dp(this, 20)));
         ImageView badge = new ImageView(this);
