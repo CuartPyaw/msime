@@ -3528,8 +3528,7 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     boolean systemDark() {
-        int mode = getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
-        return mode == Configuration.UI_MODE_NIGHT_YES;
+        return KeyboardGeometry.isNight(this);
     }
 
     private KeyboardSkin keyboardSkin(JSONObject preferences) {
