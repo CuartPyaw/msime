@@ -54,5 +54,13 @@ public final class DictionaryCollectionsStoreSmoke {
         check(DictionaryCollectionsStore.failureMessage("builtin_locked").contains("内置"));
         check(DictionaryCollectionsStore.failureMessage(null).equals(DictionaryCollectionsStore.failureMessage("x")));
         check(DictionaryCollectionsStore.BUILTIN_PINYIN.equals("builtin:pinyin"));
+        check(DictionaryCollectionsStore.exportBytesAfterPage(
+            DictionaryCollectionsStore.MAX_EXPORT_BYTES - 1, "a")
+            == DictionaryCollectionsStore.MAX_EXPORT_BYTES);
+        check(DictionaryCollectionsStore.exportBytesAfterPage(
+            DictionaryCollectionsStore.MAX_EXPORT_BYTES - 1, "ab") < 0);
+        check(DictionaryCollectionsStore.exportBytesAfterPage(
+            DictionaryCollectionsStore.MAX_EXPORT_BYTES - 3, "中")
+            == DictionaryCollectionsStore.MAX_EXPORT_BYTES);
     }
 }
