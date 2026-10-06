@@ -4,6 +4,7 @@ import android.app.Application;
 import android.content.Context;
 import android.net.Uri;
 import android.os.Bundle;
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URL;
