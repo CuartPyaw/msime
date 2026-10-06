@@ -21,6 +21,7 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.widget.NestedScrollView;
 import app.msime.android.AppEdition;
+import app.msime.android.BoundsPolicy;
 import app.msime.android.FirstRunPreparation;
 import app.msime.android.KeyboardScheme;
 import app.msime.android.R;
@@ -467,7 +468,8 @@ public final class OnboardingActivity extends AppCompatActivity {
             View line = new View(this);
             line.setBackgroundColor(Ui.hairline(this));
             card.addView(line, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, Math.max(1, Ui.dp(this, 1) / 2)));
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                BoundsPolicy.bounded(Ui.dp(this, 1) / 2, 1, Integer.MAX_VALUE)));
         }
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
