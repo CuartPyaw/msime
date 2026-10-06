@@ -100,6 +100,7 @@ import {
 import {
   AiPolishPolicy, MAX_POLISH_SOURCE_CHARACTERS, PolishReplacement
 } from './input/AiPolishPolicy';
+import { VoiceRecognitionPolicy } from './input/VoiceRecognitionPolicy';
 import { HarmonyVoicePolisher } from './input/HarmonyVoicePolisher';
 import { SmartPunctuationSpacePolicy, SmartPunctuationSpaceSnapshot, SpaceConvertDecision }
   from './input/SmartPunctuationSpacePolicy';
@@ -2667,7 +2668,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     }
     try {
       const response: VoiceTextResponse = JSON.parse(client.voiceApply(this.handle, generation, text)) as VoiceTextResponse;
-      return response.ok === true ? response.value : null;
+      return response.ok === true ? VoiceRecognitionPolicy.accepted(response.value) : null;
     } catch (error) {
       KeyboardLog.error(`voice result unavailable: ${describeError(error)}`);
       return null;

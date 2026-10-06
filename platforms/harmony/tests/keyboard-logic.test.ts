@@ -950,6 +950,12 @@ group("bounds native speech language, session and result text", () => {
     VoiceRecognitionPolicy.result("x".repeat(VOICE_MAX_TEXT + 20)).length === VOICE_MAX_TEXT,
     "voice result is bounded",
   );
+  check(
+    VoiceRecognitionPolicy.accepted(" 水 ") === "水" &&
+      VoiceRecognitionPolicy.accepted(42) === null &&
+      VoiceRecognitionPolicy.accepted(null) === null,
+    "voice apply accepts only string results",
+  );
   const splitEmoji = "x".repeat(VOICE_MAX_TEXT - 1) + "😀";
   const boundedEmoji = VoiceRecognitionPolicy.result(splitEmoji);
   check(

@@ -3,6 +3,11 @@ export const VOICE_MAX_TEXT: number = 4096;
 export const VOICE_MAX_LANGUAGE: number = 32;
 
 export class VoiceRecognitionPolicy {
+  /** 原生语音结果只有字符串才可交给编辑器，其他类型视为过期结果。 */
+  static accepted(value: unknown): string | null {
+    return typeof value === 'string' ? VoiceRecognitionPolicy.result(value as string) : null;
+  }
+
   static language(value: string): string {
     const trimmed: string = value.trim();
     if (trimmed.length === 0) {
