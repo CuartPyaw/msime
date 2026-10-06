@@ -235,8 +235,7 @@ public final class GroupCard {
     private void addDivider() {
         if (dividerInset < 0 || card.getChildCount() == 0) return;
         View rule = Ui.hairlineView(context);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, Ui.hairlinePx(context));
+        LinearLayout.LayoutParams params = Ui.matchWidthHeightPx(Ui.hairlinePx(context));
         params.setMarginStart(Ui.dp(context, dividerInset));
         card.addView(rule, params);
     }
