@@ -66,7 +66,7 @@ extension BackendAccountClient {
           texts.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 2048 }) else {
       throw Failure(status: 400)
     }
-    let body = try JSONEncoder().encode(Body(texts: texts, target_lang: target))
+    let body = try JSONEncoder().encode(Body(texts: texts, target_lang: target.uppercased()))
     let response: Response = try await json("POST", "/v1/translate", token: token,
       body: body, timeout: 30)
     guard response.code == 200, response.data.count == texts.count,
