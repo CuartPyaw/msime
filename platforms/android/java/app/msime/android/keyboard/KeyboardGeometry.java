@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.res.Configuration;
 import android.util.TypedValue;
 import android.view.View;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import java.util.Locale;
 import java.math.BigDecimal;
@@ -241,6 +242,12 @@ public final class KeyboardGeometry {
     /** Create weighted linear layout parameters with an already pixel-sized height. */
     public static LinearLayout.LayoutParams weightedHeightPxParams(int heightPixels, float weight) {
         return new LinearLayout.LayoutParams(0, heightPixels, weight);
+    }
+
+    /** Create frame layout parameters that fill both parent dimensions. */
+    public static FrameLayout.LayoutParams frameMatchParentParams() {
+        return new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT);
     }
 
     /** Create weighted linear layout parameters with a fixed height in dp. */
