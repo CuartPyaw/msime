@@ -1408,8 +1408,7 @@ final class ImePanels {
                 s.closeCommonPhrases();
                 s.openHostPage("PHRASES");
             });
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            LinearLayout.LayoutParams params = KeyboardGeometry.wrapParams();
             params.gravity = Gravity.CENTER_HORIZONTAL;
             panel.addView(add, params);
         }
