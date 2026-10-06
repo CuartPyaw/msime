@@ -2315,7 +2315,8 @@ public final class MSIMEInputService extends InputMethodService {
     private String cloudRequestUrl(String document) {
         try {
             JSONObject envelope = new JSONObject(NativeClient.cloudRequestUrl(document));
-            return envelope.optBoolean("ok", false) ? envelope.optString("value", "") : "";
+            return Boolean.TRUE.equals(envelope.opt("ok"))
+                ? envelope.optString("value", "") : "";
         } catch (JSONException | RuntimeException | LinkageError error) {
             return "";
         }
