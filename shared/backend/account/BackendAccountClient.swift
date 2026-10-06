@@ -195,12 +195,6 @@ struct BackendAccountClient: Sendable {
     return value
   }
   func rename(_ name: String, token: String) async throws {
-    guard !name.isEmpty,
-          name == name.trimmingCharacters(in: .whitespacesAndNewlines),
-          name.unicodeScalars.count <= 64,
-          !name.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) else {
-      throw Failure(status: 400)
-    }
     struct Body: Encodable { let display_name: String }
     guard Self.validDisplayName(name) else { throw Failure(status: 400) }
     _ = try await request("PATCH", "/v1/users/me", token: token,
