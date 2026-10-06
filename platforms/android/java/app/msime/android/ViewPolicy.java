@@ -156,6 +156,11 @@ public final class ViewPolicy {
         view.setMinimumHeight(height);
     }
 
+    /** Show a view in layout and rendering. */
+    public static void show(View view) {
+        view.setVisibility(View.VISIBLE);
+    }
+
     /** Hide a view from layout and rendering. */
     public static void hide(View view) {
         view.setVisibility(View.GONE);

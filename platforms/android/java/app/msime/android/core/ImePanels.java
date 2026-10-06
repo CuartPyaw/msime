@@ -167,7 +167,7 @@ final class ImePanels {
         s.closeAiPolish();
         s.closeReplyKeyboard();
         s.emojiRecents = s.loadEmojiRecents();
-        s.emojiPanel.setVisibility(View.VISIBLE);
+        ViewPolicy.show(s.emojiPanel);
         s.emojiPanel.requestFocus();
         s.selectEmojiCategory(s.emojiRecents.isEmpty() ? 0 : -1);
     }
@@ -191,7 +191,7 @@ final class ImePanels {
         s.symbolPanel.resetForPresentation();
         // 面板原先没有底色，网格空着时直接透出底下的字母键；铺上键盘底图。
         s.imeStyler.applySkinBackground(s.symbolPanel);
-        s.symbolPanel.setVisibility(View.VISIBLE);
+        ViewPolicy.show(s.symbolPanel);
         s.symbolPanel.requestFocus();
     }
 
@@ -327,7 +327,7 @@ final class ImePanels {
         s.closeReplyKeyboard();
         pendingSkinKey = null;
         renderSkinPicker();
-        s.skinScroll.setVisibility(View.VISIBLE);
+        ViewPolicy.show(s.skinScroll);
     }
 
     /** 皮肤面板正在应用、尚未写回偏好的那一款；保存回来之前选中态按它画，点下去就换色。 */
@@ -816,7 +816,7 @@ final class ImePanels {
         s.aiTarget = new EditorContextSnapshot(s.connection, s.editorContextRevision, s.editorContext(true),
             selected, s.editorContext(false));
         renderAiPolish();
-        s.aiPolishContainer.setVisibility(View.VISIBLE);
+        ViewPolicy.show(s.aiPolishContainer);
     }
 
     void sendAiPolish() {
@@ -982,7 +982,7 @@ final class ImePanels {
         s.closeAiPolish();
         s.closeReplyKeyboard();
         renderSchemePicker();
-        s.schemeScroll.setVisibility(View.VISIBLE);
+        ViewPolicy.show(s.schemeScroll);
     }
 
     void renderSchemePicker() {
@@ -1074,7 +1074,7 @@ final class ImePanels {
         s.clipboardTab = CloudClipboardPanelPolicy.initialTab(
             s.clipboardTab, s.clipboardHistoryEnabled, cloudAllowed);
         renderClipboardHistory();
-        s.clipboardScroll.setVisibility(View.VISIBLE);
+        ViewPolicy.show(s.clipboardScroll);
         // Fetched on every opening, whichever half is showing: the local half's 发到云剪贴板 needs to know the account is signed in with the cloud clipboard on.
         if (cloudAllowed) refreshCloudClipboard();
     }
@@ -1343,7 +1343,7 @@ final class ImePanels {
         s.closeCandidatePanel();
         long generation = ++phraseGeneration;
         renderCommonPhrases(java.util.List.of(), "正在读取常用语…");
-        s.phraseScroll.setVisibility(View.VISIBLE);
+        ViewPolicy.show(s.phraseScroll);
         Runnable load = () -> {
             CommonPhrasesStore.Result result;
             try {
@@ -1458,7 +1458,7 @@ final class ImePanels {
         s.closeReplyKeyboard();
         s.localInputToolsOpen = false;
         s.imeFunctionPanel.renderMoreTools();
-        s.moreToolsScroll.setVisibility(View.VISIBLE);
+        ViewPolicy.show(s.moreToolsScroll);
         s.moreToolsScroll.requestFocus();
     }
 
