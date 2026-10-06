@@ -1,5 +1,7 @@
 package app.msime.android;
 
+import app.msime.android.keyboard.KeyboardGeometry;
+
 import android.provider.Settings;
 import android.view.View;
 import android.view.animation.DecelerateInterpolator;
@@ -32,8 +34,8 @@ public final class KeyboardPressFeedback {
             return;
         }
         if (pressed) {
-            view.animate().translationY(PRESSED_TRANSLATION_DP
-                    * view.getResources().getDisplayMetrics().density)
+            view.animate().translationY(KeyboardGeometry.floatPixels(view.getContext(),
+                    PRESSED_TRANSLATION_DP))
                 .scaleX(PRESSED_SCALE).scaleY(PRESSED_SCALE)
                 .setDuration(PRESS_DURATION_MILLIS)
                 .setInterpolator(new DecelerateInterpolator()).start();
