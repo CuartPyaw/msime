@@ -197,12 +197,12 @@ public final class KeyboardGeometry {
 
     public static int halfGapPixels(int tenths, float density) {
         if (!Float.isFinite(density) || density <= 0) return 0;
-        return Math.max(0, Math.round(tenths * density / 20f));
+        return BoundsPolicy.nonNegative(Math.round(tenths * density / 20f));
     }
 
     /** Convert a size to pixels while guaranteeing at least one physical pixel. */
     public static int atLeastOnePixel(Context context, float dp) {
-        return Math.max(1, pixels(context, dp));
+        return BoundsPolicy.atLeast(pixels(context, dp), 1);
     }
 
     /** Convert an integer density-independent size to pixels using Android's rounding rule. */
