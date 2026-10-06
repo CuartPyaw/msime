@@ -120,7 +120,7 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
                 // that same fill in the shipped skins: 恢复默认 and 完成 were dark green text on a
                 // dark green button, and the bar read as three blank tiles.
                 button.setTextColor(color(skin.functionForeground()));
-                button.setAllCaps(false);
+                ViewPolicy.setAllCapsFalse(button);
             }
         }
     }
@@ -206,7 +206,7 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
 
     private Button button(String title, String description, Runnable action) {
         Button button = new KeyboardPressButton(getContext());
-        button.setAllCaps(false);
+        ViewPolicy.setAllCapsFalse(button);
         button.setText(title);
         button.setContentDescription(description);
         button.setOnClickListener(ignored -> action.run());
