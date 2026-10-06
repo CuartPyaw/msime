@@ -262,9 +262,8 @@ final class ImeStyler {
                 button.setBackground(new KeyboardSkinKeyDrawable(target,
                     color(background), selected || action || confirm, density));
             } else {
-                GradientDrawable drawable = new GradientDrawable();
-                drawable.setColor(color(background));
-                drawable.setCornerRadius(s.pixels(tile ? MoreToolsLayout.TILE_RADIUS_DP : target.cornerRadius()));
+                GradientDrawable drawable = DrawablePolicy.rounded(color(background),
+                    s.pixels(tile ? MoreToolsLayout.TILE_RADIUS_DP : target.cornerRadius()));
                 int borderWidth = s.pixels(target.borderWidth());
                 if (borderWidth > 0)
                     drawable.setStroke(borderWidth, color(target.borderColor()));
