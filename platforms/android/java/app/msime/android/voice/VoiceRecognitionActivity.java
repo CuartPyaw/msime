@@ -434,7 +434,8 @@ public final class VoiceRecognitionActivity extends Activity {
             String text = null;
             String message = null;
             try {
-                text = running.recognize(modelDirectory, files.toPath(), language, runtimeOptions(files),
+                text = running.recognize(modelDirectory, files.toPath(), language,
+                    HostOptionsPolicy.readRuntimeOptions(files),
                     hotwordTexts, hotwordPinyin,
                     partial -> runOnUiThread(() -> {
                         if (!finished && recordingHint != null) recordingHint.setText(partial);
@@ -461,17 +462,6 @@ public final class VoiceRecognitionActivity extends Activity {
                 finishRequest();
             });
         });
-    }
-
-    /** The runtime options document the keyboard's session uses, or empty when it is not ready. */
-    private static String runtimeOptions(File files) {
-        if (files == null) return "";
-        File options = new File(files, "runtime-options.json");
-        try {
-            return HostOptionsPolicy.read(options);
-        } catch (java.io.IOException error) {
-            return "";
-        }
     }
 
     /** Stream while the user speaks, then deliver the provider's final result. */

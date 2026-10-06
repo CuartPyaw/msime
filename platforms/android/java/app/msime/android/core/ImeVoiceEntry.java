@@ -132,7 +132,7 @@ final class ImeVoiceEntry {
         }
         LocalAsrRecognizer runningLocal = local;
         DoubaoRecognizer runningStream = streaming;
-        String options = runtimeOptions(files);
+        String options = HostOptionsPolicy.readRuntimeOptions(files);
         try {
             worker.execute(() -> {
                 String text = null;
@@ -319,15 +319,6 @@ final class ImeVoiceEntry {
             });
         } catch (RejectedExecutionException ignored) {
             // 键盘正在退出。
-        }
-    }
-
-    private static String runtimeOptions(File files) {
-        if (files == null) return "";
-        try {
-            return HostOptionsPolicy.read(new File(files, "runtime-options.json"));
-        } catch (java.io.IOException error) {
-            return "";
         }
     }
 

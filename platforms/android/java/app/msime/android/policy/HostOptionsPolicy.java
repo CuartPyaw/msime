@@ -23,4 +23,14 @@ public final class HostOptionsPolicy {
             return new String(HttpBodyPolicy.readRequired(input, MAX_BYTES), StandardCharsets.UTF_8);
         }
     }
+
+    /** Read the standard runtime-options document below a host files directory. */
+    public static String readRuntimeOptions(File files) {
+        if (files == null) return "";
+        try {
+            return read(new File(files, "runtime-options.json"));
+        } catch (IOException error) {
+            return "";
+        }
+    }
 }
