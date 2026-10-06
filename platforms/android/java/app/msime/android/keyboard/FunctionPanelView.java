@@ -218,7 +218,7 @@ public final class FunctionPanelView extends LinearLayout {
             float labelHeight = label.descent - label.ascent;
             float area = ICON_AREA_DP * density;
             float total = area + LABEL_GAP_DP * density + labelHeight;
-            float top = Math.max(0f, (getHeight() - total) / 2f);
+            float top = BoundsPolicy.nonNegative((getHeight() - total) / 2f);
             float centerX = getWidth() / 2f;
             float iconCenterY = top + area / 2f;
             float iconRight;
@@ -276,7 +276,7 @@ public final class FunctionPanelView extends LinearLayout {
         /** 放不下时以「…」结尾截断，不悄悄丢掉末尾的字。 */
         private String fit(String value, float width) {
             String source = value == null ? "" : value;
-            float boundedWidth = Math.max(0f, width);
+            float boundedWidth = BoundsPolicy.nonNegative(width);
             boolean bold = textPaint.getTypeface() == Typeface.DEFAULT_BOLD;
             float size = textPaint.getTextSize();
             if (fittedLabel == null || !source.equals(fittedLabelSource)
