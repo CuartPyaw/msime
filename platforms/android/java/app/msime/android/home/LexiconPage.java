@@ -93,7 +93,7 @@ public final class LexiconPage extends DetailPage {
         pill.setSingleLine(true);
         int fill = filled ? Ui.accent(context) : Ui.accentSoft(context);
         Ui.style(pill, Ui.TEXT_BUTTON_SMALL, 500, filled ? Ui.onAccent(context) : Ui.accent(context));
-        pill.setBackground(Ui.rippleOn(context, fill, 9999f));
+        pill.setBackground(Ui.pillRipple(context, fill));
         pill.setPadding(Ui.dp(context, 12), Ui.dp(context, 6), Ui.dp(context, 12), Ui.dp(context, 6));
         pill.setMinHeight(Ui.dp(context, 32));
         pill.setClickable(true);
@@ -269,7 +269,7 @@ public final class LexiconPage extends DetailPage {
         button.setGravity(Gravity.CENTER);
         button.setSingleLine(true);
         Ui.style(button, Ui.TEXT_BUTTON_SMALL, 500, added ? Ui.subText(context) : Ui.accent(context));
-        button.setBackground(Ui.rippleOn(context, added ? Ui.rowBackground(context) : Ui.accentSoft(context), 9999f));
+        button.setBackground(Ui.pillRipple(context, added ? Ui.rowBackground(context) : Ui.accentSoft(context)));
         button.setPadding(Ui.dp(context, 14), Ui.dp(context, 5), Ui.dp(context, 14), Ui.dp(context, 5));
         button.setMinHeight(Ui.dp(context, 32));
         boolean enabled = !added && !busy;
