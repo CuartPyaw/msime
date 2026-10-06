@@ -31,6 +31,11 @@ public final class DoubaoAsrPolicy {
         return AiProviderResponse.strictText(value);
     }
 
+    /** The provider envelope carries its nested result as a JSON string; reject coercion. */
+    static String strictPayload(Object value) {
+        return value instanceof String ? (String) value : null;
+    }
+
     static Boolean strictBoolean(Object value) {
         return value instanceof Boolean ? (Boolean) value : null;
     }

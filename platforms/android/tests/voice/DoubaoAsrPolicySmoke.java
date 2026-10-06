@@ -83,6 +83,14 @@ public final class DoubaoAsrPolicySmoke {
                 "Doubao accepts string transcripts");
             check("".equals(strictText.invoke(null, 42)),
                 "Doubao rejects numeric transcripts instead of coercing them");
+            Method strictPayload = DoubaoAsrPolicy.class.getDeclaredMethod("strictPayload", Object.class);
+            strictPayload.setAccessible(true);
+            check("{\"result\":{}}".equals(strictPayload.invoke(null, "{\"result\":{}}")),
+                "Doubao accepts string payloads");
+            check(strictPayload.invoke(null, 42) == null,
+                "Doubao rejects numeric payloads instead of coercing them");
+            check(strictPayload.invoke(null, new Object()) == null,
+                "Doubao rejects object payloads instead of coercing them");
             Method strictBoolean = DoubaoAsrPolicy.class.getDeclaredMethod("strictBoolean", Object.class);
             strictBoolean.setAccessible(true);
             check(Boolean.TRUE.equals(strictBoolean.invoke(null, Boolean.TRUE)),
