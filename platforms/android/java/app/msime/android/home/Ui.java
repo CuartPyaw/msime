@@ -737,6 +737,12 @@ public final class Ui {
         return new String(Character.toChars(Character.codePointAt(name, 0)));
     }
 
+    /** Return the first Unicode code point after trimming a name, or the fallback when empty. */
+    public static String trimmedInitial(CharSequence name, String fallback) {
+        String trimmed = name == null ? "" : name.toString().trim();
+        return initial(trimmed, fallback);
+    }
+
     /** Whether the optional Tauri management activity is present in this APK. */
     public static boolean tauriAvailable() {
         try {
