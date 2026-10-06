@@ -64,7 +64,7 @@ final class ImeFunctionPanel {
         }
         int columns = section.columns();
         for (int start = 0; start < cards.length; start += columns) {
-            LinearLayout row = new LinearLayout(s);
+            LinearLayout row = KeyboardGeometry.row(s);
             row.setWeightSum(columns);
             for (int column = 0; column < columns; column++) {
                 int index = start + column;
@@ -274,7 +274,7 @@ final class ImeFunctionPanel {
                     s.aiAssistChooserOpen = false;
                     renderMoreTools();
                 }));
-        LinearLayout segments = new LinearLayout(s);
+        LinearLayout segments = KeyboardGeometry.row(s);
         segments.setContentDescription("AI 回复与润色");
         Button reply = segment("回复", "生成高情商回复", true, () -> {
             s.closeMoreTools();
