@@ -40,7 +40,11 @@ public final class CommunityReplyLibrary {
         rejectSymlinkComponents(file);
         if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) return List.of();
         if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) throw new IOException("Invalid community library");
-        byte[] bytes = readBounded(file);
+        byte[] bytes;
+        try (InputStream input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
+            bytes = HttpBodyPolicy.readBounded(input, MAXIMUM_BYTES);
+            if (bytes == null) throw new IOException("Community library is too large");
+        }
         final String json;
         try {
             json = StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
@@ -53,8 +57,8 @@ public final class CommunityReplyLibrary {
         catch (IllegalArgumentException error) { throw new IOException("Invalid community library", error); }
         if (!(decoded instanceof List<?> items) || items.size() > MAXIMUM_ITEMS)
             throw new IOException("Invalid community library");
-        List<Template> replies = new ArrayList<>();
-        Set<String> ids = new HashSet<>();
+        List<Template> replies = new ArrayList<>(items.size());
+        Set<String> ids = new HashSet<>(items.size());
         for (Object value : items) {
             if (!(value instanceof Map<?, ?> item)) throw new IOException("Invalid community library");
             String id = string(item.get("id"));
@@ -79,15 +83,6 @@ public final class CommunityReplyLibrary {
             replies.add(new Template(id, name, prompt));
         }
         return List.copyOf(replies);
-    }
-
-    /** Read only the library envelope, even if a replaced file grows after inspection. */
-    private static byte[] readBounded(Path file) throws IOException {
-        try (InputStream input = Files.newInputStream(file)) {
-            byte[] bytes = HttpBodyPolicy.readBounded(input, MAXIMUM_BYTES);
-            if (bytes == null) throw new IOException("Community library is too large");
-            return bytes;
-        }
     }
 
     private static void rejectSymlinkComponents(Path path) throws IOException {

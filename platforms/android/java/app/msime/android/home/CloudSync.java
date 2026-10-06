@@ -424,7 +424,7 @@ public final class CloudSync {
 
         /** 云端或合并结果里已有的正文即使和本机的示例相同，也是用户的常用语了：先认领，免得之后只有本机改动的上传把它从云端删掉。写不下认领记录就放弃这一轮，游标不前进，下一轮重来。 */
         private void adoptStarters(List<SyncMergePolicy.Phrase> target) {
-            List<String> texts = new ArrayList<>();
+            List<String> texts = new ArrayList<>(target.size());
             for (SyncMergePolicy.Phrase phrase : target) texts.add(phrase.text());
             try {
                 CommonPhrasesStore.adoptStarters(context, texts);
@@ -437,7 +437,7 @@ public final class CloudSync {
         private List<SyncMergePolicy.Phrase> asPhrases(Map<String, String> local, List<SyncMergePolicy.Phrase> cloud) {
             HashMap<String, String> groups = new HashMap<>();
             for (SyncMergePolicy.Phrase phrase : cloud) groups.putIfAbsent(phrase.text(), phrase.group());
-            List<SyncMergePolicy.Phrase> result = new ArrayList<>();
+            List<SyncMergePolicy.Phrase> result = new ArrayList<>(local.size());
             for (Map.Entry<String, String> entry : local.entrySet()) {
                 result.add(new SyncMergePolicy.Phrase(entry.getKey(), entry.getValue(),
                     groups.getOrDefault(entry.getValue(), ""), result.size()));

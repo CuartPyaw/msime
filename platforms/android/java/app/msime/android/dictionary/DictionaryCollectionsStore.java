@@ -332,7 +332,7 @@ public final class DictionaryCollectionsStore {
      * 导入来源对话框的选项：只列 client-core 实际接受的格式，按「文本、搜狗、Rime、纯汉字」排；`standard` 和 `windows` 是文本文件的两种列顺序，由 client-core 在 `txt` 里自动识别，不单独列出。
      */
     public static List<ImportSource> importSources(List<String> formats) {
-        List<ImportSource> sources = new ArrayList<>();
+        List<ImportSource> sources = new ArrayList<>(formats.size());
         if (formats.contains("txt")) {
             sources.add(new ImportSource("txt", "文本文件（.txt）", new String[] {"text/plain"}));
         }

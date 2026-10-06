@@ -672,7 +672,8 @@ public final class BackendAccount {
             try (InputStream input = connection.getInputStream()) {
                 if (type == null || !type.toLowerCase(Locale.ROOT).startsWith("text/event-stream")) {
                     // 没按流式回答（例如中间层吞掉了 stream）：按普通 JSON 回复读，整段一次交出去。
-                    String reply = chatContent(new JSONObject(new String(readBounded(input), StandardCharsets.UTF_8)));
+                    byte[] response = readBounded(input);
+                    String reply = chatContent(new JSONObject(new String(response, StandardCharsets.UTF_8)));
                     if (call.cancelled()) throw new CancellationException("chat cancelled");
                     listener.onDelta(reply);
                     return reply;
@@ -890,4 +891,5 @@ public final class BackendAccount {
         if (response == null) throw new IllegalStateException("response too large");
         return response;
     }
+
 }

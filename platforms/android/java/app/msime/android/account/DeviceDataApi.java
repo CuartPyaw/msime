@@ -312,8 +312,8 @@ public final class DeviceDataApi {
         if (user == null || string(user, "id").isEmpty()) {
             throw new CloudApi.Failure(500, "invalid_response", "user missing", 0);
         }
-        List<String> providers = new ArrayList<>();
         JSONArray identities = root.optJSONArray("identities");
+        List<String> providers = new ArrayList<>(identities == null ? 0 : identities.length());
         if (identities != null) {
             for (int index = 0; index < identities.length(); index++) {
                 JSONObject identity = identities.optJSONObject(index);
@@ -378,7 +378,9 @@ public final class DeviceDataApi {
             InputStream error = connection.getErrorStream();
             byte[] body = new byte[0];
             if (error != null) {
-                try (InputStream input = error) { body = CloudApi.readBounded(input); }
+                try (InputStream input = error) {
+                    body = HttpBodyPolicy.readRequired(input, CloudApi.MAX_RESPONSE_BYTES);
+                }
             }
             return new Download(status, connection.getHeaderField("Retry-After"), body);
         } finally {
