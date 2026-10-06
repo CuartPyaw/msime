@@ -41,7 +41,8 @@ public final class SchemePreferences {
      * @param enabled 现在的列表，项可以为 null；列表本身为 null 时当作空列表
      */
     public static List<String> enabledAfterSwitch(List<String> enabled, String preferenceId) {
-        List<String> result = enabled == null ? new ArrayList<>() : new ArrayList<>(enabled);
+        List<String> result = enabled == null
+            ? new ArrayList<>(1) : new ArrayList<>(enabled.size() + 1);
         if (!result.contains(preferenceId)) result.add(preferenceId);
         return result;
     }
