@@ -7,6 +7,19 @@ import java.util.List;
 
 public final class BackendAccountResponseSmoke {
     public static void main(String[] args) throws Exception {
+        BackendAccount providerAccount = new BackendAccount(
+            new BackendAccount.SessionStore() {
+                @Override public String load() { return ""; }
+                @Override public void save(String value) {}
+                @Override public void clear() {}
+            },
+            (method, path, body, token) -> new org.json.JSONObject()
+                .put("providers", new org.json.JSONObject().put("google", "true")));
+        check(!providerAccount.supports("google"),
+            "provider flags reject boolean strings instead of coercing them");
+        check(BackendAccount.providerEnabled(Boolean.TRUE), "boolean provider flag is enabled");
+        check(!BackendAccount.providerEnabled("true"),
+            "string provider flag is not enabled");
         // A valid cloud-clipboard page can contain fifty four-thousand-unit entries. Keep this
         // fixture synthetic and below the shared one-megabyte JSON response bound.
         StringBuilder document = new StringBuilder("{\"enabled\":true,\"items\":[");
