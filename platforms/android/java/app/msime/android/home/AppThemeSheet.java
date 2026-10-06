@@ -187,19 +187,19 @@ final class AppThemeSheet {
         Ui.style(text, Ui.TEXT_SHEET_OPTION, selected ? 600 : 400, color);
         FrameLayout.LayoutParams textParams = new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
-        textParams.leftMargin = Ui.dp(context, 48);
-        textParams.rightMargin = Ui.dp(context, 48);
-        textParams.topMargin = Ui.dp(context, 8);
-        textParams.bottomMargin = Ui.dp(context, 8);
+        textParams.leftMargin = Ui.dp(context, Ui.SHEET_OPTION_TEXT_INSET);
+        textParams.rightMargin = Ui.dp(context, Ui.SHEET_OPTION_TEXT_INSET);
+        textParams.topMargin = Ui.dp(context, Ui.SHEET_OPTION_TEXT_VERTICAL_INSET);
+        textParams.bottomMargin = Ui.dp(context, Ui.SHEET_OPTION_TEXT_VERTICAL_INSET);
         row.addView(text, textParams);
         if (selected) {
             ImageView check = new ImageView(context);
             check.setImageResource(R.drawable.ms_w1_a2_check);
         Ui.setImageTint(check, Ui.accent(context));
             check.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            FrameLayout.LayoutParams checkParams = new FrameLayout.LayoutParams(Ui.dp(context, 18), Ui.dp(context, 18),
+            FrameLayout.LayoutParams checkParams = new FrameLayout.LayoutParams(Ui.dp(context, Ui.SHEET_CHECK_SIZE), Ui.dp(context, Ui.SHEET_CHECK_SIZE),
                 Gravity.CENTER_VERTICAL | Gravity.END);
-            checkParams.setMarginEnd(Ui.dp(context, 20));
+            checkParams.setMarginEnd(Ui.dp(context, Ui.SHEET_CHECK_END_MARGIN));
             row.addView(check, checkParams);
         }
         ViewCompat.setAccessibilityDelegate(row, new AccessibilityDelegateCompat() {

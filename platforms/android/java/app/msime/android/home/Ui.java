@@ -105,6 +105,14 @@ public final class Ui {
     public static final int SLIDER_LABEL_WIDTH = 46;
     /** 选择面板每个选项的高度。 */
     public static final int SHEET_OPTION_HEIGHT = 56;
+    /** 选择面板选项文字为勾选图标预留的左右空间。 */
+    public static final int SHEET_OPTION_TEXT_INSET = 48;
+    /** 选择面板选项文字的上下内边距。 */
+    public static final int SHEET_OPTION_TEXT_VERTICAL_INSET = 8;
+    /** 选择面板勾选图标尺寸。 */
+    public static final int SHEET_CHECK_SIZE = 18;
+    /** 选择面板勾选图标距右边的间距。 */
+    public static final int SHEET_CHECK_END_MARGIN = 20;
     /** 对话框的最大宽度。 */
     public static final int DIALOG_WIDTH = 280;
     /** 页码点：高度、未选中宽度、选中宽度、间距。 */
