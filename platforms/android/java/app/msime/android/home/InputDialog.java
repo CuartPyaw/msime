@@ -7,7 +7,6 @@ import android.graphics.drawable.GradientDrawable;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
-import android.view.Gravity;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
@@ -18,6 +17,7 @@ import android.widget.TextView;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatDialog;
 import app.msime.android.BoundsPolicy;
+import app.msime.android.ViewPolicy;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -52,7 +52,7 @@ public final class InputDialog {
         root.setClipToOutline(true);
 
         TextView heading = Ui.styledLabel(context, title, Ui.TEXT_DIALOG_TITLE, 600, Ui.text(context));
-        heading.setGravity(Gravity.CENTER);
+        ViewPolicy.setCentered(heading);
         heading.setAccessibilityHeading(true);
         LinearLayout.LayoutParams headingParams = Ui.matchWidth();
         headingParams.topMargin = Ui.dp(context, 20);
@@ -62,7 +62,7 @@ public final class InputDialog {
 
         if (message != null && message.length() > 0) {
             TextView note = Ui.styledLabel(context, message, Ui.TEXT_SHEET_HEADER, 400, Ui.subText(context));
-            note.setGravity(Gravity.CENTER);
+            ViewPolicy.setCentered(note);
             LinearLayout.LayoutParams params = Ui.matchWidth();
             params.topMargin = Ui.dp(context, 4);
             params.leftMargin = Ui.dp(context, 20);
