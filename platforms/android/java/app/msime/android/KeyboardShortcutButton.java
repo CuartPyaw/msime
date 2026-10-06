@@ -30,7 +30,7 @@ public final class KeyboardShortcutButton extends KeyboardPressButton {
         this.icon = icon;
         setKeyboardRole(KeyboardKeyRole.GLYPH);
         setGravity(Gravity.CENTER);
-        setPadding(0, 0, 0, 0);
+        ViewPolicy.clearPadding(this);
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeCap(Paint.Cap.ROUND);
         paint.setStrokeJoin(Paint.Join.ROUND);
