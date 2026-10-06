@@ -61,7 +61,7 @@ public final class KeyboardSkinKeyDrawable extends Drawable {
                 shapePath.close();
             }
             case "ticket" -> {
-                float notch = Math.min(rect.width(), rect.height()) * .12f;
+                float notch = KeyboardGeometry.shorterSide(rect.width(), rect.height()) * .12f;
                 shapePath.moveTo(rect.left, rect.top);
                 shapePath.lineTo(rect.right, rect.top);
                 shapePath.lineTo(rect.right, rect.centerY() - notch);
@@ -78,7 +78,7 @@ public final class KeyboardSkinKeyDrawable extends Drawable {
             }
             default -> {
                 float radius = Math.min(dp(skin.cornerRadius()),
-                    Math.min(rect.width(), rect.height()) / 2);
+                    KeyboardGeometry.shorterSide(rect.width(), rect.height()) / 2);
                 shapePath.addRoundRect(rect, radius, radius, Path.Direction.CW);
             }
         }
