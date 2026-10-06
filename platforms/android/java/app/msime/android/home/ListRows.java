@@ -44,8 +44,8 @@ final class ListRows {
         heading.setText(text);
         Ui.style(heading, Ui.TEXT_GROUP_TITLE, 500, Ui.accent(context));
         heading.setAccessibilityHeading(true);
-        heading.setPadding(Ui.dp(context, Ui.NAV_ROW_PADDING_H), Ui.dp(context, 16),
-            Ui.dp(context, Ui.NAV_ROW_PADDING_H), Ui.dp(context, 4));
+        Ui.setPaddingDp(heading, context, Ui.NAV_ROW_PADDING_H, 16,
+            Ui.NAV_ROW_PADDING_H, 4);
         parent.addView(heading, Ui.matchWidth());
         return heading;
     }

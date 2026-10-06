@@ -145,7 +145,8 @@ public final class CloudClipboardPage extends DetailPage {
         LinearLayout header = new LinearLayout(context);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(Ui.dp(context, Ui.GROUP_TITLE_INSET), 0, Ui.dp(context, Ui.GROUP_TITLE_INSET), Ui.dp(context, 2));
+        Ui.setPaddingDp(header, context, Ui.GROUP_TITLE_INSET, 0,
+            Ui.GROUP_TITLE_INSET, 2);
         TextView recent = new TextView(context);
         recent.setText("最近");
         recent.setAccessibilityHeading(true);
@@ -155,7 +156,7 @@ public final class CloudClipboardPage extends DetailPage {
             TextView clear = new TextView(context);
             clear.setText("清空");
             Ui.style(clear, Ui.TEXT_GROUP_TITLE, 500, Ui.accent(context));
-            clear.setPadding(Ui.dp(context, 8), Ui.dp(context, 4), 0, Ui.dp(context, 4));
+        Ui.setPaddingDp(clear, context, 8, 4, 0, 4);
             clear.setBackground(Ui.ripple(context));
             clear.setClickable(true);
             clear.setFocusable(true);
@@ -195,7 +196,7 @@ public final class CloudClipboardPage extends DetailPage {
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(Ui.dp(context, 16), Ui.dp(context, 12), Ui.dp(context, 8), Ui.dp(context, 12));
+        Ui.setPaddingDp(row, context, 16, 12, 8, 12);
         row.setBackground(Ui.ripple(context));
         row.setClickable(true);
         row.setFocusable(true);

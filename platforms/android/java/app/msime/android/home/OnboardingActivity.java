@@ -474,7 +474,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         Ui.setMinimumHeightDp(row, this, Ui.COMPACT_ROW_MIN_HEIGHT);
-        row.setPadding(Ui.dp(this, 14), Ui.dp(this, 6), Ui.dp(this, 8), Ui.dp(this, 6));
+        Ui.setPaddingDp(row, this, 14, 6, 8, 6);
 
         TextView mark = new TextView(this);
         mark.setGravity(Gravity.CENTER);

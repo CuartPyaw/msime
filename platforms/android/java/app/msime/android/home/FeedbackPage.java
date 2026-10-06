@@ -106,7 +106,7 @@ public final class FeedbackPage extends DetailPage {
         strip.setHorizontalScrollBarEnabled(false);
         LinearLayout shots = new LinearLayout(context);
         shots.setOrientation(LinearLayout.HORIZONTAL);
-        shots.setPadding(Ui.dp(requireContext(), 16), Ui.dp(requireContext(), 10), Ui.dp(requireContext(), 16), 0);
+        Ui.setPaddingDp(shots, requireContext(), 16, 10, 16, 0);
         strip.addView(shots);
         card.addView(strip, Ui.matchWidth());
         thumbnails = shots;
@@ -114,7 +114,7 @@ public final class FeedbackPage extends DetailPage {
         LinearLayout add = new LinearLayout(context);
         add.setOrientation(LinearLayout.HORIZONTAL);
         add.setGravity(Gravity.CENTER_VERTICAL);
-        add.setPadding(Ui.dp(requireContext(), 16), Ui.dp(requireContext(), 12), Ui.dp(requireContext(), 16), Ui.dp(requireContext(), 14));
+        Ui.setPaddingDp(add, requireContext(), 16, 12, 16, 14);
         add.setBackground(Ui.ripple(context));
         add.setClickable(true);
         add.setFocusable(true);
@@ -136,7 +136,8 @@ public final class FeedbackPage extends DetailPage {
 
         TextView count = new TextView(context);
         Ui.style(count, 13, 400, Ui.subText(context));
-        count.setPadding(Ui.dp(requireContext(), Ui.GROUP_TITLE_INSET), Ui.dp(requireContext(), 6), Ui.dp(requireContext(), Ui.GROUP_TITLE_INSET), 0);
+        Ui.setPaddingDp(count, requireContext(), Ui.GROUP_TITLE_INSET, 6,
+            Ui.GROUP_TITLE_INSET, 0);
         description.view().addView(count, Ui.matchWidth());
         counter = count;
 

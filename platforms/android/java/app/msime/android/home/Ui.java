@@ -224,6 +224,13 @@ public final class Ui {
         view.setPadding(horizontal, 0, horizontal, 0);
     }
 
+    /** Apply four-sided padding expressed in density-independent pixels. */
+    public static void setPaddingDp(View view, Context context, float leftDp, float topDp,
+                                    float rightDp, float bottomDp) {
+        view.setPadding(dp(context, leftDp), dp(context, topDp),
+            dp(context, rightDp), dp(context, bottomDp));
+    }
+
     /** Apply a single tint to an image view through the platform state-list wrapper. */
     public static void setImageTint(ImageView view, int color) {
         view.setImageTintList(ColorStateList.valueOf(color));

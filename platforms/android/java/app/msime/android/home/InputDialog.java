@@ -77,7 +77,7 @@ public final class InputDialog {
 
         fields = new LinearLayout(context);
         fields.setOrientation(LinearLayout.VERTICAL);
-        fields.setPadding(Ui.dp(context, 16), Ui.dp(context, 6), Ui.dp(context, 16), Ui.dp(context, 16));
+        Ui.setPaddingDp(fields, context, 16, 6, 16, 16);
         root.addView(fields, Ui.matchWidth());
 
         root.addView(rule(true));
