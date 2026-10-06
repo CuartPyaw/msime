@@ -103,8 +103,7 @@ public final class OptionSheet {
 
     private void addOption(View view) {
         if (count > 0) {
-            View rule = Ui.hairlineView(context);
-            options.addView(rule, Ui.matchWidthHeightPx(Ui.hairlinePx(context)));
+            options.addView(Ui.divider(context, true));
         }
         options.addView(view);
         count++;
