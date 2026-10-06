@@ -98,7 +98,7 @@ public final class GroupCard {
         control.setChecked(checked);
         control.setClickable(false);
         control.setFocusable(false);
-        control.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        Ui.hideFromAccessibility(control);
         LinearLayout.LayoutParams params = Ui.rowGapParams(context);
         row.view.addView(control, params);
         row.toggle = control;
@@ -141,7 +141,7 @@ public final class GroupCard {
         TextView text = Ui.styledLabel(context, label.apply(control.value()), 13, 400, Ui.subText(context));
         ViewPolicy.setEndCenteredVertically(text);
         text.setSingleLine(true);
-        text.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            Ui.hideFromAccessibility(text);
         row.view.addView(text, new LinearLayout.LayoutParams(Ui.dp(context, Ui.SLIDER_LABEL_WIDTH),
             ViewGroup.LayoutParams.WRAP_CONTENT));
         control.setOnValueChange(current -> {

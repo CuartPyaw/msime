@@ -433,7 +433,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         glyph.setImageResource(icon);
         Ui.setImageTint(glyph, Ui.accent(this));
         glyph.setScaleType(ImageView.ScaleType.FIT_START);
-        glyph.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        Ui.hideFromAccessibility(glyph);
         column.addView(glyph, Ui.squareParams(this, 36));
 
         TextView kick = Ui.label(this, kicker, 13, Ui.accent(this));
@@ -551,7 +551,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         Ui.setImageTint(badge, Ui.accent(this));
         Ui.setSymmetricPaddingDp(badge, this, 7, 7);
         badge.setBackground(Ui.rounded(Ui.accentSoft(this), Ui.dp(this, 9)));
-        badge.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        Ui.hideFromAccessibility(badge);
         row.addView(badge, Ui.squareParams(this, 32));
         TextView text = Ui.label(this, label, 15, Ui.text(this));
         LinearLayout.LayoutParams textParams = Ui.weightWrap(1f);

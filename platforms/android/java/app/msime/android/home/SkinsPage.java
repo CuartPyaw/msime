@@ -159,7 +159,7 @@ public final class SkinsPage extends DetailPage {
             ring + Ui.dp(context, 1));
         SkinSwatchView swatch = new SkinSwatchView(context);
         swatch.setSkin(card.skin());
-        swatch.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        Ui.hideFromAccessibility(swatch);
         tile.addView(swatch, Ui.frameMatchWidthHeight(context, 76));
         cell.addView(tile, Ui.matchWidth());
 
