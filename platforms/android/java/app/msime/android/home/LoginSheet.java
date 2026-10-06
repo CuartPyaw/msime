@@ -253,7 +253,7 @@ final class LoginSheet {
         again.setText("换个邮箱或重新发送");
         Ui.style(again, 14, 500, Ui.accent(activity));
         again.setGravity(Gravity.CENTER);
-        again.setMinHeight(Ui.dp(activity, 40));
+        Ui.setTextMinHeightDp(again, activity, 40);
         again.setBackground(Ui.ripple(activity));
         again.setOnClickListener(ignored -> {
             if (busy) return;
