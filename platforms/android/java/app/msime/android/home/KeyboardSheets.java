@@ -184,10 +184,8 @@ final class KeyboardSheets {
         row.addView(texts(context, title, subtitle, Ui.text(context)),
             Ui.weightWrap(1f));
         if (value != null && !value.isEmpty()) {
-            TextView state = new TextView(context);
-            state.setText(value);
+            TextView state = Ui.styledLabel(context, value, Ui.TEXT_ROW_TITLE, 400, valueColor);
             state.setSingleLine(true);
-            Ui.style(state, Ui.TEXT_ROW_TITLE, 400, valueColor);
             LinearLayout.LayoutParams params = Ui.rowGapParams(context);
             row.addView(state, params);
         }
@@ -233,9 +231,7 @@ final class KeyboardSheets {
             iconParams.setMarginEnd(Ui.dp(context, iconMarginEnd));
             row.addView(icon, iconParams);
         }
-        TextView label = new TextView(context);
-        label.setText(title);
-        Ui.style(label, Ui.TEXT_ROW_TITLE, 400, Ui.accent(context));
+        TextView label = Ui.styledLabel(context, title, Ui.TEXT_ROW_TITLE, 400, Ui.accent(context));
         LinearLayout.LayoutParams labelParams = Ui.weightWrap(1f);
         labelParams.setMarginStart(Ui.dp(context, labelMarginStart));
         row.addView(label, labelParams);
