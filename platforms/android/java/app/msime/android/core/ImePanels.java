@@ -337,7 +337,7 @@ final class ImePanels {
     void renderSkinPicker() {
         if (s.skinPanel == null) return;
         s.skinPanel.removeAllViews();
-        s.skinPanel.setPadding(s.pixels(8), s.pixels(10), s.pixels(8), s.pixels(6));
+        KeyboardGeometry.setPaddingDp(s.skinPanel, s, 8, 10, 8, 6);
         JSONObject preferences = s.preferencesSnapshot == null ? null
             : s.preferencesSnapshot.optJSONObject("preferences");
         boolean hostDark = KeyboardSkin.resolveDark(
@@ -540,7 +540,7 @@ final class ImePanels {
         // 源文字和「粘贴」在同一张卡片里：点文字和点「粘贴」都是粘贴，与 iOS 相同。
         s.replySourceCard = new LinearLayout(s);
         s.replySourceCard.setGravity(Gravity.CENTER_VERTICAL);
-        s.replySourceCard.setPadding(s.pixels(10), 0, s.pixels(6), 0);
+        KeyboardGeometry.setPaddingDp(s.replySourceCard, s, 10, 0, 6, 0);
         s.replySourceButton = MSIMEInputService.role(s.button(s.replySourceCard, MSIMEInputService.REPLY_SOURCE_PLACEHOLDER,
             this::pasteReplySource), KeyboardKeyRole.PLAIN);
         s.replySourceButton.setSingleLine(true);
@@ -899,7 +899,7 @@ final class ImePanels {
         s.aiPolishPanel.removeAllViews();
         s.aiPolishActions.removeAllViews();
         KeyboardGeometry.setSymmetricPaddingDp(s.aiPolishPanel, s, 10, 6);
-        s.aiPolishActions.setPadding(s.pixels(10), 0, s.pixels(10), s.pixels(8));
+        KeyboardGeometry.setPaddingDp(s.aiPolishActions, s, 10, 0, 10, 8);
         LinearLayout header = new LinearLayout(s);
         header.setGravity(Gravity.CENTER_VERTICAL);
         TextView title = new TextView(s);
@@ -935,7 +935,7 @@ final class ImePanels {
         TextView label = new TextView(s);
         label.setText(s.aiOutputText.isEmpty() ? "待发送的选中文字" : "润色结果");
         KeyboardGeometry.setKeyTextSize(label, 12);
-        label.setPadding(0, s.pixels(6), 0, s.pixels(4));
+        KeyboardGeometry.setPaddingDp(label, s, 0, 6, 0, 4);
         s.aiPolishPanel.addView(label);
         secondary.add(label);
         TextView content = new TextView(s);
@@ -950,7 +950,7 @@ final class ImePanels {
             TextView progress = new TextView(s);
             progress.setText("正在请求…");
             KeyboardGeometry.setKeyTextSize(progress, 12);
-            progress.setPadding(0, s.pixels(6), 0, 0);
+            KeyboardGeometry.setPaddingDp(progress, s, 0, 6, 0, 0);
             s.aiPolishPanel.addView(progress);
             secondary.add(progress);
             primary = s.button(s.aiPolishActions, "取消请求", () -> {
@@ -1006,7 +1006,7 @@ final class ImePanels {
     void renderSchemePicker() {
         if (s.schemePanel == null) return;
         s.schemePanel.removeAllViews();
-        s.schemePanel.setPadding(s.pixels(8), s.pixels(14), s.pixels(8), s.pixels(6));
+        KeyboardGeometry.setPaddingDp(s.schemePanel, s, 8, 14, 8, 6);
         // 4×2 分页网格：已启用的方案按共享目录的顺序，英文 26 键排在第三格（方案不够时排最后），末尾是「+ 添加语言」。
         java.util.List<KeyboardScheme> schemes = s.visibleSchemes;
         final int englishIndex = BoundsPolicy.bounded(2, 0, schemes.size());
@@ -1402,7 +1402,7 @@ final class ImePanels {
     private void renderCommonPhrases(java.util.List<String> phrases, String message) {
         LinearLayout panel = s.phrasePanel;
         panel.removeAllViews();
-        panel.setPadding(s.pixels(8), s.pixels(4), s.pixels(8), s.pixels(8));
+        KeyboardGeometry.setPaddingDp(panel, s, 8, 4, 8, 8);
         s.imeStyler.applySkinBackground(panel);
         TextView note = null;
         if (message != null) {
@@ -1410,7 +1410,7 @@ final class ImePanels {
             note.setText(message);
             KeyboardGeometry.setKeyTextSize(note, 14);
             note.setGravity(Gravity.CENTER);
-            note.setPadding(s.pixels(12), s.pixels(24), s.pixels(12), s.pixels(24));
+            KeyboardGeometry.setPaddingDp(note, s, 12, 24, 12, 24);
             panel.addView(note, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         }
