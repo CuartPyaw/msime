@@ -554,8 +554,7 @@ final class ImePanels {
         s.replyPasteButton.setContentDescription("粘贴回复源文字");
         KeyboardGeometry.setKeyTextSize(s.replyPasteButton, 13);
         compactReplyControl(s.replyPasteButton, s.pixels(10));
-        LinearLayout.LayoutParams pasteParams = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT);
+        LinearLayout.LayoutParams pasteParams = KeyboardGeometry.wrapMatchParentParams();
         pasteParams.setMarginStart(s.pixels(6));
         s.replyPasteButton.setLayoutParams(pasteParams);
         root.addView(s.replySourceCard, KeyboardGeometry.matchWidthHeightPx(s.pixels(38)));
@@ -601,8 +600,7 @@ final class ImePanels {
         s.replyStyleResetButton.setContentDescription("重新选择回复风格");
         KeyboardGeometry.setKeyTextSize(s.replyStyleResetButton, 12);
         compactReplyControl(s.replyStyleResetButton, s.pixels(6));
-        s.replyStyleResetButton.setLayoutParams(new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT));
+        s.replyStyleResetButton.setLayoutParams(KeyboardGeometry.wrapMatchParentParams());
         s.replyStyleResetButton.setVisibility(View.GONE);
         root.addView(footer, KeyboardGeometry.matchWidthHeightPx(s.pixels(18)));
         return root;
@@ -1245,8 +1243,7 @@ final class ImePanels {
         Button button = MSIMEInputService.role(s.button(header, label, action), KeyboardKeyRole.GLYPH);
         KeyboardGeometry.setKeyTextSize(button, 13);
         compactReplyControl(button, s.pixels(10));
-        button.setLayoutParams(new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT));
+        button.setLayoutParams(KeyboardGeometry.wrapMatchParentParams());
         return button;
     }
 
