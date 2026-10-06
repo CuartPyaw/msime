@@ -234,7 +234,9 @@ public final class DoubaoRecognizer {
             if (value == null) return null;
             // An error frame ends the session; the code is the provider's and is not shown.
             if (value.has("error_code")) return null;
-            JSONObject document = new JSONObject(value.optString("payload", "{}"));
+            String payload = DoubaoAsrPolicy.strictPayload(value.opt("payload"));
+            if (payload == null) return null;
+            JSONObject document = new JSONObject(payload);
             JSONObject result = document.optJSONObject("result");
             String text = result == null ? "" : DoubaoAsrPolicy.strictText(result.opt("text"));
             Boolean last = DoubaoAsrPolicy.strictBoolean(value.opt("last"));
