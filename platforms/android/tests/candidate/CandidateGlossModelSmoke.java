@@ -56,6 +56,10 @@ public final class CandidateGlossModelSmoke {
             "strict fallback rejects booleans");
         check(CandidateGlossPolicy.strictString("hello").equals("hello"),
             "JSON strings are accepted");
+        check(Boolean.TRUE.equals(CandidateGlossPolicy.strictBoolean(Boolean.TRUE)),
+            "JSON booleans are accepted");
+        check(CandidateGlossPolicy.strictBoolean("true") == null,
+            "boolean strings are rejected instead of coerced");
         for (Object invalid : new Object[] {
                 null, Long.valueOf(7), Boolean.TRUE, java.util.List.of("hello"),
                 java.util.Map.of("text", "hello")}) {
