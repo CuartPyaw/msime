@@ -29,6 +29,8 @@ public final class DictionaryCollectionsStore {
     public static final int MAX_NAME_CHARS = 32;
     /** 导入文件读进内存的上限，与 client-core 的导入文本上限一致。 */
     public static final int MAX_IMPORT_BYTES = 16 * 1024 * 1024;
+    /** 单次导出上限，与 iOS 个人词库导出一致，避免分页结果在 Java 堆中无限累积。 */
+    public static final int MAX_EXPORT_BYTES = 8 * 1024 * 1024;
     /** 新词的默认权重，与导入时省略权重的默认值一致。 */
     public static final long DEFAULT_WEIGHT = 10000;
     private static final int EXPORT_PAGE = 1000;
@@ -215,13 +217,18 @@ public final class DictionaryCollectionsStore {
     /** 整个词库按 `standard`（词、编码、权重，制表符分隔）导出成文本，分页读完再交给调用方写文件。 */
     public static Result<String> export(Context context, String kind) {
         StringBuilder text = new StringBuilder();
+        int bytes = 0;
         int offset = 0;
         try {
             while (true) {
                 JSONObject value = dictionary(context, action("export").put("kind", kind).put("format", "standard")
                     .put("offset", offset).put("limit", EXPORT_PAGE));
                 if (value == null) return Result.failed(failureMessage(""));
-                text.append(value.optString("text", ""));
+                String page = value.optString("text", "");
+                int nextBytes = exportBytesAfterPage(bytes, page);
+                if (nextBytes < 0) return Result.failed(failureMessage("collections_too_large"));
+                text.append(page);
+                bytes = nextBytes;
                 if (!value.optBoolean("has_more", false)) break;
                 offset += EXPORT_PAGE;
             }
@@ -229,6 +236,13 @@ public final class DictionaryCollectionsStore {
             return Result.failed(failureMessage(""));
         }
         return Result.of(text.toString());
+    }
+
+    /** 返回追加一页后的 UTF-8 字节数；超出导出上限时返回负数。 */
+    public static int exportBytesAfterPage(int currentBytes, String page) {
+        if (currentBytes < 0 || page == null) return -1;
+        long next = (long) currentBytes + page.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+        return next > MAX_EXPORT_BYTES ? -1 : (int) next;
     }
 
     /** 把一个新词放进个人词库队列（键盘活着时直接编辑会返回 busy），返回队列里还没应用的条数。 */
