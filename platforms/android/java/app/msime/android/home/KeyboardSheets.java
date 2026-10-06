@@ -314,16 +314,13 @@ final class KeyboardSheets {
     static LinearLayout texts(Context context, String title, @Nullable String subtitle, int titleColor) {
         LinearLayout texts = new LinearLayout(context);
         texts.setOrientation(LinearLayout.VERTICAL);
-        TextView heading = new TextView(context);
-        heading.setText(title);
+        TextView heading = Ui.styledLabel(context, title, Ui.TEXT_ROW_TITLE, 400, titleColor);
         heading.setSingleLine(true);
-        Ui.style(heading, Ui.TEXT_ROW_TITLE, 400, titleColor);
         texts.addView(heading);
         if (subtitle != null && !subtitle.isEmpty()) {
-            TextView detail = new TextView(context);
-            detail.setText(subtitle);
+            TextView detail = Ui.styledLabel(context, subtitle, Ui.TEXT_ROW_SUBTITLE, 400,
+                Ui.subText(context));
             detail.setSingleLine(true);
-            Ui.style(detail, Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));
             texts.addView(detail);
         }
         return texts;
@@ -359,23 +356,18 @@ final class KeyboardSheets {
 
         LinearLayout texts = new LinearLayout(context);
         texts.setOrientation(LinearLayout.VERTICAL);
-        TextView heading = new TextView(context);
-        heading.setText(title);
-        Ui.style(heading, Ui.TEXT_ROW_TITLE, 400, Ui.text(context));
+        TextView heading = Ui.styledLabel(context, title, Ui.TEXT_ROW_TITLE, 400, Ui.text(context));
         texts.addView(heading);
         if (subtitle != null) {
-            TextView detail = new TextView(context);
-            detail.setText(subtitle);
-            Ui.style(detail, 12, 400, Ui.subText(context));
+            TextView detail = Ui.styledLabel(context, subtitle, 12, 400, Ui.subText(context));
             texts.addView(detail);
         }
         row.addView(texts, Ui.weightWrap(1f));
 
         if (value != null && value.length() > 0) {
-            TextView trailing = new TextView(context);
-            trailing.setText(value);
+            TextView trailing = Ui.styledLabel(context, value, Ui.TEXT_ROW_SUBTITLE, 400,
+                Ui.subText(context));
             trailing.setSingleLine(true);
-            Ui.style(trailing, Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));
             LinearLayout.LayoutParams valueParams = Ui.rowGapParams(context);
             row.addView(trailing, valueParams);
         }
