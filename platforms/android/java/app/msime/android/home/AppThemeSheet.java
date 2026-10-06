@@ -172,8 +172,7 @@ final class AppThemeSheet {
 
     private static View rule(Context context) {
         View rule = Ui.hairlineView(context);
-        rule.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-            Ui.hairlinePx(context)));
+        rule.setLayoutParams(Ui.matchWidthHeightPx(Ui.hairlinePx(context)));
         return rule;
     }
 
