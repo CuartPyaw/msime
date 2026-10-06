@@ -253,9 +253,9 @@ public final class DiagnosticsApi {
      * 从诊断包 zip 里取出要上传的各节。按条目文件名认：`config_snapshot.json`、`input_events.jsonl`（或 `input-events.jsonl`）、`perf.jsonl`（或 `perf_trace.jsonl`、`performance_logs.jsonl`）和 `*.crash`；没选的类别不读。
      */
     public static Sections readBundle(File zip, Include include) throws IOException {
-        List<CrashLog> crashes = include.crashLogs() ? new ArrayList<>() : null;
-        List<Event> perf = include.performanceLogs() ? new ArrayList<>() : null;
-        List<Event> input = include.inputEvents() ? new ArrayList<>() : null;
+        List<CrashLog> crashes = include.crashLogs() ? new ArrayList<>(MAX_CRASH_LOGS) : null;
+        List<Event> perf = include.performanceLogs() ? new ArrayList<>(MAX_EVENTS) : null;
+        List<Event> input = include.inputEvents() ? new ArrayList<>(MAX_EVENTS) : null;
         String config = null;
         try (ZipInputStream stream = new ZipInputStream(new FileInputStream(zip), StandardCharsets.UTF_8)) {
             for (ZipEntry entry = stream.getNextEntry(); entry != null; entry = stream.getNextEntry()) {
