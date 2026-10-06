@@ -134,7 +134,7 @@ public final class TypingStatisticsModel {
         if (end == null) return series;
         for (int index = 0; index < bounded; index++) {
             LocalDate date = end.minusDays(bounded - 1L - index);
-            series[index] = (int) Math.min(Integer.MAX_VALUE, count(date.toString()));
+            series[index] = (int) BoundsPolicy.bounded(count(date.toString()), 0L, Integer.MAX_VALUE);
         }
         return series;
     }
