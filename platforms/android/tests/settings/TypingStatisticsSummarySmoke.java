@@ -18,6 +18,12 @@ public final class TypingStatisticsSummarySmoke {
         check("和上周持平".equals(TypingStatisticsSummary.weekDelta(100, 100)), "week flat");
         check(TypingStatisticsSummary.weekDelta(100, 0) == null, "no previous week, no delta");
 
+        check(TypingStatisticsSummary.strictCount(42L) == 42L,
+            "statistics counts accept JSON integers");
+        check(TypingStatisticsSummary.strictCount(1.5d) == 0L,
+            "statistics counts reject fractional JSON numbers");
+        check(TypingStatisticsSummary.strictCount(-1L) == 0L,
+            "statistics counts reject negative JSON integers");
         check("—".equals(TypingStatisticsSummary.whole(null)), "null speed is a dash");
         check("52".equals(TypingStatisticsSummary.whole(51.6)), "speed rounds");
         check("91".equals(TypingStatisticsSummary.percent(0.912)), "percent rounds");

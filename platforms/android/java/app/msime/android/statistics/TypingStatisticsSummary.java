@@ -356,9 +356,15 @@ public final class TypingStatisticsSummary {
         return Double.isFinite(result) ? result : null;
     }
 
+    /** Statistics counters are JSON unsigned integers; reject fractional and negative values. */
+    public static long strictCount(Object value) {
+        if (value instanceof Integer integer) return integer < 0 ? 0L : integer.longValue();
+        if (value instanceof Long longValue) return longValue < 0L ? 0L : longValue;
+        return 0L;
+    }
+
     private static long count(Object value) {
-        if (!(value instanceof Number number)) return 0;
-        return BoundsPolicy.nonNegative(number.longValue());
+        return strictCount(value);
     }
 
     private static List<DayCount> days(JSONArray array) {
