@@ -53,6 +53,11 @@ public final class KeyboardGeometry {
 
     private KeyboardGeometry() { }
 
+    /** Return the current display width in physical pixels. */
+    public static int screenWidthPixels(Context context) {
+        return context.getResources().getDisplayMetrics().widthPixels;
+    }
+
     /** Return whether the supplied context currently uses the system night configuration. */
     public static boolean isNight(Context context) {
         return (context.getResources().getConfiguration().uiMode

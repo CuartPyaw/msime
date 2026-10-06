@@ -146,7 +146,7 @@ public final class Ui {
 
     /** Return the current display width in physical pixels. */
     public static int screenWidthPixels(Context context) {
-        return context.getResources().getDisplayMetrics().widthPixels;
+        return KeyboardGeometry.screenWidthPixels(context);
     }
 
     /** Convert a density-independent dimension without rounding, for canvas geometry. */
