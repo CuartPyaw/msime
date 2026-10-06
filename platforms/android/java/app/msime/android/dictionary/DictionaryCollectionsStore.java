@@ -302,7 +302,7 @@ public final class DictionaryCollectionsStore {
             int dot = name.lastIndexOf('.');
             if (dot >= 0) name = name.substring(0, dot);
         }
-        StringBuilder kept = new StringBuilder();
+        StringBuilder kept = new StringBuilder(MAX_NAME_CHARS);
         int count = 0;
         for (int index = 0; index < name.length() && count < MAX_NAME_CHARS; ) {
             int codePoint = name.codePointAt(index);
