@@ -570,8 +570,7 @@ final class ImePanels {
         s.replyMain.setOrientation(LinearLayout.VERTICAL);
         s.replyMain.setContentDescription("回复风格与候选");
         s.replyScroll.addView(s.replyMain);
-        s.replyBody.addView(s.replyScroll, new LinearLayout.LayoutParams(
-            0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
+        s.replyBody.addView(s.replyScroll, KeyboardGeometry.weightedMatchParentParams(1));
         s.replyActions = new LinearLayout(s);
         s.replyActions.setOrientation(LinearLayout.VERTICAL);
         s.replyBody.addView(s.replyActions, new LinearLayout.LayoutParams(
