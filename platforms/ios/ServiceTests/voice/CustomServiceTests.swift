@@ -236,6 +236,23 @@ final class CustomServiceTests: XCTestCase {
     XCTAssertThrowsError(try configuration.validatedURL())
   }
 
+  func testDoubaoConfigurationRejectsOversizedCredentialFields() throws {
+    var configuration = CustomServiceConfiguration.loadVoicePreset(.doubao)
+    configuration.voiceAppKey = String(repeating: "a", count: 8_193)
+    configuration.voiceResourceID = "fixture-resource"
+    configuration.doubaoBoostingTableID = "fixture-table"
+    XCTAssertThrowsError(try configuration.save(.voice, token: "fixture-access"))
+
+    configuration.voiceAppKey = "fixture-app"
+    configuration.voiceResourceID = "fixture-resource"
+    configuration.doubaoBoostingTableID = String(repeating: "表", count: 2_731)
+    XCTAssertThrowsError(try configuration.save(.voice, token: "fixture-access"))
+
+    configuration.doubaoBoostingTableID = "fixture-table"
+    configuration.voiceResourceID = String(repeating: "r", count: 8_193)
+    XCTAssertThrowsError(try configuration.doubaoHandshake(accessKey: "fixture-access"))
+  }
+
   func testEngineCodecsPreserveTextAndAudioAndRejectMalformedResponses() throws {
     let text = "你好\n\"测试\""
     let data = try AppServicesBridge.polishBody("fixture", prompt: "润色", text: text)
