@@ -2,7 +2,6 @@ package app.msime.android.home;
 
 import app.msime.android.KeyboardGeometry;
 import android.content.Context;
-import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.view.GestureDetector;
@@ -266,7 +265,7 @@ public final class OnboardingActivity extends AppCompatActivity {
             ViewPolicy.setCenteredHorizontally(cell);
             Ui.setHorizontalPaddingDp(cell, this, 10);
             TextView word = Ui.label(this, samples[index][0], 19, index == 0 ? Ui.accent(this) : Ui.text(this));
-            if (index == 0) word.setTypeface(Typeface.create(Typeface.DEFAULT, 600, false));
+            if (index == 0) ViewPolicy.setTypefaceStyle(word, 600);
             cell.addView(word);
             if (on) cell.addView(Ui.label(this, samples[index][1], 11, Ui.subText(this)));
             strip.addView(cell);
@@ -438,7 +437,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         column.addView(glyph, Ui.squareParams(this, 36));
 
         TextView kick = Ui.label(this, kicker, 13, Ui.accent(this));
-        kick.setTypeface(Typeface.create(Typeface.DEFAULT, 600, false));
+        ViewPolicy.setTypefaceStyle(kick, 600);
         kick.setLetterSpacing(0.04f);
         column.addView(kick, Ui.matchWidth(this, 14 + 6));
 
@@ -515,7 +514,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         LinearLayout text = new LinearLayout(this);
         text.setOrientation(LinearLayout.VERTICAL);
         TextView heading = Ui.label(this, option.label(), 16, Ui.text(this));
-        heading.setTypeface(Typeface.create(Typeface.DEFAULT, 600, false));
+        ViewPolicy.setTypefaceStyle(heading, 600);
         text.addView(heading);
         TextView detail = Ui.label(this, option.detail(), 13, Ui.subText(this));
         LinearLayout.LayoutParams detailParams = Ui.wrap();
