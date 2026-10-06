@@ -122,8 +122,7 @@ final class ImePanels {
             if (row == null || row.getChildCount() == EmojiCatalogModel.COLUMNS) {
                 row = new LinearLayout(s);
                 row.setWeightSum(EmojiCatalogModel.COLUMNS);
-                s.emojiGrid.addView(row, new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, rowHeight));
+                s.emojiGrid.addView(row, KeyboardGeometry.matchWidthHeightPx(rowHeight));
             }
             Button cell = s.keyboardKey(item.text(), "表情 " + item.text(),
                 () -> insertEmoji(item.text()));
@@ -488,7 +487,7 @@ final class ImePanels {
         dots.setCount(grid.pageCount());
         dots.setActive(initialPage, false);
         dots.setVisibility(grid.pageCount() > 1 ? View.VISIBLE : View.INVISIBLE);
-        LinearLayout.LayoutParams dotParams = new LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams dotParams = KeyboardGeometry.linearParamsPx(
             s.pixels(Math.round(KeyboardPagerDots.totalWidthDp(
                 BoundsPolicy.bounded(grid.pageCount(), 1, Integer.MAX_VALUE)))), s.pixels(10));
         dotParams.gravity = Gravity.CENTER_HORIZONTAL;
@@ -525,13 +524,13 @@ final class ImePanels {
         KeyboardGeometry.setSymmetricPaddingDp(s.replyModeControl, s, 2, 2);
         s.replyReplyModeButton = replySegment("帮你回", "帮你回模式", ReplyKeyboardModel.Mode.REPLY);
         s.replyPolishModeButton = replySegment("帮润色", "帮润色模式", ReplyKeyboardModel.Mode.POLISH);
-        s.replyHeader.addView(s.replyModeControl, new LinearLayout.LayoutParams(
+        s.replyHeader.addView(s.replyModeControl, KeyboardGeometry.linearParamsPx(
             s.pixels(200), LinearLayout.LayoutParams.MATCH_PARENT));
         s.replyHeader.addView(new View(s), KeyboardGeometry.weightedHeightPxParams(1, 1));
         s.replyTemplateButton = s.shortcutButton(s.replyHeader, "模板",
             KeyboardShortcutIconPolicy.Icon.BOOKMARK, this::showReplyTemplates);
         s.replyTemplateButton.setContentDescription("回复模板");
-        s.replyTemplateButton.setLayoutParams(new LinearLayout.LayoutParams(
+        s.replyTemplateButton.setLayoutParams(KeyboardGeometry.linearParamsPx(
             s.pixels(44), LinearLayout.LayoutParams.MATCH_PARENT));
         root.addView(s.replyHeader, KeyboardGeometry.matchWidthHeightPx(s.pixels(36)));
 
@@ -570,7 +569,7 @@ final class ImePanels {
         s.replyBody.addView(s.replyScroll, KeyboardGeometry.weightedMatchParentParams(1));
         s.replyActions = new LinearLayout(s);
         s.replyActions.setOrientation(LinearLayout.VERTICAL);
-        s.replyBody.addView(s.replyActions, new LinearLayout.LayoutParams(
+        s.replyBody.addView(s.replyActions, KeyboardGeometry.linearParamsPx(
             s.pixels(60), LinearLayout.LayoutParams.MATCH_PARENT));
         root.addView(s.replyBody, KeyboardGeometry.weightedWidthParams(1));
 
