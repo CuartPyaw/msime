@@ -35,17 +35,10 @@ public final class OptionSheet {
         header.setOrientation(LinearLayout.VERTICAL);
         header.setGravity(Gravity.CENTER_HORIZONTAL);
         Ui.setSheetHeaderPadding(header, context);
-        TextView heading = new TextView(context);
-        heading.setText(title);
-        heading.setGravity(Gravity.CENTER);
-        Ui.style(heading, Ui.TEXT_SHEET_HEADER, 600, Ui.subText(context));
-        heading.setAccessibilityHeading(true);
+        TextView heading = Ui.sheetHeading(context, title);
         header.addView(heading);
         if (subtitle != null && subtitle.length() > 0) {
-            TextView note = new TextView(context);
-            note.setText(subtitle);
-            note.setGravity(Gravity.CENTER);
-            Ui.style(note, Ui.TEXT_SHEET_HEADER, 400, Ui.subText(context));
+            TextView note = Ui.sheetSubtitle(context, subtitle);
             LinearLayout.LayoutParams params = Ui.wrap();
             params.topMargin = Ui.dp(context, 2);
             header.addView(note, params);

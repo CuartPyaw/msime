@@ -538,6 +538,25 @@ public final class Ui {
         return view;
     }
 
+    /** Create the centered title used by option-style bottom sheets. */
+    public static TextView sheetHeading(Context context, CharSequence text) {
+        TextView heading = new TextView(context);
+        heading.setText(text);
+        heading.setGravity(android.view.Gravity.CENTER);
+        style(heading, TEXT_SHEET_HEADER, 600, subText(context));
+        heading.setAccessibilityHeading(true);
+        return heading;
+    }
+
+    /** Create the centered subtitle used by option-style bottom sheets. */
+    public static TextView sheetSubtitle(Context context, CharSequence text) {
+        TextView subtitle = new TextView(context);
+        subtitle.setText(text);
+        subtitle.setGravity(android.view.Gravity.CENTER);
+        style(subtitle, TEXT_SHEET_HEADER, 400, subText(context));
+        return subtitle;
+    }
+
     /** Create a filled accent pill button; callers add their content description and action. */
     public static TextView pillButton(Context context, CharSequence label, float sizeSp, int weight,
                                       @ColorInt int ink, float horizontalPaddingDp, float verticalPaddingDp,
