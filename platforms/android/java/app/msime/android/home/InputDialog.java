@@ -207,7 +207,7 @@ public final class InputDialog {
         View rule = Ui.hairlineView(context);
         int thin = Ui.hairlinePx(context);
         rule.setLayoutParams(horizontal
-            ? new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, thin)
+            ? Ui.matchWidthHeightPx(thin)
             : new LinearLayout.LayoutParams(thin, ViewGroup.LayoutParams.MATCH_PARENT));
         return rule;
     }
