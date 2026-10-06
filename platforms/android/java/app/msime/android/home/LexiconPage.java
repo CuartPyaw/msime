@@ -270,7 +270,7 @@ public final class LexiconPage extends DetailPage {
         button.setSingleLine(true);
         Ui.style(button, Ui.TEXT_BUTTON_SMALL, 500, added ? Ui.subText(context) : Ui.accent(context));
         button.setBackground(Ui.pillRipple(context, added ? Ui.rowBackground(context) : Ui.accentSoft(context)));
-        button.setPadding(Ui.dp(context, 14), Ui.dp(context, 5), Ui.dp(context, 14), Ui.dp(context, 5));
+        Ui.setButtonPadding(button, context);
         button.setMinHeight(Ui.dp(context, 32));
         boolean enabled = !added && !busy;
         button.setEnabled(enabled);
