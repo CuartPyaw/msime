@@ -14,6 +14,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.fragment.app.Fragment;
+import app.msime.android.BoundsPolicy;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -101,7 +102,7 @@ public final class CommunityFragment extends Fragment {
             kinds.addView(segment);
             segments[index] = segment.getId();
         }
-        kinds.check(segments[Math.max(0, values.indexOf(kind))]);
+        kinds.check(segments[BoundsPolicy.nonNegative(values.indexOf(kind))]);
         kinds.addOnButtonCheckedListener((group, id, checked) -> {
             if (!checked) return;
             for (int index = 0; index < segments.length; index++) {

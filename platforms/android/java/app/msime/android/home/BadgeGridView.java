@@ -15,6 +15,7 @@ import android.os.Bundle;
 import android.util.AttributeSet;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import app.msime.android.BoundsPolicy;
 import android.view.View;
 import android.view.animation.LinearInterpolator;
 import androidx.annotation.NonNull;
@@ -186,7 +187,7 @@ public final class BadgeGridView extends View {
 
     @Override protected void onMeasure(int widthSpec, int heightSpec) {
         int rows = (badges.size() + COLUMNS - 1) / COLUMNS;
-        float height = rows * TILE_HEIGHT + Math.max(0, rows - 1) * GAP;
+        float height = rows * TILE_HEIGHT + BoundsPolicy.nonNegative(rows - 1) * GAP;
         setMeasuredDimension(MeasureSpec.getSize(widthSpec),
             resolveSize(Ui.dp(getContext(), height), heightSpec));
     }
