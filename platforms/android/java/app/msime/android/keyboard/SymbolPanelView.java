@@ -26,7 +26,7 @@ public final class SymbolPanelView extends LinearLayout {
 
     private final ButtonFactory buttons;
     private final Listener listener;
-    private final LinearLayout categories = new LinearLayout(getContext());
+    private final LinearLayout categories;
     private final GridLayout grid = new GridLayout(getContext());
     private final ScrollView gridScroll = new ScrollView(getContext());
     private final List<Button> categoryButtons =
@@ -48,11 +48,12 @@ public final class SymbolPanelView extends LinearLayout {
         super(context);
         this.buttons = buttons;
         this.listener = listener;
+        categories = KeyboardGeometry.column(context);
         setOrientation(VERTICAL);
         setContentDescription("符号面板");
         setFocusable(true);
 
-        LinearLayout title = new LinearLayout(context);
+        LinearLayout title = KeyboardGeometry.row(context);
         ViewPolicy.setCenteredVertically(title);
         // 这个键只是关掉面板，回到打开它的那一层（字母、#+= 或手写），不一定是字母键盘。
         Button back = buttons.create("‹", "关闭符号面板", listener::close, true);
@@ -67,9 +68,7 @@ public final class SymbolPanelView extends LinearLayout {
         title.addView(delete);
         addView(title, KeyboardGeometry.matchWidthWrapParams());
 
-        LinearLayout body = new LinearLayout(context);
-        body.setOrientation(HORIZONTAL);
-        categories.setOrientation(VERTICAL);
+        LinearLayout body = KeyboardGeometry.row(context);
         categories.setGravity(Gravity.TOP);
         // 空白网格的根因：body 是横排 LinearLayout，权重只分宽度；这里和网格原先写的高度 0 是字面上的 0 像素，分类列和网格都被测成零高，面板中间于是什么都没有（面板本身又没底色，透出底下的字母键）。高度要铺满 body。
         // 分类列放进可滚动的容器、每类固定 40 dp：键盘区扣掉标题和底栏只剩百来 dp，五类按权重平分时每类二十来 dp，按钮默认的 48 dp 最小高度和内边距把字挤没了，只剩选中那块底色。
@@ -87,8 +86,7 @@ public final class SymbolPanelView extends LinearLayout {
         body.addView(gridScroll, KeyboardGeometry.weightedMatchParentParams(1));
         addView(body, KeyboardGeometry.weightedWidthParams(1));
 
-        LinearLayout bottom = new LinearLayout(context);
-        bottom.setOrientation(HORIZONTAL);
+        LinearLayout bottom = KeyboardGeometry.row(context);
         Button bottomBack = buttons.create("返回", "返回键盘", listener::close, true);
         bottom.addView(bottomBack, KeyboardGeometry.weightedHeightParams(getContext(), 48, 1));
         lockButton = buttons.create("锁定", "连续输入符号", this::toggleLock, true);
