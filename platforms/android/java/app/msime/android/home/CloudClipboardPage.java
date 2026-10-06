@@ -5,7 +5,6 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.os.Bundle;
 import android.text.TextUtils;
-import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
@@ -14,6 +13,7 @@ import androidx.annotation.Nullable;
 import app.msime.android.CloudApi;
 import app.msime.android.CloudClipboardApi;
 import app.msime.android.R;
+import app.msime.android.ViewPolicy;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import java.time.Duration;
 import java.time.Instant;
@@ -117,7 +117,7 @@ public final class CloudClipboardPage extends DetailPage {
 
         LinearLayout retention = new LinearLayout(context);
         retention.setOrientation(LinearLayout.HORIZONTAL);
-        retention.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(retention);
         Ui.setRowMinimumHeight(retention, context);
         Ui.setRowPadding(retention, context);
         TextView label = Ui.styledLabel(context, "保留时长", Ui.TEXT_ROW_TITLE, 400, Ui.text(context));
@@ -140,7 +140,7 @@ public final class CloudClipboardPage extends DetailPage {
 
         LinearLayout header = new LinearLayout(context);
         header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(header);
         Ui.setPaddingDp(header, context, Ui.GROUP_TITLE_INSET, 0,
             Ui.GROUP_TITLE_INSET, 2);
         TextView recent = Ui.groupHeading(context, "最近");
@@ -162,13 +162,13 @@ public final class CloudClipboardPage extends DetailPage {
         if (current.items().isEmpty()) {
             LinearLayout empty = new LinearLayout(context);
             empty.setOrientation(LinearLayout.VERTICAL);
-            empty.setGravity(Gravity.CENTER_HORIZONTAL);
+            ViewPolicy.setCenteredHorizontally(empty);
             Ui.setSymmetricPaddingDp(empty, context, 16, 32);
             TextView title = Ui.styledLabel(context, "还没有同步内容", Ui.TEXT_ROW_TITLE, 500, Ui.text(context));
             empty.addView(title);
             TextView hint = Ui.styledLabel(context, "在任一设备上复制文字，这里就会出现",
                 Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));
-            hint.setGravity(Gravity.CENTER);
+            ViewPolicy.setCentered(hint);
             LinearLayout.LayoutParams hintParams = Ui.wrap();
             hintParams.topMargin = Ui.dp(context, 4);
             empty.addView(hint, hintParams);
@@ -181,7 +181,7 @@ public final class CloudClipboardPage extends DetailPage {
     private View itemRow(Context context, CloudClipboardApi.Item item) {
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(row);
         Ui.setPaddingDp(row, context, 16, 12, 8, 12);
 
         LinearLayout texts = new LinearLayout(context);

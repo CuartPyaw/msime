@@ -1,11 +1,11 @@
 package app.msime.android.home;
 
 import android.content.Context;
-import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import app.msime.android.ViewPolicy;
 import androidx.annotation.Nullable;
 import androidx.core.widget.NestedScrollView;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
@@ -76,7 +76,7 @@ public final class SettingsSheet {
     /** 一行状态文字，保存成功或失败后由面板改写。 */
     public TextView addStatus() {
         TextView status = Ui.styledLabel(context, "", 12, 400, Ui.subText(context));
-        status.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(status);
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         LinearLayout.LayoutParams params = Ui.matchWidthHeight(context, 20);
         params.topMargin = Ui.dp(context, 10);
