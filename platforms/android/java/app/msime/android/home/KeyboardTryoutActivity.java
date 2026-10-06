@@ -51,7 +51,7 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
     private static final String FAILURE = "请求失败，请检查登录状态或稍后重试。";
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
-    private final List<BackendAccount.ChatModel> models = new ArrayList<>();
+    private final ArrayList<BackendAccount.ChatModel> models = new ArrayList<>();
     private final List<BackendAccount.ChatMessage> messages = new ArrayList<>(13);
     private Future<?> operation;
     private int generation;
@@ -171,6 +171,7 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed()) return;
                     models.clear();
+                    models.ensureCapacity(loaded.size());
                     models.addAll(loaded);
                     loadingModels = false;
                     // The draft may have been typed while the catalogue was loading. Refresh
