@@ -343,8 +343,7 @@ final class ImeLetterRows {
             java.util.List<String> keys = rows.get(rowIndex);
             LinearLayout row = new LinearLayout(s);
             if (block != null) {
-                block.addView(row, new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+                block.addView(row, KeyboardGeometry.weightedWidthParams(1));
             } else {
                 row.setTag(new MSIMEInputService.KeyboardHeightRole(KeyboardGeometry.KEY_ROW_HEIGHT_DP,
                     rows.size(), rowIndex, true));
