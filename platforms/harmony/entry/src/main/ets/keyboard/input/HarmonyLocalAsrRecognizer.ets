@@ -232,7 +232,7 @@ export class HarmonyLocalAsrRecognizer {
       const request: HotwordsRequest = { options: options, limit: HOTWORD_LIMIT };
       const response: HotwordsResponse =
         JSON.parse(await client.voiceHotwords(JSON.stringify(request))) as HotwordsResponse;
-      if (!response.ok || response.value === undefined) {
+      if (response.ok !== true || response.value === undefined) {
         KeyboardLog.warn(`voice hotwords unavailable: ${response.error ?? 'unknown'}`);
         return [];
       }
@@ -249,7 +249,7 @@ export class HarmonyLocalAsrRecognizer {
       const request: CorrectRequest = { text: text, hotwords: this.hotwords };
       const response: CorrectResponse =
         JSON.parse(client.voiceHotwordCorrect(JSON.stringify(request))) as CorrectResponse;
-      return response.ok && response.value !== undefined ? response.value.text : text;
+      return response.ok === true && response.value !== undefined ? response.value.text : text;
     } catch (error) {
       KeyboardLog.warn(`voice hotword correction unavailable: ${describeError(error)}`);
       return text;
