@@ -283,6 +283,12 @@ public final class Ui {
         return DrawablePolicy.rounded(color, radiusPx);
     }
 
+    /** Filled rounded rectangle with a theme-aware outline. */
+    public static GradientDrawable outlined(@ColorInt int fillColor, float radiusPx,
+                                            int strokeWidth, @ColorInt int strokeColor) {
+        return DrawablePolicy.outlined(fillColor, radiusPx, strokeWidth, strokeColor);
+    }
+
     /** 胶囊形状：GradientDrawable 会把过大的圆角夹到短边的一半，所以高度怎么变两端都是半圆。 */
     public static GradientDrawable pill(@ColorInt int color) {
         return rounded(color, 9999f);
