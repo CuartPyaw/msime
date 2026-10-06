@@ -251,7 +251,6 @@ public final class KeyboardSchemeCard extends FrameLayout {
     }
 
     private static int fade(int color, float alpha) {
-        return Color.argb(Math.round(Color.alpha(color) * alpha),
-            Color.red(color), Color.green(color), Color.blue(color));
+        return ColorPolicy.withAlpha(color, alpha);
     }
 }
