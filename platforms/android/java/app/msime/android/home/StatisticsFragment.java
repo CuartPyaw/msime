@@ -364,7 +364,6 @@ public final class StatisticsFragment extends HomeTabFragment {
         int unlocked = 0;
         for (Achievement badge : badges) if (badge.unlocked()) unlocked++;
         LinearLayout progress = card(context, content, 16);
-        TextView count = new TextView(context);
         SpannableStringBuilder text = new SpannableStringBuilder(String.valueOf(unlocked));
         text.setSpan(new AbsoluteSizeSpan(26, true), 0, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         text.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), 0, text.length(),
@@ -374,8 +373,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         text.setSpan(new AbsoluteSizeSpan(15, true), start, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         text.setSpan(new ForegroundColorSpan(Ui.subText(context)), start, text.length(),
             Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        count.setText(text);
-        count.setTextColor(Ui.text(context));
+        TextView count = Ui.label(context, text, 15, Ui.text(context));
         progress.addView(count);
         View track = new View(context);
         track.setBackground(Ui.pill(Ui.hairline(context)));
