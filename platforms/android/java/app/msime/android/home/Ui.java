@@ -531,6 +531,24 @@ public final class Ui {
         return view;
     }
 
+    /** Create a filled accent pill button; callers add their content description and action. */
+    public static TextView pillButton(Context context, CharSequence label, float sizeSp, int weight,
+                                      @ColorInt int ink, float horizontalPaddingDp, float verticalPaddingDp,
+                                      float minHeightDp, float minWidthDp) {
+        TextView button = new TextView(context);
+        button.setText(label);
+        button.setGravity(android.view.Gravity.CENTER);
+        button.setSingleLine(true);
+        style(button, Math.round(sizeSp), weight, ink);
+        button.setBackground(pillRipple(context, accent(context)));
+        setSymmetricPaddingDp(button, context, horizontalPaddingDp, verticalPaddingDp);
+        setTextMinHeightDp(button, context, minHeightDp);
+        if (minWidthDp > 0) setTextMinWidthDp(button, context, minWidthDp);
+        button.setClickable(true);
+        button.setFocusable(true);
+        return button;
+    }
+
     /** 设置字号（sp）与字重。 */
     public static void style(TextView view, int sizeSp, int weight, @ColorInt int color) {
         view.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp);
