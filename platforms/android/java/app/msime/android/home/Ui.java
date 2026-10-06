@@ -661,9 +661,7 @@ public final class Ui {
         setSymmetricPaddingDp(button, context, horizontalPaddingDp, verticalPaddingDp);
         setTextMinHeightDp(button, context, minHeightDp);
         if (minWidthDp > 0) setTextMinWidthDp(button, context, minWidthDp);
-        button.setClickable(true);
-        button.setFocusable(true);
-        if (action != null) button.setOnClickListener(ignored -> action.run());
+        bindClick(button, action);
         return button;
     }
 
@@ -683,9 +681,7 @@ public final class Ui {
         style(button, sizeSp, weight, ink);
         button.setBackground(background);
         setTextMinHeightDp(button, context, minHeightDp);
-        button.setClickable(true);
-        button.setFocusable(true);
-        if (action != null) button.setOnClickListener(ignored -> action.run());
+        bindClick(button, action);
         return button;
     }
 
@@ -698,7 +694,7 @@ public final class Ui {
         button.setScaleType(ImageView.ScaleType.CENTER);
         button.setBackground(ripple(context));
         button.setContentDescription(description);
-        button.setOnClickListener(ignored -> action.run());
+        bindClick(button, action);
         int size = dp(context, sizeDp);
         button.setLayoutParams(squareParamsPx(size));
         setSymmetricPaddingPx(button, size / 5);
@@ -717,9 +713,13 @@ public final class Ui {
     /** Apply the standard ripple and keyboard-accessible click behavior to a view. */
     public static void makeClickable(View view, Context context, Runnable action) {
         view.setBackground(ripple(context));
+        bindClick(view, action);
+    }
+
+    private static void bindClick(View view, Runnable action) {
         view.setClickable(true);
         view.setFocusable(true);
-        view.setOnClickListener(ignored -> action.run());
+        if (action != null) view.setOnClickListener(ignored -> action.run());
     }
 
     /** Create a vertically arranged rounded surface for page cards. */
