@@ -78,7 +78,9 @@ public final class Telemetry {
             if (value != null) {
                 enabled = booleanValue(value.opt("enabled"), false);
                 String path = value.optString("crash_record_path", "");
-                sessionCrashRecord = enabled && !path.isEmpty() ? new File(path) : null;
+                File candidate = path.isEmpty() ? null : new File(path);
+                sessionCrashRecord = enabled && isSafeSessionCrashRecord(candidate)
+                    ? candidate : null;
             }
             sessionBegun = true;
             flush(app);
@@ -142,6 +144,7 @@ public final class Telemetry {
     /** Synchronous: the process is about to be killed, so the record is on disk (and forced) before the previous handler runs. */
     private static void writeCrashRecord(Throwable error) throws Exception {
         File target = sessionCrashRecord;
+        if (target != null && !isSafeSessionCrashRecord(target)) return;
         if (target == null) {
             File directory = crashDirectory;
             if (directory == null) return;
@@ -156,6 +159,25 @@ public final class Telemetry {
             ByteBuffer buffer = ByteBuffer.wrap(record);
             while (buffer.hasRemaining()) channel.write(buffer);
             channel.force(true);
+        }
+    }
+
+    /** The native begin response names the reserved record below our crash directory. Recheck it
+     * before a crash write so a malformed response or a replaced parent cannot redirect the file. */
+    private static boolean isSafeSessionCrashRecord(File target) {
+        File directory = crashDirectory;
+        if (target == null || directory == null) return false;
+        try {
+            Path root = directory.toPath().toAbsolutePath().normalize();
+            Path raw = target.toPath();
+            if (!raw.isAbsolute()) return false;
+            Path path = raw.normalize();
+            if (path.equals(root) || !path.startsWith(root)
+                    || !Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) return false;
+            app.msime.android.SafePaths.rejectSymlinkComponents(path);
+            return true;
+        } catch (java.io.IOException | RuntimeException error) {
+            return false;
         }
     }
 
