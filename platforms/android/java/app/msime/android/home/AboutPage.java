@@ -133,10 +133,9 @@ public final class AboutPage extends DetailPage {
             links.nav("在管理界面中查看", "更新日志、致谢与更多信息", null, this::openTauriAbout);
         }
 
-        TextView footer = new TextView(context);
-        footer.setText("© 2026 Metasequoia · 输入内容默认只在本机处理");
+        TextView footer = Ui.styledLabel(context, "© 2026 Metasequoia · 输入内容默认只在本机处理",
+            13, 400, Ui.subText(context));
         footer.setGravity(Gravity.CENTER);
-        Ui.style(footer, 13, 400, Ui.subText(context));
         LinearLayout.LayoutParams footerParams = Ui.matchWidth();
         footerParams.topMargin = Ui.dp(context, 24);
         column.addView(footer, footerParams);
@@ -184,19 +183,16 @@ public final class AboutPage extends DetailPage {
         int discSize = Ui.dp(context, 116);
         header.addView(disc, Ui.squareParamsPx(discSize));
 
-        TextView name = new TextView(context);
-        name.setText(R.string.app_name);
+        TextView name = Ui.styledLabel(context, getString(R.string.app_name), 22, 700, Ui.text(context));
         name.setGravity(Gravity.CENTER);
-        Ui.style(name, 22, 700, Ui.text(context));
         name.setAccessibilityHeading(true);
         LinearLayout.LayoutParams nameParams = Ui.wrap();
         nameParams.topMargin = Ui.dp(context, 18);
         header.addView(name, nameParams);
 
-        TextView version = new TextView(context);
-        version.setText("版本 " + UpdateJobService.currentVersion(context) + " · Android");
+        TextView version = Ui.styledLabel(context,
+            "版本 " + UpdateJobService.currentVersion(context) + " · Android", 13, 400, Ui.subText(context));
         version.setGravity(Gravity.CENTER);
-        Ui.style(version, 13, 400, Ui.subText(context));
         LinearLayout.LayoutParams versionParams = Ui.wrap();
         versionParams.topMargin = Ui.dp(context, 6);
         header.addView(version, versionParams);
