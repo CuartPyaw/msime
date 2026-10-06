@@ -286,8 +286,8 @@ final class ImeCandidates {
             s.closeCandidatePanel();
             s.deleteFromHandwriting();
         });
-        LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(0, s.pixels(40), 1);
-        LinearLayout.LayoutParams deleteParams = new LinearLayout.LayoutParams(0, s.pixels(40), 1);
+        LinearLayout.LayoutParams closeParams = KeyboardGeometry.weightedHeightParams(s, 40, 1);
+        LinearLayout.LayoutParams deleteParams = KeyboardGeometry.weightedHeightParams(s, 40, 1);
         deleteParams.setMarginStart(s.pixels(6));
         footer.addView(close, closeParams);
         footer.addView(delete, deleteParams);

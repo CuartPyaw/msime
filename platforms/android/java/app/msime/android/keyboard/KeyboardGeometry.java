@@ -222,6 +222,12 @@ public final class KeyboardGeometry {
         return new LinearLayout.LayoutParams(pixels(context, widthDp), pixels(context, heightDp));
     }
 
+    /** Create weighted linear layout parameters with a fixed height in dp. */
+    public static LinearLayout.LayoutParams weightedHeightParams(Context context, float heightDp,
+            float weight) {
+        return new LinearLayout.LayoutParams(0, pixels(context, heightDp), weight);
+    }
+
     /** Convert a fractional density-independent size to pixels without rounding. */
     public static float floatPixels(double dp, float density) {
         return (float) dp * density;
