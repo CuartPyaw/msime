@@ -1,6 +1,7 @@
 package app.msime.android;
 
 import android.content.Context;
+import android.content.res.Configuration;
 import android.util.TypedValue;
 import java.util.Locale;
 import java.math.BigDecimal;
@@ -51,6 +52,12 @@ public final class KeyboardGeometry {
     public static final int MAX_DESIGN_HEIGHT_ADJUSTMENT_DP = 55;
 
     private KeyboardGeometry() { }
+
+    /** Return whether the supplied context currently uses the system night configuration. */
+    public static boolean isNight(Context context) {
+        return (context.getResources().getConfiguration().uiMode
+            & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+    }
 
     /** Read the display density used by keyboard geometry calculations. */
     public static float density(Context context) {
