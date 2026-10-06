@@ -85,6 +85,8 @@ public final class Ui {
     public static final int BUTTON_PADDING_H = 14;
     /** 操作按钮的垂直内边距。 */
     public static final int BUTTON_PADDING_V = 5;
+    /** 紧凑操作按钮的最小高度。 */
+    public static final int COMPACT_BUTTON_MIN_HEIGHT = 32;
     /** 设置首页导航行的最小高度。 */
     public static final int NAV_ROW_MIN_HEIGHT = 60;
     /** 设置首页导航行的左右内边距。 */
