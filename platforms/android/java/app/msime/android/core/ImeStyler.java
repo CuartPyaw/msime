@@ -228,7 +228,7 @@ final class ImeStyler {
                 s.pixels(2), s.pixels(8), s.pixels(2), s.pixels(8)));
             button.setTextColor(color(target.keyForeground()));
             applySkinTypeface(button, target);
-            button.setElevation(0);
+            ViewPolicy.clearElevation(button);
             return;
         }
         if (!face.drawsCap()) {
@@ -240,7 +240,7 @@ final class ImeStyler {
             }
             button.setTextColor(color(label));
             applySkinTypeface(button, target);
-            button.setElevation(0);
+            ViewPolicy.clearElevation(button);
             return;
         }
         boolean action = face == KeyboardKeyRole.ACCENT;

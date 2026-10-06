@@ -78,7 +78,7 @@ final class ImeCandidates {
         KeyboardGeometry.setHorizontalPaddingDp(button, s, 11);
         button.setLineSpacing(0, 1.0f);
         ViewPolicy.clearFontPadding(button);
-        button.setElevation(0);
+        ViewPolicy.clearElevation(button);
     }
 
     private void applyCandidateTypeface(Button button) {
@@ -102,7 +102,7 @@ final class ImeCandidates {
             new int[][] {{android.R.attr.state_selected}, {}},
             new int[] {accentText, keyForeground}));
         applyCandidateTypeface(button);
-        button.setElevation(0);
+        ViewPolicy.clearElevation(button);
     }
 
     boolean showCandidateMenu(Button button, int slot, JSONObject id, String text) {
