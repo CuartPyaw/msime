@@ -67,13 +67,17 @@ public final class VoiceListeningView extends TextView {
 
     /** 脉冲环在动画进度 {@code t}（0–1）时的外扩半径（像素）与透明度（0–255）。 */
     public static float pulseSpread(float t, float maxSpread) {
-        float clamped = Math.max(0f, Math.min(1f, t));
+        float clamped = clampProgress(t);
         return maxSpread * clamped;
     }
 
     public static int pulseAlpha(float t) {
-        float clamped = Math.max(0f, Math.min(1f, t));
+        float clamped = clampProgress(t);
         return Math.round(90 * (1f - clamped));
+    }
+
+    private static float clampProgress(float value) {
+        return Math.max(0f, Math.min(1f, value));
     }
 
     @Override protected void onAttachedToWindow() {
