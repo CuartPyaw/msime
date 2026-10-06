@@ -339,9 +339,9 @@ public final class CloudSync {
             JSONObject value = nativeValue(NativeClient.accountSettingsApply(request.toString()));
             JSONObject applied = value.optJSONObject("feedback");
             if (applied != null) {
-                KeyboardFeedbackStore.save(context, new KeyboardFeedbackStore.Settings(
-                    applied.optBoolean("soundEnabled", true), applied.optBoolean("hapticsEnabled", false),
-                    KeyboardFeedbackPreferences.strength(applied.optString("hapticStrength", "medium"))));
+                KeyboardFeedbackStore.save(context, KeyboardFeedbackStore.fromValues(
+                    applied.opt("soundEnabled"), applied.opt("hapticsEnabled"),
+                    applied.opt("hapticStrength")));
             }
             if (value.opt("custom_keyboard_skins") instanceof String library) {
                 CustomSkinLibrary.importDesigns(Paths.get(directory), library);

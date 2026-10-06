@@ -95,10 +95,16 @@ public final class KeyboardFeedbackStore {
     static Settings decode(String text) throws JSONException {
         if (text == null || text.length() > MAX_BYTES) throw new JSONException("feedback size");
         JSONObject value = new JSONObject(text);
-        return new Settings(
-            booleanValue(value.opt("soundEnabled"), true),
-            booleanValue(value.opt("hapticsEnabled"), false),
-            KeyboardFeedbackPreferences.strength(value.optString("hapticStrength", "medium")));
+        return fromValues(value.opt("soundEnabled"), value.opt("hapticsEnabled"),
+            value.opt("hapticStrength"));
+    }
+
+    /** Decode feedback values crossing a JSON or native boundary without scalar coercion. */
+    public static Settings fromValues(Object soundEnabled, Object hapticsEnabled,
+                                      Object hapticStrength) {
+        String strength = hapticStrength instanceof String ? (String) hapticStrength : "medium";
+        return new Settings(booleanValue(soundEnabled, true), booleanValue(hapticsEnabled, false),
+            KeyboardFeedbackPreferences.strength(strength));
     }
 
     /** Persisted flags are typed JSON booleans; do not accept org.json's string coercion. */
