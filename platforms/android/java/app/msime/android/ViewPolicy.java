@@ -188,6 +188,13 @@ public final class ViewPolicy {
         setTextSizeSp(view, sizeSp);
     }
 
+    /** Create a text label with its scalable size assigned. */
+    public static TextView textLabel(Context context, CharSequence text, float sizeSp) {
+        TextView view = newTextView(context, text);
+        setTextSizeSp(view, sizeSp);
+        return view;
+    }
+
     /** Set a text view's scalable size and center its content. */
     public static void setCenteredTextSizeSp(TextView view, float sizeSp) {
         setTextSizeSp(view, sizeSp);
@@ -204,6 +211,13 @@ public final class ViewPolicy {
     public static void setCenteredText(TextView view, CharSequence text, float sizeSp) {
         view.setText(text);
         setCenteredTextSizeSp(view, sizeSp);
+    }
+
+    /** Create a centered text label with its scalable size assigned. */
+    public static TextView centeredText(Context context, CharSequence text, float sizeSp) {
+        TextView view = newTextView(context, text);
+        setCenteredTextSizeSp(view, sizeSp);
+        return view;
     }
 
     /** Set a text view's scalable size and align its content to the start edge vertically centered. */
