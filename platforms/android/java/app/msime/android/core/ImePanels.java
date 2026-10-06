@@ -533,8 +533,7 @@ final class ImePanels {
         s.replyTemplateButton.setContentDescription("回复模板");
         s.replyTemplateButton.setLayoutParams(new LinearLayout.LayoutParams(
             s.pixels(44), LinearLayout.LayoutParams.MATCH_PARENT));
-        root.addView(s.replyHeader, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, s.pixels(36)));
+        root.addView(s.replyHeader, KeyboardGeometry.matchWidthHeightPx(s.pixels(36)));
 
         // 源文字和「粘贴」在同一张卡片里：点文字和点「粘贴」都是粘贴，与 iOS 相同。
         s.replySourceCard = new LinearLayout(s);
@@ -559,8 +558,7 @@ final class ImePanels {
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT);
         pasteParams.setMarginStart(s.pixels(6));
         s.replyPasteButton.setLayoutParams(pasteParams);
-        root.addView(s.replySourceCard, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, s.pixels(38)));
+        root.addView(s.replySourceCard, KeyboardGeometry.matchWidthHeightPx(s.pixels(38)));
 
         s.replyBody = new LinearLayout(s);
         s.replyScroll = new ScrollView(s);
@@ -606,8 +604,7 @@ final class ImePanels {
         s.replyStyleResetButton.setLayoutParams(new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT));
         s.replyStyleResetButton.setVisibility(View.GONE);
-        root.addView(footer, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, s.pixels(18)));
+        root.addView(footer, KeyboardGeometry.matchWidthHeightPx(s.pixels(18)));
         return root;
     }
 
@@ -959,8 +956,7 @@ final class ImePanels {
         }
         compactReplyControl(primary, 0);
         KeyboardGeometry.setKeyTextSize(primary, 15);
-        primary.setLayoutParams(new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, s.pixels(44)));
+        primary.setLayoutParams(KeyboardGeometry.matchWidthHeightPx(s.pixels(44)));
         s.imeStyler.applySkin();
         // 换肤遍历之后补上卡片底色、次要字色和主操作的强调色。
         float radius = s.pixels(10);
@@ -1218,8 +1214,7 @@ final class ImePanels {
             capture.setContentDescription("保存当前剪贴板文本");
             clipboardAction(header, "清空", s::confirmClearClipboardHistory);
         }
-        s.clipboardPanel.addView(header, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, s.pixels(32)));
+        s.clipboardPanel.addView(header, KeyboardGeometry.matchWidthHeightPx(s.pixels(32)));
         if (cloud) {
             renderCloudClipboard(notes);
         } else if (!s.clipboardHistoryEnabled) {
@@ -1554,8 +1549,7 @@ final class ImePanels {
         compactReplyControl(deleteEmoji, 0);
         deleteEmoji.setContentDescription("删除");
         deleteEmoji.setLayoutParams(KeyboardGeometry.linearParams(s, 60, 40));
-        s.emojiPanel.addView(bar, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, s.pixels(46)));
+        s.emojiPanel.addView(bar, KeyboardGeometry.matchWidthHeightPx(s.pixels(46)));
         s.emojiPanel.setVisibility(View.GONE);
         s.keyboardSurface.addView(s.emojiPanel, KeyboardGeometry.frameMatchParentParams());
     }
