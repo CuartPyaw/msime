@@ -172,7 +172,7 @@ public final class AboutPage extends DetailPage {
         LinearLayout header = new LinearLayout(context);
         header.setOrientation(LinearLayout.VERTICAL);
         header.setGravity(Gravity.CENTER_HORIZONTAL);
-        header.setPadding(0, Ui.dp(context, 8), 0, Ui.dp(context, 20));
+        Ui.setPaddingDp(header, context, 0, 8, 0, 20);
 
         FrameLayout disc = new FrameLayout(context);
         disc.setBackground(Ui.pill(Ui.color(context, com.google.android.material.R.attr.colorTertiaryContainer)));
