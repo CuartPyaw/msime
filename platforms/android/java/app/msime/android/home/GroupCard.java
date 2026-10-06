@@ -108,8 +108,7 @@ public final class GroupCard {
         control.setClickable(false);
         control.setFocusable(false);
         control.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams params = Ui.wrap();
         params.setMarginStart(Ui.dp(context, Ui.ROW_GAP));
         row.view.addView(control, params);
         row.toggle = control;
@@ -191,8 +190,7 @@ public final class GroupCard {
                 info.setContentDescription(label + "，" + title);
             }
         });
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams params = Ui.wrap();
         params.setMarginStart(Ui.dp(context, Ui.ROW_GAP));
         row.view.addView(button, params);
         row.button = button;
@@ -247,8 +245,7 @@ public final class GroupCard {
         TextView text = new TextView(context);
         text.setSingleLine(true);
         Ui.style(text, Ui.TEXT_ROW_TITLE, 400, Ui.subText(context));
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams params = Ui.wrap();
         params.setMarginStart(Ui.dp(context, Ui.ROW_GAP));
         row.view.addView(text, params);
         setText(text, value);
@@ -289,8 +286,7 @@ public final class GroupCard {
             texts.addView(title);
             subtitle = new TextView(context);
             Ui.style(subtitle, Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));
-            LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            LinearLayout.LayoutParams subtitleParams = Ui.wrap();
             subtitleParams.topMargin = Ui.dp(owner.context, 1);
             texts.addView(subtitle, subtitleParams);
             setText(subtitle, subtitleText);
