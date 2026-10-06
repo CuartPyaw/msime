@@ -65,7 +65,7 @@ final class ImeToolbar {
 
     /** 读音行（读音、提示、页码、漢、退出本地模式）与工具栏的滚动容器；读音行只在组词或有提示时显示。 */
     void buildCandidateHeader(LinearLayout candidateRegion) {
-        LinearLayout candidateHeader = new LinearLayout(s);
+        LinearLayout candidateHeader = KeyboardGeometry.row(s);
         ViewPolicy.setCenteredVertically(candidateHeader);
         KeyboardGeometry.setPaddingDp(candidateHeader, s, 10, 0, 6, 0);
         s.candidateHeader = candidateHeader;
@@ -77,7 +77,7 @@ final class ImeToolbar {
             s.imePanels.showLocalInputMenu();
             return true;
         });
-        LinearLayout preeditFrame = new LinearLayout(s);
+        LinearLayout preeditFrame = KeyboardGeometry.row(s);
         preeditFrame.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
         preeditFrame.addView(s.preedit, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -92,8 +92,7 @@ final class ImeToolbar {
         s.candidatePage = toolbarText(10);
         candidateHeader.addView(s.candidatePage, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        s.shortcutBar = new LinearLayout(s);
-        s.shortcutBar.setOrientation(LinearLayout.HORIZONTAL);
+        s.shortcutBar = KeyboardGeometry.row(s);
         ViewPolicy.setCenteredVertically(s.shortcutBar);
         s.shortcutBar.setContentDescription("键盘快捷栏");
         KeyboardGeometry.setPaddingDp(s.shortcutBar, s, 2, 0, 2, 0);
