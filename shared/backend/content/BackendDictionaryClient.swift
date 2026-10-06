@@ -163,13 +163,16 @@ extension BackendAccountClient {
     guard page.entries.count <= 100, page.offset == offset, page.revision >= 0,
           Self.validCatalogText(page.normalized, maximum: 256, empty: true),
           page.entries.allSatisfy({ entry in
-            entry.kind == kind && Self.validCatalogText(entry.code, maximum: 256)
-              && Self.validCatalogText(entry.word, maximum: 1024) && entry.weight >= 0
+            entry.kind == kind && Self.validDictionaryValue(code: entry.code, word: entry.word,
+                                                             weight: entry.weight, kind: kind,
+                                                             allowStoredQuickCode: true)
           }) else { throw Failure(status: 0) }
     return page
   }
   func editCatalog(_ entry: CatalogEntry, revision: Int64, replacement: DictionaryValue?, token: String) async throws -> DictionaryChange {
     guard revision >= 0,
+          Self.validDictionaryValue(code: entry.code, word: entry.word, weight: entry.weight,
+                                    kind: entry.kind, allowStoredQuickCode: true),
           replacement.map({ Self.validNewDictionaryValue($0, kind: entry.kind) }) ?? true else { throw Failure(status: 400) }
     struct Identity: Encodable { let code: String; let word: String }
     struct Body: Encodable {
@@ -199,13 +202,8 @@ extension BackendAccountClient {
   private static func validDictionaryEntry(_ entry: DictionaryEntry) -> Bool {
     entry.id.utf8.count == 64
       && entry.id.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
-      && !entry.code.isEmpty
-      && entry.code.utf8.count <= 256
-      && !entry.code.unicodeScalars.contains { $0.properties.generalCategory == .control }
-      && !entry.word.isEmpty
-      && entry.word.utf8.count <= 1024
-      && !entry.word.unicodeScalars.contains { $0.properties.generalCategory == .control }
-      && entry.weight >= 0
+      && validDictionaryValue(code: entry.code, word: entry.word, weight: entry.weight,
+                              kind: entry.kind, allowStoredQuickCode: true)
       && entry.revision > 0
   }
 
@@ -218,6 +216,12 @@ extension BackendAccountClient {
   }
 
   private static func validNewDictionaryValue(_ value: DictionaryValue, kind: DictionaryKind) -> Bool {
+    validDictionaryValue(code: value.code, word: value.word, weight: value.weight, kind: kind,
+                         allowStoredQuickCode: false)
+  }
+
+  private static func validDictionaryValue(code: String, word: String, weight: Int64,
+                                           kind: DictionaryKind, allowStoredQuickCode: Bool) -> Bool {
     let codeLimit: Int
     switch kind {
     case .pinyin: codeLimit = 256
@@ -225,18 +229,18 @@ extension BackendAccountClient {
     case .quick: codeLimit = 32
     case .english: codeLimit = 64
     }
-    guard validCatalogText(value.code, maximum: codeLimit),
-          validCatalogText(value.word, maximum: 1024), value.weight >= 0 else { return false }
+    guard validCatalogText(code, maximum: codeLimit),
+          validCatalogText(word, maximum: 1024), weight >= 0 else { return false }
     switch kind {
     case .pinyin:
-      return value.code.utf8.allSatisfy { (97...122).contains($0) || $0 == 39 || $0 == 32 }
+      return code.utf8.allSatisfy { (97...122).contains($0) || $0 == 39 || $0 == 32 }
     case .wubi, .wubi98:
-      return value.code.utf8.allSatisfy { (97...122).contains($0) }
+      return code.utf8.allSatisfy { (97...122).contains($0) }
     case .quick:
-      return value.code.utf8.allSatisfy { (97...122).contains($0) }
-        && value.word.utf16.count <= 199
+      return code.utf8.allSatisfy { (97...122).contains($0) || (allowStoredQuickCode && (48...57).contains($0)) }
+        && word.utf16.count <= 199
     case .english:
-      return value.code.utf8.allSatisfy { (65...90).contains($0) || (97...122).contains($0) || $0 == 45 || $0 == 39 }
+      return code.utf8.allSatisfy { (65...90).contains($0) || (97...122).contains($0) || $0 == 45 || $0 == 39 }
     }
   }
 
@@ -279,9 +283,8 @@ extension BackendAccountClient {
   private static func validDictionaryChangePageEntry(_ entry: DictionaryChangePage.Entry) -> Bool {
     entry.id.utf8.count == 64
       && entry.id.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
-      && validCatalogText(entry.code, maximum: 256)
-      && validCatalogText(entry.word, maximum: 1024)
-      && entry.weight >= 0
+      && validDictionaryValue(code: entry.code, word: entry.word, weight: entry.weight,
+                              kind: entry.kind, allowStoredQuickCode: true)
       && entry.revision > 0
   }
 

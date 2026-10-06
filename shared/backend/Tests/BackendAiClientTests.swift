@@ -51,6 +51,21 @@ private final class OversizedAiProtocol: URLProtocol {
   }
 }
 
+private final class MalformedAiResponseProtocol: URLProtocol {
+  static var candidateText = " \n"
+  override class func canInit(with request: URLRequest) -> Bool { true }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+  override func startLoading() {
+    let inner = try! JSONSerialization.data(withJSONObject: ["candidates": [["text": Self.candidateText]]])
+    let body = try! JSONSerialization.data(withJSONObject: ["choices": [["message": ["content": String(decoding: inner, as: UTF8.self)]]]])
+    let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+    client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didLoad: body)
+    client?.urlProtocolDidFinishLoading(self)
+  }
+  override func stopLoading() {}
+}
+
 final class BackendAiClientTests: XCTestCase {
   private func client() -> BackendAiClient {
     let configuration = URLSessionConfiguration.ephemeral
@@ -61,6 +76,30 @@ final class BackendAiClientTests: XCTestCase {
   func testParsesOpenAICompatibleCandidateResponse() async throws {
     let result = try await client().suggest(endpoint: URL(string: "https://ai.invalid/v1/chat/completions")!, model: "model", token: "session", segmentedPinyin: ["ni", "hao"], context: "", candidateLimit: 3)
     XCTAssertEqual(result.candidates.map(\.text), ["你好"])
+  }
+
+  func testRejectsWhitespaceCandidateResponse() async {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [MalformedAiResponseProtocol.self]
+    MalformedAiResponseProtocol.candidateText = " \n"
+    do {
+      _ = try await BackendAiClient(configuration: configuration).suggest(
+        endpoint: URL(string: "https://ai.invalid/v1/chat/completions")!, model: "model",
+        token: "session", segmentedPinyin: ["ni"], context: "", candidateLimit: 1)
+      XCTFail("whitespace candidate accepted")
+    } catch { }
+  }
+
+  func testRejectsControlCharacterCandidateResponse() async {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [MalformedAiResponseProtocol.self]
+    MalformedAiResponseProtocol.candidateText = "bad\u{0001}text"
+    do {
+      _ = try await BackendAiClient(configuration: configuration).suggest(
+        endpoint: URL(string: "https://ai.invalid/v1/chat/completions")!, model: "model",
+        token: "session", segmentedPinyin: ["ni"], context: "", candidateLimit: 1)
+      XCTFail("control character candidate accepted")
+    } catch { }
   }
 
   func testRejectsUnsafeEndpointAndInvalidLimit() async {
