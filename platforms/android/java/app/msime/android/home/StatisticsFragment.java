@@ -234,7 +234,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         String delta = TypingStatisticsSummary.weekDelta(overview.weekTotal(), overview.previousWeekTotal());
         if (delta != null) {
             TextView change = Ui.label(context, delta, 13, Ui.accent(context));
-            change.setTypeface(Typeface.DEFAULT_BOLD);
+            ViewPolicy.setTypefaceStyle(change, Typeface.BOLD);
         Ui.setPaddingDp(change, context, 0, 4, 0, 0);
             hero.addView(change);
         }
