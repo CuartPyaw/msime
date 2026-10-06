@@ -288,9 +288,8 @@ final class ImeLayoutRows {
     /** The rail behind the capless punctuation column; it is not a Button, so the skin pass misses it. */
     void applySidebarRail() {
         if (s.nineKeySidebar == null) return;
-        GradientDrawable rail = new GradientDrawable();
-        rail.setColor(Color.parseColor(s.skin.sidebarBackground()));
-        rail.setCornerRadius(s.pixels(s.skin.cornerRadius()));
+        GradientDrawable rail = DrawablePolicy.rounded(
+            Color.parseColor(s.skin.sidebarBackground()), s.pixels(s.skin.cornerRadius()));
         s.nineKeySidebar.setBackground(rail);
     }
 
