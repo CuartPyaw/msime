@@ -426,9 +426,7 @@ public final class UpdateApi {
     }
 
     static String hex(byte[] bytes) {
-        StringBuilder out = new StringBuilder(bytes.length * 2);
-        for (byte value : bytes) out.append(String.format(Locale.ROOT, "%02x", value & 0xff));
-        return out.toString();
+        return DigestPolicy.hex(bytes);
     }
 
     private static MessageDigest sha256() {

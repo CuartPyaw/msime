@@ -677,20 +677,10 @@ public final class NativeClient {
             if (line.size() != 0) throw new IOException("unterminated snapshot line");
         }
         if (!header || footerHash == null || footerRecords != dataRecords
-                || !footerHash.equals(hex(digest.digest())) || engineRecords > 500_000) {
+                || !footerHash.equals(DigestPolicy.hex(digest.digest())) || engineRecords > 500_000) {
             throw new IOException("invalid snapshot envelope");
         }
         return engineRecords;
     }
 
-    private static String hex(byte[] bytes) {
-        char[] digits = "0123456789abcdef".toCharArray();
-        char[] output = new char[bytes.length * 2];
-        for (int index = 0; index < bytes.length; index++) {
-            int value = bytes[index] & 0xff;
-            output[index * 2] = digits[value >>> 4];
-            output[index * 2 + 1] = digits[value & 0x0f];
-        }
-        return new String(output);
-    }
 }
