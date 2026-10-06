@@ -999,7 +999,7 @@ final class ImePanels {
         s.schemePanel.setPadding(s.pixels(8), s.pixels(14), s.pixels(8), s.pixels(6));
         // 4×2 分页网格：已启用的方案按共享目录的顺序，英文 26 键排在第三格（方案不够时排最后），末尾是「+ 添加语言」。
         java.util.List<KeyboardScheme> schemes = s.visibleSchemes;
-        final int englishIndex = Math.min(2, schemes.size());
+        final int englishIndex = BoundsPolicy.bounded(2, 0, schemes.size());
         int cardCount = schemes.size() + 2;
         PagedTileGrid grid = new PagedTileGrid(s);
         grid.setGrid(4, 2);
