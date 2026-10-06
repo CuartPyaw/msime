@@ -1,4 +1,5 @@
 import app.msime.android.CloudApi;
+import app.msime.android.CloudClipboardApi;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -6,6 +7,15 @@ import java.util.Map;
 
 public final class CloudApiSmoke {
     public static void main(String[] arguments) throws Exception {
+        java.lang.reflect.Method strictBoolean = CloudClipboardApi.class.getDeclaredMethod(
+            "strictBoolean", Object.class);
+        strictBoolean.setAccessible(true);
+        check(Boolean.TRUE.equals(strictBoolean.invoke(null, Boolean.TRUE)),
+            "cloud clipboard booleans accept JSON booleans");
+        check(strictBoolean.invoke(null, "true") == null,
+            "cloud clipboard booleans must reject strings instead of coercing them");
+        check(strictBoolean.invoke(null, 1) == null,
+            "cloud clipboard booleans must reject numbers instead of coercing them");
         // multipart 按 RFC 7578 编码，行尾 CRLF，文件段带 filename，结尾 `--boundary--`。
         byte[] encoded = CloudApi.encodeMultipart("b0und", List.of(
             CloudApi.Part.json("payload", "{\"type\":\"bug\"}"),

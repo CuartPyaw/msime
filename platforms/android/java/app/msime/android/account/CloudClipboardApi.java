@@ -66,10 +66,14 @@ public final class CloudClipboardApi {
                 String text = value.optString("text", "");
                 String updated = value.optString("updated_at", "");
                 String device = value.optString("device", "");
+                Object rawPinned = value.opt("pinned");
+                Boolean pinned = rawPinned == null || rawPinned == JSONObject.NULL
+                    ? Boolean.FALSE : strictBoolean(rawPinned);
+                if (pinned == null) throw invalid();
                 if (!validId(id) || !CloudClipboardTextPolicy.valid(text) || updated.isEmpty()
                         || TextPolicy.utf8Length(updated) > 128 || TextPolicy.hasControl(updated)) throw invalid();
                 if (TextPolicy.utf8Length(device) > 128 || TextPolicy.hasControl(device)) device = "";
-                items.add(new Item(id, text, updated, value.optBoolean("pinned", false), device));
+                items.add(new Item(id, text, updated, pinned, device));
             }
             return new Page((Boolean) enabled, retention, ordered(items));
         } catch (JSONException malformed) {
@@ -111,5 +115,10 @@ public final class CloudClipboardApi {
 
     private static CloudApi.Failure invalid() {
         return new CloudApi.Failure(500, "invalid_response", "invalid clipboard response", 0);
+    }
+
+    /** org.json's optBoolean accepts string values; server response fields must keep their JSON type. */
+    static Boolean strictBoolean(Object value) {
+        return value instanceof Boolean ? (Boolean) value : null;
     }
 }
