@@ -296,8 +296,8 @@ final class ImeLayoutRows {
         LinearLayout container = new LinearLayout(s);
         container.setOrientation(LinearLayout.HORIZONTAL);
         s.imeStyler.adjustThreeRowBlockHeight(container);
-        s.keyRows.addView(container, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, s.pixels(KeyboardGeometry.KEY_ROW_HEIGHT_DP * 3)));
+        s.keyRows.addView(container, KeyboardGeometry.matchWidthHeightPx(
+            s.pixels(KeyboardGeometry.KEY_ROW_HEIGHT_DP * 3)));
 
         LinearLayout punctuation = new LinearLayout(s);
         punctuation.setOrientation(LinearLayout.VERTICAL);
@@ -393,8 +393,8 @@ final class ImeLayoutRows {
         LinearLayout container = new LinearLayout(s);
         container.setOrientation(LinearLayout.HORIZONTAL);
         s.imeStyler.adjustThreeRowBlockHeight(container);
-        s.keyRows.addView(container, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, s.pixels(KeyboardGeometry.KEY_ROW_HEIGHT_DP * 3)));
+        s.keyRows.addView(container, KeyboardGeometry.matchWidthHeightPx(
+            s.pixels(KeyboardGeometry.KEY_ROW_HEIGHT_DP * 3)));
 
         LinearLayout punctuation = new LinearLayout(s);
         punctuation.setOrientation(LinearLayout.VERTICAL);
@@ -493,8 +493,7 @@ final class ImeLayoutRows {
         container.setOrientation(LinearLayout.HORIZONTAL);
         // 和日语九键一样不要底栏，四行都在这一块里，总高度是三行九键加一条底栏，与其他九键键盘一样高：四行挤进三行高时键太扁。底栏的 123、中/英、空格、换行挪进两侧的列。
         s.imeStyler.adjustBottomRowBlockHeight(container);
-        s.keyRows.addView(container, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
+        s.keyRows.addView(container, KeyboardGeometry.matchWidthHeightPx(
             s.pixels(KeyboardGeometry.KEY_ROW_HEIGHT_DP * 3 + KeyboardGeometry.STANDARD_ROW_HEIGHT_DP)));
 
         LinearLayout tones = new LinearLayout(s);
@@ -957,8 +956,8 @@ final class ImeLayoutRows {
         container.setOrientation(LinearLayout.HORIZONTAL);
         // 日语九键没有底栏，四行（あ行到わ行加 小゛゜ 那一行）都在这一块里：按三行算高度时每行只剩三十来 dp，假名被裁掉下半截，底栏的位置又空着。
         s.imeStyler.adjustBottomRowBlockHeight(container);
-        s.keyRows.addView(container, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, s.pixels(KeyboardGeometry.KEY_ROW_HEIGHT_DP * 3 + KeyboardGeometry.STANDARD_ROW_HEIGHT_DP)));
+        s.keyRows.addView(container, KeyboardGeometry.matchWidthHeightPx(
+            s.pixels(KeyboardGeometry.KEY_ROW_HEIGHT_DP * 3 + KeyboardGeometry.STANDARD_ROW_HEIGHT_DP)));
 
         LinearLayout modeColumn = new LinearLayout(s);
         modeColumn.setOrientation(LinearLayout.VERTICAL);
