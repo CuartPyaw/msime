@@ -81,7 +81,7 @@ public final class SyncMergePolicy {
     /** 按正文去重、重排 position 并截断；上传前对任何一份列表都要过这一步。 */
     public static List<Phrase> normalized(List<Phrase> phrases) {
         Set<String> texts = new HashSet<>();
-        List<Phrase> result = new ArrayList<>();
+        List<Phrase> result = new ArrayList<>(Math.min(MAX_PHRASES, phrases.size()));
         for (Phrase phrase : phrases) {
             if (!usable(phrase) || !texts.add(phrase.text())) continue;
             if (result.size() == MAX_PHRASES) break;
