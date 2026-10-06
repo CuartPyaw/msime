@@ -53,12 +53,10 @@ public final class HostStore {
     private static String runtimeOption(Context context, String key) {
         File files = context.getFilesDir();
         if (files == null) return "";
-        File options = new File(files, "runtime-options.json");
-        if (!options.isFile()) return "";
         try {
-            JSONObject root = new JSONObject(HostOptionsPolicy.read(options));
+            JSONObject root = new JSONObject(HostOptionsPolicy.readRuntimeOptions(files));
             return root.optString(key, "");
-        } catch (JSONException | java.io.IOException | SecurityException error) {
+        } catch (JSONException | SecurityException error) {
             return "";
         }
     }
