@@ -17,6 +17,7 @@ import android.widget.LinearLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
 import app.msime.android.KeyboardGeometry;
+import app.msime.android.ViewPolicy;
 import androidx.annotation.AttrRes;
 import androidx.annotation.ColorInt;
 import app.msime.android.ColorPolicy;
@@ -684,6 +685,6 @@ public final class Ui {
     /** 把一个 view 的透明度和可点按状态一起切换；禁用的行仍然可见，只是变淡且不响应。 */
     public static void setEnabledLook(View view, boolean enabled) {
         view.setEnabled(enabled);
-        view.setAlpha(enabled ? 1f : 0.38f);
+        ViewPolicy.setActiveAlpha(view, enabled, 0.38f);
     }
 }
