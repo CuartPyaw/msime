@@ -1,6 +1,5 @@
 package app.msime.android;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.channels.FileChannel;
@@ -60,14 +59,9 @@ public final class CustomSkinLibrary {
             throw new IOException("Invalid custom skin library");
         String document;
         try (InputStream input = Files.newInputStream(file)) {
-            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-            byte[] buffer = new byte[8192];
-            int count;
-            while ((count = input.read(buffer)) != -1) {
-                if (bytes.size() + count > MAX_LIBRARY_BYTES) return List.of();
-                bytes.write(buffer, 0, count);
-            }
-            document = new String(bytes.toByteArray(), StandardCharsets.UTF_8);
+            byte[] bytes = HttpBodyPolicy.readBounded(input, (int) MAX_LIBRARY_BYTES);
+            if (bytes == null) return List.of();
+            document = new String(bytes, StandardCharsets.UTF_8);
         }
         final JSONArray values;
         try {
