@@ -3,7 +3,6 @@ package app.msime.android.home;
 import android.content.Context;
 import android.graphics.Color;
 import android.os.Bundle;
-import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
@@ -19,6 +18,7 @@ import app.msime.android.KeyboardSkin;
 import app.msime.android.SchemePreferences;
 import app.msime.android.SyncSignals;
 import app.msime.android.SyncSwitch;
+import app.msime.android.ViewPolicy;
 import org.json.JSONObject;
 
 /**
@@ -151,12 +151,12 @@ public final class KeyboardOptionsPage extends DetailPage {
                                        KeyboardSkin skin) {
         LinearLayout strip = new LinearLayout(context);
         strip.setOrientation(LinearLayout.HORIZONTAL);
-        strip.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(strip);
         int pad = Ui.dp(context, 12);
         Ui.setSymmetricPaddingPx(strip, pad);
         LinearLayout plate = new LinearLayout(context);
         plate.setOrientation(LinearLayout.HORIZONTAL);
-        plate.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(plate);
         Ui.setHorizontalPaddingDp(plate, context, 10);
         plate.setBackground(Ui.rounded(Ui.parseColor(skin.background(), Ui.page(context)), Ui.dp(context, 12)));
         plate.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
