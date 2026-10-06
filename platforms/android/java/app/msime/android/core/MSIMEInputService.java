@@ -2327,7 +2327,8 @@ public final class MSIMEInputService extends InputMethodService {
         if (raw == null) return null;
         try {
             JSONObject envelope = new JSONObject(raw);
-            return envelope.optBoolean("ok", false) ? envelope.optJSONObject("value") : null;
+            return Boolean.TRUE.equals(envelope.opt("ok"))
+                ? envelope.optJSONObject("value") : null;
         } catch (JSONException | RuntimeException error) {
             return null;
         }

@@ -319,6 +319,14 @@ if sed -n '/private String cloudRequestUrl(String document)/,/^    }$/p' \
   echo "Android cloud request URLs must require a typed boolean ok field" >&2
   exit 1
 fi
+# AI request descriptors also come from a native envelope; malformed success flags must not expose
+# a provider endpoint to the client.
+if sed -n '/private static JSONObject aiRequestDescriptor(String raw)/,/^    }$/p' \
+    "$repo_root/platforms/android/java/app/msime/android/core/MSIMEInputService.java" \
+    | rg -n 'getBoolean\("ok"\)|optBoolean\("ok"'; then
+  echo "Android AI request descriptors must require a typed boolean ok field" >&2
+  exit 1
+fi
 # Sync rounds download over any section that is not dirty, so a preference write that forgets to mark settings dirty is reverted by the next cloud change. HostStore.savePreferences owns that mark for every caller.
 if ! rg -qU 'NativeClient\.savePreferences\(directory, revision, document\)\)\);\s*(//[^\n]*\s*)?if \(saved != null\) SyncSignals\.markDirty\(context, SyncSwitch\.SETTINGS\);' \
     "$repo_root/platforms/android/java/app/msime/android/home/HostStore.java"; then
