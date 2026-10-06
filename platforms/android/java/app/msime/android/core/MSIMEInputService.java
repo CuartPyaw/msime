@@ -2500,7 +2500,7 @@ public final class MSIMEInputService extends InputMethodService {
         if (candidateLine == null) return;
         // 42 dp 的候选行容下候选字、一行释义和选中 chip 的留白；第二行起每行再加高一些。
         int reserved = CandidateTranslationPolicy.reservedGlossRows(candidateGlossLineCount(), koreanHanjaRows());
-        int extraRows = Math.max(0, reserved - 1);
+        int extraRows = BoundsPolicy.nonNegative(reserved - 1);
         int line = ImeToolbar.CANDIDATE_LINE_DP + extraRows * ImeToolbar.EXTRA_GLOSS_ROW_DP;
         setFixedHeight(candidateLine, pixels(line));
         // 空闲时的工具栏和组词时的读音行 + 候选行占同一个位置，两者同高，打字时键盘才不会变高。空闲时读音行若在显示常驻的模式标签（直接输入、准备中），它已经占了那 14 dp，工具栏只取候选行的高度，总高不变。
