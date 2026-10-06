@@ -361,7 +361,7 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
         bubble.setLineSpacing(Ui.dp(this, 3), 1f);
         bubble.setBackground(Ui.rounded(mine ? Ui.accent(this) : Ui.card(this), Ui.dp(this, 18)));
         bubble.setPadding(Ui.dp(this, 14), Ui.dp(this, 10), Ui.dp(this, 14), Ui.dp(this, 10));
-        bubble.setMaxWidth(Math.round(getResources().getDisplayMetrics().widthPixels * 0.8f));
+        bubble.setMaxWidth(Math.round(Ui.screenWidthPixels(this) * 0.8f));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         params.gravity = mine ? Gravity.END : Gravity.START;
