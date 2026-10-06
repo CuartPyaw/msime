@@ -34,7 +34,6 @@ import app.msime.android.TypingStatisticsSummary.Share;
 import app.msime.android.ViewPolicy;
 import app.msime.android.policy.HostOptionsPolicy;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
-import java.io.File;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -168,11 +167,9 @@ public final class StatisticsFragment extends HomeTabFragment {
 
     /** 用户自己添加的词条数（徽章「造词者」）；词库读不到时返回 null，summary 按 0 计。 */
     @Nullable private static Long userWords(Context context) {
-        File options = new File(context.getFilesDir(), "runtime-options.json");
-        if (!options.isFile()) return null;
         try {
             JSONObject request = new JSONObject()
-                .put("options", new JSONObject(HostOptionsPolicy.read(options)))
+                .put("options", new JSONObject(HostOptionsPolicy.readRuntimeOptions(context.getFilesDir())))
                 .put("action", new JSONObject().put("operation", "count").put("kind", "pinyin")
                     .put("user_only", true));
             JSONObject root = new JSONObject(NativeClient.dictionary(request.toString()));
@@ -181,7 +178,7 @@ public final class StatisticsFragment extends HomeTabFragment {
             if (value == null || !value.has("count")) return null;
             Long count = DictionaryCollectionsStore.strictLong(value.opt("count"));
             return count == null ? null : BoundsPolicy.nonNegative(count);
-        } catch (JSONException | java.io.IOException | RuntimeException | LinkageError error) {
+        } catch (JSONException | RuntimeException | LinkageError error) { (refactor(android): reuse runtime options reader)
             return null;
         }
     }
