@@ -65,7 +65,7 @@ public final class CommunitySkinCache {
                 return List.of();
             }
             JSONArray array = new JSONArray(new String(Files.readAllBytes(file), StandardCharsets.UTF_8));
-            List<Entry> entries = new ArrayList<>();
+            List<Entry> entries = new ArrayList<>(MAX_ENTRIES);
             for (int index = 0; index < array.length() && entries.size() < MAX_ENTRIES; index++) {
                 JSONObject value = array.optJSONObject(index);
                 if (value == null) continue;
