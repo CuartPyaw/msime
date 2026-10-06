@@ -629,7 +629,7 @@ final class ImeLayoutRows {
         LinearLayout options = new LinearLayout(s);
         options.setOrientation(LinearLayout.HORIZONTAL);
         int padding = s.pixels(5);
-        options.setPadding(padding, padding, padding, padding);
+        ViewPolicy.setSymmetricPadding(options, padding, padding);
         GradientDrawable surface = DrawablePolicy.outlined(
             Color.parseColor(s.skin.background()), s.pixels(10),
             KeyboardGeometry.atLeastOnePixel(s, 1), Color.parseColor(s.skin.accent()));
