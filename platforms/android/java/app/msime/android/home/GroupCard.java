@@ -141,11 +141,9 @@ public final class GroupCard {
         sliderParams.setMarginStart(Ui.dp(context, Ui.ROW_GAP));
         row.view.addView(control, sliderParams);
 
-        TextView text = new TextView(context);
+        TextView text = Ui.styledLabel(context, label.apply(control.value()), 13, 400, Ui.subText(context));
         text.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
         text.setSingleLine(true);
-        Ui.style(text, 13, 400, Ui.subText(context));
-        text.setText(label.apply(control.value()));
         text.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         row.view.addView(text, new LinearLayout.LayoutParams(Ui.dp(context, Ui.SLIDER_LABEL_WIDTH),
             ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -173,9 +171,7 @@ public final class GroupCard {
 
     /** 卡片里的一段说明文字，14sp 次要文字色。 */
     public TextView note(CharSequence text) {
-        TextView note = new TextView(context);
-        note.setText(text);
-        Ui.style(note, Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));
+        TextView note = Ui.styledLabel(context, text, Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));
         Ui.setSymmetricPaddingDp(note, context, Ui.ROW_PADDING_H, 12);
         addDivider();
         card.addView(note, Ui.matchWidth());
@@ -184,9 +180,7 @@ public final class GroupCard {
 
     /** 卡片下方的脚注，13sp 次要文字色，与组标题同样缩进。 */
     public TextView footer(CharSequence text) {
-        TextView note = new TextView(context);
-        note.setText(text);
-        Ui.style(note, 13, 400, Ui.subText(context));
+        TextView note = Ui.styledLabel(context, text, 13, 400, Ui.subText(context));
         Ui.setPaddingDp(note, context, Ui.GROUP_TITLE_INSET, 8,
             Ui.GROUP_TITLE_INSET, 0);
         group.addView(note, Ui.matchWidth());
@@ -215,9 +209,8 @@ public final class GroupCard {
     }
 
     private TextView trailingValue(Row row, @Nullable CharSequence value) {
-        TextView text = new TextView(context);
+        TextView text = Ui.styledLabel(context, "", Ui.TEXT_ROW_TITLE, 400, Ui.subText(context));
         text.setSingleLine(true);
-        Ui.style(text, Ui.TEXT_ROW_TITLE, 400, Ui.subText(context));
         LinearLayout.LayoutParams params = Ui.rowGapParams(context);
         row.view.addView(text, params);
         setText(text, value);
