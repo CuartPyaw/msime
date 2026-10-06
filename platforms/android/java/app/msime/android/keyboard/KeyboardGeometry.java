@@ -280,6 +280,12 @@ public final class KeyboardGeometry {
         return new FrameLayout.LayoutParams(widthPixels, heightPixels);
     }
 
+    /** Create frame layout parameters from pixel dimensions and explicit gravity. */
+    public static FrameLayout.LayoutParams frameParamsPx(int widthPixels, int heightPixels,
+            int gravity) {
+        return new FrameLayout.LayoutParams(widthPixels, heightPixels, gravity);
+    }
+
     /** Create frame layout parameters that fill width with content-sized height. */
     public static FrameLayout.LayoutParams frameMatchWidthWrapParams() {
         return new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
