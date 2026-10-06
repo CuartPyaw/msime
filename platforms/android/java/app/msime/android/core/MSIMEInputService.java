@@ -2034,7 +2034,7 @@ public final class MSIMEInputService extends InputMethodService {
                 LinearLayout.LayoutParams.WRAP_CONTENT));
         }
         for (int slot = englishSuggestions.size(); slot < englishSuggestionButtons.size(); slot++)
-            englishSuggestionButtons.get(slot).setVisibility(View.GONE);
+            ViewPolicy.hide(englishSuggestionButtons.get(slot));
     }
 
     /** Copies Engine candidates on the IME thread, then performs only session-free IO off-thread. */
@@ -4600,7 +4600,7 @@ public final class MSIMEInputService extends InputMethodService {
         closeAiPolish();
         renderLayoutSettingsState();
         if (layoutAdjustView != null) {
-            layoutSettingsScroll.setVisibility(View.GONE);
+            ViewPolicy.hide(layoutSettingsScroll);
             layoutAdjustView.setVisibility(View.VISIBLE);
             layoutAdjustView.requestFocus();
         } else {
@@ -5356,9 +5356,9 @@ public final class MSIMEInputService extends InputMethodService {
         candidatePanelOpen = false;
         candidatePanelSnapshot = null;
         if (keyboardRoot != null && expandedCandidates != null) {
-            expandedCandidates.setVisibility(View.GONE);
+            ViewPolicy.hide(expandedCandidates);
             if (expandedCandidateScroll != null)
-                expandedCandidateScroll.setVisibility(View.GONE);
+                ViewPolicy.hide(expandedCandidateScroll);
         }
     }
 
@@ -5432,7 +5432,7 @@ public final class MSIMEInputService extends InputMethodService {
         switch (availability) {
             case UNAVAILABLE -> {
                 handwritingCanvas.setAcceptsInk(false);
-                handwritingDownload.setVisibility(View.GONE);
+                ViewPolicy.hide(handwritingDownload);
                 showHandwritingStatus("此构建不含手写识别");
             }
             case DOWNLOAD_REQUIRED -> {
@@ -5459,7 +5459,7 @@ public final class MSIMEInputService extends InputMethodService {
             case READY -> {
                 handwritingDownloading = false;
                 handwritingCanvas.setAcceptsInk(true);
-                handwritingDownload.setVisibility(View.GONE);
+                ViewPolicy.hide(handwritingDownload);
                 if (!handwritingCanvas.hasInk() && handwritingResults.isEmpty()) {
                     showHandwritingStatus("在此手写，停笔后选字");
                 }
@@ -6182,7 +6182,7 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     void closeCommonPhrases() {
-        if (phraseScroll != null) phraseScroll.setVisibility(View.GONE);
+        if (phraseScroll != null) ViewPolicy.hide(phraseScroll);
     }
 
     /** 功能面板「键盘高度」：顶部一行换成内联高度条，拖动时实时预览，完成才保存，取消恢复原值。 */
