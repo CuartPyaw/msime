@@ -190,7 +190,7 @@ public final class KeyboardPreview extends View {
         int width = MeasureSpec.getSize(widthMeasureSpec);
         int height = Math.round(width * REFERENCE_HEIGHT_DP / REFERENCE_WIDTH_DP);
         if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.AT_MOST) {
-            height = Math.min(height, MeasureSpec.getSize(heightMeasureSpec));
+            height = BoundsPolicy.atMost(height, MeasureSpec.getSize(heightMeasureSpec));
         }
         setMeasuredDimension(width, height);
     }
@@ -207,7 +207,7 @@ public final class KeyboardPreview extends View {
 
     /** 字号取设计值与键面能容下的较小者，保证标签不出键。 */
     private void fitText(String label, float designSize, RectF bounds) {
-        float size = Math.min(designSize, bounds.height() * 0.62f);
+        float size = BoundsPolicy.atMost(designSize, bounds.height() * 0.62f);
         paint.setTextSize(size);
         float limit = bounds.width() * 0.86f;
         float measured = paint.measureText(label);
