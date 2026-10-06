@@ -95,6 +95,11 @@ public final class ViewPolicy {
         ViewPolicy.setCenteredVertically(view);
     }
 
+    /** Center a view's content along the horizontal axis. */
+    public static void setCenteredHorizontally(View view) {
+        view.setGravity(Gravity.CENTER_HORIZONTAL);
+    }
+
     /** Set a text view's size in scalable pixels. */
     public static void setTextSizeSp(TextView view, float sizeSp) {
         view.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp);
