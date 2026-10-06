@@ -91,16 +91,8 @@ public final class DownloadPage extends DetailPage {
         textParams.setMarginStart(Ui.dp(context, 14));
         card.addView(texts, textParams);
 
-        TextView copy = new TextView(context);
-        copy.setText("复制链接");
-        copy.setGravity(Gravity.CENTER);
-        copy.setSingleLine(true);
-        Ui.style(copy, Ui.TEXT_BUTTON_SMALL, 600, Ui.onAccent(context));
-        copy.setBackground(Ui.pillRipple(context, Ui.accent(context)));
-        Ui.setSymmetricPaddingDp(copy, context, 14, 6);
-        Ui.setTextMinHeightDp(copy, context, Ui.COMPACT_BUTTON_MIN_HEIGHT);
-        copy.setClickable(true);
-        copy.setFocusable(true);
+        TextView copy = Ui.pillButton(context, "复制链接", Ui.TEXT_BUTTON_SMALL, 600, Ui.onAccent(context),
+            14, 6, Ui.COMPACT_BUTTON_MIN_HEIGHT, 0);
         copy.setContentDescription("复制下载页链接");
         copy.setOnClickListener(ignored -> copyLink(context));
         LinearLayout.LayoutParams copyParams = Ui.wrap();

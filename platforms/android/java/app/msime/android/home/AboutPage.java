@@ -202,16 +202,8 @@ public final class AboutPage extends DetailPage {
         header.addView(version, versionParams);
 
         if (!play) {
-            TextView button = new TextView(context);
-            button.setGravity(Gravity.CENTER);
-            button.setSingleLine(true);
-            Ui.style(button, 15, 600, Ui.onAccent(context));
-            button.setBackground(Ui.pillRipple(context, Ui.accent(context)));
-            Ui.setHorizontalPaddingDp(button, context, 20);
-            Ui.setTextMinHeightDp(button, context, 36);
-            Ui.setTextMinWidthDp(button, context, 96);
-            button.setClickable(true);
-            button.setFocusable(true);
+            TextView button = Ui.pillButton(context, "检查更新", 15, 600, Ui.onAccent(context),
+                20, 0, 36, 96);
             button.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
             button.setOnClickListener(ignored -> onPill());
             LinearLayout.LayoutParams pillParams = Ui.wrap();
