@@ -12,6 +12,8 @@ public final class HttpBodyPolicySmoke {
         check(HttpBodyPolicy.readBounded(
             new ByteArrayInputStream("hello".getBytes(StandardCharsets.UTF_8)), 4) == null);
         check(HttpBodyPolicy.readBounded(new ByteArrayInputStream(new byte[0]), 4).length == 0);
+        check(HttpBodyPolicy.readBounded(new ByteArrayInputStream("hello".getBytes(StandardCharsets.UTF_8)),
+            5, () -> true) == null);
         System.out.println("Android bounded HTTP body policy passed");
     }
 }
