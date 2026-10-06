@@ -229,9 +229,9 @@ public final class KeyboardSkinPreview extends View {
         half.close();
         paint.setColor(dark);
         canvas.drawPath(half, paint);
-        int keys = Color.argb(217, 255, 255, 255);
+        int keys = ColorPolicy.withAlpha(Color.WHITE, 217);
         drawMiniKeyboard(canvas, bounds, keys, keys, state.returnBackground,
-            state.returnForeground, state.keyForeground, Color.argb(115, 0, 0, 0), state.accent,
+            state.returnForeground, state.keyForeground, ColorPolicy.withAlpha(Color.BLACK, 115), state.accent,
             state);
         canvas.restoreToCount(saved);
     }
