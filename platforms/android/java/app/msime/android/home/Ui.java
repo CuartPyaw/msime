@@ -187,6 +187,11 @@ public final class Ui {
         view.setMinimumHeight(dp(context, heightDp));
     }
 
+    /** Set a text view's line-aware minimum height from a density-independent value. */
+    public static void setTextMinHeightDp(TextView view, Context context, float heightDp) {
+        view.setMinHeight(dp(context, heightDp));
+    }
+
     /** Apply the standard compact action-button insets to a view. */
     public static void setButtonPadding(View view, Context context) {
         int horizontal = dp(context, BUTTON_PADDING_H);

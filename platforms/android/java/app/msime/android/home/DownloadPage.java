@@ -99,7 +99,7 @@ public final class DownloadPage extends DetailPage {
         Ui.style(copy, Ui.TEXT_BUTTON_SMALL, 600, Ui.onAccent(context));
         copy.setBackground(Ui.pillRipple(context, Ui.accent(context)));
         Ui.setSymmetricPaddingDp(copy, context, 14, 6);
-        copy.setMinHeight(Ui.dp(context, Ui.COMPACT_BUTTON_MIN_HEIGHT));
+        Ui.setTextMinHeightDp(copy, context, Ui.COMPACT_BUTTON_MIN_HEIGHT);
         copy.setClickable(true);
         copy.setFocusable(true);
         copy.setContentDescription("复制下载页链接");
@@ -166,7 +166,7 @@ public final class DownloadPage extends DetailPage {
         Ui.style(button, Ui.TEXT_BUTTON_SMALL, 600, Ui.accent(context));
         button.setBackground(Ui.pillRipple(context, Ui.accentSoft(context)));
         Ui.setButtonPadding(button, context);
-        button.setMinHeight(Ui.dp(context, Ui.COMPACT_BUTTON_MIN_HEIGHT));
+        Ui.setTextMinHeightDp(button, context, Ui.COMPACT_BUTTON_MIN_HEIGHT);
         button.setClickable(true);
         button.setFocusable(true);
         button.setContentDescription(label + "，" + title);

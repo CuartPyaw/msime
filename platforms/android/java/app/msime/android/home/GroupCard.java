@@ -178,7 +178,7 @@ public final class GroupCard {
         Ui.style(button, Ui.TEXT_BUTTON_SMALL, 500, Ui.accent(context));
         button.setBackground(Ui.pillRipple(context, Ui.accentSoft(context)));
         Ui.setButtonPadding(button, context);
-        button.setMinHeight(Ui.dp(context, Ui.COMPACT_BUTTON_MIN_HEIGHT));
+        Ui.setTextMinHeightDp(button, context, Ui.COMPACT_BUTTON_MIN_HEIGHT);
         button.setClickable(true);
         button.setFocusable(true);
         button.setOnClickListener(ignored -> action.run());
