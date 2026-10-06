@@ -68,7 +68,7 @@ public final class DownloadPage extends DetailPage {
         ImageView icon = new ImageView(context);
         icon.setImageResource(R.drawable.ic_ms_link);
         Ui.setImageTint(icon, Ui.onAccent(context));
-        icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        Ui.hideFromAccessibility(icon);
         int iconSize = Ui.dp(context, 24);
         tile.addView(icon, Ui.squareFrameParamsPx(iconSize, Gravity.CENTER));
         int tileSize = Ui.dp(context, 44);
@@ -106,7 +106,7 @@ public final class DownloadPage extends DetailPage {
         ImageView image = new ImageView(context);
         image.setImageResource(icon);
         Ui.setImageTint(image, Ui.text(context));
-        image.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        Ui.hideFromAccessibility(image);
         int size = Ui.dp(context, 24);
         LinearLayout.LayoutParams params = Ui.squareParamsPx(size);
         params.setMarginEnd(Ui.dp(context, 18));

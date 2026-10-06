@@ -151,14 +151,14 @@ public final class ProfilePage extends DetailPage {
             picture.setScaleType(ImageView.ScaleType.CENTER_CROP);
             picture.setBackground(circle);
             picture.setClipToOutline(true);
-            picture.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            Ui.hideFromAccessibility(picture);
             frame.addView(picture, Ui.squareFrameParams(context, sizeDp));
         } else {
             TextView letter = Ui.styledLabel(context, initial(name), Math.round(sizeDp * 0.4f), 600,
                 Ui.onAccent(context));
             ViewPolicy.setCentered(letter);
             letter.setBackground(circle);
-            letter.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            Ui.hideFromAccessibility(letter);
             frame.addView(letter, Ui.squareFrameParams(context, sizeDp));
         }
         return frame;
@@ -238,7 +238,7 @@ public final class ProfilePage extends DetailPage {
         camera.setBackground(badge);
         int pad = Ui.dp(context, 6);
         Ui.setSymmetricPaddingPx(camera, pad);
-        camera.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        Ui.hideFromAccessibility(camera);
         FrameLayout.LayoutParams cameraParams = Ui.squareFrameParams(context, 28);
         cameraParams.gravity = Gravity.BOTTOM | Gravity.END;
         avatar.addView(camera, cameraParams);
