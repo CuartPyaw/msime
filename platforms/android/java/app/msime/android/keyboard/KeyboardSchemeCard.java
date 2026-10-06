@@ -127,8 +127,7 @@ public final class KeyboardSchemeCard extends FrameLayout {
             boolean bold) {
         TextView view = new TextView(context);
         view.setText(text);
-        ViewPolicy.setCentered(view);
-        ViewPolicy.setTextSizeSp(view, sizeSp);
+        ViewPolicy.setCenteredTextSizeSp(view, sizeSp);
         if (bold) ViewPolicy.setTypefaceStyle(view, android.graphics.Typeface.BOLD);
         return view;
     }
