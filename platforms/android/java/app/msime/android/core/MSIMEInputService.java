@@ -2251,7 +2251,8 @@ public final class MSIMEInputService extends InputMethodService {
     private JSONObject onlineQuery(long targetSession) {
         try {
             JSONObject envelope = new JSONObject(NativeClient.onlineQuery(targetSession));
-            return envelope.optBoolean("ok", false) ? envelope.optJSONObject("value") : null;
+            return Boolean.TRUE.equals(envelope.opt("ok"))
+                ? envelope.optJSONObject("value") : null;
         } catch (JSONException | RuntimeException | LinkageError error) {
             return null;
         }
