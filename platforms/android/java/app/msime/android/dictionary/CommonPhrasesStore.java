@@ -224,7 +224,9 @@ public final class CommonPhrasesStore {
     }
 
     static byte[] encodeStarters(Set<String> texts) {
-        StringBuilder builder = new StringBuilder();
+        int capacity = 0;
+        for (String text : texts) capacity += text.length() + 1;
+        StringBuilder builder = new StringBuilder(capacity);
         for (String text : texts) builder.append(text).append('\n');
         return builder.toString().getBytes(StandardCharsets.UTF_8);
     }
