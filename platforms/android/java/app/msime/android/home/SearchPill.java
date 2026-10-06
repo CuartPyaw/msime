@@ -5,7 +5,6 @@ import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
 import android.util.AttributeSet;
-import android.view.Gravity;
 import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
 import android.widget.ImageView;
@@ -28,7 +27,7 @@ public final class SearchPill extends LinearLayout {
     public SearchPill(Context context, @Nullable AttributeSet attrs) {
         super(context, attrs);
         setOrientation(HORIZONTAL);
-        setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(this);
         Ui.setMinimumHeightDp(this, context, Ui.SEARCH_HEIGHT);
         Ui.setHorizontalPaddingDp(this, context, 18);
         setBackground(Ui.pill(Ui.card(context)));

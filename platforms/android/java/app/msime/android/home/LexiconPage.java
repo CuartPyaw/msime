@@ -6,7 +6,6 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
-import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
@@ -19,6 +18,7 @@ import app.msime.android.CommunityRequest;
 import app.msime.android.DictionaryCollectionsStore;
 import app.msime.android.InputFeatureToggle;
 import app.msime.android.HttpBodyPolicy;
+import app.msime.android.ViewPolicy;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -211,7 +211,7 @@ public final class LexiconPage extends DetailPage {
         } else {
             button = Ui.styledLabel(context, added ? "已添加" : "添加中",
                 Ui.TEXT_BUTTON_SMALL, 500, Ui.subText(context));
-            button.setGravity(Gravity.CENTER);
+            ViewPolicy.setCentered(button);
             button.setSingleLine(true);
             button.setBackground(Ui.pillRipple(context,
                 added ? Ui.rowBackground(context) : Ui.accentSoft(context)));
