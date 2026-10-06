@@ -180,7 +180,7 @@ public final class AboutPage extends DetailPage {
         mark.setImageResource(R.drawable.splash_mark);
         mark.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         int markSize = Ui.dp(context, 60);
-        disc.addView(mark, new FrameLayout.LayoutParams(markSize, markSize, Gravity.CENTER));
+        disc.addView(mark, Ui.squareFrameParamsPx(markSize, Gravity.CENTER));
         int discSize = Ui.dp(context, 116);
         header.addView(disc, Ui.squareParamsPx(discSize));
 

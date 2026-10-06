@@ -74,7 +74,7 @@ public final class DownloadPage extends DetailPage {
         Ui.setImageTint(icon, Ui.onAccent(context));
         icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         int iconSize = Ui.dp(context, 24);
-        tile.addView(icon, new FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER));
+        tile.addView(icon, Ui.squareFrameParamsPx(iconSize, Gravity.CENTER));
         int tileSize = Ui.dp(context, 44);
         card.addView(tile, Ui.squareParamsPx(tileSize));
 

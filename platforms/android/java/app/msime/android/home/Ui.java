@@ -336,6 +336,11 @@ public final class Ui {
         return new FrameLayout.LayoutParams(size, size);
     }
 
+    /** Frame layout parameters for a pixel-sized square with explicit gravity. */
+    public static FrameLayout.LayoutParams squareFrameParamsPx(int size, int gravity) {
+        return new FrameLayout.LayoutParams(size, size, gravity);
+    }
+
     /** Layout parameters for a weighted child with a fixed height in dp. */
     public static LinearLayout.LayoutParams weightedHeight(Context context, float heightDp, float weight) {
         return new LinearLayout.LayoutParams(0, dp(context, heightDp), weight);
