@@ -360,18 +360,7 @@ public final class DiagnosticsApi {
 
     /** 按 UTF-8 字节截断，不切开多字节字符和代理对。 */
     static String clipUtf8(String value, int maxBytes) {
-        if (value == null) return "";
-        if (value.getBytes(StandardCharsets.UTF_8).length <= maxBytes) return value;
-        int bytes = 0;
-        int index = 0;
-        while (index < value.length()) {
-            int codePoint = value.codePointAt(index);
-            int size = codePoint < 0x80 ? 1 : codePoint < 0x800 ? 2 : codePoint < 0x10000 ? 3 : 4;
-            if (bytes + size > maxBytes) break;
-            bytes += size;
-            index += Character.charCount(codePoint);
-        }
-        return value.substring(0, index);
+        return TextPolicy.clipUtf8(value, maxBytes);
     }
 
     /** JSON 字符串转义（RFC 8259）。 */
