@@ -328,7 +328,7 @@ final class LoginSheet {
         LinearLayout button = new LinearLayout(activity);
         button.setOrientation(LinearLayout.HORIZONTAL);
         button.setGravity(Gravity.CENTER);
-        button.setMinimumHeight(Ui.dp(activity, 50));
+        Ui.setMinimumHeightDp(button, activity, 50);
         GradientDrawable face = stroke == 0
             ? Ui.rounded(fill, Ui.dp(activity, 12))
             : Ui.outlined(fill, Ui.dp(activity, 12), Ui.atLeastOnePx(activity, 1), stroke);
@@ -366,7 +366,7 @@ final class LoginSheet {
             Ui.atLeastOnePx(activity, 1), Ui.hairline(activity));
         field.setBackground(face);
         Ui.setHorizontalPaddingDp(field, activity, 14);
-        field.setMinHeight(Ui.dp(activity, 50));
+        Ui.setTextMinHeightDp(field, activity, 50);
         field.setGravity(Gravity.CENTER_VERTICAL);
         field.setContentDescription(hint);
         return field;
