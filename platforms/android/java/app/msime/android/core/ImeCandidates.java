@@ -241,7 +241,7 @@ final class ImeCandidates {
         }
         s.expandedCandidateScroll.setVisibility(View.VISIBLE);
         s.expandedCandidates.setVisibility(View.VISIBLE);
-        s.expandedCandidates.setPadding(s.pixels(8), s.pixels(6), s.pixels(8), s.pixels(6));
+        KeyboardGeometry.setSymmetricPaddingDp(s.expandedCandidates, s, 8, 6);
         JSONArray entries = s.candidatePanelSnapshot.optJSONArray("candidates");
         int count = entries == null ? 0 : entries.length();
         String reading = s.candidatePanelSnapshot.optString("reading", "");
