@@ -176,7 +176,10 @@ public final class CommunityCatalog {
                 output.write(body.toString().getBytes(StandardCharsets.UTF_8));
             }
             int status = connection.getResponseCode();
-            if (status == 200 || status == 201) return "";
+            if (status == 200 || status == 201) {
+                return confirmedReport(connection)
+                    ? "" : CommunityRequest.message(null, 502);
+            }
             if (status == 401) {
                 String fresh = anonymous
                     ? new BackendAnonymousAccount(context).accessToken(token)
@@ -214,7 +217,10 @@ public final class CommunityCatalog {
                 output.write(body.toString().getBytes(StandardCharsets.UTF_8));
             }
             int status = connection.getResponseCode();
-            if (status == 200 || status == 201) return "";
+            if (status == 200 || status == 201) {
+                return confirmedReport(connection)
+                    ? "" : CommunityRequest.message(null, 502);
+            }
             return CommunityRequest.message(errorCode(connection.getErrorStream()), status);
         } catch (Exception | LinkageError error) {
             android.util.Log.w("MSIMECommunity", "Report retry failed", error);
@@ -394,6 +400,19 @@ public final class CommunityCatalog {
 
     static Boolean strictBoolean(Object value) {
         return value instanceof Boolean ? (Boolean) value : null;
+    }
+
+    /** A successful HTTP status is not enough: the backend must confirm that it recorded the report. */
+    static boolean confirmedReport(Object value) {
+        return Boolean.TRUE.equals(value);
+    }
+
+    private static boolean confirmedReport(HttpsURLConnection connection) throws Exception {
+        try (InputStream input = connection.getInputStream()) {
+            byte[] body = HttpBodyPolicy.readRequired(input, 16 * 1024);
+            JSONObject response = new JSONObject(new String(body, StandardCharsets.UTF_8));
+            return confirmedReport(response.opt("reported"));
+        }
     }
 
     /** A malformed page is a backend fault, not more results to show. Kept apart from parse so the JVM smoke can check it: the smokes run against android.jar, whose org.json classes are stubs that throw. */

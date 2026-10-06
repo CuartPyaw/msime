@@ -96,6 +96,14 @@ public final class CommunityCatalogSmoke {
             "community boolean fields accept booleans");
         check(strictBoolean.invoke(null, "true") == null,
             "community boolean fields reject strings instead of coercing them");
+        Method confirmedReport = CommunityCatalog.class.getDeclaredMethod("confirmedReport", Object.class);
+        confirmedReport.setAccessible(true);
+        check((boolean) confirmedReport.invoke(null, Boolean.TRUE),
+            "a report is successful only when the backend confirms it");
+        check(!(boolean) confirmedReport.invoke(null, Boolean.FALSE),
+            "a backend refusal must not be reported as a successful report");
+        check(!(boolean) confirmedReport.invoke(null, "true"),
+            "a string reported value must not be coerced into success");
         Method countNumber = CommunityCatalog.class.getDeclaredMethod("countNumber", Object.class);
         countNumber.setAccessible(true);
         check(Long.valueOf(9_007_199_254_740_991L).equals(
