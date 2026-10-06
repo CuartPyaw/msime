@@ -97,7 +97,7 @@ public final class SymbolPanelView extends LinearLayout {
         bottom.addView(lockButton, KeyboardGeometry.weightedHeightParams(getContext(), 48, 1));
         Button bottomDelete = buttons.create("⌫", "删除", listener::delete, true);
         bottom.addView(bottomDelete, KeyboardGeometry.weightedHeightParams(getContext(), 48, 1));
-        addView(bottom, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, KeyboardGeometry.pixels(getContext(), 48)));
+        addView(bottom, KeyboardGeometry.matchWidthHeightPx(KeyboardGeometry.pixels(getContext(), 48)));
 
         List<SymbolPanelModel.Category> values = SymbolPanelModel.categories();
         for (int index = 0; index < values.size(); index++) {
@@ -110,8 +110,8 @@ public final class SymbolPanelView extends LinearLayout {
             button.setPadding(0, 0, 0, 0);
             KeyboardGeometry.setKeyTextSize(button, 13);
             categoryButtons.add(button);
-            categories.addView(button, new LinearLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, KeyboardGeometry.pixels(getContext(), 40)));
+            categories.addView(button, KeyboardGeometry.matchWidthHeightPx(
+                KeyboardGeometry.pixels(getContext(), 40)));
         }
         select(0);
     }
