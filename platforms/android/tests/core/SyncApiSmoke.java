@@ -21,6 +21,9 @@ public final class SyncApiSmoke {
         check(SyncApi.phraseRevision(42L) == 42L, "integer phrase revision");
         check(SyncApi.snapshotRevisionValue(42L) == 42L, "integer snapshot revision");
         check(SyncApi.changesRevision(42L, 7L) == 42L, "integer dictionary revision");
+        check(SyncApi.strictSnapshotWeight(100L) == 100L, "integer snapshot weight");
+        check(SyncApi.strictSnapshotWeight(1.5d) == null,
+            "fractional snapshot weight is rejected");
 
         // Cloud preference revisions are non-negative integers. Fractional JSON numbers
         // must not be truncated by Number.longValue(), and negative revisions are invalid.
