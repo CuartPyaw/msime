@@ -156,19 +156,7 @@ public final class DownloadPage extends DetailPage {
 
     /** 行尾的 tonal 胶囊：accentSoft 底、强调色字。 */
     private static TextView tonal(Context context, String label, String title) {
-        TextView button = new TextView(context);
-        button.setText(label);
-        button.setGravity(Gravity.CENTER);
-        button.setSingleLine(true);
-        Ui.style(button, Ui.TEXT_BUTTON_SMALL, 600, Ui.accent(context));
-        button.setBackground(Ui.pillRipple(context, Ui.accentSoft(context)));
-        Ui.setButtonPadding(button, context);
-        Ui.setTextMinHeightDp(button, context, Ui.COMPACT_BUTTON_MIN_HEIGHT);
-        button.setClickable(true);
-        button.setFocusable(true);
-        button.setContentDescription(label + "，" + title);
-        button.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        return button;
+        return KeyboardSheets.tonalButton(context, label, label + "，" + title, 600);
     }
 
     private void send(String platform, TextView button) {
