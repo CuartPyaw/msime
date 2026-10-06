@@ -77,7 +77,7 @@ public final class VoiceListeningView extends TextView {
     }
 
     private static float clampProgress(float value) {
-        return Math.max(0f, Math.min(1f, value));
+        return KeyboardGeometry.bounded(value, 0f, 1f);
     }
 
     @Override protected void onAttachedToWindow() {

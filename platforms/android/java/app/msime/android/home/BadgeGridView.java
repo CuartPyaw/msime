@@ -23,6 +23,7 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat;
 import androidx.customview.widget.ExploreByTouchHelper;
 import app.msime.android.TypingStatisticsSummary;
+import app.msime.android.keyboard.KeyboardGeometry;
 import app.msime.android.TypingStatisticsSummary.Achievement;
 import java.util.List;
 import java.util.function.Consumer;
@@ -275,7 +276,7 @@ public final class BadgeGridView extends View {
                 scale = frame(WIGGLE, wiggle, 2);
             } else if (popStart >= 0) {
                 long local = popStart - POP_DELAY - POP_STAGGER * index;
-                float t = Math.max(0f, Math.min(1f, local / (float) POP_MILLIS));
+                float t = KeyboardGeometry.bounded(local / (float) POP_MILLIS, 0f, 1f);
                 scale = frame(POP, t, 1);
             }
             int[] colours = colours(badge.group());
