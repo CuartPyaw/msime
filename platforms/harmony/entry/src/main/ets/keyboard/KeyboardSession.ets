@@ -3142,7 +3142,8 @@ export class KeyboardSession implements HardwareKeyTarget {
     let committed: string | null | undefined = null;
     try {
       const response: Response = JSON.parse(raw) as Response;
-        if (response.ok === true) {
+      if (EngineViewValuePolicy.isObject(response) && response.ok === true
+          && EngineViewValuePolicy.isObject(response.value)) {
         // Rewritten before apply() commits it, so the editor receives the opening quote and the completion below closes it.
         const reopened: string | null | undefined = PairedPunctuationPolicy.reopenQuote(
           response.value.commit, ascii, this.appearance.pairedPunctuation);
@@ -3152,7 +3153,8 @@ export class KeyboardSession implements HardwareKeyTarget {
         }
         committed = response.value.commit;
       }
-      completion = response.ok === true
+      completion = EngineViewValuePolicy.isObject(response) && response.ok === true
+        && EngineViewValuePolicy.isObject(response.value)
         ? PairedPunctuationPolicy.completion(response.value.commit,
           this.appearance.pairedPunctuation) : null;
     } catch (error) {
@@ -3521,8 +3523,10 @@ export class KeyboardSession implements HardwareKeyTarget {
       KeyboardLog.error(`candidate edge response unavailable: ${describeError(error)}`);
       return;
     }
-    if (response.ok !== true) {
-      KeyboardLog.error(`candidate edge refused: ${response.error}`);
+    if (!EngineViewValuePolicy.isObject(response) || response.ok !== true
+        || !EngineViewValuePolicy.isObject(response.value)) {
+      KeyboardLog.error(EngineViewValuePolicy.isObject(response)
+        ? `candidate edge refused: ${response.error}` : 'candidate edge refused: malformed reply');
       return;
     }
     const commit: string | null | undefined = response.value.commit;
@@ -3547,12 +3551,13 @@ export class KeyboardSession implements HardwareKeyTarget {
       KeyboardLog.error(`unreadable engine reply: ${describeError(error)}`);
       return false;
     }
-    if (response.ok !== true) {
-      KeyboardLog.error(`engine refused: ${response.error}`);
+    if (!EngineViewValuePolicy.isObject(response) || response.ok !== true) {
+      KeyboardLog.error(EngineViewValuePolicy.isObject(response)
+        ? `engine refused: ${response.error}` : 'engine refused: malformed reply');
       return false;
     }
     const value: EngineValue = response.value;
-    if (!EngineViewValuePolicy.isValid(value.view)) {
+    if (!EngineViewValuePolicy.isObject(value) || !EngineViewValuePolicy.isValid(value.view)) {
       KeyboardLog.error('engine view has malformed numeric fields');
       return false;
     }
@@ -3594,8 +3599,9 @@ export class KeyboardSession implements HardwareKeyTarget {
       KeyboardLog.error(`unreadable engine view: ${describeError(error)}`);
       return;
     }
-    if (response.ok !== true) {
-      KeyboardLog.error(`engine refused: ${response.error}`);
+    if (!EngineViewValuePolicy.isObject(response) || response.ok !== true) {
+      KeyboardLog.error(EngineViewValuePolicy.isObject(response)
+        ? `engine refused: ${response.error}` : 'engine refused: malformed reply');
       return;
     }
     if (!EngineViewValuePolicy.isValid(response.value)) {
