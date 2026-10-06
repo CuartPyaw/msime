@@ -242,8 +242,7 @@ public final class AccountFragment extends HomeTabFragment {
         toggle.setClickable(false);
         toggle.setFocusable(false);
         toggle.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        LinearLayout.LayoutParams switchParams = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams switchParams = Ui.wrap();
         switchParams.setMarginStart(Ui.dp(context, Ui.ROW_GAP));
         sync.addView(toggle, switchParams);
         sync.setAccessibilityDelegate(new View.AccessibilityDelegate() {
@@ -392,8 +391,7 @@ public final class AccountFragment extends HomeTabFragment {
             trailing.setText(value);
             trailing.setSingleLine(true);
             Ui.style(trailing, Ui.TEXT_ROW_SUBTITLE, 400, Ui.subText(context));
-            LinearLayout.LayoutParams valueParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            LinearLayout.LayoutParams valueParams = Ui.wrap();
             valueParams.setMarginStart(Ui.dp(context, Ui.ROW_GAP));
             row.addView(trailing, valueParams);
         }
