@@ -1555,7 +1555,7 @@ final class ImePanels {
         KeyboardGeometry.setKeyTextSize(abc, 14);
         compactReplyControl(abc, 0);
         abc.setContentDescription("返回键盘");
-        abc.setLayoutParams(new LinearLayout.LayoutParams(s.pixels(60), s.pixels(40)));
+        abc.setLayoutParams(KeyboardGeometry.linearParams(s, 60, 40));
         s.emojiTabs = new LinearLayout(s);
         s.emojiTabs.setOrientation(LinearLayout.HORIZONTAL);
         s.emojiTabs.setContentDescription("表情分类");
@@ -1568,7 +1568,7 @@ final class ImePanels {
         KeyboardGeometry.setKeyTextSize(deleteEmoji, 18);
         compactReplyControl(deleteEmoji, 0);
         deleteEmoji.setContentDescription("删除");
-        deleteEmoji.setLayoutParams(new LinearLayout.LayoutParams(s.pixels(60), s.pixels(40)));
+        deleteEmoji.setLayoutParams(KeyboardGeometry.linearParams(s, 60, 40));
         s.emojiPanel.addView(bar, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, s.pixels(46)));
         s.emojiPanel.setVisibility(View.GONE);
