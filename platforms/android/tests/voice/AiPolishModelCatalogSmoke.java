@@ -34,6 +34,13 @@ public final class AiPolishModelCatalogSmoke {
             "AI model metadata accepts JSON strings");
         check(strictString.invoke(null, 7) == null,
             "AI model metadata rejects numbers instead of coercing them");
+        java.lang.reflect.Method strictBoolean = AiPolishModelCatalog.class.getDeclaredMethod(
+            "strictBoolean", Object.class);
+        strictBoolean.setAccessible(true);
+        check(Boolean.TRUE.equals(strictBoolean.invoke(null, Boolean.TRUE)),
+            "AI model metadata accepts JSON booleans");
+        check(strictBoolean.invoke(null, "true") == null,
+            "AI model metadata rejects boolean strings instead of coercing them");
         System.out.println("Android AI model catalog URL handling passed");
     }
 }
