@@ -4465,7 +4465,7 @@ public final class MSIMEInputService extends InputMethodService {
         closeLayoutSettings();
         closeAiPolish();
         renderVoiceResult();
-        voiceResultScroll.setVisibility(View.VISIBLE);
+        ViewPolicy.show(voiceResultScroll);
     }
 
     private void renderVoiceResult() {
@@ -4601,10 +4601,10 @@ public final class MSIMEInputService extends InputMethodService {
         renderLayoutSettingsState();
         if (layoutAdjustView != null) {
             ViewPolicy.hide(layoutSettingsScroll);
-            layoutAdjustView.setVisibility(View.VISIBLE);
+            ViewPolicy.show(layoutAdjustView);
             layoutAdjustView.requestFocus();
         } else {
-            layoutSettingsScroll.setVisibility(View.VISIBLE);
+            ViewPolicy.show(layoutSettingsScroll);
         }
     }
 
