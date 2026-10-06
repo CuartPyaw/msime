@@ -74,6 +74,11 @@ public final class TextPolicy {
         return value == null ? "" : new String(value, StandardCharsets.UTF_8);
     }
 
+    /** Encode UTF-8 request text, treating a missing value as empty text. */
+    public static byte[] utf8Bytes(String value) {
+        return (value == null ? "" : value).getBytes(StandardCharsets.UTF_8);
+    }
+
     /** Return the number of Unicode code points in text, or zero for null. */
     public static int codePointLength(String value) {
         return value == null ? 0 : value.codePointCount(0, value.length());
