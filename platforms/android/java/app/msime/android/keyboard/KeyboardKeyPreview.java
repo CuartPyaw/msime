@@ -35,8 +35,7 @@ public final class KeyboardKeyPreview extends View {
         super(context);
         setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
         setWillNotDraw(false);
-        setClickable(false);
-        setFocusable(false);
+        ViewPolicy.setNonInteractive(this);
         text.setTextAlign(Paint.Align.CENTER);
         outline.setStyle(Paint.Style.STROKE);
         setVisibility(GONE);
