@@ -72,8 +72,7 @@ final class ImeFrame {
     private LinearLayout column() {
         if (column != null && row != null && row.getParent() == keyboard) return column;
         row = new OneHandRow(s);
-        column = new LinearLayout(s);
-        column.setOrientation(LinearLayout.VERTICAL);
+        column = KeyboardGeometry.column(s);
         row.keys = column;
         gutter = new OneHandGutterView(s);
         gutter.setOnSwap(() -> s.toggleOneHanded(true));
