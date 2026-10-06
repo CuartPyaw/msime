@@ -86,7 +86,7 @@ public final class SymbolPanelView extends LinearLayout {
         gridScroll.setContentDescription("符号网格；每行五个");
         gridScroll.addView(grid, new ScrollView.LayoutParams(
             LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
-        body.addView(gridScroll, new LinearLayout.LayoutParams(0, LayoutParams.MATCH_PARENT, 1));
+        body.addView(gridScroll, KeyboardGeometry.weightedMatchParentParams(1));
         addView(body, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 0, 1));
 
         LinearLayout bottom = new LinearLayout(context);
