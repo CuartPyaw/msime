@@ -5812,8 +5812,7 @@ public final class MSIMEInputService extends InputMethodService {
         diagnosticView.setContentDescription("输入提示");
         diagnosticView.setVisibility(View.GONE);
         candidateRegion.addView(diagnosticView, KeyboardGeometry.matchWidthWrapParams());
-        candidateRegion.addView(shortcutScroll, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
+        candidateRegion.addView(shortcutScroll, KeyboardGeometry.matchWidthHeightPx(
             pixels(KeyboardGeometry.DESIGN_TOOLBAR_ROW_HEIGHT_DP)));
         nineKeySpellings = new LinearLayout(this);
         nineKeySpellings.setOrientation(LinearLayout.HORIZONTAL);
@@ -5866,8 +5865,7 @@ public final class MSIMEInputService extends InputMethodService {
         actionRow.setOrientation(LinearLayout.HORIZONTAL);
         actionRow.setContentDescription("键盘功能行");
         actionRowSignature = "";
-        imeFrame.wrap(actionRow, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
+        imeFrame.wrap(actionRow, KeyboardGeometry.matchWidthHeightPx(
             pixels(KeyboardGeometry.STANDARD_ROW_HEIGHT_DP)));
         // Staging only: every control below is created here and then moved to the row that owns it.
         // The case and delete keys go to the last of the 26 key rows, the shortcut glyphs to the
