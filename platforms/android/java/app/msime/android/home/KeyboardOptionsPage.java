@@ -172,7 +172,7 @@ public final class KeyboardOptionsPage extends DetailPage {
                 if (toolbarButton(toolbar, settings, button[0])) addChip(context, plate, button[1], icon);
             }
         }
-        strip.addView(plate, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(context, 44)));
+        strip.addView(plate, Ui.matchWidthHeight(context, 44));
         strip.setContentDescription("工具栏预览");
         return strip;
     }
