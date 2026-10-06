@@ -5803,7 +5803,7 @@ public final class MSIMEInputService extends InputMethodService {
         keyboardSurface.addView(imeLetterRows.keyPreviewLayer, KeyboardGeometry.frameMatchParentParams());
         LinearLayout candidateRegion = KeyboardGeometry.column(this);
         imeToolbar.buildCandidateHeader(candidateRegion);
-        diagnosticView = new TextView(this);
+        diagnosticView = ViewPolicy.newTextView(this, "");
         KeyboardGeometry.setKeyTextSize(diagnosticView, 12);
         diagnosticView.setContentDescription("输入提示");
         ViewPolicy.hide(diagnosticView);
