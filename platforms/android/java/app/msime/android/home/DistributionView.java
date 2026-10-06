@@ -9,7 +9,7 @@ import android.graphics.Typeface;
 import android.util.AttributeSet;
 import android.view.View;
 import androidx.annotation.Nullable;
-import androidx.core.graphics.ColorUtils;
+import app.msime.android.ColorPolicy;
 import app.msime.android.TypingStatisticsSummary;
 import app.msime.android.TypingStatisticsSummary.Share;
 import java.util.List;
@@ -54,7 +54,12 @@ public final class DistributionView extends View {
         shares = values == null ? List.of() : List.copyOf(values);
         total = TypingStatisticsSummary.total(shares);
         style = chart;
-        StringBuilder spoken = new StringBuilder();
+        int spokenCapacity = 0;
+        for (Share share : shares) {
+            spokenCapacity += share.title().length()
+                + String.valueOf(TypingStatisticsSummary.share(share.count(), total)).length() + 2;
+        }
+        StringBuilder spoken = new StringBuilder(spokenCapacity);
         for (Share share : shares) {
             if (spoken.length() > 0) spoken.append('，');
             spoken.append(share.title()).append(' ')
@@ -70,7 +75,7 @@ public final class DistributionView extends View {
         Context context = getContext();
         int accent = Ui.accent(context);
         int mix = MIX[Math.min(index, MIX.length - 1)];
-        return ColorUtils.blendARGB(Ui.card(context), accent, mix / 100f);
+        return ColorPolicy.blend(Ui.card(context), accent, mix / 100f);
     }
 
     private int track() {

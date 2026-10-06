@@ -32,8 +32,8 @@ public final class DownloadPage extends DetailPage {
     private static final String DOWNLOAD_LABEL = "msime.app/download";
 
     /** 本次打开页面后已经发送过的平台；按钮显示「已发送」。 */
-    private final Set<String> sentPlatforms = new HashSet<>();
-    private final Set<String> sending = new HashSet<>();
+    private final Set<String> sentPlatforms = new HashSet<>(6);
+    private final Set<String> sending = new HashSet<>(6);
 
     @Override protected void buildContent(LinearLayout column, Bundle args) {
         Context context = requireContext();
@@ -98,7 +98,7 @@ public final class DownloadPage extends DetailPage {
         copy.setGravity(Gravity.CENTER);
         copy.setSingleLine(true);
         Ui.style(copy, Ui.TEXT_BUTTON_SMALL, 600, Ui.onAccent(context));
-        copy.setBackground(Ui.rippleOn(context, Ui.accent(context), 9999f));
+        copy.setBackground(Ui.pillRipple(context, Ui.accent(context)));
         copy.setPadding(Ui.dp(context, 14), Ui.dp(context, 6), Ui.dp(context, 14), Ui.dp(context, 6));
         copy.setMinHeight(Ui.dp(context, 32));
         copy.setClickable(true);
@@ -165,7 +165,7 @@ public final class DownloadPage extends DetailPage {
         button.setGravity(Gravity.CENTER);
         button.setSingleLine(true);
         Ui.style(button, Ui.TEXT_BUTTON_SMALL, 600, Ui.accent(context));
-        button.setBackground(Ui.rippleOn(context, Ui.accentSoft(context), 9999f));
+        button.setBackground(Ui.pillRipple(context, Ui.accentSoft(context)));
         button.setPadding(Ui.dp(context, 14), Ui.dp(context, 5), Ui.dp(context, 14), Ui.dp(context, 5));
         button.setMinHeight(Ui.dp(context, 32));
         button.setClickable(true);

@@ -58,7 +58,7 @@ public final class InlineHeightBar extends LinearLayout {
         reset = textButton(context, "重置");
         done = textButton(context, "完成");
         done.setTypeface(Typeface.DEFAULT_BOLD);
-        done.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        KeyboardGeometry.setKeyTextSize(done, 14);
         handle = new Handle(context, this);
         int pill = KeyboardGeometry.pixels(context, 32);
         addView(cancel, new LayoutParams(LayoutParams.WRAP_CONTENT, pill));
@@ -86,14 +86,14 @@ public final class InlineHeightBar extends LinearLayout {
         button.setMinimumHeight(0);
         int horizontal = KeyboardGeometry.pixels(context, 12);
         button.setPadding(horizontal, 0, horizontal, 0);
-        button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        KeyboardGeometry.setKeyTextSize(button, 14);
         button.setGravity(Gravity.CENTER);
         return button;
     }
 
     /** 把百分比夹进 75–130。 */
     public static int clamp(int value) {
-        return Math.max(MIN_PERCENT, Math.min(MAX_PERCENT, value));
+        return KeyboardGeometry.bounded(value, MIN_PERCENT, MAX_PERCENT);
     }
 
     /**
@@ -130,13 +130,10 @@ public final class InlineHeightBar extends LinearLayout {
     public void setColors(int foreground, int secondary, int accent, int onAccent) {
         ((BarButton) cancel).setColors(foreground, null);
         ((BarButton) reset).setColors(foreground, null);
-        GradientDrawable pill = new GradientDrawable();
-        pill.setShape(GradientDrawable.RECTANGLE);
-        pill.setCornerRadius(KeyboardGeometry.floatPixels(getContext(), 16));
-        pill.setColor(accent);
+        GradientDrawable pill = DrawablePolicy.rounded(accent,
+            KeyboardGeometry.floatPixels(getContext(), 16));
         ((BarButton) done).setColors(onAccent, pill);
-        handle.barColor = Color.argb(Math.round(Color.alpha(foreground) * .35f),
-            Color.red(foreground), Color.green(foreground), Color.blue(foreground));
+        handle.barColor = ColorPolicy.withAlpha(foreground, .35f);
         handle.textColor = secondary;
         handle.invalidate();
     }
@@ -265,7 +262,7 @@ public final class InlineHeightBar extends LinearLayout {
         }
 
         @Override protected void onDraw(Canvas canvas) {
-            text.setTextSize(KeyboardGeometry.sp(getContext(), LABEL_SP));
+            text.setTextSize(KeyboardGeometry.keySp(getContext(), LABEL_SP));
             Paint.FontMetrics metrics = text.getFontMetrics();
             float textHeight = metrics.descent - metrics.ascent;
             float gap = KeyboardGeometry.floatPixels(getContext(), 6);

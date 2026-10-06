@@ -315,10 +315,14 @@ public final class CommunityCatalog {
         JSONArray values = root.optJSONArray(
             kind == CommunityRequest.Kind.SKIN ? "skins" : "items");
         if (values == null) return new Page(List.of(), false, CommunityRequest.message(null, 500));
+        int rawLength = values.length();
+        if (rawLength > CommunityRequest.PAGE_SIZE) {
+            return new Page(List.of(), false, CommunityRequest.message(null, 500));
+        }
         boolean hasMore = root.optBoolean("has_more", false);
-        List<Item> items = new ArrayList<>(values.length());
-        Set<String> ids = new HashSet<>(values.length());
-        for (int index = 0; index < values.length(); index++) {
+        List<Item> items = new ArrayList<>(rawLength);
+        Set<String> ids = new HashSet<>(rawLength);
+        for (int index = 0; index < rawLength; index++) {
             JSONObject value = values.optJSONObject(index);
             Item item = value == null ? null : item(kind, value);
             if (item == null) {
@@ -329,7 +333,7 @@ public final class CommunityCatalog {
             }
             items.add(item);
         }
-        if (invalidPage(values.length(), items.size(), hasMore)) {
+        if (invalidPage(rawLength, items.size(), hasMore)) {
             return new Page(List.of(), false, CommunityRequest.message(null, 500));
         }
         return new Page(List.copyOf(items), hasMore, "");

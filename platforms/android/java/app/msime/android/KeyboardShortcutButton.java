@@ -78,8 +78,8 @@ public final class KeyboardShortcutButton extends KeyboardPressButton {
     }
 
     @Override protected void onDraw(Canvas canvas) {
-        int width = Math.max(0, getWidth() - getPaddingLeft() - getPaddingRight());
-        int height = Math.max(0, getHeight() - getPaddingTop() - getPaddingBottom());
+        int width = KeyboardGeometry.contentWidth(this);
+        int height = KeyboardGeometry.contentHeight(this);
         if (KeyboardShortcutIconPolicy.materialGlyph(icon)) {
             drawMaterial(canvas, width, height);
             return;
@@ -134,8 +134,7 @@ public final class KeyboardShortcutButton extends KeyboardPressButton {
         }
         int color = iconColor();
         if (color == Color.TRANSPARENT) color = Color.WHITE;
-        if (!isEnabled()) color = Color.argb(Math.round(Color.alpha(color) * 96f / 255f),
-            Color.red(color), Color.green(color), Color.blue(color));
+        if (!isEnabled()) color = ColorPolicy.withAlpha(color, 96f / 255f);
         KeyboardIconPaths.Icon path = switch (icon) {
             case EMOJI -> KeyboardIconPaths.Icon.TOOLBAR_EMOJI;
             case PHRASE -> KeyboardIconPaths.Icon.TOOLBAR_PHRASE;
@@ -145,9 +144,9 @@ public final class KeyboardShortcutButton extends KeyboardPressButton {
             case DISMISS, SETTINGS, REPLY, VOICE, GLOBE, BOOKMARK ->
                 KeyboardIconPaths.Icon.TOOLBAR_DISMISS;
         };
-        float size = Math.min(shorter,
-            (icon == KeyboardShortcutIconPolicy.Icon.DISMISS ? DISMISS_ICON_DP : MATERIAL_ICON_DP)
-                * density);
+        float iconDp = icon == KeyboardShortcutIconPolicy.Icon.DISMISS
+            ? DISMISS_ICON_DP : MATERIAL_ICON_DP;
+        float size = Math.min(shorter, KeyboardGeometry.floatPixels(getContext(), iconDp));
         KeyboardIconPaths.draw(canvas, glyph, path, centerX - size / 2f, centerY - size / 2f,
             size, color);
     }

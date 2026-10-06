@@ -130,8 +130,12 @@ public final class Ui {
     /** 页码点宽度变化。 */
     public static final long DOT_MILLIS = 200;
 
+    private static final class MotionCurves {
+        static final PathInterpolator EMPHASIZED = new PathInterpolator(0.2f, 0f, 0f, 1f);
+    }
+
     /** 设计的动效曲线 `cubic-bezier(.2, 0, 0, 1)`。 */
-    public static PathInterpolator emphasized() { return new PathInterpolator(0.2f, 0f, 0f, 1f); }
+    public static PathInterpolator emphasized() { return MotionCurves.EMPHASIZED; }
 
     // ---- 读取 ----
 
@@ -146,7 +150,7 @@ public final class Ui {
 
     /** Return the current display width in physical pixels. */
     public static int screenWidthPixels(Context context) {
-        return context.getResources().getDisplayMetrics().widthPixels;
+        return KeyboardGeometry.screenWidthPixels(context);
     }
 
     /** Convert a density-independent dimension without rounding, for canvas geometry. */
@@ -156,8 +160,7 @@ public final class Ui {
 
     /** Convert scalable text units to pixels using the context display metrics. */
     public static float sp(Context context, float value) {
-        return TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, value,
-            context.getResources().getDisplayMetrics());
+        return KeyboardGeometry.sp(context, value);
     }
 
     /** Parse a theme or skin colour, returning the supplied fallback for missing or invalid input. */
@@ -186,12 +189,12 @@ public final class Ui {
 
     /** Convert a density-independent size while guaranteeing at least one physical pixel. */
     public static int atLeastOnePx(Context context, float value) {
-        return Math.max(1, dp(context, value));
+        return KeyboardGeometry.atLeastOnePixel(context, value);
     }
 
     /** Return the minimum one-pixel thickness for a 0.5 dp separator. */
     public static int hairlinePx(Context context) {
-        return Math.max(1, dp(context, 0.5f));
+        return KeyboardGeometry.atLeastOnePixel(context, 0.5f);
     }
 
     /** Create a view filled with the standard hairline colour for separators. */
@@ -267,16 +270,17 @@ public final class Ui {
 
     /** 按 0–1 的不透明度改写颜色的 alpha，乘在原有 alpha 上。 */
     @ColorInt public static int withAlpha(@ColorInt int color, float alpha) {
-        int base = Color.alpha(color);
-        return (color & 0x00FFFFFF) | (Math.round(base * alpha) << 24);
+        return ColorPolicy.withAlpha(color, alpha);
+    }
+
+    /** Create a filled circular drawable. */
+    public static GradientDrawable circle(@ColorInt int color) {
+        return DrawablePolicy.circle(color);
     }
 
     /** 纯色圆角矩形。 */
     public static GradientDrawable rounded(@ColorInt int color, float radiusPx) {
-        GradientDrawable shape = new GradientDrawable();
-        shape.setColor(color);
-        shape.setCornerRadius(radiusPx);
-        return shape;
+        return DrawablePolicy.rounded(color, radiusPx);
     }
 
     /** 胶囊形状：GradientDrawable 会把过大的圆角夹到短边的一半，所以高度怎么变两端都是半圆。 */
@@ -292,6 +296,11 @@ public final class Ui {
     }
 
     /** 有底色的按压反馈：底色画在波纹下面，波纹裁在 `radiusPx` 的圆角里；底色透明时波纹照样可见。 */
+    /** Create a pill-shaped press ripple with a fully rounded mask. */
+    public static Drawable pillRipple(Context context, @ColorInt int fill) {
+        return rippleOn(context, fill, 9999f);
+    }
+
     public static Drawable rippleOn(Context context, @ColorInt int fill, float radiusPx) {
         int pressed = withAlpha(text(context), 0.10f);
         return new RippleDrawable(ColorStateList.valueOf(pressed), rounded(fill, radiusPx),

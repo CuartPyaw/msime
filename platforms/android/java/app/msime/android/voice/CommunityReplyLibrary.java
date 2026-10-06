@@ -155,7 +155,7 @@ public final class CommunityReplyLibrary {
 
         private String string() {
             require('"');
-            StringBuilder result = new StringBuilder();
+            StringBuilder result = new StringBuilder(input.length() - index);
             while (index < input.length()) {
                 char value = input.charAt(index++);
                 if (value == '"') return result.toString();

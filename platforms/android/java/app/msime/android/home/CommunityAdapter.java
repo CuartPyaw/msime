@@ -11,6 +11,7 @@ import androidx.annotation.Nullable;
 import androidx.recyclerview.widget.RecyclerView;
 import app.msime.android.CommunityCatalog;
 import app.msime.android.CommunityRequest;
+import app.msime.android.DrawablePolicy;
 import app.msime.android.KeyboardSkin;
 import app.msime.android.R;
 import java.util.ArrayList;
@@ -80,6 +81,7 @@ public final class CommunityAdapter extends RecyclerView.Adapter<CommunityAdapte
 
     /** Start a new section, such as 「AI 回复模板」 under the phrase packs. */
     public void appendHeader(String title) {
+        entries.ensureCapacity(entries.size() + 1);
         entries.add(new Entry(null, title));
         notifyItemInserted(entries.size() - 1);
         if (entries.size() > 1) notifyItemChanged(entries.size() - 2);
@@ -255,7 +257,7 @@ public final class CommunityAdapter extends RecyclerView.Adapter<CommunityAdapte
         // 「已添加」是终态：没有底色、正文色、不响应；皮肤拿到之后的「使用」仍是可点的 tonal 按钮。
         boolean enabled = action == Action.AVAILABLE || (skin && action == Action.DONE);
         boolean filled = action != Action.DONE || skin;
-        pill.setBackground(filled ? Ui.rippleOn(context, Ui.accentSoft(context), 9999f) : null);
+        pill.setBackground(filled ? Ui.pillRipple(context, Ui.accentSoft(context)) : null);
         pill.setTextColor(filled ? Ui.accent(context) : Ui.text(context));
         pill.setEnabled(enabled);
         pill.setClickable(enabled);
@@ -303,10 +305,8 @@ public final class CommunityAdapter extends RecyclerView.Adapter<CommunityAdapte
         float radius = Ui.dpFloat(row.getContext(), GROUP_RADIUS_DP);
         float top = first ? radius : 0f;
         float bottom = last ? radius : 0f;
-        GradientDrawable card = new GradientDrawable();
-        card.setColor(Ui.card(row.getContext()));
-        card.setCornerRadii(new float[] {top, top, top, top, bottom, bottom, bottom, bottom});
-        return card;
+        return DrawablePolicy.rounded(Ui.card(row.getContext()),
+            new float[] {top, top, top, top, bottom, bottom, bottom, bottom});
     }
 
     /** 皮肤卡上的作者行：设计写「@作者」，没写作者时是「匿名作者」。 */

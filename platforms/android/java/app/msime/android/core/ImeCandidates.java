@@ -2,7 +2,6 @@ package app.msime.android;
 
 import android.content.res.ColorStateList;
 import android.graphics.Typeface;
-import android.graphics.drawable.StateListDrawable;
 import android.os.Build;
 import android.util.TypedValue;
 import android.view.Menu;
@@ -47,10 +46,7 @@ final class ImeCandidates {
 
     /** 首选候选 chip：字母键的底（kb.key）、圆角 9，皮肤强调色 600 字重；其余候选不画底。 */
     private android.graphics.drawable.GradientDrawable chip(int color, int radiusDp) {
-        android.graphics.drawable.GradientDrawable drawable = new android.graphics.drawable.GradientDrawable();
-        drawable.setColor(color);
-        drawable.setCornerRadius(s.pixels(radiusDp));
-        return drawable;
+        return DrawablePolicy.rounded(color, s.pixels(radiusDp));
     }
 
     void styleCandidateButton(Button button) {
@@ -59,15 +55,19 @@ final class ImeCandidates {
             styleExpandedCell(button);
             return;
         }
-        StateListDrawable states = new StateListDrawable();
-        states.addState(new int[] {android.R.attr.state_selected}, chip(selectedBackground, 9));
-        states.addState(new int[] {android.R.attr.state_pressed},
-            s.imeStyler.candidateDrawable(s.candidateAppearance.hover()));
-        states.addState(new int[] {android.R.attr.state_focused},
-            s.imeStyler.candidateDrawable(s.candidateAppearance.hover()));
-        states.addState(new int[] {android.R.attr.state_hovered},
-            s.imeStyler.candidateDrawable(s.candidateAppearance.hover()));
-        states.addState(new int[0], chip(android.graphics.Color.TRANSPARENT, 9));
+        android.graphics.drawable.Drawable pressed =
+            s.imeStyler.candidateDrawable(s.candidateAppearance.hover());
+        android.graphics.drawable.Drawable focused =
+            s.imeStyler.candidateDrawable(s.candidateAppearance.hover());
+        android.graphics.drawable.Drawable hovered =
+            s.imeStyler.candidateDrawable(s.candidateAppearance.hover());
+        android.graphics.drawable.StateListDrawable states = DrawablePolicy.stateList(
+            new int[][] {
+                {android.R.attr.state_selected}, {android.R.attr.state_pressed},
+                {android.R.attr.state_focused}, {android.R.attr.state_hovered}, new int[0]
+            },
+            chip(selectedBackground, 9), pressed, focused, hovered,
+            chip(android.graphics.Color.TRANSPARENT, 9));
         button.setBackground(states);
         button.setTextColor(new ColorStateList(
             new int[][] {{android.R.attr.state_selected}, {}},
@@ -89,10 +89,11 @@ final class ImeCandidates {
 
     /** 展开网格的单元：44 dp 高、圆角 8，平时 kb.key 底，当前高亮的那个 accentSoft 底 + 强调色字。 */
     private void styleExpandedCell(Button button) {
-        StateListDrawable states = new StateListDrawable();
-        states.addState(new int[] {android.R.attr.state_selected}, chip(accentSoft, 8));
-        states.addState(new int[] {android.R.attr.state_pressed}, chip(s.candidateAppearance.hover(), 8));
-        states.addState(new int[0], chip(keyBackground, 8));
+        android.graphics.drawable.StateListDrawable states = DrawablePolicy.stateList(
+            new int[][] {
+                {android.R.attr.state_selected}, {android.R.attr.state_pressed}, new int[0]
+            },
+            chip(accentSoft, 8), chip(s.candidateAppearance.hover(), 8), chip(keyBackground, 8));
         button.setBackground(states);
         button.setTextColor(new ColorStateList(
             new int[][] {{android.R.attr.state_selected}, {}},
@@ -179,7 +180,7 @@ final class ImeCandidates {
         button.setMinLines(labelLines);
         button.setMaxLines(labelLines);
         s.configureCandidateTextLayout(button, labelLines);
-        button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        KeyboardGeometry.setKeyTextSize(button, 17);
         button.setSelected(highlighted);
         expandedCells.add(button);
         button.setMinWidth(s.pixels(64));
@@ -271,7 +272,7 @@ final class ImeCandidates {
         close.setKeyboardRole(KeyboardKeyRole.ACCENT);
         close.setAllCaps(false);
         close.setText("返回");
-        close.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        KeyboardGeometry.setKeyTextSize(close, 15);
         close.setContentDescription("收起候选面板");
         close.setOnClickListener(ignored -> {
             s.imeKeyFeedback.playFeedback(close);
@@ -282,7 +283,7 @@ final class ImeCandidates {
         delete.setKeyboardRole(KeyboardKeyRole.ACCENT);
         delete.setAllCaps(false);
         delete.setText("⌫");
-        delete.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        KeyboardGeometry.setKeyTextSize(delete, 16);
         delete.setContentDescription("候选面板 删除");
         delete.setOnClickListener(ignored -> {
             s.imeKeyFeedback.playFeedback(delete);

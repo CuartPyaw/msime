@@ -51,7 +51,7 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
     private static final String FAILURE = "请求失败，请检查登录状态或稍后重试。";
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
-    private final List<BackendAccount.ChatModel> models = new ArrayList<>();
+    private final ArrayList<BackendAccount.ChatModel> models = new ArrayList<>();
     private final List<BackendAccount.ChatMessage> messages = new ArrayList<>(13);
     private Future<?> operation;
     private int generation;
@@ -171,6 +171,7 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed()) return;
                     models.clear();
+                    models.ensureCapacity(loaded.size());
                     models.addAll(loaded);
                     loadingModels = false;
                     // The draft may have been typed while the catalogue was loading. Refresh
@@ -286,7 +287,7 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
     private final class StreamingReply {
         final int token;
         final BackendAccount.ChatCall call = new BackendAccount.ChatCall();
-        private final StringBuilder received = new StringBuilder();
+        private final StringBuilder received = new StringBuilder(BackendAccount.MAX_CHAT_REPLY_CHARS);
         private final AtomicBoolean scheduled = new AtomicBoolean();
         /** 上一次重画的时刻；worker 线程读它算延迟，界面线程写。 */
         private volatile long shownAt;

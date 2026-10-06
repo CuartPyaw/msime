@@ -224,7 +224,9 @@ public final class CommonPhrasesStore {
     }
 
     static byte[] encodeStarters(Set<String> texts) {
-        StringBuilder builder = new StringBuilder();
+        int capacity = 0;
+        for (String text : texts) capacity += text.length() + 1;
+        StringBuilder builder = new StringBuilder(capacity);
         for (String text : texts) builder.append(text).append('\n');
         return builder.toString().getBytes(StandardCharsets.UTF_8);
     }
@@ -249,7 +251,7 @@ public final class CommonPhrasesStore {
     /** 把一条移到第 `index` 位（从 0 数）。 */
     public static Result move(Context context, String id, int index) {
         try {
-            return perform(context, action("move").put("id", id).put("index", Math.max(0, index)), true);
+            return perform(context, action("move").put("id", id).put("index", BoundsPolicy.nonNegative(index)), true);
         } catch (JSONException error) {
             return Result.failed(failureMessage(""));
         }

@@ -43,7 +43,7 @@ final class ImeVoiceEntry {
     private Runnable silenceStop;
     private VoiceListeningView listening;
     private ViewGroup host;
-    private final List<View> hidden = new ArrayList<>();
+    private final ArrayList<View> hidden = new ArrayList<>();
     private LocalAsrRecognizer local;
     private DoubaoRecognizer streaming;
     private long generation;
@@ -336,6 +336,7 @@ final class ImeVoiceEntry {
         dismiss();
         host = keyArea;
         hidden.clear();
+        hidden.ensureCapacity(keyArea.getChildCount());
         for (int index = 0; index < keyArea.getChildCount(); index++) {
             View child = keyArea.getChildAt(index);
             if (child.getVisibility() == View.VISIBLE) {

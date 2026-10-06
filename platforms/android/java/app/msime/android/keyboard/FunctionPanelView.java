@@ -156,6 +156,11 @@ public final class FunctionPanelView extends LinearLayout {
         private final TextPaint textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         private final Paint badgePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF rect = new RectF();
+        private String fittedLabel;
+        private String fittedLabelSource;
+        private float fittedLabelWidth = Float.NaN;
+        private float fittedLabelSize = Float.NaN;
+        private boolean fittedLabelBold;
         private State state = State.NONE;
 
         Tile(Context context, FunctionPanelView panel, Entry entry) {
@@ -207,7 +212,7 @@ public final class FunctionPanelView extends LinearLayout {
             int color = on ? panel.accent : panel.foreground;
             if (isPressed()) color = Color.argb(Color.alpha(color) * PRESSED_ALPHA / 255,
                 Color.red(color), Color.green(color), Color.blue(color));
-            textPaint.setTextSize(KeyboardGeometry.sp(getContext(), LABEL_SP));
+            textPaint.setTextSize(KeyboardGeometry.keySp(getContext(), LABEL_SP));
             textPaint.setTypeface(on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
             Paint.FontMetrics label = textPaint.getFontMetrics();
             float labelHeight = label.descent - label.ascent;
@@ -229,7 +234,7 @@ public final class FunctionPanelView extends LinearLayout {
                 float radius = GLYPH_RADIUS_DP * density;
                 canvas.drawRoundRect(rect, radius, radius, boxPaint);
                 Paint glyph = textPaint;
-                glyph.setTextSize(KeyboardGeometry.sp(getContext(), GLYPH_SP));
+                glyph.setTextSize(KeyboardGeometry.keySp(getContext(), GLYPH_SP));
                 glyph.setTypeface(Typeface.DEFAULT_BOLD);
                 glyph.setColor(color);
                 Paint.FontMetrics metrics = glyph.getFontMetrics();
@@ -237,7 +242,7 @@ public final class FunctionPanelView extends LinearLayout {
                     iconCenterY - (metrics.ascent + metrics.descent) / 2f, glyph);
                 iconRight = centerX + box / 2f;
                 iconBottom = iconCenterY + box / 2f;
-                textPaint.setTextSize(KeyboardGeometry.sp(getContext(), LABEL_SP));
+                textPaint.setTextSize(KeyboardGeometry.keySp(getContext(), LABEL_SP));
                 textPaint.setTypeface(on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
             } else {
                 float size = ICON_DP * density;
@@ -270,8 +275,21 @@ public final class FunctionPanelView extends LinearLayout {
 
         /** 放不下时以「…」结尾截断，不悄悄丢掉末尾的字。 */
         private String fit(String value, float width) {
-            return TextUtils.ellipsize(value == null ? "" : value, textPaint, Math.max(0f, width),
-                TextUtils.TruncateAt.END).toString();
+            String source = value == null ? "" : value;
+            float boundedWidth = Math.max(0f, width);
+            boolean bold = textPaint.getTypeface() == Typeface.DEFAULT_BOLD;
+            float size = textPaint.getTextSize();
+            if (fittedLabel == null || !source.equals(fittedLabelSource)
+                || fittedLabelWidth != boundedWidth || fittedLabelSize != size
+                || fittedLabelBold != bold) {
+                fittedLabel = TextUtils.ellipsize(source, textPaint, boundedWidth,
+                    TextUtils.TruncateAt.END).toString();
+                fittedLabelSource = source;
+                fittedLabelWidth = boundedWidth;
+                fittedLabelSize = size;
+                fittedLabelBold = bold;
+            }
+            return fittedLabel;
         }
 
     }

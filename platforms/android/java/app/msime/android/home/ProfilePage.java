@@ -150,9 +150,7 @@ public final class ProfilePage extends DetailPage {
     /** 圆形头像：有图片时画图片，否则是强调色底上的昵称首字。 */
     static FrameLayout avatarView(Context context, int sizeDp, String name, @Nullable Bitmap image) {
         FrameLayout frame = new FrameLayout(context);
-        GradientDrawable circle = new GradientDrawable();
-        circle.setShape(GradientDrawable.OVAL);
-        circle.setColor(Ui.accent(context));
+        GradientDrawable circle = Ui.circle(Ui.accent(context));
         if (image != null) {
             ImageView picture = new ImageView(context);
             picture.setImageBitmap(image);
@@ -244,9 +242,7 @@ public final class ProfilePage extends DetailPage {
         avatar.addView(avatarView(context, 88, profile.displayName(), image));
         ImageView camera = new ImageView(context);
         camera.setImageResource(app.msime.android.R.drawable.ms_w5_me_camera);
-        GradientDrawable badge = new GradientDrawable();
-        badge.setShape(GradientDrawable.OVAL);
-        badge.setColor(Ui.card(context));
+        GradientDrawable badge = Ui.circle(Ui.card(context));
         camera.setBackground(badge);
         int pad = Ui.dp(context, 6);
         camera.setPadding(pad, pad, pad, pad);

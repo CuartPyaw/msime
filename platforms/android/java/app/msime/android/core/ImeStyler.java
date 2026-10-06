@@ -222,9 +222,8 @@ final class ImeStyler {
             && role != KeyboardKeyRole.TILE ? KeyboardKeyRole.ACCENT : role;
         if (face == KeyboardKeyRole.PILL) {
             // The pill is a label on the strip rather than a key, so it keeps a plain rounded face even over a designed skin, inset so the 44dp target stays.
-            GradientDrawable pill = new GradientDrawable();
-            pill.setColor(color(target.keyBackground()));
-            pill.setCornerRadius(s.pixels(14));
+            GradientDrawable pill = DrawablePolicy.rounded(color(target.keyBackground()),
+                s.pixels(14));
             button.setBackground(new InsetDrawable(pill,
                 s.pixels(2), s.pixels(8), s.pixels(2), s.pixels(8)));
             button.setTextColor(color(target.keyForeground()));
@@ -263,9 +262,8 @@ final class ImeStyler {
                 button.setBackground(new KeyboardSkinKeyDrawable(target,
                     color(background), selected || action || confirm, density));
             } else {
-                GradientDrawable drawable = new GradientDrawable();
-                drawable.setColor(color(background));
-                drawable.setCornerRadius(s.pixels(tile ? MoreToolsLayout.TILE_RADIUS_DP : target.cornerRadius()));
+                GradientDrawable drawable = DrawablePolicy.rounded(color(background),
+                    s.pixels(tile ? MoreToolsLayout.TILE_RADIUS_DP : target.cornerRadius()));
                 int borderWidth = s.pixels(target.borderWidth());
                 if (borderWidth > 0)
                     drawable.setStroke(borderWidth, color(target.borderColor()));
@@ -283,12 +281,7 @@ final class ImeStyler {
         if (button instanceof NineKeyDigitButton digitButton)
             digitButton.setDigitColor(color(target.accent()));
         button.setTypeface(target.monospaced() ? Typeface.MONOSPACE : Typeface.DEFAULT);
-        int shadowAlpha = (int) Math.round(255 * target.shadowOpacity());
-        int shadowColor = Color.argb(shadowAlpha, 0, 0, 0);
-        button.setOutlineAmbientShadowColor(shadowColor);
-        button.setOutlineSpotShadowColor(shadowColor);
-        button.setElevation(target.shadowOpacity() > 0
-            ? s.pixels(Math.max(1, target.shadowRadius() + target.shadowOffset())) : 0);
+        applyShadow(button, target);
     }
 
     /**
@@ -308,9 +301,8 @@ final class ImeStyler {
                 key.setBackground(new KeyboardSkinKeyDrawable(target,
                     color(background), !on, density));
             } else {
-                GradientDrawable drawable = new GradientDrawable();
-                drawable.setColor(color(background));
-                drawable.setCornerRadius(s.pixels(target.cornerRadius()));
+                GradientDrawable drawable = DrawablePolicy.rounded(color(background),
+                    s.pixels(target.cornerRadius()));
                 int borderWidth = s.pixels(target.borderWidth());
                 if (borderWidth > 0)
                     drawable.setStroke(borderWidth, color(target.borderColor()));
@@ -319,36 +311,35 @@ final class ImeStyler {
             key.rememberFace(target, remembered, false, density);
         }
         key.setTextColor(color(foreground));
+        applyShadow(key, target);
+    }
+
+    private void applyShadow(View view, KeyboardSkin target) {
         int shadowAlpha = (int) Math.round(255 * target.shadowOpacity());
         int shadowColor = Color.argb(shadowAlpha, 0, 0, 0);
-        key.setOutlineAmbientShadowColor(shadowColor);
-        key.setOutlineSpotShadowColor(shadowColor);
-        key.setElevation(target.shadowOpacity() > 0
+        view.setOutlineAmbientShadowColor(shadowColor);
+        view.setOutlineSpotShadowColor(shadowColor);
+        view.setElevation(target.shadowOpacity() > 0
             ? s.pixels(Math.max(1, target.shadowRadius() + target.shadowOffset())) : 0);
     }
 
     /** One of the skin's colours at a fraction of its opacity. */
     static int fade(String color, double opacity) {
         int value = Color.parseColor(color);
-        return Color.argb((int) Math.round(255 * KeyboardGeometry.bounded(opacity, 0, 1)),
-            Color.red(value), Color.green(value), Color.blue(value));
+        return ColorPolicy.withAlpha(value,
+            (float) KeyboardGeometry.bounded(opacity, 0, 1));
     }
 
     /** The outlined badge the keyboard wears while nothing is being composed. */
     GradientDrawable brandPillDrawable() {
-        GradientDrawable pill = new GradientDrawable();
-        pill.setColor(Color.TRANSPARENT);
-        pill.setCornerRadius(s.pixels(14));
-        pill.setStroke(Math.max(1, s.pixels(1)), fade(s.skin.accent(), .45));
-        return pill;
+        return DrawablePolicy.outlined(s.pixels(14), KeyboardGeometry.atLeastOnePixel(s, 1),
+            fade(s.skin.accent(), .45));
     }
 
     GradientDrawable candidateDrawable(int color) {
-        GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(color);
-        drawable.setCornerRadius(s.pixels(6));
+        GradientDrawable drawable = DrawablePolicy.rounded(color, s.pixels(6));
         if (Color.alpha(s.candidateAppearance.border()) > 0)
-            drawable.setStroke(Math.max(1, s.pixels(1)), s.candidateAppearance.border());
+            drawable.setStroke(KeyboardGeometry.atLeastOnePixel(s, 1), s.candidateAppearance.border());
         return drawable;
     }
 
@@ -450,8 +441,7 @@ final class ImeStyler {
             s.preedit.setTextColor(s.brandPillVisible
                 ? color(s.skin.accent()) : s.candidateAppearance.number());
             s.preedit.setTypeface(candidateTypeface());
-            s.preedit.setTextSize(TypedValue.COMPLEX_UNIT_SP,
-                s.brandPillVisible ? 12 : s.candidatePreeditFontSize);
+            KeyboardGeometry.setKeyTextSize(s.preedit, s.brandPillVisible ? 12 : s.candidatePreeditFontSize);
             s.preedit.setBackground(s.brandPillVisible ? brandPillDrawable() : null);
             s.preedit.setPadding(s.pixels(s.brandPillVisible ? 12 : 2), s.pixels(s.brandPillVisible ? 4 : 0),
                 s.pixels(s.brandPillVisible ? 12 : 2), s.pixels(s.brandPillVisible ? 4 : 0));

@@ -167,7 +167,7 @@ public final class SyncMergePolicy {
     public static long skinBudget(long otherDocumentBytes) {
         long overhead = SKINS_KEY.length() + 8L;
         long room = DOCUMENT_LIMIT_BYTES - Math.max(0L, otherDocumentBytes) - overhead;
-        return Math.max(0L, Math.min(SKIN_FIELD_LIMIT, room));
+        return BoundsPolicy.bounded(room, 0L, SKIN_FIELD_LIMIT);
     }
 
     /** 放不下全部设计时只留最近的：按更新时间从新到旧排，导出时按这个顺序装到预算为止。 */

@@ -123,7 +123,10 @@ public final class KeyboardFragment extends HomeTabFragment {
                     preparation.setVisibility(View.VISIBLE);
                 }
                 case FAILED -> {
-                    preparation.setText(R.string.preparation_failed);
+                    String reason = FirstRunPreparation.failure();
+                    // 原因直接写在提示里：出问题的多是别人手里的手机，没法让用户连电脑看 logcat。
+                    if (reason.isEmpty()) preparation.setText(R.string.preparation_failed);
+                    else preparation.setText(getString(R.string.preparation_failed_reason, reason));
                     preparation.setClickable(true);
                     preparation.setVisibility(View.VISIBLE);
                 }
@@ -338,9 +341,7 @@ public final class KeyboardFragment extends HomeTabFragment {
     private void check(View view, int rowId, int markId, int actionId, @StringRes int label,
             boolean done, Runnable action) {
         TextView mark = view.findViewById(markId);
-        GradientDrawable disc = new GradientDrawable();
-        disc.setShape(GradientDrawable.OVAL);
-        disc.setColor(done ? Ui.accent(requireContext()) : Ui.color(requireContext(), R.attr.msWarn));
+        GradientDrawable disc = Ui.circle(done ? Ui.accent(requireContext()) : Ui.color(requireContext(), R.attr.msWarn));
         mark.setBackground(disc);
         mark.setText(done ? "✓" : "!");
         mark.setTextColor(done ? Ui.onAccent(requireContext()) : 0xFFFFFFFF);

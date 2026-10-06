@@ -105,7 +105,7 @@ public final class SegmentedControl extends LinearLayout {
             TextView segment = segments.get(i);
             boolean on = i == index;
             Ui.style(segment, Ui.TEXT_SEGMENT, on ? 500 : 400, on ? accent : sub);
-            segment.setBackground(Ui.rippleOn(context, on ? Ui.accentSoft(context) : Color.TRANSPARENT, 9999f));
+            segment.setBackground(Ui.pillRipple(context, on ? Ui.accentSoft(context) : Color.TRANSPARENT));
             segment.setSelected(on);
         }
         if (fromUser && changed && listener != null) listener.accept(index);

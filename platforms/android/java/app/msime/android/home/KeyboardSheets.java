@@ -243,7 +243,7 @@ final class KeyboardSheets {
         button.setGravity(Gravity.CENTER);
         button.setSingleLine(true);
         Ui.style(button, Ui.TEXT_BUTTON_SMALL, 500, enabled ? Ui.accent(context) : Ui.subText(context));
-        if (enabled) button.setBackground(Ui.rippleOn(context, Ui.accentSoft(context), 9999f));
+        if (enabled) button.setBackground(Ui.pillRipple(context, Ui.accentSoft(context)));
         button.setPadding(Ui.dp(context, 14), Ui.dp(context, 5), Ui.dp(context, 14), Ui.dp(context, 5));
         button.setMinHeight(Ui.dp(context, 32));
         button.setEnabled(enabled);

@@ -37,7 +37,7 @@ public final class EnglishSuggestionPolicy {
         String word = candidate;
         if (startedCapitalized) {
             int first = word.codePointAt(0);
-            word = new StringBuilder().appendCodePoint(Character.toUpperCase(first))
+            word = new StringBuilder(word.length()).appendCodePoint(Character.toUpperCase(first))
                 .append(word.substring(Character.charCount(first))).toString();
         }
         return word.equals(typed) ? null : new Replacement(typed.length(), word);

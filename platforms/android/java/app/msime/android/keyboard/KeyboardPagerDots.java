@@ -7,6 +7,7 @@ import android.graphics.Paint;
 import android.graphics.RectF;
 import android.view.View;
 import app.msime.android.KeyboardGeometry;
+import app.msime.android.BoundsPolicy;
 
 /**
  * 分页面板下方的页点：6 dp 高，当前页 16 dp 宽 accent，其余 6 dp 宽 kbHair，间距 6 dp，切页时宽度与颜色用 200 ms 过渡。
@@ -45,10 +46,10 @@ public final class KeyboardPagerDots extends View {
     }
 
     public void setCount(int value) {
-        int next = Math.max(0, value);
+        int next = BoundsPolicy.nonNegative(value);
         if (count == next) return;
         count = next;
-        active = Math.min(active, Math.max(0, count - 1));
+        active = KeyboardGeometry.bounded(active, 0, BoundsPolicy.nonNegative(count - 1));
         previous = active;
         progress = 1f;
         setVisibility(count > 1 ? VISIBLE : GONE);
@@ -61,7 +62,7 @@ public final class KeyboardPagerDots extends View {
     public int active() { return active; }
 
     public void setActive(int value, boolean animate) {
-        int next = Math.max(0, Math.min(value, Math.max(0, count - 1)));
+        int next = KeyboardGeometry.bounded(value, 0, BoundsPolicy.nonNegative(count - 1));
         if (next == active) return;
         previous = active;
         active = next;
@@ -107,19 +108,12 @@ public final class KeyboardPagerDots extends View {
         for (int index = 0; index < count; index++) {
             float weight = index == active ? progress : index == previous ? 1f - progress : 0f;
             float width = dot + (wide - dot) * weight;
-            paint.setColor(blend(inactiveColor, activeColor, weight));
+            paint.setColor(ColorPolicy.blend(inactiveColor, activeColor,
+                KeyboardGeometry.bounded(weight, 0f, 1f)));
             rect.set(x, top, x + width, top + dot);
             canvas.drawRoundRect(rect, dot / 2f, dot / 2f, paint);
             x += width + gap;
         }
     }
 
-    private static int blend(int from, int to, float amount) {
-        float t = Math.max(0f, Math.min(1f, amount));
-        int a = Math.round(((from >>> 24) & 0xFF) + (((to >>> 24) & 0xFF) - ((from >>> 24) & 0xFF)) * t);
-        int r = Math.round(((from >> 16) & 0xFF) + (((to >> 16) & 0xFF) - ((from >> 16) & 0xFF)) * t);
-        int g = Math.round(((from >> 8) & 0xFF) + (((to >> 8) & 0xFF) - ((from >> 8) & 0xFF)) * t);
-        int b = Math.round((from & 0xFF) + ((to & 0xFF) - (from & 0xFF)) * t);
-        return (a << 24) | (r << 16) | (g << 8) | b;
-    }
 }

@@ -54,13 +54,14 @@ public final class KeyboardSchemeCard extends FrameLayout {
         glyph.setText(glyphText);
         glyph.setGravity(Gravity.CENTER);
         // "EN" is two characters wide in a box sized for one, so it takes the smaller face.
-        glyph.setTextSize(TypedValue.COMPLEX_UNIT_SP, glyphText.length() > 1 ? 15 : 20);
+        // 字形和角标都画在固定 dp 的方框里，字号也按 dp，不随系统字体变化，否则放大后会溢出方框。
+        glyph.setTextSize(TypedValue.COMPLEX_UNIT_DIP, glyphText.length() > 1 ? 15 : 20);
         glyph.setTypeface(glyph.getTypeface(), android.graphics.Typeface.BOLD);
 
         badge = new TextView(context);
         badge.setText(badgeText);
         badge.setGravity(Gravity.CENTER);
-        badge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9);
+        badge.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 9);
         badge.setTypeface(badge.getTypeface(), android.graphics.Typeface.BOLD);
 
         check = new View(context);
@@ -70,7 +71,9 @@ public final class KeyboardSchemeCard extends FrameLayout {
         title.setText(titleText);
         title.setGravity(Gravity.CENTER);
         title.setMaxLines(1);
-        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        KeyboardGeometry.setKeyTextSize(title, 12);
+        // 卡片格子只有 56 dp，字形区占去 44 dp；去掉字体留白，标题在 1.15 倍字体下仍放得下。
+        title.setIncludeFontPadding(false);
         title.setEllipsize(android.text.TextUtils.TruncateAt.END);
 
         // 字形、角标和对勾挤在一小块里，彼此的位置只跟字形框有关，跟卡片宽度无关；先把它们装进一个
@@ -140,8 +143,8 @@ public final class KeyboardSchemeCard extends FrameLayout {
         badge.setVisibility(View.VISIBLE);
         title.setTypeface(android.graphics.Typeface.DEFAULT);
         // 选中与未选中的差别落在底色和这一档透明度上，不落在色相上。
-        int face = isSelected ? accent : fade(accent, .78f);
-        setBackground(rounded(isSelected ? fade(accent, .12f) : Color.TRANSPARENT,
+        int face = isSelected ? accent : ColorPolicy.withAlpha(accent, .78f);
+        setBackground(rounded(isSelected ? ColorPolicy.withAlpha(accent, .12f) : Color.TRANSPARENT,
             KeyboardGeometry.pixels(getContext(), CARD_RADIUS_DP)));
         glyph.setTextColor(face);
         glyph.setBackground(outlined(face, KeyboardGeometry.pixels(getContext(), GLYPH_RADIUS_DP), KeyboardGeometry.pixels(getContext(), GLYPH_BORDER_DP)));
@@ -190,27 +193,16 @@ public final class KeyboardSchemeCard extends FrameLayout {
     }
 
     private static android.graphics.drawable.Drawable rounded(int color, int radius) {
-        GradientDrawable shape = new GradientDrawable();
-        shape.setShape(GradientDrawable.RECTANGLE);
-        shape.setCornerRadius(radius);
-        shape.setColor(color);
-        return shape;
+        return DrawablePolicy.rounded(color, radius);
     }
 
     private static android.graphics.drawable.Drawable outlined(int color, int radius, int width) {
-        GradientDrawable shape = new GradientDrawable();
-        shape.setShape(GradientDrawable.RECTANGLE);
-        shape.setCornerRadius(radius);
-        shape.setColor(Color.TRANSPARENT);
-        shape.setStroke(Math.max(1, width), color);
-        return shape;
+        return DrawablePolicy.outlined(radius, width, color);
     }
 
     /** A filled disc carrying a tick, sized for the 12dp corner the master puts it in. */
     private android.graphics.drawable.Drawable checkMark(int accent, int keyBackground) {
-        GradientDrawable disc = new GradientDrawable();
-        disc.setShape(GradientDrawable.OVAL);
-        disc.setColor(accent);
+        GradientDrawable disc = DrawablePolicy.circle(accent);
         // The disc sits on the glyph's border, so it carries the panel colour as its own ring.
         disc.setStroke(KeyboardGeometry.atLeastOnePixel(getContext(), 1f), keyBackground);
         return new android.graphics.drawable.LayerDrawable(
@@ -250,8 +242,4 @@ public final class KeyboardSchemeCard extends FrameLayout {
         }
     }
 
-    private static int fade(int color, float alpha) {
-        return Color.argb(Math.round(Color.alpha(color) * alpha),
-            Color.red(color), Color.green(color), Color.blue(color));
-    }
 }

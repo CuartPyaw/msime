@@ -187,6 +187,15 @@ final class KeyboardSkinTests: XCTestCase {
     XCTAssertEqual(KeyboardTheme.designed(design).keyBackground.cgColor.alpha, 0.45, accuracy: 0.001)
   }
 
+  func testPhotoImportRejectsAnOversizedSourceBeforeImageIO() throws {
+    let file = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: file) }
+    try Data(repeating: 0x5A, count: SkinPhotoData.maximumSourceBytes + 1).write(to: file)
+
+    XCTAssertNil(SkinPhotoData.sourceData(at: file))
+  }
+
   private func luminance(_ color: UIColor, style: UIUserInterfaceStyle) -> Double {
     let resolved = color.resolvedColor(with: UITraitCollection(userInterfaceStyle: style))
     var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0

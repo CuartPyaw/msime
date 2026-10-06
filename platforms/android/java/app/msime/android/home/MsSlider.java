@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.KeyboardGeometry;
 import android.content.Context;
 import android.graphics.drawable.ClipDrawable;
 import android.graphics.drawable.Drawable;
@@ -90,7 +91,7 @@ public final class MsSlider extends SeekBar {
     /** 设置当前值，不在区间里时夹到端点，不在步长上时取最近的一格。 */
     public void setValue(int value) {
         int slot = Math.round((value - min) / (float) step);
-        setProgress(Math.max(0, Math.min(getMax(), slot)));
+        setProgress(KeyboardGeometry.bounded(slot, 0, getMax()));
     }
 
     /** 拖动过程中每一格都回调，用来实时刷新数值标签。 */

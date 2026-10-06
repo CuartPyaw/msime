@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.KeyboardGeometry;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
@@ -14,11 +15,12 @@ import android.os.Bundle;
 import android.util.AttributeSet;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import app.msime.android.BoundsPolicy;
 import android.view.View;
 import android.view.animation.LinearInterpolator;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.core.graphics.ColorUtils;
+import app.msime.android.ColorPolicy;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat;
 import androidx.customview.widget.ExploreByTouchHelper;
@@ -57,6 +59,7 @@ public final class BadgeGridView extends View {
     private final RectF box = new RectF();
     private final RectF medalBox = new RectF();
     private final RectF ringBox = new RectF();
+    private final RectF hitBox = new RectF();
     private final LinearGradient[] medalGradients = new LinearGradient[4];
     private final long[] medalGradientKeys = {Long.MIN_VALUE, Long.MIN_VALUE, Long.MIN_VALUE, Long.MIN_VALUE};
     private int cachedAccent;
@@ -175,17 +178,16 @@ public final class BadgeGridView extends View {
     }
 
     private int indexAt(float x, float y) {
-        RectF hit = new RectF();
         for (int index = 0; index < badges.size(); index++) {
-            tile(index, hit);
-            if (hit.contains(x, y)) return index;
+            tile(index, hitBox);
+            if (hitBox.contains(x, y)) return index;
         }
         return -1;
     }
 
     @Override protected void onMeasure(int widthSpec, int heightSpec) {
         int rows = (badges.size() + COLUMNS - 1) / COLUMNS;
-        float height = rows * TILE_HEIGHT + Math.max(0, rows - 1) * GAP;
+        float height = rows * TILE_HEIGHT + BoundsPolicy.nonNegative(rows - 1) * GAP;
         setMeasuredDimension(MeasureSpec.getSize(widthSpec),
             resolveSize(Ui.dp(getContext(), height), heightSpec));
     }
@@ -229,14 +231,14 @@ public final class BadgeGridView extends View {
         if (coloursCached && cachedAccent == accent) return;
         cachedAccent = accent;
         coloursCached = true;
-        streakColours[0] = ColorUtils.blendARGB(Color.BLACK, accent, .82f);
-        streakColours[1] = ColorUtils.blendARGB(Color.WHITE, accent, .8f);
-        skillColours[0] = ColorUtils.blendARGB(0xFF3A6EA5, accent, .7f);
-        skillColours[1] = ColorUtils.blendARGB(Color.WHITE, accent, .55f);
-        funColours[0] = ColorUtils.blendARGB(0xFF7A5BA8, accent, .68f);
-        funColours[1] = ColorUtils.blendARGB(Color.WHITE, accent, .55f);
+        streakColours[0] = ColorPolicy.blend(Color.BLACK, accent, .82f);
+        streakColours[1] = ColorPolicy.blend(Color.WHITE, accent, .8f);
+        skillColours[0] = ColorPolicy.blend(0xFF3A6EA5, accent, .7f);
+        skillColours[1] = ColorPolicy.blend(Color.WHITE, accent, .55f);
+        funColours[0] = ColorPolicy.blend(0xFF7A5BA8, accent, .68f);
+        funColours[1] = ColorPolicy.blend(Color.WHITE, accent, .55f);
         defaultColours[0] = accent;
-        defaultColours[1] = ColorUtils.blendARGB(Color.WHITE, accent, .7f);
+        defaultColours[1] = ColorPolicy.blend(Color.WHITE, accent, .7f);
         java.util.Arrays.fill(medalGradients, null);
         java.util.Arrays.fill(medalGradientKeys, Long.MIN_VALUE);
     }
@@ -275,7 +277,7 @@ public final class BadgeGridView extends View {
                 scale = frame(WIGGLE, wiggle, 2);
             } else if (popStart >= 0) {
                 long local = popStart - POP_DELAY - POP_STAGGER * index;
-                float t = Math.max(0f, Math.min(1f, local / (float) POP_MILLIS));
+                float t = KeyboardGeometry.bounded(local / (float) POP_MILLIS, 0f, 1f);
                 scale = frame(POP, t, 1);
             }
             int[] colours = colours(badge.group());

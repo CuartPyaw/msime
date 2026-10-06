@@ -203,8 +203,8 @@ public final class DictionaryCollectionsStore {
      */
     public static Result<WordPage> words(Context context, String kind, String query, int offset, int limit) {
         try {
-            JSONObject request = action("list").put("kind", kind).put("offset", Math.max(0, offset))
-                .put("limit", Math.max(1, Math.min(1000, limit)));
+            JSONObject request = action("list").put("kind", kind).put("offset", BoundsPolicy.nonNegative(offset))
+                .put("limit", KeyboardGeometry.bounded(limit, 1, 1000));
             if (query != null && !query.isEmpty()) request.put("query", query);
             JSONObject value = dictionary(context, request);
             if (value == null) return Result.failed(failureMessage(""));
@@ -216,7 +216,7 @@ public final class DictionaryCollectionsStore {
 
     /** 整个词库按 `standard`（词、编码、权重，制表符分隔）导出成文本，分页读完再交给调用方写文件。 */
     public static Result<String> export(Context context, String kind) {
-        StringBuilder text = new StringBuilder();
+        StringBuilder text = null;
         int bytes = 0;
         int offset = 0;
         try {
@@ -227,6 +227,7 @@ public final class DictionaryCollectionsStore {
                 String page = value.optString("text", "");
                 int nextBytes = exportBytesAfterPage(bytes, page);
                 if (nextBytes < 0) return Result.failed(failureMessage("collections_too_large"));
+                if (text == null) text = new StringBuilder(Math.max(16, page.length()));
                 text.append(page);
                 bytes = nextBytes;
                 if (!value.optBoolean("has_more", false)) break;
@@ -235,7 +236,7 @@ public final class DictionaryCollectionsStore {
         } catch (JSONException error) {
             return Result.failed(failureMessage(""));
         }
-        return Result.of(text.toString());
+        return Result.of(text == null ? "" : text.toString());
     }
 
     /** 返回追加一页后的 UTF-8 字节数；超出导出上限时返回负数。 */
@@ -303,7 +304,7 @@ public final class DictionaryCollectionsStore {
 
     /** 条数的展示写法，例如 `128,406 条`。 */
     public static String countLabel(long count) {
-        return String.format(Locale.ROOT, "%,d 条", Math.max(0, count));
+        return String.format(Locale.ROOT, "%,d 条", BoundsPolicy.nonNegative(count));
     }
 
     /** 从文件名得到新词库的名字：去掉扩展名（`.dict.yaml` 算一个），截到 32 个字，收不出来时用「导入的词库」。 */

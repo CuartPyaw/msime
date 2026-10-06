@@ -1,5 +1,7 @@
 package app.msime.android;
 
+import app.msime.android.KeyboardGeometry;
+
 import android.provider.Settings;
 import android.view.View;
 import android.view.animation.DecelerateInterpolator;
@@ -17,6 +19,11 @@ public final class KeyboardPressFeedback {
     private static final float PRESSED_TRANSLATION_DP = 1f;
     private static final long PRESS_DURATION_MILLIS = 60L;
     private static final long RELEASE_DURATION_MILLIS = 180L;
+
+    private static final class Interpolators {
+        static final DecelerateInterpolator PRESS = new DecelerateInterpolator();
+        static final OvershootInterpolator RELEASE = new OvershootInterpolator(1.1f);
+    }
 
     private KeyboardPressFeedback() {}
 
@@ -36,11 +43,11 @@ public final class KeyboardPressFeedback {
                     PRESSED_TRANSLATION_DP))
                 .scaleX(PRESSED_SCALE).scaleY(PRESSED_SCALE)
                 .setDuration(PRESS_DURATION_MILLIS)
-                .setInterpolator(new DecelerateInterpolator()).start();
+                .setInterpolator(Interpolators.PRESS).start();
         } else {
             view.animate().translationY(0f).scaleX(1f).scaleY(1f)
                 .setDuration(RELEASE_DURATION_MILLIS)
-                .setInterpolator(new OvershootInterpolator(1.1f)).start();
+                .setInterpolator(Interpolators.RELEASE).start();
         }
     }
 

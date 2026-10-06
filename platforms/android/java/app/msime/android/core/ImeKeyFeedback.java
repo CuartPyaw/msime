@@ -126,7 +126,7 @@ final class ImeKeyFeedback {
 
     /** 0–100 的音量换成 SoundPool 的 0–1。 */
     static float volumeFor(int percent) {
-        return Math.max(0, Math.min(100, percent)) / 100f;
+        return KeyboardGeometry.bounded(percent, 0, 100) / 100f;
     }
 
     private void refreshPreferences() {
