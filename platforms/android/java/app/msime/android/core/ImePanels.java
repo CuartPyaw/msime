@@ -482,7 +482,7 @@ final class ImePanels {
     /** 分页网格加下方页点：皮肤面板与输入方式面板共用。 */
     private void addPagedGrid(LinearLayout parent, PagedTileGrid grid, int initialPage) {
         parent.addView(grid, KeyboardGeometry.matchWidthWrapParams());
-        parent.addView(new View(s), new LinearLayout.LayoutParams(0, 0, 1));
+        parent.addView(new View(s), KeyboardGeometry.weightedZeroParams(1));
         KeyboardPagerDots dots = new KeyboardPagerDots(s);
         dots.setTag(PAGER_DOTS_TAG);
         dots.setCount(grid.pageCount());
@@ -527,7 +527,7 @@ final class ImePanels {
         s.replyPolishModeButton = replySegment("帮润色", "帮润色模式", ReplyKeyboardModel.Mode.POLISH);
         s.replyHeader.addView(s.replyModeControl, new LinearLayout.LayoutParams(
             s.pixels(200), LinearLayout.LayoutParams.MATCH_PARENT));
-        s.replyHeader.addView(new View(s), new LinearLayout.LayoutParams(0, 1, 1));
+        s.replyHeader.addView(new View(s), KeyboardGeometry.weightedHeightPxParams(1, 1));
         s.replyTemplateButton = s.shortcutButton(s.replyHeader, "模板",
             KeyboardShortcutIconPolicy.Icon.BOOKMARK, this::showReplyTemplates);
         s.replyTemplateButton.setContentDescription("回复模板");
@@ -1202,7 +1202,7 @@ final class ImePanels {
             addClipboardTab(header, CloudClipboardPanelPolicy.TAB_LOCAL, CloudClipboardPanelPolicy.Tab.LOCAL);
             addClipboardTab(header, CloudClipboardPanelPolicy.TAB_CLOUD, CloudClipboardPanelPolicy.Tab.CLOUD);
         }
-        header.addView(new View(s), new LinearLayout.LayoutParams(0, 0, 1));
+        header.addView(new View(s), KeyboardGeometry.weightedZeroParams(1));
         if (cloud) {
             Button refresh = clipboardAction(header, "刷新", this::refreshCloudClipboard);
             refresh.setEnabled(s.cloudClipboardStatus != CloudClipboardPanelPolicy.Status.LOADING);
