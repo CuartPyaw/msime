@@ -72,7 +72,9 @@ public final class SyncMergePolicy {
      * @param other 另一方（云端），只补上 `preferred` 里没有的
      */
     public static List<Phrase> mergePhrases(List<Phrase> preferred, List<Phrase> other) {
-        LinkedHashMap<String, Phrase> byId = new LinkedHashMap<>(preferred.size() + other.size());
+        int capacity = Math.min(MAX_PHRASES,
+            Math.min(MAX_PHRASES, preferred.size()) + Math.min(MAX_PHRASES, other.size()));
+        LinkedHashMap<String, Phrase> byId = new LinkedHashMap<>(capacity);
         for (Phrase phrase : preferred) if (usable(phrase)) byId.putIfAbsent(phrase.id(), phrase);
         for (Phrase phrase : other) if (usable(phrase)) byId.putIfAbsent(phrase.id(), phrase);
         return normalized(new ArrayList<>(byId.values()));
