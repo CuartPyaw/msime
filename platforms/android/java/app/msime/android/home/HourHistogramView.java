@@ -8,6 +8,7 @@ import android.util.AttributeSet;
 import android.view.View;
 import androidx.annotation.Nullable;
 import app.msime.android.R;
+import app.msime.android.ListPolicy;
 import app.msime.android.TypingStatisticsSummary;
 import app.msime.android.TypingStatisticsSummary.PeakWindow;
 import java.util.List;
@@ -44,7 +45,7 @@ public final class HourHistogramView extends View {
      * @param window 高峰时段，可空；为空时没有柱子高亮
      */
     public void setHours(List<Long> values, @Nullable PeakWindow window, @Nullable String spokenPeak) {
-        hours = values == null ? List.of() : List.copyOf(values);
+        hours = ListPolicy.copyOrEmpty(values);
         peak = window;
         String hoursLabel = TypingStatisticsSummary.HOURS_PER_DAY + " 小时输入分布";
         setContentDescription(spokenPeak == null ? hoursLabel + "，近 7 天还没有记录"
