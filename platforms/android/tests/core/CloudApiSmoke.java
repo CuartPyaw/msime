@@ -16,6 +16,13 @@ public final class CloudApiSmoke {
             "cloud clipboard booleans must reject strings instead of coercing them");
         check(strictBoolean.invoke(null, 1) == null,
             "cloud clipboard booleans must reject numbers instead of coercing them");
+        java.lang.reflect.Method strictString = CloudClipboardApi.class.getDeclaredMethod(
+            "strictString", Object.class);
+        strictString.setAccessible(true);
+        check("synthetic".equals(strictString.invoke(null, "synthetic")),
+            "cloud clipboard strings accept JSON strings");
+        check(strictString.invoke(null, 7) == null,
+            "cloud clipboard strings must reject numbers instead of coercing them");
         // multipart 按 RFC 7578 编码，行尾 CRLF，文件段带 filename，结尾 `--boundary--`。
         byte[] encoded = CloudApi.encodeMultipart("b0und", List.of(
             CloudApi.Part.json("payload", "{\"type\":\"bug\"}"),

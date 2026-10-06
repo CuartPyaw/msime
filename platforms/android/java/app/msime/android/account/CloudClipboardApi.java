@@ -62,14 +62,18 @@ public final class CloudClipboardApi {
             List<Item> items = new ArrayList<>(values.length());
             for (int index = 0; index < values.length(); index++) {
                 JSONObject value = values.getJSONObject(index);
-                String id = value.optString("id", "");
-                String text = value.optString("text", "");
-                String updated = value.optString("updated_at", "");
-                String device = value.optString("device", "");
+                String id = strictString(value.opt("id"));
+                String text = strictString(value.opt("text"));
+                String updated = strictString(value.opt("updated_at"));
+                Object rawDevice = value.opt("device");
+                String device = rawDevice == null || rawDevice == JSONObject.NULL
+                    ? "" : strictString(rawDevice);
                 Object rawPinned = value.opt("pinned");
                 Boolean pinned = rawPinned == null || rawPinned == JSONObject.NULL
                     ? Boolean.FALSE : strictBoolean(rawPinned);
-                if (pinned == null) throw invalid();
+                if (pinned == null || id == null || text == null || updated == null || device == null) {
+                    throw invalid();
+                }
                 if (!validId(id) || !CloudClipboardTextPolicy.valid(text) || updated.isEmpty()
                         || TextPolicy.utf8Length(updated) > 128 || TextPolicy.hasControl(updated)) throw invalid();
                 if (TextPolicy.utf8Length(device) > 128 || TextPolicy.hasControl(device)) device = "";
@@ -120,5 +124,10 @@ public final class CloudClipboardApi {
     /** org.json's optBoolean accepts string values; server response fields must keep their JSON type. */
     static Boolean strictBoolean(Object value) {
         return value instanceof Boolean ? (Boolean) value : null;
+    }
+
+    /** org.json's optString coerces numbers and booleans; response text fields must stay strings. */
+    static String strictString(Object value) {
+        return value instanceof String ? (String) value : null;
     }
 }
