@@ -221,7 +221,7 @@ final class KeyboardSheets {
         if (glyph != null) {
             TextView icon = Ui.styledLabel(context, glyph, 22, 400, Ui.accent(context));
             ViewPolicy.setCentered(icon);
-            icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            Ui.hideFromAccessibility(icon);
             LinearLayout.LayoutParams iconParams = Ui.squareParams(context, iconSize);
             iconParams.setMarginEnd(Ui.dp(context, iconMarginEnd));
             row.addView(icon, iconParams);
@@ -336,7 +336,7 @@ final class KeyboardSheets {
         ImageView glyph = new ImageView(context);
         glyph.setImageResource(icon);
         Ui.setImageTint(glyph, Ui.subText(context));
-        glyph.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        Ui.hideFromAccessibility(glyph);
         LinearLayout.LayoutParams glyphParams = Ui.squareParams(context, 22);
         glyphParams.setMarginEnd(Ui.dp(context, 18));
         row.addView(glyph, glyphParams);
