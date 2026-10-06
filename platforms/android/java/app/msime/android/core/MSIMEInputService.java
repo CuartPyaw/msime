@@ -2008,7 +2008,7 @@ public final class MSIMEInputService extends InputMethodService {
 
     private Button makeEnglishSuggestionButton(int slot) {
         Button button = new KeyboardPressButton(this);
-        button.setAllCaps(false);
+        ViewPolicy.setAllCapsFalse(button);
         button.setOnClickListener(ignored -> {
             imeKeyFeedback.playFeedback(button);
             useEnglishSuggestion(slot, button);
@@ -3359,7 +3359,7 @@ public final class MSIMEInputService extends InputMethodService {
     Button button(LinearLayout row, String label, Runnable action) {
         Button button = new KeyboardPressButton(this);
         KeyboardGeometry.setKeyTextSize(button, KeyboardGeometry.DEFAULT_KEY_TEXT_SP);
-        button.setAllCaps(false);
+        ViewPolicy.setAllCapsFalse(button);
         button.setText(label);
         imeStyler.styleButton(button, true);
         button.setOnClickListener(ignored -> {
@@ -3380,7 +3380,7 @@ public final class MSIMEInputService extends InputMethodService {
     Button shortcutButton(LinearLayout row, String label,
             KeyboardShortcutIconPolicy.Icon icon, Runnable action) {
         KeyboardShortcutButton button = new KeyboardShortcutButton(this, icon);
-        button.setAllCaps(false);
+        ViewPolicy.setAllCapsFalse(button);
         button.setText(label);
         imeStyler.styleButton(button, true);
         button.setOnClickListener(ignored -> {
@@ -3395,7 +3395,7 @@ public final class MSIMEInputService extends InputMethodService {
     private Button brandButton(LinearLayout row, Runnable action) {
         KeyboardBrandButton button = new KeyboardBrandButton(this,
             () -> Color.parseColor(skin.accent()));
-        button.setAllCaps(false);
+        ViewPolicy.setAllCapsFalse(button);
         button.setText("更多");
         imeStyler.styleButton(button, true);
         button.setOnClickListener(ignored -> {
@@ -3410,7 +3410,7 @@ public final class MSIMEInputService extends InputMethodService {
     private Button pillButton(LinearLayout row, String label, Runnable action) {
         KeyboardPressButton button = new KeyboardPressButton(this);
         button.setKeyboardRole(KeyboardKeyRole.PILL);
-        button.setAllCaps(false);
+        ViewPolicy.setAllCapsFalse(button);
         button.setText(label);
         KeyboardGeometry.setKeyTextSize(button, 13);
         imeStyler.styleButton(button, KeyboardKeyRole.PILL, skin);
@@ -3424,7 +3424,7 @@ public final class MSIMEInputService extends InputMethodService {
 
     Button borderlessButton(LinearLayout row, String label, Runnable action) {
         Button button = new KeyboardBorderlessButton(this);
-        button.setAllCaps(false);
+        ViewPolicy.setAllCapsFalse(button);
         button.setText(label);
         imeStyler.styleButton(button, true);
         button.setOnClickListener(ignored -> {
@@ -3439,7 +3439,7 @@ public final class MSIMEInputService extends InputMethodService {
         Button button = new KeyboardPressButton(this);
         KeyboardGeometry.normalizeKeyCap(button);
         KeyboardGeometry.setKeyTextSize(button, KeyboardGeometry.DEFAULT_KEY_TEXT_SP);
-        button.setAllCaps(false);
+        ViewPolicy.setAllCapsFalse(button);
         button.setText(label);
         button.setContentDescription("按键 " + description);
         imeStyler.styleButton(button, false);

@@ -73,7 +73,7 @@ final class ImePanels {
     void addEmojiTab(EmojiCatalogModel.Category entry, int category) {
         KeyboardPressButton tab = new KeyboardPressButton(s);
         tab.setKeyboardRole(KeyboardKeyRole.PLAIN);
-        tab.setAllCaps(false);
+        ViewPolicy.setAllCapsFalse(tab);
         tab.setText(entry.icon());
         KeyboardGeometry.setKeyTextSize(tab, 17);
         ViewPolicy.clearPadding(tab);
@@ -1261,7 +1261,7 @@ final class ImePanels {
     private Button clipboardCard(String text, String meta, Runnable action) {
         KeyboardPressButton card = new KeyboardPressButton(s);
         card.setKeyboardRole(KeyboardKeyRole.KEY);
-        card.setAllCaps(false);
+        ViewPolicy.setAllCapsFalse(card);
         android.text.SpannableStringBuilder label = new android.text.SpannableStringBuilder(text);
         if (!meta.isEmpty()) {
             label.append('\n');
@@ -1398,7 +1398,7 @@ final class ImePanels {
             // 空的时候给一条去处：直接打开应用的常用语页去添加，而不是让人自己退出键盘去找。
             KeyboardPressButton add = new KeyboardPressButton(s);
             add.setKeyboardRole(KeyboardKeyRole.RETURN);
-            add.setAllCaps(false);
+            ViewPolicy.setAllCapsFalse(add);
             add.setText("添加常用语");
             KeyboardGeometry.setKeyTextSize(add, 15);
             ViewPolicy.setMinimumHeight(add, s.pixels(44));
@@ -1419,7 +1419,7 @@ final class ImePanels {
         for (String phrase : phrases) {
             KeyboardPressButton row = new KeyboardPressButton(s);
             row.setKeyboardRole(KeyboardKeyRole.PLAIN);
-            row.setAllCaps(false);
+            ViewPolicy.setAllCapsFalse(row);
             row.setText(phrase);
             KeyboardGeometry.setKeyTextSize(row, 15);
             row.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
@@ -1472,7 +1472,7 @@ final class ImePanels {
         s.symbolPanel = new SymbolPanelView(s,
             (title, description, action, actionStyle) -> {
                 Button button = new KeyboardPressButton(s);
-                button.setAllCaps(false);
+                ViewPolicy.setAllCapsFalse(button);
                 button.setText(title);
                 button.setContentDescription(actionStyle ? description : "按键 " + description);
                 s.imeStyler.styleButton(button, actionStyle);
