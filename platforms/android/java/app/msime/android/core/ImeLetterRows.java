@@ -81,8 +81,7 @@ final class ImeLetterRows {
         if (keyPreviewLayer == null) return null;
         if (keyPreview == null || keyPreview.getParent() != keyPreviewLayer) {
             keyPreview = new KeyboardKeyPreview(s);
-            keyPreviewLayer.addView(keyPreview, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT));
+            keyPreviewLayer.addView(keyPreview, KeyboardGeometry.frameWrapParams());
         }
         return keyPreview;
     }
