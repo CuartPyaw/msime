@@ -1,7 +1,9 @@
 package app.msime.android;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -72,6 +74,16 @@ public final class SyncApiSmoke {
             throw new AssertionError("over the limit must fail");
         } catch (IOException expected) {
             check(sink.size() == 4, "nothing past the limit is written");
+        }
+
+        // 合并路径也必须拒绝超长 NDJSON 行，不能先用 readLine 把整行分配进内存。
+        try {
+            SyncApi.readSnapshotLine(new BufferedReader(
+                new StringReader("x".repeat(70_000) + "\n")));
+            throw new AssertionError("oversized snapshot line must be refused");
+        } catch (IOException expected) {
+            check("snapshot line too large".equals(expected.getMessage()),
+                "oversized snapshot line is bounded");
         }
         System.out.println("Android sync API passed");
     }
