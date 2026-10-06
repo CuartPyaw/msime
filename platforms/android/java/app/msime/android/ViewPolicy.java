@@ -5,6 +5,7 @@ import android.view.View;
 import android.util.TypedValue;
 import android.text.TextUtils;
 import android.widget.Button;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 /** Shared view configuration for host controls whose widget defaults need resetting. */
@@ -96,7 +97,7 @@ public final class ViewPolicy {
     }
 
     /** Center a view's content along the horizontal axis. */
-    public static void setCenteredHorizontally(View view) {
+    public static void setCenteredHorizontally(LinearLayout view) {
         view.setGravity(Gravity.CENTER_HORIZONTAL);
     }
 
