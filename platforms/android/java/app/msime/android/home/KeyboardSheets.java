@@ -330,10 +330,7 @@ final class KeyboardSheets {
             subtitle == null ? Ui.COMPACT_ROW_MIN_HEIGHT : Ui.ROW_MIN_HEIGHT);
         Ui.setRowPadding(row, context);
 
-        ImageView glyph = new ImageView(context);
-        glyph.setImageResource(icon);
-        Ui.setImageTint(glyph, Ui.subText(context));
-        Ui.hideFromAccessibility(glyph);
+        ImageView glyph = Ui.decorativeIcon(context, icon, Ui.subText(context));
         LinearLayout.LayoutParams glyphParams = Ui.squareParams(context, 22);
         glyphParams.setMarginEnd(Ui.dp(context, 18));
         row.addView(glyph, glyphParams);

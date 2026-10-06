@@ -426,9 +426,7 @@ public final class OnboardingActivity extends AppCompatActivity {
     /** Glyph, kicker, title and body: the design's 48dp glyph box, 13sp accent kicker, 32sp regular title and 16sp body, 14dp apart. */
     private void header(LinearLayout column, @DrawableRes int icon, String kicker, String title,
             String body) {
-        ImageView glyph = new ImageView(this);
-        glyph.setImageResource(icon);
-        Ui.setImageTint(glyph, Ui.accent(this));
+        ImageView glyph = Ui.decorativeIcon(this, icon, Ui.accent(this));
         glyph.setScaleType(ImageView.ScaleType.FIT_START);
         Ui.hideFromAccessibility(glyph);
         column.addView(glyph, Ui.squareParams(this, 36));
@@ -539,9 +537,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         ViewPolicy.setCenteredVertically(row);
         Ui.setSymmetricPaddingDp(row, this, 14, 12);
         row.setBackground(Ui.rounded(Ui.card(this), Ui.dp(this, 20)));
-        ImageView badge = new ImageView(this);
-        badge.setImageResource(icon);
-        Ui.setImageTint(badge, Ui.accent(this));
+        ImageView badge = Ui.decorativeIcon(this, icon, Ui.accent(this));
         Ui.setSymmetricPaddingDp(badge, this, 7, 7);
         badge.setBackground(Ui.rounded(Ui.accentSoft(this), Ui.dp(this, 9)));
         Ui.hideFromAccessibility(badge);
