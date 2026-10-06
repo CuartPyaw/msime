@@ -149,13 +149,11 @@ public final class KeyboardOptionsPage extends DetailPage {
     /** 工具栏预览：用当前皮肤的底色和图标色，按开关列出会出现的按钮；隐藏时说明只剩候选条。 */
     private static View toolbarPreview(Context context, JSONObject toolbar, AndroidLocalSettings.Snapshot settings,
                                        KeyboardSkin skin) {
-        LinearLayout strip = new LinearLayout(context);
-        strip.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout strip = Ui.row(context);
         ViewPolicy.setCenteredVertically(strip);
         int pad = Ui.dp(context, 12);
         Ui.setSymmetricPaddingPx(strip, pad);
-        LinearLayout plate = new LinearLayout(context);
-        plate.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout plate = Ui.row(context);
         ViewPolicy.setCenteredVertically(plate);
         Ui.setHorizontalPaddingDp(plate, context, 10);
         plate.setBackground(Ui.rounded(Ui.parseColor(skin.background(), Ui.page(context)), Ui.dp(context, 12)));

@@ -129,8 +129,7 @@ public final class SkinsPage extends DetailPage {
         holder.setClipToOutline(false);
         Context context = target.getContext();
         for (int start = 0; start < cards.size(); start += 2) {
-            LinearLayout row = new LinearLayout(context);
-            row.setOrientation(LinearLayout.HORIZONTAL);
+            LinearLayout row = Ui.row(context);
             row.setBaselineAligned(false);
             for (int slot = 0; slot < 2; slot++) {
                 int index = start + slot;
