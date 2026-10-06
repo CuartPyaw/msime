@@ -32,6 +32,7 @@ import app.msime.android.BitmapPolicy;
 import app.msime.android.FeedbackApi;
 import app.msime.android.FeedbackImagePolicy;
 import app.msime.android.R;
+import app.msime.android.ViewPolicy;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -112,7 +113,7 @@ public final class FeedbackPage extends DetailPage {
 
         LinearLayout add = new LinearLayout(context);
         add.setOrientation(LinearLayout.HORIZONTAL);
-        add.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(add);
         Ui.setPaddingDp(add, requireContext(), 16, 12, 16, 14);
         add.setContentDescription("添加截图，最多 " + FeedbackApi.MAX_SCREENSHOTS + " 张");
         ImageView icon = new ImageView(context);
