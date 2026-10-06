@@ -236,6 +236,12 @@ public final class KeyboardGeometry {
         view.setPadding(horizontal, vertical, horizontal, vertical);
     }
 
+    /** Apply equal horizontal dp padding with no vertical padding. */
+    public static void setHorizontalPaddingDp(View view, Context context, float horizontalDp) {
+        int horizontal = pixels(context, horizontalDp);
+        view.setPadding(horizontal, 0, horizontal, 0);
+    }
+
     /** Convert a fractional density-independent size to pixels without rounding. */
     public static float floatPixels(double dp, float density) {
         return (float) dp * density;

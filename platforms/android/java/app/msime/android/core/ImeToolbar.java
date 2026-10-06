@@ -148,7 +148,7 @@ final class ImeToolbar {
             s.imeKeyFeedback.playFeedback(s.hanjaButton);
             s.command(KoreanInputPolicy.CONVERT_HANJA_COMMAND);
         });
-        s.hanjaButton.setPadding(s.pixels(8), 0, s.pixels(8), 0);
+        KeyboardGeometry.setHorizontalPaddingDp(s.hanjaButton, s, 8);
         s.hanjaButton.setMinHeight(0);
         s.hanjaButton.setMinimumHeight(0);
         candidateHeader.addView(s.hanjaButton, new LinearLayout.LayoutParams(
