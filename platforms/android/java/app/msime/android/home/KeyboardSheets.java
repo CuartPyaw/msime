@@ -210,7 +210,7 @@ final class KeyboardSheets {
         icon.setGravity(Gravity.CENTER);
         Ui.style(icon, 22, 400, Ui.accent(context));
         icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(Ui.dp(context, 32), Ui.dp(context, 32));
+        LinearLayout.LayoutParams iconParams = Ui.squareParams(context, 32);
         iconParams.setMarginEnd(Ui.dp(context, Ui.ROW_GAP));
         row.addView(icon, iconParams);
         TextView label = new TextView(context);

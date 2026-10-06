@@ -255,7 +255,7 @@ public final class ProfilePage extends DetailPage {
         avatar.setFocusable(true);
         avatar.setContentDescription("更换头像");
         avatar.setOnClickListener(ignored -> chooseAvatar());
-        header.addView(avatar, new LinearLayout.LayoutParams(Ui.dp(context, 92), Ui.dp(context, 92)));
+        header.addView(avatar, Ui.squareParams(context, 92));
 
         TextView name = new TextView(context);
         name.setText(profile.displayName());

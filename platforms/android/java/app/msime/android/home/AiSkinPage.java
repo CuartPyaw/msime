@@ -308,7 +308,7 @@ public final class AiSkinPage extends DetailPage {
         overlay.setGravity(Gravity.CENTER);
         ProgressBar spinner = new ProgressBar(context);
         spinner.setIndeterminateTintList(ColorStateList.valueOf(Ui.accent(context)));
-        overlay.addView(spinner, new LinearLayout.LayoutParams(Ui.dp(context, 32), Ui.dp(context, 32)));
+        overlay.addView(spinner, Ui.squareParams(context, 32));
         TextView designing = new TextView(context);
         designing.setText("正在设计…");
         Ui.style(designing, 14, 500, Ui.text(context));
@@ -506,7 +506,7 @@ public final class AiSkinPage extends DetailPage {
                         Ui.parseColor(colour, Color.GRAY), 9999f,
                         Ui.atLeastOnePx(context, 1), Ui.hairline(context));
                     dot.setBackground(shape);
-                    LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(Ui.dp(context, 16), Ui.dp(context, 16));
+                    LinearLayout.LayoutParams params = Ui.squareParams(context, 16);
                     params.setMarginEnd(Ui.dp(context, 6));
                     dots.addView(dot, params);
                 }

@@ -122,7 +122,7 @@ public final class FeedbackPage extends DetailPage {
         ImageView icon = new ImageView(context);
         icon.setImageResource(R.drawable.ms_w4_me2_image);
         Ui.setImageTint(icon, Ui.accent(context));
-        add.addView(icon, new LinearLayout.LayoutParams(Ui.dp(requireContext(), 20), Ui.dp(requireContext(), 20)));
+        add.addView(icon, Ui.squareParams(requireContext(), 20));
         TextView label = new TextView(context);
         label.setText("添加截图");
         Ui.style(label, Ui.TEXT_ROW_TITLE, 400, Ui.accent(context));

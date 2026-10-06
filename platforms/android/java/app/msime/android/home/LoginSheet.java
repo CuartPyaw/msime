@@ -122,7 +122,7 @@ final class LoginSheet {
         close.setBackground(Ui.ripple(activity));
         close.setContentDescription("关闭");
         close.setOnClickListener(ignored -> dialog.cancel());
-        header.addView(close, new LinearLayout.LayoutParams(Ui.dp(activity, 40), Ui.dp(activity, 40)));
+        header.addView(close, Ui.squareParams(activity, 40));
         root.addView(header);
 
         TextView subtitle = new TextView(activity);
@@ -339,7 +339,7 @@ final class LoginSheet {
             ImageView glyph = new ImageView(activity);
             glyph.setImageDrawable(icon);
             glyph.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(Ui.dp(activity, 20), Ui.dp(activity, 20));
+            LinearLayout.LayoutParams params = Ui.squareParams(activity, 20);
             params.setMarginEnd(Ui.dp(activity, 8));
             button.addView(glyph, params);
         }

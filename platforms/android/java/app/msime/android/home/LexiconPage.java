@@ -235,7 +235,7 @@ public final class LexiconPage extends DetailPage {
         icon.setGravity(Gravity.CENTER);
         Ui.style(icon, 22, 400, Ui.accent(context));
         icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        row.addView(icon, new LinearLayout.LayoutParams(Ui.dp(context, 28), Ui.dp(context, 28)));
+        row.addView(icon, Ui.squareParams(context, 28));
         TextView label = new TextView(context);
         label.setText(title);
         Ui.style(label, Ui.TEXT_ROW_TITLE, 400, Ui.accent(context));
@@ -300,7 +300,7 @@ public final class LexiconPage extends DetailPage {
         Ui.style(badge, 15, 600, Ui.accent(context));
         badge.setBackground(Ui.rounded(Ui.accentSoft(context), Ui.dp(context, 8)));
         badge.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(Ui.dp(context, 32), Ui.dp(context, 32));
+        LinearLayout.LayoutParams params = Ui.squareParams(context, 32);
         params.setMarginEnd(Ui.dp(context, Ui.ROW_GAP));
         badge.setLayoutParams(params);
         return badge;
