@@ -15,6 +15,10 @@ public final class SkinJobsApiSmoke {
         } catch (ReflectiveOperationException error) {
             throw new AssertionError("skin jobs response policy missing", error);
         }
+        check(SkinJobsApi.strictArtworkDimension(512L) == 512,
+            "artwork dimensions accept JSON integers");
+        check(SkinJobsApi.strictArtworkDimension(1.5d) == null,
+            "artwork dimensions reject fractional JSON numbers");
         CloudApi.Failure quota = new CloudApi.Failure(429, "rate_limit_exceeded", "", 7200);
         check(SkinJobsApi.quotaExhausted(quota), "429 is the daily quota");
         check(SkinJobsApi.message(quota).startsWith("今天的生成次数已用完"), "quota wording");
