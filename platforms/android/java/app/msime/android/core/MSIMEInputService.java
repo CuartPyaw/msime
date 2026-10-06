@@ -4503,13 +4503,11 @@ public final class MSIMEInputService extends InputMethodService {
             voiceResultPanel.addView(hint);
             Button insert = button(voiceResultPanel, "插入语音结果", this::insertVoiceResult);
             insert.setContentDescription("插入并清除语音结果");
-            insert.setLayoutParams(new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            insert.setLayoutParams(KeyboardGeometry.matchWidthWrapParams());
         }
         Button recognize = button(voiceResultPanel, "开始语音识别",
             this::startVoiceRecognition);
-        recognize.setLayoutParams(new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        recognize.setLayoutParams(KeyboardGeometry.matchWidthWrapParams());
         VoiceConfiguration configured = VoiceConfiguration.read(preferencesDirectory, "ime-preview");
         boolean platformRecognizerAvailable = VoiceRecognitionActivity.available(this);
         recognize.setEnabled(voiceInputEnabled
@@ -5821,8 +5819,7 @@ public final class MSIMEInputService extends InputMethodService {
         KeyboardGeometry.setKeyTextSize(diagnosticView, 12);
         diagnosticView.setContentDescription("输入提示");
         diagnosticView.setVisibility(View.GONE);
-        candidateRegion.addView(diagnosticView, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        candidateRegion.addView(diagnosticView, KeyboardGeometry.matchWidthWrapParams());
         candidateRegion.addView(shortcutScroll, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             pixels(KeyboardGeometry.DESIGN_TOOLBAR_ROW_HEIGHT_DP)));
@@ -6142,8 +6139,7 @@ public final class MSIMEInputService extends InputMethodService {
         aiPolishActions = new LinearLayout(this);
         aiPolishActions.setOrientation(LinearLayout.VERTICAL);
         aiPolishActions.setPadding(24, 0, 24, 16);
-        aiPolishContainer.addView(aiPolishActions, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        aiPolishContainer.addView(aiPolishActions, KeyboardGeometry.matchWidthWrapParams());
         aiPolishContainer.setVisibility(View.GONE);
         keyboardSurface.addView(aiPolishContainer, new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
