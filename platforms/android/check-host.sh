@@ -341,6 +341,13 @@ if rg -n 'optBoolean\("ok"' \
   echo "Android statistics dictionary responses must require a typed boolean ok field" >&2
   exit 1
 fi
+# Developer diagnostics consume a native value envelope; malformed success must stay on the
+# unavailable path rather than populating diagnostic controls.
+if rg -n 'optBoolean\("ok"' \
+    "$repo_root/platforms/android/java/app/msime/android/home/DeveloperPage.java"; then
+  echo "Android developer responses must require a typed boolean ok field" >&2
+  exit 1
+fi
 # Sync rounds download over any section that is not dirty, so a preference write that forgets to mark settings dirty is reverted by the next cloud change. HostStore.savePreferences owns that mark for every caller.
 if ! rg -qU 'NativeClient\.savePreferences\(directory, revision, document\)\)\);\s*(//[^\n]*\s*)?if \(saved != null\) SyncSignals\.markDirty\(context, SyncSwitch\.SETTINGS\);' \
     "$repo_root/platforms/android/java/app/msime/android/home/HostStore.java"; then
