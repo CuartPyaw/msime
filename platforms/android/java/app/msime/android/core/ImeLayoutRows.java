@@ -117,8 +117,7 @@ final class ImeLayoutRows {
             s.imeKeyFeedback.playFeedback(s.handwritingDownload);
             s.downloadHandwritingModel();
         });
-        FrameLayout.LayoutParams downloadParams = new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT, s.pixels(48));
+        FrameLayout.LayoutParams downloadParams = KeyboardGeometry.frameMatchWidthHeightPx(s.pixels(48));
         downloadParams.gravity = Gravity.CENTER;
         downloadParams.leftMargin = s.pixels(16);
         downloadParams.rightMargin = s.pixels(16);
