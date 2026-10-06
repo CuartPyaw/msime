@@ -335,11 +335,8 @@ final class ImeStyler {
 
     /** The outlined badge the keyboard wears while nothing is being composed. */
     GradientDrawable brandPillDrawable() {
-        GradientDrawable pill = new GradientDrawable();
-        pill.setColor(Color.TRANSPARENT);
-        pill.setCornerRadius(s.pixels(14));
-        pill.setStroke(Math.max(1, s.pixels(1)), fade(s.skin.accent(), .45));
-        return pill;
+        return DrawablePolicy.outlined(s.pixels(14), Math.max(1, s.pixels(1)),
+            fade(s.skin.accent(), .45));
     }
 
     GradientDrawable candidateDrawable(int color) {
