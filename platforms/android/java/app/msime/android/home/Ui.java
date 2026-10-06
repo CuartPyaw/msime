@@ -278,6 +278,12 @@ public final class Ui {
         return DrawablePolicy.circle(color);
     }
 
+    /** Filled circle with a visible outline. */
+    public static GradientDrawable circleOutlined(@ColorInt int fillColor, int strokeWidth,
+                                                  @ColorInt int strokeColor) {
+        return DrawablePolicy.circleOutlined(fillColor, strokeWidth, strokeColor);
+    }
+
     /** 纯色圆角矩形。 */
     public static GradientDrawable rounded(@ColorInt int color, float radiusPx) {
         return DrawablePolicy.rounded(color, radiusPx);
