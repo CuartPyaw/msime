@@ -231,7 +231,8 @@ public final class SyncMergePolicy {
             current.add(new Word(personalKind(word.kind()), word.key(), word.value(), word.weight()));
             if (current.size() == size) {
                 result.add(Collections.unmodifiableList(current));
-                current = new ArrayList<>(Math.min(words.size() - result.size() * size, size));
+                current = new ArrayList<>(BoundsPolicy.atMost(
+                    words.size() - result.size() * size, size));
             }
         }
         if (!current.isEmpty()) result.add(Collections.unmodifiableList(current));
