@@ -179,6 +179,12 @@ public final class ViewPolicy {
         setCentered(view);
     }
 
+    /** Set a centered text label and its scalable size. */
+    public static void setCenteredText(TextView view, CharSequence text, float sizeSp) {
+        view.setText(text);
+        setCenteredTextSizeSp(view, sizeSp);
+    }
+
     /** Set a text view's scalable size and align its content to the start edge vertically centered. */
     public static void setStartCenteredTextSizeSp(TextView view, float sizeSp) {
         setTextSizeSp(view, sizeSp);
