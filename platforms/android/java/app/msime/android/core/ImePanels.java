@@ -76,8 +76,7 @@ final class ImePanels {
         ViewPolicy.setAllCapsFalse(tab);
         tab.setText(entry.icon());
         KeyboardGeometry.setKeyTextSize(tab, 17);
-        ViewPolicy.clearPadding(tab);
-        ViewPolicy.clearMinimumSize(tab);
+        compactEmojiButton(tab);
         ViewPolicy.clearFontPadding(tab);
         tab.setSelected(s.emojiSelectedCategory == category);
         tab.setContentDescription("表情分类 " + entry.title());
@@ -88,6 +87,11 @@ final class ImePanels {
             s.selectEmojiCategory(category);
         });
         s.emojiTabs.addView(tab, KeyboardGeometry.weightedMatchParentParams(1));
+    }
+
+    private static void compactEmojiButton(Button button) {
+        ViewPolicy.clearPadding(button);
+        ViewPolicy.clearMinimumSize(button);
     }
 
     /** 共享换肤遍历之后再画底栏分类：选中的分类是键帽色药丸，其余只是半透明图标。 */
@@ -126,8 +130,7 @@ final class ImePanels {
                 () -> insertEmoji(item.text()));
             ((KeyboardPressButton) cell).setKeyboardRole(KeyboardKeyRole.PLAIN);
             KeyboardGeometry.setKeyTextSize(cell, 26);
-            ViewPolicy.clearPadding(cell);
-            ViewPolicy.clearMinimumSize(cell);
+            compactEmojiButton(cell);
             row.addView(cell, KeyboardGeometry.weightedMatchParentParams(1));
         }
         renderEmojiStatus();
