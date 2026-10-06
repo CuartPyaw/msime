@@ -7,6 +7,7 @@ import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.view.ViewGroup;
 import java.util.Locale;
 import java.math.BigDecimal;
 import org.json.JSONObject;
@@ -338,6 +339,12 @@ public final class KeyboardGeometry {
     public static ScrollView.LayoutParams scrollMatchWidthWrapParams() {
         return new ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT,
             ScrollView.LayoutParams.WRAP_CONTENT);
+    }
+
+    /** Apply the same start and end margin to a layout parameter. */
+    public static void setHorizontalMargins(ViewGroup.MarginLayoutParams params, int margin) {
+        params.setMarginStart(margin);
+        params.setMarginEnd(margin);
     }
 
     /** Create weighted linear layout parameters with a fixed height in dp. */
