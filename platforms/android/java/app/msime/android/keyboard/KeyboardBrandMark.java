@@ -56,7 +56,7 @@ public final class KeyboardBrandMark extends View {
         super(context);
         this.accent = accent;
         ViewPolicy.setNonInteractive(this);
-        setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        ViewPolicy.hideFromAccessibility(this);
     }
 
     @Override protected void onDraw(Canvas canvas) {

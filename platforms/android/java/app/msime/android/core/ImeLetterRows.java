@@ -183,7 +183,7 @@ final class ImeLetterRows {
 
     private View indent() {
         View spacer = new View(s);
-        spacer.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            ViewPolicy.hideFromAccessibility(spacer);
         return spacer;
     }
 

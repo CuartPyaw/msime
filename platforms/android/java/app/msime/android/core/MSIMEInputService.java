@@ -5641,7 +5641,7 @@ public final class MSIMEInputService extends InputMethodService {
             super(context);
             setVisibility(View.GONE);
             ViewPolicy.setNonInteractive(this);
-            setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            ViewPolicy.hideFromAccessibility(this);
         }
 
         void show(Button anchor, JapaneseNineKeyLayout.Key key, int direction, FrameLayout root) {
