@@ -162,9 +162,7 @@ public final class KeyboardOptionsPage extends DetailPage {
         plate.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
         int icon = Ui.parseColor(skin.toolbarIcon(), Ui.subText(context));
         if (settings.bool(AndroidLocalSettings.TOOLBAR_HIDDEN)) {
-            TextView note = new TextView(context);
-            note.setText("工具栏已隐藏，只显示候选条");
-            Ui.style(note, 13, 400, icon);
+            TextView note = Ui.styledLabel(context, "工具栏已隐藏，只显示候选条", 13, 400, icon);
             plate.addView(note);
         } else {
             addChip(context, plate, "水杉", Ui.parseColor(skin.accentText(), Ui.accent(context)));
@@ -178,10 +176,8 @@ public final class KeyboardOptionsPage extends DetailPage {
     }
 
     private static void addChip(Context context, LinearLayout plate, String label, int colour) {
-        TextView chip = new TextView(context);
-        chip.setText(label);
+        TextView chip = Ui.styledLabel(context, label, 12, 500, colour);
         chip.setSingleLine(true);
-        Ui.style(chip, 12, 500, colour);
         LinearLayout.LayoutParams params = Ui.wrap();
         params.setMarginEnd(Ui.dp(context, 12));
         plate.addView(chip, params);
