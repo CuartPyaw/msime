@@ -473,12 +473,11 @@ public final class OnboardingActivity extends AppCompatActivity {
         Ui.setMinimumHeightDp(row, this, Ui.COMPACT_ROW_MIN_HEIGHT);
         Ui.setPaddingDp(row, this, 14, 6, 8, 6);
 
-        TextView mark = new TextView(this);
+        TextView mark = Ui.label(this, done ? "✓" : "!", 13,
+            done ? Ui.onAccent(this) : 0xFFFFFFFF);
         ViewPolicy.setCentered(mark);
         // 字形画在固定 dp 的圆里，跟圆一起按 dp 定大小；按 sp 时系统字体一调大，对勾就被圆的边界切掉。
         mark.setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP, 13);
-        mark.setText(done ? "✓" : "!");
-        mark.setTextColor(done ? Ui.onAccent(this) : 0xFFFFFFFF);
         GradientDrawable disc = Ui.circle(done ? Ui.accent(this) : Ui.color(this, R.attr.msWarn));
         mark.setBackground(disc);
         mark.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
