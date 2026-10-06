@@ -194,7 +194,7 @@ public final class Ui {
 
     /** Return the minimum one-pixel thickness for a 0.5 dp separator. */
     public static int hairlinePx(Context context) {
-        return Math.max(1, dp(context, 0.5f));
+        return KeyboardGeometry.atLeastOnePixel(context, 0.5f);
     }
 
     /** Create a view filled with the standard hairline colour for separators. */
