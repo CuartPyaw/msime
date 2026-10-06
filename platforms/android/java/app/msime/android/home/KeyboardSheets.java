@@ -173,7 +173,7 @@ final class KeyboardSheets {
     static View badgeNavRow(Context context, String badge, String title, @Nullable String subtitle,
             @Nullable String value, Runnable action) {
         LinearLayout row = baseRow(context);
-        row.addView(LexiconPage.badge(context, badge));
+        row.addView(badge(context, badge));
         row.addView(texts(context, title, subtitle, Ui.text(context)),
             Ui.weightWrap(1f));
         if (value != null && !value.isEmpty()) {
@@ -242,7 +242,7 @@ final class KeyboardSheets {
     static View pillRow(Context context, String badge, String title, @Nullable String subtitle,
             String label, @Nullable Runnable action) {
         LinearLayout row = baseRow(context);
-        row.addView(LexiconPage.badge(context, badge));
+        row.addView(badge(context, badge));
         row.addView(texts(context, title, subtitle, Ui.text(context)),
             Ui.weightWrap(1f));
         boolean enabled = action != null;
@@ -290,6 +290,20 @@ final class KeyboardSheets {
         Ui.setRowMinimumHeight(row, context);
         Ui.setRowPadding(row, context);
         return row;
+    }
+
+    /** 32dp 的圆角方块徽标，供词库和语言行共用。 */
+    static TextView badge(Context context, String text) {
+        TextView badge = new TextView(context);
+        badge.setText(text);
+        badge.setGravity(Gravity.CENTER);
+        Ui.style(badge, 15, 600, Ui.accent(context));
+        badge.setBackground(Ui.rounded(Ui.accentSoft(context), Ui.dp(context, 8)));
+        badge.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        LinearLayout.LayoutParams params = Ui.squareParams(context, 32);
+        params.setMarginEnd(Ui.dp(context, Ui.ROW_GAP));
+        badge.setLayoutParams(params);
+        return badge;
     }
 
     static LinearLayout texts(Context context, String title, @Nullable String subtitle, int titleColor) {
