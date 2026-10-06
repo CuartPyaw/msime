@@ -723,6 +723,7 @@ final class ImeLayoutRows {
 
     /** 九键的一个假名背后是一串罗马字（ち 是 chi），引擎的退格一次只删一个字母；接着删到读音末尾不再挂着半截罗马字，按一次就删掉一整个假名。 */
     void deleteJapaneseKana() {
+        resetJapaneseToggle();
         if (s.connection == null) return;
         if (!s.command(0)) {
             s.deleteCodePointBeforeCursor();
@@ -732,6 +733,85 @@ final class ImeLayoutRows {
                 && JapaneseNineKeyLayout.endsWithPendingRomaji(s.view.optString("reading", "")); extra++) {
             if (!s.command(0)) return;
         }
+    }
+
+    // ---- toggle input (トグル入力) ----
+    private JapaneseNineKeyLayout.Key toggleKey;
+    private int toggleDirection;
+    private long toggleAt;
+    private String toggleEditing = "";
+    private String toggleLiteral = "";
+
+    void resetJapaneseToggle() {
+        toggleKey = null;
+    }
+
+    /** 上一次连点留下的假名还原样在那里：组字没被别的输入改过，或标点仍是光标前那一个字。中间打过别的字、删过、选过候选，都从新的一个假名开始。 */
+    private boolean japaneseToggleCurrent() {
+        if (toggleKey == null || s.connection == null || s.view == null) return false;
+        if (android.os.SystemClock.uptimeMillis() - toggleAt > JapaneseNineKeyLayout.TOGGLE_WINDOW_MS) return false;
+        String editing = s.view.optString("editing_text", "");
+        if (toggleLiteral.isEmpty()) return editing.equals(toggleEditing);
+        CharSequence before = s.connection.getTextBeforeCursor(toggleLiteral.length(), 0);
+        return editing.isEmpty() && before != null && toggleLiteral.contentEquals(before);
+    }
+
+    private void recordJapaneseToggle(JapaneseNineKeyLayout.Key key, int direction) {
+        toggleKey = key;
+        toggleDirection = direction;
+        toggleAt = android.os.SystemClock.uptimeMillis();
+        toggleEditing = s.view == null ? "" : s.view.optString("editing_text", "");
+        toggleLiteral = "";
+        if (key.strokes().get(direction).isEmpty() && s.connection != null) {
+            CharSequence before = s.connection.getTextBeforeCursor(1, 0);
+            toggleLiteral = before == null ? "" : before.toString();
+        }
+    }
+
+    /** 轻点假名键：同一个键在 {@link JapaneseNineKeyLayout#TOGGLE_WINDOW_MS} 内再点，就把刚打的假名换成下一个（あ→い→う…），否则照常打键面上的假名。数字符号层没有连点切换。 */
+    void tapJapaneseKey(JapaneseNineKeyLayout.Key key) {
+        if (s.keyboardLayer == KeyboardLayout.Layer.SYMBOLS) {
+            resetJapaneseToggle();
+            selectJapaneseKey(key, 0);
+            return;
+        }
+        if (key == toggleKey && japaneseToggleCurrent()) {
+            stepJapaneseToggle(1);
+            return;
+        }
+        resetJapaneseToggle();
+        selectJapaneseKey(key, 0);
+        recordJapaneseToggle(key, 0);
+    }
+
+    /** 撤掉上一次连点打出的假名（组字里删掉它的罗马字，标点删掉光标前那个字），换成循环里前后 `step` 位的那个。 */
+    private void stepJapaneseToggle(int step) {
+        JapaneseNineKeyLayout.Key key = toggleKey;
+        int next = JapaneseNineKeyLayout.toggleStep(JapaneseNineKeyLayout.toggleCycle(key), toggleDirection, step);
+        String stroke = key.strokes().get(toggleDirection);
+        if (stroke.isEmpty()) {
+            s.deleteCodePointBeforeCursor();
+        } else {
+            for (int index = 0; index < stroke.length(); index++) {
+                if (!s.command(0)) break;
+            }
+        }
+        selectJapaneseKey(key, next);
+        recordJapaneseToggle(key, next);
+    }
+
+    /** ↶：连点切换中往回退一个假名（え→う）；不在切换中时什么也不做。 */
+    void reverseJapaneseToggle() {
+        if (toggleKey != null && japaneseToggleCurrent()) stepJapaneseToggle(-1);
+    }
+
+    /** →：结束连点切换，下一次轻点同一个键打新的假名（ああ）；不在切换、也没有组字时把光标右移一格。 */
+    void advanceJapaneseToggle() {
+        boolean toggling = toggleKey != null && japaneseToggleCurrent();
+        resetJapaneseToggle();
+        if (toggling || s.connection == null) return;
+        if (s.view == null || s.view.optString("editing_text", "").isEmpty())
+            s.sendDownUpKeyEvents(android.view.KeyEvent.KEYCODE_DPAD_RIGHT);
     }
 
     void selectJapaneseKey(JapaneseNineKeyLayout.Key key, int direction) {
@@ -790,6 +870,7 @@ final class ImeLayoutRows {
                     else {
                         s.imeKeyFeedback.playFeedback(button);
                         s.countKey(button);
+                        resetJapaneseToggle();
                         selectJapaneseKey(key, direction[0]);
                     }
                     return true;
@@ -828,10 +909,10 @@ final class ImeLayoutRows {
         String description = key.kana().stream().filter(label -> !label.isEmpty())
             .collect(java.util.stream.Collectors.joining("、"));
         Button button = s.keyboardKey(japaneseKeyLabel(key), description,
-            () -> selectJapaneseKey(key, 0));
+            () -> tapJapaneseKey(key));
         twoLineFace(button, japaneseKeyLabel(key));
         button.setContentDescription("轻点输入" + key.kana().get(0)
-            + "；左、上、右、下滑动选择其他假名");
+            + "，连续轻点依次切换；左、上、右、下滑动选择其他假名");
         bindJapaneseFlick(button, key);
         if (button instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.KEY);
         return button;
@@ -896,6 +977,9 @@ final class ImeLayoutRows {
             s.imeLetterRows.rebuildKeyRows();
             s.render();
         }), "SoftLayer");
+        // 日语 12 键的标准左列：↶ 逆向切换、→ 结束切换（或光标右移），再是 123、☺（工具栏没有表情时）、英、切换，各占一格。
+        addJapaneseSideKey(modeColumn, s.keyboardKey("↶", "连点切换时退回上一个假名", this::reverseJapaneseToggle), 1);
+        addJapaneseSideKey(modeColumn, s.keyboardKey("→", "结束连点切换，开始下一个假名；没有组字时光标右移", this::advanceJapaneseToggle), 1);
         addJapaneseSideKey(modeColumn, s.japaneseSymbolsKey, 1);
         boolean emojiKey = s.japaneseSideEmojiKey();
         if (emojiKey) {
@@ -904,8 +988,7 @@ final class ImeLayoutRows {
         }
         Button language = s.keyId(s.keyboardKey("英", "切换到英文输入", s::toggleInputLanguage),
             "SoftLanguage");
-        addJapaneseSideKey(modeColumn, language,
-            (s.offersGlobeKey() ? 1 : 2) + (emojiKey ? 0 : 1));
+        addJapaneseSideKey(modeColumn, language, 1);
         if (s.offersGlobeKey()) {
             addJapaneseSideKey(modeColumn, s.keyId(s.keyboardKey("切换", "切换到下一个输入法",
                 s::switchToNextInputMethodAfterCommit), "SoftGlobe"), 1);
