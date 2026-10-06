@@ -78,7 +78,7 @@ public final class SkinsPage extends DetailPage {
             return null;
         }
 
-        List<Card> designs = new ArrayList<>();
+        List<Card> designs = List.of();
         JSONObject customTheme = preferences.optJSONObject("custom_theme");
         JSONObject stored = customTheme == null ? null : customTheme.optJSONObject("keyboard");
         String storedKey = "custom".equals(current) && stored != null ? CustomKeyboardSkin.from(stored).key() : "";
