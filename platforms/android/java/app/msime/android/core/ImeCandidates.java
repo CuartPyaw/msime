@@ -72,8 +72,7 @@ final class ImeCandidates {
             new int[][] {{android.R.attr.state_selected}, {}},
             new int[] {selectedText, keyForeground}));
         button.setTypeface(candidateTypeface, button.isSelected() ? Typeface.BOLD : Typeface.NORMAL);
-        button.setMinWidth(s.pixels(30));
-        button.setMinimumWidth(s.pixels(30));
+        ViewPolicy.setMinimumWidth(button, s.pixels(30));
         button.setMinHeight(0);
         button.setMinimumHeight(0);
         button.setPadding(s.pixels(11), 0, s.pixels(11), 0);
@@ -182,8 +181,7 @@ final class ImeCandidates {
         KeyboardGeometry.setKeyTextSize(button, 17);
         button.setSelected(highlighted);
         expandedCells.add(button);
-        button.setMinWidth(s.pixels(64));
-        button.setMinimumWidth(s.pixels(64));
+        ViewPolicy.setMinimumWidth(button, s.pixels(64));
         ViewPolicy.setMinimumHeight(button, s.pixels(44));
         button.setPadding(s.pixels(10), 0, s.pixels(10), 0);
         // The completed keyboard tree is styled once by MSIMEInputService.render().
