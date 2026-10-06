@@ -1028,8 +1028,8 @@ public final class MSIMEInputService extends InputMethodService {
             && EditorPolicy.useEngine(info.inputType);
         String statisticsPreferences = "";
         try {
-            File file = new File(getFilesDir(), "runtime-options.json");
-            JSONObject options = new JSONObject(HostOptionsPolicy.read(file));
+            JSONObject options = new JSONObject(
+                HostOptionsPolicy.readRuntimeOptions(getFilesDir()));
             statisticsPreferences = options.optString("preferences_directory", "");
             languageDictionaries = options.optString("language_dictionaries", "");
             JSONObject preferences = options.optJSONObject("preferences");
