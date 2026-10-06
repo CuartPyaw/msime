@@ -40,6 +40,8 @@ public final class SyncApi {
     public static final long MAX_SNAPSHOT_BYTES = 512L * 1024L * 1024L;
     /** 与 NativeClient 的快照行上限一致，避免合并路径为一行异常数据分配整份快照。 */
     static final int MAX_SNAPSHOT_LINE_CHARS = 65_535;
+    /** 与原生快照检查一致，避免合并路径把超量记录全部留在 Java 集合中。 */
+    static final int MAX_SNAPSHOT_RECORDS = 500_000;
 
     /** 偏好文档：`settings` 里的值只有字符串、布尔、整数和浮点数。 */
     public record Preferences(long revision, Map<String, Object> settings) {}
@@ -245,8 +247,10 @@ public final class SyncApi {
         LinkedHashMap<String, SyncMergePolicy.Word> words = new LinkedHashMap<>();
         java.util.HashSet<String> deleted = new java.util.HashSet<>();
         try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            SnapshotRecordReader records = new SnapshotRecordReader(reader);
+            int countedRecords = 0;
             String line;
-            while ((line = readSnapshotLine(reader)) != null) {
+            while ((line = records.next()) != null) {
                 if (line.isEmpty()) continue;
                 JSONObject record;
                 try {
@@ -255,6 +259,8 @@ public final class SyncApi {
                     throw new IOException("malformed snapshot line", malformed);
                 }
                 Object type = record.opt("type");
+                if (!"footer".equals(type) && ++countedRecords > MAX_SNAPSHOT_RECORDS)
+                    throw new IOException("snapshot has too many records");
                 JSONObject data = record.optJSONObject("data");
                 if (data == null || !(data.opt("id") instanceof String)) continue;
                 String id = (String) data.opt("id");
@@ -291,6 +297,25 @@ public final class SyncApi {
             line.append((char) value);
         }
         return line.length() == 0 ? null : line.toString();
+    }
+
+    /** 带总记录数上限的快照逐行读取器，避免调用方先把所有记录放进集合。 */
+    static final class SnapshotRecordReader {
+        private final BufferedReader reader;
+        private int records;
+
+        SnapshotRecordReader(BufferedReader reader) {
+            this.reader = reader;
+        }
+
+        String next() throws IOException {
+            String line = readSnapshotLine(reader);
+            if (line == null) return null;
+            // 原生 records 不包含 footer；预留这一行后，再由 snapshotWords 按 type 计数。
+            if (++records > MAX_SNAPSHOT_RECORDS + 1)
+                throw new IOException("snapshot has too many records");
+            return line;
+        }
     }
 
     interface Call {

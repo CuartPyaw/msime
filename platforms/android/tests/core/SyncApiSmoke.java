@@ -85,6 +85,20 @@ public final class SyncApiSmoke {
             check("snapshot line too large".equals(expected.getMessage()),
                 "oversized snapshot line is bounded");
         }
+
+        // 原生快照最多 500,000 条记录；合并路径也必须拒绝超量输入。
+        SyncApi.SnapshotRecordReader records = new SyncApi.SnapshotRecordReader(
+            new BufferedReader(new StringReader("{}\n".repeat(500_002))));
+        for (int index = 0; index < 500_001; index++) {
+            check("{}".equals(records.next()), "snapshot record within limit");
+        }
+        try {
+            records.next();
+            throw new AssertionError("excess snapshot records must be refused");
+        } catch (IOException expected) {
+            check("snapshot has too many records".equals(expected.getMessage()),
+                "excess snapshot records are bounded");
+        }
         System.out.println("Android sync API passed");
     }
 
