@@ -280,7 +280,7 @@ final class ImeVoiceEntry {
         try {
             request = new JSONObject().put("directory", directory).put("action", new JSONObject()
                 .put("operation", "record_voice").put("day", LocalDate.now().toString())
-                .put("milliseconds", Math.min(milliseconds, 600_000L))).toString();
+                .put("milliseconds", BoundsPolicy.atMost(milliseconds, 600_000L))).toString();
         } catch (JSONException error) {
             return;
         }
