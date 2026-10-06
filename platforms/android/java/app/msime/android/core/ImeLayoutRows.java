@@ -846,7 +846,7 @@ final class ImeLayoutRows {
     }
 
     void addJapaneseSideKey(LinearLayout column, Button button, float weight) {
-        // 侧列是功能键（123、☺、英、切换、⌫、空白）。角色不显式给时由描述推导，假名键的描述被判成功能面、侧列反倒成了字母面，整块配色主次颠倒。回车的角色由 updateReturnKey 跟着组字状态改。
+        // 侧列是功能键（123、☺（工具栏没有表情按钮时）、英、切换、⌫、空白）。角色不显式给时由描述推导，假名键的描述被判成功能面、侧列反倒成了字母面，整块配色主次颠倒。回车的角色由 updateReturnKey 跟着组字状态改。
         if (button instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.ACCENT);
         column.addView(button, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, 0, weight));
@@ -869,12 +869,15 @@ final class ImeLayoutRows {
             s.render();
         }), "SoftLayer");
         addJapaneseSideKey(modeColumn, s.japaneseSymbolsKey, 1);
-        addJapaneseSideKey(modeColumn, s.keyId(s.keyboardKey("☺", "打开表情浏览", s.imePanels::showEmojiPicker),
-            "SoftEmoji"), 1);
+        boolean emojiKey = s.japaneseSideEmojiKey();
+        if (emojiKey) {
+            addJapaneseSideKey(modeColumn, s.keyId(s.keyboardKey("☺", "打开表情浏览", s.imePanels::showEmojiPicker),
+                "SoftEmoji"), 1);
+        }
         Button language = s.keyId(s.keyboardKey("英", "切换到英文输入", s::toggleInputLanguage),
             "SoftLanguage");
         addJapaneseSideKey(modeColumn, language,
-            s.offersGlobeKey() ? 1 : 2);
+            (s.offersGlobeKey() ? 1 : 2) + (emojiKey ? 0 : 1));
         if (s.offersGlobeKey()) {
             addJapaneseSideKey(modeColumn, s.keyId(s.keyboardKey("切换", "切换到下一个输入法",
                 s::switchToNextInputMethodAfterCommit), "SoftGlobe"), 1);
