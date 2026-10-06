@@ -167,6 +167,12 @@ public final class ViewPolicy {
         view.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp);
     }
 
+    /** Set a text label and its scalable size. */
+    public static void setTextSizeLabel(TextView view, CharSequence text, float sizeSp) {
+        view.setText(text);
+        setTextSizeSp(view, sizeSp);
+    }
+
     /** Set a text view's scalable size and center its content. */
     public static void setCenteredTextSizeSp(TextView view, float sizeSp) {
         setTextSizeSp(view, sizeSp);
