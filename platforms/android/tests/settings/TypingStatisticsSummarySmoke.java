@@ -24,6 +24,12 @@ public final class TypingStatisticsSummarySmoke {
             "statistics counts reject fractional JSON numbers");
         check(TypingStatisticsSummary.strictCount(-1L) == 0L,
             "statistics counts reject negative JSON integers");
+        check(TypingStatisticsSummary.strictPositionRate(0.25d) == 0.25d,
+            "statistics position rates accept values in range");
+        check(TypingStatisticsSummary.strictPositionRate(1.5d) == 0d,
+            "statistics position rates reject values above one");
+        check(TypingStatisticsSummary.strictPositionRate(-0.1d) == 0d,
+            "statistics position rates reject negative values");
         check("—".equals(TypingStatisticsSummary.whole(null)), "null speed is a dash");
         check("52".equals(TypingStatisticsSummary.whole(51.6)), "speed rounds");
         check("91".equals(TypingStatisticsSummary.percent(0.912)), "percent rounds");

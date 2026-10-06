@@ -386,12 +386,18 @@ public final class TypingStatisticsSummary {
         return List.copyOf(result);
     }
 
+    /** Candidate position buckets are JSON proportions in the closed 0–1 range. */
+    public static double strictPositionRate(Object value) {
+        if (!(value instanceof Number number) || value instanceof Boolean) return 0d;
+        double rate = number.doubleValue();
+        return Double.isFinite(rate) && rate >= 0d && rate <= 1d ? rate : 0d;
+    }
+
     private static List<Double> positions(JSONArray array) {
         if (array == null || array.length() != POSITION_BUCKETS) return null;
         List<Double> result = new ArrayList<>(POSITION_BUCKETS);
         for (int index = 0; index < POSITION_BUCKETS; index++) {
-            Object value = array.opt(index);
-            result.add(value instanceof Number number ? number.doubleValue() : 0d);
+            result.add(strictPositionRate(array.opt(index)));
         }
         return List.copyOf(result);
     }
