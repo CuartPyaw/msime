@@ -293,7 +293,12 @@ public final class DiagnosticsApi {
                 Object kind = row.opt("kind");
                 if (!(kind instanceof String) || !row.has("t_ms")) continue;
                 if (durationRequired && !row.has("duration_ms")) continue;
-                Event event = Event.of(row.getLong("t_ms"), (String) kind, row.optLong("duration_ms", -1));
+                Long time = strictInteger(row.opt("t_ms"));
+                Object rawDuration = row.opt("duration_ms");
+                Long duration = rawDuration == null || rawDuration == JSONObject.NULL
+                    ? -1L : strictInteger(rawDuration);
+                if (time == null || duration == null) continue;
+                Event event = Event.of(time, (String) kind, duration);
                 if (event != null) events.add(event);
             } catch (JSONException malformed) {
                 // 不合规的行丢弃，与 Rust 诊断包和后端的口径一致。
@@ -352,6 +357,13 @@ public final class DiagnosticsApi {
             }
         }
         return new State(snapshot, Collections.unmodifiableList(accesses));
+    }
+
+    /** Diagnostics wire numbers are JSON integers; do not let org.json truncate decimals. */
+    public static Long strictInteger(Object value) {
+        if (value instanceof Integer integer) return integer.longValue();
+        if (value instanceof Long longValue) return longValue;
+        return null;
     }
 
     private static String entryText(InputStream stream) throws IOException {
