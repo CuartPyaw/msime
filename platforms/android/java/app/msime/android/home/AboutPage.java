@@ -176,9 +176,7 @@ public final class AboutPage extends DetailPage {
 
         FrameLayout disc = new FrameLayout(context);
         disc.setBackground(Ui.pill(Ui.color(context, com.google.android.material.R.attr.colorTertiaryContainer)));
-        ImageView mark = new ImageView(context);
-        mark.setImageResource(R.drawable.splash_mark);
-        Ui.hideFromAccessibility(mark);
+        ImageView mark = Ui.decorativeIcon(context, R.drawable.splash_mark);
         int markSize = Ui.dp(context, 60);
         disc.addView(mark, Ui.squareFrameParamsPx(markSize, Gravity.CENTER));
         int discSize = Ui.dp(context, 116);
