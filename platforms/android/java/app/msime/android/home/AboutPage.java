@@ -131,7 +131,7 @@ public final class AboutPage extends DetailPage {
             links.nav("给我们评分", null, null, () -> openLink(context,
                 "market://details?id=" + context.getPackageName()));
         }
-        if (tauriAvailable()) {
+        if (Ui.tauriAvailable()) {
             links.nav("在管理界面中查看", "更新日志、致谢与更多信息", null, this::openTauriAbout);
         }
 
@@ -445,16 +445,6 @@ public final class AboutPage extends DetailPage {
             startActivity(intent);
         } catch (RuntimeException unavailable) {
             MsToast.show(requireContext(), "管理界面没有打开");
-        }
-    }
-
-    /** 原生 APK 不带 WebView 管理界面，Tauri 合包带。 */
-    private static boolean tauriAvailable() {
-        try {
-            Class.forName("app.msime.android.MainActivity");
-            return true;
-        } catch (ClassNotFoundException absent) {
-            return false;
         }
     }
 
