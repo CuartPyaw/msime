@@ -180,6 +180,13 @@ public final class Ui {
             dp(context, heightDp));
     }
 
+    /** Create a view filled with the standard hairline colour for separators. */
+    public static View hairlineView(Context context) {
+        View view = new View(context);
+        view.setBackgroundColor(hairline(context));
+        return view;
+    }
+
     /** Layout parameters for a weighted child that wraps its height. */
     public static LinearLayout.LayoutParams weightWrap(float weight) {
         return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, weight);

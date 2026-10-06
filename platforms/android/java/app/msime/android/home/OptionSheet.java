@@ -111,8 +111,7 @@ public final class OptionSheet {
 
     private void addOption(View view) {
         if (count > 0) {
-            View rule = new View(context);
-            rule.setBackgroundColor(Ui.hairline(context));
+            View rule = Ui.hairlineView(context);
             options.addView(rule, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 Math.max(1, Ui.dp(context, 0.5f))));
         }
