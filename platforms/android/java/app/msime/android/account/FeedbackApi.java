@@ -67,7 +67,7 @@ public final class FeedbackApi {
 
     /** 只保留白名单键；值去掉控制字符、截到 256 字节以内（不截断在一个字符中间），空值丢掉。 */
     public static Map<String, String> filterDiagnostics(Map<String, String> raw) {
-        Map<String, String> clean = new LinkedHashMap<>();
+        Map<String, String> clean = new LinkedHashMap<>(DIAGNOSTIC_KEYS.size());
         if (raw == null) return clean;
         for (String key : DIAGNOSTIC_KEYS) {
             String value = raw.get(key);
