@@ -199,9 +199,7 @@ public final class KeyboardSchemeCard extends FrameLayout {
 
     /** A filled disc carrying a tick, sized for the 12dp corner the master puts it in. */
     private android.graphics.drawable.Drawable checkMark(int accent, int keyBackground) {
-        GradientDrawable disc = new GradientDrawable();
-        disc.setShape(GradientDrawable.OVAL);
-        disc.setColor(accent);
+        GradientDrawable disc = DrawablePolicy.circle(accent);
         // The disc sits on the glyph's border, so it carries the panel colour as its own ring.
         disc.setStroke(KeyboardGeometry.atLeastOnePixel(getContext(), 1f), keyBackground);
         return new android.graphics.drawable.LayerDrawable(
