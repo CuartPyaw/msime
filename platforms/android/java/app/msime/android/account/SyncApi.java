@@ -38,6 +38,8 @@ public final class SyncApi {
     static final String NDJSON = "application/x-ndjson";
     /** 快照文件上限，与 client-core 的 `MAX_DICTIONARY_SNAPSHOT_BYTES` 一致。 */
     public static final long MAX_SNAPSHOT_BYTES = 512L * 1024L * 1024L;
+    /** 与 NativeClient 的快照行上限一致，避免合并路径为一行异常数据分配整份快照。 */
+    static final int MAX_SNAPSHOT_LINE_CHARS = 65_535;
 
     /** 偏好文档：`settings` 里的值只有字符串、布尔、整数和浮点数。 */
     public record Preferences(long revision, Map<String, Object> settings) {}
@@ -225,7 +227,7 @@ public final class SyncApi {
     /** 快照第一行是 `{"type":"header",…,"revision":N}`。 */
     static long snapshotRevision(Path file) throws IOException, CloudApi.Failure {
         try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-            String first = reader.readLine();
+            String first = readSnapshotLine(reader);
             if (first == null) throw invalid("empty snapshot");
             JSONObject header = new JSONObject(first);
             Object revision = header.opt("revision");
@@ -244,7 +246,7 @@ public final class SyncApi {
         java.util.HashSet<String> deleted = new java.util.HashSet<>();
         try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
             String line;
-            while ((line = reader.readLine()) != null) {
+            while ((line = readSnapshotLine(reader)) != null) {
                 if (line.isEmpty()) continue;
                 JSONObject record;
                 try {
@@ -272,6 +274,23 @@ public final class SyncApi {
         }
         for (String id : deleted) words.remove(id);
         return new ArrayList<>(words.values());
+    }
+
+    /** 逐字符读一行并在超过快照契约前失败，不能先调用无界的 {@link BufferedReader#readLine}。 */
+    static String readSnapshotLine(BufferedReader reader) throws IOException {
+        StringBuilder line = new StringBuilder();
+        int value;
+        while ((value = reader.read()) != -1) {
+            if (value == '\n') {
+                int length = line.length();
+                if (length > 0 && line.charAt(length - 1) == '\r') line.setLength(length - 1);
+                return line.toString();
+            }
+            if (line.length() >= MAX_SNAPSHOT_LINE_CHARS)
+                throw new IOException("snapshot line too large");
+            line.append((char) value);
+        }
+        return line.length() == 0 ? null : line.toString();
     }
 
     interface Call {
