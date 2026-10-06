@@ -3459,7 +3459,7 @@ public final class MSIMEInputService extends InputMethodService {
         return bindCountedAction(button, action);
     }
 
-    private <T extends Button> T bindCountedAction(T button, Runnable action) {
+    <T extends Button> T bindCountedAction(T button, Runnable action) {
         button.setOnClickListener(ignored -> {
             imeKeyFeedback.playFeedback(button);
             countKey(button);
