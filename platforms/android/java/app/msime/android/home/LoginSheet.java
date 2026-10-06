@@ -104,7 +104,7 @@ final class LoginSheet {
 
         LinearLayout root = new LinearLayout(activity);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(24), 0, dp(24), dp(20));
+        root.setPadding(Ui.dp(activity, 24), 0, Ui.dp(activity, 24), Ui.dp(activity, 20));
         root.addView(new BottomSheetDragHandleView(activity), new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -118,11 +118,11 @@ final class LoginSheet {
         header.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         ImageView close = new ImageView(activity);
         close.setImageDrawable(new PathIcon(24, new String[] {CLOSE_PATH}, new int[] {Ui.text(activity)}));
-        close.setPadding(dp(8), dp(8), dp(8), dp(8));
+        close.setPadding(Ui.dp(activity, 8), Ui.dp(activity, 8), Ui.dp(activity, 8), Ui.dp(activity, 8));
         close.setBackground(Ui.ripple(activity));
         close.setContentDescription("关闭");
         close.setOnClickListener(ignored -> dialog.cancel());
-        header.addView(close, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        header.addView(close, new LinearLayout.LayoutParams(Ui.dp(activity, 40), Ui.dp(activity, 40)));
         root.addView(header);
 
         TextView subtitle = new TextView(activity);
@@ -252,7 +252,7 @@ final class LoginSheet {
         again.setText("换个邮箱或重新发送");
         Ui.style(again, 14, 500, Ui.accent(activity));
         again.setGravity(Gravity.CENTER);
-        again.setMinHeight(dp(40));
+        again.setMinHeight(Ui.dp(activity, 40));
         again.setBackground(Ui.ripple(activity));
         again.setOnClickListener(ignored -> {
             if (busy) return;
@@ -327,18 +327,18 @@ final class LoginSheet {
         LinearLayout button = new LinearLayout(activity);
         button.setOrientation(LinearLayout.HORIZONTAL);
         button.setGravity(Gravity.CENTER);
-        button.setMinimumHeight(dp(50));
-        GradientDrawable face = Ui.rounded(fill, dp(12));
-        if (stroke != 0) face.setStroke(Math.max(1, dp(1)), stroke);
-        GradientDrawable mask = Ui.rounded(Color.WHITE, dp(12));
+        button.setMinimumHeight(Ui.dp(activity, 50));
+        GradientDrawable face = Ui.rounded(fill, Ui.dp(activity, 12));
+        if (stroke != 0) face.setStroke(Math.max(1, Ui.dp(activity, 1)), stroke);
+        GradientDrawable mask = Ui.rounded(Color.WHITE, Ui.dp(activity, 12));
         int pressed = Ui.withAlpha(fill == Color.BLACK ? Color.WHITE : Ui.text(activity), 0.12f);
         button.setBackground(new RippleDrawable(android.content.res.ColorStateList.valueOf(pressed), face, mask));
         if (icon != null) {
             ImageView glyph = new ImageView(activity);
             glyph.setImageDrawable(icon);
             glyph.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(20), dp(20));
-            params.setMarginEnd(dp(8));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(Ui.dp(activity, 20), Ui.dp(activity, 20));
+            params.setMarginEnd(Ui.dp(activity, 8));
             button.addView(glyph, params);
         }
         TextView text = new TextView(activity);
@@ -360,11 +360,11 @@ final class LoginSheet {
         field.setFilters(new InputFilter[] {new InputFilter.LengthFilter(maxLength)});
         Ui.style(field, 16, 400, Ui.text(activity));
         field.setHintTextColor(Ui.subText(activity));
-        GradientDrawable face = Ui.rounded(Ui.rowBackground(activity), dp(12));
-        face.setStroke(Math.max(1, dp(1)), Ui.hairline(activity));
+        GradientDrawable face = Ui.rounded(Ui.rowBackground(activity), Ui.dp(activity, 12));
+        face.setStroke(Math.max(1, Ui.dp(activity, 1)), Ui.hairline(activity));
         field.setBackground(face);
-        field.setPadding(dp(14), 0, dp(14), 0);
-        field.setMinHeight(dp(50));
+        field.setPadding(Ui.dp(activity, 14), 0, Ui.dp(activity, 14), 0);
+        field.setMinHeight(Ui.dp(activity, 50));
         field.setGravity(Gravity.CENTER_VERTICAL);
         field.setContentDescription(hint);
         return field;
@@ -399,12 +399,8 @@ final class LoginSheet {
     private LinearLayout.LayoutParams block(int top) {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        params.topMargin = dp(top);
+        params.topMargin = Ui.dp(activity, top);
         return params;
-    }
-
-    private int dp(int value) {
-        return Ui.dp(activity, value);
     }
 
     /** 按 SVG path 数据画的图标：每条 path 一种颜色，按 `viewport` 等比缩放到边界里。 */
