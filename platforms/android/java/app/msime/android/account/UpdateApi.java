@@ -251,6 +251,11 @@ public final class UpdateApi {
         return SHA256.matcher(digest).matches() ? digest : null;
     }
 
+    /** org.json's optString coerces numbers; release metadata must keep its JSON string types. */
+    static String strictString(Object value) {
+        return value instanceof String ? (String) value : null;
+    }
+
     /** 读 msime.app 的发行版列表：`{items:[{tag,version,prerelease,…}]}`，只保留平台是 android 的条目。 */
     public static List<Release> parseReleases(String json) throws Failure {
         try {
@@ -261,12 +266,15 @@ public final class UpdateApi {
             for (int index = 0; index < items.length(); index++) {
                 JSONObject item = items.optJSONObject(index);
                 if (item == null) continue;
-                String platform = item.optString("platform", "android");
+                Object rawPlatform = item.opt("platform");
+                String platform = rawPlatform == null || rawPlatform == JSONObject.NULL
+                    ? "android" : strictString(rawPlatform);
                 if (!"android".equals(platform)) continue;
                 Object prerelease = item.opt("prerelease");
-                String tag = item.optString("tag", "");
-                String version = item.optString("version", "");
-                if (tag.isEmpty() || version.isEmpty() || !(prerelease instanceof Boolean)) continue;
+                String tag = strictString(item.opt("tag"));
+                String version = strictString(item.opt("version"));
+                if (tag == null || version == null || tag.isEmpty() || version.isEmpty()
+                        || !(prerelease instanceof Boolean)) continue;
                 releases.add(new Release(tag, version, (Boolean) prerelease));
             }
             return releases;
