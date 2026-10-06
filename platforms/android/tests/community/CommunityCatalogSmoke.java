@@ -77,6 +77,13 @@ public final class CommunityCatalogSmoke {
         validReportItem.setAccessible(true);
         check(!(boolean) validReportItem.invoke(null, nilId),
             "reporting must reject an item with a nil ID even when bypassing catalogue parsing");
+        Method validDownloadItem = CommunityCatalog.class.getDeclaredMethod(
+            "validDownloadItem", CommunityCatalog.Item.class);
+        validDownloadItem.setAccessible(true);
+        check(!(boolean) validDownloadItem.invoke(null, malformed),
+            "download counting must reject an item with an unsafe ID");
+        check(!(boolean) validDownloadItem.invoke(null, nilId),
+            "download counting must reject an item with a nil ID");
         CommunityCatalog.Item invalidRating = new CommunityCatalog.Item(
             UUID.randomUUID().toString(), CommunityRequest.Kind.SKIN, "名称", "说明", "作者",
             0, 0, 1, null, CommunityRequest.Category.OTHER, false, 0, null);

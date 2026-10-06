@@ -413,6 +413,11 @@ public final class CommunityCatalog {
         return item != null && validUuid(item.id());
     }
 
+    /** Keep the download counter path safe even when a caller bypasses catalogue parsing. */
+    static boolean validDownloadItem(Item item) {
+        return item != null && item.kind() == CommunityRequest.Kind.SKIN && validUuid(item.id());
+    }
+
     private static boolean confirmedReport(HttpsURLConnection connection) throws Exception {
         try (InputStream input = connection.getInputStream()) {
             byte[] body = HttpBodyPolicy.readRequired(input, 16 * 1024);
@@ -543,7 +548,7 @@ public final class CommunityCatalog {
      * @return 服务端是否记下了这次下载
      */
     public boolean recordDownload(Item item) {
-        if (item == null || item.kind() != CommunityRequest.Kind.SKIN) return false;
+        if (!validDownloadItem(item)) return false;
         BackendAccount account = new BackendAccount(context);
         String token = account.accessToken();
         boolean anonymous = false;
