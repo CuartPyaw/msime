@@ -202,6 +202,14 @@ final class KeyboardSheets {
 
     /** 行首一个强调色符号、强调色标题的动作行（「＋ 添加语言」）。 */
     static View actionRow(Context context, String glyph, String title, Runnable action) {
+        return actionRow(context, glyph, title, action, 32, Ui.ROW_GAP, 0);
+    }
+
+    /**
+     * 行首一个强调色符号、强调色标题的动作行；尺寸参数用于复用略有不同密度的词库操作行。
+     */
+    static View actionRow(Context context, String glyph, String title, Runnable action,
+            int iconSize, int iconMarginEnd, int labelMarginStart) {
         LinearLayout row = baseRow(context);
         Ui.setMinimumHeightDp(row, context, Ui.COMPACT_ROW_MIN_HEIGHT);
         TextView icon = new TextView(context);
@@ -209,13 +217,15 @@ final class KeyboardSheets {
         icon.setGravity(Gravity.CENTER);
         Ui.style(icon, 22, 400, Ui.accent(context));
         icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        LinearLayout.LayoutParams iconParams = Ui.squareParams(context, 32);
-        iconParams.setMarginEnd(Ui.dp(context, Ui.ROW_GAP));
+        LinearLayout.LayoutParams iconParams = Ui.squareParams(context, iconSize);
+        iconParams.setMarginEnd(Ui.dp(context, iconMarginEnd));
         row.addView(icon, iconParams);
         TextView label = new TextView(context);
         label.setText(title);
         Ui.style(label, Ui.TEXT_ROW_TITLE, 400, Ui.accent(context));
-        row.addView(label, Ui.weightWrap(1f));
+        LinearLayout.LayoutParams labelParams = Ui.weightWrap(1f);
+        labelParams.setMarginStart(Ui.dp(context, labelMarginStart));
+        row.addView(label, labelParams);
         row.setBackground(Ui.ripple(context));
         row.setClickable(true);
         row.setFocusable(true);
