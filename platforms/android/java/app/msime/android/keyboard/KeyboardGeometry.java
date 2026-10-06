@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.res.Configuration;
 import android.util.TypedValue;
 import android.view.View;
+import android.widget.LinearLayout;
 import java.util.Locale;
 import java.math.BigDecimal;
 import org.json.JSONObject;
@@ -214,6 +215,11 @@ public final class KeyboardGeometry {
     /** Convert a density-independent size to rounded pixels using the context's density. */
     public static int pixels(Context context, float dp) {
         return pixels(dp, density(context));
+    }
+
+    /** Create linear layout parameters from density-independent dimensions. */
+    public static LinearLayout.LayoutParams linearParams(Context context, float widthDp, float heightDp) {
+        return new LinearLayout.LayoutParams(pixels(context, widthDp), pixels(context, heightDp));
     }
 
     /** Convert a fractional density-independent size to pixels without rounding. */

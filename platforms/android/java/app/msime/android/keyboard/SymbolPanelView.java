@@ -56,7 +56,7 @@ public final class SymbolPanelView extends LinearLayout {
         title.setGravity(Gravity.CENTER_VERTICAL);
         // 这个键只是关掉面板，回到打开它的那一层（字母、#+= 或手写），不一定是字母键盘。
         Button back = buttons.create("‹", "关闭符号面板", listener::close, true);
-        back.setLayoutParams(new LinearLayout.LayoutParams(KeyboardGeometry.pixels(getContext(), 56), KeyboardGeometry.pixels(getContext(), 42)));
+        back.setLayoutParams(KeyboardGeometry.linearParams(getContext(), 56, 42));
         title.addView(back);
         TextView heading = new TextView(context);
         heading.setText("符号");
@@ -64,7 +64,7 @@ public final class SymbolPanelView extends LinearLayout {
         heading.setGravity(Gravity.CENTER);
         title.addView(heading, new LinearLayout.LayoutParams(0, KeyboardGeometry.pixels(getContext(), 42), 1));
         Button delete = buttons.create("⌫", "删除", listener::delete, true);
-        delete.setLayoutParams(new LinearLayout.LayoutParams(KeyboardGeometry.pixels(getContext(), 56), KeyboardGeometry.pixels(getContext(), 42)));
+        delete.setLayoutParams(KeyboardGeometry.linearParams(getContext(), 56, 42));
         title.addView(delete);
         addView(title, new LinearLayout.LayoutParams(
             LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
