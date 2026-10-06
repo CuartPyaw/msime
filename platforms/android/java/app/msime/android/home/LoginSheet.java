@@ -112,12 +112,9 @@ final class LoginSheet {
             22, 700, Ui.text(activity));
         title.setAccessibilityHeading(true);
         header.addView(title, Ui.weightWrap(1f));
-        ImageView close = new ImageView(activity);
-        close.setImageDrawable(new PathIcon(24, new String[] {CLOSE_PATH}, new int[] {Ui.text(activity)}));
-        Ui.setSymmetricPaddingDp(close, activity, 8, 8);
-        close.setBackground(Ui.ripple(activity));
-        close.setContentDescription("关闭");
-        close.setOnClickListener(ignored -> dialog.cancel());
+        ImageView close = Ui.iconButton(activity,
+            new PathIcon(24, new String[] {CLOSE_PATH}, new int[] {Ui.text(activity)}),
+            Ui.text(activity), "关闭", Ui.BACK_BUTTON_SIZE, dialog::cancel);
         header.addView(close, Ui.squareParams(activity, 40));
         root.addView(header);
 

@@ -694,8 +694,14 @@ public final class Ui {
     /** Create a square, centered icon button with the standard detail-page touch target. */
     public static ImageView iconButton(Context context, int icon, @ColorInt int tint,
                                        CharSequence description, float sizeDp, Runnable action) {
+        return iconButton(context, context.getDrawable(icon), tint, description, sizeDp, action);
+    }
+
+    /** Create an icon button from a runtime drawable with the standard detail-page touch target. */
+    public static ImageView iconButton(Context context, Drawable icon, @ColorInt int tint,
+                                       CharSequence description, float sizeDp, Runnable action) {
         ImageView button = new ImageView(context);
-        button.setImageResource(icon);
+        button.setImageDrawable(icon);
         setImageTint(button, tint);
         button.setScaleType(ImageView.ScaleType.CENTER);
         button.setBackground(ripple(context));
