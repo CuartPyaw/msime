@@ -9,6 +9,7 @@ import android.graphics.RectF;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
 import android.view.View;
+import app.msime.android.keyboard.KeyboardGeometry;
 
 /** Touch canvas only; the service injects recognition and candidate presentation. */
 public final class HandwritingCanvas extends View {
@@ -39,9 +40,9 @@ public final class HandwritingCanvas extends View {
         stroke.setStyle(Paint.Style.STROKE);
         stroke.setStrokeCap(Paint.Cap.ROUND);
         stroke.setStrokeJoin(Paint.Join.ROUND);
-        stroke.setStrokeWidth(3 * getResources().getDisplayMetrics().density);
+        stroke.setStrokeWidth(KeyboardGeometry.floatPixels(context, 3));
         guide.setStyle(Paint.Style.STROKE);
-        guide.setStrokeWidth(getResources().getDisplayMetrics().density);
+        guide.setStrokeWidth(KeyboardGeometry.floatPixels(context, 1));
         applySkin(KeyboardSkin.system(false));
     }
 
@@ -100,9 +101,10 @@ public final class HandwritingCanvas extends View {
 
     @Override protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
+<<<<<<< HEAD
         RectF card = cardRect.isEmpty() ? drawCard : cardRect;
         if (card == drawCard) drawCard.set(0, 0, getWidth(), getHeight());
-        float radius = 10 * getResources().getDisplayMetrics().density;
+        float radius = KeyboardGeometry.floatPixels(this, 10);
         canvas.drawRoundRect(card, radius, radius, background);
         guideLines[0] = card.centerX();
         guideLines[1] = card.top;
