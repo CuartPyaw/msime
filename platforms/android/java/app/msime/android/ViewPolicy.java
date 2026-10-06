@@ -50,4 +50,9 @@ public final class ViewPolicy {
         view.setMinWidth(width);
         view.setMinimumWidth(width);
     }
+
+    /** Apply equal horizontal and vertical padding to a view. */
+    public static void setSymmetricPadding(View view, int horizontal, int vertical) {
+        view.setPadding(horizontal, vertical, horizontal, vertical);
+    }
 }
