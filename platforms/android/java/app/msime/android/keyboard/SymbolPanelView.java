@@ -59,7 +59,7 @@ public final class SymbolPanelView extends LinearLayout {
         Button back = buttons.create("‹", "关闭符号面板", listener::close, true);
         back.setLayoutParams(KeyboardGeometry.linearParams(getContext(), 56, 42));
         title.addView(back);
-        TextView heading = new TextView(context);
+        TextView heading = ViewPolicy.newTextView(context, null);
         ViewPolicy.setCenteredText(heading, "符号", 17);
         KeyboardGeometry.setKeyTextSize(heading, 17);
         title.addView(heading, KeyboardGeometry.weightedHeightParams(getContext(), 42, 1));

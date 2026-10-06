@@ -70,7 +70,7 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
         resetButton = button("恢复默认", "恢复键盘布局默认值", listener::reset);
         bar.addView(resetButton, KeyboardGeometry.wrapMatchParentParams());
 
-        hint = new TextView(context);
+        hint = ViewPolicy.newTextView(context, null);
         ViewPolicy.setCenteredTextSizeSp(hint, 13);
         KeyboardGeometry.setKeyTextSize(hint, 13);
         hint.setMaxLines(2);
