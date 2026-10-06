@@ -9,6 +9,7 @@ import android.graphics.RectF;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
 import android.view.View;
+import app.msime.android.keyboard.KeyboardGeometry;
 
 /** Touch canvas only; the service injects recognition and candidate presentation. */
 public final class HandwritingCanvas extends View {
