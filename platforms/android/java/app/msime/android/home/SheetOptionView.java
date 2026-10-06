@@ -35,10 +35,8 @@ final class SheetOptionView {
         row.addView(text, textParams);
 
         if (selected) {
-            ImageView check = new ImageView(context);
-            check.setImageResource(R.drawable.ms_w1_a2_check);
-            Ui.setImageTint(check, Ui.accent(context));
-            Ui.hideFromAccessibility(check);
+            ImageView check = Ui.decorativeIcon(context, R.drawable.ms_w1_a2_check,
+                Ui.accent(context));
             FrameLayout.LayoutParams checkParams = Ui.squareFrameParams(context, Ui.SHEET_CHECK_SIZE);
             checkParams.gravity = Gravity.CENTER_VERTICAL | Gravity.END;
             checkParams.setMarginEnd(Ui.dp(context, Ui.SHEET_CHECK_END_MARGIN));
