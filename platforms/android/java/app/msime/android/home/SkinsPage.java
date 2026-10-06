@@ -135,8 +135,7 @@ public final class SkinsPage extends DetailPage {
             for (int slot = 0; slot < 2; slot++) {
                 int index = start + slot;
                 View cell = index < cards.size() ? cards.get(index) : new View(context);
-                LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0,
-                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+                LinearLayout.LayoutParams params = Ui.weightWrap(1f);
                 if (slot == 1) params.setMarginStart(Ui.dp(context, 12));
                 row.addView(cell, params);
             }

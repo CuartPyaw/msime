@@ -279,7 +279,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         Ui.setSymmetricPaddingDp(row, this, 14, 12);
         row.setBackground(Ui.rounded(Ui.card(this), Ui.dp(this, 20)));
         TextView label = text("显示译文", 16, Ui.text(this));
-        row.addView(label, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        row.addView(label, Ui.weightWrap(1f));
         MaterialSwitch toggle = new MaterialSwitch(this);
         toggle.setChecked(on);
         toggle.setEnabled(preferences != null && !saving);
@@ -488,8 +488,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         row.addView(mark, Ui.squareParams(this, 24));
 
         TextView text = text(label, 16, Ui.text(this));
-        LinearLayout.LayoutParams textParams =
-            new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        LinearLayout.LayoutParams textParams = Ui.weightWrap(1f);
         textParams.setMarginStart(Ui.dp(this, 12));
         row.addView(text, textParams);
         text.setContentDescription(label + (done ? "，已完成" : "，未完成"));
@@ -530,7 +529,7 @@ public final class OnboardingActivity extends AppCompatActivity {
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         detailParams.topMargin = Ui.dp(this, 2);
         text.addView(detail, detailParams);
-        card.addView(text, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        card.addView(text, Ui.weightWrap(1f));
 
         View radio = new View(this);
         GradientDrawable dot = Ui.circleOutlined(selected ? Ui.page(this) : 0,
@@ -564,8 +563,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         badge.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         row.addView(badge, Ui.squareParams(this, 32));
         TextView text = text(label, 15, Ui.text(this));
-        LinearLayout.LayoutParams textParams =
-            new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        LinearLayout.LayoutParams textParams = Ui.weightWrap(1f);
         textParams.setMarginStart(Ui.dp(this, 12));
         row.addView(text, textParams);
         column.addView(row, Ui.matchWidth(this, 14 + top - 10));
