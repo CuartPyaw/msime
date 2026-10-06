@@ -575,8 +575,7 @@ final class ImePanels {
         s.replyActions.setOrientation(LinearLayout.VERTICAL);
         s.replyBody.addView(s.replyActions, new LinearLayout.LayoutParams(
             s.pixels(60), LinearLayout.LayoutParams.MATCH_PARENT));
-        root.addView(s.replyBody, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+        root.addView(s.replyBody, KeyboardGeometry.weightedWidthParams(1));
 
         LinearLayout footer = new LinearLayout(s);
         footer.setGravity(Gravity.CENTER_VERTICAL);
@@ -641,8 +640,7 @@ final class ImePanels {
         button.setContentDescription(description);
         KeyboardGeometry.setKeyTextSize(button, 14);
         compactReplyControl(button, 0);
-        button.setLayoutParams(new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+        button.setLayoutParams(KeyboardGeometry.weightedWidthParams(1));
         return button;
     }
 
@@ -677,8 +675,7 @@ final class ImePanels {
                     choice.setLayoutParams(new LinearLayout.LayoutParams(
                         0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
                 }
-                s.replyMain.addView(row, new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+                s.replyMain.addView(row, KeyboardGeometry.weightedWidthParams(1));
             }
         } else {
             for (String reply : s.replyModel.replies()) {
@@ -1535,8 +1532,7 @@ final class ImePanels {
                 oldLeft, oldTop, oldRight, oldBottom) -> {
             if (bottom - top != oldBottom - oldTop && s.emojiPickerVisible()) view.post(this::renderEmojiGrid);
         });
-        s.emojiPanel.addView(s.emojiGridScroll, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+        s.emojiPanel.addView(s.emojiGridScroll, KeyboardGeometry.weightedWidthParams(1));
         LinearLayout bar = new LinearLayout(s);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
