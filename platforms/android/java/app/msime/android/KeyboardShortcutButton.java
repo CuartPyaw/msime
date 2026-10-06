@@ -84,10 +84,10 @@ public final class KeyboardShortcutButton extends KeyboardPressButton {
             drawMaterial(canvas, width, height);
             return;
         }
-        float size = Math.min(width, height) * GLYPH_SCALE;
+        float size = KeyboardGeometry.shorterSide(width, height) * GLYPH_SCALE;
         if (size <= 0) return;
         if (isSelected() && Color.alpha(activeFill) > 0) {
-            float side = Math.min(width, height) * ACTIVE_SCALE;
+        float side = KeyboardGeometry.shorterSide(width, height) * ACTIVE_SCALE;
             float left = getPaddingLeft() + (width - side) / 2f;
             float top = getPaddingTop() + (height - side) / 2f;
             bounds.set(left, top, left + side, top + side);
@@ -119,7 +119,7 @@ public final class KeyboardShortcutButton extends KeyboardPressButton {
 
     private void drawMaterial(Canvas canvas, int width, int height) {
         float density = getResources().getDisplayMetrics().density;
-        float shorter = Math.min(width, height);
+        float shorter = KeyboardGeometry.shorterSide(width, height);
         if (shorter <= 0) return;
         float centerX = getPaddingLeft() + width / 2f;
         float centerY = getPaddingTop() + height / 2f;

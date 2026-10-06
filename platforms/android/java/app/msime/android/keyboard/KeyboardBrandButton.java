@@ -85,7 +85,7 @@ public final class KeyboardBrandButton extends KeyboardPressButton {
     }
 
     private void drawDesigned(Canvas canvas, int width, int height) {
-        float shorter = Math.min(width, height);
+        float shorter = KeyboardGeometry.shorterSide(width, height);
         if (shorter <= 0) return;
         float centerX = getPaddingLeft() + width / 2f;
         float centerY = getPaddingTop() + height / 2f;
