@@ -138,7 +138,7 @@ final class ImeToolbar {
         KeyboardPressButton hanja = new KeyboardPressButton(s);
         hanja.setKeyboardRole(KeyboardKeyRole.GLYPH);
         s.hanjaButton = hanja;
-        s.hanjaButton.setAllCaps(false);
+        ViewPolicy.setAllCapsFalse(s.hanjaButton);
         s.hanjaButton.setText("漢");
         KeyboardGeometry.setKeyTextSize(s.hanjaButton, 12);
         s.hanjaButton.setContentDescription("转换为汉字");
@@ -153,7 +153,7 @@ final class ImeToolbar {
         candidateHeader.addView(s.hanjaButton, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT));
         s.exitLocalModeButton = new KeyboardBorderlessButton(s);
-        s.exitLocalModeButton.setAllCaps(false);
+        ViewPolicy.setAllCapsFalse(s.exitLocalModeButton);
         s.exitLocalModeButton.setText("×");
         KeyboardGeometry.setKeyTextSize(s.exitLocalModeButton, 14);
         s.exitLocalModeButton.setContentDescription("退出本地模式");
