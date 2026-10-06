@@ -136,14 +136,9 @@ public final class FeedbackPage extends DetailPage {
         description.view().addView(count, Ui.matchWidth());
         counter = count;
 
-        TextView button = new TextView(context);
-        button.setGravity(Gravity.CENTER);
-        Ui.style(button, 16, 600, Ui.onAccent(context));
-        Ui.setTextMinHeightDp(button, requireContext(), Ui.ACTION_BUTTON_MIN_HEIGHT);
-        button.setClickable(true);
-        button.setFocusable(true);
+        TextView button = Ui.textButton(context, "", 16, 600, Ui.onAccent(context), null,
+            Ui.ACTION_BUTTON_MIN_HEIGHT, this::submit);
         button.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        button.setOnClickListener(ignored -> submit());
         LinearLayout.LayoutParams buttonParams = Ui.matchWidth();
         buttonParams.topMargin = Ui.dp(requireContext(), Ui.GROUP_GAP);
         column.addView(button, buttonParams);
