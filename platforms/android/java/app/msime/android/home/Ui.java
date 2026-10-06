@@ -189,7 +189,7 @@ public final class Ui {
 
     /** Convert a density-independent size while guaranteeing at least one physical pixel. */
     public static int atLeastOnePx(Context context, float value) {
-        return Math.max(1, dp(context, value));
+        return KeyboardGeometry.atLeastOnePixel(context, value);
     }
 
     /** Return the minimum one-pixel thickness for a 0.5 dp separator. */
