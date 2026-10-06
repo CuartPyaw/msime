@@ -95,6 +95,23 @@ final class CustomServiceTests: XCTestCase {
     }
   }
 
+  func testDoubaoRejectsAnOversizedResponseFrame() async throws {
+    let transport = DoubaoOversizedFrameFixtureTransport()
+    let codec = DoubaoVoiceCoordinator.FrameCodec(
+      startFrame: { Data([0x01]) },
+      audioFrame: { _, _, _ in Data([0x02]) },
+      decodeFrame: { frame in frame == Data([0xFF]) ? (true, "fixture transcript") : nil }
+    )
+    let configuration = CustomServiceConfiguration.loadVoicePreset(.doubao)
+    do {
+      _ = try await CustomServiceClient.request(
+        kind: .voice, configuration: configuration, pcm: Data([0x01]), token: "fixture-access",
+        generation: 1, doubaoClient: DoubaoVoiceClient(transport: transport, codec: codec))
+      XCTFail("oversized response frame was accepted")
+    } catch DoubaoVoiceCoordinator.Failure.responseTooLarge {
+    }
+  }
+
   func testPresetsAreUsableAndKeepSeparateSavedConfigurations() throws {
     let suite = "msime-provider-tests-\(UUID().uuidString)"
     let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -365,6 +382,22 @@ private final class DoubaoRequestFixtureTransport: DoubaoVoiceTransport {
   func start(endpoint: URL, handshake: DoubaoHandshake) async throws { self.handshake = handshake }
   func send(binary frame: Data) async throws { sent.append(frame) }
   func receive() async throws -> Data { Data([0xFF]) }
+  func finish() {}
+}
+
+private final class DoubaoOversizedFrameFixtureTransport: DoubaoVoiceTransport {
+  private var first = true
+
+  func start(endpoint: URL) async throws {}
+  func start(endpoint: URL, handshake: DoubaoHandshake) async throws {}
+  func send(binary frame: Data) async throws {}
+  func receive() async throws -> Data {
+    if first {
+      first = false
+      return Data(repeating: 0x2A, count: 1_048_577)
+    }
+    return Data([0xFF])
+  }
   func finish() {}
 }
 
