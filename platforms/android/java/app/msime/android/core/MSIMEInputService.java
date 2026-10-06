@@ -6109,13 +6109,13 @@ public final class MSIMEInputService extends InputMethodService {
         aiPolishContainer.addView(aiPolishScroll, KeyboardGeometry.weightedWidthParams(1));
         aiPolishActions = new LinearLayout(this);
         aiPolishActions.setOrientation(LinearLayout.VERTICAL);
-        aiPolishActions.setPadding(24, 0, 24, 16);
+        ViewPolicy.setPadding(aiPolishActions, 24, 0, 24, 16);
         aiPolishContainer.addView(aiPolishActions, KeyboardGeometry.matchWidthWrapParams());
         ViewPolicy.hide(aiPolishContainer);
         keyboardSurface.addView(aiPolishContainer, KeyboardGeometry.frameMatchParentParams());
         moreToolsPanel = new LinearLayout(this);
         moreToolsPanel.setOrientation(LinearLayout.VERTICAL);
-        moreToolsPanel.setPadding(pixels(12), 0, pixels(12), pixels(10));
+        ViewPolicy.setPadding(moreToolsPanel, pixels(12), 0, pixels(12), pixels(10));
         moreToolsPanel.setBackgroundColor(Color.parseColor(skin.background()));
         moreToolsScroll = new ScrollView(this);
         moreToolsScroll.setFillViewport(true);
