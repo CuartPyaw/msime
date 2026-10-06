@@ -77,8 +77,7 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
         KeyboardGeometry.setKeyTextSize(hint, 13);
         hint.setMaxLines(2);
         hint.setContentDescription("布局调整说明");
-        bar.addView(hint, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.MATCH_PARENT, 1));
+        bar.addView(hint, KeyboardGeometry.weightedMatchParentParams(1));
 
         voiceShortcut = new Switch(context);
         voiceShortcut.setText("语音");
