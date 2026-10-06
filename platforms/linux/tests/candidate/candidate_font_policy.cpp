@@ -69,5 +69,22 @@ int main() {
   assert(english.next(read_candidate_font(nlohmann::json{{"candidate_english_font", "Inter"}})) ==
          "Inter, Noto Sans SC, Microsoft YaHei, 18px");
   assert(!english.next(read_candidate_font(nlohmann::json{{"candidate_english_font", "Inter"}})));
+
+  // Fcitx5 的经典界面要磅：像素乘 3/4，总是 0.25 的整数倍，照原样写出；超出范围同样退回默认的 18 像素。
+  using msime::linux_host::CandidateFontUnit;
+  assert(candidate_pango_font({"MiSans", {"Noto Sans SC", "Microsoft YaHei"}, 14}, CandidateFontUnit::Points) ==
+         "MiSans, Noto Sans SC, Microsoft YaHei, 10.5");
+  assert(candidate_pango_font({"Sans", {}, 12}, CandidateFontUnit::Points) == "Sans, 9");
+  assert(candidate_pango_font({"Sans", {}, 13}, CandidateFontUnit::Points) == "Sans, 9.75");
+  assert(candidate_pango_font({"Sans", {}, 15}, CandidateFontUnit::Points) == "Sans, 11.25");
+  assert(candidate_pango_font({"Sans", {}, 32}, CandidateFontUnit::Points) == "Sans, 24");
+  assert(candidate_pango_font({"Sans", {}, 4}, CandidateFontUnit::Points) == "Sans, 13.5");
+  assert(candidate_pango_font({"", {}, 14}, CandidateFontUnit::Points) == "10.5");
+  // 单位不改变「是否仍是默认」的判断：没动过的偏好照样不写。
+  CandidateFontSync points(CandidateFontUnit::Points);
+  assert(!points.next({"Noto Sans SC", {"Noto Sans SC", "Microsoft YaHei"}, 18}));
+  assert(points.next({"MiSans", {"Noto Sans SC", "Microsoft YaHei"}, 14}) ==
+         "MiSans, Noto Sans SC, Microsoft YaHei, 10.5");
+  assert(!points.next({"MiSans", {"Noto Sans SC", "Microsoft YaHei"}, 14}));
   return 0;
 }

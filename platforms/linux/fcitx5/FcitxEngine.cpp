@@ -5933,7 +5933,8 @@ public:
     fcitx::startProcess({guide, "--host", "fcitx5"});
   }
   fcitx::Instance *instance_;
-  msime::linux_host::CandidateFontSync candidate_font_sync_;
+  // 经典界面的字号写成磅，候选序号才与候选同样大小（见 CandidateFontUnit）。
+  msime::linux_host::CandidateFontSync candidate_font_sync_{msime::linux_host::CandidateFontUnit::Points};
   std::string candidate_theme_applied_;
   msime::linux_host::CandidateWheelPagingSync candidate_wheel_paging_sync_;
   // Last appearance the addon-wide probe reported; see stepSystemTheme.

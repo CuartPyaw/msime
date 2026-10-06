@@ -66,8 +66,22 @@ inline std::string trimmed_font_family(const std::string &value) {
   return family;
 }
 
-// The description lists the English family when one is chosen, then the primary family and the fallbacks, without repeats, and ends the family list with a comma so that a name ending in a word Pango knows as a style ("Bold", "Light") stays part of the name. The size is in pixels, the unit the shared preference is written in.
-inline std::string candidate_pango_font(const CandidateFont &font) {
+// 字号写成什么单位。共享偏好里的字号是像素，IBus 面板照写像素；Fcitx5 的经典界面要写成磅：它画候选序号时
+// 取描述里的字号乘上主题的 LabelTextSizeFactor 再按磅设回去（pango_font_description_set_size），像素字号
+// 因此被当成同样数值的磅，序号比候选大三分之一。经典界面的字体 DPI 固定为 96（Wayland 上除非用户设了
+// ForceWaylandDPI），像素乘 3/4 就是同样大小的磅，候选本身的大小不变。
+enum class CandidateFontUnit { Pixels, Points };
+
+// 像素换成磅是乘 3/4，偏好的字号是整数，所以磅数总是 0.25 的整数倍，照原样写出，不经浮点格式化。
+inline std::string candidate_font_size_text(int size_px, CandidateFontUnit unit) {
+  if (unit == CandidateFontUnit::Pixels) return std::to_string(size_px) + "px";
+  static constexpr const char *quarters[] = {"", ".25", ".5", ".75"};
+  return std::to_string(size_px * 3 / 4) + quarters[size_px * 3 % 4];
+}
+
+// The description lists the English family when one is chosen, then the primary family and the fallbacks, without repeats, and ends the family list with a comma so that a name ending in a word Pango knows as a style ("Bold", "Light") stays part of the name.
+inline std::string candidate_pango_font(const CandidateFont &font,
+                                        CandidateFontUnit unit = CandidateFontUnit::Pixels) {
   std::vector<std::string> families;
   families.reserve(font.fallbacks.size() + 2);
   auto add = [&](const std::string &value) {
@@ -86,7 +100,7 @@ inline std::string candidate_pango_font(const CandidateFont &font) {
   if (!description.empty()) description += ",";
   const int size = font.size_px >= 12 && font.size_px <= 32 ? font.size_px : kDefaultCandidateFontSize;
   if (!description.empty()) description += ' ';
-  description += std::to_string(size) + "px";
+  description += candidate_font_size_text(size, unit);
   return description;
 }
 
@@ -103,8 +117,10 @@ inline bool candidate_font_is_default(const CandidateFont &font) {
 // written again on every preference refresh.
 class CandidateFontSync {
 public:
+  explicit CandidateFontSync(CandidateFontUnit unit = CandidateFontUnit::Pixels) : unit_(unit) {}
+
   std::optional<std::string> next(const CandidateFont &font) {
-    auto description = candidate_pango_font(font);
+    auto description = candidate_pango_font(font, unit_);
     if (!last_ && candidate_font_is_default(font)) {
       last_ = description;
       return std::nullopt;
@@ -115,6 +131,7 @@ public:
   }
 
 private:
+  CandidateFontUnit unit_;
   std::optional<std::string> last_;
 };
 
