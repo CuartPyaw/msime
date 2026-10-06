@@ -771,7 +771,7 @@ final class ImePanels {
         for (Button segment : new Button[] {s.replyReplyModeButton, s.replyPolishModeButton}) {
             boolean selected = segment.isSelected();
             segment.setBackground(selected ? replySurface(Color.parseColor(s.skin.keyBackground()),
-                Math.max(0, radius - s.pixels(2))) : null);
+                BoundsPolicy.nonNegative(radius - s.pixels(2))) : null);
             segment.setTextColor(foreground);
             segment.setTypeface(Typeface.create(base, selected ? Typeface.BOLD : Typeface.NORMAL));
             segment.setElevation(0);
@@ -1303,7 +1303,7 @@ final class ImePanels {
     static String relativeTime(long timestamp, long now) {
         if (timestamp <= 0) return "";
         long millis = timestamp < 100_000_000_000L ? timestamp * 1000 : timestamp;
-        long minutes = Math.max(0, now - millis) / 60_000;
+        long minutes = BoundsPolicy.nonNegative(now - millis) / 60_000;
         if (minutes < 1) return "刚刚";
         if (minutes < 60) return minutes + " 分钟前";
         if (minutes < 60 * 24) return (minutes / 60) + " 小时前";
