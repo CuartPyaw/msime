@@ -529,13 +529,10 @@ public final class OnboardingActivity extends AppCompatActivity {
         card.addView(text, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
 
         View radio = new View(this);
-        GradientDrawable dot = new GradientDrawable();
-        dot.setShape(GradientDrawable.OVAL);
+        GradientDrawable dot = DrawablePolicy.circle(selected ? Ui.page(this) : 0);
         if (selected) {
-            dot.setColor(Ui.page(this));
             dot.setStroke(Ui.dp(this, 6), Ui.accent(this));
         } else {
-            dot.setColor(0);
             dot.setStroke(Ui.atLeastOnePx(this, 1.5f),
                 Ui.subText(this));
         }
