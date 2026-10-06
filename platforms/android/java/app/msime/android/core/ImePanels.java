@@ -427,8 +427,7 @@ final class ImePanels {
             card.setContentDescription("屏幕键盘皮肤 " + choice.title());
             if (Build.VERSION.SDK_INT >= 30)
                 card.setStateDescription(selected ? "已选中" : "未选中");
-            card.setOnClickListener(ignored -> {
-                s.imeKeyFeedback.playFeedback(card);
+            bindFeedbackAction(card, () -> {
                 pendingSkinKey = key;
                 for (KeyboardSkinCard other : cards) {
                     other.setSelected(other == card);
