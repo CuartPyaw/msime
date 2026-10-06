@@ -1381,44 +1381,29 @@ final class ImePanels {
         }
         if (EMPTY_PHRASES.equals(message)) {
             // 空的时候给一条去处：直接打开应用的常用语页去添加，而不是让人自己退出键盘去找。
-            KeyboardPressButton add = new KeyboardPressButton(s);
-            add.setKeyboardRole(KeyboardKeyRole.RETURN);
-            ViewPolicy.setAllCapsFalse(add);
-            add.setText("添加常用语");
-            KeyboardGeometry.setKeyTextSize(add, 15);
-            ViewPolicy.setMinimumHeight(add, s.pixels(44));
+            KeyboardPressButton add = phraseButton(KeyboardKeyRole.RETURN, "添加常用语",
+                "添加常用语", () -> {
+                    s.closeCommonPhrases();
+                    s.openHostPage("PHRASES");
+                });
             KeyboardGeometry.setHorizontalPaddingDp(add, s, 24);
-            add.setStateListAnimator(null);
-            add.setContentDescription("添加常用语");
-            add.setOnClickListener(ignored -> {
-                s.imeKeyFeedback.playFeedback(add);
-                s.closeCommonPhrases();
-                s.openHostPage("PHRASES");
-            });
             LinearLayout.LayoutParams params = KeyboardGeometry.wrapParams();
             params.gravity = Gravity.CENTER_HORIZONTAL;
             panel.addView(add, params);
         }
         java.util.List<View> lines = new java.util.ArrayList<>(phrases.size());
         for (String phrase : phrases) {
-            KeyboardPressButton row = new KeyboardPressButton(s);
-            row.setKeyboardRole(KeyboardKeyRole.PLAIN);
-            ViewPolicy.setAllCapsFalse(row);
-            row.setText(phrase);
-            ViewPolicy.setStartCenteredKeyTextSizeSp(row, 15);
+            KeyboardPressButton row = phraseButton(KeyboardKeyRole.PLAIN, phrase,
+                "常用语 " + (phrase.length() > 20 ? phrase.substring(0, 20) : phrase), () -> {
+                    if (s.connection == null) return;
+                    s.command(2);
+                    s.commitText(phrase);
+                    s.closeCommonPhrases();
+                     s.render();
+                 });
+             ViewPolicy.setStartCenteredKeyTextSizeSp(row, 15);
             ViewPolicy.setMaxLinesEllipsized(row, 2);
-            ViewPolicy.setMinimumHeight(row, s.pixels(44));
             KeyboardGeometry.setSymmetricPaddingDp(row, s, 12, 8);
-            row.setStateListAnimator(null);
-            row.setContentDescription("常用语 " + (phrase.length() > 20 ? phrase.substring(0, 20) : phrase));
-            row.setOnClickListener(ignored -> {
-                s.imeKeyFeedback.playFeedback(row);
-                if (s.connection == null) return;
-                s.command(2);
-                s.commitText(phrase);
-                s.closeCommonPhrases();
-                s.render();
-            });
             panel.addView(row, KeyboardGeometry.matchWidthWrapParams());
             View hairline = new View(s);
             LinearLayout.LayoutParams line = new LinearLayout.LayoutParams(
@@ -1431,6 +1416,20 @@ final class ImePanels {
         s.imeStyler.applySkin();
         for (View hairline : lines) hairline.setBackgroundColor(Color.parseColor(s.skin.hairline()));
         if (note != null) note.setTextColor(ImeStyler.fade(s.skin.keyForeground(), .6));
+    }
+
+    private KeyboardPressButton phraseButton(KeyboardKeyRole role, String text,
+            String description, Runnable action) {
+        KeyboardPressButton button = new KeyboardPressButton(s);
+        button.setKeyboardRole(role);
+        ViewPolicy.setAllCapsFalse(button);
+        button.setText(text);
+        KeyboardGeometry.setKeyTextSize(button, 15);
+        ViewPolicy.setMinimumHeight(button, s.pixels(44));
+        ViewPolicy.clearStateListAnimator(button);
+        button.setContentDescription(description);
+        bindFeedbackAction(button, action);
+        return button;
     }
 
     void showFeedbackMenu() {
