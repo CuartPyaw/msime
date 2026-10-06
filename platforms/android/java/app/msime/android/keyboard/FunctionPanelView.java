@@ -172,7 +172,7 @@ public final class FunctionPanelView extends LinearLayout {
                 ? entry.label : entry.description);
             textPaint.setTextAlign(Paint.Align.CENTER);
             boxPaint.setStyle(Paint.Style.STROKE);
-            if (entry.action != null) setOnClickListener(view -> entry.action.run());
+            if (entry.action != null) ViewPolicy.bindClick(this, entry.action);
             if (entry.longPress != null) {
                 setOnLongClickListener(view -> {
                     entry.longPress.run();
