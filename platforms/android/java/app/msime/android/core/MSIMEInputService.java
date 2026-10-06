@@ -3361,12 +3361,17 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     Button button(LinearLayout row, String label, Runnable action) {
-        Button button = new KeyboardPressButton(this);
+        return addRowButton(row, new KeyboardPressButton(this), label, action, true);
+    }
+
+    private <T extends Button> T addRowButton(LinearLayout row, T button, String label,
+            Runnable action, boolean counted) {
         KeyboardGeometry.setKeyTextSize(button, KeyboardGeometry.DEFAULT_KEY_TEXT_SP);
         ViewPolicy.setAllCapsFalse(button);
         button.setText(label);
         imeStyler.styleButton(button, true);
-        bindCountedAction(button, action);
+        if (counted) bindCountedAction(button, action);
+        else bindAction(button, action);
         row.addView(button, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
         return button;
     }
@@ -3380,12 +3385,7 @@ public final class MSIMEInputService extends InputMethodService {
     Button shortcutButton(LinearLayout row, String label,
             KeyboardShortcutIconPolicy.Icon icon, Runnable action) {
         KeyboardShortcutButton button = new KeyboardShortcutButton(this, icon);
-        ViewPolicy.setAllCapsFalse(button);
-        button.setText(label);
-        imeStyler.styleButton(button, true);
-        bindCountedAction(button, action);
-        row.addView(button, KeyboardGeometry.weightedWrapParams(1));
-        return button;
+        return addRowButton(row, button, label, action, true);
     }
 
     private Button brandButton(LinearLayout row, Runnable action) {
