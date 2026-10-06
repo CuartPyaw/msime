@@ -38,10 +38,7 @@ public final class GroupCard {
         if (parent.getChildCount() > 0) groupParams.topMargin = Ui.dp(context, Ui.GROUP_GAP);
 
         if (title != null && title.length() > 0) {
-            TextView heading = new TextView(context);
-            heading.setText(title);
-            Ui.style(heading, Ui.TEXT_GROUP_TITLE, 500, Ui.accent(context));
-            heading.setAccessibilityHeading(true);
+            TextView heading = Ui.groupHeading(context, title);
             Ui.setPaddingDp(heading, context, Ui.GROUP_TITLE_INSET, 0,
                 Ui.GROUP_TITLE_INSET, 2);
             LinearLayout.LayoutParams params = Ui.matchWidth();

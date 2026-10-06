@@ -557,6 +557,15 @@ public final class Ui {
         return subtitle;
     }
 
+    /** Create the standard accent-coloured group heading. */
+    public static TextView groupHeading(Context context, CharSequence text) {
+        TextView heading = new TextView(context);
+        heading.setText(text);
+        style(heading, TEXT_GROUP_TITLE, 500, accent(context));
+        heading.setAccessibilityHeading(true);
+        return heading;
+    }
+
     /** Create a filled accent pill button; callers add their content description and action. */
     public static TextView pillButton(Context context, CharSequence label, float sizeSp, int weight,
                                       @ColorInt int ink, float horizontalPaddingDp, float verticalPaddingDp,

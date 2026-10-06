@@ -40,10 +40,7 @@ final class ListRows {
     /** M3 组标题：强调色、14sp、500 字重，与行里的图标左对齐。 */
     static TextView heading(ViewGroup parent, CharSequence text) {
         Context context = parent.getContext();
-        TextView heading = new TextView(context);
-        heading.setText(text);
-        Ui.style(heading, Ui.TEXT_GROUP_TITLE, 500, Ui.accent(context));
-        heading.setAccessibilityHeading(true);
+        TextView heading = Ui.groupHeading(context, text);
         Ui.setPaddingDp(heading, context, Ui.NAV_ROW_PADDING_H, 16,
             Ui.NAV_ROW_PADDING_H, 4);
         parent.addView(heading, Ui.matchWidth());

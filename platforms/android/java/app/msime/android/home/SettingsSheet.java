@@ -62,10 +62,7 @@ public final class SettingsSheet {
 
     /** 行与行之间的 M3 组标题：强调色、14sp、500 字重。 */
     public void addHeading(String text) {
-        TextView heading = new TextView(context);
-        heading.setText(text);
-        Ui.style(heading, Ui.TEXT_GROUP_TITLE, 500, Ui.accent(context));
-        heading.setAccessibilityHeading(true);
+        TextView heading = Ui.groupHeading(context, text);
         LinearLayout.LayoutParams params = Ui.matchWidth();
         params.topMargin = Ui.dp(context, 16);
         params.bottomMargin = Ui.dp(context, 2);
