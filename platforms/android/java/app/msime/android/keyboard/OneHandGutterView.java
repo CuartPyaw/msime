@@ -86,12 +86,7 @@ public final class OneHandGutterView extends LinearLayout {
             super(context);
             this.icon = icon;
             this.round = round;
-            ViewPolicy.clearBackground(this);
-            ViewPolicy.clearPadding(this);
-            setMinWidth(0);
-            setMinimumWidth(0);
-            setMinHeight(0);
-            setMinimumHeight(0);
+            ViewPolicy.clearChrome(this);
         }
 
         @Override public void setPressed(boolean pressed) {

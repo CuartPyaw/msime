@@ -98,6 +98,13 @@ public final class ViewPolicy {
         view.setPadding(left, top, right, bottom);
     }
 
+    /** Remove the default background, padding, and minimum size from a view. */
+    public static void clearChrome(View view) {
+        clearBackground(view);
+        clearPadding(view);
+        clearMinimumSize(view);
+    }
+
     /** Keep a button label in its authored casing instead of applying the platform default. */
     public static void setAllCapsFalse(Button button) {
         button.setAllCaps(false);
