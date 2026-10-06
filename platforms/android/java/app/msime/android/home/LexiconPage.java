@@ -201,7 +201,7 @@ public final class LexiconPage extends DetailPage {
             Runnable action) {
         Context context = requireContext();
         LinearLayout row = KeyboardSheets.baseRow(context);
-        row.addView(badge(context, badge));
+        row.addView(KeyboardSheets.badge(context, badge));
         LinearLayout texts = KeyboardSheets.texts(context, title, subtitle, Ui.text(context));
         row.addView(texts, Ui.weightWrap(1f));
         TextView state = new TextView(context);
@@ -228,7 +228,7 @@ public final class LexiconPage extends DetailPage {
     private View discoverRow(CommunityCatalog.Item item, DictionaryCollectionsStore.View view) {
         Context context = requireContext();
         LinearLayout row = KeyboardSheets.baseRow(context);
-        row.addView(badge(context, initial(item.name())));
+        row.addView(KeyboardSheets.badge(context, initial(item.name())));
         List<String> parts = new ArrayList<>(2);
         if (!item.author().isEmpty()) parts.add("@" + item.author());
         JSONArray words = item.payload() == null ? null : item.payload().optJSONArray("words");
@@ -257,20 +257,6 @@ public final class LexiconPage extends DetailPage {
         params.setMarginStart(Ui.dp(context, Ui.ROW_GAP));
         row.addView(button, params);
         return row;
-    }
-
-    /** 32dp 的圆角方块，accentSoft 底、强调色的一个字，和设计里词库前面的「汉」「网」一样。 */
-    static TextView badge(Context context, String text) {
-        TextView badge = new TextView(context);
-        badge.setText(text);
-        badge.setGravity(Gravity.CENTER);
-        Ui.style(badge, 15, 600, Ui.accent(context));
-        badge.setBackground(Ui.rounded(Ui.accentSoft(context), Ui.dp(context, 8)));
-        badge.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        LinearLayout.LayoutParams params = Ui.squareParams(context, 32);
-        params.setMarginEnd(Ui.dp(context, Ui.ROW_GAP));
-        badge.setLayoutParams(params);
-        return badge;
     }
 
     private static String initial(String name) {
