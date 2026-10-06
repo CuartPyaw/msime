@@ -150,6 +150,18 @@ public final class ViewPolicy {
         view.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp);
     }
 
+    /** Set a text view's scalable size and center its content. */
+    public static void setCenteredTextSizeSp(TextView view, float sizeSp) {
+        setTextSizeSp(view, sizeSp);
+        setCentered(view);
+    }
+
+    /** Set a keyboard-scaled size and center the text view's content. */
+    public static void setCenteredKeyTextSizeSp(TextView view, float sizeSp) {
+        KeyboardGeometry.setKeyTextSize(view, sizeSp);
+        setCentered(view);
+    }
+
     /** Remove a view's default background drawable. */
     public static void clearBackground(View view) {
         view.setBackground(null);
