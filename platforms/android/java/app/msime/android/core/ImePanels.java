@@ -1271,10 +1271,7 @@ final class ImePanels {
         card.setMinHeight(0);
         card.setMinimumHeight(0);
         card.setStateListAnimator(null);
-        card.setOnClickListener(ignored -> {
-            s.imeKeyFeedback.playFeedback(card);
-            action.run();
-        });
+        bindFeedbackAction(card, action);
         LinearLayout.LayoutParams params = KeyboardGeometry.matchWidthWrapParams();
         params.topMargin = s.pixels(6);
         s.clipboardPanel.addView(card, params);
