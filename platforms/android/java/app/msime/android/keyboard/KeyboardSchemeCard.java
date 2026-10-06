@@ -140,8 +140,8 @@ public final class KeyboardSchemeCard extends FrameLayout {
         badge.setVisibility(View.VISIBLE);
         title.setTypeface(android.graphics.Typeface.DEFAULT);
         // 选中与未选中的差别落在底色和这一档透明度上，不落在色相上。
-        int face = isSelected ? accent : fade(accent, .78f);
-        setBackground(rounded(isSelected ? fade(accent, .12f) : Color.TRANSPARENT,
+        int face = isSelected ? accent : ColorPolicy.withAlpha(accent, .78f);
+        setBackground(rounded(isSelected ? ColorPolicy.withAlpha(accent, .12f) : Color.TRANSPARENT,
             KeyboardGeometry.pixels(getContext(), CARD_RADIUS_DP)));
         glyph.setTextColor(face);
         glyph.setBackground(outlined(face, KeyboardGeometry.pixels(getContext(), GLYPH_RADIUS_DP), KeyboardGeometry.pixels(getContext(), GLYPH_BORDER_DP)));
@@ -250,7 +250,4 @@ public final class KeyboardSchemeCard extends FrameLayout {
         }
     }
 
-    private static int fade(int color, float alpha) {
-        return ColorPolicy.withAlpha(color, alpha);
-    }
 }
