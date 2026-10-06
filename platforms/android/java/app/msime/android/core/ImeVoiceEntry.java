@@ -385,7 +385,7 @@ final class ImeVoiceEntry {
         ViewGroup parent = host;
         listening = null;
         host = null;
-        for (View child : hidden) child.setVisibility(View.VISIBLE);
+        for (View child : hidden) ViewPolicy.show(child);
         hidden.clear();
         if (view != null && parent != null && view.getParent() == parent) parent.removeView(view);
     }
