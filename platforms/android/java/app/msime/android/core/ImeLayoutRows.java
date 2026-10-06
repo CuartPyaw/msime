@@ -656,7 +656,8 @@ final class ImeLayoutRows {
         options.setPadding(padding, padding, padding, padding);
         GradientDrawable surface = DrawablePolicy.rounded(
             Color.parseColor(s.skin.background()), s.pixels(10));
-        surface.setStroke(Math.max(1, s.pixels(1)), Color.parseColor(s.skin.accent()));
+        surface.setStroke(KeyboardGeometry.atLeastOnePixel(s, 1),
+            Color.parseColor(s.skin.accent()));
         options.setBackground(surface);
 
         String letters = key.label().toLowerCase(java.util.Locale.ROOT);
