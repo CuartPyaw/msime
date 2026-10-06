@@ -199,15 +199,9 @@ public final class VoiceResultStore {
     /** Read only the accepted envelope size, even if an opened file grows after inspection. */
     private static byte[] readBounded(Path file) throws IOException {
         try (InputStream input = Files.newInputStream(file)) {
-            ByteArrayOutputStream bytes = new ByteArrayOutputStream(MAXIMUM_FILE_BYTES);
-            byte[] buffer = new byte[8192];
-            int count;
-            while ((count = input.read(buffer)) != -1) {
-                if (bytes.size() + count > MAXIMUM_FILE_BYTES)
-                    throw new IOException("voice result too large");
-                bytes.write(buffer, 0, count);
-            }
-            return bytes.toByteArray();
+            byte[] bytes = HttpBodyPolicy.readBounded(input, MAXIMUM_FILE_BYTES);
+            if (bytes == null) throw new IOException("voice result too large");
+            return bytes;
         }
     }
 
