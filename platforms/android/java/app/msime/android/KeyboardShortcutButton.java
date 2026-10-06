@@ -4,7 +4,6 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
-import app.msime.android.keyboard.KeyboardGeometry;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.view.Gravity;
@@ -120,6 +119,7 @@ public final class KeyboardShortcutButton extends KeyboardPressButton {
     private void drawMaterial(Canvas canvas, int width, int height) {
         float shorter = Math.min(width, height);
         if (shorter <= 0) return;
+        float density = KeyboardGeometry.density(getContext());
         float centerX = getPaddingLeft() + width / 2f;
         float centerY = getPaddingTop() + height / 2f;
         if (isSelected() && Color.alpha(activeFill) > 0) {
