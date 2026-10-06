@@ -1,10 +1,11 @@
 package app.msime.android;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -257,7 +258,8 @@ public final class DiagnosticsApi {
         List<Event> perf = include.performanceLogs() ? new ArrayList<>(MAX_EVENTS) : null;
         List<Event> input = include.inputEvents() ? new ArrayList<>(MAX_EVENTS) : null;
         String config = null;
-        try (ZipInputStream stream = new ZipInputStream(new FileInputStream(zip), StandardCharsets.UTF_8)) {
+        try (ZipInputStream stream = new ZipInputStream(
+                Files.newInputStream(zip.toPath(), LinkOption.NOFOLLOW_LINKS), StandardCharsets.UTF_8)) {
             for (ZipEntry entry = stream.getNextEntry(); entry != null; entry = stream.getNextEntry()) {
                 if (entry.isDirectory()) continue;
                 String name = baseName(entry.getName());
