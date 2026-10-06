@@ -3388,8 +3388,7 @@ public final class MSIMEInputService extends InputMethodService {
             countKey(button);
             action.run();
         });
-        row.addView(button, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        row.addView(button, KeyboardGeometry.weightedWrapParams(1));
         return button;
     }
 
@@ -3403,8 +3402,7 @@ public final class MSIMEInputService extends InputMethodService {
             imeKeyFeedback.playFeedback(button);
             action.run();
         });
-        row.addView(button, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        row.addView(button, KeyboardGeometry.weightedWrapParams(1));
         return button;
     }
 
@@ -3420,8 +3418,7 @@ public final class MSIMEInputService extends InputMethodService {
             imeKeyFeedback.playFeedback(button);
             action.run();
         });
-        row.addView(button, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        row.addView(button, KeyboardGeometry.weightedWrapParams(1));
         return button;
     }
 
@@ -3434,8 +3431,7 @@ public final class MSIMEInputService extends InputMethodService {
             imeKeyFeedback.playFeedback(button);
             action.run();
         });
-        row.addView(button, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        row.addView(button, KeyboardGeometry.weightedWrapParams(1));
         return button;
     }
 
@@ -4479,8 +4475,7 @@ public final class MSIMEInputService extends InputMethodService {
         TextView title = new TextView(this);
         title.setText("语音结果");
         KeyboardGeometry.setKeyTextSize(title, 18);
-        header.addView(title, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        header.addView(title, KeyboardGeometry.weightedWrapParams(1));
         button(header, "返回键盘", this::closeVoiceResult);
         voiceResultPanel.addView(header);
         if (voiceResultEntry == null) {
@@ -6014,8 +6009,7 @@ public final class MSIMEInputService extends InputMethodService {
         TextView layoutTitle = new TextView(this);
         layoutTitle.setText("键盘设置");
         KeyboardGeometry.setKeyTextSize(layoutTitle, 18);
-        layoutHeader.addView(layoutTitle, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        layoutHeader.addView(layoutTitle, KeyboardGeometry.weightedWrapParams(1));
         Button closeLayout = button(layoutHeader, "返回键盘", this::closeLayoutSettings);
         closeLayout.setContentDescription("返回键盘");
         layoutSettingsPanel.addView(layoutHeader);
@@ -6023,8 +6017,7 @@ public final class MSIMEInputService extends InputMethodService {
         TextView keyboardHeightLabel = new TextView(this);
         KeyboardGeometry.setKeyTextSize(keyboardHeightLabel, KeyboardGeometry.DEFAULT_KEY_TEXT_SP);
         keyboardHeightLabel.setText("键盘高度");
-        keyboardHeightHeader.addView(keyboardHeightLabel, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        keyboardHeightHeader.addView(keyboardHeightLabel, KeyboardGeometry.weightedWrapParams(1));
         keyboardHeightValue = new TextView(this);
         keyboardHeightHeader.addView(keyboardHeightValue);
         layoutSettingsPanel.addView(keyboardHeightHeader);
@@ -6036,8 +6029,7 @@ public final class MSIMEInputService extends InputMethodService {
         TextView keySpacingLabel = new TextView(this);
         KeyboardGeometry.setKeyTextSize(keySpacingLabel, KeyboardGeometry.DEFAULT_KEY_TEXT_SP);
         keySpacingLabel.setText("按键间距");
-        keySpacingHeader.addView(keySpacingLabel, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        keySpacingHeader.addView(keySpacingLabel, KeyboardGeometry.weightedWrapParams(1));
         keySpacingValue = new TextView(this);
         keySpacingHeader.addView(keySpacingValue);
         layoutSettingsPanel.addView(keySpacingHeader);
@@ -6049,8 +6041,7 @@ public final class MSIMEInputService extends InputMethodService {
         TextView rowSpacingLabel = new TextView(this);
         KeyboardGeometry.setKeyTextSize(rowSpacingLabel, KeyboardGeometry.DEFAULT_KEY_TEXT_SP);
         rowSpacingLabel.setText("行间距");
-        rowSpacingHeader.addView(rowSpacingLabel, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        rowSpacingHeader.addView(rowSpacingLabel, KeyboardGeometry.weightedWrapParams(1));
         rowSpacingValue = new TextView(this);
         rowSpacingHeader.addView(rowSpacingValue);
         layoutSettingsPanel.addView(rowSpacingHeader);
