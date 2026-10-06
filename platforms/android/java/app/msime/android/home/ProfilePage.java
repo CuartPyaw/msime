@@ -237,7 +237,7 @@ public final class ProfilePage extends DetailPage {
         LinearLayout header = new LinearLayout(context);
         header.setOrientation(LinearLayout.VERTICAL);
         header.setGravity(Gravity.CENTER_HORIZONTAL);
-        header.setPadding(0, Ui.dp(context, 8), 0, Ui.dp(context, 4));
+        Ui.setPaddingDp(header, context, 0, 8, 0, 4);
 
         FrameLayout avatar = new FrameLayout(context);
         avatar.addView(avatarView(context, 88, profile.displayName(), image));
