@@ -181,7 +181,7 @@ public final class LexiconPage extends DetailPage {
         InputFeatureToggle toggle = InputFeatureToggle.LEARNING;
         learning.toggle(toggle.title(), toggle.description(), current.learning(), this::saveLearning);
 
-        if (tauriAvailable()) {
+        if (Ui.tauriAvailable()) {
             GroupCard more = GroupCard.add(target, "更多");
             more.nav("背单词", "在管理界面里复习收藏的单词", null, this::openVocabularyReview);
             more.nav("云词库", "在管理界面里管理云端词库", null, this::openCloudDictionary);
@@ -385,7 +385,7 @@ public final class LexiconPage extends DetailPage {
     // ---- 只在 Tauri 合包里有用的入口（P21），跳转写法与原 KeyboardFragment / AccountFragment 一致 ----
 
     private void openVocabularyReview() {
-        if (!tauriAvailable()) {
+        if (!Ui.tauriAvailable()) {
             MsToast.show(requireContext(), "背单词需要管理界面合包，请使用 Tauri 合包打开。");
             return;
         }
@@ -396,7 +396,7 @@ public final class LexiconPage extends DetailPage {
     }
 
     private void openCloudDictionary() {
-        if (!tauriAvailable()) {
+        if (!Ui.tauriAvailable()) {
             MsToast.show(requireContext(), "云词库需要管理界面合包，请使用 Tauri 合包打开。您仍可在本机使用词库设置。");
             return;
         }
@@ -406,13 +406,4 @@ public final class LexiconPage extends DetailPage {
         startActivity(intent);
     }
 
-    /** 独立的原生 APK 没有 WebView 管理界面，Tauri 合包才有。 */
-    private static boolean tauriAvailable() {
-        try {
-            Class.forName("app.msime.android.MainActivity");
-            return true;
-        } catch (ClassNotFoundException missing) {
-            return false;
-        }
-    }
 }

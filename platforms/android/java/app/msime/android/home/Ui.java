@@ -723,6 +723,16 @@ public final class Ui {
         return new String(Character.toChars(Character.codePointAt(name, 0)));
     }
 
+    /** Whether the optional Tauri management activity is present in this APK. */
+    public static boolean tauriAvailable() {
+        try {
+            Class.forName("app.msime.android.MainActivity");
+            return true;
+        } catch (ClassNotFoundException absent) {
+            return false;
+        }
+    }
+
     /** Create the muted, accessibility-hidden chevron used by navigable rows. */
     public static ImageView chevron(Context context) {
         ImageView view = new ImageView(context);
