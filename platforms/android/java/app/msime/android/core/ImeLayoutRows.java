@@ -107,10 +107,7 @@ final class ImeLayoutRows {
         ViewPolicy.setAllCapsFalse(s.handwritingDownload);
         KeyboardGeometry.setKeyTextSize(s.handwritingDownload, KeyboardGeometry.DEFAULT_KEY_TEXT_SP);
         s.handwritingDownload.setSingleLine(true);
-        s.handwritingDownload.setOnClickListener(ignored -> {
-            s.imeKeyFeedback.playFeedback(s.handwritingDownload);
-            s.downloadHandwritingModel();
-        });
+        bindFeedbackAction(s.handwritingDownload, s::downloadHandwritingModel);
         FrameLayout.LayoutParams downloadParams = KeyboardGeometry.frameMatchWidthHeightPx(s.pixels(48));
         downloadParams.gravity = Gravity.CENTER;
         downloadParams.leftMargin = s.pixels(16);
@@ -904,8 +901,7 @@ final class ImeLayoutRows {
         s.japaneseVariantsButton = variants;
         if (variants instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.KEY);
         // 符号层上轻点直接输入第一个括号，长按才弹出全部括号；假名层不接长按，松手照常切换变体。
-        variants.setOnClickListener(ignored -> {
-            s.imeKeyFeedback.playFeedback(variants);
+        bindFeedbackAction(variants, () -> {
             if (s.keyboardLayer == KeyboardLayout.Layer.SYMBOLS) {
                 commitNineKeyLiteral(JapaneseNineKeyLayout.digitBrackets().get(0));
             } else {
@@ -919,6 +915,13 @@ final class ImeLayoutRows {
             return true;
         });
         return variants;
+    }
+
+    private void bindFeedbackAction(Button button, Runnable action) {
+        button.setOnClickListener(ignored -> {
+            s.imeKeyFeedback.playFeedback(button);
+            action.run();
+        });
     }
 
     void addJapaneseSideKey(LinearLayout column, Button button, float weight) {
