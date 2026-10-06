@@ -333,7 +333,7 @@ public final class AiSkinPage extends DetailPage {
 
         if (s.results.size() > 1) {
             GroupCard choices = GroupCard.add(target, "方案");
-            choices.card().setBackground(null);
+            ViewPolicy.clearBackground(choices.card());
             SegmentedControl picker = new SegmentedControl(context);
             picker.setFillWidth(true);
             List<String> names = new ArrayList<>(s.results.size());
@@ -355,7 +355,7 @@ public final class AiSkinPage extends DetailPage {
         input.setMinLines(2);
         input.setGravity(Gravity.TOP | Gravity.START);
         input.setFilters(new InputFilter[] {new InputFilter.LengthFilter(SkinJobsApi.MAX_PROMPT_CHARACTERS)});
-        input.setBackground(null);
+        ViewPolicy.clearBackground(input);
         Ui.style(input, Ui.TEXT_ROW_TITLE, 400, Ui.text(context));
         Ui.setPaddingDp(input, context, 16, 12, 16, 4);
         input.setEnabled(!s.busy);
@@ -388,7 +388,7 @@ public final class AiSkinPage extends DetailPage {
         styleChips(context, chipViews);
 
         GroupCard soundGroup = GroupCard.add(target, "按键音效");
-        soundGroup.card().setBackground(null);
+        ViewPolicy.clearBackground(soundGroup.card());
         SegmentedControl sounds = new SegmentedControl(context);
         sounds.setFillWidth(true);
         sounds.setOptions(List.of(SOUND_LABELS), s.sound);
@@ -399,7 +399,7 @@ public final class AiSkinPage extends DetailPage {
         soundGroup.card().addView(sounds, Ui.matchWidth());
 
         GroupCard animationGroup = GroupCard.add(target, "按键动画");
-        animationGroup.card().setBackground(null);
+        ViewPolicy.clearBackground(animationGroup.card());
         SegmentedControl animations = new SegmentedControl(context);
         animations.setFillWidth(true);
         animations.setOptions(List.of(ANIMATION_LABELS), s.animation);
