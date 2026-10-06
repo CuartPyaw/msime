@@ -427,15 +427,9 @@ public final class DictionarySnapshotQueue {
     /** Read only the metadata envelope, even if a replaced state file grows after inspection. */
     private static byte[] readBounded(Path file) throws IOException {
         try (InputStream input = Files.newInputStream(file)) {
-            ByteArrayOutputStream bytes = new ByteArrayOutputStream(MAXIMUM_STATE_BYTES);
-            byte[] buffer = new byte[4096];
-            int count;
-            while ((count = input.read(buffer)) != -1) {
-                if (bytes.size() + count > MAXIMUM_STATE_BYTES)
-                    throw new IOException("snapshot state too large");
-                bytes.write(buffer, 0, count);
-            }
-            return bytes.toByteArray();
+            byte[] bytes = HttpBodyPolicy.readBounded(input, MAXIMUM_STATE_BYTES);
+            if (bytes == null) throw new IOException("snapshot state too large");
+            return bytes;
         }
     }
 
