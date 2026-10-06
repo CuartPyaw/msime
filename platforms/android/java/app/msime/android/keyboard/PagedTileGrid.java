@@ -166,7 +166,7 @@ public final class PagedTileGrid extends ViewGroup {
             child.layout(left, top, left + child.getMeasuredWidth(), top + child.getMeasuredHeight());
         }
         if (changed) {
-            page = Math.min(page, pageCount() - 1);
+            page = BoundsPolicy.atMost(page, pageCount() - 1);
             scrollTo(page * width, 0);
         }
     }
