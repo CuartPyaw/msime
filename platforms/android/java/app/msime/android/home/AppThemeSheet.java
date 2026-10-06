@@ -64,7 +64,7 @@ final class AppThemeSheet {
         LinearLayout header = new LinearLayout(context);
         header.setOrientation(LinearLayout.VERTICAL);
         header.setGravity(Gravity.CENTER_HORIZONTAL);
-        header.setPadding(Ui.dp(context, 16), 0, Ui.dp(context, 16), Ui.dp(context, 12));
+        Ui.setSheetHeaderPadding(header, context);
         TextView heading = new TextView(context);
         heading.setText("应用主题");
         heading.setGravity(Gravity.CENTER);

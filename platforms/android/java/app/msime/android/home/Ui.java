@@ -167,6 +167,12 @@ public final class Ui {
         view.setPadding(horizontal, vertical, horizontal, vertical);
     }
 
+    /** Apply the shared bottom-sheet title-area insets to a view. */
+    public static void setSheetHeaderPadding(View view, Context context) {
+        int horizontal = dp(context, 16);
+        view.setPadding(horizontal, 0, horizontal, dp(context, 12));
+    }
+
     /** Return whether the supplied context currently uses the system night configuration. */
     public static boolean isNight(Context context) {
         return KeyboardGeometry.isNight(context);

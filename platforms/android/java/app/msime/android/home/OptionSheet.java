@@ -43,7 +43,7 @@ public final class OptionSheet {
         LinearLayout header = new LinearLayout(context);
         header.setOrientation(LinearLayout.VERTICAL);
         header.setGravity(Gravity.CENTER_HORIZONTAL);
-        header.setPadding(Ui.dp(context, 16), 0, Ui.dp(context, 16), Ui.dp(context, 12));
+        Ui.setSheetHeaderPadding(header, context);
         TextView heading = new TextView(context);
         heading.setText(title);
         heading.setGravity(Gravity.CENTER);
