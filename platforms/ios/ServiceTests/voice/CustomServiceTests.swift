@@ -244,6 +244,16 @@ final class CustomServiceTests: XCTestCase {
     XCTAssertThrowsError(try AppServicesBridge.parseResponse(polish, voice: false))
   }
 
+  func testPolishBodyRejectsAnOversizedPromptBeforeBuildingTheRequest() {
+    XCTAssertThrowsError(try AppServicesBridge.polishBody(
+      "fixture", prompt: String(repeating: "提示", count: 16_385), text: "合成文本"))
+  }
+
+  func testPolishBodyRejectsAnOversizedUnicodeTextBeforeBuildingTheRequest() {
+    XCTAssertThrowsError(try AppServicesBridge.polishBody(
+      "fixture", prompt: "润色", text: String(repeating: "😀", count: 8_193)))
+  }
+
   func testTransportUsesConfiguredEndpointAndReportsHTTPFailure() async throws {
     let session = URLSessionConfiguration.ephemeral
     session.protocolClasses = [FixtureProtocol.self]
