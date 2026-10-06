@@ -64,8 +64,7 @@ final class ImeFunctionPanel {
             label.setText(section.title());
             KeyboardGeometry.setKeyTextSize(label, 11);
             label.setGravity(Gravity.CENTER_VERTICAL);
-            s.moreToolsPanel.addView(label, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, s.pixels(20)));
+            s.moreToolsPanel.addView(label, KeyboardGeometry.matchWidthHeightPx(s.pixels(20)));
         }
         int columns = section.columns();
         for (int start = 0; start < cards.length; start += columns) {
@@ -79,8 +78,8 @@ final class ImeFunctionPanel {
                 if (column > 0) params.setMarginStart(s.pixels(MoreToolsLayout.CARD_SPACING_DP));
                 row.addView(child, params);
             }
-            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, s.pixels(section.height()));
+        LinearLayout.LayoutParams rowParams = KeyboardGeometry.matchWidthHeightPx(
+            s.pixels(section.height()));
             rowParams.bottomMargin = s.pixels(MoreToolsLayout.ROW_SPACING_DP);
             s.moreToolsPanel.addView(row, rowParams);
         }
