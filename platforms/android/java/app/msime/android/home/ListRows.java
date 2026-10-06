@@ -46,8 +46,7 @@ final class ListRows {
         heading.setAccessibilityHeading(true);
         heading.setPadding(Ui.dp(context, Ui.NAV_ROW_PADDING_H), Ui.dp(context, 16),
             Ui.dp(context, Ui.NAV_ROW_PADDING_H), Ui.dp(context, 4));
-        parent.addView(heading, new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        parent.addView(heading, Ui.matchWidth());
         return heading;
     }
 
