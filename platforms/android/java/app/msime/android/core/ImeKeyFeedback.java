@@ -225,7 +225,8 @@ final class ImeKeyFeedback {
                 PackSounds next = null;
                 try {
                     JSONObject root = new JSONObject(NativeClient.keySoundPack(body));
-                    JSONObject value = root.optBoolean("ok", false) ? root.optJSONObject("value") : null;
+                    JSONObject value = Boolean.TRUE.equals(root.opt("ok"))
+                        ? root.optJSONObject("value") : null;
                     JSONObject files = value == null ? null : value.optJSONObject("sounds");
                     if (value != null && "keys".equals(value.optString("mode")) && files != null) {
                         SoundPool pool = new SoundPool.Builder().setMaxStreams(4)
