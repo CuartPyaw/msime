@@ -161,7 +161,7 @@ public final class SkinsPage extends DetailPage {
         SkinSwatchView swatch = new SkinSwatchView(context);
         swatch.setSkin(card.skin());
         swatch.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        tile.addView(swatch, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(context, 76)));
+        tile.addView(swatch, Ui.frameMatchWidthHeight(context, 76));
         cell.addView(tile, Ui.matchWidth());
 
         TextView name = new TextView(context);
