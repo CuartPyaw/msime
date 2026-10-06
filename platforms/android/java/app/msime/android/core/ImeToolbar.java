@@ -210,7 +210,7 @@ final class ImeToolbar {
     /** 内联键盘高度条：调整时替换整行工具栏。 */
     void addInlineHeightBar(LinearLayout candidateRegion) {
         InlineHeightBar bar = new InlineHeightBar(s);
-        bar.setVisibility(View.GONE);
+        ViewPolicy.hide(bar);
         bar.setBasePixels(s.pixels(KeyboardGeometry.HEIGHT_PERCENT_BASE_DP));
         s.inlineHeightBar = bar;
         candidateRegion.addView(bar, KeyboardGeometry.matchWidthHeightPx(

@@ -233,8 +233,8 @@ final class ImeCandidates {
                 || !MSIMEInputService.sameCandidateVersion(s.candidatePanelSnapshot, s.view)) {
             s.candidatePanelOpen = false;
             s.candidatePanelSnapshot = null;
-            s.expandedCandidates.setVisibility(View.GONE);
-            s.expandedCandidateScroll.setVisibility(View.GONE);
+            ViewPolicy.hide(s.expandedCandidates);
+            ViewPolicy.hide(s.expandedCandidateScroll);
             return;
         }
         s.expandedCandidateScroll.setVisibility(View.VISIBLE);
