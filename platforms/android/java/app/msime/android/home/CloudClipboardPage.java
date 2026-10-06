@@ -155,10 +155,7 @@ public final class CloudClipboardPage extends DetailPage {
             clear.setText("清空");
             Ui.style(clear, Ui.TEXT_GROUP_TITLE, 500, Ui.accent(context));
         Ui.setPaddingDp(clear, context, 8, 4, 0, 4);
-            clear.setBackground(Ui.ripple(context));
-            clear.setClickable(true);
-            clear.setFocusable(true);
-            clear.setOnClickListener(ignored -> confirmClear());
+            Ui.makeClickable(clear, context, this::confirmClear);
             header.addView(clear);
         }
         LinearLayout.LayoutParams headerParams = Ui.matchWidth();
@@ -194,9 +191,6 @@ public final class CloudClipboardPage extends DetailPage {
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         Ui.setPaddingDp(row, context, 16, 12, 8, 12);
-        row.setBackground(Ui.ripple(context));
-        row.setClickable(true);
-        row.setFocusable(true);
 
         LinearLayout texts = new LinearLayout(context);
         texts.setOrientation(LinearLayout.VERTICAL);
@@ -226,7 +220,7 @@ public final class CloudClipboardPage extends DetailPage {
         }));
 
         row.setContentDescription(item.text() + "，" + meta(item) + "，点按复制");
-        row.setOnClickListener(ignored -> {
+        Ui.makeClickable(row, context, () -> {
             ClipboardManager clipboard = context.getSystemService(ClipboardManager.class);
             if (clipboard == null) return;
             clipboard.setPrimaryClip(ClipData.newPlainText("水杉云剪贴板", item.text()));
