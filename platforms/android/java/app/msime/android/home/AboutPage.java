@@ -205,7 +205,7 @@ public final class AboutPage extends DetailPage {
             button.setGravity(Gravity.CENTER);
             button.setSingleLine(true);
             Ui.style(button, 15, 600, Ui.onAccent(context));
-            button.setBackground(Ui.rippleOn(context, Ui.accent(context), 9999f));
+            button.setBackground(Ui.pillRipple(context, Ui.accent(context)));
             button.setPadding(Ui.dp(context, 20), 0, Ui.dp(context, 20), 0);
             button.setMinHeight(Ui.dp(context, 36));
             button.setMinWidth(Ui.dp(context, 96));
@@ -239,7 +239,7 @@ public final class AboutPage extends DetailPage {
         // 「已是最新版本」是结果而不是按钮，换成 accentSoft 底、强调色字，再点一次重新检查。
         boolean quiet = state == State.UP_TO_DATE || busy;
         button.setTextColor(quiet ? Ui.accent(context) : Ui.onAccent(context));
-        button.setBackground(Ui.rippleOn(context, quiet ? Ui.accentSoft(context) : Ui.accent(context), 9999f));
+        button.setBackground(Ui.pillRipple(context, quiet ? Ui.accentSoft(context) : Ui.accent(context)));
     }
 
     private void onPill() {

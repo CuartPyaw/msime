@@ -98,7 +98,7 @@ public final class DownloadPage extends DetailPage {
         copy.setGravity(Gravity.CENTER);
         copy.setSingleLine(true);
         Ui.style(copy, Ui.TEXT_BUTTON_SMALL, 600, Ui.onAccent(context));
-        copy.setBackground(Ui.rippleOn(context, Ui.accent(context), 9999f));
+        copy.setBackground(Ui.pillRipple(context, Ui.accent(context)));
         copy.setPadding(Ui.dp(context, 14), Ui.dp(context, 6), Ui.dp(context, 14), Ui.dp(context, 6));
         copy.setMinHeight(Ui.dp(context, 32));
         copy.setClickable(true);
@@ -165,7 +165,7 @@ public final class DownloadPage extends DetailPage {
         button.setGravity(Gravity.CENTER);
         button.setSingleLine(true);
         Ui.style(button, Ui.TEXT_BUTTON_SMALL, 600, Ui.accent(context));
-        button.setBackground(Ui.rippleOn(context, Ui.accentSoft(context), 9999f));
+        button.setBackground(Ui.pillRipple(context, Ui.accentSoft(context)));
         button.setPadding(Ui.dp(context, 14), Ui.dp(context, 5), Ui.dp(context, 14), Ui.dp(context, 5));
         button.setMinHeight(Ui.dp(context, 32));
         button.setClickable(true);

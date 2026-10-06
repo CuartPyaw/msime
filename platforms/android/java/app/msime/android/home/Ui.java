@@ -300,6 +300,11 @@ public final class Ui {
     }
 
     /** 有底色的按压反馈：底色画在波纹下面，波纹裁在 `radiusPx` 的圆角里；底色透明时波纹照样可见。 */
+    /** Create a pill-shaped press ripple with a fully rounded mask. */
+    public static Drawable pillRipple(Context context, @ColorInt int fill) {
+        return rippleOn(context, fill, 9999f);
+    }
+
     public static Drawable rippleOn(Context context, @ColorInt int fill, float radiusPx) {
         int pressed = withAlpha(text(context), 0.10f);
         return new RippleDrawable(ColorStateList.valueOf(pressed), rounded(fill, radiusPx),
