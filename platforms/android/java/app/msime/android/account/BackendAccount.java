@@ -666,7 +666,7 @@ public final class BackendAccount {
     /** 发一次流式请求并读完 SSE；连接前或响应头之前的非 2xx 抛 {@link RequestException}，流开始后的失败抛 {@link IllegalStateException}。 */
     private static String streamChat(JSONObject body, String token, ChatCall call, ChatStreamListener listener)
             throws Exception {
-        byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
+        byte[] payload = TextPolicy.utf8Bytes(body.toString());
         HttpsURLConnection connection = (HttpsURLConnection) new URL(ORIGIN + "/v1/chat/completions").openConnection();
         try {
             if (!call.attach(connection)) throw new CancellationException("chat cancelled");
