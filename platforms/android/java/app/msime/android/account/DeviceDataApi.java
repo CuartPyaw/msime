@@ -394,9 +394,7 @@ public final class DeviceDataApi {
             int status = connection.getResponseCode();
             if (status / 100 == 2) {
                 try (InputStream input = connection.getInputStream()) {
-                    byte[] buffer = new byte[16 * 1024];
-                    int read;
-                    while ((read = input.read(buffer)) != -1) out.write(buffer, 0, read);
+                    HttpBodyPolicy.copy(input, out);
                 }
                 out.flush();
                 return new Download(status, null, new byte[0]);

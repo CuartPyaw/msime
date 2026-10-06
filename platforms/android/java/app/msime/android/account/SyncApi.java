@@ -418,7 +418,9 @@ public final class SyncApi {
             try {
                 int status = connection.getResponseCode();
                 if (status / 100 == 2) {
-                    try (InputStream input = connection.getInputStream()) { copy(input, out); }
+                    try (InputStream input = connection.getInputStream()) {
+                        HttpBodyPolicy.copy(input, out);
+                    }
                     out.flush();
                     return new Exchange(status, null, new byte[0]);
                 }
@@ -437,7 +439,7 @@ public final class SyncApi {
                 connection.setDoOutput(true);
                 connection.setFixedLengthStreamingMode(length);
                 try (InputStream input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS); OutputStream output = connection.getOutputStream()) {
-                    copy(input, output);
+                    HttpBodyPolicy.copy(input, output);
                 }
                 int status = connection.getResponseCode();
                 if (status / 100 == 2) {
@@ -474,10 +476,5 @@ public final class SyncApi {
             }
         }
 
-        private static void copy(InputStream input, OutputStream output) throws IOException {
-            byte[] buffer = new byte[16 * 1024];
-            int read;
-            while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
-        }
     }
 }
