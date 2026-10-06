@@ -181,8 +181,7 @@ final class ImeToolbar {
         CandidateChevronButton expand = new CandidateChevronButton(s);
         s.expandCandidates = expand;
         expand.setContentDescription("展开候选");
-        expand.setOnClickListener(ignored -> {
-            s.imeKeyFeedback.playFeedback(expand);
+        bindToolbarAction(expand, () -> {
             if (s.candidatePanelOpen) s.closeCandidatePanel();
             else s.openCandidatePanel();
             expand.setExpanded(s.candidatePanelOpen, true);
