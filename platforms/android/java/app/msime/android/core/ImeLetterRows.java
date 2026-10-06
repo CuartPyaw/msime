@@ -355,8 +355,7 @@ final class ImeLetterRows {
             // 第二行（a–l）两侧各缩进 5%：9 个键加两侧各 0.5 的占位正好是第一行 10 个键的宽度。
             if (standardLetters && rowIndex == 1) {
                 secondRowLeadingIndent = indent();
-                row.addView(secondRowLeadingIndent, new LinearLayout.LayoutParams(0,
-                    LinearLayout.LayoutParams.MATCH_PARENT, .5f));
+                row.addView(secondRowLeadingIndent, KeyboardGeometry.weightedMatchParentParams(.5f));
             }
             for (String rowKey : keys) {
                 // 藏文的符号页把 `=` 换成叠写用的 `+`。
@@ -411,8 +410,7 @@ final class ImeLetterRows {
                     s.symbolKeyButtons.add(keyButton);
                     s.symbolKeyInputs.add(input);
                 }
-                row.addView(keyButton, new LinearLayout.LayoutParams(0,
-                    LinearLayout.LayoutParams.MATCH_PARENT, 1));
+                row.addView(keyButton, KeyboardGeometry.weightedMatchParentParams(1));
             }
             // The Dachen rows carry their own ; key (ㄤ), and no double-pinyin final.
             if (s.keyboardLayer == KeyboardLayout.Layer.LETTERS && rowIndex == 1 && !zhuyinKeycaps) {
@@ -421,13 +419,11 @@ final class ImeLetterRows {
                 s.shuangpinKeyButtons.add((ShuangpinHintButton) s.microsoftFinalKey);
                 s.shuangpinKeyInputs.add(";");
                 KeyboardGeometry.setKeyTextSize(s.microsoftFinalKey, 22);
-                row.addView(s.microsoftFinalKey, new LinearLayout.LayoutParams(0,
-                    LinearLayout.LayoutParams.MATCH_PARENT, 1));
+                row.addView(s.microsoftFinalKey, KeyboardGeometry.weightedMatchParentParams(1));
             }
             if (standardLetters && rowIndex == 1) {
                 secondRowTrailingIndent = indent();
-                row.addView(secondRowTrailingIndent, new LinearLayout.LayoutParams(0,
-                    LinearLayout.LayoutParams.MATCH_PARENT, .5f));
+                row.addView(secondRowTrailingIndent, KeyboardGeometry.weightedMatchParentParams(.5f));
                 updateSecondRowIndent();
             }
             // 大小写和删除属于最后一行的两端，不属于底部功能行。Leaving them in a strip below the keys
