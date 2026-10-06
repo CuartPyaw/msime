@@ -28,8 +28,6 @@ public final class KeyboardSkinKeyDrawable extends Drawable {
         this.density = density;
     }
 
-    private float dp(double value) { return (float) value * density; }
-
     private Path path(RectF rect) {
         Path path = new Path();
         switch (skin.keyShape()) {
@@ -63,7 +61,7 @@ public final class KeyboardSkinKeyDrawable extends Drawable {
                 path.close();
             }
             default -> {
-                float radius = Math.min(dp(skin.cornerRadius()),
+                float radius = Math.min(KeyboardGeometry.floatPixels(skin.cornerRadius(), density),
                     Math.min(rect.width(), rect.height()) / 2);
                 path.addRoundRect(rect, radius, radius, Path.Direction.CW);
             }
@@ -72,9 +70,9 @@ public final class KeyboardSkinKeyDrawable extends Drawable {
     }
 
     @Override public void draw(Canvas canvas) {
-        float depth = "raised".equals(skin.keyMaterial()) ? dp(3) : 0;
+        float depth = "raised".equals(skin.keyMaterial()) ? KeyboardGeometry.floatPixels(3, density) : 0;
         RectF face = new RectF(getBounds());
-        face.inset(dp(1), dp(1));
+        face.inset(KeyboardGeometry.floatPixels(1, density), KeyboardGeometry.floatPixels(1, density));
         face.bottom -= depth;
         Path shape = path(face);
         int opacity = action ? alpha : (int) Math.round(alpha * skin.keyOpacity());
@@ -118,17 +116,18 @@ public final class KeyboardSkinKeyDrawable extends Drawable {
         } else if ("paper".equals(skin.keyMaterial())) {
             overlay.setShader(null);
             overlay.setStyle(Paint.Style.STROKE);
-            overlay.setStrokeWidth(dp(.5));
+            overlay.setStrokeWidth(KeyboardGeometry.floatPixels(.5, density));
             overlay.setColor(Color.BLACK);
             overlay.setAlpha((int) Math.round(alpha * .08));
-            for (float y = face.top + dp(3); y < face.bottom; y += dp(4))
-                canvas.drawLine(face.left, y, face.right, y - dp(1), overlay);
+            for (float y = face.top + KeyboardGeometry.floatPixels(3, density); y < face.bottom;
+                 y += KeyboardGeometry.floatPixels(4, density))
+                canvas.drawLine(face.left, y, face.right, y - KeyboardGeometry.floatPixels(1, density), overlay);
             overlay.setStyle(Paint.Style.FILL);
         }
         canvas.restore();
         if (skin.borderWidth() > 0) {
             paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(dp(skin.borderWidth()));
+            paint.setStrokeWidth(KeyboardGeometry.floatPixels(skin.borderWidth(), density));
             paint.setColor(Color.parseColor(skin.borderColor()));
             paint.setAlpha(alpha);
             canvas.drawPath(shape, paint);

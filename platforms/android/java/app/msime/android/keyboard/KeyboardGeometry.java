@@ -166,6 +166,11 @@ public final class KeyboardGeometry {
         return Math.round(dp * density);
     }
 
+    /** Convert a fractional density-independent size to pixels without rounding. */
+    public static float floatPixels(double dp, float density) {
+        return (float) dp * density;
+    }
+
     public static int bounded(int value, int minimum, int maximum) {
         return Math.max(minimum, Math.min(value, maximum));
     }
