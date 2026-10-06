@@ -180,8 +180,7 @@ final class ImeCandidates {
         KeyboardGeometry.setKeyTextSize(button, 17);
         button.setSelected(highlighted);
         expandedCells.add(button);
-        ViewPolicy.setMinimumWidth(button, s.pixels(64));
-        ViewPolicy.setMinimumHeight(button, s.pixels(44));
+        ViewPolicy.setMinimumSize(button, s.pixels(64), s.pixels(44));
         KeyboardGeometry.setHorizontalPaddingDp(button, s, 10);
         // The completed keyboard tree is styled once by MSIMEInputService.render().
         // Styling here would be repeated immediately after this button is attached.

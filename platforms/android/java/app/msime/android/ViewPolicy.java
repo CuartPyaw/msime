@@ -149,4 +149,10 @@ public final class ViewPolicy {
     public static void setActiveAlpha(View view, boolean active, float inactiveAlpha) {
         view.setAlpha(active ? 1f : inactiveAlpha);
     }
+
+    /** Apply minimum width and height constraints to a view. */
+    public static void setMinimumSize(View view, int width, int height) {
+        view.setMinimumWidth(width);
+        view.setMinimumHeight(height);
+    }
 }
