@@ -958,7 +958,7 @@ final class ImePanels {
     }
 
     private TextView aiText(CharSequence text, float sizeSp) {
-        TextView view = new TextView(s);
+        TextView view = ViewPolicy.newTextView(s, text);
         ViewPolicy.setTextSizeLabel(view, text, sizeSp);
         KeyboardGeometry.setKeyTextSize(view, sizeSp);
         return view;
@@ -1251,7 +1251,7 @@ final class ImePanels {
     }
 
     private TextView centeredNote(String text, float sizeSp) {
-        TextView note = new TextView(s);
+        TextView note = ViewPolicy.newTextView(s, text);
         ViewPolicy.setCenteredText(note, text, sizeSp);
         return note;
     }
