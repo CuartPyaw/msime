@@ -128,7 +128,7 @@ final class ImeLayoutRows {
 
         LinearLayout tools = new LinearLayout(s);
         tools.setOrientation(LinearLayout.VERTICAL);
-        Button delete = s.keyId(s.keyboardKey("⌫", "删除", s::deleteFromHandwriting), "Backspace");
+        Button delete = s.keyId(s.backspaceKey(s::deleteFromHandwriting), "Backspace");
         if (delete instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.ACCENT);
         addNineKey(tools, delete);
         Button rewrite = s.keyboardKey("重写", "清空手写", () -> {
@@ -374,7 +374,7 @@ final class ImeLayoutRows {
         Runnable deleteAction = () -> {
             if (s.connection != null && !s.command(0)) s.deleteCodePointBeforeCursor();
         };
-        Button delete = s.keyId(s.keyboardKey("⌫", "删除", deleteAction), "Backspace");
+        Button delete = s.keyId(s.backspaceKey(deleteAction), "Backspace");
         s.imeLetterRows.bindBackspaceRepeat(delete, deleteAction);
         if (delete instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.ACCENT);
         addNineKey(actions, delete);
@@ -466,7 +466,7 @@ final class ImeLayoutRows {
         Runnable deleteAction = () -> {
             if (s.connection != null && !s.command(0)) s.connection.deleteSurroundingTextInCodePoints(1, 0);
         };
-        Button delete = s.keyId(s.keyboardKey("⌫", "删除", deleteAction), "Backspace");
+        Button delete = s.keyId(s.backspaceKey(deleteAction), "Backspace");
         s.imeLetterRows.bindBackspaceRepeat(delete, deleteAction);
         if (delete instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.ACCENT);
         addNineKey(actions, delete);
@@ -574,7 +574,7 @@ final class ImeLayoutRows {
         Runnable deleteAction = () -> {
             if (s.connection != null && !s.command(0)) s.deleteCodePointBeforeCursor();
         };
-        Button delete = s.keyId(s.keyboardKey("⌫", "删除", deleteAction), "Backspace");
+        Button delete = s.keyId(s.backspaceKey(deleteAction), "Backspace");
         s.imeLetterRows.bindBackspaceRepeat(delete, deleteAction);
         if (delete instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.ACCENT);
         addNineKey(actions, delete);
@@ -939,7 +939,7 @@ final class ImeLayoutRows {
         LinearLayout side = new LinearLayout(s);
         side.setOrientation(LinearLayout.VERTICAL);
         Runnable deleteAction = this::deleteJapaneseKana;
-        Button delete = s.keyId(s.keyboardKey("⌫", "删除", deleteAction), "Backspace");
+        Button delete = s.keyId(s.backspaceKey(deleteAction), "Backspace");
         s.imeLetterRows.bindBackspaceRepeat(delete, deleteAction);
         addJapaneseSideKey(side, delete, 1);
         s.japaneseSpaceKey = s.keyId(s.keyboardKey("空白", "空白；左右滑动移动光标", s::space), "Space");

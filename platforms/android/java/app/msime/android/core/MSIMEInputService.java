@@ -3393,6 +3393,20 @@ public final class MSIMEInputService extends InputMethodService {
         return button;
     }
 
+    /** 九键、注音、笔画、手写和日语九键的 ⌫：和 {@link #keyboardKey} 一样的键，只是画 26 键那个 22 dp 的删除图标，不再用排版字号的「⌫」字符，那样比 26 键的小一圈。 */
+    Button backspaceKey(Runnable action) {
+        KeyboardIconKey button = new KeyboardIconKey(this, KeyboardIconKey.Kind.BACKSPACE);
+        button.setText("⌫");
+        button.setContentDescription("按键 删除");
+        imeStyler.styleButton(button, false);
+        button.setOnClickListener(ignored -> {
+            imeKeyFeedback.playFeedback(button);
+            countKey(button);
+            action.run();
+        });
+        return button;
+    }
+
     /** A nine-key grid cap: the same key as {@link #keyboardKey}, plus room for its digit. */
     NineKeyDigitButton nineKeyGridKey(String label, String description, Runnable action) {
         NineKeyDigitButton button = new NineKeyDigitButton(this);
