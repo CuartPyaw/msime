@@ -259,6 +259,12 @@ public final class KeyboardGeometry {
         return new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, heightPixels);
     }
 
+    /** Create linear layout parameters with content-sized width and parent-sized height. */
+    public static LinearLayout.LayoutParams wrapMatchParentParams() {
+        return new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.MATCH_PARENT);
+    }
+
     /** Create frame layout parameters that fill both parent dimensions. */
     public static FrameLayout.LayoutParams frameMatchParentParams() {
         return new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
