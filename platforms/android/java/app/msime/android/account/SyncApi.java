@@ -274,6 +274,13 @@ public final class SyncApi {
         return preferenceRevision(value);
     }
 
+    /** Snapshot entry weights are positive JSON integers in the host-api range. */
+    public static Long strictSnapshotWeight(Object value) {
+        if (!(value instanceof Integer) && !(value instanceof Long)) return null;
+        long weight = ((Number) value).longValue();
+        return weight >= 1L && weight <= 100_000_000L ? weight : null;
+    }
+
     /**
      * 快照里用户自己的词（`type:"entry"`），供「合并」时导入本机个人词库队列。被 `overlay` 标成已删除的词不算。词条数不设上限之外的限制，调用方按 {@link SyncMergePolicy#batches} 分批。
      */
@@ -308,8 +315,10 @@ public final class SyncApi {
                 Object word = data.opt("word");
                 Object weight = data.opt("weight");
                 if (!(kind instanceof String) || !(code instanceof String) || !(word instanceof String)) continue;
+                Long strictWeight = strictSnapshotWeight(weight);
+                if (strictWeight == null) throw new IOException("invalid snapshot weight");
                 words.put(id, new SyncMergePolicy.Word((String) kind, (String) code, (String) word,
-                    weight instanceof Number ? ((Number) weight).longValue() : 0L));
+                    strictWeight));
             }
         }
         for (String id : deleted) words.remove(id);
