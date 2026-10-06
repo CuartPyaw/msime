@@ -212,7 +212,7 @@ public final class KeyboardSchemeCard extends FrameLayout {
         disc.setShape(GradientDrawable.OVAL);
         disc.setColor(accent);
         // The disc sits on the glyph's border, so it carries the panel colour as its own ring.
-        disc.setStroke(Math.max(1, KeyboardGeometry.pixels(getContext(), 1f)), keyBackground);
+        disc.setStroke(KeyboardGeometry.atLeastOnePixel(getContext(), 1f), keyBackground);
         return new android.graphics.drawable.LayerDrawable(
             new android.graphics.drawable.Drawable[] {disc, tick(keyBackground)});
     }
