@@ -28,6 +28,11 @@ import com.google.android.material.color.MaterialColors;
 public final class Ui {
     private Ui() {}
 
+    /** Bottom content inset that keeps page content above either system navigation or the IME. */
+    public static int bottomContentInset(int systemBottom, int tabs, int imeBottom, int base) {
+        return Math.max(systemBottom + tabs, imeBottom) + base;
+    }
+
     // ---- 尺寸（dp） ----
 
     /** 详情页顶栏高度，也是大标题那一行的高度。 */
