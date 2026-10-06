@@ -2022,7 +2022,7 @@ public final class MSIMEInputService extends InputMethodService {
                 englishSuggestionButtons.add(makeEnglishSuggestionButton(englishSuggestionButtons.size()));
             Button button = englishSuggestionButtons.get(slot);
             String text = englishSuggestions.get(slot);
-            button.setVisibility(View.VISIBLE);
+            ViewPolicy.show(button);
             button.setText(text);
             KeyboardGeometry.setKeyTextSize(button, candidateFontSize);
             button.setContentDescription("英文建议 " + (slot + 1) + "：" + text);
@@ -5440,14 +5440,14 @@ public final class MSIMEInputService extends InputMethodService {
                 handwritingDownload.setText("下载中文手写模型");
                 handwritingDownload.setContentDescription("下载中文手写模型；完成后可离线识别");
                 handwritingDownload.setEnabled(true);
-                handwritingDownload.setVisibility(View.VISIBLE);
+                ViewPolicy.show(handwritingDownload);
                 if (!handwritingDownloading) showHandwritingStatus("首次下载后可离线手写");
             }
             case DOWNLOADING -> {
                 handwritingCanvas.setAcceptsInk(false);
                 handwritingDownload.setText(handwritingDownloading ? "正在下载…" : "正在检查模型…");
                 handwritingDownload.setEnabled(false);
-                handwritingDownload.setVisibility(View.VISIBLE);
+                ViewPolicy.show(handwritingDownload);
                 showHandwritingStatus(handwritingDownloading
                     ? "正在下载中文手写模型…" : "正在检查中文手写模型…");
                 HandwritingRecognizer expected = handwritingRecognizer;
@@ -6771,7 +6771,7 @@ public final class MSIMEInputService extends InputMethodService {
                 while (candidateButtons.size() <= slot)
                     candidateButtons.add(imeCandidates.makeCandidateButton(candidateButtons.size()));
                 Button candidateView = candidateButtons.get(slot);
-                candidateView.setVisibility(View.VISIBLE);
+                ViewPolicy.show(candidateView);
                 updateCandidateButton(candidateView, candidate, slot);
                 activeCandidates.addView(candidateView, new LinearLayout.LayoutParams(
                     candidateHorizontal ? LinearLayout.LayoutParams.WRAP_CONTENT
@@ -6780,7 +6780,7 @@ public final class MSIMEInputService extends InputMethodService {
             }
             if (!hasDiagnostic && strictCandidatePage(view, "page_count") > 1
                     && expandCandidates != null)
-                expandCandidates.setVisibility(View.VISIBLE);
+                ViewPolicy.show(expandCandidates);
         }
         int visibleSlots = entries == null ? 0 : entries.length();
         for (int slot = visibleSlots; slot < candidateButtons.size(); slot++)
@@ -6829,7 +6829,7 @@ public final class MSIMEInputService extends InputMethodService {
     private void renderSharedHandwritingCandidates(LinearLayout activeCandidates) {
         if (handwritingStatus == null) return;
         if (handwritingResults.isEmpty() || handwritingCandidateToken == null) {
-            handwritingStatus.setVisibility(View.VISIBLE);
+            ViewPolicy.show(handwritingStatus);
             return;
         }
         ViewPolicy.hide(handwritingStatus);
