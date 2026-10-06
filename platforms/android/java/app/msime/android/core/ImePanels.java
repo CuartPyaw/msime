@@ -1364,7 +1364,9 @@ final class ImePanels {
             } catch (RuntimeException | LinkageError error) {
                 result = null;
             }
-            java.util.List<String> phrases = new java.util.ArrayList<>();
+            int phraseCapacity = result != null && result.ok()
+                ? result.document().phrases().size() : 0;
+            java.util.List<String> phrases = new java.util.ArrayList<>(phraseCapacity);
             String message;
             if (result == null || !result.ok()) {
                 message = result == null || result.failure().isEmpty() ? "常用语读取失败" : result.failure();
