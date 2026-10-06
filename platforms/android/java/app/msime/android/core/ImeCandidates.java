@@ -232,8 +232,7 @@ final class ImeCandidates {
     }
 
     private KeyboardPressButton candidateButton() {
-        KeyboardPressButton button = new KeyboardPressButton(s);
-        ViewPolicy.setAllCapsFalse(button);
+        KeyboardPressButton button = ViewPolicy.newPressButton(s);
         return button;
     }
 

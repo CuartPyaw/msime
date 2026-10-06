@@ -204,8 +204,7 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
     }
 
     private Button button(String title, String description, Runnable action) {
-        Button button = new KeyboardPressButton(getContext());
-        ViewPolicy.setAllCapsFalse(button);
+        Button button = ViewPolicy.newPressButton(getContext());
         button.setText(title);
         button.setContentDescription(description);
         button.setOnClickListener(ignored -> action.run());

@@ -314,9 +314,7 @@ final class ImeFunctionPanel {
     }
 
     private KeyboardPressButton toolButton() {
-        KeyboardPressButton button = new KeyboardPressButton(s);
-        ViewPolicy.setAllCapsFalse(button);
-        return button;
+        return ViewPolicy.newPressButton(s);
     }
 
     private TextView textLabel(CharSequence text, float sizeSp) {
