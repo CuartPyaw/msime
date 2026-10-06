@@ -228,7 +228,7 @@ public final class TypingPage extends DetailPage {
         JSONObject schemes = preferences.optJSONObject("touch_keyboard_schemes");
         JSONArray enabled = schemes == null ? null : schemes.optJSONArray("enabled");
         if (enabled == null) return null;
-        List<String> ids = new ArrayList<>();
+        List<String> ids = new ArrayList<>(enabled.length());
         for (int index = 0; index < enabled.length(); index++) {
             if (!enabled.isNull(index)) ids.add(enabled.optString(index, ""));
         }
