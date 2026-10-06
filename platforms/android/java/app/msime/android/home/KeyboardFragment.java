@@ -2,7 +2,6 @@ package app.msime.android.home;
 
 import android.content.Intent;
 import android.content.res.ColorStateList;
-import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -341,10 +340,7 @@ public final class KeyboardFragment extends HomeTabFragment {
     private void check(View view, int rowId, int markId, int actionId, @StringRes int label,
             boolean done, Runnable action) {
         TextView mark = view.findViewById(markId);
-        GradientDrawable disc = Ui.circle(done ? Ui.accent(requireContext()) : Ui.color(requireContext(), R.attr.msWarn));
-        mark.setBackground(disc);
-        mark.setText(done ? "✓" : "!");
-        mark.setTextColor(done ? Ui.onAccent(requireContext()) : 0xFFFFFFFF);
+        Ui.applyStatusMark(mark, requireContext(), done);
         TextView button = view.findViewById(actionId);
         button.setVisibility(done ? View.GONE : View.VISIBLE);
         button.setOnClickListener(done ? null : ignored -> action.run());
