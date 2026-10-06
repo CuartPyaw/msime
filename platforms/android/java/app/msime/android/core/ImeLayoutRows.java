@@ -7,6 +7,7 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -740,24 +741,37 @@ final class ImeLayoutRows {
     void bindJapaneseFlick(Button button, JapaneseNineKeyLayout.Key key) {
         final float[] origin = new float[2];
         final int[] direction = new int[1];
+        final boolean[] previewShown = new boolean[1];
+        // 轻点只输入键面上的假名，不弹十字预览；按住到系统长按时长，或手指已经滑出方向，才显示它。
+        Runnable holdPreview = () -> {
+            previewShown[0] = true;
+            showJapaneseFlickPreview(button, key, direction[0]);
+        };
         button.setOnTouchListener((ignored, event) -> {
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN -> {
                     origin[0] = event.getX();
                     origin[1] = event.getY();
                     direction[0] = 0;
+                    previewShown[0] = false;
                     button.setPressed(true);
-                    showJapaneseFlickPreview(button, key, 0);
+                    button.removeCallbacks(holdPreview);
+                    button.postDelayed(holdPreview, ViewConfiguration.getLongPressTimeout());
                     return true;
                 }
                 case MotionEvent.ACTION_MOVE -> {
                     direction[0] = JapaneseNineKeyLayout.direction(
                         event.getX() - origin[0], event.getY() - origin[1], s.pixels(12));
-                    showJapaneseFlickPreview(button, key, direction[0]);
+                    if (previewShown[0] || direction[0] != 0) {
+                        button.removeCallbacks(holdPreview);
+                        previewShown[0] = true;
+                        showJapaneseFlickPreview(button, key, direction[0]);
+                    }
                     return true;
                 }
                 case MotionEvent.ACTION_UP -> {
                     button.setPressed(false);
+                    button.removeCallbacks(holdPreview);
                     hideJapaneseFlickPreview();
                     if (direction[0] == 0) button.performClick();
                     else {
@@ -769,6 +783,7 @@ final class ImeLayoutRows {
                 }
                 case MotionEvent.ACTION_CANCEL -> {
                     button.setPressed(false);
+                    button.removeCallbacks(holdPreview);
                     hideJapaneseFlickPreview();
                     return true;
                 }
