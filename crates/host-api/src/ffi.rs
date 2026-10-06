@@ -192,6 +192,7 @@ pub(crate) fn sentence_model_path(resources: &str, configured: Option<&str>) -> 
         .unwrap_or_else(|| Path::new(resources).join(SENTENCE_MODEL_FILE))
 }
 
+pub mod android_data;
 pub mod candidates;
 pub mod host;
 pub mod input;
@@ -207,6 +208,7 @@ pub mod voice;
 
 // Every export has always been reachable at the crate root; the domain split
 // below is for readers, not for callers, so each module is flattened back out.
+pub use android_data::*;
 pub use candidates::*;
 pub use host::*;
 pub use input::*;
