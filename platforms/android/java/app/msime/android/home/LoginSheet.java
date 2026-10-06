@@ -26,6 +26,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
+import app.msime.android.keyboard.KeyboardGeometry;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -416,7 +417,7 @@ final class LoginSheet {
 
         @Override public void draw(Canvas canvas) {
             RectF bounds = new RectF(getBounds());
-            float scale = Math.min(bounds.width(), bounds.height()) / viewport;
+            float scale = KeyboardGeometry.shorterSide(bounds.width(), bounds.height()) / viewport;
             matrix.setScale(scale, scale);
             matrix.postTranslate(bounds.left + (bounds.width() - viewport * scale) / 2f,
                 bounds.top + (bounds.height() - viewport * scale) / 2f);
