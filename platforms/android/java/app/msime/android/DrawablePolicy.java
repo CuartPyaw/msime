@@ -22,6 +22,14 @@ public final class DrawablePolicy {
         return shape;
     }
 
+    public static GradientDrawable rounded(int color, float[] radii) {
+        GradientDrawable shape = new GradientDrawable();
+        shape.setShape(GradientDrawable.RECTANGLE);
+        shape.setColor(color);
+        shape.setCornerRadii(radii);
+        return shape;
+    }
+
     public static GradientDrawable outlined(float radiusPx, int strokeWidth, int strokeColor) {
         GradientDrawable shape = rounded(Color.TRANSPARENT, radiusPx);
         shape.setStroke(Math.max(1, strokeWidth), strokeColor);
