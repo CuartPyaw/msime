@@ -5948,12 +5948,12 @@ public final class MSIMEInputService extends InputMethodService {
         ViewPolicy.setSymmetricPadding(expandedCandidates, 24, 16);
         expandedCandidates.setBackgroundColor(0xfff5f5f5);
         expandedCandidates.setContentDescription("候选面板");
-        expandedCandidates.setVisibility(View.GONE);
+        ViewPolicy.hide(expandedCandidates);
         expandedCandidateScroll = new ScrollView(this);
         expandedCandidateScroll.setFillViewport(true);
         expandedCandidateScroll.addView(expandedCandidates,
             KeyboardGeometry.scrollMatchParentParams());
-        expandedCandidateScroll.setVisibility(View.GONE);
+        ViewPolicy.hide(expandedCandidateScroll);
         keyboardSurface.addView(expandedCandidateScroll, KeyboardGeometry.frameMatchParentParams());
         clipboardPanel = new LinearLayout(this);
         clipboardPanel.setOrientation(LinearLayout.VERTICAL);
@@ -5962,7 +5962,7 @@ public final class MSIMEInputService extends InputMethodService {
         clipboardPanel.setContentDescription("剪贴板历史");
         clipboardScroll = new ScrollView(this);
         clipboardScroll.addView(clipboardPanel);
-        clipboardScroll.setVisibility(View.GONE);
+        ViewPolicy.hide(clipboardScroll);
         keyboardSurface.addView(clipboardScroll, KeyboardGeometry.frameMatchParentParams());
         schemePanel = new LinearLayout(this);
         schemePanel.setOrientation(LinearLayout.VERTICAL);
@@ -5972,7 +5972,7 @@ public final class MSIMEInputService extends InputMethodService {
         schemeScroll = new ScrollView(this);
         schemeScroll.addView(schemePanel, KeyboardGeometry.scrollMatchParentParams());
         schemeScroll.setFillViewport(true);
-        schemeScroll.setVisibility(View.GONE);
+        ViewPolicy.hide(schemeScroll);
         keyboardSurface.addView(schemeScroll, KeyboardGeometry.frameMatchParentParams());
         skinPanel = new LinearLayout(this);
         skinPanel.setOrientation(LinearLayout.VERTICAL);
@@ -5982,7 +5982,7 @@ public final class MSIMEInputService extends InputMethodService {
         skinScroll = new ScrollView(this);
         skinScroll.addView(skinPanel, KeyboardGeometry.scrollMatchParentParams());
         skinScroll.setFillViewport(true);
-        skinScroll.setVisibility(View.GONE);
+        ViewPolicy.hide(skinScroll);
         keyboardSurface.addView(skinScroll, KeyboardGeometry.frameMatchParentParams());
         layoutSettingsPanel = new LinearLayout(this);
         layoutSettingsPanel.setOrientation(LinearLayout.VERTICAL);
@@ -6053,7 +6053,7 @@ public final class MSIMEInputService extends InputMethodService {
         layoutSettingsPanel.addView(layoutHint);
         layoutSettingsScroll = new ScrollView(this);
         layoutSettingsScroll.addView(layoutSettingsPanel);
-        layoutSettingsScroll.setVisibility(View.GONE);
+        ViewPolicy.hide(layoutSettingsScroll);
         keyboardSurface.addView(layoutSettingsScroll, KeyboardGeometry.frameMatchParentParams());
         layoutAdjustView = new KeyboardLayoutAdjustView(this,
             new KeyboardLayoutAdjustView.Listener() {
@@ -6084,7 +6084,7 @@ public final class MSIMEInputService extends InputMethodService {
 
                 @Override public void close() { closeLayoutSettings(); }
             });
-        layoutAdjustView.setVisibility(View.GONE);
+        ViewPolicy.hide(layoutAdjustView);
         keyboardSurface.addView(layoutAdjustView, KeyboardGeometry.frameMatchParentParams());
         voiceResultPanel = new LinearLayout(this);
         voiceResultPanel.setOrientation(LinearLayout.VERTICAL);
@@ -6093,7 +6093,7 @@ public final class MSIMEInputService extends InputMethodService {
         voiceResultPanel.setContentDescription("语音结果面板");
         voiceResultScroll = new ScrollView(this);
         voiceResultScroll.addView(voiceResultPanel);
-        voiceResultScroll.setVisibility(View.GONE);
+        ViewPolicy.hide(voiceResultScroll);
         keyboardSurface.addView(voiceResultScroll, KeyboardGeometry.frameMatchParentParams());
         aiPolishContainer = new LinearLayout(this);
         aiPolishContainer.setOrientation(LinearLayout.VERTICAL);
@@ -6111,7 +6111,7 @@ public final class MSIMEInputService extends InputMethodService {
         aiPolishActions.setOrientation(LinearLayout.VERTICAL);
         aiPolishActions.setPadding(24, 0, 24, 16);
         aiPolishContainer.addView(aiPolishActions, KeyboardGeometry.matchWidthWrapParams());
-        aiPolishContainer.setVisibility(View.GONE);
+        ViewPolicy.hide(aiPolishContainer);
         keyboardSurface.addView(aiPolishContainer, KeyboardGeometry.frameMatchParentParams());
         moreToolsPanel = new LinearLayout(this);
         moreToolsPanel.setOrientation(LinearLayout.VERTICAL);
@@ -6121,7 +6121,7 @@ public final class MSIMEInputService extends InputMethodService {
         moreToolsScroll.setFillViewport(true);
         moreToolsScroll.setVerticalScrollBarEnabled(false);
         moreToolsScroll.addView(moreToolsPanel, KeyboardGeometry.scrollMatchParentParams());
-        moreToolsScroll.setVisibility(View.GONE);
+        ViewPolicy.hide(moreToolsScroll);
         keyboardSurface.addView(moreToolsScroll, KeyboardGeometry.frameMatchParentParams());
         phrasePanel = new LinearLayout(this);
         phrasePanel.setOrientation(LinearLayout.VERTICAL);
@@ -6131,7 +6131,7 @@ public final class MSIMEInputService extends InputMethodService {
         phraseScroll.addView(phrasePanel, KeyboardGeometry.scrollMatchParentParams());
         phraseScroll.setFillViewport(true);
         phraseScroll.setClickable(true);
-        phraseScroll.setVisibility(View.GONE);
+        ViewPolicy.hide(phraseScroll);
         keyboardSurface.addView(phraseScroll, KeyboardGeometry.frameMatchParentParams());
         imePanels.buildEmojiPanel();
         imePanels.buildSymbolPanel();
