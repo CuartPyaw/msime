@@ -235,6 +235,12 @@ public final class KeyboardGeometry {
             LinearLayout.LayoutParams.WRAP_CONTENT);
     }
 
+    /** Create linear layout parameters that wrap both dimensions. */
+    public static LinearLayout.LayoutParams wrapParams() {
+        return new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT);
+    }
+
     /** Create weighted linear layout parameters that fill the parent's height. */
     public static LinearLayout.LayoutParams weightedMatchParentParams(float weight) {
         return new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, weight);
