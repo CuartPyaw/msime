@@ -134,10 +134,10 @@ public final class OptionSheet {
         FrameLayout.LayoutParams textParams = new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
         // 两侧各留出 ✓ 的位置，长选项不会压到它。
-        textParams.leftMargin = Ui.dp(context, 48);
-        textParams.rightMargin = Ui.dp(context, 48);
-        textParams.topMargin = Ui.dp(context, 8);
-        textParams.bottomMargin = Ui.dp(context, 8);
+        textParams.leftMargin = Ui.dp(context, Ui.SHEET_OPTION_TEXT_INSET);
+        textParams.rightMargin = Ui.dp(context, Ui.SHEET_OPTION_TEXT_INSET);
+        textParams.topMargin = Ui.dp(context, Ui.SHEET_OPTION_TEXT_VERTICAL_INSET);
+        textParams.bottomMargin = Ui.dp(context, Ui.SHEET_OPTION_TEXT_VERTICAL_INSET);
         row.addView(text, textParams);
 
         if (selected) {
@@ -145,9 +145,9 @@ public final class OptionSheet {
             check.setImageResource(R.drawable.ms_w1_a2_check);
             Ui.setImageTint(check, Ui.accent(context));
             check.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            FrameLayout.LayoutParams checkParams = new FrameLayout.LayoutParams(Ui.dp(context, 18), Ui.dp(context, 18),
+            FrameLayout.LayoutParams checkParams = new FrameLayout.LayoutParams(Ui.dp(context, Ui.SHEET_CHECK_SIZE), Ui.dp(context, Ui.SHEET_CHECK_SIZE),
                 Gravity.CENTER_VERTICAL | Gravity.END);
-            checkParams.setMarginEnd(Ui.dp(context, 20));
+            checkParams.setMarginEnd(Ui.dp(context, Ui.SHEET_CHECK_END_MARGIN));
             row.addView(check, checkParams);
         }
 
