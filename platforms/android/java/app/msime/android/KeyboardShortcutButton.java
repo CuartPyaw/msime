@@ -4,7 +4,6 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
-import app.msime.android.KeyboardGeometry;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.view.Gravity;
@@ -124,7 +123,8 @@ public final class KeyboardShortcutButton extends KeyboardPressButton {
         float centerX = getPaddingLeft() + width / 2f;
         float centerY = getPaddingTop() + height / 2f;
         if (isSelected() && Color.alpha(activeFill) > 0) {
-            float side = Math.min(shorter, KeyboardGeometry.floatPixels(getContext(), ACTIVE_SIDE_DP));
+            float side = BoundsPolicy.atMost(shorter,
+                KeyboardGeometry.floatPixels(getContext(), ACTIVE_SIDE_DP));
             bounds.set(centerX - side / 2f, centerY - side / 2f, centerX + side / 2f,
                 centerY + side / 2f);
             fill.setColor(activeFill);
@@ -146,7 +146,8 @@ public final class KeyboardShortcutButton extends KeyboardPressButton {
         };
         float iconDp = icon == KeyboardShortcutIconPolicy.Icon.DISMISS
             ? DISMISS_ICON_DP : MATERIAL_ICON_DP;
-        float size = Math.min(shorter, KeyboardGeometry.floatPixels(getContext(), iconDp));
+        float size = BoundsPolicy.atMost(shorter,
+            KeyboardGeometry.floatPixels(getContext(), iconDp));
         KeyboardIconPaths.draw(canvas, glyph, path, centerX - size / 2f, centerY - size / 2f,
             size, color);
     }
