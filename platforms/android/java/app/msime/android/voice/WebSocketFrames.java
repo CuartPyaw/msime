@@ -154,7 +154,7 @@ public final class WebSocketFrames {
      * something to unmask, and is refused.
      */
     public static Frame decode(byte[] buffer, int available) {
-        if (buffer == null || available < 2) return null;
+        if (buffer == null || available < 2 || available > buffer.length) return null;
         boolean fin = (buffer[0] & 0x80) != 0;
         int opcode = buffer[0] & 0x0f;
         if ((buffer[0] & 0x70) != 0) return null;

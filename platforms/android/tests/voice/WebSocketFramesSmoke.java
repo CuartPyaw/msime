@@ -103,6 +103,8 @@ public final class WebSocketFramesSmoke {
             "a partial header waits for more bytes rather than guessing");
         check(WebSocketFrames.decode(server, 4) == null,
             "a partial payload waits too");
+        check(WebSocketFrames.decode(server, server.length + 1) == null,
+            "a claimed byte count beyond the buffer is refused");
         byte[] masked = {(byte) 0x82, (byte) 0x83, 0, 0, 0, 0, 1, 2, 3};
         check(WebSocketFrames.decode(masked, masked.length) == null,
             "a server frame claiming to be masked is a protocol error, not something to unmask");
