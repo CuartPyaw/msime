@@ -121,7 +121,8 @@ public final class DistributionView extends View {
         for (int index = 0; index < shares.size(); index++) {
             float part = total <= 0 ? 0 : width * shares.get(index).count() / (float) total;
             fill.setColor(colour(index));
-            box.set(x, 0, Math.max(x, x + part - (index < shares.size() - 1 ? gap : 0)), height);
+            box.set(x, 0, BoundsPolicy.atLeast(
+                x + part - (index < shares.size() - 1 ? gap : 0), x), height);
             canvas.drawRect(box, fill);
             x += part;
         }
@@ -155,7 +156,8 @@ public final class DistributionView extends View {
             float part = total <= 0 ? 0 : (right - left) * share.count() / (float) total;
             if (part > 0) {
                 fill.setColor(colour(index));
-                box.set(left, middle - barHeight / 2, left + Math.max(barHeight, part), middle + barHeight / 2);
+            box.set(left, middle - barHeight / 2,
+                left + BoundsPolicy.atLeast(part, barHeight), middle + barHeight / 2);
                 canvas.drawRoundRect(box, barHeight / 2, barHeight / 2, fill);
             }
             styleText(14, Typeface.NORMAL, Ui.subText(context));
