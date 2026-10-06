@@ -598,7 +598,7 @@ final class ImeLayoutRows {
         int horizontal = s.pixels(2);
         ViewPolicy.setHorizontalPadding(button, horizontal);
         button.setMaxLines(2);
-        button.setAutoSizeTextTypeUniformWithConfiguration(7, 14, 1, TypedValue.COMPLEX_UNIT_SP);
+        ViewPolicy.setAutoSizeSp(button, 7, 14, 1);
         button.setContentDescription(label);
         if (button instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.KEY);
         return button;

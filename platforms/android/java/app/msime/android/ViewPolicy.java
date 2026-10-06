@@ -123,6 +123,12 @@ public final class ViewPolicy {
         view.setMaxLines(lines);
     }
 
+    /** Configure uniform automatic text sizing with scalable-pixel bounds. */
+    public static void setAutoSizeSp(TextView view, int minSp, int maxSp, int stepSp) {
+        view.setAutoSizeTextTypeUniformWithConfiguration(minSp, maxSp, stepSp,
+            TypedValue.COMPLEX_UNIT_SP);
+    }
+
     /** Remove Android's extra font top and bottom padding from a text view. */
     public static void clearFontPadding(TextView view) {
         view.setIncludeFontPadding(false);
