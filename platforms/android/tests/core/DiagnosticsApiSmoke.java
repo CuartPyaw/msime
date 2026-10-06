@@ -14,6 +14,7 @@ public final class DiagnosticsApiSmoke {
         check(DiagnosticsApi.Event.of(5, "commit", -7).durationMs() == -1, "a negative duration means none");
         check(DiagnosticsApi.strictInteger(7L) == 7L, "diagnostic integer");
         check(DiagnosticsApi.strictInteger(1.5d) == null, "fractional diagnostic integer is rejected");
+        check(DiagnosticsApi.strictInteger("7") == null, "numeric strings are rejected");
 
         check(DiagnosticsApi.Retention.fromWire("one_hour") == DiagnosticsApi.Retention.ONE_HOUR, "one_hour");
         check(DiagnosticsApi.Retention.fromWire("seven_days") == DiagnosticsApi.Retention.SEVEN_DAYS, "seven_days");

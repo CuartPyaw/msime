@@ -332,15 +332,24 @@ public final class DiagnosticsApi {
     static State parseState(JSONObject root) {
         Snapshot snapshot = null;
         JSONObject raw = root.optJSONObject("snapshot");
-        if (raw != null && !raw.optString("id", "").isEmpty()) {
+        String snapshotId = raw == null ? null : optionalString(raw, "id");
+        Long snapshotBytes = raw == null ? null : optionalInteger(raw, "bytes");
+        String snapshotCreated = raw == null ? null : optionalString(raw, "created_at");
+        String snapshotExpires = raw == null ? null : optionalString(raw, "expires_at");
+        String snapshotHint = raw == null ? null : optionalString(raw, "token_hint");
+        if (raw != null && snapshotId != null && !snapshotId.isEmpty()
+                && snapshotBytes != null && snapshotBytes >= 0
+                && snapshotCreated != null && snapshotExpires != null && snapshotHint != null) {
             JSONArray names = raw.optJSONArray("sections");
             List<String> sections = new ArrayList<>(names == null ? 0 : names.length());
             if (names != null) {
-                for (int i = 0; i < names.length(); i++) sections.add(names.optString(i, ""));
+                for (int i = 0; i < names.length(); i++) {
+                    String section = strictString(names.opt(i));
+                    if (section != null) sections.add(section);
+                }
             }
-            snapshot = new Snapshot(raw.optString("id", ""), raw.optString("created_at", ""),
-                raw.optString("expires_at", ""), raw.optLong("bytes", 0), Collections.unmodifiableList(sections),
-                raw.optString("token_hint", ""));
+            snapshot = new Snapshot(snapshotId, snapshotCreated, snapshotExpires, snapshotBytes,
+                Collections.unmodifiableList(sections), snapshotHint);
         }
         JSONArray list = root.optJSONArray("accesses");
         int accessCount = list == null ? 0 : list.length();
@@ -351,9 +360,15 @@ public final class DiagnosticsApi {
                 JSONObject item = list.optJSONObject(i);
                 if (item == null) continue;
                 Object arguments = item.opt("arguments");
-                accesses.add(new Access(item.optString("at", ""), item.optString("tool", ""),
-                    arguments == null || arguments == JSONObject.NULL ? "" : String.valueOf(arguments),
-                    item.optLong("result_count", 0), item.optLong("bytes", 0)));
+                String at = optionalString(item, "at");
+                String tool = optionalString(item, "tool");
+                String rawArguments = arguments == null || arguments == JSONObject.NULL
+                    ? "" : strictString(arguments);
+                Long resultCount = optionalInteger(item, "result_count");
+                Long bytes = optionalInteger(item, "bytes");
+                if (at == null || tool == null || rawArguments == null || resultCount == null || bytes == null
+                        || resultCount < 0 || bytes < 0) continue;
+                accesses.add(new Access(at, tool, rawArguments, resultCount, bytes));
             }
         }
         return new State(snapshot, Collections.unmodifiableList(accesses));
@@ -364,6 +379,18 @@ public final class DiagnosticsApi {
         if (value instanceof Integer integer) return integer.longValue();
         if (value instanceof Long longValue) return longValue;
         return null;
+    }
+
+    /** Optional response strings: absent/null means empty, every other JSON type is malformed. */
+    static String optionalString(JSONObject object, String key) {
+        if (object == null || !object.has(key) || object.isNull(key)) return "";
+        return strictString(object.opt(key));
+    }
+
+    /** Optional response integers: absent/null means zero, every other non-integer is malformed. */
+    static Long optionalInteger(JSONObject object, String key) {
+        if (object == null || !object.has(key) || object.isNull(key)) return 0L;
+        return strictInteger(object.opt(key));
     }
 
     private static String entryText(InputStream stream) throws IOException {
