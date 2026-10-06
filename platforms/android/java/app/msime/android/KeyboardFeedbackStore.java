@@ -96,9 +96,19 @@ public final class KeyboardFeedbackStore {
         if (text == null || text.length() > MAX_BYTES) throw new JSONException("feedback size");
         JSONObject value = new JSONObject(text);
         return new Settings(
-            value.optBoolean("soundEnabled", true),
-            value.optBoolean("hapticsEnabled", false),
+            booleanValue(value.opt("soundEnabled"), true),
+            booleanValue(value.opt("hapticsEnabled"), false),
             KeyboardFeedbackPreferences.strength(value.optString("hapticStrength", "medium")));
+    }
+
+    /** Persisted flags are typed JSON booleans; do not accept org.json's string coercion. */
+    static Boolean strictBoolean(Object value) {
+        return value instanceof Boolean ? (Boolean) value : null;
+    }
+
+    static boolean booleanValue(Object value, boolean fallback) {
+        Boolean parsed = strictBoolean(value);
+        return parsed == null ? fallback : parsed;
     }
 
     static String encode(Settings settings) throws JSONException {
