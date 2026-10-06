@@ -348,8 +348,7 @@ final class ImeLetterRows {
             } else {
                 row.setTag(new MSIMEInputService.KeyboardHeightRole(KeyboardGeometry.KEY_ROW_HEIGHT_DP,
                     rows.size(), rowIndex, true));
-                s.keyRows.addView(row, new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+                s.keyRows.addView(row, KeyboardGeometry.matchWidthWrapParams());
             }
             boolean tibetanSymbols = s.keyboardLayer == KeyboardLayout.Layer.SYMBOLS
                 && s.tibetanSchemeActive();
@@ -478,8 +477,7 @@ final class ImeLetterRows {
                 row.setTag(new MSIMEInputService.KeyboardHeightRole(KeyboardGeometry.KEY_ROW_HEIGHT_DP,
                     rows.size() - 1, rowIndex, true));
             }
-            s.keyRows.addView(row, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            s.keyRows.addView(row, KeyboardGeometry.matchWidthWrapParams());
             for (KeyboardLayout.LayerKey layerKey : rows.get(rowIndex)) {
                 Button key = designLayerKey(layerKey, rowIndex == 0);
                 if (key == null) continue;
