@@ -190,20 +190,11 @@ public final class KeyboardSchemeCard extends FrameLayout {
     }
 
     private static android.graphics.drawable.Drawable rounded(int color, int radius) {
-        GradientDrawable shape = new GradientDrawable();
-        shape.setShape(GradientDrawable.RECTANGLE);
-        shape.setCornerRadius(radius);
-        shape.setColor(color);
-        return shape;
+        return DrawablePolicy.rounded(color, radius);
     }
 
     private static android.graphics.drawable.Drawable outlined(int color, int radius, int width) {
-        GradientDrawable shape = new GradientDrawable();
-        shape.setShape(GradientDrawable.RECTANGLE);
-        shape.setCornerRadius(radius);
-        shape.setColor(Color.TRANSPARENT);
-        shape.setStroke(Math.max(1, width), color);
-        return shape;
+        return DrawablePolicy.outlined(radius, width, color);
     }
 
     /** A filled disc carrying a tick, sized for the 12dp corner the master puts it in. */

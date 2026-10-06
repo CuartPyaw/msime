@@ -283,10 +283,7 @@ public final class Ui {
 
     /** 纯色圆角矩形。 */
     public static GradientDrawable rounded(@ColorInt int color, float radiusPx) {
-        GradientDrawable shape = new GradientDrawable();
-        shape.setColor(color);
-        shape.setCornerRadius(radiusPx);
-        return shape;
+        return DrawablePolicy.rounded(color, radiusPx);
     }
 
     /** 胶囊形状：GradientDrawable 会把过大的圆角夹到短边的一半，所以高度怎么变两端都是半圆。 */
