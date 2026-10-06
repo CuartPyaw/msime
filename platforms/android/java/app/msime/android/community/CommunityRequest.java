@@ -196,7 +196,7 @@ public final class CommunityRequest {
 
     /** 条数按千位分隔，如「4,812 条」。 */
     public static String entriesLabel(int count) {
-        return String.format(java.util.Locale.ROOT, "%,d 条", BoundsPolicy.nonNegative(count));
+        return NumberPolicy.grouped(BoundsPolicy.nonNegative(count)) + " 条";
     }
 
     /**

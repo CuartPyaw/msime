@@ -308,7 +308,7 @@ public final class DictionaryCollectionsStore {
 
     /** 条数的展示写法，例如 `128,406 条`。 */
     public static String countLabel(long count) {
-        return String.format(Locale.ROOT, "%,d 条", BoundsPolicy.nonNegative(count));
+        return NumberPolicy.grouped(BoundsPolicy.nonNegative(count)) + " 条";
     }
 
     /** 从文件名得到新词库的名字：去掉扩展名（`.dict.yaml` 算一个），截到 32 个字，收不出来时用「导入的词库」。 */
