@@ -57,7 +57,7 @@ final class ImeFunctionPanel {
 
     void appendMoreToolsSection(MoreToolsLayout.Section section, Button... cards) {
         if (!section.title().isEmpty()) {
-            TextView label = new TextView(s);
+            TextView label = textLabel(section.title(), 11);
             ViewPolicy.setCenteredText(label, section.title(), 11);
             KeyboardGeometry.setKeyTextSize(label, 11);
             s.moreToolsPanel.addView(label, KeyboardGeometry.matchWidthHeightPx(s.pixels(20)));
@@ -294,8 +294,7 @@ final class ImeFunctionPanel {
         segments.addView(reply, first);
         segments.addView(polish, second);
         s.moreToolsPanel.addView(segments, KeyboardGeometry.matchWidthWrapParams());
-        TextView hint = new TextView(s);
-        ViewPolicy.setTextSizeLabel(hint,
+        TextView hint = textLabel(
             "回复：粘贴对方的话，生成几种语气的回复。润色：先选中要改的文字。", 12);
         KeyboardGeometry.setKeyTextSize(hint, 12);
         KeyboardGeometry.setPaddingDp(hint, s, 4, 10, 4, 0);
@@ -314,6 +313,12 @@ final class ImeFunctionPanel {
         if (Build.VERSION.SDK_INT >= 30) button.setStateDescription(enabled ? null : "不可用");
         bindToolAction(button, action, true);
         return button;
+    }
+
+    private TextView textLabel(CharSequence text, float sizeSp) {
+        TextView view = new TextView(s);
+        ViewPolicy.setTextSizeLabel(view, text, sizeSp);
+        return view;
     }
 
     private void bindToolAction(Button button, Runnable action, boolean playFeedback) {
