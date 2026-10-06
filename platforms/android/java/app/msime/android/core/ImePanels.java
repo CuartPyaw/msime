@@ -540,8 +540,7 @@ final class ImePanels {
         s.replySourceButton = MSIMEInputService.role(s.button(s.replySourceCard, MSIMEInputService.REPLY_SOURCE_PLACEHOLDER,
             this::pasteReplySource), KeyboardKeyRole.PLAIN);
         ViewPolicy.setSingleLineEllipsized(s.replySourceButton);
-        s.replySourceButton.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        KeyboardGeometry.setKeyTextSize(s.replySourceButton, 15);
+        ViewPolicy.setStartCenteredKeyTextSizeSp(s.replySourceButton, 15);
         s.replySourceButton.setContentDescription("回复源文字");
         compactReplyControl(s.replySourceButton, 0);
         s.replySourceButton.setLayoutParams(new LinearLayout.LayoutParams(
@@ -668,9 +667,8 @@ final class ImePanels {
             for (String reply : s.replyModel.replies()) {
                 Button candidate = MSIMEInputService.role(s.button(s.replyMain, reply, () -> useReply(reply)),
                     KeyboardKeyRole.KEY);
-                candidate.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+                ViewPolicy.setStartCenteredKeyTextSizeSp(candidate, 15);
                 candidate.setContentDescription("回复候选，点按插入");
-                KeyboardGeometry.setKeyTextSize(candidate, 15);
                 ViewPolicy.clearMinimumSize(candidate);
                 KeyboardGeometry.setSymmetricPaddingDp(candidate, s, 10, 10);
                 candidate.setLayoutParams(KeyboardGeometry.matchWidthWrapParams());

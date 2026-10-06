@@ -62,8 +62,7 @@ final class ImeFunctionPanel {
         if (!section.title().isEmpty()) {
             TextView label = new TextView(s);
             label.setText(section.title());
-            KeyboardGeometry.setKeyTextSize(label, 11);
-            ViewPolicy.setCenteredVertically(label);
+            ViewPolicy.setCenteredKeyTextSizeSp(label, 11);
             s.moreToolsPanel.addView(label, KeyboardGeometry.matchWidthHeightPx(s.pixels(20)));
         }
         int columns = section.columns();
