@@ -226,7 +226,7 @@ public final class TypingStatisticsModel {
     private static List<Slice> modes(Map<String, Long> values) {
         long chinese = 0;
         for (String id : CHINESE_SOURCES) chinese += values.getOrDefault(id, 0L);
-        List<Slice> slices = new ArrayList<>();
+        List<Slice> slices = new ArrayList<>(12);
         slices.add(new Slice("chinese", "中文模式", chinese));
         slices.add(new Slice("japanese", "日语模式", values.getOrDefault("japanese", 0L)));
         slices.add(new Slice("korean", "韩语模式", values.getOrDefault("korean", 0L)));
