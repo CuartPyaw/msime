@@ -93,12 +93,24 @@ public final class ViewPolicy {
 
     /** Center a view's content on both axes. */
     public static void setCentered(View view) {
-        ViewPolicy.setCentered(view);
+        if (view instanceof TextView text) {
+            text.setGravity(Gravity.CENTER);
+        } else if (view instanceof LinearLayout layout) {
+            layout.setGravity(Gravity.CENTER);
+        } else {
+            throw new IllegalArgumentException("Centered policy requires a text or linear-layout view");
+        }
     }
 
     /** Center a view's content along the vertical axis. */
     public static void setCenteredVertically(View view) {
-        ViewPolicy.setCenteredVertically(view);
+        if (view instanceof TextView text) {
+            text.setGravity(Gravity.CENTER_VERTICAL);
+        } else if (view instanceof LinearLayout layout) {
+            layout.setGravity(Gravity.CENTER_VERTICAL);
+        } else {
+            throw new IllegalArgumentException("Vertical centering requires a text or linear-layout view");
+        }
     }
 
     /** Center a view's content along the horizontal axis. */
