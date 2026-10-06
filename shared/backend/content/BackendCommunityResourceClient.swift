@@ -131,13 +131,16 @@ extension BackendAccountClient {
   /// Report another user's item to the moderators. kind is skins, candidate-skins, plugins, dictionaries or replies; any signed-in session counts, the device's anonymous account included.
   func reportContent(kind: String, itemID: UUID, reason: String, detail: String, token: String) async throws {
     let detail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard ["skins", "candidate-skins", "plugins", "dictionaries", "replies"].contains(kind),
+    guard itemID != UUID(uuidString: "00000000-0000-0000-0000-000000000000")!,
+          ["skins", "candidate-skins", "plugins", "dictionaries", "replies"].contains(kind),
           Self.reportReasons.contains(reason),
           Self.resourceText(detail, minimum: 0, maximum: 1000, multiline: true) else { throw Failure(status: 400) }
     struct Body: Encodable { let kind: String; let item_id: String; let reason: String; let detail: String? }
+    struct Result: Decodable { let reported: Bool }
     let body = try JSONEncoder().encode(Body(kind: kind, item_id: itemID.uuidString.lowercased(), reason: reason,
                                              detail: detail.isEmpty ? nil : detail))
-    _ = try await request("POST", "/v1/community/reports", token: token, body: body)
+    let response: Result = try await json("POST", "/v1/community/reports", token: token, body: body)
+    guard response.reported else { throw Failure(status: 502) }
   }
   private static func resourcePath(_ id: UUID) -> String { "/v1/community/resources/" + id.uuidString.lowercased() }
   private static func validSharedWord(_ entry: SharedWord) -> Bool {
