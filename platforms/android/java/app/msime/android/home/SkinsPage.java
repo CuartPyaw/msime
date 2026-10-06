@@ -175,12 +175,9 @@ public final class SkinsPage extends DetailPage {
         nameParams.topMargin = Ui.dp(context, 8);
         cell.addView(name, nameParams);
 
-        cell.setClickable(true);
-        cell.setFocusable(true);
-        cell.setBackground(Ui.ripple(context));
         cell.setContentDescription("皮肤 " + card.title());
         ViewCompat.setStateDescription(cell, card.selected() ? "已选中" : "未选中");
-        cell.setOnClickListener(ignored -> {
+        Ui.makeClickable(cell, context, () -> {
             if (!card.selected()) select(card);
         });
         return cell;
@@ -216,11 +213,9 @@ public final class SkinsPage extends DetailPage {
         LinearLayout.LayoutParams nameParams = Ui.matchWidth();
         nameParams.topMargin = Ui.dp(context, 8);
         cell.addView(name, nameParams);
-        cell.setClickable(true);
-        cell.setFocusable(true);
-        cell.setBackground(Ui.ripple(context));
         cell.setAccessibilityDelegate(KeyboardSheets.buttonDelegate("AI 设计皮肤，描述一句话生成"));
-        cell.setOnClickListener(ignored -> SettingsNavigator.open(requireContext(), PageId.AI_SKIN, null));
+        Ui.makeClickable(cell, context,
+            () -> SettingsNavigator.open(requireContext(), PageId.AI_SKIN, null));
         return cell;
     }
 
