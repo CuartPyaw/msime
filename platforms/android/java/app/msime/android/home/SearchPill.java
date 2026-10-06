@@ -12,6 +12,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import androidx.annotation.Nullable;
 import app.msime.android.R;
+import app.msime.android.ViewPolicy;
 import java.util.function.Consumer;
 
 /**
@@ -41,7 +42,7 @@ public final class SearchPill extends LinearLayout {
 
         field = new EditText(context);
         field.setBackground(null);
-        field.setPadding(0, 0, 0, 0);
+        ViewPolicy.clearPadding(field);
         field.setSingleLine(true);
         field.setInputType(InputType.TYPE_CLASS_TEXT);
         field.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
