@@ -130,17 +130,9 @@ public final class ProfilePage extends DetailPage {
         }
     }
 
-    /** 读图片的像素尺寸，不解码像素；不是图片时为 null。 */
-    @Nullable private static BitmapFactory.Options bounds(byte[] bytes) {
-        BitmapFactory.Options bounds = new BitmapFactory.Options();
-        bounds.inJustDecodeBounds = true;
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
-        return bounds.outWidth <= 0 || bounds.outHeight <= 0 ? null : bounds;
-    }
-
     /** 按头像实际显示的大小降采样解码：只限字节数挡不住高度可压缩的大尺寸图片，全尺寸解码会 OutOfMemoryError。 */
     @Nullable private static Bitmap decodeAvatar(byte[] bytes) {
-        BitmapFactory.Options bounds = bounds(bytes);
+        BitmapFactory.Options bounds = BitmapPolicy.decodeBounds(bytes);
         if (bounds == null) return null;
         int sample = BitmapPolicy.sampleSizeForEdge(
             bounds.outWidth, bounds.outHeight, AVATAR_DECODE_EDGE);
@@ -373,7 +365,7 @@ public final class ProfilePage extends DetailPage {
             }
             if (image == null) return "图片超过 1 MB，请换一张小一些的";
             if (DeviceDataApi.avatarType(image) == null) return "头像只支持 PNG 或 JPEG 图片";
-            BitmapFactory.Options size = bounds(image);
+            BitmapFactory.Options size = BitmapPolicy.decodeBounds(image);
             if (size == null) return "读不到这张图片";
             if (BitmapPolicy.longestEdge(size.outWidth, size.outHeight) > MAX_AVATAR_UPLOAD_EDGE) return "图片尺寸太大，请换一张小一些的";
             new DeviceDataApi(context).uploadAvatar(image);
