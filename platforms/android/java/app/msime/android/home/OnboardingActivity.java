@@ -479,9 +479,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         mark.setTextSize(13);
         mark.setText(done ? "✓" : "!");
         mark.setTextColor(done ? Ui.onAccent(this) : 0xFFFFFFFF);
-        GradientDrawable disc = new GradientDrawable();
-        disc.setShape(GradientDrawable.OVAL);
-        disc.setColor(done ? Ui.accent(this) : Ui.color(this, R.attr.msWarn));
+        GradientDrawable disc = Ui.circle(done ? Ui.accent(this) : Ui.color(this, R.attr.msWarn));
         mark.setBackground(disc);
         mark.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         row.addView(mark, new LinearLayout.LayoutParams(Ui.dp(this, 24), Ui.dp(this, 24)));

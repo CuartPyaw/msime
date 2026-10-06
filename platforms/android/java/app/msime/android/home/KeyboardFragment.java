@@ -338,9 +338,7 @@ public final class KeyboardFragment extends HomeTabFragment {
     private void check(View view, int rowId, int markId, int actionId, @StringRes int label,
             boolean done, Runnable action) {
         TextView mark = view.findViewById(markId);
-        GradientDrawable disc = new GradientDrawable();
-        disc.setShape(GradientDrawable.OVAL);
-        disc.setColor(done ? Ui.accent(requireContext()) : Ui.color(requireContext(), R.attr.msWarn));
+        GradientDrawable disc = Ui.circle(done ? Ui.accent(requireContext()) : Ui.color(requireContext(), R.attr.msWarn));
         mark.setBackground(disc);
         mark.setText(done ? "✓" : "!");
         mark.setTextColor(done ? Ui.onAccent(requireContext()) : 0xFFFFFFFF);

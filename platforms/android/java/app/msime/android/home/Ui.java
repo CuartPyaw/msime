@@ -271,6 +271,14 @@ public final class Ui {
         return (color & 0x00FFFFFF) | (Math.round(base * alpha) << 24);
     }
 
+    /** Create a filled circular drawable. */
+    public static GradientDrawable circle(@ColorInt int color) {
+        GradientDrawable shape = new GradientDrawable();
+        shape.setShape(GradientDrawable.OVAL);
+        shape.setColor(color);
+        return shape;
+    }
+
     /** 纯色圆角矩形。 */
     public static GradientDrawable rounded(@ColorInt int color, float radiusPx) {
         GradientDrawable shape = new GradientDrawable();
