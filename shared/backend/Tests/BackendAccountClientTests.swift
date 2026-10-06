@@ -62,6 +62,34 @@ private final class OversizedAccountProtocol: URLProtocol {
   }
   override func stopLoading() {}
 }
+private final class OversizedProvidersProtocol: URLProtocol {
+  override class func canInit(with request: URLRequest) -> Bool { request.url?.path == "/v1/auth/providers" }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+  override func startLoading() {
+    var providers: [String: Bool] = [:]
+    for suffix in Array("abcdefghijklmnopq") { providers["provider-\(suffix)"] = true }
+    let body = try! JSONSerialization.data(withJSONObject: ["providers": providers])
+    let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+      headerFields: ["Content-Type": "application/json"])!
+    client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didLoad: body)
+    client?.urlProtocolDidFinishLoading(self)
+  }
+  override func stopLoading() {}
+}
+private final class InvalidProviderKeyProtocol: URLProtocol {
+  override class func canInit(with request: URLRequest) -> Bool { request.url?.path == "/v1/auth/providers" }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+  override func startLoading() {
+    let body = Data(#"{"providers":{"Bad Provider":true}}"#.utf8)
+    let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+      headerFields: ["Content-Type": "application/json"])!
+    client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didLoad: body)
+    client?.urlProtocolDidFinishLoading(self)
+  }
+  override func stopLoading() {}
+}
 private final class MalformedAccountPayloadProtocol: URLProtocol {
   override class func canInit(with request: URLRequest) -> Bool {
     ["/v1/auth/challenges", "/v1/auth/login", "/v1/users/me"].contains(request.url?.path)
@@ -169,6 +197,18 @@ final class BackendAccountClientTests: XCTestCase {
     XCTAssertEqual(providers["email"], false)
     let challenge = try await client.challenge(provider: "apple")
     XCTAssertEqual(challenge.nonce, "server-nonce")
+  }
+  func testProvidersRejectsUnboundedOrMalformedMap() async throws {
+    for protocolClass in [OversizedProvidersProtocol.self, InvalidProviderKeyProtocol.self] {
+      let configuration = URLSessionConfiguration.ephemeral
+      configuration.protocolClasses = [protocolClass]
+      do {
+        _ = try await BackendAccountClient(configuration: configuration).providers()
+        XCTFail("malformed providers accepted")
+      } catch let error as BackendAccountClient.Failure {
+        XCTAssertEqual(error.status, 0)
+      }
+    }
   }
   func testAuthenticatedNoContentOperations() async throws {
     let client = client()
