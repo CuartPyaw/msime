@@ -5832,16 +5832,9 @@ public:
              &cloud_clipboard_action_, &emoji_action_, &emoji_search_action_, &emoji_category_action_,
              &emoji_group_action_, &input_group_action_, &punctuation_group_action_, &candidate_group_action_})
       status.addAction(fcitx::StatusGroup::InputMethod, action);
-    // Rebuilt from the current preferences rather than assembled once: the
-    // switches are a shared document that can change while a context is focused,
-    // and the menu is shared too, so there is one place for it to follow.
-    event.inputContext()->propertyFor(&factory_)->refreshToolbar();
     status.addAction(fcitx::StatusGroup::InputMethod, &desktop_tools_action_);
     try {
       if (state->ensure()) {
-        if (state->voice_enabled_)
-          event.inputContext()->statusArea().addAction(
-              fcitx::StatusGroup::InputMethod, &voice_action_);
         state->render();
         state->syncMusic();
         // Moving into another text field shows the current 中/英 as a switch does (#2589), so the user knows the mode before typing there. Only a focus change: switching to this input method from another already gets Fcitx5's own input-method popup, and showInputModeHud keeps to the input_mode_hud preference and stays quiet in password and private fields.
@@ -5849,6 +5842,9 @@ public:
       }
     } catch (const OptionsNotConfigured &) { notConfigured(*state, true); }
     catch (...) { unavailable(*state); }
+    // 工具栏与语音两项要看会话，在建会话之后才定。
+    state->refreshToolbar();
+    state->syncVoiceAction();
     state->publishInputStatus(true);
     noticeReplacedAddon(*state);
   }
@@ -5859,15 +5855,9 @@ public:
         state->commitsOnBlur() && !state->view_.value("editing_text", std::string{}).empty()) {
       try { state->command(MSIME_FINISH_COMPOSITION); } catch (...) {}
     }
-    // Everything activate() or a later voice or toolbar refresh may have added.
-    for (auto *action : std::initializer_list<fcitx::Action *>{
-             &input_mode_action_, &width_action_, &chinese_punctuation_action_,
-             &candidate_translation_action_, &scheme_action_, &global_theme_action_, &dictionary_action_,
-             &settings_action_, &about_action_, &voice_cancel_action_, &maintenance_action_, &nine_key_action_,
-             &clipboard_action_, &cloud_clipboard_action_, &emoji_action_, &emoji_search_action_,
-             &emoji_category_action_, &emoji_group_action_, &input_group_action_, &punctuation_group_action_,
-             &candidate_group_action_, &voice_action_, &toolbar_action_, &desktop_tools_action_})
-      event.inputContext()->statusArea().removeAction(action);
+    // 失焦时状态动作留给托盘菜单（见 README「状态区」一段），换输入法时才清空。
+    if (event.type() != fcitx::EventType::InputContextFocusOut)
+      event.inputContext()->statusArea().clearGroup(fcitx::StatusGroup::InputMethod);
     state->close(); state->clearPanel();
     state->publishInputStatus(false);
   }
@@ -6135,7 +6125,7 @@ public:
 // Defined here rather than in the class body because FcitxEngine is only forward-declared there, and the voice action it owns cannot be named until the definition above.
 void FcitxState::syncVoiceAction() {
   if (!engine_) return;
-  if (voice_enabled_)
+  if (session_ && voice_enabled_)
     ic_.statusArea().addAction(fcitx::StatusGroup::InputMethod, &engine_->voice_action_);
   else
     ic_.statusArea().removeAction(&engine_->voice_action_);

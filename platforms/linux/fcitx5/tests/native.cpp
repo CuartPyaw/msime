@@ -857,6 +857,26 @@ int main(int argc, char **argv) {
             ("status actions unchanged by the option toggles: " +
              std::to_string(ic.statusArea().actions(fcitx::StatusGroup::InputMethod).size()))
                 .c_str());
+    // 点托盘往往让应用失焦，托盘菜单列的是最近聚焦的上下文的状态动作：失焦时它们要留着，换输入法时才拿掉。
+    {
+      const auto statusActions = [&] { return ic.statusArea().actions(fcitx::StatusGroup::InputMethod).size(); };
+      fcitx::InputContextEvent focusOut(&ic, fcitx::EventType::InputContextFocusOut);
+      engine.deactivate(entry, focusOut);
+      require(state->session_ == 0 && statusActions() == 24,
+              ("focus out closes the session but keeps the status actions: " + std::to_string(statusActions()))
+                  .c_str());
+      engine.activate(entry, focus);
+      require(state->session_ != 0 && statusActions() == 24,
+              ("refocusing reopens the session with the status actions once each: session=" +
+               std::to_string(state->session_) + " actions=" + std::to_string(statusActions()))
+                  .c_str());
+      fcitx::InputContextEvent switched(&ic, fcitx::EventType::InputContextSwitchInputMethod);
+      engine.deactivate(entry, switched);
+      require(statusActions() == 0,
+              ("switching input methods removes the status actions: " + std::to_string(statusActions())).c_str());
+      engine.activate(entry, focus);
+      require(state->session_ != 0 && statusActions() == 24, "switching back restores the status actions");
+    }
     require(engine.emoji_category_action_.shortText(&ic) == "表情：Emoji",
             "emoji category starts in the default catalog");
     engine.emoji_category_action_.activate(&ic);
