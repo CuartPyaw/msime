@@ -97,8 +97,7 @@ public final class LexiconPage extends DetailPage {
         pill.setFocusable(true);
         pill.setContentDescription(label);
         pill.setOnClickListener(ignored -> action.run());
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams params = Ui.wrap();
         params.setMarginStart(Ui.dp(context, 8));
         pill.setLayoutParams(params);
         return pill;
