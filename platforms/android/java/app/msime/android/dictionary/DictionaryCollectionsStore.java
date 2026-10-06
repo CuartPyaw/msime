@@ -396,24 +396,34 @@ public final class DictionaryCollectionsStore {
                 JSONObject item = raw.optJSONObject(index);
                 if (item == null) continue;
                 JSONObject source = item.optJSONObject("source");
-                String type = source == null ? "user" : source.optString("type", "user");
-                String resource = source == null ? "" : source.optString("resource_id", "");
-                collections.add(new Collection(item.optString("id", ""), item.optString("name", ""),
-                    item.optString("kind", "pinyin"), type, resource, item.optBoolean("enabled", false),
-                    item.optInt("entry_count", 0), item.optInt("pending", 0)));
+                String id = strictString(item.opt("id"));
+                String name = strictString(item.opt("name"));
+                String kind = strictString(item.opt("kind"));
+                Boolean enabled = strictBoolean(item.opt("enabled"));
+                Integer entryCount = strictInteger(item.opt("entry_count"));
+                Integer pending = strictInteger(item.opt("pending"));
+                String type = source == null ? "user" : strictString(source.opt("type"));
+                String resource = source == null || !source.has("resource_id")
+                    ? "" : strictString(source.opt("resource_id"));
+                if (id == null || name == null || kind == null || enabled == null
+                        || entryCount == null || pending == null || type == null
+                        || resource == null) continue;
+                collections.add(new Collection(id, name, kind, type, resource, enabled,
+                    entryCount, pending));
             }
         }
         JSONArray rawFormats = value.optJSONArray("formats");
         List<String> formats = new ArrayList<>(rawFormats == null ? 0 : rawFormats.length());
         if (rawFormats != null) {
             for (int index = 0; index < rawFormats.length(); index++) {
-                String format = rawFormats.optString(index, "");
-                if (!format.isEmpty()) formats.add(format);
+                String format = strictString(rawFormats.opt(index));
+                if (format != null && !format.isEmpty()) formats.add(format);
             }
         }
         JSONObject report = value.optJSONObject("import");
-        ImportReport importReport = report == null ? null : new ImportReport(report.optInt("imported", 0),
-            report.optInt("duplicates", 0), report.optInt("failed", 0), report.optBoolean("truncated", false));
+        ImportReport importReport = report == null ? null : new ImportReport(
+            strictInteger(report.opt("imported"), 0), strictInteger(report.opt("duplicates"), 0),
+            strictInteger(report.opt("failed"), 0), Boolean.TRUE.equals(strictBoolean(report.opt("truncated"))));
         return new View(Collections.unmodifiableList(collections), Collections.unmodifiableList(formats), importReport);
     }
 
@@ -425,11 +435,16 @@ public final class DictionaryCollectionsStore {
             for (int index = 0; index < raw.length(); index++) {
                 JSONObject item = raw.optJSONObject(index);
                 if (item == null) continue;
-                words.add(new Word(item.optString("kind", ""), item.optString("key", ""),
-                    item.optString("value", ""), item.optLong("weight", 0), item.optString("source", "user")));
+                String kind = strictString(item.opt("kind"));
+                String key = strictString(item.opt("key"));
+                String word = strictString(item.opt("value"));
+                Long weight = strictLong(item.opt("weight"));
+                String source = strictString(item.opt("source"));
+                if (kind == null || key == null || word == null || weight == null || source == null) continue;
+                words.add(new Word(kind, key, word, weight, source));
             }
         }
-        return new WordPage(Collections.unmodifiableList(words), value.optBoolean("has_more", false));
+        return new WordPage(Collections.unmodifiableList(words), Boolean.TRUE.equals(strictBoolean(value.opt("has_more"))));
     }
 
     private static Result<View> collections(Context context, JSONObject action, boolean changesWords) {
@@ -497,6 +512,29 @@ public final class DictionaryCollectionsStore {
     /** JSON response flags must remain booleans; org.json otherwise coerces strings. */
     static Boolean strictBoolean(Object value) {
         return value instanceof Boolean ? (Boolean) value : null;
+    }
+
+    public static String strictString(Object value) {
+        return value instanceof String ? (String) value : null;
+    }
+
+    public static Integer strictInteger(Object value) {
+        if (value instanceof Integer integer) return integer;
+        if (value instanceof Long longValue
+                && longValue >= Integer.MIN_VALUE && longValue <= Integer.MAX_VALUE)
+            return longValue.intValue();
+        return null;
+    }
+
+    static int strictInteger(Object value, int fallback) {
+        Integer parsed = strictInteger(value);
+        return parsed == null ? fallback : parsed;
+    }
+
+    public static Long strictLong(Object value) {
+        if (value instanceof Integer integer) return integer.longValue();
+        if (value instanceof Long longValue) return longValue;
+        return null;
     }
 
     private static String errorOf(String response) {

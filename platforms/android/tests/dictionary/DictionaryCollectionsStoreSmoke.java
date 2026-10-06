@@ -40,6 +40,12 @@ public final class DictionaryCollectionsStoreSmoke {
         strictBoolean.setAccessible(true);
         check(Boolean.TRUE.equals(strictBoolean.invoke(null, Boolean.TRUE)));
         check(strictBoolean.invoke(null, "true") == null);
+        check(DictionaryCollectionsStore.strictString("synthetic") != null);
+        check(DictionaryCollectionsStore.strictString(7) == null);
+        check(DictionaryCollectionsStore.strictInteger(Integer.valueOf(7)) == 7);
+        check(DictionaryCollectionsStore.strictInteger("7") == null);
+        check(DictionaryCollectionsStore.strictLong(Long.valueOf(7)) == 7L);
+        check(DictionaryCollectionsStore.strictLong(7.0) == null);
 
         List<DictionaryCollectionsStore.ImportSource> sources = DictionaryCollectionsStore.importSources(
             List.of("txt", "standard", "windows", "hans", "rime"));
