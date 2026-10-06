@@ -31,6 +31,10 @@ public final class DoubaoAsrPolicy {
         return AiProviderResponse.strictText(value);
     }
 
+    static Boolean strictBoolean(Object value) {
+        return value instanceof Boolean ? (Boolean) value : null;
+    }
+
     static boolean validEndpoint(String endpoint) {
         return TextPolicy.validAuthority(endpoint, "wss://", AiPolishConfiguration.MAX_ENDPOINT_LENGTH);
     }
