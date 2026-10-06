@@ -34,6 +34,7 @@ import app.msime.android.CustomSkinLibrary;
 import app.msime.android.KeyboardSkin;
 import app.msime.android.PhotoDecodePolicy;
 import app.msime.android.SkinJobsApi;
+import app.msime.android.ViewPolicy;
 import java.io.ByteArrayOutputStream;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -279,7 +280,7 @@ public final class AiSkinPage extends DetailPage {
         Ui.setPaddingDp(card, context, 14, 14, 14, 12);
         LinearLayout header = new LinearLayout(context);
         header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(header);
         LinearLayout heading = new LinearLayout(context);
         heading.setOrientation(LinearLayout.VERTICAL);
         title = Ui.styledLabel(context, "", 17, 600, Ui.text(context));
@@ -303,7 +304,7 @@ public final class AiSkinPage extends DetailPage {
         stage.addView(preview, Ui.frameMatchWidthHeight(context, 200));
         LinearLayout overlay = new LinearLayout(context);
         overlay.setOrientation(LinearLayout.VERTICAL);
-        overlay.setGravity(Gravity.CENTER);
+        ViewPolicy.setCentered(overlay);
         ProgressBar spinner = new ProgressBar(context);
         spinner.setIndeterminateTintList(ColorStateList.valueOf(Ui.accent(context)));
         overlay.addView(spinner, Ui.squareParams(context, 32));
@@ -318,7 +319,7 @@ public final class AiSkinPage extends DetailPage {
 
         LinearLayout colours = new LinearLayout(context);
         colours.setOrientation(LinearLayout.HORIZONTAL);
-        colours.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(colours);
         TextView label = Ui.styledLabel(context, "配色", 13, 400, Ui.subText(context));
         colours.addView(label);
         palette = new LinearLayout(context);
