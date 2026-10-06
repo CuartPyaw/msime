@@ -363,7 +363,6 @@ final class LoginSheet {
     }
 
     private TextView agreement() {
-        TextView view = new TextView(activity);
         String text = "登录即表示同意《用户协议》和《隐私政策》";
         SpannableString spanned = new SpannableString(text);
         int start = text.indexOf("《隐私政策》");
@@ -381,9 +380,8 @@ final class LoginSheet {
                 paint.setUnderlineText(false);
             }
         }, start, start + "《隐私政策》".length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        view.setText(spanned);
+        TextView view = Ui.styledLabel(activity, spanned, 12, 400, Ui.subText(activity));
         view.setMovementMethod(LinkMovementMethod.getInstance());
-        Ui.style(view, 12, 400, Ui.subText(activity));
         ViewPolicy.setCenteredHorizontally(view);
         return view;
     }
