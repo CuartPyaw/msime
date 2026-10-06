@@ -86,8 +86,7 @@ final class ImeLayoutRows {
             if (key instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.ACCENT);
             addNineKey(punctuation, key);
         }
-        row.addView(punctuation, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.MATCH_PARENT, 0.7f));
+        row.addView(punctuation, KeyboardGeometry.weightedMatchParentParams(0.7f));
 
         FrameLayout area = new FrameLayout(s);
         s.handwritingCanvas = new HandwritingCanvas(s);
@@ -126,7 +125,7 @@ final class ImeLayoutRows {
         downloadParams.leftMargin = s.pixels(16);
         downloadParams.rightMargin = s.pixels(16);
         cardFrame.addView(s.handwritingDownload, downloadParams);
-        row.addView(area, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 3f));
+        row.addView(area, KeyboardGeometry.weightedMatchParentParams(3f));
 
         LinearLayout tools = new LinearLayout(s);
         tools.setOrientation(LinearLayout.VERTICAL);
@@ -139,7 +138,7 @@ final class ImeLayoutRows {
         });
         if (rewrite instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.ACCENT);
         addNineKey(tools, rewrite);
-        row.addView(tools, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 0.8f));
+        row.addView(tools, KeyboardGeometry.weightedMatchParentParams(0.8f));
         // 手写区和其他布局的三行键一样高，切换布局时键盘总高度不跳。
         s.imeStyler.adjustThreeRowBlockHeight(row);
         s.keyRows.addView(row);
@@ -331,8 +330,7 @@ final class ImeLayoutRows {
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
             placeSpellingRow(false);
         }
-        container.addView(sidebar, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.MATCH_PARENT, 0.7f));
+        container.addView(sidebar, KeyboardGeometry.weightedMatchParentParams(0.7f));
 
         LinearLayout grid = new LinearLayout(s);
         grid.setOrientation(LinearLayout.VERTICAL);
@@ -367,8 +365,7 @@ final class ImeLayoutRows {
             grid.addView(row, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
         }
-        container.addView(grid, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.MATCH_PARENT, 3));
+        container.addView(grid, KeyboardGeometry.weightedMatchParentParams(3));
 
         LinearLayout actions = new LinearLayout(s);
         actions.setOrientation(LinearLayout.VERTICAL);
@@ -390,8 +387,7 @@ final class ImeLayoutRows {
             () -> commitNineKeyLiteral(last)), "SoftPunctuation");
         if (exclamation instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.ACCENT);
         addNineKey(actions, exclamation);
-        container.addView(actions, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.MATCH_PARENT, 0.8f));
+        container.addView(actions, KeyboardGeometry.weightedMatchParentParams(0.8f));
     }
 
     /**
@@ -426,8 +422,7 @@ final class ImeLayoutRows {
         applySidebarRail();
         sidebar.addView(punctuation, new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
-        container.addView(sidebar, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.MATCH_PARENT, 0.7f));
+        container.addView(sidebar, KeyboardGeometry.weightedMatchParentParams(0.7f));
 
         LinearLayout grid = new LinearLayout(s);
         grid.setOrientation(LinearLayout.VERTICAL);
@@ -459,8 +454,7 @@ final class ImeLayoutRows {
         }
         grid.addView(lastRow, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
-        container.addView(grid, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.MATCH_PARENT, 3));
+        container.addView(grid, KeyboardGeometry.weightedMatchParentParams(3));
 
         LinearLayout actions = new LinearLayout(s);
         actions.setOrientation(LinearLayout.VERTICAL);
@@ -482,8 +476,7 @@ final class ImeLayoutRows {
             () -> commitNineKeyLiteral(last)), "SoftPunctuation");
         if (exclamation instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.ACCENT);
         addNineKey(actions, exclamation);
-        container.addView(actions, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.MATCH_PARENT, 0.8f));
+        container.addView(actions, KeyboardGeometry.weightedMatchParentParams(0.8f));
         updateStrokeWildcardKey();
     }
 
@@ -531,8 +524,7 @@ final class ImeLayoutRows {
             if (key instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.KEY);
             addNineKey(tones, key);
         }
-        container.addView(tones, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.MATCH_PARENT, 0.7f));
+        container.addView(tones, KeyboardGeometry.weightedMatchParentParams(0.7f));
 
         LinearLayout grid = new LinearLayout(s);
         grid.setOrientation(LinearLayout.VERTICAL);
@@ -562,12 +554,10 @@ final class ImeLayoutRows {
             if (key instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.KEY);
             addNineKey(marks, key);
         }
-        lastRow.addView(marks, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.MATCH_PARENT, 1));
+        lastRow.addView(marks, KeyboardGeometry.weightedMatchParentParams(1));
         grid.addView(lastRow, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
-        container.addView(grid, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.MATCH_PARENT, 3));
+        container.addView(grid, KeyboardGeometry.weightedMatchParentParams(3));
 
         // 右列与网格的四行对齐：⌫、中/英、空格、换行。后三个是底栏那几个常驻键，连同它们的手势、图标和「确认」状态一起挪过来。
         LinearLayout actions = new LinearLayout(s);
@@ -582,8 +572,7 @@ final class ImeLayoutRows {
         adoptBarKey(actions, s.languageButton, KeyboardKeyRole.ACCENT);
         adoptBarKey(actions, s.spaceButton, KeyboardKeyRole.KEY);
         adoptBarKey(actions, s.enterButton, s.imeBottomRow.returnKeyRole());
-        container.addView(actions, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.MATCH_PARENT, 0.8f));
+        container.addView(actions, KeyboardGeometry.weightedMatchParentParams(0.8f));
 
         if (s.nineKeySpellingScroll != null && s.candidateViewport != null) {
             // 选择条只在创建键盘视图时建一次，拼音九键会把它挂进自己的侧栏；先从原来的父视图摘下再挂到候选行，否则 addView 会抛 IllegalStateException。挂在最后，盖在候选滚动区上面。
@@ -1010,8 +999,7 @@ final class ImeLayoutRows {
             addJapaneseSideKey(modeColumn, s.keyId(s.keyboardKey("切换", "切换到下一个输入法",
                 s::switchToNextInputMethodAfterCommit), "SoftGlobe"), 1);
         }
-        container.addView(modeColumn, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.MATCH_PARENT, 0.17f));
+        container.addView(modeColumn, KeyboardGeometry.weightedMatchParentParams(0.17f));
 
         LinearLayout grid = new LinearLayout(s);
         grid.setOrientation(LinearLayout.VERTICAL);
@@ -1033,8 +1021,7 @@ final class ImeLayoutRows {
             grid.addView(row, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
         }
-        container.addView(grid, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.MATCH_PARENT, 0.64f));
+        container.addView(grid, KeyboardGeometry.weightedMatchParentParams(0.64f));
 
         LinearLayout side = new LinearLayout(s);
         side.setOrientation(LinearLayout.VERTICAL);
@@ -1047,8 +1034,7 @@ final class ImeLayoutRows {
         addJapaneseSideKey(side, s.japaneseSpaceKey, 1);
         s.japaneseReturnKey = s.keyId(s.keyboardKey("改行", "改行", s::enter), "Enter");
         addJapaneseSideKey(side, s.japaneseReturnKey, 2);
-        container.addView(side, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.MATCH_PARENT, 0.19f));
+        container.addView(side, KeyboardGeometry.weightedMatchParentParams(0.19f));
         s.updateReturnKey();
     }
 
