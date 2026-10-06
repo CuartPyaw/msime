@@ -600,6 +600,11 @@ function success(value: unknown): string {
   return JSON.stringify({ ok: true, value });
 }
 
+/** 账号桥接信封只有布尔值 `true` 才表示成功，拒绝其它 truthy 值。 */
+export function strictAccountOk(value: unknown): value is true {
+  return value === true;
+}
+
 function validString(value: unknown, maximum: number, allowEmpty = false): value is string {
   return (
     typeof value === "string" &&
@@ -1082,13 +1087,15 @@ export class AccountCloudBridge {
   private async logout(action: Action): Promise<string> {
     if (typeof action.all !== "boolean") return error("account_invalid");
     const result = await this.authenticated("POST", "/v1/auth/logout", { all: action.all });
-    if (JSON.parse(result).ok) await this.signOut();
+    const reply = parseJson(result);
+    if (reply !== null && strictAccountOk(reply.ok)) await this.signOut();
     return result;
   }
 
   private async deleteAccount(): Promise<string> {
     const result = await this.authenticated("DELETE", "/v1/users/me");
-    if (JSON.parse(result).ok) await this.signOut();
+    const reply = parseJson(result);
+    if (reply !== null && strictAccountOk(reply.ok)) await this.signOut();
     return result;
   }
 
@@ -1115,7 +1122,10 @@ export class AccountCloudBridge {
       const result = await this.authenticated("PUT", "/v1/users/me/clipboard/settings", {
         enabled: action.enabled,
       });
-      return JSON.parse(result).ok ? success({ enabled: action.enabled }) : result;
+      const reply = parseJson(result);
+      return reply !== null && strictAccountOk(reply.ok)
+        ? success({ enabled: action.enabled })
+        : result;
     }
     return error("account_invalid");
   }

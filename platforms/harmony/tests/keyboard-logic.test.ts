@@ -232,6 +232,7 @@ import {
   COMMUNITY_REPORT_REASONS,
   dictionaryChangePageChanged,
   parseResponseContentLength,
+  strictAccountOk,
 } from "../entry/src/main/ets/account/AccountCloudBridge";
 import {
   CrashDestination,
@@ -7429,6 +7430,13 @@ group("account response lengths accept only decimal octets", () => {
   check(parseResponseContentLength("1e0") === -1, "exponent response lengths are rejected");
   check(parseResponseContentLength(" 1 ") === -1, "whitespace response lengths are rejected");
   check(parseResponseContentLength("9007199254740993") === -1, "unsafe lengths are rejected");
+});
+
+group("account success envelopes require a real boolean", () => {
+  check(strictAccountOk(true), "true is the only successful account envelope value");
+  for (const malformed of [false, 0, 1, "true", "false", {}, []]) {
+    check(!strictAccountOk(malformed), `malformed account ok value is rejected: ${String(malformed)}`);
+  }
 });
 
 group("account and cloud clipboard bridge keeps secrets native", () => {
