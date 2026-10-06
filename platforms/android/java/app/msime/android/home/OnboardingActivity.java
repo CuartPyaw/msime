@@ -93,7 +93,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         progress.setMax(pages);
         progress.setIndicatorColor(Ui.accent(this));
         progress.setTrackColor(Ui.accentSoft(this));
-        if (state != null) page = Math.max(0, Math.min(pages - 1, state.getInt(STATE_PAGE, 0)));
+        if (state != null) page = KeyboardGeometry.bounded(state.getInt(STATE_PAGE, 0), 0, pages - 1);
         findViewById(R.id.onboarding_skip).setOnClickListener(ignored -> finishFlow());
         findViewById(R.id.onboarding_previous).setOnClickListener(ignored -> go(page - 1));
         findViewById(R.id.onboarding_next).setOnClickListener(ignored -> {

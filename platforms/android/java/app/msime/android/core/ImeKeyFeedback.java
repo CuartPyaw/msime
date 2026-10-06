@@ -1,5 +1,6 @@
 package app.msime.android;
 
+import app.msime.android.keyboard.KeyboardGeometry;
 import android.content.Context;
 import android.graphics.Color;
 import android.media.AudioAttributes;
@@ -126,7 +127,7 @@ final class ImeKeyFeedback {
 
     /** 0–100 的音量换成 SoundPool 的 0–1。 */
     static float volumeFor(int percent) {
-        return Math.max(0, Math.min(100, percent)) / 100f;
+        return KeyboardGeometry.bounded(percent, 0, 100) / 100f;
     }
 
     private void refreshPreferences() {
