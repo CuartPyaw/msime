@@ -33,7 +33,6 @@ import app.msime.android.FeedbackApi;
 import app.msime.android.FeedbackImagePolicy;
 import app.msime.android.R;
 import app.msime.android.ViewPolicy;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
@@ -287,12 +286,7 @@ public final class FeedbackPage extends DetailPage {
         if (bitmap == null) return null;
         try {
             bitmap = BitmapPolicy.scaleToEdge(bitmap, MAX_EDGE);
-            for (int quality = 85; quality >= 40; quality -= 15) {
-                ByteArrayOutputStream out = new ByteArrayOutputStream();
-                bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out);
-                if (out.size() <= FeedbackApi.MAX_SCREENSHOT_BYTES) return out.toByteArray();
-            }
-            return null;
+            return BitmapPolicy.compressJpegUnderBytes(bitmap, FeedbackApi.MAX_SCREENSHOT_BYTES);
         } finally {
             bitmap.recycle();
         }
