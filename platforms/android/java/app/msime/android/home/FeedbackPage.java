@@ -29,6 +29,7 @@ import androidx.annotation.Nullable;
 import app.msime.android.AppEdition;
 import app.msime.android.CloudApi;
 import app.msime.android.FeedbackApi;
+import app.msime.android.FeedbackImagePolicy;
 import app.msime.android.R;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -280,22 +281,20 @@ public final class FeedbackPage extends DetailPage {
 
     /** 读一张图，长边缩到 1600 像素以内，重新编码成 1 MiB 以内的 JPEG；读不出或压不到时返回 null。 */
     @Nullable private static byte[] reencode(ContentResolver resolver, Uri uri) throws IOException {
+        byte[] source;
+        try (InputStream in = resolver.openInputStream(uri)) {
+            source = FeedbackImagePolicy.readSource(in);
+        }
+        if (source == null) return null;
         BitmapFactory.Options bounds = new BitmapFactory.Options();
         bounds.inJustDecodeBounds = true;
-        try (InputStream in = resolver.openInputStream(uri)) {
-            if (in == null) return null;
-            BitmapFactory.decodeStream(in, null, bounds);
-        }
+        BitmapFactory.decodeByteArray(source, 0, source.length, bounds);
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
         int sample = 1;
         while (Math.max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= MAX_EDGE) sample *= 2;
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inSampleSize = sample;
-        Bitmap bitmap;
-        try (InputStream in = resolver.openInputStream(uri)) {
-            if (in == null) return null;
-            bitmap = BitmapFactory.decodeStream(in, null, options);
-        }
+        Bitmap bitmap = BitmapFactory.decodeByteArray(source, 0, source.length, options);
         if (bitmap == null) return null;
         try {
             int edge = Math.max(bitmap.getWidth(), bitmap.getHeight());
