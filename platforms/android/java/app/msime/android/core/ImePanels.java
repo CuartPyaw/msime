@@ -1262,8 +1262,7 @@ final class ImePanels {
                 start, label.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
         card.setText(label);
-        KeyboardGeometry.setKeyTextSize(card, 15);
-        card.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        ViewPolicy.setStartCenteredKeyTextSizeSp(card, 15);
         ViewPolicy.setMaxLinesEllipsized(card, 3);
         KeyboardGeometry.setSymmetricPaddingDp(card, s, 12, 8);
         card.setMinHeight(0);
@@ -1407,8 +1406,7 @@ final class ImePanels {
             row.setKeyboardRole(KeyboardKeyRole.PLAIN);
             ViewPolicy.setAllCapsFalse(row);
             row.setText(phrase);
-            KeyboardGeometry.setKeyTextSize(row, 15);
-            row.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+            ViewPolicy.setStartCenteredKeyTextSizeSp(row, 15);
             ViewPolicy.setMaxLinesEllipsized(row, 2);
             ViewPolicy.setMinimumHeight(row, s.pixels(44));
             KeyboardGeometry.setSymmetricPaddingDp(row, s, 12, 8);

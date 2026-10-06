@@ -169,6 +169,18 @@ public final class ViewPolicy {
         setCentered(view);
     }
 
+    /** Set a text view's scalable size and align its content to the start edge vertically centered. */
+    public static void setStartCenteredTextSizeSp(TextView view, float sizeSp) {
+        setTextSizeSp(view, sizeSp);
+        setStartCenteredVertically(view);
+    }
+
+    /** Set a keyboard-scaled size and align its content to the start edge vertically centered. */
+    public static void setStartCenteredKeyTextSizeSp(TextView view, float sizeSp) {
+        KeyboardGeometry.setKeyTextSize(view, sizeSp);
+        setStartCenteredVertically(view);
+    }
+
     /** Remove a view's default background drawable. */
     public static void clearBackground(View view) {
         view.setBackground(null);
