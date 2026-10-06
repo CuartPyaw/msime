@@ -449,7 +449,7 @@ final class ImeLetterRows {
         if (key instanceof KeyboardPressButton press)
             press.setKeyboardRole(KeyboardKeyRole.ACCENT);
         s.imeStyler.styleButton(key, KeyboardKeyRole.ACCENT, s.skin);
-        key.setVisibility(View.VISIBLE);
+        ViewPolicy.show(key);
         row.addView(key, index, KeyboardGeometry.weightedMatchParentParams(weight));
     }
 
@@ -474,7 +474,7 @@ final class ImeLetterRows {
                 Button key = designLayerKey(layerKey, rowIndex == 0);
                 if (key == null) continue;
                 if (key.getParent() instanceof android.view.ViewGroup parent) parent.removeView(key);
-                key.setVisibility(View.VISIBLE);
+                ViewPolicy.show(key);
                 row.addView(key, KeyboardGeometry.weightedMatchParentParams(layerKey.weight()));
             }
         }
