@@ -84,8 +84,7 @@ final class ImeToolbar {
         preeditFrame.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
         preeditFrame.addView(s.preedit, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        candidateHeader.addView(preeditFrame, new LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        candidateHeader.addView(preeditFrame, KeyboardGeometry.weightedWrapParams(1));
         // 宿主提示通道：正常为空，只有准备中、失败或提示时才有文字。
         s.status = new TextView(s);
         KeyboardGeometry.setKeyTextSize(s.status, 10);

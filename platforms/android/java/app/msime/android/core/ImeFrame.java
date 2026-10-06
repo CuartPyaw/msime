@@ -81,7 +81,7 @@ final class ImeFrame {
             if (oneHanded(s.oneHandedMode)) s.toggleOneHanded(false);
         });
         gutter.setVisibility(View.GONE);
-        row.addView(column, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        row.addView(column, KeyboardGeometry.weightedWrapParams(1));
         keyboard.addView(row, KeyboardGeometry.matchWidthWrapParams());
         appliedMode = "";
         return column;
@@ -111,7 +111,7 @@ final class ImeFrame {
         if (gutter.getParent() != null) row.removeView(gutter);
         if (!oneHanded(mode)) {
             gutter.setVisibility(View.GONE);
-            column.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+            column.setLayoutParams(KeyboardGeometry.weightedWrapParams(1));
             row.requestLayout();
             return;
         }
