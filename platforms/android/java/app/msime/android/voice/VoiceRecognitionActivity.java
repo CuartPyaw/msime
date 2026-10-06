@@ -16,6 +16,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 import app.msime.android.KeyboardGeometry;
+import app.msime.android.ViewPolicy;
 import java.io.File;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
@@ -383,7 +384,7 @@ public final class VoiceRecognitionActivity extends Activity {
         TextView title = new TextView(this);
         recordingTitle = title;
         title.setText("正在录音");
-        title.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 18);
+        ViewPolicy.setTextSizeSp(title, 18);
         root.addView(title);
         TextView hint = new TextView(this);
         recordingHint = hint;
