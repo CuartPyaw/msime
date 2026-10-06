@@ -1037,7 +1037,7 @@ final class MetasequoiaInputSessionBridge: @unchecked Sendable {
     // The view names a profile whatever the scheme, because the Engine is built with one
     // either way; only the scheme says whether the keys are running it.
     guard let snapshot = try? view(),
-          (snapshot["scheme"] as? NSNumber)?.uint8Value == Self.shuangpinSchemeCode,
+          Self.strictUInt64(snapshot["scheme"]) == UInt64(Self.shuangpinSchemeCode),
           let profile = snapshot["shuangpin_profile"] as? String, !profile.isEmpty,
           let data = profile.data(using: .utf8) else { return [:] }
     let response = try? data.withUnsafeBytes { bytes -> Any in
