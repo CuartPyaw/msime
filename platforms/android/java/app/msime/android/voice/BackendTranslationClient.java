@@ -1,7 +1,6 @@
 package app.msime.android;
 
 import android.content.Context;
-import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.math.BigDecimal;
@@ -68,7 +67,10 @@ public final class BackendTranslationClient implements CandidateTranslationStore
             int status = connection.getResponseCode();
             if (status != 200) throw new BackendAccount.RequestException(status);
             byte[] bytes;
-            try (InputStream input = connection.getInputStream()) { bytes = readBounded(input); }
+            try (InputStream input = connection.getInputStream()) {
+                bytes = HttpBodyPolicy.readBounded(input, MAX_RESPONSE_BYTES);
+            }
+            if (bytes == null) throw new IllegalStateException("Translation response is too large");
             List<String> result = parseResponse(bytes, expectedCount);
             if (result == null) throw new IllegalStateException("Invalid translation response");
             return result;
@@ -120,17 +122,5 @@ public final class BackendTranslationClient implements CandidateTranslationStore
     private String accessToken() throws Exception {
         String token = account.accessToken();
         return token.isEmpty() ? anonymous.accessToken() : token;
-    }
-
-    private static byte[] readBounded(InputStream input) throws Exception {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        byte[] buffer = new byte[8192];
-        int count;
-        while ((count = input.read(buffer)) != -1) {
-            if (output.size() + count > MAX_RESPONSE_BYTES)
-                throw new IllegalStateException("Translation response is too large");
-            output.write(buffer, 0, count);
-        }
-        return output.toByteArray();
     }
 }
