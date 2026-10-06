@@ -226,8 +226,9 @@ public final class StatisticsFragment extends HomeTabFragment {
     private void overview(Context context, LinearLayout content, Overview overview) {
         LinearLayout hero = card(context, content, 18);
         hero.addView(Ui.label(context, "近 7 天共输入", 13, Ui.subText(context)));
-        TextView total = new TextView(context);
-        total.setText(figure(context, TypingStatisticsSummary.grouped(overview.weekTotal()), 40, "字"));
+        TextView total = Ui.label(context,
+            figure(context, TypingStatisticsSummary.grouped(overview.weekTotal()), 40, "字"),
+            40, Ui.text(context));
         Ui.setPaddingDp(total, context, 0, 4, 0, 0);
         hero.addView(total);
         String delta = TypingStatisticsSummary.weekDelta(overview.weekTotal(), overview.previousWeekTotal());
