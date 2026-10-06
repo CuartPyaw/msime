@@ -222,9 +222,8 @@ final class ImeStyler {
             && role != KeyboardKeyRole.TILE ? KeyboardKeyRole.ACCENT : role;
         if (face == KeyboardKeyRole.PILL) {
             // The pill is a label on the strip rather than a key, so it keeps a plain rounded face even over a designed skin, inset so the 44dp target stays.
-            GradientDrawable pill = new GradientDrawable();
-            pill.setColor(color(target.keyBackground()));
-            pill.setCornerRadius(s.pixels(14));
+            GradientDrawable pill = DrawablePolicy.rounded(color(target.keyBackground()),
+                s.pixels(14));
             button.setBackground(new InsetDrawable(pill,
                 s.pixels(2), s.pixels(8), s.pixels(2), s.pixels(8)));
             button.setTextColor(color(target.keyForeground()));
