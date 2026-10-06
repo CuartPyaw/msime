@@ -499,7 +499,7 @@ public final class AiSkinPage extends DetailPage {
                 for (String colour : colours) {
                     View dot = new View(context);
                     android.graphics.drawable.GradientDrawable shape = Ui.pill(Ui.parseColor(colour, Color.GRAY));
-                    shape.setStroke(Math.max(1, Ui.dp(context, 1)), Ui.hairline(context));
+                    shape.setStroke(Ui.atLeastOnePx(context, 1), Ui.hairline(context));
                     dot.setBackground(shape);
                     LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(Ui.dp(context, 16), Ui.dp(context, 16));
                     params.setMarginEnd(Ui.dp(context, 6));

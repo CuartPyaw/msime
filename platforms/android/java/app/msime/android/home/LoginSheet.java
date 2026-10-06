@@ -326,7 +326,7 @@ final class LoginSheet {
         button.setGravity(Gravity.CENTER);
         button.setMinimumHeight(Ui.dp(activity, 50));
         GradientDrawable face = Ui.rounded(fill, Ui.dp(activity, 12));
-        if (stroke != 0) face.setStroke(Math.max(1, Ui.dp(activity, 1)), stroke);
+        if (stroke != 0) face.setStroke(Ui.atLeastOnePx(activity, 1), stroke);
         GradientDrawable mask = Ui.rounded(Color.WHITE, Ui.dp(activity, 12));
         int pressed = Ui.withAlpha(fill == Color.BLACK ? Color.WHITE : Ui.text(activity), 0.12f);
         button.setBackground(new RippleDrawable(android.content.res.ColorStateList.valueOf(pressed), face, mask));
@@ -358,7 +358,7 @@ final class LoginSheet {
         Ui.style(field, 16, 400, Ui.text(activity));
         field.setHintTextColor(Ui.subText(activity));
         GradientDrawable face = Ui.rounded(Ui.rowBackground(activity), Ui.dp(activity, 12));
-        face.setStroke(Math.max(1, Ui.dp(activity, 1)), Ui.hairline(activity));
+        face.setStroke(Ui.atLeastOnePx(activity, 1), Ui.hairline(activity));
         field.setBackground(face);
         field.setPadding(Ui.dp(activity, 14), 0, Ui.dp(activity, 14), 0);
         field.setMinHeight(Ui.dp(activity, 50));
