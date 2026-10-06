@@ -654,9 +654,8 @@ final class ImeLayoutRows {
         options.setOrientation(LinearLayout.HORIZONTAL);
         int padding = s.pixels(5);
         options.setPadding(padding, padding, padding, padding);
-        GradientDrawable surface = new GradientDrawable();
-        surface.setColor(Color.parseColor(s.skin.background()));
-        surface.setCornerRadius(s.pixels(10));
+        GradientDrawable surface = DrawablePolicy.rounded(
+            Color.parseColor(s.skin.background()), s.pixels(10));
         surface.setStroke(Math.max(1, s.pixels(1)), Color.parseColor(s.skin.accent()));
         options.setBackground(surface);
 
