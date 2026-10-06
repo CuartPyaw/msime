@@ -463,7 +463,7 @@ test("candidate pronunciation is host-enabled, defaults off, persists and needs 
       }}
     />,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "表达" }));
+  fireEvent.click(await screen.findByRole("button", { name: "标点与翻译" }));
   const toggle = screen.getByRole("switch", { name: "显示读音" }) as HTMLInputElement;
   expect(toggle.checked).toBe(false);
   expect(screen.getByText(/英文释义给音标，日文释义给罗马音/)).toBeDefined();
@@ -495,7 +495,7 @@ test("candidate pronunciation is host-enabled, defaults off, persists and needs 
       }}
     />,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "表达" }));
+  fireEvent.click(await screen.findByRole("button", { name: "标点与翻译" }));
   expect((screen.getByRole("switch", { name: "显示读音" }) as HTMLInputElement).disabled).toBe(
     true,
   );
@@ -506,7 +506,7 @@ test("candidate pronunciation is host-enabled, defaults off, persists and needs 
       client={{ load: async () => initial, save: vi.fn(), candidateEnglishGloss: true }}
     />,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "表达" }));
+  fireEvent.click(await screen.findByRole("button", { name: "标点与翻译" }));
   expect(screen.queryByRole("switch", { name: "显示读音" })).toBeNull();
 });
 
