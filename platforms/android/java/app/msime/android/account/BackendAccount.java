@@ -4,7 +4,6 @@ import android.app.Application;
 import android.content.Context;
 import android.net.Uri;
 import android.os.Bundle;
-import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URL;
@@ -886,15 +885,8 @@ public final class BackendAccount {
     }
 
     private static byte[] readBounded(InputStream input) throws Exception {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        byte[] buffer = new byte[4096];
-        int count;
-        while ((count = input.read(buffer)) != -1) {
-            if (output.size() + count > MAX_RESPONSE_BYTES) {
-                throw new IllegalStateException("response too large");
-            }
-            output.write(buffer, 0, count);
-        }
-        return output.toByteArray();
+        byte[] response = HttpBodyPolicy.readBounded(input, MAX_RESPONSE_BYTES);
+        if (response == null) throw new IllegalStateException("response too large");
+        return response;
     }
 }
