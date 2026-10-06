@@ -32,7 +32,7 @@ public final class ExpressionPage extends DetailPage {
     private boolean loaded;
     @Nullable private List<CommunityCatalog.Item> discover;
     @Nullable private String discoverFailure;
-    private final Set<String> installed = new HashSet<>();
+    private HashSet<String> installed = new HashSet<>();
     private final Set<String> installing = new HashSet<>();
 
     @Override protected void buildContent(LinearLayout column, Bundle args) {
@@ -61,7 +61,7 @@ public final class ExpressionPage extends DetailPage {
         }, result -> {
             loaded = true;
             preferences = result == null ? null : result.preferences();
-            installed.clear();
+            installed = new HashSet<>(result == null ? 0 : result.packs().size());
             if (result != null) installed.addAll(result.packs());
             render();
         });
