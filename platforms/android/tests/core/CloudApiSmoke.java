@@ -107,6 +107,15 @@ public final class CloudApiSmoke {
         } catch (CloudApi.Failure failure) {
             check(failure.network(), "an IOException is a network failure");
         }
+        CloudApi pathApi = new CloudApi((method, path, headers, body) -> {
+            throw new AssertionError("unsafe path reached transport: " + path);
+        }, rejected -> "", rejected -> "");
+        for (String path : List.of("/v1/../auth/logout", "/v1/users/../auth/logout", "/v1/%2e%2e/auth/logout")) {
+            try {
+                pathApi.send("GET", path, null, CloudApi.Auth.NONE);
+                throw new AssertionError("dot-segment path must be rejected: " + path);
+            } catch (IllegalArgumentException unsafe) { }
+        }
         System.out.println("Android cloud API transport passed");
     }
 
