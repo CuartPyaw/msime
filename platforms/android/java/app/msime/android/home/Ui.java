@@ -231,6 +231,12 @@ public final class Ui {
             dp(context, rightDp), dp(context, bottomDp));
     }
 
+    /** Replace only the bottom padding while preserving the other three sides. */
+    public static void setBottomPadding(View view, int bottomPixels) {
+        view.setPadding(view.getPaddingLeft(), view.getPaddingTop(), view.getPaddingRight(),
+            bottomPixels);
+    }
+
     /** Apply a single tint to an image view through the platform state-list wrapper. */
     public static void setImageTint(ImageView view, int color) {
         view.setImageTintList(ColorStateList.valueOf(color));
