@@ -5,7 +5,6 @@ import android.util.AtomicFile;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
@@ -29,6 +28,7 @@ public final class Bootstrap {
             installHelpcodes(context, new File(root, "bootstrap/resources/helpcodes"));
             // Before the configuration exists, so that prepare_host below finds them beside the resources and records them.
             installLanguageDictionaries(context, new File(root, "bootstrap/language-dictionaries"));
+            installSoundPacks(context, new File(root, "sound-packs"));
             File configuration = new File(root, "runtime-options.json");
             File resources = new File(root, "bootstrap/resources");
             if (existingConfiguration(configuration)) {
@@ -172,6 +172,45 @@ public final class Bootstrap {
     }
 
     /**
+     * 内置按键音包（resources/sound-packs 里 `mode = "keys"` 的包，连同各自的 plugin.toml 许可信息），解到 `<filesDir>/sound-packs/<id>/`，键盘经 `NativeClient.keySoundPack` 校验后用 SoundPool 播放其中的样本。
+     *
+     * <p>与离线释义、语言词库同样的规则：不属于校验过的词库，跟着安装包走；安装包变了就经同级的暂存目录整体替换，旧包留下的目录一起去掉。失败时键盘只用系统按键音。
+     */
+    private static void installSoundPacks(Context context, File destination) {
+        try {
+            String stamp = Long.toString(context.getPackageManager()
+                .getPackageInfo(context.getPackageName(), 0).lastUpdateTime);
+            File marker = new File(destination, ".package");
+            if (Files.isRegularFile(marker.toPath(), LinkOption.NOFOLLOW_LINKS)
+                    && stamp.equals(readMarker(marker.toPath()))) return;
+            File staging = new File(destination.getParentFile(), "sound-packs.staging");
+            ensureSafeDirectory(destination.getParentFile().toPath());
+            deleteTree(staging);
+            ensureSafeDirectory(staging.toPath());
+            String[] packs = context.getAssets().list("sound-packs");
+            for (String pack : packs == null ? new String[0] : packs) {
+                if (!pack.matches("[A-Za-z0-9_.-]+") || pack.contains("..")) throw new IllegalArgumentException("Invalid asset name");
+                String[] names = context.getAssets().list("sound-packs/" + pack);
+                if (names == null || names.length == 0) continue;
+                File directory = new File(staging, pack);
+                ensureSafeDirectory(directory.toPath());
+                for (String name : names) {
+                    if (!name.matches("[A-Za-z0-9_.-]+") || name.contains("..")) throw new IllegalArgumentException("Invalid asset name");
+                    try (InputStream input = context.getAssets().open("sound-packs/" + pack + "/" + name)) {
+                        copyAsset(input, new File(directory, name).toPath());
+                    }
+                }
+            }
+            writeAtomically(new File(staging, ".package").toPath(), stamp.getBytes(StandardCharsets.UTF_8));
+            deleteTree(destination);
+            Files.move(staging.toPath(), destination.toPath(), StandardCopyOption.ATOMIC_MOVE);
+        } catch (Exception error) {
+            // Bootstrap has no editor or session input; never use this logging for keystrokes.
+            android.util.Log.w("MSIMEBootstrap", "Sound pack extraction failed", error);
+        }
+    }
+
+    /**
      * 把 APK 里 `desktop-dictionary.lock.json` 固定的词库解包到 `resources`。共享校验要求资源目录恰好是锁里的文件（外加 `helpcodes/`），所以先删掉锁里没有的条目（例如统一 `msime-` 前缀之前的旧文件名），`helpcodes/` 连同用户自己的辅助码表原样保留。每个文件经临时同级文件原子替换，中途失败时下次启动的刷新仍报词库过期，会再解包一次。
      */
     private static void extractDictionary(Context context, File resources) throws Exception {
@@ -180,14 +219,9 @@ public final class Bootstrap {
         // 各版本的 APK 都把本版本的资源锁放在这个文件名下（build-apk.sh 选的；full 的就是 resources/desktop-dictionary.lock.json 本身），下面只解出锁里列的文件。
         try (InputStream input = context.getAssets().open("desktop-dictionary.lock.json")) {
             // Small immutable APK manifest; large dictionary files are streamed below.
-            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
-            byte[] buffer = new byte[8192];
-            int count;
-            while ((count = input.read(buffer)) != -1) {
-                if (bytes.size() + count > 16384) throw new IllegalArgumentException("Manifest too large");
-                bytes.write(buffer, 0, count);
-            }
-            manifest = new JSONObject(bytes.toString(StandardCharsets.UTF_8.name()));
+            byte[] bytes = HttpBodyPolicy.readBounded(input, 16384);
+            if (bytes == null) throw new IllegalArgumentException("Manifest too large");
+            manifest = new JSONObject(new String(bytes, StandardCharsets.UTF_8));
         }
         JSONArray artifacts = manifest.getJSONArray("artifacts");
         java.util.Set<String> names = new java.util.HashSet<>();
@@ -239,30 +273,20 @@ public final class Bootstrap {
 
     /** 配置里记录的 `resources`；超过 1 MiB 或读不出来时为 `null`。按块读并限长，文件在检查之后变大也不会无界分配。 */
     private static String readConfiguredResources(File configuration) throws Exception {
-        ByteArrayOutputStream bytes = new ByteArrayOutputStream(8192);
         try (InputStream input = Files.newInputStream(configuration.toPath(), LinkOption.NOFOLLOW_LINKS)) {
-            byte[] buffer = new byte[8192];
-            int count;
-            while ((count = input.read(buffer)) != -1) {
-                if (bytes.size() > 1024 * 1024 - count) return null;
-                bytes.write(buffer, 0, count);
-            }
+            byte[] bytes = HttpBodyPolicy.readBounded(input, 1024 * 1024);
+            if (bytes == null) return null;
+            String resources = new JSONObject(new String(bytes, StandardCharsets.UTF_8))
+                .optString("resources", "");
+            return resources.isEmpty() ? null : resources;
         }
-        String resources = new JSONObject(bytes.toString(StandardCharsets.UTF_8.name())).optString("resources", "");
-        return resources.isEmpty() ? null : resources;
     }
 
     static String readMarker(java.nio.file.Path file) {
         if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) return null;
         try (InputStream input = Files.newInputStream(file)) {
-            ByteArrayOutputStream bytes = new ByteArrayOutputStream(64);
-            byte[] buffer = new byte[64];
-            int count;
-            while ((count = input.read(buffer)) != -1) {
-                if (bytes.size() > 64 - count) return null;
-                bytes.write(buffer, 0, count);
-            }
-            return bytes.toString(StandardCharsets.UTF_8.name());
+            byte[] bytes = HttpBodyPolicy.readBounded(input, 64);
+            return bytes == null ? null : new String(bytes, StandardCharsets.UTF_8);
         } catch (Exception ignored) {
             return null;
         }

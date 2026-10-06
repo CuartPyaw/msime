@@ -23,6 +23,7 @@ public final class OnlineCandidatePolicySmoke {
         check(OnlineCandidatePolicy.requestsAi(true, true));
         check(!OnlineCandidatePolicy.requestsAi(false, true));
         check(!OnlineCandidatePolicy.requestsAi(true, false));
+        check(OnlineCandidatePolicy.CLOUD_TIMEOUT_MILLIS == 2_000);
 
         check(!OnlineCandidatePolicy.validURL(new URL("https://user:password@example.invalid/translate")));
         check(!OnlineCandidatePolicy.validURL(new URL("https://example.invalid/translate#fragment")));

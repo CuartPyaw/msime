@@ -1,6 +1,5 @@
 package app.msime.android;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -98,7 +97,9 @@ public final class AiPolishModelCatalog {
                 throw new AiPolishClient.Failure(AiPolishClient.Reason.UNAVAILABLE);
             byte[] response;
             try (InputStream input = connection.getInputStream()) {
-                response = readBounded(input);
+                response = HttpBodyPolicy.readBounded(
+                    input, AiPolishConfiguration.MAXIMUM_RESPONSE_BYTES);
+                if (response == null) throw new AiPolishClient.Failure(AiPolishClient.Reason.INVALID);
             }
             return new JSONObject(new String(response, StandardCharsets.UTF_8));
         } catch (AiPolishClient.Failure error) {
@@ -110,18 +111,6 @@ public final class AiPolishModelCatalog {
         } finally {
             if (connection != null) connection.disconnect();
         }
-    }
-
-    private static byte[] readBounded(InputStream input) throws IOException, AiPolishClient.Failure {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        byte[] buffer = new byte[8192];
-        int count;
-        while ((count = input.read(buffer)) != -1) {
-            if (output.size() + count > AiPolishConfiguration.MAXIMUM_RESPONSE_BYTES)
-                throw new AiPolishClient.Failure(AiPolishClient.Reason.INVALID);
-            output.write(buffer, 0, count);
-        }
-        return output.toByteArray();
     }
 
     static URI modelsUri(URI endpoint) throws AiPolishClient.Failure {

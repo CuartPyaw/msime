@@ -4,7 +4,6 @@ import android.app.Application;
 import android.content.Context;
 import android.net.Uri;
 import android.os.Bundle;
-import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URL;
@@ -235,18 +234,10 @@ final class BackendAnonymousAccount {
             if (status != 200) throw new IllegalStateException(
                 "anonymous account unavailable: HTTP " + status);
             try (InputStream input = connection.getInputStream()) {
-                return new JSONObject(new String(readBounded(input), StandardCharsets.UTF_8));
+                byte[] response = HttpBodyPolicy.readBounded(input, MAX_RESPONSE_BYTES);
+                if (response == null) throw new IllegalStateException("anonymous account unavailable");
+                return new JSONObject(new String(response, StandardCharsets.UTF_8));
             }
         } finally { if (connection != null) connection.disconnect(); }
-    }
-
-    private static byte[] readBounded(InputStream input) throws Exception {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        byte[] buffer = new byte[4096]; int count;
-        while ((count = input.read(buffer)) != -1) {
-            if (output.size() + count > MAX_RESPONSE_BYTES) throw new IllegalStateException("anonymous account unavailable");
-            output.write(buffer, 0, count);
-        }
-        return output.toByteArray();
     }
 }

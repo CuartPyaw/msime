@@ -379,9 +379,24 @@ test("touch hosts offering Cantonese, Zhuyin, Vietnamese, Tibetan and Stroke lis
     within(group)
       .getAllByRole("button")
       .map((button) => button.textContent?.replace("✓", "")),
-  ).toEqual([...touchSchemeLabels, "粤拼 26 键", "大千注音", "越南语 26 键", "藏文 26 键", "笔画"]);
-  expect(within(group).getAllByRole("switch")).toHaveLength(16);
-  for (const label of ["粤拼 26 键", "大千注音", "越南语 26 键", "藏文 26 键", "笔画"]) {
+  ).toEqual([
+    ...touchSchemeLabels,
+    "粤拼 26 键",
+    "大千注音",
+    "越南语 26 键",
+    "藏文 26 键",
+    "笔画",
+    "注音 9 键",
+  ]);
+  expect(within(group).getAllByRole("switch")).toHaveLength(17);
+  for (const label of [
+    "粤拼 26 键",
+    "大千注音",
+    "越南语 26 键",
+    "藏文 26 键",
+    "笔画",
+    "注音 9 键",
+  ]) {
     expect(
       (screen.getByRole("switch", { name: `显示输入方案 ${label}` }) as HTMLInputElement).checked,
     ).toBe(false);
@@ -5501,14 +5516,14 @@ test("Linux help network section says what goes online and where credentials liv
   fireEvent.click(screen.getByRole("button", { name: "帮助" }));
   const network = await screen.findByText(/日常拼音输入无需联网/);
   const text = network.textContent ?? "";
-  // Cloud candidates are on after first-run setup unless declined, and they send the spelling being typed.
-  expect(text).toContain("云候选默认开启");
+  // 云候选新装默认关闭，首次配置时勾选才打开；开启时发送的是正在输入的拼写。
+  expect(text).toContain("云候选默认关闭");
   expect(text).toContain("Google input-tools");
   expect(text).toContain("msime-linux-online-provider");
   expect(text).toContain("msime-linux-voice-provider");
-  // Fresh Linux installs translate candidates through the MSIME account, so the copy says what it sends and how to switch away; voice and AI still wait for a configured service.
-  expect(text).toContain("候选词翻译默认用水杉账号，会把当前页的中文候选词发送到 api.msime.app");
-  expect(text).toContain("可在翻译服务里改选自己的服务或不使用在线翻译");
+  // 候选翻译新装不联网，水杉账号要用户显式选择，文案说明选了它会发送什么；语音和 AI 仍要等配置好服务。
+  expect(text).toContain("候选词翻译默认不联网");
+  expect(text).toContain("选择水杉账号把当前页的中文候选词发送到 api.msime.app 之后才会发请求");
   expect(text).toContain("语音识别和 AI 功能只在启用并配置好对应服务后联网");
   expect(text).not.toContain("填好凭据后联网");
   // The provider credentials are private files; NiuTrans and custom translation keys are the exception and the copy says so.
@@ -5556,10 +5571,10 @@ test("Android help and about pages use mobile instructions and project links", a
   );
 });
 
-// The Linux section of msime.app/privacy/ does not match this host (it has an update check and keeps provider credentials in 0600 files), so Linux opens the PRIVACY.md that ships with this code, as the Windows reference opens its own. Every other host keeps msime.app/privacy/, which a looser Linux check would break.
-test("the privacy link opens PRIVACY.md on Linux and msime.app/privacy/ elsewhere", async () => {
+// 网站的 Linux 段落已与这个宿主一致（检查更新、凭据存在 0600 文件里），所以 Linux 与其他平台一样打开 msime.app/privacy/。
+test("the privacy link opens msime.app/privacy/ on every platform", async () => {
   const expected: Record<string, string> = {
-    linux: "https://github.com/metasequoiaime/msime/blob/develop/PRIVACY.md",
+    linux: "https://msime.app/privacy/",
     windows: "https://msime.app/privacy/",
     macos: "https://msime.app/privacy/",
     android: "https://msime.app/privacy/",
