@@ -13018,6 +13018,12 @@ group("LocalAsrPolicy", () => {
     LocalAsrPolicy.hotwords(Array.from({ length: 201 }, () => ({ text: "水杉", pinyin: "shui shan" }))) === null,
     "more than 200 hotwords are refused",
   );
+  check(
+    LocalAsrPolicy.correctedText({ text: "水杉" }, "原文") === "水杉" &&
+      LocalAsrPolicy.correctedText({ text: 42 }, "原文") === "原文" &&
+      LocalAsrPolicy.correctedText(null, "原文") === "原文",
+    "malformed hotword correction values keep the original text",
+  );
   check(LocalAsrPolicy.senseVoiceLanguage("zh-HK") === "yue", "Hong Kong Chinese pins Cantonese");
   check(LocalAsrPolicy.senseVoiceLanguage("ja-JP") === "ja", "Japanese is pinned");
   check(LocalAsrPolicy.senseVoiceLanguage("zh-cn") === "auto", "Mandarin is left to the model");

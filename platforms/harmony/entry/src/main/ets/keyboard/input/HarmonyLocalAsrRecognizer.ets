@@ -244,7 +244,7 @@ export class HarmonyLocalAsrRecognizer {
       const request: CorrectRequest = { text: text, hotwords: this.hotwords };
       const response: CorrectResponse =
         JSON.parse(client.voiceHotwordCorrect(JSON.stringify(request))) as CorrectResponse;
-      return response.ok === true && response.value !== undefined ? response.value.text : text;
+      return response.ok === true ? LocalAsrPolicy.correctedText(response.value, text) : text;
     } catch (error) {
       KeyboardLog.warn(`voice hotword correction unavailable: ${describeError(error)}`);
       return text;
