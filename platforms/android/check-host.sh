@@ -252,6 +252,13 @@ if rg -n 'optBoolean\("ok"' \
   echo "Android notice responses must require a typed boolean ok field" >&2
   exit 1
 fi
+# App theme resolution is another native envelope; only a JSON boolean can authorize caching
+# the returned palette and season.
+if rg -n 'optBoolean\("ok"' \
+    "$repo_root/platforms/android/java/app/msime/android/home/AppThemeController.java"; then
+  echo "Android app theme responses must require a typed boolean ok field" >&2
+  exit 1
+fi
 # Sync rounds download over any section that is not dirty, so a preference write that forgets to mark settings dirty is reverted by the next cloud change. HostStore.savePreferences owns that mark for every caller.
 if ! rg -qU 'NativeClient\.savePreferences\(directory, revision, document\)\)\);\s*(//[^\n]*\s*)?if \(saved != null\) SyncSignals\.markDirty\(context, SyncSwitch\.SETTINGS\);' \
     "$repo_root/platforms/android/java/app/msime/android/home/HostStore.java"; then
