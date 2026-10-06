@@ -32,6 +32,8 @@ public final class UpdateApiSmoke {
         check(UpdateApi.compareVersions("0.50.0-build.14", "0.50.0-build.9") > 0, "numeric prerelease ids");
         check(UpdateApi.compareVersions("v1.0", "1.0.0") == 0, "missing segments are zero");
         check(UpdateApi.compareVersions("0.1.0-dev", "0.1.0") < 0, "dev build is older than its release");
+        check(UpdateApi.compareVersions("1.9000000000000000000", "1.10000000000000000000") < 0,
+            "large numeric segments keep numeric ordering");
 
         List<UpdateApi.Release> releases = List.of(
             new UpdateApi.Release("android-v1.1.0", "1.1.0", false),
