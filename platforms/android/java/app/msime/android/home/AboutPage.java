@@ -25,6 +25,7 @@ import app.msime.android.AppEdition;
 import app.msime.android.BoundsPolicy;
 import app.msime.android.ViewPolicy;
 import app.msime.android.HttpBodyPolicy;
+import app.msime.android.TextPolicy;
 import app.msime.android.R;
 import app.msime.android.UpdateApi;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
@@ -420,7 +421,7 @@ public final class AboutPage extends DetailPage {
                 byte[] bytes = HttpBodyPolicy.readBounded(in, MAX_NOTICE_CHARS * 4);
                 if (bytes == null) return null;
                 String text = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
-                return text.length() > MAX_NOTICE_CHARS ? text.substring(0, MAX_NOTICE_CHARS) + "\n…" : text;
+                return TextPolicy.clipWithEllipsis(text, MAX_NOTICE_CHARS);
             }
         }, outcome -> {
             if (outcome.value() == null) {
