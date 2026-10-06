@@ -23,6 +23,7 @@ import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 import app.msime.android.AppEdition;
 import app.msime.android.BoundsPolicy;
+import app.msime.android.ViewPolicy;
 import app.msime.android.HttpBodyPolicy;
 import app.msime.android.R;
 import app.msime.android.UpdateApi;
@@ -135,7 +136,7 @@ public final class AboutPage extends DetailPage {
 
         TextView footer = Ui.styledLabel(context, "© 2026 Metasequoia · 输入内容默认只在本机处理",
             13, 400, Ui.subText(context));
-        footer.setGravity(Gravity.CENTER);
+        ViewPolicy.setCentered(footer);
         LinearLayout.LayoutParams footerParams = Ui.matchWidth();
         footerParams.topMargin = Ui.dp(context, 24);
         column.addView(footer, footerParams);
@@ -170,7 +171,7 @@ public final class AboutPage extends DetailPage {
     private View header(Context context, boolean play) {
         LinearLayout header = new LinearLayout(context);
         header.setOrientation(LinearLayout.VERTICAL);
-        header.setGravity(Gravity.CENTER_HORIZONTAL);
+        ViewPolicy.setCenteredHorizontally(header);
         Ui.setPaddingDp(header, context, 0, 8, 0, 20);
 
         FrameLayout disc = new FrameLayout(context);
@@ -184,7 +185,7 @@ public final class AboutPage extends DetailPage {
         header.addView(disc, Ui.squareParamsPx(discSize));
 
         TextView name = Ui.styledLabel(context, getString(R.string.app_name), 22, 700, Ui.text(context));
-        name.setGravity(Gravity.CENTER);
+        ViewPolicy.setCentered(name);
         name.setAccessibilityHeading(true);
         LinearLayout.LayoutParams nameParams = Ui.wrap();
         nameParams.topMargin = Ui.dp(context, 18);
@@ -192,7 +193,7 @@ public final class AboutPage extends DetailPage {
 
         TextView version = Ui.styledLabel(context,
             "版本 " + UpdateJobService.currentVersion(context) + " · Android", 13, 400, Ui.subText(context));
-        version.setGravity(Gravity.CENTER);
+        ViewPolicy.setCentered(version);
         LinearLayout.LayoutParams versionParams = Ui.wrap();
         versionParams.topMargin = Ui.dp(context, 6);
         header.addView(version, versionParams);
