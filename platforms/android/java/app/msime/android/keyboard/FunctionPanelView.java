@@ -82,8 +82,7 @@ public final class FunctionPanelView extends LinearLayout {
         grid.setOnPageChangeListener((page, count) -> dots.setActive(page, true));
         LinearLayout.LayoutParams gridParams = KeyboardGeometry.weightedWidthParams(1f);
         addView(grid, gridParams);
-        LinearLayout.LayoutParams dotParams = new LinearLayout.LayoutParams(
-            LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams dotParams = KeyboardGeometry.wrapParams();
         dotParams.gravity = Gravity.CENTER_HORIZONTAL;
         dotParams.topMargin = KeyboardGeometry.pixels(context, 8);
         addView(dots, dotParams);
