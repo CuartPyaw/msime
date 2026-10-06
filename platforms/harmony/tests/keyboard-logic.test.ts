@@ -764,6 +764,14 @@ group("native success replies require a value", () => {
   check(NativeReplyPolicy.hasValue({}), "an object value is present");
   check(!NativeReplyPolicy.hasValue(undefined) && !NativeReplyPolicy.hasValue(null),
     "missing native values are refused");
+  check(NativeReplyPolicy.successfulValue({ ok: true, value: "ready" }) === "ready",
+    "successful replies expose their value");
+  check(NativeReplyPolicy.successfulValue({ ok: true }) === null,
+    "successful replies without a value are refused");
+  check(NativeReplyPolicy.successfulValue({ ok: true, value: null }) === null,
+    "successful replies with a null value are refused");
+  check(NativeReplyPolicy.successfulValue({ ok: false, value: "stale" }) === null,
+    "failed replies never expose a value");
 });
 
 group("bounds persisted account sessions by UTF-8 bytes", () => {

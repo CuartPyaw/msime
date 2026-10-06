@@ -1704,7 +1704,8 @@ export class KeyboardSession implements HardwareKeyTarget {
   private storedRevision(stateRoot: string): number {
     try {
       const loaded: SnapshotResponse = JSON.parse(client.loadPreferences(stateRoot)) as SnapshotResponse;
-      return loaded.ok === true ? loaded.value.revision : -1;
+      const snapshot: PreferencesSnapshot | null = NativeReplyPolicy.successfulValue(loaded);
+      return snapshot === null ? -1 : snapshot.revision;
     } catch (error) {
       KeyboardLog.error(`preferences revision unreadable: ${describeError(error)}`);
       return -1;
@@ -3896,9 +3897,10 @@ export class KeyboardSession implements HardwareKeyTarget {
         try {
           const current: NativeReply<OnlineQuery | null> = JSON.parse(
             client.onlineQuery(handle)) as NativeReply<OnlineQuery | null>;
-          if (current.ok === true && current.value !== null) {
-            aiQuery = current.value;
-            aiDocument = JSON.stringify(current.value);
+          const currentValue: OnlineQuery | null = NativeReplyPolicy.successfulValue(current);
+          if (currentValue !== null) {
+            aiQuery = currentValue;
+            aiDocument = JSON.stringify(currentValue);
           } else {
             complete = false;
             this.releaseOnlineSignatureIfCurrent(requestSignature, epoch, handle);
@@ -4071,10 +4073,11 @@ export class KeyboardSession implements HardwareKeyTarget {
     try {
       const applied: NativeReply<OnlineApplyValue> = JSON.parse(client.applyTranslations(
         handle, query.generation, JSON.stringify(entries))) as NativeReply<OnlineApplyValue>;
-        if (applied.ok === true && applied.value !== undefined && applied.value.view !== undefined
-        && applied.value.applied !== false) {
-        appliedCurrent = applied.value.applied;
-        this.render(applied.value.view);
+      const appliedValue: OnlineApplyValue | null = NativeReplyPolicy.successfulValue(applied);
+      if (appliedValue !== null && appliedValue.view !== undefined
+        && appliedValue.applied !== false) {
+        appliedCurrent = appliedValue.applied;
+        this.render(appliedValue.view);
       }
       if (appliedCurrent && typeof query.user_data === 'string' && query.user_data.length > 0
         && TranslationPolicy.targets(query).includes('en')) {
@@ -4205,10 +4208,11 @@ export class KeyboardSession implements HardwareKeyTarget {
         };
         const reply: NativeReply<TranslationResponseValue> = JSON.parse(
           client.candidateGlosses(JSON.stringify(request), resources)) as NativeReply<TranslationResponseValue>;
-        if (reply.ok !== true || reply.value === undefined || reply.value.generation !== query.generation
-          || !Array.isArray(reply.value.translations)) continue;
+        const replyValue: TranslationResponseValue | null = NativeReplyPolicy.successfulValue(reply);
+        if (replyValue === null || replyValue.generation !== query.generation
+          || !Array.isArray(replyValue.translations)) continue;
         const glosses: TranslationEntry[] = [];
-        for (const entry of reply.value.translations) {
+        for (const entry of replyValue.translations) {
           TranslationPolicy.append(glosses, entry.text, entry.translation);
         }
         result.set(language, glosses);
@@ -4246,9 +4250,10 @@ export class KeyboardSession implements HardwareKeyTarget {
         JSON.stringify(request), query.resources ?? '');
       const reply: NativeReply<TranslationResponseValue> =
         JSON.parse(glossResponse) as NativeReply<TranslationResponseValue>;
-      if (reply.ok !== true || reply.value === undefined || reply.value.generation !== query.generation
-        || !Array.isArray(reply.value.translations)) return;
-      for (const entry of reply.value.translations) {
+      const replyValue: TranslationResponseValue | null = NativeReplyPolicy.successfulValue(reply);
+      if (replyValue === null || replyValue.generation !== query.generation
+        || !Array.isArray(replyValue.translations)) return;
+      for (const entry of replyValue.translations) {
         TranslationPolicy.append(entries, entry.text, entry.translation);
       }
     } catch (error) {
@@ -4286,7 +4291,7 @@ export class KeyboardSession implements HardwareKeyTarget {
           JSON.stringify(request));
         const reply: NativeReply<TranslationHttpDescriptor | null> =
           JSON.parse(descriptorResponse) as NativeReply<TranslationHttpDescriptor | null>;
-        if (reply.ok === true) descriptor = reply.value;
+        descriptor = NativeReplyPolicy.successfulValue(reply);
       } catch (error) {
         KeyboardLog.error(`Tencent translation descriptor unavailable: ${describeError(error)}`);
       }
@@ -4335,7 +4340,8 @@ export class KeyboardSession implements HardwareKeyTarget {
     try {
       const reply: NativeReply<string | null> = JSON.parse(
         client.parseNiuTransTranslationResponse(body)) as NativeReply<string | null>;
-      return { value: reply.ok === true ? reply.value : null, completed: reply.ok === true };
+      const value: string | null = NativeReplyPolicy.successfulValue(reply);
+      return { value: value, completed: value !== null };
     } catch {
       return { value: null, completed: false };
     }
@@ -4357,7 +4363,8 @@ export class KeyboardSession implements HardwareKeyTarget {
     try {
       const reply: NativeReply<string | null> = JSON.parse(
         client.parseCustomTranslationResponse(body)) as NativeReply<string | null>;
-      return { value: reply.ok === true ? reply.value : null, completed: reply.ok === true };
+      const value: string | null = NativeReplyPolicy.successfulValue(reply);
+      return { value: value, completed: value !== null };
     } catch {
       return { value: null, completed: false };
     }
@@ -4901,8 +4908,9 @@ export class KeyboardSession implements HardwareKeyTarget {
     try {
       const raw: NativeReply<AiHttpDescriptor | null> = JSON.parse(
         client.aiHttpRequest(document)) as NativeReply<AiHttpDescriptor | null>;
-      if (raw.ok !== true || raw.value === null) return [];
-      descriptor = raw.value;
+      const rawValue: AiHttpDescriptor | null = NativeReplyPolicy.successfulValue(raw);
+      if (rawValue === null) return [];
+      descriptor = rawValue;
     } catch (error) {
       KeyboardLog.error(`thoughtful reply request unavailable: ${describeError(error)}`);
       return [];
