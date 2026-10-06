@@ -302,6 +302,12 @@ public final class KeyboardGeometry {
             FrameLayout.LayoutParams.MATCH_PARENT);
     }
 
+    /** Create frame layout parameters that wrap both dimensions. */
+    public static FrameLayout.LayoutParams frameWrapParams() {
+        return new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT);
+    }
+
     /** Create frame layout parameters that fill width with an already pixel-sized height. */
     public static FrameLayout.LayoutParams frameMatchWidthHeightPx(int heightPixels) {
         return new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, heightPixels);
