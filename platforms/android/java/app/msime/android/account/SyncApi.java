@@ -147,6 +147,8 @@ public final class SyncApi {
         Object revision = root.opt("revision");
         if (!(revision instanceof Number)) throw invalid("phrases revision missing");
         JSONArray raw = root.optJSONArray("phrases");
+        if (raw != null && raw.length() > SyncMergePolicy.MAX_PHRASES)
+            throw invalid("too many phrases");
         List<SyncMergePolicy.Phrase> phrases = new ArrayList<>(raw == null ? 0 : raw.length());
         if (raw != null) {
             for (int index = 0; index < raw.length(); index++) {
