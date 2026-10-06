@@ -185,7 +185,7 @@ public final class UpdateApi {
     }
 
     private static int compareSegments(String[] a, String[] b, boolean padWithZero) {
-        int length = Math.max(a.length, b.length);
+        int length = BoundsPolicy.atLeast(a.length, b.length);
         for (int index = 0; index < length; index++) {
             if (!padWithZero && (index >= a.length || index >= b.length)) return Integer.compare(a.length, b.length);
             String x = index < a.length ? a[index] : "0";
