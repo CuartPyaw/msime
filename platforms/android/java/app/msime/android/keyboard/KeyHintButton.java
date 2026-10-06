@@ -44,8 +44,9 @@ public class KeyHintButton extends KeyboardPressButton {
         // TextView 把文字裁在内边距围出的框里：在按钮默认的上下内边距之外再留出提示的高度，46 dp 的键只剩不到 30 dp，22 sp 的字母连同字体留白放不下，被裁掉下半截、压在提示上。有提示时上边距归零、去掉字体留白，下边只留提示那一行。
         boolean hinted = !hintText.isEmpty();
         setIncludeFontPadding(!hinted);
+        float density = getResources().getDisplayMetrics().density;
         setPadding(getPaddingLeft(), hinted ? 0 : basePaddingTop, getPaddingRight(),
-            hinted ? dp(11) : basePaddingBottom);
+            hinted ? KeyboardGeometry.pixels(11, density) : basePaddingBottom);
         invalidate();
     }
 
@@ -69,10 +70,6 @@ public class KeyHintButton extends KeyboardPressButton {
         if (cornerHintColor == color) return;
         cornerHintColor = color;
         invalidate();
-    }
-
-    private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
     private float sp(float value) {

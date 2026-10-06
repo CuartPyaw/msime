@@ -31,7 +31,8 @@ public final class NineKeyDigitButton extends KeyboardPressButton {
         String next = value == null ? "" : value;
         if (digitText.equals(next)) return;
         digitText = next;
-        setPadding(getPaddingLeft(), basePaddingTop + (digitText.isEmpty() ? 0 : dp(10)),
+        float density = getResources().getDisplayMetrics().density;
+        setPadding(getPaddingLeft(), basePaddingTop + (digitText.isEmpty() ? 0 : KeyboardGeometry.pixels(10, density)),
             getPaddingRight(), getPaddingBottom());
         invalidate();
     }
@@ -40,10 +41,6 @@ public final class NineKeyDigitButton extends KeyboardPressButton {
         if (digitColor == color) return;
         digitColor = color;
         invalidate();
-    }
-
-    private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
     private float sp(float value) {
@@ -58,6 +55,7 @@ public final class NineKeyDigitButton extends KeyboardPressButton {
         digitPaint.setColor(digitColor);
         digitPaint.setAlpha(isEnabled() ? 204 : 96);
         Paint.FontMetrics metrics = digitPaint.getFontMetrics();
-        canvas.drawText(digitText, getWidth() / 2f, dp(3) - metrics.top, digitPaint);
+        float density = getResources().getDisplayMetrics().density;
+        canvas.drawText(digitText, getWidth() / 2f, KeyboardGeometry.pixels(3, density) - metrics.top, digitPaint);
     }
 }
