@@ -489,11 +489,7 @@ public final class StatisticsFragment extends HomeTabFragment {
     }
 
     private static TextView label(Context context, String text, int sizeSp, int colour) {
-        TextView view = new TextView(context);
-        view.setText(text);
-        view.setTextSize(sizeSp);
-        view.setTextColor(colour);
-        return view;
+        return Ui.label(context, text, sizeSp, colour);
     }
 
     private static Map<String, String> retentions() {

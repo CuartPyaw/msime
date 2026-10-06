@@ -583,11 +583,7 @@ public final class OnboardingActivity extends AppCompatActivity {
     }
 
     private TextView text(String value, int size, int colour) {
-        TextView view = new TextView(this);
-        view.setText(value);
-        view.setTextSize(size);
-        view.setTextColor(colour);
-        return view;
+        return Ui.label(this, value, size, colour);
     }
 
     private static GradientDrawable rounded(int colour, int radius) {
