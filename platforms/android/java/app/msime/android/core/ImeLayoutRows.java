@@ -644,7 +644,7 @@ final class ImeLayoutRows {
             Button option = s.keyboardKey(choice, "输入 " + choice,
                 () -> commitNineKeyHoldOption(choice));
             option.setContentDescription("输入 " + choice);
-            option.setPadding(0, 0, 0, 0);
+            ViewPolicy.clearPadding(option);
             LinearLayout.LayoutParams params = KeyboardGeometry.linearParamsPx(
                 s.pixels(36), s.pixels(38));
             if (options.getChildCount() > 0) params.setMarginStart(s.pixels(2));

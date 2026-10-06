@@ -60,4 +60,9 @@ public final class ViewPolicy {
     public static void setHorizontalPadding(View view, int horizontal) {
         view.setPadding(horizontal, 0, horizontal, 0);
     }
+
+    /** Clear all view padding. */
+    public static void clearPadding(View view) {
+        view.setPadding(0, 0, 0, 0);
+    }
 }

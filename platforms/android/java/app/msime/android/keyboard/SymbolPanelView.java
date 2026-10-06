@@ -107,7 +107,7 @@ public final class SymbolPanelView extends LinearLayout {
             button.setGravity(Gravity.CENTER);
             button.setMinHeight(0);
             button.setMinimumHeight(0);
-            button.setPadding(0, 0, 0, 0);
+            ViewPolicy.clearPadding(button);
             KeyboardGeometry.setKeyTextSize(button, 13);
             categoryButtons.add(button);
             categories.addView(button, KeyboardGeometry.matchWidthHeightPx(
@@ -136,7 +136,7 @@ public final class SymbolPanelView extends LinearLayout {
                     () -> insert(symbol), false);
                 KeyboardGeometry.setKeyTextSize(button, 18);
                 button.setGravity(Gravity.CENTER);
-                button.setPadding(0, 0, 0, 0);
+                ViewPolicy.clearPadding(button);
                 GridLayout.Spec row = GridLayout.spec(start / SymbolPanelModel.COLUMNS);
                 GridLayout.Spec column = GridLayout.spec(index - start, 1f);
                 GridLayout.LayoutParams params = new GridLayout.LayoutParams(row, column);
