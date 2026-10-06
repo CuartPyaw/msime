@@ -219,16 +219,24 @@ final class KeyboardSheets {
      */
     static View actionRow(Context context, String glyph, String title, Runnable action,
             int iconSize, int iconMarginEnd, int labelMarginStart) {
+        return accentActionRow(context, glyph, title, action, iconSize, iconMarginEnd, labelMarginStart);
+    }
+
+    /** 强调色动作行的通用构造器，允许页面选择是否显示图标。 */
+    static View accentActionRow(Context context, @Nullable String glyph, String title, Runnable action,
+            int iconSize, int iconMarginEnd, int labelMarginStart) {
         LinearLayout row = baseRow(context);
         Ui.setMinimumHeightDp(row, context, Ui.COMPACT_ROW_MIN_HEIGHT);
-        TextView icon = new TextView(context);
-        icon.setText(glyph);
-        icon.setGravity(Gravity.CENTER);
-        Ui.style(icon, 22, 400, Ui.accent(context));
-        icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        LinearLayout.LayoutParams iconParams = Ui.squareParams(context, iconSize);
-        iconParams.setMarginEnd(Ui.dp(context, iconMarginEnd));
-        row.addView(icon, iconParams);
+        if (glyph != null) {
+            TextView icon = new TextView(context);
+            icon.setText(glyph);
+            icon.setGravity(Gravity.CENTER);
+            Ui.style(icon, 22, 400, Ui.accent(context));
+            icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            LinearLayout.LayoutParams iconParams = Ui.squareParams(context, iconSize);
+            iconParams.setMarginEnd(Ui.dp(context, iconMarginEnd));
+            row.addView(icon, iconParams);
+        }
         TextView label = new TextView(context);
         label.setText(title);
         Ui.style(label, Ui.TEXT_ROW_TITLE, 400, Ui.accent(context));
