@@ -483,7 +483,8 @@ public final class StatisticsFragment extends HomeTabFragment {
         if (!unit.isEmpty()) {
             int start = text.length();
             text.append(' ').append(unit);
-            text.setSpan(new AbsoluteSizeSpan(Math.max(12, sizeSp / 3), true), start, text.length(),
+            text.setSpan(new AbsoluteSizeSpan(
+                BoundsPolicy.bounded(sizeSp / 3, 12, Integer.MAX_VALUE), true), start, text.length(),
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             text.setSpan(new ForegroundColorSpan(Ui.text(context)), start, text.length(),
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
