@@ -886,15 +886,8 @@ public final class BackendAccount {
     }
 
     private static byte[] readBounded(InputStream input) throws Exception {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        byte[] buffer = new byte[4096];
-        int count;
-        while ((count = input.read(buffer)) != -1) {
-            if (output.size() + count > MAX_RESPONSE_BYTES) {
-                throw new IllegalStateException("response too large");
-            }
-            output.write(buffer, 0, count);
-        }
-        return output.toByteArray();
+        byte[] response = HttpBodyPolicy.readBounded(input, MAX_RESPONSE_BYTES);
+        if (response == null) throw new IllegalStateException("response too large");
+        return response;
     }
 }

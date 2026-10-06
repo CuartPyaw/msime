@@ -1,9 +1,5 @@
 package app.msime.android;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.net.URL;
@@ -82,23 +78,6 @@ public final class OnlineCandidatePolicy {
         return limit >= 1 && limit <= MAX_CANDIDATE_LIMIT ? limit : 0;
     }
 
-    /**
-     * 读云候选的响应体：超过 {@code limit} 字节，或读完之前已经过了 {@code deadlineNanos}（{@link System#nanoTime()} 的时刻），都返回 null。
-     *
-     * <p>HttpURLConnection 的 readTimeout 只限制两次读之间的空闲时间，服务端每隔不到两秒发一小段就永远不会超时，所以整体时限要在这里另算。
-     */
-    public static String readWithin(InputStream input, int limit, long deadlineNanos)
-            throws IOException {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        byte[] buffer = new byte[8192];
-        int count;
-        while ((count = input.read(buffer)) != -1) {
-            if (System.nanoTime() - deadlineNanos > 0) return null;
-            if (output.size() + count > limit) return null;
-            output.write(buffer, 0, count);
-        }
-        return output.toString(StandardCharsets.UTF_8.name());
-    }
 
     /** Whether a cloud body is small enough to hand to the shared parser. */
     public static boolean acceptsCloudBody(String body) {
