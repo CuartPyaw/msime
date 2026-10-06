@@ -3773,7 +3773,7 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     void closeClipboardHistory() {
-        if (clipboardScroll != null) clipboardScroll.setVisibility(View.GONE);
+        if (clipboardScroll != null) ViewPolicy.hide(clipboardScroll);
         // Cloud entries live only as long as the panel that fetched them, so a later field - possibly a password one - never starts with them in memory.
         cloudClipboardGeneration++;
         cloudClipboardItems = java.util.List.of();
@@ -3781,23 +3781,23 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     void closeSchemePicker() {
-        if (schemeScroll != null) schemeScroll.setVisibility(View.GONE);
+        if (schemeScroll != null) ViewPolicy.hide(schemeScroll);
         synchronizeReplyKeyboard();
     }
 
     void closeSkinPicker() {
-        if (skinScroll != null) skinScroll.setVisibility(View.GONE);
+        if (skinScroll != null) ViewPolicy.hide(skinScroll);
     }
 
     void closeLayoutSettings() {
-        if (layoutSettingsScroll != null) layoutSettingsScroll.setVisibility(View.GONE);
-        if (layoutAdjustView != null) layoutAdjustView.setVisibility(View.GONE);
+        if (layoutSettingsScroll != null) ViewPolicy.hide(layoutSettingsScroll);
+        if (layoutAdjustView != null) ViewPolicy.hide(layoutAdjustView);
     }
 
     void closeMoreTools() {
         localInputToolsOpen = false;
         aiAssistChooserOpen = false;
-        if (moreToolsScroll != null) moreToolsScroll.setVisibility(View.GONE);
+        if (moreToolsScroll != null) ViewPolicy.hide(moreToolsScroll);
     }
 
     void closeEmojiPicker() {
@@ -3805,12 +3805,12 @@ public final class MSIMEInputService extends InputMethodService {
         emojiLoading = false;
         emojiSelectedCategory = Integer.MIN_VALUE;
         emojiItems = java.util.List.of();
-        if (emojiPanel != null) emojiPanel.setVisibility(View.GONE);
+        if (emojiPanel != null) ViewPolicy.hide(emojiPanel);
         synchronizeReplyKeyboard();
     }
 
     void closeSymbolPanel() {
-        if (symbolPanel != null) symbolPanel.setVisibility(View.GONE);
+        if (symbolPanel != null) ViewPolicy.hide(symbolPanel);
         synchronizeReplyKeyboard();
     }
 
@@ -3960,7 +3960,7 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     void closeVoiceResult() {
-        if (voiceResultScroll != null) voiceResultScroll.setVisibility(View.GONE);
+        if (voiceResultScroll != null) ViewPolicy.hide(voiceResultScroll);
         voiceResultEntry = null;
         voiceTarget = null;
     }
@@ -3973,7 +3973,7 @@ public final class MSIMEInputService extends InputMethodService {
 
     void closeAiPolish() {
         cancelAiRequest();
-        if (aiPolishContainer != null) aiPolishContainer.setVisibility(View.GONE);
+        if (aiPolishContainer != null) ViewPolicy.hide(aiPolishContainer);
         aiTarget = null;
         aiRequestConfiguration = null;
         aiSourceText = "";
