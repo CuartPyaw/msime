@@ -85,11 +85,11 @@ public final class InputDialog {
         buttons.setOrientation(LinearLayout.HORIZONTAL);
         TextView cancel = button("取消", 400, Ui.accent(context));
         cancel.setOnClickListener(ignored -> dialog.cancel());
-        buttons.addView(cancel, new LinearLayout.LayoutParams(0, Ui.dp(context, 48), 1f));
+        buttons.addView(cancel, Ui.weightedHeight(context, 48, 1f));
         buttons.addView(rule(false));
         primary = button("确定", 600, Ui.text(context));
         primary.setOnClickListener(ignored -> submit());
-        buttons.addView(primary, new LinearLayout.LayoutParams(0, Ui.dp(context, 48), 1f));
+        buttons.addView(primary, Ui.weightedHeight(context, 48, 1f));
         root.addView(buttons, Ui.matchWidth());
 
         dialog.setContentView(root);
