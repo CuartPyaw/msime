@@ -369,7 +369,7 @@ final class ImeVoiceEntry {
         int height = BoundsPolicy.atLeast(keyArea.getHeight(),
             s.pixels(KeyboardGeometry.NINE_KEY_HEIGHT_DP));
         ViewGroup.LayoutParams params = keyArea instanceof LinearLayout
-            ? new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, height)
+            ? KeyboardGeometry.matchWidthHeightPx(height)
             : new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height);
         // 盖在原来的键行上：键行仍占着位置（INVISIBLE），面板用负的上外边距叠上去，键盘高度不跳。
         if (params instanceof LinearLayout.LayoutParams linear && keyArea.getHeight() > 0) {
