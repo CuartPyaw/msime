@@ -143,10 +143,8 @@ final class ImeToolbar {
         KeyboardGeometry.setKeyTextSize(s.hanjaButton, 12);
         s.hanjaButton.setContentDescription("转换为汉字");
         s.hanjaButton.setVisibility(View.GONE);
-        s.hanjaButton.setOnClickListener(ignored -> {
-            s.imeKeyFeedback.playFeedback(s.hanjaButton);
-            s.command(KoreanInputPolicy.CONVERT_HANJA_COMMAND);
-        });
+        bindToolbarAction(s.hanjaButton,
+            () -> s.command(KoreanInputPolicy.CONVERT_HANJA_COMMAND));
         KeyboardGeometry.setHorizontalPaddingDp(s.hanjaButton, s, 8);
         s.hanjaButton.setMinHeight(0);
         s.hanjaButton.setMinimumHeight(0);
@@ -159,16 +157,20 @@ final class ImeToolbar {
         s.exitLocalModeButton.setContentDescription("退出本地模式");
         ViewPolicy.clearPadding(s.exitLocalModeButton);
         s.imeStyler.styleButton(s.exitLocalModeButton, true);
-        s.exitLocalModeButton.setOnClickListener(ignored -> {
-            s.imeKeyFeedback.playFeedback(s.exitLocalModeButton);
-            s.command(3);
-        });
+        bindToolbarAction(s.exitLocalModeButton, () -> s.command(3));
         s.exitLocalModeButton.setMinHeight(0);
         s.exitLocalModeButton.setMinimumHeight(0);
         candidateHeader.addView(s.exitLocalModeButton, new LinearLayout.LayoutParams(
             s.pixels(32), LinearLayout.LayoutParams.MATCH_PARENT));
         candidateRegion.addView(candidateHeader, KeyboardGeometry.matchWidthHeightPx(
             s.pixels(READING_ROW_DP)));
+    }
+
+    private void bindToolbarAction(Button button, Runnable action) {
+        button.setOnClickListener(ignored -> {
+            s.imeKeyFeedback.playFeedback(button);
+            action.run();
+        });
     }
 
     /** 候选那一行：候选滚动区占满剩余宽度，右端是分隔线加展开键。 */
