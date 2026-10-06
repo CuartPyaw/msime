@@ -66,7 +66,7 @@ final class ImeToolbar {
     /** 读音行（读音、提示、页码、漢、退出本地模式）与工具栏的滚动容器；读音行只在组词或有提示时显示。 */
     void buildCandidateHeader(LinearLayout candidateRegion) {
         LinearLayout candidateHeader = new LinearLayout(s);
-        candidateHeader.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(candidateHeader);
         KeyboardGeometry.setPaddingDp(candidateHeader, s, 10, 0, 6, 0);
         s.candidateHeader = candidateHeader;
         s.preedit = new TextView(s);
@@ -102,7 +102,7 @@ final class ImeToolbar {
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         s.shortcutBar = new LinearLayout(s);
         s.shortcutBar.setOrientation(LinearLayout.HORIZONTAL);
-        s.shortcutBar.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(s.shortcutBar);
         s.shortcutBar.setContentDescription("键盘快捷栏");
         KeyboardGeometry.setPaddingDp(s.shortcutBar, s, 2, 0, 2, 0);
         s.shortcutScroll = new HorizontalScrollView(s);
@@ -175,7 +175,7 @@ final class ImeToolbar {
     void addCandidateLine(LinearLayout candidateRegion, FrameLayout viewport, int height) {
         LinearLayout line = new LinearLayout(s);
         line.setOrientation(LinearLayout.HORIZONTAL);
-        line.setGravity(Gravity.CENTER_VERTICAL);
+        ViewPolicy.setCenteredVertically(line);
         line.addView(viewport, KeyboardGeometry.weightedMatchParentParams(1));
         CandidateChevronButton expand = new CandidateChevronButton(s);
         s.expandCandidates = expand;
