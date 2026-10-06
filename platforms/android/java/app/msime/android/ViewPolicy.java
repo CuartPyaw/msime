@@ -115,4 +115,10 @@ public final class ViewPolicy {
     public static void clearFontPadding(TextView view) {
         view.setIncludeFontPadding(false);
     }
+
+    /** Make a view passive for touch and focus navigation. */
+    public static void setNonInteractive(View view) {
+        view.setClickable(false);
+        view.setFocusable(false);
+    }
 }

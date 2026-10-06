@@ -70,8 +70,7 @@ final class ImeLayoutRows {
         ViewPolicy.setCentered(s.handwritingStatus);
         s.handwritingStatus.setText("在此手写，停笔后选字");
         s.handwritingStatus.setContentDescription("手写状态");
-        s.handwritingStatus.setClickable(false);
-        s.handwritingStatus.setFocusable(false);
+        ViewPolicy.setNonInteractive(s.handwritingStatus);
 
         LinearLayout row = new LinearLayout(s);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -96,8 +95,7 @@ final class ImeLayoutRows {
         area.addView(s.handwritingCanvas, KeyboardGeometry.frameMatchParentParams());
 
         FrameLayout cardFrame = new FrameLayout(s);
-        cardFrame.setClickable(false);
-        cardFrame.setFocusable(false);
+        ViewPolicy.setNonInteractive(cardFrame);
         FrameLayout.LayoutParams cardParams = KeyboardGeometry.frameMatchParentParams();
         int inset = s.pixels(3);
         cardParams.setMargins(inset, inset, inset, inset);

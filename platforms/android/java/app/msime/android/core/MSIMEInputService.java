@@ -5653,8 +5653,7 @@ public final class MSIMEInputService extends InputMethodService {
         JapaneseFlickPreview(android.content.Context context) {
             super(context);
             setVisibility(View.GONE);
-            setClickable(false);
-            setFocusable(false);
+            ViewPolicy.setNonInteractive(this);
             setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         }
 
