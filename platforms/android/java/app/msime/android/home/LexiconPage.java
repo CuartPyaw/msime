@@ -229,7 +229,7 @@ public final class LexiconPage extends DetailPage {
     private View actionRow(String glyph, String title, Runnable action) {
         Context context = requireContext();
         LinearLayout row = baseRow(context);
-        row.setMinimumHeight(Ui.dp(context, 52));
+        row.setMinimumHeight(Ui.dp(context, Ui.COMPACT_ROW_MIN_HEIGHT));
         TextView icon = new TextView(context);
         icon.setText(glyph);
         icon.setGravity(Gravity.CENTER);

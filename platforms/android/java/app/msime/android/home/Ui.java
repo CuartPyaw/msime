@@ -73,6 +73,8 @@ public final class Ui {
 
     /** 详情页行的最小高度。 */
     public static final int ROW_MIN_HEIGHT = 64;
+    /** 单行无副标题时使用的紧凑详情行高度。 */
+    public static final int COMPACT_ROW_MIN_HEIGHT = 52;
     /** 详情页行的左右内边距。 */
     public static final int ROW_PADDING_H = 16;
     /** 详情页行的上下内边距。 */
