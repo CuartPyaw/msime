@@ -271,8 +271,7 @@ public final class DictionaryCollectionsStore {
     /** 集合名能否使用，与 client-core 一致：1–32 个字，首尾没有空白，不含控制字符和换行。 */
     public static boolean validName(String name) {
         if (name == null || name.isEmpty() || !name.equals(name.strip())) return false;
-        int count = name.codePointCount(0, name.length());
-        if (count < 1 || count > MAX_NAME_CHARS) return false;
+        if (!TextPolicy.withinCodePoints(name, MAX_NAME_CHARS)) return false;
         for (int index = 0; index < name.length(); index++) {
             if (Character.isISOControl(name.charAt(index))) return false;
         }
