@@ -8,6 +8,7 @@ import android.graphics.RectF;
 import android.util.AttributeSet;
 import android.view.View;
 import androidx.annotation.Nullable;
+import app.msime.android.KeyboardGeometry;
 
 /**
  * 分页指示点：6dp 高、圆角 3，未选中 6dp 宽、选中拉长到 16dp 并换成 accent，切换时宽度和颜色在 0.2 秒里过渡。
@@ -41,7 +42,7 @@ public final class PageDots extends View {
 
     public void setCount(int count) {
         this.count = Math.max(0, count);
-        selected = Math.min(selected, Math.max(0, this.count - 1));
+        selected = KeyboardGeometry.bounded(selected, 0, Math.max(0, this.count - 1));
         previous = selected;
         progress = 1f;
         updateDescription();
