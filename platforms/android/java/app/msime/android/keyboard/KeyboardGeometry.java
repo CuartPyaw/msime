@@ -226,6 +226,10 @@ public final class KeyboardGeometry {
         return Math.max(minimum, Math.min(value, maximum));
     }
 
+    public static long bounded(long value, long minimum, long maximum) {
+        return Math.max(minimum, Math.min(value, maximum));
+    }
+
     public static double bounded(double value, double minimum, double maximum) {
         return Math.max(minimum, Math.min(value, maximum));
     }
