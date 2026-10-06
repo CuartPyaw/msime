@@ -608,7 +608,7 @@ public final class CloudSync {
                 .put("options", new JSONObject(options))
                 .put("action", new JSONObject().put("operation", "import_personal").put("text", file)
                     .put("request_id", "cloud-merge-" + UUID.randomUUID())).toString()));
-            return response.optBoolean("ok", false);
+            return Boolean.TRUE.equals(response.opt("ok"));
         }
     }
 

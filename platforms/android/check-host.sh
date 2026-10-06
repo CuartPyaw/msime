@@ -356,6 +356,14 @@ if sed -n '/private static JSONObject nativeValue(String response)/,/^    }$/p' 
   echo "Android cloud sync native envelopes must require a typed boolean ok field" >&2
   exit 1
 fi
+# Personal dictionary imports are acknowledged separately from the value envelope. A malformed
+# acknowledgement must not be reported as a successful merge item.
+if sed -n '/private boolean queueImport(String options, List<SyncMergePolicy.Word> words)/,/^    }$/p' \
+    "$repo_root/platforms/android/java/app/msime/android/home/CloudSync.java" \
+    | rg -n 'getBoolean\("ok"\)|optBoolean\("ok"'; then
+  echo "Android cloud sync imports must require a typed boolean ok field" >&2
+  exit 1
+fi
 # Sync rounds download over any section that is not dirty, so a preference write that forgets to mark settings dirty is reverted by the next cloud change. HostStore.savePreferences owns that mark for every caller.
 if ! rg -qU 'NativeClient\.savePreferences\(directory, revision, document\)\)\);\s*(//[^\n]*\s*)?if \(saved != null\) SyncSignals\.markDirty\(context, SyncSwitch\.SETTINGS\);' \
     "$repo_root/platforms/android/java/app/msime/android/home/HostStore.java"; then
