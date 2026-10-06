@@ -86,7 +86,7 @@ public final class FeedbackPage extends DetailPage {
         input.setHint("遇到了什么问题？可以写复现步骤、出错的词或期望的结果");
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
             | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-        input.setGravity(Gravity.TOP | Gravity.START);
+        ViewPolicy.setTopStart(input);
         input.setMinLines(4);
         ViewPolicy.clearBackground(input);
         Ui.style(input, Ui.TEXT_ROW_TITLE, 400, Ui.text(context));
