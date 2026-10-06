@@ -124,7 +124,7 @@ public final class ViewPolicy {
     }
 
     /** Align a view's content to the end edge and center it vertically. */
-    public static void setEndCenteredVertically(View view) {
+    public static void setEndCenteredVertically(TextView view) {
         view.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
     }
 
