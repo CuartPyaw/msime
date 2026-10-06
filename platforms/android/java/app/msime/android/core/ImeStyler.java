@@ -329,8 +329,8 @@ final class ImeStyler {
     /** One of the skin's colours at a fraction of its opacity. */
     static int fade(String color, double opacity) {
         int value = Color.parseColor(color);
-        return Color.argb((int) Math.round(255 * KeyboardGeometry.bounded(opacity, 0, 1)),
-            Color.red(value), Color.green(value), Color.blue(value));
+        return ColorPolicy.withAlpha(value,
+            (float) KeyboardGeometry.bounded(opacity, 0, 1));
     }
 
     /** The outlined badge the keyboard wears while nothing is being composed. */
