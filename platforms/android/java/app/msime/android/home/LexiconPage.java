@@ -214,8 +214,7 @@ public final class LexiconPage extends DetailPage {
         chevron.setImageResource(R.drawable.ms_w1_a2_chevron);
         Ui.setImageTint(chevron, Ui.subText(context));
         chevron.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        LinearLayout.LayoutParams chevronParams = new LinearLayout.LayoutParams(
-            Ui.dp(context, Ui.CHEVRON_SIZE), Ui.dp(context, Ui.CHEVRON_SIZE));
+        LinearLayout.LayoutParams chevronParams = Ui.squareParams(context, Ui.CHEVRON_SIZE);
         chevronParams.setMarginStart(Ui.dp(context, 6));
         row.addView(chevron, chevronParams);
         row.setBackground(Ui.ripple(context));
