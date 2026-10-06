@@ -4,7 +4,6 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
-import android.util.TypedValue;
 
 /**
  * 带提示的字母键：右上角画符号提示（设计的 q1 … m/，10 sp kbSub，上 3 dp、右 5 dp），底边留给双拼提示。
@@ -72,11 +71,6 @@ public class KeyHintButton extends KeyboardPressButton {
         invalidate();
     }
 
-    private float sp(float value) {
-        return TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, value,
-            getResources().getDisplayMetrics());
-    }
-
     @Override protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
         if (getWidth() <= 0 || getHeight() <= 0) return;
@@ -86,7 +80,7 @@ public class KeyHintButton extends KeyboardPressButton {
 
     private void drawCornerHint(Canvas canvas) {
         float density = getResources().getDisplayMetrics().density;
-        cornerPaint.setTextSize(sp(CORNER_HINT_SP));
+        cornerPaint.setTextSize(KeyboardGeometry.sp(getContext(), CORNER_HINT_SP));
         cornerPaint.setColor(cornerHintColor);
         if (!isEnabled()) cornerPaint.setAlpha(96);
         Paint.FontMetrics metrics = cornerPaint.getFontMetrics();
@@ -96,14 +90,14 @@ public class KeyHintButton extends KeyboardPressButton {
     }
 
     private void drawBottomHint(Canvas canvas) {
-        float size = sp(9);
+        float size = KeyboardGeometry.sp(getContext(), 9);
         float density = getResources().getDisplayMetrics().density;
         float available = Math.max(1, getWidth() - getPaddingLeft() - getPaddingRight()
             - KeyboardGeometry.pixels(4, density));
         hintPaint.setTextSize(size);
-        while (size > sp(6)
+        while (size > KeyboardGeometry.sp(getContext(), 6)
                 && hintPaint.measureText(hintText) > available) {
-            size -= sp(0.5f);
+            size -= KeyboardGeometry.sp(getContext(), 0.5f);
             hintPaint.setTextSize(size);
         }
         hintPaint.setColor(hintColor);

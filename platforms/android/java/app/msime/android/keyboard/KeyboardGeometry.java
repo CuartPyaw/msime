@@ -1,5 +1,7 @@
 package app.msime.android;
 
+import android.content.Context;
+import android.util.TypedValue;
 import java.util.Locale;
 import java.math.BigDecimal;
 import org.json.JSONObject;
@@ -169,6 +171,12 @@ public final class KeyboardGeometry {
     /** Convert a fractional density-independent size to pixels without rounding. */
     public static float floatPixels(double dp, float density) {
         return (float) dp * density;
+    }
+
+    /** Convert scalable text units using the view context's display metrics. */
+    public static float sp(Context context, float value) {
+        return TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, value,
+            context.getResources().getDisplayMetrics());
     }
 
     public static int bounded(int value, int minimum, int maximum) {
