@@ -139,7 +139,7 @@ final class ImeDebugOverlay {
 
         private static byte[] read(java.nio.file.Path file) throws IOException {
             try (InputStream input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
-                byte[] bytes = HttpBodyPolicy.readBounded(input, 2 * MAX_BYTES);
+                byte[] bytes = HttpBodyPolicy.readBounded(input, Math.toIntExact(2 * MAX_BYTES));
                 return bytes == null ? new byte[0] : bytes;
             }
         }
