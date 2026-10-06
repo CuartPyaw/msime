@@ -168,6 +168,11 @@ public final class KeyboardGeometry {
         return Math.round(dp * density);
     }
 
+    /** Convert a fractional density-independent size to rounded pixels. */
+    public static int pixels(float dp, float density) {
+        return Math.round(dp * density);
+    }
+
     /** Convert a fractional density-independent size to pixels without rounding. */
     public static float floatPixels(double dp, float density) {
         return (float) dp * density;
