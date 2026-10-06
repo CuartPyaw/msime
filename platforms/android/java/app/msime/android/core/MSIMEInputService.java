@@ -4496,6 +4496,13 @@ public final class MSIMEInputService extends InputMethodService {
         return view;
     }
 
+    private TextView layoutText(CharSequence text) {
+        TextView view = new TextView(this);
+        KeyboardGeometry.setKeyTextSize(view, KeyboardGeometry.DEFAULT_KEY_TEXT_SP);
+        view.setText(text);
+        return view;
+    }
+
     private void renderLayoutSettingsState() {
         if (keySpacingSlider != null && rowSpacingSlider != null && keyboardHeightSlider != null
                 && keySpacingValue != null && rowSpacingValue != null && keyboardHeightValue != null
@@ -5976,7 +5983,7 @@ public final class MSIMEInputService extends InputMethodService {
         layoutSettingsPanel.setBackgroundColor(Color.parseColor(skin.background()));
         layoutSettingsPanel.setContentDescription("键盘设置");
         LinearLayout layoutHeader = new LinearLayout(this);
-        TextView layoutTitle = new TextView(this);
+        TextView layoutTitle = layoutText("键盘设置");
         ViewPolicy.setTextSizeLabel(layoutTitle, "键盘设置", 18);
         KeyboardGeometry.setKeyTextSize(layoutTitle, 18);
         layoutHeader.addView(layoutTitle, KeyboardGeometry.weightedWrapParams(1));
@@ -5984,11 +5991,9 @@ public final class MSIMEInputService extends InputMethodService {
         closeLayout.setContentDescription("返回键盘");
         layoutSettingsPanel.addView(layoutHeader);
         LinearLayout keyboardHeightHeader = new LinearLayout(this);
-        TextView keyboardHeightLabel = new TextView(this);
-        KeyboardGeometry.setKeyTextSize(keyboardHeightLabel, KeyboardGeometry.DEFAULT_KEY_TEXT_SP);
-        keyboardHeightLabel.setText("键盘高度");
+        TextView keyboardHeightLabel = layoutText("键盘高度");
         keyboardHeightHeader.addView(keyboardHeightLabel, KeyboardGeometry.weightedWrapParams(1));
-        keyboardHeightValue = new TextView(this);
+        keyboardHeightValue = layoutText("");
         keyboardHeightHeader.addView(keyboardHeightValue);
         layoutSettingsPanel.addView(keyboardHeightHeader);
         keyboardHeightSlider = new SeekBar(this);
@@ -5996,11 +6001,9 @@ public final class MSIMEInputService extends InputMethodService {
         configureHeightSlider(keyboardHeightSlider);
         layoutSettingsPanel.addView(keyboardHeightSlider);
         LinearLayout keySpacingHeader = new LinearLayout(this);
-        TextView keySpacingLabel = new TextView(this);
-        KeyboardGeometry.setKeyTextSize(keySpacingLabel, KeyboardGeometry.DEFAULT_KEY_TEXT_SP);
-        keySpacingLabel.setText("按键间距");
+        TextView keySpacingLabel = layoutText("按键间距");
         keySpacingHeader.addView(keySpacingLabel, KeyboardGeometry.weightedWrapParams(1));
-        keySpacingValue = new TextView(this);
+        keySpacingValue = layoutText("");
         keySpacingHeader.addView(keySpacingValue);
         layoutSettingsPanel.addView(keySpacingHeader);
         keySpacingSlider = new SeekBar(this);
@@ -6008,11 +6011,9 @@ public final class MSIMEInputService extends InputMethodService {
         configureSpacingSlider(keySpacingSlider, true);
         layoutSettingsPanel.addView(keySpacingSlider);
         LinearLayout rowSpacingHeader = new LinearLayout(this);
-        TextView rowSpacingLabel = new TextView(this);
-        KeyboardGeometry.setKeyTextSize(rowSpacingLabel, KeyboardGeometry.DEFAULT_KEY_TEXT_SP);
-        rowSpacingLabel.setText("行间距");
+        TextView rowSpacingLabel = layoutText("行间距");
         rowSpacingHeader.addView(rowSpacingLabel, KeyboardGeometry.weightedWrapParams(1));
-        rowSpacingValue = new TextView(this);
+        rowSpacingValue = layoutText("");
         rowSpacingHeader.addView(rowSpacingValue);
         layoutSettingsPanel.addView(rowSpacingHeader);
         rowSpacingSlider = new SeekBar(this);
@@ -6033,9 +6034,7 @@ public final class MSIMEInputService extends InputMethodService {
         layoutSettingsPanel.addView(voiceShortcutSwitch);
         resetLayoutSettingsButton = button(layoutSettingsPanel, "恢复默认", this::resetTouchGeometry);
         resetLayoutSettingsButton.setContentDescription("恢复默认");
-        TextView layoutHint = new TextView(this);
-        KeyboardGeometry.setKeyTextSize(layoutHint, KeyboardGeometry.DEFAULT_KEY_TEXT_SP);
-        layoutHint.setText("高度和间距只改变键位外观，不改变输入方案；松手后自动保存。");
+        TextView layoutHint = layoutText("高度和间距只改变键位外观，不改变输入方案；松手后自动保存。");
         layoutSettingsPanel.addView(layoutHint);
         layoutSettingsScroll = new ScrollView(this);
         layoutSettingsScroll.addView(layoutSettingsPanel);
