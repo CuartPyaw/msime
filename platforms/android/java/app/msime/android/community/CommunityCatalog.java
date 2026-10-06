@@ -36,6 +36,7 @@ public final class CommunityCatalog {
     private static final int MAX_NAME_CHARACTERS = 32;
     private static final int MAX_DESCRIPTION_CHARACTERS = 280;
     private static final int MAX_AUTHOR_CHARACTERS = 128;
+    private static final UUID NIL_UUID = new UUID(0L, 0L);
 
     /**
      * One catalogue entry, flattened to what a list row shows.
@@ -445,7 +446,8 @@ public final class CommunityCatalog {
     private static boolean validUuid(String value) {
         if (value == null) return false;
         try {
-            return UUID.fromString(value).toString().equalsIgnoreCase(value);
+            UUID parsed = UUID.fromString(value);
+            return !NIL_UUID.equals(parsed) && parsed.toString().equalsIgnoreCase(value);
         } catch (IllegalArgumentException error) {
             return false;
         }

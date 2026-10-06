@@ -63,6 +63,15 @@ public final class CommunityCatalogSmoke {
             CommunityRequest.Category.OTHER, false, 0, null);
         check(!(boolean) validItem.invoke(null, malformed, CommunityRequest.Kind.SKIN),
             "malformed community items must be rejected");
+        CommunityCatalog.Item nilId = new CommunityCatalog.Item(
+            "00000000-0000-0000-0000-000000000000", CommunityRequest.Kind.SKIN, "名称", "说明", "作者",
+            0, 0, 0, null, CommunityRequest.Category.OTHER, false, 0, null);
+        check(!(boolean) validItem.invoke(null, nilId, CommunityRequest.Kind.SKIN),
+            "nil community item IDs must be rejected");
+        Method validUuid = CommunityCatalog.class.getDeclaredMethod("validUuid", String.class);
+        validUuid.setAccessible(true);
+        check(!(boolean) validUuid.invoke(null, "00000000-0000-0000-0000-000000000000"),
+            "nil UUIDs must not be accepted as community item IDs");
         CommunityCatalog.Item invalidRating = new CommunityCatalog.Item(
             UUID.randomUUID().toString(), CommunityRequest.Kind.SKIN, "名称", "说明", "作者",
             0, 0, 1, null, CommunityRequest.Category.OTHER, false, 0, null);
