@@ -761,16 +761,22 @@ impl UnixSocketProvider {
             if value.get("generation").and_then(Value::as_u64) != Some(generation) {
                 return None;
             }
-            if value.get("ok").and_then(Value::as_bool) == Some(false) {
-                if value.get("error").and_then(Value::as_str) == Some("voice_dependency_missing") {
-                    *missing_dependency = match value.get("detail").and_then(Value::as_str) {
-                        Some("websockets") => Some("websockets"),
-                        Some("recorder") => Some("recorder"),
-                        Some("local_asr") => Some("local_asr"),
-                        _ => None,
-                    };
+            match value.get("ok").and_then(Value::as_bool) {
+                Some(true) => {}
+                Some(false) => {
+                    if value.get("error").and_then(Value::as_str)
+                        == Some("voice_dependency_missing")
+                    {
+                        *missing_dependency = match value.get("detail").and_then(Value::as_str) {
+                            Some("websockets") => Some("websockets"),
+                            Some("recorder") => Some("recorder"),
+                            Some("local_asr") => Some("local_asr"),
+                            _ => None,
+                        };
+                    }
+                    return None;
                 }
-                return None;
+                None => return None,
             }
             let text = value.get("text").and_then(Value::as_str).unwrap_or("");
             if text.len() > 4096 {
