@@ -387,6 +387,13 @@ if sed -n '/private void reloadPreferences/,/^    }$/p;/boolean apply(String res
   echo "Android transition and emoji cursor flags must require typed booleans" >&2
   exit 1
 fi
+# Candidate and online provider writes acknowledge whether the native operation took effect. A
+# coerced string must never make the host publish a view it did not receive as applied.
+if rg -n 'optBoolean\("applied"' \
+    "$repo_root/platforms/android/java/app/msime/android/core/MSIMEInputService.java"; then
+  echo "Android candidate writes must require a typed boolean applied field" >&2
+  exit 1
+fi
 # The keyboard skin save writes the local animation only after a successful native CAS response;
 # keep that acknowledgement strict to avoid persisting a change after malformed JSON.
 if sed -n '/void saveKeyboardSkin(String identifier, JSONObject design)/,/^    }$/p' \
