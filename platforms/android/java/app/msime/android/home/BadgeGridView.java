@@ -2,7 +2,6 @@ package app.msime.android.home;
 
 import android.animation.ValueAnimator;
 import android.content.Context;
-import android.content.res.Configuration;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
@@ -85,9 +84,9 @@ public final class BadgeGridView extends View {
         glyph.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
         title.setTextAlign(Paint.Align.CENTER);
         title.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-        title.setTextSize(Ui.dp(context, 14));
+        title.setTextSize(Ui.sp(context, 14));
         caption.setTextAlign(Paint.Align.CENTER);
-        caption.setTextSize(Ui.dp(context, 11));
+        caption.setTextSize(Ui.sp(context, 11));
         ring.setStyle(Paint.Style.STROKE);
         ring.setStrokeCap(Paint.Cap.ROUND);
         ring.setStrokeWidth(Ui.dp(context, RING_STROKE));
@@ -212,8 +211,7 @@ public final class BadgeGridView extends View {
     }
 
     private boolean dark() {
-        return (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
-            == Configuration.UI_MODE_NIGHT_YES;
+        return Ui.isNight(getContext());
     }
 
     /** 分组的两种颜色：深色端和浅色端。 */
@@ -327,7 +325,7 @@ public final class BadgeGridView extends View {
         canvas.rotate(rotate);
         String face = badge.glyph();
         glyph.setColor(Color.WHITE);
-        glyph.setTextSize(Ui.dp(context, face.length() > 2 ? 13 : face.length() > 1 ? 15 : 19));
+        glyph.setTextSize(Ui.sp(context, face.length() > 2 ? 13 : face.length() > 1 ? 15 : 19));
         Paint.FontMetrics metrics = glyph.getFontMetrics();
         canvas.drawText(face, 0, -(metrics.ascent + metrics.descent) / 2, glyph);
         canvas.restore();
@@ -348,10 +346,10 @@ public final class BadgeGridView extends View {
         }
         String face = badge.glyph();
         glyph.setColor(sub);
-        glyph.setTextSize(Ui.dp(context, face.length() > 2 ? 12 : 15));
+        glyph.setTextSize(Ui.sp(context, face.length() > 2 ? 12 : 15));
         canvas.drawText(face, 0, Ui.dp(context, 2), glyph);
         glyph.setColor(colours[0]);
-        glyph.setTextSize(Ui.dp(context, 9));
+        glyph.setTextSize(Ui.sp(context, 9));
         canvas.drawText(TypingStatisticsSummary.progressLabel(badge), 0, Ui.dp(context, 14), glyph);
         canvas.restore();
     }

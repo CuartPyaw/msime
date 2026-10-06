@@ -386,7 +386,7 @@ public final class AccountFragment extends HomeTabFragment {
             Ui.style(detail, 12, 400, Ui.subText(context));
             texts.addView(detail);
         }
-        row.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(texts, Ui.weightWrap(1f));
 
         if (value != null && value.length() > 0) {
             TextView trailing = new TextView(context);

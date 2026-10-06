@@ -4,7 +4,6 @@ import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
-import android.content.res.Configuration;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.ColorFilter;
@@ -114,7 +113,7 @@ final class LoginSheet {
         title.setText("link".equals(purpose) ? "添加登录方式" : "登录水杉");
         Ui.style(title, 22, 700, Ui.text(activity));
         title.setAccessibilityHeading(true);
-        header.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        header.addView(title, Ui.weightWrap(1f));
         ImageView close = new ImageView(activity);
         close.setImageDrawable(new PathIcon(24, new String[] {CLOSE_PATH}, new int[] {Ui.text(activity)}));
         close.setPadding(Ui.dp(activity, 8), Ui.dp(activity, 8), Ui.dp(activity, 8), Ui.dp(activity, 8));
@@ -131,8 +130,7 @@ final class LoginSheet {
 
         options = new LinearLayout(activity);
         options.setOrientation(LinearLayout.VERTICAL);
-        boolean night = (activity.getResources().getConfiguration().uiMode
-            & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+        boolean night = Ui.isNight(activity);
         if (providers.appleWeb()) {
             // Apple 的规范按钮：浅色下黑底白字，深色下白底黑字；这是 Apple 的品牌色，不随季节主题变。
             int fill = night ? Color.WHITE : Color.BLACK;
@@ -328,7 +326,7 @@ final class LoginSheet {
         button.setGravity(Gravity.CENTER);
         button.setMinimumHeight(Ui.dp(activity, 50));
         GradientDrawable face = Ui.rounded(fill, Ui.dp(activity, 12));
-        if (stroke != 0) face.setStroke(Math.max(1, Ui.dp(activity, 1)), stroke);
+        if (stroke != 0) face.setStroke(Ui.atLeastOnePx(activity, 1), stroke);
         GradientDrawable mask = Ui.rounded(Color.WHITE, Ui.dp(activity, 12));
         int pressed = Ui.withAlpha(fill == Color.BLACK ? Color.WHITE : Ui.text(activity), 0.12f);
         button.setBackground(new RippleDrawable(android.content.res.ColorStateList.valueOf(pressed), face, mask));
@@ -360,7 +358,7 @@ final class LoginSheet {
         Ui.style(field, 16, 400, Ui.text(activity));
         field.setHintTextColor(Ui.subText(activity));
         GradientDrawable face = Ui.rounded(Ui.rowBackground(activity), Ui.dp(activity, 12));
-        face.setStroke(Math.max(1, Ui.dp(activity, 1)), Ui.hairline(activity));
+        face.setStroke(Ui.atLeastOnePx(activity, 1), Ui.hairline(activity));
         field.setBackground(face);
         field.setPadding(Ui.dp(activity, 14), 0, Ui.dp(activity, 14), 0);
         field.setMinHeight(Ui.dp(activity, 50));

@@ -255,7 +255,7 @@ final class ImeStyler {
             : tile ? (selected ? target.accentText() : target.keyForeground())
             : selected ? target.onAccent()
             : action ? target.functionForeground() : target.keyForeground();
-        float density = s.getResources().getDisplayMetrics().density;
+        float density = KeyboardGeometry.density(s);
         KeyboardPressButton press = button instanceof KeyboardPressButton key ? key : null;
         // 键帽完全由皮肤、角色、选中状态和密度决定；这几项都没变就留着现在这块，不再每次 render 换一个一样的新 Drawable 让整块键盘重画。
         if (press == null || !press.keepsFace(target, role, selected, density)) {
@@ -300,7 +300,7 @@ final class ImeStyler {
             ? KeyboardIconKey.Kind.CAPS_LOCK : KeyboardIconKey.Kind.SHIFT);
         String background = on ? target.keyBackground() : target.functionBackground();
         String foreground = on ? target.accent() : target.functionForeground();
-        float density = s.getResources().getDisplayMetrics().density;
+        float density = KeyboardGeometry.density(s);
         // 记忆键帽时按「开着」当作 KEY 角色，免得开关切换后沿用旧的那块底图。
         KeyboardKeyRole remembered = on ? KeyboardKeyRole.KEY : KeyboardKeyRole.ACCENT;
         if (!key.keepsFace(target, remembered, false, density)) {
@@ -470,7 +470,7 @@ final class ImeStyler {
 
     void applySkinBackground(View node, KeyboardSkin target) {
         target = themed(target);
-        float density = s.getResources().getDisplayMetrics().density;
+        float density = KeyboardGeometry.density(s);
         // 同一个皮肤对象画出的底图完全一样；已经是它就不再换新的，免得每按一个键都让整块键盘底图重画（照片皮肤还要重新上传位图）。
         if (node.getBackground() instanceof KeyboardSkinBackgroundDrawable current
                 && current.draws(target, density)) return;

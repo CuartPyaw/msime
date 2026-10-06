@@ -67,10 +67,10 @@ public final class KeyHeatmapView extends View {
         super(context, attributes);
         face.setTextAlign(Paint.Align.CENTER);
         face.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-        face.setTextSize(Ui.dp(context, 14));
+        face.setTextSize(Ui.sp(context, 14));
         share.setTextAlign(Paint.Align.CENTER);
-        share.setTextSize(Ui.dp(context, 9));
-        caption.setTextSize(Ui.dp(context, 12));
+        share.setTextSize(Ui.sp(context, 9));
+        caption.setTextSize(Ui.sp(context, 12));
     }
 
     private static Key k(String id) {

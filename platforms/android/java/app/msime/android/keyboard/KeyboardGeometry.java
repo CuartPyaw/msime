@@ -1,6 +1,7 @@
 package app.msime.android;
 
 import android.content.Context;
+import android.content.res.Configuration;
 import android.util.TypedValue;
 import java.util.Locale;
 import java.math.BigDecimal;
@@ -51,6 +52,12 @@ public final class KeyboardGeometry {
     public static final int MAX_DESIGN_HEIGHT_ADJUSTMENT_DP = 55;
 
     private KeyboardGeometry() { }
+
+    /** Return whether the supplied context currently uses the system night configuration. */
+    public static boolean isNight(Context context) {
+        return (context.getResources().getConfiguration().uiMode
+            & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+    }
 
     /** Read the display density used by keyboard geometry calculations. */
     public static float density(Context context) {
@@ -168,6 +175,11 @@ public final class KeyboardGeometry {
         return Math.max(0, Math.round(tenths * density / 20f));
     }
 
+    /** Convert a size to pixels while guaranteeing at least one physical pixel. */
+    public static int atLeastOnePixel(Context context, float dp) {
+        return Math.max(1, pixels(context, dp));
+    }
+
     /** Convert an integer density-independent size to pixels using Android's rounding rule. */
     public static int pixels(int dp, float density) {
         return Math.round(dp * density);
@@ -180,7 +192,7 @@ public final class KeyboardGeometry {
 
     /** Convert a density-independent size to rounded pixels using the context's density. */
     public static int pixels(Context context, float dp) {
-        return pixels(dp, context.getResources().getDisplayMetrics().density);
+        return pixels(dp, density(context));
     }
 
     /** Convert a fractional density-independent size to pixels without rounding. */
@@ -190,7 +202,7 @@ public final class KeyboardGeometry {
 
     /** Convert a fractional density-independent size to pixels using the context's density. */
     public static float floatPixels(Context context, double dp) {
-        return floatPixels(dp, context.getResources().getDisplayMetrics().density);
+        return floatPixels(dp, density(context));
     }
 
     /** Convert pixels back to density-independent units using the context's density. */

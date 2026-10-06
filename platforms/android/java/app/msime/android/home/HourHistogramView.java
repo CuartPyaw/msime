@@ -34,7 +34,7 @@ public final class HourHistogramView extends View {
 
     public HourHistogramView(Context context, @Nullable AttributeSet attributes) {
         super(context, attributes);
-        label.setTextSize(Ui.dp(context, LABEL_SIZE));
+        label.setTextSize(Ui.sp(context, LABEL_SIZE));
     }
 
     /**

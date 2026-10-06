@@ -8,7 +8,6 @@ import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.text.TextPaint;
 import android.text.TextUtils;
-import android.util.TypedValue;
 
 /**
  * 键盘内皮肤面板的一格瓷砖：上面是圆角 8 dp、按设计 MiniKb 比例的整副迷你键盘，下面一行 12 sp 的皮肤名。
@@ -66,8 +65,7 @@ public final class KeyboardSkinCard extends KeyboardPressButton {
     public KeyboardSkin skin() { return skin; }
 
     @Override protected void onDraw(Canvas canvas) {
-        float labelSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, LABEL_SP,
-            getResources().getDisplayMetrics());
+        float labelSize = KeyboardGeometry.sp(getContext(), LABEL_SP);
         paint.setTextSize(labelSize);
         Paint.FontMetrics metrics = paint.getFontMetrics();
         float labelHeight = metrics.descent - metrics.ascent;

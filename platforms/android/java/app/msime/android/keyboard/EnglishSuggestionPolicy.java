@@ -7,7 +7,7 @@ public final class EnglishSuggestionPolicy {
     /** Read Latin letters backwards, normalizing full-width forms for the ASCII dictionary. */
     public static String currentWord(CharSequence beforeCursor) {
         if (beforeCursor == null || beforeCursor.length() == 0) return "";
-        StringBuilder result = new StringBuilder();
+        StringBuilder result = new StringBuilder(beforeCursor.length());
         for (int offset = beforeCursor.length(); offset > 0;) {
             int codePoint = Character.codePointBefore(beforeCursor, offset);
             int normalized = normalizeLetter(codePoint);

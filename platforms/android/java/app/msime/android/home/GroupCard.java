@@ -235,10 +235,9 @@ public final class GroupCard {
 
     private void addDivider() {
         if (dividerInset < 0 || card.getChildCount() == 0) return;
-        View rule = new View(context);
-        rule.setBackgroundColor(Ui.hairline(context));
+        View rule = Ui.hairlineView(context);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, Ui.dp(context, 0.5f)));
+            ViewGroup.LayoutParams.MATCH_PARENT, Ui.hairlinePx(context));
         params.setMarginStart(Ui.dp(context, dividerInset));
         card.addView(rule, params);
     }
@@ -295,7 +294,7 @@ public final class GroupCard {
             subtitleParams.topMargin = Ui.dp(owner.context, 1);
             texts.addView(subtitle, subtitleParams);
             setText(subtitle, subtitleText);
-            view.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            view.addView(texts, Ui.weightWrap(1f));
         }
 
         private void setAction(@Nullable Runnable action) {

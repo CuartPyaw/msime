@@ -260,7 +260,7 @@ public final class CommunityRequest {
      */
     public static String encode(String value) {
         if (value == null || value.isEmpty()) return "";
-        StringBuilder result = new StringBuilder();
+        StringBuilder result = new StringBuilder(value.length());
         for (byte raw : value.getBytes(StandardCharsets.UTF_8)) {
             int octet = raw & 0xFF;
             if (octet >= 'a' && octet <= 'z' || octet >= 'A' && octet <= 'Z'

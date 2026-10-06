@@ -30,6 +30,7 @@ import app.msime.android.CloudApi;
 import app.msime.android.CustomKeyboardSkin;
 import app.msime.android.CustomSkinLibrary;
 import app.msime.android.KeyboardSkin;
+import app.msime.android.PhotoDecodePolicy;
 import app.msime.android.SkinJobsApi;
 import java.io.ByteArrayOutputStream;
 import java.nio.file.Paths;
@@ -286,7 +287,7 @@ public final class AiSkinPage extends DetailPage {
         subtitle = new TextView(context);
         Ui.style(subtitle, 13, 400, Ui.subText(context));
         heading.addView(subtitle);
-        header.addView(heading, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        header.addView(heading, Ui.weightWrap(1f));
         SegmentedControl layout = new SegmentedControl(context);
         layout.setOptions(List.of("26 键", "9 键"), s.nineKey ? 1 : 0);
         layout.setOnSelect(index -> {
@@ -417,14 +418,14 @@ public final class AiSkinPage extends DetailPage {
             GroupCard.add(target, null).note("AI 设计皮肤暂不可用，请稍后再来。");
         } else if (s.results.isEmpty()) {
             TextView generate = KeyboardSheets.bigButton(context, "✦ 生成皮肤", true, () -> generate(input));
-            actions.addView(generate, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            actions.addView(generate, Ui.weightWrap(1f));
             target.addView(actions, actionsParams);
             bindEnabled(input, generate);
         } else {
             TextView again = KeyboardSheets.bigButton(context, "✦ 重新生成", false, () -> generate(input));
-            actions.addView(again, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            actions.addView(again, Ui.weightWrap(1f));
             TextView use = KeyboardSheets.bigButton(context, "使用此皮肤", true, this::useResult);
-            LinearLayout.LayoutParams useParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            LinearLayout.LayoutParams useParams = Ui.weightWrap(1f);
             useParams.setMarginStart(Ui.dp(context, 12));
             actions.addView(use, useParams);
             target.addView(actions, actionsParams);
@@ -499,7 +500,7 @@ public final class AiSkinPage extends DetailPage {
                 for (String colour : colours) {
                     View dot = new View(context);
                     android.graphics.drawable.GradientDrawable shape = Ui.pill(Ui.parseColor(colour, Color.GRAY));
-                    shape.setStroke(Math.max(1, Ui.dp(context, 1)), Ui.hairline(context));
+                    shape.setStroke(Ui.atLeastOnePx(context, 1), Ui.hairline(context));
                     dot.setBackground(shape);
                     LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(Ui.dp(context, 16), Ui.dp(context, 16));
                     params.setMarginEnd(Ui.dp(context, 6));
