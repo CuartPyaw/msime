@@ -2819,7 +2819,31 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     int displayedTouchLayout(JSONObject value) {
-        return dedicatedEnglish ? STANDARD_TOUCH_LAYOUT : touchLayout(value);
+        if (dedicatedEnglish) return STANDARD_TOUCH_LAYOUT;
+        if (value == null) return touchLayoutHint();
+        int layout = touchLayout(value);
+        rememberTouchLayout(layout);
+        return layout;
+    }
+
+    // 键盘弹出时引擎会话还在后台起（scheduleEngineStartup），view 要一两秒后才到；那之前按 view 算布局只能是默认的 26 键，九键用户每次都先看到 26 键再跳成九键。所以记住上次引擎给出的布局，view 还没到时先按它画。记在 SharedPreferences 里，键盘进程重启后也还在。
+    private static final String TOUCH_LAYOUT_HINT_PREFERENCES = "keyboard-layout-hint";
+    private static final String TOUCH_LAYOUT_HINT_KEY = "touch_layout";
+    private int touchLayoutHint = -1;
+
+    private int touchLayoutHint() {
+        if (touchLayoutHint < 0) {
+            touchLayoutHint = getSharedPreferences(TOUCH_LAYOUT_HINT_PREFERENCES, MODE_PRIVATE)
+                .getInt(TOUCH_LAYOUT_HINT_KEY, STANDARD_TOUCH_LAYOUT);
+        }
+        return touchLayoutHint;
+    }
+
+    private void rememberTouchLayout(int layout) {
+        if (layout == touchLayoutHint()) return;
+        touchLayoutHint = layout;
+        getSharedPreferences(TOUCH_LAYOUT_HINT_PREFERENCES, MODE_PRIVATE).edit()
+            .putInt(TOUCH_LAYOUT_HINT_KEY, layout).apply();
     }
 
     boolean sendsChinesePunctuation() {
