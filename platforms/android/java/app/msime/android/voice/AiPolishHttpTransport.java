@@ -47,7 +47,11 @@ public final class AiPolishHttpTransport implements AiPolishClient.Transport {
                 throw new AiPolishClient.Failure(AiPolishClient.Reason.UNAVAILABLE);
             byte[] response;
             try (InputStream input = connection.getInputStream()) {
-                response = readBounded(input, cancellation);
+                response = HttpBodyPolicy.readBounded(input,
+                    AiPolishConfiguration.MAXIMUM_RESPONSE_BYTES, cancellation::cancelled);
+                if (cancellation.cancelled())
+                    throw new AiPolishClient.Failure(AiPolishClient.Reason.CANCELLED);
+                if (response == null) throw new AiPolishClient.Failure(AiPolishClient.Reason.INVALID);
             }
             JSONObject document = new JSONObject(new String(response, StandardCharsets.UTF_8));
             Object content = document.getJSONArray("choices").getJSONObject(0)
@@ -82,13 +86,4 @@ public final class AiPolishHttpTransport implements AiPolishClient.Transport {
         return value instanceof String ? (String) value : "";
     }
 
-    private static byte[] readBounded(InputStream input, AiPolishClient.Cancellation cancellation)
-            throws IOException, AiPolishClient.Failure {
-        byte[] response = HttpBodyPolicy.readBounded(input,
-            AiPolishConfiguration.MAXIMUM_RESPONSE_BYTES, cancellation::cancelled);
-        if (cancellation.cancelled())
-            throw new AiPolishClient.Failure(AiPolishClient.Reason.CANCELLED);
-        if (response == null) throw new AiPolishClient.Failure(AiPolishClient.Reason.INVALID);
-        return response;
-    }
 }
