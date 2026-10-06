@@ -89,8 +89,7 @@ public final class KeyboardSchemeCard extends FrameLayout {
         glyphParams.topMargin = top;
         cluster.addView(glyph, glyphParams);
 
-        FrameLayout.LayoutParams badgeParams =
-            new FrameLayout.LayoutParams(badgeWidth, badgeHeight);
+        FrameLayout.LayoutParams badgeParams = KeyboardGeometry.frameParamsPx(badgeWidth, badgeHeight);
         badgeParams.leftMargin = glyphSize + KeyboardGeometry.pixels(getContext(), 4) - badgeWidth;
         badgeParams.topMargin = top + glyphSize + KeyboardGeometry.pixels(getContext(), OVERHANG_BOTTOM_DP) - badgeHeight;
         cluster.addView(badge, badgeParams);
