@@ -226,7 +226,8 @@ public final class KeyboardPreview extends View {
         float gap = Ui.dpFloat(getContext(), 5) * s;
         float stripHeight = Ui.dpFloat(getContext(), 24) * s;
         float radius = (skin == null ? Ui.dpFloat(getContext(), 6)
-            : Math.min(Ui.dpFloat(getContext(), (float) skin.cornerRadius()), Ui.dpFloat(getContext(), 12))) * s;
+            : BoundsPolicy.atMost(Ui.dpFloat(getContext(), (float) skin.cornerRadius()),
+                Ui.dpFloat(getContext(), 12))) * s;
 
         // 候选条：一个拼音和两枚候选，首选用强调色。
         float baseline = pad + stripHeight * 0.68f;
