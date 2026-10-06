@@ -295,6 +295,14 @@ if sed -n '/private JSONObject value(String response)/,/^    }$/p' \
   echo "Android input service envelope reader must require a typed boolean ok field" >&2
   exit 1
 fi
+# The live preference reload feeds the next Engine session. It must use the same strict native
+# envelope rule instead of accepting a string status from a malformed store response.
+if sed -n '/private static String withLivePreferences/,/^    }$/p' \
+    "$repo_root/platforms/android/java/app/msime/android/core/MSIMEInputService.java" \
+    | rg -n 'getBoolean\("ok"\)|optBoolean\("ok"'; then
+  echo "Android live preferences must require a typed boolean ok field" >&2
+  exit 1
+fi
 # Sync rounds download over any section that is not dirty, so a preference write that forgets to mark settings dirty is reverted by the next cloud change. HostStore.savePreferences owns that mark for every caller.
 if ! rg -qU 'NativeClient\.savePreferences\(directory, revision, document\)\)\);\s*(//[^\n]*\s*)?if \(saved != null\) SyncSignals\.markDirty\(context, SyncSwitch\.SETTINGS\);' \
     "$repo_root/platforms/android/java/app/msime/android/home/HostStore.java"; then
