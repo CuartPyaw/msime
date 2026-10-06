@@ -549,6 +549,20 @@ public final class Ui {
         return button;
     }
 
+    /** Create a centered, clickable text button with caller-supplied background and ink. */
+    public static TextView textButton(Context context, CharSequence label, int sizeSp, int weight,
+                                      @ColorInt int ink, Drawable background, float minHeightDp) {
+        TextView button = new TextView(context);
+        button.setText(label);
+        button.setGravity(android.view.Gravity.CENTER);
+        style(button, sizeSp, weight, ink);
+        button.setBackground(background);
+        setTextMinHeightDp(button, context, minHeightDp);
+        button.setClickable(true);
+        button.setFocusable(true);
+        return button;
+    }
+
     /** 设置字号（sp）与字重。 */
     public static void style(TextView view, int sizeSp, int weight, @ColorInt int color) {
         view.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp);

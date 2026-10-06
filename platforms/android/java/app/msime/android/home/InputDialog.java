@@ -191,14 +191,7 @@ public final class InputDialog {
     }
 
     private TextView button(CharSequence label, int weight, int color) {
-        TextView button = new TextView(context);
-        button.setText(label);
-        button.setGravity(Gravity.CENTER);
-        Ui.style(button, Ui.TEXT_DIALOG_TITLE, weight, color);
-        button.setBackground(Ui.ripple(context));
-        button.setClickable(true);
-        button.setFocusable(true);
-        return button;
+        return Ui.textButton(context, label, Ui.TEXT_DIALOG_TITLE, weight, color, Ui.ripple(context), 0);
     }
 
     /** 分隔线：横的在按钮上方，竖的在两个按钮之间。 */
