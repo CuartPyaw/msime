@@ -6,6 +6,7 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.view.View;
+import app.msime.android.keyboard.KeyboardGeometry;
 
 /**
  * 分页面板下方的页点：6 dp 高，当前页 16 dp 宽 accent，其余 6 dp 宽 kbHair，间距 6 dp，切页时宽度与颜色用 200 ms 过渡。
@@ -89,20 +90,18 @@ public final class KeyboardPagerDots extends View {
     }
 
     @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        float density = getResources().getDisplayMetrics().density;
-        int width = Math.round(totalWidthDp(count) * density);
-        int height = Math.round(DOT_DP * density);
+        int width = KeyboardGeometry.pixels(getContext(), totalWidthDp(count));
+        int height = KeyboardGeometry.pixels(getContext(), DOT_DP);
         setMeasuredDimension(resolveSize(width, widthMeasureSpec),
             resolveSize(height, heightMeasureSpec));
     }
 
     @Override protected void onDraw(Canvas canvas) {
         if (count <= 0) return;
-        float density = getResources().getDisplayMetrics().density;
-        float dot = DOT_DP * density;
-        float wide = ACTIVE_DP * density;
-        float gap = GAP_DP * density;
-        float total = totalWidthDp(count) * density;
+        float dot = KeyboardGeometry.floatPixels(getContext(), DOT_DP);
+        float wide = KeyboardGeometry.floatPixels(getContext(), ACTIVE_DP);
+        float gap = KeyboardGeometry.floatPixels(getContext(), GAP_DP);
+        float total = KeyboardGeometry.floatPixels(getContext(), totalWidthDp(count));
         float x = (getWidth() - total) / 2f;
         float top = (getHeight() - dot) / 2f;
         for (int index = 0; index < count; index++) {
