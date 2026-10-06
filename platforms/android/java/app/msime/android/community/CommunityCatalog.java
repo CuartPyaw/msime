@@ -1,7 +1,6 @@
 package app.msime.android;
 
 import android.content.Context;
-import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -488,15 +487,9 @@ public final class CommunityCatalog {
     }
 
     private static byte[] readBounded(InputStream input, int maximumBytes) throws Exception {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        byte[] buffer = new byte[8192];
-        int count;
-        while ((count = input.read(buffer)) != -1) {
-            if (output.size() + count > maximumBytes)
-                throw new IllegalStateException("community response too large");
-            output.write(buffer, 0, count);
-        }
-        return output.toByteArray();
+        byte[] body = HttpBodyPolicy.readBounded(input, maximumBytes);
+        if (body == null) throw new IllegalStateException("community response too large");
+        return body;
     }
 
     /**

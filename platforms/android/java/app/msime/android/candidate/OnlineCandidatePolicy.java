@@ -18,6 +18,7 @@ import java.net.URL;
 public final class OnlineCandidatePolicy {
     /** How long a composition has to hold still before either provider is asked. */
     public static final long QUIET_INTERVAL_MILLIS = 350;
+    /** 云候选的连接时限和整体时限，与 client-core 的 `CONNECT_TIMEOUT_MS` / `REQUEST_TIMEOUT_MS` 相同，由 scripts/test-cloud-request-budget.py 核对。 */
     public static final int CLOUD_TIMEOUT_MILLIS = 2_000;
     public static final int MAX_CLOUD_RESPONSE_BYTES = 256 * 1024;
     public static final int MAX_AI_RESPONSE_BYTES = 1024 * 1024;
@@ -77,6 +78,7 @@ public final class OnlineCandidatePolicy {
         return limit >= 1 && limit <= MAX_CANDIDATE_LIMIT ? limit : 0;
     }
 
+
     /** Whether a cloud body is small enough to hand to the shared parser. */
     public static boolean acceptsCloudBody(String body) {
         return body != null && !body.isEmpty() && TextPolicy.utf8Length(body) <= MAX_CLOUD_RESPONSE_BYTES;
@@ -99,10 +101,11 @@ public final class OnlineCandidatePolicy {
      * matching the shared parser: one unusable entry does not discard the usable ones beside it.
      */
     public static List<String> aiCandidates(List<String> texts, int limit) {
-        List<String> result = new ArrayList<>();
-        if (texts == null || aiCandidateLimit(limit) == 0) return result;
+        int boundedLimit = aiCandidateLimit(limit);
+        if (texts == null || boundedLimit == 0) return new ArrayList<>();
+        List<String> result = new ArrayList<>(boundedLimit);
         for (String text : texts) {
-            if (result.size() == limit) break;
+            if (result.size() == boundedLimit) break;
             if (text == null || text.trim().isEmpty() || TextPolicy.utf8Length(text) > MAX_CANDIDATE_BYTES
                     || TextPolicy.hasControl(text) || result.contains(text)) {
                 continue;
