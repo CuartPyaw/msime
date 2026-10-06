@@ -560,7 +560,7 @@ public final class Ui {
     public static TextView sheetHeading(Context context, CharSequence text) {
         TextView heading = new TextView(context);
         heading.setText(text);
-        heading.setGravity(android.view.Gravity.CENTER);
+        ViewPolicy.setCentered(heading);
         style(heading, TEXT_SHEET_HEADER, 600, subText(context));
         heading.setAccessibilityHeading(true);
         return heading;
@@ -570,7 +570,7 @@ public final class Ui {
     public static TextView sheetSubtitle(Context context, CharSequence text) {
         TextView subtitle = new TextView(context);
         subtitle.setText(text);
-        subtitle.setGravity(android.view.Gravity.CENTER);
+        ViewPolicy.setCentered(subtitle);
         style(subtitle, TEXT_SHEET_HEADER, 400, subText(context));
         return subtitle;
     }
@@ -616,7 +616,7 @@ public final class Ui {
                                       float minHeightDp, float minWidthDp, Runnable action) {
         TextView button = new TextView(context);
         button.setText(label);
-        button.setGravity(android.view.Gravity.CENTER);
+        ViewPolicy.setCentered(button);
         button.setSingleLine(true);
         style(button, Math.round(sizeSp), weight, ink);
         button.setBackground(pillRipple(context, fill));
@@ -641,7 +641,7 @@ public final class Ui {
                                       Runnable action) {
         TextView button = new TextView(context);
         button.setText(label);
-        button.setGravity(android.view.Gravity.CENTER);
+        ViewPolicy.setCentered(button);
         style(button, sizeSp, weight, ink);
         button.setBackground(background);
         setTextMinHeightDp(button, context, minHeightDp);
