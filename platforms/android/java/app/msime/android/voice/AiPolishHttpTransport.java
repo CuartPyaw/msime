@@ -74,7 +74,7 @@ public final class AiPolishHttpTransport implements AiPolishClient.Transport {
 
     /** Chat completions carry text; do not let org.json coerce malformed values into prose. */
     static String strictContent(Object value) {
-        return value instanceof String ? (String) value : "";
+        return AiProviderResponse.strictContent(value);
     }
 
 }
