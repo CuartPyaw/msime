@@ -46,8 +46,7 @@ public final class OptionSheet {
             note.setText(subtitle);
             note.setGravity(Gravity.CENTER);
             Ui.style(note, Ui.TEXT_SHEET_HEADER, 400, Ui.subText(context));
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            LinearLayout.LayoutParams params = Ui.wrap();
             params.topMargin = Ui.dp(context, 2);
             header.addView(note, params);
         }
