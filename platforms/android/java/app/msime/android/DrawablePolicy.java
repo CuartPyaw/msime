@@ -7,6 +7,13 @@ import android.graphics.drawable.GradientDrawable;
 public final class DrawablePolicy {
     private DrawablePolicy() {}
 
+    public static GradientDrawable circle(int color) {
+        GradientDrawable shape = new GradientDrawable();
+        shape.setShape(GradientDrawable.OVAL);
+        shape.setColor(color);
+        return shape;
+    }
+
     public static GradientDrawable rounded(int color, float radiusPx) {
         GradientDrawable shape = new GradientDrawable();
         shape.setShape(GradientDrawable.RECTANGLE);

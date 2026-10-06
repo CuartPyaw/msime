@@ -275,10 +275,7 @@ public final class Ui {
 
     /** Create a filled circular drawable. */
     public static GradientDrawable circle(@ColorInt int color) {
-        GradientDrawable shape = new GradientDrawable();
-        shape.setShape(GradientDrawable.OVAL);
-        shape.setColor(color);
-        return shape;
+        return DrawablePolicy.circle(color);
     }
 
     /** 纯色圆角矩形。 */
