@@ -102,8 +102,7 @@ final class LoginSheet {
         dialog = new BottomSheetDialog(activity);
         appleResult = this::finishWith;
 
-        LinearLayout root = new LinearLayout(activity);
-        root.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout root = Ui.column(activity);
         Ui.setPaddingDp(root, activity, 24, 0, 24, 20);
         root.addView(Ui.sheetDragHandle(activity));
 
@@ -127,8 +126,7 @@ final class LoginSheet {
             14, 400, Ui.subText(activity));
         root.addView(subtitle, Ui.matchWidth(activity, 2));
 
-        options = new LinearLayout(activity);
-        options.setOrientation(LinearLayout.VERTICAL);
+        options = Ui.column(activity);
         boolean night = Ui.isNight(activity);
         if (providers.appleWeb()) {
             // Apple 的规范按钮：浅色下黑底白字，深色下白底黑字；这是 Apple 的品牌色，不随季节主题变。
@@ -141,8 +139,7 @@ final class LoginSheet {
             options.addView(button(new PathIcon(48, GOOGLE_PATHS, GOOGLE_COLORS), "通过 Google 登录",
                 Color.TRANSPARENT, Ui.text(activity), Ui.outline(activity), this::google), Ui.matchWidth(activity, 12));
         }
-        email = new LinearLayout(activity);
-        email.setOrientation(LinearLayout.VERTICAL);
+        email = Ui.column(activity);
         if (providers.email()) {
             int accent = Ui.accent(activity);
             options.addView(button(new PathIcon(24, new String[] {MAIL_PATH}, new int[] {accent}), "使用邮箱登录",

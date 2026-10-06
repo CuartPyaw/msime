@@ -352,6 +352,13 @@ public final class Ui {
         return handle;
     }
 
+    /** Create a vertical linear container for stacked host content. */
+    public static LinearLayout column(Context context) {
+        LinearLayout view = new LinearLayout(context);
+        view.setOrientation(LinearLayout.VERTICAL);
+        return view;
+    }
+
     /** Layout parameters for a weighted child that wraps its height. */
     public static LinearLayout.LayoutParams weightWrap(float weight) {
         return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, weight);

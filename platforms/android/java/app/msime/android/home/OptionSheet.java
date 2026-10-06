@@ -27,12 +27,10 @@ public final class OptionSheet {
     public OptionSheet(Context context, CharSequence title, @Nullable CharSequence subtitle) {
         this.context = context;
         dialog = new BottomSheetDialog(context);
-        LinearLayout root = new LinearLayout(context);
-        root.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout root = Ui.column(context);
         root.addView(Ui.sheetDragHandle(context));
 
-        LinearLayout header = new LinearLayout(context);
-        header.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout header = Ui.column(context);
         ViewPolicy.setCenteredHorizontally(header);
         Ui.setSheetHeaderPadding(header, context);
         TextView heading = Ui.sheetHeading(context, title);
@@ -45,8 +43,7 @@ public final class OptionSheet {
         }
         root.addView(header);
 
-        options = new LinearLayout(context);
-        options.setOrientation(LinearLayout.VERTICAL);
+        options = Ui.column(context);
         NestedScrollView scroll = new NestedScrollView(context);
         scroll.addView(options, new ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));

@@ -48,12 +48,10 @@ final class AppThemeSheet {
     static void show(Fragment host, @Nullable JSONObject preferences, Runnable refresh) {
         Context context = host.requireContext();
         BottomSheetDialog dialog = new BottomSheetDialog(context);
-        LinearLayout root = new LinearLayout(context);
-        root.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout root = Ui.column(context);
         root.addView(Ui.sheetDragHandle(context));
 
-        LinearLayout header = new LinearLayout(context);
-        header.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout header = Ui.column(context);
         ViewPolicy.setCenteredHorizontally(header);
         Ui.setSheetHeaderPadding(header, context);
         TextView heading = Ui.sheetHeading(context, "应用主题");

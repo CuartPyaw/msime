@@ -46,8 +46,7 @@ public final class InputDialog {
         dialog = new AppCompatDialog(context);
         dialog.supportRequestWindowFeature(Window.FEATURE_NO_TITLE);
 
-        LinearLayout root = new LinearLayout(context);
-        root.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout root = Ui.column(context);
         root.setBackground(Ui.rounded(Ui.sheetBackground(context), Ui.dp(context, Ui.DIALOG_RADIUS)));
         root.setClipToOutline(true);
 
@@ -70,8 +69,7 @@ public final class InputDialog {
             root.addView(note, params);
         }
 
-        fields = new LinearLayout(context);
-        fields.setOrientation(LinearLayout.VERTICAL);
+        fields = Ui.column(context);
         Ui.setPaddingDp(fields, context, 16, 6, 16, 16);
         root.addView(fields, Ui.matchWidth());
 
