@@ -4,7 +4,6 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
-import app.msime.android.keyboard.KeyboardGeometry;
 import android.graphics.RectF;
 import java.util.function.IntSupplier;
 
