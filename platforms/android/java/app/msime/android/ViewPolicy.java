@@ -93,4 +93,9 @@ public final class ViewPolicy {
     public static void setTextSizeSp(TextView view, float sizeSp) {
         view.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp);
     }
+
+    /** Remove a view's default background drawable. */
+    public static void clearBackground(View view) {
+        view.setBackground(null);
+    }
 }

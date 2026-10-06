@@ -103,7 +103,7 @@ final class ImePanels {
                 tab.setBackground(new InsetDrawable(face, s.pixels(2), s.pixels(3), s.pixels(2), s.pixels(3)));
                 tab.setAlpha(1f);
             } else {
-                tab.setBackground(null);
+                ViewPolicy.clearBackground(tab);
                 tab.setAlpha(.6f);
             }
             tab.setElevation(0);

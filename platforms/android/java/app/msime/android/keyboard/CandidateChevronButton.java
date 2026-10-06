@@ -35,7 +35,7 @@ public final class CandidateChevronButton extends Button {
         super(context);
         setText("展开");
         ViewPolicy.setAllCapsFalse(this);
-        setBackground(null);
+        ViewPolicy.clearBackground(this);
         ViewPolicy.clearPadding(this);
         ViewPolicy.clearMinimumWidth(this);
         setMinHeight(0);
@@ -44,7 +44,7 @@ public final class CandidateChevronButton extends Button {
 
     /** 展开键只画分隔线和 chevron；键盘的整树样式通道会给每个 Button 套键帽，这里挡掉。 */
     @Override public void setBackground(Drawable background) {
-        super.setBackground(null);
+        ViewPolicy.clearBackground(super);
     }
 
     public void setColors(int chevron, int hairline) {

@@ -233,7 +233,7 @@ final class ImeStyler {
             return;
         }
         if (!face.drawsCap()) {
-            button.setBackground(null);
+            ViewPolicy.clearBackground(button);
             String label = face.usesAccentLabel() ? target.accent() : target.keyForeground();
             if (button instanceof KeyboardShortcutButton shortcut) {
                 shortcut.setActiveFill(color(target.accentSoft()));
