@@ -1,5 +1,6 @@
 package app.msime.android;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -31,5 +32,10 @@ public final class DigestPolicy {
             hex.append(Character.forDigit(value & 0xf, 16));
         }
         return hex.toString();
+    }
+
+    /** Return a file's SHA-256 digest as lowercase hexadecimal. */
+    public static String sha256Hex(File file) throws IOException {
+        return sha256Hex(file.toPath());
     }
 }
