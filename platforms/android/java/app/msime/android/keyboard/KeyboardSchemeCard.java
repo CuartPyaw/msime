@@ -104,7 +104,7 @@ public final class KeyboardSchemeCard extends FrameLayout {
 
         LinearLayout column = new LinearLayout(context);
         column.setOrientation(LinearLayout.VERTICAL);
-        column.setGravity(Gravity.CENTER_HORIZONTAL);
+        ViewPolicy.setCenteredHorizontally(column);
 
         LinearLayout.LayoutParams clusterParams = new LinearLayout.LayoutParams(
             glyphSize + KeyboardGeometry.pixels(getContext(), 1) + checkSize, top + glyphSize + KeyboardGeometry.pixels(getContext(), OVERHANG_BOTTOM_DP));
