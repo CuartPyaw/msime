@@ -1,6 +1,7 @@
 package app.msime.android;
 
 import android.graphics.Bitmap;
+import java.io.ByteArrayOutputStream;
 
 /** Shared bitmap geometry for host image-processing flows. */
 public final class BitmapPolicy {
@@ -27,6 +28,17 @@ public final class BitmapPolicy {
             Math.max(1, Math.round(bitmap.getHeight() * scale)), true);
         if (scaled != bitmap) bitmap.recycle();
         return scaled;
+    }
+
+    /** Encode a bitmap as JPEG using the shared quality ladder until it fits the byte limit. */
+    public static byte[] compressJpegUnderBytes(Bitmap bitmap, int maximumBytes) {
+        if (bitmap == null || maximumBytes <= 0) return null;
+        for (int quality = 85; quality >= 40; quality -= 15) {
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            if (bitmap.compress(Bitmap.CompressFormat.JPEG, quality, output)
+                    && output.size() <= maximumBytes) return output.toByteArray();
+        }
+        return null;
     }
 
     /** Return the largest power-of-two decoder sample that keeps the longest edge useful. */

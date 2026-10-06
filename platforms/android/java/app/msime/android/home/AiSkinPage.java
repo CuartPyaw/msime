@@ -34,7 +34,6 @@ import app.msime.android.KeyboardSkin;
 import app.msime.android.PhotoDecodePolicy;
 import app.msime.android.SkinJobsApi;
 import app.msime.android.ViewPolicy;
-import java.io.ByteArrayOutputStream;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -540,15 +539,7 @@ public final class AiSkinPage extends DetailPage {
             return CustomKeyboardSkin.from(design).toJson(true);
         }
         bitmap = BitmapPolicy.scaleToEdge(bitmap, MAX_PHOTO_EDGE);
-        byte[] jpeg = null;
-        for (int quality = 85; quality >= 40; quality -= 15) {
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out);
-            if (out.size() <= MAX_PHOTO_BYTES) {
-                jpeg = out.toByteArray();
-                break;
-            }
-        }
+        byte[] jpeg = BitmapPolicy.compressJpegUnderBytes(bitmap, MAX_PHOTO_BYTES);
         bitmap.recycle();
         try {
             if (jpeg != null) design.put("photo", Base64.getEncoder().encodeToString(jpeg));
