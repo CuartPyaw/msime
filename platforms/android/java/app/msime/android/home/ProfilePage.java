@@ -159,7 +159,7 @@ public final class ProfilePage extends DetailPage {
             picture.setBackground(circle);
             picture.setClipToOutline(true);
             picture.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            frame.addView(picture, new FrameLayout.LayoutParams(Ui.dp(context, sizeDp), Ui.dp(context, sizeDp)));
+            frame.addView(picture, Ui.squareFrameParams(context, sizeDp));
         } else {
             TextView letter = new TextView(context);
             letter.setText(initial(name));
@@ -167,7 +167,7 @@ public final class ProfilePage extends DetailPage {
             Ui.style(letter, Math.round(sizeDp * 0.4f), 600, Ui.onAccent(context));
             letter.setBackground(circle);
             letter.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            frame.addView(letter, new FrameLayout.LayoutParams(Ui.dp(context, sizeDp), Ui.dp(context, sizeDp)));
+            frame.addView(letter, Ui.squareFrameParams(context, sizeDp));
         }
         return frame;
     }
