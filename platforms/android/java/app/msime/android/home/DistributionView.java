@@ -54,7 +54,12 @@ public final class DistributionView extends View {
         shares = values == null ? List.of() : List.copyOf(values);
         total = TypingStatisticsSummary.total(shares);
         style = chart;
-        StringBuilder spoken = new StringBuilder();
+        int spokenCapacity = 0;
+        for (Share share : shares) {
+            spokenCapacity += share.title().length()
+                + String.valueOf(TypingStatisticsSummary.share(share.count(), total)).length() + 2;
+        }
+        StringBuilder spoken = new StringBuilder(spokenCapacity);
         for (Share share : shares) {
             if (spoken.length() > 0) spoken.append('，');
             spoken.append(share.title()).append(' ')
