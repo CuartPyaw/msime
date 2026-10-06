@@ -110,12 +110,12 @@ public final class SkinsPage extends DetailPage {
             return;
         }
         Context context = requireContext();
-        List<View> themeCards = new ArrayList<>();
+        List<View> themeCards = new ArrayList<>(model.themes().size() + 1);
         for (Card card : model.themes()) themeCards.add(card(context, card));
         if (!AiSkinPage.hidden(context)) themeCards.add(aiCard(context));
         grid(target, "皮肤", themeCards);
         if (!model.designs().isEmpty()) {
-            List<View> designCards = new ArrayList<>();
+            List<View> designCards = new ArrayList<>(model.designs().size());
             for (Card card : model.designs()) designCards.add(card(context, card));
             grid(target, "我的设计", designCards);
         }
