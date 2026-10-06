@@ -81,7 +81,7 @@ public abstract class DetailPage extends HomeTabFragment {
         ViewCompat.setOnApplyWindowInsetsListener(scroll, (target, insets) -> {
             Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
             Insets ime = insets.getInsets(WindowInsetsCompat.Type.ime());
-            int bottom = Math.max(bars.bottom + tabs, ime.bottom) + base;
+            int bottom = Ui.bottomContentInset(bars.bottom, tabs, ime.bottom, base);
             target.setPadding(target.getPaddingLeft(), target.getPaddingTop(), target.getPaddingRight(), bottom);
             return insets;
         });
