@@ -283,12 +283,7 @@ final class ImeStyler {
         if (button instanceof NineKeyDigitButton digitButton)
             digitButton.setDigitColor(color(target.accent()));
         button.setTypeface(target.monospaced() ? Typeface.MONOSPACE : Typeface.DEFAULT);
-        int shadowAlpha = (int) Math.round(255 * target.shadowOpacity());
-        int shadowColor = Color.argb(shadowAlpha, 0, 0, 0);
-        button.setOutlineAmbientShadowColor(shadowColor);
-        button.setOutlineSpotShadowColor(shadowColor);
-        button.setElevation(target.shadowOpacity() > 0
-            ? s.pixels(Math.max(1, target.shadowRadius() + target.shadowOffset())) : 0);
+        applyShadow(button, target);
     }
 
     /**
@@ -319,11 +314,15 @@ final class ImeStyler {
             key.rememberFace(target, remembered, false, density);
         }
         key.setTextColor(color(foreground));
+        applyShadow(key, target);
+    }
+
+    private void applyShadow(View view, KeyboardSkin target) {
         int shadowAlpha = (int) Math.round(255 * target.shadowOpacity());
         int shadowColor = Color.argb(shadowAlpha, 0, 0, 0);
-        key.setOutlineAmbientShadowColor(shadowColor);
-        key.setOutlineSpotShadowColor(shadowColor);
-        key.setElevation(target.shadowOpacity() > 0
+        view.setOutlineAmbientShadowColor(shadowColor);
+        view.setOutlineSpotShadowColor(shadowColor);
+        view.setElevation(target.shadowOpacity() > 0
             ? s.pixels(Math.max(1, target.shadowRadius() + target.shadowOffset())) : 0);
     }
 
