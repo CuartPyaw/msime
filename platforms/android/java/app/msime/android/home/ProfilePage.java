@@ -161,10 +161,9 @@ public final class ProfilePage extends DetailPage {
             picture.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             frame.addView(picture, Ui.squareFrameParams(context, sizeDp));
         } else {
-            TextView letter = new TextView(context);
-            letter.setText(initial(name));
+            TextView letter = Ui.styledLabel(context, initial(name), Math.round(sizeDp * 0.4f), 600,
+                Ui.onAccent(context));
             letter.setGravity(Gravity.CENTER);
-            Ui.style(letter, Math.round(sizeDp * 0.4f), 600, Ui.onAccent(context));
             letter.setBackground(circle);
             letter.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             frame.addView(letter, Ui.squareFrameParams(context, sizeDp));
@@ -273,9 +272,8 @@ public final class ProfilePage extends DetailPage {
         String kind = SyncSwitch.validLoginKind(SyncSwitch.loginKind(context)) ? SyncSwitch.loginKind(context)
             : profile.loginKind();
         if (!kind.isEmpty()) {
-            TextView chip = new TextView(context);
-            chip.setText("通过 " + providerName(kind) + " 登录");
-            Ui.style(chip, 12, 500, Ui.accent(context));
+            TextView chip = Ui.styledLabel(context, "通过 " + providerName(kind) + " 登录", 12, 500,
+                Ui.accent(context));
             chip.setBackground(Ui.pill(Ui.accentSoft(context)));
             Ui.setSymmetricPaddingDp(chip, context, 10, 3);
             LinearLayout.LayoutParams chipParams = Ui.wrap();
