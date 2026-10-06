@@ -563,6 +563,22 @@ public final class Ui {
         return button;
     }
 
+    /** Create a square, centered icon button with the standard detail-page touch target. */
+    public static ImageView iconButton(Context context, int icon, @ColorInt int tint,
+                                       CharSequence description, float sizeDp, Runnable action) {
+        ImageView button = new ImageView(context);
+        button.setImageResource(icon);
+        setImageTint(button, tint);
+        button.setScaleType(ImageView.ScaleType.CENTER);
+        button.setBackground(ripple(context));
+        button.setContentDescription(description);
+        button.setOnClickListener(ignored -> action.run());
+        int size = dp(context, sizeDp);
+        button.setLayoutParams(squareParamsPx(size));
+        setSymmetricPaddingPx(button, size / 5);
+        return button;
+    }
+
     /** Create a vertically arranged rounded surface for page cards. */
     public static LinearLayout verticalCard(Context context, float radiusDp) {
         LinearLayout card = new LinearLayout(context);

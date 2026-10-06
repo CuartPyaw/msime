@@ -8,10 +8,8 @@ import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import androidx.annotation.DrawableRes;
 import androidx.annotation.Nullable;
 import app.msime.android.CloudApi;
 import app.msime.android.CloudClipboardApi;
@@ -216,12 +214,13 @@ public final class CloudClipboardPage extends DetailPage {
         texts.addView(meta, metaParams);
         row.addView(texts, Ui.weightWrap(1f));
 
-        row.addView(iconButton(context, R.drawable.ic_ms_keep, item.pinned() ? Ui.accent(context) : Ui.subText(context),
-            item.pinned() ? "取消置顶" : "置顶", () -> {
+        row.addView(Ui.iconButton(context, R.drawable.ic_ms_keep,
+            item.pinned() ? Ui.accent(context) : Ui.subText(context),
+            item.pinned() ? "取消置顶" : "置顶", 40, () -> {
                 CloudClipboardApi api = api();
                 mutate(() -> { api.setPinned(item.id(), !item.pinned()); return null; }, null);
             }));
-        row.addView(iconButton(context, R.drawable.ic_ms_delete, Ui.subText(context), "删除", () -> {
+        row.addView(Ui.iconButton(context, R.drawable.ic_ms_delete, Ui.subText(context), "删除", 40, () -> {
             CloudClipboardApi api = api();
             mutate(() -> { api.delete(item.id()); return null; }, "已删除");
         }));
@@ -234,24 +233,6 @@ public final class CloudClipboardPage extends DetailPage {
             MsToast.show(context, "已复制");
         });
         return row;
-    }
-
-    private static View iconButton(Context context, @DrawableRes int icon, int tint, String label, Runnable action) {
-        ImageView button = new ImageView(context);
-        button.setImageResource(icon);
-        Ui.setImageTint(button, tint);
-        button.setScaleType(ImageView.ScaleType.CENTER);
-        button.setBackground(Ui.ripple(context));
-        button.setContentDescription(label);
-        button.setOnClickListener(ignored -> action.run());
-        int size = Ui.dp(context, 40);
-        return wrap(button, size);
-    }
-
-    private static View wrap(ImageView button, int size) {
-        button.setLayoutParams(Ui.squareParamsPx(size));
-        Ui.setSymmetricPaddingPx(button, size / 5);
-        return button;
     }
 
     /** 「已置顶 · 设备 · 时间」，没有的部分省掉。 */
