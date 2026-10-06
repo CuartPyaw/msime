@@ -261,6 +261,11 @@ public final class Ui {
         view.setImageTintList(ColorStateList.valueOf(color));
     }
 
+    /** Exclude a decorative view from the accessibility tree. */
+    public static void hideFromAccessibility(View view) {
+        view.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+    }
+
     /** Return whether the supplied context currently uses the system night configuration. */
     public static boolean isNight(Context context) {
         return KeyboardGeometry.isNight(context);
