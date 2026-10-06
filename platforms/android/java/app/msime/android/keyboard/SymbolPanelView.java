@@ -61,7 +61,7 @@ public final class SymbolPanelView extends LinearLayout {
         TextView heading = new TextView(context);
         heading.setText("符号");
         KeyboardGeometry.setKeyTextSize(heading, 17);
-        heading.setGravity(Gravity.CENTER);
+        ViewPolicy.setCentered(heading);
         title.addView(heading, KeyboardGeometry.weightedHeightParams(getContext(), 42, 1));
         Button delete = buttons.create("⌫", "删除", listener::delete, true);
         delete.setLayoutParams(KeyboardGeometry.linearParams(getContext(), 56, 42));
@@ -104,7 +104,7 @@ public final class SymbolPanelView extends LinearLayout {
             final int category = index;
             Button button = buttons.create(values.get(index).title(),
                 "符号分类 " + values.get(index).title(), () -> select(category), true);
-            button.setGravity(Gravity.CENTER);
+            ViewPolicy.setCentered(button);
             button.setMinHeight(0);
             button.setMinimumHeight(0);
             ViewPolicy.clearPadding(button);
@@ -135,7 +135,7 @@ public final class SymbolPanelView extends LinearLayout {
                 Button button = buttons.create(symbol, "符号 " + symbol,
                     () -> insert(symbol), false);
                 KeyboardGeometry.setKeyTextSize(button, 18);
-                button.setGravity(Gravity.CENTER);
+                ViewPolicy.setCentered(button);
                 ViewPolicy.clearPadding(button);
                 GridLayout.Spec row = GridLayout.spec(start / SymbolPanelModel.COLUMNS);
                 GridLayout.Spec column = GridLayout.spec(index - start, 1f);

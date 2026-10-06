@@ -1251,7 +1251,7 @@ final class ImePanels {
         TextView note = new TextView(s);
         note.setText(text);
         KeyboardGeometry.setKeyTextSize(note, 13);
-        note.setGravity(Gravity.CENTER);
+        ViewPolicy.setCentered(note);
         KeyboardGeometry.setSymmetricPaddingDp(note, s, 12, 20);
         s.clipboardPanel.addView(note, KeyboardGeometry.matchWidthWrapParams());
         return note;
@@ -1390,7 +1390,7 @@ final class ImePanels {
             note = new TextView(s);
             note.setText(message);
             KeyboardGeometry.setKeyTextSize(note, 14);
-            note.setGravity(Gravity.CENTER);
+            ViewPolicy.setCentered(note);
             KeyboardGeometry.setPaddingDp(note, s, 12, 24, 12, 24);
             panel.addView(note, KeyboardGeometry.matchWidthWrapParams());
         }

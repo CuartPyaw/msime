@@ -26,7 +26,7 @@ public final class OneHandGutterView extends LinearLayout {
     public OneHandGutterView(Context context) {
         super(context);
         setOrientation(VERTICAL);
-        setGravity(Gravity.CENTER);
+        ViewPolicy.setCentered(this);
         swap = new GutterButton(context, KeyboardIconPaths.Icon.SWAP_SIDE, true);
         swap.setContentDescription("单手键盘换到另一侧");
         exit = new GutterButton(context, KeyboardIconPaths.Icon.EXIT_ONE_HAND, false);

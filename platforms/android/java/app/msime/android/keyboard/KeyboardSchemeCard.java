@@ -52,7 +52,7 @@ public final class KeyboardSchemeCard extends FrameLayout {
 
         glyph = new TextView(context);
         glyph.setText(glyphText);
-        glyph.setGravity(Gravity.CENTER);
+        ViewPolicy.setCentered(glyph);
         // "EN" is two characters wide in a box sized for one, so it takes the smaller face.
         // 字形和角标都画在固定 dp 的方框里，字号也按 dp，不随系统字体变化，否则放大后会溢出方框。
         glyph.setTextSize(TypedValue.COMPLEX_UNIT_DIP, glyphText.length() > 1 ? 15 : 20);
@@ -60,7 +60,7 @@ public final class KeyboardSchemeCard extends FrameLayout {
 
         badge = new TextView(context);
         badge.setText(badgeText);
-        badge.setGravity(Gravity.CENTER);
+        ViewPolicy.setCentered(badge);
         badge.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 9);
         badge.setTypeface(badge.getTypeface(), android.graphics.Typeface.BOLD);
 
@@ -69,7 +69,7 @@ public final class KeyboardSchemeCard extends FrameLayout {
 
         title = new TextView(context);
         title.setText(titleText);
-        title.setGravity(Gravity.CENTER);
+        ViewPolicy.setCentered(title);
         title.setMaxLines(1);
         KeyboardGeometry.setKeyTextSize(title, 12);
         // 卡片格子只有 56 dp，字形区占去 44 dp；去掉字体留白，标题在 1.15 倍字体下仍放得下。

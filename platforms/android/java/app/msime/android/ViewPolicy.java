@@ -1,5 +1,6 @@
 package app.msime.android;
 
+import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
@@ -75,5 +76,10 @@ public final class ViewPolicy {
     /** Keep a button label in its authored casing instead of applying the platform default. */
     public static void setAllCapsFalse(Button button) {
         button.setAllCaps(false);
+    }
+
+    /** Center a view's content on both axes. */
+    public static void setCentered(View view) {
+        ViewPolicy.setCentered(view);
     }
 }
