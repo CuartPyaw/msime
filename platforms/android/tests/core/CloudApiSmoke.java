@@ -23,6 +23,15 @@ public final class CloudApiSmoke {
             "cloud clipboard strings accept JSON strings");
         check(strictString.invoke(null, 7) == null,
             "cloud clipboard strings must reject numbers instead of coercing them");
+        java.lang.reflect.Method strictInteger = CloudClipboardApi.class.getDeclaredMethod(
+            "strictInteger", Object.class);
+        strictInteger.setAccessible(true);
+        check(Integer.valueOf(7).equals(strictInteger.invoke(null, Integer.valueOf(7))),
+            "cloud clipboard retention accepts JSON integers");
+        check(strictInteger.invoke(null, "7") == null,
+            "cloud clipboard retention rejects numeric strings instead of coercing them");
+        check(strictInteger.invoke(null, Double.valueOf(7.5)) == null,
+            "cloud clipboard retention rejects fractional numbers instead of truncating them");
         // multipart 按 RFC 7578 编码，行尾 CRLF，文件段带 filename，结尾 `--boundary--`。
         byte[] encoded = CloudApi.encodeMultipart("b0und", List.of(
             CloudApi.Part.json("payload", "{\"type\":\"bug\"}"),

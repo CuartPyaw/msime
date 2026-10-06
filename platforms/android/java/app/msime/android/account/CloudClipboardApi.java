@@ -57,7 +57,8 @@ public final class CloudClipboardApi {
             JSONArray values = response.optJSONArray("items");
             Object enabled = response.opt("enabled");
             if (values == null || values.length() > MAX_ITEMS || !(enabled instanceof Boolean)) throw invalid();
-            int retention = response.optInt("retention_days", 0);
+            Integer rawRetention = strictInteger(response.opt("retention_days"));
+            int retention = rawRetention == null ? 0 : rawRetention;
             if (!validRetention(retention)) retention = 0;
             List<Item> items = new ArrayList<>(values.length());
             for (int index = 0; index < values.length(); index++) {
@@ -129,5 +130,15 @@ public final class CloudClipboardApi {
     /** org.json's optString coerces numbers and booleans; response text fields must stay strings. */
     static String strictString(Object value) {
         return value instanceof String ? (String) value : null;
+    }
+
+    /** Retention days must be a JSON integer; reject strings and fractional numbers. */
+    static Integer strictInteger(Object value) {
+        if (value instanceof Integer integer) return integer;
+        if (value instanceof Long longValue
+                && longValue >= Integer.MIN_VALUE && longValue <= Integer.MAX_VALUE) {
+            return longValue.intValue();
+        }
+        return null;
     }
 }
