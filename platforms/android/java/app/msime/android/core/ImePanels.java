@@ -879,7 +879,7 @@ final class ImePanels {
         LinearLayout header = new LinearLayout(s);
         ViewPolicy.setCenteredVertically(header);
         TextView title = new TextView(s);
-        title.setText(s.aiOutputText.isEmpty() ? "AI 润色" : "润色结果");
+        ViewPolicy.setTextSizeLabel(title, s.aiOutputText.isEmpty() ? "AI 润色" : "润色结果", 15);
         KeyboardGeometry.setKeyTextSize(title, 15);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         header.addView(title, KeyboardGeometry.weightedWrapParams(1));
@@ -893,28 +893,31 @@ final class ImePanels {
         TextView error = null;
         if (!s.aiError.isEmpty()) {
             error = new TextView(s);
-            error.setText(s.aiError);
+            ViewPolicy.setTextSizeLabel(error, s.aiError, 13);
             KeyboardGeometry.setKeyTextSize(error, 13);
             error.setContentDescription("AI 润色状态");
             s.aiPolishPanel.addView(error);
         }
         if (s.aiRequestConfiguration != null) {
             TextView destination = new TextView(s);
-            destination.setText("发送到 " + s.aiRequestConfiguration.destination() + " · "
-                + s.aiRequestConfiguration.model());
+            ViewPolicy.setTextSizeLabel(destination,
+                "发送到 " + s.aiRequestConfiguration.destination() + " · "
+                    + s.aiRequestConfiguration.model(), 12);
             KeyboardGeometry.setKeyTextSize(destination, 12);
             destination.setContentDescription("AI 请求目标和模型");
             s.aiPolishPanel.addView(destination);
             secondary.add(destination);
         }
         TextView label = new TextView(s);
-        label.setText(s.aiOutputText.isEmpty() ? "待发送的选中文字" : "润色结果");
+        ViewPolicy.setTextSizeLabel(label,
+            s.aiOutputText.isEmpty() ? "待发送的选中文字" : "润色结果", 12);
         KeyboardGeometry.setKeyTextSize(label, 12);
         KeyboardGeometry.setPaddingDp(label, s, 0, 6, 0, 4);
         s.aiPolishPanel.addView(label);
         secondary.add(label);
         TextView content = new TextView(s);
-        content.setText(s.aiOutputText.isEmpty() ? s.aiSourceText : s.aiOutputText);
+        ViewPolicy.setTextSizeLabel(content,
+            s.aiOutputText.isEmpty() ? s.aiSourceText : s.aiOutputText, 15);
         KeyboardGeometry.setKeyTextSize(content, 15);
         KeyboardGeometry.setSymmetricPaddingDp(content, s, 12, 10);
         content.setContentDescription(s.aiOutputText.isEmpty() ? "待润色文字" : "AI 润色结果");
@@ -922,7 +925,7 @@ final class ImePanels {
         Button primary;
         if (s.aiBusy) {
             TextView progress = new TextView(s);
-            progress.setText("正在请求…");
+            ViewPolicy.setTextSizeLabel(progress, "正在请求…", 12);
             KeyboardGeometry.setKeyTextSize(progress, 12);
             KeyboardGeometry.setPaddingDp(progress, s, 0, 6, 0, 0);
             s.aiPolishPanel.addView(progress);
