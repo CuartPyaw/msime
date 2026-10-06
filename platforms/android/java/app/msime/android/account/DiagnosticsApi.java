@@ -323,8 +323,8 @@ public final class DiagnosticsApi {
         Snapshot snapshot = null;
         JSONObject raw = root.optJSONObject("snapshot");
         if (raw != null && !raw.optString("id", "").isEmpty()) {
-            List<String> sections = new ArrayList<>();
             JSONArray names = raw.optJSONArray("sections");
+            List<String> sections = new ArrayList<>(names == null ? 0 : names.length());
             if (names != null) {
                 for (int i = 0; i < names.length(); i++) sections.add(names.optString(i, ""));
             }
@@ -332,8 +332,8 @@ public final class DiagnosticsApi {
                 raw.optString("expires_at", ""), raw.optLong("bytes", 0), Collections.unmodifiableList(sections),
                 raw.optString("token_hint", ""));
         }
-        List<Access> accesses = new ArrayList<>();
         JSONArray list = root.optJSONArray("accesses");
+        List<Access> accesses = new ArrayList<>(list == null ? 0 : list.length());
         if (list != null) {
             for (int i = 0; i < list.length(); i++) {
                 JSONObject item = list.optJSONObject(i);
