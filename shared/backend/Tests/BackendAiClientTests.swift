@@ -3,9 +3,23 @@ import XCTest
 @testable import MSIMEBackend
 
 private final class AiProtocol: URLProtocol {
+  private static let lock = NSLock()
+  private static var requestCount = 0
+
+  static func reset() {
+    lock.lock(); defer { lock.unlock() }
+    requestCount = 0
+  }
+
+  static func requests() -> Int {
+    lock.lock(); defer { lock.unlock() }
+    return requestCount
+  }
+
   override class func canInit(with request: URLRequest) -> Bool { true }
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
   override func startLoading() {
+    Self.lock.lock(); Self.requestCount += 1; Self.lock.unlock()
     let body = #"{"choices":[{"message":{"content":"{\"candidates\":[{\"text\":\"你好\"}]}"}}]}"#
     let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
     client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
@@ -58,6 +72,19 @@ final class BackendAiClientTests: XCTestCase {
       _ = try await client().suggest(endpoint: URL(string: "https://ai.invalid")!, model: "model", token: "session", segmentedPinyin: ["ni"], context: "", candidateLimit: 0)
       XCTFail("invalid limit")
     } catch { }
+  }
+
+  func testRejectsOversizedPinyinBeforeSending() async {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [AiProtocol.self]
+    let client = BackendAiClient(configuration: configuration)
+    AiProtocol.reset()
+    do {
+      _ = try await client.suggest(endpoint: URL(string: "https://ai.invalid/v1/chat/completions")!, model: "model",
+        token: "session", segmentedPinyin: [String(repeating: "a", count: 33)], context: "", candidateLimit: 1)
+      XCTFail("oversized pinyin segment accepted")
+    } catch { }
+    XCTAssertEqual(AiProtocol.requests(), 0)
   }
 
   func testRefusesToFollowAResponseRedirect() {
