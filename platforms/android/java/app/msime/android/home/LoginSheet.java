@@ -322,7 +322,7 @@ final class LoginSheet {
         if (icon != null) {
             ImageView glyph = new ImageView(activity);
             glyph.setImageDrawable(icon);
-            glyph.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            Ui.hideFromAccessibility(glyph);
             LinearLayout.LayoutParams params = Ui.squareParams(activity, 20);
             params.setMarginEnd(Ui.dp(activity, 8));
             button.addView(glyph, params);

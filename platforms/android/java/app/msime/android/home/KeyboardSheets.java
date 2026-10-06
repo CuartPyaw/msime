@@ -291,7 +291,7 @@ final class KeyboardSheets {
         TextView badge = Ui.styledLabel(context, text, 15, 600, Ui.accent(context));
         ViewPolicy.setCentered(badge);
         badge.setBackground(Ui.rounded(Ui.accentSoft(context), Ui.dp(context, 8)));
-        badge.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            Ui.hideFromAccessibility(badge);
         LinearLayout.LayoutParams params = Ui.squareParams(context, 32);
         params.setMarginEnd(Ui.dp(context, Ui.ROW_GAP));
         badge.setLayoutParams(params);

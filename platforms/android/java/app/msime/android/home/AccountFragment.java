@@ -239,7 +239,7 @@ public final class AccountFragment extends HomeTabFragment {
         toggle.setChecked(real && state.syncEnabled());
         toggle.setClickable(false);
         toggle.setFocusable(false);
-        toggle.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        Ui.hideFromAccessibility(toggle);
             LinearLayout.LayoutParams switchParams = Ui.rowGapParams(context);
         sync.addView(toggle, switchParams);
         sync.setAccessibilityDelegate(new View.AccessibilityDelegate() {
