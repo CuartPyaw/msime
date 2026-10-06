@@ -9,6 +9,7 @@ import android.graphics.Typeface;
 import android.util.AttributeSet;
 import android.view.View;
 import androidx.annotation.Nullable;
+import app.msime.android.BoundsPolicy;
 import app.msime.android.ColorPolicy;
 import app.msime.android.TypingStatisticsSummary;
 import app.msime.android.TypingStatisticsSummary.Share;
@@ -85,7 +86,7 @@ public final class DistributionView extends View {
 
     @Override protected void onMeasure(int widthSpec, int heightSpec) {
         Context context = getContext();
-        int rows = Math.max(1, shares.size());
+        int rows = BoundsPolicy.bounded(shares.size(), 1, Integer.MAX_VALUE);
         float height = switch (style) {
             case STACK -> STACK_HEIGHT + 12 + LEGEND_ROW * ((rows + 1) / 2);
             case BARS -> BAR_ROW * rows;
