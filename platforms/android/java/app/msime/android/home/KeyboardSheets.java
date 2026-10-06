@@ -258,11 +258,9 @@ final class KeyboardSheets {
                 Ui.accentSoft(context), Ui.accent(context), Ui.BUTTON_PADDING_H, Ui.BUTTON_PADDING_V,
                 Ui.COMPACT_BUTTON_MIN_HEIGHT, 0, action);
         } else {
-            button = new TextView(context);
-            button.setText(label);
+            button = Ui.styledLabel(context, label, Ui.TEXT_BUTTON_SMALL, 500, Ui.subText(context));
             ViewPolicy.setCentered(button);
             button.setSingleLine(true);
-            Ui.style(button, Ui.TEXT_BUTTON_SMALL, 500, Ui.subText(context));
             Ui.setButtonPadding(button, context);
             Ui.setTextMinHeightDp(button, context, Ui.COMPACT_BUTTON_MIN_HEIGHT);
             button.setEnabled(false);
