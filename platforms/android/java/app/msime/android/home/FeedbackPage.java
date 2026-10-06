@@ -245,7 +245,8 @@ public final class FeedbackPage extends DetailPage {
                 renderThumbnails();
                 refresh();
             });
-            FrameLayout.LayoutParams removeParams = new FrameLayout.LayoutParams(Ui.dp(requireContext(), 20), Ui.dp(requireContext(), 20), Gravity.TOP | Gravity.END);
+            FrameLayout.LayoutParams removeParams = Ui.squareFrameParams(requireContext(), 20);
+            removeParams.gravity = Gravity.TOP | Gravity.END;
             frame.addView(remove, removeParams);
             LinearLayout.LayoutParams params = Ui.squareParams(requireContext(), Ui.THUMBNAIL_SIZE);
             params.setMarginEnd(Ui.dp(requireContext(), 8));

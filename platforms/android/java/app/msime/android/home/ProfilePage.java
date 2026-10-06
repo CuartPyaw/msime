@@ -248,8 +248,8 @@ public final class ProfilePage extends DetailPage {
         int pad = Ui.dp(context, 6);
         camera.setPadding(pad, pad, pad, pad);
         camera.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        FrameLayout.LayoutParams cameraParams = new FrameLayout.LayoutParams(Ui.dp(context, 28), Ui.dp(context, 28),
-            Gravity.BOTTOM | Gravity.END);
+        FrameLayout.LayoutParams cameraParams = Ui.squareFrameParams(context, 28);
+        cameraParams.gravity = Gravity.BOTTOM | Gravity.END;
         avatar.addView(camera, cameraParams);
         avatar.setClickable(true);
         avatar.setFocusable(true);
