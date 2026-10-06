@@ -340,7 +340,7 @@ public final class AiSkinPage extends DetailPage {
             choices.card().setBackground(null);
             SegmentedControl picker = new SegmentedControl(context);
             picker.setFillWidth(true);
-            List<String> names = new ArrayList<>();
+            List<String> names = new ArrayList<>(s.results.size());
             for (Result result : s.results) names.add(result.name());
             picker.setOptions(names, s.chosen);
             picker.setOnSelect(index -> {
@@ -369,7 +369,7 @@ public final class AiSkinPage extends DetailPage {
         LinearLayout chips = new LinearLayout(context);
         chips.setOrientation(LinearLayout.HORIZONTAL);
         chips.setPadding(Ui.dp(context, 12), Ui.dp(context, 4), Ui.dp(context, 12), Ui.dp(context, 12));
-        List<TextView> chipViews = new ArrayList<>();
+        List<TextView> chipViews = new ArrayList<>(SUGGESTIONS.length);
         for (String suggestion : SUGGESTIONS) {
             TextView chip = new TextView(context);
             chip.setText(suggestion);
