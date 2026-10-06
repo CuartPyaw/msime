@@ -478,7 +478,8 @@ final class ImePanels {
         dots.setActive(initialPage, false);
         dots.setVisibility(grid.pageCount() > 1 ? View.VISIBLE : View.INVISIBLE);
         LinearLayout.LayoutParams dotParams = new LinearLayout.LayoutParams(
-            s.pixels(Math.round(KeyboardPagerDots.totalWidthDp(Math.max(1, grid.pageCount())))), s.pixels(10));
+            s.pixels(Math.round(KeyboardPagerDots.totalWidthDp(
+                BoundsPolicy.bounded(grid.pageCount(), 1, Integer.MAX_VALUE)))), s.pixels(10));
         dotParams.gravity = Gravity.CENTER_HORIZONTAL;
         dotParams.topMargin = s.pixels(6);
         dotParams.bottomMargin = s.pixels(6);
