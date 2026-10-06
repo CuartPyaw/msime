@@ -6526,7 +6526,7 @@ public final class MSIMEInputService extends InputMethodService {
             exitLocalModeButton.setVisibility(localModeActive ? View.VISIBLE : View.GONE);
             exitLocalModeButton.setEnabled(localModeActive && session != 0);
             exitLocalModeButton.setContentDescription("退出本地模式");
-            imeStyler.styleButton(exitLocalModeButton, KeyboardKeyRole.GLYPH, skin);
+            // The final applySkin() traversal styles this attached button once.
         }
         if (hanjaButton != null) {
             boolean offersHanja = session != 0 && koreanConvertsHanja();
@@ -6672,8 +6672,7 @@ public final class MSIMEInputService extends InputMethodService {
             shiftButton.setText(letterCase.keyText());
             shiftButton.setSelected(letterCase.usesUppercase());
             shiftButton.setActivated(letterCase.mode() == EnglishLetterCaseState.Mode.CAPS_LOCK);
-            // The tinted function face in the letter row, and the filled accent only while it is on.
-            imeStyler.styleButton(shiftButton, KeyboardKeyRole.ACCENT, skin);
+            // The final applySkin() traversal styles this attached button once.
             String caseLabel = shiftLayout == KeyboardLayout.KOREAN_LAYOUT
                 ? KoreanKeyboardLayout.SHIFT_LABEL
                 : letterCase.accessibilityLabel(dedicatedEnglish || session == 0
