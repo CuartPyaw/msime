@@ -207,7 +207,7 @@ public final class AboutPage extends DetailPage {
             button.setSingleLine(true);
             Ui.style(button, 15, 600, Ui.onAccent(context));
             button.setBackground(Ui.pillRipple(context, Ui.accent(context)));
-            button.setPadding(Ui.dp(context, 20), 0, Ui.dp(context, 20), 0);
+            Ui.setHorizontalPaddingDp(button, context, 20);
             button.setMinHeight(Ui.dp(context, 36));
             button.setMinWidth(Ui.dp(context, 96));
             button.setClickable(true);

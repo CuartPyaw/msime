@@ -264,7 +264,7 @@ public final class OnboardingActivity extends AppCompatActivity {
             LinearLayout cell = new LinearLayout(this);
             cell.setOrientation(LinearLayout.VERTICAL);
             cell.setGravity(Gravity.CENTER_HORIZONTAL);
-            cell.setPadding(Ui.dp(this, 10), 0, Ui.dp(this, 10), 0);
+            Ui.setHorizontalPaddingDp(cell, this, 10);
             TextView word = text(samples[index][0], 19, index == 0 ? Ui.accent(this) : Ui.text(this));
             if (index == 0) word.setTypeface(Typeface.create(Typeface.DEFAULT, 600, false));
             cell.addView(word);
@@ -497,7 +497,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         if (!done) {
             TextView button = text(action, 15, Ui.accent(this));
             button.setGravity(Gravity.CENTER);
-            button.setPadding(Ui.dp(this, 8), 0, Ui.dp(this, 8), 0);
+            Ui.setHorizontalPaddingDp(button, this, 8);
             android.util.TypedValue ripple = new android.util.TypedValue();
             getTheme().resolveAttribute(android.R.attr.selectableItemBackground, ripple, true);
             button.setBackgroundResource(ripple.resourceId);
