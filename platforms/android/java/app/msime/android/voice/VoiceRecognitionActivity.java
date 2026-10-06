@@ -391,12 +391,12 @@ public final class VoiceRecognitionActivity extends Activity {
         root.addView(hint);
         LinearLayout actions = KeyboardGeometry.row(this);
         actions.setGravity(Gravity.END);
-        Button cancel = new Button(this);
+        Button cancel = ViewPolicy.newPressButton(this);
         cancel.setText("取消");
         cancel.setContentDescription("取消录音并丢弃结果");
         cancel.setOnClickListener(ignored -> cancelRecognition());
         actions.addView(cancel);
-        Button done = new Button(this);
+        Button done = ViewPolicy.newPressButton(this);
         done.setText("完成");
         done.setContentDescription("结束录音并开始转写");
         done.setOnClickListener(ignored -> {
