@@ -21,10 +21,7 @@ final class SheetOptionView {
             int color, boolean bold, Runnable action) {
         FrameLayout row = new FrameLayout(context);
         Ui.setMinimumHeightDp(row, context, Ui.SHEET_OPTION_HEIGHT);
-        row.setBackground(Ui.ripple(context));
-        row.setClickable(true);
-        row.setFocusable(true);
-        row.setOnClickListener(ignored -> action.run());
+        Ui.makeClickable(row, context, action);
 
         TextView text = new TextView(context);
         text.setText(nested ? label + " ›" : label);
