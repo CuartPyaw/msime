@@ -101,7 +101,7 @@ public final class VoiceConfiguration {
     public static VoiceConfiguration decode(String response, String requestId) {
         try {
             JSONObject document = new JSONObject(response);
-            if (!document.optBoolean("ok", false)) return none();
+            if (!Boolean.TRUE.equals(strictBoolean(document.opt("ok")))) return none();
             JSONObject value = document.optJSONObject("value");
             if (value == null) return none();
             JSONObject provider = value.optJSONObject("provider");
@@ -123,9 +123,9 @@ public final class VoiceConfiguration {
             if (DoubaoAsrPolicy.usable(name, endpoint, java.util.Arrays.asList(names(headers)))) {
                 return new VoiceConfiguration(name, null, null, null,
                     new VoiceRecognitionActivity.Streaming(endpoint, headers,
-                        provider.optBoolean("enableItn", false),
-                        provider.optBoolean("enablePunctuation", false),
-                        provider.optBoolean("enableDdc", false),
+                        Boolean.TRUE.equals(strictBoolean(provider.opt("enableItn"))),
+                        Boolean.TRUE.equals(strictBoolean(provider.opt("enablePunctuation"))),
+                        Boolean.TRUE.equals(strictBoolean(provider.opt("enableDdc"))),
                         provider.optString("boostingTableId", "")),
                     polish);
             }
@@ -143,6 +143,11 @@ public final class VoiceConfiguration {
                                            VoiceRecognitionActivity.Polish polish) {
         if (!"local".equals(name)) return none();
         return new VoiceConfiguration(name, null, null, null, null, polish, modelPath);
+    }
+
+    /** Shared voice configuration flags must remain JSON booleans; reject coercible strings. */
+    static Boolean strictBoolean(Object value) {
+        return value instanceof Boolean ? (Boolean) value : null;
     }
 
     private static VoiceRecognitionActivity.Polish polish(JSONObject value, String requestId) {
