@@ -202,19 +202,24 @@ public final class LexiconPage extends DetailPage {
             Ui.weightWrap(1f));
         boolean added = view.installed(item.id());
         boolean busy = installing.contains(item.id());
-        TextView button = new TextView(context);
-        button.setText(added ? "已添加" : busy ? "添加中" : "添加");
-        button.setGravity(Gravity.CENTER);
-        button.setSingleLine(true);
-        Ui.style(button, Ui.TEXT_BUTTON_SMALL, 500, added ? Ui.subText(context) : Ui.accent(context));
-        button.setBackground(Ui.pillRipple(context, added ? Ui.rowBackground(context) : Ui.accentSoft(context)));
-        Ui.setButtonPadding(button, context);
-        Ui.setTextMinHeightDp(button, context, Ui.COMPACT_BUTTON_MIN_HEIGHT);
         boolean enabled = !added && !busy;
-        button.setEnabled(enabled);
-        button.setClickable(enabled);
-        button.setFocusable(enabled);
-        if (enabled) button.setOnClickListener(ignored -> install(item));
+        TextView button;
+        if (enabled) {
+            button = Ui.pillButton(context, "添加", Ui.TEXT_BUTTON_SMALL, 500,
+                Ui.accentSoft(context), Ui.accent(context), Ui.BUTTON_PADDING_H, Ui.BUTTON_PADDING_V,
+                Ui.COMPACT_BUTTON_MIN_HEIGHT, 0, () -> install(item));
+        } else {
+            button = new TextView(context);
+            button.setText(added ? "已添加" : "添加中");
+            button.setGravity(Gravity.CENTER);
+            button.setSingleLine(true);
+            Ui.style(button, Ui.TEXT_BUTTON_SMALL, 500, Ui.subText(context));
+            button.setBackground(Ui.pillRipple(context,
+                added ? Ui.rowBackground(context) : Ui.accentSoft(context)));
+            Ui.setButtonPadding(button, context);
+            Ui.setTextMinHeightDp(button, context, Ui.COMPACT_BUTTON_MIN_HEIGHT);
+            button.setEnabled(false);
+        }
         button.setAccessibilityDelegate(KeyboardSheets.buttonDelegate(button.getText() + "，" + item.name()));
         LinearLayout.LayoutParams params = Ui.rowGapParams(context);
         row.addView(button, params);
