@@ -286,6 +286,12 @@ public final class Ui {
             ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
+    /** Layout parameters for a square child with a size expressed in dp. */
+    public static LinearLayout.LayoutParams squareParams(Context context, float sizeDp) {
+        int size = dp(context, sizeDp);
+        return new LinearLayout.LayoutParams(size, size);
+    }
+
     /** 读一个颜色主题属性；属性缺失时退回洋红，让漏配的属性在截图里一眼可见，而不是悄悄显示成别的颜色。 */
     @ColorInt public static int color(Context context, @AttrRes int attr) {
         return MaterialColors.getColor(context, attr, Color.MAGENTA);

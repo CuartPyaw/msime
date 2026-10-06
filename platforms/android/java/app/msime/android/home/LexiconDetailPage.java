@@ -192,7 +192,7 @@ public final class LexiconDetailPage extends DetailPage {
             icon.setGravity(Gravity.CENTER);
             Ui.style(icon, 22, 400, Ui.accent(context));
             icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(Ui.dp(context, 24), Ui.dp(context, 24));
+            LinearLayout.LayoutParams iconParams = Ui.squareParams(context, 24);
             iconParams.setMarginEnd(Ui.dp(context, 10));
             row.addView(icon, iconParams);
         }

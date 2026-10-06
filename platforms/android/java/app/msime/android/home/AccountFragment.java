@@ -369,7 +369,7 @@ public final class AccountFragment extends HomeTabFragment {
         glyph.setImageResource(icon);
         Ui.setImageTint(glyph, Ui.subText(context));
         glyph.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        LinearLayout.LayoutParams glyphParams = new LinearLayout.LayoutParams(Ui.dp(context, 22), Ui.dp(context, 22));
+        LinearLayout.LayoutParams glyphParams = Ui.squareParams(context, 22);
         glyphParams.setMarginEnd(Ui.dp(context, 18));
         row.addView(glyph, glyphParams);
 

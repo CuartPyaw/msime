@@ -435,7 +435,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         Ui.setImageTint(glyph, Ui.accent(this));
         glyph.setScaleType(ImageView.ScaleType.FIT_START);
         glyph.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        column.addView(glyph, new LinearLayout.LayoutParams(Ui.dp(this, 36), Ui.dp(this, 36)));
+        column.addView(glyph, Ui.squareParams(this, 36));
 
         TextView kick = text(kicker, 13, Ui.accent(this));
         kick.setTypeface(Typeface.create(Typeface.DEFAULT, 600, false));
@@ -485,7 +485,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         GradientDrawable disc = Ui.circle(done ? Ui.accent(this) : Ui.color(this, R.attr.msWarn));
         mark.setBackground(disc);
         mark.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        row.addView(mark, new LinearLayout.LayoutParams(Ui.dp(this, 24), Ui.dp(this, 24)));
+        row.addView(mark, Ui.squareParams(this, 24));
 
         TextView text = text(label, 16, Ui.text(this));
         LinearLayout.LayoutParams textParams =
@@ -537,7 +537,7 @@ public final class OnboardingActivity extends AppCompatActivity {
             selected ? Ui.dp(this, 6) : Ui.atLeastOnePx(this, 1.5f),
             selected ? Ui.accent(this) : Ui.subText(this));
         radio.setBackground(dot);
-        LinearLayout.LayoutParams radioParams = new LinearLayout.LayoutParams(Ui.dp(this, 22), Ui.dp(this, 22));
+        LinearLayout.LayoutParams radioParams = Ui.squareParams(this, 22);
         radioParams.setMarginStart(Ui.dp(this, 12));
         card.addView(radio, radioParams);
 
@@ -562,7 +562,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         Ui.setSymmetricPaddingDp(badge, this, 7, 7);
         badge.setBackground(Ui.rounded(Ui.accentSoft(this), Ui.dp(this, 9)));
         badge.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        row.addView(badge, new LinearLayout.LayoutParams(Ui.dp(this, 32), Ui.dp(this, 32)));
+        row.addView(badge, Ui.squareParams(this, 32));
         TextView text = text(label, 15, Ui.text(this));
         LinearLayout.LayoutParams textParams =
             new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
