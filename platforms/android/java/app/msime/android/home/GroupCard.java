@@ -1,7 +1,6 @@
 package app.msime.android.home;
 
 import android.content.Context;
-import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -13,6 +12,7 @@ import android.widget.TextView;
 import androidx.annotation.Nullable;
 import androidx.core.view.ViewCompat;
 import app.msime.android.R;
+import app.msime.android.ViewPolicy;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 import java.util.function.IntFunction;
@@ -142,7 +142,7 @@ public final class GroupCard {
         row.view.addView(control, sliderParams);
 
         TextView text = Ui.styledLabel(context, label.apply(control.value()), 13, 400, Ui.subText(context));
-        text.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        ViewPolicy.setEndCenteredVertically(text);
         text.setSingleLine(true);
         text.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         row.view.addView(text, new LinearLayout.LayoutParams(Ui.dp(context, Ui.SLIDER_LABEL_WIDTH),
@@ -239,7 +239,7 @@ public final class GroupCard {
                 @Override public boolean onInterceptTouchEvent(MotionEvent event) { return true; }
             } : new LinearLayout(context);
             view.setOrientation(LinearLayout.HORIZONTAL);
-            view.setGravity(Gravity.CENTER_VERTICAL);
+            ViewPolicy.setCenteredVertically(view);
             Ui.setRowMinimumHeight(view, owner.context);
             Ui.setRowPadding(view, owner.context);
 
