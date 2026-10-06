@@ -106,8 +106,9 @@ public final class KeyboardSchemeCard extends FrameLayout {
         column.setOrientation(LinearLayout.VERTICAL);
         ViewPolicy.setCenteredHorizontally(column);
 
-        LinearLayout.LayoutParams clusterParams = new LinearLayout.LayoutParams(
-            glyphSize + KeyboardGeometry.pixels(getContext(), 1) + checkSize, top + glyphSize + KeyboardGeometry.pixels(getContext(), OVERHANG_BOTTOM_DP));
+        LinearLayout.LayoutParams clusterParams = KeyboardGeometry.linearParamsPx(
+            glyphSize + KeyboardGeometry.pixels(getContext(), 1) + checkSize,
+            top + glyphSize + KeyboardGeometry.pixels(getContext(), OVERHANG_BOTTOM_DP));
         clusterParams.gravity = Gravity.CENTER_HORIZONTAL;
         // 8dp is measured to the glyph, and the cluster already carries the check's overhang.
         clusterParams.topMargin = KeyboardGeometry.pixels(getContext(), 8) - top;
