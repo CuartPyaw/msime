@@ -223,6 +223,11 @@ public final class Ui {
         view.setPadding(padding, padding, padding, padding);
     }
 
+    /** Apply equal horizontal padding when the value is already in pixels. */
+    public static void setHorizontalPaddingPx(View view, int horizontal) {
+        view.setPadding(horizontal, 0, horizontal, 0);
+    }
+
     /** Apply equal horizontal dp padding with no vertical padding. */
     public static void setHorizontalPaddingDp(View view, Context context, float horizontalDp) {
         int horizontal = dp(context, horizontalDp);
