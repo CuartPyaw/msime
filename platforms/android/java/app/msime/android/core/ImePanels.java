@@ -82,10 +82,7 @@ final class ImePanels {
         tab.setContentDescription("表情分类 " + entry.title());
         if (Build.VERSION.SDK_INT >= 30)
             tab.setStateDescription(tab.isSelected() ? "已选中" : "未选中");
-        tab.setOnClickListener(ignored -> {
-            s.imeKeyFeedback.playFeedback(tab);
-            s.selectEmojiCategory(category);
-        });
+        bindFeedbackAction(tab, () -> s.selectEmojiCategory(category));
         s.emojiTabs.addView(tab, KeyboardGeometry.weightedMatchParentParams(1));
     }
 
@@ -1003,7 +1000,7 @@ final class ImePanels {
                 title = "添加语言";
                 selected = false;
                 card = new KeyboardSchemeCard(s, "+", "", "添加语言");
-                bindSchemeCard(card, () -> {
+                bindFeedbackAction(card, () -> {
                     android.os.Bundle args = new android.os.Bundle();
                     args.putBoolean("add_language", true);
                     s.closeSchemePicker();
@@ -1014,14 +1011,14 @@ final class ImePanels {
                 title = "英文 26 键";
                 selected = s.dedicatedEnglish;
                 card = new KeyboardSchemeCard(s, "EN", "26", title);
-                bindSchemeCard(card, s::selectEnglishScheme);
+                bindFeedbackAction(card, s::selectEnglishScheme);
                 card.setEnabled(!s.schemeSaving);
             } else {
                 KeyboardScheme scheme = schemes.get(index > englishIndex ? index - 1 : index);
                 title = scheme.title(s.wubiProfile);
                 selected = !s.dedicatedEnglish && scheme == s.selectedScheme;
                 card = new KeyboardSchemeCard(s, scheme.glyph(), scheme.badge(s.wubiProfile), title);
-                bindSchemeCard(card, () -> s.selectKeyboardScheme(scheme));
+                bindFeedbackAction(card, () -> s.selectKeyboardScheme(scheme));
                 card.setEnabled(!s.schemeSaving);
             }
             card.setContentDescription("输入方案卡片 " + title);
@@ -1043,9 +1040,9 @@ final class ImePanels {
         styleDots(s.schemePanel);
     }
 
-    private void bindSchemeCard(KeyboardSchemeCard card, Runnable action) {
-        card.setOnClickListener(ignored -> {
-            s.imeKeyFeedback.playFeedback(card);
+    private void bindFeedbackAction(View view, Runnable action) {
+        view.setOnClickListener(ignored -> {
+            s.imeKeyFeedback.playFeedback(view);
             action.run();
         });
     }
