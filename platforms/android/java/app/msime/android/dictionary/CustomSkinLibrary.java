@@ -69,7 +69,7 @@ public final class CustomSkinLibrary {
         } catch (org.json.JSONException error) {
             return List.of();
         }
-        ArrayList<Item> result = new ArrayList<>();
+        ArrayList<Item> result = new ArrayList<>(MAX_DESIGNS);
         for (int index = 0; index < values.length() && result.size() < MAX_DESIGNS; index++) {
             JSONObject item = values.optJSONObject(index);
             if (item == null) continue;

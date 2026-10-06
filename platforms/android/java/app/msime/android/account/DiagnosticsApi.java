@@ -1,6 +1,5 @@
 package app.msime.android;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -349,15 +348,9 @@ public final class DiagnosticsApi {
     }
 
     private static String readEntry(InputStream stream) throws IOException {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        byte[] buffer = new byte[8192];
-        int total = 0;
-        for (int read = stream.read(buffer); read >= 0; read = stream.read(buffer)) {
-            total += read;
-            if (total > MAX_BODY_BYTES * 4) throw new IOException("diagnostics bundle entry too large");
-            out.write(buffer, 0, read);
-        }
-        return out.toString(StandardCharsets.UTF_8);
+        byte[] bytes = HttpBodyPolicy.readBounded(stream, MAX_BODY_BYTES * 4);
+        if (bytes == null) throw new IOException("diagnostics bundle entry too large");
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 
     private static String baseName(String path) {
