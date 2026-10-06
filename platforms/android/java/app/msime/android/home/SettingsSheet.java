@@ -23,8 +23,7 @@ public final class SettingsSheet {
     public SettingsSheet(Context context, String title, @Nullable String subtitle) {
         this.context = context;
         dialog = new BottomSheetDialog(context);
-        LinearLayout root = new LinearLayout(context);
-        root.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout root = Ui.column(context);
         Ui.setPaddingDp(root, context, 24, 0, 24, 24);
 
         // 拖动条既是可见的把手，也给读屏提供「收起面板」的操作。
@@ -41,8 +40,7 @@ public final class SettingsSheet {
             root.addView(note, params);
         }
 
-        content = new LinearLayout(context);
-        content.setOrientation(LinearLayout.VERTICAL);
+        content = Ui.column(context);
         NestedScrollView scroll = new NestedScrollView(context);
         scroll.addView(content, new ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
