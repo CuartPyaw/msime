@@ -194,11 +194,17 @@ public final class SyncApi {
     public DictionaryProbe dictionaryChangedSince(long after) throws CloudApi.Failure {
         JSONObject page = cloud.json("GET", changesPath(after), null, CloudApi.Auth.ACCOUNT);
         JSONArray changes = page.optJSONArray("changes");
-        Object next = page.opt("next");
         long minimum = BoundsPolicy.nonNegative(after);
-        long revision = BoundsPolicy.bounded(next instanceof Number ? ((Number) next).longValue() : 0L,
-            minimum, Long.MAX_VALUE);
+        long revision = changesRevision(page.opt("next"), minimum);
         return new DictionaryProbe(changes != null && changes.length() > 0, revision);
+    }
+
+    /** Dictionary change cursors are non-negative integer revisions and cannot move backwards. */
+    static long changesRevision(Object value, long minimum) throws CloudApi.Failure {
+        long revision = preferenceRevision(value);
+        long floor = BoundsPolicy.nonNegative(minimum);
+        if (revision < floor) throw invalid("dictionary revision moved backwards");
+        return revision;
     }
 
     static String changesPath(long after) {
