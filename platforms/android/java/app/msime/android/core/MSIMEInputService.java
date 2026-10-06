@@ -6570,7 +6570,7 @@ public final class MSIMEInputService extends InputMethodService {
             candidateViewport.setVisibility(!idle && !hasDiagnostic ? View.VISIBLE : View.GONE);
         updateCandidateViewportHeight();
         if (scriptShortcutButton != null) {
-            scriptShortcutButton.setVisibility(View.GONE);
+            ViewPolicy.hide(scriptShortcutButton);
             scriptShortcutButton.setText(traditionalChineseOutput ? "繁" : "简");
             scriptShortcutButton.setSelected(traditionalChineseOutput);
             imeStyler.styleButton(scriptShortcutButton, true);
@@ -6631,16 +6631,16 @@ public final class MSIMEInputService extends InputMethodService {
             dismissShortcutButton.setContentDescription(anyToolbarPanelOpen() ? "返回键盘" : "收起键盘");
         }
         if (voiceShortcutButton != null) {
-            voiceShortcutButton.setVisibility(View.GONE);
+            ViewPolicy.hide(voiceShortcutButton);
             voiceShortcutButton.setEnabled(voiceInsertionReady());
         }
         if (aiPolishShortcutButton != null) {
-            aiPolishShortcutButton.setVisibility(View.GONE);
+            ViewPolicy.hide(aiPolishShortcutButton);
             aiPolishShortcutButton.setEnabled(aiPolishReady());
         }
         if (replyShortcutButton != null) {
             // 回复面板不属于任何输入方案，每个方案都显示这个入口；未配置 AI 时面板里会提示去设置。开着时始终可点，用来收起面板。
-            replyShortcutButton.setVisibility(View.GONE);
+            ViewPolicy.hide(replyShortcutButton);
             replyShortcutButton.setEnabled(replyOpen || aiPolishReady());
             replyShortcutButton.setSelected(replyOpen);
             imeStyler.styleButton(replyShortcutButton, KeyboardKeyRole.GLYPH, skin);
@@ -6721,13 +6721,13 @@ public final class MSIMEInputService extends InputMethodService {
             if (Build.VERSION.SDK_INT >= 30) skinButton.setStateDescription(skin.title());
         }
         synchronizeReplyKeyboard();
-        if (layoutSettingsButton != null) layoutSettingsButton.setVisibility(View.GONE);
+        if (layoutSettingsButton != null) ViewPolicy.hide(layoutSettingsButton);
         if (layoutSettingsButton != null)
             layoutSettingsButton.setEnabled(session != 0 && preferencesSnapshot != null
                 && !schemeSaving && !touchGeometrySaving && !traditionalOutputSaving);
         imeLayoutRows.renderNineKeySpellings();
         if (hasDiagnostic && nineKeySpellingScroll != null)
-            nineKeySpellingScroll.setVisibility(View.GONE);
+            ViewPolicy.hide(nineKeySpellingScroll);
         scheduleCandidateGlosses();
         scheduleCandidateTranslations();
         scheduleOnlineProviders();
@@ -6750,11 +6750,11 @@ public final class MSIMEInputService extends InputMethodService {
         LinearLayout activeCandidates = candidateHorizontal ? candidates : verticalCandidates;
         candidates.removeAllViews();
         if (verticalCandidates != null) verticalCandidates.removeAllViews();
-        if (expandCandidates != null) expandCandidates.setVisibility(View.GONE);
+        if (expandCandidates != null) ViewPolicy.hide(expandCandidates);
         if (view == null) {
             closeCandidatePanel();
             renderEnglishSuggestions(activeCandidates);
-            for (Button button : candidateButtons) button.setVisibility(View.GONE);
+            for (Button button : candidateButtons) ViewPolicy.hide(button);
             imeStyler.applySkin();
             imeToolbar.styleTopRow();
             return;
@@ -6784,9 +6784,9 @@ public final class MSIMEInputService extends InputMethodService {
         }
         int visibleSlots = entries == null ? 0 : entries.length();
         for (int slot = visibleSlots; slot < candidateButtons.size(); slot++)
-            candidateButtons.get(slot).setVisibility(View.GONE);
+            ViewPolicy.hide(candidateButtons.get(slot));
         if (directEnglishActive()) {
-            for (Button button : candidateButtons) button.setVisibility(View.GONE);
+            for (Button button : candidateButtons) ViewPolicy.hide(button);
         }
         if (hasDiagnostic) closeCandidatePanel();
         resetCandidateScrollIfViewChanged();
@@ -6832,7 +6832,7 @@ public final class MSIMEInputService extends InputMethodService {
             handwritingStatus.setVisibility(View.VISIBLE);
             return;
         }
-        handwritingStatus.setVisibility(View.GONE);
+        ViewPolicy.hide(handwritingStatus);
         for (int index = 0; index < handwritingResults.size(); index++) {
             String candidate = handwritingResults.get(index);
             HandwritingRequestTracker.Token token = handwritingCandidateToken;
