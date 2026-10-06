@@ -1,6 +1,5 @@
 package app.msime.android;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -85,15 +84,9 @@ public final class CommunityReplyLibrary {
     /** Read only the library envelope, even if a replaced file grows after inspection. */
     private static byte[] readBounded(Path file) throws IOException {
         try (InputStream input = Files.newInputStream(file)) {
-            ByteArrayOutputStream bytes = new ByteArrayOutputStream(MAXIMUM_BYTES);
-            byte[] buffer = new byte[8192];
-            int count;
-            while ((count = input.read(buffer)) != -1) {
-                if (bytes.size() + count > MAXIMUM_BYTES)
-                    throw new IOException("Community library is too large");
-                bytes.write(buffer, 0, count);
-            }
-            return bytes.toByteArray();
+            byte[] bytes = HttpBodyPolicy.readBounded(input, MAXIMUM_BYTES);
+            if (bytes == null) throw new IOException("Community library is too large");
+            return bytes;
         }
     }
 
