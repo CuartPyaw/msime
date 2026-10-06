@@ -673,7 +673,7 @@ final class ImePanels {
                     ViewPolicy.clearMinimumWidth(choice);
                     choice.setMinHeight(0);
                     choice.setMinimumHeight(0);
-                    choice.setPadding(s.pixels(4), 0, s.pixels(4), 0);
+                    KeyboardGeometry.setHorizontalPaddingDp(choice, s, 4);
                     choice.setMaxLines(1);
                     choice.setAutoSizeTextTypeUniformWithConfiguration(
                         10, 14, 1, TypedValue.COMPLEX_UNIT_SP);
@@ -793,7 +793,7 @@ final class ImePanels {
         s.replyPasteButton.setBackground(new InsetDrawable(replySurface(accent, radius),
             0, s.pixels(6), 0, s.pixels(6)));
         // setBackground 会把 InsetDrawable 的内边距（左右为 0）套到按钮上，冲掉前面设的左右留白，文字就贴着色块边缘；换完背景再设回来。
-        s.replyPasteButton.setPadding(s.pixels(12), 0, s.pixels(12), 0);
+        KeyboardGeometry.setHorizontalPaddingDp(s.replyPasteButton, s, 12);
         s.replyPasteButton.setTextColor(onAccent);
         s.replyPasteButton.setElevation(0);
         for (int index = 0; index < s.replyActions.getChildCount(); index++) {
@@ -1422,7 +1422,7 @@ final class ImePanels {
             add.setText("添加常用语");
             KeyboardGeometry.setKeyTextSize(add, 15);
             ViewPolicy.setMinimumHeight(add, s.pixels(44));
-            add.setPadding(s.pixels(24), 0, s.pixels(24), 0);
+            KeyboardGeometry.setHorizontalPaddingDp(add, s, 24);
             add.setStateListAnimator(null);
             add.setContentDescription("添加常用语");
             add.setOnClickListener(ignored -> {

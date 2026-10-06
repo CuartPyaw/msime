@@ -75,7 +75,7 @@ final class ImeCandidates {
         ViewPolicy.setMinimumWidth(button, s.pixels(30));
         button.setMinHeight(0);
         button.setMinimumHeight(0);
-        button.setPadding(s.pixels(11), 0, s.pixels(11), 0);
+        KeyboardGeometry.setHorizontalPaddingDp(button, s, 11);
         button.setLineSpacing(0, 1.0f);
         button.setIncludeFontPadding(false);
         button.setElevation(0);
@@ -183,7 +183,7 @@ final class ImeCandidates {
         expandedCells.add(button);
         ViewPolicy.setMinimumWidth(button, s.pixels(64));
         ViewPolicy.setMinimumHeight(button, s.pixels(44));
-        button.setPadding(s.pixels(10), 0, s.pixels(10), 0);
+        KeyboardGeometry.setHorizontalPaddingDp(button, s, 10);
         // The completed keyboard tree is styled once by MSIMEInputService.render().
         // Styling here would be repeated immediately after this button is attached.
         long index = id == null ? -1
