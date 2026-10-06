@@ -238,7 +238,7 @@ public final class ProfilePage extends DetailPage {
         avatar.setClickable(true);
         avatar.setFocusable(true);
         avatar.setContentDescription("更换头像");
-        ViewPolicy.bindClick(avatar, this::chooseAvatar);
+        avatar.setOnClickListener(ignored -> chooseAvatar());
         header.addView(avatar, Ui.squareParams(context, 92));
 
         TextView name = Ui.styledLabel(context, profile.displayName(), 22, 700, Ui.text(context));
