@@ -186,15 +186,11 @@ public final class CloudClipboardPage extends DetailPage {
 
         LinearLayout texts = new LinearLayout(context);
         texts.setOrientation(LinearLayout.VERTICAL);
-        TextView text = new TextView(context);
-        text.setText(item.text());
+        TextView text = Ui.styledLabel(context, item.text(), 15, 400, Ui.text(context));
         text.setMaxLines(3);
         text.setEllipsize(TextUtils.TruncateAt.END);
-        Ui.style(text, 15, 400, Ui.text(context));
         texts.addView(text);
-        TextView meta = new TextView(context);
-        meta.setText(meta(item));
-        Ui.style(meta, 12, 400, Ui.subText(context));
+        TextView meta = Ui.styledLabel(context, meta(item), 12, 400, Ui.subText(context));
         LinearLayout.LayoutParams metaParams = Ui.wrap();
         metaParams.topMargin = Ui.dp(context, 4);
         texts.addView(meta, metaParams);
