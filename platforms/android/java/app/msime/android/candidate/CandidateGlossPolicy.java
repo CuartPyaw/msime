@@ -45,6 +45,11 @@ public final class CandidateGlossPolicy {
         return value instanceof Boolean ? (Boolean) value : null;
     }
 
+    /** Whether an apply-translations response carries a typed JSON success flag. */
+    public static boolean isApplied(Object value) {
+        return Boolean.TRUE.equals(strictBoolean(value));
+    }
+
     /** Engine annotations (for example Wubi codes) occupy the shared hint slot first. */
     public static String annotation(
             String engineAnnotation, String translation, boolean glossEnabled) {
