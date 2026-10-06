@@ -5356,6 +5356,11 @@ group("a completion reply is bounded before it reaches the strip", () => {
     "a refusal offers nothing",
   );
   check(
+    EnglishSuggestionPolicy.decode('{"ok":"false","value":{"prefix":"hel","items":["hello"]}}') ===
+      null,
+    "a non-boolean success flag offers nothing",
+  );
+  check(
     EnglishSuggestionPolicy.decode("not json") === null,
     "nor does something that is not a reply",
   );
