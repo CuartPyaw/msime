@@ -409,8 +409,7 @@ public final class VoiceRecognitionActivity extends Activity {
             stopRecognition();
         });
         actions.addView(done);
-        root.addView(actions, new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        root.addView(actions, KeyboardGeometry.matchWidthWrapParams());
         setContentView(root);
     }
 
