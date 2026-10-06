@@ -97,7 +97,9 @@ public class KeyHintButton extends KeyboardPressButton {
 
     private void drawBottomHint(Canvas canvas) {
         float size = sp(9);
-        float available = Math.max(1, getWidth() - getPaddingLeft() - getPaddingRight() - dp(4));
+        float density = getResources().getDisplayMetrics().density;
+        float available = Math.max(1, getWidth() - getPaddingLeft() - getPaddingRight()
+            - KeyboardGeometry.pixels(4, density));
         hintPaint.setTextSize(size);
         while (size > sp(6)
                 && hintPaint.measureText(hintText) > available) {
@@ -107,7 +109,7 @@ public class KeyHintButton extends KeyboardPressButton {
         hintPaint.setColor(hintColor);
         hintPaint.setAlpha(isEnabled() ? 204 : 96);
         Paint.FontMetrics metrics = hintPaint.getFontMetrics();
-        float baseline = getHeight() - dp(2) - metrics.bottom;
+        float baseline = getHeight() - KeyboardGeometry.pixels(2, density) - metrics.bottom;
         canvas.drawText(hintText, getWidth() / 2f, baseline, hintPaint);
     }
 }
