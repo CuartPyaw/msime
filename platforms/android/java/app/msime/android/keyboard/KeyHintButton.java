@@ -80,7 +80,7 @@ public class KeyHintButton extends KeyboardPressButton {
     private void drawCornerHint(Canvas canvas) {
         cornerPaint.setTextSize(KeyboardGeometry.keySp(getContext(), CORNER_HINT_SP));
         cornerPaint.setColor(cornerHintColor);
-        if (!isEnabled()) cornerPaint.setAlpha(96);
+        cornerPaint.setAlpha(ColorPolicy.enabledAlpha(isEnabled(), 255, 96));
         Paint.FontMetrics metrics = cornerPaint.getFontMetrics();
         float baseline = KeyboardGeometry.floatPixels(getContext(), CORNER_HINT_TOP_DP) - metrics.ascent;
         canvas.drawText(cornerHint,
