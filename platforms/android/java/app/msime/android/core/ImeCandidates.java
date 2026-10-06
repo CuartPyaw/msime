@@ -184,8 +184,7 @@ final class ImeCandidates {
         expandedCells.add(button);
         button.setMinWidth(s.pixels(64));
         button.setMinimumWidth(s.pixels(64));
-        button.setMinHeight(s.pixels(44));
-        button.setMinimumHeight(s.pixels(44));
+        ViewPolicy.setMinimumHeight(button, s.pixels(44));
         button.setPadding(s.pixels(10), 0, s.pixels(10), 0);
         // The completed keyboard tree is styled once by MSIMEInputService.render().
         // Styling here would be repeated immediately after this button is attached.

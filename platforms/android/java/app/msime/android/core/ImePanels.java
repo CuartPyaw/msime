@@ -1426,8 +1426,7 @@ final class ImePanels {
             add.setAllCaps(false);
             add.setText("添加常用语");
             KeyboardGeometry.setKeyTextSize(add, 15);
-            add.setMinHeight(s.pixels(44));
-            add.setMinimumHeight(s.pixels(44));
+            ViewPolicy.setMinimumHeight(add, s.pixels(44));
             add.setPadding(s.pixels(24), 0, s.pixels(24), 0);
             add.setStateListAnimator(null);
             add.setContentDescription("添加常用语");
@@ -1451,8 +1450,7 @@ final class ImePanels {
             row.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
             row.setMaxLines(2);
             row.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            row.setMinHeight(s.pixels(44));
-            row.setMinimumHeight(s.pixels(44));
+            ViewPolicy.setMinimumHeight(row, s.pixels(44));
             row.setPadding(s.pixels(12), s.pixels(8), s.pixels(12), s.pixels(8));
             row.setStateListAnimator(null);
             row.setContentDescription("常用语 " + (phrase.length() > 20 ? phrase.substring(0, 20) : phrase));
