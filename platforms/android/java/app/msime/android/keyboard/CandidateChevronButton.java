@@ -108,7 +108,7 @@ public final class CandidateChevronButton extends Button {
             (height + dividerHeight) / 2f, divider);
         float areaLeft = lineWidth;
         float areaWidth = getWidth() - areaLeft;
-        float size = Math.min(Math.min(areaWidth, height),
+        float size = BoundsPolicy.atMost(KeyboardGeometry.shorterSide(areaWidth, height),
             KeyboardGeometry.floatPixels(getContext(), CHEVRON_DP));
         if (size <= 0) return;
         float centerX = areaLeft + areaWidth / 2f;
