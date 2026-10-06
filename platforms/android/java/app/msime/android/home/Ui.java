@@ -291,6 +291,11 @@ public final class Ui {
             dp(context, heightDp));
     }
 
+    /** Full-width layout parameters with an already pixel-sized height. */
+    public static LinearLayout.LayoutParams matchWidthHeightPx(int heightPixels) {
+        return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, heightPixels);
+    }
+
     /** Convert a density-independent size while guaranteeing at least one physical pixel. */
     public static int atLeastOnePx(Context context, float value) {
         return KeyboardGeometry.atLeastOnePixel(context, value);

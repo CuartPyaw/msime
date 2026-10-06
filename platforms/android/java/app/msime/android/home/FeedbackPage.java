@@ -97,8 +97,7 @@ public final class FeedbackPage extends DetailPage {
         detail = input;
 
         View rule = Ui.hairlineView(context);
-        LinearLayout.LayoutParams ruleParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-            Ui.hairlinePx(context));
+        LinearLayout.LayoutParams ruleParams = Ui.matchWidthHeightPx(Ui.hairlinePx(context));
         ruleParams.setMarginStart(Ui.dp(requireContext(), 16));
         card.addView(rule, ruleParams);
 
