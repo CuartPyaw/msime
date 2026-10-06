@@ -56,7 +56,7 @@ public final class InputDialog {
         heading.setGravity(Gravity.CENTER);
         Ui.style(heading, Ui.TEXT_DIALOG_TITLE, 600, Ui.text(context));
         heading.setAccessibilityHeading(true);
-        LinearLayout.LayoutParams headingParams = matchWidth();
+        LinearLayout.LayoutParams headingParams = Ui.matchWidth();
         headingParams.topMargin = Ui.dp(context, 20);
         headingParams.leftMargin = Ui.dp(context, 20);
         headingParams.rightMargin = Ui.dp(context, 20);
@@ -67,7 +67,7 @@ public final class InputDialog {
             note.setText(message);
             note.setGravity(Gravity.CENTER);
             Ui.style(note, Ui.TEXT_SHEET_HEADER, 400, Ui.subText(context));
-            LinearLayout.LayoutParams params = matchWidth();
+            LinearLayout.LayoutParams params = Ui.matchWidth();
             params.topMargin = Ui.dp(context, 4);
             params.leftMargin = Ui.dp(context, 20);
             params.rightMargin = Ui.dp(context, 20);
@@ -77,7 +77,7 @@ public final class InputDialog {
         fields = new LinearLayout(context);
         fields.setOrientation(LinearLayout.VERTICAL);
         fields.setPadding(Ui.dp(context, 16), Ui.dp(context, 6), Ui.dp(context, 16), Ui.dp(context, 16));
-        root.addView(fields, matchWidth());
+        root.addView(fields, Ui.matchWidth());
 
         root.addView(rule(true));
         LinearLayout buttons = new LinearLayout(context);
@@ -89,7 +89,7 @@ public final class InputDialog {
         primary = button("确定", 600, Ui.text(context));
         primary.setOnClickListener(ignored -> submit());
         buttons.addView(primary, new LinearLayout.LayoutParams(0, Ui.dp(context, 48), 1f));
-        root.addView(buttons, matchWidth());
+        root.addView(buttons, Ui.matchWidth());
 
         dialog.setContentView(root);
         Window window = dialog.getWindow();
@@ -211,11 +211,6 @@ public final class InputDialog {
             ? new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, thin)
             : new LinearLayout.LayoutParams(thin, ViewGroup.LayoutParams.MATCH_PARENT));
         return rule;
-    }
-
-    private static LinearLayout.LayoutParams matchWidth() {
-        return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
 }
