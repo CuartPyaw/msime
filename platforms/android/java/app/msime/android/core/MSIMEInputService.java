@@ -3526,11 +3526,6 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     /**
-     * The global theme's keyboard resolved for one panel's own light/dark setting.
-     *
-     * <p>An explicit `dark` or `light` on the surface wins; `follow` inherits the app mode (`theme`), and a `system` app mode follows the Android night mode. A missing or unknown value is `follow`, so an older snapshot keeps the keyboard's appearance rather than jumping to light. A theme with a fixed appearance then overrides that mode, which is what the shared resolver's `appearance` says.
-     */
-    /**
      * 候选条的配色。皮肤和键盘、表情、手写一样要经 {@link ImeStyler#themed} 按应用主题着色：「跟随系统」不着色时取的是经典绿种子，暖色主题下候选条铺一层淡绿底、页码也是绿的。键盘里换皮肤时也要跟着重算，否则候选条停在旧皮肤上。
      */
     CandidateAppearance.Palette candidateAppearanceFor(JSONObject preferences) {
@@ -3538,6 +3533,11 @@ public final class MSIMEInputService extends InputMethodService {
         return CandidateAppearance.from(preferences, imeStyler == null ? strip : imeStyler.themed(strip));
     }
 
+    /**
+     * The global theme's keyboard resolved for one panel's own light/dark setting.
+     *
+     * <p>An explicit `dark` or `light` on the surface wins; `follow` inherits the app mode (`theme`), and a `system` app mode follows the Android night mode. A missing or unknown value is `follow`, so an older snapshot keeps the keyboard's appearance rather than jumping to light. A theme with a fixed appearance then overrides that mode, which is what the shared resolver's `appearance` says.
+     */
     private KeyboardSkin surfaceSkin(JSONObject preferences, String key) {
         String surfaceMode = preferences == null ? "follow" : preferences.optString(key, "follow");
         String appMode = preferences == null ? "system"
