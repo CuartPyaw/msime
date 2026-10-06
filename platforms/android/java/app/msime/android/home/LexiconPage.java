@@ -153,7 +153,7 @@ public final class LexiconPage extends DetailPage {
         for (DictionaryCollectionsStore.Collection collection : current.view().collections()) {
             String subtitle = DictionaryCollectionsStore.countLabel(collection.entryCount())
                 + ("community".equals(collection.sourceType()) ? " · 社区" : "");
-            installed.addView(KeyboardSheets.badgeNavRow(context, initial(collection.name()), collection.name(),
+            installed.addView(KeyboardSheets.badgeNavRow(context, Ui.initial(collection.name(), "词"), collection.name(),
                 subtitle, collection.enabled() ? "已启用" : "已停用",
                 collection.enabled() ? Ui.accent(context) : Ui.subText(context),
                 () -> openDetail(collection.id(), collection.name())));
@@ -191,7 +191,7 @@ public final class LexiconPage extends DetailPage {
     private View discoverRow(CommunityCatalog.Item item, DictionaryCollectionsStore.View view) {
         Context context = requireContext();
         LinearLayout row = KeyboardSheets.baseRow(context);
-        row.addView(KeyboardSheets.badge(context, initial(item.name())));
+        row.addView(KeyboardSheets.badge(context, Ui.initial(item.name(), "词")));
         List<String> parts = new ArrayList<>(2);
         if (!item.author().isEmpty()) parts.add("@" + item.author());
         JSONArray words = item.payload() == null ? null : item.payload().optJSONArray("words");
@@ -223,11 +223,6 @@ public final class LexiconPage extends DetailPage {
         LinearLayout.LayoutParams params = Ui.rowGapParams(context);
         row.addView(button, params);
         return row;
-    }
-
-    private static String initial(String name) {
-        if (name == null || name.isEmpty()) return "词";
-        return new String(Character.toChars(name.codePointAt(0)));
     }
 
     // ---- 操作 ----
