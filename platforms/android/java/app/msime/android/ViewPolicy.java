@@ -65,4 +65,9 @@ public final class ViewPolicy {
     public static void clearPadding(View view) {
         view.setPadding(0, 0, 0, 0);
     }
+
+    /** Clear vertical padding while preserving horizontal padding. */
+    public static void clearVerticalPadding(View view) {
+        view.setPadding(view.getPaddingLeft(), 0, view.getPaddingRight(), 0);
+    }
 }
