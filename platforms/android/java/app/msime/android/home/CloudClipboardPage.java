@@ -145,10 +145,7 @@ public final class CloudClipboardPage extends DetailPage {
         header.setGravity(Gravity.CENTER_VERTICAL);
         Ui.setPaddingDp(header, context, Ui.GROUP_TITLE_INSET, 0,
             Ui.GROUP_TITLE_INSET, 2);
-        TextView recent = new TextView(context);
-        recent.setText("最近");
-        recent.setAccessibilityHeading(true);
-        Ui.style(recent, Ui.TEXT_GROUP_TITLE, 500, Ui.accent(context));
+        TextView recent = Ui.groupHeading(context, "最近");
         header.addView(recent, Ui.weightWrap(1f));
         if (!current.items().isEmpty()) {
             TextView clear = new TextView(context);
