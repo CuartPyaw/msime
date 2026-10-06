@@ -165,11 +165,12 @@ final class ImeToolbar {
     }
 
     private TextView toolbarText(float sizeSp) {
-        TextView text = ViewPolicy.newTextView(s, null);
+        TextView text = ViewPolicy.textLabel(s, null, sizeSp);
         KeyboardGeometry.setKeyTextSize(text, sizeSp);
         ViewPolicy.clearFontPadding(text);
         return text;
     }
+
 
     /** 候选那一行：候选滚动区占满剩余宽度，右端是分隔线加展开键。 */
     void addCandidateLine(LinearLayout candidateRegion, FrameLayout viewport, int height) {
