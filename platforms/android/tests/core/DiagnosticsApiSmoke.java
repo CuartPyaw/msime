@@ -12,6 +12,8 @@ public final class DiagnosticsApiSmoke {
         check(DiagnosticsApi.Event.of(1, "KEY_DOWN", 3) == null, "kinds are matched exactly");
         check(DiagnosticsApi.Event.of(-1, "commit", 0) == null, "a negative time is dropped");
         check(DiagnosticsApi.Event.of(5, "commit", -7).durationMs() == -1, "a negative duration means none");
+        check(DiagnosticsApi.strictInteger(7L) == 7L, "diagnostic integer");
+        check(DiagnosticsApi.strictInteger(1.5d) == null, "fractional diagnostic integer is rejected");
 
         check(DiagnosticsApi.Retention.fromWire("one_hour") == DiagnosticsApi.Retention.ONE_HOUR, "one_hour");
         check(DiagnosticsApi.Retention.fromWire("seven_days") == DiagnosticsApi.Retention.SEVEN_DAYS, "seven_days");
