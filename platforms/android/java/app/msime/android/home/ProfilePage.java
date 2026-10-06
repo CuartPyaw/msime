@@ -290,8 +290,7 @@ public final class ProfilePage extends DetailPage {
 
     private static View dangerButton(Context context, CharSequence label, Runnable action) {
         TextView button = Ui.textButton(context, label, Ui.TEXT_ROW_TITLE, 500, Ui.danger(context),
-            Ui.ripple(context), Ui.ACTION_BUTTON_MIN_HEIGHT);
-        button.setOnClickListener(ignored -> action.run());
+            Ui.ripple(context), Ui.ACTION_BUTTON_MIN_HEIGHT, action);
         return button;
     }
 
