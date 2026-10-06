@@ -158,6 +158,13 @@ public final class Ui {
             ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
+    /** Full-width layout parameters with a top margin expressed in dp. */
+    public static LinearLayout.LayoutParams matchWidth(Context context, int topMarginDp) {
+        LinearLayout.LayoutParams params = matchWidth();
+        params.topMargin = dp(context, topMarginDp);
+        return params;
+    }
+
     /** Layout parameters for a view that wraps both its content dimensions. */
     public static LinearLayout.LayoutParams wrap() {
         return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
