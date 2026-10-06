@@ -609,7 +609,7 @@ final class ImeLayoutRows {
         }), ZhuyinNineKeyLayout.keyId(key));
         twoLineFace(button, face);
         int horizontal = s.pixels(2);
-        button.setPadding(horizontal, 0, horizontal, 0);
+        ViewPolicy.setHorizontalPadding(button, horizontal);
         button.setMaxLines(2);
         button.setAutoSizeTextTypeUniformWithConfiguration(7, 14, 1, TypedValue.COMPLEX_UNIT_SP);
         button.setContentDescription(label);

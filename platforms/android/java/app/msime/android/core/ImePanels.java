@@ -631,7 +631,7 @@ final class ImePanels {
         ViewPolicy.clearMinimumWidth(button);
         button.setMinHeight(0);
         button.setMinimumHeight(0);
-        button.setPadding(horizontalPadding, 0, horizontalPadding, 0);
+        ViewPolicy.setHorizontalPadding(button, horizontalPadding);
         button.setIncludeFontPadding(false);
         button.setStateListAnimator(null);
     }
