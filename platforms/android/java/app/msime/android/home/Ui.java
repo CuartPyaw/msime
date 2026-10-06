@@ -289,6 +289,14 @@ public final class Ui {
         return DrawablePolicy.outlined(fillColor, radiusPx, strokeWidth, strokeColor);
     }
 
+    /** Filled rounded rectangle with a dashed outline. */
+    public static GradientDrawable outlinedDashed(@ColorInt int fillColor, float radiusPx,
+                                                  int strokeWidth, @ColorInt int strokeColor,
+                                                  float dashWidth, float dashGap) {
+        return DrawablePolicy.outlinedDashed(fillColor, radiusPx, strokeWidth, strokeColor,
+            dashWidth, dashGap);
+    }
+
     /** 胶囊形状：GradientDrawable 会把过大的圆角夹到短边的一半，所以高度怎么变两端都是半圆。 */
     public static GradientDrawable pill(@ColorInt int color) {
         return rounded(color, 9999f);
