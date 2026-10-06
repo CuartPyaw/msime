@@ -9,7 +9,6 @@ import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
-import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -263,8 +262,7 @@ public final class InlineHeightBar extends LinearLayout {
         }
 
         @Override protected void onDraw(Canvas canvas) {
-            text.setTextSize(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, LABEL_SP,
-                getResources().getDisplayMetrics()));
+            text.setTextSize(KeyboardGeometry.sp(getContext(), LABEL_SP));
             Paint.FontMetrics metrics = text.getFontMetrics();
             float textHeight = metrics.descent - metrics.ascent;
             float gap = KeyboardGeometry.floatPixels(getContext(), 6);
