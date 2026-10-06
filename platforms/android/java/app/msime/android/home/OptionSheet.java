@@ -113,7 +113,7 @@ public final class OptionSheet {
         if (count > 0) {
             View rule = Ui.hairlineView(context);
             options.addView(rule, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-                Math.max(1, Ui.dp(context, 0.5f))));
+                Ui.hairlinePx(context)));
         }
         options.addView(view);
         count++;
