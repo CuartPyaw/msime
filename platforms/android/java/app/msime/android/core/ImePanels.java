@@ -883,9 +883,7 @@ final class ImePanels {
         KeyboardGeometry.setPaddingDp(s.aiPolishActions, s, 10, 0, 10, 8);
         LinearLayout header = new LinearLayout(s);
         ViewPolicy.setCenteredVertically(header);
-        TextView title = new TextView(s);
-        ViewPolicy.setTextSizeLabel(title, s.aiOutputText.isEmpty() ? "AI 润色" : "润色结果", 15);
-        KeyboardGeometry.setKeyTextSize(title, 15);
+        TextView title = aiText(s.aiOutputText.isEmpty() ? "AI 润色" : "润色结果", 15);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         header.addView(title, KeyboardGeometry.weightedWrapParams(1));
         Button back = MSIMEInputService.role(s.button(header, "返回键盘", s::closeAiPolish), KeyboardKeyRole.GLYPH);
@@ -897,41 +895,31 @@ final class ImePanels {
         java.util.List<TextView> secondary = new java.util.ArrayList<>(3);
         TextView error = null;
         if (!s.aiError.isEmpty()) {
-            error = new TextView(s);
-            ViewPolicy.setTextSizeLabel(error, s.aiError, 13);
-            KeyboardGeometry.setKeyTextSize(error, 13);
+            error = aiText(s.aiError, 13);
             error.setContentDescription("AI 润色状态");
             s.aiPolishPanel.addView(error);
         }
         if (s.aiRequestConfiguration != null) {
-            TextView destination = new TextView(s);
-            ViewPolicy.setTextSizeLabel(destination,
+            TextView destination = aiText(
                 "发送到 " + s.aiRequestConfiguration.destination() + " · "
                     + s.aiRequestConfiguration.model(), 12);
-            KeyboardGeometry.setKeyTextSize(destination, 12);
             destination.setContentDescription("AI 请求目标和模型");
             s.aiPolishPanel.addView(destination);
             secondary.add(destination);
         }
-        TextView label = new TextView(s);
-        ViewPolicy.setTextSizeLabel(label,
+        TextView label = aiText(
             s.aiOutputText.isEmpty() ? "待发送的选中文字" : "润色结果", 12);
-        KeyboardGeometry.setKeyTextSize(label, 12);
         KeyboardGeometry.setPaddingDp(label, s, 0, 6, 0, 4);
         s.aiPolishPanel.addView(label);
         secondary.add(label);
-        TextView content = new TextView(s);
-        ViewPolicy.setTextSizeLabel(content,
+        TextView content = aiText(
             s.aiOutputText.isEmpty() ? s.aiSourceText : s.aiOutputText, 15);
-        KeyboardGeometry.setKeyTextSize(content, 15);
         KeyboardGeometry.setSymmetricPaddingDp(content, s, 12, 10);
         content.setContentDescription(s.aiOutputText.isEmpty() ? "待润色文字" : "AI 润色结果");
         s.aiPolishPanel.addView(content, KeyboardGeometry.matchWidthWrapParams());
         Button primary;
         if (s.aiBusy) {
-            TextView progress = new TextView(s);
-            ViewPolicy.setTextSizeLabel(progress, "正在请求…", 12);
-            KeyboardGeometry.setKeyTextSize(progress, 12);
+            TextView progress = aiText("正在请求…", 12);
             KeyboardGeometry.setPaddingDp(progress, s, 0, 6, 0, 0);
             s.aiPolishPanel.addView(progress);
             secondary.add(progress);
@@ -963,6 +951,13 @@ final class ImePanels {
         primary.setTextColor(busy ? Color.parseColor(s.skin.keyForeground()) : Color.parseColor(s.skin.onAccent()));
         ViewPolicy.setActiveAlpha(primary, primary.isEnabled(), .45f);
         ViewPolicy.clearElevation(primary);
+    }
+
+    private TextView aiText(CharSequence text, float sizeSp) {
+        TextView view = new TextView(s);
+        ViewPolicy.setTextSizeLabel(view, text, sizeSp);
+        KeyboardGeometry.setKeyTextSize(view, sizeSp);
+        return view;
     }
 
     void showSchemePicker() {
