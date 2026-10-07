@@ -93,6 +93,7 @@ constexpr jsize kRefreshHostPathLimit = 4096;
 constexpr jsize kSnapshotVersionRequestLimit = 1 * 1024 * 1024;
 constexpr jsize kSnapshotPrepareRequestLimit = 1 * 1024 * 1024;
 constexpr jsize kSnapshotPreparePathLimit = 16384;
+constexpr jsize kUpdatePreferencesSnapshotLimit = 1 * 1024 * 1024;
 }
 
 extern "C" {
@@ -407,6 +408,9 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_snapshotActivat
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_updatePreferencesRaw(JNIEnv *env, jclass, jlong handle, jbyteArray snapshot) {
     if (!snapshot) return response(env, msime_client_update_preferences(static_cast<uint64_t>(handle), nullptr, 0));
     jsize length = env->GetArrayLength(snapshot);
+    if (length > kUpdatePreferencesSnapshotLimit) {
+        return response(env, msime_client_update_preferences(static_cast<uint64_t>(handle), nullptr, 0));
+    }
     jbyte *bytes = env->GetByteArrayElements(snapshot, nullptr);
     if (!bytes) return nullptr;
     char *result = msime_client_update_preferences(static_cast<uint64_t>(handle), reinterpret_cast<const uint8_t *>(bytes), static_cast<size_t>(length));
