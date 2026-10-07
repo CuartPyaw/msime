@@ -112,7 +112,8 @@ public final class OnlineCandidatePolicy {
         for (String text : texts) {
             if (result.size() == boundedLimit) break;
             if (text == null || text.trim().isEmpty() || TextPolicy.utf8Length(text) > MAX_CANDIDATE_BYTES
-                    || TextPolicy.hasControl(text) || result.contains(text)) {
+                    || TextPolicy.hasControl(text) || !TextPolicy.validUnicode(text)
+                    || result.contains(text)) {
                 continue;
             }
             result.add(text);
