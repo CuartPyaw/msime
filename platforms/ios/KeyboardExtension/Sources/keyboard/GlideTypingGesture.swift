@@ -122,7 +122,8 @@ final class GlideTypingGestureRecognizer: UIGestureRecognizer {
     let point = touch.location(in: view)
     let elapsed = max(0, (touch.timestamp - downTime) * 1_000)
     if let last = samples.last, last.x == point.x, last.y == point.y, last.milliseconds == elapsed { return }
-    samples.append(GlideTyping.Sample(x: point.x, y: point.y, milliseconds: elapsed))
+    GlideTyping.appendBounded(
+      GlideTyping.Sample(x: point.x, y: point.y, milliseconds: elapsed), to: &samples)
   }
 }
 

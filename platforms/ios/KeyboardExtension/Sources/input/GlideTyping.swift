@@ -15,6 +15,8 @@ enum GlideTyping {
   static let letters = Array("abcdefghijklmnopqrstuvwxyz")
   /// `msime_client_glide` 一次最多接受的采样点数。
   static let pointLimit = 1_024
+  /// 手指尚未跨到另一枚键时也限制内存；抬手时还会再抽稀到 `pointLimit`。
+  static let sampleBufferLimit = 4_096
   /// `msime_client_glide` 接受的请求最大字节数。
   static let requestByteLimit = 65_536
   /// 横向位移至少达到按下那个键键宽的这个比例才算滑行：同一个键上的竖直手势和手指的轻微抖动都到不了这个距离。
@@ -37,6 +39,14 @@ enum GlideTyping {
     guard limit >= 2, samples.count > limit else { return samples }
     let last = samples.count - 1
     return (0..<limit).map { samples[$0 * last / (limit - 1)] }
+  }
+
+  /// 追加一个触摸采样，同时限制尚未结束的手势占用的数组大小。
+  static func appendBounded(_ sample: Sample, to samples: inout [Sample]) {
+    if samples.count >= sampleBufferLimit {
+      samples = downsampled(samples, limit: sampleBufferLimit / 2)
+    }
+    samples.append(sample)
   }
 
   /// `msime_client_glide` 的请求 JSON：`keys` 是 a..z 各键的中心，`key_width`/`key_height` 是一个字母键的大小（取二十六个键里最小的宽和高），`points` 是至多 `pointLimit` 个 `[x, y, ms]`。坐标保留一位小数、时间取整毫秒，请求因此远小于 `requestByteLimit`。键不全、采样不足两个或有非有限值时为 nil。
