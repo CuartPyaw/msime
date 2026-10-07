@@ -79,6 +79,21 @@ class AiCandidateCache(unittest.TestCase):
             self.configured(changed_segments)
         self.assertEqual(ai.call_count, 3)
 
+    def test_candidate_limit_partitions_cache(self):
+        rows = [
+            {"text": "你好", "source": 1},
+            {"text": "您好", "source": 1},
+            {"text": "你号", "source": 1},
+        ]
+        changed_limit = query()
+        changed_limit["ai_assistant"]["candidate_limit"] = 5
+        with mock.patch.object(provider, "load_ai_config",
+                               return_value=self.config), \
+                mock.patch.object(provider, "ai", return_value=rows) as ai:
+            self.assertEqual(self.configured(query()), rows)
+            self.assertEqual(self.configured(changed_limit), rows)
+        self.assertEqual(ai.call_count, 2)
+
     def test_empty_result_is_not_cached(self):
         with mock.patch.object(provider, "load_ai_config",
                                return_value=self.config), \
