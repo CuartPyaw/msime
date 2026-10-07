@@ -78,6 +78,7 @@ impl CustomSkinLibraryStore {
     }
 
     pub fn load(&self) -> Result<Vec<SavedTouchKeyboardSkin>, CustomSkinLibraryError> {
+        crate::storage::reject_symlink(&self.directory)?;
         match fs::symlink_metadata(self.path()) {
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -446,6 +447,19 @@ mod tests {
         std::os::unix::fs::symlink(root.path().join("missing-library.json"), store.path()).unwrap();
 
         assert!(matches!(store.load(), Err(CustomSkinLibraryError::Invalid)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_rejects_a_symlinked_library_directory_before_reporting_empty() {
+        use msime_path_trust::untrusted_symlink as symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let store = CustomSkinLibraryStore::new(root.path());
+        symlink(outside.path(), store.path().parent().unwrap()).unwrap();
+
+        assert!(matches!(store.load(), Err(CustomSkinLibraryError::Io(_))));
     }
 
     #[test]
