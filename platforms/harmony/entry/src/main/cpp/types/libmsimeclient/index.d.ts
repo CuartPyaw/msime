@@ -42,7 +42,7 @@ export const customSkinLibrary: (request: string) => string;
  * One call rather than two: the trial remembers the skin being replaced, so a failed import has to
  * end it. Writes preferences and two locked files, so call it off the UI thread.
  */
-export const communitySkinInstall: (request: string) => string;
+export const communitySkinInstall: (request: string) => Promise<string>;
 /** `{directory,action:{operation:"finish",id,keep}}` or `{operation:"restore_pending"}`. */
 export const keyboardSkinTrial: (request: string) => string;
 /**

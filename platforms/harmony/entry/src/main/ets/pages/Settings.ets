@@ -1312,7 +1312,7 @@ class SettingsBridge {
     } catch {
       return JSON.stringify({ ok: false, error: 'community_unavailable' });
     }
-    const installed: string = client.communitySkinInstall(JSON.stringify({
+    const installed: string = await client.communitySkinInstall(JSON.stringify({
       directory: this.stateDirectory, id: action.id, name: action.name, design: design
     }));
     // The install wrote the preference document, so the page's copy is now the old one. Same
