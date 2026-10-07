@@ -45,3 +45,24 @@ pub(crate) fn read(file: File, maximum: u64) -> io::Result<Vec<u8>> {
     }
     Ok(bytes)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::open_private;
+
+    #[cfg(unix)]
+    #[test]
+    fn open_private_rejects_a_symlinked_leaf() {
+        use std::os::unix::fs::symlink;
+
+        let outside = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let target = outside.path().join("outside.json");
+        std::fs::write(&target, b"synthetic-host-data").unwrap();
+        let linked = root.path().join("private.json");
+        symlink(&target, &linked).unwrap();
+
+        assert!(open_private(&linked).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"synthetic-host-data");
+    }
+}
