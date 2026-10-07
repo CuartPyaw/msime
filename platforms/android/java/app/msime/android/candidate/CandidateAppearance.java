@@ -93,7 +93,7 @@ public final class CandidateAppearance {
     private static boolean validFont(String value) {
         if (value == null || value.isEmpty()
                 || TextPolicy.utf8Length(value) > 128) return false;
-        return !TextPolicy.hasControl(value);
+        return !TextPolicy.hasControl(value) && TextPolicy.validUnicode(value);
     }
 
     public static final class Palette {
