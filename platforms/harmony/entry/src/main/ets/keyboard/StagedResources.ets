@@ -7,6 +7,7 @@
  * directory came to hold a set that matched neither, which the shared verification then refused.
  */
 import fs from '@ohos.file.fs';
+import util from '@ohos.util';
 import { KeyboardLog, describeError } from './KeyboardLog';
 import { StagedArtifact, StagedResourcePolicy } from './StagedResourcePolicy';
 
@@ -105,10 +106,20 @@ export class StagedResources {
   }
 
   private static readMarker(marker: string): string | null {
+    let handle: fs.File | null = null;
     try {
-      return fs.accessSync(marker) ? fs.readTextSync(marker) : null;
+      if (!fs.accessSync(marker)) return null;
+      handle = fs.openSync(marker, fs.OpenMode.READ_ONLY);
+      const stat: fs.Stat = fs.statSync(handle.fd);
+      if (!stat.isFile() || stat.size > 256) return null;
+      const buffer: ArrayBuffer = new ArrayBuffer(stat.size + 1);
+      const count: number = fs.readSync(handle.fd, buffer);
+      if (count !== stat.size) return null;
+      return util.TextDecoder.create('utf-8').decode(new Uint8Array(buffer, 0, count));
     } catch (error) {
       return null;
+    } finally {
+      if (handle !== null) fs.closeSync(handle);
     }
   }
 

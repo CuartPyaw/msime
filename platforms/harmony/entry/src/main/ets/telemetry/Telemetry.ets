@@ -2,6 +2,7 @@ import bundleManager from '@ohos.bundle.bundleManager';
 import hiAppEvent from '@ohos.hiviewdfx.hiAppEvent';
 import process from '@ohos.process';
 import fs from '@ohos.file.fs';
+import util from '@ohos.util';
 import client from 'libmsimeclient.so';
 import { KeyboardLog, describeError } from '../keyboard/KeyboardLog';
 import { CrashDestination, CrashReport, TelemetryPolicy } from './TelemetryPolicy';
@@ -274,6 +275,7 @@ export class HarmonyTelemetry {
 
   private static readRememberedPid(): number | null {
     const path: string = `${HarmonyTelemetry.directory}/${KEYBOARD_PROCESS_FILE}`;
+    let handle: fs.File | null = null;
     try {
       if (!HarmonyTelemetry.safeTelemetryDirectory()) {
         return null;
@@ -282,7 +284,15 @@ export class HarmonyTelemetry {
       if (stat.isSymbolicLink() || !stat.isFile()) {
         return null;
       }
-      return TelemetryPolicy.rememberedPid(fs.readTextSync(path));
+      handle = fs.openSync(path, fs.OpenMode.READ_ONLY);
+      const opened: fs.Stat = fs.statSync(handle.fd);
+      if (!opened.isFile() || opened.size > 256) return null;
+      const buffer: ArrayBuffer = new ArrayBuffer(opened.size + 1);
+      const count: number = fs.readSync(handle.fd, buffer);
+      if (count !== opened.size) return null;
+      const text: string = util.TextDecoder.create('utf-8').decode(
+        new Uint8Array(buffer, 0, count));
+      return TelemetryPolicy.rememberedPid(text);
     } catch (error) {
       // An absent marker is the normal first-run state.
       try {
@@ -293,6 +303,8 @@ export class HarmonyTelemetry {
         // The directory or marker is unavailable.
       }
       return null;
+    } finally {
+      if (handle !== null) fs.closeSync(handle);
     }
   }
 
