@@ -47,6 +47,12 @@ fn create_private_file(path: &Path) -> io::Result<File> {
     options.open(path)
 }
 
+fn write_private_bytes(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut file = create_private_file(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Catalog {
     pub version: u32,
@@ -639,7 +645,7 @@ pub(crate) fn install_model(
                 if !hex::encode(Sha256::digest(bytes)).eq_ignore_ascii_case(&extra.sha256) {
                     return Err(LocalModelError::ChecksumMismatch(extra.name.clone()));
                 }
-                fs::write(&destination, bytes)?;
+                write_private_bytes(&destination, bytes)?;
             }
             (None, Some(url)) => {
                 let mut output = BufWriter::new(create_private_file(&destination)?);

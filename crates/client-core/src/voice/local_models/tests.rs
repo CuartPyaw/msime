@@ -15,6 +15,22 @@ fn staging_file_creation_rejects_a_symlink() {
     assert!(create_private_file(&path).is_err());
     assert_eq!(std::fs::read(&target).unwrap(), b"keep");
 }
+
+#[cfg(unix)]
+#[test]
+fn embedded_file_writing_rejects_a_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let target = outside.path().join("outside.bin");
+    std::fs::write(&target, b"keep").unwrap();
+    let path = directory.path().join("embedded.bin");
+    symlink(&target, &path).unwrap();
+
+    assert!(write_private_bytes(&path, b"replacement").is_err());
+    assert_eq!(std::fs::read(&target).unwrap(), b"keep");
+}
 use std::collections::HashMap;
 use std::sync::Mutex;
 
