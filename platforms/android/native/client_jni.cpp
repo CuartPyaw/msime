@@ -926,6 +926,7 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_localSpeechAcce
     }
     std::vector<jshort> samples(static_cast<size_t>(count));
     env->GetShortArrayRegion(pcm, 0, count, samples.data());
+    if (env->ExceptionCheck()) return nullptr;
     std::vector<float> floats(samples.size());
     for (size_t index = 0; index < samples.size(); index++) floats[index] = static_cast<float>(samples[index]) / 32768.0f;
     try {
