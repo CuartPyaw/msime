@@ -158,6 +158,15 @@ public final class CommunityCatalogSmoke {
         } catch (InvocationTargetException error) {
             throw new AssertionError("a missing item must not throw", error.getCause());
         }
+        Method install = CommunityCatalog.class.getDeclaredMethod(
+            "install", java.nio.file.Path.class, CommunityCatalog.Item.class);
+        try {
+            String failure = (String) install.invoke(uninitialized, null, null);
+            check(failure != null && !failure.isEmpty(),
+                "a missing item must return an install failure");
+        } catch (InvocationTargetException error) {
+            throw new AssertionError("a missing item must not throw during install", error.getCause());
+        }
         System.out.println("Android community catalogue bounds passed");
     }
 
