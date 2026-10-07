@@ -689,6 +689,7 @@ struct LocalSpeech {
     std::string partial;
     bool partial_changed = false;
 };
+constexpr jint kLocalSpeechChunkLimit = 1600;
 
 jbyteArray bytes_of(JNIEnv *env, const std::string &text) {
     if (text.size() > static_cast<size_t>(std::numeric_limits<jsize>::max())) return nullptr;
@@ -883,7 +884,8 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_localSpeechStar
 // Feeds 16 kHz mono PCM16. Returns the whole transcript so far when it changed, else null. Throws IllegalStateException when the session was cancelled or the recognizer failed.
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_localSpeechAcceptRaw(JNIEnv *env, jclass, jlong handle, jshortArray pcm, jint count) {
     LocalSpeech *state = speech(handle);
-    if (!state || !state->session || !pcm || count < 0 || count > env->GetArrayLength(pcm)) {
+    if (!state || !state->session || !pcm || count < 0 || count > kLocalSpeechChunkLimit
+            || count > env->GetArrayLength(pcm)) {
         throw_state(env, "invalid local speech input");
         return nullptr;
     }
