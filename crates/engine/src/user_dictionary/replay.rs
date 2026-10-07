@@ -64,10 +64,7 @@ fn replay_with(user_db: &Path, main_db: Option<&Path>, english_db: &Path) -> Rep
     let Some(main) = main else {
         return fail(result, "cannot open target dictionary database");
     };
-    let Ok(english_db) = crate::paths::sqlite_path_no_follow(english_db) else {
-        return fail(result, "cannot attach English dictionary database");
-    };
-    if attach(&main, &english_db, "replay_english").is_err() {
+    if attach(&main, english_db, "replay_english").is_err() {
         return fail(result, "cannot attach English dictionary database");
     }
     let Ok(mut rows) = journal.prepare(
@@ -197,9 +194,11 @@ impl ToSql for Text<'_> {
 
 /// `ATTACH DATABASE ?1 AS <schema>`; `schema` is one of this module's fixed aliases, never user input.
 pub(super) fn attach(connection: &Connection, path: &Path, schema: &str) -> rusqlite::Result<()> {
+    let path = crate::paths::sqlite_path_no_follow(path)
+        .map_err(|_| rusqlite::Error::InvalidPath(path.to_owned()))?;
     let name = path
         .to_str()
-        .ok_or_else(|| rusqlite::Error::InvalidPath(path.to_owned()))?;
+        .ok_or_else(|| rusqlite::Error::InvalidPath(path.clone()))?;
     connection.execute(&format!("ATTACH DATABASE ?1 AS {schema}"), [name])?;
     Ok(())
 }
