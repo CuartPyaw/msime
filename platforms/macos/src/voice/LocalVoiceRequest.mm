@@ -172,6 +172,7 @@ NSString *MSIMELocalVoiceHelperPath(void) {
     const uint64_t generation = ++_generation;
     __weak MSIMELocalVoiceHelper *weakSelf = self;
     NSMutableData *pending = [NSMutableData data];
+    __block BOOL droppingOversizedLine = NO;
     output.fileHandleForReading.readabilityHandler = ^(NSFileHandle *handle) {
         NSData *chunk = handle.availableData;
         if (!chunk.length) { handle.readabilityHandler = nil; return; }
@@ -179,15 +180,26 @@ NSString *MSIMELocalVoiceHelperPath(void) {
         @synchronized(pending) {
             [pending appendData:chunk];
             for (;;) {
+                if (!pending.length) break;
                 const char *bytes = static_cast<const char *>(pending.bytes);
                 const void *newline = std::memchr(bytes, '\n', pending.length);
-                if (!newline) break;
+                if (!newline) {
+                    if (droppingOversizedLine || pending.length > MaximumHelperLine) {
+                        pending.length = 0;
+                        droppingOversizedLine = YES;
+                    }
+                    break;
+                }
                 const NSUInteger length = static_cast<NSUInteger>(static_cast<const char *>(newline) - bytes);
+                if (droppingOversizedLine || length > MaximumHelperLine) {
+                    [pending replaceBytesInRange:NSMakeRange(0, length + 1) withBytes:nullptr length:0];
+                    droppingOversizedLine = NO;
+                    continue;
+                }
                 id message = [NSJSONSerialization JSONObjectWithData:[pending subdataWithRange:NSMakeRange(0, length)] options:0 error:nil];
                 if ([message isKindOfClass:NSDictionary.class]) [messages addObject:message];
                 [pending replaceBytesInRange:NSMakeRange(0, length + 1) withBytes:nullptr length:0];
             }
-            if (pending.length > MaximumHelperLine) pending.length = 0;
         }
         if (messages.count)
             dispatch_async(dispatch_get_main_queue(), ^{
