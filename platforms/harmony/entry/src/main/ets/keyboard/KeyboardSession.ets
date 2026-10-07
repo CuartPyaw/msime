@@ -4514,17 +4514,10 @@ export class KeyboardSession implements HardwareKeyTarget {
   static saveFeedbackIn(stateRoot: string, settings: FeedbackSettings): boolean {
     try {
       const path: string = KeyboardSession.feedbackFileIn(stateRoot);
-      if (!KeyboardSession.safeStateDirectory(stateRoot) || KeyboardSession.isSymbolicLink(path)) {
+      if (!KeyboardSession.safeStateDirectory(stateRoot)) {
         return false;
       }
-      const handle = fs.openSync(path,
-        fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
-      try {
-        fs.writeSync(handle.fd, KeyboardFeedback.serialize(settings));
-      } finally {
-        fs.closeSync(handle);
-      }
-      return true;
+      return KeyboardSession.writePrivateText(path, KeyboardFeedback.serialize(settings));
     } catch (error) {
       KeyboardLog.error(`key feedback not saved: ${describeError(error)}`);
       return false;
@@ -4549,15 +4542,11 @@ export class KeyboardSession implements HardwareKeyTarget {
   saveFeedback(settings: FeedbackSettings): boolean {
     try {
       const path: string = this.feedbackFile();
-      if (!KeyboardSession.safeStateDirectory(this.stateDirectory) || KeyboardSession.isSymbolicLink(path)) {
+      if (!KeyboardSession.safeStateDirectory(this.stateDirectory)) {
         return false;
       }
-      const handle = fs.openSync(path,
-        fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
-      try {
-        fs.writeSync(handle.fd, KeyboardFeedback.serialize(settings));
-      } finally {
-        fs.closeSync(handle);
+      if (!KeyboardSession.writePrivateText(path, KeyboardFeedback.serialize(settings))) {
+        return false;
       }
       this.feedbackSettings = settings;
       return true;
@@ -4792,16 +4781,10 @@ export class KeyboardSession implements HardwareKeyTarget {
     }
     try {
       const path: string = this.emojiRecentsFile();
-      if (!KeyboardSession.safeStateDirectory(this.stateDirectory) || KeyboardSession.isSymbolicLink(path)) {
+      if (!KeyboardSession.safeStateDirectory(this.stateDirectory)) {
         return recents;
       }
-      const handle = fs.openSync(path,
-        fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
-      try {
-        fs.writeSync(handle.fd, EmojiCatalogModel.serializeRecents(recents));
-      } finally {
-        fs.closeSync(handle);
-      }
+      KeyboardSession.writePrivateText(path, EmojiCatalogModel.serializeRecents(recents));
     } catch (error) {
       KeyboardLog.error(`emoji recents not persisted: ${describeError(error)}`);
     }
@@ -4814,17 +4797,10 @@ export class KeyboardSession implements HardwareKeyTarget {
     }
     try {
       const path: string = this.emojiRecentsFile();
-      if (!KeyboardSession.safeStateDirectory(this.stateDirectory) || KeyboardSession.isSymbolicLink(path)) {
+      if (!KeyboardSession.safeStateDirectory(this.stateDirectory)) {
         return false;
       }
-      const handle = fs.openSync(path,
-        fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
-      try {
-        fs.writeSync(handle.fd, '[]');
-      } finally {
-        fs.closeSync(handle);
-      }
-      return true;
+      return KeyboardSession.writePrivateText(path, '[]');
     } catch (error) {
       KeyboardLog.error(`emoji recents not cleared: ${describeError(error)}`);
       return false;
@@ -4912,6 +4888,31 @@ export class KeyboardSession implements HardwareKeyTarget {
       return !stat.isSymbolicLink() && stat.isFile() && stat.size <= maximumBytes ? stat : null;
     } catch {
       return null;
+    }
+  }
+
+  private static writePrivateText(path: string, text: string): boolean {
+    const staging: string = `${path}.${util.generateRandomUUID(false)}.tmp`;
+    let renamed: boolean = false;
+    try {
+      const handle: fs.File = fs.openSync(staging,
+        fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+      try {
+        fs.writeSync(handle.fd, text);
+      } finally {
+        fs.closeSync(handle);
+      }
+      fs.renameSync(staging, path);
+      renamed = true;
+      return true;
+    } finally {
+      if (!renamed) {
+        try {
+          if (fs.accessSync(staging)) fs.unlinkSync(staging);
+        } catch {
+          // A failed private write may leave only its uniquely named staging file.
+        }
+      }
     }
   }
 

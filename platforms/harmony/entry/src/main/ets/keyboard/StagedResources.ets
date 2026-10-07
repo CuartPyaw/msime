@@ -45,12 +45,26 @@ export class StagedResources {
         }
         fs.copyFileSync(`${packaged}/${artifact.name}`, `${destination}/${artifact.name}`);
       }
-      const handle = fs.openSync(marker,
-        fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+      const staging: string = `${marker}.${util.generateRandomUUID(false)}.tmp`;
+      let renamed: boolean = false;
       try {
-        fs.writeSync(handle.fd, token);
+        const handle = fs.openSync(staging,
+          fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+        try {
+          fs.writeSync(handle.fd, token);
+        } finally {
+          fs.closeSync(handle);
+        }
+        fs.renameSync(staging, marker);
+        renamed = true;
       } finally {
-        fs.closeSync(handle);
+        if (!renamed) {
+          try {
+            if (fs.accessSync(staging)) fs.unlinkSync(staging);
+          } catch {
+            // A failed marker write leaves at most its uniquely named staging file.
+          }
+        }
       }
       KeyboardLog.info(`staged ${destination}`);
       return true;
