@@ -303,6 +303,15 @@ fn panel_provider_rejects_unsafe_text_and_handwriting_language() {
             strokes: vec![vec![HandwritingPoint { x: 0.0, y: 0.0 }]],
         })
         .is_none());
+    assert!(UnixSocketProvider::new(&socket)
+        .handwriting(HandwritingQuery {
+            language: "zh-CN".into(),
+            strokes: vec![vec![HandwritingPoint {
+                x: f32::NAN,
+                y: 0.0,
+            }]],
+        })
+        .is_none());
 }
 
 #[cfg(unix)]

@@ -522,7 +522,13 @@ impl UnixSocketProvider {
             || query
                 .strokes
                 .iter()
-                .any(|stroke| stroke.is_empty() || stroke.len() > 512)
+                .any(|stroke| {
+                    stroke.is_empty()
+                        || stroke.len() > 512
+                        || stroke
+                            .iter()
+                            .any(|point| !point.x.is_finite() || !point.y.is_finite())
+                })
         {
             return None;
         }
