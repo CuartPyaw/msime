@@ -108,10 +108,11 @@ export class StagedResources {
   private static readMarker(marker: string): string | null {
     let handle: fs.File | null = null;
     try {
-      if (!fs.accessSync(marker)) return null;
+      const expected: fs.Stat = fs.lstatSync(marker);
+      if (expected.isSymbolicLink() || !expected.isFile() || expected.size > 256) return null;
       handle = fs.openSync(marker, fs.OpenMode.READ_ONLY);
       const stat: fs.Stat = fs.statSync(handle.fd);
-      if (!stat.isFile() || stat.size > 256) return null;
+      if (!stat.isFile() || stat.size > 256 || stat.ino !== expected.ino) return null;
       const buffer: ArrayBuffer = new ArrayBuffer(stat.size + 1);
       const count: number = fs.readSync(handle.fd, buffer);
       if (count !== stat.size) return null;

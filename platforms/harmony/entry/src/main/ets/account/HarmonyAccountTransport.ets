@@ -56,14 +56,14 @@ export class FileSessionStore implements AccountSessionStore {
     let handle: fs.File | null = null;
     try {
       if (!this.safeDirectory()) return null;
-      const stat: fs.Stat = fs.lstatSync(this.file);
-      if (stat.isSymbolicLink() || !stat.isFile() || stat.size > MAX_SESSION_BYTES) return null;
+      const expected: fs.Stat = fs.lstatSync(this.file);
+      if (expected.isSymbolicLink() || !expected.isFile() || expected.size > MAX_SESSION_BYTES) return null;
       handle = fs.openSync(this.file, fs.OpenMode.READ_ONLY);
-      const opened: fs.Stat = fs.statSync(handle.fd);
-      if (!opened.isFile() || opened.size > MAX_SESSION_BYTES) return null;
-      const buffer: ArrayBuffer = new ArrayBuffer(opened.size + 1);
+      const stat: fs.Stat = fs.statSync(handle.fd);
+      if (!stat.isFile() || stat.size > MAX_SESSION_BYTES || stat.ino !== expected.ino) return null;
+      const buffer: ArrayBuffer = new ArrayBuffer(stat.size + 1);
       const count: number = fs.readSync(handle.fd, buffer);
-      if (count !== opened.size) return null;
+      if (count !== stat.size) return null;
       return util.TextDecoder.create('utf-8').decode(new Uint8Array(buffer, 0, count));
     } catch {
       return null;
