@@ -34,6 +34,10 @@ export function asrProviderCredentialTestConfig(
     doubao_enable_itn: voiceInput.doubao_enable_itn !== false,
     doubao_enable_punc: voiceInput.doubao_enable_punc !== false,
     doubao_enable_ddc: voiceInput.doubao_enable_ddc === true,
+    // 本地识别没有凭据可测，provider 校验的是这个模型目录；不带上它，测试必然报模型不可用。
+    ...(voiceInput.asr_provider === "local" && voiceInput.asr_model_path
+      ? { asr_model_path: voiceInput.asr_model_path }
+      : {}),
   };
 }
 

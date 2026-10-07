@@ -70,6 +70,19 @@ test("voice credential test configs share Linux and remote defaults", () => {
   });
 });
 
+test("local ASR credential test names the model directory the provider checks", () => {
+  const modelPath = "/synthetic/voice-models/synthetic-model";
+  expect(
+    asrProviderCredentialTestConfig(
+      { ...voiceInput, asr_provider: "local", asr_model_path: modelPath },
+      "api_key",
+    ),
+  ).toMatchObject({ asr_provider: "local", asr_model_path: modelPath });
+  expect(
+    asrProviderCredentialTestConfig({ ...voiceInput, asr_model_path: modelPath }, "api_key"),
+  ).not.toHaveProperty("asr_model_path");
+});
+
 test("shared ASR service provider ids cover the credential-backed providers", () => {
   expect(ASR_SERVICE_PROVIDER_IDS).toEqual([
     "openai",
