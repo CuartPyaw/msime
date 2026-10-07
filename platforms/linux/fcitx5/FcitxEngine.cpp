@@ -5259,10 +5259,16 @@ public:
   // it in classicui.conf, where Fcitx5's configuration tool shows the same value. A front end
   // without the classic UI (kimpanel on Plasma draws with the desktop's font) is left alone.
   void applyCandidatePanelFont(const Json &preferences) {
-    const auto description = candidate_font_sync_.next(msime::linux_host::read_candidate_font(preferences));
-    if (!description) return;
     auto *classicui = instance_->addonManager().addon("classicui", true);
-    if (!classicui) return;
+    // 面板里现有的描述只在第一次同步时用得上（见 CandidateFontSync::next）。
+    std::optional<std::string> current;
+    if (!candidate_font_sync_.primed() && classicui && classicui->getConfig()) {
+      fcitx::RawConfig existing;
+      classicui->getConfig()->save(existing);
+      if (const auto *font = existing.valueByPath("Font")) current = *font;
+    }
+    const auto description = candidate_font_sync_.next(msime::linux_host::read_candidate_font(preferences), current);
+    if (!description || !classicui) return;
     fcitx::RawConfig config;
     config.setValueByPath("Font", *description);
     set_classicui_config(*classicui, config);
@@ -5985,8 +5991,14 @@ public:
     fcitx::startProcess({guide, "--host", "fcitx5"});
   }
   fcitx::Instance *instance_;
-  // 经典界面的字号写成磅，候选序号才与候选同样大小（见 CandidateFontUnit）。
-  msime::linux_host::CandidateFontSync candidate_font_sync_{msime::linux_host::CandidateFontUnit::Points};
+  // 5.1.18 起的经典界面字号写成磅，候选序号才与候选同样大小（见 CandidateFontUnit）。
+  static constexpr auto kClassicUiFontUnit =
+#ifdef MSIME_FCITX5_LABEL_POINTS
+      msime::linux_host::CandidateFontUnit::Points;
+#else
+      msime::linux_host::CandidateFontUnit::Pixels;
+#endif
+  msime::linux_host::CandidateFontSync candidate_font_sync_{kClassicUiFontUnit};
   std::string candidate_theme_applied_;
   msime::linux_host::CandidateWheelPagingSync candidate_wheel_paging_sync_;
   // Last appearance the addon-wide probe reported; see stepSystemTheme.

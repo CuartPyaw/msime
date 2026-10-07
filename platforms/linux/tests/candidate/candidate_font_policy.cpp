@@ -86,5 +86,15 @@ int main() {
   assert(points.next({"MiSans", {"Noto Sans SC", "Microsoft YaHei"}, 14}) ==
          "MiSans, Noto Sans SC, Microsoft YaHei, 10.5");
   assert(!points.next({"MiSans", {"Noto Sans SC", "Microsoft YaHei"}, 14}));
+  // 升级前按像素写过同一个字体时，偏好虽是默认值也按磅重写一次，之后照旧不重复写；面板里是别的描述，或者仍写像素时，不动它。
+  const CandidateFont defaultFont{"Noto Sans SC", {"Noto Sans SC", "Microsoft YaHei"}, 18};
+  CandidateFontSync upgraded(CandidateFontUnit::Points);
+  assert(upgraded.next(defaultFont, std::string("Noto Sans SC, Microsoft YaHei, 18px")) ==
+         "Noto Sans SC, Microsoft YaHei, 13.5");
+  assert(!upgraded.next(defaultFont, std::string("Noto Sans SC, Microsoft YaHei, 13.5")));
+  CandidateFontSync foreign(CandidateFontUnit::Points);
+  assert(!foreign.next(defaultFont, std::string("Sans 10")));
+  CandidateFontSync pixels;
+  assert(!pixels.next(defaultFont, std::string("Noto Sans SC, Microsoft YaHei, 18px")));
   return 0;
 }
