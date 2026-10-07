@@ -1,5 +1,8 @@
 #pragma once
+#include <array>
 #include <filesystem>
+#include <optional>
+#include <string>
 #include <stdexcept>
 #include <windows.h>
 
@@ -58,6 +61,46 @@ inline void reject_reparse_ancestors(const std::filesystem::path &root) {
     if (is_name_surrogate_reparse_point(info.FileAttributes, info.ReparseTag))
       throw std::runtime_error("State root contains a reparse point");
   }
+}
+
+// Read a regular file through a handle that cannot follow a name-surrogate
+// reparse point. The caller supplies the byte limit for the document contract.
+inline std::optional<std::string> read_private_file(const std::filesystem::path &path,
+                                                     std::size_t max_bytes) {
+  try {
+    reject_reparse_ancestors(path.parent_path());
+  } catch (...) {
+    return std::nullopt;
+  }
+  HANDLE handle = CreateFileW(
+      path.c_str(), GENERIC_READ,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+  if (handle == INVALID_HANDLE_VALUE || !handle_is_trusted_file(handle)) {
+    if (handle != INVALID_HANDLE_VALUE)
+      CloseHandle(handle);
+    return std::nullopt;
+  }
+  std::string document;
+  document.reserve(max_bytes + 1);
+  std::array<char, 4096> buffer{};
+  for (;;) {
+    DWORD count = 0;
+    if (!ReadFile(handle, buffer.data(), static_cast<DWORD>(buffer.size()), &count, nullptr)) {
+      CloseHandle(handle);
+      return std::nullopt;
+    }
+    if (count == 0)
+      break;
+    if (static_cast<std::size_t>(count) > max_bytes ||
+        document.size() > max_bytes - static_cast<std::size_t>(count)) {
+      CloseHandle(handle);
+      return std::nullopt;
+    }
+    document.append(buffer.data(), count);
+  }
+  CloseHandle(handle);
+  return document;
 }
 
 // Hold through resource preparation, all sessions and ordered Server shutdown.

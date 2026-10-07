@@ -42,7 +42,6 @@
 #include "TelemetryConsent.h"
 #include "WindowsServer.h"
 #include "ipc_negotiation.h"
-#include <fstream>
 #include <windows.h>
 #include <iostream>
 #include <map>
@@ -214,15 +213,10 @@ std::filesystem::path edition_telemetry_directory() {
   return shared.parent_path() / MSIME_EDITION_USER_DATA_DIRECTORY;
 }
 std::string read_document(const std::filesystem::path &path) {
-  std::ifstream input(path, std::ios::binary);
-  if (!input)
+  const auto document = msime::windows::read_private_file(path, kMaxConfigBytes);
+  if (!document)
     throw std::runtime_error("Configuration unavailable");
-  std::string document(kMaxConfigBytes + 1, '\0');
-  input.read(document.data(), static_cast<std::streamsize>(document.size()));
-  if (input.bad() || input.gcount() > static_cast<std::streamsize>(kMaxConfigBytes))
-    throw std::runtime_error("Configuration read failed");
-  document.resize(static_cast<size_t>(input.gcount()));
-  return document;
+  return *document;
 }
 void write_document_atomic(const std::filesystem::path &path, const std::string &document) {
   if (document.size() > kMaxConfigBytes)
