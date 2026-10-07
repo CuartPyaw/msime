@@ -114,6 +114,7 @@ constexpr jsize kOnlineQueryLimit = 16384;
 constexpr jsize kOnlineBodyLimit = 262144;
 constexpr jsize kOnlineCandidatesLimit = 16384;
 constexpr jsize kDoubaoAudioPcmLimit = 1 * 1024 * 1024;
+constexpr jsize kDoubaoBoostingLimit = 4096;
 }
 
 extern "C" {
@@ -312,6 +313,8 @@ static jbyteArray build_frame(JNIEnv *env, const std::function<bool(uint8_t *, s
     return out;
 }
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_doubaoStartFrameRaw(JNIEnv *env, jclass, jboolean itn, jboolean punc, jboolean ddc, jbyteArray boosting) {
+    jsize boostingLength = boosting ? env->GetArrayLength(boosting) : 0;
+    if (boostingLength > kDoubaoBoostingLimit) return nullptr;
     std::string table = utf8(env, boosting);
     return build_frame(env, [&](uint8_t *out, size_t capacity, size_t *length) {
         return msime_client_doubao_start_frame(
