@@ -8897,6 +8897,64 @@ group("dictionary candidate requests use the shared query contract", () => {
   });
 });
 
+group("dictionary writes follow per-kind code and quick phrase bounds", () => {
+  const paths: string[] = [];
+  const bridge = new AccountCloudBridge(
+    {
+      request: async (_method, path) => {
+        paths.push(path);
+        return { status: 200, body: "{}" };
+      },
+    },
+    {
+      load: () => JSON.stringify({
+        access_token: "a".repeat(64),
+        refresh_token: "b".repeat(64),
+        token_type: "Bearer",
+        expires_at: Date.now() + 600000,
+        user: { id: "synthetic-user", display_name: "Test", created_at: "2026-01-01" },
+      }),
+      save: () => {},
+      clear: () => {},
+    },
+  );
+  const write = (fields: Record<string, unknown>): Promise<string> => bridge.handle(JSON.stringify({
+    operation: "dictionary", dictionary_operation: "add", kind: "quick",
+    code: "ab", word: "字", weight: 0, ...fields,
+  }));
+  void (async () => {
+    const invalid = [
+      { kind: "pinyin", code: "Ni" },
+      { kind: "wubi", code: "abcde" },
+      { kind: "wubi98", code: "a1" },
+      { kind: "quick", code: "a1" },
+      { kind: "quick", code: "a".repeat(33) },
+      { kind: "quick", word: "字".repeat(200) },
+      { kind: "english", code: "hello1" },
+      { kind: "english", code: "a".repeat(65) },
+    ];
+    for (const fields of invalid) {
+      check(JSON.parse(await write(fields)).error === "account_invalid", "invalid dictionary code or word is rejected");
+    }
+    check(paths.length === 0, "invalid dictionary writes never reach transport");
+    check(JSON.parse(await write({ kind: "quick", word: "字".repeat(199) })).ok === true,
+      "the maximum quick phrase is accepted");
+    check(paths.length === 1, "a valid dictionary write reaches transport");
+
+    const edit = (fields: Record<string, unknown>): Promise<string> => bridge.handle(JSON.stringify({
+      operation: "dictionary", dictionary_operation: "edit_catalog", kind: "quick",
+      code: "a1", word: "字", revision: 0, replacement: null, ...fields,
+    }));
+    check(JSON.parse(await edit({ code: "A1" })).error === "account_invalid",
+      "catalog identities reject invalid codes");
+    check(JSON.parse(await edit({ replacement: { code: "a1", word: "字", weight: 0 } })).error === "account_invalid",
+      "new quick phrase replacements reject digits");
+    check(paths.length === 1, "invalid catalog edits never reach transport");
+    check(JSON.parse(await edit({})).ok === true, "stored quick phrase identities may contain digits");
+    check(paths.length === 2, "valid catalog edits reach transport");
+  })();
+});
+
 group("profile updates preserve the session and cannot outlive logout", () => {
   const expiresAt = Date.now() + 600000;
   const original = JSON.stringify({
