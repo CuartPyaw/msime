@@ -41,8 +41,9 @@ use msime_input_runtime::HandwritingQuery;
 #[cfg(unix)]
 use msime_input_runtime::UnixSocketProvider;
 use msime_input_runtime::{
-    Action, AiAssistantProviderConfig, CandidateId, CharacterWidth, NineKeySpellingId,
-    OnlineCandidate, OnlineQuery, Reranker, Runtime, SentenceModel, Transition, TranslationService,
+    Action, AiAssistantProviderConfig, CandidateId, CharacterWidth, GlideKeyboard, GlidePoint,
+    NineKeySpellingId, OnlineCandidate, OnlineQuery, Reranker, Runtime, SentenceModel, Transition,
+    TranslationService,
 };
 #[cfg(unix)]
 use msime_input_runtime::{EmojiPanelQuery, TranslationQuery};
@@ -1569,7 +1570,7 @@ fn refresh_options_file(
     // The file can be replaced or grow after symlink_metadata returns. Read through a
     // limit-aware handle so that the size check remains effective across that race.
     let bytes = crate::bounded_file::read(
-        std::fs::File::open(path)?,
+        crate::bounded_file::open_private(path)?,
         HOST_OPTIONS_DOCUMENT_LIMIT as u64,
     )
     .map_err(|error| {

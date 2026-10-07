@@ -191,7 +191,8 @@ public final class FeedbackPage extends DetailPage {
         int fill = ready ? Ui.accent(context)
             : Ui.color(context, com.google.android.material.R.attr.colorSurfaceContainerHighest);
         submit.setBackground(Ui.rippleOn(context, fill, Ui.dp(requireContext(), Ui.GROUP_RADIUS)));
-        if (addShot != null) Ui.setEnabledLook(addShot, screenshots.size() < FeedbackApi.MAX_SCREENSHOTS && !sending);
+        if (addShot != null) ViewPolicy.setEnabledWithAlpha(addShot,
+            screenshots.size() < FeedbackApi.MAX_SCREENSHOTS && !sending, 0.38f);
     }
 
     private void renderThumbnails() {
@@ -220,7 +221,7 @@ public final class FeedbackPage extends DetailPage {
             remove.setBackground(Ui.pill(Ui.color(context, com.google.android.material.R.attr.colorSurfaceInverse)));
             Ui.setSymmetricPaddingDp(remove, requireContext(), 3, 3);
             remove.setContentDescription("移除截图 " + (index + 1));
-            remove.setOnClickListener(ignored -> {
+            ViewPolicy.bindClick(remove, () -> {
                 if (sending) return;
                 screenshots.remove(position);
                 renderThumbnails();

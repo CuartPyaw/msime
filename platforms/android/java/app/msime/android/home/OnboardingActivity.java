@@ -99,9 +99,9 @@ public final class OnboardingActivity extends AppCompatActivity {
         progress.setIndicatorColor(Ui.accent(this));
         progress.setTrackColor(Ui.accentSoft(this));
         if (state != null) page = KeyboardGeometry.bounded(state.getInt(STATE_PAGE, 0), 0, pages - 1);
-        findViewById(R.id.onboarding_skip).setOnClickListener(ignored -> finishFlow());
-        findViewById(R.id.onboarding_previous).setOnClickListener(ignored -> go(page - 1));
-        findViewById(R.id.onboarding_next).setOnClickListener(ignored -> {
+        ViewPolicy.bindClick(findViewById(R.id.onboarding_skip), this::finishFlow);
+        ViewPolicy.bindClick(findViewById(R.id.onboarding_previous), () -> go(page - 1));
+        ViewPolicy.bindClick(findViewById(R.id.onboarding_next), () -> {
             if (page < pages - 1) go(page + 1);
             else if (account == SignIn.State.OFFERED && !declined) signIn();
             else finishFlow();
@@ -177,7 +177,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         next.setText(page < pages - 1 ? R.string.onboarding_next
             : offer ? R.string.onboarding_sign_in : R.string.onboarding_done);
         ViewPolicy.setEnabled(next, !signingIn);
-        ViewPolicy.setEnabled(back, page > 0);
+        back.setEnabled(page > 0);
 
         LinearLayout column = findViewById(R.id.onboarding_page);
         column.removeAllViews();
@@ -300,7 +300,7 @@ public final class OnboardingActivity extends AppCompatActivity {
             if (checked != on) chooseGloss(checked);
         });
         row.addView(toggle);
-        row.setOnClickListener(ignored -> toggle.toggle());
+        ViewPolicy.bindClick(row, toggle::toggle);
         column.addView(row, Ui.matchWidth(this, 12));
 
         if (note != null) {
@@ -451,12 +451,12 @@ public final class OnboardingActivity extends AppCompatActivity {
         column.addView(kick, Ui.matchWidth(this, 14 + 6));
 
         TextView heading = Ui.label(this, title, 32, Ui.text(this));
-        heading.setLineSpacing(0, 1.1f);
+        ViewPolicy.setLineSpacing(heading, 0, 1.1f);
         heading.setAccessibilityHeading(true);
         column.addView(heading, Ui.matchWidth(this, 14));
 
         TextView line = Ui.label(this, body, 16, Ui.subText(this));
-        line.setLineSpacing(0, 1.35f);
+        ViewPolicy.setLineSpacing(line, 0, 1.35f);
         column.addView(line, Ui.matchWidth(this, 14));
     }
 
@@ -501,7 +501,7 @@ public final class OnboardingActivity extends AppCompatActivity {
             android.util.TypedValue ripple = new android.util.TypedValue();
             getTheme().resolveAttribute(android.R.attr.selectableItemBackground, ripple, true);
             button.setBackgroundResource(ripple.resourceId);
-            button.setOnClickListener(ignored -> fix.run());
+            ViewPolicy.bindClick(button, fix);
             row.addView(button, Ui.wrapHeight(this, 40));
         }
         card.addView(row);
@@ -539,8 +539,8 @@ public final class OnboardingActivity extends AppCompatActivity {
         card.setContentDescription(option.label() + "，" + option.detail()
             + (selected ? "，已选择" : "，未选择"));
         // 偏好还读不到时也能点：选择先记下，偏好可读后再写（OnboardingChoices）。
-        card.setOnClickListener(selected ? null : ignored -> chooseScheme(option.scheme()));
-        card.setClickable(true);
+        ViewPolicy.bindOptionalClick(card, selected ? null : () -> chooseScheme(option.scheme()));
+        ViewPolicy.setClickable(card, true);
         column.addView(card, Ui.matchWidth(this, top));
     }
 

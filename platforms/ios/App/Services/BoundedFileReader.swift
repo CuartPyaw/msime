@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// Reads a file without allowing a replacement or unexpectedly growing file to
 /// force an unbounded allocation. The extra byte distinguishes an exact-limit
@@ -11,7 +12,11 @@ enum BoundedFileReader {
 
   static func read(from url: URL, maximumBytes: Int) throws -> Data {
     guard maximumBytes > 0 else { throw Failure.invalidLimit }
-    let handle = try FileHandle(forReadingFrom: url)
+    let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+    guard descriptor >= 0 else {
+      throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
+    let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
     defer { try? handle.close() }
 
     var result = Data()

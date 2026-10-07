@@ -203,15 +203,27 @@ impl PinyinDatabase {
             table_keys.push((table, key));
         }
         let mut seen_keys = HashSet::with_capacity(table_keys.len());
-        let unique = table_keys
+        let duplicates = table_keys
             .iter()
-            .map(|(_, key)| seen_keys.insert(key.as_str()))
+            .enumerate()
+            .filter_map(|(index, (_, key))| (!seen_keys.insert(key.as_str())).then_some(index))
             .collect::<Vec<_>>();
         drop(seen_keys);
-        for ((table, key), unique) in table_keys.into_iter().zip(unique) {
-            if unique {
-                keys_by_table.entry(table).or_default().push(key);
+        let mut duplicates = duplicates.into_iter().peekable();
+        let mut write = 0;
+        for read in 0..table_keys.len() {
+            if duplicates.peek() == Some(&read) {
+                duplicates.next();
+                continue;
             }
+            if write != read {
+                table_keys.swap(write, read);
+            }
+            write += 1;
+        }
+        table_keys.truncate(write);
+        for (table, key) in table_keys {
+            keys_by_table.entry(table).or_default().push(key);
         }
         let mut rows = Vec::with_capacity(segmentations.len().saturating_mul(limit));
         for (table, keys) in &keys_by_table {
@@ -440,9 +452,12 @@ fn open_connection(path: &Path) -> Option<Connection> {
         return None;
     }
     // No CREATE: a missing dictionary must stay missing instead of becoming an empty file (QD:237-246).
+    let path = crate::paths::sqlite_path_no_follow(path).ok()?;
     let connection = Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        &path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_NOFOLLOW
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .ok()?;
     // Learning writes briefly hold the commit lock; waiting keeps a query that lands in that window from becoming an empty page.

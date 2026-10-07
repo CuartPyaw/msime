@@ -103,6 +103,7 @@ public final class MSIMEInputService extends InputMethodService {
     ImeFunctionPanel imeFunctionPanel;
     ImePanels imePanels;
     ImeLetterRows imeLetterRows;
+    ImeGlideTyping imeGlideTyping;
     ImeBottomRow imeBottomRow;
     ImeLayoutRows imeLayoutRows;
     ImeStyler imeStyler;
@@ -1090,6 +1091,7 @@ public final class MSIMEInputService extends InputMethodService {
         imeFunctionPanel = new ImeFunctionPanel(this);
         imePanels = new ImePanels(this);
         imeLetterRows = new ImeLetterRows(this);
+        imeGlideTyping = new ImeGlideTyping(this);
         imeBottomRow = new ImeBottomRow(this);
         imeLayoutRows = new ImeLayoutRows(this);
         imeStyler = new ImeStyler(this);
@@ -2605,6 +2607,13 @@ public final class MSIMEInputService extends InputMethodService {
         return ChineseHelpcodePolicy.entersHelpcode(dedicatedEnglish, letterCase.usesUppercase(),
             view.optString("editing_text", ""), InputViewValuePolicy.scheme(view, -1),
             view.optString("local_mode", "none"));
+    }
+
+    /** 一笔滑行抬手（{@link ImeGlideTyping}）：请求见 {@link GlideTypingPolicy#request}。引擎不收（handled=false）时什么也不输入。 */
+    void glide(String request) {
+        if (session == 0) return;
+        try { apply(NativeClient.glide(session, request)); }
+        catch (JSONException | LinkageError error) { fail(); }
     }
 
     boolean command(int code) {
@@ -4562,12 +4571,13 @@ public final class MSIMEInputService extends InputMethodService {
             keySpacingSlider.setProgress(touchKeySpacingTenths);
             rowSpacingSlider.setProgress(touchRowSpacingTenths);
             keyboardHeightSlider.setProgress(touchKeyboardHeightAdjustment);
-            keySpacingSlider.setEnabled(!touchGeometrySaving && !traditionalOutputSaving);
-            rowSpacingSlider.setEnabled(!touchGeometrySaving && !traditionalOutputSaving);
-            keyboardHeightSlider.setEnabled(!touchGeometrySaving && !traditionalOutputSaving);
+            boolean settingsEditable = !touchGeometrySaving && !traditionalOutputSaving;
+            ViewPolicy.setEnabled(keySpacingSlider, settingsEditable);
+            ViewPolicy.setEnabled(rowSpacingSlider, settingsEditable);
+            ViewPolicy.setEnabled(keyboardHeightSlider, settingsEditable);
             voiceShortcutSwitch.setChecked(touchVoiceShortcutEnabled);
-            voiceShortcutSwitch.setEnabled(!touchGeometrySaving && !traditionalOutputSaving);
-            resetLayoutSettingsButton.setEnabled(!touchGeometrySaving && !traditionalOutputSaving);
+            ViewPolicy.setEnabled(voiceShortcutSwitch, settingsEditable);
+            ViewPolicy.setEnabled(resetLayoutSettingsButton, settingsEditable);
             keySpacingValue.setText(KeyboardGeometry.display(touchKeySpacingTenths) + " dp");
             rowSpacingValue.setText(KeyboardGeometry.display(touchRowSpacingTenths) + " dp");
             keyboardHeightValue.setText(KeyboardGeometry.displayHeight(
@@ -5217,7 +5227,7 @@ public final class MSIMEInputService extends InputMethodService {
     void configureCandidateTextLayout(Button button, int lines) {
         // Reserve extra rows only when this candidate actually carries a gloss. A globally enabled translation target is not evidence that every candidate has one; keeping the empty case single-line prevents long candidate words from wrapping inside the chip. Likewise, a second requested language may be unavailable for this particular result; only an actual newline in the rendered label (a second gloss, or a Korean 훈음 row under its Hanja) warrants another row.
         // A multi-row label deliberately occupies those rows. Do not turn the whole label into a single-line TextView in that case, or the rows after the first are silently clipped. With no extra row the chip can scroll horizontally as one intact candidate word.
-        button.setSingleLine(lines == 1);
+        ViewPolicy.setSingleLine(button, lines == 1);
         button.setEllipsize(null);
         button.setHorizontallyScrolling(lines == 1);
     }
@@ -5902,7 +5912,9 @@ public final class MSIMEInputService extends InputMethodService {
         ViewPolicy.hide(replyKeyboard);
         keyboard.addView(replyKeyboard, KeyboardGeometry.weightedWidthParams(1));
         // 键距是键的外边距；这两个容器把落在空隙里的按下交给拥有那段空隙的键，画面不变（见 KeyboardKeyArea）。
-        keyRows = new KeyboardKeyArea(this, this::followsKeySpacing);
+        KeyboardKeyArea letterArea = new KeyboardKeyArea(this, this::followsKeySpacing);
+        letterArea.setGlideTracker(imeGlideTyping);
+        keyRows = letterArea;
         keyRows.setOrientation(LinearLayout.VERTICAL);
         imeFrame.wrap(keyRows);
         actionRow = new KeyboardKeyArea(this, this::followsKeySpacing);
@@ -6158,7 +6170,7 @@ public final class MSIMEInputService extends InputMethodService {
         // 与皮肤、剪贴板面板一样铺满键盘区：只按内容高度时，没有常用语的那一行提示只盖住第一排键，空白处的触摸还会穿到下面的键上。
         phraseScroll.addView(phrasePanel, KeyboardGeometry.scrollMatchParentParams());
         phraseScroll.setFillViewport(true);
-        phraseScroll.setClickable(true);
+        ViewPolicy.setClickable(phraseScroll, true);
         ViewPolicy.hide(phraseScroll);
         keyboardSurface.addView(phraseScroll, KeyboardGeometry.frameMatchParentParams());
         imePanels.buildEmojiPanel();
@@ -6553,13 +6565,13 @@ public final class MSIMEInputService extends InputMethodService {
             preedit.setText(displayText);
             preedit.setContentDescription(offersLocalModes ? "长按打开本地输入模式" : displayText);
             preedit.setLongClickable(offersLocalModes);
-            preedit.setFocusable(offersLocalModes);
+            ViewPolicy.setFocusable(preedit, offersLocalModes);
         }
         if (exitLocalModeButton != null) {
             boolean localModeActive = view != null
                 && !"none".equals(view.optString("local_mode", "none"));
             ViewPolicy.setVisible(exitLocalModeButton, localModeActive);
-            exitLocalModeButton.setEnabled(localModeActive && session != 0);
+            ViewPolicy.setEnabled(exitLocalModeButton, localModeActive && session != 0);
             exitLocalModeButton.setContentDescription("退出本地模式");
             // The final applySkin() traversal styles this attached button once.
         }
@@ -6570,7 +6582,7 @@ public final class MSIMEInputService extends InputMethodService {
                 || (offersZhuyinList && zhuyinListOpen());
             hanjaButton.setText(offersZhuyinList ? "選" : "漢");
             ViewPolicy.setVisible(hanjaButton, offersHanja || offersZhuyinList);
-            hanjaButton.setEnabled(offersHanja || offersZhuyinList);
+            ViewPolicy.setEnabled(hanjaButton, offersHanja || offersZhuyinList);
             ViewPolicy.setSelected(hanjaButton, listOpen);
             hanjaButton.setContentDescription(offersZhuyinList
                 ? (listOpen ? "关闭候选列表" : "打开候选列表")
@@ -6619,8 +6631,9 @@ public final class MSIMEInputService extends InputMethodService {
             boolean vietnamese = scheme == InputSchemeTraits.VIETNAMESE;
             boolean tibetan = scheme == InputSchemeTraits.TIBETAN;
             boolean stroke = scheme == InputSchemeTraits.STROKE;
-            scriptShortcutButton.setEnabled(!japanese && !korean && !cantonese && !zhuyin
-                && !vietnamese && !tibetan && !stroke && canSaveChineseOutput());
+            ViewPolicy.setEnabled(scriptShortcutButton,
+                !japanese && !korean && !cantonese && !zhuyin
+                    && !vietnamese && !tibetan && !stroke && canSaveChineseOutput());
             String label = traditionalChineseOutput ? "切换到简体" : "切换到繁体";
             String outputState = japanese ? "日语不使用简繁转换"
                 : korean ? "韩语不使用简繁转换"
@@ -6638,19 +6651,19 @@ public final class MSIMEInputService extends InputMethodService {
         }
         if (emojiShortcutButton != null) {
             ViewPolicy.setVisible(emojiShortcutButton, toolbarEmoji);
-            emojiShortcutButton.setEnabled(session != 0 && !emojiResources.isEmpty());
+            ViewPolicy.setEnabled(emojiShortcutButton, session != 0 && !emojiResources.isEmpty());
             ViewPolicy.setSelected(emojiShortcutButton, emojiPanel != null
                 && emojiPanel.getVisibility() == View.VISIBLE);
         }
         if (phraseShortcutButton != null) {
             ViewPolicy.setVisible(phraseShortcutButton, toolbarPhrase);
-            phraseShortcutButton.setEnabled(session != 0 && !preferencesDirectory.isEmpty());
+            ViewPolicy.setEnabled(phraseShortcutButton, session != 0 && !preferencesDirectory.isEmpty());
             ViewPolicy.setSelected(phraseShortcutButton, phraseScroll != null
                 && phraseScroll.getVisibility() == View.VISIBLE);
         }
         if (clipboardShortcutButton != null) {
             ViewPolicy.setVisible(clipboardShortcutButton, toolbarClipboard);
-            clipboardShortcutButton.setEnabled(CloudClipboardPanelPolicy.panelAvailable(
+            ViewPolicy.setEnabled(clipboardShortcutButton, CloudClipboardPanelPolicy.panelAvailable(
                 clipboardHistoryEnabled, imePanels.cloudClipboardAllowed()));
             ViewPolicy.setSelected(clipboardShortcutButton, imePanels.clipboardPanelOpen());
         }
@@ -6659,16 +6672,16 @@ public final class MSIMEInputService extends InputMethodService {
         }
         if (voiceShortcutButton != null) {
             ViewPolicy.hide(voiceShortcutButton);
-            voiceShortcutButton.setEnabled(voiceInsertionReady());
+            ViewPolicy.setEnabled(voiceShortcutButton, voiceInsertionReady());
         }
         if (aiPolishShortcutButton != null) {
             ViewPolicy.hide(aiPolishShortcutButton);
-            aiPolishShortcutButton.setEnabled(aiPolishReady());
+            ViewPolicy.setEnabled(aiPolishShortcutButton, aiPolishReady());
         }
         if (replyShortcutButton != null) {
             // 回复面板不属于任何输入方案，每个方案都显示这个入口；未配置 AI 时面板里会提示去设置。开着时始终可点，用来收起面板。
             ViewPolicy.hide(replyShortcutButton);
-            replyShortcutButton.setEnabled(replyOpen || aiPolishReady());
+            ViewPolicy.setEnabled(replyShortcutButton, replyOpen || aiPolishReady());
             ViewPolicy.setSelected(replyShortcutButton, replyOpen);
             imeStyler.styleButton(replyShortcutButton, KeyboardKeyRole.GLYPH, skin);
             replyShortcutButton.setContentDescription(replyOpen ? "收起高情商回复" : "生成高情商回复");
@@ -6678,7 +6691,7 @@ public final class MSIMEInputService extends InputMethodService {
             boolean visible = MicrosoftShuangpinKeyPolicy.visible(
                 dedicatedEnglish, selectedScheme, currentLocalMode);
             ViewPolicy.setVisible(microsoftFinalKey, visible);
-            microsoftFinalKey.setEnabled(visible && session != 0);
+            ViewPolicy.setEnabled(microsoftFinalKey, visible && session != 0);
             microsoftFinalKey.setContentDescription("微软双拼 ing");
         }
         if (layerButton != null) {
@@ -6729,7 +6742,7 @@ public final class MSIMEInputService extends InputMethodService {
             schemeButton.setText(selectedScheme.glyph() + selectedScheme.badge(wubiProfile));
             schemeButton.setContentDescription("输入方案：" + selectedScheme.title(wubiProfile));
             // 只按「会话与偏好是否就绪」决定可用：简繁、键高、方案的保存都在一瞬间完成，若跟着保存状态禁用，图标每切一次简繁就变灰再变回来。保存进行中的点按由 showSchemePicker 忽略。
-            schemeButton.setEnabled(session != 0 && preferencesSnapshot != null);
+            ViewPolicy.setEnabled(schemeButton, session != 0 && preferencesSnapshot != null);
             if (Build.VERSION.SDK_INT >= 30) {
                 String schemeState = session == 0 ? "输入会话未就绪"
                     : preferencesSnapshot == null ? "设置加载中"
@@ -6744,14 +6757,15 @@ public final class MSIMEInputService extends InputMethodService {
             ViewPolicy.setSelected(skinButton,
                 skinScroll != null && skinScroll.getVisibility() == View.VISIBLE);
             // 同上：保存进行中的点按由 ImePanels.showSkinPicker 按 canSaveKeyboardSkin 忽略，图标不跟着变灰。
-            skinButton.setEnabled(session != 0 && preferencesSnapshot != null && !preferencesDirectory.isEmpty());
+            ViewPolicy.setEnabled(skinButton, session != 0 && preferencesSnapshot != null
+                && !preferencesDirectory.isEmpty());
             skinButton.setContentDescription("切换键盘皮肤；当前" + skin.title());
             if (Build.VERSION.SDK_INT >= 30) skinButton.setStateDescription(skin.title());
         }
         synchronizeReplyKeyboard();
         if (layoutSettingsButton != null) ViewPolicy.hide(layoutSettingsButton);
         if (layoutSettingsButton != null)
-            layoutSettingsButton.setEnabled(session != 0 && preferencesSnapshot != null
+            ViewPolicy.setEnabled(layoutSettingsButton, session != 0 && preferencesSnapshot != null
                 && !schemeSaving && !touchGeometrySaving && !traditionalOutputSaving);
         imeLayoutRows.renderNineKeySpellings();
         if (hasDiagnostic && nineKeySpellingScroll != null)

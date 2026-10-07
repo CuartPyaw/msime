@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use msime_engine::format::{quanpin_table, SHIPPED_INITIALS};
 use rusqlite::types::Value;
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::Connection;
 
 use crate::japanese;
 use crate::msime::quanpin_tables;
@@ -180,7 +180,7 @@ fn write(inputs: Inputs<'_>, out: &Path, flavour: Flavour, keep_multi: usize) ->
     drop(connection);
     fs::remove_file(&scratch).with_context(|| format!("removing {}", scratch.display()))?;
 
-    let output = Connection::open_with_flags(out, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let output = sqlite::open_read_only(out)?;
     sqlite::integrity_check(&output)?;
     let mode: String = output.query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
     if !mode.eq_ignore_ascii_case("delete") {
@@ -208,7 +208,7 @@ fn remove_if_present(path: &Path) -> Result<()> {
 }
 
 fn open_read_only(path: &Path) -> Result<Connection> {
-    Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+    sqlite::open_read_only(path)
         .with_context(|| format!("opening {}", path.display()))
 }
 

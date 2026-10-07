@@ -3,6 +3,7 @@
 //! Layout, little-endian: a 56-byte header (`MSJPDT1\0`, version, token count, connection size, reserved, token/connection/string offsets, string bytes), 20-byte token records (reading offset u32, reading length u16, surface offset u32, surface length u16, left id u16, right id u16, cost i32), the `size * size` connection matrix as i16, then the interned UTF-8 strings.
 
 use std::collections::{HashMap, HashSet};
+use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 
@@ -507,7 +508,10 @@ pub fn unpack(bytes: &[u8]) -> Result<(Vec<Token>, usize, Vec<i16>)> {
 
 pub fn write_model(output: &Path, bytes: &[u8]) -> Result<()> {
     let temporary = output.with_extension("dat.tmp");
-    let mut file = std::fs::File::create(&temporary)?;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)?;
     file.write_all(bytes)?;
     file.sync_all()?;
     std::fs::rename(&temporary, output)?;
@@ -517,6 +521,22 @@ pub fn write_model(output: &Path, bytes: &[u8]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn model_staging_symlink_is_not_truncated() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let output = directory.path().join("model.dat");
+        let target = outside.path().join("outside.dat");
+        std::fs::write(&target, b"keep").unwrap();
+        symlink(&target, directory.path().join("model.dat.tmp")).unwrap();
+
+        assert!(write_model(&output, b"replacement").is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"keep");
+    }
 
     #[test]
     fn unpack_reads_back_what_pack_wrote() {

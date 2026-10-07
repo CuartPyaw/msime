@@ -119,7 +119,7 @@ public final class KeyboardFragment extends HomeTabFragment {
             switch (status) {
                 case RUNNING -> {
                     preparation.setText(R.string.preparation_running);
-                    preparation.setClickable(false);
+                    ViewPolicy.setClickable(preparation, false);
                     ViewPolicy.show(preparation);
                 }
                 case FAILED -> {
@@ -127,7 +127,7 @@ public final class KeyboardFragment extends HomeTabFragment {
                     // 原因直接写在提示里：出问题的多是别人手里的手机，没法让用户连电脑看 logcat。
                     if (reason.isEmpty()) preparation.setText(R.string.preparation_failed);
                     else preparation.setText(getString(R.string.preparation_failed_reason, reason));
-                    preparation.setClickable(true);
+                    ViewPolicy.setClickable(preparation, true);
                     ViewPolicy.show(preparation);
                 }
                 default -> {
@@ -343,7 +343,7 @@ public final class KeyboardFragment extends HomeTabFragment {
         Ui.applyStatusMark(mark, requireContext(), done);
         TextView button = view.findViewById(actionId);
         ViewPolicy.setVisible(button, !done);
-        button.setOnClickListener(done ? null : ignored -> action.run());
+        ViewPolicy.bindOptionalClick(button, done ? null : action);
         button.setTextColor(ColorStateList.valueOf(Ui.accent(requireContext())));
         view.findViewById(rowId).setContentDescription(
             getString(label) + (done ? "，已完成" : "，未完成"));

@@ -936,7 +936,9 @@ fn download_and_extract(
         downloaded: total,
         total,
     });
-    let mut zip = zip::ZipArchive::new(BufReader::new(fs::File::open(&partial)?))
+    let mut zip = zip::ZipArchive::new(BufReader::new(
+        crate::storage::open_private_file(&partial)?,
+    ))
         .map_err(|error| LocalModelError::UnsafeArchive(error.to_string()))?;
     for file in files {
         check_cancel(cancel)?;
@@ -1376,7 +1378,11 @@ fn copy_link_with_budget(
     written: &mut u64,
     budget: u64,
 ) -> Result<(), LocalModelError> {
-    let size = fs::metadata(source)?.len();
+    // Keep the archive link target tied to the bytes we copy. The extracted
+    // tree is user-visible while installation runs; a replacement symlink
+    // between `metadata` and `fs::copy` must not redirect bytes outside it.
+    let mut input = crate::storage::open_private_file(source)?;
+    let size = input.metadata()?.len();
     let next = written
         .checked_add(size)
         .ok_or_else(|| LocalModelError::UnsafeArchive("archive expands too far".into()))?;
@@ -1385,7 +1391,11 @@ fn copy_link_with_budget(
             "archive expands too far".into(),
         ));
     }
-    fs::copy(source, destination)?;
+    let mut output = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)?;
+    io::copy(&mut input, &mut output)?;
     *written = next;
     Ok(())
 }
@@ -1410,7 +1420,7 @@ fn extract(
     let total = model.archive.size;
     let consumed = Rc::new(Cell::new(0u64));
     let reader = Counting {
-        inner: fs::File::open(archive)?,
+        inner: crate::storage::open_private_file(archive)?,
         count: consumed.clone(),
     };
     let decoder = bzip2::read::MultiBzDecoder::new(BufReader::with_capacity(CHUNK, reader));
