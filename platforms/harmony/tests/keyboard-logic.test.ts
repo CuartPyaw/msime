@@ -905,6 +905,12 @@ group("keeps translation provider policy bounded and credential-free in signatur
     "a vanished translation query invalidates queued or in-flight work",
   );
   check(
+    !TranslationPolicy.shouldResetCache(4095) &&
+      TranslationPolicy.shouldResetCache(4096) &&
+      TranslationPolicy.shouldResetCache(5000),
+    "translation caches reset at their bounded capacity",
+  );
+  check(
     TranslationPolicy.shouldReleaseAfterProviderFailure("tencent", false, true),
     "offline rows do not hide a failed online provider",
   );

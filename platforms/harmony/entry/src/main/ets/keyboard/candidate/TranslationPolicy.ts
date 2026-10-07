@@ -61,6 +61,7 @@ export class TranslationPolicy {
   static readonly MAX_QUERY_BYTES: number = 64 * 1024;
   static readonly MAX_RESPONSE_BYTES: number = 1024 * 1024;
   static readonly MAX_TRANSLATION_BYTES: number = 4096;
+  static readonly MAX_CACHE_ENTRIES: number = 4096;
   static readonly NEGATIVE_CACHE_MS: number = 8 * 60 * 1000;
 
   static targets(query: TranslationQuery): string[] {
@@ -157,6 +158,11 @@ export class TranslationPolicy {
     requestCount: number,
   ): boolean {
     return signature.length > 0 || timerActive || requestCount > 0;
+  }
+
+  /** 缓存达到容量时清空，避免长时间输入让键盘进程无限保留候选词。 */
+  static shouldResetCache(size: number): boolean {
+    return size >= TranslationPolicy.MAX_CACHE_ENTRIES;
   }
 
   /** 在线 provider 未完成时，即使离线词典有可应用条目，也必须允许相同候选页重试。 */
