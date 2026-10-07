@@ -176,14 +176,18 @@ public enum KeyboardScheme {
 
     private static List<KeyboardScheme> withFallback(List<KeyboardScheme> schemes,
             AppEdition edition) {
-        return schemes.isEmpty() ? List.of(fallback(edition)) : List.copyOf(schemes);
+        return List.copyOf(availableOrFallback(schemes, edition));
+    }
+
+    private static List<KeyboardScheme> availableOrFallback(List<KeyboardScheme> schemes,
+            AppEdition edition) {
+        return schemes == null || schemes.isEmpty() ? List.of(fallback(edition)) : schemes;
     }
 
     /** Shared selected is authoritative; otherwise preserve the applied scheme or use first enabled. */
     public static KeyboardScheme resolveEnabledSelection(KeyboardScheme applied,
             String selectedPreferenceId, List<KeyboardScheme> enabled, AppEdition edition) {
-        List<KeyboardScheme> available = enabled == null || enabled.isEmpty()
-            ? List.of(fallback(edition)) : enabled;
+        List<KeyboardScheme> available = availableOrFallback(enabled, edition);
         KeyboardScheme selected = fromPreferenceId(selectedPreferenceId);
         if (selected != null && available.contains(selected)) return selected;
         if (selectedPreferenceId == null && applied != null && available.contains(applied)) return applied;
