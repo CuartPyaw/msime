@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""POSIX local ASR manifest and token readers must reject special path inputs."""
+"""Local ASR manifest and token readers must reject special path inputs."""
 from pathlib import Path
 import sys
 
@@ -22,8 +22,16 @@ def main() -> int:
         for token in ("O_NOFOLLOW", "O_NONBLOCK", "fstat", "S_ISREG"):
             if token not in region:
                 missing.append(f"{name}: {token}")
-        if "std::ifstream" in region and "#if defined(_WIN32)" not in region:
+        if "std::ifstream" in region:
             missing.append(f"{name}: path ifstream")
+    for token in (
+        "CreateFileW",
+        "FILE_FLAG_OPEN_REPARSE_POINT",
+        "GetFileInformationByHandleEx",
+        "FILE_TYPE_DISK",
+    ):
+        if token not in source:
+            missing.append(f"windows reader: {token}")
     if missing:
         print(f"{SOURCE}: reader contract missing {', '.join(missing)}", file=sys.stderr)
         return 1

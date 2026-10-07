@@ -10,7 +10,6 @@
 #include <cerrno>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <iterator>
 #include <map>
 #include <mutex>
@@ -46,27 +45,51 @@ namespace fs = std::filesystem;
 constexpr int kSampleRate = 16000;
 constexpr int32_t kVadWindow = 512;
 constexpr size_t kMaxManifestBytes = 256 * 1024;
+constexpr size_t kMaxTokenBytes = 16 * 1024 * 1024;
+
+#if defined(_WIN32)
+std::string read_windows_regular_file(const fs::path &path, size_t max_bytes) {
+  const HANDLE handle = CreateFileW(path.c_str(), GENERIC_READ,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                    nullptr, OPEN_EXISTING,
+                                    FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+                                    nullptr);
+  if (handle == INVALID_HANDLE_VALUE)
+    throw VoiceError("Not an installed local speech model");
+  struct CloseOnExit {
+    HANDLE handle;
+    ~CloseOnExit() { CloseHandle(handle); }
+  } close_on_exit{handle};
+  FILE_ATTRIBUTE_TAG_INFO attributes{};
+  if (GetFileType(handle) != FILE_TYPE_DISK ||
+      !GetFileInformationByHandleEx(handle, FileAttributeTagInfo, &attributes,
+                                     sizeof(attributes)) ||
+      (attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ||
+      ((attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 &&
+       IsReparseTagNameSurrogate(attributes.ReparseTag)))
+    throw VoiceError("Not an installed local speech model");
+  LARGE_INTEGER size{};
+  if (!GetFileSizeEx(handle, &size) || size.QuadPart < 0 ||
+      static_cast<unsigned long long>(size.QuadPart) > max_bytes)
+    throw VoiceError("Local speech model file is too large");
+  const auto byte_count = static_cast<size_t>(size.QuadPart);
+  std::string payload(byte_count, '\0');
+  size_t offset = 0;
+  while (offset < payload.size()) {
+    const DWORD request = static_cast<DWORD>((std::min)(payload.size() - offset, sizeof(std::array<char, 8192>)));
+    DWORD count = 0;
+    if (!ReadFile(handle, payload.data() + offset, request, &count, nullptr) || count == 0)
+      throw VoiceError("Local speech model file could not be read");
+    offset += count;
+  }
+  return payload;
+}
+#endif
 
 nlohmann::json read_manifest(const fs::path &directory) {
 #if defined(_WIN32)
-  std::ifstream input(directory / fs::u8path(std::string(local_model_manifest)),
-                      std::ios::binary);
-  if (!input)
-    throw VoiceError("Not an installed local speech model");
-  std::array<char, 8192> buffer{};
-  std::string payload;
-  while (input) {
-    input.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-    const auto count = input.gcount();
-    if (count <= 0)
-      continue;
-    const auto bytes = static_cast<size_t>(count);
-    if (payload.size() > kMaxManifestBytes - bytes)
-      throw VoiceError("Local speech model manifest is too large");
-    payload.append(buffer.data(), bytes);
-  }
-  if (!input.eof())
-    throw VoiceError("Local speech model manifest could not be read");
+  const auto payload = read_windows_regular_file(
+      directory / fs::u8path(std::string(local_model_manifest)), kMaxManifestBytes);
 #else
   const auto path = directory / fs::u8path(std::string(local_model_manifest));
   const int descriptor = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
@@ -452,7 +475,7 @@ std::string sense_voice_language(std::string_view tag) {
 std::set<std::string> read_token_set(const std::string &tokens_path) {
   std::set<std::string> tokens;
 #if defined(_WIN32)
-  std::ifstream input(fs::u8path(tokens_path), std::ios::binary);
+  std::istringstream input(read_windows_regular_file(fs::u8path(tokens_path), kMaxTokenBytes));
   std::string line;
   while (std::getline(input, line)) {
     const auto space = line.find(' ');
@@ -470,9 +493,13 @@ std::set<std::string> read_token_set(const std::string &tokens_path) {
   if (::fstat(descriptor, &metadata) != 0 || !S_ISREG(metadata.st_mode)) return tokens;
   std::array<char, 8192> buffer{};
   std::string line;
+  std::size_t total = 0;
   for (;;) {
     const ssize_t count = ::read(descriptor, buffer.data(), buffer.size());
     if (count > 0) {
+      const auto bytes = static_cast<std::size_t>(count);
+      if (total > kMaxTokenBytes - bytes) return {};
+      total += bytes;
       for (ssize_t index = 0; index < count; ++index) {
         if (buffer[static_cast<std::size_t>(index)] == '\n') {
           const auto space = line.find(' ');
