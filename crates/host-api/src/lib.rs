@@ -1181,6 +1181,9 @@ fn bundled_settled_model(resources: &str, recorded: Option<&str>) -> Option<Path
         Some(path) => PathBuf::from(path),
         None => Path::new(resources).join(SETTLED_MODEL_FILE),
     };
+    if !path.is_absolute() {
+        return None;
+    }
     path.is_file().then_some(path)
 }
 
