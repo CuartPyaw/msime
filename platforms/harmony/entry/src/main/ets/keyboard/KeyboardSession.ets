@@ -4405,24 +4405,35 @@ export class KeyboardSession implements HardwareKeyTarget {
 
   private recordTranslation(query: TranslationQuery, target: string, item: TranslationPlanItem,
     value: string | null, entries: TranslationEntry[]): void {
+    const key: string = TranslationPolicy.cacheKey(query, target, item);
     // A `/fy` answer is the command's row, not a candidate gloss: it is neither cached nor remembered as a failure.
     if (query.sentence === true) {
       if (value !== null) TranslationPolicy.append(entries, item.text, value);
       return;
     }
     if (value === null) {
-      this.translationNegativeCache.set(TranslationPolicy.cacheKey(query, target, item),
-        Date.now() + TranslationPolicy.NEGATIVE_CACHE_MS);
+      if (!this.translationNegativeCache.has(key)
+        && TranslationPolicy.shouldResetCache(this.translationNegativeCache.size)) {
+        this.translationNegativeCache.clear();
+      }
+      this.translationNegativeCache.set(key, Date.now() + TranslationPolicy.NEGATIVE_CACHE_MS);
       return;
     }
     const normalised: string = TranslationPolicy.normalise(value);
     if (normalised.length === 0) {
-      this.translationNegativeCache.set(TranslationPolicy.cacheKey(query, target, item),
-        Date.now() + TranslationPolicy.NEGATIVE_CACHE_MS);
+      if (!this.translationNegativeCache.has(key)
+        && TranslationPolicy.shouldResetCache(this.translationNegativeCache.size)) {
+        this.translationNegativeCache.clear();
+      }
+      this.translationNegativeCache.set(key, Date.now() + TranslationPolicy.NEGATIVE_CACHE_MS);
       return;
     }
-    this.translationCache.set(TranslationPolicy.cacheKey(query, target, item), normalised);
-    this.translationNegativeCache.delete(TranslationPolicy.cacheKey(query, target, item));
+    if (!this.translationCache.has(key)
+      && TranslationPolicy.shouldResetCache(this.translationCache.size)) {
+      this.translationCache.clear();
+    }
+    this.translationCache.set(key, normalised);
+    this.translationNegativeCache.delete(key);
     TranslationPolicy.append(entries, item.text, normalised);
   }
 
