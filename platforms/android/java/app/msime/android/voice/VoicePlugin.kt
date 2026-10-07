@@ -294,5 +294,6 @@ class VoicePlugin(activity: Activity) : Plugin(activity) {
             && args.requestId.all { it.isLetterOrDigit() || it == '-' }
             && args.language.length in 1..64
             && !TextPolicy.hasControl(args.language)
+            && TextPolicy.validUnicode(args.language)
     }
 }
