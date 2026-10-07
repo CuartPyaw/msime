@@ -84,6 +84,7 @@ namespace {
 template <typename Call> jbyteArray bounded_request(JNIEnv *env, jbyteArray request, jsize limit, Call call);
 constexpr jsize kThemeRequestLimit = 1 * 1024 * 1024;
 constexpr jsize kTypingStatisticsRequestLimit = 65536;
+constexpr jsize kTypingStatisticsDirectoryLimit = 16384;
 constexpr jsize kPrepareHostRequestLimit = 16384;
 constexpr jsize kSavePreferencesDirectoryLimit = 16384;
 constexpr jsize kSavePreferencesSnapshotLimit = 1 * 1024 * 1024;
@@ -141,6 +142,7 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_typingStatistic
 JNIEXPORT jint JNICALL Java_app_msime_android_NativeClient_typingStatisticsEnabledRaw(JNIEnv *env, jclass, jbyteArray directory) {
     if (!directory) return -1;
     jsize length = env->GetArrayLength(directory);
+    if (length > kTypingStatisticsDirectoryLimit) return -1;
     jbyte *bytes = env->GetByteArrayElements(directory, nullptr);
     if (!bytes) return -1;
     int32_t result = msime_client_typing_statistics_enabled(
