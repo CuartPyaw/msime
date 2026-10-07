@@ -245,7 +245,9 @@ impl AiSuggestionResponse {
         if self
             .candidates
             .iter()
-            .any(|candidate| candidate.text.is_empty() || candidate.text.len() > 4096)
+            .any(|candidate| {
+                candidate.text.is_empty() || !crate::text::is_bounded_text(&candidate.text, 4096)
+            })
         {
             return Err(AiError::InvalidCandidate);
         }
@@ -304,6 +306,16 @@ mod tests {
             chat_completion_body(&request, "openai", "model", "prompt\u{0}"),
             Err(AiError::InvalidConfiguration)
         );
+    }
+
+    #[test]
+    fn rejects_control_characters_in_suggestions() {
+        let response = AiSuggestionResponse {
+            candidates: vec![AiSuggestion {
+                text: "候选\u{0}".into(),
+            }],
+        };
+        assert_eq!(response.validate(1), Err(AiError::InvalidCandidate));
     }
 
     #[test]
