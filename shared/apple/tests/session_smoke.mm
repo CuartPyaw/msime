@@ -57,6 +57,12 @@ int main() {
             assert(applied[@"error"] && ![applied[@"activated"] boolValue]);
             assert(!gSnapshotIntegerProbeCalled);
         }
+        NSDictionary *invalidDiscardObject = [SnapshotIntegerProbe discardSnapshot:(NSDictionary *)@YES];
+        assert(invalidDiscardObject[@"error"]);
+        NSDictionary *invalidApplyObject = [SnapshotIntegerProbe applySnapshot:(NSDictionary *)@YES];
+        assert(invalidApplyObject[@"error"]);
+        NSDictionary *invalidPrepareObject = [SnapshotIntegerProbe prepareSnapshot:(NSDictionary *)@YES];
+        assert(invalidPrepareObject[@"error"]);
         gSnapshotIntegerProbeCalled = NO;
         NSDictionary *missingDiscardHandle = [SnapshotIntegerProbe discardSnapshot:@{}];
         assert(missingDiscardHandle[@"error"] && !gSnapshotIntegerProbeCalled);

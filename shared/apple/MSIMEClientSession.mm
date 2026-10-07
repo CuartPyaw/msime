@@ -397,6 +397,10 @@ static NSDictionary *decode(char *response, NSError **error) {
 }
 + (NSDictionary *)discardSnapshot:(NSDictionary<NSString *, id> *)parameters {
     NSError *error = nil;
+    if (![parameters isKindOfClass:NSDictionary.class]) {
+        setError(&error, @"本地词库准备参数无效");
+        return @{ @"error": error };
+    }
     uint64_t handle = 0;
     if (!parseUInt64(parameters[@"handle"], @"本地词库准备句柄", &handle, &error) || !handle) {
         if (!handle && !error) setError(&error, @"本地词库准备句柄无效");
@@ -448,6 +452,10 @@ static NSDictionary *decode(char *response, NSError **error) {
 }
 + (NSDictionary *)applySnapshot:(NSDictionary<NSString *, id> *)parameters {
     NSError *error = nil;
+    if (![parameters isKindOfClass:NSDictionary.class]) {
+        setError(&error, @"本地词库准备参数无效");
+        return @{ @"error": error };
+    }
     uint64_t handle = 0;
     if (!parseUInt64(parameters[@"handle"], @"本地词库准备句柄", &handle, &error) || !handle) {
         if (!handle && !error) setError(&error, @"本地词库准备句柄无效");
@@ -484,6 +492,10 @@ static NSDictionary *decode(char *response, NSError **error) {
 }
 + (NSDictionary *)prepareSnapshot:(NSDictionary<NSString *, id> *)parameters {
     NSError *error = nil;
+    if (![parameters isKindOfClass:NSDictionary.class]) {
+        setError(&error, @"本地词库快照参数无效");
+        return @{ @"error": error };
+    }
     NSDictionary *request = parameters[@"request"];
     MSIMESnapshotNextRecord next = parameters[@"nextRecord"];
     NSDictionary *result = [self prepareSnapshotRequest:request nextRecord:next error:&error];
