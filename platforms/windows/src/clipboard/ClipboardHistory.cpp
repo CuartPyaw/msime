@@ -318,6 +318,14 @@ bool ClipboardHistory::remove(const std::string &text) {
 }
 bool ClipboardHistory::clear() {
   StoreLock lock(store_); if (!lock) return false;
+#ifdef _WIN32
+  if (remove_private_file(store_)) return true;
+  const auto attributes = GetFileAttributesW(store_.c_str());
+  if (attributes != INVALID_FILE_ATTRIBUTES) return false;
+  const auto error = GetLastError();
+  return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
+#else
   std::error_code error; return std::filesystem::remove(store_, error) || !std::filesystem::exists(store_);
+#endif
 }
 } // namespace msime::windows

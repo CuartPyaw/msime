@@ -26,6 +26,11 @@ def main() -> int:
         if "remove_private_file" not in source:
             print(f"{path}: temporary cleanup is not bound to a trusted handle")
             return 1
+    clipboard = (ROOT / "platforms/windows/src/clipboard/ClipboardHistory.cpp").read_text(encoding="utf-8")
+    clear = clipboard.split("bool ClipboardHistory::clear()", 1)[1].split("\n}", 1)[0]
+    if "remove_private_file(store_)" not in clear:
+        print(f"{ROOT / 'platforms/windows/src/clipboard/ClipboardHistory.cpp'}: clipboard clear is not bound to a trusted handle")
+        return 1
     print("Windows temporary failure cleanup uses trusted handles")
     return 0
 
