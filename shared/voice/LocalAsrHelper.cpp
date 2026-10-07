@@ -30,7 +30,9 @@
 #include <thread>
 #include <vector>
 #if !defined(_WIN32)
+#include <fcntl.h>
 #include <poll.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -95,6 +97,7 @@ std::optional<std::vector<float>> decode_pcm16(const std::string &encoded) {
 }
 
 std::vector<float> read_wav(const std::string &path) {
+#if defined(_WIN32)
   std::ifstream input(path, std::ios::binary);
   if (!input)
     throw std::runtime_error("cannot open " + path);
@@ -107,6 +110,32 @@ std::vector<float> read_wav(const std::string &path) {
   std::vector<char> data(static_cast<std::size_t>(length));
   if (!data.empty() && !input.read(data.data(), static_cast<std::streamsize>(data.size())))
     throw std::runtime_error("cannot read " + path);
+#else
+  const int descriptor = ::open(std::filesystem::u8path(path).c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+  if (descriptor < 0)
+    throw std::runtime_error("cannot open " + path);
+  struct CloseOnExit {
+    int descriptor;
+    ~CloseOnExit() { ::close(descriptor); }
+  } close_on_exit{descriptor};
+  struct stat metadata {};
+  if (::fstat(descriptor, &metadata) != 0 || !S_ISREG(metadata.st_mode))
+    throw std::runtime_error("cannot open " + path);
+  if (metadata.st_size < 0 || static_cast<uintmax_t>(metadata.st_size) > kMaxWavBytes)
+    throw std::runtime_error(path + " is too large for local recognition");
+  std::vector<char> data(static_cast<std::size_t>(metadata.st_size));
+  std::size_t offset = 0;
+  while (offset < data.size()) {
+    const ssize_t count = ::read(descriptor, data.data() + offset, data.size() - offset);
+    if (count > 0) {
+      offset += static_cast<std::size_t>(count);
+      continue;
+    }
+    if (count < 0 && errno == EINTR)
+      continue;
+    throw std::runtime_error("cannot read " + path);
+  }
+#endif
   auto u16 = [&](std::size_t at) { return static_cast<uint16_t>(static_cast<unsigned char>(data[at]) | static_cast<unsigned char>(data[at + 1]) << 8); };
   auto u32 = [&](std::size_t at) { return static_cast<uint32_t>(u16(at)) | static_cast<uint32_t>(u16(at + 2)) << 16; };
   if (data.size() < 12 || std::memcmp(data.data(), "RIFF", 4) != 0 || std::memcmp(data.data() + 8, "WAVE", 4) != 0)
