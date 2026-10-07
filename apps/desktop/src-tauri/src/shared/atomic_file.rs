@@ -99,6 +99,34 @@ pub(crate) fn open_private(path: &Path) -> io::Result<File> {
     Ok(file)
 }
 
+/// Remove a private file relative to its opened parent directory. Opening the
+/// parent with `O_NOFOLLOW` keeps a concurrent replacement of the final
+/// directory component from redirecting cleanup through a symlink.
+pub(crate) fn remove_private(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        let name = path.file_name().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "private file has no name")
+        })?;
+        let directory = rustix::fs::open(
+            parent,
+            rustix::fs::OFlags::RDONLY
+                | rustix::fs::OFlags::DIRECTORY
+                | rustix::fs::OFlags::NOFOLLOW
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::NONBLOCK,
+            rustix::fs::Mode::empty(),
+        )?;
+        return rustix::fs::unlinkat(&directory, name, rustix::fs::AtFlags::empty())
+            .map_err(Into::into);
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::remove_file(path)
+    }
+}
+
 /// Replace a file after fully writing and syncing a temporary sibling.
 pub(crate) fn write(path: &Path, contents: &[u8]) -> io::Result<()> {
     let parent: PathBuf = path
@@ -137,6 +165,23 @@ mod tests {
 
 #[cfg(test)]
 mod private_open_tests {
+    #[cfg(unix)]
+    #[test]
+    fn private_remove_refuses_a_symlinked_parent() {
+        use super::remove_private;
+        use std::os::unix::fs::symlink;
+
+        let outside = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let target = outside.path().join("private-input");
+        std::fs::write(&target, b"synthetic-outside").unwrap();
+        let linked = root.path().join("linked");
+        symlink(outside.path(), &linked).unwrap();
+
+        assert!(remove_private(&linked.join("private-input")).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"synthetic-outside");
+    }
+
     #[cfg(unix)]
     #[test]
     fn private_open_rejects_a_symlinked_leaf() {
