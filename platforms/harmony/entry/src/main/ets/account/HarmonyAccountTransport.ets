@@ -41,6 +41,12 @@ export class FileSessionStore implements AccountSessionStore {
     }
     const lock: fs.File = fs.openSync(this.lockFile, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE);
     try {
+      const pathStat: fs.Stat = fs.lstatSync(this.lockFile);
+      const opened: fs.Stat = fs.statSync(lock.fd);
+      if (pathStat.isSymbolicLink() || !pathStat.isFile()
+        || !opened.isFile() || opened.ino !== pathStat.ino) {
+        throw new Error('account_storage');
+      }
       await lock.lock(true);
       try {
         return await body();

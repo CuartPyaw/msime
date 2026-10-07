@@ -47,6 +47,10 @@ def main() -> int:
     for token in ("fs.lstatSync(this.file)", "stat.ino !== expected.ino"):
         if token not in account_region:
             missing.append(f"account reader: {token}")
+    exclusive_region = account[account.index("  async exclusive<T>") : account.index("\n  load(): string | null", account.index("  async exclusive<T>"))]
+    for token in ("fs.statSync(lock.fd)", "opened.ino !== pathStat.ino"):
+        if token not in exclusive_region:
+            missing.append(f"account lock: {token}")
     if "fs.readTextSync(marker)" in staged_region:
         missing.append("staged marker path read")
     if "fs.readTextSync(path)" in telemetry_region:
