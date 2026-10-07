@@ -171,7 +171,7 @@ public final class CommunityRequest {
     public static boolean validReport(String reason, String detail) {
         if (reason == null || !REPORT_REASONS.contains(reason)) return false;
         String text = detail == null ? "" : detail;
-        if (text.codePointCount(0, text.length()) > MAX_REPORT_DETAIL) return false;
+        if (!TextPolicy.withinCodePoints(text, MAX_REPORT_DETAIL)) return false;
         return !CommunityTextPolicy.hasDisallowedControl(text, true);
     }
 

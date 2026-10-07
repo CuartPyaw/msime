@@ -457,12 +457,12 @@ public final class CommunityCatalog {
 
     private static boolean validName(String value, int maximum) {
         return value != null && !value.isEmpty() && value.trim().equals(value)
-            && value.codePointCount(0, value.length()) <= maximum
+            && TextPolicy.withinCodePoints(value, maximum)
             && !CommunityTextPolicy.hasDisallowedControl(value, false);
     }
 
     private static boolean validDescription(String value) {
-        return value != null && value.codePointCount(0, value.length()) <= MAX_DESCRIPTION_CHARACTERS
+        return TextPolicy.withinCodePoints(value, MAX_DESCRIPTION_CHARACTERS)
             && !CommunityTextPolicy.hasDisallowedControl(value, true);
     }
 

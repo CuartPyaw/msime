@@ -98,6 +98,12 @@ public final class TextPolicy {
         return value.substring(0, value.offsetByCodePoints(0, maxCodePoints));
     }
 
+    /** Return whether non-null text fits within a Unicode code-point limit. */
+    public static boolean withinCodePoints(String value, int maxCodePoints) {
+        return value != null && maxCodePoints >= 0
+            && value.codePointCount(0, value.length()) <= maxCodePoints;
+    }
+
     /** Truncate text and append an ellipsis only when the character limit is exceeded. */
     public static String clipWithEllipsis(String value, int maxChars) {
         if (value == null || maxChars <= 0) return "";
