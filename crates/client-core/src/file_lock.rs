@@ -57,7 +57,8 @@ pub fn open_private_file(path: impl AsRef<Path>) -> io::Result<File> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+        // A user-controlled FIFO must not block the host thread while it is opened.
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK);
     }
     #[cfg(windows)]
     {
@@ -65,7 +66,14 @@ pub fn open_private_file(path: impl AsRef<Path>) -> io::Result<File> {
         const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
         options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
     }
-    options.open(path)
+    let file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "private input is not a regular file",
+        ));
+    }
+    Ok(file)
 }
 
 pub(crate) fn try_shared(file: &File) -> io::Result<bool> {
@@ -189,6 +197,14 @@ mod tests {
             std::fs::read(&target).unwrap(),
             b"synthetic-private-lock-target"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_directory_as_a_private_file() {
+        let root = tempfile::tempdir().unwrap();
+
+        assert!(open_private_file(root.path()).is_err());
     }
 
     #[test]
