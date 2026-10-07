@@ -821,23 +821,38 @@ export class HarmonyAccountCloudBridge {
       if (selected.length === 0) return this.success({ saved: false });
       if (this.bridge.currentUserId() !== accountId) return this.failure('account_cancelled');
       const source: string = selected[0];
-      const sourceBytes: number = fs.statSync(source).size;
-      if (sourceBytes <= 0 || sourceBytes > MAX_SNAPSHOT_DOWNLOAD_BYTES) {
-        return this.failure('snapshot_invalid');
+      const sourceFile: fs.File = fs.openSync(source, fs.OpenMode.READ_ONLY);
+      let copied: boolean = false;
+      let copiedBytes: number = 0;
+      try {
+        const sourcePathStat: fs.Stat = fs.lstatSync(source);
+        const sourceFdStat: fs.Stat = fs.statSync(sourceFile.fd);
+        if (sourcePathStat.isSymbolicLink() || !sourcePathStat.isFile()
+          || !sourceFdStat.isFile() || sourceFdStat.ino !== sourcePathStat.ino) {
+          return this.failure('snapshot_invalid');
+        }
+        const sourceBytes: number = sourceFdStat.size;
+        if (sourceBytes <= 0 || sourceBytes > MAX_SNAPSHOT_DOWNLOAD_BYTES) {
+          return this.failure('snapshot_invalid');
+        }
+        const directory: string = `${stateRoot}/cloud-restore`;
+        if (!fs.accessSync(directory)) fs.mkdirSync(directory, true);
+        if (!this.safeDirectory(directory)) {
+          return this.failure('account_storage');
+        }
+        this.restoreFile = `${directory}/${util.generateRandomUUID(false)}.ndjson`;
+        await fs.copyFile(sourceFile.fd, this.restoreFile);
+        copied = true;
+        copiedBytes = fs.statSync(this.restoreFile).size;
+        if (copiedBytes !== sourceBytes || copiedBytes <= 0
+          || copiedBytes > MAX_SNAPSHOT_DOWNLOAD_BYTES) {
+          this.clearRestorePreview();
+          return this.failure('snapshot_invalid');
+        }
+      } finally {
+        fs.closeSync(sourceFile);
       }
-      const directory: string = `${stateRoot}/cloud-restore`;
-      if (!fs.accessSync(directory)) fs.mkdirSync(directory, true);
-      if (!this.safeDirectory(directory)) {
-        return this.failure('account_storage');
-      }
-      this.restoreFile = `${directory}/${util.generateRandomUUID(false)}.ndjson`;
-      await fs.copyFile(source, this.restoreFile);
-      const copiedBytes: number = fs.statSync(this.restoreFile).size;
-      if (copiedBytes !== sourceBytes || copiedBytes <= 0
-        || copiedBytes > MAX_SNAPSHOT_DOWNLOAD_BYTES) {
-        this.clearRestorePreview();
-        return this.failure('snapshot_invalid');
-      }
+      if (!copied) return this.failure('snapshot_invalid');
       const metadata: SnapshotMetadata | null = this.inspectSnapshot(this.restoreFile);
       if (metadata === null || metadata.bytes !== copiedBytes) {
         this.clearRestorePreview();
