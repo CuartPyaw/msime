@@ -69,6 +69,11 @@ public final class TextPolicy {
         return value.getBytes(StandardCharsets.UTF_8).length;
     }
 
+    /** Return the number of Unicode code points in text, or zero for null. */
+    public static int codePointLength(String value) {
+        return value == null ? 0 : value.codePointCount(0, value.length());
+    }
+
     /** Truncates UTF-8 text by bytes without splitting a code point. */
     public static String clipUtf8(String value, int maxBytes) {
         if (value == null) return "";
@@ -94,20 +99,20 @@ public final class TextPolicy {
     /** Truncate text to at most {@code maxCodePoints} without splitting a surrogate pair. */
     public static String clipCodePoints(String value, int maxCodePoints) {
         if (value == null || maxCodePoints <= 0) return "";
-        if (value.codePointCount(0, value.length()) <= maxCodePoints) return value;
+        if (codePointLength(value) <= maxCodePoints) return value;
         return value.substring(0, value.offsetByCodePoints(0, maxCodePoints));
     }
 
     /** Return whether non-null text fits within a Unicode code-point limit. */
     public static boolean withinCodePoints(String value, int maxCodePoints) {
         return value != null && maxCodePoints >= 0
-            && value.codePointCount(0, value.length()) <= maxCodePoints;
+            && codePointLength(value) <= maxCodePoints;
     }
 
     /** Keep at most the final Unicode code points without splitting a surrogate pair. */
     public static String tailCodePoints(String value, int maxCodePoints) {
         if (value == null || maxCodePoints <= 0) return "";
-        int count = value.codePointCount(0, value.length());
+        int count = codePointLength(value);
         return count <= maxCodePoints ? value
             : value.substring(value.offsetByCodePoints(0, count - maxCodePoints));
     }
