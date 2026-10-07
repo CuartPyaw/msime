@@ -128,6 +128,8 @@ interface VoiceCaptureDeviceReply {
 
 const BRIDGE_NAME: string = 'msimeHarmony';
 const PLATFORM: string = 'harmony';
+/** The settings page and native save bridge hold one complete export in memory. */
+const MAX_DICTIONARY_EXPORT_BYTES: number = 32 * 1024 * 1024;
 
 /** `{directory, platform, channel}` for `client.notices`; `{directory, id}` for `client.noticeDismiss`. */
 interface NoticesRequest {
@@ -925,6 +927,9 @@ class SettingsBridge {
     const name: string | null = SkinImportPolicy.destinationName(request.name);
     if (name === null || typeof request.contents !== 'string' || this.context === undefined) {
       return JSON.stringify({ ok: false, error: 'export_invalid' });
+    }
+    if (utf8Length(request.contents) > MAX_DICTIONARY_EXPORT_BYTES) {
+      return JSON.stringify({ ok: false, error: 'export_too_large' });
     }
     const directory: string = `${this.stateDirectory}/dictionary-exports`;
     const staging: string = `${directory}/${util.generateRandomUUID(false)}.txt`;
