@@ -194,6 +194,13 @@ class ModelAndHotwords(LocalFixture):
         linked_model.symlink_to(external, target_is_directory=True)
         with self.assertRaises(ValueError):
             local.model_manifest(str(linked_model))
+        nested = external / "nested"
+        nested.mkdir()
+        (nested / local.MANIFEST).write_text("{}")
+        linked_parent = self.root / "linked-parent"
+        linked_parent.symlink_to(external, target_is_directory=True)
+        with self.assertRaises(ValueError):
+            local.model_manifest(str(linked_parent / "nested"))
         listed = self.root / "listed"
         listed.mkdir()
         (listed / local.MANIFEST).write_text("[]")
