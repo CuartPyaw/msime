@@ -115,6 +115,8 @@ constexpr jsize kOnlineBodyLimit = 262144;
 constexpr jsize kOnlineCandidatesLimit = 16384;
 constexpr jsize kDoubaoAudioPcmLimit = 1 * 1024 * 1024;
 constexpr jsize kDoubaoBoostingLimit = 4096;
+constexpr jsize kPolishPromptIdLimit = 256;
+constexpr jsize kPolishPromptCustomLimit = 8192;
 }
 
 extern "C" {
@@ -258,6 +260,12 @@ static std::string utf8(JNIEnv *env, jbyteArray value) {
 }
 // Which prompt the selected slot resolves to, decided by the shared header rather than here: slot precedence has been wrong on individual hosts before, and it is one rule.
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_polishPromptRaw(JNIEnv *env, jclass, jbyteArray id, jbyteArray custom1, jbyteArray custom2, jbyteArray custom3) {
+    if ((id && env->GetArrayLength(id) > kPolishPromptIdLimit)
+            || (custom1 && env->GetArrayLength(custom1) > kPolishPromptCustomLimit)
+            || (custom2 && env->GetArrayLength(custom2) > kPolishPromptCustomLimit)
+            || (custom3 && env->GetArrayLength(custom3) > kPolishPromptCustomLimit)) {
+        return env->NewByteArray(0);
+    }
     msime::windows::PolishPromptSlots slots;
     slots.id = utf8(env, id);
     slots.custom_1 = utf8(env, custom1);
