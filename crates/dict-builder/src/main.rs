@@ -829,8 +829,7 @@ struct CheckWords {
 
 fn open_read_only(path: Option<&Path>) -> Result<Option<rusqlite::Connection>> {
     path.map(|path| {
-        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .with_context(|| format!("opening {}", path.display()))
+        sqlite::open_read_only(path).with_context(|| format!("opening {}", path.display()))
     })
     .transpose()
 }
