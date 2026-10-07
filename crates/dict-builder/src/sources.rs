@@ -137,8 +137,8 @@ impl Dictionary {
                 root.display()
             );
         }
-        let text = crate::text::read(&path)
-            .with_context(|| format!("reading {}", path.display()))?;
+        let text =
+            crate::text::read(&path).with_context(|| format!("reading {}", path.display()))?;
         let upstream: UpstreamLock =
             serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
         if upstream.version != 1 {
@@ -340,6 +340,13 @@ fn open_private(path: &Path) -> std::io::Result<File> {
         ));
     }
     Ok(file)
+}
+
+pub(crate) fn read_private(path: &Path) -> std::io::Result<Vec<u8>> {
+    let mut file = open_private(path)?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    Ok(bytes)
 }
 
 fn sha256_reader(stream: &mut File) -> Result<String> {
