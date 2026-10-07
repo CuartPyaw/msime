@@ -9,12 +9,14 @@ use pulldown_cmark::{CowStr, Event, Options, Parser, Tag, TagEnd};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// The cache of the last feed and the dismissed ids.
 pub const NOTICES_FILE: &str = "notices.json";
+const NOTICES_LOCK_FILE: &str = "notices.lock";
 /// The server's `max-age`; the feed is not requested again sooner, whether the last attempt worked or not.
 pub const MIN_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 /// Most notices the server lists.
@@ -162,6 +164,7 @@ impl NoticeStore {
     ) -> Result<Vec<Notice>, NoticeError> {
         let platform =
             crate::telemetry::canonical_platform(platform).ok_or(NoticeError::Invalid)?;
+        let _lock = self.lock()?;
         let feed = format!("{}/{platform}", channel.as_str());
         let mut cache = self.read();
         if cache.feed != feed {
@@ -200,6 +203,7 @@ impl NoticeStore {
         {
             return Err(NoticeError::Invalid);
         }
+        let _lock = self.lock()?;
         let mut cache = self.read();
         if cache.dismissed.iter().any(|dismissed| dismissed == id) {
             return Ok(());
@@ -210,6 +214,17 @@ impl NoticeStore {
             cache.dismissed.drain(..excess);
         }
         self.write(&cache)
+    }
+
+    fn lock(&self) -> Result<File, NoticeError> {
+        if !self.directory.is_absolute()
+            || !crate::storage::create_directory_and_check(&self.directory)?
+        {
+            return Err(NoticeError::Storage);
+        }
+        let lock = crate::file_lock::open_lock_file(self.directory.join(NOTICES_LOCK_FILE))?;
+        crate::file_lock::exclusive(&lock)?;
+        Ok(lock)
     }
 
     fn read(&self) -> NoticeCache {
