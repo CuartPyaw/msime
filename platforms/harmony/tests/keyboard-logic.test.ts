@@ -8935,6 +8935,9 @@ group("cloud clipboard items stay out of password fields and stale editors", () 
     !CloudClipboardPolicy.current(Number.NaN, Number.NaN),
     "a non-integer generation is refused",
   );
+  check(CloudClipboardPolicy.sendCurrent(4, 4), "the active send result is current");
+  check(!CloudClipboardPolicy.sendCurrent(4, 5), "a cancelled send result is dropped");
+  check(!CloudClipboardPolicy.sendCurrent(-1, -1), "an invalid send generation is dropped");
 });
 
 group("sending to the cloud clipboard needs a signed-in account with the clipboard on", () => {
