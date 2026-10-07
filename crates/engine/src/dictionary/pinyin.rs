@@ -452,9 +452,12 @@ fn open_connection(path: &Path) -> Option<Connection> {
         return None;
     }
     // No CREATE: a missing dictionary must stay missing instead of becoming an empty file (QD:237-246).
+    let path = crate::paths::sqlite_path_no_follow(path).ok()?;
     let connection = Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        &path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_NOFOLLOW
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .ok()?;
     // Learning writes briefly hold the commit lock; waiting keeps a query that lands in that window from becoming an empty page.

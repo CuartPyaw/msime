@@ -50,9 +50,13 @@ pub fn open_read_only(path: &Path) -> Result<LanguageDictionary> {
     let unavailable =
         |_: rusqlite::Error| EngineError::failed(diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE);
     // A shipped resource like the offline glosses (host/glosses.rs), not user data: no symlink policy on the parent path and no busy wait, since nothing writes the file.
+    let path = crate::paths::sqlite_path_no_follow_allow_parent_symlinks(path)
+        .map_err(|_| EngineError::failed(diagnostics::LANGUAGE_DICTIONARY_UNAVAILABLE))?;
     let connection = Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_FULL_MUTEX,
+        &path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY
+            | OpenFlags::SQLITE_OPEN_NOFOLLOW
+            | OpenFlags::SQLITE_OPEN_FULL_MUTEX,
     )
     .map_err(unavailable)?;
     connection

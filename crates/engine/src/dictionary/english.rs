@@ -174,7 +174,7 @@ impl EnglishDictionary {
 
 /// Create or migrate `english_words` to the composite-key, weighted shape, create the gloss tables, `user_version = 3` (english_dictionary.cpp:242-315). The golden harness calls this for fixtures without an `msime-english.db`.
 pub fn ensure_english_schema(path: &Path) -> Result<()> {
-    let path = sqlite_path(path)?;
+    let path = crate::paths::sqlite_path_no_follow(path)?;
     let mut connection = Connection::open_with_flags(
         &path,
         OpenFlags::SQLITE_OPEN_READ_WRITE
@@ -230,7 +230,7 @@ pub fn upsert_gloss(path: &Path, chinese_to_english: bool, key: &str, gloss: &st
 
 fn write_gloss(path: &Path, chinese_to_english: bool, key: &str, gloss: &str) -> Result<()> {
     ensure_english_schema(path)?;
-    let path = sqlite_path(path)?;
+    let path = crate::paths::sqlite_path_no_follow(path)?;
     let connection = Connection::open_with_flags(
         &path,
         OpenFlags::SQLITE_OPEN_READ_WRITE
@@ -322,7 +322,7 @@ fn open_read_only(path: &Path) -> Option<Connection> {
     if path.as_os_str().is_empty() {
         return None;
     }
-    let path = sqlite_path(path).ok()?;
+    let path = crate::paths::sqlite_path_no_follow(path).ok()?;
     let connection = Connection::open_with_flags(
         &path,
         OpenFlags::SQLITE_OPEN_READ_ONLY
@@ -332,34 +332,6 @@ fn open_read_only(path: &Path) -> Option<Connection> {
     .ok()?;
     connection.busy_timeout(READ_BUSY_TIMEOUT).ok()?;
     Some(connection)
-}
-
-/// SQLite's NOFOLLOW flag rejects trusted system aliases such as macOS `/var`
-/// as well as a malicious leaf. Reject untrusted components first, then pass a
-/// canonical parent plus the original leaf so the flag protects the leaf
-/// without rejecting the platform's normal storage roots.
-fn sqlite_path(path: &Path) -> std::io::Result<std::path::PathBuf> {
-    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
-    {
-        return Ok(path.to_owned());
-    }
-    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-    {
-        msime_path_trust::reject_symlinked_components(path)?;
-        let parent = path.parent().ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "database path has no parent",
-            )
-        })?;
-        let name = path.file_name().ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "database path has no filename",
-            )
-        })?;
-        Ok(std::fs::canonicalize(parent)?.join(name))
-    }
 }
 
 /// The first row's gloss, "" for none, or `None` when the gloss tables cannot be prepared. Both are prepared together, so a store with only one of them answers neither, as in the reference (english_dictionary.cpp:345-361).

@@ -104,6 +104,45 @@ pub(crate) fn open_file_no_follow(path: &Path) -> io::Result<File> {
     options.open(path)
 }
 
+/// SQLite's `SQLITE_OPEN_NOFOLLOW` rejects trusted system aliases such as
+/// macOS `/var` when they remain in the path. Reject untrusted components first,
+/// then canonicalize only the parent so the SQLite flag protects the leaf while
+/// normal platform storage roots continue to work.
+pub(crate) fn sqlite_path_no_follow(path: &Path) -> io::Result<PathBuf> {
+    sqlite_path_no_follow_with_parent_policy(path, true)
+}
+
+/// Resolve a database's parent directory while protecting only the final path
+/// component with SQLite's `SQLITE_OPEN_NOFOLLOW` flag. This is used by
+/// packaged language dictionaries, whose established contract permits an
+/// application supplied directory alias.
+pub(crate) fn sqlite_path_no_follow_allow_parent_symlinks(path: &Path) -> io::Result<PathBuf> {
+    sqlite_path_no_follow_with_parent_policy(path, false)
+}
+
+fn sqlite_path_no_follow_with_parent_policy(
+    path: &Path,
+    reject_parent_symlinks: bool,
+) -> io::Result<PathBuf> {
+    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+    {
+        return Ok(path.to_owned());
+    }
+    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+    {
+        if reject_parent_symlinks {
+            msime_path_trust::reject_symlinked_components(path)?;
+        }
+        let parent = path.parent().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "database path has no parent")
+        })?;
+        let name = path.file_name().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "database path has no filename")
+        })?;
+        Ok(std::fs::canonicalize(parent)?.join(name))
+    }
+}
+
 /// `join` for a name that came from outside the crate: a `..` component is refused rather than allowed to escape the root (`runtime_paths.cpp:14-23`).
 #[cfg_attr(
     not(test),
