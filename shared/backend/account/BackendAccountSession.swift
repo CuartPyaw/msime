@@ -202,6 +202,9 @@ struct BackendDesktopSessionFile: BackendSessionStorage {
 
   func clear() throws {
     guard let url else { return }
+    guard let directory, backendDirectoryPathIsSafe(directory) else {
+      throw BackendAccountClient.Failure(status: 0)
+    }
     guard unlink(url.path) == 0 || errno == ENOENT else { throw BackendAccountClient.Failure(status: 0) }
   }
 }
