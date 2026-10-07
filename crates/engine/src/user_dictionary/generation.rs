@@ -230,7 +230,7 @@ fn copy_database(source: &Path, target: &Path) -> Result<()> {
     Ok(())
 }
 
-fn copy_private_file(source: &Path, target: &Path) -> io::Result<u64> {
+pub(super) fn copy_private_file(source: &Path, target: &Path) -> io::Result<u64> {
     let mut input = crate::paths::open_file_no_follow(source)?;
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
