@@ -1169,12 +1169,7 @@ fn download_resumable(
         Err(error) if error.kind() == io::ErrorKind::NotFound => 0,
         Err(error) => return Err(error.into()),
     };
-    let mut output = fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(partial)?;
+    let mut output = crate::storage::open_private_read_write_file(partial)?;
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; CHUNK];
     let mut downloaded = 0u64;
