@@ -85,6 +85,9 @@ int main() {
             options[name] = path;
         }
         NSError *error = nil;
+        assert(![MSIMEClientSession handwritingProviderRequest:(NSDictionary *)@[] error:&error] && error);
+        error = nil;
+        assert([MSIMEClientSession emojiCatalogRequest:(NSDictionary *)@[]][@"error"]);
         MSIMEClientSession *session = [[MSIMEClientSession alloc] initWithOptions:options error:&error];
         assert(session && !error);
         NSDictionary *activeOptions = [MSIMEClientSession activeHostOptions];

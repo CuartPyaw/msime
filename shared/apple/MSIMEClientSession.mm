@@ -303,7 +303,7 @@ static NSDictionary *decode(char *response, NSError **error) {
     return decode(msime_client_dictionary(static_cast<const uint8_t *>(data.bytes), data.length), error);
 }
 + (NSDictionary *)handwritingProviderRequest:(NSDictionary<NSString *, id> *)request error:(NSError **)error {
-    if (![NSJSONSerialization isValidJSONObject:request]) { setError(error, @"手写请求格式错误"); return nil; }
+    if (![request isKindOfClass:NSDictionary.class] || ![NSJSONSerialization isValidJSONObject:request]) { setError(error, @"手写请求格式错误"); return nil; }
     NSString *socketPath = request[@"socket_path"];
     if (![socketPath isKindOfClass:NSString.class] || !socketPath.isAbsolutePath || socketPath.length > 4096) { setError(error, @"手写 provider 路径无效"); return nil; }
     NSData *data = [NSJSONSerialization dataWithJSONObject:request options:0 error:error];
@@ -362,6 +362,9 @@ static NSDictionary *decode(char *response, NSError **error) {
 }
 + (NSDictionary *)emojiCatalogRequest:(NSDictionary<NSString *, id> *)request {
     NSError *error = nil;
+    if (![request isKindOfClass:NSDictionary.class]) {
+        return @{ @"error": [NSError errorWithDomain:MSIMEClientErrorDomain code:1 userInfo:nil] };
+    }
     NSString *resources = request[@"resources"];
     if (![resources isKindOfClass:NSString.class] || !resources.isAbsolutePath ||
         ![NSJSONSerialization isValidJSONObject:request]) {
