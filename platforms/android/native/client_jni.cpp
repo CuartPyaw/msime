@@ -394,6 +394,7 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_snapshotDiscard
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_snapshotActivateRaw(JNIEnv *env, jclass, jlong handle, jbyteArray expected) {
     if (!expected || handle <= 0) return response(env, msime_client_snapshot_activate(0, nullptr, 0));
     jsize length = env->GetArrayLength(expected);
+    if (length != 64) return response(env, msime_client_snapshot_activate(0, nullptr, 0));
     jbyte *bytes = env->GetByteArrayElements(expected, nullptr);
     if (!bytes) return nullptr;
     char *result = msime_client_snapshot_activate(
