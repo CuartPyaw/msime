@@ -1,6 +1,5 @@
 //! Neural reranking of the lattice's n-best (overlays.md §1.6.2-§1.6.3) on the `chinese-ime-lm` crate. The model never generates sentences; it only reorders lattice paths and contributes one row. Only the keyboard model runs here, synchronously on the session's own `Reranker` on every keystroke, whose prefix cache keeps it cheap. The desktop model, whose p95 of 153 ms does not fit a keystroke, is not the engine's: the input runtime runs it as its settled reranker once typing pauses.
 
-use std::fs::File;
 use std::io::Read;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
@@ -68,7 +67,7 @@ fn load_model(path: &Path) -> Option<Arc<SentenceModel>> {
     if !std::fs::symlink_metadata(path).ok()?.file_type().is_file() {
         return None;
     }
-    let file = File::open(path).ok()?;
+    let file = crate::paths::open_file_no_follow(path).ok()?;
     let file_size = file.metadata().ok()?.len();
     if file_size > MAX_MODEL_BYTES {
         return None;

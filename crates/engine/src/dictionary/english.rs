@@ -2,7 +2,6 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -262,7 +261,7 @@ pub fn load_custom_translations(path: &Path) -> CustomTranslations {
     if !metadata.file_type().is_file() {
         return translations;
     }
-    let Ok(file) = File::open(path) else {
+    let Ok(file) = crate::paths::open_file_no_follow(path) else {
         return translations;
     };
     let Ok(size) = file.metadata().map(|metadata| metadata.len()) else {

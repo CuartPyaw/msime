@@ -2831,6 +2831,7 @@ dependencies = [
  "ewts",
  "exmex",
  "hex",
+ "libc",
  "lru",
  "lunar-lite",
  "memmap2",
