@@ -11,7 +11,7 @@ use crate::platform::mobile::mobile_account_helpers::{
     clear_snapshot_previews_after, cloud_dictionary_account_request, prepare_snapshot_directory,
     replace_pending_snapshot, snapshot_command_error, snapshot_response_without_account,
     snapshot_text_within_limit, take_pending_snapshot, valid_mobile_haptic_strength,
-    validate_pending_snapshot, PendingSnapshot, SnapshotMetadata,
+    validate_pending_snapshot, write_snapshot_file, PendingSnapshot, SnapshotMetadata,
 };
 use crate::platform::mobile::mobile_community::MobileCommunityState;
 use crate::shared::account_dto::{
@@ -659,7 +659,7 @@ async fn dictionary_snapshot_restore_preview(
     tauri::async_runtime::spawn_blocking(move || {
         prepare_snapshot_directory(&directory).map_err(|_| AccountError::Unavailable)?;
         let path = directory.join(format!("restore-{token}.ndjson"));
-        let result = fs::write(&path, text.as_bytes())
+        let result = write_snapshot_file(&path, text.as_bytes())
             .map_err(|_| AccountError::Unavailable)
             .and_then(|_| inspect_snapshot(&path))
             .and_then(|metadata| {
@@ -697,7 +697,7 @@ async fn dictionary_snapshot_restore(
     tauri::async_runtime::spawn_blocking(move || {
         prepare_snapshot_directory(&directory).map_err(|_| AccountError::Unavailable)?;
         let path = directory.join(format!("restore-{token}.ndjson"));
-        let result = fs::write(&path, text.as_bytes())
+        let result = write_snapshot_file(&path, text.as_bytes())
             .map_err(|_| AccountError::Unavailable)
             .and_then(|_| inspect_snapshot(&path))
             .and_then(|metadata| {
