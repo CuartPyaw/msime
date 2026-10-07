@@ -84,6 +84,7 @@ namespace {
 template <typename Call> jbyteArray bounded_request(JNIEnv *env, jbyteArray request, jsize limit, Call call);
 constexpr jsize kThemeRequestLimit = 1 * 1024 * 1024;
 constexpr jsize kTypingStatisticsRequestLimit = 65536;
+constexpr jsize kPrepareHostRequestLimit = 16384;
 }
 
 extern "C" {
@@ -350,13 +351,7 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_personalDiction
     return response(env, result);
 }
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_prepareHostRaw(JNIEnv *env, jclass, jbyteArray options) {
-    if (!options) return response(env, msime_client_prepare_host(nullptr, 0));
-    jsize length = env->GetArrayLength(options);
-    jbyte *bytes = env->GetByteArrayElements(options, nullptr);
-    if (!bytes) return nullptr;
-    char *result = msime_client_prepare_host(reinterpret_cast<const uint8_t *>(bytes), static_cast<size_t>(length));
-    env->ReleaseByteArrayElements(options, bytes, JNI_ABORT);
-    return response(env, result);
+    return bounded_request(env, options, kPrepareHostRequestLimit, msime_client_prepare_host);
 }
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_refreshHostRaw(JNIEnv *env, jclass, jbyteArray path) {
     if (!path) return response(env, msime_client_refresh_host(nullptr, 0));
