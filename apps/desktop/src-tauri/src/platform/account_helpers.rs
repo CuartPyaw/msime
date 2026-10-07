@@ -19,6 +19,24 @@ pub(crate) fn write_snapshot_file(path: &Path, contents: &[u8]) -> std::io::Resu
     crate::shared::atomic_file::write(path, contents)
 }
 
+/// Read a staged snapshot through a no-follow handle and the native 512 MiB limit.
+#[cfg(any(target_os = "ios", target_os = "android", test))]
+pub(crate) fn read_snapshot_file(path: &Path) -> std::io::Result<String> {
+    let file = crate::shared::atomic_file::open_private(path)?;
+    let bytes =
+        crate::shared::bounded_body::read_bounded(file, 512 * 1024 * 1024).map_err(|error| {
+            match error {
+                crate::shared::bounded_body::BoundedReadError::TooLarge => std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "snapshot exceeds size limit",
+                ),
+                crate::shared::bounded_body::BoundedReadError::Read(error) => error,
+            }
+        })?;
+    String::from_utf8(bytes)
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "snapshot is not UTF-8"))
+}
+
 #[cfg(any(target_os = "ios", target_os = "android", test))]
 pub(crate) fn cleanup_stale_snapshot_previews(directory: &Path) -> std::io::Result<()> {
     for entry in std::fs::read_dir(directory)? {
@@ -122,7 +140,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{cleanup_stale_snapshot_previews, prepare_snapshot_directory, write_snapshot_file};
+    use super::{
+        cleanup_stale_snapshot_previews, prepare_snapshot_directory, read_snapshot_file,
+        write_snapshot_file,
+    };
 
     #[test]
     fn stale_snapshot_cleanup_removes_only_download_ndjson_files() {
@@ -169,5 +190,20 @@ mod tests {
 
         assert_eq!(std::fs::read(&target).unwrap(), b"synthetic-outside");
         assert_eq!(std::fs::read(&path).unwrap(), b"synthetic-snapshot");
+    }
+    #[cfg(unix)]
+    #[test]
+    fn snapshot_file_read_rejects_a_symlinked_leaf() {
+        use std::os::unix::fs::symlink;
+
+        let outside = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let target = outside.path().join("outside.ndjson");
+        std::fs::write(&target, b"synthetic-outside").unwrap();
+        let path = root.path().join("export.ndjson");
+        symlink(&target, &path).unwrap();
+
+        assert!(read_snapshot_file(&path).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"synthetic-outside");
     }
 }

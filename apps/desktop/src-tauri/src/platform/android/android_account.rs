@@ -9,9 +9,10 @@ use crate::platform::mobile::mobile_account_helpers::{
     account_request_code as shared_account_request_code, account_status as shared_account_status,
     call_session, cleanup_stale_snapshot_previews, clear_snapshot_previews,
     clear_snapshot_previews_after, cloud_dictionary_account_request, prepare_snapshot_directory,
-    replace_pending_snapshot, snapshot_command_error, snapshot_response_without_account,
-    snapshot_text_within_limit, take_pending_snapshot, valid_mobile_haptic_strength,
-    validate_pending_snapshot, write_snapshot_file, PendingSnapshot, SnapshotMetadata,
+    read_snapshot_file, replace_pending_snapshot, snapshot_command_error,
+    snapshot_response_without_account, snapshot_text_within_limit, take_pending_snapshot,
+    valid_mobile_haptic_strength, validate_pending_snapshot, write_snapshot_file, PendingSnapshot,
+    SnapshotMetadata,
 };
 use crate::platform::mobile::mobile_community::MobileCommunityState;
 use crate::shared::account_dto::{
@@ -629,7 +630,7 @@ async fn dictionary_snapshot_export(
             .dictionary_snapshot_to_file(&path)
             .and_then(|_| inspect_snapshot(&path))
             .and_then(|metadata| {
-                let text = fs::read_to_string(&path).map_err(|_| AccountError::Unavailable)?;
+                let text = read_snapshot_file(&path).map_err(|_| AccountError::Unavailable)?;
                 Ok(serde_json::json!({
                     "text": text,
                     "filename": "msime-dictionary-snapshot.ndjson",
