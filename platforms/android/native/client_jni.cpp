@@ -100,6 +100,8 @@ constexpr jsize kSnapshotPrepareRequestLimit = 1 * 1024 * 1024;
 constexpr jsize kSnapshotPreparePathLimit = 16384;
 constexpr jsize kUpdatePreferencesSnapshotLimit = 1 * 1024 * 1024;
 constexpr jsize kSmallJsonRequestLimit = 16 * 1024;
+constexpr jsize kEmojiQueryLimit = 16384;
+constexpr jsize kEmojiResourcesLimit = 4096;
 }
 
 extern "C" {
@@ -165,9 +167,12 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_emojiCatalogRaw
         return response(env, msime_client_emoji_catalog_request(nullptr, 0, nullptr, 0));
     }
     jsize query_length = env->GetArrayLength(query);
+    jsize resources_length = env->GetArrayLength(resources);
+    if (query_length > kEmojiQueryLimit || resources_length > kEmojiResourcesLimit) {
+        return response(env, msime_client_emoji_catalog_request(nullptr, 0, nullptr, 0));
+    }
     jbyte *query_bytes = env->GetByteArrayElements(query, nullptr);
     if (!query_bytes) return nullptr;
-    jsize resources_length = env->GetArrayLength(resources);
     jbyte *resources_bytes = env->GetByteArrayElements(resources, nullptr);
     if (!resources_bytes) {
         env->ReleaseByteArrayElements(query, query_bytes, JNI_ABORT);
