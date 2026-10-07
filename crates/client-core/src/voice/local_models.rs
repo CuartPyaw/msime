@@ -1055,7 +1055,7 @@ pub(crate) fn adopt_files(
         }
         for file in files {
             let path = pack_dir.join(&file.name);
-            let mut input = fs::File::open(&path)?;
+            let mut input = crate::storage::open_private_file(&path)?;
             if input.metadata()?.len() != file.size {
                 return Err(LocalModelError::SizeMismatch(file.name.clone()));
             }

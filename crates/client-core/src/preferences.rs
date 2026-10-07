@@ -2863,7 +2863,7 @@ impl PreferencesStore {
             Err(failure) => failure,
         };
         let bytes = crate::bounded_io::read_bounded_file(
-            File::open(self.path())?,
+            crate::storage::open_private_file(&self.path())?,
             MAX_DOCUMENT_BYTES,
             || PreferencesError::DocumentTooLarge,
         )?;
