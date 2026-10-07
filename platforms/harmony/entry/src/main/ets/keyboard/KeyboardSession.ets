@@ -1237,7 +1237,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       };
       const response: SkinResourceResponse =
         JSON.parse(client.skinResource(JSON.stringify(request))) as SkinResourceResponse;
-      if (response.ok !== true || response.value === undefined) {
+      if (response.ok !== true || response.value === undefined || response.value === null) {
         return NO_CANDIDATE_SKIN_IMAGE;
       }
       const image: CandidateSkinImage = {
@@ -5144,7 +5144,7 @@ export class KeyboardSession implements HardwareKeyTarget {
         KeyboardLog.error(`emoji catalog refused: ${response.error}`);
         return null;
       }
-      return response.value;
+      return response.value === undefined || response.value === null ? null : response.value;
     } catch (error) {
       KeyboardLog.error(`emoji catalog unreadable: ${describeError(error)}`);
       return null;
@@ -5168,7 +5168,8 @@ export class KeyboardSession implements HardwareKeyTarget {
     try {
       const raw: string = client.emojiCatalog(JSON.stringify(query), this.resourceDirectory);
       const response: EmojiGroupsResponse = JSON.parse(raw) as EmojiGroupsResponse;
-      if (response.ok !== true || !Array.isArray(response.value.groups)) {
+      if (response.ok !== true || response.value === undefined || response.value === null
+        || !Array.isArray(response.value.groups)) {
         return [];
       }
       return normalizeGroups(response.value.groups);
@@ -5195,7 +5196,8 @@ export class KeyboardSession implements HardwareKeyTarget {
     try {
       const raw: string = client.emojiCatalog(JSON.stringify(query), this.resourceDirectory);
       const response: EmojiSymbolGroupsResponse = JSON.parse(raw) as EmojiSymbolGroupsResponse;
-      if (response.ok !== true || !Array.isArray(response.value.symbol_groups)) {
+      if (response.ok !== true || response.value === undefined || response.value === null
+        || !Array.isArray(response.value.symbol_groups)) {
         return [];
       }
       return normalizeSymbolGroups(response.value.symbol_groups);
@@ -5230,7 +5232,7 @@ export class KeyboardSession implements HardwareKeyTarget {
     try {
       const raw: string = client.emojiCatalog(JSON.stringify(query), this.resourceDirectory);
       const response: PluginSymbolGroupsResponse = JSON.parse(raw) as PluginSymbolGroupsResponse;
-      if (response.ok !== true) {
+      if (response.ok !== true || response.value === undefined || response.value === null) {
         KeyboardLog.error(`plugin symbol groups refused: ${response.error}`);
         return [];
       }

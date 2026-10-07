@@ -457,7 +457,7 @@ export class HarmonyAccountCloudBridge {
    */
   private async preferenceSchema(): Promise<string> {
     const reply = await this.bridge.preferenceSchema();
-    if (reply.error !== undefined || reply.value === undefined) {
+    if (reply.error !== undefined || reply.value === undefined || reply.value === null) {
       return this.failure(reply.error ?? 'account_unavailable');
     }
     const schema = this.schemaOf(reply.value);
@@ -471,7 +471,7 @@ export class HarmonyAccountCloudBridge {
 
   private async preferenceDocument(): Promise<string> {
     const reply = await this.bridge.loadPreferenceDocument();
-    if (reply.error !== undefined || reply.value === undefined) {
+    if (reply.error !== undefined || reply.value === undefined || reply.value === null) {
       return this.failure(reply.error ?? 'account_unavailable');
     }
     const cloud = this.cloudOf(reply.value);
@@ -517,13 +517,13 @@ export class HarmonyAccountCloudBridge {
   private async uploadPreferences(stateRoot: string): Promise<string> {
     const expectedGeneration: number = this.bridge.sessionGeneration();
     const schemaReply = await this.bridge.preferenceSchema();
-    if (schemaReply.error !== undefined || schemaReply.value === undefined) {
+    if (schemaReply.error !== undefined || schemaReply.value === undefined || schemaReply.value === null) {
       return this.failure(schemaReply.error ?? 'account_unavailable');
     }
     const schema = this.schemaOf(schemaReply.value);
     if (schema === null) return this.failure('account_unavailable');
     const cloudReply = await this.bridge.loadPreferenceDocument();
-    if (cloudReply.error !== undefined || cloudReply.value === undefined) {
+    if (cloudReply.error !== undefined || cloudReply.value === undefined || cloudReply.value === null) {
       return this.failure(cloudReply.error ?? 'account_unavailable');
     }
     const cloud = this.cloudOf(cloudReply.value);
@@ -547,7 +547,7 @@ export class HarmonyAccountCloudBridge {
     }
     const putReply = await this.bridge.putPreferenceDocument(
       merged as Object as Record<string, Object>);
-    if (putReply.error !== undefined || putReply.value === undefined) {
+    if (putReply.error !== undefined || putReply.value === undefined || putReply.value === null) {
       return this.failure(putReply.error ?? 'account_unavailable');
     }
     const updated = this.cloudOf(putReply.value);
@@ -569,13 +569,13 @@ export class HarmonyAccountCloudBridge {
       return this.failure('account_unauthorized');
     }
     const schemaReply = await this.bridge.preferenceSchema();
-    if (schemaReply.error !== undefined || schemaReply.value === undefined) {
+    if (schemaReply.error !== undefined || schemaReply.value === undefined || schemaReply.value === null) {
       return this.failure(schemaReply.error ?? 'account_unavailable');
     }
     const schema = this.schemaOf(schemaReply.value);
     if (schema === null) return this.failure('account_unavailable');
     const cloudReply = await this.bridge.loadPreferenceDocument();
-    if (cloudReply.error !== undefined || cloudReply.value === undefined) {
+    if (cloudReply.error !== undefined || cloudReply.value === undefined || cloudReply.value === null) {
       return this.failure(cloudReply.error ?? 'account_unavailable');
     }
     const cloud = this.cloudOf(cloudReply.value);
@@ -858,7 +858,7 @@ export class HarmonyAccountCloudBridge {
     const sha256: string = this.restoreMetadata.fileSha256;
     try {
       const restored = await this.bridge.restoreSnapshotAuthenticated(file, revision, sha256);
-      if (restored.value === undefined) {
+      if (restored.value === undefined || restored.value === null) {
         return this.failure(restored.error ?? 'account_unavailable');
       }
       return this.success(restored.value as SnapshotValue);
