@@ -64,7 +64,10 @@ fn replay_with(user_db: &Path, main_db: Option<&Path>, english_db: &Path) -> Rep
     let Some(main) = main else {
         return fail(result, "cannot open target dictionary database");
     };
-    if attach(&main, english_db, "replay_english").is_err() {
+    let Ok(english_db) = crate::paths::sqlite_path_no_follow(english_db) else {
+        return fail(result, "cannot attach English dictionary database");
+    };
+    if attach(&main, &english_db, "replay_english").is_err() {
         return fail(result, "cannot attach English dictionary database");
     }
     let Ok(mut rows) = journal.prepare(
