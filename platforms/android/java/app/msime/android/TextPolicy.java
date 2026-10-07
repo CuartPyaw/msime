@@ -1,5 +1,8 @@
 package app.msime.android;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
@@ -73,6 +76,14 @@ public final class TextPolicy {
     /** Decode UTF-8 response bytes with the shared text policy. */
     public static String utf8(byte[] value) {
         return value == null ? "" : new String(value, StandardCharsets.UTF_8);
+    }
+
+    /** Decode UTF-8 bytes strictly, reporting malformed or unmappable input to the caller. */
+    public static String utf8Strict(byte[] value) throws CharacterCodingException {
+        return StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .decode(ByteBuffer.wrap(value)).toString();
     }
 
     /** Encode UTF-8 request text, treating a missing value as empty text. */
