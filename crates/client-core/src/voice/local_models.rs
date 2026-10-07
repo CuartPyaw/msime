@@ -936,7 +936,9 @@ fn download_and_extract(
         downloaded: total,
         total,
     });
-    let mut zip = zip::ZipArchive::new(BufReader::new(fs::File::open(&partial)?))
+    let mut zip = zip::ZipArchive::new(BufReader::new(
+        crate::storage::open_private_file(&partial)?,
+    ))
         .map_err(|error| LocalModelError::UnsafeArchive(error.to_string()))?;
     for file in files {
         check_cancel(cancel)?;
@@ -1410,7 +1412,7 @@ fn extract(
     let total = model.archive.size;
     let consumed = Rc::new(Cell::new(0u64));
     let reader = Counting {
-        inner: fs::File::open(archive)?,
+        inner: crate::storage::open_private_file(archive)?,
         count: consumed.clone(),
     };
     let decoder = bzip2::read::MultiBzDecoder::new(BufReader::with_capacity(CHUNK, reader));
