@@ -380,7 +380,7 @@ fn restore_interrupted_adoption(staging: &Path) {
     if !metadata.file_type().is_file() || metadata.len() > MAX_ADOPTION_SOURCE_BYTES {
         return;
     }
-    let Ok(file) = fs::File::open(&record) else {
+    let Ok(file) = crate::storage::open_private_file(&record) else {
         return;
     };
     let Ok(bytes) =
@@ -1266,7 +1266,7 @@ pub fn installed_manifest(root: &Path, id: &str) -> Option<Value> {
         return None;
     }
     let bytes = crate::bounded_io::read_bounded_file_with(
-        fs::File::open(&path).ok()?,
+        crate::storage::open_private_file(&path).ok()?,
         MAX_MANIFEST_BYTES,
         || (),
         |_| (),
