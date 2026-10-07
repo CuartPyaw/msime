@@ -214,7 +214,8 @@ impl DictionarySnapshotQueue {
             return Err(SnapshotQueueError::Invalid);
         }
         let bytes = crate::bounded_io::read_bounded_file_with(
-            File::open(path).map_err(|_| SnapshotQueueError::Unavailable)?,
+            crate::storage::open_private_file(&path)
+                .map_err(|_| SnapshotQueueError::Unavailable)?,
             MAXIMUM_STATE_BYTES,
             || SnapshotQueueError::Invalid,
             |_| SnapshotQueueError::Unavailable,
