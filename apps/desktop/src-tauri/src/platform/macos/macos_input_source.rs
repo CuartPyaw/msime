@@ -138,6 +138,14 @@ fn copy_tree(source: &Path, destination: &Path) -> Result<(), InstallError> {
 }
 
 fn copy_tree_within(root: &Path, source: &Path, destination: &Path) -> Result<(), InstallError> {
+    if let Some(parent) = source.parent() {
+        crate::shared::atomic_file::check_directory_ancestors(parent)
+            .map_err(|_| InstallError::Io)?;
+    }
+    if let Some(parent) = destination.parent() {
+        crate::shared::atomic_file::check_directory_ancestors(parent)
+            .map_err(|_| InstallError::Io)?;
+    }
     let metadata = fs::symlink_metadata(source).map_err(|_| InstallError::Io)?;
     if metadata.file_type().is_symlink() {
         let target = fs::read_link(source).map_err(|_| InstallError::Io)?;
@@ -158,8 +166,21 @@ fn copy_tree_within(root: &Path, source: &Path, destination: &Path) -> Result<()
     if !metadata.is_file() {
         return Err(InstallError::InvalidBundle);
     }
-    fs::copy(source, destination).map_err(|_| InstallError::Io)?;
-    fs::set_permissions(destination, metadata.permissions()).map_err(|_| InstallError::Io)
+    let mut input =
+        crate::shared::atomic_file::open_private(source).map_err(|_| InstallError::Io)?;
+    if !input.metadata().map_err(|_| InstallError::Io)?.is_file() {
+        return Err(InstallError::InvalidBundle);
+    }
+    let mut output = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)
+        .map_err(|_| InstallError::Io)?;
+    io::copy(&mut input, &mut output).map_err(|_| InstallError::Io)?;
+    output
+        .set_permissions(metadata.permissions())
+        .map_err(|_| InstallError::Io)?;
+    output.sync_all().map_err(|_| InstallError::Io)
 }
 
 fn remove_staging(path: &Path) -> Result<(), InstallError> {
@@ -1333,6 +1354,23 @@ mod tests {
             validate_bundle(&source),
             Err(InstallError::InvalidBundle)
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_symlinked_file_destination_without_writing_through_it() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempdir().unwrap();
+        let source = root.path().join("source");
+        fs::write(&source, b"synthetic-source").unwrap();
+        let outside = root.path().join("outside");
+        fs::write(&outside, b"synthetic-outside").unwrap();
+        let destination = root.path().join("destination");
+        symlink(&outside, &destination).unwrap();
+
+        assert!(copy_tree_within(root.path(), &source, &destination).is_err());
+        assert_eq!(fs::read(&outside).unwrap(), b"synthetic-outside");
     }
 
     #[cfg(unix)]
