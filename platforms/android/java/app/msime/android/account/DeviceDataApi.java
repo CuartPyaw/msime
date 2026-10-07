@@ -157,7 +157,7 @@ public final class DeviceDataApi {
             if (!validSessionId(id)) continue;
             sessions.add(new Session(id, string(row, "platform"), string(row, "name"), string(row, "app_version"),
                 instant(string(row, "created_at")), instant(string(row, "last_active")),
-                Boolean.TRUE.equals(row.opt("current"))));
+                JsonPolicy.strictTrue(row.opt("current"))));
         }
         return Collections.unmodifiableList(sessions);
     }

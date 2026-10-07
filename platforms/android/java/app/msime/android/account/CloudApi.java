@@ -290,7 +290,7 @@ public final class CloudApi {
 
     /** JSON 布尔值只有严格的 `true` 才算；字符串和数字都不算。 */
     static boolean strictTrue(Object value) {
-        return Boolean.TRUE.equals(value);
+        return JsonPolicy.strictTrue(value);
     }
 
     // ---- multipart ----
