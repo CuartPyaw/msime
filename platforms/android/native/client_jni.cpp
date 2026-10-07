@@ -83,6 +83,7 @@ static jbyteArray response(JNIEnv *env, char *value) {
 namespace {
 template <typename Call> jbyteArray bounded_request(JNIEnv *env, jbyteArray request, jsize limit, Call call);
 constexpr jsize kThemeRequestLimit = 1 * 1024 * 1024;
+constexpr jsize kTypingStatisticsRequestLimit = 65536;
 }
 
 extern "C" {
@@ -130,14 +131,7 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_resolveThemeRaw
     return bounded_request(env, request, kThemeRequestLimit, msime_client_resolve_theme);
 }
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_typingStatisticsRaw(JNIEnv *env, jclass, jbyteArray request) {
-    if (!request) return response(env, msime_client_typing_statistics(nullptr, 0));
-    jsize length = env->GetArrayLength(request);
-    jbyte *bytes = env->GetByteArrayElements(request, nullptr);
-    if (!bytes) return nullptr;
-    char *result = msime_client_typing_statistics(
-        reinterpret_cast<const uint8_t *>(bytes), static_cast<size_t>(length));
-    env->ReleaseByteArrayElements(request, bytes, JNI_ABORT);
-    return response(env, result);
+    return bounded_request(env, request, kTypingStatisticsRequestLimit, msime_client_typing_statistics);
 }
 // 1 enabled, 0 disabled or missing, -1 invalid directory or unreadable document; the Java side treats anything but 1 as off.
 JNIEXPORT jint JNICALL Java_app_msime_android_NativeClient_typingStatisticsEnabledRaw(JNIEnv *env, jclass, jbyteArray directory) {
