@@ -87,6 +87,7 @@ constexpr jsize kTypingStatisticsRequestLimit = 65536;
 constexpr jsize kPrepareHostRequestLimit = 16384;
 constexpr jsize kSavePreferencesDirectoryLimit = 16384;
 constexpr jsize kSavePreferencesSnapshotLimit = 1 * 1024 * 1024;
+constexpr jsize kMobileVoiceDirectoryLimit = 16384;
 constexpr jsize kRefreshHostPathLimit = 4096;
 constexpr jsize kSnapshotVersionRequestLimit = 1 * 1024 * 1024;
 }
@@ -438,14 +439,8 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_setEnglishModeR
 // same response helper: both are NUL-terminated strings this side must free. A null answer means
 // the text was not convertible and the caller keeps the original.
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_mobileVoiceConfigurationRaw(JNIEnv *env, jclass, jbyteArray directory) {
-    if (!directory) return response(env, msime_client_mobile_voice_configuration(nullptr, 0));
-    jsize length = env->GetArrayLength(directory);
-    jbyte *bytes = env->GetByteArrayElements(directory, nullptr);
-    if (!bytes) return nullptr;
-    char *result = msime_client_mobile_voice_configuration(
-        reinterpret_cast<const uint8_t *>(bytes), static_cast<size_t>(length));
-    env->ReleaseByteArrayElements(directory, bytes, JNI_ABORT);
-    return response(env, result);
+    return bounded_request(env, directory, kMobileVoiceDirectoryLimit,
+        msime_client_mobile_voice_configuration);
 }
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_simplifiedToTraditionalRaw(JNIEnv *env, jclass, jbyteArray text) {
     if (!text) return nullptr;
