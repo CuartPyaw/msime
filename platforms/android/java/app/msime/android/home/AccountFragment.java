@@ -51,7 +51,7 @@ public final class AccountFragment extends HomeTabFragment {
     @Override public void onViewCreated(@NonNull View view, @Nullable Bundle state) {
         View card = view.findViewById(R.id.account_card);
         card.setBackground(Ui.rippleOn(requireContext(), Ui.card(requireContext()), Ui.dp(requireContext(), 20)));
-        card.setOnClickListener(ignored -> openProfile());
+        ViewPolicy.bindClick(card, this::openProfile);
         render();
     }
 
