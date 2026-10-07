@@ -225,6 +225,15 @@ void classicuiTakeoverRecord() {
   else unsetenv("XDG_STATE_HOME");
   std::filesystem::remove_all(root);
 }
+
+void translationPreferenceChangesIncludeAccount() {
+  const Json before = Json{{"translation_account", false}};
+  auto after = before;
+  after["translation_account"] = true;
+  require(FcitxState::translationPreferencesChanged(before, after),
+          "translation account changes invalidate translation requests");
+}
+
 int main(int argc, char **argv) {
   try {
     autocorrectMarker();
@@ -232,6 +241,7 @@ int main(int argc, char **argv) {
     candidateThemeDecoration();
     modeBadgeTheme();
     classicuiTakeoverRecord();
+    translationPreferenceChangesIncludeAccount();
     require(argc == 2 || (argc == 3 && (std::string(argv[2]) == "--ai" ||
                                        std::string(argv[2]) == "--ctrl-space" ||
                                        std::string(argv[2]) == "--local-modes")),
