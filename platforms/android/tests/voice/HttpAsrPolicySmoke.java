@@ -46,6 +46,9 @@ public final class HttpAsrPolicySmoke {
             "a control character is refused rather than smuggled into a header");
         check(!HttpAsrPolicy.usable("openai", endpoint + "\uD800", "whisper-1", "token"),
             "malformed Unicode in an endpoint is refused");
+        check(!HttpAsrPolicy.usable("openai", endpoint, "whisper-1\uD800", "token")
+                && !HttpAsrPolicy.usable("openai", endpoint, "whisper-1", "token\uD800"),
+            "malformed Unicode in model and token is refused");
         check(!HttpAsrPolicy.usable("doubao", endpoint, "whisper-1", "token"),
             "an unsupported provider is not usable however complete it looks");
         check(!HttpAsrPolicy.usable("openai", null, "whisper-1", "token"),

@@ -54,9 +54,9 @@ public final class HttpAsrPolicy {
         return supported(provider)
             && TextPolicy.validAuthority(endpoint, "https://", AiPolishConfiguration.MAX_ENDPOINT_LENGTH)
             && model != null && !model.trim().isEmpty() && model.length() <= 512
-            && !TextPolicy.hasControl(model)
+            && !TextPolicy.hasControl(model) && TextPolicy.validUnicode(model)
             && token != null && !token.trim().isEmpty() && token.length() <= 16 * 1024
-            && !TextPolicy.hasControl(token);
+            && !TextPolicy.hasControl(token) && TextPolicy.validUnicode(token);
     }
 
     /** A boundary that cannot occur in the parts, derived from the request rather than random. */
