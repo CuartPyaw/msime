@@ -23,6 +23,7 @@ public final class LocalAsrPolicySmoke {
         check(!LocalAsrPolicy.usable("local", "models/x"), "a relative path is refused");
         check(!LocalAsrPolicy.usable("local", "/models/x\n/other"), "a control character is refused");
         check(!LocalAsrPolicy.usable("local", "/" + "a".repeat(LocalAsrPolicy.MAX_PATH_LENGTH)), "an overlong path is refused");
+        check(!LocalAsrPolicy.usable("local", "/" + "😀".repeat(1024)), "a path over the shared UTF-8 byte limit is refused");
 
         Path root = Files.createTempDirectory("msime-local-asr");
         try {
