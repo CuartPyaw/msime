@@ -2867,6 +2867,7 @@ dependencies = [
  "cpal",
  "hex",
  "kira",
+ "libc",
  "lru",
  "msime-client-core",
  "msime-engine",
