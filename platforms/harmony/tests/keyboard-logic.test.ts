@@ -10701,6 +10701,42 @@ group("the account assistant answers with a model list and one reply", () => {
     });
 });
 
+group("account chat refuses blank and control-bearing content", () => {
+  const session = JSON.stringify({
+    access_token: "a".repeat(64),
+    refresh_token: "b".repeat(64),
+    token_type: "Bearer",
+    expires_at: Date.now() + 600_000,
+    user: { id: "synthetic-user", display_name: "Test", created_at: "2026-01-01" },
+  });
+  let calls = 0;
+  let content = "第一行\n第二行";
+  const bridge = new AccountCloudBridge({
+    request: async () => {
+      calls++;
+      return { status: 200, body: JSON.stringify({ choices: [{ message: { role: "assistant", content } }] }) };
+    },
+  }, { load: () => session, save: () => {}, clear: () => {} });
+  const ask = (message: string) => bridge.handle(JSON.stringify({
+    operation: "chat", chat_operation: "complete", model: "synthetic-model",
+    messages: [{ role: "user", content: message }],
+  }));
+  void ask("\n\t ").then((reply) => {
+    check(JSON.parse(reply).error === "account_invalid", "blank chat messages are refused");
+    return ask("safe\u0000hidden");
+  }).then((reply) => {
+    check(JSON.parse(reply).error === "account_invalid", "messages with NUL are refused");
+    check(calls === 0, "invalid messages do not reach transport");
+    return ask("第一行\n第二行");
+  }).then((reply) => {
+    check(JSON.parse(reply).ok === true, "ordinary paragraphs remain accepted");
+    content = "unsafe\u007fcontent";
+    return ask("valid request");
+  }).then((reply) => {
+    check(JSON.parse(reply).error === "account_unavailable", "control-bearing replies are refused");
+  });
+});
+
 group("a device's own buttons are not a keyboard", () => {
   // Every phone enumerates a keyboard source for volume and power. Only the type separates them,
   // which is the whole reason this decision is not `sources.includes("keyboard")`.

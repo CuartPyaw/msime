@@ -637,6 +637,15 @@ function boundedUtf8(value: unknown, maximumBytes: number): value is string {
   return typeof value === "string" && utf8Length(value) <= maximumBytes;
 }
 
+/** Chat paragraphs allow tabs and line breaks, but not other Unicode controls. */
+function validChatText(value: unknown, maximumBytes: number): value is string {
+  if (typeof value !== "string" || value.trim().length === 0 ||
+      !boundedUtf8(value, maximumBytes) || !TextPolicy.validUnicode(value)) return false;
+  return ![...value].some((character) =>
+    character !== "\t" && character !== "\n" && character !== "\r" &&
+    TextPolicy.hasControl(character));
+}
+
 function validCandidateKind(value: unknown): value is string {
   return typeof value === "string" &&
     ["pinyin", "jianpin", "wubi", "wubi98", "quick", "english"].includes(value);
@@ -1224,14 +1233,10 @@ export class AccountCloudBridge {
       }
       const role = (message as Action).role;
       const content = (message as Action).content;
-      // Newlines are content here, not a control character to refuse: a conversation is written in
-      // paragraphs, and the shared clients bound the text by bytes rather than by character class.
       if (
         typeof role !== "string" ||
         !CHAT_ROLES.includes(role) ||
-        typeof content !== "string" ||
-        content.length === 0 ||
-        !boundedUtf8(content, MAX_CHAT_MESSAGE_BYTES)
+        !validChatText(content, MAX_CHAT_MESSAGE_BYTES)
       ) {
         return error("account_invalid");
       }
@@ -1266,9 +1271,7 @@ export class AccountCloudBridge {
     const content = (reply as Action).content;
     if (
       role !== "assistant" ||
-      typeof content !== "string" ||
-      content.trim().length === 0 ||
-      !boundedUtf8(content, MAX_CHAT_RESPONSE_BYTES)
+      !validChatText(content, MAX_CHAT_RESPONSE_BYTES)
     ) {
       return error("account_unavailable");
     }
