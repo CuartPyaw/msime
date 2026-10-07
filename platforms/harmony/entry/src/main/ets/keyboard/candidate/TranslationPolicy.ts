@@ -28,6 +28,8 @@ export interface TranslationQuery {
   generation: number;
   target_language: string;
   target_languages?: string[];
+  provider?: string;
+  translation_account?: boolean;
   candidates: TranslationCandidate[];
   custom_translation?: TranslationProviderConfig | null;
   tencent_tmt?: TencentTranslationConfig | null;
@@ -108,7 +110,7 @@ export class TranslationPolicy {
     return "";
   }
 
-  /** Signature excludes credentials while still invalidating work on account/provider changes. */
+  /** 签名不携带凭据原文，但凭据轮换仍必须让旧请求失效。 */
   static signature(query: TranslationQuery): string {
     const custom: TranslationProviderConfig | null = query.custom_translation ?? null;
     const niutrans: NiuTransTranslationConfig | null = query.niutrans ?? null;
@@ -119,10 +121,25 @@ export class TranslationPolicy {
       candidates: query.candidates.map((candidate: TranslationCandidate): string => candidate.text),
       english_gloss: query.english_gloss,
       provider: TranslationPolicy.provider(query),
+      translation_account: query.translation_account === true,
       endpoint: custom?.endpoint ?? "",
       app_id: niutrans?.app_id ?? "",
       region: tencent?.region ?? "",
+      custom_credential: TranslationPolicy.credentialFingerprint(custom?.api_key ?? ""),
+      niutrans_credential: TranslationPolicy.credentialFingerprint(niutrans?.apikey ?? ""),
+      tencent_id: TranslationPolicy.credentialFingerprint(tencent?.secret_id ?? ""),
+      tencent_credential: TranslationPolicy.credentialFingerprint(tencent?.secret_key ?? ""),
     });
+  }
+
+  /** 为失效签名和缓存作用域生成不含凭据原文的稳定指纹。 */
+  static credentialFingerprint(value: string): string {
+    let hash: number = 2166136261;
+    for (let index = 0; index < value.length; index++) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `${value.length}:${hash >>> 0}`;
   }
 
   /** 判断失败请求是否仍可释放当前签名，让同一候选页在下一次刷新时重试。 */
@@ -150,8 +167,19 @@ export class TranslationPolicy {
 
   static providerScope(query: TranslationQuery): string {
     const provider: string = TranslationPolicy.provider(query);
-    if (provider === "custom") return `custom:${query.custom_translation?.endpoint ?? ""}`;
-    if (provider === "niutrans") return `niutrans:${query.niutrans?.app_id ?? ""}`;
+    if (provider === "custom") {
+      return `custom:${query.custom_translation?.endpoint ?? ""}:${TranslationPolicy.credentialFingerprint(
+        query.custom_translation?.api_key ?? "")}`;
+    }
+    if (provider === "niutrans") {
+      return `niutrans:${query.niutrans?.app_id ?? ""}:${TranslationPolicy.credentialFingerprint(
+        query.niutrans?.apikey ?? "")}`;
+    }
+    if (provider === "tencent") {
+      return `tencent:${query.tencent_tmt?.region ?? ""}:${TranslationPolicy.credentialFingerprint(
+        query.tencent_tmt?.secret_id ?? "")}:${TranslationPolicy.credentialFingerprint(
+        query.tencent_tmt?.secret_key ?? "")}`;
+    }
     return provider;
   }
 

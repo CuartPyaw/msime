@@ -855,6 +855,28 @@ group("keeps translation provider policy bounded and credential-free in signatur
     !TranslationPolicy.signature(query).includes("secret"),
     "provider signatures never contain credentials",
   );
+  const rotated = {
+    ...query,
+    niutrans: { enabled: true, app_id: "account", apikey: "rotated" },
+  };
+  check(
+    TranslationPolicy.signature(query) !== TranslationPolicy.signature(rotated),
+    "rotating a provider credential invalidates the in-flight translation",
+  );
+  check(
+    TranslationPolicy.cacheKey(query, "en", {
+      text: "你好",
+      key: "你好",
+      source_language: "zh",
+      target_language: "en",
+    }) !== TranslationPolicy.cacheKey(rotated, "en", {
+      text: "你好",
+      key: "你好",
+      source_language: "zh",
+      target_language: "en",
+    }),
+    "rotating a provider credential does not reuse its translation cache",
+  );
   check(
     TranslationPolicy.cacheKey(query, "en", {
       text: "你好",
