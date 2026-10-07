@@ -934,7 +934,7 @@ class SettingsBridge {
       }
       const file: fs.File = fs.openSync(staging, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
       try {
-        fs.writeSync(file.fd, request.contents);
+        await fs.write(file.fd, request.contents);
       } finally {
         fs.closeSync(file);
       }
@@ -945,7 +945,7 @@ class SettingsBridge {
         return JSON.stringify({ ok: true, value: null, error: '' });
       }
       destination = selected[0];
-      fs.copyFileSync(staging, destination);
+      await fs.copyFile(staging, destination);
       KeyboardLog.info('export saved');
       // The picker answers with a provider URI, which means nothing to the user; the file's own name is what they will look for.
       return JSON.stringify({ ok: true, value: SkinImportPolicy.pickedName(destination) ?? name, error: '' });
