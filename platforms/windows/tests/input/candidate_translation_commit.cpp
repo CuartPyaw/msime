@@ -68,12 +68,27 @@ int main() {
   const auto query = session.online_query(epoch);
   require(query.has_value(), "no online query for the composition");
   require(session.apply_ai_candidates(epoch, *query, R"(["你好"])").has_value(), "the fixture candidate was not applied");
-  const auto view = session.view();
+  auto view = session.view();
   require(!view.at("candidates").empty(), "the fixture produced no candidate");
   require(session.apply_translations(epoch, view.at("generation").get<uint64_t>(),
                                      R"([{"text":"你好","translation":"hello"}])")
               .has_value(),
           "the translation was not applied");
+  auto disabled = nlohmann::json{{"format_version", 1},
+                                 {"revision", 1},
+                                 {"preferences", options["preferences"]}};
+  disabled["preferences"]["candidate_translations"] = false;
+  const auto after_disable = session.update_preferences(epoch, disabled.dump());
+  require(after_disable.at("view").at("candidates").at(0).value("translation", "") == "",
+          "disabling translations clears the displayed gloss");
+  disabled["revision"] = 2;
+  disabled["preferences"]["candidate_translations"] = true;
+  session.update_preferences(epoch, disabled.dump());
+  view = session.view();
+  require(session.apply_translations(epoch, view.at("generation").get<uint64_t>(),
+                                     R"([{"text":"你好","translation":"hello"}])")
+              .has_value(),
+          "the translation could not be restored after the preference test");
 
   ReplyComposer composer(42, epoch);
   FanyImeNamedpipeData enter{};
