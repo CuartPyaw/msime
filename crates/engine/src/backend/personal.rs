@@ -2,7 +2,6 @@
 //!
 //! The journal is the engine's own (`user_dictionary_operations`, `fixed_candidate_positions`, `candidate_selection_state`), unchanged since the C++ engine, so the rows the server stored through the old bridge replay as they always did.
 
-use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
@@ -53,7 +52,8 @@ fn require_roots(roots: Roots) -> Result<(), BackendError> {
 fn snapshot_lines(
     scratch: &Path,
 ) -> Result<impl Iterator<Item = Result<Value, BackendError>>, BackendError> {
-    let file = File::open(scratch.join(SNAPSHOT)).map_err(|_| BackendError::EngineFailure)?;
+    let file = crate::paths::open_file_no_follow(&scratch.join(SNAPSHOT))
+        .map_err(|_| BackendError::EngineFailure)?;
     Ok(BufReader::new(file).lines().map(|line| {
         let line = line.map_err(|_| BackendError::EngineFailure)?;
         if line.len() > MAXIMUM_LINE_BYTES {
