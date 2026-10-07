@@ -108,7 +108,11 @@ inline std::filesystem::path prepare_host_state_in_directory(
   // any destination created concurrently. Unsupported filesystems fail closed.
   // Do not remove prepared data on failure: the user may need it to diagnose.
   std::filesystem::create_hard_link(temporary, destination);
+#ifdef _WIN32
+  (void)remove_private_file(temporary);
+#else
   std::filesystem::remove(temporary);
+#endif
   return destination;
 }
 

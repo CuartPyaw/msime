@@ -185,7 +185,7 @@ bool write_store(const std::filesystem::path &path, const std::vector<std::strin
   if (handle == INVALID_HANDLE_VALUE || !handle_is_trusted_file(handle)) {
     if (handle != INVALID_HANDLE_VALUE)
       CloseHandle(handle);
-    std::filesystem::remove(temporary, error);
+    (void)remove_private_file(temporary);
     return false;
   }
   DWORD written = 0;
@@ -199,7 +199,7 @@ bool write_store(const std::filesystem::path &path, const std::vector<std::strin
   if (!complete || !MoveFileExW(temporary.c_str(), path.c_str(),
                                 MOVEFILE_REPLACE_EXISTING |
                                     MOVEFILE_WRITE_THROUGH)) {
-    std::filesystem::remove(temporary, error);
+    (void)remove_private_file(temporary);
     return false;
   }
   return true;
