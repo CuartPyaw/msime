@@ -8894,6 +8894,32 @@ group("dictionary candidate requests use the shared query contract", () => {
   }).then((reply) => {
     check(JSON.parse(reply).error === "account_invalid", "an unknown ranking mode is refused");
     check(paths.length === 1, "an invalid ranking request never reaches transport");
+    return bridge.handle(JSON.stringify({
+      ...valid,
+      kind: "quick",
+      dictionary_operation: "rank",
+      code: "ab",
+      word: "字",
+      revision: 0,
+      mode: "pin",
+      linear_step: 1,
+      trigger_count: 1,
+      force_top: false,
+    }));
+  }).then((reply) => {
+    check(JSON.parse(reply).error === "account_invalid", "quick phrases cannot be ranked");
+    check(paths.length === 1, "a quick ranking request never reaches transport");
+    return bridge.handle(JSON.stringify({
+      ...valid,
+      kind: "quick",
+      dictionary_operation: "remove_candidate",
+      code: "ab",
+      word: "字",
+      revision: 0,
+    }));
+  }).then((reply) => {
+    check(JSON.parse(reply).error === "account_invalid", "quick phrases cannot be removed as candidates");
+    check(paths.length === 1, "a quick candidate removal never reaches transport");
   });
 });
 

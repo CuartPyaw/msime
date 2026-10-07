@@ -712,6 +712,11 @@ function validDictionaryIdentity(kind: string, code: unknown, word: unknown): bo
   return false;
 }
 
+function validCandidateValue(kind: string, code: unknown, word: unknown): boolean {
+  return validString(code, 256) && validString(word, 1024) &&
+    (kind !== "quick" || (word as string).length <= MAX_QUICK_PHRASE_UTF16);
+}
+
 function parseBody(body: string): Action | null {
   if (body.length === 0 || utf8Length(body) > MAX_ACTION_BYTES) return null;
   try {
@@ -1808,8 +1813,8 @@ export class AccountCloudBridge {
         !validCandidateScheme(action.scheme) ||
         !validCandidateProfile(action.profile) ||
         !this.boundedNumber(action.limit, 1, 100) ||
-        !validString(action.code, 256) ||
-        !validString(action.word, 1024) ||
+        !validCandidateValue(action.kind, action.code, action.word) ||
+        action.kind === "quick" ||
         !this.boundedNumber(action.revision, 0, 2147483647) ||
         !validCandidateRankingMode(action.mode) ||
         !this.boundedNumber(action.linear_step, 1, 100) ||
@@ -1843,8 +1848,8 @@ export class AccountCloudBridge {
         !validCandidateScheme(action.scheme) ||
         !validCandidateProfile(action.profile) ||
         !this.boundedNumber(action.limit, 1, 100) ||
-        !validString(action.code, 256) ||
-        !validString(action.word, 1024) ||
+        !validCandidateValue(action.kind, action.code, action.word) ||
+        action.kind === "quick" ||
         !this.boundedNumber(action.revision, 0, 2147483647)
       )
         return error("account_invalid");
