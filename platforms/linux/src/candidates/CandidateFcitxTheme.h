@@ -455,7 +455,7 @@ inline std::optional<FcitxThemeOverlay> stage_fcitx_overlay(const std::filesyste
   if (std::find(std::begin(kinds), std::end(kinds), extension) == std::end(kinds)) return std::nullopt;
   std::error_code error;
   if (!std::filesystem::is_regular_file(source, error)) return std::nullopt;
-  const int descriptor = ::open(source.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  const int descriptor = ::open(source.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
   if (descriptor < 0) return std::nullopt;
   struct CloseOnExit {
     int descriptor;
