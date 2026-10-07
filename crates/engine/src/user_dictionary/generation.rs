@@ -114,9 +114,9 @@ pub fn prepare_runtime_paths_for(
         stage_generation_copies(resources, &stage, true)?;
         replay_into(&result, &stage, main_dictionary)?;
         index_reverse_lookup(&stage, main_dictionary);
-        fs::write(
-            stage.join(assets::GENERATION_READY),
-            format!("{content_id}\n"),
+        write_private_file(
+            &stage.join(assets::GENERATION_READY),
+            format!("{content_id}\n").as_bytes(),
         )
         .map_err(|_| EngineError::failed(diagnostics::RUNTIME_FINALIZE_FAILED))?;
         fs::rename(&stage, &result.dictionaries)?;
@@ -232,6 +232,13 @@ fn copy_database(source: &Path, target: &Path) -> Result<()> {
 
 pub(super) fn copy_private_file(source: &Path, target: &Path) -> io::Result<u64> {
     let mut input = crate::paths::open_file_no_follow(source)?;
+    let mut output = create_private_file(target)?;
+    let copied = io::copy(&mut input, &mut output)?;
+    output.sync_all()?;
+    Ok(copied)
+}
+
+fn create_private_file(path: &Path) -> io::Result<fs::File> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -245,10 +252,14 @@ pub(super) fn copy_private_file(source: &Path, target: &Path) -> io::Result<u64>
         const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
         options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
     }
-    let mut output = options.open(target)?;
-    let copied = io::copy(&mut input, &mut output)?;
+    options.open(path)
+}
+
+fn write_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut output = create_private_file(path)?;
+    io::Write::write_all(&mut output, bytes)?;
     output.sync_all()?;
-    Ok(copied)
+    Ok(())
 }
 
 /// 词库发布把五笔码表单独放在只读的 `msime-wubi.db` 里，`msime-pinyin.db` 不再含 `wubi86`/`wubi98`。五笔的学习调序、删词、个人词典编辑与日志回放都写代次里的工作主词库，五笔 provider 也从它读，所以准备代次（以及重置学习数据）时把这两张表连同索引并回工作副本：读写落在同一个文件上，学到的权重立即可见。资源目录没有 `msime-wubi.db`（旧的合并发布）或工作副本里已有同名表时不动。
@@ -1094,5 +1105,21 @@ mod tests {
 
         assert!(copy_private_file(&directory.path().join("linked.bin"), &target).is_err());
         assert!(!target.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn generation_marker_writing_rejects_a_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("outside.txt");
+        std::fs::write(&target, b"keep").unwrap();
+        let marker = directory.path().join(".ready");
+        symlink(&target, &marker).unwrap();
+
+        assert!(write_private_file(&marker, b"ready\n").is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"keep");
     }
 }
