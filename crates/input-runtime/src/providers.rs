@@ -713,7 +713,7 @@ impl UnixSocketProvider {
         missing_dependency: &mut Option<&'static str>,
     ) -> Option<String> {
         if generation == 0
-            || language.len() > 64
+            || !msime_client_core::is_bounded_text(language, 64)
             || cancelled.is_some_and(|value| value.load(Ordering::Relaxed))
         {
             return None;
@@ -779,7 +779,7 @@ impl UnixSocketProvider {
                 None => return None,
             }
             let text = value.get("text").and_then(Value::as_str).unwrap_or("");
-            if text.len() > 4096 {
+            if !msime_client_core::is_bounded_text_with_options(text, 4096, true) {
                 return None;
             }
             let kind = value

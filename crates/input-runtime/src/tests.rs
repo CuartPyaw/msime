@@ -529,6 +529,44 @@ fn voice_provider_rejects_unknown_event_types() {
 
 #[cfg(unix)]
 #[test]
+fn voice_provider_rejects_control_characters_in_transcripts() {
+    let directory = private_tempdir();
+    let socket = directory.path().join("voice.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = String::new();
+        std::io::BufRead::read_line(
+            &mut std::io::BufReader::new(stream.try_clone().unwrap()),
+            &mut request,
+        )
+        .unwrap();
+        std::io::Write::write_all(
+            &mut stream,
+            br#"{"generation":7,"type":"final","text":"bad\u0000text","ok":true}"#,
+        )
+        .unwrap();
+        std::io::Write::write_all(&mut stream, b"\n").unwrap();
+    });
+    let provider = UnixSocketProvider::new(socket);
+    let mut updates = Vec::new();
+    assert!(provider
+        .voice_stream_with_options_feedback(
+            "zh-cn",
+            7,
+            &Value::Null,
+            None,
+            &mut |text, final_result| updates.push((text.to_owned(), final_result)),
+            None,
+            None,
+        )
+        .is_none());
+    assert!(updates.is_empty(), "control-bearing transcript reached callbacks");
+    server.join().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
 fn voice_provider_rejects_final_events_without_success_envelope() {
     let directory = private_tempdir();
     let socket = directory.path().join("voice.sock");
