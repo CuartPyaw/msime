@@ -45,6 +45,7 @@
 #include "../src/core/DictionaryQuiesceLease.h"
 #include "../src/core/EmojiPluginGroups.h"
 #include "../src/core/RuntimeOptionsRefresh.h"
+#include "../src/core/RuntimeOptionsFile.h"
 #include "../src/core/FirstRunGuidance.h"
 #include "../src/core/InputModeIndicator.h"
 #include "../src/core/InputStatus.h"
@@ -291,12 +292,7 @@ std::filesystem::path optionsPath() {
 }
 
 Json readOptions() {
-  std::ifstream file(optionsPath());
-  std::array<char, 16385> data{};
-  file.read(data.data(), data.size());
-  if (file.bad() || file.gcount() <= 0 || file.gcount() >= static_cast<std::streamsize>(data.size()))
-    throw std::runtime_error("MSIME configuration unavailable");
-  return Json::parse(data.data(), data.data() + file.gcount());
+  return Json::parse(msime::linux_host::read_runtime_options(optionsPath()));
 }
 
 using CandidateSkinCatalog = std::vector<msime::linux_host::CandidateSkin>;
