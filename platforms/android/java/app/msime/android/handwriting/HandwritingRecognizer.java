@@ -53,9 +53,7 @@ public interface HandwritingRecognizer extends AutoCloseable {
     static String clipPreContext(String value) {
         if (value == null || value.isEmpty()) return "";
         String text = TextPolicy.removeControls(value);
-        int count = text.codePointCount(0, text.length());
-        if (count <= MAX_PRE_CONTEXT) return text;
-        return text.substring(text.offsetByCodePoints(0, count - MAX_PRE_CONTEXT));
+        return TextPolicy.tailCodePoints(text, MAX_PRE_CONTEXT);
     }
 
     Availability availability();
