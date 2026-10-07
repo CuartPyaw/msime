@@ -208,7 +208,6 @@ TEXT_ENTRY(KeyboardSkinTrial, msime_client_keyboard_skin_trial)
 TEXT_ENTRY(AiSkinPlan, msime_client_ai_skin_plan)
 TEXT_ENTRY(Dictionary, msime_client_dictionary)
 TEXT_ENTRY(TypingStatistics, msime_client_typing_statistics)
-TEXT_ENTRY(VocabularyReview, msime_client_vocabulary_review)
 TEXT_ENTRY(MobileClipboardHistory, msime_client_mobile_clipboard_history)
 TEXT_ENTRY(PersonalDictionarySync, msime_client_personal_dictionary_sync)
 TEXT_ENTRY(PersonalDictionaryRequest, msime_client_personal_dictionary_request)
@@ -483,6 +482,12 @@ static napi_value CustomSkinLibrary(napi_env env, napi_callback_info info) {
 static napi_value CommunityResourceLibrary(napi_env env, napi_callback_info info) {
     return queueRequest(env, info, msime_client_community_resource_library,
         "MSIME community resource library");
+}
+
+// Wordbook imports are bounded at several megabytes and rewrite the selected book and review
+// progress. Keep parsing, file locks and atomic replacement off the ArkTS thread.
+static napi_value VocabularyReview(napi_env env, napi_callback_info info) {
+    return queueRequest(env, info, msime_client_vocabulary_review, "MSIME vocabulary review");
 }
 
 // A pack import extracts or copies up to a music pack's size and validates it before swapping it into place, which the header says belongs on a worker thread, so it runs as async work and answers through a promise. The small catalog, remove and name-list calls stay on the synchronous `plugins` entry.
