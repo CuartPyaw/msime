@@ -1441,13 +1441,7 @@ public:
   }
   void clearOnlineCandidates(uint8_t source) {
     if (!session_ || source >= 2) return;
-    const auto &query = !online_display_queries_[source].empty()
-        ? online_display_queries_[source] : online_query_;
-    if (query.empty()) return;
-    const auto empty = std::string("[]");
-    view_ = response(msime_client_apply_online_candidates(
-        session_, reinterpret_cast<const uint8_t *>(query.data()), query.size(),
-        reinterpret_cast<const uint8_t *>(empty.data()), empty.size(), source)).at("view");
+    view_ = response(msime_client_clear_online_candidates(session_, source)).at("view");
     online_display_queries_[source].clear();
   }
   static bool translationPreferencesChanged(const Json &before, const Json &after) {
@@ -1484,13 +1478,13 @@ public:
     const bool previousCloud = preferences_.value("cloud_candidates", true);
     const bool nextCloud = snapshot.at("preferences").value("cloud_candidates", true);
     const bool cloudChanged = previousCloud != nextCloud;
-    const bool aiDisabled = previousAi.value("enabled", false) &&
-                            !nextAi.value("enabled", false);
+    const bool aiChangedWhileEnabled = aiChanged &&
+                                       previousAi.value("enabled", false);
     const bool translationChanged = translationPreferencesChanged(
         preferences_, snapshot.at("preferences"));
     // 先用旧偏好清掉已显示的在线候选；更新偏好后 Host API 会拒绝旧查询，旧行会因此残留。
     if (cloudChanged && previousCloud && !nextCloud) clearOnlineCandidates(0);
-    if (aiDisabled) clearOnlineCandidates(1);
+    if (aiChangedWhileEnabled) clearOnlineCandidates(1);
     const auto encoded = effectiveContextSnapshot(snapshot).dump();
     view_ = response(msime_client_update_preferences(
         session_, reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size())).at("view");
@@ -1703,13 +1697,13 @@ public:
             const bool previousCloud = preferences_.value("cloud_candidates", true);
             const bool nextCloud = effectivePreferences.value("cloud_candidates", true);
             const bool cloudChanged = previousCloud != nextCloud;
-            const bool aiDisabled = previousAi.value("enabled", false) &&
-                                    !nextAi.value("enabled", false);
+            const bool aiChangedWhileEnabled = aiChanged &&
+                                               previousAi.value("enabled", false);
             const bool translationChanged = translationPreferencesChanged(
                 preferences_, effectivePreferences);
             // 先用旧偏好清掉已显示的在线候选；更新偏好后 Host API 会拒绝旧查询，旧行会因此残留。
             if (cloudChanged && previousCloud && !nextCloud) clearOnlineCandidates(0);
-            if (aiDisabled) clearOnlineCandidates(1);
+            if (aiChangedWhileEnabled) clearOnlineCandidates(1);
             const auto encoded = effective.dump();
             view_ = response(msime_client_update_preferences(session_,
                 reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size())).at("view");

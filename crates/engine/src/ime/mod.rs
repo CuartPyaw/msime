@@ -575,6 +575,15 @@ impl ImeSession {
         true
     }
 
+    /// Remove one provider's rows from all provider caches and rebuild the live candidate list.
+    pub fn clear_online_candidates(&mut self, source: CandidateSource) {
+        if !source.is_online() {
+            return;
+        }
+        self.registry.clear_online_candidates(source);
+        self.refresh_candidates();
+    }
+
     /// ime_session.cpp:299-369.
     fn refresh_candidates(&mut self) {
         self.state.preedit = self.scheme.preedit();
