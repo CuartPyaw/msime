@@ -1,0 +1,57 @@
+name: Depot macOS probe
+
+# 把 macOS 任务搬到 Depot 之前，先看清 depot-macos-15 镜像里有什么。Depot 的镜像跟随 GitHub 的 macos-15，但可能落后一点，而 ci-ios.yml、codeql.yml、release-ios.yml 都用 DEVELOPER_DIR 钉死了 Xcode_26.3：镜像里没有这个版本，那些 job 一上去就会失败。所以这里缺了 26.3 就直接报红，其余工具只列出来。
+#
+# 只在改到这个文件本身的 PR 上和手动触发时跑，不进分支保护。
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/depot-macos-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Inspect depot-macos-15
+    runs-on: depot-macos-15
+    timeout-minutes: 15
+    env:
+      PINNED_XCODE: /Applications/Xcode_26.3.app
+    steps:
+      - name: Machine
+        run: |
+          sw_vers
+          uname -m
+          echo "logical cpus: $(sysctl -n hw.logicalcpu)"
+          echo "memory GiB: $(( $(sysctl -n hw.memsize) / 1024 / 1024 / 1024 ))"
+          df -h /
+      - name: Xcode installations
+        run: |
+          ls -1d /Applications/Xcode*.app
+          echo "xcode-select: $(xcode-select -p)"
+          if [[ ! -d "$PINNED_XCODE" ]]; then
+            echo "::error::$PINNED_XCODE is missing; ci-ios.yml, codeql.yml and release-ios.yml pin it through DEVELOPER_DIR"
+            exit 1
+          fi
+          DEVELOPER_DIR="$PINNED_XCODE/Contents/Developer" xcodebuild -version
+      - name: Simulator runtimes under the pinned Xcode
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+        run: |
+          xcrun simctl list runtimes
+          xcodebuild -showsdks
+      - name: Toolchain used by the macOS and iOS jobs
+        run: |
+          for tool in brew cargo rustup cmake python3 pod xcodegen swift; do
+            if path="$(command -v "$tool")"; then
+              echo "$tool: $path"
+            else
+              echo "$tool: not installed"
+            fi
+          done
+          rustup show || true
+          cmake --version || true
+          python3 --version
