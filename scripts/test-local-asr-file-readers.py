@@ -6,6 +6,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "shared/voice/LocalAsr.cpp"
+HELPER = ROOT / "shared/voice/LocalAsrHelper.cpp"
 
 
 def main() -> int:
@@ -34,6 +35,23 @@ def main() -> int:
             missing.append(f"windows reader: {token}")
     if missing:
         print(f"{SOURCE}: reader contract missing {', '.join(missing)}", file=sys.stderr)
+        return 1
+    helper = HELPER.read_text(encoding="utf-8")
+    start = helper.index("std::vector<float> read_wav(")
+    region = helper[start : helper.index("\n}\n\nstruct Command", start)]
+    for token in (
+        "CreateFileW",
+        "FILE_FLAG_OPEN_REPARSE_POINT",
+        "GetFileInformationByHandleEx",
+        "FILE_TYPE_DISK",
+        "ReadFile",
+    ):
+        if token not in region:
+            missing.append(f"read_wav windows reader: {token}")
+    if "std::ifstream" in region:
+        missing.append("read_wav windows reader: path ifstream")
+    if missing:
+        print(f"{HELPER}: reader contract missing {', '.join(missing)}", file=sys.stderr)
         return 1
     print("Local ASR manifest and token readers reject special files")
     return 0

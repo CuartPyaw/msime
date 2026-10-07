@@ -39,6 +39,7 @@
 #if defined(_WIN32)
 #include <fcntl.h>
 #include <io.h>
+#include <windows.h>
 #endif
 
 namespace {
@@ -98,18 +99,41 @@ std::optional<std::vector<float>> decode_pcm16(const std::string &encoded) {
 
 std::vector<float> read_wav(const std::string &path) {
 #if defined(_WIN32)
-  std::ifstream input(path, std::ios::binary);
-  if (!input)
+  const auto wide_path = std::filesystem::u8path(path);
+  const HANDLE handle = CreateFileW(
+      wide_path.c_str(), GENERIC_READ,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+      nullptr);
+  if (handle == INVALID_HANDLE_VALUE)
     throw std::runtime_error("cannot open " + path);
-  std::error_code error;
-  const auto length = std::filesystem::file_size(path, error);
-  if (error)
-    throw std::runtime_error("cannot stat " + path);
-  if (length > kMaxWavBytes)
+  struct CloseOnExit {
+    HANDLE handle;
+    ~CloseOnExit() { CloseHandle(handle); }
+  } close_on_exit{handle};
+  FILE_ATTRIBUTE_TAG_INFO attributes{};
+  if (GetFileType(handle) != FILE_TYPE_DISK ||
+      !GetFileInformationByHandleEx(handle, FileAttributeTagInfo, &attributes,
+                                     sizeof(attributes)) ||
+      (attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ||
+      ((attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 &&
+       IsReparseTagNameSurrogate(attributes.ReparseTag)))
+    throw std::runtime_error("cannot open " + path);
+  LARGE_INTEGER length{};
+  if (!GetFileSizeEx(handle, &length) || length.QuadPart < 0 ||
+      static_cast<unsigned long long>(length.QuadPart) > kMaxWavBytes)
     throw std::runtime_error(path + " is too large for local recognition");
-  std::vector<char> data(static_cast<std::size_t>(length));
-  if (!data.empty() && !input.read(data.data(), static_cast<std::streamsize>(data.size())))
-    throw std::runtime_error("cannot read " + path);
+  std::vector<char> data(static_cast<std::size_t>(length.QuadPart));
+  std::size_t offset = 0;
+  while (offset < data.size()) {
+    const DWORD request = static_cast<DWORD>(
+        (std::min)(data.size() - offset, sizeof(std::array<char, 8192>)));
+    DWORD count = 0;
+    if (!ReadFile(handle, data.data() + offset, request, &count, nullptr) ||
+        count == 0)
+      throw std::runtime_error("cannot read " + path);
+    offset += count;
+  }
 #else
   const int descriptor = ::open(std::filesystem::u8path(path).c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
   if (descriptor < 0)
