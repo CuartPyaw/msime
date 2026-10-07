@@ -1710,8 +1710,8 @@ public final class MSIMEInputService extends InputMethodService {
         boolean previousCandidateGloss = candidateEnglishGloss;
         boolean previousCandidateTranslations = candidateTranslationsEnabled;
         boolean previousCandidateTranslationAccount = candidateTranslationAccount;
-        boolean previousEnglishSuggestions = englishSuggestionsEnabled;
         java.util.List<String> previousTranslationTargets = candidateTranslationTargets;
+        boolean previousEnglishSuggestions = englishSuggestionsEnabled;
         boolean previousWubiCodeHint = wubiCodeHint;
         boolean previousWubiMixedPinyin = wubiMixedPinyin;
         String previousWubiProfile = wubiProfile;
@@ -1875,6 +1875,11 @@ public final class MSIMEInputService extends InputMethodService {
         defaultImeMode = nextDefaultImeMode;
         imeModeScope = nextImeModeScope;
         JSONObject nextView = result.getJSONObject("view");
+        boolean translationDisplayChanged = CandidateTranslationPolicy.displayInvalidated(
+            candidateEnglishGloss, nextCandidateGloss, candidateTranslationsEnabled,
+            nextCandidateTranslations, candidateTranslationAccount,
+            nextCandidateTranslationAccount, candidateTranslationTargets,
+            nextTranslationTargets);
         boolean rebuildLayout = displayedTouchLayout(view) != displayedTouchLayout(nextView)
             || japaneseEmojiKeyChanged;
         enabledSchemes = nextSchemeConfiguration.enabled();
@@ -1888,6 +1893,19 @@ public final class MSIMEInputService extends InputMethodService {
             else closeClipboardHistory();
         }
         view = nextView;
+        if (translationDisplayChanged) {
+            long generation = CandidateGlossPolicy.strictOr(view.opt("generation"), -1);
+            if (generation >= 0) {
+                try {
+                    JSONObject cleared = value(NativeClient.applyTranslations(
+                        session, generation, "[]"));
+                    if (CandidateGlossPolicy.isApplied(cleared.opt("applied")))
+                        view = cleared.getJSONObject("view");
+                } catch (JSONException | RuntimeException | LinkageError ignored) {
+                    // 翻译是可选的显示状态，清除失败不能影响正在输入的会话。
+                }
+            }
+        }
         // After the view is in place, because this replaces it with the runtime's answer.
         if (characterWidthChanged) applyCharacterWidth(nextFullWidthPreference);
         if (punctuationChanged) applyChinesePunctuation(nextChinesePunctuation);
