@@ -25,6 +25,8 @@ import org.json.JSONObject;
 /** 盖在键盘上的各个面板：表情、符号、皮肤、输入方案、剪贴板、回复键盘、AI 润色、本地输入菜单与更多工具的入口；从 MSIMEInputService 原样搬出，状态仍在服务里。 */
 final class ImePanels {
     private final MSIMEInputService s;
+    private int replyReadGeneration;
+    private int replyMenuReadGeneration;
 
     ImePanels(MSIMEInputService s) {
         this.s = s;
@@ -247,15 +249,31 @@ final class ImePanels {
             renderReplyKeyboard();
             return;
         }
-        java.util.List<CommunityReplyLibrary.Template> templates = java.util.List.of();
+        int generation = ++replyReadGeneration;
         if (style != null && style.startsWith("community:")) {
-            try { templates = s.communityReplyLibrary == null ? java.util.List.of() : s.communityReplyLibrary.read(); }
-            catch (java.io.IOException error) {
-                s.replyModel.showStatus("回复模板无法读取，请重试");
-                renderReplyKeyboard();
-                return;
-            }
+            final CommunityReplyLibrary library = s.communityReplyLibrary;
+            s.preferencesWorker.execute(() -> {
+                final java.util.List<CommunityReplyLibrary.Template> templates;
+                try { templates = library == null ? java.util.List.of() : library.read(); }
+                catch (java.io.IOException error) {
+                    s.main.post(() -> {
+                        if (generation == replyReadGeneration) {
+                            s.replyModel.showStatus("回复模板无法读取，请重试");
+                            renderReplyKeyboard();
+                        }
+                    });
+                    return;
+                }
+                s.main.post(() -> {
+                    if (generation == replyReadGeneration) generateReplyLoaded(style, templates);
+                });
+            });
+            return;
         }
+        generateReplyLoaded(style, java.util.List.of());
+    }
+
+    private void generateReplyLoaded(String style, java.util.List<CommunityReplyLibrary.Template> templates) {
         ReplyKeyboardModel.Request request = s.replyModel.begin(style, templates);
         if (request == null) {
             renderReplyKeyboard();
@@ -299,13 +317,27 @@ final class ImePanels {
 
     void showReplyTemplates() {
         if (s.replyTemplateButton == null || s.replyModel.busy()) return;
-        final java.util.List<CommunityReplyLibrary.Template> templates;
-        try { templates = s.communityReplyLibrary == null ? java.util.List.of() : s.communityReplyLibrary.read(); }
-        catch (java.io.IOException error) {
-            s.replyModel.showStatus("回复模板无法读取，请重试");
-            renderReplyKeyboard();
-            return;
-        }
+        int generation = ++replyMenuReadGeneration;
+        final CommunityReplyLibrary library = s.communityReplyLibrary;
+        s.preferencesWorker.execute(() -> {
+            final java.util.List<CommunityReplyLibrary.Template> templates;
+            try { templates = library == null ? java.util.List.of() : library.read(); }
+            catch (java.io.IOException error) {
+                s.main.post(() -> {
+                    if (generation == replyMenuReadGeneration) {
+                        s.replyModel.showStatus("回复模板无法读取，请重试");
+                        renderReplyKeyboard();
+                    }
+                });
+                return;
+            }
+            s.main.post(() -> {
+                if (generation == replyMenuReadGeneration) showReplyTemplatesLoaded(templates);
+            });
+        });
+    }
+
+    private void showReplyTemplatesLoaded(java.util.List<CommunityReplyLibrary.Template> templates) {
         if (templates.isEmpty()) {
             Toast.makeText(s, "请先在 App 社区收藏并添加回复模板", Toast.LENGTH_SHORT).show();
             return;
@@ -339,19 +371,45 @@ final class ImePanels {
 
     /** 皮肤面板正在应用、尚未写回偏好的那一款；保存回来之前选中态按它画，点下去就换色。 */
     private String pendingSkinKey;
+    private int skinRenderGeneration;
 
     void renderSkinPicker() {
         if (s.skinPanel == null) return;
-        s.skinPanel.removeAllViews();
-        KeyboardGeometry.setPaddingDp(s.skinPanel, s, 8, 10, 8, 6);
         JSONObject preferences = s.preferencesSnapshot == null ? null
             : s.preferencesSnapshot.optJSONObject("preferences");
         boolean hostDark = KeyboardSkin.resolveDark(
             preferences == null ? "follow" : preferences.optString("screen_keyboard_theme", "follow"),
             preferences == null ? "system" : preferences.optString("theme", "system"), s.systemDark());
+        JSONArray themes = s.themeCatalog();
+        int generation = ++skinRenderGeneration;
+        renderSkinPickerLoaded(preferences, hostDark, themes, java.util.List.of(), java.util.List.of());
+        String directory = s.preferencesDirectory;
+        s.preferencesWorker.execute(() -> {
+            java.util.List<CustomSkinLibrary.Item> library = java.util.List.of();
+            java.util.List<CommunitySkinCache.Entry> community = java.util.List.of();
+            if (!directory.isEmpty()) {
+                java.nio.file.Path root = java.nio.file.Paths.get(directory);
+                try { library = CustomSkinLibrary.read(root); }
+                catch (Exception ignored) { }
+                community = CommunitySkinCache.read(root);
+            }
+            java.util.List<CustomSkinLibrary.Item> loadedLibrary = library;
+            java.util.List<CommunitySkinCache.Entry> loadedCommunity = community;
+            s.main.post(() -> {
+                if (generation != skinRenderGeneration || s.skinPanel == null) return;
+                renderSkinPickerLoaded(preferences, hostDark, themes, loadedLibrary, loadedCommunity);
+            });
+        });
+    }
+
+    private void renderSkinPickerLoaded(JSONObject preferences, boolean hostDark, JSONArray themes,
+            java.util.List<CustomSkinLibrary.Item> libraryItems,
+            java.util.List<CommunitySkinCache.Entry> communityItems) {
+        if (s.skinPanel == null) return;
+        s.skinPanel.removeAllViews();
+        KeyboardGeometry.setPaddingDp(s.skinPanel, s, 8, 10, 8, 6);
         // 目录里的全局主题按共享目录的顺序（含水杉四季与春夏秋冬），后面接「我的设计」。
         JSONObject customTheme = preferences == null ? null : preferences.optJSONObject("custom_theme");
-        JSONArray themes = s.themeCatalog();
         java.util.List<MSIMEInputService.SkinChoice> choices =
             new java.util.ArrayList<>(themes.length());
         for (int index = 0; index < themes.length(); index++) {
@@ -371,28 +429,22 @@ final class ImePanels {
         // 已获取的设计与社区目录缓存里的设计，按皮肤的绘制键去重；「我的皮肤」与其中某一款相同时只留带名字的那一格。
         java.util.Set<String> libraryIds = new java.util.HashSet<>();
         java.util.Set<String> namedKeys = new java.util.HashSet<>();
-        try {
-            for (CustomSkinLibrary.Item item : CustomSkinLibrary.read(java.nio.file.Paths.get(s.preferencesDirectory))) {
-                JSONObject design = item.design();
-                KeyboardSkin skin = KeyboardSkin.custom(design, hostDark);
-                libraryIds.add(item.id());
-                namedKeys.add(skin.key());
-                choices.add(new MSIMEInputService.SkinChoice("custom", item.name(), skin, design));
-            }
-        } catch (Exception ignored) {
-            // 写到一半的自定义库不能把主题也藏起来。
+        for (CustomSkinLibrary.Item item : libraryItems) {
+            JSONObject design = item.design();
+            KeyboardSkin skin = KeyboardSkin.custom(design, hostDark);
+            libraryIds.add(item.id());
+            namedKeys.add(skin.key());
+            choices.add(new MSIMEInputService.SkinChoice("custom", item.name(), skin, design));
         }
         // 社区里还没获取的皮肤：目录由 App 缓存（键盘不为浏览目录联网），选中时先存进皮肤库再换上。
         java.util.Map<MSIMEInputService.SkinChoice, CommunitySkinCache.Entry> uninstalled = new java.util.HashMap<>();
-        if (!s.preferencesDirectory.isEmpty()) {
-            for (CommunitySkinCache.Entry entry : CommunitySkinCache.read(java.nio.file.Paths.get(s.preferencesDirectory))) {
-                if (libraryIds.contains(entry.id())) continue;
-                KeyboardSkin skin = KeyboardSkin.custom(entry.design(), hostDark);
-                if (!namedKeys.add(skin.key())) continue;
-                MSIMEInputService.SkinChoice choice = new MSIMEInputService.SkinChoice("custom", entry.name(), skin, entry.design());
-                uninstalled.put(choice, entry);
-                choices.add(choice);
-            }
+        for (CommunitySkinCache.Entry entry : communityItems) {
+            if (libraryIds.contains(entry.id())) continue;
+            KeyboardSkin skin = KeyboardSkin.custom(entry.design(), hostDark);
+            if (!namedKeys.add(skin.key())) continue;
+            MSIMEInputService.SkinChoice choice = new MSIMEInputService.SkinChoice("custom", entry.name(), skin, entry.design());
+            uninstalled.put(choice, entry);
+            choices.add(choice);
         }
         choices.removeIf(choice -> "custom".equals(choice.id()) && choice.design() == null
             && namedKeys.contains(choice.skin().key()));
