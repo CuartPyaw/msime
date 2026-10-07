@@ -179,8 +179,12 @@ bool write_store(const std::filesystem::path &path, const std::vector<std::strin
     return false;
   temporary = temporary_name;
   HANDLE handle = CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr,
-                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-  if (handle == INVALID_HANDLE_VALUE) {
+                              OPEN_EXISTING,
+                              FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+                              nullptr);
+  if (handle == INVALID_HANDLE_VALUE || !handle_is_trusted_file(handle)) {
+    if (handle != INVALID_HANDLE_VALUE)
+      CloseHandle(handle);
     std::filesystem::remove(temporary, error);
     return false;
   }
