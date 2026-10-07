@@ -80,6 +80,11 @@ static jbyteArray response(JNIEnv *env, char *value) {
     return output;
 }
 
+namespace {
+template <typename Call> jbyteArray bounded_request(JNIEnv *env, jbyteArray request, jsize limit, Call call);
+constexpr jsize kThemeRequestLimit = 1 * 1024 * 1024;
+}
+
 extern "C" {
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_loadPreferencesRaw(JNIEnv *env, jclass, jbyteArray directory) {
     if (!directory) return response(env, msime_client_load_preferences(nullptr, 0));
@@ -122,13 +127,7 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_themeCatalogRaw
     return response(env, msime_client_theme_catalog());
 }
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_resolveThemeRaw(JNIEnv *env, jclass, jbyteArray request) {
-    if (!request) return response(env, msime_client_resolve_theme(nullptr, 0));
-    jsize length = env->GetArrayLength(request);
-    jbyte *bytes = env->GetByteArrayElements(request, nullptr);
-    if (!bytes) return nullptr;
-    char *result = msime_client_resolve_theme(reinterpret_cast<const uint8_t *>(bytes), static_cast<size_t>(length));
-    env->ReleaseByteArrayElements(request, bytes, JNI_ABORT);
-    return response(env, result);
+    return bounded_request(env, request, kThemeRequestLimit, msime_client_resolve_theme);
 }
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_typingStatisticsRaw(JNIEnv *env, jclass, jbyteArray request) {
     if (!request) return response(env, msime_client_typing_statistics(nullptr, 0));
