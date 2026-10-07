@@ -262,14 +262,14 @@ pub fn kind_directory(root: &Path, kind: PluginKind) -> PathBuf {
 /// Every pack under `root`, and the built-in sound packs under `builtin_sounds` when the host has them, with what is wrong with each folder that is not a pack. Folders whose name starts with a dot are install and removal leftovers and are not reported.
 pub fn scan(root: &Path, builtin_sounds: Option<&Path>) -> PluginCatalog {
     let mut catalog = PluginCatalog::default();
+    if let Some(builtin) = builtin_sounds {
+        scan_builtin(builtin, &mut catalog);
+    }
     // Do not enumerate through an untrusted root link: even though each pack
     // is checked again below, read_dir would otherwise expose names from
     // outside the host's plugins directory as catalog issues.
     if crate::storage::reject_symlink(root).is_err() {
         return catalog;
-    }
-    if let Some(builtin) = builtin_sounds {
-        scan_builtin(builtin, &mut catalog);
     }
     for kind in PluginKind::ALL {
         let directory = kind_directory(root, kind);

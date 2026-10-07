@@ -720,6 +720,13 @@ fn a_linked_plugins_root_is_not_scanned() {
     msime_path_trust::untrusted_symlink(outside.path(), &root).unwrap();
 
     assert_eq!(scan(&root, None), PluginCatalog::default());
+    let catalog = scan(&root, Some(&builtin_root()));
+    assert!(catalog.issues.is_empty(), "{:?}", catalog.issues);
+    assert_eq!(
+        catalog.packages.len(),
+        BUILTIN_SOUND_PACKS.len() + BUILTIN_MUSIC_PACKS.len()
+    );
+    assert!(catalog.packages.iter().all(|package| package.builtin));
 }
 
 #[test]
