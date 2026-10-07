@@ -301,7 +301,7 @@ fn open_private(path: &Path) -> std::io::Result<File> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK);
     }
     #[cfg(windows)]
     {
@@ -309,7 +309,14 @@ fn open_private(path: &Path) -> std::io::Result<File> {
         const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
         options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
     }
-    options.open(path)
+    let file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "dictionary input is not a regular file",
+        ));
+    }
+    Ok(file)
 }
 
 fn sha256_reader(stream: &mut File) -> Result<String> {
