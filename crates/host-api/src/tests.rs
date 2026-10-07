@@ -10707,6 +10707,28 @@ fn downloaded_language_dictionaries_win_over_the_recorded_directory() {
 }
 
 #[test]
+fn a_relative_recorded_language_dictionary_directory_is_ignored() {
+    let relative_root = tempfile::Builder::new()
+        .prefix("synthetic-language-dictionaries-")
+        .tempdir_in(".")
+        .unwrap();
+    let relative = std::path::Path::new(".")
+        .join(relative_root.path().file_name().unwrap());
+    for name in [
+        "msime-cantonese.db",
+        "msime-zhuyin.db",
+        "msime-stroke.db",
+    ] {
+        std::fs::write(relative.join(name), b"synthetic dictionary").unwrap();
+    }
+    assert!(!relative.is_absolute());
+    assert_eq!(
+        LanguageDictionaries::resolve(None, Some(&relative)),
+        LanguageDictionaries::default()
+    );
+}
+
+#[test]
 fn a_downloaded_japanese_pack_keeps_temporary_japanese_available() {
     let root = tempfile::tempdir().unwrap();
     let resources = root.path().join("resources");

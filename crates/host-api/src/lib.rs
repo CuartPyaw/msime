@@ -829,6 +829,7 @@ impl LanguageDictionaries {
                 })
                 .or_else(|| {
                     recorded
+                        .filter(|directory| directory.is_absolute())
                         .map(|directory| directory.join(name))
                         .filter(|path| path.is_file())
                 })
