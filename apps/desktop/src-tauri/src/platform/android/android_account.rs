@@ -40,7 +40,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fs::{self, File};
+use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -338,7 +338,8 @@ fn inspect_snapshot_record(
 
 fn inspect_snapshot(path: &std::path::Path) -> Result<SnapshotMetadata, AccountError> {
     const MAX_BYTES: u64 = 512 * 1024 * 1024;
-    let file = File::open(path).map_err(|_| AccountError::Unavailable)?;
+    let file =
+        crate::shared::atomic_file::open_private(path).map_err(|_| AccountError::Unavailable)?;
     let mut reader = BufReader::with_capacity(65_536, file);
     let mut line = Vec::with_capacity(65_536);
     let mut total_bytes = 0u64;
