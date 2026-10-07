@@ -33,10 +33,9 @@ public final class KeyboardKeyPreview extends View {
 
     public KeyboardKeyPreview(Context context) {
         super(context);
-        setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        ViewPolicy.hideFromAccessibility(this);
         setWillNotDraw(false);
-        setClickable(false);
-        setFocusable(false);
+        ViewPolicy.setNonInteractive(this);
         text.setTextAlign(Paint.Align.CENTER);
         outline.setStyle(Paint.Style.STROKE);
         setVisibility(GONE);
@@ -51,7 +50,7 @@ public final class KeyboardKeyPreview extends View {
     public static float bubbleLeft(float keyLeft, float keyWidth, float bubbleWidth,
             float parentWidth) {
         float left = keyLeft + keyWidth / 2f - bubbleWidth / 2f;
-        float max = Math.max(0f, parentWidth - bubbleWidth);
+        float max = BoundsPolicy.nonNegative(parentWidth - bubbleWidth);
         return KeyboardGeometry.bounded(left, 0f, max);
     }
 
@@ -75,7 +74,7 @@ public final class KeyboardKeyPreview extends View {
      */
     public void show(String value, float keyLeft, float keyTop, float keyWidth, float weight,
             float parentWidth) {
-        label = value == null ? "" : value;
+        label = TextPolicy.emptyIfNull(value);
         float width = bubbleWidth(keyWidth, weight);
         float height = KeyboardGeometry.floatPixels(getContext(), HEIGHT_DP);
         float margin = KeyboardGeometry.floatPixels(getContext(), SHADOW_MARGIN_DP);
@@ -95,7 +94,7 @@ public final class KeyboardKeyPreview extends View {
 
     /** 下滑输入提示时换成提示字符，位置不变。 */
     public void setLabel(String value) {
-        String next = value == null ? "" : value;
+        String next = TextPolicy.emptyIfNull(value);
         if (label.equals(next)) return;
         label = next;
         invalidate();
@@ -122,10 +121,10 @@ public final class KeyboardKeyPreview extends View {
         shape.reset();
         shape.addRoundRect(rect, radii, Path.Direction.CW);
         fill.setShadowLayer(KeyboardGeometry.floatPixels(getContext(), 9), 0,
-            KeyboardGeometry.floatPixels(getContext(), 6), Color.argb(56, 0, 0, 0));
+            KeyboardGeometry.floatPixels(getContext(), 6), ColorPolicy.withAlpha(Color.BLACK, 56));
         canvas.drawPath(shape, fill);
-        outline.setStrokeWidth(Math.max(1f,
-            KeyboardGeometry.floatPixels(getContext(), .5f)));
+        outline.setStrokeWidth(BoundsPolicy.bounded(
+            KeyboardGeometry.floatPixels(getContext(), .5f), 1f, Float.MAX_VALUE));
         canvas.drawPath(shape, outline);
         if (label.isEmpty()) return;
         text.setTextSize(KeyboardGeometry.keySp(getContext(), TEXT_SP));

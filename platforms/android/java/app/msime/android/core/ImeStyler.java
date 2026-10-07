@@ -21,7 +21,7 @@ import org.json.JSONObject;
 /** 键盘的着色与几何：按键样式、皮肤套用、键距行距与键盘高度；从 MSIMEInputService 原样搬出。 */
 final class ImeStyler {
     private final MSIMEInputService s;
-    private final Map<String, Integer> colorCache = new HashMap<>();
+    private final Map<String, Integer> colorCache = new HashMap<>(64);
 
     ImeStyler(MSIMEInputService s) {
         this.s = s;
@@ -106,7 +106,8 @@ final class ImeStyler {
     private static JSONObject resolveAppTheme(String theme, int month, boolean dark) {
         try {
             JSONObject root = new JSONObject(NativeClient.resolveAppTheme(theme, month, dark));
-            return root.optBoolean("ok", false) ? root.optJSONObject("value") : null;
+            return Boolean.TRUE.equals(root.opt("ok"))
+                ? root.optJSONObject("value") : null;
         } catch (JSONException | RuntimeException | LinkageError error) {
             return null;
         }
@@ -146,12 +147,12 @@ final class ImeStyler {
             s.actionRow.requestLayout();
         }
         // 设计的键区左右外边距 6 dp 量到键的边缘；键自己带半个键距的外边距，所以容器只补差值。
-        int edge = Math.max(0, s.pixels(KeyboardGeometry.DESIGN_PADDING_HORIZONTAL_DP)
-            - s.halfSpacingPixels(layoutKeySpacingTenths()));
-        s.keyRows.setPadding(edge, s.keyRows.getPaddingTop(), edge, s.keyRows.getPaddingBottom());
+        int edge = BoundsPolicy.nonNegative(
+            s.pixels(KeyboardGeometry.DESIGN_PADDING_HORIZONTAL_DP)
+                - s.halfSpacingPixels(layoutKeySpacingTenths()));
+        ViewPolicy.setHorizontalPaddingPreservingVertical(s.keyRows, edge);
         if (s.actionRow != null)
-            s.actionRow.setPadding(edge, s.actionRow.getPaddingTop(), edge,
-                s.actionRow.getPaddingBottom());
+            ViewPolicy.setHorizontalPaddingPreservingVertical(s.actionRow, edge);
         s.keyRows.requestLayout();
         if (s.keyboardRoot != null) {
             s.keyboardRoot.requestLayout();
@@ -227,20 +228,20 @@ final class ImeStyler {
             button.setBackground(new InsetDrawable(pill,
                 s.pixels(2), s.pixels(8), s.pixels(2), s.pixels(8)));
             button.setTextColor(color(target.keyForeground()));
-            button.setTypeface(target.monospaced() ? Typeface.MONOSPACE : Typeface.DEFAULT);
-            button.setElevation(0);
+            applySkinTypeface(button, target);
+            ViewPolicy.clearElevation(button);
             return;
         }
         if (!face.drawsCap()) {
-            button.setBackground(null);
+            ViewPolicy.clearBackground(button);
             String label = face.usesAccentLabel() ? target.accent() : target.keyForeground();
             if (button instanceof KeyboardShortcutButton shortcut) {
                 shortcut.setActiveFill(color(target.accentSoft()));
                 if (selected) label = target.accentText();
             }
             button.setTextColor(color(label));
-            button.setTypeface(target.monospaced() ? Typeface.MONOSPACE : Typeface.DEFAULT);
-            button.setElevation(0);
+            applySkinTypeface(button, target);
+            ViewPolicy.clearElevation(button);
             return;
         }
         boolean action = face == KeyboardKeyRole.ACCENT;
@@ -280,8 +281,12 @@ final class ImeStyler {
             space.setFaceColor(color(target.toolbarIcon()));
         if (button instanceof NineKeyDigitButton digitButton)
             digitButton.setDigitColor(color(target.accent()));
-        button.setTypeface(target.monospaced() ? Typeface.MONOSPACE : Typeface.DEFAULT);
+        applySkinTypeface(button, target);
         applyShadow(button, target);
+    }
+
+    private void applySkinTypeface(Button button, KeyboardSkin target) {
+        button.setTypeface(target.monospaced() ? Typeface.MONOSPACE : Typeface.DEFAULT);
     }
 
     /**
@@ -316,11 +321,12 @@ final class ImeStyler {
 
     private void applyShadow(View view, KeyboardSkin target) {
         int shadowAlpha = (int) Math.round(255 * target.shadowOpacity());
-        int shadowColor = Color.argb(shadowAlpha, 0, 0, 0);
+        int shadowColor = ColorPolicy.withAlpha(Color.BLACK, shadowAlpha);
         view.setOutlineAmbientShadowColor(shadowColor);
         view.setOutlineSpotShadowColor(shadowColor);
         view.setElevation(target.shadowOpacity() > 0
-            ? s.pixels(Math.max(1, target.shadowRadius() + target.shadowOffset())) : 0);
+            ? s.pixels(BoundsPolicy.bounded(target.shadowRadius() + target.shadowOffset(),
+                1d, Double.MAX_VALUE)) : 0);
     }
 
     /** One of the skin's colours at a fraction of its opacity. */
@@ -337,10 +343,16 @@ final class ImeStyler {
     }
 
     GradientDrawable candidateDrawable(int color) {
-        GradientDrawable drawable = DrawablePolicy.rounded(color, s.pixels(6));
-        if (Color.alpha(s.candidateAppearance.border()) > 0)
-            drawable.setStroke(KeyboardGeometry.atLeastOnePixel(s, 1), s.candidateAppearance.border());
-        return drawable;
+        int border = s.candidateAppearance.border();
+        return roundedFace(color, s.pixels(6),
+            Color.alpha(border) > 0 ? KeyboardGeometry.atLeastOnePixel(s, 1) : 0, border);
+    }
+
+    private static GradientDrawable roundedFace(int color, float radius, int borderWidth,
+                                                int borderColor) {
+        return borderWidth > 0
+            ? DrawablePolicy.outlined(color, radius, borderWidth, borderColor)
+            : DrawablePolicy.rounded(color, radius);
     }
 
     Typeface candidateTypeface() {
@@ -443,8 +455,9 @@ final class ImeStyler {
             s.preedit.setTypeface(candidateTypeface());
             KeyboardGeometry.setKeyTextSize(s.preedit, s.brandPillVisible ? 12 : s.candidatePreeditFontSize);
             s.preedit.setBackground(s.brandPillVisible ? brandPillDrawable() : null);
-            s.preedit.setPadding(s.pixels(s.brandPillVisible ? 12 : 2), s.pixels(s.brandPillVisible ? 4 : 0),
-                s.pixels(s.brandPillVisible ? 12 : 2), s.pixels(s.brandPillVisible ? 4 : 0));
+            ViewPolicy.setPadding(s.preedit, s.pixels(s.brandPillVisible ? 12 : 2),
+                s.pixels(s.brandPillVisible ? 4 : 0), s.pixels(s.brandPillVisible ? 12 : 2),
+                s.pixels(s.brandPillVisible ? 4 : 0));
         }
         if (s.candidateBrandMark != null) s.candidateBrandMark.invalidate();
         if (s.status != null) s.status.setTextColor(fade(s.skin.accent(), .55));
@@ -467,14 +480,14 @@ final class ImeStyler {
         node.setBackground(new KeyboardSkinBackgroundDrawable(target, density));
     }
 
-    /** Keep phone keys edge-to-edge while a tablet or two-in-one gets a bounded, centred surface. */
+    /** 手机的键盘铺满窗口，平板和二合一的键盘表面限宽居中；平板横屏画分离式键盘时铺满，让左右两半贴到两侧。 */
     void applyKeyboardSurfaceGeometry() {
         if (s.keyboardSurface == null) return;
         Configuration configuration = s.getResources().getConfiguration();
         int widthDp = KeyboardFormFactorPolicy.surfaceWidthDp(
-            configuration.smallestScreenWidthDp, configuration.screenWidthDp);
+            configuration.smallestScreenWidthDp, configuration.screenWidthDp, s.splitKeyboardDrawn());
         int width = widthDp == 0 ? FrameLayout.LayoutParams.MATCH_PARENT : s.pixels(widthDp);
-        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+        FrameLayout.LayoutParams params = KeyboardGeometry.frameParamsPx(
             width, FrameLayout.LayoutParams.MATCH_PARENT, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         s.keyboardSurface.setLayoutParams(params);
         s.keyboardSurface.setElevation(widthDp == 0 ? 0 : s.pixels(10));

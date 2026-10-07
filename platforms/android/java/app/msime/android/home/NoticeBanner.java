@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.TextPolicy;
+
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
@@ -7,18 +9,20 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import app.msime.android.core.NoticeFieldPolicy;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 import app.msime.android.NativeClient;
 import app.msime.android.R;
+import app.msime.android.TextPolicy;
+import app.msime.android.ViewPolicy;
 import io.noties.markwon.AbstractMarkwonPlugin;
 import io.noties.markwon.Markwon;
 import io.noties.markwon.MarkwonConfiguration;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -48,16 +52,20 @@ final class NoticeBanner {
                 .put("platform", "android")
                 .put("channel", "app");
             JSONObject root = new JSONObject(NativeClient.notices(request.toString()));
-            JSONObject value = root.optBoolean("ok", false) ? root.optJSONObject("value") : null;
+            JSONObject value = Boolean.TRUE.equals(root.opt("ok"))
+                ? root.optJSONObject("value") : null;
             JSONArray items = value == null ? null : value.optJSONArray("items");
             List<Notice> notices = new ArrayList<>(items == null ? 0 : items.length());
             for (int index = 0; items != null && index < items.length(); index++) {
                 JSONObject item = items.optJSONObject(index);
                 if (item == null) continue;
-                String id = item.optString("id", "");
-                String title = item.optString("title", "").trim();
+                String id = NoticeFieldPolicy.strictString(item.opt("id"));
+                String title = NoticeFieldPolicy.strictString(item.opt("title"));
+                String body = NoticeFieldPolicy.strictString(item.opt("body"));
+                if (id == null || title == null || body == null) continue;
+                title = TextPolicy.trimmed(title);
                 if (id.isEmpty() || title.isEmpty()) continue;
-                notices.add(new Notice(id, title, item.optString("body", "")));
+                notices.add(new Notice(id, title, body));
             }
             return notices;
         } catch (Exception | LinkageError error) {
@@ -77,7 +85,7 @@ final class NoticeBanner {
         ((TextView) card.findViewById(R.id.notice_title)).setText(notice.title());
         TextView body = card.findViewById(R.id.notice_body);
         if (notice.body().isBlank()) {
-            body.setVisibility(View.GONE);
+            ViewPolicy.hide(body);
         } else {
             markwon(context).setMarkdown(body, notice.body());
         }
@@ -92,7 +100,8 @@ final class NoticeBanner {
     private static Boolean dismiss(Context context, String id) {
         try {
             JSONObject request = new JSONObject().put("directory", directory(context)).put("id", id);
-            return new JSONObject(NativeClient.noticeDismiss(request.toString())).optBoolean("ok", false);
+            JSONObject response = new JSONObject(NativeClient.noticeDismiss(request.toString()));
+            return Boolean.TRUE.equals(response.opt("ok"));
         } catch (Exception | LinkageError error) {
             android.util.Log.i("MSIMENotices", "Dismissal not saved", error);
             return false;
@@ -116,7 +125,7 @@ final class NoticeBanner {
 
     private static void open(Context context, String link) {
         Uri uri = Uri.parse(link);
-        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+        String scheme = TextPolicy.lowercase(uri.getScheme());
         if (!scheme.equals("https") && !scheme.equals("http") && !scheme.equals("mailto")) return;
         try {
             context.startActivity(new Intent(Intent.ACTION_VIEW, uri)

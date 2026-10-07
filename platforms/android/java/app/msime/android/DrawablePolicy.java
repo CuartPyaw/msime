@@ -16,6 +16,14 @@ public final class DrawablePolicy {
         return shape;
     }
 
+    /** Create a filled circle with a visible outline. */
+    public static GradientDrawable circleOutlined(int fillColor, int strokeWidth,
+                                                  int strokeColor) {
+        GradientDrawable shape = circle(fillColor);
+        shape.setStroke(BoundsPolicy.atLeast(strokeWidth, 1), strokeColor);
+        return shape;
+    }
+
     public static GradientDrawable rounded(int color, float radiusPx) {
         GradientDrawable shape = new GradientDrawable();
         shape.setShape(GradientDrawable.RECTANGLE);
@@ -34,7 +42,7 @@ public final class DrawablePolicy {
 
     public static GradientDrawable outlined(float radiusPx, int strokeWidth, int strokeColor) {
         GradientDrawable shape = rounded(Color.TRANSPARENT, radiusPx);
-        shape.setStroke(Math.max(1, strokeWidth), strokeColor);
+        shape.setStroke(BoundsPolicy.atLeast(strokeWidth, 1), strokeColor);
         return shape;
     }
 
@@ -42,7 +50,16 @@ public final class DrawablePolicy {
     public static GradientDrawable outlined(int fillColor, float radiusPx, int strokeWidth,
                                             int strokeColor) {
         GradientDrawable shape = rounded(fillColor, radiusPx);
-        shape.setStroke(Math.max(1, strokeWidth), strokeColor);
+        shape.setStroke(BoundsPolicy.atLeast(strokeWidth, 1), strokeColor);
+        return shape;
+    }
+
+    /** Create a filled rounded rectangle with a dashed outline. */
+    public static GradientDrawable outlinedDashed(int fillColor, float radiusPx, int strokeWidth,
+                                                  int strokeColor, float dashWidth,
+                                                  float dashGap) {
+        GradientDrawable shape = rounded(fillColor, radiusPx);
+        shape.setStroke(BoundsPolicy.atLeast(strokeWidth, 1), strokeColor, dashWidth, dashGap);
         return shape;
     }
 

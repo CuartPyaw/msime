@@ -43,9 +43,8 @@ public final class VoiceListeningView extends TextView {
         super(context);
         setText("正在聆听…");
         setContentDescription("正在聆听，点任意处取消");
-        setClickable(true);
-        setFocusable(true);
-        setBackground(null);
+        ViewPolicy.setInteractive(this, true);
+        ViewPolicy.clearBackground(this);
         title.setTextAlign(Paint.Align.CENTER);
         hint.setTextAlign(Paint.Align.CENTER);
     }
@@ -61,7 +60,7 @@ public final class VoiceListeningView extends TextView {
 
     /** 替换第二行提示（例如识别完成时短暂显示「已识别：…」）。 */
     public void setHint(String value) {
-        hintText = value == null ? "" : value;
+        hintText = TextPolicy.emptyIfNull(value);
         invalidate();
     }
 
@@ -126,7 +125,7 @@ public final class VoiceListeningView extends TextView {
             cy - mic / 2f, mic, onAccent);
         float titleBaseline = cy + radius + gap - titleMetrics.ascent;
         // 两行居中绘制，左右各留 16 dp；放不下时省略：标题省略结尾，提示里是滚动中的识别文字，省略开头留住最新说的那段。
-        float available = Math.max(0f, getWidth() - getPaddingLeft() - getPaddingRight()
+        float available = BoundsPolicy.nonNegative(getWidth() - getPaddingLeft() - getPaddingRight()
             - KeyboardGeometry.floatPixels(getContext(), 32));
         String titleText = String.valueOf(getText());
         if (!titleText.equals(fittedTitleSource) || available != fittedWidth

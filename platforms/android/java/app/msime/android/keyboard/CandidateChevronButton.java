@@ -34,13 +34,8 @@ public final class CandidateChevronButton extends Button {
     public CandidateChevronButton(Context context) {
         super(context);
         setText("展开");
-        setAllCaps(false);
-        setBackground(null);
-        setPadding(0, 0, 0, 0);
-        setMinWidth(0);
-        setMinimumWidth(0);
-        setMinHeight(0);
-        setMinimumHeight(0);
+        ViewPolicy.setAllCapsFalse(this);
+        ViewPolicy.clearChrome(this);
     }
 
     /** 展开键只画分隔线和 chevron；键盘的整树样式通道会给每个 Button 套键帽，这里挡掉。 */
@@ -99,16 +94,16 @@ public final class CandidateChevronButton extends Button {
 
     @Override protected void onDraw(Canvas canvas) {
         float height = getHeight();
-        float dividerHeight = Math.min(height,
+        float dividerHeight = BoundsPolicy.atMost(height,
             KeyboardGeometry.floatPixels(getContext(), DIVIDER_HEIGHT_DP));
         divider.setColor(hairlineColor);
-        float lineWidth = Math.max(1f,
-            KeyboardGeometry.floatPixels(getContext(), 1));
+        float lineWidth = BoundsPolicy.bounded(
+            KeyboardGeometry.floatPixels(getContext(), 1), 1f, Float.MAX_VALUE);
         canvas.drawRect(0, (height - dividerHeight) / 2f, lineWidth,
             (height + dividerHeight) / 2f, divider);
         float areaLeft = lineWidth;
         float areaWidth = getWidth() - areaLeft;
-        float size = Math.min(Math.min(areaWidth, height),
+        float size = BoundsPolicy.atMost(KeyboardGeometry.shorterSide(areaWidth, height),
             KeyboardGeometry.floatPixels(getContext(), CHEVRON_DP));
         if (size <= 0) return;
         float centerX = areaLeft + areaWidth / 2f;
