@@ -65,7 +65,8 @@ public final class DoubaoAsrPolicy {
         int appKey = 0;
         int accessKey = 0;
         for (String name : headerNames) {
-            if (name == null || name.isEmpty() || TextPolicy.hasControl(name)) return false;
+            if (name == null || name.isEmpty() || TextPolicy.hasControl(name)
+                    || !TextPolicy.validUnicode(name)) return false;
             switch (name) {
                 case RESOURCE_HEADER -> resource++;
                 case REQUEST_HEADER -> request++;

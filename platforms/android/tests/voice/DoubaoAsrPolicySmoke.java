@@ -76,6 +76,9 @@ public final class DoubaoAsrPolicySmoke {
         check(!DoubaoAsrPolicy.usable("doubao", endpoint,
             headers("x-api-resource-id", "x-api-request-id", "x-api-key\r")),
             "a header name carrying a control character is refused");
+        check(!DoubaoAsrPolicy.usable("doubao", endpoint,
+            headers("x-api-resource-id", "x-api-request-id", "x-api-key\uD800")),
+            "a header name carrying malformed Unicode is refused");
         try {
             Method strictText = DoubaoAsrPolicy.class.getDeclaredMethod("strictText", Object.class);
             strictText.setAccessible(true);
