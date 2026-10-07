@@ -40,6 +40,7 @@
 #include "WatchdogPolicy.h"
 #include "Telemetry.h"
 #include "TelemetryConsent.h"
+#include "TsfConfigRevision.h"
 #include "WindowsServer.h"
 #include "ipc_negotiation.h"
 #include <windows.h>
@@ -826,8 +827,9 @@ int wmain(int argc, wchar_t **argv) {
                               language_dictionaries));
     auto tray_preferences_mutex = std::make_shared<std::mutex>();
     // Set on every publication and on each focus session, so a TIP that
-    // registers later is not left holding compiled defaults.
-    auto tsf_config_dirty = std::make_shared<std::atomic<bool>>(true);
+    // registers later is not left holding compiled defaults. A revision is
+    // used instead of a bool so an older send cannot clear a newer update.
+    auto tsf_config_revision = std::make_shared<msime::windows::TsfConfigRevision>();
     // The toolbar resolves light/dark from its own preference, independently
     // of the candidate card: toolbar_theme is honoured on macOS and in the
     // settings preview but was ignored by the Windows surface, which simply
@@ -910,7 +912,7 @@ int wmain(int argc, wchar_t **argv) {
          toolbar_enabled, follow_cursor, effect_intensity, voice_theme, candidate_fonts, candidate_style,
          toolbar_theme, menu_theme, mode_scope_global, tsf_config, candidate_layout,
          tsf_config_mutex, tray_preferences, tray_preferences_mutex,
-         tsf_config_dirty, candidate_theme, toolbar_settings,
+         tsf_config_revision, candidate_theme, toolbar_settings,
          language_dictionaries](const PreferenceSnapshot &snapshot) {
           const auto preferences =
               nlohmann::json::parse(snapshot.serialized()).at("preferences");
@@ -962,7 +964,7 @@ int wmain(int argc, wchar_t **argv) {
             const bool dedicated_english = tsf_config->dedicated_english;
             *tsf_config = tsf_local_config(preferences, language_dictionaries);
             tsf_config->dedicated_english = dedicated_english;
-            tsf_config_dirty->store(true, std::memory_order_release);
+            tsf_config_revision->mark_changed();
           }
           {
             auto menu = tray_menu_preferences(preferences, language_dictionaries);
@@ -1631,6 +1633,7 @@ int wmain(int argc, wchar_t **argv) {
               << " Server running; candidate selection and mode controls enabled.\n";
     // 工具栏失败不结束 Server：它只是方便切换模式的附件，Server 记一条诊断、去掉工具栏继续服务输入。曾经它也在这个条件里，某台 Windows 11 上工具栏一失败 Server 就在启动后约 100 ms 退出，日志却只写了一句正常停止。
     bool toolbar_failure_reported = false;
+    uint64_t tsf_config_applied_revision = 0;
     while (!stopping.load() && server.failure() == ControllerFailure::None &&
            !candidates.failed() && !clicks.failed() && !pages.failed() &&
            !mode_clicks.failed() &&
@@ -1745,7 +1748,8 @@ int wmain(int argc, wchar_t **argv) {
       // predicate dead outside its unit test.
       // Push the TSF-local settings whenever they changed, so turning smart
       // punctuation off takes effect on the text being typed now.
-      if (tsf_config_dirty->load(std::memory_order_acquire)) {
+      const auto current_tsf_config_revision = tsf_config_revision->snapshot();
+      if (current_tsf_config_revision != tsf_config_applied_revision) {
         if (const auto view = server.mode_view()) {
           msime::windows::TsfLocalConfig pending;
           {
@@ -1753,7 +1757,8 @@ int wmain(int argc, wchar_t **argv) {
             pending = *tsf_config;
           }
           if (server.send_tsf_config(pending))
-            tsf_config_dirty->store(false, std::memory_order_release);
+            if (tsf_config_revision->is_current(current_tsf_config_revision))
+              tsf_config_applied_revision = current_tsf_config_revision;
         }
       }
       // One CN/EN state follows the user between applications when the scope
@@ -1792,7 +1797,7 @@ int wmain(int argc, wchar_t **argv) {
           // The TIP's V-mode key rule follows the focused session's English mode (Ctrl+Shift+E, the toolbar exit, a focus change): the next pass pushes the trigger frame again.
           if (tsf_config->dedicated_english != language.dedicated_english) {
             tsf_config->dedicated_english = language.dedicated_english;
-            tsf_config_dirty->store(true, std::memory_order_release);
+            tsf_config_revision->mark_changed();
           }
         }
         toolbar.set_language_state(language);
