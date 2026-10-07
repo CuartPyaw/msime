@@ -139,6 +139,31 @@ inline std::optional<std::string> take_private_file(
   return document;
 }
 
+// Delete a private regular file through the handle that was checked. A path
+// based DeleteFileW after validating the parent would re-resolve that parent
+// if a concurrent writer replaced it with a junction.
+inline bool remove_private_file(const std::filesystem::path &path) {
+  try {
+    reject_reparse_ancestors(path.parent_path());
+  } catch (...) {
+    return false;
+  }
+  HANDLE handle = CreateFileW(
+      path.c_str(), DELETE,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+      nullptr);
+  if (handle == INVALID_HANDLE_VALUE)
+    return false;
+  const bool trusted = handle_is_trusted_file(handle);
+  FILE_DISPOSITION_INFO disposition{TRUE};
+  const bool removed = trusted &&
+      SetFileInformationByHandle(handle, FileDispositionInfo, &disposition,
+                                 sizeof(disposition)) != FALSE;
+  CloseHandle(handle);
+  return removed;
+}
+
 // Hold through resource preparation, all sessions and ordered Server shutdown.
 // The stable file is never deleted: ownership is the OS handle, not existence.
 class StateRootLease final {
