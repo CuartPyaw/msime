@@ -1,6 +1,7 @@
 package app.msime.android;
 
 import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
@@ -84,6 +85,17 @@ public final class TextPolicy {
             .onMalformedInput(CodingErrorAction.REPORT)
             .onUnmappableCharacter(CodingErrorAction.REPORT)
             .decode(ByteBuffer.wrap(value)).toString();
+    }
+
+    /** Encode text as UTF-8 strictly, reporting malformed or unmappable input to the caller. */
+    public static byte[] utf8StrictBytes(String value) throws CharacterCodingException {
+        ByteBuffer encoded = StandardCharsets.UTF_8.newEncoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .encode(CharBuffer.wrap(value));
+        byte[] result = new byte[encoded.remaining()];
+        encoded.get(result);
+        return result;
     }
 
     /** Encode UTF-8 request text, treating a missing value as empty text. */
