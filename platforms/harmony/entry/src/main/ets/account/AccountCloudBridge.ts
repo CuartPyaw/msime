@@ -933,7 +933,7 @@ export class AccountCloudBridge {
       "GET",
       "/v1/users/me/dictionaries/quick/catalog?q=&offset=0&limit=100&scheme=pinyin&profile=xiaohe",
     );
-    if (result.error !== undefined || result.value === undefined)
+    if (result.error !== undefined || result.value === undefined || result.value === null)
       return { error: result.error ?? "account_unavailable" };
     const revision = result.value.revision;
     if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0)
@@ -1157,7 +1157,7 @@ export class AccountCloudBridge {
     const result = await this.authenticatedJson("GET", "/v1/models");
     if (result.error !== undefined) return error(result.error);
     const value = result.value;
-    if (value === undefined) return error("account_unavailable");
+    if (value === undefined || value === null) return error("account_unavailable");
     const data = value.data;
     if (
       !Array.isArray(data) ||
@@ -1233,7 +1233,7 @@ export class AccountCloudBridge {
       CHAT_TIMEOUT_MS,
     );
     if (result.error !== undefined) return error(result.error);
-    if (result.value === undefined) return error("account_unavailable");
+    if (result.value === undefined || result.value === null) return error("account_unavailable");
     const choices = result.value.choices;
     if (!Array.isArray(choices) || choices.length === 0) return error("account_unavailable");
     const first = choices[0] as unknown;

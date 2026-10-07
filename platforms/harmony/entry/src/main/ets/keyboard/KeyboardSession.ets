@@ -1216,7 +1216,8 @@ export class KeyboardSession implements HardwareKeyTarget {
     try {
       const response: SkinCatalogResponse =
         JSON.parse(client.skinCatalog(`${stateRoot}/skins`)) as SkinCatalogResponse;
-      if (response.ok !== true || response.value === undefined || !Array.isArray(response.value.packages)) {
+      if (response.ok !== true || response.value === undefined || response.value === null
+        || !Array.isArray(response.value.packages)) {
         return [];
       }
       return response.value.packages;

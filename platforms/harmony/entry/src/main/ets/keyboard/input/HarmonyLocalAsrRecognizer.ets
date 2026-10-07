@@ -226,7 +226,7 @@ export class HarmonyLocalAsrRecognizer {
       const request: HotwordsRequest = { options: options, limit: HOTWORD_LIMIT };
       const response: HotwordsResponse =
         JSON.parse(await client.voiceHotwords(JSON.stringify(request))) as HotwordsResponse;
-      if (response.ok !== true || response.value === undefined) {
+      if (response.ok !== true || response.value === undefined || response.value === null) {
         KeyboardLog.warn(`voice hotwords unavailable: ${response.error ?? 'unknown'}`);
         return [];
       }

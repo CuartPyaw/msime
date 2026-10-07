@@ -708,7 +708,7 @@ class SettingsBridge {
   private rememberRevision(reply: string): void {
     try {
       const parsed: RevisionReply = JSON.parse(reply) as RevisionReply;
-      if (parsed.ok === true && parsed.value !== undefined) {
+      if (parsed.ok === true && parsed.value !== undefined && parsed.value !== null) {
         this.observedRevision =
           PreferenceRevisionPolicy.observe(this.observedRevision, parsed.value.revision);
       }
@@ -729,7 +729,7 @@ class SettingsBridge {
     let current: number = this.observedRevision;
     try {
       const parsed: RevisionReply = JSON.parse(reply) as RevisionReply;
-      if (parsed.ok !== true || parsed.value === undefined) {
+      if (parsed.ok !== true || parsed.value === undefined || parsed.value === null) {
         return;
       }
       current = parsed.value.revision;
@@ -1302,7 +1302,8 @@ class SettingsBridge {
     let design: Object;
     try {
       const reply: CommunityDownloadReply = JSON.parse(downloaded) as CommunityDownloadReply;
-      if (reply.ok !== true || reply.value === undefined || reply.value.design === undefined) {
+      if (reply.ok !== true || reply.value === undefined || reply.value === null
+        || reply.value.design === undefined) {
         return downloaded.length > 0 ? downloaded
           : JSON.stringify({ ok: false, error: 'community_unavailable' });
       }
