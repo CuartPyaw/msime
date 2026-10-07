@@ -254,7 +254,11 @@ REFRESH_OUTDATED = 3
 
 def read_options(options_file: Path) -> dict:
     try:
-        with options_file.open("rb") as handle:
+        # Open the final component without following a replacement symlink. The
+        # descriptor remains tied to the checked file even if an attacker swaps
+        # the path while it is being read.
+        flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+        with os.fdopen(os.open(options_file, flags), "rb") as handle:
             raw = handle.read(RUNTIME_OPTIONS_LIMIT + 1)
         if len(raw) > RUNTIME_OPTIONS_LIMIT:
             raise ValueError(f"文件超过 {RUNTIME_OPTIONS_LIMIT} 字节限制")
