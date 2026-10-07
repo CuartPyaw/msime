@@ -233,10 +233,10 @@ void write_document_atomic(const std::filesystem::path &path, const std::string 
                               OPEN_EXISTING,
                               FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
                               nullptr);
-  if (handle == INVALID_HANDLE_VALUE || !handle_is_trusted_file(handle)) {
+  if (handle == INVALID_HANDLE_VALUE || !msime::windows::handle_is_trusted_file(handle)) {
     if (handle != INVALID_HANDLE_VALUE)
       CloseHandle(handle);
-    (void)remove_private_file(temporary);
+    (void)msime::windows::remove_private_file(temporary);
     throw std::runtime_error("Configuration temporary file unavailable");
   }
   DWORD written = 0;
@@ -248,12 +248,12 @@ void write_document_atomic(const std::filesystem::path &path, const std::string 
                         FlushFileBuffers(handle);
   CloseHandle(handle);
   if (!complete) {
-    (void)remove_private_file(temporary);
+    (void)msime::windows::remove_private_file(temporary);
     throw std::runtime_error("Configuration write failed");
   }
   if (!MoveFileExW(temporary.c_str(), path.c_str(),
                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-    (void)remove_private_file(temporary);
+    (void)msime::windows::remove_private_file(temporary);
     throw std::runtime_error("Configuration replace failed");
   }
 }
