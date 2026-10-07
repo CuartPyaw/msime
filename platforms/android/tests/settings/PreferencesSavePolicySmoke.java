@@ -11,6 +11,8 @@ public final class PreferencesSavePolicySmoke {
         check(!PreferencesSavePolicy.isCurrentOperation(6, 7, 3, 3, "/state", "/state"));
         check(!PreferencesSavePolicy.isCurrentOperation(7, 7, 2, 3, "/state", "/state"));
         check(!PreferencesSavePolicy.isCurrentOperation(7, 7, 3, 3, "/old", "/state"));
+        check(PreferencesSavePolicy.isCurrentOperation(7, 7));
+        check(!PreferencesSavePolicy.isCurrentOperation(6, 7));
         System.out.println("Android preference saves preserve newer reloads passed");
     }
 }
