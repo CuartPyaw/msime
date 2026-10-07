@@ -1619,7 +1619,10 @@ class SettingsBridge {
         directory: this.stateDirectory, action: action
       }));
       const reply: TypingStatisticsReply = JSON.parse(raw) as TypingStatisticsReply;
-      if (reply.ok !== true || reply.value === undefined || reply.value === null) return raw;
+      if (reply.ok !== true) return raw;
+      if (reply.value === undefined || reply.value === null) {
+        return JSON.stringify({ ok: false, error: 'invalid typing statistics response' });
+      }
       let lastWrittenMs: number | null = null;
       let available: boolean = false;
       const file: string = `${this.stateDirectory}/typing-statistics.json`;
