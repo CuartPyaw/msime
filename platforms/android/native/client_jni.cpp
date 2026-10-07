@@ -108,6 +108,7 @@ constexpr jsize kEnglishCompletionRequestLimit = 16384;
 constexpr jsize kEnglishCompletionResourcesLimit = 4096;
 constexpr jsize kShuangpinProfileLimit = 64;
 constexpr jsize kSmartPunctuationRequestLimit = 4096;
+constexpr jsize kTraditionalConversionLimit = 1 * 1024 * 1024;
 }
 
 extern "C" {
@@ -446,7 +447,7 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_mobileVoiceConf
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_simplifiedToTraditionalRaw(JNIEnv *env, jclass, jbyteArray text) {
     if (!text) return nullptr;
     jsize length = env->GetArrayLength(text);
-    if (length <= 0) return nullptr;
+    if (length <= 0 || length > kTraditionalConversionLimit) return nullptr;
     jbyte *bytes = env->GetByteArrayElements(text, nullptr);
     if (!bytes) return nullptr;
     char *result = msime_client_simplified_to_traditional(
