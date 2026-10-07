@@ -251,7 +251,7 @@ public final class HomeActivity extends AppCompatActivity {
         onboardingAfterIntro = leadsToOnboarding;
         intro.animate().cancel();
         intro.setAlpha(1f);
-        intro.setClickable(true);
+        ViewPolicy.setClickable(intro, true);
         ViewPolicy.show(intro);
         barsOnDark(true);
 
@@ -330,12 +330,12 @@ public final class HomeActivity extends AppCompatActivity {
         if (intro.getVisibility() != View.VISIBLE || !intro.isClickable()) return;
         intro.removeCallbacks(dismissIntro);
         // Not clickable while it fades, so a second tap during the fade does not start onboarding twice.
-        intro.setClickable(false);
+        ViewPolicy.setClickable(intro, false);
         boolean onboarding = onboardingAfterIntro;
         onboardingAfterIntro = false;
         intro.animate().alpha(0f).setDuration(INTRO_FADE_MILLIS).withEndAction(() -> {
             ViewPolicy.hide(intro);
-            intro.setClickable(true);
+            ViewPolicy.setClickable(intro, true);
             stopBreath();
         }).start();
         barsOnDark(false);
@@ -425,7 +425,8 @@ public final class HomeActivity extends AppCompatActivity {
     /** 返回键由我们处理的条件：有详情页可弹，或者不在第一个 tab。 */
     private void updateBack() {
         if (back == null) return;
-        back.setEnabled(getSupportFragmentManager().getBackStackEntryCount() > 0 || selected != FIRST_TAB);
+        ViewPolicy.setEnabled(back,
+            getSupportFragmentManager().getBackStackEntryCount() > 0 || selected != FIRST_TAB);
     }
 
     /**

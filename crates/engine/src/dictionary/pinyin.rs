@@ -203,15 +203,27 @@ impl PinyinDatabase {
             table_keys.push((table, key));
         }
         let mut seen_keys = HashSet::with_capacity(table_keys.len());
-        let unique = table_keys
+        let duplicates = table_keys
             .iter()
-            .map(|(_, key)| seen_keys.insert(key.as_str()))
+            .enumerate()
+            .filter_map(|(index, (_, key))| (!seen_keys.insert(key.as_str())).then_some(index))
             .collect::<Vec<_>>();
         drop(seen_keys);
-        for ((table, key), unique) in table_keys.into_iter().zip(unique) {
-            if unique {
-                keys_by_table.entry(table).or_default().push(key);
+        let mut duplicates = duplicates.into_iter().peekable();
+        let mut write = 0;
+        for read in 0..table_keys.len() {
+            if duplicates.peek() == Some(&read) {
+                duplicates.next();
+                continue;
             }
+            if write != read {
+                table_keys.swap(write, read);
+            }
+            write += 1;
+        }
+        table_keys.truncate(write);
+        for (table, key) in table_keys {
+            keys_by_table.entry(table).or_default().push(key);
         }
         let mut rows = Vec::with_capacity(segmentations.len().saturating_mul(limit));
         for (table, keys) in &keys_by_table {
@@ -605,17 +617,25 @@ fn deduplicate_by_value(rows: &mut Vec<DictRow>) {
     }
     // Check duplicate values through borrowed slices, then retain in place after releasing the set.
     let mut seen = HashSet::with_capacity(rows.len());
-    let unique = rows
+    let duplicates = rows
         .iter()
-        .map(|row| seen.insert(row.value.as_str()))
+        .enumerate()
+        .filter_map(|(index, row)| (!seen.insert(row.value.as_str())).then_some(index))
         .collect::<Vec<_>>();
     drop(seen);
-    let mut index = 0;
-    rows.retain(|_| {
-        let keep = unique[index];
-        index += 1;
-        keep
-    });
+    let mut duplicates = duplicates.into_iter().peekable();
+    let mut write = 0;
+    for read in 0..rows.len() {
+        if duplicates.peek() == Some(&read) {
+            duplicates.next();
+            continue;
+        }
+        if write != read {
+            rows.swap(write, read);
+        }
+        write += 1;
+    }
+    rows.truncate(write);
 }
 
 #[cfg(test)]

@@ -280,7 +280,7 @@ impl ResourceStore {
             )));
         }
         for artifact in &specification.artifacts {
-            let mut input = File::open(directory.join(&artifact.name))?;
+            let mut input = crate::storage::open_private_file(&directory.join(&artifact.name))?;
             copy_verified(&mut input, &mut std::io::sink(), artifact)?;
         }
         Ok(())
@@ -450,7 +450,7 @@ impl VerifiedMarker {
             return None;
         }
         let bytes = crate::bounded_io::read_bounded_file_with(
-            File::open(path).ok()?,
+            crate::storage::open_private_file(path).ok()?,
             MAX_MARKER_BYTES,
             || (),
             |_| (),

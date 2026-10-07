@@ -447,7 +447,7 @@ impl Edition {
         let path = state_root.join(Self::STATE_RECORD_FILE);
         crate::storage::reject_symlink(&path).ok()?;
         let mut text = String::new();
-        std::fs::File::open(path)
+        crate::storage::open_private_file(&path)
             .ok()?
             .take(STATE_RECORD_LIMIT)
             .read_to_string(&mut text)

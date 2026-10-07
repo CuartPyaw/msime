@@ -177,7 +177,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         next.setText(page < pages - 1 ? R.string.onboarding_next
             : offer ? R.string.onboarding_sign_in : R.string.onboarding_done);
         ViewPolicy.setEnabled(next, !signingIn);
-        back.setEnabled(page > 0);
+        ViewPolicy.setEnabled(back, page > 0);
 
         LinearLayout column = findViewById(R.id.onboarding_page);
         column.removeAllViews();
@@ -540,7 +540,7 @@ public final class OnboardingActivity extends AppCompatActivity {
             + (selected ? "，已选择" : "，未选择"));
         // 偏好还读不到时也能点：选择先记下，偏好可读后再写（OnboardingChoices）。
         card.setOnClickListener(selected ? null : ignored -> chooseScheme(option.scheme()));
-        card.setClickable(true);
+        ViewPolicy.setClickable(card, true);
         column.addView(card, Ui.matchWidth(this, top));
     }
 

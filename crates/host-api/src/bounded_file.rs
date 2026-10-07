@@ -1,5 +1,23 @@
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{self, Read};
+use std::path::Path;
+
+pub(crate) fn open_private(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    options.open(path)
+}
 
 /// Read a file while enforcing a byte ceiling before and during the read.
 pub(crate) fn read(file: File, maximum: u64) -> io::Result<Vec<u8>> {
@@ -26,4 +44,25 @@ pub(crate) fn read(file: File, maximum: u64) -> io::Result<Vec<u8>> {
         ));
     }
     Ok(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::open_private;
+
+    #[cfg(unix)]
+    #[test]
+    fn open_private_rejects_a_symlinked_leaf() {
+        use std::os::unix::fs::symlink;
+
+        let outside = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let target = outside.path().join("outside.json");
+        std::fs::write(&target, b"synthetic-host-data").unwrap();
+        let linked = root.path().join("private.json");
+        symlink(&target, &linked).unwrap();
+
+        assert!(open_private(&linked).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"synthetic-host-data");
+    }
 }

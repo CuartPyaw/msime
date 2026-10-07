@@ -2,6 +2,8 @@
 //!
 //! `prepare_runtime_paths`, which stages a generation directory, lives in `user_dictionary::generation` because it replays the journal.
 
+use std::fs::{File, OpenOptions};
+use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use crate::assets;
@@ -82,6 +84,26 @@ fn join_current_or_legacy(root: &Path, name: &str) -> PathBuf {
 /// 存储路径可以经过的系统链接只在 `msime-path-trust` 里列一次。
 pub(crate) use msime_path_trust::is_trusted_system_alias;
 
+/// Open an Engine asset without following a leaf symlink. Callers still
+/// validate the file format and size through their own loaders; this closes
+/// the check-then-open race between those checks and the read or mapping.
+pub(crate) fn open_file_no_follow(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    options.open(path)
+}
+
 /// `join` for a name that came from outside the crate: a `..` component is refused rather than allowed to escape the root (`runtime_paths.cpp:14-23`).
 #[cfg_attr(
     not(test),
@@ -105,6 +127,22 @@ pub fn join_checked(root: &Path, name: &str) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn opening_an_asset_does_not_follow_a_leaf_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("asset.bin");
+        std::fs::write(&target, b"synthetic engine asset").unwrap();
+        let linked = root.path().join("asset.bin");
+        symlink(&target, &linked).unwrap();
+
+        assert!(open_file_no_follow(&linked).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"synthetic engine asset");
+    }
 
     #[test]
     fn joins_like_the_reference() {

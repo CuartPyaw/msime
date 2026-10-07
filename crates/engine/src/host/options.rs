@@ -1,6 +1,5 @@
 //! `EngineOptions` and its mapping onto `SessionOptions` (api-contract §2, bridge.cpp:306-407, 698-734).
 
-use std::fs::File;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
@@ -294,7 +293,7 @@ pub fn prepare_translation_sidecar(options: &EngineOptions) -> Result<()> {
     {
         return Err(EngineError::failed(diagnostics::TRANSLATION_SIDECAR_FAILED));
     }
-    let source_file = File::open(&source)
+    let source_file = crate::paths::open_file_no_follow(&source)
         .map_err(|_| EngineError::failed(diagnostics::TRANSLATION_SIDECAR_FAILED))?;
     let source_size = source_file
         .metadata()

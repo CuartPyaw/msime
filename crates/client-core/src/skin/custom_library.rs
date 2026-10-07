@@ -186,9 +186,11 @@ impl CustomSkinLibraryStore {
         if !metadata.file_type().is_file() || metadata.len() > MAXIMUM_BYTES {
             return Err(CustomSkinLibraryError::Invalid);
         }
-        let bytes = crate::bounded_io::read_bounded_file(File::open(path)?, MAXIMUM_BYTES, || {
-            CustomSkinLibraryError::Invalid
-        })?;
+        let bytes = crate::bounded_io::read_bounded_file(
+            crate::storage::open_private_file(&path)?,
+            MAXIMUM_BYTES,
+            || CustomSkinLibraryError::Invalid,
+        )?;
         let mut items: Vec<SavedTouchKeyboardSkin> = serde_json::from_slice(&bytes)?;
         if items.len() > MAXIMUM_ITEMS {
             return Err(CustomSkinLibraryError::Invalid);

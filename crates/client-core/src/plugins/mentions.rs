@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::fs::{self, File};
+use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -105,9 +105,11 @@ impl MentionStore {
             return Err(MentionError::Storage);
         }
         let bytes =
-            crate::bounded_io::read_bounded_file(File::open(&path)?, MAX_DOCUMENT_BYTES, || {
-                MentionError::Format
-            })?;
+            crate::bounded_io::read_bounded_file(
+                crate::storage::open_private_file(&path)?,
+                MAX_DOCUMENT_BYTES,
+                || MentionError::Format,
+            )?;
         let document: Document =
             serde_json::from_slice(&bytes).map_err(|_| MentionError::Format)?;
         if document.format_version != FORMAT_VERSION {

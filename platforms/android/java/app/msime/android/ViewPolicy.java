@@ -135,6 +135,12 @@ public final class ViewPolicy {
         view.setEnabled(enabled);
     }
 
+    /** Apply enabled state and a caller-selected inactive opacity. */
+    public static void setEnabledWithAlpha(View view, boolean enabled, float inactiveAlpha) {
+        setEnabled(view, enabled);
+        setActiveAlpha(view, enabled, inactiveAlpha);
+    }
+
     /** Announce changing view content to accessibility services without interrupting the user. */
     public static void setPoliteLiveRegion(View view) {
         view.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
@@ -327,6 +333,16 @@ public final class ViewPolicy {
     public static void setInteractive(View view, boolean interactive) {
         view.setClickable(interactive);
         view.setFocusable(interactive);
+    }
+
+    /** Set whether a view responds to taps without changing its focus policy. */
+    public static void setClickable(View view, boolean clickable) {
+        view.setClickable(clickable);
+    }
+
+    /** Set whether a view accepts keyboard focus without changing its click policy. */
+    public static void setFocusable(View view, boolean focusable) {
+        view.setFocusable(focusable);
     }
 
     /** Exclude a decorative view from the accessibility tree. */

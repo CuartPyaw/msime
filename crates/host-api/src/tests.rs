@@ -10707,6 +10707,28 @@ fn downloaded_language_dictionaries_win_over_the_recorded_directory() {
 }
 
 #[test]
+fn a_relative_recorded_language_dictionary_directory_is_ignored() {
+    let relative_root = tempfile::Builder::new()
+        .prefix("synthetic-language-dictionaries-")
+        .tempdir_in(".")
+        .unwrap();
+    let relative = std::path::Path::new(".")
+        .join(relative_root.path().file_name().unwrap());
+    for name in [
+        "msime-cantonese.db",
+        "msime-zhuyin.db",
+        "msime-stroke.db",
+    ] {
+        std::fs::write(relative.join(name), b"synthetic dictionary").unwrap();
+    }
+    assert!(!relative.is_absolute());
+    assert_eq!(
+        LanguageDictionaries::resolve(None, Some(&relative)),
+        LanguageDictionaries::default()
+    );
+}
+
+#[test]
 fn a_downloaded_japanese_pack_keeps_temporary_japanese_available() {
     let root = tempfile::tempdir().unwrap();
     let resources = root.path().join("resources");
@@ -10995,6 +11017,40 @@ fn a_bundled_settled_model_wins_over_the_downloaded_pack() {
         Some(resources.join("sentence-model-desktop.safetensors"))
     );
     assert_eq!(super::packaged_settled_model(&json!({})), None);
+}
+
+#[test]
+fn a_relative_recorded_settled_model_is_ignored() {
+    let root = tempfile::tempdir().unwrap();
+    let state = root.path().join("state");
+    let resources = root.path().join("resources");
+    std::fs::create_dir_all(&resources).unwrap();
+    let downloaded = publish_resource_pack(
+        &state,
+        ResourcePack::SettledModel,
+        &["sentence-model-desktop.safetensors"],
+    )
+    .join("sentence-model-desktop.safetensors");
+
+    // HostOptions promises an absolute path. A relative path must not be resolved
+    // against whichever directory happened to launch the input method.
+    let relative_root = tempfile::Builder::new()
+        .prefix("synthetic-settled-model-")
+        .tempdir_in(".")
+        .unwrap();
+    let relative = std::path::Path::new(".")
+        .join(relative_root.path().file_name().unwrap())
+        .join("synthetic-model.safetensors");
+    std::fs::write(&relative, b"synthetic model").unwrap();
+    assert!(!relative.is_absolute());
+    assert_eq!(
+        super::settled_model_file(
+            resources.to_str().unwrap(),
+            Some(relative.to_str().unwrap()),
+            Some(&state)
+        ),
+        Some(downloaded)
+    );
 }
 
 /// 会话打开后才下载好的落定重排模型，在下一次聚焦时被看见，在后台线程加载，加载完后由输入空闲时的 `apply_pending` 换上，不重建 Engine。

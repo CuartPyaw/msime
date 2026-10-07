@@ -119,7 +119,7 @@ pub fn load_helpcode_keymap(resources: &Path, schema: &str) -> Result<HelpcodeKe
             return Ok(HelpcodeKeymap::default());
         }
     }
-    let bytes = match File::open(&path) {
+    let bytes = match crate::paths::open_file_no_follow(&path) {
         Ok(file) => match read_helpcode_file(file) {
             Some(bytes) => bytes,
             None => return Ok(HelpcodeKeymap::default()),

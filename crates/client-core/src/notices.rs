@@ -9,7 +9,6 @@ use pulldown_cmark::{CowStr, Event, Options, Parser, Tag, TagEnd};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -224,7 +223,7 @@ impl NoticeStore {
         if !metadata.file_type().is_file() {
             return NoticeCache::default();
         }
-        let mut cache: NoticeCache = File::open(path)
+        let mut cache: NoticeCache = crate::storage::open_private_file(&path)
             .ok()
             .and_then(|file| crate::bounded_io::read_bounded(file, MAX_CACHE_BYTES).ok())
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
