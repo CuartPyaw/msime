@@ -10799,6 +10799,23 @@ fn a_relative_recorded_language_dictionary_directory_is_ignored() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn a_symlinked_recorded_language_dictionary_directory_is_ignored() {
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    for name in ["msime-cantonese.db", "msime-zhuyin.db", "msime-stroke.db"] {
+        std::fs::write(outside.path().join(name), b"synthetic dictionary").unwrap();
+    }
+    let linked = root.path().join("language-dictionaries");
+    msime_path_trust::untrusted_symlink(outside.path(), &linked).unwrap();
+
+    assert_eq!(
+        LanguageDictionaries::resolve(None, Some(&linked)),
+        LanguageDictionaries::default()
+    );
+}
+
 #[test]
 fn a_downloaded_japanese_pack_keeps_temporary_japanese_available() {
     let root = tempfile::tempdir().unwrap();
