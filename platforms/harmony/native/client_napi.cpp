@@ -490,6 +490,12 @@ static napi_value VocabularyReview(napi_env env, napi_callback_info info) {
     return queueRequest(env, info, msime_client_vocabulary_review, "MSIME vocabulary review");
 }
 
+// Picked skins are checked against the manifest and copied with a bounded tree budget. Run that
+// validation and replacement off the ArkTS thread so a large folder cannot freeze settings.
+static napi_value SkinImport(napi_env env, napi_callback_info info) {
+    return queueRequest(env, info, msime_client_skin_import, "MSIME skin import");
+}
+
 // A pack import extracts or copies up to a music pack's size and validates it before swapping it into place, which the header says belongs on a worker thread, so it runs as async work and answers through a promise. The small catalog, remove and name-list calls stay on the synchronous `plugins` entry.
 struct PluginsWork {
     napi_async_work work = nullptr;
@@ -1316,6 +1322,7 @@ static napi_value Init(napi_env env, napi_value exports) {
         ENTRY("dictionaryManifest", DictionaryManifest),
         ENTRY("skinResource", SkinResource),
         ENTRY("skinToolbarStylesheet", SkinToolbarStylesheet),
+        ENTRY("skinImport", SkinImport),
         ENTRY("customSkinLibrary", CustomSkinLibrary),
         ENTRY("communitySkinInstall", CommunitySkinInstall),
         ENTRY("keyboardSkinTrial", KeyboardSkinTrial),
