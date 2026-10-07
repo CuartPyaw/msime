@@ -74,6 +74,30 @@ CHECKS = (
         "    let handle = FileHandle",
         ("O_NONBLOCK",),
     ),
+    (
+        ROOT / "shared/backend/account/BackendAccountSession.swift",
+        "  static func readBounded(_ url: URL",
+        "  func save(_ session: BackendSavedSession)",
+        ("O_NONBLOCK",),
+    ),
+    (
+        ROOT / "shared/backend/storage/BackendLocalStore.swift",
+        "  private static func readBounded(_ url: URL",
+        "  @discardableResult static func write(",
+        ("O_NONBLOCK",),
+    ),
+    (
+        ROOT / "shared/backend/clients/BackendSnapshotClient.swift",
+        "private func openBackendSnapshotSource(_ source: URL)",
+        "\n\n\n/// A synchronous pull stream",
+        ("O_NONBLOCK",),
+    ),
+    (
+        ROOT / "shared/snapshot/Sources/MSIMESnapshot/Snapshot.swift",
+        "private func openSnapshotSource(_ source: URL)",
+        "\n}",
+        ("O_NONBLOCK",),
+    ),
 )
 
 

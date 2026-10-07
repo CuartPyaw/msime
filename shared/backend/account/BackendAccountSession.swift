@@ -152,7 +152,7 @@ struct BackendDesktopSessionFile: BackendSessionStorage {
     // `load()` checks the path with `lstat`, but another process could replace it before a
     // path-based FileHandle opens it. Keep the final component pinned and reject symlinks at
     // the open itself.
-    let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+    let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
     guard descriptor >= 0 else { throw BackendAccountClient.Failure(status: 0) }
     defer { close(descriptor) }
     var data = Data()
