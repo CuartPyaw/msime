@@ -109,6 +109,7 @@ constexpr jsize kEnglishCompletionResourcesLimit = 4096;
 constexpr jsize kShuangpinProfileLimit = 64;
 constexpr jsize kSmartPunctuationRequestLimit = 4096;
 constexpr jsize kTraditionalConversionLimit = 1 * 1024 * 1024;
+constexpr jsize kOnlineQueryLimit = 16384;
 }
 
 extern "C" {
@@ -595,14 +596,7 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_onlineQueryRaw(
     return response(env, msime_client_online_query(static_cast<uint64_t>(handle)));
 }
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_cloudRequestUrlRaw(JNIEnv *env, jclass, jbyteArray query) {
-    if (!query) return response(env, msime_client_cloud_request_url(nullptr, 0));
-    jsize length = env->GetArrayLength(query);
-    jbyte *bytes = env->GetByteArrayElements(query, nullptr);
-    if (!bytes) return nullptr;
-    char *result = msime_client_cloud_request_url(
-        reinterpret_cast<const uint8_t *>(bytes), static_cast<size_t>(length));
-    env->ReleaseByteArrayElements(query, bytes, JNI_ABORT);
-    return response(env, result);
+    return bounded_request(env, query, kOnlineQueryLimit, msime_client_cloud_request_url);
 }
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_aiRequestForQueryRaw(JNIEnv *env, jclass, jlong handle, jbyteArray query) {
     if (!query) {
