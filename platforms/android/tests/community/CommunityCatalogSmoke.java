@@ -89,6 +89,14 @@ public final class CommunityCatalogSmoke {
             0, 0, 1, null, CommunityRequest.Category.OTHER, false, 0, null);
         check(!(boolean) validItem.invoke(null, invalidRating, CommunityRequest.Kind.SKIN),
             "a rating average without ratings must be rejected");
+        Method validName = CommunityCatalog.class.getDeclaredMethod("validName", String.class, int.class);
+        validName.setAccessible(true);
+        check(!(boolean) validName.invoke(null, "坏\uD800名", 128),
+            "community names reject malformed Unicode");
+        Method validDescription = CommunityCatalog.class.getDeclaredMethod("validDescription", String.class);
+        validDescription.setAccessible(true);
+        check(!(boolean) validDescription.invoke(null, "说明\uD800"),
+            "community descriptions reject malformed Unicode");
         // 分类只属于皮肤：皮肤条目必须有分类（缺失时已解析成 other），词库和回复条目不能有。
         Method validCategory = CommunityCatalog.class.getDeclaredMethod(
             "validCategory", CommunityRequest.Kind.class, CommunityRequest.Category.class);
