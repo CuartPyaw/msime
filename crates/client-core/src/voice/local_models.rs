@@ -380,7 +380,7 @@ fn restore_interrupted_adoption(staging: &Path) {
     if !metadata.file_type().is_file() || metadata.len() > MAX_ADOPTION_SOURCE_BYTES {
         return;
     }
-    let Ok(file) = fs::File::open(&record) else {
+    let Ok(file) = crate::storage::open_private_file(&record) else {
         return;
     };
     let Ok(bytes) =
@@ -1055,7 +1055,7 @@ pub(crate) fn adopt_files(
         }
         for file in files {
             let path = pack_dir.join(&file.name);
-            let mut input = fs::File::open(&path)?;
+            let mut input = crate::storage::open_private_file(&path)?;
             if input.metadata()?.len() != file.size {
                 return Err(LocalModelError::SizeMismatch(file.name.clone()));
             }
@@ -1169,12 +1169,7 @@ fn download_resumable(
         Err(error) if error.kind() == io::ErrorKind::NotFound => 0,
         Err(error) => return Err(error.into()),
     };
-    let mut output = fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(partial)?;
+    let mut output = crate::storage::open_private_read_write_file(partial)?;
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; CHUNK];
     let mut downloaded = 0u64;
@@ -1266,7 +1261,7 @@ pub fn installed_manifest(root: &Path, id: &str) -> Option<Value> {
         return None;
     }
     let bytes = crate::bounded_io::read_bounded_file_with(
-        fs::File::open(&path).ok()?,
+        crate::storage::open_private_file(&path).ok()?,
         MAX_MANIFEST_BYTES,
         || (),
         |_| (),

@@ -27,6 +27,25 @@ pub(crate) fn open_private_file(path: &Path) -> io::Result<File> {
     options.open(path)
 }
 
+/// Open a private resumable file for reading and writing without following a
+/// leaf symlink. The caller is responsible for bounding the path and contents.
+pub(crate) fn open_private_read_write_file(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    options.open(path)
+}
+
 /// Create a directory and report whether the path itself is a real directory.
 ///
 /// `create_dir_all` follows an existing symlink, while storage roots must stay
@@ -83,6 +102,22 @@ mod tests {
         symlink(&target, &linked).unwrap();
 
         assert!(open_private_file(&linked).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_read_write_open_rejects_a_symlinked_leaf() {
+        use std::os::unix::fs::symlink;
+
+        let outside = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let target = outside.path().join("outside.json");
+        std::fs::write(&target, b"synthetic-private-data").unwrap();
+        let linked = root.path().join("private.json");
+        symlink(&target, &linked).unwrap();
+
+        assert!(open_private_read_write_file(&linked).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"synthetic-private-data");
     }
 
     #[cfg(unix)]

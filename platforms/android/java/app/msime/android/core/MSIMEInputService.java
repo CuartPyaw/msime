@@ -3163,7 +3163,7 @@ public final class MSIMEInputService extends InputMethodService {
             boolean symbols = keyboardLayer == KeyboardLayout.Layer.SYMBOLS;
             boolean enabled = symbols ? japaneseNineKeyActive() : JapaneseVariantPolicy.enabled(
                 japaneseNineKeyActive(), false, composing);
-            japaneseVariantsButton.setEnabled(enabled);
+            ViewPolicy.setEnabled(japaneseVariantsButton, enabled);
             japaneseVariantsButton.setContentDescription(
                 symbols ? "括号；长按选择其他括号"
                     : JapaneseVariantPolicy.accessibilityLabel(enabled));
@@ -4545,7 +4545,7 @@ public final class MSIMEInputService extends InputMethodService {
         recognize.setLayoutParams(KeyboardGeometry.matchWidthWrapParams());
         VoiceConfiguration configured = VoiceConfiguration.read(preferencesDirectory, "ime-preview");
         boolean platformRecognizerAvailable = VoiceRecognitionActivity.available(this);
-        recognize.setEnabled(voiceInputEnabled
+        ViewPolicy.setEnabled(recognize, voiceInputEnabled
             && (platformRecognizerAvailable || configured.provider() != null));
         imeStyler.applySkin();
     }
@@ -5400,7 +5400,7 @@ public final class MSIMEInputService extends InputMethodService {
             ? description + "；长按管理" : description);
         if (Build.VERSION.SDK_INT >= 30)
             button.setStateDescription(highlighted ? "已选中" : "未选中");
-        button.setEnabled(id != null);
+        ViewPolicy.setEnabled(button, id != null);
     }
 
     void closeCandidatePanel() {
@@ -6687,7 +6687,7 @@ public final class MSIMEInputService extends InputMethodService {
             layerButton.setContentDescription(KeyboardActionRow.layerDescription(symbols));
         }
         if (symbolPanelButton != null) {
-            symbolPanelButton.setEnabled(session != 0 && connection != null
+            ViewPolicy.setEnabled(symbolPanelButton, session != 0 && connection != null
                 && keyboardLayer == KeyboardLayout.Layer.LETTERS);
             symbolPanelButton.setContentDescription("打开符号面板");
         }
@@ -6715,7 +6715,7 @@ public final class MSIMEInputService extends InputMethodService {
         }
         if (languageButton != null) {
             languageButton.setText(dedicatedEnglish ? "英" : "中");
-            languageButton.setEnabled(session != 0);
+            ViewPolicy.setEnabled(languageButton, session != 0);
             languageButton.setContentDescription(
                 dedicatedEnglish ? "切换到所选输入方案" : "切换到英文输入");
             if (Build.VERSION.SDK_INT >= 30) {

@@ -7,7 +7,7 @@
 //! On Windows every input session lives in the one Server process, which releases them when asked over its auxiliary pipe instead (see [`server`]). The Server does not track who asked, so one writer's resume can hand the sessions back while another is still working; that writer's next request then finds the dictionaries busy, asks again and is retried like the first.
 
 use std::ffi::OsStr;
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -32,7 +32,7 @@ fn reject_symlinked_path_ancestors(path: &Path) -> std::io::Result<()> {
 fn read_lease(path: &Path) -> Option<String> {
     reject_symlinked_path_ancestors(path).ok()?;
     let bytes = crate::bounded_io::read_bounded_file_with(
-        File::open(path).ok()?,
+        crate::storage::open_private_file(path).ok()?,
         MAX_LEASE_BYTES,
         || (),
         |_| (),
