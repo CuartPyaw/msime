@@ -8549,6 +8549,7 @@ group("cloud clipboard text follows the shared clipboard bounds", () => {
     !CloudClipboardPolicy.validText("a\u0085b"),
     "C1 controls are refused as Rust's is_control does",
   );
+  check(!CloudClipboardPolicy.validText("a\ud800b"), "unpaired surrogates are refused");
   check(CloudClipboardPolicy.validText("x".repeat(4000)), "4,000 UTF-16 units fit");
   check(!CloudClipboardPolicy.validText("x".repeat(4001)), "4,001 do not");
   check(
