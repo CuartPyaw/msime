@@ -604,6 +604,10 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_aiRequestForQue
             static_cast<uint64_t>(handle), nullptr, 0));
     }
     jsize length = env->GetArrayLength(query);
+    if (length > kOnlineQueryLimit) {
+        return response(env, msime_client_ai_request_for_query(
+            static_cast<uint64_t>(handle), nullptr, 0));
+    }
     jbyte *bytes = env->GetByteArrayElements(query, nullptr);
     if (!bytes) return nullptr;
     char *result = msime_client_ai_request_for_query(static_cast<uint64_t>(handle),
