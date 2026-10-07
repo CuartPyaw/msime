@@ -2810,6 +2810,7 @@ dependencies = [
  "hex",
  "html-escape",
  "indexmap 2.14.2",
+ "libc",
  "msime-engine",
  "pinyin",
  "regex",
