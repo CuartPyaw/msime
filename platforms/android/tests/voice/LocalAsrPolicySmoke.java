@@ -118,6 +118,9 @@ public final class LocalAsrPolicySmoke {
         check(!LocalAsrPolicy.suppliedHotword("水\n杉", "shui shan") && !LocalAsrPolicy.suppliedHotword("水杉", "shui\nshan"), "a control character is dropped");
         check(!LocalAsrPolicy.suppliedHotword("字".repeat(LocalAsrPolicy.MAX_HOTWORD_TEXT_LENGTH + 1), "zi"), "an overlong word is dropped");
         check(!LocalAsrPolicy.suppliedHotword("水杉", "a".repeat(LocalAsrPolicy.MAX_HOTWORD_PINYIN_LENGTH + 1)), "an overlong pinyin is dropped");
+        check(!LocalAsrPolicy.suppliedHotword("坏\uD800", "huai"), "a malformed word is dropped");
+        check(LocalAsrPolicy.hotwordLines(Arrays.asList("坏\uD800", "好")).equals("好"),
+            "malformed hotwords are dropped before native framing");
         try {
             Method strictText = LocalAsrPolicy.class.getDeclaredMethod("strictText", Object.class);
             strictText.setAccessible(true);

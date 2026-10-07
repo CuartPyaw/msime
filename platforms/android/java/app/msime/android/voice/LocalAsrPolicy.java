@@ -140,7 +140,8 @@ public final class LocalAsrPolicy {
         String trimmed = text.trim();
         if (trimmed.isEmpty() || text.length() > MAX_HOTWORD_TEXT_LENGTH) return false;
         if (pinyin.length() > MAX_HOTWORD_PINYIN_LENGTH) return false;
-        return !TextPolicy.hasControl(text) && !TextPolicy.hasControl(pinyin);
+        return !TextPolicy.hasControl(text) && !TextPolicy.hasControl(pinyin)
+            && TextPolicy.validUnicode(text) && TextPolicy.validUnicode(pinyin);
     }
 
     /**
@@ -158,7 +159,8 @@ public final class LocalAsrPolicy {
             if (kept == HOTWORD_LIMIT) break;
             if (word == null) continue;
             String trimmed = word.trim();
-            if (trimmed.isEmpty() || TextPolicy.hasControl(trimmed)) continue;
+            if (trimmed.isEmpty() || TextPolicy.hasControl(trimmed)
+                    || !TextPolicy.validUnicode(trimmed)) continue;
             if (kept > 0) out.append('\n');
             out.append(trimmed);
             kept++;
