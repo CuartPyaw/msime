@@ -380,7 +380,14 @@ fn remove_leftovers(root: &Path, id: &str) {
         let Some(name) = name.to_str() else {
             continue;
         };
-        if name.starts_with(&staging) {
+        let kind = match entry.file_type() {
+            Ok(kind) => kind,
+            Err(_) => continue,
+        };
+        // Only a real staging directory may carry an adoption record. A
+        // symlink here could redirect the recovery scan to an unrelated tree
+        // and rename its files into the trusted source directory.
+        if name.starts_with(&staging) && kind.is_dir() {
             restore_interrupted_adoption(&entry.path());
         }
         if name.starts_with(&staging) || name.starts_with(&old) {
