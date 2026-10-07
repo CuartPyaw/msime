@@ -356,7 +356,7 @@ impl Edition {
         struct Marker {
             edition: String,
         }
-        let file = match std::fs::File::open(marker) {
+        let file = match crate::storage::open_private_file(marker) {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Self::full()),
             Err(error) => return Err(error),
@@ -1197,6 +1197,21 @@ mod tests {
             std::fs::write(&marker, bad).unwrap();
             assert!(Edition::declared_by_package(&marker).is_err());
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_package_marker_does_not_follow_a_symlinked_leaf() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join(Edition::PACKAGE_MARKER_FILE);
+        std::fs::write(&target, br#"{"edition":"wubi"}"#).unwrap();
+        let marker = directory.path().join(Edition::PACKAGE_MARKER_FILE);
+        symlink(&target, &marker).unwrap();
+
+        assert!(Edition::declared_by_package(&marker).is_err());
     }
 
     #[test]
