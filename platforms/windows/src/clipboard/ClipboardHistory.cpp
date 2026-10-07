@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <fstream>
+#include <optional>
 #ifdef _WIN32
 #include "StateRootLease.h"
 #include <windows.h>
@@ -214,14 +215,39 @@ bool write_store(const std::filesystem::path &path, const std::vector<std::strin
 // a byte count could end inside a multi-byte sequence and leave invalid UTF-8,
 // which nlohmann::json::dump() then throws on when the store is written.
 namespace {
-// Units a UTF-8 lead byte contributes to UTF-16: astral planes take a pair.
-size_t utf16_units(unsigned char lead) { return lead >= 0xF0 ? 2 : 1; }
-size_t sequence_length(unsigned char lead) {
-  if (lead < 0x80) return 1;
-  if ((lead & 0xE0) == 0xC0) return 2;
-  if ((lead & 0xF0) == 0xE0) return 3;
-  if ((lead & 0xF8) == 0xF0) return 4;
-  return 1; // Not a lead byte; copy it and let validation elsewhere object.
+// Return the length of a well-formed UTF-8 scalar at offset, rejecting
+// overlong encodings, surrogate code points and values above U+10FFFF.
+std::optional<size_t> valid_sequence_length(const std::string &text,
+                                            size_t offset) {
+  const auto lead = static_cast<unsigned char>(text[offset]);
+  size_t length = 0;
+  uint32_t minimum = 0;
+  if (lead < 0x80) {
+    return 1;
+  } else if ((lead & 0xE0) == 0xC0) {
+    length = 2;
+    minimum = 0x80;
+  } else if ((lead & 0xF0) == 0xE0) {
+    length = 3;
+    minimum = 0x800;
+  } else if ((lead & 0xF8) == 0xF0) {
+    length = 4;
+    minimum = 0x10000;
+  } else {
+    return std::nullopt;
+  }
+  if (offset > text.size() || length > text.size() - offset)
+    return std::nullopt;
+  uint32_t codepoint = lead & ((1u << (8 - length - 1)) - 1u);
+  for (size_t index = 1; index < length; ++index) {
+    const auto byte = static_cast<unsigned char>(text[offset + index]);
+    if ((byte & 0xC0) != 0x80) return std::nullopt;
+    codepoint = (codepoint << 6) | (byte & 0x3F);
+  }
+  if (codepoint < minimum || codepoint > 0x10FFFF ||
+      (codepoint >= 0xD800 && codepoint <= 0xDFFF))
+    return std::nullopt;
+  return length;
 }
 } // namespace
 std::string normalize_clipboard_text(std::string text) {
@@ -238,14 +264,14 @@ std::string normalize_clipboard_text(std::string text) {
   normalized.reserve(text.size());
   size_t units = 0;
   for (size_t i = 0; i < text.size() && units < ClipboardHistory::max_chars;) {
-    const auto lead = static_cast<unsigned char>(text[i]);
-    const size_t length = (std::min)(sequence_length(lead), text.size() - i);
-    const size_t cost = utf16_units(lead);
+    const auto length = valid_sequence_length(text, i);
+    if (!length) return {};
+    const size_t cost = *length == 4 ? 2 : 1;
     // Never take part of a character: stop before one that would not fit.
     if (units + cost > ClipboardHistory::max_chars) break;
-    normalized.append(text, i, length);
+    normalized.append(text, i, *length);
     units += cost;
-    i += length;
+    i += *length;
   }
   return normalized;
 }
