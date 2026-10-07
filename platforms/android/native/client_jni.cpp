@@ -111,6 +111,8 @@ constexpr jsize kShuangpinProfileLimit = 64;
 constexpr jsize kSmartPunctuationRequestLimit = 4096;
 constexpr jsize kTraditionalConversionLimit = 1 * 1024 * 1024;
 constexpr jsize kOnlineQueryLimit = 16384;
+constexpr jsize kOnlineBodyLimit = 262144;
+constexpr jsize kOnlineCandidatesLimit = 16384;
 }
 
 extern "C" {
@@ -627,6 +629,10 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_applyCloudRespo
     }
     jsize queryLength = env->GetArrayLength(query);
     jsize bodyLength = env->GetArrayLength(body);
+    if (queryLength > kOnlineQueryLimit || bodyLength > kOnlineBodyLimit) {
+        return response(env, msime_client_apply_cloud_response(
+            static_cast<uint64_t>(handle), nullptr, 0, nullptr, 0));
+    }
     jbyte *queryBytes = env->GetByteArrayElements(query, nullptr);
     if (!queryBytes) return nullptr;
     jbyte *bodyBytes = env->GetByteArrayElements(body, nullptr);
@@ -648,6 +654,10 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_applyOnlineCand
     }
     jsize queryLength = env->GetArrayLength(query);
     jsize candidatesLength = env->GetArrayLength(candidates);
+    if (queryLength > kOnlineQueryLimit || candidatesLength > kOnlineCandidatesLimit) {
+        return response(env, msime_client_apply_online_candidates(
+            static_cast<uint64_t>(handle), nullptr, 0, nullptr, 0, 0));
+    }
     jbyte *queryBytes = env->GetByteArrayElements(query, nullptr);
     if (!queryBytes) return nullptr;
     jbyte *candidateBytes = env->GetByteArrayElements(candidates, nullptr);
