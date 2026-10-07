@@ -400,13 +400,22 @@ inline std::optional<std::filesystem::path> fcitx_theme_file(const char *xdg_dat
 
 // Replace the theme file atomically, leaving it untouched when it already holds the content. Returns whether the file now holds it.
 inline bool write_fcitx_theme(const std::filesystem::path &file, const std::string &content) {
-  {
-    std::ifstream current(file, std::ios::binary);
-    if (current) {
+  const int descriptor = ::open(file.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+  if (descriptor >= 0) {
+    struct CloseOnExit {
+      int descriptor;
+      ~CloseOnExit() { ::close(descriptor); }
+    } close_on_exit{descriptor};
+    struct stat metadata {};
+    if (::fstat(descriptor, &metadata) == 0 && S_ISREG(metadata.st_mode)) {
       std::string existing(content.size() + 1, '\0');
-      current.read(existing.data(), static_cast<std::streamsize>(existing.size()));
-      const auto count = current.gcount();
-      if (count == static_cast<std::streamsize>(content.size()) &&
+      ssize_t count = 0;
+      for (;;) {
+        count = ::read(descriptor, existing.data(), existing.size());
+        if (count < 0 && errno == EINTR) continue;
+        break;
+      }
+      if (count >= 0 && count == static_cast<ssize_t>(content.size()) &&
           existing.compare(0, content.size(), content) == 0)
         return true;
     }
