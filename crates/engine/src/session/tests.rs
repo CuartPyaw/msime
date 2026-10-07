@@ -1591,6 +1591,50 @@ INSERT INTO tbl_1_n VALUES('ni','n','你',100),('ni','n','拟',90),('ni','n','�
     assert_eq!(session.snapshot().candidates, before);
 }
 
+#[test]
+fn clearing_one_online_source_removes_cached_rows_but_keeps_the_other_source() {
+    let fixture = Fixture::new(
+        "CREATE TABLE tbl_1_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_1_n VALUES('ni','n','你',100),('ni','n','拟',90);",
+    );
+    let mut session = fixture.session();
+    type_text(&mut session, "ni");
+    let query = session.online_query().expect("a quanpin query");
+    assert!(session.apply_online_candidate(&query, "云候选", CandidateSource::CloudSuggestion));
+    assert!(session.apply_online_candidate(&query, "AI候选", CandidateSource::AiSuggestion));
+    assert!(words(&session).contains(&"云候选".to_owned()));
+    assert!(words(&session).contains(&"AI候选".to_owned()));
+
+    session.clear_online_candidates(CandidateSource::CloudSuggestion);
+    assert!(!words(&session).contains(&"云候选".to_owned()));
+    assert!(words(&session).contains(&"AI候选".to_owned()));
+
+    session.command(Command::Cancel);
+    type_text(&mut session, "ni");
+    assert!(!words(&session).contains(&"云候选".to_owned()));
+    assert!(words(&session).contains(&"AI候选".to_owned()));
+}
+
+#[test]
+fn clearing_online_source_during_nine_key_mode_drops_cached_rows() {
+    let fixture = Fixture::new(
+        "CREATE TABLE tbl_1_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_1_n VALUES('ni','n','你',100),('ni','n','拟',90);",
+    );
+    let mut session = fixture.session();
+    type_text(&mut session, "ni");
+    let query = session.online_query().expect("a quanpin query");
+    assert!(session.apply_online_candidate(&query, "云候选", CandidateSource::CloudSuggestion));
+    session.command(Command::Cancel);
+
+    session.set_nine_key_enabled(true);
+    assert!(session.character(b'6', false).handled);
+    session.clear_online_candidates(CandidateSource::CloudSuggestion);
+    session.set_nine_key_enabled(false);
+    type_text(&mut session, "ni");
+    assert!(!words(&session).contains(&"云候选".to_owned()));
+}
+
 /// Loading a helpcode table drops the cached pinyin answers, online rows included, as the reference's keymap setters did (quanpin/engine.h:37-41); the golden ri_session_a_resources records the same sequence.
 #[test]
 fn a_new_helpcode_table_drops_the_online_rows_of_an_earlier_composition() {

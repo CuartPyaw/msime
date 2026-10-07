@@ -475,6 +475,21 @@ impl ShuangpinDictionary {
         single || reversed
     }
 
+    /// Remove one provider's rows from every cached answer while retaining the other provider and dictionary rows.
+    pub fn clear_online_candidates(&mut self, source: CandidateSource) {
+        for cache in [
+            &mut self.series_cache,
+            &mut self.single_helpcode_cache,
+            &mut self.reversed_single_helpcode_cache,
+            &mut self.double_helpcode_cache,
+        ] {
+            cache.retain_mut(|_, rows| {
+                rows.retain(|item| item.source != source);
+                !rows.is_empty()
+            });
+        }
+    }
+
     pub fn find_candidate(&self, key: &str, value: &str) -> Option<WordItem> {
         self.database
             .find_weight(key, value)
