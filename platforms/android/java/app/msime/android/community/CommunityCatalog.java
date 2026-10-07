@@ -512,7 +512,7 @@ public final class CommunityCatalog {
      * @return the failure to show, or an empty string on success
      */
     public String install(java.nio.file.Path preferencesDirectory, Item item) {
-        if (item.kind() != CommunityRequest.Kind.SKIN || item.payload() == null) {
+        if (item == null || item.kind() != CommunityRequest.Kind.SKIN || item.payload() == null) {
             return "这类作品还不能从这里保存。";
         }
         try {
