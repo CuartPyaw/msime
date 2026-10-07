@@ -795,7 +795,7 @@ fn check_files(
 
 /// Whether the file begins with the RIFF/WAVE or Ogg header its extension promises. Decoding is the host's, bounded again there; this only keeps a renamed file of some other type from being listed as audio.
 fn audio_signature_matches(directory: &Path, name: &str) -> bool {
-    let Ok(mut file) = fs::File::open(directory.join(name)) else {
+    let Ok(mut file) = crate::storage::open_private_file(&directory.join(name)) else {
         return false;
     };
     let mut header = [0u8; 12];
@@ -815,7 +815,7 @@ fn read_file(directory: &Path, name: &str, maximum: u64) -> std::io::Result<Vec<
     if !fs::symlink_metadata(&path)?.is_file() {
         return Err(std::io::Error::other("not a regular file"));
     }
-    let file = fs::File::open(&path)?;
+    let file = crate::storage::open_private_file(&path)?;
     if !file.metadata()?.is_file() {
         return Err(std::io::Error::other("not a regular file"));
     }

@@ -1,12 +1,74 @@
 //! SQLite housekeeping shared by the database stages.
 
 use std::path::Path;
+use std::{fs::OpenOptions, io};
 
 use anyhow::{bail, Result};
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 
 pub fn open(path: &Path) -> Result<Connection> {
-    Ok(Connection::open(path)?)
+    let path = no_follow_path(path)?;
+    create_database_file(&path)?;
+    Ok(Connection::open_with_flags(
+        &path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
+    )?)
+}
+
+fn create_database_file(path: &Path) -> io::Result<()> {
+    if let Ok(metadata) = std::fs::symlink_metadata(path) {
+        if metadata.file_type().is_symlink() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "database path is a symbolic link",
+            ));
+        }
+    }
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    match options.open(path) {
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+pub fn open_read_only(path: &Path) -> Result<Connection> {
+    let path = no_follow_path(path)?;
+    Ok(Connection::open_with_flags(
+        &path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )?)
+}
+
+fn no_follow_path(path: &Path) -> io::Result<std::path::PathBuf> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "database path has no parent"))?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "database path has no filename"))?;
+    let resolved = std::fs::canonicalize(parent)?.join(name);
+    if let Ok(metadata) = std::fs::symlink_metadata(&resolved) {
+        if metadata.file_type().is_symlink() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "database path is a symbolic link",
+            ));
+        }
+    }
+    Ok(resolved)
 }
 
 pub fn integrity_check(connection: &Connection) -> Result<()> {
@@ -44,6 +106,21 @@ pub fn freeze(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn sqlite_opens_reject_symlinked_leaves() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let real = directory.path().join("real.db");
+        open(&real).unwrap();
+        let linked = directory.path().join("linked.db");
+        symlink(&real, &linked).unwrap();
+
+        assert!(open(&linked).is_err());
+        assert!(open_read_only(&linked).is_err());
+    }
 
     #[test]
     fn analyze_leaves_only_stat1() {

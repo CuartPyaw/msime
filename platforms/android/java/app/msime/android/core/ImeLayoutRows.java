@@ -555,7 +555,8 @@ final class ImeLayoutRows {
         s.nineKeySpellings.removeAllViews();
         s.nineKeySpellingButtons.clear();
         s.nineKeySpellingScroll.setFillViewport(candidateRow);
-        s.nineKeySpellings.setGravity(candidateRow ? Gravity.CENTER_VERTICAL : Gravity.NO_GRAVITY);
+        ViewPolicy.setGravity(s.nineKeySpellings,
+            candidateRow ? Gravity.CENTER_VERTICAL : Gravity.NO_GRAVITY);
         if (s.nineKeySpellings.getLayoutParams() != null) {
             s.nineKeySpellings.getLayoutParams().height = candidateRow
                 ? android.view.ViewGroup.LayoutParams.MATCH_PARENT
@@ -919,7 +920,7 @@ final class ImeLayoutRows {
     }
 
     private void bindFeedbackAction(Button button, Runnable action) {
-        button.setOnClickListener(ignored -> {
+        ViewPolicy.bindClick(button, () -> {
             s.imeKeyFeedback.playFeedback(button);
             action.run();
         });

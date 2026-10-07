@@ -89,7 +89,9 @@ final class VoiceTextHandoffStore: @unchecked Sendable {
   }
 
   static func readBounded(_ file: URL) throws -> Data {
-    let handle = try FileHandle(forReadingFrom: file)
+    let descriptor = open(file.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+    guard descriptor >= 0 else { throw Failure.invalid }
+    let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
     defer { try? handle.close() }
     var data = Data()
     data.reserveCapacity(min(Self.maximumBytes, 64 * 1024))

@@ -6,7 +6,7 @@ pub mod queries;
 pub mod registry;
 pub mod scheme;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -441,6 +441,11 @@ impl ImeSession {
             .is_some_and(|wubi| wubi.has_complete_code())
     }
 
+    /// 全拼词典里每个键（以 `'` 连接的完整音节）最好那一行的权重，供滑行输入使用。
+    pub fn quanpin_best_weights(&self, keys: &[String]) -> HashMap<String, i64> {
+        self.registry.quanpin_best_weights(keys)
+    }
+
     /// Candidates for a raw prefix through a scratch scheme of the current type, leaving the live composition alone (caret-prefix decoding, overlays.md §7.6).
     pub fn query_raw_candidates(&mut self, raw: &str, raw_with_cases: &str) -> Vec<WordItem> {
         let request = self.raw_request(raw, raw_with_cases);
@@ -736,18 +741,27 @@ fn merge_pinyin_fallback(
     }
     // Keep deduplication keys borrowed until the pinyin rows are ready to move into the result.
     let mut seen: HashSet<&str> = candidates.iter().map(|item| item.word.as_str()).collect();
-    let unique = pinyin_rows
+    let duplicates = pinyin_rows
         .iter()
-        .map(|item| seen.insert(item.word.as_str()))
+        .enumerate()
+        .filter_map(|(index, item)| (!seen.insert(item.word.as_str())).then_some(index))
         .collect::<Vec<_>>();
     drop(seen);
-    let unique_count = unique.iter().filter(|&&is_unique| is_unique).count();
+    let unique_count = pinyin_rows.len() - duplicates.len();
     candidates.reserve(unique_count);
+    let mut duplicates = duplicates.into_iter().peekable();
     candidates.extend(
         pinyin_rows
             .into_iter()
-            .zip(unique)
-            .filter_map(|(item, unique)| unique.then_some(item)),
+            .enumerate()
+            .filter_map(|(index, item)| {
+                if duplicates.peek() == Some(&index) {
+                    duplicates.next();
+                    None
+                } else {
+                    Some(item)
+                }
+            }),
     );
     candidates
 }

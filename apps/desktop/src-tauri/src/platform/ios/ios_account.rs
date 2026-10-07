@@ -12,7 +12,7 @@ use crate::platform::mobile::mobile_account_helpers::{
     clear_snapshot_previews_after, cloud_dictionary_account_request, prepare_snapshot_directory,
     replace_pending_snapshot, snapshot_command_error, snapshot_response_without_account,
     snapshot_text_within_limit, take_pending_snapshot, valid_mobile_haptic_strength,
-    validate_pending_snapshot, PendingSnapshot, SnapshotMetadata,
+    validate_pending_snapshot, write_snapshot_file, PendingSnapshot, SnapshotMetadata,
 };
 #[cfg(target_os = "ios")]
 use crate::shared::account_dto::{
@@ -478,7 +478,7 @@ async fn dictionary_snapshot_restore_preview(
         prepare_snapshot_directory(&directory).map_err(|_| snapshot_command_error())?;
         let path = directory.join(format!("restore-{token}.ndjson"));
         let result = (|| {
-            fs::write(&path, text.as_bytes()).map_err(|_| snapshot_command_error())?;
+            write_snapshot_file(&path, text.as_bytes()).map_err(|_| snapshot_command_error())?;
             let metadata = snapshot_metadata(snapshot_bridge(serde_json::json!({
                 "operation": "inspect",
                 "path": path.to_string_lossy(),
@@ -517,7 +517,7 @@ async fn dictionary_snapshot_restore(
         prepare_snapshot_directory(&directory).map_err(|_| snapshot_command_error())?;
         let path = directory.join(format!("restore-{token}.ndjson"));
         let result = (|| {
-            fs::write(&path, text.as_bytes()).map_err(|_| snapshot_command_error())?;
+            write_snapshot_file(&path, text.as_bytes()).map_err(|_| snapshot_command_error())?;
             let metadata = snapshot_metadata(snapshot_bridge(serde_json::json!({
                 "operation": "inspect",
                 "path": path.to_string_lossy(),

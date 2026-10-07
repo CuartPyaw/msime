@@ -59,6 +59,10 @@ pub(crate) fn has_ownership_marker(directory: &Path, marker: &str) -> bool {
         .unwrap_or(false)
 }
 
+pub(crate) fn write_data_marker(path: &Path) -> io::Result<()> {
+    crate::shared::atomic_file::write(path, b"Metasequoia IME user data directory.\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -76,5 +80,23 @@ mod tests {
         symlink(outside.path(), &linked).unwrap();
 
         assert!(validate_directory::<()>(&linked.join("Downloads"), ()).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn data_marker_write_replaces_a_symlink_without_following_it() {
+        use std::os::unix::fs::symlink;
+
+        let outside = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let target = outside.path().join("outside-marker");
+        fs::write(&target, b"synthetic-outside").unwrap();
+        let marker = root.path().join(".metasequoia-ime-data");
+        symlink(&target, &marker).unwrap();
+
+        write_data_marker(&marker).unwrap();
+
+        assert_eq!(fs::read(&target).unwrap(), b"synthetic-outside");
+        assert_eq!(fs::read(&marker).unwrap(), b"Metasequoia IME user data directory.\n");
     }
 }

@@ -252,8 +252,14 @@ def ai_cache_key(query):
         if not isinstance(value, str):
             return None
         identity[key] = value
+    configured_limit = options.get("candidate_limit", 3)
+    identity["candidate_limit"] = (configured_limit
+                                    if type(configured_limit) is int and 1 <= configured_limit <= 10
+                                    else 3)
     # Match Windows AiCandidateWorker: omit credentials, prompt, context,
-    # session and generation so a successful result survives view refreshes.
+    # session and generation so a successful result survives view refreshes;
+    # keep candidate_limit because it controls how many rows the cached answer
+    # is allowed to contain.
     identity["pinyin_segments"] = segments
     return json.dumps(identity, ensure_ascii=False, sort_keys=True,
                       separators=(",", ":"))

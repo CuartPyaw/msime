@@ -23,6 +23,7 @@ pub const MAX_SYLLABLES_FOR_MULTIPLE_SEGMENTATIONS: usize = 4;
 /// Continuations are only taken up to three syllables longer: past that the rows' weights have dropped to a few dozen and the seats are better left to prefix characters (QD:23-25).
 pub const LONGER_PHRASE_EXTRA_SYLLABLES: usize = 3;
 pub const LONGER_PHRASE_LIMIT: usize = 12;
+const SMALL_UNIQUE_ROWS: usize = 64;
 
 /// How one raw input is read (QD:110-215).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -238,6 +239,24 @@ pub fn merge_alternative_segmentations(
 
 /// Deduplicate rows that are already sorted by weight while keeping the merged vector's allocation.
 fn retain_unique_sorted_rows(rows: &mut Vec<WordItem>) {
+    // 候选页规模内直接扫描已保留的词，避免为一次合并建立临时哈希表和布尔数组。
+    if rows.len() <= SMALL_UNIQUE_ROWS {
+        let mut write = 0;
+        for read in 0..rows.len() {
+            if rows[..write]
+                .iter()
+                .any(|item| item.word == rows[read].word)
+            {
+                continue;
+            }
+            if write != read {
+                rows.swap(write, read);
+            }
+            write += 1;
+        }
+        rows.truncate(write);
+        return;
+    }
     // Borrow words while calculating each first occurrence, then retain in place after releasing the set.
     let mut seen = HashSet::with_capacity(rows.len());
     let duplicates = rows
@@ -266,20 +285,36 @@ pub fn append_unique_words(result: &mut Vec<WordItem>, rows: Vec<WordItem>) {
     if rows.is_empty() {
         return;
     }
+    if result.len().saturating_add(rows.len()) <= SMALL_UNIQUE_ROWS {
+        // 候选总量很小时边追加边扫描结果，避免建立临时哈希表和保留标记数组。
+        result.reserve(rows.len());
+        for item in rows {
+            if result.iter().any(|existing| existing.word == item.word) {
+                continue;
+            }
+            result.push(item);
+        }
+        return;
+    }
     // Borrow words while checking duplicates, then release the borrows before moving rows into the result.
     let mut seen = HashSet::with_capacity(result.len().saturating_add(rows.len()));
     seen.extend(result.iter().map(|item| item.word.as_str()));
-    let unique = rows
+    let duplicates = rows
         .iter()
-        .map(|item| seen.insert(item.word.as_str()))
+        .enumerate()
+        .filter_map(|(index, item)| (!seen.insert(item.word.as_str())).then_some(index))
         .collect::<Vec<_>>();
     drop(seen);
     result.reserve(rows.len());
-    result.extend(
-        rows.into_iter()
-            .zip(unique)
-            .filter_map(|(item, unique)| unique.then_some(item)),
-    );
+    let mut duplicates = duplicates.into_iter().peekable();
+    result.extend(rows.into_iter().enumerate().filter_map(|(index, item)| {
+        if duplicates.peek() == Some(&index) {
+            duplicates.next();
+            None
+        } else {
+            Some(item)
+        }
+    }));
 }
 
 #[cfg(test)]
@@ -450,6 +485,20 @@ mod tests {
     }
 
     #[test]
+    fn alternative_dedup_uses_no_heap_state_for_small_merges() {
+        let mut rows = (0..36)
+            .map(|index| row("xian", &format!("词{}", index % 18), 100 - index))
+            .collect::<Vec<_>>();
+
+        let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            retain_unique_sorted_rows(&mut rows);
+        });
+
+        assert_eq!(allocations, 0);
+        assert_eq!(rows.len(), 18);
+    }
+
+    #[test]
     fn rare_alternative_is_not_promoted() {
         let primary: Vec<WordItem> = (0..10)
             .map(|i| row("xie", &format!("写{i}"), 1_000_000 - i))
@@ -518,6 +567,22 @@ mod tests {
 
         assert_eq!(result.len(), 11);
         assert_eq!(result.capacity(), 11);
+    }
+
+    #[test]
+    fn append_unique_words_uses_no_temporary_heap_state_for_small_merges() {
+        let mut result = Vec::with_capacity(37);
+        result.push(row("a", "已有", 1));
+        let rows: Vec<WordItem> = (0..36)
+            .map(|index| row("a", &format!("词{}", index % 18), index))
+            .collect();
+
+        let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            append_unique_words(&mut result, rows);
+        });
+
+        assert_eq!(allocations, 0);
+        assert_eq!(result.len(), 19);
     }
 
     #[test]

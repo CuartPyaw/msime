@@ -65,7 +65,7 @@ impl ClipboardHistoryStore {
             crate::storage::reject_symlink(parent)?;
         }
         crate::storage::reject_symlink(&self.path)?;
-        match fs::File::open(&self.path) {
+        match crate::storage::open_private_file(&self.path) {
             Ok(file) => {
                 let bytes = crate::bounded_io::read_bounded_file(file, MAX_HISTORY_BYTES, || {
                     std::io::Error::new(

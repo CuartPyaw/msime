@@ -1,7 +1,7 @@
 //! 构建输入的固定记录（`resources/dictionary-sources.lock.json`）：每个文件从哪里来、必须有怎样的 SHA-256。大文件和第三方输入按需下载到缓存目录；没有固定记录的文件一律不下载，缓存里的文件只在大小和摘要仍然一致时复用。msime-dictionary 的 `sources/` 和 `custom/` 不在锁文件里，只从 `--dictionary` checkout 读取；其中的上游数据按该 checkout 的 `upstream.lock.json` 校验。
 
 use std::collections::BTreeMap;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -291,7 +291,28 @@ impl Sources {
 }
 
 pub fn sha256_file(path: &Path) -> Result<String> {
-    let mut stream = File::open(path).with_context(|| format!("opening {}", path.display()))?;
+    let mut stream = open_private(path).with_context(|| format!("opening {}", path.display()))?;
+    sha256_reader(&mut stream)
+}
+
+fn open_private(path: &Path) -> std::io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    options.open(path)
+}
+
+fn sha256_reader(stream: &mut File) -> Result<String> {
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; 1 << 20];
     loop {
@@ -305,7 +326,11 @@ pub fn sha256_file(path: &Path) -> Result<String> {
 }
 
 fn matches(path: &Path, size: u64, sha256: &str) -> Result<bool> {
-    Ok(std::fs::metadata(path)?.len() == size && sha256_file(path)? == sha256)
+    let mut stream = open_private(path)?;
+    if stream.metadata()?.len() != size {
+        return Ok(false);
+    }
+    Ok(sha256_reader(&mut stream)? == sha256)
 }
 
 fn download(file: &PinnedFile, target: &Path) -> Result<()> {
@@ -337,7 +362,10 @@ fn write_pinned_response<R: Read>(
     let mut hasher = Sha256::new();
     let mut written = 0u64;
     let result = (|| {
-        let mut output = File::create(incoming)?;
+        let mut output = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(incoming)?;
         let mut buffer = vec![0u8; 1 << 20];
         loop {
             let read = response.read(&mut buffer)?;
@@ -793,6 +821,56 @@ mod tests {
 
         assert!(error.to_string().contains("exceeds pinned size"));
         assert!(!incoming.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_cached_symlink_is_not_used_even_when_its_target_matches() {
+        use std::os::unix::fs::symlink;
+
+        let cache = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("fixture.txt");
+        std::fs::write(&target, b"fixture").unwrap();
+        let cached = cache.path().join("fixture.txt");
+        symlink(&target, &cached).unwrap();
+        let file = PinnedFile {
+            path: "fixture.txt".into(),
+            url: "https://synthetic.invalid/fixture.txt".into(),
+            sha256: hex::encode(Sha256::digest(b"fixture")),
+            size: 7,
+        };
+        let sources = Sources {
+            lock: lock_with(file),
+            repository_inputs: cache.path().into(),
+            cache: cache.path().into(),
+            offline: true,
+            dictionary: None,
+        };
+
+        assert!(sources.pinned("fixture.txt").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_incoming_symlink_is_not_truncated_by_a_download() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("outside.txt");
+        std::fs::write(&target, b"keep").unwrap();
+        let incoming = directory.path().join("fixture.incoming");
+        symlink(&target, &incoming).unwrap();
+        let file = PinnedFile {
+            path: "fixture.txt".into(),
+            url: "https://synthetic.invalid/fixture.txt".into(),
+            sha256: hex::encode(Sha256::digest(b"fixture")),
+            size: 7,
+        };
+
+        assert!(write_pinned_response(Cursor::new(b"fixture"), &incoming, &file).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"keep");
     }
 
     fn repository_lock() -> Lock {

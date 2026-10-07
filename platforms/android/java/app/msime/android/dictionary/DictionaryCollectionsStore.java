@@ -532,11 +532,11 @@ public final class DictionaryCollectionsStore {
 
     /** JSON response flags must remain booleans; org.json otherwise coerces strings. */
     static Boolean strictBoolean(Object value) {
-        return value instanceof Boolean ? (Boolean) value : null;
+        return JsonPolicy.strictBoolean(value);
     }
 
     public static String strictString(Object value) {
-        return value instanceof String ? (String) value : null;
+        return JsonPolicy.strictString(value);
     }
 
     /** Export pages are text from the native response; do not let org.json coerce malformed values. */
@@ -545,11 +545,7 @@ public final class DictionaryCollectionsStore {
     }
 
     public static Integer strictInteger(Object value) {
-        if (value instanceof Integer integer) return integer;
-        if (value instanceof Long longValue
-                && longValue >= Integer.MIN_VALUE && longValue <= Integer.MAX_VALUE)
-            return longValue.intValue();
-        return null;
+        return JsonPolicy.strictInteger(value);
     }
 
     /** 词库计数必须是非负 JSON 整数；非法值按调用方的缺省值处理。 */
@@ -564,9 +560,7 @@ public final class DictionaryCollectionsStore {
     }
 
     public static Long strictLong(Object value) {
-        if (value instanceof Integer integer) return integer.longValue();
-        if (value instanceof Long longValue) return longValue;
-        return null;
+        return JsonPolicy.strictLong(value);
     }
 
     private static String errorOf(String response) {
