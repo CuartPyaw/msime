@@ -416,6 +416,7 @@ fn restore_interrupted_adoption(staging: &Path) {
     };
     let source = PathBuf::from(source);
     if !source.is_absolute()
+        || check_root(&source).is_err()
         || !fs::symlink_metadata(&source).is_ok_and(|metadata| metadata.file_type().is_dir())
     {
         return;

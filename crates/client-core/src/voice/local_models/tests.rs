@@ -2,6 +2,29 @@ use super::*;
 
 #[cfg(unix)]
 #[test]
+fn interrupted_adoption_rejects_a_source_below_a_symlinked_ancestor() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let source_real = outside.path().join("source");
+    std::fs::create_dir(&source_real).unwrap();
+    let linked = root.path().join("linked");
+    symlink(outside.path(), &linked).unwrap();
+    let source = linked.join("source");
+    let staging = root.path().join("staging");
+    std::fs::create_dir_all(staging.join("model")).unwrap();
+    std::fs::write(staging.join(ADOPTION_SOURCE), source.to_str().unwrap()).unwrap();
+    std::fs::write(staging.join("model/fixture.bin"), b"synthetic model").unwrap();
+
+    restore_interrupted_adoption(&staging);
+
+    assert!(staging.join("model/fixture.bin").exists());
+    assert!(!source_real.join("fixture.bin").exists());
+}
+
+#[cfg(unix)]
+#[test]
 fn staging_file_creation_rejects_a_symlink() {
     use std::os::unix::fs::symlink;
 
