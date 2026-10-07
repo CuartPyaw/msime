@@ -1278,6 +1278,7 @@ public final class MSIMEInputService extends InputMethodService {
         preferencesSnapshot = null;
         schemeSaving = false;
         touchGeometrySaving = false;
+        panelPreferenceSaving = false;
         skinSaving = false;
         traditionalOutputSaving = false;
         if (session != 0) {
@@ -6315,11 +6316,8 @@ public final class MSIMEInputService extends InputMethodService {
 
     private void finishPanelPreferenceSave(long operation, long targetSession,
                                            String targetDirectory, String label, String response) {
-        if (operation != preferenceSaveGeneration || session != targetSession
-                || !targetDirectory.equals(preferencesDirectory)) {
-            panelPreferenceSaving = false;
-            return;
-        }
+        if (!PreferencesSavePolicy.isCurrentOperation(operation, preferenceSaveGeneration,
+                targetSession, session, targetDirectory, preferencesDirectory)) return;
         panelPreferenceSaving = false;
         try {
             if (response == null) throw new JSONException("Preferences save unavailable");
