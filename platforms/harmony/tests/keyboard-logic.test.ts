@@ -8834,6 +8834,69 @@ group("the account bridge accepts the shared clipboard search bound", () => {
     });
 });
 
+group("dictionary candidate requests use the shared query contract", () => {
+  let stored: string | null = JSON.stringify({
+    access_token: "a".repeat(64),
+    refresh_token: "b".repeat(64),
+    token_type: "Bearer",
+    expires_at: Date.now() + 600_000,
+    user: { id: "synthetic-user", display_name: "Test", created_at: "2026-01-01" },
+  });
+  const paths: string[] = [];
+  const bridge = new AccountCloudBridge(
+    {
+      request: async (_method, path) => {
+        paths.push(path);
+        return { status: 200, body: '{"revision":0,"candidates":[]}' };
+      },
+    },
+    {
+      load: () => stored,
+      save: (value) => {
+        stored = value;
+      },
+      clear: () => {
+        stored = null;
+      },
+    },
+  );
+  const valid = {
+    operation: "dictionary",
+    dictionary_operation: "candidates",
+    text: "ni",
+    kind: "pinyin",
+    scheme: "pinyin",
+    profile: "xiaohe",
+    limit: 10,
+  };
+  void bridge.handle(JSON.stringify(valid)).then((reply) => {
+    check(JSON.parse(reply).ok === true, "a valid candidate query reaches the account service");
+    check(paths.length === 1, "the valid candidate query uses one request");
+    return bridge.handle(JSON.stringify({ ...valid, text: "你".repeat(86) }));
+  }).then((reply) => {
+    check(JSON.parse(reply).error === "account_invalid", "a candidate query over 256 UTF-8 bytes is refused");
+    check(paths.length === 1, "an oversized candidate query never reaches transport");
+    return bridge.handle(JSON.stringify({ ...valid, kind: "unknown" }));
+  }).then((reply) => {
+    check(JSON.parse(reply).error === "account_invalid", "an unknown candidate kind is refused");
+    check(paths.length === 1, "an invalid candidate kind never reaches transport");
+    return bridge.handle(JSON.stringify({
+      ...valid,
+      dictionary_operation: "rank",
+      code: "ni",
+      word: "你",
+      revision: 0,
+      mode: "unknown",
+      linear_step: 1,
+      trigger_count: 1,
+      force_top: false,
+    }));
+  }).then((reply) => {
+    check(JSON.parse(reply).error === "account_invalid", "an unknown ranking mode is refused");
+    check(paths.length === 1, "an invalid ranking request never reaches transport");
+  });
+});
+
 group("profile updates preserve the session and cannot outlive logout", () => {
   const expiresAt = Date.now() + 600000;
   const original = JSON.stringify({

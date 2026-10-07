@@ -637,6 +637,24 @@ function boundedUtf8(value: unknown, maximumBytes: number): value is string {
   return typeof value === "string" && utf8Length(value) <= maximumBytes;
 }
 
+function validCandidateKind(value: unknown): value is string {
+  return typeof value === "string" &&
+    ["pinyin", "jianpin", "wubi", "wubi98", "quick", "english"].includes(value);
+}
+
+function validCandidateScheme(value: unknown): value is string {
+  return value === "pinyin" || value === "shuangpin";
+}
+
+function validCandidateProfile(value: unknown): value is string {
+  return value === "xiaohe" || value === "ziranma" || value === "microsoft" || value === "shoudao";
+}
+
+function validCandidateRankingMode(value: unknown): value is string {
+  return value === "disabled" || value === "pin" || value === "halve" ||
+    value === "linear" || value === "promote";
+}
+
 function parseBody(body: string): Action | null {
   if (body.length === 0 || utf8Length(body) > MAX_ACTION_BYTES) return null;
   try {
@@ -1718,10 +1736,10 @@ export class AccountCloudBridge {
     }
     if (operation === "candidates") {
       if (
-        !validString(action.text, 1024) ||
-        !validString(action.kind, 32) ||
-        !validString(action.scheme, 64) ||
-        !validString(action.profile, 64) ||
+        !validString(action.text, 256) ||
+        !validCandidateKind(action.kind) ||
+        !validCandidateScheme(action.scheme) ||
+        !validCandidateProfile(action.profile) ||
         !this.boundedNumber(action.limit, 1, 100)
       )
         return error("account_invalid");
@@ -1735,17 +1753,17 @@ export class AccountCloudBridge {
     }
     if (operation === "rank") {
       if (
-        !validString(action.text, 1024) ||
-        !validString(action.kind, 32) ||
-        !validString(action.scheme, 64) ||
-        !validString(action.profile, 64) ||
+        !validString(action.text, 256) ||
+        !validCandidateKind(action.kind) ||
+        !validCandidateScheme(action.scheme) ||
+        !validCandidateProfile(action.profile) ||
         !this.boundedNumber(action.limit, 1, 100) ||
         !validString(action.code, 256) ||
         !validString(action.word, 1024) ||
         !this.boundedNumber(action.revision, 0, 2147483647) ||
-        !validString(action.mode, 16) ||
-        !this.boundedNumber(action.linear_step, 0, 100) ||
-        !this.boundedNumber(action.trigger_count, 0, 100) ||
+        !validCandidateRankingMode(action.mode) ||
+        !this.boundedNumber(action.linear_step, 1, 100) ||
+        !this.boundedNumber(action.trigger_count, 1, 10) ||
         typeof action.force_top !== "boolean"
       )
         return error("account_invalid");
@@ -1770,10 +1788,10 @@ export class AccountCloudBridge {
     }
     if (operation === "remove_candidate") {
       if (
-        !validString(action.text, 1024) ||
-        !validString(action.kind, 32) ||
-        !validString(action.scheme, 64) ||
-        !validString(action.profile, 64) ||
+        !validString(action.text, 256) ||
+        !validCandidateKind(action.kind) ||
+        !validCandidateScheme(action.scheme) ||
+        !validCandidateProfile(action.profile) ||
         !this.boundedNumber(action.limit, 1, 100) ||
         !validString(action.code, 256) ||
         !validString(action.word, 1024) ||
