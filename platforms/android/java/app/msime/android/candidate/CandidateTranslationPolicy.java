@@ -45,7 +45,7 @@ public final class CandidateTranslationPolicy {
             String gloss = value.trim();
             if (gloss.isEmpty() || result.contains(gloss)
                     || TextPolicy.utf8Length(gloss) > 4096
-                    || TextPolicy.hasControl(gloss)) continue;
+                    || TextPolicy.hasControl(gloss) || !TextPolicy.validUnicode(gloss)) continue;
             result.add(gloss);
             if (result.size() == MAX_TARGETS) break;
         }
