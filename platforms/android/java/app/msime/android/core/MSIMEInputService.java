@@ -4477,8 +4477,15 @@ public final class MSIMEInputService extends InputMethodService {
             Toast.makeText(this, "请先在共享设置中启用语音输入", Toast.LENGTH_SHORT).show();
             return;
         }
+        // 语音结果面板盖在键区上面；从面板里的「开始语音识别」进来时先收起它，键区里的聆听面板才看得见。只在面板开着时收：正在聆听时再按语音键是结束录音，这时清掉记下的输入位置会让结果无法直接上屏。
+        if (shown(voiceResultScroll)) closeVoiceResult();
         // 键盘内识别（扩展点）接手时不再打开识别窗口。
         if (imeVoiceEntry.startInKeyboard(keyRows)) return;
+        launchVoiceActivity();
+    }
+
+    /** 打开语音识别窗口：上传式服务商、需要申请麦克风权限，或者系统识别服务在键盘里没能开始聆听时用它。 */
+    void launchVoiceActivity() {
         String requestId = "ime-" + Long.toUnsignedString(SystemClock.uptimeMillis());
         // The configuration the settings app resolves, read through the same shared entry. This
         // keyboard's voice button used to launch the platform recogniser unconditionally, so a

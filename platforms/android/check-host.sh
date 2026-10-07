@@ -550,6 +550,15 @@ if ! rg -q 'VoiceConfiguration\.read' \
   echo "Android keyboard voice must read the shared provider resolution" >&2
   exit 1
 fi
+# SpeechRecognizer 绑定的是 RecognitionService；Android 11 起只声明 RECOGNIZE_SPEECH 的话，识别服务与识别界面分属两个包的设备上会判为没有系统识别服务。原生宿主与 Tauri 壳共用同一个识别窗口，两份清单都要声明。
+for manifest in \
+    "$repo_root/platforms/android/AndroidManifest.xml" \
+    "$repo_root/apps/desktop/src-tauri/gen/android/app/src/main/AndroidManifest.xml"; do
+  if ! rg -q '<action android:name="android\.speech\.RecognitionService" />' "$manifest"; then
+    echo "Android manifests must query android.speech.RecognitionService for SpeechRecognizer: $manifest" >&2
+    exit 1
+  fi
+done
 # The JNI translation unit is the one place a Java declaration and a shared FFI signature have to agree, and nothing else in this script reads it: a method declared native in Java compiles whether or not the C++ side exists. Compiling it for the real target catches that without the full native build, which needs vcpkg, the Rust Android targets and the pinned speech runtime. A machine without the pinned NDK skips it and says so.
 ndk=${MSIME_ANDROID_NDK:-${android_sdk}/ndk/28.2.13676358}
 case $(uname -s) in
