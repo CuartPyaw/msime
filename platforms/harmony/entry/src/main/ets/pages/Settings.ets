@@ -1122,8 +1122,16 @@ class SettingsBridge {
         }
       } else {
         source = `${staging}/${PluginImportPolicy.ARCHIVE_NAME}`;
+        const pathStat: fs.Stat = fs.lstatSync(picked[0]);
+        if (pathStat.isSymbolicLink() || !pathStat.isFile()) {
+          return JSON.stringify({ ok: false, error: 'plugin_invalid', detail: '压缩包不是普通文件' });
+        }
         const file: fs.File = fs.openSync(picked[0], fs.OpenMode.READ_ONLY);
         try {
+          const opened: fs.Stat = fs.statSync(file.fd);
+          if (!opened.isFile() || opened.ino !== pathStat.ino) {
+            return JSON.stringify({ ok: false, error: 'plugin_invalid', detail: '压缩包文件发生变化' });
+          }
           const refusal: PluginImportRefusal | null = PluginImportPolicy.archive(fs.statSync(file.fd).size);
           if (refusal !== null) {
             return JSON.stringify(refusal);
