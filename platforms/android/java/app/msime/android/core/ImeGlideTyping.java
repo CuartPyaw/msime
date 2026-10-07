@@ -159,6 +159,23 @@ final class ImeGlideTyping implements KeyboardKeyArea.GlideTracker {
 
     private void add(float x, float y, long eventTime) {
         if (!Float.isFinite(x) || !Float.isFinite(y)) return;
+        if (count >= GlideTypingPolicy.MAX_BUFFER_POINTS) {
+            int kept = GlideTypingPolicy.MAX_BUFFER_POINTS / 2;
+            int[] picked = GlideTypingPolicy.sample(count, kept);
+            float[] keptXs = new float[kept];
+            float[] keptYs = new float[kept];
+            long[] keptTimes = new long[kept];
+            for (int index = 0; index < kept; index++) {
+                int source = picked[index];
+                keptXs[index] = xs[source];
+                keptYs[index] = ys[source];
+                keptTimes[index] = times[source];
+            }
+            xs = keptXs;
+            ys = keptYs;
+            times = keptTimes;
+            count = kept;
+        }
         if (count == xs.length) {
             xs = Arrays.copyOf(xs, count * 2);
             ys = Arrays.copyOf(ys, count * 2);

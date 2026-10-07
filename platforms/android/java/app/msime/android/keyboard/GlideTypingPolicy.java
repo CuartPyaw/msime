@@ -8,6 +8,8 @@ public final class GlideTypingPolicy {
     public static final float START_KEY_WIDTHS = 0.4f;
     /** 一次请求最多带的轨迹点数，与 `msime_client_glide` 的上限一致；更多的点均匀抽稀，首尾两点总保留。 */
     public static final int MAX_POINTS = 1024;
+    /** 滑行尚未成立时也限制宿主缓存，避免长按移动无限扩容；抬手时还会抽稀到 MAX_POINTS。 */
+    public static final int MAX_BUFFER_POINTS = 4096;
     private static final int LETTERS = 26;
 
     private GlideTypingPolicy() { }

@@ -103,6 +103,18 @@ final class GlideTypingTests: XCTestCase {
     XCTAssertEqual(GlideTyping.downsampled(Array(0..<1_025)).count, 1_024)
   }
 
+  func testLiveStrokeBufferIsBoundedBeforeTheRequestIsBuilt() {
+    var samples: [GlideTyping.Sample] = []
+    for index in 0..<(GlideTyping.sampleBufferLimit * 3) {
+      GlideTyping.appendBounded(
+        GlideTyping.Sample(x: CGFloat(index), y: 0, milliseconds: Double(index)),
+        to: &samples)
+    }
+    XCTAssertLessThanOrEqual(samples.count, GlideTyping.sampleBufferLimit)
+    XCTAssertEqual(samples.first?.x, 0)
+    XCTAssertEqual(samples.last?.x, CGFloat(GlideTyping.sampleBufferLimit * 3 - 1))
+  }
+
   func testRequestCarriesTheKeyCentresTheKeySizeAndTheStroke() throws {
     var frames = Self.frames
     // 第二行的键稍宽一些，一个字母键的大小取最小的那个。
