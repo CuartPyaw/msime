@@ -87,6 +87,7 @@ constexpr jsize kTypingStatisticsRequestLimit = 65536;
 constexpr jsize kPrepareHostRequestLimit = 16384;
 constexpr jsize kSavePreferencesDirectoryLimit = 16384;
 constexpr jsize kSavePreferencesSnapshotLimit = 1 * 1024 * 1024;
+constexpr jsize kRefreshHostPathLimit = 4096;
 }
 
 extern "C" {
@@ -360,13 +361,7 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_prepareHostRaw(
     return bounded_request(env, options, kPrepareHostRequestLimit, msime_client_prepare_host);
 }
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_refreshHostRaw(JNIEnv *env, jclass, jbyteArray path) {
-    if (!path) return response(env, msime_client_refresh_host(nullptr, 0));
-    jsize length = env->GetArrayLength(path);
-    jbyte *bytes = env->GetByteArrayElements(path, nullptr);
-    if (!bytes) return nullptr;
-    char *result = msime_client_refresh_host(reinterpret_cast<const uint8_t *>(bytes), static_cast<size_t>(length));
-    env->ReleaseByteArrayElements(path, bytes, JNI_ABORT);
-    return response(env, result);
+    return bounded_request(env, path, kRefreshHostPathLimit, msime_client_refresh_host);
 }
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_snapshotVersionRaw(JNIEnv *env, jclass, jbyteArray options) {
     if (!options) return response(env, msime_client_snapshot_version(nullptr, 0));
@@ -405,6 +400,7 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_snapshotDiscard
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_snapshotActivateRaw(JNIEnv *env, jclass, jlong handle, jbyteArray expected) {
     if (!expected || handle <= 0) return response(env, msime_client_snapshot_activate(0, nullptr, 0));
     jsize length = env->GetArrayLength(expected);
+    if (length != 64) return response(env, msime_client_snapshot_activate(0, nullptr, 0));
     jbyte *bytes = env->GetByteArrayElements(expected, nullptr);
     if (!bytes) return nullptr;
     char *result = msime_client_snapshot_activate(
