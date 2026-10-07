@@ -246,10 +246,7 @@ public final class VoiceResultStore {
                 throw new Failure(Reason.INVALID);
             }
             if (input.read() != -1) throw new Failure(Reason.INVALID);
-            String decoded = StandardCharsets.UTF_8.newDecoder()
-                .onMalformedInput(CodingErrorAction.REPORT)
-                .onUnmappableCharacter(CodingErrorAction.REPORT)
-                .decode(ByteBuffer.wrap(text)).toString();
+            String decoded = TextPolicy.utf8Strict(text);
             return new Entry(id, decoded, created, expires);
         } catch (Failure error) {
             throw error;
