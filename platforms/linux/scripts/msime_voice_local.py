@@ -133,12 +133,19 @@ class Helper:
         self.reader.start()
 
     def read(self):
+        discarding_line = False
         try:
             while True:
                 line = self.process.stdout.readline(MAX_LINE + 1)
                 if not line:
                     break
+                if discarding_line:
+                    if line.endswith(b"\n"):
+                        discarding_line = False
+                    continue
                 if len(line) > MAX_LINE:
+                    if not line.endswith(b"\n"):
+                        discarding_line = True
                     continue
                 try:
                     event = json.loads(line)
