@@ -707,18 +707,7 @@ LocalSpeech *speech(jlong handle) {
     return reinterpret_cast<LocalSpeech *>(static_cast<intptr_t>(handle));
 }
 
-// Bytes of one request/response host call; null input goes to the host so its own validation answers.
-template <typename Call> jbyteArray host_request(JNIEnv *env, jbyteArray request, Call call) {
-    if (!request) return response(env, call(nullptr, 0));
-    jsize length = env->GetArrayLength(request);
-    jbyte *bytes = env->GetByteArrayElements(request, nullptr);
-    if (!bytes) return nullptr;
-    char *result = call(reinterpret_cast<const uint8_t *>(bytes), static_cast<size_t>(length));
-    env->ReleaseByteArrayElements(request, bytes, JNI_ABORT);
-    return response(env, result);
-}
-
-// 与 host_request 相同，但先按头文件写明的上限检查长度：超限的请求在取得本地视图之前就交给宿主以空请求拒绝，避免 GetByteArrayElements 复制一份超大数组。
+// 先按头文件写明的上限检查长度：超限的请求在取得本地视图之前就交给宿主以空请求拒绝，避免 GetByteArrayElements 复制一份超大数组。
 template <typename Call> jbyteArray bounded_request(JNIEnv *env, jbyteArray request, jsize limit, Call call) {
     if (!request) return response(env, call(nullptr, 0));
     jsize length = env->GetArrayLength(request);
@@ -770,14 +759,15 @@ constexpr jsize kDiagnosticBundleLimit = 65536;
 constexpr jsize kAccountSettingsLimit = 4 * 1024 * 1024;
 constexpr jsize kAppThemeRequestLimit = 4096;
 constexpr jsize kPlatformLimit = 64;
+constexpr jsize kVoiceRequestLimit = 1 * 1024 * 1024;
 } // namespace
 
 extern "C" {
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_voiceHotwordsRaw(JNIEnv *env, jclass, jbyteArray request) {
-    return host_request(env, request, msime_client_voice_hotwords);
+    return bounded_request(env, request, kVoiceRequestLimit, msime_client_voice_hotwords);
 }
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_voiceHotwordCorrectRaw(JNIEnv *env, jclass, jbyteArray request) {
-    return host_request(env, request, msime_client_voice_hotword_correct);
+    return bounded_request(env, request, kVoiceRequestLimit, msime_client_voice_hotword_correct);
 }
 // 应用主题目录与当季颜色：纯计算。
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_appThemeCatalogRaw(JNIEnv *env, jclass) {
