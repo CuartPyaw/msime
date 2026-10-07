@@ -223,7 +223,8 @@ public final class DictionaryCollectionsStore {
                 JSONObject value = dictionary(context, action("export").put("kind", kind).put("format", "standard")
                     .put("offset", offset).put("limit", EXPORT_PAGE));
                 if (value == null) return Result.failed(failureMessage(""));
-                String page = value.optString("text", "");
+                String page = exportPage(value.opt("text"));
+                if (page == null) return Result.failed(failureMessage(""));
                 int nextBytes = exportBytesAfterPage(bytes, page);
                 if (nextBytes < 0) return Result.failed(failureMessage("collections_too_large"));
                 if (text == null) text = new StringBuilder(Math.max(16, page.length()));
@@ -515,6 +516,11 @@ public final class DictionaryCollectionsStore {
 
     public static String strictString(Object value) {
         return value instanceof String ? (String) value : null;
+    }
+
+    /** Export pages are text from the native response; do not let org.json coerce malformed values. */
+    public static String exportPage(Object value) {
+        return strictString(value);
     }
 
     public static Integer strictInteger(Object value) {
