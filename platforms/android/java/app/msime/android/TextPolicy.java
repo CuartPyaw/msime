@@ -45,7 +45,7 @@ public final class TextPolicy {
     /** Accepts a bounded URL with the requested scheme and a non-empty authority. */
     public static boolean validAuthority(String value, String scheme, int maxBytes) {
         if (value == null || value.isEmpty() || !value.startsWith(scheme)
-                || utf8Length(value) > maxBytes || hasControl(value)) return false;
+                || utf8Length(value) > maxBytes || hasControl(value) || !validUnicode(value)) return false;
         String rest = value.substring(scheme.length());
         int end = rest.length();
         for (char separator : new char[] {'/', '?', '#'}) {

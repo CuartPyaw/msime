@@ -43,7 +43,7 @@ public final class LocalAsrPolicy {
     public static boolean usable(String provider, String modelPath) {
         if (!PROVIDER.equals(provider) || modelPath == null) return false;
         if (modelPath.isEmpty() || modelPath.length() > MAX_PATH_LENGTH) return false;
-        if (TextPolicy.hasControl(modelPath)) return false;
+        if (TextPolicy.hasControl(modelPath) || !TextPolicy.validUnicode(modelPath)) return false;
         return modelPath.startsWith("/");
     }
 
