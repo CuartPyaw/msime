@@ -1120,7 +1120,7 @@ fn read_runtime_options_bytes(path: &Path) -> Result<Vec<u8>, std::io::Error> {
             "runtime options is not a regular file",
         ));
     }
-    let file = fs::File::open(path)?;
+    let file = crate::shared::atomic_file::open_private(path)?;
     match crate::shared::bounded_body::read_bounded(file, RUNTIME_OPTIONS_READ_LIMIT as usize) {
         Ok(bytes) => Ok(bytes),
         Err(crate::shared::bounded_body::BoundedReadError::TooLarge) => Err(std::io::Error::new(
