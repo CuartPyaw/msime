@@ -21,8 +21,29 @@ namespace msime::windows {
 
 inline constexpr std::uint64_t kAudioMuteStateMaxBytes = 1024 * 1024;
 
+inline bool audio_mute_parent_is_safe(const std::filesystem::path &path) {
+#ifdef _WIN32
+  for (auto current = path.parent_path(); !current.empty();
+       current = current.parent_path()) {
+    std::error_code error;
+    const auto status = std::filesystem::symlink_status(current, error);
+    if (!error && status.type() == std::filesystem::file_type::symlink)
+      return false;
+    if (error && error != std::errc::no_such_file_or_directory)
+      return false;
+    if (current == current.root_path())
+      break;
+  }
+  return true;
+#else
+  (void)path;
+  return true;
+#endif
+}
+
 inline bool read_audio_mute_state(const std::filesystem::path &path,
                                   std::string &contents) {
+  if (!audio_mute_parent_is_safe(path)) return false;
 #ifdef _WIN32
   HANDLE handle = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
                               OPEN_EXISTING,
@@ -78,7 +99,8 @@ inline bool read_audio_mute_state(const std::filesystem::path &path,
 
 inline bool write_audio_mute_state(const std::filesystem::path &path,
                                    std::string_view contents) {
-  if (contents.size() > kAudioMuteStateMaxBytes || path.parent_path().empty())
+  if (contents.size() > kAudioMuteStateMaxBytes || path.parent_path().empty() ||
+      !audio_mute_parent_is_safe(path))
     return false;
 #ifdef _WIN32
   wchar_t temporary_name[MAX_PATH]{};
