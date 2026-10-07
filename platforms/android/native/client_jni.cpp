@@ -99,6 +99,7 @@ constexpr jsize kSnapshotVersionRequestLimit = 1 * 1024 * 1024;
 constexpr jsize kSnapshotPrepareRequestLimit = 1 * 1024 * 1024;
 constexpr jsize kSnapshotPreparePathLimit = 16384;
 constexpr jsize kUpdatePreferencesSnapshotLimit = 1 * 1024 * 1024;
+constexpr jsize kSmallJsonRequestLimit = 16 * 1024;
 }
 
 extern "C" {
@@ -109,6 +110,7 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_loadPreferences
 static jbyteArray json_call(JNIEnv *env, jbyteArray request, char *(*call)(const uint8_t *, size_t)) {
     if (!request) return response(env, call(nullptr, 0));
     jsize length = env->GetArrayLength(request);
+    if (length > kSmallJsonRequestLimit) return response(env, call(nullptr, 0));
     jbyte *bytes = env->GetByteArrayElements(request, nullptr);
     if (!bytes) return nullptr;
     char *result = call(reinterpret_cast<const uint8_t *>(bytes), static_cast<size_t>(length));
