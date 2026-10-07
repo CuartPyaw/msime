@@ -8771,6 +8771,52 @@ group("the account bridge sends multi-line clipboard text the shared client acce
     });
 });
 
+group("the account bridge accepts the shared clipboard search bound", () => {
+  let stored: string | null = JSON.stringify({
+    access_token: "a".repeat(64),
+    refresh_token: "b".repeat(64),
+    token_type: "Bearer",
+    expires_at: Date.now() + 600_000,
+    user: { id: "synthetic-user", display_name: "Test", created_at: "2026-01-01" },
+  });
+  const paths: string[] = [];
+  const bridge = new AccountCloudBridge(
+    {
+      request: async (_method, path) => {
+        paths.push(path);
+        return { status: 200, body: '{"enabled":true,"items":[]}' };
+      },
+    },
+    {
+      load: () => stored,
+      save: (value) => {
+        stored = value;
+      },
+      clear: () => {
+        stored = null;
+      },
+    },
+  );
+  const accepted = "你".repeat(341) + "a";
+  void bridge
+    .handle(JSON.stringify({ operation: "clipboard", clipboard_operation: "list", search: accepted }))
+    .then((reply) => {
+      check(JSON.parse(reply).ok === true, "a 1,024-byte UTF-8 clipboard search is accepted");
+      check(paths.length === 1, "the accepted search reaches the account service");
+      return bridge.handle(
+        JSON.stringify({
+          operation: "clipboard",
+          clipboard_operation: "list",
+          search: "你".repeat(342),
+        }),
+      );
+    })
+    .then((reply) => {
+      check(JSON.parse(reply).error === "account_invalid", "a search over 1,024 UTF-8 bytes is refused");
+      check(paths.length === 1, "the oversized search never reaches the account service");
+    });
+});
+
 group("profile updates preserve the session and cannot outlive logout", () => {
   const expiresAt = Date.now() + 600000;
   const original = JSON.stringify({
