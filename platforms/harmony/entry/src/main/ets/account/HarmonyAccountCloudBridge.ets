@@ -139,9 +139,6 @@ class HarmonyTransport extends HarmonyAccountTransport {
       || maximumBytes <= 0 || maximumBytes > MAX_SNAPSHOT_DOWNLOAD_BYTES) {
       throw new Error('account_invalid');
     }
-    if (!this.safeDestination(destination)) {
-      throw new Error('account_storage');
-    }
     const request = http.createHttp();
     this.activeDownloads.add(request);
     const headers: DownloadHeaders = {
@@ -199,8 +196,7 @@ class HarmonyTransport extends HarmonyAccountTransport {
     try {
       // Open the destination inside the guarded region: if the picker URI or parent directory is
       // unavailable, the request created above still needs to be destroyed.
-      handle = fs.openSync(destination,
-        fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+      handle = this.openSafeDestination(destination);
       const status: number = await request.requestInStream(`${ACCOUNT_ORIGIN}${path}`, options);
       await ended;
       if (status < 200 || status >= 300) {
@@ -254,6 +250,28 @@ class HarmonyTransport extends HarmonyAccountTransport {
       }
     } catch {
       return false;
+    }
+  }
+
+  /** Open a private staging file and bind the descriptor to the path checked above. */
+  private openSafeDestination(destination: string): fs.File {
+    if (!this.safeDestination(destination)) {
+      throw new Error('account_storage');
+    }
+    let handle: fs.File | undefined = undefined;
+    try {
+      handle = fs.openSync(destination,
+        fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+      const pathStat: fs.Stat = fs.lstatSync(destination);
+      const opened: fs.Stat = fs.statSync(handle.fd);
+      if (pathStat.isSymbolicLink() || !pathStat.isFile()
+        || !opened.isFile() || opened.ino !== pathStat.ino) {
+        throw new Error('account_storage');
+      }
+      return handle;
+    } catch (error) {
+      if (handle !== undefined) fs.closeSync(handle);
+      throw error;
     }
   }
 }
