@@ -177,7 +177,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         next.setText(page < pages - 1 ? R.string.onboarding_next
             : offer ? R.string.onboarding_sign_in : R.string.onboarding_done);
         ViewPolicy.setEnabled(next, !signingIn);
-        ViewPolicy.setEnabled(back, page > 0);
+        back.setEnabled(page > 0);
 
         LinearLayout column = findViewById(R.id.onboarding_page);
         column.removeAllViews();
@@ -300,7 +300,7 @@ public final class OnboardingActivity extends AppCompatActivity {
             if (checked != on) chooseGloss(checked);
         });
         row.addView(toggle);
-        row.setOnClickListener(ignored -> toggle.toggle());
+        ViewPolicy.bindClick(row, toggle::toggle);
         column.addView(row, Ui.matchWidth(this, 12));
 
         if (note != null) {
@@ -501,7 +501,7 @@ public final class OnboardingActivity extends AppCompatActivity {
             android.util.TypedValue ripple = new android.util.TypedValue();
             getTheme().resolveAttribute(android.R.attr.selectableItemBackground, ripple, true);
             button.setBackgroundResource(ripple.resourceId);
-            button.setOnClickListener(ignored -> fix.run());
+            ViewPolicy.bindClick(button, fix);
             row.addView(button, Ui.wrapHeight(this, 40));
         }
         card.addView(row);
@@ -539,7 +539,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         card.setContentDescription(option.label() + "，" + option.detail()
             + (selected ? "，已选择" : "，未选择"));
         // 偏好还读不到时也能点：选择先记下，偏好可读后再写（OnboardingChoices）。
-        card.setOnClickListener(selected ? null : ignored -> chooseScheme(option.scheme()));
+        ViewPolicy.bindOptionalClick(card, selected ? null : () -> chooseScheme(option.scheme()));
         ViewPolicy.setClickable(card, true);
         column.addView(card, Ui.matchWidth(this, top));
     }

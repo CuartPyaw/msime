@@ -9,6 +9,7 @@ import android.widget.TextView;
 import androidx.annotation.DrawableRes;
 import androidx.annotation.Nullable;
 import app.msime.android.R;
+import app.msime.android.ViewPolicy;
 import com.google.android.material.imageview.ShapeableImageView;
 
 /**
@@ -31,7 +32,7 @@ final class ListRows {
         detail.setText(value);
         Ui.setVisibilityForText(detail, value);
         ViewPolicy.setEnabledWithAlpha(row, action != null, 0.5f);
-        row.setOnClickListener(action == null ? null : ignored -> action.run());
+        ViewPolicy.bindOptionalClick(row, action);
         parent.addView(row);
         return row;
     }
