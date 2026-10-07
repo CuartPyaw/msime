@@ -30,7 +30,7 @@ public final class LocalAsrPolicy {
     /** Per-word ceilings of a hotword handed in by the shared layer, in UTF-16 units; the shared request validation allows no more than this in bytes. */
     public static final int MAX_HOTWORD_TEXT_LENGTH = 256;
     public static final int MAX_HOTWORD_PINYIN_LENGTH = 1024;
-    /** Keep local-model output within the same bound as network ASR responses. */
+    /** 本机模型输出与网络识别结果使用同一长度上限。 */
     public static final int MAX_TRANSCRIPT = 2000;
 
     private LocalAsrPolicy() {}

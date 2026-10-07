@@ -967,6 +967,10 @@ group("bounds native speech language, session and result text", () => {
     "voice result removes control bytes and trims",
   );
   check(
+    VoiceRecognitionPolicy.result("坏\ud800文本") === "",
+    "voice result rejects unpaired surrogate text",
+  );
+  check(
     VoiceRecognitionPolicy.result("x".repeat(VOICE_MAX_TEXT + 20)).length === VOICE_MAX_TEXT,
     "voice result is bounded",
   );
