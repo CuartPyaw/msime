@@ -700,6 +700,7 @@ function validateUser(value: unknown): value is Session["user"] {
   return (
     validString(user.id, 256) &&
     validString(user.display_name, 256, true) &&
+    [...user.display_name].length <= 64 &&
     validString(user.created_at, 128, true)
   );
 }

@@ -7502,6 +7502,23 @@ group("account and cloud clipboard bridge keeps secrets native", () => {
   new AccountCloudBridge({ request: async () => ({ status: 200, body: "{}" }) }, oversizedStore);
   check(oversizedCleared, "an oversized saved session is cleared before JSON parsing");
 
+  let oversizedNameCleared = false;
+  const oversizedNameStore: AccountSessionStore = {
+    load: () => JSON.stringify({
+      access_token: "a".repeat(64),
+      refresh_token: "b".repeat(64),
+      token_type: "Bearer",
+      expires_at: Date.now() + 600_000,
+      user: { id: "synthetic-user", display_name: "你".repeat(65), created_at: "2026-01-01" },
+    }),
+    save: () => {},
+    clear: () => {
+      oversizedNameCleared = true;
+    },
+  };
+  new AccountCloudBridge({ request: async () => ({ status: 200, body: "{}" }) }, oversizedNameStore);
+  check(oversizedNameCleared, "a saved nickname over 64 Unicode scalars is cleared");
+
   let stored: string | null = null;
   const store: AccountSessionStore = {
     load: () => stored,
