@@ -1,8 +1,8 @@
 //! 代次准备（core-session.md §12、data-formats.md §3、`runtime_paths.cpp:116-182`）：`user_data/dictionaries/<content id>` 里是经 backup API 复制的 `msime-pinyin.db` 与 `msime-english.db`（资源单独发布的 `msime-wubi.db` 五笔码表并回前者），回放过用户日志，旁边还有 n-gram 表。不读 `msime-pinyin.db` 的方案集合（见 `SchemeSet::reads_main_dictionary`）准备的代次只有 `msime-english.db`。
 
 use std::ffi::OsString;
-use std::fs;
-use std::io::ErrorKind;
+use std::fs::{self, OpenOptions};
+use std::io::{self, ErrorKind};
 use std::path::{Component, Path, PathBuf};
 
 use rusqlite::backup::{Backup, StepResult};
@@ -230,6 +230,27 @@ fn copy_database(source: &Path, target: &Path) -> Result<()> {
     Ok(())
 }
 
+fn copy_private_file(source: &Path, target: &Path) -> io::Result<u64> {
+    let mut input = crate::paths::open_file_no_follow(source)?;
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    let mut output = options.open(target)?;
+    let copied = io::copy(&mut input, &mut output)?;
+    output.sync_all()?;
+    Ok(copied)
+}
+
 /// 词库发布把五笔码表单独放在只读的 `msime-wubi.db` 里，`msime-pinyin.db` 不再含 `wubi86`/`wubi98`。五笔的学习调序、删词、个人词典编辑与日志回放都写代次里的工作主词库，五笔 provider 也从它读，所以准备代次（以及重置学习数据）时把这两张表连同索引并回工作副本：读写落在同一个文件上，学到的权重立即可见。资源目录没有 `msime-wubi.db`（旧的合并发布）或工作副本里已有同名表时不动。
 pub(crate) fn merge_split_wubi(resources: &Path, main_db: &Path) -> Result<()> {
     let source = resources.join(assets::WUBI_DICTIONARY);
@@ -333,7 +354,7 @@ pub(super) fn stage_generation_copies(
             Err(error) if error.kind() == ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
         }
-        fs::copy(&source, &incoming)?;
+        copy_private_file(&source, &incoming)?;
         fs::rename(&incoming, &target)?;
     }
     Ok(())
@@ -1057,5 +1078,21 @@ mod tests {
         );
         assert!(!user.join("dictionaries/v1.incoming").exists());
         assert!(!user.join("dictionaries/v1").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn generation_copy_rejects_a_symlinked_source() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let source = outside.path().join("source.bin");
+        let target = directory.path().join("target.bin");
+        std::fs::write(&source, b"outside").unwrap();
+        symlink(&source, directory.path().join("linked.bin")).unwrap();
+
+        assert!(copy_private_file(&directory.path().join("linked.bin"), &target).is_err());
+        assert!(!target.exists());
     }
 }
