@@ -205,7 +205,6 @@ TEXT_ENTRY(DictionaryManifest, msime_client_dictionary_manifest)
 TEXT_ENTRY(SkinResource, msime_client_skin_resource)
 TEXT_ENTRY(SkinToolbarStylesheet, msime_client_skin_toolbar_stylesheet)
 TEXT_ENTRY(KeyboardSkinTrial, msime_client_keyboard_skin_trial)
-TEXT_ENTRY(CommunityResourceLibrary, msime_client_community_resource_library)
 TEXT_ENTRY(AiSkinPlan, msime_client_ai_skin_plan)
 TEXT_ENTRY(Dictionary, msime_client_dictionary)
 TEXT_ENTRY(TypingStatistics, msime_client_typing_statistics)
@@ -477,6 +476,13 @@ static napi_value Notices(napi_env env, napi_callback_info info) {
 // serialize megabytes while holding its file lock. The settings page awaits this worker.
 static napi_value CustomSkinLibrary(napi_env env, napi_callback_info info) {
     return queueRequest(env, info, msime_client_custom_skin_library, "MSIME custom skin library");
+}
+
+// Reply templates are bounded but can still occupy several megabytes across the saved library;
+// keep validation, locking and atomic replacement off the ArkTS thread as well.
+static napi_value CommunityResourceLibrary(napi_env env, napi_callback_info info) {
+    return queueRequest(env, info, msime_client_community_resource_library,
+        "MSIME community resource library");
 }
 
 // A pack import extracts or copies up to a music pack's size and validates it before swapping it into place, which the header says belongs on a worker thread, so it runs as async work and answers through a promise. The small catalog, remove and name-list calls stay on the synchronous `plugins` entry.
