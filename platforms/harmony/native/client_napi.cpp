@@ -6,6 +6,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <limits>
+#include <sys/stat.h>
 #include <string>
 #include <unistd.h>
 #include <vector>
@@ -16,7 +17,13 @@
 
 struct SnapshotReader {
     explicit SnapshotReader(const std::string &path)
-        : descriptor(::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW)) {}
+        : descriptor(::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)) {
+        struct stat metadata{};
+        if (descriptor < 0 || ::fstat(descriptor, &metadata) != 0 || !S_ISREG(metadata.st_mode)) {
+            if (descriptor >= 0) ::close(descriptor);
+            descriptor = -1;
+        }
+    }
     ~SnapshotReader() { if (descriptor >= 0) ::close(descriptor); }
     SnapshotReader(const SnapshotReader &) = delete;
     SnapshotReader &operator=(const SnapshotReader &) = delete;
