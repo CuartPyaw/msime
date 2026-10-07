@@ -80,6 +80,11 @@ inline std::filesystem::path prepare_host_state_in_directory(
       !std::filesystem::is_directory(resources))
     throw std::runtime_error("Absolute resource and new state paths required");
   const auto state = requested_state.lexically_normal();
+#ifdef _WIN32
+  // Validate every existing ancestor before the shared preparation call or
+  // the temporary publication can follow a junction outside the state root.
+  reject_reparse_ancestors(state);
+#endif
   auto request_document = nlohmann::json{
       {"resources", std::filesystem::canonical(resources).u8string()},
       {"state_root", state.u8string()}};
@@ -118,6 +123,9 @@ inline std::filesystem::path prepare_host_state(
   if (!resources.is_absolute() || !requested_state.is_absolute() ||
       !std::filesystem::is_directory(resources))
     throw std::runtime_error("Absolute resource and new state paths required");
+#ifdef _WIN32
+  reject_reparse_ancestors(state);
+#endif
   if (!std::filesystem::create_directory(state))
     throw std::runtime_error("A fresh state directory is required");
   return prepare_host_state_in_directory(resources, state, prepare);
