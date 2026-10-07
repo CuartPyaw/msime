@@ -205,7 +205,6 @@ TEXT_ENTRY(DictionaryManifest, msime_client_dictionary_manifest)
 TEXT_ENTRY(SkinResource, msime_client_skin_resource)
 TEXT_ENTRY(SkinToolbarStylesheet, msime_client_skin_toolbar_stylesheet)
 TEXT_ENTRY(CustomSkinLibrary, msime_client_custom_skin_library)
-TEXT_ENTRY(CommunitySkinInstall, msime_client_community_skin_install)
 TEXT_ENTRY(KeyboardSkinTrial, msime_client_keyboard_skin_trial)
 TEXT_ENTRY(CommunityResourceLibrary, msime_client_community_resource_library)
 TEXT_ENTRY(AiSkinPlan, msime_client_ai_skin_plan)
@@ -515,6 +514,54 @@ static napi_value PluginsAsync(napi_env env, napi_callback_info info) {
         napi_delete_async_work(env, work->work);
         delete work;
         return invalid(env, "Unable to queue plugin worker");
+    }
+    return promise;
+}
+
+// Community skin designs can carry several megabytes of validated image data and are written to
+// both the trial and library stores. Keep the import and its file locks off the ArkTS thread.
+struct CommunitySkinInstallWork {
+    napi_async_work work = nullptr;
+    napi_deferred deferred = nullptr;
+    std::string request;
+    char *result = nullptr;
+};
+
+static void executeCommunitySkinInstall(napi_env, void *data) {
+    auto *work = static_cast<CommunitySkinInstallWork *>(data);
+    work->result = msime_client_community_skin_install(
+        reinterpret_cast<const uint8_t *>(work->request.data()), work->request.size());
+}
+
+static void completeCommunitySkinInstall(napi_env env, napi_status status, void *data) {
+    auto *work = static_cast<CommunitySkinInstallWork *>(data);
+    settleVoicePromise(env, status, work->deferred, work->result,
+        "Community skin install worker failed");
+    napi_delete_async_work(env, work->work);
+    delete work;
+}
+
+static napi_value CommunitySkinInstall(napi_env env, napi_callback_info info) {
+    std::vector<napi_value> argv;
+    auto *work = new CommunitySkinInstallWork();
+    if (!arguments(env, info, 1, argv) || !argumentText(env, argv[0], work->request)) {
+        delete work;
+        return invalid(env, "Expected a community skin install request");
+    }
+    napi_value promise = nullptr;
+    napi_value resource = nullptr;
+    if (napi_create_promise(env, &work->deferred, &promise) != napi_ok
+            || napi_create_string_utf8(env, "MSIME community skin install", NAPI_AUTO_LENGTH,
+                &resource) != napi_ok
+            || napi_create_async_work(env, nullptr, resource, executeCommunitySkinInstall,
+                completeCommunitySkinInstall, work, &work->work) != napi_ok) {
+        delete work;
+        return invalid(env, "Unable to create community skin install worker");
+    }
+    if (napi_queue_async_work(env, work->work) != napi_ok) {
+        napi_delete_async_work(env, work->work);
+        delete work;
+        return invalid(env, "Unable to queue community skin install worker");
     }
     return promise;
 }
