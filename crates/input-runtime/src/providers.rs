@@ -550,8 +550,8 @@ impl UnixSocketProvider {
     /// Search the user-owned emoji catalog. Results stay outside the IBus
     /// session and can be rendered by any desktop panel toolkit.
     pub fn emoji(&self, query: EmojiPanelQuery) -> Option<Vec<EmojiPanelItem>> {
-        if query.search.len() > 256
-            || query.category.len() > 128
+        if !msime_client_core::is_bounded_text(&query.search, 256)
+            || !msime_client_core::is_bounded_text(&query.category, 128)
             || !(1..=96).contains(&query.limit)
         {
             return None;
@@ -574,7 +574,9 @@ impl UnixSocketProvider {
         let reply: Reply = serde_json::from_str(&line).ok()?;
         if reply.items.len() > 96
             || reply.items.iter().any(|item| {
-                item.text.is_empty() || item.text.len() > 64 || item.annotation.len() > 256
+                item.text.is_empty()
+                    || !msime_client_core::is_bounded_text(&item.text, 64)
+                    || !msime_client_core::is_bounded_text(&item.annotation, 256)
             })
         {
             return None;
