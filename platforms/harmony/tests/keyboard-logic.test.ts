@@ -15988,6 +15988,8 @@ group("notices are shown from client-core's answer and their links leave the app
     }),
   );
   check(items.length === 2 && items[0].id === "n2", "valid notices keep their order, newest first");
+  check(NoticePolicy.requestCurrent(3, 3), "the latest notice request is current");
+  check(!NoticePolicy.requestCurrent(3, 4), "a late notice response is dropped");
   check(NoticePolicy.items('{"ok":false,"error":"x"}').length === 0, "a refusal shows nothing");
   check(NoticePolicy.items("garbage").length === 0, "and so does an unreadable answer");
   check(

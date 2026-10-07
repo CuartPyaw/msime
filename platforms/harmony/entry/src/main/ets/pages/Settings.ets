@@ -489,6 +489,8 @@ struct Settings {
   private noticeAttached: boolean = false;
   // The notice whose body the card's web view holds, so a refresh that changes nothing does not reload it.
   private noticeShown: string = '';
+  /** Bumped for every notice fetch and when the page disappears, so late answers cannot repaint it. */
+  private noticeRequest: number = 0;
 
   aboutToAppear(): void {
     this.bridge.attach(this.context);
@@ -507,10 +509,12 @@ struct Settings {
    * Fetches the notices when the window opens or comes back to the front, never on a timer: client-core answers from its copy for a minute after a fetch, which is as often as the service wants to be asked.
    */
   private loadNotices(): void {
+    const generation: number = ++this.noticeRequest;
     const request: NoticesRequest = {
       directory: `${this.context.filesDir}/state/notices`, platform: PLATFORM, channel: 'app'
     };
     client.notices(JSON.stringify(request)).then((reply: string): void => {
+      if (!NoticePolicy.requestCurrent(generation, this.noticeRequest)) return;
       this.notices = NoticePolicy.items(reply);
       this.renderNotice();
     }).catch((error: Error): void => {
@@ -613,6 +617,7 @@ struct Settings {
   }
 
   aboutToDisappear(): void {
+    this.noticeRequest++;
     // The ability outlives this page, so a handler left behind would hold a bridge whose webview
     // has gone.
     EntryAbility.onActivated = undefined;
