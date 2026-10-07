@@ -294,6 +294,7 @@ import {
   KeyPressFlush,
 } from "../entry/src/main/ets/keyboard/KeyIdPolicy";
 import { OnlineCandidatePolicy } from "../entry/src/main/ets/keyboard/candidate/OnlineCandidatePolicy";
+import { utf8WriteComplete } from "../entry/src/main/ets/keyboard/Utf8";
 import {
   MAX_SESSION_BYTES,
   sessionFitsStorage,
@@ -813,6 +814,13 @@ group("bounds persisted account sessions by UTF-8 bytes", () => {
     "a complete multibyte session write uses UTF-8 bytes");
   check(!sessionWriteComplete("你", 2),
     "a short multibyte session write is refused");
+});
+
+group("private text writes require every UTF-8 byte", () => {
+  check(utf8WriteComplete("synthetic", 9), "a complete private text write is accepted");
+  check(!utf8WriteComplete("synthetic", 8), "a short private text write is refused");
+  check(utf8WriteComplete("你", 3), "a multibyte private text write uses UTF-8 bytes");
+  check(!utf8WriteComplete("你", 2), "a short multibyte private text write is refused");
 });
 
 group("AI 候选逐条跳过无效结构，保留相邻的有效候选", () => {
