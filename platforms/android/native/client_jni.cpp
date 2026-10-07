@@ -88,19 +88,16 @@ constexpr jsize kPrepareHostRequestLimit = 16384;
 constexpr jsize kSavePreferencesDirectoryLimit = 16384;
 constexpr jsize kSavePreferencesSnapshotLimit = 1 * 1024 * 1024;
 constexpr jsize kMobileVoiceDirectoryLimit = 16384;
+constexpr jsize kLoadPreferencesDirectoryLimit = 16384;
 constexpr jsize kRefreshHostPathLimit = 4096;
 constexpr jsize kSnapshotVersionRequestLimit = 1 * 1024 * 1024;
+constexpr jsize kSnapshotPrepareRequestLimit = 1 * 1024 * 1024;
+constexpr jsize kSnapshotPreparePathLimit = 16384;
 }
 
 extern "C" {
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_loadPreferencesRaw(JNIEnv *env, jclass, jbyteArray directory) {
-    if (!directory) return response(env, msime_client_load_preferences(nullptr, 0));
-    jsize length = env->GetArrayLength(directory);
-    jbyte *bytes = env->GetByteArrayElements(directory, nullptr);
-    if (!bytes) return nullptr;
-    char *result = msime_client_load_preferences(reinterpret_cast<const uint8_t *>(bytes), static_cast<size_t>(length));
-    env->ReleaseByteArrayElements(directory, bytes, JNI_ABORT);
-    return response(env, result);
+    return bounded_request(env, directory, kLoadPreferencesDirectoryLimit, msime_client_load_preferences);
 }
 // Usage reporting and notices: one UTF-8 JSON request in, the shared envelope out (msime_client.h documents each request).
 static jbyteArray json_call(JNIEnv *env, jbyteArray request, char *(*call)(const uint8_t *, size_t)) {
@@ -371,9 +368,12 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_snapshotVersion
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_snapshotPrepareRaw(JNIEnv *env, jclass, jbyteArray request, jbyteArray file) {
     if (!request || !file) return response(env, msime_client_snapshot_prepare(nullptr, 0, nullptr, nullptr));
     jsize request_length = env->GetArrayLength(request);
+    jsize file_length = env->GetArrayLength(file);
+    if (request_length > kSnapshotPrepareRequestLimit || file_length > kSnapshotPreparePathLimit) {
+        return response(env, msime_client_snapshot_prepare(nullptr, 0, nullptr, nullptr));
+    }
     jbyte *request_bytes = env->GetByteArrayElements(request, nullptr);
     if (!request_bytes) return nullptr;
-    jsize file_length = env->GetArrayLength(file);
     jbyte *file_bytes = env->GetByteArrayElements(file, nullptr);
     if (!file_bytes) {
         env->ReleaseByteArrayElements(request, request_bytes, JNI_ABORT);
