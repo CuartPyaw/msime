@@ -694,12 +694,27 @@ struct LocalSpeech {
     bool partial_changed = false;
 };
 constexpr jint kLocalSpeechChunkLimit = 1600;
+constexpr jsize kLocalSpeechModelPathLimit = 4096;
+constexpr jsize kLocalSpeechLanguageLimit = 256;
+constexpr jsize kLocalSpeechHotwordsLimit = 256 * 1024;
 
 jbyteArray bytes_of(JNIEnv *env, const std::string &text) {
     if (text.size() > static_cast<size_t>(std::numeric_limits<jsize>::max())) return nullptr;
     jbyteArray out = env->NewByteArray(static_cast<jsize>(text.size()));
     if (out) env->SetByteArrayRegion(out, 0, static_cast<jsize>(text.size()), reinterpret_cast<const jbyte *>(text.data()));
     return out;
+}
+
+bool bounded_utf8(JNIEnv *env, jbyteArray value, jsize limit, std::string &out) {
+    out.clear();
+    if (!value) return true;
+    jsize length = env->GetArrayLength(value);
+    if (length > limit) return false;
+    jbyte *bytes = env->GetByteArrayElements(value, nullptr);
+    if (!bytes) return false;
+    out.assign(reinterpret_cast<const char *>(bytes), static_cast<size_t>(length));
+    env->ReleaseByteArrayElements(value, bytes, JNI_ABORT);
+    return true;
 }
 
 void throw_state(JNIEnv *env, const char *message) {
@@ -860,11 +875,19 @@ JNIEXPORT jlong JNICALL Java_app_msime_android_NativeClient_localSpeechCreateRaw
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_localSpeechStartRaw(JNIEnv *env, jclass, jlong handle, jbyteArray model, jbyteArray language, jbyteArray hotwords, jint threads) {
     LocalSpeech *state = speech(handle);
     if (!state || state->session) return bytes_of(env, "invalid local speech session");
+    std::string model_text;
+    std::string language_text;
+    std::string hotwords_text;
+    if (!bounded_utf8(env, model, kLocalSpeechModelPathLimit, model_text)
+            || !bounded_utf8(env, language, kLocalSpeechLanguageLimit, language_text)
+            || !bounded_utf8(env, hotwords, kLocalSpeechHotwordsLimit, hotwords_text)) {
+        return bytes_of(env, "invalid local speech input");
+    }
     msime::voice::LocalAsrOptions options;
-    options.model_dir = utf8(env, model);
-    options.language = utf8(env, language);
+    options.model_dir = model_text;
+    options.language = language_text;
     options.threads = threads < 0 ? 0 : threads;
-    const std::string words = utf8(env, hotwords);
+    const std::string &words = hotwords_text;
     for (size_t start = 0; start < words.size();) {
         size_t end = words.find('\n', start);
         if (end == std::string::npos) end = words.size();
