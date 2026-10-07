@@ -1671,6 +1671,19 @@ int main(int argc, char **argv) {
       }
     }
     require(selected && ic.committed == oldCommit + suggestion, "exact provider candidate commit");
+    // 已显示答案后禁用服务必须立即移除该答案；不能先更新偏好再清除，否则 Host API 会把回调视为过期。
+    {
+      auto disabled = state->preferences_snapshot_;
+      if (ai)
+        disabled["preferences"]["ai_assistant"]["enabled"] = false;
+      else
+        disabled["preferences"]["cloud_candidates"] = false;
+      require(state->applyPreferenceSnapshot(std::move(disabled)),
+              "disabling the active provider succeeds");
+      require(response(msime_client_all_candidates(state->session_)).dump().find(suggestion) ==
+                  std::string::npos,
+              "disabling the active provider clears displayed candidates");
+    }
     require(key(FcitxKey_n) && key(FcitxKey_i), "second composition keys");
     const auto beforeWordCharacter = ic.committed;
     require(key(FcitxKey_bracketleft), "configured word-to-character binding");

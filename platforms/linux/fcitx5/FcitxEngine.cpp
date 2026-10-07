@@ -1488,6 +1488,9 @@ public:
                             !nextAi.value("enabled", false);
     const bool translationChanged = translationPreferencesChanged(
         preferences_, snapshot.at("preferences"));
+    // 先用旧偏好清掉已显示的在线候选；更新偏好后 Host API 会拒绝旧查询，旧行会因此残留。
+    if (cloudChanged && previousCloud && !nextCloud) clearOnlineCandidates(0);
+    if (aiDisabled) clearOnlineCandidates(1);
     const auto encoded = effectiveContextSnapshot(snapshot).dump();
     view_ = response(msime_client_update_preferences(
         session_, reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size())).at("view");
@@ -1497,8 +1500,6 @@ public:
     chinese_punctuation_ = preferences_.value("chinese_punctuation", chinese_punctuation_);
     syncSessionChinesePunctuation();
     preferences_snapshot_ = std::move(snapshot);
-    if (cloudChanged && previousCloud && !nextCloud) clearOnlineCandidates(0);
-    if (aiDisabled) clearOnlineCandidates(1);
     if (translationChanged)
       clearCandidateTranslations();
     if (aiChanged || cloudChanged)
@@ -1706,6 +1707,9 @@ public:
                                     !nextAi.value("enabled", false);
             const bool translationChanged = translationPreferencesChanged(
                 preferences_, effectivePreferences);
+            // 先用旧偏好清掉已显示的在线候选；更新偏好后 Host API 会拒绝旧查询，旧行会因此残留。
+            if (cloudChanged && previousCloud && !nextCloud) clearOnlineCandidates(0);
+            if (aiDisabled) clearOnlineCandidates(1);
             const auto encoded = effective.dump();
             view_ = response(msime_client_update_preferences(session_,
                 reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size())).at("view");
@@ -1754,8 +1758,6 @@ public:
             syncVoiceOverlayTheme();
             syncVoiceAction();
             preferences_snapshot_ = std::move(snapshot);
-            if (cloudChanged && previousCloud && !nextCloud) clearOnlineCandidates(0);
-            if (aiDisabled) clearOnlineCandidates(1);
             if (translationChanged)
               clearCandidateTranslations();
             if (aiChanged || cloudChanged)
