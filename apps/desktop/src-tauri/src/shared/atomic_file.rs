@@ -1,3 +1,4 @@
+use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
@@ -49,6 +50,31 @@ pub(crate) fn create_directory_and_check(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Open a host-owned file without following a replaced leaf symlink.
+pub(crate) fn open_private(path: &Path) -> io::Result<File> {
+    #[cfg(unix)]
+    {
+        let descriptor = rustix::fs::open(
+            path,
+            rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC,
+            rustix::fs::Mode::empty(),
+        )?;
+        return Ok(descriptor.into());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        let mut options = OpenOptions::new();
+        options
+            .read(true)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+        return options.open(path);
+    }
+    #[allow(unreachable_code)]
+    OpenOptions::new().read(true).open(path)
+}
+
 /// Replace a file after fully writing and syncing a temporary sibling.
 pub(crate) fn write(path: &Path, contents: &[u8]) -> io::Result<()> {
     let parent: PathBuf = path
@@ -82,5 +108,25 @@ mod tests {
 
         assert!(write(&path, b"synthetic").is_err());
         assert!(!outside.path().join("missing").exists());
+    }
+}
+
+#[cfg(test)]
+mod private_open_tests {
+    #[cfg(unix)]
+    #[test]
+    fn private_open_rejects_a_symlinked_leaf() {
+        use super::open_private;
+        use std::os::unix::fs::symlink;
+
+        let outside = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let target = outside.path().join("outside.json");
+        std::fs::write(&target, b"synthetic-private-data").unwrap();
+        let linked = root.path().join("private.json");
+        symlink(&target, &linked).unwrap();
+
+        assert!(open_private(&linked).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"synthetic-private-data");
     }
 }

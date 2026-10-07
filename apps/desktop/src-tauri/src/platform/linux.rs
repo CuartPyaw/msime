@@ -39,7 +39,7 @@ pub(crate) fn apply_edition_to_config(config: &mut tauri::Config) {
 /// Read at most `max_bytes + 1` bytes so callers can distinguish an accepted
 /// file from one that crossed its bound after its metadata was inspected.
 pub(crate) fn read_bounded_file(path: &Path, max_bytes: u64) -> io::Result<Vec<u8>> {
-    let file = std::fs::File::open(path)?;
+    let file = crate::shared::atomic_file::open_private(path)?;
     let initial_size = file.metadata()?.len().min(max_bytes.saturating_add(1));
     let mut bytes = Vec::with_capacity(usize::try_from(initial_size).unwrap_or(0));
     file.take(max_bytes.saturating_add(1))
@@ -67,4 +67,25 @@ pub(crate) fn config_home(xdg: Option<&OsStr>, home: Option<&OsStr>) -> Option<P
                 .filter(|path| path.is_absolute())
                 .map(|path| path.join(".config"))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_bounded_file;
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_reads_reject_a_symlinked_leaf() {
+        use std::os::unix::fs::symlink;
+
+        let outside = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let target = outside.path().join("outside.json");
+        std::fs::write(&target, b"synthetic-private-data").unwrap();
+        let linked = root.path().join("provider.json");
+        symlink(&target, &linked).unwrap();
+
+        assert!(read_bounded_file(&linked, 1024).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"synthetic-private-data");
+    }
 }
