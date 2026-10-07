@@ -508,9 +508,126 @@ int candidateThemePriority() {
   std::cout << "Fcitx5 candidate theme ownership passed\n";
   return 0;
 }
+#ifdef MSIME_FCITX5_HINT_FONT
+// 模式提示的宽度：classicui 画水杉主题且主题带装饰图时，「中」「英」要补到装饰完整显示；
+// 第三方主题（含由 DarkTheme 决定的活动主题）、没有装饰都保持原样。全部用合成目录与合成图。
+int candidateThemeHint() {
+  char temporary[] = "/tmp/msime-fcitx-hint-XXXXXX";
+  const auto *directory = mkdtemp(temporary);
+  require(directory != nullptr, "theme hint fixture directory");
+  const std::filesystem::path root(directory);
+  for (const auto *name : {"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR"})
+    setenv(name, directory, 1);
+  setenv("MSIME_FCITX5_OPTIONS", (root / "missing-options.json").c_str(), 1);
+  // PNG 文件头声明 200 x 12；缩放器解不开它，装饰按原图暂存，宽度就是 200。
+  const std::string png_header("\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR\0\0\0\xc8\0\0\0\x0c\x08\x06\0\0\0", 29);
+  // 纯几何：提示宽度只由主题写的边距与装饰宽度决定，与字体无关。
+  require(fcitx_draws_candidate_theme("msime", "Nord-Dark", false, true), "浅色画水杉 Theme");
+  require(!fcitx_draws_candidate_theme("msime", "Nord-Dark", true, true), "深色画第三方 DarkTheme");
+  require(fcitx_draws_candidate_theme("msime", "msime", true, true), "深色画水杉 DarkTheme");
+  require(!fcitx_draws_candidate_theme("Nord-Dark", "msime", false, true), "第三方 Theme 不算水杉");
+  require(fcitx_overlay_panel_width(32, "Top Center", 0, 13, 13) == 58, "居中装饰两边各留 clip 边距");
+  require(fcitx_overlay_panel_width(32, "Top Left", 19, 13, 13) == 64, "靠边装饰量 OverlayOffsetX 与对面 clip 边距");
+  require(fcitx_pad_hint_label("中", 58, 16, 16) == "中\u3000\u3000\u3000", "按全角空格一次补到目标宽度");
+  require(fcitx_pad_hint_label("中", 16, 16, 16) == "中", "已经够宽就不再补");
+  require(fcitx_pad_hint_label("中", 40, 16, 0) == "中", "量不出空格宽度就不补");
+  // 读回主题：居中装饰的宽度与四边边距决定提示要占的宽度，没有装饰就是 0。
+  const auto synthetic = root / "synthetic";
+  std::filesystem::create_directories(synthetic);
+  {
+    std::ofstream out(synthetic / "decoration-synthetic.png", std::ios::binary);
+    out << png_header;
+  }
+  std::ofstream(synthetic / "theme.conf")
+      << "[InputPanel/Background]\nOverlay=decoration-synthetic.png\nGravity=Top Center\nOverlayOffsetX=0\n"
+         "[InputPanel/Background/OverlayClipMargin]\nLeft=13\nRight=13\nTop=8\nBottom=17\n"
+         "[InputPanel/ContentMargin]\nLeft=19\nRight=19\nTop=14\nBottom=23\n"
+         "[InputPanel/TextMargin]\nLeft=10\nRight=12\nTop=6\nBottom=6\n";
+  require(fcitx_hint_width_from_theme(synthetic / "theme.conf") == 200 + 2 * 13 - 19 - 19 - 10 - 12,
+          "居中的装饰按两边 clip 边距算提示宽度");
+  std::ofstream(synthetic / "plain.conf") << "[InputPanel/Background]\nColor=#ffffff\n";
+  require(fcitx_hint_width_from_theme(synthetic / "plain.conf") == 0, "没有装饰就没有要预留的宽度");
+  std::filesystem::create_directories(root / "fcitx5/conf");
+  std::ofstream(root / "fcitx5/conf/classicui.conf") << "Theme=msime\nDarkTheme=msime\nFont=Sans 10\n";
+  const auto image = root / "skins/sakura/ears.png";
+  std::filesystem::create_directories(image.parent_path());
+  {
+    std::ofstream out(image, std::ios::binary);
+    out << png_header;
+  }
+  const Json catalog = {{"packages", Json::array({{{"id", "sakura"},
+                                                  {"title", "樱花"},
+                                                  {"base", "system"},
+                                                  {"layouts", Json::array({"horizontal", "vertical"})},
+                                                  {"candidate", {{"light", Json::object()}, {"dark", Json::object()}}},
+                                                  {"decoration_top_dip", 24.5},
+                                                  {"decoration_width_dip", 200},
+                                                  {"decoration_image", image.string()}}})}};
+  char program[] = "msime-theme-hint-test";
+  char disabled[] = "--disable=all";
+  char enabled[] = "--enable=classicui";
+  char *args[] = {program, disabled, enabled, nullptr};
+  {
+    fcitx::Instance instance(3, args);
+    instance.addonManager().registerDefaultLoader(nullptr);
+    instance.initialize();
+    if (!instance.addonManager().addonInfo("classicui")) {
+      std::filesystem::remove_all(root);
+      std::cout << "skipped: classicui runtime is not installed\n";
+      return 77;
+    }
+    auto *classicui = instance.addonManager().addon("classicui", true);
+    require(classicui && classicui->getConfig(), "real classicui loaded");
+    FcitxEngine engine(&instance);
+    const Json preferences{{"global_theme", "custom"}, {"custom_theme", {{"candidate_skin", "sakura"}}}};
+    engine.applyCandidatePanelTheme(preferences, false, catalog, true);
+    const auto theme_file = root / "fcitx5/themes/msime/theme.conf";
+    require(std::filesystem::is_regular_file(theme_file), "装饰主题已写入");
+    const int target = fcitx_hint_width_from_theme(theme_file);
+    require(target > 0, "带装饰的主题给出提示宽度");
+    const auto resolution = fcitx_default_font_resolution();
+    const auto chinese = engine.modeHintLabel("x11::0", "中");
+    require(chinese.size() > std::string("中").size(), "水杉主题的提示被补宽");
+    require(fcitx_measure_text("Sans 10", resolution, chinese) >= target, "补宽后的提示容得下装饰");
+    require(fcitx_measure_text("Sans 10", resolution, engine.modeHintLabel("x11::0", "英")) >= target, "英同样补宽");
+    require(engine.modeHintLabel("x11::0", "中") == chinese, "重复切换用同一份结果");
+    // 热路径不碰文件：删掉主题与装饰图后，中/英切换仍用写主题时算好的宽度。
+    std::filesystem::remove_all(root / "fcitx5/themes/msime");
+    require(engine.modeHintLabel("x11::0", "中") == chinese, "提示不依赖主题文件");
+    // 桌面切深色、DarkTheme 是第三方：classicui 画的是第三方主题，提示保持原样。
+    fcitx::RawConfig external;
+    external.setValueByPath("UseDarkTheme", "True");
+    external.setValueByPath("DarkTheme", "Nord-Dark");
+    classicui->setConfig(external);
+    engine.applyCandidatePanelTheme(preferences, true, catalog, false);
+    require(engine.modeHintLabel("x11::0", "中") == "中", "第三方深色主题不补宽");
+    // 关掉跟随系统后画回水杉 Theme，提示重新补宽。
+    fcitx::RawConfig light;
+    light.setValueByPath("UseDarkTheme", "False");
+    classicui->setConfig(light);
+    engine.applyCandidatePanelTheme(preferences, true, catalog, false);
+    require(engine.modeHintLabel("x11::0", "中").size() > std::string("中").size(), "回到水杉主题后重新补宽");
+    // 换成没有装饰的内置主题：没有要放的装饰，提示保持原样。
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "paper"}}, false, Json(), true);
+    require(engine.modeHintLabel("x11::0", "中") == "中", "没有装饰就不补宽");
+    // 第三方主题：即使水杉自己的主题文件还在，也不补宽。
+    fcitx::RawConfig third;
+    third.setValueByPath("Theme", "Nord-Dark");
+    classicui->setConfig(third);
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "ink"}}, false, Json(), false);
+    require(engine.modeHintLabel("x11::0", "中") == "中", "第三方主题不补宽");
+  }
+  std::filesystem::remove_all(root);
+  std::cout << "Fcitx5 candidate theme hint passed\n";
+  return 0;
+}
+#endif
 int main(int argc, char **argv) {
   try {
     if (argc == 2 && std::string(argv[1]) == "--theme-priority") return candidateThemePriority();
+#ifdef MSIME_FCITX5_HINT_FONT
+    if (argc == 2 && std::string(argv[1]) == "--theme-hint") return candidateThemeHint();
+#endif
     autocorrectMarker();
     koreanHanjaGlossRow();
     candidateThemeDecoration();

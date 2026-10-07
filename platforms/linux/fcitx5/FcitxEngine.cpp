@@ -126,6 +126,10 @@
 
 extern char **environ;
 
+#ifdef MSIME_FCITX5_HINT_FONT
+#include <pango/pangocairo.h>
+#endif
+
 namespace msime::fcitx_host {
 using Json = nlohmann::json;
 class FcitxEngine;
@@ -5331,6 +5335,128 @@ void restore_classicui_theme(fcitx::AddonInstance &classicui) {
   classicui.setConfig(config);
 }
 
+#ifdef MSIME_FCITX5_HINT_FONT
+// classicui 的经典界面按自己的字体与 Pango 分辨率排版模式提示；这里用同一个分辨率测量，
+// 才能把「中」「英」补到装饰图完整显示所需的逻辑宽度。分辨率只在 Wayland 且设置了
+// ForceWaylandDPI 时改变——X11 的 Xft.dpi 与每屏 DPI 只改设备缩放（cairo device scale），
+// 不改变 yoga 布局用的逻辑尺寸，所以提示宽度不必跟着它们走。
+double fcitx_default_font_resolution() {
+  static const double resolution = [] {
+    auto *font_map = pango_cairo_font_map_new();
+    const double value = pango_cairo_font_map_get_resolution(PANGO_CAIRO_FONT_MAP(font_map));
+    g_object_unref(font_map);
+    return value;
+  }();
+  return resolution;
+}
+
+// 一段文字在同一字体与分辨率下的逻辑宽度（像素），与 classicui 的 pango_layout_get_pixel_size 一致。
+int fcitx_measure_text(const std::string &font, double resolution, const std::string &text) {
+  auto *font_map = pango_cairo_font_map_new();
+  pango_cairo_font_map_set_resolution(PANGO_CAIRO_FONT_MAP(font_map), resolution);
+  auto *context = pango_font_map_create_context(PANGO_FONT_MAP(font_map));
+  auto *layout = pango_layout_new(context);
+  auto *description = pango_font_description_from_string(font.c_str());
+  pango_layout_set_font_description(layout, description);
+  pango_layout_set_text(layout, text.c_str(), -1);
+  int width = 0;
+  pango_layout_get_pixel_size(layout, &width, nullptr);
+  pango_font_description_free(description);
+  g_object_unref(layout);
+  g_object_unref(context);
+  g_object_unref(font_map);
+  return width;
+}
+#endif
+
+// classicui 正在绘制的是不是水杉主题：UseDarkTheme 打开且桌面为深色时画 DarkTheme，
+// 否则画 Theme（与 classicui reloadTheme 的规则一致）。
+inline bool fcitx_draws_candidate_theme(const std::string &theme, const std::string &dark_theme,
+                                        bool use_dark_theme, bool system_dark) {
+  return (use_dark_theme && system_dark ? dark_theme : theme) == msime::linux_host::kFcitxCandidateTheme;
+}
+
+// 装饰图完整落在 OverlayClipMargin 之内所需的面板宽度（逻辑单位），与 classicui Theme::paint 的定位
+// 一致：居中时两边各留一份 clip 边距，靠边时从对齐边量 OverlayOffsetX，再留对面的 clip 边距。
+inline int fcitx_overlay_panel_width(int overlay_width, const std::string &gravity, int offset_x,
+                                     int clip_left, int clip_right) {
+  if (overlay_width <= 0) return 0;
+  if (gravity == "Top Center") return overlay_width + 2 * std::max(clip_left, clip_right);
+  return overlay_width + offset_x + (gravity == "Top Left" ? clip_right : clip_left);
+}
+
+// 提示文本要占的宽度：面板宽度减去主题在文字两侧留的边距，与 classicui 的 yoga 布局一致。
+inline int fcitx_hint_text_width(int panel_width, int content_left, int content_right, int text_left, int text_right) {
+  return panel_width - content_left - content_right - text_left - text_right;
+}
+
+// 读回刚写好的主题，得出提示文本至少要多宽才能让装饰完整显示。没有装饰、装饰宽度读不出来
+// （非 PNG、声明尺寸超限）时返回 0，提示保持原样。只在写主题时调用一次，热路径不读文件。
+inline int fcitx_hint_width_from_theme(const std::filesystem::path &theme_file) {
+  namespace host = msime::linux_host;
+  fcitx::RawConfig theme;
+  fcitx::readAsIni(theme, theme_file.string());
+  const auto *overlay = theme.valueByPath("InputPanel/Background/Overlay");
+  if (!overlay || overlay->empty()) return 0;
+  std::string header(24, '\0');
+  std::ifstream image(theme_file.parent_path() / *overlay, std::ios::binary);
+  if (!image.read(header.data(), static_cast<std::streamsize>(header.size()))) return 0;
+  const auto width = host::fcitx_png_width(header);
+  if (!width) return 0;
+  const auto number = [&theme](const char *path) {
+    const auto *value = theme.valueByPath(path);
+    if (!value) return 0;
+    try {
+      return std::stoi(*value);
+    } catch (...) {
+      return 0;
+    }
+  };
+  const auto *gravity = theme.valueByPath("InputPanel/Background/Gravity");
+  const int panel = fcitx_overlay_panel_width(*width, gravity ? *gravity : std::string(),
+                                              number("InputPanel/Background/OverlayOffsetX"),
+                                              number("InputPanel/Background/OverlayClipMargin/Left"),
+                                              number("InputPanel/Background/OverlayClipMargin/Right"));
+  const int text = fcitx_hint_text_width(panel, number("InputPanel/ContentMargin/Left"),
+                                         number("InputPanel/ContentMargin/Right"),
+                                         number("InputPanel/TextMargin/Left"),
+                                         number("InputPanel/TextMargin/Right"));
+  return text > 0 ? text : 0;
+}
+
+// 把提示补到至少 target 宽：按全角空格的数量一次算出，不逐字符排版。
+inline std::string fcitx_pad_hint_label(const std::string &label, int target, int natural, int space) {
+  if (target <= natural || space <= 0) return label;
+  const int count = (target - natural + space - 1) / space;
+  std::string message = label;
+  for (int index = 0; index < count; ++index) message += "\u3000";
+  return message;
+}
+
+// classicui 的主题选择与面板字体，在每次主题/字体同步时读一次；模式提示的中/英切换只用这份缓存，
+// 不再调 getConfig()——它会扫描主题目录并逐个解析 theme.conf，不能放在按键热路径上。
+struct FcitxHintInputs {
+  bool active = false;
+  std::string font;
+  int force_wayland_dpi = 0;
+};
+
+inline FcitxHintInputs fcitx_hint_inputs(const fcitx::RawConfig &config, bool system_dark) {
+  const auto value = [&config](const char *path) {
+    const auto *found = config.valueByPath(path);
+    return found ? *found : std::string();
+  };
+  int dpi = 0;
+  try {
+    dpi = std::stoi(value("ForceWaylandDPI"));
+  } catch (...) {
+    dpi = 0;
+  }
+  return FcitxHintInputs{
+      fcitx_draws_candidate_theme(value("Theme"), value("DarkTheme"), value("UseDarkTheme") == "True", system_dark),
+      value("Font"), dpi};
+}
+
 // Each context owns a thread-bound Host API session. Fcitx never copies composing state.
 class FcitxEngine : public fcitx::InputMethodEngineV2 {
 public:
@@ -5353,6 +5479,8 @@ public:
     fcitx::RawConfig config;
     config.setValueByPath("Font", *description);
     set_classicui_config(*classicui, config);
+    // 写字体不经 applyCandidatePanelTheme，提示的字体缓存要在这里跟上。
+    hint_inputs_.font = *description;
   }
   // The candidate colours reach the classic UI as a theme named "msime" in the user's Fcitx5 data directory (see candidates/CandidateFcitxTheme.h). The addon is pointed at it while it shows one of Fcitx5's stock themes or MSIME's own, so a theme the user chose is left in place; a theme the user just picked in the 主题 menu (`chosen`) is taken over even then, and while the resolved theme carries no candidate coverage (系统, or a custom theme with neither colours nor skin) the options MSIME still holds go back. Setting the configuration also makes the addon read the theme file again, which is how a changed palette appears without a restart.
   void applyCandidatePanelTheme(const Json &preferences, bool system_dark, const Json &catalog, bool chosen) {
@@ -5369,6 +5497,8 @@ public:
     // 但只恢复仍是水杉自己写的项，用户在 fcitx5-configtool 选的主题不动。
     if (!resolved.covers_candidates) {
       if (classicui) restore_classicui_theme(*classicui);
+      hint_text_width_ = 0;
+      hint_inputs_ = FcitxHintInputs{};
       return;
     }
     const auto &colors = resolved.colors;
@@ -5399,6 +5529,9 @@ public:
     if (!live) return;
     fcitx::RawConfig current;
     live->save(current);
+    // 模式提示的热路径不读 classicui 配置（getConfig() 会扫描主题目录并逐个解析 theme.conf），
+    // 每次同步在这里记下它画的主题、字体与 Wayland 字体 DPI。
+    hint_inputs_ = fcitx_hint_inputs(current, system_dark);
     const auto *selected = current.valueByPath("Theme");
     const auto *selected_dark = current.valueByPath("DarkTheme");
     // 用户刚在主题菜单里选了水杉主题时（chosen）即使当前是第三方主题也接管；焦点进入、偏好同步、系统明暗变化都只是重读同一份偏好，绝不把用户选的主题换回来。
@@ -5414,6 +5547,10 @@ public:
         candidate_theme_retry_at_ = now + kCandidateThemeRetry;
         return;
       }
+#ifdef MSIME_FCITX5_HINT_FONT
+      // 装饰图的宽度只在写主题时读一次，模式提示切换时直接用结果。
+      hint_text_width_ = fcitx_hint_width_from_theme(*file);
+#endif
     }
     fcitx::RawConfig config;
     config.setValueByPath("Theme", std::string(host::kFcitxCandidateTheme));
@@ -5423,7 +5560,35 @@ public:
     candidate_theme_applied_ = std::move(inputs);
     candidate_theme_attempt_.clear();
   }
+#ifdef MSIME_FCITX5_HINT_FONT
+  // classicui 的面板只在画水杉主题时才有装饰图；此时把「中」「英」补到主题自己预留的宽度，
+  // 装饰就不会被 OverlayClipMargin 从两侧切掉。第三方主题、没有装饰、以及 kimpanel（不画
+  // classicui 主题）都保持原来的窄提示。宽度在写主题时算好，这里不读 theme.conf，也不逐字符
+  // 重排，只在字体或 DPI 变化时重测一次。
+  std::string modeHintLabel(const std::string &display, const std::string &label) {
+    if (instance_->currentUI() != "classicui" || !hint_inputs_.active || hint_text_width_ <= 0) return label;
+    const auto &font = hint_inputs_.font;
+    if (font.empty()) return label;
+    // Wayland 下 classicui 用 ForceWaylandDPI 排版；X11 与未设置时用 Pango 默认分辨率。
+    double resolution = 0;
+    if (display.rfind("wayland:", 0) == 0 && hint_inputs_.force_wayland_dpi > 0)
+      resolution = hint_inputs_.force_wayland_dpi;
+    if (resolution <= 0) resolution = fcitx_default_font_resolution();
+    if (font != hint_measured_font_ || resolution != hint_measured_resolution_) {
+      hint_natural_[0] = fcitx_measure_text(font, resolution, "中");
+      hint_natural_[1] = fcitx_measure_text(font, resolution, "英");
+      hint_space_ = fcitx_measure_text(font, resolution, "\u3000");
+      hint_measured_font_ = font;
+      hint_measured_resolution_ = resolution;
+    }
+    const int natural = label == "中" ? hint_natural_[0] : hint_natural_[1];
+    auto message = fcitx_pad_hint_label(label, hint_text_width_, natural, hint_space_);
+    // 一次最终校验：字体整形不保证空格严格线性，差一点就再补一个。
+    if (message.size() != label.size() && fcitx_measure_text(font, resolution, message) < hint_text_width_)
+      message += "\u3000";
+    return message;
   }
+#endif
   // 告诉设置页经典界面画不画候选字体、配色和皮肤（见 candidates/CandidatePanelStatus.h）。每次主题同步都问一遍，因为用户随时可能在 fcitx5-configtool 里换界面或主题；答案变了才重写文件。主题选择取自落盘的 classicui.conf（read_classicui_theme_selection），不调 `getConfig()`，后者每次都扫描全部已装主题（#5988）。
   void publishCandidatePanelStatus() {
     namespace host = msime::linux_host;
@@ -6124,6 +6289,16 @@ public:
   std::string candidate_theme_attempt_;
   std::chrono::steady_clock::time_point candidate_theme_retry_at_;
   static constexpr auto kCandidateThemeRetry = std::chrono::seconds(10);
+  // 提示要撑到的文本宽度（逻辑单位），写主题时算好；0 表示不加宽。
+  int hint_text_width_ = 0;
+  FcitxHintInputs hint_inputs_;
+#ifdef MSIME_FCITX5_HINT_FONT
+  // 最近一次测量的字体与分辨率，以及「中」「英」和一个全角空格的宽度；变化时重测。
+  std::string hint_measured_font_;
+  double hint_measured_resolution_ = 0;
+  std::array<int, 2> hint_natural_{{0, 0}};
+  int hint_space_ = 0;
+#endif
   msime::linux_host::CandidateWheelPagingSync candidate_wheel_paging_sync_;
   // Last appearance the addon-wide probe reported; see stepSystemTheme.
   bool system_dark_ = false;
@@ -6501,8 +6676,13 @@ void FcitxState::showInputModeHud() {
           fcitx_mode_badge_theme(preferences_, system_dark_, candidate_skin_document_))};
   if (mode_badge_ && mode_badge_->show(label, MSIME_MODE_BADGE_ICON, style)) scheduleModeBadgeHide();
 #endif
-  if (auto *instance = engine_->instance())
+  if (auto *instance = engine_->instance()) {
+#ifdef MSIME_FCITX5_HINT_FONT
+    instance->showCustomInputMethodInformation(&ic_, engine_->modeHintLabel(ic_.display(), label));
+#else
     instance->showCustomInputMethodInformation(&ic_, label);
+#endif
+  }
 #endif
 }
 
