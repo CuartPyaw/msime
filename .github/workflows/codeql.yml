@@ -63,9 +63,9 @@ jobs:
 
   swift:
     name: CodeQL / Swift
-    # 只在每日定时和手动触发时跑，理由见文件顶部：一次占用一台 macos-15 约一小时。
+    # 只在每日定时和手动触发时跑，理由见文件顶部：一次占用一台 macOS runner 约一小时。
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
-    runs-on: macos-15
+    runs-on: depot-macos-26
     timeout-minutes: 60
     env:
       # The same Xcode the simulator CI and the release build use: the keyboard calls iOS 26 API, which the runner's default Xcode 16.4 (iOS 18.5 SDK) cannot compile.
