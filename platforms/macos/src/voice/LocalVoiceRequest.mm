@@ -8,8 +8,10 @@
 #include <cstdint>
 #include <cstring>
 #include <fcntl.h>
+#include <filesystem>
 #include <sys/stat.h>
 #include <memory>
+#include <iterator>
 #include <unistd.h>
 #include <vector>
 
@@ -89,8 +91,43 @@ NSData *BoundedModelManifestData(NSString *path) {
     return data;
 }
 
+bool TrustedModelPathLink(const std::filesystem::path &path) {
+    const std::filesystem::path expected = path == "/var"   ? "/private/var"
+                                         : path == "/tmp"   ? "/private/tmp"
+                                                             : std::filesystem::path();
+    if (expected.empty()) return false;
+    std::error_code error;
+    const auto target = std::filesystem::read_symlink(path, error);
+    return !error && (path.parent_path() / target).lexically_normal() == expected;
+}
+
+bool ModelDirectoryHasRealAncestors(NSString *path) {
+    const std::filesystem::path directory(path.fileSystemRepresentation);
+    if (!directory.is_absolute()) return false;
+    std::vector<std::filesystem::path> ancestors;
+    for (auto current = directory;; current = current.parent_path()) {
+        ancestors.push_back(current);
+        if (current.parent_path() == current) break;
+    }
+    std::error_code error;
+    bool sawTrustedLink = false;
+    for (auto it = ancestors.rbegin(); it != ancestors.rend(); ++it) {
+        const auto status = std::filesystem::symlink_status(*it, error);
+        if (error) return false;
+        if (std::filesystem::is_symlink(status)) {
+            const bool last = std::next(it) == ancestors.rend();
+            if (last || sawTrustedLink || !TrustedModelPathLink(*it)) return false;
+            sawTrustedLink = true;
+        } else if (!std::filesystem::is_directory(status)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 NSDictionary *ModelManifest(NSString *path) {
     if (!path.isAbsolutePath) return nil;
+    if (!ModelDirectoryHasRealAncestors(path)) return nil;
     struct stat directoryStat = {};
     if (lstat(path.fileSystemRepresentation, &directoryStat) != 0 || !S_ISDIR(directoryStat.st_mode)) return nil;
     NSString *manifestPath = [path stringByAppendingPathComponent:@"msime-model.json"];
