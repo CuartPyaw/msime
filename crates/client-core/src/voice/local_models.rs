@@ -1040,6 +1040,7 @@ pub(crate) fn adopt_files(
     if !source.is_absolute() {
         return Err(LocalModelError::InvalidRoot);
     }
+    check_root(source)?;
     let record = source.to_str().ok_or(LocalModelError::InvalidRoot)?;
     fs::create_dir_all(root)?;
     // 先放回上一次被打断的收编移走的文件，再检查来源里有没有这组文件。
