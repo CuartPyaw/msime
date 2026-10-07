@@ -729,6 +729,19 @@ fn a_linked_plugins_root_is_not_scanned() {
     assert!(catalog.packages.iter().all(|package| package.builtin));
 }
 
+#[cfg(unix)]
+#[test]
+fn a_linked_builtin_root_is_not_scanned() {
+    let state = tempdir().unwrap();
+    let outside = tempdir().unwrap();
+    sound_pack(outside.path(), SOUND);
+    let linked = state.path().join("builtin-sounds");
+    msime_path_trust::untrusted_symlink(outside.path(), &linked).unwrap();
+
+    let catalog = scan(state.path(), Some(&linked));
+    assert_eq!(catalog, PluginCatalog::default());
+}
+
 #[test]
 fn built_in_ids_are_reserved_and_resolved_only_from_the_bundle() {
     let root = tempdir().unwrap();
