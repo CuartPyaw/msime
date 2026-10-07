@@ -104,6 +104,8 @@ constexpr jsize kEmojiQueryLimit = 16384;
 constexpr jsize kEmojiResourcesLimit = 4096;
 constexpr jsize kCandidateGlossRequestLimit = 262144;
 constexpr jsize kCandidateGlossResourcesLimit = 4096;
+constexpr jsize kEnglishCompletionRequestLimit = 16384;
+constexpr jsize kEnglishCompletionResourcesLimit = 4096;
 }
 
 extern "C" {
@@ -216,9 +218,13 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_englishCompleti
         return response(env, msime_client_english_completions_request(nullptr, 0, nullptr, 0));
     }
     jsize request_length = env->GetArrayLength(request);
+    jsize resources_length = env->GetArrayLength(resources);
+    if (request_length > kEnglishCompletionRequestLimit
+            || resources_length > kEnglishCompletionResourcesLimit) {
+        return response(env, msime_client_english_completions_request(nullptr, 0, nullptr, 0));
+    }
     jbyte *request_bytes = env->GetByteArrayElements(request, nullptr);
     if (!request_bytes) return nullptr;
-    jsize resources_length = env->GetArrayLength(resources);
     jbyte *resources_bytes = env->GetByteArrayElements(resources, nullptr);
     if (!resources_bytes) {
         env->ReleaseByteArrayElements(request, request_bytes, JNI_ABORT);
