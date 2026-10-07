@@ -208,6 +208,26 @@ export class MusicPlayer {
     return value;
   }
 
+  /** Open a validated pack track and bind the descriptor to the path checked above. */
+  private static openVerified(path: string): fs.File {
+    const pathStat: fs.Stat = fs.lstatSync(path);
+    if (pathStat.isSymbolicLink() || !pathStat.isFile()) {
+      throw new Error('music track is not a regular file');
+    }
+    let file: fs.File | undefined = undefined;
+    try {
+      file = fs.openSync(path, fs.OpenMode.READ_ONLY);
+      const opened: fs.Stat = fs.statSync(file.fd);
+      if (!opened.isFile() || opened.ino !== pathStat.ino) {
+        throw new Error('music track changed while opening');
+      }
+      return file;
+    } catch (error) {
+      if (file !== undefined) fs.closeSync(file);
+      throw error;
+    }
+  }
+
   /** Whether a track's declared length is within the pack bound. Read once per track and pack; a track that cannot be read is not played. */
   private async allowed(pack: MusicPackTracks, index: number, generation: number): Promise<boolean> {
     const path: string = pack.tracks[index];
@@ -219,7 +239,7 @@ export class MusicPlayer {
     let file: fs.File | undefined = undefined;
     let extractor: media.AVMetadataExtractor | undefined = undefined;
     try {
-      file = fs.openSync(path, fs.OpenMode.READ_ONLY);
+      file = MusicPlayer.openVerified(path);
       extractor = await media.createAVMetadataExtractor();
       const descriptor: media.AVFileDescriptor = { fd: file.fd };
       extractor.fdSrc = descriptor;
@@ -257,7 +277,7 @@ export class MusicPlayer {
     // Held before the file is opened, so a track that cannot be opened lets this player go with the failure it reports.
     this.player = player;
     this.opening = false;
-    const file: fs.File = fs.openSync(pack.tracks[index], fs.OpenMode.READ_ONLY);
+    const file: fs.File = MusicPlayer.openVerified(pack.tracks[index]);
     this.file = file;
     const maxTrackSeconds: number = pack.max_track_seconds;
     player.on('stateChange', (state: media.AVPlayerState): void => {

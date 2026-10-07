@@ -343,9 +343,29 @@ export class KeySoundPlayer {
     }
   }
 
+  /** Open a rendered note and bind the descriptor to the path produced by the renderer. */
+  private static openVerified(path: string): fs.File {
+    const pathStat: fs.Stat = fs.lstatSync(path);
+    if (pathStat.isSymbolicLink() || !pathStat.isFile()) {
+      throw new Error('rendered sound is not a regular file');
+    }
+    let file: fs.File | undefined = undefined;
+    try {
+      file = fs.openSync(path, fs.OpenMode.READ_ONLY);
+      const opened: fs.Stat = fs.statSync(file.fd);
+      if (!opened.isFile() || opened.ino !== pathStat.ino) {
+        throw new Error('rendered sound changed while opening');
+      }
+      return file;
+    } catch (error) {
+      if (file !== undefined) fs.closeSync(file);
+      throw error;
+    }
+  }
+
   private async loadFile(generation: number, pool: media.SoundPool, path: string,
     cues: string[]): Promise<void> {
-    const file: fs.File = fs.openSync(path, fs.OpenMode.READ_ONLY);
+    const file: fs.File = KeySoundPlayer.openVerified(path);
     let sound: number = 0;
     let loaded: boolean = false;
     try {
