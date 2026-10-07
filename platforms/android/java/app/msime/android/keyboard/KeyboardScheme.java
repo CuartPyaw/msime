@@ -143,7 +143,7 @@ public enum KeyboardScheme {
         for (KeyboardScheme candidate : enabled) {
             if (candidate.offeredBy(edition) && candidate.installed(directory)) installed.add(candidate);
         }
-        return installed.isEmpty() ? List.of(fallback(edition)) : List.copyOf(installed);
+        return withFallback(installed, edition);
     }
 
     public static KeyboardScheme fromPreferenceId(String value) {
@@ -162,7 +162,7 @@ public enum KeyboardScheme {
                 if ((!candidate.optIn() || !edition.offersSchemeChoice()) && candidate.offeredBy(edition))
                     defaults.add(candidate);
             }
-            return defaults.isEmpty() ? List.of(fallback(edition)) : List.copyOf(defaults);
+            return withFallback(defaults, edition);
         }
         Set<String> requested = new LinkedHashSet<>(ids);
         // A plain loop, not `Stream#toList`: that arrived in API 34 and this host declares
@@ -171,7 +171,12 @@ public enum KeyboardScheme {
         for (KeyboardScheme candidate : values()) {
             if (requested.contains(candidate.preferenceId) && candidate.offeredBy(edition)) enabled.add(candidate);
         }
-        return enabled.isEmpty() ? List.of(fallback(edition)) : List.copyOf(enabled);
+        return withFallback(enabled, edition);
+    }
+
+    private static List<KeyboardScheme> withFallback(List<KeyboardScheme> schemes,
+            AppEdition edition) {
+        return schemes.isEmpty() ? List.of(fallback(edition)) : List.copyOf(schemes);
     }
 
     /** Shared selected is authoritative; otherwise preserve the applied scheme or use first enabled. */
