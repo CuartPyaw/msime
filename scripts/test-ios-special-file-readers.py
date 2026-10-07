@@ -44,6 +44,36 @@ CHECKS = (
         "    return data;\n}",
         ("O_NONBLOCK",),
     ),
+    (
+        ROOT / "platforms/macos/src/backend/dictionary/BackendSecureFileReader.swift",
+        "static func readData(from url: URL",
+        "    #else",
+        ("O_NONBLOCK",),
+    ),
+    (
+        ROOT / "platforms/ios/SharedUI/vocabulary/VocabularyReviewStore.swift",
+        "private static func openReadableWordbook(_ url: URL)",
+        "    #else",
+        ("O_NONBLOCK",),
+    ),
+    (
+        ROOT / "platforms/ios/SharedUI/dictionary/PersonalDictionaryImport.swift",
+        "private static func openReadableFile(_ url: URL)",
+        "    #else",
+        ("O_NONBLOCK",),
+    ),
+    (
+        ROOT / "platforms/ios/SharedUI/core/DiagnosticLog.swift",
+        "static func readTail(from url: URL",
+        "    let handle = FileHandle",
+        ("O_NONBLOCK",),
+    ),
+    (
+        ROOT / "platforms/ios/App/Services/LocalSpeechModel.swift",
+        "    let descriptor = open(url.path",
+        "    let handle = FileHandle",
+        ("O_NONBLOCK",),
+    ),
 )
 
 
