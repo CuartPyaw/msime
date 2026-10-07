@@ -76,7 +76,9 @@ fn embedded_file_writing_rejects_a_symlink() {
     assert_eq!(std::fs::read(&target).unwrap(), b"keep");
 }
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{mpsc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 #[test]
 fn relative_component_capacity_covers_each_valid_component() {
@@ -317,6 +319,7 @@ fn root_entries(root: &Path) -> Vec<String> {
     let mut names: Vec<_> = fs::read_dir(root)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name != MODEL_LOCK_FILE)
         .collect();
     names.sort();
     names
@@ -900,6 +903,59 @@ fn installing_files_publishes_them_with_the_manifest_and_reports_progress() {
     assert!(events
         .iter()
         .all(|event| event.total == total && event.downloaded <= total));
+}
+
+#[test]
+fn removal_waits_for_an_install_before_cleaning_its_staging_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let files = pack_files();
+    let id = default_model_id().to_owned();
+    let install_id = id.clone();
+    let root_path = root.path().to_owned();
+    let (ready_tx, ready_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let install = thread::spawn(move || {
+        let fetcher = pack_fetcher("", PACK_B);
+        let mut events = Vec::new();
+        let result = install_files_with(
+            &root_path,
+            &install_id,
+            &files,
+            &serde_json::json!({"pack": "pack"}),
+            &[],
+            &fetcher,
+            &mut |event| {
+                events.push(event.clone());
+                if event.stage == "verify" {
+                    ready_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                }
+            },
+            &AtomicBool::new(false),
+        );
+        (result, events)
+    });
+    ready_rx.recv().unwrap();
+
+    let remove_root = root.path().to_owned();
+    let remove_id = id.clone();
+    let (removed_tx, removed_rx) = mpsc::channel();
+    let removal = thread::spawn(move || {
+        let result = remove(&remove_root, &remove_id);
+        removed_tx.send(result).unwrap();
+    });
+
+    // Without serialization, remove_leftovers deletes the install's staging directory and
+    // returns while the installer is paused before publishing it.
+    assert!(removed_rx.recv_timeout(Duration::from_millis(100)).is_err());
+    release_tx.send(()).unwrap();
+
+    let (install_result, _events) = install.join().unwrap();
+    assert!(install_result.is_ok(), "install failed: {install_result:?}");
+    let remove_result = removed_rx.recv().unwrap();
+    removal.join().unwrap();
+    assert!(remove_result.is_ok(), "remove failed: {remove_result:?}");
+    assert!(!root.path().join(id).exists());
 }
 
 /// 摘要不符的文件不留下，也不发布任何东西；同一包里已经校验过的文件留在续传目录，下次不用再下。
