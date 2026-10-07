@@ -5,7 +5,7 @@ import {
   AccountSessionStore, AccountTransport, AccountTransportResponse, parseResponseContentLength
 } from './AccountCloudBridge';
 import { installNoRedirectGuard, noRedirectOptions } from '../network/HarmonyHttpSecurity';
-import { sessionFitsStorage } from './AccountSessionPolicy';
+import { sessionFitsStorage, sessionWriteComplete } from './AccountSessionPolicy';
 
 /**
  * The account session file and the HTTPS transport, shared by the settings application and the keyboard extension.
@@ -87,7 +87,8 @@ export class FileSessionStore implements AccountSessionStore {
     try {
       const handle = fs.openSync(staging, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
       try {
-        fs.writeSync(handle.fd, value);
+        const written: number = fs.writeSync(handle.fd, value);
+        if (!sessionWriteComplete(value, written)) throw new Error('account_storage');
       } finally {
         fs.closeSync(handle);
       }
