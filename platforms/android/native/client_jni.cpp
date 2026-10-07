@@ -86,6 +86,7 @@ constexpr jsize kThemeRequestLimit = 1 * 1024 * 1024;
 constexpr jsize kTypingStatisticsRequestLimit = 65536;
 constexpr jsize kTypingStatisticsDirectoryLimit = 16384;
 constexpr jsize kPersonalDictionaryRequestLimit = 2248576;
+constexpr jsize kCreateOptionsLimit = 1 * 1024 * 1024;
 constexpr jsize kPrepareHostRequestLimit = 16384;
 constexpr jsize kSavePreferencesDirectoryLimit = 16384;
 constexpr jsize kSavePreferencesSnapshotLimit = 1 * 1024 * 1024;
@@ -415,13 +416,7 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_updatePreferenc
     return response(env, result);
 }
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_createRaw(JNIEnv *env, jclass, jbyteArray options) {
-    if (!options) return response(env, msime_client_create(nullptr, 0));
-    jsize length = env->GetArrayLength(options);
-    jbyte *bytes = env->GetByteArrayElements(options, nullptr);
-    if (!bytes) return nullptr;
-    char *result = msime_client_create(reinterpret_cast<const uint8_t *>(bytes), static_cast<size_t>(length));
-    env->ReleaseByteArrayElements(options, bytes, JNI_ABORT);
-    return response(env, result);
+    return bounded_request(env, options, kCreateOptionsLimit, msime_client_create);
 }
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_focusRaw(JNIEnv *env, jclass, jlong handle, jboolean focused) {
     return response(env, msime_client_focus(static_cast<uint64_t>(handle), focused == JNI_TRUE));
