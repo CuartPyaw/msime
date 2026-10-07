@@ -142,7 +142,7 @@ export class HarmonyAiSkins {
           throw new AiSkinFailure(reply.error ?? 'ai_skin_unavailable');
         }
         const model: Object | undefined = (reply.value as Record<string, Object>)['default_model'];
-        if (typeof model !== 'string' || model.length === 0 || model.length > 200) {
+        if (typeof model !== 'string' || model.length === 0 || utf8Length(model) > 200) {
           throw new AiSkinFailure('ai_skin_response');
         }
         return model;
