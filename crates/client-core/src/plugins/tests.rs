@@ -710,6 +710,18 @@ fn a_linked_kind_directory_cannot_load_a_pack_outside_the_plugins_root() {
     assert!(pack.join(MANIFEST_FILE).is_file());
 }
 
+#[cfg(unix)]
+#[test]
+fn a_linked_plugins_root_is_not_scanned() {
+    let state = tempdir().unwrap();
+    let outside = tempdir().unwrap();
+    let root = state.path().join("plugins");
+    installed_sound(outside.path(), SOUND);
+    msime_path_trust::untrusted_symlink(outside.path(), &root).unwrap();
+
+    assert_eq!(scan(&root, None), PluginCatalog::default());
+}
+
 #[test]
 fn built_in_ids_are_reserved_and_resolved_only_from_the_bundle() {
     let root = tempdir().unwrap();
