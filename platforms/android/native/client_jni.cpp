@@ -106,6 +106,7 @@ constexpr jsize kCandidateGlossRequestLimit = 262144;
 constexpr jsize kCandidateGlossResourcesLimit = 4096;
 constexpr jsize kEnglishCompletionRequestLimit = 16384;
 constexpr jsize kEnglishCompletionResourcesLimit = 4096;
+constexpr jsize kShuangpinProfileLimit = 64;
 }
 
 extern "C" {
@@ -326,14 +327,8 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_doubaoAudioFram
     return out;
 }
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_shuangpinKeyHintsRaw(JNIEnv *env, jclass, jbyteArray profile) {
-    if (!profile) return response(env, msime_client_shuangpin_key_hints(nullptr, 0));
-    jsize length = env->GetArrayLength(profile);
-    jbyte *bytes = env->GetByteArrayElements(profile, nullptr);
-    if (!bytes) return nullptr;
-    char *result = msime_client_shuangpin_key_hints(
-        reinterpret_cast<const uint8_t *>(bytes), static_cast<size_t>(length));
-    env->ReleaseByteArrayElements(profile, bytes, JNI_ABORT);
-    return response(env, result);
+    return bounded_request(env, profile, kShuangpinProfileLimit,
+        msime_client_shuangpin_key_hints);
 }
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_savePreferencesRaw(JNIEnv *env, jclass, jbyteArray directory, jlong expected_revision, jbyteArray snapshot) {
     if (!directory || !snapshot || expected_revision < 0) {
