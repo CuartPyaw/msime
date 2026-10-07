@@ -7,7 +7,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::cell::Cell;
 use std::collections::BTreeMap;
-use std::fs;
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Read, Seek, Write};
 use std::path::{Component, Path, PathBuf};
 use std::rc::Rc;
@@ -29,6 +29,23 @@ const EMBEDDED_RESOURCES: &[(&str, &[u8])] = &[(
 const CHUNK: usize = 64 * 1024;
 /// Upper bound on archive members, so a hostile archive of empty entries cannot keep the extractor busy indefinitely.
 const MAX_ARCHIVE_ENTRIES: usize = 100_000;
+
+fn create_private_file(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    options.open(path)
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Catalog {
@@ -560,7 +577,7 @@ pub(crate) fn install_model(
     let total = model.archive.size;
     let archive = staging.0.join("archive.tar.bz2");
     let digest = {
-        let mut output = BufWriter::new(fs::File::create(&archive)?);
+        let mut output = BufWriter::new(create_private_file(&archive)?);
         let mut last = 0u64;
         let digest = download(
             fetcher,
@@ -625,7 +642,7 @@ pub(crate) fn install_model(
                 fs::write(&destination, bytes)?;
             }
             (None, Some(url)) => {
-                let mut output = BufWriter::new(fs::File::create(&destination)?);
+                let mut output = BufWriter::new(create_private_file(&destination)?);
                 let digest = download(
                     fetcher,
                     &mirrored(mirror, url),
@@ -667,7 +684,7 @@ pub(crate) fn install_model(
 /// 把 `msime-model.json` 写进暂存目录；它总是该目录里最后写入的文件，有它才算安装完整。
 fn write_manifest(dir: &Path, manifest: &Value) -> Result<(), LocalModelError> {
     let manifest = serde_json::to_vec_pretty(manifest).map_err(io::Error::other)?;
-    let mut file = fs::File::create(dir.join(MANIFEST_FILE))?;
+    let mut file = create_private_file(&dir.join(MANIFEST_FILE))?;
     file.write_all(&manifest)?;
     file.sync_all()?;
     Ok(())
@@ -956,7 +973,7 @@ fn download_and_extract(
         if !entry.is_file() {
             return Err(LocalModelError::UnsafeArchive(member.to_owned()));
         }
-        let mut output = BufWriter::new(fs::File::create(pack_dir.join(&name))?);
+        let mut output = BufWriter::new(create_private_file(&pack_dir.join(&name))?);
         let mut hasher = Sha256::new();
         let mut buffer = vec![0u8; CHUNK];
         let mut written = 0u64;
@@ -1042,7 +1059,7 @@ pub(crate) fn adopt_files(
     let pack_dir = staging.0.join("model");
     fs::create_dir(&pack_dir)?;
     // 改名之前先落盘来源记录：进程在发布前被杀时，下次收编或安装这个包时按它把文件放回来源（[`restore_interrupted_adoption`]）。
-    let mut source_record = fs::File::create(staging.0.join(ADOPTION_SOURCE))?;
+    let mut source_record = create_private_file(&staging.0.join(ADOPTION_SOURCE))?;
     source_record.write_all(record.as_bytes())?;
     source_record.sync_all()?;
     drop(source_record);
@@ -1485,7 +1502,7 @@ fn extract(
             if let Some(parent) = destination.parent() {
                 fs::create_dir_all(parent)?;
             }
-            let mut output = BufWriter::new(fs::File::create(&destination)?);
+            let mut output = BufWriter::new(create_private_file(&destination)?);
             loop {
                 check_cancel(cancel)?;
                 let read = match entry.read(&mut buffer) {
