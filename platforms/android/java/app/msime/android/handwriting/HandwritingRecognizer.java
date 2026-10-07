@@ -52,10 +52,7 @@ public interface HandwritingRecognizer extends AutoCloseable {
     /** 上文截成最后 {@link #MAX_PRE_CONTEXT} 个码点，并去掉控制字符；null 视为空串。 */
     static String clipPreContext(String value) {
         if (value == null || value.isEmpty()) return "";
-        StringBuilder clean = new StringBuilder(value.length());
-        value.codePoints().filter(codePoint -> !Character.isISOControl(codePoint))
-            .forEach(clean::appendCodePoint);
-        String text = clean.toString();
+        String text = TextPolicy.removeControls(value);
         int count = text.codePointCount(0, text.length());
         if (count <= MAX_PRE_CONTEXT) return text;
         return text.substring(text.offsetByCodePoints(0, count - MAX_PRE_CONTEXT));

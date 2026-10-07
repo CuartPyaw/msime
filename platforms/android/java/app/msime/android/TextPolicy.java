@@ -33,6 +33,15 @@ public final class TextPolicy {
         return result.toString();
     }
 
+    /** Remove ISO control code points while preserving all other Unicode text. */
+    public static String removeControls(String value) {
+        if (value == null || value.isEmpty()) return value == null ? "" : value;
+        StringBuilder result = new StringBuilder(value.length());
+        value.codePoints().filter(codePoint -> !Character.isISOControl(codePoint))
+            .forEach(result::appendCodePoint);
+        return result.toString();
+    }
+
     /** Accepts a bounded URL with the requested scheme and a non-empty authority. */
     public static boolean validAuthority(String value, String scheme, int maxBytes) {
         if (value == null || value.isEmpty() || !value.startsWith(scheme)
