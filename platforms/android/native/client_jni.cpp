@@ -106,6 +106,7 @@ constexpr jsize kCandidateGlossRequestLimit = 262144;
 constexpr jsize kCandidateGlossResourcesLimit = 4096;
 constexpr jsize kEnglishCompletionRequestLimit = 16384;
 constexpr jsize kEnglishCompletionResourcesLimit = 4096;
+constexpr jsize kApplyTranslationsLimit = 1 * 1024 * 1024;
 constexpr jsize kShuangpinProfileLimit = 64;
 constexpr jsize kSmartPunctuationRequestLimit = 4096;
 constexpr jsize kTraditionalConversionLimit = 1 * 1024 * 1024;
@@ -584,6 +585,10 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_applyTranslatio
             static_cast<uint64_t>(generation), nullptr, 0));
     }
     jsize length = env->GetArrayLength(translations);
+    if (length > kApplyTranslationsLimit) {
+        return response(env, msime_client_apply_translations(static_cast<uint64_t>(handle),
+            static_cast<uint64_t>(generation), nullptr, 0));
+    }
     jbyte *bytes = env->GetByteArrayElements(translations, nullptr);
     if (!bytes) return nullptr;
     char *result = msime_client_apply_translations(static_cast<uint64_t>(handle),
