@@ -85,6 +85,8 @@ template <typename Call> jbyteArray bounded_request(JNIEnv *env, jbyteArray requ
 constexpr jsize kThemeRequestLimit = 1 * 1024 * 1024;
 constexpr jsize kTypingStatisticsRequestLimit = 65536;
 constexpr jsize kPrepareHostRequestLimit = 16384;
+constexpr jsize kSavePreferencesDirectoryLimit = 16384;
+constexpr jsize kSavePreferencesSnapshotLimit = 1 * 1024 * 1024;
 }
 
 extern "C" {
@@ -324,9 +326,13 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_savePreferences
         return response(env, msime_client_save_preferences(nullptr, 0, 0, nullptr, 0));
     }
     jsize directory_length = env->GetArrayLength(directory);
+    jsize snapshot_length = env->GetArrayLength(snapshot);
+    if (directory_length > kSavePreferencesDirectoryLimit
+            || snapshot_length > kSavePreferencesSnapshotLimit) {
+        return response(env, msime_client_save_preferences(nullptr, 0, 0, nullptr, 0));
+    }
     jbyte *directory_bytes = env->GetByteArrayElements(directory, nullptr);
     if (!directory_bytes) return nullptr;
-    jsize snapshot_length = env->GetArrayLength(snapshot);
     jbyte *snapshot_bytes = env->GetByteArrayElements(snapshot, nullptr);
     if (!snapshot_bytes) {
         env->ReleaseByteArrayElements(directory, directory_bytes, JNI_ABORT);
