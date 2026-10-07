@@ -1246,7 +1246,7 @@ class SettingsBridge {
     }
     const file: string = `${this.context.filesDir}/CommunityLibrary.json`;
     if (action.resource_operation === 'store_reply') {
-      return client.communityResourceLibrary(`{"file":${JSON.stringify(file)},`
+      return await client.communityResourceLibrary(`{"file":${JSON.stringify(file)},`
         + `"action":{"operation":"save_reply","item":${JSON.stringify(action.item ?? null)}}}`);
     }
     if (action.resource_operation === 'remove_reply') {
@@ -1254,7 +1254,7 @@ class SettingsBridge {
         file: file,
         action: { operation: 'remove', id: action.id ?? '' } as ResourceLibraryRemove
       };
-      return client.communityResourceLibrary(JSON.stringify(remove));
+      return await client.communityResourceLibrary(JSON.stringify(remove));
     }
     return this.accountBridge.request(actionDocument);
   }

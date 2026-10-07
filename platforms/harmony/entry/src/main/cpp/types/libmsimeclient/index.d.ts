@@ -49,7 +49,7 @@ export const keyboardSkinTrial: (request: string) => string;
  * `{file,action:{operation:"load"|"save_reply"|"remove",...}}` over the reply templates the user
  * kept. Every operation answers with the whole library; the keyboard process rereads the same file.
  */
-export const communityResourceLibrary: (request: string) => string;
+export const communityResourceLibrary: (request: string) => Promise<string>;
 /**
  * The decisions in AI skin generation, for a host that performs the requests itself.
  *
