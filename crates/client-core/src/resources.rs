@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -181,6 +181,23 @@ pub struct ResourceStore {
     root: PathBuf,
 }
 
+fn create_private_file(path: &Path) -> std::io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    options.open(path)
+}
+
 impl ResourceStore {
     /// root is an application-owned directory, separate from user learning data.
     pub fn new(root: impl Into<PathBuf>) -> Self {
@@ -207,7 +224,7 @@ impl ResourceStore {
             .tempdir_in(&self.root)?;
         for artifact in &specification.artifacts {
             let mut source = fetch(artifact)?;
-            let mut output = File::create(stage.path().join(&artifact.name))?;
+            let mut output = create_private_file(&stage.path().join(&artifact.name))?;
             copy_verified(source.as_mut(), &mut output, artifact)?;
             output.sync_all()?;
         }
@@ -504,6 +521,22 @@ mod tests {
     }
     fn source(bytes: &[u8]) -> Box<dyn Read> {
         Box::new(Cursor::new(bytes.to_vec()))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn staged_resource_file_creation_rejects_a_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("outside.bin");
+        fs::write(&target, b"keep").unwrap();
+        let path = directory.path().join("staged.bin");
+        symlink(&target, &path).unwrap();
+
+        assert!(create_private_file(&path).is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"keep");
     }
 
     fn fixture_artifact(name: &str, bytes: &[u8]) -> Artifact {
