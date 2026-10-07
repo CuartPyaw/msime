@@ -7,6 +7,7 @@
 #include <array>
 #include <atomic>
 #include <cctype>
+#include <cerrno>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -27,7 +28,8 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
-#if defined(__unix__)
+#if !defined(_WIN32)
+#include <fcntl.h>
 #include <sys/stat.h>
 #endif
 #include <unistd.h>
@@ -46,6 +48,7 @@ constexpr int32_t kVadWindow = 512;
 constexpr size_t kMaxManifestBytes = 256 * 1024;
 
 nlohmann::json read_manifest(const fs::path &directory) {
+#if defined(_WIN32)
   std::ifstream input(directory / fs::u8path(std::string(local_model_manifest)),
                       std::ios::binary);
   if (!input)
@@ -64,6 +67,34 @@ nlohmann::json read_manifest(const fs::path &directory) {
   }
   if (!input.eof())
     throw VoiceError("Local speech model manifest could not be read");
+#else
+  const auto path = directory / fs::u8path(std::string(local_model_manifest));
+  const int descriptor = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+  if (descriptor < 0)
+    throw VoiceError("Not an installed local speech model");
+  struct CloseOnExit {
+    int descriptor;
+    ~CloseOnExit() { ::close(descriptor); }
+  } close_on_exit{descriptor};
+  struct stat metadata {};
+  if (::fstat(descriptor, &metadata) != 0 || !S_ISREG(metadata.st_mode))
+    throw VoiceError("Not an installed local speech model");
+  std::array<char, 8192> buffer{};
+  std::string payload;
+  for (;;) {
+    const ssize_t count = ::read(descriptor, buffer.data(), buffer.size());
+    if (count > 0) {
+      const auto bytes = static_cast<std::size_t>(count);
+      if (payload.size() > kMaxManifestBytes - bytes)
+        throw VoiceError("Local speech model manifest is too large");
+      payload.append(buffer.data(), bytes);
+      continue;
+    }
+    if (count == 0) break;
+    if (errno == EINTR) continue;
+    throw VoiceError("Local speech model manifest could not be read");
+  }
+#endif
   auto manifest = nlohmann::json::parse(payload, nullptr, false);
   if (manifest.is_discarded())
     throw VoiceError("Local speech model manifest is malformed");
@@ -420,12 +451,50 @@ std::string sense_voice_language(std::string_view tag) {
 
 std::set<std::string> read_token_set(const std::string &tokens_path) {
   std::set<std::string> tokens;
+#if defined(_WIN32)
   std::ifstream input(fs::u8path(tokens_path), std::ios::binary);
   std::string line;
   while (std::getline(input, line)) {
     const auto space = line.find(' ');
     tokens.insert(line.substr(0, space));
   }
+#else
+  const int descriptor = ::open(fs::u8path(tokens_path).c_str(),
+                                O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+  if (descriptor < 0) return tokens;
+  struct CloseOnExit {
+    int descriptor;
+    ~CloseOnExit() { ::close(descriptor); }
+  } close_on_exit{descriptor};
+  struct stat metadata {};
+  if (::fstat(descriptor, &metadata) != 0 || !S_ISREG(metadata.st_mode)) return tokens;
+  std::array<char, 8192> buffer{};
+  std::string line;
+  for (;;) {
+    const ssize_t count = ::read(descriptor, buffer.data(), buffer.size());
+    if (count > 0) {
+      for (ssize_t index = 0; index < count; ++index) {
+        if (buffer[static_cast<std::size_t>(index)] == '\n') {
+          const auto space = line.find(' ');
+          tokens.insert(line.substr(0, space));
+          line.clear();
+        } else {
+          line.push_back(buffer[static_cast<std::size_t>(index)]);
+        }
+      }
+      continue;
+    }
+    if (count == 0) {
+      if (!line.empty()) {
+        const auto space = line.find(' ');
+        tokens.insert(line.substr(0, space));
+      }
+      break;
+    }
+    if (errno == EINTR) continue;
+    break;
+  }
+#endif
   return tokens;
 }
 
