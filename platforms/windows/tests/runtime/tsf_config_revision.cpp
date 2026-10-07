@@ -1,4 +1,4 @@
-#include "../../src/system/TsfConfigRevision.h"
+#include "../../src/system/RevisionFence.h"
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -18,7 +18,7 @@ namespace {
 
 int main() {
   try {
-    TsfConfigRevision revision;
+    RevisionFence revision;
     const auto first = revision.snapshot();
     require(first != 0);
 
@@ -30,7 +30,7 @@ int main() {
     require(!revision.is_current(sent));
     require(revision.is_current(revision.snapshot()));
 
-    std::cout << "TSF config revisions preserve newer publications\n";
+    std::cout << "Revision fences preserve newer publications\n";
   } catch (const std::exception &failure) {
     std::cerr << failure.what() << '\n';
     return 1;

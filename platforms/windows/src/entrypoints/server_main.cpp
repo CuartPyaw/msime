@@ -40,7 +40,7 @@
 #include "WatchdogPolicy.h"
 #include "Telemetry.h"
 #include "TelemetryConsent.h"
-#include "TsfConfigRevision.h"
+#include "RevisionFence.h"
 #include "WindowsServer.h"
 #include "ipc_negotiation.h"
 #include <windows.h>
@@ -829,7 +829,7 @@ int wmain(int argc, wchar_t **argv) {
     // Set on every publication and on each focus session, so a TIP that
     // registers later is not left holding compiled defaults. A revision is
     // used instead of a bool so an older send cannot clear a newer update.
-    auto tsf_config_revision = std::make_shared<msime::windows::TsfConfigRevision>();
+    auto tsf_config_revision = std::make_shared<msime::windows::RevisionFence>();
     // The toolbar resolves light/dark from its own preference, independently
     // of the candidate card: toolbar_theme is honoured on macOS and in the
     // settings preview but was ignored by the Windows surface, which simply
@@ -1450,7 +1450,7 @@ int wmain(int argc, wchar_t **argv) {
             .value("default_ime_mode", std::string("chinese")) != "english";
     mode_authority.seeded = true;
     std::atomic<bool> caps_lock{(GetKeyState(VK_CAPITAL) & 1) != 0};
-    std::atomic<bool> caps_lock_dirty{true};
+    msime::windows::RevisionFence caps_lock_revision;
     // Starts true: the Server is launched by the TIP, so the IME is active by
     // the time this runs, and waiting for the first edge would hide the toolbar
     // until the user switched focus once.
@@ -1618,7 +1618,7 @@ int wmain(int argc, wchar_t **argv) {
       // The Server owns the indicator; publish and let the loop deliver it, so
       // the hook callback never touches the transport.
       caps_lock.store(caps, std::memory_order_release);
-      caps_lock_dirty.store(true, std::memory_order_release);
+      caps_lock_revision.mark_changed();
     });
     if (!maintenance.installed())
       notice("Maintenance shortcuts unavailable; continuing without them");
@@ -1634,6 +1634,7 @@ int wmain(int argc, wchar_t **argv) {
     // 工具栏失败不结束 Server：它只是方便切换模式的附件，Server 记一条诊断、去掉工具栏继续服务输入。曾经它也在这个条件里，某台 Windows 11 上工具栏一失败 Server 就在启动后约 100 ms 退出，日志却只写了一句正常停止。
     bool toolbar_failure_reported = false;
     uint64_t tsf_config_applied_revision = 0;
+    uint64_t caps_lock_applied_revision = 0;
     while (!stopping.load() && server.failure() == ControllerFailure::None &&
            !candidates.failed() && !clicks.failed() && !pages.failed() &&
            !mode_clicks.failed() &&
@@ -1802,11 +1803,14 @@ int wmain(int argc, wchar_t **argv) {
         }
         toolbar.set_language_state(language);
       }
-      if (caps_lock_dirty.load(std::memory_order_acquire)) {
-        if (const auto view = server.mode_view())
-          if (server.send_caps_lock(view->lease,
-                                    caps_lock.load(std::memory_order_acquire)))
-            caps_lock_dirty.store(false, std::memory_order_release);
+      const auto current_caps_lock_revision = caps_lock_revision.snapshot();
+      if (current_caps_lock_revision != caps_lock_applied_revision) {
+        if (const auto view = server.mode_view()) {
+          const bool enabled = caps_lock.load(std::memory_order_acquire);
+          if (server.send_caps_lock(view->lease, enabled) &&
+              caps_lock_revision.is_current(current_caps_lock_revision))
+            caps_lock_applied_revision = current_caps_lock_revision;
+        }
       }
       const bool fullscreen = foreground_is_fullscreen(GetForegroundWindow());
       // The DLL's activation edges, not the mode view: a temporary focus

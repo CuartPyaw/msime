@@ -8,7 +8,7 @@ namespace msime::windows {
 // The Server loop may finish sending an older snapshot after the preference
 // monitor has published a newer one. A revision lets the sender acknowledge
 // only the snapshot it actually sent, leaving newer work pending.
-class TsfConfigRevision final {
+class RevisionFence final {
 public:
   uint64_t snapshot() const {
     return revision_.load(std::memory_order_acquire);
