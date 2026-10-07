@@ -73,10 +73,11 @@ int main() {
   assert(dictionary_quiesced(root.string(), 1000000));
   assert(dictionary_quiesced(root.string(), 1029999));
   assert(!dictionary_quiesced(root.string(), 1030000));
-  assert(std::distance(std::filesystem::directory_iterator(root), std::filesystem::directory_iterator()) == 1);
+  assert(std::distance(std::filesystem::directory_iterator(root), std::filesystem::directory_iterator()) == 2);
   lower_dictionary_quiesce_lease(root.string(), written);
   assert(!dictionary_quiesced(root.string(), 1000000));
-  assert(std::filesystem::is_empty(root));
+  assert(std::filesystem::exists(root / ".msime-dictionary-quiesce.lock"));
+  assert(std::distance(std::filesystem::directory_iterator(root), std::filesystem::directory_iterator()) == 1);
   // Two raises in one process are told apart.
   std::string second;
   assert(raise_dictionary_quiesce_lease(root.string(), written, 1000000));
