@@ -73,7 +73,21 @@ pub fn prepare_runtime_paths_for(
     reject_redirected_directory(user_data)?;
     reject_redirected_directory(cache)?;
 
-    if result.dictionaries.join(assets::GENERATION_READY).exists() {
+    let marker = result.dictionaries.join(assets::GENERATION_READY);
+    let generation_ready = match fs::symlink_metadata(&marker) {
+        Ok(metadata) if metadata.file_type().is_file() => true,
+        Ok(_) => {
+            // A directory, device or symlink at the marker path is not a
+            // completed generation. Do not follow it or try to replace the
+            // existing generation directory during staging.
+            return Err(EngineError::failed(
+                diagnostics::INCOMPLETE_RUNTIME_GENERATION,
+            ));
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => false,
+        Err(error) => return Err(error.into()),
+    };
+    if generation_ready {
         for name in generation_dictionaries(main_dictionary) {
             if !is_real_file(&result.dictionary(name)) {
                 return Err(EngineError::failed(
@@ -729,6 +743,33 @@ mod tests {
         let error = prepare_runtime_paths(&resources, &user, &cache, "v2").unwrap_err();
         assert_eq!(
             error.to_string(),
+            diagnostics::INCOMPLETE_RUNTIME_GENERATION
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_generation_marker_is_not_treated_as_ready() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let resources = resources(root.path());
+        let user = root.path().join("user");
+        let cache = root.path().join("cache");
+        let generation = user.join("dictionaries/v1");
+        fs::create_dir_all(&generation).unwrap();
+        for name in generation_dictionaries(true) {
+            fs::copy(resources.join(name), generation.join(name)).unwrap();
+        }
+        let outside = tempfile::tempdir().unwrap();
+        let marker_target = outside.path().join("marker");
+        fs::write(&marker_target, b"v1\n").unwrap();
+        symlink(&marker_target, generation.join(assets::GENERATION_READY)).unwrap();
+
+        assert_eq!(
+            prepare_runtime_paths(&resources, &user, &cache, "v1")
+                .unwrap_err()
+                .to_string(),
             diagnostics::INCOMPLETE_RUNTIME_GENERATION
         );
     }
