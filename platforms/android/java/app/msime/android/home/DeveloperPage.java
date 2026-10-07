@@ -14,6 +14,7 @@ import app.msime.android.AndroidLocalSettings;
 import app.msime.android.CloudApi;
 import app.msime.android.DiagnosticsApi;
 import app.msime.android.NativeClient;
+import app.msime.android.NumberPolicy;
 import app.msime.android.PreferencesRevisionPolicy;
 import app.msime.android.SyncSignals;
 import app.msime.android.SyncSwitch;
@@ -603,7 +604,7 @@ public final class DeveloperPage extends DetailPage {
     private static String size(long bytes) {
         if (bytes < 1024) return bytes + " B";
         if (bytes < 1024 * 1024) return Math.round(bytes / 1024.0) + " KB";
-        return String.format(Locale.ROOT, "%.1f MB", bytes / (1024.0 * 1024.0));
+        return NumberPolicy.decimal1(bytes / (1024.0 * 1024.0)) + " MB";
     }
 
     /** ISO 时间显示成「今天 14:28」或「10月4日 14:28」。 */
