@@ -111,4 +111,27 @@ inline bool record_panel_takeover(const std::filesystem::path &file, std::string
   return record_panel_takeover(file, host, key, current, written, current);
 }
 
+// The settings MSIME still holds and the value each goes back to, for a host that stops drawing its own panel theme and leaves the desktop's again: `held` maps an option name to the value it holds now, and only the options whose value is still MSIME's own go in it, so a value the user picked in the desktop's configuration tool is never in this map and never written over. Each one goes back to the record's `prior`, or to `stock` when the record kept no prior for what it holds (an earlier build wrote MSIME's own value before the record existed, which msime-linux-setup --unregister resets the same way). A recorded `written` that no longer matches is ignored: the record no longer describes this value, so its prior is not this option's to go back to. The counterpart of msime-linux-setup's `restorable`, for a host that restores in place rather than at uninstall.
+// 恢复不修改记录：这不是一次新的接管，把恢复写进去只会把用户自己的值换成被恢复的值。
+inline nlohmann::json panel_restore_values(const nlohmann::json &record, std::string_view host,
+                                          const nlohmann::json &held, const nlohmann::json &stock) {
+  nlohmann::json restore = nlohmann::json::object();
+  if (!held.is_object()) return restore;
+  const auto section = record.is_object() ? record.find(std::string(host)) : record.cend();
+  const bool have_section = record.is_object() && section != record.cend() && section->is_object();
+  for (const auto &item : held.items()) {
+    const auto &key = item.key();
+    nlohmann::json prior = nullptr;
+    if (have_section) {
+      const auto recorded = section->find(key);
+      if (recorded != section->cend() && recorded->is_object() && recorded->contains("prior") &&
+          recorded->contains("written") && recorded->at("written") == item.value())
+        prior = recorded->at("prior");
+    }
+    if (prior.is_string()) restore[key] = prior;
+    else if (stock.is_object() && stock.contains(key)) restore[key] = stock.at(key);
+  }
+  return restore;
+}
+
 }  // namespace msime::linux_host

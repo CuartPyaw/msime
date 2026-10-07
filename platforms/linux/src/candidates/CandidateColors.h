@@ -90,7 +90,9 @@ inline std::optional<std::uint32_t> contrasting_color(std::optional<std::uint32_
 }
 
 // Whether the candidate surfaces draw dark. An explicit candidate_theme wins; "follow" takes the global theme mode, as Windows resolves theme_cand against theme_mode and as the voice overlay does here (VoiceAction.h): the desktop appearance decides only when that mode is "system", which is also the shared default when the key is absent. The Fcitx5 mode badge takes its colours from here too, so it always matches the panel.
+// 运行时的 preferences 可能是 null、数组或数字（runtime-options.json 被手工改过、或写入被截断）：按一份空偏好文档处理，即跟随系统明暗，而不是让 nlohmann 的 value() 抛出 type_error。两个宿主都从这里取模式，所以这个入口是唯一需要设防的地方。
 inline bool candidate_dark_theme(const nlohmann::json &preferences, bool system_dark) {
+  if (!preferences.is_object()) return system_dark;
   const auto theme = preferences.value("candidate_theme", "follow");
   if (theme != "follow") return theme == "dark";
   const auto global = preferences.value("theme", "system");
@@ -99,18 +101,31 @@ inline bool candidate_dark_theme(const nlohmann::json &preferences, bool system_
 
 // Whether a floating surface with a mode preference of its own (toolbar_theme, voice_theme) draws dark, by the rule macOS gives its floating toolbar and mode badge: that preference when it names a mode, otherwise the global mode, whose "system" (also the shared default when the key is absent) follows the desktop. A resolved theme with a fixed appearance still overrides this, as it does for the candidate window.
 inline bool surface_dark_theme(const nlohmann::json &preferences, const char *surface_key, bool system_dark) {
+  // 与 candidate_dark_theme 同一份文档、同一条边界：非对象按空文档处理。
+  if (!preferences.is_object()) return system_dark;
   const auto theme = preferences.value(surface_key, "follow");
   if (theme == "dark" || theme == "light") return theme == "dark";
   const auto global = preferences.value("theme", "system");
   return global == "system" ? system_dark : global != "light";
 }
 
-// The candidate window being drawn, as msime_client_resolve_theme takes it: a package may declare only one of the two layouts.
+// The candidate window being drawn, as msime_client_resolve_theme takes it: a package may declare only one of the two layouts. 非对象文档取默认的纵向布局，与 candidate_dark_theme 一样不抛异常。
 inline std::string candidate_layout_id(const nlohmann::json &preferences) {
+  if (!preferences.is_object()) return "vertical";
   return preferences.value("candidate_layout", std::string{}) == "horizontal" ? "horizontal" : "vertical";
 }
 
-// The msime_client_resolve_theme request for the candidate window: the global theme and the custom theme exactly as stored, the mode candidate_dark_theme settles on, the layout being drawn and, when the custom theme names an installed package, that package's catalogue entry unchanged. The shared layer uses the package only for `custom` and only when its id equals custom_theme.candidate_skin, so it is sent only then. The caller does the FFI call; this header stays free of it so the palette tests need no engine.
+// The two preferences a 主题 choice writes, as one comparable document: they are what says which global theme the candidate window draws. The Fcitx5 host treats a change to this value as the user choosing a theme (the status menu and the settings page both write these keys), while a focus change, a system appearance change or a restart re-reads the same value; comparing the whole custom_theme document also covers a skin or a colour picker inside it. `system` and a missing key come out alike, so clearing the key is not read as a choice of something else.
+inline nlohmann::json candidate_theme_selection(const nlohmann::json &preferences) {
+  using Json = nlohmann::json;
+  if (!preferences.is_object()) return Json::object();
+  const auto theme = preferences.find("global_theme");
+  const auto custom = preferences.find("custom_theme");
+  return Json{{"global_theme", theme != preferences.end() && theme->is_string() ? *theme : Json("system")},
+              {"custom_theme", custom != preferences.end() ? *custom : Json(nullptr)}};
+}
+
+// The msime_client_resolve_theme request for the candidate window: the global theme and the custom theme exactly as stored, the mode candidate_dark_theme settles on, the layout being drawn and, when the custom theme names an installed package, that package's catalogue entry unchanged. The shared layer uses the package only for `custom` and only when its id equals custom_theme.candidate_skin, so it is sent only then. The caller does the FFI call; this header stays free of it so the palette tests need no engine. 非对象文档与空文档一样只带出 `system`（find() 对非对象返回 end()），于是一份畸形文档解析成「没有候选覆盖」，而不是读出一个错误的主题字段。
 inline nlohmann::json candidate_theme_request(const nlohmann::json &preferences, bool dark,
                                               const nlohmann::json &catalog) {
   using Json = nlohmann::json;
@@ -135,12 +150,25 @@ struct CandidateTheme {
   bool dark = false;
   // The package whose colours were drawn, the only signal for its decoration; empty when none.
   std::string candidate_skin;
+  // Whether the shared layer resolved candidate coverage of its own for this theme. See candidate_theme_covers.
+  bool covers_candidates = false;
 };
+
+// Whether a resolved theme (`msime_client_resolve_theme`'s `value`) draws candidate colours of its own. The shared layer answers `candidate: null` for `system` and for a custom theme whose package palette and pickers set nothing, and sets `candidate_skin` only for a package whose manifest declares the layout and the mode being drawn, so a document carrying neither describes no coverage at all: the host draws the native tokens and Fcitx5 must leave the classic UI's own theme alone (see FcitxEngine::applyCandidatePanelTheme). Read from the resolution itself rather than from `global_theme`, so an id that fails the call, a retired skin id and a malformed preferences document all land here instead of counting as a theme.
+inline bool candidate_theme_covers(const nlohmann::json &resolved) {
+  if (const auto candidate = resolved.find("candidate");
+      candidate != resolved.end() && candidate->is_object())
+    return true;
+  const auto skin = resolved.find("candidate_skin");
+  return skin != resolved.end() && skin->is_string() && !skin->get<std::string>().empty();
+}
 
 // Map a ResolvedTheme (the `value` of msime_client_resolve_theme) onto the colours the frontends draw. Every null slot, or a null palette as `system` resolves to, takes the Adwaita token from candidate_native_palette in the mode drawn. The frontends paint opaque colours only, so translucent slots are composited: the surface over the native surface, everything else over the surface. The hover slot has no counterpart on the card (neither IBus attributes nor the classic UI theme track the pointer over candidates) and reaches only the Fcitx5 menu highlight, through `menu`; show_selected_bar is not read, because neither frontend draws a selection bar that a package could hide. An empty object resolves to the native tokens, which is also what a host draws when the call fails.
 inline CandidateTheme candidate_theme_colors(const nlohmann::json &resolved, bool dark) {
   using Json = nlohmann::json;
   CandidateTheme theme;
+  // 在下面的空槽位被原生 token 补齐之前判断覆盖，否则补齐后的颜色无法区分「主题给的颜色」与「平台默认」。
+  theme.covers_candidates = candidate_theme_covers(resolved);
   const auto appearance = resolved.find("appearance");
   theme.dark = appearance != resolved.end() && appearance->is_string() ? *appearance == "dark" : dark;
   const auto skin = resolved.find("candidate_skin");

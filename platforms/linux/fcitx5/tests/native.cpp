@@ -270,7 +270,7 @@ void classicuiThemeTicks(FcitxEngine &engine) {
     return ::stat(themeFile.c_str(), &info) == 0 ? info.st_ino : 0;
   };
   const auto tick = [&](FakeClassicUi &classicui, const Json &preferences, bool dark) {
-    engine.applyCandidatePanelTheme(&classicui, preferences, dark, Json());
+    engine.applyCandidatePanelTheme(&classicui, preferences, dark, Json(), false);
   };
   FakeClassicUi classicui;
   classicui.config.theme.setValue("nord");
@@ -351,8 +351,166 @@ void translationPreferenceChangesIncludeAccount() {
           "translation account changes invalidate translation requests");
 }
 
+// 用真实 classicui 配置验证候选主题的接管、退出与恢复：只有用户主动选择水杉主题才从第三方主题手里接管，启动、焦点、偏好同步与系统明暗变化都只是重读同一份偏好，切回「系统」或选中没有实际候选覆盖的自定义主题时把仍是水杉写的项放回。每个 fcitx::Instance 就是一次进程启动（内存里的缓存与所有权状态从零开始），所有路径都指向合成目录；机器上只有 classicui 开发库而没有运行库时跳过（77）。
+int candidateThemePriority() {
+  char temporary[] = "/tmp/msime-fcitx-theme-priority-XXXXXX";
+  const auto *directory = mkdtemp(temporary);
+  require(directory != nullptr, "theme priority fixture directory");
+  const std::filesystem::path root(directory);
+  for (const auto *name : {"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR"})
+    setenv(name, directory, 1);
+  setenv("MSIME_FCITX5_OPTIONS", (root / "missing-options.json").c_str(), 1);
+  const auto conf = root / "fcitx5/conf/classicui.conf";
+  const auto record = root / "msime-client/panel-restore.json";
+  const auto theme_file = root / "fcitx5/themes/msime/theme.conf";
+  // fcitx5-configtool 选了一个第三方主题，另有水杉写入的字体：恢复主题不能顺手动它。
+  const auto choose_external = [&] {
+    std::filesystem::create_directories(conf.parent_path());
+    std::ofstream(conf) << "Theme=Nord-Dark\nDarkTheme=Nord-Dark\nFont=Noto Sans SC 18px\n";
+  };
+  choose_external();
+  char program[] = "msime-theme-test";
+  char disabled[] = "--disable=all";
+  char enabled[] = "--enable=classicui";
+  char *args[] = {program, disabled, enabled, nullptr};
+  {
+    fcitx::Instance instance(3, args);
+    instance.addonManager().registerDefaultLoader(nullptr);
+    instance.initialize();
+    if (!instance.addonManager().addonInfo("classicui")) {
+      std::filesystem::remove_all(root);
+      std::cout << "skipped: classicui runtime is not installed\n";
+      return 77;
+    }
+    auto *classicui = instance.addonManager().addon("classicui", true);
+    require(classicui && classicui->getConfig(), "real classicui loaded");
+    const auto option = [&](const char *key) {
+      fcitx::RawConfig config;
+      classicui->getConfig()->save(config);
+      const auto *value = config.valueByPath(key);
+      return value ? *value : std::string();
+    };
+    // 用户在 fcitx5-configtool 里换主题，写进运行中的 addon；`light_only` 只改 Theme（Fcitx5 的 DarkTheme 单独判断）。
+    const auto pick_third_party = [&](bool light_only) {
+      fcitx::RawConfig external;
+      external.setValueByPath("Theme", "Nord-Dark");
+      if (!light_only && !option("DarkTheme").empty()) external.setValueByPath("DarkTheme", "Nord-Dark");
+      classicui->setConfig(external);
+    };
+    FcitxEngine engine(&instance);
+    // 启动与焦点同步只是重读同一份偏好：不碰用户已经选的第三方主题。
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "paper"}}, false, Json(), false);
+    require(option("Theme") == "Nord-Dark" && option("DarkTheme") == "Nord-Dark",
+            "启动与焦点同步保留第三方主题");
+    // 「系统」没有实际候选覆盖，也不接管。
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "system"}}, false, Json(), false);
+    require(option("Theme") == "Nord-Dark" && option("DarkTheme") == "Nord-Dark", "系统主题保留第三方主题");
+    // 畸形或其他字段的偏好文档不抛异常，也不能因此接管第三方主题。
+    for (const auto &document : {Json(nullptr), Json::array({Json("paper")}), Json(7),
+                                 Json{{"global_theme", "retired-skin"}}, Json{{"global_theme", 7}}})
+      engine.applyCandidatePanelTheme(document, false, Json(), false);
+    require(option("Theme") == "Nord-Dark", "畸形偏好文档不接管第三方主题");
+    // 用户在主题菜单里主动选择水杉内置主题：即使当前是第三方主题也接管，并先记下被替换的值。
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "paper"}}, false, Json(), true);
+    require(option("Theme") == "msime" && option("DarkTheme") == "msime", "主动选择水杉主题得以接管第三方主题");
+    {
+      std::ifstream in(record);
+      const auto written = Json::parse(in).at("fcitx5");
+      require(written.at("Theme").at("prior") == "Nord-Dark" &&
+                  written.at("DarkTheme").at("prior") == "Nord-Dark",
+              "接管前记下要恢复的第三方主题");
+    }
+    // 切回「系统」：两项一起恢复成被替换的第三方主题。
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "system"}}, false, Json(), false);
+    require(option("Theme") == "Nord-Dark" && option("DarkTheme") == "Nord-Dark",
+            "切回系统恢复 Theme 与 DarkTheme");
+    // 再次主动选择重新接管；这一次只把 Theme 换成第三方主题。
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "paper"}}, false, Json(), true);
+    require(option("Theme") == "msime" && option("DarkTheme") == "msime", "再次主动选择重新接管");
+    pick_third_party(true);
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "paper"}}, false, Json(), false);
+    require(option("Theme") == "Nord-Dark", "偏好同步不夺回第三方主题");
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "paper"}}, true, Json(), false);
+    require(option("Theme") == "Nord-Dark" && option("DarkTheme") == "msime",
+            "系统明暗变化不夺回第三方主题，DarkTheme 仍由水杉持有");
+    // 切回「系统」：只恢复仍是水杉写的那一项；字体等其他选项与接管记录都不动。
+    const auto record_before = [&] { std::ifstream in(record); return Json::parse(in); };
+    const auto before_restore = record_before();
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "system"}}, false, Json(), false);
+    require(option("Theme") == "Nord-Dark" && option("DarkTheme") == "Nord-Dark",
+            "切回系统只恢复仍是水杉写的 DarkTheme");
+    require(option("Font") == "Noto Sans SC 18px", "恢复主题不动水杉写入的字体");
+    require(record_before() == before_restore, "恢复不是一次接管，不重写接管记录");
+    // 两项都换成第三方主题后，后台同步一项都不夺回。
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "ink"}}, false, Json(), true);
+    require(option("Theme") == "msime" && option("DarkTheme") == "msime", "主动选择再次接管");
+    pick_third_party(false);
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "paper"}}, false, Json(), false);
+    require(option("Theme") == "Nord-Dark" && option("DarkTheme") == "Nord-Dark",
+            "两项都换成第三方主题后焦点与偏好同步都不夺回");
+    // 切回「系统」：两项都已不是水杉的，一项也不动。
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "system"}}, false, Json(), false);
+    require(option("Theme") == "Nord-Dark" && option("DarkTheme") == "Nord-Dark",
+            "退出接管不覆盖用户自己改过的项");
+    // 「系统」基底、没有皮肤也没有颜色槽位的自定义主题没有实际覆盖：即使是一次主动选择也退出接管。
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "ink"}}, false, Json(), true);
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "custom"}, {"custom_theme", {{"base", "system"}}}}, false,
+                                    Json(), true);
+    require(option("Theme") == "Nord-Dark" && option("DarkTheme") == "Nord-Dark",
+            "没有候选覆盖的自定义主题不接管");
+    // 有效的外部皮肤（清单声明了当前布局与明暗）接管，颜色写进主题文件。
+    const Json catalog{{"packages", Json::array({{{"id", "omarchy"},
+                                                  {"title", "Omarchy"},
+                                                  {"base", "system"},
+                                                  {"layouts", Json::array({"horizontal", "vertical"})},
+                                                  {"candidate", {{"light", {{"surface", "#123456"}}}}}}})}};
+    engine.applyCandidatePanelTheme(
+        Json{{"global_theme", "custom"}, {"custom_theme", {{"base", "system"}, {"candidate_skin", "omarchy"}}}},
+        false, catalog, true);
+    require(option("Theme") == "msime", "有效的外部皮肤接管");
+    {
+      std::ifstream in(theme_file);
+      const std::string theme(std::istreambuf_iterator<char>(in), {});
+      require(theme.find("Color=#123456") != std::string::npos, "皮肤颜色写进 classicui 主题");
+    }
+    // 皮肤不支持当前明暗时没有实际覆盖：后台同步退出接管。
+    engine.applyCandidatePanelTheme(
+        Json{{"global_theme", "custom"}, {"custom_theme", {{"base", "system"}, {"candidate_skin", "omarchy"}}}},
+        true, catalog, false);
+    require(option("Theme") == "Nord-Dark", "皮肤不支持当前明暗时不接管");
+  }
+  // 进程重启：缓存清空，classicui 仍是用户选的第三方主题，启动同步不能接管；自带主题时仍正常接管。
+  choose_external();
+  {
+    fcitx::Instance instance(3, args);
+    instance.addonManager().registerDefaultLoader(nullptr);
+    instance.initialize();
+    auto *classicui = instance.addonManager().addon("classicui", true);
+    require(classicui && classicui->getConfig(), "real classicui loaded after restart");
+    const auto option = [&](const char *key) {
+      fcitx::RawConfig config;
+      classicui->getConfig()->save(config);
+      const auto *value = config.valueByPath(key);
+      return value ? *value : std::string();
+    };
+    require(option("Theme") == "Nord-Dark", "重启后读到的是用户的第三方主题");
+    FcitxEngine engine(&instance);
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "paper"}}, false, Json(), false);
+    require(option("Theme") == "Nord-Dark", "重启后不夺回第三方主题");
+    fcitx::RawConfig stock;
+    stock.setValueByPath("Theme", "default");
+    stock.setValueByPath("DarkTheme", "default-dark");
+    classicui->setConfig(stock);
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "paper"}}, false, Json(), false);
+    require(option("Theme") == "msime" && option("DarkTheme") == "msime", "自带主题下重启后仍接管");
+  }
+  std::filesystem::remove_all(root);
+  std::cout << "Fcitx5 candidate theme ownership passed\n";
+  return 0;
+}
 int main(int argc, char **argv) {
   try {
+    if (argc == 2 && std::string(argv[1]) == "--theme-priority") return candidateThemePriority();
     autocorrectMarker();
     koreanHanjaGlossRow();
     candidateThemeDecoration();

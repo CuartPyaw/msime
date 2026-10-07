@@ -242,6 +242,12 @@ if(BUILD_TESTING)
   target_compile_options(linux-candidate-fcitx-overlay-scale-test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
   target_link_libraries(linux-candidate-fcitx-overlay-scale-test PRIVATE PkgConfig::CAIRO nlohmann_json::nlohmann_json)
   add_test(NAME linux-candidate-fcitx-overlay-scale COMMAND linux-candidate-fcitx-overlay-scale-test)
+  # 接管、退出与恢复需要真实的 classicui 运行库；只装开发库的构建环境没有它，这时候跳过（77）。这不依赖已验证词库，所以与下面的资源 fixture 分开注册。
+  find_library(MSIME_FCITX5_CLASSICUI NAMES classicui PATH_SUFFIXES fcitx5)
+  if(MSIME_FCITX5_CLASSICUI)
+    add_test(NAME fcitx5-candidate-theme-priority COMMAND fcitx5-native-test --theme-priority)
+    set_tests_properties(fcitx5-candidate-theme-priority PROPERTIES SKIP_RETURN_CODE 77)
+  endif()
   set(MSIME_FCITX5_TEST_RESOURCES "" CACHE PATH "Verified resources directory for the native Fcitx5 test")
   if(MSIME_FCITX5_TEST_RESOURCES)
     add_test(NAME fcitx5-native-context
