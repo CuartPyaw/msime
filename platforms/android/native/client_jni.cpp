@@ -113,6 +113,7 @@ constexpr jsize kTraditionalConversionLimit = 1 * 1024 * 1024;
 constexpr jsize kOnlineQueryLimit = 16384;
 constexpr jsize kOnlineBodyLimit = 262144;
 constexpr jsize kOnlineCandidatesLimit = 16384;
+constexpr jsize kDoubaoAudioPcmLimit = 1 * 1024 * 1024;
 }
 
 extern "C" {
@@ -321,7 +322,7 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_doubaoStartFram
 }
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_doubaoAudioFrameRaw(JNIEnv *env, jclass, jint sequence, jbyteArray pcm, jint pcmLength, jboolean finalChunk) {
     jsize available = pcm ? env->GetArrayLength(pcm) : 0;
-    if (pcmLength < 0 || pcmLength > available) return nullptr;
+    if (pcmLength < 0 || pcmLength > available || pcmLength > kDoubaoAudioPcmLimit) return nullptr;
     jbyte *bytes = pcm && pcmLength > 0 ? env->GetByteArrayElements(pcm, nullptr) : nullptr;
     if (pcmLength > 0 && !bytes) return nullptr;
     jbyteArray out = build_frame(env, [&](uint8_t *buffer, size_t capacity, size_t *length) {
