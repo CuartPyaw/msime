@@ -1,5 +1,6 @@
 import inputMethodEngine from '@ohos.inputMethodEngine';
 import fs from '@ohos.file.fs';
+import util from '@ohos.util';
 import client from 'libmsimeclient.so';
 import { utf8Length } from './Utf8';
 import { TextPolicy } from './TextPolicy';
@@ -4473,7 +4474,8 @@ export class KeyboardSession implements HardwareKeyTarget {
         || KeyboardSession.safePrivateFile(path, KeyboardFeedback.MAX_BYTES) === null) {
         return KeyboardFeedback.DEFAULTS;
       }
-      return KeyboardFeedback.parse(fs.readTextSync(path));
+      const text: string | null = KeyboardSession.readPrivateText(path, KeyboardFeedback.MAX_BYTES);
+      return text === null ? KeyboardFeedback.DEFAULTS : KeyboardFeedback.parse(text);
     } catch (error) {
       KeyboardLog.error(`key feedback unreadable: ${describeError(error)}`);
       return KeyboardFeedback.DEFAULTS;
@@ -4516,7 +4518,9 @@ export class KeyboardSession implements HardwareKeyTarget {
       if (KeyboardSession.safePrivateFile(this.feedbackFile(), KeyboardFeedback.MAX_BYTES) === null) {
         return KeyboardFeedback.DEFAULTS;
       }
-      return KeyboardFeedback.parse(fs.readTextSync(this.feedbackFile()));
+      const text: string | null = KeyboardSession.readPrivateText(
+        this.feedbackFile(), KeyboardFeedback.MAX_BYTES);
+      return text === null ? KeyboardFeedback.DEFAULTS : KeyboardFeedback.parse(text);
     } catch (error) {
       KeyboardLog.error(`key feedback unreadable: ${describeError(error)}`);
       return KeyboardFeedback.DEFAULTS;
@@ -4748,7 +4752,8 @@ export class KeyboardSession implements HardwareKeyTarget {
       if (KeyboardSession.safePrivateFile(file, EMOJI_RECENTS_MAX_BYTES) === null) {
         return [];
       }
-      return EmojiCatalogModel.parseRecents(fs.readTextSync(file));
+      const text: string | null = KeyboardSession.readPrivateText(file, EMOJI_RECENTS_MAX_BYTES);
+      return text === null ? [] : EmojiCatalogModel.parseRecents(text);
     } catch (error) {
       KeyboardLog.error(`emoji recents unavailable: ${describeError(error)}`);
       return [];
@@ -4864,7 +4869,9 @@ export class KeyboardSession implements HardwareKeyTarget {
         || KeyboardSession.safePrivateFile(file, CommunityReplyLibraryPolicy.MAX_BYTES) === null) {
         return [];
       }
-      return CommunityReplyLibraryPolicy.parse(fs.readTextSync(file));
+      const text: string | null = KeyboardSession.readPrivateText(
+        file, CommunityReplyLibraryPolicy.MAX_BYTES);
+      return text === null ? [] : CommunityReplyLibraryPolicy.parse(text);
     } catch (error) {
       KeyboardLog.error(`community reply library unavailable: ${describeError(error)}`);
       return [];
@@ -4886,6 +4893,23 @@ export class KeyboardSession implements HardwareKeyTarget {
       return !stat.isSymbolicLink() && stat.isFile() && stat.size <= maximumBytes ? stat : null;
     } catch {
       return null;
+    }
+  }
+
+  private static readPrivateText(path: string, maximumBytes: number): string | null {
+    let handle: fs.File | null = null;
+    try {
+      handle = fs.openSync(path, fs.OpenMode.READ_ONLY);
+      const stat: fs.Stat = fs.statSync(handle.fd);
+      if (!stat.isFile() || stat.size > maximumBytes) return null;
+      const buffer: ArrayBuffer = new ArrayBuffer(stat.size + 1);
+      const count: number = fs.readSync(handle.fd, buffer);
+      if (count !== stat.size) return null;
+      return util.TextDecoder.create('utf-8').decode(new Uint8Array(buffer, 0, count));
+    } catch {
+      return null;
+    } finally {
+      if (handle !== null) fs.closeSync(handle);
     }
   }
 
