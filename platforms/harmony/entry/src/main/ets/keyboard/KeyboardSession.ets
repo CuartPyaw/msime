@@ -2813,22 +2813,34 @@ export class KeyboardSession implements HardwareKeyTarget {
 
   /** Invalidate host-side network work before the focused editor changes or the session dies. */
   private cancelOnlineProviders(): void {
+    this.invalidateOnlineProviders();
+    this.invalidateTranslationProviders();
+  }
+
+  private invalidateOnlineProviders(): void {
+    if (!OnlineCandidatePolicy.hasActiveWork(
+      this.onlineSignature, this.onlineTimer >= 0, this.onlineRequests.size)) return;
     this.onlineEpoch++;
     this.onlineSignature = '';
-    for (const request of this.onlineRequests) request.destroy();
-    this.onlineRequests.clear();
     if (this.onlineTimer >= 0) {
       clearTimeout(this.onlineTimer);
       this.onlineTimer = -1;
     }
+    for (const request of this.onlineRequests) request.destroy();
+    this.onlineRequests.clear();
+  }
+
+  private invalidateTranslationProviders(): void {
+    if (!TranslationPolicy.hasActiveWork(
+      this.translationSignature, this.translationTimer >= 0, this.translationRequests.size)) return;
     this.translationEpoch++;
     this.translationSignature = '';
-    for (const request of this.translationRequests) request.destroy();
-    this.translationRequests.clear();
     if (this.translationTimer >= 0) {
       clearTimeout(this.translationTimer);
       this.translationTimer = -1;
     }
+    for (const request of this.translationRequests) request.destroy();
+    this.translationRequests.clear();
   }
 
   /** Invalidate asynchronous reply work without logging or retaining editor text. */
@@ -3876,17 +3888,18 @@ export class KeyboardSession implements HardwareKeyTarget {
       reply = JSON.parse(client.onlineQuery(this.handle)) as NativeReply<OnlineQuery | null>;
     } catch (error) {
       KeyboardLog.error(`online query unavailable: ${describeError(error)}`);
+      this.invalidateOnlineProviders();
       return;
     }
     const query: OnlineQuery | null = NativeReplyPolicy.successfulValue<OnlineQuery>(reply);
     if (query === null) {
-      this.onlineSignature = '';
+      this.invalidateOnlineProviders();
       return;
     }
     const signature: string = OnlineCandidatePolicy.signature(query);
     if (signature === this.onlineSignature) return;
+    this.invalidateOnlineProviders();
     this.onlineSignature = signature;
-    if (this.onlineTimer >= 0) clearTimeout(this.onlineTimer);
     const epoch: number = ++this.onlineEpoch;
     const handle: number = this.handle;
     const requestSignature: string = signature;
@@ -4029,17 +4042,18 @@ export class KeyboardSession implements HardwareKeyTarget {
       reply = JSON.parse(client.translationQuery(this.handle)) as NativeReply<TranslationQuery | null>;
     } catch (error) {
       KeyboardLog.error(`translation query unavailable: ${describeError(error)}`);
+      this.invalidateTranslationProviders();
       return;
     }
     const query: TranslationQuery | null = NativeReplyPolicy.successfulValue<TranslationQuery>(reply);
     if (query === null) {
-      this.translationSignature = '';
+      this.invalidateTranslationProviders();
       return;
     }
     const signature: string = TranslationPolicy.signature(query);
     if (signature === this.translationSignature) return;
+    this.invalidateTranslationProviders();
     this.translationSignature = signature;
-    if (this.translationTimer >= 0) clearTimeout(this.translationTimer);
     const epoch: number = ++this.translationEpoch;
     const handle: number = this.handle;
     const requestSignature: string = signature;

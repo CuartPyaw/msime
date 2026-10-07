@@ -728,6 +728,13 @@ group("bounds and deduplicates asynchronous online AI candidates", () => {
       !OnlineCandidatePolicy.shouldReleaseAfterFailure(signature, signature, 4, 4, 8, 7),
     "a stale online failure cannot clear a newer request",
   );
+  check(
+    OnlineCandidatePolicy.hasActiveWork(signature, false, 0) &&
+      OnlineCandidatePolicy.hasActiveWork("", true, 0) &&
+      OnlineCandidatePolicy.hasActiveWork("", false, 1) &&
+      !OnlineCandidatePolicy.hasActiveWork("", false, 0),
+    "a vanished online query invalidates queued or in-flight work",
+  );
   const response = JSON.stringify({
     choices: [
       {
@@ -862,6 +869,13 @@ group("keeps translation provider policy bounded and credential-free in signatur
       !TranslationPolicy.shouldReleaseAfterFailure(signature, signature, 3, 4, 7, 7) &&
       !TranslationPolicy.shouldReleaseAfterFailure(signature, signature, 4, 4, 8, 7),
     "a stale translation failure cannot clear a newer request",
+  );
+  check(
+    TranslationPolicy.hasActiveWork(signature, false, 0) &&
+      TranslationPolicy.hasActiveWork("", true, 0) &&
+      TranslationPolicy.hasActiveWork("", false, 1) &&
+      !TranslationPolicy.hasActiveWork("", false, 0),
+    "a vanished translation query invalidates queued or in-flight work",
   );
   check(
     TranslationPolicy.shouldReleaseAfterProviderFailure("tencent", false, true),
