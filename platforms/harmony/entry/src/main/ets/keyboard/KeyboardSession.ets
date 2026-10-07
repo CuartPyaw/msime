@@ -4918,9 +4918,11 @@ export class KeyboardSession implements HardwareKeyTarget {
   private static readPrivateText(path: string, maximumBytes: number): string | null {
     let handle: fs.File | null = null;
     try {
+      const expected: fs.Stat | null = KeyboardSession.safePrivateFile(path, maximumBytes);
+      if (expected === null) return null;
       handle = fs.openSync(path, fs.OpenMode.READ_ONLY);
       const stat: fs.Stat = fs.statSync(handle.fd);
-      if (!stat.isFile() || stat.size > maximumBytes) return null;
+      if (!stat.isFile() || stat.size > maximumBytes || stat.ino !== expected.ino) return null;
       const buffer: ArrayBuffer = new ArrayBuffer(stat.size + 1);
       const count: number = fs.readSync(handle.fd, buffer);
       if (count !== stat.size) return null;

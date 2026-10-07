@@ -23,7 +23,15 @@ def main() -> int:
     helper_start = session.find(helper_marker)
     helper_end = session.find("\n  /** Generates bounded reply candidates", helper_start)
     helper = session[helper_start:helper_end] if helper_start >= 0 and helper_end >= 0 else ""
-    required_helper = ("fs.openSync", "fs.statSync(handle.fd)", "fs.readSync", "fs.closeSync", "isFile")
+    required_helper = (
+        "safePrivateFile(path, maximumBytes)",
+        "fs.openSync",
+        "fs.statSync(handle.fd)",
+        "stat.ino !== expected.ino",
+        "fs.readSync",
+        "fs.closeSync",
+        "isFile",
+    )
     missing = [token for token in required_helper if token not in helper]
     if not helper:
         missing.append("readPrivateText helper")
