@@ -125,6 +125,17 @@ public final class LocalAsrPolicySmoke {
                 "local ASR accepts string correction text");
             check(strictText.invoke(null, 42) == null,
                 "local ASR rejects numeric correction text instead of coercing it");
+            Method transcript = LocalAsrPolicy.class.getDeclaredMethod("transcript", Object.class);
+            transcript.setAccessible(true);
+            check("synthetic transcript".equals(transcript.invoke(null, "synthetic transcript")),
+                "local ASR accepts bounded transcript text");
+            check("".equals(transcript.invoke(null, "bad\u0000text")),
+                "local ASR rejects transcript controls before editor insertion");
+            check("".equals(transcript.invoke(null, "\ud800")),
+                "local ASR rejects malformed transcript Unicode");
+            check("".equals(transcript.invoke(null,
+                "a".repeat(LocalAsrPolicy.MAX_TRANSCRIPT + 1))),
+                "local ASR rejects overlong transcript text");
             Method strictBoolean = LocalAsrPolicy.class.getDeclaredMethod("strictBoolean", Object.class);
             strictBoolean.setAccessible(true);
             check(Boolean.TRUE.equals(strictBoolean.invoke(null, Boolean.TRUE)),

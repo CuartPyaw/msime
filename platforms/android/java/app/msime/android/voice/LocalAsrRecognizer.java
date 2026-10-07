@@ -187,13 +187,14 @@ public final class LocalAsrRecognizer {
                 if (!capture.isAlive() && audio.isEmpty()) break;
                 continue;
             }
-            String partial = NativeClient.localSpeechAccept(session, chunk, chunk.length);
+            String partial = LocalAsrPolicy.transcript(
+                NativeClient.localSpeechAccept(session, chunk, chunk.length));
             if (partial != null && !partial.equals(last)) {
                 last = partial;
                 if (listener != null) listener.onPartial(partial);
             }
         }
-        return NativeClient.localSpeechFinish(session);
+        return LocalAsrPolicy.transcript(NativeClient.localSpeechFinish(session));
     }
 
     private static AudioRecord openRecorder() throws Refused {
@@ -340,8 +341,8 @@ public final class LocalAsrRecognizer {
             JSONObject value = Boolean.TRUE.equals(LocalAsrPolicy.strictBoolean(response.opt("ok")))
                 ? response.optJSONObject("value") : null;
             if (value == null || value.isNull("text")) return text;
-            String corrected = LocalAsrPolicy.strictText(value.opt("text"));
-            return corrected == null ? text : corrected;
+            String corrected = LocalAsrPolicy.transcript(value.opt("text"));
+            return corrected.isEmpty() ? text : corrected;
         } catch (JSONException | RuntimeException error) {
             return text;
         }

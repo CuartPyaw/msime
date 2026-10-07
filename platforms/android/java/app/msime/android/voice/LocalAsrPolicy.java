@@ -30,6 +30,8 @@ public final class LocalAsrPolicy {
     /** Per-word ceilings of a hotword handed in by the shared layer, in UTF-16 units; the shared request validation allows no more than this in bytes. */
     public static final int MAX_HOTWORD_TEXT_LENGTH = 256;
     public static final int MAX_HOTWORD_PINYIN_LENGTH = 1024;
+    /** Keep local-model output within the same bound as network ASR responses. */
+    public static final int MAX_TRANSCRIPT = 2000;
 
     private LocalAsrPolicy() {}
 
@@ -112,6 +114,15 @@ public final class LocalAsrPolicy {
     /** The native correction response carries text; reject non-string bridge values. */
     static String strictText(Object value) {
         return value instanceof String ? (String) value : null;
+    }
+
+    /** Native ASR text must be plain, well-formed Unicode before it reaches the editor. */
+    static String transcript(Object value) {
+        String text = strictText(value);
+        if (text == null || text.codePointCount(0, text.length()) > MAX_TRANSCRIPT
+                || TextPolicy.hasControlExceptWhitespace(text)
+                || !TextPolicy.validUnicode(text)) return "";
+        return text;
     }
 
     /** Native bridge response flags must remain JSON booleans; reject coercible strings. */
