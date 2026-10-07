@@ -87,6 +87,7 @@ constexpr jsize kTypingStatisticsRequestLimit = 65536;
 constexpr jsize kTypingStatisticsDirectoryLimit = 16384;
 constexpr jsize kPersonalDictionaryRequestLimit = 2248576;
 constexpr jsize kCreateOptionsLimit = 1 * 1024 * 1024;
+constexpr jsize kMobileClipboardHistoryRequestLimit = 524288;
 constexpr jsize kPrepareHostRequestLimit = 16384;
 constexpr jsize kSavePreferencesDirectoryLimit = 16384;
 constexpr jsize kSavePreferencesSnapshotLimit = 1 * 1024 * 1024;
@@ -249,14 +250,8 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_polishPromptRaw
     return out;
 }
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_mobileClipboardHistoryRaw(JNIEnv *env, jclass, jbyteArray request) {
-    if (!request) return response(env, msime_client_mobile_clipboard_history(nullptr, 0));
-    jsize length = env->GetArrayLength(request);
-    jbyte *bytes = env->GetByteArrayElements(request, nullptr);
-    if (!bytes) return nullptr;
-    char *result = msime_client_mobile_clipboard_history(
-        reinterpret_cast<const uint8_t *>(bytes), static_cast<size_t>(length));
-    env->ReleaseByteArrayElements(request, bytes, JNI_ABORT);
-    return response(env, result);
+    return bounded_request(env, request, kMobileClipboardHistoryRequestLimit,
+        msime_client_mobile_clipboard_history);
 }
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_doubaoDecodeFrameRaw(JNIEnv *env, jclass, jbyteArray frame) {
     if (!frame) return response(env, msime_client_doubao_decode_frame(nullptr, 0));
