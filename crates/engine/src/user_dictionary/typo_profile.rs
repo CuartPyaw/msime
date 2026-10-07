@@ -134,26 +134,59 @@ pub fn load_pinyin_typo_state(user_db: &Path) -> Result<PinyinTypoState> {
         return Ok(state);
     };
     if table_exists(&connection, "pinyin_typo_counts")? {
+        let count: i64 = connection.query_row(
+            "SELECT count(*) FROM pinyin_typo_counts WHERE accepted > 0 AND accepted <= ?1 AND length(CAST(typed AS BLOB)) BETWEEN 1 AND ?2 AND length(CAST(intended AS BLOB)) BETWEEN 1 AND ?2",
+            params![MAX_TYPO_STATE_COUNT, MAX_SYLLABLE_LENGTH as i64],
+            |row| row.get(0),
+        )?;
+        if count > MAX_TYPO_STATE_ROWS as i64 {
+            return Err(EngineError::failed(
+                "pinyin typo state exceeds its memory limit",
+            ));
+        }
         let mut statement = connection
-            .prepare("SELECT typed,intended,accepted FROM pinyin_typo_counts WHERE accepted > 0")?;
-        let rows = statement.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i32>(2)?,
-            ))
-        })?;
+            .prepare("SELECT typed,intended,accepted FROM pinyin_typo_counts WHERE accepted > 0 AND accepted <= ?1 AND length(CAST(typed AS BLOB)) BETWEEN 1 AND ?2 AND length(CAST(intended AS BLOB)) BETWEEN 1 AND ?2")?;
+        let rows = statement.query_map(
+            params![MAX_TYPO_STATE_COUNT, MAX_SYLLABLE_LENGTH as i64],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i32>(2)?,
+                ))
+            },
+        )?;
         for row in rows {
             let (typed, intended, accepted) = row?;
-            state.accepted.insert((typed, intended), accepted);
+            if is_lowercase_letters(&typed, MAX_SYLLABLE_LENGTH)
+                && is_lowercase_letters(&intended, MAX_SYLLABLE_LENGTH)
+                && typed != intended
+            {
+                state.accepted.insert((typed, intended), accepted);
+            }
         }
     }
     if table_exists(&connection, "pinyin_autocorrect_suppressions")? {
+        let count: i64 = connection.query_row(
+            "SELECT count(*) FROM pinyin_autocorrect_suppressions WHERE commits >= 1 AND length(CAST(input AS BLOB)) BETWEEN 1 AND ?1",
+            params![MAX_SUPPRESSED_INPUT_LENGTH as i64],
+            |row| row.get(0),
+        )?;
+        if count > MAX_TYPO_STATE_ROWS as i64 {
+            return Err(EngineError::failed(
+                "pinyin suppression state exceeds its memory limit",
+            ));
+        }
         let mut statement =
-            connection.prepare("SELECT input FROM pinyin_autocorrect_suppressions")?;
-        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            connection.prepare("SELECT input FROM pinyin_autocorrect_suppressions WHERE commits >= 1 AND length(CAST(input AS BLOB)) BETWEEN 1 AND ?1")?;
+        let rows = statement.query_map(params![MAX_SUPPRESSED_INPUT_LENGTH as i64], |row| {
+            row.get::<_, String>(0)
+        })?;
         for row in rows {
-            state.suppressed.insert(row?);
+            let input = row?;
+            if is_lowercase_letters(&input, MAX_SUPPRESSED_INPUT_LENGTH) {
+                state.suppressed.insert(input);
+            }
         }
     }
     Ok(state)
@@ -421,6 +454,45 @@ mod tests {
             .unwrap();
         record_pinyin_typos(&journal, &[pair("gan", "guan")]).unwrap();
         assert_eq!(typo_count(&journal, "gan", "guan"), 1000);
+    }
+
+    #[test]
+    fn loading_a_typo_table_over_the_memory_cap_fails_closed() {
+        let dir = Dir::new();
+        let journal = dir.journal();
+        record_pinyin_typos(&journal, &[pair("gan", "guan")]).unwrap();
+        let connection = Connection::open(&journal).unwrap();
+        for index in 0..=MAX_TYPO_STATE_ROWS {
+            let typed = format!("a{:02}", index % 100);
+            let intended = format!("b{:02}", index / 100);
+            connection
+                .execute(
+                    "INSERT INTO pinyin_typo_counts(typed,intended,accepted) VALUES(?1,?2,1)",
+                    (&typed, &intended),
+                )
+                .unwrap();
+        }
+
+        assert!(load_pinyin_typo_state(&journal).is_err());
+    }
+
+    #[test]
+    fn loading_a_suppression_table_over_the_memory_cap_fails_closed() {
+        let dir = Dir::new();
+        let journal = dir.journal();
+        record_autocorrect_suppression(&journal, "shabg").unwrap();
+        let connection = Connection::open(&journal).unwrap();
+        for index in 0..=MAX_TYPO_STATE_ROWS {
+            let input = format!("input{index}");
+            connection
+                .execute(
+                    "INSERT INTO pinyin_autocorrect_suppressions(input,commits) VALUES(?1,1)",
+                    [&input],
+                )
+                .unwrap();
+        }
+
+        assert!(load_pinyin_typo_state(&journal).is_err());
     }
 
     #[test]
