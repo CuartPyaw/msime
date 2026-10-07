@@ -387,6 +387,7 @@ impl VerifiedMarker {
         directory: &Path,
         specification: &ResourceSet,
     ) -> Result<Option<Self>, ResourceError> {
+        crate::storage::reject_symlink(directory)?;
         let mut expected = HashSet::with_capacity(specification.artifacts.len());
         expected.extend(
             specification
@@ -787,6 +788,22 @@ mod tests {
         let store = ResourceStore::new(&directory);
 
         let error = store.verify(&directory, &specification()).unwrap_err();
+
+        assert!(matches!(error, ResourceError::Io(_)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn marker_description_rejects_a_symlinked_directory() {
+        use std::os::unix::fs::symlink;
+
+        let parent = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("msime-pinyin.db"), b"fixture").unwrap();
+        let linked = parent.path().join("resources");
+        symlink(outside.path(), &linked).unwrap();
+
+        let error = VerifiedMarker::describe(&linked, &specification()).unwrap_err();
 
         assert!(matches!(error, ResourceError::Io(_)));
     }
