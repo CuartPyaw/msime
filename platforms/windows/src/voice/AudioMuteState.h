@@ -13,6 +13,7 @@
 #include <windows.h>
 #else
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -48,8 +49,13 @@ inline bool read_audio_mute_state(const std::filesystem::path &path,
   if (!ok) contents.clear();
   return ok;
 #else
-  const int descriptor = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  const int descriptor = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
   if (descriptor < 0) return false;
+  struct stat metadata {};
+  if (::fstat(descriptor, &metadata) != 0 || !S_ISREG(metadata.st_mode)) {
+    ::close(descriptor);
+    return false;
+  }
   contents.clear();
   char buffer[8192];
   bool ok = true;
