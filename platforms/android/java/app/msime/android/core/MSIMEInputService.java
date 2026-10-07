@@ -2982,7 +2982,7 @@ public final class MSIMEInputService extends InputMethodService {
         if (quickPunctuationButton == null) return;
         java.util.List<QuickPunctuationPolicy.Entry> entries = quickPunctuationEntries();
         boolean visible = quickPunctuationVisible() && !entries.isEmpty();
-        quickPunctuationButton.setVisibility(visible ? View.VISIBLE : View.GONE);
+        ViewPolicy.setVisible(quickPunctuationButton, visible);
         if (!visible) return;
         String face = entries.get(0).face();
         // 与句号键一样按墨迹居中放大画：全角「，」原样居中时只剩键底一个小点。
@@ -4054,12 +4054,12 @@ public final class MSIMEInputService extends InputMethodService {
             }
         }
         if (replyKeyboard != null)
-            replyKeyboard.setVisibility(visible ? View.VISIBLE : View.GONE);
+            ViewPolicy.setVisible(replyKeyboard, visible);
         if (keyRows != null)
-            keyRows.setVisibility(visible ? View.GONE : View.VISIBLE);
+            ViewPolicy.setVisible(keyRows, !visible);
         // 收起回复面板时底栏不是一律恢复：日语九键没有底栏，强行设回 VISIBLE 会让一条空底栏占掉一行高度。由 updateActionRow 按当前布局决定。
         if (actionRow != null) {
-            if (visible) actionRow.setVisibility(View.GONE);
+            if (visible) ViewPolicy.hide(actionRow);
             else imeBottomRow.updateActionRow();
         }
     }
@@ -6569,7 +6569,7 @@ public final class MSIMEInputService extends InputMethodService {
             boolean listOpen = (offersHanja && koreanHanjaListOpen())
                 || (offersZhuyinList && zhuyinListOpen());
             hanjaButton.setText(offersZhuyinList ? "選" : "漢");
-            hanjaButton.setVisibility(offersHanja || offersZhuyinList ? View.VISIBLE : View.GONE);
+            ViewPolicy.setVisible(hanjaButton, offersHanja || offersZhuyinList);
             hanjaButton.setEnabled(offersHanja || offersZhuyinList);
             hanjaButton.setSelected(listOpen);
             hanjaButton.setContentDescription(offersZhuyinList
@@ -6580,24 +6580,21 @@ public final class MSIMEInputService extends InputMethodService {
         imeDebugOverlay.updateDiagnosticView(hasDiagnostic);
         boolean heightMode = inlineHeightActive;
         if (inlineHeightBar != null)
-            inlineHeightBar.setVisibility(heightMode ? View.VISIBLE : View.GONE);
+            ViewPolicy.setVisible(inlineHeightBar, heightMode);
         if (candidateHeader != null) {
             // 空闲时这一行只给常驻的模式标签（直接输入、准备中）：简繁切换、设置保存、同步重试、Shift 这类一闪而过的提示若也占这一行，每次出现和消失都把整副键盘顶上去又落回来。临时提示只在失败时以 Toast 说出来。
             boolean modeLabel = !message.isEmpty();
-            candidateHeader.setVisibility(!heightMode && !hasDiagnostic && (!idle || modeLabel)
-                ? View.VISIBLE : View.GONE);
+            ViewPolicy.setVisible(candidateHeader, !heightMode && !hasDiagnostic && (!idle || modeLabel));
             if (idle && !modeLabel) announceIdleNotice(preferencesNotice);
         }
         if (shortcutScroll != null)
-            shortcutScroll.setVisibility(!heightMode && idle && !hasDiagnostic && !toolbarHidden
-                ? View.VISIBLE : View.GONE);
+            ViewPolicy.setVisible(shortcutScroll, !heightMode && idle && !hasDiagnostic && !toolbarHidden);
         if (candidateLine != null)
-            candidateLine.setVisibility(!heightMode && !idle && !hasDiagnostic
-                ? View.VISIBLE : View.GONE);
+            ViewPolicy.setVisible(candidateLine, !heightMode && !idle && !hasDiagnostic);
         if (replyKeyboard == null || replyKeyboard.getVisibility() != View.VISIBLE)
             imeBottomRow.updateActionRow();
         if (candidateViewport != null)
-            candidateViewport.setVisibility(!idle && !hasDiagnostic ? View.VISIBLE : View.GONE);
+            ViewPolicy.setVisible(candidateViewport, !idle && !hasDiagnostic);
         updateCandidateViewportHeight();
         if (scriptShortcutButton != null) {
             ViewPolicy.hide(scriptShortcutButton);
@@ -6640,19 +6637,19 @@ public final class MSIMEInputService extends InputMethodService {
                 scriptShortcutButton.setStateDescription(outputState);
         }
         if (emojiShortcutButton != null) {
-            emojiShortcutButton.setVisibility(toolbarEmoji ? View.VISIBLE : View.GONE);
+            ViewPolicy.setVisible(emojiShortcutButton, toolbarEmoji);
             emojiShortcutButton.setEnabled(session != 0 && !emojiResources.isEmpty());
             emojiShortcutButton.setSelected(emojiPanel != null
                 && emojiPanel.getVisibility() == View.VISIBLE);
         }
         if (phraseShortcutButton != null) {
-            phraseShortcutButton.setVisibility(toolbarPhrase ? View.VISIBLE : View.GONE);
+            ViewPolicy.setVisible(phraseShortcutButton, toolbarPhrase);
             phraseShortcutButton.setEnabled(session != 0 && !preferencesDirectory.isEmpty());
             phraseShortcutButton.setSelected(phraseScroll != null
                 && phraseScroll.getVisibility() == View.VISIBLE);
         }
         if (clipboardShortcutButton != null) {
-            clipboardShortcutButton.setVisibility(toolbarClipboard ? View.VISIBLE : View.GONE);
+            ViewPolicy.setVisible(clipboardShortcutButton, toolbarClipboard);
             clipboardShortcutButton.setEnabled(CloudClipboardPanelPolicy.panelAvailable(
                 clipboardHistoryEnabled, imePanels.cloudClipboardAllowed()));
             clipboardShortcutButton.setSelected(imePanels.clipboardPanelOpen());
@@ -6680,7 +6677,7 @@ public final class MSIMEInputService extends InputMethodService {
             String currentLocalMode = view == null ? "none" : view.optString("local_mode", "none");
             boolean visible = MicrosoftShuangpinKeyPolicy.visible(
                 dedicatedEnglish, selectedScheme, currentLocalMode);
-            microsoftFinalKey.setVisibility(visible ? View.VISIBLE : View.GONE);
+            ViewPolicy.setVisible(microsoftFinalKey, visible);
             microsoftFinalKey.setEnabled(visible && session != 0);
             microsoftFinalKey.setContentDescription("微软双拼 ing");
         }
@@ -6701,9 +6698,8 @@ public final class MSIMEInputService extends InputMethodService {
             int shiftLayout = displayedTouchLayout(view);
             boolean keepsOwnGrid = shiftLayout == QUANPIN_NINE_KEY_LAYOUT
                 || shiftLayout == JAPANESE_NINE_KEY_LAYOUT;
-            shiftButton.setVisibility(!KeyboardLayout.carriesLetterCase(shiftLayout)
-                && (keepsOwnGrid || keyboardLayer == KeyboardLayout.Layer.LETTERS)
-                ? View.GONE : View.VISIBLE);
+            ViewPolicy.setVisible(shiftButton, KeyboardLayout.carriesLetterCase(shiftLayout)
+                || (!keepsOwnGrid && keyboardLayer != KeyboardLayout.Layer.LETTERS));
             shiftButton.setText(letterCase.keyText());
             shiftButton.setSelected(letterCase.usesUppercase());
             shiftButton.setActivated(letterCase.mode() == EnglishLetterCaseState.Mode.CAPS_LOCK);
@@ -6727,7 +6723,7 @@ public final class MSIMEInputService extends InputMethodService {
             }
         }
         if (schemeButton != null) {
-            schemeButton.setVisibility(toolbarScheme ? View.VISIBLE : View.GONE);
+            ViewPolicy.setVisible(schemeButton, toolbarScheme);
             schemeButton.setSelected(schemeScroll != null && schemeScroll.getVisibility() == View.VISIBLE);
             schemeButton.setText(selectedScheme.glyph() + selectedScheme.badge(wubiProfile));
             schemeButton.setContentDescription("输入方案：" + selectedScheme.title(wubiProfile));
@@ -6743,7 +6739,7 @@ public final class MSIMEInputService extends InputMethodService {
             }
         }
         if (skinButton != null) {
-            skinButton.setVisibility(toolbarSkin ? View.VISIBLE : View.GONE);
+            ViewPolicy.setVisible(skinButton, toolbarSkin);
             skinButton.setSelected(skinScroll != null && skinScroll.getVisibility() == View.VISIBLE);
             // 同上：保存进行中的点按由 ImePanels.showSkinPicker 按 canSaveKeyboardSkin 忽略，图标不跟着变灰。
             skinButton.setEnabled(session != 0 && preferencesSnapshot != null && !preferencesDirectory.isEmpty());
@@ -6771,12 +6767,16 @@ public final class MSIMEInputService extends InputMethodService {
             && nineKeySpellingScroll.getVisibility() == View.VISIBLE
             && displayedTouchLayout(view) == KeyboardLayout.ZHUYIN_NINE_KEY_LAYOUT;
         int candidateScrollShown = zhuyinSpellingsShown ? View.INVISIBLE : View.VISIBLE;
-        if (horizontalCandidateScroll != null)
-            horizontalCandidateScroll.setVisibility(
-                candidateHorizontal && !hasDiagnostic ? candidateScrollShown : View.GONE);
-        if (verticalCandidateScroll != null)
-            verticalCandidateScroll.setVisibility(
-                !candidateHorizontal && !hasDiagnostic ? candidateScrollShown : View.GONE);
+        if (horizontalCandidateScroll != null) {
+            if (!candidateHorizontal || hasDiagnostic) ViewPolicy.hide(horizontalCandidateScroll);
+            else if (candidateScrollShown == View.VISIBLE) ViewPolicy.show(horizontalCandidateScroll);
+            else ViewPolicy.setInvisible(horizontalCandidateScroll);
+        }
+        if (verticalCandidateScroll != null) {
+            if (candidateHorizontal || hasDiagnostic) ViewPolicy.hide(verticalCandidateScroll);
+            else if (candidateScrollShown == View.VISIBLE) ViewPolicy.show(verticalCandidateScroll);
+            else ViewPolicy.setInvisible(verticalCandidateScroll);
+        }
         LinearLayout activeCandidates = candidateHorizontal ? candidates : verticalCandidates;
         candidates.removeAllViews();
         if (verticalCandidates != null) verticalCandidates.removeAllViews();

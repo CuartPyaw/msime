@@ -11999,6 +11999,7 @@ group("AI model catalogs keep each provider's protocol and path", () => {
   check(!TextPolicy.validMultiline("bad\u0001", 32, true), "rejects other control characters");
   check(!TextPolicy.validMultiline("bad\u007f", 32, true), "rejects C1 control characters");
   check(!TextPolicy.validMultiline("bad\ud800", 32, true), "rejects unpaired UTF-16 surrogates");
+  check(TextPolicy.hasControl("bad\ud800"), "all control checks reject unpaired surrogates");
   check(
     TextPolicy.validSecureAuthority("https://remote.example/api", true),
     "accepts remote HTTPS endpoints",

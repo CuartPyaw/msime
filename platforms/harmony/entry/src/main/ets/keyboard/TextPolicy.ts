@@ -37,8 +37,9 @@ export class TextPolicy {
     return authority === "[::1]" || authority.startsWith("[::1]:");
   }
 
-  /** Rejects the C0 and C1 control ranges while leaving printable Unicode untouched. */
+  /** Rejects malformed UTF-16 and the C0/C1 control ranges. */
   static hasControl(value: string): boolean {
+    if (!TextPolicy.validUnicode(value)) return true;
     return Array.from(value).some((character: string): boolean => {
       const code: number = character.codePointAt(0) ?? 0;
       return code <= 0x1f || (code >= 0x7f && code <= 0x9f);
