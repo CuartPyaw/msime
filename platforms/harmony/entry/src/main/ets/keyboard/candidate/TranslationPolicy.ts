@@ -133,6 +133,15 @@ export class TranslationPolicy {
       && requestSignature.length > 0 && requestSignature === currentSignature;
   }
 
+  /** A replaced or vanished query must invalidate any timer or request for the old candidate page. */
+  static hasActiveWork(
+    signature: string,
+    timerActive: boolean,
+    requestCount: number,
+  ): boolean {
+    return signature.length > 0 || timerActive || requestCount > 0;
+  }
+
   /** 在线 provider 未完成时，即使离线词典有可应用条目，也必须允许相同候选页重试。 */
   static shouldReleaseAfterProviderFailure(provider: string, providerComplete: boolean,
     hasEntries: boolean): boolean {
