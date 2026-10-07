@@ -7,24 +7,9 @@ pub(crate) fn reject_symlink(path: &Path) -> io::Result<()> {
     msime_path_trust::reject_symlinked_components(path)
 }
 
-/// Open a private document without following a leaf symlink. Callers still
-/// validate the opened handle's type, owner and mode; this flag closes the
-/// check-then-open race between those metadata checks and the read itself.
+/// 打开私有文档时复用文件锁模块的无跟随实现。
 pub(crate) fn open_private_file(path: &Path) -> io::Result<File> {
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
-    }
-    options.open(path)
+    crate::file_lock::open_private_file(path)
 }
 
 /// Open a private resumable file for reading and writing without following a
