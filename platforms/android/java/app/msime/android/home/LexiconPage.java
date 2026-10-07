@@ -22,7 +22,6 @@ import app.msime.android.ViewPolicy;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -350,7 +349,7 @@ public final class LexiconPage extends DetailPage {
         if (!text.ok()) return text.failure();
         try (OutputStream output = context.getContentResolver().openOutputStream(uri, "wt")) {
             if (output == null) return "写入文件失败，请重新选择位置。";
-            output.write(text.value().getBytes(StandardCharsets.UTF_8));
+            output.write(TextPolicy.utf8Bytes(text.value()));
         } catch (IOException | SecurityException error) {
             return "写入文件失败，请重新选择位置。";
         }
