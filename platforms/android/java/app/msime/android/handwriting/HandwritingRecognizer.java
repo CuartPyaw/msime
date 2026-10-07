@@ -70,7 +70,7 @@ public interface HandwritingRecognizer extends AutoCloseable {
             String candidate = value.strip();
             if (candidate.isEmpty()
                     || TextPolicy.utf8Length(candidate) > MAX_CANDIDATE_BYTES
-                    || TextPolicy.hasControl(candidate)) continue;
+                    || TextPolicy.hasControl(candidate) || !TextPolicy.validUnicode(candidate)) continue;
             accepted.add(candidate);
             if (accepted.size() == MAX_CANDIDATES) break;
         }
