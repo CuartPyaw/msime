@@ -1,6 +1,5 @@
 package app.msime.android;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
 /**
@@ -88,8 +87,8 @@ public final class HttpAsrPolicy {
         head.append("--").append(boundary).append("\r\n")
             .append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n")
             .append("Content-Type: audio/wav\r\n\r\n");
-        byte[] prefix = head.toString().getBytes(StandardCharsets.UTF_8);
-        byte[] suffix = ("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8);
+        byte[] prefix = TextPolicy.utf8Bytes(head.toString());
+        byte[] suffix = TextPolicy.utf8Bytes("\r\n--" + boundary + "--\r\n");
         byte[] body = new byte[prefix.length + wav.length + suffix.length];
         System.arraycopy(prefix, 0, body, 0, prefix.length);
         System.arraycopy(wav, 0, body, prefix.length, wav.length);
