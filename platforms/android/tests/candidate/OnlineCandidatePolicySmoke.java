@@ -38,6 +38,10 @@ public final class OnlineCandidatePolicySmoke {
         check(OnlineCandidatePolicy.aiCandidateLimit(-1) == 0);
         check(OnlineCandidatePolicy.aiCandidateLimit(11) == 0);
 
+        check("text".equals(OnlineCandidatePolicy.strictText("text")));
+        check(OnlineCandidatePolicy.strictText(42) == null);
+        check(OnlineCandidatePolicy.strictText(true) == null);
+
         // The same composition is asked about once; a changed AI configuration asks again.
         check(signature(true, "{\"model\":\"a\"}").equals(signature(true, "{\"model\":\"a\"}")));
         check(!signature(true, "{\"model\":\"a\"}").equals(signature(true, "{\"model\":\"b\"}")));

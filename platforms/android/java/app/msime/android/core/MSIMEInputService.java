@@ -2308,14 +2308,18 @@ public final class MSIMEInputService extends InputMethodService {
             if (choices == null || choices.length() == 0) return texts;
             JSONObject message = choices.getJSONObject(0).optJSONObject("message");
             if (message == null) return texts;
-            String content = message.optString("content", "");
+            String content = OnlineCandidatePolicy.strictText(message.opt("content"));
+            if (content == null) return texts;
             if (!OnlineCandidatePolicy.acceptsAiContent(content)) return texts;
             JSONArray entries = new JSONObject(content).optJSONArray("candidates");
             if (entries == null) return texts;
             texts = new java.util.ArrayList<>(entries.length());
             for (int index = 0; index < entries.length(); index++) {
                 JSONObject entry = entries.optJSONObject(index);
-                if (entry != null) texts.add(entry.optString("text", ""));
+                if (entry != null) {
+                    String text = OnlineCandidatePolicy.strictText(entry.opt("text"));
+                    if (text != null) texts.add(text);
+                }
             }
             return texts;
         } catch (JSONException | RuntimeException error) {
