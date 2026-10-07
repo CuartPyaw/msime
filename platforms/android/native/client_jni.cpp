@@ -702,7 +702,10 @@ void throw_state(JNIEnv *env, const char *message) {
     if (type) env->ThrowNew(type, message);
 }
 
-LocalSpeech *speech(jlong handle) { return reinterpret_cast<LocalSpeech *>(static_cast<intptr_t>(handle)); }
+LocalSpeech *speech(jlong handle) {
+    if (handle <= 0) return nullptr;
+    return reinterpret_cast<LocalSpeech *>(static_cast<intptr_t>(handle));
+}
 
 // Bytes of one request/response host call; null input goes to the host so its own validation answers.
 template <typename Call> jbyteArray host_request(JNIEnv *env, jbyteArray request, Call call) {
@@ -927,7 +930,7 @@ JNIEXPORT void JNICALL Java_app_msime_android_NativeClient_localSpeechCancelRaw(
     if (LocalSpeech *state = speech(handle)) state->cancelled->store(true);
 }
 JNIEXPORT void JNICALL Java_app_msime_android_NativeClient_localSpeechDestroyRaw(JNIEnv *, jclass, jlong handle) {
-    delete speech(handle);
+    if (handle > 0) delete speech(handle);
 }
 // Drops models no session has used for `idleMillis`; 0 drops every model not in use. Returns how many were dropped.
 JNIEXPORT jint JNICALL Java_app_msime_android_NativeClient_localSpeechReleaseRaw(JNIEnv *, jclass, jlong idleMillis) {

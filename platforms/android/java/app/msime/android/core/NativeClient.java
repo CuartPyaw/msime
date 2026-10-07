@@ -333,7 +333,7 @@ public final class NativeClient {
      */
     public static String localSpeechStart(long handle, String modelDirectory, String language,
                                           String hotwords, int threads) {
-        if (handle == 0) throw new IllegalArgumentException("Invalid local speech handle");
+        NativeHandlePolicy.requirePositive(handle);
         byte[] error = localSpeechStartRaw(handle, utf8(modelDirectory), utf8(language),
             utf8(hotwords), threads);
         return error == null ? null : text(error);
@@ -341,24 +341,28 @@ public final class NativeClient {
 
     /** Feed 16 kHz mono PCM16. Returns the transcript so far when it changed, else null. Throws IllegalStateException once cancelled or on a recognizer failure. */
     public static String localSpeechAccept(long handle, short[] pcm, int count) {
-        if (handle == 0) throw new IllegalArgumentException("Invalid local speech handle");
+        NativeHandlePolicy.requirePositive(handle);
         byte[] partial = localSpeechAcceptRaw(handle, pcm, count);
         return partial == null ? null : text(partial);
     }
 
     /** Flush and return the whole transcript. Throws IllegalStateException once cancelled or on failure. */
     public static String localSpeechFinish(long handle) {
-        if (handle == 0) throw new IllegalArgumentException("Invalid local speech handle");
+        NativeHandlePolicy.requirePositive(handle);
         return text(localSpeechFinishRaw(handle));
     }
 
     /** Any thread, while the handle is alive: stops a decode in progress. */
     public static void localSpeechCancel(long handle) {
-        if (handle != 0) localSpeechCancelRaw(handle);
+        if (!NativeHandlePolicy.isOptional(handle))
+            throw new IllegalArgumentException("Invalid local speech handle");
+        if (handle > 0) localSpeechCancelRaw(handle);
     }
 
     public static void localSpeechDestroy(long handle) {
-        if (handle != 0) localSpeechDestroyRaw(handle);
+        if (!NativeHandlePolicy.isOptional(handle))
+            throw new IllegalArgumentException("Invalid local speech handle");
+        if (handle > 0) localSpeechDestroyRaw(handle);
     }
 
     /** Drop loaded models idle for `idleMillis`, or every model not in use for 0. */
