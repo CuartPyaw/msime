@@ -36,8 +36,7 @@ pub struct PinnedFile {
 
 impl Lock {
     pub fn load(path: &Path) -> Result<Self> {
-        let text =
-            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        let text = crate::text::read(path).with_context(|| format!("reading {}", path.display()))?;
         serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
     }
 
@@ -460,6 +459,31 @@ mod tests {
             },
             files: vec![file],
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lock_load_rejects_a_fifo_without_blocking() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("sources.lock.json");
+        assert!(std::process::Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .unwrap()
+            .success());
+        let (done, result) = mpsc::channel();
+        let worker_path = path.clone();
+        let worker = std::thread::spawn(move || {
+            done.send(Lock::load(&worker_path).is_err()).unwrap();
+        });
+        assert!(
+            result.recv_timeout(Duration::from_secs(1)).unwrap(),
+            "FIFO lock input must be rejected without blocking"
+        );
+        worker.join().unwrap();
     }
 
     /// 带指定 references 和 Mozc 修订的锁文件，不固定任何文件。

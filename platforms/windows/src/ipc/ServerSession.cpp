@@ -484,12 +484,26 @@ nlohmann::json ServerSession::update_preferences(uint64_t epoch,
   check_active(epoch);
   const auto document = nlohmann::json::parse(snapshot);
   const auto next_preferences = document.at("preferences");
+  const bool cloud_changed = preferences_.value("cloud_candidates", true) !=
+                             next_preferences.value("cloud_candidates", true);
+  const auto previous_ai = preferences_.value("ai_assistant", nlohmann::json::object());
+  const auto next_ai = next_preferences.value("ai_assistant", nlohmann::json::object());
+  const bool ai_changed = previous_ai != next_ai;
   const bool translation_changed =
       translation_preferences_changed(preferences_, next_preferences);
   auto result = response(msime_client_update_preferences(
       session_, reinterpret_cast<const uint8_t *>(snapshot.data()),
       snapshot.size()));
   preferences_ = next_preferences;
+  const auto clear_online = [&](uint8_t source) {
+    auto cleared = response(msime_client_clear_online_candidates(session_, source));
+    if (cleared.contains("view") && cleared.at("view").is_object())
+      result["view"] = std::move(cleared.at("view"));
+  };
+  if (cloud_changed)
+    clear_online(0);
+  if (ai_changed)
+    clear_online(1);
   traditional_output_ = next_preferences.value(
       "traditional_chinese_output", false);
   if (translation_changed && result.contains("view") &&

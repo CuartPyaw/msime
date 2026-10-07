@@ -2,7 +2,7 @@ import inputMethodEngine from '@ohos.inputMethodEngine';
 import fs from '@ohos.file.fs';
 import util from '@ohos.util';
 import client from 'libmsimeclient.so';
-import { utf8Length } from './Utf8';
+import { utf8Length, utf8WriteComplete } from './Utf8';
 import { TextPolicy } from './TextPolicy';
 import { KeyboardLog, describeError } from './KeyboardLog';
 import { DictionaryMaintenancePolicy } from './DictionaryMaintenancePolicy';
@@ -4909,7 +4909,8 @@ export class KeyboardSession implements HardwareKeyTarget {
       const handle: fs.File = fs.openSync(staging,
         fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
       try {
-        fs.writeSync(handle.fd, text);
+        const written: number = fs.writeSync(handle.fd, text);
+        if (!utf8WriteComplete(text, written)) throw new Error('private_write');
       } finally {
         fs.closeSync(handle);
       }

@@ -294,7 +294,12 @@ import {
   KeyPressFlush,
 } from "../entry/src/main/ets/keyboard/KeyIdPolicy";
 import { OnlineCandidatePolicy } from "../entry/src/main/ets/keyboard/candidate/OnlineCandidatePolicy";
-import { MAX_SESSION_BYTES, sessionFitsStorage } from "../entry/src/main/ets/account/AccountSessionPolicy";
+import { utf8WriteComplete } from "../entry/src/main/ets/keyboard/Utf8";
+import {
+  MAX_SESSION_BYTES,
+  sessionFitsStorage,
+  sessionWriteComplete,
+} from "../entry/src/main/ets/account/AccountSessionPolicy";
 import {
   TranslationPolicy,
   TranslationQuery,
@@ -801,6 +806,21 @@ group("bounds persisted account sessions by UTF-8 bytes", () => {
   check(sessionFitsStorage("a".repeat(MAX_SESSION_BYTES)), "ASCII session at the byte limit fits");
   check(!sessionFitsStorage("你".repeat(Math.floor(MAX_SESSION_BYTES / 3) + 1)),
     "multibyte session above the byte limit is refused");
+  check(sessionWriteComplete("synthetic", 9),
+    "a complete ASCII session write is accepted");
+  check(!sessionWriteComplete("synthetic", 8),
+    "a short ASCII session write is refused");
+  check(sessionWriteComplete("你", 3),
+    "a complete multibyte session write uses UTF-8 bytes");
+  check(!sessionWriteComplete("你", 2),
+    "a short multibyte session write is refused");
+});
+
+group("private text writes require every UTF-8 byte", () => {
+  check(utf8WriteComplete("synthetic", 9), "a complete private text write is accepted");
+  check(!utf8WriteComplete("synthetic", 8), "a short private text write is refused");
+  check(utf8WriteComplete("你", 3), "a multibyte private text write uses UTF-8 bytes");
+  check(!utf8WriteComplete("你", 2), "a short multibyte private text write is refused");
 });
 
 group("AI 候选逐条跳过无效结构，保留相邻的有效候选", () => {
