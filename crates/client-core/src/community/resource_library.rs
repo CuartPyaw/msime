@@ -90,10 +90,11 @@ impl CommunityResourceLibraryStore {
         if !metadata.file_type().is_file() || metadata.len() > MAXIMUM_BYTES {
             return Err(CommunityResourceLibraryError::Invalid);
         }
-        let bytes =
-            crate::bounded_io::read_bounded_file(File::open(&self.file)?, MAXIMUM_BYTES, || {
-                CommunityResourceLibraryError::Invalid
-            })?;
+        let bytes = crate::bounded_io::read_bounded_file(
+            crate::storage::open_private_file(&self.file)?,
+            MAXIMUM_BYTES,
+            || CommunityResourceLibraryError::Invalid,
+        )?;
         let items: Vec<CommunityResource> = from_slice(&bytes)?;
         if items.len() > MAXIMUM_ITEMS || items.iter().any(|item| !is_valid_reply(item)) {
             return Err(CommunityResourceLibraryError::Invalid);
