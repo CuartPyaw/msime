@@ -1,4 +1,5 @@
 #import "MSIMEClientSession.h"
+#import "TextClient.h"
 #include "msime_client.h"
 #include <cassert>
 #include <initializer_list>
@@ -46,6 +47,7 @@ static NSDictionary *reload(MSIMEClientSession *session, NSString *directory, BO
 
 int main() {
     @autoreleasepool {
+        MSIMEApplyTransition((NSDictionary *)@[], nil);
         for (id invalid in @[@YES, @1.5, @1e30, @(-1), @0, @"1", NSNull.null]) {
             gSnapshotIntegerProbeCalled = NO;
             NSDictionary *discarded = [SnapshotIntegerProbe discardSnapshot:@{ @"handle": invalid }];
