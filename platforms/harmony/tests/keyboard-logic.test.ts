@@ -8846,6 +8846,21 @@ group("profile updates preserve the session and cannot outlive logout", () => {
         "native rename enforces the 64-character limit",
       );
       check(calls.length === beforeInvalid, "an oversized nickname never reaches transport");
+      const malformed = await bridge.handle(
+        JSON.stringify({ operation: "rename", display_name: "bad\u0085name" }),
+      );
+      check(
+        JSON.parse(malformed).error === "account_invalid",
+        "a C1 control in a nickname is refused locally",
+      );
+      const surrogate = await bridge.handle(
+        JSON.stringify({ operation: "rename", display_name: "bad\ud800name" }),
+      );
+      check(
+        JSON.parse(surrogate).error === "account_invalid",
+        "an unpaired surrogate in a nickname is refused locally",
+      );
+      check(calls.length === beforeInvalid, "malformed nicknames never reach transport");
     });
 
   let lateStored: string | null = original;

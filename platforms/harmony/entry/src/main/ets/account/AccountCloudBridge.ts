@@ -1,6 +1,7 @@
 import { utf8Length } from "../keyboard/Utf8";
 import { CustomKeyboardSkin, CustomSkinDocument } from "../keyboard/skin/CustomKeyboardSkin";
 import { CloudClipboardPolicy } from "../keyboard/clipboard/CloudClipboardPolicy";
+import { TextPolicy } from "../keyboard/TextPolicy";
 
 export type AccountTransportResponse = { status: number; body: string; contentLength?: number };
 export type AccountDownloadResponse = {
@@ -146,10 +147,9 @@ function validCommunityText(
   if (typeof value !== "string") return false;
   const characters = [...value];
   if (characters.length < minimum || characters.length > maximum) return false;
-  return !characters.some((character) => {
+  return TextPolicy.validUnicode(value) && !characters.some((character) => {
     if (multiline && (character === "\n" || character === "\t")) return false;
-    const code = character.codePointAt(0) ?? 0;
-    return code <= 0x1f || code === 0x7f;
+    return TextPolicy.hasControl(character);
   });
 }
 
@@ -618,10 +618,8 @@ function validString(value: unknown, maximum: number, allowEmpty = false): value
     typeof value === "string" &&
     (allowEmpty || value.length > 0) &&
     value.length <= maximum &&
-    ![...value].some((character) => {
-      const code = character.codePointAt(0) ?? 0;
-      return code <= 0x1f || code === 0x7f;
-    })
+    !TextPolicy.hasControl(value) &&
+    TextPolicy.validUnicode(value)
   );
 }
 
