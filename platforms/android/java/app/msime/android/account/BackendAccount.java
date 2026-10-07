@@ -444,13 +444,14 @@ public final class BackendAccount {
     static boolean validChatModels(List<ChatModel> models, String defaultModel) {
         if (models == null || models.isEmpty() || models.size() > MAX_CHAT_MODELS || defaultModel == null
                 || defaultModel.isEmpty() || TextPolicy.utf8Length(defaultModel) > 200
-                || TextPolicy.hasControl(defaultModel))
+                || TextPolicy.hasControl(defaultModel) || !TextPolicy.validUnicode(defaultModel))
             return false;
         java.util.HashSet<String> ids = new java.util.HashSet<>(models.size());
         boolean hasDefault = false;
         for (ChatModel model : models) {
             if (model == null || model.id() == null || model.id().isEmpty()
                     || TextPolicy.utf8Length(model.id()) > 200 || TextPolicy.hasControl(model.id())
+                    || !TextPolicy.validUnicode(model.id())
                     || !ids.add(model.id())) return false;
             if (defaultModel.equals(model.id())) hasDefault = true;
         }
@@ -459,7 +460,7 @@ public final class BackendAccount {
 
     static boolean validChatRequest(List<ChatMessage> messages, String model) {
         if (model == null || model.isEmpty() || TextPolicy.utf8Length(model) > 200
-                || TextPolicy.hasControl(model)
+                || TextPolicy.hasControl(model) || !TextPolicy.validUnicode(model)
                 || messages == null || messages.isEmpty() || messages.size() > 16) return false;
         int bytes = 0;
         for (ChatMessage message : messages) {
@@ -467,7 +468,8 @@ public final class BackendAccount {
                     || "system".equals(message.role())) || message.content() == null
                     || message.content().trim().isEmpty()
                     || TextPolicy.utf8Length(message.content()) > 16 * 1024
-                    || TextPolicy.hasControlExceptWhitespace(message.content())) return false;
+                    || TextPolicy.hasControlExceptWhitespace(message.content())
+                    || !TextPolicy.validUnicode(message.content())) return false;
             bytes += TextPolicy.utf8Length(message.content());
         }
         return bytes <= 64 * 1024;
@@ -476,12 +478,14 @@ public final class BackendAccount {
     static boolean validChatResponse(String role, String content) {
         return "assistant".equals(role) && content != null && !content.trim().isEmpty()
             && TextPolicy.utf8Length(content) <= 16 * 1024
-            && !TextPolicy.hasControlExceptWhitespace(content);
+            && !TextPolicy.hasControlExceptWhitespace(content)
+            && TextPolicy.validUnicode(content);
     }
 
     static boolean validChatReplyText(String content) {
         return content != null && !content.trim().isEmpty()
-            && TextPolicy.utf8Length(content) <= MAX_CHAT_REPLY_BYTES;
+            && TextPolicy.utf8Length(content) <= MAX_CHAT_REPLY_BYTES
+            && TextPolicy.validUnicode(content);
     }
 
     /** Sends one bounded non-streaming chat request; callers must run it off the UI thread. */
