@@ -16,4 +16,8 @@ public final class PreferencesSavePolicy {
         return operation == currentOperation && targetSession == currentSession
             && Objects.equals(targetDirectory, currentDirectory);
     }
+
+    public static boolean isCurrentOperation(long operation, long currentOperation) {
+        return operation == currentOperation;
+    }
 }

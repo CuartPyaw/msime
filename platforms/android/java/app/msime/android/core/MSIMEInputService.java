@@ -1228,6 +1228,7 @@ public final class MSIMEInputService extends InputMethodService {
         imeLetterRows.cancelBackspaceRepeat();
         cancelInputViewRefresh();
         engineStartGeneration++;
+        localSettingSaveGeneration++;
         cancelPersonalDictionarySynchronization();
         stop(false);
         schedulePersonalDictionarySynchronization(true);
@@ -6392,8 +6393,8 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     private void finishLocalPanelSetting(long operation, String label, AndroidLocalSettings.Snapshot saved) {
+        if (!PreferencesSavePolicy.isCurrentOperation(operation, localSettingSaveGeneration)) return;
         panelPreferenceSaving = false;
-        if (operation != localSettingSaveGeneration) return;
         if (saved == null) {
             preferencesNotice = " · " + label + "保存失败，保留原设置";
             Toast.makeText(this, label + "未能保存", Toast.LENGTH_SHORT).show();
