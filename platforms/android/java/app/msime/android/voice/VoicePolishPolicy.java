@@ -37,17 +37,21 @@ public final class VoicePolishPolicy {
     public static boolean usable(String endpoint, String model, String token, String prompt) {
         return TextPolicy.validAuthority(endpoint, "https://", AiPolishConfiguration.MAX_ENDPOINT_LENGTH)
             && model != null && !model.trim().isEmpty() && model.length() <= 512
-            && !TextPolicy.hasControl(model)
+            && !TextPolicy.hasControl(model) && TextPolicy.validUnicode(model)
             && token != null && !token.trim().isEmpty() && token.length() <= 16 * 1024
-            && !TextPolicy.hasControl(token)
+            && !TextPolicy.hasControl(token) && TextPolicy.validUnicode(token)
             && prompt != null && !prompt.trim().isEmpty()
-            && TextPolicy.utf8Length(prompt) <= MAX_PROMPT_BYTES;
+            && TextPolicy.utf8Length(prompt) <= MAX_PROMPT_BYTES
+            && !TextPolicy.hasControlExceptWhitespace(prompt)
+            && TextPolicy.validUnicode(prompt);
     }
 
     /** Whether a transcript is worth sending: empty or absurdly long is not. */
     public static boolean sendable(String text) {
         return text != null && !text.trim().isEmpty()
-            && TextPolicy.utf8Length(text) <= MAX_TEXT_BYTES;
+            && TextPolicy.utf8Length(text) <= MAX_TEXT_BYTES
+            && !TextPolicy.hasControlExceptWhitespace(text)
+            && TextPolicy.validUnicode(text);
     }
 
     /**
