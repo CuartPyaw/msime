@@ -83,6 +83,10 @@ public final class DoubaoAsrPolicySmoke {
                 "Doubao accepts string transcripts");
             check("".equals(strictText.invoke(null, 42)),
                 "Doubao rejects numeric transcripts instead of coercing them");
+            check("".equals(strictText.invoke(null, "好\u0000")),
+                "Doubao rejects control characters before display");
+            check("".equals(strictText.invoke(null, "好\uD800")),
+                "Doubao rejects unpaired surrogates before display");
             Method strictPayload = DoubaoAsrPolicy.class.getDeclaredMethod("strictPayload", Object.class);
             strictPayload.setAccessible(true);
             check("{\"result\":{}}".equals(strictPayload.invoke(null, "{\"result\":{}}")),

@@ -112,6 +112,10 @@ public final class HttpAsrPolicySmoke {
                 "HTTP ASR rejects numeric transcripts instead of coercing them");
             check("".equals(strictText.invoke(null, "字".repeat(2001))),
                 "HTTP ASR rejects an oversized transcript before display");
+            check("".equals(strictText.invoke(null, "好\u0000")),
+                "HTTP ASR rejects control characters before display");
+            check("".equals(strictText.invoke(null, "好\uD800")),
+                "HTTP ASR rejects unpaired surrogates before display");
         } catch (ReflectiveOperationException error) {
             throw new AssertionError("HTTP ASR response parser unavailable", error);
         }
