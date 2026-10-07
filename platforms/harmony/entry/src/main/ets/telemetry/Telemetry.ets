@@ -249,25 +249,10 @@ export class HarmonyTelemetry {
           return;
         }
       }
-      // A dangling link is invisible to accessSync but openSync would follow it when CREATE is set.
-      let pathStat: fs.Stat | null = null;
-      try {
-        pathStat = fs.lstatSync(path);
-      } catch {
-        // The record does not exist yet.
-      }
-      if (pathStat !== null && pathStat.isSymbolicLink()) {
-        return;
-      }
       if (fs.accessSync(path)) {
         return;
       }
-      const file: fs.File = fs.openSync(path, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY);
-      try {
-        fs.writeSync(file.fd, TelemetryPolicy.recordText(report));
-      } finally {
-        fs.closeSync(file);
-      }
+      HarmonyTelemetry.atomicWrite(path, TelemetryPolicy.recordText(report), false);
     } catch (error) {
       KeyboardLog.error(`telemetry: crash record not written: ${describeError(error)}`);
     }
@@ -315,24 +300,35 @@ export class HarmonyTelemetry {
       if (!HarmonyTelemetry.prepareTelemetryDirectory()) {
         return;
       }
-      let stat: fs.Stat | null = null;
+      HarmonyTelemetry.atomicWrite(path, JSON.stringify(remembered), true);
+    } catch (error) {
+      KeyboardLog.error(`telemetry: keyboard process not remembered: ${describeError(error)}`);
+    }
+  }
+
+  private static atomicWrite(path: string, text: string, replaceExisting: boolean): boolean {
+    const staging: string = `${path}.${util.generateRandomUUID(false)}.tmp`;
+    let renamed: boolean = false;
+    try {
+      const file: fs.File = fs.openSync(staging,
+        fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
       try {
-        stat = fs.lstatSync(path);
-      } catch {
-        // The marker does not exist yet.
-      }
-      if (stat !== null && (stat.isSymbolicLink() || !stat.isFile())) {
-        return;
-      }
-      const file: fs.File =
-        fs.openSync(path, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
-      try {
-        fs.writeSync(file.fd, JSON.stringify(remembered));
+        fs.writeSync(file.fd, text);
       } finally {
         fs.closeSync(file);
       }
-    } catch (error) {
-      KeyboardLog.error(`telemetry: keyboard process not remembered: ${describeError(error)}`);
+      if (!replaceExisting && fs.accessSync(path)) return false;
+      fs.renameSync(staging, path);
+      renamed = true;
+      return true;
+    } finally {
+      if (!renamed) {
+        try {
+          if (fs.accessSync(staging)) fs.unlinkSync(staging);
+        } catch {
+          // A failed telemetry write leaves at most its uniquely named staging file.
+        }
+      }
     }
   }
 
