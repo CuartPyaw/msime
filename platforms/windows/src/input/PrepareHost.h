@@ -39,7 +39,7 @@ inline bool write_new_file(const std::filesystem::path &path,
     offset += written;
   }
   if (!CloseHandle(handle)) ok = false;
-  if (!ok) DeleteFileW(path.c_str());
+  if (!ok) (void)remove_private_file(path);
   return ok;
 #else
   const int descriptor = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL |

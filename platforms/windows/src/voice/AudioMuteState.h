@@ -106,7 +106,9 @@ inline bool write_audio_mute_state(const std::filesystem::path &path,
   wchar_t temporary_name[MAX_PATH]{};
   if (!GetTempFileNameW(path.parent_path().c_str(), L"msi", 0, temporary_name))
     return false;
-  const auto remove_temporary = [&] { DeleteFileW(temporary_name); };
+  const auto remove_temporary = [&] {
+    (void)remove_private_file(std::filesystem::path(temporary_name));
+  };
   HANDLE handle = CreateFileW(temporary_name, GENERIC_WRITE, 0, nullptr,
                               OPEN_EXISTING,
                               FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
