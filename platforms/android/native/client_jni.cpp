@@ -107,6 +107,7 @@ constexpr jsize kCandidateGlossResourcesLimit = 4096;
 constexpr jsize kEnglishCompletionRequestLimit = 16384;
 constexpr jsize kEnglishCompletionResourcesLimit = 4096;
 constexpr jsize kShuangpinProfileLimit = 64;
+constexpr jsize kSmartPunctuationRequestLimit = 4096;
 }
 
 extern "C" {
@@ -479,6 +480,9 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_punctuationWith
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_smartPunctuationArmRaw(JNIEnv *env, jclass, jlong handle, jbyteArray request) {
     if (!request) return response(env, msime_client_smart_punctuation_arm(static_cast<uint64_t>(handle), nullptr, 0));
     jsize length = env->GetArrayLength(request);
+    if (length > kSmartPunctuationRequestLimit) {
+        return response(env, msime_client_smart_punctuation_arm(static_cast<uint64_t>(handle), nullptr, 0));
+    }
     jbyte *bytes = env->GetByteArrayElements(request, nullptr);
     if (!bytes) return nullptr;
     char *result = msime_client_smart_punctuation_arm(static_cast<uint64_t>(handle),
@@ -489,6 +493,9 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_smartPunctuatio
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_smartPunctuationDecideRaw(JNIEnv *env, jclass, jlong handle, jbyteArray request) {
     if (!request) return response(env, msime_client_smart_punctuation_decide(static_cast<uint64_t>(handle), nullptr, 0));
     jsize length = env->GetArrayLength(request);
+    if (length > kSmartPunctuationRequestLimit) {
+        return response(env, msime_client_smart_punctuation_decide(static_cast<uint64_t>(handle), nullptr, 0));
+    }
     jbyte *bytes = env->GetByteArrayElements(request, nullptr);
     if (!bytes) return nullptr;
     char *result = msime_client_smart_punctuation_decide(static_cast<uint64_t>(handle),
