@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
@@ -130,14 +130,14 @@ fn is_lowercase_hex(text: &str, length: usize) -> bool {
 impl Dictionary {
     /// 读取 `root/upstream.lock.json` 并与锁文件核对：版本必须是 1；每个上游的提交是 40 位小写十六进制，repository 和 commit 等于锁文件的同名 reference（`mozc` 对应 `lock.mozc`）；每个文件条目的上游名等于 msime 按 `UPSTREAM_FILES` 给它的上游名，并在 upstreams 里有记录；路径不重复。任何一项不符都报错。
     pub fn open(root: PathBuf, lock: &Lock) -> Result<Self> {
-        let path = root.join(UPSTREAM_LOCK);
+        let path = dictionary_checkout_path(&root, UPSTREAM_LOCK)?;
         if !path.is_file() {
             bail!(
                 "{} has no {UPSTREAM_LOCK}; msime's builder needs msime-dictionary at or after the commit that added it",
                 root.display()
             );
         }
-        let text = std::fs::read_to_string(&path)
+        let text = crate::text::read(&path)
             .with_context(|| format!("reading {}", path.display()))?;
         let upstream: UpstreamLock =
             serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
@@ -253,7 +253,7 @@ impl Sources {
             let Some(dictionary) = self.dictionary.as_ref() else {
                 bail!("{path} is msime-dictionary data, which the sources lock no longer pins; pass --dictionary <msime-dictionary checkout>");
             };
-            let resolved = dictionary.root.join(path);
+            let resolved = dictionary_checkout_path(&dictionary.root, path)?;
             if !resolved.is_file() {
                 bail!(
                     "{path} is not in the dictionary checkout at {}",
@@ -288,6 +288,29 @@ impl Sources {
         download(file, &target)?;
         Ok(target)
     }
+}
+
+fn dictionary_checkout_path(root: &Path, path: &str) -> Result<PathBuf> {
+    let relative = Path::new(path);
+    if !relative
+        .components()
+        .all(|component| matches!(component, Component::Normal(_)))
+    {
+        bail!("{path} is not a relative dictionary source path");
+    }
+    let mut resolved = root.to_path_buf();
+    for component in relative.components() {
+        resolved.push(component);
+        match std::fs::symlink_metadata(&resolved) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                bail!("{} is a symbolic link", resolved.display());
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(resolved)
 }
 
 pub fn sha256_file(path: &Path) -> Result<String> {
@@ -485,6 +508,44 @@ mod tests {
 
     fn dictionary_at(checkout: &tempfile::TempDir, lock: &Lock) -> Dictionary {
         Dictionary::open(checkout.path().into(), lock).unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_checkout_parent_link_cannot_escape_the_checkout() {
+        use std::os::unix::fs::symlink;
+
+        let checkout = checkout(&[], json!({"version": 1, "upstreams": {}, "files": []}));
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(checkout.path().join("custom")).unwrap();
+        std::fs::write(outside.path().join("words.txt"), b"synthetic outside words").unwrap();
+        symlink(outside.path(), checkout.path().join("custom/linked")).unwrap();
+        let lock = lock_with_references(&[], ("", String::new()));
+        let sources = Sources {
+            dictionary: Some(dictionary_at(&checkout, &lock)),
+            lock,
+            repository_inputs: checkout.path().into(),
+            cache: checkout.path().into(),
+            offline: true,
+        };
+
+        assert!(sources.pinned("custom/linked/words.txt").is_err());
+        assert!(sources.pinned("custom/../../outside.txt").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_checkout_cannot_read_a_linked_upstream_lock() {
+        use std::os::unix::fs::symlink;
+
+        let checkout = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let lock_file = outside.path().join(UPSTREAM_LOCK);
+        std::fs::write(&lock_file, br#"{"version":1,"upstreams":{},"files":[]}"#).unwrap();
+        symlink(&lock_file, checkout.path().join(UPSTREAM_LOCK)).unwrap();
+        let lock = lock_with_references(&[], ("", String::new()));
+
+        assert!(Dictionary::open(checkout.path().to_path_buf(), &lock).is_err());
     }
 
     #[test]
