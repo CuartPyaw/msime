@@ -176,7 +176,7 @@ export class MusicPlayer {
       return;
     }
     for (let attempt: number = 0; attempt < pack.tracks.length; attempt++) {
-      const allowed: boolean = await this.allowed(pack, this.track);
+      const allowed: boolean = await this.allowed(pack, this.track, generation);
       if (generation !== this.generation) {
         return;
       }
@@ -209,7 +209,7 @@ export class MusicPlayer {
   }
 
   /** Whether a track's declared length is within the pack bound. Read once per track and pack; a track that cannot be read is not played. */
-  private async allowed(pack: MusicPackTracks, index: number): Promise<boolean> {
+  private async allowed(pack: MusicPackTracks, index: number, generation: number): Promise<boolean> {
     const path: string = pack.tracks[index];
     const known: boolean | undefined = this.checked.get(path);
     if (known !== undefined) {
@@ -241,7 +241,9 @@ export class MusicPlayer {
         fs.closeSync(file);
       }
     }
-    this.checked.set(path, allowed);
+    if (MusicPolicy.metadataResultApplies(generation, this.generation)) {
+      this.checked.set(path, allowed);
+    }
     return allowed;
   }
 

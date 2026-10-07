@@ -14692,6 +14692,10 @@ group("background music follows the desktop player's rules", () => {
     "a track plays only within the pack bound",
   );
   check(
+    MusicPolicy.metadataResultApplies(5, 5) && !MusicPolicy.metadataResultApplies(4, 5),
+    "stale music metadata cannot repopulate a newer pack cache",
+  );
+  check(
     !MusicPolicy.trackAllowed(null, 900) && !MusicPolicy.trackAllowed(0, 900),
     "a track whose length is unknown is not played",
   );
