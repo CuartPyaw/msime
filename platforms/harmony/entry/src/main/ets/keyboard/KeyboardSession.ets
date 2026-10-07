@@ -2239,7 +2239,12 @@ export class KeyboardSession implements HardwareKeyTarget {
    */
   private refreshKeyStatistics(): void {
     if (this.stateDirectory.length === 0) return;
+    const generation: number = this.attributeGeneration;
+    const inputClient: inputMethodEngine.InputClient | undefined = this.inputClient;
+    if (inputClient === undefined) return;
     taskpool.execute(readTypingStatisticsEnabled, this.stateDirectory).then((value: Object): void => {
+      if (!TypingStatisticsPolicy.isCurrentGeneration(generation, this.attributeGeneration)
+        || inputClient !== this.inputClient) return;
       this.keyStatisticsEnabled = (value as number) === 1;
       if (!this.keyStatisticsEnabled) {
         this.cancelKeyFlushTimer();

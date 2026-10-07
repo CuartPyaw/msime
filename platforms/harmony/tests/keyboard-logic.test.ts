@@ -512,6 +512,11 @@ group("maps Harmony commits to shared typing-statistics sources", () => {
       TypingStatisticsPolicy.hour(new Date(2026, 8, 19, 23, 59)) === 23,
     "hour buckets use the same local calendar as the day beside them",
   );
+  check(
+    TypingStatisticsPolicy.isCurrentGeneration(7, 7) &&
+      !TypingStatisticsPolicy.isCurrentGeneration(6, 7),
+    "a statistics read only applies to the editor that requested it",
+  );
 });
 
 group("names keys with the shared key heatmap ids and nothing else", () => {
