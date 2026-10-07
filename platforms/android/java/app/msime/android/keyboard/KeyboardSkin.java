@@ -370,8 +370,7 @@ public final class KeyboardSkin {
 
     /** `color` at a fraction of full opacity; any alpha it already carried is replaced. */
     private static String alpha(String color, double value) {
-        return String.format(Locale.ROOT, "#%02X%s", channel(value),
-            color.substring(color.length() - 6));
+        return ColorPolicy.withAlpha(color, channel(value));
     }
 
     public String id() { return id; }
