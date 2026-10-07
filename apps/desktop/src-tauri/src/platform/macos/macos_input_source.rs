@@ -8,7 +8,7 @@
 
 use std::ffi::OsStr;
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -610,11 +610,24 @@ impl Ord for BundleVersion {
 }
 
 fn plist_string(info: &Path, key: &str) -> Option<String> {
-    let output = std::process::Command::new("/usr/bin/plutil")
-        .args(["-extract", key, "raw", "-o", "-"])
-        .arg(info)
-        .output()
-        .ok()?;
+    let file = crate::shared::atomic_file::open_private(info).ok()?;
+    let plist =
+        crate::shared::bounded_body::read_bounded(file, MAX_INFO_PLIST_BYTES as usize).ok()?;
+    let mut command = Command::new("/usr/bin/plutil");
+    command
+        .args(["-extract", key, "raw", "-o", "-", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = command.spawn().ok()?;
+    let mut stdin = child.stdin.take()?;
+    if stdin.write_all(&plist).is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
+    }
+    drop(stdin);
+    let output = child.wait_with_output().ok()?;
     if !output.status.success() {
         return None;
     }
@@ -624,9 +637,6 @@ fn plist_string(info: &Path, key: &str) -> Option<String> {
 /// Read a bundle's version through `plutil`, which accepts both XML and binary property lists. Missing or non-numeric values give `None`.
 pub(crate) fn bundle_version(bundle: &Path) -> Option<BundleVersion> {
     let info = bundle.join("Contents/Info.plist");
-    if !info.is_file() {
-        return None;
-    }
     let short = plist_string(&info, "CFBundleShortVersionString")?;
     let build = plist_string(&info, "CFBundleVersion")?;
     BundleVersion::parse(&short, &build)
@@ -1030,6 +1040,14 @@ mod tests {
         .unwrap();
         assert_eq!(bundle_version(&bundle), None);
         assert_eq!(bundle_version(&root.path().join("missing.app")), None);
+
+        let linked_root = tempdir().unwrap();
+        let linked = versioned_fixture(linked_root.path(), "0.50.0", "7289", b"x");
+        let outside = linked_root.path().join("outside.plist");
+        fs::copy(linked.join("Contents/Info.plist"), &outside).unwrap();
+        fs::remove_file(linked.join("Contents/Info.plist")).unwrap();
+        std::os::unix::fs::symlink(&outside, linked.join("Contents/Info.plist")).unwrap();
+        assert_eq!(bundle_version(&linked), None);
     }
 
     // `bundle_version` reads the plist through `/usr/bin/plutil`, which exists only on macOS. The
