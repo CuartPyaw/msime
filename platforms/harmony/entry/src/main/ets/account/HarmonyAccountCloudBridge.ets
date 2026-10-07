@@ -358,6 +358,9 @@ export class HarmonyAccountCloudBridge {
         return this.failure('account_storage');
       }
       if (!fs.accessSync(directory)) fs.mkdirSync(directory, true);
+      if (!this.safeDirectory(directory)) {
+        return this.failure('account_storage');
+      }
       const downloaded = await this.bridge.downloadAuthenticated(
         `/v1/users/me/dictionaries/${kind}/export?format=${format}`,
         staging, MAX_DICTIONARY_EXPORT_BYTES, 'text/plain');
