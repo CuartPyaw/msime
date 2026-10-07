@@ -1,11 +1,14 @@
 #pragma once
 
+#include <array>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <cerrno>
 #include <cstdio>
 #include <filesystem>
+#include <fcntl.h>
 #include <fstream>
 #include <functional>
 #include <iterator>
@@ -13,7 +16,9 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <sys/stat.h>
 #include <system_error>
+#include <unistd.h>
 #include <vector>
 
 #include "CandidateColors.h"
@@ -441,16 +446,29 @@ inline std::optional<FcitxThemeOverlay> stage_fcitx_overlay(const std::filesyste
   if (std::find(std::begin(kinds), std::end(kinds), extension) == std::end(kinds)) return std::nullopt;
   std::error_code error;
   if (!std::filesystem::is_regular_file(source, error)) return std::nullopt;
+  const int descriptor = ::open(source.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  if (descriptor < 0) return std::nullopt;
+  struct CloseOnExit {
+    int descriptor;
+    ~CloseOnExit() { ::close(descriptor); }
+  } close_on_exit{descriptor};
+  struct stat metadata {};
+  if (::fstat(descriptor, &metadata) != 0 || !S_ISREG(metadata.st_mode)) return std::nullopt;
   std::string bytes;
-  {
-    std::ifstream in(source, std::ios::binary);
-    if (!in) return std::nullopt;
-    std::vector<char> buffer(64 * 1024);
-    while (in && bytes.size() <= kFcitxOverlayMaxBytes) {
-      in.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-      bytes.append(buffer.data(), static_cast<std::size_t>(in.gcount()));
+  bytes.reserve(std::min<std::uintmax_t>(metadata.st_size, kFcitxOverlayMaxBytes));
+  std::array<char, 64 * 1024> buffer{};
+  for (;;) {
+    const ssize_t count = ::read(descriptor, buffer.data(), buffer.size());
+    if (count > 0) {
+      const auto size = static_cast<std::size_t>(count);
+      if (size > kFcitxOverlayMaxBytes || bytes.size() > kFcitxOverlayMaxBytes - size)
+        return std::nullopt;
+      bytes.append(buffer.data(), size);
+      continue;
     }
-    if (in.bad()) return std::nullopt;
+    if (count == 0) break;
+    if (errno == EINTR) continue;
+    return std::nullopt;
   }
   if (bytes.empty() || bytes.size() > kFcitxOverlayMaxBytes) return std::nullopt;
   const int width = static_cast<int>(std::lround(decoration.width_dip));
