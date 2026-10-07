@@ -149,6 +149,9 @@ public final class BackendAccountResponseSmoke {
         check(!BackendAccount.validClipboardItem(new BackendAccount.ClipboardItem(
             "a".repeat(64), "safe\u0000hidden", "2026-10-04T00:00:00Z")),
             "add clipboard rejects control characters in the returned text");
+        check(!BackendAccount.validClipboardItem(new BackendAccount.ClipboardItem(
+            "a".repeat(64), "safe", "2026-10-04\uD800")),
+            "clipboard metadata rejects malformed Unicode");
 
         System.out.println("Android account response bounds and fields passed");
     }

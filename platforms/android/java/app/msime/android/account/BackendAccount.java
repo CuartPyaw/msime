@@ -720,7 +720,8 @@ public final class BackendAccount {
                     if (chunk.has("error")) throw new IllegalStateException("chat stream failed");
                     String delta = chunkDelta(chunk);
                     if (delta.isEmpty()) continue;
-                    if (TextPolicy.hasControlExceptWhitespace(delta))
+                    if (TextPolicy.hasControlExceptWhitespace(delta)
+                            || !TextPolicy.validUnicode(delta))
                         throw new IllegalStateException("invalid chat response");
                     int deltaBytes = TextPolicy.utf8Length(delta);
                     if (deltaBytes > MAX_CHAT_REPLY_BYTES - replyBytes)
@@ -740,7 +741,8 @@ public final class BackendAccount {
 
     public ClipboardPage clipboard(String search) throws Exception {
         String token = accessToken();
-        if (token.isEmpty() || search == null || search.length() > 1024 || TextPolicy.hasControl(search))
+        if (token.isEmpty() || search == null || search.length() > 1024 || TextPolicy.hasControl(search)
+                || !TextPolicy.validUnicode(search))
             throw new IllegalStateException("invalid clipboard request");
         String encoded = java.net.URLEncoder.encode(search, StandardCharsets.UTF_8.name()).replace("+", "%20");
         JSONObject response = authorizedRequest("GET", "/v1/users/me/clipboard?q=" + encoded, null, token);
@@ -798,7 +800,8 @@ public final class BackendAccount {
         return item != null && item.id() != null && item.id().matches("[0-9a-f]{" + HEX_ID_LENGTH + "}")
             && CloudClipboardTextPolicy.valid(item.text()) && item.updatedAt() != null
             && !item.updatedAt().isEmpty() && TextPolicy.utf8Length(item.updatedAt()) <= 128
-            && !TextPolicy.hasControl(item.updatedAt());
+            && !TextPolicy.hasControl(item.updatedAt())
+            && TextPolicy.validUnicode(item.updatedAt());
     }
 
     public void deleteClipboard(String id) throws Exception {
