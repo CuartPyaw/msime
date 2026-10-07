@@ -1,10 +1,30 @@
-use std::fs;
+use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::path::Path;
 
 /// 在存储操作跟随已有的符号链接之前先拒绝它。每个应用的存储都会经过的系统链接，以 `msime-path-trust` 列出的为准。
 pub(crate) fn reject_symlink(path: &Path) -> io::Result<()> {
     msime_path_trust::reject_symlinked_components(path)
+}
+
+/// Open a private document without following a leaf symlink. Callers still
+/// validate the opened handle's type, owner and mode; this flag closes the
+/// check-then-open race between those metadata checks and the read itself.
+pub(crate) fn open_private_file(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    options.open(path)
 }
 
 /// Create a directory and report whether the path itself is a real directory.
@@ -49,6 +69,21 @@ pub(crate) fn create_directory_and_check(path: &Path) -> io::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn private_file_open_rejects_a_symlinked_leaf() {
+        use std::os::unix::fs::symlink;
+
+        let outside = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let target = outside.path().join("outside.json");
+        std::fs::write(&target, b"synthetic-private-data").unwrap();
+        let linked = root.path().join("private.json");
+        symlink(&target, &linked).unwrap();
+
+        assert!(open_private_file(&linked).is_err());
+    }
 
     #[cfg(unix)]
     #[test]
