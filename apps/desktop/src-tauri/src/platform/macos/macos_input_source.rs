@@ -27,6 +27,7 @@ const INITIAL_COMMAND_OUTPUT_CAPACITY: usize = 8 * 1024;
 const MAX_INFO_PLIST_BYTES: u64 = 1024 * 1024;
 const MAX_LAUNCH_SERVICES_DUMP_BYTES: usize = 8 * 1024 * 1024;
 const MAX_INPUT_SOURCE_PREFERENCES_BYTES: usize = 1024 * 1024;
+const MAX_PLUTIL_VERSION_BYTES: usize = 1024;
 /// The system-wide input method directory. Nothing this product shipped installed there, but a copy placed by hand competes with the user's; removing it needs an administrator, so it is only reported.
 const SYSTEM_INPUT_METHODS: &str = "/Library/Input Methods";
 
@@ -50,6 +51,10 @@ fn bounded_command_output(command: &mut Command, maximum: usize) -> Option<Vec<u
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
+    bounded_child_output(&mut child, maximum)
+}
+
+fn bounded_child_output(child: &mut std::process::Child, maximum: usize) -> Option<Vec<u8>> {
     let stdout = child.stdout.take()?;
     let mut bytes = Vec::with_capacity(maximum.min(INITIAL_COMMAND_OUTPUT_CAPACITY));
     let read = stdout
@@ -648,11 +653,8 @@ fn plist_string(info: &Path, key: &str) -> Option<String> {
         return None;
     }
     drop(stdin);
-    let output = child.wait_with_output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    String::from_utf8(output.stdout).ok()
+    let output = bounded_child_output(&mut child, MAX_PLUTIL_VERSION_BYTES)?;
+    String::from_utf8(output).ok()
 }
 
 /// Read a bundle's version through `plutil`, which accepts both XML and binary property lists. Missing or non-numeric values give `None`.
@@ -894,11 +896,7 @@ fn preference_list_json(domain: &str, key: &str) -> Option<Vec<u8>> {
         .spawn()
         .ok()?;
     plutil.stdin.take()?.write_all(&exported).ok()?;
-    let output = plutil.wait_with_output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    Some(output.stdout)
+    bounded_child_output(&mut plutil, MAX_INPUT_SOURCE_PREFERENCES_BYTES)
 }
 
 #[cfg(test)]
@@ -926,6 +924,24 @@ mod tests {
         let mut command = Command::new("/bin/sh");
         command.args(["-c", "printf 12345"]);
         assert!(bounded_command_output(&mut command, 4).is_none());
+    }
+
+    #[test]
+    fn bounded_child_output_rejects_oversized_stdout_after_stdin() {
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "cat >/dev/null; printf 12345"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"synthetic-input")
+            .unwrap();
+        assert!(bounded_child_output(&mut child, 4).is_none());
     }
 
     #[cfg(target_os = "macos")]
