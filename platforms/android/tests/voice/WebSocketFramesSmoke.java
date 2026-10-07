@@ -57,6 +57,10 @@ public final class WebSocketFramesSmoke {
             "an accept value for a different key is refused");
         check(!WebSocketFrames.handshakeAccepted(ok.replace("Upgrade: websocket", "Upgrade: h2c"), key),
             "an upgrade to something else is refused");
+        check(!WebSocketFrames.handshakeAccepted(ok.substring(0, ok.length() - 2), key),
+            "a truncated header block is not an upgrade");
+        check(!WebSocketFrames.handshakeAccepted(ok.replace("HTTP/1.1 101 Switching", "HTTP/1.1 101x Switching"), key),
+            "a status line without the required separator is refused");
         check(!WebSocketFrames.handshakeAccepted(
                 ok.replace("\r\n\r\n", "\r\nSec-WebSocket-Extensions: permessage-deflate\r\n\r\n"), key),
             "an extension this host never offered is refused rather than ignored");
@@ -120,6 +124,12 @@ public final class WebSocketFramesSmoke {
         byte[] huge = {(byte) 0x82, 127, 0x7f, -1, -1, -1, -1, -1, -1, -1};
         check(WebSocketFrames.decode(huge, huge.length) == null,
             "a frame this host could not hold is refused rather than allocated");
+        byte[] reservedOpcode = {(byte) 0x83, 0};
+        check(WebSocketFrames.decode(reservedOpcode, reservedOpcode.length) == null,
+            "a reserved data opcode is refused");
+        byte[] reservedControlOpcode = {(byte) 0x8b, 0};
+        check(WebSocketFrames.decode(reservedControlOpcode, reservedControlOpcode.length) == null,
+            "a reserved control opcode is refused");
 
         // Continuation: a long transcript legitimately arrives in pieces.
         byte[] first = {0x02, 0x02, 1, 2};
