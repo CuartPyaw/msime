@@ -101,6 +101,15 @@ public final class TextPolicy {
         return value.length() <= maxChars ? value : value.substring(0, maxChars);
     }
 
+    /** Truncate UTF-16 text without leaving a high surrogate at the end. */
+    public static String clipSurrogateSafe(String value, int maxChars) {
+        if (value == null || maxChars <= 0) return value;
+        if (value.length() <= maxChars) return value;
+        int end = maxChars;
+        if (Character.isHighSurrogate(value.charAt(end - 1))) end--;
+        return value.substring(0, end);
+    }
+
     /** Truncate text to at most {@code maxCodePoints} without splitting a surrogate pair. */
     public static String clipCodePoints(String value, int maxCodePoints) {
         if (value == null || maxCodePoints <= 0) return "";
