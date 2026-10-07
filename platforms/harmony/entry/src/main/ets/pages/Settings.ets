@@ -803,7 +803,6 @@ class SettingsBridge {
       KeyboardLog.error('skin folder name refused');
       return JSON.stringify({ ok: false, error: '皮肤文件夹名不可用' } as TextReply);
     }
-    const destination: string = `${this.stateDirectory}/skins/${name}`;
     try {
       const skinsDirectory: string = `${this.stateDirectory}/skins`;
       if (!this.safeDirectory(this.stateDirectory)) {
@@ -813,12 +812,13 @@ class SettingsBridge {
       if (!this.safeDirectory(skinsDirectory)) {
         return JSON.stringify({ ok: false, error: '导入失败' });
       }
-      if (fs.accessSync(destination)) {
-        // Replacing rather than merging: a half-overwritten skin is a skin whose stylesheet and
-        // assets come from two different versions, which the catalog would list and then draw wrong.
-        StagedResources.removeDirectory(destination);
+      const reply: string = await client.skinImport(JSON.stringify({
+        source: picked[0], directory: skinsDirectory
+      }));
+      const parsed: Record<string, Object> = JSON.parse(reply) as Record<string, Object>;
+      if (parsed['ok'] !== true) {
+        return JSON.stringify({ ok: false, error: '导入失败' } as TextReply);
       }
-      fs.copyDirSync(picked[0], skinsDirectory, 1);
     } catch (error) {
       KeyboardLog.error(`skin import failed: ${describeError(error)}`);
       return JSON.stringify({ ok: false, error: '导入失败' } as TextReply);
