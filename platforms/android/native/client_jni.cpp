@@ -90,6 +90,8 @@ constexpr jsize kSavePreferencesSnapshotLimit = 1 * 1024 * 1024;
 constexpr jsize kLoadPreferencesDirectoryLimit = 16384;
 constexpr jsize kRefreshHostPathLimit = 4096;
 constexpr jsize kSnapshotVersionRequestLimit = 1 * 1024 * 1024;
+constexpr jsize kSnapshotPrepareRequestLimit = 1 * 1024 * 1024;
+constexpr jsize kSnapshotPreparePathLimit = 16384;
 }
 
 extern "C" {
@@ -365,9 +367,12 @@ JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_snapshotVersion
 JNIEXPORT jbyteArray JNICALL Java_app_msime_android_NativeClient_snapshotPrepareRaw(JNIEnv *env, jclass, jbyteArray request, jbyteArray file) {
     if (!request || !file) return response(env, msime_client_snapshot_prepare(nullptr, 0, nullptr, nullptr));
     jsize request_length = env->GetArrayLength(request);
+    jsize file_length = env->GetArrayLength(file);
+    if (request_length > kSnapshotPrepareRequestLimit || file_length > kSnapshotPreparePathLimit) {
+        return response(env, msime_client_snapshot_prepare(nullptr, 0, nullptr, nullptr));
+    }
     jbyte *request_bytes = env->GetByteArrayElements(request, nullptr);
     if (!request_bytes) return nullptr;
-    jsize file_length = env->GetArrayLength(file);
     jbyte *file_bytes = env->GetByteArrayElements(file, nullptr);
     if (!file_bytes) {
         env->ReleaseByteArrayElements(request, request_bytes, JNI_ABORT);
