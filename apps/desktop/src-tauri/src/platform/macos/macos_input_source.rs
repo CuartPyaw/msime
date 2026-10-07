@@ -100,7 +100,7 @@ fn validate_bundle(source: &Path) -> Result<(), InstallError> {
         return Err(InstallError::InvalidBundle);
     }
     let plist = crate::shared::bounded_body::read_bounded(
-        fs::File::open(info).map_err(|_| InstallError::InvalidBundle)?,
+        crate::shared::atomic_file::open_private(&info).map_err(|_| InstallError::InvalidBundle)?,
         MAX_INFO_PLIST_BYTES as usize,
     )
     .map_err(|_| InstallError::InvalidBundle)?;
@@ -252,7 +252,7 @@ fn carries_product_identifier(bundle: &Path) -> bool {
     if is_symlink(&info).unwrap_or(true) {
         return false;
     }
-    let Ok(file) = fs::File::open(&info) else {
+    let Ok(file) = crate::shared::atomic_file::open_private(&info) else {
         return false;
     };
     let Ok(plist) = crate::shared::bounded_body::read_bounded(file, MAX_INFO_PLIST_BYTES as usize)
