@@ -1172,7 +1172,20 @@ class SettingsBridge {
     }
     fs.mkdirSync(destination);
     for (const name of scan.files) {
-      await fs.copyFile(`${picked}/${name}`, `${destination}/${name}`);
+      const sourcePath: string = `${picked}/${name}`;
+      const destinationPath: string = `${destination}/${name}`;
+      const file: fs.File = fs.openSync(sourcePath, fs.OpenMode.READ_ONLY);
+      try {
+        const pathStat: fs.Stat = fs.lstatSync(sourcePath);
+        const opened: fs.Stat = fs.statSync(file.fd);
+        if (pathStat.isSymbolicLink() || !pathStat.isFile()
+          || !opened.isFile() || opened.ino !== pathStat.ino) {
+          return { ok: false, error: 'plugin_invalid', detail: `${name} 文件发生变化` };
+        }
+        await fs.copyFile(file.fd, destinationPath);
+      } finally {
+        fs.closeSync(file);
+      }
     }
     return null;
   }
