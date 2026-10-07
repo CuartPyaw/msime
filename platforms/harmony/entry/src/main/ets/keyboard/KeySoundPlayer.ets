@@ -11,6 +11,7 @@ import fs from '@ohos.file.fs';
 import common from '@ohos.app.ability.common';
 import client from 'libmsimeclient.so';
 import { KeyboardLog, describeError } from './KeyboardLog';
+import { StagedResources } from './StagedResources';
 import {
   KEY_SOUNDS_OFF, KeySoundCue, KeySoundEvent, KeySoundManifestStat, KeySoundMelody, KeySoundPackFiles,
   KeySoundPolicy, KeySoundSampleRequest, KeySoundSelection, KeySoundSettings
@@ -219,6 +220,7 @@ export class KeySoundPlayer {
 
   private async load(generation: number): Promise<void> {
     if (generation !== this.generation) {
+      this.clearGeneration(generation);
       return;
     }
     // Stamped before the packs are read, so a change while they are read is seen by the next recheck rather than missed.
@@ -270,6 +272,7 @@ export class KeySoundPlayer {
       fs.mkdirSync(directory, true);
       await this.prepare(generation, pool, requests[index], directory, maxMillis);
       if (generation !== this.generation) {
+        this.clearGeneration(generation);
         return;
       }
     }
@@ -384,11 +387,19 @@ export class KeySoundPlayer {
       return;
     }
     try {
-      if (fs.accessSync(this.cacheRoot)) {
-        fs.rmdirSync(this.cacheRoot);
-      }
+      StagedResources.removeDirectory(this.cacheRoot);
     } catch (error) {
       KeyboardLog.error(`rendered key sounds not removed: ${describeError(error)}`);
+    }
+  }
+
+  /** A renderer that was already in flight when release() ran can recreate its generation after the root was removed. */
+  private clearGeneration(generation: number): void {
+    if (this.cacheRoot.length === 0) return;
+    try {
+      StagedResources.removeDirectory(`${this.cacheRoot}/${generation}`);
+    } catch (error) {
+      KeyboardLog.error(`stale rendered key sounds not removed: ${describeError(error)}`);
     }
   }
 }
