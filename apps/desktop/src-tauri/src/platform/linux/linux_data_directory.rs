@@ -136,8 +136,8 @@ fn target_is_empty(target: &Path, default_root: &Path) -> Result<bool, MoveError
     for entry in fs::read_dir(target).map_err(|_| MoveError::InvalidTarget)? {
         let entry = entry.map_err(|_| MoveError::InvalidTarget)?;
         // The marker and staging names are normally tolerated so an interrupted move can be
-        // resumed. They must still be real entries: fs::write(marker) below follows a symlink,
-        // which could otherwise overwrite a file outside the selected data directory.
+        // resumed. They must still be real entries: a linked marker or staging entry is not a
+        // valid data directory, even though publication replaces the marker atomically.
         if entry
             .file_type()
             .map_err(|_| MoveError::InvalidTarget)?
@@ -365,9 +365,8 @@ impl MovePlan {
                 DATA_DIRECTORY_MARKER,
             );
         if wrote_marker
-            && fs::write(
-                target.join(DATA_DIRECTORY_MARKER),
-                b"Metasequoia IME user data directory.\n",
+            && crate::platform::desktop::desktop_data_directory::write_data_marker(
+                &target.join(DATA_DIRECTORY_MARKER),
             )
             .is_err()
         {
