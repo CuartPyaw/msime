@@ -8,7 +8,6 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.view.ViewGroup;
-import java.util.Locale;
 import java.math.BigDecimal;
 import org.json.JSONObject;
 
@@ -187,7 +186,7 @@ public final class KeyboardGeometry {
     }
 
     public static String display(int tenths) {
-        return String.format(Locale.ROOT, "%.1f", tenths / 10.0);
+        return NumberPolicy.decimal1(tenths / 10.0);
     }
 
     public static String displayHeight(int adjustment) {
