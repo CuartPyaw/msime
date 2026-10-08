@@ -248,6 +248,11 @@ public final class ViewPolicy {
             context.getResources().getDisplayMetrics()));
     }
 
+    /** 直接设置文本画笔的像素字号。 */
+    public static void setTextSize(Paint paint, float sizePx) {
+        paint.setTextSize(sizePx);
+    }
+
     /** Set a text view's size in density-independent pixels. */
     public static void setTextSizeDp(TextView view, float sizeDp) {
         view.setTextSize(TypedValue.COMPLEX_UNIT_DIP, sizeDp);
