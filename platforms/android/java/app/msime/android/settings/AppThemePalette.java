@@ -2,7 +2,6 @@ package app.msime.android;
 
 import java.math.BigDecimal;
 import java.math.MathContext;
-import java.util.Locale;
 import org.json.JSONObject;
 
 /**
@@ -201,7 +200,7 @@ public final class AppThemePalette {
 
     /** `#AARRGGBB` 形式，供日志和测试比对。 */
     public static String hex(int color) {
-        return String.format(Locale.ROOT, "#%08X", color);
+        return ColorPolicy.hexArgb(color);
     }
 
     /**
