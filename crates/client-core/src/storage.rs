@@ -6,7 +6,7 @@ use std::fs::OpenOptions;
 use std::fs::{self, File};
 use std::io::{self, Write};
 #[cfg(unix)]
-use std::os::unix::ffi::OsStrExt;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
 use std::path::PathBuf;
 #[cfg(unix)]
@@ -158,6 +158,62 @@ pub(crate) fn open_private_directory_at(directory: &File, name: &OsStr) -> io::R
     Ok(descriptor.into())
 }
 
+#[cfg(unix)]
+pub(crate) fn clone_private_directory(directory: &File) -> io::Result<File> {
+    directory.try_clone()
+}
+
+#[cfg(unix)]
+pub(crate) fn open_private_lock_file_at(directory: &File, name: &OsStr) -> io::Result<File> {
+    let descriptor = rustix::fs::openat(
+        directory,
+        name,
+        rustix::fs::OFlags::RDWR
+            | rustix::fs::OFlags::CREATE
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NONBLOCK,
+        rustix::fs::Mode::from_raw_mode(0o600),
+    )?;
+    Ok(descriptor.into())
+}
+
+#[cfg(unix)]
+pub(crate) fn read_private_directory(directory: &File) -> io::Result<Vec<OsString>> {
+    let entries = rustix::fs::Dir::read_from(directory)?;
+    entries
+        .map(|entry| {
+            let entry = entry?;
+            let name = entry.file_name();
+            if name.to_bytes() == b"." || name.to_bytes() == b".." {
+                return Ok(None);
+            }
+            Ok(Some(OsString::from_vec(name.to_bytes().to_vec())))
+        })
+        .filter_map(|entry| entry.transpose())
+        .collect()
+}
+
+#[cfg(unix)]
+pub(crate) fn create_private_directory_at(parent: &File, name: &OsStr) -> io::Result<()> {
+    rustix::fs::mkdirat(parent, name, rustix::fs::Mode::from_raw_mode(0o700)).map_err(Into::into)
+}
+
+#[cfg(unix)]
+pub(crate) fn remove_private_directory_at(parent: &File, name: &OsStr) -> io::Result<()> {
+    rustix::fs::unlinkat(parent, name, rustix::fs::AtFlags::REMOVEDIR).map_err(Into::into)
+}
+
+#[cfg(unix)]
+pub(crate) fn rename_private_entry(
+    from: &File,
+    from_name: &OsStr,
+    to: &File,
+    to_name: &OsStr,
+) -> io::Result<()> {
+    rustix::fs::renameat(from, from_name, to, to_name).map_err(Into::into)
+}
+
 /// 非 Unix 平台上的「目录句柄」：没有 openat 这组调用，只记下已确认是真实目录（不是符号链接）的路径，`open_private_file_at` 再在它下面按名字打开。和 Unix 版的接口一致，调用方不必分平台。
 #[cfg(not(unix))]
 pub(crate) struct PrivateDirectory(PathBuf);
@@ -171,6 +227,69 @@ pub(crate) fn open_private_directory(parent: &Path) -> io::Result<PrivateDirecto
         ));
     }
     Ok(PrivateDirectory(parent.to_path_buf()))
+}
+
+#[cfg(not(unix))]
+pub(crate) fn clone_private_directory(
+    directory: &PrivateDirectory,
+) -> io::Result<PrivateDirectory> {
+    Ok(PrivateDirectory(directory.0.clone()))
+}
+
+#[cfg(not(unix))]
+pub(crate) fn open_private_directory_at(
+    directory: &PrivateDirectory,
+    name: &OsStr,
+) -> io::Result<PrivateDirectory> {
+    let path = directory.0.join(name);
+    if !fs::symlink_metadata(&path)?.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "private directory is not a real directory",
+        ));
+    }
+    Ok(PrivateDirectory(path))
+}
+
+#[cfg(not(unix))]
+pub(crate) fn open_private_lock_file_at(
+    directory: &PrivateDirectory,
+    name: &OsStr,
+) -> io::Result<File> {
+    crate::file_lock::open_private_lock_file(directory.0.join(name))
+}
+
+#[cfg(not(unix))]
+pub(crate) fn read_private_directory(directory: &PrivateDirectory) -> io::Result<Vec<OsString>> {
+    fs::read_dir(&directory.0)?
+        .map(|entry| entry.map(|entry| entry.file_name()))
+        .collect()
+}
+
+#[cfg(not(unix))]
+pub(crate) fn create_private_directory_at(
+    parent: &PrivateDirectory,
+    name: &OsStr,
+) -> io::Result<()> {
+    fs::create_dir(parent.0.join(name))
+}
+
+#[cfg(not(unix))]
+pub(crate) fn remove_private_directory_at(
+    parent: &PrivateDirectory,
+    name: &OsStr,
+) -> io::Result<()> {
+    fs::remove_dir(parent.0.join(name))
+}
+
+#[cfg(not(unix))]
+pub(crate) fn rename_private_entry(
+    from: &PrivateDirectory,
+    from_name: &OsStr,
+    to: &PrivateDirectory,
+    to_name: &OsStr,
+) -> io::Result<()> {
+    fs::rename(from.0.join(from_name), to.0.join(to_name))
 }
 
 #[cfg(not(unix))]
