@@ -364,7 +364,7 @@ public final class CommonPhrasesStore {
                 packs.add(new Pack(id, name, revision));
             }
         }
-        return new Document(Collections.unmodifiableList(phrases), Collections.unmodifiableList(packs),
+        return new Document(ListPolicy.copyOrEmpty(phrases), ListPolicy.copyOrEmpty(packs),
             nonNegativeInteger(value.opt("skipped"), 0));
     }
 

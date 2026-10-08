@@ -797,6 +797,43 @@ impl Staging {
             Ok(Self { path })
         }
     }
+
+    /// Create the staging directory through the parent descriptor. The path is
+    /// retained for APIs that need it, but must not be used to create the
+    /// directory after the parent has been opened: the root entry may have
+    /// been replaced by a symlink in between those operations.
+    fn create(&self) -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            rustix::fs::mkdirat(
+                &self.parent,
+                &self.name,
+                rustix::fs::Mode::from_raw_mode(0o700),
+            )
+            .map_err(io::Error::from)
+        }
+        #[cfg(not(unix))]
+        {
+            fs::create_dir(&self.path)
+        }
+    }
+
+    fn create_model_directory(&self) -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            let staging = crate::storage::open_private_directory_at(&self.parent, &self.name)?;
+            rustix::fs::mkdirat(
+                &staging,
+                OsStr::new("model"),
+                rustix::fs::Mode::from_raw_mode(0o700),
+            )
+            .map_err(io::Error::from)
+        }
+        #[cfg(not(unix))]
+        {
+            fs::create_dir(self.path.join("model"))
+        }
+    }
 }
 
 impl Drop for Staging {
@@ -823,9 +860,9 @@ pub(crate) fn install_model(
     let _lock = acquire_model_lock(root)?;
     remove_leftovers(root, &model.id);
     let staging = Staging::new(root.join(format!(".staging-{}-{}", model.id, unique_suffix())))?;
-    fs::create_dir(&staging.path)?;
+    staging.create()?;
     let model_dir = staging.path.join("model");
-    fs::create_dir(&model_dir)?;
+    staging.create_model_directory()?;
 
     let total = model.archive.size;
     let archive = staging.path.join("archive.tar.bz2");
@@ -1064,9 +1101,9 @@ pub(crate) fn install_files_with(
     let _lock = acquire_model_lock(root)?;
     remove_leftovers(root, id);
     let staging = Staging::new(root.join(format!(".staging-{}-{}", id, unique_suffix())))?;
-    fs::create_dir(&staging.path)?;
+    staging.create()?;
     let pack_dir = staging.path.join("model");
-    fs::create_dir(&pack_dir)?;
+    staging.create_model_directory()?;
     let partials = partial_directory(root, id)?;
     let result = download_and_publish(
         root, id, files, manifest, mirrors, fetcher, progress, cancel, &pack_dir, &partials,
@@ -1196,9 +1233,9 @@ pub(crate) fn install_archive_members_with(
     let _lock = acquire_model_lock(root)?;
     remove_leftovers(root, id);
     let staging = Staging::new(root.join(format!(".staging-{}-{}", id, unique_suffix())))?;
-    fs::create_dir(&staging.path)?;
+    staging.create()?;
     let pack_dir = staging.path.join("model");
-    fs::create_dir(&pack_dir)?;
+    staging.create_model_directory()?;
     let partials = partial_directory(root, id)?;
     let result = download_and_extract(
         root, id, archive, members, files, manifest, mirrors, fetcher, progress, cancel, &pack_dir,
@@ -1353,9 +1390,9 @@ pub(crate) fn adopt_files(
         names.push(name);
     }
     let staging = Staging::new(root.join(format!(".staging-{}-{}", id, unique_suffix())))?;
-    fs::create_dir(&staging.path)?;
+    staging.create()?;
     let pack_dir = staging.path.join("model");
-    fs::create_dir(&pack_dir)?;
+    staging.create_model_directory()?;
     // 改名之前先落盘来源记录：进程在发布前被杀时，下次收编或安装这个包时按它把文件放回来源（[`restore_interrupted_adoption`]）。
     let mut source_record = create_private_file(&staging.path.join(ADOPTION_SOURCE))?;
     source_record.write_all(record.as_bytes())?;
