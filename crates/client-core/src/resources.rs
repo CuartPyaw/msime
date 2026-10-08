@@ -283,25 +283,27 @@ fn publish_generation(
     staging_name: &str,
     generation: &str,
 ) -> std::io::Result<()> {
-    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
     {
-        return rustix::fs::renameat_with(
+        rustix::fs::renameat_with(
             directory,
             std::ffi::OsStr::new(staging_name),
             directory,
             std::ffi::OsStr::new(generation),
             rustix::fs::RenameFlags::NOREPLACE,
         )
-        .map_err(Into::into);
+        .map_err(Into::into)
     }
-    #[cfg(not(any(target_os = "linux", target_os = "android")))]
-    rustix::fs::renameat(
-        directory,
-        std::ffi::OsStr::new(staging_name),
-        directory,
-        std::ffi::OsStr::new(generation),
-    )
-    .map_err(Into::into)
+    #[cfg(not(any(target_os = "linux", target_os = "android", target_vendor = "apple")))]
+    {
+        rustix::fs::renameat(
+            directory,
+            std::ffi::OsStr::new(staging_name),
+            directory,
+            std::ffi::OsStr::new(generation),
+        )
+        .map_err(Into::into)
+    }
 }
 
 impl ResourceStore {
@@ -717,7 +719,7 @@ mod tests {
         assert!(!outside.join("generation").exists());
     }
 
-    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
     #[test]
     fn generation_publish_does_not_replace_a_generation_created_after_the_check() {
         let root = tempfile::tempdir().unwrap();
@@ -726,7 +728,6 @@ mod tests {
         fs::create_dir(&stage).unwrap();
         fs::write(stage.join("artifact"), b"new").unwrap();
         fs::create_dir(&generation).unwrap();
-        fs::write(generation.join("artifact"), b"old").unwrap();
         let directory = crate::storage::open_private_directory(root.path()).unwrap();
 
         assert_eq!(
@@ -735,7 +736,8 @@ mod tests {
                 .kind(),
             std::io::ErrorKind::AlreadyExists
         );
-        assert_eq!(fs::read(generation.join("artifact")).unwrap(), b"old");
+        assert!(generation.is_dir());
+        assert!(!generation.join("artifact").exists());
         assert_eq!(fs::read(stage.join("artifact")).unwrap(), b"new");
     }
 

@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-Linux 和 Android 使用目录句柄上的 `renameat` 与 `RENAME_NOREPLACE` 原子发布；目标已存在时返回 `AlreadyExists`，保留原 generation 和 staging。其他 Unix 保留现有 `renameat` 兼容路径。
+Linux、Android 和 Apple 使用目录句柄上的 `renameat` 与 `RENAME_NOREPLACE` 原子发布；目标已存在时返回 `AlreadyExists`，保留原 generation 和 staging。其他 Unix 保留现有 `renameat` 兼容路径。
 
 ## Alternatives considered
 
@@ -17,10 +17,10 @@ Linux 和 Android 使用目录句柄上的 `renameat` 与 `RENAME_NOREPLACE` 原
 
 ## Consequences
 
-资源安装不会因发布竞态覆盖已存在的 generation；缓存命中和正常首次发布流程保持不变。
+资源安装不会因发布竞态覆盖已存在的 generation；Linux、Android 和 macOS 都使用系统提供的 no-replace 原子操作，缓存命中和正常首次发布流程保持不变。
 
 ## Verification
 
-`cargo test -p msime-client-core resources::tests:: --lib --locked`：28 passed。
+`cargo test -p msime-client-core resources::tests:: --lib --locked`：29 passed（含 macOS no-replace 回归测试）。
 
 `cargo fmt --all`、`cargo clippy -p msime-client-core --lib --locked -- -D warnings`、`cargo check -p msime-client-core --all-targets --locked` 和 `git diff --check` 通过。
