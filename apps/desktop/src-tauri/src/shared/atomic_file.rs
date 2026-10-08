@@ -4,8 +4,6 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 #[cfg(unix)]
 use std::os::fd::OwnedFd;
-#[cfg(unix)]
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -101,7 +99,7 @@ pub(crate) fn open_private(path: &Path) -> io::Result<File> {
 }
 
 #[cfg(unix)]
-fn open_private_fd(directory: &OwnedFd, name: &OsStr) -> io::Result<File> {
+pub(crate) fn open_private_fd(directory: &OwnedFd, name: &OsStr) -> io::Result<File> {
     let descriptor = rustix::fs::openat(
         directory,
         name,
@@ -184,32 +182,61 @@ pub(crate) fn write(path: &Path, contents: &[u8]) -> io::Result<()> {
 /// directory selected by the path. Callers can then use the descriptor for
 /// all writes, so a replacement of the path cannot redirect the operation.
 #[cfg(unix)]
-fn open_private_directory(parent: &Path) -> io::Result<OwnedFd> {
-    check_directory_ancestors(parent)?;
-    let metadata = std::fs::symlink_metadata(parent)?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "write parent is not a real directory",
-        ));
-    }
-    let directory = rustix::fs::open(
-        parent,
-        rustix::fs::OFlags::RDONLY
-            | rustix::fs::OFlags::DIRECTORY
-            | rustix::fs::OFlags::NOFOLLOW
-            | rustix::fs::OFlags::CLOEXEC
-            | rustix::fs::OFlags::NONBLOCK,
+pub(crate) fn open_private_directory(parent: &Path) -> io::Result<OwnedFd> {
+    let flags = rustix::fs::OFlags::RDONLY
+        | rustix::fs::OFlags::DIRECTORY
+        | rustix::fs::OFlags::NOFOLLOW
+        | rustix::fs::OFlags::CLOEXEC
+        | rustix::fs::OFlags::NONBLOCK;
+    let absolute = parent.is_absolute();
+    let mut directory = rustix::fs::open(
+        if absolute {
+            Path::new("/")
+        } else {
+            Path::new(".")
+        },
+        flags,
         rustix::fs::Mode::empty(),
     )?;
-    let stat = rustix::fs::fstat(&directory)?;
-    if u64::try_from(stat.st_dev).ok() != Some(metadata.dev())
-        || u64::try_from(stat.st_ino).ok() != Some(metadata.ino())
-    {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "write parent directory changed",
-        ));
+    let mut logical = if absolute {
+        PathBuf::from("/")
+    } else {
+        PathBuf::from(".")
+    };
+    for component in parent.components() {
+        match component {
+            std::path::Component::Prefix(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "directory path has an unsupported prefix",
+                ));
+            }
+            std::path::Component::RootDir | std::path::Component::CurDir => continue,
+            std::path::Component::ParentDir => {
+                directory = rustix::fs::openat(&directory, "..", flags, rustix::fs::Mode::empty())?;
+                logical.pop();
+            }
+            std::path::Component::Normal(name) => {
+                logical.push(name);
+                directory =
+                    match rustix::fs::openat(&directory, name, flags, rustix::fs::Mode::empty()) {
+                        Ok(directory) => directory,
+                        Err(error)
+                            if (error == rustix::io::Errno::LOOP
+                                || error == rustix::io::Errno::NOTDIR)
+                                && msime_path_trust::is_trusted_system_alias(&logical) =>
+                        {
+                            rustix::fs::openat(
+                                &directory,
+                                name,
+                                flags & !rustix::fs::OFlags::NOFOLLOW,
+                                rustix::fs::Mode::empty(),
+                            )?
+                        }
+                        Err(error) => return Err(error.into()),
+                    };
+            }
+        }
     }
     Ok(directory)
 }
