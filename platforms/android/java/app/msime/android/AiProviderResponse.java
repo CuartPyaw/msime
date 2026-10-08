@@ -4,10 +4,6 @@ package app.msime.android;
 final class AiProviderResponse {
     private AiProviderResponse() {}
 
-    static String strictContent(Object value) {
-        return JsonPolicy.strictStringOrEmpty(value);
-    }
-
     static String strictText(Object value) {
         return JsonPolicy.strictStringOrEmpty(value);
     }
