@@ -221,7 +221,10 @@ impl InputSession {
 
     /// input_session.cpp:88-245: caret insertion, dedicated English, local modes and their Shift entries, the acceptance gate, then the scheme. Handled iff the preedit changed.
     pub fn handle_character(&mut self, value: u8, shift_only: bool) -> KeyResult {
-        if self.caret_position() < self.editing_text().len() {
+        if self
+            .caret
+            .is_some_and(|caret| caret < self.editing_text().len())
+        {
             return self.insert_at_caret(value);
         }
         self.caret = None;
