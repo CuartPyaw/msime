@@ -210,10 +210,12 @@ public final class KeyboardPreview extends View {
     /** 字号取设计值与键面能容下的较小者，保证标签不出键。 */
     private void fitText(String label, float designSize, RectF bounds) {
         float size = BoundsPolicy.atMost(designSize, bounds.height() * 0.62f);
-        paint.setTextSize(size);
+        ViewPolicy.setTextSize(paint, size);
         float limit = bounds.width() * 0.86f;
         float measured = paint.measureText(label);
-        if (measured > limit && measured > 0f) paint.setTextSize(size * limit / measured);
+        if (measured > limit && measured > 0f) {
+            ViewPolicy.setTextSize(paint, size * limit / measured);
+        }
     }
 
     @Override protected void onDraw(Canvas canvas) {
