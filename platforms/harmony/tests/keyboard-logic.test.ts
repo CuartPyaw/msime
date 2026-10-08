@@ -930,6 +930,10 @@ group("keeps translation provider policy bounded and credential-free in signatur
   );
   const signature = TranslationPolicy.signature(query);
   check(
+    signature !== TranslationPolicy.signature({ ...query, offline_gloss_languages: ["ja"] }),
+    "installing an offline dictionary invalidates the translation request",
+  );
+  check(
     TranslationPolicy.shouldReleaseAfterFailure(signature, signature, 4, 4, 7, 7),
     "a failed current translation request can be retried",
   );
