@@ -102,6 +102,15 @@ public final class SymbolPanelModelSmoke {
         List<String> capped = SymbolPanelModel.appendCatalogPage(List.of(), many);
         check(capped.size() == SymbolPanelModel.MAX_CATALOG_ITEMS && SymbolPanelModel.catalogFull(capped), "capped");
         check(!SymbolPanelModel.catalogFull(List.of("→")), "not full");
+
+        // #6070：设备字体画不出来的符号不显示，否则是一格空白、点了上屏一个看不见的字；颜文字是多个字形，不按单字形判断。
+        java.util.Set<String> missing = java.util.Set.of("⭠", "🩷");
+        check(SymbolPanelModel.renderableCatalogItems(List.of("⬅", "⭠", "❤", "🩷", "❤️"), false,
+            text -> !missing.contains(text)).equals(List.of("⬅", "❤", "❤️")), "undrawable symbols are dropped");
+        check(SymbolPanelModel.renderableCatalogItems(List.of("⭠"), false, text -> false).isEmpty(),
+            "a page with nothing drawable is an empty page, not a failure");
+        check(SymbolPanelModel.renderableCatalogItems(List.of("(ノ°▽°)ノ", "ʕ•ᴥ•ʔ"), true, text -> false)
+            .equals(List.of("(ノ°▽°)ノ", "ʕ•ᴥ•ʔ")), "kaomoji are kept: hasGlyph only answers single glyphs");
     }
 
     private static void check(boolean condition, String message) {

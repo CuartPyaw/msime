@@ -592,8 +592,8 @@ public final class MSIMEInputService extends InputMethodService {
         new ThreadPoolExecutor.AbortPolicy());
     /** 表情目录和符号面板里的颜文字、符号目录都在这条线程上读。 */
     final ExecutorService emojiWorker = Executors.newSingleThreadExecutor();
-    // 只在 `emojiWorker` 线程上使用；`hasGlyph` 会走系统字体回退链，能判断当前设备能否画出某个表情。
-    private final Paint emojiGlyphPaint = new Paint();
+    // 只在 `emojiWorker` 线程上使用（表情目录和符号面板的符号目录都在那条线程上读）；`hasGlyph` 会走系统字体回退链，能判断当前设备能否画出某个表情或符号。
+    final Paint emojiGlyphPaint = new Paint();
     final ExecutorService cloudClipboardWorker = Executors.newSingleThreadExecutor();
     private final ExecutorService candidateGlossWorker = new ThreadPoolExecutor(
         1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(1),

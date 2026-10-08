@@ -1872,6 +1872,8 @@ final class ImePanels {
             SymbolCatalogPage page = null;
             try {
                 page = decodeSymbolCatalogPage(NativeClient.emojiCatalog(query, resources), offset, category.kaomoji());
+                page = new SymbolCatalogPage(SymbolPanelModel.renderableCatalogItems(page.items(),
+                    category.kaomoji(), s.emojiGlyphPaint::hasGlyph), page.nextOffset(), page.complete());
             } catch (JSONException | RuntimeException | LinkageError ignored) {
                 // 读不出目录时面板只说「暂时不可用」，不把资源路径或目录内容写进任何地方。
             }

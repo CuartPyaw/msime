@@ -24,4 +24,4 @@ Status: implemented
 ## Consequences
 
 - **收益**：用户能在 Android 上打开已有的 emoji / 颜文字混输；符号面板多了一千多个颜文字和两千多个符号，数据与其他平台一致、随词库更新，宿主没有多一份表。
-- **代价与缺口**：九键当时不混入 emoji（Engine 的 `NineKeySession` 不走 `mixed`），开关说明写的是「26 键全拼、双拼」；#5848 在 Engine 里给九键补上了这条路径，说明随之改为「全拼（26 键或 9 键）、双拼」，见 [2026-10-08-nine-key-expressive-candidates.md](2026-10-08-nine-key-expressive-candidates.md)。目录分类里有些符号（盲文、国际象棋等）在旧系统字体里可能显示成方框，这次没有像表情面板那样按字形过滤。上级分类是写死的十二个，目录以后新增的上级分类不会自动出现。只在 `check-host.sh`（JVM 冒烟、守卫）上验证，没有在真机上打开过这些分类。
+- **代价与缺口**：九键当时不混入 emoji（Engine 的 `NineKeySession` 不走 `mixed`），开关说明写的是「26 键全拼、双拼」；#5848 在 Engine 里给九键补上了这条路径，说明随之改为「全拼（26 键或 9 键）、双拼」，见 [2026-10-08-nine-key-expressive-candidates.md](2026-10-08-nine-key-expressive-candidates.md)。目录分类里有些符号在旧系统字体里没有字形，起初没有像表情面板那样按字形过滤，#6070 在 Android 11（vivo）上报出「箭头」两行空白格（⭠⭡⭢⭣⭤⭥⮂⮃⮐⮑）和「爱心」里三个空白格（Unicode 15 的 🩷🩵🩶），点了上屏的是看不见的字；之后符号目录的每一页也在 `emojiWorker` 上经同一个 `Paint.hasGlyph` 过滤（`SymbolPanelModel.renderableCatalogItems`），游标仍按扫过的行数前进。颜文字不过滤：`hasGlyph` 只在整串排成一个字形时回答「能画」，对多字形的颜文字一律是「不能」，按它过滤会把颜文字全部去掉；逐个码位判断又会误杀组合附加符号拼出的颜文字，目前没有颜文字显示不出的报告，暂不处理。上级分类是写死的十二个，目录以后新增的上级分类不会自动出现。只在 `check-host.sh`（JVM 冒烟、守卫）上验证，没有在真机上打开过这些分类。
