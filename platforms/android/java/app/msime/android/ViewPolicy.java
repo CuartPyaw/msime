@@ -216,6 +216,11 @@ public final class ViewPolicy {
         view.setTypeface(view.getTypeface(), style);
     }
 
+    /** 直接设置文本视图的字体。 */
+    public static void setTypeface(TextView view, Typeface typeface) {
+        view.setTypeface(typeface);
+    }
+
     /** Apply a default-family typeface with the supplied numeric weight. */
     public static void setTypefaceWeight(TextView view, int weight) {
         view.setTypeface(Typeface.create(Typeface.DEFAULT, weight, false));

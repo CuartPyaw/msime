@@ -292,7 +292,7 @@ final class ImeStyler {
     }
 
     private void applySkinTypeface(Button button, KeyboardSkin target) {
-        button.setTypeface(target.monospaced() ? Typeface.MONOSPACE : Typeface.DEFAULT);
+        ViewPolicy.setTypeface(button, target.monospaced() ? Typeface.MONOSPACE : Typeface.DEFAULT);
     }
 
     /**
@@ -400,7 +400,7 @@ final class ImeStyler {
             TextView text = (TextView) node;
             ViewPolicy.setTextColor(text,
                 candidate ? s.candidateAppearance.text() : color(target.keyForeground()));
-            text.setTypeface(candidate ? candidateTypeface()
+            ViewPolicy.setTypeface(text, candidate ? candidateTypeface()
                 : target.monospaced() ? Typeface.MONOSPACE : Typeface.DEFAULT);
         }
         if (node instanceof android.view.ViewGroup) {
@@ -465,7 +465,7 @@ final class ImeStyler {
             // Idle, this is the brand badge the shared design draws as an outlined pill; composing, it is the reading itself, set in the strip's typeface and its secondary colour above the candidates.
             ViewPolicy.setTextColor(s.preedit, s.brandPillVisible
                 ? color(s.skin.accent()) : s.candidateAppearance.number());
-            s.preedit.setTypeface(candidateTypeface());
+            ViewPolicy.setTypeface(s.preedit, candidateTypeface());
             KeyboardGeometry.setKeyTextSize(s.preedit, s.brandPillVisible ? 12 : s.candidatePreeditFontSize);
             ViewPolicy.setBackground(s.preedit, s.brandPillVisible ? brandPillDrawable() : null);
             ViewPolicy.setPadding(s.preedit, s.pixels(s.brandPillVisible ? 12 : 2),
@@ -476,7 +476,7 @@ final class ImeStyler {
         if (s.status != null) ViewPolicy.setTextColor(s.status, fade(s.skin.accent(), .55));
         if (s.candidatePage != null) {
             ViewPolicy.setTextColor(s.candidatePage, s.candidateAppearance.accent());
-            s.candidatePage.setTypeface(candidateTypeface());
+            ViewPolicy.setTypeface(s.candidatePage, candidateTypeface());
         }
         if (s.layoutAdjustView != null) s.layoutAdjustView.updateSkin(s.skin);
         s.imeFrame.applyOneHanded();
