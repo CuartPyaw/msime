@@ -180,11 +180,6 @@ impl InputSession {
         if items.is_empty() {
             return;
         }
-        let journal = self.journal_path();
-        let journal_exists = journal.try_exists().unwrap_or(false);
-        if !journal_exists && !items.iter().any(|item| item.source.is_online()) {
-            return;
-        }
         let regular = self.local_mode == LocalInputMode::None
             && !self.dedicated_english
             && !matches!(
@@ -195,6 +190,17 @@ impl InputSession {
                     | SchemeType::Zhuyin
                     | SchemeType::Stroke
             );
+        let has_english = items
+            .iter()
+            .any(|item| item.source == CandidateSource::EnglishDictionary);
+        if !regular && self.local_mode != LocalInputMode::SuperJianpin && !has_english {
+            return;
+        }
+        let journal = self.journal_path();
+        let journal_exists = journal.try_exists().unwrap_or(false);
+        if !journal_exists && !items.iter().any(|item| item.source.is_online()) {
+            return;
+        }
         let include_missing = self.engine.request().raw_input.len() == 1;
         let keep_dynamic = self.has_active_helpcode();
         let engine = &self.engine;
@@ -257,10 +263,7 @@ impl InputSession {
                 journal_exists,
             );
         }
-        if items
-            .iter()
-            .any(|item| item.source == CandidateSource::EnglishDictionary)
-        {
+        if has_english {
             let context = self.position_context(true, false);
             apply_fixed_positions_with_state(
                 journal,
