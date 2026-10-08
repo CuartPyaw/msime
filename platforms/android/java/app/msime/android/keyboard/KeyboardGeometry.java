@@ -245,9 +245,7 @@ public final class KeyboardGeometry {
 
     /** Create a vertical container for stacked keyboard content. */
     public static LinearLayout column(Context context) {
-        LinearLayout view = new LinearLayout(context);
-        view.setOrientation(LinearLayout.VERTICAL);
-        return view;
+        return ViewPolicy.newColumn(context);
     }
 
     /** Create a horizontal container for inline keyboard content. */
