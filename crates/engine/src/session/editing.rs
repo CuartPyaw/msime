@@ -48,7 +48,8 @@ impl InputSession {
     /// input_session_editing.cpp:123-159.
     pub(super) fn edit_at_caret(&mut self, command: Command) -> KeyResult {
         let mut text = self.editing_text();
-        let mut caret = self.caret_position();
+        let text_len = text.len();
+        let mut caret = self.caret.unwrap_or(text_len).min(text_len);
         // 本地模式的前缀字母是模式标记，不是可编辑的内容；网址模式没有前缀字母，整段都能编辑。
         let begin = usize::from(!matches!(
             self.local_mode,
