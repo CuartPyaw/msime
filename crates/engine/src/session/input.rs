@@ -302,7 +302,6 @@ impl InputSession {
             self.chain.reset();
         }
 
-        let previous_preedit = self.preedit();
         let key = if value == b'\'' {
             SchemeKey::Apostrophe
         } else if microsoft_final {
@@ -315,10 +314,10 @@ impl InputSession {
             // Only a key the scheme claims gets past the filter above; none of the current schemes claims one here.
             SchemeKey::Symbol(value)
         };
-        self.engine.handle_key(key);
+        let changed = self.engine.handle_key(key);
         self.update_mixed_candidates();
         // A key the scheme ignores (a fifth wubi letter, a second apostrophe) leaves the preedit alone and goes back to the host.
-        if self.preedit() == previous_preedit {
+        if !changed {
             return KeyResult::unhandled();
         }
         self.online_requests.invalidate();
