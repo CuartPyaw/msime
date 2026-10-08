@@ -13,6 +13,23 @@ use crate::types::{
 };
 use crate::user_dictionary::journal::is_user_inserted;
 
+/// 提交只会读取这些候选字段；纠错提示、权重和固定位置由显示层消费，不必随选择复制。
+fn clone_selected_candidate(item: &WordItem, copy_sentence_words: bool) -> WordItem {
+    WordItem {
+        pinyin: item.pinyin.clone(),
+        canonical_pinyin: item.canonical_pinyin.clone(),
+        word: item.word.clone(),
+        source: item.source,
+        scheme: item.scheme,
+        sentence_words: if copy_sentence_words && item.source.is_generated_or_fallback() {
+            item.sentence_words.clone()
+        } else {
+            Vec::new()
+        },
+        ..WordItem::default()
+    }
+}
+
 impl InputSession {
     pub(super) fn select_candidate(&mut self, index: usize) -> KeyResult {
         if let Some(result) = self.select_in_open_list(index) {
@@ -154,7 +171,11 @@ impl InputSession {
             self.chain.reset();
             return KeyResult::committed(text);
         }
-        let selected = self.candidates().get(index).cloned();
+        let copy_sentence_words = self.personal_context_applies();
+        let selected = self
+            .candidates()
+            .get(index)
+            .map(|item| clone_selected_candidate(item, copy_sentence_words));
         let text = match &selected {
             Some(item) => Some(item.word.clone()),
             // The bare prefix letter of a temporary mode is a marker, not text.

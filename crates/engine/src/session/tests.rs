@@ -932,6 +932,28 @@ fn selecting_a_quanpin_candidate_clones_only_needed_request_fields() {
 }
 
 #[test]
+fn selecting_a_candidate_does_not_clone_unused_row_metadata() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.learning = false;
+        options.personal_context = false;
+    });
+    type_text(&mut session, "nihao");
+    let index = index_of(&session, "你好");
+    session.input.mixed_candidates[index].corrected_from = "synthetic correction".to_owned();
+    session.input.mixed_candidates[index].sentence_words = vec!["你".to_owned(), "好".to_owned()];
+
+    let (result, allocations) =
+        crate::ime::personal_rerank::allocations::count(|| session.select(index));
+
+    assert_eq!(result.commit.as_deref(), Some("你好"));
+    assert!(
+        allocations <= 35,
+        "选择候选不应复制未使用的行字段，却产生了 {allocations} 次分配"
+    );
+}
+
+#[test]
 fn selecting_a_shuangpin_candidate_does_not_clone_the_full_request() {
     let fixture = Fixture::new(QUANPIN_FIXTURE);
     let mut session = fixture.session_with(|options| {
