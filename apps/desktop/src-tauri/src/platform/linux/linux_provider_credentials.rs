@@ -12,8 +12,9 @@ use reqwest::Url;
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
 use std::io::Write;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -225,7 +226,48 @@ fn read_private(path: &Path) -> Result<Option<Map<String, Value>>, CredentialErr
     }
 }
 
-/// Publish `document` at `path` owner-only, or remove the file when there is nothing left to store.
+/// Publish serialized `document` at `path` owner-only, or remove the file when there is nothing left to store.
+fn write_private_at(
+    directory: &std::os::fd::OwnedFd,
+    file_name: &OsStr,
+    value: &[u8],
+) -> Result<(), CredentialError> {
+    if value.len() > MAX_PROVIDER_CONFIG_BYTES {
+        return Err(CredentialError::TooManyProfiles);
+    }
+
+    // Keep the temporary name in the opened directory too. O_EXCL prevents a
+    // concurrent symlink from redirecting the create after stale cleanup.
+    let mut temporary_name = file_name.to_os_string();
+    temporary_name.push(".new");
+    let _ = rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty());
+    let descriptor = rustix::fs::openat(
+        directory,
+        &temporary_name,
+        rustix::fs::OFlags::WRONLY
+            | rustix::fs::OFlags::CREATE
+            | rustix::fs::OFlags::EXCL
+            | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::from_raw_mode(0o600),
+    )
+    .map_err(|_| CredentialError::Storage)?;
+    let mut file: std::fs::File = descriptor.into();
+    let written = file
+        .write_all(&value)
+        .and_then(|()| file.sync_all())
+        .map_err(|_| CredentialError::Storage);
+    drop(file);
+    if let Err(error) = written {
+        let _ = rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty());
+        return Err(error);
+    }
+    if rustix::fs::renameat(directory, &temporary_name, directory, file_name).is_err() {
+        let _ = rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty());
+        return Err(CredentialError::Storage);
+    }
+    Ok(())
+}
+
 fn write_private(path: &Path, document: Option<&Value>) -> Result<(), CredentialError> {
     let parent = path.parent().ok_or(CredentialError::Storage)?;
     super::reject_symlink_ancestors(parent).map_err(|_| CredentialError::Storage)?;
@@ -244,31 +286,20 @@ fn write_private(path: &Path, document: Option<&Value>) -> Result<(), Credential
     if !super::create_directory_and_check(parent).map_err(|_| CredentialError::Storage)? {
         return Err(CredentialError::Storage);
     }
-    std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
+    let directory = rustix::fs::open(
+        parent,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NONBLOCK,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(|_| CredentialError::Storage)?;
+    rustix::fs::fchmod(&directory, rustix::fs::Mode::from_raw_mode(0o700))
         .map_err(|_| CredentialError::Storage)?;
-    // Created 0600 from the start: between a create and a chmod the secret would be readable.
-    let temporary = path.with_extension("json.new");
-    let _ = std::fs::remove_file(&temporary);
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&temporary)
-        .map_err(|_| CredentialError::Storage)?;
-    let written = file
-        .write_all(&value)
-        .and_then(|()| file.sync_all())
-        .map_err(|_| CredentialError::Storage);
-    drop(file);
-    if let Err(error) = written {
-        let _ = std::fs::remove_file(&temporary);
-        return Err(error);
-    }
-    if std::fs::rename(&temporary, path).is_err() {
-        let _ = std::fs::remove_file(&temporary);
-        return Err(CredentialError::Storage);
-    }
-    Ok(())
+    let file_name = path.file_name().ok_or(CredentialError::Storage)?;
+    write_private_at(&directory, file_name, &value)
 }
 
 /// Surrounding whitespace the provider strips before it validates.
@@ -1492,5 +1523,37 @@ mod tests {
             read_private(&path),
             Err(CredentialError::Existing)
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn publishes_into_the_open_directory_after_its_path_is_replaced() {
+        use std::ffi::OsStr;
+        use std::os::unix::fs::symlink;
+
+        let temp = directory();
+        let root = temp.path();
+        let original = root.join("original");
+        let outside = root.join("outside");
+        std::fs::create_dir(&original).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        let directory = rustix::fs::open(
+            &original,
+            rustix::fs::OFlags::RDONLY
+                | rustix::fs::OFlags::DIRECTORY
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::NONBLOCK,
+            rustix::fs::Mode::empty(),
+        )
+        .unwrap();
+        let moved = root.join("moved");
+        std::fs::rename(&original, &moved).unwrap();
+        symlink(&outside, &original).unwrap();
+
+        let value = b"{\"token\":\"synthetic-token\"}\n";
+        write_private_at(&directory, OsStr::new(AI_FILE), value).unwrap();
+
+        assert!(moved.join(AI_FILE).is_file());
+        assert!(!outside.join(AI_FILE).exists());
     }
 }
