@@ -2925,18 +2925,18 @@ public final class MSIMEInputService extends InputMethodService {
         int reserved = CandidateTranslationPolicy.reservedGlossRows(candidateGlossLineCount(), koreanHanjaRows());
         int extraRows = BoundsPolicy.nonNegative(reserved - 1);
         int line = ImeToolbar.CANDIDATE_LINE_DP + extraRows * ImeToolbar.EXTRA_GLOSS_ROW_DP;
-        setFixedHeight(candidateLine, pixels(line));
+        ViewPolicy.setFixedHeight(candidateLine, pixels(line));
         // 读音行至少是设计的 14 dp，读音字号放不下时按读音文字的实际高度加高，见 ReadingRowPolicy。
         int readingRow = readingRowHeight();
-        if (candidateHeader != null) setFixedHeight(candidateHeader, readingRow);
+        if (candidateHeader != null) ViewPolicy.setFixedHeight(candidateHeader, readingRow);
         // 空闲时的工具栏和组词时的读音行 + 候选行占同一个位置，两者同高，打字时键盘才不会变高。空闲时读音行若在显示常驻的模式标签（直接输入、准备中），它已经占了读音行那一截，工具栏只取候选行的高度，总高不变。
         boolean idleHeader = candidateHeader != null
             && candidateHeader.getVisibility() == View.VISIBLE;
         if (shortcutScroll != null)
-            setFixedHeight(shortcutScroll, (idleHeader ? 0 : readingRow) + pixels(line));
+            ViewPolicy.setFixedHeight(shortcutScroll, (idleHeader ? 0 : readingRow) + pixels(line));
         // 「最近复制」占的是工具栏那一行的位置，同高，出现和消失时键盘不跳。
         if (recentClipRow != null)
-            setFixedHeight(recentClipRow, (idleHeader ? 0 : readingRow) + pixels(line));
+            ViewPolicy.setFixedHeight(recentClipRow, (idleHeader ? 0 : readingRow) + pixels(line));
     }
 
     private int readingRowHeight() {
@@ -2945,13 +2945,6 @@ public final class MSIMEInputService extends InputMethodService {
         Paint.FontMetricsInt metrics = preedit.getPaint().getFontMetricsInt();
         return ReadingRowPolicy.heightPx(design, metrics.ascent, metrics.descent,
             preedit.getPaddingTop() + preedit.getPaddingBottom());
-    }
-
-    private static void setFixedHeight(View view, int height) {
-        android.view.ViewGroup.LayoutParams params = view.getLayoutParams();
-        if (params == null || params.height == height) return;
-        params.height = height;
-        view.setLayoutParams(params);
     }
 
     void fail() { stop(false); message = "输入连接失败：仅直接输入"; render(); }

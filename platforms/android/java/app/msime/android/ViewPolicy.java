@@ -163,6 +163,14 @@ public final class ViewPolicy {
         }
     }
 
+    /** 设置视图的固定像素高度；布局参数缺失或高度未变化时不触发重新布局。 */
+    public static void setFixedHeight(View view, int height) {
+        android.view.ViewGroup.LayoutParams params = view.getLayoutParams();
+        if (params == null || params.height == height) return;
+        params.height = height;
+        view.setLayoutParams(params);
+    }
+
     /** Announce changing view content to accessibility services without interrupting the user. */
     public static void setPoliteLiveRegion(View view) {
         view.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
