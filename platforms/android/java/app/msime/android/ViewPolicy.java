@@ -11,6 +11,7 @@ import android.text.TextUtils;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.PopupWindow;
 
 /** Shared view configuration for host controls whose widget defaults need resetting. */
 public final class ViewPolicy {
@@ -437,6 +438,11 @@ public final class ViewPolicy {
     /** 设置视图的浮层高度。 */
     public static void setElevation(View view, float elevation) {
         view.setElevation(elevation);
+    }
+
+    /** 设置弹出窗口的浮层高度。 */
+    public static void setElevation(PopupWindow popup, float elevation) {
+        popup.setElevation(elevation);
     }
 
     /** Apply full opacity to an active view and a caller-selected opacity otherwise. */
