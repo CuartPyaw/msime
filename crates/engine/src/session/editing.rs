@@ -296,7 +296,7 @@ impl InputSession {
             self.caret = None;
             return;
         }
-        let length = self.editing_text().len();
+        let length = self.editing_text_len();
         self.caret = caret.map(|position| position.min(length));
         // Only the scheme composition decodes by caret; local and English lists do not depend on it.
         if !self.dedicated_english && self.local_mode == LocalInputMode::None {
