@@ -846,7 +846,7 @@ fn selecting_a_quanpin_candidate_clones_only_needed_request_fields() {
         crate::ime::personal_rerank::allocations::count(|| session.select(index));
 
     assert_eq!(result.commit.as_deref(), Some("你好"));
-    assert_eq!(allocations, 36, "selection allocations: {allocations}");
+    assert_eq!(allocations, 35, "selection allocations: {allocations}");
 }
 
 /// The reported case: in mixed Wubi `jixu` is the wubi code of 曳光弹 and the pinyin of 继续. The fourth key must leave both on offer; without pinyin rows the same code still commits its one wubi row.
