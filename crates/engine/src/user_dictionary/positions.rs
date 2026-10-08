@@ -118,13 +118,16 @@ pub fn apply_fixed_positions(
     };
 
     let mut dynamic_candidates = Vec::new();
-    if !keep_dynamic_candidate_positions {
+    if !keep_dynamic_candidate_positions && candidates.iter().any(|item| item.source.is_online()) {
         let original = std::mem::take(candidates);
         let (retained, dynamic): (Vec<_>, Vec<_>) = original
             .into_iter()
             .partition(|item| !item.source.is_online());
         *candidates = retained;
         dynamic_candidates = dynamic;
+    }
+    if fixed.is_empty() && dynamic_candidates.is_empty() {
+        return;
     }
 
     let candidate_by_word: HashMap<&str, &WordItem> = candidates
@@ -210,6 +213,23 @@ mod tests {
 
         assert!(found);
         assert_eq!(allocations, 0);
+    }
+
+    #[test]
+    fn ordinary_rows_skip_dynamic_partition_when_no_online_candidates_exist() {
+        let dir = Dir::new();
+        let journal = dir.journal();
+        let mut list = vec![item("ni", "甲", 3), item("ni", "乙", 2)];
+
+        let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            apply_fixed_positions(&journal, "ni", &mut list, false, None, false);
+        });
+
+        assert_eq!(words(&list), ["甲", "乙"]);
+        assert_eq!(
+            allocations, 0,
+            "ordinary rows allocated {allocations} temporary buffers"
+        );
     }
 
     #[test]
