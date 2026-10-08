@@ -252,9 +252,7 @@ public final class KeyboardGeometry {
 
     /** Create a horizontal container for inline keyboard content. */
     public static LinearLayout row(Context context) {
-        LinearLayout view = new LinearLayout(context);
-        view.setOrientation(LinearLayout.HORIZONTAL);
-        return view;
+        return ViewPolicy.newRow(context);
     }
 
     /** Create linear layout parameters from density-independent dimensions. */

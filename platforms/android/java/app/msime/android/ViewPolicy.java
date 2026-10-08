@@ -137,6 +137,13 @@ public final class ViewPolicy {
         return button;
     }
 
+    /** 创建横向排列的线性容器。 */
+    public static LinearLayout newRow(Context context) {
+        LinearLayout view = new LinearLayout(context);
+        view.setOrientation(LinearLayout.HORIZONTAL);
+        return view;
+    }
+
     /** Bind a caller-supplied action to a view without changing any other interaction policy. */
     public static void bindClick(View view, Runnable action) {
         view.setOnClickListener(ignored -> action.run());
