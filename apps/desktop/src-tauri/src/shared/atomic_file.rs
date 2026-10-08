@@ -121,22 +121,18 @@ pub(crate) fn remove_private(path: &Path) -> io::Result<()> {
         let name = path.file_name().ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "private file has no name")
         })?;
-        let directory = rustix::fs::open(
-            parent,
-            rustix::fs::OFlags::RDONLY
-                | rustix::fs::OFlags::DIRECTORY
-                | rustix::fs::OFlags::NOFOLLOW
-                | rustix::fs::OFlags::CLOEXEC
-                | rustix::fs::OFlags::NONBLOCK,
-            rustix::fs::Mode::empty(),
-        )?;
-        return rustix::fs::unlinkat(&directory, name, rustix::fs::AtFlags::empty())
-            .map_err(Into::into);
+        let directory = open_private_directory(parent)?;
+        return remove_private_at(&directory, name);
     }
     #[cfg(not(unix))]
     {
         std::fs::remove_file(path)
     }
+}
+
+#[cfg(unix)]
+fn remove_private_at(directory: &OwnedFd, name: &OsStr) -> io::Result<()> {
+    rustix::fs::unlinkat(directory, name, rustix::fs::AtFlags::empty()).map_err(Into::into)
 }
 
 /// Replace a file after fully writing and syncing a temporary sibling.
@@ -151,7 +147,7 @@ pub(crate) fn write(path: &Path, contents: &[u8]) -> io::Result<()> {
         let name = path
             .file_name()
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "file path has no name"))?;
-        let directory = open_write_directory(&parent)?;
+        let directory = open_private_directory(&parent)?;
         return write_in_directory(&directory, name, contents);
     }
     #[cfg(not(unix))]
@@ -170,7 +166,7 @@ pub(crate) fn write(path: &Path, contents: &[u8]) -> io::Result<()> {
 /// directory selected by the path. Callers can then use the descriptor for
 /// all writes, so a replacement of the path cannot redirect the operation.
 #[cfg(unix)]
-fn open_write_directory(parent: &Path) -> io::Result<OwnedFd> {
+fn open_private_directory(parent: &Path) -> io::Result<OwnedFd> {
     let metadata = std::fs::symlink_metadata(parent)?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err(io::Error::new(
@@ -276,7 +272,7 @@ mod tests {
         let parent = root.path().join("state");
         let moved = root.path().join("state-moved");
         std::fs::create_dir(&parent).unwrap();
-        let directory = open_write_directory(&parent).unwrap();
+        let directory = open_private_directory(&parent).unwrap();
 
         std::fs::rename(&parent, &moved).unwrap();
         symlink(outside.path(), &parent).unwrap();
@@ -305,6 +301,33 @@ mod private_open_tests {
 
         assert!(remove_private(&linked.join("private-input")).is_err());
         assert_eq!(std::fs::read(&target).unwrap(), b"synthetic-outside");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_remove_stays_bound_to_the_open_parent_when_its_path_is_replaced() {
+        use super::{open_private_directory, remove_private_at};
+
+        let root = tempfile::tempdir().unwrap();
+        let parent = root.path().join("state");
+        let moved = root.path().join("state-moved");
+        let replacement = root.path().join("replacement");
+        std::fs::create_dir(&parent).unwrap();
+        std::fs::create_dir(&replacement).unwrap();
+        std::fs::write(parent.join("private-input"), b"original").unwrap();
+        std::fs::write(replacement.join("private-input"), b"replacement").unwrap();
+        let directory = open_private_directory(&parent).unwrap();
+
+        std::fs::rename(&parent, &moved).unwrap();
+        std::fs::rename(&replacement, &parent).unwrap();
+
+        remove_private_at(&directory, std::ffi::OsStr::new("private-input")).unwrap();
+
+        assert!(!moved.join("private-input").exists());
+        assert_eq!(
+            std::fs::read(parent.join("private-input")).unwrap(),
+            b"replacement"
+        );
     }
 
     #[cfg(unix)]
