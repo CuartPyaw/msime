@@ -487,6 +487,34 @@ fn english_phonetics_refuse_another_kind_version_or_a_missing_file() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn english_phonetics_rejects_a_linked_database() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let external = outside.path().join("en-phonetic.db");
+    pronunciation_database(&external, "en_phonetic", 1);
+    let linked = directory.path().join("en-phonetic.db");
+    symlink(&external, &linked).unwrap();
+
+    assert!(english_phonetics(linked.to_str().unwrap(), &["love".to_owned()]).is_err());
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn english_phonetics_rejects_a_hard_linked_database() {
+    let directory = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let external = outside.path().join("en-phonetic.db");
+    pronunciation_database(&external, "en_phonetic", 1);
+    let linked = directory.path().join("en-phonetic.db");
+    std::fs::hard_link(&external, &linked).unwrap();
+
+    assert!(english_phonetics(linked.to_str().unwrap(), &["love".to_owned()]).is_err());
+}
+
 #[test]
 fn reset_learned_data_restores_packaged_dictionaries_and_clears_journal() {
     // Both an ASCII root and one carrying Chinese characters: the reset derives temporary, backup and SQLite sidecar names from these paths, and on Windows a narrow conversion of the second either mangles it or throws after files are already published.
