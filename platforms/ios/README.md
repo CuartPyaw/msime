@@ -126,6 +126,8 @@ iOS 26 会默认在滚动视图边缘叠加渐隐和模糊。键盘内的候选�
 
 手写方案在真机构建中使用锁定的 ML Kit Digital Ink 8.0.0。模型下载会为键盘扩展创建的后台 URLSession 注入 App Group 共享容器；没有完全访问或共享容器不可用时明确失败，不把模型写入扩展私有临时目录。Apple Silicon 模拟器继续编译不依赖 ML Kit 的同界面 fallback，因为该 SDK 的 arm64 slice 是 device 平台而不是 simulator 平台。fallback 不冒充识别成功，也不沉默：它在自己的状态行上写明「此版本不含手写识别，请使用真机版本」——只画笔画什么都不说，和键盘坏了无从区分。真机构建通过 CocoaPods workspace 链接 SDK。
 
+通过 Google 登录使用锁定的 GoogleSignIn 10.0.0，经同一个 CocoaPods workspace 只链接进主 App（`Podfile` 里键盘扩展是独立的顶层 target，不嵌套在 App 下，所以不继承它）。流程与 Android 相同：向后端申请 `google` challenge 拿 nonce，用 SDK 取得带这个 nonce 的 ID token，再换成后端会话；拿到 token 后立即 `signOut()`，不在钥匙串里保留 Google 会话。`project.yml` 的 Info.plist 写着 iOS 类型 OAuth client 的 `GIDClientID`、倒序的回调 URL scheme，以及与 Android 共用的 web client `GIDServerClientID`，后者决定 ID token 的 audience。iOS client 建在 Google Cloud 里，仓库之外；bundle ID 变了要另建一个。不装 pod 的模拟器构建没有 GoogleSignIn，登录面板不显示 Google 按钮。设计取舍见 [iOS 通过 Google 登录](../../.agents/notes/implemented/feature/2026-10-08-ios-google-sign-in.md)。
+
 ## 按键延迟
 
 一次按键的成本由 `KeystrokeLatencyTests` 逐键计时，共享层那一侧由 `cargo run -p msime-host-api --example keystroke_latency <verified-resources>` 单独测。两者都报分布而不是均值：掉帧来自尾部，而均值会把它藏在同一个词里那些便宜的键后面。

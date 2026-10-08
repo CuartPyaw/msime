@@ -78,6 +78,9 @@ targets:
         buildPhase: resources
       - path: SharedResources/MLKit-Dependencies.txt
         buildPhase: resources
+      # 通过 Google 登录用的 GoogleSignIn 及其依赖（CocoaPods 生成的 Pods-MSIMEApp 致谢文件，均为 Apache-2.0）。
+      - path: SharedResources/GoogleSignIn-Dependencies.txt
+        buildPhase: resources
       # Licences of the embedded SherpaOnnxC.xcframework below: sherpa-onnx (Apache-2.0) and the ONNX Runtime linked into it (MIT), plus the notices ONNX Runtime carries for what it bundles, shared with the desktops.
       - path: SharedResources/VoiceRuntime-NOTICES.txt
         buildPhase: resources
