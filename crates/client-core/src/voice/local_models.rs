@@ -1338,6 +1338,13 @@ fn download_and_publish(
         downloaded: total,
         total,
     });
+    #[cfg(unix)]
+    if let Some(pack_directory) = pack_directory {
+        write_manifest_at(pack_directory, manifest)?;
+    } else {
+        write_manifest(pack_dir, manifest)?;
+    }
+    #[cfg(not(unix))]
     write_manifest(pack_dir, manifest)?;
     check_cancel(cancel)?;
     // 确认没有取消之后才把下完的文件移进暂存目录：暂存目录在失败时会被整个删掉，所以之后移动或发布失败时要把已经移过去的文件放回 `.partial-<id>`，留给下次用。同在 root 下，改名不复制。
