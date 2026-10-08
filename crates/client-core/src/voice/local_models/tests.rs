@@ -220,6 +220,45 @@ fn partial_file_writes_stay_in_the_open_directory_after_root_replacement() {
 
 #[cfg(unix)]
 #[test]
+fn partial_publish_rename_stays_in_open_directories_after_root_replacement() {
+    use std::os::unix::fs::symlink;
+
+    let state = tempfile::tempdir().unwrap();
+    let root = state.path().join("models");
+    let outside = state.path().join("outside");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(&outside).unwrap();
+    let partials = partial_directory(&root, "pack").unwrap();
+    let staging = Staging::new(root.join(".staging-pack-new")).unwrap();
+    staging.create().unwrap();
+    staging.create_model_directory().unwrap();
+    let pack_dir = staging.path.join("model");
+    let pack_directory = staging.open_model_directory().unwrap();
+    let name = OsStr::new("a.dat");
+    let partial_name = OsStr::new("partial-a");
+    fs::write(partials.path().join(partial_name), b"synthetic").unwrap();
+    let moved = state.path().join("models-moved");
+    fs::rename(&root, &moved).unwrap();
+    symlink(&outside, &root).unwrap();
+
+    move_partial_into_pack(
+        &partials,
+        partial_name,
+        &pack_dir,
+        name.to_str().unwrap(),
+        Some(&pack_directory),
+    )
+    .unwrap();
+
+    assert_eq!(
+        fs::read(moved.join(".staging-pack-new/model/a.dat")).unwrap(),
+        b"synthetic"
+    );
+    assert!(!outside.join(".staging-pack-new/model/a.dat").exists());
+}
+
+#[cfg(unix)]
+#[test]
 fn model_directory_creation_stays_in_the_open_staging_directory() {
     use std::os::unix::fs::symlink;
 

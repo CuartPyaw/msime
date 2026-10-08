@@ -833,6 +833,13 @@ impl Staging {
             fs::create_dir(self.path.join("model"))
         }
     }
+
+    #[cfg(unix)]
+    fn open_model_directory(&self) -> io::Result<File> {
+        crate::storage::open_private_directory_at(&self.parent, &self.name).and_then(|staging| {
+            crate::storage::open_private_directory_at(&staging, OsStr::new("model"))
+        })
+    }
 }
 
 impl Drop for Staging {
@@ -1103,9 +1110,23 @@ pub(crate) fn install_files_with(
     staging.create()?;
     let pack_dir = staging.path.join("model");
     staging.create_model_directory()?;
+    #[cfg(unix)]
+    let pack_directory = Some(staging.open_model_directory()?);
+    #[cfg(not(unix))]
+    let pack_directory = None;
     let partials = partial_directory(root, id)?;
     let result = download_and_publish(
-        root, id, files, manifest, mirrors, fetcher, progress, cancel, &pack_dir, &partials,
+        root,
+        id,
+        files,
+        manifest,
+        mirrors,
+        fetcher,
+        progress,
+        cancel,
+        &pack_dir,
+        pack_directory.as_ref(),
+        &partials,
     );
     if result.is_err() {
         // 只删空目录：还有没下完的文件时留着它给下次续传。
@@ -1125,6 +1146,7 @@ fn download_and_publish(
     progress: &mut dyn FnMut(InstallProgress),
     cancel: &AtomicBool,
     pack_dir: &Path,
+    pack_directory: Option<&File>,
     partials: &PartialDirectory,
 ) -> Result<PathBuf, LocalModelError> {
     let total = files
@@ -1176,7 +1198,13 @@ fn download_and_publish(
     let published = downloaded_files
         .iter()
         .try_for_each(|(partial, name)| {
-            fs::rename(partial, pack_dir.join(name))?;
+            move_partial_into_pack(
+                partials,
+                partial.file_name().ok_or(LocalModelError::InvalidRoot)?,
+                pack_dir,
+                name,
+                pack_directory,
+            )?;
             moved += 1;
             Ok::<(), LocalModelError>(())
         })
@@ -1185,7 +1213,10 @@ fn download_and_publish(
         Ok(target) => target,
         Err(error) => {
             for (partial, name) in &downloaded_files[..moved] {
-                let _ = fs::rename(pack_dir.join(name), partial);
+                if let Some(partial_name) = partial.file_name() {
+                    let _ =
+                        move_pack_file_back(partials, name, pack_dir, partial_name, pack_directory);
+                }
             }
             return Err(error);
         }
@@ -1197,6 +1228,46 @@ fn download_and_publish(
         total,
     });
     Ok(target)
+}
+
+fn move_partial_into_pack(
+    partials: &PartialDirectory,
+    partial_name: &OsStr,
+    pack_dir: &Path,
+    name: &str,
+    pack_directory: Option<&File>,
+) -> io::Result<()> {
+    #[cfg(unix)]
+    if let Some(pack_directory) = pack_directory {
+        return rustix::fs::renameat(
+            &partials.directory,
+            partial_name,
+            pack_directory,
+            OsStr::new(name),
+        )
+        .map_err(io::Error::from);
+    }
+    fs::rename(partials.path().join(partial_name), pack_dir.join(name))
+}
+
+fn move_pack_file_back(
+    partials: &PartialDirectory,
+    name: &str,
+    pack_dir: &Path,
+    partial_name: &OsStr,
+    pack_directory: Option<&File>,
+) -> io::Result<()> {
+    #[cfg(unix)]
+    if let Some(pack_directory) = pack_directory {
+        return rustix::fs::renameat(
+            pack_directory,
+            OsStr::new(name),
+            &partials.directory,
+            partial_name,
+        )
+        .map_err(io::Error::from);
+    }
+    fs::rename(pack_dir.join(name), partials.path().join(partial_name))
 }
 
 /// 下载一个固定的上游归档（ZIP，名称、URL、长度、SHA-256 来自锁文件），取出 `members` 列出的成员，作为 `files` 里同名的文件安装到 `<root>/<id>`。每个取出的文件按 `files` 里它自己的长度和 SHA-256 校验，归档本身也先按锁文件校验；归档的下载和 [`install_files`] 一样按 `mirrors` 换源、用 HTTP Range 续传。进度的 `download` 阶段按归档字节计，取出成员时报 `verify`。
