@@ -102,7 +102,7 @@ pub(crate) fn open_private(path: &Path) -> io::Result<File> {
 /// Remove a private file relative to its opened parent directory. Opening the
 /// parent with `O_NOFOLLOW` keeps a concurrent replacement of the final
 /// directory component from redirecting cleanup through a symlink.
-#[cfg(any(target_os = "ios", target_os = "android", test))]
+#[cfg(any(target_os = "ios", target_os = "android", target_os = "linux", test))]
 pub(crate) fn remove_private(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
