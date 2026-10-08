@@ -2458,16 +2458,10 @@ struct KeyboardView {
     this.show(SURFACE_TOOLS);
   }
 
-  /** 工具栏的「剪贴板」：用历史记录代替按键，或回到按键。在设置中关闭时，工具条会短暂提示这一点，而不是打开一个空面板。 */
+  /** 工具栏的「剪贴板」：用剪贴板面板代替按键，或回到按键。 */
   private toggleClipboard(): void {
     if (this.surface === SURFACE_CLIPBOARD) {
       this.show(SURFACE_NONE);
-      return;
-    }
-    if (!this.clipboardEnabled) {
-      this.show(SURFACE_NONE);
-      this.diagnostic = '剪贴板历史已在设置中关闭';
-      this.clearDiagnosticLater();
       return;
     }
     this.openClipboard();
@@ -4813,15 +4807,13 @@ struct KeyboardView {
     return KeyboardFormFactor.isDesktop() ? this.emojiSkin : this.skin;
   }
 
+  /**
+   * 打开手机的剪贴板面板。本机剪贴板历史在设置中关闭时也照常打开，在「本机」一栏说明已关闭，「云端」一栏照常可用，与 Android 的 `renderClipboardHistory` 和 2in1 表情面板里的剪贴板页一致。以前这里拒绝打开面板，改在工具条上显示一句诊断：工具栏整个换成候选栏的空壳，提示挤在拼音预编辑那一行，几秒后才恢复；而且本机历史一关，云剪贴板也跟着打不开。
+   */
   private openClipboard(): void {
-    if (!this.clipboardEnabled) {
-      this.clipboardNotice = '剪贴板历史已在设置中关闭';
-      this.show(SURFACE_NONE);
-      return;
-    }
     this.show(SURFACE_CLIPBOARD);
-    this.clips = KeyboardSession.shared.clipboardHistory();
-    this.clipboardNotice = '';
+    this.clips = this.clipboardEnabled ? KeyboardSession.shared.clipboardHistory() : [];
+    this.clipboardNotice = this.clipboardEnabled ? '' : '剪贴板历史已在设置中关闭';
     this.confirmingClear = false;
     this.openCloudClipboard();
   }
