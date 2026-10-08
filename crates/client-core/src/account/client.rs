@@ -541,7 +541,7 @@ impl BackendAccountClient {
             return Err(AccountError::Invalid);
         }
         let file =
-            crate::storage::open_private_file(snapshot).map_err(|_| AccountError::Invalid)?;
+            crate::storage::open_private_file_in(snapshot).map_err(|_| AccountError::Invalid)?;
         let bytes = file.metadata().map_err(|_| AccountError::Invalid)?.len();
         if bytes == 0 || bytes > MAX_DICTIONARY_SNAPSHOT_BYTES as u64 {
             return Err(AccountError::Invalid);
