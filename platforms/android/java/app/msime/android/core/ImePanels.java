@@ -812,7 +812,8 @@ final class ImePanels {
             ViewPolicy.setBackground(segment, selected ? replySurface(Color.parseColor(s.skin.keyBackground()),
                 BoundsPolicy.nonNegative(radius - s.pixels(2))) : null);
             ViewPolicy.setTextColor(segment, foreground);
-            segment.setTypeface(Typeface.create(base, selected ? Typeface.BOLD : Typeface.NORMAL));
+            ViewPolicy.setTypeface(segment,
+                Typeface.create(base, selected ? Typeface.BOLD : Typeface.NORMAL));
             ViewPolicy.clearElevation(segment);
         }
         ViewPolicy.setBackground(s.replySourceCard,
@@ -933,7 +934,7 @@ final class ImePanels {
         LinearLayout header = KeyboardGeometry.row(s);
         ViewPolicy.setCenteredVertically(header);
         TextView title = aiText(s.aiOutputText.isEmpty() ? "AI 润色" : "润色结果", 15);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
+        ViewPolicy.setTypeface(title, Typeface.DEFAULT_BOLD);
         header.addView(title, KeyboardGeometry.weightedWrapParams(1));
         Button back = MSIMEInputService.role(s.button(header, "返回键盘", s::closeAiPolish), KeyboardKeyRole.GLYPH);
         ViewPolicy.setTextSizeSp(back, 13);
