@@ -16,9 +16,9 @@ PR #4371#discussion_r4203158943 指出解析边界：`candidate_dark_theme`、`s
 
 - **接管依据是共享层解析出的实际候选覆盖**，不是 classicui 当前主题。`CandidateTheme::covers_candidates` / `candidate_theme_covers(resolved)`（`CandidateColors.h`）为真仅两种：共享层的 `candidate` 是非 null 对象（内置主题，或 custom 的皮肤槽位/取色器给了颜色），或 `candidate_skin` 非空（皮肤清单声明了当前布局与明暗）。`system`、基底 system 且无皮肤无颜色的 custom、未知/退役 id、解析失败落回的空文档都判为「没有覆盖」。它在 `candidate_theme_colors` 里**先于**空槽位被原生 palette 补齐前计算。
 - **只有「用户主动选择」才允许从第三方主题手里接管。** `FcitxState::syncCandidatePanelTheme(bool chosen)` 的 `chosen` 只有两处为真：主题菜单 `setThemeChoice()`，以及偏好文件监视里 `candidate_theme_selection(preferences)`（`global_theme` + 整个 `custom_theme` 两个字段的可比较文档）发生变化时。`ensure()`（启动/焦点）、`refreshProviderSockets()`（runtime options 刷新）、`setSystemDark()`、以及指纹不变的偏好同步都传 `false`。
-- **无覆盖时退出接管并恢复。** `restore_classicui_theme(fcitx::AddonInstance&)`（`FcitxEngine.cpp`）在 `!resolved.covers_candidates` 时调用：只把当前值仍等于水杉自己主题名的 `Theme`/`DarkTheme` 放进 `held`，再用 `panel_restore_values(record, "fcitx5", held, kClassicuiStockThemes)`（`PanelRestoreRecord.h`）求恢复值——记录里的 `prior`，记录没留下可用 prior 时用自带主题 `default`/`default-dark`。用户自己改过的项不在 `held` 里，一项都不动。
+- **无覆盖时退出接管并恢复。** `restore_classicui_theme(fcitx::AddonInstance&)`（`FcitxEngine.cpp`）在 `!resolved.covers_candidates` 时调用：只把当前值仍等于水杉自己主题名的 `Theme`/`DarkTheme` 放进 `held`，再用 `panel_restore_values(record, "fcitx5", held, kClassicuiStockThemes)`（`PanelRestoreRecord.h`）求恢复值——记录里的 `prior`，记录没留下可用 prior 时用自带主题 `default`/`default-dark`。恢复记录缺失或损坏时仍用空记录调用 `panel_restore_values`，不能跳过自带主题兜底。用户自己改过的项不在 `held` 里，一项都不动。
 - **恢复不是一次新的接管**：走 `classicui.setConfig()`，不经 `set_classicui_config()`（后者会 `record_classicui_takeover`），否则会把用户自己的值换成被恢复的值；只写 `Theme`/`DarkTheme`，`Font`/`WheelForPaging` 等其他项不动。
-- **缓存只决定是否重写主题文件**，不再影响所有权判断、退出接管或 `publishCandidatePanelStatus`。
+- **缓存只决定是否重写主题文件**，不再影响所有权判断、退出接管或 `publishCandidatePanelStatus`。退出接管时同时清空 `candidate_theme_applied_`，否则选回同一皮肤会命中旧 stamp，却留下已清零的提示宽度。
 - **非对象 preferences 按空文档处理**：`candidate_dark_theme`/`surface_dark_theme` 跟随系统明暗，`candidate_layout_id` 取默认纵向，`candidate_theme_request` 用 `find()` 本就返回 `system`。入口 helper 覆盖两个宿主。
 - 自带主题名唯一副本 `kClassicuiStockThemes{{"Theme","default"},{"DarkTheme","default-dark"}}`，与 `msime-linux-setup --unregister` 的 `FCITX5_STOCK_THEMES` 同一规则。
 
@@ -35,4 +35,4 @@ PR #4371#discussion_r4203158943 指出解析边界：`candidate_dark_theme`、`s
 
 ## Verification
 
-`platforms/linux/tests/candidate/candidate_palette.cpp`（非对象文档、覆盖信号、`candidate_theme_selection` 边界）、`panel_restore_record.cpp`（`panel_restore_values` 的 prior/兜底/单项/`written` 不匹配）、`platforms/linux/fcitx5/tests/native.cpp::candidateThemePriority`（`--theme-priority`，真实 classicui：启动/焦点不夺回第三方主题、主动选择接管并记录、`Nord-Dark -> paper -> system` 恢复、单项被用户改过只恢复另一项、恢复不动字体与记录、进程重启后尊重用户选择）。
+`platforms/linux/tests/candidate/candidate_palette.cpp`（非对象文档、覆盖信号、`candidate_theme_selection` 边界）、`panel_restore_record.cpp`（`panel_restore_values` 的 prior/兜底/单项/`written` 不匹配）、`platforms/linux/fcitx5/tests/native.cpp::candidateThemePriority`（`--theme-priority`，真实 classicui：启动/焦点不夺回第三方主题、主动选择接管并记录、`Nord-Dark -> paper -> system` 恢复、单项被用户改过只恢复另一项、恢复不动字体与记录、恢复记录缺失或损坏时兜底、进程重启后尊重用户选择）。

@@ -15,6 +15,16 @@
 #include <cstring>
 #include <poll.h>
 
+#ifdef MSIME_FCITX5_HINT_FONT
+// 只统计测试程序自身创建的字体映射，不拦截动态加载的 classicui：重复提示不能重新排版。
+static int hint_font_map_creations = 0;
+extern "C" PangoFontMap *__real_pango_cairo_font_map_new();
+extern "C" PangoFontMap *__wrap_pango_cairo_font_map_new() {
+  ++hint_font_map_creations;
+  return __real_pango_cairo_font_map_new();
+}
+#endif
+
 using namespace msime::fcitx_host;
 class FixtureContext : public fcitx::InputContext {
 public:
@@ -478,6 +488,19 @@ int candidateThemePriority() {
         Json{{"global_theme", "custom"}, {"custom_theme", {{"base", "system"}, {"candidate_skin", "omarchy"}}}},
         true, catalog, false);
     require(option("Theme") == "Nord-Dark", "皮肤不支持当前明暗时不接管");
+    // 旧版本留下水杉主题但没有恢复记录，或记录已损坏：退出时仍应恢复自带主题。
+    for (const auto *contents : {"", "broken json"}) {
+      fcitx::RawConfig held;
+      held.setValueByPath("Theme", "msime");
+      held.setValueByPath("DarkTheme", "msime");
+      classicui->setConfig(held);
+      std::filesystem::remove(record);
+      if (*contents) std::ofstream(record) << contents;
+      engine.applyCandidatePanelTheme(Json{{"global_theme", "system"}}, false, Json(), false);
+      require(option("Theme") == "default" && option("DarkTheme") == "default-dark",
+              "恢复记录缺失或损坏时仍退出水杉主题");
+      require(option("Font") == "Noto Sans SC 18px", "默认主题兜底不改变字体");
+    }
   }
   // 进程重启：缓存清空，classicui 仍是用户选的第三方主题，启动同步不能接管；自带主题时仍正常接管。
   choose_external();
@@ -548,7 +571,8 @@ int candidateThemeHint() {
   std::ofstream(synthetic / "plain.conf") << "[InputPanel/Background]\nColor=#ffffff\n";
   require(fcitx_hint_width_from_theme(synthetic / "plain.conf") == 0, "没有装饰就没有要预留的宽度");
   std::filesystem::create_directories(root / "fcitx5/conf");
-  std::ofstream(root / "fcitx5/conf/classicui.conf") << "Theme=msime\nDarkTheme=msime\nFont=Sans 10\n";
+  // 从第三方主题主动切换后，第一次提示就必须补宽，不依赖下一次焦点或偏好同步。
+  std::ofstream(root / "fcitx5/conf/classicui.conf") << "Theme=Nord-Dark\nDarkTheme=Nord-Dark\nFont=Sans 10\n";
   const auto image = root / "skins/sakura/ears.png";
   std::filesystem::create_directories(image.parent_path());
   {
@@ -590,7 +614,18 @@ int candidateThemeHint() {
     require(chinese.size() > std::string("中").size(), "水杉主题的提示被补宽");
     require(fcitx_measure_text("Sans 10", resolution, chinese) >= target, "补宽后的提示容得下装饰");
     require(fcitx_measure_text("Sans 10", resolution, engine.modeHintLabel("x11::0", "英")) >= target, "英同样补宽");
-    require(engine.modeHintLabel("x11::0", "中") == chinese, "重复切换用同一份结果");
+    const auto english = engine.modeHintLabel("x11::0", "英");
+    const int measured = hint_font_map_creations;
+    for (int index = 0; index < 20; ++index) {
+      require(engine.modeHintLabel("x11::0", "中") == chinese && engine.modeHintLabel("x11::0", "英") == english,
+              "重复切换用同一份结果");
+    }
+    require(hint_font_map_creations == measured, "重复切换不再创建 Pango 字体映射");
+    // 退出接管清掉提示宽度后，再选回同一皮肤也必须重新初始化，不能被旧主题 stamp 短路。
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "system"}}, false, Json(), true);
+    require(engine.modeHintLabel("x11::0", "中") == "中", "退出接管后不补宽");
+    engine.applyCandidatePanelTheme(preferences, false, catalog, true);
+    require(engine.modeHintLabel("x11::0", "中") == chinese, "选回同一皮肤后恢复提示宽度");
     // 热路径不碰文件：删掉主题与装饰图后，中/英切换仍用写主题时算好的宽度。
     std::filesystem::remove_all(root / "fcitx5/themes/msime");
     require(engine.modeHintLabel("x11::0", "中") == chinese, "提示不依赖主题文件");

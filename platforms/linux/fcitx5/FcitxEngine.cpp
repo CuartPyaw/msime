@@ -5326,10 +5326,10 @@ void restore_classicui_theme(fcitx::AddonInstance &classicui) {
     if (value && *value == msime::linux_host::kFcitxCandidateTheme) held[item.key()] = *value;
   }
   if (held.empty()) return;
-  Json restore = Json::object();
+  Json record = Json::object();
   if (const auto file = msime::linux_host::panel_restore_file(std::getenv("XDG_STATE_HOME"), std::getenv("HOME")))
-    if (const auto record = msime::linux_host::read_panel_restore(*file))
-      restore = msime::linux_host::panel_restore_values(*record, "fcitx5", held, kClassicuiStockThemes);
+    if (const auto saved = msime::linux_host::read_panel_restore(*file)) record = *saved;
+  const auto restore = msime::linux_host::panel_restore_values(record, "fcitx5", held, kClassicuiStockThemes);
   fcitx::RawConfig config;
   for (const auto &item : restore.items()) config.setValueByPath(item.key(), item.value().get<std::string>());
   classicui.setConfig(config);
@@ -5497,6 +5497,7 @@ public:
     // 但只恢复仍是水杉自己写的项，用户在 fcitx5-configtool 选的主题不动。
     if (!resolved.covers_candidates) {
       if (classicui) restore_classicui_theme(*classicui);
+      candidate_theme_applied_.clear();
       hint_text_width_ = 0;
       hint_inputs_ = FcitxHintInputs{};
       return;
@@ -5557,6 +5558,10 @@ public:
     // Fcitx5 releases with a separate dark-mode theme would otherwise switch to their stock dark theme; MSIME already resolves "follow" against the system appearance itself.
     if (replace_dark) config.setValueByPath("DarkTheme", std::string(host::kFcitxCandidateTheme));
     set_classicui_config(*classicui, current, config);
+    // 缓存的是写入后的活动主题，第一次模式提示不应继续沿用接管前的第三方主题。
+    current.setValueByPath("Theme", std::string(host::kFcitxCandidateTheme));
+    if (replace_dark) current.setValueByPath("DarkTheme", std::string(host::kFcitxCandidateTheme));
+    hint_inputs_ = fcitx_hint_inputs(current, system_dark);
     candidate_theme_applied_ = std::move(inputs);
     candidate_theme_attempt_.clear();
   }
@@ -5574,19 +5579,23 @@ public:
     if (display.rfind("wayland:", 0) == 0 && hint_inputs_.force_wayland_dpi > 0)
       resolution = hint_inputs_.force_wayland_dpi;
     if (resolution <= 0) resolution = fcitx_default_font_resolution();
-    if (font != hint_measured_font_ || resolution != hint_measured_resolution_) {
-      hint_natural_[0] = fcitx_measure_text(font, resolution, "中");
-      hint_natural_[1] = fcitx_measure_text(font, resolution, "英");
-      hint_space_ = fcitx_measure_text(font, resolution, "\u3000");
+    if (font != hint_measured_font_ || resolution != hint_measured_resolution_ ||
+        hint_text_width_ != hint_measured_width_) {
+      const int space = fcitx_measure_text(font, resolution, "\u3000");
+      const std::array<std::string, 2> labels{{"中", "英"}};
+      for (std::size_t index = 0; index < labels.size(); ++index) {
+        const auto &text = labels[index];
+        auto message = fcitx_pad_hint_label(text, hint_text_width_, fcitx_measure_text(font, resolution, text), space);
+        // 一次最终校验：字体整形不保证空格严格线性，差一点就再补一个；结果也缓存。
+        if (message.size() != text.size() && fcitx_measure_text(font, resolution, message) < hint_text_width_)
+          message += "\u3000";
+        hint_labels_[index] = std::move(message);
+      }
       hint_measured_font_ = font;
       hint_measured_resolution_ = resolution;
+      hint_measured_width_ = hint_text_width_;
     }
-    const int natural = label == "中" ? hint_natural_[0] : hint_natural_[1];
-    auto message = fcitx_pad_hint_label(label, hint_text_width_, natural, hint_space_);
-    // 一次最终校验：字体整形不保证空格严格线性，差一点就再补一个。
-    if (message.size() != label.size() && fcitx_measure_text(font, resolution, message) < hint_text_width_)
-      message += "\u3000";
-    return message;
+    return label == "中" ? hint_labels_[0] : label == "英" ? hint_labels_[1] : label;
   }
 #endif
   // 告诉设置页经典界面画不画候选字体、配色和皮肤（见 candidates/CandidatePanelStatus.h）。每次主题同步都问一遍，因为用户随时可能在 fcitx5-configtool 里换界面或主题；答案变了才重写文件。主题选择取自落盘的 classicui.conf（read_classicui_theme_selection），不调 `getConfig()`，后者每次都扫描全部已装主题（#5988）。
@@ -6293,11 +6302,11 @@ public:
   int hint_text_width_ = 0;
   FcitxHintInputs hint_inputs_;
 #ifdef MSIME_FCITX5_HINT_FONT
-  // 最近一次测量的字体与分辨率，以及「中」「英」和一个全角空格的宽度；变化时重测。
+  // 字体、分辨率或装饰宽度变化时测量并缓存完整提示，重复切换不再分配 Pango 对象。
   std::string hint_measured_font_;
   double hint_measured_resolution_ = 0;
-  std::array<int, 2> hint_natural_{{0, 0}};
-  int hint_space_ = 0;
+  int hint_measured_width_ = 0;
+  std::array<std::string, 2> hint_labels_;
 #endif
   msime::linux_host::CandidateWheelPagingSync candidate_wheel_paging_sync_;
   // Last appearance the addon-wide probe reported; see stepSystemTheme.

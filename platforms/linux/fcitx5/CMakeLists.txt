@@ -225,6 +225,8 @@ if(BUILD_TESTING)
   target_link_libraries(fcitx5-native-test PRIVATE Fcitx5::Core PkgConfig::GIO PkgConfig::CAIRO nlohmann_json::nlohmann_json "${MSIME_HOST_LIBRARY}")
   if(MSIME_HINT_FONT_FOUND)
     target_link_libraries(fcitx5-native-test PRIVATE PkgConfig::MSIME_HINT_FONT)
+    # 模式提示回归测试统计字体映射分配，确保缓存命中不触发 Pango 排版。
+    target_link_options(fcitx5-native-test PRIVATE -Wl,--wrap=pango_cairo_font_map_new)
     target_compile_definitions(fcitx5-native-test PRIVATE MSIME_FCITX5_HINT_FONT)
   endif()
   if(Fcitx5Core_VERSION VERSION_GREATER_EQUAL 5.1.22)

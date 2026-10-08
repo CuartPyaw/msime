@@ -14,8 +14,8 @@ Status: implemented
 
 - **活动主题判据**：`fcitx_draws_candidate_theme(theme, dark_theme, use_dark_theme, system_dark)`（`FcitxEngine.cpp`）与 classicui `reloadTheme` 同规则——`use_dark_theme && system_dark ? dark_theme : theme` 是否等于 `msime`；`currentUI() != "classicui"`（kimpanel）直接排除。
 - **所需宽度在写主题时算一次**：`fcitx_hint_width_from_theme(theme_file)` 读宿主刚写好的 theme.conf 的 `Gravity`/`OverlayOffsetX`/`OverlayClipMargin`/`ContentMargin`/`TextMargin`，用 `fcitx_png_width` 读暂存装饰图（1x 的逻辑宽度），面板宽度按 `fcitx_overlay_panel_width`（Top Center 两边各留 `max(clip_left, clip_right)`；靠边从对齐边量 `OverlayOffsetX` 再留对面 `clip`），再减文字两侧边距得 `fcitx_hint_text_width`。没有装饰、非 PNG、尺寸超限返回 0。
-- **热路径缓存**：结果存 `hint_text_width_`，只在写主题成功时刷新；`hint_inputs_` 缓存活动主题、`Font`、`ForceWaylandDPI`，随主题/字体同步刷新，中英切换不调 `getConfig()`（它会扫描主题目录并逐个解析 theme.conf）。
-- **一次算好、一次校验**：`fcitx_pad_hint_label` 按全角空格（U+3000）数量一次补齐，随后只做一次最终宽度测量，差一点再补一个；测量结果按字体+分辨率缓存。
+- **热路径缓存**：结果存 `hint_text_width_`，只在写主题成功时刷新；`hint_inputs_` 缓存活动主题、`Font`、`ForceWaylandDPI`，随主题/字体同步刷新；接管后按刚写入的配置更新，第一次提示不能沿用接管前的第三方主题。中英切换不调 `getConfig()`（它会扫描主题目录并逐个解析 theme.conf）。
+- **一次算好、一次校验**：`fcitx_pad_hint_label` 按全角空格（U+3000）数量一次补齐，随后只做一次最终宽度测量，差一点再补一个；完整的「中」「英」补宽结果按字体、分辨率、装饰宽度缓存；重复切换不再创建 Pango 对象或最终重测，装饰宽度变化则重新测量。
 - **分辨率对齐 classicui 实际排版**：Wayland 且 `ForceWaylandDPI > 0` 时取它，否则取 `pango_cairo_font_map_new()` 的默认分辨率（不硬编码 96）。**5.1.23 的 classicui 不读主题里的 `ScaleWithDPI`**（全源码与 `libclassicui.so` 都没有该键），`Xft.dpi`/`PerScreenDPI` 只设 cairo device scale，不改 yoga 布局的逻辑尺寸——这与评论 r4203158955 的机制描述不一致。
 - **构建开关**：`pkg_check_modules(MSIME_HINT_FONT QUIET pangocairo)`，缺它时整段不编译，提示保持原样（与 `MSIME_FCITX5_MODE_BADGE` 同一策略）。
 
@@ -32,4 +32,6 @@ Status: implemented
 
 ## Verification
 
-`platforms/linux/fcitx5/tests/native.cpp::candidateThemeHint`（`--theme-hint`，`#ifdef MSIME_FCITX5_HINT_FONT`）：`fcitx_draws_candidate_theme` 四种组合、`fcitx_overlay_panel_width`/`fcitx_pad_hint_label` 纯几何、读回 theme.conf+PNG 的宽度、真实 classicui 端到端（带装饰补宽且实测 ≥ 目标、删掉 `themes/msime` 目录仍返回同样结果、深色第三方 DarkTheme 不补宽、关闭跟随系统后重新补宽、无装饰内置主题与第三方主题不补宽）。ctest 注册 `fcitx5-candidate-theme-hint`（`MSIME_FCITX5_CLASSICUI` 与 `MSIME_HINT_FONT_FOUND` 双守卫，缺依赖时 skip 77）。
+`platforms/linux/fcitx5/tests/native.cpp::candidateThemeHint`（`--theme-hint`，`#ifdef MSIME_FCITX5_HINT_FONT`）：`fcitx_draws_candidate_theme` 四种组合、`fcitx_overlay_panel_width`/`fcitx_pad_hint_label` 纯几何、读回 theme.conf+PNG 的宽度、真实 classicui 端到端（带装饰补宽且实测 ≥ 目标、删掉 `themes/msime` 目录仍返回同样结果、深色第三方 DarkTheme 不补宽、关闭跟随系统后重新补宽、无装饰内置主题与第三方主题不补宽、主动接管后的第一次提示立即补宽、退出后选回同一皮肤重新初始化）。链接包装 `pango_cairo_font_map_new` 统计测试程序分配：预热后重复 20 组中英切换没有新增字体映射。ctest 注册 `fcitx5-candidate-theme-hint`（`MSIME_FCITX5_CLASSICUI` 与 `MSIME_HINT_FONT_FOUND` 双守卫，缺依赖时 skip 77）。
+
+已安装插件的独立原生 Fcitx5 daemon + 真实聚焦 GTK 编辑器验证使用合成 PNG：候选及两种内部模式提示的装饰边框均为 85×112 像素，四个角完整（X11，设备缩放 1）。隔离 daemon 的默认全局 Shift 会切到键盘输入法，因此用已启用的 Ctrl+Alt+Space 走水杉内部切换，并断言当前输入法仍为 `msime`；这不覆盖 Fcitx5 自带的全局输入法提示。实际桌面的快捷键依用户原配置，不为测试改写。
