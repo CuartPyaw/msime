@@ -12,6 +12,34 @@ pub(crate) fn open_private_file(path: &Path) -> io::Result<File> {
     crate::file_lock::open_private_file(path)
 }
 
+/// Remove a private file relative to an opened parent directory, so a
+/// concurrent replacement of the directory cannot redirect cleanup through a
+/// symlink.
+pub(crate) fn remove_private_file(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        let name = path.file_name().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "private file has no name")
+        })?;
+        let directory = rustix::fs::open(
+            parent,
+            rustix::fs::OFlags::RDONLY
+                | rustix::fs::OFlags::DIRECTORY
+                | rustix::fs::OFlags::NOFOLLOW
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::NONBLOCK,
+            rustix::fs::Mode::empty(),
+        )?;
+        return rustix::fs::unlinkat(&directory, name, rustix::fs::AtFlags::empty())
+            .map_err(Into::into);
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::remove_file(path)
+    }
+}
+
 /// Open a private resumable file for reading and writing without following a
 /// leaf symlink. The caller is responsible for bounding the path and contents.
 pub(crate) fn open_private_read_write_file(path: &Path) -> io::Result<File> {
@@ -94,6 +122,22 @@ mod tests {
         symlink(&target, &linked).unwrap();
 
         assert!(open_private_file(&linked).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_file_remove_rejects_a_symlinked_parent() {
+        use std::os::unix::fs::symlink;
+
+        let outside = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let target = outside.path().join("anonymous-session.json");
+        std::fs::write(&target, b"synthetic-outside").unwrap();
+        let linked = root.path().join("linked");
+        symlink(outside.path(), &linked).unwrap();
+
+        assert!(remove_private_file(&linked.join("anonymous-session.json")).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"synthetic-outside");
     }
 
     #[cfg(unix)]
