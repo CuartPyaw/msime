@@ -138,7 +138,7 @@ fn copy_tree(
             // folder can be changed while it is being imported; `fs::copy` would
             // otherwise follow a file that was replaced by a symlink after the
             // `file_type` check.
-            let mut input = crate::storage::open_private_file(&entry.path())?;
+            let mut input = crate::storage::open_private_file_in(&entry.path())?;
             let length = input.metadata()?.len();
             budget.bytes = budget
                 .bytes
