@@ -18,7 +18,7 @@ pub const LEASE_NAME: &str = ".msime-dictionary-quiesce";
 /// A persistent advisory lock that serializes lease publishers and removers.
 /// The lease path itself is replaced atomically, but checking its owner and
 /// removing it are otherwise a check-then-remove race across writers.
-const LEASE_LOCK_NAME: &str = ".msime-dictionary-quiesce.lock";
+pub const LEASE_LOCK_NAME: &str = ".msime-dictionary-quiesce.lock";
 const LEASE_DURATION: Duration = Duration::from_secs(30);
 /// Long enough for the IBus host's one-second timer to come round twice.
 pub const RETRY_BUDGET: Duration = Duration::from_millis(2500);
@@ -40,7 +40,7 @@ fn read_lease(path: &Path) -> Option<String> {
     {
         let parent = path.parent().unwrap_or_else(|| Path::new("."));
         let directory = open_lease_directory(parent).ok()?;
-        return read_lease_at(&directory, path.file_name()?).ok();
+        read_lease_at(&directory, path.file_name()?).ok()
     }
     #[cfg(not(unix))]
     {
