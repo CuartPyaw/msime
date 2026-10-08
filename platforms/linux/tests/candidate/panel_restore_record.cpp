@@ -88,6 +88,29 @@ int main() {
   assert(!read_panel_restore(file));
   std::filesystem::remove(file);
 
+  // A planted record hard link must not be read as private restore state.
+  {
+    const auto hardlink_target = root / "outside-record-hardlink.json";
+    std::ofstream(hardlink_target) << R"({"fcitx5":{"Font":{"prior":"attacker","written":"msime"}}})";
+    std::filesystem::create_hard_link(hardlink_target, file);
+    assert(!read_panel_restore(file));
+    assert(std::filesystem::exists(hardlink_target));
+    std::filesystem::remove(file);
+  }
+
+  // A hard-linked lock must not become the panel takeover lock.
+  {
+    const auto hardlink_lock_target = root / "outside-record-lock-hardlink";
+    const auto hardlink_lock = std::filesystem::path(file.string() + ".lock");
+    std::ofstream(hardlink_lock_target) << "keep";
+    std::filesystem::remove(hardlink_lock);
+    std::filesystem::create_hard_link(hardlink_lock_target, hardlink_lock);
+    assert(!record_panel_takeover(file, "fcitx5", "Font", "Sans 10", "Noto Sans SC 18px"));
+    assert(std::filesystem::exists(hardlink_lock_target));
+    std::filesystem::remove(hardlink_lock);
+    std::filesystem::remove(hardlink_lock_target);
+  }
+
   // A planted FIFO must be rejected without blocking the settings writer.
   assert(::mkfifo(file.c_str(), 0600) == 0);
   assert(!read_panel_restore(file));
