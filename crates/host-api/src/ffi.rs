@@ -34,6 +34,7 @@ pub(crate) fn absolute_path(value: &str) -> bool {
     Path::new(value).is_absolute()
 }
 
+#[cfg(unix)]
 pub(crate) fn parse_absolute_socket_path(bytes: &[u8]) -> Result<&str, String> {
     parse_absolute_path(
         bytes,

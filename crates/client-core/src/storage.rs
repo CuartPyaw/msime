@@ -839,6 +839,7 @@ pub(crate) fn create_directory_and_check(path: &Path) -> io::Result<bool> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use super::*;
 
     #[cfg(unix)]

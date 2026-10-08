@@ -57,6 +57,7 @@ pub(crate) fn read(file: File, maximum: u64) -> io::Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use super::open_private;
 
     #[cfg(unix)]
