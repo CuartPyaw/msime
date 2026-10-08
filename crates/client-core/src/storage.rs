@@ -262,6 +262,62 @@ where
     Ok((value, bytes))
 }
 
+/// A private temporary file whose creation, publication and cleanup all use
+/// the same opened directory. This lets large files be streamed before a
+/// caller takes its state lock.
+#[cfg(unix)]
+pub(crate) struct PrivateStagedFile {
+    directory: File,
+    name: OsString,
+    file: Option<File>,
+}
+
+#[cfg(unix)]
+impl PrivateStagedFile {
+    pub(crate) fn new(directory: &File) -> io::Result<Self> {
+        let directory = directory.try_clone()?;
+        let name = private_temporary_name();
+        let descriptor = rustix::fs::openat(
+            &directory,
+            &name,
+            rustix::fs::OFlags::WRONLY
+                | rustix::fs::OFlags::CREATE
+                | rustix::fs::OFlags::EXCL
+                | rustix::fs::OFlags::CLOEXEC,
+            rustix::fs::Mode::from_raw_mode(0o600),
+        )?;
+        Ok(Self {
+            directory,
+            name,
+            file: Some(descriptor.into()),
+        })
+    }
+
+    pub(crate) fn file_mut(&mut self) -> &mut File {
+        self.file.as_mut().expect("staged file was published")
+    }
+
+    pub(crate) fn directory(&self) -> &File {
+        &self.directory
+    }
+
+    pub(crate) fn persist(mut self, name: &OsStr) -> io::Result<()> {
+        self.file
+            .take()
+            .expect("staged file was published")
+            .sync_all()?;
+        rustix::fs::renameat(&self.directory, &self.name, &self.directory, name)?;
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+impl Drop for PrivateStagedFile {
+    fn drop(&mut self) {
+        let _ = rustix::fs::unlinkat(&self.directory, &self.name, rustix::fs::AtFlags::empty());
+    }
+}
+
 /// 在存储操作跟随已有的符号链接之前先拒绝它。每个应用的存储都会经过的系统链接，以 `msime-path-trust` 列出的为准。
 pub(crate) fn reject_symlink(path: &Path) -> io::Result<()> {
     msime_path_trust::reject_symlinked_components(path)
@@ -489,6 +545,33 @@ mod tests {
             b"synthetic-identity"
         );
         assert!(!outside.join("anonymous-account.json").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn staged_private_file_publishes_in_its_original_directory() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let original = root.path().join("original");
+        let outside = root.path().join("outside");
+        fs::create_dir(&original).unwrap();
+        fs::create_dir(&outside).unwrap();
+        let directory = open_private_directory(&original).unwrap();
+        let mut staged = PrivateStagedFile::new(&directory).unwrap();
+        staged.file_mut().write_all(b"synthetic-snapshot").unwrap();
+        staged.file_mut().sync_all().unwrap();
+
+        let moved = root.path().join("moved");
+        fs::rename(&original, &moved).unwrap();
+        symlink(&outside, &original).unwrap();
+        staged.persist(OsStr::new("snapshot.ndjson")).unwrap();
+
+        assert_eq!(
+            fs::read(moved.join("snapshot.ndjson")).unwrap(),
+            b"synthetic-snapshot"
+        );
+        assert!(!outside.join("snapshot.ndjson").exists());
     }
 
     #[cfg(unix)]
