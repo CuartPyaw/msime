@@ -126,8 +126,8 @@ public final class VoiceListeningView extends TextView {
     @Override protected void onDraw(Canvas canvas) {
         float density = getResources().getDisplayMetrics().density;
         float radius = KeyboardGeometry.floatPixels(getContext(), ORB_DP) / 2f;
-        title.setTextSize(KeyboardGeometry.keySp(getContext(), 16));
-        hint.setTextSize(KeyboardGeometry.keySp(getContext(), 13));
+        ViewPolicy.setTextSize(title, KeyboardGeometry.keySp(getContext(), 16));
+        ViewPolicy.setTextSize(hint, KeyboardGeometry.keySp(getContext(), 13));
         Paint.FontMetrics titleMetrics = title.getFontMetrics();
         Paint.FontMetrics hintMetrics = hint.getFontMetrics();
         float titleHeight = titleMetrics.descent - titleMetrics.ascent;
