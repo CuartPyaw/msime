@@ -559,7 +559,7 @@ fn caret_prefix_expands_its_own_initial_list() {
         crate::ime::personal_rerank::allocations::count(|| session.expand_initial_candidates());
     assert!(grew);
     assert_eq!(
-        allocations, 356,
+        allocations, 355,
         "caret-prefix expansion allocations: {allocations}"
     );
     let widened = words(&session);
@@ -805,7 +805,7 @@ fn typing_at_the_end_does_not_build_the_preedit_twice_for_caret_detection() {
     });
 
     assert!(result.handled);
-    assert_eq!(allocations, 138);
+    assert_eq!(allocations, 137);
 }
 
 #[test]
@@ -818,7 +818,7 @@ fn backspacing_at_the_end_does_not_build_the_preedit_twice_for_caret_detection()
         crate::ime::personal_rerank::allocations::count(|| session.command(Command::Backspace));
 
     assert!(result.handled);
-    assert_eq!(allocations, 26);
+    assert_eq!(allocations, 25);
 }
 
 #[test]
@@ -909,7 +909,7 @@ fn typing_at_a_caret_reuses_the_editing_text_length() {
 
     assert!(result.handled);
     assert_eq!(
-        allocations, 225,
+        allocations, 223,
         "caret insertion allocations: {allocations}"
     );
 }
@@ -928,7 +928,7 @@ fn selecting_a_quanpin_candidate_clones_only_needed_request_fields() {
         crate::ime::personal_rerank::allocations::count(|| session.select(index));
 
     assert_eq!(result.commit.as_deref(), Some("你好"));
-    assert_eq!(allocations, 35, "selection allocations: {allocations}");
+    assert_eq!(allocations, 31, "selection allocations: {allocations}");
 }
 
 #[test]
@@ -989,7 +989,7 @@ fn selecting_a_shuangpin_candidate_does_not_clone_the_full_request() {
 
     assert_eq!(result.commit.as_deref(), Some("你好"));
     assert_eq!(
-        allocations, 46,
+        allocations, 42,
         "shuangpin selection allocations: {allocations}"
     );
 }
