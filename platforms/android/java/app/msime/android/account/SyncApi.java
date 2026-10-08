@@ -230,10 +230,26 @@ public final class SyncApi {
     /** 云端自 `after` 以来有没有词库改动（只取一条）。 */
     public DictionaryProbe dictionaryChangedSince(long after) throws CloudApi.Failure {
         JSONObject page = cloud.json("GET", changesPath(after), null, CloudApi.Auth.ACCOUNT);
-        JSONArray changes = page.optJSONArray("changes");
+        JSONArray changes = requiredChanges(page.opt("changes"));
         long minimum = BoundsPolicy.nonNegative(after);
         long revision = changesRevision(page.opt("next"), minimum);
-        return new DictionaryProbe(changes != null && changes.length() > 0, revision);
+        boolean changed = changes.length() > 0;
+        changePageChanged(changed, revision, minimum);
+        return new DictionaryProbe(changed, revision);
+    }
+
+    /** Successful dictionary change pages always carry an array, including an empty one. */
+    static JSONArray requiredChanges(Object value) throws CloudApi.Failure {
+        if (!(value instanceof JSONArray)) throw invalid("dictionary changes missing");
+        return (JSONArray) value;
+    }
+
+    /** An empty page must stay on the requested cursor; a non-empty page must advance it. */
+    static boolean changePageChanged(boolean changed, long revision, long minimum)
+            throws CloudApi.Failure {
+        long floor = BoundsPolicy.nonNegative(minimum);
+        if (changed ? revision <= floor : revision != floor) throw invalid("dictionary change cursor");
+        return changed;
     }
 
     /** Dictionary change cursors are non-negative integer revisions and cannot move backwards. */
