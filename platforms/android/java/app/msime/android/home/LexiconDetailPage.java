@@ -12,6 +12,7 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.Nullable;
 import app.msime.android.DictionaryCollectionsStore;
+import app.msime.android.ViewPolicy;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import java.util.ArrayList;
 import java.util.List;
@@ -128,7 +129,7 @@ public final class LexiconDetailPage extends DetailPage {
         String count = current.count() < 0 ? null : DictionaryCollectionsStore.countLabel(current.count());
         GroupCard.Row toggle = header.toggle("启用此词库", builtin ? (count == null ? "内置词库始终启用" : count + " · 内置词库始终启用") : count,
             builtin || collection.enabled(), this::setEnabled);
-        if (builtin) toggle.setEnabled(false);
+        if (builtin) ViewPolicy.setEnabled(toggle, false);
 
         if (builtin) {
             SearchPill search = new SearchPill(requireContext());
