@@ -293,13 +293,14 @@ impl NineKeySession {
         let Some(choice) = self.spellings.get(index).cloned() else {
             return KeyResult::unhandled();
         };
-        let choices = if self.reselecting() {
+        let reselecting = self.reselecting();
+        let choices = if reselecting {
             match self.undo_last_lock() {
                 Some(choices) => choices,
                 None => return KeyResult::unhandled(),
             }
         } else {
-            self.spellings.clone()
+            Vec::new()
         };
         match choice_kind(&choice) {
             Choice::Digit(digit) => {
@@ -323,6 +324,11 @@ impl NineKeySession {
                 });
             }
             Choice::Syllable => {
+                let choices = if reselecting {
+                    choices
+                } else {
+                    std::mem::take(&mut self.spellings)
+                };
                 let offset = self.locked_length();
                 // A spelling longer than what is typed extends the digits to its whole code; the spelling list only offers ones that stay within the digit limit.
                 let end = offset + choice.len().min(self.digits.len() - offset);
@@ -2514,6 +2520,28 @@ mod tests {
         assert!(
             allocations <= 1,
             "九键选择候选复制无用行字段产生了 {allocations} 次分配"
+        );
+    }
+
+    #[test]
+    fn choosing_a_nine_key_letter_does_not_clone_spelling_choices() {
+        let fixture = fixture();
+        let mut session = open(&fixture.paths, false, mixed());
+        type_digits(&mut session, "64426");
+        let index = session
+            .snapshot()
+            .nine_key_spellings
+            .iter()
+            .position(|spelling| spelling == "N")
+            .unwrap();
+
+        let (result, allocations) =
+            crate::ime::personal_rerank::allocations::count(|| session.choose_spelling(index));
+
+        assert!(result.handled);
+        assert!(
+            allocations <= 347,
+            "九键选择字母复制音节列表产生了 {allocations} 次分配"
         );
     }
 
