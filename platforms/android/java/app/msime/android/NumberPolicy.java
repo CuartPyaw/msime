@@ -11,6 +11,11 @@ public final class NumberPolicy {
         return String.format(Locale.ROOT, "%,d", value);
     }
 
+    /** 条数按千位分隔并限制为非负数，例如「128,406 条」。 */
+    public static String groupedCount(long count) {
+        return grouped(BoundsPolicy.nonNegative(count)) + " 条";
+    }
+
     /** Format a decimal with one locale-stable fractional digit. */
     public static String decimal1(double value) {
         return String.format(Locale.ROOT, "%.1f", value);
