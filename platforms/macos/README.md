@@ -87,7 +87,7 @@ workflow 曾经读取的是括号里的名字，而仓库的 secrets 是以前�
 
 没有这些 secrets 时所有签名都是 ad-hoc、也不公证。下载的应用被 Gatekeeper 隔离，第一次要右键「打开」，或执行 `xattr -dr com.apple.quarantine "/Applications/MSIME.app"`；之后设置应用可以运行、词库可以准备，但内嵌的输入法是 ad-hoc 签名，macOS 不会把它登记为输入源（见上一节与 `scripts/install.sh` 开头的说明），安装窗口、启动时的刷新与「安装 / 更新」都会在注册这一步失败：已有安装时回滚到原有安装，设置页提示安装失败；没有安装时 bundle 按上面的首次安装规则留在原处、提示重新登录，但 ad-hoc 签名的输入源重新登录后也不会出现。这种包只对有自己 Developer ID 的开发者可用：用 `scripts/install.sh` 重签并安装其中的 `水杉输入法.app`。
 
-DMG 不提供 Sparkle appcast，输入法与设置应用的「检查更新…」打开官方发布页。
+DMG 不提供 Sparkle appcast，输入法与设置应用的「检查更新…」打开官网下载页（`msime.app/download/?platform=macos`），那里有 GitHub 和国内镜像两种下载。
 
 ### Homebrew
 
