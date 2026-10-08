@@ -476,7 +476,7 @@ public final class KeyboardGeometry {
 
     /** 以 {@link #keySp} 设置键盘里控件的字号。 */
     public static void setKeyTextSize(android.widget.TextView view, float sp) {
-        view.setTextSize(TypedValue.COMPLEX_UNIT_PX, keySp(view.getContext(), sp));
+        ViewPolicy.setTextSize(view, keySp(view.getContext(), sp));
     }
 
     /** 键帽左右各留的内边距（dp）：只防字形贴住圆角，键宽几乎全部留给文字。 */
