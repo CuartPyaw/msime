@@ -465,7 +465,7 @@ pub(crate) fn export_local_snapshot(
     use msime_engine::host::DictionaryKind;
     const REVISION: i64 = 1;
     const CHUNK: usize = 1000;
-    let parent = destination
+    destination
         .parent()
         .filter(|_| destination.is_absolute() && destination.file_name().is_some())
         .ok_or("invalid snapshot destination")?;
@@ -576,20 +576,22 @@ pub(crate) fn export_local_snapshot(
             .as_bytes(),
     );
     body.push(b'\n');
-    let mut temporary =
-        tempfile::NamedTempFile::new_in(parent).map_err(|_| "snapshot file unavailable")?;
+    let mut temporary = tempfile::NamedTempFile::new().map_err(|_| "snapshot file unavailable")?;
     temporary
         .write_all(&body)
         .and_then(|()| temporary.as_file().sync_all())
         .map_err(|_| "snapshot file unavailable")?;
     let metadata = inspect_snapshot(temporary.path())?;
-    temporary
-        .persist(destination)
-        .map_err(|_| "snapshot file unavailable")?;
+    publish_snapshot(destination, &body)?;
     let mut value = serde_json::to_value(metadata).map_err(|_| "snapshot file unavailable")?;
     value["path"] = json!(destination.to_string_lossy());
     value["skipped"] = json!(skipped);
     Ok(value)
+}
+
+fn publish_snapshot(destination: &Path, bytes: &[u8]) -> Result<(), &'static str> {
+    msime_client_core::file_lock::replace_private_file(destination, bytes)
+        .map_err(|_| "snapshot file unavailable")
 }
 
 /// The same byte test `snapshot_validation::required_text` applies to a code or word, so an exported row is never one `inspect_snapshot` refuses.

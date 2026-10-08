@@ -210,6 +210,26 @@ fn inspection_rejects_a_snapshot_below_a_symlinked_parent() {
     assert!(super::inspect_snapshot(&path).is_err());
 }
 
+#[cfg(unix)]
+#[test]
+fn snapshot_publication_rejects_a_symlinked_parent() {
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let linked = root.path().join("linked");
+    symlink(outside.path(), &linked).unwrap();
+    let destination = linked.join("snapshot.ndjson");
+    let outside_file = outside.path().join("snapshot.ndjson");
+    fs::write(&outside_file, b"keep me").unwrap();
+
+    let result = super::publish_snapshot(&destination, b"synthetic snapshot");
+
+    assert!(result.is_err());
+    assert_eq!(fs::read(outside_file).unwrap(), b"keep me");
+}
+
 #[test]
 fn restore_reinspects_the_exact_file_before_upload() {
     use msime_client_core::account::AccountDictionarySnapshotRestore;
