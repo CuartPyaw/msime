@@ -429,6 +429,11 @@ public final class ViewPolicy {
         view.setElevation(0);
     }
 
+    /** 设置视图的浮层高度。 */
+    public static void setElevation(View view, float elevation) {
+        view.setElevation(elevation);
+    }
+
     /** Apply full opacity to an active view and a caller-selected opacity otherwise. */
     public static void setActiveAlpha(View view, boolean active, float inactiveAlpha) {
         view.setAlpha(active ? 1f : inactiveAlpha);

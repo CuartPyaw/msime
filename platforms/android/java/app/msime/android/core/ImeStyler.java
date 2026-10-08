@@ -330,7 +330,7 @@ final class ImeStyler {
         int shadowColor = ColorPolicy.withAlpha(Color.BLACK, shadowAlpha);
         view.setOutlineAmbientShadowColor(shadowColor);
         view.setOutlineSpotShadowColor(shadowColor);
-        view.setElevation(target.shadowOpacity() > 0
+        ViewPolicy.setElevation(view, target.shadowOpacity() > 0
             ? s.pixels(BoundsPolicy.bounded(target.shadowRadius() + target.shadowOffset(),
                 1d, Double.MAX_VALUE)) : 0);
     }
@@ -510,7 +510,7 @@ final class ImeStyler {
             s.keyboardSurface.setLayoutParams(KeyboardGeometry.frameParamsPx(
                 s.pixels(FloatingKeyboardPolicy.widthDp(configuration.screenWidthDp)),
                 FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.LEFT));
-            s.keyboardSurface.setElevation(s.pixels(10));
+            ViewPolicy.setElevation(s.keyboardSurface, s.pixels(10));
             s.keyboardSurface.setOutlineProvider(floatingOutline);
             s.keyboardSurface.setClipToOutline(true);
             return;
@@ -523,6 +523,6 @@ final class ImeStyler {
         FrameLayout.LayoutParams params = KeyboardGeometry.frameParamsPx(
             width, FrameLayout.LayoutParams.MATCH_PARENT, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         s.keyboardSurface.setLayoutParams(params);
-        s.keyboardSurface.setElevation(widthDp == 0 ? 0 : s.pixels(10));
+        ViewPolicy.setElevation(s.keyboardSurface, widthDp == 0 ? 0 : s.pixels(10));
     }
 }
