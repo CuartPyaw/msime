@@ -761,6 +761,20 @@ fn prefix_end_does_not_build_editing_text_to_clamp_the_caret() {
 }
 
 #[test]
+fn setting_the_caret_does_not_build_editing_text_to_clamp_it() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session();
+    type_text(&mut session, "nihao");
+
+    let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+        session.set_caret(Some(2));
+    });
+
+    assert_eq!(session.snapshot().caret_position, 2);
+    assert_eq!(allocations, 77);
+}
+
+#[test]
 fn moving_the_caret_does_not_build_the_preedit_twice() {
     let fixture = Fixture::new(QUANPIN_FIXTURE);
     let mut session = fixture.session();
