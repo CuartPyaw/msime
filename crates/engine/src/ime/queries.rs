@@ -32,6 +32,8 @@ pub const MODE_ENGLISH_LIMIT: usize = 1_000;
 const MIXED_DEDUP_CAPACITY: usize = MIXED_ENGLISH_LIMIT + MIXED_FETCH_LIMIT * 2;
 /// 混入 emoji 和颜文字所需的最短输入：它们按拼音查，一个字母能匹配的太多。九宫格按数字个数算，同样是 2。
 pub(crate) const MIXED_EXPRESSIVE_MINIMUM_INPUT: usize = 2;
+/// 短候选列表直接线性找锚点，避免为索引表分配堆内存。
+const EXPRESSIVE_ANCHOR_LINEAR_LIMIT: usize = 64;
 
 pub(crate) fn lowercase_prefix(raw: &str) -> Cow<'_, str> {
     if raw.bytes().all(|byte| byte.is_ascii_lowercase()) {
@@ -335,34 +337,43 @@ fn anchor_expressive_rows(
         .chain(kaomoji.iter())
         .any(|row| !row.keywords.is_empty());
     if any_keywords {
-        // 26 键的列表常有几百行（`ji` 七百多行），每行 emoji 的每个关键词都从头扫一遍列表太慢：先把候选词连同位置排好序，关键词二分查找；同一个词出现几次时取最前面的位置。
-        let mut words: Vec<(&str, usize)> = list
-            .iter()
-            .enumerate()
-            .map(|(at, candidate)| (candidate.word.as_str(), at))
-            .collect();
-        words.sort_unstable();
-        let first_position = |keyword: &str| {
-            let at = words.partition_point(|(word, _)| *word < keyword);
-            words
-                .get(at)
-                .filter(|(word, _)| *word == keyword)
-                .map(|(_, position)| *position)
-        };
-        for (group, rows) in [&emoji, &kaomoji].into_iter().enumerate() {
-            debug_assert!(rows.len() <= MIXED_FETCH_LIMIT);
-            for (index, row) in rows.iter().enumerate() {
-                let anchor = row
-                    .keywords
-                    .split_whitespace()
-                    .filter_map(first_position)
-                    .min();
-                if let Some(anchor) = anchor {
-                    anchored[anchored_length] = (anchor, group, index);
-                    anchored_length += 1;
-                    placed[group] |= 1 << index;
+        let mut add_anchors = |first_position: &dyn Fn(&str) -> Option<usize>| {
+            for (group, rows) in [&emoji, &kaomoji].into_iter().enumerate() {
+                debug_assert!(rows.len() <= MIXED_FETCH_LIMIT);
+                for (index, row) in rows.iter().enumerate() {
+                    let anchor = row
+                        .keywords
+                        .split_whitespace()
+                        .filter_map(first_position)
+                        .min();
+                    if let Some(anchor) = anchor {
+                        anchored[anchored_length] = (anchor, group, index);
+                        anchored_length += 1;
+                        placed[group] |= 1 << index;
+                    }
                 }
             }
+        };
+        if list.len() <= EXPRESSIVE_ANCHOR_LINEAR_LIMIT {
+            let first_position =
+                |keyword: &str| list.iter().position(|candidate| candidate.word == keyword);
+            add_anchors(&first_position);
+        } else {
+            // 26 键的列表常有几百行（`ji` 七百多行），每行 emoji 的每个关键词都从头扫一遍列表太慢：先把候选词连同位置排好序，关键词二分查找；同一个词出现几次时取最前面的位置。
+            let mut words: Vec<(&str, usize)> = list
+                .iter()
+                .enumerate()
+                .map(|(at, candidate)| (candidate.word.as_str(), at))
+                .collect();
+            words.sort_unstable();
+            let first_position = |keyword: &str| {
+                let at = words.partition_point(|(word, _)| *word < keyword);
+                words
+                    .get(at)
+                    .filter(|(word, _)| *word == keyword)
+                    .map(|(_, position)| *position)
+            };
+            add_anchors(&first_position);
         }
     }
     let anchored = &mut anchored[..anchored_length];
@@ -564,6 +575,23 @@ mod tests {
             Vec::new(),
         );
         assert_eq!(words(&merged), vec!["美", "", "🇺🇸"]);
+    }
+
+    #[test]
+    fn short_expressive_anchor_scan_does_not_allocate_word_index() {
+        let mut candidates = Vec::with_capacity(3);
+        candidates.extend(chinese());
+        let emoji = vec![depicting("🐔", CandidateSource::Emoji, "倪 chicken")];
+
+        let (list, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            insert_mixed_rows(candidates, Vec::new(), emoji, Vec::new())
+        });
+
+        assert_eq!(words(&list), vec!["你", "倪", "🐔"]);
+        assert_eq!(
+            allocations, 0,
+            "短表情锚定不应为候选词索引分配临时缓冲：{allocations}"
+        );
     }
 
     #[test]
