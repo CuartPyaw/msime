@@ -932,6 +932,26 @@ fn selecting_a_quanpin_candidate_clones_only_needed_request_fields() {
 }
 
 #[test]
+fn selecting_a_dictionary_candidate_does_not_build_context_row_vec() {
+    let fixture = Fixture::new(CONTEXT_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.learning = true;
+        options.personal_context = true;
+    });
+    type_text(&mut session, "ni");
+    let index = index_of(&session, "甲");
+
+    let (result, allocations) =
+        crate::ime::personal_rerank::allocations::count(|| session.select(index));
+
+    assert_eq!(result.commit.as_deref(), Some("甲"));
+    assert!(
+        allocations <= 71,
+        "个人上下文记录的中间行分配了 {allocations} 次"
+    );
+}
+
+#[test]
 fn selecting_a_candidate_does_not_clone_unused_row_metadata() {
     let fixture = Fixture::new(QUANPIN_FIXTURE);
     let mut session = fixture.session_with(|options| {
