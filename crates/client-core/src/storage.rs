@@ -185,11 +185,31 @@ pub(crate) fn open_private_file_at(directory: &PrivateDirectory, name: &OsStr) -
     open_private_file(&path)
 }
 
+#[cfg(not(unix))]
+pub(crate) fn replace_private_file_at(
+    directory: &PrivateDirectory,
+    name: &OsStr,
+    contents: &[u8],
+    permissions: Option<&fs::Permissions>,
+) -> io::Result<()> {
+    replace_private_file_with_permissions(&directory.0.join(name), contents, permissions)
+}
+
 #[cfg(unix)]
 pub(crate) fn write_private_file_at(
     directory: &File,
     name: &OsStr,
     contents: &[u8],
+) -> io::Result<()> {
+    write_private_file_at_with_permissions(directory, name, contents, None)
+}
+
+#[cfg(unix)]
+pub(crate) fn write_private_file_at_with_permissions(
+    directory: &File,
+    name: &OsStr,
+    contents: &[u8],
+    permissions: Option<&fs::Permissions>,
 ) -> io::Result<()> {
     let temporary_name = private_temporary_name();
     let descriptor = rustix::fs::openat(
@@ -202,7 +222,12 @@ pub(crate) fn write_private_file_at(
         rustix::fs::Mode::from_raw_mode(0o600),
     )?;
     let mut file: File = descriptor.into();
-    let result = file.write_all(contents).and_then(|()| file.sync_all());
+    let result = file.write_all(contents).and_then(|()| {
+        if let Some(permissions) = permissions {
+            file.set_permissions(permissions.clone())?;
+        }
+        file.sync_all()
+    });
     drop(file);
     if let Err(error) = result {
         let _ = rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty());
@@ -213,6 +238,16 @@ pub(crate) fn write_private_file_at(
         return Err(error.into());
     }
     Ok(())
+}
+
+#[cfg(unix)]
+pub(crate) fn replace_private_file_at(
+    directory: &File,
+    name: &OsStr,
+    contents: &[u8],
+    permissions: Option<&fs::Permissions>,
+) -> io::Result<()> {
+    write_private_file_at_with_permissions(directory, name, contents, permissions)
 }
 
 #[cfg(unix)]
@@ -507,6 +542,14 @@ pub(crate) fn open_private_file_in(path: &Path) -> io::Result<File> {
 
 /// 替换私有文件，并让 Unix 的读取和发布都绑定到已打开的父目录句柄。
 pub(crate) fn replace_private_file(path: &Path, contents: &[u8]) -> io::Result<()> {
+    replace_private_file_with_permissions(path, contents, None)
+}
+
+pub(crate) fn replace_private_file_with_permissions(
+    path: &Path,
+    contents: &[u8],
+    permissions: Option<&fs::Permissions>,
+) -> io::Result<()> {
     #[cfg(unix)]
     {
         let parent = path.parent().unwrap_or_else(|| Path::new("."));
@@ -514,7 +557,7 @@ pub(crate) fn replace_private_file(path: &Path, contents: &[u8]) -> io::Result<(
             io::Error::new(io::ErrorKind::InvalidInput, "private file has no name")
         })?;
         let directory = open_private_directory(parent)?;
-        write_private_file_at(&directory, name, contents)
+        write_private_file_at_with_permissions(&directory, name, contents, permissions)
     }
     #[cfg(not(unix))]
     {
@@ -522,6 +565,9 @@ pub(crate) fn replace_private_file(path: &Path, contents: &[u8]) -> io::Result<(
         reject_symlink(parent)?;
         let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
         temporary.write_all(contents)?;
+        if let Some(permissions) = permissions {
+            temporary.as_file().set_permissions(permissions.clone())?;
+        }
         temporary.as_file().sync_all()?;
         temporary
             .persist(path)
@@ -912,5 +958,34 @@ mod tests {
         assert!(create_directory_and_check(&path).unwrap());
         assert!(std::fs::symlink_metadata(&path).unwrap().is_dir());
         std::fs::remove_dir_all(path).unwrap();
+    }
+    #[cfg(unix)]
+    #[test]
+    fn private_file_publish_stays_in_an_open_directory_after_replacement() {
+        use std::os::unix::fs::symlink;
+
+        let parent = tempfile::tempdir().unwrap();
+        let original = parent.path().join("state");
+        let outside = parent.path().join("outside");
+        fs::create_dir(&original).unwrap();
+        fs::create_dir(&outside).unwrap();
+        let directory = open_private_directory(&original).unwrap();
+        let moved = parent.path().join("moved");
+        fs::rename(&original, &moved).unwrap();
+        symlink(&outside, &original).unwrap();
+
+        write_private_file_at_with_permissions(
+            &directory,
+            OsStr::new("runtime-options.json"),
+            b"synthetic-options",
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read(moved.join("runtime-options.json")).unwrap(),
+            b"synthetic-options"
+        );
+        assert!(!outside.join("runtime-options.json").exists());
     }
 }
