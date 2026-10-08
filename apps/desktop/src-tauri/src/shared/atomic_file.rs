@@ -65,22 +65,12 @@ pub(crate) fn create_directory_and_check(path: &Path) -> io::Result<()> {
 pub(crate) fn open_private(path: &Path) -> io::Result<File> {
     #[cfg(unix)]
     {
-        let descriptor = rustix::fs::open(
-            path,
-            rustix::fs::OFlags::RDONLY
-                | rustix::fs::OFlags::NOFOLLOW
-                | rustix::fs::OFlags::CLOEXEC
-                | rustix::fs::OFlags::NONBLOCK,
-            rustix::fs::Mode::empty(),
-        )?;
-        let stat = rustix::fs::fstat(&descriptor)?;
-        if !rustix::fs::FileType::from_raw_mode(stat.st_mode).is_file() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "private input is not a regular file",
-            ));
-        }
-        return Ok(descriptor.into());
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        let name = path.file_name().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "private file has no name")
+        })?;
+        let directory = open_private_directory(parent)?;
+        return open_private_fd(&directory, name);
     }
     #[cfg(windows)]
     {
@@ -108,6 +98,34 @@ pub(crate) fn open_private(path: &Path) -> io::Result<File> {
         ));
     }
     Ok(file)
+}
+
+#[cfg(unix)]
+fn open_private_fd(directory: &OwnedFd, name: &OsStr) -> io::Result<File> {
+    let descriptor = rustix::fs::openat(
+        directory,
+        name,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NONBLOCK,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(|error| {
+        if error == rustix::io::Errno::LOOP {
+            io::Error::new(io::ErrorKind::InvalidInput, "private input is a symlink")
+        } else {
+            error.into()
+        }
+    })?;
+    let stat = rustix::fs::fstat(&descriptor)?;
+    if !rustix::fs::FileType::from_raw_mode(stat.st_mode).is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "private input is not a regular file",
+        ));
+    }
+    Ok(descriptor.into())
 }
 
 /// Remove a private file relative to its opened parent directory. Opening the
@@ -328,6 +346,31 @@ mod private_open_tests {
             std::fs::read(parent.join("private-input")).unwrap(),
             b"replacement"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_open_stays_bound_to_the_open_parent_when_its_path_is_replaced() {
+        use super::{open_private_directory, open_private_fd};
+        use std::io::Read;
+
+        let root = tempfile::tempdir().unwrap();
+        let parent = root.path().join("state");
+        let moved = root.path().join("state-moved");
+        let replacement = root.path().join("replacement");
+        std::fs::create_dir(&parent).unwrap();
+        std::fs::create_dir(&replacement).unwrap();
+        std::fs::write(parent.join("private-input"), b"original").unwrap();
+        std::fs::write(replacement.join("private-input"), b"replacement").unwrap();
+        let directory = open_private_directory(&parent).unwrap();
+
+        std::fs::rename(&parent, &moved).unwrap();
+        std::fs::rename(&replacement, &parent).unwrap();
+
+        let mut file = open_private_fd(&directory, std::ffi::OsStr::new("private-input")).unwrap();
+        let mut contents = Vec::new();
+        file.read_to_end(&mut contents).unwrap();
+        assert_eq!(contents, b"original");
     }
 
     #[cfg(unix)]
