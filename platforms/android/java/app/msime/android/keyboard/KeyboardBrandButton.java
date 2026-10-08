@@ -71,12 +71,7 @@ public final class KeyboardBrandButton extends KeyboardPressButton {
         }
         // The text remains available to accessibility and device smoke tests, while the visible
         // shortcut is the same mark Apple turns into an accent-tinted template.
-        int color;
-        try {
-            color = accent.getAsInt();
-        } catch (RuntimeException error) {
-            color = Color.WHITE;
-        }
+        int color = KeyboardBrandMark.colorOrWhite(accent);
         mark.setColor(color);
         mark.setAlpha(ColorPolicy.enabledAlpha(isEnabled(), 255, 96));
         KeyboardBrandMark.draw(canvas, mark, getPaddingLeft(), getPaddingTop(), width, height,
