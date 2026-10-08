@@ -283,7 +283,7 @@ final class ImeLayoutRows {
         if (s.nineKeySidebar == null) return;
         GradientDrawable rail = DrawablePolicy.rounded(
             Color.parseColor(s.skin.sidebarBackground()), s.pixels(s.skin.cornerRadius()));
-        s.nineKeySidebar.setBackground(rail);
+        ViewPolicy.setBackground(s.nineKeySidebar, rail);
     }
 
     /** 当前键行建出来时用的左侧符号和它属于哪个键面；设置改了以后 {@link #sidebarStale} 据此判断要不要重建。 */
@@ -748,7 +748,7 @@ final class ImeLayoutRows {
         GradientDrawable surface = DrawablePolicy.outlined(
             Color.parseColor(s.skin.background()), s.pixels(10),
             KeyboardGeometry.atLeastOnePixel(s, 1), Color.parseColor(s.skin.accent()));
-        options.setBackground(surface);
+        ViewPolicy.setBackground(options, surface);
 
         String letters = key.label().toLowerCase(java.util.Locale.ROOT);
         String[] choices = new String[letters.length() + 1];
