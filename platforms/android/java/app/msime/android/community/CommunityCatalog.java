@@ -379,11 +379,6 @@ public final class CommunityCatalog {
         return true;
     }
 
-    /** org.json's optString/optBoolean coerce numbers and booleans; community responses are a typed contract. */
-    static String strictString(Object value) {
-        return JsonPolicy.strictString(value);
-    }
-
     static Boolean strictBoolean(Object value) {
         return JsonPolicy.strictBoolean(value);
     }

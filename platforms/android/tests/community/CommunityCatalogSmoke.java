@@ -1,5 +1,6 @@
 import app.msime.android.CommunityCatalog;
 import app.msime.android.CommunityRequest;
+import app.msime.android.JsonPolicy;
 import java.lang.reflect.Method;
 import java.lang.reflect.InvocationTargetException;
 import java.util.UUID;
@@ -111,13 +112,11 @@ public final class CommunityCatalogSmoke {
             "a reply set without a category is valid");
         check(!(boolean) validCategory.invoke(null, CommunityRequest.Kind.PHRASE,
             CommunityRequest.Category.OTHER), "a phrase pack carries no category");
-        Method strictString = CommunityCatalog.class.getDeclaredMethod("strictString", Object.class);
-        strictString.setAccessible(true);
-        check("synthetic name".equals(strictString.invoke(null, "synthetic name")),
+        check("synthetic name".equals(JsonPolicy.strictString("synthetic name")),
             "community string fields accept strings");
-        check(strictString.invoke(null, 42) == null,
+        check(JsonPolicy.strictString(42) == null,
             "community string fields reject numbers instead of coercing them");
-        check(strictString.invoke(null, Boolean.TRUE) == null,
+        check(JsonPolicy.strictString(Boolean.TRUE) == null,
             "community string fields reject booleans instead of coercing them");
         Method strictBoolean = CommunityCatalog.class.getDeclaredMethod("strictBoolean", Object.class);
         strictBoolean.setAccessible(true);
