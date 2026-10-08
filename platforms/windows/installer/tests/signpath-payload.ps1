@@ -56,6 +56,8 @@ try {
 
     # SignPath 送回的文件必须带有效签名：合成文件没有签名，Restore 拒绝覆盖。
     Assert-Throws '未签名的文件 Restore' { & $script -Mode Restore -Edition wubi -Directory $staged -PackageRoot $package -RepoRoot $repoRoot } '签名状态'
+    # test-signing 只放宽信任链，不放宽「必须带签名」：没有签名证书的文件照样拒绝。
+    Assert-Throws '未签名的文件以 -TestCertificate Restore' { & $script -Mode Restore -Edition wubi -Directory $staged -PackageRoot $package -RepoRoot $repoRoot -TestCertificate } '签名状态'
     Remove-Item -LiteralPath (Join-Path $staged 'wubi/tsf_dll/64/msime_host_api_wubi.dll')
     Assert-Throws '少送回一个文件 Restore' { & $script -Mode Restore -Edition wubi -Directory $staged -PackageRoot $package -RepoRoot $repoRoot } 'tsf_dll/64/msime_host_api_wubi.dll'
     Assert-Throws '没有本版本的 Restore' { & $script -Mode Restore -Edition pinyin -Directory $staged -PackageRoot $package -RepoRoot $repoRoot } '没有 pinyin'
