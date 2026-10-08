@@ -4079,13 +4079,21 @@ public final class MSIMEInputService extends InputMethodService {
         writtenSkinHint = text;
         File target = new File(getFilesDir(), SKIN_HINT_FILE);
         preferencesWorker.execute(() -> {
-            File pending = new File(getFilesDir(), SKIN_HINT_FILE + ".pending");
+            java.nio.file.Path pending = null;
             try {
-                java.nio.file.Files.write(pending.toPath(), TextPolicy.utf8Bytes(text));
-                java.nio.file.Files.move(pending.toPath(), target.toPath(),
+                pending = java.nio.file.Files.createTempFile(getFilesDir().toPath(),
+                    SKIN_HINT_FILE + ".", ".pending");
+                java.nio.file.Files.write(pending, TextPolicy.utf8Bytes(text),
+                    java.nio.file.StandardOpenOption.TRUNCATE_EXISTING,
+                    java.nio.file.StandardOpenOption.WRITE,
+                    java.nio.file.LinkOption.NOFOLLOW_LINKS);
+                java.nio.file.Files.move(pending, target.toPath(),
                     java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
             } catch (java.io.IOException | RuntimeException error) {
                 android.util.Log.w("MSIMESkin", "Keyboard skin hint was not written", error);
+            } finally {
+                if (pending != null) try { java.nio.file.Files.deleteIfExists(pending); }
+                catch (java.io.IOException ignored) { }
             }
         });
     }
