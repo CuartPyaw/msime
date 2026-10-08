@@ -118,11 +118,9 @@ public final class CommunityCatalogSmoke {
             "community string fields reject numbers instead of coercing them");
         check(JsonPolicy.strictString(Boolean.TRUE) == null,
             "community string fields reject booleans instead of coercing them");
-        Method strictBoolean = CommunityCatalog.class.getDeclaredMethod("strictBoolean", Object.class);
-        strictBoolean.setAccessible(true);
-        check(Boolean.TRUE.equals(strictBoolean.invoke(null, Boolean.TRUE)),
+        check(Boolean.TRUE.equals(JsonPolicy.strictBoolean(Boolean.TRUE)),
             "community boolean fields accept booleans");
-        check(strictBoolean.invoke(null, "true") == null,
+        check(JsonPolicy.strictBoolean("true") == null,
             "community boolean fields reject strings instead of coercing them");
         Method pageFlag = CommunityCatalog.class.getDeclaredMethod("pageHasMore", Object.class);
         pageFlag.setAccessible(true);
