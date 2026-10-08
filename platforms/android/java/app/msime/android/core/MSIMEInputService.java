@@ -7352,8 +7352,7 @@ public final class MSIMEInputService extends InputMethodService {
         } catch (RuntimeException error) {
             // 原先把异常整个吞掉，用户在定制系统上报来「无法打开设置」时，截图和日志里都看不出是哪一种拦截。提示里带上异常类型，日志里留下完整堆栈。
             android.util.Log.w("MSIMEHost", "Opening host page " + page + " failed", error);
-            Toast.makeText(this, "无法打开设置，请从主屏幕进入（" + error.getClass().getSimpleName() + "）",
-                Toast.LENGTH_LONG).show();
+            notice("无法打开设置，请从主屏幕进入（" + error.getClass().getSimpleName() + "）");
         }
     }
 
