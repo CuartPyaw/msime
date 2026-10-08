@@ -20,6 +20,7 @@ public final class UpdateApiSmoke {
         // 只允许 https 与白名单主机。
         check(UpdateApi.allowedUrl("https://msime.app/api/releases?platform=android"), "msime.app allowed");
         check(UpdateApi.allowedUrl("https://release-assets.githubusercontent.com/a/b"), "asset host allowed");
+        check(UpdateApi.allowedUrl(UpdateApi.MIRROR_PREFIX + "https://github.com/metasequoiaime/msime/releases/download/android-v1.1.0/msime-android.apk"), "mirror allowed");
         check(!UpdateApi.allowedUrl("http://github.com/x"), "plain http refused");
         check(!UpdateApi.allowedUrl("https://evil.example/x"), "other hosts refused");
         check(!UpdateApi.allowedUrl("https://github.com.evil.example/x"), "suffix tricks refused");
@@ -77,6 +78,32 @@ public final class UpdateApiSmoke {
         File downloaded = api.download(update, cache, null);
         check(downloaded.isFile() && downloaded.getName().equals("msime-android.apk"), "verified file kept");
         check(downloaded.getParentFile().getName().equals("updates"), "stored under cache/updates");
+        check(seen.indexOf(UpdateApi.MIRROR_PREFIX + update.apkUrl()) >= 0 && seen.indexOf(update.apkUrl()) > seen.indexOf(UpdateApi.MIRROR_PREFIX + update.apkUrl()),
+            "the mirror is tried first and GitHub after it fails");
+
+        // 镜像能用时完全不碰 GitHub。
+        List<String> mirrorSeen = new ArrayList<>();
+        UpdateApi mirrored = new UpdateApi(url -> {
+            mirrorSeen.add(url);
+            if (url.equals(UpdateApi.MIRROR_PREFIX + update.checksumUrl())) return body(good + "  msime-android.apk\n");
+            if (url.equals(UpdateApi.MIRROR_PREFIX + update.apkUrl())) return new UpdateApi.Exchange(200, null, apk.length, new ByteArrayInputStream(apk));
+            return new UpdateApi.Exchange(404, null, 0, new ByteArrayInputStream(new byte[0]));
+        });
+        File mirroredCache = Files.createTempDirectory("update-smoke-mirror").toFile();
+        check(good.equals(UpdateApi.sha256Hex(mirrored.download(update, mirroredCache, null))), "the mirror alone delivers a verified APK");
+        check(mirrorSeen.stream().allMatch(url -> url.startsWith(UpdateApi.MIRROR_PREFIX)), "GitHub is not contacted when the mirror works");
+
+        // 镜像给的包摘要不符：删掉，换 GitHub 再下一次。
+        byte[] corrupt = "apk-bytez".getBytes(StandardCharsets.US_ASCII);
+        UpdateApi corrupted = new UpdateApi(url -> {
+            if (url.equals(UpdateApi.MIRROR_PREFIX + update.checksumUrl())) return body(good + "  msime-android.apk\n");
+            if (url.equals(UpdateApi.MIRROR_PREFIX + update.apkUrl())) return new UpdateApi.Exchange(200, null, corrupt.length, new ByteArrayInputStream(corrupt));
+            if (url.equals(update.apkUrl())) return new UpdateApi.Exchange(200, null, apk.length, new ByteArrayInputStream(apk));
+            return new UpdateApi.Exchange(404, null, 0, new ByteArrayInputStream(new byte[0]));
+        });
+        File corruptedCache = Files.createTempDirectory("update-smoke-corrupt").toFile();
+        check(good.equals(UpdateApi.sha256Hex(corrupted.download(update, corruptedCache, null))), "a corrupt mirror copy falls back to GitHub");
+        check(!new File(corruptedCache, "updates/msime-android.apk.part").exists(), "the corrupt copy is not left behind");
 
         // Cancelling from the progress callback must remove the partial APK.
         File cancelledCache = Files.createTempDirectory("update-smoke-cancelled").toFile();
