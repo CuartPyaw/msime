@@ -253,6 +253,11 @@ public final class ViewPolicy {
         paint.setTextSize(sizePx);
     }
 
+    /** 直接设置文本视图的像素字号。 */
+    public static void setTextSize(TextView view, float sizePx) {
+        view.setTextSize(TypedValue.COMPLEX_UNIT_PX, sizePx);
+    }
+
     /** Set a text view's size in density-independent pixels. */
     public static void setTextSizeDp(TextView view, float sizeDp) {
         view.setTextSize(TypedValue.COMPLEX_UNIT_DIP, sizeDp);
