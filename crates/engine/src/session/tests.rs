@@ -3453,6 +3453,18 @@ fn cantonese_candidate_refresh_reuses_row_storage() {
     );
 }
 
+#[test]
+fn pinyin_candidate_refresh_reuses_preedit_storage() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session();
+    type_text(&mut session, "nihao");
+    let preedit_pointer = session.input.engine.preedit().as_ptr();
+
+    session.input.engine.handle_key(SchemeKey::Requery);
+
+    assert_eq!(session.input.engine.preedit().as_ptr(), preedit_pointer);
+}
+
 /// 合成的 `msime-stroke.db`（`stroke::fixture`），用共享的 schema 写成。
 fn stroke_dictionary(directory: &Path) -> PathBuf {
     let path = directory.join("msime-stroke.db");

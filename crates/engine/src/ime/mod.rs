@@ -589,8 +589,8 @@ impl ImeSession {
 
     /// ime_session.cpp:299-369.
     fn refresh_candidates(&mut self) {
-        self.state.preedit = self.scheme.preedit();
         let request = self.prepare_request(&self.scheme);
+        reuse_request_preedit(&request, &mut self.state.preedit);
         if !request.valid {
             // An emptied composition is an invalid request, and Backspace never goes through `reset`: the next code must be answered by the wubi table again.
             self.pinyin_tail = false;
@@ -730,6 +730,23 @@ impl ImeSession {
             wubi.set_mixed_pinyin_allowed(mixed_pinyin);
         }
     }
+}
+
+/// 从已构造的请求复用方案显示文本，避免刷新时再次调用 `Scheme::preedit()` 分配同一份字符串。
+fn reuse_request_preedit(request: &QueryRequest, destination: &mut String) {
+    let source = match request.scheme {
+        SchemeType::Quanpin
+        | SchemeType::Shuangpin
+        | SchemeType::Wubi
+        | SchemeType::JapaneseRomaji
+        | SchemeType::Cantonese => &request.raw_input_with_cases,
+        SchemeType::Korean
+        | SchemeType::Zhuyin
+        | SchemeType::Vietnamese
+        | SchemeType::Tibetan
+        | SchemeType::Stroke => &request.normalized_segmentation,
+    };
+    source.clone_into(destination);
 }
 
 /// The open Zhuyin list as session rows, in list order. Each row is keyed by nothing: Zhuyin learns nothing, so no row is ever written back under a reading.
@@ -937,6 +954,32 @@ mod tests {
 
     fn words(list: &[WordItem]) -> Vec<&str> {
         list.iter().map(|item| item.word.as_str()).collect()
+    }
+
+    #[test]
+    fn request_preedit_reuses_existing_storage() {
+        let mut request = QueryRequest {
+            scheme: SchemeType::Quanpin,
+            raw_input_with_cases: "NiHao".to_owned(),
+            normalized_segmentation: "ni'hao".to_owned(),
+            ..QueryRequest::default()
+        };
+        let mut destination = String::with_capacity(request.raw_input_with_cases.len());
+        destination.push_str("old");
+        let pointer = destination.as_ptr();
+
+        let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            reuse_request_preedit(&request, &mut destination);
+        });
+
+        assert_eq!(allocations, 0);
+        assert_eq!(destination, "NiHao");
+        assert_eq!(destination.as_ptr(), pointer);
+
+        request.scheme = SchemeType::Korean;
+        request.normalized_segmentation = "你好".to_owned();
+        reuse_request_preedit(&request, &mut destination);
+        assert_eq!(destination, "你好");
     }
 
     #[test]
