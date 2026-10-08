@@ -910,6 +910,10 @@ pub(crate) fn install_model(
     staging.create()?;
     let model_dir = staging.path.join("model");
     staging.create_model_directory()?;
+    #[cfg(unix)]
+    let model_directory = Some(staging.open_model_directory()?);
+    #[cfg(not(unix))]
+    let model_directory = None;
 
     let total = model.archive.size;
     let archive = staging.path.join("archive.tar.bz2");
@@ -953,6 +957,7 @@ pub(crate) fn install_model(
         model,
         &catalog().exclude,
         &model_dir,
+        model_directory.as_ref(),
         progress,
         cancel,
     )?;
@@ -1000,6 +1005,13 @@ pub(crate) fn install_model(
     for relative in model.files.values() {
         let components = relative_components(relative)
             .ok_or_else(|| LocalModelError::UnsafeArchive(relative.clone()))?;
+        #[cfg(unix)]
+        if let Some(model_directory) = model_directory.as_ref() {
+            if !model_path_exists_at(model_directory, &components) {
+                return Err(LocalModelError::MissingFile(relative.clone()));
+            }
+            continue;
+        }
         let path = components
             .iter()
             .fold(model_dir.clone(), |path, part| path.join(part));
@@ -1008,6 +1020,13 @@ pub(crate) fn install_model(
         }
     }
     check_cancel(cancel)?;
+    #[cfg(unix)]
+    if let Some(model_directory) = model_directory.as_ref() {
+        write_manifest_at(model_directory, &model.manifest)?;
+    } else {
+        write_manifest(&model_dir, &model.manifest)?;
+    }
+    #[cfg(not(unix))]
     write_manifest(&model_dir, &model.manifest)?;
     let target = publish(root, &model.id, &model_dir)?;
     progress(InstallProgress {
@@ -2101,6 +2120,90 @@ fn copy_link_with_budget(
     Ok(())
 }
 
+#[cfg(unix)]
+fn open_or_create_directory_at(parent: &File, components: &[String]) -> io::Result<File> {
+    let mut directory = parent.try_clone()?;
+    for component in components {
+        let name = OsStr::new(component);
+        match crate::storage::open_private_directory_at(&directory, name) {
+            Ok(next) => directory = next,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                rustix::fs::mkdirat(&directory, name, rustix::fs::Mode::from_raw_mode(0o700))
+                    .map_err(io::Error::from)?;
+                directory = crate::storage::open_private_directory_at(&directory, name)?;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(directory)
+}
+
+#[cfg(unix)]
+fn open_model_parent_at(
+    model_directory: &File,
+    relative: &[String],
+) -> io::Result<(File, OsString)> {
+    let (name, parent) = relative
+        .split_last()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "empty model path"))?;
+    Ok((
+        open_or_create_directory_at(model_directory, parent)?,
+        OsString::from(name),
+    ))
+}
+
+#[cfg(unix)]
+fn copy_link_at_with_budget(
+    model_directory: &File,
+    source: &[String],
+    destination: &[String],
+    written: &mut u64,
+    budget: u64,
+) -> Result<(), LocalModelError> {
+    let (source_parent, source_name) = open_model_parent_at(model_directory, source)?;
+    let mut input = crate::storage::open_private_file_at(&source_parent, &source_name)?;
+    let size = input.metadata()?.len();
+    let next = written
+        .checked_add(size)
+        .ok_or_else(|| LocalModelError::UnsafeArchive("archive expands too far".into()))?;
+    if next > budget {
+        return Err(LocalModelError::UnsafeArchive(
+            "archive expands too far".into(),
+        ));
+    }
+    let (destination_parent, destination_name) =
+        open_model_parent_at(model_directory, destination)?;
+    crate::storage::write_private_file_at_with(
+        &destination_parent,
+        &destination_name,
+        |mut output| {
+            io::copy(&mut input, &mut output)?;
+            Ok::<(File, ()), LocalModelError>((output, ()))
+        },
+    )?;
+    *written = next;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn model_path_exists_at(model_directory: &File, relative: &[String]) -> bool {
+    let Some((name, parents)) = relative.split_last() else {
+        return false;
+    };
+    let Ok(mut parent) = model_directory.try_clone() else {
+        return false;
+    };
+    for component in relative.iter().take(parents.len()) {
+        let Ok(next) = crate::storage::open_private_directory_at(&parent, OsStr::new(component))
+        else {
+            return false;
+        };
+        parent = next;
+    }
+    crate::storage::open_private_file_at(&parent, OsStr::new(name)).is_ok()
+        || crate::storage::open_private_directory_at(&parent, OsStr::new(name)).is_ok()
+}
+
 impl<R: Read> Read for Counting<R> {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         let read = self.inner.read(buffer)?;
@@ -2115,6 +2218,7 @@ fn extract(
     model: &CatalogModel,
     exclude: &[String],
     model_dir: &Path,
+    model_directory: Option<&File>,
     progress: &mut dyn FnMut(InstallProgress),
     cancel: &AtomicBool,
 ) -> Result<(), LocalModelError> {
@@ -2181,38 +2285,113 @@ fn extract(
             .fold(model_dir.to_path_buf(), |path, part| path.join(part));
         let kind = entry.header().entry_type();
         if kind.is_dir() {
+            #[cfg(unix)]
+            if let Some(model_directory) = model_directory {
+                open_or_create_directory_at(model_directory, &relative)?;
+            } else {
+                fs::create_dir_all(&destination)?;
+            }
+            #[cfg(not(unix))]
             fs::create_dir_all(&destination)?;
         } else if kind.is_file() || kind.is_contiguous() {
-            if let Some(parent) = destination.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            let mut output = BufWriter::new(create_private_file(&destination)?);
-            loop {
-                check_cancel(cancel)?;
-                let read = match entry.read(&mut buffer) {
-                    Ok(0) => break,
-                    Ok(read) => read,
-                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                    Err(error) => return Err(unsafe_archive(error)),
-                };
-                written += read as u64;
-                if written > budget {
-                    return Err(LocalModelError::UnsafeArchive(
-                        "archive expands too far".into(),
-                    ));
+            #[cfg(unix)]
+            if let Some(model_directory) = model_directory {
+                let (parent, name) = open_model_parent_at(model_directory, &relative)?;
+                crate::storage::write_private_file_at_with(&parent, &name, |output| {
+                    let mut output = BufWriter::new(output);
+                    loop {
+                        check_cancel(cancel)?;
+                        let read = match entry.read(&mut buffer) {
+                            Ok(0) => break,
+                            Ok(read) => read,
+                            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                            Err(error) => return Err(unsafe_archive(error)),
+                        };
+                        written += read as u64;
+                        if written > budget {
+                            return Err(LocalModelError::UnsafeArchive(
+                                "archive expands too far".into(),
+                            ));
+                        }
+                        output.write_all(&buffer[..read])?;
+                        let now = consumed.get().min(total);
+                        if now - last_report >= (total / 200).max(CHUNK as u64) {
+                            last_report = now;
+                            progress(InstallProgress {
+                                stage: "extract",
+                                downloaded: now,
+                                total,
+                            });
+                        }
+                    }
+                    let output = output.into_inner().map_err(|error| error.into_error())?;
+                    Ok::<(File, ()), LocalModelError>((output, ()))
+                })?;
+            } else {
+                if let Some(parent) = destination.parent() {
+                    fs::create_dir_all(parent)?;
                 }
-                output.write_all(&buffer[..read])?;
-                let now = consumed.get().min(total);
-                if now - last_report >= (total / 200).max(CHUNK as u64) {
-                    last_report = now;
-                    progress(InstallProgress {
-                        stage: "extract",
-                        downloaded: now,
-                        total,
-                    });
+                let mut output = BufWriter::new(create_private_file(&destination)?);
+                loop {
+                    check_cancel(cancel)?;
+                    let read = match entry.read(&mut buffer) {
+                        Ok(0) => break,
+                        Ok(read) => read,
+                        Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                        Err(error) => return Err(unsafe_archive(error)),
+                    };
+                    written += read as u64;
+                    if written > budget {
+                        return Err(LocalModelError::UnsafeArchive(
+                            "archive expands too far".into(),
+                        ));
+                    }
+                    output.write_all(&buffer[..read])?;
+                    let now = consumed.get().min(total);
+                    if now - last_report >= (total / 200).max(CHUNK as u64) {
+                        last_report = now;
+                        progress(InstallProgress {
+                            stage: "extract",
+                            downloaded: now,
+                            total,
+                        });
+                    }
                 }
+                output.flush()?;
             }
-            output.flush()?;
+            #[cfg(not(unix))]
+            {
+                if let Some(parent) = destination.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                let mut output = BufWriter::new(create_private_file(&destination)?);
+                loop {
+                    check_cancel(cancel)?;
+                    let read = match entry.read(&mut buffer) {
+                        Ok(0) => break,
+                        Ok(read) => read,
+                        Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                        Err(error) => return Err(unsafe_archive(error)),
+                    };
+                    written += read as u64;
+                    if written > budget {
+                        return Err(LocalModelError::UnsafeArchive(
+                            "archive expands too far".into(),
+                        ));
+                    }
+                    output.write_all(&buffer[..read])?;
+                    let now = consumed.get().min(total);
+                    if now - last_report >= (total / 200).max(CHUNK as u64) {
+                        last_report = now;
+                        progress(InstallProgress {
+                            stage: "extract",
+                            downloaded: now,
+                            total,
+                        });
+                    }
+                }
+                output.flush()?;
+            }
         } else if kind.is_symlink() || kind.is_hard_link() {
             let target = entry
                 .link_name()
@@ -2235,6 +2414,18 @@ fn extract(
         // Device nodes, FIFOs and the like are never part of a model and are skipped.
     }
     for (destination, source) in pending {
+        #[cfg(unix)]
+        if let Some(model_directory) = model_directory {
+            if !model_path_exists_at(model_directory, &source) {
+                return Err(LocalModelError::UnsafeArchive(format!(
+                    "{} -> {}",
+                    destination.join("/"),
+                    source.join("/")
+                )));
+            }
+            copy_link_at_with_budget(model_directory, &source, &destination, &mut written, budget)?;
+            continue;
+        }
         let join = |parts: &[String]| {
             parts
                 .iter()

@@ -393,6 +393,49 @@ fn adoption_rename_stays_in_open_source_and_model_directories() {
 
 #[cfg(unix)]
 #[test]
+fn tar_extraction_stays_in_the_open_model_directory() {
+    use std::os::unix::fs::symlink;
+
+    let archive = good_archive();
+    let state = tempfile::tempdir().unwrap();
+    let root = state.path().join("models");
+    let outside = state.path().join("outside");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(&outside).unwrap();
+    let staging = Staging::new(root.join(".staging-fixture-new")).unwrap();
+    staging.create().unwrap();
+    staging.create_model_directory().unwrap();
+    let model_dir = staging.path.join("model");
+    let model_directory = staging.open_model_directory().unwrap();
+    let archive_path = state.path().join("fixture.tar.bz2");
+    fs::write(&archive_path, &archive).unwrap();
+    let moved = state.path().join("models-moved");
+    fs::rename(&root, &moved).unwrap();
+    symlink(&outside, &root).unwrap();
+
+    let model = fixture_model(&archive);
+    extract(
+        &archive_path,
+        &model,
+        &[],
+        &model_dir,
+        Some(&model_directory),
+        &mut |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+
+    assert_eq!(
+        fs::read(moved.join(".staging-fixture-new/model/encoder.onnx")).unwrap(),
+        b"encoder"
+    );
+    assert!(!outside
+        .join(".staging-fixture-new/model/encoder.onnx")
+        .exists());
+}
+
+#[cfg(unix)]
+#[test]
 fn leftover_file_cleanup_rejects_a_symlinked_parent() {
     use std::os::unix::fs::symlink;
 
