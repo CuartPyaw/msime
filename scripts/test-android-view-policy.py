@@ -20,6 +20,8 @@ def main() -> None:
         "setEnabledWithAlpha(child, enabled, inactiveAlpha);",
         "public static void setFixedHeight(View view, int height)",
         "if (params == null || params.height == height) return;",
+        "public static boolean isVisible(View view)",
+        "return view != null && view.getVisibility() == View.VISIBLE;",
     )
     missing = [snippet for snippet in required if snippet not in view_policy]
     if missing:
@@ -32,6 +34,10 @@ def main() -> None:
         raise AssertionError("MSIMEInputService 仍保留重复的固定高度实现")
     if "ViewPolicy.setFixedHeight(candidateLine, pixels(line));" not in input_service:
         raise AssertionError("MSIMEInputService 没有调用共享固定高度策略")
+    if "private static boolean shown(View view)" in input_service:
+        raise AssertionError("MSIMEInputService 仍保留重复的可见性判断")
+    if "ViewPolicy.isVisible(" not in input_service:
+        raise AssertionError("MSIMEInputService 没有调用共享可见性策略")
     print("android view policy: recursive enabled state is shared")
 
 
