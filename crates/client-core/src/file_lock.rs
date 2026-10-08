@@ -30,6 +30,15 @@ pub fn open_private_file_at(directory: &PrivateDirectory, name: &OsStr) -> io::R
     crate::storage::open_private_file_at(&directory.directory, name)
 }
 
+/// Replace a private file relative to an already opened parent directory.
+pub fn write_private_file_at(
+    directory: &PrivateDirectory,
+    name: &OsStr,
+    contents: &[u8],
+) -> io::Result<()> {
+    crate::storage::write_private_file_at(&directory.directory, name, contents)
+}
+
 pub fn replace_private_file_at(
     directory: &PrivateDirectory,
     name: &OsStr,
