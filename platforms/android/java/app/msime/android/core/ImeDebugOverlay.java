@@ -116,16 +116,14 @@ final class ImeDebugOverlay {
                 SafePaths.ensureDirectory(directory.toPath());
                 java.nio.file.Path file = new File(directory, name).toPath();
                 if (Files.isSymbolicLink(file)) Files.delete(file);
-                long size = Files.exists(file, LinkOption.NOFOLLOW_LINKS) ? Files.size(file) : 0;
-                if (size + line.length <= MAX_BYTES) {
-                    Files.write(file, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND,
-                        StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
-                    return;
-                }
-                byte[] kept = trimmed(read(file), line.length, MAX_BYTES);
+                byte[] existing = Files.exists(file, LinkOption.NOFOLLOW_LINKS)
+                    ? read(file) : new byte[0];
+                byte[] kept = existing.length + (long) line.length <= MAX_BYTES
+                    ? existing : trimmed(existing, line.length, MAX_BYTES);
                 byte[] next = new byte[kept.length + line.length];
                 System.arraycopy(kept, 0, next, 0, kept.length);
                 System.arraycopy(line, 0, next, kept.length, line.length);
+                // 追加路径也必须先写新文件再替换；直接打开日志目标会跟随硬链接并改写目录外 inode。
                 java.nio.file.Path staging = Files.createTempFile(directory.toPath(),
                     "." + name + ".", ".staging");
                 try {
