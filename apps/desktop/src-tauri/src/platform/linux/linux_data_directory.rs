@@ -246,7 +246,8 @@ fn rebased_locator(
     {
         return Err(MoveError::Publish);
     }
-    let file = crate::shared::atomic_file::open_private(path).map_err(|_| MoveError::Publish)?;
+    let file = super::open_private_at(parent, path.file_name().ok_or(MoveError::Publish)?)
+        .map_err(|_| MoveError::Publish)?;
     let mut contents =
         Vec::with_capacity((MAX_OPTIONS_BYTES as usize).min(INITIAL_OPTIONS_READ_CAPACITY));
     file.take(MAX_OPTIONS_BYTES + 1)
