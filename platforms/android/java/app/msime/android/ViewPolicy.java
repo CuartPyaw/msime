@@ -151,6 +151,11 @@ public final class ViewPolicy {
         return view;
     }
 
+    /** 创建像素尺寸的线性布局正方形参数。 */
+    public static LinearLayout.LayoutParams newSquareParamsPx(int size) {
+        return new LinearLayout.LayoutParams(size, size);
+    }
+
     /** Bind a caller-supplied action to a view without changing any other interaction policy. */
     public static void bindClick(View view, Runnable action) {
         view.setOnClickListener(ignored -> action.run());

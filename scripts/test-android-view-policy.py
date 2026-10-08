@@ -36,6 +36,8 @@ def main() -> None:
         "view.setOrientation(LinearLayout.HORIZONTAL);",
         "public static LinearLayout newColumn(Context context)",
         "view.setOrientation(LinearLayout.VERTICAL);",
+        "public static LinearLayout.LayoutParams newSquareParamsPx(int size)",
+        "return new LinearLayout.LayoutParams(size, size);",
     )
     missing = [snippet for snippet in required if snippet not in view_policy]
     if missing:
@@ -82,6 +84,13 @@ def main() -> None:
     vertical_factory = "LinearLayout view = new LinearLayout(context);\n        view.setOrientation(LinearLayout.VERTICAL);"
     if vertical_factory in ui or vertical_factory in keyboard_geometry:
         raise AssertionError("页面工具类仍保留重复的纵向容器实现")
+    if "return ViewPolicy.newSquareParamsPx(size);" not in ui:
+        raise AssertionError("Ui 没有调用共享正方形布局参数工厂")
+    if "return ViewPolicy.newSquareParamsPx(size);" not in keyboard_geometry:
+        raise AssertionError("KeyboardGeometry 没有调用共享正方形布局参数工厂")
+    square_factory = "public static LinearLayout.LayoutParams squareParamsPx(int size) {\n        return new LinearLayout.LayoutParams(size, size);"
+    if square_factory in ui or square_factory in keyboard_geometry:
+        raise AssertionError("页面工具类仍保留重复的正方形布局参数实现")
     print("android view policy: recursive enabled state is shared")
 
 
