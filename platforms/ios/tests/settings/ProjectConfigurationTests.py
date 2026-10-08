@@ -265,6 +265,13 @@ class ProjectConfigurationTests(unittest.TestCase):
         self.assertRegex(app, r"target 'MSIMEApp' do\n(?:  [^\n]*\n|\n)*end\n")
         self.assertNotIn("GoogleSignIn", extension)
         self.assertIn("pod 'MLKitDigitalInkRecognition', '8.0.0'", extension)
+        # 回调 scheme 必须是 GIDClientID 倒过来写，否则 Google 登录页回不到 App。
+        project = (IOS_ROOT / "project.yml").read_text()
+        client = re.search(r"GIDClientID: (\S+)\.apps\.googleusercontent\.com\n", project).group(1)
+        self.assertIn(f"CFBundleURLSchemes: [com.googleusercontent.apps.{client}]", project)
+        self.assertIn("GIDServerClientID: 237074057301-q5av9h30kspkqnjat4i9hn9oer9ogfpp.apps.googleusercontent.com", project)
+        android = (IOS_ROOT / "../android/res/values/strings.xml").read_text()
+        self.assertIn("237074057301-q5av9h30kspkqnjat4i9hn9oer9ogfpp.apps.googleusercontent.com", android)
 
     def test_every_keyboard_scroll_view_turns_off_the_ios26_edge_effect(self):
         roots = [IOS_ROOT / "SharedUI", IOS_ROOT / "KeyboardExtension/Sources"]

@@ -38,3 +38,11 @@ Info.plist 里同时写 `GIDClientID`（iOS 类型的 OAuth client）和 `GIDSer
 - **代价**：`MSIMEApp` 多了 GoogleSignIn 及其依赖（AppAuth、GTMAppAuth、GTMSessionFetcher、AppCheckCore、GoogleUtilities、Promises、RecaptchaInterop），它们的许可证随 App 打包为 `GoogleSignIn-Dependencies.txt`。Podfile 里键盘扩展原本嵌套在 App 下面，现在改成独立的顶层 target：嵌套时会把 GoogleSignIn 继承进键盘扩展，嵌套加 `inherit! :none` 又会让 CocoaPods 把 ML Kit 的预编译框架从扩展的链接参数里漏掉，真机构建报 `Unable to resolve module dependency: 'MLKitDigitalInkRecognition'`。`ProjectConfigurationTests` 守着这一条。
 - **代价**：iOS 类型的 OAuth client 建在 Google Cloud 项目里，仓库之外。以后 iOS 的 bundle ID 变了（比如出了别的版本），每个 bundle ID 都要另建一个 client，否则 Google 会拒绝回调。
 - **代价**：不装 pod 的模拟器构建里看不到 Google 按钮，界面测试只能在 workspace 构建里覆盖这条路径。
+
+## Verification
+
+- `shared/backend` 的 `BackendAccountClientTests.testProvidersAndServerNonce` 覆盖空 target 的 Google challenge。
+- `ProjectConfigurationTests.test_google_sign_in_is_linked_into_the_app_only` 检查 Podfile 的 target 结构、回调 scheme 与 `GIDClientID` 是否对应、`GIDServerClientID` 是否与 Android 一致。
+- 真机发布构建（完整 Podfile，`CODE_SIGNING_ALLOWED=NO`）编过：App 二进制里有 `GIDSignIn`，键盘扩展里没有，ML Kit 仍在扩展里。
+- `OnboardingUITests.testGoogleSignInOpensGoogleAndCancelReturnsToSheet` 在只装 GoogleSignIn pod 的 arm64 模拟器构建上通过：打开 Google 的登录页（没有 `invalid_request` 一类的错误），取消后回到登录面板，也不显示错误。不装 pod 的构建里这个用例会跳过。
+- 用真实 Google 账号完成登录、换到后端会话这一步，还没有在设备上验证过。
