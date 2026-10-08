@@ -1017,7 +1017,7 @@ pub(crate) fn install_model(
         check_cancel(cancel)?;
         let name = single_component(&extra.name)
             .ok_or_else(|| LocalModelError::UnsafeArchive(extra.name.clone()))?;
-        let destination = model_dir.join(name);
+        let destination = model_dir.join(&name);
         match (&extra.resource, &extra.url) {
             (Some(resource), _) => {
                 let bytes = EMBEDDED_RESOURCES
@@ -1031,9 +1031,39 @@ pub(crate) fn install_model(
                 if !hex::encode(Sha256::digest(bytes)).eq_ignore_ascii_case(&extra.sha256) {
                     return Err(LocalModelError::ChecksumMismatch(extra.name.clone()));
                 }
+                #[cfg(unix)]
+                if let Some(model_directory) = model_directory.as_ref() {
+                    crate::storage::write_private_file_at(
+                        model_directory,
+                        OsStr::new(&name),
+                        bytes,
+                    )?;
+                    continue;
+                }
                 write_private_bytes(&destination, bytes)?;
             }
             (None, Some(url)) => {
+                #[cfg(unix)]
+                if let Some(model_directory) = model_directory.as_ref() {
+                    let expected = extra.sha256.clone();
+                    let size = extra.size;
+                    let url = mirrored(mirror, url);
+                    crate::storage::write_private_file_at_with(
+                        model_directory,
+                        OsStr::new(&name),
+                        |file| {
+                            let mut output = BufWriter::new(file);
+                            let digest =
+                                download(fetcher, &url, size, &mut output, cancel, &mut |_| {})?;
+                            if !digest.eq_ignore_ascii_case(&expected) {
+                                return Err(LocalModelError::ChecksumMismatch(extra.name.clone()));
+                            }
+                            let output = output.into_inner().map_err(|error| error.into_error())?;
+                            Ok::<(File, ()), LocalModelError>((output, ()))
+                        },
+                    )?;
+                    continue;
+                }
                 let mut output = BufWriter::new(create_private_file(&destination)?);
                 let digest = download(
                     fetcher,
