@@ -912,11 +912,49 @@ pub(crate) fn install_model(
     staging.create_model_directory()?;
     #[cfg(unix)]
     let model_directory = Some(staging.open_model_directory()?);
+    #[cfg(unix)]
+    let staging_directory = Some(staging.open_directory()?);
     #[cfg(not(unix))]
     let model_directory = None;
+    #[cfg(not(unix))]
+    let staging_directory = None;
 
     let total = model.archive.size;
     let archive = staging.path.join("archive.tar.bz2");
+    let archive_name = OsStr::new("archive.tar.bz2");
+    #[cfg(unix)]
+    let (archive_digest, archive_reader) = {
+        let staging_directory = staging_directory.as_ref().expect("unix staging handle");
+        let mut last = 0u64;
+        let (digest, _) =
+            crate::storage::write_private_file_at_with(staging_directory, archive_name, |file| {
+                let mut output = BufWriter::new(file);
+                let digest = download(
+                    fetcher,
+                    &mirrored(mirror, &model.archive.url),
+                    total,
+                    &mut output,
+                    cancel,
+                    &mut |downloaded| {
+                        if downloaded == total
+                            || downloaded - last >= (total / 200).max(CHUNK as u64)
+                        {
+                            last = downloaded;
+                            progress(InstallProgress {
+                                stage: "download",
+                                downloaded,
+                                total,
+                            });
+                        }
+                    },
+                )?;
+                let file = output.into_inner().map_err(|error| error.into_error())?;
+                Ok::<(File, String), LocalModelError>((file, digest))
+            })?;
+        let reader = crate::storage::open_private_file_at(staging_directory, archive_name)?;
+        (digest, reader)
+    };
+    #[cfg(not(unix))]
     let digest = {
         let mut output = BufWriter::new(create_private_file(&archive)?);
         let mut last = 0u64;
@@ -946,6 +984,8 @@ pub(crate) fn install_model(
         downloaded: total,
         total,
     });
+    #[cfg(unix)]
+    let digest = archive_digest.as_str();
     if !digest.eq_ignore_ascii_case(&model.archive.sha256) {
         return Err(LocalModelError::ChecksumMismatch(
             model.archive.name.clone(),
@@ -958,9 +998,19 @@ pub(crate) fn install_model(
         &catalog().exclude,
         &model_dir,
         model_directory.as_ref(),
+        #[cfg(unix)]
+        Some(&archive_reader),
+        #[cfg(not(unix))]
+        None,
         progress,
         cancel,
     )?;
+    #[cfg(unix)]
+    crate::storage::remove_private_tree_at(
+        staging_directory.as_ref().expect("unix staging handle"),
+        archive_name,
+    )?;
+    #[cfg(not(unix))]
     fs::remove_file(&archive)?;
 
     for extra in &model.extra {
@@ -2213,19 +2263,29 @@ impl<R: Read> Read for Counting<R> {
 }
 
 /// Unpack the members the model needs from `archive` into `model_dir`. Members outside `archive.root`, or with absolute or `..` paths, or links that resolve outside the model, fail the install; members the model does not name are skipped. Links inside the model are materialised as copies so the result needs no symlink support on Windows.
+#[allow(clippy::too_many_arguments)]
 fn extract(
     archive: &Path,
     model: &CatalogModel,
     exclude: &[String],
     model_dir: &Path,
     model_directory: Option<&File>,
+    archive_file: Option<&File>,
     progress: &mut dyn FnMut(InstallProgress),
     cancel: &AtomicBool,
 ) -> Result<(), LocalModelError> {
     let total = model.archive.size;
     let consumed = Rc::new(Cell::new(0u64));
+    #[cfg(unix)]
+    let archive_input = if let Some(archive_file) = archive_file {
+        archive_file.try_clone()?
+    } else {
+        crate::storage::open_private_file_in(archive)?
+    };
+    #[cfg(not(unix))]
+    let archive_input = crate::storage::open_private_file_in(archive)?;
     let reader = Counting {
-        inner: crate::storage::open_private_file_in(archive)?,
+        inner: archive_input,
         count: consumed.clone(),
     };
     let decoder = bzip2::read::MultiBzDecoder::new(BufReader::with_capacity(CHUNK, reader));

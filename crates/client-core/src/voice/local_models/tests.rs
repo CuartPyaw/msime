@@ -420,6 +420,7 @@ fn tar_extraction_stays_in_the_open_model_directory() {
         &[],
         &model_dir,
         Some(&model_directory),
+        None,
         &mut |_| {},
         &AtomicBool::new(false),
     )
