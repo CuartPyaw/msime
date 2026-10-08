@@ -49,6 +49,42 @@ fn create_private_file(path: &Path) -> io::Result<File> {
     options.open(path)
 }
 
+fn extract_archive_member<R: Read>(
+    entry: &mut R,
+    output: File,
+    file: &crate::resources::Artifact,
+    cancel: &AtomicBool,
+) -> Result<File, LocalModelError> {
+    let mut output = BufWriter::new(output);
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; CHUNK];
+    let mut written = 0u64;
+    loop {
+        check_cancel(cancel)?;
+        let read = match entry.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(unsafe_archive(error)),
+        };
+        written += read as u64;
+        if written > file.size {
+            return Err(LocalModelError::SizeMismatch(file.name.clone()));
+        }
+        hasher.update(&buffer[..read]);
+        output.write_all(&buffer[..read])?;
+    }
+    let output = output.into_inner().map_err(|error| error.into_error())?;
+    output.sync_all()?;
+    if written != file.size {
+        return Err(LocalModelError::SizeMismatch(file.name.clone()));
+    }
+    if !hex::encode(hasher.finalize()).eq_ignore_ascii_case(&file.sha256) {
+        return Err(LocalModelError::ChecksumMismatch(file.name.clone()));
+    }
+    Ok(output)
+}
+
 fn write_private_bytes(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut file = create_private_file(path)?;
     file.write_all(bytes)?;
@@ -986,6 +1022,13 @@ fn write_manifest(dir: &Path, manifest: &Value) -> Result<(), LocalModelError> {
     Ok(())
 }
 
+#[cfg(unix)]
+fn write_manifest_at(directory: &File, manifest: &Value) -> Result<(), LocalModelError> {
+    let manifest = serde_json::to_vec_pretty(manifest).map_err(io::Error::other)?;
+    crate::storage::write_private_file_at(directory, OsStr::new(MANIFEST_FILE), &manifest)?;
+    Ok(())
+}
+
 /// 把完整的暂存目录移到 `<root>/<id>`：先把旧安装改名挪开，移动失败时再挪回来，成功后删除旧安装。
 fn publish(root: &Path, id: &str, staged: &Path) -> Result<PathBuf, LocalModelError> {
     let target = root.join(id);
@@ -1317,9 +1360,24 @@ pub(crate) fn install_archive_members_with(
     staging.create()?;
     let pack_dir = staging.path.join("model");
     staging.create_model_directory()?;
+    #[cfg(unix)]
+    let pack_directory = Some(staging.open_model_directory()?);
+    #[cfg(not(unix))]
+    let pack_directory = None;
     let partials = partial_directory(root, id)?;
     let result = download_and_extract(
-        root, id, archive, members, files, manifest, mirrors, fetcher, progress, cancel, &pack_dir,
+        root,
+        id,
+        archive,
+        members,
+        files,
+        manifest,
+        mirrors,
+        fetcher,
+        progress,
+        cancel,
+        &pack_dir,
+        pack_directory.as_ref(),
         &partials,
     );
     if result.is_err() {
@@ -1341,6 +1399,7 @@ fn download_and_extract(
     progress: &mut dyn FnMut(InstallProgress),
     cancel: &AtomicBool,
     pack_dir: &Path,
+    pack_directory: Option<&File>,
     partials: &PartialDirectory,
 ) -> Result<PathBuf, LocalModelError> {
     let total = archive.size;
@@ -1370,10 +1429,8 @@ fn download_and_extract(
         downloaded: total,
         total,
     });
-    let mut zip = zip::ZipArchive::new(BufReader::new(crate::storage::open_private_file_in(
-        &partial,
-    )?))
-    .map_err(|error| LocalModelError::UnsafeArchive(error.to_string()))?;
+    let mut zip = zip::ZipArchive::new(BufReader::new(partials.open_read(partial_name)?))
+        .map_err(|error| LocalModelError::UnsafeArchive(error.to_string()))?;
     for file in files {
         check_cancel(cancel)?;
         let name = single_component(&file.name)
@@ -1390,42 +1447,53 @@ fn download_and_extract(
         if !entry.is_file() {
             return Err(LocalModelError::UnsafeArchive(member.to_owned()));
         }
-        let mut output = BufWriter::new(create_private_file(&pack_dir.join(&name))?);
-        let mut hasher = Sha256::new();
-        let mut buffer = vec![0u8; CHUNK];
-        let mut written = 0u64;
-        loop {
-            check_cancel(cancel)?;
-            let read = match entry.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(read) => read,
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(error) => return Err(unsafe_archive(error)),
-            };
-            written += read as u64;
-            // 先按锁文件的长度截住，解压炸弹写不满磁盘。
-            if written > file.size {
-                return Err(LocalModelError::SizeMismatch(file.name.clone()));
-            }
-            hasher.update(&buffer[..read]);
-            output.write_all(&buffer[..read])?;
+        #[cfg(unix)]
+        if let Some(pack_directory) = pack_directory {
+            crate::storage::write_private_file_at_with(
+                pack_directory,
+                OsStr::new(&name),
+                |output| {
+                    Ok::<(File, ()), LocalModelError>((
+                        extract_archive_member(&mut entry, output, file, cancel)?,
+                        (),
+                    ))
+                },
+            )?;
+        } else {
+            extract_archive_member(
+                &mut entry,
+                create_private_file(&pack_dir.join(&name))?,
+                file,
+                cancel,
+            )?;
         }
-        let output = output.into_inner().map_err(|error| error.into_error())?;
-        output.sync_all()?;
-        if written != file.size {
-            return Err(LocalModelError::SizeMismatch(file.name.clone()));
-        }
-        if !hex::encode(hasher.finalize()).eq_ignore_ascii_case(&file.sha256) {
-            return Err(LocalModelError::ChecksumMismatch(file.name.clone()));
-        }
+        #[cfg(not(unix))]
+        extract_archive_member(
+            &mut entry,
+            create_private_file(&pack_dir.join(&name))?,
+            file,
+            cancel,
+        )?;
         // 取出的是原生库：Android 14 起动态加载的代码文件必须只读，发布前去掉写权限。替换和删除只改目录项，不受影响。
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(pack_dir.join(&name), fs::Permissions::from_mode(0o444))?;
+            let output = if let Some(pack_directory) = pack_directory {
+                crate::storage::open_private_file_at(pack_directory, OsStr::new(&name))?
+            } else {
+                crate::storage::open_private_file_in(&pack_dir.join(&name))?
+            };
+            rustix::fs::fchmod(&output, rustix::fs::Mode::from_raw_mode(0o444))
+                .map_err(io::Error::from)?;
         }
     }
     drop(zip);
+    #[cfg(unix)]
+    if let Some(pack_directory) = pack_directory {
+        write_manifest_at(pack_directory, manifest)?;
+    } else {
+        write_manifest(pack_dir, manifest)?;
+    }
+    #[cfg(not(unix))]
     write_manifest(pack_dir, manifest)?;
     check_cancel(cancel)?;
     let target = publish(root, id, pack_dir)?;
@@ -1550,6 +1618,16 @@ impl PartialDirectory {
             rustix::fs::Mode::from_raw_mode(0o600),
         )?;
         Ok(descriptor.into())
+    }
+
+    #[cfg(unix)]
+    fn open_read(&self, name: &OsStr) -> io::Result<File> {
+        crate::storage::open_private_file_at(&self.directory, name)
+    }
+
+    #[cfg(not(unix))]
+    fn open_read(&self, name: &OsStr) -> io::Result<File> {
+        crate::storage::open_private_file_in(&self.path.join(name))
     }
 
     #[cfg(not(unix))]

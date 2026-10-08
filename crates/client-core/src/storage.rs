@@ -303,13 +303,14 @@ pub(crate) fn write_private_file_at_noclobber(
 /// with an atomic rename. The callback returns the finished file so callers
 /// can use writers, such as a zip encoder, that consume their output handle.
 #[cfg(unix)]
-pub(crate) fn write_private_file_at_with<T, F>(
+pub(crate) fn write_private_file_at_with<T, E, F>(
     directory: &File,
     name: &OsStr,
     writer: F,
-) -> io::Result<(T, u64)>
+) -> Result<(T, u64), E>
 where
-    F: FnOnce(File) -> io::Result<(File, T)>,
+    E: From<io::Error>,
+    F: FnOnce(File) -> Result<(File, T), E>,
 {
     let temporary_name = private_temporary_name();
     let descriptor = rustix::fs::openat(
@@ -320,7 +321,8 @@ where
             | rustix::fs::OFlags::EXCL
             | rustix::fs::OFlags::CLOEXEC,
         rustix::fs::Mode::from_raw_mode(0o600),
-    )?;
+    )
+    .map_err(|error| E::from(io::Error::from(error)))?;
     let file: File = descriptor.into();
     let (file, value) = match writer(file) {
         Ok(result) => result,
@@ -337,13 +339,13 @@ where
         Err(error) => {
             drop(file);
             let _ = rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty());
-            return Err(error);
+            return Err(E::from(error));
         }
     };
     drop(file);
     if let Err(error) = rustix::fs::renameat(directory, &temporary_name, directory, name) {
         let _ = rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty());
-        return Err(error.into());
+        return Err(E::from(error.into()));
     }
     Ok((value, bytes))
 }

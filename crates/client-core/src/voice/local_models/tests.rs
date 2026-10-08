@@ -220,6 +220,32 @@ fn partial_file_writes_stay_in_the_open_directory_after_root_replacement() {
 
 #[cfg(unix)]
 #[test]
+fn partial_file_reads_stay_in_the_open_directory_after_root_replacement() {
+    use std::os::unix::fs::symlink;
+
+    let state = tempfile::tempdir().unwrap();
+    let root = state.path().join("models");
+    let outside = state.path().join("outside");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(&outside).unwrap();
+    let partials = partial_directory(&root, "pack").unwrap();
+    let name = OsStr::new("partial-a");
+    fs::write(partials.path().join(name), b"synthetic partial").unwrap();
+    fs::create_dir_all(outside.join(".partial-pack")).unwrap();
+    fs::write(outside.join(".partial-pack").join(name), b"outside partial").unwrap();
+    let moved = state.path().join("models-moved");
+    fs::rename(&root, &moved).unwrap();
+    symlink(&outside, &root).unwrap();
+
+    let mut input = partials.open_read(name).unwrap();
+    let mut bytes = Vec::new();
+    input.read_to_end(&mut bytes).unwrap();
+
+    assert_eq!(bytes, b"synthetic partial");
+}
+
+#[cfg(unix)]
+#[test]
 fn partial_publish_rename_stays_in_open_directories_after_root_replacement() {
     use std::os::unix::fs::symlink;
 
@@ -277,6 +303,53 @@ fn model_directory_creation_stays_in_the_open_staging_directory() {
 
     assert!(moved.join(".staging-pack-new/model").is_dir());
     assert!(!outside.join(".staging-pack-new").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn archive_member_creation_stays_in_the_open_model_directory() {
+    use std::os::unix::fs::symlink;
+
+    let state = tempfile::tempdir().unwrap();
+    let root = state.path().join("models");
+    let outside = state.path().join("outside");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(&outside).unwrap();
+    let staging = Staging::new(root.join(".staging-pack-new")).unwrap();
+    staging.create().unwrap();
+    staging.create_model_directory().unwrap();
+    let pack_directory = staging.open_model_directory().unwrap();
+    fs::create_dir_all(outside.join(".staging-pack-new/model")).unwrap();
+    let moved = state.path().join("models-moved");
+    fs::rename(&root, &moved).unwrap();
+    symlink(&outside, &root).unwrap();
+
+    crate::storage::write_private_file_at_with(
+        &pack_directory,
+        OsStr::new("libfixture.so"),
+        |mut output| {
+            output.write_all(b"synthetic library")?;
+            Ok::<(File, ()), io::Error>((output, ()))
+        },
+    )
+    .unwrap();
+    write_manifest_at(&pack_directory, &serde_json::json!({"synthetic": true})).unwrap();
+
+    assert_eq!(
+        fs::read(moved.join(".staging-pack-new/model/libfixture.so")).unwrap(),
+        b"synthetic library"
+    );
+    assert_eq!(
+        fs::read(moved.join(".staging-pack-new/model").join(MANIFEST_FILE)).unwrap(),
+        serde_json::to_vec_pretty(&serde_json::json!({"synthetic": true})).unwrap()
+    );
+    assert!(!outside
+        .join(".staging-pack-new/model/libfixture.so")
+        .exists());
+    assert!(!outside
+        .join(".staging-pack-new/model")
+        .join(MANIFEST_FILE)
+        .exists());
 }
 
 #[cfg(unix)]
