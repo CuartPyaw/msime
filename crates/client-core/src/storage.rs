@@ -20,6 +20,14 @@ pub(crate) fn open_private_directory(parent: &Path) -> io::Result<File> {
         | rustix::fs::OFlags::NOFOLLOW
         | rustix::fs::OFlags::CLOEXEC
         | rustix::fs::OFlags::NONBLOCK;
+    // 沿途的祖先目录只需要搜索权限（`x`）。Android 只给应用 `/data` 和 `/data/user` 的 `x`、不给 `r`，按 `RDONLY` 逐级打开会在走到应用自己的目录之前就 EACCES，所有私有文件读写因此全部失败。Linux 和 Android 用 `O_PATH` 只凭搜索权限打开祖先，`NOFOLLOW` 照样拒绝符号链接；走完后再用 `flags` 重新打开目录本身，调用方拿到的描述符和以前一样。
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    let search = rustix::fs::OFlags::PATH
+        | rustix::fs::OFlags::DIRECTORY
+        | rustix::fs::OFlags::NOFOLLOW
+        | rustix::fs::OFlags::CLOEXEC;
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    let search = flags;
     let absolute = parent.is_absolute();
     let mut directory = rustix::fs::open(
         if absolute {
@@ -27,7 +35,7 @@ pub(crate) fn open_private_directory(parent: &Path) -> io::Result<File> {
         } else {
             Path::new(".")
         },
-        flags,
+        search,
         rustix::fs::Mode::empty(),
     )?;
     let mut logical = if absolute {
@@ -45,13 +53,14 @@ pub(crate) fn open_private_directory(parent: &Path) -> io::Result<File> {
             }
             std::path::Component::RootDir | std::path::Component::CurDir => {}
             std::path::Component::ParentDir => {
-                directory = rustix::fs::openat(&directory, "..", flags, rustix::fs::Mode::empty())?;
+                directory =
+                    rustix::fs::openat(&directory, "..", search, rustix::fs::Mode::empty())?;
                 logical.pop();
             }
             std::path::Component::Normal(name) => {
                 logical.push(name);
                 directory =
-                    match rustix::fs::openat(&directory, name, flags, rustix::fs::Mode::empty()) {
+                    match rustix::fs::openat(&directory, name, search, rustix::fs::Mode::empty()) {
                         Ok(directory) => directory,
                         Err(error)
                             if (error == rustix::io::Errno::LOOP
@@ -61,7 +70,7 @@ pub(crate) fn open_private_directory(parent: &Path) -> io::Result<File> {
                             rustix::fs::openat(
                                 &directory,
                                 name,
-                                flags & !rustix::fs::OFlags::NOFOLLOW,
+                                search & !rustix::fs::OFlags::NOFOLLOW,
                                 rustix::fs::Mode::empty(),
                             )?
                         }
@@ -70,7 +79,7 @@ pub(crate) fn open_private_directory(parent: &Path) -> io::Result<File> {
             }
         }
     }
-    Ok(directory.into())
+    Ok(rustix::fs::openat(&directory, ".", flags, rustix::fs::Mode::empty())?.into())
 }
 
 #[cfg(unix)]
@@ -192,6 +201,26 @@ pub(crate) fn write_private_file_at_noclobber(
     if let Err(error) = result {
         let _ = rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty());
         return Err(error);
+    }
+    // Android 的 SELinux 不允许应用（以及 adb shell）建硬链接，下面的 `linkat` 在那里一律 EACCES，匿名账号等不覆盖写入全部失败。Linux 和 Android 先用 `renameat2(RENAME_NOREPLACE)`：同样原子、目标已存在时返回 EEXIST，不需要硬链接；文件系统不支持这个标志（EINVAL）或内核没有这个调用（ENOSYS）时才退回硬链接。
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    match rustix::fs::renameat_with(
+        directory,
+        &temporary_name,
+        directory,
+        name,
+        rustix::fs::RenameFlags::NOREPLACE,
+    ) {
+        Ok(()) => return Ok(true),
+        Err(rustix::io::Errno::EXIST) => {
+            let _ = rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty());
+            return Ok(false);
+        }
+        Err(rustix::io::Errno::INVAL | rustix::io::Errno::NOSYS) => {}
+        Err(error) => {
+            let _ = rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty());
+            return Err(error.into());
+        }
     }
     match rustix::fs::linkat(
         directory,
@@ -524,6 +553,32 @@ mod tests {
         assert_eq!(std::fs::read(&target).unwrap(), b"synthetic-outside");
     }
 
+    // 模拟 Android 的 `/data`：祖先目录只有搜索权限、没有读权限，它下面的应用私有目录照样要能打开和写入。以 root 运行时权限检查不生效，这条测试只在普通用户下有区分度。
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn private_directory_opens_below_a_search_only_ancestor() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let ancestor = root.path().join("search-only");
+        let private = ancestor.join("private");
+        std::fs::create_dir_all(&private).unwrap();
+        std::fs::set_permissions(&ancestor, std::fs::Permissions::from_mode(0o111)).unwrap();
+
+        let written = open_private_directory(&private).and_then(|directory| {
+            write_private_file_at(&directory, OsStr::new("session.json"), b"synthetic-session")
+        });
+        let read = open_private_file_in(&private.join("session.json"));
+        std::fs::set_permissions(&ancestor, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        written.unwrap();
+        read.unwrap();
+        assert_eq!(
+            std::fs::read(private.join("session.json")).unwrap(),
+            b"synthetic-session"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn private_file_write_stays_in_an_open_directory_after_replacement() {
@@ -656,6 +711,10 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    #[cfg_attr(
+        target_os = "android",
+        ignore = "Android 的 adb shell 域不允许建 FIFO（SELinux 拒绝 fifo_file create）"
+    )]
     fn private_read_write_open_rejects_a_fifo() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("partial-download");

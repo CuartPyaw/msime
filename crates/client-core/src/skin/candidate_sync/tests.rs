@@ -9,6 +9,10 @@ use std::path::PathBuf;
 
 #[cfg(unix)]
 #[test]
+#[cfg_attr(
+    target_os = "android",
+    ignore = "Android 的 adb shell 域不允许建 FIFO（SELinux 拒绝 fifo_file create）"
+)]
 fn sync_state_fifo_is_rejected_without_blocking() {
     use std::os::unix::fs::{FileTypeExt, OpenOptionsExt};
     use std::sync::mpsc;

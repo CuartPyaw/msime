@@ -56,6 +56,10 @@ fn builtin_root() -> PathBuf {
 }
 
 #[test]
+#[cfg_attr(
+    target_os = "android",
+    ignore = "读主机仓库里的文件，设备上没有这份检出"
+)]
 fn the_built_in_packs_the_bundles_ship_are_valid() {
     let root = tempdir().unwrap();
     let catalog = scan(root.path(), Some(&builtin_root()));
@@ -712,6 +716,10 @@ fn a_linked_kind_directory_cannot_load_a_pack_outside_the_plugins_root() {
 
 #[cfg(unix)]
 #[test]
+#[cfg_attr(
+    target_os = "android",
+    ignore = "读主机仓库里的文件，设备上没有这份检出"
+)]
 fn a_linked_plugins_root_is_not_scanned() {
     let state = tempdir().unwrap();
     let outside = tempdir().unwrap();
@@ -743,6 +751,10 @@ fn a_linked_builtin_root_is_not_scanned() {
 }
 
 #[test]
+#[cfg_attr(
+    target_os = "android",
+    ignore = "读主机仓库里的文件，设备上没有这份检出"
+)]
 fn built_in_ids_are_reserved_and_resolved_only_from_the_bundle() {
     let root = tempdir().unwrap();
     installed_sound(root.path(), &SOUND.replace("typewriter", "default"));
@@ -1954,6 +1966,10 @@ fn fixture_cases(group: &str) -> Vec<(String, PathBuf)> {
 }
 
 #[test]
+#[cfg_attr(
+    target_os = "android",
+    ignore = "读主机仓库里的文件，设备上没有这份检出"
+)]
 fn shared_fixture_packs_are_accepted_and_refused_as_listed() {
     for (case, path) in fixture_cases("valid") {
         let summary = validate(&path).unwrap_or_else(|error| panic!("{case}: {error}"));
