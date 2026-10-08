@@ -63,8 +63,12 @@ pub(crate) fn open_private_directory(parent: &Path) -> io::Result<std::os::fd::O
 
 pub(crate) fn open_private_at(parent: &Path, name: &OsStr) -> io::Result<File> {
     let directory = open_private_directory(parent)?;
+    open_private_fd(&directory, name)
+}
+
+pub(crate) fn open_private_fd(directory: &std::os::fd::OwnedFd, name: &OsStr) -> io::Result<File> {
     let descriptor = rustix::fs::openat(
-        &directory,
+        directory,
         name,
         rustix::fs::OFlags::RDONLY
             | rustix::fs::OFlags::NOFOLLOW
