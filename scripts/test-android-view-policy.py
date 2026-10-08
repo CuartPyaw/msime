@@ -34,6 +34,8 @@ def main() -> None:
         "if (view.getVisibility() == visibility) return;",
         "public static LinearLayout newRow(Context context)",
         "view.setOrientation(LinearLayout.HORIZONTAL);",
+        "public static LinearLayout newColumn(Context context)",
+        "view.setOrientation(LinearLayout.VERTICAL);",
     )
     missing = [snippet for snippet in required if snippet not in view_policy]
     if missing:
@@ -73,6 +75,13 @@ def main() -> None:
     horizontal_factory = "LinearLayout view = new LinearLayout(context);\n        view.setOrientation(LinearLayout.HORIZONTAL);"
     if horizontal_factory in ui or horizontal_factory in keyboard_geometry:
         raise AssertionError("页面工具类仍保留重复的横向容器实现")
+    if "return ViewPolicy.newColumn(context);" not in ui:
+        raise AssertionError("Ui 没有调用共享纵向容器工厂")
+    if "return ViewPolicy.newColumn(context);" not in keyboard_geometry:
+        raise AssertionError("KeyboardGeometry 没有调用共享纵向容器工厂")
+    vertical_factory = "LinearLayout view = new LinearLayout(context);\n        view.setOrientation(LinearLayout.VERTICAL);"
+    if vertical_factory in ui or vertical_factory in keyboard_geometry:
+        raise AssertionError("页面工具类仍保留重复的纵向容器实现")
     print("android view policy: recursive enabled state is shared")
 
 

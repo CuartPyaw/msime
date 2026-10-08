@@ -364,9 +364,7 @@ public final class Ui {
 
     /** Create a vertical linear container for stacked host content. */
     public static LinearLayout column(Context context) {
-        LinearLayout view = new LinearLayout(context);
-        view.setOrientation(LinearLayout.VERTICAL);
-        return view;
+        return ViewPolicy.newColumn(context);
     }
 
     /** Create a horizontal linear container for inline host content. */
