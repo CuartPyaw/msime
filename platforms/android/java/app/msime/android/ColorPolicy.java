@@ -56,6 +56,11 @@ public final class ColorPolicy {
             color.substring(color.length() - 6));
     }
 
+    /** 将不透明 RGB 整数格式化为稳定的大写 `#RRGGBB` 颜色串。 */
+    public static String hexRgb(int color) {
+        return String.format(java.util.Locale.ROOT, "#%06X", color & 0xFFFFFF);
+    }
+
     /** Parse only the hexadecimal colour forms emitted by keyboard skin data. */
     public static int parseHex(String value, int fallback) {
         if (value == null || !value.matches("#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8}")) return fallback;
