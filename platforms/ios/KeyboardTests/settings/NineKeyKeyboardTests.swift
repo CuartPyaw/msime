@@ -976,13 +976,10 @@ final class NineKeyKeyboardTests: XCTestCase {
   }
 
   func testBrandTogglesTheFunctionMenuInTheKeyArea() throws {
-    let previous = KeyboardFeedbackPreference.defaults.object(forKey: KeyboardFeedbackPreference.soundKey)
-    defer {
-      if let previous { KeyboardFeedbackPreference.defaults.set(previous, forKey: KeyboardFeedbackPreference.soundKey) }
-      else { KeyboardFeedbackPreference.defaults.removeObject(forKey: KeyboardFeedbackPreference.soundKey) }
-    }
+    let previous = KeyboardPrivacyPreference.incognito
+    defer { KeyboardPrivacyPreference.incognito = previous }
     for width in [320.0, 414.0] {
-      KeyboardFeedbackPreference.defaults.set(true, forKey: KeyboardFeedbackPreference.soundKey)
+      KeyboardPrivacyPreference.incognito = false
       let controller = KeyboardViewController()
       controller.loadViewIfNeeded()
       controller.view.frame = CGRect(x: 0, y: 0, width: width, height: KeyboardViewController.defaultKeyboardHeight)
@@ -1020,12 +1017,12 @@ final class NineKeyKeyboardTests: XCTestCase {
       let grid = try XCTUnwrap(descendants(panel).compactMap { $0 as? KeyboardPagedGridView }.first)
       grid.scrollToPage(1, animated: false)
       XCTAssertEqual(panel.currentPage, 1)
-      let sound = try tile("moreCard-按键音", in: controller)
-      XCTAssertEqual(page(of: sound, in: scroll), 1)
-      XCTAssertEqual(sound.accessibilityValue, "已开启")
-      sound.sendActions(for: .primaryActionTriggered)
-      XCTAssertFalse(KeyboardFeedbackPreference.soundEnabled)
-      XCTAssertEqual(try tile("moreCard-按键音", in: controller).accessibilityValue, "已关闭")
+      let privacy = try tile("moreCard-隐私模式", in: controller)
+      XCTAssertEqual(page(of: privacy, in: scroll), 1)
+      XCTAssertEqual(privacy.accessibilityValue, "已关闭")
+      privacy.sendActions(for: .primaryActionTriggered)
+      XCTAssertTrue(KeyboardPrivacyPreference.incognito)
+      XCTAssertEqual(try tile("moreCard-隐私模式", in: controller).accessibilityValue, "已开启")
       XCTAssertNotNil(panel.superview, "a switch leaves the menu open")
       XCTAssertEqual(panel.currentPage, 1, "a switch keeps the page")
 

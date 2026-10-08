@@ -1790,10 +1790,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       KeyboardTool(id: "dictionary", title: "词库", face: .icon(.lexicon)) { [weak self] in
         self?.openApp(KeyboardAppLauncher.dictionaryURL)
       },
-      // Android 在这一格放「键盘高度」；iOS 的键盘布局面板同时调高度、键距和行距，单独的高度入口与它重复，所以这一格给布局面板。
-      KeyboardTool(id: "keyboardLayout", title: "键盘布局", face: .icon(.keyboardLayout)) { [weak self] in
-        self?.showLayoutPicker()
-      },
+      // Android 在这里有一格「键盘高度」。iOS 调高度、键距和行距的布局面板由工具栏的「键盘设置」按钮打开（默认显示），菜单里不放。
       // 键盘只改这个菜单里有的设置；其余设置都在 app 里，正在打字的人没有别的路可以过去。
       KeyboardTool(id: "settings", title: "设置", face: .icon(.settings)) { [weak self] in
         self?.openApp(KeyboardAppLauncher.inputSettingsURL)
