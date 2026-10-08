@@ -284,7 +284,7 @@ public final class InlineHeightBar extends LinearLayout {
             float gap = KeyboardGeometry.floatPixels(getContext(), 6);
             String caption = label(bar.percent(), bar.heightPixels);
             float scale = fitScale(text.measureText(caption), getWidth() - 2 * gap);
-            if (scale < 1f) text.setTextSize(text.getTextSize() * scale);
+            if (scale < 1f) ViewPolicy.setTextSize(text, text.getTextSize() * scale);
             Paint.FontMetrics metrics = text.getFontMetrics();
             float textHeight = metrics.descent - metrics.ascent;
             float total = KeyboardGeometry.floatPixels(getContext(), BAR_HEIGHT_DP) + gap + textHeight;
