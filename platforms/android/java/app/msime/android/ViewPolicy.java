@@ -514,6 +514,13 @@ public final class ViewPolicy {
         view.setVisibility(visible ? View.VISIBLE : View.GONE);
     }
 
+    /** 仅在显示状态发生变化时更新视图，避免无意义的重新布局。 */
+    public static void setVisibleIfChanged(View view, boolean visible) {
+        int visibility = visible ? View.VISIBLE : View.GONE;
+        if (view.getVisibility() == visibility) return;
+        setVisible(view, visible);
+    }
+
     /** Show a view only when the supplied text is non-null and non-empty. */
     public static void setVisibilityForText(View view, CharSequence text) {
         setVisible(view, text != null && text.length() != 0);

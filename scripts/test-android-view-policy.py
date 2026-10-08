@@ -28,6 +28,8 @@ def main() -> None:
         "return view != null && view.getVisibility() == View.VISIBLE;",
         "public static void setPaddingIfChanged(View view, int left, int top, int right, int bottom)",
         "if (view.getPaddingLeft() == left && view.getPaddingTop() == top",
+        "public static void setVisibleIfChanged(View view, boolean visible)",
+        "if (view.getVisibility() == visibility) return;",
     )
     missing = [snippet for snippet in required if snippet not in view_policy]
     if missing:
@@ -48,6 +50,10 @@ def main() -> None:
         raise AssertionError("ImeBottomBar 仍保留重复的条件内边距实现")
     if "ViewPolicy.setPaddingIfChanged(keyboard, 0, 0, 0, 0);" not in bottom_bar:
         raise AssertionError("ImeBottomBar 没有调用共享条件内边距策略")
+    if "if (bar != null && (bar.getVisibility() == View.VISIBLE) != shown) ViewPolicy.setVisible(bar, shown);" in bottom_bar:
+        raise AssertionError("ImeBottomBar 仍保留重复的条件可见性实现")
+    if "ViewPolicy.setVisibleIfChanged(bar, shown);" not in bottom_bar:
+        raise AssertionError("ImeBottomBar 没有调用共享条件可见性策略")
     if "view.setMinHeight(dp(context, heightDp));" in ui:
         raise AssertionError("Ui 仍直接实现文本最小高度策略")
     if "ViewPolicy.setTextMinHeight(view, dp(context, heightDp));" not in ui:
