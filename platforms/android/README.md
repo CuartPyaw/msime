@@ -60,7 +60,7 @@ Java/Kotlin 宿主按 `java/app/msime/android/<feature>/` 分为 `account`、`ca
 
 软键盘的主按键区按 Apple 键盘的基础层次拆成字母层和符号层；字母层支持可见的 Shift 状态，符号层保留标点、括号和数字，两个层次均通过无障碍描述暴露当前按键。层次排列由无 Android 依赖的 `KeyboardLayout` 提供，便于在主机测试中验证布局不被宿主生命周期改变。
 
-“符”入口按 Apple 的整屏符号面板适配为 Android 原生面板：常用、中文、英文、数字、网络五类使用左侧分类和右侧五列滚动网格，底部提供返回、删除和锁定连续输入。打开前先由 Engine 完成组合；符号通过普通 `InputConnection` 以本地输入来源上屏，未锁定时插入一个后回到键盘，锁定时可连续输入。分类、网格数量和锁定行为由无 Android 依赖的 `SymbolPanelModel` 验证，宿主只负责 View 与触摸反馈。
+“符”入口按 Apple 的整屏符号面板适配为 Android 原生面板：常用、中文、英文、数字、网络五类使用左侧分类和右侧五列滚动网格，底部提供返回、删除和锁定连续输入。这五类之后是颜文字（每行两个）和形状、箭头、标点、数学、货币、爱心、字母、游戏、文化、自然、人物、更多十二类符号，内容不写在宿主里，而是打开分类时在表情目录的工作线程上经 `msime_client_emoji_catalog_request`（`category` 为 `kaomoji` 或 `symbols`，后者带 `parent`）从随包的 `msime-others.db` 每次读 64 条，滚到底再读下一页，与 iOS 键盘和桌面面板是同一份数据；颜文字不记进「常用」。打开前先由 Engine 完成组合；符号通过普通 `InputConnection` 以本地输入来源上屏，未锁定时插入一个后回到键盘，锁定时可连续输入。「常用」不是写死的表，而是用户在面板里实际点过的符号，最近点的在前、最多 30 个，只存在本机的 `android-symbol-recents`；隐私模式和不许个性化学习的输入框不记。还没有记录时面板打开在「中文」，原先写在「常用」里的中文标点也在「中文」最前面。分类、网格数量、使用记录和锁定行为由无 Android 依赖的 `SymbolPanelModel` 验证，宿主只负责 View 与触摸反馈。
 
 编辑器上下文按固定 Apple 来源的边界适配 Android `inputType`：URI、邮箱、密码和明确禁用建议的字段临时进入英文输入，允许 Engine 的字段使用 dedicated English 模式，敏感字段继续绕过 Engine；离开后恢复进入前的中英状态，同一字段内用户通过“中/英”手动切换后，输入重启回调不会再次覆盖。英文模式始终展示完整 26 键，即使底层方案为九键或手写；数字和标点会在完成英文组合后由宿主直接提交，空格会完成候选并保留实际空格。`TYPE_TEXT_FLAG_CAP_CHARACTERS`、`CAP_WORDS` 和 `CAP_SENTENCES` 分别映射为全大写、单词首字母和句首自动大写，URI/邮箱强制关闭；规则只读取最多 128 个光标前字符并在内存中即时判断，不记录或持久化编辑器内容。缺失上下文安全回退为关闭自动 Shift。
 
@@ -71,6 +71,8 @@ Java/Kotlin 宿主按 `java/app/msime/android/<feature>/` 分为 `account`、`ca
 中文全拼或双拼已有组合时，软键盘 Shift 保持中文会话并把后续字母以大写辅码交给 Engine，用于缩小候选；组合开始前仍按 Apple 行为切换到英文。五笔、日语、本地输入模式和空组合不启用辅码，Shift 的一次性状态在辅码输入后复位。
 
 移动端智能标点消费共享 `smart_punctuation`、`chinese_punctuation` 和 `punctuation_lock`：中文跟随模式且 Engine 空闲时，逗号、句点或冒号紧跟 ASCII 字母/数字会保留 ASCII，锁定中文或英文优先；已有组合、日语、英文和本地模式仍交给 Engine。Android 每次只从 `InputConnection` 读取光标前最多两个 UTF-16 单元并向共享策略传一个 Unicode 标量，不保存或记录编辑器文字；缺失或异常上下文安全回退到 Engine 标点。
+
+共享偏好 `paired_punctuation`（设置「表达 › 标点」里的「自动补全成对标点」，默认开）打开时，Engine 上屏以（、【、《、〈、“、‘ 结尾，宿主就补上后半个并把光标留在中间；每按一次引号键都开一对新的（Engine 交替出的后引号改回前引号），没有组字时再按 `)`、`]`、`>`、`"`、`'` 会跨过光标右边自己补上的那个后半个而不是再写一个，删除、用户移动光标或换输入框后不再跨过。补的是书名号时经 `msime_client_balance_paired_punctuation_after_auto_close` 告诉 Engine 这一层已闭合。符号面板不经过 Engine：轻点中文和英文括号、书名号、中文引号的前半个时成对上屏，长按只上屏这半个；之后在面板里轻点同一个后半个会跨过已补好的那个，而不是再写一个；ASCII 的 `"` 和 `'` 不成对。标点键的补全和跨过规则与 iOS 宿主相同（HarmonyOS 只有补全、没有跨过），集中在无 Android 依赖的 `PairedPunctuationPolicy`，由 `PairedPunctuationPolicySmoke` 验证。
 
 重复标点和标点后空格也由共享 Host API 决定：Android 只在当前编辑器会话内保存带 `editor_generation` 的有界 snapshot，按下下一个标点或空格时重新读取光标前标量并消费 `replace_with` / `space_ascii`；焦点、会话或编辑器变化会清空 snapshot，过期或上下文不一致时不改写文本。重复时间窗口、候选数量、组字状态和开关均不在 Android 重实现。
 

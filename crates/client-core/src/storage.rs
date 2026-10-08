@@ -1,6 +1,68 @@
 use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
+
+#[cfg(unix)]
+pub(crate) fn open_private_directory(parent: &Path) -> io::Result<File> {
+    let flags = rustix::fs::OFlags::RDONLY
+        | rustix::fs::OFlags::DIRECTORY
+        | rustix::fs::OFlags::NOFOLLOW
+        | rustix::fs::OFlags::CLOEXEC
+        | rustix::fs::OFlags::NONBLOCK;
+    let absolute = parent.is_absolute();
+    let mut directory = rustix::fs::open(
+        if absolute {
+            Path::new("/")
+        } else {
+            Path::new(".")
+        },
+        flags,
+        rustix::fs::Mode::empty(),
+    )?;
+    let mut logical = if absolute {
+        PathBuf::from("/")
+    } else {
+        PathBuf::from(".")
+    };
+    for component in parent.components() {
+        match component {
+            std::path::Component::Prefix(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "directory path has an unsupported prefix",
+                ));
+            }
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                directory = rustix::fs::openat(&directory, "..", flags, rustix::fs::Mode::empty())?;
+                logical.pop();
+            }
+            std::path::Component::Normal(name) => {
+                logical.push(name);
+                directory =
+                    match rustix::fs::openat(&directory, name, flags, rustix::fs::Mode::empty()) {
+                        Ok(directory) => directory,
+                        Err(error)
+                            if (error == rustix::io::Errno::LOOP
+                                || error == rustix::io::Errno::NOTDIR)
+                                && msime_path_trust::is_trusted_system_alias(&logical) =>
+                        {
+                            rustix::fs::openat(
+                                &directory,
+                                name,
+                                flags & !rustix::fs::OFlags::NOFOLLOW,
+                                rustix::fs::Mode::empty(),
+                            )?
+                        }
+                        Err(error) => return Err(error.into()),
+                    };
+            }
+        }
+    }
+    Ok(directory.into())
+}
 
 /// 在存储操作跟随已有的符号链接之前先拒绝它。每个应用的存储都会经过的系统链接，以 `msime-path-trust` 列出的为准。
 pub(crate) fn reject_symlink(path: &Path) -> io::Result<()> {
@@ -22,15 +84,7 @@ pub(crate) fn remove_private_file(path: &Path) -> io::Result<()> {
         let name = path.file_name().ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "private file has no name")
         })?;
-        let directory = rustix::fs::open(
-            parent,
-            rustix::fs::OFlags::RDONLY
-                | rustix::fs::OFlags::DIRECTORY
-                | rustix::fs::OFlags::NOFOLLOW
-                | rustix::fs::OFlags::CLOEXEC
-                | rustix::fs::OFlags::NONBLOCK,
-            rustix::fs::Mode::empty(),
-        )?;
+        let directory = open_private_directory(parent)?;
         rustix::fs::unlinkat(&directory, name, rustix::fs::AtFlags::empty()).map_err(Into::into)
     }
     #[cfg(not(unix))]
@@ -136,6 +190,24 @@ mod tests {
         symlink(outside.path(), &linked).unwrap();
 
         assert!(remove_private_file(&linked.join("anonymous-session.json")).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"synthetic-outside");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_file_remove_rejects_a_symlinked_ancestor() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let nested = outside.path().join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        let target = nested.join("anonymous-session.json");
+        std::fs::write(&target, b"synthetic-outside").unwrap();
+        let linked = root.path().join("linked");
+        symlink(outside.path(), &linked).unwrap();
+
+        assert!(remove_private_file(&linked.join("nested/anonymous-session.json")).is_err());
         assert_eq!(std::fs::read(&target).unwrap(), b"synthetic-outside");
     }
 
