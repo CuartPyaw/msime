@@ -138,9 +138,4 @@ public final class FeedbackApi {
         return JsonPolicy.strictStringOrEmpty(response.opt("id"));
     }
 
-    /** Compatibility entry point retained for the host smoke contract. */
-    static String strictString(Object value) {
-        return JsonPolicy.strictString(value);
-    }
-
 }
