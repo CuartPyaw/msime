@@ -2,7 +2,7 @@
 //!
 //! A `Session` always configures frequency adjustment (session.cpp:21-23 rejects invalid options instead), so the reference's unconfigured compatibility path, which bumped a picked row to its key's maximum plus one, is unreachable and not ported.
 
-use std::time::Duration;
+use std::{borrow::Cow, time::Duration};
 
 use super::composition::{
     append_canonical_pinyin, fold_autocorrect_letters, normalize_canonical_pinyin_for_word,
@@ -102,12 +102,7 @@ impl InputSession {
         }
         // Generated/Fallback and injected online sentences are not dictionary rows, so frequency adjustment has nowhere to persist them. Store the selected sentence as a user phrase instead. This applies even at index zero and is independent of the frequency-adjustment mode.
         if selected_source.is_sentence_learning() {
-            let selected = self.ranking_list().get(index)?;
-            if !self.can_learn_sentence_candidate(selected) {
-                return None;
-            }
-            let selected = selected.clone();
-            return self.learn_sentence_candidate(&selected);
+            return self.learn_sentence_candidate(index);
         }
         if self.frequency.mode == FrequencyAdjustmentMode::Disabled || index == 0 {
             return None;
@@ -232,30 +227,37 @@ impl InputSession {
     }
 
     /// input_session_composition.cpp:562-600.
-    pub(super) fn learn_sentence_candidate(&mut self, selected: &WordItem) -> Option<String> {
+    pub(super) fn learn_sentence_candidate(&mut self, index: usize) -> Option<String> {
         // Local shortcuts and English/Japanese modes also use Generated candidates, but they are not pinyin sentences and must never enter the pinyin user dictionary. A native wubi row is not one either, while a pinyin row beside it in a mixed list is (overlays.md §3.3).
-        if !self.can_learn_sentence_candidate(selected) {
-            return None;
-        }
-        let typo_diagnostic = self.learn_accepted_typos(selected);
-        // Both quanpin and shuangpin sentences carry canonical quanpin; require a complete reading with one syllable per Han character before creating the row. Online cloud/AI rows are injected after the local query and carry no canonical reading: for a complete full-pinyin query the session's explicit segmentation is the canonical key, because the committed letters without apostrophes would let correction re-segment a reading such as qi'e'huan before it is stored.
-        let online = selected.source.is_online();
-        let selected_canonical =
-            if selected.canonical_pinyin.is_empty() && online && self.is_all_complete_pure_pinyin()
+        let (typo_diagnostic, online, canonical, word) = {
+            let selected = self.ranking_list().get(index)?;
+            if !self.can_learn_sentence_candidate(selected) {
+                return None;
+            }
+            let typo_diagnostic = self.learn_accepted_typos(selected);
+            // Both quanpin and shuangpin sentences carry canonical quanpin; require a complete reading with one syllable per Han character before creating the row. Online cloud/AI rows are injected after the local query and carry no canonical reading: for a complete full-pinyin query the session's explicit segmentation is the canonical key, because the committed letters without apostrophes would let correction re-segment a reading such as qi'e'huan before it is stored.
+            let online = selected.source.is_online();
+            let selected_canonical: Cow<'_, str> = if selected.canonical_pinyin.is_empty()
+                && online
+                && self.is_all_complete_pure_pinyin()
             {
-                self.pinyin_segmentation()
+                Cow::Owned(self.pinyin_segmentation())
             } else {
-                selected.canonical_pinyin.clone()
+                Cow::Borrowed(&selected.canonical_pinyin)
             };
-        let canonical = normalize_canonical_pinyin_for_word(&selected_canonical, &selected.word);
+            let canonical =
+                normalize_canonical_pinyin_for_word(&selected_canonical, &selected.word);
+            let word = selected.word.clone();
+            (typo_diagnostic, online, canonical, word)
+        };
         if canonical.is_empty() || segment_count(&canonical) > MAX_LEARNED_SENTENCE_SYLLABLES {
             return typo_diagnostic;
         }
-        if online && !self.online_word_matches_reading(&canonical, &selected.word) {
+        if online && !self.online_word_matches_reading(&canonical, &word) {
             return typo_diagnostic;
         }
         if self
-            .store_user_phrase_from_canonical_pinyin(&canonical, &selected.word)
+            .store_user_phrase_from_canonical_pinyin(&canonical, &word)
             .is_err()
         {
             return Some(diagnostics::SENTENCE_NOT_PERSISTED.to_owned());
@@ -294,7 +296,7 @@ impl InputSession {
     }
 
     /// input_session_composition.cpp:602-627.
-    pub(super) fn learn_accepted_typos(&mut self, selected: &WordItem) -> Option<String> {
+    pub(super) fn learn_accepted_typos(&self, selected: &WordItem) -> Option<String> {
         if selected.source != CandidateSource::Generated
             || !selected.sentence_association
             || selected.corrected_from.is_empty()

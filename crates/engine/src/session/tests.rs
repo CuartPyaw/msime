@@ -1366,6 +1366,41 @@ fn a_quanpin_sentence_beside_a_wubi_row_is_learned_and_the_wubi_row_is_not() {
     assert!(count(&fixture.journal(), pinyin_journal) > 0);
 }
 
+#[test]
+fn generated_sentence_learning_borrows_candidate_fields() {
+    let fixture = Fixture::new(
+        &WUBI_ROUTING_FIXTURE.replace("INSERT INTO tbl_2_g VALUES('ge''ge','gg','哥哥',1000);", ""),
+    );
+    let mut session = wubi_mixed(&fixture);
+    let index = session
+        .snapshot()
+        .candidates
+        .iter()
+        .position(|item| {
+            item.scheme == SchemeType::Quanpin
+                && item.source.is_generated_or_fallback()
+                && item.word.chars().count() == 2
+        })
+        .unwrap();
+    let sentence = session.snapshot().candidates[index].word.clone();
+    let (result, allocations) =
+        crate::ime::personal_rerank::allocations::count(|| session.select(index));
+    assert_eq!(result.commit.as_deref(), Some(sentence.as_str()));
+    assert!(result.diagnostic.is_none());
+    assert!(session.snapshot().preedit.is_empty());
+    assert_eq!(
+        count(
+            &fixture.main_db(),
+            &format!("SELECT count(*) FROM tbl_2_g WHERE key='ge''ge' AND value='{sentence}'")
+        ),
+        1
+    );
+    assert!(
+        allocations <= 196,
+        "生成句子提交产生了 {allocations} 次分配"
+    );
+}
+
 /// A native wubi row's fixed slot is stored under the wubi raw code and applied within the wubi group only.
 #[test]
 fn a_native_wubi_row_is_fixed_under_the_wubi_context_in_a_mixed_list() {
