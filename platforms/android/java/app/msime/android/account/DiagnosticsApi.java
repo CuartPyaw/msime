@@ -413,9 +413,4 @@ public final class DiagnosticsApi {
         out.append(JsonPolicy.quote(value));
     }
 
-    /** Compatibility entry point retained for the host smoke contract. */
-    static String strictString(Object value) {
-        return JsonPolicy.strictString(value);
-    }
-
 }
