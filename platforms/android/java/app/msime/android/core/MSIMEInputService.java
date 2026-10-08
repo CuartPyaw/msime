@@ -3053,7 +3053,11 @@ public final class MSIMEInputService extends InputMethodService {
             return;
         }
         char output = letterCase.usesUppercase() ? Character.toUpperCase(key) : key;
-        boolean punctuationKey = SmartPunctuationContext.isAsciiPunctuation(output);
+        // 微软双拼的 ; 是韵母 ing：组字中交给 character()，引擎按双拼键处理；空闲时才是标点。#2004 加 ing 键时 type 走的都是 character()，b73a611a8 把 ASCII 标点改走 punctuation() 以后，组字中的 ; 被当成分号：打 b; 上屏「把；」，ing 韵母全打不出来。
+        boolean microsoftFinal = MicrosoftShuangpinKeyPolicy.routesAsFinal(output, hasEngineComposition(),
+            dedicatedEnglish, selectedScheme,
+            view == null ? "none" : InputViewValuePolicy.textOr(view, "local_mode", "none"));
+        boolean punctuationKey = SmartPunctuationContext.isAsciiPunctuation(output) && !microsoftFinal;
         boolean handled = punctuationKey ? punctuation(output) : character(output);
         if (!handled) {
             // 引擎不收的标点是一次自动上屏，先把组合按首选结束掉。The preedit is a real composing
