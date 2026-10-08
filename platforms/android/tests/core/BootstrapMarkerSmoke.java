@@ -39,6 +39,17 @@ public final class BootstrapMarkerSmoke {
                 configurationRejected = true;
             }
             check(configurationRejected);
+            Files.deleteIfExists(configurationLink);
+            Files.writeString(configurationOutside, "synthetic");
+            Files.createLink(configurationLink, configurationOutside);
+            configurationRejected = false;
+            try {
+                Bootstrap.existingConfiguration(configurationLink.toFile());
+            } catch (java.io.IOException expected) {
+                configurationRejected = true;
+            }
+            check(configurationRejected);
+            Files.deleteIfExists(configurationLink);
             Files.deleteIfExists(configurationOutside);
         } finally {
             Files.deleteIfExists(exact);
