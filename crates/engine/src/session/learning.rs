@@ -102,7 +102,11 @@ impl InputSession {
         }
         // Generated/Fallback and injected online sentences are not dictionary rows, so frequency adjustment has nowhere to persist them. Store the selected sentence as a user phrase instead. This applies even at index zero and is independent of the frequency-adjustment mode.
         if selected_source.is_sentence_learning() {
-            let selected = self.ranking_list().get(index)?.clone();
+            let selected = self.ranking_list().get(index)?;
+            if !self.can_learn_sentence_candidate(selected) {
+                return None;
+            }
+            let selected = selected.clone();
             return self.learn_sentence_candidate(&selected);
         }
         if self.frequency.mode == FrequencyAdjustmentMode::Disabled || index == 0 {
@@ -230,14 +234,7 @@ impl InputSession {
     /// input_session_composition.cpp:562-600.
     pub(super) fn learn_sentence_candidate(&mut self, selected: &WordItem) -> Option<String> {
         // Local shortcuts and English/Japanese modes also use Generated candidates, but they are not pinyin sentences and must never enter the pinyin user dictionary. A native wubi row is not one either, while a pinyin row beside it in a mixed list is (overlays.md §3.3).
-        if self.local_mode != LocalInputMode::None
-            || self.dedicated_english
-            || !self
-                .engine
-                .current_scheme_type()
-                .learns_into_main_dictionary()
-            || Self::is_wubi_native_candidate(selected)
-        {
+        if !self.can_learn_sentence_candidate(selected) {
             return None;
         }
         let typo_diagnostic = self.learn_accepted_typos(selected);
@@ -264,6 +261,16 @@ impl InputSession {
             return Some(diagnostics::SENTENCE_NOT_PERSISTED.to_owned());
         }
         typo_diagnostic
+    }
+
+    fn can_learn_sentence_candidate(&self, selected: &WordItem) -> bool {
+        self.local_mode == LocalInputMode::None
+            && !self.dedicated_english
+            && self
+                .engine
+                .current_scheme_type()
+                .learns_into_main_dictionary()
+            && !Self::is_wubi_native_candidate(selected)
     }
 
     /// Providers return bare words, so the only reading to check an online row against is the typed one. A character absent from every single-character table cannot be checked and is accepted so rare words stay learnable (input_session_composition.cpp:538-560).
