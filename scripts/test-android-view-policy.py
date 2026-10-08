@@ -9,6 +9,7 @@ LOGIN_SHEET = ROOT / "platforms/android/java/app/msime/android/home/LoginSheet.j
 INPUT_SERVICE = ROOT / "platforms/android/java/app/msime/android/core/MSIMEInputService.java"
 BOTTOM_BAR = ROOT / "platforms/android/java/app/msime/android/core/ImeBottomBar.java"
 UI = ROOT / "platforms/android/java/app/msime/android/home/Ui.java"
+KEYBOARD_GEOMETRY = ROOT / "platforms/android/java/app/msime/android/keyboard/KeyboardGeometry.java"
 
 
 def main() -> None:
@@ -17,6 +18,7 @@ def main() -> None:
     input_service = INPUT_SERVICE.read_text(encoding="utf-8")
     bottom_bar = BOTTOM_BAR.read_text(encoding="utf-8")
     ui = UI.read_text(encoding="utf-8")
+    keyboard_geometry = KEYBOARD_GEOMETRY.read_text(encoding="utf-8")
     required = (
         "public static void setEnabledRecursively(ViewGroup group, boolean enabled, float inactiveAlpha)",
         "if (child instanceof ViewGroup nested && !child.isClickable())",
@@ -30,6 +32,8 @@ def main() -> None:
         "if (view.getPaddingLeft() == left && view.getPaddingTop() == top",
         "public static void setVisibleIfChanged(View view, boolean visible)",
         "if (view.getVisibility() == visibility) return;",
+        "public static LinearLayout newRow(Context context)",
+        "view.setOrientation(LinearLayout.HORIZONTAL);",
     )
     missing = [snippet for snippet in required if snippet not in view_policy]
     if missing:
@@ -62,6 +66,13 @@ def main() -> None:
         raise AssertionError("Ui 仍直接实现文本最小宽度策略")
     if "ViewPolicy.setTextMinWidth(view, dp(context, widthDp));" not in ui:
         raise AssertionError("Ui 没有调用共享文本最小宽度策略")
+    if "return ViewPolicy.newRow(context);" not in ui:
+        raise AssertionError("Ui 没有调用共享横向容器工厂")
+    if "return ViewPolicy.newRow(context);" not in keyboard_geometry:
+        raise AssertionError("KeyboardGeometry 没有调用共享横向容器工厂")
+    horizontal_factory = "LinearLayout view = new LinearLayout(context);\n        view.setOrientation(LinearLayout.HORIZONTAL);"
+    if horizontal_factory in ui or horizontal_factory in keyboard_geometry:
+        raise AssertionError("页面工具类仍保留重复的横向容器实现")
     print("android view policy: recursive enabled state is shared")
 
 

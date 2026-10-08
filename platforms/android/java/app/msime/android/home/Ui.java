@@ -371,9 +371,7 @@ public final class Ui {
 
     /** Create a horizontal linear container for inline host content. */
     public static LinearLayout row(Context context) {
-        LinearLayout view = new LinearLayout(context);
-        view.setOrientation(LinearLayout.HORIZONTAL);
-        return view;
+        return ViewPolicy.newRow(context);
     }
 
     /** Layout parameters for a weighted child that wraps its height. */
