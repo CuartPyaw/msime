@@ -104,6 +104,13 @@ public final class ViewPolicy {
         view.setPadding(left, top, right, bottom);
     }
 
+    /** 仅在四边内边距发生变化时更新视图，避免无意义的重新布局。 */
+    public static void setPaddingIfChanged(View view, int left, int top, int right, int bottom) {
+        if (view.getPaddingLeft() == left && view.getPaddingTop() == top
+                && view.getPaddingRight() == right && view.getPaddingBottom() == bottom) return;
+        setPadding(view, left, top, right, bottom);
+    }
+
     /** Remove the default background, padding, and minimum size from a view. */
     public static void clearChrome(View view) {
         clearBackground(view);

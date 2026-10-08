@@ -7,12 +7,14 @@ ROOT = Path(__file__).resolve().parents[1]
 VIEW_POLICY = ROOT / "platforms/android/java/app/msime/android/ViewPolicy.java"
 LOGIN_SHEET = ROOT / "platforms/android/java/app/msime/android/home/LoginSheet.java"
 INPUT_SERVICE = ROOT / "platforms/android/java/app/msime/android/core/MSIMEInputService.java"
+BOTTOM_BAR = ROOT / "platforms/android/java/app/msime/android/core/ImeBottomBar.java"
 
 
 def main() -> None:
     view_policy = VIEW_POLICY.read_text(encoding="utf-8")
     login_sheet = LOGIN_SHEET.read_text(encoding="utf-8")
     input_service = INPUT_SERVICE.read_text(encoding="utf-8")
+    bottom_bar = BOTTOM_BAR.read_text(encoding="utf-8")
     required = (
         "public static void setEnabledRecursively(ViewGroup group, boolean enabled, float inactiveAlpha)",
         "if (child instanceof ViewGroup nested && !child.isClickable())",
@@ -22,6 +24,8 @@ def main() -> None:
         "if (params == null || params.height == height) return;",
         "public static boolean isVisible(View view)",
         "return view != null && view.getVisibility() == View.VISIBLE;",
+        "public static void setPaddingIfChanged(View view, int left, int top, int right, int bottom)",
+        "if (view.getPaddingLeft() == left && view.getPaddingTop() == top",
     )
     missing = [snippet for snippet in required if snippet not in view_policy]
     if missing:
@@ -38,6 +42,10 @@ def main() -> None:
         raise AssertionError("MSIMEInputService 仍保留重复的可见性判断")
     if "ViewPolicy.isVisible(" not in input_service:
         raise AssertionError("MSIMEInputService 没有调用共享可见性策略")
+    if "private static void setPadding(View view, int left, int top, int right, int bottom)" in bottom_bar:
+        raise AssertionError("ImeBottomBar 仍保留重复的条件内边距实现")
+    if "ViewPolicy.setPaddingIfChanged(keyboard, 0, 0, 0, 0);" not in bottom_bar:
+        raise AssertionError("ImeBottomBar 没有调用共享条件内边距策略")
     print("android view policy: recursive enabled state is shared")
 
 
