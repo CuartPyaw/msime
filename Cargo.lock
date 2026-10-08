@@ -2767,6 +2767,7 @@ dependencies = [
  "unicode-general-category",
  "unicode-segmentation",
  "uuid",
+ "winapi-util",
  "zip",
  "zune-jpeg",
 ]
