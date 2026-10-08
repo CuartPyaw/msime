@@ -110,6 +110,17 @@ final class DiagnosticLogTests: XCTestCase {
     XCTAssertThrowsError(try DiagnosticLog.readTail(from: linked, maximumBytes: 32 * 1024))
   }
 
+  func testWriteRejectsLeafHardLink() throws {
+    let outside = state.appendingPathComponent("outside-hardlink.log")
+    try Data("outside\n".utf8).write(to: outside)
+    try FileManager.default.createHardLink(atPath: file.path, toFileAtPath: outside.path)
+
+    log.configure(directory: state.path, enabled: true)
+    log.write("must_not_modify_hardlink")
+
+    XCTAssertEqual(try Data(contentsOf: outside), Data("outside\n".utf8))
+  }
+
   /// The App's switch writes `diagnostic_log.server` and leaves the Windows-only field as stored.
   func testSwitchKeepsTheWindowsField() throws {
     _ = MetasequoiaInputSessionBridge(stateRoot: state)

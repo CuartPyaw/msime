@@ -75,6 +75,9 @@ final class DiagnosticLog: @unchecked Sendable {
     guard let file else { return }
     guard !Self.rejectsSymlinkAncestors(file) else { return }
     let manager = FileManager.default
+    var existing = stat()
+    if lstat(file.path, &existing) == 0 &&
+        ((existing.st_mode & S_IFMT) != S_IFREG || existing.st_nlink != 1) { return }
     if let size = (try? manager.attributesOfItem(atPath: file.path))?[.size] as? NSNumber, size.intValue > Self.maxBytes {
       let rotated = file.appendingPathExtension("1")
       try? manager.removeItem(at: rotated)
@@ -87,6 +90,9 @@ final class DiagnosticLog: @unchecked Sendable {
     }
     guard let handle = try? FileHandle(forWritingTo: file) else { return }
     defer { try? handle.close() }
+    var opened = stat()
+    guard fstat(handle.fileDescriptor, &opened) == 0,
+          (opened.st_mode & S_IFMT) == S_IFREG, opened.st_nlink == 1 else { return }
     _ = try? handle.seekToEnd()
     try? handle.write(contentsOf: record)
   }
