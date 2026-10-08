@@ -88,18 +88,9 @@ public final class KeyboardFeedbackStore {
     public static Settings fromValues(Object soundEnabled, Object hapticsEnabled,
                                       Object hapticStrength) {
         String strength = hapticStrength instanceof String ? (String) hapticStrength : "medium";
-        return new Settings(booleanValue(soundEnabled, true), booleanValue(hapticsEnabled, false),
+        return new Settings(JsonPolicy.strictBoolean(soundEnabled, true),
+            JsonPolicy.strictBoolean(hapticsEnabled, false),
             KeyboardFeedbackPreferences.strength(strength));
-    }
-
-    /** Persisted flags are typed JSON booleans; do not accept org.json's string coercion. */
-    static Boolean strictBoolean(Object value) {
-        return JsonPolicy.strictBoolean(value);
-    }
-
-    static boolean booleanValue(Object value, boolean fallback) {
-        Boolean parsed = strictBoolean(value);
-        return parsed == null ? fallback : parsed;
     }
 
     static String encode(Settings settings) throws JSONException {
