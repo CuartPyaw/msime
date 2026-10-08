@@ -98,6 +98,9 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   private var keyAreaPanel: UIView?
   private let moreShortcut = KeyboardBrandMarkButton()
   private var morePicker: KeyboardMorePickerView?
+  /// 键盘高度：占据工具栏位置的内联调节条（此时按键照常可用），以及按「取消」时要恢复的调整值。
+  private var inlineHeightBar: InlineHeightBar?
+  private var inlineHeightSnapshot: CGFloat = 0
   /// 隐私模式，在键盘出现时和点它的磁贴时读取，按键时不读 App Group。
   private var incognito = false
   /// 当前输入框下各类记录是否允许（`KeyboardPrivacyGate`）：隐私模式或凭据输入框里统计、剪贴板历史、云剪贴板和诊断日志一律不记。
@@ -770,6 +773,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     personalDictionaryTimer?.invalidate()
     personalDictionaryTimer = nil
     closeKeyboardPicker()
+    // 键盘收起时还在调整高度就当作取消：没点「完成」的预览不保存，与 Android onFinishInputView 一致。
+    closeInlineHeight(commit: false)
     cursorMovement.cancel()
     endGlide()
     updateSpaceKeyTitle()
@@ -1784,7 +1789,9 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       KeyboardTool(id: "dictionary", title: "词库", face: .icon(.lexicon)) { [weak self] in
         self?.openApp(KeyboardAppLauncher.dictionaryURL)
       },
-      // Android 在这里有一格「键盘高度」。iOS 键盘里不调高度、键距和行距，它们在 App 的「键盘」设置页里调。
+      KeyboardTool(id: "keyboardHeight", title: "键盘高度", face: .icon(.keyboardHeight)) { [weak self] in
+        self?.showInlineHeight()
+      },
       // 键盘只改这个菜单里有的设置；其余设置都在 app 里，正在打字的人没有别的路可以过去。
       KeyboardTool(id: "settings", title: "设置", face: .icon(.settings)) { [weak self] in
         self?.openApp(KeyboardAppLauncher.inputSettingsURL)
@@ -5246,9 +5253,11 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     exitLocalModeButton.isHidden = !isInLocalMode
     updateHanjaButton()
     let showsCandidates = isInLocalMode || !visiblePreedit.isEmpty || !visibleCandidates.isEmpty || visibleDiagnostic != nil
-    shortcutBar.isHidden = showsCandidates || toolbarHidden
+    // 内联高度调节条占据工具栏的位置；下面的按键照常可用，所以打字时候选仍会盖在两者之上显示。
+    shortcutBar.isHidden = showsCandidates || inlineHeightBar != nil || toolbarHidden
     // 显示方式「隐藏」：与 Android 隐藏空闲时的工具栏区域一样，有内容可显示之前顶栏不存在，按键上移占据它的位置。
-    setTopRowCollapsed(toolbarHidden && !showsCandidates)
+    setTopRowCollapsed(toolbarHidden && !showsCandidates && inlineHeightBar == nil)
+    inlineHeightBar?.isHidden = showsCandidates
     readingRow.isHidden = !showsCandidates
     candidateContent?.isHidden = !showsCandidates
     updatePreeditButton()
@@ -6157,6 +6166,24 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
   }
 
+  // The drags report on every gesture frame; the shared document is written once the value has
+  // settled, so a single adjustment does not take a file lock a hundred times.
+  private func commitTouchKeyboardGeometry() {
+    let saved = session.persistTouchKeyboardGeometry(
+      keySpacing: KeyboardLayoutPreference.keySpacing,
+      rowSpacing: KeyboardLayoutPreference.rowSpacing,
+      heightAdjustment: KeyboardLayoutPreference.heightAdjustment,
+      voiceEnabled: KeyboardLayoutPreference.voiceShortcutEnabled)
+    guard !saved else { return }
+    // 共享文档没写成（多半是和设置 App 同时写、比较交换输了）。原先不声不响：App Group 和这个键盘用着新值，文档里还是旧值，下次键盘出现时被文档盖回去，看起来就是「调的高度自己变回去了」。现在记一笔日志，并按文档把 App Group 和键盘对齐，用户当场看到的就是实际留下的值。
+    DiagnosticLog.shared.write("touch_geometry_not_persisted")
+    guard let document = MetasequoiaInputSessionBridge.loadSharedPreferences() else { return }
+    KeyboardLayoutPreference.mirrorGeometry(document)
+    sharedKeyboardHeightAdjustment = CGFloat(KeyboardLayoutPreference.heightAdjustment)
+    applyLayoutPreferences()
+    updatePreferredKeyboardHeight()
+  }
+
   /// 品牌键：关掉盖住按键的任何东西（面板、候选网格、回复面板或菜单本身），否则在第一页打开菜单。
   private func toggleMorePicker() {
     if keyAreaPanel != nil || phrasesRequest != nil {
@@ -6206,6 +6233,67 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   /// 把调节条上的百分比换回以整点存储的调整值，限制在共用的 -12…48 范围内。
   static func heightAdjustment(percent: Int, keyBlock: CGFloat) -> CGFloat {
     KeyboardHeightPercent.adjustment(percent: percent, keyBlock: keyBlock)
+  }
+
+  /// `touch_keyboard_height_adjustment` 校验后的范围，单位为点。
+  static let heightAdjustmentRange: ClosedRange<CGFloat> = KeyboardHeightPercent.adjustmentRange
+
+  private var currentKeyBlockHeight: CGFloat {
+    Self.keyBlockHeight(
+      keyHeight: formFactor.keyHeight(landscape: isLandscape, handwriting: false),
+      rows: formFactor.keyRows(numberRow: showsKeyboardNumberRow),
+      rowSpacing: CGFloat(KeyboardLayoutPreference.rowSpacing))
+  }
+
+  /// 键盘高度：内联调节条占据工具栏的位置，下面的按键照常可用，改动当场可见。设置仍以点为单位存储；调节条以按键区高度的百分比显示。
+  private func showInlineHeight() {
+    closeKeyboardService()
+    closeKeyboardPicker()
+    // 调节条已经开着时保留它和正在预览的高度，不再叠一条新的，也不覆盖打开时记下的原高度。
+    guard inlineHeightBar == nil, let container = compositionContainer else { return }
+    let keyBlock = currentKeyBlockHeight
+    inlineHeightSnapshot = sharedKeyboardHeightAdjustment
+    let range = Self.heightPercent(adjustment: Self.heightAdjustmentRange.lowerBound, keyBlock: keyBlock)
+      ... Self.heightPercent(adjustment: Self.heightAdjustmentRange.upperBound, keyBlock: keyBlock)
+    let bar = InlineHeightBar(
+      percent: Self.heightPercent(adjustment: sharedKeyboardHeightAdjustment, keyBlock: keyBlock), range: range,
+      onChange: { [weak self] percent in self?.previewKeyboardHeight(Self.heightAdjustment(percent: percent, keyBlock: keyBlock)) },
+      onCancel: { [weak self] in self?.closeInlineHeight(commit: false) },
+      onReset: { [weak self] in self?.previewKeyboardHeight(0) },
+      onDone: { [weak self] in self?.closeInlineHeight(commit: true) })
+    bar.referenceHeight = keyBlock
+    bar.translatesAutoresizingMaskIntoConstraints = false
+    container.addSubview(bar)
+    NSLayoutConstraint.activate([
+      bar.leadingAnchor.constraint(equalTo: shortcutBar.leadingAnchor),
+      bar.trailingAnchor.constraint(equalTo: shortcutBar.trailingAnchor),
+      bar.topAnchor.constraint(equalTo: shortcutBar.topAnchor),
+      bar.bottomAnchor.constraint(equalTo: shortcutBar.bottomAnchor),
+    ])
+    inlineHeightBar = bar
+    renderCandidateStrip()
+    UIAccessibility.post(notification: .layoutChanged, argument: bar)
+  }
+
+  /// 按 `adjustment` 画出键盘，但不保存。
+  private func previewKeyboardHeight(_ adjustment: CGFloat) {
+    sharedKeyboardHeightAdjustment = adjustment
+    updatePreferredKeyboardHeight()
+  }
+
+  /// 「完成」把调节条显示的高度保存到键盘和设置 app 都读取的地方；「取消」或键盘收起时恢复调节条打开时的高度。
+  private func closeInlineHeight(commit: Bool) {
+    guard let bar = inlineHeightBar else { return }
+    if commit {
+      KeyboardLayoutPreference.heightAdjustment = Double(sharedKeyboardHeightAdjustment)
+      commitTouchKeyboardGeometry()
+    } else {
+      previewKeyboardHeight(inlineHeightSnapshot)
+    }
+    bar.removeFromSuperview()
+    inlineHeightBar = nil
+    renderCandidateStrip()
+    UIAccessibility.post(notification: .layoutChanged, argument: moreShortcut)
   }
 
   private func selectTraditionalOutput(_ traditional: Bool) {
@@ -6449,6 +6537,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     preeditButton.configuration?.baseForegroundColor = candidatePalette?.secondary ?? skin.secondary
     expandCandidatesButton.configuration?.baseForegroundColor = candidatePalette?.text ?? skin.keyForeground
     expandDivider.backgroundColor = skin.hairline
+    inlineHeightBar?.apply(skin: skin)
     oneHandGutter.apply(skin: skin)
     voicePanel?.apply(skin: skin)
     for (_, _, hint, corner) in letterButtons {

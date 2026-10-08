@@ -790,7 +790,7 @@ fn setting_the_caret_does_not_build_editing_text_to_clamp_it() {
     });
 
     assert_eq!(session.snapshot().caret_position, 2);
-    assert_eq!(allocations, 74);
+    assert_eq!(allocations, 73);
 }
 
 #[test]
@@ -804,7 +804,7 @@ fn moving_the_caret_does_not_build_the_preedit_twice() {
 
     assert!(result.handled);
     assert_eq!(
-        allocations, 74,
+        allocations, 73,
         "caret movement should reuse the editing text length: {allocations} allocations"
     );
 }
@@ -820,8 +820,8 @@ fn typing_at_a_caret_reuses_the_editing_text_length() {
         crate::ime::personal_rerank::allocations::count(|| session.character(b'x', false));
 
     assert!(result.handled);
-    assert!(
-        allocations <= 283,
+    assert_eq!(
+        allocations, 278,
         "caret insertion allocations: {allocations}"
     );
 }
@@ -5258,7 +5258,13 @@ fn a_glide_into_a_composition_starts_a_new_syllable() {
     let fixture = Fixture::new(GLIDE_FIXTURE);
     let mut session = fixture.session();
     type_text(&mut session, "xi");
-    assert!(glide(&mut session, "an").handled);
+    let (result, allocations) =
+        crate::ime::personal_rerank::allocations::count(|| glide(&mut session, "an"));
+    assert!(result.handled);
+    assert!(
+        allocations <= 7160,
+        "glide insertion allocations: {allocations}"
+    );
     assert_eq!(session.snapshot().editing_text, "xi'an");
     assert_eq!(words(&session).first().map(String::as_str), Some("西安"));
 }
