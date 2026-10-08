@@ -132,6 +132,7 @@ impl Scheme {
             Self::Korean(scheme) => scheme.build_request_into(request),
             Self::Stroke(scheme) => scheme.build_request_into(request),
             Self::Vietnamese(scheme) => scheme.build_request_into(request),
+            Self::Tibetan(scheme) => scheme.build_request_into(request),
             _ => *request = self.build_request(),
         }
     }
