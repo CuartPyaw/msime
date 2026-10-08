@@ -7,7 +7,9 @@ use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 #[cfg(unix)]
 use std::ffi::OsString;
-use std::fs::{self, File, OpenOptions};
+#[cfg(any(not(unix), test))]
+use std::fs::OpenOptions;
+use std::fs::{self, File};
 use std::io::{Read, Write};
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
@@ -229,6 +231,10 @@ impl ResourceStage {
     fn path(&self) -> &Path {
         &self.path
     }
+
+    fn open_directory(&self) -> std::io::Result<File> {
+        crate::storage::open_private_directory_at(&self.parent, &self.name)
+    }
 }
 
 #[cfg(unix)]
@@ -238,6 +244,7 @@ impl Drop for ResourceStage {
     }
 }
 
+#[cfg(any(not(unix), test))]
 fn create_private_file(path: &Path) -> std::io::Result<File> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
@@ -253,6 +260,21 @@ fn create_private_file(path: &Path) -> std::io::Result<File> {
         options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
     }
     options.open(path)
+}
+
+#[cfg(unix)]
+fn create_private_file_at(directory: &File, name: &str) -> std::io::Result<File> {
+    let descriptor = rustix::fs::openat(
+        directory,
+        name,
+        rustix::fs::OFlags::WRONLY
+            | rustix::fs::OFlags::CREATE
+            | rustix::fs::OFlags::EXCL
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::from_raw_mode(0o600),
+    )?;
+    Ok(descriptor.into())
 }
 
 #[cfg(unix)]
@@ -302,8 +324,13 @@ impl ResourceStore {
         let stage = tempfile::Builder::new()
             .prefix("incoming-")
             .tempdir_in(&self.root)?;
+        #[cfg(unix)]
+        let stage_directory = stage.open_directory()?;
         for artifact in &specification.artifacts {
             let mut source = fetch(artifact)?;
+            #[cfg(unix)]
+            let mut output = create_private_file_at(&stage_directory, &artifact.name)?;
+            #[cfg(not(unix))]
             let mut output = create_private_file(&stage.path().join(&artifact.name))?;
             copy_verified(source.as_mut(), &mut output, artifact)?;
             output.sync_all()?;
@@ -698,6 +725,45 @@ mod tests {
         assert!(stage.path().starts_with(&root));
         assert!(moved.join(stage.path().file_name().unwrap()).is_dir());
         assert!(!outside.join(stage.path().file_name().unwrap()).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_writes_artifacts_into_the_created_stage_after_root_replacement() {
+        use std::os::unix::fs::symlink;
+
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("resources");
+        let outside = parent.path().join("outside");
+        let moved = parent.path().join("moved");
+        fs::create_dir(&root).unwrap();
+        fs::create_dir(&outside).unwrap();
+        let spec = specification();
+        let generation = spec.generation().unwrap();
+        let store = ResourceStore::new(&root);
+
+        store
+            .install(&spec, |_| {
+                let stage_name = fs::read_dir(&root)?
+                    .map(|entry| entry.map(|entry| entry.file_name()))
+                    .collect::<std::io::Result<Vec<_>>>()?
+                    .into_iter()
+                    .find(|name| name.to_string_lossy().starts_with("incoming-"))
+                    .expect("created stage");
+                fs::create_dir(outside.join(&stage_name))?;
+                fs::rename(&root, &moved)?;
+                symlink(&outside, &root)?;
+                Ok(source(b"fixture"))
+            })
+            .unwrap();
+
+        assert_eq!(
+            fs::read(moved.join(generation).join("msime-pinyin.db")).unwrap(),
+            b"fixture"
+        );
+        assert!(!fs::read_dir(&outside)
+            .unwrap()
+            .any(|entry| { entry.unwrap().path().join("msime-pinyin.db").exists() }));
     }
 
     #[cfg(unix)]
