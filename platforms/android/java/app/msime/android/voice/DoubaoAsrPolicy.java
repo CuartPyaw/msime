@@ -28,10 +28,7 @@ public final class DoubaoAsrPolicy {
 
     /** A streaming response carries text; reject non-string JSON values before display. */
     static String strictText(Object value) {
-        String text = AiProviderResponse.strictText(value);
-        return text.length() <= HttpAsrPolicy.MAX_TRANSCRIPT
-                && !TextPolicy.hasControlExceptWhitespace(text)
-                && TextPolicy.validUnicode(text) ? text : "";
+        return AiProviderResponse.boundedText(value, HttpAsrPolicy.MAX_TRANSCRIPT);
     }
 
     /** The provider envelope carries its nested result as a JSON string; reject coercion. */
