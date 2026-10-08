@@ -171,6 +171,11 @@ public final class ViewPolicy {
         view.setLayoutParams(params);
     }
 
+    /** 判断视图是否非空且正在显示。 */
+    public static boolean isVisible(View view) {
+        return view != null && view.getVisibility() == View.VISIBLE;
+    }
+
     /** Announce changing view content to accessibility services without interrupting the user. */
     public static void setPoliteLiveRegion(View view) {
         view.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);

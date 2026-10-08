@@ -4933,7 +4933,7 @@ public final class MSIMEInputService extends InputMethodService {
             return;
         }
         // 语音结果面板盖在键区上面；从面板里的「开始语音识别」进来时先收起它，键区里的聆听面板才看得见。只在面板开着时收：正在聆听时再按语音键是结束录音，这时清掉记下的输入位置会让结果无法直接上屏。
-        if (shown(voiceResultScroll)) closeVoiceResult();
+        if (ViewPolicy.isVisible(voiceResultScroll)) closeVoiceResult();
         // 键盘内识别（扩展点）接手时不再打开识别窗口。
         if (imeVoiceEntry.startInKeyboard(keyRows)) return;
         launchVoiceActivity();
@@ -6915,16 +6915,15 @@ public final class MSIMEInputService extends InputMethodService {
         }
     }
 
-    private static boolean shown(View view) {
-        return view != null && view.getVisibility() == View.VISIBLE;
-    }
-
     /** 是否有从工具栏打开的面板（功能面板、表情、常用语、剪贴板、皮肤、方案、符号、AI、语音结果、旧的键盘设置）开着；开着时品牌键垫 accentSoft、收起键变为「返回键盘」。 */
     boolean anyToolbarPanelOpen() {
-        return shown(moreToolsScroll) || shown(emojiPanel) || shown(phraseScroll)
-            || shown(clipboardScroll) || shown(skinScroll) || shown(schemeScroll)
-            || shown(symbolPanel) || shown(aiPolishContainer) || shown(voiceResultScroll)
-            || shown(layoutSettingsScroll) || shown(layoutAdjustView) || shown(textEditPanel)
+        return ViewPolicy.isVisible(moreToolsScroll) || ViewPolicy.isVisible(emojiPanel)
+            || ViewPolicy.isVisible(phraseScroll)
+            || ViewPolicy.isVisible(clipboardScroll) || ViewPolicy.isVisible(skinScroll)
+            || ViewPolicy.isVisible(schemeScroll) || ViewPolicy.isVisible(symbolPanel)
+            || ViewPolicy.isVisible(aiPolishContainer) || ViewPolicy.isVisible(voiceResultScroll)
+            || ViewPolicy.isVisible(layoutSettingsScroll) || ViewPolicy.isVisible(layoutAdjustView)
+            || ViewPolicy.isVisible(textEditPanel)
             || replyOpen;
     }
 
