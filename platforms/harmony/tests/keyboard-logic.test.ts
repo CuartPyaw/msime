@@ -1629,8 +1629,8 @@ group("polishing acts on what is in front of the caret, and only if it still is"
   check(AiPolishPolicy.replacement("", result, "") === null, "an empty source replaces nothing");
 
   // Counted in code points, not UTF-16 units: an emoji is one thing the user sees deleted and two
-  // units of JavaScript string. The unit `deleteBackwardSync` takes is the one open question here,
-  // which is why the re-read above stands between a wrong answer and a corrupted message.
+  // units of JavaScript string. On the device `deleteForwardSync(1)` removes a whole 😀, so the unit
+  // is not UTF-16; the re-read above still stands between any other surprise and a corrupted message.
   const withEmoji = "今天天气不错🙂";
   check(withEmoji.length === 8, "the source is eight UTF-16 units");
   check(codePointLength(withEmoji) === 7, "and seven code points");
