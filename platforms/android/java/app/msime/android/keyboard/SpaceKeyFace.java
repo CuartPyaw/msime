@@ -99,7 +99,7 @@ public final class SpaceKeyFace extends KeyboardPressButton {
 
     @Override protected void onDraw(Canvas canvas) {
         if (getWidth() <= 0 || getHeight() <= 0) return;
-        label.setTextSize(KeyboardGeometry.keySp(getContext(), LABEL_SP));
+        ViewPolicy.setTextSize(label, KeyboardGeometry.keySp(getContext(), LABEL_SP));
         label.setColor(faceColor);
         boolean overlay = !transientLabel.isEmpty();
         float mic = (showsMic && !overlay)
