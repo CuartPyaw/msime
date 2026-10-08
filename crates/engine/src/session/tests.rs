@@ -473,7 +473,13 @@ fn caret_prefix_expands_its_own_initial_list() {
     assert_eq!(capped.len(), 24);
     assert!(capped.iter().all(|item| item.pinyin == "n"));
 
-    assert!(session.expand_initial_candidates());
+    let (grew, allocations) =
+        crate::ime::personal_rerank::allocations::count(|| session.expand_initial_candidates());
+    assert!(grew);
+    assert_eq!(
+        allocations, 398,
+        "caret-prefix expansion allocations: {allocations}"
+    );
     let widened = words(&session);
     assert_eq!(widened.len(), 30);
     assert!(widened.contains(&"丝".to_owned()), "{widened:?}");
@@ -5258,7 +5264,13 @@ fn a_glide_into_a_composition_starts_a_new_syllable() {
     let fixture = Fixture::new(GLIDE_FIXTURE);
     let mut session = fixture.session();
     type_text(&mut session, "xi");
-    assert!(glide(&mut session, "an").handled);
+    let (result, allocations) =
+        crate::ime::personal_rerank::allocations::count(|| glide(&mut session, "an"));
+    assert!(result.handled);
+    assert!(
+        allocations <= 7160,
+        "glide insertion allocations: {allocations}"
+    );
     assert_eq!(session.snapshot().editing_text, "xi'an");
     assert_eq!(words(&session).first().map(String::as_str), Some("西安"));
 }

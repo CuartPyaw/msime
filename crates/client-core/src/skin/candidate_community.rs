@@ -19,6 +19,8 @@ use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+#[cfg(unix)]
+use std::ffi::OsStr;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -1410,6 +1412,7 @@ fn decode_files(files: &BTreeMap<String, String>) -> Result<Vec<(&str, Vec<u8>)>
     Ok(decoded)
 }
 
+#[cfg(not(unix))]
 fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let mut file = fs::OpenOptions::new()
         .write(true)
@@ -1541,6 +1544,124 @@ fn stage_and_swap(
     files: &[(&str, Vec<u8>)],
     target: &Path,
 ) -> Result<(), &'static str> {
+    #[cfg(unix)]
+    {
+        stage_and_swap_unix(root, staging_root, package, files, target)
+    }
+    #[cfg(not(unix))]
+    {
+        stage_and_swap_by_path(root, staging_root, package, files, target)
+    }
+}
+
+#[cfg(unix)]
+fn stage_and_swap_unix(
+    root: &Path,
+    staging_root: &Path,
+    package: &CandidateSkinPackage,
+    files: &[(&str, Vec<u8>)],
+    target: &Path,
+) -> Result<(), &'static str> {
+    let package_id = package.package_id.as_str();
+    let backup = root.join(format!(".replaced-{package_id}"));
+    if staging_root.parent() != Some(root) || backup.parent() != Some(root) {
+        return Err(STORAGE);
+    }
+    let root_directory = crate::storage::open_private_directory(root).map_err(|_| STORAGE)?;
+    let staging_root_name = staging_root.file_name().ok_or(STORAGE)?;
+    let backup_name = backup.file_name().ok_or(STORAGE)?;
+    for name in [staging_root_name, backup_name] {
+        match crate::storage::remove_private_tree_at(&root_directory, name) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(STORAGE),
+        }
+    }
+    rustix::fs::mkdirat(
+        &root_directory,
+        staging_root_name,
+        rustix::fs::Mode::from_raw_mode(0o700),
+    )
+    .map_err(|_| STORAGE)?;
+    let staging_directory =
+        crate::storage::open_private_directory_at(&root_directory, staging_root_name)
+            .map_err(|_| STORAGE)?;
+    let staging_name = OsStr::new(package_id);
+    rustix::fs::mkdirat(
+        &staging_directory,
+        staging_name,
+        rustix::fs::Mode::from_raw_mode(0o700),
+    )
+    .map_err(|_| STORAGE)?;
+    let package_directory =
+        crate::storage::open_private_directory_at(&staging_directory, staging_name)
+            .map_err(|_| STORAGE)?;
+    crate::storage::write_private_file_at(
+        &package_directory,
+        OsStr::new(MANIFEST_FILE),
+        package.manifest.as_bytes(),
+    )
+    .map_err(|_| STORAGE)?;
+    for (path, bytes) in files {
+        // Every segment of `path` passed safe_resource, so the parents created here stay inside the staging folder.
+        write_package_file_at(&package_directory, path, bytes).map_err(|_| STORAGE)?;
+    }
+    let staging = staging_root.join(package_id);
+    let summary = catalog::load_package(staging_root, package_id).map_err(|_| PACKAGE)?;
+    let preview = shared_preview(&summary).map_err(|_| PACKAGE)?;
+    let referenced = referenced_images(&summary).map_err(|_| PACKAGE)?;
+    if referenced.len() != files.len() || files.iter().any(|(path, _)| !referenced.contains(*path))
+    {
+        return Err(PACKAGE);
+    }
+    if files
+        .iter()
+        .any(|(path, bytes)| *path == preview && bytes.len() > MAX_PREVIEW_BYTES)
+    {
+        return Err(TOO_LARGE);
+    }
+    super::folder_import::replace_directory(&staging, target, &backup)
+}
+
+#[cfg(unix)]
+fn write_package_file_at(
+    package_directory: &std::fs::File,
+    path: &str,
+    bytes: &[u8],
+) -> std::io::Result<()> {
+    let components: Vec<&OsStr> = Path::new(path)
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(name) => Some(name),
+            _ => None,
+        })
+        .collect();
+    let (file_name, parents) = components.split_last().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty package path")
+    })?;
+    let mut directory = package_directory.try_clone()?;
+    for parent in parents {
+        directory = match crate::storage::open_private_directory_at(&directory, parent) {
+            Ok(directory) => directory,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                rustix::fs::mkdirat(&directory, *parent, rustix::fs::Mode::from_raw_mode(0o700))
+                    .map_err(std::io::Error::from)?;
+                crate::storage::open_private_directory_at(&directory, parent)?
+            }
+            Err(error) => return Err(error),
+        };
+    }
+    crate::storage::write_private_file_at(&directory, file_name, bytes)
+}
+
+#[cfg(not(unix))]
+fn stage_and_swap_by_path(
+    root: &Path,
+    staging_root: &Path,
+    package: &CandidateSkinPackage,
+    files: &[(&str, Vec<u8>)],
+    target: &Path,
+) -> Result<(), &'static str> {
     let package_id = package.package_id.as_str();
     let backup = root.join(format!(".replaced-{package_id}"));
     remove_leftover(staging_root)?;
@@ -1550,7 +1671,6 @@ fn stage_and_swap(
     fs::create_dir(&staging).map_err(|_| STORAGE)?;
     write_new(&staging.join(MANIFEST_FILE), package.manifest.as_bytes()).map_err(|_| STORAGE)?;
     for (path, bytes) in files {
-        // Every segment of `path` passed safe_resource, so the parents created here stay inside the staging folder.
         let destination = staging.join(path);
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent).map_err(|_| STORAGE)?;
