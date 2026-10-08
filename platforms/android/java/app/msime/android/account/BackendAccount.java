@@ -437,7 +437,7 @@ public final class BackendAccount {
         String defaultModel = optionalStringField(response.opt("default_model"), "");
         if (!validChatModels(models, defaultModel))
             throw new IllegalStateException("invalid model catalogue");
-        return List.copyOf(models);
+        return ListPolicy.copyOrEmpty(models);
     }
 
     static boolean validChatModels(List<ChatModel> models, String defaultModel) {
@@ -757,7 +757,7 @@ public final class BackendAccount {
                 throw new IllegalStateException("invalid clipboard response");
             items.add(new ClipboardItem(id, text, updated));
         }
-        return new ClipboardPage(requiredBooleanField(response.opt("enabled")), List.copyOf(items));
+        return new ClipboardPage(requiredBooleanField(response.opt("enabled")), ListPolicy.copyOrEmpty(items));
     }
 
     /** Whether a clipboard search fits client-core's 1024-byte text contract. */

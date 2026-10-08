@@ -207,7 +207,7 @@ public final class SkinJobsApi {
                 }
             }
             if (first != null) throw first;
-            return List.copyOf(proposals);
+            return ListPolicy.copyOrEmpty(proposals);
         } finally {
             pool.shutdownNow();
         }
