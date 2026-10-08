@@ -190,7 +190,7 @@ fn read_private_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>, Acco
     }
     // Bound the read through the handle so a concurrent replacement cannot bypass the size limit.
     let bytes = read_private_file(
-        crate::storage::open_private_file(path).map_err(|_| AccountError::Storage)?,
+        crate::storage::open_private_file_in(path).map_err(|_| AccountError::Storage)?,
     )?;
     serde_json::from_slice(&bytes)
         .map(Some)
