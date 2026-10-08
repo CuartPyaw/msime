@@ -233,7 +233,7 @@ final class ImeStyler {
                 s.pixels(14));
             button.setBackground(new InsetDrawable(pill,
                 s.pixels(2), s.pixels(8), s.pixels(2), s.pixels(8)));
-            button.setTextColor(color(target.keyForeground()));
+            ViewPolicy.setTextColor(button, color(target.keyForeground()));
             applySkinTypeface(button, target);
             ViewPolicy.clearElevation(button);
             return;
@@ -245,7 +245,7 @@ final class ImeStyler {
                 shortcut.setActiveFill(color(target.accentSoft()));
                 if (selected) label = target.accentText();
             }
-            button.setTextColor(color(label));
+            ViewPolicy.setTextColor(button, color(label));
             applySkinTypeface(button, target);
             ViewPolicy.clearElevation(button);
             return;
@@ -278,7 +278,7 @@ final class ImeStyler {
             }
             if (press != null) press.rememberFace(target, role, selected, density);
         }
-        button.setTextColor(color(foreground));
+        ViewPolicy.setTextColor(button, color(foreground));
         if (button instanceof KeyHintButton hintButton) {
             hintButton.setHintColor(color(target.accent()));
             hintButton.setCornerHintColor(color(target.hint()));
@@ -321,7 +321,7 @@ final class ImeStyler {
             }
             key.rememberFace(target, remembered, false, density);
         }
-        key.setTextColor(color(foreground));
+        ViewPolicy.setTextColor(key, color(foreground));
         applyShadow(key, target);
     }
 
@@ -395,10 +395,11 @@ final class ImeStyler {
             else if (role != null) styleButton((Button) node, role, target);
             else styleButton((Button) node, !key, target);
             if (description != null && "恢复默认".contentEquals(description))
-                ((Button) node).setTextColor(Color.RED);
+                ViewPolicy.setTextColor((Button) node, Color.RED);
         } else if (node instanceof TextView) {
             TextView text = (TextView) node;
-            text.setTextColor(candidate ? s.candidateAppearance.text() : color(target.keyForeground()));
+            ViewPolicy.setTextColor(text,
+                candidate ? s.candidateAppearance.text() : color(target.keyForeground()));
             text.setTypeface(candidate ? candidateTypeface()
                 : target.monospaced() ? Typeface.MONOSPACE : Typeface.DEFAULT);
         }
@@ -462,7 +463,7 @@ final class ImeStyler {
         s.imeNineKeyPanel.applySkin();
         if (s.preedit != null) {
             // Idle, this is the brand badge the shared design draws as an outlined pill; composing, it is the reading itself, set in the strip's typeface and its secondary colour above the candidates.
-            s.preedit.setTextColor(s.brandPillVisible
+            ViewPolicy.setTextColor(s.preedit, s.brandPillVisible
                 ? color(s.skin.accent()) : s.candidateAppearance.number());
             s.preedit.setTypeface(candidateTypeface());
             KeyboardGeometry.setKeyTextSize(s.preedit, s.brandPillVisible ? 12 : s.candidatePreeditFontSize);
@@ -472,9 +473,9 @@ final class ImeStyler {
                 s.pixels(s.brandPillVisible ? 4 : 0));
         }
         if (s.candidateBrandMark != null) s.candidateBrandMark.invalidate();
-        if (s.status != null) s.status.setTextColor(fade(s.skin.accent(), .55));
+        if (s.status != null) ViewPolicy.setTextColor(s.status, fade(s.skin.accent(), .55));
         if (s.candidatePage != null) {
-            s.candidatePage.setTextColor(s.candidateAppearance.accent());
+            ViewPolicy.setTextColor(s.candidatePage, s.candidateAppearance.accent());
             s.candidatePage.setTypeface(candidateTypeface());
         }
         if (s.layoutAdjustView != null) s.layoutAdjustView.updateSkin(s.skin);
