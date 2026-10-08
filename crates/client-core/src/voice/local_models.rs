@@ -817,6 +817,23 @@ impl Staging {
             fs::create_dir(&self.path)
         }
     }
+
+    fn create_model_directory(&self) -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            let staging = crate::storage::open_private_directory_at(&self.parent, &self.name)?;
+            rustix::fs::mkdirat(
+                &staging,
+                OsStr::new("model"),
+                rustix::fs::Mode::from_raw_mode(0o700),
+            )
+            .map_err(io::Error::from)
+        }
+        #[cfg(not(unix))]
+        {
+            fs::create_dir(self.path.join("model"))
+        }
+    }
 }
 
 impl Drop for Staging {
@@ -845,7 +862,7 @@ pub(crate) fn install_model(
     let staging = Staging::new(root.join(format!(".staging-{}-{}", model.id, unique_suffix())))?;
     staging.create()?;
     let model_dir = staging.path.join("model");
-    fs::create_dir(&model_dir)?;
+    staging.create_model_directory()?;
 
     let total = model.archive.size;
     let archive = staging.path.join("archive.tar.bz2");
@@ -1086,7 +1103,7 @@ pub(crate) fn install_files_with(
     let staging = Staging::new(root.join(format!(".staging-{}-{}", id, unique_suffix())))?;
     staging.create()?;
     let pack_dir = staging.path.join("model");
-    fs::create_dir(&pack_dir)?;
+    staging.create_model_directory()?;
     let partials = partial_directory(root, id)?;
     let result = download_and_publish(
         root, id, files, manifest, mirrors, fetcher, progress, cancel, &pack_dir, &partials,
@@ -1218,7 +1235,7 @@ pub(crate) fn install_archive_members_with(
     let staging = Staging::new(root.join(format!(".staging-{}-{}", id, unique_suffix())))?;
     staging.create()?;
     let pack_dir = staging.path.join("model");
-    fs::create_dir(&pack_dir)?;
+    staging.create_model_directory()?;
     let partials = partial_directory(root, id)?;
     let result = download_and_extract(
         root, id, archive, members, files, manifest, mirrors, fetcher, progress, cancel, &pack_dir,
@@ -1375,7 +1392,7 @@ pub(crate) fn adopt_files(
     let staging = Staging::new(root.join(format!(".staging-{}-{}", id, unique_suffix())))?;
     staging.create()?;
     let pack_dir = staging.path.join("model");
-    fs::create_dir(&pack_dir)?;
+    staging.create_model_directory()?;
     // 改名之前先落盘来源记录：进程在发布前被杀时，下次收编或安装这个包时按它把文件放回来源（[`restore_interrupted_adoption`]）。
     let mut source_record = create_private_file(&staging.path.join(ADOPTION_SOURCE))?;
     source_record.write_all(record.as_bytes())?;
@@ -1424,17 +1441,44 @@ pub(crate) fn adopt_files(
 
 /// `<root>/.partial-<id>`：没下完的文件跨安装保留在这里，供下次续传。不以 `.staging-` 或 `.old-` 开头，所以 [`remove_leftovers`] 不会清掉它；不是真实目录（比如被换成符号链接）时先删掉再建。
 fn partial_directory(root: &Path, id: &str) -> Result<PathBuf, LocalModelError> {
-    let directory = root.join(format!(".partial-{id}"));
-    match fs::symlink_metadata(&directory) {
-        Ok(metadata) if metadata.file_type().is_dir() => {}
-        Ok(_) => {
-            remove_leftover(&directory);
-            fs::create_dir(&directory)?;
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => fs::create_dir(&directory)?,
-        Err(error) => return Err(error.into()),
+    #[cfg(unix)]
+    {
+        let root_directory = crate::storage::open_private_directory(root)?;
+        partial_directory_at(root, &root_directory, id)
     }
-    Ok(directory)
+    #[cfg(not(unix))]
+    {
+        let directory = root.join(format!(".partial-{id}"));
+        match fs::symlink_metadata(&directory) {
+            Ok(metadata) if metadata.file_type().is_dir() => {}
+            Ok(_) => {
+                remove_leftover(&directory);
+                fs::create_dir(&directory)?;
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => fs::create_dir(&directory)?,
+            Err(error) => return Err(error.into()),
+        }
+        Ok(directory)
+    }
+}
+
+#[cfg(unix)]
+fn partial_directory_at(
+    root: &Path,
+    root_directory: &File,
+    id: &str,
+) -> Result<PathBuf, LocalModelError> {
+    let name = format!(".partial-{id}");
+    let name = OsStr::new(&name);
+    match crate::storage::open_private_directory_at(root_directory, name) {
+        Ok(_) => return Ok(root.join(name)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(_) => crate::storage::remove_private_tree_at(root_directory, name)?,
+    }
+    rustix::fs::mkdirat(root_directory, name, rustix::fs::Mode::from_raw_mode(0o700))
+        .map_err(io::Error::from)?;
+    crate::storage::open_private_directory_at(root_directory, name)?;
+    Ok(root.join(name))
 }
 
 /// 没下完的文件按锁文件里的 SHA-256 加文件名命名：锁文件换了一份字节时，旧的部分不会被拿来续传。调用方已确认 `file.name` 是单个路径成分。

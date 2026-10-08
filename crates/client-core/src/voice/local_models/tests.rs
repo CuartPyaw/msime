@@ -162,6 +162,49 @@ fn staging_creation_stays_in_an_open_parent_after_root_replacement() {
 
 #[cfg(unix)]
 #[test]
+fn partial_directory_creation_stays_in_an_open_root_after_replacement() {
+    use std::os::unix::fs::symlink;
+
+    let state = tempfile::tempdir().unwrap();
+    let root = state.path().join("models");
+    let outside = state.path().join("outside");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(&outside).unwrap();
+    let root_directory = crate::storage::open_private_directory(&root).unwrap();
+    let moved = state.path().join("models-moved");
+    fs::rename(&root, &moved).unwrap();
+    symlink(&outside, &root).unwrap();
+
+    partial_directory_at(&root, &root_directory, "pack").unwrap();
+
+    assert!(moved.join(".partial-pack").is_dir());
+    assert!(!outside.join(".partial-pack").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn model_directory_creation_stays_in_the_open_staging_directory() {
+    use std::os::unix::fs::symlink;
+
+    let state = tempfile::tempdir().unwrap();
+    let root = state.path().join("models");
+    let outside = state.path().join("outside");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(&outside).unwrap();
+    let staging = Staging::new(root.join(".staging-pack-new")).unwrap();
+    staging.create().unwrap();
+    let moved = state.path().join("models-moved");
+    fs::rename(&root, &moved).unwrap();
+    symlink(&outside, &root).unwrap();
+
+    staging.create_model_directory().unwrap();
+
+    assert!(moved.join(".staging-pack-new/model").is_dir());
+    assert!(!outside.join(".staging-pack-new").exists());
+}
+
+#[cfg(unix)]
+#[test]
 fn leftover_file_cleanup_rejects_a_symlinked_parent() {
     use std::os::unix::fs::symlink;
 

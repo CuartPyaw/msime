@@ -2,9 +2,9 @@ package app.msime.android.home;
 
 import androidx.annotation.Nullable;
 import app.msime.android.HostDeepLink;
+import app.msime.android.ListPolicy;
 import app.msime.android.TextPolicy;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 
 /**
@@ -79,7 +79,7 @@ public enum PageId {
         this.className = PACKAGE + simpleName;
         this.title = title;
         this.tab = tab;
-        this.keywords = Collections.unmodifiableList(Arrays.asList(keywords));
+        this.keywords = ListPolicy.copyOrEmpty(Arrays.asList(keywords));
     }
 
     /** 页面 Fragment 的全限定类名，交给 `FragmentFactory.instantiate`。 */
