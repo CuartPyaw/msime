@@ -106,6 +106,14 @@ public final class ImePrivacyGateSmoke {
             "synthetic\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         check(java.util.Arrays.equals(sentinel, java.nio.file.Files.readAllBytes(external)),
             "diagnostic log staging does not modify a hard-linked file");
+        java.nio.file.Path appendTarget = logRoot.resolve(ImeDebugOverlay.EventLog.PERF_FILE);
+        java.nio.file.Files.createLink(appendTarget, external);
+        append.invoke(log, ImeDebugOverlay.EventLog.PERF_FILE,
+            "synthetic\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        check(java.util.Arrays.equals(sentinel, java.nio.file.Files.readAllBytes(external)),
+            "diagnostic log append does not modify a hard-linked file");
+        check(new String(java.nio.file.Files.readAllBytes(appendTarget), java.nio.charset.StandardCharsets.UTF_8)
+            .equals("outside-sentinelsynthetic\n"), "the replacement retains existing diagnostic bytes");
         log.shutdown();
         System.out.println("Android IME privacy gate passed");
     }
