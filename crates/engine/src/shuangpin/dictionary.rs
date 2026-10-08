@@ -30,6 +30,8 @@ use crate::user_dictionary::ngram_store::PersonalNgramStore;
 
 // 双拼前缀候选的短合并直接扫描已有词，避免临时哈希表和重复索引分配。
 const SMALL_PREFIX_DEDUP: usize = 64;
+// 单字辅助码的常见候选批次很短，排列索引放在栈上即可。
+const SMALL_SINGLE_HELP_CODE_ORDER: usize = 64;
 
 /// The reference passed `INT_MAX` as "no limit" to the row queries (SD:899, SD:543).
 const UNLIMITED_ROWS: usize = i32::MAX as usize;
@@ -644,7 +646,32 @@ fn reorder_single_helpcode_rows(
     prefer_last: bool,
 ) -> (Vec<WordItem>, Vec<WordItem>) {
     debug_assert_eq!(candidates.len(), matches.len());
-    let mut order = Vec::with_capacity(candidates.len());
+    let unmatched_count = matches
+        .iter()
+        .filter(|matched| **matched == SingleHelpcodeMatch::None)
+        .count();
+    if candidates.len() <= SMALL_SINGLE_HELP_CODE_ORDER {
+        let mut order = [0usize; SMALL_SINGLE_HELP_CODE_ORDER];
+        let order_len = fill_single_helpcode_order(&mut order, matches, prefer_last);
+        debug_assert_eq!(order_len, candidates.len());
+        debug_assert!(order_len <= order.len());
+        apply_order(&mut candidates, &order[..order_len]);
+    } else {
+        let mut order = vec![0usize; candidates.len()];
+        let order_len = fill_single_helpcode_order(&mut order, matches, prefer_last);
+        debug_assert_eq!(order_len, candidates.len());
+        apply_order(&mut candidates, &order[..order_len]);
+    }
+    let unmatched = candidates.split_off(candidates.len() - unmatched_count);
+    (candidates, unmatched)
+}
+
+fn fill_single_helpcode_order(
+    order: &mut [usize],
+    matches: &[SingleHelpcodeMatch],
+    prefer_last: bool,
+) -> usize {
+    let mut order_len = 0;
     for primary in [true, false] {
         for (index, matched) in matches.iter().enumerate() {
             let selected = match matched {
@@ -656,23 +683,20 @@ fn reorder_single_helpcode_rows(
                 SingleHelpcodeMatch::None => false,
             };
             if selected {
-                order.push(index);
+                debug_assert!(order_len < order.len());
+                order[order_len] = index;
+                order_len += 1;
             }
         }
     }
-    let unmatched_count = matches
-        .iter()
-        .filter(|matched| **matched == SingleHelpcodeMatch::None)
-        .count();
-    debug_assert_eq!(order.len(), candidates.len() - unmatched_count);
-    order.extend(
-        matches.iter().enumerate().filter_map(|(index, matched)| {
-            (*matched == SingleHelpcodeMatch::None).then_some(index)
-        }),
-    );
-    apply_order(&mut candidates, &order);
-    let unmatched = candidates.split_off(candidates.len() - unmatched_count);
-    (candidates, unmatched)
+    for (index, matched) in matches.iter().enumerate() {
+        if *matched == SingleHelpcodeMatch::None {
+            debug_assert!(order_len < order.len());
+            order[order_len] = index;
+            order_len += 1;
+        }
+    }
+    order_len
 }
 
 #[cfg(test)]
@@ -719,6 +743,29 @@ mod tests {
 
         assert_eq!(words(&result), ["甲", "丙"]);
         assert_eq!(words(&unmatched), ["乙"]);
+    }
+
+    #[test]
+    fn short_single_helpcode_reordering_does_not_allocate_order_storage() {
+        let mut rows = Vec::with_capacity(3);
+        rows.extend([row("甲"), row("乙"), row("丙")]);
+        let matches = [
+            SingleHelpcodeMatch::First,
+            SingleHelpcodeMatch::First,
+            SingleHelpcodeMatch::First,
+        ];
+
+        let ((result, unmatched), allocations) =
+            crate::ime::personal_rerank::allocations::count(|| {
+                reorder_single_helpcode_rows(rows, &matches, false)
+            });
+
+        assert_eq!(words(&result), ["甲", "乙", "丙"]);
+        assert!(unmatched.is_empty());
+        assert_eq!(
+            allocations, 0,
+            "短辅助码重排不应为排列索引分配临时存储：{allocations}"
+        );
     }
 
     #[test]
