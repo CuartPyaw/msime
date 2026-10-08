@@ -32,7 +32,8 @@ inline std::optional<nlohmann::json> read_panel_restore(const std::filesystem::p
     ~CloseOnExit() { ::close(descriptor); }
   } close_on_exit{descriptor};
   struct stat metadata {};
-  if (::fstat(descriptor, &metadata) != 0 || !S_ISREG(metadata.st_mode) || metadata.st_size < 0 ||
+  if (::fstat(descriptor, &metadata) != 0 || !S_ISREG(metadata.st_mode) || metadata.st_nlink != 1 ||
+      metadata.st_size < 0 ||
       static_cast<std::uintmax_t>(metadata.st_size) > kPanelRestoreMaxBytes)
     return std::nullopt;
   std::string bytes(static_cast<std::size_t>(metadata.st_size), '\0');
@@ -80,7 +81,12 @@ inline bool record_panel_takeover(const std::filesystem::path &file, std::string
   lock_path += ".lock";
   const int lock = open(lock_path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
   if (lock < 0) return false;
-  flock(lock, LOCK_EX);
+  struct stat lock_metadata {};
+  if (fstat(lock, &lock_metadata) != 0 || !S_ISREG(lock_metadata.st_mode) || lock_metadata.st_nlink != 1 ||
+      flock(lock, LOCK_EX) != 0) {
+    close(lock);
+    return false;
+  }
   nlohmann::json record = nlohmann::json::object();
   {
     // An unreadable or oversized record is replaced; the values it held cannot be restored either way.

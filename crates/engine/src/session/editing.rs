@@ -273,9 +273,10 @@ impl InputSession {
                 }
                 boundaries
             }
-            SchemeType::Quanpin => {
-                quanpin_raw_boundaries(raw_with_cases, &self.pinyin_segmentation_with_cases())
-            }
+            SchemeType::Quanpin => quanpin_raw_boundaries(
+                raw_with_cases,
+                self.pinyin_segmentation_with_cases().as_ref(),
+            ),
             // The Cantonese editing text is spaced, so raw offsets would not land on its syllables; the host edits it one character at a time. A stroke is one character, so Stroke has no units either.
             SchemeType::Wubi
             | SchemeType::JapaneseRomaji

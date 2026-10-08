@@ -11,6 +11,7 @@ import androidx.core.content.FileProvider;
 import app.msime.android.AndroidLocalSettings;
 import app.msime.android.CloudApi;
 import app.msime.android.DiagnosticsApi;
+import app.msime.android.FilePolicy;
 import app.msime.android.McpUploadSwitchPolicy;
 import app.msime.android.NativeClient;
 import app.msime.android.JsonPolicy;
@@ -250,7 +251,7 @@ public final class DeveloperPage extends DetailPage {
             } catch (java.io.IOException failure) {
                 return new UploadResult(null, null, "诊断包读取失败，请重试");
             } finally {
-                if (zip.exists() && !zip.delete()) zip.deleteOnExit();
+                FilePolicy.deleteQuietly(zip);
             }
         }, result -> {
             busy = false;
@@ -379,7 +380,7 @@ public final class DeveloperPage extends DetailPage {
             File[] old = directory.listFiles((dir, file) -> file.startsWith("msime-diagnostics-"));
             if (old != null) {
                 for (File stale : old) {
-                    if (!stale.delete()) stale.deleteOnExit();
+                    FilePolicy.deleteQuietly(stale);
                 }
             }
             return writeBundle(context, include, new File(directory, name));

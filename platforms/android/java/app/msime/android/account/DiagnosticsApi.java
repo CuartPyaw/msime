@@ -6,6 +6,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -255,12 +256,16 @@ public final class DiagnosticsApi {
      * 从诊断包 zip 里取出要上传的各节。按条目文件名认：`config_snapshot.json`、`input_events.jsonl`（或 `input-events.jsonl`）、`perf.jsonl`（或 `perf_trace.jsonl`、`performance_logs.jsonl`）和 `*.crash`；没选的类别不读。
      */
     public static Sections readBundle(File zip, Include include) throws IOException {
+        Path path = zip == null ? null : zip.toPath();
+        if (path == null || !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
+                || !SafePaths.isSingleLink(path))
+            throw new IOException("diagnostics archive is not a private regular file");
         List<CrashLog> crashes = include.crashLogs() ? new ArrayList<>(MAX_CRASH_LOGS) : null;
         List<Event> perf = include.performanceLogs() ? new ArrayList<>(MAX_EVENTS) : null;
         List<Event> input = include.inputEvents() ? new ArrayList<>(MAX_EVENTS) : null;
         String config = null;
         try (ZipInputStream stream = new ZipInputStream(
-                Files.newInputStream(zip.toPath(), LinkOption.NOFOLLOW_LINKS), StandardCharsets.UTF_8)) {
+                Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS), StandardCharsets.UTF_8)) {
             for (ZipEntry entry = stream.getNextEntry(); entry != null; entry = stream.getNextEntry()) {
                 if (entry.isDirectory()) continue;
                 String name = baseName(entry.getName());
@@ -406,11 +411,6 @@ public final class DiagnosticsApi {
     /** JSON 字符串转义（RFC 8259）。 */
     static void quote(StringBuilder out, String value) {
         out.append(JsonPolicy.quote(value));
-    }
-
-    /** Compatibility entry point retained for the host smoke contract. */
-    static String strictString(Object value) {
-        return JsonPolicy.strictString(value);
     }
 
 }

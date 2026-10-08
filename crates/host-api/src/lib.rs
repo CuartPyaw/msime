@@ -1571,24 +1571,28 @@ fn refresh_options_file(
     language_dictionaries: bool,
     bundled: Option<&std::path::Path>,
 ) -> Result<bool, Box<dyn std::error::Error>> {
+    let parent = path.parent().ok_or("runtime options have no directory")?;
+    let name = path
+        .file_name()
+        .ok_or("runtime options have no file name")?;
+    let directory = msime_client_core::file_lock::open_private_directory(parent)?;
     reject_symlinked_options_parent(path)?;
-    let metadata = std::fs::symlink_metadata(path)?;
-    if !metadata.is_file() {
+    let locator = std::fs::symlink_metadata(path)?;
+    if locator.file_type().is_symlink() {
         return Ok(false);
     }
+    let file = msime_client_core::file_lock::open_private_file_at(&directory, name)?;
+    let metadata = file.metadata()?;
     // The file can be replaced or grow after symlink_metadata returns. Read through a
     // limit-aware handle so that the size check remains effective across that race.
-    let bytes = crate::bounded_file::read(
-        crate::bounded_file::open_private(path)?,
-        HOST_OPTIONS_DOCUMENT_LIMIT as u64,
-    )
-    .map_err(|error| {
-        if error.kind() == std::io::ErrorKind::InvalidData {
-            Box::<dyn std::error::Error>::from("runtime options exceed 1 MiB")
-        } else {
-            Box::<dyn std::error::Error>::from(error)
-        }
-    })?;
+    let bytes =
+        crate::bounded_file::read(file, HOST_OPTIONS_DOCUMENT_LIMIT as u64).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::InvalidData {
+                Box::<dyn std::error::Error>::from("runtime options exceed 1 MiB")
+            } else {
+                Box::<dyn std::error::Error>::from(error)
+            }
+        })?;
     let document: Value = serde_json::from_slice(&bytes)?;
     // 文档记录的版本，缺省是 full。新代次按同一个版本准备；`refreshed_layout` 只替换 `resources` 和 `dictionaries`，`edition` 键原样保留。
     let edition =
@@ -1621,7 +1625,7 @@ fn refresh_options_file(
         Ok(prepared) => prepared,
         Err(error) => {
             if let Some(languages) = languages {
-                replace_options_file(path, &metadata, &languages)?;
+                replace_options_file(&directory, name, &metadata, &languages)?;
             }
             return Err(error);
         }
@@ -1629,27 +1633,25 @@ fn refresh_options_file(
     let Some(refreshed) = languages.or(prepared) else {
         return Ok(false);
     };
-    replace_options_file(path, &metadata, &refreshed)?;
+    replace_options_file(&directory, name, &metadata, &refreshed)?;
     Ok(true)
 }
 
-/// 用 `document` 原子替换 `path` 处的配置文件，保留原有权限。
+/// 用已打开的父目录句柄原子替换配置文件，保留原有权限。
 fn replace_options_file(
-    path: &std::path::Path,
+    directory: &msime_client_core::file_lock::PrivateDirectory,
+    name: &std::ffi::OsStr,
     metadata: &std::fs::Metadata,
     document: &Value,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use std::io::Write as _;
-    let parent = path.parent().ok_or("runtime options have no directory")?;
-    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
-    temporary
-        .as_file()
-        .set_permissions(metadata.permissions())?;
     let mut serialized = serde_json::to_vec_pretty(document)?;
     serialized.push(b'\n');
-    temporary.write_all(&serialized)?;
-    temporary.as_file().sync_all()?;
-    temporary.persist(path)?;
+    msime_client_core::file_lock::replace_private_file_at(
+        directory,
+        name,
+        &serialized,
+        &metadata.permissions(),
+    )?;
     Ok(())
 }
 

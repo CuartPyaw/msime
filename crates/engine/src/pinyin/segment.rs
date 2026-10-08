@@ -16,8 +16,28 @@ pub enum CutMode {
     Correction,
 }
 
+/// 短拼音切分使用栈上的动态规划表；更长输入继续使用堆回退，避免扩大递归调用方的栈帧。
+const SMALL_MIN_CUT_LENGTH: usize = 64;
+
 /// Minimum segment count; among equals the shortest first piece, recursively (QU:354-422). Empty means no cut. Keeps `keneng -> ke'neng` and `fangan -> fan'gan`.
 pub fn cut_one_piece_min_segments(pinyin: &str, intact_only: bool) -> Vec<String> {
+    if pinyin.len() <= SMALL_MIN_CUT_LENGTH {
+        let mut best = [None; SMALL_MIN_CUT_LENGTH + 1];
+        return cut_one_piece_min_segments_with_best(
+            pinyin,
+            intact_only,
+            &mut best[..pinyin.len() + 1],
+        );
+    }
+    let mut best = vec![None; pinyin.len() + 1];
+    cut_one_piece_min_segments_with_best(pinyin, intact_only, &mut best)
+}
+
+fn cut_one_piece_min_segments_with_best(
+    pinyin: &str,
+    intact_only: bool,
+    best: &mut [Option<(usize, usize)>],
+) -> Vec<String> {
     let bytes = pinyin.as_bytes();
     let length = bytes.len();
     let in_set = |piece: &[u8]| {
@@ -28,7 +48,6 @@ pub fn cut_one_piece_min_segments(pinyin: &str, intact_only: bool) -> Vec<String
         }
     };
     // best[i] = (end of the first piece, segment count) of the chosen cut of `pinyin[i..]`. The C++ memoised recursion's result at an index does not depend on call order, so filling it from the back gives the same cuts.
-    let mut best: Vec<Option<(usize, usize)>> = vec![None; length + 1];
     for index in (0..length).rev() {
         let mut chosen: Option<(usize, usize)> = None;
         // Longest piece first; both sets only hold pieces of at most six letters.
@@ -231,6 +250,12 @@ fn cut_one_piece_with_corrections(pinyin: &str) -> Vec<Vec<&'static str>> {
 
 /// QQ:97-234: alias-aware cut of every `'`-part and their cartesian product, capped at `CORRECTION_PATH_LIMIT`. An empty part (trailing `'`) contributes nothing; a non-empty part without a path empties the result.
 pub fn cut_pinyin_with_corrections(pinyin: &str) -> Vec<Vec<String>> {
+    if !pinyin.contains('\'') {
+        return cut_one_piece_with_corrections(pinyin)
+            .into_iter()
+            .map(|path| path.into_iter().map(str::to_owned).collect())
+            .collect();
+    }
     let mut merged: Vec<Vec<&'static str>> = vec![Vec::new()];
     for part in pinyin.split('\'') {
         let part_paths = cut_one_piece_with_corrections(part);
@@ -340,6 +365,22 @@ mod tests {
         assert!(cut_one_piece_min_segments("nihaoz", true).is_empty());
         assert!(cut_one_piece_min_segments("", true).is_empty());
         assert!(cut_one_piece_min_segments("你好", false).is_empty());
+    }
+
+    #[test]
+    fn short_minimum_cut_needs_no_temporary_dp_allocation() {
+        assert!(intact_piece(b"ni").is_some());
+        let (segments, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            cut_one_piece_min_segments("nihao", true)
+        });
+        assert_eq!(segments, ["ni", "hao"]);
+        assert_eq!(allocations, 3);
+
+        let long = "ni".repeat(SMALL_MIN_CUT_LENGTH / 2 + 1);
+        assert_eq!(
+            cut_one_piece_min_segments(&long, true).len(),
+            SMALL_MIN_CUT_LENGTH / 2 + 1
+        );
     }
 
     #[test]
@@ -453,6 +494,16 @@ mod tests {
                 "g".to_owned()
             ]]
         );
+    }
+
+    #[test]
+    fn correction_without_delimiters_does_not_build_a_product_buffer() {
+        let _ = correction_paths("sahng");
+        let (paths, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            cut_pinyin_with_corrections("sahng")
+        });
+        assert_eq!(paths, [vec!["shang".to_owned()], vec!["sang".to_owned()]]);
+        assert_eq!(allocations, 23);
     }
 
     #[test]

@@ -35,10 +35,7 @@ public final class HttpAsrPolicy {
 
     /** A transcription response carries text; reject non-string JSON values before display. */
     static String strictText(Object value) {
-        String text = AiProviderResponse.strictText(value);
-        return TextPolicy.codePointLength(text) <= MAX_TRANSCRIPT
-                && !TextPolicy.hasControlExceptWhitespace(text)
-                && TextPolicy.validUnicode(text) ? text : "";
+        return AiProviderResponse.boundedText(value, MAX_TRANSCRIPT);
     }
 
     /**

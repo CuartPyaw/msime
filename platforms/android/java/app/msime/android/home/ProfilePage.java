@@ -22,6 +22,7 @@ import androidx.core.content.FileProvider;
 import app.msime.android.BitmapPolicy;
 import app.msime.android.CloudApi;
 import app.msime.android.DeviceDataApi;
+import app.msime.android.FilePolicy;
 import app.msime.android.HttpBodyPolicy;
 import app.msime.android.ListPolicy;
 import app.msime.android.SyncSwitch;
@@ -375,7 +376,7 @@ public final class ProfilePage extends DetailPage {
             if (!directory.isDirectory() && !directory.mkdirs()) return "没有导出，存储空间不可用";
             // 导出包里是个人数据，只留最新这一份给分享用：先删掉以前导出的，不让它们一直堆在缓存目录里。
             File[] previous = directory.listFiles();
-            if (previous != null) for (File stale : previous) deleteQuietly(stale);
+            if (previous != null) for (File stale : previous) FilePolicy.deleteQuietly(stale);
             File file = new File(directory, name);
             java.nio.file.Path temporary = null;
             try {
@@ -391,14 +392,14 @@ public final class ProfilePage extends DetailPage {
                     Files.move(temporary, file.toPath(), StandardCopyOption.REPLACE_EXISTING);
                 }
             } catch (IOException unwritable) {
-                deleteQuietly(file);
+                FilePolicy.deleteQuietly(file);
                 return "没有导出，存储空间不可用";
             } catch (CloudApi.Failure failure) {
-                deleteQuietly(file);
+                FilePolicy.deleteQuietly(file);
                 if (failure.status == 429) return "今天的导出次数已用完，明天再试";
                 throw failure;
             } finally {
-                if (temporary != null) deleteQuietly(temporary.toFile());
+                if (temporary != null) FilePolicy.deleteQuietly(temporary.toFile());
             }
             return "";
         }, outcome -> {
@@ -413,10 +414,6 @@ public final class ProfilePage extends DetailPage {
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             startActivity(Intent.createChooser(send, "导出我的数据"));
         }, null);
-    }
-
-    private static void deleteQuietly(File file) {
-        if (file.exists() && !file.delete()) file.deleteOnExit();
     }
 
     private void confirmDeleteData() {

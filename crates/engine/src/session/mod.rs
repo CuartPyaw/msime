@@ -361,14 +361,15 @@ impl Session {
         }
         let input = &self.input;
         let candidates = input.candidates().to_vec();
-        let mut preedit = input.preedit();
-        if !self.shuangpin_preedit_uses_raw
+        let preedit = if !self.shuangpin_preedit_uses_raw
             && input.scheme() == SchemeType::Shuangpin
             && input.local_mode == LocalInputMode::None
             && !input.dedicated_english
         {
-            preedit = input.pinyin_segmentation_with_cases();
-        }
+            input.pinyin_segmentation_with_cases().into_owned()
+        } else {
+            input.preedit()
+        };
         SessionSnapshot {
             scheme: input.scheme(),
             local_mode: input.local_mode,

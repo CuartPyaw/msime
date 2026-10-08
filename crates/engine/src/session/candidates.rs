@@ -5,7 +5,7 @@ use std::borrow::Cow;
 use super::input::InputSession;
 use crate::assets;
 use crate::diagnostics;
-use crate::ime::personal_rerank::personal_context_rerank;
+use crate::ime::personal_rerank::personal_context_rerank_order;
 use crate::ime::queries::MODE_ENGLISH_LIMIT;
 use crate::local::date_time::LocalDateTime;
 use crate::local::jianpin::jianpin_ranking_context;
@@ -16,8 +16,8 @@ use crate::types::{
     LocalInputMode, PersonalDictionaryKind, SchemeType, WordItem,
 };
 use crate::user_dictionary::positions::{
-    apply_fixed_positions, clear_fixed_position, is_pinned_candidate, record_pinned_candidate,
-    set_fixed_position,
+    apply_fixed_positions_with_state, clear_fixed_position, is_pinned_candidate,
+    record_pinned_candidate, set_fixed_position,
 };
 use crate::user_dictionary::removal::delete_dictionary_candidate;
 
@@ -61,39 +61,43 @@ pub(super) fn clone_candidate_rows(source: &[WordItem], destination: &mut Vec<Wo
 }
 
 impl InputSession {
-    /// Prefix or engine rows, then personal context rerank, mixed English / emoji / kaomoji, fixed positions (input_session.cpp:1057-1078).
+    /// 前缀或引擎候选经过个人上下文重排，再混入英文、表情、颜文字并应用固定位置。
     pub(super) fn update_mixed_candidates(&mut self) {
         self.refresh_prefix_candidates();
         let mut decoded = self
             .ranking_candidates
             .take()
             .unwrap_or_else(|| std::mem::take(&mut self.mixed_candidates));
+        let mut reranked = std::mem::take(&mut self.mixed_candidates);
         if self.prefix_active {
             clone_candidate_rows(&self.prefix_candidates, &mut decoded);
         } else {
             clone_candidate_rows(self.engine.candidates(), &mut decoded);
         }
         self.personal_reranked = false;
-        // At the chain start the preference is context-free, which is the frequency setting's business, not this one's.
+        // 提交链起点没有上下文，候选偏好由词频设置负责。
         let reordered = match self.chain.previous.as_deref() {
             Some(previous) if self.personal_context_applies() => {
                 let journal = self.journal_path();
                 let context = self.pinyin_ranking_context();
                 let model = self.personal_context.model();
-                personal_context_rerank(
+                personal_context_rerank_order(
                     &decoded,
                     &model,
                     self.chain.earlier.as_deref(),
                     previous,
-                    &mut |leader: &str| is_pinned_candidate(&journal, &context, leader),
+                    &mut |leader: &str| is_pinned_candidate(journal, &context, leader),
                 )
             }
             _ => None,
         };
         match reordered {
-            Some(reordered) => {
-                self.mixed_candidates = self.mixed_from(reordered);
-                // Learning ranks against the order the dictionary gave, so the unreordered list is kept beside the shown one.
+            Some(order) => {
+                // 先复制原始行到可复用的显示缓冲，再按索引原地重排，避免重新分配每个字符串。
+                clone_candidate_rows(&decoded, &mut reranked);
+                order.reorder(&mut reranked);
+                self.mixed_candidates = self.mixed_from(reranked);
+                // 学习使用字典给出的顺序，因此另存未重排的混排列表。
                 self.ranking_candidates = Some(self.mixed_from(decoded));
                 self.personal_reranked = true;
             }
@@ -176,7 +180,6 @@ impl InputSession {
         if items.is_empty() {
             return;
         }
-        let journal = self.journal_path();
         let regular = self.local_mode == LocalInputMode::None
             && !self.dedicated_english
             && !matches!(
@@ -187,63 +190,97 @@ impl InputSession {
                     | SchemeType::Zhuyin
                     | SchemeType::Stroke
             );
+        let has_english = if !regular && self.local_mode != LocalInputMode::SuperJianpin {
+            if !items
+                .iter()
+                .any(|item| item.source == CandidateSource::EnglishDictionary)
+            {
+                return;
+            }
+            true
+        } else {
+            false
+        };
+        let journal = self.journal_path();
+        let journal_exists = journal.try_exists().unwrap_or(false);
+        if !journal_exists && !items.iter().any(|item| item.source.is_online()) {
+            return;
+        }
         let include_missing = self.engine.request().raw_input.len() == 1;
         let keep_dynamic = self.has_active_helpcode();
         let engine = &self.engine;
         if regular && self.is_wubi() {
             // Each producer's rows are fixed within their own group and under their own context, and the groups keep the wubi-first order.
-            let (mut wubi_items, mut pinyin_items): (Vec<WordItem>, Vec<WordItem>) =
-                items.drain(..).partition(Self::is_wubi_native_candidate);
-            if !wubi_items.is_empty() {
+            let mut pinyin_items = split_wubi_candidates(items);
+            if !items.is_empty() {
                 let context = self.position_context(false, true);
                 let mut finder =
                     |key: &str, word: &str| engine.find_candidate(SchemeType::Wubi, key, word);
-                apply_fixed_positions(
-                    &journal,
+                apply_fixed_positions_with_state(
+                    journal,
                     context.as_ref(),
-                    &mut wubi_items,
+                    items,
                     include_missing,
                     Some(&mut finder),
                     keep_dynamic,
+                    journal_exists,
                 );
             }
             if !pinyin_items.is_empty() {
                 let context = self.position_context(false, false);
                 let mut finder =
                     |key: &str, word: &str| engine.find_candidate(SchemeType::Quanpin, key, word);
-                apply_fixed_positions(
-                    &journal,
+                apply_fixed_positions_with_state(
+                    journal,
                     context.as_ref(),
                     &mut pinyin_items,
                     include_missing,
                     Some(&mut finder),
                     keep_dynamic,
+                    journal_exists,
                 );
             }
-            items.append(&mut wubi_items);
             items.append(&mut pinyin_items);
         } else if regular {
             let context = self.position_context(false, false);
             let scheme = self.scheme();
             let mut finder = |key: &str, word: &str| engine.find_candidate(scheme, key, word);
-            apply_fixed_positions(
-                &journal,
+            apply_fixed_positions_with_state(
+                journal,
                 context.as_ref(),
                 items,
                 include_missing,
                 Some(&mut finder),
                 keep_dynamic,
+                journal_exists,
             );
         } else if self.local_mode == LocalInputMode::SuperJianpin {
             let context = self.position_context(false, false);
-            apply_fixed_positions(&journal, context.as_ref(), items, false, None, false);
+            apply_fixed_positions_with_state(
+                journal,
+                context.as_ref(),
+                items,
+                false,
+                None,
+                false,
+                journal_exists,
+            );
         }
-        if items
-            .iter()
-            .any(|item| item.source == CandidateSource::EnglishDictionary)
+        if has_english
+            || items
+                .iter()
+                .any(|item| item.source == CandidateSource::EnglishDictionary)
         {
             let context = self.position_context(true, false);
-            apply_fixed_positions(&journal, context.as_ref(), items, false, None, true);
+            apply_fixed_positions_with_state(
+                journal,
+                context.as_ref(),
+                items,
+                false,
+                None,
+                true,
+                journal_exists,
+            );
         }
     }
 
@@ -310,14 +347,14 @@ impl InputSession {
         if !(0..=5).contains(&position) {
             return KeyResult::unhandled();
         }
-        let Some(selected) = self.candidates().get(index).cloned() else {
+        let Some(selected) = self.candidates().get(index) else {
             return KeyResult::unhandled();
         };
-        if !self.is_editable_source(&selected) {
+        if !self.is_editable_source(selected) {
             return KeyResult::unhandled();
         }
         let english = selected.source == CandidateSource::EnglishDictionary;
-        let wubi = Self::is_wubi_native_candidate(&selected)
+        let wubi = Self::is_wubi_native_candidate(selected)
             && self.local_mode != LocalInputMode::SuperJianpin;
         let context = self.position_context(english, wubi);
         let key = if english || wubi || selected.canonical_pinyin.is_empty() {
@@ -330,9 +367,9 @@ impl InputSession {
         }
         let journal = self.journal_path();
         let written = if position == 0 {
-            clear_fixed_position(&journal, context.as_ref(), key, &selected.word)
+            clear_fixed_position(journal, context.as_ref(), key, &selected.word)
         } else {
-            set_fixed_position(&journal, context.as_ref(), key, &selected.word, position)
+            set_fixed_position(journal, context.as_ref(), key, &selected.word, position)
         };
         if written.is_err() {
             return KeyResult::handled()
@@ -345,10 +382,14 @@ impl InputSession {
         let Some(index) = self.ranking_index(index) else {
             return KeyResult::unhandled();
         };
-        let selected = self.ranking_list()[index].clone();
-        if !self.is_editable_source(&selected) {
+        let Some(selected) = self.ranking_list().get(index) else {
+            return KeyResult::unhandled();
+        };
+        if !self.is_editable_source(selected) {
             return KeyResult::unhandled();
         }
+        let selected_source = selected.source;
+        let selected_word = selected.word.clone();
         // Manual pinning is independent of the automatic learning preferences and never selects text.
         let pin = FrequencyAdjustmentOptions {
             mode: FrequencyAdjustmentMode::Pin,
@@ -359,14 +400,14 @@ impl InputSession {
             return KeyResult::handled().with_diagnostic(Some(diagnostic));
         }
         // Remembered so that the personal context rerank does not move the pinned word off the top it was pinned to.
-        if selected.source != CandidateSource::EnglishDictionary
+        if selected_source != CandidateSource::EnglishDictionary
             && self.local_mode == LocalInputMode::None
             && !self.dedicated_english
             && self.scheme().is_pinyin()
             && record_pinned_candidate(
-                &self.journal_path(),
+                self.journal_path(),
                 &self.pinyin_ranking_context(),
-                &selected.word,
+                &selected_word,
             )
             .is_err()
         {
@@ -377,17 +418,16 @@ impl InputSession {
     }
 
     pub(super) fn remove_candidate(&mut self, index: usize) -> KeyResult {
-        let Some(selected) = self.candidates().get(index).cloned() else {
+        let Some(selected) = self.candidates().get(index) else {
             return KeyResult::unhandled();
         };
         let english = selected.source == CandidateSource::EnglishDictionary;
         // A single character is protected: removing it would leave its reading unanswerable.
-        if !self.is_editable_source(&selected)
-            || (!english && count_utf8_chars(&selected.word) <= 1)
+        if !self.is_editable_source(selected) || (!english && count_utf8_chars(&selected.word) <= 1)
         {
             return KeyResult::unhandled();
         }
-        let wubi = Self::is_wubi_native_candidate(&selected)
+        let wubi = Self::is_wubi_native_candidate(selected)
             && self.local_mode != LocalInputMode::SuperJianpin;
         let kind = if english {
             PersonalDictionaryKind::English
@@ -410,7 +450,7 @@ impl InputSession {
         } else {
             assets::MAIN_DICTIONARY
         });
-        if delete_dictionary_candidate(&dictionary, &self.journal_path(), kind, key, &selected.word)
+        if delete_dictionary_candidate(&dictionary, self.journal_path(), kind, key, &selected.word)
             .is_err()
         {
             return KeyResult::handled()
@@ -459,9 +499,25 @@ impl InputSession {
     }
 }
 
+fn split_wubi_candidates(items: &mut Vec<WordItem>) -> Vec<WordItem> {
+    let mut wubi_count = 0;
+    for index in 0..items.len() {
+        if InputSession::is_wubi_native_candidate(&items[index]) {
+            if index != wubi_count {
+                items[wubi_count..=index].rotate_right(1);
+            }
+            wubi_count += 1;
+        }
+    }
+    items.split_off(wubi_count)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{clone_candidate_rows, english_position_context, plain_position_context};
+    use super::{
+        clone_candidate_rows, english_position_context, plain_position_context,
+        split_wubi_candidates,
+    };
     use crate::types::{CandidateSource, WordItem};
 
     #[test]
@@ -522,5 +578,37 @@ mod tests {
         assert_eq!(destination, larger);
         clone_candidate_rows(&[], &mut destination);
         assert!(destination.is_empty());
+    }
+
+    #[test]
+    fn wubi_partition_does_not_allocate_two_group_buffers() {
+        let mut rows = vec![
+            WordItem::new("aaaa", "甲", 1, CandidateSource::Database, ""),
+            WordItem::new("ni", "你", 2, CandidateSource::Database, ""),
+            WordItem::new("bbbb", "乙", 3, CandidateSource::Database, ""),
+            WordItem::new("hao", "好", 4, CandidateSource::Database, ""),
+        ];
+        rows[0].scheme = crate::types::SchemeType::Wubi;
+        rows[2].scheme = crate::types::SchemeType::Wubi;
+        let (pinyin, allocations) =
+            crate::ime::personal_rerank::allocations::count(|| split_wubi_candidates(&mut rows));
+
+        assert_eq!(
+            rows.iter()
+                .map(|item| item.word.as_str())
+                .collect::<Vec<_>>(),
+            ["甲", "乙"]
+        );
+        assert_eq!(
+            pinyin
+                .iter()
+                .map(|item| item.word.as_str())
+                .collect::<Vec<_>>(),
+            ["你", "好"]
+        );
+        assert!(
+            allocations <= 1,
+            "五笔混输分组为临时行缓冲分配了两次：{allocations}"
+        );
     }
 }

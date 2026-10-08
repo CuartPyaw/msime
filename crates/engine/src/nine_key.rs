@@ -115,7 +115,8 @@ struct LockUndo {
     /// 这段数字锁定前的样子：锁定把它换成了拼写的编码，拼写比键入的长时还补齐了数字。
     replaced: String,
     /// 锁定时丢掉的切分，都在这段数字里。
-    splits: Vec<usize>,
+    splits: [usize; DIGIT_LIMIT],
+    split_count: usize,
     /// 锁定前选的首字母，锁定时并进了拼写。
     initial: Option<Initial>,
     /// 锁定时左列给出的选项。数字全部锁定后左列还给出这一组，选其中一项就换掉这次锁定。
@@ -293,13 +294,14 @@ impl NineKeySession {
         let Some(choice) = self.spellings.get(index).cloned() else {
             return KeyResult::unhandled();
         };
-        let choices = if self.reselecting() {
+        let reselecting = self.reselecting();
+        let choices = if reselecting {
             match self.undo_last_lock() {
                 Some(choices) => choices,
                 None => return KeyResult::unhandled(),
             }
         } else {
-            self.spellings.clone()
+            Vec::new()
         };
         match choice_kind(&choice) {
             Choice::Digit(digit) => {
@@ -323,6 +325,11 @@ impl NineKeySession {
                 });
             }
             Choice::Syllable => {
+                let choices = if reselecting {
+                    choices
+                } else {
+                    std::mem::take(&mut self.spellings)
+                };
                 let offset = self.locked_length();
                 // A spelling longer than what is typed extends the digits to its whole code; the spelling list only offers ones that stay within the digit limit.
                 let end = offset + choice.len().min(self.digits.len() - offset);
@@ -337,14 +344,21 @@ impl NineKeySession {
                 }
                 self.locked.push(choice);
                 let locked_length = self.locked_length();
-                let (dropped, kept): (Vec<usize>, Vec<usize>) = self
-                    .splits
-                    .iter()
-                    .partition(|&&split| split <= locked_length);
-                self.splits = kept;
+                let mut dropped = [0; DIGIT_LIMIT];
+                let mut split_count = 0;
+                self.splits.retain(|&split| {
+                    if split <= locked_length {
+                        dropped[split_count] = split;
+                        split_count += 1;
+                        false
+                    } else {
+                        true
+                    }
+                });
                 self.lock_undo.push(Some(LockUndo {
                     replaced,
                     splits: dropped,
+                    split_count,
                     initial: self.initial.take(),
                     choices,
                 }));
@@ -369,7 +383,8 @@ impl NineKeySession {
         let offset = self.locked_length();
         let end = (offset + spelling.len()).min(self.digits.len());
         self.digits.replace_range(offset..end, &undo.replaced);
-        self.splits.extend(undo.splits);
+        self.splits
+            .extend(undo.splits[..undo.split_count].iter().copied());
         self.splits.sort_unstable();
         self.splits.dedup();
         self.initial = undo.initial.map(|initial| Initial {
@@ -385,36 +400,53 @@ impl NineKeySession {
     }
 
     pub fn select(&mut self, index: usize) -> KeyResult {
-        let Some(selected) = self.candidates.get(index).cloned() else {
+        let Some(selected) = self.candidates.get(index) else {
             return KeyResult::unhandled();
+        };
+        let selected_source = selected.source;
+        let selected_fixed_position = selected.fixed_position;
+        let selected_pinyin_length = selected.pinyin.len();
+        let selected_word = selected.word.clone();
+        let selected_canonical_pinyin = if self.learning
+            && (selected_source.is_dictionary() || selected_source.is_sentence_learning())
+        {
+            selected.canonical_pinyin.clone()
+        } else {
+            String::new()
         };
         let mut diagnostic = if self.learning
             && self.frequency.mode != FrequencyAdjustmentMode::Disabled
             && index != 0
-            && selected.fixed_position == 0
+            && selected_fixed_position == 0
             && self.editable(index)
         {
             self.adjust_frequency(index, false)
         } else {
             None
         };
-        self.consume(selected.pinyin.len());
+        self.consume(selected_pinyin_length);
         if self.learning {
-            let learned = self.learn_selection(&selected);
+            let learned =
+                self.learn_selection(selected_source, &selected_canonical_pinyin, &selected_word);
             diagnostic = diagnostic.or(learned);
         } else {
             self.reset_phrase();
         }
         self.refresh();
-        KeyResult::committed(selected.word).with_diagnostic(diagnostic)
+        KeyResult::committed(selected_word).with_diagnostic(diagnostic)
     }
 
     /// 选中一行之后的造词，与全拼键盘的规则相同：选掉一部分数字时记下这一段；选完全部数字时，前面有选过的段就把各段连成一个词存起来（「我滴」+「个天呐」），没有就只在选中的是整句行（词库里没有的句子）时把整句存起来，最多 `MAX_LEARNED_SENTENCE_SYLLABLES` 个音节。词库里本来就有的词不再写。
-    fn learn_selection(&mut self, selected: &WordItem) -> Option<String> {
-        let reading = if selected.source.is_dictionary() || selected.source.is_sentence_learning() {
-            selected.canonical_pinyin.clone()
+    fn learn_selection(
+        &mut self,
+        selected_source: CandidateSource,
+        selected_canonical_pinyin: &str,
+        selected_word: &str,
+    ) -> Option<String> {
+        let reading = if selected_source.is_dictionary() || selected_source.is_sentence_learning() {
+            selected_canonical_pinyin
         } else {
-            String::new()
+            ""
         };
         if self.active() {
             if reading.is_empty() {
@@ -423,9 +455,9 @@ impl NineKeySession {
                 if !self.phrase_pinyin.is_empty() {
                     self.phrase_pinyin.push('\'');
                 }
-                self.phrase_pinyin.push_str(&reading);
+                self.phrase_pinyin.push_str(reading);
             }
-            self.phrase_word.push_str(&selected.word);
+            self.phrase_word.push_str(selected_word);
             return None;
         }
         let phrase = !self.phrase_word.is_empty();
@@ -433,14 +465,14 @@ impl NineKeySession {
             (self.phrase_storable && !reading.is_empty()).then(|| {
                 (
                     format!("{}'{reading}", self.phrase_pinyin),
-                    format!("{}{}", self.phrase_word, selected.word),
+                    format!("{}{}", self.phrase_word, selected_word),
                 )
             })
         } else {
-            (selected.source.is_sentence_learning()
+            (selected_source.is_sentence_learning()
                 && !reading.is_empty()
-                && split_segments(&reading).len() <= MAX_LEARNED_SENTENCE_SYLLABLES)
-                .then(|| (reading, selected.word.clone()))
+                && split_segments(reading).len() <= MAX_LEARNED_SENTENCE_SYLLABLES)
+                .then(|| (reading.to_owned(), selected_word.to_owned()))
         };
         self.reset_phrase();
         let (pinyin, word) = stored?;
@@ -720,11 +752,11 @@ impl NineKeySession {
         let table = spelling_table();
         let locked_length = self.locked_length();
         let remaining = remaining_digits(&self.digits, locked_length);
-        let splits: Vec<usize> = self
-            .splits
-            .iter()
-            .map(|split| split - locked_length)
-            .collect();
+        let mut split_offsets = [0usize; DIGIT_LIMIT];
+        for (index, split) in self.splits.iter().enumerate() {
+            split_offsets[index] = split - locked_length;
+        }
+        let splits = &split_offsets[..self.splits.len()];
         let initial = self.initial.map(|initial| initial.letter);
         let starts_right =
             |piece: &str| initial.is_none_or(|letter| piece.as_bytes().first() == Some(&letter));
@@ -739,7 +771,7 @@ impl NineKeySession {
             let prior = self
                 .prior
                 .get_or_insert_with(|| SyllablePrior::from_dictionary(dictionary, table));
-            let mut alternatives = table.split_paths(remaining, &splits, prior);
+            let mut alternatives = table.split_paths(remaining, splits, prior);
             alternatives.retain(|path| path.first().is_none_or(|piece| starts_right(piece)));
             // Even an unfinished or invalid tail must still offer the leading syllable for partial selection.
             alternatives.extend(
@@ -769,7 +801,7 @@ impl NineKeySession {
         // 每个数字都能当一个音节的首字母时也按简拼查（`68` 是 m't：明天、每天）。用户在每个数字之间都打了切分（`6'8`），说的就是简拼，简拼行排在前面；没打切分时数字也可能是完整音节（`68` 是 mu），简拼行排在同样覆盖的音节行之后。
         // 在展开面板里选定了首字母时用户是在逐个拼音节，简拼行不经过 `starts_right` 的首字母过滤，这时不查简拼。
         let initials =
-            self.locked.is_empty() && initial.is_none() && initials_apply(remaining.len(), &splits);
+            self.locked.is_empty() && initial.is_none() && initials_apply(remaining.len(), splits);
         let initials_lead = initials && !splits.is_empty();
         for (index, path) in alternatives.iter().enumerate() {
             append_path_key(&mut key, &locked_key, path);
@@ -2481,6 +2513,98 @@ mod tests {
             "mixed English waits for the minimum prefix"
         );
         assert_eq!(session.snapshot().candidates[0].pinyin, "6");
+    }
+
+    #[test]
+    fn selecting_a_nine_key_candidate_does_not_clone_unused_row_fields() {
+        let fixture = fixture();
+        let mut session = open(&fixture.paths, false, mixed());
+        type_digits(&mut session, "64426");
+        let index = index_of(&session, "你好");
+
+        let (result, allocations) =
+            crate::ime::personal_rerank::allocations::count(|| session.select(index));
+
+        assert_eq!(result.commit.as_deref(), Some("你好"));
+        assert!(
+            allocations <= 1,
+            "九键选择候选复制无用行字段产生了 {allocations} 次分配"
+        );
+    }
+
+    #[test]
+    fn choosing_a_nine_key_letter_does_not_clone_spelling_choices() {
+        let fixture = fixture();
+        let mut session = open(&fixture.paths, false, mixed());
+        type_digits(&mut session, "64426");
+        let index = session
+            .snapshot()
+            .nine_key_spellings
+            .iter()
+            .position(|spelling| spelling == "N")
+            .unwrap();
+
+        let (result, allocations) =
+            crate::ime::personal_rerank::allocations::count(|| session.choose_spelling(index));
+
+        assert!(result.handled);
+        assert!(
+            allocations <= 347,
+            "九键选择字母复制音节列表产生了 {allocations} 次分配"
+        );
+    }
+
+    #[test]
+    fn split_refresh_reuses_normalized_boundaries() {
+        let fixture = fixture();
+        let mut plain = open(&fixture.paths, false, EnglishInputOptions::default());
+        plain.digits = "644".into();
+        plain.refresh();
+        let (_, plain_allocations) =
+            crate::ime::personal_rerank::allocations::count(|| plain.refresh());
+        let mut split = open(&fixture.paths, false, EnglishInputOptions::default());
+        split.digits = "644".into();
+        split.splits = vec![2];
+        split.refresh();
+        let (_, split_allocations) =
+            crate::ime::personal_rerank::allocations::count(|| split.refresh());
+
+        assert!(
+            split_allocations <= 151,
+            "split refresh should keep normalized boundaries off the heap: {split_allocations}"
+        );
+        assert!(split_allocations < plain_allocations);
+    }
+
+    #[test]
+    fn choosing_a_spelling_with_a_split_does_not_allocate_a_second_partition() {
+        let fixture = fixture();
+        let mut plain = open(&fixture.paths, false, mixed());
+        type_digits(&mut plain, "64426");
+        let index = plain
+            .spellings
+            .iter()
+            .position(|spelling| spelling == "ni")
+            .unwrap();
+        let (_, plain_allocations) =
+            crate::ime::personal_rerank::allocations::count(|| plain.choose_spelling(index));
+
+        let mut session = open(&fixture.paths, false, mixed());
+        type_digits(&mut session, "64426");
+        session.splits = vec![2];
+        session.refresh();
+        let index = session
+            .spellings
+            .iter()
+            .position(|spelling| spelling == "ni")
+            .unwrap();
+        let (_, allocations) =
+            crate::ime::personal_rerank::allocations::count(|| session.choose_spelling(index));
+
+        assert!(
+            allocations <= plain_allocations,
+            "九键选择带切分的音节分配多于无切分路径：{allocations} > {plain_allocations}"
+        );
     }
 
     #[test]

@@ -86,7 +86,7 @@ INSERT INTO english_words VALUES('help','Help',90);";
 fn mixed_candidate_refresh_reuses_rows_for_engine_and_caret_prefix() {
     let fixture = Fixture::new(CARET_PREFIX_FIXTURE);
     let mut session = fixture.session();
-    type_text(&mut session, "nihao");
+    type_text(&mut session, "nihc");
     let word_pointer = session.input.mixed_candidates[0].word.as_ptr();
     let before = session.snapshot();
     session.input.update_mixed_candidates();
@@ -106,6 +106,88 @@ fn mixed_candidate_refresh_reuses_rows_for_engine_and_caret_prefix() {
         word_pointer
     );
     assert_eq!(session.snapshot(), before);
+}
+
+#[test]
+fn journal_path_lookup_reuses_the_session_path() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let session = fixture.session();
+
+    let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+        assert_eq!(session.input.journal_path(), session.input.journal_path());
+    });
+
+    assert_eq!(
+        allocations, 0,
+        "journal path lookup allocated {allocations} buffers"
+    );
+}
+
+#[test]
+fn ordinary_candidate_positions_skip_missing_journal_work() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session();
+    type_text(&mut session, "ni");
+    let mut candidates = session.input.engine.candidates().to_vec();
+
+    let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+        session.input.apply_candidate_positions(&mut candidates);
+    });
+
+    assert_eq!(
+        allocations, 0,
+        "ordinary position refresh allocated {allocations} buffers"
+    );
+}
+
+#[test]
+fn personal_rerank_refresh_reuses_shown_rows_and_preserves_learning_order() {
+    let fixture = Fixture::new(CONTEXT_FIXTURE);
+    let mut session = fixture.session();
+    for _ in 0..4 {
+        type_text(&mut session, "hao");
+        select_word(&mut session, "子");
+        type_text(&mut session, "ni");
+        select_word(&mut session, "乙");
+        session.punctuation(b',');
+    }
+    type_text(&mut session, "hao");
+    select_word(&mut session, "子");
+    type_text(&mut session, "ni");
+
+    for prefix in [false, true] {
+        if prefix {
+            type_text(&mut session, "hao");
+            session.set_caret(Some(2));
+        }
+        assert!(session.input.personal_reranked);
+        assert_eq!(session.input.mixed_candidates[0].word, "乙");
+        let before = session.snapshot();
+        let ranking = session.input.ranking_list().to_vec();
+        let mut string_pointers: Vec<_> = session
+            .input
+            .mixed_candidates
+            .iter()
+            .map(|row| row.word.as_ptr())
+            .collect();
+        string_pointers.sort_unstable();
+
+        session.input.update_mixed_candidates();
+
+        assert_eq!(session.snapshot(), before);
+        assert_eq!(session.input.ranking_list(), ranking);
+        let mut refreshed_pointers: Vec<_> = session
+            .input
+            .mixed_candidates
+            .iter()
+            .map(|row| row.word.as_ptr())
+            .collect();
+        refreshed_pointers.sort_unstable();
+        assert_eq!(refreshed_pointers, string_pointers);
+        let original_index = session.input.ranking_index(0).unwrap();
+        assert_ne!(original_index, 0);
+        assert_eq!(session.input.ranking_list()[original_index].word, "乙");
+    }
 }
 
 /// One directory standing in for all four runtime roots, as the reference session tests used.
@@ -477,7 +559,7 @@ fn caret_prefix_expands_its_own_initial_list() {
         crate::ime::personal_rerank::allocations::count(|| session.expand_initial_candidates());
     assert!(grew);
     assert_eq!(
-        allocations, 398,
+        allocations, 354,
         "caret-prefix expansion allocations: {allocations}"
     );
     let widened = words(&session);
@@ -709,7 +791,7 @@ fn ignored_scheme_key_does_not_clone_preedit_for_change_detection() {
     });
 
     assert!(!result.handled);
-    assert_eq!(allocations, 52);
+    assert_eq!(allocations, 35);
 }
 
 #[test]
@@ -723,7 +805,7 @@ fn typing_at_the_end_does_not_build_the_preedit_twice_for_caret_detection() {
     });
 
     assert!(result.handled);
-    assert_eq!(allocations, 155);
+    assert_eq!(allocations, 136);
 }
 
 #[test]
@@ -736,7 +818,7 @@ fn backspacing_at_the_end_does_not_build_the_preedit_twice_for_caret_detection()
         crate::ime::personal_rerank::allocations::count(|| session.command(Command::Backspace));
 
     assert!(result.handled);
-    assert_eq!(allocations, 30);
+    assert_eq!(allocations, 24);
 }
 
 #[test]
@@ -782,7 +864,7 @@ fn prefix_end_does_not_build_editing_text_to_clamp_the_caret() {
         crate::ime::personal_rerank::allocations::count(|| session.prefix_end());
 
     assert_eq!(prefix_end, 2);
-    assert_eq!(allocations, 2);
+    assert_eq!(allocations, 1);
 }
 
 #[test]
@@ -796,7 +878,7 @@ fn setting_the_caret_does_not_build_editing_text_to_clamp_it() {
     });
 
     assert_eq!(session.snapshot().caret_position, 2);
-    assert_eq!(allocations, 73);
+    assert_eq!(allocations, 32);
 }
 
 #[test]
@@ -810,7 +892,7 @@ fn moving_the_caret_does_not_build_the_preedit_twice() {
 
     assert!(result.handled);
     assert_eq!(
-        allocations, 73,
+        allocations, 32,
         "caret movement should reuse the editing text length: {allocations} allocations"
     );
 }
@@ -827,7 +909,7 @@ fn typing_at_a_caret_reuses_the_editing_text_length() {
 
     assert!(result.handled);
     assert_eq!(
-        allocations, 278,
+        allocations, 221,
         "caret insertion allocations: {allocations}"
     );
 }
@@ -846,7 +928,160 @@ fn selecting_a_quanpin_candidate_clones_only_needed_request_fields() {
         crate::ime::personal_rerank::allocations::count(|| session.select(index));
 
     assert_eq!(result.commit.as_deref(), Some("你好"));
-    assert_eq!(allocations, 36, "selection allocations: {allocations}");
+    assert_eq!(allocations, 31, "selection allocations: {allocations}");
+}
+
+#[test]
+fn selecting_a_dictionary_candidate_does_not_build_context_row_vec() {
+    let fixture = Fixture::new(CONTEXT_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.learning = true;
+        options.personal_context = true;
+    });
+    type_text(&mut session, "ni");
+    let index = index_of(&session, "甲");
+
+    let (result, allocations) =
+        crate::ime::personal_rerank::allocations::count(|| session.select(index));
+
+    assert_eq!(result.commit.as_deref(), Some("甲"));
+    assert!(
+        allocations <= 71,
+        "个人上下文记录的中间行分配了 {allocations} 次"
+    );
+}
+
+#[test]
+fn selecting_a_candidate_does_not_clone_unused_row_metadata() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.learning = false;
+        options.personal_context = false;
+    });
+    type_text(&mut session, "nihao");
+    let index = index_of(&session, "你好");
+    session.input.mixed_candidates[index].corrected_from = "synthetic correction".to_owned();
+    session.input.mixed_candidates[index].sentence_words = vec!["你".to_owned(), "好".to_owned()];
+
+    let (result, allocations) =
+        crate::ime::personal_rerank::allocations::count(|| session.select(index));
+
+    assert_eq!(result.commit.as_deref(), Some("你好"));
+    assert!(
+        allocations <= 35,
+        "选择候选不应复制未使用的行字段，却产生了 {allocations} 次分配"
+    );
+}
+
+#[test]
+fn selecting_a_shuangpin_candidate_does_not_clone_the_full_request() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.scheme = SchemeType::Shuangpin;
+        options.learning = false;
+        options.personal_context = false;
+    });
+    type_text(&mut session, "ni'hc");
+    let index = index_of(&session, "你好");
+
+    let (result, allocations) =
+        crate::ime::personal_rerank::allocations::count(|| session.select(index));
+
+    assert_eq!(result.commit.as_deref(), Some("你好"));
+    assert_eq!(
+        allocations, 40,
+        "shuangpin selection allocations: {allocations}"
+    );
+}
+
+#[test]
+fn selecting_an_unsupported_candidate_does_not_clone_its_row() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session();
+    assert!(session.character(b'Y', true).handled);
+    let before = session.snapshot();
+    assert_eq!(before.candidate_sources, [CandidateSource::Fallback]);
+
+    let (result, allocations) =
+        crate::ime::personal_rerank::allocations::count(|| session.select(0));
+
+    assert!(result.handled && result.diagnostic.is_none());
+    assert_eq!(result.commit.as_deref(), Some("Y"));
+    assert!(session.snapshot().preedit.is_empty());
+    assert!(
+        allocations <= 3,
+        "选择不可编辑候选产生了 {allocations} 次分配"
+    );
+}
+
+#[test]
+fn selecting_the_top_candidate_does_not_clone_an_unused_learning_row() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.personal_context = false;
+    });
+    type_text(&mut session, "nihao");
+    let index = index_of(&session, "你好");
+    assert_eq!(index, 0);
+
+    let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+        assert_eq!(session.input.learn_candidate(index), None);
+    });
+
+    assert_eq!(
+        allocations, 0,
+        "top-candidate learning allocated {allocations} unused buffers"
+    );
+}
+
+#[test]
+fn learning_a_non_top_candidate_does_not_clone_the_whole_ranking_list() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.personal_context = false;
+        options.frequency.mode = FrequencyAdjustmentMode::Promote;
+        options.frequency.trigger_count = 1;
+    });
+    type_text(&mut session, "nihao");
+    let index = index_of(&session, "拟好");
+    assert_eq!(index, 1);
+
+    let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+        assert_eq!(session.input.learn_candidate(index), None);
+    });
+
+    assert!(
+        allocations <= 411,
+        "non-top learning allocated {allocations} buffers"
+    );
+    assert!(
+        count(
+            &fixture.main_db(),
+            "SELECT weight FROM tbl_2_n WHERE value='拟好'"
+        ) > 200
+    );
+}
+
+#[test]
+fn frequency_learning_borrows_an_existing_entry_key() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.personal_context = false;
+        options.frequency.mode = FrequencyAdjustmentMode::Promote;
+        options.frequency.trigger_count = 1;
+    });
+    type_text(&mut session, "nihao");
+    let index = index_of(&session, "拟好");
+    assert_eq!(index, 1);
+
+    let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+        assert_eq!(session.input.learn_candidate(index), None);
+    });
+
+    assert!(
+        allocations <= 410,
+        "entry-key learning allocated {allocations} buffers"
+    );
 }
 
 /// The reported case: in mixed Wubi `jixu` is the wubi code of 曳光弹 and the pinyin of 继续. The fourth key must leave both on offer; without pinyin rows the same code still commits its one wubi row.
@@ -922,6 +1157,81 @@ fn pinning_a_quanpin_row_in_mixed_wubi_writes_the_pinyin_table() {
             "SELECT count(*) FROM user_dictionary_operations WHERE dictionary='wubi'"
         ),
         0
+    );
+}
+
+#[test]
+fn removing_an_unsupported_candidate_does_not_clone_its_row() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session();
+    assert!(session.character(b'Y', true).handled);
+    let before = session.snapshot();
+    assert_eq!(before.candidate_sources, [CandidateSource::Fallback]);
+
+    let (result, allocations) =
+        crate::ime::personal_rerank::allocations::count(|| session.remove(0));
+
+    assert!(!result.handled && result.commit.is_none() && result.diagnostic.is_none());
+    assert_eq!(session.snapshot(), before);
+    assert_eq!(allocations, 0, "拒绝删除候选产生了 {allocations} 次分配");
+}
+
+#[test]
+fn pinning_a_candidate_does_not_clone_the_full_learning_row() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| options.local_modes.temporary_english = true);
+    assert!(session.character(b'Y', true).handled);
+    assert_eq!(
+        session.snapshot().candidates[0].source,
+        CandidateSource::Fallback
+    );
+
+    let (result, allocations) = crate::ime::personal_rerank::allocations::count(|| session.pin(0));
+
+    assert!(!result.handled && result.diagnostic.is_none(), "{result:?}");
+    assert_eq!(
+        allocations, 0,
+        "pinning an unsupported candidate allocated {allocations} buffers"
+    );
+}
+
+#[test]
+fn fixing_an_unsupported_candidate_does_not_clone_the_full_row() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| options.local_modes.temporary_english = true);
+    assert!(session.character(b'Y', true).handled);
+    assert_eq!(
+        session.snapshot().candidates[0].source,
+        CandidateSource::Fallback
+    );
+
+    let (result, allocations) =
+        crate::ime::personal_rerank::allocations::count(|| session.fix_position(0, 1));
+
+    assert!(!result.handled && result.diagnostic.is_none(), "{result:?}");
+    assert_eq!(
+        allocations, 0,
+        "fixing an unsupported candidate allocated {allocations} buffers"
+    );
+}
+
+#[test]
+fn removing_an_unsupported_candidate_does_not_clone_the_full_row() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| options.local_modes.temporary_english = true);
+    assert!(session.character(b'Y', true).handled);
+    assert_eq!(
+        session.snapshot().candidates[0].source,
+        CandidateSource::Fallback
+    );
+
+    let (result, allocations) =
+        crate::ime::personal_rerank::allocations::count(|| session.remove(0));
+
+    assert!(!result.handled && result.diagnostic.is_none(), "{result:?}");
+    assert_eq!(
+        allocations, 0,
+        "removing an unsupported candidate allocated {allocations} buffers"
     );
 }
 
@@ -1096,6 +1406,41 @@ fn a_quanpin_sentence_beside_a_wubi_row_is_learned_and_the_wubi_row_is_not() {
         1
     );
     assert!(count(&fixture.journal(), pinyin_journal) > 0);
+}
+
+#[test]
+fn generated_sentence_learning_borrows_candidate_fields() {
+    let fixture = Fixture::new(
+        &WUBI_ROUTING_FIXTURE.replace("INSERT INTO tbl_2_g VALUES('ge''ge','gg','哥哥',1000);", ""),
+    );
+    let mut session = wubi_mixed(&fixture);
+    let index = session
+        .snapshot()
+        .candidates
+        .iter()
+        .position(|item| {
+            item.scheme == SchemeType::Quanpin
+                && item.source.is_generated_or_fallback()
+                && item.word.chars().count() == 2
+        })
+        .unwrap();
+    let sentence = session.snapshot().candidates[index].word.clone();
+    let (result, allocations) =
+        crate::ime::personal_rerank::allocations::count(|| session.select(index));
+    assert_eq!(result.commit.as_deref(), Some(sentence.as_str()));
+    assert!(result.diagnostic.is_none());
+    assert!(session.snapshot().preedit.is_empty());
+    assert_eq!(
+        count(
+            &fixture.main_db(),
+            &format!("SELECT count(*) FROM tbl_2_g WHERE key='ge''ge' AND value='{sentence}'")
+        ),
+        1
+    );
+    assert!(
+        allocations <= 196,
+        "生成句子提交产生了 {allocations} 次分配"
+    );
 }
 
 /// A native wubi row's fixed slot is stored under the wubi raw code and applied within the wubi group only.
@@ -2029,9 +2374,75 @@ fn temporary_english_shows_its_prefix_until_a_word_matches() {
 }
 
 #[test]
+fn selecting_a_local_generated_candidate_does_not_clone_its_learning_row() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE).with_english(ENGLISH_FIXTURE);
+    let mut session = fixture.session();
+    assert!(session.character(b'Y', true).handled);
+    type_text(&mut session, "he");
+    assert_eq!(
+        session.snapshot().candidates[0].source,
+        CandidateSource::Generated
+    );
+
+    let (result, allocations) =
+        crate::ime::personal_rerank::allocations::count(|| session.select(0));
+
+    assert_eq!(result.commit.as_deref(), Some("he"));
+    assert!(result.diagnostic.is_none());
+    assert!(session.snapshot().preedit.is_empty());
+    assert!(
+        allocations <= 3,
+        "本地生成候选提交产生了 {allocations} 次分配"
+    );
+}
+
+#[test]
+fn selecting_a_temporary_english_candidate_does_not_clone_full_ranking_rows() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE).with_english(ENGLISH_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.frequency = FrequencyAdjustmentOptions {
+            mode: FrequencyAdjustmentMode::Promote,
+            trigger_count: 1,
+            linear_step: 1,
+        };
+    });
+    assert!(session.character(b'Y', true).handled);
+    type_text(&mut session, "he");
+    assert_eq!(
+        session.snapshot().candidates[0].source,
+        CandidateSource::Generated
+    );
+    assert_eq!(
+        session.snapshot().candidates[2].source,
+        CandidateSource::EnglishDictionary
+    );
+
+    let (result, allocations) =
+        crate::ime::personal_rerank::allocations::count(|| session.select(2));
+
+    assert_eq!(result.commit.as_deref(), Some("Help"));
+    assert!(result.diagnostic.is_none(), "{result:?}");
+    assert!(session.snapshot().preedit.is_empty());
+    let english = fixture.path().join(assets::ENGLISH_DICTIONARY);
+    assert!(
+        count(
+            &english,
+            "SELECT weight FROM english_words WHERE word='help' AND display='Help'"
+        ) > 90
+    );
+    assert!(
+        allocations <= 67,
+        "temporary English frequency selection allocations: {allocations}"
+    );
+}
+
+#[test]
 fn temporary_japanese_returns_to_the_original_scheme() {
     let fixture = Fixture::new(QUANPIN_FIXTURE);
-    let mut session = fixture.session_with(|options| options.scheme = SchemeType::Shuangpin);
+    let mut session = fixture.session_with(|options| {
+        options.scheme = SchemeType::Shuangpin;
+        options.shuangpin_preedit_uses_raw = false;
+    });
     assert!(session.character(b'R', true).handled);
     let snapshot = session.snapshot();
     assert_eq!(snapshot.preedit, "R");
@@ -2063,6 +2474,25 @@ fn temporary_japanese_returns_to_the_original_scheme() {
     assert_eq!(
         session.input.engine.current_scheme_type(),
         SchemeType::Shuangpin
+    );
+}
+
+#[test]
+fn shuangpin_snapshot_does_not_build_unused_raw_preedit() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.scheme = SchemeType::Shuangpin;
+        options.shuangpin_preedit_uses_raw = false;
+    });
+    type_text(&mut session, "nihc");
+
+    let (snapshot, allocations) =
+        crate::ime::personal_rerank::allocations::count(|| session.snapshot());
+
+    assert_eq!(snapshot.preedit, "ni'hao");
+    assert_eq!(
+        allocations, 54,
+        "shuangpin snapshot allocations: {allocations}"
     );
 }
 
@@ -3764,6 +4194,26 @@ fn cantonese_rows_are_never_learned_or_edited() {
 }
 
 #[test]
+fn selecting_a_cantonese_candidate_does_not_clone_the_full_row() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.scheme = SchemeType::Cantonese;
+        options.cantonese_dictionary = cantonese_dictionary(fixture.path());
+    });
+    type_text(&mut session, "neihou");
+
+    let (result, allocations) =
+        crate::ime::personal_rerank::allocations::count(|| session.select(0));
+
+    assert_eq!(result.commit.as_deref(), Some("你好"));
+    assert!(session.snapshot().preedit.is_empty());
+    assert!(
+        allocations <= 1,
+        "Cantonese candidate selection allocations: {allocations}"
+    );
+}
+
+#[test]
 fn cantonese_caret_edits_keep_the_shown_syllables() {
     let fixture = Fixture::new(QUANPIN_FIXTURE);
     let mut session = fixture.session_with(|options| {
@@ -4205,6 +4655,23 @@ fn stroke_rows_are_never_learned_or_edited() {
     let mut session = fixture.session_with(configure);
     type_text(&mut session, "h");
     assert_eq!(words(&session), order);
+}
+
+#[test]
+fn selecting_a_stroke_candidate_does_not_clone_the_full_row() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = stroke_session(&fixture);
+    type_text(&mut session, "h");
+
+    let (result, allocations) =
+        crate::ime::personal_rerank::allocations::count(|| session.select(1));
+
+    assert_eq!(result.commit.as_deref(), Some("大"));
+    assert!(session.snapshot().preedit.is_empty());
+    assert!(
+        allocations <= 1,
+        "stroke candidate selection allocations: {allocations}"
+    );
 }
 
 #[test]

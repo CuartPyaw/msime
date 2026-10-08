@@ -1,7 +1,6 @@
 package app.msime.android;
 
 import java.util.HashMap;
-import java.util.Locale;
 import java.util.Map;
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -208,8 +207,8 @@ public final class KeyboardSkin {
 
     /** ARGB 整数转成皮肤里用的颜色串：不透明时 `#RRGGBB`，否则 Android 的 `#AARRGGBB`。 */
     static String colorString(int argb) {
-        if ((argb >>> 24) == 0xFF) return String.format(Locale.ROOT, "#%06X", argb & 0xFFFFFF);
-        return String.format(Locale.ROOT, "#%08X", argb);
+        if ((argb >>> 24) == 0xFF) return ColorPolicy.hexRgb(argb & 0xFFFFFF);
+        return ColorPolicy.hexArgb(argb);
     }
 
     /**

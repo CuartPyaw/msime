@@ -5,6 +5,28 @@
 use super::*;
 use std::sync::Arc;
 
+#[cfg(unix)]
+#[test]
+fn statistics_writes_stay_bound_to_the_locked_directory_after_replacement() {
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().join("statistics");
+    fs::create_dir(&directory).unwrap();
+    let store = TypingStatisticsStore::new(&directory);
+    let lock = store.lock().unwrap();
+
+    let moved = root.path().join("statistics-moved");
+    fs::rename(&directory, &moved).unwrap();
+    fs::create_dir(&directory).unwrap();
+
+    store
+        .write_locked(&lock, &TypingStatistics::default())
+        .unwrap();
+
+    assert!(moved.join("typing-statistics.json").exists());
+    assert!(!directory.join("typing-statistics.json").exists());
+    fs::remove_dir_all(moved).unwrap();
+}
+
 #[test]
 fn oversized_document_is_rejected_before_loading() {
     let directory = tempfile::tempdir().unwrap();

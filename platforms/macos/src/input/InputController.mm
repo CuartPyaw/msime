@@ -5187,8 +5187,8 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
 - (void)recordPassthroughKey:(NSEvent *)event client:(id)sender {
     if (!MSIMETypingStatisticsEnabled.load(std::memory_order_relaxed)) return;
     if (event.type != NSEventTypeKeyDown || !sender) return;
-    // A password field turns on secure event input; what is typed there is never counted.
-    if (IsSecureEventInputEnabled()) return;
+    // A password field turns on secure event input; what is typed there is never counted. Asked through secureEventInputActive like the key sounds, so a test can pin the window-server state instead of inheriting whatever the machine has on.
+    if ([self secureEventInputActive]) return;
     CGEventRef nativeEvent = event.CGEvent;
     if (nativeEvent && CGEventGetIntegerValueField(nativeEvent, kCGEventSourceUserData) == MSIMEVoiceCommitEventTag) return;
     NSString *characters = event.characters;
@@ -5211,7 +5211,7 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
     } else if (event.type != NSEventTypeFlagsChanged || !msime::mac::IsModifierPress(keyCode, event.modifierFlags)) {
         return;
     }
-    if (IsSecureEventInputEnabled()) return;
+    if ([self secureEventInputActive]) return;
     const std::string_view keyId = msime::mac::KeyIdForVirtualKeyCode(keyCode);
     if (keyId.empty()) return;
     // The day is taken at the press, so counts collected before midnight are written under the day they belong to.

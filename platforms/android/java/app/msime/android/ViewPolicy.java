@@ -6,11 +6,13 @@ import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.util.TypedValue;
 import android.text.TextUtils;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.PopupWindow;
 
 /** Shared view configuration for host controls whose widget defaults need resetting. */
 public final class ViewPolicy {
@@ -50,6 +52,11 @@ public final class ViewPolicy {
         view.setMinimumHeight(height);
     }
 
+    /** 应用文本控件需要的按行最小高度。 */
+    public static void setTextMinHeight(TextView view, int height) {
+        setMinimumHeight(view, height);
+    }
+
     /** Remove both legacy and platform minimum-width constraints from a view. */
     public static void clearMinimumWidth(View view) {
         view.setMinimumWidth(0);
@@ -70,6 +77,11 @@ public final class ViewPolicy {
     public static void setMinimumWidth(TextView view, int width) {
         view.setMinWidth(width);
         view.setMinimumWidth(width);
+    }
+
+    /** 应用文本控件需要的按行最小宽度。 */
+    public static void setTextMinWidth(TextView view, int width) {
+        setMinimumWidth(view, width);
     }
 
     /** Apply equal horizontal and vertical padding to a view. */
@@ -102,6 +114,13 @@ public final class ViewPolicy {
         view.setPadding(left, top, right, bottom);
     }
 
+    /** 仅在四边内边距发生变化时更新视图，避免无意义的重新布局。 */
+    public static void setPaddingIfChanged(View view, int left, int top, int right, int bottom) {
+        if (view.getPaddingLeft() == left && view.getPaddingTop() == top
+                && view.getPaddingRight() == right && view.getPaddingBottom() == bottom) return;
+        setPadding(view, left, top, right, bottom);
+    }
+
     /** Remove the default background, padding, and minimum size from a view. */
     public static void clearChrome(View view) {
         clearBackground(view);
@@ -128,6 +147,25 @@ public final class ViewPolicy {
         return button;
     }
 
+    /** 创建横向排列的线性容器。 */
+    public static LinearLayout newRow(Context context) {
+        LinearLayout view = new LinearLayout(context);
+        view.setOrientation(LinearLayout.HORIZONTAL);
+        return view;
+    }
+
+    /** 创建纵向排列的线性容器。 */
+    public static LinearLayout newColumn(Context context) {
+        LinearLayout view = new LinearLayout(context);
+        view.setOrientation(LinearLayout.VERTICAL);
+        return view;
+    }
+
+    /** 创建像素尺寸的线性布局正方形参数。 */
+    public static LinearLayout.LayoutParams newSquareParamsPx(int size) {
+        return new LinearLayout.LayoutParams(size, size);
+    }
+
     /** Bind a caller-supplied action to a view without changing any other interaction policy. */
     public static void bindClick(View view, Runnable action) {
         view.setOnClickListener(ignored -> action.run());
@@ -147,6 +185,31 @@ public final class ViewPolicy {
     public static void setEnabledWithAlpha(View view, boolean enabled, float inactiveAlpha) {
         setEnabled(view, enabled);
         setActiveAlpha(view, enabled, inactiveAlpha);
+    }
+
+    /** 递归设置未承载点击行为的容器及其控件的启用状态和禁用透明度。 */
+    public static void setEnabledRecursively(ViewGroup group, boolean enabled, float inactiveAlpha) {
+        for (int index = 0; index < group.getChildCount(); index++) {
+            View child = group.getChildAt(index);
+            if (child instanceof ViewGroup nested && !child.isClickable()) {
+                setEnabledRecursively(nested, enabled, inactiveAlpha);
+            } else {
+                setEnabledWithAlpha(child, enabled, inactiveAlpha);
+            }
+        }
+    }
+
+    /** 设置视图的固定像素高度；布局参数缺失或高度未变化时不触发重新布局。 */
+    public static void setFixedHeight(View view, int height) {
+        android.view.ViewGroup.LayoutParams params = view.getLayoutParams();
+        if (params == null || params.height == height) return;
+        params.height = height;
+        view.setLayoutParams(params);
+    }
+
+    /** 判断视图是否非空且正在显示。 */
+    public static boolean isVisible(View view) {
+        return view != null && view.getVisibility() == View.VISIBLE;
     }
 
     /** Announce changing view content to accessibility services without interrupting the user. */
@@ -216,6 +279,21 @@ public final class ViewPolicy {
         view.setTypeface(view.getTypeface(), style);
     }
 
+    /** 直接设置文本视图的字体。 */
+    public static void setTypeface(TextView view, Typeface typeface) {
+        view.setTypeface(typeface);
+    }
+
+    /** 直接设置文本画笔的字体。 */
+    public static void setTypeface(Paint paint, Typeface typeface) {
+        paint.setTypeface(typeface);
+    }
+
+    /** 直接设置文本视图的字体和字形样式。 */
+    public static void setTypeface(TextView view, Typeface typeface, int style) {
+        view.setTypeface(typeface, style);
+    }
+
     /** Apply a default-family typeface with the supplied numeric weight. */
     public static void setTypefaceWeight(TextView view, int weight) {
         view.setTypeface(Typeface.create(Typeface.DEFAULT, weight, false));
@@ -230,6 +308,16 @@ public final class ViewPolicy {
     public static void setTextSizeSp(Paint paint, Context context, float sizeSp) {
         paint.setTextSize(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, sizeSp,
             context.getResources().getDisplayMetrics()));
+    }
+
+    /** 直接设置文本画笔的像素字号。 */
+    public static void setTextSize(Paint paint, float sizePx) {
+        paint.setTextSize(sizePx);
+    }
+
+    /** 直接设置文本视图的像素字号。 */
+    public static void setTextSize(TextView view, float sizePx) {
+        view.setTextSize(TypedValue.COMPLEX_UNIT_PX, sizePx);
     }
 
     /** Set a text view's size in density-independent pixels. */
@@ -404,6 +492,11 @@ public final class ViewPolicy {
         view.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
     }
 
+    /** Set the platform accessibility importance policy for a view. */
+    public static void setImportantForAccessibility(View view, int mode) {
+        view.setImportantForAccessibility(mode);
+    }
+
     /** Remove the platform state-list animator from a view. */
     public static void clearStateListAnimator(View view) {
         view.setStateListAnimator(null);
@@ -412,6 +505,16 @@ public final class ViewPolicy {
     /** Remove any platform elevation from a view. */
     public static void clearElevation(View view) {
         view.setElevation(0);
+    }
+
+    /** 设置视图的浮层高度。 */
+    public static void setElevation(View view, float elevation) {
+        view.setElevation(elevation);
+    }
+
+    /** 设置弹出窗口的浮层高度。 */
+    public static void setElevation(PopupWindow popup, float elevation) {
+        popup.setElevation(elevation);
     }
 
     /** Apply full opacity to an active view and a caller-selected opacity otherwise. */
@@ -438,6 +541,13 @@ public final class ViewPolicy {
     /** Toggle between visible and gone layout participation. */
     public static void setVisible(View view, boolean visible) {
         view.setVisibility(visible ? View.VISIBLE : View.GONE);
+    }
+
+    /** 仅在显示状态发生变化时更新视图，避免无意义的重新布局。 */
+    public static void setVisibleIfChanged(View view, boolean visible) {
+        int visibility = visible ? View.VISIBLE : View.GONE;
+        if (view.getVisibility() == visibility) return;
+        setVisible(view, visible);
     }
 
     /** Show a view only when the supplied text is non-null and non-empty. */

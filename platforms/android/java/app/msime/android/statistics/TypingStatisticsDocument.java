@@ -66,9 +66,9 @@ public final class TypingStatisticsDocument {
             counts(root.optJSONObject("days")),
             MapPolicy.copyOrEmpty(detail == null ? null : counts(detail.optJSONObject("characters"))),
             MapPolicy.copyOrEmpty(detail == null ? null : counts(detail.optJSONObject("sources"))),
-            Map.copyOf(dailyCharacters),
-            Map.copyOf(dailySources),
-            Map.copyOf(dailyKeys));
+            MapPolicy.copyOrEmpty(dailyCharacters),
+            MapPolicy.copyOrEmpty(dailySources),
+            MapPolicy.copyOrEmpty(dailyKeys));
     }
 
     /** Persisted flags are typed JSON booleans; reject org.json's string coercion. */
@@ -84,6 +84,6 @@ public final class TypingStatisticsDocument {
             long count = KeyboardGeometry.strictLong(value.opt(key), 0);
             if (count > 0) result.put(key, count);
         }
-        return Map.copyOf(result);
+        return MapPolicy.copyOrEmpty(result);
     }
 }

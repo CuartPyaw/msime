@@ -9,6 +9,8 @@ import { createAboutSettingsActions } from "../about-settings-actions";
 import { OtherPlatformDownloadRows } from "./download-page";
 import { ActionButton } from "../action-button";
 import { SettingsPageFieldset } from "../settings-page-fieldset";
+import { downloadMirrorPrefix } from "../app-resources";
+import { mirrorDownloadUrl } from "../update-manifest";
 
 const privacyUrl = "https://msime.app/privacy/";
 const androidPrivacyUrl = "https://msime.app/privacy/";
@@ -48,6 +50,7 @@ export function AboutSettingsPage() {
     selectPage,
     setDraft,
   });
+  const mirrorUrl = availableUpdate && mirrorDownloadUrl(availableUpdate, downloadMirrorPrefix);
   const updateResult = availableUpdate && (
     <div className={doc.updateResult}>
       <p>水杉 IME v{availableUpdate.version.display} 已发布。</p>
@@ -61,6 +64,10 @@ export function AboutSettingsPage() {
             核对命令：<code>{installerTrust.verify.command}</code>
           </p>
         </>
+      )}
+      {/* 国内连 GitHub 发布页常常只有几十 KB/s，镜像是同一个文件，上面的 SHA256 照样适用。 */}
+      {mirrorUrl && (
+        <ActionButton action={() => void openExternalUrl(mirrorUrl)} label="国内镜像下载" />
       )}
       <ActionButton
         action={() => void openExternalUrl(availableUpdate.releaseUrl)}

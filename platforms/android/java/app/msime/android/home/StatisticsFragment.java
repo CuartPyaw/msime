@@ -462,7 +462,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         tile.addView(number);
         tile.addView(Ui.label(context, note, 12, highlight ? Ui.accent(context) : Ui.subText(context)));
         tile.setContentDescription(title + " " + value + ("—".equals(value) ? "" : " " + unit) + "，" + note);
-        tile.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        ViewPolicy.setImportantForAccessibility(tile, View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         return tile;
     }
 

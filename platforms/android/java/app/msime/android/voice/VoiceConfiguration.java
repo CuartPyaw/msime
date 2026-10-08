@@ -150,13 +150,8 @@ public final class VoiceConfiguration {
         return JsonPolicy.strictBoolean(value);
     }
 
-    /** Shared voice response text fields must remain JSON strings; malformed values become empty. */
-    static String strictString(Object value) {
-        return JsonPolicy.strictString(value);
-    }
-
     private static String text(Object value) {
-        String parsed = strictString(value);
+        String parsed = JsonPolicy.strictString(value);
         return parsed == null ? "" : parsed;
     }
 

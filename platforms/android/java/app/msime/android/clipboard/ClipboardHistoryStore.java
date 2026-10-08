@@ -130,9 +130,4 @@ public final class ClipboardHistoryStore {
         return items;
     }
 
-    /** Shared-store response flags must remain JSON booleans; org.json otherwise coerces strings. */
-    static Boolean strictBoolean(Object value) {
-        return ClipboardHistoryPolicy.strictBoolean(value);
-    }
-
 }

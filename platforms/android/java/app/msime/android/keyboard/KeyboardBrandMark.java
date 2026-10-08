@@ -37,6 +37,15 @@ public final class KeyboardBrandMark extends View {
         return paint;
     }
 
+    /** 读取主题颜色；供应器异常时使用白色，保证两个品牌控件的回退一致。 */
+    static int colorOrWhite(IntSupplier accent) {
+        try {
+            return accent.getAsInt();
+        } catch (RuntimeException error) {
+            return Color.WHITE;
+        }
+    }
+
     /** Draws the mark centred in the given content box at {@code scale} of its shorter side. */
     static void draw(Canvas canvas, Paint paint, float left, float top, float width, float height,
             float scale) {
@@ -60,12 +69,7 @@ public final class KeyboardBrandMark extends View {
     }
 
     @Override protected void onDraw(Canvas canvas) {
-        int color;
-        try {
-            color = accent.getAsInt();
-        } catch (RuntimeException error) {
-            color = Color.WHITE;
-        }
+        int color = colorOrWhite(accent);
         mark.setColor(color);
         int width = KeyboardGeometry.contentWidth(this);
         int height = KeyboardGeometry.contentHeight(this);

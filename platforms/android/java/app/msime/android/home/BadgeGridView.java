@@ -86,9 +86,9 @@ public final class BadgeGridView extends View {
     public BadgeGridView(Context context, @Nullable AttributeSet attributes) {
         super(context, attributes);
         glyph.setTextAlign(Paint.Align.CENTER);
-        glyph.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+        ViewPolicy.setTypeface(glyph, Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
         title.setTextAlign(Paint.Align.CENTER);
-        title.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+        ViewPolicy.setTypeface(title, Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
         ViewPolicy.setTextSizeSp(title, context, 14);
         caption.setTextAlign(Paint.Align.CENTER);
         ViewPolicy.setTextSizeSp(caption, context, 11);

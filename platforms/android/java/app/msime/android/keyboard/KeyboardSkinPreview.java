@@ -144,8 +144,8 @@ public final class KeyboardSkinPreview extends View {
         float rowHeight = (bounds.height() - gap * 3) / rows.length;
         Paint text = reusableText == null ? new Paint(Paint.ANTI_ALIAS_FLAG) : reusableText;
         text.setTextAlign(Paint.Align.CENTER);
-        text.setTypeface(skin.monospaced() ? Typeface.MONOSPACE : Typeface.DEFAULT);
-        text.setTextSize(KeyboardGeometry.bounded(rowHeight * .42f, 7f,
+        ViewPolicy.setTypeface(text, skin.monospaced() ? Typeface.MONOSPACE : Typeface.DEFAULT);
+        ViewPolicy.setTextSize(text, KeyboardGeometry.bounded(rowHeight * .42f, 7f,
             KeyboardGeometry.floatPixels(14f, density)));
         int keyFill = Color.parseColor(skin.keyBackground());
         int actionFill = Color.parseColor(skin.actionBackground());
@@ -337,7 +337,7 @@ public final class KeyboardSkinPreview extends View {
                 if (!face.isEmpty()) {
                     text.setTextAlign(Paint.Align.CENTER);
                     text.setColor(enter ? returnInk : ink);
-                    text.setTextSize(letter || punctuation ? 22f : 15f);
+                    ViewPolicy.setTextSize(text, letter || punctuation ? 22f : 15f);
                     text.setFakeBoldText(special);
                     Paint.FontMetrics metrics = text.getFontMetrics();
                     canvas.drawText(face, rect.centerX(), rect.centerY() - (metrics.ascent + metrics.descent) / 2f, text);
@@ -345,7 +345,7 @@ public final class KeyboardSkinPreview extends View {
                 if (letter) {
                     text.setTextAlign(Paint.Align.RIGHT);
                     text.setColor(sub);
-                    text.setTextSize(10f);
+                    ViewPolicy.setTextSize(text, 10f);
                     text.setFakeBoldText(false);
                     canvas.drawText(HINTS[LETTER_HINTS.indexOf(face)], rect.right - 5f, rect.top + 13f, text);
                 }

@@ -290,18 +290,7 @@ final class LoginSheet {
     }
 
     private void setEnabled(boolean enabled) {
-        setEnabled(options, enabled);
-    }
-
-    private static void setEnabled(ViewGroup group, boolean enabled) {
-        for (int index = 0; index < group.getChildCount(); index++) {
-            View child = group.getChildAt(index);
-            if (child instanceof ViewGroup nested && !child.isClickable()) {
-                setEnabled(nested, enabled);
-            } else {
-                ViewPolicy.setEnabledWithAlpha(child, enabled, 0.6f);
-            }
-        }
+        ViewPolicy.setEnabledRecursively(options, enabled, 0.6f);
     }
 
     // ---- 部件 ----

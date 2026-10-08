@@ -78,7 +78,7 @@ public class KeyHintButton extends KeyboardPressButton {
     }
 
     private void drawCornerHint(Canvas canvas) {
-        cornerPaint.setTextSize(KeyboardGeometry.keySp(getContext(), CORNER_HINT_SP));
+        ViewPolicy.setTextSize(cornerPaint, KeyboardGeometry.keySp(getContext(), CORNER_HINT_SP));
         cornerPaint.setColor(cornerHintColor);
         cornerPaint.setAlpha(ColorPolicy.enabledAlpha(isEnabled(), 255, 96));
         Paint.FontMetrics metrics = cornerPaint.getFontMetrics();
@@ -92,11 +92,11 @@ public class KeyHintButton extends KeyboardPressButton {
         float size = KeyboardGeometry.keySp(getContext(), 9);
         float available = BoundsPolicy.bounded(getWidth() - getPaddingLeft() - getPaddingRight()
             - KeyboardGeometry.pixels(getContext(), 4), 1f, Float.MAX_VALUE);
-        hintPaint.setTextSize(size);
+        ViewPolicy.setTextSize(hintPaint, size);
         while (size > KeyboardGeometry.keySp(getContext(), 6)
                 && hintPaint.measureText(hintText) > available) {
             size -= KeyboardGeometry.keySp(getContext(), 0.5f);
-            hintPaint.setTextSize(size);
+            ViewPolicy.setTextSize(hintPaint, size);
         }
         hintPaint.setColor(hintColor);
         hintPaint.setAlpha(ColorPolicy.enabledAlpha(isEnabled(), 204, 96));

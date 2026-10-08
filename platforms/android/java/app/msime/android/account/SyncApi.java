@@ -278,8 +278,14 @@ public final class SyncApi {
     public long downloadSnapshot(Path destination) throws CloudApi.Failure {
         Path partial = destination.resolveSibling(destination.getFileName() + ".partial");
         try {
-            try (OutputStream out = Files.newOutputStream(partial, StandardOpenOption.CREATE,
-                    StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE,
+            if (Files.exists(partial, LinkOption.NOFOLLOW_LINKS)
+                    && (!Files.isRegularFile(partial, LinkOption.NOFOLLOW_LINKS)
+                        || !SafePaths.isSingleLink(partial))) {
+                throw new IOException("snapshot partial file is not private");
+            }
+            Files.deleteIfExists(partial);
+            try (OutputStream out = Files.newOutputStream(partial,
+                    StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE,
                     LinkOption.NOFOLLOW_LINKS)) {
                 streamed(token -> streams.download(SNAPSHOT, token, new BoundedStream(out, MAX_SNAPSHOT_BYTES)));
             }
@@ -307,6 +313,12 @@ public final class SyncApi {
         } catch (JSONException malformed) {
             throw invalid("malformed snapshot response");
         }
+    }
+
+    static boolean uploadable(Path file) {
+        return file != null
+            && Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
+            && SafePaths.isSingleLink(file);
     }
 
     /** 快照第一行是 `{"type":"header",…,"revision":N}`。 */
@@ -494,6 +506,7 @@ public final class SyncApi {
         }
 
         @Override public Exchange upload(String path, String token, Path file, String contentType) throws IOException {
+            if (!uploadable(file)) throw new IOException("snapshot upload file is not private");
             long length = Files.size(file);
             if (length <= 0 || length > MAX_SNAPSHOT_BYTES) throw new IOException("snapshot size out of range");
             HttpsURLConnection connection = open(path, "PUT", token, "application/json");

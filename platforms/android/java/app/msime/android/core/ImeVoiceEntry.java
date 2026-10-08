@@ -202,7 +202,10 @@ final class ImeVoiceEntry {
                 s.main.post(() -> delivered(session, finalText, finalFailure, audio, elapsed, language, provider));
             });
         } catch (RejectedExecutionException error) {
-            dismiss();
+            // The recognizer was created before the worker accepted the task. If the service is
+            // shutting down, release that recognizer before handing control back to the window
+            // fallback; otherwise it can keep the microphone open after this path returns false.
+            cancel();
             return false;
         }
         return true;

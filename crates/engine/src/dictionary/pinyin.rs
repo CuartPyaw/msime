@@ -190,25 +190,7 @@ impl PinyinDatabase {
         if self.connection.is_none() || segmentations.is_empty() || limit == 0 {
             return Vec::new();
         }
-        let mut keys_by_table: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        let mut table_keys = Vec::with_capacity(segmentations.len());
-        for segments in segmentations {
-            if !has_only_complete_pinyin_segments(segments) {
-                continue;
-            }
-            let Some(table) = build_table_name(segments) else {
-                continue;
-            };
-            let key = join_segments(segments);
-            if key.is_empty() {
-                continue;
-            }
-            table_keys.push((table, key));
-        }
-        deduplicate_table_keys(&mut table_keys);
-        for (table, key) in table_keys {
-            keys_by_table.entry(table).or_default().push(key);
-        }
+        let keys_by_table = exact_segmentations_by_table(segmentations);
         let mut rows = Vec::with_capacity(segmentations.len().saturating_mul(limit));
         for (table, keys) in &keys_by_table {
             rows.extend(self.batch_rows(table, keys, limit));
@@ -691,6 +673,48 @@ fn deduplicate_table_keys(table_keys: &mut Vec<(String, String)>) {
     table_keys.truncate(write);
 }
 
+fn exact_segmentations_by_table(segmentations: &[Vec<String>]) -> BTreeMap<String, Vec<String>> {
+    let mut keys_by_table: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    if segmentations.len() <= SMALL_TABLE_KEY_BATCH {
+        for segments in segmentations {
+            if !has_only_complete_pinyin_segments(segments) {
+                continue;
+            }
+            let Some(table) = build_table_name(segments) else {
+                continue;
+            };
+            let key = join_segments(segments);
+            if key.is_empty() {
+                continue;
+            }
+            let keys = keys_by_table.entry(table).or_default();
+            if !keys.iter().any(|existing| existing == &key) {
+                keys.push(key);
+            }
+        }
+        return keys_by_table;
+    }
+    let mut table_keys = Vec::with_capacity(segmentations.len());
+    for segments in segmentations {
+        if !has_only_complete_pinyin_segments(segments) {
+            continue;
+        }
+        let Some(table) = build_table_name(segments) else {
+            continue;
+        };
+        let key = join_segments(segments);
+        if key.is_empty() {
+            continue;
+        }
+        table_keys.push((table, key));
+    }
+    deduplicate_table_keys(&mut table_keys);
+    for (table, key) in table_keys {
+        keys_by_table.entry(table).or_default().push(key);
+    }
+    keys_by_table
+}
+
 fn query_capacity(limit: usize) -> Option<usize> {
     (limit < i32::MAX as usize).then_some(limit)
 }
@@ -781,6 +805,16 @@ mod tests {
         let keys = vec!["ni'hao".to_owned()];
         assert!(contains_table_key(&keys, "ni'hao"));
         assert!(!contains_table_key(&keys, "ni'he"));
+    }
+
+    #[test]
+    fn small_exact_segmentation_batches_avoid_transition_vector_allocation() {
+        let segmentations = [strings(&["ni", "hao"]), strings(&["ni", "men"])];
+        let (keys, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            exact_segmentations_by_table(&segmentations)
+        });
+        assert_eq!(keys["tbl_2_n"], ["ni'hao", "ni'men"]);
+        assert!(allocations <= 7, "unexpected allocations: {allocations}");
     }
 
     #[test]

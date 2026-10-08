@@ -193,17 +193,17 @@ public final class Ui {
 
     /** Set a view's minimum height from a density-independent value. */
     public static void setMinimumHeightDp(View view, Context context, float heightDp) {
-        view.setMinimumHeight(dp(context, heightDp));
+        ViewPolicy.setMinimumHeight(view, dp(context, heightDp));
     }
 
     /** Set a text view's line-aware minimum height from a density-independent value. */
     public static void setTextMinHeightDp(TextView view, Context context, float heightDp) {
-        view.setMinHeight(dp(context, heightDp));
+        ViewPolicy.setTextMinHeight(view, dp(context, heightDp));
     }
 
     /** Set a text view's line-aware minimum width from a density-independent value. */
     public static void setTextMinWidthDp(TextView view, Context context, float widthDp) {
-        view.setMinWidth(dp(context, widthDp));
+        ViewPolicy.setTextMinWidth(view, dp(context, widthDp));
     }
 
     /** Apply the standard compact action-button insets to a view. */
@@ -364,16 +364,12 @@ public final class Ui {
 
     /** Create a vertical linear container for stacked host content. */
     public static LinearLayout column(Context context) {
-        LinearLayout view = new LinearLayout(context);
-        view.setOrientation(LinearLayout.VERTICAL);
-        return view;
+        return ViewPolicy.newColumn(context);
     }
 
     /** Create a horizontal linear container for inline host content. */
     public static LinearLayout row(Context context) {
-        LinearLayout view = new LinearLayout(context);
-        view.setOrientation(LinearLayout.HORIZONTAL);
-        return view;
+        return ViewPolicy.newRow(context);
     }
 
     /** Layout parameters for a weighted child that wraps its height. */
@@ -408,7 +404,7 @@ public final class Ui {
 
     /** Layout parameters for a square child when its size is already in pixels. */
     public static LinearLayout.LayoutParams squareParamsPx(int size) {
-        return new LinearLayout.LayoutParams(size, size);
+        return ViewPolicy.newSquareParamsPx(size);
     }
 
     /** Frame layout parameters for a square child with a size expressed in dp. */

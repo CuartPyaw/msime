@@ -13,6 +13,23 @@ use crate::types::{
 };
 use crate::user_dictionary::journal::is_user_inserted;
 
+/// 提交只会读取这些候选字段；纠错提示、权重和固定位置由显示层消费，不必随选择复制。
+fn clone_selected_candidate(item: &WordItem, copy_sentence_words: bool) -> WordItem {
+    WordItem {
+        pinyin: item.pinyin.clone(),
+        canonical_pinyin: item.canonical_pinyin.clone(),
+        word: item.word.clone(),
+        source: item.source,
+        scheme: item.scheme,
+        sentence_words: if copy_sentence_words && item.source.is_generated_or_fallback() {
+            item.sentence_words.clone()
+        } else {
+            Vec::new()
+        },
+        ..WordItem::default()
+    }
+}
+
 impl InputSession {
     pub(super) fn select_candidate(&mut self, index: usize) -> KeyResult {
         if let Some(result) = self.select_in_open_list(index) {
@@ -104,40 +121,61 @@ impl InputSession {
             }
             return KeyResult::committed(text);
         }
-        let selected = self.candidates().get(index).cloned();
-        // A Korean commit is the chosen Hanja or the Hangul itself, and nothing about it is learned: the rows are keyed by Dubeolsik letters, which every learning path below would read as pinyin. A Vietnamese commit is the displayed word, learned nowhere either.
-        // A Cantonese commit is learned nowhere either. A row that covers only the leading syllables commits at once and the letters after it keep composing (`holds_phrase_progress` is false), so there is no phrase being built to hold.
+        let committed = |text: Option<String>, diagnostic: Option<String>| KeyResult {
+            handled: true,
+            commit: text,
+            diagnostic,
+        };
+        if self.local_mode != LocalInputMode::None {
+            let text = self.candidates().get(index).map(|item| item.word.clone());
+            let diagnostic = self
+                .ranking_index(index)
+                .and_then(|learn_index| self.learn_candidate(learn_index));
+            self.chain.reset();
+            self.reset_composition();
+            return committed(text, diagnostic);
+        }
+        if self.stroke_rules_apply() {
+            let text = self.candidates().get(index).map_or_else(
+                || self.engine.request().raw_input.clone(),
+                |item| item.word.clone(),
+            );
+            self.reset_composition();
+            self.chain.reset();
+            return KeyResult::committed(text);
+        }
         if self.cantonese_rules_apply() {
-            let Some(selected) = selected else {
+            let Some(candidate) = self.candidates().get(index) else {
                 let text = self.preedit();
                 self.reset_composition();
                 self.chain.reset();
                 return KeyResult::committed(text);
             };
-            if self.engine.select_cantonese(&selected) {
+            let text = candidate.word.clone();
+            let end = candidate.pinyin.len();
+            if self.engine.select_cantonese_end(end) {
                 self.update_mixed_candidates();
             } else {
                 self.reset_composition();
             }
             self.chain.reset();
-            return KeyResult::committed(selected.word);
-        }
-        // 笔画的提交不学习：候选来自只读的 `msime-stroke.db`，键是笔画字母，任何学习路径都会把它当拼音写进用户词典。选中的字结束整个组合；没有候选时上屏键入的字母串，与 Enter 相同。
-        if self.stroke_rules_apply() {
-            let text =
-                selected.map_or_else(|| self.engine.request().raw_input.clone(), |item| item.word);
-            self.reset_composition();
-            self.chain.reset();
             return KeyResult::committed(text);
         }
-        // 藏文提交的是显示出来的藏文（不附加音节点），同样不学习。
         if self.korean_rules_apply() || self.vietnamese_rules_apply() || self.tibetan_rules_apply()
         {
-            let text = selected.map_or_else(|| self.preedit(), |item| item.word);
+            let text = self
+                .candidates()
+                .get(index)
+                .map_or_else(|| self.preedit(), |item| item.word.clone());
             self.reset_composition();
             self.chain.reset();
             return KeyResult::committed(text);
         }
+        let copy_sentence_words = self.personal_context_applies();
+        let selected = self
+            .candidates()
+            .get(index)
+            .map(|item| clone_selected_candidate(item, copy_sentence_words));
         let text = match &selected {
             Some(item) => Some(item.word.clone()),
             // The bare prefix letter of a temporary mode is a marker, not text.
@@ -150,12 +188,6 @@ impl InputSession {
             }
             None => Some(self.preedit()),
         };
-        let committed = |diagnostic: Option<String>| KeyResult {
-            handled: true,
-            commit: text.clone(),
-            diagnostic,
-        };
-
         let mut diagnostic = self
             .ranking_index(index)
             .and_then(|learn_index| self.learn_candidate(learn_index));
@@ -164,7 +196,7 @@ impl InputSession {
             self.record_context_into(&mut diagnostic, None, false, false);
             self.chain.last_pick = None;
             self.reset_composition();
-            return committed(diagnostic);
+            return committed(text, diagnostic);
         };
         let has_dictionary_reading = selected.source.is_dictionary();
         // Whole sentences from the lattice carry a canonical reading and join the phrase being composed like dictionary rows do.
@@ -180,7 +212,7 @@ impl InputSession {
             self.record_context_into(&mut diagnostic, Some(&selected), false, false);
             self.chain.last_pick = None;
             self.reset_composition();
-            return committed(diagnostic);
+            return committed(text, diagnostic);
         }
 
         // A user row of three or more characters answering the whole composition is almost always a sentence stored by sentence learning; counting it as one word would teach the model a sentence as a word. User rows come back as Database like shipped ones, so the journal's insert record tells them apart; checked last because it reads a file.
@@ -198,7 +230,7 @@ impl InputSession {
                 let mut segments = split_segments(&selected.canonical_pinyin);
                 normalize_umlaut_aliases(&mut segments);
                 is_user_inserted(
-                    &self.journal_path(),
+                    self.journal_path(),
                     PersonalDictionaryKind::Pinyin,
                     &join_segments(&segments),
                     &selected.word,
@@ -250,7 +282,7 @@ impl InputSession {
         if transition.continues_composition {
             self.phrase_progress = progress;
             self.discard_abandoned_phrase_progress();
-            return committed(diagnostic);
+            return committed(text, diagnostic);
         }
         if !self.phrase_progress.word.is_empty()
             && progress.can_store
@@ -262,7 +294,7 @@ impl InputSession {
             diagnostic = Some(diagnostics::PHRASE_NOT_PERSISTED.to_owned());
         }
         self.reset_composition();
-        committed(diagnostic)
+        committed(text, diagnostic)
     }
 
     /// Chain bookkeeping for a nine-key commit: the grid bypasses this session, so the word after it must not read the word before it as its context. The committed text is not needed, since it only fed the dropped learning-undo ledger.

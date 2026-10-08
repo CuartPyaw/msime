@@ -11,7 +11,6 @@ import app.msime.android.ViewPolicy;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.chip.Chip;
 import com.google.android.material.chip.ChipGroup;
-import java.util.Locale;
 import java.util.function.Consumer;
 
 /**
@@ -135,9 +134,7 @@ public final class CommunitySkinSheet {
             String meta = CommunityAdapter.subtitle(item);
             details = meta.isEmpty() ? "匿名作者" : meta;
         }
-        String rating = item.ratingCount() <= 0 ? "暂无评分"
-            : String.format(Locale.ROOT, "★ %.1f · %d 人", item.ratingAverage(),
-                item.ratingCount());
+        String rating = CommunityAdapter.rating(item);
         int capacity = (category == null ? 0 : category.length() + 3)
             + details.length() + rating.length() + 3;
         StringBuilder value = new StringBuilder(capacity);

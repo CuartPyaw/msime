@@ -1,7 +1,6 @@
 package app.msime.android;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -421,6 +420,6 @@ public final class TypingStatisticsSummary {
             String key = keys.next();
             result.put(key, count(object.opt(key)));
         }
-        return Collections.unmodifiableMap(result);
+        return MapPolicy.copyOrEmpty(result);
     }
 }

@@ -100,7 +100,7 @@ final class ImeToolbar {
             s.imeKeyFeedback.playFeedback(s.preedit);
             s.movePreeditCaret(s.preedit.getOffsetForPosition(preeditTouchX, preeditTouchY));
         });
-        s.preedit.setClickable(false);
+        ViewPolicy.setClickable(s.preedit, false);
         LinearLayout preeditFrame = KeyboardGeometry.row(s);
         ViewPolicy.setStartCenteredVertically(preeditFrame);
         preeditFrame.addView(s.preedit, new LinearLayout.LayoutParams(

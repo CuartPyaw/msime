@@ -215,6 +215,38 @@ public final class SyncApiSmoke {
         Files.deleteIfExists(destination);
         Files.deleteIfExists(outside);
         Files.deleteIfExists(root);
+
+        Path hardlinkRoot = Files.createTempDirectory("msime-sync-api-hardlink-");
+        Path hardlinkDestination = hardlinkRoot.resolve("snapshot.ndjson");
+        Path hardlinkOutside = hardlinkRoot.resolve("outside.ndjson");
+        Path hardlinkPartial = hardlinkRoot.resolve("snapshot.ndjson.partial");
+        Files.writeString(hardlinkOutside, "sentinel");
+        Files.createLink(hardlinkPartial, hardlinkOutside);
+        try {
+            download.downloadSnapshot(hardlinkDestination);
+        } catch (Exception expected) { }
+        check("sentinel".equals(Files.readString(hardlinkOutside)),
+            "snapshot download must not follow a partial-file hard link");
+        Files.deleteIfExists(hardlinkDestination);
+        Files.deleteIfExists(hardlinkPartial);
+        Files.deleteIfExists(hardlinkOutside);
+        Files.deleteIfExists(hardlinkRoot);
+
+        Path uploadRoot = Files.createTempDirectory("msime-sync-upload-");
+        try {
+            Path source = uploadRoot.resolve("source.ndjson");
+            Files.writeString(source, "synthetic\n");
+            Path linked = uploadRoot.resolve("upload.ndjson");
+            Files.createLink(linked, source);
+            check(!SyncApi.uploadable(linked), "hard-linked upload is refused");
+        } finally {
+            try (java.util.stream.Stream<Path> paths = Files.walk(uploadRoot)) {
+                paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); }
+                    catch (Exception error) { throw new IllegalStateException(error); }
+                });
+            }
+        }
         System.out.println("Android sync API passed");
     }
 

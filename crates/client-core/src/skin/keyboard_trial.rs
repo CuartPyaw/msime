@@ -9,8 +9,6 @@ use crate::preferences::{
 use crate::skin::theme::GlobalTheme;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
-#[cfg(not(unix))]
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
@@ -19,6 +17,8 @@ use uuid::Uuid;
 
 const MAXIMUM_RECORD_BYTES: u64 = 2_000_000;
 const MAXIMUM_NAME_GRAPHEMES: usize = 32;
+const RECORD_FILE: &str = "KeyboardSkinTrial.json";
+const LOCK_FILE: &str = "KeyboardSkinTrial.lock";
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct KeyboardSkinTrial {
@@ -57,6 +57,11 @@ pub struct KeyboardSkinTrialStore {
     preferences: Arc<PreferencesStore>,
 }
 
+struct TrialLock {
+    directory: file_lock::PrivateDirectory,
+    _lock: File,
+}
+
 impl KeyboardSkinTrialStore {
     pub fn new(directory: impl AsRef<Path>, preferences: Arc<PreferencesStore>) -> Self {
         Self {
@@ -70,8 +75,8 @@ impl KeyboardSkinTrialStore {
         name: &str,
         design: TouchKeyboardSkinDesign,
     ) -> Result<(KeyboardSkinTrial, PreferencesSnapshot), KeyboardSkinTrialError> {
-        let _lock = self.lock()?;
-        self.restore_locked()?;
+        let lock = self.lock()?;
+        self.restore_locked(&lock)?;
         let name = normalized_name(name)?;
         if !design.validate() {
             return Err(KeyboardSkinTrialError::Invalid);
@@ -87,7 +92,7 @@ impl KeyboardSkinTrialStore {
             previous_design: snapshot.preferences.custom_theme.keyboard.clone(),
             design: design.clone(),
         };
-        self.write_record(&record)?;
+        self.write_record(&lock, &record)?;
         let mut preferences = snapshot.preferences;
         // Applying a keyboard design from another theme keeps that theme under the candidate window: it becomes the custom theme's base and any package left in the custom theme is dropped. While `custom` is already selected only the keyboard changes.
         if preferences.global_theme != GlobalTheme::Custom {
@@ -99,7 +104,7 @@ impl KeyboardSkinTrialStore {
         let applied = match self.preferences.save(snapshot.revision, preferences) {
             Ok(applied) => applied,
             Err(error) => {
-                let _ = self.remove_record();
+                let _ = self.remove_record(&lock);
                 return Err(error.into());
             }
         };
@@ -117,41 +122,45 @@ impl KeyboardSkinTrialStore {
         id: Uuid,
         keep: bool,
     ) -> Result<PreferencesSnapshot, KeyboardSkinTrialError> {
-        let _lock = self.lock()?;
-        let Some(record) = self.pending()? else {
+        let lock = self.lock()?;
+        let Some(record) = self.pending(&lock)? else {
             return Ok(self.preferences.load()?);
         };
         if record.id != id {
             return Ok(self.preferences.load()?);
         }
         if keep {
-            self.remove_record()?;
+            self.remove_record(&lock)?;
             return Ok(self.preferences.load()?);
         }
-        self.restore_record(record)
+        self.restore_record(&lock, record)
     }
 
     pub fn restore_pending(&self) -> Result<PreferencesSnapshot, KeyboardSkinTrialError> {
-        let _lock = self.lock()?;
-        self.restore_locked()
+        let lock = self.lock()?;
+        self.restore_locked(&lock)
     }
 
-    fn restore_locked(&self) -> Result<PreferencesSnapshot, KeyboardSkinTrialError> {
-        match self.pending()? {
-            Some(record) => self.restore_record(record),
+    fn restore_locked(
+        &self,
+        lock: &TrialLock,
+    ) -> Result<PreferencesSnapshot, KeyboardSkinTrialError> {
+        match self.pending(lock)? {
+            Some(record) => self.restore_record(lock, record),
             None => Ok(self.preferences.load()?),
         }
     }
 
     fn restore_record(
         &self,
+        lock: &TrialLock,
         record: TrialRecord,
     ) -> Result<PreferencesSnapshot, KeyboardSkinTrialError> {
         let snapshot = self.preferences.load()?;
         if snapshot.preferences.global_theme != GlobalTheme::Custom
             || snapshot.preferences.custom_theme.keyboard.as_ref() != Some(&record.design)
         {
-            self.remove_record()?;
+            self.remove_record(lock)?;
             return Ok(snapshot);
         }
         let mut preferences = snapshot.preferences;
@@ -162,25 +171,29 @@ impl KeyboardSkinTrialStore {
         preferences.global_theme = record.previous_theme;
         preferences.custom_theme.keyboard = record.previous_design;
         let restored = self.preferences.save(snapshot.revision, preferences)?;
-        self.remove_record()?;
+        self.remove_record(lock)?;
         Ok(restored)
     }
 
-    fn lock(&self) -> Result<File, KeyboardSkinTrialError> {
+    fn lock(&self) -> Result<TrialLock, KeyboardSkinTrialError> {
         if !crate::storage::create_directory_and_check(&self.directory)? {
             return Err(KeyboardSkinTrialError::Invalid);
         }
-        let lock = file_lock::open_lock_file(self.directory.join("KeyboardSkinTrial.lock"))?;
+        let directory = file_lock::open_private_directory(&self.directory)?;
+        let lock =
+            file_lock::open_private_lock_file_at(&directory, std::ffi::OsStr::new(LOCK_FILE))?;
         file_lock::exclusive(&lock)?;
-        Ok(lock)
+        Ok(TrialLock {
+            directory,
+            _lock: lock,
+        })
     }
 
-    fn path(&self) -> PathBuf {
-        self.directory.join("KeyboardSkinTrial.json")
-    }
-
-    fn pending(&self) -> Result<Option<TrialRecord>, KeyboardSkinTrialError> {
-        let file = match crate::storage::open_private_file_in(&self.path()) {
+    fn pending(&self, lock: &TrialLock) -> Result<Option<TrialRecord>, KeyboardSkinTrialError> {
+        let file = match file_lock::open_private_file_at(
+            &lock.directory,
+            std::ffi::OsStr::new(RECORD_FILE),
+        ) {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(_) => return Err(KeyboardSkinTrialError::Invalid),
@@ -206,35 +219,26 @@ impl KeyboardSkinTrialStore {
         Ok(Some(record))
     }
 
-    fn write_record(&self, record: &TrialRecord) -> Result<(), KeyboardSkinTrialError> {
+    fn write_record(
+        &self,
+        lock: &TrialLock,
+        record: &TrialRecord,
+    ) -> Result<(), KeyboardSkinTrialError> {
         let bytes = serde_json::to_vec(record)?;
         if bytes.len() as u64 > MAXIMUM_RECORD_BYTES {
             return Err(KeyboardSkinTrialError::Invalid);
         }
-        #[cfg(unix)]
-        {
-            let directory = crate::storage::open_private_directory(&self.directory)?;
-            crate::storage::write_private_file_at(
-                &directory,
-                std::ffi::OsStr::new("KeyboardSkinTrial.json"),
-                &bytes,
-            )?;
-            Ok(())
-        }
-        #[cfg(not(unix))]
-        {
-            let mut temporary = tempfile::NamedTempFile::new_in(&self.directory)?;
-            temporary.write_all(&bytes)?;
-            temporary.as_file().sync_all()?;
-            temporary
-                .persist(self.path())
-                .map_err(|error| error.error)?;
-            Ok(())
-        }
+        file_lock::write_private_file_at(
+            &lock.directory,
+            std::ffi::OsStr::new(RECORD_FILE),
+            &bytes,
+        )?;
+        Ok(())
     }
 
-    fn remove_record(&self) -> Result<(), KeyboardSkinTrialError> {
-        match crate::storage::remove_private_file(&self.path()) {
+    fn remove_record(&self, lock: &TrialLock) -> Result<(), KeyboardSkinTrialError> {
+        match file_lock::remove_private_file_at(&lock.directory, std::ffi::OsStr::new(RECORD_FILE))
+        {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(error.into()),
@@ -405,5 +409,35 @@ mod tests {
             trials.restore_pending(),
             Err(KeyboardSkinTrialError::Invalid)
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn trial_record_stays_bound_to_the_locked_directory_after_replacement() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("trial");
+        fs::create_dir(&directory).unwrap();
+        let preferences = Arc::new(PreferencesStore::new(root.path().join("preferences")));
+        let trials = KeyboardSkinTrialStore::new(&directory, preferences);
+        let lock = trials.lock().unwrap();
+        let record = TrialRecord {
+            id: Uuid::parse_str("10000000-0000-4000-8000-000000000001").unwrap(),
+            name: "合成试用".into(),
+            previous_theme: GlobalTheme::System,
+            previous_base: GlobalTheme::System,
+            previous_candidate_skin: None,
+            previous_design: None,
+            design: TouchKeyboardSkinDesign::default(),
+        };
+
+        let moved = root.path().join("trial-moved");
+        fs::rename(&directory, &moved).unwrap();
+        fs::create_dir(&directory).unwrap();
+
+        trials.write_record(&lock, &record).unwrap();
+
+        assert!(moved.join("KeyboardSkinTrial.json").exists());
+        assert!(!directory.join("KeyboardSkinTrial.json").exists());
+        fs::remove_dir_all(moved).unwrap();
     }
 }
