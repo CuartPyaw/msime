@@ -76,6 +76,13 @@ public final class VoiceListeningView extends TextView {
         invalidate();
     }
 
+    /** 识别器不再报音量（说完了、出结果了）时立即收回光圈；{@link #setLevel} 的平滑只会让它停在上一帧的四分之三。 */
+    public void resetLevel() {
+        if (level == 0f) return;
+        level = 0f;
+        invalidate();
+    }
+
     /** 音量光圈超出圆盘的半径（像素）：音量 0 时贴着圆盘不显示，满音量时扩到 {@code maxSpread}。 */
     public static float levelSpread(float value, float maxSpread) {
         return maxSpread * clampProgress(value);

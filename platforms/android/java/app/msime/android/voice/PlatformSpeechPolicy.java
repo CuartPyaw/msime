@@ -14,13 +14,16 @@ public final class PlatformSpeechPolicy {
     /** 音量回落时每次保留上一帧的比例：声音一大立刻跟上，变小时缓缓落下，光圈不会一闪一闪。 */
     static final float LEVEL_RELEASE = 0.75f;
 
+    /** 设备自带的识别服务自己出了问题时给的出路：换一个不依赖它的识别方式。设置页里服务商下拉框的选项就是「本地模型（离线）」和豆包。 */
+    static final String ALTERNATIVES = "也可在设置的「语音输入」页改用本地模型或填写豆包密钥";
+
     private PlatformSpeechPolicy() {}
 
-    /** 一个错误码对应的提示，结尾带「（错误码 N）」。 */
+    /** 一个错误码对应的提示，原因后紧跟「（错误码 N）」（Toast 放不下时截掉的是结尾，错误码要留在前面）；识别服务自身的故障再接上 {@link #ALTERNATIVES}。 */
     public static String message(int error) {
         String reason = switch (error) {
             case SpeechRecognizer.ERROR_NETWORK_TIMEOUT, SpeechRecognizer.ERROR_NETWORK ->
-                "系统语音识别服务连不上网络，请检查网络；部分设备自带的识别服务在当前网络下无法使用";
+                "系统语音识别服务连不上网络，请检查网络";
             case SpeechRecognizer.ERROR_SERVER, SpeechRecognizer.ERROR_SERVER_DISCONNECTED ->
                 "系统语音识别服务出错，请稍后重试";
             case SpeechRecognizer.ERROR_AUDIO -> "系统语音识别服务无法录音，麦克风可能被其他应用占用";
@@ -35,7 +38,27 @@ public final class PlatformSpeechPolicy {
             case SpeechRecognizer.ERROR_CLIENT -> "系统语音识别服务无法启动";
             default -> "系统语音识别失败";
         };
-        return reason + "（错误码 " + error + "）";
+        String coded = reason + "（错误码 " + error + "）";
+        return serviceFault(error) ? coded + "；" + ALTERNATIVES : coded;
+    }
+
+    /**
+     * 识别服务报了成功（onResults）却没有给出任何文字。它没有走 onError，没有错误码可报，这里也不借用 ERROR_NO_MATCH 的码：反馈回来的「错误码 7」应当只表示服务自己报的没听懂，不然分不清是哪一种失败（#5553）。
+     */
+    public static String emptyResult() {
+        return "系统语音识别服务没有返回文字；" + ALTERNATIVES;
+    }
+
+    /**
+     * 这个错误码是不是设备识别服务自身的故障（网络、服务端、服务起不来、不支持所选语言、限流或未知错误），换成本地模型或豆包就能绕开。没听到声音、没听懂、麦克风被占用、识别服务缺权限、服务正忙是用户这边重试或调整就能解决的，不给这个出路。
+     */
+    static boolean serviceFault(int error) {
+        return switch (error) {
+            case SpeechRecognizer.ERROR_SPEECH_TIMEOUT, SpeechRecognizer.ERROR_NO_MATCH,
+                 SpeechRecognizer.ERROR_AUDIO, SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS,
+                 SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> false;
+            default -> true;
+        };
     }
 
     /**

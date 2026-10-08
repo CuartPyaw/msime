@@ -16,8 +16,10 @@ Status: implemented
 
 - `ImeVoiceEntry.choose` 多一种 `Engine.PLATFORM`：没有本机模型和豆包、离线回退也不成立、没有配置上传式服务商、`SpeechRecognizer.isRecognitionAvailable` 为真时，系统识别服务在键区里聆听，和本机模型、豆包共用 `VoiceListeningView`。识别结果直接经 `commitText(…, TypingSource.VOICE)` 上屏；聆听期间输入位置变了才存进语音结果，与另外两种引擎相同。配置了润色时在工作线程上润色再上屏。
 - 键区里的系统识别带 `EXTRA_PARTIAL_RESULTS`，边听边把识别出的文字显示在提示行，但不像本机模型和豆包那样按 1.5 秒停顿自动结束：系统识别服务自己判断说完了没有。再按一次语音键是 `stopListening`，点面板是取消。
-- `onRmsChanged` 经 `PlatformSpeechPolicy.level` 换成 0–1 的音量，`VoiceListeningView.setLevel` 在麦克风圆盘外画一圈随音量涨落的光圈（最多 12 dp，变大立即跟上、变小按 0.75 回落），原来的 1.2 秒脉冲环保留。
-- 错误提示统一由 `PlatformSpeechPolicy.message` 给出，每个错误码一句具体原因，结尾带「（错误码 N）」；键盘和识别窗口都用它。
+- `onRmsChanged` 经 `PlatformSpeechPolicy.level` 换成 0–1 的音量，`VoiceListeningView.setLevel` 在麦克风圆盘外画一圈随音量涨落的光圈（最多 12 dp，变大立即跟上、变小按 0.75 回落），原来的 1.2 秒脉冲环保留。`onEndOfSpeech` 和「识别完成」时用 `resetLevel` 直接收回光圈：多数识别服务说完后不再报音量，只靠平滑回落的话光圈会停在上一帧的四分之三。
+- 错误提示统一由 `PlatformSpeechPolicy.message` 给出，每个错误码一句具体原因，紧跟「（错误码 N）」；键盘和识别窗口都用它。网络、服务端、服务起不来、语言不支持、限流和未知错误这类设备识别服务自身的故障，在错误码后面再接一句「也可在设置的「语音输入」页改用本地模型或填写豆包密钥」：#5553 这台设备上系统识别一直失败，只给错误码等于没给出路。没听到声音、没听懂、麦克风被占用、识别服务缺权限、服务正忙是用户这边能解决的，不接这句。错误码排在出路前面，Toast 放不下截掉的是结尾。
+- 识别服务走 `onResults` 却没有任何文字时提示「系统语音识别服务没有返回文字」并给同样的出路，不带错误码，也不冒用 `ERROR_NO_MATCH` 的 7：反馈回来的错误码必须只表示服务自己在 `onError` 里报的那个。识别窗口那条路以前遇到空结果直接关窗，现在给同一句提示。
+- 不在提示里说「你选的豆包缺密钥」：`voice_input.asr_provider` 的默认值就是 `doubao`，诊断包里的 `doubao` 不能说明用户主动选过它，每次都这么提示会打扰所有没配置服务商、系统识别好好的用户。
 - 键区里还没报 `onReadyForSpeech` 就失败、并且是 `ERROR_CLIENT`、`ERROR_INSUFFICIENT_PERMISSIONS`、`ERROR_SERVER_DISCONNECTED` 这类调用方一侧被拒时，`MSIMEInputService.launchVoiceActivity` 用原来的识别窗口再试一次；已经开始聆听之后的失败直接提示，不重试。没有麦克风权限时仍交给识别窗口申请。
 - 识别窗口里的系统识别器也显示「正在录音」和「完成」「取消」，不再是只有灰色蒙层的空白对话框。设置应用的语音面板（`VoicePlugin`）也走这个窗口。
 - 识别请求带 `EXTRA_CALLING_PACKAGE`；两份清单（原生宿主和 Tauri 壳）在 `RECOGNIZE_SPEECH` 之外声明对 `android.speech.RecognitionService` 的包可见性，`check-host.sh` 守着这一条。
@@ -35,4 +37,4 @@ Status: implemented
 
 ## Verification
 
-`bash platforms/android/check-host.sh`：`tests/voice/PlatformSpeechPolicySmoke.java`（错误提示、转交条件、音量换算）、`tests/keyboard/ms_w4_kpb_KeyboardExtrasSmoke.java`（`choose` 选出 `PLATFORM`、上传式服务商和没有识别服务时仍交给识别窗口、离线回退优先）、`tests/keyboard/ms_w2_kb_ViewLogicSmoke.java`（音量光圈有界），以及清单的 `RecognitionService` 守卫。共享设置文案的改动由 `apps/desktop/tests/settings/voice-settings-copy.test.tsx` 覆盖。
+`bash platforms/android/check-host.sh`：`tests/voice/PlatformSpeechPolicySmoke.java`（错误提示、转交条件、音量换算）、`tests/keyboard/ms_w4_kpb_KeyboardExtrasSmoke.java`（`choose` 选出 `PLATFORM`、上传式服务商和没有识别服务时仍交给识别窗口、离线回退优先）、`tests/keyboard/ms_w2_kb_ViewLogicSmoke.java`（音量光圈有界），以及清单的 `RecognitionService` 守卫。SpeechRecognizer 回调接线本身跑不进 JVM 冒烟，`check-host.sh` 另有一道源码守卫：两条入口都用 `PlatformSpeechPolicy.message(error)` 和 `emptyResult()`，键区里保留 `s.launchVoiceActivity()` 转交、系统识别服务跳过 1.5 秒停顿截断、`resetLevel` 收回光圈。共享设置文案的改动由 `apps/desktop/tests/settings/voice-settings-copy.test.tsx` 覆盖。

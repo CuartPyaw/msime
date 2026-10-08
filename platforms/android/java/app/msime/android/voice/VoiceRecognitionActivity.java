@@ -310,6 +310,8 @@ public final class VoiceRecognitionActivity extends Activity {
                     deliver(values.get(0));
                     return;
                 }
+                // 服务报了成功却没有文字：和键盘里一样说清楚，不再悄无声息地关掉窗口（#5553）。
+                if (!stopping) fail(PlatformSpeechPolicy.emptyResult());
                 finishRequest();
             }
             @Override public void onPartialResults(Bundle partialResults) { }
@@ -369,7 +371,7 @@ public final class VoiceRecognitionActivity extends Activity {
     /**
      * A window that says it is recording, and a way to end the recording and keep the result.
      *
-     * <p>This activity is a dialog theme that never sets a content view of its own, so without this every path put a blank box on screen. A provider or the streaming socket records until a sixty-second cap, and without these buttons the only way out was Back, which cancels and throws the transcript away — there was no way to say "I am done, transcribe it". The platform recogniser stops itself when the speaker pauses, but with nothing drawn the screen showed only the dialog's grey dim while the microphone was open, with no sign that anything was listening (#5553), so it gets the same window.
+     * <p>这个 Activity 是对话框主题，自己从不设置内容视图，没有这里的话每条路径都只在屏幕上放一个空白框。服务商上传和豆包流式会一直录到六十秒上限，没有这两个按钮时唯一的出路是返回键，而返回会取消并丢掉转写结果，没法表达「我说完了，开始转写」。系统识别服务在说话人停顿时会自己结束，但什么都不画的话，麦克风开着时屏幕上只有对话框的灰色蒙层，看不出有任何东西在听（#5553），所以它也用同一个窗口。
      *
      * <p>Built in code rather than as a layout, which is how this host builds its keyboard: the
      * two buttons are the whole surface, and a resource file for them would be one more place for

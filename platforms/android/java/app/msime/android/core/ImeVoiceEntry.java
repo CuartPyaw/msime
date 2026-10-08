@@ -279,7 +279,8 @@ final class ImeVoiceEntry {
             @Override public void onBufferReceived(byte[] buffer) { }
             @Override public void onEndOfSpeech() {
                 if (session == generation && listening != null) {
-                    listening.setLevel(0f);
+                    // 说完后多数识别服务不再报音量，光圈直接收回，不能停在半截。
+                    listening.resetLevel();
                     listening.setHint("正在识别…");
                 }
             }
@@ -317,8 +318,7 @@ final class ImeVoiceEntry {
         releasePlatform();
         String result = text == null ? null : TextPolicy.trimmed(text);
         if (result == null || result.isEmpty()) {
-            delivered(session, null, PlatformSpeechPolicy.message(SpeechRecognizer.ERROR_NO_MATCH),
-                null, 0, language, PLATFORM_PROVIDER);
+            delivered(session, null, PlatformSpeechPolicy.emptyResult(), null, 0, language, PLATFORM_PROVIDER);
             return;
         }
         long elapsed = SystemClock.uptimeMillis() - startedAt;
@@ -394,6 +394,7 @@ final class ImeVoiceEntry {
             contribute(pcm, text, language, provider);
         }
         if (listening != null) {
+            listening.resetLevel();
             listening.setText("识别完成");
             listening.setHint("已识别：" + text);
             listening.setContentDescription("已识别：" + text);
