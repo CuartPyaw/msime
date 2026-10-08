@@ -131,8 +131,10 @@ public class DeviceSmoke extends Instrumentation {
     protected Predicate<AccessibilityNodeInfo> key(String text) {
         boolean letter = text.length() == 1 && Character.isLetter(text.charAt(0))
             && text.charAt(0) < 128;
+        // 组字时读音行可以点（点中的字母前放组字光标，#5613），它的文字可能就是一个字母（打了 n，读音行是 n）；只认按钮，不然会点到读音行上去。
         return node -> equalsText("app.msime.android", node.getPackageName())
             && (letter ? node.getText() != null && text.equalsIgnoreCase(node.getText().toString())
+                    && equalsText("android.widget.Button", node.getClassName())
                 : equalsText(text, node.getText()));
     }
     /**
