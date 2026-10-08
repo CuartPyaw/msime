@@ -404,6 +404,11 @@ public final class ViewPolicy {
         view.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
     }
 
+    /** Set the platform accessibility importance policy for a view. */
+    public static void setImportantForAccessibility(View view, int mode) {
+        view.setImportantForAccessibility(mode);
+    }
+
     /** Remove the platform state-list animator from a view. */
     public static void clearStateListAnimator(View view) {
         view.setStateListAnimator(null);

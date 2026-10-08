@@ -137,6 +137,7 @@ public abstract class DetailPage extends HomeTabFragment {
         barFade.addUpdateListener(animation -> fill.setAlpha((int) animation.getAnimatedValue()));
         barFade.start();
         // 收起后读屏要能从顶栏读到标题，展开时标题在大标题那里。
-        barTitle.setImportantForAccessibility(value ? View.IMPORTANT_FOR_ACCESSIBILITY_YES : View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        ViewPolicy.setImportantForAccessibility(barTitle,
+            value ? View.IMPORTANT_FOR_ACCESSIBILITY_YES : View.IMPORTANT_FOR_ACCESSIBILITY_NO);
     }
 }
