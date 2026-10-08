@@ -4269,6 +4269,35 @@ fn zhuyin_candidate_refresh_reuses_row_storage() {
 }
 
 #[test]
+fn zhuyin_refresh_reuses_request_strings() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = zhuyin_session(&fixture);
+    type_text(&mut session, "su3cl3");
+    let request = session.input.engine.request();
+    let pointers = [
+        request.raw_input.as_ptr(),
+        request.raw_input_with_cases.as_ptr(),
+        request.normalized_input.as_ptr(),
+        request.raw_segmentation.as_ptr(),
+        request.normalized_segmentation.as_ptr(),
+        request.segmentation.as_ptr(),
+    ];
+    session.input.engine.handle_key(SchemeKey::Requery);
+    let request = session.input.engine.request();
+    assert_eq!(
+        [
+            request.raw_input.as_ptr(),
+            request.raw_input_with_cases.as_ptr(),
+            request.normalized_input.as_ptr(),
+            request.raw_segmentation.as_ptr(),
+            request.normalized_segmentation.as_ptr(),
+            request.segmentation.as_ptr(),
+        ],
+        pointers
+    );
+}
+
+#[test]
 fn zhuyin_list_selection_pins_without_committing_or_learning() {
     let fixture = Fixture::new(QUANPIN_FIXTURE);
     let mut session = fixture.session_with(|options| {
