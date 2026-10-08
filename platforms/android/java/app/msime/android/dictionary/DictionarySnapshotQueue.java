@@ -168,6 +168,7 @@ public final class DictionarySnapshotQueue {
             String expectedLocalVersion, String fileSha256) throws Failure {
         if (source == null || !source.isAbsolute()
                 || !Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)
+                || !SafePaths.isSingleLink(source)
                 || accountId == null || accountId.isEmpty() || accountId.length() > 128
                 || cloudRevision < 0 || !validVersion(expectedLocalVersion)
                 || !validDigest(fileSha256)) throw new Failure(Reason.INVALID);
@@ -344,6 +345,7 @@ public final class DictionarySnapshotQueue {
     }
 
     private void copyAndHash(Path source, Path destination, String expected) throws IOException, Failure {
+        if (!SafePaths.isSingleLink(source)) throw new Failure(Reason.INVALID);
         MessageDigest digest;
         try { digest = MessageDigest.getInstance("SHA-256"); }
         catch (NoSuchAlgorithmException error) { throw new Failure(Reason.UNAVAILABLE, error); }
@@ -419,6 +421,7 @@ public final class DictionarySnapshotQueue {
             if (!Files.exists(stateFile, LinkOption.NOFOLLOW_LINKS)) return new State(null, null);
             if (!Files.isRegularFile(stateFile, LinkOption.NOFOLLOW_LINKS))
                 throw new Failure(Reason.INVALID);
+            if (!SafePaths.isSingleLink(stateFile)) throw new Failure(Reason.INVALID);
             byte[] bytes;
             try (InputStream input = Files.newInputStream(stateFile, LinkOption.NOFOLLOW_LINKS)) {
                 bytes = HttpBodyPolicy.readRequired(input, MAXIMUM_STATE_BYTES);
