@@ -26,6 +26,51 @@ pub fn open_private_directory(path: impl AsRef<Path>) -> io::Result<PrivateDirec
     })
 }
 
+impl PrivateDirectory {
+    pub fn try_clone(&self) -> io::Result<Self> {
+        Ok(Self {
+            directory: crate::storage::clone_private_directory(&self.directory)?,
+        })
+    }
+}
+
+pub fn open_private_directory_at(
+    directory: &PrivateDirectory,
+    name: &OsStr,
+) -> io::Result<PrivateDirectory> {
+    Ok(PrivateDirectory {
+        directory: crate::storage::open_private_directory_at(&directory.directory, name)?,
+    })
+}
+
+pub fn open_private_lock_file_at(directory: &PrivateDirectory, name: &OsStr) -> io::Result<File> {
+    ensure_regular(crate::storage::open_private_lock_file_at(
+        &directory.directory,
+        name,
+    )?)
+}
+
+pub fn read_private_directory(directory: &PrivateDirectory) -> io::Result<Vec<std::ffi::OsString>> {
+    crate::storage::read_private_directory(&directory.directory)
+}
+
+pub fn create_private_directory_at(parent: &PrivateDirectory, name: &OsStr) -> io::Result<()> {
+    crate::storage::create_private_directory_at(&parent.directory, name)
+}
+
+pub fn remove_private_directory_at(parent: &PrivateDirectory, name: &OsStr) -> io::Result<()> {
+    crate::storage::remove_private_directory_at(&parent.directory, name)
+}
+
+pub fn rename_private_entry(
+    from: &PrivateDirectory,
+    from_name: &OsStr,
+    to: &PrivateDirectory,
+    to_name: &OsStr,
+) -> io::Result<()> {
+    crate::storage::rename_private_entry(&from.directory, from_name, &to.directory, to_name)
+}
+
 pub fn open_private_file_at(directory: &PrivateDirectory, name: &OsStr) -> io::Result<File> {
     crate::storage::open_private_file_at(&directory.directory, name)
 }
@@ -266,6 +311,37 @@ pub(crate) fn unlock(file: &File) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn directory_bound_rename_stays_on_original_inode_after_path_replacement() {
+        use std::fs;
+
+        let root = tempfile::tempdir().unwrap();
+        let live = root.path().join("live");
+        let moved = root.path().join("moved");
+        let backup = root.path().join("backup");
+        fs::create_dir(&live).unwrap();
+        fs::create_dir(&backup).unwrap();
+        fs::write(live.join("marker"), b"old").unwrap();
+        let live_handle = open_private_directory(&live).unwrap();
+        let backup_handle = open_private_directory(&backup).unwrap();
+
+        fs::rename(&live, &moved).unwrap();
+        fs::create_dir(&live).unwrap();
+
+        rename_private_entry(
+            &live_handle,
+            OsStr::new("marker"),
+            &backup_handle,
+            OsStr::new("marker"),
+        )
+        .unwrap();
+
+        assert!(!moved.join("marker").exists());
+        assert!(!live.join("marker").exists());
+        assert_eq!(fs::read(backup.join("marker")).unwrap(), b"old");
+    }
     use std::time::{Duration, Instant};
 
     // 宽限期内释放的锁应当被拿到，长期被持有的锁仍要如实报告占用——后者是产品语义，
