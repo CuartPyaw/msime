@@ -44,6 +44,7 @@ import android.widget.PopupMenu;
 import android.widget.PopupWindow;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -114,6 +115,7 @@ public final class MSIMEInputService extends InputMethodService {
     ImeVoiceEntry imeVoiceEntry;
     ImeKeyFeedback imeKeyFeedback;
     ImeDebugOverlay imeDebugOverlay;
+    ImeTextEditPanel imeTextEditPanel;
     ImeCalculator imeCalculator;
     long session;
     InputConnection connection;
@@ -343,6 +345,10 @@ public final class MSIMEInputService extends InputMethodService {
     String actionRowSignature = "";
     boolean brandPillVisible;
     JapaneseFlickPreview japaneseFlickPreview;
+    /** 删除键上滑时弹出的「快速删除」框，见 {@link BackspaceSwipePolicy}。 */
+    QuickDeleteOverlay quickDeleteOverlay;
+    /** 文本编辑面板（方向键、选择、全选、复制、剪切、粘贴），见 {@link ImeTextEditPanel}。 */
+    LinearLayout textEditPanel;
     LinearLayout shortcutBar;
     HorizontalScrollView shortcutScroll;
     final java.util.List<Button> symbolKeyButtons = new java.util.ArrayList<>(30);
@@ -680,7 +686,11 @@ public final class MSIMEInputService extends InputMethodService {
         if (localModes == null) localModes = new JSONObject();
         applyCandidateAppearance(preferences);
         applyTouchGeometry(preferences);
-        applyToolbarPreferences(preferences);
+        // 工具栏按钮开关与皮肤同理：runtime-options.json 那份出厂默认里剪贴板按钮是关的，拿它画，新打开的应用里工具栏先少一格、其余按钮跟着挪位，一两秒后实时偏好到了才补回来（#5680）。那条路径改用上次真正读到的开关，没有时才退回这份副本。
+        JSONObject toolbar = appearance || rememberedToolbar == null
+            ? (preferences == null ? null : preferences.optJSONObject("touch_toolbar"))
+            : rememberedToolbar;
+        applyToolbarPreferences(preferences, toolbar);
         applyVoicePreferences(preferences);
         applyAiPreferences(preferences);
         if (appearance) applyClipboardPreference(preferences);
@@ -1218,6 +1228,7 @@ public final class MSIMEInputService extends InputMethodService {
         imeVoiceEntry = new ImeVoiceEntry(this);
         imeKeyFeedback = new ImeKeyFeedback(this);
         imeDebugOverlay = new ImeDebugOverlay(this);
+        imeTextEditPanel = new ImeTextEditPanel(this);
         imeCalculator = new ImeCalculator(this);
         // 必须在 super.onCreate() 之前：InputMethodService 在那里按这个主题建输入法窗口，之后再设会抛异常。按名字查是因为 core/ 要能脱离 Gradle 生成的 R 编译（check-host.sh 的 JVM 冒烟）；res/values/themes.xml 说明了这个主题为什么存在。
         // 五笔、拼音等版本的 applicationId 带后缀，资源表的包名仍是命名空间，两个都试。
@@ -1502,12 +1513,12 @@ public final class MSIMEInputService extends InputMethodService {
     private void scheduleEngineStartup(String options, long generation) {
         Runnable complete = () -> {
             if (generation != engineStartGeneration || connection == null || session != 0) return;
-            startEngineSession(options);
+            startEngineSession(options, null);
         };
         boolean suppressLearning = learningSuppressed();
         try {
             preferencesWorker.execute(() -> {
-                String startOptions = withLivePreferences(options, suppressLearning);
+                EngineStartOptions startOptions = withLivePreferences(options, suppressLearning);
                 String notice = "";
                 try {
                     JSONObject sync = value(NativeClient.personalDictionarySync(options));
@@ -1523,7 +1534,7 @@ public final class MSIMEInputService extends InputMethodService {
                 main.post(() -> {
                     if (generation != engineStartGeneration || connection == null || session != 0) return;
                     if (!finalNotice.isEmpty()) preferencesNotice = finalNotice;
-                    startEngineSession(startOptions);
+                    startEngineSession(startOptions.options(), startOptions.livePreferences());
                 });
             });
         } catch (RuntimeException ignored) {
@@ -1535,24 +1546,32 @@ public final class MSIMEInputService extends InputMethodService {
     /**
      * runtime-options.json 里的偏好是首次安装时写下的出厂默认（见 Bootstrap.prepare），拿它建会话，引擎先按默认方案（全拼 26 键）起来，过一两秒实时偏好重载后才换成用户的方案，九键用户每次都看到键盘从 26 键跳成九键。建会话前在工作线程上读一次实时偏好换进去；读不到时照旧用原来那份。不允许学习的输入框照样把 learning 关掉。
      */
-    private static String withLivePreferences(String optionsText, boolean suppressLearning) {
+    private static EngineStartOptions withLivePreferences(String optionsText, boolean suppressLearning) {
         try {
             JSONObject options = new JSONObject(optionsText);
             String directory = options.optString("preferences_directory", "");
-            if (directory.isEmpty() || !new File(directory).isAbsolute()) return optionsText;
-            JSONObject envelope = new JSONObject(NativeClient.loadPreferences(directory));
+            if (directory.isEmpty() || !new File(directory).isAbsolute())
+                return new EngineStartOptions(optionsText, null);
+            String response = NativeClient.loadPreferences(directory);
+            JSONObject envelope = new JSONObject(response);
             JSONObject live = JsonPolicy.strictTrue(envelope.opt("ok"))
                 ? envelope.getJSONObject("value").optJSONObject("preferences") : null;
-            if (live == null) return optionsText;
+            if (live == null) return new EngineStartOptions(optionsText, null);
             if (suppressLearning) live.put("learning", false);
             options.put("preferences", live);
-            return options.toString();
+            return new EngineStartOptions(options.toString(), response);
         } catch (JSONException | RuntimeException | LinkageError error) {
-            return optionsText;
+            return new EngineStartOptions(optionsText, null);
         }
     }
 
-    private void startEngineSession(String optionsText) {
+    /** 建会话用的运行时选项，以及换进去的那份实时偏好的原始 loadPreferences 响应（没读到时为 null）。 */
+    private record EngineStartOptions(String options, String livePreferences) {}
+
+    /**
+     * @param livePreferences 建会话前刚在工作线程上读到的实时偏好（原始响应），会话建好后直接作为第一份偏好快照应用；null 时等 preferencesReloader 读。
+     */
+    private void startEngineSession(String optionsText, String livePreferences) {
         try {
             JSONObject options = new JSONObject(optionsText);
             // 选中只吃掉部分输入的候选时，让运行时把已选的那一段留在组字里而不是立刻上屏。这个宿主
@@ -1580,14 +1599,21 @@ public final class MSIMEInputService extends InputMethodService {
                 imeLetterRows.rebuildKeyRows();
             }
             refreshEnglishSuggestions();
+            String directory = options.optString("preferences_directory", "");
+            boolean hasPreferencesDirectory = !directory.isEmpty() && new File(directory).isAbsolute();
+            if (hasPreferencesDirectory) preferencesDirectory = directory;
+            // 建会话前刚读过的实时偏好直接作为第一份快照：原先要等 preferencesReloader 在工作线程上再读一遍、回到主线程后才有 preferencesSnapshot，冷启动的应用里这段要一秒左右，其间皮肤和输入方式两个工具栏按钮按「设置加载中」画成灰色（#5680）。应用失败不影响会话，下面的 reloader 马上再读一次并报告。
+            if (hasPreferencesDirectory && livePreferences != null) {
+                try {
+                    applyPreferencesSnapshot(value(livePreferences));
+                } catch (JSONException | LinkageError ignored) {
+                    // 不记录偏好内容和原生层的返回；下面的 reloader 会再读一次。
+                }
+            }
             // 先清掉「准备中」再画，否则这次 render 还会把过期的模式标签留在读音行上。
             message = "";
             render();
-            String directory = options.optString("preferences_directory", "");
-            if (!directory.isEmpty() && new File(directory).isAbsolute()) {
-                preferencesDirectory = directory;
-                preferencesReloader.start(directory, this::reloadPreferences);
-            }
+            if (hasPreferencesDirectory) preferencesReloader.start(directory, this::reloadPreferences);
         } catch (Exception | LinkageError error) {
             stop(false);
             message = "共享运行时未就绪：仅直接输入";
@@ -1681,7 +1707,12 @@ public final class MSIMEInputService extends InputMethodService {
 
     /** `touch_toolbar` 的按钮开关，以及功能面板直接切换的模糊音、单手、隐私三项；缺键时按 Android 的默认值读。 */
     private void applyToolbarPreferences(JSONObject preferences) {
-        JSONObject toolbar = preferences == null ? null : preferences.optJSONObject("touch_toolbar");
+        applyToolbarPreferences(preferences,
+            preferences == null ? null : preferences.optJSONObject("touch_toolbar"));
+    }
+
+    /** 同上，按钮开关取自 `toolbar` 而不是 `preferences` 自己的 `touch_toolbar`。 */
+    private void applyToolbarPreferences(JSONObject preferences, JSONObject toolbar) {
         toolbarEmoji = toolbar == null || toolbar.optBoolean("emoji", true);
         toolbarClipboard = toolbar == null || toolbar.optBoolean("clipboard", true);
         toolbarSkin = toolbar == null || toolbar.optBoolean("skin", true);
@@ -3988,12 +4019,14 @@ public final class MSIMEInputService extends InputMethodService {
         return surfaceSkin(preferences, "screen_keyboard_theme");
     }
 
-    /** 决定键盘、表情与手写面板皮肤的偏好字段；{@link #rememberSkinHint} 只记这几项。 */
+    /** 决定键盘、表情与手写面板皮肤的偏好字段，加上工具栏按钮开关 `touch_toolbar`；{@link #rememberSkinHint} 只记这几项。 */
     private static final String[] SKIN_HINT_KEYS = {"global_theme", "custom_theme", "theme",
-        "screen_keyboard_theme", "emoji_theme", "handwriting_theme"};
+        "screen_keyboard_theme", "emoji_theme", "handwriting_theme", "touch_toolbar"};
     /** 上次换上的皮肤所用的偏好片段，存在键盘进程自己的 filesDir 里。 */
     private static final String SKIN_HINT_FILE = "keyboard-skin-hint.json";
     private String writtenSkinHint;
+    /** 最近一次真正读到的偏好里的 `touch_toolbar`（启动时来自皮肤片段文件）；没有时为 null。 */
+    private JSONObject rememberedToolbar;
 
     /**
      * 记下这次换上的皮肤所依据的偏好片段，下次键盘进程启动时在偏好读到之前就用它画第一帧。
@@ -4010,6 +4043,8 @@ public final class MSIMEInputService extends InputMethodService {
         } catch (JSONException error) {
             return;
         }
+        JSONObject toolbar = hint.optJSONObject("touch_toolbar");
+        if (toolbar != null) rememberedToolbar = toolbar;
         String text = hint.toString();
         if (text.equals(writtenSkinHint)) return;
         writtenSkinHint = text;
@@ -4035,7 +4070,9 @@ public final class MSIMEInputService extends InputMethodService {
             if (bytes == null) return null;
             String text = TextPolicy.utf8(bytes);
             writtenSkinHint = text;
-            return new JSONObject(text);
+            JSONObject hint = new JSONObject(text);
+            rememberedToolbar = hint.optJSONObject("touch_toolbar");
+            return hint;
         } catch (Exception ignored) {
             return null;
         }
@@ -4663,6 +4700,28 @@ public final class MSIMEInputService extends InputMethodService {
         imeStyler.applySkin();
         render();
         imePanels.finishSkinPick();
+    }
+
+    /**
+     * 长按「中/英」（以及地球键、日语九键侧列的英和切换）弹出系统的输入法选择框，用来临时换到密码管理器之类的键盘（#5615）。组字不在这里结束：用户可能只是看一眼就关掉选择框；真的换了输入法时 onFinishInput 会照常收尾。
+     */
+    void bindInputMethodPicker(Button button) {
+        button.setOnLongClickListener(ignored -> {
+            InputMethodManager manager = getSystemService(InputMethodManager.class);
+            if (manager == null) return false;
+            imeKeyFeedback.playFeedback(button);
+            manager.showInputMethodPicker();
+            return true;
+        });
+        // 给读屏的长按动作一个名字，否则只会念「双击并按住即可长按」，听不出长按做什么。
+        button.setAccessibilityDelegate(new View.AccessibilityDelegate() {
+            @Override public void onInitializeAccessibilityNodeInfo(
+                    View host, android.view.accessibility.AccessibilityNodeInfo info) {
+                super.onInitializeAccessibilityNodeInfo(host, info);
+                info.addAction(new android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction(
+                    android.view.accessibility.AccessibilityNodeInfo.ACTION_LONG_CLICK, "切换输入法"));
+            }
+        });
     }
 
     /** Finish the Engine composition before handing the input connection to another IME. */
@@ -6079,6 +6138,34 @@ public final class MSIMEInputService extends InputMethodService {
         showHandwritingStatus("在此手写，停笔后选字");
     }
 
+    /**
+     * 删除键上滑「快速删除」后松手（#5585）：先清掉手写墨迹、丢掉组字，再删掉选中的文字和光标前的全部文字。光标后的文字不动。读到的文字只用来确定每轮删多长，不保存、不记录。
+     */
+    void deleteAllBeforeCursor() {
+        if (handwritingCanvas != null && handwritingCanvas.hasInk()) clearHandwriting();
+        if (hasEngineComposition()) discardComposition();
+        InputConnection target = connection;
+        if (target == null) return;
+        selectionEcho.invalidate();
+        CharSequence selected = target.getSelectedText(0);
+        if (selected != null && selected.length() > 0) target.commitText("", 1);
+        BackspaceSwipePolicy.clearBeforeCursor(new BackspaceSwipePolicy.Editor() {
+            @Override public CharSequence textBeforeCursor(int length) {
+                return target.getTextBeforeCursor(length, 0);
+            }
+
+            @Override public boolean deleteBeforeCursor(int length) {
+                return target.deleteSurroundingText(length, 0);
+            }
+        });
+        if (directEnglishActive()) {
+            clearEnglishSuggestions();
+            refreshEnglishSuggestions();
+        }
+        updateAutomaticCapitalization();
+        render();
+    }
+
     void deleteFromHandwriting() {
         if (handwritingCanvas != null && handwritingCanvas.hasInk()) {
             handwritingCanvas.undo();
@@ -6301,6 +6388,9 @@ public final class MSIMEInputService extends InputMethodService {
         keyboardSurface.addView(keyboard, KeyboardGeometry.frameMatchParentParams());
         japaneseFlickPreview = new JapaneseFlickPreview(this);
         keyboardSurface.addView(japaneseFlickPreview, KeyboardGeometry.frameMatchParentParams());
+        quickDeleteOverlay = new QuickDeleteOverlay(this);
+        keyboardSurface.addView(quickDeleteOverlay, KeyboardGeometry.frameMatchParentParams());
+        surface.fullBleed.add(quickDeleteOverlay);
         // 按键气泡的覆盖层：盖在整个键盘上、初始为空，空的 FrameLayout 不拦截触摸，由 ImeLetterRows 持有。
         surface.fullBleed.add(japaneseFlickPreview);
         imeLetterRows.keyPreviewLayer = new FrameLayout(this);
@@ -6402,6 +6492,14 @@ public final class MSIMEInputService extends InputMethodService {
         keyId(shiftButton, "ShiftLeft");
         languageButton = keyId(button(controls, "中/英", this::toggleInputLanguage), "SoftLanguage");
         languageButton.setContentDescription("切换中英文");
+        // 没有会话时这个键仍可用（长按要能打开输入法选择框），但点按切不了中英：不给按键反馈、也不记一次按键，免得点上去有声有振动却什么也没发生。
+        languageButton.setOnClickListener(ignored -> {
+            if (session == 0) return;
+            imeKeyFeedback.playFeedback(languageButton);
+            countKey(languageButton);
+            toggleInputLanguage();
+        });
+        bindInputMethodPicker(languageButton);
         layerButton = button(controls, "123", () -> {
             keyboardLayer = keyboardLayer == KeyboardLayout.Layer.LETTERS
                 ? KeyboardLayout.Layer.SYMBOLS : KeyboardLayout.Layer.LETTERS;
@@ -6432,6 +6530,7 @@ public final class MSIMEInputService extends InputMethodService {
             KeyboardShortcutIconPolicy.Icon.GLOBE, this::switchToNextInputMethodAfterCommit);
         globeButton.setContentDescription("切换到下一个输入法");
         keyId(globeButton, "SoftGlobe");
+        bindInputMethodPicker(globeButton);
         schemeButton = shortcutButton(controls, "输入方式",
             KeyboardShortcutIconPolicy.Icon.SCHEME,
             imeToolbar.panelToggle(() -> schemeScroll, imePanels::showSchemePicker));
@@ -6634,6 +6733,8 @@ public final class MSIMEInputService extends InputMethodService {
         ViewPolicy.setClickable(phraseScroll, true);
         ViewPolicy.hide(phraseScroll);
         keyboardSurface.addView(phraseScroll, KeyboardGeometry.frameMatchParentParams());
+        textEditPanel = imeTextEditPanel.build();
+        keyboardSurface.addView(textEditPanel, KeyboardGeometry.frameMatchParentParams());
         imePanels.buildEmojiPanel();
         imePanels.buildSymbolPanel();
         renderLayoutSettingsState();
@@ -6648,7 +6749,7 @@ public final class MSIMEInputService extends InputMethodService {
         int top = (parent == null ? 0 : parent.getTop()) + region.getBottom();
         for (View overlay : new View[] {moreToolsScroll, expandedCandidateScroll, imeNineKeyPanel.root(),
                 phraseScroll, emojiPanel, symbolPanel, clipboardScroll, skinScroll, schemeScroll,
-                aiPolishContainer}) {
+                aiPolishContainer, textEditPanel}) {
             if (overlay == null) continue;
             if (!(overlay.getLayoutParams() instanceof FrameLayout.LayoutParams params)
                     || params.topMargin == top) continue;
@@ -6666,7 +6767,8 @@ public final class MSIMEInputService extends InputMethodService {
         return shown(moreToolsScroll) || shown(emojiPanel) || shown(phraseScroll)
             || shown(clipboardScroll) || shown(skinScroll) || shown(schemeScroll)
             || shown(symbolPanel) || shown(aiPolishContainer) || shown(voiceResultScroll)
-            || shown(layoutSettingsScroll) || shown(layoutAdjustView) || replyOpen;
+            || shown(layoutSettingsScroll) || shown(layoutAdjustView) || shown(textEditPanel)
+            || replyOpen;
     }
 
     void closeToolbarPanels() {
@@ -6681,6 +6783,7 @@ public final class MSIMEInputService extends InputMethodService {
         closeVoiceResult();
         closeLayoutSettings();
         closeReplyKeyboard();
+        imeTextEditPanel.close();
     }
 
     void closeCommonPhrases() {
@@ -7383,11 +7486,15 @@ public final class MSIMEInputService extends InputMethodService {
         }
         if (languageButton != null) {
             languageButton.setText(dedicatedEnglish ? "英" : "中");
-            ViewPolicy.setEnabled(languageButton, session != 0);
-            languageButton.setContentDescription(
-                dedicatedEnglish ? "切换到所选输入方案" : "切换到英文输入");
+            // 没有会话（密码框、会话还在建）时点按切不了中英，但长按仍要能打开输入法选择框：换到密码管理器的键盘正是在密码框里最常用。禁用的按钮收不到长按，所以这个键始终可用，只把它画淡、读屏念成「暂不可用」，点按在点击监听里直接忽略。
+            boolean canToggle = session != 0;
+            ViewPolicy.setEnabled(languageButton, true);
+            ViewPolicy.setActiveAlpha(languageButton, canToggle, .45f);
+            languageButton.setContentDescription(!canToggle ? "中英切换暂不可用，长按切换输入法"
+                : dedicatedEnglish ? "切换到所选输入方案" : "切换到英文输入");
             if (Build.VERSION.SDK_INT >= 30) {
-                languageButton.setStateDescription(dedicatedEnglish ? "英文输入" : "中文输入");
+                languageButton.setStateDescription(!canToggle ? "输入会话未就绪"
+                    : dedicatedEnglish ? "英文输入" : "中文输入");
             }
         }
         if (floatingShortcutButton != null) {
