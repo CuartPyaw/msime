@@ -3770,6 +3770,45 @@ fn shuangpin_refresh_reuses_request_strings() {
     );
 }
 
+#[test]
+fn shuangpin_double_helpcode_refresh_reuses_request_strings() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.scheme = SchemeType::Shuangpin;
+        options.helpcode = true;
+    });
+    type_text(&mut session, "nihcAB");
+    let request = session.input.engine.request();
+    assert_eq!(request.raw_segmentation, "ni'hc'AB");
+    assert_eq!(request.normalized_segmentation, "ni'hao'AB");
+    let pointers = [
+        request.raw_input.as_ptr(),
+        request.raw_input_with_cases.as_ptr(),
+        request.normalized_input.as_ptr(),
+        request.raw_segmentation.as_ptr(),
+        request.normalized_segmentation.as_ptr(),
+        request.segmentation.as_ptr(),
+    ];
+
+    session.input.engine.handle_key(SchemeKey::Requery);
+
+    let request = session.input.engine.request();
+    assert_eq!(request.raw_segmentation, "ni'hc'AB");
+    assert_eq!(request.normalized_segmentation, "ni'hao'AB");
+    assert_eq!(request.segmentation, "ni'hao'AB");
+    assert_eq!(
+        [
+            request.raw_input.as_ptr(),
+            request.raw_input_with_cases.as_ptr(),
+            request.normalized_input.as_ptr(),
+            request.raw_segmentation.as_ptr(),
+            request.normalized_segmentation.as_ptr(),
+            request.segmentation.as_ptr(),
+        ],
+        pointers
+    );
+}
+
 /// 合成的 `msime-stroke.db`（`stroke::fixture`），用共享的 schema 写成。
 fn stroke_dictionary(directory: &Path) -> PathBuf {
     let path = directory.join("msime-stroke.db");
