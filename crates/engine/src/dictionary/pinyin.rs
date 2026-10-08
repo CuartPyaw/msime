@@ -26,6 +26,9 @@ pub const INSERTED_WEIGHT: i64 = 10_000;
 /// The reference kept every prepared statement for the life of the connection (QQ:572-590). A session touches a few dozen tables with five statement shapes each plus one batch shape per key count, so the rusqlite default of 16 would re-prepare on nearly every keystroke.
 const STATEMENT_CACHE_CAPACITY: usize = 512;
 
+// 错误纠正一次最多提交 96 个键；短批次用线性扫描可以省掉临时哈希表分配。
+const SMALL_QUERY_KEY_BATCH: usize = 64;
+
 /// The C++ returned an error code without text for these writes (QD:1502-1536); callers map the failure to their own diagnostic.
 const DICTIONARY_CLOSED: &str = "Pinyin dictionary is not open";
 const INVALID_DICTIONARY_KEY: &str = "Invalid pinyin dictionary key";
@@ -202,26 +205,7 @@ impl PinyinDatabase {
             }
             table_keys.push((table, key));
         }
-        let mut seen_keys = HashSet::with_capacity(table_keys.len());
-        let duplicates = table_keys
-            .iter()
-            .enumerate()
-            .filter_map(|(index, (_, key))| (!seen_keys.insert(key.as_str())).then_some(index))
-            .collect::<Vec<_>>();
-        drop(seen_keys);
-        let mut duplicates = duplicates.into_iter().peekable();
-        let mut write = 0;
-        for read in 0..table_keys.len() {
-            if duplicates.peek() == Some(&read) {
-                duplicates.next();
-                continue;
-            }
-            if write != read {
-                table_keys.swap(write, read);
-            }
-            write += 1;
-        }
-        table_keys.truncate(write);
+        deduplicate_table_keys(&mut table_keys);
         for (table, key) in table_keys {
             keys_by_table.entry(table).or_default().push(key);
         }
@@ -244,10 +228,13 @@ impl PinyinDatabase {
             return result;
         }
         let mut keys_by_table: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        let mut seen = HashSet::with_capacity(keys.len());
-        for key in keys {
+        let mut seen =
+            (keys.len() > SMALL_QUERY_KEY_BATCH).then(|| HashSet::with_capacity(keys.len()));
+        for (index, key) in keys.iter().enumerate() {
             let segments = split_segments(key);
-            if !seen.insert(key.as_str()) || !has_only_complete_pinyin_segments(&segments) {
+            if !query_key_is_new(keys, index, &mut seen)
+                || !has_only_complete_pinyin_segments(&segments)
+            {
                 continue;
             }
             let Some(table) = build_table_name(&segments) else {
@@ -609,8 +596,64 @@ fn dict_row(row: &Row<'_>) -> rusqlite::Result<DictRow> {
     })
 }
 
+const SMALL_TABLE_KEY_BATCH: usize = 16;
+
+// 小批次直接扫描已保留键；大批次保留哈希去重，避免无界查询的平方级退化。
+fn deduplicate_table_keys(table_keys: &mut Vec<(String, String)>) {
+    if table_keys.len() <= SMALL_TABLE_KEY_BATCH {
+        let mut write = 0;
+        for read in 0..table_keys.len() {
+            if table_keys[..write]
+                .iter()
+                .any(|(_, key)| key == &table_keys[read].1)
+            {
+                continue;
+            }
+            if write != read {
+                table_keys.swap(write, read);
+            }
+            write += 1;
+        }
+        table_keys.truncate(write);
+        return;
+    }
+    let mut seen_keys = HashSet::with_capacity(table_keys.len());
+    let duplicates = table_keys
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (_, key))| (!seen_keys.insert(key.as_str())).then_some(index))
+        .collect::<Vec<_>>();
+    drop(seen_keys);
+    let mut duplicates = duplicates.into_iter().peekable();
+    let mut write = 0;
+    for read in 0..table_keys.len() {
+        if duplicates.peek() == Some(&read) {
+            duplicates.next();
+            continue;
+        }
+        if write != read {
+            table_keys.swap(write, read);
+        }
+        write += 1;
+    }
+    table_keys.truncate(write);
+}
+
 fn query_capacity(limit: usize) -> Option<usize> {
     (limit < i32::MAX as usize).then_some(limit)
+}
+
+fn query_key_is_new<'a>(
+    keys: &'a [String],
+    index: usize,
+    seen: &mut Option<HashSet<&'a str>>,
+) -> bool {
+    match seen {
+        Some(seen) => seen.insert(keys[index].as_str()),
+        None => !keys[..index]
+            .iter()
+            .any(|existing| existing == &keys[index]),
+    }
 }
 
 /// First occurrence wins (QQ:774-780).
@@ -1011,6 +1054,77 @@ mod tests {
 
         assert_eq!(allocations, 0);
         assert_eq!(rows.len(), 18);
+    }
+
+    #[test]
+    fn exact_segmentation_key_dedup_uses_no_temporary_heap_state_for_small_batches() {
+        let mut table_keys = (0..16)
+            .map(|index| ("tbl_2_n".to_owned(), format!("ni'{}", index % 8)))
+            .collect::<Vec<_>>();
+
+        let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            deduplicate_table_keys(&mut table_keys);
+        });
+
+        assert_eq!(allocations, 0);
+        assert_eq!(
+            table_keys,
+            (0..8)
+                .map(|index| ("tbl_2_n".to_owned(), format!("ni'{index}")))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn exact_segmentation_key_dedup_keeps_first_rows_on_both_sides_of_the_boundary() {
+        for length in [0, 1, 15, 16, 17, 64, 128] {
+            let mut table_keys = (0..length)
+                .map(|index| (format!("table-{index}"), format!("key-{}", index % 17)))
+                .collect::<Vec<_>>();
+            let expected = table_keys[..length.min(17)].to_vec();
+            let pointer = table_keys.as_ptr();
+            let capacity = table_keys.capacity();
+
+            deduplicate_table_keys(&mut table_keys);
+
+            assert_eq!(table_keys, expected, "length={length}");
+            assert_eq!(table_keys.as_ptr(), pointer);
+            assert_eq!(table_keys.capacity(), capacity);
+        }
+    }
+
+    #[test]
+    fn exact_key_query_dedup_avoids_temporary_heap_state_for_small_batches() {
+        let keys = strings(&["ni", "ni", "hao", "ni"]);
+        let mut seen = None;
+        let mut accepted = 0;
+        let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            for index in 0..keys.len() {
+                if query_key_is_new(&keys, index, &mut seen) {
+                    accepted += 1;
+                }
+            }
+        });
+
+        assert_eq!(allocations, 0);
+        assert_eq!(accepted, 2);
+    }
+
+    #[test]
+    fn exact_key_query_dedup_switches_to_hashing_after_small_batch_boundary() {
+        for length in [SMALL_QUERY_KEY_BATCH, SMALL_QUERY_KEY_BATCH + 1] {
+            let keys = (0..length)
+                .map(|index| format!("key-{}", index % (length / 2).max(1)))
+                .collect::<Vec<_>>();
+            let mut seen = (length > SMALL_QUERY_KEY_BATCH).then(|| HashSet::with_capacity(length));
+            let mut unique = 0;
+            for index in 0..keys.len() {
+                if query_key_is_new(&keys, index, &mut seen) {
+                    unique += 1;
+                }
+            }
+            assert_eq!(unique, length / 2, "length={length}");
+        }
     }
 
     #[test]

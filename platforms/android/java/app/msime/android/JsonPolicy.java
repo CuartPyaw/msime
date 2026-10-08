@@ -14,9 +14,21 @@ public final class JsonPolicy {
         return value instanceof Boolean ? (Boolean) value : null;
     }
 
+    /** Accept only a JSON boolean, using the supplied fallback for every other value. */
+    public static boolean strictBoolean(Object value, boolean fallback) {
+        Boolean parsed = strictBoolean(value);
+        return parsed == null ? fallback : parsed;
+    }
+
     /** Accept only a JSON string; numbers and booleans are not coerced to text. */
     public static String strictString(Object value) {
         return value instanceof String ? (String) value : null;
+    }
+
+    /** Accept only a JSON string, using an empty string for every other value. */
+    public static String strictStringOrEmpty(Object value) {
+        String text = strictString(value);
+        return text == null ? "" : text;
     }
 
     /** Accept only a JSON integer that fits in a Java int. */
