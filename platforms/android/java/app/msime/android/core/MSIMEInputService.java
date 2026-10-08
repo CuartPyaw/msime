@@ -6438,8 +6438,8 @@ public final class MSIMEInputService extends InputMethodService {
                 canvas.drawRoundRect(x, y, x + cellWidth, y + cellHeight, radius, radius, paint);
             }
             paint.clearShadowLayer();
-            paint.setTextSize(textSize);
-            paint.setTypeface(previewTypeface);
+            ViewPolicy.setTextSize(paint, textSize);
+            ViewPolicy.setTypeface(paint, previewTypeface);
             Paint.FontMetrics metrics = paint.getFontMetrics();
             for (int index = 0; index < labelCount; index++) {
                 String label = labels[index];
