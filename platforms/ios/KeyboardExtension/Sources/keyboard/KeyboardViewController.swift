@@ -82,7 +82,6 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   /// 常用语：与 Android 一样始终在工具栏里，因为 `touch_toolbar` 没有它的开关。
   private let phrasesShortcut = KeyboardToolbarButton(icon: .toolbarPhrase, accessibilityLabel: "常用语")
   private let skinShortcut = KeyboardToolbarButton(icon: .toolbarSkin, accessibilityLabel: "切换皮肤")
-  private let layoutShortcut = UIButton()
   /// 「工具栏按钮」（`touch_toolbar`）里的可选按钮，用户没有固定时隐藏；每一个在功能菜单里也有。
   private let clipboardShortcut = KeyboardToolbarButton(icon: .toolbarClipboard, accessibilityLabel: "剪贴板历史")
   private let aiShortcut = UIButton()
@@ -136,7 +135,6 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   private var handwritingColumns: [UIStackView] = []
   private var handwritingResults: [String] = []
   private var handwritingActionHeight: NSLayoutConstraint?
-  private var layoutPicker: KeyboardLayoutPickerView?
   private var candidatePanel: KeyboardCandidatePanelView?
   /// 面板正在显示的那一代候选。选择和长按菜单都按它里面的代次和全局序号找候选；九键面板换代时整份换掉。
   private var candidatePanelSnapshot: CandidatePanelSnapshot?
@@ -1591,7 +1589,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     // 先按设计稿手机工具栏的顺序，再排「工具栏按钮」可以固定的 iOS 额外按钮，语音入口和收起放在最后。
     let shortcuts: [UIButton] = [
       moreShortcut, emojiShortcut, phrasesShortcut, clipboardShortcut, skinShortcut, schemeButton,
-      layoutShortcut, aiShortcut, characterSetShortcut, fullwidthShortcut, punctuationShortcut,
+      aiShortcut, characterSetShortcut, fullwidthShortcut, punctuationShortcut,
       replyShortcut, scriptShortcut, dismissShortcut,
     ]
     for button in shortcuts {
@@ -1625,7 +1623,6 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       guard let self else { return }
       if phrasesPanel != nil { closeKeyboardPicker() } else { showPhrasesPanel() }
     }, for: .primaryActionTriggered)
-    layoutShortcut.addAction(UIAction { [weak self] _ in self?.showLayoutPicker() }, for: .primaryActionTriggered)
     skinShortcut.addAction(UIAction { [weak self] _ in
       guard let self else { return }
       if skinPicker != nil { closeKeyboardPicker() } else { showSkinPicker() }
@@ -1693,8 +1690,6 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     replyShortcut.isHidden = true
     skinShortcut.accessibilityValue = skin.title
     schemeButton.accessibilityValue = inputScheme.title
-    configure(layoutShortcut, title: nil, symbol: "slider.horizontal.3", label: "键盘设置", id: "layoutShortcut")
-    layoutShortcut.accessibilityValue = "默认键位"
     // The switches show their state as a character, the way the Windows floating toolbar does: 简/繁, 全/半, and a Chinese or ASCII comma.
     let pinned = TouchToolbarPreference(in: session.sharedPreferences)
     configure(aiShortcut, title: nil, symbol: "sparkles", label: "AI 润色", id: "aiShortcut")
@@ -1709,7 +1704,6 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
               label: "中英文标点", id: "punctuationShortcut")
     punctuationShortcut.accessibilityValue = chinesePunctuation ? "中文标点" : "英文标点"
     punctuationShortcut.isEnabled = chinesePunctuationSwitchApplies
-    layoutShortcut.isHidden = !pinned.layout
     emojiShortcut.isHidden = !pinned.emoji
     phrasesShortcut.isHidden = !toolbarPhrases
     schemeButton.isHidden = !toolbarScheme
@@ -1790,7 +1784,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       KeyboardTool(id: "dictionary", title: "词库", face: .icon(.lexicon)) { [weak self] in
         self?.openApp(KeyboardAppLauncher.dictionaryURL)
       },
-      // Android 在这里有一格「键盘高度」。iOS 调高度、键距和行距的布局面板由工具栏的「键盘设置」按钮打开（默认显示），菜单里不放。
+      // Android 在这里有一格「键盘高度」。iOS 键盘里不调高度、键距和行距，它们在 App 的「键盘」设置页里调。
       // 键盘只改这个菜单里有的设置；其余设置都在 app 里，正在打字的人没有别的路可以过去。
       KeyboardTool(id: "settings", title: "设置", face: .icon(.settings)) { [weak self] in
         self?.openApp(KeyboardAppLauncher.inputSettingsURL)
@@ -6163,88 +6157,6 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
   }
 
-  private func showLayoutPicker() {
-    closeKeyboardService()
-    closeKeyboardPicker()
-    // The keyboard has to stay visible while it is being adjusted, so the shortcut bar stays too --
-    // it sits under the toolbar and is out of the way. Hiding it was for the opaque slider panel.
-    let picker = KeyboardLayoutPickerView(
-      keySpacing: KeyboardLayoutPreference.keySpacing,
-      rowSpacing: KeyboardLayoutPreference.rowSpacing,
-      height: KeyboardLayoutPreference.heightAdjustment,
-      onKeySpacing: { [weak self] spacing in
-        KeyboardLayoutPreference.keySpacing = spacing
-        self?.applyLayoutPreferences()
-        self?.persistTouchKeyboardGeometry()
-      },
-      onRowSpacing: { [weak self] spacing in
-        KeyboardLayoutPreference.rowSpacing = spacing
-        self?.applyLayoutPreferences()
-        self?.persistTouchKeyboardGeometry()
-      },
-      onHeight: { [weak self] adjustment in
-        KeyboardLayoutPreference.heightAdjustment = adjustment
-        self?.sharedKeyboardHeightAdjustment = CGFloat(adjustment)
-        self?.updatePreferredKeyboardHeight()
-        self?.persistTouchKeyboardGeometry()
-      },
-      onCommit: { [weak self] in self?.commitTouchKeyboardGeometry() },
-      onReset: { [weak self] in
-        guard let self else { return }
-        KeyboardLayoutPreference.resetToDefaults()
-        sharedKeyboardHeightAdjustment = 0
-        applyLayoutPreferences()
-        updatePreferredKeyboardHeight()
-        updateShortcutButtons()
-        _ = session.resetTouchKeyboardGeometry()
-        showLayoutPicker()
-      },
-      onClose: { [weak self] in
-        guard let self else { return }
-        updateKeyboardLayout()
-        closeKeyboardPicker()
-      })
-    picker.accessibilityIdentifier = "keyboardLayoutPicker"
-    picker.accessibilityViewIsModal = true
-    picker.translatesAutoresizingMaskIntoConstraints = false
-    view.addSubview(picker)
-    NSLayoutConstraint.activate([
-      picker.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-      picker.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      picker.topAnchor.constraint(equalTo: view.topAnchor),
-      picker.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-    ])
-    layoutPicker = picker
-    UIAccessibility.post(notification: .screenChanged, argument: picker)
-  }
-
-  private func persistTouchKeyboardGeometry() {
-    _ = session.setTouchKeyboardGeometry(
-      keySpacing: KeyboardLayoutPreference.keySpacing,
-      rowSpacing: KeyboardLayoutPreference.rowSpacing,
-      heightAdjustment: KeyboardLayoutPreference.heightAdjustment,
-      voiceEnabled: KeyboardLayoutPreference.voiceShortcutEnabled)
-  }
-
-  // The drags report on every gesture frame; the shared document is written once the value has
-  // settled, so a single adjustment does not take a file lock a hundred times.
-  private func commitTouchKeyboardGeometry() {
-    let saved = session.persistTouchKeyboardGeometry(
-      keySpacing: KeyboardLayoutPreference.keySpacing,
-      rowSpacing: KeyboardLayoutPreference.rowSpacing,
-      heightAdjustment: KeyboardLayoutPreference.heightAdjustment,
-      voiceEnabled: KeyboardLayoutPreference.voiceShortcutEnabled)
-    guard !saved else { return }
-    // 共享文档没写成（多半是和设置 App 同时写、比较交换输了）。原先不声不响：App Group 和这个键盘用着新值，文档里还是旧值，下次键盘出现时被文档盖回去，看起来就是「调的高度自己变回去了」。现在记一笔日志，并按文档把 App Group 和键盘对齐，用户当场看到的就是实际留下的值。
-    DiagnosticLog.shared.write("touch_geometry_not_persisted")
-    guard let document = MetasequoiaInputSessionBridge.loadSharedPreferences() else { return }
-    KeyboardLayoutPreference.mirrorGeometry(document)
-    sharedKeyboardHeightAdjustment = CGFloat(KeyboardLayoutPreference.heightAdjustment)
-    applyLayoutPreferences()
-    updatePreferredKeyboardHeight()
-    if layoutPicker != nil { showLayoutPicker() }
-  }
-
   /// 品牌键：关掉盖住按键的任何东西（面板、候选网格、回复面板或菜单本身），否则在第一页打开菜单。
   private func toggleMorePicker() {
     if keyAreaPanel != nil || phrasesRequest != nil {
@@ -6436,12 +6348,6 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       UIAccessibility.post(notification: .layoutChanged, argument: phrasesShortcut)
     }
     closeCandidatePanel()
-    if let picker = layoutPicker {
-      picker.removeFromSuperview()
-      layoutPicker = nil
-      shortcutBar.isHidden = false
-      UIAccessibility.post(notification: .screenChanged, argument: layoutShortcut)
-    }
     // 键区面板不是模态的，所以焦点只回到打开它们的工具栏按钮上。
     if let picker = morePicker {
       picker.removeFromSuperview()
