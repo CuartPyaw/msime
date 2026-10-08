@@ -679,6 +679,19 @@ fn a_mixed_list_holds_both_producers_wubi_first() {
     assert!(!snapshot.wubi_unique_four_code);
 }
 
+#[test]
+fn wubi_mixed_refresh_reuses_pinyin_request_buffer() {
+    let fixture = Fixture::new(WUBI_ROUTING_FIXTURE);
+    let mut session = wubi_mixed(&fixture);
+    let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+        session.input.engine.handle_key(SchemeKey::Requery);
+    });
+    assert!(
+        allocations <= 53,
+        "mixed Wubi refresh should reuse the pinyin request buffer: {allocations} allocations"
+    );
+}
+
 /// The reported case: in mixed Wubi `jixu` is the wubi code of 曳光弹 and the pinyin of 继续. The fourth key must leave both on offer; without pinyin rows the same code still commits its one wubi row.
 #[test]
 fn a_four_letter_code_that_is_also_pinyin_stays_open_in_mixed_wubi() {

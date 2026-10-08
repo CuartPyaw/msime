@@ -75,6 +75,9 @@ pub struct ImeSession {
     sentence_association: SentenceAssociationOptions,
     rescoring_context: String,
     typo_profile: Arc<PersonalTypoProfile>,
+    /// 五笔混输拼音回退使用的方案和请求缓冲，逐键刷新时复用。
+    mixed_pinyin_scheme: QuanpinScheme,
+    mixed_pinyin_request: QueryRequest,
 }
 
 impl ImeSession {
@@ -126,6 +129,8 @@ impl ImeSession {
             sentence_association: SentenceAssociationOptions::default(),
             rescoring_context: String::new(),
             typo_profile: PersonalTypoProfile::shared(&paths.user(assets::USER_JOURNAL)),
+            mixed_pinyin_scheme: QuanpinScheme::new(),
+            mixed_pinyin_request: QueryRequest::default(),
         };
         session.bind_wubi_scheme();
         Ok(session)
@@ -735,18 +740,21 @@ impl ImeSession {
             };
         }
 
-        let mut pinyin = QuanpinScheme::new();
-        pinyin.set_raw_input(&request.raw_input, &request.raw_input_with_cases);
-        let mut mixed = pinyin.build_request();
+        self.mixed_pinyin_scheme
+            .set_raw_input(&request.raw_input, &request.raw_input_with_cases);
+        let mut mixed = std::mem::take(&mut self.mixed_pinyin_request);
+        self.mixed_pinyin_scheme.build_request_into(&mut mixed);
         self.apply_request_options(&mut mixed);
         self.apply_autocorrect_suppression(&mut mixed);
         if !mixed.valid {
+            self.mixed_pinyin_request = mixed;
             return Decoded {
                 candidates,
                 wubi_table_answered,
             };
         }
         let pinyin_rows = self.registry.query(&mixed);
+        self.mixed_pinyin_request = mixed;
         Decoded {
             candidates: merge_pinyin_fallback(candidates, pinyin_rows),
             wubi_table_answered,
