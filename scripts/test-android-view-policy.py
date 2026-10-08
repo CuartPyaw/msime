@@ -8,6 +8,7 @@ VIEW_POLICY = ROOT / "platforms/android/java/app/msime/android/ViewPolicy.java"
 LOGIN_SHEET = ROOT / "platforms/android/java/app/msime/android/home/LoginSheet.java"
 INPUT_SERVICE = ROOT / "platforms/android/java/app/msime/android/core/MSIMEInputService.java"
 BOTTOM_BAR = ROOT / "platforms/android/java/app/msime/android/core/ImeBottomBar.java"
+UI = ROOT / "platforms/android/java/app/msime/android/home/Ui.java"
 
 
 def main() -> None:
@@ -15,6 +16,7 @@ def main() -> None:
     login_sheet = LOGIN_SHEET.read_text(encoding="utf-8")
     input_service = INPUT_SERVICE.read_text(encoding="utf-8")
     bottom_bar = BOTTOM_BAR.read_text(encoding="utf-8")
+    ui = UI.read_text(encoding="utf-8")
     required = (
         "public static void setEnabledRecursively(ViewGroup group, boolean enabled, float inactiveAlpha)",
         "if (child instanceof ViewGroup nested && !child.isClickable())",
@@ -46,6 +48,14 @@ def main() -> None:
         raise AssertionError("ImeBottomBar 仍保留重复的条件内边距实现")
     if "ViewPolicy.setPaddingIfChanged(keyboard, 0, 0, 0, 0);" not in bottom_bar:
         raise AssertionError("ImeBottomBar 没有调用共享条件内边距策略")
+    if "view.setMinHeight(dp(context, heightDp));" in ui:
+        raise AssertionError("Ui 仍直接实现文本最小高度策略")
+    if "ViewPolicy.setTextMinHeight(view, dp(context, heightDp));" not in ui:
+        raise AssertionError("Ui 没有调用共享文本最小高度策略")
+    if "view.setMinWidth(dp(context, widthDp));" in ui:
+        raise AssertionError("Ui 仍直接实现文本最小宽度策略")
+    if "ViewPolicy.setTextMinWidth(view, dp(context, widthDp));" not in ui:
+        raise AssertionError("Ui 没有调用共享文本最小宽度策略")
     print("android view policy: recursive enabled state is shared")
 
 
