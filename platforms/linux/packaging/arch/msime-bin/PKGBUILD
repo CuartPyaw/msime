@@ -124,7 +124,7 @@ package() {
   local missing=0
   while IFS= read -r -d '' elf; do
     if _msime_is_elf "$elf"; then
-      if ldd "$elf" | grep -q 'not found'; then
+      if ldd "$elf" 2>/dev/null | grep -q 'not found'; then
         echo "unresolved libraries in ${elf#"$pkgdir"}:" >&2
         ldd "$elf" | grep 'not found' >&2
         missing=1
