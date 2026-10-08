@@ -223,7 +223,7 @@ public final class MSIMEInputService extends InputMethodService {
     private long englishSuggestionEpoch;
     private long englishSuggestionRequestedEpoch = -1;
     private String englishSuggestionRequestedPrefix = "";
-    private boolean candidateHorizontal;
+    private boolean candidateHorizontal = true;
     int candidateFontSize = 16;
     int candidatePreeditFontSize = 16;
     CandidateAppearance.Palette candidateAppearance =
@@ -642,7 +642,7 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     /**
-     * @param source 这份偏好从哪里来，由调用处明说。只有实时读到的（`LIVE`）才重算皮肤、才改剪贴板历史开关。runtime-options.json 里的偏好是宿主早先准备时写下的副本（`RUNTIME_OPTIONS_COPY`）：主题字段可能已经过时（例如仍是默认的薄荷设计），用它重算会把按上次皮肤画好的第一帧刷成旧配色，一两秒后真正的偏好到了又换回来；它的 `clipboard_history` 永远是出厂默认的关，按它清空就是每换一个输入框历史都被清掉的原因（#5602）。皮肤因此只认启动缓存和真正读到的偏好。
+     * @param source 这份偏好从哪里来，由调用处明说。只有实时读到的（`LIVE`）才重算皮肤和候选条外观、才改剪贴板历史开关。runtime-options.json 里的偏好是宿主早先准备时写下的副本（`RUNTIME_OPTIONS_COPY`）：主题字段可能已经过时（例如仍是默认的薄荷设计），用它重算会把按上次皮肤画好的第一帧刷成旧配色，一两秒后真正的偏好到了又换回来；它的 `clipboard_history` 永远是出厂默认的关，按它清空就是每换一个输入框历史都被清掉的原因（#5602）。皮肤因此只认启动缓存和真正读到的偏好。
      */
     private void applyEditorPreferences(JSONObject preferences,
             ClipboardHistoryRetentionPolicy.Source source) throws JSONException {
@@ -695,7 +695,8 @@ public final class MSIMEInputService extends InputMethodService {
         localModes = preferences == null ? new JSONObject()
             : preferences.optJSONObject("local_modes");
         if (localModes == null) localModes = new JSONObject();
-        applyCandidateAppearance(preferences);
+        // 候选条的配色和字号与皮肤同理：按副本重算，候选条会先铺一层出厂薄荷底、字号回到出厂的 18/15，实时偏好到了才换回来（#5933）。副本这条路径保留当前外观，也就是上次真正读到的偏好或 onCreate 按皮肤片段算好的那一份。
+        if (live) applyCandidateAppearance(preferences);
         applyTouchGeometry(preferences);
         // 工具栏按钮开关与皮肤同理：runtime-options.json 那份出厂默认里剪贴板按钮是关的，拿它画，新打开的应用里工具栏先少一格、其余按钮跟着挪位，一两秒后实时偏好到了才补回来（#5680）。那条路径改用上次真正读到的开关，没有时才退回这份副本。
         JSONObject toolbar = live || rememberedToolbar == null
@@ -1255,11 +1256,14 @@ public final class MSIMEInputService extends InputMethodService {
         hardwareKeyboardAttached = hardwareKeyboardAttached(getResources().getConfiguration());
         productName = getApplicationInfo().loadLabel(getPackageManager()).toString();
         // 偏好要等引擎准备好才读到；先按上次换上的皮肤画，免得每次弹出键盘都先闪一两秒内置的淡绿配色。
+        // 候选条外观要经 ImeStyler.themed 按应用主题着色，第一次着色会把主题种子缓存约一分钟；先读本地设置，种子才是用户选的应用主题而不是默认的四季。
+        refreshLocalSettings();
         JSONObject hint = readSkinHint();
         if (hint != null) {
             skin = keyboardSkin(hint);
             emojiSkin = surfaceSkin(hint, "emoji_theme");
             handwritingSkin = surfaceSkin(hint, "handwriting_theme");
+            applyCandidateAppearance(hint);
         }
         Telemetry.beginInputSession(this);
         ClipboardManager clipboard = getSystemService(ClipboardManager.class);
@@ -4048,9 +4052,10 @@ public final class MSIMEInputService extends InputMethodService {
         return surfaceSkin(preferences, "screen_keyboard_theme");
     }
 
-    /** 决定键盘、表情与手写面板皮肤的偏好字段，加上工具栏按钮开关 `touch_toolbar`；{@link #rememberSkinHint} 只记这几项。 */
+    /** 决定键盘、表情、手写面板皮肤与候选条外观的偏好字段，加上工具栏按钮开关 `touch_toolbar`；{@link #rememberSkinHint} 只记这几项。 */
     private static final String[] SKIN_HINT_KEYS = {"global_theme", "custom_theme", "theme",
-        "screen_keyboard_theme", "emoji_theme", "handwriting_theme", "touch_toolbar"};
+        "candidate_theme", "candidate_font_family", "candidate_english_font", "candidate_fallback_fonts",
+        "candidate_font_size", "candidate_preedit_font_size", "screen_keyboard_theme", "emoji_theme", "handwriting_theme", "touch_toolbar"};
     /** 上次换上的皮肤所用的偏好片段，存在键盘进程自己的 filesDir 里。 */
     private static final String SKIN_HINT_FILE = "keyboard-skin-hint.json";
     private String writtenSkinHint;
