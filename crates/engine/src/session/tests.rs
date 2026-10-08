@@ -2297,6 +2297,29 @@ fn temporary_english_shows_its_prefix_until_a_word_matches() {
 }
 
 #[test]
+fn selecting_a_local_generated_candidate_does_not_clone_its_learning_row() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE).with_english(ENGLISH_FIXTURE);
+    let mut session = fixture.session();
+    assert!(session.character(b'Y', true).handled);
+    type_text(&mut session, "he");
+    assert_eq!(
+        session.snapshot().candidates[0].source,
+        CandidateSource::Generated
+    );
+
+    let (result, allocations) =
+        crate::ime::personal_rerank::allocations::count(|| session.select(0));
+
+    assert_eq!(result.commit.as_deref(), Some("he"));
+    assert!(result.diagnostic.is_none());
+    assert!(session.snapshot().preedit.is_empty());
+    assert!(
+        allocations <= 3,
+        "本地生成候选提交产生了 {allocations} 次分配"
+    );
+}
+
+#[test]
 fn temporary_japanese_returns_to_the_original_scheme() {
     let fixture = Fixture::new(QUANPIN_FIXTURE);
     let mut session = fixture.session_with(|options| {
