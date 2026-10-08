@@ -350,7 +350,7 @@ impl DictionarySnapshotQueue {
         let root = self.root()?;
         let mut incoming =
             tempfile::NamedTempFile::new_in(&root).map_err(|_| SnapshotQueueError::Unavailable)?;
-        let mut input = crate::storage::open_private_file(source)
+        let mut input = crate::storage::open_private_file_in(source)
             .map_err(|_| SnapshotQueueError::Unavailable)?;
         let mut hash = Sha256::new();
         let mut total = 0u64;
