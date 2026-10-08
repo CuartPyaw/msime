@@ -413,7 +413,7 @@ public final class KeyboardGeometry {
             float verticalDp) {
         int horizontal = pixels(context, horizontalDp);
         int vertical = pixels(context, verticalDp);
-        view.setPadding(horizontal, vertical, horizontal, vertical);
+        ViewPolicy.setSymmetricPadding(view, horizontal, vertical);
     }
 
     /** Apply equal horizontal dp padding with no vertical padding. */
