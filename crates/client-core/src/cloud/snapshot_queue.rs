@@ -456,7 +456,9 @@ impl DictionarySnapshotQueue {
         }
         let applied = self.update(|_, state| {
             let request = state.request.as_mut().ok_or(SnapshotQueueError::Conflict)?;
-            if request.id != id || (!already_applied && !request.status.active()) {
+            let can_complete = request.status.active()
+                || (already_applied && request.status == SnapshotRequestStatus::Applied);
+            if request.id != id || !can_complete {
                 return Err(SnapshotQueueError::Conflict);
             }
             if already_applied {
@@ -789,6 +791,37 @@ mod tests {
             queue.read().unwrap().request.unwrap().status,
             SnapshotRequestStatus::Cancelled
         );
+    }
+
+    #[test]
+    fn already_applied_completion_does_not_resurrect_cancelled_request() {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("queue");
+        let source = parent.path().join("snapshot.ndjson");
+        fs::write(&source, b"synthetic snapshot\n").unwrap();
+        let digest = hex::encode(Sha256::digest(fs::read(&source).unwrap()));
+        let initial = version("legacy", 'a');
+        let queue = DictionarySnapshotQueue::new(root).unwrap();
+        queue.publish_local_version(&initial).unwrap();
+        let id = queue
+            .enqueue(&source, "fixture", 1, &initial, &digest)
+            .unwrap();
+        let lease = queue.acquire_worker_lease().unwrap();
+        queue.claim(&lease).unwrap();
+        queue.cancel("fixture").unwrap();
+
+        assert!(matches!(
+            queue.complete(id, &lease, &version(&id.to_string(), 'b'), true, || {
+                panic!("cancelled request must not be applied")
+            }),
+            Err(SnapshotQueueError::Conflict)
+        ));
+        let state = queue.read().unwrap();
+        assert_eq!(
+            state.request.unwrap().status,
+            SnapshotRequestStatus::Cancelled
+        );
+        assert_eq!(state.local_version.as_deref(), Some(initial.as_str()));
     }
 
     #[test]

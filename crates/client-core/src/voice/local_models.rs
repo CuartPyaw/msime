@@ -7,7 +7,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::cell::Cell;
 use std::collections::BTreeMap;
-use std::fs;
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Read, Seek, Write};
 use std::path::{Component, Path, PathBuf};
 use std::rc::Rc;
@@ -17,6 +17,7 @@ use std::time::Duration;
 
 /// The file that marks a directory as an installed model. Kept in step with `local_model_manifest` in `shared/voice/LocalAsr.cpp`.
 pub const MANIFEST_FILE: &str = "msime-model.json";
+const MODEL_LOCK_FILE: &str = ".models.lock";
 
 const CATALOG_JSON: &str = include_str!("../../../../resources/local-asr-models.json");
 
@@ -29,6 +30,29 @@ const EMBEDDED_RESOURCES: &[(&str, &[u8])] = &[(
 const CHUNK: usize = 64 * 1024;
 /// Upper bound on archive members, so a hostile archive of empty entries cannot keep the extractor busy indefinitely.
 const MAX_ARCHIVE_ENTRIES: usize = 100_000;
+
+fn create_private_file(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    options.open(path)
+}
+
+fn write_private_bytes(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut file = create_private_file(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Catalog {
@@ -281,6 +305,13 @@ pub fn install(
 pub fn remove(root: &Path, id: &str) -> Result<(), LocalModelError> {
     let model = find_model(id)?;
     check_root(root)?;
+    if matches!(
+        fs::symlink_metadata(root),
+        Err(error) if error.kind() == io::ErrorKind::NotFound
+    ) {
+        return Ok(());
+    }
+    let _lock = acquire_model_lock(root)?;
     let target = root.join(&model.id);
     remove_leftovers(root, &model.id);
     let target_is_dir = match fs::symlink_metadata(&target) {
@@ -337,6 +368,17 @@ fn check_root(root: &Path) -> Result<(), LocalModelError> {
     Ok(())
 }
 
+/// Serialize every operation that mutates a model root, including operations made by separate
+/// host processes. The lock lives in the root and is deliberately kept after the operation so a
+/// later process cannot create a different inode while an earlier process still owns the lock.
+fn acquire_model_lock(root: &Path) -> Result<File, LocalModelError> {
+    fs::create_dir_all(root)?;
+    check_root(root)?;
+    let lock = crate::file_lock::open_private_lock_file(root.join(MODEL_LOCK_FILE))?;
+    crate::file_lock::exclusive(&lock)?;
+    Ok(lock)
+}
+
 fn ancestor_capacity(root: &Path) -> usize {
     root.components().count()
 }
@@ -357,7 +399,14 @@ fn remove_leftovers(root: &Path, id: &str) {
         let Some(name) = name.to_str() else {
             continue;
         };
-        if name.starts_with(&staging) {
+        let kind = match entry.file_type() {
+            Ok(kind) => kind,
+            Err(_) => continue,
+        };
+        // Only a real staging directory may carry an adoption record. A
+        // symlink here could redirect the recovery scan to an unrelated tree
+        // and rename its files into the trusted source directory.
+        if name.starts_with(&staging) && kind.is_dir() {
             restore_interrupted_adoption(&entry.path());
         }
         if name.starts_with(&staging) || name.starts_with(&old) {
@@ -393,11 +442,16 @@ fn restore_interrupted_adoption(staging: &Path) {
     };
     let source = PathBuf::from(source);
     if !source.is_absolute()
+        || check_root(&source).is_err()
         || !fs::symlink_metadata(&source).is_ok_and(|metadata| metadata.file_type().is_dir())
     {
         return;
     }
-    let Ok(entries) = fs::read_dir(staging.join("model")) else {
+    let model = staging.join("model");
+    if !fs::symlink_metadata(&model).is_ok_and(|metadata| metadata.file_type().is_dir()) {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(model) else {
         return;
     };
     for entry in entries.flatten() {
@@ -550,7 +604,7 @@ pub(crate) fn install_model(
     if !crate::preferences::valid_model_mirror(mirror) {
         return Err(LocalModelError::InvalidMirror);
     }
-    fs::create_dir_all(root)?;
+    let _lock = acquire_model_lock(root)?;
     remove_leftovers(root, &model.id);
     let staging = Staging(root.join(format!(".staging-{}-{}", model.id, unique_suffix())));
     fs::create_dir(&staging.0)?;
@@ -560,7 +614,7 @@ pub(crate) fn install_model(
     let total = model.archive.size;
     let archive = staging.0.join("archive.tar.bz2");
     let digest = {
-        let mut output = BufWriter::new(fs::File::create(&archive)?);
+        let mut output = BufWriter::new(create_private_file(&archive)?);
         let mut last = 0u64;
         let digest = download(
             fetcher,
@@ -622,10 +676,10 @@ pub(crate) fn install_model(
                 if !hex::encode(Sha256::digest(bytes)).eq_ignore_ascii_case(&extra.sha256) {
                     return Err(LocalModelError::ChecksumMismatch(extra.name.clone()));
                 }
-                fs::write(&destination, bytes)?;
+                write_private_bytes(&destination, bytes)?;
             }
             (None, Some(url)) => {
-                let mut output = BufWriter::new(fs::File::create(&destination)?);
+                let mut output = BufWriter::new(create_private_file(&destination)?);
                 let digest = download(
                     fetcher,
                     &mirrored(mirror, url),
@@ -667,7 +721,7 @@ pub(crate) fn install_model(
 /// 把 `msime-model.json` 写进暂存目录；它总是该目录里最后写入的文件，有它才算安装完整。
 fn write_manifest(dir: &Path, manifest: &Value) -> Result<(), LocalModelError> {
     let manifest = serde_json::to_vec_pretty(manifest).map_err(io::Error::other)?;
-    let mut file = fs::File::create(dir.join(MANIFEST_FILE))?;
+    let mut file = create_private_file(&dir.join(MANIFEST_FILE))?;
     file.write_all(&manifest)?;
     file.sync_all()?;
     Ok(())
@@ -747,7 +801,7 @@ pub(crate) fn install_files_with(
     cancel: &AtomicBool,
 ) -> Result<PathBuf, LocalModelError> {
     check_install(root, id, mirrors)?;
-    fs::create_dir_all(root)?;
+    let _lock = acquire_model_lock(root)?;
     remove_leftovers(root, id);
     let staging = Staging(root.join(format!(".staging-{}-{}", id, unique_suffix())));
     fs::create_dir(&staging.0)?;
@@ -879,7 +933,7 @@ pub(crate) fn install_archive_members_with(
     cancel: &AtomicBool,
 ) -> Result<PathBuf, LocalModelError> {
     check_install(root, id, mirrors)?;
-    fs::create_dir_all(root)?;
+    let _lock = acquire_model_lock(root)?;
     remove_leftovers(root, id);
     let staging = Staging(root.join(format!(".staging-{}-{}", id, unique_suffix())));
     fs::create_dir(&staging.0)?;
@@ -956,7 +1010,7 @@ fn download_and_extract(
         if !entry.is_file() {
             return Err(LocalModelError::UnsafeArchive(member.to_owned()));
         }
-        let mut output = BufWriter::new(fs::File::create(pack_dir.join(&name))?);
+        let mut output = BufWriter::new(create_private_file(&pack_dir.join(&name))?);
         let mut hasher = Sha256::new();
         let mut buffer = vec![0u8; CHUNK];
         let mut written = 0u64;
@@ -1017,8 +1071,9 @@ pub(crate) fn adopt_files(
     if !source.is_absolute() {
         return Err(LocalModelError::InvalidRoot);
     }
+    check_root(source)?;
     let record = source.to_str().ok_or(LocalModelError::InvalidRoot)?;
-    fs::create_dir_all(root)?;
+    let _lock = acquire_model_lock(root)?;
     // 先放回上一次被打断的收编移走的文件，再检查来源里有没有这组文件。
     remove_leftovers(root, id);
     let mut names = Vec::with_capacity(files.len());
@@ -1042,7 +1097,7 @@ pub(crate) fn adopt_files(
     let pack_dir = staging.0.join("model");
     fs::create_dir(&pack_dir)?;
     // 改名之前先落盘来源记录：进程在发布前被杀时，下次收编或安装这个包时按它把文件放回来源（[`restore_interrupted_adoption`]）。
-    let mut source_record = fs::File::create(staging.0.join(ADOPTION_SOURCE))?;
+    let mut source_record = create_private_file(&staging.0.join(ADOPTION_SOURCE))?;
     source_record.write_all(record.as_bytes())?;
     source_record.sync_all()?;
     drop(source_record);
@@ -1485,7 +1540,7 @@ fn extract(
             if let Some(parent) = destination.parent() {
                 fs::create_dir_all(parent)?;
             }
-            let mut output = BufWriter::new(fs::File::create(&destination)?);
+            let mut output = BufWriter::new(create_private_file(&destination)?);
             loop {
                 check_cancel(cancel)?;
                 let read = match entry.read(&mut buffer) {

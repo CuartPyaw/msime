@@ -1,6 +1,8 @@
 package app.msime.android;
 
 import android.content.Context;
+import android.content.res.ColorStateList;
+import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.view.Gravity;
 import android.view.View;
@@ -224,9 +226,25 @@ public final class ViewPolicy {
         view.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp);
     }
 
+    /** Set a paint's text size in scalable pixels using the supplied display context. */
+    public static void setTextSizeSp(Paint paint, Context context, float sizeSp) {
+        paint.setTextSize(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, sizeSp,
+            context.getResources().getDisplayMetrics()));
+    }
+
+    /** Set a text view's size in density-independent pixels. */
+    public static void setTextSizeDp(TextView view, float sizeDp) {
+        view.setTextSize(TypedValue.COMPLEX_UNIT_DIP, sizeDp);
+    }
+
     /** Set a text view's solid foreground color. */
     public static void setTextColor(TextView view, int color) {
         view.setTextColor(color);
+    }
+
+    /** Set a text view's state-aware foreground colors. */
+    public static void setTextColor(TextView view, ColorStateList colors) {
+        view.setTextColor(colors);
     }
 
     /** Set a text label and its scalable size. */
@@ -282,6 +300,11 @@ public final class ViewPolicy {
     /** Set a view background while preserving its other visual state. */
     public static void setBackground(View view, android.graphics.drawable.Drawable background) {
         view.setBackground(background);
+    }
+
+    /** Apply a solid background color while preserving the view's other visual state. */
+    public static void setBackgroundColor(View view, int color) {
+        view.setBackgroundColor(color);
     }
 
     /** Remove a view's default background drawable. */

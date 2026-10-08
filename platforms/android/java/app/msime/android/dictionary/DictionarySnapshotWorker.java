@@ -81,11 +81,11 @@ public final class DictionarySnapshotWorker {
 
     /** Snapshot bridge status flags must remain JSON booleans; reject scalar coercion. */
     static Boolean strictBoolean(Object value) {
-        return value instanceof Boolean ? (Boolean) value : null;
+        return JsonPolicy.strictBoolean(value);
     }
 
     /** Snapshot identity fields must remain JSON strings; org.json otherwise coerces scalars. */
     static String strictString(Object value) {
-        return value instanceof String ? (String) value : null;
+        return JsonPolicy.strictString(value);
     }
 }

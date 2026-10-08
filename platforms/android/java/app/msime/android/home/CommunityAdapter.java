@@ -219,7 +219,7 @@ public final class CommunityAdapter extends RecyclerView.Adapter<CommunityAdapte
         boolean first = position == 0 || entries.get(position - 1).item() == null;
         boolean last = position == entries.size() - 1 || entries.get(position + 1).item() == null;
         if (holder.divider != null) ViewPolicy.setVisible(holder.divider, !first);
-        holder.itemView.setBackground(group(holder.itemView, first, last));
+        ViewPolicy.setBackground(holder.itemView, group(holder.itemView, first, last));
         String subtitle = subtitle(item);
         if (holder.author != null) {
             holder.author.setText(subtitle);
@@ -259,7 +259,7 @@ public final class CommunityAdapter extends RecyclerView.Adapter<CommunityAdapte
         // 「已添加」是终态：没有底色、正文色、不响应；皮肤拿到之后的「使用」仍是可点的 tonal 按钮。
         boolean enabled = action == Action.AVAILABLE || (skin && action == Action.DONE);
         boolean filled = action != Action.DONE || skin;
-        pill.setBackground(filled ? Ui.pillRipple(context, Ui.accentSoft(context)) : null);
+        ViewPolicy.setBackground(pill, filled ? Ui.pillRipple(context, Ui.accentSoft(context)) : null);
         ViewPolicy.setTextColor(pill, filled ? Ui.accent(context) : Ui.text(context));
         ViewPolicy.setEnabled(pill, enabled);
         ViewPolicy.setInteractive(pill, enabled);

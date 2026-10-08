@@ -105,9 +105,9 @@ public final class ProfilePage extends DetailPage {
         SyncSwitch.bindAccount(context, profile.id(), kind);
     }
 
-    /** 读头像图片：只认 https、不超过 1 MiB；读不到时为 null，界面显示首字头像。阻塞。 */
+    /** 读头像图片：只认账号头像服务的 HTTPS 主机、不超过 1 MiB；读不到时为 null，界面显示首字头像。阻塞。 */
     @Nullable static Bitmap avatar(String url) {
-        if (url == null || !url.startsWith("https://")) return null;
+        if (!DeviceDataApi.avatarUrlAllowed(url)) return null;
         try {
             HttpsURLConnection connection = (HttpsURLConnection) new URL(url).openConnection();
             try {

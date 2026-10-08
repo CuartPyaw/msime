@@ -1212,18 +1212,14 @@ pub fn add_preview(root: &Path, id: &str, bytes: &[u8]) -> Result<String, &'stat
         return Err(STORAGE);
     }
     let staged = directory.join(".skin.toml.preview");
-    if fs::write(&staged, &manifest)
-        .and_then(|()| fs::rename(&staged, &manifest_path))
-        .is_err()
-    {
-        let _ = fs::remove_file(&staged);
+    if replace_manifest(&staged, &manifest_path, manifest.as_bytes()).is_err() {
         undo_image();
         return Err(STORAGE);
     }
     match catalog::load_package(root, id) {
         Ok(updated) if updated.preview.as_deref() == Some(name.as_str()) => Ok(name),
         _ => {
-            let _ = fs::write(&manifest_path, &original);
+            let _ = replace_manifest(&staged, &manifest_path, &original);
             undo_image();
             Err(PACKAGE)
         }
@@ -1287,11 +1283,7 @@ pub fn add_license(root: &Path, id: &str, assets: &str) -> Result<(), &'static s
         return Err(PACKAGE);
     }
     let staged = root.join(id).join(".skin.toml.license");
-    if fs::write(&staged, &manifest)
-        .and_then(|()| fs::rename(&staged, &manifest_path))
-        .is_err()
-    {
-        let _ = fs::remove_file(&staged);
+    if replace_manifest(&staged, &manifest_path, manifest.as_bytes()).is_err() {
         return Err(STORAGE);
     }
     match catalog::load_package(root, id) {
@@ -1305,7 +1297,7 @@ pub fn add_license(root: &Path, id: &str, assets: &str) -> Result<(), &'static s
             Ok(())
         }
         _ => {
-            let _ = fs::write(&manifest_path, &original);
+            let _ = replace_manifest(&staged, &manifest_path, &original);
             Err(PACKAGE)
         }
     }
@@ -1398,6 +1390,16 @@ fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         .open(path)?;
     file.write_all(bytes)?;
     file.sync_all()
+}
+
+/// Write through a newly created sidecar, then replace the directory entry. Neither the
+/// staging name nor a manifest replaced during rollback may redirect these bytes elsewhere.
+fn replace_manifest(staged: &Path, manifest_path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let result = write_new(staged, bytes).and_then(|()| fs::rename(staged, manifest_path));
+    if result.is_err() {
+        let _ = fs::remove_file(staged);
+    }
+    result
 }
 
 fn remove_leftover(path: &Path) -> Result<(), &'static str> {

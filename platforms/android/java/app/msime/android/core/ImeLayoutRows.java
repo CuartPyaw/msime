@@ -256,7 +256,7 @@ final class ImeLayoutRows {
     static String pinyinOf(String text, String resources) {
         try {
             JSONObject root = new JSONObject(NativeClient.dictionaryHansEntries(text, resources));
-            JSONObject value = Boolean.TRUE.equals(root.opt("ok"))
+            JSONObject value = JsonPolicy.strictTrue(root.opt("ok"))
                 ? root.optJSONObject("value") : null;
             JSONArray entries = value == null ? null : value.optJSONArray("entries");
             JSONObject entry = entries == null || entries.length() == 0 ? null : entries.optJSONObject(0);
@@ -920,7 +920,7 @@ final class ImeLayoutRows {
     }
 
     private void bindFeedbackAction(Button button, Runnable action) {
-        button.setOnClickListener(ignored -> {
+        ViewPolicy.bindClick(button, () -> {
             s.imeKeyFeedback.playFeedback(button);
             action.run();
         });
