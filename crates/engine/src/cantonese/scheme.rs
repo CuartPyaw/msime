@@ -106,20 +106,29 @@ impl CantoneseScheme {
     /// The typed letters with a space at each syllable boundary (`nei hou`). Letters no syllable reads follow after a space as typed, and a trailing `'` stays visible so the key shows an effect.
     pub fn editing_text(&self) -> String {
         let reading = self.segmentation();
-        let mut text = String::new();
+        let mut text = String::with_capacity(
+            reading
+                .syllables
+                .iter()
+                .map(|syllable| syllable.end - syllable.start)
+                .sum::<usize>()
+                .saturating_add(reading.syllables.len().saturating_sub(1)),
+        );
         self.editing_text_into(&reading, &mut text);
         text
     }
 
     fn editing_text_into(&self, reading: &Segmentation, text: &mut String) {
-        text.clear();
-        let required = reading
+        let capacity = reading
             .syllables
             .iter()
             .map(|syllable| syllable.end - syllable.start)
             .sum::<usize>()
             .saturating_add(reading.syllables.len().saturating_sub(1));
-        text.reserve_exact(required.saturating_sub(text.capacity()));
+        text.clear();
+        if text.capacity() < capacity {
+            text.reserve(capacity - text.capacity());
+        }
         for (index, syllable) in reading.syllables.iter().enumerate() {
             if index > 0 {
                 text.push(' ');
@@ -144,27 +153,23 @@ impl CantoneseScheme {
         request
     }
 
-    /// 将粤拼请求写入已有存储，避免逐键刷新重复分配输入和切分字符串。
     pub fn build_request_into(&self, request: &mut QueryRequest) {
         let reading = self.segmentation();
         request.scheme = SchemeType::Cantonese;
         request.raw_input.clone_from(&self.input);
         request.raw_input_with_cases.clone_from(&self.input);
         request.normalized_input.clear();
+        request.normalized_input.reserve(self.input.len());
         request
             .normalized_input
             .extend(self.input.chars().filter(|&character| character != '\''));
         request.raw_segmentation.clone_from(&self.input);
         self.editing_text_into(&reading, &mut request.normalized_segmentation);
-        request.segmentation.clear();
-        for (index, syllable) in reading.syllables.iter().enumerate() {
-            if index > 0 {
-                request.segmentation.push(' ');
-            }
-            request
-                .segmentation
-                .push_str(&self.input[syllable.start..syllable.end]);
-        }
+        reading.key_into(
+            &self.input,
+            reading.syllables.len(),
+            &mut request.segmentation,
+        );
         request.valid = !self.input.is_empty();
     }
 
@@ -730,6 +735,35 @@ mod tests {
         scheme.set_raw_input(&source);
         assert_eq!(scheme.input.len(), source.len());
         assert_eq!(scheme.input.capacity(), source.len());
+    }
+
+    #[test]
+    fn build_request_reuses_request_strings() {
+        let mut scheme = typed("nei'hou");
+        let mut request = scheme.build_request();
+        let pointers = [
+            request.raw_input.as_ptr(),
+            request.raw_input_with_cases.as_ptr(),
+            request.normalized_input.as_ptr(),
+            request.raw_segmentation.as_ptr(),
+            request.normalized_segmentation.as_ptr(),
+            request.segmentation.as_ptr(),
+        ];
+
+        scheme.handle_key(SchemeKey::Requery);
+        scheme.build_request_into(&mut request);
+
+        assert_eq!(
+            [
+                request.raw_input.as_ptr(),
+                request.raw_input_with_cases.as_ptr(),
+                request.normalized_input.as_ptr(),
+                request.raw_segmentation.as_ptr(),
+                request.normalized_segmentation.as_ptr(),
+                request.segmentation.as_ptr(),
+            ],
+            pointers
+        );
     }
 
     #[test]
