@@ -444,7 +444,7 @@ public final class AndroidLocalSettings {
 
     private static Snapshot read(Path file) {
         try {
-            if (Files.isSymbolicLink(file) || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS))
+            if (!privateFile(file))
                 throw new IOException("settings path is not a regular file");
             byte[] bytes;
             try (InputStream input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
@@ -454,6 +454,12 @@ public final class AndroidLocalSettings {
         } catch (IOException | JSONException | RuntimeException ignored) {
             return DEFAULTS;
         }
+    }
+
+    static boolean privateFile(Path file) {
+        return file != null
+            && Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
+            && SafePaths.isSingleLink(file);
     }
 
     /** 文件身份：inode、修改时间和大小；文件不存在或不是普通文件时为 null。 */
