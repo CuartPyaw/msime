@@ -72,7 +72,7 @@ public final class KeyboardSkinCard extends KeyboardPressButton {
 
     @Override protected void onDraw(Canvas canvas) {
         float labelSize = KeyboardGeometry.keySp(getContext(), LABEL_SP);
-        paint.setTextSize(labelSize);
+        ViewPolicy.setTextSize(paint, labelSize);
         Paint.FontMetrics metrics = paint.getFontMetrics();
         float labelHeight = metrics.descent - metrics.ascent;
         float ring = KeyboardGeometry.floatPixels(2, density);
