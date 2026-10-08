@@ -1029,6 +1029,10 @@ fn load_package_rejects_theme_mismatched_missing_and_aliased_packages() {
 
 #[test]
 #[cfg(unix)]
+#[cfg_attr(
+    target_os = "android",
+    ignore = "Android 的 adb shell 域不允许建 FIFO（SELinux 拒绝 fifo_file create）"
+)]
 fn a_fifo_manifest_is_rejected_without_blocking() {
     let root = tempdir().unwrap();
     fs::create_dir_all(root.path().join("pipe")).unwrap();

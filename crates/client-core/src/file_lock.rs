@@ -222,6 +222,10 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    #[cfg_attr(
+        target_os = "android",
+        ignore = "Android 的 adb shell 域不允许建 FIFO（SELinux 拒绝 fifo_file create）"
+    )]
     fn refuses_a_fifo_lock_leaf() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("state.lock");

@@ -180,6 +180,10 @@ mod tests {
     /// vendored from the reference, so a mismatch would mean the contract drifted from the markup -
     /// and nothing else in this repository reads that file today, so nothing else would notice.
     #[test]
+    #[cfg_attr(
+        target_os = "android",
+        ignore = "读主机仓库里的文件，设备上没有这份检出"
+    )]
     fn the_vendored_fragment_renders_a_page_of_candidates() {
         let fragment = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
             "../../packages/ui/src/upstream/candidate-themes/vertical_candidate_window_dark.html",

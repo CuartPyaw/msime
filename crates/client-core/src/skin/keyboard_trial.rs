@@ -348,10 +348,17 @@ mod tests {
             background: 0x654321,
             ..TouchKeyboardSkinDesign::default()
         };
+        // 恢复的是试用前的键盘皮肤：桌面默认没有，触屏构建默认是薄荷晨光。
+        let before = preferences
+            .load()
+            .unwrap()
+            .preferences
+            .custom_theme
+            .keyboard;
         trials.begin("待恢复", design.clone()).unwrap();
         let recovered = KeyboardSkinTrialStore::new(root.path(), Arc::clone(&preferences));
         let restored = recovered.restore_pending().unwrap();
-        assert_eq!(restored.preferences.custom_theme.keyboard, None);
+        assert_eq!(restored.preferences.custom_theme.keyboard, before);
 
         let (trial, applied) = trials.begin("不覆盖后续选择", design).unwrap();
         let mut later = applied.preferences;
