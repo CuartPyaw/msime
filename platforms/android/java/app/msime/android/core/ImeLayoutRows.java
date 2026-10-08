@@ -776,7 +776,7 @@ final class ImeLayoutRows {
         popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         popup.setOutsideTouchable(true);
         popup.setClippingEnabled(true);
-        popup.setElevation(s.pixels(4));
+        ViewPolicy.setElevation(popup, s.pixels(4));
         popup.setOnDismissListener(() -> {
             if (s.nineKeyHoldPopup == holder[0]) s.nineKeyHoldPopup = null;
         });
