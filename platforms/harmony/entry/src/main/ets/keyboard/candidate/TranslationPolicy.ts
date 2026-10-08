@@ -119,6 +119,7 @@ export class TranslationPolicy {
     return JSON.stringify({
       generation: query.generation,
       target_languages: TranslationPolicy.targets(query),
+      offline_gloss_languages: TranslationPolicy.offlineTargets(query),
       candidates: query.candidates.map((candidate: TranslationCandidate): string => candidate.text),
       english_gloss: query.english_gloss,
       provider: TranslationPolicy.provider(query),
