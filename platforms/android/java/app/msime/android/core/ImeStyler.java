@@ -231,7 +231,7 @@ final class ImeStyler {
             // The pill is a label on the strip rather than a key, so it keeps a plain rounded face even over a designed skin, inset so the 44dp target stays.
             GradientDrawable pill = DrawablePolicy.rounded(color(target.keyBackground()),
                 s.pixels(14));
-            button.setBackground(new InsetDrawable(pill,
+            ViewPolicy.setBackground(button, new InsetDrawable(pill,
                 s.pixels(2), s.pixels(8), s.pixels(2), s.pixels(8)));
             ViewPolicy.setTextColor(button, color(target.keyForeground()));
             applySkinTypeface(button, target);
@@ -266,7 +266,7 @@ final class ImeStyler {
         // 键帽完全由皮肤、角色、选中状态和密度决定；这几项都没变就留着现在这块，不再每次 render 换一个一样的新 Drawable 让整块键盘重画。
         if (press == null || !press.keepsFace(target, role, selected, density)) {
             if (target.designed()) {
-                button.setBackground(new KeyboardSkinKeyDrawable(target,
+                ViewPolicy.setBackground(button, new KeyboardSkinKeyDrawable(target,
                     color(background), selected || action || confirm, density));
             } else {
                 GradientDrawable drawable = DrawablePolicy.rounded(color(background),
@@ -274,7 +274,7 @@ final class ImeStyler {
                 int borderWidth = s.pixels(target.borderWidth());
                 if (borderWidth > 0)
                     drawable.setStroke(borderWidth, color(target.borderColor()));
-                button.setBackground(drawable);
+                ViewPolicy.setBackground(button, drawable);
             }
             if (press != null) press.rememberFace(target, role, selected, density);
         }
@@ -309,7 +309,7 @@ final class ImeStyler {
         KeyboardKeyRole remembered = on ? KeyboardKeyRole.KEY : KeyboardKeyRole.ACCENT;
         if (!key.keepsFace(target, remembered, false, density)) {
             if (target.designed()) {
-                key.setBackground(new KeyboardSkinKeyDrawable(target,
+                ViewPolicy.setBackground(key, new KeyboardSkinKeyDrawable(target,
                     color(background), !on, density));
             } else {
                 GradientDrawable drawable = DrawablePolicy.rounded(color(background),
@@ -317,7 +317,7 @@ final class ImeStyler {
                 int borderWidth = s.pixels(target.borderWidth());
                 if (borderWidth > 0)
                     drawable.setStroke(borderWidth, color(target.borderColor()));
-                key.setBackground(drawable);
+                ViewPolicy.setBackground(key, drawable);
             }
             key.rememberFace(target, remembered, false, density);
         }
@@ -467,7 +467,7 @@ final class ImeStyler {
                 ? color(s.skin.accent()) : s.candidateAppearance.number());
             s.preedit.setTypeface(candidateTypeface());
             KeyboardGeometry.setKeyTextSize(s.preedit, s.brandPillVisible ? 12 : s.candidatePreeditFontSize);
-            s.preedit.setBackground(s.brandPillVisible ? brandPillDrawable() : null);
+            ViewPolicy.setBackground(s.preedit, s.brandPillVisible ? brandPillDrawable() : null);
             ViewPolicy.setPadding(s.preedit, s.pixels(s.brandPillVisible ? 12 : 2),
                 s.pixels(s.brandPillVisible ? 4 : 0), s.pixels(s.brandPillVisible ? 12 : 2),
                 s.pixels(s.brandPillVisible ? 4 : 0));
@@ -490,7 +490,7 @@ final class ImeStyler {
         // 同一个皮肤对象画出的底图完全一样；已经是它就不再换新的，免得每按一个键都让整块键盘底图重画（照片皮肤还要重新上传位图）。
         if (node.getBackground() instanceof KeyboardSkinBackgroundDrawable current
                 && current.draws(target, density)) return;
-        node.setBackground(new KeyboardSkinBackgroundDrawable(target, density));
+        ViewPolicy.setBackground(node, new KeyboardSkinBackgroundDrawable(target, density));
     }
 
     /** 浮动面板的圆角轮廓；阴影与裁剪都按它来。 */
