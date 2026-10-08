@@ -5,9 +5,39 @@
 //! locking API works on which target. `host-api` had its own `File::lock` call, and on Android it
 //! failed on the first line of every shared clipboard operation - which made the keyboard's own
 //! `onCreateInputView` throw and the input method die before it could draw a single key.
+use std::ffi::OsStr;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::path::Path;
+
+/// A parent directory opened without following an untrusted symlink. On Unix,
+/// all operations through this value stay bound to that directory if its path
+/// is replaced later.
+pub struct PrivateDirectory {
+    #[cfg(unix)]
+    directory: File,
+    #[cfg(not(unix))]
+    directory: crate::storage::PrivateDirectory,
+}
+
+pub fn open_private_directory(path: impl AsRef<Path>) -> io::Result<PrivateDirectory> {
+    Ok(PrivateDirectory {
+        directory: crate::storage::open_private_directory(path.as_ref())?,
+    })
+}
+
+pub fn open_private_file_at(directory: &PrivateDirectory, name: &OsStr) -> io::Result<File> {
+    crate::storage::open_private_file_at(&directory.directory, name)
+}
+
+pub fn replace_private_file_at(
+    directory: &PrivateDirectory,
+    name: &OsStr,
+    contents: &[u8],
+    permissions: &std::fs::Permissions,
+) -> io::Result<()> {
+    crate::storage::replace_private_file_at(&directory.directory, name, contents, Some(permissions))
+}
 
 fn lock_file_options() -> OpenOptions {
     let mut options = File::options();
@@ -117,6 +147,19 @@ pub fn open_private_file_in(path: impl AsRef<Path>) -> io::Result<File> {
 /// 替换私有文件时不再通过路径解析可能已被替换的 Unix 父目录。
 pub fn replace_private_file(path: impl AsRef<Path>, contents: &[u8]) -> io::Result<()> {
     crate::storage::replace_private_file(path.as_ref(), contents)
+}
+
+/// Replace a private file atomically while preserving the supplied permissions.
+pub fn replace_private_file_with_permissions(
+    path: impl AsRef<Path>,
+    contents: &[u8],
+    permissions: &std::fs::Permissions,
+) -> io::Result<()> {
+    crate::storage::replace_private_file_with_permissions(
+        path.as_ref(),
+        contents,
+        Some(permissions),
+    )
 }
 
 pub(crate) fn try_shared(file: &File) -> io::Result<bool> {

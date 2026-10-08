@@ -9389,6 +9389,48 @@ fn refresh_leaves_a_symlinked_options_file_alone() {
 
 #[cfg(unix)]
 #[test]
+fn refresh_publish_stays_in_the_open_options_parent() {
+    use std::ffi::OsStr;
+    use std::os::unix::fs::symlink;
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = tempfile::tempdir().unwrap();
+    let original = root.path().join("state");
+    let outside = root.path().join("outside");
+    std::fs::create_dir(&original).unwrap();
+    std::fs::create_dir(&outside).unwrap();
+    let options = original.join("runtime-options.json");
+    std::fs::write(&options, b"{} ").unwrap();
+    std::fs::set_permissions(&options, std::fs::Permissions::from_mode(0o640)).unwrap();
+    let metadata = std::fs::metadata(&options).unwrap();
+    let directory = msime_client_core::file_lock::open_private_directory(&original).unwrap();
+
+    let moved = root.path().join("moved");
+    std::fs::rename(&original, &moved).unwrap();
+    symlink(&outside, &original).unwrap();
+
+    super::replace_options_file(
+        &directory,
+        OsStr::new("runtime-options.json"),
+        &metadata,
+        &json!({"synthetic": true}),
+    )
+    .unwrap();
+
+    assert!(moved.join("runtime-options.json").is_file());
+    assert!(!outside.join("runtime-options.json").exists());
+    assert_eq!(
+        std::fs::metadata(moved.join("runtime-options.json"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o640
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn refresh_rejects_a_symlinked_options_parent() {
     use msime_path_trust::untrusted_symlink as symlink;
 
