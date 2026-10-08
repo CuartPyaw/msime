@@ -4139,9 +4139,9 @@ public final class MSIMEInputService extends InputMethodService {
     /** 读上次的皮肤片段；没有或损坏时返回 null，键盘照旧先用内置配色。 */
     private JSONObject readSkinHint() {
         File file = new File(getFilesDir(), SKIN_HINT_FILE);
-        if (!file.isFile() || file.length() > 1_000_000) return null;
+        if (!SkinHintFilePolicy.readable(file)) return null;
         try (java.io.InputStream input = java.nio.file.Files.newInputStream(file.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-            byte[] bytes = HttpBodyPolicy.readBounded(input, 1_000_000);
+            byte[] bytes = HttpBodyPolicy.readBounded(input, SkinHintFilePolicy.MAX_BYTES);
             if (bytes == null) return null;
             String text = TextPolicy.utf8(bytes);
             writtenSkinHint = text;
