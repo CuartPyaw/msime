@@ -87,7 +87,7 @@ final class QuickDeleteOverlay extends View {
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(Color.parseColor(armed ? skin.onAccent() : skin.keyForeground()));
         paint.setTextSize(KeyboardGeometry.keySp(getContext(), 15));
-        paint.setTypeface(Typeface.DEFAULT_BOLD);
+        ViewPolicy.setTypeface(paint, Typeface.DEFAULT_BOLD);
         Paint.FontMetrics metrics = paint.getFontMetrics();
         float baseline = (current.top() + current.bottom()) / 2 - (metrics.ascent + metrics.descent) / 2;
         float width = paint.measureText(LABEL);
