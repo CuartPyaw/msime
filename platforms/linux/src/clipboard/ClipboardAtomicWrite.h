@@ -43,7 +43,14 @@ inline int open_clipboard_lock(const std::filesystem::path &history) {
   if (!clipboard_directory_is_safe(directory)) return -1;
   auto lock = history;
   lock += ".lock";
-  return ::open(lock.c_str(), O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
+  const int descriptor = ::open(lock.c_str(), O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
+  if (descriptor < 0) return -1;
+  struct stat metadata {};
+  if (::fstat(descriptor, &metadata) != 0 || !S_ISREG(metadata.st_mode) || metadata.st_nlink != 1) {
+    ::close(descriptor);
+    return -1;
+  }
+  return descriptor;
 }
 
 // Remove the history file only when its parent remains a real directory. The
@@ -66,7 +73,7 @@ inline std::optional<std::string> read_clipboard_file(const std::filesystem::pat
   const int descriptor = ::open(file.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
   if (descriptor < 0) return std::nullopt;
   struct stat metadata {};
-  if (::fstat(descriptor, &metadata) != 0 || !S_ISREG(metadata.st_mode)) {
+  if (::fstat(descriptor, &metadata) != 0 || !S_ISREG(metadata.st_mode) || metadata.st_nlink != 1) {
     ::close(descriptor);
     return std::nullopt;
   }
