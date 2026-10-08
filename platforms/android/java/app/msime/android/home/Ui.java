@@ -193,7 +193,7 @@ public final class Ui {
 
     /** Set a view's minimum height from a density-independent value. */
     public static void setMinimumHeightDp(View view, Context context, float heightDp) {
-        view.setMinimumHeight(dp(context, heightDp));
+        ViewPolicy.setMinimumHeight(view, dp(context, heightDp));
     }
 
     /** Set a text view's line-aware minimum height from a density-independent value. */
