@@ -640,6 +640,14 @@ impl ImeSession {
                     wubi_table_answered: false,
                 }
             }
+            None if request.scheme == SchemeType::Stroke => {
+                let mut candidates = std::mem::take(&mut self.state.candidates);
+                self.registry.query_stroke_into(&request, &mut candidates);
+                Decoded {
+                    candidates,
+                    wubi_table_answered: false,
+                }
+            }
             None => self.decode(&request),
         };
         // A fifth letter is only allowed once the table has failed the code typed so far.
