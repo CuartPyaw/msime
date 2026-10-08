@@ -14,7 +14,7 @@ import java.util.List;
  *
  * <p>页面类的约束见 {@link DetailPage}：必须是 public 类、有 public 无参构造器、参数只放在 arguments Bundle 里。
  *
- * <p>关键词取自对应设计图上的行标题，搜索时与标题一起匹配；{@link #LEXICON_DETAIL} 需要参数才能打开，所以没有关键词，不出现在搜索结果里。
+ * <p>关键词取自对应设计图上的行标题，搜索时与标题一起匹配；{@link #LEXICON_DETAIL} 需要参数才能打开，所以没有关键词，不出现在搜索结果里。页面里新加的开关、导航和滑块行要同时把行标题加进这里，否则设置首页搜不到它（#6132 的「浮动键盘」就是这样漏掉的）；`tests/home/SettingsSearchIndexSmoke.java` 逐页核对。
  */
 public enum PageId {
     SKINS("SkinsPage", "皮肤", HostDeepLink.TAB_SETTINGS,
@@ -22,20 +22,21 @@ public enum PageId {
     AI_SKIN("AiSkinPage", "AI 设计皮肤", HostDeepLink.TAB_SETTINGS,
         "描述一句话生成", "配色", "按键音效", "按键动画", "生成皮肤"),
     KEYBOARD_OPTIONS("KeyboardOptionsPage", "键盘", HostDeepLink.TAB_SETTINGS,
-        "布局", "中文键盘", "键盘高度", "按键反馈", "按键音", "按键振动", "按键弹出预览", "手势",
-        "滑动输入符号", "滑动方向", "下滑", "上滑", "滑行输入", "空格键滑动移动光标", "长按空格语音输入", "键盘工具栏", "显示方式", "表情", "常用语",
-        "剪贴板", "输入方式", "按键间距", "行间距", "剪贴板排列", "单列", "双列", "工具栏显示最近复制", "最近复制"),
+        "布局", "中文键盘", "九键左侧符号", "九键数字键盘左侧符号", "数字键盘顺序", "键盘高度", "横屏分离式键盘",
+        "浮动键盘", "键盘底栏", "按键反馈", "按键音", "按键振动", "按键弹出预览", "按键动画", "手势",
+        "滑动输入符号", "滑动方向", "下滑", "上滑", "九键滑动输入数字", "滑行输入", "空格键滑动移动光标", "长按空格语音输入", "键盘工具栏", "显示方式", "表情", "常用语",
+        "皮肤", "剪贴板", "输入方式", "按键间距", "行间距", "剪贴板排列", "单列", "双列", "工具栏显示最近复制", "最近复制"),
     AI_SETTINGS("AiSettingsPage", "AI 润色与回复", HostDeepLink.TAB_SETTINGS,
         "启用 AI 入口", "端点 URL", "模型", "凭据", "润色提示词"),
     TYPING("TypingPage", "输入", HostDeepLink.TAB_SETTINGS,
-        "语言与方案", "普通话", "粤语", "英语", "日语", "添加语言", "中文", "中文字符集", "简体", "繁体",
-        "拼音纠错", "模糊音", "云候选", "辅助码", "启用辅助码", "辅助码方案", "辅助码模式", "翻译", "候选词翻译",
+        "语言与方案", "普通话", "粤语", "英语", "日语", "韩语", "越南语", "藏语", "添加语言", "中文", "中文字符集", "简体", "繁体",
+        "拼音纠错", "模糊音", "只出单字", "云候选", "辅助码", "启用辅助码", "辅助码方案", "辅助码模式", "翻译", "候选词翻译",
         "离线英文释义", "翻译目标语言"),
     EXPRESSION("ExpressionPage", "表达", HostDeepLink.TAB_SETTINGS,
         "标点", "使用英文标点", "自动补全成对标点", "智能标点", "智能", "整句联想", "英文自动纠正", "英文联想",
-        "发现短语"),
+        "候选带 emoji", "候选带颜文字", "发现短语"),
     LEXICON("LexiconPage", "词库", HostDeepLink.TAB_SETTINGS,
-        "已安装", "拼音词库", "新建词库", "导入词库", "导出", "发现词库", "记忆新词", "学习"),
+        "已安装", "拼音词库", "新建词库", "导入词库", "导出", "发现词库", "记忆新词", "学习", "背单词", "云词库"),
     LEXICON_DETAIL("LexiconDetailPage", "词库详情", HostDeepLink.TAB_SETTINGS),
     PHRASES("PhrasesPage", "常用语", HostDeepLink.TAB_SETTINGS,
         "添加常用语", "修改常用语", "删除常用语"),
@@ -44,16 +45,16 @@ public enum PageId {
     HANDWRITING("HandwritingPage", "手写输入", HostDeepLink.TAB_SETTINGS,
         "书写", "书写模式", "叠写", "识别等待时间", "识别后显示拼音", "笔迹", "笔迹颜色", "笔迹粗细"),
     DEVELOPER("DeveloperPage", "开发者选项", HostDeepLink.TAB_SETTINGS,
-        "MCP 开发者访问", "上传日志", "保留时长", "可访问的日志", "崩溃日志", "性能日志", "输入事件", "配置快照",
+        "MCP 开发者访问", "上传日志", "上传日志供开发者通过 MCP 读取", "保留时长", "可访问的日志", "崩溃日志", "性能日志", "输入事件", "配置快照",
         "调试", "显示调试信息", "记录输入日志", "日志级别", "数据", "导出诊断包", "重置所有设置"),
     FEEDBACK("FeedbackPage", "帮助与反馈", HostDeepLink.TAB_ACCOUNT,
         "反馈", "反馈类型", "附带诊断信息", "描述", "添加截图", "提交", "复制设备信息"),
     ABOUT("AboutPage", "关于", HostDeepLink.TAB_ACCOUNT,
         "版本", "检查更新", "更新", "自动更新", "更新通道", "稳定版", "设备信息", "复制设备信息", "官网", "法律信息",
-        "用户协议", "隐私政策", "开源许可", "给我们评分"),
+        "用户协议", "隐私政策", "开源许可", "给我们评分", "在管理界面中查看"),
     HELP("HelpPage", "使用帮助", HostDeepLink.TAB_ACCOUNT,
         "启用键盘", "打开系统键盘设置", "打字", "选择候选词", "换一种输入方案", "换皮肤与布局", "遇到问题",
-        "完整文档"),
+        "完整文档", "反馈问题与建议"),
     DOWNLOAD("DownloadPage", "其他平台下载", HostDeepLink.TAB_ACCOUNT,
         "在电脑上打开", "复制链接", "电脑", "发送链接", "Windows", "macOS", "Linux", "HarmonyOS", "手机和平板",
         "iOS", "iPadOS", "Android"),
@@ -66,7 +67,8 @@ public enum PageId {
     DEVICES("DevicesPage", "我的设备", HostDeepLink.TAB_ACCOUNT,
         "设备"),
     PRIVACY("PrivacyPage", "隐私", HostDeepLink.TAB_ACCOUNT,
-        "本地优先", "联网功能", "本机数据", "剪贴板历史", "匿名使用统计", "用水杉账号翻译候选");
+        "本地优先", "联网功能", "本机数据", "剪贴板历史", "匿名使用统计", "用水杉账号翻译候选", "隐私模式",
+        "隐私政策");
 
     private static final String PACKAGE = "app.msime.android.home.";
 
