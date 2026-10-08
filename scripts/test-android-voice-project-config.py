@@ -163,6 +163,14 @@ class AndroidVoiceProjectConfigurationTests(unittest.TestCase):
         # configured origin before the response is parsed.
         self.assertIn("connection.setInstanceFollowRedirects(false);", polisher)
 
+    def test_keyboard_voice_releases_recognizer_when_worker_submission_is_rejected(self):
+        entry = (
+            ROOT / "platforms/android/java/app/msime/android/core/ImeVoiceEntry.java"
+        ).read_text()
+        rejected = entry.split("} catch (RejectedExecutionException error) {", 1)[1]
+        cleanup = rejected.split("return false;", 1)[0]
+        self.assertIn("cancel();", cleanup)
+
     def test_on_device_recognition_keeps_the_audio_on_the_device(self):
         """A user who chose provider `local` must get the installed model or an error, never the platform recognizer, and the model must run through the shared runtime rather than a copy."""
         plugin = (
