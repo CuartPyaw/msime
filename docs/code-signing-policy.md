@@ -23,9 +23,9 @@ Third-party binaries are shipped as their upstream built them and are never subm
 | Role | Members | What the role may do |
 | --- | --- | --- |
 | Committers and reviewers | [fanlusky](https://github.com/fanlusky), [houko](https://github.com/houko), [J0ey2ou](https://github.com/J0ey2ou), [jsfaint](https://github.com/jsfaint), [linyanm](https://github.com/linyanm), [luojiyin1987](https://github.com/luojiyin1987), [Neptrue-Lin](https://github.com/Neptrue-Lin), [spectrumzero](https://github.com/spectrumzero), [Xibeilius](https://github.com/Xibeilius) | Push branches and merge pull requests into `develop` |
-| Approvers | [fanlusky](https://github.com/fanlusky), [houko](https://github.com/houko) | Approve signing requests in SignPath |
+| Approvers | [houko](https://github.com/houko) | Approve signing requests in SignPath |
 
-The approvers are the same people who approve signing requests for `msime-windows`, since both repositories sign through the same SignPath project. The organization account `metasequoiaime-dev` is used only by release automation and is not a person; it holds no role above. How roles are granted is described in the organization's [GOVERNANCE.md](https://github.com/metasequoiaime/.github/blob/main/GOVERNANCE.md).
+Approvers are the people configured as approvers of the `release-signing` policy in SignPath. They are the same for `msime-windows`, since both repositories sign through the same SignPath project. The organization account `metasequoiaime-dev` is used only by release automation and is not a person; it holds no role above. How roles are granted is described in the organization's [GOVERNANCE.md](https://github.com/metasequoiaime/.github/blob/main/GOVERNANCE.md).
 
 Contributors without write access can still propose changes through pull requests. Their changes are reviewed and merged by a committer before they can reach a release.
 
