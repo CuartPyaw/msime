@@ -1094,8 +1094,8 @@ pub fn pack_as(
         }
         files.insert(path.clone(), BASE64.encode(&resource.bytes));
     }
-    let input =
-        crate::storage::open_private_file(&directory.join(MANIFEST_FILE)).map_err(|_| PACKAGE)?;
+    let input = crate::storage::open_private_file_in(&directory.join(MANIFEST_FILE))
+        .map_err(|_| PACKAGE)?;
     let manifest = crate::bounded_io::read_bounded_file_with(
         input,
         MAX_MANIFEST_BYTES as u64,
@@ -1162,7 +1162,7 @@ pub fn add_preview(root: &Path, id: &str, bytes: &[u8]) -> Result<String, &'stat
     check_image(content_type, bytes)?;
     let directory = root.join(id);
     let manifest_path = directory.join(MANIFEST_FILE);
-    let input = crate::storage::open_private_file(&manifest_path).map_err(|_| PACKAGE)?;
+    let input = crate::storage::open_private_file_in(&manifest_path).map_err(|_| PACKAGE)?;
     let original = crate::bounded_io::read_bounded_file_with(
         input,
         MAX_MANIFEST_BYTES as u64,
@@ -1243,7 +1243,7 @@ pub fn add_license(root: &Path, id: &str, assets: &str) -> Result<(), &'static s
         return Err(PACKAGE);
     }
     let manifest_path = root.join(id).join(MANIFEST_FILE);
-    let input = crate::storage::open_private_file(&manifest_path).map_err(|_| PACKAGE)?;
+    let input = crate::storage::open_private_file_in(&manifest_path).map_err(|_| PACKAGE)?;
     let original = crate::bounded_io::read_bounded_file_with(
         input,
         MAX_MANIFEST_BYTES as u64,
