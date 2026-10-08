@@ -114,6 +114,7 @@ public final class MSIMEInputService extends InputMethodService {
     ImeVoiceEntry imeVoiceEntry;
     ImeKeyFeedback imeKeyFeedback;
     ImeDebugOverlay imeDebugOverlay;
+    ImeCalculator imeCalculator;
     long session;
     InputConnection connection;
     private EditorBridge bridge = new EditorBridge();
@@ -1199,6 +1200,7 @@ public final class MSIMEInputService extends InputMethodService {
         imeVoiceEntry = new ImeVoiceEntry(this);
         imeKeyFeedback = new ImeKeyFeedback(this);
         imeDebugOverlay = new ImeDebugOverlay(this);
+        imeCalculator = new ImeCalculator(this);
         // 必须在 super.onCreate() 之前：InputMethodService 在那里按这个主题建输入法窗口，之后再设会抛异常。按名字查是因为 core/ 要能脱离 Gradle 生成的 R 编译（check-host.sh 的 JVM 冒烟）；res/values/themes.xml 说明了这个主题为什么存在。
         // 五笔、拼音等版本的 applicationId 带后缀，资源表的包名仍是命名空间，两个都试。
         int theme = getResources().getIdentifier("Theme.MSIME.InputMethod", "style", getPackageName());
@@ -1258,6 +1260,7 @@ public final class MSIMEInputService extends InputMethodService {
         engineStartGeneration++;
         cloudClipboardGeneration++;
         imeBottomRow.resetSpaceCursor();
+        imeCalculator.clear();
         // 也覆盖 onFinishInputView(true)：那条路径不经过 finishInputViewPresentation。
         imeVoiceEntry.cancel();
         stop(true);
@@ -3750,6 +3753,8 @@ public final class MSIMEInputService extends InputMethodService {
         }
         updateAutomaticCapitalization();
         if (directEnglishActive()) refreshEnglishSuggestions();
+        // 数字键面上打完算式（或光标挪到算式后面）时，工具栏给出计算结果。
+        imeCalculator.refresh();
     }
 
     Button button(LinearLayout row, String label, Runnable action) {
@@ -6350,6 +6355,7 @@ public final class MSIMEInputService extends InputMethodService {
                 ? KeyboardLayout.Layer.SYMBOLS : KeyboardLayout.Layer.LETTERS;
             imeLetterRows.rebuildKeyRows();
             render();
+            imeCalculator.refresh();
         });
         layerButton.setContentDescription("切换到数字和符号");
         keyId(layerButton, "SoftLayer");
@@ -7040,11 +7046,13 @@ public final class MSIMEInputService extends InputMethodService {
         // 浮动开关或外接键盘的候选条模式变了：先把窗口换成对应的布局，下面判断分离式键盘、单手模式时用的是新状态。
         applyFloatingLayout(false);
         // 旋转、设置变化或布局切换让分离式键盘该画与否变了，而键行还是按旧状态建的：先按新状态重建，下面的底行排布也会跟着换。
-        if (imeLetterRows.splitStale()) imeLetterRows.rebuildKeyRows();
+        // 设置页改了九键左侧符号栏的符号：同样按新的符号表重建。
+        if (imeLetterRows.splitStale() || imeLayoutRows.sidebarStale()) imeLetterRows.rebuildKeyRows();
         updateSymbolKeyFaces();
         updateShuangpinKeyHints();
         updateQuickPunctuation();
         imeLayoutRows.updateStrokeWildcardKey();
+        imeCalculator.syncVisibility();
         imeLayoutRows.updateNineKeySymbolKey();
         String currentEditingText = view == null ? "" : view.optString("editing_text", "");
         if (!japaneseSchemeActive() || currentEditingText.isEmpty()) {
