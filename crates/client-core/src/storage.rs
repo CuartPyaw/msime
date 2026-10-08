@@ -505,6 +505,31 @@ pub(crate) fn open_private_file_in(path: &Path) -> io::Result<File> {
     }
 }
 
+/// 替换私有文件，并让 Unix 的读取和发布都绑定到已打开的父目录句柄。
+pub(crate) fn replace_private_file(path: &Path, contents: &[u8]) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        let name = path.file_name().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "private file has no name")
+        })?;
+        let directory = open_private_directory(parent)?;
+        write_private_file_at(&directory, name, contents)
+    }
+    #[cfg(not(unix))]
+    {
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        reject_symlink(parent)?;
+        let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+        temporary.write_all(contents)?;
+        temporary.as_file().sync_all()?;
+        temporary
+            .persist(path)
+            .map(|_| ())
+            .map_err(|error| error.error)
+    }
+}
+
 /// Remove a private file relative to an opened parent directory, so a
 /// concurrent replacement of the directory cannot redirect cleanup through a
 /// symlink.

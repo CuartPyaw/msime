@@ -109,6 +109,16 @@ pub fn open_private_file(path: impl AsRef<Path>) -> io::Result<File> {
     Ok(file)
 }
 
+/// 相对于已检查的父目录打开私有文件；Unix 调用方会绑定到该目录句柄。
+pub fn open_private_file_in(path: impl AsRef<Path>) -> io::Result<File> {
+    crate::storage::open_private_file_in(path.as_ref())
+}
+
+/// 替换私有文件时不再通过路径解析可能已被替换的 Unix 父目录。
+pub fn replace_private_file(path: impl AsRef<Path>, contents: &[u8]) -> io::Result<()> {
+    crate::storage::replace_private_file(path.as_ref(), contents)
+}
+
 pub(crate) fn try_shared(file: &File) -> io::Result<bool> {
     #[cfg(not(target_os = "android"))]
     {
