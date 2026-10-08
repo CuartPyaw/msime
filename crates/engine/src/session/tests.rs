@@ -1000,6 +1000,28 @@ fn learning_a_non_top_candidate_does_not_clone_the_whole_ranking_list() {
     );
 }
 
+#[test]
+fn frequency_learning_borrows_an_existing_entry_key() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.personal_context = false;
+        options.frequency.mode = FrequencyAdjustmentMode::Promote;
+        options.frequency.trigger_count = 1;
+    });
+    type_text(&mut session, "nihao");
+    let index = index_of(&session, "拟好");
+    assert_eq!(index, 1);
+
+    let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+        assert_eq!(session.input.learn_candidate(index), None);
+    });
+
+    assert!(
+        allocations <= 410,
+        "entry-key learning allocated {allocations} buffers"
+    );
+}
+
 /// The reported case: in mixed Wubi `jixu` is the wubi code of 曳光弹 and the pinyin of 继续. The fourth key must leave both on offer; without pinyin rows the same code still commits its one wubi row.
 #[test]
 fn a_four_letter_code_that_is_also_pinyin_stays_open_in_mixed_wubi() {

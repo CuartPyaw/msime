@@ -184,11 +184,11 @@ impl InputSession {
         }
         let wubi_row = wubi && !super_jianpin;
         let entry_key = if wubi_row {
-            selected.pinyin.clone()
+            selected.pinyin.as_str()
         } else if selected.canonical_pinyin.is_empty() {
-            context_key.clone()
+            context_key.as_str()
         } else {
-            selected.canonical_pinyin.clone()
+            selected.canonical_pinyin.as_str()
         };
         let mixed_wubi = self.is_wubi();
         let ranked_storage;
@@ -204,7 +204,7 @@ impl InputSession {
             user_db,
             context_key: &context_key,
             ordered: ranked,
-            entry_key: &entry_key,
+            entry_key,
             value: &selected.word,
             mode: options.mode,
             linear_step: options.linear_step,
