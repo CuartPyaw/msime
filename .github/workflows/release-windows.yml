@@ -291,7 +291,7 @@ jobs:
           name: msime-signpath-payload-windows-${{ matrix.edition }}-${{ steps.version.outputs.value }}
           path: ${{ runner.temp }}/signpath-payload/
           if-no-files-found: error
-      # 暂存包交给 package 任务编译安装包：签名要等这个任务结束、六个版本一起提交，所以编译不能留在这里。上传的正好是 .gitignore 列出的那些暂存内容；安装包不收 PDB 和 .ilk（msime_setup.iss），符号已经进了上面的符号包，这里不再传。
+      # 暂存包交给 package 任务编译安装包：签名要等这个任务结束、六个版本一起提交，所以编译不能留在这里。上传的是 .gitignore 列出的那些暂存内容，加上 msime_setup.iss：Prepare-PackageFiles.ps1 把版本号就地写进了这个受版本控制的文件，package 任务检出的那份还是 0.0.1，不带上它编出的安装包名和版本资源都是 0.0.1。安装包不收 PDB 和 .ilk（msime_setup.iss），符号已经进了上面的符号包，这里不再传。
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: msime-staged-windows-${{ matrix.edition }}-${{ steps.version.outputs.value }}
@@ -302,6 +302,7 @@ jobs:
             platforms/windows/installer/MetasequoiaIME.ico
             platforms/windows/installer/THIRD_PARTY_NOTICES.txt
             platforms/windows/installer/LICENSE.txt
+            platforms/windows/installer/msime_setup.iss
             !platforms/windows/installer/**/*.pdb
             !platforms/windows/installer/**/*.ilk
           if-no-files-found: error
