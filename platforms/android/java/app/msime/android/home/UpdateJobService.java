@@ -20,6 +20,7 @@ import android.net.Uri;
 import android.os.Build;
 import androidx.core.content.FileProvider;
 import app.msime.android.AppEdition;
+import app.msime.android.FilePolicy;
 import app.msime.android.R;
 import app.msime.android.UpdateApi;
 import java.io.File;
@@ -61,7 +62,7 @@ public final class UpdateJobService extends JobService {
                     try {
                         UpdateApi.verifyArchive(context, apk);
                     } catch (UpdateApi.Failure rejected) {
-                        if (!apk.delete()) apk.deleteOnExit();
+                        FilePolicy.deleteQuietly(apk);
                         throw rejected;
                     }
                     notifyReady(context, update.release().version(), apk);
