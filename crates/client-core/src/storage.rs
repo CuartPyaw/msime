@@ -125,14 +125,7 @@ pub(crate) fn write_private_file_at(
     name: &OsStr,
     contents: &[u8],
 ) -> io::Result<()> {
-    let mut temporary_name = OsString::from(".msime-private-");
-    temporary_name.push(std::process::id().to_string());
-    temporary_name.push("-");
-    temporary_name.push(
-        PRIVATE_FILE_COUNTER
-            .fetch_add(1, Ordering::Relaxed)
-            .to_string(),
-    );
+    let temporary_name = private_temporary_name();
     let descriptor = rustix::fs::openat(
         directory,
         &temporary_name,
@@ -154,6 +147,70 @@ pub(crate) fn write_private_file_at(
         return Err(error.into());
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn private_temporary_name() -> OsString {
+    let mut temporary_name = OsString::from(".msime-private-");
+    temporary_name.push(std::process::id().to_string());
+    temporary_name.push("-");
+    temporary_name.push(
+        PRIVATE_FILE_COUNTER
+            .fetch_add(1, Ordering::Relaxed)
+            .to_string(),
+    );
+    temporary_name
+}
+
+/// Publish a private file without replacing an existing destination.
+///
+/// Unix has no portable `renameat` no-replace operation across all supported
+/// targets. A hard link from the unique temporary file is atomic and fails
+/// with `AlreadyExists` when another process published first; removing the
+/// temporary name then leaves the linked file at the destination.
+#[cfg(unix)]
+pub(crate) fn write_private_file_at_noclobber(
+    directory: &File,
+    name: &OsStr,
+    contents: &[u8],
+) -> io::Result<bool> {
+    let temporary_name = private_temporary_name();
+    let descriptor = rustix::fs::openat(
+        directory,
+        &temporary_name,
+        rustix::fs::OFlags::WRONLY
+            | rustix::fs::OFlags::CREATE
+            | rustix::fs::OFlags::EXCL
+            | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::from_raw_mode(0o600),
+    )?;
+    let mut file: File = descriptor.into();
+    let result = file.write_all(contents).and_then(|()| file.sync_all());
+    drop(file);
+    if let Err(error) = result {
+        let _ = rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty());
+        return Err(error);
+    }
+    match rustix::fs::linkat(
+        directory,
+        &temporary_name,
+        directory,
+        name,
+        rustix::fs::AtFlags::empty(),
+    ) {
+        Ok(()) => {
+            rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty())?;
+            Ok(true)
+        }
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            let _ = rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty());
+            Ok(false)
+        }
+        Err(error) => {
+            let _ = rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty());
+            Err(error.into())
+        }
+    }
 }
 
 /// 在存储操作跟随已有的符号链接之前先拒绝它。每个应用的存储都会经过的系统链接，以 `msime-path-trust` 列出的为准。
@@ -343,6 +400,46 @@ mod tests {
             b"synthetic-session"
         );
         assert!(!outside.join("session.json").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_file_no_clobber_preserves_first_publication() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = open_private_directory(root.path()).unwrap();
+        let name = OsStr::new("anonymous-account.json");
+
+        assert!(write_private_file_at_noclobber(&directory, name, b"first").unwrap());
+        assert!(!write_private_file_at_noclobber(&directory, name, b"second").unwrap());
+        assert_eq!(fs::read(root.path().join(name)).unwrap(), b"first");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_file_no_clobber_stays_in_open_directory_after_replacement() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let original = root.path().join("original");
+        let outside = root.path().join("outside");
+        fs::create_dir(&original).unwrap();
+        fs::create_dir(&outside).unwrap();
+        let directory = open_private_directory(&original).unwrap();
+        let moved = root.path().join("moved");
+        fs::rename(&original, &moved).unwrap();
+        symlink(&outside, &original).unwrap();
+
+        assert!(write_private_file_at_noclobber(
+            &directory,
+            OsStr::new("anonymous-account.json"),
+            b"synthetic-identity"
+        )
+        .unwrap());
+        assert_eq!(
+            fs::read(moved.join("anonymous-account.json")).unwrap(),
+            b"synthetic-identity"
+        );
+        assert!(!outside.join("anonymous-account.json").exists());
     }
 
     #[cfg(unix)]

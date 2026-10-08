@@ -218,7 +218,11 @@ fn read_private_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>, Acco
         .map_err(|_| AccountError::Storage)
 }
 
-/// Stages `bytes` beside the target and renames it into place. `NamedTempFile` is created owner-only on Unix; on Windows and HarmonyOS the directory is already private to the user or the app. With `no_clobber`, returns `false` instead of replacing a file another process published first.
+/// Stages `bytes` beside the target and publishes it into place. Unix binds
+/// both the temporary file and publication to an opened directory handle; on
+/// Windows and HarmonyOS the directory is already private to the user or the
+/// app. With `no_clobber`, returns `false` instead of replacing a file another
+/// process published first.
 fn write_private(
     directory: &Path,
     name: &str,
@@ -226,24 +230,41 @@ fn write_private(
     no_clobber: bool,
 ) -> Result<bool, AccountError> {
     prepare_directory(directory)?;
-    let mut temporary =
-        tempfile::NamedTempFile::new_in(directory).map_err(|_| AccountError::Storage)?;
-    temporary
-        .write_all(bytes)
-        .and_then(|()| temporary.as_file().sync_all())
-        .map_err(|_| AccountError::Storage)?;
-    let path = directory.join(name);
-    if no_clobber {
-        return match temporary.persist_noclobber(&path) {
-            Ok(_) => Ok(true),
-            Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
-            Err(_) => Err(AccountError::Storage),
-        };
+    #[cfg(unix)]
+    {
+        let directory_handle =
+            crate::storage::open_private_directory(directory).map_err(|_| AccountError::Storage)?;
+        let name = std::ffi::OsStr::new(name);
+        if no_clobber {
+            crate::storage::write_private_file_at_noclobber(&directory_handle, name, bytes)
+                .map_err(|_| AccountError::Storage)
+        } else {
+            crate::storage::write_private_file_at(&directory_handle, name, bytes)
+                .map(|_| true)
+                .map_err(|_| AccountError::Storage)
+        }
     }
-    temporary
-        .persist(&path)
-        .map(|_| true)
-        .map_err(|_| AccountError::Storage)
+    #[cfg(not(unix))]
+    {
+        let mut temporary =
+            tempfile::NamedTempFile::new_in(directory).map_err(|_| AccountError::Storage)?;
+        temporary
+            .write_all(bytes)
+            .and_then(|()| temporary.as_file().sync_all())
+            .map_err(|_| AccountError::Storage)?;
+        let path = directory.join(name);
+        if no_clobber {
+            return match temporary.persist_noclobber(&path) {
+                Ok(_) => Ok(true),
+                Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+                Err(_) => Err(AccountError::Storage),
+            };
+        }
+        temporary
+            .persist(&path)
+            .map(|_| true)
+            .map_err(|_| AccountError::Storage)
+    }
 }
 
 #[cfg(test)]
