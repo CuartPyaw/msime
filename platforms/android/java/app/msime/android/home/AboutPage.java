@@ -24,6 +24,7 @@ import androidx.fragment.app.Fragment;
 import app.msime.android.AppEdition;
 import app.msime.android.BoundsPolicy;
 import app.msime.android.DeviceInfoReport;
+import app.msime.android.FilePolicy;
 import app.msime.android.ListPolicy;
 import app.msime.android.ViewPolicy;
 import app.msime.android.HttpBodyPolicy;
@@ -300,7 +301,7 @@ public final class AboutPage extends DetailPage {
             try {
                 UpdateApi.verifyArchive(context, apk);
             } catch (UpdateApi.Failure rejected) {
-                if (!apk.delete()) apk.deleteOnExit();
+                FilePolicy.deleteQuietly(apk);
                 throw rejected;
             }
             return apk;
