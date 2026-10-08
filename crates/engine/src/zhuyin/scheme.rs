@@ -567,19 +567,43 @@ impl ZhuyinScheme {
         };
         let current = current_spelling(&self.conversion, target);
         let readings = Arc::clone(&self.syllables[target].readings);
-        let mut ranked = Vec::with_capacity(readings.len());
-        for reading in readings.iter() {
-            let weight = cached_best(
-                &self.dictionary,
-                &mut self.best,
-                &[std::slice::from_ref(reading)],
-            )?
-            .map_or(i64::MIN, |(_, entry)| entry.weight);
-            ranked.push((current != Some(reading.as_str()), Reverse(weight), reading));
+        if readings.len() <= SMALL_SPELLING_RANK {
+            let mut ranked = [(false, Reverse(0), 0usize); SMALL_SPELLING_RANK];
+            for (index, reading) in readings.iter().enumerate() {
+                let weight = cached_best(
+                    &self.dictionary,
+                    &mut self.best,
+                    &[std::slice::from_ref(reading)],
+                )?
+                .map_or(i64::MIN, |(_, entry)| entry.weight);
+                ranked[index] = (current != Some(reading.as_str()), Reverse(weight), index);
+            }
+            ranked[..readings.len()].sort_by(|left, right| {
+                left.0
+                    .cmp(&right.0)
+                    .then_with(|| left.1.cmp(&right.1))
+                    .then_with(|| readings[left.2].cmp(&readings[right.2]))
+            });
+            self.spellings.extend(
+                ranked[..readings.len()]
+                    .iter()
+                    .map(|(_, _, index)| readings[*index].clone()),
+            );
+        } else {
+            let mut ranked = Vec::with_capacity(readings.len());
+            for reading in readings.iter() {
+                let weight = cached_best(
+                    &self.dictionary,
+                    &mut self.best,
+                    &[std::slice::from_ref(reading)],
+                )?
+                .map_or(i64::MIN, |(_, entry)| entry.weight);
+                ranked.push((current != Some(reading.as_str()), Reverse(weight), reading));
+            }
+            ranked.sort();
+            self.spellings
+                .extend(ranked.into_iter().map(|(_, _, reading)| reading.clone()));
         }
-        ranked.sort();
-        self.spellings
-            .extend(ranked.into_iter().map(|(_, _, reading)| reading.clone()));
         self.spelling_target = Some(target);
         Ok(())
     }
@@ -656,6 +680,9 @@ fn current_spelling(conversion: &[Span], target: usize) -> Option<&str> {
 ///
 /// Conversion ranks paths by word length first (libchewing's score), which suits Dachen, where each position has exactly one reading. A nine-key position allows 4 to 23 readings, so the combined reading sets of two or three positions match some obscure word almost everywhere, and length-first alone lets 監聽器 (weight 9) beat 今天 (25469) + 去 (28394). Such a word therefore takes part only when its weight times this factor reaches the smallest single-character weight over its positions. 1000 was chosen against a rebuild of the libchewing-derived dictionary: it drops 監聽器, 趕明兒 and 禮教 from 我們今天去學校, 這個東西很便宜 and 請問你叫什麼名字, and of the sampled counted 2 to 4 syllable words that convert to themselves without the floor all but one still do, while a factor of 300 already loses about one in eight of them.
 const AMBIGUOUS_WORD_FLOOR: i64 = 1000;
+
+/// 九键一个音节的读音通常很短；短列表用栈上的排序状态，避免为临时排名向量分配堆内存。
+const SMALL_SPELLING_RANK: usize = 64;
 
 /// Whether `entry`, the heaviest entry for the span starting at syllable `start` whose positions are flagged in `ambiguous`, may take part in conversion. Single syllables and spans where no position was typed with more than one reading (all of Dachen) always may, so Dachen conversion is unchanged; otherwise see `AMBIGUOUS_WORD_FLOOR`. Ambiguity is how the syllable was typed, not what is left after the user pinned a reading: pinning the reading the conversion already uses must not let a word the floor held back win (是之 turning into 適之). `singles` holds every position's single-character weight over its allowed readings and is empty when no position is ambiguous.
 fn clears_ambiguous_word_floor(
@@ -1330,6 +1357,20 @@ mod tests {
         assert_eq!(spellings(&scheme), ["ㄋㄧˇ", "ㄌㄧˇ", "ㄉㄧˇ"]);
         assert_eq!(scheme.conversion[0].key, "ㄋㄧˇ ㄏㄠˇ");
         assert_eq!(scheme.take_committed(), "");
+    }
+
+    #[test]
+    fn refreshing_short_spelling_choices_does_not_allocate_ranking_state() {
+        let (_dir, mut scheme) = nine_key_scheme();
+        type_keys(&mut scheme, "28c");
+        scheme.spellings.reserve(scheme.syllables[0].readings.len());
+
+        let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            scheme.refresh_spellings().unwrap();
+        });
+
+        assert_eq!(allocations, 12);
+        assert_eq!(spellings(&scheme), ["ㄌㄧˇ", "ㄋㄧˇ", "ㄉㄧˇ"]);
     }
 
     /// 今天 + 去 的读音和冷僻的 監聽器 落在同样的数字串上：ㄐㄧㄣ/ㄐㄧㄢ 都是 480，ㄊㄧㄢ/ㄊㄧㄥ 都是 280，ㄑㄩˋ/ㄑㄧˋ 都是 48ˋ。
