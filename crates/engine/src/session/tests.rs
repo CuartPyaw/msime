@@ -3688,6 +3688,41 @@ fn stroke_composes_glyphs_from_its_keys() {
 }
 
 #[test]
+fn stroke_candidate_refresh_reuses_row_storage() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = stroke_session(&fixture);
+    type_text(&mut session, "hs");
+    let pointers = session
+        .input
+        .engine
+        .candidates()
+        .iter()
+        .map(|row| {
+            (
+                row.word.as_ptr(),
+                row.pinyin.as_ptr(),
+                row.canonical_pinyin.as_ptr(),
+            )
+        })
+        .collect::<Vec<_>>();
+    session.input.engine.handle_key(SchemeKey::Requery);
+    assert_eq!(
+        session
+            .input
+            .engine
+            .candidates()
+            .iter()
+            .map(|row| (
+                row.word.as_ptr(),
+                row.pinyin.as_ptr(),
+                row.canonical_pinyin.as_ptr()
+            ))
+            .collect::<Vec<_>>(),
+        pointers
+    );
+}
+
+#[test]
 fn stroke_rows_are_never_learned_or_edited() {
     let fixture = Fixture::new(QUANPIN_FIXTURE);
     let stroke = stroke_dictionary(fixture.path());
