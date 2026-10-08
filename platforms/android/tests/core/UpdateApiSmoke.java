@@ -182,6 +182,27 @@ public final class UpdateApiSmoke {
         check(apkFetches.get() == 1, "the second download reuses the verified file");
         check(!new File(raceCache, "updates/msime-android.apk.part").exists(), "no partial file is left behind");
 
+        java.nio.file.Path digestRoot = Files.createTempDirectory("digest-policy-smoke");
+        try {
+            java.nio.file.Path digestSource = digestRoot.resolve("source.bin");
+            Files.writeString(digestSource, "synthetic");
+            java.nio.file.Path digestLink = digestRoot.resolve("linked.bin");
+            Files.createLink(digestLink, digestSource);
+            try {
+                UpdateApi.sha256Hex(digestLink.toFile());
+                throw new AssertionError("hard-linked digest input must be refused");
+            } catch (java.io.IOException expected) {
+                // Private digest inputs must have one directory entry.
+            }
+        } finally {
+            try (java.util.stream.Stream<java.nio.file.Path> paths = Files.walk(digestRoot)) {
+                paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); }
+                    catch (Exception error) { throw new IllegalStateException(error); }
+                });
+            }
+        }
+
         routes.put("https://release-assets.githubusercontent.com/sum", body("cd".repeat(32) + "  msime-android.apk\n"));
         routes.put(update.apkUrl(), new UpdateApi.Exchange(200, null, apk.length, new ByteArrayInputStream(apk)));
         try {

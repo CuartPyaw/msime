@@ -309,6 +309,12 @@ public final class SyncApi {
         }
     }
 
+    static boolean uploadable(Path file) {
+        return file != null
+            && Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
+            && SafePaths.isSingleLink(file);
+    }
+
     /** 快照第一行是 `{"type":"header",…,"revision":N}`。 */
     static long snapshotRevision(Path file) throws IOException, CloudApi.Failure {
         try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
@@ -494,6 +500,7 @@ public final class SyncApi {
         }
 
         @Override public Exchange upload(String path, String token, Path file, String contentType) throws IOException {
+            if (!uploadable(file)) throw new IOException("snapshot upload file is not private");
             long length = Files.size(file);
             if (length <= 0 || length > MAX_SNAPSHOT_BYTES) throw new IOException("snapshot size out of range");
             HttpsURLConnection connection = open(path, "PUT", token, "application/json");

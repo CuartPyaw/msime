@@ -215,6 +215,22 @@ public final class SyncApiSmoke {
         Files.deleteIfExists(destination);
         Files.deleteIfExists(outside);
         Files.deleteIfExists(root);
+
+        Path uploadRoot = Files.createTempDirectory("msime-sync-upload-");
+        try {
+            Path source = uploadRoot.resolve("source.ndjson");
+            Files.writeString(source, "synthetic\n");
+            Path linked = uploadRoot.resolve("upload.ndjson");
+            Files.createLink(linked, source);
+            check(!SyncApi.uploadable(linked), "hard-linked upload is refused");
+        } finally {
+            try (java.util.stream.Stream<Path> paths = Files.walk(uploadRoot)) {
+                paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); }
+                    catch (Exception error) { throw new IllegalStateException(error); }
+                });
+            }
+        }
         System.out.println("Android sync API passed");
     }
 
