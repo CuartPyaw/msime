@@ -13,6 +13,9 @@ pub const LATTICE_SOURCE: u8 = 8;
 /// `CandidateSource::QuickPhrase`, `Emoji` and `Kaomoji`: entries a keyword finds in a catalog, listed in the catalog's order. They are not readings of the key, so the reranker neither compares them nor promotes them: typing `kiss` in kaomoji mode had the model seat the catalog's 646th entry, `French Kiss!(*￣(￣　*)`, above its first.
 const CATALOG_SOURCES: [u8; 3] = [5, 6, 7];
 
+/// 候选列表通常不超过一页；短列表的文本引用放在栈上，较大列表继续走堆缓冲。
+const SMALL_RERANK_TEXTS: usize = 128;
+
 /// The traits of the scheme behind `scheme`, which the Engine reports as its `SchemeType` ordinal. Only the placeholder snapshot of a failed refresh carries an ordinal no scheme has; each caller decides what that placeholder means, the way the ordinal comparisons this replaces did.
 fn scheme_type(scheme: u8) -> Option<SchemeType> {
     SchemeType::from_u8(scheme)
@@ -183,7 +186,7 @@ pub fn rerank_pick<'a, R: OrderRowSource<'a> + ?Sized>(
     context: &str,
     scheme: u8,
     answered_by_pinyin_fallback: bool,
-    rows: &R,
+    rows: &'a R,
 ) -> Option<usize> {
     // A Korean Hanja list is a table in frequency order for one syllable, not Chinese text the language model can read.
     if !reorders_candidates(scheme) {
@@ -196,8 +199,6 @@ pub fn rerank_pick<'a, R: OrderRowSource<'a> + ?Sized>(
     if rows.len() < 2 {
         return None;
     }
-    let mut texts = Vec::with_capacity(rows.len());
-    texts.extend((0..rows.len()).map(|index| rows.get(index).text));
     // A dictionary hit earns the model's deference because it carries corpus frequency for the
     // key the user typed. That premise fails the moment the engine offers a correction of that
     // key: the frequency then belongs to the letters that arrived rather than to the word they
@@ -216,11 +217,30 @@ pub fn rerank_pick<'a, R: OrderRowSource<'a> + ?Sized>(
         .max()
         .unwrap_or(0);
     let context = rerank_context(context, reranker.model().context_length(), longest);
-    reranker.best_where(context, &texts, |index| CandidateFacts {
-        answers_key: answers_key(rows.get(index)),
-        trusted_dictionary_hit: DICTIONARY_SOURCES.contains(&rows.get(index).source)
-            && !corrected_key,
+    with_row_texts(rows, |texts| {
+        reranker.best_where(context, texts, |index| CandidateFacts {
+            answers_key: answers_key(rows.get(index)),
+            trusted_dictionary_hit: DICTIONARY_SOURCES.contains(&rows.get(index).source)
+                && !corrected_key,
+        })
     })
+}
+
+fn with_row_texts<'a, R, T>(rows: &'a R, operation: impl FnOnce(&[&'a str]) -> T) -> T
+where
+    R: OrderRowSource<'a> + ?Sized,
+{
+    if rows.len() <= SMALL_RERANK_TEXTS {
+        let mut texts = [""; SMALL_RERANK_TEXTS];
+        for (index, text) in texts.iter_mut().enumerate().take(rows.len()) {
+            *text = rows.get(index).text;
+        }
+        operation(&texts[..rows.len()])
+    } else {
+        let mut texts = Vec::with_capacity(rows.len());
+        texts.extend((0..rows.len()).map(|index| rows.get(index).text));
+        operation(&texts)
+    }
 }
 
 /// demote_runner_up_readings() 的决策部分：返回 order（新座位 -> 旧座位）；恒等排列时返回 None。
@@ -418,6 +438,16 @@ mod tests {
         let (order, allocations) =
             crate::ime::personal_rerank::allocations::count(|| runner_up_order(0, &rows));
         assert_eq!(order, None);
+        assert_eq!(allocations, 0);
+    }
+
+    #[test]
+    fn short_rerank_texts_need_no_temporary_heap_state() {
+        let rows = [row("你好", LATTICE_SOURCE), row("倪好", LATTICE_SOURCE)];
+        let (summary, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            with_row_texts(&rows, |texts| (texts.len(), texts[0], texts[1]))
+        });
+        assert_eq!(summary, (2, "你好", "倪好"));
         assert_eq!(allocations, 0);
     }
 
