@@ -240,6 +240,21 @@ public class DeviceSmoke extends Instrumentation {
         throw new AssertionError("Expected synthetic control was not observed; IME showed " + imeTexts());
     }
 
+    /** 等控件的位置和大小连续两次读到一样：面板打开、翻页有动画，动画中量到的尺寸是过渡值。 */
+    protected AccessibilityNodeInfo awaitStableBounds(Predicate<AccessibilityNodeInfo> match) {
+        Rect previous = null;
+        long deadline = SystemClock.uptimeMillis() + 15000;
+        while (SystemClock.uptimeMillis() < deadline) {
+            AccessibilityNodeInfo node = await(match);
+            Rect bounds = new Rect();
+            node.getBoundsInScreen(bounds);
+            if (bounds.equals(previous)) return node;
+            previous = bounds;
+            SystemClock.sleep(250);
+        }
+        throw new AssertionError("Bounds never settled; IME showed " + imeTexts());
+    }
+
     /** 超时时输入法窗口里看得见的文字（键面、候选、提示），最多 30 条：只读输入法自己的节点，不读编辑器内容。 */
     protected String imeTexts() {
         java.util.List<String> texts = new java.util.ArrayList<>();
