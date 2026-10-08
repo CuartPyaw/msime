@@ -489,12 +489,9 @@ public final class KeyboardGeometry {
      */
     public static void normalizeKeyCap(android.widget.TextView key) {
         int horizontal = pixels(key.getContext(), KEY_CAP_HORIZONTAL_PADDING_DP);
-        key.setPadding(horizontal, 0, horizontal, 0);
+        ViewPolicy.setHorizontalPadding(key, horizontal);
         ViewPolicy.clearFontPadding(key);
-        key.setMinWidth(0);
-        key.setMinimumWidth(0);
-        key.setMinHeight(0);
-        key.setMinimumHeight(0);
+        ViewPolicy.clearMinimumSize(key);
     }
 
     public static int bounded(int value, int minimum, int maximum) {
