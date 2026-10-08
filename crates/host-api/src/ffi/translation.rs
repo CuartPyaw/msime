@@ -602,10 +602,33 @@ pub unsafe extern "C" fn msime_client_candidate_gloss_request(
         }
         let lookup = |candidates: &[(String, u8)]| -> Result<Vec<String>, String> {
             Ok(match target_language.as_deref() {
-                None | Some("en") => msime_engine::host::candidate_glosses_with_user(
-                    resources, user_data, candidates,
-                )
-                .map_err(|_| "candidate gloss dictionary unavailable")?,
+                None | Some("en") => {
+                    let mut glosses = msime_engine::host::candidate_glosses_with_user(
+                        resources, user_data, candidates,
+                    )
+                    .map_err(|_| "candidate gloss dictionary unavailable")?;
+                    // What the user's own glossary contributed is what differs from the packaged answer; that stays.
+                    let learned = if user_data.is_empty() {
+                        vec![false; glosses.len()]
+                    } else {
+                        msime_engine::host::candidate_glosses(resources, candidates)
+                            .map(|packaged| {
+                                glosses
+                                    .iter()
+                                    .zip(&packaged)
+                                    .map(|(gloss, packaged)| gloss != packaged)
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_else(|_| vec![true; glosses.len()])
+                    };
+                    crate::supplementary_glosses::prefer(
+                        std::path::Path::new(resources),
+                        candidates,
+                        &mut glosses,
+                        &learned,
+                    );
+                    glosses
+                }
                 // Another language reads only its offline dictionary: the learned store and custom_translations.txt hold English. A dictionary that is not installed answers nothing, so the host keeps whatever the online path brings.
                 Some(language) if crate::OFFLINE_GLOSS_LANGUAGES.contains(&language) => {
                     let Some(database) = crate::offline_glosses_file(
