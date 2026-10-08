@@ -86,7 +86,7 @@ INSERT INTO english_words VALUES('help','Help',90);";
 fn mixed_candidate_refresh_reuses_rows_for_engine_and_caret_prefix() {
     let fixture = Fixture::new(CARET_PREFIX_FIXTURE);
     let mut session = fixture.session();
-    type_text(&mut session, "nihao");
+    type_text(&mut session, "nihc");
     let word_pointer = session.input.mixed_candidates[0].word.as_ptr();
     let before = session.snapshot();
     session.input.update_mixed_candidates();
@@ -2031,7 +2031,10 @@ fn temporary_english_shows_its_prefix_until_a_word_matches() {
 #[test]
 fn temporary_japanese_returns_to_the_original_scheme() {
     let fixture = Fixture::new(QUANPIN_FIXTURE);
-    let mut session = fixture.session_with(|options| options.scheme = SchemeType::Shuangpin);
+    let mut session = fixture.session_with(|options| {
+        options.scheme = SchemeType::Shuangpin;
+        options.shuangpin_preedit_uses_raw = false;
+    });
     assert!(session.character(b'R', true).handled);
     let snapshot = session.snapshot();
     assert_eq!(snapshot.preedit, "R");
@@ -2063,6 +2066,25 @@ fn temporary_japanese_returns_to_the_original_scheme() {
     assert_eq!(
         session.input.engine.current_scheme_type(),
         SchemeType::Shuangpin
+    );
+}
+
+#[test]
+fn shuangpin_snapshot_does_not_build_unused_raw_preedit() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.scheme = SchemeType::Shuangpin;
+        options.shuangpin_preedit_uses_raw = false;
+    });
+    type_text(&mut session, "nihc");
+
+    let (snapshot, allocations) =
+        crate::ime::personal_rerank::allocations::count(|| session.snapshot());
+
+    assert_eq!(snapshot.preedit, "ni'hao");
+    assert_eq!(
+        allocations, 66,
+        "shuangpin snapshot allocations: {allocations}"
     );
 }
 
