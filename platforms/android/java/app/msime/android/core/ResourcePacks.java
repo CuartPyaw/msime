@@ -73,9 +73,9 @@ public final class ResourcePacks {
                 for (int scheme = 0; schemes != null && scheme < schemes.length(); scheme++)
                     ids.add(schemes.getString(scheme));
                 result.add(new Pack(pack.getString("id"), pack.getString("state"),
-                    pack.optLong("size", 0), List.copyOf(ids)));
+                    pack.optLong("size", 0), ListPolicy.copyOrEmpty(ids)));
             }
-            return List.copyOf(result);
+            return ListPolicy.copyOrEmpty(result);
         } catch (JSONException error) {
             throw new Failure("invalid resource pack response");
         }
@@ -103,7 +103,7 @@ public final class ResourcePacks {
         } catch (Failure error) {
             android.util.Log.w("MSIMEResourcePacks", "Resource pack state unavailable: " + error.code());
         }
-        return java.util.Set.copyOf(ids);
+        return SetPolicy.copyOrEmpty(ids);
     }
 
     /** 资源包已完整安装且与编译进来的锁一致。读不出状态时按未安装处理。 */
