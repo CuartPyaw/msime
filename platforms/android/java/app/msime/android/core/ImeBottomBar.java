@@ -215,7 +215,7 @@ final class ImeBottomBar {
             }
             bottom = margin + s.pixels(KeyboardBottomBarPolicy.BAR_HEIGHT_DP);
         }
-        if (bar != null && (bar.getVisibility() == View.VISIBLE) != shown) ViewPolicy.setVisible(bar, shown);
+        if (bar != null) ViewPolicy.setVisibleIfChanged(bar, shown);
         ViewPolicy.setPaddingIfChanged(keyboard, insets.left, insets.top, insets.right, bottom);
     }
 
