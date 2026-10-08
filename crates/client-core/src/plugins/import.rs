@@ -75,7 +75,7 @@ pub fn import(source: &Path, root: &Path) -> Result<PluginSummary, PluginError> 
     let target = directory.join(&summary.id);
     // A stray file or link where the pack goes is not a pack anyone could have chosen; it is replaced like one.
     if fs::symlink_metadata(&target).is_ok_and(|metadata| !metadata.is_dir()) {
-        fs::remove_file(&target)?;
+        crate::storage::remove_private_file(&target)?;
     }
     // Named uniquely, so a backup a crashed import left behind, too young yet for the sweep, cannot stand in the way of this one.
     let backup = directory.join(format!(
@@ -217,7 +217,7 @@ fn copy_folder(source: &Path, staging: &Path) -> Result<(), PluginError> {
         if !kind.is_file() {
             return Err(PluginError::Invalid(format!("{name} 不是普通文件")));
         }
-        let input = crate::storage::open_private_file(&entry.path())?;
+        let input = crate::storage::open_private_file_in(&entry.path())?;
         let size = input.metadata()?.len();
         budget.take(size)?;
         write_member(staging, &name, input, size)?;
@@ -226,7 +226,7 @@ fn copy_folder(source: &Path, staging: &Path) -> Result<(), PluginError> {
 }
 
 fn extract(source: &Path, staging: &Path) -> Result<(), PluginError> {
-    let file = crate::storage::open_private_file(source)?;
+    let file = crate::storage::open_private_file_in(source)?;
     if file.metadata()?.len() > MAX_ARCHIVE_BYTES {
         return Err(PluginError::Archive("压缩包太大".into()));
     }
