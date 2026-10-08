@@ -452,9 +452,23 @@ public final class MSIMEInputService extends InputMethodService {
         if (text.equals(announcedIdleNotice)) return;
         announcedIdleNotice = text;
         if (text.contains("失败") || text.contains("未能") || text.contains("无法")) {
-            Toast.makeText(this, text, Toast.LENGTH_SHORT).show();
+            notice(text);
         }
     }
+    /**
+     * 键盘里的一句提示（失败、尚未就绪、操作结果）。键盘在屏幕上时显示在诊断行，几秒后或下一次按键时消失，不改变键盘高度；键盘不在屏幕上时才用 Toast。安卓 13 起没有通知权限的应用从后台发的 Toast 会被系统吞掉（logcat: Suppressing toast from package app.msime.android by user request），输入法服务就算后台，而应用只在「关于」页检查更新时才请求通知权限，原先这些提示多数用户根本看不到。
+     */
+    void notice(String text) {
+        if (text == null || text.isEmpty()) return;
+        if (diagnosticView != null && isInputViewShown()) {
+            imeDebugOverlay.showMessage(text);
+            // 投递而不是直接重画：announceIdleNotice 在 render() 里面调用到这里。
+            main.post(this::render);
+            return;
+        }
+        Toast.makeText(this, text, Toast.LENGTH_SHORT).show();
+    }
+
     String preferencesDirectory = "";
     private long appearanceLoadGeneration;
     private String runtimeOptionsForSnapshot = "";
@@ -4620,7 +4634,7 @@ public final class MSIMEInputService extends InputMethodService {
             replyModel.showStatus(value);
             imePanels.renderReplyKeyboard();
         } else {
-            Toast.makeText(this, value, Toast.LENGTH_SHORT).show();
+            notice(value);
         }
     }
 
@@ -4794,7 +4808,7 @@ public final class MSIMEInputService extends InputMethodService {
 
     void toggleChineseOutput() {
         if (!canSaveChineseOutput()) {
-            Toast.makeText(this, "简繁设置尚未就绪", Toast.LENGTH_SHORT).show();
+            notice("简繁设置尚未就绪");
             return;
         }
         final boolean targetTraditional = !traditionalChineseOutput;
@@ -4862,7 +4876,7 @@ public final class MSIMEInputService extends InputMethodService {
                 : preferencesSnapshot.optJSONObject("preferences");
             applyChineseOutputPreference(accepted);
             preferencesNotice = " · 简繁设置保存失败，已恢复原设置";
-            Toast.makeText(this, "简繁设置未能保存", Toast.LENGTH_SHORT).show();
+            notice("简繁设置未能保存");
         }
         render();
     }
@@ -4918,7 +4932,7 @@ public final class MSIMEInputService extends InputMethodService {
 
     void startVoiceRecognition() {
         if (!voiceInputEnabled) {
-            Toast.makeText(this, "请先在共享设置中启用语音输入", Toast.LENGTH_SHORT).show();
+            notice("请先在共享设置中启用语音输入");
             return;
         }
         // 语音结果面板盖在键区上面；从面板里的「开始语音识别」进来时先收起它，键区里的聆听面板才看得见。只在面板开着时收：正在聆听时再按语音键是结束录音，这时清掉记下的输入位置会让结果无法直接上屏。
@@ -4938,8 +4952,7 @@ public final class MSIMEInputService extends InputMethodService {
         if (configured.provider() == null && !VoiceRecognitionActivity.available(this)) {
             // Only reached with no provider configured, so name the way out rather than leaving
             // the user with a device limitation and nothing to do about it.
-            Toast.makeText(this, "设备没有可用的系统语音识别服务，可在设置中配置识别服务商",
-                Toast.LENGTH_LONG).show();
+            notice("设备没有可用的系统语音识别服务，可在设置中配置识别服务商");
             return;
         }
         closeVoiceResult();
@@ -4950,7 +4963,7 @@ public final class MSIMEInputService extends InputMethodService {
                 configured.localModel());
         } catch (RuntimeException error) {
             VoiceRecognitionActivity.clearRequest(requestId);
-            Toast.makeText(this, "语音识别服务无法启动", Toast.LENGTH_SHORT).show();
+            notice("语音识别服务无法启动");
         }
     }
 
@@ -4958,7 +4971,7 @@ public final class MSIMEInputService extends InputMethodService {
         VoiceResultStore.Entry entry = voiceResultEntry;
         if (entry == null || voiceResultStore == null) return;
         if (!voiceInsertionReady() || !voiceTargetMatches()) {
-            Toast.makeText(this, "输入位置已变化，请关闭后重新打开语音结果", Toast.LENGTH_SHORT).show();
+            notice("输入位置已变化，请关闭后重新打开语音结果");
             return;
         }
         try {
@@ -4967,13 +4980,12 @@ public final class MSIMEInputService extends InputMethodService {
             committed = commitText(text, TypingSource.VOICE);
             closeVoiceResult();
             if (!committed)
-                Toast.makeText(this, "编辑器拒绝插入；结果已安全清除", Toast.LENGTH_SHORT).show();
+                notice("编辑器拒绝插入；结果已安全清除");
         } catch (VoiceResultStore.Failure error) {
             voiceResultEntry = null;
             renderVoiceResult();
-            Toast.makeText(this, error.reason() == VoiceResultStore.Reason.BUSY
-                ? "语音结果正在更新，请稍后重试" : "语音结果已过期、已使用或不可读取",
-                Toast.LENGTH_SHORT).show();
+            notice(error.reason() == VoiceResultStore.Reason.BUSY
+                ? "语音结果正在更新，请稍后重试" : "语音结果已过期、已使用或不可读取");
         }
     }
 
@@ -4994,31 +5006,30 @@ public final class MSIMEInputService extends InputMethodService {
     void openClientApp() {
         Intent intent = getPackageManager().getLaunchIntentForPackage(getPackageName());
         if (intent == null) {
-            Toast.makeText(this, "无法打开水杉输入法，请从主屏幕进入", Toast.LENGTH_SHORT).show();
+            notice("无法打开水杉输入法，请从主屏幕进入");
             return;
         }
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         try {
             startActivity(intent);
         } catch (RuntimeException error) {
-            Toast.makeText(this, "无法打开水杉输入法，请从主屏幕进入", Toast.LENGTH_SHORT).show();
+            notice("无法打开水杉输入法，请从主屏幕进入");
         }
     }
 
     void showVoiceResult() {
         if (!voiceInsertionReady()) {
-            Toast.makeText(this, "请先完成当前输入，再插入语音结果", Toast.LENGTH_SHORT).show();
+            notice("请先完成当前输入，再插入语音结果");
             return;
         }
         if (voiceResultStore == null || voiceResultScroll == null) {
-            Toast.makeText(this, "语音结果存储尚未就绪", Toast.LENGTH_SHORT).show();
+            notice("语音结果存储尚未就绪");
             return;
         }
         try { voiceResultEntry = voiceResultStore.read(System.currentTimeMillis()); }
         catch (VoiceResultStore.Failure error) {
-            Toast.makeText(this, error.reason() == VoiceResultStore.Reason.BUSY
-                ? "语音结果正在更新，请稍后重试" : "语音结果无法读取",
-                Toast.LENGTH_SHORT).show();
+            notice(error.reason() == VoiceResultStore.Reason.BUSY
+                ? "语音结果正在更新，请稍后重试" : "语音结果无法读取");
             return;
         }
         captureVoiceTarget();
@@ -5152,7 +5163,7 @@ public final class MSIMEInputService extends InputMethodService {
         if (touchGeometrySaving || traditionalOutputSaving
                 || session == 0 || preferencesSnapshot == null
                 || preferencesDirectory.isEmpty()) {
-            Toast.makeText(this, "键盘设置尚未就绪", Toast.LENGTH_SHORT).show();
+            notice("键盘设置尚未就绪");
             return;
         }
         closeEmojiPicker();
@@ -5286,7 +5297,7 @@ public final class MSIMEInputService extends InputMethodService {
         // 后台已经先写了本地高度，不论共享文档写没写成都先读回来：下面按快照重算布局时，高度取的是刚写下的值，而不是内存里那份旧的本地设置。
         refreshLocalSettings();
         if (!result.heightSaved())
-            Toast.makeText(this, "键盘高度未能保存", Toast.LENGTH_SHORT).show();
+            notice("键盘高度未能保存");
         if (!result.sharedAttempted()) {
             if (preferencesSnapshot != null)
                 applyTouchGeometry(preferencesSnapshot.optJSONObject("preferences"));
@@ -5318,7 +5329,7 @@ public final class MSIMEInputService extends InputMethodService {
                 applyTouchGeometry(preferencesSnapshot.optJSONObject("preferences"));
             imeStyler.applyKeyboardGeometry();
             preferencesNotice = reset ? " · 恢复默认失败，已恢复原设置" : " · 键盘设置保存失败，已恢复原设置";
-            Toast.makeText(this, reset ? "键盘设置未能恢复默认" : "键盘设置未能保存", Toast.LENGTH_SHORT).show();
+            notice(reset ? "键盘设置未能恢复默认" : "键盘设置未能保存");
         }
         renderLayoutSettingsState();
         render();
@@ -5431,7 +5442,7 @@ public final class MSIMEInputService extends InputMethodService {
         } catch (JSONException | LinkageError error) {
             // A conflict or storage failure leaves the working session unchanged.
             preferencesNotice = " · 输入方案切换失败，保留当前设置";
-            Toast.makeText(this, "输入方案未能保存", Toast.LENGTH_SHORT).show();
+            notice("输入方案未能保存");
         }
         synchronizeReplyKeyboard();
         render();
@@ -5480,15 +5491,15 @@ public final class MSIMEInputService extends InputMethodService {
      */
     void captureClipboard(ClipboardCapturePolicy.Trigger trigger, boolean announce) {
         if (!imePrivacyGate.allows(ImePrivacyGate.Record.CLIPBOARD_HISTORY)) {
-            if (announce) Toast.makeText(this, "隐私模式或当前输入框下不保存剪贴板", Toast.LENGTH_SHORT).show();
+            if (announce) notice("隐私模式或当前输入框下不保存剪贴板");
             return;
         }
         if (!imePrivacyGate.capturesClipboard()) return;
         try {
             PrimaryClip clip = readPrimaryClip();
             if (clip == null) {
-                if (announce) Toast.makeText(this, ClipboardHistoryPolicy.message(
-                    ClipboardHistoryPolicy.Rejection.EMPTY), Toast.LENGTH_SHORT).show();
+                if (announce) notice(ClipboardHistoryPolicy.message(
+                    ClipboardHistoryPolicy.Rejection.EMPTY));
                 return;
             }
             if (clip.sensitive()) return;
@@ -5500,13 +5511,13 @@ public final class MSIMEInputService extends InputMethodService {
             // 存储有了答复才记为已处理：收下了，或者明确拒收（拒收的内容同样不该在每次打开面板时再试一遍）。存储写不进去时 add 会抛异常，那一条不记，下次打开面板补读时还会再试，否则它就永远进不了历史。
             rememberHandledClip(identity);
             if (reason != null) {
-                if (announce) Toast.makeText(this, ClipboardHistoryPolicy.message(
-                    ClipboardHistoryPolicy.rejectionFor(reason)), Toast.LENGTH_SHORT).show();
+                if (announce) notice(ClipboardHistoryPolicy.message(
+                    ClipboardHistoryPolicy.rejectionFor(reason)));
                 return;
             }
             if (imePanels.clipboardPanelOpen()) imePanels.renderClipboardHistory();
         } catch (IllegalArgumentException | IllegalStateException | SecurityException error) {
-            if (announce) Toast.makeText(this, "无法保存当前剪贴板", Toast.LENGTH_SHORT).show();
+            if (announce) notice("无法保存当前剪贴板");
         }
     }
 
@@ -5596,7 +5607,7 @@ public final class MSIMEInputService extends InputMethodService {
         try {
             clipboardHistory.setPinned(item.text(), !item.pinned());
         } catch (IllegalStateException error) {
-            Toast.makeText(this, "无法修改剪贴板历史", Toast.LENGTH_SHORT).show();
+            notice("无法修改剪贴板历史");
         }
         imePanels.renderClipboardHistory();
     }
@@ -5607,7 +5618,7 @@ public final class MSIMEInputService extends InputMethodService {
             clipboardHistory.remove(item.text());
             forgetCurrentClip();
         } catch (IllegalStateException error) {
-            Toast.makeText(this, "无法修改剪贴板历史", Toast.LENGTH_SHORT).show();
+            notice("无法修改剪贴板历史");
         }
         imePanels.renderClipboardHistory();
     }
@@ -5621,7 +5632,7 @@ public final class MSIMEInputService extends InputMethodService {
             if (clipboardHistory != null) clipboardHistory.clear();
             forgetCurrentClip();
         } catch (IllegalStateException error) {
-            Toast.makeText(this, "无法清空剪贴板历史", Toast.LENGTH_SHORT).show();
+            notice("无法清空剪贴板历史");
         }
         imePanels.renderClipboardHistory();
     }
@@ -6545,6 +6556,8 @@ public final class MSIMEInputService extends InputMethodService {
         diagnosticView = ViewPolicy.textLabel(this, "", 12);
         KeyboardGeometry.setKeyTextSize(diagnosticView, 12);
         diagnosticView.setContentDescription("输入提示");
+        // 提示原先是 Toast，读屏会念出来；改到诊断行后由实时区域念出。
+        diagnosticView.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         ViewPolicy.hide(diagnosticView);
         candidateRegion.addView(diagnosticView, KeyboardGeometry.matchWidthWrapParams());
         candidateRegion.addView(shortcutScroll, KeyboardGeometry.matchWidthHeightPx(
@@ -6942,7 +6955,7 @@ public final class MSIMEInputService extends InputMethodService {
         if (touchGeometrySaving || traditionalOutputSaving || session == 0
                 || preferencesSnapshot == null || preferencesDirectory.isEmpty()
                 || inlineHeightBar == null) {
-            Toast.makeText(this, "键盘设置尚未就绪", Toast.LENGTH_SHORT).show();
+            notice("键盘设置尚未就绪");
             return;
         }
         closeToolbarPanels();
@@ -6983,7 +6996,7 @@ public final class MSIMEInputService extends InputMethodService {
     void savePanelPreference(String label, PreferenceEdit edit) {
         if (panelPreferenceSaving || traditionalOutputSaving || schemeSaving || touchGeometrySaving
                 || session == 0 || preferencesSnapshot == null || preferencesDirectory.isEmpty()) {
-            Toast.makeText(this, label + "设置尚未就绪", Toast.LENGTH_SHORT).show();
+            notice(label + "设置尚未就绪");
             return;
         }
         final long targetSession = session;
@@ -7046,7 +7059,7 @@ public final class MSIMEInputService extends InputMethodService {
             applyToolbarPreferences(preferencesSnapshot == null ? null
                 : preferencesSnapshot.optJSONObject("preferences"));
             preferencesNotice = " · " + label + "保存失败，已恢复原设置";
-            Toast.makeText(this, label + "未能保存", Toast.LENGTH_SHORT).show();
+            notice(label + "未能保存");
         }
         render();
     }
@@ -7242,7 +7255,7 @@ public final class MSIMEInputService extends InputMethodService {
     /** 功能面板上写本地设置的开关（单手、隐私）：在偏好线程上写文件，写好后在主线程生效；隐私模式变了还要把会话的学习开关重新推给引擎。 */
     private void saveLocalPanelSetting(String label, String key, Object value) {
         if (panelPreferenceSaving) {
-            Toast.makeText(this, label + "设置尚未就绪", Toast.LENGTH_SHORT).show();
+            notice(label + "设置尚未就绪");
             return;
         }
         panelPreferenceSaving = true;
@@ -7270,7 +7283,7 @@ public final class MSIMEInputService extends InputMethodService {
         panelPreferenceSaving = false;
         if (saved == null) {
             preferencesNotice = " · " + label + "保存失败，保留原设置";
-            Toast.makeText(this, label + "未能保存", Toast.LENGTH_SHORT).show();
+            notice(label + "未能保存");
             render();
             return;
         }
