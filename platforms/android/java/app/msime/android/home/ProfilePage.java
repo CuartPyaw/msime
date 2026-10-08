@@ -23,6 +23,7 @@ import app.msime.android.BitmapPolicy;
 import app.msime.android.CloudApi;
 import app.msime.android.DeviceDataApi;
 import app.msime.android.HttpBodyPolicy;
+import app.msime.android.ListPolicy;
 import app.msime.android.SyncSwitch;
 import app.msime.android.ViewPolicy;
 import java.io.File;
@@ -312,7 +313,8 @@ public final class ProfilePage extends DetailPage {
 
     private void link() {
         Loaded before = loaded;
-        List<String> linked = before == null || before.profile() == null ? List.of() : before.profile().providers();
+        List<String> linked = ListPolicy.copyOrEmpty(
+            before == null || before.profile() == null ? null : before.profile().providers());
         LoginSheet.show(requireActivity(), "link", failure -> {
             if (!isAdded()) return;
             if (!failure.isEmpty()) {
