@@ -298,7 +298,7 @@ impl ResourceStore {
             )));
         }
         for artifact in &specification.artifacts {
-            let mut input = crate::storage::open_private_file(&directory.join(&artifact.name))?;
+            let mut input = crate::storage::open_private_file_in(&directory.join(&artifact.name))?;
             copy_verified(&mut input, &mut std::io::sink(), artifact)?;
         }
         Ok(())
