@@ -2413,7 +2413,7 @@ public final class MSIMEInputService extends InputMethodService {
             KeyboardGeometry.setKeyTextSize(button, candidateFontSize);
             button.setContentDescription("英文建议 " + (slot + 1) + "：" + text);
             imeStyler.styleButton(button, false);
-            button.setTypeface(imeStyler.candidateTypeface());
+            ViewPolicy.setTypeface(button, imeStyler.candidateTypeface());
             activeCandidates.addView(button, new LinearLayout.LayoutParams(
                 candidateHorizontal ? LinearLayout.LayoutParams.WRAP_CONTENT
                     : LinearLayout.LayoutParams.MATCH_PARENT,
