@@ -200,6 +200,26 @@ pub(crate) fn write_private_file_at_noclobber(
         let _ = rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty());
         return Err(error);
     }
+    // Android 的 SELinux 不允许应用（以及 adb shell）建硬链接，下面的 `linkat` 在那里一律 EACCES，匿名账号等不覆盖写入全部失败。Linux 和 Android 先用 `renameat2(RENAME_NOREPLACE)`：同样原子、目标已存在时返回 EEXIST，不需要硬链接；文件系统不支持这个标志（EINVAL）或内核没有这个调用（ENOSYS）时才退回硬链接。
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    match rustix::fs::renameat_with(
+        directory,
+        &temporary_name,
+        directory,
+        name,
+        rustix::fs::RenameFlags::NOREPLACE,
+    ) {
+        Ok(()) => return Ok(true),
+        Err(rustix::io::Errno::EXIST) => {
+            let _ = rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty());
+            return Ok(false);
+        }
+        Err(rustix::io::Errno::INVAL | rustix::io::Errno::NOSYS) => {}
+        Err(error) => {
+            let _ = rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty());
+            return Err(error.into());
+        }
+    }
     match rustix::fs::linkat(
         directory,
         &temporary_name,
@@ -627,6 +647,10 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    #[cfg_attr(
+        target_os = "android",
+        ignore = "Android 的 adb shell 域不允许建 FIFO（SELinux 拒绝 fifo_file create）"
+    )]
     fn private_read_write_open_rejects_a_fifo() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("partial-download");
