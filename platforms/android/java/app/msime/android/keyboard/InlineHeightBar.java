@@ -280,7 +280,7 @@ public final class InlineHeightBar extends LinearLayout {
         }
 
         @Override protected void onDraw(Canvas canvas) {
-            text.setTextSize(KeyboardGeometry.keySp(getContext(), LABEL_SP));
+            ViewPolicy.setTextSize(text, KeyboardGeometry.keySp(getContext(), LABEL_SP));
             float gap = KeyboardGeometry.floatPixels(getContext(), 6);
             String caption = label(bar.percent(), bar.heightPixels);
             float scale = fitScale(text.measureText(caption), getWidth() - 2 * gap);
