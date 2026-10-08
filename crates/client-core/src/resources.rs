@@ -283,6 +283,18 @@ fn publish_generation(
     staging_name: &str,
     generation: &str,
 ) -> std::io::Result<()> {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        return rustix::fs::renameat_with(
+            directory,
+            std::ffi::OsStr::new(staging_name),
+            directory,
+            std::ffi::OsStr::new(generation),
+            rustix::fs::RenameFlags::NOREPLACE,
+        )
+        .map_err(Into::into);
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
     rustix::fs::renameat(
         directory,
         std::ffi::OsStr::new(staging_name),
@@ -703,6 +715,28 @@ mod tests {
 
         assert!(moved.join("generation/artifact").is_file());
         assert!(!outside.join("generation").exists());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn generation_publish_does_not_replace_a_generation_created_after_the_check() {
+        let root = tempfile::tempdir().unwrap();
+        let stage = root.path().join("incoming-fixture");
+        let generation = root.path().join("generation");
+        fs::create_dir(&stage).unwrap();
+        fs::write(stage.join("artifact"), b"new").unwrap();
+        fs::create_dir(&generation).unwrap();
+        fs::write(generation.join("artifact"), b"old").unwrap();
+        let directory = crate::storage::open_private_directory(root.path()).unwrap();
+
+        assert_eq!(
+            publish_generation(&directory, "incoming-fixture", "generation")
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
+        assert_eq!(fs::read(generation.join("artifact")).unwrap(), b"old");
+        assert_eq!(fs::read(stage.join("artifact")).unwrap(), b"new");
     }
 
     #[cfg(unix)]
