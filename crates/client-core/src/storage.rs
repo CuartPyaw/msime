@@ -3,6 +3,8 @@ use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::path::PathBuf;
 #[cfg(unix)]
@@ -364,6 +366,46 @@ pub(crate) fn remove_private_file(path: &Path) -> io::Result<()> {
     }
 }
 
+/// Remove a file or directory tree relative to an opened parent directory.
+/// Directory traversal never reconstructs a path, and leaf symlinks are
+/// unlinked rather than followed.
+#[cfg(unix)]
+pub(crate) fn remove_private_tree_at(directory: &File, name: &OsStr) -> io::Result<()> {
+    let child = match rustix::fs::openat(
+        directory,
+        name,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NONBLOCK,
+        rustix::fs::Mode::empty(),
+    ) {
+        Ok(child) => child,
+        Err(error) if error == rustix::io::Errno::NOTDIR => {
+            return rustix::fs::unlinkat(directory, name, rustix::fs::AtFlags::empty())
+                .map_err(Into::into)
+        }
+        Err(error) if error == rustix::io::Errno::LOOP => {
+            return rustix::fs::unlinkat(directory, name, rustix::fs::AtFlags::empty())
+                .map_err(Into::into)
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let child: File = child.into();
+    let entries = rustix::fs::Dir::read_from(&child)?;
+    for entry in entries {
+        let entry = entry?;
+        let entry_name = entry.file_name();
+        if entry_name.to_bytes() == b"." || entry_name.to_bytes() == b".." {
+            continue;
+        }
+        let entry_name = std::ffi::OsStr::from_bytes(entry_name.to_bytes());
+        remove_private_tree_at(&child, entry_name)?;
+    }
+    rustix::fs::unlinkat(directory, name, rustix::fs::AtFlags::REMOVEDIR).map_err(Into::into)
+}
+
 /// Open a private resumable file for reading and writing without following a
 /// leaf symlink. The caller is responsible for bounding the path and contents.
 pub(crate) fn open_private_read_write_file(path: &Path) -> io::Result<File> {
@@ -572,6 +614,28 @@ mod tests {
             b"synthetic-snapshot"
         );
         assert!(!outside.join("snapshot.ndjson").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_tree_remove_stays_in_an_open_directory() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let original = root.path().join("original");
+        let outside = root.path().join("outside");
+        fs::create_dir(&original).unwrap();
+        fs::create_dir(&outside).unwrap();
+        fs::create_dir(original.join("nested")).unwrap();
+        fs::write(original.join("nested/file"), b"synthetic").unwrap();
+        let directory = open_private_directory(&original).unwrap();
+        let moved = root.path().join("moved");
+        fs::rename(&original, &moved).unwrap();
+        symlink(&outside, &original).unwrap();
+
+        remove_private_tree_at(&directory, OsStr::new("nested")).unwrap();
+        assert!(!moved.join("nested").exists());
+        assert!(outside.exists());
     }
 
     #[cfg(unix)]
