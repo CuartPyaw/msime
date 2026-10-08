@@ -1098,6 +1098,25 @@ fn pinning_a_quanpin_row_in_mixed_wubi_writes_the_pinyin_table() {
     );
 }
 
+#[test]
+fn pinning_a_candidate_does_not_clone_the_full_learning_row() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| options.local_modes.temporary_english = true);
+    assert!(session.character(b'Y', true).handled);
+    assert_eq!(
+        session.snapshot().candidates[0].source,
+        CandidateSource::Fallback
+    );
+
+    let (result, allocations) = crate::ime::personal_rerank::allocations::count(|| session.pin(0));
+
+    assert!(!result.handled && result.diagnostic.is_none(), "{result:?}");
+    assert_eq!(
+        allocations, 0,
+        "pinning an unsupported candidate allocated {allocations} buffers"
+    );
+}
+
 /// 904bd0976: learning ranks against the list before any personal reorder, filtered to the selected row's producer, so a wubi row heavier than every quanpin row does not take part in a quanpin row's rank.
 #[test]
 fn a_quanpin_row_in_mixed_wubi_ranks_among_the_quanpin_rows_only() {

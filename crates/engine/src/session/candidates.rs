@@ -384,10 +384,14 @@ impl InputSession {
         let Some(index) = self.ranking_index(index) else {
             return KeyResult::unhandled();
         };
-        let selected = self.ranking_list()[index].clone();
-        if !self.is_editable_source(&selected) {
+        let Some(selected) = self.ranking_list().get(index) else {
+            return KeyResult::unhandled();
+        };
+        if !self.is_editable_source(selected) {
             return KeyResult::unhandled();
         }
+        let selected_source = selected.source;
+        let selected_word = selected.word.clone();
         // Manual pinning is independent of the automatic learning preferences and never selects text.
         let pin = FrequencyAdjustmentOptions {
             mode: FrequencyAdjustmentMode::Pin,
@@ -398,14 +402,14 @@ impl InputSession {
             return KeyResult::handled().with_diagnostic(Some(diagnostic));
         }
         // Remembered so that the personal context rerank does not move the pinned word off the top it was pinned to.
-        if selected.source != CandidateSource::EnglishDictionary
+        if selected_source != CandidateSource::EnglishDictionary
             && self.local_mode == LocalInputMode::None
             && !self.dedicated_english
             && self.scheme().is_pinyin()
             && record_pinned_candidate(
                 self.journal_path(),
                 &self.pinyin_ranking_context(),
-                &selected.word,
+                &selected_word,
             )
             .is_err()
         {
