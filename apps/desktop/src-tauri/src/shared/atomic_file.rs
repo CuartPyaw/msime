@@ -1,6 +1,17 @@
+#[cfg(unix)]
+use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
+#[cfg(unix)]
+use std::os::fd::OwnedFd;
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::sync::atomic::{AtomicU64, Ordering};
+
+#[cfg(unix)]
+static TEMPORARY_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Check that `path` and all existing ancestors are real directories.
 ///
@@ -135,13 +146,104 @@ pub(crate) fn write(path: &Path, contents: &[u8]) -> io::Result<()> {
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
     create_directory_and_check(&parent)?;
-    let mut temporary = tempfile::NamedTempFile::new_in(&parent)?;
-    temporary.write_all(contents)?;
-    temporary.as_file().sync_all()?;
-    temporary
-        .persist(path)
-        .map(|_| ())
-        .map_err(|error| error.error)
+    #[cfg(unix)]
+    {
+        let name = path
+            .file_name()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "file path has no name"))?;
+        let directory = open_write_directory(&parent)?;
+        return write_in_directory(&directory, name, contents);
+    }
+    #[cfg(not(unix))]
+    {
+        let mut temporary = tempfile::NamedTempFile::new_in(&parent)?;
+        temporary.write_all(contents)?;
+        temporary.as_file().sync_all()?;
+        temporary
+            .persist(path)
+            .map(|_| ())
+            .map_err(|error| error.error)
+    }
+}
+
+/// Open a parent directory and verify that the descriptor still names the
+/// directory selected by the path. Callers can then use the descriptor for
+/// all writes, so a replacement of the path cannot redirect the operation.
+#[cfg(unix)]
+fn open_write_directory(parent: &Path) -> io::Result<OwnedFd> {
+    let metadata = std::fs::symlink_metadata(parent)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "write parent is not a real directory",
+        ));
+    }
+    let directory = rustix::fs::open(
+        parent,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NONBLOCK,
+        rustix::fs::Mode::empty(),
+    )?;
+    let stat = rustix::fs::fstat(&directory)?;
+    if u64::try_from(stat.st_dev).ok() != Some(metadata.dev())
+        || u64::try_from(stat.st_ino).ok() != Some(metadata.ino())
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "write parent directory changed",
+        ));
+    }
+    Ok(directory)
+}
+
+/// Atomically replace `name` using only an already opened parent directory.
+#[cfg(unix)]
+fn write_in_directory(directory: &OwnedFd, name: &OsStr, contents: &[u8]) -> io::Result<()> {
+    let mut temporary_name = OsString::from(".msime-atomic-");
+    temporary_name.push(std::process::id().to_string());
+    temporary_name.push("-");
+    temporary_name.push(
+        TEMPORARY_COUNTER
+            .fetch_add(1, Ordering::Relaxed)
+            .to_string(),
+    );
+    let descriptor = loop {
+        match rustix::fs::openat(
+            directory,
+            &temporary_name,
+            rustix::fs::OFlags::WRONLY
+                | rustix::fs::OFlags::CREATE
+                | rustix::fs::OFlags::EXCL
+                | rustix::fs::OFlags::CLOEXEC,
+            rustix::fs::Mode::from_raw_mode(0o600),
+        ) {
+            Ok(descriptor) => break descriptor,
+            Err(error) if error == rustix::io::Errno::EXIST => {
+                temporary_name.push("-");
+                temporary_name.push(
+                    TEMPORARY_COUNTER
+                        .fetch_add(1, Ordering::Relaxed)
+                        .to_string(),
+                );
+            }
+            Err(error) => return Err(error.into()),
+        }
+    };
+    let mut file: File = descriptor.into();
+    let result = file.write_all(contents).and_then(|()| file.sync_all());
+    drop(file);
+    if let Err(error) = result {
+        let _ = rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty());
+        return Err(error);
+    }
+    if let Err(error) = rustix::fs::renameat(directory, &temporary_name, directory, name) {
+        let _ = rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty());
+        return Err(error.into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -161,6 +263,28 @@ mod tests {
 
         assert!(write(&path, b"synthetic").is_err());
         assert!(!outside.path().join("missing").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_stays_bound_to_the_open_parent_when_its_path_is_replaced() {
+        use std::ffi::OsStr;
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let parent = root.path().join("state");
+        let moved = root.path().join("state-moved");
+        std::fs::create_dir(&parent).unwrap();
+        let directory = open_write_directory(&parent).unwrap();
+
+        std::fs::rename(&parent, &moved).unwrap();
+        symlink(outside.path(), &parent).unwrap();
+
+        write_in_directory(&directory, OsStr::new("marker"), b"synthetic").unwrap();
+
+        assert_eq!(std::fs::read(moved.join("marker")).unwrap(), b"synthetic");
+        assert!(!outside.path().join("marker").exists());
     }
 }
 
