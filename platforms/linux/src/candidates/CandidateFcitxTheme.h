@@ -464,7 +464,8 @@ inline std::optional<FcitxThemeOverlay> stage_fcitx_overlay(const std::filesyste
     ~CloseOnExit() { ::close(descriptor); }
   } close_on_exit{descriptor};
   struct stat metadata {};
-  if (::fstat(descriptor, &metadata) != 0 || !S_ISREG(metadata.st_mode)) return std::nullopt;
+  if (::fstat(descriptor, &metadata) != 0 || !S_ISREG(metadata.st_mode) || metadata.st_nlink != 1)
+    return std::nullopt;
   std::string bytes;
   bytes.reserve(std::min<std::uintmax_t>(metadata.st_size, kFcitxOverlayMaxBytes));
   std::array<char, 64 * 1024> buffer{};

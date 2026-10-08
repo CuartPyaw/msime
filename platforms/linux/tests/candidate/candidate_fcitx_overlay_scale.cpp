@@ -100,6 +100,12 @@ int main() {
   std::filesystem::create_symlink(outside, linked);
   assert(!host::stage_fcitx_overlay(theme_dir,
                                     {linked.string(), 112, 85, host::CandidateSkinAlign::right}));
+  const auto hardlinked = root / "skin" / "hardlinked.png";
+  std::filesystem::create_hard_link(outside, hardlinked);
+  assert(!host::stage_fcitx_overlay(theme_dir,
+                                    {hardlinked.string(), 112, 85, host::CandidateSkinAlign::right}));
+  assert(std::filesystem::exists(outside));
+  std::filesystem::remove(hardlinked);
 
   // Without the scaler, or with no width declared, the image is copied as it is and placed by its own height, as before.
   const auto plain_dir = root / "plain";
