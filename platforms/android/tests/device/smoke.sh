@@ -29,8 +29,8 @@ bash platforms/android/tests/device/build-editor.sh
 mkdir -p target/android/device-test
 xml="$repo_root/target/android/device-test/window.xml"
 dump() {
-  "$adb" -s "$serial" shell uiautomator dump /data/local/tmp/msime-test-window.xml >/dev/null
-  "$adb" -s "$serial" pull /data/local/tmp/msime-test-window.xml "$xml" >/dev/null 2>&1
+  "$adb" -s "$serial" shell uiautomator dump /data/local/tmp/msime-test-window.xml >/dev/null \
+    && "$adb" -s "$serial" pull /data/local/tmp/msime-test-window.xml "$xml" >/dev/null 2>&1
 }
 tap() {
   dump
@@ -45,7 +45,8 @@ tap() {
 ready=false
 settled=0
 for attempt in $(seq 1 60); do
-  dump
+  # 应用刚启动、窗口还在切换时，uiautomator 偶尔报 `ERROR: null root node returned by UiTestAutomationBridge.` 并以非零退出；set -e 下这一次失败会让整个冒烟在第一条用例之前退出（API 35 上出现过）。轮询里把它当作这一拍还没就绪。
+  if ! dump; then settled=0; sleep 1; continue; fi
   if [[ $(xmllint --xpath 'boolean(//node[contains(@text,"词库准备失败")])' "$xml") == true ]]; then echo "Device bootstrap failed" >&2; exit 1; fi
   if [[ $(xmllint --xpath 'boolean(//node[contains(@resource-id,":id/onboarding_skip")])' "$xml") == true ]]; then
     settled=0
