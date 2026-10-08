@@ -40,8 +40,27 @@ impl InputSession {
         }
     }
 
+    fn editing_text_len(&self) -> usize {
+        if self.dedicated_english {
+            return self.dedicated_english_preedit.len();
+        }
+        match self.local_mode {
+            LocalInputMode::TemporaryJapanese => {
+                1 + self.engine.request().raw_input_with_cases.len()
+            }
+            LocalInputMode::None if self.is_vietnamese() || self.is_tibetan() => {
+                self.engine.preedit().len()
+            }
+            LocalInputMode::None if self.is_cantonese() => {
+                self.engine.request().normalized_segmentation.len()
+            }
+            LocalInputMode::None => self.raw_with_cases().len(),
+            _ => self.local_preedit.len(),
+        }
+    }
+
     pub(super) fn caret_position(&self) -> usize {
-        let length = self.editing_text().len();
+        let length = self.editing_text_len();
         self.caret.unwrap_or(length).min(length)
     }
 
