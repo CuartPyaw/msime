@@ -8,7 +8,7 @@ client-core 删除匿名会话、剪贴板历史和读取或发布词库租约�
 
 ## Decision
 
-在 `storage` 中提供统一的 Unix `open_private_directory`：从根或当前目录开始逐级使用 `openat(O_NOFOLLOW)`，只对 `msime-path-trust` 声明的系统别名放宽最后一级。私有文件删除和词库租约目录都复用这个句柄，后续 `unlinkat`、`openat` 和 `renameat` 始终相对于已打开的目录执行。
+在 `storage` 中提供统一的 Unix `open_private_directory`：从根或当前目录开始逐级使用 `openat(O_NOFOLLOW)`，只对 `msime-path-trust` 声明的系统别名放宽最后一级。私有文件删除和词库租约目录都复用这个句柄，后续 `unlinkat`、`openat` 和 `renameat` 始终相对于已打开的目录执行；租约正文和租约锁在打开后的文件句柄上还必须是单硬链接普通文件。
 
 ## Alternatives considered
 
@@ -18,4 +18,4 @@ client-core 删除匿名会话、剪贴板历史和读取或发布词库租约�
 
 ## Consequences
 
-祖先目录发生替换时，删除和租约操作会失败并保持原目录及外部目录不变；正常路径和 macOS 受信任系统别名仍可用。共享实现增加了逐级遍历代码，但把多个存储入口的竞态策略集中在一处，并由祖先符号链接测试覆盖。
+祖先目录发生替换时，删除和租约操作会失败并保持原目录及外部目录不变；租约目录中的硬链接正文或锁也会被拒绝，避免把外部 inode 当成私有协调状态。正常路径和 macOS 受信任系统别名仍可用。共享实现增加了逐级遍历代码，但把多个存储入口的竞态策略集中在一处，并由祖先符号链接和硬链接测试覆盖。
