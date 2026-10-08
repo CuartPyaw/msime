@@ -103,7 +103,8 @@ final class ImePanels {
             if (tab.isSelected()) {
                 GradientDrawable face = DrawablePolicy.rounded(
                     Color.parseColor(s.emojiSkin.keyBackground()), s.pixels(8));
-                tab.setBackground(new InsetDrawable(face, s.pixels(2), s.pixels(3), s.pixels(2), s.pixels(3)));
+                ViewPolicy.setBackground(tab,
+                    new InsetDrawable(face, s.pixels(2), s.pixels(3), s.pixels(2), s.pixels(3)));
                 ViewPolicy.setActiveAlpha(tab, true, .6f);
             } else {
                 ViewPolicy.clearBackground(tab);
@@ -804,19 +805,21 @@ final class ImePanels {
         int accent = Color.parseColor(s.skin.accent());
         int onAccent = Color.parseColor(s.skin.onAccent());
         Typeface base = s.skin.monospaced() ? Typeface.MONOSPACE : Typeface.DEFAULT;
-        s.replyModeControl.setBackground(replySurface(ImeStyler.fade(s.skin.keyForeground(), .08), radius));
+        ViewPolicy.setBackground(s.replyModeControl,
+            replySurface(ImeStyler.fade(s.skin.keyForeground(), .08), radius));
         for (Button segment : new Button[] {s.replyReplyModeButton, s.replyPolishModeButton}) {
             boolean selected = segment.isSelected();
-            segment.setBackground(selected ? replySurface(Color.parseColor(s.skin.keyBackground()),
+            ViewPolicy.setBackground(segment, selected ? replySurface(Color.parseColor(s.skin.keyBackground()),
                 BoundsPolicy.nonNegative(radius - s.pixels(2))) : null);
             ViewPolicy.setTextColor(segment, foreground);
             segment.setTypeface(Typeface.create(base, selected ? Typeface.BOLD : Typeface.NORMAL));
             ViewPolicy.clearElevation(segment);
         }
-        s.replySourceCard.setBackground(replySurface(Color.parseColor(s.skin.keyBackground()), radius));
+        ViewPolicy.setBackground(s.replySourceCard,
+            replySurface(Color.parseColor(s.skin.keyBackground()), radius));
         ViewPolicy.setTextColor(s.replySourceButton, s.replyModel.source().isEmpty()
             ? ImeStyler.fade(s.skin.keyForeground(), .55) : foreground);
-        s.replyPasteButton.setBackground(new InsetDrawable(replySurface(accent, radius),
+        ViewPolicy.setBackground(s.replyPasteButton, new InsetDrawable(replySurface(accent, radius),
             0, s.pixels(6), 0, s.pixels(6)));
         // setBackground 会把 InsetDrawable 的内边距（左右为 0）套到按钮上，冲掉前面设的左右留白，文字就贴着色块边缘；换完背景再设回来。
         KeyboardGeometry.setHorizontalPaddingDp(s.replyPasteButton, s, 12);
@@ -825,7 +828,8 @@ final class ImePanels {
         for (int index = 0; index < s.replyActions.getChildCount(); index++) {
             if (!(s.replyActions.getChildAt(index) instanceof Button action)) continue;
             boolean primary = action == s.replyPrimaryAction;
-            action.setBackground(replySurface(primary ? accent : ImeStyler.fade(s.skin.keyBackground(), .7), radius));
+            ViewPolicy.setBackground(action,
+                replySurface(primary ? accent : ImeStyler.fade(s.skin.keyBackground(), .7), radius));
             ViewPolicy.setTextColor(action, primary ? onAccent : foreground);
             ViewPolicy.clearElevation(action);
         }
@@ -984,11 +988,12 @@ final class ImePanels {
         s.imeStyler.applySkin();
         // 换肤遍历之后补上卡片底色、次要字色和主操作的强调色。
         float radius = s.pixels(10);
-        content.setBackground(replySurface(Color.parseColor(s.skin.keyBackground()), radius));
+        ViewPolicy.setBackground(content,
+            replySurface(Color.parseColor(s.skin.keyBackground()), radius));
         for (TextView text : secondary) ViewPolicy.setTextColor(text, ImeStyler.fade(s.skin.keyForeground(), .6));
         if (error != null) ViewPolicy.setTextColor(error, Color.parseColor(s.skin.accent()));
         boolean busy = s.aiBusy;
-        primary.setBackground(replySurface(busy ? ImeStyler.fade(s.skin.keyBackground(), .7)
+        ViewPolicy.setBackground(primary, replySurface(busy ? ImeStyler.fade(s.skin.keyBackground(), .7)
             : Color.parseColor(s.skin.accent()), radius));
         ViewPolicy.setTextColor(primary, busy ? Color.parseColor(s.skin.keyForeground()) : Color.parseColor(s.skin.onAccent()));
         ViewPolicy.setActiveAlpha(primary, primary.isEnabled(), .45f);
