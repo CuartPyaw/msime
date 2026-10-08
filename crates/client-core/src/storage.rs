@@ -723,6 +723,16 @@ pub(crate) fn remove_private_file(path: &Path) -> io::Result<()> {
     }
 }
 
+#[cfg(unix)]
+pub(crate) fn remove_private_file_at(directory: &File, name: &OsStr) -> io::Result<()> {
+    rustix::fs::unlinkat(directory, name, rustix::fs::AtFlags::empty()).map_err(Into::into)
+}
+
+#[cfg(not(unix))]
+pub(crate) fn remove_private_file_at(directory: &PrivateDirectory, name: &OsStr) -> io::Result<()> {
+    fs::remove_file(directory.0.join(name))
+}
+
 /// Remove a file or directory tree relative to an opened parent directory.
 /// Directory traversal never reconstructs a path, and leaf symlinks are
 /// unlinked rather than followed.
