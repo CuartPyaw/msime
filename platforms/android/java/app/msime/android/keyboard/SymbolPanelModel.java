@@ -178,6 +178,27 @@ public final class SymbolPanelModel {
         return List.copyOf(kept);
     }
 
+    /**
+     * 「常用」里去掉这台设备画不出来的符号（#6070）：目录过滤上线前点过的空白格（⭠、🩷 等）已经记进了「常用」，而面板一打开就是「常用」，不过滤的话第一屏仍是空白格。「常用」里还有「http://」「@gmail.com」这类多字形的条目，`hasGlyph` 对它们一律回答「不能」，所以只判断一个码位（可带变体选择符）的条目，其余原样保留。
+     */
+    public static List<String> renderableRecents(List<String> recents, Predicate<String> drawable) {
+        ArrayList<String> kept = new ArrayList<>(recents.size());
+        for (String text : recents) if (!singleCodePoint(text) || drawable.test(text)) kept.add(text);
+        return List.copyOf(kept);
+    }
+
+    private static boolean singleCodePoint(String text) {
+        int count = 0;
+        for (int index = 0; index < text.length(); ) {
+            int codePoint = text.codePointAt(index);
+            index += Character.charCount(codePoint);
+            boolean variationSelector = (codePoint >= 0xFE00 && codePoint <= 0xFE0F)
+                || (codePoint >= 0xE0100 && codePoint <= 0xE01EF);
+            if (!variationSelector && ++count > 1) return false;
+        }
+        return count == 1;
+    }
+
     /** 已显示的条数到了上限，就当作读完了，不再要下一页。 */
     public static boolean catalogFull(List<String> shown) { return shown.size() >= MAX_CATALOG_ITEMS; }
 

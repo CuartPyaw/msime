@@ -111,6 +111,16 @@ public final class SymbolPanelModelSmoke {
             "a page with nothing drawable is an empty page, not a failure");
         check(SymbolPanelModel.renderableCatalogItems(List.of("(ノ°▽°)ノ", "ʕ•ᴥ•ʔ"), true, text -> false)
             .equals(List.of("(ノ°▽°)ノ", "ʕ•ᴥ•ʔ")), "kaomoji are kept: hasGlyph only answers single glyphs");
+        // 过滤上线前点过的空白格已经在「常用」里；多字形的条目 hasGlyph 一律回答「不能」，只判断单个码位（可带变体选择符）。
+        java.util.Set<String> undrawable = java.util.Set.of("⭠", "🩷", "🩵️");
+        java.util.Set<String> judged = new java.util.HashSet<>();
+        List<String> recentsShown = SymbolPanelModel.renderableRecents(
+            List.of("⭠", "，", "🩷", "http://", "@gmail.com", "🩵️", "❤️", "❤️‍🔥"),
+            text -> { judged.add(text); return !undrawable.contains(text) && text.codePointCount(0, text.length()) <= 2; });
+        check(recentsShown.equals(List.of("，", "http://", "@gmail.com", "❤️", "❤️‍🔥")),
+            "undrawable single symbols leave 常用, multi-glyph entries stay: " + recentsShown);
+        check(!judged.contains("http://") && !judged.contains("❤️‍🔥") && judged.contains("❤️"),
+            "only single code points (with an optional variation selector) are judged: " + judged);
     }
 
     private static void check(boolean condition, String message) {
