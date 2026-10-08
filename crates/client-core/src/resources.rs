@@ -198,6 +198,21 @@ fn create_private_file(path: &Path) -> std::io::Result<File> {
     options.open(path)
 }
 
+#[cfg(unix)]
+fn publish_generation(
+    directory: &File,
+    staging_name: &str,
+    generation: &str,
+) -> std::io::Result<()> {
+    rustix::fs::renameat(
+        directory,
+        std::ffi::OsStr::new(staging_name),
+        directory,
+        std::ffi::OsStr::new(generation),
+    )
+    .map_err(Into::into)
+}
+
 impl ResourceStore {
     /// root is an application-owned directory, separate from user learning data.
     pub fn new(root: impl Into<PathBuf>) -> Self {
@@ -213,8 +228,10 @@ impl ResourceStore {
         crate::storage::create_directory_and_check(&self.root)?;
         let lock = crate::file_lock::open_lock_file(self.root.join("resources.lock"))?;
         crate::file_lock::exclusive(&lock)?;
+        #[cfg(unix)]
+        let root_directory = crate::storage::open_private_directory(&self.root)?;
         sweep_abandoned_stages(&self.root);
-        let destination = self.root.join(generation);
+        let destination = self.root.join(&generation);
         if fs::symlink_metadata(&destination).is_ok() {
             self.verify(&destination, specification)?;
             return Ok(destination);
@@ -229,6 +246,27 @@ impl ResourceStore {
             output.sync_all()?;
         }
         // Published directories are complete. Existing generations are never overwritten.
+        #[cfg(unix)]
+        {
+            publish_generation(
+                &root_directory,
+                stage
+                    .path()
+                    .file_name()
+                    .ok_or_else(|| {
+                        std::io::Error::new(std::io::ErrorKind::InvalidInput, "stage has no name")
+                    })?
+                    .to_str()
+                    .ok_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "stage name is not UTF-8",
+                        )
+                    })?,
+                &generation,
+            )?;
+        }
+        #[cfg(not(unix))]
         fs::rename(stage.path(), &destination)?;
         Ok(destination)
     }
@@ -551,6 +589,30 @@ mod tests {
 
         assert!(create_private_file(&path).is_err());
         assert_eq!(fs::read(&target).unwrap(), b"keep");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn generation_publish_stays_in_an_open_resource_directory() {
+        use std::os::unix::fs::symlink;
+
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("resources");
+        let outside = parent.path().join("outside");
+        fs::create_dir(&root).unwrap();
+        fs::create_dir(&outside).unwrap();
+        let stage = root.join("incoming-fixture");
+        fs::create_dir(&stage).unwrap();
+        fs::write(stage.join("artifact"), b"synthetic").unwrap();
+        let directory = crate::storage::open_private_directory(&root).unwrap();
+        let moved = parent.path().join("moved");
+        fs::rename(&root, &moved).unwrap();
+        symlink(&outside, &root).unwrap();
+
+        publish_generation(&directory, "incoming-fixture", "generation").unwrap();
+
+        assert!(moved.join("generation/artifact").is_file());
+        assert!(!outside.join("generation").exists());
     }
 
     fn fixture_artifact(name: &str, bytes: &[u8]) -> Artifact {
