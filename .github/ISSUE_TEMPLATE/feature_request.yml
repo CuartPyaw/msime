@@ -1,28 +1,26 @@
 name: 功能建议
-description: 对共享客户端或某个平台宿主提出范围明确的改动。
+description: 希望增加功能或改善体验？
 title: "[Feature]: "
 labels: [enhancement]
 body:
-  - type: markdown
-    attributes:
-      value: |
-        请描述用户可见的行为以及涉及的平台边界。不要附带私人输入、凭据或有版权限制的上游文件。
   - type: textarea
     id: problem
     attributes:
-      label: 问题与使用场景
+      label: 遇到了什么不便
+      description: 说说你在什么情况下觉得不方便。
+      placeholder: 例如：在手机上打长句时，候选字太小，经常点错。
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
-      label: 期望的行为
+      label: 希望怎样改进
+      description: 描述你想要的效果就好，不用考虑怎么实现。
+      placeholder: 例如：希望能在设置里调大候选字。
     validations:
       required: true
   - type: textarea
-    id: platforms
+    id: additional
     attributes:
-      label: 涉及平台与验证方案
-      description: 说明改动落在共享层还是某个平台宿主，以及结果可以怎样验证。
-    validations:
-      required: true
+      label: 其他信息（可选）
+      description: 例如其他输入法的类似做法，或相关链接。
