@@ -3,6 +3,7 @@ package app.msime.android.home;
 import android.net.Uri;
 import android.os.Bundle;
 import android.widget.LinearLayout;
+import app.msime.android.ViewPolicy;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.Nullable;
@@ -52,8 +53,8 @@ public final class BackupPage extends DetailPage {
     }
 
     private void refresh() {
-        if (exportRow != null) exportRow.setEnabled(!busy);
-        if (restoreRow != null) restoreRow.setEnabled(!busy);
+        if (exportRow != null) ViewPolicy.setEnabled(exportRow, !busy);
+        if (restoreRow != null) ViewPolicy.setEnabled(restoreRow, !busy);
     }
 
     private void setBusy(boolean value) {
