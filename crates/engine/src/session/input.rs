@@ -1587,7 +1587,10 @@ impl InputSession {
     }
 
     fn backspace(&mut self) -> KeyResult {
-        if self.caret_position() < self.editing_text().len() {
+        if self
+            .caret
+            .is_some_and(|caret| caret < self.editing_text().len())
+        {
             return self.edit_at_caret(Command::Backspace);
         }
         self.caret = None;
