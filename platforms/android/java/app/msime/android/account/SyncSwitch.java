@@ -32,6 +32,9 @@ public final class SyncSwitch {
     /** 待上传标记的读改写都在这把锁里：provider 的 binder 线程与 CloudSync 的工作线程同在主进程里并发调用。 */
     private static final Object DIRTY_LOCK = new Object();
 
+    /** Shared lock for sync-owned local writes that must exclude account rebinding. */
+    public static Object bindingLock() { return DIRTY_LOCK; }
+
     private SyncSwitch() {}
 
     /** 是不是已知的同步分类；provider 收到的分类名先过这一关。 */
