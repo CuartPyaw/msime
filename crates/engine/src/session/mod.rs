@@ -48,6 +48,7 @@ impl Session {
             options.fuzzy_pinyin,
             options.english,
             options.enabled_schemes.contains(SchemeType::Quanpin),
+            options.single_character_only,
         );
         nine_key.set_stroke_dictionary(options.stroke_dictionary.clone());
         Ok(Session {
