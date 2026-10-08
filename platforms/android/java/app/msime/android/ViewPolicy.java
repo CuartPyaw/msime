@@ -6,6 +6,7 @@ import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.util.TypedValue;
 import android.text.TextUtils;
 import android.widget.Button;
@@ -148,6 +149,18 @@ public final class ViewPolicy {
     public static void setEnabledWithAlpha(View view, boolean enabled, float inactiveAlpha) {
         setEnabled(view, enabled);
         setActiveAlpha(view, enabled, inactiveAlpha);
+    }
+
+    /** 递归设置未承载点击行为的容器及其控件的启用状态和禁用透明度。 */
+    public static void setEnabledRecursively(ViewGroup group, boolean enabled, float inactiveAlpha) {
+        for (int index = 0; index < group.getChildCount(); index++) {
+            View child = group.getChildAt(index);
+            if (child instanceof ViewGroup nested && !child.isClickable()) {
+                setEnabledRecursively(nested, enabled, inactiveAlpha);
+            } else {
+                setEnabledWithAlpha(child, enabled, inactiveAlpha);
+            }
+        }
     }
 
     /** Announce changing view content to accessibility services without interrupting the user. */
