@@ -221,6 +221,11 @@ public final class ViewPolicy {
         view.setTypeface(typeface);
     }
 
+    /** 直接设置文本画笔的字体。 */
+    public static void setTypeface(Paint paint, Typeface typeface) {
+        paint.setTypeface(typeface);
+    }
+
     /** 直接设置文本视图的字体和字形样式。 */
     public static void setTypeface(TextView view, Typeface typeface, int style) {
         view.setTypeface(typeface, style);
