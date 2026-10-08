@@ -26,11 +26,14 @@ import app.msime.android.HttpBodyPolicy;
 import app.msime.android.SyncSwitch;
 import app.msime.android.ViewPolicy;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
@@ -368,8 +371,19 @@ public final class ProfilePage extends DetailPage {
             File[] previous = directory.listFiles();
             if (previous != null) for (File stale : previous) deleteQuietly(stale);
             File file = new File(directory, name);
-            try (OutputStream output = new FileOutputStream(file)) {
-                new DeviceDataApi(context).exportData(output);
+            java.nio.file.Path temporary = null;
+            try {
+                temporary = Files.createTempFile(directory.toPath(), name + ".", ".part");
+                try (OutputStream output = Files.newOutputStream(temporary, StandardOpenOption.WRITE,
+                        StandardOpenOption.TRUNCATE_EXISTING, LinkOption.NOFOLLOW_LINKS)) {
+                    new DeviceDataApi(context).exportData(output);
+                }
+                try {
+                    Files.move(temporary, file.toPath(), StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING);
+                } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
+                    Files.move(temporary, file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                }
             } catch (IOException unwritable) {
                 deleteQuietly(file);
                 return "没有导出，存储空间不可用";
@@ -377,6 +391,8 @@ public final class ProfilePage extends DetailPage {
                 deleteQuietly(file);
                 if (failure.status == 429) return "今天的导出次数已用完，明天再试";
                 throw failure;
+            } finally {
+                if (temporary != null) Files.deleteIfExists(temporary);
             }
             return "";
         }, outcome -> {
