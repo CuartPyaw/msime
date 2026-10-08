@@ -14,6 +14,7 @@ SignPath Foundation 的开源计划已经批准了项目 `msime-windows`，签�
 
 - **开关和配置**：`source` 任务决定本次签不签。变量是 `signpath` 时，`SIGNPATH_TOKEN`、`SIGNPATH_ORGANIZATION_ID`、`SIGNPATH_PROJECT_SLUG`、`SIGNPATH_SIGNING_POLICY_SLUG` 缺一个就失败，不悄悄退回未签名；变量是别的值也失败。开关变量必须建在本仓库，不能建在组织级：msime-windows 用同名变量打开它自己的 SignPath 路径，组织级的会让两个仓库一起打开。
 - **只签 `main` 和 `develop`**：其他分支的 `-alpha` 是试验构建，照旧不签名，不占审批。
+- **签名测试**：派发时勾上 `signpath_test`，不看开关、不限分支，用 SignPath 的 `test-signing` 策略走一遍两个签名任务。测试证书不受系统信任，策略不要审批、也不核对来源，所以这种运行从不发布，并且用单独的并发组，不挡真正的发布。正式证书还没签发时（`release_certificate_2026` 处于 CsrPending），用它先验证托管 runner 构建和整条签名链路。
 - **runner**：SignPath 对开源项目检查签名请求之前的每个 job 都在 GitHub 托管 runner 上，所以签名时 `rust`、`release`、`package` 从 `depot-windows-2025-8` 换到 `windows-2025`，sccache 改用 GitHub Actions 缓存（`SCCACHE_GHA_ENABLED`），`rust` 的超时放宽到 120 分钟。
 - **两次批量签名请求**：发布签名每个请求都要审批人在 SignPath 里批准。六个版本各签两次是十二次审批，所以任务拆成 `release`（构建、暂存、收符号，上传不带 PDB 的暂存包和本项目二进制）→ `sign-payload`（六个版本的二进制合成一次请求）→ `package`（按版本放回签好的二进制、编译安装包、装卸冒烟）→ `sign-installers`（六个安装包合成一次请求，重算 `.sha256`，作为 `msime-windows-signed-<版本>` 交给下游）。一次发版批准两次。
 - **签什么**：只签本项目从源码构建的二进制（`installer/SignPath-PackageBinaries.ps1`）：`server_exe` 下有同名 PDB 的 EXE（`Prepare-PackageFiles.ps1` 要求每个 Server EXE 带 PDB，Windows App SDK 自带的除外），以及各架构的 TIP 和本版本的宿主 DLL（版本表 `host_dll`）。Windows App SDK、ONNX Runtime、sherpa-onnx 和 vcpkg 构建的 DLL 保持上游原样：SignPath Foundation 条款是 "The team must only sign software artifacts built from their own source code"，同时允许签名的安装包里带未签名的上游 DLL。
