@@ -312,6 +312,36 @@ where
     E: From<io::Error>,
     F: FnOnce(File) -> Result<(File, T), E>,
 {
+    write_private_file_at_with_mode(directory, name, writer, false)
+}
+
+/// Stream a private file into a directory-bound temporary file and publish it
+/// with an atomic no-replace operation. The callback returns the finished file
+/// so callers can use writers that consume their output handle.
+#[cfg(unix)]
+pub(crate) fn write_private_file_at_noclobber_with<T, E, F>(
+    directory: &File,
+    name: &OsStr,
+    writer: F,
+) -> Result<(T, u64), E>
+where
+    E: From<io::Error>,
+    F: FnOnce(File) -> Result<(File, T), E>,
+{
+    write_private_file_at_with_mode(directory, name, writer, true)
+}
+
+#[cfg(unix)]
+fn write_private_file_at_with_mode<T, E, F>(
+    directory: &File,
+    name: &OsStr,
+    writer: F,
+    no_replace: bool,
+) -> Result<(T, u64), E>
+where
+    E: From<io::Error>,
+    F: FnOnce(File) -> Result<(File, T), E>,
+{
     let temporary_name = private_temporary_name();
     let descriptor = rustix::fs::openat(
         directory,
@@ -343,11 +373,53 @@ where
         }
     };
     drop(file);
-    if let Err(error) = rustix::fs::renameat(directory, &temporary_name, directory, name) {
-        let _ = rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty());
-        return Err(E::from(error.into()));
+    if !no_replace {
+        if let Err(error) = rustix::fs::renameat(directory, &temporary_name, directory, name) {
+            let _ = rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty());
+            return Err(E::from(io::Error::from(error)));
+        }
+        return Ok((value, bytes));
     }
-    Ok((value, bytes))
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    match rustix::fs::renameat_with(
+        directory,
+        &temporary_name,
+        directory,
+        name,
+        rustix::fs::RenameFlags::NOREPLACE,
+    ) {
+        Ok(()) => return Ok((value, bytes)),
+        Err(rustix::io::Errno::EXIST) => {
+            let _ = rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty());
+            return Err(E::from(io::Error::from(io::ErrorKind::AlreadyExists)));
+        }
+        Err(rustix::io::Errno::INVAL | rustix::io::Errno::NOSYS) => {}
+        Err(error) => {
+            let _ = rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty());
+            return Err(E::from(io::Error::from(error)));
+        }
+    }
+    match rustix::fs::linkat(
+        directory,
+        &temporary_name,
+        directory,
+        name,
+        rustix::fs::AtFlags::empty(),
+    ) {
+        Ok(()) => {
+            rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty())
+                .map_err(|error| E::from(io::Error::from(error)))?;
+            Ok((value, bytes))
+        }
+        Err(error) if error == rustix::io::Errno::EXIST => {
+            let _ = rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty());
+            Err(E::from(io::Error::from(io::ErrorKind::AlreadyExists)))
+        }
+        Err(error) => {
+            let _ = rustix::fs::unlinkat(directory, &temporary_name, rustix::fs::AtFlags::empty());
+            Err(E::from(io::Error::from(error)))
+        }
+    }
 }
 
 /// A private temporary file whose creation, publication and cleanup all use
