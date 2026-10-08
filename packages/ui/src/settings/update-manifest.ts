@@ -23,6 +23,18 @@ export type GitHubRelease = {
   assets?: unknown;
 };
 
+const projectReleaseTagUrl =
+  /^https:\/\/github\.com\/metasequoiaime\/([\w.-]+)\/releases\/tag\/([\w.+-]+)$/;
+
+/**
+ * 国内镜像上这次更新的安装包：`<前缀>https://github.com/metasequoiaime/<仓库>/releases/download/<tag>/<安装包名>`。安装包名是检查更新时按平台、版本和架构挑出来并校验过形状的那一个，和页面上让用户核对的 SHA256 是同一个文件。发布页地址不是某个 tag，或者没有挑出安装包时返回 null，页面只给 GitHub 发布页。
+ */
+export function mirrorDownloadUrl(update: ValidatedUpdate, prefix: string): string | null {
+  const tag = projectReleaseTagUrl.exec(update.releaseUrl);
+  if (!tag || !update.installerName) return null;
+  return `${prefix}https://github.com/metasequoiaime/${tag[1]}/releases/download/${tag[2]}/${update.installerName}`;
+}
+
 export type ValidatedUpdate = {
   version: Version;
   releaseUrl: string;

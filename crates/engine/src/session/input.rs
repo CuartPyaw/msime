@@ -1276,10 +1276,9 @@ impl InputSession {
     pub(super) fn expand_initial_candidates(&mut self) -> bool {
         self.refresh_prefix_candidates();
         let grew = if self.prefix_active {
-            let raw_with_cases = self.raw_with_cases()[..self.prefix_end()].to_owned();
-            self.engine.expand_raw_initial_candidates(
+            self.engine.expand_current_raw_prefix_initial_candidates(
                 &self.prefix_query_input,
-                &raw_with_cases,
+                self.prefix_end(),
                 &mut self.prefix_candidates,
             )
         } else {

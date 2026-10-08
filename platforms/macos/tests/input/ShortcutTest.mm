@@ -288,6 +288,16 @@ static void CheckMenu(NSMenu *menu, id controller) {
 @property(nonatomic, strong) NSMutableArray<NSString *> *insertions;
 @end
 
+@interface ModeController : MSIMEInputController
+@property(nonatomic) NSUInteger preparationCalls;
+// Plays secure event input, which is window-server state a test cannot turn on. Left at NO it also keeps a test from inheriting the machine's state: a locked screen or another process's password field turns it on for everyone.
+@property(nonatomic) BOOL secureInput;
+@property(nonatomic) NSUInteger paletteCalls;
+@property(nonatomic) NSUInteger screenKeyboardCalls;
+@property(nonatomic) NSUInteger restartCalls;
+@property(nonatomic) NSUInteger terminationCalls;
+@end
+
 static void TestBackspaceHoldDoesNotEscapeComposition() {
     NSString *suite = [@"msime.backspace-hold." stringByAppendingString:NSUUID.UUID.UUIDString];
     NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
@@ -364,7 +374,8 @@ static void TestPassthroughKeysAreCounted() {
     appearance.fullWidthInput = NO;
     ShortcutSession *session = [ShortcutSession new];
     ShortcutClient *client = [ShortcutClient new];
-    MSIMEInputController *controller = [MSIMEInputController alloc];
+    // Secure event input skips counting; ModeController keeps it off whatever the CI machine has on.
+    ModeController *controller = [ModeController alloc];
     [controller setValue:appearance forKey:@"appearance"];
     [controller setValue:session forKey:@"session"];
     [controller setValue:client forKey:@"activeClient"];
@@ -512,15 +523,6 @@ static void TestKeyLatencyIsLoggedWithoutTheKey() {
 - (void)orderOut:(id)sender { (void)sender; self.requestedVisible = NO; }
 @end
 
-@interface ModeController : MSIMEInputController
-@property(nonatomic) NSUInteger preparationCalls;
-// Plays secure event input, which is window-server state a test cannot turn on.
-@property(nonatomic) BOOL secureInput;
-@property(nonatomic) NSUInteger paletteCalls;
-@property(nonatomic) NSUInteger screenKeyboardCalls;
-@property(nonatomic) NSUInteger restartCalls;
-@property(nonatomic) NSUInteger terminationCalls;
-@end
 @implementation ModeController
 - (void)prepareSession {
     ++self.preparationCalls;

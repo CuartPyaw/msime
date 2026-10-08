@@ -168,6 +168,7 @@ public final class DictionarySnapshotQueue {
             String expectedLocalVersion, String fileSha256) throws Failure {
         if (source == null || !source.isAbsolute()
                 || !Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)
+                || !SafePaths.isSingleLink(source)
                 || accountId == null || accountId.isEmpty() || accountId.length() > 128
                 || cloudRevision < 0 || !validVersion(expectedLocalVersion)
                 || !validDigest(fileSha256)) throw new Failure(Reason.INVALID);
@@ -285,15 +286,34 @@ public final class DictionarySnapshotQueue {
 
     public void cancel(String accountId) throws Failure {
         if (accountId == null || accountId.isEmpty()) throw new Failure(Reason.INVALID);
-        Request cancelled = locked(() -> {
-            State state = readUnlocked();
-            Request request = state.request();
-            if (request == null || !accountId.equals(request.accountId()) || !request.status().active()) return null;
-            Request result = copy(request, Status.CANCELLED);
-            writeState(new State(state.localVersion(), result));
-            return result;
-        });
-        if (cancelled != null) deleteSnapshot(cancelled.id());
+        // 输入法 worker 在认领或完成请求时可能短暂持有状态锁。
+        // 重试这次交接，避免退出登录或切换账号时静默留下旧账号的活动快照。
+        // 已完成的请求不会造成影响：下一次尝试会观察到终态，不会触碰更新后的请求。
+        Failure busy = null;
+        for (int attempt = 0; attempt < 40; attempt++) {
+            try {
+                Request cancelled = locked(() -> {
+                    State state = readUnlocked();
+                    Request request = state.request();
+                    if (request == null || !accountId.equals(request.accountId()) || !request.status().active()) return null;
+                    Request result = copy(request, Status.CANCELLED);
+                    writeState(new State(state.localVersion(), result));
+                    return result;
+                });
+                if (cancelled != null) deleteSnapshot(cancelled.id());
+                return;
+            } catch (Failure error) {
+                if (error.reason() != Reason.BUSY) throw error;
+                busy = error;
+                try {
+                    Thread.sleep(25L);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new Failure(Reason.BUSY, interrupted);
+                }
+            }
+        }
+        throw busy == null ? new Failure(Reason.BUSY) : busy;
     }
 
     private void transition(UUID id, Status status) throws Failure {
@@ -325,6 +345,7 @@ public final class DictionarySnapshotQueue {
     }
 
     private void copyAndHash(Path source, Path destination, String expected) throws IOException, Failure {
+        if (!SafePaths.isSingleLink(source)) throw new Failure(Reason.INVALID);
         MessageDigest digest;
         try { digest = MessageDigest.getInstance("SHA-256"); }
         catch (NoSuchAlgorithmException error) { throw new Failure(Reason.UNAVAILABLE, error); }
@@ -400,6 +421,7 @@ public final class DictionarySnapshotQueue {
             if (!Files.exists(stateFile, LinkOption.NOFOLLOW_LINKS)) return new State(null, null);
             if (!Files.isRegularFile(stateFile, LinkOption.NOFOLLOW_LINKS))
                 throw new Failure(Reason.INVALID);
+            if (!SafePaths.isSingleLink(stateFile)) throw new Failure(Reason.INVALID);
             byte[] bytes;
             try (InputStream input = Files.newInputStream(stateFile, LinkOption.NOFOLLOW_LINKS)) {
                 bytes = HttpBodyPolicy.readRequired(input, MAXIMUM_STATE_BYTES);
