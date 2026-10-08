@@ -83,7 +83,7 @@ final class ImeCandidates {
     }
 
     private void applyCandidateTypeface(Button button) {
-        button.setTypeface(candidateTypeface,
+        ViewPolicy.setTypeface(button, candidateTypeface,
             button.isSelected() ? Typeface.BOLD : Typeface.NORMAL);
     }
 
