@@ -4508,6 +4508,35 @@ fn wubi_session(fixture: &Fixture) -> Session {
     fixture.session_with(|options| options.scheme = SchemeType::Wubi)
 }
 
+#[test]
+fn wubi_refresh_reuses_request_strings() {
+    let fixture = Fixture::new(CARET_PREFIX_FIXTURE);
+    let mut session = wubi_session(&fixture);
+    type_text(&mut session, "aaaa");
+    let request = session.input.engine.request();
+    let pointers = [
+        request.raw_input.as_ptr(),
+        request.raw_input_with_cases.as_ptr(),
+        request.normalized_input.as_ptr(),
+        request.raw_segmentation.as_ptr(),
+        request.normalized_segmentation.as_ptr(),
+        request.segmentation.as_ptr(),
+    ];
+    session.input.engine.handle_key(SchemeKey::Requery);
+    let request = session.input.engine.request();
+    assert_eq!(
+        [
+            request.raw_input.as_ptr(),
+            request.raw_input_with_cases.as_ptr(),
+            request.normalized_input.as_ptr(),
+            request.raw_segmentation.as_ptr(),
+            request.normalized_segmentation.as_ptr(),
+            request.segmentation.as_ptr(),
+        ],
+        pointers
+    );
+}
+
 /// 依次送入网址的各个字符：字母和数字走 `character`，符号走 `punctuation`，与宿主把符号报成标点时一样。
 fn type_url(session: &mut Session, text: &str) {
     for byte in text.bytes() {

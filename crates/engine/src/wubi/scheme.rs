@@ -55,17 +55,21 @@ impl WubiScheme {
 
     /// Every string field is the raw code; valid when non-empty.
     pub fn build_request(&self) -> QueryRequest {
-        QueryRequest {
-            scheme: SchemeType::Wubi,
-            raw_input: self.raw.clone(),
-            raw_input_with_cases: self.raw.clone(),
-            normalized_input: self.raw.clone(),
-            raw_segmentation: self.raw.clone(),
-            normalized_segmentation: self.raw.clone(),
-            segmentation: self.raw.clone(),
-            valid: !self.raw.is_empty(),
-            ..QueryRequest::default()
-        }
+        let mut request = QueryRequest::default();
+        self.build_request_into(&mut request);
+        request
+    }
+
+    /// 将五笔请求写入已有存储，避免逐键刷新重复克隆同一码字符串。
+    pub fn build_request_into(&self, request: &mut QueryRequest) {
+        request.scheme = SchemeType::Wubi;
+        request.raw_input.clone_from(&self.raw);
+        request.raw_input_with_cases.clone_from(&self.raw);
+        request.normalized_input.clone_from(&self.raw);
+        request.raw_segmentation.clone_from(&self.raw);
+        request.normalized_segmentation.clone_from(&self.raw);
+        request.segmentation.clone_from(&self.raw);
+        request.valid = !self.raw.is_empty();
     }
 
     pub fn preedit(&self) -> String {
