@@ -104,7 +104,7 @@ public final class KeyboardSkinCard extends KeyboardPressButton {
         canvas.drawRoundRect(outline, radius + stroke / 2f, radius + stroke / 2f, paint);
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(selected ? accent : label);
-        paint.setTypeface(selected ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+        ViewPolicy.setTypeface(paint, selected ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
         paint.setTextAlign(Paint.Align.CENTER);
         // 皮肤名放不下时以「…」结尾，不悄悄丢掉末尾的字。
         boolean bold = selected;
