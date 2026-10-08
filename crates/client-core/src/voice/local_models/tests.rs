@@ -354,6 +354,45 @@ fn archive_member_creation_stays_in_the_open_model_directory() {
 
 #[cfg(unix)]
 #[test]
+fn adoption_rename_stays_in_open_source_and_model_directories() {
+    use std::os::unix::fs::symlink;
+
+    let state = tempfile::tempdir().unwrap();
+    let root = state.path().join("models");
+    let source = state.path().join("resources");
+    let outside_root = state.path().join("outside-root");
+    let outside_source = state.path().join("outside-source");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(&source).unwrap();
+    fs::create_dir(&outside_root).unwrap();
+    fs::create_dir(&outside_source).unwrap();
+    fs::write(source.join("a.dat"), PACK_A).unwrap();
+    fs::create_dir_all(outside_source.join("a.dat")).unwrap();
+
+    let source_directory = crate::storage::open_private_directory(&source).unwrap();
+    let staging = Staging::new(root.join(".staging-pack-new")).unwrap();
+    staging.create().unwrap();
+    staging.create_model_directory().unwrap();
+    let pack_directory = staging.open_model_directory().unwrap();
+    let moved_root = state.path().join("models-moved");
+    let moved_source = state.path().join("resources-moved");
+    fs::rename(&root, &moved_root).unwrap();
+    fs::rename(&source, &moved_source).unwrap();
+    symlink(&outside_root, &root).unwrap();
+    symlink(&outside_source, &source).unwrap();
+
+    move_adopted_file_at(&source_directory, &pack_directory, OsStr::new("a.dat")).unwrap();
+
+    assert_eq!(
+        fs::read(moved_root.join(".staging-pack-new/model/a.dat")).unwrap(),
+        PACK_A
+    );
+    assert!(!outside_root.join(".staging-pack-new/model/a.dat").exists());
+    assert!(outside_source.join("a.dat").is_dir());
+}
+
+#[cfg(unix)]
+#[test]
 fn leftover_file_cleanup_rejects_a_symlinked_parent() {
     use std::os::unix::fs::symlink;
 

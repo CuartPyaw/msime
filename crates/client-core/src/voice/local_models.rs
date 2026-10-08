@@ -7,7 +7,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::cell::Cell;
 use std::collections::BTreeMap;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Read, Seek, Write};
 use std::path::{Component, Path, PathBuf};
@@ -876,6 +876,11 @@ impl Staging {
             crate::storage::open_private_directory_at(&staging, OsStr::new("model"))
         })
     }
+
+    #[cfg(unix)]
+    fn open_directory(&self) -> io::Result<File> {
+        crate::storage::open_private_directory_at(&self.parent, &self.name)
+    }
 }
 
 impl Drop for Staging {
@@ -1313,6 +1318,11 @@ fn move_pack_file_back(
     fs::rename(pack_dir.join(name), partials.path().join(partial_name))
 }
 
+#[cfg(unix)]
+fn move_adopted_file_at(source: &File, destination: &File, name: &OsStr) -> io::Result<()> {
+    rustix::fs::renameat(source, name, destination, name).map_err(io::Error::from)
+}
+
 /// 下载一个固定的上游归档（ZIP，名称、URL、长度、SHA-256 来自锁文件），取出 `members` 列出的成员，作为 `files` 里同名的文件安装到 `<root>/<id>`。每个取出的文件按 `files` 里它自己的长度和 SHA-256 校验，归档本身也先按锁文件校验；归档的下载和 [`install_files`] 一样按 `mirrors` 换源、用 HTTP Range 续传。进度的 `download` 阶段按归档字节计，取出成员时报 `verify`。
 #[allow(clippy::too_many_arguments)]
 pub fn install_archive_members(
@@ -1524,12 +1534,30 @@ pub(crate) fn adopt_files(
     let _lock = acquire_model_lock(root)?;
     // 先放回上一次被打断的收编移走的文件，再检查来源里有没有这组文件。
     remove_leftovers(root, id);
+    #[cfg(unix)]
+    let source_directory = crate::storage::open_private_directory(source)?;
     let mut names = Vec::with_capacity(files.len());
     for file in files {
         let name = single_component(&file.name)
             .filter(|single| *single == file.name)
             .ok_or_else(|| LocalModelError::UnsafeArchive(file.name.clone()))?;
         // 只收编普通文件：符号链接可能把外面的文件带进资源包。
+        #[cfg(unix)]
+        match crate::storage::open_private_file_at(&source_directory, OsStr::new(&name)) {
+            Ok(file) if file.metadata()?.is_file() => {}
+            Ok(_) => return Err(LocalModelError::UnsafeArchive(file.name.clone())),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Err(LocalModelError::MissingFile(file.name.clone()))
+            }
+            Err(error)
+                if error.kind() == io::ErrorKind::InvalidInput
+                    || error.raw_os_error() == Some(libc::ELOOP) =>
+            {
+                return Err(LocalModelError::UnsafeArchive(file.name.clone()))
+            }
+            Err(error) => return Err(error.into()),
+        }
+        #[cfg(not(unix))]
         match fs::symlink_metadata(source.join(&name)) {
             Ok(metadata) if metadata.file_type().is_file() => {}
             Ok(_) => return Err(LocalModelError::UnsafeArchive(file.name.clone())),
@@ -1544,22 +1572,52 @@ pub(crate) fn adopt_files(
     staging.create()?;
     let pack_dir = staging.path.join("model");
     staging.create_model_directory()?;
+    #[cfg(unix)]
+    let staging_directory = staging.open_directory()?;
+    #[cfg(unix)]
+    let pack_directory = staging.open_model_directory()?;
     // 改名之前先落盘来源记录：进程在发布前被杀时，下次收编或安装这个包时按它把文件放回来源（[`restore_interrupted_adoption`]）。
+    #[cfg(unix)]
+    crate::storage::write_private_file_at(
+        &staging_directory,
+        OsStr::new(ADOPTION_SOURCE),
+        record.as_bytes(),
+    )?;
+    #[cfg(not(unix))]
     let mut source_record = create_private_file(&staging.path.join(ADOPTION_SOURCE))?;
+    #[cfg(not(unix))]
     source_record.write_all(record.as_bytes())?;
+    #[cfg(not(unix))]
     source_record.sync_all()?;
+    #[cfg(not(unix))]
     drop(source_record);
 
+    #[cfg(unix)]
+    let mut moved: Vec<OsString> = Vec::with_capacity(files.len());
+    #[cfg(not(unix))]
     let mut moved: Vec<(PathBuf, PathBuf)> = Vec::with_capacity(files.len());
     let result = (|| {
         for name in &names {
+            #[cfg(unix)]
+            move_adopted_file_at(&source_directory, &pack_directory, OsStr::new(name))?;
+            #[cfg(unix)]
+            moved.push(OsString::from(name));
+            #[cfg(not(unix))]
             let from = source.join(name);
+            #[cfg(not(unix))]
             let to = pack_dir.join(name);
+            #[cfg(not(unix))]
             fs::rename(&from, &to)?;
+            #[cfg(not(unix))]
             moved.push((from, to));
         }
         for file in files {
+            #[cfg(unix)]
+            let mut input =
+                crate::storage::open_private_file_at(&pack_directory, OsStr::new(&file.name))?;
+            #[cfg(not(unix))]
             let path = pack_dir.join(&file.name);
+            #[cfg(not(unix))]
             let mut input = crate::storage::open_private_file_in(&path)?;
             if input.metadata()?.len() != file.size {
                 return Err(LocalModelError::SizeMismatch(file.name.clone()));
@@ -1579,10 +1637,18 @@ pub(crate) fn adopt_files(
                 return Err(LocalModelError::ChecksumMismatch(file.name.clone()));
             }
         }
+        #[cfg(unix)]
+        write_manifest_at(&pack_directory, manifest)?;
+        #[cfg(not(unix))]
         write_manifest(&pack_dir, manifest)?;
         publish(root, id, &pack_dir)
     })();
     if result.is_err() {
+        #[cfg(unix)]
+        for name in moved.iter().rev() {
+            let _ = move_adopted_file_at(&pack_directory, &source_directory, name);
+        }
+        #[cfg(not(unix))]
         for (from, to) in moved.iter().rev() {
             let _ = fs::rename(to, from);
         }
