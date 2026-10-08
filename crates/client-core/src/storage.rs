@@ -1,6 +1,4 @@
-use std::ffi::OsStr;
-#[cfg(unix)]
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 #[cfg(any(not(unix), test))]
 use std::fs::OpenOptions;
 use std::fs::{self, File};

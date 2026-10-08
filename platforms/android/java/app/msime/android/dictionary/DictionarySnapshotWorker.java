@@ -72,7 +72,7 @@ public final class DictionarySnapshotWorker {
         if (digest == null) throw new IllegalStateException("snapshot version missing");
         Object rawGeneration = value.opt("generation");
         String generation = rawGeneration == null || rawGeneration == JSONObject.NULL
-            ? "legacy" : strictString(rawGeneration);
+            ? "legacy" : JsonPolicy.strictString(rawGeneration);
         if (generation == null) throw new IllegalStateException("snapshot generation invalid");
         String version = "local-v1:" + generation + ":" + digest;
         if (!DictionarySnapshotQueue.validVersion(version))
@@ -80,13 +80,4 @@ public final class DictionarySnapshotWorker {
         return version;
     }
 
-    /** Snapshot bridge status flags must remain JSON booleans; reject scalar coercion. */
-    static Boolean strictBoolean(Object value) {
-        return JsonPolicy.strictBoolean(value);
-    }
-
-    /** Snapshot identity fields must remain JSON strings; org.json otherwise coerces scalars. */
-    static String strictString(Object value) {
-        return JsonPolicy.strictString(value);
-    }
 }

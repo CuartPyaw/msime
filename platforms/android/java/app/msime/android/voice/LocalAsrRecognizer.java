@@ -154,13 +154,19 @@ public final class LocalAsrRecognizer {
         AudioRecord recorder = openRecorder();
         Thread capture = new Thread(() -> capture(recorder, audio, captureFailed),
             "msime-local-asr-capture");
-        long created = NativeClient.localSpeechCreate();
-        synchronized (handleLock) {
-            handle = created;
-        }
+        long created = 0;
+        boolean captureStarted = false;
         try {
+            // Native session creation can fail before the cleanup scope used to
+            // own the recorder exists. Keep both resources in this scope so a
+            // linker/runtime failure cannot leave the microphone allocated.
+            created = NativeClient.localSpeechCreate();
+            synchronized (handleLock) {
+                handle = created;
+            }
             // Capture starts before the model loads, so the first words are queued rather than lost while a cold model is read from storage.
             capture.start();
+            captureStarted = true;
             String error = NativeClient.localSpeechStart(created, modelDirectory, language,
                 LocalAsrPolicy.hotwordLines(texts(hotwords)), 0);
             if (cancelled.get()) throw new Refused(Failure.CANCELLED);
@@ -179,9 +185,10 @@ public final class LocalAsrRecognizer {
         } finally {
             stopped.set(true);
             joinQuietly(capture);
+            if (!captureStarted) recorder.release();
             synchronized (handleLock) {
                 handle = 0;
-                NativeClient.localSpeechDestroy(created);
+                if (created != 0) NativeClient.localSpeechDestroy(created);
             }
             releaseLater(LocalAsrPolicy.IDLE_RELEASE_MILLIS,
                 LocalAsrPolicy.IDLE_RELEASE_MILLIS + 5_000);

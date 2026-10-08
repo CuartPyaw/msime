@@ -401,29 +401,14 @@ public final class CommonPhrasesStore {
         }
     }
 
-    /** Native response status must remain a JSON boolean; reject org.json string coercion. */
-    static Boolean strictBoolean(Object value) {
-        return JsonPolicy.strictBoolean(value);
-    }
-
-    /** Persisted response fields must retain their JSON string type. */
-    public static String strictString(Object value) {
-        return JsonPolicy.strictString(value);
-    }
-
-    /** Read a JSON integer without org.json's string or fractional coercion. */
-    public static Integer strictInteger(Object value) {
-        return JsonPolicy.strictInteger(value);
-    }
-
     /** 常用语包修订号和跳过条数必须是非负 JSON 整数。 */
     public static Integer nonNegativeInteger(Object value) {
-        Integer parsed = strictInteger(value);
+        Integer parsed = JsonPolicy.strictInteger(value);
         return parsed == null || parsed < 0 ? null : parsed;
     }
 
     static int strictInteger(Object value, int fallback) {
-        Integer parsed = strictInteger(value);
+        Integer parsed = JsonPolicy.strictInteger(value);
         return parsed == null ? fallback : parsed;
     }
 
