@@ -385,36 +385,53 @@ impl NineKeySession {
     }
 
     pub fn select(&mut self, index: usize) -> KeyResult {
-        let Some(selected) = self.candidates.get(index).cloned() else {
+        let Some(selected) = self.candidates.get(index) else {
             return KeyResult::unhandled();
+        };
+        let selected_source = selected.source;
+        let selected_fixed_position = selected.fixed_position;
+        let selected_pinyin_length = selected.pinyin.len();
+        let selected_word = selected.word.clone();
+        let selected_canonical_pinyin = if self.learning
+            && (selected_source.is_dictionary() || selected_source.is_sentence_learning())
+        {
+            selected.canonical_pinyin.clone()
+        } else {
+            String::new()
         };
         let mut diagnostic = if self.learning
             && self.frequency.mode != FrequencyAdjustmentMode::Disabled
             && index != 0
-            && selected.fixed_position == 0
+            && selected_fixed_position == 0
             && self.editable(index)
         {
             self.adjust_frequency(index, false)
         } else {
             None
         };
-        self.consume(selected.pinyin.len());
+        self.consume(selected_pinyin_length);
         if self.learning {
-            let learned = self.learn_selection(&selected);
+            let learned =
+                self.learn_selection(selected_source, &selected_canonical_pinyin, &selected_word);
             diagnostic = diagnostic.or(learned);
         } else {
             self.reset_phrase();
         }
         self.refresh();
-        KeyResult::committed(selected.word).with_diagnostic(diagnostic)
+        KeyResult::committed(selected_word).with_diagnostic(diagnostic)
     }
 
     /// 选中一行之后的造词，与全拼键盘的规则相同：选掉一部分数字时记下这一段；选完全部数字时，前面有选过的段就把各段连成一个词存起来（「我滴」+「个天呐」），没有就只在选中的是整句行（词库里没有的句子）时把整句存起来，最多 `MAX_LEARNED_SENTENCE_SYLLABLES` 个音节。词库里本来就有的词不再写。
-    fn learn_selection(&mut self, selected: &WordItem) -> Option<String> {
-        let reading = if selected.source.is_dictionary() || selected.source.is_sentence_learning() {
-            selected.canonical_pinyin.clone()
+    fn learn_selection(
+        &mut self,
+        selected_source: CandidateSource,
+        selected_canonical_pinyin: &str,
+        selected_word: &str,
+    ) -> Option<String> {
+        let reading = if selected_source.is_dictionary() || selected_source.is_sentence_learning() {
+            selected_canonical_pinyin
         } else {
-            String::new()
+            ""
         };
         if self.active() {
             if reading.is_empty() {
@@ -423,9 +440,9 @@ impl NineKeySession {
                 if !self.phrase_pinyin.is_empty() {
                     self.phrase_pinyin.push('\'');
                 }
-                self.phrase_pinyin.push_str(&reading);
+                self.phrase_pinyin.push_str(reading);
             }
-            self.phrase_word.push_str(&selected.word);
+            self.phrase_word.push_str(selected_word);
             return None;
         }
         let phrase = !self.phrase_word.is_empty();
@@ -433,14 +450,14 @@ impl NineKeySession {
             (self.phrase_storable && !reading.is_empty()).then(|| {
                 (
                     format!("{}'{reading}", self.phrase_pinyin),
-                    format!("{}{}", self.phrase_word, selected.word),
+                    format!("{}{}", self.phrase_word, selected_word),
                 )
             })
         } else {
-            (selected.source.is_sentence_learning()
+            (selected_source.is_sentence_learning()
                 && !reading.is_empty()
-                && split_segments(&reading).len() <= MAX_LEARNED_SENTENCE_SYLLABLES)
-                .then(|| (reading, selected.word.clone()))
+                && split_segments(reading).len() <= MAX_LEARNED_SENTENCE_SYLLABLES)
+                .then(|| (reading.to_owned(), selected_word.to_owned()))
         };
         self.reset_phrase();
         let (pinyin, word) = stored?;
@@ -2481,6 +2498,23 @@ mod tests {
             "mixed English waits for the minimum prefix"
         );
         assert_eq!(session.snapshot().candidates[0].pinyin, "6");
+    }
+
+    #[test]
+    fn selecting_a_nine_key_candidate_does_not_clone_unused_row_fields() {
+        let fixture = fixture();
+        let mut session = open(&fixture.paths, false, mixed());
+        type_digits(&mut session, "64426");
+        let index = index_of(&session, "你好");
+
+        let (result, allocations) =
+            crate::ime::personal_rerank::allocations::count(|| session.select(index));
+
+        assert_eq!(result.commit.as_deref(), Some("你好"));
+        assert!(
+            allocations <= 1,
+            "九键选择候选复制无用行字段产生了 {allocations} 次分配"
+        );
     }
 
     #[test]
