@@ -9,14 +9,13 @@ use crate::file_lock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs::File;
-#[cfg(not(unix))]
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
 
 /// 常用语文件在偏好目录里的文件名。
 pub const FILE_NAME: &str = "CommonPhrases.json";
+const LOCK_FILE_NAME: &str = "CommonPhrases.json.lock";
 /// 用户自己添加的常用语最多的条数。
 pub const MAX_OWN_PHRASES: usize = 200;
 /// 每条常用语最多的 UTF-16 单元数（编辑器和 Java 都按 UTF-16 计长度）。
@@ -130,6 +129,11 @@ pub struct CommonPhrasesStore {
     file: PathBuf,
 }
 
+struct CommonPhrasesLock {
+    directory: crate::file_lock::PrivateDirectory,
+    _lock: File,
+}
+
 impl CommonPhrasesStore {
     /// `directory` 是偏好目录，文件放在它下面的 [`FILE_NAME`]。
     pub fn new(directory: impl AsRef<Path>) -> Self {
@@ -162,8 +166,8 @@ impl CommonPhrasesStore {
 
     /// 首次运行时文件不存在，返回空文档。
     pub fn load(&self) -> Result<CommonPhrases, CommonPhrasesError> {
-        let _lock = self.lock()?;
-        self.read_locked()
+        let lock = self.lock()?;
+        self.read_locked(&lock)
     }
 
     /// 在末尾加一条自己的常用语。与自己已有的某条完全相同时拒绝。
@@ -332,11 +336,11 @@ impl CommonPhrasesStore {
         &self,
         change: impl FnOnce(&mut CommonPhrases) -> Result<(), CommonPhrasesError>,
     ) -> Result<CommonPhrases, CommonPhrasesError> {
-        let _lock = self.lock()?;
-        let mut document = self.read_locked()?;
+        let lock = self.lock()?;
+        let mut document = self.read_locked(&lock)?;
         change(&mut document)?;
         validate(&document).map_err(|_| CommonPhrasesError::Invalid)?;
-        self.write_locked(&document)?;
+        self.write_locked(&lock, &document)?;
         Ok(document)
     }
 
@@ -348,15 +352,21 @@ impl CommonPhrasesStore {
         Ok(parent)
     }
 
-    fn lock(&self) -> Result<File, CommonPhrasesError> {
-        self.parent()?;
-        let lock = file_lock::open_lock_file(self.file.with_extension("json.lock"))?;
+    fn lock(&self) -> Result<CommonPhrasesLock, CommonPhrasesError> {
+        let parent = self.parent()?;
+        let directory = crate::file_lock::open_private_directory(parent)?;
+        let lock =
+            file_lock::open_private_lock_file_at(&directory, std::ffi::OsStr::new(LOCK_FILE_NAME))?;
         file_lock::exclusive(&lock)?;
-        Ok(lock)
+        Ok(CommonPhrasesLock {
+            directory,
+            _lock: lock,
+        })
     }
 
-    fn read_locked(&self) -> Result<CommonPhrases, CommonPhrasesError> {
-        let file = match crate::storage::open_private_file_in(&self.file) {
+    fn read_locked(&self, lock: &CommonPhrasesLock) -> Result<CommonPhrases, CommonPhrasesError> {
+        let name = self.file.file_name().ok_or(CommonPhrasesError::Invalid)?;
+        let file = match crate::file_lock::open_private_file_at(&lock.directory, name) {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(CommonPhrases::default())
@@ -375,27 +385,18 @@ impl CommonPhrasesStore {
         Ok(document)
     }
 
-    fn write_locked(&self, document: &CommonPhrases) -> Result<(), CommonPhrasesError> {
-        let parent = self.parent()?;
+    fn write_locked(
+        &self,
+        lock: &CommonPhrasesLock,
+        document: &CommonPhrases,
+    ) -> Result<(), CommonPhrasesError> {
         let bytes = serde_json::to_vec(document).map_err(|_| CommonPhrasesError::Invalid)?;
         if bytes.len() as u64 > MAX_FILE_BYTES {
             return Err(CommonPhrasesError::TooLarge);
         }
-        #[cfg(unix)]
-        {
-            let directory = crate::storage::open_private_directory(parent)?;
-            let name = self.file.file_name().ok_or(CommonPhrasesError::Invalid)?;
-            crate::storage::write_private_file_at(&directory, name, &bytes)?;
-            Ok(())
-        }
-        #[cfg(not(unix))]
-        {
-            let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
-            temporary.write_all(&bytes)?;
-            temporary.as_file().sync_all()?;
-            temporary.persist(&self.file).map_err(|error| error.error)?;
-            Ok(())
-        }
+        let name = self.file.file_name().ok_or(CommonPhrasesError::Invalid)?;
+        crate::file_lock::write_private_file_at(&lock.directory, name, &bytes)?;
+        Ok(())
     }
 }
 
