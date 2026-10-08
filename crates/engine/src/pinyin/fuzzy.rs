@@ -23,28 +23,28 @@ const FINAL_PAIRS: [(&str, &str, u32); 5] = [
 ];
 
 /// The partners of `part` under every enabled pair, `part` itself first.
-fn with_partners<'a>(
+fn with_partners<'a, const N: usize>(
     part: &'a str,
     pairs: &[(&'a str, &'a str, u32)],
     options: FuzzyPinyinOptions,
-) -> Vec<&'a str> {
-    let additional = pairs
-        .iter()
-        .filter(|&&(a, b, rule)| options.enabled(rule) && (part == a || part == b))
-        .count();
-    let mut variants = Vec::with_capacity(1 + additional);
-    variants.push(part);
+) -> ([&'a str; N], usize) {
+    let mut variants = [part; N];
+    let mut count = 1;
     for &(a, b, rule) in pairs {
         if !options.enabled(rule) {
             continue;
         }
         if part == a {
-            variants.push(b);
+            debug_assert!(count < N);
+            variants[count] = b;
+            count += 1;
         } else if part == b {
-            variants.push(a);
+            debug_assert!(count < N);
+            variants[count] = a;
+            count += 1;
         }
     }
-    variants
+    (variants, count)
 }
 
 /// `[syllable]` then every intact initial/final variant the enabled rules allow, deduplicated (FZ:10-68). A non-intact syllable or no rules gives just `[syllable]`.
@@ -64,12 +64,16 @@ pub fn fuzzy_syllables(syllable: &str, options: FuzzyPinyinOptions) -> Vec<Strin
         0
     };
     let (initial, final_part) = syllable.split_at(initial_length);
-    let starts = with_partners(initial, &INITIAL_PAIRS, options);
-    let ends = with_partners(final_part, &FINAL_PAIRS, options);
+    let (starts, start_count) =
+        with_partners::<{ INITIAL_PAIRS.len() + 1 }>(initial, &INITIAL_PAIRS, options);
+    let (ends, end_count) =
+        with_partners::<{ FINAL_PAIRS.len() + 1 }>(final_part, &FINAL_PAIRS, options);
+    let starts = &starts[..start_count];
+    let ends = &ends[..end_count];
     let mut result = Vec::with_capacity(starts.len().saturating_mul(ends.len()));
     result.push(syllable.to_owned());
-    for start in &starts {
-        for end in &ends {
+    for start in starts {
+        for end in ends {
             let mut candidate = String::with_capacity(start.len() + end.len());
             candidate.push_str(start);
             candidate.push_str(end);
@@ -171,11 +175,29 @@ mod tests {
         let lan = fuzzy_syllables("lan", rules(fuzzy_rule::ALL));
         assert_eq!(lan.capacity(), 6);
         assert_eq!(lan.len(), 6);
-        let initial_partners = with_partners("l", &INITIAL_PAIRS, rules(fuzzy_rule::ALL));
-        assert_eq!(initial_partners.capacity(), 3);
+        let (initial_partners, initial_count) = with_partners::<{ INITIAL_PAIRS.len() + 1 }>(
+            "l",
+            &INITIAL_PAIRS,
+            rules(fuzzy_rule::ALL),
+        );
+        assert_eq!(&initial_partners[..initial_count], ["l", "n", "r"]);
         assert_eq!(fuzzy_syllables("zh", rules(fuzzy_rule::ALL)), ["zh"]);
         assert_eq!(fuzzy_syllables("bian", rules(fuzzy_rule::AN_ANG)), ["bian"]);
         assert_eq!(fuzzy_syllables("zan", rules(0)), ["zan"]);
+    }
+
+    #[test]
+    fn partner_references_need_no_temporary_heap_state() {
+        let (summary, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            let (variants, count) = with_partners::<{ INITIAL_PAIRS.len() + 1 }>(
+                "l",
+                &INITIAL_PAIRS,
+                rules(fuzzy_rule::ALL),
+            );
+            (count, variants[0], variants[1], variants[2])
+        });
+        assert_eq!(summary, (3, "l", "n", "r"));
+        assert_eq!(allocations, 0);
     }
 
     #[test]
