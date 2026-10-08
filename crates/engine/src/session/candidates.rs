@@ -190,12 +190,17 @@ impl InputSession {
                     | SchemeType::Zhuyin
                     | SchemeType::Stroke
             );
-        let has_english = items
-            .iter()
-            .any(|item| item.source == CandidateSource::EnglishDictionary);
-        if !regular && self.local_mode != LocalInputMode::SuperJianpin && !has_english {
-            return;
-        }
+        let has_english = if !regular && self.local_mode != LocalInputMode::SuperJianpin {
+            if !items
+                .iter()
+                .any(|item| item.source == CandidateSource::EnglishDictionary)
+            {
+                return;
+            }
+            true
+        } else {
+            false
+        };
         let journal = self.journal_path();
         let journal_exists = journal.try_exists().unwrap_or(false);
         if !journal_exists && !items.iter().any(|item| item.source.is_online()) {
@@ -263,7 +268,11 @@ impl InputSession {
                 journal_exists,
             );
         }
-        if has_english {
+        if has_english
+            || items
+                .iter()
+                .any(|item| item.source == CandidateSource::EnglishDictionary)
+        {
             let context = self.position_context(true, false);
             apply_fixed_positions_with_state(
                 journal,
