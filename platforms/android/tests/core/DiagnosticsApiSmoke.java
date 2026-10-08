@@ -2,6 +2,10 @@ import app.msime.android.CloudApi;
 import app.msime.android.DiagnosticsApi;
 import java.util.ArrayList;
 import java.util.List;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 public final class DiagnosticsApiSmoke {
     public static void main(String[] arguments) throws Exception {
@@ -72,6 +76,31 @@ public final class DiagnosticsApiSmoke {
         new DiagnosticsApi(api).delete();
         check(seen.size() == 1 && "DELETE /v1/users/me/diagnostics Bearer anon".equals(seen.get(0)),
             "delete with the anonymous session: " + seen);
+
+        Path root = Files.createTempDirectory("msime-diagnostics-");
+        try {
+            Path source = root.resolve("source.zip");
+            try (ZipOutputStream output = new ZipOutputStream(Files.newOutputStream(source))) {
+                output.putNextEntry(new ZipEntry("ignored.txt"));
+                output.write('x');
+                output.closeEntry();
+            }
+            Path linked = root.resolve("diagnostics.zip");
+            Files.createLink(linked, source);
+            try {
+                DiagnosticsApi.readBundle(linked.toFile(), new DiagnosticsApi.Include(false, false, false, false));
+                throw new AssertionError("hard-linked diagnostics input must be refused");
+            } catch (java.io.IOException ioError) {
+                // Private diagnostic archives must have one directory entry.
+            }
+        } finally {
+            try (java.util.stream.Stream<Path> paths = Files.walk(root)) {
+                paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); }
+                    catch (Exception error) { throw new IllegalStateException(error); }
+                });
+            }
+        }
 
         System.out.println("DiagnosticsApiSmoke passed");
     }
