@@ -473,7 +473,13 @@ fn caret_prefix_expands_its_own_initial_list() {
     assert_eq!(capped.len(), 24);
     assert!(capped.iter().all(|item| item.pinyin == "n"));
 
-    assert!(session.expand_initial_candidates());
+    let (grew, allocations) =
+        crate::ime::personal_rerank::allocations::count(|| session.expand_initial_candidates());
+    assert!(grew);
+    assert_eq!(
+        allocations, 398,
+        "caret-prefix expansion allocations: {allocations}"
+    );
     let widened = words(&session);
     assert_eq!(widened.len(), 30);
     assert!(widened.contains(&"丝".to_owned()), "{widened:?}");

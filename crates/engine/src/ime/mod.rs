@@ -469,13 +469,21 @@ impl ImeSession {
         self.decode(&request).candidates
     }
 
-    /// `expand_initial_candidates` for a list `query_raw_candidates` returned for the same raw prefix.
-    pub fn expand_raw_initial_candidates(
+    /// 扩展当前请求的光标前缀，直接借用请求里的带大小写原文，避免调用方先复制前缀。
+    pub fn expand_current_raw_prefix_initial_candidates(
         &mut self,
         raw: &str,
-        raw_with_cases: &str,
+        prefix_end: usize,
         candidates: &mut Vec<WordItem>,
     ) -> bool {
+        let raw_with_cases = if self.state.request.raw_input_with_cases.is_empty() {
+            &self.state.request.raw_input
+        } else {
+            &self.state.request.raw_input_with_cases
+        };
+        let Some(raw_with_cases) = raw_with_cases.get(..prefix_end) else {
+            return false;
+        };
         let request = self.raw_request(raw, raw_with_cases);
         request.valid
             && self
