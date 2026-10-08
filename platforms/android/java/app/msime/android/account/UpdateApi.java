@@ -321,7 +321,7 @@ public final class UpdateApi {
         File[] stale = directory.listFiles();
         if (stale != null) {
             for (File file : stale) {
-                if (!file.getName().equals(update.fileName())) deleteQuietly(file);
+                if (!file.getName().equals(update.fileName())) FilePolicy.deleteQuietly(file);
             }
         }
         File target = new File(directory, update.fileName());
@@ -338,13 +338,13 @@ public final class UpdateApi {
             }
             if (!MessageDigest.isEqual(actual.getBytes(StandardCharsets.US_ASCII),
                     expected.getBytes(StandardCharsets.US_ASCII))) {
-                deleteQuietly(partial);
+                FilePolicy.deleteQuietly(partial);
                 failure = new Failure("安装包校验不通过，已删除");
                 continue;
             }
-            deleteQuietly(target);
+            FilePolicy.deleteQuietly(target);
             if (!partial.renameTo(target)) {
-                deleteQuietly(partial);
+                FilePolicy.deleteQuietly(partial);
                 throw new Failure("没有空间存放安装包");
             }
             return target;
@@ -379,15 +379,15 @@ public final class UpdateApi {
                 }
             }
         } catch (IOException offline) {
-            deleteQuietly(partial);
+            FilePolicy.deleteQuietly(partial);
             throw new Failure("下载没有完成，请检查网络后重试", offline);
         } catch (Failure failure) {
-            deleteQuietly(partial);
+            FilePolicy.deleteQuietly(partial);
             throw failure;
         } catch (RuntimeException cancelled) {
             // Progress callbacks are allowed to cancel a page/job download. Do not leave the
             // half-written APK behind when that callback aborts the worker.
-            deleteQuietly(partial);
+            FilePolicy.deleteQuietly(partial);
             throw cancelled;
         }
         return hex(digest.digest());
@@ -463,10 +463,6 @@ public final class UpdateApi {
         } catch (NoSuchAlgorithmException impossible) {
             throw new IllegalStateException(impossible);
         }
-    }
-
-    private static void deleteQuietly(File file) {
-        if (file.exists() && !file.delete()) file.deleteOnExit();
     }
 
     /** 逐跳跟随重定向，每一跳都过白名单；返回最终的 200 响应，调用方关闭它的流。 */
