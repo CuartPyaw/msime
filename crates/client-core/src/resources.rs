@@ -5,6 +5,8 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
+#[cfg(unix)]
+use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 #[cfg(unix)]
@@ -198,6 +200,44 @@ pub struct ResourceStore {
     root: PathBuf,
 }
 
+#[cfg(unix)]
+struct ResourceStage {
+    path: PathBuf,
+    parent: File,
+    name: OsString,
+}
+
+#[cfg(unix)]
+impl ResourceStage {
+    fn create(root: &Path, parent: &File) -> std::io::Result<Self> {
+        loop {
+            let name = OsString::from(format!("incoming-{}", uuid::Uuid::new_v4().simple()));
+            match rustix::fs::mkdirat(parent, &name, rustix::fs::Mode::from_raw_mode(0o700)) {
+                Ok(()) => {
+                    return Ok(Self {
+                        path: root.join(&name),
+                        parent: parent.try_clone()?,
+                        name,
+                    })
+                }
+                Err(rustix::io::Errno::EXIST) => continue,
+                Err(error) => return Err(error.into()),
+            }
+        }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ResourceStage {
+    fn drop(&mut self) {
+        let _ = crate::storage::remove_private_tree_at(&self.parent, &self.name);
+    }
+}
+
 fn create_private_file(path: &Path) -> std::io::Result<File> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
@@ -256,6 +296,9 @@ impl ResourceStore {
             self.verify(&destination, specification)?;
             return Ok(destination);
         }
+        #[cfg(unix)]
+        let stage = ResourceStage::create(&self.root, &root_directory)?;
+        #[cfg(not(unix))]
         let stage = tempfile::Builder::new()
             .prefix("incoming-")
             .tempdir_in(&self.root)?;
@@ -633,6 +676,28 @@ mod tests {
 
         assert!(moved.join("generation/artifact").is_file());
         assert!(!outside.join("generation").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stage_creation_stays_in_an_open_resource_directory() {
+        use std::os::unix::fs::symlink;
+
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("resources");
+        let outside = parent.path().join("outside");
+        fs::create_dir(&root).unwrap();
+        fs::create_dir(&outside).unwrap();
+        let directory = crate::storage::open_private_directory(&root).unwrap();
+        let moved = parent.path().join("moved");
+        fs::rename(&root, &moved).unwrap();
+        symlink(&outside, &root).unwrap();
+
+        let stage = ResourceStage::create(&root, &directory).unwrap();
+
+        assert!(stage.path().starts_with(&root));
+        assert!(moved.join(stage.path().file_name().unwrap()).is_dir());
+        assert!(!outside.join(stage.path().file_name().unwrap()).exists());
     }
 
     #[cfg(unix)]
