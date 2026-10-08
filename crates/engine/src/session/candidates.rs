@@ -420,17 +420,16 @@ impl InputSession {
     }
 
     pub(super) fn remove_candidate(&mut self, index: usize) -> KeyResult {
-        let Some(selected) = self.candidates().get(index).cloned() else {
+        let Some(selected) = self.candidates().get(index) else {
             return KeyResult::unhandled();
         };
         let english = selected.source == CandidateSource::EnglishDictionary;
         // A single character is protected: removing it would leave its reading unanswerable.
-        if !self.is_editable_source(&selected)
-            || (!english && count_utf8_chars(&selected.word) <= 1)
+        if !self.is_editable_source(selected) || (!english && count_utf8_chars(&selected.word) <= 1)
         {
             return KeyResult::unhandled();
         }
-        let wubi = Self::is_wubi_native_candidate(&selected)
+        let wubi = Self::is_wubi_native_candidate(selected)
             && self.local_mode != LocalInputMode::SuperJianpin;
         let kind = if english {
             PersonalDictionaryKind::English

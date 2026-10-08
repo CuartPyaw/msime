@@ -1099,6 +1099,22 @@ fn pinning_a_quanpin_row_in_mixed_wubi_writes_the_pinyin_table() {
 }
 
 #[test]
+fn removing_an_unsupported_candidate_does_not_clone_its_row() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session();
+    assert!(session.character(b'Y', true).handled);
+    let before = session.snapshot();
+    assert_eq!(before.candidate_sources, [CandidateSource::Fallback]);
+
+    let (result, allocations) =
+        crate::ime::personal_rerank::allocations::count(|| session.remove(0));
+
+    assert!(!result.handled && result.commit.is_none() && result.diagnostic.is_none());
+    assert_eq!(session.snapshot(), before);
+    assert_eq!(allocations, 0, "拒绝删除候选产生了 {allocations} 次分配");
+}
+
+#[test]
 fn pinning_a_candidate_does_not_clone_the_full_learning_row() {
     let fixture = Fixture::new(QUANPIN_FIXTURE);
     let mut session = fixture.session_with(|options| options.local_modes.temporary_english = true);
