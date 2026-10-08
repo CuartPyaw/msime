@@ -404,7 +404,7 @@ public final class Ui {
 
     /** Layout parameters for a square child when its size is already in pixels. */
     public static LinearLayout.LayoutParams squareParamsPx(int size) {
-        return new LinearLayout.LayoutParams(size, size);
+        return ViewPolicy.newSquareParamsPx(size);
     }
 
     /** Frame layout parameters for a square child with a size expressed in dp. */

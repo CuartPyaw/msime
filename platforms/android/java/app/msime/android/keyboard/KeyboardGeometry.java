@@ -326,7 +326,7 @@ public final class KeyboardGeometry {
 
     /** 创建像素尺寸的线性布局正方形参数。 */
     public static LinearLayout.LayoutParams squareParamsPx(int size) {
-        return new LinearLayout.LayoutParams(size, size);
+        return ViewPolicy.newSquareParamsPx(size);
     }
 
     /** Create linear layout parameters with content-sized width and parent-sized height. */
