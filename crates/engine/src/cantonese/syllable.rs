@@ -205,30 +205,35 @@ fn walk(
         return false;
     }
     let chunk_end = chunk_end(input, position);
-    let mut pieces: Vec<Syllable> = (position + 1..=chunk_end.min(position + inventory.longest))
-        .filter(|&end| inventory.contains(&input[position..end]))
-        .map(|end| Syllable {
-            start: position,
-            end,
-            complete: true,
-        })
-        .collect();
-    if allow_prefix && chunk_end == input.len() && inventory.is_prefix(&input[position..]) {
-        pieces.push(Syllable {
-            start: position,
-            end: input.len(),
-            complete: false,
-        });
-    }
-    // Longest first; a complete syllable sorts before a prefix of the same letters, which the inventory never holds anyway.
-    pieces.sort_by_key(|piece| (std::cmp::Reverse(piece.end), !piece.complete));
+    let max_end = chunk_end.min(position + inventory.longest);
+    let has_prefix =
+        allow_prefix && chunk_end == input.len() && inventory.is_prefix(&input[position..]);
     let mut any = false;
-    for piece in pieces {
-        path.push(piece);
-        any |= walk(input, inventory, allow_prefix, piece.end, path, dead, found);
-        path.pop();
-        if found.len() >= MAX_SEGMENTATIONS {
-            return true;
+    // 按结束位置倒序直接遍历；相同范围内完整音节先于尾部前缀。
+    for end in (position + 1..=max_end).rev() {
+        if inventory.contains(&input[position..end]) {
+            path.push(Syllable {
+                start: position,
+                end,
+                complete: true,
+            });
+            any |= walk(input, inventory, allow_prefix, end, path, dead, found);
+            path.pop();
+            if found.len() >= MAX_SEGMENTATIONS {
+                return true;
+            }
+        }
+        if has_prefix && end == input.len() {
+            path.push(Syllable {
+                start: position,
+                end,
+                complete: false,
+            });
+            any |= walk(input, inventory, allow_prefix, end, path, dead, found);
+            path.pop();
+            if found.len() >= MAX_SEGMENTATIONS {
+                return true;
+            }
         }
     }
     if !any {
@@ -356,6 +361,35 @@ pub(crate) mod tests {
         let all = segment(&input, &Inventory::new(["n", "g", "ng"]));
         assert_eq!(all.len(), MAX_SEGMENTATIONS);
         assert_eq!(all[0].syllables.len(), 12);
+    }
+
+    #[test]
+    fn walk_does_not_allocate_candidate_pieces() {
+        let input = "abcx";
+        let inventory = Inventory::new(["ab", "abc"]);
+        let mut path = Vec::with_capacity(input.len());
+        let mut dead = vec![false; input.len() + 1];
+        let mut found = Vec::with_capacity(MAX_SEGMENTATIONS);
+
+        let (readable, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            walk(
+                input, &inventory, false, 0, &mut path, &mut dead, &mut found,
+            )
+        });
+
+        assert!(!readable);
+        assert!(found.is_empty());
+        assert_eq!(allocations, 0);
+    }
+
+    #[test]
+    fn complete_piece_precedes_a_prefix_with_the_same_range() {
+        let input = "ab";
+        let inventory = Inventory::new(["ab", "abc"]);
+        let readings = segment(input, &inventory);
+        assert_eq!(readings.len(), 2);
+        assert_eq!(read(input, &readings[0]), ["ab"]);
+        assert_eq!(read(input, &readings[1]), ["ab*"]);
     }
 
     #[test]
