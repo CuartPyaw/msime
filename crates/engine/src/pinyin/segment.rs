@@ -250,6 +250,12 @@ fn cut_one_piece_with_corrections(pinyin: &str) -> Vec<Vec<&'static str>> {
 
 /// QQ:97-234: alias-aware cut of every `'`-part and their cartesian product, capped at `CORRECTION_PATH_LIMIT`. An empty part (trailing `'`) contributes nothing; a non-empty part without a path empties the result.
 pub fn cut_pinyin_with_corrections(pinyin: &str) -> Vec<Vec<String>> {
+    if !pinyin.contains('\'') {
+        return cut_one_piece_with_corrections(pinyin)
+            .into_iter()
+            .map(|path| path.into_iter().map(str::to_owned).collect())
+            .collect();
+    }
     let mut merged: Vec<Vec<&'static str>> = vec![Vec::new()];
     for part in pinyin.split('\'') {
         let part_paths = cut_one_piece_with_corrections(part);
@@ -488,6 +494,16 @@ mod tests {
                 "g".to_owned()
             ]]
         );
+    }
+
+    #[test]
+    fn correction_without_delimiters_does_not_build_a_product_buffer() {
+        let _ = correction_paths("sahng");
+        let (paths, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            cut_pinyin_with_corrections("sahng")
+        });
+        assert_eq!(paths, [vec!["shang".to_owned()], vec!["sang".to_owned()]]);
+        assert_eq!(allocations, 23);
     }
 
     #[test]
