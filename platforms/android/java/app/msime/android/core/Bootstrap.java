@@ -88,11 +88,16 @@ public final class Bootstrap {
     static boolean existingConfiguration(File file) throws java.io.IOException {
         if (file == null) throw new java.io.IOException("Runtime options unavailable");
         java.nio.file.Path path = file.toPath();
-        if (Files.isSymbolicLink(path)
-                || (Files.exists(path, LinkOption.NOFOLLOW_LINKS)
-                    && !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)))
+        if (!privateConfiguration(path))
             throw new java.io.IOException("Runtime options are not a regular file");
         return Files.exists(path, LinkOption.NOFOLLOW_LINKS);
+    }
+
+    static boolean privateConfiguration(java.nio.file.Path path) {
+        return path != null
+            && (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)
+                || (Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
+                    && SafePaths.isSingleLink(path)));
     }
 
     static void ensureSafeDirectory(java.nio.file.Path directory) throws java.io.IOException {
@@ -390,6 +395,8 @@ public final class Bootstrap {
 
     /** 配置里记录的 `resources`；超过 1 MiB 或读不出来时为 `null`。按块读并限长，文件在检查之后变大也不会无界分配。 */
     private static String readConfiguredResources(File configuration) throws Exception {
+        if (!privateConfiguration(configuration.toPath()))
+            throw new java.io.IOException("Runtime options are not a private regular file");
         try (InputStream input = Files.newInputStream(configuration.toPath(), LinkOption.NOFOLLOW_LINKS)) {
             byte[] bytes = HttpBodyPolicy.readBounded(input, 1024 * 1024);
             if (bytes == null) return null;
