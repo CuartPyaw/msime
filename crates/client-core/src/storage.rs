@@ -195,6 +195,15 @@ pub(crate) fn replace_private_file_at(
     replace_private_file_with_permissions(&directory.0.join(name), contents, permissions)
 }
 
+#[cfg(not(unix))]
+pub(crate) fn write_private_file_at(
+    directory: &PrivateDirectory,
+    name: &OsStr,
+    contents: &[u8],
+) -> io::Result<()> {
+    replace_private_file_at(directory, name, contents, None)
+}
+
 #[cfg(unix)]
 pub(crate) fn write_private_file_at(
     directory: &File,

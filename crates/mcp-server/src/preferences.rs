@@ -10,6 +10,7 @@ use msime_client_core::preferences::{
 use rmcp::schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::ffi::OsStr;
 use std::path::Path;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
@@ -507,7 +508,19 @@ const TOO_LARGE: &str = "the runtime options would be too large for the input me
 
 /// Replace the preferences in the runtime-options document, the way `sync_runtime_options` in the desktop app does. Everything else in the document, the skin catalog included, is kept as it is.
 fn publish_to_runtime_options(path: &Path, preferences: &Preferences) -> Result<(), String> {
-    let file = msime_client_core::file_lock::open_private_file_in(path)
+    let parent = path.parent().ok_or("cannot read the runtime options")?;
+    let name = path.file_name().ok_or("cannot read the runtime options")?;
+    let directory = msime_client_core::file_lock::open_private_directory(parent)
+        .map_err(|_| "cannot read the runtime options")?;
+    publish_to_runtime_options_at(&directory, name, preferences)
+}
+
+fn publish_to_runtime_options_at(
+    directory: &msime_client_core::file_lock::PrivateDirectory,
+    name: &OsStr,
+    preferences: &Preferences,
+) -> Result<(), String> {
+    let file = msime_client_core::file_lock::open_private_file_at(directory, name)
         .map_err(|_| "cannot read the runtime options")?;
     let bytes = crate::bounded::read(file, LINUX_RUNTIME_OPTIONS_LIMIT as u64).map_err(
         |error| match error {
@@ -533,7 +546,7 @@ fn publish_to_runtime_options(path: &Path, preferences: &Preferences) -> Result<
     if bytes.len() > LINUX_RUNTIME_OPTIONS_LIMIT {
         return Err(TOO_LARGE.into());
     }
-    msime_client_core::file_lock::replace_private_file(path, &bytes)
+    msime_client_core::file_lock::write_private_file_at(directory, name, &bytes)
         .map_err(|_| "cannot write the runtime options".into())
 }
 
@@ -695,6 +708,39 @@ mod tests {
             assert!(document.get("preferences").is_none());
         }
         assert_eq!(document["candidate_skin_catalog"][0]["id"], "kept");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn publishing_runtime_options_stays_in_an_open_parent_after_replacement() {
+        use std::ffi::OsStr;
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let original = root.path().join("state");
+        let outside = root.path().join("outside");
+        std::fs::create_dir(&original).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        let options = original.join("runtime-options.json");
+        std::fs::write(&options, br#"{"api_version":1}"#).unwrap();
+        let directory = msime_client_core::file_lock::open_private_directory(&original).unwrap();
+
+        let moved = root.path().join("moved");
+        std::fs::rename(&original, &moved).unwrap();
+        symlink(&outside, &original).unwrap();
+
+        publish_to_runtime_options_at(
+            &directory,
+            OsStr::new("runtime-options.json"),
+            &Preferences::default(),
+        )
+        .unwrap();
+
+        let written: Value =
+            serde_json::from_slice(&std::fs::read(moved.join("runtime-options.json")).unwrap())
+                .unwrap();
+        assert!(written.get("preferences").is_some());
+        assert!(!outside.join("runtime-options.json").exists());
     }
 
     #[cfg(unix)]
