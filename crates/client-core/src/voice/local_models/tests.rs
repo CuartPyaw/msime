@@ -183,6 +183,43 @@ fn partial_directory_creation_stays_in_an_open_root_after_replacement() {
 
 #[cfg(unix)]
 #[test]
+fn partial_file_writes_stay_in_the_open_directory_after_root_replacement() {
+    use std::os::unix::fs::symlink;
+
+    let state = tempfile::tempdir().unwrap();
+    let root = state.path().join("models");
+    let outside = state.path().join("outside");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(&outside).unwrap();
+    let partials = partial_directory(&root, "pack").unwrap();
+    let moved = state.path().join("models-moved");
+    fs::rename(&root, &moved).unwrap();
+    symlink(&outside, &root).unwrap();
+
+    let file = pack_files()[0].clone();
+    let partial = partial_path(partials.path(), &file).unwrap();
+    let name = partial.file_name().unwrap();
+    let fetcher = pack_fetcher("", PACK_B);
+    download_from_sources(
+        &fetcher,
+        &[],
+        &file,
+        &partials,
+        name,
+        &AtomicBool::new(false),
+        &mut |_| {},
+    )
+    .unwrap();
+
+    assert_eq!(
+        fs::read(moved.join(".partial-pack").join(name)).unwrap(),
+        PACK_A
+    );
+    assert!(!outside.join(".partial-pack").join(name).exists());
+}
+
+#[cfg(unix)]
+#[test]
 fn model_directory_creation_stays_in_the_open_staging_directory() {
     use std::os::unix::fs::symlink;
 

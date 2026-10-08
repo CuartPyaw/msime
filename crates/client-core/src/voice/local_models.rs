@@ -7,7 +7,6 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::cell::Cell;
 use std::collections::BTreeMap;
-#[cfg(unix)]
 use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Read, Seek, Write};
@@ -638,7 +637,7 @@ fn move_file_noclobber_at(
     }
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, test))]
 fn remove_leftover(path: &Path) {
     let Some(parent) = path.parent() else {
         return;
@@ -1110,7 +1109,7 @@ pub(crate) fn install_files_with(
     );
     if result.is_err() {
         // 只删空目录：还有没下完的文件时留着它给下次续传。
-        let _ = fs::remove_dir(&partials);
+        partials.remove_if_empty();
     }
     result
 }
@@ -1126,7 +1125,7 @@ fn download_and_publish(
     progress: &mut dyn FnMut(InstallProgress),
     cancel: &AtomicBool,
     pack_dir: &Path,
-    partials: &Path,
+    partials: &PartialDirectory,
 ) -> Result<PathBuf, LocalModelError> {
     let total = files
         .iter()
@@ -1139,18 +1138,29 @@ fn download_and_publish(
         let name = single_component(&file.name)
             .filter(|single| *single == file.name)
             .ok_or_else(|| LocalModelError::UnsafeArchive(file.name.clone()))?;
-        let partial = partial_path(partials, file)?;
-        download_from_sources(fetcher, mirrors, file, &partial, cancel, &mut |n| {
-            let downloaded = offset + n;
-            if downloaded == total || downloaded.abs_diff(last) >= (total / 200).max(CHUNK as u64) {
-                last = downloaded;
-                progress(InstallProgress {
-                    stage: "download",
-                    downloaded,
-                    total,
-                });
-            }
-        })?;
+        let partial = partial_path(partials.path(), file)?;
+        let partial_name = partial.file_name().ok_or(LocalModelError::InvalidRoot)?;
+        download_from_sources(
+            fetcher,
+            mirrors,
+            file,
+            partials,
+            partial_name,
+            cancel,
+            &mut |n| {
+                let downloaded = offset + n;
+                if downloaded == total
+                    || downloaded.abs_diff(last) >= (total / 200).max(CHUNK as u64)
+                {
+                    last = downloaded;
+                    progress(InstallProgress {
+                        stage: "download",
+                        downloaded,
+                        total,
+                    });
+                }
+            },
+        )?;
         downloaded_files.push((partial, name));
         offset += file.size;
     }
@@ -1180,7 +1190,7 @@ fn download_and_publish(
             return Err(error);
         }
     };
-    remove_leftover(partials);
+    partials.remove_tree();
     progress(InstallProgress {
         stage: "done",
         downloaded: total,
@@ -1242,7 +1252,7 @@ pub(crate) fn install_archive_members_with(
         &partials,
     );
     if result.is_err() {
-        let _ = fs::remove_dir(&partials);
+        partials.remove_if_empty();
     }
     result
 }
@@ -1260,16 +1270,18 @@ fn download_and_extract(
     progress: &mut dyn FnMut(InstallProgress),
     cancel: &AtomicBool,
     pack_dir: &Path,
-    partials: &Path,
+    partials: &PartialDirectory,
 ) -> Result<PathBuf, LocalModelError> {
     let total = archive.size;
-    let partial = partial_path(partials, archive)?;
+    let partial = partial_path(partials.path(), archive)?;
+    let partial_name = partial.file_name().ok_or(LocalModelError::InvalidRoot)?;
     let mut last = 0u64;
     download_from_sources(
         fetcher,
         mirrors,
         archive,
-        &partial,
+        partials,
+        partial_name,
         cancel,
         &mut |downloaded| {
             if downloaded == total || downloaded.abs_diff(last) >= (total / 200).max(CHUNK as u64) {
@@ -1347,7 +1359,7 @@ fn download_and_extract(
     check_cancel(cancel)?;
     let target = publish(root, id, pack_dir)?;
     // 归档只是来源，取完就删。
-    remove_leftover(partials);
+    partials.remove_tree();
     progress(InstallProgress {
         stage: "done",
         downloaded: total,
@@ -1439,8 +1451,76 @@ pub(crate) fn adopt_files(
     result
 }
 
+struct PartialDirectory {
+    path: PathBuf,
+    #[cfg(unix)]
+    directory: File,
+    #[cfg(unix)]
+    parent: File,
+    #[cfg(unix)]
+    name: std::ffi::OsString,
+}
+
+impl PartialDirectory {
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    #[cfg(unix)]
+    fn open_read_write(&self, name: &OsStr) -> io::Result<File> {
+        let descriptor = rustix::fs::openat(
+            &self.directory,
+            name,
+            rustix::fs::OFlags::RDWR
+                | rustix::fs::OFlags::CREATE
+                | rustix::fs::OFlags::NOFOLLOW
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::NONBLOCK,
+            rustix::fs::Mode::from_raw_mode(0o600),
+        )?;
+        Ok(descriptor.into())
+    }
+
+    #[cfg(not(unix))]
+    fn open_read_write(&self, name: &OsStr) -> io::Result<File> {
+        crate::storage::open_private_read_write_file(&self.path.join(name))
+    }
+
+    fn remove(&self, name: &OsStr) {
+        #[cfg(unix)]
+        let _ = crate::storage::remove_private_tree_at(&self.directory, name);
+        #[cfg(not(unix))]
+        remove_leftover(&self.path.join(name));
+    }
+
+    fn remove_tree(&self) {
+        #[cfg(unix)]
+        let _ = crate::storage::remove_private_tree_at(&self.parent, &self.name);
+        #[cfg(not(unix))]
+        let _ = fs::remove_dir_all(&self.path);
+    }
+
+    fn remove_if_empty(&self) {
+        #[cfg(unix)]
+        let _ = rustix::fs::unlinkat(&self.parent, &self.name, rustix::fs::AtFlags::REMOVEDIR);
+        #[cfg(not(unix))]
+        let _ = fs::remove_dir(&self.path);
+    }
+
+    fn contains_file(&self, name: &OsStr) -> bool {
+        #[cfg(unix)]
+        {
+            crate::storage::open_private_file_at(&self.directory, name).is_ok()
+        }
+        #[cfg(not(unix))]
+        {
+            fs::symlink_metadata(self.path.join(name)).is_ok()
+        }
+    }
+}
+
 /// `<root>/.partial-<id>`：没下完的文件跨安装保留在这里，供下次续传。不以 `.staging-` 或 `.old-` 开头，所以 [`remove_leftovers`] 不会清掉它；不是真实目录（比如被换成符号链接）时先删掉再建。
-fn partial_directory(root: &Path, id: &str) -> Result<PathBuf, LocalModelError> {
+fn partial_directory(root: &Path, id: &str) -> Result<PartialDirectory, LocalModelError> {
     #[cfg(unix)]
     {
         let root_directory = crate::storage::open_private_directory(root)?;
@@ -1458,7 +1538,7 @@ fn partial_directory(root: &Path, id: &str) -> Result<PathBuf, LocalModelError> 
             Err(error) if error.kind() == io::ErrorKind::NotFound => fs::create_dir(&directory)?,
             Err(error) => return Err(error.into()),
         }
-        Ok(directory)
+        Ok(PartialDirectory { path: directory })
     }
 }
 
@@ -1467,18 +1547,30 @@ fn partial_directory_at(
     root: &Path,
     root_directory: &File,
     id: &str,
-) -> Result<PathBuf, LocalModelError> {
+) -> Result<PartialDirectory, LocalModelError> {
     let name = format!(".partial-{id}");
     let name = OsStr::new(&name);
     match crate::storage::open_private_directory_at(root_directory, name) {
-        Ok(_) => return Ok(root.join(name)),
+        Ok(directory) => {
+            return Ok(PartialDirectory {
+                path: root.join(name),
+                directory,
+                parent: root_directory.try_clone()?,
+                name: name.to_owned(),
+            })
+        }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(_) => crate::storage::remove_private_tree_at(root_directory, name)?,
     }
     rustix::fs::mkdirat(root_directory, name, rustix::fs::Mode::from_raw_mode(0o700))
         .map_err(io::Error::from)?;
-    crate::storage::open_private_directory_at(root_directory, name)?;
-    Ok(root.join(name))
+    let directory = crate::storage::open_private_directory_at(root_directory, name)?;
+    Ok(PartialDirectory {
+        path: root.join(name),
+        directory,
+        parent: root_directory.try_clone()?,
+        name: name.to_owned(),
+    })
 }
 
 /// 没下完的文件按锁文件里的 SHA-256 加文件名命名：锁文件换了一份字节时，旧的部分不会被拿来续传。调用方已确认 `file.name` 是单个路径成分。
@@ -1498,7 +1590,8 @@ fn download_from_sources(
     fetcher: &dyn Fetcher,
     mirrors: &[&str],
     file: &crate::resources::Artifact,
-    partial: &Path,
+    partials: &PartialDirectory,
+    partial_name: &OsStr,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64),
 ) -> Result<(), LocalModelError> {
@@ -1512,7 +1605,7 @@ fn download_from_sources(
     sources.push(file.url.clone());
     let mut failure = None;
     for url in &sources {
-        match download_resumable(fetcher, url, file, partial, cancel, progress) {
+        match download_resumable(fetcher, url, file, partials, partial_name, cancel, progress) {
             Ok(()) => return Ok(()),
             Err(error @ (LocalModelError::Cancelled | LocalModelError::Io(_))) => {
                 return Err(error)
@@ -1528,7 +1621,8 @@ fn download_resumable(
     fetcher: &dyn Fetcher,
     url: &str,
     file: &crate::resources::Artifact,
-    partial: &Path,
+    partials: &PartialDirectory,
+    partial_name: &OsStr,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64),
 ) -> Result<(), LocalModelError> {
@@ -1539,18 +1633,23 @@ fn download_resumable(
     }
     check_cancel(cancel)?;
     let expected = file.size;
-    let existing = match fs::symlink_metadata(partial) {
-        Ok(metadata) if metadata.file_type().is_file() && metadata.len() <= expected => {
-            metadata.len()
+    let mut output = match partials.open_read_write(partial_name) {
+        Ok(output) => output,
+        Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+            partials.remove(partial_name);
+            partials.open_read_write(partial_name)?
         }
-        Ok(_) => {
-            remove_leftover(partial);
-            0
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => 0,
         Err(error) => return Err(error.into()),
     };
-    let mut output = crate::storage::open_private_read_write_file(partial)?;
+    let metadata = output.metadata()?;
+    let existing = if metadata.is_file() && metadata.len() <= expected {
+        metadata.len()
+    } else {
+        drop(output);
+        partials.remove(partial_name);
+        output = partials.open_read_write(partial_name)?;
+        0
+    };
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; CHUNK];
     let mut downloaded = 0u64;
@@ -1597,7 +1696,7 @@ fn download_resumable(
             if downloaded > expected {
                 drop(writer);
                 drop(output);
-                remove_leftover(partial);
+                partials.remove(partial_name);
                 return Err(LocalModelError::SizeMismatch(url_file_name(url)));
             }
             hasher.update(&buffer[..read]);
@@ -1612,12 +1711,20 @@ fn download_resumable(
     }
     if !hex::encode(hasher.finalize()).eq_ignore_ascii_case(&file.sha256) {
         drop(output);
-        remove_leftover(partial);
+        partials.remove(partial_name);
         // 删不掉时不重试，否则会对着同一份坏前缀反复续传。
-        if resumed && fs::symlink_metadata(partial).is_err() {
+        if resumed && !partials.contains_file(partial_name) {
             // 文件已删掉，这次从零开始，不会再走到这里。
             progress(0);
-            return download_resumable(fetcher, url, file, partial, cancel, progress);
+            return download_resumable(
+                fetcher,
+                url,
+                file,
+                partials,
+                partial_name,
+                cancel,
+                progress,
+            );
         }
         return Err(LocalModelError::ChecksumMismatch(file.name.clone()));
     }

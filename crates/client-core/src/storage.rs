@@ -1,7 +1,9 @@
 use std::ffi::OsStr;
 #[cfg(unix)]
 use std::ffi::OsString;
-use std::fs::{self, File, OpenOptions};
+#[cfg(any(not(unix), test))]
+use std::fs::OpenOptions;
+use std::fs::{self, File};
 use std::io::{self, Write};
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
@@ -490,6 +492,7 @@ pub(crate) fn remove_private_tree_at(directory: &File, name: &OsStr) -> io::Resu
 
 /// Open a private resumable file for reading and writing without following a
 /// leaf symlink. The caller is responsible for bounding the path and contents.
+#[cfg(any(not(unix), test))]
 pub(crate) fn open_private_read_write_file(path: &Path) -> io::Result<File> {
     let mut options = OpenOptions::new();
     options.read(true).write(true).create(true).truncate(false);
