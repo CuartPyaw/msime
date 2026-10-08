@@ -694,23 +694,11 @@ fn write_activation_receipt(
 ) -> Result<(), &'static str> {
     let directory = Path::new(&options.user_data);
     let path = directory.join(ACTIVATION_RECEIPT_NAME);
-    write_activation_receipt_at(directory, &path, activation_id)
+    write_activation_receipt_at(&path, activation_id)
 }
 
-fn write_activation_receipt_at(
-    directory: &Path,
-    path: &Path,
-    activation_id: &str,
-) -> Result<(), &'static str> {
-    let mut temporary = tempfile::NamedTempFile::new_in(directory)
-        .map_err(|_| "snapshot activation receipt unavailable")?;
-    temporary
-        .write_all(activation_id.as_bytes())
-        .and_then(|_| temporary.as_file().sync_all())
-        .map_err(|_| "snapshot activation receipt unavailable")?;
-    temporary
-        .persist(path)
-        .map(|_| ())
+fn write_activation_receipt_at(path: &Path, activation_id: &str) -> Result<(), &'static str> {
+    msime_client_core::file_lock::replace_private_file(path, activation_id.as_bytes())
         .map_err(|_| "snapshot activation receipt unavailable")
 }
 

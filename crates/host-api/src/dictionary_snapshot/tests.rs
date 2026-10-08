@@ -19,8 +19,7 @@ fn activation_receipt_does_not_follow_a_fixed_temporary_symlink() {
     symlink(&outside_file, &temporary).unwrap();
     let path = root.path().join(super::ACTIVATION_RECEIPT_NAME);
 
-    super::write_activation_receipt_at(root.path(), &path, "10000000-0000-4000-8000-000000000001")
-        .unwrap();
+    super::write_activation_receipt_at(&path, "10000000-0000-4000-8000-000000000001").unwrap();
     assert_eq!(fs::read(outside_file).unwrap(), b"keep me");
     assert_eq!(
         fs::read(path).unwrap(),
@@ -56,6 +55,26 @@ fn activation_receipt_rejects_a_symlinked_receipt() {
         super::activation_receipt(&options.into_engine_options()),
         Err("snapshot activation receipt unavailable")
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn activation_receipt_rejects_a_symlinked_parent() {
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let linked = root.path().join("linked");
+    symlink(outside.path(), &linked).unwrap();
+    let path = linked.join(super::ACTIVATION_RECEIPT_NAME);
+    let outside_file = outside.path().join(super::ACTIVATION_RECEIPT_NAME);
+    fs::write(&outside_file, b"keep me").unwrap();
+
+    let result = super::write_activation_receipt_at(&path, "10000000-0000-4000-8000-000000000001");
+
+    assert!(result.is_err());
+    assert_eq!(fs::read(outside_file).unwrap(), b"keep me");
 }
 
 #[cfg(unix)]
