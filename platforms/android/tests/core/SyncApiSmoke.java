@@ -21,6 +21,16 @@ public final class SyncApiSmoke {
         check(SyncApi.phraseRevision(42L) == 42L, "integer phrase revision");
         check(SyncApi.snapshotRevisionValue(42L) == 42L, "integer snapshot revision");
         check(SyncApi.changesRevision(42L, 7L) == 42L, "integer dictionary revision");
+        check(!SyncApi.changePageChanged(false, 7L, 7L), "stationary empty change page");
+        check(SyncApi.changePageChanged(true, 8L, 7L), "non-empty change page");
+        expectInvalid(() -> SyncApi.requiredChanges(null),
+            "missing dictionary changes must be rejected");
+        expectInvalid(() -> SyncApi.requiredChanges("bad"),
+            "non-array dictionary changes must be rejected");
+        expectInvalid(() -> SyncApi.changePageChanged(false, 8L, 7L),
+            "empty change page must not advance the cursor");
+        expectInvalid(() -> SyncApi.changePageChanged(true, 7L, 7L),
+            "non-empty change page must advance the cursor");
         check(SyncApi.strictSnapshotWeight(100L) == 100L, "integer snapshot weight");
         check(SyncApi.strictSnapshotWeight(1.5d) == null,
             "fractional snapshot weight is rejected");
