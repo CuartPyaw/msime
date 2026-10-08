@@ -72,16 +72,9 @@ public final class PreferencesDeviceSmoke extends DeviceSmoke {
             await(field("msime-test-plain").and(node -> node.getText() != null && !node.getText().toString().contains("nihao")));
             stage = "malformed preferences preserve working input";
             byte[] broken = "broken".getBytes(StandardCharsets.UTF_8);
-            // 空闲时的失败提示不再占候选栏那一行（会把整副键盘顶起又落下），改用 Toast 说出来；Toast 不在输入法窗口里，所以等它发出的无障碍事件。
-            automation.executeAndWaitForEvent(() -> {
-                try {
-                    publish(preferences, broken);
-                } catch (Exception error) {
-                    throw new IllegalStateException(error);
-                }
-            }, event -> event.getEventType()
-                    == android.view.accessibility.AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED
-                && String.valueOf(event.getText()).contains("设置读取或应用失败，保留当前设置"), 15000);
+            publish(preferences, broken);
+            // 失败提示显示在键盘的诊断行（MSIMEInputService.notice），不用 Toast：安卓 13 起没有通知权限时 Toast 会被系统吞掉。
+            await(key("设置读取或应用失败，保留当前设置"));
             typePhrase();
             tap(key("空格"));
             await(field("msime-test-plain").and(node -> node.getText() != null && node.getText().toString().endsWith("你好")));
