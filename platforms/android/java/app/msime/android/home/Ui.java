@@ -198,12 +198,12 @@ public final class Ui {
 
     /** Set a text view's line-aware minimum height from a density-independent value. */
     public static void setTextMinHeightDp(TextView view, Context context, float heightDp) {
-        view.setMinHeight(dp(context, heightDp));
+        ViewPolicy.setTextMinHeight(view, dp(context, heightDp));
     }
 
     /** Set a text view's line-aware minimum width from a density-independent value. */
     public static void setTextMinWidthDp(TextView view, Context context, float widthDp) {
-        view.setMinWidth(dp(context, widthDp));
+        ViewPolicy.setTextMinWidth(view, dp(context, widthDp));
     }
 
     /** Apply the standard compact action-button insets to a view. */
