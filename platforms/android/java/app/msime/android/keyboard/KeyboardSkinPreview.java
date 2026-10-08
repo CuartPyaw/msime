@@ -144,7 +144,7 @@ public final class KeyboardSkinPreview extends View {
         float rowHeight = (bounds.height() - gap * 3) / rows.length;
         Paint text = reusableText == null ? new Paint(Paint.ANTI_ALIAS_FLAG) : reusableText;
         text.setTextAlign(Paint.Align.CENTER);
-        text.setTypeface(skin.monospaced() ? Typeface.MONOSPACE : Typeface.DEFAULT);
+        ViewPolicy.setTypeface(text, skin.monospaced() ? Typeface.MONOSPACE : Typeface.DEFAULT);
         text.setTextSize(KeyboardGeometry.bounded(rowHeight * .42f, 7f,
             KeyboardGeometry.floatPixels(14f, density)));
         int keyFill = Color.parseColor(skin.keyBackground());
