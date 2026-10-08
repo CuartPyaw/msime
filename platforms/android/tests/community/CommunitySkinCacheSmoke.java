@@ -1,17 +1,16 @@
 import app.msime.android.CommunitySkinCache;
+import app.msime.android.JsonPolicy;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 public final class CommunitySkinCacheSmoke {
     public static void main(String[] arguments) throws Exception {
-        Method strictString = CommunitySkinCache.class.getDeclaredMethod("strictString", Object.class);
-        strictString.setAccessible(true);
-        check("synthetic".equals(strictString.invoke(null, "synthetic")),
+        check("synthetic".equals(JsonPolicy.strictString("synthetic")),
             "community cache text accepts JSON strings");
-        check(strictString.invoke(null, 7) == null,
+        check(JsonPolicy.strictString(7) == null,
             "community cache text rejects numbers instead of coercing them");
-        check(strictString.invoke(null, Boolean.TRUE) == null,
+        check(JsonPolicy.strictString(Boolean.TRUE) == null,
             "community cache text rejects booleans instead of coercing them");
         Path root = Files.createTempDirectory("community-skin-cache-");
         Path outside = Files.createTempFile("community-skin-cache-hardlink-", ".json");
