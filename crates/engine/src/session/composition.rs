@@ -103,6 +103,16 @@ fn remove_delimiters(segmented: &str) -> String {
     result
 }
 
+fn with_trailing_separator<'a>(preedit: Cow<'a, str>, request: &QueryRequest) -> Cow<'a, str> {
+    if request.raw_input_with_cases.ends_with('\'') && !preedit.ends_with('\'') {
+        let mut preedit = preedit.into_owned();
+        preedit.push('\'');
+        Cow::Owned(preedit)
+    } else {
+        preedit
+    }
+}
+
 /// A consumed prefix can leave the remainder starting with the separator that followed it.
 fn remove_consumed_leading_separators(raw: &str) -> &str {
     raw.trim_start_matches('\'')
@@ -206,7 +216,7 @@ fn folded_segments_equal(segments: &[AutocorrectCutSegment], text: &str) -> bool
 }
 
 /// The preedit must always show the letters the user typed. Two layers can rewrite them into canonical pinyin: the scheme's alias table (sahng -> shang, baked into raw_segmentation) and the dictionary's correction search (shabg -> shang, which only re-separates). Both are redrawn here from the raw letters with separators at the cut positions; when the search cannot explain a rewrite (length-changing aliases such as mihng -> ming) the raw letters are shown without separators (input_session_composition.cpp:286-333).
-pub(super) fn build_quanpin_autocorrect_display(request: &QueryRequest) -> String {
+pub(super) fn build_quanpin_autocorrect_display<'a>(request: &'a QueryRequest) -> Cow<'a, str> {
     let cased = if request.raw_input_with_cases.is_empty() {
         &request.raw_input
     } else {
@@ -218,7 +228,7 @@ pub(super) fn build_quanpin_autocorrect_display(request: &QueryRequest) -> Strin
         &request.raw_segmentation
     };
     if request.raw_input.is_empty() || cased.is_empty() {
-        return base.clone();
+        return Cow::Borrowed(base);
     }
     let types = request_autocorrect_mask(
         request.enable_quanpin_autocorrect_transposition,
@@ -227,11 +237,11 @@ pub(super) fn build_quanpin_autocorrect_display(request: &QueryRequest) -> Strin
     let letters_rewritten = !folded_letters_equal(base, cased);
     // The scheme kept the typed letters and no correction can apply, so there are no other separators to draw.
     if !letters_rewritten && (types == 0 || is_complete_pinyin_input(&request.raw_input)) {
-        return base.clone();
+        return Cow::Borrowed(base);
     }
     // A legal syllable plus one trailing letter is jianpin, never a typo, as in the dictionary's own guard; without this the deletion table would re-separate `zheg`.
     if looks_like_syllable_with_jianpin_tail(&request.raw_input) {
-        return base.clone();
+        return Cow::Borrowed(base);
     }
     let folded_input = fold_autocorrect_letters(cased);
     let cut = autocorrect_cut_detail(&folded_input, types).filter(|cut| !cut.is_empty());
@@ -253,13 +263,13 @@ pub(super) fn build_quanpin_autocorrect_display(request: &QueryRequest) -> Strin
                     }
                 }
             }
-            return display;
+            return Cow::Owned(display);
         }
     }
     if letters_rewritten {
-        remove_delimiters(cased)
+        Cow::Owned(remove_delimiters(cased))
     } else {
-        base.clone()
+        Cow::Borrowed(base)
     }
 }
 
@@ -373,7 +383,8 @@ impl InputSession {
                 self.update_mixed_candidates();
             }
             transition.current_segmentation = self.pinyin_segmentation();
-            transition.current_segmentation_with_cases = self.pinyin_segmentation_with_cases();
+            transition.current_segmentation_with_cases =
+                self.pinyin_segmentation_with_cases().into_owned();
             return transition;
         }
 
@@ -405,7 +416,8 @@ impl InputSession {
             self.online_requests.invalidate();
             self.update_mixed_candidates();
             transition.current_segmentation = self.pinyin_segmentation();
-            transition.current_segmentation_with_cases = self.pinyin_segmentation_with_cases();
+            transition.current_segmentation_with_cases =
+                self.pinyin_segmentation_with_cases().into_owned();
             return transition;
         }
         let request = self.engine.request();
@@ -415,7 +427,8 @@ impl InputSession {
         } else {
             request.normalized_segmentation.clone()
         };
-        transition.current_segmentation_with_cases = self.pinyin_segmentation_with_cases();
+        transition.current_segmentation_with_cases =
+            self.pinyin_segmentation_with_cases().into_owned();
         transition
     }
 
@@ -480,32 +493,29 @@ impl InputSession {
     }
 
     /// input_session_composition.cpp:417-449.
-    pub(super) fn pinyin_segmentation_with_cases(&self) -> String {
+    pub(super) fn pinyin_segmentation_with_cases(&self) -> Cow<'_, str> {
         let request = self.engine.request();
-        let with_trailing_separator = |mut preedit: String| {
-            if request.raw_input_with_cases.ends_with('\'') && !preedit.ends_with('\'') {
-                preedit.push('\'');
-            }
-            preedit
-        };
         match self.engine.current_scheme_type() {
-            SchemeType::Wubi => request.raw_input.clone(),
+            SchemeType::Wubi => Cow::Borrowed(&request.raw_input),
             SchemeType::JapaneseRomaji
             | SchemeType::Korean
             | SchemeType::Cantonese
             | SchemeType::Zhuyin
             | SchemeType::Vietnamese
             | SchemeType::Tibetan
-            | SchemeType::Stroke => self.raw_with_cases().to_owned(),
-            SchemeType::Shuangpin if self.shuangpin_preedit_uses_raw => {
-                with_trailing_separator(if request.raw_segmentation.is_empty() {
-                    request.raw_input.clone()
+            | SchemeType::Stroke => Cow::Borrowed(self.raw_with_cases()),
+            SchemeType::Shuangpin if self.shuangpin_preedit_uses_raw => with_trailing_separator(
+                if request.raw_segmentation.is_empty() {
+                    Cow::Borrowed(&request.raw_input)
                 } else {
-                    request.raw_segmentation.clone()
-                })
-            }
+                    Cow::Borrowed(&request.raw_segmentation)
+                },
+                request,
+            ),
             SchemeType::Quanpin => build_quanpin_autocorrect_display(request),
-            SchemeType::Shuangpin => with_trailing_separator(self.pinyin_segmentation()),
+            SchemeType::Shuangpin => {
+                with_trailing_separator(Cow::Owned(self.pinyin_segmentation()), request)
+            }
         }
     }
 
@@ -788,7 +798,7 @@ mod tests {
         let mut request = scheme.build_request();
         request.enable_quanpin_autocorrect_transposition = transposition;
         request.enable_quanpin_autocorrect_neighbor = neighbor;
-        build_quanpin_autocorrect_display(&request)
+        build_quanpin_autocorrect_display(&request).into_owned()
     }
 
     #[test]

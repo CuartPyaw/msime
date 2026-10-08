@@ -367,7 +367,7 @@ impl Session {
             && input.local_mode == LocalInputMode::None
             && !input.dedicated_english
         {
-            preedit = input.pinyin_segmentation_with_cases();
+            preedit = input.pinyin_segmentation_with_cases().into_owned();
         }
         SessionSnapshot {
             scheme: input.scheme(),
