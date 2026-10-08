@@ -107,8 +107,10 @@ public final class ProfilePage extends DetailPage {
         if (kind.isEmpty()) return;
         String previousAccount = SyncSwitch.accountId(context);
         if (profile.id().equals(previousAccount) && kind.equals(SyncSwitch.loginKind(context))) return;
-        SignIn.cancelPendingSnapshot(context, previousAccount);
-        SyncSwitch.bindAccount(context, profile.id(), kind);
+        synchronized (SyncSwitch.bindingLock()) {
+            SignIn.cancelPendingSnapshot(context, previousAccount);
+            SyncSwitch.bindAccount(context, profile.id(), kind);
+        }
     }
 
     /** 读头像图片：只认账号头像服务的 HTTPS 主机、不超过 1 MiB；读不到时为 null，界面显示首字头像。阻塞。 */
