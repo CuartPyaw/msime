@@ -56,6 +56,8 @@ final class ImeVoiceEntry {
     private SpeechRecognizer platform;
     /** 系统识别服务已经报过 onReadyForSpeech：之后的失败不再转交识别窗口。 */
     private boolean platformListening;
+    /** 用户已经按语音键结束了这次系统识别：之后报的错（例如还没开始聆听就被叫停时的 ERROR_CLIENT）不再转交识别窗口，否则按两下语音键会弹出一个识别窗口重新录音。 */
+    private boolean platformStopped;
     private long generation;
     private boolean recognizing;
 
@@ -231,7 +233,10 @@ final class ImeVoiceEntry {
         }
         if (local != null) local.stop();
         if (streaming != null) streaming.stop();
-        if (platform != null) platform.stopListening();
+        if (platform != null) {
+            platformStopped = true;
+            platform.stopListening();
+        }
         if (listening != null) listening.setHint("正在识别…");
     }
 
@@ -266,6 +271,7 @@ final class ImeVoiceEntry {
         }
         platform = recognizer;
         platformListening = false;
+        platformStopped = false;
         recognizer.setRecognitionListener(new RecognitionListener() {
             @Override public void onReadyForSpeech(Bundle params) {
                 if (session == generation) platformListening = true;
@@ -344,7 +350,7 @@ final class ImeVoiceEntry {
     /** 系统识别服务报错：还没开始聆听就被拒的转交识别窗口再试，其余按错误码提示。 */
     private void platformFailed(long session, int error) {
         if (session != generation) return;
-        boolean retry = PlatformSpeechPolicy.retryInActivity(error, platformListening);
+        boolean retry = PlatformSpeechPolicy.retryInActivity(error, platformListening || platformStopped);
         ImeLog.w("Platform speech recognizer failed in keyboard: error " + error);
         cancel();
         if (retry) {
@@ -358,6 +364,7 @@ final class ImeVoiceEntry {
         SpeechRecognizer recognizer = platform;
         platform = null;
         platformListening = false;
+        platformStopped = false;
         if (recognizer != null) recognizer.destroy();
     }
 
