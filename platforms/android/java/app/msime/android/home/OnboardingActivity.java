@@ -279,7 +279,8 @@ public final class OnboardingActivity extends AppCompatActivity {
         LinearLayout strip = Ui.row(this);
         Ui.setSymmetricPaddingDp(strip, this, 10, 12);
         ViewPolicy.setBackground(strip, Ui.rounded(Ui.accentSoft(this), Ui.dp(this, 20)));
-        strip.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        ViewPolicy.setImportantForAccessibility(strip,
+            View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
         String[][] samples = {{"候选", "candidate"}, {"后选", "choice"}, {"侯选", "option"}, {"候", "wait"}};
         for (int index = 0; index < samples.length; index++) {
             LinearLayout cell = Ui.column(this);

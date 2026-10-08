@@ -11,6 +11,7 @@ import androidx.annotation.Nullable;
 import app.msime.android.ColorPolicy;
 import app.msime.android.BoundsPolicy;
 import app.msime.android.KeyboardGeometry;
+import app.msime.android.ViewPolicy;
 
 /**
  * 分页指示点：6dp 高、圆角 3，未选中 6dp 宽、选中拉长到 16dp 并换成 accent，切换时宽度和颜色在 0.2 秒里过渡。
@@ -39,7 +40,7 @@ public final class PageDots extends View {
         dot = Ui.dp(context, Ui.DOT_SIZE);
         active = Ui.dp(context, Ui.DOT_ACTIVE_WIDTH);
         gap = Ui.dp(context, Ui.DOT_GAP);
-        setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
+        ViewPolicy.setImportantForAccessibility(this, IMPORTANT_FOR_ACCESSIBILITY_YES);
     }
 
     public void setCount(int count) {
