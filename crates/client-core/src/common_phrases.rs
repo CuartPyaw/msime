@@ -8,9 +8,9 @@ use crate::community::resource::{validate_resource, CommunityResource, Community
 use crate::file_lock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::fs::File;
 #[cfg(test)]
 use std::fs;
+use std::fs::File;
 #[cfg(not(unix))]
 use std::io::Write;
 use std::path::{Path, PathBuf};
