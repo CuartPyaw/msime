@@ -442,24 +442,28 @@ impl InputSession {
             self.chain.reset();
             return None;
         }
-        let words: Vec<(&str, u32)> = if selected.source.is_dictionary() {
-            vec![(selected.word.as_str(), DICTIONARY_PICK_TIMES)]
+        let dictionary = selected.source.is_dictionary();
+        // 借用现有词文本，避免为上下文记录额外构造中间词列表。
+        let words = if dictionary {
+            std::slice::from_ref(&selected.word)
         } else if selected.source.is_generated_or_fallback() && !selected.sentence_words.is_empty()
         {
-            let continues = self.chain.same_composition && self.chain.previous.is_some();
-            selected
-                .sentence_words
-                .iter()
-                .enumerate()
-                .map(|(index, word)| (word.as_str(), if index == 0 && continues { 2 } else { 1 }))
-                .collect()
+            selected.sentence_words.as_slice()
         } else {
             self.chain.reset();
             return None;
         };
         let now = self.steady_now();
+        let continues = self.chain.same_composition && self.chain.previous.is_some();
         let mut transitions = Vec::with_capacity(words.len());
-        for (word, times) in words {
+        for (index, word) in words.iter().enumerate() {
+            let times = if dictionary {
+                DICTIONARY_PICK_TIMES
+            } else if index == 0 && continues {
+                2
+            } else {
+                1
+            };
             transitions.push(PersonalTransition {
                 earlier: self.chain.earlier.clone().unwrap_or_default(),
                 previous: self.chain.previous.clone().unwrap_or_default(),
