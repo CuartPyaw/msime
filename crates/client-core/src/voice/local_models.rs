@@ -1441,17 +1441,44 @@ pub(crate) fn adopt_files(
 
 /// `<root>/.partial-<id>`：没下完的文件跨安装保留在这里，供下次续传。不以 `.staging-` 或 `.old-` 开头，所以 [`remove_leftovers`] 不会清掉它；不是真实目录（比如被换成符号链接）时先删掉再建。
 fn partial_directory(root: &Path, id: &str) -> Result<PathBuf, LocalModelError> {
-    let directory = root.join(format!(".partial-{id}"));
-    match fs::symlink_metadata(&directory) {
-        Ok(metadata) if metadata.file_type().is_dir() => {}
-        Ok(_) => {
-            remove_leftover(&directory);
-            fs::create_dir(&directory)?;
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => fs::create_dir(&directory)?,
-        Err(error) => return Err(error.into()),
+    #[cfg(unix)]
+    {
+        let root_directory = crate::storage::open_private_directory(root)?;
+        partial_directory_at(root, &root_directory, id)
     }
-    Ok(directory)
+    #[cfg(not(unix))]
+    {
+        let directory = root.join(format!(".partial-{id}"));
+        match fs::symlink_metadata(&directory) {
+            Ok(metadata) if metadata.file_type().is_dir() => {}
+            Ok(_) => {
+                remove_leftover(&directory);
+                fs::create_dir(&directory)?;
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => fs::create_dir(&directory)?,
+            Err(error) => return Err(error.into()),
+        }
+        Ok(directory)
+    }
+}
+
+#[cfg(unix)]
+fn partial_directory_at(
+    root: &Path,
+    root_directory: &File,
+    id: &str,
+) -> Result<PathBuf, LocalModelError> {
+    let name = format!(".partial-{id}");
+    let name = OsStr::new(&name);
+    match crate::storage::open_private_directory_at(root_directory, name) {
+        Ok(_) => return Ok(root.join(name)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(_) => crate::storage::remove_private_tree_at(root_directory, name)?,
+    }
+    rustix::fs::mkdirat(root_directory, name, rustix::fs::Mode::from_raw_mode(0o700))
+        .map_err(io::Error::from)?;
+    crate::storage::open_private_directory_at(root_directory, name)?;
+    Ok(root.join(name))
 }
 
 /// 没下完的文件按锁文件里的 SHA-256 加文件名命名：锁文件换了一份字节时，旧的部分不会被拿来续传。调用方已确认 `file.name` 是单个路径成分。
