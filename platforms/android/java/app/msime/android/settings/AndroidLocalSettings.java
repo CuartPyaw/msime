@@ -6,11 +6,9 @@ import java.io.InputStream;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Collections;
@@ -477,17 +475,6 @@ public final class AndroidLocalSettings {
 
     static void writeAtomically(Path file, byte[] content) throws IOException {
         if (content.length > MAX_BYTES) throw new IOException("settings size");
-        Path temporary = Files.createTempFile(file.getParent(), FILE_NAME + ".", ".tmp");
-        try {
-            Files.write(temporary, content, StandardOpenOption.TRUNCATE_EXISTING);
-            try {
-                Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException ignored) {
-                Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
-            }
-        } finally {
-            Files.deleteIfExists(temporary);
-        }
+        FilePolicy.writeAtomically(file, content);
     }
 }
