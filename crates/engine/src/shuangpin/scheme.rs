@@ -59,23 +59,42 @@ impl ShuangpinScheme {
 
     /// :97-121.
     pub fn build_request(&self) -> QueryRequest {
-        let raw_input = self.raw.to_ascii_lowercase();
-        let mut request = QueryRequest {
-            scheme: SchemeType::Shuangpin,
-            raw_input_with_cases: self.raw.clone(),
-            valid: effective_input_length(&raw_input) > 0,
-            ..QueryRequest::default()
-        };
-        if request.valid {
-            let segmentation = segment_input(&raw_input, self.profile);
-            request.raw_segmentation =
-                apply_segmentation_cases(&segmentation, &request.raw_input_with_cases);
-            request.normalized_segmentation = to_quanpin_segmentation(&segmentation, self.profile);
-            request.segmentation = request.normalized_segmentation.clone();
-            request.normalized_input = normalize_input(&raw_input, self.profile);
-        }
-        request.raw_input = raw_input;
+        let mut request = QueryRequest::default();
+        self.build_request_into(&mut request);
         request
+    }
+
+    /// 将双拼请求写入已有存储，避免逐键刷新重复构建按键和切分字符串。
+    pub fn build_request_into(&self, request: &mut QueryRequest) {
+        request.scheme = SchemeType::Shuangpin;
+        request.raw_input.clear();
+        request.raw_input.extend(
+            self.raw
+                .bytes()
+                .map(|byte| char::from(byte.to_ascii_lowercase())),
+        );
+        request.raw_input_with_cases.clone_from(&self.raw);
+        request.valid = effective_input_length(&request.raw_input) > 0;
+        if request.valid {
+            let segmentation = segment_input(&request.raw_input, self.profile);
+            let raw_segmentation =
+                apply_segmentation_cases(&segmentation, &request.raw_input_with_cases);
+            request.raw_segmentation.clone_from(&raw_segmentation);
+            let normalized_segmentation = to_quanpin_segmentation(&segmentation, self.profile);
+            request
+                .normalized_segmentation
+                .clone_from(&normalized_segmentation);
+            request
+                .segmentation
+                .clone_from(&request.normalized_segmentation);
+            let normalized_input = normalize_input(&request.raw_input, self.profile);
+            request.normalized_input.clone_from(&normalized_input);
+        } else {
+            request.raw_segmentation.clear();
+            request.normalized_segmentation.clear();
+            request.segmentation.clear();
+            request.normalized_input.clear();
+        }
     }
 
     pub fn preedit(&self) -> String {
