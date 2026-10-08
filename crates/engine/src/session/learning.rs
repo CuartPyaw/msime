@@ -128,7 +128,7 @@ impl InputSession {
     ) -> Option<String> {
         // Ranks are read from the order before personal context reordering.
         let ordered = self.ranking_list();
-        let selected = ordered.get(index)?.clone();
+        let selected = ordered.get(index)?;
         let user_db = self.journal_path();
         if selected.source == CandidateSource::EnglishDictionary {
             let context = if self.dedicated_english {
@@ -163,7 +163,7 @@ impl InputSession {
 
         let super_jianpin = self.local_mode == LocalInputMode::SuperJianpin;
         // In a mixed wubi list the selected row's producer decides: a quanpin row is ranked, keyed and stored as pinyin, and only a row the wubi table answered is ranked under the code itself (overlays.md §3.3). The pinyin fallback reuses the context the fixed positions are written under, otherwise a pinned candidate would not be recognised here.
-        let wubi = Self::is_wubi_native_candidate(&selected);
+        let wubi = Self::is_wubi_native_candidate(selected);
         let pinyin_fallback = self.is_wubi() && !wubi;
         let request = self.engine.request();
         let mut context_key = if super_jianpin {
@@ -191,15 +191,19 @@ impl InputSession {
             selected.canonical_pinyin.clone()
         };
         let mixed_wubi = self.is_wubi();
-        let ranked = clone_matching_rows(ordered, |item| {
-            !mixed_wubi || item.scheme == selected.scheme
-        });
+        let ranked_storage;
+        let ranked = if mixed_wubi {
+            ranked_storage = clone_matching_rows(ordered, |item| item.scheme == selected.scheme);
+            ranked_storage.as_slice()
+        } else {
+            ordered
+        };
         let main_db = self.paths.dictionary(assets::MAIN_DICTIONARY);
         let adjusted = adjust_candidate_ranking(&RankingRequest {
             main_db: &main_db,
             user_db,
             context_key: &context_key,
-            ordered: &ranked,
+            ordered: ranked,
             entry_key: &entry_key,
             value: &selected.word,
             mode: options.mode,
