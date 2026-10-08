@@ -507,8 +507,8 @@ const TOO_LARGE: &str = "the runtime options would be too large for the input me
 
 /// Replace the preferences in the runtime-options document, the way `sync_runtime_options` in the desktop app does. Everything else in the document, the skin catalog included, is kept as it is.
 fn publish_to_runtime_options(path: &Path, preferences: &Preferences) -> Result<(), String> {
-    use std::io::Write;
-    let file = crate::bounded::open_private(path).map_err(|_| "cannot read the runtime options")?;
+    let file = msime_client_core::file_lock::open_private_file_in(path)
+        .map_err(|_| "cannot read the runtime options")?;
     let bytes = crate::bounded::read(file, LINUX_RUNTIME_OPTIONS_LIMIT as u64).map_err(
         |error| match error {
             crate::bounded::ReadError::TooLarge => TOO_LARGE,
@@ -533,16 +533,7 @@ fn publish_to_runtime_options(path: &Path, preferences: &Preferences) -> Result<
     if bytes.len() > LINUX_RUNTIME_OPTIONS_LIMIT {
         return Err(TOO_LARGE.into());
     }
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let mut temporary =
-        tempfile::NamedTempFile::new_in(parent).map_err(|_| "cannot write the runtime options")?;
-    temporary
-        .write_all(&bytes)
-        .and_then(|()| temporary.as_file().sync_all())
-        .map_err(|_| "cannot write the runtime options")?;
-    temporary
-        .persist(path)
-        .map(|_| ())
+    msime_client_core::file_lock::replace_private_file(path, &bytes)
         .map_err(|_| "cannot write the runtime options".into())
 }
 
@@ -704,6 +695,30 @@ mod tests {
             assert!(document.get("preferences").is_none());
         }
         assert_eq!(document["candidate_skin_catalog"][0]["id"], "kept");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn publishing_runtime_options_rejects_a_symlinked_parent() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let linked = root.path().join("linked");
+        symlink(outside.path(), &linked).unwrap();
+        let outside_options = outside.path().join("runtime-options.json");
+        std::fs::write(&outside_options, br#"{"api_version":1}"#).unwrap();
+
+        let result = publish_to_runtime_options(
+            &linked.join("runtime-options.json"),
+            &Preferences::default(),
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            std::fs::read(&outside_options).unwrap(),
+            br#"{"api_version":1}"#
+        );
     }
 
     /// 五笔版只能选五笔：别的方案被拒绝，偏好不动；还没有偏好文件时读到的是五笔版的默认值。
