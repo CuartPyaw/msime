@@ -543,8 +543,4 @@ public final class UpdateApi {
         return new Exchange(status, connection.getHeaderField("Location"), connection.getContentLengthLong(), body);
     }
 
-    /** Compatibility entry point retained for the host smoke contract. */
-    static String strictString(Object value) {
-        return JsonPolicy.strictString(value);
-    }
 }
