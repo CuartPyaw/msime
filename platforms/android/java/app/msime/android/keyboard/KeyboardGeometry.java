@@ -425,7 +425,7 @@ public final class KeyboardGeometry {
     /** Apply four-sided padding expressed in density-independent pixels. */
     public static void setPaddingDp(View view, Context context, float leftDp, float topDp,
             float rightDp, float bottomDp) {
-        view.setPadding(pixels(context, leftDp), pixels(context, topDp),
+        ViewPolicy.setPadding(view, pixels(context, leftDp), pixels(context, topDp),
             pixels(context, rightDp), pixels(context, bottomDp));
     }
 
