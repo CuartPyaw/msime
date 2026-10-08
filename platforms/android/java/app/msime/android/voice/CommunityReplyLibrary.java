@@ -34,7 +34,7 @@ public final class CommunityReplyLibrary {
     }
 
     public static List<Template> read(Path file) throws IOException {
-        rejectSymlinkComponents(file);
+        SafePaths.rejectSymlinkComponents(file);
         if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) return List.of();
         if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) throw new IOException("Invalid community library");
         if (!SafePaths.isSingleLink(file)) throw new IOException("Community library is not a single link");
@@ -79,10 +79,6 @@ public final class CommunityReplyLibrary {
             replies.add(new Template(id, name, prompt));
         }
         return List.copyOf(replies);
-    }
-
-    private static void rejectSymlinkComponents(Path path) throws IOException {
-        SafePaths.rejectSymlinkComponents(path);
     }
 
     private static String string(Object value) { return JsonPolicy.strictString(value); }
