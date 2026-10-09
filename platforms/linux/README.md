@@ -152,6 +152,8 @@ programs.msime.enable = true;
 
 用 IBus（例如 GNOME 自带的输入源）时设 `i18n.inputMethod.type = "ibus";`，模块改用不带 Fcitx5 插件的 `msime-ibus`，把它的 IBus engine 加进 `i18n.inputMethod.ibus.engines`，其余不变。`i18n.inputMethod.type` 是其他框架时会给出警告。
 
+在 GNOME、KDE 以外的 Wayland 混成器上（Hyprland、Sway 等），nixpkgs 的 ibus 模块经 XDG autostart 以 `ibus-daemon --daemonize --xim` 启动 IBus。这样启动的 IBus 不提供 Wayland 的输入法协议：经 GTK、Qt 输入法模块（`GTK_IM_MODULE=ibus` 等）的程序能用，只认 text-input 协议的原生 Wayland 程序（如 WezTerm）连不上 IBus，在里面按切换快捷键也没有反应。要改用 `ibus start --type wayland` 启动（IBus 已在运行时用 `ibus restart --type wayland`），这时由 `ibus-ui-gtk3 --enable-wayland-im` 经 `zwp_input_method_v2` 接入混成器。每次登录都这样启动，需要在混成器的启动项里执行它，并用 `~/.config/autostart/ibus-daemon.desktop`（写 `Hidden=true`）盖住系统的那一条。
+
 | 选项 | 默认 | 作用 |
 |---|---|---|
 | `programs.msime.services.online.enable` | 开 | 按 socket 激活的在线候选与翻译服务 |
