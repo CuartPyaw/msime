@@ -78,6 +78,21 @@ interface ExportSaveRequest {
   contents: string;
 }
 
+/** What the about page sends with `update_check`: the running version and, when the page knows them, the edition and architecture. */
+interface UpdateCheckPayload {
+  current_version: string;
+  edition?: string;
+  arch?: string;
+}
+
+/** `msime_client_update_check`'s request; the platform is always this host's. */
+interface UpdateCheckRequest {
+  platform: string;
+  current_version: string;
+  edition?: string;
+  arch?: string;
+}
+
 interface TextReply {
   ok: boolean;
   value: string;
@@ -1048,6 +1063,11 @@ class SettingsBridge {
         KeyboardLog.error(`plugin import failed: ${describeError(error)}`);
         deliver(JSON.stringify({ ok: false, error: 'storage' }));
       });
+    } else if (kind === 'update_check') {
+      this.updateCheck(payload).then(deliver).catch((error: Object): void => {
+        KeyboardLog.error(`update check failed: ${describeError(error)}`);
+        deliver(JSON.stringify({ ok: false, error: 'update_check_unavailable' }));
+      });
     } else if (kind === 'save_export') {
       this.saveExport(payload).then(deliver).catch((error: Object): void => {
         KeyboardLog.error(`export save failed: ${describeError(error)}`);
@@ -1065,6 +1085,29 @@ class SettingsBridge {
    *
    * ArkWeb drops a blob download link unless a download delegate takes it, and a delegate would only save into the sandbox, where no file manager reaches. So the page hands the text over, it is staged privately, and the save picker decides where it goes, the same way the cloud dictionary export already works. The reply carries the saved file's name to show, or null when the user closed the picker, which is not a failure.
    */
+  /**
+   * The about page's 检查更新, answered by `msime_client_update_check` on a native worker: it waits on GitHub for up to ten seconds. The platform is filled in here rather than taken from the page, so the page can only ask about this host's releases.
+   */
+  private async updateCheck(document: string): Promise<string> {
+    let payload: UpdateCheckPayload;
+    try {
+      payload = JSON.parse(document) as UpdateCheckPayload;
+    } catch {
+      return JSON.stringify({ ok: false, error: 'update_check_invalid' });
+    }
+    if (typeof payload.current_version !== 'string') {
+      return JSON.stringify({ ok: false, error: 'update_check_invalid' });
+    }
+    const request: UpdateCheckRequest = { platform: 'harmony', current_version: payload.current_version };
+    if (typeof payload.edition === 'string') {
+      request.edition = payload.edition;
+    }
+    if (typeof payload.arch === 'string') {
+      request.arch = payload.arch;
+    }
+    return await client.updateCheck(JSON.stringify(request));
+  }
+
   private async saveExport(document: string): Promise<string> {
     let request: ExportSaveRequest;
     try {
