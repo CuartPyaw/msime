@@ -11,7 +11,7 @@
 - 桌面端没有社区页：社区皮肤在共享应用「主题」页的「社区皮肤」标签里，本窗口「主题」页的「社区皮肤」一行打开它，`community` 路由打开本窗口的「主题」页。AI 对话是 AI 辅助的子页，`chat` 路由打开「AI 辅助」。
 - 其他平台下载不单独成页：「关于」页的「版本与更新」组可以打开产品下载页或复制链接。
 
-原生页面不绘制的部分（候选字体选择、皮肤与自定义主题编辑、词库管理、背单词、辅助码插件、语音识别服务、屏幕键盘与手写的详细设置、帮助、反馈表单、检查更新）以按钮的形式跳到共享应用的对应路由，路由 id 与托盘和其他启动方使用的相同。
+原生页面不绘制的部分（候选字体选择、皮肤与自定义主题编辑、词库管理、背单词、辅助码插件、语音识别服务、屏幕键盘与手写的详细设置、帮助、反馈表单）以按钮的形式跳到共享应用的对应路由，路由 id 与托盘和其他启动方使用的相同。
 
 `--route=settings:<id>` 指定打开的页面，可以是共享路由的设置分类 id（`appearance`、`dictionary`、`about` 等，映射见 `route_aliases`），也可以是本窗口的页面 id；其他值打开默认的「输入」页。
 
@@ -30,6 +30,10 @@
 设置窗口通过 `msime_client_load_preferences` 和 `msime_client_save_preferences` 读取、校验并以 compare-and-swap 方式保存共享偏好。每个控件改动后立即保存，滑块停止拖动后保存；保存被拒绝（其他窗口已更新或与其他设置冲突）时重新读取并在页面顶部说明。窗口重新获得焦点时重新读取，以反映托盘、共享应用或同步带来的变化。Server 启动它时注入 `MSIME_CLIENT_STATE_DIR`，所以设置和输入法宿主使用同一个数据目录；从开始菜单直接启动时回落到 `%LOCALAPPDATA%\MSIME-Client`。
 
 「候选窗口」页「游戏」组的两张程序列表（`game_compatibility.overlay_processes`、`excluded_processes`）在写入前先按偏好库的规则规范化和校验（`GameProcessList.h`）：去掉首尾空白、ASCII 字母转小写，要求以 `.exe` 结尾、不超过 64 个字符、不带路径和 `\ / : * ? " < > |` 及控制字符，两张表之间不重复、合计不超过 32 条。不合法时在列表下方说明具体原因，不写入文档：保存被拒时窗口只能给出上面那句笼统的说明，用户看不出是哪一项出了问题。这组设置只由 TSF DLL 在每次激活时读取，对已打开的游戏要切换一次输入法才生效，取舍见 [决策笔记](../../../.agents/notes/implemented/feature/2026-10-08-windows-game-candidate-overlay.md)。
+
+## 检查更新
+
+「关于」页的「检查更新」在本窗口中完成，不再打开共享应用：工作线程调用 `msime_client_update_check`（`crates/client-core/src/update_check.rs`，与共享设置页、鸿蒙走同一份 Rust 逻辑），请求带 `platform: windows`、本版本 id 和当前版本，结果写在该行下方：「已是最新版本」「暂无可用发行版」「检查失败，请稍后重试」，或「发现新版本 vX」加未签名提示与安装包的 SHA256，按钮随之变成「前往下载」，打开该版本在 GitHub 上的发布页。只接受本仓库的 tag 页地址。当前版本是编译期宏 `MSIME_WINDOWS_VERSION`：`Build-Client.ps1` 用 `/p:MsimeVersion=<TargetVersion>` 传入，开发构建取 `platforms/windows/version.txt`，与 Server 上报的版本相同。
 
 ## 连接 AI 助手
 
