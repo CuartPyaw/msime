@@ -207,9 +207,8 @@ public final class LexiconPage extends DetailPage {
                 Ui.accentSoft(context), Ui.accent(context), Ui.BUTTON_PADDING_H, Ui.BUTTON_PADDING_V,
                 Ui.COMPACT_BUTTON_MIN_HEIGHT, 0, () -> install(item));
         } else {
-            button = Ui.styledLabel(context, added ? "已添加" : "添加中",
+            button = Ui.centeredLabel(context, added ? "已添加" : "添加中",
                 Ui.TEXT_BUTTON_SMALL, 500, Ui.subText(context));
-            ViewPolicy.setCentered(button);
             ViewPolicy.setSingleLine(button);
             ViewPolicy.setBackground(button, Ui.pillRipple(context,
                 added ? Ui.rowBackground(context) : Ui.accentSoft(context)));

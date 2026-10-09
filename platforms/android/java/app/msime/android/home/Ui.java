@@ -408,6 +408,22 @@ public final class Ui {
         return view;
     }
 
+    /** 创建双轴居中的普通标签。 */
+    public static TextView centeredLabel(Context context, CharSequence text, float sizeSp,
+                                         @ColorInt int color) {
+        TextView centered = label(context, text, sizeSp, color);
+        ViewPolicy.setCentered(centered);
+        return centered;
+    }
+
+    /** 创建带字重且双轴居中的标签。 */
+    public static TextView centeredLabel(Context context, CharSequence text, int sizeSp, int weight,
+                                         @ColorInt int color) {
+        TextView centered = styledLabel(context, text, sizeSp, weight, color);
+        ViewPolicy.setCentered(centered);
+        return centered;
+    }
+
     /** 创建带无障碍标题语义的普通标签。 */
     public static TextView headingLabel(Context context, CharSequence text, float sizeSp,
                                         @ColorInt int color) {
@@ -495,8 +511,7 @@ public final class Ui {
                                       @ColorInt int fill, @ColorInt int ink,
                                       float horizontalPaddingDp, float verticalPaddingDp,
                                       float minHeightDp, float minWidthDp, Runnable action) {
-        TextView button = styledLabel(context, label, Math.round(sizeSp), weight, ink);
-        ViewPolicy.setCentered(button);
+        TextView button = centeredLabel(context, label, Math.round(sizeSp), weight, ink);
         ViewPolicy.setSingleLine(button);
         ViewPolicy.setBackground(button, pillRipple(context, fill));
         setSymmetricPaddingDp(button, context, horizontalPaddingDp, verticalPaddingDp);
@@ -516,8 +531,7 @@ public final class Ui {
     public static TextView textButton(Context context, CharSequence label, int sizeSp, int weight,
                                       @ColorInt int ink, Drawable background, float minHeightDp,
                                       Runnable action) {
-        TextView button = styledLabel(context, label, sizeSp, weight, ink);
-        ViewPolicy.setCentered(button);
+        TextView button = centeredLabel(context, label, sizeSp, weight, ink);
         ViewPolicy.setBackground(button, background);
         setTextMinHeightDp(button, context, minHeightDp);
         bindClick(button, action);
