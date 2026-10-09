@@ -898,6 +898,17 @@ function validateSession(value: unknown): value is Session {
   );
 }
 
+/** Read only the owner of a freshly loaded session, without caching it across processes. */
+export function storedSessionUserId(saved: string | null): string | null {
+  if (saved === null || utf8Length(saved) > MAX_SESSION_BYTES) return null;
+  try {
+    const value: unknown = JSON.parse(saved);
+    return validateSession(value) ? value.user.id : null;
+  } catch {
+    return null;
+  }
+}
+
 function sessionFromTokens(value: Action): Session | null {
   if (
     !validToken(value.access_token) ||

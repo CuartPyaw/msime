@@ -280,6 +280,7 @@ import {
   dictionaryChangePageChanged,
   parseResponseContentLength,
   accountReplyValue,
+  storedSessionUserId,
   strictAccountOk,
 } from "../entry/src/main/ets/account/AccountCloudBridge";
 import {
@@ -9682,6 +9683,19 @@ group("account native success envelopes require a value", () => {
 });
 
 group("account and cloud clipboard bridge keeps secrets native", () => {
+  const sessionFor = (id: string): string => JSON.stringify({
+    access_token: "a".repeat(64), refresh_token: "b".repeat(64),
+    token_type: "Bearer", expires_at: Date.now() + 600_000,
+    user: { id, display_name: "Synthetic", created_at: "2026-01-01" },
+  });
+  check(storedSessionUserId(sessionFor("old-account")) === "old-account",
+    "the keyboard sees the saved account owner");
+  check(storedSessionUserId(sessionFor("new-account")) === "new-account",
+    "a fresh read sees the replacement account");
+  check(storedSessionUserId(null) === null && storedSessionUserId("not json") === null,
+    "missing or malformed sessions have no owner");
+  check(storedSessionUserId(JSON.stringify({ user: { id: "forged" } })) === null,
+    "an unvalidated user id cannot own a snapshot");
   let oversizedCleared = false;
   const oversizedStore: AccountSessionStore = {
     load: () => "x".repeat(64 * 1024 + 1),
