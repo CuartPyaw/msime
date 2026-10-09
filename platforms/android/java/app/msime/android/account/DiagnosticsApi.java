@@ -304,10 +304,10 @@ public final class DiagnosticsApi {
                 Object kind = row.opt("kind");
                 if (!(kind instanceof String) || !row.has("t_ms")) continue;
                 if (durationRequired && !row.has("duration_ms")) continue;
-                Long time = strictInteger(row.opt("t_ms"));
+                Long time = JsonPolicy.strictLong(row.opt("t_ms"));
                 Object rawDuration = row.opt("duration_ms");
                 Long duration = rawDuration == null || rawDuration == JSONObject.NULL
-                    ? -1L : strictInteger(rawDuration);
+                    ? -1L : JsonPolicy.strictLong(rawDuration);
                 if (time == null || duration == null) continue;
                 Event event = Event.of(time, (String) kind, duration);
                 if (event != null) {
@@ -399,11 +399,6 @@ public final class DiagnosticsApi {
         return new State(snapshot, ListPolicy.copyOrEmpty(accesses));
     }
 
-    /** Diagnostics wire numbers are JSON integers; do not let org.json truncate decimals. */
-    public static Long strictInteger(Object value) {
-        return JsonPolicy.strictLong(value);
-    }
-
     /** Optional response strings: absent/null means empty, every other JSON type is malformed. */
     static String optionalString(JSONObject object, String key) {
         if (object == null || !object.has(key) || object.isNull(key)) return "";
@@ -413,7 +408,7 @@ public final class DiagnosticsApi {
     /** Optional response integers: absent/null means zero, every other non-integer is malformed. */
     static Long optionalInteger(JSONObject object, String key) {
         if (object == null || !object.has(key) || object.isNull(key)) return 0L;
-        return strictInteger(object.opt(key));
+        return JsonPolicy.strictLong(object.opt(key));
     }
 
     private static String entryText(InputStream stream) throws IOException {
