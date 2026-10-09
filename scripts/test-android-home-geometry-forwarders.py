@@ -10,6 +10,7 @@ HOME = ROOT / "platforms/android/java/app/msime/android/home"
 UI = HOME / "Ui.java"
 EXPECTED_CALLERS = (
     "AiSkinPage.java",
+    "FeedbackPage.java",
     "InputDialog.java",
     "LoginSheet.java",
     "OnboardingActivity.java",
@@ -24,6 +25,8 @@ def main() -> int:
         errors.append(f"{UI}: 不应保留 atLeastOnePx 转发方法")
     if "public static float sp(Context context, float value)" in ui:
         errors.append(f"{UI}: 不应保留无调用方的 sp 转发方法")
+    if "public static int hairlinePx(Context context)" in ui:
+        errors.append(f"{UI}: 不应保留 hairlinePx 转发方法")
 
     for path in HOME.glob("*.java"):
         source = path.read_text(encoding="utf-8")
@@ -31,6 +34,8 @@ def main() -> int:
             errors.append(f"{path}: 应直接调用 KeyboardGeometry.atLeastOnePixel")
         if "Ui.sp(" in source:
             errors.append(f"{path}: 不应调用已移除的 Ui.sp")
+        if "Ui.hairlinePx(" in source:
+            errors.append(f"{path}: 应直接调用 KeyboardGeometry.atLeastOnePixel")
 
     for name in EXPECTED_CALLERS:
         path = HOME / name
