@@ -802,7 +802,7 @@ pub struct Preferences {
     /// Show the Wubi code suffix that remains after the typed prefix.
     #[serde(default = "enabled_by_default")]
     pub wubi_code_hint: bool,
-    /// Answer an unmatched Wubi code with candidates from the same Pinyin spelling.
+    /// 五笔拼音混输：五笔候选之后接着列出同一串字母的全拼候选，五笔编码打不出时直接出拼音候选。
     #[serde(default)]
     pub wubi_mixed_pinyin: bool,
     /// 五笔用 86 还是 98 码表；个人词条和学习记录也按它分开存。
