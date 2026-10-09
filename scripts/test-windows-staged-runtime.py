@@ -72,16 +72,18 @@ if "--message-format=json" in " ".join(call):
     if os.environ.get("MSIME_TEST_CARGO_FAIL"):
         print("error: synthetic Cargo failure", file=sys.stderr)
         sys.exit(1)
-    exe = pathlib.Path(entry["repo"]) / "target/x86_64-pc-windows-gnu/debug/deps/msime_engine-0123456789abcdef.exe"
-    exe.parent.mkdir(parents=True, exist_ok=True)
-    exe.write_text("synthetic Rust test executable")
-    print(json.dumps({"executable": "/repo/" + str(exe.relative_to(entry["repo"])), "profile": {"test": True}}))
+    for target in ("msime_host_windows", "paste_policy", "msime_engine", "golden"):
+        exe = pathlib.Path(entry["repo"]) / f"target/x86_64-pc-windows-gnu/debug/deps/{target}-0123456789abcdef.exe"
+        exe.parent.mkdir(parents=True, exist_ok=True)
+        exe.write_text("synthetic Rust test executable")
+        print(json.dumps({"executable": "/repo/" + str(exe.relative_to(entry["repo"])),
+                          "profile": {"test": True}, "target": {"name": target}}))
 if "runtime" in entry:
     print("PASS windows-synthetic-runtime")
     rust_stage = next((pathlib.Path(arg[:-len(":/bin-rust:ro")]) for arg in call
                        if arg.endswith(":/bin-rust:ro")), None)
-    if rust_stage is not None and (rust_stage / "rust-msime_engine.exe").is_file():
-        print("PASS rust-msime_engine")
+    if rust_stage is not None and (rust_stage / "rust-msime_host_windows.exe").is_file():
+        print("PASS rust-msime_host_windows")
 if call[:2] == ["info", "--format"]:
     print("linux/arm64")
 ''')
@@ -205,9 +207,12 @@ if call[:2] == ["info", "--format"]:
         result = subprocess.run(["bash", str(self.windows / "run-tests-wine.sh"), "x64"],
                                 env=self.env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        staged = self.root / "target/wine-rust-tests/x64/rust-msime_engine.exe"
+        staged = self.root / "target/wine-rust-tests/x64/rust-msime_host_windows.exe"
         self.assertTrue(staged.is_file(), result.stdout)
-        self.assertIn("PASS rust-msime_engine", result.stdout)
+        self.assertIn("PASS rust-msime_host_windows", result.stdout)
+        self.assertTrue((staged.parent / "rust-paste_policy.exe").is_file())
+        self.assertFalse((staged.parent / "rust-msime_engine.exe").exists())
+        self.assertFalse((staged.parent / "rust-golden.exe").exists())
         calls = [json.loads(line)["args"] for line in self.log.read_text().splitlines()]
         cargo_run = next((args for args in calls if "--message-format=json" in " ".join(args)), None)
         self.assertIsNotNone(cargo_run, calls)
