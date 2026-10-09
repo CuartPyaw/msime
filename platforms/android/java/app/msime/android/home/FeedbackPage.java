@@ -2,7 +2,6 @@ package app.msime.android.home;
 
 import android.content.ContentResolver;
 import android.content.Context;
-import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -25,6 +24,7 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.Nullable;
 import app.msime.android.AppEdition;
+import app.msime.android.AppVersionPolicy;
 import app.msime.android.core.InputViewValuePolicy;
 import app.msime.android.CloudApi;
 import app.msime.android.BitmapPolicy;
@@ -349,8 +349,8 @@ public final class FeedbackPage extends DetailPage {
 
     private static String appVersion(Context context) {
         try {
-            PackageInfo info = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
-            return (info.versionName == null ? "—" : info.versionName) + " (" + info.getLongVersionCode() + ")";
+            AppVersionPolicy.Version version = AppVersionPolicy.current(context);
+            return (version.name() == null ? "—" : version.name()) + " (" + version.code() + ")";
         } catch (PackageManager.NameNotFoundException missing) {
             return "—";
         }
