@@ -25,6 +25,7 @@ import app.msime.android.DrawablePolicy;
 import app.msime.android.KeyboardGeometry;
 import app.msime.android.TextPolicy;
 import app.msime.android.ViewPolicy;
+import app.msime.android.WindowInsetsPolicy;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
@@ -85,7 +86,7 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
             Insets bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars());
             Insets ime = windowInsets.getInsets(WindowInsetsCompat.Type.ime());
             ViewPolicy.setPadding(view, bars.left, bars.top, bars.right,
-                Ui.bottomContentInset(bars.bottom, 0, ime.bottom, 0));
+                WindowInsetsPolicy.bottomContentInset(bars.bottom, 0, ime.bottom, 0));
             return windowInsets;
         });
 

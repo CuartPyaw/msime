@@ -27,6 +27,7 @@ import app.msime.android.R;
 import app.msime.android.SchemePreferences;
 import app.msime.android.TextPolicy;
 import app.msime.android.ViewPolicy;
+import app.msime.android.WindowInsetsPolicy;
 import app.msime.android.core.InputViewValuePolicy;
 import app.msime.android.core.InputViewValuePolicy;
 import com.google.android.material.button.MaterialButton;
@@ -104,7 +105,7 @@ public final class KeyboardFragment extends HomeTabFragment {
         ViewCompat.setOnApplyWindowInsetsListener(scroll, (target, insets) -> {
             Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
             Insets ime = insets.getInsets(WindowInsetsCompat.Type.ime());
-            int bottom = Ui.bottomContentInset(bars.bottom, tabs, ime.bottom, base);
+            int bottom = WindowInsetsPolicy.bottomContentInset(bars.bottom, tabs, ime.bottom, base);
             ViewPolicy.setBottomPadding(target, bottom);
             return insets;
         });

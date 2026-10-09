@@ -22,6 +22,11 @@ HEIGHT_PX_CALLERS = (
     "OnboardingActivity.java",
     "SkinsPage.java",
 )
+BOTTOM_INSET_CALLERS = (
+    "DetailPage.java",
+    "KeyboardFragment.java",
+    "KeyboardTryoutActivity.java",
+)
 
 
 def main() -> int:
@@ -33,6 +38,8 @@ def main() -> int:
         errors.append(f"{UI}: 不应保留无调用方的 sp 转发方法")
     if "public static int hairlinePx(Context context)" in ui:
         errors.append(f"{UI}: 不应保留 hairlinePx 转发方法")
+    if "public static int bottomContentInset(" in ui:
+        errors.append(f"{UI}: 不应保留 bottomContentInset 转发方法")
     if "public static LinearLayout.LayoutParams matchWidthHeightPx(" in ui:
         errors.append(f"{UI}: 不应保留 matchWidthHeightPx 转发方法")
     if re.search(r"(?<![.\w])matchWidthHeightPx\(", ui):
@@ -72,6 +79,8 @@ def main() -> int:
             errors.append(f"{path}: 不应调用已移除的 Ui.sp")
         if "Ui.hairlinePx(" in source:
             errors.append(f"{path}: 应直接调用 KeyboardGeometry.atLeastOnePixel")
+        if "Ui.bottomContentInset(" in source:
+            errors.append(f"{path}: 应直接调用 WindowInsetsPolicy.bottomContentInset")
         if "Ui.matchWidthHeightPx(" in source:
             errors.append(f"{path}: 应直接调用 KeyboardGeometry.matchWidthHeightPx")
         if "Ui.weightedWidth(" in source:
@@ -96,6 +105,11 @@ def main() -> int:
         path = HOME / name
         if "KeyboardGeometry.matchWidthHeightPx(" not in path.read_text(encoding="utf-8"):
             errors.append(f"{path}: 未直接复用 KeyboardGeometry.matchWidthHeightPx")
+
+    for name in BOTTOM_INSET_CALLERS:
+        path = HOME / name
+        if "WindowInsetsPolicy.bottomContentInset(" not in path.read_text(encoding="utf-8"):
+            errors.append(f"{path}: 未直接复用 WindowInsetsPolicy.bottomContentInset")
 
     option_sheet = HOME / "OptionSheet.java"
     if "KeyboardGeometry.weightedWidthParams(" not in option_sheet.read_text(encoding="utf-8"):
