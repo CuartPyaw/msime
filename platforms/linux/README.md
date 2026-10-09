@@ -523,6 +523,8 @@ Emoji 本地 CLI 的 `msime-linux-emoji --local` 会按显式资源目录、其�
 
 `scripts/verify-local.sh` 的「compile: linux desktop shell」阶段在非 Linux 主机上用 `tests/tools/Dockerfile.desktop-check` 构建的镜像跑 `cargo check -p msime-desktop --locked --all-targets`：与编译门禁同一个固定摘要的 `rust:1.97.1-bookworm`，预装 Tauri 外壳需要的 webkit2gtk、gtk3、libsoup、javascriptcoregtk 和 cpal 需要的 ALSA 开发包，apt 只在 Dockerfile 变化后的第一次运行时执行，`--quick` 和 pre-push 钩子不再每次重装。镜像构建日志留在 `target/linux-desktop-check/image.log`，apt 失败时阶段打印其末尾并 FAIL。
 
+原生门禁和桌面检查分别把 `CARGO_HOME` 放在已有挂载内的 `/build/cargo-home`、`/ctarget/cargo-home`，对应宿主的 `target/linux-build-gate/cargo-home`、`target/linux-desktop-check/cargo-home`。registry 和 git 下载缓存随构建目录保留，后续临时容器复用；首次运行或依赖变化仍可联网准备，日常命令继续使用 `--locked`。两个缓存按 checkout 与门禁隔离，不借用主机 Cargo home，删除 worktree 时一并清理。
+
 这两个门禁镜像、隔离验收基镜像（`tests/tools/Dockerfile`）和 RPM 打包镜像（`tests/tools/Dockerfile.package-rpm`）同时预装 `rust-toolchain.toml` 要求的 `rustfmt` 和 `clippy`，临时容器启动时不再逐次补装。Fcitx5 和现代 IBus 验收镜像继承验收基镜像，Deb 打包镜像继承原生门禁镜像。组件层放在已有构建层之后，修改组件准备步骤时可复用系统依赖、Wayland 驱动或 RPM 编译器安装缓存。构建或升级相应镜像后，在仓库根目录验证工具链就绪：
 
 ```sh
