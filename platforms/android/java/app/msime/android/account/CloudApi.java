@@ -310,6 +310,8 @@ public final class CloudApi {
             throw failure;
         } catch (java.util.concurrent.CancellationException changed) {
             throw sessionChanged();
+        } catch (BackendAnonymousAccount.RateLimited limited) {
+            throw new Failure(429, "", limited.getMessage(), 0);
         } catch (Exception unavailable) {
             throw new Failure(0, "session_unavailable", unavailable.getMessage(), 0);
         }
