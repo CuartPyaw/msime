@@ -499,7 +499,8 @@ public final class Ui {
     public static void applyStatusMark(TextView mark, Context context, boolean done) {
         mark.setText(done ? "✓" : "!");
         ViewPolicy.setTextColor(mark, done ? onAccent(context) : 0xFFFFFFFF);
-        ViewPolicy.setBackground(mark, circle(done ? accent(context) : color(context, app.msime.android.R.attr.msWarn)));
+        ViewPolicy.setBackground(mark,
+            DrawablePolicy.circle(done ? accent(context) : color(context, app.msime.android.R.attr.msWarn)));
         ViewPolicy.hideFromAccessibility(mark);
     }
 
