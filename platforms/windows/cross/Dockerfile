@@ -8,8 +8,7 @@
 # property of one machine, not of the architecture - Debian's i686 MinGW is
 # built `--disable-sjlj-exceptions --with-dwarf2`, so the same build works here.
 #
-# linux/amd64 because vcpkg's host tools are built for the container's own
-# architecture; on an arm64 host Docker emulates, which is slow but correct.
+# 编译器和 vcpkg 工具使用 Docker daemon 的原生 Linux 架构，输出仍为 x86/x64 PE。
 FROM debian:trixie-slim
 RUN apt-get update -qq \
  && apt-get install -y -qq --no-install-recommends \

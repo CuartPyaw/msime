@@ -10,7 +10,7 @@ Status: implemented
 
 镜像默认工具链安装为仓库固定版本，显式补齐两个组件，保留原有两个 Windows GNU 目标。系统依赖和 MinGW 线程模型保持原有缓存；头文件大小写兼容由 [单次扫描别名](2026-10-09-windows-header-aliases.md) 约束；替换浮动编译器安装层，不在旧 stable 上再叠一份固定编译器。
 
-`tests/tools/check-cross-image-toolchain.sh` 只读挂载真实仓库，在断网的新 amd64 容器中调用 Cargo、Rustfmt、Clippy，执行与构建脚本相同的 `rustup target add`，并使用两个 MinGW 链接器链接包含标准库和线程调用的合成 Rust 程序。用 objdump 验证 x86/x64 的 PE 格式，产物写入已有 `target/windows-cross/<arch>`。该探针验证工具链准备和真实链接，不运行 Windows 程序，不替代产品构建或系统输入法验收。
+`tests/tools/check-cross-image-toolchain.sh` 只读挂载真实仓库，按指定镜像架构在断网的新容器中调用 Cargo、Rustfmt、Clippy，执行与构建脚本相同的 `rustup target add`，并使用两个 MinGW 链接器链接包含标准库和线程调用的合成 Rust 程序。用 objdump 验证 x86/x64 的 PE 格式，产物写入已有 `target/windows-cross/<arch>`。该探针验证工具链准备和真实链接，不运行 Windows 程序，不替代产品构建或系统输入法验收。
 
 ## Alternatives considered
 
@@ -20,7 +20,7 @@ Status: implemented
 
 ## Consequences
 
-临时容器复用镜像里的固定工具链和目标安装，避免重复网络准备；镜像增加两个组件的占用。固定版本、组件和目标与仓库声明仍需同步维护；断网探针在升级镜像后手动运行，不为每次 quick 增加容器开销。amd64 仿真和系统包不保证耗时或字节级可复现，未测量相对耗时就不宣称改善百分比。
+临时容器复用镜像里的固定工具链和目标安装，避免重复网络准备；镜像增加两个组件的占用。固定版本、组件和目标与仓库声明仍需同步维护；断网探针在升级镜像后手动运行，不为每次 quick 增加容器开销。容器架构由 [原生交叉编译宿主](2026-10-09-windows-native-cross-host.md) 接管；系统包和共享构建环境不保证耗时或字节级可复现，未测量相对耗时就不宣称改善百分比。
 
 与 [Linux 镜像组件准备](2026-10-09-linux-gate-toolchain-components.md) 部分重叠，但本决定还约束固定工具链名称和 Windows GNU 标准库归属，不替代 Linux 决定。检索 implemented/proposed/rejected 未发现 Windows 交叉工具链已有归属；其他 Windows 笔记涉及运行时和产品行为，与镜像准备无关。
 
