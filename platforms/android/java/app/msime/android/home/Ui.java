@@ -343,12 +343,6 @@ public final class Ui {
         return new FrameLayout.LayoutParams(size, size, gravity);
     }
 
-    /** Frame layout parameters for a child that fills width and uses a dp height. */
-    public static FrameLayout.LayoutParams frameMatchWidthHeight(Context context, float heightDp) {
-        return new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-            dp(context, heightDp));
-    }
-
     /** 读一个颜色主题属性；属性缺失时退回洋红，让漏配的属性在截图里一眼可见，而不是悄悄显示成别的颜色。 */
     @ColorInt public static int color(Context context, @AttrRes int attr) {
         return MaterialColors.getColor(context, attr, Color.MAGENTA);

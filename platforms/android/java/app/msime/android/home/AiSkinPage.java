@@ -302,7 +302,8 @@ public final class AiSkinPage extends DetailPage {
         FrameLayout stage = new FrameLayout(context);
         preview = new KeyboardPreview(context);
         preview.setContentDescription("皮肤预览");
-        stage.addView(preview, Ui.frameMatchWidthHeight(context, 200));
+        stage.addView(preview,
+            KeyboardGeometry.frameMatchWidthHeightPx(Ui.dp(context, 200)));
         LinearLayout overlay = Ui.column(context);
         ViewPolicy.setCentered(overlay);
         ProgressBar spinner = new ProgressBar(context);
