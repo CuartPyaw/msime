@@ -271,11 +271,6 @@ public final class Ui {
         ViewPolicy.hideFromAccessibility(view);
     }
 
-    /** Return whether the supplied context currently uses the system night configuration. */
-    public static boolean isNight(Context context) {
-        return KeyboardGeometry.isNight(context);
-    }
-
     /** Return the current display width in physical pixels. */
     public static int screenWidthPixels(Context context) {
         return KeyboardGeometry.screenWidthPixels(context);
