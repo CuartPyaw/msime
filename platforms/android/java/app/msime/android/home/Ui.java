@@ -408,6 +408,22 @@ public final class Ui {
         return view;
     }
 
+    /** 创建带无障碍标题语义的普通标签。 */
+    public static TextView headingLabel(Context context, CharSequence text, float sizeSp,
+                                        @ColorInt int color) {
+        TextView heading = label(context, text, sizeSp, color);
+        heading.setAccessibilityHeading(true);
+        return heading;
+    }
+
+    /** 创建带字重与无障碍标题语义的标签。 */
+    public static TextView headingLabel(Context context, CharSequence text, int sizeSp, int weight,
+                                        @ColorInt int color) {
+        TextView heading = styledLabel(context, text, sizeSp, weight, color);
+        heading.setAccessibilityHeading(true);
+        return heading;
+    }
+
     /** 创建会由辅助功能礼貌播报变化的空状态文本。 */
     public static TextView liveStatus(Context context, int sizeSp) {
         TextView status = styledLabel(context, "", sizeSp, 400, subText(context));
@@ -446,9 +462,7 @@ public final class Ui {
 
     /** Create the standard accent-coloured group heading. */
     public static TextView groupHeading(Context context, CharSequence text) {
-        TextView heading = styledLabel(context, text, TEXT_GROUP_TITLE, 500, accent(context));
-        heading.setAccessibilityHeading(true);
-        return heading;
+        return headingLabel(context, text, TEXT_GROUP_TITLE, 500, accent(context));
     }
 
     /** Create a filled accent pill button; callers add their content description and action. */

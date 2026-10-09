@@ -13,7 +13,7 @@ def main() -> int:
     errors = []
     source = UI.read_text(encoding="utf-8")
     required = (
-        "TextView heading = styledLabel(context, text, TEXT_GROUP_TITLE, 500, accent(context));",
+        "return headingLabel(context, text, TEXT_GROUP_TITLE, 500, accent(context));",
         "TextView button = styledLabel(context, label, Math.round(sizeSp), weight, ink);",
         "TextView button = styledLabel(context, label, sizeSp, weight, ink);",
     )

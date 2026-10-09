@@ -18,10 +18,9 @@ public final class SheetHeaderView {
         int horizontal = Ui.dp(context, 16);
         ViewPolicy.setPadding(header, horizontal, 0, horizontal, Ui.dp(context, 12));
 
-        TextView heading = Ui.styledLabel(context, title, Ui.TEXT_SHEET_HEADER, 600,
+        TextView heading = Ui.headingLabel(context, title, Ui.TEXT_SHEET_HEADER, 600,
             Ui.subText(context));
         ViewPolicy.setCentered(heading);
-        heading.setAccessibilityHeading(true);
         header.addView(heading);
 
         if (subtitle != null && subtitle.length() > 0) {
