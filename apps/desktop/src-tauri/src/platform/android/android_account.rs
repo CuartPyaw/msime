@@ -9,7 +9,7 @@ use crate::platform::mobile::mobile_account_helpers::{
     account_request_code as shared_account_request_code, account_status as shared_account_status,
     call_session, cleanup_stale_snapshot_previews, clear_snapshot_previews,
     clear_snapshot_previews_after, cloud_dictionary_account_request, prepare_snapshot_directory,
-    read_snapshot_file, remove_snapshot_file, replace_pending_snapshot, snapshot_command_error,
+    publish_snapshot_preview, read_snapshot_file, remove_snapshot_file, snapshot_command_error,
     snapshot_response_without_account, snapshot_text_within_limit, take_pending_snapshot,
     valid_mobile_haptic_strength, validate_pending_snapshot, write_snapshot_file, PendingSnapshot,
     SnapshotMetadata,
@@ -543,35 +543,48 @@ async fn dictionary_snapshot_preview(
     // The token names the staged file and is also returned to the caller, so the worker takes a
     // copy rather than the value the pending entry below is keyed on.
     let file_token = token.clone();
-    let (account_id, path, metadata) = tauri::async_runtime::spawn_blocking(move || {
-        prepare_snapshot_directory(&directory).map_err(|_| AccountError::Unavailable)?;
-        let profile = session.profile()?;
-        let path = directory.join(format!("download-{file_token}.ndjson"));
-        let result = session
-            .dictionary_snapshot_to_file(&path)
-            .and_then(|_| inspect_snapshot(&path));
-        match result {
-            Ok(metadata) => Ok((profile.user.id, path, metadata)),
-            Err(error) => {
-                let _ = remove_snapshot_file(&path);
-                Err(error)
+    let (account_id, generation, path, metadata) =
+        tauri::async_runtime::spawn_blocking(move || {
+            prepare_snapshot_directory(&directory).map_err(|_| AccountError::Unavailable)?;
+            let profile = session.profile()?;
+            let (_, _, generation) =
+                session.credentials_with_generation(None, Some(&profile.user.id))?;
+            let path = directory.join(format!("download-{file_token}.ndjson"));
+            let result = session
+                .dictionary_snapshot_to_file(&path)
+                .and_then(|_| inspect_snapshot(&path));
+            match result {
+                Ok(metadata) => Ok((profile.user.id, generation, path, metadata)),
+                Err(error) => {
+                    let _ = remove_snapshot_file(&path);
+                    Err(error)
+                }
             }
-        }
-    })
-    .await
-    .map_err(|_| snapshot_command_error())?
-    .map_err(account_command_error)?;
-    let old = replace_pending_snapshot(
+        })
+        .await
+        .map_err(|_| snapshot_command_error())?
+        .map_err(account_command_error)?;
+    let old = publish_snapshot_preview(
+        &state.session,
+        generation,
+        &account_id,
         &previews,
         token.clone(),
         PendingSnapshot {
-            account_id,
-            path,
+            account_id: account_id.clone(),
+            path: path.clone(),
             metadata: metadata.clone(),
         },
-    )?;
-    for path in old {
-        let _ = remove_snapshot_file(&path);
+    );
+    let old = match old {
+        Ok(old) => old,
+        Err(error) => {
+            let _ = remove_snapshot_file(&path);
+            return Err(account_command_error(error));
+        }
+    };
+    for preview in old {
+        let _ = remove_snapshot_file(&preview.path);
     }
     Ok(serde_json::json!({
         "previewToken": token,
