@@ -160,6 +160,12 @@ public final class KeyboardOptionsPage extends DetailPage {
             GroupCard.Row[] nineKeySwipeRow = new GroupCard.Row[1];
             nineKeySwipeRow[0] = gestures.nav("九键滑动输入数字", "拼音九键上沿选定方向滑动输入键上的数字，往反方向滑动弹出数字和字母",
                 nineKeySwipeLabel(nineKeySwipe), () -> pickNineKeySwipe(nineKeySwipe, nineKeySwipeRow[0]));
+            // 九键单独的判定距离（#6208）：键高，快速连打时手指往上带一下就会被当成上滑；26 键的「滑动输入符号」阈值不受影响。
+            GroupCard.Row distanceRow = gestures.slider("九键滑动距离", NineKeySwipePolicy.MIN_THRESHOLD_DP,
+                NineKeySwipePolicy.MAX_THRESHOLD_DP, NineKeySwipePolicy.THRESHOLD_STEP_DP,
+                settings.integer(AndroidLocalSettings.NINE_KEY_SWIPE_DISTANCE), value -> value + " dp",
+                value -> saveLocal(AndroidLocalSettings.NINE_KEY_SWIPE_DISTANCE, value));
+            distanceRow.setEnabled(!NineKeySwipePolicy.OFF.equals(nineKeySwipe));
         }
         gestures.toggle("滑行输入", "在 26 键上连续滑过拼音的字母，抬手出词；在键上稍作停留可确认经过的键",
             settings.bool(AndroidLocalSettings.GLIDE_TYPING),
