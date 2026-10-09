@@ -319,6 +319,8 @@ public final class MSIMEInputService extends InputMethodService {
     String oneHandedMode = "off";
     /** 本地设置「横屏分离式键盘」；实际画不画还要看设备形态、方向和布局，见 {@link #splitKeyboardDrawn}。 */
     boolean splitKeyboardEnabled;
+    /** 本地设置「数字行」；实际画不画还要看键面和布局，见 {@link #numberRowDrawn}。 */
+    boolean numberRowEnabled;
     boolean incognitoEnabled;
     boolean panelPreferenceSaving;
     Button microsoftFinalKey;
@@ -1795,6 +1797,7 @@ public final class MSIMEInputService extends InputMethodService {
         }
         oneHandedMode = localSettings.choice(AndroidLocalSettings.ONE_HANDED);
         splitKeyboardEnabled = localSettings.bool(AndroidLocalSettings.SPLIT_KEYBOARD);
+        numberRowEnabled = localSettings.bool(AndroidLocalSettings.NUMBER_ROW);
         incognitoEnabled = localSettings.bool(AndroidLocalSettings.INCOGNITO);
     }
 
@@ -3059,9 +3062,8 @@ public final class MSIMEInputService extends InputMethodService {
         boolean punctuationKey = SmartPunctuationContext.isAsciiPunctuation(output) && !microsoftFinal;
         boolean handled = punctuationKey ? punctuation(output) : character(output);
         if (!handled) {
-            // 引擎不收的标点是一次自动上屏，先把组合按首选结束掉。The preedit is a real composing
-            // region, so committing into it would replace the pinyin instead of following it.
-            if (DeclinedKeyPolicy.finishesComposition(punctuationKey, hasEngineComposition())) {
+            // 引擎不收的标点和数字（数字行的 0、没有候选时的 1–9）是一次自动上屏，先把组合按首选结束掉。The preedit is a real composing region, so committing into it would replace the pinyin instead of following it.
+            if (DeclinedKeyPolicy.finishesComposition(punctuationKey, output, hasEngineComposition())) {
                 command(FINISH_COMPOSITION_COMMAND);
             }
             commitText(fullWidthOutput(String.valueOf(output)));
@@ -3390,6 +3392,12 @@ public final class MSIMEInputService extends InputMethodService {
         Configuration configuration = getResources().getConfiguration();
         return SplitKeyboardPolicy.drawn(splitKeyboardEnabled, configuration.smallestScreenWidthDp,
             configuration.orientation == Configuration.ORIENTATION_LANDSCAPE, displayedTouchLayout(view));
+    }
+
+    /** 现在字母上方要不要画数字行（#6022）：开关打开、在字母层、画的是 26 键一族或韩文键盘、窗口够高（{@link KeyboardLayout#drawsNumberRow}）。 */
+    boolean numberRowDrawn() {
+        return KeyboardLayout.drawsNumberRow(numberRowEnabled, keyboardLayer, displayedTouchLayout(view),
+            getResources().getConfiguration().screenHeightDp);
     }
 
     int displayedTouchLayout(JSONObject value) {
@@ -7371,8 +7379,10 @@ public final class MSIMEInputService extends InputMethodService {
         // 旋转、设置变化或布局切换让分离式键盘该画与否变了，而键行还是按旧状态建的：先按新状态重建，下面的底行排布也会跟着换。
         // 设置页改了九键左侧符号栏的符号：同样按新的符号表重建。
         // 中文标点开关在 123 / #+= 层上切换了（工具面板、设置页、Ctrl + .）：这一层的标点按新状态重画。
+        // 设置页开关了「数字行」：按新状态重建。
         if (imeLetterRows.splitStale() || imeLayoutRows.sidebarStale()
-                || imeLetterRows.layerPunctuationStale()) imeLetterRows.rebuildKeyRows();
+                || imeLetterRows.layerPunctuationStale() || imeLetterRows.numberRowStale())
+            imeLetterRows.rebuildKeyRows();
         updateSymbolKeyFaces();
         updateShuangpinKeyHints();
         updateQuickPunctuation();

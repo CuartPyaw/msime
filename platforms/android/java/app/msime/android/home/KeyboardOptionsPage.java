@@ -125,7 +125,10 @@ public final class KeyboardOptionsPage extends DetailPage {
         layout.slider("行间距", KeyboardGeometry.MIN_ROW_SPACING_TENTHS, KeyboardGeometry.MAX_ROW_SPACING_TENTHS, 1,
             KeyboardGeometry.rowSpacing(KeyboardGeometry.strictInt(preferences, "touch_row_spacing_tenths", -1)),
             KeyboardGeometry::display, value -> savePreference("touch_row_spacing_tenths", value));
-        layout.toggle("横屏分离式键盘", "仅在平板横屏时生效：26 键和韩文键盘分成左右两半，方便双手握持时用拇指输入",
+        layout.toggle("数字行", "26 键和韩文键盘的字母上方多一行 1–0，键盘整体高出一行；手机横屏时放不下，不显示",
+            settings.bool(AndroidLocalSettings.NUMBER_ROW),
+            checked -> saveLocal(AndroidLocalSettings.NUMBER_ROW, checked));
+        layout.toggle("横屏分离式键盘", "仅在平板横屏时生效：26 键和韩文键盘分成左右两半，方便双手握持时用拇指输入；右半边也有 G 和 V",
             settings.bool(AndroidLocalSettings.SPLIT_KEYBOARD),
             checked -> saveLocal(AndroidLocalSettings.SPLIT_KEYBOARD, checked));
         layout.toggle("浮动键盘", "键盘缩小成一块面板悬在应用上面，按住顶部横条拖动位置；也可以在功能面板或工具栏按钮里切换",
