@@ -71,9 +71,8 @@ public final class SettingsSheet {
 
     /** 一行状态文字，保存成功或失败后由面板改写。 */
     public TextView addStatus() {
-        TextView status = Ui.styledLabel(context, "", 12, 400, Ui.subText(context));
+        TextView status = Ui.liveStatus(context, 12);
         ViewPolicy.setCenteredVertically(status);
-        ViewPolicy.setPoliteLiveRegion(status);
         LinearLayout.LayoutParams params = Ui.matchWidthHeight(context, 20);
         params.topMargin = Ui.dp(context, 10);
         content.addView(status, params);
