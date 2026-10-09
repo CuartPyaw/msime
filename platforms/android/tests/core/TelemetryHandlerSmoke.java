@@ -1,5 +1,6 @@
 package app.msime.android.core;
 
+import app.msime.android.JsonPolicy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -11,8 +12,8 @@ public final class TelemetryHandlerSmoke {
     }
 
     public static void main(String[] args) throws Exception {
-        check(!Telemetry.booleanValue("true", false), "string consent must not enable telemetry");
-        check(Telemetry.booleanValue(Boolean.TRUE, false), "typed consent is accepted");
+        check(!JsonPolicy.strictBoolean("true", false), "string consent must not enable telemetry");
+        check(JsonPolicy.strictBoolean(Boolean.TRUE, false), "typed consent is accepted");
         Thread.UncaughtExceptionHandler previous = Thread.getDefaultUncaughtExceptionHandler();
         try {
             check(Telemetry.installCrashHandler(null), "first installation must succeed");
