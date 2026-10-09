@@ -436,6 +436,7 @@ import { PluginsSettingsPage } from "./settings/pages/plugins-page";
 import type { PluginClient } from "./settings/plugins-section";
 import type { PluginPreferences } from "./settings/plugin-preferences";
 import { AboutSettingsPage } from "./settings/pages/about-page";
+import { UsageReportingSettingsPage } from "./settings/pages/usage-reporting-page";
 import type {
   CustomHelpcodeSchema,
   HelpcodePackOption,
@@ -847,7 +848,8 @@ export {
 export {
   TelemetryRow,
   TelemetrySection,
-  usageReportingDescription,
+  UsageReportingDetails,
+  usageReportingEndpoint,
   usageReportingSummary,
   type TelemetrySectionProps,
 } from "./settings/telemetry-section";
@@ -3773,6 +3775,7 @@ export function SettingsPage(props: SettingsPageProps) {
                       onOpenSystemKeyboardSettings={externalActions.onOpenSystemKeyboardSettings}
                     />
                     <AboutSettingsPage />
+                    <UsageReportingSettingsPage />
                   </SettingsFormContext.Provider>
                   <SettingsFormFooter
                     draft={draft}
