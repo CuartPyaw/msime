@@ -2926,7 +2926,7 @@ public final class MSIMEInputService extends InputMethodService {
         int extraRows = BoundsPolicy.nonNegative(reserved - 1);
         int line = ImeToolbar.CANDIDATE_LINE_DP + extraRows * ImeToolbar.EXTRA_GLOSS_ROW_DP;
         ViewPolicy.setFixedHeight(candidateLine, pixels(line));
-        // 读音行至少是设计的 14 dp，读音字号放不下时按读音文字的实际高度加高，见 ReadingRowPolicy。
+        // 读音行至少是设计的 14 dp，读音字号放不下时按读音文字的实际高度加上和候选行之间的间距加高，见 ReadingRowPolicy。
         int readingRow = readingRowHeight();
         if (candidateHeader != null) ViewPolicy.setFixedHeight(candidateHeader, readingRow);
         // 空闲时的工具栏和组词时的读音行 + 候选行占同一个位置，两者同高，打字时键盘才不会变高。空闲时读音行若在显示常驻的模式标签（直接输入、准备中），它已经占了读音行那一截，工具栏只取候选行的高度，总高不变。
@@ -2943,8 +2943,11 @@ public final class MSIMEInputService extends InputMethodService {
         int design = pixels(ImeToolbar.READING_ROW_DP);
         if (preedit == null) return design;
         Paint.FontMetricsInt metrics = preedit.getPaint().getFontMetricsInt();
+        // 读音行自己的上下内边距（下边就是和候选行之间的 READING_GAP_DP）也算进去，否则字号大时间距被读音挤掉。
+        int headerPadding = candidateHeader == null ? 0
+            : candidateHeader.getPaddingTop() + candidateHeader.getPaddingBottom();
         return ReadingRowPolicy.heightPx(design, metrics.ascent, metrics.descent,
-            preedit.getPaddingTop() + preedit.getPaddingBottom());
+            preedit.getPaddingTop() + preedit.getPaddingBottom() + headerPadding);
     }
 
     void fail() { stop(false); message = "输入连接失败：仅直接输入"; render(); }
@@ -7419,7 +7422,7 @@ public final class MSIMEInputService extends InputMethodService {
             && !hasEnglishSuggestions
             && !hasHandwritingResults);
         if (preedit != null) {
-            KeyboardGeometry.setKeyTextSize(preedit, candidatePreeditFontSize);
+            // 读音的字号由 ImeStyler.applySkin 在 render 末尾统一设置，这里不再另设一份。
             String editingText = view == null ? "" : InputViewValuePolicy.editingText(view);
             boolean offersLocalModes = idle && supportsLocalTools();
             String localModeKey = view == null ? "none" : InputViewValuePolicy.textOr(view, "local_mode", "none");
