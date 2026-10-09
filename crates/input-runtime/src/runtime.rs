@@ -85,13 +85,9 @@ pub struct Runtime<E: InputEngine = Session> {
     pub(crate) snapshot_valid: bool,
     pub(crate) character_width: CharacterWidth,
     pub(crate) touch_keyboard_layout: TouchKeyboardLayout,
-    /// Whether a complete Wubi code the whole candidate list answers with one word commits on the
-    /// fourth key.
+    /// 整个候选列表只给出一个词的完整五笔码，是否在第四键提交。
     ///
-    /// The Engine decides *what* counts as such a code ([`EngineSnapshot::wubi_unique_four_code`]);
-    /// committing it is the host's business, because the commit has to cross the platform's own
-    /// composition boundary. Off only when the user asks for it - the word then stays in the
-    /// candidate list like any other, and Space or a digit picks it.
+    /// *什么*算这种码由 Engine 判定（[`EngineSnapshot::wubi_unique_four_code`]）；提交它是宿主的事，因为提交要跨过平台自己的组字边界。只有用户要求时才关：关了以后词和其他候选一样留在候选列表里，由空格或数字键选走。
     pub(crate) wubi_auto_commit_unique: bool,
     /// Whether the host draws a half-composed phrase itself instead of having it committed.
     ///
@@ -474,12 +470,9 @@ impl<E: InputEngine> Runtime<E> {
         self.refresh()
     }
 
-    /// Whether a complete Wubi code the whole list answers with one word commits on the fourth key.
+    /// 整个候选列表只回一个词的完整五笔码，是否在第四键提交。
     ///
-    /// Host state, not Engine state: it decides whether this runtime performs the commit, so
-    /// changing it mid-composition is safe and needs no Engine rebuild. It takes effect on the next
-    /// keystroke, so a four-letter code already in the composition is not committed by the switch
-    /// turning itself off.
+    /// 这是宿主状态而不是 Engine 状态：它决定本 runtime 要不要执行提交，所以组字中途改也安全，不需要重建 Engine。下一键生效，因此已经打进组字的四码不会因为把开关关掉而自己上屏。
     pub fn set_wubi_auto_commit_unique(&mut self, enabled: bool) {
         self.wubi_auto_commit_unique = enabled;
     }
@@ -2023,8 +2016,7 @@ impl<E: InputEngine> Runtime<E> {
         Ok(transition)
     }
 
-    /// Whether this keystroke ends with the unique Wubi candidate committed. Reads the cached
-    /// snapshot, so the two call sites around the refresh deliberately see different generations.
+    /// 本次按键是否以唯一五笔候选被提交收尾。读缓存快照，所以 refresh 前后的两处调用会故意看到不同代。
     fn wubi_should_auto_commit(&self, character_action: bool) -> bool {
         self.wubi_auto_commit_unique
             && character_action

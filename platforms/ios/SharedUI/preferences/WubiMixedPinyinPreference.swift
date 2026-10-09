@@ -1,11 +1,8 @@
 import Foundation
 
-// Answers a wubi code the table cannot spell with quanpin candidates for the same letters. A code
-// the table does answer keeps its own candidates, so wubi as typed is unchanged.
+// 码表拼不出来的五笔码，用同字母的全拼候选来回答。码表能回答的码保留自己的候选，所以照打的五笔不受影响。
 //
-// The choice lives in the shared preference document `wubi_mixed_pinyin`, which the settings page
-// writes and the engine reads through host-api; `Preferences::for_edition` seeds a fresh wubi
-// edition with it on, so no App Group mirror is needed.
+// 选择放在共享偏好文档 `wubi_mixed_pinyin` 里，设置页写、引擎经 host-api 读；`Preferences::for_edition` 会给新建的五笔版把它打开，所以不需要 App Group 镜像。
 @MainActor
 enum WubiMixedPinyinPreference {
   static let documentKey = "wubi_mixed_pinyin"

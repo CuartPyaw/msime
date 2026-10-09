@@ -1,10 +1,8 @@
 import Foundation
 
-/// Controls the remaining-code hint beside Wubi candidates.
+/// 控制五笔候选旁的剩余编码提示。
 ///
-/// The choice lives in the shared preference document (`wubi_code_hint`), which the settings page
-/// writes and the keyboard reads through the session, so nothing is kept in the App Group. A
-/// bounded pure helper keeps fallback or unrelated candidate codes from suggesting invalid keys.
+/// 选择放在共享偏好文档（`wubi_code_hint`）里，设置页写、键盘经会话读，所以 App Group 里不留任何东西。有界的纯函数保证回退或其他无关候选的编码不会提示出无效按键。
 @MainActor
 enum WubiCodeHintPreference {
   static let documentKey = "wubi_code_hint"

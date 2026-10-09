@@ -8,7 +8,7 @@ export interface SettingsDirtyOptions {
   savedMacosShuangpinKeymap?: boolean;
 }
 
-/** Reports whether shared settings or a macOS native preference changed. */
+/** 判断共享设置或某项 macOS 原生偏好是否发生了变化。 */
 export function settingsDirty({
   draft,
   snapshot,

@@ -392,9 +392,8 @@ final class MetasequoiaInputSessionBridge: @unchecked Sendable {
 
   var fuzzyPinyinRulesApplied: UInt32? { appliedFuzzyPinyinRules }
 
-  /// The latest canonical PreferencesStore document, exposed as a read-only value for the
-  /// keyboard's own reads (the Wubi candidate hint) and native settings. Callers must remain on
-  /// the session's owning thread when reading it.
+  /// 最新的规范 PreferencesStore 文档，只读地暴露给键盘自己的读取（五笔剩余编码提示）和原生设置。
+  /// 读取时调用方必须留在会话所属的线程上。
   var sharedPreferences: [String: Any]? {
     options["preferences"] as? [String: Any]
   }

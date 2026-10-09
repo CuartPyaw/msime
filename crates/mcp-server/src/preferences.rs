@@ -247,7 +247,7 @@ pub struct PreferencesView {
     pub wubi_mixed_pinyin: bool,
     /// In Wubi, show the rest of each candidate's code after the typed keys.
     pub wubi_code_hint: bool,
-    /// In Wubi, commit the only candidate of a complete four-letter code on the fourth key.
+    /// 五笔里，完整四码且只有一个候选时在第四键提交。
     pub wubi_auto_commit_unique: bool,
     /// Whether the input method writes its diagnostic log: focus changes, slow requests, candidate window and dictionary events and failures, never what is typed.
     pub diagnostic_log_server: bool,
