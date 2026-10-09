@@ -36,4 +36,10 @@ Status: implemented
 
 ### Windows 交叉构建
 
-首次真实 `cargo build --locked -p msime-host-api --target i686-pc-windows-gnu` 在原始容器布局中下载 273 个 crates、更新两个 Git 依赖。新的断网容器未设置持久化 Cargo home 时退出 101，明确报错无法检出固定的 chinese-ime-lm Git 依赖。在线构建、持久化缓存填充及断网复用的最终结果待运行完成后记录。
+在原始容器布局中实际执行 `cargo build --locked -p msime-host-api --target i686-pc-windows-gnu`，下载 273 个 crates、更新两个 Git 依赖，首次冷编译 `14m 59s`，退出 0。随后一个全新断网容器先确认 DLL 已存在，再执行相同 Cargo 构建加 `--offline`，仍因无法检出固定的 `chinese-ime-lm` Git 依赖而退出 101。
+
+按修改后容器脚本的仓库/工具挂载与 `CARGO_HOME` 填充缓存，真实 x86 宿主库构建退出 0，objdump 确认为 `pei-i386`。首次启用新缓存仍下载 273 个 crates、更新两个 Git 依赖，源码绝对路径改变后发生重新编译，本次冷编译耗时 `15m 57s`；不把这次冷编译与后续暖构建的差异当作单纯下载优化的百分比。随后另一个 `--network none` 的全新容器在同一持久化 Cargo home 中实际执行该 Cargo 构建加 `--offline`，`3.83s` 成功，未下载 crates 或更新 Git 依赖，DLL 仍是 `pei-i386`。
+
+设置新 Cargo home 后，Cargo `1.97.1`、Rustfmt `1.9.0-stable`、Clippy `0.1.97` 均正常；断网调用两个 Windows GNU 标准库安装命令，都报告已安装。缓存占用约 415 MiB，位于既有 target 中，随任务 worktree 清理。上述构建直接执行 `build-cross.sh` 的真实 Cargo 阶段，没有运行整个 vcpkg/CMake 产品流水线，未构建 C++ TSF DLL、Server 或全部原生测试，也未运行 DLL、Wine 或系统输入法验收。
+
+本轮 `bash scripts/verify-local.sh --quick` 退出 0：Windows 范围的 102 项主机测试、Rust workspace 和共享 Apple bridge 编译通过；2 项按主机差异排除、59 项需要 Windows 构建、1 项不是测试。Windows 原生/pipe-only 因本机缺少 MinGW 或工程配置跳过，x86 语法检查缺少 x64 旗标，桌面 workspace 包缺少 macOS 资源；Android、Wasm、HarmonyOS、Linux 与 macOS 原生阶段按 scope 跳过。本轮只修改 Windows 构建容器配置与文档，Linux 数据是上个切片的验证。Shell 语法、笔记与 diff 校验通过。
