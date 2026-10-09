@@ -32,6 +32,10 @@ impl PrivateDirectory {
             directory: crate::storage::clone_private_directory(&self.directory)?,
         })
     }
+
+    pub fn metadata(&self) -> io::Result<std::fs::Metadata> {
+        crate::storage::private_directory_metadata(&self.directory)
+    }
 }
 
 pub fn open_private_directory_at(
