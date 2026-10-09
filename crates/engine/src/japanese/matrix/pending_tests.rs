@@ -198,9 +198,12 @@ fn matrix_pending_key_output_and_allocation_match_current_baseline() {
                     limit,
                 );
                 assert_eq!(
-                    new_allocations + saved_views + saved_initial_views,
+                    new_allocations
+                        + saved_views
+                        + saved_initial_views
+                        + super::rolling_row_tests::saved_row_buffers(&conversion, limit),
                     exact_allocations,
-                    "继续补全与空读音前缀视图向量分配差值：{pending}"
+                    "继续补全、空读音前缀视图与滚动行容器分配差值：{pending}"
                 );
                 assert!(exact_allocations <= buffered_allocations);
                 assert!(new_allocations <= buffered_allocations);

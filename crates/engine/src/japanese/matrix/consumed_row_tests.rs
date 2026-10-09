@@ -201,7 +201,12 @@ fn consumed_rows_release_storage_and_preserve_complete_queries() {
                         &conversion,
                         limit,
                     );
-                    assert_eq!(new.allocations + saved, old.allocations);
+                    assert_eq!(
+                        new.allocations
+                            + saved
+                            + super::rolling_row_tests::saved_row_buffers(&conversion, limit),
+                        old.allocations
+                    );
                     assert_eq!(new.remaining_bytes, old.remaining_bytes);
                     assert!(new.peak_bytes <= old.peak_bytes);
                     if reading.chars().count() >= 32 && limit > 0 {
@@ -240,20 +245,23 @@ fn unknown_unicode_peak_is_linear_after_consumed_rows_are_released() {
         );
         assert_measurement_scope(old);
         assert_measurement_scope(new);
-        assert_eq!(new.allocations, old.allocations);
+        assert_eq!(
+            new.allocations + super::rolling_row_tests::saved_row_buffers(&conversion, 16),
+            old.allocations
+        );
         assert_eq!(new.remaining_bytes, old.remaining_bytes);
         eprintln!(
             "未知Unicode {length}：峰值请求字节 {}→{}，分配 {}→{}",
             old.peak_bytes, new.peak_bytes, old.allocations, new.allocations
         );
         assert!(new.peak_bytes < old.peak_bytes);
-        // 固定八项行容器、边界与两份未知文本，留出跨架构布局余量。
+        // 最多十七行、边界与两份未知文本，留出跨架构布局余量。
         assert!(new.peak_bytes <= length * 400 + 2048);
     }
 }
 
 #[test]
-#[ignore = "本地 release 与冻结历史查询对照，空读音另含前缀流式；不设置 CI 时间阈值"]
+#[ignore = "本地 release 组合查询含行释放、滚动复用与空读音前缀流式；不设置 CI 时间阈值"]
 fn benchmark_consumed_row_release() {
     use std::hint::black_box;
     use std::time::Instant;
@@ -291,7 +299,12 @@ fn benchmark_consumed_row_release() {
                 &conversion,
                 limit,
             );
-            assert_eq!(new.allocations + saved, old.allocations);
+            assert_eq!(
+                new.allocations
+                    + saved
+                    + super::rolling_row_tests::saved_row_buffers(&conversion, limit),
+                old.allocations
+            );
             assert_measurement_scope(old);
             assert_measurement_scope(new);
             let mut timings = [Vec::new(), Vec::new()];
@@ -319,7 +332,7 @@ fn benchmark_consumed_row_release() {
             for samples in &mut timings {
                 samples.sort_unstable();
             }
-            eprintln!("行释放查询（空读音含前缀流式）：密集={dense}，读音字符={}，待定={}，限额={limit}，分配={}→{}，峰值字节={}→{}，中位批次={:?}→{:?}/{iterations}次", conversion.hiragana.chars().count(), conversion.pending.len(), old.allocations, new.allocations, old.peak_bytes, new.peak_bytes, timings[0][5], timings[1][5]);
+            eprintln!("组合查询（行释放、滚动复用、空读音前缀流式）：密集={dense}，读音字符={}，待定={}，限额={limit}，分配={}→{}，峰值字节={}→{}，中位批次={:?}→{:?}/{iterations}次", conversion.hiragana.chars().count(), conversion.pending.len(), old.allocations, new.allocations, old.peak_bytes, new.peak_bytes, timings[0][5], timings[1][5]);
         }
     }
 }
