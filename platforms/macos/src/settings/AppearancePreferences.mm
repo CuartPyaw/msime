@@ -317,6 +317,7 @@ static NSDictionary<NSString *, NSString *> *SharedOverrideProperties() {
         ShuangpinPreeditKey : @"sharedShuangpinPreeditUsesRaw",
         WubiProfileKey : @"sharedWubiProfile",
         WubiMixedPinyinKey : @"sharedWubiMixedPinyin",
+        WubiKey : @"sharedWubiAutoCommitUnique",
         LocalModesKey : @"sharedLocalModes",
         FontKey : @"sharedFontSize",
         FontFamilyKey : @"sharedFontFamily",
@@ -1009,6 +1010,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     NSString *_sharedWubiProfile;
     NSTextField *_wubiProfileLabel;
     NSNumber *_sharedWubiMixedPinyin;
+    NSNumber *_sharedWubiAutoCommitUnique;
     NSString *_sharedInlinePreeditStyle;
     NSMutableDictionary *_sharedLocalModes;
     NSMutableArray<NSButton *> *_localModeButtons;
@@ -1223,6 +1225,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     merged[@"shuangpin_preedit_uses_raw"] = @(self.shuangpinPreeditUsesRaw);
     merged[@"wubi_profile"] = self.wubiProfile;
     merged[@"wubi_mixed_pinyin"] = @(self.wubiMixedPinyinEnabled);
+    merged[@"wubi_auto_commit_unique"] = @(self.wubiAutoCommitUnique);
     NSMutableDictionary *qh = [merged[@"quanpin_helpcode"] mutableCopy] ?: [NSMutableDictionary dictionary];
     qh[@"enabled"] = @(self.quanpinHelpcodeEnabled);
     merged[@"quanpin_helpcode"] = qh;
@@ -1797,6 +1800,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     id profile = preferences[@"shuangpin_profile"];
     id raw = preferences[@"shuangpin_preedit_uses_raw"];
     id wubiMixedPinyin = preferences[@"wubi_mixed_pinyin"];
+    id wubiAutoCommitUnique = preferences[@"wubi_auto_commit_unique"];
     id wubiProfile = preferences[@"wubi_profile"];
     if (MSIMEEditionOffersScheme(scheme)) _sharedInputScheme = [scheme copy];
     id lastChinese = preferences[@"last_chinese_scheme"];
@@ -1804,6 +1808,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     if ([@[@"xiaohe", @"ziranma", @"shoudao", @"microsoft"] containsObject:profile]) _sharedShuangpinProfile = [profile copy];
     if (LocalModeBoolean(raw)) _sharedShuangpinPreeditUsesRaw = raw;
     if (LocalModeBoolean(wubiMixedPinyin)) _sharedWubiMixedPinyin = wubiMixedPinyin;
+    if (LocalModeBoolean(wubiAutoCommitUnique)) _sharedWubiAutoCommitUnique = wubiAutoCommitUnique;
     if ([@[@"wubi86", @"wubi98"] containsObject:wubiProfile]) _sharedWubiProfile = [wubiProfile copy];
     id inlinePreedit = preferences[@"tsf_preedit_style"];
     if ([@[@"raw", @"pinyin", @"empty"] containsObject:inlinePreedit]) _sharedInlinePreeditStyle = [inlinePreedit copy];
@@ -1923,7 +1928,11 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
 - (BOOL)smartPunctuationSpaceConvert { return _sharedSmartPunctuationSpaceConvert ? _sharedSmartPunctuationSpaceConvert.boolValue : [_defaults boolForKey:SmartPunctuationSpaceConvertKey]; }
 - (void)setSmartPunctuationSpaceConvert:(BOOL)value { _sharedSmartPunctuationSpaceConvert = nil; [_defaults setBool:value forKey:SmartPunctuationSpaceConvertKey]; [self preferencesChanged]; }
 - (BOOL)shuangpinKeymap { return [_defaults boolForKey:KeymapKey]; }
-- (BOOL)wubiAutoCommitUnique { return [_defaults boolForKey:WubiKey]; }
+// 从没设置过时是开：这个开关接进共享偏好之前，第四键上屏是唯一可能的实际行为，缺省必须是 YES 才不会在升级后改掉手感。
+- (BOOL)wubiAutoCommitUnique {
+    if (_sharedWubiAutoCommitUnique) return _sharedWubiAutoCommitUnique.boolValue;
+    return [_defaults objectForKey:WubiKey] == nil ? YES : [_defaults boolForKey:WubiKey];
+}
 - (BOOL)floatingToolbarEnabled { return _sharedToolbarEnabled ? _sharedToolbarEnabled.boolValue : ([_defaults objectForKey:FloatingToolbarKey] == nil ? YES : [_defaults boolForKey:FloatingToolbarKey]); }
 - (void)setFloatingToolbarEnabled:(BOOL)value { _sharedToolbarEnabled = nil; [_defaults setBool:value forKey:FloatingToolbarKey]; [self preferencesChanged]; }
 - (void)applySharedToolbarVisibility:(BOOL)enabled { _sharedToolbarEnabled = @(enabled); [self refreshControls]; }
@@ -2008,7 +2017,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     if (ValidToolbarFontSize(font)) _sharedToolbarOptions[@"font_size"] = font;
     [self refreshControls];
 }
-- (void)setWubiAutoCommitUnique:(BOOL)value { [_defaults setBool:value forKey:WubiKey]; [self preferencesChanged]; }
+- (void)setWubiAutoCommitUnique:(BOOL)value { _sharedWubiAutoCommitUnique = nil; [_defaults setBool:value forKey:WubiKey]; [self preferencesChanged]; }
 - (void)setShuangpinKeymap:(BOOL)value {
     [_defaults setBool:value forKey:KeymapKey];
     [self preferencesChanged];

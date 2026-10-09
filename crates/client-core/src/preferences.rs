@@ -802,6 +802,13 @@ pub struct Preferences {
     /// Show the Wubi code suffix that remains after the typed prefix.
     #[serde(default = "enabled_by_default")]
     pub wubi_code_hint: bool,
+    /// Commit the only candidate of a complete four-letter Wubi code on the fourth key.
+    ///
+    /// The Engine always answers *which* codes are like this; whether the word leaves the input
+    /// method right there is the user's decision, and off means it stays in the candidate list for
+    /// Space or a digit to pick.
+    #[serde(default = "enabled_by_default")]
+    pub wubi_auto_commit_unique: bool,
     /// 五笔拼音混输：五笔候选之后接着列出同一串字母的全拼候选，五笔编码打不出时直接出拼音候选。
     #[serde(default)]
     pub wubi_mixed_pinyin: bool,
@@ -1910,6 +1917,7 @@ impl Default for Preferences {
             show_app_logo: false,
             scheme: InputScheme::default(),
             wubi_code_hint: true,
+            wubi_auto_commit_unique: true,
             wubi_mixed_pinyin: false,
             wubi_profile: WubiProfile::default(),
             touch_keyboard_layout: TouchKeyboardLayout::default(),
