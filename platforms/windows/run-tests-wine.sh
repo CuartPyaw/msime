@@ -132,6 +132,13 @@ if [ -d "$installer" ]; then
   installer_argument='Z:\\installer\\msime_setup.iss'
 fi
 
+# CTest passes these checked-in dictionaries to the Stroke and Zhuyin suites.
+# Their executables assert that argv[1] exists, so the Wine runner must supply
+# the same inputs rather than counting an argument error as a product failure.
+fixtures="$root/platforms/windows/tests/input/fixtures"
+stroke_argument='Z:\\fixtures\\msime-stroke.db'
+zhuyin_argument='Z:\\fixtures\\msime-zhuyin.db'
+
 # The Rust host carries the Windows-only code the C++ suite never touches:
 # clipboard reads and writes, synthetic key strokes, the extended-key set. Its
 # tests build for the same target and run under the same Wine, but this runner
@@ -223,8 +230,9 @@ fi
 
 docker run --rm --platform linux/amd64 \
   -v "$build":/bin-win:ro -v "$runtime":/rt:ro -v "$rust_stage":/bin-rust:ro ${resources_mount[@]+"${resources_mount[@]}"} \
-  ${installer_mount[@]+"${installer_mount[@]}"} \
+  ${installer_mount[@]+"${installer_mount[@]}"} -v "$fixtures":/fixtures:ro \
   -e "MSIME_RESOURCES=$resources_argument" -e "MSIME_INSTALLER=$installer_argument" \
+  -e "MSIME_STROKE_FIXTURE=$stroke_argument" -e "MSIME_ZHUYIN_FIXTURE=$zhuyin_argument" \
   -e LANG=C.utf8 -e LC_ALL=C.utf8 "$image" sh -c '
 mkdir -p /run/t && cp /rt/*.dll /run/t/ && cp /bin-win/*.dll /run/t/ 2>/dev/null
 cd /run/t
@@ -238,6 +246,8 @@ for exe in /bin-win/windows-*.exe /bin-win/msime-tsf-*.exe /bin-win/msimeui-test
   argument=""
   [ "$name" = windows-session-smoke ] && argument="$MSIME_RESOURCES"
   [ "$name" = windows-installer-launch ] && argument="$MSIME_INSTALLER"
+  [ "$name" = windows-stroke-keys ] && argument="$MSIME_STROKE_FIXTURE"
+  [ "$name" = windows-zhuyin-keys ] && argument="$MSIME_ZHUYIN_FIXTURE"
   if timeout 120 xvfb-run -a wine "/run/t/$name.exe" $argument >/dev/null 2>&1; then
     echo "PASS $name"
   else

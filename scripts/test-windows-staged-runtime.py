@@ -232,6 +232,27 @@ if call[:2] == ["info", "--format"]:
         self.assertIn("FAIL rust-test-build", result.stdout)
         self.assertIn("PASS windows-synthetic-runtime", result.stdout)
 
+    def test_wine_supplies_dictionary_fixtures_to_stroke_and_zhuyin_suites(self):
+        build = self.root / "target/windows-full/x64"
+        build.mkdir(parents=True)
+        for name in self.names("x64"):
+            (build / name).write_text(name)
+        for name in ("windows-stroke-keys.exe", "windows-zhuyin-keys.exe"):
+            (build / name).write_text("synthetic test executable")
+        fixtures = self.windows / "tests/input/fixtures"
+        fixtures.mkdir(parents=True)
+        for name in ("msime-stroke.db", "msime-zhuyin.db"):
+            (fixtures / name).write_text("synthetic dictionary")
+        result = subprocess.run(["bash", str(self.windows / "run-tests-wine.sh"), "x64"],
+                                env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = [json.loads(line) for line in self.log.read_text().splitlines()]
+        wine = next(call["args"] for call in calls if "runtime" in call)
+        self.assertIn(f"{fixtures}:/fixtures:ro", wine)
+        command = "\n".join(wine)
+        self.assertIn("msime-stroke.db", command)
+        self.assertIn("msime-zhuyin.db", command)
+
 
 if __name__ == "__main__":
     if os.name != "posix" or not shutil.which("bash") or not shutil.which("cmake"):
