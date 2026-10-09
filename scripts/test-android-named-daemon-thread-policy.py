@@ -8,9 +8,17 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 JAVA = ROOT / "platforms/android/java/app/msime/android"
 SITES = {
+    JAVA / "AccountTaskExecutor.java": ("msime-account",),
+    JAVA / "account/SkinJobsApi.java": ("msime-ai-skin",),
+    JAVA / "candidate/OnlineCandidateTransport.java": ("msime-cloud-deadline",),
+    JAVA / "core/ImeDebugOverlay.java": ("msime-input-events",),
+    JAVA / "core/ImeKeyFeedback.java": ("msime-key-sound",),
+    JAVA / "core/Telemetry.java": ("msime-telemetry",),
     JAVA / "home/AboutPage.java": ("msime-home-network",),
     JAVA / "home/HostTask.java": ("msime-settings-host", "msime-settings-network"),
     JAVA / "home/OnboardingChoices.java": ("msime-onboarding-choices",),
+    JAVA / "voice/AiPolishClient.java": ("msime-ai-polish",),
+    JAVA / "voice/LocalAsrRecognizer.java": ("msime-local-asr-release",),
 }
 
 
