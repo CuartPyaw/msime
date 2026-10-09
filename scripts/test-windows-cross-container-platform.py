@@ -84,19 +84,37 @@ elif sys.argv[1] not in ("build", "run"):
     def test_amd64_alias_keeps_existing_cache(self):
         self.assert_platform("linux/amd64", "linux/amd64", "")
 
-    def test_unsupported_daemon_stops_before_preparing_cache(self):
-        for daemon in ("linux/riscv64", "windows/x86_64"):
-            with self.subTest(daemon=daemon):
-                result, calls = self.run_script(daemon)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertFalse(any(call[0] in ("build", "run") for call in calls))
-                self.assertFalse((self.root / "target").exists())
+    def test_other_linux_daemon_keeps_existing_amd64_fallback(self):
+        self.assert_platform("linux/riscv64", "linux/amd64", "")
+
+    def test_non_linux_daemon_stops_before_preparing_cache(self):
+        result, calls = self.run_script("windows/x86_64")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(call[0] in ("build", "run") for call in calls))
+        self.assertFalse((self.root / "target").exists())
 
     def test_unavailable_daemon_keeps_skip_behavior(self):
         result, calls = self.run_script("linux/aarch64", down=True)
         self.assertEqual(result.returncode, 0)
         self.assertIn("skipped:", result.stdout)
         self.assertFalse(any(call[0] in ("build", "run") for call in calls))
+
+
+class CrossImageDownloadTests(unittest.TestCase):
+    def test_failed_rustup_download_cannot_be_cached_as_success(self):
+        dockerfile = (ROOT / "platforms/windows/cross/Dockerfile").read_text()
+        commands = dockerfile.replace("\\\n", " ").splitlines()
+        install = next(line[4:] for line in commands
+                       if line.startswith("RUN ") and "https://sh.rustup.rs" in line)
+        with tempfile.TemporaryDirectory() as directory:
+            curl = Path(directory) / "curl"
+            curl.write_text("#!/bin/sh\nexit 6\n", encoding="utf-8")
+            curl.chmod(0o755)
+            env = dict(os.environ, PATH=f"{directory}:{os.environ['PATH']}")
+            result = subprocess.run(["/bin/sh", "-c", install], env=env,
+                                    capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0,
+                            "Rustup 下载失败必须在安装层报错，不能缓存空安装")
 
 
 if __name__ == "__main__":

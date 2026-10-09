@@ -24,8 +24,8 @@ fi
 # 以 daemon 而非客户端架构选择编译器，避免 ARM 主机上的整套工具链仿真。
 # amd64 保留已有缓存；ARM64 的 vcpkg 可执行文件和宿主依赖单独存放。
 case "$daemon_platform" in
-  linux/x86_64|linux/amd64) platform=linux/amd64; cache_suffix=; image=msime-cross:local ;;
   linux/aarch64|linux/arm64) platform=linux/arm64; cache_suffix=/arm64; image=msime-cross:local-arm64 ;;
+  linux/*) platform=linux/amd64; cache_suffix=; image=msime-cross:local ;;
   *) echo "Unsupported cross-build Docker platform: $daemon_platform" >&2; exit 1 ;;
 esac
 docker build --platform "$platform" -t "$image" "$root/platforms/windows/cross" >/dev/null 2>&1 || {

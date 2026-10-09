@@ -31,7 +31,10 @@ RUN python3 /tmp/msime-add-header-aliases.py \
     && rm /tmp/msime-add-header-aliases.py
 
 # 与仓库声明使用同一固定工具链，避免临时容器另装编译器、组件和目标标准库。
-RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.97.1 --component rustfmt --component clippy
+# 先确认下载成功，避免 curl 失败被管线末端的空 sh 吞掉并缓存空安装层。
+RUN curl -sSf https://sh.rustup.rs -o /tmp/msime-rustup-init.sh \
+    && sh /tmp/msime-rustup-init.sh -y --profile minimal --default-toolchain 1.97.1 --component rustfmt --component clippy \
+    && rm /tmp/msime-rustup-init.sh
 ENV PATH=/root/.cargo/bin:$PATH
 RUN rustup target add i686-pc-windows-gnu x86_64-pc-windows-gnu
 ENV VCPKG_DISABLE_METRICS=1
