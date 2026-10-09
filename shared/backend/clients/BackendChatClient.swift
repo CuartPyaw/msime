@@ -10,14 +10,14 @@ extension BackendAccountClient {
     let data: [Model]
     let default_model: String
   }
-  func chatModels(session: BackendAccountSession, matchingUserID expected: String? = nil) async throws -> ChatModels {
-    let userID: String
-    if let expected { userID = expected }
-    else { userID = try await session.credentials().userID }
-    let catalog = try await session.authenticated(matchingUserID: userID) { token in
+  func chatModels(session: BackendAccountSession, matchingUserID expected: String? = nil,
+                  matchingSessionID expectedSessionID: UUID? = nil) async throws -> ChatModels {
+    let identity = try await session.credentials(matchingUserID: expected, matchingSessionID: expectedSessionID)
+    let catalog = try await session.authenticated(matchingUserID: identity.userID,
+                                                   matchingSessionID: identity.sessionID) { token in
       try await chatModels(token: token)
     }.value
-    _ = try await session.credentials(matchingUserID: userID)
+    try await session.requireSession(matchingUserID: identity.userID, matchingSessionID: identity.sessionID)
     try Task.checkCancellation()
     return catalog
   }
@@ -32,14 +32,14 @@ extension BackendAccountClient {
     return catalog
   }
   func chat(messages: [ChatMessage], model: String, session: BackendAccountSession,
-            matchingUserID expected: String? = nil) async throws -> String {
-    let userID: String
-    if let expected { userID = expected }
-    else { userID = try await session.credentials().userID }
-    let reply = try await session.authenticated(matchingUserID: userID) { token in
+            matchingUserID expected: String? = nil,
+            matchingSessionID expectedSessionID: UUID? = nil) async throws -> String {
+    let identity = try await session.credentials(matchingUserID: expected, matchingSessionID: expectedSessionID)
+    let reply = try await session.authenticated(matchingUserID: identity.userID,
+                                                 matchingSessionID: identity.sessionID) { token in
       try await chat(messages: messages, model: model, token: token)
     }.value
-    _ = try await session.credentials(matchingUserID: userID)
+    try await session.requireSession(matchingUserID: identity.userID, matchingSessionID: identity.sessionID)
     try Task.checkCancellation()
     return reply
   }
@@ -85,11 +85,12 @@ extension BackendAccountClient {
   /// Translate one visible candidate page in order. The backend owns the provider and credentials;
   /// the keyboard only receives bounded display strings and never sends the user's raw keystrokes.
   func translate(texts: [String], target: String, session: BackendAccountSession) async throws -> [String] {
-    let userID = try await session.credentials().userID
-    let result = try await session.authenticated(matchingUserID: userID) { token in
+    let identity = try await session.credentials()
+    let result = try await session.authenticated(matchingUserID: identity.userID,
+                                                 matchingSessionID: identity.sessionID) { token in
       try await translate(texts: texts, target: target, token: token)
     }.value
-    _ = try await session.credentials(matchingUserID: userID)
+    try await session.requireSession(matchingUserID: identity.userID, matchingSessionID: identity.sessionID)
     try Task.checkCancellation()
     return result
   }

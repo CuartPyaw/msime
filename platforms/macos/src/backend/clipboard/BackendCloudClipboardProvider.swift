@@ -23,11 +23,13 @@ final class BackendCloudClipboardProvider: NSObject {
   @objc static func prepare(completion: @escaping (BackendCloudClipboardProvider?) -> Void) {
     Task {
       do {
-        guard let user = try await BackendAccountSession.shared.user() else { completion(nil); return }
+        let identity = try await BackendAccountSession.shared.credentials()
         completion(BackendCloudClipboardProvider(client: BackendAccountClient(), credentials: {
-          try await BackendAccountSession.shared.credentials(matchingUserID: user.id).token
+          try await BackendAccountSession.shared.credentials(matchingUserID: identity.userID,
+                                                              matchingSessionID: identity.sessionID).token
         }, refreshCredentials: { rejected in
-          try await BackendAccountSession.shared.credentials(retrying: rejected, matchingUserID: user.id).token
+          try await BackendAccountSession.shared.credentials(retrying: rejected, matchingUserID: identity.userID,
+                                                              matchingSessionID: identity.sessionID).token
         }))
       } catch { completion(nil) }
     }

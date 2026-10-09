@@ -14,11 +14,13 @@ final class SkinGenerationModel: ObservableObject {
   private var generation = UUID()
   private let api = BackendAccountClient()
   private var accountID: String?
-  private func switchAccount(to userID: String?) {
-    guard accountID != userID else { return }
+  private var accountSessionID: UUID?
+  private func switchAccount(to userID: String?, sessionID: UUID? = nil) {
+    guard accountID != userID || accountSessionID != sessionID else { return }
     let hadAccount = accountID != nil
     cancel()
     accountID = userID
+    accountSessionID = sessionID
     models = []
     selectedModel = ""
     if hadAccount { prompt = "" }
@@ -40,10 +42,13 @@ final class SkinGenerationModel: ObservableObject {
       models = [.init(id: "gpt-5.6-luna")]; selectedModel = "gpt-5.6-luna"; return
     }
     do {
-      let userID = try await BackendAccountSession.shared.user()?.id
-      switchAccount(to: userID)
-      guard let userID else { loginNeeded = true; return }
-      let catalog = try await api.chatModels(session: .shared, matchingUserID: userID)
+      guard let userID = try await BackendAccountSession.shared.user()?.id else {
+        switchAccount(to: nil); loginNeeded = true; return
+      }
+      let identity = try await BackendAccountSession.shared.credentials(matchingUserID: userID)
+      switchAccount(to: identity.userID, sessionID: identity.sessionID)
+      let catalog = try await api.chatModels(session: .shared, matchingUserID: identity.userID,
+                                              matchingSessionID: identity.sessionID)
       try Task.checkCancellation()
       models = catalog.data
       if !models.contains(where: { $0.id == selectedModel }) { selectedModel = catalog.default_model }
@@ -58,6 +63,7 @@ final class SkinGenerationModel: ObservableObject {
     generating = true; message = nil
     let id = UUID(); generation = id
     let model = selectedModel
+    let sessionID = accountSessionID
     request = Task {
       defer { if generation == id { generating = false; request = nil } }
       do {
@@ -68,7 +74,8 @@ final class SkinGenerationModel: ObservableObject {
         } else {
           let messages: [BackendAccountClient.ChatMessage] = [.init(role: "system", content: GeneratedKeyboardSkin.instruction), .init(role: "user", content: description)]
           reply = try await api.chat(messages: messages, model: model,
-                                     session: .shared, matchingUserID: userID)
+                                     session: .shared, matchingUserID: userID,
+                                     matchingSessionID: sessionID)
         }
         try Task.checkCancellation()
         let parsed = try GeneratedKeyboardSkin.parse(reply)

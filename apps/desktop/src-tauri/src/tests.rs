@@ -2201,6 +2201,7 @@ fn desktop_account_storage_round_trips_an_owner_only_session() {
             },
         },
         expires_at_unix_ms: 1_700_000_000_000,
+        session_id: None,
     };
     storage.save(&session).expect("save");
     let path = directory.path().join("account-session.json");

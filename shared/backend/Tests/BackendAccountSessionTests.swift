@@ -64,6 +64,26 @@ private struct FailingRefreshLock: BackendRefreshLock {
   }
 }
 
+private final class ReplacingSessionLock: BackendRefreshLock, @unchecked Sendable {
+  let storage: MemorySessions
+  let replacement: BackendSavedSession
+  private let lock = NSLock()
+  private var replaced = false
+  var sharedAcrossProcesses: Bool { true }
+  init(storage: MemorySessions, replacement: BackendSavedSession) {
+    self.storage = storage; self.replacement = replacement
+  }
+  func run<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T {
+    let shouldReplace = lock.withLock { () -> Bool in
+      if replaced { return false }
+      replaced = true
+      return true
+    }
+    if shouldReplace { try storage.save(replacement) }
+    return try await body()
+  }
+}
+
 private final class AttemptCounter: @unchecked Sendable {
   private let lock = NSLock()
   private var value = 0
@@ -118,6 +138,72 @@ final class BackendAccountSessionTests: XCTestCase {
       XCTFail("old account's completion must not clear the replacement account")
     } catch is CancellationError { }
     XCTAssertEqual(try storage.load()?.tokens.user.id, "replacement-user")
+  }
+
+  func testLogoutDoesNotClearSameUsersNewSessionWhileWaitingForLock() async throws {
+    let old = try BackendSavedSession.forTokens(SharedStoreAPI.tokens("a", "f"))
+    let replacement = try BackendSavedSession.forTokens(SharedStoreAPI.tokens("d", "e"))
+    let storage = MemorySessions(old)
+    let session = BackendAccountSession(api: SharedStoreAPI { _ in SharedStoreAPI.tokens("b", "c") },
+                                        storage: storage,
+                                        refreshLock: ReplacingSessionLock(storage: storage, replacement: replacement))
+
+    do {
+      try await session.logout()
+      XCTFail("the old logout must not clear the same user's new session")
+    } catch is CancellationError { }
+    catch { XCTFail("expected cancellation, got \(error)") }
+    XCTAssertEqual(try storage.load()?.sessionID, replacement.sessionID)
+  }
+
+  func testRefreshDoesNotAdoptSameUsersNewLoginWhileWaitingForLock() async throws {
+    let old = BackendSavedSession(tokens: SharedStoreAPI.tokens("a", "f"), expiresAt: .distantPast)
+    let replacement = try BackendSavedSession.forTokens(SharedStoreAPI.tokens("d", "e"))
+    let storage = MemorySessions(old)
+    let api = SharedStoreAPI { _ in SharedStoreAPI.tokens("b", "c") }
+    let session = BackendAccountSession(api: api, storage: storage,
+                                        refreshLock: ReplacingSessionLock(storage: storage, replacement: replacement))
+
+    do {
+      _ = try await session.accessToken(retrying: old.tokens.access_token)
+      XCTFail("旧登录不得收养同一用户的新会话")
+    } catch is CancellationError { }
+    XCTAssertEqual(api.refreshCount, 0)
+    XCTAssertEqual(try storage.load()?.sessionID, replacement.sessionID)
+  }
+
+  func testBoundForgetDoesNotClearSameUsersNewSession() async throws {
+    let old = try BackendSavedSession.forTokens(SharedStoreAPI.tokens("a", "f"))
+    let replacement = try BackendSavedSession.forTokens(SharedStoreAPI.tokens("d", "e"))
+    let storage = MemorySessions(old)
+    let session = BackendAccountSession(api: SharedStoreAPI { _ in SharedStoreAPI.tokens("b", "c") },
+                                        storage: storage, refreshLock: try sharedLock())
+    let identity = try await session.credentials(matchingUserID: "synthetic-user")
+    try storage.save(replacement)
+
+    do {
+      try await session.forget(matchingUserID: identity.userID, matchingSessionID: identity.sessionID)
+      XCTFail("the old account deletion must not clear the same user's new session")
+    } catch is CancellationError { }
+    XCTAssertEqual(try storage.load()?.sessionID, replacement.sessionID)
+  }
+
+  func testProfileUpdateDoesNotModifySameUsersNewLoginWithReusedToken() async throws {
+    let original = try BackendSavedSession.forTokens(SharedStoreAPI.tokens("a", "f"))
+    let replacement = try BackendSavedSession.forTokens(SharedStoreAPI.tokens("a", "f"))
+    let storage = MemorySessions(original)
+    let session = BackendAccountSession(api: SharedStoreAPI { _ in SharedStoreAPI.tokens("b", "c") },
+                                        storage: storage, refreshLock: try sharedLock())
+    try storage.save(replacement)
+    let renamed = BackendAccountClient.User(id: replacement.tokens.user.id, display_name: "新名称",
+                                             created_at: replacement.tokens.user.created_at)
+
+    do {
+      try await session.updateUser(renamed, matching: original.tokens.access_token,
+                                   matchingSessionID: original.sessionID)
+      XCTFail("旧会话的资料不得写入新登录")
+    } catch is CancellationError { }
+    XCTAssertEqual(try storage.load()?.tokens.user.display_name, replacement.tokens.user.display_name)
   }
 
   func testLogoutDuringRefreshCannotClearReplacementAccount() async throws {
@@ -323,6 +409,44 @@ final class BackendAccountSessionTests: XCTestCase {
     XCTAssertEqual(api.refreshCount, 0)
     XCTAssertEqual(try storage.load()?.tokens.user.id, "other-synthetic-user")
   }
+  func testAuthenticatedRequestNeverRetriesAfterSameUserSignsInAgain() async throws {
+    let old = try BackendSavedSession.forTokens(SharedStoreAPI.tokens("a", "f"))
+    let replacement = try BackendSavedSession.forTokens(SharedStoreAPI.tokens("d", "e"))
+    let storage = MemorySessions(old)
+    let api = SharedStoreAPI { _ in SharedStoreAPI.tokens("b", "c") }
+    let session = BackendAccountSession(api: api, storage: storage, refreshLock: try sharedLock())
+    let attempts = AttemptCounter()
+
+    do {
+      _ = try await session.authenticated(matchingUserID: "synthetic-user") { _ -> String in
+        _ = attempts.increment()
+        try storage.save(replacement)
+        throw BackendAccountClient.Failure(status: 401)
+      }
+      XCTFail("the old request must not retry after the same user signs in again")
+    } catch is CancellationError { }
+    catch { XCTFail("expected cancellation, got \(error)") }
+    XCTAssertEqual(attempts.count, 1)
+    XCTAssertEqual(api.refreshCount, 0)
+    XCTAssertEqual(try storage.load()?.tokens.access_token, replacement.tokens.access_token)
+  }
+
+  func testAuthenticatedRequestDiscardsSuccessAfterSameUserSignsInAgain() async throws {
+    let old = try BackendSavedSession.forTokens(SharedStoreAPI.tokens("a", "f"))
+    let replacement = try BackendSavedSession.forTokens(SharedStoreAPI.tokens("d", "e"))
+    let storage = MemorySessions(old)
+    let api = SharedStoreAPI { _ in SharedStoreAPI.tokens("b", "c") }
+    let session = BackendAccountSession(api: api, storage: storage, refreshLock: try sharedLock())
+
+    do {
+      _ = try await session.authenticated(matchingUserID: "synthetic-user") { token in
+        try storage.save(replacement)
+        return token
+      }
+      XCTFail("the old response must not be returned after the same user signs in again")
+    } catch is CancellationError { }
+    XCTAssertEqual(try storage.load()?.tokens.access_token, replacement.tokens.access_token)
+  }
   func testBoundCredentialsRejectLogoutDuringRefresh() async throws {
     let storage = MemorySessions(.init(tokens: RefreshAPI.tokens(), expiresAt: .distantPast))
     let api = RefreshAPI()
@@ -367,8 +491,10 @@ final class BackendAccountSessionTests: XCTestCase {
     XCTAssertEqual(try storage.load()?.tokens.refresh_token, String(repeating: "c", count: 64))
   }
   func testUnauthorizedRefreshKeepsSessionRotatedMeanwhile() async throws {
-    let storage = MemorySessions(.init(tokens: SharedStoreAPI.tokens("a", "f"), expiresAt: .distantPast))
-    let winner = BackendSavedSession(tokens: SharedStoreAPI.tokens("b", "c"), expiresAt: Date().addingTimeInterval(600))
+    let original = BackendSavedSession(tokens: SharedStoreAPI.tokens("a", "f"), expiresAt: .distantPast)
+    let storage = MemorySessions(original)
+    let winner = BackendSavedSession(tokens: SharedStoreAPI.tokens("b", "c"),
+                                     expiresAt: Date().addingTimeInterval(600), sessionID: original.sessionID)
     let api = SharedStoreAPI { _ in
       // Another process rotates while this refresh is in flight, so ours is rejected.
       try storage.save(winner)
