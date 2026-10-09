@@ -34,6 +34,8 @@ if(BUILD_TESTING)
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_test(NAME linux-fcitx5-contract
            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/core/fcitx5_contract.py")
+  add_test(NAME linux-ibus-component-contract
+           COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/core/ibus_component_contract.py")
 endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

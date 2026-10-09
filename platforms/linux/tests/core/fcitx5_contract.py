@@ -18,6 +18,8 @@ entry = configparser.ConfigParser()
 entry.read(root / "fcitx5/msime-inputmethod.conf")
 assert entry["InputMethod"]["Addon"] == "msime"
 assert entry["InputMethod"]["LangCode"] == "zh_CN"
+# 不写 LayoutHint：Fcitx5 按输入法组的默认布局（或用户给本输入法单独选的布局）翻译按键，Dvorak、Colemak 用户在 fcitx5-configtool 里选好布局即可（#6365）。
+assert "LayoutHint" not in entry["InputMethod"]
 cmake = (root / "CMakeLists.txt").read_text()
 assert "MSIME_ENABLE_FCITX5" in cmake
 # 默认值跟着环境走而不是跟着打包开关：装了 Fcitx5 开发包的机器就构建这个并列入口，

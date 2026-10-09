@@ -566,6 +566,8 @@ Linux 桌面设置页通过宿主能力显示共享的模糊音配置。总开�
 
 词库管理可从 IBus 与 Fcitx5 菜单顶层的“词库…”、桌面启动器的“词库”动作或执行 `msime-linux-settings --panel dictionary` 打开，与 Windows 桌面工具使用同一设置宿主和词典状态。
 
+**键盘布局跟随系统设置**（#6365）。两个宿主收到的都是按当前布局翻译后的按键符号（IBus 的 keyval、Fcitx5 的 `key.sym()`），字母、标点和 Ctrl+Shift+F 这类字母快捷键都按符号匹配，所以 Dvorak、Colemak 等布局打出来的字母就是拼音字母；只有候选序号键按物理数字行取键（AZERTY 上也能选词）。IBus 组件里引擎的 `<layout>` 写的是 `default`，切到本输入法时 IBus 面板和 GNOME Shell 都不改当前布局；此前写的是 `us`，二者会在切换时把键盘换成美式 QWERTY。Fcitx5 的输入法条目不带 `LayoutHint`，用的是输入法组的默认布局：在 `fcitx5-configtool` 的「输入法」页把当前组的键盘布局（或单独给「水杉输入法」选的布局）设成 Dvorak 等即可。
+
 全角/半角输出与 Windows 模式面板对应：`CharacterWidth` 由 `input-runtime` 和 `msime-host-api` 按会话携带，IBus 属性菜单和 Fcitx5 状态栏都提供该开关，可打印 ASCII 在上屏时完成全角转换。配置了共享偏好目录时，模式按 `character_width` 持久化；没有该目录的直接预览配置保持会话级。Fcitx5 与 IBus 都在会话建立时按 `character_width` 设置全角，共享偏好热重载、属性/状态菜单和快捷键切换都会立即同步到正在运行的会话；焦点切换不会丢失全角状态。Fcitx5 新会话以偏好存储中的 `character_width` 为准，另一个窗口在状态栏切换的宽度也会带过来；状态栏切换后尚未写入存储的宽度（保存失败待重试，或隐私输入窗口中本不保存的切换）不会被热重载改回，下一个会话再以存储为准。IBus 冒烟夹具和 Fcitx5 原生上下文测试覆盖全角与半角 ASCII 上屏。
 
 IBus 注册入口通过 launcher 启动，配置优先级为 `MSIME_IBUS_OPTIONS`、用户的 `$XDG_CONFIG_HOME/msime-client/runtime-options.json`（默认 `~/.config`）、安装时配置的系统 runtime-options。IBus 与桌面启动器仅在用户配置不存在时回退；显式覆盖、已存在但不可读的用户配置、悬空符号链接或相对用户配置目录会报错，不会悄悄改用系统配置。系统配置的写入权限沿用安装权限，启动器不会自动复制或改写配置。直接运行 launcher 时可用第一个参数指定系统配置回退路径。
