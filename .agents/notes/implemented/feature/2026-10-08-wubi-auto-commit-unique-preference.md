@@ -24,7 +24,9 @@ Status: implemented
 - 账号同步的键表两份都加这个键：Android 侧的 `crates/client-core/src/account/settings_sync.rs`（导出与应用），鸿蒙侧的 `platforms/harmony/entry/src/main/ets/account/AccountPreferencePlan.ts`（上传与下载）加 `input.wubi_auto_commit_unique`，与它的兄弟键 `input.wubi_code_hint` 保持一致，免得服务端声明该字段后只有 Android 会传。
 - 删掉 macOS 的第二实现：`WubiCommitPolicy.h`、`WubiCommitPolicyTest.cpp`、`InputController.mm` 里那个不可达分支，以及 Tauri 侧 `load/save_macos_wubi_auto_commit_unique` 两个命令和 React 的一整套 `macosWubiAutoCommitUnique` 脏检查管道。共享路径接管后它们是重复的另一半。
 
-macOS 的 defaults 键保留。原生外观面板仍读写它，值经 `merged[@"wubi_auto_commit_unique"]` 进共享文档；只有缺省值从 `@NO` 改成 `@YES`。
+macOS 的 defaults 键保留。原生外观面板仍读写它，值经 `merged[@"wubi_auto_commit_unique"]` 进共享文档；缺省值从 `@NO` 改成 `@YES`，并配一段迁移。这个键在接入共享偏好之前接不到实际行为，所以 defaults 里存下来的 `NO`（旧缺省、旧版本套用云快照时写回的）都是历史缺省而不是用户选择；云端 `platform.macos.wubi_auto_commit_unique` 的 `false` 同理。迁移用一个 `MSIMEClientWubiAutoCommitUniqueAdopted` 标记：只有用户在原生面板里真正选过一次（`setWubiAutoCommitUnique:` 写标记）之后，存下来的 `NO` 才作数；在那之前 getter 一律读作开。因此升级后、以及旧账号同步把 `false` 套到本机后，第四键照旧上屏，下一次上传还会用生效值把云端的历史 `NO` 改成 `true`。配套两处：`cloudSettingsSnapshot` 的这个键改成取生效值（对齐 `shuangpin_preedit_uses_raw` 等共享文档字段，否则共享设置页只写文档不写 defaults 会导出旧值），`applyCloudSettingsSnapshot:` 套用时把这个共享文档字段的缓存一并清掉（它现在在云快照里）。
+
+Linux 的 IBus 属性菜单在没有偏好目录时改走 `close()`/`open()` 重建会话：这个开关是由 runtime 判定的，override 只在会话建立或重读偏好时经 `apply_session_overrides` 交给它，照搬 `WubiCodeHint`（宿主渲染时读）那种「改状态 + render」的做法会让菜单显示关了、四码唯一仍在上屏。
 
 ## Alternatives considered
 
@@ -45,6 +47,6 @@ macOS 的 defaults 键保留。原生外观面板仍读写它，值经 `merged[@
 - `cargo test -p msime-client-core`：`wubi_auto_commit_unique_defaults_on_and_roundtrips`（缺省开、旧文档缺键仍读出开、关掉后往返保持）；`settings_sync` 两条（导出键清单、逐键往返）。
 - `cargo test -p msime-mcp-server`：`update_preferences` 用例补 `wubi_auto_commit_unique: Some(false)`。
 - `pnpm --filter @msime/desktop typecheck`、`pnpm --filter @msime/desktop test`：`wubi-section` 三条（缺省开、走共享 patch 写入）、`settings` 的双平台共享保存用例取代原来那条「写原生域、共享文档不动」的用例。
-- `platforms/linux/tests/core/settings_launcher_contract.py`、`fcitx5_contract.py` 各补对应断言；`platforms/macos/tests/settings/CloudAppearanceSettingsTest.mm` 的布尔缺省分组挪项。
+- `platforms/linux/tests/core/settings_launcher_contract.py`、`fcitx5_contract.py` 各补对应断言；`platforms/macos/tests/settings/CloudAppearanceSettingsTest.mm` 的布尔缺省分组挪项、新增 `WubiAutoCommitPreferencesTest.mm`（存量 `NO` 与旧云快照的 `false` 都读作开，用户在面板选过一次之后才作数）。
 - `platforms/harmony/tests/run.sh`：`localAccountPreferences` / `applyAccountPreferences` 的用例覆盖新键（键表声明与 `wubi_code_hint` 一起摆在布尔声明组里）。
 - iOS 三个五笔开关都写共享文档、从共享文档读；`KeyboardSkinTests` 去掉对 `WubiCodeHintPreference` App Group 键的强设，改由文档缺省承担。没有新增 App Group 键，也没有动 XcodeGen 的 `project.pbxproj`。
