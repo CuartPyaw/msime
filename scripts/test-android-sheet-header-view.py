@@ -20,15 +20,17 @@ def main() -> int:
         "LinearLayout header = Ui.column(context);",
         "ViewPolicy.setCenteredHorizontally(header);",
         "ViewPolicy.setPadding(header, horizontal, 0, horizontal, Ui.dp(context, 12));",
-        "Ui.style(heading, Ui.TEXT_SHEET_HEADER, 600, Ui.subText(context));",
+        "TextView heading = Ui.styledLabel(context, title, Ui.TEXT_SHEET_HEADER, 600,",
         "heading.setAccessibilityHeading(true);",
         "if (subtitle != null && subtitle.length() > 0)",
-        "Ui.style(note, Ui.TEXT_SHEET_HEADER, 400, Ui.subText(context));",
+        "TextView note = Ui.styledLabel(context, subtitle, Ui.TEXT_SHEET_HEADER, 400,",
         "params.topMargin = Ui.dp(context, 2);",
     )
     for snippet in required:
         if snippet not in component:
             errors.append(f"{COMPONENT}: 缺少共享面板标题语义：{snippet}")
+    if "new TextView(context)" in component:
+        errors.append(f"{COMPONENT}: 标题文本应复用 Ui.styledLabel")
 
     ui = UI.read_text(encoding="utf-8")
     signatures = {
