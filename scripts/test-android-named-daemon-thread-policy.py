@@ -30,6 +30,7 @@ STARTED_SITES = {
     JAVA / "home/AuthRedirectActivity.java": ("msime-apple-sign-in",),
     JAVA / "home/LoginSheet.java": ("msime-login-sheet", "msime-email-code", "msime-email-login"),
     JAVA / "home/OnboardingActivity.java": ("msime-onboarding",),
+    JAVA / "home/SignIn.java": ("msime-sign-in",),
 }
 STARTED_EXPRESSIONS = {
     JAVA / "core/ResourcePackService.java": (

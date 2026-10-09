@@ -17,6 +17,7 @@ import app.msime.android.MainThreadPolicy;
 import app.msime.android.R;
 import app.msime.android.SyncSwitch;
 import app.msime.android.DictionarySnapshotQueue;
+import app.msime.android.ThreadPolicy;
 import java.io.File;
 import app.msime.android.TextPolicy;
 import java.util.function.Consumer;
@@ -294,6 +295,6 @@ final class SignIn {
     }
 
     private static void offMainThread(Runnable work) {
-        new Thread(work, "msime-sign-in").start();
+        ThreadPolicy.startNamedThread("msime-sign-in", work);
     }
 }
