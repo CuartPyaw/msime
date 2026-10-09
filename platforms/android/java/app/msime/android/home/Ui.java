@@ -23,7 +23,6 @@ import app.msime.android.TextPolicy;
 import app.msime.android.ViewPolicy;
 import androidx.annotation.AttrRes;
 import androidx.annotation.ColorInt;
-import app.msime.android.ColorPolicy;
 import androidx.annotation.DrawableRes;
 import com.google.android.material.color.MaterialColors;
 import com.google.android.material.bottomsheet.BottomSheetDragHandleView;
@@ -461,11 +460,6 @@ public final class Ui {
 
     @ColorInt public static int danger(Context context) {
         return color(context, androidx.appcompat.R.attr.colorError);
-    }
-
-    /** 按 0–1 的不透明度改写颜色的 alpha，乘在原有 alpha 上。 */
-    @ColorInt public static int withAlpha(@ColorInt int color, float alpha) {
-        return ColorPolicy.withAlpha(color, alpha);
     }
 
     /** Create a filled circular drawable. */
