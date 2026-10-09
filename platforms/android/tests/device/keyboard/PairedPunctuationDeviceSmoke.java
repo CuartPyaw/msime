@@ -7,7 +7,7 @@ import java.util.function.Predicate;
 /**
  * 成对标点补上后半个时光标留在两半之间（#6458）。
  *
- * <p>普通输入框照规矩处理 `commitText(closing, 0)`，用来确认原有行为不变；`msime-test-cursor-at-end` 不认第二个参数、总把光标放在新文字后面，重现 vivo「信息」里光标跑到括号外的情形。两边都从符号面板点（，再用键盘的 ( 走一遍 Engine 那条路，最后在面板里点 ） 跨过自动补上的后半个。
+ * <p>普通输入框照规矩处理 `commitText(closing, 0)`，用来确认原有行为不变；`msime-test-cursor-at-end` 不认第二个参数、总把光标放在新文字后面，重现 vivo「信息」里光标跑到括号外的情形。两边都从符号面板点（，再在面板里点 ） 跨过自动补上的后半个：跨过要靠选区回声认出补全那次写入，光标跑偏又被拉回时同样要认得出来。键盘标点键经 Engine 补全后写后半个用的是同一个 `commitClosingMark`；123 层的符号键按字面上屏、不补全，这里驱动不到 Engine 那条路。
  */
 public final class PairedPunctuationDeviceSmoke extends DeviceSmoke {
     private static final String PLAIN = "msime-test-plain";
@@ -31,13 +31,9 @@ public final class PairedPunctuationDeviceSmoke extends DeviceSmoke {
             insertFromSymbolPanel("按键 符号 （，长按只输入这半个");
             await(editorState(editor, "（）", 1));
 
-            stage = editor + " keyboard pair";
-            tapSymbol("(");
-            await(editorState(editor, "（（））", 2));
-
             stage = editor + " step over the closing half";
             insertFromSymbolPanel("按键 符号 ）");
-            await(editorState(editor, "（（））", 3));
+            await(editorState(editor, "（）", 2));
         }
     }
 
