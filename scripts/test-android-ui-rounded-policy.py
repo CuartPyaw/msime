@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Android home 页面直接使用共享圆角 drawable 策略。"""
 from pathlib import Path
+import re
 import sys
 
 
@@ -14,6 +15,9 @@ def main() -> int:
     ui = UI.read_text(encoding="utf-8")
     if "GradientDrawable rounded(" in ui:
         print(f"{UI}: 仍保留 Ui.rounded 转发方法", file=sys.stderr)
+        ok = False
+    if re.search(r"(?<![.\w])rounded\(", ui):
+        print(f"{UI}: 仍调用已删除的 rounded 方法", file=sys.stderr)
         ok = False
     for path in JAVA_ROOT.rglob("*.java"):
         source = path.read_text(encoding="utf-8")

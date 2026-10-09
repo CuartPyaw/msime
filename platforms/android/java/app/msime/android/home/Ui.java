@@ -436,7 +436,7 @@ public final class Ui {
 
     /** 胶囊形状：GradientDrawable 会把过大的圆角夹到短边的一半，所以高度怎么变两端都是半圆。 */
     public static GradientDrawable pill(@ColorInt int color) {
-        return rounded(color, 9999f);
+        return DrawablePolicy.rounded(color, 9999f);
     }
 
     /** 主题的按压反馈（`selectableItemBackground`），行在代码里构造时用它。 */
@@ -454,8 +454,8 @@ public final class Ui {
 
     public static Drawable rippleOn(Context context, @ColorInt int fill, float radiusPx) {
         int pressed = ColorPolicy.withAlpha(text(context), 0.10f);
-        return DrawablePolicy.ripple(pressed, rounded(fill, radiusPx),
-            rounded(Color.WHITE, radiusPx));
+        return DrawablePolicy.ripple(pressed, DrawablePolicy.rounded(fill, radiusPx),
+            DrawablePolicy.rounded(Color.WHITE, radiusPx));
     }
 
     /** Create a text label with the supplied text, size in sp, and colour. */
@@ -681,7 +681,8 @@ public final class Ui {
     /** Create a vertically arranged rounded surface for page cards. */
     public static LinearLayout verticalCard(Context context, float radiusDp) {
         LinearLayout card = column(context);
-        ViewPolicy.setBackground(card, rounded(card(context), dp(context, radiusDp)));
+        ViewPolicy.setBackground(card,
+            DrawablePolicy.rounded(card(context), dp(context, radiusDp)));
         return card;
     }
 
