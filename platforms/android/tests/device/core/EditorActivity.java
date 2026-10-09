@@ -39,6 +39,13 @@ public final class EditorActivity extends Activity {
         password.setHint("Password editor");
         showImeOnFocus(password);
         layout.addView(password);
+        // 系统标记为邮箱的输入框：邮箱后缀（#6147）只在这种输入框里出现。
+        EditText email = new EditText(this);
+        email.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+        email.setContentDescription("msime-test-email");
+        email.setHint("Email editor");
+        showImeOnFocus(email);
+        layout.addView(email);
         setContentView(layout);
     }
 

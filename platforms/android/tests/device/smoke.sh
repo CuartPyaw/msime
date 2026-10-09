@@ -87,7 +87,9 @@ for entry in \
     "NineKeyEnglishDeviceSmoke|Nine-key English acceptance failed" \
     "NineKeyPanelDeviceSmoke|Nine-key panel acceptance failed" \
     "ChineseHelpcodeDeviceSmoke|Chinese helpcode acceptance failed" \
-    "MicrosoftShuangpinDeviceSmoke|Microsoft double-pinyin acceptance failed"
+    "MicrosoftShuangpinDeviceSmoke|Microsoft double-pinyin acceptance failed" \
+    "EmailSuffixDeviceSmoke|Email suffix acceptance failed" \
+    "NumberRowDeviceSmoke|Number row acceptance failed"
 do
   suite=${entry%%|*}
   if [[ " ${MSIME_DEVICE_SMOKE_SKIP:-} " == *" $suite "* ]]; then
