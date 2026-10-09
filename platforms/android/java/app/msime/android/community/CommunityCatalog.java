@@ -5,7 +5,9 @@ import java.io.InputStream;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import javax.net.ssl.HttpsURLConnection;
@@ -56,22 +58,33 @@ public final class CommunityCatalog {
         public boolean failed() { return !failure.isEmpty(); }
     }
 
-    private final Context context;
     private final CloudApi cloud;
+    private final CloudApi.Tokens accountTokens;
+    private final CloudApi.Tokens anonymousTokens;
+    private final CloudApi.Transport listingTransport;
     private record PageResponse(Page page, int status) {}
-    private record ListingToken(String value, boolean anonymous) {}
+    private record ListingToken(String value, boolean anonymous, String sessionId) {}
 
     public CommunityCatalog(Context context) {
         this(context, new CloudApi(context));
     }
 
     CommunityCatalog(Context context, CloudApi cloud) {
-        this.context = context.getApplicationContext();
+        this(context, cloud, CloudApi.accountTokens(context.getApplicationContext()),
+            rejected -> new BackendAnonymousAccount(context.getApplicationContext()).accessToken(rejected),
+            CommunityCatalog::httpListingExchange);
+    }
+
+    CommunityCatalog(Context context, CloudApi cloud, CloudApi.Tokens accountTokens,
+            CloudApi.Tokens anonymousTokens, CloudApi.Transport listingTransport) {
         this.cloud = cloud;
+        this.accountTokens = accountTokens;
+        this.anonymousTokens = anonymousTokens;
+        this.listingTransport = listingTransport;
     }
 
     /** Open a catalogue request with the shared transport defaults. */
-    private static HttpsURLConnection open(URL url, String method, boolean output)
+    private static HttpsURLConnection open(URL url, String method)
             throws java.io.IOException {
         HttpsURLConnection connection = (HttpsURLConnection) url.openConnection();
         connection.setInstanceFollowRedirects(false);
@@ -80,10 +93,6 @@ public final class CommunityCatalog {
         connection.setReadTimeout(TIMEOUT_MILLIS);
         connection.setRequestProperty("Accept", "application/json");
         connection.setRequestProperty("User-Agent", "MSIME/Android");
-        if (output) {
-            connection.setDoOutput(true);
-            connection.setRequestProperty("Content-Type", "application/json");
-        }
         return connection;
     }
 
@@ -100,14 +109,26 @@ public final class CommunityCatalog {
         ListingToken selected = listingToken();
         String token = selected.value();
         for (int attempt = 0; ; attempt++) {
+            Page stale = listingSessionFailure(selected);
+            if (stale != null) return stale;
             PageResponse response = requestPage(kind, search, offset, category, token);
+            stale = listingSessionFailure(selected);
+            if (stale != null) return stale;
             if (!shouldRetryListing(response.status(), token, attempt)) return response.page();
             try {
-                String fresh = selected.anonymous()
-                    ? new BackendAnonymousAccount(context).accessToken(token)
-                    : new BackendAccount(context).currentAccessToken(token);
-                if (fresh.isEmpty()) return response.page();
+                String fresh;
+                if (selected.anonymous()) {
+                    fresh = anonymousTokens.token(token);
+                } else {
+                    CloudApi.TokenSnapshot refreshed = accountTokens.snapshot(token);
+                    if (!selected.sessionId().equals(refreshed.sessionId()))
+                        return listingFailure("session_changed", 409);
+                    fresh = refreshed.token();
+                }
+                if (fresh == null || fresh.isEmpty() || fresh.equals(token)) return response.page();
                 token = fresh;
+            } catch (java.util.concurrent.CancellationException changed) {
+                return listingFailure("session_changed", 409);
             } catch (Exception | LinkageError error) {
                 android.util.Log.i("MSIMECommunity", "Account refresh for catalogue failed", error);
                 return response.page();
@@ -120,30 +141,79 @@ public final class CommunityCatalog {
         return status == 401 && token != null && !token.isEmpty() && attempt == 0;
     }
 
+    private Page listingSessionFailure(ListingToken selected) {
+        if (selected.anonymous()) return null;
+        if (selected.sessionId() == null || selected.sessionId().isEmpty())
+            return listingFailure("session_unavailable", 0);
+        try {
+            CloudApi.TokenSnapshot current = accountTokens.snapshot(null);
+            return selected.sessionId().equals(current.sessionId())
+                ? null : listingFailure("session_changed", 409);
+        } catch (java.util.concurrent.CancellationException changed) {
+            return listingFailure("session_changed", 409);
+        } catch (Exception | LinkageError unavailable) {
+            android.util.Log.i("MSIMECommunity", "Account session check for catalogue failed", unavailable);
+            return listingFailure("session_unavailable", 0);
+        }
+    }
+
+    private static Page listingFailure(String code, int status) {
+        return new Page(List.of(), false, CommunityRequest.message(code, status));
+    }
+
     private PageResponse requestPage(CommunityRequest.Kind kind, String search, int offset,
             CommunityRequest.Category category, String token) {
-        HttpsURLConnection connection = null;
         try {
-            connection = open(new URL(ORIGIN
-                + CommunityRequest.path(kind, "", search, offset, category)), "GET", false);
-            if (token != null) connection.setRequestProperty("Authorization", "Bearer " + token);
-            int status = connection.getResponseCode();
+            Map<String, String> headers = new LinkedHashMap<>();
+            headers.put("Accept", "application/json");
+            headers.put("User-Agent", "MSIME/Android");
+            if (token != null) headers.put("Authorization", "Bearer " + token);
+            CloudApi.Exchange response = listingTransport.exchange("GET",
+                CommunityRequest.path(kind, "", search, offset, category), headers, null);
+            int status = response.status();
             if (status != 200) {
-                String code = errorCode(connection.getErrorStream());
+                String code = CloudApi.failure(response).code;
                 return new PageResponse(
                     new Page(List.of(), false, CommunityRequest.message(code, status)), status);
             }
-            try (InputStream input = connection.getInputStream()) {
-                byte[] body = HttpBodyPolicy.readRequired(input, maximumResponseBytes(kind));
-                return new PageResponse(parse(kind, new JSONObject(
-                    TextPolicy.utf8(body))), 200);
-            }
+            byte[] body = response.body();
+            if (body == null || body.length > maximumResponseBytes(kind))
+                throw new java.io.IOException("catalogue response too large");
+            return new PageResponse(parse(kind, new JSONObject(TextPolicy.utf8(body))), 200);
         } catch (Exception | LinkageError error) {
             // 说出是哪一步断的。界面上仍然只有那一句，但把原因扔掉，下一次就还得从头猜。
             android.util.Log.w("MSIMECommunity", "Catalogue request failed", error);
             return new PageResponse(new Page(List.of(), false, CommunityRequest.message(null, 0)), 0);
+        }
+    }
+
+    /** Catalogue pages may be larger than the shared cloud transport's 4 MiB default. */
+    private static CloudApi.Exchange httpListingExchange(String method, String path,
+            Map<String, String> headers, byte[] request) throws java.io.IOException {
+        HttpsURLConnection connection = open(new URL(ORIGIN + path), method);
+        try {
+            for (Map.Entry<String, String> header : headers.entrySet())
+                connection.setRequestProperty(header.getKey(), header.getValue());
+            int status = connection.getResponseCode();
+            InputStream stream = status == 200 ? connection.getInputStream() : connection.getErrorStream();
+            byte[] body = new byte[0];
+            if (stream != null) {
+                int limit = status == 200 && path.startsWith("/v1/community/resources?")
+                    ? MAX_RESOURCE_RESPONSE_BYTES : MAX_RESPONSE_BYTES;
+                try (InputStream input = stream) {
+                    if (status == 200) {
+                        body = HttpBodyPolicy.readRequired(input, limit);
+                    } else {
+                        // A malformed or oversized error body must not hide its HTTP status.
+                        try { body = HttpBodyPolicy.readRequired(input, limit); }
+                        catch (java.io.IOException unreadable) { body = new byte[0]; }
+                    }
+                }
+            }
+            return new CloudApi.Exchange(status, connection.getContentType(),
+                connection.getHeaderField("Retry-After"), body);
         } finally {
-            if (connection != null) connection.disconnect();
+            connection.disconnect();
         }
     }
 
@@ -187,18 +257,19 @@ public final class CommunityCatalog {
      */
     private ListingToken listingToken() {
         try {
-            String account = new BackendAccount(context).accessToken();
-            if (!account.isEmpty()) return new ListingToken(account, false);
+            CloudApi.TokenSnapshot account = accountTokens.snapshot(null);
+            if (account.token() != null && !account.token().isEmpty())
+                return new ListingToken(account.token(), false, account.sessionId());
         } catch (Exception | LinkageError error) {
             android.util.Log.i("MSIMECommunity", "Account session unavailable; trying anonymous",
                 error);
         }
         try {
-            return new ListingToken(new BackendAnonymousAccount(context).accessToken(), true);
+            return new ListingToken(anonymousTokens.token(null), true, null);
         } catch (Exception | LinkageError error) {
             android.util.Log.i("MSIMECommunity", "Anonymous identity unavailable; listing anyway",
                 error);
-            return new ListingToken(null, true);
+            return new ListingToken(null, true, null);
         }
     }
 
@@ -381,20 +452,6 @@ public final class CommunityCatalog {
         if (!(raw instanceof Number number)) return null;
         double result = number.doubleValue();
         return Double.isFinite(result) ? result : null;
-    }
-
-    /** The backend's own name for a failure, so the reader is told the specific thing. */
-    private static String errorCode(InputStream errors) {
-        if (errors == null) return "";
-        try (InputStream input = errors) {
-            byte[] body = HttpBodyPolicy.readRequired(input, MAX_RESPONSE_BYTES);
-            JSONObject root = new JSONObject(
-                TextPolicy.utf8(body));
-            JSONObject error = root.optJSONObject("error");
-            return error == null ? "" : JsonPolicy.strictStringOrEmpty(error.opt("code"));
-        } catch (Exception error) {
-            return "";
-        }
     }
 
     static int maximumResponseBytes(CommunityRequest.Kind kind) {

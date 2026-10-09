@@ -522,6 +522,101 @@ public final class BackendAccountRefreshDeviceSmoke extends Instrumentation {
         check(failure.contains("操作较频繁"), "anonymous report retains rate-limit guidance");
     }
 
+    private static byte[] syntheticListingPage() throws Exception {
+        JSONObject root = new JSONObject().put("skins", new org.json.JSONArray()
+            .put(new JSONObject(new String(updatedSkin(), java.nio.charset.StandardCharsets.UTF_8))))
+            .put("has_more", false);
+        return root.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    private CommunityCatalog syntheticListingCatalog(CloudApi.Tokens account,
+            CloudApi.Tokens anonymous, CloudApi.Transport listing) throws Exception {
+        CloudApi cloud = new CloudApi((method, path, headers, body) -> {
+            throw new AssertionError("listing must use its bounded transport");
+        }, account, anonymous);
+        return new CommunityCatalog(getTargetContext(), cloud, account, anonymous, listing);
+    }
+
+    private void communityListingUsesSyntheticTransport() throws Exception {
+        CloudApi.Tokens account = new CloudApi.Tokens() {
+            @Override public String token(String rejected) { return ACCESS; }
+            @Override public String sessionId() { return "synthetic-login-a"; }
+        };
+        CloudApi.Tokens anonymous = rejected -> "";
+        byte[] pageBody = syntheticListingPage();
+        AtomicInteger calls = new AtomicInteger();
+        CloudApi.Transport listing = (method, path, headers, body) -> {
+            calls.incrementAndGet();
+            check("GET".equals(method) && path.contains("include=category")
+                    && ("Bearer " + ACCESS).equals(headers.get("Authorization")),
+                "listing uses the selected account and category path");
+            return new CloudApi.Exchange(200, "application/json", null, pageBody);
+        };
+        CommunityCatalog catalog = syntheticListingCatalog(account, anonymous, listing);
+        CommunityCatalog.Page page = catalog.list(CommunityRequest.Kind.SKIN, "", 0, null);
+        check(!page.failed() && page.items().size() == 1 && calls.get() == 1,
+            "synthetic catalogue page is returned without contacting the backend");
+    }
+
+    private void communityListingRejectsNewLogin() throws Exception {
+        byte[] pageBody = syntheticListingPage();
+        for (int status : new int[] {401, 200}) {
+            AtomicReference<String> login = new AtomicReference<>("synthetic-login-a");
+            CloudApi.Tokens account = new CloudApi.Tokens() {
+                @Override public String token(String rejected) {
+                    return "synthetic-login-a".equals(login.get()) ? ACCESS : NEXT_ACCESS;
+                }
+                @Override public String sessionId() { return login.get(); }
+            };
+            AtomicInteger calls = new AtomicInteger();
+            CloudApi.Transport listing = (method, path, headers, body) -> {
+                calls.incrementAndGet();
+                login.set("synthetic-login-b");
+                return new CloudApi.Exchange(status, "application/json", null,
+                    status == 200 ? pageBody : new byte[0]);
+            };
+            CommunityCatalog.Page page = syntheticListingCatalog(account, ignored -> "", listing)
+                .list(CommunityRequest.Kind.SKIN, "", 0, null);
+            check(page.failed() && page.failure().contains("登录已切换") && calls.get() == 1,
+                "old catalogue page must not retry or display after a new login: " + status);
+        }
+    }
+
+    private void communityListingRetainsSameLoginAndPublicFallback() throws Exception {
+        byte[] pageBody = syntheticListingPage();
+        AtomicReference<String> token = new AtomicReference<>(ACCESS);
+        CloudApi.Tokens account = new CloudApi.Tokens() {
+            @Override public String token(String rejected) {
+                if (rejected != null) token.set(NEXT_ACCESS);
+                return token.get();
+            }
+            @Override public String sessionId() { return "synthetic-login-a"; }
+        };
+        AtomicInteger calls = new AtomicInteger();
+        CloudApi.Transport listing = (method, path, headers, body) -> {
+            calls.incrementAndGet();
+            boolean refreshed = ("Bearer " + NEXT_ACCESS).equals(headers.get("Authorization"));
+            return new CloudApi.Exchange(refreshed ? 200 : 401, "application/json", null,
+                refreshed ? pageBody : new byte[0]);
+        };
+        CommunityCatalog.Page refreshed = syntheticListingCatalog(account, ignored -> "", listing)
+            .list(CommunityRequest.Kind.SKIN, "", 0, null);
+        check(!refreshed.failed() && refreshed.items().size() == 1 && calls.get() == 2,
+            "same login listing retries once with refreshed token");
+
+        CloudApi.Tokens unavailable = rejected -> {
+            throw new IllegalStateException("synthetic identity unavailable");
+        };
+        CloudApi.Transport publicListing = (method, path, headers, body) -> {
+            check(!headers.containsKey("Authorization"), "public listing omits bearer token");
+            return new CloudApi.Exchange(200, "application/json", null, pageBody);
+        };
+        CommunityCatalog.Page publicPage = syntheticListingCatalog(unavailable, unavailable, publicListing)
+            .list(CommunityRequest.Kind.SKIN, "", 0, null);
+        check(!publicPage.failed() && publicPage.items().size() == 1,
+            "catalogue remains readable without identity endpoints");
+    }
+
     private static void unauthorizedRefreshClearsSession() throws Exception {
         MemoryStore store = new MemoryStore(expiredSession());
         BackendAccount account = new BackendAccount(store, (method, path, body, token) -> {
@@ -580,9 +675,15 @@ public final class BackendAccountRefreshDeviceSmoke extends Instrumentation {
             communityWritesRetryWithinTheSameLogin();
             stage = "community report rate limit";
             communityReportKeepsAnonymousRateLimit();
+            stage = "community listing synthetic transport";
+            communityListingUsesSyntheticTransport();
+            stage = "community listing old login";
+            communityListingRejectsNewLogin();
+            stage = "community listing same login and public";
+            communityListingRetainsSameLoginAndPublicFallback();
             unauthorizedRefreshClearsSession();
             unboundedPersistedExpiryIsRejected();
-            result.putString("stream", "MSIME_DEVICE_SMOKE_PASSED: account refresh, login lineage, chat stream and community writes\n");
+            result.putString("stream", "MSIME_DEVICE_SMOKE_PASSED: account refresh, login lineage, chat stream and community requests\n");
             finish(Activity.RESULT_OK, result);
         } catch (Exception | AssertionError error) {
             result.putString("stream", "MSIME_DEVICE_SMOKE_FAILED: account refresh " + stage + " ("
