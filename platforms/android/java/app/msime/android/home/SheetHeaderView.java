@@ -18,18 +18,16 @@ public final class SheetHeaderView {
         int horizontal = Ui.dp(context, 16);
         ViewPolicy.setPadding(header, horizontal, 0, horizontal, Ui.dp(context, 12));
 
-        TextView heading = new TextView(context);
-        heading.setText(title);
+        TextView heading = Ui.styledLabel(context, title, Ui.TEXT_SHEET_HEADER, 600,
+            Ui.subText(context));
         ViewPolicy.setCentered(heading);
-        Ui.style(heading, Ui.TEXT_SHEET_HEADER, 600, Ui.subText(context));
         heading.setAccessibilityHeading(true);
         header.addView(heading);
 
         if (subtitle != null && subtitle.length() > 0) {
-            TextView note = new TextView(context);
-            note.setText(subtitle);
+            TextView note = Ui.styledLabel(context, subtitle, Ui.TEXT_SHEET_HEADER, 400,
+                Ui.subText(context));
             ViewPolicy.setCentered(note);
-            Ui.style(note, Ui.TEXT_SHEET_HEADER, 400, Ui.subText(context));
             LinearLayout.LayoutParams params = Ui.wrap();
             params.topMargin = Ui.dp(context, 2);
             header.addView(note, params);
