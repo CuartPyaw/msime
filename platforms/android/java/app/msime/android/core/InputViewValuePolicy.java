@@ -20,14 +20,6 @@ public final class InputViewValuePolicy {
         return KeyboardGeometry.strictInt(object == null ? null : object.opt(key), fallback);
     }
 
-    public static int integer(Object raw, int fallback) {
-        return KeyboardGeometry.strictInt(raw, fallback);
-    }
-
-    public static int schemeValue(Object raw, int fallback) {
-        return KeyboardGeometry.strictInt(raw, fallback);
-    }
-
     /** Read a JSON boolean without org.json's implicit string coercion. */
     public static boolean booleanValue(JSONObject object, String key, boolean fallback) {
         Object raw = object == null ? null : object.opt(key);
