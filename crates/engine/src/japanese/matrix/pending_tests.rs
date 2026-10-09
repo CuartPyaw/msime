@@ -2,7 +2,7 @@ use super::super::decoder::test_model;
 use super::super::romaji::convert_romaji;
 use super::*;
 
-// 固定 f37203c77 的完整矩阵查询正文；查询键差由冻结的后续 Vec 查询隔离。
+// 固定 f37203c77 的完整矩阵查询正文；键差由固定 Vec 查询隔离，继续补全差由固定精确流式查询隔离。
 fn reference_current_search(
     dictionary: &JapaneseDictionary,
     conversion: &RomajiConversion,
@@ -155,7 +155,6 @@ fn matrix_pending_key_output_and_allocation_match_current_baseline() {
                     "读音长度 {}，待定 {pending}，限额 {limit}",
                     reading.len()
                 );
-                // 后续精确词条流式消费另省结果容器，键差仍对照固定的单缓冲 Vec 查询。
                 let (_, buffered_allocations) =
                     crate::ime::personal_rerank::allocations::count(|| {
                         super::inline_row_tests::vector_reference_search(
@@ -164,17 +163,41 @@ fn matrix_pending_key_output_and_allocation_match_current_baseline() {
                             limit,
                         )
                     });
+                let (exact_output, exact_allocations) =
+                    crate::ime::personal_rerank::allocations::count(|| {
+                        super::continuing_reference::search_converted(
+                            &dictionary,
+                            &conversion,
+                            limit,
+                        )
+                    });
+                assert_eq!(actual, exact_output);
                 let suffixes = kana_for_romaji_prefix_view(pending);
-                let saved = if reading.is_empty() || limit == 0 {
+                let saved_keys = if reading.is_empty() || limit == 0 {
                     0
                 } else {
                     suffixes.len().saturating_sub(1)
                 };
+                let saved_views = if reading.is_empty() || pending.is_empty() || limit == 0 {
+                    0
+                } else {
+                    usize::from(
+                        !dictionary
+                            .continuing_lemma_views(reading, suffixes, 48)
+                            .is_empty(),
+                    )
+                };
                 assert_eq!(
-                    buffered_allocations + saved,
+                    buffered_allocations + saved_keys,
                     old_allocations,
-                    "键分配差值：{pending}"
+                    "拼接键分配差值：{pending}"
                 );
+                assert_eq!(
+                    new_allocations + saved_views,
+                    exact_allocations,
+                    "继续补全视图向量分配差值：{pending}"
+                );
+                assert!(exact_allocations <= buffered_allocations);
                 assert!(new_allocations <= buffered_allocations);
             }
         }
@@ -182,8 +205,8 @@ fn matrix_pending_key_output_and_allocation_match_current_baseline() {
 }
 
 #[test]
-#[ignore = "本地 release 与固定历史矩阵对照；包含精确词条流式消费，不设置 CI 时间阈值"]
-fn benchmark_matrix_pending_reading_keys() {
+#[ignore = "本地 release 与固定历史矩阵对照；包含精确和继续补全流式消费，不设置 CI 时间阈值"]
+fn benchmark_matrix_pending_queries() {
     use std::hint::black_box;
     use std::time::Instant;
     let dictionary = JapaneseDictionary::from_bytes(

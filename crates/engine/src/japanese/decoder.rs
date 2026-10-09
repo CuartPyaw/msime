@@ -473,6 +473,7 @@ impl JapaneseDictionary {
         self.prefix_lemmas_continuing_with(prefix, next_kana, limit, |id| self.lemma(id))
     }
 
+    #[cfg(test)]
     pub(crate) fn continuing_lemma_views(
         &self,
         prefix: &str,
@@ -480,6 +481,20 @@ impl JapaneseDictionary {
         limit: usize,
     ) -> Vec<JapaneseLemmaRef<'_>> {
         self.prefix_lemmas_continuing_with(prefix, next_kana, limit, |id| self.lemma_ref(id))
+    }
+
+    /// 按原排名顺序消费继续补全词条，不为单次消费建立视图结果向量。
+    pub(crate) fn for_each_continuing_lemma_view<'a>(
+        &'a self,
+        prefix: &str,
+        next_kana: &[&str],
+        limit: usize,
+        mut visit: impl FnMut(JapaneseLemmaRef<'a>),
+    ) {
+        // 与前缀访问共用零大小结果模式，拼接键、排名与重复 ID 仍由原查询处理。
+        self.prefix_lemmas_continuing_with(prefix, next_kana, limit, |id| {
+            visit(self.lemma_ref(id))
+        });
     }
 
     fn prefix_lemmas_continuing_with<T>(
