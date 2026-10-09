@@ -5251,9 +5251,15 @@ void property_activate(IBusEngine *engine, const gchar *name, guint value) {
         save_menu_preference(engine, MenuPreference::WubiAutoCommitUnique, enabled);
         return;
       }
+      // 和上面的双拼原始预编辑一样：这个开关由 runtime 判定，没有偏好目录就不会重读，
+      // 只能重建会话把 override 交给它，否则菜单显示已关、四码唯一仍然自动上屏。
+      if (s.session)
+        apply(engine, msime_client_command(s.session, MSIME_FINISH_COMPOSITION));
+      s.close();
       s.wubi_auto_commit_unique_override = enabled;
-      s.wubi_auto_commit_unique = enabled;
-      render(engine, s.view);
+      s.open();
+      if (s.session)
+        apply(engine, msime_client_focus(s.session, true));
       publish_mode(engine);
       return;
     }
