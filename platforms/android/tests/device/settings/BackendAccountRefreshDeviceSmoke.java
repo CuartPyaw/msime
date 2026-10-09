@@ -617,6 +617,102 @@ public final class BackendAccountRefreshDeviceSmoke extends Instrumentation {
             "catalogue remains readable without identity endpoints");
     }
 
+    private void candidateTranslationUsesSyntheticTransport() throws Exception {
+        CloudApi.Tokens account = new CloudApi.Tokens() {
+            @Override public String token(String rejected) { return ACCESS; }
+            @Override public String sessionId() { return "synthetic-login-a"; }
+        };
+        AtomicInteger calls = new AtomicInteger();
+        CloudApi cloud = new CloudApi((method, path, headers, body) -> {
+            calls.incrementAndGet();
+            check("POST".equals(method) && "/v1/translate".equals(path)
+                    && ("Bearer " + ACCESS).equals(headers.get("Authorization"))
+                    && body != null,
+                "translation uses the selected account and endpoint");
+            return new CloudApi.Exchange(200, "application/json", null,
+                "{\"code\":200,\"data\":[\"synthetic-gloss\"]}".getBytes());
+        }, account, ignored -> "");
+        List<String> translated = new BackendTranslationClient(cloud).translate(List.of("合成词"), "EN");
+        check(translated.equals(List.of("synthetic-gloss")) && calls.get() == 1,
+            "synthetic translation returns without contacting the backend");
+    }
+
+    private void candidateTranslationRejectsNewLogin() throws Exception {
+        for (int status : new int[] {401, 200}) {
+            AtomicReference<String> login = new AtomicReference<>("synthetic-login-a");
+            CloudApi.Tokens account = new CloudApi.Tokens() {
+                @Override public String token(String rejected) {
+                    return "synthetic-login-a".equals(login.get()) ? ACCESS : NEXT_ACCESS;
+                }
+                @Override public String sessionId() { return login.get(); }
+            };
+            AtomicInteger calls = new AtomicInteger();
+            CloudApi cloud = new CloudApi((method, path, headers, body) -> {
+                calls.incrementAndGet();
+                login.set("synthetic-login-b");
+                return new CloudApi.Exchange(status, "application/json", null,
+                    status == 200 ? "{\"code\":200,\"data\":[\"old-gloss\"]}".getBytes()
+                        : new byte[0]);
+            }, account, ignored -> "");
+            boolean changed = false;
+            try {
+                new BackendTranslationClient(cloud).translate(List.of("合成词"), "EN");
+            } catch (CloudApi.Failure failure) {
+                changed = "session_changed".equals(failure.code);
+            }
+            check(changed && calls.get() == 1,
+                "old translation must not retry or publish after a new login: " + status);
+        }
+    }
+
+    private void candidateTranslationRetainsSameLoginAndAnonymousFallback() throws Exception {
+        AtomicReference<String> token = new AtomicReference<>(ACCESS);
+        CloudApi.Tokens account = new CloudApi.Tokens() {
+            @Override public String token(String rejected) {
+                if (rejected != null) token.set(NEXT_ACCESS);
+                return token.get();
+            }
+            @Override public String sessionId() { return "synthetic-login-a"; }
+        };
+        AtomicInteger calls = new AtomicInteger();
+        CloudApi cloud = new CloudApi((method, path, headers, body) -> {
+            calls.incrementAndGet();
+            boolean refreshed = ("Bearer " + NEXT_ACCESS).equals(headers.get("Authorization"));
+            return new CloudApi.Exchange(refreshed ? 200 : 401, "application/json", null,
+                refreshed ? "{\"code\":200,\"data\":[\"fresh-gloss\"]}".getBytes()
+                    : new byte[0]);
+        }, account, ignored -> "");
+        check(new BackendTranslationClient(cloud).translate(List.of("合成词"), "EN")
+                .equals(List.of("fresh-gloss")) && calls.get() == 2,
+            "same login translation retries once with refreshed token");
+
+        CloudApi anonymous = new CloudApi((method, path, headers, body) -> {
+            check(("Bearer " + REFRESH).equals(headers.get("Authorization")),
+                "anonymous translation retains device identity");
+            return new CloudApi.Exchange(200, "application/json", null,
+                "{\"code\":200,\"data\":[\"anonymous-gloss\"]}".getBytes());
+        }, ignored -> "", ignored -> REFRESH);
+        check(new BackendTranslationClient(anonymous).translate(List.of("合成词"), "EN")
+                .equals(List.of("anonymous-gloss")),
+            "signed-out translation uses the anonymous identity");
+    }
+
+    private void candidateTranslationKeepsResponseBound() throws Exception {
+        CloudApi cloud = new CloudApi((method, path, headers, body) ->
+            new CloudApi.Exchange(200, "application/json", null, new byte[256 * 1024 + 1]),
+            new CloudApi.Tokens() {
+                @Override public String token(String rejected) { return ACCESS; }
+                @Override public String sessionId() { return "synthetic-login-a"; }
+            }, ignored -> "");
+        boolean tooLarge = false;
+        try {
+            new BackendTranslationClient(cloud).translate(List.of("合成词"), "EN");
+        } catch (IllegalStateException bounded) {
+            tooLarge = bounded.getMessage().contains("too large");
+        }
+        check(tooLarge, "translation retains its 256 KiB response bound");
+    }
+
     private static void unauthorizedRefreshClearsSession() throws Exception {
         MemoryStore store = new MemoryStore(expiredSession());
         BackendAccount account = new BackendAccount(store, (method, path, body, token) -> {
@@ -681,9 +777,17 @@ public final class BackendAccountRefreshDeviceSmoke extends Instrumentation {
             communityListingRejectsNewLogin();
             stage = "community listing same login and public";
             communityListingRetainsSameLoginAndPublicFallback();
+            stage = "candidate translation synthetic transport";
+            candidateTranslationUsesSyntheticTransport();
+            stage = "candidate translation old login";
+            candidateTranslationRejectsNewLogin();
+            stage = "candidate translation same login and anonymous";
+            candidateTranslationRetainsSameLoginAndAnonymousFallback();
+            stage = "candidate translation response bound";
+            candidateTranslationKeepsResponseBound();
             unauthorizedRefreshClearsSession();
             unboundedPersistedExpiryIsRejected();
-            result.putString("stream", "MSIME_DEVICE_SMOKE_PASSED: account refresh, login lineage, chat stream and community requests\n");
+            result.putString("stream", "MSIME_DEVICE_SMOKE_PASSED: account refresh, login lineage, chat stream, community and translation\n");
             finish(Activity.RESULT_OK, result);
         } catch (Exception | AssertionError error) {
             result.putString("stream", "MSIME_DEVICE_SMOKE_FAILED: account refresh " + stage + " ("
