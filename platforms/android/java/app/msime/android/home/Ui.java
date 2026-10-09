@@ -470,16 +470,6 @@ public final class Ui {
             rounded(Color.WHITE, radiusPx));
     }
 
-    /** 沿着 ContextWrapper 链找到所在的 Activity；不在任何 Activity 里时返回 null。 */
-    @androidx.annotation.Nullable public static android.app.Activity activityOf(Context context) {
-        Context current = context;
-        while (current instanceof android.content.ContextWrapper wrapper) {
-            if (current instanceof android.app.Activity activity) return activity;
-            current = wrapper.getBaseContext();
-        }
-        return null;
-    }
-
     /** Create a text label with the supplied text, size in sp, and colour. */
     public static TextView label(Context context, CharSequence text, float sizeSp, @ColorInt int color) {
         TextView view = new TextView(context);
