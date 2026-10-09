@@ -1760,6 +1760,13 @@ impl<E: InputEngine> Runtime<E> {
                 return Err(RuntimeError::StaleNineKeySpelling);
             }
         }
+        if let Action::FixCandidatePosition(_, position) = &action {
+            if !(1..=5).contains(position) {
+                return Err(RuntimeError::Engine(
+                    "Candidate position must be between 1 and 5".into(),
+                ));
+            }
+        }
         self.advance()?;
         let filled_current_page =
             matches!(action, Action::NextPage) && self.expand_for_next_page()?;
@@ -1915,15 +1922,9 @@ impl<E: InputEngine> Runtime<E> {
             Action::RemoveCandidate(id) => {
                 self.engine.remove_candidate(self.engine_index(id.index))
             }
-            Action::FixCandidatePosition(id, position) => {
-                if !(1..=5).contains(&position) {
-                    return Err(RuntimeError::Engine(
-                        "Candidate position must be between 1 and 5".into(),
-                    ));
-                }
-                self.engine
-                    .fix_candidate_position(self.engine_index(id.index), position)
-            }
+            Action::FixCandidatePosition(id, position) => self
+                .engine
+                .fix_candidate_position(self.engine_index(id.index), position),
             Action::ClearCandidatePosition(id) => self
                 .engine
                 .clear_candidate_position(self.engine_index(id.index)),
