@@ -446,9 +446,7 @@ public final class Ui {
 
     /** Create the standard accent-coloured group heading. */
     public static TextView groupHeading(Context context, CharSequence text) {
-        TextView heading = new TextView(context);
-        heading.setText(text);
-        style(heading, TEXT_GROUP_TITLE, 500, accent(context));
+        TextView heading = styledLabel(context, text, TEXT_GROUP_TITLE, 500, accent(context));
         heading.setAccessibilityHeading(true);
         return heading;
     }
@@ -483,11 +481,9 @@ public final class Ui {
                                       @ColorInt int fill, @ColorInt int ink,
                                       float horizontalPaddingDp, float verticalPaddingDp,
                                       float minHeightDp, float minWidthDp, Runnable action) {
-        TextView button = new TextView(context);
-        button.setText(label);
+        TextView button = styledLabel(context, label, Math.round(sizeSp), weight, ink);
         ViewPolicy.setCentered(button);
         ViewPolicy.setSingleLine(button);
-        style(button, Math.round(sizeSp), weight, ink);
         ViewPolicy.setBackground(button, pillRipple(context, fill));
         setSymmetricPaddingDp(button, context, horizontalPaddingDp, verticalPaddingDp);
         setTextMinHeightDp(button, context, minHeightDp);
@@ -506,10 +502,8 @@ public final class Ui {
     public static TextView textButton(Context context, CharSequence label, int sizeSp, int weight,
                                       @ColorInt int ink, Drawable background, float minHeightDp,
                                       Runnable action) {
-        TextView button = new TextView(context);
-        button.setText(label);
+        TextView button = styledLabel(context, label, sizeSp, weight, ink);
         ViewPolicy.setCentered(button);
-        style(button, sizeSp, weight, ink);
         ViewPolicy.setBackground(button, background);
         setTextMinHeightDp(button, context, minHeightDp);
         bindClick(button, action);
