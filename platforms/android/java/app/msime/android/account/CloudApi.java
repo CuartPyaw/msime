@@ -153,8 +153,9 @@ public final class CloudApi {
         JSONObject root = json("GET", "/v1/auth/providers", null, Auth.NONE);
         JSONObject map = root.optJSONObject("providers");
         if (map == null) throw new Failure(500, "invalid_response", "providers missing", 0);
-        return new Providers(strictTrue(map.opt("google")), strictTrue(map.opt("apple")),
-            strictTrue(map.opt("apple_web")), strictTrue(map.opt("email")));
+        return new Providers(JsonPolicy.strictTrue(map.opt("google")),
+            JsonPolicy.strictTrue(map.opt("apple")), JsonPolicy.strictTrue(map.opt("apple_web")),
+            JsonPolicy.strictTrue(map.opt("email")));
     }
 
     /** 发一个 JSON 请求（`body` 可为 null）并把响应读成 JSON 对象。 */
@@ -294,11 +295,6 @@ public final class CloudApi {
             if (value.charAt(index) < '0' || value.charAt(index) > '9') return 0L;
         }
         return Long.parseLong(value);
-    }
-
-    /** JSON 布尔值只有严格的 `true` 才算；字符串和数字都不算。 */
-    static boolean strictTrue(Object value) {
-        return JsonPolicy.strictTrue(value);
     }
 
     // ---- multipart ----
