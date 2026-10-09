@@ -6902,11 +6902,12 @@ bool FcitxState::key(fcitx::KeyEvent &event) {
                           ? MSIME_PREVIOUS_PAGE : MSIME_NEXT_PAGE);
       return true;
     }
-    // Tab pages the senses the way it pages an ordinary candidate list below; leaving the overlay first would page the Engine's hidden list instead. Fcitx normalises ISO_Left_Tab to Tab, so the raw key tells a Shift-less back-tab apart.
+    // Tab pages the senses the way it pages an ordinary candidate list below; leaving the overlay first would page the Engine's hidden list instead. Use the raw key because normalization can drop Shift and turn ISO_Left_Tab into Tab.
     if (!ctrl && !alt && navigation_.value("tab", true) &&
         !states.testAny(fcitx::KeyStates{fcitx::KeyState::Super, fcitx::KeyState::Hyper, fcitx::KeyState::Mod5}) &&
         (sym == FcitxKey_Tab || sym == FcitxKey_KP_Tab || sym == FcitxKey_ISO_Left_Tab)) {
-      translationPage(shift || event.rawKey().sym() == FcitxKey_ISO_Left_Tab
+      translationPage(event.rawKey().states().test(fcitx::KeyState::Shift) ||
+                              event.rawKey().sym() == FcitxKey_ISO_Left_Tab
                           ? MSIME_PREVIOUS_PAGE : MSIME_NEXT_PAGE);
       return true;
     }
@@ -7103,10 +7104,11 @@ bool FcitxState::key(fcitx::KeyEvent &event) {
     case FcitxKey_End: case FcitxKey_KP_End:
       return command(MSIME_LAST_CANDIDATE);
     case FcitxKey_Tab: case FcitxKey_KP_Tab:
-      // Fcitx normalises ISO_Left_Tab to Tab, keeping Shift only when it was held, so a back-tab sent without Shift is recognised by its raw symbol.
+      // Normalization can drop Shift and turn ISO_Left_Tab into Tab; the raw key preserves both directions.
       if (navigation_.value("tab", true))
-        return command(shift || event.rawKey().sym() == FcitxKey_ISO_Left_Tab ? MSIME_PREVIOUS_PAGE
-                                                                              : MSIME_NEXT_PAGE);
+        return command(event.rawKey().states().test(fcitx::KeyState::Shift) ||
+                               event.rawKey().sym() == FcitxKey_ISO_Left_Tab
+                           ? MSIME_PREVIOUS_PAGE : MSIME_NEXT_PAGE);
       break;
     case FcitxKey_ISO_Left_Tab:
       if (navigation_.value("tab", true)) return command(MSIME_PREVIOUS_PAGE);
