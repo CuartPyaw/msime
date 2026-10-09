@@ -72,8 +72,9 @@ pub fn fuzzy_syllables(syllable: &str, options: FuzzyPinyinOptions) -> Vec<Strin
     let ends = &ends[..end_count];
     let mut result = Vec::with_capacity(starts.len().saturating_mul(ends.len()));
     result.push(syllable.to_owned());
-    for start in starts {
-        for end in ends {
+    for (index, start) in starts.iter().enumerate() {
+        // 原音节已经在首行，跳过两个伙伴列表首项组成的重复组合。
+        for end in ends.iter().skip(usize::from(index == 0)) {
             let mut candidate = String::with_capacity(start.len() + end.len());
             candidate.push_str(start);
             candidate.push_str(end);
@@ -207,6 +208,30 @@ mod tests {
     }
 
     #[test]
+    fn fuzzy_expansion_does_not_rebuild_the_original_syllable() {
+        for (syllable, options, expected, budget) in [
+            (
+                "zhan",
+                rules(fuzzy_rule::ALL),
+                vec!["zhan", "zhang", "zan", "zang"],
+                5,
+            ),
+            ("an", rules(fuzzy_rule::ALL), vec!["an", "ang"], 3),
+            ("bian", rules(fuzzy_rule::Z_ZH), vec!["bian"], 2),
+        ] {
+            let _ = fuzzy_syllables(syllable, options);
+            let (actual, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+                fuzzy_syllables(syllable, options)
+            });
+            assert_eq!(actual, expected);
+            assert_eq!(
+                allocations, budget,
+                "原音节 {syllable} 被重复构造: {allocations}"
+            );
+        }
+    }
+
+    #[test]
     fn segmentations_are_a_bounded_beam_without_the_original() {
         let typed = vec!["zan".to_owned(), "fa".to_owned()];
         let paths = fuzzy_segmentations(
@@ -237,6 +262,6 @@ mod tests {
         });
 
         assert_eq!(paths.len(), 7);
-        assert_eq!(allocations, 40);
+        assert_eq!(allocations, 38);
     }
 }
