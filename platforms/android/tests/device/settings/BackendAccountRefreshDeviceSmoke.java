@@ -2,6 +2,9 @@ package app.msime.android;
 
 import android.app.Activity;
 import android.app.Instrumentation;
+import android.content.Context;
+import android.content.ContextWrapper;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -419,6 +422,106 @@ public final class BackendAccountRefreshDeviceSmoke extends Instrumentation {
             "signed-out category update keeps its sign-in guidance");
     }
 
+    /** Keep the old direct transport from contacting a real account during the red test. */
+    private Context communityTestContext() {
+        return new ContextWrapper(getTargetContext()) {
+            @Override public Context getApplicationContext() { return this; }
+            @Override public SharedPreferences getSharedPreferences(String name, int mode) {
+                return (SharedPreferences) java.lang.reflect.Proxy.newProxyInstance(
+                    getClass().getClassLoader(), new Class<?>[] {SharedPreferences.class},
+                    (proxy, method, arguments) -> {
+                        if ("getString".equals(method.getName())
+                                && !name.contains("anonymous")) return null;
+                        throw new IllegalStateException("synthetic account storage only");
+                    });
+            }
+        };
+    }
+
+    private void communityWritesRejectNewLogin() throws Exception {
+        for (int status : new int[] {401, 200}) {
+            AtomicReference<String> login = new AtomicReference<>("synthetic-login-a");
+            CloudApi.Tokens account = new CloudApi.Tokens() {
+                @Override public String token(String rejected) {
+                    return "synthetic-login-a".equals(login.get()) ? ACCESS : NEXT_ACCESS;
+                }
+                @Override public String sessionId() { return login.get(); }
+            };
+            AtomicInteger reportCalls = new AtomicInteger();
+            CloudApi reportCloud = new CloudApi((method, path, headers, body) -> {
+                reportCalls.incrementAndGet();
+                check("POST".equals(method) && CommunityRequest.REPORT_PATH.equals(path),
+                    "report endpoint");
+                login.set("synthetic-login-b");
+                return new CloudApi.Exchange(status, "application/json", null,
+                    "{\"reported\":true}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }, account, ignored -> "");
+            String failure = new CommunityCatalog(communityTestContext(), reportCloud)
+                .report(syntheticSkin(), CommunityRequest.REPORT_REASONS.get(0), "");
+            check(reportCalls.get() == 1 && failure.contains("登录已切换"),
+                "old report must not retry or accept a response under a new login: " + status);
+
+            login.set("synthetic-login-a");
+            AtomicInteger downloadCalls = new AtomicInteger();
+            String downloadPath = CommunityRequest.skinDownloadPath(syntheticSkin().id());
+            CloudApi downloadCloud = new CloudApi((method, path, headers, body) -> {
+                downloadCalls.incrementAndGet();
+                check("POST".equals(method) && downloadPath.equals(path),
+                    "download endpoint");
+                login.set("synthetic-login-b");
+                return new CloudApi.Exchange(status, "application/json", null, "{}".getBytes());
+            }, account, ignored -> "");
+            check(!new CommunityCatalog(communityTestContext(), downloadCloud)
+                    .recordDownload(syntheticSkin()) && downloadCalls.get() == 1,
+                "old download must not retry or accept a response under a new login: " + status);
+        }
+    }
+
+    private void communityWritesRetryWithinTheSameLogin() throws Exception {
+        AtomicReference<String> token = new AtomicReference<>(ACCESS);
+        CloudApi.Tokens account = new CloudApi.Tokens() {
+            @Override public String token(String rejected) {
+                if (rejected != null) token.set(NEXT_ACCESS);
+                return token.get();
+            }
+            @Override public String sessionId() { return "synthetic-login-a"; }
+        };
+        AtomicInteger reportCalls = new AtomicInteger();
+        CloudApi reportCloud = new CloudApi((method, path, headers, body) -> {
+            reportCalls.incrementAndGet();
+            boolean refreshed = ("Bearer " + NEXT_ACCESS).equals(headers.get("Authorization"));
+            return new CloudApi.Exchange(refreshed ? 201 : 401, "application/json", null,
+                refreshed ? "{\"reported\":true}".getBytes() : new byte[0]);
+        }, account, ignored -> "");
+        check(new CommunityCatalog(communityTestContext(), reportCloud)
+                .report(syntheticSkin(), CommunityRequest.REPORT_REASONS.get(0), "").isEmpty()
+                && reportCalls.get() == 2,
+            "same login report retries once with refreshed token");
+
+        token.set(ACCESS);
+        AtomicInteger downloadCalls = new AtomicInteger();
+        CloudApi downloadCloud = new CloudApi((method, path, headers, body) -> {
+            downloadCalls.incrementAndGet();
+            boolean refreshed = ("Bearer " + NEXT_ACCESS).equals(headers.get("Authorization"));
+            return new CloudApi.Exchange(refreshed ? 200 : 401, "application/json", null,
+                refreshed ? "{}".getBytes() : new byte[0]);
+        }, account, ignored -> "");
+        check(new CommunityCatalog(communityTestContext(), downloadCloud)
+                .recordDownload(syntheticSkin()) && downloadCalls.get() == 2,
+            "same login download retries once with refreshed token");
+    }
+
+    private void communityReportKeepsAnonymousRateLimit() throws Exception {
+        CloudApi cloud = new CloudApi((method, path, headers, body) -> {
+            throw new AssertionError("rate-limited identity must not send a report");
+        }, ignored -> "", rejected -> {
+            throw new BackendAnonymousAccount.RateLimited(60_000L);
+        });
+        String failure = new CommunityCatalog(communityTestContext(), cloud)
+            .report(syntheticSkin(), CommunityRequest.REPORT_REASONS.get(0), "");
+        check(failure.contains("操作较频繁"), "anonymous report retains rate-limit guidance");
+    }
+
     private static void unauthorizedRefreshClearsSession() throws Exception {
         MemoryStore store = new MemoryStore(expiredSession());
         BackendAccount account = new BackendAccount(store, (method, path, body, token) -> {
@@ -471,9 +574,15 @@ public final class BackendAccountRefreshDeviceSmoke extends Instrumentation {
             communityCategoryRejectsNewLogin();
             stage = "community category same login";
             communityCategoryRetriesWithinTheSameLogin();
+            stage = "community writes old login";
+            communityWritesRejectNewLogin();
+            stage = "community writes same login";
+            communityWritesRetryWithinTheSameLogin();
+            stage = "community report rate limit";
+            communityReportKeepsAnonymousRateLimit();
             unauthorizedRefreshClearsSession();
             unboundedPersistedExpiryIsRejected();
-            result.putString("stream", "MSIME_DEVICE_SMOKE_PASSED: account refresh, login lineage, chat stream and community category\n");
+            result.putString("stream", "MSIME_DEVICE_SMOKE_PASSED: account refresh, login lineage, chat stream and community writes\n");
             finish(Activity.RESULT_OK, result);
         } catch (Exception | AssertionError error) {
             result.putString("stream", "MSIME_DEVICE_SMOKE_FAILED: account refresh " + stage + " ("
