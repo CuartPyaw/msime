@@ -28,8 +28,10 @@ Wine 优先读取构建目录内完整的三个匹配运行时，不再为这些
 
 ## Verification
 
-原实现上新增 6 项回归共 7 个断言失败：缺少仅运行时模式、Wine x86 仍准备编译镜像、x64 仍查询不可用的本机工具链。实现后 5 项通过，覆盖双架构暂存、缺失依赖和错误 PE 架构拒绝、默认完整模式仍要求构建，以及 Wine 只准备执行镜像并使用已暂存 DLL。Shell 语法和 diff 校验通过。本地 quick 退出 0，102 项 Windows 主机测试、5 项新增回归、常驻契约、Rust workspace 与共享 Apple bridge 编译通过；Windows 原生/pipe-only 阶段缺少本机工具链而跳过，x86 语法检查缺少 x64 旗标，其他平台按 scope 跳过，桌面包因缺少 macOS 资源跳过。真实 x86 容器构建退出 0，完成宿主 DLL、TSF、Server 和原生测试链接，并暂存三个 PE32 运行时。专用 amd64 Wine 10 镜像构建退出 0；x64 构建和 Wine 动态运行时验证仍在执行，当前不构成 Windows 程序运行成功的证据。
+原实现上最初 5 项回归共 6 个断言失败：缺少仅运行时模式、Wine x86 仍准备编译镜像、x64 仍查询不可用的本机工具链。补充完整模式系统依赖回归后，旧分类在 `CRYPT32.dll` 处失败；扩展明确的系统 DLL 清单后最终 6 项通过，未知依赖仍拒绝。覆盖双架构暂存、缺失依赖与错误 PE 架构、完整模式构建要求、系统与未知 DLL 分类、Wine 只准备执行镜像并使用已暂存文件。Shell 语法、diff 和笔记校验通过。
 
-完整模式在原实现上也因 `CRYPT32.dll` 未列入允许的 Windows 系统依赖而失败；该依赖来自真实 Server 导入图，现已按现有系统运行时分类放行，未知 DLL 仍拒绝。x86/x64 完整暂存在 ARM64 容器均退出 0。
+ARM64 容器内真实 x86/x64 构建均退出 0，完成 Rust 宿主 DLL、TSF、Server 与全部原生测试链接，并分别暂存三个 PE32、PE32+ 运行时；六个 DLL 与生产编译器返回的文件逐字节匹配。`stage-runtime.sh x86` 和 `x64` 完整导入图检查也退出 0。
 
-实际 Wine 运行复核：x86/x64 线程与 C++ 异常展开合成程序均在 Wine 10 中输出 `synthetic runtime ok`。x86 套件 120 PASS、9 FAIL，x64 121 PASS、9 FAIL；失败集中在已记录的 Wine 图形/资源/文件系统环境和测试基线，运行时来源逐字节匹配生产编译器输出。Rust Wine 测试在本机未安装 Windows GNU linker 时无法构建，未把它算作本切片通过。
+专用 amd64 Wine 10 镜像构建退出 0。x86/x64 线程与 C++ 异常展开合成程序均使用暂存 DLL 输出 `synthetic runtime ok`。实际 Wine 脚本的 x86 C++/工具套件为 120 PASS、9 FAIL，x64 为 121 PASS、8 FAIL，两个脚本均退出 0；脚本只输出测试结果，退出码不证明全绿。失败尚未全部建立修复前基线，不能统称为已知失败。已定向观察到共享宿主操作错误、ClipboardHistory reparse 清理断言、Wine 符号链接删除 Access denied，以及 stroke 测试缺少命令行参数；完整失败处理是后续独立工作，不向 known-failures 增项。本切片的动态运行时验证通过，不声称整个 Wine 套件通过。宿主 `rustup target list --installed` 没有 Windows GNU 标准库，Wine Rust 测试未构建，不能归为 linker 阶段失败或计入通过。
+
+本地最新 quick 退出 0：102 项 Windows 主机测试、6 项新增回归、常驻契约、Rust workspace 与共享 Apple bridge 编译通过。Windows 原生/pipe-only 阶段缺少本机工具链跳过，x86 语法检查缺少本机 i686 编译器，其他平台按 scope 跳过，桌面包因缺少 macOS 资源跳过。未运行系统输入法验收，不生成发行安装包。
