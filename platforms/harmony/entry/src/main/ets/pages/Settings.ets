@@ -1081,12 +1081,7 @@ class SettingsBridge {
   }
 
   /**
-   * Saves an exported dictionary where the user chooses, which is what the source's download link gets from WebView2.
-   *
-   * ArkWeb drops a blob download link unless a download delegate takes it, and a delegate would only save into the sandbox, where no file manager reaches. So the page hands the text over, it is staged privately, and the save picker decides where it goes, the same way the cloud dictionary export already works. The reply carries the saved file's name to show, or null when the user closed the picker, which is not a failure.
-   */
-  /**
-   * The about page's 检查更新, answered by `msime_client_update_check` on a native worker: it waits on GitHub for up to ten seconds. The platform is filled in here rather than taken from the page, so the page can only ask about this host's releases.
+   * 「关于」页的检查更新，由原生工作线程上的 `msime_client_update_check` 回答，最多等 GitHub 十秒。平台在这里填，不取页面传来的值，页面只能问本宿主的发行版。
    */
   private async updateCheck(document: string): Promise<string> {
     let payload: UpdateCheckPayload;
@@ -1108,6 +1103,11 @@ class SettingsBridge {
     return await client.updateCheck(JSON.stringify(request));
   }
 
+  /**
+   * Saves an exported dictionary where the user chooses, which is what the source's download link gets from WebView2.
+   *
+   * ArkWeb drops a blob download link unless a download delegate takes it, and a delegate would only save into the sandbox, where no file manager reaches. So the page hands the text over, it is staged privately, and the save picker decides where it goes, the same way the cloud dictionary export already works. The reply carries the saved file's name to show, or null when the user closed the picker, which is not a failure.
+   */
   private async saveExport(document: string): Promise<string> {
     let request: ExportSaveRequest;
     try {
