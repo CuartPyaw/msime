@@ -57,11 +57,17 @@ public final class CommunityCatalog {
     }
 
     private final Context context;
+    private final CloudApi cloud;
     private record PageResponse(Page page, int status) {}
     private record ListingToken(String value, boolean anonymous) {}
 
     public CommunityCatalog(Context context) {
+        this(context, new CloudApi(context));
+    }
+
+    CommunityCatalog(Context context, CloudApi cloud) {
         this.context = context.getApplicationContext();
+        this.cloud = cloud;
     }
 
     /** Open a catalogue request with the shared transport defaults. */
@@ -253,54 +259,24 @@ public final class CommunityCatalog {
         if (item == null || item.kind() != CommunityRequest.Kind.SKIN || category == null) {
             return new Update(null, "这类作品没有分类。");
         }
-        BackendAccount account = new BackendAccount(context);
-        String token = account.accessToken();
-        if (token.isEmpty()) return new Update(null, "请先登录水杉账号，再修改分类。");
-        for (int attempt = 0; ; attempt++) {
-            HttpsURLConnection connection = null;
-            try {
-                connection = open(new URL(
-                    ORIGIN + CommunityRequest.skinPath(item.id())), "PATCH", true);
-                connection.setRequestProperty("Authorization", "Bearer " + token);
-                byte[] body = TextPolicy.utf8Bytes(CommunityRequest.categoryBody(category));
-                connection.setFixedLengthStreamingMode(body.length);
-                try (java.io.OutputStream output = connection.getOutputStream()) {
-                    output.write(body);
-                }
-                int status = connection.getResponseCode();
-                if (shouldRetryCategory(status, token, attempt)) {
-                    String fresh = account.currentAccessToken(token);
-                    if (!fresh.isEmpty() && !fresh.equals(token)) {
-                        token = fresh;
-                        continue;
-                    }
-                }
-                if (status != 200) {
-                    String code = errorCode(connection.getErrorStream());
-                    return new Update(null, CommunityRequest.message(code, status));
-                }
-                Item updated;
-                try (InputStream input = connection.getInputStream()) {
-                    updated = item(CommunityRequest.Kind.SKIN, new JSONObject(TextPolicy.utf8(
-                        HttpBodyPolicy.readRequired(input, MAX_RESPONSE_BYTES))));
-                }
-                if (updated == null || !updated.id().equalsIgnoreCase(item.id())
-                        || updated.category() != category) {
-                    return new Update(null, CommunityRequest.message(null, 500));
-                }
-                return new Update(updated, "");
-            } catch (Exception | LinkageError error) {
-                android.util.Log.w("MSIMECommunity", "Category update failed", error);
-                return new Update(null, CommunityRequest.message(null, 0));
-            } finally {
-                if (connection != null) connection.disconnect();
+        try {
+            CloudApi.Response response = cloud.send("PATCH", CommunityRequest.skinPath(item.id()),
+                CloudApi.Body.json(new JSONObject(CommunityRequest.categoryBody(category))), CloudApi.Auth.ACCOUNT);
+            if (response.status() != 200) return new Update(null, CommunityRequest.message(null, 500));
+            Item updated = item(CommunityRequest.Kind.SKIN, response.json());
+            if (updated == null || !updated.id().equalsIgnoreCase(item.id())
+                    || updated.category() != category) {
+                return new Update(null, CommunityRequest.message(null, 500));
             }
+            return new Update(updated, "");
+        } catch (CloudApi.Failure failure) {
+            if ("signed_out".equals(failure.code))
+                return new Update(null, "请先登录水杉账号，再修改分类。");
+            return new Update(null, CommunityRequest.message(failure.code, failure.status));
+        } catch (Exception | LinkageError error) {
+            android.util.Log.w("MSIMECommunity", "Category update failed", error);
+            return new Update(null, CommunityRequest.message(null, 0));
         }
-    }
-
-    /** A category mutation may refresh its rejected account token exactly once. */
-    static boolean shouldRetryCategory(int status, String token, int attempt) {
-        return status == 401 && token != null && !token.isEmpty() && attempt == 0;
     }
 
     private static Page parse(CommunityRequest.Kind kind, JSONObject root) {

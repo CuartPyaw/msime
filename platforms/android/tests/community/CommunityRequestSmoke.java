@@ -86,6 +86,8 @@ public final class CommunityRequestSmoke {
             "a named code answers before the status");
         check("登录已过期，请重新登录。".equals(CommunityRequest.message("", 401)),
             "an unnamed 401 falls back to the status");
+        check("登录已切换，请重试。".equals(CommunityRequest.message("session_changed", 409)),
+            "a replaced login asks for retry under the current account");
         check("连不上社区，请检查网络后重试。".equals(CommunityRequest.message(null, 0)),
             "a request that never reached the server says so");
         check(!CommunityRequest.message("something new", 599).isEmpty(),
