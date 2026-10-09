@@ -48,3 +48,5 @@ Status: implemented
 [待定候选循环的拼接读音缓冲](2026-10-09-japanese-pending-reading-buffer.md)进一步减少 provider 前缀与 matrix 精确补全的临时键；本篇原有排序、别名和生命周期边界保持。
 
 [精确词条流式消费](2026-10-09-japanese-exact-lemma-stream.md) 进一步让 matrix 直接访问精确词条，生产 `exact_lemma_views` 结果向量退出，仅保留测试对照；精确视图仍只绑定词库，本篇历史逐字段与文本分配对照保留。前缀完整读音已由流式入口消费，continuing 仍返回视图向量；查询排名与最终文本仍会分配。
+
+[排名堆成本键复用](2026-10-10-japanese-ranked-heap-output.md) 将项存储由 `((cost, id), id)` 收为 `(cost, id)`，最终对保存键不稳定排序，避免重读成本；继续保留本篇的空查询、流式消费、重复项与词库借用边界。历史分配次数和单项计时保留，当前排名请求字节与独立选型证据由新篇核算。
