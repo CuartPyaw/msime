@@ -2726,6 +2726,24 @@ fn stale_views_and_other_sessions_cannot_select() {
         Err(RuntimeError::StaleCandidate)
     ));
 }
+
+#[test]
+fn invalid_fixed_position_keeps_the_current_candidate_selectable() {
+    let mut runtime = runtime();
+    runtime.focus(true).unwrap();
+    let id = type_key(&mut runtime).view.candidates[0].id;
+
+    for position in [0, 6] {
+        assert!(matches!(
+            runtime.dispatch(Action::FixCandidatePosition(id, position)),
+            Err(RuntimeError::Engine(_))
+        ));
+        assert_eq!(runtime.generation(), id.generation);
+    }
+
+    let selected = runtime.dispatch(Action::Select(id)).unwrap();
+    assert_eq!(selected.commit.as_deref(), Some("candidate-0"));
+}
 #[test]
 fn focus_changes_end_the_engine_context() {
     let mut runtime = runtime();
