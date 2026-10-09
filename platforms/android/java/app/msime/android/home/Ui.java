@@ -18,6 +18,7 @@ import android.widget.EditText;
 import android.widget.TextView;
 import app.msime.android.BoundsPolicy;
 import app.msime.android.ColorPolicy;
+import app.msime.android.ImageViewPolicy;
 import app.msime.android.KeyboardGeometry;
 import app.msime.android.TextPolicy;
 import app.msime.android.ViewPolicy;
@@ -241,11 +242,6 @@ public final class Ui {
     public static void setBottomPadding(View view, int bottomPixels) {
         ViewPolicy.setPadding(view, view.getPaddingLeft(), view.getPaddingTop(), view.getPaddingRight(),
             bottomPixels);
-    }
-
-    /** Apply a single tint to an image view through the platform state-list wrapper. */
-    public static void setImageTint(ImageView view, int color) {
-        view.setImageTintList(ColorStateList.valueOf(color));
     }
 
     /** Exclude a decorative view from the accessibility tree. */
@@ -641,7 +637,7 @@ public final class Ui {
                                        CharSequence description, float sizeDp, Runnable action) {
         ImageView button = new ImageView(context);
         button.setImageDrawable(icon);
-        setImageTint(button, tint);
+        ImageViewPolicy.setTint(button, tint);
         button.setScaleType(ImageView.ScaleType.CENTER);
         ViewPolicy.setBackground(button, ripple(context));
         button.setContentDescription(description);
@@ -657,7 +653,7 @@ public final class Ui {
                                            @ColorInt int tint) {
         ImageView view = new ImageView(context);
         view.setImageResource(icon);
-        setImageTint(view, tint);
+        ImageViewPolicy.setTint(view, tint);
         hideFromAccessibility(view);
         return view;
     }
@@ -688,7 +684,7 @@ public final class Ui {
     public static ImageView chevron(Context context) {
         ImageView view = new ImageView(context);
         view.setImageResource(app.msime.android.R.drawable.ms_w1_a2_chevron);
-        setImageTint(view, subText(context));
+        ImageViewPolicy.setTint(view, subText(context));
         ViewPolicy.hideFromAccessibility(view);
         return view;
     }
