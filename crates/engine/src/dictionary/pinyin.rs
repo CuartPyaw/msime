@@ -174,8 +174,21 @@ impl PinyinDatabase {
                 [prefix.as_str(), upper_bound.as_str()],
                 query_capacity(limit),
             );
-            if !page.is_empty() && rows.capacity() == 0 {
-                rows.reserve_exact(extra_syllables.saturating_mul(limit));
+            if !page.is_empty() {
+                // 短页只按实际行数预留，满页才按剩余页的上限一次性预留。
+                let remaining_pages = extra_syllables - extra + 1;
+                let planned = if page.len() == limit {
+                    remaining_pages.saturating_mul(limit)
+                } else {
+                    page.len()
+                };
+                let required = rows
+                    .len()
+                    .saturating_add(planned)
+                    .saturating_sub(rows.capacity());
+                if required != 0 {
+                    rows.reserve_exact(required);
+                }
             }
             rows.extend(page);
         }

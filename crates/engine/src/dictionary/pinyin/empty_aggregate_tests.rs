@@ -108,11 +108,27 @@ fn compare_longer(
     limit: usize,
     saved: usize,
 ) {
-    compare_hot(
-        || original_query_longer_phrases(database, key, extra, limit),
-        || database.query_longer_phrases(key, extra, limit),
-        saved,
+    drop(original_query_longer_phrases(database, key, extra, limit));
+    drop(database.query_longer_phrases(key, extra, limit));
+    let (old, old_count) = count(|| original_query_longer_phrases(database, key, extra, limit));
+    let (new, new_count) = count(|| database.query_longer_phrases(key, extra, limit));
+    assert_eq!(new, old);
+    assert!(
+        new_count + saved <= old_count + extra,
+        "按页扩容的分配次数应有界：新={}，旧={}，extra={extra}",
+        new_count,
+        old_count
     );
+    if new.is_empty() {
+        assert_eq!(new.capacity(), 0);
+    } else {
+        assert!(
+            new.capacity() <= old.capacity(),
+            "按页预留不得超过旧上界：新={}，旧={}，extra={extra}，limit={limit}",
+            new.capacity(),
+            old.capacity()
+        );
+    }
 }
 
 fn compare_exact(database: &PinyinDatabase, keys: &[Vec<String>], limit: usize, saved: usize) {
@@ -121,6 +137,38 @@ fn compare_exact(database: &PinyinDatabase, keys: &[Vec<String>], limit: usize, 
         || database.query_exact_segmentations_keyed_flat(keys, limit),
         saved,
     );
+}
+
+#[test]
+fn sparse_longer_pages_do_not_reserve_all_future_limit_slots() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = pinyin_db(
+        directory.path(),
+        &[("tbl_3_p", "ping'guo'shu", "稀疏一行", 10)],
+    );
+    let database = PinyinDatabase::open(&path);
+    let rows = database.query_longer_phrases(&segments(&["ping", "guo"]), 3, 1000);
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.value.as_str())
+            .collect::<Vec<_>>(),
+        ["稀疏一行"]
+    );
+    assert!(
+        rows.capacity() <= 3,
+        "稀疏页不应预留 3000 个槽位：{}",
+        rows.capacity()
+    );
+
+    let key = segments(&["ping", "guo"]);
+    let (old, old_heap) = measure(|| original_query_longer_phrases(&database, &key, 3, 1000));
+    let (new, new_heap) = measure(|| database.query_longer_phrases(&key, 3, 1000));
+    assert_eq!(new, old);
+    assert_eq!(old.capacity(), 3000);
+    assert!(new.capacity() <= 3);
+    assert!(new_heap.peak_bytes < old_heap.peak_bytes);
+    assert_eq!(new_heap.minimum_bytes, 0);
+    assert_eq!(old_heap.minimum_bytes, 0);
 }
 
 #[test]
