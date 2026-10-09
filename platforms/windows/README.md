@@ -306,9 +306,11 @@ WindowsServer 的回调可能在构造返回前运行，捕获依赖须事先初
 
 bootstrap 只管理默认工具缓存，已有错误版本、跟踪文件改动、符号链接或非预期目录均拒绝，不覆盖用户内容。目录锁拒绝并发准备；失败的独立 staging 目录保留供检查，不递归删除。若遗留锁，先确认原进程已结束再清理空锁目录。可单独执行 `bash platforms/windows/bootstrap-vcpkg.sh`，已有固定版本且可执行时复用；离线拒绝路径测试为 `bash tests/tools/bootstrap-vcpkg.sh`，测试只操作新建的隔离目录。本机 x86 SJLJ 工具链会在网络准备前被拒绝。
 
-x64 宿主 DLL、会话测试及完整原生管道集成测试链接为 PE32+，产物位于 target/windows-full/x64。脚本只复制宿主 DLL，不打包 MinGW 运行时 DLL，运行前还需同工具链的 libstdc++、libgcc 和 libwinpthread 及系统运行时——交叉构建的产物是测试目录，不是安装包，发行安装包由 `installer/Package-SimplySign.ps1` 产出。
+x64 宿主 DLL、会话测试及完整原生管道集成测试链接为 PE32+，产物位于 target/windows-full/x64。脚本复制宿主 DLL，并调用 `stage-runtime.sh <arch> --runtime-only <output>`，从实际生产编译器暂存 libstdc++、libgcc 和 libwinpthread；每项由同一工具链的 objdump 检查 PE 架构。Windows 系统运行时仍由目标系统提供——交叉构建的产物是测试目录，不是安装包，发行安装包由 `installer/Package-SimplySign.ps1` 产出。
 
 x86 的 Rust GNU 目标要求 DWARF 展开，而 Homebrew 的 i686 MinGW 用 SJLJ，`build-cross.sh` 在准备依赖之前就拒绝这个组合，不通过 panic=abort 改变既有错误隔离契约。在这类主机上用 `bash platforms/windows/build-cross-container.sh x86`：容器里的 Debian i686 MinGW 以 DWARF 构建，脚本内容不变。Windows 上的 x86 由 `Build-Client.ps1` 以 MSVC 构建。
+
+Wine 优先读取构建目录中完整的三个匹配运行时 DLL，不为新构建另准备交叉编译镜像，也不要求本机还保留生产编译器。因此容器构建的 x86/x64 都可沿同一路径进入 Wine。缺少完整运行时的旧构建目录保留原有工具链回退；Wine 执行镜像仍为 amd64。`stage-runtime.sh <arch>` 无模式参数时仍执行完整导入图检查并生成可复制到 Windows 的验证目录，`--runtime-only <output>` 只暂存运行时，支持不同 edition 的现有产物目录。这些目录不是发行包。
 
 交叉编译容器按 Docker daemon 的 Linux 架构选择 `linux/amd64` 或 `linux/arm64`，不依据客户端的 `uname` 或 `DOCKER_DEFAULT_PLATFORM`。ARM64 使用原生 Rust、MinGW 和 vcpkg 工具，Windows 输出目标仍由 `x86`/`x64` 参数决定；Linux ARM64 的 vcpkg 宿主 triplet 为 `arm64-linux`。amd64 保留 `msime-cross:local`、`target/tooling-linux` 和 `target/windows-native-deps-linux`；ARM64 使用 `msime-cross:local-arm64` 和两个缓存目录下的 `arm64` 子目录，避免混用 vcpkg 可执行文件及宿主依赖。现有 amd64 缓存不会自动迁移，ARM64 首次需准备依赖。其他 Linux daemon 架构保留原有 amd64 仿真路径。Wine 执行 Windows 程序仍使用独立的 amd64 容器。
 

@@ -32,17 +32,18 @@ if [ ! -d "$build" ]; then
   exit 0
 fi
 
-# The MinGW runtime is not bundled beside the executables, so collect it from
-# the toolchain that produced them - which is not the same toolchain for both
-# architectures. x64 is built by this host. x86 cannot be: the i686 MinGW
-# usually installed on macOS uses SJLJ exceptions and Rust's target needs DWARF,
-# so build-cross-container.sh builds it inside the cross image. Taking the x86
-# runtime from this host would pair DWARF-built executables with an SJLJ
-# unwinder, and the unwinder is exactly what differs.
+# 新构建由实际生产编译器暂存运行时 DLL。旧目录没有这些文件时，
+# x86 沿用 Debian DWARF 工具链，x64 沿用本机工具链；不能把 Homebrew
+# i686 的 SJLJ 展开器配给 Rust 要求的 DWARF 产物。
 runtime="$(mktemp -d)"
 trap 'rm -rf "$runtime"' EXIT
 
-if [ "$arch" = x86 ]; then
+# 优先复用构建方按实际编译器暂存的 DLL，保留旧构建目录的工具链回退。
+unwind=libgcc_s_seh-1.dll
+[ "$arch" = x86 ] && unwind=libgcc_s_dw2-1.dll
+if [ -f "$build/libwinpthread-1.dll" ] && [ -f "$build/libstdc++-6.dll" ] && [ -f "$build/$unwind" ]; then
+  cp "$build/libwinpthread-1.dll" "$build/libstdc++-6.dll" "$build/$unwind" "$runtime/" || exit 1
+elif [ "$arch" = x86 ]; then
   cross=msime-cross:local
   docker build --platform linux/amd64 -t "$cross" "$root/platforms/windows/cross" >/dev/null 2>&1 || {
     echo "skipped: could not build the cross image"; exit 0; }
