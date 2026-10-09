@@ -336,6 +336,89 @@ public final class BackendAccountRefreshDeviceSmoke extends Instrumentation {
             "same login fallback delivers one complete reply");
     }
 
+    private static CommunityCatalog.Item syntheticSkin() throws Exception {
+        return new CommunityCatalog.Item("10000000-0000-4000-8000-000000000001",
+            CommunityRequest.Kind.SKIN, "Synthetic", "", "Synthetic author", 0, 0, 0.0,
+            new JSONObject(), CommunityRequest.Category.OTHER, true, 0, new JSONObject());
+    }
+
+    private static byte[] updatedSkin() {
+        try {
+            return new JSONObject().put("id", syntheticSkin().id()).put("name", "Synthetic")
+                .put("description", "").put("author", "Synthetic author").put("design", new JSONObject())
+                .put("saves", 0).put("rating_count", 0).put("rating_average", 0.0)
+                .put("downloads", 0).put("category", "tech").put("owned", true)
+                .toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Exception error) {
+            throw new AssertionError(error);
+        }
+    }
+
+    private void communityCategoryRejectsNewLogin() throws Exception {
+        AtomicReference<String> login = new AtomicReference<>("synthetic-login-a");
+        CloudApi.Tokens account = new CloudApi.Tokens() {
+            @Override public String token(String rejected) {
+                return "synthetic-login-a".equals(login.get()) ? ACCESS : NEXT_ACCESS;
+            }
+            @Override public String sessionId() { return login.get(); }
+        };
+        AtomicInteger rejectedCalls = new AtomicInteger();
+        CloudApi rejected = new CloudApi((method, path, headers, body) -> {
+            rejectedCalls.incrementAndGet();
+            login.set("synthetic-login-b");
+            return new CloudApi.Exchange(401, "application/json", null, new byte[0]);
+        }, account, ignored -> "");
+        CommunityCatalog.Update rejectedUpdate = new CommunityCatalog(getTargetContext(), rejected)
+            .setCategory(syntheticSkin(), CommunityRequest.Category.TECH);
+        check(rejectedCalls.get() == 1 && rejectedUpdate.failed()
+                && rejectedUpdate.failure().contains("登录已切换"),
+            "old category update must not retry under a new login");
+
+        login.set("synthetic-login-a");
+        AtomicInteger acceptedCalls = new AtomicInteger();
+        CloudApi accepted = new CloudApi((method, path, headers, body) -> {
+            acceptedCalls.incrementAndGet();
+            login.set("synthetic-login-b");
+            return new CloudApi.Exchange(200, "application/json", null, updatedSkin());
+        }, account, ignored -> "");
+        CommunityCatalog.Update oldSuccess = new CommunityCatalog(getTargetContext(), accepted)
+            .setCategory(syntheticSkin(), CommunityRequest.Category.TECH);
+        check(acceptedCalls.get() == 1 && oldSuccess.failed()
+                && oldSuccess.failure().contains("登录已切换"),
+            "old category response must not be accepted after a new login");
+    }
+
+    private void communityCategoryRetriesWithinTheSameLogin() throws Exception {
+        AtomicReference<String> token = new AtomicReference<>(ACCESS);
+        CloudApi.Tokens account = new CloudApi.Tokens() {
+            @Override public String token(String rejected) {
+                if (rejected != null) token.set(NEXT_ACCESS);
+                return token.get();
+            }
+            @Override public String sessionId() { return "synthetic-login-a"; }
+        };
+        AtomicInteger calls = new AtomicInteger();
+        CloudApi cloud = new CloudApi((method, path, headers, body) -> {
+            calls.incrementAndGet();
+            boolean refreshed = ("Bearer " + NEXT_ACCESS).equals(headers.get("Authorization"));
+            return new CloudApi.Exchange(refreshed ? 200 : 401, "application/json", null,
+                refreshed ? updatedSkin() : new byte[0]);
+        }, account, ignored -> "");
+        CommunityCatalog.Update update = new CommunityCatalog(getTargetContext(), cloud)
+            .setCategory(syntheticSkin(), CommunityRequest.Category.TECH);
+        check(!update.failed() && update.item().category() == CommunityRequest.Category.TECH,
+            "same login category update accepts a refreshed token");
+        check(calls.get() == 2, "same login category update retries once");
+
+        CloudApi signedOut = new CloudApi((method, path, headers, body) -> {
+            throw new AssertionError("signed-out category update must not send a request");
+        }, rejected -> "", rejected -> "");
+        CommunityCatalog.Update missing = new CommunityCatalog(getTargetContext(), signedOut)
+            .setCategory(syntheticSkin(), CommunityRequest.Category.TECH);
+        check(missing.failed() && missing.failure().contains("请先登录水杉账号"),
+            "signed-out category update keeps its sign-in guidance");
+    }
+
     private static void unauthorizedRefreshClearsSession() throws Exception {
         MemoryStore store = new MemoryStore(expiredSession());
         BackendAccount account = new BackendAccount(store, (method, path, body, token) -> {
@@ -384,9 +467,13 @@ public final class BackendAccountRefreshDeviceSmoke extends Instrumentation {
             chatStreamRetriesWithinTheSameLogin();
             stage = "same login stream fallback";
             chatStreamFallsBackWithinTheSameLogin();
+            stage = "community category old login";
+            communityCategoryRejectsNewLogin();
+            stage = "community category same login";
+            communityCategoryRetriesWithinTheSameLogin();
             unauthorizedRefreshClearsSession();
             unboundedPersistedExpiryIsRejected();
-            result.putString("stream", "MSIME_DEVICE_SMOKE_PASSED: account refresh, login lineage, chat stream and unauthorized clearing\n");
+            result.putString("stream", "MSIME_DEVICE_SMOKE_PASSED: account refresh, login lineage, chat stream and community category\n");
             finish(Activity.RESULT_OK, result);
         } catch (Exception | AssertionError error) {
             result.putString("stream", "MSIME_DEVICE_SMOKE_FAILED: account refresh " + stage + " ("
