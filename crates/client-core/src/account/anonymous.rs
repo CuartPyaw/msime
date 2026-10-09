@@ -195,6 +195,7 @@ fn validate_opened_private_json_file(
 
 fn read_private_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>, AccountError> {
     let parent = path.parent().ok_or(AccountError::Storage)?;
+    #[cfg(unix)]
     let name = path.file_name().ok_or(AccountError::Storage)?;
     crate::storage::reject_symlink(parent).map_err(|_| AccountError::Storage)?;
     #[cfg(unix)]

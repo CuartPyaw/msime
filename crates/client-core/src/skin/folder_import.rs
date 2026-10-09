@@ -1,5 +1,6 @@
 //! Copying a picked skin folder into a host's skin root.
 
+#[cfg(unix)]
 use std::fs::File;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};

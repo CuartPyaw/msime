@@ -238,7 +238,7 @@ impl NoticeStore {
         })
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     fn read(&self) -> NoticeCache {
         let path = self.directory.join(NOTICES_FILE);
         if !self.directory.is_absolute() {

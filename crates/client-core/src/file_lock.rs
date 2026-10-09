@@ -137,12 +137,14 @@ pub(crate) fn open_lock_file(path: impl AsRef<Path>) -> io::Result<File> {
 /// Open a lock file with owner-only permissions on Unix hosts.
 pub fn open_private_lock_file(path: impl AsRef<Path>) -> io::Result<File> {
     let path = path.as_ref();
-    let mut options = secure_lock_file_options(path)?;
+    let options = secure_lock_file_options(path)?;
     #[cfg(unix)]
-    {
+    let options = {
         use std::os::unix::fs::OpenOptionsExt;
+        let mut options = options;
         options.mode(0o600);
-    }
+        options
+    };
     ensure_regular(options.open(path)?)
 }
 
@@ -310,6 +312,7 @@ pub fn exclusive(file: &File) -> io::Result<()> {
     }
 }
 
+#[cfg(unix)]
 pub(crate) fn unlock(file: &File) -> io::Result<()> {
     #[cfg(not(target_os = "android"))]
     {
