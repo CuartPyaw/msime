@@ -145,6 +145,13 @@ public final class ViewPolicy {
         return view;
     }
 
+    /** 创建使用指定纯色背景的视图。 */
+    public static View newColorView(Context context, int color) {
+        View view = new View(context);
+        setBackgroundColor(view, color);
+        return view;
+    }
+
     /** Create a keyboard press button with authored casing preserved. */
     public static KeyboardPressButton newPressButton(android.content.Context context) {
         KeyboardPressButton button = new KeyboardPressButton(context);

@@ -98,7 +98,7 @@ public final class FeedbackPage extends DetailPage {
         card.addView(input, Ui.matchWidth());
         detail = input;
 
-        View rule = Ui.hairlineView(context);
+        View rule = ViewPolicy.newColorView(context, Ui.hairline(context));
         LinearLayout.LayoutParams ruleParams = KeyboardGeometry.matchWidthHeightPx(
             KeyboardGeometry.atLeastOnePixel(context, 0.5f));
         ruleParams.setMarginStart(Ui.dp(requireContext(), 16));

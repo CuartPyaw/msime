@@ -42,6 +42,8 @@ def main() -> None:
         "view.setOrientation(LinearLayout.VERTICAL);",
         "public static LinearLayout.LayoutParams newSquareParamsPx(int size)",
         "return new LinearLayout.LayoutParams(size, size);",
+        "public static View newColorView(Context context, int color)",
+        "setBackgroundColor(view, color);",
     )
     missing = [snippet for snippet in required if snippet not in view_policy]
     if missing:
@@ -85,6 +87,16 @@ def main() -> None:
         source = (HOME / name).read_text(encoding="utf-8")
         if "ViewPolicy.setBottomPadding(target, bottom);" not in source:
             raise AssertionError(f"{name} 没有调用共享底部内边距策略")
+    if "public static View hairlineView(" in ui:
+        raise AssertionError("Ui 仍保留发丝线视图工厂")
+    for path in HOME.glob("*.java"):
+        if "Ui.hairlineView(" in path.read_text(encoding="utf-8"):
+            raise AssertionError(f"{path} 没有直接调用共享着色视图工厂")
+    if "ViewPolicy.newColorView(context, hairline(context));" not in ui:
+        raise AssertionError("Ui 分隔线没有调用共享着色视图工厂")
+    feedback = (HOME / "FeedbackPage.java").read_text(encoding="utf-8")
+    if "ViewPolicy.newColorView(context, Ui.hairline(context));" not in feedback:
+        raise AssertionError("FeedbackPage 没有调用共享着色视图工厂")
     if "public static void setHorizontalPaddingPx(" in ui:
         raise AssertionError("Ui 仍保留水平像素内边距转发方法")
     for path in HOME.glob("*.java"):
