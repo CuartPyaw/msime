@@ -848,6 +848,7 @@ export {
   TelemetryRow,
   TelemetrySection,
   usageReportingDescription,
+  usageReportingSummary,
   type TelemetrySectionProps,
 } from "./settings/telemetry-section";
 export { WubiSection, type WubiPreferences, type WubiSectionProps } from "./settings/wubi-section";
