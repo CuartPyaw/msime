@@ -227,35 +227,37 @@ impl ZhuyinScheme {
 
     /// 打出组字的键，按顺序，供光标锁定的编辑文本使用；九键下是数字串加声调键，例如 `28c39c4`。
     pub fn editing_text(&self) -> String {
-        let mut keys = build_editing_keys(&self.syllables, &self.pending);
+        let mut keys =
+            build_editing_keys(&self.syllables, &self.pending, self.pending_digits.len());
         keys.extend(self.pending_digits.iter().map(|digit| char::from(*digit)));
         keys
     }
 
     fn editing_text_into(&self, keys: &mut String) {
-        append_editing_keys(&self.syllables, &self.pending, keys);
-        keys.reserve(self.pending_digits.len());
+        append_editing_keys(
+            &self.syllables,
+            &self.pending,
+            self.pending_digits.len(),
+            keys,
+        );
         keys.extend(self.pending_digits.iter().map(|digit| char::from(*digit)));
     }
 
     /// 转换后的文字加上还在拼的部分：大千是待定的注音符号，例如 `你好ㄇㄚ`；九键是还没按声调的数字，例如 `你好28`。
     pub fn reading(&self) -> String {
-        let mut reading = build_converted_text(&self.conversion);
-        if let Some(symbol) = self.pending.initial {
-            reading.push(symbol);
-        }
-        if let Some(symbol) = self.pending.medial {
-            reading.push(symbol);
-        }
-        if let Some(symbol) = self.pending.rime {
-            reading.push(symbol);
-        }
-        reading.extend(self.pending_digits.iter().map(|digit| char::from(*digit)));
+        let mut reading = String::new();
+        self.reading_into(&mut reading);
         reading
     }
 
     fn reading_into(&self, reading: &mut String) {
-        append_converted_text(&self.conversion, reading);
+        let pending_capacity = [self.pending.initial, self.pending.medial, self.pending.rime]
+            .into_iter()
+            .flatten()
+            .map(char::len_utf8)
+            .sum::<usize>()
+            + self.pending_digits.len();
+        append_converted_text(&self.conversion, pending_capacity, reading);
         if let Some(symbol) = self.pending.initial {
             reading.push(symbol);
         }
@@ -265,7 +267,6 @@ impl ZhuyinScheme {
         if let Some(symbol) = self.pending.rime {
             reading.push(symbol);
         }
-        reading.reserve(self.pending_digits.len());
         reading.extend(self.pending_digits.iter().map(|digit| char::from(*digit)));
     }
 
@@ -554,22 +555,24 @@ impl ZhuyinScheme {
             }
         }
         let singles = &singles[..count];
-        self.conversion = conversion::convert(
+        self.conversion = conversion::convert_filtered(
             positions.len(),
             &self.pins,
-            |start, end| {
-                cached_best(dictionary, best, &positions[start..end], |entry| {
-                    entry
-                        .filter(|(_, entry)| {
-                            clears_ambiguous_word_floor(
-                                &ambiguous[start..end],
-                                singles,
-                                start,
-                                entry,
-                            )
-                        })
-                        .cloned()
-                })
+            |start, end, can_improve| {
+                cached_best(
+                    dictionary,
+                    best,
+                    &positions[start..end],
+                    |entry| match entry.filter(|(_, entry)| {
+                        clears_ambiguous_word_floor(&ambiguous[start..end], singles, start, entry)
+                    }) {
+                        Some((key, entry)) if can_improve(entry.weight) => {
+                            conversion::Lookup::Found(key.clone(), entry.clone())
+                        }
+                        Some(_) => conversion::Lookup::Rejected,
+                        None => conversion::Lookup::Missing,
+                    },
+                )
             },
             |index| positions[index][0].clone(),
         )?;
@@ -828,19 +831,28 @@ fn describe(positions: &[&[String]], description: &mut String) {
     }
 }
 
-fn build_editing_keys(syllables: &[Syllable], pending: &PendingSyllable) -> String {
+fn build_editing_keys(
+    syllables: &[Syllable],
+    pending: &PendingSyllable,
+    extra_capacity: usize,
+) -> String {
     let mut keys = String::new();
-    append_editing_keys(syllables, pending, &mut keys);
+    append_editing_keys(syllables, pending, extra_capacity, &mut keys);
     keys
 }
 
 fn build_converted_text(spans: &[Span]) -> String {
     let mut text = String::new();
-    append_converted_text(spans, &mut text);
+    append_converted_text(spans, 0, &mut text);
     text
 }
 
-fn append_editing_keys(syllables: &[Syllable], pending: &PendingSyllable, keys: &mut String) {
+fn append_editing_keys(
+    syllables: &[Syllable],
+    pending: &PendingSyllable,
+    extra_capacity: usize,
+    keys: &mut String,
+) {
     let pending_capacity = usize::from(pending.initial.is_some())
         + usize::from(pending.medial.is_some())
         + usize::from(pending.rime.is_some());
@@ -848,23 +860,20 @@ fn append_editing_keys(syllables: &[Syllable], pending: &PendingSyllable, keys: 
         .iter()
         .map(|syllable| syllable.keys.len())
         .sum::<usize>()
-        + pending_capacity;
+        + pending_capacity
+        + extra_capacity;
     keys.clear();
-    if keys.capacity() < capacity {
-        keys.reserve(capacity - keys.capacity());
-    }
+    keys.reserve(capacity);
     for syllable in syllables {
         keys.push_str(&syllable.keys);
     }
     pending.append_keys(keys);
 }
 
-fn append_converted_text(spans: &[Span], text: &mut String) {
-    let capacity = spans.iter().map(|span| span.text.len()).sum::<usize>();
+fn append_converted_text(spans: &[Span], extra_capacity: usize, text: &mut String) {
+    let capacity = spans.iter().map(|span| span.text.len()).sum::<usize>() + extra_capacity;
     text.clear();
-    if text.capacity() < capacity {
-        text.reserve(capacity - text.capacity());
-    }
+    text.reserve(capacity);
     for span in spans {
         text.push_str(&span.text);
     }
@@ -917,7 +926,7 @@ mod tests {
             rime: None,
         };
 
-        assert_eq!(build_editing_keys(&syllables, &pending), "su3lc3a8");
+        assert_eq!(build_editing_keys(&syllables, &pending, 0), "su3lc3a8");
     }
 
     #[test]
@@ -1028,6 +1037,130 @@ mod tests {
 
         assert_eq!(description, "ㄋㄧˇ ㄏㄠˇ ㄋㄧˇ|ㄌㄧˇ");
         assert_eq!(allocations, 1);
+    }
+
+    #[test]
+    fn reading_pending_suffix_buffer_allocates_once() {
+        let (_dir, mut scheme) = scheme();
+        scheme.conversion = (0..MAX_SYLLABLES)
+            .map(|start| Span {
+                start,
+                end: start + 1,
+                key: "ㄋㄧˇ".to_owned(),
+                text: "合".to_owned(),
+            })
+            .collect();
+        for digits in [false, true] {
+            scheme.pending = if digits {
+                PendingSyllable::default()
+            } else {
+                PendingSyllable {
+                    initial: Some('ㄇ'),
+                    medial: Some('ㄧ'),
+                    rime: Some('ㄢ'),
+                }
+            };
+            scheme.pending_digits = if digits { b"28".to_vec() } else { Vec::new() };
+            let expected = format!(
+                "{}{}",
+                "合".repeat(MAX_SYLLABLES),
+                if digits { "28" } else { "ㄇㄧㄢ" }
+            );
+            let mut reading = String::with_capacity(16);
+            let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+                scheme.reading_into(&mut reading);
+            });
+            assert_eq!(reading, expected);
+            assert_eq!(allocations, 1, "待定符号和数字应纳入一次容量预留");
+            let (reading, allocations) =
+                crate::ime::personal_rerank::allocations::count(|| scheme.reading());
+            assert_eq!(reading, expected);
+            assert_eq!(allocations, 1);
+        }
+    }
+
+    #[test]
+    fn editing_pending_digits_buffer_allocates_once() {
+        let (_dir, mut scheme) = scheme();
+        scheme.syllables = (0..MAX_SYLLABLES)
+            .map(|_| syllable("28c", &["ㄋㄧˇ"]))
+            .collect();
+        scheme.pending_digits.extend_from_slice(b"28");
+        let expected = format!("{}28", "28c".repeat(MAX_SYLLABLES));
+        let mut keys = String::with_capacity(16);
+        let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            scheme.editing_text_into(&mut keys);
+        });
+        assert_eq!(keys, expected);
+        assert_eq!(allocations, 1, "待定数字应纳入一次按键容量预留");
+        let (keys, allocations) =
+            crate::ime::personal_rerank::allocations::count(|| scheme.editing_text());
+        assert_eq!(keys, expected);
+        assert_eq!(allocations, 1);
+    }
+
+    #[test]
+    fn editing_keys_growing_buffer_allocates_once() {
+        let syllables = (0..MAX_SYLLABLES)
+            .map(|_| syllable("su3", &["ㄋㄧˇ"]))
+            .collect::<Vec<_>>();
+        let pending = PendingSyllable {
+            initial: Some('ㄇ'),
+            medial: None,
+            rime: Some('ㄚ'),
+        };
+        let expected = format!("{}a8", "su3".repeat(MAX_SYLLABLES));
+        for capacity in [16, 0, 128] {
+            let mut keys = String::with_capacity(capacity);
+            if capacity > 0 {
+                keys.push_str("舊值");
+            }
+            let old_capacity = keys.capacity();
+            let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+                append_editing_keys(&syllables, &pending, 0, &mut keys);
+            });
+            assert_eq!(keys, expected);
+            assert_eq!(allocations, usize::from(old_capacity < expected.len()));
+            let capacity = keys.capacity();
+            let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+                append_editing_keys(&[], &PendingSyllable::default(), 0, &mut keys);
+            });
+            assert!(keys.is_empty());
+            assert_eq!(allocations, 0);
+            assert_eq!(keys.capacity(), capacity);
+        }
+    }
+
+    #[test]
+    fn converted_text_growing_buffer_allocates_once() {
+        let spans = (0..MAX_SYLLABLES)
+            .map(|start| Span {
+                start,
+                end: start + 1,
+                key: "ㄋㄧˇ".to_owned(),
+                text: "合".to_owned(),
+            })
+            .collect::<Vec<_>>();
+        let expected = "合".repeat(MAX_SYLLABLES);
+        for capacity in [16, 0, 128] {
+            let mut text = String::with_capacity(capacity);
+            if capacity > 0 {
+                text.push_str("舊值");
+            }
+            let old_capacity = text.capacity();
+            let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+                append_converted_text(&spans, 0, &mut text);
+            });
+            assert_eq!(text, expected);
+            assert_eq!(allocations, usize::from(old_capacity < expected.len()));
+            let capacity = text.capacity();
+            let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+                append_converted_text(&[], 0, &mut text);
+            });
+            assert!(text.is_empty());
+            assert_eq!(allocations, 0);
+            assert_eq!(text.capacity(), capacity);
+        }
     }
 
     #[test]
@@ -1551,6 +1684,67 @@ mod tests {
         assert!(best.description.is_empty());
         assert_eq!(best.description.capacity(), capacity);
         assert!(cached_best(&scheme.dictionary, &mut best, &[&readings], |_| ()).is_err());
+    }
+
+    #[test]
+    fn rejected_cached_single_rows_do_not_become_fallbacks() {
+        let (_dir, mut scheme) = scheme_with(&[
+            ("ㄋㄧˇ", "甲", 0),
+            ("ㄏㄠˇ", "乙", 0),
+            ("ㄇㄚ", "丙", 0),
+            ("ㄊㄞˊ", "丁", -20),
+            ("ㄏㄠˇ ㄇㄚ", "乙丙", 0),
+            ("ㄇㄚ ㄊㄞˊ", "丙丁", -10),
+        ]);
+        scheme.syllables = ["ㄋㄧˇ", "ㄏㄠˇ", "ㄇㄚ", "ㄊㄞˊ"]
+            .into_iter()
+            .map(|reading| syllable("合成按鍵", &[reading]))
+            .collect();
+
+        scheme.reconvert().unwrap();
+
+        assert_eq!(
+            scheme
+                .conversion
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<Vec<_>>(),
+            ["甲", "乙", "丙丁"]
+        );
+        assert_eq!(scheme.conversion[2].key, "ㄇㄚ ㄊㄞˊ");
+    }
+
+    #[test]
+    fn warmed_dense_conversion_only_clones_improving_paths() {
+        let entries = (1..=MAX_SYLLABLES)
+            .map(|len| (vec!["ㄋㄧˇ"; len].join(" "), "合".repeat(len), len as i64))
+            .collect::<Vec<_>>();
+        let rows = entries
+            .iter()
+            .map(|(key, text, weight)| (key.as_str(), text.as_str(), *weight))
+            .collect::<Vec<_>>();
+        let (dir, mut scheme) = scheme_with(&rows);
+        scheme.syllables = (0..MAX_SYLLABLES)
+            .map(|_| syllable("su3", &["ㄋㄧˇ"]))
+            .collect();
+        scheme.reconvert().unwrap();
+        Connection::open(dir.path().join("msime-zhuyin.db"))
+            .unwrap()
+            .execute_batch("DROP TABLE entries")
+            .unwrap();
+
+        let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            scheme.reconvert().unwrap();
+        });
+
+        assert_eq!(scheme.conversion.len(), 1);
+        assert_eq!(scheme.conversion[0].key, entries.last().unwrap().0);
+        assert_eq!(scheme.conversion[0].text, entries.last().unwrap().1);
+        assert_eq!(
+            allocations,
+            MAX_SYLLABLES * 2 + 1,
+            "只应复制首次改善路径的二十组词条字符串，并分配返回向量"
+        );
     }
 
     #[test]
