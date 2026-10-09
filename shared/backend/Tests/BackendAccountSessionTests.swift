@@ -104,6 +104,22 @@ final class BackendAccountSessionTests: XCTestCase {
     XCTAssertNil(try storage.load())
   }
 
+  func testStaleForgetCannotRemoveReplacementAccount() async throws {
+    let replacement = BackendAccountClient.Tokens(
+      access_token: String(repeating: "b", count: 64), refresh_token: String(repeating: "c", count: 64),
+      token_type: "Bearer", expires_in: 900,
+      user: .init(id: "replacement-user", display_name: "Replacement", created_at: "2026-09-08"))
+    let storage = MemorySessions(try BackendSavedSession.forTokens(replacement))
+    let session = BackendAccountSession(api: RefreshAPI(), storage: storage, refreshLock: BackendProcessRefreshLock())
+    do {
+      try await session.forget(matchingUserID: "synthetic-user", removingAccount: { _ in
+        XCTFail("stale cleanup must not run for the replacement account")
+      })
+      XCTFail("old account's completion must not clear the replacement account")
+    } catch is CancellationError { }
+    XCTAssertEqual(try storage.load()?.tokens.user.id, "replacement-user")
+  }
+
   func testFailedReplacementCleanupKeepsOldIdentity() async throws {
     let storage = MemorySessions(try BackendSavedSession.forTokens(RefreshAPI.tokens()))
     let replacement = BackendAccountClient.Tokens(

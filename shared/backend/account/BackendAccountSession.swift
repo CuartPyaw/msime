@@ -468,12 +468,18 @@ actor BackendAccountSession {
   func forget(removingAccount cleanup: @Sendable (String) throws -> Void = { _ in }) async throws {
     try await forget(removingAccount: cleanup, fallbackAccountID: nil)
   }
+  func forget(matchingUserID expected: String,
+              removingAccount cleanup: @Sendable (String) throws -> Void = { _ in }) async throws {
+    try await forget(removingAccount: cleanup, fallbackAccountID: expected, matchingUserID: expected)
+  }
   private func forget(removingAccount cleanup: @Sendable (String) throws -> Void,
-                      fallbackAccountID: String?) async throws {
+                      fallbackAccountID: String?, matchingUserID expectedUserID: String? = nil) async throws {
     // Keep the old identity before clearing memory. The shared lock below rechecks the account
     // so an older sign-out cannot clear another process's replacement session. A refresh by
     // that process rotates its token but must still allow this sign-out to finish.
-    let expected = (try? storage.load()) ?? saved
+    let stored = try storage.load()
+    if let expectedUserID, stored?.tokens.user.id != expectedUserID { throw CancellationError() }
+    let expected = stored ?? saved
     let accountID = expected?.tokens.user.id ?? fallbackAccountID
     generation += 1
     refreshing?.cancel(); refreshing = nil
@@ -482,13 +488,16 @@ actor BackendAccountSession {
     // 清理必须在共享锁内完成，避免另一个进程正在刷新的 token 在注销后写回。
     // 如果暂时拿不到锁就保留持久化会话；无锁清理会让进行中的刷新重新复活已注销的会话。
     try await refreshLock.run {
-      try await self.clearStorage(at: version, accountID: accountID, cleanup: cleanup)
+      try await self.clearStorage(at: version, accountID: accountID,
+                                  matchingUserID: expectedUserID, cleanup: cleanup)
     }
   }
   private func clearStorage(at version: Int, accountID: String?,
+                            matchingUserID expectedUserID: String?,
                             cleanup: @Sendable (String) throws -> Void) throws {
     guard generation == version else { throw CancellationError() }
-    let current = try? storage.load()
+    let current = try storage.load()
+    if let expectedUserID, current?.tokens.user.id != expectedUserID { throw CancellationError() }
     if let current, current.tokens.user.id != accountID { throw CancellationError() }
     if let accountID = current?.tokens.user.id ?? accountID { try cleanup(accountID) }
     try storage.clear()

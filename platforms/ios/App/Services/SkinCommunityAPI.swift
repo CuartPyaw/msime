@@ -208,14 +208,15 @@ actor SkinCommunityAPI {
   /// Run one account request with the token that was actually used. A session may still look
   /// unexpired locally when the backend has revoked that access token, so retry exactly once after
   /// rotating it. Callers receive the token paired with the successful result for session updates.
-  private func accountRequest<T>(_ operation: (String) async throws -> T) async throws -> (value: T, token: String) {
-    var token = try await account.accessToken()
-    do {
-      return (try await operation(token), token)
-    } catch let error as BackendAccountClient.Failure where error.status == 401 {
-      token = try await account.accessToken(retrying: token)
-      return (try await operation(token), token)
-    }
+  private func accountRequest<T: Sendable>(matchingUserID expected: String? = nil,
+                                           _ operation: @Sendable (String) async throws -> T) async throws -> (value: T, token: String) {
+    let userID: String
+    if let expected { userID = expected }
+    else { userID = try await account.credentials().userID }
+    let result = try await account.authenticated(matchingUserID: userID, operation)
+    _ = try await account.credentials(matchingUserID: userID)
+    try Task.checkCancellation()
+    return result
   }
 
   func challenge() async throws -> CommunityChallenge {
@@ -239,15 +240,17 @@ actor SkinCommunityAPI {
     guard CommunityProfilePolicy.validName(name) else {
       throw CommunityFailure(message: "昵称需为 1–64 个字符，不能包含换行或控制字符。")
     }
-    _ = try await accountRequest { token in try await client.rename(name, token: token) }
-    let result = try await accountRequest { token in try await client.profile(token: token) }
+    let userID = try await account.credentials().userID
+    _ = try await accountRequest(matchingUserID: userID) { token in try await client.rename(name, token: token) }
+    let result = try await accountRequest(matchingUserID: userID) { token in try await client.profile(token: token) }
     try await account.updateUser(result.value.user, matching: result.token)
     return result.value
   }
   func logout(deleteAccount: Bool = false, all: Bool = false) async throws {
     if deleteAccount {
-      _ = try await accountRequest { token in try await client.deleteAccount(token: token) }
-      try await account.forget(removingAccount: { accountID in
+      let userID = try await account.credentials().userID
+      _ = try await accountRequest(matchingUserID: userID) { token in try await client.deleteAccount(token: token) }
+      try await account.forget(matchingUserID: userID, removingAccount: { accountID in
         try DictionarySnapshotQueue().cancelIfPresent(accountID: accountID)
       })
     } else {
@@ -476,8 +479,8 @@ actor SkinCommunityAPI {
     }
     guard let id = UUID(uuidString: itemID) else { throw CommunityFailure(message: "作品不存在或已下架。") }
     do {
-      if try await account.user() != nil {
-        _ = try await accountRequest { token in
+      if let userID = try await account.user()?.id {
+        _ = try await accountRequest(matchingUserID: userID) { token in
           try await client.reportContent(kind: kind, itemID: id, reason: reason, detail: detail, token: token)
         }
         return
