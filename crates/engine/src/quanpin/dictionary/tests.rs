@@ -144,6 +144,19 @@ fn segment_row_cache_hit_borrows_the_segmentation_key() {
 }
 
 #[test]
+fn automatic_segmentation_reuses_the_joined_code_for_word_items() {
+    let fixture = Fixture::new();
+    fixture.insert("ni'hao", "你好", 10);
+    let mut dictionary = QuanpinDictionary::new(&fixture.paths);
+    let segments = vec!["ni".to_owned(), "hao".to_owned()];
+    let _ = dictionary.query_database(&segments, "");
+    let (_, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+        let _ = dictionary.query_database(&segments, "");
+    });
+    assert_eq!(allocations, 6, "自动分段查询重复拼接了读音: {allocations}");
+}
+
+#[test]
 fn truncating_a_joined_prefix_drops_only_the_last_segment() {
     let mut segmentation = "ni'hao'ma".to_owned();
     truncate_last_segment(&mut segmentation);

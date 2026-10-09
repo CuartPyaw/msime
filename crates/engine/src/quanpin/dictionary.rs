@@ -875,12 +875,9 @@ impl QuanpinDictionary {
             return rows;
         }
         // The segments were normalised once in `resolve_segments`, so the lookup uses the standard keys directly.
-        let key = if segmentation.is_empty() {
-            Cow::Owned(join_segments(segments))
-        } else {
-            Cow::Borrowed(segmentation)
-        };
-        let rows = if let Some(rows) = self.segment_row_cache.get_ref_by(key.as_ref()) {
+        let code = segmentation.is_empty().then(|| join_segments(segments));
+        let key = code.as_deref().unwrap_or(segmentation);
+        let rows = if let Some(rows) = self.segment_row_cache.get_ref_by(key) {
             rows.clone()
         } else {
             let rows = self.database.query_segments_keyed_flat(
@@ -888,16 +885,14 @@ impl QuanpinDictionary {
                 UNLIMITED_ROWS,
                 QuerySource::Quanpin,
             );
-            self.segment_row_cache
-                .insert(key.into_owned(), rows.clone());
+            self.segment_row_cache.insert(key.to_owned(), rows.clone());
             rows
         };
-        if segmentation.is_empty() {
-            let code = join_segments(segments);
+        if let Some(code) = code.as_deref() {
             rows.into_iter()
                 .map(|row| {
                     WordItem::new(
-                        &code,
+                        code,
                         row.value,
                         row.weight,
                         CandidateSource::Database,
