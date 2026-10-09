@@ -31,14 +31,14 @@ public final class KeyboardPreview extends View {
         {"，", "@#", "ABC", "DEF", "⌫"},
         {"。", "GHI", "JKL", "MNO", "重输"},
         {"？", "PQRS", "TUV", "WXYZ", "0"},
-        {"123", "中", "，", "空格", "。", "↵"},
+        {"123", "，", "空格", "。", "中", "↵"},
     };
-    /** 设计的全键盘：中文模式小写字母，底行 `123 | 中 | ， | 空格 | 。 | ↵`。 */
+    /** 设计的全键盘：中文模式小写字母，底行 `123 | ， | 空格 | 。 | 中 | ↵`。 */
     private static final String[][] FULL_ROWS = {
         {"q", "w", "e", "r", "t", "y", "u", "i", "o", "p"},
         {"a", "s", "d", "f", "g", "h", "j", "k", "l"},
         {"⇧", "z", "x", "c", "v", "b", "n", "m", "⌫"},
-        {"123", "中", "，", "空格", "。", "↵"},
+        {"123", "，", "空格", "。", "中", "↵"},
     };
     /** 画成功能键底色的键面。 */
     private static final java.util.Set<String> FUNCTION_KEYS = java.util.Set.of(
