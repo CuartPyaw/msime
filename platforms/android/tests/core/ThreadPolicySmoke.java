@@ -19,6 +19,15 @@ public final class ThreadPolicySmoke {
         thread.start();
         thread.join();
         check(ran.get(), "worker task runs");
+
+        AtomicBoolean directRan = new AtomicBoolean(false);
+        Thread direct = ThreadPolicy.namedDaemonThread("msime-smoke-direct", () -> directRan.set(true));
+        check("msime-smoke-direct".equals(direct.getName()), "direct thread name is preserved");
+        check(direct.isDaemon(), "direct worker thread is a daemon");
+        check(direct.getState() == Thread.State.NEW, "direct thread is not started");
+        direct.start();
+        direct.join();
+        check(directRan.get(), "direct worker task runs");
         System.out.println("Android named daemon thread factory passed");
     }
 }

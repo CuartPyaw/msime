@@ -20,6 +20,9 @@ SITES = {
     JAVA / "voice/AiPolishClient.java": ("msime-ai-polish",),
     JAVA / "voice/LocalAsrRecognizer.java": ("msime-local-asr-release",),
 }
+DIRECT_SITES = {
+    JAVA / "home/AiSkinPage.java": ("msime-ai-skin-generate",),
+}
 
 
 def main() -> int:
@@ -32,6 +35,15 @@ def main() -> int:
         source = path.read_text(encoding="utf-8")
         for name in names:
             expected = f'ThreadPolicy.namedDaemonFactory("{name}")'
+            if expected not in source:
+                errors.append(f"{path}: {name} 未复用 ThreadPolicy")
+        if "setDaemon(true)" in source:
+            errors.append(f"{path}: 仍在重复配置守护线程")
+
+    for path, names in DIRECT_SITES.items():
+        source = path.read_text(encoding="utf-8")
+        for name in names:
+            expected = f'ThreadPolicy.namedDaemonThread("{name}",'
             if expected not in source:
                 errors.append(f"{path}: {name} 未复用 ThreadPolicy")
         if "setDaemon(true)" in source:
