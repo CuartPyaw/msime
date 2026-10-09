@@ -109,6 +109,11 @@ public final class ViewPolicy {
         view.setPadding(horizontal, view.getPaddingTop(), horizontal, view.getPaddingBottom());
     }
 
+    /** 只替换底部内边距，保留其余三边。 */
+    public static void setBottomPadding(View view, int bottom) {
+        setPadding(view, view.getPaddingLeft(), view.getPaddingTop(), view.getPaddingRight(), bottom);
+    }
+
     /** Apply explicit pixel padding on all four sides. */
     public static void setPadding(View view, int left, int top, int right, int bottom) {
         view.setPadding(left, top, right, bottom);

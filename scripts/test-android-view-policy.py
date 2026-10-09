@@ -32,6 +32,8 @@ def main() -> None:
         "return view != null && view.getVisibility() == View.VISIBLE;",
         "public static void setPaddingIfChanged(View view, int left, int top, int right, int bottom)",
         "if (view.getPaddingLeft() == left && view.getPaddingTop() == top",
+        "public static void setBottomPadding(View view, int bottom)",
+        "setPadding(view, view.getPaddingLeft(), view.getPaddingTop(), view.getPaddingRight(), bottom);",
         "public static void setVisibleIfChanged(View view, boolean visible)",
         "if (view.getVisibility() == visibility) return;",
         "public static LinearLayout newRow(Context context)",
@@ -74,6 +76,15 @@ def main() -> None:
         raise AssertionError("Ui 按钮没有直接调用共享文本最小宽度策略")
     if "public static void setEnabledLook(" in ui:
         raise AssertionError("Ui 仍保留无调用方的启用状态转发方法")
+    if "public static void setBottomPadding(" in ui:
+        raise AssertionError("Ui 仍保留底部内边距转发方法")
+    for path in HOME.glob("*.java"):
+        if "Ui.setBottomPadding(" in path.read_text(encoding="utf-8"):
+            raise AssertionError(f"{path} 没有直接调用共享底部内边距策略")
+    for name in ("DetailPage.java", "KeyboardFragment.java"):
+        source = (HOME / name).read_text(encoding="utf-8")
+        if "ViewPolicy.setBottomPadding(target, bottom);" not in source:
+            raise AssertionError(f"{name} 没有调用共享底部内边距策略")
     if "public static void setHorizontalPaddingPx(" in ui:
         raise AssertionError("Ui 仍保留水平像素内边距转发方法")
     for path in HOME.glob("*.java"):

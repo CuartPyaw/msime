@@ -105,7 +105,7 @@ public final class KeyboardFragment extends HomeTabFragment {
             Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
             Insets ime = insets.getInsets(WindowInsetsCompat.Type.ime());
             int bottom = Ui.bottomContentInset(bars.bottom, tabs, ime.bottom, base);
-            Ui.setBottomPadding(target, bottom);
+            ViewPolicy.setBottomPadding(target, bottom);
             return insets;
         });
         ViewCompat.requestApplyInsets(scroll);
