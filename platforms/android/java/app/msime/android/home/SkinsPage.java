@@ -166,10 +166,9 @@ public final class SkinsPage extends DetailPage {
             KeyboardGeometry.frameMatchWidthHeightPx(Ui.dp(context, 76)));
         cell.addView(tile, Ui.matchWidth());
 
-        TextView name = Ui.styledLabel(context, card.selected() ? "✓ " + card.title() : card.title(),
+        TextView name = Ui.centeredLabel(context, card.selected() ? "✓ " + card.title() : card.title(),
             Ui.TEXT_ROW_SUBTITLE + 1, card.selected() ? 600 : 400,
             card.selected() ? Ui.accent(context) : Ui.text(context));
-        ViewPolicy.setCentered(name);
         ViewPolicy.setSingleLineEllipsized(name);
         LinearLayout.LayoutParams nameParams = Ui.matchWidth();
         nameParams.topMargin = Ui.dp(context, 8);
@@ -193,16 +192,13 @@ public final class SkinsPage extends DetailPage {
             KeyboardGeometry.atLeastOnePixel(context, 1.5f), Ui.accent(context), Ui.dp(context, 6),
             Ui.dp(context, 4));
         ViewPolicy.setBackground(tile, dashed);
-        TextView spark = Ui.styledLabel(context, "✦", 22, 400, Ui.accent(context));
-        ViewPolicy.setCentered(spark);
+        TextView spark = Ui.centeredLabel(context, "✦", 22, 400, Ui.accent(context));
         tile.addView(spark);
-        TextView hint = Ui.styledLabel(context, "描述一句话生成", 12, 400, Ui.accent(context));
-        ViewPolicy.setCentered(hint);
+        TextView hint = Ui.centeredLabel(context, "描述一句话生成", 12, 400, Ui.accent(context));
         tile.addView(hint);
         cell.addView(tile, KeyboardGeometry.matchWidthHeightPx(Ui.dp(context, 76) + Ui.dp(context, 6)));
-        TextView name = Ui.styledLabel(context, "AI 设计皮肤", Ui.TEXT_ROW_SUBTITLE + 1, 500,
+        TextView name = Ui.centeredLabel(context, "AI 设计皮肤", Ui.TEXT_ROW_SUBTITLE + 1, 500,
             Ui.accent(context));
-        ViewPolicy.setCentered(name);
         LinearLayout.LayoutParams nameParams = Ui.matchWidth();
         nameParams.topMargin = Ui.dp(context, 8);
         cell.addView(name, nameParams);

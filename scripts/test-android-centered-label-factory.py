@@ -27,6 +27,7 @@ def main() -> int:
             errors.append(f"{UI}: 居中标签工厂缺少：{snippet}")
 
     consumers = {
+        "CloudClipboardPage.java": 1,
         "InputDialog.java": 1,
         "LexiconPage.java": 1,
         "MsToast.java": 1,
@@ -35,6 +36,7 @@ def main() -> int:
         "SegmentedControl.java": 1,
         "SheetHeaderView.java": 1,
         "SheetOptionView.java": 1,
+        "SkinsPage.java": 4,
     }
     duplicated = re.compile(
         r"Ui\.(?:styledLabel|label)\([^;]{0,300};\s*ViewPolicy\.setCentered\(", re.DOTALL
