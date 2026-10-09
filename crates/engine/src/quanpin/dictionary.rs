@@ -362,17 +362,33 @@ impl QuanpinDictionary {
                 rows
             };
             result.reserve(rows.len());
-            result.extend(rows.into_iter().map(|row| {
+            let mut rows = rows.into_iter();
+            if let Some(row) = rows.next() {
                 let mut item = WordItem::new(
-                    typed.clone(),
+                    typed,
                     row.value,
                     row.weight,
                     CandidateSource::Database,
                     row.key,
                 );
                 item.fuzzy = true;
-                item
-            }));
+                result.push(item);
+            }
+            for row in rows {
+                let mut item = WordItem::new(
+                    result
+                        .last()
+                        .expect("the first fuzzy row was inserted")
+                        .pinyin
+                        .clone(),
+                    row.value,
+                    row.weight,
+                    CandidateSource::Database,
+                    row.key,
+                );
+                item.fuzzy = true;
+                result.push(item);
+            }
         }
         self.fuzzy_cache.insert(
             hash,

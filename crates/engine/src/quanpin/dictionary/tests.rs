@@ -1153,6 +1153,21 @@ fn fuzzy_candidates_do_not_allocate_the_full_path_budget_up_front() {
 }
 
 #[test]
+fn fuzzy_candidate_rows_reuse_the_first_typed_reading_string() {
+    let fixture = fuzzy_fixture();
+    let mut dictionary = QuanpinDictionary::new(&fixture.paths);
+    let options = FuzzyPinyinOptions {
+        rules: fuzzy_rule::ALL,
+    };
+    let _ = dictionary.fuzzy_candidates("zong'guo", options);
+    dictionary.fuzzy_cache.clear();
+    let (_, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+        let _ = dictionary.fuzzy_candidates("zong'guo", options);
+    });
+    assert_eq!(allocations, 48, "模糊候选重复复制了首个读音: {allocations}");
+}
+
+#[test]
 fn query_rows_reserve_the_incoming_batch() {
     let mut result = Vec::with_capacity(1);
     result.push(WordItem::new("a", "啊", 1, CandidateSource::Database, "a"));
