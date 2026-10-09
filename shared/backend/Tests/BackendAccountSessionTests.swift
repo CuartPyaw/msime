@@ -72,6 +72,69 @@ private final class AttemptCounter: @unchecked Sendable {
 }
 
 final class BackendAccountSessionTests: XCTestCase {
+  private enum CleanupRefused: Error { case busy }
+
+  func testReplacingAccountCancelsOldWorkBeforePublishingNewIdentity() async throws {
+    let old = try BackendSavedSession.forTokens(RefreshAPI.tokens())
+    let storage = MemorySessions(old)
+    let new = BackendAccountClient.Tokens(
+      access_token: String(repeating: "b", count: 64), refresh_token: String(repeating: "c", count: 64),
+      token_type: "Bearer", expires_in: 900,
+      user: .init(id: "replacement-user", display_name: "Replacement", created_at: "2026-09-08"))
+    let api = SharedStoreAPI({ _ in SharedStoreAPI.tokens("a", "f") }, loginResult: new)
+    let session = BackendAccountSession(api: api, storage: storage, refreshLock: BackendProcessRefreshLock())
+
+    try await session.signIn(challenge: "challenge", credential: "synthetic", replacingAccount: { accountID in
+      XCTAssertEqual(accountID, "synthetic-user")
+      XCTAssertEqual(try? storage.load()?.tokens.user.id, "synthetic-user")
+    })
+
+    XCTAssertEqual(try storage.load()?.tokens.user.id, "replacement-user")
+  }
+
+  func testForgettingAccountCancelsOldWorkBeforeRemovingIdentity() async throws {
+    let storage = MemorySessions(try BackendSavedSession.forTokens(RefreshAPI.tokens()))
+    let session = BackendAccountSession(api: RefreshAPI(), storage: storage, refreshLock: BackendProcessRefreshLock())
+
+    try await session.forget(removingAccount: { accountID in
+      XCTAssertEqual(accountID, "synthetic-user")
+      XCTAssertEqual(try? storage.load()?.tokens.user.id, "synthetic-user")
+    })
+
+    XCTAssertNil(try storage.load())
+  }
+
+  func testFailedReplacementCleanupKeepsOldIdentity() async throws {
+    let storage = MemorySessions(try BackendSavedSession.forTokens(RefreshAPI.tokens()))
+    let replacement = BackendAccountClient.Tokens(
+      access_token: String(repeating: "b", count: 64), refresh_token: String(repeating: "c", count: 64),
+      token_type: "Bearer", expires_in: 900,
+      user: .init(id: "replacement-user", display_name: "Replacement", created_at: "2026-09-08"))
+    let api = SharedStoreAPI({ _ in SharedStoreAPI.tokens("a", "f") }, loginResult: replacement)
+    let session = BackendAccountSession(api: api, storage: storage, refreshLock: BackendProcessRefreshLock())
+
+    do {
+      try await session.signIn(challenge: "challenge", credential: "synthetic", replacingAccount: { _ in
+        throw CleanupRefused.busy
+      })
+      XCTFail("replacement must stop when old work cannot be cancelled")
+    } catch CleanupRefused.busy { }
+
+    XCTAssertEqual(try storage.load()?.tokens.user.id, "synthetic-user")
+  }
+
+  func testFailedForgetCleanupKeepsOldIdentity() async throws {
+    let storage = MemorySessions(try BackendSavedSession.forTokens(RefreshAPI.tokens()))
+    let session = BackendAccountSession(api: RefreshAPI(), storage: storage, refreshLock: BackendProcessRefreshLock())
+
+    do {
+      try await session.forget(removingAccount: { _ in throw CleanupRefused.busy })
+      XCTFail("forget must stop when old work cannot be cancelled")
+    } catch CleanupRefused.busy { }
+
+    XCTAssertEqual(try storage.load()?.tokens.user.id, "synthetic-user")
+  }
+
   func testSignInRejectsUnboundedExpiryFromAPI() async throws {
     let invalid = BackendAccountClient.Tokens(access_token: String(repeating: "a", count: 64),
       refresh_token: String(repeating: "b", count: 64), token_type: "Bearer", expires_in: 86_400 * 30 + 1,

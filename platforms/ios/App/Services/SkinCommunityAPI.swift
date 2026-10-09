@@ -225,7 +225,7 @@ actor SkinCommunityAPI {
   }
   func login(challenge: String, identityToken: String) async throws {
     try await account.signIn(challenge: challenge, credential: identityToken, replacingAccount: { accountID in
-      try? DictionarySnapshotQueue().cancel(accountID: accountID)
+      try DictionarySnapshotQueue().cancelIfPresent(accountID: accountID)
     })
   }
   func profile() async throws -> CommunityProfile {
@@ -248,17 +248,17 @@ actor SkinCommunityAPI {
     if deleteAccount {
       _ = try await accountRequest { token in try await client.deleteAccount(token: token) }
       try await account.forget(removingAccount: { accountID in
-        try? DictionarySnapshotQueue().cancel(accountID: accountID)
+        try DictionarySnapshotQueue().cancelIfPresent(accountID: accountID)
       })
     } else {
       try await account.logout(all: all, removingAccount: { accountID in
-        try? DictionarySnapshotQueue().cancel(accountID: accountID)
+        try DictionarySnapshotQueue().cancelIfPresent(accountID: accountID)
       })
     }
   }
   func clearExpiredLogin() async throws {
     try await account.forget(removingAccount: { accountID in
-      try? DictionarySnapshotQueue().cancel(accountID: accountID)
+      try DictionarySnapshotQueue().cancelIfPresent(accountID: accountID)
     })
   }
   /// `category` 为 `nil` 时不按分类筛选。
