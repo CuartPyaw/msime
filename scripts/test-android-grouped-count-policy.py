@@ -8,23 +8,38 @@ ROOT = Path(__file__).resolve().parents[1]
 NUMBER = ROOT / "platforms/android/java/app/msime/android/NumberPolicy.java"
 COMMUNITY = ROOT / "platforms/android/java/app/msime/android/community/CommunityRequest.java"
 COLLECTIONS = ROOT / "platforms/android/java/app/msime/android/dictionary/DictionaryCollectionsStore.java"
+DETAIL = ROOT / "platforms/android/java/app/msime/android/home/LexiconDetailPage.java"
+PAGE = ROOT / "platforms/android/java/app/msime/android/home/LexiconPage.java"
+SMOKE = ROOT / "platforms/android/tests/dictionary/DictionaryCollectionsStoreSmoke.java"
 
 
 def main() -> int:
     number = NUMBER.read_text(encoding="utf-8")
+    community = COMMUNITY.read_text(encoding="utf-8")
+    collections = COLLECTIONS.read_text(encoding="utf-8")
+    pages = DETAIL.read_text(encoding="utf-8") + PAGE.read_text(encoding="utf-8")
+    smoke = SMOKE.read_text(encoding="utf-8")
     errors = []
     if "public static String groupedCount(long count)" not in number:
         errors.append(f"{NUMBER}: 缺少共享条数展示方法")
-    for source in (COMMUNITY, COLLECTIONS):
-        text = source.read_text(encoding="utf-8")
-        if text.count("NumberPolicy.groupedCount(") != 1:
-            errors.append(f"{source}: 没有调用共享条数展示方法")
-        if "NumberPolicy.grouped(BoundsPolicy.nonNegative(count)) + \" 条\"" in text:
-            errors.append(f"{source}: 仍保留重复的条数拼接逻辑")
+    if community.count("NumberPolicy.groupedCount(") != 1:
+        errors.append(f"{COMMUNITY}: 没有调用共享条数展示方法")
+    if "NumberPolicy.grouped(BoundsPolicy.nonNegative(count)) + \" 条\"" in community:
+        errors.append(f"{COMMUNITY}: 仍保留重复的条数拼接逻辑")
+    if "public static String countLabel(" in collections:
+        errors.append(f"{COLLECTIONS}: 不应保留条数展示转发方法")
+    if pages.count("NumberPolicy.groupedCount(") != 6:
+        errors.append("Android 词库页面没有直接调用共享条数展示方法")
+    if "DictionaryCollectionsStore.countLabel(" in pages:
+        errors.append("Android 词库页面仍通过存储类转发条数展示")
+    if "import app.msime.android.NumberPolicy;" not in smoke:
+        errors.append(f"{SMOKE}: 应直接导入 NumberPolicy")
+    if "DictionaryCollectionsStore.countLabel(" in smoke or smoke.count("NumberPolicy.groupedCount(") < 2:
+        errors.append(f"{SMOKE}: 应直接检查 NumberPolicy.groupedCount")
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1
-    print("Android count labels share the grouped count policy")
+    print("Android count labels share the grouped count policy directly")
     return 0
 
 
