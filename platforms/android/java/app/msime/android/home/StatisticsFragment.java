@@ -427,8 +427,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         LinearLayout row = Ui.row(context);
         ViewPolicy.setCenteredVertically(row);
         Ui.setHorizontalPaddingDp(row, context, 4);
-        TextView heading = Ui.label(context, title, 13, Ui.subText(context));
-        heading.setAccessibilityHeading(true);
+        TextView heading = Ui.headingLabel(context, title, 13, Ui.subText(context));
         row.addView(heading, Ui.weightWrap(1f));
         if (trailing != null) row.addView(Ui.label(context, trailing, 13, Ui.subText(context)));
         LinearLayout.LayoutParams params = Ui.matchWidth();

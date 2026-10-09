@@ -30,8 +30,7 @@ public final class SettingsSheet {
         root.addView(Ui.sheetDragHandle(context));
 
         // M3 headline small：面板标题是标题，不是加粗的标签。
-        TextView heading = Ui.styledLabel(context, title, Ui.TEXT_BAR_TITLE, 400, Ui.text(context));
-        heading.setAccessibilityHeading(true);
+        TextView heading = Ui.headingLabel(context, title, Ui.TEXT_BAR_TITLE, 400, Ui.text(context));
         root.addView(heading);
 
         if (subtitle != null && !subtitle.isEmpty()) {
