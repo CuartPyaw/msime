@@ -2,12 +2,10 @@ package app.msime.android.home;
 
 import app.msime.android.DrawablePolicy;
 import android.content.Context;
-import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
-import android.graphics.drawable.RippleDrawable;
 import android.util.TypedValue;
 import android.view.View;
 import android.view.ViewGroup;
@@ -466,7 +464,7 @@ public final class Ui {
 
     public static Drawable rippleOn(Context context, @ColorInt int fill, float radiusPx) {
         int pressed = ColorPolicy.withAlpha(text(context), 0.10f);
-        return new RippleDrawable(ColorStateList.valueOf(pressed), rounded(fill, radiusPx),
+        return DrawablePolicy.ripple(pressed, rounded(fill, radiusPx),
             rounded(Color.WHITE, radiusPx));
     }
 
