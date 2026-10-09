@@ -2628,6 +2628,107 @@ test("clipboard history reloads when its page opens while an earlier list is pen
   expect(screen.queryByText("synthetic stale")).toBeNull();
 });
 
+test("clipboard history ignores an initial list that finishes after a manual sync", async () => {
+  const initialList = deferred<Array<{ text: string; timestampMs: number; pinned: boolean }>>();
+  const list = vi.fn().mockImplementation(() => initialList.promise);
+  const sync = vi
+    .fn()
+    .mockResolvedValue([
+      { text: "synthetic synced", timestampMs: 1_789_000_000_000, pinned: false },
+    ]);
+  const snapshot = { ...initial, preferences: { ...initial.preferences, clipboard_history: true } };
+  render(
+    <SettingsPage
+      client={{
+        load: vi.fn().mockResolvedValue(snapshot),
+        save: vi.fn(),
+        clipboard: { list, sync, clear: vi.fn() },
+      }}
+    />,
+  );
+  await settingsReady();
+  fireEvent.click(screen.getByRole("button", { name: "剪贴板" }));
+  await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole("button", { name: "从系统剪贴板同步" }));
+  expect(await screen.findByText("synthetic synced")).toBeDefined();
+
+  await act(async () =>
+    initialList.resolve([
+      { text: "synthetic stale", timestampMs: 1_788_000_000_000, pinned: false },
+    ]),
+  );
+  expect(screen.getByText("synthetic synced")).toBeDefined();
+  expect(screen.queryByText("synthetic stale")).toBeNull();
+});
+
+test("clipboard history waits for a sync before accepting deletion", async () => {
+  const pendingSync = deferred<Array<{ text: string; timestampMs: number; pinned: boolean }>>();
+  const entry = { text: "synthetic record", timestampMs: 1_789_000_000_000, pinned: false };
+  let entries = [entry];
+  const list = vi.fn().mockImplementation(async () => entries);
+  const remove = vi.fn().mockImplementation(async () => {
+    entries = [];
+  });
+  const snapshot = { ...initial, preferences: { ...initial.preferences, clipboard_history: true } };
+  render(
+    <SettingsPage
+      client={{
+        load: vi.fn().mockResolvedValue(snapshot),
+        save: vi.fn(),
+        clipboard: { list, sync: () => pendingSync.promise, remove, clear: vi.fn() },
+      }}
+    />,
+  );
+  await settingsReady();
+  fireEvent.click(screen.getByRole("button", { name: "剪贴板" }));
+  const row = (await screen.findByText(entry.text)).closest(
+    "[data-clipboard-entry-row]",
+  ) as HTMLElement;
+  fireEvent.click(screen.getByRole("button", { name: "从系统剪贴板同步" }));
+  const deleteButton = within(row).getByRole("button", {
+    name: "删除剪贴板记录",
+  }) as HTMLButtonElement;
+  expect(deleteButton.disabled).toBe(true);
+  fireEvent.click(deleteButton);
+  expect(remove).not.toHaveBeenCalled();
+
+  await act(async () => pendingSync.resolve([entry]));
+  await waitFor(() => expect(deleteButton.disabled).toBe(false));
+  fireEvent.click(deleteButton);
+  await waitFor(() => expect(remove).toHaveBeenCalledWith(entry.text));
+  expect(await screen.findByText("暂无历史记录")).toBeDefined();
+});
+
+test("clipboard history ignores a pending list after its switch is turned off and on", async () => {
+  const pendingList = deferred<Array<{ text: string; timestampMs: number; pinned: boolean }>>();
+  const list = vi
+    .fn()
+    .mockImplementationOnce(() => pendingList.promise)
+    .mockResolvedValue([]);
+  const snapshot = { ...initial, preferences: { ...initial.preferences, clipboard_history: true } };
+  render(
+    <SettingsPage
+      client={{
+        load: vi.fn().mockResolvedValue(snapshot),
+        save: vi.fn(),
+        clipboard: { list, clear: vi.fn().mockResolvedValue(undefined) },
+      }}
+    />,
+  );
+  await settingsReady();
+  fireEvent.click(screen.getByRole("button", { name: "剪贴板" }));
+  await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+  const history = screen.getByRole("switch", { name: "剪贴板历史" });
+  fireEvent.click(history);
+  fireEvent.click(history);
+  await act(async () =>
+    pendingList.resolve([
+      { text: "synthetic stale", timestampMs: 1_788_000_000_000, pinned: false },
+    ]),
+  );
+  expect(screen.queryByText("synthetic stale")).toBeNull();
+});
+
 test("iOS clipboard history follows keyboard permission instead of the desktop preference", async () => {
   const list = vi
     .fn()
