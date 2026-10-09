@@ -3,8 +3,8 @@
 #
 # These suites were built by build-cross.sh and then never run: executing a
 # Windows binary needs Windows, so every report about them said "linked".
-# Linking does not catch an assertion. Wine runs 72 of them as they are, which
-# is the difference between a suite that compiles and a suite that passes.
+# Linking does not catch an assertion. Wine runs the resulting executables,
+# which is the difference between a suite that compiles and one that passes.
 #
 # What it cannot run is recorded rather than hidden: anything that needs a
 # compositor, a real monitor, or the installed dictionary bundle fails here for
@@ -138,6 +138,9 @@ fi
 fixtures="$root/platforms/windows/tests/input/fixtures"
 stroke_argument='Z:\\fixtures\\msime-stroke.db'
 zhuyin_argument='Z:\\fixtures\\msime-zhuyin.db'
+# CMake builds TSF tests in a subdirectory; its two wiring checks read source files.
+tsf_source="$root/platforms/windows/tsf"
+tsf_source_argument='Z:\\tsf-source'
 
 # The Rust host carries the Windows-only code the C++ suite never touches:
 # clipboard reads and writes, synthetic key strokes, the extended-key set. Its
@@ -230,15 +233,19 @@ fi
 
 docker run --rm --platform linux/amd64 \
   -v "$build":/bin-win:ro -v "$runtime":/rt:ro -v "$rust_stage":/bin-rust:ro ${resources_mount[@]+"${resources_mount[@]}"} \
-  ${installer_mount[@]+"${installer_mount[@]}"} -v "$fixtures":/fixtures:ro \
+  ${installer_mount[@]+"${installer_mount[@]}"} -v "$fixtures":/fixtures:ro -v "$tsf_source":/tsf-source:ro \
   -e "MSIME_RESOURCES=$resources_argument" -e "MSIME_INSTALLER=$installer_argument" \
   -e "MSIME_STROKE_FIXTURE=$stroke_argument" -e "MSIME_ZHUYIN_FIXTURE=$zhuyin_argument" \
+  -e "MSIME_TSF_SOURCE=$tsf_source_argument" \
   -e LANG=C.utf8 -e LC_ALL=C.utf8 "$image" sh -c '
 mkdir -p /run/t && cp /rt/*.dll /run/t/ && cp /bin-win/*.dll /run/t/ 2>/dev/null
+cp /bin-win/tsf/*MetasequoiaImeTsf.dll /run/t/ 2>/dev/null
 cd /run/t
-# msimeui puts its test executable in bin/ rather than beside the others, so a
-# top-level pattern silently matched nothing and that suite was never run here.
-for exe in /bin-win/windows-*.exe /bin-win/msime-tsf-*.exe /bin-win/msimeui-tests.exe \
+# CMake puts TSF tests in tsf/, its registration tests below tsf/tests/,
+# and msimeui tests in bin/.
+for exe in /bin-win/windows-*.exe /bin-win/tsf/msime-tsf-*.exe /bin-win/msimeui-tests.exe \
+           /bin-win/tsf/tests/registration_categories/msime-tsf-*.exe \
+           /bin-win/tsf/tests/registration_profiles/msime-tsf-*.exe \
            /bin-win/bin/msimeui-tests.exe /bin-rust/rust-*.exe; do
   [ -f "$exe" ] || continue
   name=$(basename "$exe" .exe)
@@ -248,6 +255,8 @@ for exe in /bin-win/windows-*.exe /bin-win/msime-tsf-*.exe /bin-win/msimeui-test
   [ "$name" = windows-installer-launch ] && argument="$MSIME_INSTALLER"
   [ "$name" = windows-stroke-keys ] && argument="$MSIME_STROKE_FIXTURE"
   [ "$name" = windows-zhuyin-keys ] && argument="$MSIME_ZHUYIN_FIXTURE"
+  [ "$name" = msime-tsf-paired-punctuation-wiring-test ] && argument="$MSIME_TSF_SOURCE"
+  [ "$name" = msime-tsf-smart-punctuation-focus-wiring-test ] && argument="$MSIME_TSF_SOURCE"
   if timeout 120 xvfb-run -a wine "/run/t/$name.exe" $argument >/dev/null 2>&1; then
     echo "PASS $name"
   else

@@ -253,6 +253,40 @@ if call[:2] == ["info", "--format"]:
         self.assertIn("msime-stroke.db", command)
         self.assertIn("msime-zhuyin.db", command)
 
+    def test_wine_runs_tsf_subdirectory_tests_with_source_for_wiring_checks(self):
+        build = self.root / "target/windows-full/x64"
+        tsf_build = build / "tsf"
+        tsf_build.mkdir(parents=True)
+        for name in self.names("x64"):
+            (build / name).write_text(name)
+        for name in ("msime-tsf-paired-punctuation-wiring-test.exe",
+                     "msime-tsf-smart-punctuation-focus-wiring-test.exe"):
+            (tsf_build / name).write_text("synthetic test executable")
+        for directory, name in (("registration_categories", "msime-tsf-category-registration-test.exe"),
+                                ("registration_profiles", "msime-tsf-profile-registration-test.exe")):
+            nested = tsf_build / "tests" / directory
+            nested.mkdir(parents=True)
+            (nested / name).write_text("synthetic test executable")
+        source = self.windows / "tsf"
+        source.mkdir()
+        (tsf_build / "libMetasequoiaImeTsf.dll").write_text("synthetic TSF DLL")
+
+        result = subprocess.run(["bash", str(self.windows / "run-tests-wine.sh"), "x64"],
+                                env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = [json.loads(line) for line in self.log.read_text().splitlines()]
+        wine = next(call["args"] for call in calls if "runtime" in call)
+        command = "\n".join(wine)
+        self.assertIn("/bin-win/tsf/msime-tsf-*.exe", command)
+        self.assertIn("/bin-win/tsf/tests/registration_categories/msime-tsf-*.exe", command)
+        self.assertIn("/bin-win/tsf/tests/registration_profiles/msime-tsf-*.exe", command)
+        self.assertIn("cp /bin-win/tsf/*MetasequoiaImeTsf.dll /run/t/", command)
+        self.assertIn(f"{source}:/tsf-source:ro", wine)
+        self.assertIn("MSIME_TSF_SOURCE=Z:\\\\tsf-source", command)
+        for name in ("msime-tsf-paired-punctuation-wiring-test",
+                     "msime-tsf-smart-punctuation-focus-wiring-test"):
+            self.assertIn(f'"$name" = {name} ] && argument="$MSIME_TSF_SOURCE"', command)
+
 
 if __name__ == "__main__":
     if os.name != "posix" or not shutil.which("bash") or not shutil.which("cmake"):
