@@ -19,7 +19,7 @@ def main() -> int:
         "TextView centered = label(context, text, sizeSp, color);",
         "public static TextView centeredLabel(Context context, CharSequence text, int sizeSp, int weight,",
         "TextView centered = styledLabel(context, text, sizeSp, weight, color);",
-        "TextView button = centeredLabel(context, label, Math.round(sizeSp), weight, ink);",
+        "TextView button = centeredSingleLineLabel(context, label, Math.round(sizeSp), weight, ink);",
         "TextView button = centeredLabel(context, label, sizeSp, weight, ink);",
     )
     for snippet in required:
@@ -42,8 +42,9 @@ def main() -> int:
     for name, minimum in consumers.items():
         path = HOME / name
         source = path.read_text(encoding="utf-8")
-        if source.count("Ui.centeredLabel(") < minimum:
-            errors.append(f"{path}: 至少 {minimum} 处文本未复用 Ui.centeredLabel")
+        centered = source.count("Ui.centeredLabel(") + source.count("Ui.centeredSingleLineLabel(")
+        if centered < minimum:
+            errors.append(f"{path}: 至少 {minimum} 处文本未复用 Ui 居中标签工厂")
         if duplicated.search(source):
             errors.append(f"{path}: 仍在标签构造后重复设置居中")
 

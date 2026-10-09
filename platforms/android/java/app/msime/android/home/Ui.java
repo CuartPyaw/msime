@@ -408,6 +408,14 @@ public final class Ui {
         return view;
     }
 
+    /** 创建带字重的单行标签。 */
+    public static TextView singleLineLabel(Context context, CharSequence text, int sizeSp, int weight,
+                                           @ColorInt int color) {
+        TextView singleLine = styledLabel(context, text, sizeSp, weight, color);
+        ViewPolicy.setSingleLine(singleLine);
+        return singleLine;
+    }
+
     /** 创建双轴居中的普通标签。 */
     public static TextView centeredLabel(Context context, CharSequence text, float sizeSp,
                                          @ColorInt int color) {
@@ -422,6 +430,14 @@ public final class Ui {
         TextView centered = styledLabel(context, text, sizeSp, weight, color);
         ViewPolicy.setCentered(centered);
         return centered;
+    }
+
+    /** 创建带字重、双轴居中的单行标签。 */
+    public static TextView centeredSingleLineLabel(Context context, CharSequence text, int sizeSp,
+                                                   int weight, @ColorInt int color) {
+        TextView singleLine = centeredLabel(context, text, sizeSp, weight, color);
+        ViewPolicy.setSingleLine(singleLine);
+        return singleLine;
     }
 
     /** 创建带无障碍标题语义的普通标签。 */
@@ -511,8 +527,7 @@ public final class Ui {
                                       @ColorInt int fill, @ColorInt int ink,
                                       float horizontalPaddingDp, float verticalPaddingDp,
                                       float minHeightDp, float minWidthDp, Runnable action) {
-        TextView button = centeredLabel(context, label, Math.round(sizeSp), weight, ink);
-        ViewPolicy.setSingleLine(button);
+        TextView button = centeredSingleLineLabel(context, label, Math.round(sizeSp), weight, ink);
         ViewPolicy.setBackground(button, pillRipple(context, fill));
         setSymmetricPaddingDp(button, context, horizontalPaddingDp, verticalPaddingDp);
         setTextMinHeightDp(button, context, minHeightDp);
