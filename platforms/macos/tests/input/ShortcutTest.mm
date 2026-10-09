@@ -536,7 +536,44 @@ static void TestKeyLatencyIsLoggedWithoutTheKey() {
 @end
 
 static NSEvent *ModeKey(unsigned short code, NSEventModifierFlags flags, BOOL repeat) {
-    return [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:flags timestamp:0 windowNumber:0 context:nil characters:code == 49 ? @" " : @"a" charactersIgnoringModifiers:code == 49 ? @" " : @"a" isARepeat:repeat keyCode:code];
+    // 字母键带上它在美式布局上打出的字母，和真实事件一样：字母快捷键按这个字符认键。
+    const char letter = msime::mac::PhysicalAnsiLetter(code);
+    NSString *characters = code == 49 ? @" " : letter ? [NSString stringWithFormat:@"%c", letter] : @"a";
+    return [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:flags timestamp:0 windowNumber:0 context:nil characters:characters charactersIgnoringModifiers:characters isARepeat:repeat keyCode:code];
+}
+
+// 非美式键盘布局上的按键：`code` 是物理位置，`characters` 是当前布局在这个键上打出的字符。
+static NSEvent *LayoutKey(unsigned short code, NSString *characters, NSEventModifierFlags flags) {
+    return [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:flags timestamp:0 windowNumber:0 context:nil characters:characters charactersIgnoringModifiers:characters isARepeat:NO keyCode:code];
+}
+
+// 字母快捷键按当前键盘布局在这个键上打出的字母认键（#5552）。
+static void TestShortcutLetterFollowsKeyboardLayout(void) {
+    for (unsigned short code = 0; code < 128; ++code) {
+        const char letter = msime::mac::PhysicalAnsiLetter(code);
+        if (!letter) continue;
+        // 美式布局：字符和物理位置一致，大写（Shift）折成小写。
+        assert(msime::mac::ShortcutLetter(code, static_cast<unsigned short>(letter)) == letter);
+        assert(msime::mac::ShortcutLetter(code, static_cast<unsigned short>(letter - 'a' + 'A')) == letter);
+        // 没有字符的合成事件、布局给出非拉丁字母时按物理位置认。
+        assert(msime::mac::ShortcutLetter(code, 0) == letter);
+        assert(msime::mac::ShortcutLetter(code, 0x0430) == letter);
+    }
+    // Dvorak：物理 Y 键打出 f，物理 F 键打出 u。
+    assert(msime::mac::ShortcutLetter(16, 'f') == 'f' && msime::mac::ShortcutLetter(16, 'F') == 'f');
+    assert(msime::mac::ShortcutLetter(3, 'u') == 'u');
+    // 布局在字母位置上放的是 ASCII 标点或数字时它不是字母快捷键，不能再按物理位置认成 E。
+    assert(msime::mac::ShortcutLetter(14, '.') == '\0');
+    assert(msime::mac::ShortcutLetter(12, '\'') == '\0');
+    assert(msime::mac::ShortcutLetter(49, ' ') == '\0');
+    assert(msime::mac::ShortcutLetter(18, '1') == '\0');
+    const NSEventModifierFlags optionShift = NSEventModifierFlagOption | NSEventModifierFlagShift;
+    assert(msime::mac::IsFullWidthInputToggle(38, msime::mac::ShortcutLetter(38, 'H'), optionShift));
+    assert(!msime::mac::IsFullWidthInputToggle(4, msime::mac::ShortcutLetter(4, 'D'), optionShift));
+    assert(msime::mac::MaintenanceShortcut(msime::mac::ShortcutLetter(34, 'C'), true, true, true, false) ==
+           msime::mac::MaintenanceShortcutAction::ClearCache);
+    assert(msime::mac::MaintenanceShortcut(msime::mac::ShortcutLetter(8, 'J'), true, true, true, false) ==
+           msime::mac::MaintenanceShortcutAction::None);
 }
 
 static NSEvent *KeypadKey(unsigned short code, NSString *characters, NSEventModifierFlags flags, BOOL repeat) {
@@ -1497,6 +1534,21 @@ static void TestCharacterSetShortcut(void) {
         assert(appearance.traditionalOutput == traditional);
     }
     assert(![controller handleEvent:ModeKey(2, flags, NO) client:client]);
+    // Dvorak：标着 F 的键在美式布局的 Y 位置（keyCode 16），物理 F 键打出 u。英文模式下只占用不切换。
+    assert([controller handleEvent:LayoutKey(16, @"F", flags) client:client]);
+    assert(appearance.traditionalOutput == traditional);
+    assert(![controller handleEvent:LayoutKey(3, @"U", flags) client:client]);
+    appearance.englishMode = NO;
+    assert([controller handleEvent:LayoutKey(16, @"F", flags) client:client]);
+    assert(appearance.traditionalOutput != traditional);
+    assert([controller handleEvent:LayoutKey(16, @"f", flags) client:client]);
+    assert(appearance.traditionalOutput == traditional);
+    // 没有字符的合成事件、给出非拉丁字母的布局仍按物理位置认键。
+    assert([controller handleEvent:LayoutKey(3, @"", flags) client:client]);
+    assert(appearance.traditionalOutput != traditional);
+    assert([controller handleEvent:LayoutKey(3, @"\u0430", flags) client:client]);
+    assert(appearance.traditionalOutput == traditional);
+    appearance.englishMode = YES;
     [appearance applySharedInputPreferences:@{@"keybindings":keys}];
     assert(![controller handleEvent:ModeKey(3, flags, NO) client:client]);
     appearance.characterSetShortcut = NO;
@@ -1572,6 +1624,14 @@ static void TestDedicatedEnglish(MSIMEAppearancePreferences *appearance) {
         [controller handleEvent:ModeKey(14, flags | extra.unsignedIntegerValue, NO) client:client];
         assert(session.englishCandidateCalls == calls);
     }
+    // Dvorak：E 在美式布局的 D 位置（keyCode 2），物理 E 键打出句点，不再切换。
+    const BOOL dedicated = session.dedicatedEnglish;
+    [controller handleEvent:LayoutKey(14, @".", flags) client:client];
+    assert(session.dedicatedEnglish == dedicated && session.englishCandidateCalls == calls);
+    assert([controller handleEvent:LayoutKey(2, @"E", flags) client:client]);
+    assert(session.dedicatedEnglish != dedicated);
+    assert([controller handleEvent:LayoutKey(2, @"E", flags) client:client]);
+    assert(session.dedicatedEnglish == dedicated);
 }
 
 static void TestFullWidth(NSUserDefaults *defaults, MSIMEAppearancePreferences *appearance) {
@@ -1611,7 +1671,7 @@ static void TestFullWidth(NSUserDefaults *defaults, MSIMEAppearancePreferences *
     [controller appearanceChanged:nil];
     assert(appearance.runtimeFullWidthInput && session.fullwidth);
     for (NSEventModifierFlags extra : {NSEventModifierFlagCommand, NSEventModifierFlagOption})
-        assert(!msime::mac::IsFullWidthInputToggle(49, windowsChord | extra));
+        assert(!msime::mac::IsFullWidthInputToggle(49, '\0', windowsChord | extra));
     for (NSEventModifierFlags extra : {NSEventModifierFlagCommand, NSEventModifierFlagControl}) {
         assert(![controller handleEvent:ModeKey(4, chord | extra, NO) client:client]);
         assert(appearance.runtimeFullWidthInput);
@@ -1631,6 +1691,11 @@ static void TestFullWidth(NSUserDefaults *defaults, MSIMEAppearancePreferences *
     assert([controller handleEvent:ModeKey(4, chord, NO) client:client]);
     assert(appearance.runtimeFullWidthInput != fullWidthBefore);
     assert([controller handleEvent:ModeKey(4, chord, NO) client:client]);
+    assert(appearance.runtimeFullWidthInput == fullWidthBefore);
+    // Dvorak：H 在美式布局的 J 位置（keyCode 38）。
+    assert([controller handleEvent:LayoutKey(38, @"H", chord) client:client]);
+    assert(appearance.runtimeFullWidthInput != fullWidthBefore);
+    assert([controller handleEvent:LayoutKey(38, @"H", chord) client:client]);
     assert(appearance.runtimeFullWidthInput == fullWidthBefore);
     appearance.englishMode = YES;
     assert(![controller handleEvent:ModeKey(4, chord, NO) client:client]);
@@ -2973,6 +3038,11 @@ static void TestScreenKeyboardShortcut(MSIMEAppearancePreferences *appearance) {
     }
     assert(![controller handleEvent:ModeKey(39, chord, NO) client:client]);
     assert(controller.screenKeyboardCalls == 3);
+    // Dvorak：K 在美式布局的 V 位置（keyCode 9），物理 K 键打出 t。
+    assert([controller handleEvent:LayoutKey(9, @"K", chord) client:client]);
+    assert(controller.screenKeyboardCalls == 4);
+    assert(![controller handleEvent:LayoutKey(40, @"T", chord) client:client]);
+    assert(controller.screenKeyboardCalls == 4);
     appearance.englishMode = previousEnglishMode;
 }
 
@@ -3018,6 +3088,12 @@ static void TestMaintenanceShortcuts(MSIMEAppearancePreferences *appearance) {
     }
     assert(![controller handleEvent:ModeKey(9, chord, NO) client:client]);
     assert(session.resetCacheCalls == 2 && controller.restartCalls == 2 && controller.terminationCalls == 1);
+    // Dvorak：C、R、T 分别在美式布局的 I、O、K 位置，物理 C 键打出 j。
+    assert([controller handleEvent:LayoutKey(34, @"C", chord) client:client]);
+    assert([controller handleEvent:LayoutKey(31, @"R", chord) client:client]);
+    assert([controller handleEvent:LayoutKey(40, @"T", chord) client:client]);
+    assert(![controller handleEvent:LayoutKey(8, @"J", chord) client:client]);
+    assert(session.resetCacheCalls == 3 && controller.restartCalls == 3 && controller.terminationCalls == 2);
     appearance.englishMode = previousEnglishMode;
 }
 
@@ -9347,6 +9423,7 @@ int main(int argc, char **argv) {
         @autoreleasepool { TestSharedCharacterWidth(); }
         @autoreleasepool { TestScreenKeyboardShortcut(appearance); }
         @autoreleasepool { TestMaintenanceShortcuts(appearance); }
+        @autoreleasepool { TestShortcutLetterFollowsKeyboardLayout(); }
         @autoreleasepool { TestPunctuation(defaults, appearance); }
         @autoreleasepool { TestPairedPunctuationPreferences(); }
         @autoreleasepool { TestPairedPunctuationHostExclusion(); }

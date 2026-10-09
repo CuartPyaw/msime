@@ -624,6 +624,11 @@ static NSUInteger MSIMECandidateDeletionSlot(NSEvent *event) {
     for (NSUInteger slot = 0; slot < 8; ++slot) if (event.keyCode == codes[slot]) return slot;
     return NSNotFound;
 }
+// 这次按键在当前键盘布局上对应的快捷键字母，规则见 `msime::mac::ShortcutLetter`。
+static char MSIMEShortcutLetter(NSEvent *event) {
+    NSString *characters = event.charactersIgnoringModifiers;
+    return msime::mac::ShortcutLetter(event.keyCode, characters.length == 1 ? [characters characterAtIndex:0] : 0);
+}
 static BOOL MSIMEPunctuationToggle(NSEvent *event) {
     const NSEventModifierFlags modifiers = NSEventModifierFlagControl | NSEventModifierFlagShift | NSEventModifierFlagOption | NSEventModifierFlagCommand;
     return event.keyCode == 47 && (event.modifierFlags & modifiers) == NSEventModifierFlagControl;
@@ -5398,32 +5403,33 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
         if (!event.isARepeat) [self floatingToolbarDidRequestTogglePunctuation:nil];
         return YES;
     }
-    if (_appearance.characterSetShortcut && event.keyCode == 3 &&
+    const char shortcutLetter = MSIMEShortcutLetter(event);
+    if (_appearance.characterSetShortcut && shortcutLetter == 'f' &&
         (event.modifierFlags & (competing | NSEventModifierFlagShift)) == (NSEventModifierFlagControl | NSEventModifierFlagShift)) {
         // Like the Windows host, reserve the chord but only toggle in Chinese mode.
         if (!event.isARepeat && !_appearance.englishMode) [self floatingToolbarDidRequestToggleTraditionalOutput:nil];
         return YES;
     }
-    if (event.keyCode == 14 && (event.modifierFlags & (competing | NSEventModifierFlagShift)) == (NSEventModifierFlagControl | NSEventModifierFlagShift)) {
+    if (shortcutLetter == 'e' && (event.modifierFlags & (competing | NSEventModifierFlagShift)) == (NSEventModifierFlagControl | NSEventModifierFlagShift)) {
         if (!event.isARepeat) [self toggleDedicatedEnglishMode:nil];
         return YES;
     }
     // Only the Option+Shift+H arm is a preference; Ctrl+Shift+Space is the chord the Windows host
     // reserves too, and the settings page says nothing about it.
-    if (msime::mac::IsFullWidthInputToggle(event.keyCode, event.modifierFlags) &&
+    if (msime::mac::IsFullWidthInputToggle(event.keyCode, shortcutLetter, event.modifierFlags) &&
         (event.keyCode == 49 || _appearance.fullWidthShortcut) &&
         (!_appearance.englishMode || event.keyCode == 49)) {
         if (!event.isARepeat) [self toggleRuntimeFullWidthInput];
         return YES;
     }
-    if (event.keyCode == 40 &&
+    if (shortcutLetter == 'k' &&
         (event.modifierFlags & (competing | NSEventModifierFlagShift)) ==
             (NSEventModifierFlagControl | NSEventModifierFlagShift | NSEventModifierFlagCommand)) {
         if (!event.isARepeat) [self showScreenKeyboard:nil];
         return YES;
     }
-    const auto maintenanceShortcut = msime::mac::PhysicalMaintenanceShortcut(
-        event.keyCode,
+    const auto maintenanceShortcut = msime::mac::MaintenanceShortcut(
+        shortcutLetter,
         (event.modifierFlags & NSEventModifierFlagControl) != 0,
         (event.modifierFlags & NSEventModifierFlagShift) != 0,
         (event.modifierFlags & NSEventModifierFlagOption) != 0,
