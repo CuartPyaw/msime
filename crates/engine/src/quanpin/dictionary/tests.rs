@@ -60,6 +60,20 @@ fn primary_segmentation_is_checked_without_owning_a_key_copy() {
 }
 
 #[test]
+fn explicit_segmentation_without_alternatives_does_not_allocate_a_result_buffer() {
+    let resolution = SeriesResolution {
+        segmentation: "ni'hao".to_owned(),
+        ..SeriesResolution::default()
+    };
+    let segments = vec!["ni".to_owned(), "hao".to_owned()];
+    let (alternatives, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+        alternative_segmentations("ni'hao", &segments, &resolution, NONE)
+    });
+    assert!(alternatives.is_empty());
+    assert_eq!(allocations, 0, "无替代切分却分配了结果缓冲: {allocations}");
+}
+
+#[test]
 fn alternative_segmentation_key_state_uses_no_temporary_heap_allocation() {
     let keys = ["ni'hao", "ni'he", "ni'hao", "ni'men"]
         .into_iter()

@@ -1152,7 +1152,7 @@ fn alternative_segmentations(
     resolution: &SeriesResolution,
     types: u32,
 ) -> Vec<Vec<String>> {
-    let mut alternatives: Vec<Vec<String>> = Vec::with_capacity(SYLLABLE_GRAPH_PATH_LIMIT);
+    let mut alternatives = Vec::new();
     // Seeding the costlier cuts keeps them out of the frequency-competing tier; they are appended after it.
     let mut seen: [Option<String>; ALTERNATIVE_SEGMENTATION_SEEN_CAPACITY] =
         std::array::from_fn(|_| None);
@@ -1172,6 +1172,9 @@ fn alternative_segmentations(
             && alternatives.len() < SYLLABLE_GRAPH_PATH_LIMIT
             && remember_segmentation_key(&mut seen, &mut seen_length, primary_segmentation, key)
         {
+            if alternatives.is_empty() {
+                alternatives.reserve(SYLLABLE_GRAPH_PATH_LIMIT);
+            }
             alternatives.push(candidate.to_vec());
         }
     };
