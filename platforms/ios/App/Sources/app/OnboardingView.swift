@@ -42,7 +42,7 @@ struct KeyboardSettingsView: View {
 
 /// 输入页：语言与方案、中文选项、辅助码、候选翻译和其余输入开关，对应 Android 的 `TypingPage`。
 ///
-/// 除了五笔的几个开关和「沿用上次的中英文」由键盘从 App Group 读取，这里其余各项都以共享偏好文档为准。每个控件都写这份文档，页面每次写完都重新读回，免得显示一个键盘其实没有的设置。
+/// 除了五笔混拼、剩余编码两个开关和「沿用上次的中英文」由键盘从 App Group 读取，其余各项都以共享偏好文档为准。每个控件都写这份文档，页面每次写完都重新读回，免得显示一个键盘其实没有的设置。四码唯一自动上屏只改共享运行时，没有键盘侧的渲染分支，因此直接按文档读写，不经 App Group 镜像；键盘进程把它连同文档交给 host-api。
 struct InputSettingsView: View {
   @Environment(\.scenePhase) private var scenePhase
   @AppStorage(WubiMixedPinyinPreference.enabledKey, store: WubiMixedPinyinPreference.defaults)
@@ -59,6 +59,7 @@ struct InputSettingsView: View {
   @State private var habits = InputHabitPreference.mirrored
   @State private var startsInEnglish = false
   @State private var remembersImeMode = false
+  @State private var wubiAutoCommitUnique = true
   @State private var addingLanguage = false
   @State private var failedGroup: PageGroup?
 
@@ -399,6 +400,17 @@ struct InputSettingsView: View {
         DesignToggleRow(title: "候选显示剩余编码", subtitle: "在候选后标出还要输入的字母", isOn: $wubiCodeHint)
           .accessibilityIdentifier("wubiCodeHint")
         DesignDivider()
+        DesignToggleRow(title: "四码唯一候选自动上屏",
+                        subtitle: "五笔四码且只有一个候选时自动上屏，关闭后用空格或数字键选它",
+                        isOn: Binding(get: { wubiAutoCommitUnique }, set: { enabled in
+                          wubiAutoCommitUnique = enabled
+                          record(MetasequoiaInputSessionBridge.updateSharedPreferences {
+                            $0["wubi_auto_commit_unique"] = enabled
+                          }, .more)
+                          reloadPreferences()
+                        }))
+          .accessibilityIdentifier("wubiAutoCommitUnique")
+        DesignDivider()
       }
       DesignSelectRow(title: "默认中英文", subtitle: "新打开的键盘从这里开始",
                       options: [DesignOption(title: "中文", value: false), DesignOption(title: "英文", value: true)],
@@ -450,6 +462,7 @@ struct InputSettingsView: View {
     usesTraditionalOutput = ChineseOutputPreference.usesTraditional
     if let document { WubiProfilePreference.mirror(document) }
     wubiProfile = WubiProfilePreference.profile
+    wubiAutoCommitUnique = document?["wubi_auto_commit_unique"] as? Bool ?? true
     fuzzy = FuzzyPinyinPreference.settings(in: document) ?? .pristine
     habits = InputHabitPreference.settings(in: document)
     startsInEnglish = document?["default_ime_mode"] as? String == "english"

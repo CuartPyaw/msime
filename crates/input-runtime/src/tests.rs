@@ -1031,7 +1031,7 @@ fn unique_complete_wubi_code_auto_commits_unless_a_phrase_is_being_built() {
 }
 
 #[test]
-fn turning_off_wibi_auto_commit_keeps_the_unique_four_code_in_the_candidate_list() {
+fn turning_off_wubi_auto_commit_keeps_the_unique_four_code_in_the_candidate_list() {
     let create = |fixture| {
         let mut runtime = Runtime::new(fixture, 5).unwrap();
         runtime.focus(true).unwrap();
