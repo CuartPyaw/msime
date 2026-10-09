@@ -81,7 +81,8 @@ fn exact_streamed_matrix_matches_fixed_vector_query_including_full_pages() {
                     } else if limit == 0 || reading == "くく" || reading.starts_with('😀') {
                         assert_eq!(
                             new_allocations
-                                + super::rolling_row_tests::saved_row_buffers(&conversion, limit),
+                                + super::rolling_row_tests::saved_row_buffers(&conversion, limit)
+                                + super::boundary_tests::saved_boundary_buffers(&conversion, limit),
                             old_allocations
                         );
                     } else {
@@ -136,7 +137,7 @@ fn provider_exact_streaming_reuses_full_candidate_fields_and_saves_two_vectors()
     });
     assert_eq!(destination, expected);
     assert_eq!(destination.as_ptr(), pointer);
-    assert_eq!(allocations, 8);
+    assert_eq!(allocations, 7);
 }
 
 #[test]

@@ -204,7 +204,8 @@ fn consumed_rows_release_storage_and_preserve_complete_queries() {
                     assert_eq!(
                         new.allocations
                             + saved
-                            + super::rolling_row_tests::saved_row_buffers(&conversion, limit),
+                            + super::rolling_row_tests::saved_row_buffers(&conversion, limit)
+                            + super::boundary_tests::saved_boundary_buffers(&conversion, limit),
                         old.allocations
                     );
                     assert_eq!(new.remaining_bytes, old.remaining_bytes);
@@ -246,7 +247,9 @@ fn unknown_unicode_peak_is_linear_after_consumed_rows_are_released() {
         assert_measurement_scope(old);
         assert_measurement_scope(new);
         assert_eq!(
-            new.allocations + super::rolling_row_tests::saved_row_buffers(&conversion, 16),
+            new.allocations
+                + super::rolling_row_tests::saved_row_buffers(&conversion, 16)
+                + super::boundary_tests::saved_boundary_buffers(&conversion, 16),
             old.allocations
         );
         assert_eq!(new.remaining_bytes, old.remaining_bytes);
@@ -261,7 +264,7 @@ fn unknown_unicode_peak_is_linear_after_consumed_rows_are_released() {
 }
 
 #[test]
-#[ignore = "本地 release 组合查询含行释放、滚动复用与空读音前缀流式；不设置 CI 时间阈值"]
+#[ignore = "本地 release 组合查询含行释放、滚动行与边界、空读音前缀流式；不设置 CI 时间阈值"]
 fn benchmark_consumed_row_release() {
     use std::hint::black_box;
     use std::time::Instant;
@@ -302,7 +305,8 @@ fn benchmark_consumed_row_release() {
             assert_eq!(
                 new.allocations
                     + saved
-                    + super::rolling_row_tests::saved_row_buffers(&conversion, limit),
+                    + super::rolling_row_tests::saved_row_buffers(&conversion, limit)
+                    + super::boundary_tests::saved_boundary_buffers(&conversion, limit),
                 old.allocations
             );
             assert_measurement_scope(old);
@@ -332,7 +336,7 @@ fn benchmark_consumed_row_release() {
             for samples in &mut timings {
                 samples.sort_unstable();
             }
-            eprintln!("组合查询（行释放、滚动复用、空读音前缀流式）：密集={dense}，读音字符={}，待定={}，限额={limit}，分配={}→{}，峰值字节={}→{}，中位批次={:?}→{:?}/{iterations}次", conversion.hiragana.chars().count(), conversion.pending.len(), old.allocations, new.allocations, old.peak_bytes, new.peak_bytes, timings[0][5], timings[1][5]);
+            eprintln!("组合查询（行释放、滚动行与边界、空读音前缀流式）：密集={dense}，读音字符={}，待定={}，限额={limit}，分配={}→{}，峰值字节={}→{}，中位批次={:?}→{:?}/{iterations}次", conversion.hiragana.chars().count(), conversion.pending.len(), old.allocations, new.allocations, old.peak_bytes, new.peak_bytes, timings[0][5], timings[1][5]);
         }
     }
 }

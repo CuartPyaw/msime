@@ -5,7 +5,7 @@ use super::*;
 #[derive(Default)]
 pub(super) struct Row {
     pub(super) nodes: Vec<Node>,
-    ranked: bool,
+    pub(super) ranked: bool,
 }
 
 impl Row {

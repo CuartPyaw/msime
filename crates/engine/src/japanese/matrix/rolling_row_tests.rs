@@ -14,7 +14,7 @@ pub(super) fn saved_row_buffers(conversion: &RomajiConversion, limit: usize) -> 
         .saturating_sub(MAX_LEMMA_MORA)
 }
 
-fn fixture(dense: bool) -> JapaneseDictionary {
+pub(super) fn fixture(dense: bool) -> JapaneseDictionary {
     let readings: Vec<_> = [1, 2, 3, 15, 16, 17, 32]
         .map(|length| "か".repeat(length))
         .into();
@@ -64,7 +64,9 @@ fn rolling_unknown_rows_bound_buffers_and_preserve_heap_scope() {
             old.allocations, new.allocations, old.peak_bytes, new.peak_bytes
         );
         assert_eq!(
-            new.allocations + saved_row_buffers(&conversion, 16),
+            new.allocations
+                + saved_row_buffers(&conversion, 16)
+                + super::boundary_tests::saved_boundary_buffers(&conversion, 16),
             old.allocations
         );
         assert_eq!(new.remaining_bytes, old.remaining_bytes);
@@ -137,7 +139,9 @@ fn rolling_rows_match_linear_query_across_wraps_and_maximum_spans() {
                         reading.chars().count()
                     );
                     assert_eq!(
-                        new.allocations + saved_row_buffers(&conversion, limit),
+                        new.allocations
+                            + saved_row_buffers(&conversion, limit)
+                            + super::boundary_tests::saved_boundary_buffers(&conversion, limit),
                         old.allocations
                     );
                     assert_eq!(new.remaining_bytes, old.remaining_bytes);
@@ -151,7 +155,7 @@ fn rolling_rows_match_linear_query_across_wraps_and_maximum_spans() {
 }
 
 #[test]
-#[ignore = "本地 release 与固定线性行查询交替对照；不设置 CI 时间阈值"]
+#[ignore = "本地 release 滚动行与边界组合对固定线性查询交替对照；不设置 CI 时间阈值"]
 fn benchmark_rolling_matrix_rows() {
     use std::hint::black_box;
     use std::time::Instant;
@@ -183,7 +187,9 @@ fn benchmark_rolling_matrix_rows() {
             let (actual, new) = measure(|| search_converted(&dictionary, &conversion, limit));
             assert_eq!(actual, expected);
             assert_eq!(
-                new.allocations + saved_row_buffers(&conversion, limit),
+                new.allocations
+                    + saved_row_buffers(&conversion, limit)
+                    + super::boundary_tests::saved_boundary_buffers(&conversion, limit),
                 old.allocations
             );
             let mut timings = [Vec::new(), Vec::new()];
@@ -211,7 +217,7 @@ fn benchmark_rolling_matrix_rows() {
             for samples in &mut timings {
                 samples.sort_unstable();
             }
-            eprintln!("滚动行：密集={dense}，字符数={length}，未知={unknown}，限额={limit}，分配={}→{}，峰值={}→{}，中位批次={:?}→{:?}/{iterations}次",
+            eprintln!("组合查询（滚动行与边界）：密集={dense}，字符数={length}，未知={unknown}，限额={limit}，分配={}→{}，峰值={}→{}，中位批次={:?}→{:?}/{iterations}次",
                 old.allocations, new.allocations, old.peak_bytes, new.peak_bytes, timings[0][5], timings[1][5]);
         }
     }
@@ -251,7 +257,7 @@ fn paired_percentiles(mut samples: Vec<f64>) -> [f64; 3] {
 }
 
 #[test]
-#[ignore = "本地 release 滚动与线性查询短批次配对计时；不设置 CI 时间阈值"]
+#[ignore = "本地 release 滚动行与边界组合对线性查询短批次配对计时；不设置 CI 时间阈值"]
 fn benchmark_rolling_matrix_rows_paired() {
     use std::hint::black_box;
     for (dense, length, unknown, iterations) in [
@@ -283,7 +289,9 @@ fn benchmark_rolling_matrix_rows_paired() {
             let (actual, new) = measure(|| search_converted(&dictionary, &conversion, limit));
             assert_eq!(actual, expected);
             assert_eq!(
-                new.allocations + saved_row_buffers(&conversion, limit),
+                new.allocations
+                    + saved_row_buffers(&conversion, limit)
+                    + super::boundary_tests::saved_boundary_buffers(&conversion, limit),
                 old.allocations
             );
             for rolling in [false, true] {
@@ -322,7 +330,7 @@ fn benchmark_rolling_matrix_rows_paired() {
                     })
                     .collect(),
             );
-            eprintln!("滚动行配对：密集={dense} 字符={length} 未知={unknown} 限额={limit} iterations={iterations} groups={} batches_us_p10_p50_p90={absolute:.3?} rolling_linear={ratios:.4?} 分配={}→{} 峰值={}→{}", groups.len(), old.allocations, new.allocations, old.peak_bytes, new.peak_bytes);
+            eprintln!("组合配对（滚动行与边界）：密集={dense} 字符={length} 未知={unknown} 限额={limit} iterations={iterations} groups={} batches_us_p10_p50_p90={absolute:.3?} rolling_linear={ratios:.4?} 分配={}→{} 峰值={}→{}", groups.len(), old.allocations, new.allocations, old.peak_bytes, new.peak_bytes);
         }
     }
 }
