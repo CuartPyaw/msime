@@ -289,11 +289,6 @@ public final class Ui {
         return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, heightPixels);
     }
 
-    /** Return the minimum one-pixel thickness for a 0.5 dp separator. */
-    public static int hairlinePx(Context context) {
-        return KeyboardGeometry.atLeastOnePixel(context, 0.5f);
-    }
-
     /** Create a view filled with the standard hairline colour for separators. */
     public static View hairlineView(Context context) {
         View view = new View(context);
