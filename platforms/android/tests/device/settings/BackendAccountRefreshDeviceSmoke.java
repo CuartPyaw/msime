@@ -9,6 +9,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.json.JSONObject;
 
 /** Regression coverage for refresh-token rotation in the native Android account client. */
@@ -62,6 +63,7 @@ public final class BackendAccountRefreshDeviceSmoke extends Instrumentation {
         JSONObject savedTokens = saved.getJSONObject("tokens");
         check(NEXT_ACCESS.equals(savedTokens.optString("access_token")), "access token rotated");
         check(NEXT_REFRESH.equals(savedTokens.optString("refresh_token")), "refresh token rotated");
+        check(!saved.optString("session_id").isEmpty(), "legacy session receives a login identity");
         check(saved.optLong("expires_at_unix_ms") > System.currentTimeMillis(), "expiry persisted");
         check(calls.get() == 1, "one refresh request");
     }
@@ -122,6 +124,106 @@ public final class BackendAccountRefreshDeviceSmoke extends Instrumentation {
 
         check(account.chatModels().size() == 1, "an account 401 retries after refresh");
         check(calls.get() == 3, "account request, refresh and retry are each issued once");
+        check(!new JSONObject(store.load()).optString("session_id").isEmpty(),
+            "refresh retains a persisted login identity");
+    }
+
+    private static JSONObject models() throws Exception {
+        return new JSONObject().put("data", new org.json.JSONArray()
+            .put(new JSONObject().put("id", "synthetic-model")))
+            .put("default_model", "synthetic-model");
+    }
+
+    private static void oldRequestDoesNotRetryAfterNewLogin() throws Exception {
+        MemoryStore store = new MemoryStore(activeSession());
+        String oldId = new BackendAccount(store, (method, path, body, token) -> models()).currentSession().sessionId();
+        BackendAccount replacement = new BackendAccount(store,
+            (method, path, body, token) -> tokens(NEXT_ACCESS, NEXT_REFRESH));
+        AtomicInteger modelCalls = new AtomicInteger();
+        BackendAccount old = new BackendAccount(store, (method, path, body, token) -> {
+            if ("/v1/models".equals(path)) {
+                if (modelCalls.incrementAndGet() == 1) {
+                    replacement.login(new BackendAccount.Challenge("synthetic-challenge", "synthetic-nonce"),
+                        "synthetic-credential");
+                    throw new BackendAccount.RequestException(401);
+                }
+                return models();
+            }
+            throw new AssertionError("unexpected account request");
+        });
+
+        boolean cancelled = false;
+        try {
+            old.chatModels();
+        } catch (java.util.concurrent.CancellationException expected) {
+            cancelled = true;
+        }
+        check(cancelled, "a rejected old request must not retry with a new login");
+        check(modelCalls.get() == 1, "the new login must not receive the old request");
+        check(!oldId.equals(new JSONObject(store.load()).optString("session_id")),
+            "new login has a new identity");
+    }
+
+    private static void oldRequestDiscardsSuccessAfterNewLogin() throws Exception {
+        MemoryStore store = new MemoryStore(activeSession());
+        BackendAccount replacement = new BackendAccount(store,
+            (method, path, body, token) -> tokens(NEXT_ACCESS, NEXT_REFRESH));
+        BackendAccount old = new BackendAccount(store, (method, path, body, token) -> {
+            check("/v1/models".equals(path), "models endpoint");
+            replacement.login(new BackendAccount.Challenge("synthetic-challenge", "synthetic-nonce"),
+                "synthetic-credential");
+            return models();
+        });
+
+        boolean cancelled = false;
+        try {
+            old.chatModels();
+        } catch (java.util.concurrent.CancellationException expected) {
+            cancelled = true;
+        }
+        check(cancelled, "an old response must not be delivered after a new login");
+    }
+
+    private static void secondaryProcessRejectsChangedOwnerLogin() throws Exception {
+        AtomicReference<String> login = new AtomicReference<>("synthetic-login-a");
+        BackendAccount.TokenSource owner = new BackendAccount.TokenSource() {
+            @Override public String accessToken() { return ACCESS; }
+            @Override public BackendAccount.SessionCredential session(String rejectedToken) {
+                return new BackendAccount.SessionCredential(ACCESS, login.get());
+            }
+        };
+        AtomicInteger calls = new AtomicInteger();
+        BackendAccount secondary = new BackendAccount(new MemoryStore(null), (method, path, body, token) -> {
+            calls.incrementAndGet();
+            login.set("synthetic-login-b");
+            throw new BackendAccount.RequestException(401);
+        }, owner);
+
+        boolean cancelled = false;
+        try {
+            secondary.chatModels();
+        } catch (java.util.concurrent.CancellationException expected) {
+            cancelled = true;
+        }
+        check(cancelled, "a secondary process must reject an owner login replacement");
+        check(calls.get() == 1, "a secondary process must not replay an old request");
+    }
+
+    private static void oldRequestDiscardsSuccessAfterSignOut() throws Exception {
+        MemoryStore store = new MemoryStore(activeSession());
+        BackendAccount account = new BackendAccount(store, (method, path, body, token) -> {
+            check("/v1/models".equals(path), "models endpoint");
+            new BackendAccount(store, (m, p, b, t) -> models()).signOut();
+            return models();
+        });
+
+        boolean cancelled = false;
+        try {
+            account.chatModels();
+        } catch (java.util.concurrent.CancellationException expected) {
+            cancelled = true;
+        }
+        check(cancelled, "a signed-out request must not deliver its old response");
     }
 
     private static void unauthorizedRefreshClearsSession() throws Exception {
@@ -157,13 +259,17 @@ public final class BackendAccountRefreshDeviceSmoke extends Instrumentation {
             concurrentCallersShareOneRefresh();
             refreshesAnUnexpiredRejectedToken();
             retriesAccountRequestsAfter401();
+            oldRequestDoesNotRetryAfterNewLogin();
+            oldRequestDiscardsSuccessAfterNewLogin();
+            secondaryProcessRejectsChangedOwnerLogin();
+            oldRequestDiscardsSuccessAfterSignOut();
             unauthorizedRefreshClearsSession();
             unboundedPersistedExpiryIsRejected();
-            result.putString("stream", "MSIME_DEVICE_SMOKE_PASSED: account refresh rotation, single-flight and unauthorized clearing\n");
+            result.putString("stream", "MSIME_DEVICE_SMOKE_PASSED: account refresh, login lineage and unauthorized clearing\n");
             finish(Activity.RESULT_OK, result);
         } catch (Exception | AssertionError error) {
             result.putString("stream", "MSIME_DEVICE_SMOKE_FAILED: account refresh ("
-                + error.getClass().getSimpleName() + ")\n");
+                + error.getClass().getSimpleName() + ": " + error.getMessage() + ")\n");
             finish(Activity.RESULT_CANCELED, result);
         }
     }
