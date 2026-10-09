@@ -483,7 +483,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         if (divider) {
             View line = new View(this);
             ViewPolicy.setBackgroundColor(line, Ui.hairline(this));
-            card.addView(line, Ui.matchWidthHeightPx(
+            card.addView(line, KeyboardGeometry.matchWidthHeightPx(
                 BoundsPolicy.bounded(Ui.dp(this, 1) / 2, 1, Integer.MAX_VALUE)));
         }
         LinearLayout row = Ui.row(this);
