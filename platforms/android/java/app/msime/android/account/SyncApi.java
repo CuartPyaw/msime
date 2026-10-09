@@ -73,11 +73,20 @@ public final class SyncApi {
     /** Every token lookup belongs to the same account binding, including a 401 retry. */
     public SyncApi(Context context, long bindingGeneration) {
         Context application = context.getApplicationContext();
-        this.account = rejected -> {
-            synchronized (SyncSwitch.bindingLock()) {
-                if (SyncSwitch.bindingGeneration(application) != bindingGeneration) return "";
-                String token = new BackendAccount(application).currentAccessToken(rejected);
-                return SyncSwitch.bindingGeneration(application) == bindingGeneration ? token : "";
+        this.account = new CloudApi.Tokens() {
+            @Override public String token(String rejected) throws Exception {
+                return snapshot(rejected).token();
+            }
+
+            @Override public CloudApi.TokenSnapshot snapshot(String rejected) throws Exception {
+                synchronized (SyncSwitch.bindingLock()) {
+                    if (SyncSwitch.bindingGeneration(application) != bindingGeneration)
+                        return new CloudApi.TokenSnapshot("", "");
+                    BackendAccount.SessionCredential session = new BackendAccount(application).currentSession(rejected);
+                    if (SyncSwitch.bindingGeneration(application) != bindingGeneration)
+                        return new CloudApi.TokenSnapshot("", "");
+                    return new CloudApi.TokenSnapshot(session.token(), session.sessionId());
+                }
             }
         };
         this.cloud = new CloudApi(application, this.account);
