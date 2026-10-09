@@ -201,11 +201,6 @@ public final class Ui {
         ViewPolicy.setTextMinHeight(view, dp(context, heightDp));
     }
 
-    /** Set a text view's line-aware minimum width from a density-independent value. */
-    public static void setTextMinWidthDp(TextView view, Context context, float widthDp) {
-        ViewPolicy.setTextMinWidth(view, dp(context, widthDp));
-    }
-
     /** Apply the standard compact action-button insets to a view. */
     public static void setButtonPadding(View view, Context context) {
         int horizontal = dp(context, BUTTON_PADDING_H);
@@ -618,7 +613,7 @@ public final class Ui {
         ViewPolicy.setBackground(button, pillRipple(context, fill));
         setSymmetricPaddingDp(button, context, horizontalPaddingDp, verticalPaddingDp);
         setTextMinHeightDp(button, context, minHeightDp);
-        if (minWidthDp > 0) setTextMinWidthDp(button, context, minWidthDp);
+        if (minWidthDp > 0) ViewPolicy.setTextMinWidth(button, dp(context, minWidthDp));
         bindClick(button, action);
         return button;
     }
@@ -747,13 +742,4 @@ public final class Ui {
         ViewPolicy.setTextColor(view, color);
     }
 
-    /** 把一个 view 的透明度和可点按状态一起切换；禁用的行仍然可见，只是变淡且不响应。 */
-    public static void setEnabledLook(View view, boolean enabled) {
-        setEnabledLook(view, enabled, 0.38f);
-    }
-
-    /** Apply enabled state and a caller-selected inactive opacity to a home control. */
-    public static void setEnabledLook(View view, boolean enabled, float inactiveAlpha) {
-        ViewPolicy.setEnabledWithAlpha(view, enabled, inactiveAlpha);
-    }
 }
