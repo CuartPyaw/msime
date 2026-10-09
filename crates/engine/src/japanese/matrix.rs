@@ -157,11 +157,11 @@ fn search_with_output(
     let pending_kana = kana_for_romaji_prefix_view(pending);
     if reading.is_empty() {
         for kana in pending_kana {
-            for lemma in dictionary.prefix_lemma_views(kana, 24) {
+            dictionary.for_each_prefix_lemma_view(kana, 24, |lemma| {
                 output.push(lemma.surface, i64::from(lemma.word_cost));
-                if output.full() {
-                    return output.items;
-                }
+            });
+            if output.full() {
+                return output.items;
             }
         }
         return output.items;
@@ -576,3 +576,7 @@ mod exact_stream_tests;
 #[cfg(test)]
 #[path = "matrix/consumed_row_tests.rs"]
 mod consumed_row_tests;
+
+#[cfg(test)]
+#[path = "matrix/initial_prefix_tests.rs"]
+mod initial_prefix_tests;

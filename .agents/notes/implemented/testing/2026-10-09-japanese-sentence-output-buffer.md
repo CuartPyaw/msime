@@ -20,6 +20,8 @@ provider 持有初始为空的句子向量。有词库查询写入该向量，�
 
 按 `search_converted_into`、句子结果向量、矩阵缓冲与 `Output` 检索活跃 proposed、implemented、rejected，没有已有句子容器复用决定。[固定八槽行](../../rejected/testing/2026-10-09-japanese-inline-matrix-rows.md) 仍被否决，本篇不改变 Row 布局或矩阵行存储。会话最终候选行、粤拼与注音缓冲属于不同层，保留。
 
+[前缀结果流式消费](2026-10-09-japanese-prediction-stream.md) 同时覆盖空读音矩阵的各前缀结果容器：它与本篇最终输出向量属于不同的分配层，热输出差值继续只核算最终容器。
+
 ## Alternatives considered
 
 - **矩阵直接回调到最终候选**：可进一步省去中间容器与部分词条文本复制，但矩阵和 provider 的去重、限额及所有权边界不同，直接共用会改变结果计数或需要新的独立去重存储；本篇复用现有拥有型结果。
