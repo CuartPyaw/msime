@@ -214,7 +214,7 @@ final class SkinCommunityTests: XCTestCase {
     let profileAfterLogout = try await api.currentUser()
     XCTAssertNil(profileAfterLogout)
   }
-  func testNativeLoginCancelsOnlyThePreviousAccountAfterSavingNewSession() async throws {
+  func testNativeLoginCancelsOnlyThePreviousAccountBeforeSavingNewSession() async throws {
     let memory = CommunityMemoryCredentials()
     let oldTokens = BackendAccountClient.Tokens(
       access_token: String(repeating: "a", count: 64), refresh_token: String(repeating: "f", count: 64),
@@ -232,14 +232,14 @@ final class SkinCommunityTests: XCTestCase {
     })
     XCTAssertEqual(recorder.events.count, 1)
     XCTAssertEqual(recorder.events.first?.old, "previous-user")
-    XCTAssertEqual(recorder.events.first?.stored, "fixture-user")
+    XCTAssertEqual(recorder.events.first?.stored, "previous-user")
 
     try await session.signIn(challenge: "fixture", credential: "synthetic", replacingAccount: {
       recorder.record($0, storage: memory)
     })
     XCTAssertEqual(recorder.events.count, 1, "same-account login keeps its pending snapshot")
   }
-  func testNativeForgetCancelsTheOldQueueAfterClearingTheSession() async throws {
+  func testNativeForgetCancelsTheOldQueueBeforeClearingTheSession() async throws {
     let memory = CommunityMemoryCredentials()
     let oldTokens = BackendAccountClient.Tokens(
       access_token: String(repeating: "a", count: 64), refresh_token: String(repeating: "f", count: 64),
@@ -254,7 +254,7 @@ final class SkinCommunityTests: XCTestCase {
     XCTAssertNil(try memory.load())
     XCTAssertEqual(recorder.events.count, 1)
     XCTAssertEqual(recorder.events.first?.old, "previous-user")
-    XCTAssertNil(recorder.events.first?.stored)
+    XCTAssertEqual(recorder.events.first?.stored, "previous-user")
   }
 
   func testDelayedNativeForgetKeepsAnotherSessionsNewLoginAndSnapshot() async throws {

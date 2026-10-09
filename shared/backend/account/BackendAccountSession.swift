@@ -332,7 +332,7 @@ actor BackendAccountSession {
     }
   }
   func signIn(challenge: String, credential: String,
-              replacingAccount cleanup: @Sendable (String) -> Void = { _ in }) async throws {
+              replacingAccount cleanup: @Sendable (String) throws -> Void = { _ in }) async throws {
     generation += 1
     refreshing?.cancel(); refreshing = nil
     let version = generation
@@ -343,14 +343,17 @@ actor BackendAccountSession {
     }
   }
   private func installReplacingAccount(_ tokens: BackendAccountClient.Tokens,
-                                       version: Int, cleanup: @Sendable (String) -> Void) throws {
+                                       version: Int, cleanup: @Sendable (String) throws -> Void) throws {
     guard generation == version else { throw CancellationError() }
     let previous = try? storage.load().map { try BackendSavedSession.validated($0) }
-    try install(tokens)
-    if let accountID = previous?.tokens.user.id, accountID != tokens.user.id { cleanup(accountID) }
+    try install(tokens) {
+      if let accountID = previous?.tokens.user.id, accountID != tokens.user.id { try cleanup(accountID) }
+    }
   }
-  private func install(_ tokens: BackendAccountClient.Tokens) throws {
+  private func install(_ tokens: BackendAccountClient.Tokens,
+                       beforeSave: () throws -> Void = {}) throws {
     let value = try BackendSavedSession.forTokens(tokens)
+    try beforeSave()
     try storage.save(value)
     saved = value; loaded = true
   }
@@ -462,10 +465,10 @@ actor BackendAccountSession {
       return (try await operation(identity.token), identity.token)
     }
   }
-  func forget(removingAccount cleanup: @Sendable (String) -> Void = { _ in }) async throws {
+  func forget(removingAccount cleanup: @Sendable (String) throws -> Void = { _ in }) async throws {
     try await forget(removingAccount: cleanup, fallbackAccountID: nil)
   }
-  private func forget(removingAccount cleanup: @Sendable (String) -> Void,
+  private func forget(removingAccount cleanup: @Sendable (String) throws -> Void,
                       fallbackAccountID: String?) async throws {
     // Keep the old identity before clearing memory. The shared lock below rechecks the account
     // so an older sign-out cannot clear another process's replacement session. A refresh by
@@ -483,14 +486,14 @@ actor BackendAccountSession {
     }
   }
   private func clearStorage(at version: Int, accountID: String?,
-                            cleanup: @Sendable (String) -> Void) throws {
+                            cleanup: @Sendable (String) throws -> Void) throws {
     guard generation == version else { throw CancellationError() }
     let current = try? storage.load()
     if let current, current.tokens.user.id != accountID { throw CancellationError() }
+    if let accountID = current?.tokens.user.id ?? accountID { try cleanup(accountID) }
     try storage.clear()
-    if let accountID = current?.tokens.user.id ?? accountID { cleanup(accountID) }
   }
-  func logout(all: Bool = false, removingAccount cleanup: @Sendable (String) -> Void = { _ in }) async throws {
+  func logout(all: Bool = false, removingAccount cleanup: @Sendable (String) throws -> Void = { _ in }) async throws {
     let owner = try? user()?.id
     let version = generation
     let token: String
