@@ -2699,6 +2699,83 @@ test("clipboard history waits for a sync before accepting deletion", async () =>
   expect(await screen.findByText("暂无历史记录")).toBeDefined();
 });
 
+test("clipboard history refreshes a deletion that finishes after leaving and reopening the page", async () => {
+  const pendingDelete = deferred<void>();
+  const entry = { text: "synthetic record", timestampMs: 1_789_000_000_000, pinned: false };
+  let entries = [entry];
+  const list = vi.fn().mockImplementation(async () => [...entries]);
+  const remove = vi.fn().mockImplementation(async () => {
+    await pendingDelete.promise;
+    entries = [];
+  });
+  const snapshot = { ...initial, preferences: { ...initial.preferences, clipboard_history: true } };
+  render(
+    <SettingsPage
+      client={{
+        load: vi.fn().mockResolvedValue(snapshot),
+        save: vi.fn(),
+        clipboard: { list, remove, clear: vi.fn().mockResolvedValue(undefined) },
+      }}
+    />,
+  );
+  await settingsReady();
+  fireEvent.click(screen.getByRole("button", { name: "剪贴板" }));
+  const row = (await screen.findByText(entry.text)).closest(
+    "[data-clipboard-entry-row]",
+  ) as HTMLElement;
+  fireEvent.click(within(row).getByRole("button", { name: "删除剪贴板记录" }));
+  await waitFor(() => expect(remove).toHaveBeenCalledWith(entry.text));
+
+  fireEvent.click(screen.getByRole("button", { name: "输入" }));
+  fireEvent.click(screen.getByRole("button", { name: "剪贴板" }));
+  await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+  expect(screen.getByText(entry.text)).toBeDefined();
+  const deleteButton = screen.getByRole("button", { name: "删除剪贴板记录" }) as HTMLButtonElement;
+  expect(deleteButton.disabled).toBe(true);
+  expect((screen.getByRole("switch", { name: "剪贴板历史" }) as HTMLInputElement).disabled).toBe(
+    true,
+  );
+
+  await act(async () => pendingDelete.resolve());
+  expect(screen.queryByText(entry.text)).toBeNull();
+});
+
+test("clipboard history applies a sync that finishes after leaving and reopening the page", async () => {
+  const pendingSync = deferred<Array<{ text: string; timestampMs: number; pinned: boolean }>>();
+  const oldEntry = { text: "synthetic old", timestampMs: 1_788_000_000_000, pinned: false };
+  const newEntry = { text: "synthetic new", timestampMs: 1_789_000_000_000, pinned: false };
+  const list = vi.fn().mockResolvedValue([oldEntry]);
+  const snapshot = { ...initial, preferences: { ...initial.preferences, clipboard_history: true } };
+  render(
+    <SettingsPage
+      client={{
+        load: vi.fn().mockResolvedValue(snapshot),
+        save: vi.fn(),
+        clipboard: {
+          list,
+          sync: () => pendingSync.promise,
+          clear: vi.fn().mockResolvedValue(undefined),
+        },
+      }}
+    />,
+  );
+  await settingsReady();
+  fireEvent.click(screen.getByRole("button", { name: "剪贴板" }));
+  expect(await screen.findByText(oldEntry.text)).toBeDefined();
+  fireEvent.click(screen.getByRole("button", { name: "从系统剪贴板同步" }));
+
+  fireEvent.click(screen.getByRole("button", { name: "输入" }));
+  fireEvent.click(screen.getByRole("button", { name: "剪贴板" }));
+  await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+  expect(
+    (screen.getByRole("button", { name: "从系统剪贴板同步" }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+
+  await act(async () => pendingSync.resolve([newEntry]));
+  expect(screen.getByText(newEntry.text)).toBeDefined();
+  expect(screen.queryByText(oldEntry.text)).toBeNull();
+});
+
 test("clipboard history ignores a pending list after its switch is turned off and on", async () => {
   const pendingList = deferred<Array<{ text: string; timestampMs: number; pinned: boolean }>>();
   const list = vi

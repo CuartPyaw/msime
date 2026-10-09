@@ -70,8 +70,23 @@ export function ClipboardHistorySection({
     persistedHistoryEnabled,
     revision,
   );
+  // A write belongs to the client even while the user visits another settings page.
+  const historyActionGeneration = useAsyncGeneration(
+    client,
+    ios,
+    historyEnabled,
+    persistedHistoryEnabled,
+  );
   const historyActionBusy = useRef(false);
   const historyRead = useRef(0);
+
+  useEffect(() => {
+    historyActionBusy.current = false;
+    setHistoryBusy(false);
+    return () => {
+      historyActionBusy.current = false;
+    };
+  }, [client, ios, historyEnabled, persistedHistoryEnabled]);
 
   // The account state and the server's enabled flag are read once each time the page is opened with the history showing; there is no polling.
   useEffect(() => {
@@ -120,7 +135,6 @@ export function ClipboardHistorySection({
   useEffect(() => {
     const currentGeneration = historyGeneration.current;
     const currentRead = historyRead.current;
-    setHistoryBusy(false);
     // The section remains mounted behind other settings pages. Read on entry instead of
     // starting a request that will be invalidated before the history is shown.
     if (page && page !== "tools") return;
@@ -146,32 +160,32 @@ export function ClipboardHistorySection({
         }
       })
       .catch(() => undefined);
-    return () => {
-      historyActionBusy.current = false;
-    };
   }, [client, historyGeneration, ios, page, historyEnabled, persistedHistoryEnabled, revision]);
 
   const mutate = async (action: () => Promise<void>, failure: string) => {
     if (historyActionBusy.current) return;
     historyActionBusy.current = true;
     setHistoryBusy(true);
-    const currentGeneration = historyGeneration.current;
+    const currentGeneration = historyActionGeneration.current;
     const currentClient = client;
     try {
       await action();
-      if (currentGeneration !== historyGeneration.current) return;
+      if (currentGeneration !== historyActionGeneration.current) return;
       const currentRead = ++historyRead.current;
       setClearArmed(false);
       if (currentClient?.list) {
         const next = await currentClient.list();
-        if (currentGeneration !== historyGeneration.current || currentRead !== historyRead.current)
+        if (
+          currentGeneration !== historyActionGeneration.current ||
+          currentRead !== historyRead.current
+        )
           return;
         setEntries(next);
       }
     } catch {
-      if (currentGeneration === historyGeneration.current) onError(failure);
+      if (currentGeneration === historyActionGeneration.current) onError(failure);
     } finally {
-      if (currentGeneration === historyGeneration.current) {
+      if (currentGeneration === historyActionGeneration.current) {
         historyActionBusy.current = false;
         setHistoryBusy(false);
       }
@@ -201,6 +215,7 @@ export function ClipboardHistorySection({
             description={clipboardDescription}
             aria-label="剪贴板历史"
             checked={historyEnabled}
+            disabled={historyBusy}
             onChange={toggle}
           />
         )}
@@ -213,20 +228,20 @@ export function ClipboardHistorySection({
                     if (historyActionBusy.current) return;
                     historyActionBusy.current = true;
                     setHistoryBusy(true);
-                    const currentGeneration = historyGeneration.current;
+                    const currentGeneration = historyActionGeneration.current;
                     void client.sync!()
                       .then((next) => {
-                        if (currentGeneration !== historyGeneration.current) return;
+                        if (currentGeneration !== historyActionGeneration.current) return;
                         historyRead.current++;
                         setEntries(next);
                         setClearArmed(false);
                       })
                       .catch(() => {
-                        if (currentGeneration === historyGeneration.current)
+                        if (currentGeneration === historyActionGeneration.current)
                           onError("无法同步剪贴板历史");
                       })
                       .finally(() => {
-                        if (currentGeneration === historyGeneration.current) {
+                        if (currentGeneration === historyActionGeneration.current) {
                           historyActionBusy.current = false;
                           setHistoryBusy(false);
                         }
