@@ -2,6 +2,7 @@ package app.msime.android.home;
 
 import app.msime.android.MainThreadPolicy;
 import app.msime.android.TextPolicy;
+import app.msime.android.ThreadPolicy;
 
 import android.os.Bundle;
 import android.os.Handler;
@@ -57,7 +58,8 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
     private static final long STREAM_FRAME_MS = 50;
     private static final String FAILURE = "请求失败，请检查登录状态或稍后重试。";
     private final Handler mainHandler = MainThreadPolicy.mainHandler();
-    private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private final ExecutorService worker = Executors.newSingleThreadExecutor(
+        ThreadPolicy.namedFactory("msime-keyboard-tryout"));
     private final ArrayList<BackendAccount.ChatModel> models = new ArrayList<>(BackendAccount.MAX_CHAT_MODELS);
     private final List<BackendAccount.ChatMessage> messages = new ArrayList<>(13);
     private Future<?> operation;
