@@ -36,10 +36,6 @@ public final class DoubaoAsrPolicy {
         return JsonPolicy.strictString(value);
     }
 
-    static Boolean strictBoolean(Object value) {
-        return JsonPolicy.strictBoolean(value);
-    }
-
     static boolean validEndpoint(String endpoint) {
         return TextPolicy.validAuthority(endpoint, "wss://", AiPolishConfiguration.MAX_ENDPOINT_LENGTH);
     }
