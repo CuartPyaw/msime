@@ -255,16 +255,9 @@ public final class Ui {
             dp(context, heightDp));
     }
 
-    /** Create a view filled with the standard hairline colour for separators. */
-    public static View hairlineView(Context context) {
-        View view = new View(context);
-        ViewPolicy.setBackgroundColor(view, hairline(context));
-        return view;
-    }
-
     /** Create a theme-coloured one-pixel divider in either orientation. */
     public static View divider(Context context, boolean horizontal) {
-        View view = hairlineView(context);
+        View view = ViewPolicy.newColorView(context, hairline(context));
         int thin = KeyboardGeometry.atLeastOnePixel(context, 0.5f);
         view.setLayoutParams(horizontal
             ? KeyboardGeometry.matchWidthHeightPx(thin)
