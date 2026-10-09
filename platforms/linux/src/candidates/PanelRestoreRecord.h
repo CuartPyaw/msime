@@ -111,7 +111,7 @@ inline bool record_panel_takeover(const std::filesystem::path &file, std::string
   return record_panel_takeover(file, host, key, current, written, current);
 }
 
-// The settings MSIME still holds and the value each goes back to, for a host that stops drawing its own panel theme and leaves the desktop's again: `held` maps an option name to the value it holds now, and only the options whose value is still MSIME's own go in it, so a value the user picked in the desktop's configuration tool is never in this map and never written over. Each one goes back to the record's `prior`, or to `stock` when the record kept no prior for what it holds (an earlier build wrote MSIME's own value before the record existed, which msime-linux-setup --unregister resets the same way). A recorded `written` that no longer matches is ignored: the record no longer describes this value, so its prior is not this option's to go back to. The counterpart of msime-linux-setup's `restorable`, for a host that restores in place rather than at uninstall.
+// `held` 只含当前值仍由水杉持有的面板项，恢复记录的 `prior`，没有原值则用 `stock`；`written` 不匹配时忽略旧原值，不覆盖用户后改的项。与卸载脚本 `restorable` 共用语义，在宿主内立即恢复。
 // 恢复不修改记录：这不是一次新的接管，把恢复写进去只会把用户自己的值换成被恢复的值。
 inline nlohmann::json panel_restore_values(const nlohmann::json &record, std::string_view host,
                                           const nlohmann::json &held, const nlohmann::json &stock) {

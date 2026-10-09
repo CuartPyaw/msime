@@ -32,7 +32,7 @@ std::string synthetic_png(int width, int height) {
   return out;
 }
 
-// A PNG signature and IHDR declaring the given size: as much of an image as the host reads before it decides whether to decode it, with nothing behind it, so cairo refuses it.
+// 只有指定尺寸的 PNG 签名和 IHDR，没有像素数据，宿主能读头但 cairo 必须拒绝解码。
 std::string png_header(std::uint32_t width, std::uint32_t height) {
   std::string bytes("\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR", 16);
   for (const auto side : {width, height})
@@ -56,7 +56,7 @@ int offset_y(const std::string &theme) {
   return std::stoi(theme.substr(start + std::string_view("\nOverlayOffsetY=").size()));
 }
 
-// The value of the Overlay key in a theme.
+// 读取主题的 Overlay 键值。
 std::string overlay_of(const std::string &theme) {
   const auto start = theme.find("\nOverlay=");
   assert(start != std::string::npos);
@@ -154,7 +154,7 @@ int main() {
   const auto refused = host::stage_fcitx_overlay(plain_dir, declared, pad,
                                                  [](const std::string &, int, int) { return std::optional<std::string>{}; });
   assert(refused && refused->height == 448 && refused->file == plain->file);
-  // A scaler that resamples the 1x copy but fails on the @2x twin leaves the original too: the theme never names a resampled image without its twin.
+  // 1x 缩放成功但 @2x 失败时，两者都退回原图，主题不能引用缺少配对副本的缩放图。
   bool scaled_once = false;
   const auto half_scaled = host::stage_fcitx_overlay(
       plain_dir, declared, pad, [&](const std::string &png, int width, int room) {
@@ -187,7 +187,7 @@ int main() {
     assert(name == "oversized.png" ? !tried : tried);
   }
 
-  // A source the declared width would leave taller than the band plus the card's padding is shrunk further, so the classic UI draws all of it: the top is exactly at the clip margin and the @2x twin is twice the copy.
+  // 声明宽度会让图高超过顶带加内边距时继续缩小：顶边落在裁剪边距内，@2x 的两边尺寸恰好翻倍。
   {
     const auto banner_image = root / "skin" / "banner.png";
     write(banner_image, synthetic_png(64, 512));

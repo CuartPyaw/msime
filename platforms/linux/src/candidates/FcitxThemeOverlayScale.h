@@ -12,7 +12,7 @@
 
 namespace msime::linux_host {
 
-// Resample a skin's decoration PNG to `width` pixels wide with its aspect ratio kept, and to `room` pixels tall at most when that width would leave it taller, which is the room the classic UI gives the overlay above the card (see stage_fcitx_overlay); `room <= 0` keeps the width alone. For the classic UI, which draws an overlay at the image's own pixel size. Decoded and encoded with cairo, the library the classic UI reads theme images with. Returns nullopt for bytes cairo cannot read as a PNG.
+// 用 classicui 同样的 cairo 编解码 PNG，保持比例缩放到 `width` 宽；超过可用高度 `room` 时继续缩小，`room <= 0` 只约束宽度，解码失败返回 `nullopt`。
 inline std::optional<std::string> scale_fcitx_overlay_png(const std::string &png, int width, int room) {
   if (width <= 0) return std::nullopt;
   struct Reader {

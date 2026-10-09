@@ -109,13 +109,13 @@ inline bool surface_dark_theme(const nlohmann::json &preferences, const char *su
   return global == "system" ? system_dark : global != "light";
 }
 
-// The candidate window being drawn, as msime_client_resolve_theme takes it: a package may declare only one of the two layouts. 非对象文档取默认的纵向布局，与 candidate_dark_theme 一样不抛异常。
+// 传给 `msime_client_resolve_theme` 的候选布局；皮肤可能只支持一种布局，非对象文档取默认纵向，不抛异常。
 inline std::string candidate_layout_id(const nlohmann::json &preferences) {
   if (!preferences.is_object()) return "vertical";
   return preferences.value("candidate_layout", std::string{}) == "horizontal" ? "horizontal" : "vertical";
 }
 
-// The two preferences a 主题 choice writes, as one comparable document: they are what says which global theme the candidate window draws. The Fcitx5 host treats a change to this value as the user choosing a theme (the status menu and the settings page both write these keys), while a focus change, a system appearance change or a restart re-reads the same value; comparing the whole custom_theme document also covers a skin or a colour picker inside it. `system` and a missing key come out alike, so clearing the key is not read as a choice of something else.
+// 菜单和设置页写入的 `global_theme`、整个 `custom_theme` 构成选择指纹，覆盖皮肤与取色器变化；重读不算新选择，缺失主题键与 `system` 等价。
 inline nlohmann::json candidate_theme_selection(const nlohmann::json &preferences) {
   using Json = nlohmann::json;
   if (!preferences.is_object()) return Json::object();
@@ -125,7 +125,7 @@ inline nlohmann::json candidate_theme_selection(const nlohmann::json &preference
               {"custom_theme", custom != preferences.end() ? *custom : Json(nullptr)}};
 }
 
-// The msime_client_resolve_theme request for the candidate window: the global theme and the custom theme exactly as stored, the mode candidate_dark_theme settles on, the layout being drawn and, when the custom theme names an installed package, that package's catalogue entry unchanged. The shared layer uses the package only for `custom` and only when its id equals custom_theme.candidate_skin, so it is sent only then. The caller does the FFI call; this header stays free of it so the palette tests need no engine. 非对象文档与空文档一样只带出 `system`（find() 对非对象返回 end()），于是一份畸形文档解析成「没有候选覆盖」，而不是读出一个错误的主题字段。
+// 候选请求沿用存储的全局/自定义主题、已解析明暗与布局，仅为匹配的自定义皮肤附上清单；非对象文档按 `system` 处理，FFI 由调用方执行。
 inline nlohmann::json candidate_theme_request(const nlohmann::json &preferences, bool dark,
                                               const nlohmann::json &catalog) {
   using Json = nlohmann::json;
@@ -150,11 +150,11 @@ struct CandidateTheme {
   bool dark = false;
   // The package whose colours were drawn, the only signal for its decoration; empty when none.
   std::string candidate_skin;
-  // Whether the shared layer resolved candidate coverage of its own for this theme. See candidate_theme_covers.
+  // 共享层是否解析出自己的候选覆盖，见 `candidate_theme_covers`。
   bool covers_candidates = false;
 };
 
-// Whether a resolved theme (`msime_client_resolve_theme`'s `value`) draws candidate colours of its own. The shared layer answers `candidate: null` for `system` and for a custom theme whose package palette and pickers set nothing, and sets `candidate_skin` only for a package whose manifest declares the layout and the mode being drawn, so a document carrying neither describes no coverage at all: the host draws the native tokens and Fcitx5 must leave the classic UI's own theme alone (see FcitxEngine::applyCandidatePanelTheme). Read from the resolution itself rather than from `global_theme`, so an id that fails the call, a retired skin id and a malformed preferences document all land here instead of counting as a theme.
+// 从共享解析结果判断覆盖：候选配色对象或非空有效皮肤才算；`system`、无颜色自定义及解析失败不算，不能用原始主题 id 强行接管 classicui。
 inline bool candidate_theme_covers(const nlohmann::json &resolved) {
   if (const auto candidate = resolved.find("candidate");
       candidate != resolved.end() && candidate->is_object())

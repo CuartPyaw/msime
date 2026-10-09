@@ -97,7 +97,7 @@ std::string image_in(const std::string &theme, const std::string &section) {
   return theme.substr(value, theme.find('\n', value) - value);
 }
 
-// The value of one key of a Margin block, which is what the classic UI leaves out of the nine-slice's stretched middle.
+// 读取 Margin 块的键值，即 classicui 九宫格不参与中心拉伸的边距。
 int margin_in(const std::string &theme, const std::string &section, const std::string &key) {
   const auto header = "[" + section + "]\n";
   const auto start = theme.find(header);

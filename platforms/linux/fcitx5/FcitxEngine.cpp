@@ -971,7 +971,7 @@ public:
   void refreshToolbar();
   void refreshThemeMenu();
   void syncCandidatePanelFont();
-  // `chosen` says whether this sync follows a 主题 choice the user just made (the status menu, or a settings page that wrote new theme preferences) rather than a re-read of the same preferences: only a choice may take a third-party classicui theme over.
+  // `chosen` 只标记用户刚在菜单或设置页主动选主题；重读相同偏好不能夺回第三方 classicui 主题。
   void syncCandidatePanelTheme(bool chosen);
   void syncVoiceAction();
   // 中英文切换后在光标附近短暂显示「中」或「英」，由 Fcitx5 面板绘制；定义在
@@ -2522,7 +2522,7 @@ public:
     wave_overlay_.light_theme = !theme.dark;
     wave_overlay_.palette = msime::linux_host::floating_surface_colors(theme);
   }
-  // Called by FcitxEngine::applySystemTheme on the loop when its addon-wide probe sees the desktop appearance change. 桌面明暗变化不是新的选主题操作，所以不允许接管第三方主题。
+  // `FcitxEngine::applySystemTheme` 在主循环收到全插件明暗探测结果后调用；明暗变化不是主动选主题，不能接管第三方主题。
   void setSystemDark(bool dark) {
     if (dark == system_dark_) return;
     system_dark_ = dark;
@@ -5267,7 +5267,7 @@ private:
   fcitx::FactoryFor<FcitxState> *factory_;
 };
 
-// Fcitx5's stock candidate themes: the values MSIME's own theme stands in for, both when a takeover records what to put back and when MSIME stops drawing its theme. The same pair msime-linux-setup --unregister restores.
+// Fcitx5 自带候选主题的恢复值，接管记录与退出接管共用；与 `msime-linux-setup --unregister` 一致。
 const Json kClassicuiStockThemes{{"Theme", "default"}, {"DarkTheme", "default-dark"}};
 
 // classicui's options are shared by every input method, so before one changes, the value it replaces is recorded for msime-linux-setup --unregister to put back (see PanelRestoreRecord.h). A failed record does not hold the change back.
@@ -5310,7 +5310,7 @@ ClassicUiThemeSelection read_classicui_theme_selection() {
   if (const auto *dark = config.valueByPath("DarkTheme")) selection.dark_theme = *dark;
   return selection;
 }
-// Put back the classicui theme options MSIME is no longer drawing, for a host that has no candidate coverage of its own any more: the options that still hold MSIME's theme go back to the value the takeover record kept, or to the stock theme when it kept none, and one the user has replaced in fcitx5-configtool does not hold MSIME's theme and is not in `held` at all. Written straight to the addon rather than through set_classicui_config: this is not a takeover, and recording it would put the restored value where the user's own belongs.
+// 无候选覆盖时，只恢复仍由水杉持有的 classicui 主题项：有记录用原值，否则用自带主题；直接写 addon，不经接管记录接口，避免污染原值。
 void restore_classicui_theme(fcitx::AddonInstance &classicui) {
   // 没有候选覆盖是每一拍都会走到的状态（全局主题为「系统」是默认值），所以先按落盘的 classicui.conf 看有没有仍是水杉写的项：
   // 没有就一次 `getConfig()` 都不调，后者每次都扫描并解析全部已装主题（#5988）。
@@ -5482,7 +5482,7 @@ public:
     // 写字体不经 applyCandidatePanelTheme，提示的字体缓存要在这里跟上。
     hint_inputs_.font = *description;
   }
-  // The candidate colours reach the classic UI as a theme named "msime" in the user's Fcitx5 data directory (see candidates/CandidateFcitxTheme.h). The addon is pointed at it while it shows one of Fcitx5's stock themes or MSIME's own, so a theme the user chose is left in place; a theme the user just picked in the 主题 menu (`chosen`) is taken over even then, and while the resolved theme carries no candidate coverage (系统, or a custom theme with neither colours nor skin) the options MSIME still holds go back. Setting the configuration also makes the addon read the theme file again, which is how a changed palette appears without a restart.
+  // 配色写入用户目录的 `msime` 主题：后台同步只替换自带或水杉主题，主动选择可接管第三方；无覆盖时恢复仍持有的项，写配置让 classicui 重载。
   void applyCandidatePanelTheme(const Json &preferences, bool system_dark, const Json &catalog, bool chosen) {
     applyCandidatePanelTheme(instance_->addonManager().addon("classicui", true), preferences, system_dark, catalog, chosen);
   }

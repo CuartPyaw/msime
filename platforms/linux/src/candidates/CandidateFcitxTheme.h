@@ -64,7 +64,7 @@ inline std::string fcitx_overlay_2x_name(const std::string &file) {
   return file.substr(0, file.size() - png.size()) + "@2x.png";
 }
 
-// Resamples a PNG to `width` pixels wide, and to `room` pixels tall at most, keeping its aspect ratio, and returns the new PNG bytes; nullopt when it cannot. The classic UI draws an overlay at the image's own pixel size, so the decoration has to arrive already at the width the skin declares and within the room the band and the card's padding leave it. Decoding takes cairo, which the Fcitx5 addon links and this header does not, so the addon passes it in (see FcitxThemeOverlayScale.h).
+// PNG 保持比例缩放到 `width` 宽、至多 `room` 高，失败返回 `nullopt`；classicui 按图片像素绘制，缩放器由链接 cairo 的 addon 传入，见 `FcitxThemeOverlayScale.h`。
 using FcitxOverlayScaler = std::function<std::optional<std::string>(const std::string &png, int width, int room)>;
 
 // An image the theme draws with, generated from the colours: its file name in the theme directory and its PNG bytes.
@@ -109,7 +109,7 @@ struct FcitxPanelGeometry {
   static constexpr int logo_gap = 6;
 };
 
-// The card's inner padding, where its content starts inside the outline: one pixel of hairline even without a border, so the highlight never covers the outline, plus the content padding. A decoration's bottom edge and the room it may occupy are measured with the same value through fcitx_card_padding, so a resampled copy can neither drift inside the card nor over its top edge.
+// 卡片内边距含至少 1 px 发丝线与内容留白；装饰底边定位和可用高度共用 `fcitx_card_padding`，避免缩放后越界或偏移。
 inline int fcitx_card_padding(const CandidateColors &colors) {
   return std::max(1, colors.border ? std::max(0, colors.border_width) : 0) + FcitxPanelGeometry::padding;
 }
@@ -200,7 +200,7 @@ inline std::string fcitx_margin(int left, int right, int top, int bottom) {
 //
 // The brand mark leads the header row as on every other host, but the classic UI lays every row out with the same content margin and has no slot for an image beside the preedit. So the mark is painted into the card image's top-left corner slice, which is never stretched, at the content's top-left corner and the text margin's top, and the content margin grows by the mark and its gap: the preedit follows the mark as the design's header does, and the candidate rows below keep the same left edge as the preedit. Without the mark the theme is unchanged.
 //
-// A decoration is drawn as the background's overlay, with the geometry every host shares: the panel is top_inset_dip (the band) taller than the card, the band is transparent, and the image sits in it with its bottom one card padding below the card's top edge, over the card, aligned left, centre or right with the same padding in from the card's side. The panel image carries the band as fully transparent rows above the card (the shadow keeps the margin above the card it has without a decoration) and counts them in the nine-slice top margin, so they are never stretched; the shadow margin and the content margin both grow by the band, so X11 places the card, not the band, at the cursor and the candidates start below the card's top edge as they do without a decoration. The classic UI paints the overlay while it paints the background, before the candidates, so the part over the card is under the preedit and the highlight; it ends where the content starts, so nothing is covered. classicui 按图片自身的像素尺寸画 Overlay，stage_fcitx_overlay 因此把 PNG 装饰图缩放到 width_dip（并生成 @2x 副本），在超过「预留高度 + 卡片内边距」时继续等比缩小，让整张图都落在窗口里；高度已知的图按底边放置，宿主无法缩放的格式若仍高于这个高度，会在裁剪边界被切掉顶部，高度未知的则从预留区域顶部按原尺寸画出。
+// 装饰作为背景 Overlay：透明顶带增加面板与九宫格顶部固定切片高度，阴影和内容边距同步增加，让 X11 卡片仍贴光标；装饰底边伸入卡片一个内边距，画在候选前但止于内容起点。PNG 按 `width_dip` 缩放并生成 @2x，过高则继续等比缩小；无法缩放但已知高度的图按底边定位，过高会裁顶部，高度未知则从预留区顶部按原尺寸绘制。
 //
 // `user_radius` says whether `corner_radius` is the user's own setting rather than the skin package's: only then does the highlight follow a card tighter than its 6 px, so a package's radius leaves the rows as they were drawn before the setting existed.
 inline FcitxThemeFiles fcitx_candidate_theme_files(const CandidateColors &colors, bool dark,
@@ -437,10 +437,10 @@ inline constexpr std::string_view kFcitxOverlayPrefix = "decoration-";
 // The largest decoration image copied, the same limit the shared layer puts on any skin asset (skin::catalog::MAX_RESOURCE_BYTES).
 inline constexpr std::uintmax_t kFcitxOverlayMaxBytes = 8u * 1024u * 1024u;
 
-// The largest side of a decoration image this host decodes, the same limit the shared layer puts on a skin asset (skin::catalog::MAX_IMAGE_SIDE). A file that only declares a larger size is never decoded, so a small PNG cannot ask for a picture whose pixels do not fit in memory.
+// 解码边长上限与共享层 `skin::catalog::MAX_IMAGE_SIDE` 一致，拒绝仅靠文件头声明巨幅尺寸的图片。
 inline constexpr int kFcitxOverlayMaxSide = 2048;
 
-// The pixel size in a PNG's IHDR, the only part of an image this host reads without decoding it: the signature, the IHDR chunk, and a width and height each within 1..kFcitxOverlayMaxSide. nullopt for another format, a header cut short, and a size outside that range.
+// 不解码读取 PNG 尺寸：签名、IHDR 和两边的 1..kFcitxOverlayMaxSide 范围都有效才接受；其他格式、截断或超限返回 `nullopt`。
 struct FcitxPngSize {
   int width;
   int height;
@@ -461,13 +461,13 @@ inline std::optional<FcitxPngSize> fcitx_png_size(const std::string &bytes) {
   return FcitxPngSize{width, height};
 }
 
-// The width the PNG header records, for the caller that needs only that side: the hint that reserves room for a decoration above the card reads it without opening the image.
+// 只需宽度的调用方从 PNG 头取值，供模式提示预留装饰宽度。
 inline std::optional<int> fcitx_png_width(const std::string &bytes) {
   const auto size = fcitx_png_size(bytes);
   return size ? std::optional<int>(size->width) : std::nullopt;
 }
 
-// The height the PNG header records, which is what places a copy this host cannot resample. Other formats are drawn without it.
+// PNG 头的高度用于无法缩放时的原图定位，其他格式不提供高度。
 inline std::optional<int> fcitx_png_height(const std::string &bytes) {
   const auto size = fcitx_png_size(bytes);
   return size ? std::optional<int>(size->height) : std::nullopt;
