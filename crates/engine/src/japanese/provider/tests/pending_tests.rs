@@ -1,6 +1,6 @@
 use super::*;
 
-// 固定 f37203c77 的 provider 查询正文，矩阵调用保持当前实现以隔离 provider 拼接键。
+// 固定 f37203c77 的 provider 查询正文，矩阵调用保持当前实现以隔离 provider 查询键与词条视图容器。
 fn reference_query_into(
     provider: &mut JapaneseProvider,
     request: &QueryRequest,
@@ -111,22 +111,28 @@ fn reference_query_into(
 
 #[test]
 fn provider_matches_old_pending_keys_across_edits_and_dynamic_rows() {
-    let (_root, mut actual_provider) = provider_with(Some(test_model::bytes(
-        &[
-            ("か", "仮", 0, 0, -20),
-            ("かか", "仮仮", 0, 0, -500),
-            ("かきゃ", "仮甲", 0, 0, -500),
-            ("かくぁ", "仮乙", 0, 0, 5),
-            ("かし", "仮指", 0, 0, -10),
-            ("かしゃ", "仮写", 0, 0, -10),
-            ("かじゃ", "仮蛇", 0, 0, -30),
-            ("かぢゃ", "仮地", 0, 0, -30),
-            ("かっ", "仮促", 0, 0, 15),
-            ("しし", "仮指", 0, 0, 20),
-        ],
-        1,
-        &[0],
-    )));
+    let surfaces: Vec<_> = (0..70).map(|index| format!("合成語{index:02}")).collect();
+    let mut entries = vec![
+        ("か", "仮", 0, 0, -20),
+        ("かか", "仮仮", 0, 0, -500),
+        ("かきゃ", "仮甲", 0, 0, -500),
+        ("かくぁ", "仮乙", 0, 0, 5),
+        ("かし", "仮指", 0, 0, -10),
+        ("かしゃ", "仮写", 0, 0, -10),
+        ("かじゃ", "仮蛇", 0, 0, -30),
+        ("かぢゃ", "仮地", 0, 0, -30),
+        ("かっ", "仮促", 0, 0, 15),
+        ("しし", "仮指", 0, 0, 20),
+    ];
+    // 同一读音超过单次 24 条限额，覆盖负成本和平局时的截断与原词面去重。
+    entries.extend(
+        surfaces
+            .iter()
+            .enumerate()
+            .map(|(index, surface)| ("かか", surface.as_str(), 0, 0, index as i32 % 7 - 50)),
+    );
+    entries.sort_by_key(|entry| entry.0);
+    let (_root, mut actual_provider) = provider_with(Some(test_model::bytes(&entries, 1, &[0])));
     let mut reference_provider = JapaneseProvider::new(&actual_provider.model);
     assert!(
         actual_provider.dictionary().is_some(),
@@ -162,17 +168,32 @@ fn provider_matches_old_pending_keys_across_edits_and_dynamic_rows() {
         });
         assert_eq!(actual, expected);
         let conversion = super::super::super::romaji::convert_romaji(&request.raw_input);
-        let saved = if conversion.hiragana.is_empty() || conversion.pending.is_empty() {
+        let saved_keys = if conversion.hiragana.is_empty() || conversion.pending.is_empty() {
             0
         } else {
             kana_for_romaji_prefix_view(&conversion.pending)
                 .len()
                 .saturating_sub(1)
         };
+        // 每个命中的待定假名前缀另省一份视图向量；查询键与排名存储保持原来的边界。
+        let saved_views = if conversion.hiragana.is_empty() || conversion.pending.is_empty() {
+            0
+        } else {
+            let dictionary = actual_provider.dictionary().expect("合成词库必须加载");
+            kana_for_romaji_prefix_view(&conversion.pending)
+                .iter()
+                .filter(|kana| {
+                    let prefix = join_reading(&conversion.hiragana, kana);
+                    !dictionary
+                        .prefix_lemma_views(&prefix, PENDING_PREFIX_LEMMAS)
+                        .is_empty()
+                })
+                .count()
+        };
         assert_eq!(
-            new_allocations + saved,
+            new_allocations + saved_keys + saved_views,
             old_allocations,
-            "provider 键分配差值"
+            "provider 查询键与词条视图向量分配差值"
         );
         for rows in [&mut actual, &mut expected] {
             for item in rows.iter_mut() {
@@ -188,8 +209,8 @@ fn provider_matches_old_pending_keys_across_edits_and_dynamic_rows() {
 }
 
 #[test]
-#[ignore = "本地 release 对照，只隔离 provider 拼接键；不设置 CI 时间阈值"]
-fn benchmark_provider_pending_reading_keys() {
+#[ignore = "本地 release 对照，比较 provider 待定前缀查询；不设置 CI 时间阈值"]
+fn benchmark_provider_pending_prefix_queries() {
     use std::hint::black_box;
     use std::time::Instant;
     let (_root, mut actual_provider) = provider_with(Some(test_model::bytes(
