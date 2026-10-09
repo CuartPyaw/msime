@@ -51,3 +51,5 @@ Status: implemented
 [前缀词条流式消费](2026-10-09-japanese-prediction-stream.md) 也覆盖空读音矩阵分支。精确词条对照的空读音控制路径现按页满之前实际命中的前缀数核算这一独立视图分量，零限额和未命中仍无差值；冻结 Vec 查询正文保持；非空读音的未命中控制路径在加回[矩阵滚动行](2026-10-10-japanese-rolling-rows.md)独立减少的行容器分量和[滚动字节边界](2026-10-10-japanese-rolling-boundaries.md)实测旧位置 Vec 的 alloc/realloc 分量后保持次数等值。本篇两轮 release 数字继续只对应当时的精确流式切片。
 
 [滚动字节边界](2026-10-10-japanese-rolling-boundaries.md)省去热 provider 的一份位置容器，当前完整行热预算为 7，完整预测为 10；历史 8/11 预算与两轮精确流式计时保留，不把边界收益归入精确词条消费。
+
+[排名堆成本键复用](2026-10-10-japanese-ranked-heap-output.md) 将项存储由 `((cost, id), id)` 收为 `(cost, id)`，最终对保存键不稳定排序，避免重读成本；继续保留本篇的空查询、流式消费、重复项与词库借用边界。历史分配次数和单项计时保留，当前排名请求字节与独立选型证据由新篇核算。

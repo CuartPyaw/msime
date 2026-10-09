@@ -149,19 +149,20 @@ where
     let Some(first) = ids.next() else {
         return Vec::new();
     };
-    let mut best: BinaryHeap<((i32, u32), u32)> = BinaryHeap::with_capacity(limit);
+    let mut best: BinaryHeap<(i32, u32)> = BinaryHeap::with_capacity(limit);
     for id in std::iter::once(first).chain(ids) {
         let key = (cost(id), id);
         if best.len() < limit {
-            best.push((key, id));
-        } else if key < best.peek().expect("non-empty bounded heap").0 {
+            best.push(key);
+        } else if key < *best.peek().expect("non-empty bounded heap") {
             best.pop();
-            best.push((key, id));
+            best.push(key);
         }
     }
-    let mut ids: Vec<u32> = best.into_iter().map(|(_, id)| id).collect();
-    ids.sort_unstable_by_key(|id| (cost(*id), *id));
-    ids
+    // 成本已随 ID 保存，按已有键排序，不再次读取模型成本。
+    let mut keys = best.into_vec();
+    keys.sort_unstable();
+    keys.into_iter().map(|(_, id)| id).collect()
 }
 
 impl JapaneseDictionary {
@@ -508,17 +509,17 @@ impl JapaneseDictionary {
         if prefix.is_empty() || next_kana.is_empty() || limit == 0 {
             return Vec::new();
         }
-        let mut best: BinaryHeap<((i32, u32), u32)> = BinaryHeap::new();
+        let mut best: BinaryHeap<(i32, u32)> = BinaryHeap::new();
         let mut consider = |id: u32| {
             let key = (self.cost_of(id), id);
             if best.len() < limit {
                 if best.is_empty() {
                     best.reserve_exact(limit);
                 }
-                best.push((key, id));
-            } else if key < best.peek().expect("non-empty bounded heap").0 {
+                best.push(key);
+            } else if key < *best.peek().expect("non-empty bounded heap") {
                 best.pop();
-                best.push((key, id));
+                best.push(key);
             }
         };
         let mut query = String::new();
@@ -559,9 +560,10 @@ impl JapaneseDictionary {
                 consider(index as u32);
             }
         }
-        let mut ids: Vec<u32> = best.into_iter().map(|(_, id)| id).collect();
-        ids.sort_unstable_by_key(|id| (self.cost_of(*id), *id));
-        ids.into_iter().map(build).collect()
+        // 已保存的键同时决定筛选和输出顺序；保留重叠后缀产生的重复 ID。
+        let mut keys = best.into_vec();
+        keys.sort_unstable();
+        keys.into_iter().map(|(_, id)| id).map(build).collect()
     }
 
     /// 10000 for an out-of-range id.
@@ -1350,3 +1352,15 @@ mod continuing_tests;
 #[cfg(test)]
 #[path = "decoder/exact_stream_tests.rs"]
 mod exact_stream_tests;
+
+#[cfg(test)]
+#[path = "decoder/ranking_reference.rs"]
+mod ranking_reference;
+
+#[cfg(test)]
+#[path = "decoder/ranking_tests.rs"]
+mod ranking_tests;
+
+#[cfg(test)]
+#[path = "decoder/ranking_heap_sort.rs"]
+mod ranking_heap_sort;
