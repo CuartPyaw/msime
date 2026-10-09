@@ -1,6 +1,6 @@
 pub(crate) use crate::platform::account_helpers::{
     account_command_error, account_value, call_session, cleanup_stale_snapshot_previews,
-    prepare_snapshot_directory, read_snapshot_file, remove_snapshot_file,
+    prepare_snapshot_directory, publish_snapshot_preview, read_snapshot_file, remove_snapshot_file,
     snapshot_text_within_limit, write_snapshot_file,
 };
 pub(crate) use crate::platform::mobile::mobile_account_preferences::valid_mobile_haptic_strength;
@@ -48,20 +48,6 @@ pub(crate) fn clear_snapshot_previews(
     for item in pending.drain().map(|(_, item)| item) {
         let _ = remove_snapshot_file(&item.path);
     }
-}
-
-pub(crate) fn replace_pending_snapshot(
-    previews: &std::sync::Arc<std::sync::Mutex<HashMap<String, PendingSnapshot>>>,
-    token: String,
-    snapshot: PendingSnapshot,
-) -> Result<Vec<PathBuf>, crate::CommandError> {
-    let mut pending = previews.lock().map_err(|_| snapshot_command_error())?;
-    let old = pending
-        .drain()
-        .map(|(_, item)| item.path)
-        .collect::<Vec<_>>();
-    pending.insert(token, snapshot);
-    Ok(old)
 }
 
 pub(crate) fn validate_pending_snapshot(
