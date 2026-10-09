@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.DrawablePolicy;
 import app.msime.android.KeyboardGeometry;
 import android.content.Context;
 import android.graphics.drawable.ClipDrawable;
@@ -47,8 +48,8 @@ public final class MsSlider extends SeekBar {
         }
         setProgressDrawable(layers);
 
-        GradientDrawable thumb = Ui.rounded(Ui.accent(context), Ui.dp(context, 2));
-        thumb.setSize(Ui.dp(context, Ui.SLIDER_THUMB_WIDTH), Ui.dp(context, Ui.SLIDER_THUMB_HEIGHT));
+        GradientDrawable thumb = DrawablePolicy.rounded(Ui.accent(context), Ui.dp(context, 2),
+            Ui.dp(context, Ui.SLIDER_THUMB_WIDTH), Ui.dp(context, Ui.SLIDER_THUMB_HEIGHT));
         setThumb(thumb);
         setThumbOffset(Ui.dp(context, Ui.SLIDER_THUMB_WIDTH) / 2);
         setSplitTrack(false);
