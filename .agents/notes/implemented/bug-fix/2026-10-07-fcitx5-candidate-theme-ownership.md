@@ -14,12 +14,14 @@ PR #4371#discussion_r4203158939 / r4203158947 指出，宿主的接管判据与�
 
 PR #6466 的多窗口审查指出，偏好刷新若与各 `FcitxState` 自己的旧偏好比较，同一次选择会被重复当成主动选择：活动窗口先读到设置页的新主题并接管，用户随后选择第三方 classicui 主题，再聚焦尚未刷新偏好的旧窗口，就会被再次接管。原生门禁镜像只有 Fcitx5 开发库，没有 classicui 运行库和 pangocairo 开发包，接管与提示测试未注册，73 项通过不能覆盖它们。
 
+装机后的设置页选择仍留下 Catppuccin：离开输入框后会话被关闭，设置页保存新主题，返回输入框时 `ensure()` 先把新选择记成已见，却不保留比较结果；此时 `session_` 尚未创建，主题同步也没有实际执行。后续同步只能以 `chosen=false` 看到第三方主题，刚才的主动选择因而被吃掉。只写偏好、不发布 runtime options 的最小真实 classicui 回归同样失败，排除了运行配置重载与文件写入权限作为根因。
+
 PR #4371#discussion_r4203158943 指出解析边界：`candidate_dark_theme`、`surface_dark_theme`、`candidate_layout_id` 对 `preferences` 调 `.value()`，而 `preferences` 为 `null`、数组或数字时抛出 `nlohmann::json::type_error`；这三个 helper 由 IBus 宿主（`ClientEngine.cpp`）与 Fcitx5 宿主（`resolveThemeInMode`）共用，只修 `global_theme` 一行不够。
 
 ## Decision
 
 - **接管依据是共享层解析出的实际候选覆盖**，不是 classicui 当前主题。`CandidateTheme::covers_candidates` / `candidate_theme_covers(resolved)`（`CandidateColors.h`）为真仅两种：共享层的 `candidate` 是非 null 对象（内置主题，或 custom 的皮肤槽位/取色器给了颜色），或 `candidate_skin` 非空（皮肤清单声明了当前布局与明暗）。`system`、基底 system 且无皮肤无颜色的 custom、未知/退役 id、解析失败落回的空文档都判为「没有覆盖」。它在 `candidate_theme_colors` 里**先于**空槽位被原生 palette 补齐前计算。
-- **只有「用户主动选择」才允许从第三方主题手里接管。** `FcitxState::syncCandidatePanelTheme(bool chosen)` 的 `chosen` 只有两处为真：主题菜单 `setThemeChoice()`，以及偏好文件监视里 `candidate_theme_selection(preferences)`（`global_theme` + 整个 `custom_theme` 两个字段的可比较文档）相对整个插件已见的选择发生变化时。`FcitxEngine::candidate_theme_selection_` 共用一份观察状态，与 classicui 的进程级所有权一致，不随上下文关闭清空。`candidateThemeSelectionChanged()` 在真实存储快照被会话接受后比较并记录；菜单立即记录自己的选择，避免另一个窗口补读菜单保存后再次接管。新会话用最新存储快照建立基线，不把 runtime options 或上下文 override 的旧主题当成新选择。`ensure()`（启动/焦点）、`refreshProviderSockets()`（runtime options 刷新）、`setSystemDark()`、以及指纹不变的偏好同步都传 `false`。
+- **只有「用户主动选择」才允许从第三方主题手里接管。** `FcitxState::syncCandidatePanelTheme(bool chosen)` 的 `chosen` 只来自主题菜单 `setThemeChoice()`，或偏好监视/新会话初始化接受存储快照时 `candidate_theme_selection(preferences)`（`global_theme` + 整个 `custom_theme` 两个字段的可比较文档）相对整个插件已见的选择发生变化时。`FcitxEngine::candidate_theme_selection_` 共用一份观察状态，与 classicui 的进程级所有权一致，不随上下文关闭清空。`candidateThemeSelectionChanged()` 在真实存储快照被会话接受后比较并记录；菜单立即记录自己的选择，避免另一个窗口补读菜单保存后再次接管。新会话在 Host API 创建与焦点初始化成功后，用最新存储快照比较共享基线并同步主题：首次观察只建基线，同一份选择不重复接管，已有基线下尚未处理的新存储选择仍传 `true`。不把 runtime options 或上下文 override 的旧主题当成新选择。`refreshProviderSockets()`（runtime options 刷新）、`setSystemDark()`、以及指纹不变的偏好同步都传 `false`。
 - **CI 必须实际运行接管与提示测试。** `Dockerfile.build-gate` 安装 Debian 的 `fcitx5-modules`（classicui 运行库与 addon 元数据）和 `libpango1.0-dev`（pangocairo 开发接口）。`build-container.sh` 保存 CTest JUnit 报告，并断言 `fcitx5-candidate-theme-priority` 与 `fcitx5-candidate-theme-hint` 各出现一次、状态为 `run` 且没有 `skipped` 节点；少注册一项或返回 77 都使门禁失败。普通开发环境仍可不安装 classicui，不把门禁要求变成所有构建的强制依赖。
 - **无覆盖时退出接管并恢复。** `restore_classicui_theme(fcitx::AddonInstance&)`（`FcitxEngine.cpp`）在 `!resolved.covers_candidates` 时调用：只把当前值仍等于水杉自己主题名的 `Theme`/`DarkTheme` 放进 `held`，再用 `panel_restore_values(record, "fcitx5", held, kClassicuiStockThemes)`（`PanelRestoreRecord.h`）求恢复值——记录里的 `prior`，记录没留下可用 prior 时用自带主题 `default`/`default-dark`。恢复记录缺失或损坏时仍用空记录调用 `panel_restore_values`，不能跳过自带主题兜底。用户自己改过的项不在 `held` 里，一项都不动。
 - **恢复不是一次新的接管**：走 `classicui.setConfig()`，不经 `set_classicui_config()`（后者会 `record_classicui_takeover`），否则会把用户自己的值换成被恢复的值；只写 `Theme`/`DarkTheme`，`Font`/`WheelForPaging` 等其他项不动。
@@ -41,7 +43,7 @@ PR #4371#discussion_r4203158943 指出解析边界：`candidate_dark_theme`、`s
 
 - **收益**：用户选的第三方主题不再被后台同步夺回；切回「系统」或无覆盖 custom 时真的退出并把仍属于水杉的项原地放回；classicui 被改回自带主题后不自动追回，但重新主动选择同一份水杉配色仍能接管；畸形偏好不再让宿主抛异常。
 - **门禁代价**：构建镜像多安装 classicui 及 Pango 相关包；测试加载真实 addon，但不启动系统输入法 daemon、不需要锁定词库或用户桌面。JUnit 报告只留在规定的 `target/linux-build-gate` 产物目录。
-- **启动边界**：没有会话时在设置页改主题，下一次 `ensure()` 仍只记录启动基线，不从第三方 classicui 主题接管；本次保留原有行为，不把焦点进入扩展成主动选择。
+- **启动边界**：进程第一次观察偏好只建立基线，不从第三方主题接管；已有基线后，在没有会话时保存的新主题由下一个成功创建的会话处理一次。焦点进入本身不是主动选择，但不能吞掉用户尚未处理的存储选择。原生回归分别覆盖仅写偏好、同时发布 runtime options，以及处理后外部改第三方主题不被下一拍夺回。
 - **代价与已知上限**：「退出接管」无法区分「用户在 fcitx5-configtool 里主动选了水杉主题（`Theme=msime`）而偏好是系统」和「上次残留」，前者也会被改回 prior/自带主题——与卸载脚本同一规则。同理，后台同步不读 `getConfig()` 的代价是：用户在 fcitx5-configtool 改主题后不做焦点变化就切中英，会用到上一次同步的判据（见模式提示笔记）。`panel_restore_values` 的 `written` 一致性检查在当前调用点上不会触发，保留是为了与 `--unregister` 的 `restorable` 同构。
 
 ## Verification

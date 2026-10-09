@@ -1665,10 +1665,6 @@ public:
     // 一份 preferences_ 回填了。
     options["preferences"] = preferences_;
     syncCandidatePanelFont();
-    // 新会话只记录存储里的选择作为共享基线，不把启动或焦点进入当成主动选择。
-    candidateThemeSelectionChanged(preferences_snapshot_.is_object()
-        ? preferences_snapshot_.value("preferences", preferences_) : preferences_);
-    syncCandidatePanelTheme(false);
     // This front end draws view.phrase_prefix ahead of the reading, so a phrase assembled out of
     // several selections stays in the composition instead of reaching the document one piece at a
     // time. Requesting it and drawing it are one decision; see core/PhrasePreedit.h.
@@ -1692,6 +1688,10 @@ public:
     // A mode the focus restores is a Chinese/English switch like any other; resolved here, once the lock is read and the session exists.
     if (restore_changed_mode) resyncPunctuationForMode();
     view_ = response(msime_client_focus(session_, true)).at("view");
+    // 会话建立成功后处理尚未见过的存储选择；首次启动只建基线，已处理的选择不重复接管。
+    const auto chosen = preferences_snapshot_.is_object() &&
+        candidateThemeSelectionChanged(preferences_snapshot_.at("preferences"));
+    syncCandidatePanelTheme(chosen);
     return true;
   }
   void refreshPreferences() {

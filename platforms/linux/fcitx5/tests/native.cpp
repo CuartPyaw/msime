@@ -590,12 +590,35 @@ int candidateThemePriority() {
       require(option("Theme") == "Nord-Dark" && (!has_dark_theme || option("DarkTheme") == "Nord-Dark"),
               "旧窗口补读菜单的系统选择不夺回第三方主题");
       old_window.focusOut();
+      // 设置页会同时更新存储与 runtime options，返回输入框时可能需要新建会话。
+      old_state->close();
+      active_state->close();
+      for (const bool publish_options : {false, true}) {
+        pick_third_party(false);
+        options["preferences"] = save_theme(publish_options ? "paper" : "ink");
+        if (publish_options) std::ofstream(options_file) << options.dump();
+        FixtureContext settings_return_window(instance.inputContextManager());
+        settings_return_window.focusIn();
+        auto *settings_return_state = settings_return_window.propertyFor(&engine.factory_);
+        require(settings_return_state->ensure(), "设置页保存后返回输入框建立会话");
+        settings_return_state->refreshProviderSockets();
+        require(option("Theme") == "msime" && (!has_dark_theme || option("DarkTheme") == "msime"),
+                "设置页的新选择不能在新会话建立基线时丢掉主动接管");
+        pick_third_party(false);
+        settings_return_state->refreshProviderSockets();
+        require(option("Theme") == "Nord-Dark", "新会话处理过选择后也不能后台夺回第三方主题");
+        settings_return_window.focusOut();
+        settings_return_state->close();
+      }
       // 不带偏好存储的合法 runtime options 仍可建立会话，不能对 null 快照调用 value()。
       old_state->close();
       options.erase("preferences_directory");
+      options["preferences"]["global_theme"] = "ink";
+      pick_third_party(false);
       std::ofstream(options_file) << options.dump();
       old_window.focusIn();
       require(old_state->ensure(), "没有偏好存储时仍可建立会话");
+      require(option("Theme") == "Nord-Dark", "没有存储快照的 runtime options 变化不能算主动选择");
       old_window.focusOut();
       setenv("MSIME_FCITX5_OPTIONS", (root / "missing-options.json").c_str(), 1);
     }
