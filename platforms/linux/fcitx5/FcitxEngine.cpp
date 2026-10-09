@@ -5457,14 +5457,14 @@ inline FcitxHintInputs fcitx_hint_inputs(const fcitx::RawConfig &config, bool sy
       value("Font"), dpi};
 }
 
-// 经典界面里影响模式提示的其余键（跟随深色、面板字体、Wayland 字体 DPI）：它们不在主题选择的缓存里，但用户在 fcitx5-configtool 里改它们时，
-// 下一拍的提示缓存也要跟上。与主题选择一样只读落盘的 `conf/classicui.conf`，不调会扫描全部已装主题的 `getConfig()`（#5988）；
+// 活动主题、跟随深色、字体与 Wayland 字体 DPI 任一变化都要刷新提示缓存。
+// 只读落盘的 `conf/classicui.conf`，不逐拍调会扫描全部已装主题的 `getConfig()`（#5988）；
 // 等于默认值的项 fcitx 写成注释，解析后缺失即默认，而提示本身在真正重读时取自经典界面的现值（见 FcitxHintInputs）。
 std::string read_classicui_hint_stamp() {
   fcitx::RawConfig config;
   fcitx::readAsIni(config, "conf/classicui.conf");
   std::string stamp;
-  for (const auto *key : {"UseDarkTheme", "Font", "ForceWaylandDPI"}) {
+  for (const auto *key : {"Theme", "DarkTheme", "UseDarkTheme", "Font", "ForceWaylandDPI"}) {
     const auto *value = config.valueByPath(key);
     stamp += key;
     stamp += '=';
@@ -5531,10 +5531,10 @@ public:
         {"user_radius", user_radius},
         {"overlay", host::fcitx_overlay_stamp(decoration)}}.dump();
     // 缓存只决定「同一份输入已经接管写好」这一件事：一拍不调 `getConfig()`，也不重写主题（#5988）；一次新的主动选择（chosen）仍然往下走，重新判断所有权。
-    // 提示缓存还取决于 classicui 落盘的跟随深色、字体与 Wayland 字体 DPI，所以它们变了也要往下走（见 read_classicui_hint_stamp）。
+    // classicui 落盘的活动主题、跟随深色、字体与 Wayland 字体 DPI 变了时刷新提示（见 read_classicui_hint_stamp）。
     const auto hint_stamp = read_classicui_hint_stamp();
     if (inputs == candidate_theme_applied_ && !chosen && hint_stamp == classicui_hint_stamp_) return;
-    auto attempt = Json{{"inputs", inputs}, {"chosen", chosen}, {"classicui", classicui != nullptr}};
+    auto attempt = Json{{"inputs", inputs}, {"chosen", chosen}, {"classicui", classicui != nullptr}, {"hint", hint_stamp}};
     if (classicui) {
       const auto selection = read_classicui_theme_selection();
       attempt["theme"] = selection.theme;
@@ -5553,6 +5553,8 @@ public:
     // 每次同步在这里记下它画的主题、字体与 Wayland 字体 DPI。
     hint_inputs_ = fcitx_hint_inputs(current, system_dark);
     classicui_hint_stamp_ = hint_stamp;
+    // 同一份主题已接管过时，外部配置变化只刷新提示，不追回用户手改或卸载还原的主题。
+    if (inputs == candidate_theme_applied_ && !chosen) return;
     const auto *selected = current.valueByPath("Theme");
     const auto *selected_dark = current.valueByPath("DarkTheme");
     // 用户刚在主题菜单里选了水杉主题时（chosen）即使当前是第三方主题也接管；焦点进入、偏好同步、系统明暗变化都只是重读同一份偏好，绝不把用户选的主题换回来。
@@ -5582,6 +5584,7 @@ public:
     current.setValueByPath("Theme", std::string(host::kFcitxCandidateTheme));
     if (replace_dark) current.setValueByPath("DarkTheme", std::string(host::kFcitxCandidateTheme));
     hint_inputs_ = fcitx_hint_inputs(current, system_dark);
+    classicui_hint_stamp_ = read_classicui_hint_stamp();
     candidate_theme_applied_ = std::move(inputs);
     candidate_theme_attempt_.clear();
   }

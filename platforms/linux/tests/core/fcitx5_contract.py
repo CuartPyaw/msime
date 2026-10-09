@@ -421,7 +421,7 @@ assert 'std::tuple{"stroke", "Scheme/Stroke", "笔画"}' in ibus_source
 assert 'property_name != "Scheme/Stroke"' in ibus_source
 assert 'property_name == "Scheme/Stroke" ? std::string("stroke")' in ibus_source
 
-# #5988：主题同步每 250 ms 跑一拍。经典界面的 getConfig() 每次都扫描并解析全部已装主题，所以状态页只读落盘的 classicui.conf；主题同步先比主题输入，已接管写好（且不是一次新的主动选择、落盘的跟随深色与字体也没变）就不重写主题、也不调 getConfig()，于是卸载还原或用户手改的主题不会被接管回去；还没接管成功时只在输入或落盘选择变化、或写失败到了重试时间时才调一次 getConfig()，比较时不栅格化主题；「重启输入法服务」清掉两份记录。拍子本身仍要同步主题，否则在 fcitx5-configtool 里改回默认主题后不会恢复接管。
+# #5988：主题同步每 250 ms 跑一拍。经典界面的 getConfig() 每次都扫描并解析全部已装主题，所以状态页只读落盘的 classicui.conf；主题同步先比主题输入，已接管写好（且不是一次新的主动选择、落盘的活动主题、跟随深色、字体与 Wayland 字体 DPI 也没变）就不重写主题、也不调 getConfig()，于是卸载还原或用户手改的主题不会被接管回去；还没接管成功时只在输入或落盘选择变化、或写失败到了重试时间时才调一次 getConfig()，比较时不栅格化主题；「重启输入法服务」清掉两份记录。拍子本身仍要同步主题，否则在 fcitx5-configtool 里改回默认主题后不会恢复接管。
 def body(text, start, end):
     begin = text.index(start)
     return text[begin:text.index(end, begin + len(start))]
@@ -431,6 +431,8 @@ apply_theme = body(source, "  void applyCandidatePanelTheme(fcitx::AddonInstance
 # 一次主动选择（chosen）时即使输入没变也重新接管，所以返回条件多了它；主题输入与落盘选择不变时仍不调 getConfig()。
 assert apply_theme.count("classicui->getConfig()") == 1
 assert apply_theme.index("if (inputs == candidate_theme_applied_ && !chosen && hint_stamp == classicui_hint_stamp_) return;") < apply_theme.index("read_classicui_theme_selection()") < apply_theme.index("if (attempt_key == candidate_theme_attempt_ && now < candidate_theme_retry_at_) return;") < apply_theme.index("classicui->getConfig()")
+assert apply_theme.index("hint_inputs_ = fcitx_hint_inputs(current, system_dark);") < apply_theme.index("if (inputs == candidate_theme_applied_ && !chosen) return;") < apply_theme.index("if (!chosen && !host::fcitx_theme_replaceable")
+assert '{"hint", hint_stamp}' in apply_theme
 assert "candidate_theme_retry_at_ = now + kCandidateThemeRetry;" in apply_theme
 assert "host::fcitx_candidate_theme(" not in apply_theme
 assert "set_classicui_config(*classicui, current, config);" in apply_theme

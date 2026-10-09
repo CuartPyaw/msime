@@ -256,7 +256,7 @@ public:
   mutable int scans = 0;
   int writes = 0;
 };
-// 每 250 ms 一拍的主题同步（#5988）：用户选了第三方主题时只看一次经典界面的现值，之后的每一拍既不再调 `getConfig()` 也不栅格化；在 fcitx5-configtool 里改回默认主题后下一拍恢复接管；接管之后的拍子不重写主题，卸载还原或用户手改 classicui.conf 之后也不再接管回去；配色变化照常重写；写主题失败不在每一拍上重试，到点再试。classicui.conf 落在 main 开头指定的临时 XDG_CONFIG_HOME 里，主题和接管记录写进这里的临时目录。
+// 每 250 ms 一拍的主题同步（#5988）：用户选了第三方主题时只看一次经典界面的现值，之后的每一拍既不再调 `getConfig()` 也不栅格化；在 fcitx5-configtool 里改回默认主题后下一拍恢复接管；接管之后的拍子不重写主题，卸载还原或用户手改 classicui.conf 之后只重读一次现值刷新提示，不再接管回去；配色变化照常重写；写主题失败不在每一拍上重试，到点再试。classicui.conf 落在 main 开头指定的临时 XDG_CONFIG_HOME 里，主题和接管记录写进这里的临时目录。
 void classicuiThemeTicks(FcitxEngine &engine) {
   namespace host = msime::linux_host;
   char temporary[] = "/tmp/msime-fcitx5-ticks-XXXXXX";
@@ -286,8 +286,9 @@ void classicuiThemeTicks(FcitxEngine &engine) {
   classicui.config.theme.setValue("nord");
   require(fcitx::safeSaveAsIni(classicui.config, "conf/classicui.conf") && std::filesystem::is_regular_file(classicuiConf),
           "classicui.conf is read from the scratch config home");
+  // 默认值会被 fcitx 写成注释；落盘缺失 DarkTheme 等同于 default-dark。
   require(read_classicui_theme_selection().theme == "nord" &&
-              read_classicui_theme_selection().dark_theme == std::optional<std::string>("default-dark"),
+              read_classicui_theme_selection().dark_theme.value_or("default-dark") == "default-dark",
           "the persisted selection is what classicui saved");
   engine.candidate_theme_applied_.clear();
   engine.candidate_theme_attempt_.clear();
@@ -316,33 +317,33 @@ void classicuiThemeTicks(FcitxEngine &engine) {
   // 卸载时 `msime-linux-setup --unregister` 经 D-Bus 的 SetConfig 把主题还原成默认，同样落盘；仍在运行的插件不能在下一拍又把它接管回去。
   classicui.setConfig(stock);
   for (int count = 0; count < 4; ++count) tick(classicui, paper, false);
-  require(classicui.scans == 3 && classicui.writes == 4 && classicui.config.theme.value() == "default",
-          "a theme restored after the takeover is not taken over again while the inputs are unchanged");
+  require(classicui.scans == 4 && classicui.writes == 4 && classicui.config.theme.value() == "default",
+          "还原主题只重读一次提示配置，不重新接管或逐拍扫描");
   // fcitx5 运行时用户手改 classicui.conf（第三方主题的安装说明常这么写，改完再重启 fcitx5）：同样不去覆盖。
   FakeClassicUiConfig edited;
   edited.theme.setValue("Material-Color-Pink");
   require(fcitx::safeSaveAsIni(edited, "conf/classicui.conf"), "classicui.conf edited by hand");
   for (int count = 0; count < 4; ++count) tick(classicui, paper, false);
-  require(classicui.scans == 3 && classicui.writes == 4 && read_classicui_theme_selection().theme == "Material-Color-Pink",
-          "a hand edit of classicui.conf is left alone");
+  require(classicui.scans == 5 && classicui.writes == 4 && read_classicui_theme_selection().theme == "Material-Color-Pink",
+          "手改主题只重读一次提示配置，不重写或逐拍扫描");
   // 主题目录的位置被一个普通文件占住，写主题失败：不在之后的每一拍上重试，到了重试时间才再试，目录恢复可写后自己接上。
   std::filesystem::create_directories(root / "blocked/fcitx5/themes");
   std::ofstream(root / "blocked/fcitx5/themes" / std::string(host::kFcitxCandidateTheme)) << "synthetic";
   setenv("XDG_DATA_HOME", (root / "blocked").c_str(), 1);
   const Json night{{"global_theme", "night"}};
   for (int count = 0; count < 4; ++count) tick(classicui, night, false);
-  require(classicui.scans == 4 && classicui.writes == 4, "a failed theme write is not retried on every tick");
+  require(classicui.scans == 6 && classicui.writes == 4, "a failed theme write is not retried on every tick");
   require(engine.candidate_theme_retry_at_ <= std::chrono::steady_clock::now() + FcitxEngine::kCandidateThemeRetry,
           "a failed theme write schedules its retry");
   setenv("XDG_DATA_HOME", (root / "data").c_str(), 1);
   tick(classicui, night, false);
-  require(classicui.scans == 4 && classicui.writes == 4, "the retry waits for its time");
+  require(classicui.scans == 6 && classicui.writes == 4, "the retry waits for its time");
   engine.candidate_theme_retry_at_ = std::chrono::steady_clock::now() - std::chrono::seconds(1);
   tick(classicui, night, false);
-  require(classicui.scans == 5 && classicui.writes == 5 && classicui.config.theme.value() == host::kFcitxCandidateTheme,
+  require(classicui.scans == 7 && classicui.writes == 5 && classicui.config.theme.value() == host::kFcitxCandidateTheme,
           "a failed theme write is retried once its time comes, without any input changing");
   tick(classicui, Json{{"global_theme", "system"}}, false);
-  require(classicui.scans == 6 && classicui.writes == 6, "the next change of the inputs writes the theme again");
+  require(classicui.scans == 8 && classicui.writes == 6, "the next change of the inputs writes the theme again");
   if (savedDataHome) setenv("XDG_DATA_HOME", savedDataHome->c_str(), 1);
   else unsetenv("XDG_DATA_HOME");
   if (savedStateHome) setenv("XDG_STATE_HOME", savedStateHome->c_str(), 1);
@@ -603,6 +604,7 @@ int candidateThemeHint() {
     auto *classicui = instance.addonManager().addon("classicui", true);
     require(classicui && classicui->getConfig(), "real classicui loaded");
     FcitxEngine engine(&instance);
+    classicuiThemeTicks(engine);
     const Json preferences{{"global_theme", "custom"}, {"custom_theme", {{"candidate_skin", "sakura"}}}};
     engine.applyCandidatePanelTheme(preferences, false, catalog, true);
     const auto theme_file = root / "fcitx5/themes/msime/theme.conf";
@@ -621,6 +623,46 @@ int candidateThemeHint() {
               "重复切换用同一份结果");
     }
     require(hint_font_map_creations == measured, "重复切换不再创建 Pango 字体映射");
+    // 水杉偏好不变时，外部换主题也要刷新提示，但不能重新接管用户还原的自带主题。
+    engine.applyCandidatePanelTheme(preferences, false, catalog, false);
+    fcitx::RawConfig changed;
+    changed.setValueByPath("Theme", "Nord-Dark");
+    classicui->setConfig(changed);
+    engine.applyCandidatePanelTheme(preferences, false, catalog, false);
+    require(engine.modeHintLabel("x11::0", "中") == "中", "只换第三方 Theme 时立即停止补宽");
+    for (const auto *font : {"Sans 14", "Sans 18"}) {
+      fcitx::RawConfig changed_font;
+      changed_font.setValueByPath("Font", font);
+      classicui->setConfig(changed_font);
+      engine.applyCandidatePanelTheme(preferences, false, catalog, false);
+      require(engine.hint_inputs_.font == font, "第三方主题下连续修改字体也刷新提示缓存");
+    }
+    changed.setValueByPath("Theme", "default");
+    classicui->setConfig(changed);
+    engine.applyCandidatePanelTheme(preferences, false, catalog, false);
+    fcitx::RawConfig stock_current;
+    classicui->getConfig()->save(stock_current);
+    require(stock_current.valueByPath("Theme") && *stock_current.valueByPath("Theme") == "default",
+            "已接管后外部还原自带主题不会被相同偏好抢回");
+    require(engine.modeHintLabel("x11::0", "中") == "中", "外部还原自带主题时停止补宽");
+    changed.setValueByPath("Theme", "msime");
+    changed.setValueByPath("Font", "Sans 10");
+    classicui->setConfig(changed);
+    engine.applyCandidatePanelTheme(preferences, false, catalog, false);
+    require(engine.modeHintLabel("x11::0", "中") == chinese, "外部换回水杉主题时恢复缓存的补宽结果");
+    changed.setValueByPath("UseDarkTheme", "True");
+    changed.setValueByPath("DarkTheme", "msime");
+    classicui->setConfig(changed);
+    engine.applyCandidatePanelTheme(preferences, true, catalog, false);
+    require(engine.modeHintLabel("x11::0", "中") == chinese, "深色画水杉时补宽");
+    changed.setValueByPath("DarkTheme", "Nord-Dark");
+    classicui->setConfig(changed);
+    engine.applyCandidatePanelTheme(preferences, true, catalog, false);
+    require(engine.modeHintLabel("x11::0", "中") == "中", "只换第三方 DarkTheme 时立即停止补宽");
+    changed.setValueByPath("UseDarkTheme", "False");
+    changed.setValueByPath("DarkTheme", "msime");
+    classicui->setConfig(changed);
+    engine.applyCandidatePanelTheme(preferences, false, catalog, false);
     // 退出接管清掉提示宽度后，再选回同一皮肤也必须重新初始化，不能被旧主题 stamp 短路。
     engine.applyCandidatePanelTheme(Json{{"global_theme", "system"}}, false, Json(), true);
     require(engine.modeHintLabel("x11::0", "中") == "中", "退出接管后不补宽");
