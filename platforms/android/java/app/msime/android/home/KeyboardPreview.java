@@ -10,6 +10,7 @@ import android.util.AttributeSet;
 import android.view.View;
 import androidx.annotation.Nullable;
 import app.msime.android.BoundsPolicy;
+import app.msime.android.ColorPolicy;
 import app.msime.android.KeyboardSkin;
 import app.msime.android.ViewPolicy;
 
@@ -101,7 +102,7 @@ public final class KeyboardPreview extends View {
 
     private void applyBackground() {
         int radius = Ui.dp(getContext(), cornerRadiusDp);
-        int base = skin == null ? Ui.card(getContext()) : Ui.parseColor(skin.background(), Ui.card(getContext()));
+        int base = skin == null ? Ui.card(getContext()) : ColorPolicy.parse(skin.background(), Ui.card(getContext()));
         android.graphics.drawable.GradientDrawable surface = Ui.rounded(base, radius);
         // 设计皮肤的底是一道渐变，和键盘本身一样画出来；只画纯色时，深色设计上的功能键和回车显得格外跳。
         String end = skin != null && skin.designed() ? skin.gradientEnd() : null;
@@ -109,7 +110,7 @@ public final class KeyboardPreview extends View {
             surface.setOrientation(skin.gradientHorizontal()
                 ? android.graphics.drawable.GradientDrawable.Orientation.LEFT_RIGHT
                 : android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM);
-            surface.setColors(new int[] {base, Ui.parseColor(end, base)});
+            surface.setColors(new int[] {base, ColorPolicy.parse(end, base)});
         }
         setBackground(surface);
         setClipToOutline(true);
@@ -163,12 +164,12 @@ public final class KeyboardPreview extends View {
             returnLabelColor = Ui.onAccent(context);
             secondaryColor = Ui.subText(context);
         } else {
-            letterCapColor = Ui.parseColor(skin.keyBackground(), Color.WHITE);
-            inkColor = Ui.parseColor(skin.keyForeground(), Ui.text(context));
-            functionCapColor = Ui.parseColor(skin.functionBackground(), letterCapColor);
-            returnCapColor = Ui.parseColor(skin.returnBackground(), Ui.accent(context));
-            returnLabelColor = Ui.parseColor(skin.returnForeground(), Color.WHITE);
-            secondaryColor = Ui.parseColor(skin.secondary(), Ui.subText(context));
+            letterCapColor = ColorPolicy.parse(skin.keyBackground(), Color.WHITE);
+            inkColor = ColorPolicy.parse(skin.keyForeground(), Ui.text(context));
+            functionCapColor = ColorPolicy.parse(skin.functionBackground(), letterCapColor);
+            returnCapColor = ColorPolicy.parse(skin.returnBackground(), Ui.accent(context));
+            returnLabelColor = ColorPolicy.parse(skin.returnForeground(), Color.WHITE);
+            secondaryColor = ColorPolicy.parse(skin.secondary(), Ui.subText(context));
         }
         colorsValid = true;
     }
