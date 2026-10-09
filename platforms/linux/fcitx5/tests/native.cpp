@@ -31,6 +31,19 @@ public:
   std::vector<std::pair<fcitx::Key, bool>> forwarded;
 };
 void require(bool ok, const char *message) { if (!ok) throw std::runtime_error(message); }
+void removeFixtureTree(const std::filesystem::path &directory) {
+  // A detached private-file write may rename its temporary file while remove_all walks the tree.
+  // Retry only that transient missing-entry error and still require the fixture to be gone.
+  for (int attempt = 0; attempt < 20; ++attempt) {
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+    if (error && error != std::errc::no_such_file_or_directory)
+      throw std::filesystem::filesystem_error("remove fixture", directory, error);
+    if (!std::filesystem::exists(directory)) return;
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  require(!std::filesystem::exists(directory), "native fixture directory removed");
+}
 // The autocorrect marker is display-only: Windows appends '*' to the row text of a candidate whose spelling the Engine corrected, and the IBus host does the same. It sits right after the word and before the cloud/AI badge, and the text the candidate selects with stays the Engine's. Runs before the resource fixture so it needs nothing but the plugin code.
 void autocorrectMarker() {
   // FcitxCandidate::text() is the Engine text it selects with; the row the panel draws is the base class's.
@@ -425,7 +438,7 @@ int main(int argc, char **argv) {
     options["voice_provider_socket"] = voiceSocketPath;
     const auto path = std::string(directory) + "/runtime-options.json";
     std::ofstream(path) << options.dump();
-    // The online, cloud clipboard and voice steps come many seconds after these providers start listening (the whole run takes 8 to 15 seconds in the build-gate container, more under load), and the Fcitx5 host only dispatches the online request once the test polls for it, so each accept window spans the run instead of its first few seconds.
+    // Online and cloud clipboard requests arrive after earlier native checks; voice starts its listener immediately before its own key test below.
     constexpr int kProviderAcceptMs = 30000;
     std::thread provider([providerServer, ai, suggestion] {
       const auto reply = Json{{"candidates", Json::array({Json{{"text", suggestion}, {"source", ai ? 1 : 0}}})}}.dump() + "\n";
@@ -474,39 +487,6 @@ int main(int argc, char **argv) {
       const bool sent = send(client, reply, std::strlen(reply), MSG_NOSIGNAL) == static_cast<ssize_t>(std::strlen(reply));
       close(client); close(cloudServer);
       return valid && sent;
-    });
-    auto voiceProvider = std::async(std::launch::async, [voiceServer] {
-      pollfd ready{voiceServer, POLLIN, 0};
-      if (poll(&ready, 1, kProviderAcceptMs) <= 0) { close(voiceServer); return false; }
-      const int client = accept(voiceServer, nullptr, nullptr);
-      if (client < 0) { close(voiceServer); return false; }
-      char request[4096]{};
-      const auto count = read(client, request, sizeof(request) - 1);
-      uint64_t generation = 1;
-      try {
-        generation = Json::parse(request, request + std::max<ssize_t>(count, 0))
-                         .at("query").at("generation").get<uint64_t>();
-      } catch (...) {}
-      const auto partial = Json{{"type", "partial"}, {"generation", generation},
-                                {"text", "语音中"}}.dump() + "\n";
-      const auto status = Json{{"type", "status"}, {"generation", generation},
-                               {"phase", "recognizing"}}.dump() + "\n";
-      const auto level = Json{{"type", "level"}, {"generation", generation},
-                              {"level", 0.7}}.dump() + "\n";
-      const auto final = Json{{"type", "final"}, {"generation", generation},
-                              {"text", "语音测试"}}.dump() + "\n";
-      const bool valid = count > 0 && std::string(request, count).find("voice") != std::string::npos;
-      const bool partialSent = send(client, partial.data(), partial.size(), MSG_NOSIGNAL) ==
-                               static_cast<ssize_t>(partial.size());
-      const bool statusSent = send(client, status.data(), status.size(), MSG_NOSIGNAL) ==
-                              static_cast<ssize_t>(status.size());
-      const bool levelSent = send(client, level.data(), level.size(), MSG_NOSIGNAL) ==
-                             static_cast<ssize_t>(level.size());
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
-      const bool finalSent = send(client, final.data(), final.size(), MSG_NOSIGNAL) ==
-                             static_cast<ssize_t>(final.size());
-      close(client); close(voiceServer);
-      return valid && partialSent && statusSent && levelSent && finalSent;
     });
     setenv("MSIME_FCITX5_OPTIONS", path.c_str(), 1);
     char name[] = "fcitx5-native-test";
@@ -721,7 +701,7 @@ int main(int argc, char **argv) {
       require(ic.committed == before, "Mode shortcuts must not commit uppercase letters");
       if (argc == 3 && std::string(argv[2]) == "--local-modes") {
         state->close();
-        std::filesystem::remove_all(directory);
+        removeFixtureTree(directory);
         std::cout << "Fcitx5 Shift local modes, uppercase passthrough and modifier release passed\n";
         return 0;
       }
@@ -790,7 +770,7 @@ int main(int argc, char **argv) {
               "Consumed Ctrl+Space release escaped after Ctrl was released");
       require(chord() && state->input_enabled_, "Ctrl+Space did not restore Chinese mode");
       state->close();
-      std::filesystem::remove_all(directory);
+      removeFixtureTree(directory);
       std::cout << "Fcitx5 Ctrl+Space defaults, passthrough, hot-reload and repeat passed\n";
       return 0;
     }
@@ -1187,7 +1167,7 @@ int main(int argc, char **argv) {
           require(!action->name().empty(), "every option group entry is registered");
           if (!action->isSeparator()) ++grouped;
         }
-      require(grouped == 38, ("option groups hold the moved status actions: " + std::to_string(grouped)).c_str());
+      require(grouped == 42, ("option groups hold the moved status actions: " + std::to_string(grouped)).c_str());
       for (auto *menu : {&engine.scheme_menu_, &engine.desktop_tools_menu_})
         for (auto *action : menu->actions())
           require(!action->name().empty(), "scheme and desktop tools entries are registered");
@@ -1796,7 +1776,8 @@ int main(int argc, char **argv) {
     }
     require(response(msime_client_all_candidates(state->session_)).dump().find(suggestion) != std::string::npos,
             "provider candidate applied to full candidate list");
-    if (ai) {
+    const auto verifyPreferenceInvalidation = [&] {
+      if (!ai) return;
       const auto epochBeforeSettings = state->online_epoch_;
       auto changedPreferences = state->preferences_snapshot_;
       changedPreferences["preferences"]["ai_assistant"]["prompt_custom_1"] =
@@ -1826,7 +1807,7 @@ int main(int argc, char **argv) {
       require(state->translation_epoch_ > translationEpochBeforeSettings &&
                   state->translation_query_.empty() && state->translation_pending_.empty(),
               "translation preference changes invalidate translation completions");
-    }
+    };
     provider.join();
     auto page = ic.inputPanel().candidateList();
     require(page && page->layoutHint() == fcitx::CandidateLayoutHint::Vertical,
@@ -1858,6 +1839,18 @@ int main(int argc, char **argv) {
       }
     }
     require(selected && ic.committed == oldCommit + suggestion, "exact provider candidate commit");
+    verifyPreferenceInvalidation();
+    require(key(FcitxKey_n) && key(FcitxKey_i), "second composition keys");
+    // Recreate a displayed answer in the same synthetic composition so disabling the provider checks a real candidate removal after the selection above committed the first answer.
+    const auto secondQuery = response(msime_client_online_query(state->session_)).dump();
+    const auto secondCandidates = Json::array({suggestion}).dump();
+    const uint8_t activeSource = ai ? 1 : 0;
+    state->view_ = response(msime_client_apply_online_candidates(
+        state->session_, reinterpret_cast<const uint8_t *>(secondQuery.data()), secondQuery.size(),
+        reinterpret_cast<const uint8_t *>(secondCandidates.data()), secondCandidates.size(), activeSource)).at("view");
+    state->render();
+    require(response(msime_client_all_candidates(state->session_)).dump().find(suggestion) != std::string::npos,
+            "synthetic provider answer is displayed before disabling it");
     // 已显示答案后禁用服务必须立即移除该答案；不能先更新偏好再清除，否则 Host API 会把回调视为过期。
     {
       auto disabled = state->preferences_snapshot_;
@@ -1871,7 +1864,6 @@ int main(int argc, char **argv) {
                   std::string::npos,
               "disabling the active provider clears displayed candidates");
     }
-    require(key(FcitxKey_n) && key(FcitxKey_i), "second composition keys");
     const auto beforeWordCharacter = ic.committed;
     require(key(FcitxKey_bracketleft), "configured word-to-character binding");
     require(ic.committed != beforeWordCharacter, "word-to-character commits selected edge");
@@ -1882,7 +1874,7 @@ int main(int argc, char **argv) {
     require(key(FcitxKey_minus), "configured minus previous-page binding");
     require(key(FcitxKey_equal), "configured equal next-page binding");
     require(key(FcitxKey_Escape), "cancel after navigation");
-    // Tab and Shift+Tab page the candidates by default (navigation.tab), as on macOS, Windows and IBus. A real keyboard sends Shift+Tab as Shift+ISO_Left_Tab, and Fcitx normalises both to Tab with Shift; a back-tab without Shift must still go back.
+    // Tab and Shift+Tab page the candidates by default (navigation.tab), as on macOS, Windows and IBus. A real keyboard sends Shift+Tab as Shift+ISO_Left_Tab; Fcitx can drop Shift from the normalized key, so the raw event decides direction.
     {
       const auto candidatePage = [&] { return state->view_.value("page", size_t{0}); };
       const auto preedit = [&] { return ic.inputPanel().clientPreedit().toString(); };
@@ -1895,7 +1887,10 @@ int main(int argc, char **argv) {
               "Tab paging test composes a multi-page ni");
       require(key(FcitxKey_Tab) && candidatePage() == 1, "Tab moves to the next candidate page");
       require(key(FcitxKey_Tab) && candidatePage() == 2, "a second Tab moves on again");
-      require(keyWith(FcitxKey_Tab, shiftState) && candidatePage() == 1, "Shift+Tab moves to the previous page");
+      const bool shiftTabAccepted = keyWith(FcitxKey_Tab, shiftState);
+      require(shiftTabAccepted && candidatePage() == 1,
+              ("Shift+Tab moves to the previous page: accepted=" + std::to_string(shiftTabAccepted) +
+               " page=" + std::to_string(candidatePage())).c_str());
       require(keyWith(FcitxKey_ISO_Left_Tab, shiftState) && candidatePage() == 0,
               "Shift+ISO_Left_Tab moves to the previous page");
       require(key(FcitxKey_Tab) && candidatePage() == 1 && key(FcitxKey_ISO_Left_Tab) && candidatePage() == 0,
@@ -1984,6 +1979,39 @@ int main(int argc, char **argv) {
                 ic.inputPanel().clientPreedit().toString() == "ni",
             "composition before voice input");
     const auto committedBeforeVoice = ic.committed;
+    auto voiceProvider = std::async(std::launch::async, [voiceServer] {
+      pollfd ready{voiceServer, POLLIN, 0};
+      if (poll(&ready, 1, kProviderAcceptMs) <= 0) { close(voiceServer); return false; }
+      const int client = accept(voiceServer, nullptr, nullptr);
+      if (client < 0) { close(voiceServer); return false; }
+      char request[4096]{};
+      const auto count = read(client, request, sizeof(request) - 1);
+      uint64_t generation = 1;
+      try {
+        generation = Json::parse(request, request + std::max<ssize_t>(count, 0))
+                         .at("query").at("generation").get<uint64_t>();
+      } catch (...) {}
+      const auto partial = Json{{"ok", true}, {"type", "partial"}, {"generation", generation},
+                                {"text", "语音中"}}.dump() + "\n";
+      const auto status = Json{{"ok", true}, {"type", "status"}, {"generation", generation},
+                               {"phase", "recognizing"}}.dump() + "\n";
+      const auto level = Json{{"ok", true}, {"type", "level"}, {"generation", generation},
+                              {"level", 0.7}}.dump() + "\n";
+      const auto final = Json{{"ok", true}, {"type", "final"}, {"generation", generation},
+                              {"text", "语音测试"}}.dump() + "\n";
+      const bool valid = count > 0 && std::string(request, count).find("voice") != std::string::npos;
+      const bool partialSent = send(client, partial.data(), partial.size(), MSG_NOSIGNAL) ==
+                               static_cast<ssize_t>(partial.size());
+      const bool statusSent = send(client, status.data(), status.size(), MSG_NOSIGNAL) ==
+                              static_cast<ssize_t>(status.size());
+      const bool levelSent = send(client, level.data(), level.size(), MSG_NOSIGNAL) ==
+                             static_cast<ssize_t>(level.size());
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      const bool finalSent = send(client, final.data(), final.size(), MSG_NOSIGNAL) ==
+                             static_cast<ssize_t>(final.size());
+      close(client); close(voiceServer);
+      return valid && partialSent && statusSent && levelSent && finalSent;
+    });
     fcitx::KeyEvent voiceHotkey(&ic,
         fcitx::Key(FcitxKey_F9, fcitx::KeyStates{fcitx::KeyState::Ctrl}));
     engine.keyEvent(entry, voiceHotkey);
@@ -2004,7 +2032,14 @@ int main(int argc, char **argv) {
       observedVoicePreedit = observedVoicePreedit ||
                              ic.inputPanel().clientPreedit().toString() == "语音中";
     }
-    require(observedVoicePartial || state->voice_partial_seen_, "voice action receives provider partial text");
+    const bool voiceProtocolValid = voiceProvider.get();
+    require(observedVoicePartial || state->voice_partial_seen_,
+            ("voice action receives provider partial text: provider_valid=" +
+             std::to_string(voiceProtocolValid) +
+             " job_valid=" + std::to_string(state->voice_job_.valid()) +
+             " failure_visible=" + std::to_string(state->voice_failure_visible_) +
+             " committed=" + std::to_string(ic.committed.find("语音测试") != std::string::npos) +
+             " aux=" + ic.inputPanel().auxUp().toString()).c_str());
     require(observedVoicePreedit,
             "streaming Doubao text reaches preedit even with a stored ctrl_v commit mode");
     require(state->voice_phase_seen_ && state->voice_level_seen_,
@@ -2015,7 +2050,7 @@ int main(int argc, char **argv) {
     require(ic.inputPanel().clientPreedit().toString().empty(),
             "final voice result clears streaming preedit");
     require(!state->wave_overlay_visible_, "voice completion hides the native wave overlay");
-    require(voiceProvider.get(), "voice socket protocol");
+    require(voiceProtocolValid, "voice socket protocol");
     Json statistics;
     const auto statisticsDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (std::chrono::steady_clock::now() < statisticsDeadline) {
@@ -2302,7 +2337,7 @@ int main(int argc, char **argv) {
       require(state->modeIndicatorLabel() == "한", "the status area labels Korean input");
       // The 输入方案 menu picks a scheme directly and marks the one in use.
       // Cantonese, Zhuyin and Stroke are listed only with their dictionaries, which this fixture does not install.
-      require(engine.scheme_menu_.actions().size() == 6, "scheme menu lists the six schemes that need no dictionary");
+      require(engine.scheme_menu_.actions().size() == 7, "scheme menu lists the seven schemes that need no dictionary");
       require(engine.scheme_korean_action_.isChecked(&ic) && !engine.scheme_japanese_action_.isChecked(&ic) &&
                   !engine.scheme_quanpin_action_.isChecked(&ic),
               "scheme menu marks the scheme in use");
@@ -2547,6 +2582,17 @@ int main(int argc, char **argv) {
     {
       options["preferences"]["scheme"] = "korean";
       std::ofstream(path) << options.dump();
+      // Status-bar choices live in the store and take precedence over runtime options on a new session.
+      auto snapshot = response(msime_client_load_preferences(
+          reinterpret_cast<const uint8_t *>(preferenceDirectory.data()), preferenceDirectory.size()));
+      const auto revision = snapshot.at("revision").get<uint64_t>();
+      snapshot["preferences"]["scheme"] = "korean";
+      snapshot["revision"] = revision + 1;
+      const auto document = snapshot.dump();
+      const auto saved = response(msime_client_save_preferences(
+          reinterpret_cast<const uint8_t *>(preferenceDirectory.data()), preferenceDirectory.size(), revision,
+          reinterpret_cast<const uint8_t *>(document.data()), document.size()));
+      require(saved.value("revision", uint64_t{}) > revision, "Korean saved as the scheme");
       const auto press = [&](fcitx::KeySym sym, fcitx::KeyStates states = fcitx::KeyStates()) {
         fcitx::KeyEvent event(&ic, fcitx::Key(sym, states));
         engine.keyEvent(entry, event);
@@ -2556,7 +2602,9 @@ int main(int argc, char **argv) {
       auto before = ic.committed;
       require(press(FcitxKey_d) && press(FcitxKey_k) && press(FcitxKey_s), "Korean letters compose");
       require(state->view_.at("scheme") == 4 && preedit() == "안" && ic.committed == before,
-              "the syllable is drawn inline while it composes");
+              ("the syllable is drawn inline while it composes: scheme=" +
+               state->view_.at("scheme").dump() + " preedit=" + preedit() +
+               " committed=" + std::to_string(ic.committed != before)).c_str());
       require(state->view_.at("candidates").empty(), "Korean offers no candidates before the Hanja key");
       require(ic.inputPanel().clientPreedit().cursor() == static_cast<int>(std::string("안").size()),
               "the caret follows the syllable");
@@ -2654,15 +2702,16 @@ int main(int argc, char **argv) {
         state->traditional_ = true;
         before = ic.committed;
         require(press(FcitxKey_g) && press(FcitxKey_n) && press(FcitxKey_F9) && preedit() == "후" &&
-                    candidates().size() > 3 && candidates().at(3).value("text", std::string()) == "后",
-                "the Hanja list of 후 holds 后 fourth");
+                    state->view_.value("page_count", size_t{0}) > 1 && press(FcitxKey_Page_Down) &&
+                    candidates().size() == 2 && candidates().at(1).value("text", std::string()) == "后",
+                "the second Hanja page of 후 holds 后 fourth");
         const auto *panel = ic.inputPanel().candidateList().get();
         require(panel && panel->size() == static_cast<int>(candidates().size()), "the panel shows the Hanja list");
         for (int row = 0; row < panel->size(); ++row)
           require(panel->candidate(row).text().toString().rfind(
                       candidates().at(row).value("text", std::string()), 0) == 0,
                   "with traditional output on a Hanja row shows the character it commits");
-        require(press(FcitxKey_4) && ic.committed == before + "后", "the row showing 后 commits 后");
+        require(press(FcitxKey_2) && ic.committed == before + "后", "the row showing 后 commits 后");
         state->traditional_ = false;
       }
       before = ic.committed;
@@ -2911,10 +2960,12 @@ int main(int argc, char **argv) {
                   candidates().at(0).value("text", std::string()) == "一" &&
                   state->view_.value("editing_text", std::string()) == "h",
               "h composes the stroke 一");
-      require(press(FcitxKey_s) && preedit() == "一丨" && candidates().size() >= 3 &&
+      require(press(FcitxKey_s) && preedit() == "一丨" && candidates().size() == 2 &&
                   candidates().at(0).value("text", std::string()) == "十" &&
                   candidates().at(1).value("text", std::string()) == "木" &&
-                  candidates().at(2).value("text", std::string()) == "古",
+                  press(FcitxKey_Page_Down) && !candidates().empty() &&
+                  candidates().at(0).value("text", std::string()) == "古" &&
+                  press(FcitxKey_Page_Up),
               "h s lists 十 exactly and then its completions");
       require(press(FcitxKey_q) && preedit() == "一丨" && ic.committed == before,
               "a letter that is no stroke is swallowed while composing");
@@ -2940,7 +2991,7 @@ int main(int argc, char **argv) {
       state->close();
       state->clearPanel();
     }
-    std::filesystem::remove_all(directory);
+    removeFixtureTree(directory);
     std::cout << "Fcitx5 native context tests passed\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
