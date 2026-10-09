@@ -36,6 +36,7 @@ import androidx.core.widget.NestedScrollView;
 import app.msime.android.BackendAccount;
 import app.msime.android.BoundsPolicy;
 import app.msime.android.CloudApi;
+import app.msime.android.ColorPolicy;
 import app.msime.android.KeyboardGeometry;
 import app.msime.android.ViewPolicy;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
@@ -304,7 +305,7 @@ final class LoginSheet {
             ? Ui.rounded(fill, Ui.dp(activity, 12))
             : Ui.outlined(fill, Ui.dp(activity, 12), KeyboardGeometry.atLeastOnePixel(activity, 1), stroke);
         GradientDrawable mask = Ui.rounded(Color.WHITE, Ui.dp(activity, 12));
-        int pressed = Ui.withAlpha(fill == Color.BLACK ? Color.WHITE : Ui.text(activity), 0.12f);
+        int pressed = ColorPolicy.withAlpha(fill == Color.BLACK ? Color.WHITE : Ui.text(activity), 0.12f);
         ViewPolicy.setBackground(button, new RippleDrawable(android.content.res.ColorStateList.valueOf(pressed), face, mask));
         if (icon != null) {
             ImageView glyph = Ui.decorativeIcon(activity, icon);
