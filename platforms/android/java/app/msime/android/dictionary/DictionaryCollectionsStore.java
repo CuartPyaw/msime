@@ -206,7 +206,7 @@ public final class DictionaryCollectionsStore {
         try {
             JSONObject value = dictionary(context, action("count").put("kind", kind));
             if (value == null) return Result.failed(failureMessage(""));
-            Long count = strictLong(value.opt("count"));
+            Long count = JsonPolicy.strictLong(value.opt("count"));
             return Result.of(count == null || count < 0 ? 0L : count);
         } catch (JSONException error) {
             return Result.failed(failureMessage(""));
@@ -242,7 +242,7 @@ public final class DictionaryCollectionsStore {
                 JSONObject value = dictionary(context, action("export").put("kind", kind).put("format", "standard")
                     .put("offset", offset).put("limit", EXPORT_PAGE));
                 if (value == null) return Result.failed(failureMessage(""));
-                String page = exportPage(value.opt("text"));
+                String page = JsonPolicy.strictString(value.opt("text"));
                 if (page == null) return Result.failed(failureMessage(""));
                 int nextBytes = exportBytesAfterPage(bytes, page);
                 if (nextBytes < 0) return Result.failed(failureMessage("collections_too_large"));
@@ -486,7 +486,7 @@ public final class DictionaryCollectionsStore {
                 String kind = JsonPolicy.strictString(item.opt("kind"));
                 String key = JsonPolicy.strictString(item.opt("key"));
                 String word = JsonPolicy.strictString(item.opt("value"));
-                Long weight = strictLong(item.opt("weight"));
+                Long weight = JsonPolicy.strictLong(item.opt("weight"));
                 String source = JsonPolicy.strictString(item.opt("source"));
                 if (kind == null || key == null || word == null || weight == null || source == null) continue;
                 words.add(new Word(kind, key, word, weight, source));
@@ -557,37 +557,15 @@ public final class DictionaryCollectionsStore {
         }
     }
 
-    /** JSON response flags must remain booleans; org.json otherwise coerces strings. */
-    static Boolean strictBoolean(Object value) {
-        return JsonPolicy.strictBoolean(value);
-    }
-
-    public static String strictString(Object value) {
-        return JsonPolicy.strictString(value);
-    }
-
-    /** Export pages are text from the native response; do not let org.json coerce malformed values. */
-    public static String exportPage(Object value) {
-        return strictString(value);
-    }
-
-    public static Integer strictInteger(Object value) {
-        return JsonPolicy.strictInteger(value);
-    }
-
     /** 词库计数必须是非负 JSON 整数；非法值按调用方的缺省值处理。 */
     public static Integer nonNegativeInteger(Object value) {
-        Integer parsed = strictInteger(value);
+        Integer parsed = JsonPolicy.strictInteger(value);
         return parsed == null || parsed < 0 ? null : parsed;
     }
 
     static int nonNegativeInteger(Object value, int fallback) {
         Integer parsed = nonNegativeInteger(value);
         return parsed == null ? fallback : parsed;
-    }
-
-    public static Long strictLong(Object value) {
-        return JsonPolicy.strictLong(value);
     }
 
     private static String errorOf(String response) {
