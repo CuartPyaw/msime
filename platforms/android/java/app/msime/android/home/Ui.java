@@ -291,11 +291,6 @@ public final class Ui {
         return KeyboardGeometry.sp(context, value);
     }
 
-    /** Parse a theme or skin colour, returning the supplied fallback for missing or invalid input. */
-    public static int parseColor(String value, int fallback) {
-        return ColorPolicy.parse(value, fallback);
-    }
-
     /** Layout parameters for a view that fills the parent width at its measured height. */
     public static LinearLayout.LayoutParams matchWidth() {
         return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
