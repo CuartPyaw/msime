@@ -33,6 +33,7 @@ import app.msime.android.BoundsPolicy;
 import app.msime.android.ColorPolicy;
 import app.msime.android.CustomKeyboardSkin;
 import app.msime.android.CustomSkinLibrary;
+import app.msime.android.DrawablePolicy;
 import app.msime.android.KeyboardGeometry;
 import app.msime.android.KeyboardSkin;
 import app.msime.android.PhotoDecodePolicy;
@@ -487,7 +488,7 @@ public final class AiSkinPage extends DetailPage {
                     skin.keyForeground(), skin.returnBackground()};
                 for (String colour : colours) {
                     View dot = new View(context);
-                    android.graphics.drawable.GradientDrawable shape = Ui.outlined(
+                    android.graphics.drawable.GradientDrawable shape = DrawablePolicy.outlined(
                         ColorPolicy.parse(colour, Color.GRAY), 9999f,
                         KeyboardGeometry.atLeastOnePixel(context, 1), Ui.hairline(context));
                     ViewPolicy.setBackground(dot, shape);

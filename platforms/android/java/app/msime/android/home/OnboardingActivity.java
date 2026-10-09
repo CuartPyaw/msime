@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.DrawablePolicy;
 import app.msime.android.KeyboardGeometry;
 import android.content.Context;
 import android.graphics.drawable.GradientDrawable;
@@ -521,7 +522,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         ViewPolicy.setCenteredVertically(card);
         Ui.setSymmetricPaddingDp(card, this, 16, 14);
         GradientDrawable face = selected
-            ? Ui.outlined(Ui.card(this), Ui.dp(this, 20), Ui.dp(this, 2), Ui.accent(this))
+            ? DrawablePolicy.outlined(Ui.card(this), Ui.dp(this, 20), Ui.dp(this, 2), Ui.accent(this))
             : Ui.rounded(Ui.card(this), Ui.dp(this, 20));
         ViewPolicy.setBackground(card, face);
 
@@ -536,7 +537,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         card.addView(text, Ui.weightWrap(1f));
 
         View radio = new View(this);
-        GradientDrawable dot = Ui.circleOutlined(selected ? Ui.page(this) : 0,
+        GradientDrawable dot = DrawablePolicy.circleOutlined(selected ? Ui.page(this) : 0,
             selected ? Ui.dp(this, 6) : KeyboardGeometry.atLeastOnePixel(this, 1.5f),
             selected ? Ui.accent(this) : Ui.subText(this));
         ViewPolicy.setBackground(radio, dot);
