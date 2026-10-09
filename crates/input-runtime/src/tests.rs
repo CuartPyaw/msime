@@ -4122,6 +4122,33 @@ fn slash_and_at_open_their_modes_only_with_nothing_composed() {
     assert!(finished.commit_context.unwrap().typing_statistics);
 }
 
+#[test]
+fn wubi_literal_marks_do_not_open_table_modes() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut options = real_engine_options(directory.path());
+    options.scheme = 2;
+    options.local_command = true;
+    options.local_mention = true;
+    options.command_table = vec![msime_engine::host::CommandTableEntry {
+        trigger: "sig".into(),
+        title: "签名".into(),
+        template: "张三".into(),
+    }];
+    options.mention_entries = vec![msime_engine::host::MentionEntry {
+        text: "张三".into(),
+        key: "zhang'san".into(),
+    }];
+    let session = msime_engine::host::Session::new(&options).unwrap();
+    let mut runtime = Runtime::new(session, 5).unwrap();
+    runtime.focus(true).unwrap();
+    assert_eq!(runtime.view().spelling_symbols, "/@");
+
+    let literal = runtime.dispatch(Action::PunctuationAscii(b'/')).unwrap();
+    assert_eq!(literal.view.local_mode, "none");
+    let opened = runtime.dispatch(Action::Punctuation(b'/')).unwrap();
+    assert_eq!(opened.view.local_mode, "command");
+}
+
 /// Without a settled model attached, the settle call is inert.
 ///
 /// This is the shape every installation that ships one model is in, and the one where a mistake
