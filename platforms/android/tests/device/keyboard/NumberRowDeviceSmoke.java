@@ -66,6 +66,7 @@ public final class NumberRowDeviceSmoke extends DeviceSmoke {
                 userRotation = shellOutput("settings get system user_rotation");
                 shell("settings put system accelerometer_rotation 0");
                 shell("settings put system user_rotation 1");
+                awaitEditorOrientation(true);
                 tap(field("msime-test-plain"));
                 awaitStableBounds(key("q"));
                 SystemClock.sleep(800);
@@ -73,6 +74,7 @@ public final class NumberRowDeviceSmoke extends DeviceSmoke {
                     throw new AssertionError("Number row drawn in a landscape phone window; IME showed " + imeTexts());
                 stage = "portrait brings the number row back";
                 shell("settings put system user_rotation 0");
+                awaitEditorOrientation(false);
                 tap(field("msime-test-plain"));
                 await(digit("1"));
             }
@@ -85,6 +87,30 @@ public final class NumberRowDeviceSmoke extends DeviceSmoke {
             else publish(localSettings, originalLocal);
             rebindInputMethod();
         }
+    }
+
+    /**
+     * 改了屏幕方向后，等编辑器窗口按新方向排好、输入框位置稳定下来再去点。旋转过渡期间编辑器 Activity 正在重建，这时注入的点按没有窗口接收（logcat 里是 `ActivityRecordInputSink ... NO_INPUT_CHANNEL` 和 `Dropping event because no targets were found`），`tap` 报 Touch injection failed；CI 的 API 35 上就这样失败过一次。
+     */
+    private void awaitEditorOrientation(boolean landscape) throws Exception {
+        long deadline = SystemClock.uptimeMillis() + 15000;
+        while (SystemClock.uptimeMillis() < deadline) {
+            automation.waitForIdle(500, 5000);
+            for (AccessibilityWindowInfo window : automation.getWindows()) {
+                if (window.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                AccessibilityNodeInfo root = window.getRoot();
+                if (root == null || !equalsText("app.msime.android.test", root.getPackageName())) continue;
+                Rect bounds = new Rect();
+                window.getBoundsInScreen(bounds);
+                if (!bounds.isEmpty() && (bounds.width() > bounds.height()) == landscape) {
+                    awaitStableBounds(field("msime-test-plain"));
+                    return;
+                }
+            }
+            SystemClock.sleep(250);
+        }
+        throw new AssertionError("Editor window never turned " + (landscape ? "landscape" : "portrait")
+            + "; IME showed " + imeTexts());
     }
 
     private AccessibilityNodeInfo findVisible(Predicate<AccessibilityNodeInfo> match) {
