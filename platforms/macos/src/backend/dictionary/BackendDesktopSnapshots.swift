@@ -95,6 +95,10 @@ extension BackendAccountClient: DesktopSnapshotAPI {}
     try Task.checkCancellation()
     return token
   }
+  private func visibleStatus() async -> Any {
+    guard (try? await authorize()) != nil else { return NSNull() }
+    return status as Any? ?? NSNull()
+  }
   private static func read<T>(token: String, refreshCredentials: ((String) async throws -> String)?,
                               operation: (String) async throws -> T) async throws -> T {
     do { return try await operation(token) }
@@ -127,7 +131,7 @@ extension BackendAccountClient: DesktopSnapshotAPI {}
   func execute(_ request: NSDictionary) async throws -> [String: Any] {
     guard let operation = request["operation"] as? String else { throw BackendAccountClient.Failure(status: 400) }
     if operation == "snapshot_status" {
-      return ["nativeFiles":true, "localVersion":try capture().version, "request":status as Any? ?? NSNull()]
+      return ["nativeFiles":true, "localVersion":try capture().version, "request":await visibleStatus()]
     }
     if operation == "snapshot_cancel" {
       // Keep the handle until the task's defer path observes cancellation and
@@ -136,7 +140,7 @@ extension BackendAccountClient: DesktopSnapshotAPI {}
       // that cleanup and create two native snapshot lifecycles at once.
       job?.cancel()
       if status?["status"] as? String == "preparing" || status?["status"] as? String == "queued" { status?["status"] = "cancelled" }
-      return ["request":status as Any? ?? NSNull()]
+      return ["request":await visibleStatus()]
     }
     if operation == "snapshot_restore_cancel" {
       if preview?.target == nil { preview = nil }
