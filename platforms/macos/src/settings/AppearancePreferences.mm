@@ -1814,7 +1814,11 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     if ([@[@"xiaohe", @"ziranma", @"shoudao", @"microsoft"] containsObject:profile]) _sharedShuangpinProfile = [profile copy];
     if (LocalModeBoolean(raw)) _sharedShuangpinPreeditUsesRaw = raw;
     if (LocalModeBoolean(wubiMixedPinyin)) _sharedWubiMixedPinyin = wubiMixedPinyin;
-    if (LocalModeBoolean(wubiAutoCommitUnique)) _sharedWubiAutoCommitUnique = wubiAutoCommitUnique;
+    if (LocalModeBoolean(wubiAutoCommitUnique)) {
+        _sharedWubiAutoCommitUnique = wubiAutoCommitUnique;
+        // 文档里的 false 只可能来自新语义下的选择：升级时把旧的原生 NO 合并进文档之前 getter 已经读作开，而共享设置页（macOS 上的主要入口）只写文档、不写原生标记。这里也认作本机已经采纳新语义，免得下一次套用云快照时把用户关掉的开关又当历史缺省恢复成开。
+        if (![wubiAutoCommitUnique boolValue]) [_defaults setBool:YES forKey:WubiAutoCommitUniqueAdoptedKey];
+    }
     if ([@[@"wubi86", @"wubi98"] containsObject:wubiProfile]) _sharedWubiProfile = [wubiProfile copy];
     id inlinePreedit = preferences[@"tsf_preedit_style"];
     if ([@[@"raw", @"pinyin", @"empty"] containsObject:inlinePreedit]) _sharedInlinePreeditStyle = [inlinePreedit copy];
