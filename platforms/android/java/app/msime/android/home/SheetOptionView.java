@@ -13,7 +13,7 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat;
 import app.msime.android.R;
 import app.msime.android.ViewPolicy;
-import app.msime.android.keyboard.KeyboardGeometry;
+import app.msime.android.KeyboardGeometry;
 
 /** Shared option-row renderer used by the settings bottom sheets. */
 final class SheetOptionView {
