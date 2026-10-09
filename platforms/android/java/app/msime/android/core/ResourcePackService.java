@@ -223,7 +223,7 @@ public final class ResourcePackService extends Service {
 
     private void install(String pack) {
         Context context = getApplicationContext();
-        Thread worker = new Thread(() -> {
+        ThreadPolicy.startNamedThread("msime-resource-pack-" + pack, () -> {
             String failure = null;
             try {
                 if (CANCELLING.contains(pack)) {
@@ -240,8 +240,7 @@ public final class ResourcePackService extends Service {
             }
             String result = failure;
             MAIN.post(() -> finished(pack, result));
-        }, "msime-resource-pack-" + pack);
-        worker.start();
+        });
     }
 
     /** 用户在共享偏好里填的下载镜像前缀（与本地语音模型共用的 `voice_input.asr_model_mirror`）；没填时为空，按项目镜像、锁文件原地址的顺序下载。 */
