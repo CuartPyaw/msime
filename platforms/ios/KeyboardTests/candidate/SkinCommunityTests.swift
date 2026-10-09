@@ -257,7 +257,7 @@ final class SkinCommunityTests: XCTestCase {
     XCTAssertNil(recorder.events.first?.stored)
   }
 
-  func testDelayedNativeForgetKeepsANewerLoginAndItsSnapshot() async throws {
+  func testDelayedNativeForgetKeepsAnotherSessionsNewLoginAndSnapshot() async throws {
     let memory = CommunityMemoryCredentials()
     let oldTokens = BackendAccountClient.Tokens(
       access_token: String(repeating: "a", count: 64), refresh_token: String(repeating: "f", count: 64),
@@ -270,13 +270,14 @@ final class SkinCommunityTests: XCTestCase {
     let gate = FirstRefreshLockGate()
     let session = BackendAccountSession(api: client, storage: memory,
                                         refreshLock: FirstRunGatedRefreshLock(gate: gate))
+    let replacement = communitySession(client, memory)
     let recorder = AccountReplacementRecorder()
     let oldForget = Task {
       try await session.forget(removingAccount: { recorder.record($0, storage: memory) })
     }
     await gate.untilFirstRun()
 
-    try await session.signIn(challenge: "fixture", credential: "synthetic")
+    try await replacement.signIn(challenge: "fixture", credential: "synthetic")
     await gate.release()
     do { try await oldForget.value; XCTFail("stale forget cleared the new account") }
     catch is CancellationError { }
