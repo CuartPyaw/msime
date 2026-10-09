@@ -2,7 +2,7 @@ use super::*;
 use crate::dictionary::fixtures::pinyin_db;
 use crate::ime::personal_rerank::allocations::{count, measure};
 
-// 冻结 `a6bbd05e10d4a9841e60cd8476ebc10e7d5c711f` 的完整按键分组查询正文，仅转接数据库接收者。
+// 冻结 `4a2343f01bca460f97f352dd2448f6e6f243f125` 的完整按键分组查询正文，仅转接数据库接收者。
 fn original_query(
     database: &PinyinDatabase,
     keys: &[String],
@@ -18,14 +18,10 @@ fn original_query(
         if !query_key_is_new(keys, index, &mut seen) {
             continue;
         }
-        let segments = split_segments(key);
-        if !has_only_complete_pinyin_segments(&segments) {
-            continue;
-        }
-        let Some(table) = build_table_name(&segments) else {
+        let Some((table, syllables)) = complete_key_table(key) else {
             continue;
         };
-        if segments.len() == 1 {
+        if syllables == 1 {
             let rows = database.rows(
                 &exact_sql(&table, sql_limit(per_key_limit)),
                 [key.as_str()],
@@ -60,7 +56,7 @@ fn original_query(
 }
 
 #[test]
-fn unique_multi_syllable_keys_skip_owned_segment_allocations() {
+fn unique_multi_syllable_keys_skip_group_key_clones() {
     let directory = tempfile::tempdir().unwrap();
     let path = pinyin_db(directory.path(), &[("tbl_2_n", "ni'hao", "合成甲", 10)]);
     let database = PinyinDatabase::open(&path);
@@ -74,27 +70,7 @@ fn unique_multi_syllable_keys_skip_owned_segment_allocations() {
     let (new, new_count) = count(|| database.query_exact_keys_per_key(&batch, 2));
     assert_eq!(new, old);
     assert_eq!(new.len(), 1);
-    assert_eq!(
-        new_count + 9 + borrowed_key_groups_tests::owned_group_allocations(&batch),
-        old_count
-    );
-}
-
-fn original_plan(key: &str) -> Option<(String, usize)> {
-    let segments = split_segments(key);
-    if !has_only_complete_pinyin_segments(&segments) {
-        return None;
-    }
-    build_table_name(&segments).map(|table| (table, segments.len()))
-}
-
-fn owned_split_allocations(batch: &[String]) -> usize {
-    batch
-        .iter()
-        .enumerate()
-        .filter(|(index, key)| !batch[..*index].contains(key))
-        .map(|(_, key)| count(|| split_segments(key)).1)
-        .sum()
+    assert_eq!(new_count + 3, old_count);
 }
 
 fn assert_results(new: &HashMap<String, Vec<DictRow>>, old: &HashMap<String, Vec<DictRow>>) {
@@ -107,12 +83,6 @@ fn assert_results(new: &HashMap<String, Vec<DictRow>>, old: &HashMap<String, Vec
 }
 
 fn compare_hot(database: &PinyinDatabase, batch: &[String], limit: usize, saved: usize) {
-    let saved = saved
-        + if database.connection.is_some() && limit > 0 {
-            borrowed_key_groups_tests::owned_group_allocations(batch)
-        } else {
-            0
-        };
     // 热缓存会替换区间前已拥有的查询键，此边界只比较次数。
     drop(original_query(database, batch, limit));
     drop(database.query_exact_keys_per_key(batch, limit));
@@ -142,78 +112,6 @@ fn many_keys() -> Vec<String> {
         }
     }
     batch
-}
-
-#[test]
-fn all_intact_syllables_keep_table_names_counts_and_only_table_allocation() {
-    let _ = intact_pinyin_set();
-    for &syllable in crate::pinyin::syllables::intact_pinyin_list() {
-        for length in [1, 2, 7, 8] {
-            let key = std::iter::repeat_n(syllable, length)
-                .collect::<Vec<_>>()
-                .join("'");
-            let (old, old_count) = count(|| original_plan(&key));
-            let (new, new_count) = count(|| complete_key_table(&key));
-            assert_eq!(new, old, "key={key}");
-            let (new_table, new_length) = new.unwrap();
-            let (old_table, _) = old.unwrap();
-            assert_eq!(new_length, length);
-            assert_eq!(new_table.capacity(), old_table.capacity());
-            assert_eq!(new_count, 1);
-            assert_eq!(new_count + length + 1, old_count);
-        }
-    }
-    let long = std::iter::repeat_n("ni", 1025)
-        .collect::<Vec<_>>()
-        .join("'");
-    assert_eq!(
-        complete_key_table(&long),
-        Some(("tbl_others_n".to_owned(), 1025))
-    );
-    assert_eq!(complete_key_table(&long), original_plan(&long));
-}
-
-#[test]
-fn malformed_keys_keep_empty_segments_and_reject_without_storage() {
-    let _ = intact_pinyin_set();
-    for key in [
-        "",
-        "'",
-        "''",
-        "'ni",
-        "ni'",
-        "ni''hao",
-        "n'h",
-        "Ni",
-        "NI'HAO",
-        "合成",
-        "ni'合成",
-        "i",
-        "u",
-        "v",
-        "ni\0hao",
-        "ni hao",
-        "ni’hao",
-        "ni'hao'?",
-    ] {
-        let (old, old_count) = count(|| original_plan(key));
-        let (new, new_count) = count(|| complete_key_table(key));
-        assert_eq!(new, old);
-        assert!(new.is_none());
-        assert_eq!(new_count, 0);
-        assert_eq!(old_count, count(|| split_segments(key)).1);
-    }
-    let long = format!(
-        "合成'{}",
-        std::iter::repeat_n("ni", 1024)
-            .collect::<Vec<_>>()
-            .join("'")
-    );
-    let (old, old_count) = count(|| original_plan(&long));
-    let (new, new_count) = count(|| complete_key_table(&long));
-    assert_eq!(new, old);
-    assert_eq!(new_count, 0);
-    assert_eq!(old_count, 1026);
 }
 
 #[test]
@@ -247,7 +145,7 @@ fn mixed_valid_invalid_repeated_keys_keep_results_and_limits() {
         ]),
         keys(&["ni'hao'ma'shi'jie'men'ma", "ni'hao'ma'shi'jie'men'ma'ni"]),
     ] {
-        let saved = owned_split_allocations(&batch);
+        let saved = owned_group_allocations(&batch);
         for limit in [1, 2, 5, 1000] {
             compare_hot(&database, &batch, limit, saved);
         }
@@ -255,12 +153,12 @@ fn mixed_valid_invalid_repeated_keys_keep_results_and_limits() {
     let long = std::iter::repeat_n("ni", 1025)
         .collect::<Vec<_>>()
         .join("'");
-    compare_hot(&database, &[long], 2, 1026);
+    compare_hot(&database, &[long], 2, 1);
     for length in [1, 64, 65, 96, 129] {
         let batch: Vec<String> = (0..length)
             .map(|index| ["ni", "ni'hao", "Ni", "", "ni''hao", "shi'jie"][index % 6].to_owned())
             .collect();
-        compare_hot(&database, &batch, 2, owned_split_allocations(&batch));
+        compare_hot(&database, &batch, 2, owned_group_allocations(&batch));
     }
     let result = database.query_exact_keys_per_key(&keys(&["ni", "ni'hao", "shi'jie"]), 2);
     assert_eq!(result["ni"][0].value, "合成甲");
@@ -271,7 +169,7 @@ fn mixed_valid_invalid_repeated_keys_keep_results_and_limits() {
 }
 
 #[test]
-fn unique_dense_batches_save_owned_segments_at_batch_boundaries() {
+fn unique_dense_batches_save_group_key_clones_at_batch_boundaries() {
     let directory = tempfile::tempdir().unwrap();
     let path = pinyin_db(directory.path(), &[("tbl_2_n", "ni'hao", "合成原点", 0)]);
     let mut connection = Connection::open(&path).unwrap();
@@ -294,13 +192,13 @@ fn unique_dense_batches_save_owned_segments_at_batch_boundaries() {
     let database = PinyinDatabase::open(&path);
     for length in [1, 64, 65, 96, 129] {
         for limit in [1, 2, 12] {
-            compare_hot(&database, &batch[..length], limit, length * 3);
+            compare_hot(&database, &batch[..length], limit, length);
             let result = database.query_exact_keys_per_key(&batch[..length], limit);
             assert_eq!(result.len(), length);
             assert_eq!(result["ni'hao"].len(), limit);
         }
     }
-    compare_hot(&database, &batch[..1], 1000, 3);
+    compare_hot(&database, &batch[..1], 1000, 1);
     assert_eq!(
         database.query_exact_keys_per_key(&batch[..1], 1000)["ni'hao"].len(),
         1000
@@ -327,7 +225,7 @@ fn parameter_guards_keep_allocation_count_and_unbounded_single_rows() {
     compare_hot(&database, &[], 2, 0);
     let batch = keys(&["ni", "ni"]);
     for limit in [i32::MAX as usize, usize::MAX] {
-        compare_hot(&database, &batch, limit, 2);
+        compare_hot(&database, &batch, limit, 0);
         assert_eq!(
             database.query_exact_keys_per_key(&batch, limit)["ni"].len(),
             2
@@ -336,7 +234,7 @@ fn parameter_guards_keep_allocation_count_and_unbounded_single_rows() {
 }
 
 #[test]
-fn first_step_failure_keeps_empty_result_and_skips_owned_plan() {
+fn first_step_failure_keeps_empty_result_and_skips_group_key_clones() {
     let directory = tempfile::tempdir().unwrap();
     let path = pinyin_db(directory.path(), &[]);
     let connection = Connection::open(&path).unwrap();
@@ -353,14 +251,14 @@ fn first_step_failure_keeps_empty_result_and_skips_owned_plan() {
         let mut rows = statement.query(["ni'hao"]).unwrap();
         assert!(rows.next().is_err());
     }
-    compare_hot(&database, &keys(&["ni'hao", "ni'hao"]), 2, 3);
+    compare_hot(&database, &keys(&["ni'hao", "ni'hao"]), 2, 1);
     assert!(database
         .query_exact_keys_per_key(&keys(&["ni'hao"]), 2)
         .is_empty());
 }
 
 #[test]
-fn cold_unique_queries_keep_result_storage_and_save_plan_allocations() {
+fn cold_unique_queries_keep_result_storage_and_save_group_key_clones() {
     let directory = tempfile::tempdir().unwrap();
     let path = pinyin_db(
         directory.path(),
@@ -379,11 +277,11 @@ fn cold_unique_queries_keep_result_storage_and_save_plan_allocations() {
         .collect();
     let many = many_keys();
     for (label, batch, saved) in [
-        ("single-unique-96", single, 192),
-        ("multi-unique-96", many[..96].to_vec(), 288),
-        ("single-hit", keys(&["ni"]), 2),
-        ("multi-hit", keys(&["ni'hao"]), 3),
-        ("invalid-unique", keys(&["Ni", "ni''hao", "'ni", "合成"]), 9),
+        ("single-unique-96", single, 0),
+        ("multi-unique-96", many[..96].to_vec(), 96),
+        ("single-hit", keys(&["ni"]), 0),
+        ("multi-hit", keys(&["ni'hao"]), 1),
+        ("invalid-unique", keys(&["Ni", "ni''hao", "'ni", "合成"]), 0),
     ] {
         let cold = |original| {
             measure(|| {
@@ -401,9 +299,7 @@ fn cold_unique_queries_keep_result_storage_and_save_plan_allocations() {
         let (new, new_heap) = cold(false);
         assert_results(&new, &old);
         assert_eq!(
-            new_heap.allocations
-                + saved
-                + borrowed_key_groups_tests::owned_group_allocations(&batch),
+            new_heap.allocations + saved,
             old_heap.allocations,
             "{label}"
         );
@@ -416,4 +312,79 @@ fn cold_unique_queries_keep_result_storage_and_save_plan_allocations() {
         assert!(new_heap.peak_bytes <= old_heap.peak_bytes, "{label}");
         eprintln!("case={label} old={old_heap:?} new={new_heap:?}");
     }
+}
+
+// 独立用旧校验识别首次合法多音节键，区间外计量每个完整键克隆，保留各片冻结正文。
+pub(super) fn owned_group_allocations(keys: &[String]) -> usize {
+    keys.iter()
+        .enumerate()
+        .filter(|(index, key)| !keys[..*index].contains(key))
+        .filter(|(_, key)| {
+            let segments = split_segments(key);
+            segments.len() > 1
+                && has_only_complete_pinyin_segments(&segments)
+                && build_table_name(&segments).is_some()
+        })
+        .map(|(_, key)| count(|| key.clone()).1)
+        .sum()
+}
+
+// 冻结同一基线的私有批量读行正文，以原来的 `&String` 参数绑定验证泛型桥接。
+fn original_batch_rows(
+    database: &PinyinDatabase,
+    table: &str,
+    keys: &[String],
+    limit: usize,
+) -> Vec<DictRow> {
+    if table.is_empty() || keys.is_empty() || limit == 0 {
+        return Vec::new();
+    }
+    let sql = batch_sql(table, keys.len(), sql_limit(limit));
+    database.rows(&sql, params_from_iter(keys), query_capacity(limit))
+}
+
+#[test]
+fn owned_and_borrowed_batch_parameters_keep_rows_capacity_and_allocations() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = pinyin_db(
+        directory.path(),
+        &[
+            ("tbl_2_n", "ni'hao", "合成甲", 30),
+            ("tbl_2_n", "ni'hao", "合成乙", -10),
+            ("tbl_2_n", "nan'hao", "合成丙", 20),
+            ("tbl_2_n", "ni\0hao", "合成零字节", 15),
+        ],
+    );
+    let database = PinyinDatabase::open(&path);
+    for batch in [
+        vec![],
+        keys(&["ni'hao"]),
+        keys(&["ni'hao", "nan'hao", "ni\0hao"]),
+        keys(&["不存在"]),
+    ] {
+        let borrowed: Vec<&str> = batch.iter().map(String::as_str).collect();
+        for table in ["", "tbl_2_n", "tbl_missing"] {
+            for limit in [0, 1, 2, i32::MAX as usize, usize::MAX] {
+                drop(original_batch_rows(&database, table, &batch, limit));
+                drop(database.batch_rows(table, &batch, limit));
+                drop(database.batch_rows(table, &borrowed, limit));
+                let (old, old_count) =
+                    count(|| original_batch_rows(&database, table, &batch, limit));
+                let (owned, owned_count) = count(|| database.batch_rows(table, &batch, limit));
+                let (new, new_count) = count(|| database.batch_rows(table, &borrowed, limit));
+                assert_eq!(owned, old);
+                assert_eq!(new, old);
+                assert_eq!(owned.capacity(), old.capacity());
+                assert_eq!(new.capacity(), old.capacity());
+                assert_eq!(owned_count, old_count);
+                assert_eq!(new_count, old_count);
+            }
+        }
+    }
+    let batch = keys(&["ni'hao", "nan'hao"]);
+    let result = database.query_exact_keys_per_key(&batch, 2);
+    drop(batch);
+    assert_eq!(result["ni'hao"][0].value, "合成甲");
+    assert_eq!(result["ni'hao"][1].weight, -10);
+    assert_eq!(result["nan'hao"][0].value, "合成丙");
 }

@@ -102,6 +102,7 @@ fn compare_hot(database: &PinyinDatabase, batch: &[String], limit: usize, saved:
     let saved = saved
         + if database.connection.is_some() && limit > 0 {
             unique_split_allocations(batch)
+                + borrowed_key_groups_tests::owned_group_allocations(batch)
         } else {
             0
         };
@@ -299,7 +300,10 @@ fn cold_queries_save_only_duplicate_segment_allocations() {
         let (new, new_heap) = cold(false);
         assert_results(&new, &old);
         assert_eq!(
-            new_heap.allocations + saved + unique_split_allocations(&batch),
+            new_heap.allocations
+                + saved
+                + unique_split_allocations(&batch)
+                + borrowed_key_groups_tests::owned_group_allocations(&batch),
             old_heap.allocations
         );
         assert_eq!(new_heap.remaining_bytes, old_heap.remaining_bytes);
