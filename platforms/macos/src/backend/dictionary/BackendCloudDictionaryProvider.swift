@@ -26,7 +26,7 @@ final class BackendCloudDictionaryProvider: NSObject {
   private let refreshCredentials: ((String) async throws -> String)?
   private lazy var snapshots: BackendDesktopSnapshots? = {
     guard let client = client as? any DesktopSnapshotAPI else { return nil }
-    return BackendDesktopSnapshots(client: client, credentials: credentials)
+    return BackendDesktopSnapshots(client: client, credentials: credentials, refreshCredentials: refreshCredentials)
   }()
   private var exported: URL?
   init(client: any DesktopCloudDictionaryAPI, credentials: @escaping () async throws -> String,

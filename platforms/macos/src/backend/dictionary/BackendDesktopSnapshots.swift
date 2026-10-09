@@ -74,6 +74,7 @@ extension BackendAccountClient: DesktopSnapshotAPI {}
 @MainActor final class BackendDesktopSnapshots {
   private let client: any DesktopSnapshotAPI
   private let credentials: () async throws -> String
+  private let refreshCredentials: ((String) async throws -> String)?
   private let choose: (Bool) async throws -> URL?
   private let capture: @MainActor () throws -> any DesktopSnapshotTarget
   private var preview: (token: String, file: BackendPreparedSnapshot, target: (any DesktopSnapshotTarget)?, revision: Int64)?
@@ -81,9 +82,11 @@ extension BackendAccountClient: DesktopSnapshotAPI {}
   private var status: [String: Any]?
   private var busy = false
   init(client: any DesktopSnapshotAPI = BackendAccountClient(), credentials: @escaping () async throws -> String,
+       refreshCredentials: ((String) async throws -> String)? = nil,
        choose: @escaping (Bool) async throws -> URL? = { try await DesktopSnapshotFileDialogs().choose(saving: $0) },
        capture: @escaping @MainActor () throws -> any DesktopSnapshotTarget = { try MacDesktopSnapshotTarget() }) {
-    self.client = client; self.credentials = credentials; self.choose = choose; self.capture = capture
+    self.client = client; self.credentials = credentials; self.refreshCredentials = refreshCredentials
+    self.choose = choose; self.capture = capture
   }
   deinit { job?.cancel() }
   private func authorize() async throws -> String {
@@ -91,6 +94,19 @@ extension BackendAccountClient: DesktopSnapshotAPI {}
     let token = try await credentials()
     try Task.checkCancellation()
     return token
+  }
+  private static func read<T>(token: String, refreshCredentials: ((String) async throws -> String)?,
+                              operation: (String) async throws -> T) async throws -> T {
+    do { return try await operation(token) }
+    catch let failure as BackendAccountClient.Failure where failure.status == 401 {
+      guard let refreshCredentials else { throw failure }
+      let fresh = try await refreshCredentials(token)
+      try Task.checkCancellation()
+      return try await operation(fresh)
+    }
+  }
+  private func read<T>(token: String, operation: (String) async throws -> T) async throws -> T {
+    try await Self.read(token: token, refreshCredentials: refreshCredentials, operation: operation)
   }
   private func metadata(_ file: BackendPreparedSnapshot) throws -> [String: Any] {
     let e = file.envelope
@@ -100,7 +116,9 @@ extension BackendAccountClient: DesktopSnapshotAPI {}
       "entries":e.entries, "overlays":e.overlays, "positions":e.positions, "selections":e.selections]
   }
   private func cloudRevision(_ token: String) async throws -> Int64 {
-    try await client.dictionaryCatalog(.quick, code: "", offset: 0, scheme: "pinyin", profile: "xiaohe", token: token).revision
+    try await read(token: token) { current in
+      try await client.dictionaryCatalog(.quick, code: "", offset: 0, scheme: "pinyin", profile: "xiaohe", token: current).revision
+    }
   }
   private func freeze(_ url: URL) async throws -> BackendPreparedSnapshot {
     let work = Task.detached(priority: .utility) { try BackendPreparedSnapshot(copying: url) }
@@ -132,7 +150,7 @@ extension BackendAccountClient: DesktopSnapshotAPI {}
       guard job == nil else { throw BackendAccountClient.Failure(status: 409) }
       preview = nil
       let target = try capture()
-      let downloaded = try await client.dictionarySnapshot(token: token)
+      let downloaded = try await read(token: token) { try await client.dictionarySnapshot(token: $0) }
       defer { try? FileManager.default.removeItem(at: downloaded.url.deletingLastPathComponent()) }
       let frozen = try await freeze(downloaded.url)
       _ = try await authorize()
@@ -154,7 +172,7 @@ extension BackendAccountClient: DesktopSnapshotAPI {}
       return ["previewToken":id, "snapshot":try metadata(frozen), "expectedRevision":revision]
     case "snapshot_export", "snapshot_save":
       guard let destination = try await choose(true) else { return ["cancelled":true] }
-      let downloaded = try await client.dictionarySnapshot(token: try await authorize())
+      let downloaded = try await read(token: try await authorize()) { try await client.dictionarySnapshot(token: $0) }
       defer { try? FileManager.default.removeItem(at: downloaded.url.deletingLastPathComponent()) }
       try await MacCloudFileTransfer.save(downloaded.url, to: destination) { _ = try await self.authorize() }
       return ["saved":true]
@@ -174,7 +192,7 @@ extension BackendAccountClient: DesktopSnapshotAPI {}
       preview = nil
       let id = UUID().uuidString
       status = ["id":id, "cloudRevision":selected.file.envelope.revision, "expectedLocalVersion":target.version, "fileSha256":selected.file.fileSHA256, "status":"queued"]
-      let credentials = self.credentials, client = self.client
+      let credentials = self.credentials, refreshCredentials = self.refreshCredentials, client = self.client
       job = Task { [weak self] in
         self?.status?["status"] = "preparing"
         let outcome: String
@@ -182,7 +200,9 @@ extension BackendAccountClient: DesktopSnapshotAPI {}
           let activation = try await target.stage(selected.file)
           while !(try activation.ready()) { try await Task.sleep(nanoseconds: 100_000_000) }
           let token = try await credentials()
-          let cloud = try await client.dictionaryCatalog(.quick, code:"", offset:0, scheme:"pinyin", profile:"xiaohe", token:token)
+          let cloud = try await Self.read(token: token, refreshCredentials: refreshCredentials) { current in
+            try await client.dictionaryCatalog(.quick, code:"", offset:0, scheme:"pinyin", profile:"xiaohe", token:current)
+          }
           _ = try await credentials()
           try Task.checkCancellation()
           guard cloud.revision == selected.file.envelope.revision, try target.currentVersion() == target.version else { throw BackendAccountClient.Failure(status:409) }
