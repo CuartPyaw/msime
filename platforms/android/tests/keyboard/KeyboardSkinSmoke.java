@@ -112,6 +112,9 @@ public final class KeyboardSkinSmoke {
         check(CustomKeyboardSkin.doubleValue(Double.NaN, 7) == 7);
         check(JsonPolicy.strictBoolean("true", false) == false);
         check(JsonPolicy.strictBoolean(Boolean.TRUE, false));
+        check("skin".equals(JsonPolicy.strictString("skin", "fallback")));
+        check("fallback".equals(JsonPolicy.strictString(7, "fallback")));
+        check(JsonPolicy.strictString(null, null) == null);
         KeyboardSkin custom = KeyboardSkin.customFixture(design, false);
         check("custom".equals(custom.id()) && "我的皮肤".equals(custom.title()) && custom.designed());
         check("#151022".equals(custom.background()) && "#30224A".equals(custom.gradientEnd()));
