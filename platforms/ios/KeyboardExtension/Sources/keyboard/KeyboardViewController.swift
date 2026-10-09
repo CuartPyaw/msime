@@ -6372,6 +6372,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       panel.topAnchor.constraint(equalTo: view.topAnchor),
       panel.bottomAnchor.constraint(equalTo: view.bottomAnchor),
     ])
+    // 把背景交给系统底板的皮肤（原生皮肤、经典兜底）面板是透明的，与主键盘透出同一块系统底板（iOS 26 起是 Liquid Glass），而不是铺一块量出来的不透明色；面板整块盖住键盘，所以下面的工具栏和按键先藏起来，关面板时再放出来。
+    if KeyboardTheme.current.drawsNativeBackground { keyboardRoot?.alpha = 0 }
     symbolPanel = panel
     UIAccessibility.post(notification: .screenChanged, argument: panel)
   }
@@ -6464,6 +6466,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     if let panel = symbolPanel {
       panel.removeFromSuperview()
       symbolPanel = nil
+      keyboardRoot?.alpha = 1
       UIAccessibility.post(notification: .screenChanged, argument: nineKeySymbolsButton)
     }
     if let picker = skinPicker {
