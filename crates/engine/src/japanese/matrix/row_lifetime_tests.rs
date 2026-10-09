@@ -194,11 +194,16 @@ fn verify_case(
         measured
     });
     let [retain, release, clear, production] = measurements;
-    for measured in [release, clear, production] {
+    for measured in [release, clear] {
         assert_eq!(measured.allocations, retain.allocations);
         assert_eq!(measured.remaining_bytes, retain.remaining_bytes);
     }
-    assert_eq!(production.peak_bytes, release.peak_bytes);
+    assert_eq!(
+        production.allocations + super::rolling_row_tests::saved_row_buffers(conversion, limit),
+        retain.allocations
+    );
+    assert_eq!(production.remaining_bytes, retain.remaining_bytes);
+    assert!(production.peak_bytes <= release.peak_bytes);
     assert!(release.peak_bytes <= clear.peak_bytes);
     assert!(clear.peak_bytes <= retain.peak_bytes);
     if conversion.hiragana.chars().count() >= 32 && limit > 0 {
@@ -248,8 +253,8 @@ fn row_lifetime_unknown_unicode_records_three_peak_tradeoffs() {
             let [retain, release, clear, production] = verify_case(&dictionary, &conversion, limit);
             assert!(release.peak_bytes < clear.peak_bytes);
             assert!(release.peak_bytes <= length * 400 + 2048);
-            assert_eq!(production.peak_bytes, release.peak_bytes);
-            eprintln!("行生命周期内存：字符={length} 限额={limit} 保留={} 释放={} 清空={} 生产={} 分配={}", retain.peak_bytes, release.peak_bytes, clear.peak_bytes, production.peak_bytes, release.allocations);
+            assert!(production.peak_bytes < release.peak_bytes);
+            eprintln!("行生命周期内存：字符={length} 限额={limit} 保留={} 释放={} 清空={} 滚动生产={} 分配={:?}", retain.peak_bytes, release.peak_bytes, clear.peak_bytes, production.peak_bytes, [retain, release, clear, production].map(|measurement| measurement.allocations));
         }
     }
 }
@@ -339,7 +344,7 @@ fn time_batch(
 }
 
 #[test]
-#[ignore = "本地 release 短批次配对计时；不设置 CI 时间阈值"]
+#[ignore = "本地 release 生命周期与滚动生产的组合配对计时；不设置 CI 时间阈值"]
 fn benchmark_row_lifetime_paired_timings() {
     use std::time::{Duration, Instant};
 
@@ -429,7 +434,7 @@ fn benchmark_row_lifetime_paired_timings() {
                             .collect(),
                     )
                 });
-            eprintln!("行生命周期配对：case={name} limit={limit} iterations={iterations} groups={} batches_us_p10_p50_p90={absolute:.3?} drop_retain={:.4?} clear_retain={:.4?} production_retain={:.4?} production_drop={:.4?} clear_drop={:.4?} production_clear={:.4?} peak={:?} allocations={}", groups.len(), ratios[0], ratios[1], ratios[2], ratios[3], ratios[4], ratios[5], measured.map(|measurement| measurement.peak_bytes), measured[0].allocations);
+            eprintln!("行生命周期配对（生产含滚动复用）：case={name} limit={limit} iterations={iterations} groups={} batches_us_p10_p50_p90={absolute:.3?} drop_retain={:.4?} clear_retain={:.4?} production_retain={:.4?} production_drop={:.4?} clear_drop={:.4?} production_clear={:.4?} peak={:?} allocations={:?}", groups.len(), ratios[0], ratios[1], ratios[2], ratios[3], ratios[4], ratios[5], measured.map(|measurement| measurement.peak_bytes), measured.map(|measurement| measurement.allocations));
         }
     }
 }

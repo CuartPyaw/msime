@@ -79,7 +79,11 @@ fn exact_streamed_matrix_matches_fixed_vector_query_including_full_pages() {
                         );
                         assert_eq!(new_allocations + saved, old_allocations);
                     } else if limit == 0 || reading == "くく" || reading.starts_with('😀') {
-                        assert_eq!(new_allocations, old_allocations);
+                        assert_eq!(
+                            new_allocations
+                                + super::rolling_row_tests::saved_row_buffers(&conversion, limit),
+                            old_allocations
+                        );
                     } else {
                         assert!(new_allocations < old_allocations);
                     }

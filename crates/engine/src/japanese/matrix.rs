@@ -1,4 +1,4 @@
-//! The matrix search the provider uses for sentence conversion (schemes-lang.md §5.6, `japanese_matrix_search.cpp`), modelled on Google Pinyin's MatrixSearch: one row per mora of the converted reading, k-best nodes per row extended by lemmas whose reading covers the next morae, plus a single unknown-kana backoff so every reading has a path.
+//! 日文句子转换矩阵（schemes-lang.md §5.6、`japanese_matrix_search.cpp`）：每个读音位置保留前八条路径，按词条跨度扩展，并以未知假名回退保证可达；物理行滚动复用。
 
 use super::decoder::JapaneseDictionary;
 use super::romaji::{kana_for_romaji_prefix_view, RomajiConversion};
@@ -173,7 +173,9 @@ fn search_with_output(
         .chain(std::iter::once(reading.len()))
         .collect();
     let mora_count = boundaries.len() - 1;
-    let mut rows: Vec<Row> = (0..=mora_count).map(|_| Row::new()).collect();
+    let mut rows: Vec<Row> = (0..=mora_count.min(MAX_LEMMA_MORA))
+        .map(|_| Row::new())
+        .collect();
     rows[0].nodes.push(Node {
         text: String::new(),
         cost: 0,
@@ -181,27 +183,30 @@ fn search_with_output(
     });
 
     for start in 0..mora_count {
-        if rows[start].nodes.is_empty() {
+        let slot = start % (MAX_LEMMA_MORA + 1);
+        if rows[slot].nodes.is_empty() {
             continue;
         }
-        let previous_row = std::mem::take(&mut rows[start]);
+        let mut previous_row = std::mem::take(&mut rows[slot]);
         let start_byte = boundaries[start];
         let max_end = mora_count.min(start + MAX_LEMMA_MORA);
         for end in start + 1..=max_end {
             let key = &reading[start_byte..boundaries[end]];
+            let target = &mut rows[end % (MAX_LEMMA_MORA + 1)];
             dictionary.for_each_exact_lemma_view(key, 24, |lemma| {
                 for previous in &previous_row.nodes {
                     let cost = previous.cost
                         + i64::from(lemma.word_cost)
                         + i64::from(dictionary.connection_cost(previous.right_id, lemma.left_id));
-                    rows[end].extend(&previous.text, lemma.surface, cost, lemma.right_id);
+                    target.extend(&previous.text, lemma.surface, cost, lemma.right_id);
                 }
             });
         }
 
         let kana = &reading[start_byte..boundaries[start + 1]];
+        let target = &mut rows[(start + 1) % (MAX_LEMMA_MORA + 1)];
         for previous in &previous_row.nodes {
-            rows[start + 1].extend(
+            target.extend(
                 &previous.text,
                 kana,
                 previous.cost + i64::from(UNKNOWN_KANA_COST),
@@ -209,10 +214,16 @@ fn search_with_output(
             );
         }
 
-        // 此起点已完成全部扩展，后续只访问更晚的行；迭代结束即释放前驱文本。
+        // 窗口多于最大跨度，当前槽与所有目标槽独立；扩展完立即释放前驱文本。
+        if mora_count - start > MAX_LEMMA_MORA {
+            previous_row.nodes.clear();
+            previous_row.ranked = false;
+            rows[slot] = previous_row;
+        }
+        // 尾部不再使用的槽直接析构，避免留住节点缓冲抬高峰值。
     }
 
-    let mut finals = std::mem::take(&mut rows[mora_count]).nodes;
+    let mut finals = std::mem::take(&mut rows[mora_count % (MAX_LEMMA_MORA + 1)]).nodes;
     for node in &mut finals {
         node.cost += i64::from(dictionary.connection_cost(node.right_id, 0));
     }
@@ -584,3 +595,11 @@ mod initial_prefix_tests;
 #[cfg(test)]
 #[path = "matrix/row_lifetime_tests.rs"]
 mod row_lifetime_tests;
+
+#[cfg(test)]
+#[path = "matrix/linear_row_reference.rs"]
+mod linear_row_reference;
+
+#[cfg(test)]
+#[path = "matrix/rolling_row_tests.rs"]
+mod rolling_row_tests;
