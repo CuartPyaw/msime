@@ -20,6 +20,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import app.msime.android.ColorPolicy;
 import app.msime.android.BoundsPolicy;
+import app.msime.android.DrawablePolicy;
 import app.msime.android.KeyboardGeometry;
 import app.msime.android.TextPolicy;
 import app.msime.android.ViewPolicy;
@@ -96,7 +97,7 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
         View inputBar = findViewById(R.id.tryout_input_bar);
         ViewPolicy.setBackgroundColor(inputBar, Ui.card(this));
         // 固定 20 dp 圆角而不是全圆：单行 40 dp 高时看起来仍是胶囊，长到几行时是圆角矩形，不会撑成一个椭圆。
-        android.graphics.drawable.GradientDrawable pill = Ui.outlined(Ui.page(this),
+        android.graphics.drawable.GradientDrawable pill = DrawablePolicy.outlined(Ui.page(this),
             Ui.dp(this, 20), Ui.dp(this, 1), Ui.hairline(this));
         ViewPolicy.setBackground(field, pill);
         // 聊天页的回车是发送：键盘回车显示「发送」，按下等同右边的发送键，不再插入换行把输入框越撑越高。长句仍会折行显示，最多 4 行。
