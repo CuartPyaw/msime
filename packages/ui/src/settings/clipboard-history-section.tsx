@@ -116,6 +116,9 @@ export function ClipboardHistorySection({
 
   useEffect(() => {
     const currentGeneration = historyGeneration.current;
+    // The section remains mounted behind other settings pages. Read on entry instead of
+    // starting a request that will be invalidated before the history is shown.
+    if (page && page !== "tools") return;
     if (!ios && !persistedHistoryEnabled) {
       setEntries([]);
       setClearArmed(false);
@@ -138,7 +141,7 @@ export function ClipboardHistorySection({
     return () => {
       historyActionBusy.current = false;
     };
-  }, [client, historyGeneration]);
+  }, [client, historyGeneration, ios, page, persistedHistoryEnabled, revision]);
 
   const mutate = async (action: () => Promise<void>, failure: string) => {
     if (historyActionBusy.current) return;

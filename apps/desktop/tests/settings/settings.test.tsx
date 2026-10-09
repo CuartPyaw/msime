@@ -2588,13 +2588,44 @@ test("clipboard history exposes timestamps, pinning, deletion and two-step clear
     .closest("[data-clipboard-entry-row]") as HTMLElement;
   fireEvent.click(within(recentRow).getByRole("button", { name: "删除剪贴板记录" }));
   await waitFor(() => expect(remove).toHaveBeenCalledWith("synthetic recent"));
-  expect(screen.queryByText("synthetic recent")).toBeNull();
+  await waitFor(() => expect(screen.queryByText("synthetic recent")).toBeNull());
 
   fireEvent.click(screen.getByRole("button", { name: "清空历史" }));
   expect(clear).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "确认清空" }));
   await waitFor(() => expect(clear).toHaveBeenCalledTimes(1));
   expect(await screen.findByText("暂无历史记录")).toBeDefined();
+});
+
+test("clipboard history reloads when its page opens while an earlier list is pending", async () => {
+  const stale = deferred<Array<{ text: string; timestampMs: number; pinned: boolean }>>();
+  const list = vi
+    .fn()
+    .mockImplementationOnce(() => stale.promise)
+    .mockResolvedValue([
+      { text: "synthetic current", timestampMs: 1_789_000_000_000, pinned: false },
+    ]);
+  const snapshot = { ...initial, preferences: { ...initial.preferences, clipboard_history: true } };
+  render(
+    <SettingsPage
+      initialPage="tools"
+      client={{
+        load: vi.fn().mockResolvedValue(snapshot),
+        save: vi.fn(),
+        clipboard: { list, clear: vi.fn() },
+      }}
+    />,
+  );
+  await settingsReady();
+  await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole("button", { name: "输入" }));
+  fireEvent.click(screen.getByRole("button", { name: "剪贴板" }));
+  await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+  expect(await screen.findByText("synthetic current")).toBeDefined();
+  await act(async () =>
+    stale.resolve([{ text: "synthetic stale", timestampMs: 1_788_000_000_000, pinned: false }]),
+  );
+  expect(screen.queryByText("synthetic stale")).toBeNull();
 });
 
 test("iOS clipboard history follows keyboard permission instead of the desktop preference", async () => {
