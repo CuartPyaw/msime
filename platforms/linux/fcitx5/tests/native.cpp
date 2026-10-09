@@ -362,7 +362,7 @@ void translationPreferenceChangesIncludeAccount() {
           "translation account changes invalidate translation requests");
 }
 
-// 用真实 classicui 配置验证候选主题的接管、退出与恢复：只有用户主动选择水杉主题才从第三方主题手里接管，启动、焦点、偏好同步与系统明暗变化都只是重读同一份偏好，切回「系统」或选中没有实际候选覆盖的自定义主题时把仍是水杉写的项放回。每个 fcitx::Instance 就是一次进程启动（内存里的缓存与所有权状态从零开始），所有路径都指向合成目录；机器上只有 classicui 开发库而没有运行库时跳过（77）。
+// 用真实 classicui 配置验证接管与恢复：缺省和切回「系统」保留水杉样式，只有主动选择才从第三方主题手里接管；无覆盖自定义主题与解析失败仍恢复持有项。每个 fcitx::Instance 就是一次进程启动（内存里的缓存与所有权状态从零开始），所有路径都指向合成目录；机器上只有 classicui 开发库而没有运行库时跳过（77）。
 int candidateThemePriority() {
   char temporary[] = "/tmp/msime-fcitx-theme-priority-XXXXXX";
   const auto *directory = mkdtemp(temporary);
@@ -411,11 +411,28 @@ int candidateThemePriority() {
     // Fcitx5 5.0.x 没有 DarkTheme；同一套测试仍验证 Theme，支持时再验证深色项。
     const bool has_dark_theme = !option("DarkTheme").empty();
     FcitxEngine engine(&instance);
+    // 新装缺省仍使用水杉卡片，系统明暗只改变配色。
+    fcitx::RawConfig stock;
+    stock.setValueByPath("Theme", "default");
+    stock.setValueByPath("DarkTheme", "default-dark");
+    classicui->setConfig(stock);
+    engine.applyCandidatePanelTheme(Json::object(), false, Json(), false);
+    require(option("Theme") == "msime" && (!has_dark_theme || option("DarkTheme") == "msime"),
+            "新装缺省跟随系统保留水杉样式");
+    const auto theme_text = [&] {
+      std::ifstream in(theme_file);
+      return std::string(std::istreambuf_iterator<char>(in), {});
+    };
+    require(theme_text().find("Color=#ffffff\n") != std::string::npos, "跟随系统的浅色候选底色");
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "system"}}, true, Json(), false);
+    require(theme_text().find("Color=#303030\n") != std::string::npos, "跟随系统的深色候选底色");
+    require(option("Theme") == "msime", "系统明暗变化保留水杉样式");
+    pick_third_party(false);
     // 启动与焦点同步只是重读同一份偏好：不碰用户已经选的第三方主题。
     engine.applyCandidatePanelTheme(Json{{"global_theme", "paper"}}, false, Json(), false);
     require(option("Theme") == "Nord-Dark" && (!has_dark_theme || option("DarkTheme") == "Nord-Dark"),
             "启动与焦点同步保留第三方主题");
-    // 「系统」没有实际候选覆盖，也不接管。
+    // 「系统」有默认样式，但后台同步也不接管第三方主题。
     engine.applyCandidatePanelTheme(Json{{"global_theme", "system"}}, false, Json(), false);
     require(option("Theme") == "Nord-Dark" && (!has_dark_theme || option("DarkTheme") == "Nord-Dark"), "系统主题保留第三方主题");
     // 畸形或其他字段的偏好文档不抛异常，也不能因此接管第三方主题。
@@ -433,10 +450,10 @@ int candidateThemePriority() {
                   (!has_dark_theme || written.at("DarkTheme").at("prior") == "Nord-Dark"),
               "接管前记下要恢复的第三方主题");
     }
-    // 切回「系统」：两项一起恢复成被替换的第三方主题。
-    engine.applyCandidatePanelTheme(Json{{"global_theme", "system"}}, false, Json(), false);
-    require(option("Theme") == "Nord-Dark" && (!has_dark_theme || option("DarkTheme") == "Nord-Dark"),
-            "切回系统恢复 Theme 与 DarkTheme");
+    // 主动切回「系统」只改为原生配色，仍画水杉样式。
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "system"}}, false, Json(), true);
+    require(option("Theme") == "msime" && (!has_dark_theme || option("DarkTheme") == "msime"),
+            "主动切回系统保留水杉 Theme 与 DarkTheme");
     // 再次主动选择重新接管；这一次只把 Theme 换成第三方主题。
     engine.applyCandidatePanelTheme(Json{{"global_theme", "paper"}}, false, Json(), true);
     require(option("Theme") == "msime" && (!has_dark_theme || option("DarkTheme") == "msime"), "再次主动选择重新接管");
@@ -446,14 +463,17 @@ int candidateThemePriority() {
     engine.applyCandidatePanelTheme(Json{{"global_theme", "paper"}}, true, Json(), false);
     require(option("Theme") == "Nord-Dark" && (!has_dark_theme || option("DarkTheme") == "msime"),
             "系统明暗变化不夺回第三方主题，DarkTheme 仍由水杉持有");
-    // 切回「系统」：只恢复仍是水杉写的那一项；字体等其他选项与接管记录都不动。
+    // 系统偏好的后台同步不接管第三方项，也不退出仍属于水杉的深色项。
     const auto record_before = [&] { std::ifstream in(record); return Json::parse(in); };
-    const auto before_restore = record_before();
+    const auto before_sync = record_before();
     engine.applyCandidatePanelTheme(Json{{"global_theme", "system"}}, false, Json(), false);
-    require(option("Theme") == "Nord-Dark" && (!has_dark_theme || option("DarkTheme") == "Nord-Dark"),
-            "切回系统只恢复仍是水杉写的 DarkTheme");
-    require(option("Font") == "Noto Sans SC 18px", "恢复主题不动水杉写入的字体");
-    require(record_before() == before_restore, "恢复不是一次接管，不重写接管记录");
+    require(option("Theme") == "Nord-Dark" && (!has_dark_theme || option("DarkTheme") == "msime"),
+            "系统后台同步保留第三方 Theme 与水杉 DarkTheme");
+    require(option("Font") == "Noto Sans SC 18px", "系统后台同步不改变字体");
+    require(record_before() == before_sync, "未接管的后台同步不重写恢复记录");
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "system"}}, false, Json(), true);
+    require(option("Theme") == "msime" && (!has_dark_theme || option("DarkTheme") == "msime"),
+            "主动选择系统可重新接管第三方主题");
     // 两项都换成第三方主题后，后台同步一项都不夺回。
     engine.applyCandidatePanelTheme(Json{{"global_theme", "ink"}}, false, Json(), true);
     require(option("Theme") == "msime" && (!has_dark_theme || option("DarkTheme") == "msime"), "主动选择再次接管");
@@ -461,10 +481,10 @@ int candidateThemePriority() {
     engine.applyCandidatePanelTheme(Json{{"global_theme", "paper"}}, false, Json(), false);
     require(option("Theme") == "Nord-Dark" && (!has_dark_theme || option("DarkTheme") == "Nord-Dark"),
             "两项都换成第三方主题后焦点与偏好同步都不夺回");
-    // 切回「系统」：两项都已不是水杉的，一项也不动。
+    // 系统偏好的后台同步：两项都已是第三方主题，一项也不动。
     engine.applyCandidatePanelTheme(Json{{"global_theme", "system"}}, false, Json(), false);
     require(option("Theme") == "Nord-Dark" && (!has_dark_theme || option("DarkTheme") == "Nord-Dark"),
-            "退出接管不覆盖用户自己改过的项");
+            "系统后台同步不覆盖用户自己改过的项");
     // 「系统」基底、没有皮肤也没有颜色槽位的自定义主题没有实际覆盖：即使是一次主动选择也退出接管。
     engine.applyCandidatePanelTheme(Json{{"global_theme", "ink"}}, false, Json(), true);
     engine.applyCandidatePanelTheme(Json{{"global_theme", "custom"}, {"custom_theme", {{"base", "system"}}}}, false,
@@ -558,7 +578,18 @@ int candidateThemePriority() {
       refresh(active_state, paper);
       require(option("Theme") == "Nord-Dark" && (!has_dark_theme || option("DarkTheme") == "Nord-Dark"),
               "另一个窗口补读菜单保存的选择不能再次接管");
+      require(active_state->setThemeChoice("system"), "主题菜单主动切回系统成功");
+      active_state->preferences_save_job_.wait();
+      active_state->waitForPreferenceSave();
+      require(option("Theme") == "msime" && (!has_dark_theme || option("DarkTheme") == "msime"),
+              "菜单主动切回系统重新接管并保留水杉样式");
+      pick_third_party(false);
       active_window.focusOut();
+      old_window.focusIn();
+      refresh(old_state, active_state->preferences_);
+      require(option("Theme") == "Nord-Dark" && (!has_dark_theme || option("DarkTheme") == "Nord-Dark"),
+              "旧窗口补读菜单的系统选择不夺回第三方主题");
+      old_window.focusOut();
       // 不带偏好存储的合法 runtime options 仍可建立会话，不能对 null 快照调用 value()。
       old_state->close();
       options.erase("preferences_directory");
@@ -568,7 +599,7 @@ int candidateThemePriority() {
       old_window.focusOut();
       setenv("MSIME_FCITX5_OPTIONS", (root / "missing-options.json").c_str(), 1);
     }
-    // 旧版本留下水杉主题但没有恢复记录，或记录已损坏：退出时仍应恢复自带主题。
+    // 旧版本留下水杉主题但恢复记录缺失或损坏：系统保留样式，无覆盖自定义仍安全恢复。
     for (const auto *contents : {"", "broken json"}) {
       fcitx::RawConfig held;
       held.setValueByPath("Theme", "msime");
@@ -577,8 +608,12 @@ int candidateThemePriority() {
       std::filesystem::remove(record);
       if (*contents) std::ofstream(record) << contents;
       engine.applyCandidatePanelTheme(Json{{"global_theme", "system"}}, false, Json(), false);
+      require(option("Theme") == "msime" && (!has_dark_theme || option("DarkTheme") == "msime"),
+              "旧用户默认系统主题在恢复记录缺失或损坏时仍保留水杉样式");
+      engine.applyCandidatePanelTheme(Json{{"global_theme", "custom"}, {"custom_theme", {{"base", "system"}}}},
+                                      false, Json(), false);
       require(option("Theme") == "default" && (!has_dark_theme || option("DarkTheme") == "default-dark"),
-              "恢复记录缺失或损坏时仍退出水杉主题");
+              "无覆盖主题在恢复记录缺失或损坏时仍恢复自带主题");
       require(option("Font") == "Noto Sans SC 18px", "默认主题兜底不改变字体");
     }
   }
@@ -599,14 +634,14 @@ int candidateThemePriority() {
     const bool has_dark_theme = !option("DarkTheme").empty();
     require(option("Theme") == "Nord-Dark", "重启后读到的是用户的第三方主题");
     FcitxEngine engine(&instance);
-    engine.applyCandidatePanelTheme(Json{{"global_theme", "paper"}}, false, Json(), false);
-    require(option("Theme") == "Nord-Dark", "重启后不夺回第三方主题");
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "system"}}, false, Json(), false);
+    require(option("Theme") == "Nord-Dark", "默认系统主题重启后不夺回第三方主题");
     fcitx::RawConfig stock;
     stock.setValueByPath("Theme", "default");
     stock.setValueByPath("DarkTheme", "default-dark");
     classicui->setConfig(stock);
-    engine.applyCandidatePanelTheme(Json{{"global_theme", "paper"}}, false, Json(), false);
-    require(option("Theme") == "msime" && (!has_dark_theme || option("DarkTheme") == "msime"), "自带主题下重启后仍接管");
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "system"}}, false, Json(), false);
+    require(option("Theme") == "msime" && (!has_dark_theme || option("DarkTheme") == "msime"), "默认系统主题在自带主题下重启后仍接管");
   }
   std::filesystem::remove_all(root);
   std::cout << "Fcitx5 candidate theme ownership passed\n";
@@ -748,8 +783,14 @@ int candidateThemeHint() {
     changed.setValueByPath("DarkTheme", "msime");
     classicui->setConfig(changed);
     engine.applyCandidatePanelTheme(preferences, false, catalog, false);
-    // 退出接管清掉提示宽度后，再选回同一皮肤也必须重新初始化，不能被旧主题 stamp 短路。
     engine.applyCandidatePanelTheme(Json{{"global_theme", "system"}}, false, Json(), true);
+    require(engine.hint_inputs_.active && engine.modeHintLabel("x11::0", "中") == "中",
+            "跟随系统仍画水杉样式，但没有皮肤装饰就不补宽");
+    engine.applyCandidatePanelTheme(preferences, false, catalog, true);
+    require(engine.modeHintLabel("x11::0", "中") == chinese, "从系统配色选回皮肤后恢复提示宽度");
+    // 无覆盖自定义主题退出后，再选回同一皮肤必须重新初始化，不能被旧 stamp 短路。
+    engine.applyCandidatePanelTheme(Json{{"global_theme", "custom"}, {"custom_theme", {{"base", "system"}}}},
+                                    false, Json(), true);
     require(engine.modeHintLabel("x11::0", "中") == "中", "退出接管后不补宽");
     engine.applyCandidatePanelTheme(preferences, false, catalog, true);
     require(engine.modeHintLabel("x11::0", "中") == chinese, "选回同一皮肤后恢复提示宽度");

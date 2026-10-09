@@ -154,8 +154,9 @@ struct CandidateTheme {
   bool covers_candidates = false;
 };
 
-// 从共享解析结果判断覆盖：候选配色对象或非空有效皮肤才算；`system`、无颜色自定义及解析失败不算，不能用原始主题 id 强行接管 classicui。
+// 有效 `system` 用原生配色绘制水杉样式，候选配色或有效皮肤也提供覆盖；无颜色自定义与解析失败仍不算。
 inline bool candidate_theme_covers(const nlohmann::json &resolved) {
+  if (const auto id = resolved.find("id"); id != resolved.end() && *id == "system") return true;
   if (const auto candidate = resolved.find("candidate");
       candidate != resolved.end() && candidate->is_object())
     return true;

@@ -2,6 +2,8 @@
 
 Status: implemented
 
+`system` 的退出接管语义由 [跟随系统保留水杉样式](../feature/2026-10-09-fcitx5-system-theme-keeps-brand-style.md) 部分取代：维护者确认缺省和主动切回 system 均保留水杉样式；本篇保留原审查理由，第三方保护、共享选择基线、无覆盖自定义/解析失败恢复与 CI 门禁仍成立。
+
 ## Problem
 
 PR #4371#discussion_r4203158939 / r4203158947 指出，宿主的接管判据与生命周期都不对：

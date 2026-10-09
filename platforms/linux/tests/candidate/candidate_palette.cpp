@@ -87,8 +87,8 @@ int main() {
       R"("keyboard":null,"candidate_skin":null})");
   const auto fixed = host::candidate_theme_colors(builtin_light, true);
   assert(!fixed.dark);
-  // 覆盖信号：共享层的 `candidate` 非 null 是主题自带的候选颜色，`candidate_skin` 非空是外部皮肤在当前布局与明暗下真的被画出来；两者都没有就是没有覆盖。
-  assert(fixed.covers_candidates && !native_light.covers_candidates && !native_dark.covers_candidates);
+  // 有效系统主题使用原生配色绘制水杉样式；无覆盖自定义与解析失败不能借原生配色接管。
+  assert(fixed.covers_candidates && native_light.covers_candidates && native_dark.covers_candidates);
   assert(!host::candidate_theme_colors(Json::object(), true).covers_candidates);
   assert(fixed.colors.background == 0xFFFFFFu && fixed.colors.text == 0x1A1A1Au && fixed.colors.number == 0x6A6F76u);
   assert(fixed.colors.accent == 0x005FB8u);

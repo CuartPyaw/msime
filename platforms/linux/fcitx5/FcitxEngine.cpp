@@ -5528,8 +5528,8 @@ public:
                                 const Json &catalog, bool chosen) {
     namespace host = msime::linux_host;
     const auto resolved = resolveCandidateTheme(preferences, system_dark, catalog);
-    // 没有实际候选覆盖就没有要画的东西：退出接管比「保留一个空主题」更接近用户的选择（切回系统，或选了一个没有颜色也没有皮肤的自定义主题），
-    // 但只恢复仍是水杉自己写的项，用户在 fcitx5-configtool 选的主题不动。
+    // 无覆盖自定义主题或解析失败才退出；有效系统主题仍绘制水杉样式，只跟随原生配色。
+    // 只恢复仍是水杉自己写的项，用户在 fcitx5-configtool 选的主题不动。
     if (!resolved.covers_candidates) {
       if (classicui) restore_classicui_theme(*classicui);
       candidate_theme_applied_.clear();
