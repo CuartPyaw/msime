@@ -311,7 +311,7 @@ public final class CommunityCatalog {
         if (rawLength > CommunityRequest.PAGE_SIZE) {
             return new Page(List.of(), false, CommunityRequest.message(null, 500));
         }
-        boolean hasMore = pageHasMore(root.opt("has_more"));
+        boolean hasMore = JsonPolicy.strictTrue(root.opt("has_more"));
         List<Item> items = new ArrayList<>(rawLength);
         Set<String> ids = new HashSet<>(rawLength);
         for (int index = 0; index < rawLength; index++) {
@@ -320,7 +320,7 @@ public final class CommunityCatalog {
             if (item == null) {
                 return new Page(List.of(), false, CommunityRequest.message(null, 500));
             }
-            if (!ids.add(idKey(item.id()))) {
+            if (!ids.add(TextPolicy.lowercase(item.id()))) {
                 return new Page(List.of(), false, CommunityRequest.message(null, 500));
             }
             items.add(item);
@@ -329,10 +329,6 @@ public final class CommunityCatalog {
             return new Page(List.of(), false, CommunityRequest.message(null, 500));
         }
         return new Page(List.copyOf(items), hasMore, "");
-    }
-
-    static String idKey(String value) {
-        return TextPolicy.lowercase(value);
     }
 
     /** 一个条目，读不出或不合规时为 null。 */
@@ -379,16 +375,6 @@ public final class CommunityCatalog {
         return true;
     }
 
-    /** Pagination controls must be JSON booleans; malformed values mean there is no next page. */
-    static boolean pageHasMore(Object value) {
-        return JsonPolicy.strictTrue(value);
-    }
-
-    /** A successful HTTP status is not enough: the backend must confirm that it recorded the report. */
-    static boolean confirmedReport(Object value) {
-        return JsonPolicy.strictTrue(value);
-    }
-
     /** Keep the report endpoint safe even when a caller bypasses catalogue parsing. */
     static boolean validReportItem(Item item) {
         return item != null && validUuid(item.id());
@@ -403,7 +389,7 @@ public final class CommunityCatalog {
         try (InputStream input = connection.getInputStream()) {
             byte[] body = HttpBodyPolicy.readRequired(input, 16 * 1024);
             JSONObject response = new JSONObject(TextPolicy.utf8(body));
-            return confirmedReport(response.opt("reported"));
+            return JsonPolicy.strictTrue(response.opt("reported"));
         }
     }
 
