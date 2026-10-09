@@ -5880,7 +5880,7 @@ void show_input_mode_hint(IBusEngine *engine) {
   if (!configured.contains("preferences") ||
       !configured.at("preferences").value("input_mode_hud", true))
     return;
-  // Nor in IBus's own "fake" context: with a global engine the daemon focuses it while no text field has the focus, so there is no field to show the mode for. The panel draws such a hint in its X11 candidate window, which Hyprland maps as a window of its own that takes the focus.
+  // IBus 自己的 "fake" 上下文也不显示：全局引擎下没有输入框获得焦点时，守护进程让它获得焦点，这时没有可以显示模式的输入框。面板把这样的提示画进 X11 候选窗，Hyprland 会把它映射成一个抢焦点的独立窗口。
   if (!s.focused || s.blocked || s.focused_client == "fake")
     return;
   ++s.mode_hint_id;

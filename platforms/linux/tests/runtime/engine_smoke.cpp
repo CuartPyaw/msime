@@ -44,7 +44,7 @@ struct Observation {
   std::vector<PreeditAttribute> preedit_attributes;
   std::string auxiliary;
   gboolean auxiliary_visible = FALSE;
-  // How many UpdateAuxiliaryText calls showed the line, so a test can tell one hint from two without waiting out a timeout.
+  // UpdateAuxiliaryText 显示出这一行的次数，测试据此区分一次提示和两次，不必等到超时。
   int auxiliary_shows = 0;
   // HideLookupTable and HideAuxiliaryText in the order they arrived.
   std::vector<std::string> hides;
@@ -508,7 +508,7 @@ int main(int argc, char **argv) {
                             .c_str());
     };
 #if IBUS_CHECK_VERSION(1, 5, 27)
-    // With a global engine IBus focuses its own "fake" context while no text field has the focus; there is no field to show the mode for. Signals arrive in order, so the field's hint below is the first one only if the fake focus showed none.
+    // 全局引擎下没有输入框获得焦点时，IBus 让自己的 "fake" 上下文获得焦点，这时没有可以显示模式的输入框。信号按顺序到达，所以只有 fake 焦点没显示提示时，下面输入框的提示才是第一次。
     invoke("FocusInId", g_variant_new("(ss)", "/org/freedesktop/IBus/InputContext_1", "fake"));
     invoke("FocusOut");
 #endif
