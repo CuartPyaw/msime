@@ -16,6 +16,7 @@ SITES = (
     JAVA / "home/LexiconDetailPage.java",
     JAVA / "home/OnboardingChoices.java",
     JAVA / "home/OnboardingActivity.java",
+    JAVA / "home/SignIn.java",
 )
 
 
