@@ -33,6 +33,7 @@ import app.msime.android.FeedbackImagePolicy;
 import app.msime.android.ImageViewPolicy;
 import app.msime.android.KeyboardGeometry;
 import app.msime.android.R;
+import app.msime.android.TextPolicy;
 import app.msime.android.ViewPolicy;
 import java.io.IOException;
 import java.io.InputStream;
@@ -186,7 +187,7 @@ public final class FeedbackPage extends DetailPage {
     private void refresh() {
         Context context = getContext();
         if (context == null || counter == null || submit == null) return;
-        int length = FeedbackApi.length(draft);
+        int length = TextPolicy.codePointLength(draft);
         counter.setText(length + " / " + FeedbackApi.MAX_TEXT);
         ViewPolicy.setTextColor(counter,
             length > FeedbackApi.MAX_TEXT ? Ui.danger(context) : Ui.subText(context));
