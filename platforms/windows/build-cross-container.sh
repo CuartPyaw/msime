@@ -30,8 +30,11 @@ docker build --platform linux/amd64 -t "$image" "$root/platforms/windows/cross" 
 # and the dependency trees are built for different hosts. bootstrap-vcpkg.sh
 # writes to target/tooling by construction, so that path is bind-mounted to a
 # container-only directory rather than teaching the script a second location.
-mkdir -p "$root/target/tooling-linux" "$root/target/windows-native-deps-linux"
+# `CARGO_HOME` 放在现有仓库挂载内，保留临时容器运行后下载的 registry 与 Git 源码。
+mkdir -p "$root/target/tooling-linux" "$root/target/windows-native-deps-linux" \
+  "$root/target/windows-cross/cargo-home"
 docker run --rm --platform linux/amd64 \
   -v "$root":/repo -v "$root/target/tooling-linux":/repo/target/tooling -w /repo \
   -e MSIME_WINDOWS_DEPS_ROOT=/repo/target/windows-native-deps-linux \
+  -e CARGO_HOME=/repo/target/windows-cross/cargo-home \
   "$image" bash platforms/windows/build-cross.sh "$arch"

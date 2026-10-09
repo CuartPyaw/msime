@@ -310,6 +310,8 @@ x64 宿主 DLL、会话测试及完整原生管道集成测试链接为 PE32+，
 
 x86 的 Rust GNU 目标要求 DWARF 展开，而 Homebrew 的 i686 MinGW 用 SJLJ，`build-cross.sh` 在准备依赖之前就拒绝这个组合，不通过 panic=abort 改变既有错误隔离契约。在这类主机上用 `bash platforms/windows/build-cross-container.sh x86`：容器里的 Debian i686 MinGW 以 DWARF 构建，脚本内容不变。Windows 上的 x86 由 `Build-Client.ps1` 以 MSVC 构建。
 
+交叉构建容器的 `CARGO_HOME` 指向仓库挂载内的 `target/windows-cross/cargo-home`，同一 worktree 的 x86/x64 构建复用 Cargo 下载与源码缓存，容器删除后仍保留；镜像里的 Rustup 工具链与主机 Cargo home 保持各自位置。首次填充需要联网，首次改变源码缓存路径也可能触发重新编译；依赖继续由 `Cargo.lock` 和 `--locked` 约束。缓存位于既有 `target` 内，移除 worktree 时一并清理。
+
 交叉镜像的默认 Rust 工具链与 `rust-toolchain.toml` 的固定版本一致，预装 `rustfmt`、`clippy` 以及 x86/x64 两个 Windows GNU 标准库。这样从仓库目录调用 Cargo 和 `rustup target add` 时可复用镜像里的安装，不在每个临时容器中重新准备另一份工具链。升级固定版本或组件时同步 `cross/Dockerfile`，构建镜像后在仓库根目录运行：
 
 ```sh
