@@ -107,18 +107,50 @@ impl Row {
     }
 }
 
-/// `SearchReading(conversion.hiragana, conversion.pending, limit)`: the best sentence, pending-kana completions, the other finals, then longest-prefix lemmas, unique by text.
+/// 测试冷查询与历史对照的拥有型入口：最佳句子、待定补全、其余末行和最长前缀词条，按文本去重。
+#[cfg(test)]
 pub fn search_converted(
     dictionary: &JapaneseDictionary,
     conversion: &RomajiConversion,
     limit: usize,
 ) -> Vec<JapaneseConversion> {
+    search_with_output(
+        dictionary,
+        conversion,
+        Output {
+            items: Vec::with_capacity(limit),
+            limit,
+        },
+    )
+}
+
+/// 先释放旧结果文本，再复用结果向量；排序、去重与限额仍由同一搜索核心处理。
+pub(crate) fn search_converted_into(
+    dictionary: &JapaneseDictionary,
+    conversion: &RomajiConversion,
+    limit: usize,
+    destination: &mut Vec<JapaneseConversion>,
+) {
+    destination.clear();
+    destination.reserve(limit);
+    *destination = search_with_output(
+        dictionary,
+        conversion,
+        Output {
+            items: std::mem::take(destination),
+            limit,
+        },
+    );
+}
+
+fn search_with_output(
+    dictionary: &JapaneseDictionary,
+    conversion: &RomajiConversion,
+    mut output: Output,
+) -> Vec<JapaneseConversion> {
     let reading = conversion.hiragana.as_str();
     let pending = conversion.pending.as_str();
-    let mut output = Output {
-        items: Vec::with_capacity(limit),
-        limit,
-    };
+    let limit = output.limit;
     if limit == 0 {
         return output.items;
     }
@@ -515,6 +547,10 @@ mod tests {
 
 #[cfg(test)]
 mod pruning_tests;
+
+#[cfg(test)]
+#[path = "matrix/output_buffer_tests.rs"]
+mod output_buffer_tests;
 
 #[cfg(test)]
 #[path = "matrix/pending_tests.rs"]

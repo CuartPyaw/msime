@@ -35,3 +35,5 @@ Status: implemented
 拥有句子接纳时复用原字符串存储，省去每条已接纳末行文本的一次分配。代价是增加一个私有拥有入口与共用判定方法，原借用入口仍服务词库文本；最终输出继续自行拥有文本，没有新增缓存或公开 API。
 
 [固定八槽行实验](../../rejected/testing/2026-10-09-japanese-inline-matrix-rows.md) 因 release 未显示稳定收益且出现查询回退被否决；生产 Vec 行及本篇历史验证保持。实验仅保留在 `cfg(test)` 中，不能把减少分配视为查询加速。
+
+[句子结果容器复用](2026-10-09-japanese-sentence-output-buffer.md) 进一步让 provider 保留固定限额的空向量；本篇的末行文本转移继续有效，句子文本消费后仍释放。

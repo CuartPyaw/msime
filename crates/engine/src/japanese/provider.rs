@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::decoder::JapaneseDictionary;
+#[cfg(test)]
 use super::matrix::search_converted;
+use super::matrix::{search_converted_into, JapaneseConversion};
 use super::romaji::{
     convert_romaji_into, hiragana_to_katakana_into, is_single_kana_conversion,
     kana_for_romaji_prefix_view, RomajiConversion,
@@ -41,6 +43,7 @@ pub struct JapaneseProvider {
     dynamic: FifoCache<String, Vec<WordItem>>,
     conversion: RomajiConversion,
     katakana: String,
+    sentences: Vec<JapaneseConversion>,
 }
 
 /// 按插入顺序保留唯一词面；`used` 之后是上次查询留下的可复用行。
@@ -119,6 +122,7 @@ impl JapaneseProvider {
             dynamic: FifoCache::new(DYNAMIC_CACHE_CAPACITY),
             conversion: RomajiConversion::default(),
             katakana: String::new(),
+            sentences: Vec::new(),
         }
     }
 
@@ -204,7 +208,9 @@ impl JapaneseProvider {
                     .saturating_mul(READING_PREFIX_LEMMAS)
                     .saturating_add(SENTENCE_LIMIT + 1),
             );
-            for sentence in search_converted(&dictionary, conversion, SENTENCE_LIMIT) {
+            search_converted_into(&dictionary, conversion, SENTENCE_LIMIT, &mut self.sentences);
+            // 消费后释放句子文本，仅保留固定结果限额所需的向量容量。
+            for sentence in self.sentences.drain(..) {
                 rows.push(
                     &sentence.text,
                     SENTENCE_BASE - sentence.cost,
@@ -386,8 +392,8 @@ mod tests {
         assert_eq!(words(&destination), ["か", "カ", "蚊"]);
         eprintln!("日文有词库单假名 provider 热查询分配：{allocations}");
         assert!(
-            allocations <= 11,
-            "词条应借用，句子文本应移入矩阵输出：{allocations}"
+            allocations <= 10,
+            "词条应借用，句子结果向量应复用：{allocations}"
         );
     }
 
@@ -409,8 +415,8 @@ mod tests {
         assert!(words(&destination).contains(&"仮仮"));
         eprintln!("日文待定前缀 provider 热查询分配：{allocations}");
         assert!(
-            allocations <= 19,
-            "假名前缀与拼接读音键应复用，词条视图应直接消费：{allocations}"
+            allocations <= 18,
+            "假名前缀与拼接读音键应复用，词条视图应直接消费，句子结果向量应复用：{allocations}"
         );
     }
 
@@ -438,7 +444,10 @@ mod tests {
             ["仮名", "かな", "加奈子", "奏で", "カナ"]
         );
         eprintln!("日文完整预测流式查询分配：{allocations}");
-        assert_eq!(allocations, 14, "预测词条应可流式写入候选行");
+        assert!(
+            allocations <= 13,
+            "预测词条应流式写入，句子结果向量应复用：{allocations}"
+        );
     }
 
     fn assert_provider_reuses_conversion_strings(raw: &str) {
