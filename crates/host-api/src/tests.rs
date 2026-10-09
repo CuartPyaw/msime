@@ -5913,6 +5913,87 @@ fn an_ai_credential_handed_over_in_memory_signs_requests_without_being_stored() 
 }
 
 #[test]
+fn an_in_memory_ai_credential_overrides_a_stored_origin_token() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut preferences = Preferences {
+        scheme: InputScheme::Quanpin,
+        ..chinese_preferences()
+    };
+    preferences.ai_assistant.enabled = true;
+    preferences.ai_assistant.provider = "deepseek".into();
+    preferences.ai_assistant.model = "synthetic-model".into();
+    preferences.ai_assistant.endpoint = "https://api.deepseek.com/chat/completions".into();
+    preferences.ai_assistant.tokens.insert(
+        "https://api.deepseek.com:443".into(),
+        "synthetic-stored".into(),
+    );
+    let handle = test_host_preferences(dir.path(), preferences);
+    read(msime_client_focus(handle, true));
+    for byte in b"nihao" {
+        read(msime_client_character(handle, *byte, false));
+    }
+    let query = read(msime_client_online_query(handle))["value"].to_string();
+    let token = b"synthetic-keychain";
+    assert_eq!(
+        read(unsafe { msime_client_set_ai_credential(handle, token.as_ptr(), token.len()) })["ok"],
+        true
+    );
+    let descriptor =
+        read(unsafe { msime_client_ai_request_for_query(handle, query.as_ptr(), query.len()) });
+    assert_eq!(descriptor["ok"], true);
+    assert_eq!(
+        descriptor["value"]["headers"]["Authorization"],
+        "Bearer synthetic-keychain"
+    );
+    assert_eq!(
+        read(unsafe { msime_client_set_ai_credential(handle, std::ptr::null(), 0) })["ok"],
+        true
+    );
+    let restored =
+        read(unsafe { msime_client_ai_request_for_query(handle, query.as_ptr(), query.len()) });
+    assert_eq!(
+        restored["value"]["headers"]["Authorization"],
+        "Bearer synthetic-stored"
+    );
+    read(msime_client_destroy(handle));
+}
+
+#[test]
+fn an_in_memory_ai_credential_stays_bound_to_its_endpoint() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut preferences = Preferences {
+        scheme: InputScheme::Quanpin,
+        ..chinese_preferences()
+    };
+    preferences.ai_assistant.enabled = true;
+    preferences.ai_assistant.provider = "deepseek".into();
+    preferences.ai_assistant.model = "synthetic-model".into();
+    preferences.ai_assistant.endpoint = "https://api.deepseek.com/chat/completions".into();
+    let handle = test_host_preferences(dir.path(), preferences.clone());
+    read(msime_client_focus(handle, true));
+    for byte in b"nihao" {
+        read(msime_client_character(handle, *byte, false));
+    }
+    let token = b"synthetic-deepseek-keychain";
+    assert_eq!(
+        read(unsafe { msime_client_set_ai_credential(handle, token.as_ptr(), token.len()) })["ok"],
+        true
+    );
+
+    preferences.ai_assistant.provider = "openai".into();
+    preferences.ai_assistant.endpoint = "https://api.openai.com/v1/chat/completions".into();
+    assert_eq!(update(handle, 1, &preferences)["ok"], true);
+    let query = read(msime_client_online_query(handle))["value"].to_string();
+    let descriptor =
+        read(unsafe { msime_client_ai_request_for_query(handle, query.as_ptr(), query.len()) });
+    assert_ne!(
+        descriptor["ok"], true,
+        "old keychain token reached a new endpoint"
+    );
+    read(msime_client_destroy(handle));
+}
+
+#[test]
 fn ai_queries_and_delivery_follow_pending_preferences() {
     let dir = tempfile::tempdir().unwrap();
     let mut preferences = Preferences {
