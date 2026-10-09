@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.MainThreadPolicy;
 import app.msime.android.TextPolicy;
 
 import android.content.Context;
@@ -9,7 +10,6 @@ import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.os.Handler;
-import android.os.Looper;
 import android.text.Editable;
 import android.text.InputFilter;
 import android.text.InputType;
@@ -85,7 +85,7 @@ public final class AiSkinPage extends DetailPage {
      * <p>工作线程的结果先落到这里（{@link #complete}），页面有视图时再经 {@link #observer} 重画；没有视图时等下一次 {@link #buildContent} 读出来。描述、布局、音效和动画这几个小值另外存进 `onSaveInstanceState`，进程被杀后也能恢复；设计 JSON 只留在这里，不进 Bundle。
      */
     public static final class State extends ViewModel {
-        private final Handler main = new Handler(Looper.getMainLooper());
+        private final Handler main = MainThreadPolicy.mainHandler();
         final List<Result> results = new ArrayList<>(SkinJobsApi.MAX_DESIGNS);
         int chosen;
         boolean nineKey;
