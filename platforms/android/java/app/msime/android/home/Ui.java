@@ -266,11 +266,6 @@ public final class Ui {
             dp(context, heightDp));
     }
 
-    /** Full-width layout parameters with an already pixel-sized height. */
-    public static LinearLayout.LayoutParams matchWidthHeightPx(int heightPixels) {
-        return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, heightPixels);
-    }
-
     /** Create a view filled with the standard hairline colour for separators. */
     public static View hairlineView(Context context) {
         View view = new View(context);
@@ -283,7 +278,7 @@ public final class Ui {
         View view = hairlineView(context);
         int thin = KeyboardGeometry.atLeastOnePixel(context, 0.5f);
         view.setLayoutParams(horizontal
-            ? matchWidthHeightPx(thin)
+            ? KeyboardGeometry.matchWidthHeightPx(thin)
             : new LinearLayout.LayoutParams(thin, ViewGroup.LayoutParams.MATCH_PARENT));
         return view;
     }

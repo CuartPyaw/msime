@@ -198,7 +198,7 @@ public final class SkinsPage extends DetailPage {
         TextView hint = Ui.styledLabel(context, "描述一句话生成", 12, 400, Ui.accent(context));
         ViewPolicy.setCentered(hint);
         tile.addView(hint);
-        cell.addView(tile, Ui.matchWidthHeightPx(Ui.dp(context, 76) + Ui.dp(context, 6)));
+        cell.addView(tile, KeyboardGeometry.matchWidthHeightPx(Ui.dp(context, 76) + Ui.dp(context, 6)));
         TextView name = Ui.styledLabel(context, "AI 设计皮肤", Ui.TEXT_ROW_SUBTITLE + 1, 500,
             Ui.accent(context));
         ViewPolicy.setCentered(name);
