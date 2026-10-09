@@ -283,12 +283,7 @@ public final class BackendAccount {
      * <p>只给登录请求用：后端只在登录时把它记进会话，刷新和其他请求都发 `MSIME/Android`。
      */
     public static String loginUserAgent(Context context, String editionId) {
-        String version;
-        try {
-            version = context.getPackageManager().getPackageInfo(context.getPackageName(), 0).versionName;
-        } catch (android.content.pm.PackageManager.NameNotFoundException absent) {
-            version = "";
-        }
+        String version = AppVersionPolicy.versionName(context, "");
         return loginUserAgent(version, android.os.Build.MODEL, android.os.Build.VERSION.RELEASE, editionId);
     }
 
