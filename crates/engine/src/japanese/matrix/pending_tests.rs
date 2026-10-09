@@ -192,10 +192,15 @@ fn matrix_pending_key_output_and_allocation_match_current_baseline() {
                     old_allocations,
                     "拼接键分配差值：{pending}"
                 );
+                let saved_initial_views = super::initial_prefix_tests::saved_initial_prefix_views(
+                    &dictionary,
+                    &conversion,
+                    limit,
+                );
                 assert_eq!(
-                    new_allocations + saved_views,
+                    new_allocations + saved_views + saved_initial_views,
                     exact_allocations,
-                    "继续补全视图向量分配差值：{pending}"
+                    "继续补全与空读音前缀视图向量分配差值：{pending}"
                 );
                 assert!(exact_allocations <= buffered_allocations);
                 assert!(new_allocations <= buffered_allocations);

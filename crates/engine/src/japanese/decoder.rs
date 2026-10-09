@@ -381,6 +381,7 @@ impl JapaneseDictionary {
         self.prefix_lemmas_with(prefix, limit, |id| self.lemma(id))
     }
 
+    #[cfg(test)]
     pub(crate) fn prefix_lemma_views(
         &self,
         prefix: &str,

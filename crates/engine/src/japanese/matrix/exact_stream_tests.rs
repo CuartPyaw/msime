@@ -71,11 +71,14 @@ fn exact_streamed_matrix_matches_fixed_vector_query_including_full_pages() {
                         reading.chars().count()
                     );
                     assert!(new_allocations <= old_allocations);
-                    if reading.is_empty()
-                        || limit == 0
-                        || reading == "くく"
-                        || reading.starts_with('😀')
-                    {
+                    if reading.is_empty() {
+                        let saved = super::initial_prefix_tests::saved_initial_prefix_views(
+                            &dictionary,
+                            &conversion,
+                            limit,
+                        );
+                        assert_eq!(new_allocations + saved, old_allocations);
+                    } else if limit == 0 || reading == "くく" || reading.starts_with('😀') {
                         assert_eq!(new_allocations, old_allocations);
                     } else {
                         assert!(new_allocations < old_allocations);

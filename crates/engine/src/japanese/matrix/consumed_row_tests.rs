@@ -3,7 +3,7 @@ use super::super::romaji::convert_romaji;
 use super::*;
 use crate::ime::personal_rerank::allocations::{measure, Measurement};
 
-// 冻结 0f6bf002a 的完整搜索正文，保留已消费行到查询结束，只隔离释放时机。
+// 冻结 0f6bf002a 的完整搜索正文；非空读音只隔离行释放，空读音容器差值另计。
 fn retained_reference_search(
     dictionary: &JapaneseDictionary,
     conversion: &RomajiConversion,
@@ -196,7 +196,12 @@ fn consumed_rows_release_storage_and_preserve_complete_queries() {
                     );
                     assert_measurement_scope(old);
                     assert_measurement_scope(new);
-                    assert_eq!(new.allocations, old.allocations);
+                    let saved = super::initial_prefix_tests::saved_initial_prefix_views(
+                        &dictionary,
+                        &conversion,
+                        limit,
+                    );
+                    assert_eq!(new.allocations + saved, old.allocations);
                     assert_eq!(new.remaining_bytes, old.remaining_bytes);
                     assert!(new.peak_bytes <= old.peak_bytes);
                     if reading.chars().count() >= 32 && limit > 0 {
@@ -248,7 +253,7 @@ fn unknown_unicode_peak_is_linear_after_consumed_rows_are_released() {
 }
 
 #[test]
-#[ignore = "本地 release 与冻结历史行查询交替对照；不设置 CI 时间阈值"]
+#[ignore = "本地 release 与冻结历史查询对照，空读音另含前缀流式；不设置 CI 时间阈值"]
 fn benchmark_consumed_row_release() {
     use std::hint::black_box;
     use std::time::Instant;
@@ -281,7 +286,12 @@ fn benchmark_consumed_row_release() {
                 measure(|| retained_reference_search(&dictionary, &conversion, limit));
             let (actual, new) = measure(|| search_converted(&dictionary, &conversion, limit));
             assert_eq!(actual, expected);
-            assert_eq!(new.allocations, old.allocations);
+            let saved = super::initial_prefix_tests::saved_initial_prefix_views(
+                &dictionary,
+                &conversion,
+                limit,
+            );
+            assert_eq!(new.allocations + saved, old.allocations);
             assert_measurement_scope(old);
             assert_measurement_scope(new);
             let mut timings = [Vec::new(), Vec::new()];
@@ -309,7 +319,7 @@ fn benchmark_consumed_row_release() {
             for samples in &mut timings {
                 samples.sort_unstable();
             }
-            eprintln!("行释放：密集={dense}，读音字符={}，待定={}，限额={limit}，分配={}→{}，峰值字节={}→{}，中位批次={:?}→{:?}/{iterations}次", conversion.hiragana.chars().count(), conversion.pending.len(), old.allocations, new.allocations, old.peak_bytes, new.peak_bytes, timings[0][5], timings[1][5]);
+            eprintln!("行释放查询（空读音含前缀流式）：密集={dense}，读音字符={}，待定={}，限额={limit}，分配={}→{}，峰值字节={}→{}，中位批次={:?}→{:?}/{iterations}次", conversion.hiragana.chars().count(), conversion.pending.len(), old.allocations, new.allocations, old.peak_bytes, new.peak_bytes, timings[0][5], timings[1][5]);
         }
     }
 }
