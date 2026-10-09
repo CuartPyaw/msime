@@ -156,8 +156,9 @@ impl JapaneseProvider {
         }
 
         if let Some(dictionary) = dictionary {
-            // With letters still pending, the lemmas the letters can go on to spell lead: the sentence search can convert only the finished kana. With the reading complete, the lemmas whose reading only starts with it (predictions) go after the conversions of the reading itself: listed first, the cheapest longer readings fill the page and push the word the reading spells off it (にじ listed 二重, 二条 and 二次創作 ahead of 虹).
-            let mut predictions = Vec::new();
+            // 待定字母的前缀词条先展示；完整读音先展示转换，再追加预测，避免较长联想挤走当前词。
+            let complete_prediction = conversion.pending.is_empty()
+                && conversion.hiragana.len() >= MIN_PREFIX_READING_BYTES;
             if !conversion.hiragana.is_empty() && !conversion.pending.is_empty() {
                 // 前缀视图已限制为待定字母能拼出的假名。一个读音有多种合法拼法，不能再用反查首选拼法过滤：しし反查为 `shishi`，会被 `sis` 错误排除。
                 let pending_kana = kana_for_romaji_prefix_view(&conversion.pending);
@@ -193,13 +194,12 @@ impl JapaneseProvider {
                         }
                     }
                 }
-            } else if conversion.pending.is_empty()
-                && conversion.hiragana.len() >= MIN_PREFIX_READING_BYTES
-            {
-                predictions =
-                    dictionary.prefix_lemma_views(&conversion.hiragana, READING_PREFIX_LEMMAS);
             }
-            rows.reserve(predictions.len() + SENTENCE_LIMIT + 1);
+            rows.reserve(
+                usize::from(complete_prediction)
+                    .saturating_mul(READING_PREFIX_LEMMAS)
+                    .saturating_add(SENTENCE_LIMIT + 1),
+            );
             for sentence in search_converted(&dictionary, conversion, SENTENCE_LIMIT) {
                 rows.push(
                     &sentence.text,
@@ -207,11 +207,17 @@ impl JapaneseProvider {
                     CandidateSource::Database,
                 );
             }
-            for lemma in predictions {
-                rows.push(
-                    lemma.surface,
-                    PREFIX_LEMMA_BASE - i64::from(lemma.word_cost),
-                    CandidateSource::Database,
+            if complete_prediction {
+                dictionary.for_each_prefix_lemma_view(
+                    &conversion.hiragana,
+                    READING_PREFIX_LEMMAS,
+                    |lemma| {
+                        rows.push(
+                            lemma.surface,
+                            PREFIX_LEMMA_BASE - i64::from(lemma.word_cost),
+                            CandidateSource::Database,
+                        );
+                    },
                 );
             }
         }
@@ -402,6 +408,33 @@ mod tests {
             allocations <= 21,
             "假名前缀与拼接读音键应复用：{allocations}"
         );
+    }
+
+    #[test]
+    fn complete_model_query_streams_predictions() {
+        let (_root, mut provider) = provider_with(Some(test_model::bytes(
+            &[
+                ("かな", "仮名", 0, 0, 500),
+                ("かなこ", "加奈子", 0, 0, 600),
+                ("かなで", "奏で", 0, 0, 700),
+            ],
+            1,
+            &[0],
+        )));
+        let request = request("kana");
+        let mut destination = provider.query(&request);
+        provider.query_into(&request, &mut destination);
+        let expected = destination.clone();
+        let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            provider.query_into(&request, &mut destination);
+        });
+        assert_eq!(destination, expected);
+        assert_eq!(
+            words(&destination),
+            ["仮名", "かな", "加奈子", "奏で", "カナ"]
+        );
+        eprintln!("日文完整预测流式查询分配：{allocations}");
+        assert_eq!(allocations, 14, "预测词条应可流式写入候选行");
     }
 
     fn assert_provider_reuses_conversion_strings(raw: &str) {

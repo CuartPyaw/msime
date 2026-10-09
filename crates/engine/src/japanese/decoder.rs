@@ -377,6 +377,17 @@ impl JapaneseDictionary {
         self.prefix_lemmas_with(prefix, limit, |id| self.lemma_ref(id))
     }
 
+    /// 按成本顺序访问前缀词条，避免为只消费一次的结果建立视图向量。
+    pub(crate) fn for_each_prefix_lemma_view<'a>(
+        &'a self,
+        prefix: &str,
+        limit: usize,
+        mut visit: impl FnMut(JapaneseLemmaRef<'a>),
+    ) {
+        // 复用同一套筛选与排序；闭包返回的 `()` 是零大小类型，`Vec<()>` 不申请结果存储。
+        self.prefix_lemmas_with(prefix, limit, |id| visit(self.lemma_ref(id)));
+    }
+
     fn prefix_lemmas_with<T>(
         &self,
         prefix: &str,
@@ -800,6 +811,73 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn prefix_lemma_views_can_be_consumed_without_result_vector() {
+        let dictionary = parsed(test_model::bytes(
+            &[
+                ("かな", "仮名", 0, 0, 500),
+                ("かなこ", "加奈子", 0, 0, 600),
+                ("かなで", "奏で", 0, 0, 700),
+            ],
+            1,
+            &[0],
+        ));
+        let visits = std::cell::Cell::new(0);
+        let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            dictionary.for_each_prefix_lemma_view("かな", 16, |_| {
+                visits.set(visits.get() + 1);
+            });
+        });
+        assert_eq!(visits.get(), 3);
+        assert_eq!(allocations, 1);
+    }
+
+    #[test]
+    fn streamed_prefixes_keep_ties_limits_missing_queries_and_dictionary_borrows() {
+        let surfaces: Vec<_> = (0..70).map(|index| format!("語{index:02}")).collect();
+        let entries: Vec<_> = surfaces
+            .iter()
+            .enumerate()
+            .map(|(index, surface)| ("かな", surface.as_str(), 0, 0, index as i32 % 7 - 3))
+            .collect();
+        let dictionary = parsed(test_model::bytes(&entries, 1, &[0]));
+        let mut expected: Vec<u32> = (0..70).collect();
+        expected.sort_unstable_by_key(|id| (id % 7, *id));
+        for prefix in ["", "く", "か", "かな"] {
+            for limit in [0, 1, 2, 24, 64, 65, 70, 100] {
+                let mut views = [None; 70];
+                let mut used = 0;
+                let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+                    dictionary.for_each_prefix_lemma_view(prefix, limit, |view| {
+                        views[used] = Some(view);
+                        used += 1;
+                    });
+                });
+                let missing = prefix.is_empty() || prefix == "く" || limit == 0;
+                let ids = if missing {
+                    &[][..]
+                } else {
+                    &expected[..limit.min(70)]
+                };
+                assert_eq!(used, ids.len());
+                for (view, &id) in views[..used].iter().zip(ids) {
+                    assert_eq!(view.unwrap(), dictionary.lemma_ref(id));
+                }
+                assert_eq!(
+                    allocations,
+                    usize::from(!missing && (prefix != "か" || limit > 64))
+                );
+            }
+        }
+        let mut saved = None;
+        {
+            // 查询文本释放后，保存的视图仍只依赖词库。
+            let query = String::from("かな");
+            dictionary.for_each_prefix_lemma_view(&query, 1, |view| saved = Some(view));
+        }
+        assert_eq!(saved.unwrap(), dictionary.lemma_ref(expected[0]));
     }
 
     #[test]
