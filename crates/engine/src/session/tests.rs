@@ -805,7 +805,7 @@ fn typing_at_the_end_does_not_build_the_preedit_twice_for_caret_detection() {
     });
 
     assert!(result.handled);
-    assert_eq!(allocations, 136);
+    assert_eq!(allocations, 135);
 }
 
 #[test]
@@ -909,7 +909,7 @@ fn typing_at_a_caret_reuses_the_editing_text_length() {
 
     assert!(result.handled);
     assert_eq!(
-        allocations, 221,
+        allocations, 219,
         "caret insertion allocations: {allocations}"
     );
 }
