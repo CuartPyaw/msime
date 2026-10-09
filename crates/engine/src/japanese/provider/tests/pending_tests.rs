@@ -1,6 +1,6 @@
 use super::*;
 
-// 固定 f37203c77 的 provider 查询正文，矩阵调用保持当前实现以隔离 provider 查询键与词条视图容器。
+// 固定 f37203c77 的 provider 查询正文，矩阵调用保持当前实现以隔离 provider 查询键、词条视图与句子结果容器。
 fn reference_query_into(
     provider: &mut JapaneseProvider,
     request: &QueryRequest,
@@ -167,6 +167,10 @@ fn provider_matches_old_pending_keys_across_edits_and_dynamic_rows() {
             actual_provider.query_into(&request, &mut actual)
         });
         assert_eq!(actual, expected);
+        assert!(
+            actual_provider.sentences.is_empty(),
+            "消费后仅保留句子容器容量"
+        );
         let conversion = super::super::super::romaji::convert_romaji(&request.raw_input);
         let saved_keys = if conversion.hiragana.is_empty() || conversion.pending.is_empty() {
             0
@@ -190,10 +194,12 @@ fn provider_matches_old_pending_keys_across_edits_and_dynamic_rows() {
                 })
                 .count()
         };
+        // 合成词库已加载且限额固定为 12；只有裸 `-` 会在矩阵搜索之前返回。
+        let saved_sentences = usize::from(request.raw_input != "-");
         assert_eq!(
-            new_allocations + saved_keys + saved_views,
+            new_allocations + saved_keys + saved_views + saved_sentences,
             old_allocations,
-            "provider 查询键与词条视图向量分配差值"
+            "provider 查询键、词条视图和句子结果容器分配差值"
         );
         for rows in [&mut actual, &mut expected] {
             for item in rows.iter_mut() {

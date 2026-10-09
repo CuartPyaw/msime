@@ -45,3 +45,5 @@ provider 隔离本层循环的对照（两侧均调用当前 matrix，三词条�
 `truncate` 的边界必须是已写入完整公共读音的末尾，容量必须覆盖最长假名。两处键缓冲各自局部，decoder 的 continuing 缓冲、原完整字符串比较、所有查询限额、顺序和候选去重保持。`join_reading` 仅保留测试以支撑冻结旧流程，matrix 的 `join_text` 仍负责节点文本构造。
 
 [固定八槽行实验](../../rejected/testing/2026-10-09-japanese-inline-matrix-rows.md) 因 release 未显示稳定收益且出现查询回退被否决；生产 Vec 行及本篇历史验证保持。实验仅保留在 `cfg(test)` 中，不能把减少分配视为查询加速。
+
+冻结 provider 对照现另包含[句子结果容器复用](2026-10-09-japanese-sentence-output-buffer.md) 的分配差值；在合成有词库夹具中，除裸 `-` 外的查询恰好再省一次容器分配，分别统计后求和。历史拼接键计时不归因于此后新增的容器优化。
