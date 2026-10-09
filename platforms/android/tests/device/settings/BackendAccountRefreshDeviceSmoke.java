@@ -3,6 +3,7 @@ package app.msime.android;
 import android.app.Activity;
 import android.app.Instrumentation;
 import android.os.Bundle;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -226,6 +227,115 @@ public final class BackendAccountRefreshDeviceSmoke extends Instrumentation {
         check(cancelled, "a signed-out request must not deliver its old response");
     }
 
+    private static List<BackendAccount.ChatMessage> chatRequest() {
+        return java.util.List.of(new BackendAccount.ChatMessage("user", "synthetic prompt"));
+    }
+
+    private static void oldChatStreamDoesNotRetryAfterNewLogin() throws Exception {
+        MemoryStore store = new MemoryStore(activeSession());
+        BackendAccount replacement = new BackendAccount(store,
+            (method, path, body, token) -> tokens(NEXT_ACCESS, NEXT_REFRESH));
+        AtomicInteger calls = new AtomicInteger();
+        BackendAccount old = new BackendAccount(store, (method, path, body, token) -> models(), null,
+            (body, token, call, listener) -> {
+                calls.incrementAndGet();
+                replacement.login(new BackendAccount.Challenge("synthetic-challenge", "synthetic-nonce"),
+                    "synthetic-credential");
+                throw new BackendAccount.RequestException(401);
+            });
+        boolean cancelled = false;
+        try {
+            old.chatStream(chatRequest(), "synthetic-model", new BackendAccount.ChatCall(), delta -> {});
+        } catch (java.util.concurrent.CancellationException expected) {
+            cancelled = true;
+        }
+        check(cancelled, "an old chat stream must not retry after a new login");
+        check(calls.get() == 1, "a new login receives no old chat stream retry");
+    }
+
+    private static void oldChatStreamDiscardsDeltaAfterNewLogin() throws Exception {
+        MemoryStore store = new MemoryStore(activeSession());
+        BackendAccount replacement = new BackendAccount(store,
+            (method, path, body, token) -> tokens(NEXT_ACCESS, NEXT_REFRESH));
+        AtomicInteger deltas = new AtomicInteger();
+        BackendAccount old = new BackendAccount(store, (method, path, body, token) -> models(), null,
+            (body, token, call, listener) -> {
+                replacement.login(new BackendAccount.Challenge("synthetic-challenge", "synthetic-nonce"),
+                    "synthetic-credential");
+                listener.onDelta("old delta");
+                return "old delta";
+            });
+        boolean cancelled = false;
+        try {
+            old.chatStream(chatRequest(), "synthetic-model", new BackendAccount.ChatCall(),
+                delta -> deltas.incrementAndGet());
+        } catch (java.util.concurrent.CancellationException expected) {
+            cancelled = true;
+        }
+        check(cancelled, "an old chat stream must stop after a new login");
+        check(deltas.get() == 0, "an old chat delta must not reach the listener");
+    }
+
+    private static void oldChatStreamDoesNotFallbackAfterNewLogin() throws Exception {
+        MemoryStore store = new MemoryStore(activeSession());
+        BackendAccount replacement = new BackendAccount(store,
+            (method, path, body, token) -> tokens(NEXT_ACCESS, NEXT_REFRESH));
+        AtomicInteger fallbackCalls = new AtomicInteger();
+        BackendAccount old = new BackendAccount(store, (method, path, body, token) -> {
+            fallbackCalls.incrementAndGet();
+            return models();
+        }, null, (body, token, call, listener) -> {
+            replacement.login(new BackendAccount.Challenge("synthetic-challenge", "synthetic-nonce"),
+                "synthetic-credential");
+            throw new BackendAccount.RequestException(400);
+        });
+        boolean cancelled = false;
+        try {
+            old.chatStream(chatRequest(), "synthetic-model", new BackendAccount.ChatCall(), delta -> {});
+        } catch (java.util.concurrent.CancellationException expected) {
+            cancelled = true;
+        }
+        check(cancelled, "an old chat stream must not fallback under a new login");
+        check(fallbackCalls.get() == 0, "a new login receives no old fallback request");
+    }
+
+    private static void chatStreamRetriesWithinTheSameLogin() throws Exception {
+        MemoryStore store = new MemoryStore(activeSession());
+        AtomicInteger calls = new AtomicInteger();
+        BackendAccount account = new BackendAccount(store, (method, path, body, token) -> {
+            check("/v1/auth/refresh".equals(path), "chat stream refresh endpoint");
+            return tokens(NEXT_ACCESS, NEXT_REFRESH);
+        }, null, (body, token, call, listener) -> {
+            calls.incrementAndGet();
+            if (ACCESS.equals(token)) throw new BackendAccount.RequestException(401);
+            check(NEXT_ACCESS.equals(token), "chat stream retry uses refreshed token");
+            listener.onDelta("synthetic reply");
+            return "synthetic reply";
+        });
+        AtomicInteger deltas = new AtomicInteger();
+        String reply = account.chatStream(chatRequest(), "synthetic-model", new BackendAccount.ChatCall(),
+            delta -> deltas.incrementAndGet());
+        check("synthetic reply".equals(reply), "same login chat stream returns reply");
+        check(calls.get() == 2 && deltas.get() == 1, "same login chat stream retries once and delivers delta");
+    }
+
+    private static void chatStreamFallsBackWithinTheSameLogin() throws Exception {
+        MemoryStore store = new MemoryStore(activeSession());
+        BackendAccount account = new BackendAccount(store, (method, path, body, token) -> {
+            check(ACCESS.equals(token) && "/v1/chat/completions".equals(path), "fallback keeps request identity");
+            check(!body.optBoolean("stream", true), "fallback disables streaming");
+            return new JSONObject().put("choices", new org.json.JSONArray().put(new JSONObject()
+                .put("message", new JSONObject().put("role", "assistant").put("content", "synthetic reply"))));
+        }, null, (body, token, call, listener) -> {
+            throw new BackendAccount.RequestException(400);
+        });
+        AtomicInteger deltas = new AtomicInteger();
+        String reply = account.chatStream(chatRequest(), "synthetic-model", new BackendAccount.ChatCall(),
+            delta -> deltas.incrementAndGet());
+        check("synthetic reply".equals(reply) && deltas.get() == 1,
+            "same login fallback delivers one complete reply");
+    }
+
     private static void unauthorizedRefreshClearsSession() throws Exception {
         MemoryStore store = new MemoryStore(expiredSession());
         BackendAccount account = new BackendAccount(store, (method, path, body, token) -> {
@@ -254,6 +364,7 @@ public final class BackendAccountRefreshDeviceSmoke extends Instrumentation {
 
     @Override public void onStart() {
         Bundle result = new Bundle();
+        String stage = "refresh";
         try {
             refreshesExpiredSessionAndRotatesCredentials();
             concurrentCallersShareOneRefresh();
@@ -263,12 +374,22 @@ public final class BackendAccountRefreshDeviceSmoke extends Instrumentation {
             oldRequestDiscardsSuccessAfterNewLogin();
             secondaryProcessRejectsChangedOwnerLogin();
             oldRequestDiscardsSuccessAfterSignOut();
+            stage = "old stream retry";
+            oldChatStreamDoesNotRetryAfterNewLogin();
+            stage = "old stream delta";
+            oldChatStreamDiscardsDeltaAfterNewLogin();
+            stage = "old stream fallback";
+            oldChatStreamDoesNotFallbackAfterNewLogin();
+            stage = "same login stream refresh";
+            chatStreamRetriesWithinTheSameLogin();
+            stage = "same login stream fallback";
+            chatStreamFallsBackWithinTheSameLogin();
             unauthorizedRefreshClearsSession();
             unboundedPersistedExpiryIsRejected();
-            result.putString("stream", "MSIME_DEVICE_SMOKE_PASSED: account refresh, login lineage and unauthorized clearing\n");
+            result.putString("stream", "MSIME_DEVICE_SMOKE_PASSED: account refresh, login lineage, chat stream and unauthorized clearing\n");
             finish(Activity.RESULT_OK, result);
         } catch (Exception | AssertionError error) {
-            result.putString("stream", "MSIME_DEVICE_SMOKE_FAILED: account refresh ("
+            result.putString("stream", "MSIME_DEVICE_SMOKE_FAILED: account refresh " + stage + " ("
                 + error.getClass().getSimpleName() + ": " + error.getMessage() + ")\n");
             finish(Activity.RESULT_CANCELED, result);
         }
