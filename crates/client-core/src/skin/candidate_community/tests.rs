@@ -498,7 +498,7 @@ fn add_license_refuses_a_symlinked_staging_file_without_writing_through_it() {
 #[cfg(unix)]
 #[test]
 fn replacing_manifest_does_not_follow_a_replaced_package_directory() {
-    use std::os::unix::fs::symlink;
+    use msime_path_trust::untrusted_symlink as symlink;
 
     let root = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
@@ -687,7 +687,7 @@ fn community_staging_file_writes_stay_in_an_open_package_directory() {
 #[cfg(unix)]
 #[test]
 fn leftover_cleanup_rejects_a_symlinked_parent() {
-    use std::os::unix::fs::symlink;
+    use msime_path_trust::untrusted_symlink as symlink;
 
     let state = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();

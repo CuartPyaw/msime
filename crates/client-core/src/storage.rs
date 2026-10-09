@@ -883,7 +883,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn private_file_remove_rejects_a_symlinked_parent() {
-        use std::os::unix::fs::symlink;
+        use msime_path_trust::untrusted_symlink as symlink;
 
         let outside = tempfile::tempdir().unwrap();
         let root = tempfile::tempdir().unwrap();
@@ -899,7 +899,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn private_file_remove_rejects_a_symlinked_ancestor() {
-        use std::os::unix::fs::symlink;
+        use msime_path_trust::untrusted_symlink as symlink;
 
         let root = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();

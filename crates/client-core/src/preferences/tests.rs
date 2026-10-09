@@ -7,7 +7,7 @@ use super::*;
 #[cfg(unix)]
 #[test]
 fn stale_sweep_does_not_follow_a_replaced_directory() {
-    use std::os::unix::fs::symlink;
+    use msime_path_trust::untrusted_symlink as symlink;
     use std::time::{Duration, SystemTime};
 
     let root = tempfile::tempdir().unwrap();
@@ -36,7 +36,7 @@ fn stale_sweep_does_not_follow_a_replaced_directory() {
 #[cfg(unix)]
 #[test]
 fn recovery_backup_does_not_follow_a_symlinked_directory() {
-    use std::os::unix::fs::symlink;
+    use msime_path_trust::untrusted_symlink as symlink;
 
     let root = tempfile::tempdir().unwrap();
     let directory = root.path().join("preferences");
