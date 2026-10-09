@@ -68,10 +68,12 @@ def main() -> None:
         raise AssertionError("Ui 仍直接实现文本最小高度策略")
     if "ViewPolicy.setTextMinHeight(view, dp(context, heightDp));" not in ui:
         raise AssertionError("Ui 没有调用共享文本最小高度策略")
-    if "view.setMinWidth(dp(context, widthDp));" in ui:
-        raise AssertionError("Ui 仍直接实现文本最小宽度策略")
-    if "ViewPolicy.setTextMinWidth(view, dp(context, widthDp));" not in ui:
-        raise AssertionError("Ui 没有调用共享文本最小宽度策略")
+    if "public static void setTextMinWidthDp(" in ui:
+        raise AssertionError("Ui 仍保留文本最小宽度转发方法")
+    if "ViewPolicy.setTextMinWidth(button, dp(context, minWidthDp));" not in ui:
+        raise AssertionError("Ui 按钮没有直接调用共享文本最小宽度策略")
+    if "public static void setEnabledLook(" in ui:
+        raise AssertionError("Ui 仍保留无调用方的启用状态转发方法")
     if "return ViewPolicy.newRow(context);" not in ui:
         raise AssertionError("Ui 没有调用共享横向容器工厂")
     if "return ViewPolicy.newRow(context);" not in keyboard_geometry:
