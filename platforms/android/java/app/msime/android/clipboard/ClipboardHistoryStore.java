@@ -118,11 +118,11 @@ public final class ClipboardHistoryStore {
         for (int index = 0; index < entries.length(); index++) {
             JSONObject entry = entries.optJSONObject(index);
             if (entry == null) continue;
-            String text = ClipboardHistoryPolicy.strictString(entry.opt("text"));
+            String text = JsonPolicy.strictString(entry.opt("text"));
             if (text == null || text.isEmpty()) continue;
             Object rawPinned = entry.opt("pinned");
             Boolean pinned = rawPinned == null || rawPinned == JSONObject.NULL
-                ? Boolean.FALSE : ClipboardHistoryPolicy.strictBoolean(rawPinned);
+                ? Boolean.FALSE : JsonPolicy.strictBoolean(rawPinned);
             if (pinned == null) continue;
             items.add(new ClipboardHistory.Item(text,
                 ClipboardHistoryPolicy.timestampValue(entry.opt("timestampMs")), pinned));
