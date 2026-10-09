@@ -45,6 +45,10 @@ def main() -> int:
         errors.append(f"{UI}: 不应保留 weightedMatchParent 转发方法")
     if re.search(r"(?<![.\w])weightedMatchParent\(", ui):
         errors.append(f"{UI}: 不应调用已移除的 weightedMatchParent")
+    if "public static LinearLayout.LayoutParams weightedHeight(" in ui:
+        errors.append(f"{UI}: 不应保留 weightedHeight 转发方法")
+    if re.search(r"(?<![.\w])weightedHeight\(", ui):
+        errors.append(f"{UI}: 不应调用已移除的 weightedHeight")
 
     for path in HOME.glob("*.java"):
         source = path.read_text(encoding="utf-8")
@@ -60,6 +64,8 @@ def main() -> int:
             errors.append(f"{path}: 应直接调用 KeyboardGeometry.weightedWidthParams")
         if "Ui.weightedMatchParent(" in source:
             errors.append(f"{path}: 应直接调用 KeyboardGeometry.weightedMatchParentParams")
+        if "Ui.weightedHeight(" in source:
+            errors.append(f"{path}: 应直接调用 KeyboardGeometry.weightedHeightPxParams")
 
     for name in EXPECTED_CALLERS:
         path = HOME / name
@@ -80,6 +86,12 @@ def main() -> int:
         "KeyboardGeometry.weightedMatchParentParams("
     ) != 2:
         errors.append(f"{statistics}: 未直接复用 KeyboardGeometry.weightedMatchParentParams")
+
+    input_dialog = HOME / "InputDialog.java"
+    if input_dialog.read_text(encoding="utf-8").count(
+        "KeyboardGeometry.weightedHeightPxParams("
+    ) != 2:
+        errors.append(f"{input_dialog}: 未直接复用 KeyboardGeometry.weightedHeightPxParams")
 
     if errors:
         print("\n".join(errors), file=sys.stderr)
