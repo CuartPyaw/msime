@@ -62,6 +62,8 @@ let
   # 安装出去的 provider 脚本用的解释器。豆包流式识别要 websockets 的同步客户端
   # （scripts/msime_voice_doubao.py 按特性检查，不限主版本上限）；其余脚本只用标准库。
   python = python3.withPackages (ps: [ ps.websockets ]);
+  # msime-linux-setup 的包装器追加到 XDG_DATA_DIRS 的 IBus schema 数据目录（其下是 glib-2.0/schemas）。
+  ibusSchemas = glib.getSchemaDataDirPath ibus;
   clipboardPath = lib.makeBinPath [
     wl-clipboard
     xclip
@@ -201,18 +203,27 @@ stdenv.mkDerivation (finalAttrs: {
   #
   # wrapGAppsHook3 默认把 bin 下每个可执行文件都包一层，这里只包设置窗口，其余的不用 GTK。包装后真正
   # 的二进制是同目录下的 .msime-linux-desktop-wrapped，它按 current_exe 找前缀，不受影响。
+  #
+  # msime-linux-setup 经 gsettings 把引擎写进 IBus 的输入源列表（org.freedesktop.ibus.general），但 IBus 的
+  # schema 只在 ibus 自己的包装器和 GNOME 会话的 XDG_DATA_DIRS 里，Hyprland 这类会话的 gsettings 找不到它，
+  # 注册就退回手动步骤。追加在后面，会话里已有的 schema 优先；gsettings 与 Fcitx5 注册用的 gdbus 同理，
+  # PATH 上没有时用 glib 的。
   dontWrapGApps = true;
   postFixup = ''
     wrapProgram $out/bin/msime-linux-clipboard-monitor --prefix PATH : ${clipboardPath}
+    wrapProgram $out/bin/msime-linux-setup \
+      --suffix XDG_DATA_DIRS : ${ibusSchemas} \
+      --suffix PATH : ${lib.getBin glib}/bin
   ''
   + lib.optionalString (settingsWindow != null) ''
     wrapGApp $out/bin/msime-linux-desktop --prefix PATH : ${clipboardPath}
   '';
 
   # ctest 跑的是构建目录，看不到装出去的插件能不能加载。fixup 之后再核对一次：Fcitx5 按插件的
-  # RUNPATH 找 Host API，IBus engine 也一样，它必须落在本包自己的 lib/msime-client 里；组件文件的
-  # <exec> 要指向本包里能执行的启动脚本。语音运行库同理，另外它的依赖都要
-  # 能单独解析：msime-voice-local 自己已经载入了 libstdc++，只看它能否打开运行库发现不了缺依赖。
+  # RUNPATH 找 Host API，IBus engine 也一样，它必须落在本包自己的 lib/msime-client 里，语音运行库
+  # 同理；组件文件的 <exec> 要指向本包里能执行的启动脚本；msime-linux-setup 包装后还能运行、带着
+  # IBus 的 schema。语音运行库的依赖还要能单独解析：msime-voice-local 自己已经载入了 libstdc++，
+  # 只看它能否打开运行库发现不了缺依赖。
   # 设置窗口经 fixup 收缩过 RUNPATH，也核对一遍它的 GTK 与 WebKit 依赖都还解析得到，以及包装器给了
   # TLS 模块：缺了它 GIO 只记一条警告，设置页的 https 请求失败。THIRD_PARTY_NOTICES.txt 指向的
   # 几份声明也要真的装进来。
@@ -229,6 +240,9 @@ stdenv.mkDerivation (finalAttrs: {
       resolves $out/lib/fcitx5/libmsime-fcitx5.so libmsime_host_api.so
     ''}
     resolves $out/bin/msime-linux-ibus libmsime_host_api.so
+    $out/bin/msime-linux-setup --help > /dev/null
+    grep -qF ${ibusSchemas} $out/bin/msime-linux-setup
+    XDG_DATA_DIRS=${ibusSchemas} ${lib.getBin glib}/bin/gsettings list-schemas | grep -qx org.freedesktop.ibus.general
     for component in $out/share/ibus/component/*.xml; do
       [[ -x $(sed -n 's|.*<exec>&quot;\([^&]*\)&quot;.*|\1|p' "$component") ]]
     done

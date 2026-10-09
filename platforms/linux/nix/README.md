@@ -99,9 +99,10 @@ CMake 只在打开 `MSIME_ENABLE_PACKAGING` 时强制要求这两份，Nix 构�
 - **`msime-mcp`** 经 `MSIME_MCP_BINARY` 交给 CMake，装在同一前缀的 `bin` 下：设置窗口的 MCP 页在自己旁边找它。这条路径在 `/nix/store` 里，升级和垃圾回收后会失效，所以写进助手配置的是 PATH 上 Nix profile 里解析后就是这个文件的链接（如 `/run/current-system/sw/bin/msime-mcp`），找不到时才写 store 路径，规则见 `crates/host-api/src/mcp_clients.rs` 的 `stable_command_in`。以前写进去的任一版 store 路径，设置页显示为已连接并提示更新，点「更新」换成 profile 链接，权限照旧。
 - **`wl-clipboard` 与 `xclip`** 加在剪贴板监视器和设置窗口的 PATH 前面：两者在 Wayland 上读写剪贴板只经 `wl-copy`、`wl-paste`，在 X11 上只经 `xclip`、`xsel`，找不到时剪贴板历史什么也记不下，设置窗口的同步、复制与粘贴报告不可用。
 - **IBus engine** 和 Fcitx5 插件出自同一次构建，组件文件装在 `share/ibus/component`，它的 `<exec>` 是本包 `bin` 下启动脚本的绝对路径。但本包不能直接放进 `i18n.inputMethod.ibus.engines`：nixpkgs 的 `ibus-with-plugins` 把引擎和 `ibus` 合成一个 `buildEnv`，要求 `lib/systemd/user` 只来自 `ibus`，本包的 provider 单元也在 `lib/systemd/user`，构建会失败；整包的 `bin` 也会混进 IBus 的环境。所以另给一个 `passthru.ibusEngine`（`msime-fcitx5` 与 `msime-ibus` 都有）：只有指回本包的组件文件，带着引擎类型要求的 `meta.isIbusEngine`。它取的是 `finalPackage`，`override` 过的包的 `ibusEngine` 指向的也是 override 之后的那份。
+- **`msime-linux-setup` 包了一层**：它经 `gsettings` 把引擎写进 IBus 的输入源列表（`org.freedesktop.ibus.general`），而 IBus 的 schema 只在 `ibus` 自己的包装器和 GNOME 会话的 `XDG_DATA_DIRS` 里，Hyprland 这类会话找不到，注册会退回打印手动步骤。包装器把 `ibus` 的 schema 目录和 glib 的 `bin`（`gsettings`、`gdbus`）追加在 `XDG_DATA_DIRS`、`PATH` 后面，会话里已有的优先。真正的脚本是同目录下的 `.msime-linux-setup-wrapped`，它按自己所在的前缀找同级程序，不受影响。
 - **音频工具不随包**：provider 取 PATH 上找到的第一个（`parec`、`pw-cat`、`arecord`），带上 PulseAudio 的工具会让只有 PipeWire、没开 pipewire-pulse 的系统选到连不上的 `parec`，所以交给系统的音频栈。
 
-ctest 跑的是构建目录，看不到装出去的东西能不能加载，所以 fixup 之后还有装后检查（`installCheckPhase`）：插件和 `msime-linux-ibus` 按 RUNPATH 找到的 Host API 必须是本包 `lib/msime-client` 里的那份，IBus 组件文件的 `<exec>` 指向本包里能执行的启动脚本；语音运行库同理，它的依赖都要能单独解析，并且 `msime-voice-local` 能打开它；设置窗口的依赖在收缩 RUNPATH 后都还解析得到，包装器带着 TLS 模块和 `xclip`；`msime-mcp` 能运行；两份第三方许可证声明都装进来了。
+ctest 跑的是构建目录，看不到装出去的东西能不能加载，所以 fixup 之后还有装后检查（`installCheckPhase`）：插件和 `msime-linux-ibus` 按 RUNPATH 找到的 Host API 必须是本包 `lib/msime-client` 里的那份，IBus 组件文件的 `<exec>` 指向本包里能执行的启动脚本，`msime-linux-setup` 包装后还能运行、带着 IBus 的 schema；语音运行库同理，它的依赖都要能单独解析，并且 `msime-voice-local` 能打开它；设置窗口的依赖在收缩 RUNPATH 后都还解析得到，包装器带着 TLS 模块和 `xclip`；`msime-mcp` 能运行；两份第三方许可证声明都装进来了。
 
 ### 随包词库
 

@@ -18,7 +18,10 @@ Status: implemented
 - 装后检查对两个变体都核对 `msime-linux-ibus` 按 RUNPATH 找到本包的 Host API、组件 `<exec>` 指向本包里可执行的启动脚本；插件的那项只在 `enableFcitx5` 时检查。
 - `platforms/linux/nix/module.nix` 的 `package` 默认值跟着 `i18n.inputMethod.type`：`ibus` 时是 `msime-ibus`，其余是 `msime-fcitx5`。`type` 不依赖 `package`，不会循环。`type` 是 `fcitx5` 而包的 `enableFcitx5` 为假时断言失败，不让用户静默得到一个没有插件的系统。
 - 模块同时填 `i18n.inputMethod.fcitx5.addons = [ cfg.package ]` 和 `i18n.inputMethod.ibus.engines = [ cfg.package.ibusEngine ]`，`type` 仍以 `mkDefault` 设为 `fcitx5`。nixpkgs 的两个框架模块各自 `mkIf type == …`，只有选中的那个会读自己的列表，所以模块不必自己分支。警告改为 `type` 不在 `fcitx5`、`ibus` 之内时才给。
-- 其余接线（`environment.systemPackages`、`systemd.packages`、provider 的 `wantedBy`）与框架无关，不变。首次配置的 `msime-linux-setup` 本来就按正在运行的框架注册（`register_ibus`），不用改。
+- 实机（Hyprland 会话）上 `msime-linux-setup --register` 原本注册不了 IBus，有两层原因，都在本改动里修：
+  - `running()` 只用 `pgrep -x` 比对进程名，而 Nix 的 `wrapProgram` 启动的 `ibus-daemon` 进程名是 `.ibus-daemon-wr`，脚本于是报「Fcitx5 和 IBus 都没有在运行」。`running()` 再用 `pgrep -f` 比对命令行的第一个词（包装脚本以 `exec -a` 保留了 `…/bin/ibus-daemon`），只出现在参数里的不算。这是 `scripts/msime-linux-setup` 的通用改动，任何经包装脚本启动的守护进程都受益。
+  - 认出 IBus 之后，`gsettings` 仍找不到 `org.freedesktop.ibus.general`：IBus 的 schema 只在 `ibus` 自己的包装器和 GNOME 会话的 `XDG_DATA_DIRS` 里。`fcitx5.nix` 给 `msime-linux-setup` 包一层，把 `glib.getSchemaDataDirPath ibus`（`gsettings` 在它下面的 `glib-2.0/schemas` 里找）和 glib 的 `bin` 追加到 `XDG_DATA_DIRS`、`PATH` 后面。
+- 其余接线（`environment.systemPackages`、`systemd.packages`、provider 的 `wantedBy`）与框架无关，不变。首次配置的 `msime-linux-setup` 按正在运行的框架注册（`register_ibus`），上一条修好后在 IBus 下也能注册。
 
 ## Alternatives considered
 
@@ -38,4 +41,4 @@ Status: implemented
 
 ## Verification
 
-`nix build .#checks.x86_64-linux.nixos-module`：虚拟机测试新增节点 `ibus`（`i18n.inputMethod.type = "ibus"`），以 alice 在 linger 的会话总线上起 PATH 上的 `ibus-daemon`，等 `ibus list-engine` 列出 `msime-linux` 和「水杉输入法」，再核对 PATH 上的命令来自 `msime-ibus`、前缀下没有 `lib/fcitx5`。它同时证明 `ibus-with-plugins` 能构建、引擎类型检查通过。`nix build .#msime-ibus` 跑关掉插件后的装后检查。模块的默认包与断言用 `nixosSystem` 分别对 `ibus`、`fcitx5`、`kime` 和「`fcitx5` 配 `msime-ibus`」求值核对过。选中引擎后宿主真正打字没有在虚拟机里覆盖（需要词库，虚拟机不联网），要在真机上核对。
+`nix build .#checks.x86_64-linux.nixos-module`：虚拟机测试新增节点 `ibus`（`i18n.inputMethod.type = "ibus"`），以 alice 在 linger 的会话总线上起 PATH 上的 `ibus-daemon`，等 `ibus list-engine` 列出 `msime-linux` 和「水杉输入法」，再核对 PATH 上的命令来自 `msime-ibus`、前缀下没有 `lib/fcitx5`。它同时证明 `ibus-with-plugins` 能构建、引擎类型检查通过。`nix build .#msime-ibus` 跑关掉插件后的装后检查。模块的默认包与断言用 `nixosSystem` 分别对 `ibus`、`fcitx5`、`kime` 和「`fcitx5` 配 `msime-ibus`」求值核对过。`tests/core/setup_registration.py` 新增一例：只有命令行是 `…/bin/ibus-daemon` 的进程（进程名不是）时照样认出 IBus 并写入 `preload-engines`，只在参数里出现 `ibus-daemon` 的进程不算；去掉 `running()` 的改动时这一例失败。实机上在 Hyprland 会话里 `ibus engine msime-linux` 拉起了 `msime-ibus` 的宿主。选中引擎后宿主真正打字没有在虚拟机里覆盖（需要词库，虚拟机不联网），要在真机上核对。
