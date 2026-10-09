@@ -90,9 +90,7 @@ test("a release the page would open or show unsafely is refused or trimmed", () 
   ]) {
     expect(fromHostUpdate(hostUpdate({ release_url }))).toBeNull();
   }
-  expect(
-    fromHostUpdate(hostUpdate({ version: { display: "next", parts: [] } })),
-  ).toBeNull();
+  expect(fromHostUpdate(hostUpdate({ version: { display: "next", parts: [] } }))).toBeNull();
   // A name needing shell quoting or a digest of the wrong shape is dropped, not shown in the copyable command.
   expect(
     fromHostUpdate(

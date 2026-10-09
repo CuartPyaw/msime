@@ -7064,9 +7064,7 @@ function hostRelease(
 }
 
 test("about page offers no update check without a host to ask", async () => {
-  render(
-    <SettingsPage client={{ load: vi.fn().mockResolvedValue(initial), save: vi.fn() }} />,
-  );
+  render(<SettingsPage client={{ load: vi.fn().mockResolvedValue(initial), save: vi.fn() }} />);
   await settingsReady();
   fireEvent.click(screen.getByRole("button", { name: "关于" }));
   expect(await screen.findByText("当前版本")).toBeDefined();
