@@ -152,7 +152,10 @@ programs.msime.enable = true;
 
 用 IBus（例如 GNOME 自带的输入源）时设 `i18n.inputMethod.type = "ibus";`，模块改用不带 Fcitx5 插件的 `msime-ibus`，把它的 IBus engine 加进 `i18n.inputMethod.ibus.engines`，其余不变。`i18n.inputMethod.type` 是其他框架时会给出警告。
 
-在 GNOME、KDE 以外的 Wayland 混成器上（Hyprland、Sway 等），nixpkgs 的 ibus 模块经 XDG autostart 以 `ibus-daemon --daemonize --xim` 启动 IBus。这样启动的 IBus 不提供 Wayland 的输入法协议：经 GTK、Qt 输入法模块（`GTK_IM_MODULE=ibus` 等）的程序能用，只认 text-input 协议的原生 Wayland 程序（如 WezTerm）连不上 IBus，在里面按切换快捷键也没有反应。要改用 `ibus start --type wayland` 启动（IBus 已在运行时用 `ibus restart --type wayland`），这时由 `ibus-ui-gtk3 --enable-wayland-im` 经 `zwp_input_method_v2` 接入混成器。每次登录都这样启动，需要在混成器的启动项里执行它，并用 `~/.config/autostart/ibus-daemon.desktop`（写 `Hidden=true`）盖住系统的那一条。
+在 GNOME、KDE 以外的 Wayland 混成器上（Hyprland、Sway 等），nixpkgs 的 ibus 模块经 XDG autostart 以 `ibus-daemon --daemonize --xim` 启动 IBus，并导出 `GTK_IM_MODULE=ibus`、`QT_IM_MODULE=ibus`。这样的 IBus 不提供 Wayland 的输入法协议，只认 text-input 协议的原生 Wayland 程序（如 WezTerm）连不上它；经输入法模块接入的 GTK、Qt 程序，IBus 面板把候选和「中/英」提示画进 X11 候选窗，在 Hyprland 上那是一个抢焦点的新窗口，聚焦输入框时提示反复弹出。两处要一起改：
+
+- 设 `i18n.inputMethod.ibus.waylandFrontend = true;`，不再导出这两个变量（IBus 也要求 Wayland 方式下不设），改后重新登录。
+- 以 `ibus start --type wayland` 启动（IBus 已在运行时用 `ibus restart --type wayland`），由 `ibus-ui-gtk3 --enable-wayland-im` 经 `zwp_input_method_v2` 接入混成器。每次登录都这样启动，需要在混成器的启动项里执行它，并用 `~/.config/autostart/ibus-daemon.desktop`（写 `Hidden=true`）盖住系统的那一条。
 
 | 选项 | 默认 | 作用 |
 |---|---|---|
@@ -328,7 +331,7 @@ Fcitx5 宿主复用同一套 X11/Wayland 原生浮层和取消、结束按钮；
 
 Fcitx5 每 5 秒通过 freedesktop Settings portal 读取 `org.freedesktop.appearance/color-scheme`，因此 `voice_theme=follow` 且全局主题为 `system` 时，已显示的语音浮层会跟随系统明暗变化；portal 不可用时保留上一次主题，不阻塞输入。
 
-Fcitx5 切换中英文时，以及焦点移到另一个输入框时（共享偏好 `input_mode_hud`，默认开启），除面板自带的文字提示外还显示约 1 秒带产品 logo 的「中」/「英」徽章；从别的输入法切到水杉时由 Fcitx5 自己弹输入法名，不再叠加这个提示。IBus 下同一偏好在切换中英文和焦点移到新输入框时，于辅助区域显示约 1.2 秒「中」/「英」，IBus 协商客户端身份时重放的同一次焦点不会再显示一遍；密码框和私密输入中都不显示。焦点不在任何输入框时（切换窗口、落在文件列表上），开着全局引擎的 IBus 会把引擎挂到它自己的 `fake` 上下文上，这时也不显示：没有输入框可提示，而 IBus 面板会把它画进 X11 候选窗，在 Hyprland 上那是一个会抢焦点的新窗口。Wayland 下经 `wlr-layer-shell` 固定在屏幕右下角；X11 下（没有 layer-shell 的 Wayland 会话如 GNOME 经 Xwayland 也走这里）是不抢焦点、点击穿透的原生窗口，每次显示时按语音浮层的同一套规则选显示器（前台窗口所在，取不到时用指针所在或主显示器，经 XRandR 枚举），放在该显示器工作区的右下角以避开面板，尺寸、图标和边距按 `Xft.dpi`/`GDK_SCALE` 缩放。徽章深浅与候选面板一致：`candidate_theme` 为浅色或深色时照用，为「跟随颜色模式」时取颜色模式，颜色模式为「跟随系统」时跟随上述 portal 报告的系统明暗。
+Fcitx5 切换中英文时，以及焦点移到另一个输入框时（共享偏好 `input_mode_hud`，默认开启），除面板自带的文字提示外还显示约 1 秒带产品 logo 的「中」/「英」徽章；从别的输入法切到水杉时由 Fcitx5 自己弹输入法名，不再叠加这个提示。IBus 下同一偏好在切换中英文和焦点移到新输入框时，于辅助区域显示约 1.2 秒「中」/「英」，IBus 协商客户端身份时重放的同一次焦点不会再显示一遍；密码框和私密输入中都不显示。焦点不在任何输入框时（切换窗口、落在文件列表上），开着全局引擎的 IBus 把引擎挂到它自己的 `fake` 上下文上，这时没有输入框可提示，焦点进入和切换中英文都不显示。Wayland 下经 `wlr-layer-shell` 固定在屏幕右下角；X11 下（没有 layer-shell 的 Wayland 会话如 GNOME 经 Xwayland 也走这里）是不抢焦点、点击穿透的原生窗口，每次显示时按语音浮层的同一套规则选显示器（前台窗口所在，取不到时用指针所在或主显示器，经 XRandR 枚举），放在该显示器工作区的右下角以避开面板，尺寸、图标和边距按 `Xft.dpi`/`GDK_SCALE` 缩放。徽章深浅与候选面板一致：`candidate_theme` 为浅色或深色时照用，为「跟随颜色模式」时取颜色模式，颜色模式为「跟随系统」时跟随上述 portal 报告的系统明暗。
 
 同一个 socket 也承载候选翻译请求。候选视图更新后，宿主发送一行 JSON：
 

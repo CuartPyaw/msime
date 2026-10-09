@@ -37,7 +37,7 @@ Status: implemented
 - **收益**：`i18n.inputMethod.type = "ibus"` 加 `programs.msime.enable = true` 即可在 IBus（含 GNOME 输入源）里用水杉，provider 服务、设置窗口与 Fcitx5 时相同，系统里不带 Fcitx5 插件和 `fcitx5`。不用模块的用户取 `pkgs.msime-ibus` 与它的 `ibusEngine` 即可。
 - **代价**：`nix flake check` 多一次完整的 CMake 构建（`msime-ibus`）。它不跑 ctest（`doCheck = enableFcitx5`）：关掉插件只少了 `fcitx5/` 子目录，其余测试与 `msime-fcitx5` 相同，再跑一遍只是重复；只构建 `msime-ibus` 的用户因此看不到 ctest 结果，测试结果由 `msime-fcitx5` 和 CI 给出。变体特有的安装布局（`msime-linux-ibus` 的 RUNPATH、组件 `<exec>`）由装后检查核对。
 - **约束**：`programs.msime.package` 现在要求包带 `ibusEngine`（只在 `type = "ibus"` 时被求值）；换成不是从 `msime-fcitx5` 派生的包时会在求值时报缺属性。引擎图标仍靠 `environment.systemPackages` 链进 `/run/current-system/sw/share/icons`，没有放进 `ibus-with-plugins` 的环境。
-- **已知上限**：正在运行的 `ibus-daemon` 只读它自己那份 `ibus-with-plugins` 的组件，`ibus restart` 按原路径重启，切换配置后要重新登录才换到新构建；这与 Fcitx5 的情况相同，README 已写明。GNOME、KDE 以外的 Wayland 混成器上，nixpkgs 的 ibus 模块以 `ibus-daemon --daemonize --xim` 自启动，不提供 Wayland 的输入法协议，只认 text-input 的程序（实机上是 Hyprland 里的 WezTerm）切不到水杉，要以 `ibus start --type wayland` 启动。这是 nixpkgs 决定的启动方式，模块不覆盖它，做法写在 `platforms/linux/README.md` 的「Nix 与 NixOS」一节。
+- **已知上限**：正在运行的 `ibus-daemon` 只读它自己那份 `ibus-with-plugins` 的组件，`ibus restart` 按原路径重启，切换配置后要重新登录才换到新构建；这与 Fcitx5 的情况相同，README 已写明。GNOME、KDE 以外的 Wayland 混成器上，nixpkgs 的 ibus 模块以 `--xim` 方式自启动 IBus 并导出 `GTK_IM_MODULE`、`QT_IM_MODULE`，原生 Wayland 程序切不到水杉，GTK、Qt 程序的候选和提示在 Hyprland 上成了抢焦点的窗口。要以 `ibus start --type wayland` 启动并设 `ibus.waylandFrontend = true`。这些是 nixpkgs 决定的启动方式和环境变量，X11 会话和 GNOME 仍需要原样，模块不覆盖它们，做法写在 `platforms/linux/README.md` 的「Nix 与 NixOS」一节。
 
 ## Verification
 
