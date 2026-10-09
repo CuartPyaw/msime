@@ -219,6 +219,17 @@ actor SkinCommunityAPI {
     return result
   }
 
+  private func anonymousRequest<T: Sendable>(_ operation: @Sendable (String) async throws -> T) async throws -> T {
+    if (try? await anonymous.accessToken()) == nil {
+      _ = try await BackendAnonymousAccount.ensureSignedIn(session: anonymous, client: client)
+    }
+    let userID = try await anonymous.credentials().userID
+    let result = try await anonymous.authenticated(matchingUserID: userID, operation)
+    _ = try await anonymous.credentials(matchingUserID: userID)
+    try Task.checkCancellation()
+    return result.value
+  }
+
   func challenge() async throws -> CommunityChallenge {
     let value = try await client.challenge(provider: "apple")
     guard let nonce = value.nonce else { throw CommunityFailure(message: "Apple 登录暂不可用，请稍后重试。") }
@@ -355,16 +366,10 @@ actor SkinCommunityAPI {
       // 没有登录账号时与举报相同，用设备的匿名身份领取并记一次下载，与 Android 的「获取」（`CommunityCatalog.recordDownload`）一致；评分仍要登录。
       let data: Data
       do {
-        if (try? await anonymous.accessToken()) == nil {
-          _ = try await BackendAnonymousAccount.ensureSignedIn(session: anonymous, client: client)
-        }
-        let token = try await anonymous.accessToken()
-        do { data = try await client.request("POST", path, token: token, body: body) }
-        catch let error as BackendAccountClient.Failure where error.status == 401 {
-          data = try await client.request("POST", path, token: try await anonymous.accessToken(retrying: token), body: body)
+        data = try await anonymousRequest { token in
+          try await client.request("POST", path, token: token, body: body)
         }
       } catch let error as BackendAccountClient.Failure { throw Self.failure(error) }
-      try Task.checkCancellation()
       result = try JSONDecoder().decode(Result.self, from: data)
     }
     guard result.design == result.design.normalized else {
@@ -485,14 +490,8 @@ actor SkinCommunityAPI {
         }
         return
       }
-      if (try? await anonymous.accessToken()) == nil {
-        _ = try await BackendAnonymousAccount.ensureSignedIn(session: anonymous, client: client)
-      }
-      let token = try await anonymous.accessToken()
-      do { try await client.reportContent(kind: kind, itemID: id, reason: reason, detail: detail, token: token) }
-      catch let error as BackendAccountClient.Failure where error.status == 401 {
-        let fresh = try await anonymous.accessToken(retrying: token)
-        try await client.reportContent(kind: kind, itemID: id, reason: reason, detail: detail, token: fresh)
+      _ = try await anonymousRequest { token in
+        try await client.reportContent(kind: kind, itemID: id, reason: reason, detail: detail, token: token)
       }
     } catch let error as BackendAccountClient.Failure { throw Self.failure(error) }
   }
