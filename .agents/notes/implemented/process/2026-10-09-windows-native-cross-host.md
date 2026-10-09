@@ -28,4 +28,12 @@ ARM64 daemon 可以原生执行工具链，首次构建仍需准备镜像与依�
 
 ## Verification
 
-脚本回归先在原实现上运行：ARM64 daemon 的两个名称仍选择 amd64，非 Linux daemon 也进入构建；原回归共 4 个断言失败。最终脚本与失败下载回归共 8 项通过，覆盖 daemon 与客户端架构不一致、默认平台干扰、amd64 原路径保留、ARM64 独立缓存、其他 Linux 架构保留 amd64 路径、非 Linux daemon 拒绝和 Docker 不可用时跳过。`bash scripts/verify-local.sh --quick` 退出 0：102 项 Windows 主机测试、常驻契约检查、Rust workspace 与共享 Apple bridge 编译通过。Windows 原生与 pipe-only 构建缺少本机工具链而跳过，x86 语法检查缺少 x64 构建旗标；其他平台按 scope 跳过，桌面包因缺少 macOS 资源跳过。笔记、Shell 语法和 diff 校验通过。真实 ARM64 镜像构建退出 0，Rust host 为 `aarch64-unknown-linux-gnu`。断网新容器的工具链探针退出 0，生成 `pei-i386` 与 `pei-x86-64`。真实 `build-cross-container.sh x86` 退出 0，固定 vcpkg 为 AArch64 ELF，使用 `arm64-linux` 宿主 triplet，完成 7 个清单依赖安装、Rust 宿主 DLL、TSF DLL、Server 与全部原生测试链接；检查的宿主 DLL 和 Server 为 PE32。Rust 冷编译阶段为 1m 05s，使用脚本默认并发，不能与上轮 4 jobs 的 amd64 结果计算加速比。x64 完整构建仍在执行。未运行 Windows 程序、Wine 或系统输入法验收，SDK C++/WinRT 手写示例不在 GNU 构建范围内。
+ARM64 daemon 两个名称的平台选择回归在原实现上失败；失败下载回归也在旧管线命令上失败。最终 8 项脚本回归通过，覆盖 daemon 与客户端架构不同、默认平台干扰、amd64 原路径保留、ARM64 独立缓存、其他 Linux 架构保留 amd64 路径、非 Linux daemon 拒绝、Docker 不可用时跳过和下载失败传播。
+
+真实 ARM64 镜像构建退出 0。断网新容器的工具链探针退出 0，固定 Cargo、Rustfmt、Clippy 与两个目标标准库可用，生成 `pei-i386` 与 `pei-x86-64`。Rust host 为 `aarch64-unknown-linux-gnu`，两个 MinGW 编译器的 ELF Machine 均为 AArch64；固定 vcpkg 也是 AArch64 ELF。
+
+真实 `build-cross-container.sh x86` 和 `x64` 均退出 0，使用 `arm64-linux` 宿主 triplet，完成两个架构的锁定清单依赖准备，以及 Rust 宿主 DLL、TSF DLL、Server 与全部原生测试链接。检查的主要 DLL 和 Server 分别为 PE32 与 PE32+。Rust 编译阶段分别为 1m 05s、1m 00s；使用脚本默认并发，不能与上轮 4 jobs 的 amd64 结果计算加速比。
+
+随后在全新 `--network none` ARM64 容器中使用相同挂载、Cargo home 和依赖根，顺序执行真实 `build-cross.sh x86`、`x64`，进程退出 0。两个架构依赖均报告已安装，Cargo 没有下载或更新 Git，Rust 阶段分别为 1.31s、0.45s；CMake 仍有少量重新链接，不宣称零编译。
+
+`bash scripts/verify-local.sh --quick` 退出 0：102 项 Windows 主机测试、8 项新增回归、常驻契约、Rust workspace 和共享 Apple bridge 编译通过。Windows 原生与 pipe-only 构建缺少本机工具链而跳过，x86 语法检查缺少 x64 构建旗标；其他平台按 scope 跳过，桌面包因缺少 macOS 资源跳过。笔记、Shell 语法和 diff 校验通过。构建仍报告未改源码的 unused、signedness 等警告。未运行 Windows 程序、Wine 或系统输入法验收，SDK C++/WinRT 手写示例不在 GNU 构建范围内，未打包运行时或安装包。
