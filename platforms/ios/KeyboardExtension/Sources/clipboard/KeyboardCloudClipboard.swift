@@ -19,13 +19,15 @@ struct BackendKeyboardCloudClipboardService: KeyboardCloudClipboardService {
   func add(_ text: String) async throws {
     _ = try await authorized { [client] token in try await client.addClipboard(text, token: token) }
   }
-  /// One retry with a refreshed token when the access token was rejected, as the app's account-backed screens do.
-  private func authorized<T>(_ body: (String) async throws -> T) async throws -> T {
-    let token = try await session.accessToken()
-    do { return try await body(token) }
-    catch let failure as BackendAccountClient.Failure where failure.status == 401 {
-      return try await body(session.accessToken(retrying: token))
-    }
+  /// Bind one request and its possible token refresh to the account that started it.
+  private func authorized<T: Sendable>(_ body: @Sendable (String) async throws -> T) async throws -> T {
+    let userID = try await session.credentials().userID
+    let result = try await session.authenticated(matchingUserID: userID) { token in
+      try await body(token)
+    }.value
+    _ = try await session.credentials(matchingUserID: userID)
+    try Task.checkCancellation()
+    return result
   }
 }
 
