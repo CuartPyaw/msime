@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.MainThreadPolicy;
 import app.msime.android.DrawablePolicy;
 import app.msime.android.KeyboardGeometry;
 import android.content.Context;
@@ -74,7 +75,7 @@ public final class OnboardingActivity extends AppCompatActivity {
     /** 意外异常后自动重试保存的次数与间隔，见 {@link #syncChoices}。 */
     private static final int SYNC_RETRY_LIMIT = 3;
     private static final long SYNC_RETRY_DELAY_MS = 1500;
-    private final android.os.Handler retryHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final android.os.Handler retryHandler = MainThreadPolicy.mainHandler();
     private int syncRetries;
     /** What the last write on this page did, shown under the page's controls until the page changes. */
     @Nullable private String note;

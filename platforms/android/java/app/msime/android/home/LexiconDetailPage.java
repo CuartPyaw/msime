@@ -1,10 +1,10 @@
 package app.msime.android.home;
 
+import app.msime.android.MainThreadPolicy;
 import android.content.Context;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
-import android.os.Looper;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
@@ -35,7 +35,7 @@ public final class LexiconDetailPage extends DetailPage {
     private record Model(@Nullable DictionaryCollectionsStore.Collection collection, long count,
                          List<DictionaryCollectionsStore.Word> words, String failure) {}
 
-    private final Handler main = new Handler(Looper.getMainLooper());
+    private final Handler main = MainThreadPolicy.mainHandler();
     private final ActivityResultLauncher<String> createDocument =
         registerForActivityResult(new ActivityResultContracts.CreateDocument("text/plain"), this::onExportPicked);
     @Nullable private LinearLayout column;

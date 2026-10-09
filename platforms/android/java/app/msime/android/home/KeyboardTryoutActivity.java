@@ -1,10 +1,10 @@
 package app.msime.android.home;
 
+import app.msime.android.MainThreadPolicy;
 import app.msime.android.TextPolicy;
 
 import android.os.Bundle;
 import android.os.Handler;
-import android.os.Looper;
 import android.os.SystemClock;
 import android.text.Editable;
 import android.text.TextWatcher;
@@ -56,7 +56,7 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
     /** 流式回复两次重画之间的最短间隔：最多每秒 20 次。 */
     private static final long STREAM_FRAME_MS = 50;
     private static final String FAILURE = "请求失败，请检查登录状态或稍后重试。";
-    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final Handler mainHandler = MainThreadPolicy.mainHandler();
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final ArrayList<BackendAccount.ChatModel> models = new ArrayList<>(BackendAccount.MAX_CHAT_MODELS);
     private final List<BackendAccount.ChatMessage> messages = new ArrayList<>(13);
