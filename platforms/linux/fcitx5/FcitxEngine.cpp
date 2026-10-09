@@ -4033,7 +4033,7 @@ public:
     return {};
   }
   std::string icon(fcitx::InputContext *) const override { return "input-keyboard"; }
-  /// 本项所属的方案，以及它在共享偏好文档里的键；两项都属于某个方案，只有该方案生效时才列出和切换。
+  /// 本项所属的方案，以及它在共享偏好文档里的键；三项都属于某个方案，只有该方案生效时才列出和切换。
   bool appliesTo(unsigned scheme) const {
     switch (kind_) {
       case Kind::ShuangpinPreedit: return scheme == 1;
