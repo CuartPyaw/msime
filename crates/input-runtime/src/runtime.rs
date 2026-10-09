@@ -1875,8 +1875,20 @@ impl<E: InputEngine> Runtime<E> {
             Action::Character { value, shift } if wubi_top_commit => self
                 .engine
                 .select(self.engine_index(0))
-                .and_then(|committed| {
-                    self.engine.character(value, shift)?;
+                .and_then(|mut committed| {
+                    let next = self.engine.character(value, shift)?;
+                    let tail = if next.has_commit {
+                        next.commit
+                    } else if !next.handled {
+                        char::from(value).to_string()
+                    } else {
+                        String::new()
+                    };
+                    if !tail.is_empty() {
+                        committed.commit.push_str(&tail);
+                        committed.handled = true;
+                        committed.has_commit = true;
+                    }
                     Ok(committed)
                 }),
             // A symbol that would open a mode behind a held phrase piece ends the phrase as punctuation instead, as on the punctuation route.
