@@ -50,10 +50,12 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    # 跟着 i18n.inputMethod.type 接入：两处都填上，nixpkgs 只读当前框架的那一个。默认用 Fcitx5。
+    # 跟着 i18n.inputMethod.type 接入：两处都填上，nixpkgs 只读当前框架的那一个。默认用 Fcitx5，
+    # 但比 mkDefault 低一级：GNOME 模块以 mkDefault 设为 "ibus"，同级的两个值会以冲突报错，
+    # 这样 GNOME 用户不设 type 也能求值，并跟着用 IBus。
     i18n.inputMethod = {
       enable = lib.mkDefault true;
-      type = lib.mkDefault "fcitx5";
+      type = lib.mkOverride 1001 "fcitx5";
       fcitx5.addons = [ cfg.package ];
       ibus.engines = [ cfg.package.ibusEngine ];
     };

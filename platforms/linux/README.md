@@ -150,7 +150,7 @@ programs.msime.enable = true;
 
 `programs.msime.enable` 接入 Fcitx5 插件，放上 `msime-linux-setup`、`msime-linux-settings` 等命令和设置窗口的桌面入口，并注册 provider 的用户单元。包按本系统的 nixpkgs 构建，与系统上的 Fcitx5 出自同一份，不需要另加 overlay。
 
-用 IBus（例如 GNOME 自带的输入源）时设 `i18n.inputMethod.type = "ibus";`，模块改用不带 Fcitx5 插件的 `msime-ibus`，把它的 IBus engine 加进 `i18n.inputMethod.ibus.engines`，其余不变。`i18n.inputMethod.type` 是其他框架时会给出警告。
+用 IBus 时设 `i18n.inputMethod.type = "ibus";`（GNOME 已默认如此，不用另设），模块改用不带 Fcitx5 插件的 `msime-ibus`，把它的 IBus engine 加进 `i18n.inputMethod.ibus.engines`，其余不变。`i18n.inputMethod.type` 是其他框架时会给出警告。
 
 在 GNOME、KDE 以外的 Wayland 混成器上（Hyprland、Sway 等），nixpkgs 的 ibus 模块经 XDG autostart 以 `ibus-daemon --daemonize --xim` 启动 IBus，并导出 `GTK_IM_MODULE=ibus`、`QT_IM_MODULE=ibus`。这样的 IBus 不提供 Wayland 的输入法协议，只认 text-input 协议的原生 Wayland 程序（如 WezTerm）连不上它；经输入法模块接入的 GTK、Qt 程序，IBus 面板把候选和「中/英」提示画进 X11 候选窗，在 Hyprland 上那是一个抢焦点的新窗口，聚焦输入框时提示反复弹出。两处要一起改：
 

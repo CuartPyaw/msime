@@ -114,7 +114,7 @@ ctest 跑的是构建目录，看不到装出去的东西能不能加载，所�
 
 ## NixOS 模块
 
-`programs.msime.enable` 把包加进 `i18n.inputMethod.fcitx5.addons`、把它的 `ibusEngine` 加进 `i18n.inputMethod.ibus.engines`（并以 `mkDefault` 打开 Fcitx5；nixpkgs 只读 `i18n.inputMethod.type` 选中的那一个）。包的默认值跟着 `type` 走：`ibus` 时是 `msime-ibus`，其余是 `msime-fcitx5`；`type` 是 `fcitx5` 而包不带插件时断言失败。包同时加进 `environment.systemPackages`，经 `systemd.packages` 注册用户单元。NixOS 不理会包里单元的 `[Install]` 段，所以模块照单元文件（`platforms/linux/data`）里的 `WantedBy` 给出 `wantedBy`：两个 socket 随 `sockets.target`，剪贴板监视器随 `graphical-session.target`。
+`programs.msime.enable` 把包加进 `i18n.inputMethod.fcitx5.addons`、把它的 `ibusEngine` 加进 `i18n.inputMethod.ibus.engines`（并以比 `mkDefault` 低一级的优先级打开 Fcitx5，GNOME 以 `mkDefault` 设的 `ibus` 会胜出；nixpkgs 只读 `i18n.inputMethod.type` 选中的那一个）。包的默认值跟着 `type` 走：`ibus` 时是 `msime-ibus`，其余是 `msime-fcitx5`；`type` 是 `fcitx5` 而包不带插件时断言失败。包同时加进 `environment.systemPackages`，经 `systemd.packages` 注册用户单元。NixOS 不理会包里单元的 `[Install]` 段，所以模块照单元文件（`platforms/linux/data`）里的 `WantedBy` 给出 `wantedBy`：两个 socket 随 `sockets.target`，剪贴板监视器随 `graphical-session.target`。
 
 ## 检查
 
