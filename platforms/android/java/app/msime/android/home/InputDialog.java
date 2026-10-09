@@ -17,6 +17,7 @@ import android.widget.TextView;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatDialog;
 import app.msime.android.BoundsPolicy;
+import app.msime.android.DrawablePolicy;
 import app.msime.android.KeyboardGeometry;
 import app.msime.android.ListPolicy;
 import app.msime.android.TextPolicy;
@@ -112,7 +113,7 @@ public final class InputDialog {
         ViewPolicy.setSingleLine(input);
         input.setInputType(inputType == 0 ? InputType.TYPE_CLASS_TEXT : inputType);
         input.setHintTextColor(Ui.subText(context));
-        GradientDrawable field = Ui.outlined(Ui.rowBackground(context), Ui.dp(context, 10),
+        GradientDrawable field = DrawablePolicy.outlined(Ui.rowBackground(context), Ui.dp(context, 10),
             KeyboardGeometry.atLeastOnePixel(context, 1), Ui.hairline(context));
         ViewPolicy.setBackground(input, field);
         Ui.setHorizontalPaddingDp(input, context, 12);

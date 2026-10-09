@@ -10,6 +10,7 @@ import android.widget.LinearLayout;
 import android.widget.RadioButton;
 import android.widget.TextView;
 import androidx.annotation.Nullable;
+import app.msime.android.DrawablePolicy;
 import app.msime.android.ViewPolicy;
 import java.util.ArrayList;
 import java.util.List;
@@ -36,7 +37,7 @@ public final class SegmentedControl extends LinearLayout {
         ViewPolicy.setCenteredVertically(this);
         int pad = Ui.dp(context, 2);
         Ui.setSymmetricPaddingPx(this, pad);
-        GradientDrawable frame = Ui.outlined(Color.TRANSPARENT, 9999f, Ui.dp(context, 1),
+        GradientDrawable frame = DrawablePolicy.outlined(Color.TRANSPARENT, 9999f, Ui.dp(context, 1),
             Ui.outline(context));
         setBackground(frame);
     }

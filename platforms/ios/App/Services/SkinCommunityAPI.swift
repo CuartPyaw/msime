@@ -224,7 +224,9 @@ actor SkinCommunityAPI {
     return CommunityChallenge(challenge_id: value.challenge_id, nonce: nonce)
   }
   func login(challenge: String, identityToken: String) async throws {
-    try await account.signIn(challenge: challenge, credential: identityToken)
+    try await account.signIn(challenge: challenge, credential: identityToken, replacingAccount: { accountID in
+      try? DictionarySnapshotQueue().cancel(accountID: accountID)
+    })
   }
   func profile() async throws -> CommunityProfile {
     let result = try await accountRequest { token in try await client.profile(token: token) }
@@ -245,10 +247,20 @@ actor SkinCommunityAPI {
   func logout(deleteAccount: Bool = false, all: Bool = false) async throws {
     if deleteAccount {
       _ = try await accountRequest { token in try await client.deleteAccount(token: token) }
-      try await account.forget()
-    } else { try await account.logout(all: all) }
+      try await account.forget(removingAccount: { accountID in
+        try? DictionarySnapshotQueue().cancel(accountID: accountID)
+      })
+    } else {
+      try await account.logout(all: all, removingAccount: { accountID in
+        try? DictionarySnapshotQueue().cancel(accountID: accountID)
+      })
+    }
   }
-  func clearExpiredLogin() async throws { try await account.forget() }
+  func clearExpiredLogin() async throws {
+    try await account.forget(removingAccount: { accountID in
+      try? DictionarySnapshotQueue().cancel(accountID: accountID)
+    })
+  }
   /// `category` 为 `nil` 时不按分类筛选。
   func list(offset: Int = 0, search: String = "", mine: Bool = false,
             category: CommunitySkinCategory? = nil) async throws -> CommunityPage {

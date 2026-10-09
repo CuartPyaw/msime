@@ -1474,17 +1474,9 @@ fn ios_keyboard_ai_preferences(
         _ => "custom",
     }
     .to_owned();
-    let endpoint = preferences.endpoint.trim();
     // 来源键与设置页一致：https 不限主机，http 只认本机或局域网（`ai::endpoint`）。
-    let token = msime_client_core::ai::endpoint::credential_origin(endpoint)
-        .and_then(|origin| {
-            preferences
-                .tokens
-                .get(&preferences.provider)
-                .or_else(|| preferences.tokens.get(&origin))
-                .or_else(|| (!preferences.token.is_empty()).then_some(&preferences.token))
-                .cloned()
-        })
+    let token = msime_client_core::ai::credential_for_endpoint(preferences)
+        .map(str::to_owned)
         .unwrap_or_default();
     let enabled = preferences.enabled
         && !preferences.endpoint.trim().is_empty()
@@ -3006,9 +2998,6 @@ fn macos_input_method_defaults_domain() -> &'static str {
 const MACOS_SHUANGPIN_KEYMAP_DEFAULTS_KEY: &str = "MSIMEClientShuangpinKeymap";
 
 #[cfg(target_os = "macos")]
-const MACOS_WUBI_AUTO_COMMIT_UNIQUE_DEFAULTS_KEY: &str = "MSIMEClientWubiAutoCommitUnique";
-
-#[cfg(target_os = "macos")]
 #[tauri::command]
 async fn load_macos_shuangpin_keymap() -> Result<bool, HostActionError> {
     tauri::async_runtime::spawn_blocking(|| {
@@ -3051,65 +3040,6 @@ async fn save_macos_shuangpin_keymap(enabled: bool) -> Result<(), HostActionErro
                 "write",
                 macos_input_method_defaults_domain(),
                 MACOS_SHUANGPIN_KEYMAP_DEFAULTS_KEY,
-                "-bool",
-                if enabled { "true" } else { "false" },
-            ])
-            .status()
-            .map_err(|_| HostActionError {
-                code: "unavailable",
-            })?;
-        status.success().then_some(()).ok_or(HostActionError {
-            code: "unavailable",
-        })
-    })
-    .await
-    .map_err(|_| HostActionError {
-        code: "unavailable",
-    })?
-}
-
-#[cfg(target_os = "macos")]
-#[tauri::command]
-async fn load_macos_wubi_auto_commit_unique() -> Result<bool, HostActionError> {
-    tauri::async_runtime::spawn_blocking(|| {
-        let output = std::process::Command::new("defaults")
-            .args([
-                "read",
-                macos_input_method_defaults_domain(),
-                MACOS_WUBI_AUTO_COMMIT_UNIQUE_DEFAULTS_KEY,
-            ])
-            .output()
-            .map_err(|_| HostActionError {
-                code: "unavailable",
-            })?;
-        if !output.status.success() {
-            // NSUserDefaults.boolForKey: also treats an unset value as false.
-            return Ok(false);
-        }
-        let value = String::from_utf8_lossy(&output.stdout);
-        match value.trim() {
-            "1" | "true" | "TRUE" => Ok(true),
-            "0" | "false" | "FALSE" => Ok(false),
-            _ => Err(HostActionError {
-                code: "unavailable",
-            }),
-        }
-    })
-    .await
-    .map_err(|_| HostActionError {
-        code: "unavailable",
-    })?
-}
-
-#[cfg(target_os = "macos")]
-#[tauri::command]
-async fn save_macos_wubi_auto_commit_unique(enabled: bool) -> Result<(), HostActionError> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let status = std::process::Command::new("defaults")
-            .args([
-                "write",
-                macos_input_method_defaults_domain(),
-                MACOS_WUBI_AUTO_COMMIT_UNIQUE_DEFAULTS_KEY,
                 "-bool",
                 if enabled { "true" } else { "false" },
             ])
@@ -5429,10 +5359,6 @@ pub fn run() {
             load_macos_shuangpin_keymap,
             #[cfg(target_os = "macos")]
             save_macos_shuangpin_keymap,
-            #[cfg(target_os = "macos")]
-            load_macos_wubi_auto_commit_unique,
-            #[cfg(target_os = "macos")]
-            save_macos_wubi_auto_commit_unique,
             #[cfg(target_os = "macos")]
             on_device_translation_downloadable_languages,
             #[cfg(target_os = "macos")]

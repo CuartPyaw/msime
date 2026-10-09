@@ -1,6 +1,7 @@
 #import <AppKit/AppKit.h>
 #import <InputMethodKit/InputMethodKit.h>
 #import <CoreText/CoreText.h>
+#import <CommonCrypto/CommonDigest.h>
 #import "MSIMEClientSession.h"
 #import "../settings/RuntimeOptions.h"
 #import "../../../../shared/apple/TextClient.h"
@@ -67,7 +68,6 @@
 #import "../cloud/CloudCandidateRequest.h"
 #import "../core/CustomTranslationBatch.h"
 #import "../cloud/TranslationCache.h"
-#include "../core/WubiCommitPolicy.h"
 #include "../core/WubiCodeHintPolicy.h"
 #include "../core/PairedPunctuation.h"
 #include "../core/PairedPunctuation.h"
@@ -219,6 +219,12 @@ static NSString *MSIMEAICacheKey(NSDictionary *online) {
     if (![config isKindOfClass:NSDictionary.class] || !MSIMEStrictBoolean(config[@"enabled"]) ||
         ![segments isKindOfClass:NSArray.class] || !segments.count ||
         ![NSJSONSerialization isValidJSONObject:segments]) return nil;
+    NSString *context = [online[@"ai_context"] isKindOfClass:NSString.class] ? online[@"ai_context"] : @"";
+    NSData *contextBytes = [context dataUsingEncoding:NSUTF8StringEncoding];
+    if (!contextBytes || contextBytes.length > UINT32_MAX) return nil;
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(contextBytes.bytes, (CC_LONG)contextBytes.length, digest);
+    NSString *contextHash = [[NSData dataWithBytes:digest length:sizeof(digest)] base64EncodedStringWithOptions:0];
     NSDictionary *identity = @{ @"provider": [config[@"provider"] isKindOfClass:NSString.class] ? config[@"provider"] : @"",
         @"endpoint": [config[@"endpoint"] isKindOfClass:NSString.class] ? config[@"endpoint"] : @"",
         @"model": [config[@"model"] isKindOfClass:NSString.class] ? config[@"model"] : @"",
@@ -227,6 +233,7 @@ static NSString *MSIMEAICacheKey(NSDictionary *online) {
         @"prompt_custom_1": [config[@"prompt_custom_1"] isKindOfClass:NSString.class] ? config[@"prompt_custom_1"] : @"",
         @"prompt_custom_2": [config[@"prompt_custom_2"] isKindOfClass:NSString.class] ? config[@"prompt_custom_2"] : @"",
         @"prompt_custom_3": [config[@"prompt_custom_3"] isKindOfClass:NSString.class] ? config[@"prompt_custom_3"] : @"",
+        @"ai_context_sha256": contextHash,
         @"pinyin_segments": segments };
     NSData *data = [NSJSONSerialization dataWithJSONObject:identity options:0 error:nil];
     return data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
@@ -572,6 +579,18 @@ static NSArray<NSString *> *MSIMETranslationTargetsFromPreferences(NSDictionary 
 
 static NSString *MSIMETranslationWorkKey(NSString *target, NSString *text) {
     return [NSString stringWithFormat:@"%@\u001f%@", target ?: @"", text ?: @""];
+}
+
+// The cache outlives input controllers. Include the selected provider's full
+// configuration so a credential changed while no controller existed cannot
+// reuse an earlier provider's results, without retaining the credential itself.
+static NSString *MSIMETranslationProviderScope(NSString *service, NSDictionary *configuration) {
+    NSData *encoded = [NSJSONSerialization dataWithJSONObject:configuration options:NSJSONWritingSortedKeys error:nil];
+    if (!encoded || encoded.length > UINT32_MAX) return nil;
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(encoded.bytes, (CC_LONG)encoded.length, digest);
+    NSString *fingerprint = [[NSData dataWithBytes:digest length:sizeof(digest)] base64EncodedStringWithOptions:0];
+    return [NSString stringWithFormat:@"%@:%@", service, fingerprint];
 }
 
 static NSString *MSIMEJoinedTranslations(NSDictionary<NSString *, NSString *> *values,
@@ -2401,7 +2420,6 @@ static NSImage *MSIMECandidateLogoImage() {
     [self stopAccountGloss];
     if ([_customQuery isEqual:query]) return;
     [self detachCustomTranslations];
-    _customQuery = query;
     // `/fy` translates one English sentence into the query's own target, Chinese, which the candidate target list does not name and the candidate plan refuses; it is its own plan item and is neither read from nor written to the gloss cache.
     const BOOL command = MSIMEStrictBoolean(query[@"command"]);
     NSArray<NSString *> *targets = command ? query[@"target_languages"] : MSIMETranslationTargets(query);
@@ -2410,8 +2428,10 @@ static NSImage *MSIMECandidateLogoImage() {
     MSIMETranslationCache *cache = [MSIMETranslationCache sharedCache];
     BOOL tencent = query[@"tencent_tmt"] != nil;
     BOOL niuTrans = query[@"niutrans"] != nil;
-    NSString *scope = niuTrans ? [@"niutrans:" stringByAppendingString:query[@"niutrans"][@"app_id"] ?: @""] :
-        tencent ? @"tencent" : [@"custom:" stringByAppendingString:query[@"custom_translation"][@"endpoint"] ?: @""];
+    NSString *scope = MSIMETranslationProviderScope(niuTrans ? @"niutrans" : tencent ? @"tencent" : @"custom",
+        niuTrans ? query[@"niutrans"] : tencent ? query[@"tencent_tmt"] : query[@"custom_translation"]);
+    if (!scope) return;
+    _customQuery = query;
     NSSet *glossTexts = [NSSet setWithArray:[_glossResults valueForKey:@"text"] ?: @[]];
     if ([_glossRequest isEqual:[self currentGlossRequest]]) {
         for (NSDictionary *result in _glossResults) {
@@ -5854,13 +5874,6 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
     // A punctuation key is the only route that arms the space conversion, as in the reference, whose punctuation handler is the one caller: a candidate picked with Space or a digit never arms, even when its text ends in a mark.
     if (command == UINT32_MAX && event.characters.length == 1 && MSIMEASCIIPunctuation([event.characters characterAtIndex:0]))
         [self noteCommittedChinesePunctuation:transition client:sender];
-    if (command == UINT32_MAX && MSIMEStrictBoolean(transition[@"handled"]) &&
-        ![transition[@"commit"] isKindOfClass:NSString.class] && event.characters.length == 1 &&
-        [event.characters characterAtIndex:0] >= 'a' && [event.characters characterAtIndex:0] <= 'z' &&
-        MSIMEShouldAutoCommitWubi(_appearance.wubiAutoCommitUnique, transition[@"view"])) {
-        NSDictionary *committed = [_session command:MSIME_COMMIT_CANDIDATE error:nil];
-        if (committed) [self apply:committed];
-    }
     if (MSIMEStrictBoolean(transition[@"handled"])) return YES;
     // Match Apple: Engine gets first refusal, then finish any composition before fallback.
     if ([_view[@"editing_text"] length]) {

@@ -13,6 +13,7 @@ import androidx.annotation.Nullable;
 import androidx.core.view.ViewCompat;
 import app.msime.android.CustomKeyboardSkin;
 import app.msime.android.CustomSkinLibrary;
+import app.msime.android.DrawablePolicy;
 import app.msime.android.KeyboardGeometry;
 import app.msime.android.KeyboardSkin;
 import app.msime.android.ViewPolicy;
@@ -152,7 +153,7 @@ public final class SkinsPage extends DetailPage {
 
         FrameLayout tile = new FrameLayout(context);
         int ring = Ui.dp(context, 2);
-        GradientDrawable frame = Ui.outlined(Color.TRANSPARENT, Ui.dp(context, 14),
+        GradientDrawable frame = DrawablePolicy.outlined(Color.TRANSPARENT, Ui.dp(context, 14),
             card.selected() ? ring : KeyboardGeometry.atLeastOnePixel(context, 1),
             card.selected() ? Ui.accent(context) : Ui.outline(context));
         ViewPolicy.setBackground(tile, frame);
@@ -187,7 +188,7 @@ public final class SkinsPage extends DetailPage {
         ViewPolicy.setCenteredHorizontally(cell);
         LinearLayout tile = Ui.column(context);
         ViewPolicy.setCentered(tile);
-        GradientDrawable dashed = Ui.outlinedDashed(Ui.accentSoft(context), Ui.dp(context, 14),
+        GradientDrawable dashed = DrawablePolicy.outlinedDashed(Ui.accentSoft(context), Ui.dp(context, 14),
             KeyboardGeometry.atLeastOnePixel(context, 1.5f), Ui.accent(context), Ui.dp(context, 6),
             Ui.dp(context, 4));
         ViewPolicy.setBackground(tile, dashed);

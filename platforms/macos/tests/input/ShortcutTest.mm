@@ -5378,7 +5378,8 @@ static void TestAiCandidateEngineDelivery() {
     NSError *bridgeError = nil;
     NSDictionary *descriptor = [MSIMEClientSession aiHTTPRequest:@{
         @"config":@{@"enabled":@YES, @"provider":@"deepseek", @"endpoint":@"https://synthetic.invalid/chat", @"model":@"synthetic",
-            @"token":@"synthetic-secret", @"candidate_limit":@3, @"prompt_id":@"custom_2", @"prompt_custom_2":@"synthetic prompt"},
+            @"tokens":@{@"https://synthetic.invalid:443":@"synthetic-secret"}, @"candidate_limit":@3,
+            @"prompt_id":@"custom_2", @"prompt_custom_2":@"synthetic prompt"},
         @"input":@{@"segmented_pinyin":@[@"ni", @"hao"], @"context":@"", @"candidate_limit":@3}} error:&bridgeError];
     assert(descriptor && !bridgeError && [descriptor[@"timeout_ms"] isEqual:@8000]);
     assert([descriptor[@"headers"][@"Authorization"] isEqual:@"Bearer synthetic-secret"]);
@@ -5391,7 +5392,8 @@ static void TestAiCandidateEngineDelivery() {
     NSMutableDictionary *options = [@{@"api_version":@1, @"preferences":@{@"scheme":@"quanpin", @"learning":@NO,
         @"candidate_page_size":@5, @"chinese_punctuation":@YES, @"default_ime_mode":@"chinese",
         @"ai_assistant":@{@"enabled":@YES, @"provider":@"openai", @"endpoint":@"https://synthetic.invalid/chat",
-            @"model":@"synthetic", @"token":@"synthetic-private", @"candidate_limit":@3}}} mutableCopy];
+            @"model":@"synthetic", @"tokens":@{@"https://synthetic.invalid:443":@"synthetic-private"},
+            @"candidate_limit":@3}}} mutableCopy];
     for (NSString *name in @[@"resources", @"user_data", @"cache", @"dictionaries"]) {
         NSString *path = [root stringByAppendingPathComponent:name];
         assert([NSFileManager.defaultManager createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nil]);
@@ -5405,6 +5407,7 @@ static void TestAiCandidateEngineDelivery() {
     NSDictionary *query = [session onlineQueryWithError:&error];
     assert(!error && [query[@"ai_eligible"] boolValue]);
     assert(!query[@"ai_assistant"][@"token"]); // Copied queries never expose credentials.
+    assert(!query[@"ai_assistant"][@"tokens"]);
     NSDictionary *sessionDescriptor = [session aiRequestForQuery:query error:&error];
     assert(sessionDescriptor && !error &&
         [sessionDescriptor[@"headers"][@"Authorization"] isEqual:@"Bearer synthetic-private"]);
@@ -6116,6 +6119,16 @@ static void TestAiCandidateCacheAcrossGenerations() {
     [controller setValue:@{ @"candidates": @[@{ @"text": @"普通候选", @"source": @0 }] } forKey:@"view"];
     [controller synchronizeAITranslations];
     assert(session.applications == 2 && session.descriptorRequests == 1 && controller.aiBatches.count == 1);
+    NSMutableDictionary *changedContext = [session.query mutableCopy];
+    changedContext[@"generation"] = @([changedContext[@"generation"] unsignedLongLongValue] + 1);
+    changedContext[@"ai_context"] = @"另一个上下文";
+    session.query = changedContext;
+    [controller setValue:@{ @"candidates": @[@{ @"text": @"普通候选", @"source": @0 }] } forKey:@"view"];
+    [controller synchronizeAITranslations];
+    timer = [controller valueForKey:@"aiTimer"];
+    assert(timer && controller.aiBatches.count == 1);
+    [timer fire];
+    assert(controller.aiBatches.count == 2 && session.descriptorRequests == 2);
     [controller cancelAITranslations];
 }
 
@@ -6455,10 +6468,10 @@ static void TestTencentCandidateScheduling() {
     assert(fallback.tencentConfig && fallback.items.count == 1 && [fallback.items[0][@"text"] isEqual:@"测试"]);
     fallback.reply(@[@{@"text":@"测试", @"translation":@"test"}]);
     assert(([session.delivered isEqual:@[@{@"text":@"Hello", @"translation":@"本地释义"}, @{@"text":@"测试", @"translation":@"test"}]]));
-    NSArray *(^identity)(NSDictionary *) = ^NSArray *(NSDictionary *item) {
-        return @[@"tencent", session.targetLanguage, item[@"source_language"], item[@"target_language"], item[@"key"]];
-    };
-    assert([[[MSIMETranslationCache sharedCache] valueForIdentity:identity(fallback.items[0])] isEqual:@"test"]);
+    NSUInteger cachedBatchCount = controller.batches.count;
+    session.generation++;
+    [controller synchronizeCustomTranslations];
+    assert(controller.batches.count == cachedBatchCount && [session.delivered.lastObject[@"translation"] isEqual:@"test"]);
     [controller cancelCandidateTranslations]; [[MSIMETranslationCache sharedCache] clear];
     session.offline = NO;
     [controller synchronizeCandidateGloss];
@@ -6469,13 +6482,15 @@ static void TestTencentCandidateScheduling() {
     [controller applySharedToolbarPreferences:@{@"tencent_tmt":disabled}];
     assert(pending.cancelled && ![controller currentCustomTranslationRequest] && session.delivered.count == 0);
     pending.reply(online); assert(session.delivered.count == 0);
-    // The provider changed while the request was in flight, and the cache identity carries no credentials: the late reply must leave neither a gloss nor a negative entry behind.
-    for (NSDictionary *item in pending.items) assert(![[MSIMETranslationCache sharedCache] valueForIdentity:identity(item)]);
+    // The provider changed while the request was in flight. Its late reply must
+    // leave neither a gloss nor a negative entry behind.
     session.tencent = disabled; assert(![controller currentCustomTranslationRequest]);
     session.tencent = TencentConfig();
     [controller applySharedToolbarPreferences:@{@"tencent_tmt":session.tencent}];
     [controller synchronizeCandidateGloss];
+    NSUInteger beforeReenable = controller.batches.count;
     [controller synchronizeCustomTranslations]; pending = controller.batches.lastObject;
+    assert(controller.batches.count == beforeReenable + 1);
     // Pending custom enablement must block Tencent even before the query updates.
     NSDictionary *custom = @{@"enabled":@YES, @"endpoint":@"https://provider.invalid", @"api_key":@""};
     [controller applySharedToolbarPreferences:@{@"custom_translation":custom}];
@@ -7420,6 +7435,37 @@ static void TestCustomTranslationCacheDelivery() {
     [controller cancelCandidateTranslations];
     [[MSIMETranslationCache sharedCache] clear];
 }
+static void TestCustomTranslationCacheSeparatesCredentialsAcrossControllers() {
+    [[MSIMETranslationCache sharedCache] clear];
+    CustomTranslationController *first = [CustomTranslationController alloc];
+    first.batches = [NSMutableArray array];
+    CustomTranslationSession *oldSession = [CustomTranslationSession new];
+    oldSession.enabled = YES; oldSession.generation = 1; oldSession.targetLanguage = @"fr";
+    oldSession.custom = @{@"enabled":@YES, @"endpoint":@"https://cache-source.invalid/api", @"api_key":@"synthetic-old"};
+    oldSession.page = @[@{@"text":@"Hello", @"source":@4}];
+    [first setValue:oldSession forKey:@"session"];
+    [first setValue:[ShortcutClient new] forKey:@"activeClient"];
+    [first applySharedToolbarPreferences:@{@"custom_translation":oldSession.custom}];
+    [first synchronizeCustomTranslations];
+    assert(first.batches.count == 1);
+    first.batches[0].reply(@[@{@"text":@"Hello", @"translation":@"旧译文"}]);
+    [first cancelCandidateTranslations];
+    first = nil;
+
+    CustomTranslationController *second = [CustomTranslationController alloc];
+    second.batches = [NSMutableArray array];
+    CustomTranslationSession *newSession = [CustomTranslationSession new];
+    newSession.enabled = YES; newSession.generation = 1; newSession.targetLanguage = @"fr";
+    newSession.custom = @{@"enabled":@YES, @"endpoint":@"https://cache-source.invalid/api", @"api_key":@"synthetic-new"};
+    newSession.page = @[@{@"text":@"Hello", @"source":@4}];
+    [second setValue:newSession forKey:@"session"];
+    [second setValue:[ShortcutClient new] forKey:@"activeClient"];
+    [second applySharedToolbarPreferences:@{@"custom_translation":newSession.custom}];
+    [second synchronizeCustomTranslations];
+    assert(second.batches.count == 1 && newSession.delivered.count == 0);
+    [second cancelCandidateTranslations];
+    [[MSIMETranslationCache sharedCache] clear];
+}
 static void TestCustomTranslationIdleDelay(BOOL tencent) {
     [[MSIMETranslationCache sharedCache] clear];
     CustomTranslationController *controller = [CustomTranslationController alloc];
@@ -7880,6 +7926,7 @@ int main(int argc, char **argv) {
             @autoreleasepool { TestGlossLinesSurviveSession(); }
             @autoreleasepool { TestSecondaryTranslationScheduling(); }
             @autoreleasepool { TestCustomTranslationCacheDelivery(); }
+            @autoreleasepool { TestCustomTranslationCacheSeparatesCredentialsAcrossControllers(); }
             @autoreleasepool { TestCustomTranslationIdleDelay(NO); }
             @autoreleasepool { TestCustomTranslationIdleDelay(YES); }
             @autoreleasepool { TestTencentCandidateScheduling(); }
@@ -7921,6 +7968,7 @@ int main(int argc, char **argv) {
         @autoreleasepool { TestGlossLinesSurviveSession(); }
         @autoreleasepool { TestSecondaryTranslationScheduling(); }
         @autoreleasepool { TestCustomTranslationCacheDelivery(); }
+        @autoreleasepool { TestCustomTranslationCacheSeparatesCredentialsAcrossControllers(); }
         @autoreleasepool { TestCustomTranslationIdleDelay(NO); }
         @autoreleasepool { TestCustomTranslationIdleDelay(YES); }
         @autoreleasepool { TestTencentCandidateScheduling(); }

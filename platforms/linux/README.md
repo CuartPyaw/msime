@@ -122,7 +122,7 @@ msime-linux-setup --update --download   # 升级之后只取回过期的那几�
 
 安装前先核对校验值：`sha256sum -c SHA256SUMS --ignore-missing`。Debian/Ubuntu 用 `sudo apt install ./msime-linux_<版本>_<架构>.deb`，依赖由 apt 一并装好，卸载用 `sudo apt remove msime-client`。对应 Windows 安装程序在卸载和升级时停止输入法进程：`apt remove` 删除文件前，包的 prerm 在每个已登录（或启用了 linger）用户的 systemd 用户实例里逐个 `disable --now` 与 CMake 卸载相同的那组在线、语音和剪贴板单元，免得它们指着已删除的程序反复重启，再在同一实例里以临时单元运行 `msime-linux-setup --unregister`，把本输入法从该用户的输入法列表里移除（见「卸载 CMake 安装」）；升级后 postinst 让这些实例重读单元文件，并重启其中正在运行的服务，使其换到新程序，socket 单元保持监听，输入法宿主自己换到新程序（见上文「安装后首次使用」里的升级一段）。联系不上的用户实例只打印该用户需要执行的命令；未登录的用户没有运行中的服务，但启用链接仍留在各自的 `~/.config/systemd/user`，需要时自行执行 `systemctl --user disable …`。没有 systemd 的环境（例如容器）两步都跳过，也都不会让 apt 失败。包里唯一不在 `/usr` 下的文件是剪贴板服务的 XDG 自启动项 `/etc/xdg/autostart/msime-linux-clipboard.desktop`（见「独立剪贴板采集」），它是 conffile：管理员修改或删除它之后，升级不会把它改回来；`apt remove` 留下它、`apt purge` 才删除，留下的自启动项在服务已被 prerm 停用后什么也不做。归档给不经 apt 安装的 Debian 系系统用，不是跨发行版的通用包：库目录是 Debian 的多架构布局 `usr/lib/<三元组>/`（例如 `usr/lib/x86_64-linux-gnu/`），Fcitx5 插件因此在 `usr/lib/<三元组>/fcitx5/`，Arch（`/usr/lib/fcitx5`）和 Fedora（`/usr/lib64/fcitx5`）上的 Fcitx5 不会去那里加载它。用法：`sudo tar -xzf msime-linux-<版本>-linux-<架构>.tar.gz --strip-components=1 -C /`，再执行 `sudo gtk-update-icon-cache -f -t /usr/share/icons/hicolor`；归档没有依赖声明，需由发行版提供 IBus 1.5.20+ 或 Fcitx5 5.0.20+、Python 3.9+，以及二进制链接的共享库（WebKitGTK 4.1、GTK 3、libsoup 3、ICU、libcurl、SQLite、D-Bus、Wayland、X11、xkbcommon 等，完整列表以同版本 `.deb` 的 Depends 为准）；它也没有卸载入口，删除时按归档内的文件列表（`tar -tzf`）逐个移除。两种方式装完都按上面的「安装后首次使用」执行 `msime-linux-setup`。
 
-`.deb` 与归档在 Debian 12（bookworm）容器里构建，链接的是 bookworm 的库版本，Depends 因此要求 glibc 2.35、libstdc++ 11、WebKitGTK 4.1 与 libsoup 3 及以上，只能装在提供这些包的发行版上：Debian 12、Ubuntu 22.04 与更新的版本可以，Debian 11、UOS 20 这类 glibc 更旧或没有 WebKitGTK 4.1 的系统不行（#6311）。Fcitx5 不在 Depends 里，而是 Recommends `fcitx5 (>= 5.0.20)`：IBus 宿主不需要它，Ubuntu 22.04 只有 Fcitx5 5.0.14，写成依赖会让整个包装不上（#6305）。apt 默认安装推荐包，Fcitx5 够新的系统照旧一起装上；在 Ubuntu 22.04 上推荐被跳过，水杉走 IBus，即使另装了系统的 Fcitx5 5.0.14，它也会按插件条目的 `core:5.0.20` 依赖拒绝加载插件。`dpkg-shlibdeps` 从插件推出的 `libfcitx5*` 依赖由 `package-container.sh` 重新打包时从 Depends 去掉，`release-linux.yml` 逐包核对 Depends 里没有 Fcitx5。
+`.deb` 与归档在 Debian 12（bookworm）容器里构建，链接的是 bookworm 的库版本，Depends 因此要求 glibc 2.35、libstdc++ 11、WebKitGTK 4.1 与 libsoup 3 及以上，只能装在提供这些包的发行版上：Debian 12、Ubuntu 22.04 与更新的版本可以，Debian 11、UOS 20 这类 glibc 更旧或没有 WebKitGTK 4.1 的系统不行（#6311）。输入法框架在 Depends 里写成二选一 `ibus (>= 1.5.20) | fcitx5 (>= 5.0.20)`（#6401）：系统里已有哪个就算满足哪个，deepin 这类用 Fcitx5 的系统不会被拉进 IBus 守护进程和它的 GTK 模块，用 IBus 的系统也不会被拉进 Fcitx5；两个都没有时 apt 装写在前面的 IBus。Fcitx5 不进 Recommends，因为 apt 默认安装推荐包，那样 IBus 系统会被拉进 Fcitx5。Ubuntu 22.04 只有 Fcitx5 5.0.14，在那里由 IBus 满足这一项，整包照样装得上（#6305）；即使另装了系统的 Fcitx5 5.0.14，它也会按插件条目的 `core:5.0.20` 依赖拒绝加载插件。辅助程序链接 libibus，所以 `dpkg-shlibdeps` 仍会带上 `libibus-1.0-5`，那只是一个库，不会启动 IBus。`dpkg-shlibdeps` 从插件推出的 `libfcitx5*` 依赖由 `package-container.sh` 重新打包时从 Depends 去掉，`release-linux.yml` 逐包核对 Depends 里只以这个二选一提到两个框架。`.rpm` 同样写成 `(ibus >= 1.5.20 or fcitx5 >= 5.0.20)`，插件链接的 `libFcitx5*` 不进自动生成的 Requires；Arch 的两个 PKGBUILD 把 `ibus`、`fcitx5` 都放在 optdepends。
 
 `.rpm` 在 Fedora 44 容器里单独构建（`tests/tools/Dockerfile.package-rpm`），不是由 `.deb` 转换来的：rpmbuild 按二进制实际链接的库生成 Requires，在 Debian 上链接的二进制会带上 Debian 独有的 soname 与符号版本（例如 libcurl 的 `CURL_OPENSSL_4`），Fedora 上没有包提供它们，已归档的 MSIME-Linux 0.9.1 的 rpm 就是因此装不上（#2095）。它面向 Fedora 44 及提供同样库版本的 DNF 系统，用 `sudo dnf install ./msime-linux-<版本>-1.<架构>.rpm` 安装，`sudo dnf remove msime-linux` 卸载；维护脚本就是 `.deb` 的 prerm 与 postinst，前面加一段把 RPM 的实例计数换算成对应的 dpkg 参数，所以卸载与升级的行为与上面 `.deb` 的描述相同，自启动项是 `%config(noreplace)`。包自带的 Host API 库与 sherpa-onnx 运行库既不作为依赖要求、也不对系统声明提供。发行流程在构建后把它装进一个干净的 Fedora 容器再卸掉（`tests/tools/check-rpm-install.sh`），依赖解析不了就在那一步失败。支持更多发行版仍需按目标发行版分别构建。
 
@@ -427,7 +427,7 @@ Fcitx5 的候选表由 classicui 插件按主题绘制，宿主把同一份 Reso
 
 共享设置页的“输入 → 双拼预编辑”在 Linux 上同样可见，对应 `HostCapabilities::shuangpin_preedit`。IBus 与 Fcitx5 都是自己把快照的 `preedit` 写进平台预编辑的，因此这个选择归宿主展示；此前该控件按平台名只给 macOS，Linux 用户只能在双拼方案生效时从原生状态菜单里找到它。
 
-五笔方案提供 IBus 属性“五笔剩余编码”，对应共享 `wubi_code_hint`，默认开启；关闭后候选仍按 Engine 原文显示，但隐藏候选后的剩余五笔编码提示。该设置仅影响展示，不改变候选身份或提交文本；配置共享偏好目录时持久化，未配置时保留在当前会话。
+五笔方案提供 IBus 属性“五笔剩余编码”，对应共享 `wubi_code_hint`，默认开启；关闭后候选仍按 Engine 原文显示，但隐藏候选后的剩余五笔编码提示。该设置仅影响展示，不改变候选身份或提交文本；配置共享偏好目录时持久化，未配置时保留在当前会话。同一菜单还有“五笔四码唯一自动上屏”，对应共享 `wubi_auto_commit_unique`（默认开启），关闭后四码唯一的词停在候选列表里等空格或数字键选择；提交判定在共享 `crates/input-runtime`，两个前端都只是把值写进共享偏好文档。
 
 Windows 的 `clipboard_history` 依赖独立剪贴板监听器和候选历史 UI；IBus Engine API 不提供剪贴板事件。Linux IBus 宿主只读取用户明确配置的历史文件，并通过属性菜单提供最近条目、删除和清空操作，不读取系统剪贴板，也不在输入线程监听剪贴板。Linux 桌面面板的剪贴板同步仍由独立 Tauri 服务承载。独立工具的 `get INDEX` 操作会将已存储条目写到标准输出，`remove-index INDEX` 按历史位置删除单个条目，供桌面服务或 compositor 显式接管粘贴和删除动作；它不会写入或读取系统剪贴板。
 
@@ -523,18 +523,24 @@ Emoji 本地 CLI 的 `msime-linux-emoji --local` 会按显式资源目录、其�
 
 `scripts/verify-local.sh` 的「compile: linux desktop shell」阶段在非 Linux 主机上用 `tests/tools/Dockerfile.desktop-check` 构建的镜像跑 `cargo check -p msime-desktop --locked --all-targets`：与编译门禁同一个固定摘要的 `rust:1.97.1-bookworm`，预装 Tauri 外壳需要的 webkit2gtk、gtk3、libsoup、javascriptcoregtk 和 cpal 需要的 ALSA 开发包，apt 只在 Dockerfile 变化后的第一次运行时执行，`--quick` 和 pre-push 钩子不再每次重装。镜像构建日志留在 `target/linux-desktop-check/image.log`，apt 失败时阶段打印其末尾并 FAIL。
 
-这两个门禁镜像同时预装 `rust-toolchain.toml` 要求的 `rustfmt` 和 `clippy`，临时容器启动时不再逐次补装。组件层放在已有系统依赖层之后，修改组件准备步骤时可复用 apt 缓存。构建或升级镜像后，在仓库根目录验证工具链就绪：
+原生门禁和桌面检查分别把 `CARGO_HOME` 放在已有挂载内的 `/build/cargo-home`、`/ctarget/cargo-home`，对应宿主的 `target/linux-build-gate/cargo-home`、`target/linux-desktop-check/cargo-home`。registry 和 git 下载缓存随构建目录保留，后续临时容器复用；首次运行或依赖变化仍可联网准备，日常命令继续使用 `--locked`。两个缓存按 checkout 与门禁隔离，不借用主机 Cargo home，删除 worktree 时一并清理。
+
+这两个门禁镜像、隔离验收基镜像（`tests/tools/Dockerfile`）和 RPM 打包镜像（`tests/tools/Dockerfile.package-rpm`）同时预装 `rust-toolchain.toml` 要求的 `rustfmt` 和 `clippy`，临时容器启动时不再逐次补装。Fcitx5 和现代 IBus 验收镜像继承验收基镜像，Deb 打包镜像继承原生门禁镜像。组件层放在已有构建层之后，修改组件准备步骤时可复用系统依赖、Wayland 驱动或 RPM 编译器安装缓存。构建或升级相应镜像后，在仓库根目录验证工具链就绪：
 
 ```sh
 linux_gate_hash=$(printf %s "$PWD" | shasum | cut -c1-12)
 bash platforms/linux/tests/tools/check-image-toolchain.sh \
   "msime-linux-build-gate:${linux_gate_hash}" \
   "msime-linux-desktop-check:${linux_gate_hash}"
+# 验收和 RPM 镜像构建后，用各自按同一 checkout 哈希打出的 tag 检查。
+bash platforms/linux/tests/tools/check-image-toolchain.sh \
+  "msime-linux-test:${linux_gate_hash}" \
+  "msime-linux-package-rpm:${linux_gate_hash}"
 ```
 
-检查只读挂载真实仓库，在断网的新容器里执行 `cargo`、`cargo fmt` 和 `cargo clippy` 的版本命令。组件缺失或镜像工具链与仓库声明不匹配时无法临时下载补齐，检查失败；项目构建仍通过原有门禁验证。
+检查只读挂载真实仓库，在断网的新容器里执行 `cargo`、`cargo fmt` 和 `cargo clippy` 的版本命令。组件缺失或镜像工具链与仓库声明不匹配时无法临时下载补齐，检查失败。该检查只验证工具链准备；项目构建、真实输入法框架和发行包仍通过各自原有流程验证。
 
-这两个镜像都按 checkout 路径打 tag（`msime-linux-build-gate:<哈希>`、`msime-linux-desktop-check:<哈希>`，哈希取仓库绝对路径的 SHA-1 前 12 位），每个跑过门禁的 worktree 各留一份，单个占 2.4–3.3 GB，worktree 删除后不会自动回收。清理只删这两类 tag，不要 `docker system prune`（会连带别的项目和并发会话在用的镜像）：先 `docker images 'msime-linux-*'` 看有哪些，再 `docker image rm <tag>` 删掉已不存在的 worktree 对应的那些，最后 `docker image prune` 回收失去 tag 的悬空层。当前 checkout 的哈希可用 `printf %s "$PWD" | shasum | cut -c1-12` 在仓库根目录算出；删错了也无妨，下次运行会重建。
+这两个日常门禁镜像都按 checkout 路径打 tag（`msime-linux-build-gate:<哈希>`、`msime-linux-desktop-check:<哈希>`，哈希取仓库绝对路径的 SHA-1 前 12 位），每个跑过门禁的 worktree 各留一份，单个占 2.4–3.3 GB，worktree 删除后不会自动回收。清理只删这两类 tag，不要 `docker system prune`（会连带别的项目和并发会话在用的镜像）：先 `docker images 'msime-linux-*'` 看有哪些，再 `docker image rm <tag>` 删掉已不存在的 worktree 对应的那些，最后 `docker image prune` 回收失去 tag 的悬空层。当前 checkout 的哈希可用 `printf %s "$PWD" | shasum | cut -c1-12` 在仓库根目录算出；删错了也无妨，下次运行会重建。
 
 隔离验收脚本只读挂载源码，输入引擎是仓库里的 Rust crate，不再需要预先准备或借用任何 Engine 树，因此在 worktree 里也能直接跑。它的测试镜像与编译门禁一样按 checkout 路径打 tag，并发的 worktree 不会互相覆盖镜像。随包在线/语音/剪贴板 provider、凭据、豆包鉴权、翻译缓存、录音设备这一整片 Python 测试都在容器内执行。
 
@@ -616,7 +622,7 @@ msime-linux-online-provider "$XDG_RUNTIME_DIR/msime-client/online.sock"
 
 将该 socket 的绝对路径填入 runtime-options 的 `online_provider_socket`。仅提供云候选时无需凭据；AI 服务可增加 `--ai-config /absolute/private-ai.json`，文件仅允许所有者读写，包含 `provider`、`endpoint`、`model`、`token` 四个字符串字段。前三项须与共享 AI 设置一致，endpoint 使用 HTTPS，token 只留在服务配置中，不进入 IBus 查询。AI 私有配置在每次符合条件的请求中重新加载，修改凭据无需重启；可用 `profiles` 按 provider 保存多组配置，选择与共享设置一致的 provider、endpoint、model。不会自动启用系统服务或 CI。
 
-服务只接受同一用户连接，同时最多处理四个请求；云候选与 AI 并行请求，AI 失败时仍可返回云候选。HTTP 响应最多 64 KiB，拒绝 HTTP 重定向以保持凭据与端点绑定。AI 沿用 Windows 的 JSON 请求、上下文、candidate_limit 和 DeepSeek thinking 禁用设置；所选提示词槽位为空（含空白）时，system 消息使用与 Windows 默认 `[ai_assistant].prompt` 相同的内置联想提示词，与 client-core 的 `DEFAULT_CANDIDATE_PROMPT` 一致，因此默认配置和手动清空过提示词的配置都能得到可解析的候选。按配置最多保留 10 条有效且不重复的模型候选，再由 Engine 批量缓存和排序。成功的 AI 结果按 provider、endpoint、model 和拼音分段保存在有界进程内缓存中，可跨候选 generation 复用；缓存键不包含凭据、上下文、提示词、会话或原始输入，空响应和失败不会缓存。候选翻译同样按单项缓存，最多 4096 项；成功结果在当前 provider scope 下持续复用，直到配置 scope 变化或容量淘汰，失败项使用 8 分钟负缓存且在 TTL 内不会重复请求，独立候选不会互相抑制。服务不打印输入或网络错误正文，退出时仅删除自己创建的 socket。该入口同时实现候选翻译；语音由独立的随包 voice provider 提供；账号同步服务仍按各自契约接入。
+服务只接受同一用户连接，同时最多处理四个请求；云候选与 AI 并行请求，AI 失败时仍可返回云候选。HTTP 响应最多 64 KiB，拒绝 HTTP 重定向以保持凭据与端点绑定。AI 沿用 Windows 的 JSON 请求、上下文、candidate_limit 和 DeepSeek thinking 禁用设置；所选提示词槽位为空（含空白）时，system 消息使用与 Windows 默认 `[ai_assistant].prompt` 相同的内置联想提示词，与 client-core 的 `DEFAULT_CANDIDATE_PROMPT` 一致，因此默认配置和手动清空过提示词的配置都能得到可解析的候选。按配置最多保留 10 条有效且不重复的模型候选，再由 Engine 批量缓存和排序。成功的 AI 结果按 provider、endpoint、model、候选数量、提示词摘要、近期上下文摘要和拼音分段保存在有界进程内缓存中，可跨候选 generation 复用；缓存键不包含凭据、上下文或提示词原文、会话或原始输入，空响应和失败不会缓存。候选翻译同样按单项缓存，最多 4096 项；成功结果在当前 provider scope 下持续复用，直到配置 scope 变化或容量淘汰，失败项使用 8 分钟负缓存且在 TTL 内不会重复请求，独立候选不会互相抑制。服务不打印输入或网络错误正文，退出时仅删除自己创建的 socket。该入口同时实现候选翻译；语音由独立的随包 voice provider 提供；账号同步服务仍按各自契约接入。
 
 设置页的「获取模型列表」和「AI 润色测试」也接进了同一个 provider。这两个按钮此前在 Linux 上不可用：持有 token 的宿主是自己发 HTTP 去取的，而这个平台按设计把 token 留在 provider 的所有者专用配置文件里，外壳手上没有可用于鉴权的东西。现在 provider 增加 `ai_models` 与 `ai_test` 两种请求：设置页只给出 provider 名、接口地址、模型、提示词和待润色文字，provider 先核对这些与私有配置中的 provider/接口地址（润色再加模型）一致，再用自己的 token 发请求；不一致就什么都不发。模型名最多 128 个、每个 256 字节，去重并保序；润色结果最多 16 KiB。新增能力位 `ai_provider_credentials` 表示「凭据归宿主的 provider」，设置页据此不显示 API Token 输入框，也不再因为没有 token 而禁用这两个按钮——此前模型列表那一段是按平台名藏掉的。
 

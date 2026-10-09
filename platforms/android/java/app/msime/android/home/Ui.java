@@ -2,22 +2,21 @@ package app.msime.android.home;
 
 import app.msime.android.DrawablePolicy;
 import android.content.Context;
-import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
-import android.graphics.drawable.RippleDrawable;
 import android.util.TypedValue;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.animation.PathInterpolator;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ImageView;
 import android.widget.EditText;
 import android.widget.TextView;
 import app.msime.android.BoundsPolicy;
+import app.msime.android.ColorPolicy;
+import app.msime.android.ImageViewPolicy;
 import app.msime.android.KeyboardGeometry;
 import app.msime.android.TextPolicy;
 import app.msime.android.ViewPolicy;
@@ -165,13 +164,6 @@ public final class Ui {
     /** 页码点宽度变化。 */
     public static final long DOT_MILLIS = 200;
 
-    private static final class MotionCurves {
-        static final PathInterpolator EMPHASIZED = new PathInterpolator(0.2f, 0f, 0f, 1f);
-    }
-
-    /** 设计的动效曲线 `cubic-bezier(.2, 0, 0, 1)`。 */
-    public static PathInterpolator emphasized() { return MotionCurves.EMPHASIZED; }
-
     // ---- 读取 ----
 
     public static int dp(Context context, float value) {
@@ -198,11 +190,6 @@ public final class Ui {
     /** Set a text view's line-aware minimum height from a density-independent value. */
     public static void setTextMinHeightDp(TextView view, Context context, float heightDp) {
         ViewPolicy.setTextMinHeight(view, dp(context, heightDp));
-    }
-
-    /** Set a text view's line-aware minimum width from a density-independent value. */
-    public static void setTextMinWidthDp(TextView view, Context context, float widthDp) {
-        ViewPolicy.setTextMinWidth(view, dp(context, widthDp));
     }
 
     /** Apply the standard compact action-button insets to a view. */
@@ -255,11 +242,6 @@ public final class Ui {
             bottomPixels);
     }
 
-    /** Apply a single tint to an image view through the platform state-list wrapper. */
-    public static void setImageTint(ImageView view, int color) {
-        view.setImageTintList(ColorStateList.valueOf(color));
-    }
-
     /** Exclude a decorative view from the accessibility tree. */
     public static void hideFromAccessibility(View view) {
         ViewPolicy.hideFromAccessibility(view);
@@ -299,7 +281,7 @@ public final class Ui {
     /** Create a theme-coloured one-pixel divider in either orientation. */
     public static View divider(Context context, boolean horizontal) {
         View view = hairlineView(context);
-        int thin = hairlinePx(context);
+        int thin = KeyboardGeometry.atLeastOnePixel(context, 0.5f);
         view.setLayoutParams(horizontal
             ? matchWidthHeightPx(thin)
             : new LinearLayout.LayoutParams(thin, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -359,11 +341,6 @@ public final class Ui {
     public static LinearLayout.LayoutParams squareParams(Context context, float sizeDp) {
         int size = dp(context, sizeDp);
         return new LinearLayout.LayoutParams(size, size);
-    }
-
-    /** Layout parameters for a square child when its size is already in pixels. */
-    public static LinearLayout.LayoutParams squareParamsPx(int size) {
-        return ViewPolicy.newSquareParamsPx(size);
     }
 
     /** Frame layout parameters for a square child with a size expressed in dp. */
@@ -462,29 +439,9 @@ public final class Ui {
         return DrawablePolicy.circle(color);
     }
 
-    /** Filled circle with a visible outline. */
-    public static GradientDrawable circleOutlined(@ColorInt int fillColor, int strokeWidth,
-                                                  @ColorInt int strokeColor) {
-        return DrawablePolicy.circleOutlined(fillColor, strokeWidth, strokeColor);
-    }
-
     /** 纯色圆角矩形。 */
     public static GradientDrawable rounded(@ColorInt int color, float radiusPx) {
         return DrawablePolicy.rounded(color, radiusPx);
-    }
-
-    /** Filled rounded rectangle with a theme-aware outline. */
-    public static GradientDrawable outlined(@ColorInt int fillColor, float radiusPx,
-                                            int strokeWidth, @ColorInt int strokeColor) {
-        return DrawablePolicy.outlined(fillColor, radiusPx, strokeWidth, strokeColor);
-    }
-
-    /** Filled rounded rectangle with a dashed outline. */
-    public static GradientDrawable outlinedDashed(@ColorInt int fillColor, float radiusPx,
-                                                  int strokeWidth, @ColorInt int strokeColor,
-                                                  float dashWidth, float dashGap) {
-        return DrawablePolicy.outlinedDashed(fillColor, radiusPx, strokeWidth, strokeColor,
-            dashWidth, dashGap);
     }
 
     /** 胶囊形状：GradientDrawable 会把过大的圆角夹到短边的一半，所以高度怎么变两端都是半圆。 */
@@ -506,19 +463,9 @@ public final class Ui {
     }
 
     public static Drawable rippleOn(Context context, @ColorInt int fill, float radiusPx) {
-        int pressed = withAlpha(text(context), 0.10f);
-        return new RippleDrawable(ColorStateList.valueOf(pressed), rounded(fill, radiusPx),
+        int pressed = ColorPolicy.withAlpha(text(context), 0.10f);
+        return DrawablePolicy.ripple(pressed, rounded(fill, radiusPx),
             rounded(Color.WHITE, radiusPx));
-    }
-
-    /** 沿着 ContextWrapper 链找到所在的 Activity；不在任何 Activity 里时返回 null。 */
-    @androidx.annotation.Nullable public static android.app.Activity activityOf(Context context) {
-        Context current = context;
-        while (current instanceof android.content.ContextWrapper wrapper) {
-            if (current instanceof android.app.Activity activity) return activity;
-            current = wrapper.getBaseContext();
-        }
-        return null;
     }
 
     /** Create a text label with the supplied text, size in sp, and colour. */
@@ -642,7 +589,7 @@ public final class Ui {
         ViewPolicy.setBackground(button, pillRipple(context, fill));
         setSymmetricPaddingDp(button, context, horizontalPaddingDp, verticalPaddingDp);
         setTextMinHeightDp(button, context, minHeightDp);
-        if (minWidthDp > 0) setTextMinWidthDp(button, context, minWidthDp);
+        if (minWidthDp > 0) ViewPolicy.setTextMinWidth(button, dp(context, minWidthDp));
         bindClick(button, action);
         return button;
     }
@@ -678,13 +625,13 @@ public final class Ui {
                                        CharSequence description, float sizeDp, Runnable action) {
         ImageView button = new ImageView(context);
         button.setImageDrawable(icon);
-        setImageTint(button, tint);
+        ImageViewPolicy.setTint(button, tint);
         button.setScaleType(ImageView.ScaleType.CENTER);
         ViewPolicy.setBackground(button, ripple(context));
         button.setContentDescription(description);
         bindClick(button, action);
         int size = dp(context, sizeDp);
-        button.setLayoutParams(squareParamsPx(size));
+        button.setLayoutParams(ViewPolicy.newSquareParamsPx(size));
         setSymmetricPaddingPx(button, size / 5);
         return button;
     }
@@ -694,7 +641,7 @@ public final class Ui {
                                            @ColorInt int tint) {
         ImageView view = new ImageView(context);
         view.setImageResource(icon);
-        setImageTint(view, tint);
+        ImageViewPolicy.setTint(view, tint);
         hideFromAccessibility(view);
         return view;
     }
@@ -715,33 +662,17 @@ public final class Ui {
         return view;
     }
 
-    /** Return the first Unicode code point of a name, or the caller's fallback when empty. */
-    public static String initial(CharSequence name, String fallback) {
-        if (name == null || name.length() == 0) return fallback;
-        return new String(Character.toChars(Character.codePointAt(name, 0)));
-    }
-
-    /** Return the first Unicode code point after trimming a name, or the fallback when empty. */
+    /** 去掉名称首尾空白后返回第一个 Unicode 码点；名称为空时返回后备值。 */
     public static String trimmedInitial(CharSequence name, String fallback) {
         String trimmed = TextPolicy.trimmed(name == null ? null : name.toString());
-        return initial(trimmed, fallback);
-    }
-
-    /** Whether the optional Tauri management activity is present in this APK. */
-    public static boolean tauriAvailable() {
-        try {
-            Class.forName("app.msime.android.MainActivity");
-            return true;
-        } catch (ClassNotFoundException absent) {
-            return false;
-        }
+        return TextPolicy.initial(trimmed, fallback);
     }
 
     /** Create the muted, accessibility-hidden chevron used by navigable rows. */
     public static ImageView chevron(Context context) {
         ImageView view = new ImageView(context);
         view.setImageResource(app.msime.android.R.drawable.ms_w1_a2_chevron);
-        setImageTint(view, subText(context));
+        ImageViewPolicy.setTint(view, subText(context));
         ViewPolicy.hideFromAccessibility(view);
         return view;
     }
@@ -771,13 +702,4 @@ public final class Ui {
         ViewPolicy.setTextColor(view, color);
     }
 
-    /** 把一个 view 的透明度和可点按状态一起切换；禁用的行仍然可见，只是变淡且不响应。 */
-    public static void setEnabledLook(View view, boolean enabled) {
-        setEnabledLook(view, enabled, 0.38f);
-    }
-
-    /** Apply enabled state and a caller-selected inactive opacity to a home control. */
-    public static void setEnabledLook(View view, boolean enabled, float inactiveAlpha) {
-        ViewPolicy.setEnabledWithAlpha(view, enabled, inactiveAlpha);
-    }
 }

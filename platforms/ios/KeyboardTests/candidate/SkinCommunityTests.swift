@@ -9,6 +9,53 @@ private final class CommunityMemoryCredentials: BackendSessionStorage, @unchecke
   func clear() throws { lock.lock(); defer { lock.unlock() }; value = nil }
 }
 
+private final class AccountReplacementRecorder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var recorded: [(old: String, stored: String?)] = []
+  func record(_ accountID: String, storage: CommunityMemoryCredentials) {
+    let stored = try? storage.load()?.tokens.user.id
+    lock.lock(); recorded.append((accountID, stored)); lock.unlock()
+  }
+  var events: [(old: String, stored: String?)] {
+    lock.lock(); defer { lock.unlock() }; return recorded
+  }
+}
+
+private actor FirstRefreshLockGate {
+  private var calls = 0
+  private var entered = false
+  private var entering: CheckedContinuation<Void, Never>?
+  private var blocked: CheckedContinuation<Void, Never>?
+
+  func waitOnFirstRun() async {
+    calls += 1
+    guard calls == 1 else { return }
+    entered = true
+    entering?.resume()
+    entering = nil
+    await withCheckedContinuation { blocked = $0 }
+  }
+
+  func untilFirstRun() async {
+    if entered { return }
+    await withCheckedContinuation { entering = $0 }
+  }
+
+  func release() {
+    blocked?.resume()
+    blocked = nil
+  }
+}
+
+private struct FirstRunGatedRefreshLock: BackendRefreshLock {
+  let gate: FirstRefreshLockGate
+  var sharedAcrossProcesses: Bool { false }
+  func run<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T {
+    await gate.waitOnFirstRun()
+    return try await body()
+  }
+}
+
 /// 需要登录的用例用这个会话。内存存储只属于本进程，所以配进程内的刷新锁；默认的 App Group 文件锁在未签名的测试宿主里拿不到共享容器，`login` 会被它直接拒绝成 `Failure(status: 0)`。
 private func communitySession(_ client: BackendAccountClient, _ storage: CommunityMemoryCredentials) -> BackendAccountSession {
   BackendAccountSession(api: client, storage: storage, refreshLock: BackendProcessRefreshLock())
@@ -166,6 +213,77 @@ final class SkinCommunityTests: XCTestCase {
     XCTAssertFalse(signedOut)
     let profileAfterLogout = try await api.currentUser()
     XCTAssertNil(profileAfterLogout)
+  }
+  func testNativeLoginCancelsOnlyThePreviousAccountAfterSavingNewSession() async throws {
+    let memory = CommunityMemoryCredentials()
+    let oldTokens = BackendAccountClient.Tokens(
+      access_token: String(repeating: "a", count: 64), refresh_token: String(repeating: "f", count: 64),
+      token_type: "Bearer", expires_in: 900,
+      user: .init(id: "previous-user", display_name: "Previous", created_at: "2026-01-01T00:00:00Z"))
+    try memory.save(BackendSavedSession.forTokens(oldTokens))
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [CommunityFixtureProtocol.self]
+    let client = BackendAccountClient(configuration: configuration)
+    let session = communitySession(client, memory)
+    let recorder = AccountReplacementRecorder()
+
+    try await session.signIn(challenge: "fixture", credential: "synthetic", replacingAccount: {
+      recorder.record($0, storage: memory)
+    })
+    XCTAssertEqual(recorder.events.count, 1)
+    XCTAssertEqual(recorder.events.first?.old, "previous-user")
+    XCTAssertEqual(recorder.events.first?.stored, "fixture-user")
+
+    try await session.signIn(challenge: "fixture", credential: "synthetic", replacingAccount: {
+      recorder.record($0, storage: memory)
+    })
+    XCTAssertEqual(recorder.events.count, 1, "same-account login keeps its pending snapshot")
+  }
+  func testNativeForgetCancelsTheOldQueueAfterClearingTheSession() async throws {
+    let memory = CommunityMemoryCredentials()
+    let oldTokens = BackendAccountClient.Tokens(
+      access_token: String(repeating: "a", count: 64), refresh_token: String(repeating: "f", count: 64),
+      token_type: "Bearer", expires_in: 900,
+      user: .init(id: "previous-user", display_name: "Previous", created_at: "2026-01-01T00:00:00Z"))
+    try memory.save(BackendSavedSession.forTokens(oldTokens))
+    let session = BackendAccountSession(storage: memory, refreshLock: BackendProcessRefreshLock())
+    let recorder = AccountReplacementRecorder()
+
+    try await session.forget(removingAccount: { recorder.record($0, storage: memory) })
+
+    XCTAssertNil(try memory.load())
+    XCTAssertEqual(recorder.events.count, 1)
+    XCTAssertEqual(recorder.events.first?.old, "previous-user")
+    XCTAssertNil(recorder.events.first?.stored)
+  }
+
+  func testDelayedNativeForgetKeepsAnotherSessionsNewLoginAndSnapshot() async throws {
+    let memory = CommunityMemoryCredentials()
+    let oldTokens = BackendAccountClient.Tokens(
+      access_token: String(repeating: "a", count: 64), refresh_token: String(repeating: "f", count: 64),
+      token_type: "Bearer", expires_in: 900,
+      user: .init(id: "previous-user", display_name: "Previous", created_at: "2026-01-01T00:00:00Z"))
+    try memory.save(BackendSavedSession.forTokens(oldTokens))
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [CommunityFixtureProtocol.self]
+    let client = BackendAccountClient(configuration: configuration)
+    let gate = FirstRefreshLockGate()
+    let session = BackendAccountSession(api: client, storage: memory,
+                                        refreshLock: FirstRunGatedRefreshLock(gate: gate))
+    let replacement = communitySession(client, memory)
+    let recorder = AccountReplacementRecorder()
+    let oldForget = Task {
+      try await session.forget(removingAccount: { recorder.record($0, storage: memory) })
+    }
+    await gate.untilFirstRun()
+
+    try await replacement.signIn(challenge: "fixture", credential: "synthetic")
+    await gate.release()
+    do { try await oldForget.value; XCTFail("stale forget cleared the new account") }
+    catch is CancellationError { }
+
+    XCTAssertEqual(try memory.load()?.tokens.user.id, "fixture-user")
+    XCTAssertTrue(recorder.events.isEmpty)
   }
   func testProfileFetchUpdateAndValidation() async throws {
     let memory = CommunityMemoryCredentials()

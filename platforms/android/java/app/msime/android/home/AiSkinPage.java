@@ -4,7 +4,6 @@ import app.msime.android.TextPolicy;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -33,10 +32,13 @@ import app.msime.android.BoundsPolicy;
 import app.msime.android.ColorPolicy;
 import app.msime.android.CustomKeyboardSkin;
 import app.msime.android.CustomSkinLibrary;
+import app.msime.android.DrawablePolicy;
 import app.msime.android.KeyboardGeometry;
 import app.msime.android.KeyboardSkin;
 import app.msime.android.PhotoDecodePolicy;
+import app.msime.android.ProgressBarPolicy;
 import app.msime.android.SkinJobsApi;
+import app.msime.android.ThreadPolicy;
 import app.msime.android.ViewPolicy;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -106,7 +108,7 @@ public final class AiSkinPage extends DetailPage {
             AtomicBoolean flag = new AtomicBoolean(false);
             cancelled = flag;
             // 一次生成可能要几分钟，不能占用设置页共用的那条 HostTask 线程。
-            Thread worker = new Thread(() -> {
+            Thread worker = ThreadPolicy.namedDaemonThread("msime-ai-skin-generate", () -> {
                 List<Result> generated = new ArrayList<>(SkinJobsApi.MAX_DESIGNS);
                 CloudApi.Failure failure = null;
                 try {
@@ -121,8 +123,7 @@ public final class AiSkinPage extends DetailPage {
                 }
                 CloudApi.Failure result = failure;
                 main.post(() -> complete(application, flag, text, generated, result));
-            }, "msime-ai-skin-generate");
-            worker.setDaemon(true);
+            });
             worker.start();
         }
 
@@ -305,7 +306,7 @@ public final class AiSkinPage extends DetailPage {
         LinearLayout overlay = Ui.column(context);
         ViewPolicy.setCentered(overlay);
         ProgressBar spinner = new ProgressBar(context);
-        spinner.setIndeterminateTintList(ColorStateList.valueOf(Ui.accent(context)));
+        ProgressBarPolicy.setIndeterminateTint(spinner, Ui.accent(context));
         overlay.addView(spinner, Ui.squareParams(context, 32));
         TextView designing = Ui.styledLabel(context, "正在设计…", 14, 500, Ui.text(context));
         overlay.addView(designing);
@@ -487,7 +488,7 @@ public final class AiSkinPage extends DetailPage {
                     skin.keyForeground(), skin.returnBackground()};
                 for (String colour : colours) {
                     View dot = new View(context);
-                    android.graphics.drawable.GradientDrawable shape = Ui.outlined(
+                    android.graphics.drawable.GradientDrawable shape = DrawablePolicy.outlined(
                         ColorPolicy.parse(colour, Color.GRAY), 9999f,
                         KeyboardGeometry.atLeastOnePixel(context, 1), Ui.hairline(context));
                     ViewPolicy.setBackground(dot, shape);

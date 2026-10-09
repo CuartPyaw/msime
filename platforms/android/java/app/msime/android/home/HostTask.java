@@ -7,6 +7,7 @@ import android.view.View;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 import androidx.lifecycle.Lifecycle;
+import app.msime.android.ThreadPolicy;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
@@ -23,17 +24,11 @@ import java.util.function.Function;
  * context from the worker is a race against the fragment being detached.
  */
 public final class HostTask {
-    private static final ExecutorService WORKER = Executors.newSingleThreadExecutor(runnable -> {
-        Thread thread = new Thread(runnable, "msime-settings-host");
-        thread.setDaemon(true);
-        return thread;
-    });
+    private static final ExecutorService WORKER = Executors.newSingleThreadExecutor(
+        ThreadPolicy.namedDaemonFactory("msime-settings-host"));
     /** HTTP calls get their own threads: one can block for a full connect plus read timeout, and the shared store's reads and writes must not queue behind it. */
-    private static final ExecutorService NETWORK = Executors.newCachedThreadPool(runnable -> {
-        Thread thread = new Thread(runnable, "msime-settings-network");
-        thread.setDaemon(true);
-        return thread;
-    });
+    private static final ExecutorService NETWORK = Executors.newCachedThreadPool(
+        ThreadPolicy.namedDaemonFactory("msime-settings-network"));
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
     private HostTask() {}

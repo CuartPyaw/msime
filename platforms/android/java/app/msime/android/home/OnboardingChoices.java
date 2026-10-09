@@ -9,6 +9,7 @@ import app.msime.android.AppEdition;
 import app.msime.android.FirstRunPreparation;
 import app.msime.android.KeyboardScheme;
 import app.msime.android.SchemePreferences;
+import app.msime.android.ThreadPolicy;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -30,11 +31,8 @@ final class OnboardingChoices {
     static final String GLOSS = "candidate_english_gloss";
     /** 保存被拒（多半是键盘恰好也写了偏好、修订号对不上）时重新读取再试的次数。 */
     private static final int ATTEMPTS = 3;
-    private static final ExecutorService WORKER = Executors.newSingleThreadExecutor(runnable -> {
-        Thread thread = new Thread(runnable, "msime-onboarding-choices");
-        thread.setDaemon(true);
-        return thread;
-    });
+    private static final ExecutorService WORKER = Executors.newSingleThreadExecutor(
+        ThreadPolicy.namedDaemonFactory("msime-onboarding-choices"));
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
     private static final AtomicBoolean WATCHING = new AtomicBoolean();
     /** 记下选择与写成功后清掉选择互斥：清之前要确认它还是刚写进去的那个，用户在写入途中又改了就留着下一次写。 */
