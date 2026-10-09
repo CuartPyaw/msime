@@ -971,6 +971,7 @@ mod tests {
             store.directory().join("vocabulary-progress.json"),
         )
         .unwrap();
+        msime_path_trust::open_to_other_users(store.directory()).unwrap();
 
         assert!(matches!(
             store.load(),
