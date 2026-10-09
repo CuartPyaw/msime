@@ -256,11 +256,6 @@ public final class Ui {
             bottomPixels);
     }
 
-    /** Show a view only when the supplied text is non-null and non-empty. */
-    public static void setVisibilityForText(View view, CharSequence text) {
-        ViewPolicy.setVisibilityForText(view, text);
-    }
-
     /** Apply a single tint to an image view through the platform state-list wrapper. */
     public static void setImageTint(ImageView view, int color) {
         view.setImageTintList(ColorStateList.valueOf(color));
