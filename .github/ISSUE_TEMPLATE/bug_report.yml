@@ -32,11 +32,11 @@ body:
       placeholder: 例如：候选字应该正常显示为汉字。
     validations:
       required: true
-  - type: input
+  - type: textarea
     id: version
     attributes:
       label: 系统与输入法版本
-      description: 输入法版本可以在输入法的设置或「关于」页面里找到。
+      description: 输入法版本可以在输入法的设置或「关于」页面里找到。Android 版在「关于」或「帮助与反馈」里点「复制设备信息」，整段粘贴到这里即可。
       placeholder: 例如：macOS 15.3，水杉输入法 1.2.0
     validations:
       required: true

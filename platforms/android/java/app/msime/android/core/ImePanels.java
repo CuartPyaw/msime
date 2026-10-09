@@ -7,6 +7,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
+import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.InsetDrawable;
@@ -32,6 +33,8 @@ final class ImePanels {
     private static final String SYMBOL_RECENTS_KEY = "items";
     private final MSIMEInputService s;
     private SharedPreferences symbolPreferences;
+    // 只在主线程上用（打开符号面板、点符号记进「常用」时）；`emojiGlyphPaint` 归 `emojiWorker`，Paint 不能跨线程共用。
+    private final Paint symbolRecentsGlyphPaint = new Paint();
     private int replyReadGeneration;
     private int replyMenuReadGeneration;
 
@@ -1835,7 +1838,8 @@ final class ImePanels {
                 Object value = values.opt(index);
                 if (value instanceof String) stored.add((String) value);
             }
-            return SymbolPanelModel.normalizeRecents(stored);
+            return SymbolPanelModel.renderableRecents(SymbolPanelModel.normalizeRecents(stored),
+                symbolRecentsGlyphPaint::hasGlyph);
         } catch (JSONException error) {
             return List.of();
         }
@@ -1872,6 +1876,8 @@ final class ImePanels {
             SymbolCatalogPage page = null;
             try {
                 page = decodeSymbolCatalogPage(NativeClient.emojiCatalog(query, resources), offset, category.kaomoji());
+                page = new SymbolCatalogPage(SymbolPanelModel.renderableCatalogItems(page.items(),
+                    category.kaomoji(), s.emojiGlyphPaint::hasGlyph), page.nextOffset(), page.complete());
             } catch (JSONException | RuntimeException | LinkageError ignored) {
                 // 读不出目录时面板只说「暂时不可用」，不把资源路径或目录内容写进任何地方。
             }
