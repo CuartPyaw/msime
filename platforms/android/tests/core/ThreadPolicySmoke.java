@@ -28,6 +28,14 @@ public final class ThreadPolicySmoke {
         direct.start();
         direct.join();
         check(directRan.get(), "direct worker task runs");
-        System.out.println("Android named daemon thread factory passed");
+
+        AtomicBoolean startedRan = new AtomicBoolean(false);
+        Thread started = ThreadPolicy.startNamedThread("msime-smoke-started", () -> startedRan.set(true));
+        started.join();
+        check("msime-smoke-started".equals(started.getName()), "started thread name is preserved");
+        check(started.isDaemon() == Thread.currentThread().isDaemon(),
+            "started thread preserves inherited daemon state");
+        check(startedRan.get(), "started worker task runs");
+        System.out.println("Android named thread policy passed");
     }
 }
