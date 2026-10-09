@@ -300,6 +300,22 @@ test("only the iOS carousel offers 原生, right after 跟随系统", async () =
     .getAllByRole("article")
     .map((article) => article.getAttribute("aria-label"));
   expect(titles.slice(0, 3)).toEqual(["跟随系统", "原生", "水杉"]);
+  // 「原生」卡有自己的说明和系统键盘预览（系统蓝、扁平同色按键），和「跟随系统」卡分得开。
+  const carouselRegion = screen.getByRole("region", { name: "主题列表" });
+  const native = within(carouselRegion).getByRole("article", { name: "原生" });
+  expect(within(native).getByText("iOS 自带键盘的样子，跟随系统明暗，不跟季节")).toBeTruthy();
+  const nativePreview = native.querySelector("svg[data-preview-skin]");
+  expect(nativePreview?.getAttribute("data-preview-skin")).toBe("native");
+  const nativeTheme = nativePreview?.getAttribute("data-preview-theme");
+  expect(nativePreview?.querySelector("rect")?.getAttribute("fill")).toBe(
+    nativeTheme === "dark" ? "#222223" : "#E2E3E8",
+  );
+  const systemPreview = within(carouselRegion)
+    .getByRole("article", { name: "跟随系统" })
+    .querySelector("svg[data-preview-skin]");
+  expect(systemPreview?.querySelector("rect")?.getAttribute("fill")).not.toBe(
+    nativePreview?.querySelector("rect")?.getAttribute("fill"),
+  );
   cleanup();
 
   render(
