@@ -244,9 +244,9 @@ fn search_with_output(
                 });
             }
         }
-        for lemma in dictionary.continuing_lemma_views(reading, pending_kana, 48) {
+        dictionary.for_each_continuing_lemma_view(reading, pending_kana, 48, |lemma| {
             output.push(lemma.surface, i64::from(lemma.word_cost));
-        }
+        });
     }
 
     for node in finals {
@@ -541,6 +541,10 @@ mod tests {
         assert!(search(&dictionary, "q", 16).is_empty());
     }
 }
+
+#[cfg(test)]
+#[path = "matrix/continuing_reference.rs"]
+mod continuing_reference;
 
 #[cfg(test)]
 mod pruning_tests;

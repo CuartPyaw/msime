@@ -21,7 +21,10 @@ fn pending_exact_completions_share_one_reading_key() {
     });
     assert_eq!(actual, expected);
     eprintln!("日文待定精确补全矩阵分配：{allocations}");
-    assert!(allocations <= 16, "精确补全应复用读音键：{allocations}");
+    assert!(
+        allocations <= 13,
+        "精确补全应复用读音键，继续补全词条应直接消费：{allocations}"
+    );
 }
 
 // 固定基线 dbfdd576e 的批量构造、稳定排序及截断流程，独立对照提前筛选的行为。

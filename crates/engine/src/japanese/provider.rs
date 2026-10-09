@@ -415,8 +415,8 @@ mod tests {
         assert!(words(&destination).contains(&"仮仮"));
         eprintln!("日文待定前缀 provider 热查询分配：{allocations}");
         assert!(
-            allocations <= 18,
-            "假名前缀与拼接读音键应复用，词条视图应直接消费，句子结果向量应复用：{allocations}"
+            allocations <= 15,
+            "拼接读音键与句子结果容器应复用，前缀与继续补全词条应直接消费：{allocations}"
         );
     }
 
