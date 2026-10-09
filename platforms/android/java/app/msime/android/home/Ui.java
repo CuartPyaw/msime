@@ -366,11 +366,6 @@ public final class Ui {
         return new LinearLayout.LayoutParams(0, dp(context, heightDp), weight);
     }
 
-    /** Layout parameters for a weighted child that fills the parent's height. */
-    public static LinearLayout.LayoutParams weightedMatchParent(float weight) {
-        return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, weight);
-    }
-
     /** 读一个颜色主题属性；属性缺失时退回洋红，让漏配的属性在截图里一眼可见，而不是悄悄显示成别的颜色。 */
     @ColorInt public static int color(Context context, @AttrRes int attr) {
         return MaterialColors.getColor(context, attr, Color.MAGENTA);
