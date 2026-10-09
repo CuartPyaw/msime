@@ -25,6 +25,7 @@ import app.msime.android.JsonPolicy;
 import app.msime.android.BoundsPolicy;
 import app.msime.android.DictionaryCollectionsStore;
 import app.msime.android.KeyPressIds;
+import app.msime.android.KeyboardGeometry;
 import app.msime.android.NumberPolicy;
 import app.msime.android.R;
 import app.msime.android.TypingStatisticsModel;
@@ -440,8 +441,8 @@ public final class StatisticsFragment extends HomeTabFragment {
     /** 并排两张 KPI 卡。 */
     private static void tiles(Context context, LinearLayout parent, View left, View right) {
         LinearLayout row = Ui.row(context);
-        LinearLayout.LayoutParams leftParams = Ui.weightedMatchParent(1f);
-        LinearLayout.LayoutParams rightParams = Ui.weightedMatchParent(1f);
+        LinearLayout.LayoutParams leftParams = KeyboardGeometry.weightedMatchParentParams(1f);
+        LinearLayout.LayoutParams rightParams = KeyboardGeometry.weightedMatchParentParams(1f);
         rightParams.setMarginStart(Ui.dp(context, 10));
         row.addView(left, leftParams);
         row.addView(right, rightParams);
