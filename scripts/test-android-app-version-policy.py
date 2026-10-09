@@ -11,6 +11,8 @@ POLICY = JAVA / "AppVersionPolicy.java"
 DEVICE_SOURCES = ROOT / "platforms/android/tests/device/editor-sources.txt"
 SITES = {
     JAVA / "account/BackendAccount.java": 'AppVersionPolicy.versionName(context, "")',
+    JAVA / "core/Telemetry.java": "AppVersionPolicy.versionName(app)",
+    JAVA / "home/DeveloperPage.java": 'AppVersionPolicy.versionName(context, "")',
     JAVA / "home/UpdateJobService.java": 'AppVersionPolicy.versionName(context, "0")',
 }
 
@@ -18,6 +20,8 @@ SITES = {
 def main() -> int:
     errors = []
     policy = POLICY.read_text(encoding="utf-8") if POLICY.exists() else ""
+    if "String versionName(Context context)" not in policy:
+        errors.append("AppVersionPolicy 缺少保留异常语义的版本名查询")
     if "String versionName(Context context, String fallback)" not in policy:
         errors.append("AppVersionPolicy 缺少带回退值的版本名查询")
     device_sources = DEVICE_SOURCES.read_text(encoding="utf-8")
@@ -28,7 +32,7 @@ def main() -> int:
         source = path.read_text(encoding="utf-8")
         if expected not in source:
             errors.append(f"{path}: 应用版本名查询未复用 AppVersionPolicy")
-        if "getPackageManager().getPackageInfo(context.getPackageName(), 0)" in source:
+        if ".getPackageManager().getPackageInfo(" in source:
             errors.append(f"{path}: 仍在调用点重复查询应用版本名")
 
     if errors:
