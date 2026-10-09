@@ -230,7 +230,7 @@ impl PinyinDatabase {
         if self.connection.is_none() || keys.is_empty() || per_key_limit == 0 {
             return result;
         }
-        let mut keys_by_table: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let mut keys_by_table: BTreeMap<String, Vec<&str>> = BTreeMap::new();
         let mut seen =
             (keys.len() > SMALL_QUERY_KEY_BATCH).then(|| HashSet::with_capacity(keys.len()));
         for (index, key) in keys.iter().enumerate() {
@@ -254,7 +254,7 @@ impl PinyinDatabase {
                 }
                 continue;
             }
-            keys_by_table.entry(table).or_default().push(key.clone());
+            keys_by_table.entry(table).or_default().push(key.as_str());
         }
         for (table, table_keys) in &keys_by_table {
             let rows = self.batch_rows(table, table_keys, usize::MAX);
@@ -433,13 +433,17 @@ impl PinyinDatabase {
         )
     }
 
-    /// QQ:686-740: one `IN (...)` statement per key count, which `prepare_cached` keeps apart by its text.
-    fn batch_rows(&self, table: &str, keys: &[String], limit: usize) -> Vec<DictRow> {
+    /// QQ:686-740：按键数生成 `IN (...)` 语句，`prepare_cached` 按语句文本分别缓存。
+    fn batch_rows<K: AsRef<str>>(&self, table: &str, keys: &[K], limit: usize) -> Vec<DictRow> {
         if table.is_empty() || keys.is_empty() || limit == 0 {
             return Vec::new();
         }
         let sql = batch_sql(table, keys.len(), sql_limit(limit));
-        self.rows(&sql, params_from_iter(keys), query_capacity(limit))
+        self.rows(
+            &sql,
+            params_from_iter(keys.iter().map(AsRef::as_ref)),
+            query_capacity(limit),
+        )
     }
 
     /// Runs a `"key", "value", "weight"` statement. A statement that fails to prepare (the table does not exist) yields no rows, and a failed step ends the rows read so far, exactly as the reference's `while (sqlite3_step(...) == SQLITE_ROW)` loops did (QQ:584-605).
@@ -1479,3 +1483,7 @@ mod dedup_before_split_tests;
 #[cfg(test)]
 #[path = "pinyin/borrowed_key_plan_tests.rs"]
 mod borrowed_key_plan_tests;
+
+#[cfg(test)]
+#[path = "pinyin/borrowed_key_groups_tests.rs"]
+mod borrowed_key_groups_tests;

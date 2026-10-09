@@ -74,7 +74,7 @@ fn all_split_allocations(keys: &[String]) -> usize {
 fn compare_hot(database: &PinyinDatabase, keys: &[String], limit: usize, saved: usize) {
     let saved = saved
         + if database.connection.is_some() && limit > 0 {
-            all_split_allocations(keys)
+            all_split_allocations(keys) + borrowed_key_groups_tests::owned_group_allocations(keys)
         } else {
             0
         };
@@ -284,7 +284,10 @@ fn cold_missed_batch_returns_no_reserved_hash_table() {
     assert_eq!(new_heap.minimum_bytes, 0);
     assert_eq!(new_heap.remaining_bytes, 0);
     assert_eq!(
-        new_heap.allocations + 1 + all_split_allocations(&batch),
+        new_heap.allocations
+            + 1
+            + all_split_allocations(&batch)
+            + borrowed_key_groups_tests::owned_group_allocations(&batch),
         old_heap.allocations
     );
     assert!(new_heap.peak_bytes < old_heap.peak_bytes);
