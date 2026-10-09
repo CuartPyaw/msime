@@ -231,12 +231,6 @@ public final class Ui {
             dp(context, rightDp), dp(context, bottomDp));
     }
 
-    /** Replace only the bottom padding while preserving the other three sides. */
-    public static void setBottomPadding(View view, int bottomPixels) {
-        ViewPolicy.setPadding(view, view.getPaddingLeft(), view.getPaddingTop(), view.getPaddingRight(),
-            bottomPixels);
-    }
-
     /** Exclude a decorative view from the accessibility tree. */
     public static void hideFromAccessibility(View view) {
         ViewPolicy.hideFromAccessibility(view);
