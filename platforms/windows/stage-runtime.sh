@@ -68,6 +68,7 @@ while (( index < ${#files[@]} )); do
         lower=$(printf '%s' "$dependency" | tr '[:upper:]' '[:lower:]')
         case "$lower" in
           api-ms-*.dll|ext-ms-*.dll|kernel32.dll|ntdll.dll|advapi32.dll|user32.dll|gdi32.dll|ole32.dll|shell32.dll|userenv.dll|ws2_32.dll|bcrypt.dll|bcryptprimitives.dll|ucrtbase.dll|msvcrt.dll) ;;
+          crypt32.dll|winhttp.dll|dwrite.dll|combase.dll|d2d1.dll|d3d11.dll|dcomp.dll|dwmapi.dll|mmdevapi.dll|oleaut32.dll|propsys.dll|rpcrt4.dll) ;;
           *) echo "Unclassified dependency: $dependency" >&2; exit 1 ;;
         esac ;;
     esac

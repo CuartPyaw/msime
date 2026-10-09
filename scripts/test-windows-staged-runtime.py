@@ -42,10 +42,13 @@ else:
     sys.exit(1)
 ''')
         self.write_command("synthetic-objdump", '''#!/usr/bin/env python3
-import pathlib, sys
+import os, pathlib, sys
 if sys.argv[1] == "-f":
     print("fixture: file format " + pathlib.Path(sys.argv[2]).read_text().strip())
-elif sys.argv[1] != "-p":
+elif sys.argv[1] == "-p":
+    for dependency in os.environ.get("MSIME_TEST_IMPORTS", "").split():
+        print("DLL Name: " + dependency)
+else:
     sys.exit(1)
 ''')
         for prefix in ("i686", "x86_64"):
@@ -116,6 +119,41 @@ if "runtime" in entry:
                                 env=self.env, capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Run build-cross.sh first", result.stderr)
+
+    def prepare_full_build(self):
+        self.prepare_library("x86")
+        build = self.root / "target/windows-full/x86"
+        build.mkdir(parents=True)
+        for name in (
+            "windows-registration-inbox.exe", "windows-focus-router.exe", "windows-main-frame.exe",
+            "windows-focus-gate.exe", "windows-input-queue.exe", "windows-session-smoke.exe",
+            "windows-reply-codec.exe", "windows-reply-composer.exe", "windows-server-smoke.exe",
+            "windows-preview-config.exe", "MetasequoiaImeServer.exe", "msime_host_api.dll",
+            "tests/native-pipe/windows-pipe-io.exe",
+        ):
+            path = build / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("pei-i386")
+        runner = self.windows / "tests/tools/run-smoke.ps1"
+        runner.parent.mkdir(parents=True)
+        runner.write_text("synthetic runner")
+        return build
+
+    def test_full_mode_accepts_system_dlls_and_still_rejects_unknown_dependencies(self):
+        build = self.prepare_full_build()
+        self.env["MSIME_TEST_IMPORTS"] = (
+            "CRYPT32.dll WINHTTP.dll DWrite.dll combase.dll d2d1.dll d3d11.dll dcomp.dll "
+            "dwmapi.dll mmdevapi.dll oleaut32.dll propsys.dll rpcrt4.dll"
+        )
+        result = subprocess.run(["bash", str(self.windows / "stage-runtime.sh"), "x86"],
+                                env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((build / "run-smoke.ps1").read_text(), "synthetic runner")
+        self.env["MSIME_TEST_IMPORTS"] = "synthetic-unknown.dll"
+        result = subprocess.run(["bash", str(self.windows / "stage-runtime.sh"), "x86"],
+                                env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Unclassified dependency: synthetic-unknown.dll", result.stderr)
 
     def test_wine_uses_staged_dlls_without_querying_host_or_cross_compiler(self):
         for arch in ("x86", "x64"):
