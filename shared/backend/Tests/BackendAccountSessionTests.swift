@@ -104,6 +104,59 @@ final class BackendAccountSessionTests: XCTestCase {
     XCTAssertNil(try storage.load())
   }
 
+  func testStaleForgetCannotRemoveReplacementAccount() async throws {
+    let replacement = BackendAccountClient.Tokens(
+      access_token: String(repeating: "b", count: 64), refresh_token: String(repeating: "c", count: 64),
+      token_type: "Bearer", expires_in: 900,
+      user: .init(id: "replacement-user", display_name: "Replacement", created_at: "2026-09-08"))
+    let storage = MemorySessions(try BackendSavedSession.forTokens(replacement))
+    let session = BackendAccountSession(api: RefreshAPI(), storage: storage, refreshLock: BackendProcessRefreshLock())
+    do {
+      try await session.forget(matchingUserID: "synthetic-user", removingAccount: { _ in
+        XCTFail("stale cleanup must not run for the replacement account")
+      })
+      XCTFail("old account's completion must not clear the replacement account")
+    } catch is CancellationError { }
+    XCTAssertEqual(try storage.load()?.tokens.user.id, "replacement-user")
+  }
+
+  func testLogoutDuringRefreshCannotClearReplacementAccount() async throws {
+    let old = BackendSavedSession(tokens: SharedStoreAPI.tokens("a", "f"), expiresAt: .distantPast)
+    let storage = MemorySessions(old)
+    let replacement = BackendAccountClient.Tokens(
+      access_token: String(repeating: "b", count: 64), refresh_token: String(repeating: "c", count: 64),
+      token_type: "Bearer", expires_in: 900,
+      user: .init(id: "replacement-user", display_name: "Replacement", created_at: "2026-09-08"))
+    let api = SharedStoreAPI { _ in
+      try storage.save(BackendSavedSession.forTokens(replacement))
+      return SharedStoreAPI.tokens("d", "e")
+    }
+    let session = BackendAccountSession(api: api, storage: storage, refreshLock: BackendProcessRefreshLock())
+
+    do {
+      try await session.logout()
+      XCTFail("old logout must stop after another account replaces the session")
+    } catch is CancellationError { }
+    XCTAssertEqual(try storage.load()?.tokens.user.id, "replacement-user")
+  }
+
+  func testLogoutStillCleansOldAccountAfterRejectedRefresh() async throws {
+    let storage = MemorySessions(.init(tokens: SharedStoreAPI.tokens("a", "f"), expiresAt: .distantPast))
+    let api = SharedStoreAPI { _ in throw BackendAccountClient.Failure(status: 401) }
+    let session = BackendAccountSession(api: api, storage: storage, refreshLock: BackendProcessRefreshLock())
+    let cleanup = AttemptCounter()
+
+    do {
+      try await session.logout(removingAccount: { accountID in
+        XCTAssertEqual(accountID, "synthetic-user")
+        _ = cleanup.increment()
+      })
+      XCTFail("revoked refresh token must fail logout")
+    } catch let error as BackendAccountClient.Failure { XCTAssertEqual(error.status, 401) }
+    XCTAssertEqual(cleanup.count, 1)
+    XCTAssertNil(try storage.load())
+  }
+
   func testFailedReplacementCleanupKeepsOldIdentity() async throws {
     let storage = MemorySessions(try BackendSavedSession.forTokens(RefreshAPI.tokens()))
     let replacement = BackendAccountClient.Tokens(
