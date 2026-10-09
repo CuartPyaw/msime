@@ -74,6 +74,14 @@ def main() -> None:
         raise AssertionError("Ui 按钮没有直接调用共享文本最小宽度策略")
     if "public static void setEnabledLook(" in ui:
         raise AssertionError("Ui 仍保留无调用方的启用状态转发方法")
+    if "public static void setHorizontalPaddingPx(" in ui:
+        raise AssertionError("Ui 仍保留水平像素内边距转发方法")
+    for path in HOME.glob("*.java"):
+        if "Ui.setHorizontalPaddingPx(" in path.read_text(encoding="utf-8"):
+            raise AssertionError(f"{path} 没有直接调用共享水平内边距策略")
+    slider = (HOME / "MsSlider.java").read_text(encoding="utf-8")
+    if "ViewPolicy.setHorizontalPadding(this, inset);" not in slider:
+        raise AssertionError("MsSlider 没有直接调用共享水平内边距策略")
     if "return ViewPolicy.newRow(context);" not in ui:
         raise AssertionError("Ui 没有调用共享横向容器工厂")
     if "return ViewPolicy.newRow(context);" not in keyboard_geometry:
