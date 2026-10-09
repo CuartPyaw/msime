@@ -193,7 +193,7 @@ fn cut_one_piece_with_corrections(pinyin: &str) -> Vec<Vec<&'static str>> {
         correction_ranks: Vec::new(),
     }];
     for index in (0..length).rev() {
-        let mut ranked = Vec::with_capacity(CORRECTION_PATH_LIMIT);
+        let mut ranked = Vec::new();
         for end in (index + 1..=length.min(index + max_piece)).rev() {
             let Ok(typed) = std::str::from_utf8(&bytes[index..end]) else {
                 continue;
@@ -210,6 +210,10 @@ fn cut_one_piece_with_corrections(pinyin: &str) -> Vec<Vec<&'static str>> {
             };
             for (rank, &reading) in readings.iter().enumerate() {
                 for suffix in &paths[end] {
+                    // 首条完整后缀路径出现时才预留原有初始容量，不可达位置保持空缓冲。
+                    if ranked.is_empty() {
+                        ranked.reserve_exact(CORRECTION_PATH_LIMIT);
+                    }
                     let mut segments = Vec::with_capacity(1 + suffix.segments.len());
                     segments.push(reading);
                     segments.extend_from_slice(&suffix.segments);
@@ -503,7 +507,43 @@ mod tests {
             cut_pinyin_with_corrections("sahng")
         });
         assert_eq!(paths, [vec!["shang".to_owned()], vec!["sang".to_owned()]]);
-        assert_eq!(allocations, 23);
+        assert_eq!(allocations, 20);
+    }
+
+    #[test]
+    fn unreachable_correction_positions_do_not_allocate_ranked_buffers() {
+        let _ = cut_pinyin_with_corrections("sahng");
+        for (input, budget) in [
+            ("x".repeat(128), 2),
+            ("🧪".repeat(32), 2),
+            ("?".to_owned(), 2),
+            ("ni?".to_owned(), 2),
+            ("xxxni".to_owned(), 6),
+        ] {
+            let (paths, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+                cut_pinyin_with_corrections(&input)
+            });
+            assert!(paths.is_empty());
+            assert_eq!(
+                allocations,
+                budget,
+                "不可达位置仍预留排名缓冲: {} 字节",
+                input.len()
+            );
+        }
+    }
+
+    #[test]
+    fn greedy_fallback_does_not_reserve_unreachable_correction_paths() {
+        let _ = cut_pinyin_by_mode("nihz", CutMode::Correction);
+        let (paths, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            cut_pinyin_by_mode("nihz", CutMode::Correction)
+        });
+        assert_eq!(
+            paths,
+            [vec!["ni".to_owned(), "h".to_owned(), "z".to_owned()]]
+        );
+        assert_eq!(allocations, 7);
     }
 
     #[test]
