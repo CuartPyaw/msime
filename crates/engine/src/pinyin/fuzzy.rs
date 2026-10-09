@@ -1,6 +1,6 @@
 //! Fuzzy pinyin expansion (quanpin.md §6, `R/quanpin/fuzzy_pinyin.h`). The dictionary side (`fuzzy_candidates`) is in `quanpin::dictionary`.
 
-use super::syllables::is_intact;
+use super::syllables::{intact_piece, is_intact, MAX_SYLLABLE_LENGTH};
 use crate::types::{fuzzy_rule, FuzzyPinyinOptions};
 
 pub const FUZZY_SEGMENTATION_LIMIT: usize = 64;
@@ -72,14 +72,20 @@ pub fn fuzzy_syllables(syllable: &str, options: FuzzyPinyinOptions) -> Vec<Strin
     let ends = &ends[..end_count];
     let mut result = Vec::with_capacity(starts.len().saturating_mul(ends.len()));
     result.push(syllable.to_owned());
+    let mut buffer = [0; MAX_SYLLABLE_LENGTH];
     for (index, start) in starts.iter().enumerate() {
         // 原音节已经在首行，跳过两个伙伴列表首项组成的重复组合。
         for end in ends.iter().skip(usize::from(index == 0)) {
-            let mut candidate = String::with_capacity(start.len() + end.len());
-            candidate.push_str(start);
-            candidate.push_str(end);
-            if is_intact(&candidate) && !result.contains(&candidate) {
-                result.push(candidate);
+            // 超过完整音节表上限的组合必定无效，其余先在栈上验证再分配。
+            let Some(bytes) = buffer.get_mut(..start.len() + end.len()) else {
+                continue;
+            };
+            bytes[..start.len()].copy_from_slice(start.as_bytes());
+            bytes[start.len()..].copy_from_slice(end.as_bytes());
+            if let Some(candidate) = intact_piece(bytes) {
+                if !result.iter().any(|variant| variant == candidate) {
+                    result.push(candidate.to_owned());
+                }
             }
         }
     }
@@ -228,6 +234,53 @@ mod tests {
                 allocations, budget,
                 "原音节 {syllable} 被重复构造: {allocations}"
             );
+        }
+    }
+
+    #[test]
+    fn fuzzy_expansion_allocates_only_valid_variant_strings() {
+        for (syllable, expected, budget) in [
+            ("lian", vec!["lian", "liang", "nian", "niang"], 5),
+            ("fo", vec!["fo"], 2),
+            ("chuang", vec!["chuang", "chuan", "cuan"], 4),
+        ] {
+            let options = rules(fuzzy_rule::ALL);
+            let _ = fuzzy_syllables(syllable, options);
+            let (actual, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+                fuzzy_syllables(syllable, options)
+            });
+
+            assert_eq!(actual, expected);
+            assert_eq!(
+                allocations, budget,
+                "无效模糊变体仍分配字符串: {syllable}: {allocations}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_syllable_expansion_allocates_only_its_owned_results() {
+        let _ = fuzzy_syllables("lian", rules(fuzzy_rule::ALL));
+        for &syllable in super::super::syllables::intact_pinyin_list() {
+            for mask in std::iter::once(0)
+                .chain((0..11).map(|bit| 1 << bit))
+                .chain(std::iter::once(fuzzy_rule::ALL))
+            {
+                let (variants, allocations) =
+                    crate::ime::personal_rerank::allocations::count(|| {
+                        fuzzy_syllables(syllable, rules(mask))
+                    });
+                assert_eq!(variants.first().map(String::as_str), Some(syllable));
+                assert!(variants.iter().all(|variant| is_intact(variant)));
+                for (index, variant) in variants.iter().enumerate() {
+                    assert!(!variants[..index].contains(variant));
+                }
+                assert_eq!(
+                    allocations,
+                    variants.len() + 1,
+                    "{syllable}: {mask}: 分配了输出之外的缓冲"
+                );
+            }
         }
     }
 
