@@ -201,7 +201,7 @@ public final class AboutPage extends DetailPage {
         int markSize = Ui.dp(context, 60);
         disc.addView(mark, Ui.squareFrameParamsPx(markSize, Gravity.CENTER));
         int discSize = Ui.dp(context, 116);
-        header.addView(disc, Ui.squareParamsPx(discSize));
+        header.addView(disc, ViewPolicy.newSquareParamsPx(discSize));
 
         TextView name = Ui.styledLabel(context, getString(R.string.app_name), 22, 700, Ui.text(context));
         ViewPolicy.setCentered(name);

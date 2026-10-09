@@ -9,6 +9,8 @@ LOGIN_SHEET = ROOT / "platforms/android/java/app/msime/android/home/LoginSheet.j
 INPUT_SERVICE = ROOT / "platforms/android/java/app/msime/android/core/MSIMEInputService.java"
 BOTTOM_BAR = ROOT / "platforms/android/java/app/msime/android/core/ImeBottomBar.java"
 UI = ROOT / "platforms/android/java/app/msime/android/home/Ui.java"
+HOME = ROOT / "platforms/android/java/app/msime/android/home"
+ANDROID_JAVA = ROOT / "platforms/android/java"
 KEYBOARD_GEOMETRY = ROOT / "platforms/android/java/app/msime/android/keyboard/KeyboardGeometry.java"
 
 
@@ -84,13 +86,21 @@ def main() -> None:
     vertical_factory = "LinearLayout view = new LinearLayout(context);\n        view.setOrientation(LinearLayout.VERTICAL);"
     if vertical_factory in ui or vertical_factory in keyboard_geometry:
         raise AssertionError("页面工具类仍保留重复的纵向容器实现")
-    if "return ViewPolicy.newSquareParamsPx(size);" not in ui:
-        raise AssertionError("Ui 没有调用共享正方形布局参数工厂")
-    if "return ViewPolicy.newSquareParamsPx(size);" not in keyboard_geometry:
-        raise AssertionError("KeyboardGeometry 没有调用共享正方形布局参数工厂")
-    square_factory = "public static LinearLayout.LayoutParams squareParamsPx(int size) {\n        return new LinearLayout.LayoutParams(size, size);"
-    if square_factory in ui or square_factory in keyboard_geometry:
-        raise AssertionError("页面工具类仍保留重复的正方形布局参数实现")
+    square_forwarder = "public static LinearLayout.LayoutParams squareParamsPx(int size)"
+    if square_forwarder in ui or square_forwarder in keyboard_geometry:
+        raise AssertionError("页面工具类仍保留正方形布局参数转发方法")
+    for path in HOME.glob("*.java"):
+        source = path.read_text(encoding="utf-8")
+        if "Ui.squareParamsPx(" in source:
+            raise AssertionError(f"{path} 没有直接调用共享正方形布局参数工厂")
+    for path in ANDROID_JAVA.rglob("*.java"):
+        source = path.read_text(encoding="utf-8")
+        if "KeyboardGeometry.squareParamsPx(" in source:
+            raise AssertionError(f"{path} 没有直接调用共享正方形布局参数工厂")
+    for name in ("AboutPage.java", "DownloadPage.java", "Ui.java"):
+        source = (HOME / name).read_text(encoding="utf-8")
+        if "ViewPolicy.newSquareParamsPx(" not in source:
+            raise AssertionError(f"{name} 没有调用共享正方形布局参数工厂")
     print("android view policy: recursive enabled state is shared")
 
 
