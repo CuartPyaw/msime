@@ -78,6 +78,8 @@ export function FloatingToolbarSettingsPage() {
   });
   // Linux 两个前端都不画悬浮窗，工具栏是输入法菜单里的子菜单（IBus 面板属性菜单、Fcitx5 托盘状态区菜单）。页面按这个呈现：页首放说明而不是悬浮条预览，开关和按钮的文案说菜单，尺寸组整组不出现。其他宿主照旧。
   const menuToolbar = linuxPlatform;
+  // GNOME Shell 下 IBus 只发布输入模式和设置两项，没有「工具栏」子菜单（ClientEngine.cpp 的 publish_mode）。判据和页首说明同一个，开关与按钮组的描述不能再指向那个不存在的子菜单。
+  const gnomeShell = menuToolbar && host?.candidate_panel_limit === "gnome_shell";
   return (
     <SettingsPageFieldset
       disabled={busy}
@@ -87,10 +89,7 @@ export function FloatingToolbarSettingsPage() {
       {/* 预览放在页首：下面每一组改的都是它画出的内容。Linux 没有可预览的悬浮条，页首换成说明。 */}
       {menuToolbar ? (
         <GroupList>
-          <FloatingToolbarPlatformNotice
-            buttons={showToolbarComponents}
-            gnomeShell={host?.candidate_panel_limit === "gnome_shell"}
-          />
+          <FloatingToolbarPlatformNotice buttons={showToolbarComponents} gnomeShell={gnomeShell} />
         </GroupList>
       ) : (
         <GroupList>
@@ -121,9 +120,11 @@ export function FloatingToolbarSettingsPage() {
         <SwitchRow
           title={menuToolbar ? "在输入法菜单显示工具栏" : "在桌面显示悬浮工具栏"}
           description={
-            menuToolbar
-              ? "「工具栏」子菜单：IBus 在面板的属性菜单里，Fcitx5 在托盘的状态区菜单里，需要桌面提供托盘"
-              : "快速访问输入法状态与常用功能"
+            gnomeShell
+              ? "当前 GNOME 桌面的输入源菜单没有「工具栏」子菜单，这个开关在这里不生效"
+              : menuToolbar
+                ? "「工具栏」子菜单：IBus 在面板的属性菜单里，Fcitx5 在托盘的状态区菜单里，需要桌面提供托盘"
+                : "快速访问输入法状态与常用功能"
           }
           checked={floatingToolbar.enabled}
           onChange={(enabled) => onToolbarChange({ enabled })}
@@ -135,9 +136,11 @@ export function FloatingToolbarSettingsPage() {
             <Checks
               legend="按钮"
               description={
-                menuToolbar
-                  ? "勾选要显示在「工具栏」子菜单里的按钮"
-                  : "勾选要显示在悬浮工具栏上的按钮"
+                gnomeShell
+                  ? "勾选工具栏要列出的按钮，当前 GNOME 桌面不生效"
+                  : menuToolbar
+                    ? "勾选要显示在「工具栏」子菜单里的按钮"
+                    : "勾选要显示在悬浮工具栏上的按钮"
               }
               items={[
                 // The mode switch is the toolbar's reason to exist, so its box is drawn checked and cannot be cleared.

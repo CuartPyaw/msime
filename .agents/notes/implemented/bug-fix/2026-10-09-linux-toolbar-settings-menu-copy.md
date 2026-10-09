@@ -16,6 +16,7 @@ Linux 两个前端都不画悬浮工具栏窗口，这是既有设计（`platfor
 
 - `floating-toolbar-page.tsx` 用 `linuxPlatform` 分支（局部名 `menuToolbar`）：Linux 下页首不画 `SkinToolbarPreview`，换成 `FloatingToolbarPlatformNotice`；开关标题是「在输入法菜单显示工具栏」，描述写明入口：IBus 在面板属性菜单，Fcitx5 在托盘状态区菜单，需要桌面提供托盘；按钮组描述改说「工具栏」子菜单；「尺寸」组在 Linux 下整组不出现（缩放、图标尺寸本来就不显示，「颜色与明暗」链接本来就对 Linux 隐藏）。
 - `FloatingToolbarPlatformNotice` 改成 Linux 专用文案，新增 `gnomeShell` 参数。页面在 `host.candidate_panel_limit === "gnome_shell"` 时传真。这个值只有 IBus 宿主会写（`publish_candidate_panel_status`），判据和 `publish_mode` 的 GNOME 分支是同一个 `candidate_panel_is_gnome_shell()`，所以页面说「不生效」的时候，宿主确实没发布工具栏。
+- GNOME 下开关和按钮组的描述也跟着换，不再指向「工具栏」子菜单：开关说「当前 GNOME 桌面的输入源菜单没有「工具栏」子菜单，这个开关在这里不生效」，按钮组说「勾选工具栏要列出的按钮，当前 GNOME 桌面不生效」。页面只算一次 `gnomeShell`，页首说明和这两处描述用同一个值，免得页首说没有子菜单、下面又教人去子菜单里找。开关标题仍是「在输入法菜单显示工具栏」，它是这个偏好的名字，换到别的桌面就生效。
 - 宿主还没写出状态文件时（例如用户还没在 IBus 下激活过输入法），页面不知道是不是 GNOME，通用说明的末尾仍注明「GNOME 桌面下的 IBus 没有这个子菜单」，不让 GNOME 用户只看到一句不成立的话。
 - `host_surface.rs` 的能力位不动。Windows、macOS、Harmony 的页面（预览、标题、描述、「尺寸」组）不变，`host-capabilities.test.tsx` 按三家逐一钉住。
 
@@ -35,6 +36,6 @@ Linux 两个前端都不画悬浮工具栏窗口，这是既有设计（`platfor
 - `FloatingToolbarPlatformNotice` 从「菜单型宿主」的通用说明变成了 Linux 专用文案。假设中「不是 Linux、又不报外观能力」的宿主，「尺寸」组里原先的通用说明不再出现，那里只剩「颜色与明暗」链接；现实中没有这样的宿主。
 - GNOME 判定依赖 IBus 宿主写的 `candidate-panel.json`。Fcitx5 跑在 GNOME 下不会报 `gnome_shell`，那时页面给通用说明；Fcitx5 的入口取决于托盘，描述里已写明需要桌面提供托盘。
 
-验证：`apps/desktop` 下 `vitest run tests/settings tests/input/host-capabilities.test.tsx`（Linux 页首说明在「显示」组之前、无预览、新标题与描述、无「尺寸」组；GNOME 文案不含「仍然生效」；Windows/macOS/Harmony 保持预览、旧标题和「显示 / 按钮 / 尺寸」三组），以及 `pnpm run typecheck`。
+验证：`apps/desktop` 下 `vitest run tests/settings tests/input/host-capabilities.test.tsx`（Linux 页首说明在「显示」组之前、无预览、新标题与描述、无「尺寸」组；GNOME 文案不含「仍然生效」，开关和按钮组描述不提子菜单入口；Windows/macOS/Harmony 保持预览、旧标题和「显示 / 按钮 / 尺寸」三组），以及 `pnpm run typecheck`。
 
 尚未验证：没有在真实的 Linux 桌面（IBus/GNOME、IBus/KDE、Fcitx5）里打开设置窗口看这页。

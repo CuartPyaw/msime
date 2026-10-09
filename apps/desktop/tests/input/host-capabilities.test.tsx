@@ -290,6 +290,13 @@ test("the Linux toolbar page says nothing applies under GNOME Shell", async () =
     ),
   ).toBeTruthy();
   expect(screen.queryByText(/仍然生效/)).toBeNull();
+  // 开关和按钮组的描述跟页首说明一致，不再指向 GNOME 下不存在的「工具栏」子菜单。
+  expect(
+    screen.getByText("当前 GNOME 桌面的输入源菜单没有「工具栏」子菜单，这个开关在这里不生效"),
+  ).toBeTruthy();
+  expect(screen.getByText("勾选工具栏要列出的按钮，当前 GNOME 桌面不生效")).toBeTruthy();
+  expect(screen.queryByText(/IBus 在面板的属性菜单里/)).toBeNull();
+  expect(screen.queryByText("勾选要显示在「工具栏」子菜单里的按钮")).toBeNull();
 });
 
 test.each(["windows", "macos", "harmony"] as const)(
