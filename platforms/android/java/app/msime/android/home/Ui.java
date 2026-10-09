@@ -326,12 +326,6 @@ public final class Ui {
         return params;
     }
 
-    /** Layout parameters for a view that wraps its width and uses a dp height. */
-    public static LinearLayout.LayoutParams wrapHeight(Context context, float heightDp) {
-        return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
-            dp(context, heightDp));
-    }
-
     /** Layout parameters for a square child with a size expressed in dp. */
     public static LinearLayout.LayoutParams squareParams(Context context, float sizeDp) {
         int size = dp(context, sizeDp);
