@@ -124,17 +124,17 @@ int main() {
   assert(offset_y(conf) + *staged->height ==
          host::FcitxPanelGeometry::shadow_top + staged->band + pad);
 
-  // A skin resource replaced by a symlink must not redirect the host outside the package.
+    // A skin resource replaced by a symlink must not redirect the host outside the package.
   const auto outside = root / "outside.png";
   write(outside, source);
   const auto linked = root / "skin" / "linked.png";
   std::filesystem::create_symlink(outside, linked);
   assert(!host::stage_fcitx_overlay(theme_dir,
-                                    {linked.string(), 112, 85, host::CandidateSkinAlign::right}));
+                                    {linked.string(), 112, 85, host::CandidateSkinAlign::right}, pad));
   const auto hardlinked = root / "skin" / "hardlinked.png";
   std::filesystem::create_hard_link(outside, hardlinked);
   assert(!host::stage_fcitx_overlay(theme_dir,
-                                    {hardlinked.string(), 112, 85, host::CandidateSkinAlign::right}));
+                                    {hardlinked.string(), 112, 85, host::CandidateSkinAlign::right}, pad));
   assert(std::filesystem::exists(outside));
   std::filesystem::remove(hardlinked);
 

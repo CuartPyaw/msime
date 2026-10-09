@@ -5457,6 +5457,23 @@ inline FcitxHintInputs fcitx_hint_inputs(const fcitx::RawConfig &config, bool sy
       value("Font"), dpi};
 }
 
+// 经典界面里影响模式提示的其余键（跟随深色、面板字体、Wayland 字体 DPI）：它们不在主题选择的缓存里，但用户在 fcitx5-configtool 里改它们时，
+// 下一拍的提示缓存也要跟上。与主题选择一样只读落盘的 `conf/classicui.conf`，不调会扫描全部已装主题的 `getConfig()`（#5988）；
+// 等于默认值的项 fcitx 写成注释，解析后缺失即默认，而提示本身在真正重读时取自经典界面的现值（见 FcitxHintInputs）。
+std::string read_classicui_hint_stamp() {
+  fcitx::RawConfig config;
+  fcitx::readAsIni(config, "conf/classicui.conf");
+  std::string stamp;
+  for (const auto *key : {"UseDarkTheme", "Font", "ForceWaylandDPI"}) {
+    const auto *value = config.valueByPath(key);
+    stamp += key;
+    stamp += '=';
+    stamp += value ? *value : std::string();
+    stamp += '\n';
+  }
+  return stamp;
+}
+
 // Each context owns a thread-bound Host API session. Fcitx never copies composing state.
 class FcitxEngine : public fcitx::InputMethodEngineV2 {
 public:
@@ -5514,7 +5531,9 @@ public:
         {"user_radius", user_radius},
         {"overlay", host::fcitx_overlay_stamp(decoration)}}.dump();
     // 缓存只决定「同一份输入已经接管写好」这一件事：一拍不调 `getConfig()`，也不重写主题（#5988）；一次新的主动选择（chosen）仍然往下走，重新判断所有权。
-    if (inputs == candidate_theme_applied_ && !chosen) return;
+    // 提示缓存还取决于 classicui 落盘的跟随深色、字体与 Wayland 字体 DPI，所以它们变了也要往下走（见 read_classicui_hint_stamp）。
+    const auto hint_stamp = read_classicui_hint_stamp();
+    if (inputs == candidate_theme_applied_ && !chosen && hint_stamp == classicui_hint_stamp_) return;
     auto attempt = Json{{"inputs", inputs}, {"chosen", chosen}, {"classicui", classicui != nullptr}};
     if (classicui) {
       const auto selection = read_classicui_theme_selection();
@@ -5533,6 +5552,7 @@ public:
     // 模式提示的热路径不读 classicui 配置（getConfig() 会扫描主题目录并逐个解析 theme.conf），
     // 每次同步在这里记下它画的主题、字体与 Wayland 字体 DPI。
     hint_inputs_ = fcitx_hint_inputs(current, system_dark);
+    classicui_hint_stamp_ = hint_stamp;
     const auto *selected = current.valueByPath("Theme");
     const auto *selected_dark = current.valueByPath("DarkTheme");
     // 用户刚在主题菜单里选了水杉主题时（chosen）即使当前是第三方主题也接管；焦点进入、偏好同步、系统明暗变化都只是重读同一份偏好，绝不把用户选的主题换回来。
@@ -6301,6 +6321,8 @@ public:
   // 提示要撑到的文本宽度（逻辑单位），写主题时算好；0 表示不加宽。
   int hint_text_width_ = 0;
   FcitxHintInputs hint_inputs_;
+  // 上一次重读经典界面现值时落盘配置的样子（见 read_classicui_hint_stamp）：没变就不必再读一次完整配置。
+  std::string classicui_hint_stamp_;
 #ifdef MSIME_FCITX5_HINT_FONT
   // 字体、分辨率或装饰宽度变化时测量并缓存完整提示，重复切换不再分配 Pango 对象。
   std::string hint_measured_font_;
