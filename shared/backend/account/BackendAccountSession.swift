@@ -473,12 +473,14 @@ actor BackendAccountSession {
     try await forget(removingAccount: cleanup, fallbackAccountID: expected, matchingUserID: expected)
   }
   private func forget(removingAccount cleanup: @Sendable (String) throws -> Void,
-                      fallbackAccountID: String?, matchingUserID expectedUserID: String? = nil) async throws {
+                      fallbackAccountID: String?, matchingUserID expectedUserID: String? = nil,
+                      allowMissingExpected: Bool = false) async throws {
     // Keep the old identity before clearing memory. The shared lock below rechecks the account
     // so an older sign-out cannot clear another process's replacement session. A refresh by
     // that process rotates its token but must still allow this sign-out to finish.
     let stored = try storage.load()
-    if let expectedUserID, stored?.tokens.user.id != expectedUserID { throw CancellationError() }
+    if let expectedUserID, stored?.tokens.user.id != expectedUserID,
+       !(allowMissingExpected && stored == nil) { throw CancellationError() }
     let expected = stored ?? saved
     let accountID = expected?.tokens.user.id ?? fallbackAccountID
     generation += 1
@@ -489,31 +491,35 @@ actor BackendAccountSession {
     // 如果暂时拿不到锁就保留持久化会话；无锁清理会让进行中的刷新重新复活已注销的会话。
     try await refreshLock.run {
       try await self.clearStorage(at: version, accountID: accountID,
-                                  matchingUserID: expectedUserID, cleanup: cleanup)
+                                  matchingUserID: expectedUserID,
+                                  allowMissingExpected: allowMissingExpected, cleanup: cleanup)
     }
   }
   private func clearStorage(at version: Int, accountID: String?,
                             matchingUserID expectedUserID: String?,
+                            allowMissingExpected: Bool,
                             cleanup: @Sendable (String) throws -> Void) throws {
     guard generation == version else { throw CancellationError() }
     let current = try storage.load()
-    if let expectedUserID, current?.tokens.user.id != expectedUserID { throw CancellationError() }
+    if let expectedUserID, current?.tokens.user.id != expectedUserID,
+       !(allowMissingExpected && current == nil) { throw CancellationError() }
     if let current, current.tokens.user.id != accountID { throw CancellationError() }
     if let accountID = current?.tokens.user.id ?? accountID { try cleanup(accountID) }
     try storage.clear()
   }
   func logout(all: Bool = false, removingAccount cleanup: @Sendable (String) throws -> Void = { _ in }) async throws {
-    let owner = try? user()?.id
+    guard let owner = try user()?.id else { throw BackendAccountClient.Failure(status: 401) }
     let version = generation
     let token: String
-    do { token = try await accessToken() }
+    do { token = try await credentials(matchingUserID: owner).token }
     catch {
       guard generation == version else { throw CancellationError() }
-      try await forget(removingAccount: cleanup, fallbackAccountID: owner)
+      try await forget(removingAccount: cleanup, fallbackAccountID: owner,
+                       matchingUserID: owner, allowMissingExpected: true)
       throw error
     }
     guard generation == version else { throw CancellationError() }
-    try await forget(removingAccount: cleanup, fallbackAccountID: owner)
+    try await forget(matchingUserID: owner, removingAccount: cleanup)
     try await api.logout(token: token, all: all)
   }
 }
