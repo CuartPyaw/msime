@@ -59,18 +59,23 @@ pub fn enumerate_complete_segmentations(
         graph: &SyllableGraph,
         position: usize,
         path_limit: usize,
-        current: &mut Vec<String>,
+        current: &mut Vec<&'static str>,
         result: &mut Vec<Vec<String>>,
     ) {
         if result.len() >= path_limit {
             return;
         }
         if position == graph.input_length {
-            result.push(current.clone());
+            result.push(
+                current
+                    .iter()
+                    .map(|syllable| (*syllable).to_owned())
+                    .collect(),
+            );
             return;
         }
         for edge in &graph.edges[position] {
-            current.push(edge.syllable.to_owned());
+            current.push(edge.syllable);
             visit(graph, edge.end, path_limit, current, result);
             current.pop();
             if result.len() >= path_limit {
@@ -119,6 +124,17 @@ mod tests {
         assert!(paths("xi'an", SYLLABLE_GRAPH_PATH_LIMIT).is_empty());
         assert!(paths("", SYLLABLE_GRAPH_PATH_LIMIT).is_empty());
         assert!(paths("xian", 0).is_empty());
+    }
+
+    #[test]
+    fn complete_segmentation_walk_borrows_temporary_syllables() {
+        let graph = build_syllable_graph("xian");
+        let (result, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            enumerate_complete_segmentations(&graph, SYLLABLE_GRAPH_PATH_LIMIT)
+        });
+
+        assert_eq!(result, [vec!["xian"], vec!["xi", "an"]]);
+        assert_eq!(allocations, 7, "临时遍历路径仍复制音节: {allocations}");
     }
 
     #[test]

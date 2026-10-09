@@ -559,7 +559,7 @@ fn caret_prefix_expands_its_own_initial_list() {
         crate::ime::personal_rerank::allocations::count(|| session.expand_initial_candidates());
     assert!(grew);
     assert_eq!(
-        allocations, 354,
+        allocations, 353,
         "caret-prefix expansion allocations: {allocations}"
     );
     let widened = words(&session);
@@ -791,7 +791,7 @@ fn ignored_scheme_key_does_not_clone_preedit_for_change_detection() {
     });
 
     assert!(!result.handled);
-    assert_eq!(allocations, 35);
+    assert_eq!(allocations, 32);
 }
 
 #[test]
@@ -805,7 +805,7 @@ fn typing_at_the_end_does_not_build_the_preedit_twice_for_caret_detection() {
     });
 
     assert!(result.handled);
-    assert_eq!(allocations, 136);
+    assert_eq!(allocations, 132);
 }
 
 #[test]
@@ -818,7 +818,7 @@ fn backspacing_at_the_end_does_not_build_the_preedit_twice_for_caret_detection()
         crate::ime::personal_rerank::allocations::count(|| session.command(Command::Backspace));
 
     assert!(result.handled);
-    assert_eq!(allocations, 24);
+    assert_eq!(allocations, 23);
 }
 
 #[test]
@@ -878,7 +878,7 @@ fn setting_the_caret_does_not_build_editing_text_to_clamp_it() {
     });
 
     assert_eq!(session.snapshot().caret_position, 2);
-    assert_eq!(allocations, 32);
+    assert_eq!(allocations, 29);
 }
 
 #[test]
@@ -892,7 +892,7 @@ fn moving_the_caret_does_not_build_the_preedit_twice() {
 
     assert!(result.handled);
     assert_eq!(
-        allocations, 32,
+        allocations, 29,
         "caret movement should reuse the editing text length: {allocations} allocations"
     );
 }
@@ -909,7 +909,7 @@ fn typing_at_a_caret_reuses_the_editing_text_length() {
 
     assert!(result.handled);
     assert_eq!(
-        allocations, 221,
+        allocations, 207,
         "caret insertion allocations: {allocations}"
     );
 }
@@ -2682,6 +2682,36 @@ fn dedicated_english_offers_the_typed_word_when_unknown() {
     assert_eq!(result.commit.as_deref(), Some("Codex"));
     assert!(result.diagnostic.is_none(), "{result:?}");
     assert!(session.snapshot().dedicated_english);
+}
+
+#[test]
+fn dedicated_english_writes_ascii_punctuation_unless_locked_to_chinese() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE).with_english(ENGLISH_FIXTURE);
+    let mut session = fixture.session();
+    session.set_dedicated_english(true);
+    // 组字中：结束组字，接半角句号，不是「。」。
+    type_text(&mut session, "HE");
+    let period = session.punctuation(b'.');
+    assert!(period.handled);
+    let commit = period.commit.unwrap_or_default();
+    assert!(commit.ends_with('.') && !commit.contains('。'), "{commit}");
+    assert!(!session.input.has_composition());
+    // 空闲：交还宿主，由宿主插入按键本身。
+    let idle = session.punctuation(b'.');
+    assert!(!idle.handled && idle.commit.is_none(), "{idle:?}");
+    assert!(!session.punctuation(b',').handled);
+
+    // 「始终使用中文标点」（lock 1）在英文模式下也给中文标点。
+    session.set_punctuation_lock(1).unwrap();
+    assert_eq!(session.punctuation(b'.').commit.as_deref(), Some("。"));
+    // 「始终使用英文标点」（lock 2）同样是半角。
+    session.set_punctuation_lock(2).unwrap();
+    assert!(!session.punctuation(b'.').handled);
+
+    // 中文模式不受影响：默认跟随中英文状态时仍是中文标点。
+    session.set_punctuation_lock(0).unwrap();
+    session.set_dedicated_english(false);
+    assert_eq!(session.punctuation(b'.').commit.as_deref(), Some("。"));
 }
 
 // ---- construction ----

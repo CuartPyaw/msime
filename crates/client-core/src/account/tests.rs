@@ -285,6 +285,7 @@ impl AccountSessionStorage for FailingLockStorage {
 struct FakeApi {
     refreshes: Arc<AtomicUsize>,
     reject_refresh: Arc<AtomicBool>,
+    reject_logout: Arc<AtomicBool>,
     refresh_gate: Option<Arc<(Mutex<bool>, Condvar)>>,
     preferences_started: Arc<AtomicBool>,
     preferences_gate: Option<Arc<(Mutex<bool>, Condvar)>>,
@@ -298,6 +299,7 @@ impl FakeApi {
         Self {
             refreshes: Arc::new(AtomicUsize::new(0)),
             reject_refresh: Arc::new(AtomicBool::new(false)),
+            reject_logout: Arc::new(AtomicBool::new(false)),
             refresh_gate: None,
             preferences_started: Arc::new(AtomicBool::new(false)),
             preferences_gate: None,
@@ -378,7 +380,11 @@ impl AccountApi for FakeApi {
     }
 
     fn logout(&self, _access_token: &str, _all: bool) -> Result<(), AccountError> {
-        Ok(())
+        if self.reject_logout.load(Ordering::SeqCst) {
+            Err(AccountError::Unavailable)
+        } else {
+            Ok(())
+        }
     }
 
     fn delete_account(&self, _access_token: &str) -> Result<(), AccountError> {
@@ -798,6 +804,21 @@ fn logout_clears_local_session_before_remote_result() {
 }
 
 #[test]
+fn logout_remote_failure_still_invalidates_local_identity() {
+    let storage = MemoryStorage::default();
+    installed(&storage, valid_future_expiry());
+    let api = FakeApi::new();
+    api.reject_logout.store(true, Ordering::SeqCst);
+    let session = BackendAccountSession::new(api, storage);
+
+    assert_eq!(session.logout(true), Err(AccountError::Unavailable));
+    assert_eq!(
+        session.with_current_identity(|identity| Ok(identity.map(|(user, _)| user.to_owned()))),
+        Ok(None)
+    );
+}
+
+#[test]
 fn authenticated_operation_is_cancelled_when_session_changes_before_completion() {
     let storage = MemoryStorage::default();
     installed(&storage, valid_future_expiry());
@@ -887,6 +908,34 @@ fn a_generation_guard_rejects_a_same_user_relogin_before_local_write() {
         session.put_preferences_with_generation(&cloud, generation, "fixture-user"),
         Err(AccountError::Cancelled)
     );
+}
+
+#[test]
+fn current_identity_guard_tracks_same_user_relogin() {
+    let storage = MemoryStorage::default();
+    installed(&storage, valid_future_expiry());
+    let session = BackendAccountSession::new(FakeApi::new(), storage);
+    let original = session
+        .with_current_identity(|identity| {
+            Ok(identity.map(|(user, generation)| (user.to_owned(), generation)))
+        })
+        .unwrap()
+        .unwrap();
+
+    session.forget().unwrap();
+    assert_eq!(
+        session.with_current_identity(|identity| Ok(identity.map(|(user, _)| user.to_owned()))),
+        Ok(None)
+    );
+    session.sign_in("synthetic-challenge", "123456").unwrap();
+    let current = session
+        .with_current_identity(|identity| {
+            Ok(identity.map(|(user, generation)| (user.to_owned(), generation)))
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(current.0, original.0);
+    assert_ne!(current.1, original.1);
 }
 
 #[test]
@@ -1888,25 +1937,33 @@ fn avatar_uploads_are_read_by_their_contents() {
     std::fs::write(&large, oversized).unwrap();
     let empty = directory.path().join("empty.png");
     std::fs::write(&empty, b"").unwrap();
-    let link = directory.path().join("link.png");
-    msime_path_trust::untrusted_symlink(&png, &link).unwrap();
-    let outside = tempfile::tempdir().unwrap();
-    let outside_png = outside.path().join("outside.png");
-    std::fs::write(&outside_png, b"\x89PNG\r\n\x1a\nexternal").unwrap();
-    let linked_parent = directory.path().join("linked-parent");
-    msime_path_trust::untrusted_symlink(outside.path(), &linked_parent).unwrap();
-    let nested_link = linked_parent.join("outside.png");
-    for path in [&gif, &webp, &large, &empty, &link, directory.path()] {
+    for path in [&gif, &webp, &large, &empty, directory.path()] {
         assert_eq!(
             read_account_avatar_upload(path),
             Err(AccountError::Invalid),
             "{path:?}"
         );
     }
-    assert_eq!(
-        read_account_avatar_upload(&nested_link),
-        Err(AccountError::Invalid)
-    );
+    // A symlink needs privileges on Windows; the symlink cases run on unix only.
+    #[cfg(unix)]
+    {
+        let link = directory.path().join("link.png");
+        msime_path_trust::untrusted_symlink(&png, &link).unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let outside_png = outside.path().join("outside.png");
+        std::fs::write(&outside_png, b"\x89PNG\r\n\x1a\nexternal").unwrap();
+        let linked_parent = directory.path().join("linked-parent");
+        msime_path_trust::untrusted_symlink(outside.path(), &linked_parent).unwrap();
+        let nested_link = linked_parent.join("outside.png");
+        assert_eq!(
+            read_account_avatar_upload(&link),
+            Err(AccountError::Invalid)
+        );
+        assert_eq!(
+            read_account_avatar_upload(&nested_link),
+            Err(AccountError::Invalid)
+        );
+    }
     assert_eq!(
         read_account_avatar_upload(Path::new("relative.png")),
         Err(AccountError::Invalid)
@@ -2280,4 +2337,81 @@ fn moderation_refusals_are_told_apart_by_the_error_code() {
         "account_screening_unavailable"
     );
     assert_eq!(AccountError::Banned.code(), "account_banned");
+}
+
+#[test]
+fn google_loopback_plan_checks_the_target_and_the_url_before_a_host_opens_it() {
+    let target = google_loopback_target(53682);
+    assert_eq!(target, "http://127.0.0.1:53682/callback");
+    let url = google_authorization_url(&target, GOOGLE_FIXTURE_STATE);
+    assert_eq!(
+        google_loopback_plan(&url, &target, 600),
+        Ok(GoogleLoopbackPlan {
+            state: GOOGLE_FIXTURE_STATE.into(),
+            wait: GOOGLE_SIGN_IN_TIMEOUT,
+        })
+    );
+    // 等待时长扣掉提交授权码的余量，不超过 challenge 的寿命。
+    assert_eq!(
+        google_loopback_plan(&url, &target, 90).map(|plan| plan.wait),
+        Ok(Duration::from_secs(60))
+    );
+    assert_eq!(
+        google_loopback_plan(&url, &target, 30),
+        Err(AccountError::Unavailable)
+    );
+    // 链接指向别的监听，或回跳地址不是回环形状，都不打开。
+    assert_eq!(
+        google_loopback_plan(&url, &google_loopback_target(53683), 600),
+        Err(AccountError::Unavailable)
+    );
+    let foreign = "http://192.168.1.2:53682/callback";
+    assert_eq!(
+        google_loopback_plan(
+            &google_authorization_url(foreign, GOOGLE_FIXTURE_STATE),
+            foreign,
+            600
+        ),
+        Err(AccountError::Unavailable)
+    );
+}
+
+#[test]
+fn google_loopback_reply_answers_the_browser_with_the_same_page_as_the_desktop_listener() {
+    let state = GOOGLE_FIXTURE_STATE;
+    let code = google_loopback_reply(
+        Some(&format!(
+            "GET /callback?state={state}&code=4%2F0Afixture HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+        )),
+        state,
+    );
+    assert_eq!(code.outcome, GoogleCallback::Code("4/0Afixture".into()));
+    assert!(code.response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(code.response.contains("已收到 Google 授权"));
+    let (head, body) = code.response.split_once("\r\n\r\n").unwrap();
+    assert!(head.contains(&format!("Content-Length: {}\r\n", body.len())));
+    assert!(head.contains("Content-Security-Policy: default-src 'none'"));
+
+    let denied = google_loopback_reply(
+        Some(&format!(
+            "GET /callback?state={state}&error=access_denied HTTP/1.1\r\n\r\n"
+        )),
+        state,
+    );
+    assert_eq!(
+        denied.outcome,
+        GoogleCallback::Failed(AccountError::Cancelled)
+    );
+    assert!(denied.response.contains("已取消 Google 登录"));
+
+    // 别的路径、别的 state、没读完整的请求头，都不是回跳：回 404，继续等。
+    for head in [
+        Some("GET /favicon.ico HTTP/1.1\r\n\r\n".to_owned()),
+        Some("GET /callback?state=other&code=x HTTP/1.1\r\n\r\n".to_owned()),
+        None,
+    ] {
+        let reply = google_loopback_reply(head.as_deref(), state);
+        assert_eq!(reply.outcome, GoogleCallback::Ignored);
+        assert!(reply.response.starts_with("HTTP/1.1 404 Not Found\r\n"));
+    }
 }

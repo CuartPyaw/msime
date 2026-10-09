@@ -77,7 +77,7 @@ public final class Telemetry {
         WORKER.execute(() -> {
             JSONObject value = call(() -> NativeClient.telemetryBegin(request(app)));
             if (value != null) {
-                enabled = booleanValue(value.opt("enabled"), false);
+                enabled = JsonPolicy.strictBoolean(value.opt("enabled"), false);
                 String path = value.optString("crash_record_path", "");
                 File candidate = path.isEmpty() ? null : new File(path);
                 sessionCrashRecord = enabled && isSafeSessionCrashRecord(candidate)
@@ -242,7 +242,7 @@ public final class Telemetry {
 
     private static void flush(Context app) {
         JSONObject value = call(() -> NativeClient.telemetryFlush(request(app)));
-        if (value != null) enabled = booleanValue(value.opt("enabled"), enabled);
+        if (value != null) enabled = JsonPolicy.strictBoolean(value.opt("enabled"), enabled);
     }
 
     private static File directory(Context app) {
@@ -260,7 +260,7 @@ public final class Telemetry {
         JSONObject request = new JSONObject(directoryRequest(app))
             .put("platform", "android")
             .put("version", version(app));
-        String preferences = preferencesDirectory(app);
+        String preferences = HostOptionsPolicy.readOption(app.getFilesDir(), "preferences_directory");
         if (preferences.isEmpty()) request.put("enabled", true);
         else request.put("preferences_directory", preferences);
         return request.toString();
@@ -276,11 +276,6 @@ public final class Telemetry {
             Log.i(TAG, "Package version unavailable", error);
         }
         return "unknown";
-    }
-
-    /** Where the shared preferences live, as Bootstrap wrote it into runtime-options.json; empty before first-run preparation. */
-    private static String preferencesDirectory(Context app) {
-        return HostOptionsPolicy.readOption(app.getFilesDir(), "preferences_directory");
     }
 
     private interface Call {
@@ -302,8 +297,4 @@ public final class Telemetry {
         return null;
     }
 
-    /** Reporter status and consent are typed JSON booleans; reject org.json string coercion. */
-    static boolean booleanValue(Object value, boolean fallback) {
-        return JsonPolicy.strictBoolean(value, fallback);
-    }
 }

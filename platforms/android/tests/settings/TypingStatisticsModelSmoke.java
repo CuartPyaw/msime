@@ -1,3 +1,4 @@
+import app.msime.android.JsonPolicy;
 import app.msime.android.TypingStatisticsModel;
 import app.msime.android.TypingStatisticsModel.Section;
 import app.msime.android.TypingStatisticsModel.Slice;
@@ -25,9 +26,9 @@ public final class TypingStatisticsModelSmoke {
 
     public static void main(String[] args) {
         TypingStatisticsModel model = model();
-        check(!app.msime.android.TypingStatisticsDocument.booleanValue("true", false),
+        check(!JsonPolicy.strictBoolean("true", false),
             "malformed enabled flag keeps the fallback");
-        check(app.msime.android.TypingStatisticsDocument.booleanValue(Boolean.TRUE, false),
+        check(JsonPolicy.strictBoolean(Boolean.TRUE, false),
             "typed enabled flag is accepted");
         check(model.enabled() && model.total() == 120 && "90d".equals(model.retention()),
             "headline fields");

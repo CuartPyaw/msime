@@ -7,7 +7,9 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::cell::Cell;
 use std::collections::BTreeMap;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
+#[cfg(unix)]
+use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Read, Seek, Write};
 use std::path::{Component, Path, PathBuf};
@@ -931,6 +933,7 @@ pub(crate) fn install_model(
 
     let total = model.archive.size;
     let archive = staging.path.join("archive.tar.bz2");
+    #[cfg(unix)]
     let archive_name = OsStr::new("archive.tar.bz2");
     #[cfg(unix)]
     let (archive_digest, archive_reader) = {
@@ -1412,6 +1415,8 @@ fn move_partial_into_pack(
         )
         .map_err(io::Error::from);
     }
+    #[cfg(not(unix))]
+    let _ = pack_directory;
     fs::rename(partials.path().join(partial_name), pack_dir.join(name))
 }
 
@@ -1432,6 +1437,8 @@ fn move_pack_file_back(
         )
         .map_err(io::Error::from);
     }
+    #[cfg(not(unix))]
+    let _ = pack_directory;
     fs::rename(pack_dir.join(name), partials.path().join(partial_name))
 }
 
@@ -1529,6 +1536,8 @@ fn download_and_extract(
     pack_directory: Option<&File>,
     partials: &PartialDirectory,
 ) -> Result<PathBuf, LocalModelError> {
+    #[cfg(not(unix))]
+    let _ = pack_directory;
     let total = archive.size;
     let partial = partial_path(partials.path(), archive)?;
     let partial_name = partial.file_name().ok_or(LocalModelError::InvalidRoot)?;
@@ -2367,6 +2376,8 @@ fn extract(
     progress: &mut dyn FnMut(InstallProgress),
     cancel: &AtomicBool,
 ) -> Result<(), LocalModelError> {
+    #[cfg(not(unix))]
+    let _ = (model_directory, archive_file);
     let total = model.archive.size;
     let consumed = Rc::new(Cell::new(0u64));
     #[cfg(unix)]

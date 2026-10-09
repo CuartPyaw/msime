@@ -235,12 +235,12 @@ public final class DoubaoRecognizer {
             if (value == null) return null;
             // An error frame ends the session; the code is the provider's and is not shown.
             if (value.has("error_code")) return null;
-            String payloadText = DoubaoAsrPolicy.strictPayload(value.opt("payload"));
+            String payloadText = JsonPolicy.strictString(value.opt("payload"));
             if (payloadText == null) return null;
             JSONObject document = new JSONObject(payloadText);
             JSONObject result = document.optJSONObject("result");
             String text = result == null ? "" : DoubaoAsrPolicy.strictText(result.opt("text"));
-            Boolean last = DoubaoAsrPolicy.strictBoolean(value.opt("last"));
+            Boolean last = JsonPolicy.strictBoolean(value.opt("last"));
             return last == null ? null : new Update(text, last);
         } catch (JSONException error) {
             return null;

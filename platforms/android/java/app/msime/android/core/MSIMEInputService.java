@@ -592,8 +592,8 @@ public final class MSIMEInputService extends InputMethodService {
         new ThreadPoolExecutor.AbortPolicy());
     /** 表情目录和符号面板里的颜文字、符号目录都在这条线程上读。 */
     final ExecutorService emojiWorker = Executors.newSingleThreadExecutor();
-    // 只在 `emojiWorker` 线程上使用；`hasGlyph` 会走系统字体回退链，能判断当前设备能否画出某个表情。
-    private final Paint emojiGlyphPaint = new Paint();
+    // 只在 `emojiWorker` 线程上使用（表情目录和符号面板的符号目录都在那条线程上读）；`hasGlyph` 会走系统字体回退链，能判断当前设备能否画出某个表情或符号。
+    final Paint emojiGlyphPaint = new Paint();
     final ExecutorService cloudClipboardWorker = Executors.newSingleThreadExecutor();
     private final ExecutorService candidateGlossWorker = new ThreadPoolExecutor(
         1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(1),
@@ -2698,7 +2698,7 @@ public final class MSIMEInputService extends InputMethodService {
             if (choices == null || choices.length() == 0) return texts;
             JSONObject message = choices.getJSONObject(0).optJSONObject("message");
             if (message == null) return texts;
-            String content = OnlineCandidatePolicy.strictText(message.opt("content"));
+            String content = JsonPolicy.strictString(message.opt("content"));
             if (content == null) return texts;
             if (!OnlineCandidatePolicy.acceptsAiContent(content)) return texts;
             JSONArray entries = new JSONObject(content).optJSONArray("candidates");
@@ -2707,7 +2707,7 @@ public final class MSIMEInputService extends InputMethodService {
             for (int index = 0; index < entries.length(); index++) {
                 JSONObject entry = entries.optJSONObject(index);
                 if (entry != null) {
-                    String text = OnlineCandidatePolicy.strictText(entry.opt("text"));
+                    String text = JsonPolicy.strictString(entry.opt("text"));
                     if (text != null) texts.add(text);
                 }
             }

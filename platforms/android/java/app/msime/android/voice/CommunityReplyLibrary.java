@@ -57,14 +57,14 @@ public final class CommunityReplyLibrary {
         Set<String> ids = new HashSet<>(items.size());
         for (Object value : items) {
             if (!(value instanceof Map<?, ?> item)) throw new IOException("Invalid community library");
-            String id = string(item.get("id"));
-            String kind = string(item.get("kind"));
+            String id = JsonPolicy.strictString(item.get("id"));
+            String kind = JsonPolicy.strictString(item.get("kind"));
             Object contentValue = item.get("content");
             if (id == null || kind == null || !(contentValue instanceof Map<?, ?> content))
                 throw new IOException("Invalid community library");
             if (!"reply".equals(kind)) continue;
-            String name = string(item.get("name"));
-            String prompt = string(content.get("prompt"));
+            String name = JsonPolicy.strictString(item.get("name"));
+            String prompt = JsonPolicy.strictString(content.get("prompt"));
             if (name == null || id.isEmpty() || name.isEmpty() || prompt == null
                     || TextPolicy.blank(id) || TextPolicy.blank(name) || TextPolicy.blank(prompt)
                     || !TextPolicy.trimmed(name).equals(name) || !ids.add(id))
@@ -80,8 +80,6 @@ public final class CommunityReplyLibrary {
         }
         return List.copyOf(replies);
     }
-
-    private static String string(Object value) { return JsonPolicy.strictString(value); }
 
     private static final class Parser {
         private static final int MAXIMUM_DEPTH = 24;

@@ -384,7 +384,7 @@ public final class LocalAsrRecognizer {
         for (int index = 0; index < hotwords.length(); index++) {
             JSONObject word = hotwords.optJSONObject(index);
             if (word == null || word.isNull("text")) continue;
-            String text = LocalAsrPolicy.strictText(word.opt("text"));
+            String text = JsonPolicy.strictString(word.opt("text"));
             if (text != null) out.add(text);
         }
         return out;

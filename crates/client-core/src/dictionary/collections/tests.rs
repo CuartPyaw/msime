@@ -3,6 +3,36 @@ use crate::community::resource::{CommunityResourceContent, SharedWord};
 use crate::dictionary::personal::{PersonalWordApplied, PersonalWordPage, PersonalWordRequest};
 use std::collections::BTreeMap;
 
+#[cfg(unix)]
+#[test]
+fn collection_writes_stay_bound_to_the_locked_directory_after_replacement() {
+    let root = tempfile::tempdir().unwrap();
+    let preferences = root.path().join("preferences");
+    let store = DictionaryCollectionsStore::new(
+        &preferences,
+        PersonalDictionaryStore::new(root.path().join("personal")),
+    );
+    let lock = store.lock().unwrap();
+    let moved = root.path().join("preferences-moved");
+    std::fs::rename(&store.directory, &moved).unwrap();
+    std::fs::create_dir(&store.directory).unwrap();
+
+    store
+        .write_json(
+            &lock.directory,
+            std::ffi::OsStr::new(INDEX_FILE),
+            &CollectionIndex {
+                version: 1,
+                collections: Vec::new(),
+            },
+            MAX_INDEX_BYTES,
+        )
+        .unwrap();
+
+    assert!(moved.join(INDEX_FILE).exists());
+    assert!(!store.directory.join(INDEX_FILE).exists());
+}
+
 struct Fixture {
     _root: tempfile::TempDir,
     personal_directory: PathBuf,

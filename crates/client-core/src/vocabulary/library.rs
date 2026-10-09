@@ -86,7 +86,7 @@ impl WordbookLibrary {
         &self.directory
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     fn book_path(&self, id: &str) -> PathBuf {
         self.directory.join(format!("{id}.json"))
     }

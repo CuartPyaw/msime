@@ -60,7 +60,7 @@ public final class TypingStatisticsDocument {
             // The shared Rust store defaults a missing field to false. Keep old or partially
             // written documents opt-in on Android as well; showing them as enabled would expose
             // statistics the user never turned on.
-            booleanValue(root.opt("enabled"), false),
+            JsonPolicy.strictBoolean(root.opt("enabled"), false),
             BoundsPolicy.nonNegative(KeyboardGeometry.strictLong(root.opt("total"), 0)),
             root.optString("retention", "forever"),
             counts(root.optJSONObject("days")),
@@ -69,11 +69,6 @@ public final class TypingStatisticsDocument {
             MapPolicy.copyOrEmpty(dailyCharacters),
             MapPolicy.copyOrEmpty(dailySources),
             MapPolicy.copyOrEmpty(dailyKeys));
-    }
-
-    /** Persisted flags are typed JSON booleans; reject org.json's string coercion. */
-    public static boolean booleanValue(Object value, boolean fallback) {
-        return JsonPolicy.strictBoolean(value, fallback);
     }
 
     private static Map<String, Long> counts(JSONObject value) {

@@ -270,7 +270,7 @@ fn load_state_locked(lock: &StateLock) -> SyncState {
         .unwrap_or_default()
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 fn open_state_file(path: &Path) -> Option<File> {
     crate::storage::reject_symlink(path).ok()?;
     crate::storage::open_private_file_in(path).ok()

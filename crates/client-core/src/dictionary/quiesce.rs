@@ -203,7 +203,7 @@ impl Lease {
         // The owner line tells this lease from one another writer put up; the expiry alone could coincide.
         let contents = format!("{expiry}\n{}\n", self.owner);
         #[cfg(not(unix))]
-        let mut file = {
+        let file = {
             let mut file = OpenOptions::new();
             file.write(true).create_new(true);
             file

@@ -12,7 +12,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-/// Rows accepted from one file. Beyond this the remainder is reported as
+/// Rows examined from one file. Beyond this the remainder is reported as
 /// truncated rather than silently dropped or rejected wholesale, because each
 /// import holds the dictionary maintenance lock.
 pub const MAX_ENTRIES: usize = 1000;
@@ -257,11 +257,8 @@ pub fn parse_rows(kind: ImportKind, format: ImportFormat, text: &str) -> ImportR
         swapped: false,
     };
     let mut in_yaml_header = false;
+    let mut examined = 0;
     for (index, line) in text.lines().enumerate() {
-        if report.entries.len() >= MAX_ENTRIES {
-            report.truncated = true;
-            break;
-        }
         let line = line.trim_end_matches('\r');
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
@@ -280,6 +277,11 @@ pub fn parse_rows(kind: ImportKind, format: ImportFormat, text: &str) -> ImportR
                 continue;
             }
         }
+        if examined >= MAX_ENTRIES {
+            report.truncated = true;
+            break;
+        }
+        examined += 1;
         match parse_row(kind, format, line) {
             Ok(mut entry) => {
                 entry.line = index + 1;
@@ -600,6 +602,20 @@ mod tests {
         assert_eq!(report.entries.len(), MAX_ENTRIES);
         assert!(report.truncated);
         assert_eq!(report.failed, 0);
+    }
+
+    #[test]
+    fn invalid_rows_count_toward_the_examined_row_limit() {
+        let mut text = String::from("首词\tni'hao\n");
+        for _ in 1..MAX_ENTRIES {
+            text.push_str("invalid row\n");
+        }
+        text.push_str("末词\tni'hao\n");
+
+        let report = parse_ok(ImportKind::Pinyin, "standard", &text);
+        assert_eq!(report.entries.len(), 1);
+        assert_eq!(report.failed, MAX_ENTRIES - 1);
+        assert!(report.truncated);
     }
 
     #[test]
