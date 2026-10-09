@@ -14,6 +14,7 @@ import CryptoKit
   var failure: Int?
   var lastRevision: Int64 = 0
   var lastExport: URL?
+  var snapshotSource: URL?
   var lastCode = ""
   var lastPosition: Int?
   var lastReplacement: BackendAccountClient.DictionaryValue?
@@ -32,8 +33,12 @@ import CryptoKit
     return .init(entries: [.init(kind:kind, code:"he'cheng", word:"合成", weight:100)], offset:invalidPage ? offset + 1 : offset, has_more:offset == 0, revision:0, normalized:"he'cheng")
   }
   func dictionarySnapshot(token: String) async throws -> BackendAccountClient.DownloadedSnapshot {
-    assertionFailure("测试不应下载云端快照")
-    throw BackendAccountClient.Failure(status: 500)
+    guard let snapshotSource else { throw BackendAccountClient.Failure(status: 500) }
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("msime-synthetic-download-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+    let file = root.appendingPathComponent("msime-dictionary-snapshot.ndjson")
+    try FileManager.default.copyItem(at: snapshotSource, to: file)
+    return .init(url: file, envelope: try BackendSnapshotEnvelope.inspect(file))
   }
   func restoreDictionarySnapshot(file: URL, expectedSHA256: String, revision: Int64, token: String) async throws -> BackendAccountClient.SnapshotRestoreResult {
     assertionFailure("已取消的预览不应恢复云端快照")
@@ -220,6 +225,21 @@ import CryptoKit
     let empty = BackendDesktopSnapshots(client: api, credentials: { "synthetic-token" }, choose: { _ in nil })
     let dismissed = try await empty.execute(["operation":"snapshot_restore_preview"])
     assert(dismissed["saved"] as? Bool == false)
+
+    let statusAPI = SyntheticDictionaryAPI()
+    statusAPI.snapshotSource = source
+    var signedIn = true
+    let statusOwner = BackendDesktopSnapshots(client: statusAPI, credentials: {
+      if !signedIn { throw CancellationError() }
+      return "synthetic-token"
+    }, capture: { SyntheticSnapshotTarget() })
+    let staged = try await statusOwner.execute(["operation":"snapshot_preview"])
+    _ = try await statusOwner.execute(["operation":"snapshot_enqueue", "token":staged["previewToken"]!])
+    signedIn = false
+    let hidden = try await statusOwner.execute(["operation":"snapshot_status"])
+    assert(hidden["request"] is NSNull)
+    let cancelledAfterLogout = try await statusOwner.execute(["operation":"snapshot_cancel"])
+    assert(cancelledAfterLogout["request"] is NSNull)
 
     let retryAPI = SyntheticDictionaryAPI()
     retryAPI.rejectFirstCatalog = true
