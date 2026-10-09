@@ -25,9 +25,8 @@ final class SheetOptionView {
         Ui.setMinimumHeightDp(row, context, Ui.SHEET_OPTION_HEIGHT);
         Ui.makeClickable(row, context, action);
 
-        TextView text = Ui.styledLabel(context, nested ? label + " ›" : label,
+        TextView text = Ui.centeredLabel(context, nested ? label + " ›" : label,
             Ui.TEXT_SHEET_OPTION, bold ? 600 : 400, color);
-        ViewPolicy.setCentered(text);
         FrameLayout.LayoutParams textParams = KeyboardGeometry.frameParamsPx(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
             Gravity.CENTER);

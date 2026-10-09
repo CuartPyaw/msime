@@ -22,7 +22,7 @@ def main() -> int:
         "ViewPolicy.setPadding(header, horizontal, 0, horizontal, Ui.dp(context, 12));",
         "TextView heading = Ui.headingLabel(context, title, Ui.TEXT_SHEET_HEADER, 600,",
         "if (subtitle != null && subtitle.length() > 0)",
-        "TextView note = Ui.styledLabel(context, subtitle, Ui.TEXT_SHEET_HEADER, 400,",
+        "TextView note = Ui.centeredLabel(context, subtitle, Ui.TEXT_SHEET_HEADER, 400,",
         "params.topMargin = Ui.dp(context, 2);",
     )
     for snippet in required:

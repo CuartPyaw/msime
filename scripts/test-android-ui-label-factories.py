@@ -14,8 +14,8 @@ def main() -> int:
     source = UI.read_text(encoding="utf-8")
     required = (
         "return headingLabel(context, text, TEXT_GROUP_TITLE, 500, accent(context));",
-        "TextView button = styledLabel(context, label, Math.round(sizeSp), weight, ink);",
-        "TextView button = styledLabel(context, label, sizeSp, weight, ink);",
+        "TextView button = centeredLabel(context, label, Math.round(sizeSp), weight, ink);",
+        "TextView button = centeredLabel(context, label, sizeSp, weight, ink);",
     )
     for snippet in required:
         if snippet not in source:
@@ -32,7 +32,7 @@ def main() -> int:
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1
-    print("Android text control factories use the shared styled label constructor")
+    print("Android text control factories use the shared label constructors")
     return 0
 
 

@@ -62,8 +62,8 @@ public final class InputDialog {
         root.addView(heading, headingParams);
 
         if (message != null && message.length() > 0) {
-            TextView note = Ui.styledLabel(context, message, Ui.TEXT_SHEET_HEADER, 400, Ui.subText(context));
-            ViewPolicy.setCentered(note);
+            TextView note = Ui.centeredLabel(context, message, Ui.TEXT_SHEET_HEADER, 400,
+                Ui.subText(context));
             LinearLayout.LayoutParams params = Ui.matchWidth();
             params.topMargin = Ui.dp(context, 4);
             params.leftMargin = Ui.dp(context, 20);
