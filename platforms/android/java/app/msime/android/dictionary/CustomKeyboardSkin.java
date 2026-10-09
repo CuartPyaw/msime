@@ -53,7 +53,7 @@ public final class CustomKeyboardSkin {
         value.borderWidth = KeyboardGeometry.bounded(doubleValue(object.opt("borderWidth"), 0), 0, 2, 0);
         value.shadow = KeyboardGeometry.bounded(doubleValue(object.opt("shadow"), 0), 0, .4, 0);
         value.pattern = patternValue(object.opt("pattern"));
-        value.monospaced = booleanValue(object.opt("monospaced"), false);
+        value.monospaced = JsonPolicy.strictBoolean(object.opt("monospaced"), false);
         value.keyShape = oneOf(JsonPolicy.strictStringOrEmpty(object.opt("keyShape")),
             "rounded", "capsule", "ticket", "pebble");
         value.keyMaterial = oneOf(JsonPolicy.strictStringOrEmpty(object.opt("keyMaterial")),
@@ -61,7 +61,7 @@ public final class CustomKeyboardSkin {
         value.keyOpacity = KeyboardGeometry.bounded(doubleValue(object.opt("keyOpacity"), 1), .25, 1, 1);
         if (object.has("gradientEnd") && !object.isNull("gradientEnd"))
             value.gradientEnd = color(object, "gradientEnd", value.background);
-        value.gradientHorizontal = booleanValue(object.opt("gradientHorizontal"), false);
+        value.gradientHorizontal = JsonPolicy.strictBoolean(object.opt("gradientHorizontal"), false);
         value.patternOpacity = KeyboardGeometry.bounded(doubleValue(object.opt("patternOpacity"), .15), 0, .5, .15);
         if (object.has("customBorderColor") && !object.isNull("customBorderColor"))
             value.customBorderColor = color(object, "customBorderColor", value.accent);
@@ -212,11 +212,6 @@ public final class CustomKeyboardSkin {
 
     static double doubleValue(Object raw, double fallback) {
         return KeyboardGeometry.strictDouble(raw, fallback);
-    }
-
-    /** Design documents use typed JSON booleans; reject org.json's string coercion. */
-    static boolean booleanValue(Object raw, boolean fallback) {
-        return JsonPolicy.strictBoolean(raw, fallback);
     }
 
     private static String oneOf(String value, String first, String second, String third, String fourth) {
