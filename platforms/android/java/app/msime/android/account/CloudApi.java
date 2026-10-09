@@ -163,7 +163,7 @@ public final class CloudApi {
         this.anonymous = anonymous;
     }
 
-    private static Tokens accountTokens(Context application) {
+    static Tokens accountTokens(Context application) {
         return new Tokens() {
             @Override public String token(String rejected) throws Exception {
                 return new BackendAccount(application).currentAccessToken(rejected);
