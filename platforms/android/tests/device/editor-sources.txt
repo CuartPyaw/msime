@@ -20,6 +20,7 @@ platforms/android/tests/device/settings/SettingsLifecycleSmoke.java
 platforms/android/tests/device/voice/TypingStatisticsDeviceSmoke.java
 platforms/android/tests/device/settings/AccountStorageDeviceSmoke.java
 platforms/android/tests/device/settings/BackendAccountRefreshDeviceSmoke.java
+platforms/android/java/app/msime/android/AppVersionPolicy.java
 platforms/android/java/app/msime/android/BoundsPolicy.java
 platforms/android/java/app/msime/android/ColorPolicy.java
 platforms/android/java/app/msime/android/HttpBodyPolicy.java
