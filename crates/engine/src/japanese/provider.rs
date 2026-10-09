@@ -185,13 +185,17 @@ impl JapaneseProvider {
                         // 公共读音始终保留，截断边界是完整 UTF-8 文本的末尾。
                         prefix.truncate(conversion.hiragana.len());
                         prefix.push_str(kana);
-                        for lemma in dictionary.prefix_lemma_views(&prefix, PENDING_PREFIX_LEMMAS) {
-                            rows.push(
-                                lemma.surface,
-                                PREFIX_LEMMA_BASE - i64::from(lemma.word_cost),
-                                CandidateSource::Database,
-                            );
-                        }
+                        dictionary.for_each_prefix_lemma_view(
+                            &prefix,
+                            PENDING_PREFIX_LEMMAS,
+                            |lemma| {
+                                rows.push(
+                                    lemma.surface,
+                                    PREFIX_LEMMA_BASE - i64::from(lemma.word_cost),
+                                    CandidateSource::Database,
+                                );
+                            },
+                        );
                     }
                 }
             }
@@ -405,8 +409,8 @@ mod tests {
         assert!(words(&destination).contains(&"仮仮"));
         eprintln!("日文待定前缀 provider 热查询分配：{allocations}");
         assert!(
-            allocations <= 21,
-            "假名前缀与拼接读音键应复用：{allocations}"
+            allocations <= 19,
+            "假名前缀与拼接读音键应复用，词条视图应直接消费：{allocations}"
         );
     }
 
