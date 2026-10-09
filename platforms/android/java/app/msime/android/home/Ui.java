@@ -443,15 +443,6 @@ public final class Ui {
         return view;
     }
 
-    /** Apply the shared completion or warning mark used by setup checks. */
-    public static void applyStatusMark(TextView mark, Context context, boolean done) {
-        mark.setText(done ? "✓" : "!");
-        ViewPolicy.setTextColor(mark, done ? onAccent(context) : 0xFFFFFFFF);
-        ViewPolicy.setBackground(mark,
-            DrawablePolicy.circle(done ? accent(context) : color(context, app.msime.android.R.attr.msWarn)));
-        ViewPolicy.hideFromAccessibility(mark);
-    }
-
     /** Create the centered title used by option-style bottom sheets. */
     public static TextView sheetHeading(Context context, CharSequence text) {
         TextView heading = new TextView(context);

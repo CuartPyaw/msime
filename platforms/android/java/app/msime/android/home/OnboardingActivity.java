@@ -497,7 +497,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         ViewPolicy.setCentered(mark);
         // 字形画在固定 dp 的圆里，跟圆一起按 dp 定大小；按 sp 时系统字体一调大，对勾就被圆的边界切掉。
         ViewPolicy.setTextSizeDp(mark, 13);
-        Ui.applyStatusMark(mark, this, done);
+        StatusMarkPolicy.apply(mark, this, done);
         row.addView(mark, Ui.squareParams(this, 24));
 
         TextView text = Ui.label(this, label, 16, Ui.text(this));
