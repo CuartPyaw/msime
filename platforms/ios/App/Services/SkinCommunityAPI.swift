@@ -164,7 +164,7 @@ actor SkinCommunityAPI {
     // Reading the session throws the same type a request does, so it has to sit inside the same
     // conversion. Outside it, an unreadable keychain surfaced BackendAccountClient's status-0
     // fallback — 请求未完成 — in place of anything this screen could say about the community.
-    var identity: (userID: String, token: String)?
+    var identity: (userID: String, token: String, sessionID: UUID)?
     let data: Data
     do {
       if try await account.user() != nil { identity = try await account.credentials() }
@@ -173,10 +173,15 @@ actor SkinCommunityAPI {
       do { data = try await client.request(method, path, token: token, body: body, maximumResponseBytes: maximumResponseBytes) }
       catch let error as BackendAccountClient.Failure where error.status == 401 && token != nil {
         guard let identity else { throw CancellationError() }
-        let fresh = try await account.credentials(retrying: token, matchingUserID: identity.userID)
+        let fresh = try await account.credentials(retrying: token, matchingUserID: identity.userID,
+                                                  matchingSessionID: identity.sessionID)
         data = try await client.request(method, path, token: fresh.token, body: body, maximumResponseBytes: maximumResponseBytes)
       }
-      guard try await account.user()?.id == identity?.userID else { throw CancellationError() }
+      if let identity {
+        try await account.requireSession(matchingUserID: identity.userID, matchingSessionID: identity.sessionID)
+      } else {
+        guard try await account.user()?.id == nil else { throw CancellationError() }
+      }
     } catch let error as BackendAccountClient.Failure { throw Self.failure(error) }
     try Task.checkCancellation()
     return try JSONDecoder().decode(T.self, from: data.isEmpty ? Data("{}".utf8) : data)
@@ -209,12 +214,14 @@ actor SkinCommunityAPI {
   /// unexpired locally when the backend has revoked that access token, so retry exactly once after
   /// rotating it. Callers receive the token paired with the successful result for session updates.
   private func accountRequest<T: Sendable>(matchingUserID expected: String? = nil,
+                                           matchingSessionID expectedSessionID: UUID? = nil,
                                            _ operation: @Sendable (String) async throws -> T) async throws -> (value: T, token: String) {
-    let userID: String
-    if let expected { userID = expected }
-    else { userID = try await account.credentials().userID }
-    let result = try await account.authenticated(matchingUserID: userID, operation)
-    _ = try await account.credentials(matchingUserID: userID)
+    let identity = try await account.credentials(matchingUserID: expected,
+                                                  matchingSessionID: expectedSessionID)
+    let result = try await account.authenticated(matchingUserID: identity.userID,
+                                                 matchingSessionID: identity.sessionID, operation)
+    try await account.requireSession(matchingUserID: identity.userID,
+                                     matchingSessionID: identity.sessionID)
     try Task.checkCancellation()
     return result
   }
@@ -223,9 +230,11 @@ actor SkinCommunityAPI {
     if (try? await anonymous.accessToken()) == nil {
       _ = try await BackendAnonymousAccount.ensureSignedIn(session: anonymous, client: client)
     }
-    let userID = try await anonymous.credentials().userID
-    let result = try await anonymous.authenticated(matchingUserID: userID, operation)
-    _ = try await anonymous.credentials(matchingUserID: userID)
+    let identity = try await anonymous.credentials()
+    let result = try await anonymous.authenticated(matchingUserID: identity.userID,
+                                                   matchingSessionID: identity.sessionID, operation)
+    try await anonymous.requireSession(matchingUserID: identity.userID,
+                                       matchingSessionID: identity.sessionID)
     try Task.checkCancellation()
     return result.value
   }
@@ -241,8 +250,13 @@ actor SkinCommunityAPI {
     })
   }
   func profile() async throws -> CommunityProfile {
-    let result = try await accountRequest { token in try await client.profile(token: token) }
-    try await account.updateUser(result.value.user, matching: result.token)
+    let identity = try await account.credentials()
+    let result = try await accountRequest(matchingUserID: identity.userID,
+                                          matchingSessionID: identity.sessionID) {
+      token in try await client.profile(token: token)
+    }
+    try await account.updateUser(result.value.user, matching: result.token,
+                                 matchingSessionID: identity.sessionID)
     let profile = result.value
     return profile
   }
@@ -251,17 +265,26 @@ actor SkinCommunityAPI {
     guard CommunityProfilePolicy.validName(name) else {
       throw CommunityFailure(message: "昵称需为 1–64 个字符，不能包含换行或控制字符。")
     }
-    let userID = try await account.credentials().userID
-    _ = try await accountRequest(matchingUserID: userID) { token in try await client.rename(name, token: token) }
-    let result = try await accountRequest(matchingUserID: userID) { token in try await client.profile(token: token) }
-    try await account.updateUser(result.value.user, matching: result.token)
+    let identity = try await account.credentials()
+    _ = try await accountRequest(matchingUserID: identity.userID, matchingSessionID: identity.sessionID) {
+      token in try await client.rename(name, token: token)
+    }
+    let result = try await accountRequest(matchingUserID: identity.userID,
+                                          matchingSessionID: identity.sessionID) {
+      token in try await client.profile(token: token)
+    }
+    try await account.updateUser(result.value.user, matching: result.token,
+                                 matchingSessionID: identity.sessionID)
     return result.value
   }
   func logout(deleteAccount: Bool = false, all: Bool = false) async throws {
     if deleteAccount {
-      let userID = try await account.credentials().userID
-      _ = try await accountRequest(matchingUserID: userID) { token in try await client.deleteAccount(token: token) }
-      try await account.forget(matchingUserID: userID, removingAccount: { accountID in
+      let identity = try await account.credentials()
+      _ = try await accountRequest(matchingUserID: identity.userID, matchingSessionID: identity.sessionID) {
+        token in try await client.deleteAccount(token: token)
+      }
+      try await account.forget(matchingUserID: identity.userID, matchingSessionID: identity.sessionID,
+                               removingAccount: { accountID in
         try DictionarySnapshotQueue().cancelIfPresent(accountID: accountID)
       })
     } else {

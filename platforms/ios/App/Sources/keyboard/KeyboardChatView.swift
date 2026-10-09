@@ -18,11 +18,13 @@ final class KeyboardChatModel: ObservableObject {
   private let api = BackendAccountClient()
   private var generation = 0
   private var accountID: String?
+  private var accountSessionID: UUID?
 
-  private func switchAccount(to userID: String?) {
-    guard accountID != userID else { return }
+  private func switchAccount(to userID: String?, sessionID: UUID? = nil) {
+    guard accountID != userID || accountSessionID != sessionID else { return }
     clear()
     accountID = userID
+    accountSessionID = sessionID
     models = []
     selectedModel = ""
   }
@@ -46,10 +48,13 @@ final class KeyboardChatModel: ObservableObject {
     loadingModels = true
     defer { loadingModels = false }
     do {
-      let userID = try await BackendAccountSession.shared.user()?.id
-      switchAccount(to: userID)
-      guard let userID else { loginNeeded = true; return }
-      let catalog = try await api.chatModels(session: .shared, matchingUserID: userID)
+      guard let userID = try await BackendAccountSession.shared.user()?.id else {
+        switchAccount(to: nil); loginNeeded = true; return
+      }
+      let identity = try await BackendAccountSession.shared.credentials(matchingUserID: userID)
+      switchAccount(to: identity.userID, sessionID: identity.sessionID)
+      let catalog = try await api.chatModels(session: .shared, matchingUserID: identity.userID,
+                                              matchingSessionID: identity.sessionID)
       try Task.checkCancellation()
       models = catalog.data
       if !models.contains(where: { $0.id == selectedModel }) { selectedModel = catalog.default_model }
@@ -67,6 +72,7 @@ final class KeyboardChatModel: ObservableObject {
   func retry() { guard !sending, messages.last?.role == "user" else { return }; submit() }
   private func submit() {
     guard let userID = accountID else { loginNeeded = true; return }
+    let sessionID = accountSessionID
     error = nil; sending = true
     generation += 1
     let version = generation, model = selectedModel
@@ -85,7 +91,8 @@ final class KeyboardChatModel: ObservableObject {
           return
         }
         let reply = try await api.chat(messages: history, model: model,
-                                       session: .shared, matchingUserID: userID)
+                                       session: .shared, matchingUserID: userID,
+                                       matchingSessionID: sessionID)
         try Task.checkCancellation()
         guard generation == version else { return }
         messages.append(Message(role: "assistant", text: reply))
