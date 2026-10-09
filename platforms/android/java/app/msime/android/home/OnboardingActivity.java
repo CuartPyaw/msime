@@ -507,9 +507,7 @@ public final class OnboardingActivity extends AppCompatActivity {
             TextView button = Ui.label(this, action, 15, Ui.accent(this));
             ViewPolicy.setCentered(button);
             Ui.setHorizontalPaddingDp(button, this, 8);
-            android.util.TypedValue ripple = new android.util.TypedValue();
-            getTheme().resolveAttribute(android.R.attr.selectableItemBackground, ripple, true);
-            button.setBackgroundResource(ripple.resourceId);
+            ViewPolicy.setBackground(button, Ui.ripple(this));
             ViewPolicy.bindClick(button, fix);
             row.addView(button, Ui.wrapHeight(this, 40));
         }
