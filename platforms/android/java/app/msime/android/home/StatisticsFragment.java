@@ -24,6 +24,7 @@ import app.msime.android.JsonPolicy;
 import app.msime.android.BoundsPolicy;
 import app.msime.android.DictionaryCollectionsStore;
 import app.msime.android.KeyPressIds;
+import app.msime.android.NumberPolicy;
 import app.msime.android.R;
 import app.msime.android.TypingStatisticsModel;
 import app.msime.android.TypingStatisticsSummary;
@@ -229,7 +230,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         LinearLayout hero = card(context, content, 18);
         hero.addView(Ui.label(context, "近 7 天共输入", 13, Ui.subText(context)));
         TextView total = Ui.label(context,
-            figure(context, TypingStatisticsSummary.grouped(overview.weekTotal()), 40, "字"),
+            figure(context, NumberPolicy.grouped(overview.weekTotal()), 40, "字"),
             40, Ui.text(context));
         Ui.setPaddingDp(total, context, 0, 4, 0, 0);
         hero.addView(total);
