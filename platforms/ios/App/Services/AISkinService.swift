@@ -90,11 +90,12 @@ enum AISkinService {
     let prompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     guard (1...500).contains(prompt.count) else { throw ServiceFailure(message: "无法生成抽卡灵感，请重试。") }
     let identity = try await account.credentials()
-    let catalog = try await client.chatModels(token: identity.token)
-    let fresh = try await account.credentials(matchingUserID: identity.userID)
+    let catalog = try await client.chatModels(session: account, matchingUserID: identity.userID)
     try Task.checkCancellation()
-    let result = try await client.chat(messages: [.init(role:"system",content:systemPrompt), .init(role:"user",content:prompt)],
-      model:catalog.default_model, token:fresh.token)
+    let result = try await account.authenticated(matchingUserID: identity.userID) { token in
+      try await client.chat(messages: [.init(role:"system",content:systemPrompt), .init(role:"user",content:prompt)],
+        model:catalog.default_model, token:token)
+    }.value
     _ = try await account.credentials(matchingUserID:identity.userID)
     try Task.checkCancellation()
     let plans = try parse(result)

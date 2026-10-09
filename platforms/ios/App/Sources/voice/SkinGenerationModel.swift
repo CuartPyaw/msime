@@ -26,7 +26,7 @@ final class SkinGenerationModel: ObservableObject {
     if fixture { models = [.init(id: "gpt-5.6-luna")]; selectedModel = "gpt-5.6-luna"; return }
     do {
       guard try await BackendAccountSession.shared.user() != nil else { loginNeeded = true; return }
-      let catalog = try await api.chatModels(token: BackendAccountSession.shared.accessToken())
+      let catalog = try await api.chatModels(session: .shared)
       try Task.checkCancellation()
       models = catalog.data
       if !models.contains(where: { $0.id == selectedModel }) { selectedModel = catalog.default_model }
