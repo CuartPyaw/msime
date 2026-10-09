@@ -8,13 +8,18 @@ enum KeyGapRouting {
   static func nearest(to point: CGPoint, in frames: [CGRect], reach: CGFloat) -> Int? {
     var best: (index: Int, distance: CGFloat)?
     for (index, frame) in frames.enumerated() where !frame.isEmpty {
-      let dx = max(frame.minX - point.x, 0, point.x - frame.maxX)
-      let dy = max(frame.minY - point.y, 0, point.y - frame.maxY)
-      let distance = (dx * dx + dy * dy).squareRoot()
+      let distance = distance(from: point, to: frame)
       guard distance <= reach, distance < (best?.distance ?? .infinity) else { continue }
       best = (index, distance)
     }
     return best?.index
+  }
+
+  /// `point` 到 `frame` 的最短距离，在矩形里面为 0。
+  static func distance(from point: CGPoint, to frame: CGRect) -> CGFloat {
+    let dx = max(frame.minX - point.x, 0, point.x - frame.maxX)
+    let dy = max(frame.minY - point.y, 0, point.y - frame.maxY)
+    return (dx * dx + dy * dy).squareRoot()
   }
 
   /// 一个 stack view 里的空隙最远能归到多远的键：间距的一半（两侧的键各分一半），排列用的边距（居中字母行两侧的空白归最外侧的键）整段都算，再加 1pt 吸收像素取整。
@@ -46,8 +51,15 @@ final class KeyAreaStackView: UIStackView {
     let reach = KeyGapRouting.reach(
       spacing: gap.spacing, axis: gap.axis,
       margins: gap.isLayoutMarginsRelativeArrangement ? gap.layoutMargins : nil)
-    guard let index = KeyGapRouting.nearest(to: convert(point, to: gap), in: frames, reach: reach) else { return hit }
-    return keys[index]
+    let local = convert(point, to: gap)
+    guard let index = KeyGapRouting.nearest(to: local, in: frames, reach: reach) else { return hit }
+    // 顶栏和第一排之间的间隔比行距还窄时，整段间隔都在第一排的够得着范围内；离候选栏这类非键区域更近的点仍然不交给键，空隙两侧各归一半。
+    let keyDistance = KeyGapRouting.distance(from: local, to: frames[index])
+    let closerToExcluded = gapRoutingExclusions.contains { excluded in
+      !excluded.isHidden && excluded.isDescendant(of: gap)
+        && KeyGapRouting.distance(from: local, to: excluded.convert(excluded.bounds, to: gap)) < keyDistance
+    }
+    return closerToExcluded ? hit : keys[index]
   }
 
   private func isExcluded(_ view: UIView) -> Bool {

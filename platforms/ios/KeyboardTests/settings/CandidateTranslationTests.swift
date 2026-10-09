@@ -353,6 +353,15 @@ final class CandidateTranslationTests: XCTestCase {
                    accuracy: 0.5, "the gloss row was taken off the keys instead of added to the keyboard")
   }
 
+  /// 带释义的词块按内容取宽：候选字和释义里更宽的那个，释义最多把词块撑到一栏，候选字本身更宽时照旧按候选字。
+  func testGlossedChipsFitTheirContentUpToAColumn() {
+    XCTAssertEqual(KeyboardKeyButton.chipContentWidth(titleLine: 40, glossLine: 26, glossLines: 1, column: 110), 40)
+    XCTAssertEqual(KeyboardKeyButton.chipContentWidth(titleLine: 40, glossLine: 80, glossLines: 1, column: 110), 80)
+    XCTAssertEqual(KeyboardKeyButton.chipContentWidth(titleLine: 40, glossLine: 300, glossLines: 1, column: 110), 110)
+    XCTAssertEqual(KeyboardKeyButton.chipContentWidth(titleLine: 140, glossLine: 300, glossLines: 1, column: 110), 140)
+    XCTAssertEqual(KeyboardKeyButton.chipContentWidth(titleLine: 40, glossLine: 300, glossLines: 0, column: 110), 40)
+  }
+
   /// The gloss sits on its own line under the candidate rather than beside it, and a candidate
   /// without one stays a single line - the expanded panel draws the same rows as the strip.
   func testGlossTakesItsOwnLineUnderTheCandidate() throws {

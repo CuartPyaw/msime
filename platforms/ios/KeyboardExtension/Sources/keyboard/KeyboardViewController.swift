@@ -5659,7 +5659,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
 
   /// `leadLine` is the width of a line under the candidate that must not be cut, a Korean Hanja's 훈음, which widens the chip as the candidate itself would.
   private func pinCandidateWidth(
-    of button: KeyboardKeyButton, firstLine title: AttributedString?, glossLines: Int, leadLine: CGFloat = 0
+    of button: KeyboardKeyButton, firstLine title: AttributedString?, glossLines: Int, glossLine: CGFloat,
+    leadLine: CGFloat = 0
   ) {
     let existing = button.constraints.first { $0.identifier == "candidateChipWidth" }
     guard glossLines > 0, let title else {
@@ -5673,7 +5674,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       : NSRange(location: 0, length: separator.location)
     let width = KeyboardKeyButton.chipWidth(
       titleLine: max(text.attributedSubstring(from: head).size().width, leadLine),
-      glossLines: glossLines, column: candidateColumnWidth(),
+      glossLine: glossLine, glossLines: glossLines, column: candidateColumnWidth(),
       insets: button.configuration?.contentInsets ?? .zero)
     if let existing {
       existing.constant = width
@@ -5725,6 +5726,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       : candidatePalette?.text ?? skin.keyForeground
     // The 훈음 is drawn whole, like an inline hint was, so the chip widens to it rather than cutting it to the gloss column; the glosses under it fit that width.
     var readingWidth: CGFloat = 0
+    var glossWidth: CGFloat = 0
     let candidateFont = Self.candidateChipFont(scale: candidateFontScale, families: candidateFontFamilies, weight: weight)
     if annotation.isEmpty && lines.isEmpty && markers.isEmpty {
       configuration.titleLineBreakMode = .byTruncatingTail
@@ -5755,9 +5757,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       }
       let caption = UIFont.systemFont(ofSize: Self.candidateGlossFontSize)
       readingWidth = reading.map { ceil(($0 as NSString).size(withAttributes: [.font: caption]).width) } ?? 0
+      glossWidth = lines.map { ceil(($0 as NSString).size(withAttributes: [.font: caption]).width) }.max() ?? 0
       let content = KeyboardKeyButton.chipContentWidth(
-        titleLine: max(NSAttributedString(title).size().width, readingWidth), glossLines: lines.count,
-        column: candidateColumnWidth())
+        titleLine: max(NSAttributedString(title).size().width, readingWidth), glossLine: glossWidth,
+        glossLines: lines.count, column: candidateColumnWidth())
       for gloss in lines {
         let fitted = KeyboardKeyButton.fittedGloss(gloss, font: caption, width: content)
         title += AttributedString("\n" + fitted.text, attributes: AttributeContainer([
@@ -5770,7 +5773,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     button.configuration = configuration
     button.titleLineCount = 1 + lines.count
     pinCandidateWidth(of: button, firstLine: configuration.attributedTitle, glossLines: lines.count,
-                      leadLine: readingWidth)
+                      glossLine: glossWidth, leadLine: readingWidth)
     button.accessibilityLabel = annotation.isEmpty
       ? "候选词 \(number)：\(display)"
       : "候选词 \(number)：\(display)，还需输入 \(annotation)"

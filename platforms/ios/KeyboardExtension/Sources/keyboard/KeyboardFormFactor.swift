@@ -17,18 +17,20 @@ enum KeyboardFormFactor: Equatable {
     resolve(idiom: traits.userInterfaceIdiom, horizontalSizeClass: traits.horizontalSizeClass)
   }
 
-  /// 键盘在顶部那一行和按键四周的内边距（dc.html `kbPad`）：手机上方 6、两侧 3、下方 4，iPad 为 6 / 8 / 4。
+  /// 键盘在顶部那一行和按键四周的内边距（dc.html `kbPad`）：手机上方 2、两侧 3、下方 4，iPad 为 6 / 8 / 4。
+  ///
+  /// 手机的上边距原是设计稿的 6：顶栏为了打字时按键不跳，空闲时也按读音行加候选行的高度留着，再加上边距和下面的间隔，iPhone 上按键以上占了约 72pt，比四排按键的三分之一还多。上边距和间隔（`topRowGap`）是这一截里纯空白的部分，所以从这两处压。
   var padding: NSDirectionalEdgeInsets {
     switch self {
-    case .phone: NSDirectionalEdgeInsets(top: 6, leading: 3, bottom: 4, trailing: 3)
+    case .phone: NSDirectionalEdgeInsets(top: 2, leading: 3, bottom: 4, trailing: 3)
     case .tablet: NSDirectionalEdgeInsets(top: 6, leading: 8, bottom: 4, trailing: 8)
     }
   }
 
-  /// 顶部那一行与第一排按键之间的间隔（dc.html `kbGap`）：手机 11，iPad 9。
+  /// 顶部那一行与第一排按键之间的间隔（dc.html `kbGap`）：手机 4，iPad 9。手机原是设计稿的 11，理由见 `padding`。
   ///
   /// 设计稿的各排按键之间也用同样的间隔，这里则与 Android 一样保留用户的排间距（`touch_row_spacing_tenths`，取值 4-10，默认 7）：共享的取值范围放不下 11，而且用户调过的间距应当保持不变。
-  var topRowGap: CGFloat { self == .tablet ? 9 : 11 }
+  var topRowGap: CGFloat { self == .tablet ? 9 : 4 }
 
   /// 默认键盘高度下一排按键的高度。
   ///
