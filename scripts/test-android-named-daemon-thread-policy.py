@@ -29,6 +29,11 @@ STARTED_SITES = {
     JAVA / "home/LoginSheet.java": ("msime-login-sheet", "msime-email-code", "msime-email-login"),
     JAVA / "home/OnboardingActivity.java": ("msime-onboarding",),
 }
+STARTED_EXPRESSIONS = {
+    JAVA / "core/ResourcePackService.java": (
+        'ThreadPolicy.startNamedThread("msime-resource-pack-" + pack,',
+    ),
+}
 
 
 def main() -> int:
@@ -61,6 +66,14 @@ def main() -> int:
             expected = f'ThreadPolicy.startNamedThread("{name}",'
             if expected not in source:
                 errors.append(f"{path}: {name} 未复用 ThreadPolicy")
+        if "new Thread(" in source:
+            errors.append(f"{path}: 仍在重复创建并启动命名线程")
+
+    for path, expressions in STARTED_EXPRESSIONS.items():
+        source = path.read_text(encoding="utf-8")
+        for expression in expressions:
+            if expression not in source:
+                errors.append(f"{path}: 动态线程名未复用 ThreadPolicy")
         if "new Thread(" in source:
             errors.append(f"{path}: 仍在重复创建并启动命名线程")
 
