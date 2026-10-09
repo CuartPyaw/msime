@@ -409,7 +409,7 @@ Tauri macOS 设置宿主首次启动时，如果应用数据目录中没有 `run
 
 文本适配测试验证提交、ASCII 光标和清除预编辑。
 
-维护快捷键只在水杉输入法当前 IMK 上下文中处理，不安装全局键盘监听。`Control+Shift+Option+1–8` 删除当前候选页对应槽位，`Control+Shift+Option+C` 通过共享 Host API 清除当前会话 Engine 缓存，`Control+Shift+Option+R` 用独立 helper 实例重新注册当前输入源并退出旧进程，`Control+Shift+Option+T` 退出当前输入法进程。物理键位不受当前键盘布局字符影响，Command 明确排除，Caps Lock 可共存，重复事件只消费一次。macOS 设置页相应使用 Option 与输入上下文文案；桌面重新注册命令按输入法 bundle identifier 定位目标，而不是重新打开设置应用。
+维护快捷键只在水杉输入法当前 IMK 上下文中处理，不安装全局键盘监听。`Control+Shift+Option+1–8` 删除当前候选页对应槽位，`Control+Shift+Option+C` 通过共享 Host API 清除当前会话 Engine 缓存，`Control+Shift+Option+R` 用独立 helper 实例重新注册当前输入源并退出旧进程，`Control+Shift+Option+T` 退出当前输入法进程。数字按物理数字行认键；字母和其他字母快捷键（Control+Shift+F、Option+Shift+H、Control+Shift+E、Control+Shift+Command+K）一样按当前键盘布局在这个键上打出的字母认键（`charactersIgnoringModifiers`，只保留 Shift 的作用），Dvorak、Colemak 用户按标着该字母的键即可，拿不到 ASCII 字符的事件才退回美式布局的物理位置。Command 明确排除，Caps Lock 可共存，重复事件只消费一次。macOS 设置页相应使用 Option 与输入上下文文案；桌面重新注册命令按输入法 bundle identifier 定位目标，而不是重新打开设置应用。
 
 ## 快照激活测试
 
