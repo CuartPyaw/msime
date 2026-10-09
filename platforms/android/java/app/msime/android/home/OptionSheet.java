@@ -7,6 +7,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import androidx.annotation.Nullable;
 import androidx.core.widget.NestedScrollView;
+import app.msime.android.KeyboardGeometry;
 import app.msime.android.ViewPolicy;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 import java.util.function.Supplier;
@@ -48,7 +49,7 @@ public final class OptionSheet {
         scroll.addView(options, new ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         // 选项多到一屏放不下时，这一段滚动，标题和「取消」留在原处。
-        root.addView(scroll, Ui.weightedWidth(1f));
+        root.addView(scroll, KeyboardGeometry.weightedWidthParams(1f));
 
         // 「取消」与选项之间一条页面底色的带子，代替设计里分开的两块卡片。
         root.addView(Ui.sheetSeparator(context));

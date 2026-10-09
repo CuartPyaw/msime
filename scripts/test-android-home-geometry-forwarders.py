@@ -37,6 +37,10 @@ def main() -> int:
         errors.append(f"{UI}: 不应保留 matchWidthHeightPx 转发方法")
     if re.search(r"(?<![.\w])matchWidthHeightPx\(", ui):
         errors.append(f"{UI}: 不应调用已移除的 matchWidthHeightPx")
+    if "public static LinearLayout.LayoutParams weightedWidth(" in ui:
+        errors.append(f"{UI}: 不应保留 weightedWidth 转发方法")
+    if re.search(r"(?<![.\w])weightedWidth\(", ui):
+        errors.append(f"{UI}: 不应调用已移除的 weightedWidth")
 
     for path in HOME.glob("*.java"):
         source = path.read_text(encoding="utf-8")
@@ -48,6 +52,8 @@ def main() -> int:
             errors.append(f"{path}: 应直接调用 KeyboardGeometry.atLeastOnePixel")
         if "Ui.matchWidthHeightPx(" in source:
             errors.append(f"{path}: 应直接调用 KeyboardGeometry.matchWidthHeightPx")
+        if "Ui.weightedWidth(" in source:
+            errors.append(f"{path}: 应直接调用 KeyboardGeometry.weightedWidthParams")
 
     for name in EXPECTED_CALLERS:
         path = HOME / name
@@ -58,6 +64,10 @@ def main() -> int:
         path = HOME / name
         if "KeyboardGeometry.matchWidthHeightPx(" not in path.read_text(encoding="utf-8"):
             errors.append(f"{path}: 未直接复用 KeyboardGeometry.matchWidthHeightPx")
+
+    option_sheet = HOME / "OptionSheet.java"
+    if "KeyboardGeometry.weightedWidthParams(" not in option_sheet.read_text(encoding="utf-8"):
+        errors.append(f"{option_sheet}: 未直接复用 KeyboardGeometry.weightedWidthParams")
 
     if errors:
         print("\n".join(errors), file=sys.stderr)
