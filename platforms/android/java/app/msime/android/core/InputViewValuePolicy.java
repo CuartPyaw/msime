@@ -49,7 +49,7 @@ public final class InputViewValuePolicy {
 
     /** Read a JSON string or use the supplied fallback for missing or invalid values. */
     public static String textOr(Object raw, String fallback) {
-        return raw instanceof String ? (String) raw : fallback;
+        return JsonPolicy.strictString(raw, fallback);
     }
 
     public static String textOr(JSONObject object, String key, String fallback) {
