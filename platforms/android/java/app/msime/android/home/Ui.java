@@ -434,11 +434,6 @@ public final class Ui {
         return color(context, androidx.appcompat.R.attr.colorError);
     }
 
-    /** Create a filled circular drawable. */
-    public static GradientDrawable circle(@ColorInt int color) {
-        return DrawablePolicy.circle(color);
-    }
-
     /** 纯色圆角矩形。 */
     public static GradientDrawable rounded(@ColorInt int color, float radiusPx) {
         return DrawablePolicy.rounded(color, radiusPx);
