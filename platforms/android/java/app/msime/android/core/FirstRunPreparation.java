@@ -24,7 +24,8 @@ public final class FirstRunPreparation {
         void onPreparationState(State state);
     }
 
-    private static final ExecutorService WORKER = Executors.newSingleThreadExecutor();
+    private static final ExecutorService WORKER = Executors.newSingleThreadExecutor(
+        ThreadPolicy.namedFactory("msime-first-run"));
     private static final Handler MAIN = MainThreadPolicy.mainHandler();
     private static final AtomicBoolean RUNNING = new AtomicBoolean();
     private static volatile State state = State.IDLE;

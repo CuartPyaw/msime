@@ -40,6 +40,9 @@ UNSTARTED_SITES = {
     JAVA / "home/UpdateJobService.java": ("msime-update-job",),
     JAVA / "voice/LocalAsrRecognizer.java": ("msime-local-asr-capture",),
 }
+NON_DAEMON_SITES = {
+    JAVA / "core/FirstRunPreparation.java": ("msime-first-run",),
+}
 
 
 def main() -> int:
@@ -47,6 +50,8 @@ def main() -> int:
     policy = (JAVA / "ThreadPolicy.java").read_text(encoding="utf-8")
     if "ThreadFactory namedDaemonFactory(String name)" not in policy:
         errors.append("ThreadPolicy 缺少命名守护线程工厂")
+    if "ThreadFactory namedFactory(String name)" not in policy:
+        errors.append("ThreadPolicy 缺少命名非守护线程工厂")
     if "Thread namedThread(String name, Runnable runnable)" not in policy:
         errors.append("ThreadPolicy 缺少命名线程创建方法")
 
@@ -93,6 +98,13 @@ def main() -> int:
                 errors.append(f"{path}: {name} 未复用 ThreadPolicy")
         if "new Thread(" in source:
             errors.append(f"{path}: 仍在重复创建命名线程")
+
+    for path, names in NON_DAEMON_SITES.items():
+        source = path.read_text(encoding="utf-8")
+        for name in names:
+            expected = f'ThreadPolicy.namedFactory("{name}")'
+            if expected not in source:
+                errors.append(f"{path}: {name} 未复用 ThreadPolicy")
 
     if errors:
         print("\n".join(errors), file=sys.stderr)
