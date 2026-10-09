@@ -77,8 +77,4 @@ public final class VoiceContributionApi {
         return JsonPolicy.strictStringOrEmpty(response.opt("id"));
     }
 
-    /** org.json's optString coerces numbers; contribution identifiers must stay JSON strings. */
-    static String strictString(Object value) {
-        return JsonPolicy.strictString(value);
-    }
 }
