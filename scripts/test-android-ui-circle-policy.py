@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Android 头像和徽章直接使用共享圆形 drawable 策略。"""
 from pathlib import Path
+import re
 import sys
 
 
@@ -15,6 +16,9 @@ def main() -> int:
     ok = True
     if "GradientDrawable circle(" in ui:
         print(f"{UI}: 仍保留 Ui.circle 转发方法", file=sys.stderr)
+        ok = False
+    if re.search(r"(?<![\w.])circle\(", ui):
+        print(f"{UI}: 仍调用已删除的 Ui.circle", file=sys.stderr)
         ok = False
     if profile.count("DrawablePolicy.circle(") != 2:
         print(f"{PROFILE}: 圆形 drawable 没有全部直接调用 DrawablePolicy.circle", file=sys.stderr)
