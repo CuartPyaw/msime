@@ -119,8 +119,7 @@ public final class KeyboardPreview extends View {
     /** 设计皮肤的字母键与功能键按其键帽不透明度叠在背景上，与键盘的 KeyboardSkinKeyDrawable 一致；回车不透明。 */
     private int withKeyOpacity(int colour) {
         if (skin == null || !skin.designed()) return colour;
-        float opacity = (float) KeyboardGeometry.bounded(skin.keyOpacity(), 0, 1);
-        return ColorPolicy.withAlpha(colour, opacity);
+        return ColorPolicy.withAlpha(colour, skin.keyOpacity());
     }
 
     private int ink() {

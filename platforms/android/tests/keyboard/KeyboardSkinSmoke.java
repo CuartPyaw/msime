@@ -68,6 +68,9 @@ public final class KeyboardSkinSmoke {
         check("#99FFFFFF".equals(KeyboardSkin.androidColor("#FFFFFF99")));
         check("#12ABCDEF".equals(KeyboardSkin.androidColor("#abcdef12")));
         check("#ABCDEF".equals(KeyboardSkin.androidColor("#abcdef")));
+        check(ColorPolicy.withAlpha(0x80ABCDEF, .5) == 0x40ABCDEF);
+        check(ColorPolicy.withAlpha(0x80ABCDEF, 2d) == 0x80ABCDEF);
+        check(ColorPolicy.withAlpha(0x80ABCDEF, -1d) == 0x00ABCDEF);
         check(KeyboardSkin.androidColor("red") == null && KeyboardSkin.androidColor("#12345") == null);
         check(KeyboardSkin.androidColor(null) == null);
         KeyboardSkin partial = KeyboardSkin.palette("custom", "自定义", false, null, "#FFFFFF",
