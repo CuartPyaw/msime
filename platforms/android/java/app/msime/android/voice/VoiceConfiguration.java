@@ -145,11 +145,6 @@ public final class VoiceConfiguration {
         return new VoiceConfiguration(name, null, null, null, null, polish, modelPath);
     }
 
-    /** Shared voice configuration flags must remain JSON booleans; reject coercible strings. */
-    static Boolean strictBoolean(Object value) {
-        return JsonPolicy.strictBoolean(value);
-    }
-
     private static String text(Object value) {
         String parsed = JsonPolicy.strictString(value);
         return parsed == null ? "" : parsed;
