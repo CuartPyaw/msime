@@ -7477,7 +7477,11 @@ public final class MSIMEInputService extends InputMethodService {
                 : PhrasePreeditPolicy.title(phrasePrefix, caretMark >= 0
                     ? CompositionCaretPolicy.withMark(caretSpelling, caretMark) : localModeTitle,
                     !"none".equals(localModeKey));
-            preedit.setText(displayText);
+            // 光标符画成强调色的粗竖条（#6110），文本里仍是那个字符，点读音行的下标换算不变。
+            int caretInTitle = idleTitle ? -1
+                : CompositionCaretPolicy.markInTitle(phrasePrefix, caretMark, !"none".equals(localModeKey));
+            preedit.setText(CompositionCaretSpan.mark(displayText, caretInTitle, pixels(2), pixels(2),
+                imeStyler.caretColor()));
             preedit.setContentDescription(offersLocalModes ? "长按打开本地输入模式" : displayText);
             preedit.setLongClickable(offersLocalModes);
             ViewPolicy.setClickable(preedit, preeditCaretEditing != null);
