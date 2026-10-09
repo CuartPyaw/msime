@@ -69,12 +69,13 @@ extension BackendAccountClient {
   /// Translate one visible candidate page in order. The backend owns the provider and credentials;
   /// the keyboard only receives bounded display strings and never sends the user's raw keystrokes.
   func translate(texts: [String], target: String, session: BackendAccountSession) async throws -> [String] {
-    let token = try await session.accessToken()
-    do { return try await translate(texts: texts, target: target, token: token) }
-    catch let failure as Failure where failure.status == 401 {
-      return try await translate(texts: texts, target: target,
-                                 token: session.accessToken(retrying: token))
-    }
+    let userID = try await session.credentials().userID
+    let result = try await session.authenticated(matchingUserID: userID) { token in
+      try await translate(texts: texts, target: target, token: token)
+    }.value
+    _ = try await session.credentials(matchingUserID: userID)
+    try Task.checkCancellation()
+    return result
   }
 
   func translate(texts: [String], target: String, token: String) async throws -> [String] {
