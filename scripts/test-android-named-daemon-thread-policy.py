@@ -42,6 +42,7 @@ UNSTARTED_SITES = {
 }
 NON_DAEMON_SITES = {
     JAVA / "core/FirstRunPreparation.java": ("msime-first-run",),
+    JAVA / "home/KeyboardTryoutActivity.java": ("msime-keyboard-tryout",),
 }
 
 
