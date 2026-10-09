@@ -1541,6 +1541,16 @@ fn linux_input_method_reply_separates_delivery_from_refusal() {
         parse_ime_reply("{\"error\":\"no_focus\",\"ok\":false}\n"),
         Some(ImeReply::Declined)
     );
+    // A host refusal must not be treated as permission to replay through a tool.
+    assert_eq!(
+        parse_ime_reply("{\"error\":\"restricted\",\"ok\":false}\n"),
+        Some(ImeReply::Rejected)
+    );
+    assert_eq!(
+        parse_ime_reply("{\"error\":\"invalid\",\"ok\":false}\n"),
+        Some(ImeReply::Rejected)
+    );
+    assert_eq!(parse_ime_reply("{\"ok\":false}"), None);
     // A missing or garbled answer is not a refusal: the host may already have typed the text.
     assert_eq!(parse_ime_reply(""), None);
     assert_eq!(parse_ime_reply("{\"ok\":\"yes\"}"), None);
