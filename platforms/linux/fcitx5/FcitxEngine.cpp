@@ -973,6 +973,7 @@ public:
   void syncCandidatePanelFont();
   // `chosen` 只标记用户刚在菜单或设置页主动选主题；重读相同偏好不能夺回第三方 classicui 主题。
   void syncCandidatePanelTheme(bool chosen);
+  bool candidateThemeSelectionChanged(const Json &preferences);
   void syncVoiceAction();
   // 中英文切换后在光标附近短暂显示「中」或「英」，由 Fcitx5 面板绘制；定义在
   // FcitxEngine 之后，它需要那个类型完整。
@@ -1288,6 +1289,7 @@ public:
     preferences_snapshot_ = std::move(snapshot);
     if (!options_path_.empty() && !private_)
       startPreferenceSave({options_path_, {}, {}, *change, true});
+    candidateThemeSelectionChanged(preferences_);
     syncCandidatePanelTheme(true);
     render();
     return true;
@@ -1663,7 +1665,9 @@ public:
     // 一份 preferences_ 回填了。
     options["preferences"] = preferences_;
     syncCandidatePanelFont();
-    // 新会话（启动、焦点进入）只是重读同一份偏好，不是主动选主题。
+    // 新会话只记录存储里的选择作为共享基线，不把启动或焦点进入当成主动选择。
+    candidateThemeSelectionChanged(preferences_snapshot_.is_object()
+        ? preferences_snapshot_.value("preferences", preferences_) : preferences_);
     syncCandidatePanelTheme(false);
     // This front end draws view.phrase_prefix ahead of the reading, so a phrase assembled out of
     // several selections stays in the composition instead of reaching the document one piece at a
@@ -1728,12 +1732,11 @@ public:
             // 先用旧偏好清掉已显示的在线候选；更新偏好后 Host API 会拒绝旧查询，旧行会因此残留。
             if (cloudChanged && previousCloud && !nextCloud) clearOnlineCandidates(0);
             if (aiChangedWhileEnabled) clearOnlineCandidates(1);
-            // 设置页或另一个窗口的状态栏把主题选择写进了存储：这是一次主动选择（即使当前 classicui 用的是第三方主题）；其他字段的变化不会走到这里。
-            const auto chosen = msime::linux_host::candidate_theme_selection(effectivePreferences) !=
-                                msime::linux_host::candidate_theme_selection(preferences_);
             const auto encoded = effective.dump();
             view_ = response(msime_client_update_preferences(session_,
                 reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size())).at("view");
+            // 与插件共用的已见选择比较，失焦窗口补读同一份存储不能再次接管。
+            const auto chosen = candidateThemeSelectionChanged(snapshot.at("preferences"));
             preferences_ = std::move(effectivePreferences);
             configureDiagnostics();
             // A width chosen here that the store does not hold - its save failed, or a private window, which never saves - is not undone by the store, as a failed scheme choice is kept; the next session re-reads the store.
@@ -6333,6 +6336,8 @@ public:
       msime::linux_host::CandidateFontUnit::Pixels;
 #endif
   msime::linux_host::CandidateFontSync candidate_font_sync_{kClassicUiFontUnit};
+  // classicui 属于整个插件，已见的主题选择也共用；不随某个上下文关闭而清空。
+  Json candidate_theme_selection_;
   // applyCandidatePanelTheme 上一次接管写好时的主题输入。
   std::string candidate_theme_applied_;
   // 还没接管成功时，上一次尝试所见的主题输入与经典界面落盘的选择；写主题失败时到 candidate_theme_retry_at_ 再试一次，其他情况要等它们变化。
@@ -6567,6 +6572,15 @@ void FcitxState::syncCandidatePanelFont() {
   if (!engine_) return;
   engine_->applyCandidatePanelFont(preferences_);
   engine_->applyCandidateWheelPaging(preferences_);
+}
+
+bool FcitxState::candidateThemeSelectionChanged(const Json &preferences) {
+  if (!engine_) return false;
+  const auto selection = msime::linux_host::candidate_theme_selection(preferences);
+  const bool changed = !engine_->candidate_theme_selection_.is_null() &&
+                       selection != engine_->candidate_theme_selection_;
+  engine_->candidate_theme_selection_ = selection;
+  return changed;
 }
 
 void FcitxState::syncCandidatePanelTheme(bool chosen) {
