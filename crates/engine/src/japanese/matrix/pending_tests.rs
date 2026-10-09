@@ -201,9 +201,10 @@ fn matrix_pending_key_output_and_allocation_match_current_baseline() {
                     new_allocations
                         + saved_views
                         + saved_initial_views
-                        + super::rolling_row_tests::saved_row_buffers(&conversion, limit),
+                        + super::rolling_row_tests::saved_row_buffers(&conversion, limit)
+                        + super::boundary_tests::saved_boundary_buffers(&conversion, limit),
                     exact_allocations,
-                    "继续补全、空读音前缀视图与滚动行容器分配差值：{pending}"
+                    "继续补全、空读音前缀视图、滚动行与边界容器分配差值：{pending}"
                 );
                 assert!(exact_allocations <= buffered_allocations);
                 assert!(new_allocations <= buffered_allocations);
@@ -213,7 +214,7 @@ fn matrix_pending_key_output_and_allocation_match_current_baseline() {
 }
 
 #[test]
-#[ignore = "本地 release 与固定历史矩阵对照；包含精确和继续补全流式消费，不设置 CI 时间阈值"]
+#[ignore = "本地 release 与固定历史矩阵对照；包含精确、继续补全流式及滚动行与边界，不设置 CI 时间阈值"]
 fn benchmark_matrix_pending_queries() {
     use std::hint::black_box;
     use std::time::Instant;

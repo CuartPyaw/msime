@@ -199,7 +199,9 @@ fn verify_case(
         assert_eq!(measured.remaining_bytes, retain.remaining_bytes);
     }
     assert_eq!(
-        production.allocations + super::rolling_row_tests::saved_row_buffers(conversion, limit),
+        production.allocations
+            + super::rolling_row_tests::saved_row_buffers(conversion, limit)
+            + super::boundary_tests::saved_boundary_buffers(conversion, limit),
         retain.allocations
     );
     assert_eq!(production.remaining_bytes, retain.remaining_bytes);
@@ -434,7 +436,7 @@ fn benchmark_row_lifetime_paired_timings() {
                             .collect(),
                     )
                 });
-            eprintln!("行生命周期配对（生产含滚动复用）：case={name} limit={limit} iterations={iterations} groups={} batches_us_p10_p50_p90={absolute:.3?} drop_retain={:.4?} clear_retain={:.4?} production_retain={:.4?} production_drop={:.4?} clear_drop={:.4?} production_clear={:.4?} peak={:?} allocations={:?}", groups.len(), ratios[0], ratios[1], ratios[2], ratios[3], ratios[4], ratios[5], measured.map(|measurement| measurement.peak_bytes), measured.map(|measurement| measurement.allocations));
+            eprintln!("行生命周期配对（生产含滚动行与边界）：case={name} limit={limit} iterations={iterations} groups={} batches_us_p10_p50_p90={absolute:.3?} drop_retain={:.4?} clear_retain={:.4?} production_retain={:.4?} production_drop={:.4?} clear_drop={:.4?} production_clear={:.4?} peak={:?} allocations={:?}", groups.len(), ratios[0], ratios[1], ratios[2], ratios[3], ratios[4], ratios[5], measured.map(|measurement| measurement.peak_bytes), measured.map(|measurement| measurement.allocations));
         }
     }
 }

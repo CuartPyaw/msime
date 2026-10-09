@@ -167,12 +167,14 @@ fn search_with_output(
         return output.items;
     }
 
-    let boundaries: Vec<usize> = reading
+    let mora_count = reading.chars().count();
+    let mut next_boundaries = reading
         .char_indices()
-        .map(|(index, _)| index)
-        .chain(std::iter::once(reading.len()))
-        .collect();
-    let mora_count = boundaries.len() - 1;
+        .map(|(index, character)| index + character.len_utf8());
+    let mut boundaries = [0; MAX_LEMMA_MORA + 1];
+    for boundary in boundaries.iter_mut().skip(1).take(mora_count) {
+        *boundary = next_boundaries.next().expect("计数读音边界");
+    }
     let mut rows: Vec<Row> = (0..=mora_count.min(MAX_LEMMA_MORA))
         .map(|_| Row::new())
         .collect();
@@ -184,15 +186,20 @@ fn search_with_output(
 
     for start in 0..mora_count {
         let slot = start % (MAX_LEMMA_MORA + 1);
+        let start_byte = boundaries[slot];
+        // 当前字节位置已保存；最大跨度内的目标都不使用当前槽，提前补下一轮边界。
+        if mora_count - start > MAX_LEMMA_MORA {
+            boundaries[slot] = next_boundaries.next().expect("计数读音边界");
+        }
         if rows[slot].nodes.is_empty() {
             continue;
         }
         let mut previous_row = std::mem::take(&mut rows[slot]);
-        let start_byte = boundaries[start];
         let max_end = mora_count.min(start + MAX_LEMMA_MORA);
         for end in start + 1..=max_end {
-            let key = &reading[start_byte..boundaries[end]];
-            let target = &mut rows[end % (MAX_LEMMA_MORA + 1)];
+            let end_slot = end % (MAX_LEMMA_MORA + 1);
+            let key = &reading[start_byte..boundaries[end_slot]];
+            let target = &mut rows[end_slot];
             dictionary.for_each_exact_lemma_view(key, 24, |lemma| {
                 for previous in &previous_row.nodes {
                     let cost = previous.cost
@@ -203,8 +210,9 @@ fn search_with_output(
             });
         }
 
-        let kana = &reading[start_byte..boundaries[start + 1]];
-        let target = &mut rows[(start + 1) % (MAX_LEMMA_MORA + 1)];
+        let next_slot = (start + 1) % (MAX_LEMMA_MORA + 1);
+        let kana = &reading[start_byte..boundaries[next_slot]];
+        let target = &mut rows[next_slot];
         for previous in &previous_row.nodes {
             target.extend(
                 &previous.text,
@@ -264,11 +272,14 @@ fn search_with_output(
         output.push_owned(node.text, node.cost);
     }
 
-    for end in (1..=mora_count).rev() {
-        if output.full() {
+    // 矩阵窗口已覆盖早期位置；前缀从原读音末尾反向遍历，页满时不再解码。
+    let mut prefixes = reading.char_indices();
+    while !output.full() {
+        let Some((start, character)) = prefixes.next_back() else {
             break;
-        }
-        dictionary.for_each_exact_lemma_view(&reading[..boundaries[end]], 16, |lemma| {
+        };
+        let end = start + character.len_utf8();
+        dictionary.for_each_exact_lemma_view(&reading[..end], 16, |lemma| {
             output.push(lemma.surface, i64::from(lemma.word_cost));
         });
     }
@@ -410,7 +421,7 @@ mod tests {
         );
         eprintln!("日文未命中双假名矩阵搜索分配：{allocations}");
         assert!(
-            allocations <= 8,
+            allocations <= 7,
             "未命中输出应接收已有句子文本：{allocations}"
         );
     }
@@ -437,7 +448,7 @@ mod tests {
         assert_eq!(actual, expected);
         eprintln!("日文密集单假名矩阵分配：{allocations}");
         assert!(
-            allocations <= 23,
+            allocations <= 22,
             "胜选文本应移入输出，败选不应构造文本：{allocations}"
         );
     }
@@ -454,7 +465,7 @@ mod tests {
         assert_eq!(texts(&actual), ["蚊", "か"]);
         eprintln!("日文单假名矩阵搜索分配：{allocations}");
         assert!(
-            allocations <= 9,
+            allocations <= 8,
             "词条应借用，句子文本应移入输出：{allocations}"
         );
     }
@@ -603,3 +614,11 @@ mod linear_row_reference;
 #[cfg(test)]
 #[path = "matrix/rolling_row_tests.rs"]
 mod rolling_row_tests;
+
+#[cfg(test)]
+#[path = "matrix/full_boundary_reference.rs"]
+mod full_boundary_reference;
+
+#[cfg(test)]
+#[path = "matrix/boundary_tests.rs"]
+mod boundary_tests;
