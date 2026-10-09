@@ -5880,7 +5880,8 @@ void show_input_mode_hint(IBusEngine *engine) {
   if (!configured.contains("preferences") ||
       !configured.at("preferences").value("input_mode_hud", true))
     return;
-  if (!s.focused || s.blocked)
+  // Nor in IBus's own "fake" context: with a global engine the daemon focuses it while no text field has the focus, so there is no field to show the mode for. The panel draws such a hint in its X11 candidate window, which Hyprland maps as a window of its own that takes the focus.
+  if (!s.focused || s.blocked || s.focused_client == "fake")
     return;
   ++s.mode_hint_id;
   if (s.mode_hint_id == 0)

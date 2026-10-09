@@ -44,6 +44,8 @@ struct Observation {
   std::vector<PreeditAttribute> preedit_attributes;
   std::string auxiliary;
   gboolean auxiliary_visible = FALSE;
+  // How many UpdateAuxiliaryText calls showed the line, so a test can tell one hint from two without waiting out a timeout.
+  int auxiliary_shows = 0;
   // HideLookupTable and HideAuxiliaryText in the order they arrived.
   std::vector<std::string> hides;
   std::vector<std::string> candidates;
@@ -155,6 +157,8 @@ void signal(GDBusConnection *, const gchar *, const gchar *, const gchar *,
   if (std::string(name) == "UpdateAuxiliaryText") {
     seen.auxiliary = ibus_text_get_text(IBUS_TEXT(object));
     g_variant_get_child(parameters, 1, "b", &seen.auxiliary_visible);
+    if (seen.auxiliary_visible)
+      ++seen.auxiliary_shows;
   }
   auto observe_property = [&](auto &&self, IBusProperty *property) -> void {
     const std::string key = ibus_property_get_key(property);
@@ -503,10 +507,16 @@ int main(int argc, char **argv) {
                          std::to_string(call))
                             .c_str());
     };
+#if IBUS_CHECK_VERSION(1, 5, 27)
+    // With a global engine IBus focuses its own "fake" context while no text field has the focus; there is no field to show the mode for. Signals arrive in order, so the field's hint below is the first one only if the fake focus showed none.
+    invoke("FocusInId", g_variant_new("(ss)", "/org/freedesktop/IBus/InputContext_1", "fake"));
+    invoke("FocusOut");
+#endif
     invoke("FocusIn");
     // #2589: a new focus shows the current mode the way a switch does, then the hint goes away by itself. The replay IBus sends while it names the client is the same focus and must not show it again.
     require(wait_until([&] { return seen.auxiliary == "中" && seen.auxiliary_visible; }),
             "Focus did not show the input mode");
+    require(seen.auxiliary_shows == 1, "Focusing IBus's fake context showed the input mode");
     require(wait_until([&] { return !seen.auxiliary_visible; }), "Focus mode hint did not hide");
     invoke("FocusIn");
     require(!wait_until([&] { return seen.auxiliary_visible; }) || seen.auxiliary != "中",
