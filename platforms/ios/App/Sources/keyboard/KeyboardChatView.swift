@@ -37,8 +37,7 @@ final class KeyboardChatModel: ObservableObject {
     defer { loadingModels = false }
     do {
       guard try await BackendAccountSession.shared.user() != nil else { loginNeeded = true; return }
-      let token = try await BackendAccountSession.shared.accessToken()
-      let catalog = try await api.chatModels(token: token)
+      let catalog = try await api.chatModels(session: .shared)
       try Task.checkCancellation()
       models = catalog.data
       if !models.contains(where: { $0.id == selectedModel }) { selectedModel = catalog.default_model }

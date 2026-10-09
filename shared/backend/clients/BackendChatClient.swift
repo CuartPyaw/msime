@@ -10,6 +10,15 @@ extension BackendAccountClient {
     let data: [Model]
     let default_model: String
   }
+  func chatModels(session: BackendAccountSession, matchingUserID expected: String? = nil) async throws -> ChatModels {
+    let userID: String
+    if let expected { userID = expected }
+    else { userID = try await session.credentials().userID }
+    return try await session.authenticated(matchingUserID: userID) { token in
+      try await chatModels(token: token)
+    }.value
+  }
+
   func chatModels(token: String) async throws -> ChatModels {
     let catalog: ChatModels = try await json("GET", "/v1/models", token: token)
     guard !catalog.data.isEmpty, catalog.data.count <= 33,
