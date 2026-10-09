@@ -355,12 +355,6 @@ public final class Ui {
             dp(context, heightDp));
     }
 
-    /** Frame layout parameters for a content-sized child with explicit gravity. */
-    public static FrameLayout.LayoutParams frameWrap(int gravity) {
-        return new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT, gravity);
-    }
-
     /** 读一个颜色主题属性；属性缺失时退回洋红，让漏配的属性在截图里一眼可见，而不是悄悄显示成别的颜色。 */
     @ColorInt public static int color(Context context, @AttrRes int attr) {
         return MaterialColors.getColor(context, attr, Color.MAGENTA);
