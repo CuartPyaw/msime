@@ -18,6 +18,7 @@ import android.widget.ImageView;
 import android.widget.EditText;
 import android.widget.TextView;
 import app.msime.android.BoundsPolicy;
+import app.msime.android.ColorPolicy;
 import app.msime.android.KeyboardGeometry;
 import app.msime.android.TextPolicy;
 import app.msime.android.ViewPolicy;
@@ -299,7 +300,7 @@ public final class Ui {
     /** Create a theme-coloured one-pixel divider in either orientation. */
     public static View divider(Context context, boolean horizontal) {
         View view = hairlineView(context);
-        int thin = hairlinePx(context);
+        int thin = KeyboardGeometry.atLeastOnePixel(context, 0.5f);
         view.setLayoutParams(horizontal
             ? matchWidthHeightPx(thin)
             : new LinearLayout.LayoutParams(thin, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -506,7 +507,7 @@ public final class Ui {
     }
 
     public static Drawable rippleOn(Context context, @ColorInt int fill, float radiusPx) {
-        int pressed = withAlpha(text(context), 0.10f);
+        int pressed = ColorPolicy.withAlpha(text(context), 0.10f);
         return new RippleDrawable(ColorStateList.valueOf(pressed), rounded(fill, radiusPx),
             rounded(Color.WHITE, radiusPx));
     }
