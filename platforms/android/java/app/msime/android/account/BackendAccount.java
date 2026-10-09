@@ -75,6 +75,10 @@ public final class BackendAccount {
         }
     }
 
+    interface StreamRequester {
+        String stream(JSONObject body, String token, ChatCall call, ChatStreamListener listener) throws Exception;
+    }
+
     /** 走 HTTPS 的默认实现；只有登录请求会传入详细 User-Agent。 */
     private static final class HttpRequester implements Requester {
         @Override public JSONObject request(String method, String path, JSONObject body, String token)
@@ -117,6 +121,7 @@ public final class BackendAccount {
     private final SessionStore sessions;
     private final Requester requester;
     private final TokenSource ownerProcess;
+    private final StreamRequester streamer;
 
     /**
      * The account as this process may use it.
@@ -140,9 +145,14 @@ public final class BackendAccount {
     }
 
     BackendAccount(SessionStore sessions, Requester requester, TokenSource owner) {
+        this(sessions, requester, owner, BackendAccount::streamChat);
+    }
+
+    BackendAccount(SessionStore sessions, Requester requester, TokenSource owner, StreamRequester streamer) {
         this.sessions = sessions;
         this.requester = requester;
         this.ownerProcess = owner;
+        this.streamer = streamer;
     }
 
     private static TokenSource sessionOwner(Context context) {
@@ -537,24 +547,45 @@ public final class BackendAccount {
      */
     public String chatStream(List<ChatMessage> messages, String model, ChatCall call, ChatStreamListener listener)
             throws Exception {
-        String token = accessToken();
-        JSONObject body = chatBody(messages, model, token).put("stream", true);
+        SessionCredential session = currentSession();
+        JSONObject body = chatBody(messages, model, session.token()).put("stream", true);
+        ChatStreamListener guarded = delta -> {
+            try {
+                ensureCurrentSession(session);
+            } catch (Exception unavailable) {
+                throw new CancellationException("account session changed");
+            }
+            if (call.cancelled()) throw new CancellationException("chat cancelled");
+            listener.onDelta(delta);
+        };
         try {
             try {
-                return streamChat(body, token, call, listener);
+                ensureCurrentSession(session);
+                String reply = streamer.stream(body, session.token(), call, guarded);
+                ensureCurrentSession(session);
+                return reply;
             } catch (RequestException error) {
                 if (error.status != 401) throw error;
-                String fresh = currentAccessToken(token);
-                if (fresh.isEmpty() || fresh.equals(token)) throw error;
-                return streamChat(body, fresh, call, listener);
+                ensureCurrentSession(session);
+                SessionCredential fresh = currentSession(session.token());
+                if (!session.sessionId().equals(fresh.sessionId()))
+                    throw new CancellationException("account session changed");
+                if (fresh.token().isEmpty() || fresh.token().equals(session.token())) throw error;
+                ensureCurrentSession(session);
+                String reply = streamer.stream(body, fresh.token(), call, guarded);
+                ensureCurrentSession(session);
+                return reply;
             }
         } catch (RequestException error) {
             if (error.status != 400) throw error;
             // 旧后端不认识 stream：退回非流式请求，整段回复一次交出去。
+            ensureCurrentSession(session);
             if (call.cancelled()) throw new CancellationException("chat cancelled");
-            String reply = chat(messages, model);
+            String reply = chatContent(authorizedRequest("POST", "/v1/chat/completions",
+                body.put("stream", false), session));
+            ensureCurrentSession(session);
             if (call.cancelled()) throw new CancellationException("chat cancelled");
-            listener.onDelta(reply);
+            guarded.onDelta(reply);
             return reply;
         }
     }
