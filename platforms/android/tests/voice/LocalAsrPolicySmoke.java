@@ -135,11 +135,9 @@ public final class LocalAsrPolicySmoke {
         check(LocalAsrPolicy.hotwordLines(Arrays.asList("坏\uD800", "好")).equals("好"),
             "malformed hotwords are dropped before native framing");
         try {
-            Method strictText = LocalAsrPolicy.class.getDeclaredMethod("strictText", Object.class);
-            strictText.setAccessible(true);
-            check("synthetic transcript".equals(strictText.invoke(null, "synthetic transcript")),
+            check("synthetic transcript".equals(JsonPolicy.strictString("synthetic transcript")),
                 "local ASR accepts string correction text");
-            check(strictText.invoke(null, 42) == null,
+            check(JsonPolicy.strictString(42) == null,
                 "local ASR rejects numeric correction text instead of coercing it");
             Method transcript = LocalAsrPolicy.class.getDeclaredMethod("transcript", Object.class);
             transcript.setAccessible(true);
