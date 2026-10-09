@@ -121,6 +121,7 @@ public final class MSIMEInputService extends InputMethodService {
     ImeDebugOverlay imeDebugOverlay;
     ImeTextEditPanel imeTextEditPanel;
     ImeCalculator imeCalculator;
+    ImeEmailSuffixes imeEmailSuffixes;
     long session;
     InputConnection connection;
     private EditorBridge bridge = new EditorBridge();
@@ -1052,7 +1053,7 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     /** 删光标前 `length` 个 UTF-16 单元，并记下删完后的选区预期，免得这次删除迟到的回报把紧接着开始的新组字取消掉。有选区或组字区时删的位置由编辑器决定，追踪器会自己作废预期。 */
-    private boolean deleteBeforeCursor(int length) {
+    boolean deleteBeforeCursor(int length) {
         pairedPunctuationStack.clear();
         boolean deleted = connection.deleteSurroundingText(length, 0);
         if (deleted) {
@@ -1265,6 +1266,7 @@ public final class MSIMEInputService extends InputMethodService {
         imeDebugOverlay = new ImeDebugOverlay(this);
         imeTextEditPanel = new ImeTextEditPanel(this);
         imeCalculator = new ImeCalculator(this);
+        imeEmailSuffixes = new ImeEmailSuffixes(this);
         // 必须在 super.onCreate() 之前：InputMethodService 在那里按这个主题建输入法窗口，之后再设会抛异常。按名字查是因为 core/ 要能脱离 Gradle 生成的 R 编译（check-host.sh 的 JVM 冒烟）；res/values/themes.xml 说明了这个主题为什么存在。
         // 五笔、拼音等版本的 applicationId 带后缀，资源表的包名仍是命名空间，两个都试。
         int theme = getResources().getIdentifier("Theme.MSIME.InputMethod", "style", getPackageName());
@@ -1331,6 +1333,7 @@ public final class MSIMEInputService extends InputMethodService {
         cloudClipboardGeneration++;
         imeBottomRow.resetSpaceCursor();
         imeCalculator.clear();
+        imeEmailSuffixes.clear();
         // 也覆盖 onFinishInputView(true)：那条路径不经过 finishInputViewPresentation。
         imeVoiceEntry.cancel();
         stop(true);
@@ -3897,6 +3900,8 @@ public final class MSIMEInputService extends InputMethodService {
         if (directEnglishActive()) refreshEnglishSuggestions();
         // 数字键面上打完算式（或光标挪到算式后面）时，工具栏给出计算结果。
         imeCalculator.refresh();
+        // 邮箱输入框里打到 `xxx@` 时，候选栏给出邮箱后缀（#6147）。
+        imeEmailSuffixes.refresh();
     }
 
     Button button(LinearLayout row, String label, Runnable action) {
@@ -7416,10 +7421,12 @@ public final class MSIMEInputService extends InputMethodService {
         boolean handwriting = handwritingActive();
         boolean hasHandwritingResults = handwriting && !handwritingResults.isEmpty()
             && handwritingCandidateToken != null;
+        boolean hasEmailSuffixes = imeEmailSuffixes.active();
         boolean idle = view == null || (InputViewValuePolicy.editingText(view).isEmpty()
             && "none".equals(InputViewValuePolicy.textOr(view, "local_mode", "none"))
             && (visibleCandidates == null || visibleCandidates.length() == 0)
             && !hasEnglishSuggestions
+            && !hasEmailSuffixes
             && !hasHandwritingResults);
         if (preedit != null) {
             // 读音的字号由 ImeStyler.applySkin 在 render 末尾统一设置，这里不再另设一份。
@@ -7755,6 +7762,9 @@ public final class MSIMEInputService extends InputMethodService {
         JSONArray entries = view.optJSONArray("candidates");
         if (handwriting) {
             renderSharedHandwritingCandidates(activeCandidates);
+        } else if (imeEmailSuffixes.active()) {
+            // 邮箱后缀和英文建议占同一个候选行；打到 `@` 之后英文建议本来也没有，先给后缀。
+            imeEmailSuffixes.render(activeCandidates);
         } else if (englishSuggestionsActive()) {
             renderEnglishSuggestions(activeCandidates);
         } else if (entries != null) {
