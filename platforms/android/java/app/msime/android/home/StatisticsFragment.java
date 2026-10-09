@@ -178,7 +178,7 @@ public final class StatisticsFragment extends HomeTabFragment {
             if (!JsonPolicy.strictTrue(root.opt("ok"))) return null;
             JSONObject value = root.optJSONObject("value");
             if (value == null || !value.has("count")) return null;
-            Long count = DictionaryCollectionsStore.strictLong(value.opt("count"));
+            Long count = JsonPolicy.strictLong(value.opt("count"));
             return count == null ? null : BoundsPolicy.nonNegative(count);
         } catch (JSONException | RuntimeException | LinkageError error) {
             return null;
