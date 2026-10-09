@@ -22,6 +22,7 @@ import androidx.core.content.FileProvider;
 import app.msime.android.AppEdition;
 import app.msime.android.FilePolicy;
 import app.msime.android.R;
+import app.msime.android.ThreadPolicy;
 import app.msime.android.UpdateApi;
 import java.io.File;
 import java.util.concurrent.TimeUnit;
@@ -48,7 +49,7 @@ public final class UpdateJobService extends JobService {
     @Override public boolean onStartJob(JobParameters params) {
         Context context = getApplicationContext();
         if (!autoUpdate(context) || installedFromPlay(context)) return false;
-        worker = new Thread(() -> {
+        worker = ThreadPolicy.namedThread("msime-update-job", () -> {
             boolean retry = false;
             try {
                 UpdateApi api = new UpdateApi();
@@ -73,7 +74,7 @@ public final class UpdateJobService extends JobService {
             } finally {
                 jobFinished(params, retry);
             }
-        }, "msime-update-job");
+        });
         worker.start();
         return true;
     }
