@@ -3,6 +3,7 @@
 //! 九键模式（`set_nine_key`）下不读大千键：数字串按 `nine_key::KEYPAD` 记下符号位置，声调键结束音节，这个位置的读音是数字串加声调对应的全部合法音节；转换在每个位置的读音里一起挑，用户可以经 `choose_spelling` 逐个钉住目标音节的读音。
 
 use std::cmp::Reverse;
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -430,8 +431,15 @@ impl ZhuyinScheme {
             }
             return Ok(true);
         }
-        let digits = std::mem::take(&mut self.pending_digits);
-        let Some(readings) = self.nine_key_index()?.readings(&digits, mark) else {
+        let mut digits = std::mem::take(&mut self.pending_digits);
+        let readings = match self.nine_key_index() {
+            Ok(index) => index.readings(&digits, mark),
+            Err(error) => {
+                self.pending_digits = digits;
+                return Err(error);
+            }
+        };
+        let Some(readings) = readings else {
             self.pending_digits = digits;
             return Ok(true);
         };
@@ -440,6 +448,8 @@ impl ZhuyinScheme {
         }
         let mut keys: String = digits.iter().map(|digit| char::from(*digit)).collect();
         keys.push(char::from(byte));
+        digits.clear();
+        self.pending_digits = digits;
         self.syllables.push(Syllable {
             keys,
             readings,
@@ -527,8 +537,8 @@ impl ZhuyinScheme {
         let mut singles = [0; MAX_SYLLABLES];
         if ambiguous.iter().any(|&ambiguous| ambiguous) {
             for index in 0..positions.len() {
-                singles[index] = cached_best(dictionary, best, &positions[index..=index])?
-                    .map_or(0, |(_, entry)| entry.weight);
+                singles[index] =
+                    cached_best_weight(dictionary, best, &positions[index..=index])?.unwrap_or(0);
             }
         }
         let singles = &singles[..count];
@@ -537,9 +547,11 @@ impl ZhuyinScheme {
             &self.pins,
             |start, end| {
                 let entry = cached_best(dictionary, best, &positions[start..end])?;
-                Ok(entry.filter(|(_, entry)| {
-                    clears_ambiguous_word_floor(&ambiguous[start..end], singles, start, entry)
-                }))
+                Ok(entry
+                    .filter(|(_, entry)| {
+                        clears_ambiguous_word_floor(&ambiguous[start..end], singles, start, entry)
+                    })
+                    .cloned())
             },
             |index| positions[index][0].clone(),
         )?;
@@ -548,9 +560,17 @@ impl ZhuyinScheme {
 
     /// 重算钉读音的目标和它的候选读音。目标是第一个不被任何 pin 覆盖、没有钉住、且有不止一个读音的音节；读音按当前转换用的那个、单字最重词条的权重（从重到轻）、字典序排列。没有目标时为空，大千模式下永远为空。
     fn refresh_spellings(&mut self) -> Result<()> {
-        self.spellings.clear();
+        let result = self.refresh_spelling_choices();
+        if result.is_err() {
+            self.spellings.clear();
+        }
+        result
+    }
+
+    fn refresh_spelling_choices(&mut self) -> Result<()> {
         self.spelling_target = None;
         if !self.nine_key {
+            self.spellings.clear();
             return Ok(());
         }
         let Some(target) = self
@@ -563,6 +583,7 @@ impl ZhuyinScheme {
                     && !self.pins.iter().any(|pin| pin.overlaps(index, index + 1))
             })
         else {
+            self.spellings.clear();
             return Ok(());
         };
         let current = current_spelling(&self.conversion, target);
@@ -570,12 +591,12 @@ impl ZhuyinScheme {
         if readings.len() <= SMALL_SPELLING_RANK {
             let mut ranked = [(false, Reverse(0), 0usize); SMALL_SPELLING_RANK];
             for (index, reading) in readings.iter().enumerate() {
-                let weight = cached_best(
+                let weight = cached_best_weight(
                     &self.dictionary,
                     &mut self.best,
                     &[std::slice::from_ref(reading)],
                 )?
-                .map_or(i64::MIN, |(_, entry)| entry.weight);
+                .unwrap_or(i64::MIN);
                 ranked[index] = (current != Some(reading.as_str()), Reverse(weight), index);
             }
             ranked[..readings.len()].sort_by(|left, right| {
@@ -584,28 +605,52 @@ impl ZhuyinScheme {
                     .then_with(|| left.1.cmp(&right.1))
                     .then_with(|| readings[left.2].cmp(&readings[right.2]))
             });
-            self.spellings.extend(
+            replace_string_buffer(
+                &mut self.spellings,
                 ranked[..readings.len()]
                     .iter()
-                    .map(|(_, _, index)| readings[*index].clone()),
+                    .map(|(_, _, index)| readings[*index].as_str()),
             );
         } else {
             let mut ranked = Vec::with_capacity(readings.len());
             for reading in readings.iter() {
-                let weight = cached_best(
+                let weight = cached_best_weight(
                     &self.dictionary,
                     &mut self.best,
                     &[std::slice::from_ref(reading)],
                 )?
-                .map_or(i64::MIN, |(_, entry)| entry.weight);
+                .unwrap_or(i64::MIN);
                 ranked.push((current != Some(reading.as_str()), Reverse(weight), reading));
             }
             ranked.sort();
-            self.spellings
-                .extend(ranked.into_iter().map(|(_, _, reading)| reading.clone()));
+            replace_string_buffer(
+                &mut self.spellings,
+                ranked.into_iter().map(|(_, _, reading)| reading.as_str()),
+            );
         }
         self.spelling_target = Some(target);
         Ok(())
+    }
+}
+
+fn replace_string_buffer<'a>(
+    destination: &mut Vec<String>,
+    mut source: impl Iterator<Item = &'a str>,
+) {
+    let mut kept = 0;
+    loop {
+        let Some(value) = source.next() else {
+            destination.truncate(kept);
+            return;
+        };
+        if let Some(target) = destination.get_mut(kept) {
+            target.clear();
+            target.push_str(value);
+            kept += 1;
+        } else {
+            destination.extend(std::iter::once(value).chain(source).map(str::to_owned));
+            return;
+        }
     }
 }
 
@@ -702,19 +747,34 @@ fn clears_ambiguous_word_floor(
     entry.weight.saturating_mul(AMBIGUOUS_WORD_FLOOR) >= weakest
 }
 
-/// `positions` 的最重词条及其键，先查缓存。缓存键是各位置允许的读音以 `|` 连接、位置之间用空格；大千下每个位置只有一个读音，所以就是词库键本身。
-fn cached_best(
+/// 只取词频时，单位置单读音的缓存键直接借用读音；未命中或需要组合缓存键时复用完整词条的查询路径。
+fn cached_best_weight(
     dictionary: &LanguageDictionary,
     best: &mut HashMap<String, Option<(String, LanguageEntry)>>,
     positions: &[&[String]],
-) -> Result<Option<(String, LanguageEntry)>> {
-    let description = describe(positions);
-    if let Some(entry) = best.get(&description) {
-        return Ok(entry.clone());
+) -> Result<Option<i64>> {
+    if let [[reading]] = positions {
+        if let Some(entry) = best.get(reading.as_str()) {
+            return Ok(entry.as_ref().map(|(_, entry)| entry.weight));
+        }
     }
-    let entry = dictionary.lookup_readings(positions, 1)?.into_iter().next();
-    best.insert(description, entry.clone());
-    Ok(entry)
+    Ok(cached_best(dictionary, best, positions)?.map(|(_, entry)| entry.weight))
+}
+
+/// 借用缓存中 `positions` 的最重词条及其键。缓存键是各位置允许的读音以 `|` 连接、位置之间用空格；大千下每个位置只有一个读音，所以就是词库键本身。
+fn cached_best<'a>(
+    dictionary: &LanguageDictionary,
+    best: &'a mut HashMap<String, Option<(String, LanguageEntry)>>,
+    positions: &[&[String]],
+) -> Result<Option<&'a (String, LanguageEntry)>> {
+    let description = describe(positions);
+    match best.entry(description) {
+        Entry::Occupied(entry) => Ok(entry.into_mut().as_ref()),
+        Entry::Vacant(entry) => {
+            let candidate = dictionary.lookup_readings(positions, 1)?.into_iter().next();
+            Ok(entry.insert(candidate).as_ref())
+        }
+    }
 }
 
 /// `cached_best` 的缓存键。
@@ -1360,16 +1420,137 @@ mod tests {
     }
 
     #[test]
+    fn spelling_refresh_failure_clears_previous_choices() {
+        for count in [3, SMALL_SPELLING_RANK + 1] {
+            let (dir, mut scheme) = nine_key_scheme();
+            type_keys(&mut scheme, "28c");
+            assert!(!scheme.spellings().is_empty());
+            if count > SMALL_SPELLING_RANK {
+                scheme.syllables[0].readings = (0..count)
+                    .map(|index| format!("測試讀音{index:03}"))
+                    .collect::<Vec<_>>()
+                    .into();
+            }
+            scheme.best.clear();
+            Connection::open(dir.path().join("msime-zhuyin.db"))
+                .unwrap()
+                .execute_batch("DROP TABLE entries")
+                .unwrap();
+
+            assert!(scheme.refresh_spellings().is_err());
+            assert!(scheme.spellings().is_empty());
+            assert_eq!(scheme.spelling_target, None);
+        }
+    }
+
+    #[test]
+    fn spelling_refresh_handles_changing_choice_counts() {
+        let (_dir, mut scheme) = nine_key_scheme();
+        type_keys(&mut scheme, "28c");
+        for count in [SMALL_SPELLING_RANK + 1, 2, 4] {
+            let readings = (0..count)
+                .map(|index| format!("測試讀音{index:03}"))
+                .collect::<Vec<_>>();
+            scheme.syllables[0].readings = readings.clone().into();
+            scheme.refresh_spellings().unwrap();
+            assert_eq!(scheme.spellings(), readings);
+            assert_eq!(scheme.spelling_target, Some(0));
+        }
+        scheme.syllables[0].locked = Some(0);
+        scheme.refresh_spellings().unwrap();
+        assert!(scheme.spellings().is_empty());
+        assert_eq!(scheme.spelling_target, None);
+        scheme.syllables[0].locked = None;
+        scheme.refresh_spellings().unwrap();
+        assert_eq!(scheme.spellings(), &*scheme.syllables[0].readings);
+    }
+
+    #[test]
+    fn cached_best_preserves_rows_misses_and_query_errors() {
+        let (dir, scheme) = nine_key_scheme();
+        let mut best = HashMap::new();
+        let readings = ["ㄋㄧˇ".to_owned(), "ㄌㄧˇ".to_owned()];
+        let missing = ["測試缺失讀音".to_owned()];
+        let uncached = ["ㄉㄧˇ".to_owned()];
+        let (key, entry) = cached_best(&scheme.dictionary, &mut best, &[&readings])
+            .unwrap()
+            .unwrap();
+        assert_eq!(key, "ㄌㄧˇ");
+        assert_eq!(entry.text, "李");
+        assert_eq!(entry.weight, 1200);
+        assert!(cached_best(&scheme.dictionary, &mut best, &[&missing])
+            .unwrap()
+            .is_none());
+        assert_eq!(best.len(), 2);
+        Connection::open(dir.path().join("msime-zhuyin.db"))
+            .unwrap()
+            .execute_batch("DROP TABLE entries")
+            .unwrap();
+
+        let (_, entry) = cached_best(&scheme.dictionary, &mut best, &[&readings])
+            .unwrap()
+            .unwrap();
+        assert_eq!(entry.text, "李");
+        assert_eq!(entry.weight, 1200);
+        assert!(cached_best(&scheme.dictionary, &mut best, &[&missing])
+            .unwrap()
+            .is_none());
+        assert!(cached_best(&scheme.dictionary, &mut best, &[&uncached]).is_err());
+        assert!(cached_best(&scheme.dictionary, &mut best, &[&uncached]).is_err());
+        assert_eq!(best.len(), 2);
+    }
+
+    #[test]
+    fn cached_single_reading_weights_keep_hits_misses_and_errors() {
+        let (dir, scheme) = nine_key_scheme();
+        let mut best = HashMap::new();
+        let reading = ["ㄌㄧˇ".to_owned()];
+        let missing = ["測試缺失讀音".to_owned()];
+        assert_eq!(
+            cached_best_weight(&scheme.dictionary, &mut best, &[&reading]).unwrap(),
+            Some(1200)
+        );
+        assert_eq!(
+            cached_best_weight(&scheme.dictionary, &mut best, &[&missing]).unwrap(),
+            None
+        );
+        Connection::open(dir.path().join("msime-zhuyin.db"))
+            .unwrap()
+            .execute_batch("DROP TABLE entries")
+            .unwrap();
+
+        let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            assert_eq!(
+                cached_best_weight(&scheme.dictionary, &mut best, &[&reading]).unwrap(),
+                Some(1200)
+            );
+            assert_eq!(
+                cached_best_weight(&scheme.dictionary, &mut best, &[&missing]).unwrap(),
+                None
+            );
+        });
+        assert_eq!(allocations, 0);
+        let readings = ["ㄌㄧˇ".to_owned(), "ㄋㄧˇ".to_owned()];
+        assert!(cached_best_weight(&scheme.dictionary, &mut best, &[&readings]).is_err());
+        assert!(cached_best_weight(&scheme.dictionary, &mut best, &[&reading, &reading]).is_err());
+        assert_eq!(best.len(), 2);
+    }
+
+    #[test]
     fn refreshing_short_spelling_choices_does_not_allocate_ranking_state() {
         let (_dir, mut scheme) = nine_key_scheme();
         type_keys(&mut scheme, "28c");
+        assert_eq!(scheme.spellings.len(), 3);
         scheme.spellings.reserve(scheme.syllables[0].readings.len());
 
         let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
             scheme.refresh_spellings().unwrap();
         });
 
-        assert_eq!(allocations, 12);
+        assert_eq!(
+            allocations, 0,
+            "读取已有单读音词频仍分配了 {allocations} 次"
+        );
         assert_eq!(spellings(&scheme), ["ㄌㄧˇ", "ㄋㄧˇ", "ㄉㄧˇ"]);
     }
 
@@ -1465,6 +1646,44 @@ mod tests {
         assert_eq!(scheme.pending_digits.as_ptr(), pointer);
         assert_eq!(scheme.pending_digits, b"29");
         assert_eq!(scheme.reading(), "29");
+    }
+
+    #[test]
+    fn nine_key_completed_syllables_reuse_pending_digit_storage() {
+        let (_dir, mut scheme) = nine_key_scheme();
+        type_keys(&mut scheme, "28");
+        let pointer = scheme.pending_digits.as_ptr();
+        let capacity = scheme.pending_digits.capacity();
+        assert!(scheme.handle_key(ZhuyinKey::Char(b'c')).unwrap());
+        assert!(scheme.pending_digits.is_empty());
+
+        let (claimed, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            scheme.handle_key(ZhuyinKey::Char(b'2')).unwrap()
+        });
+        assert!(claimed);
+        assert_eq!(allocations, 0);
+        assert_eq!(scheme.pending_digits.as_ptr(), pointer);
+        assert_eq!(scheme.pending_digits.capacity(), capacity);
+        assert_eq!(scheme.pending_digits, b"2");
+        assert_eq!(scheme.reading(), "李2");
+    }
+
+    #[test]
+    fn nine_key_tone_index_failure_restores_pending_digits() {
+        let (dir, mut scheme) = nine_key_scheme();
+        scheme.pending_digits.extend_from_slice(b"28");
+        let pointer = scheme.pending_digits.as_ptr();
+        Connection::open(dir.path().join("msime-zhuyin.db"))
+            .unwrap()
+            .execute_batch("DROP TABLE syllables")
+            .unwrap();
+
+        assert!(scheme.handle_key(ZhuyinKey::Char(b'c')).is_err());
+        assert_eq!(scheme.pending_digits, b"28");
+        assert_eq!(scheme.pending_digits.as_ptr(), pointer);
+        assert!(scheme.syllables.is_empty());
+        assert!(scheme.is_composing());
+        assert_eq!(scheme.reading(), "28");
     }
 
     #[test]

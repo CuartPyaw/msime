@@ -162,6 +162,11 @@ pub(crate) fn clone_private_directory(directory: &File) -> io::Result<File> {
 }
 
 #[cfg(unix)]
+pub(crate) fn private_directory_metadata(directory: &File) -> io::Result<fs::Metadata> {
+    directory.metadata()
+}
+
+#[cfg(unix)]
 pub(crate) fn open_private_lock_file_at(directory: &File, name: &OsStr) -> io::Result<File> {
     let descriptor = rustix::fs::openat(
         directory,
@@ -255,6 +260,11 @@ pub(crate) fn open_private_lock_file_at(
     name: &OsStr,
 ) -> io::Result<File> {
     crate::file_lock::open_private_lock_file(directory.0.join(name))
+}
+
+#[cfg(not(unix))]
+pub(crate) fn private_directory_metadata(directory: &PrivateDirectory) -> io::Result<fs::Metadata> {
+    fs::metadata(&directory.0)
 }
 
 #[cfg(not(unix))]
@@ -839,6 +849,7 @@ pub(crate) fn create_directory_and_check(path: &Path) -> io::Result<bool> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use super::*;
 
     #[cfg(unix)]

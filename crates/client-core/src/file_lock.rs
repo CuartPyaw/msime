@@ -32,6 +32,10 @@ impl PrivateDirectory {
             directory: crate::storage::clone_private_directory(&self.directory)?,
         })
     }
+
+    pub fn metadata(&self) -> io::Result<std::fs::Metadata> {
+        crate::storage::private_directory_metadata(&self.directory)
+    }
 }
 
 pub fn open_private_directory_at(
@@ -48,6 +52,11 @@ pub fn open_private_lock_file_at(directory: &PrivateDirectory, name: &OsStr) -> 
         &directory.directory,
         name,
     )?)
+}
+
+#[cfg(unix)]
+pub(crate) fn open_private_lock_file_at_raw(directory: &File, name: &OsStr) -> io::Result<File> {
+    ensure_regular(crate::storage::open_private_lock_file_at(directory, name)?)
 }
 
 pub fn read_private_directory(directory: &PrivateDirectory) -> io::Result<Vec<std::ffi::OsString>> {
@@ -128,12 +137,14 @@ pub(crate) fn open_lock_file(path: impl AsRef<Path>) -> io::Result<File> {
 /// Open a lock file with owner-only permissions on Unix hosts.
 pub fn open_private_lock_file(path: impl AsRef<Path>) -> io::Result<File> {
     let path = path.as_ref();
-    let mut options = secure_lock_file_options(path)?;
+    let options = secure_lock_file_options(path)?;
     #[cfg(unix)]
-    {
+    let options = {
         use std::os::unix::fs::OpenOptionsExt;
+        let mut options = options;
         options.mode(0o600);
-    }
+        options
+    };
     ensure_regular(options.open(path)?)
 }
 
@@ -301,6 +312,7 @@ pub fn exclusive(file: &File) -> io::Result<()> {
     }
 }
 
+#[cfg(unix)]
 pub(crate) fn unlock(file: &File) -> io::Result<()> {
     #[cfg(not(target_os = "android"))]
     {

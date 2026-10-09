@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""诊断接口直接复用共享 JSON 字符串策略。"""
+"""诊断接口直接复用共享 JSON 字符串和整数策略。"""
 from pathlib import Path
 import sys
 
@@ -15,16 +15,22 @@ def main() -> int:
     if "strictString(Object value)" in source:
         print(f"{SOURCE}: 不应保留 strictString 转发方法", file=sys.stderr)
         return 1
-    if "import app.msime.android.JsonPolicy;" not in smoke:
-        print(f"{SMOKE}: 应直接导入 JsonPolicy", file=sys.stderr)
+    if "strictInteger(Object value)" in source:
+        print(f"{SOURCE}: 不应保留 strictInteger 转发方法", file=sys.stderr)
         return 1
-    if 'DiagnosticsApi.class.getDeclaredMethod("strictString"' in smoke:
-        print(f"{SMOKE}: 不应反射检查已删除的转发方法", file=sys.stderr)
+    if "DiagnosticsApi.class.getDeclaredMethod(\"strictString\"" in smoke:
+        print(f"{SMOKE}: 不应反射检查已删除的字符串转发方法", file=sys.stderr)
+        return 1
+    if "DiagnosticsApi.strictInteger" in smoke:
+        print(f"{SMOKE}: 不应继续通过诊断类调用 strictInteger", file=sys.stderr)
         return 1
     if "JsonPolicy.strictString" not in smoke:
         print(f"{SMOKE}: 缺少 JsonPolicy.strictString 合同检查", file=sys.stderr)
         return 1
-    print("Android diagnostics JSON reads use the shared string policy")
+    if "JsonPolicy.strictLong" not in source or "JsonPolicy.strictLong" not in smoke:
+        print(f"{SMOKE}: 应直接检查 JsonPolicy.strictLong", file=sys.stderr)
+        return 1
+    print("Android diagnostics use the shared JSON string and integer policies")
     return 0
 
 

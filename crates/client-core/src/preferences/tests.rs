@@ -2437,23 +2437,26 @@ fn first_document_tells_a_fresh_install_from_an_upgrade() {
     assert_eq!(store.load().unwrap(), first);
 
     // 指向别处的 `user/dictionaries` 不算准备过。
-    let elsewhere = tempfile::tempdir().unwrap();
-    let linked = tempfile::tempdir().unwrap();
-    fs::create_dir_all(linked.path().join("user")).unwrap();
-    std::os::unix::fs::symlink(
-        elsewhere.path(),
-        linked.path().join("user").join("dictionaries"),
-    )
-    .unwrap();
-    assert_eq!(
-        PreferencesStore::new(linked.path())
-            .load()
-            .unwrap()
-            .preferences
-            .touch_keyboard_schemes
-            .enabled,
-        chinese
-    );
+    #[cfg(unix)]
+    {
+        let elsewhere = tempfile::tempdir().unwrap();
+        let linked = tempfile::tempdir().unwrap();
+        fs::create_dir_all(linked.path().join("user")).unwrap();
+        std::os::unix::fs::symlink(
+            elsewhere.path(),
+            linked.path().join("user").join("dictionaries"),
+        )
+        .unwrap();
+        assert_eq!(
+            PreferencesStore::new(linked.path())
+                .load()
+                .unwrap()
+                .preferences
+                .touch_keyboard_schemes
+                .enabled,
+            chinese
+        );
+    }
 
     // 不是 full 的版本升级时同样按以前的默认列表，只是收窄到本版本提供的入口：拼音版的日文和韩文入口本来就没有。
     let pinyin = crate::edition::Edition::by_id("pinyin").unwrap();

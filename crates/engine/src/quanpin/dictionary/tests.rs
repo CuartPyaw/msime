@@ -60,6 +60,20 @@ fn primary_segmentation_is_checked_without_owning_a_key_copy() {
 }
 
 #[test]
+fn explicit_segmentation_without_alternatives_does_not_allocate_a_result_buffer() {
+    let resolution = SeriesResolution {
+        segmentation: "ni'hao".to_owned(),
+        ..SeriesResolution::default()
+    };
+    let segments = vec!["ni".to_owned(), "hao".to_owned()];
+    let (alternatives, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+        alternative_segmentations("ni'hao", &segments, &resolution, NONE)
+    });
+    assert!(alternatives.is_empty());
+    assert_eq!(allocations, 0, "无替代切分却分配了结果缓冲: {allocations}");
+}
+
+#[test]
 fn alternative_segmentation_key_state_uses_no_temporary_heap_allocation() {
     let keys = ["ni'hao", "ni'he", "ni'hao", "ni'men"]
         .into_iter()
@@ -114,6 +128,32 @@ fn fuzzy_segmentation_borrows_explicit_input() {
 fn path_cache_key_borrows_the_segmentation_when_present() {
     assert_eq!(path_cache_key("nihao", "ni'hao"), "ni'hao");
     assert_eq!(path_cache_key("nihao", ""), "nihao");
+}
+
+#[test]
+fn segment_row_cache_hit_borrows_the_segmentation_key() {
+    let fixture = Fixture::new();
+    fixture.insert("ni'hao", "你好", 10);
+    let mut dictionary = QuanpinDictionary::new(&fixture.paths);
+    let segments = vec!["ni".to_owned(), "hao".to_owned()];
+    let _ = dictionary.query_database(&segments, "ni'hao");
+    let (_, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+        let _ = dictionary.query_database(&segments, "ni'hao");
+    });
+    assert_eq!(allocations, 5, "热缓存分段查询仍重建了表键: {allocations}");
+}
+
+#[test]
+fn automatic_segmentation_reuses_the_joined_code_for_word_items() {
+    let fixture = Fixture::new();
+    fixture.insert("ni'hao", "你好", 10);
+    let mut dictionary = QuanpinDictionary::new(&fixture.paths);
+    let segments = vec!["ni".to_owned(), "hao".to_owned()];
+    let _ = dictionary.query_database(&segments, "");
+    let (_, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+        let _ = dictionary.query_database(&segments, "");
+    });
+    assert_eq!(allocations, 6, "自动分段查询重复拼接了读音: {allocations}");
 }
 
 #[test]
@@ -1110,6 +1150,21 @@ fn fuzzy_candidates_do_not_allocate_the_full_path_budget_up_front() {
 
     assert_eq!(candidates.len(), 1);
     assert!(candidates.capacity() < FUZZY_PATH_BUDGET * FUZZY_ROW_LIMIT);
+}
+
+#[test]
+fn fuzzy_candidate_rows_reuse_the_first_typed_reading_string() {
+    let fixture = fuzzy_fixture();
+    let mut dictionary = QuanpinDictionary::new(&fixture.paths);
+    let options = FuzzyPinyinOptions {
+        rules: fuzzy_rule::ALL,
+    };
+    let _ = dictionary.fuzzy_candidates("zong'guo", options);
+    dictionary.fuzzy_cache.clear();
+    let (_, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+        let _ = dictionary.fuzzy_candidates("zong'guo", options);
+    });
+    assert_eq!(allocations, 48, "模糊候选重复复制了首个读音: {allocations}");
 }
 
 #[test]

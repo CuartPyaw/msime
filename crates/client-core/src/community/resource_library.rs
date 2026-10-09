@@ -155,6 +155,7 @@ impl CommunityResourceLibraryStore {
         }
         #[cfg(not(unix))]
         {
+            let _ = lock;
             let Some(parent) = self.file.parent() else {
                 return Err(CommunityResourceLibraryError::Invalid);
             };
