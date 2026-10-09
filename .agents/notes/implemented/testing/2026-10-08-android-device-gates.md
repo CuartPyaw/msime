@@ -23,6 +23,7 @@ CI 的 Android job 只做 `check-host.sh`、各版本 Gradle 编译和 NewApi li
 - 设备测试统一用 `ime list` 给出的短写 id `app.msime.android/.MSIMEInputService`。
 - 设备测试读控件状态走 `DeviceSmoke.state()`/`switchState()`：API 30 起读状态描述，更早的系统按应用实际暴露的 `isSelected`/`isEnabled` 折算。
 - `DeviceSmoke.await` 超时时附上输入法窗口里看得见的文字（最多 30 条，只读输入法自己的节点），失败信息直接说明界面停在哪里。
+- 无障碍点击（`DeviceSmoke.tap` 和 `HandwritingDeviceSmoke.accessibleClick`）在 `performAction(ACTION_CLICK)` 返回 false 时重新查节点再点，最多三次。查到节点和点下去之间面板可能已经重新绑定（开关刷新状态、翻页动画收尾），过期节点上的点击返回 false、并没有发生，所以重试不会把开关点两次；真不接受点击的控件三次后照样失败。2026-10-08 起 API 35 上这一处间歇失败，一天里落在四个互不相关的 PR 上（三次是「更多」面板的按键音开关），重跑即过。
 - `smoke.sh` 的套件改成一个循环；`MSIME_DEVICE_SMOKE_SKIP` 列出的套件跳过并打印出来，不算通过。CI 的跳过名单写在 `android-device.yml`，每一项带原因，修好一个删一个，不往里加新的来让门禁变绿。
 - `smoke.sh` 不授予通知权限，按没授过权的普通用户来测：输入法的提示显示在键盘的诊断行（`MSIMEInputService.notice`），不依赖 Toast。
 
@@ -45,6 +46,8 @@ CI 的 Android job 只做 `check-host.sh`、各版本 Gradle 编译和 NewApi li
 - **用 `reactivecircus/android-emulator-runner` 这类 action 起模拟器**：省掉 KVM 规则、等开机这些样板。不用是因为本机和 CI 应该走同一套 `start-emulator.sh`，否则 CI 绿而本机复现不了（或反过来）；而且要多引入一个第三方 action。
 - **只跑 client-core 单测，不装 APK**：快得多，也能抓住前两个问题。但 Android 9 的启动崩溃是资源加载问题，只有装包启动才看得见。
 - **在 Depot runner 上跑，复用 sccache**：构建更快。Depot 的 runner 不保证有 KVM，没有 KVM 的模拟器慢到不可用。
+
+- **间歇失败的点击放进跳过名单**：立刻让门禁变绿。但被跳过的是「更多」面板和候选长按菜单这类整段套件，跳过等于不测；而且跳过名单的规矩是修好一个删一个、不为变绿往里加。失败的根源在测试拿着过期节点点击，在测试这一侧修。
 
 ## Consequences
 

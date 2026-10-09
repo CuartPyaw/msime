@@ -283,10 +283,16 @@ public class DeviceSmoke extends Instrumentation {
         // Accessibility click still invokes the real product control and InputConnection path.
         if (equalsText("app.msime.android", target.getPackageName())
                 && target.isClickable()) {
-            if (!target.performAction(AccessibilityNodeInfo.ACTION_CLICK))
-                throw new AssertionError("Synthetic control action failed");
-            SystemClock.sleep(150);
-            return;
+            // 查到节点和点下去之间，面板可能已经重新绑定（开关刷新状态、翻页动画收尾），performAction 对过期节点返回 false，点击并没有发生。所以等界面空闲后重新查一次再点，连续三次都不成才算失败：真不接受点击的控件照样失败，不会被重试掩盖，也不会把开关点两次。
+            for (int attempt = 1; ; attempt++) {
+                if (target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                    SystemClock.sleep(150);
+                    return;
+                }
+                if (attempt == 3) throw new AssertionError("Synthetic control action failed");
+                automation.waitForIdle(500, 5000);
+                target = awaitAny(match);
+            }
         }
         if (!target.isVisibleToUser()) target = await(match);
         Rect bounds = new Rect();
