@@ -10,6 +10,7 @@ import android.view.GestureDetector;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.animation.AnimationUtils;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -511,7 +512,8 @@ public final class OnboardingActivity extends AppCompatActivity {
             Ui.setHorizontalPaddingDp(button, this, 8);
             ViewPolicy.setBackground(button, Ui.ripple(this));
             ViewPolicy.bindClick(button, fix);
-            row.addView(button, Ui.wrapHeight(this, 40));
+            row.addView(button, KeyboardGeometry.linearParamsPx(
+                ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dp(this, 40)));
         }
         card.addView(row);
     }

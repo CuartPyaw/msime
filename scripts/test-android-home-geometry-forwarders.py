@@ -53,6 +53,10 @@ def main() -> int:
         errors.append(f"{UI}: 不应保留 frameWrap 转发方法")
     if re.search(r"(?<![.\w])frameWrap\(", ui):
         errors.append(f"{UI}: 不应调用已移除的 frameWrap")
+    if "public static LinearLayout.LayoutParams wrapHeight(" in ui:
+        errors.append(f"{UI}: 不应保留 wrapHeight 转发方法")
+    if re.search(r"(?<![.\w])wrapHeight\(", ui):
+        errors.append(f"{UI}: 不应调用已移除的 wrapHeight")
 
     for path in HOME.glob("*.java"):
         source = path.read_text(encoding="utf-8")
@@ -74,6 +78,8 @@ def main() -> int:
             errors.append(f"{path}: 应直接调用 KeyboardGeometry.weightedHeightPxParams")
         if "Ui.frameWrap(" in source:
             errors.append(f"{path}: 应直接调用 KeyboardGeometry.frameParamsPx")
+        if "Ui.wrapHeight(" in source:
+            errors.append(f"{path}: 应直接调用 KeyboardGeometry.linearParamsPx")
 
     for name in EXPECTED_CALLERS:
         path = HOME / name
@@ -105,6 +111,11 @@ def main() -> int:
         path = HOME / name
         if path.read_text(encoding="utf-8").count("KeyboardGeometry.frameParamsPx(") != 1:
             errors.append(f"{path}: 未直接复用 KeyboardGeometry.frameParamsPx")
+
+    for name in ("OnboardingActivity.java", "StatisticsFragment.java"):
+        path = HOME / name
+        if path.read_text(encoding="utf-8").count("KeyboardGeometry.linearParamsPx(") != 1:
+            errors.append(f"{path}: 未直接复用 KeyboardGeometry.linearParamsPx")
 
     if errors:
         print("\n".join(errors), file=sys.stderr)
