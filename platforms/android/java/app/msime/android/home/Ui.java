@@ -14,7 +14,6 @@ import android.widget.LinearLayout;
 import android.widget.ImageView;
 import android.widget.EditText;
 import android.widget.TextView;
-import app.msime.android.BoundsPolicy;
 import app.msime.android.ColorPolicy;
 import app.msime.android.ImageViewPolicy;
 import app.msime.android.KeyboardGeometry;
@@ -33,11 +32,6 @@ import com.google.android.material.bottomsheet.BottomSheetDragHandleView;
  */
 public final class Ui {
     private Ui() {}
-
-    /** Bottom content inset that keeps page content above either system navigation or the IME. */
-    public static int bottomContentInset(int systemBottom, int tabs, int imeBottom, int base) {
-        return BoundsPolicy.atLeast(systemBottom + tabs, imeBottom) + base;
-    }
 
     // ---- 尺寸（dp） ----
 
