@@ -13,33 +13,33 @@ final class KeyboardFormFactorTests: XCTestCase {
     XCTAssertEqual(KeyboardFormFactor.resolve(idiom: .phone, horizontalSizeClass: .compact), .phone)
   }
 
-  /// 键盘高度按设计稿的方式由各部分累加：上内边距 6、下内边距 4，顶栏，顶栏下方的间隙（手机 11，iPad 9），以及各排键和排间距。
+  /// 键盘高度按设计稿的方式由各部分累加：上内边距（手机 2，iPad 6）、下内边距 4，顶栏，顶栏下方的间隙（手机 4，iPad 9），以及各排键和排间距。手机的上边距和间隙比设计稿的 6 和 11 小，见 `KeyboardFormFactor.padding`。
   func testHeightsAreBuiltFromTheDesignMetrics() {
     let phone = KeyboardFormFactor.phone, tablet = KeyboardFormFactor.tablet
-    XCTAssertEqual(phone.padding, NSDirectionalEdgeInsets(top: 6, leading: 3, bottom: 4, trailing: 3))
+    XCTAssertEqual(phone.padding, NSDirectionalEdgeInsets(top: 2, leading: 3, bottom: 4, trailing: 3))
     XCTAssertEqual(tablet.padding, NSDirectionalEdgeInsets(top: 6, leading: 8, bottom: 4, trailing: 8))
-    XCTAssertEqual(phone.topRowGap, 11)
+    XCTAssertEqual(phone.topRowGap, 4)
     XCTAssertEqual(tablet.topRowGap, 9)
-    XCTAssertEqual(phone.keyHeight(landscape: false, handwriting: false), 42)
-    XCTAssertEqual(phone.keyHeight(landscape: false, handwriting: true), 42)
+    XCTAssertEqual(phone.keyHeight(landscape: false, handwriting: false), 46)
+    XCTAssertEqual(phone.keyHeight(landscape: false, handwriting: true), 46)
     XCTAssertEqual(phone.keyHeight(landscape: true, handwriting: false), 34)
     XCTAssertEqual(phone.keyHeight(landscape: true, handwriting: true), 40)
     XCTAssertEqual(tablet.keyHeight(landscape: false, handwriting: false), 54)
     XCTAssertGreaterThan(tablet.keyHeight(landscape: true, handwriting: false), 54)
-    // 设计稿的手机键盘：6 + 50 + 11 + 4 × 42 + 3 × 7 + 4。
-    XCTAssertEqual(phone.keyboardHeight(topRow: 50, rowSpacing: 7, landscape: false, handwriting: false), 260)
-    XCTAssertEqual(phone.keyboardHeight(topRow: 50, rowSpacing: 7, landscape: false, handwriting: false, numberRow: true), 260,
+    // 手机键盘：2 + 50 + 4 + 4 × 46 + 3 × 7 + 4。
+    XCTAssertEqual(phone.keyboardHeight(topRow: 50, rowSpacing: 7, landscape: false, handwriting: false), 265)
+    XCTAssertEqual(phone.keyboardHeight(topRow: 50, rowSpacing: 7, landscape: false, handwriting: false, numberRow: true), 265,
                    "a phone has no digit row")
     // 更宽的排间距加在键盘总高上，而不是从键高里扣。
-    XCTAssertEqual(phone.keyboardHeight(topRow: 50, rowSpacing: 10, landscape: false, handwriting: false), 269)
+    XCTAssertEqual(phone.keyboardHeight(topRow: 50, rowSpacing: 10, landscape: false, handwriting: false), 274)
     // 数字行是整整一排键，平板加一排的高度而不是压扁字母。
     let portrait = tablet.keyboardHeight(topRow: 50, rowSpacing: 7, landscape: false, handwriting: false)
     // 6 + 50 + 9 + 4 × 54 + 3 × 7 + 4，再加数字行这第五排 54pt 键及其 7pt 间距。
     XCTAssertEqual(portrait, 306)
     XCTAssertEqual(tablet.keyboardHeight(topRow: 50, rowSpacing: 7, landscape: false, handwriting: false, numberRow: true), 367)
     XCTAssertGreaterThan(tablet.keyboardHeight(topRow: 50, rowSpacing: 7, landscape: true, handwriting: false), portrait)
-    // 「显示方式」为隐藏、顶栏收起时，它下面的间隔也一起去掉：6 + 4 × 42 + 3 × 7 + 4，与键区实际占的高度相同，按键不会被多出的 11pt 拉高。
-    XCTAssertEqual(phone.keyboardHeight(topRow: 0, rowSpacing: 7, landscape: false, handwriting: false), 199)
+    // 「显示方式」为隐藏、顶栏收起时，它下面的间隔也一起去掉：2 + 4 × 46 + 3 × 7 + 4，与键区实际占的高度相同，按键不会被多出的 4pt 拉高。
+    XCTAssertEqual(phone.keyboardHeight(topRow: 0, rowSpacing: 7, landscape: false, handwriting: false), 211)
     XCTAssertEqual(tablet.keyboardHeight(topRow: 0, rowSpacing: 7, landscape: false, handwriting: false), 247)
     XCTAssertTrue(KeyboardFormFactor.tablet.canShowFullKeys)
     XCTAssertFalse(KeyboardFormFactor.phone.canShowFullKeys)
@@ -81,9 +81,9 @@ final class KeyboardFormFactorTests: XCTestCase {
     }
     let phone = try layout(tablet: false, width: 393)
     XCTAssertEqual(phone.height, KeyboardViewController.defaultKeyboardHeight)
-    XCTAssertEqual(phone.key.height, 42, accuracy: 0.5)
-    XCTAssertEqual(phone.space.height, 42, accuracy: 0.5)
-    XCTAssertEqual(phone.strip.minY, 6, accuracy: 0.5)
+    XCTAssertEqual(phone.key.height, 46, accuracy: 0.5)
+    XCTAssertEqual(phone.space.height, 46, accuracy: 0.5)
+    XCTAssertEqual(phone.strip.minY, 2, accuracy: 0.5)
     XCTAssertEqual(phone.strip.minX, 3, accuracy: 0.5)
     XCTAssertEqual(phone.strip.maxX, 393 - 3, accuracy: 0.5)
     XCTAssertEqual(phone.space.maxY, phone.height - 4, accuracy: 0.5)
