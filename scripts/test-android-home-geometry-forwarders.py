@@ -57,6 +57,10 @@ def main() -> int:
         errors.append(f"{UI}: 不应保留 wrapHeight 转发方法")
     if re.search(r"(?<![.\w])wrapHeight\(", ui):
         errors.append(f"{UI}: 不应调用已移除的 wrapHeight")
+    if "public static FrameLayout.LayoutParams frameMatchWidthHeight(" in ui:
+        errors.append(f"{UI}: 不应保留 frameMatchWidthHeight 转发方法")
+    if re.search(r"(?<![.\w])frameMatchWidthHeight\(", ui):
+        errors.append(f"{UI}: 不应调用已移除的 frameMatchWidthHeight")
 
     for path in HOME.glob("*.java"):
         source = path.read_text(encoding="utf-8")
@@ -80,6 +84,8 @@ def main() -> int:
             errors.append(f"{path}: 应直接调用 KeyboardGeometry.frameParamsPx")
         if "Ui.wrapHeight(" in source:
             errors.append(f"{path}: 应直接调用 KeyboardGeometry.linearParamsPx")
+        if "Ui.frameMatchWidthHeight(" in source:
+            errors.append(f"{path}: 应直接调用 KeyboardGeometry.frameMatchWidthHeightPx")
 
     for name in EXPECTED_CALLERS:
         path = HOME / name
@@ -116,6 +122,13 @@ def main() -> int:
         path = HOME / name
         if path.read_text(encoding="utf-8").count("KeyboardGeometry.linearParamsPx(") != 1:
             errors.append(f"{path}: 未直接复用 KeyboardGeometry.linearParamsPx")
+
+    for name in ("AiSkinPage.java", "SkinsPage.java"):
+        path = HOME / name
+        if path.read_text(encoding="utf-8").count(
+            "KeyboardGeometry.frameMatchWidthHeightPx("
+        ) != 1:
+            errors.append(f"{path}: 未直接复用 KeyboardGeometry.frameMatchWidthHeightPx")
 
     if errors:
         print("\n".join(errors), file=sys.stderr)

@@ -162,7 +162,8 @@ public final class SkinsPage extends DetailPage {
         SkinSwatchView swatch = new SkinSwatchView(context);
         swatch.setSkin(card.skin());
         Ui.hideFromAccessibility(swatch);
-        tile.addView(swatch, Ui.frameMatchWidthHeight(context, 76));
+        tile.addView(swatch,
+            KeyboardGeometry.frameMatchWidthHeightPx(Ui.dp(context, 76)));
         cell.addView(tile, Ui.matchWidth());
 
         TextView name = Ui.styledLabel(context, card.selected() ? "✓ " + card.title() : card.title(),
