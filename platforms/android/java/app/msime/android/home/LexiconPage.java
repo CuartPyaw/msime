@@ -1,6 +1,5 @@
 package app.msime.android.home;
 
-import app.msime.android.TextPolicy;
 import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
@@ -136,7 +135,7 @@ public final class LexiconPage extends DetailPage {
         for (DictionaryCollectionsStore.Collection collection : current.view().collections()) {
             String subtitle = DictionaryCollectionsStore.countLabel(collection.entryCount())
                 + ("community".equals(collection.sourceType()) ? " · 社区" : "");
-            installed.addView(KeyboardSheets.badgeNavRow(context, Ui.initial(collection.name(), "词"), collection.name(),
+            installed.addView(KeyboardSheets.badgeNavRow(context, TextPolicy.initial(collection.name(), "词"), collection.name(),
                 subtitle, collection.enabled() ? "已启用" : "已停用",
                 collection.enabled() ? Ui.accent(context) : Ui.subText(context),
                 () -> openDetail(collection.id(), collection.name())));
@@ -190,7 +189,7 @@ public final class LexiconPage extends DetailPage {
     private View discoverRow(CommunityCatalog.Item item, DictionaryCollectionsStore.View view) {
         Context context = requireContext();
         LinearLayout row = KeyboardSheets.baseRow(context);
-        row.addView(KeyboardSheets.badge(context, Ui.initial(item.name(), "词")));
+        row.addView(KeyboardSheets.badge(context, TextPolicy.initial(item.name(), "词")));
         List<String> parts = new ArrayList<>(2);
         if (!item.author().isEmpty()) parts.add("@" + item.author());
         JSONArray words = item.payload() == null ? null : item.payload().optJSONArray("words");
