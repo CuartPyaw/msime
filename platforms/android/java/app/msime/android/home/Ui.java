@@ -686,16 +686,10 @@ public final class Ui {
         return view;
     }
 
-    /** Return the first Unicode code point of a name, or the caller's fallback when empty. */
-    public static String initial(CharSequence name, String fallback) {
-        if (name == null || name.length() == 0) return fallback;
-        return new String(Character.toChars(Character.codePointAt(name, 0)));
-    }
-
-    /** Return the first Unicode code point after trimming a name, or the fallback when empty. */
+    /** 去掉名称首尾空白后返回第一个 Unicode 码点；名称为空时返回后备值。 */
     public static String trimmedInitial(CharSequence name, String fallback) {
         String trimmed = TextPolicy.trimmed(name == null ? null : name.toString());
-        return initial(trimmed, fallback);
+        return TextPolicy.initial(trimmed, fallback);
     }
 
     /** Whether the optional Tauri management activity is present in this APK. */
