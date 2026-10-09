@@ -50,6 +50,13 @@ final class KeyboardSkinTests: XCTestCase {
     XCTAssertEqual(hex(skin.actionForeground, dark), 0x000000)
     XCTAssertEqual(hex(skin.keyForeground, light), 0x000000)
     XCTAssertEqual(skin.accentSoft, SystemKeyboardTokens.accentSoft)
+    // 工具栏 logo 也不跟季节：按其他皮肤的配方取系统蓝，圆底垫在系统的白 / #1C1C1E 卡片底上。
+    for (traits, percent, card) in [(light, 14.0, UIColor.white), (dark, 22.0, UIColor(red: 0x1C / 255, green: 0x1C / 255, blue: 0x1E / 255, alpha: 1))] {
+      let blue = skin.accent.resolvedColor(with: traits)
+      XCTAssertEqual(hex(skin.logoCircle, traits), packed(AppThemePalette.mix(blue, percent, card)))
+      XCTAssertEqual(hex(skin.logoMark, traits), packed(AppThemePalette.mix(blue, 82, .black)))
+    }
+    XCTAssertNotEqual(hex(skin.logoCircle, light), hex(KeyboardTheme.resolve(GlobalThemeCatalog.systemId, document: [:]).logoCircle, light))
     if #available(iOS 26.0, *) {
       XCTAssertEqual(hex(skin.keyBackground, light), 0xFFFFFF)
       XCTAssertEqual(hex(skin.functionKeyBackground, light), 0xFFFFFF)
@@ -101,6 +108,51 @@ final class KeyboardSkinTests: XCTestCase {
       let attachment = XCTAttachment(image: image)
       attachment.name = "原生键盘-" + (style == .dark ? "深色" : "浅色"); attachment.lifetime = .keepAlways; add(attachment)
     }
+  }
+
+  /// 原生皮肤下整块盖住键盘的符号面板也透出系统底板：面板和选中分类透明，下面的工具栏和按键藏起来，关面板后再放出来。附上浅色渲染图供对照。
+  @MainActor
+  func testNativeSymbolPanelShowsTheSystemBackdropOverHiddenKeys() throws {
+    preserveSharedTheme()
+    XCTAssertTrue(GlobalThemePreference.save(GlobalThemeCatalog.nativeId))
+    let previous = InputSchemePreference.scheme
+    defer { InputSchemePreference.scheme = previous }
+    InputSchemePreference.scheme = .nineKey
+    func descendants(_ node: UIView) -> [UIView] { [node] + node.subviews.flatMap { descendants($0) } }
+    func hidden(_ node: UIView) -> Bool { sequence(first: node, next: \.superview).contains { $0.alpha == 0 } }
+    let controller = KeyboardViewController()
+    let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: KeyboardViewController.defaultKeyboardHeight))
+    window.overrideUserInterfaceStyle = .light
+    window.rootViewController = controller
+    window.isHidden = false
+    defer { window.isHidden = true }
+    controller.viewWillAppear(false)
+    controller.overrideUserInterfaceStyle = .light
+    window.layoutIfNeeded()
+    XCTAssertTrue(KeyboardTheme.current.isNative)
+    let enter = try XCTUnwrap(descendants(controller.view).first { $0.accessibilityIdentifier == "returnKey" })
+    XCTAssertFalse(hidden(enter))
+
+    let key = try XCTUnwrap(descendants(controller.view).first { $0.accessibilityIdentifier == "nineKey1" } as? UIButton)
+    key.sendActions(for: .primaryActionTriggered)
+    window.layoutIfNeeded()
+    let panel = try XCTUnwrap(descendants(controller.view).first { $0.accessibilityIdentifier == "keyboardSymbolPanel" })
+    XCTAssertEqual(panel.backgroundColor, .clear)
+    XCTAssertEqual(try XCTUnwrap(descendants(panel).first { $0.accessibilityIdentifier == "symbolCategory_0" }).backgroundColor, .clear)
+    XCTAssertTrue(hidden(enter), "面板透明时下面的按键不能透出来")
+    let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { context in
+      SystemKeyboardTokens.background.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light)).setFill()
+      context.fill(controller.view.bounds)
+      controller.view.layer.render(in: context.cgContext)
+    }
+    let attachment = XCTAttachment(image: image)
+    attachment.name = "原生符号面板-浅色"; attachment.lifetime = .keepAlways; add(attachment)
+
+    let close = try XCTUnwrap(descendants(panel).first { $0.accessibilityIdentifier == "closeSymbolPanel" } as? UIButton)
+    close.sendActions(for: .primaryActionTriggered)
+    window.layoutIfNeeded()
+    XCTAssertNil(descendants(controller.view).first { $0.accessibilityIdentifier == "keyboardSymbolPanel" })
+    XCTAssertFalse(hidden(enter))
   }
 
   /// 从「原生」开始自定义时不把它写成底：`native` 不能当自定义主题的底，自定义主题画在跟随系统上。

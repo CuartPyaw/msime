@@ -88,6 +88,15 @@ enum SystemKeyboardTokens {
   /// 系统蓝上的文字：浅色下白色；深色下的蓝偏亮，白字对比度不到 3:1，与经典兜底一样改用黑字。
   static let onAccent = adaptiveColor(0xFFFFFF, 0x000000)
   static let accentSoft = adaptiveColor(0x0040DD, 0x409CFF, lightAlpha: 0.14, darkAlpha: 0.26)
+  /// 工具栏 logo 的圆底：与其他皮肤同一个配方 mix(强调色 14% 浅色 / 22% 深色, 卡片底)，只是强调色换成系统蓝、卡片底取系统的 `#FFFFFF` / `#1C1C1E`，不跟季节。
+  static let logoCircle = UIColor { traits in
+    let dark = traits.userInterfaceStyle == .dark
+    return AppThemePalette.mix(accent.resolvedColor(with: traits), dark ? 22 : 14, rgbColor(dark ? 0x1C1C1E : 0xFFFFFF))
+  }
+  /// 圆底里的 logo 图形：mix(系统蓝 82%, #000)，白色折线描边画在它上面依然清楚。
+  static let logoMark = UIColor { traits in
+    AppThemePalette.mix(accent.resolvedColor(with: traits), 82, .black)
+  }
   /// iOS 26 之前的按键底边：中性黑色，浅色 .3、深色 .55，与 `NativeKeyboardTokens` 的透明度相同。
   static let keyShadowColor = UIColor { traits in
     UIColor.black.withAlphaComponent(traits.userInterfaceStyle == .dark ? 0.55 : 0.3)
