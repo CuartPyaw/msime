@@ -150,7 +150,7 @@ PreviousCandidate/NextCandidate/PreviousPage/NextPage 路径消费共享导航�
 
 `platforms/windows/CMakeLists.txt` 注册 96 个 CTest，`tsf/CMakeLists.txt` 另有 19 个，`tests/native-pipe/`（仅 Windows）2 个，`msimeui/tests/` 1 个；`tsf/tests/exports/`、`tsf/tests/registration_profiles/`、`tsf/tests/registration_categories/` 和 `tests/server-manifest/` 是各自 configure 的独立子工程。PowerShell 侧另有 `tests/tools/*.ps1` 与 `installer/tests/*.ps1` 覆盖构建编排、PE 门禁、通知收集、运行器控制和安装器编排。
 
-`bash platforms/windows/run-tests-wine.sh x64` 把交叉构建出的 C++ 套件（`windows-*.exe`、`msime-tsf-*.exe`、`bin/msimeui-tests.exe`）与 Windows 目标的 Rust 宿主及集成测试放在 `xvfb-run -a wine` 下执行，每个程序 120 秒超时。Rust 通用库单测和 golden 用例仍交给工作区 `cargo test`；它们在交叉编译时编译，但不在仿真的 Wine 中重复运行。结果与 `scripts/known-failures.txt` 比对；不带 `--quick` 的 `scripts/verify-local.sh` 会自动调用它。
+`bash platforms/windows/run-tests-wine.sh x64` 把交叉构建出的 C++ 套件（`windows-*.exe`、`tsf/msime-tsf-*.exe`、`tsf/tests/registration_*/msime-tsf-*.exe`、`bin/msimeui-tests.exe`）与 Windows 目标的 Rust 宿主及集成测试放在 `xvfb-run -a wine` 下执行，每个程序 120 秒超时。TSF 的两个标点 wiring 测试会读取只读挂载的 `platforms/windows/tsf` 源码。Rust 通用库单测和 golden 用例仍交给工作区 `cargo test`；它们在交叉编译时编译，但不在仿真的 Wine 中重复运行。结果与 `scripts/known-failures.txt` 比对；不带 `--quick` 的 `scripts/verify-local.sh` 会自动调用它。
 
 CI（`.github/workflows/ci-platforms.yml` 的 windows job）在 `debian:trixie-slim` 容器里跑 `build-cross.sh x64`——Ubuntu 24.04 的 MinGW 头文件缺 `d2d1_3.h`。`release-windows.yml` 是手动 `workflow_dispatch`，在 Windows runner 上按版本矩阵（full、wubi、pinyin）各跑一遍 `Build-Client.ps1 -Edition`、打包和装卸冒烟，再用 `installer/tests/coexistence-smoke.ps1` 把几个版本装到同一台机器上，检查它们并存、卸掉一个版本不碰 full，并在 `windows-11-arm` runner 上装卸每个版本、检查 Arm64X TIP 能在原生 ARM64 和模拟 x64 进程里创建，最后一起发布。安装器由 Windows 上的 `installer/Package-SimplySign.ps1` 编译和签名，不在 CI 里产出。
 
