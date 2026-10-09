@@ -65,7 +65,8 @@ public final class AccountSessionProvider extends ContentProvider {
             case OWN -> own.currentAccessToken(rejectedToken);
             case LEGACY_READ_ONLY -> {
                 String token = AccountSessionRoutingPolicy.legacyToken(
-                    legacyAccessToken(legacy.getJSONObject("tokens").opt("access_token")),
+                    JsonPolicy.strictStringOrEmpty(
+                        legacy.getJSONObject("tokens").opt("access_token")),
                     AccountTokenPolicy.strictLong(legacy.opt("expires_at_unix_ms"), 0), System.currentTimeMillis());
                 // Still signed in, but only the Rust client may refresh this session, and it does so when the app runs; say "not now" rather than "signed out".
                 if (token.isEmpty() || token.equals(rejectedToken)) {
@@ -86,10 +87,6 @@ public final class AccountSessionProvider extends ContentProvider {
         if (extras == null) return null;
         String token = extras.getString(AccountSessionRoutingPolicy.KEY_REJECTED_ACCESS_TOKEN);
         return AccountTokenPolicy.validToken(token) ? token : null;
-    }
-
-    static String legacyAccessToken(Object value) {
-        return JsonPolicy.strictStringOrEmpty(value);
     }
 
     /** The combined package's session as its Rust client saved it, or null when there is none; never refreshed here. */

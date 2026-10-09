@@ -1629,8 +1629,8 @@ group("polishing acts on what is in front of the caret, and only if it still is"
   check(AiPolishPolicy.replacement("", result, "") === null, "an empty source replaces nothing");
 
   // Counted in code points, not UTF-16 units: an emoji is one thing the user sees deleted and two
-  // units of JavaScript string. The unit `deleteBackwardSync` takes is the one open question here,
-  // which is why the re-read above stands between a wrong answer and a corrupted message.
+  // units of JavaScript string. On the device `deleteForwardSync(1)` removes a whole 😀, so the unit
+  // is not UTF-16; the re-read above still stands between any other surprise and a corrupted message.
   const withEmoji = "今天天气不错🙂";
   check(withEmoji.length === 8, "the source is eight UTF-16 units");
   check(codePointLength(withEmoji) === 7, "and seven code points");
@@ -3046,12 +3046,20 @@ group("the wubi hint shows only the untyped suffix", () => {
 
 group("the letter face and the engine input are decided separately", () => {
   check(
-    LetterKeyFacePolicy.face("a", true, false, false) === "A",
-    "Chinese mode prints uppercase faces while still sending lowercase",
+    LetterKeyFacePolicy.face("a", true, false, false) === "a",
+    "Chinese mode draws lowercase faces, as the design, Android and iOS do",
+  );
+  check(
+    LetterKeyFacePolicy.face("a", true, false, true) === "A",
+    "a Chinese key that will type uppercase helpcode draws it",
   );
   check(
     LetterKeyFacePolicy.face("a", true, true, false) === "a",
-    "a local mode drops back to the lowercase face",
+    "a local mode keeps the lowercase face",
+  );
+  check(
+    LetterKeyFacePolicy.face("a", true, true, true) === "a",
+    "a Chinese local mode keeps the lowercase face under Shift",
   );
   check(
     LetterKeyFacePolicy.face("a", false, false, false) === "a",
@@ -3066,6 +3074,14 @@ group("the letter face and the engine input are decided separately", () => {
   check(
     LetterKeyFacePolicy.accessibilityLabel("a", true, false, false) === "字母 A",
     "a Chinese key announces the letter",
+  );
+  check(
+    LetterKeyFacePolicy.accessibilityLabel("a", true, false, true) === "大写 A",
+    "a Chinese key that will type uppercase helpcode announces it",
+  );
+  check(
+    LetterKeyFacePolicy.accessibilityLabel("a", true, true, true) === "字母 A",
+    "a Chinese local mode is not announced as uppercase",
   );
   check(
     LetterKeyFacePolicy.accessibilityLabel(null, true, false, false) === "字母",
@@ -13186,7 +13202,7 @@ group("a malformed enumeration is not trusted", () => {
 });
 
 group("setup has two steps and they fail separately", () => {
-  const own = "app.msime.harmony";
+  const own = "app.msime.hmos";
   check(
     OnboardingStatePolicy.required({
       enabled: ImeEnabledState.DISABLED,
@@ -13231,7 +13247,7 @@ group("an unanswerable setup query does not send anyone back to a welcome screen
     OnboardingStatePolicy.required({
       enabled: null,
       currentBundle: "",
-      ownBundle: "app.msime.harmony",
+      ownBundle: "app.msime.hmos",
     }) === false,
     "an unreadable enablement state opens settings",
   );
@@ -13239,7 +13255,7 @@ group("an unanswerable setup query does not send anyone back to a welcome screen
     OnboardingStatePolicy.required({
       enabled: ImeEnabledState.FULL_EXPERIENCE_MODE,
       currentBundle: "",
-      ownBundle: "app.msime.harmony",
+      ownBundle: "app.msime.hmos",
     }) === false,
     "an unreadable current keyboard opens settings",
   );
@@ -13247,7 +13263,7 @@ group("an unanswerable setup query does not send anyone back to a welcome screen
   check(
     OnboardingStatePolicy.required({
       enabled: ImeEnabledState.FULL_EXPERIENCE_MODE,
-      currentBundle: "app.msime.harmony",
+      currentBundle: "app.msime.hmos",
       ownBundle: "",
     }) === false,
     "an unreadable own bundle opens settings",
@@ -13256,7 +13272,7 @@ group("an unanswerable setup query does not send anyone back to a welcome screen
     OnboardingStatePolicy.describe({
       enabled: ImeEnabledState.FULL_EXPERIENCE_MODE,
       currentBundle: "com.example.other",
-      ownBundle: "app.msime.harmony",
+      ownBundle: "app.msime.hmos",
     }) === "enabled but not current, opening welcome flow",
     "the reason the window opened where it did is recorded, not inferred afterwards",
   );

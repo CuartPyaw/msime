@@ -1,7 +1,7 @@
 //! `InputSession` (core-session.md §5): the platform-neutral composition and commit policy. Three mutually exclusive views drive every getter: dedicated English, a local mode, or the scheme composition. Its behaviour is split over this module's sibling files by concern; this file holds the state and the key, command and punctuation dispatch.
 
 use std::borrow::Cow;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::candidates::clone_candidate_rows;
@@ -53,6 +53,7 @@ pub(super) struct CreatingWordProgress {
 
 pub(super) struct InputSession {
     pub paths: RuntimePaths,
+    pub journal_path: PathBuf,
     pub engine: ImeSession,
     pub queries: CandidateQueries,
     pub clock: Clock,
@@ -164,6 +165,7 @@ impl InputSession {
             shuangpin_preedit_uses_raw: true,
             single_character_only: options.single_character_only,
             canonical_phrase_engine: None,
+            journal_path: journal,
             paths,
         };
 
@@ -940,10 +942,13 @@ impl InputSession {
             return self.handle_character(value, false);
         }
         // A scheme without Chinese punctuation (Korean) writes half-width ASCII punctuation whatever the Chinese punctuation switches say. With a syllable open the mark follows it in one commit; with nothing open the host inserts the key itself.
-        if !self.engine.current_scheme_type().uses_chinese_punctuation()
-            && !self.dedicated_english
-            && self.local_mode == LocalInputMode::None
-        {
+        // 专用英文模式同样写半角英文标点：英文模式不往宿主漏中文标点，字符键那条路早就如此（`handle_character` 吞掉非字母键）。只有「固定标点」锁成「始终使用中文标点」（lock 1）时才照中文标点开关走；默认的「跟随中英文状态」（lock 0）在英文模式下就是英文标点。以前这里把专用英文排除在外，于是英文模式下按 `.` 上屏的是「。」。
+        let ascii_marks = if self.dedicated_english {
+            self.punctuation_lock != 1
+        } else {
+            !self.engine.current_scheme_type().uses_chinese_punctuation()
+        };
+        if ascii_marks && self.local_mode == LocalInputMode::None {
             if !self.has_composition() {
                 self.reset_commit_context();
                 return KeyResult::unhandled();
@@ -1304,8 +1309,8 @@ impl InputSession {
         profile(self.profile)
     }
 
-    pub(super) fn journal_path(&self) -> PathBuf {
-        self.paths.user(assets::USER_JOURNAL)
+    pub(super) fn journal_path(&self) -> &Path {
+        &self.journal_path
     }
 
     /// The live scheme, which is Japanese during temporary Japanese.
@@ -1666,7 +1671,7 @@ impl InputSession {
         if self.dedicated_english
             && learn_entered_english_word(
                 &self.paths.dictionary(assets::ENGLISH_DICTIONARY),
-                &self.journal_path(),
+                self.journal_path(),
                 &raw,
                 ENTERED_ENGLISH_WORD_WEIGHT,
             )

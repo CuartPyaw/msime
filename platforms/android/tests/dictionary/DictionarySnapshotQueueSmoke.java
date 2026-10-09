@@ -1,6 +1,7 @@
 import app.msime.android.DictionarySnapshotQueue;
 import app.msime.android.DictionarySnapshotWorker;
 import app.msime.android.DictionarySnapshotPolicy;
+import app.msime.android.JsonPolicy;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -22,17 +23,11 @@ public final class DictionarySnapshotQueueSmoke {
     }
 
     public static void main(String[] args) throws Exception {
-        java.lang.reflect.Method strictBoolean = DictionarySnapshotWorker.class.getDeclaredMethod(
-            "strictBoolean", Object.class);
-        strictBoolean.setAccessible(true);
-        check(Boolean.TRUE.equals(strictBoolean.invoke(null, Boolean.TRUE)));
-        check(strictBoolean.invoke(null, "true") == null);
-        java.lang.reflect.Method strictString = DictionarySnapshotWorker.class.getDeclaredMethod(
-            "strictString", Object.class);
-        strictString.setAccessible(true);
-        check("legacy".equals(strictString.invoke(null, "legacy")));
-        check(strictString.invoke(null, 1) == null);
-        check(strictString.invoke(null, Boolean.TRUE) == null);
+        check(Boolean.TRUE.equals(JsonPolicy.strictBoolean(Boolean.TRUE)));
+        check(JsonPolicy.strictBoolean("true") == null);
+        check("legacy".equals(JsonPolicy.strictString("legacy")));
+        check(JsonPolicy.strictString(1) == null);
+        check(JsonPolicy.strictString(Boolean.TRUE) == null);
         check(DictionarySnapshotPolicy.handle(42L, -1) == 42L);
         check(DictionarySnapshotPolicy.handle(42.5, -1) == -1);
         check(DictionarySnapshotPolicy.handle(true, -1) == -1);
@@ -105,6 +100,16 @@ public final class DictionarySnapshotQueueSmoke {
             Files.delete(workerQueuePath.resolve("worker.lock"));
             String version = "local-v1:legacy:" + "a".repeat(64);
             check(DictionarySnapshotQueue.validVersion(version));
+            queue.publishLocalVersion(version);
+            check(queue.read().localVersion().equals(version));
+            Path linkedStateSource = root.resolve("outside-state.bin");
+            Files.copy(root.resolve("queue/state.bin"), linkedStateSource);
+            Path linkedState = root.resolve("queue/state.bin");
+            Files.delete(linkedState);
+            Files.createLink(linkedState, linkedStateSource);
+            fails(DictionarySnapshotQueue.Reason.INVALID, queue::read);
+            Files.delete(linkedState);
+            queue.publishLocalVersion(version);
             UUID receipt = UUID.randomUUID();
             String receiptVersion = "local-v1:" + receipt + ":" + "b".repeat(64);
             check(DictionarySnapshotQueue.validVersion(receiptVersion));
@@ -114,6 +119,11 @@ public final class DictionarySnapshotQueueSmoke {
             String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
                 .digest(Files.readAllBytes(source)));
             String account = "fixture-account";
+            Path linkedSource = root.resolve("linked-download.ndjson");
+            Files.createLink(linkedSource, source);
+            fails(DictionarySnapshotQueue.Reason.INVALID,
+                () -> queue.enqueue(linkedSource, account, 42, version, digest));
+            Files.delete(linkedSource);
             fails(DictionarySnapshotQueue.Reason.INVALID,
                 () -> queue.enqueue(source, account, 42, version, "0".repeat(64)));
             try (Stream<Path> entries = Files.list(root.resolve("queue"))) {

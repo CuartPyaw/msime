@@ -1,7 +1,9 @@
 import { expect, test } from "vitest";
 import {
   describeInstallerTrust,
+  mirrorDownloadUrl,
   selectPlatformRelease,
+  validateManifest,
 } from "../../../../packages/ui/src/settings/update-manifest";
 
 const page = "https://github.com/metasequoiaime/msime/releases";
@@ -139,4 +141,42 @@ test("an edition picks its own package for the host's architecture", () => {
   });
   // pinyin has no aarch64 package in this release, so an aarch64 host is offered none of the x86_64 ones.
   expect(pickFor("pinyin", "aarch64")).toEqual({ name: null, sha256: null });
+});
+
+// 国内镜像给的是检查更新挑中的那个安装包，地址是镜像前缀加它在 GitHub 上的下载地址。
+test("the mirror link points at the chosen installer under its GitHub download URL", () => {
+  const mirror = "https://dl.msime.app/gh/";
+  const windows = selectPlatformRelease(windowsRelease, "windows", page, "full");
+  expect(windows && mirrorDownloadUrl(windows, mirror)).toBe(
+    "https://dl.msime.app/gh/https://github.com/metasequoiaime/msime/releases/download/windows-v1.2.0/MetasequoiaIME-Full_Setup_v1.2.0.exe",
+  );
+  const wubi = selectPlatformRelease(linuxRelease, "linux", page, "wubi");
+  expect(wubi && mirrorDownloadUrl(wubi, mirror)).toBe(
+    "https://dl.msime.app/gh/https://github.com/metasequoiaime/msime/releases/download/linux-v1.2.0/msime-linux-wubi_1.2.0_amd64.deb",
+  );
+  // update.json 一路（msime-windows 的安装包）同样适用。
+  const legacyPage = "https://github.com/metasequoiaime/MSIME-Windows/releases";
+  const legacy = validateManifest(
+    {
+      version: "0.9.5",
+      releaseUrl: `${legacyPage}/tag/v0.9.5`,
+      installerName: "MetasequoiaIME_Setup_v0.9.5.exe",
+      installerSha256: "a".repeat(64),
+    },
+    legacyPage,
+  );
+  expect(legacy && mirrorDownloadUrl(legacy, mirror)).toBe(
+    "https://dl.msime.app/gh/https://github.com/metasequoiaime/MSIME-Windows/releases/download/v0.9.5/MetasequoiaIME_Setup_v0.9.5.exe",
+  );
+  // 没挑出安装包，或者发布页不是某个 tag：只给 GitHub 发布页。
+  const noInstaller = validateManifest(
+    { version: "0.9.5", releaseUrl: `${legacyPage}/tag/v0.9.5` },
+    legacyPage,
+  );
+  expect(noInstaller && mirrorDownloadUrl(noInstaller, mirror)).toBeNull();
+  const pageOnly = validateManifest(
+    { version: "0.9.5", releaseUrl: legacyPage, installerName: "MetasequoiaIME_Setup_v0.9.5.exe" },
+    legacyPage,
+  );
+  expect(pageOnly && mirrorDownloadUrl(pageOnly, mirror)).toBeNull();
 });

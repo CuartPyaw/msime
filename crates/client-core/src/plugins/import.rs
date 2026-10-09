@@ -64,8 +64,17 @@ pub fn import(source: &Path, root: &Path) -> Result<PluginSummary, PluginError> 
     let _writes = lock_plugin_root(root)?;
     sweep_leftovers(root, SystemTime::now());
     let staging = Staging::new(root.join(format!(".staging-{}", uuid::Uuid::new_v4().simple())))?;
-    fs::create_dir(&staging.path)?;
-    stage(source, archive, &staging.path)?;
+    #[cfg(unix)]
+    let staging_directory = {
+        staging.create()?;
+        Some(staging.open_directory()?)
+    };
+    #[cfg(not(unix))]
+    let staging_directory: Option<File> = {
+        fs::create_dir(&staging.path)?;
+        None
+    };
+    stage(source, archive, &staging.path, staging_directory.as_ref())?;
     let mut summary = check_staged(&staging.path)?;
     let kind = summary.kind();
     let directory = kind_directory(root, kind);
@@ -93,7 +102,7 @@ pub fn import(source: &Path, root: &Path) -> Result<PluginSummary, PluginError> 
 pub fn validate(source: &Path) -> Result<PluginSummary, PluginError> {
     let archive = is_archive(source)?;
     let staging = tempfile::Builder::new().prefix("msime-pack-").tempdir()?;
-    stage(source, archive, staging.path())?;
+    stage(source, archive, staging.path(), None)?;
     let mut summary = check_staged(staging.path())?;
     summary.directory = source.to_path_buf();
     Ok(summary)
@@ -117,11 +126,16 @@ fn is_archive(source: &Path) -> Result<bool, PluginError> {
 }
 
 /// Copy or extract the pack's files from `source` into the empty directory `staging`.
-fn stage(source: &Path, archive: bool, staging: &Path) -> Result<(), PluginError> {
+fn stage(
+    source: &Path,
+    archive: bool,
+    staging: &Path,
+    staging_directory: Option<&File>,
+) -> Result<(), PluginError> {
     if archive {
-        extract(source, staging)
+        extract(source, staging, staging_directory)
     } else {
-        copy_folder(source, staging)
+        copy_folder(source, staging, staging_directory)
     }
 }
 
@@ -161,6 +175,21 @@ impl Staging {
         {
             Ok(Self { path })
         }
+    }
+
+    #[cfg(unix)]
+    fn create(&self) -> io::Result<()> {
+        rustix::fs::mkdirat(
+            &self.parent,
+            &self.name,
+            rustix::fs::Mode::from_raw_mode(0o700),
+        )
+        .map_err(io::Error::from)
+    }
+
+    #[cfg(unix)]
+    fn open_directory(&self) -> io::Result<File> {
+        crate::storage::open_private_directory_at(&self.parent, &self.name)
     }
 }
 
@@ -280,7 +309,11 @@ impl Budget {
     }
 }
 
-fn copy_folder(source: &Path, staging: &Path) -> Result<(), PluginError> {
+fn copy_folder(
+    source: &Path,
+    staging: &Path,
+    staging_directory: Option<&File>,
+) -> Result<(), PluginError> {
     let mut budget = Budget::default();
     for entry in fs::read_dir(source)? {
         let entry = entry?;
@@ -304,12 +337,16 @@ fn copy_folder(source: &Path, staging: &Path) -> Result<(), PluginError> {
         let input = crate::storage::open_private_file_in(&entry.path())?;
         let size = input.metadata()?.len();
         budget.take(size)?;
-        write_member(staging, &name, input, size)?;
+        write_member(staging, &name, input, size, staging_directory)?;
     }
     Ok(())
 }
 
-fn extract(source: &Path, staging: &Path) -> Result<(), PluginError> {
+fn extract(
+    source: &Path,
+    staging: &Path,
+    staging_directory: Option<&File>,
+) -> Result<(), PluginError> {
     let file = crate::storage::open_private_file_in(source)?;
     if file.metadata()?.len() > MAX_ARCHIVE_BYTES {
         return Err(PluginError::Archive("压缩包太大".into()));
@@ -381,7 +418,7 @@ fn extract(source: &Path, staging: &Path) -> Result<(), PluginError> {
         let member = archive.by_index(index).map_err(archive_error)?;
         let size = member.size();
         budget.take(size)?;
-        write_member(staging, &name, member, size)?;
+        write_member(staging, &name, member, size, staging_directory)?;
     }
     Ok(())
 }
@@ -466,10 +503,36 @@ fn write_member(
     name: &str,
     input: impl Read,
     declared: u64,
+    staging_directory: Option<&File>,
 ) -> Result<(), PluginError> {
     if !super::valid_file_name(name) {
         return Err(PluginError::Invalid(format!("{name} 不是有效的文件名")));
     }
+    #[cfg(unix)]
+    if let Some(staging_directory) = staging_directory {
+        let mut input = input.take(declared.saturating_add(1));
+        crate::storage::write_private_file_at_noclobber_with(
+            staging_directory,
+            std::ffi::OsStr::new(name),
+            |mut output| {
+                let copied = io::copy(&mut input, &mut output)?;
+                if copied != declared {
+                    return Err(PluginError::Invalid(format!("{name} 的大小与记录的不符")));
+                }
+                output.flush()?;
+                Ok::<(File, ()), PluginError>((output, ()))
+            },
+        )
+        .map_err(|error| match error {
+            PluginError::Io(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                PluginError::Invalid(format!("{name} 出现了两次"))
+            }
+            error => error,
+        })?;
+        return Ok(());
+    }
+    #[cfg(not(unix))]
+    let _ = staging_directory;
     let mut output = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -489,6 +552,39 @@ fn write_member(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn member_write_stays_in_open_staging_directory_after_replacement() {
+        use std::os::unix::fs::symlink;
+
+        let state = tempfile::tempdir().unwrap();
+        let root = state.path().join("plugins");
+        let outside = state.path().join("outside");
+        fs::create_dir(&root).unwrap();
+        fs::create_dir(&outside).unwrap();
+        let staging = Staging::new(root.join(".staging-new")).unwrap();
+        fs::create_dir(&staging.path).unwrap();
+        let staging_directory = crate::storage::open_private_directory(&staging.path).unwrap();
+        let moved = state.path().join("plugins-moved");
+        fs::rename(&root, &moved).unwrap();
+        symlink(&outside, &root).unwrap();
+
+        write_member(
+            &staging.path,
+            "fixture.bin",
+            io::Cursor::new(b"synthetic plugin"),
+            b"synthetic plugin".len() as u64,
+            Some(&staging_directory),
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read(moved.join(".staging-new/fixture.bin")).unwrap(),
+            b"synthetic plugin"
+        );
+        assert!(!outside.join("fixture.bin").exists());
+    }
 
     #[test]
     fn budget_rejects_an_oversized_member_without_overflowing() {

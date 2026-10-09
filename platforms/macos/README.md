@@ -72,7 +72,7 @@ DMG 里是设置应用（`MSIME.app`）、指向 `/Applications` 的链接和一
 
 用户词库的代次仍按完整的 `desktop-dictionary.lock.json` 计算，`user/dictionaries/<代次>` 不会因为包里少了日文词典而变化，所以从内置全部资源的旧版本升级上来不会重新准备工作词库。升级后旧配置里记录的资源目录和语言词库目录如果还在，照常作为兜底；Sparkle 换掉整个 bundle 后包里的那份已经不在，设置应用启动时按已保存的方案补下需要的资源包。
 
-`package-release.sh` 在编译之前先用 App 运行时的同一个安装器（`install_resource_pack` 示例）把 macOS 会下载的四个资源包（`japanese`、`language-dictionaries`、`handwriting`、`settled-model`，按 id 列出，不装只给 Android 的离线释义和语音运行库）装进临时目录，地址失效或哈希漂移的发布包不会被打出来。`msime-dictionary/.github/workflows/release-built-dictionaries.yml` 发布的词库 release 是已发布 App 的下载源，不能删除，附件也不能替换。`.github/workflows/ci-macos-package.yml` 在改动碰到打包输入的 PR 上检查核心词库的暂存规则和资源包可下载，并在 Apple 芯片的 runner 上打一个未签名的包；它不是分支保护要求的检查，每周还会定时跑一次。`scripts/test-macos-package-resources.py` 静态核对这几处保持一致。
+`package-release.sh` 在编译之前先用 App 运行时的同一个安装器（`install_resource_pack` 示例）把 macOS 会下载的四个资源包（`japanese`、`language-dictionaries`、`handwriting`、`settled-model`，按 id 列出，不装只给 Android 的离线释义和语音运行库）装进临时目录，地址失效或哈希漂移的发布包不会被打出来。`msime-dictionary/.github/workflows/release-built-dictionaries.yml` 发布的词库 release 是已发布 App 的下载源，不能删除，附件也不能替换。`.github/workflows/ci-macos-package.yml` 在合进 develop、且改动碰到打包输入的推送上检查核心词库的暂存规则和资源包可下载，并在 Apple 芯片的 runner 上打一个未签名的包；它不是分支保护要求的检查，每周还会定时跑一次。`scripts/test-macos-package-resources.py` 静态核对这几处保持一致。
 
 签名与公证取决于仓库 secrets，全部可选。括号里是 workflow 把它们交给 `package-release.sh` 时用的环境变量名，本机打包时直接设置这些变量：
 
@@ -87,7 +87,7 @@ workflow 曾经读取的是括号里的名字，而仓库的 secrets 是以前�
 
 没有这些 secrets 时所有签名都是 ad-hoc、也不公证。下载的应用被 Gatekeeper 隔离，第一次要右键「打开」，或执行 `xattr -dr com.apple.quarantine "/Applications/MSIME.app"`；之后设置应用可以运行、词库可以准备，但内嵌的输入法是 ad-hoc 签名，macOS 不会把它登记为输入源（见上一节与 `scripts/install.sh` 开头的说明），安装窗口、启动时的刷新与「安装 / 更新」都会在注册这一步失败：已有安装时回滚到原有安装，设置页提示安装失败；没有安装时 bundle 按上面的首次安装规则留在原处、提示重新登录，但 ad-hoc 签名的输入源重新登录后也不会出现。这种包只对有自己 Developer ID 的开发者可用：用 `scripts/install.sh` 重签并安装其中的 `水杉输入法.app`。
 
-DMG 不提供 Sparkle appcast，输入法与设置应用的「检查更新…」打开官方发布页。
+DMG 不提供 Sparkle appcast，输入法与设置应用的「检查更新…」打开官网下载页（`msime.app/download/?platform=macos`），那里有 GitHub 和国内镜像两种下载。
 
 ### Homebrew
 

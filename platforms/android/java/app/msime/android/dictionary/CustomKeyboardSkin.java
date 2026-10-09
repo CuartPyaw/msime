@@ -2,7 +2,6 @@ package app.msime.android;
 
 import java.util.Base64;
 import java.util.Arrays;
-import java.util.Locale;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -54,7 +53,7 @@ public final class CustomKeyboardSkin {
         value.borderWidth = KeyboardGeometry.bounded(doubleValue(object.opt("borderWidth"), 0), 0, 2, 0);
         value.shadow = KeyboardGeometry.bounded(doubleValue(object.opt("shadow"), 0), 0, .4, 0);
         value.pattern = patternValue(object.opt("pattern"));
-        value.monospaced = booleanValue(object.opt("monospaced"), false);
+        value.monospaced = JsonPolicy.strictBoolean(object.opt("monospaced"), false);
         value.keyShape = oneOf(JsonPolicy.strictStringOrEmpty(object.opt("keyShape")),
             "rounded", "capsule", "ticket", "pebble");
         value.keyMaterial = oneOf(JsonPolicy.strictStringOrEmpty(object.opt("keyMaterial")),
@@ -62,7 +61,7 @@ public final class CustomKeyboardSkin {
         value.keyOpacity = KeyboardGeometry.bounded(doubleValue(object.opt("keyOpacity"), 1), .25, 1, 1);
         if (object.has("gradientEnd") && !object.isNull("gradientEnd"))
             value.gradientEnd = color(object, "gradientEnd", value.background);
-        value.gradientHorizontal = booleanValue(object.opt("gradientHorizontal"), false);
+        value.gradientHorizontal = JsonPolicy.strictBoolean(object.opt("gradientHorizontal"), false);
         value.patternOpacity = KeyboardGeometry.bounded(doubleValue(object.opt("patternOpacity"), .15), 0, .5, .15);
         if (object.has("customBorderColor") && !object.isNull("customBorderColor"))
             value.customBorderColor = color(object, "customBorderColor", value.accent);
@@ -215,11 +214,6 @@ public final class CustomKeyboardSkin {
         return KeyboardGeometry.strictDouble(raw, fallback);
     }
 
-    /** Design documents use typed JSON booleans; reject org.json's string coercion. */
-    static boolean booleanValue(Object raw, boolean fallback) {
-        return JsonPolicy.strictBoolean(raw, fallback);
-    }
-
     private static String oneOf(String value, String first, String second, String third, String fourth) {
         if (second.equals(value) || third.equals(value) || fourth.equals(value)) return value;
         return first;
@@ -252,15 +246,11 @@ public final class CustomKeyboardSkin {
         return true;
     }
 
-    private static String hex(int value) {
-        return String.format(Locale.ROOT, "#%06X", value & 0xFFFFFF);
-    }
-
-    public String background() { return hex(background); }
-    public String keyBackground() { return hex(keyBackground); }
-    public String keyForeground() { return hex(keyForeground); }
-    public String accent() { return hex(accent); }
-    public String actionBackground() { return hex(actionBackground); }
+    public String background() { return ColorPolicy.hexRgb(background); }
+    public String keyBackground() { return ColorPolicy.hexRgb(keyBackground); }
+    public String keyForeground() { return ColorPolicy.hexRgb(keyForeground); }
+    public String accent() { return ColorPolicy.hexRgb(accent); }
+    public String actionBackground() { return ColorPolicy.hexRgb(actionBackground); }
     public String actionForeground() { return luminance(actionBackground) > .179 ? "#000000" : "#FFFFFF"; }
     public double cornerRadius() { return cornerRadius; }
     public double borderWidth() { return borderWidth; }
@@ -270,10 +260,14 @@ public final class CustomKeyboardSkin {
     public String keyShape() { return keyShape; }
     public String keyMaterial() { return keyMaterial; }
     public double keyOpacity() { return keyOpacity; }
-    public String gradientEnd() { return gradientEnd == null ? null : hex(gradientEnd); }
+    public String gradientEnd() {
+        return gradientEnd == null ? null : ColorPolicy.hexRgb(gradientEnd);
+    }
     public boolean gradientHorizontal() { return gradientHorizontal; }
     public double patternOpacity() { return patternOpacity; }
-    public String borderColor() { return hex(customBorderColor == null ? accent : customBorderColor); }
+    public String borderColor() {
+        return ColorPolicy.hexRgb(customBorderColor == null ? accent : customBorderColor);
+    }
     public byte[] photo() { return photo == null ? null : photo.clone(); }
     public double photoShade() { return photoShade; }
     public double photoPosition() { return photoPosition; }

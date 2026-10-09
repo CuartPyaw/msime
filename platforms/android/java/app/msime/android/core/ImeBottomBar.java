@@ -202,7 +202,7 @@ final class ImeBottomBar {
         if (keyboard == null) return;
         if (s.floatingDrawn()) {
             if (bar != null) ViewPolicy.hide(bar);
-            setPadding(keyboard, 0, 0, 0, 0);
+            ViewPolicy.setPaddingIfChanged(keyboard, 0, 0, 0, 0);
             return;
         }
         boolean shown = shown();
@@ -215,14 +215,8 @@ final class ImeBottomBar {
             }
             bottom = margin + s.pixels(KeyboardBottomBarPolicy.BAR_HEIGHT_DP);
         }
-        if (bar != null && (bar.getVisibility() == View.VISIBLE) != shown) ViewPolicy.setVisible(bar, shown);
-        setPadding(keyboard, insets.left, insets.top, insets.right, bottom);
-    }
-
-    private static void setPadding(View view, int left, int top, int right, int bottom) {
-        if (view.getPaddingLeft() == left && view.getPaddingTop() == top
-                && view.getPaddingRight() == right && view.getPaddingBottom() == bottom) return;
-        ViewPolicy.setPadding(view, left, top, right, bottom);
+        if (bar != null) ViewPolicy.setVisibleIfChanged(bar, shown);
+        ViewPolicy.setPaddingIfChanged(keyboard, insets.left, insets.top, insets.right, bottom);
     }
 
     /** 每次 render 末尾按皮肤给两个按钮上色；剪贴板面板开着时剪贴板按钮画成选中。 */

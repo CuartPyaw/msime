@@ -53,7 +53,7 @@ public final class AiPolishHttpTransport implements AiPolishClient.Transport {
             JSONObject document = new JSONObject(TextPolicy.utf8(response));
             Object content = document.getJSONArray("choices").getJSONObject(0)
                 .getJSONObject("message").opt("content");
-            return strictContent(content);
+            return JsonPolicy.strictStringOrEmpty(content);
         } catch (AiPolishClient.Failure error) {
             throw error;
         } catch (IOException | JSONException | ClassCastException | SecurityException error) {
@@ -71,8 +71,4 @@ public final class AiPolishHttpTransport implements AiPolishClient.Transport {
     }
 
     /** Chat completions carry text; do not let org.json coerce malformed values into prose. */
-    static String strictContent(Object value) {
-        return AiProviderResponse.strictContent(value);
-    }
-
 }

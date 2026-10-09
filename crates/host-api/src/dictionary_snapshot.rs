@@ -20,7 +20,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
-    ffi::{c_char, c_void},
+    ffi::{c_char, c_void, OsStr, OsString},
     io::{self, BufRead, BufReader, Write},
     path::Path,
     sync::{
@@ -465,7 +465,7 @@ pub(crate) fn export_local_snapshot(
     use msime_engine::host::DictionaryKind;
     const REVISION: i64 = 1;
     const CHUNK: usize = 1000;
-    let parent = destination
+    destination
         .parent()
         .filter(|_| destination.is_absolute() && destination.file_name().is_some())
         .ok_or("invalid snapshot destination")?;
@@ -576,20 +576,22 @@ pub(crate) fn export_local_snapshot(
             .as_bytes(),
     );
     body.push(b'\n');
-    let mut temporary =
-        tempfile::NamedTempFile::new_in(parent).map_err(|_| "snapshot file unavailable")?;
+    let mut temporary = tempfile::NamedTempFile::new().map_err(|_| "snapshot file unavailable")?;
     temporary
         .write_all(&body)
         .and_then(|()| temporary.as_file().sync_all())
         .map_err(|_| "snapshot file unavailable")?;
     let metadata = inspect_snapshot(temporary.path())?;
-    temporary
-        .persist(destination)
-        .map_err(|_| "snapshot file unavailable")?;
+    publish_snapshot(destination, &body)?;
     let mut value = serde_json::to_value(metadata).map_err(|_| "snapshot file unavailable")?;
     value["path"] = json!(destination.to_string_lossy());
     value["skipped"] = json!(skipped);
     Ok(value)
+}
+
+fn publish_snapshot(destination: &Path, bytes: &[u8]) -> Result<(), &'static str> {
+    msime_client_core::file_lock::replace_private_file(destination, bytes)
+        .map_err(|_| "snapshot file unavailable")
 }
 
 /// The same byte test `snapshot_validation::required_text` applies to a code or word, so an exported row is never one `inspect_snapshot` refuses.
@@ -694,23 +696,11 @@ fn write_activation_receipt(
 ) -> Result<(), &'static str> {
     let directory = Path::new(&options.user_data);
     let path = directory.join(ACTIVATION_RECEIPT_NAME);
-    write_activation_receipt_at(directory, &path, activation_id)
+    write_activation_receipt_at(&path, activation_id)
 }
 
-fn write_activation_receipt_at(
-    directory: &Path,
-    path: &Path,
-    activation_id: &str,
-) -> Result<(), &'static str> {
-    let mut temporary = tempfile::NamedTempFile::new_in(directory)
-        .map_err(|_| "snapshot activation receipt unavailable")?;
-    temporary
-        .write_all(activation_id.as_bytes())
-        .and_then(|_| temporary.as_file().sync_all())
-        .map_err(|_| "snapshot activation receipt unavailable")?;
-    temporary
-        .persist(path)
-        .map(|_| ())
+fn write_activation_receipt_at(path: &Path, activation_id: &str) -> Result<(), &'static str> {
+    msime_client_core::file_lock::replace_private_file(path, activation_id.as_bytes())
         .map_err(|_| "snapshot activation receipt unavailable")
 }
 
@@ -805,7 +795,104 @@ fn prepare(
     })
 }
 
+struct ActivationRoot {
+    path: std::path::PathBuf,
+    name: OsString,
+    directory: msime_client_core::file_lock::PrivateDirectory,
+    parent: msime_client_core::file_lock::PrivateDirectory,
+}
+
+struct ActivationBackup {
+    name: OsString,
+    directory: msime_client_core::file_lock::PrivateDirectory,
+    parent: msime_client_core::file_lock::PrivateDirectory,
+}
+
+#[derive(Clone, Copy)]
+enum ActivationRootSlot {
+    Active(usize),
+    Staged(usize),
+    Backup(usize),
+}
+
+struct MovedActivationEntry {
+    from: ActivationRootSlot,
+    to: ActivationRootSlot,
+    name: OsString,
+}
+
+fn bind_activation_root(
+    path: &Path,
+    directory: msime_client_core::file_lock::PrivateDirectory,
+) -> Result<ActivationRoot, &'static str> {
+    let name = path
+        .file_name()
+        .ok_or("invalid snapshot activation path")?
+        .to_os_string();
+    let parent =
+        msime_client_core::file_lock::open_private_directory_at(&directory, OsStr::new(".."))
+            .map_err(|_| "snapshot activation unavailable")?;
+    Ok(ActivationRoot {
+        path: path.to_path_buf(),
+        name,
+        directory,
+        parent,
+    })
+}
+
+fn prepare_snapshot_backup_at(
+    parent: &msime_client_core::file_lock::PrivateDirectory,
+    name: &OsStr,
+) -> std::io::Result<msime_client_core::file_lock::PrivateDirectory> {
+    match msime_client_core::file_lock::open_private_directory_at(parent, name) {
+        Ok(directory) => {
+            if !msime_client_core::file_lock::read_private_directory(&directory)?.is_empty() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "snapshot backup is not empty",
+                ));
+            }
+            Ok(directory)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            msime_client_core::file_lock::create_private_directory_at(parent, name)?;
+            msime_client_core::file_lock::open_private_directory_at(parent, name)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn activation_slot_directory<'a>(
+    slot: ActivationRootSlot,
+    active: &'a [ActivationRoot],
+    staged: &'a [ActivationRoot],
+    backups: &'a [ActivationBackup],
+) -> &'a msime_client_core::file_lock::PrivateDirectory {
+    match slot {
+        ActivationRootSlot::Active(index) => &active[index].directory,
+        ActivationRootSlot::Staged(index) => &staged[index].directory,
+        ActivationRootSlot::Backup(index) => &backups[index].directory,
+    }
+}
+
+fn activation_entry_leads_to_nested_root(
+    root: &ActivationRoot,
+    entry_name: &OsStr,
+    all: &[ActivationRoot],
+) -> bool {
+    let entry = root.path.join(entry_name);
+    all.iter()
+        .any(|other| other.path != root.path && other.path.starts_with(&entry))
+}
+
 fn activate(handle: u64, expected: &str) -> Result<Value, &'static str> {
+    activate_with_hook(handle, expected, || {})
+}
+
+fn activate_with_hook<F>(handle: u64, expected: &str, before_swap: F) -> Result<Value, &'static str>
+where
+    F: FnOnce(),
+{
     let mut entries = registry()
         .lock()
         .map_err(|_| "snapshot registry unavailable")?;
@@ -838,18 +925,65 @@ fn activate(handle: u64, expected: &str) -> Result<Value, &'static str> {
         (&active.cache, &staged.cache),
         (&active.dictionaries, &staged.dictionaries),
     ];
-    let mut backups = Vec::with_capacity(pairs.len());
-    backups.extend(pairs.iter().map(|(current, _)| {
-        let current = Path::new(current.as_str());
-        current.with_file_name(format!(
-            "{}{}",
-            current
-                .file_name()
-                .and_then(|x| x.to_str())
-                .unwrap_or("state"),
-            suffix
-        ))
-    }));
+    let active_directories = [
+        _access
+            .directory(Path::new(&active.user_data))
+            .map_err(|_| "snapshot activation unavailable")?,
+        msime_client_core::file_lock::open_private_directory(&active.cache)
+            .map_err(|_| "snapshot activation unavailable")?,
+        _access
+            .directory(Path::new(&active.dictionaries))
+            .map_err(|_| "snapshot activation unavailable")?,
+    ];
+    let staged_directories = [
+        msime_client_core::file_lock::open_private_directory(&staged.user_data)
+            .map_err(|_| "snapshot activation unavailable")?,
+        msime_client_core::file_lock::open_private_directory(&staged.cache)
+            .map_err(|_| "snapshot activation unavailable")?,
+        msime_client_core::file_lock::open_private_directory(&staged.dictionaries)
+            .map_err(|_| "snapshot activation unavailable")?,
+    ];
+    let active_roots = active_directories
+        .into_iter()
+        .zip(pairs.iter().map(|(current, _)| Path::new(current.as_str())))
+        .map(|(directory, path)| bind_activation_root(path, directory))
+        .collect::<Result<Vec<_>, _>>()?;
+    let staged_roots = staged_directories
+        .into_iter()
+        .zip(
+            pairs
+                .iter()
+                .map(|(_, replacement)| Path::new(replacement.as_str())),
+        )
+        .map(|(directory, path)| bind_activation_root(path, directory))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut backups: Vec<ActivationBackup> = Vec::with_capacity(active_roots.len());
+    for root in &active_roots {
+        let mut name = root.name.clone();
+        name.push(&suffix);
+        let parent = root
+            .parent
+            .try_clone()
+            .map_err(|_| "snapshot activation unavailable")?;
+        let directory = match prepare_snapshot_backup_at(&parent, &name) {
+            Ok(directory) => directory,
+            Err(_) => {
+                for backup in &backups {
+                    let _ = msime_client_core::file_lock::remove_private_directory_at(
+                        &backup.parent,
+                        &backup.name,
+                    );
+                }
+                return Err("snapshot activation failed");
+            }
+        };
+        backups.push(ActivationBackup {
+            name,
+            directory,
+            parent,
+        });
+    }
+    before_swap();
     // Swap each root's contents rather than the root itself.
     //
     // Renaming the roots cannot work on Windows: the maintenance guard holds
@@ -859,41 +993,36 @@ fn activate(handle: u64, expected: &str) -> Result<Value, &'static str> {
     // files exactly where they are, which is also what they are documented to
     // require: they are stable coordination objects, and renaming a root moved
     // one out from under every other process using it.
-    let mut roots = Vec::with_capacity(pairs.len());
-    roots.extend(pairs.iter().map(|(current, _)| Path::new(current.as_str())));
-    let mut staged_roots = Vec::with_capacity(pairs.len());
-    staged_roots.extend(
-        pairs
-            .iter()
-            .map(|(_, replacement)| Path::new(replacement.as_str())),
-    );
-    let mut moved: Vec<(std::path::PathBuf, std::path::PathBuf)> = Vec::with_capacity(pairs.len());
-    let rollback = |moved: &[(std::path::PathBuf, std::path::PathBuf)]| {
+    let mut moved = Vec::new();
+    let rollback = |moved: &[MovedActivationEntry]| {
         // Anything opened on a moved file while the swap ran would outlive its move back.
         msime_engine::close_cached_databases();
-        for (from, to) in moved.iter().rev() {
-            let _ = std::fs::rename(to, from);
+        for entry in moved.iter().rev() {
+            let from = activation_slot_directory(entry.to, &active_roots, &staged_roots, &backups);
+            let to = activation_slot_directory(entry.from, &active_roots, &staged_roots, &backups);
+            let _ = msime_client_core::file_lock::rename_private_entry(
+                from,
+                &entry.name,
+                to,
+                &entry.name,
+            );
         }
         for backup in &backups {
-            discard_recovered_backup(backup);
+            let _ = msime_client_core::file_lock::remove_private_directory_at(
+                &backup.parent,
+                &backup.name,
+            );
         }
     };
     // An entry that leads to another root nested below this one is left alone:
     // that root does its own swap, and it holds its own lock file.
-    let leads_to_nested_root = |root: &Path, entry: &Path, all: &[&Path]| {
-        all.iter()
-            .any(|other| *other != root && other.starts_with(entry))
-    };
-    for (index, (current, replacement)) in pairs.iter().enumerate() {
-        let current = Path::new(current.as_str());
-        let replacement = Path::new(replacement.as_str());
+    for index in 0..active_roots.len() {
+        let current = &active_roots[index];
+        let replacement = &staged_roots[index];
         let backup = &backups[index];
-        if prepare_snapshot_backup(backup).is_err() {
-            rollback(&moved);
-            return Err("snapshot activation failed");
-        }
         // Out with the old.
-        let listing = match std::fs::read_dir(current) {
+        let listing = match msime_client_core::file_lock::read_private_directory(&current.directory)
+        {
             Ok(listing) => listing,
             Err(_) => {
                 rollback(&moved);
@@ -901,54 +1030,66 @@ fn activate(handle: u64, expected: &str) -> Result<Value, &'static str> {
             }
         };
         for entry in listing {
-            let Ok(entry) = entry else {
-                rollback(&moved);
-                return Err("snapshot activation failed");
-            };
-            let path = entry.path();
-            if entry.file_name() == DICTIONARY_ACCESS_LOCK_NAME
-                || leads_to_nested_root(roots[index], &path, &roots)
+            if entry == OsStr::new(DICTIONARY_ACCESS_LOCK_NAME)
+                || activation_entry_leads_to_nested_root(current, &entry, &active_roots)
             {
                 continue;
             }
-            let destination = backup.join(entry.file_name());
-            if std::fs::rename(&path, &destination).is_err() {
+            if msime_client_core::file_lock::rename_private_entry(
+                &current.directory,
+                &entry,
+                &backup.directory,
+                &entry,
+            )
+            .is_err()
+            {
                 rollback(&moved);
                 return Err("snapshot activation failed");
             }
-            moved.push((path, destination));
+            moved.push(MovedActivationEntry {
+                from: ActivationRootSlot::Active(index),
+                to: ActivationRootSlot::Backup(index),
+                name: entry,
+            });
         }
         // In with the new.
-        let listing = match std::fs::read_dir(replacement) {
-            Ok(listing) => listing,
-            Err(_) => {
-                rollback(&moved);
-                return Err("snapshot activation failed");
-            }
-        };
-        for entry in listing {
-            let Ok(entry) = entry else {
-                rollback(&moved);
-                return Err("snapshot activation failed");
+        let listing =
+            match msime_client_core::file_lock::read_private_directory(&replacement.directory) {
+                Ok(listing) => listing,
+                Err(_) => {
+                    rollback(&moved);
+                    return Err("snapshot activation failed");
+                }
             };
-            let path = entry.path();
-            if entry.file_name() == DICTIONARY_ACCESS_LOCK_NAME
-                || leads_to_nested_root(staged_roots[index], &path, &staged_roots)
+        for entry in listing {
+            if entry == OsStr::new(DICTIONARY_ACCESS_LOCK_NAME)
+                || activation_entry_leads_to_nested_root(replacement, &entry, &staged_roots)
             {
                 continue;
             }
-            let destination = current.join(entry.file_name());
-            if std::fs::rename(&path, &destination).is_err() {
+            if msime_client_core::file_lock::rename_private_entry(
+                &replacement.directory,
+                &entry,
+                &current.directory,
+                &entry,
+            )
+            .is_err()
+            {
                 rollback(&moved);
                 return Err("snapshot activation failed");
             }
-            moved.push((path, destination));
+            moved.push(MovedActivationEntry {
+                from: ActivationRootSlot::Staged(index),
+                to: ActivationRootSlot::Active(index),
+                name: entry,
+            });
         }
     }
     // A reader that opened a file while the swap ran holds the old one; the next access opens the restored files.
     msime_engine::close_cached_databases();
     for backup in &backups {
-        let _ = std::fs::remove_dir_all(backup);
+        let _ =
+            msime_client_core::file_lock::remove_private_directory_at(&backup.parent, &backup.name);
     }
     entries.remove(&handle);
     Ok(json!({"activated": true}))
@@ -961,34 +1102,9 @@ fn activate(handle: u64, expected: &str) -> Result<Value, &'static str> {
 /// exactly the case where the backup is the only remaining copy of the user's dictionaries, and
 /// `remove_dir_all` would delete it on the way out of a failure that had already been survived.
 /// Leaving the directory on disk costs some space and keeps the data.
+#[cfg(test)]
 fn discard_recovered_backup(backup: &Path) {
     let _ = std::fs::remove_dir(backup);
-}
-
-/// Create or reuse only an empty, real backup directory. A backup path is derived from a
-/// process-local handle but lives beside user state, so a pre-existing symlink must never be
-/// accepted as the destination for the old generation's files.
-fn prepare_snapshot_backup(path: &Path) -> std::io::Result<()> {
-    match std::fs::symlink_metadata(path) {
-        Ok(metadata) => {
-            let kind = metadata.file_type();
-            if !kind.is_dir() || kind.is_symlink() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::AlreadyExists,
-                    "snapshot backup is not a real directory",
-                ));
-            }
-            if std::fs::read_dir(path)?.next().is_some() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::AlreadyExists,
-                    "snapshot backup is not empty",
-                ));
-            }
-            Ok(())
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => std::fs::create_dir(path),
-        Err(error) => Err(error),
-    }
 }
 
 fn version_without_access(options: &EngineOptions) -> Result<String, &'static str> {

@@ -69,6 +69,25 @@ fn sync_state_fifo_is_rejected_without_blocking() {
     assert!(fs::symlink_metadata(&path).unwrap().file_type().is_fifo());
 }
 
+#[cfg(unix)]
+#[test]
+fn state_lock_stays_bound_to_the_original_parent_after_replacement() {
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().join("state");
+    fs::create_dir(&directory).unwrap();
+    let path = directory.join(STATE_FILE);
+    let lock = lock_state(&path).unwrap();
+
+    let moved = root.path().join("state-moved");
+    fs::rename(&directory, &moved).unwrap();
+    fs::create_dir(&directory).unwrap();
+
+    save_state_locked(&lock, &SyncState::default()).unwrap();
+
+    assert!(moved.join(STATE_FILE).exists());
+    assert!(!directory.join(STATE_FILE).exists());
+}
+
 fn manifest(id: &str, name: &str, head: &str, tail: &str) -> String {
     format!("schema_version = 1\nid = '{id}'\nname = '{name}'\ndescription = '{name}的说明'\nversion = '1.0'\nbase = 'paper'\npreview = 'preview.png'\n{head}[supports]\nlayouts = ['vertical', 'horizontal']\nthemes = ['light', 'dark']\n[candidate_window]\nmin_width_dip = 10\n[candidate_window.decoration]\ntop_inset_dip = 0\nwidth_dip = 0\n{tail}")
 }
@@ -1054,7 +1073,7 @@ fn a_symlinked_sync_state_does_not_delete_a_local_skin() {
         Err(AccountError::Storage)
     );
     assert!(fixture.installed("sakura"));
-    assert_eq!(fixture.library.rows.borrow().len(), 1);
+    assert_eq!(fixture.library.rows.borrow().len(), 0);
     assert_eq!(fs::read(&external_state).unwrap(), bytes);
 }
 
@@ -1077,7 +1096,7 @@ fn a_symlinked_sync_state_parent_does_not_write_outside() {
     );
     assert!(!outside.path().join(STATE_FILE).exists());
     assert!(fixture.installed("sakura"));
-    assert_eq!(fixture.library.rows.borrow().len(), 1);
+    assert_eq!(fixture.library.rows.borrow().len(), 0);
 }
 
 #[cfg(unix)]

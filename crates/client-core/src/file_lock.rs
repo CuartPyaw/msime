@@ -5,9 +5,106 @@
 //! locking API works on which target. `host-api` had its own `File::lock` call, and on Android it
 //! failed on the first line of every shared clipboard operation - which made the keyboard's own
 //! `onCreateInputView` throw and the input method die before it could draw a single key.
+use std::ffi::OsStr;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::path::Path;
+
+/// A parent directory opened without following an untrusted symlink. On Unix,
+/// all operations through this value stay bound to that directory if its path
+/// is replaced later.
+pub struct PrivateDirectory {
+    #[cfg(unix)]
+    directory: File,
+    #[cfg(not(unix))]
+    directory: crate::storage::PrivateDirectory,
+}
+
+pub fn open_private_directory(path: impl AsRef<Path>) -> io::Result<PrivateDirectory> {
+    Ok(PrivateDirectory {
+        directory: crate::storage::open_private_directory(path.as_ref())?,
+    })
+}
+
+impl PrivateDirectory {
+    pub fn try_clone(&self) -> io::Result<Self> {
+        Ok(Self {
+            directory: crate::storage::clone_private_directory(&self.directory)?,
+        })
+    }
+
+    pub fn metadata(&self) -> io::Result<std::fs::Metadata> {
+        crate::storage::private_directory_metadata(&self.directory)
+    }
+}
+
+pub fn open_private_directory_at(
+    directory: &PrivateDirectory,
+    name: &OsStr,
+) -> io::Result<PrivateDirectory> {
+    Ok(PrivateDirectory {
+        directory: crate::storage::open_private_directory_at(&directory.directory, name)?,
+    })
+}
+
+pub fn open_private_lock_file_at(directory: &PrivateDirectory, name: &OsStr) -> io::Result<File> {
+    ensure_regular(crate::storage::open_private_lock_file_at(
+        &directory.directory,
+        name,
+    )?)
+}
+
+#[cfg(unix)]
+pub(crate) fn open_private_lock_file_at_raw(directory: &File, name: &OsStr) -> io::Result<File> {
+    ensure_regular(crate::storage::open_private_lock_file_at(directory, name)?)
+}
+
+pub fn read_private_directory(directory: &PrivateDirectory) -> io::Result<Vec<std::ffi::OsString>> {
+    crate::storage::read_private_directory(&directory.directory)
+}
+
+pub fn create_private_directory_at(parent: &PrivateDirectory, name: &OsStr) -> io::Result<()> {
+    crate::storage::create_private_directory_at(&parent.directory, name)
+}
+
+pub fn remove_private_directory_at(parent: &PrivateDirectory, name: &OsStr) -> io::Result<()> {
+    crate::storage::remove_private_directory_at(&parent.directory, name)
+}
+
+pub fn rename_private_entry(
+    from: &PrivateDirectory,
+    from_name: &OsStr,
+    to: &PrivateDirectory,
+    to_name: &OsStr,
+) -> io::Result<()> {
+    crate::storage::rename_private_entry(&from.directory, from_name, &to.directory, to_name)
+}
+
+pub fn open_private_file_at(directory: &PrivateDirectory, name: &OsStr) -> io::Result<File> {
+    crate::storage::open_private_file_at(&directory.directory, name)
+}
+
+pub fn remove_private_file_at(directory: &PrivateDirectory, name: &OsStr) -> io::Result<()> {
+    crate::storage::remove_private_file_at(&directory.directory, name)
+}
+
+/// Replace a private file relative to an already opened parent directory.
+pub fn write_private_file_at(
+    directory: &PrivateDirectory,
+    name: &OsStr,
+    contents: &[u8],
+) -> io::Result<()> {
+    crate::storage::write_private_file_at(&directory.directory, name, contents)
+}
+
+pub fn replace_private_file_at(
+    directory: &PrivateDirectory,
+    name: &OsStr,
+    contents: &[u8],
+    permissions: &std::fs::Permissions,
+) -> io::Result<()> {
+    crate::storage::replace_private_file_at(&directory.directory, name, contents, Some(permissions))
+}
 
 fn lock_file_options() -> OpenOptions {
     let mut options = File::options();
@@ -40,12 +137,14 @@ pub(crate) fn open_lock_file(path: impl AsRef<Path>) -> io::Result<File> {
 /// Open a lock file with owner-only permissions on Unix hosts.
 pub fn open_private_lock_file(path: impl AsRef<Path>) -> io::Result<File> {
     let path = path.as_ref();
-    let mut options = secure_lock_file_options(path)?;
+    let options = secure_lock_file_options(path)?;
     #[cfg(unix)]
-    {
+    let options = {
         use std::os::unix::fs::OpenOptionsExt;
+        let mut options = options;
         options.mode(0o600);
-    }
+        options
+    };
     ensure_regular(options.open(path)?)
 }
 
@@ -107,6 +206,29 @@ pub fn open_private_file(path: impl AsRef<Path>) -> io::Result<File> {
         ));
     }
     Ok(file)
+}
+
+/// 相对于已检查的父目录打开私有文件；Unix 调用方会绑定到该目录句柄。
+pub fn open_private_file_in(path: impl AsRef<Path>) -> io::Result<File> {
+    crate::storage::open_private_file_in(path.as_ref())
+}
+
+/// 替换私有文件时不再通过路径解析可能已被替换的 Unix 父目录。
+pub fn replace_private_file(path: impl AsRef<Path>, contents: &[u8]) -> io::Result<()> {
+    crate::storage::replace_private_file(path.as_ref(), contents)
+}
+
+/// Replace a private file atomically while preserving the supplied permissions.
+pub fn replace_private_file_with_permissions(
+    path: impl AsRef<Path>,
+    contents: &[u8],
+    permissions: &std::fs::Permissions,
+) -> io::Result<()> {
+    crate::storage::replace_private_file_with_permissions(
+        path.as_ref(),
+        contents,
+        Some(permissions),
+    )
 }
 
 pub(crate) fn try_shared(file: &File) -> io::Result<bool> {
@@ -190,6 +312,7 @@ pub fn exclusive(file: &File) -> io::Result<()> {
     }
 }
 
+#[cfg(unix)]
 pub(crate) fn unlock(file: &File) -> io::Result<()> {
     #[cfg(not(target_os = "android"))]
     {
@@ -204,6 +327,37 @@ pub(crate) fn unlock(file: &File) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn directory_bound_rename_stays_on_original_inode_after_path_replacement() {
+        use std::fs;
+
+        let root = tempfile::tempdir().unwrap();
+        let live = root.path().join("live");
+        let moved = root.path().join("moved");
+        let backup = root.path().join("backup");
+        fs::create_dir(&live).unwrap();
+        fs::create_dir(&backup).unwrap();
+        fs::write(live.join("marker"), b"old").unwrap();
+        let live_handle = open_private_directory(&live).unwrap();
+        let backup_handle = open_private_directory(&backup).unwrap();
+
+        fs::rename(&live, &moved).unwrap();
+        fs::create_dir(&live).unwrap();
+
+        rename_private_entry(
+            &live_handle,
+            OsStr::new("marker"),
+            &backup_handle,
+            OsStr::new("marker"),
+        )
+        .unwrap();
+
+        assert!(!moved.join("marker").exists());
+        assert!(!live.join("marker").exists());
+        assert_eq!(fs::read(backup.join("marker")).unwrap(), b"old");
+    }
     use std::time::{Duration, Instant};
 
     // 宽限期内释放的锁应当被拿到，长期被持有的锁仍要如实报告占用——后者是产品语义，

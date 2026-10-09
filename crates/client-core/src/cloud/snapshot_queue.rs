@@ -5,7 +5,6 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-#[cfg(unix)]
 use std::ffi::OsStr;
 use std::{
     fs::{self, File},
@@ -129,8 +128,15 @@ pub fn local_version_digest(value: &str) -> Result<&str, SnapshotQueueError> {
 }
 
 pub struct SnapshotWorkerLease {
+    _directory: crate::file_lock::PrivateDirectory,
     _file: File,
     owner: PathBuf,
+}
+
+struct SnapshotQueueLock {
+    directory: crate::file_lock::PrivateDirectory,
+    root: PathBuf,
+    _file: File,
 }
 
 pub struct DictionarySnapshotQueue {
@@ -182,42 +188,47 @@ impl DictionarySnapshotQueue {
         self.existing_root()?.ok_or(SnapshotQueueError::Unavailable)
     }
 
-    fn state_path(root: &Path) -> PathBuf {
-        root.join(STATE_NAME)
-    }
-
-    fn lock(&self, name: &str) -> Result<(File, PathBuf), SnapshotQueueError> {
+    fn lock(&self, name: &str) -> Result<SnapshotQueueLock, SnapshotQueueError> {
         let root = self.root()?;
-        let file = crate::file_lock::open_lock_file(root.join(name))
+        let directory = crate::file_lock::open_private_directory(&root)
+            .map_err(|_| SnapshotQueueError::Unavailable)?;
+        let file = crate::file_lock::open_private_lock_file_at(&directory, OsStr::new(name))
             .map_err(|_| SnapshotQueueError::Unavailable)?;
         match crate::file_lock::try_exclusive_with_grace(&file) {
-            Ok(true) => Ok((file, root)),
+            Ok(true) => Ok(SnapshotQueueLock {
+                directory,
+                root,
+                _file: file,
+            }),
             Ok(false) => Err(SnapshotQueueError::Busy),
             Err(_) => Err(SnapshotQueueError::Unavailable),
         }
     }
 
-    fn read_from(root: &Path) -> Result<SnapshotQueueState, SnapshotQueueError> {
-        let path = Self::state_path(root);
-        let metadata = match fs::symlink_metadata(&path) {
-            Ok(metadata) => metadata,
+    fn read_from(
+        directory: &crate::file_lock::PrivateDirectory,
+    ) -> Result<SnapshotQueueState, SnapshotQueueError> {
+        let file = match crate::file_lock::open_private_file_at(directory, OsStr::new(STATE_NAME)) {
+            Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(SnapshotQueueState {
                     version: 1,
                     ..SnapshotQueueState::default()
                 });
             }
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
+                return Err(SnapshotQueueError::Invalid);
+            }
             Err(_) => return Err(SnapshotQueueError::Unavailable),
         };
-        if !metadata.file_type().is_file()
-            || metadata.len() == 0
-            || metadata.len() > MAXIMUM_STATE_BYTES
-        {
+        let metadata = file
+            .metadata()
+            .map_err(|_| SnapshotQueueError::Unavailable)?;
+        if metadata.len() == 0 || metadata.len() > MAXIMUM_STATE_BYTES {
             return Err(SnapshotQueueError::Invalid);
         }
         let bytes = crate::bounded_io::read_bounded_file_with(
-            crate::storage::open_private_file_in(&path)
-                .map_err(|_| SnapshotQueueError::Unavailable)?,
+            file,
             MAXIMUM_STATE_BYTES,
             || SnapshotQueueError::Invalid,
             |_| SnapshotQueueError::Unavailable,
@@ -228,56 +239,55 @@ impl DictionarySnapshotQueue {
         Ok(state)
     }
 
-    fn write_to(root: &Path, state: &SnapshotQueueState) -> Result<(), SnapshotQueueError> {
+    fn write_to(
+        directory: &crate::file_lock::PrivateDirectory,
+        state: &SnapshotQueueState,
+    ) -> Result<(), SnapshotQueueError> {
         state.validate()?;
         let bytes = serde_json::to_vec(state).map_err(|_| SnapshotQueueError::Invalid)?;
         if bytes.is_empty() || bytes.len() as u64 > MAXIMUM_STATE_BYTES {
             return Err(SnapshotQueueError::Invalid);
         }
-        #[cfg(unix)]
-        {
-            let directory = crate::storage::open_private_directory(root)
-                .map_err(|_| SnapshotQueueError::Unavailable)?;
-            crate::storage::write_private_file_at(&directory, OsStr::new(STATE_NAME), &bytes)
-                .map_err(|_| SnapshotQueueError::Unavailable)
-        }
-        #[cfg(not(unix))]
-        {
-            let mut temporary = tempfile::NamedTempFile::new_in(root)
-                .map_err(|_| SnapshotQueueError::Unavailable)?;
-            temporary
-                .write_all(&bytes)
-                .and_then(|_| temporary.as_file().sync_all())
-                .map_err(|_| SnapshotQueueError::Unavailable)?;
-            temporary
-                .persist(Self::state_path(root))
-                .map(|_| ())
-                .map_err(|_| SnapshotQueueError::Unavailable)
-        }
+        crate::file_lock::write_private_file_at(directory, OsStr::new(STATE_NAME), &bytes)
+            .map_err(|_| SnapshotQueueError::Unavailable)
     }
 
     fn update<T>(
         &self,
-        action: impl FnOnce(&Path, &mut SnapshotQueueState) -> Result<T, SnapshotQueueError>,
+        action: impl FnOnce(
+            &SnapshotQueueLock,
+            &mut SnapshotQueueState,
+        ) -> Result<T, SnapshotQueueError>,
     ) -> Result<T, SnapshotQueueError> {
-        let (_lock, root) = self.lock(STATE_LOCK_NAME)?;
-        let mut state = Self::read_from(&root)?;
-        let result = action(&root, &mut state)?;
-        Self::write_to(&root, &state)?;
+        let lock = self.lock(STATE_LOCK_NAME)?;
+        let mut state = Self::read_from(&lock.directory)?;
+        let result = action(&lock, &mut state)?;
+        Self::write_to(&lock.directory, &state)?;
         Ok(result)
     }
 
     fn update_wait<T>(
         &self,
-        action: impl FnOnce(&Path, &mut SnapshotQueueState) -> Result<T, SnapshotQueueError>,
+        action: impl FnOnce(
+            &SnapshotQueueLock,
+            &mut SnapshotQueueState,
+        ) -> Result<T, SnapshotQueueError>,
     ) -> Result<T, SnapshotQueueError> {
         let root = self.root()?;
-        let lock = crate::file_lock::open_lock_file(root.join(STATE_LOCK_NAME))
+        let directory = crate::file_lock::open_private_directory(&root)
             .map_err(|_| SnapshotQueueError::Unavailable)?;
-        crate::file_lock::exclusive(&lock).map_err(|_| SnapshotQueueError::Unavailable)?;
-        let mut state = Self::read_from(&root)?;
-        let result = action(&root, &mut state)?;
-        Self::write_to(&root, &state)?;
+        let file =
+            crate::file_lock::open_private_lock_file_at(&directory, OsStr::new(STATE_LOCK_NAME))
+                .map_err(|_| SnapshotQueueError::Unavailable)?;
+        crate::file_lock::exclusive(&file).map_err(|_| SnapshotQueueError::Unavailable)?;
+        let lock = SnapshotQueueLock {
+            directory,
+            root,
+            _file: file,
+        };
+        let mut state = Self::read_from(&lock.directory)?;
+        let result = action(&lock, &mut state)?;
+        Self::write_to(&lock.directory, &state)?;
         Ok(result)
     }
 
@@ -289,7 +299,9 @@ impl DictionarySnapshotQueue {
                 ..SnapshotQueueState::default()
             });
         };
-        Self::read_from(&root)
+        let directory = crate::file_lock::open_private_directory(&root)
+            .map_err(|_| SnapshotQueueError::Unavailable)?;
+        Self::read_from(&directory)
     }
 
     pub fn file_path(&self, id: Uuid) -> Result<PathBuf, SnapshotQueueError> {
@@ -402,8 +414,8 @@ impl DictionarySnapshotQueue {
             .map_err(|_| SnapshotQueueError::Unavailable)?;
         let id = Uuid::new_v4();
         let destination = root.join(format!("{id}.ndjson"));
-        let result = self.update(|locked_root, state| {
-            if locked_root != root {
+        let result = self.update(|locked, state| {
+            if locked.root != root {
                 return Err(SnapshotQueueError::Invalid);
             }
             if state
@@ -418,14 +430,13 @@ impl DictionarySnapshotQueue {
             }
             #[cfg(unix)]
             {
-                let directory = crate::storage::open_private_directory(locked_root)
-                    .map_err(|_| SnapshotQueueError::Unavailable)?;
                 use std::os::unix::fs::MetadataExt;
                 let staged = incoming
                     .directory()
                     .metadata()
                     .map_err(|_| SnapshotQueueError::Unavailable)?;
-                let locked = directory
+                let locked = locked
+                    .directory
                     .metadata()
                     .map_err(|_| SnapshotQueueError::Unavailable)?;
                 if staged.dev() != locked.dev() || staged.ino() != locked.ino() {
@@ -465,8 +476,12 @@ impl DictionarySnapshotQueue {
     }
 
     pub fn acquire_worker_lease(&self) -> Result<SnapshotWorkerLease, SnapshotQueueError> {
-        let (file, owner) = self.lock(WORKER_LOCK_NAME)?;
-        Ok(SnapshotWorkerLease { _file: file, owner })
+        let lock = self.lock(WORKER_LOCK_NAME)?;
+        Ok(SnapshotWorkerLease {
+            _directory: lock.directory,
+            _file: lock._file,
+            owner: lock.root,
+        })
     }
 
     fn check_lease(&self, lease: &SnapshotWorkerLease) -> Result<PathBuf, SnapshotQueueError> {
@@ -589,15 +604,25 @@ impl DictionarySnapshotQueue {
 
     /// Return a terminal state once, then acknowledge it while retaining the local version.
     pub fn take_state(&self) -> Result<SnapshotQueueState, SnapshotQueueError> {
-        self.update(|root, state| {
+        self.update(|lock, state| {
             let result = state.clone();
             if let Some(request) = state
                 .request
                 .as_ref()
                 .filter(|request| !request.status.active())
             {
-                let path = root.join(format!("{}.ndjson", request.id));
-                remove_snapshot_file(&path)?;
+                crate::file_lock::remove_private_file_at(
+                    &lock.directory,
+                    OsStr::new(&format!("{}.ndjson", request.id)),
+                )
+                .or_else(|error| {
+                    if error.kind() == std::io::ErrorKind::NotFound {
+                        Ok(())
+                    } else {
+                        Err(error)
+                    }
+                })
+                .map_err(|_| SnapshotQueueError::Unavailable)?;
                 state.request = None;
             }
             Ok(result)
@@ -636,6 +661,30 @@ mod tests {
 
         assert!(remove_snapshot_file(&linked.join("synthetic.ndjson")).is_err());
         assert_eq!(fs::read(&outside_file).unwrap(), b"synthetic-outside");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn state_writes_stay_bound_to_the_locked_directory_after_replacement() {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("queue");
+        let queue = DictionarySnapshotQueue::new(root.clone()).unwrap();
+        queue
+            .publish_local_version(&version("legacy", 'a'))
+            .unwrap();
+
+        queue
+            .update(|_lock, state| {
+                let moved = parent.path().join("queue-moved");
+                fs::rename(&root, &moved).unwrap();
+                fs::create_dir(&root).unwrap();
+                state.local_version = Some(version("legacy", 'b'));
+                Ok(())
+            })
+            .unwrap();
+
+        assert!(fs::read(parent.path().join("queue-moved").join(STATE_NAME)).is_ok());
+        assert!(!root.join(STATE_NAME).exists());
     }
 
     fn version(owner: &str, digest: char) -> String {

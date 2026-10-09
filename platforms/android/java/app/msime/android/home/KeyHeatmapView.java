@@ -69,7 +69,7 @@ public final class KeyHeatmapView extends View {
     public KeyHeatmapView(Context context, @Nullable AttributeSet attributes) {
         super(context, attributes);
         face.setTextAlign(Paint.Align.CENTER);
-        face.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+        ViewPolicy.setTypeface(face, Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
         ViewPolicy.setTextSizeSp(face, context, 14);
         share.setTextAlign(Paint.Align.CENTER);
         ViewPolicy.setTextSizeSp(share, context, 9);

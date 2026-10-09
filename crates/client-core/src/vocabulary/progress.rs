@@ -13,8 +13,6 @@ use super::wordbook::{self, Wordbook};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::File;
-#[cfg(not(unix))]
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// The largest progress document that will be read.
@@ -37,6 +35,9 @@ const MAX_REVIEWS_PER_DAY: u32 = 86_400;
 pub const DEFAULT_NEW_CARDS_PER_DAY: usize = 20;
 /// The most cards one session will hand out, new and due together.
 pub const DEFAULT_SESSION_LIMIT: usize = 200;
+
+const PROGRESS_FILE: &str = "vocabulary-progress.json";
+const LOCK_FILE: &str = "vocabulary-progress.lock";
 
 #[derive(Debug, thiserror::Error)]
 pub enum VocabularyProgressError {
@@ -288,6 +289,11 @@ pub struct VocabularyProgressStore {
     directory: PathBuf,
 }
 
+struct ProgressLock {
+    directory: crate::file_lock::PrivateDirectory,
+    _lock: File,
+}
+
 impl VocabularyProgressStore {
     pub fn new(directory: impl Into<PathBuf>) -> Self {
         Self {
@@ -300,12 +306,7 @@ impl VocabularyProgressStore {
         &self.directory
     }
 
-    #[cfg(not(unix))]
-    fn path(&self) -> PathBuf {
-        self.directory.join("vocabulary-progress.json")
-    }
-
-    fn lock(&self) -> Result<File, VocabularyProgressError> {
+    fn lock(&self) -> Result<ProgressLock, VocabularyProgressError> {
         if let Some(parent) = self.directory.parent() {
             crate::storage::reject_symlink(parent)?;
         }
@@ -315,15 +316,25 @@ impl VocabularyProgressStore {
                 "vocabulary progress directory is not a real directory",
             )));
         }
-        let lock =
-            crate::file_lock::open_lock_file(self.directory.join("vocabulary-progress.lock"))?;
+        let directory = crate::file_lock::open_private_directory(&self.directory)?;
+        let lock = crate::file_lock::open_private_lock_file_at(
+            &directory,
+            std::ffi::OsStr::new(LOCK_FILE),
+        )?;
         crate::file_lock::exclusive(&lock)?;
-        Ok(lock)
+        Ok(ProgressLock {
+            directory,
+            _lock: lock,
+        })
     }
 
-    fn read_locked(&self) -> Result<VocabularyProgress, VocabularyProgressError> {
-        let file = match crate::storage::open_private_file_in(
-            &self.directory.join("vocabulary-progress.json"),
+    fn read_locked(
+        &self,
+        lock: &ProgressLock,
+    ) -> Result<VocabularyProgress, VocabularyProgressError> {
+        let file = match crate::file_lock::open_private_file_at(
+            &lock.directory,
+            std::ffi::OsStr::new(PROGRESS_FILE),
         ) {
             Ok(file) => file,
             // A missing file is a fresh profile. A damaged one is not, and is never overwritten
@@ -344,34 +355,24 @@ impl VocabularyProgressStore {
         Ok(value)
     }
 
-    fn write_locked(&self, value: &VocabularyProgress) -> Result<(), VocabularyProgressError> {
+    fn write_locked(
+        &self,
+        lock: &ProgressLock,
+        value: &VocabularyProgress,
+    ) -> Result<(), VocabularyProgressError> {
         value.validate()?;
         let bytes = serde_json::to_vec(value)?;
-        #[cfg(unix)]
-        {
-            let directory = crate::storage::open_private_directory(&self.directory)?;
-            crate::storage::write_private_file_at(
-                &directory,
-                std::ffi::OsStr::new("vocabulary-progress.json"),
-                &bytes,
-            )?;
-            Ok(())
-        }
-        #[cfg(not(unix))]
-        {
-            let mut temporary = tempfile::NamedTempFile::new_in(&self.directory)?;
-            temporary.write_all(&bytes)?;
-            temporary.as_file().sync_all()?;
-            temporary
-                .persist(self.path())
-                .map(|_| ())
-                .map_err(|error| VocabularyProgressError::Io(error.error))
-        }
+        crate::file_lock::write_private_file_at(
+            &lock.directory,
+            std::ffi::OsStr::new(PROGRESS_FILE),
+            &bytes,
+        )?;
+        Ok(())
     }
 
     pub fn load(&self) -> Result<VocabularyProgress, VocabularyProgressError> {
-        let _lock = self.lock()?;
-        self.read_locked()
+        let lock = self.lock()?;
+        self.read_locked(&lock)
     }
 
     /// Record that the user answered `word` from `book` with `grade` on `today`.
@@ -396,8 +397,8 @@ impl VocabularyProgressStore {
             return Err(VocabularyProgressError::UnknownWord);
         }
 
-        let _lock = self.lock()?;
-        let mut document = self.read_locked()?;
+        let lock = self.lock()?;
+        let mut document = self.read_locked(&lock)?;
         document.prune(today);
 
         let words = document.cards.entry(book.id.clone()).or_default();
@@ -432,7 +433,7 @@ impl VocabularyProgressStore {
             return Err(VocabularyProgressError::CountExhausted);
         }
 
-        self.write_locked(&document)?;
+        self.write_locked(&lock, &document)?;
         Ok(next)
     }
 
@@ -448,10 +449,10 @@ impl VocabularyProgressStore {
         if !settings.is_valid() {
             return Err(VocabularyProgressError::InvalidDocument);
         }
-        let _lock = self.lock()?;
-        let mut document = self.read_locked()?;
+        let lock = self.lock()?;
+        let mut document = self.read_locked(&lock)?;
         document.settings = settings;
-        self.write_locked(&document)?;
+        self.write_locked(&lock, &document)?;
         Ok(document)
     }
 
@@ -465,18 +466,18 @@ impl VocabularyProgressStore {
         if !wordbook::id_is_well_formed(wordbook) {
             return Err(VocabularyProgressError::InvalidWordbook);
         }
-        let _lock = self.lock()?;
-        let mut document = self.read_locked()?;
+        let lock = self.lock()?;
+        let mut document = self.read_locked(&lock)?;
         document.cards.remove(wordbook);
-        self.write_locked(&document)?;
+        self.write_locked(&lock, &document)?;
         Ok(document)
     }
 
     /// Forget everything.
     pub fn reset(&self) -> Result<VocabularyProgress, VocabularyProgressError> {
-        let _lock = self.lock()?;
+        let lock = self.lock()?;
         let document = VocabularyProgress::default();
-        self.write_locked(&document)?;
+        self.write_locked(&lock, &document)?;
         Ok(document)
     }
 }
@@ -514,6 +515,28 @@ mod tests {
     fn a_missing_file_is_a_fresh_profile() {
         let (_directory, store) = store();
         assert_eq!(store.load().unwrap(), VocabularyProgress::default());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn progress_writes_stay_bound_to_the_locked_directory_after_replacement() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("progress");
+        fs::create_dir(&directory).unwrap();
+        let store = VocabularyProgressStore::new(&directory);
+        let lock = store.lock().unwrap();
+
+        let moved = root.path().join("progress-moved");
+        fs::rename(&directory, &moved).unwrap();
+        fs::create_dir(&directory).unwrap();
+
+        store
+            .write_locked(&lock, &VocabularyProgress::default())
+            .unwrap();
+
+        assert!(moved.join("vocabulary-progress.json").exists());
+        assert!(!directory.join("vocabulary-progress.json").exists());
+        fs::remove_dir_all(moved).unwrap();
     }
 
     #[test]

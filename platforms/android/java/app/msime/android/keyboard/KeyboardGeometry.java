@@ -245,16 +245,12 @@ public final class KeyboardGeometry {
 
     /** Create a vertical container for stacked keyboard content. */
     public static LinearLayout column(Context context) {
-        LinearLayout view = new LinearLayout(context);
-        view.setOrientation(LinearLayout.VERTICAL);
-        return view;
+        return ViewPolicy.newColumn(context);
     }
 
     /** Create a horizontal container for inline keyboard content. */
     public static LinearLayout row(Context context) {
-        LinearLayout view = new LinearLayout(context);
-        view.setOrientation(LinearLayout.HORIZONTAL);
-        return view;
+        return ViewPolicy.newRow(context);
     }
 
     /** Create linear layout parameters from density-independent dimensions. */
@@ -330,7 +326,7 @@ public final class KeyboardGeometry {
 
     /** 创建像素尺寸的线性布局正方形参数。 */
     public static LinearLayout.LayoutParams squareParamsPx(int size) {
-        return new LinearLayout.LayoutParams(size, size);
+        return ViewPolicy.newSquareParamsPx(size);
     }
 
     /** Create linear layout parameters with content-sized width and parent-sized height. */
@@ -413,19 +409,19 @@ public final class KeyboardGeometry {
             float verticalDp) {
         int horizontal = pixels(context, horizontalDp);
         int vertical = pixels(context, verticalDp);
-        view.setPadding(horizontal, vertical, horizontal, vertical);
+        ViewPolicy.setSymmetricPadding(view, horizontal, vertical);
     }
 
     /** Apply equal horizontal dp padding with no vertical padding. */
     public static void setHorizontalPaddingDp(View view, Context context, float horizontalDp) {
         int horizontal = pixels(context, horizontalDp);
-        view.setPadding(horizontal, 0, horizontal, 0);
+        ViewPolicy.setHorizontalPadding(view, horizontal);
     }
 
     /** Apply four-sided padding expressed in density-independent pixels. */
     public static void setPaddingDp(View view, Context context, float leftDp, float topDp,
             float rightDp, float bottomDp) {
-        view.setPadding(pixels(context, leftDp), pixels(context, topDp),
+        ViewPolicy.setPadding(view, pixels(context, leftDp), pixels(context, topDp),
             pixels(context, rightDp), pixels(context, bottomDp));
     }
 
@@ -476,7 +472,7 @@ public final class KeyboardGeometry {
 
     /** 以 {@link #keySp} 设置键盘里控件的字号。 */
     public static void setKeyTextSize(android.widget.TextView view, float sp) {
-        view.setTextSize(TypedValue.COMPLEX_UNIT_PX, keySp(view.getContext(), sp));
+        ViewPolicy.setTextSize(view, keySp(view.getContext(), sp));
     }
 
     /** 键帽左右各留的内边距（dp）：只防字形贴住圆角，键宽几乎全部留给文字。 */
@@ -489,12 +485,9 @@ public final class KeyboardGeometry {
      */
     public static void normalizeKeyCap(android.widget.TextView key) {
         int horizontal = pixels(key.getContext(), KEY_CAP_HORIZONTAL_PADDING_DP);
-        key.setPadding(horizontal, 0, horizontal, 0);
+        ViewPolicy.setHorizontalPadding(key, horizontal);
         ViewPolicy.clearFontPadding(key);
-        key.setMinWidth(0);
-        key.setMinimumWidth(0);
-        key.setMinHeight(0);
-        key.setMinimumHeight(0);
+        ViewPolicy.clearMinimumSize(key);
     }
 
     public static int bounded(int value, int minimum, int maximum) {

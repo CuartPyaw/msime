@@ -18,8 +18,6 @@ public final class SyncApiSmoke {
         check(!SyncApi.conflict(new CloudApi.Failure(412, "revision_conflict", "", 0)), "other status");
         check(!SyncApi.conflict(null), "null failure");
         check(SyncApi.preferenceRevision(42L) == 42L, "integer preference revision");
-        check(SyncApi.phraseRevision(42L) == 42L, "integer phrase revision");
-        check(SyncApi.snapshotRevisionValue(42L) == 42L, "integer snapshot revision");
         check(SyncApi.changesRevision(42L, 7L) == 42L, "integer dictionary revision");
         check(!SyncApi.changePageChanged(false, 7L, 7L), "stationary empty change page");
         check(SyncApi.changePageChanged(true, 8L, 7L), "non-empty change page");
@@ -62,24 +60,6 @@ public final class SyncApiSmoke {
             } catch (CloudApi.Failure expected) {
                 check(expected.status == 500 && "invalid_response".equals(expected.code),
                     "invalid preference revision failure");
-            }
-        }
-        for (Number invalid : new Number[] {1.5d, -1L}) {
-            try {
-                SyncApi.snapshotRevisionValue(invalid);
-                throw new AssertionError("invalid snapshot revision must be refused: " + invalid);
-            } catch (CloudApi.Failure expected) {
-                check(expected.status == 500 && "invalid_response".equals(expected.code),
-                    "invalid snapshot revision failure");
-            }
-        }
-        for (Number invalid : new Number[] {2.5d, -2L}) {
-            try {
-                SyncApi.phraseRevision(invalid);
-                throw new AssertionError("invalid phrase revision must be refused: " + invalid);
-            } catch (CloudApi.Failure expected) {
-                check(expected.status == 500 && "invalid_response".equals(expected.code),
-                    "invalid phrase revision failure");
             }
         }
         for (Number invalid : new Number[] {1.5d, -1L}) {
@@ -215,6 +195,38 @@ public final class SyncApiSmoke {
         Files.deleteIfExists(destination);
         Files.deleteIfExists(outside);
         Files.deleteIfExists(root);
+
+        Path hardlinkRoot = Files.createTempDirectory("msime-sync-api-hardlink-");
+        Path hardlinkDestination = hardlinkRoot.resolve("snapshot.ndjson");
+        Path hardlinkOutside = hardlinkRoot.resolve("outside.ndjson");
+        Path hardlinkPartial = hardlinkRoot.resolve("snapshot.ndjson.partial");
+        Files.writeString(hardlinkOutside, "sentinel");
+        Files.createLink(hardlinkPartial, hardlinkOutside);
+        try {
+            download.downloadSnapshot(hardlinkDestination);
+        } catch (Exception expected) { }
+        check("sentinel".equals(Files.readString(hardlinkOutside)),
+            "snapshot download must not follow a partial-file hard link");
+        Files.deleteIfExists(hardlinkDestination);
+        Files.deleteIfExists(hardlinkPartial);
+        Files.deleteIfExists(hardlinkOutside);
+        Files.deleteIfExists(hardlinkRoot);
+
+        Path uploadRoot = Files.createTempDirectory("msime-sync-upload-");
+        try {
+            Path source = uploadRoot.resolve("source.ndjson");
+            Files.writeString(source, "synthetic\n");
+            Path linked = uploadRoot.resolve("upload.ndjson");
+            Files.createLink(linked, source);
+            check(!SyncApi.uploadable(linked), "hard-linked upload is refused");
+        } finally {
+            try (java.util.stream.Stream<Path> paths = Files.walk(uploadRoot)) {
+                paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); }
+                    catch (Exception error) { throw new IllegalStateException(error); }
+                });
+            }
+        }
         System.out.println("Android sync API passed");
     }
 

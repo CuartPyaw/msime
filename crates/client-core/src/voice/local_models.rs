@@ -7,8 +7,9 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::cell::Cell;
 use std::collections::BTreeMap;
-#[cfg(unix)]
 use std::ffi::OsStr;
+#[cfg(unix)]
+use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Read, Seek, Write};
 use std::path::{Component, Path, PathBuf};
@@ -48,6 +49,42 @@ fn create_private_file(path: &Path) -> io::Result<File> {
         options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
     }
     options.open(path)
+}
+
+fn extract_archive_member<R: Read>(
+    entry: &mut R,
+    output: File,
+    file: &crate::resources::Artifact,
+    cancel: &AtomicBool,
+) -> Result<File, LocalModelError> {
+    let mut output = BufWriter::new(output);
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; CHUNK];
+    let mut written = 0u64;
+    loop {
+        check_cancel(cancel)?;
+        let read = match entry.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(unsafe_archive(error)),
+        };
+        written += read as u64;
+        if written > file.size {
+            return Err(LocalModelError::SizeMismatch(file.name.clone()));
+        }
+        hasher.update(&buffer[..read]);
+        output.write_all(&buffer[..read])?;
+    }
+    let output = output.into_inner().map_err(|error| error.into_error())?;
+    output.sync_all()?;
+    if written != file.size {
+        return Err(LocalModelError::SizeMismatch(file.name.clone()));
+    }
+    if !hex::encode(hasher.finalize()).eq_ignore_ascii_case(&file.sha256) {
+        return Err(LocalModelError::ChecksumMismatch(file.name.clone()));
+    }
+    Ok(output)
 }
 
 fn write_private_bytes(path: &Path, bytes: &[u8]) -> io::Result<()> {
@@ -300,7 +337,16 @@ pub fn install(
     cancel: &AtomicBool,
 ) -> Result<PathBuf, LocalModelError> {
     let model = find_model(id)?;
-    install_model(root, model, mirror, &HttpFetcher::new()?, progress, cancel)
+    // 和资源包一样按 `download_prefixes` 换源：先用户的镜像，再本项目的国内镜像，最后原地址。原来只用用户的镜像、填了就不再回 GitHub，没填就直连 GitHub，国内下一个上百 MB 的模型常常要很久。
+    let mirrors = crate::resource_packs::download_prefixes(&[mirror]);
+    install_model(
+        root,
+        model,
+        &mirrors,
+        &HttpFetcher::new()?,
+        progress,
+        cancel,
+    )
 }
 
 /// Delete an installed model. Only catalog ids are accepted, so the id can never name anything outside `root`. Removing a model that is not installed succeeds.
@@ -638,7 +684,7 @@ fn move_file_noclobber_at(
     }
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, test))]
 fn remove_leftover(path: &Path) {
     let Some(parent) = path.parent() else {
         return;
@@ -834,6 +880,18 @@ impl Staging {
             fs::create_dir(self.path.join("model"))
         }
     }
+
+    #[cfg(unix)]
+    fn open_model_directory(&self) -> io::Result<File> {
+        crate::storage::open_private_directory_at(&self.parent, &self.name).and_then(|staging| {
+            crate::storage::open_private_directory_at(&staging, OsStr::new("model"))
+        })
+    }
+
+    #[cfg(unix)]
+    fn open_directory(&self) -> io::Result<File> {
+        crate::storage::open_private_directory_at(&self.parent, &self.name)
+    }
 }
 
 impl Drop for Staging {
@@ -848,13 +906,16 @@ impl Drop for Staging {
 pub(crate) fn install_model(
     root: &Path,
     model: &CatalogModel,
-    mirror: &str,
+    mirrors: &[&str],
     fetcher: &dyn Fetcher,
     progress: &mut dyn FnMut(InstallProgress),
     cancel: &AtomicBool,
 ) -> Result<PathBuf, LocalModelError> {
     check_root(root)?;
-    if !crate::preferences::valid_model_mirror(mirror) {
+    if !mirrors
+        .iter()
+        .all(|mirror| crate::preferences::valid_model_mirror(mirror))
+    {
         return Err(LocalModelError::InvalidMirror);
     }
     let _lock = acquire_model_lock(root)?;
@@ -863,17 +924,63 @@ pub(crate) fn install_model(
     staging.create()?;
     let model_dir = staging.path.join("model");
     staging.create_model_directory()?;
+    #[cfg(unix)]
+    let model_directory = Some(staging.open_model_directory()?);
+    #[cfg(unix)]
+    let staging_directory = Some(staging.open_directory()?);
+    #[cfg(not(unix))]
+    let model_directory = None;
 
     let total = model.archive.size;
     let archive = staging.path.join("archive.tar.bz2");
-    let digest = {
-        let mut output = BufWriter::new(create_private_file(&archive)?);
+    #[cfg(unix)]
+    let archive_name = OsStr::new("archive.tar.bz2");
+    #[cfg(unix)]
+    let (archive_digest, archive_reader) = {
+        let staging_directory = staging_directory.as_ref().expect("unix staging handle");
         let mut last = 0u64;
-        let digest = download(
+        let (digest, _) = crate::storage::write_private_file_at_with(
+            staging_directory,
+            archive_name,
+            |mut file| {
+                let digest = download_from_mirrors(
+                    fetcher,
+                    mirrors,
+                    &model.archive.url,
+                    total,
+                    &model.archive.sha256,
+                    &mut file,
+                    cancel,
+                    &mut |downloaded| {
+                        if downloaded == total
+                            || downloaded - last >= (total / 200).max(CHUNK as u64)
+                        {
+                            last = downloaded;
+                            progress(InstallProgress {
+                                stage: "download",
+                                downloaded,
+                                total,
+                            });
+                        }
+                    },
+                )?;
+                Ok::<(File, String), LocalModelError>((file, digest))
+            },
+        )?;
+        let reader = crate::storage::open_private_file_at(staging_directory, archive_name)?;
+        (digest, reader)
+    };
+    #[cfg(not(unix))]
+    let digest = {
+        let mut file = create_private_file(&archive)?;
+        let mut last = 0u64;
+        download_from_mirrors(
             fetcher,
-            &mirrored(mirror, &model.archive.url),
+            mirrors,
+            &model.archive.url,
             total,
-            &mut output,
+            &model.archive.sha256,
+            &mut file,
             cancel,
             &mut |downloaded| {
                 // About two hundred updates over the whole download is smooth enough for a bar and cheap to deliver across a C or IPC boundary.
@@ -886,15 +993,15 @@ pub(crate) fn install_model(
                     });
                 }
             },
-        )?;
-        output.flush()?;
-        digest
+        )?
     };
     progress(InstallProgress {
         stage: "verify",
         downloaded: total,
         total,
     });
+    #[cfg(unix)]
+    let digest = archive_digest.as_str();
     if !digest.eq_ignore_ascii_case(&model.archive.sha256) {
         return Err(LocalModelError::ChecksumMismatch(
             model.archive.name.clone(),
@@ -906,16 +1013,27 @@ pub(crate) fn install_model(
         model,
         &catalog().exclude,
         &model_dir,
+        model_directory.as_ref(),
+        #[cfg(unix)]
+        Some(&archive_reader),
+        #[cfg(not(unix))]
+        None,
         progress,
         cancel,
     )?;
+    #[cfg(unix)]
+    crate::storage::remove_private_tree_at(
+        staging_directory.as_ref().expect("unix staging handle"),
+        archive_name,
+    )?;
+    #[cfg(not(unix))]
     fs::remove_file(&archive)?;
 
     for extra in &model.extra {
         check_cancel(cancel)?;
         let name = single_component(&extra.name)
             .ok_or_else(|| LocalModelError::UnsafeArchive(extra.name.clone()))?;
-        let destination = model_dir.join(name);
+        let destination = model_dir.join(&name);
         match (&extra.resource, &extra.url) {
             (Some(resource), _) => {
                 let bytes = EMBEDDED_RESOURCES
@@ -929,22 +1047,50 @@ pub(crate) fn install_model(
                 if !hex::encode(Sha256::digest(bytes)).eq_ignore_ascii_case(&extra.sha256) {
                     return Err(LocalModelError::ChecksumMismatch(extra.name.clone()));
                 }
+                #[cfg(unix)]
+                if let Some(model_directory) = model_directory.as_ref() {
+                    crate::storage::write_private_file_at(
+                        model_directory,
+                        OsStr::new(&name),
+                        bytes,
+                    )?;
+                    continue;
+                }
                 write_private_bytes(&destination, bytes)?;
             }
             (None, Some(url)) => {
-                let mut output = BufWriter::new(create_private_file(&destination)?);
-                let digest = download(
+                #[cfg(unix)]
+                if let Some(model_directory) = model_directory.as_ref() {
+                    crate::storage::write_private_file_at_with(
+                        model_directory,
+                        OsStr::new(&name),
+                        |mut file| {
+                            download_from_mirrors(
+                                fetcher,
+                                mirrors,
+                                url,
+                                extra.size,
+                                &extra.sha256,
+                                &mut file,
+                                cancel,
+                                &mut |_| {},
+                            )?;
+                            Ok::<(File, ()), LocalModelError>((file, ()))
+                        },
+                    )?;
+                    continue;
+                }
+                let mut file = create_private_file(&destination)?;
+                download_from_mirrors(
                     fetcher,
-                    &mirrored(mirror, url),
+                    mirrors,
+                    url,
                     extra.size,
-                    &mut output,
+                    &extra.sha256,
+                    &mut file,
                     cancel,
                     &mut |_| {},
                 )?;
-                output.flush()?;
-                if !digest.eq_ignore_ascii_case(&extra.sha256) {
-                    return Err(LocalModelError::ChecksumMismatch(extra.name.clone()));
-                }
             }
             (None, None) => return Err(LocalModelError::MissingFile(extra.name.clone())),
         }
@@ -953,6 +1099,13 @@ pub(crate) fn install_model(
     for relative in model.files.values() {
         let components = relative_components(relative)
             .ok_or_else(|| LocalModelError::UnsafeArchive(relative.clone()))?;
+        #[cfg(unix)]
+        if let Some(model_directory) = model_directory.as_ref() {
+            if !model_path_exists_at(model_directory, &components) {
+                return Err(LocalModelError::MissingFile(relative.clone()));
+            }
+            continue;
+        }
         let path = components
             .iter()
             .fold(model_dir.clone(), |path, part| path.join(part));
@@ -961,6 +1114,13 @@ pub(crate) fn install_model(
         }
     }
     check_cancel(cancel)?;
+    #[cfg(unix)]
+    if let Some(model_directory) = model_directory.as_ref() {
+        write_manifest_at(model_directory, &model.manifest)?;
+    } else {
+        write_manifest(&model_dir, &model.manifest)?;
+    }
+    #[cfg(not(unix))]
     write_manifest(&model_dir, &model.manifest)?;
     let target = publish(root, &model.id, &model_dir)?;
     progress(InstallProgress {
@@ -977,6 +1137,13 @@ fn write_manifest(dir: &Path, manifest: &Value) -> Result<(), LocalModelError> {
     let mut file = create_private_file(&dir.join(MANIFEST_FILE))?;
     file.write_all(&manifest)?;
     file.sync_all()?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn write_manifest_at(directory: &File, manifest: &Value) -> Result<(), LocalModelError> {
+    let manifest = serde_json::to_vec_pretty(manifest).map_err(io::Error::other)?;
+    crate::storage::write_private_file_at(directory, OsStr::new(MANIFEST_FILE), &manifest)?;
     Ok(())
 }
 
@@ -1104,13 +1271,27 @@ pub(crate) fn install_files_with(
     staging.create()?;
     let pack_dir = staging.path.join("model");
     staging.create_model_directory()?;
+    #[cfg(unix)]
+    let pack_directory = Some(staging.open_model_directory()?);
+    #[cfg(not(unix))]
+    let pack_directory = None;
     let partials = partial_directory(root, id)?;
     let result = download_and_publish(
-        root, id, files, manifest, mirrors, fetcher, progress, cancel, &pack_dir, &partials,
+        root,
+        id,
+        files,
+        manifest,
+        mirrors,
+        fetcher,
+        progress,
+        cancel,
+        &pack_dir,
+        pack_directory.as_ref(),
+        &partials,
     );
     if result.is_err() {
         // 只删空目录：还有没下完的文件时留着它给下次续传。
-        let _ = fs::remove_dir(&partials);
+        partials.remove_if_empty();
     }
     result
 }
@@ -1126,7 +1307,8 @@ fn download_and_publish(
     progress: &mut dyn FnMut(InstallProgress),
     cancel: &AtomicBool,
     pack_dir: &Path,
-    partials: &Path,
+    pack_directory: Option<&File>,
+    partials: &PartialDirectory,
 ) -> Result<PathBuf, LocalModelError> {
     let total = files
         .iter()
@@ -1139,18 +1321,29 @@ fn download_and_publish(
         let name = single_component(&file.name)
             .filter(|single| *single == file.name)
             .ok_or_else(|| LocalModelError::UnsafeArchive(file.name.clone()))?;
-        let partial = partial_path(partials, file)?;
-        download_from_sources(fetcher, mirrors, file, &partial, cancel, &mut |n| {
-            let downloaded = offset + n;
-            if downloaded == total || downloaded.abs_diff(last) >= (total / 200).max(CHUNK as u64) {
-                last = downloaded;
-                progress(InstallProgress {
-                    stage: "download",
-                    downloaded,
-                    total,
-                });
-            }
-        })?;
+        let partial = partial_path(partials.path(), file)?;
+        let partial_name = partial.file_name().ok_or(LocalModelError::InvalidRoot)?;
+        download_from_sources(
+            fetcher,
+            mirrors,
+            file,
+            partials,
+            partial_name,
+            cancel,
+            &mut |n| {
+                let downloaded = offset + n;
+                if downloaded == total
+                    || downloaded.abs_diff(last) >= (total / 200).max(CHUNK as u64)
+                {
+                    last = downloaded;
+                    progress(InstallProgress {
+                        stage: "download",
+                        downloaded,
+                        total,
+                    });
+                }
+            },
+        )?;
         downloaded_files.push((partial, name));
         offset += file.size;
     }
@@ -1159,6 +1352,13 @@ fn download_and_publish(
         downloaded: total,
         total,
     });
+    #[cfg(unix)]
+    if let Some(pack_directory) = pack_directory {
+        write_manifest_at(pack_directory, manifest)?;
+    } else {
+        write_manifest(pack_dir, manifest)?;
+    }
+    #[cfg(not(unix))]
     write_manifest(pack_dir, manifest)?;
     check_cancel(cancel)?;
     // 确认没有取消之后才把下完的文件移进暂存目录：暂存目录在失败时会被整个删掉，所以之后移动或发布失败时要把已经移过去的文件放回 `.partial-<id>`，留给下次用。同在 root 下，改名不复制。
@@ -1166,7 +1366,13 @@ fn download_and_publish(
     let published = downloaded_files
         .iter()
         .try_for_each(|(partial, name)| {
-            fs::rename(partial, pack_dir.join(name))?;
+            move_partial_into_pack(
+                partials,
+                partial.file_name().ok_or(LocalModelError::InvalidRoot)?,
+                pack_dir,
+                name,
+                pack_directory,
+            )?;
             moved += 1;
             Ok::<(), LocalModelError>(())
         })
@@ -1175,18 +1381,70 @@ fn download_and_publish(
         Ok(target) => target,
         Err(error) => {
             for (partial, name) in &downloaded_files[..moved] {
-                let _ = fs::rename(pack_dir.join(name), partial);
+                if let Some(partial_name) = partial.file_name() {
+                    let _ =
+                        move_pack_file_back(partials, name, pack_dir, partial_name, pack_directory);
+                }
             }
             return Err(error);
         }
     };
-    remove_leftover(partials);
+    partials.remove_tree();
     progress(InstallProgress {
         stage: "done",
         downloaded: total,
         total,
     });
     Ok(target)
+}
+
+fn move_partial_into_pack(
+    partials: &PartialDirectory,
+    partial_name: &OsStr,
+    pack_dir: &Path,
+    name: &str,
+    pack_directory: Option<&File>,
+) -> io::Result<()> {
+    #[cfg(unix)]
+    if let Some(pack_directory) = pack_directory {
+        return rustix::fs::renameat(
+            &partials.directory,
+            partial_name,
+            pack_directory,
+            OsStr::new(name),
+        )
+        .map_err(io::Error::from);
+    }
+    #[cfg(not(unix))]
+    let _ = pack_directory;
+    fs::rename(partials.path().join(partial_name), pack_dir.join(name))
+}
+
+fn move_pack_file_back(
+    partials: &PartialDirectory,
+    name: &str,
+    pack_dir: &Path,
+    partial_name: &OsStr,
+    pack_directory: Option<&File>,
+) -> io::Result<()> {
+    #[cfg(unix)]
+    if let Some(pack_directory) = pack_directory {
+        return rustix::fs::renameat(
+            pack_directory,
+            OsStr::new(name),
+            &partials.directory,
+            partial_name,
+        )
+        .map_err(io::Error::from);
+    }
+    #[cfg(not(unix))]
+    let _ = pack_directory;
+    fs::rename(pack_dir.join(name), partials.path().join(partial_name))
+}
+
+#[cfg(unix)]
+fn move_adopted_file_at(source: &File, destination: &File, name: &OsStr) -> io::Result<()> {
+    rustix::fs::renameat(source, name, destination, name).map_err(io::Error::from)
 }
 
 /// 下载一个固定的上游归档（ZIP，名称、URL、长度、SHA-256 来自锁文件），取出 `members` 列出的成员，作为 `files` 里同名的文件安装到 `<root>/<id>`。每个取出的文件按 `files` 里它自己的长度和 SHA-256 校验，归档本身也先按锁文件校验；归档的下载和 [`install_files`] 一样按 `mirrors` 换源、用 HTTP Range 续传。进度的 `download` 阶段按归档字节计，取出成员时报 `verify`。
@@ -1236,13 +1494,28 @@ pub(crate) fn install_archive_members_with(
     staging.create()?;
     let pack_dir = staging.path.join("model");
     staging.create_model_directory()?;
+    #[cfg(unix)]
+    let pack_directory = Some(staging.open_model_directory()?);
+    #[cfg(not(unix))]
+    let pack_directory = None;
     let partials = partial_directory(root, id)?;
     let result = download_and_extract(
-        root, id, archive, members, files, manifest, mirrors, fetcher, progress, cancel, &pack_dir,
+        root,
+        id,
+        archive,
+        members,
+        files,
+        manifest,
+        mirrors,
+        fetcher,
+        progress,
+        cancel,
+        &pack_dir,
+        pack_directory.as_ref(),
         &partials,
     );
     if result.is_err() {
-        let _ = fs::remove_dir(&partials);
+        partials.remove_if_empty();
     }
     result
 }
@@ -1260,16 +1533,21 @@ fn download_and_extract(
     progress: &mut dyn FnMut(InstallProgress),
     cancel: &AtomicBool,
     pack_dir: &Path,
-    partials: &Path,
+    pack_directory: Option<&File>,
+    partials: &PartialDirectory,
 ) -> Result<PathBuf, LocalModelError> {
+    #[cfg(not(unix))]
+    let _ = pack_directory;
     let total = archive.size;
-    let partial = partial_path(partials, archive)?;
+    let partial = partial_path(partials.path(), archive)?;
+    let partial_name = partial.file_name().ok_or(LocalModelError::InvalidRoot)?;
     let mut last = 0u64;
     download_from_sources(
         fetcher,
         mirrors,
         archive,
-        &partial,
+        partials,
+        partial_name,
         cancel,
         &mut |downloaded| {
             if downloaded == total || downloaded.abs_diff(last) >= (total / 200).max(CHUNK as u64) {
@@ -1287,10 +1565,8 @@ fn download_and_extract(
         downloaded: total,
         total,
     });
-    let mut zip = zip::ZipArchive::new(BufReader::new(crate::storage::open_private_file_in(
-        &partial,
-    )?))
-    .map_err(|error| LocalModelError::UnsafeArchive(error.to_string()))?;
+    let mut zip = zip::ZipArchive::new(BufReader::new(partials.open_read(partial_name)?))
+        .map_err(|error| LocalModelError::UnsafeArchive(error.to_string()))?;
     for file in files {
         check_cancel(cancel)?;
         let name = single_component(&file.name)
@@ -1307,47 +1583,58 @@ fn download_and_extract(
         if !entry.is_file() {
             return Err(LocalModelError::UnsafeArchive(member.to_owned()));
         }
-        let mut output = BufWriter::new(create_private_file(&pack_dir.join(&name))?);
-        let mut hasher = Sha256::new();
-        let mut buffer = vec![0u8; CHUNK];
-        let mut written = 0u64;
-        loop {
-            check_cancel(cancel)?;
-            let read = match entry.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(read) => read,
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(error) => return Err(unsafe_archive(error)),
-            };
-            written += read as u64;
-            // 先按锁文件的长度截住，解压炸弹写不满磁盘。
-            if written > file.size {
-                return Err(LocalModelError::SizeMismatch(file.name.clone()));
-            }
-            hasher.update(&buffer[..read]);
-            output.write_all(&buffer[..read])?;
+        #[cfg(unix)]
+        if let Some(pack_directory) = pack_directory {
+            crate::storage::write_private_file_at_with(
+                pack_directory,
+                OsStr::new(&name),
+                |output| {
+                    Ok::<(File, ()), LocalModelError>((
+                        extract_archive_member(&mut entry, output, file, cancel)?,
+                        (),
+                    ))
+                },
+            )?;
+        } else {
+            extract_archive_member(
+                &mut entry,
+                create_private_file(&pack_dir.join(&name))?,
+                file,
+                cancel,
+            )?;
         }
-        let output = output.into_inner().map_err(|error| error.into_error())?;
-        output.sync_all()?;
-        if written != file.size {
-            return Err(LocalModelError::SizeMismatch(file.name.clone()));
-        }
-        if !hex::encode(hasher.finalize()).eq_ignore_ascii_case(&file.sha256) {
-            return Err(LocalModelError::ChecksumMismatch(file.name.clone()));
-        }
+        #[cfg(not(unix))]
+        extract_archive_member(
+            &mut entry,
+            create_private_file(&pack_dir.join(&name))?,
+            file,
+            cancel,
+        )?;
         // 取出的是原生库：Android 14 起动态加载的代码文件必须只读，发布前去掉写权限。替换和删除只改目录项，不受影响。
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(pack_dir.join(&name), fs::Permissions::from_mode(0o444))?;
+            let output = if let Some(pack_directory) = pack_directory {
+                crate::storage::open_private_file_at(pack_directory, OsStr::new(&name))?
+            } else {
+                crate::storage::open_private_file_in(&pack_dir.join(&name))?
+            };
+            rustix::fs::fchmod(&output, rustix::fs::Mode::from_raw_mode(0o444))
+                .map_err(io::Error::from)?;
         }
     }
     drop(zip);
+    #[cfg(unix)]
+    if let Some(pack_directory) = pack_directory {
+        write_manifest_at(pack_directory, manifest)?;
+    } else {
+        write_manifest(pack_dir, manifest)?;
+    }
+    #[cfg(not(unix))]
     write_manifest(pack_dir, manifest)?;
     check_cancel(cancel)?;
     let target = publish(root, id, pack_dir)?;
     // 归档只是来源，取完就删。
-    remove_leftover(partials);
+    partials.remove_tree();
     progress(InstallProgress {
         stage: "done",
         downloaded: total,
@@ -1373,12 +1660,30 @@ pub(crate) fn adopt_files(
     let _lock = acquire_model_lock(root)?;
     // 先放回上一次被打断的收编移走的文件，再检查来源里有没有这组文件。
     remove_leftovers(root, id);
+    #[cfg(unix)]
+    let source_directory = crate::storage::open_private_directory(source)?;
     let mut names = Vec::with_capacity(files.len());
     for file in files {
         let name = single_component(&file.name)
             .filter(|single| *single == file.name)
             .ok_or_else(|| LocalModelError::UnsafeArchive(file.name.clone()))?;
         // 只收编普通文件：符号链接可能把外面的文件带进资源包。
+        #[cfg(unix)]
+        match crate::storage::open_private_file_at(&source_directory, OsStr::new(&name)) {
+            Ok(file) if file.metadata()?.is_file() => {}
+            Ok(_) => return Err(LocalModelError::UnsafeArchive(file.name.clone())),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Err(LocalModelError::MissingFile(file.name.clone()))
+            }
+            Err(error)
+                if error.kind() == io::ErrorKind::InvalidInput
+                    || error.raw_os_error() == Some(libc::ELOOP) =>
+            {
+                return Err(LocalModelError::UnsafeArchive(file.name.clone()))
+            }
+            Err(error) => return Err(error.into()),
+        }
+        #[cfg(not(unix))]
         match fs::symlink_metadata(source.join(&name)) {
             Ok(metadata) if metadata.file_type().is_file() => {}
             Ok(_) => return Err(LocalModelError::UnsafeArchive(file.name.clone())),
@@ -1393,22 +1698,52 @@ pub(crate) fn adopt_files(
     staging.create()?;
     let pack_dir = staging.path.join("model");
     staging.create_model_directory()?;
+    #[cfg(unix)]
+    let staging_directory = staging.open_directory()?;
+    #[cfg(unix)]
+    let pack_directory = staging.open_model_directory()?;
     // 改名之前先落盘来源记录：进程在发布前被杀时，下次收编或安装这个包时按它把文件放回来源（[`restore_interrupted_adoption`]）。
+    #[cfg(unix)]
+    crate::storage::write_private_file_at(
+        &staging_directory,
+        OsStr::new(ADOPTION_SOURCE),
+        record.as_bytes(),
+    )?;
+    #[cfg(not(unix))]
     let mut source_record = create_private_file(&staging.path.join(ADOPTION_SOURCE))?;
+    #[cfg(not(unix))]
     source_record.write_all(record.as_bytes())?;
+    #[cfg(not(unix))]
     source_record.sync_all()?;
+    #[cfg(not(unix))]
     drop(source_record);
 
+    #[cfg(unix)]
+    let mut moved: Vec<OsString> = Vec::with_capacity(files.len());
+    #[cfg(not(unix))]
     let mut moved: Vec<(PathBuf, PathBuf)> = Vec::with_capacity(files.len());
     let result = (|| {
         for name in &names {
+            #[cfg(unix)]
+            move_adopted_file_at(&source_directory, &pack_directory, OsStr::new(name))?;
+            #[cfg(unix)]
+            moved.push(OsString::from(name));
+            #[cfg(not(unix))]
             let from = source.join(name);
+            #[cfg(not(unix))]
             let to = pack_dir.join(name);
+            #[cfg(not(unix))]
             fs::rename(&from, &to)?;
+            #[cfg(not(unix))]
             moved.push((from, to));
         }
         for file in files {
+            #[cfg(unix)]
+            let mut input =
+                crate::storage::open_private_file_at(&pack_directory, OsStr::new(&file.name))?;
+            #[cfg(not(unix))]
             let path = pack_dir.join(&file.name);
+            #[cfg(not(unix))]
             let mut input = crate::storage::open_private_file_in(&path)?;
             if input.metadata()?.len() != file.size {
                 return Err(LocalModelError::SizeMismatch(file.name.clone()));
@@ -1428,10 +1763,18 @@ pub(crate) fn adopt_files(
                 return Err(LocalModelError::ChecksumMismatch(file.name.clone()));
             }
         }
+        #[cfg(unix)]
+        write_manifest_at(&pack_directory, manifest)?;
+        #[cfg(not(unix))]
         write_manifest(&pack_dir, manifest)?;
         publish(root, id, &pack_dir)
     })();
     if result.is_err() {
+        #[cfg(unix)]
+        for name in moved.iter().rev() {
+            let _ = move_adopted_file_at(&pack_directory, &source_directory, name);
+        }
+        #[cfg(not(unix))]
         for (from, to) in moved.iter().rev() {
             let _ = fs::rename(to, from);
         }
@@ -1439,19 +1782,136 @@ pub(crate) fn adopt_files(
     result
 }
 
-/// `<root>/.partial-<id>`：没下完的文件跨安装保留在这里，供下次续传。不以 `.staging-` 或 `.old-` 开头，所以 [`remove_leftovers`] 不会清掉它；不是真实目录（比如被换成符号链接）时先删掉再建。
-fn partial_directory(root: &Path, id: &str) -> Result<PathBuf, LocalModelError> {
-    let directory = root.join(format!(".partial-{id}"));
-    match fs::symlink_metadata(&directory) {
-        Ok(metadata) if metadata.file_type().is_dir() => {}
-        Ok(_) => {
-            remove_leftover(&directory);
-            fs::create_dir(&directory)?;
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => fs::create_dir(&directory)?,
-        Err(error) => return Err(error.into()),
+struct PartialDirectory {
+    path: PathBuf,
+    #[cfg(unix)]
+    directory: File,
+    #[cfg(unix)]
+    parent: File,
+    #[cfg(unix)]
+    name: std::ffi::OsString,
+}
+
+impl PartialDirectory {
+    fn path(&self) -> &Path {
+        &self.path
     }
-    Ok(directory)
+
+    #[cfg(unix)]
+    fn open_read_write(&self, name: &OsStr) -> io::Result<File> {
+        let descriptor = rustix::fs::openat(
+            &self.directory,
+            name,
+            rustix::fs::OFlags::RDWR
+                | rustix::fs::OFlags::CREATE
+                | rustix::fs::OFlags::NOFOLLOW
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::NONBLOCK,
+            rustix::fs::Mode::from_raw_mode(0o600),
+        )?;
+        Ok(descriptor.into())
+    }
+
+    #[cfg(unix)]
+    fn open_read(&self, name: &OsStr) -> io::Result<File> {
+        crate::storage::open_private_file_at(&self.directory, name)
+    }
+
+    #[cfg(not(unix))]
+    fn open_read(&self, name: &OsStr) -> io::Result<File> {
+        crate::storage::open_private_file_in(&self.path.join(name))
+    }
+
+    #[cfg(not(unix))]
+    fn open_read_write(&self, name: &OsStr) -> io::Result<File> {
+        crate::storage::open_private_read_write_file(&self.path.join(name))
+    }
+
+    fn remove(&self, name: &OsStr) {
+        #[cfg(unix)]
+        let _ = crate::storage::remove_private_tree_at(&self.directory, name);
+        #[cfg(not(unix))]
+        remove_leftover(&self.path.join(name));
+    }
+
+    fn remove_tree(&self) {
+        #[cfg(unix)]
+        let _ = crate::storage::remove_private_tree_at(&self.parent, &self.name);
+        #[cfg(not(unix))]
+        let _ = fs::remove_dir_all(&self.path);
+    }
+
+    fn remove_if_empty(&self) {
+        #[cfg(unix)]
+        let _ = rustix::fs::unlinkat(&self.parent, &self.name, rustix::fs::AtFlags::REMOVEDIR);
+        #[cfg(not(unix))]
+        let _ = fs::remove_dir(&self.path);
+    }
+
+    fn contains_file(&self, name: &OsStr) -> bool {
+        #[cfg(unix)]
+        {
+            crate::storage::open_private_file_at(&self.directory, name).is_ok()
+        }
+        #[cfg(not(unix))]
+        {
+            fs::symlink_metadata(self.path.join(name)).is_ok()
+        }
+    }
+}
+
+/// `<root>/.partial-<id>`：没下完的文件跨安装保留在这里，供下次续传。不以 `.staging-` 或 `.old-` 开头，所以 [`remove_leftovers`] 不会清掉它；不是真实目录（比如被换成符号链接）时先删掉再建。
+fn partial_directory(root: &Path, id: &str) -> Result<PartialDirectory, LocalModelError> {
+    #[cfg(unix)]
+    {
+        let root_directory = crate::storage::open_private_directory(root)?;
+        partial_directory_at(root, &root_directory, id)
+    }
+    #[cfg(not(unix))]
+    {
+        let directory = root.join(format!(".partial-{id}"));
+        match fs::symlink_metadata(&directory) {
+            Ok(metadata) if metadata.file_type().is_dir() => {}
+            Ok(_) => {
+                remove_leftover(&directory);
+                fs::create_dir(&directory)?;
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => fs::create_dir(&directory)?,
+            Err(error) => return Err(error.into()),
+        }
+        Ok(PartialDirectory { path: directory })
+    }
+}
+
+#[cfg(unix)]
+fn partial_directory_at(
+    root: &Path,
+    root_directory: &File,
+    id: &str,
+) -> Result<PartialDirectory, LocalModelError> {
+    let name = format!(".partial-{id}");
+    let name = OsStr::new(&name);
+    match crate::storage::open_private_directory_at(root_directory, name) {
+        Ok(directory) => {
+            return Ok(PartialDirectory {
+                path: root.join(name),
+                directory,
+                parent: root_directory.try_clone()?,
+                name: name.to_owned(),
+            })
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(_) => crate::storage::remove_private_tree_at(root_directory, name)?,
+    }
+    rustix::fs::mkdirat(root_directory, name, rustix::fs::Mode::from_raw_mode(0o700))
+        .map_err(io::Error::from)?;
+    let directory = crate::storage::open_private_directory_at(root_directory, name)?;
+    Ok(PartialDirectory {
+        path: root.join(name),
+        directory,
+        parent: root_directory.try_clone()?,
+        name: name.to_owned(),
+    })
 }
 
 /// 没下完的文件按锁文件里的 SHA-256 加文件名命名：锁文件换了一份字节时，旧的部分不会被拿来续传。调用方已确认 `file.name` 是单个路径成分。
@@ -1471,7 +1931,8 @@ fn download_from_sources(
     fetcher: &dyn Fetcher,
     mirrors: &[&str],
     file: &crate::resources::Artifact,
-    partial: &Path,
+    partials: &PartialDirectory,
+    partial_name: &OsStr,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64),
 ) -> Result<(), LocalModelError> {
@@ -1485,7 +1946,7 @@ fn download_from_sources(
     sources.push(file.url.clone());
     let mut failure = None;
     for url in &sources {
-        match download_resumable(fetcher, url, file, partial, cancel, progress) {
+        match download_resumable(fetcher, url, file, partials, partial_name, cancel, progress) {
             Ok(()) => return Ok(()),
             Err(error @ (LocalModelError::Cancelled | LocalModelError::Io(_))) => {
                 return Err(error)
@@ -1501,7 +1962,8 @@ fn download_resumable(
     fetcher: &dyn Fetcher,
     url: &str,
     file: &crate::resources::Artifact,
-    partial: &Path,
+    partials: &PartialDirectory,
+    partial_name: &OsStr,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64),
 ) -> Result<(), LocalModelError> {
@@ -1512,18 +1974,23 @@ fn download_resumable(
     }
     check_cancel(cancel)?;
     let expected = file.size;
-    let existing = match fs::symlink_metadata(partial) {
-        Ok(metadata) if metadata.file_type().is_file() && metadata.len() <= expected => {
-            metadata.len()
+    let mut output = match partials.open_read_write(partial_name) {
+        Ok(output) => output,
+        Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+            partials.remove(partial_name);
+            partials.open_read_write(partial_name)?
         }
-        Ok(_) => {
-            remove_leftover(partial);
-            0
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => 0,
         Err(error) => return Err(error.into()),
     };
-    let mut output = crate::storage::open_private_read_write_file(partial)?;
+    let metadata = output.metadata()?;
+    let existing = if metadata.is_file() && metadata.len() <= expected {
+        metadata.len()
+    } else {
+        drop(output);
+        partials.remove(partial_name);
+        output = partials.open_read_write(partial_name)?;
+        0
+    };
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; CHUNK];
     let mut downloaded = 0u64;
@@ -1570,7 +2037,7 @@ fn download_resumable(
             if downloaded > expected {
                 drop(writer);
                 drop(output);
-                remove_leftover(partial);
+                partials.remove(partial_name);
                 return Err(LocalModelError::SizeMismatch(url_file_name(url)));
             }
             hasher.update(&buffer[..read]);
@@ -1585,12 +2052,20 @@ fn download_resumable(
     }
     if !hex::encode(hasher.finalize()).eq_ignore_ascii_case(&file.sha256) {
         drop(output);
-        remove_leftover(partial);
+        partials.remove(partial_name);
         // 删不掉时不重试，否则会对着同一份坏前缀反复续传。
-        if resumed && fs::symlink_metadata(partial).is_err() {
+        if resumed && !partials.contains_file(partial_name) {
             // 文件已删掉，这次从零开始，不会再走到这里。
             progress(0);
-            return download_resumable(fetcher, url, file, partial, cancel, progress);
+            return download_resumable(
+                fetcher,
+                url,
+                file,
+                partials,
+                partial_name,
+                cancel,
+                progress,
+            );
         }
         return Err(LocalModelError::ChecksumMismatch(file.name.clone()));
     }
@@ -1676,6 +2151,51 @@ fn download(
     Ok(hex::encode(hasher.finalize()))
 }
 
+/// 按顺序从每个源把 `url` 下载进 `file`：先是 `mirrors` 里每个非空前缀加原地址，最后是原地址本身。每换一个源都把文件截断重写；长度或摘要不符、网络和 HTTP 错误都换下一个源，取消和本地读写错误直接返回。返回核对通过的小写十六进制 SHA-256。
+#[allow(clippy::too_many_arguments)]
+fn download_from_mirrors(
+    fetcher: &dyn Fetcher,
+    mirrors: &[&str],
+    url: &str,
+    expected_size: u64,
+    expected_sha256: &str,
+    file: &mut File,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(u64),
+) -> Result<String, LocalModelError> {
+    let mut sources: Vec<String> = mirrors
+        .iter()
+        .filter(|mirror| !mirror.is_empty())
+        .map(|mirror| mirrored(mirror, url))
+        .collect();
+    sources.push(url.to_owned());
+    let mut failure = None;
+    for source in &sources {
+        file.set_len(0)?;
+        file.rewind()?;
+        let mut output = BufWriter::new(&mut *file);
+        let result = download(
+            fetcher,
+            source,
+            expected_size,
+            &mut output,
+            cancel,
+            progress,
+        );
+        output.flush()?;
+        drop(output);
+        match result {
+            Ok(digest) if digest.eq_ignore_ascii_case(expected_sha256) => return Ok(digest),
+            Ok(_) => failure = Some(LocalModelError::ChecksumMismatch(url_file_name(url))),
+            Err(error @ (LocalModelError::Cancelled | LocalModelError::Io(_))) => {
+                return Err(error)
+            }
+            Err(error) => failure = Some(error),
+        }
+    }
+    Err(failure.unwrap_or_else(|| LocalModelError::MissingFile(url_file_name(url))))
+}
+
 fn url_file_name(url: &str) -> String {
     url.rsplit('/').next().unwrap_or_default().to_owned()
 }
@@ -1752,6 +2272,90 @@ fn copy_link_with_budget(
     Ok(())
 }
 
+#[cfg(unix)]
+fn open_or_create_directory_at(parent: &File, components: &[String]) -> io::Result<File> {
+    let mut directory = parent.try_clone()?;
+    for component in components {
+        let name = OsStr::new(component);
+        match crate::storage::open_private_directory_at(&directory, name) {
+            Ok(next) => directory = next,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                rustix::fs::mkdirat(&directory, name, rustix::fs::Mode::from_raw_mode(0o700))
+                    .map_err(io::Error::from)?;
+                directory = crate::storage::open_private_directory_at(&directory, name)?;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(directory)
+}
+
+#[cfg(unix)]
+fn open_model_parent_at(
+    model_directory: &File,
+    relative: &[String],
+) -> io::Result<(File, OsString)> {
+    let (name, parent) = relative
+        .split_last()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "empty model path"))?;
+    Ok((
+        open_or_create_directory_at(model_directory, parent)?,
+        OsString::from(name),
+    ))
+}
+
+#[cfg(unix)]
+fn copy_link_at_with_budget(
+    model_directory: &File,
+    source: &[String],
+    destination: &[String],
+    written: &mut u64,
+    budget: u64,
+) -> Result<(), LocalModelError> {
+    let (source_parent, source_name) = open_model_parent_at(model_directory, source)?;
+    let mut input = crate::storage::open_private_file_at(&source_parent, &source_name)?;
+    let size = input.metadata()?.len();
+    let next = written
+        .checked_add(size)
+        .ok_or_else(|| LocalModelError::UnsafeArchive("archive expands too far".into()))?;
+    if next > budget {
+        return Err(LocalModelError::UnsafeArchive(
+            "archive expands too far".into(),
+        ));
+    }
+    let (destination_parent, destination_name) =
+        open_model_parent_at(model_directory, destination)?;
+    crate::storage::write_private_file_at_with(
+        &destination_parent,
+        &destination_name,
+        |mut output| {
+            io::copy(&mut input, &mut output)?;
+            Ok::<(File, ()), LocalModelError>((output, ()))
+        },
+    )?;
+    *written = next;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn model_path_exists_at(model_directory: &File, relative: &[String]) -> bool {
+    let Some((name, parents)) = relative.split_last() else {
+        return false;
+    };
+    let Ok(mut parent) = model_directory.try_clone() else {
+        return false;
+    };
+    for component in relative.iter().take(parents.len()) {
+        let Ok(next) = crate::storage::open_private_directory_at(&parent, OsStr::new(component))
+        else {
+            return false;
+        };
+        parent = next;
+    }
+    crate::storage::open_private_file_at(&parent, OsStr::new(name)).is_ok()
+        || crate::storage::open_private_directory_at(&parent, OsStr::new(name)).is_ok()
+}
+
 impl<R: Read> Read for Counting<R> {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         let read = self.inner.read(buffer)?;
@@ -1761,18 +2365,31 @@ impl<R: Read> Read for Counting<R> {
 }
 
 /// Unpack the members the model needs from `archive` into `model_dir`. Members outside `archive.root`, or with absolute or `..` paths, or links that resolve outside the model, fail the install; members the model does not name are skipped. Links inside the model are materialised as copies so the result needs no symlink support on Windows.
+#[allow(clippy::too_many_arguments)]
 fn extract(
     archive: &Path,
     model: &CatalogModel,
     exclude: &[String],
     model_dir: &Path,
+    model_directory: Option<&File>,
+    archive_file: Option<&File>,
     progress: &mut dyn FnMut(InstallProgress),
     cancel: &AtomicBool,
 ) -> Result<(), LocalModelError> {
+    #[cfg(not(unix))]
+    let _ = (model_directory, archive_file);
     let total = model.archive.size;
     let consumed = Rc::new(Cell::new(0u64));
+    #[cfg(unix)]
+    let archive_input = if let Some(archive_file) = archive_file {
+        archive_file.try_clone()?
+    } else {
+        crate::storage::open_private_file_in(archive)?
+    };
+    #[cfg(not(unix))]
+    let archive_input = crate::storage::open_private_file_in(archive)?;
     let reader = Counting {
-        inner: crate::storage::open_private_file_in(archive)?,
+        inner: archive_input,
         count: consumed.clone(),
     };
     let decoder = bzip2::read::MultiBzDecoder::new(BufReader::with_capacity(CHUNK, reader));
@@ -1832,38 +2449,113 @@ fn extract(
             .fold(model_dir.to_path_buf(), |path, part| path.join(part));
         let kind = entry.header().entry_type();
         if kind.is_dir() {
+            #[cfg(unix)]
+            if let Some(model_directory) = model_directory {
+                open_or_create_directory_at(model_directory, &relative)?;
+            } else {
+                fs::create_dir_all(&destination)?;
+            }
+            #[cfg(not(unix))]
             fs::create_dir_all(&destination)?;
         } else if kind.is_file() || kind.is_contiguous() {
-            if let Some(parent) = destination.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            let mut output = BufWriter::new(create_private_file(&destination)?);
-            loop {
-                check_cancel(cancel)?;
-                let read = match entry.read(&mut buffer) {
-                    Ok(0) => break,
-                    Ok(read) => read,
-                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                    Err(error) => return Err(unsafe_archive(error)),
-                };
-                written += read as u64;
-                if written > budget {
-                    return Err(LocalModelError::UnsafeArchive(
-                        "archive expands too far".into(),
-                    ));
+            #[cfg(unix)]
+            if let Some(model_directory) = model_directory {
+                let (parent, name) = open_model_parent_at(model_directory, &relative)?;
+                crate::storage::write_private_file_at_with(&parent, &name, |output| {
+                    let mut output = BufWriter::new(output);
+                    loop {
+                        check_cancel(cancel)?;
+                        let read = match entry.read(&mut buffer) {
+                            Ok(0) => break,
+                            Ok(read) => read,
+                            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                            Err(error) => return Err(unsafe_archive(error)),
+                        };
+                        written += read as u64;
+                        if written > budget {
+                            return Err(LocalModelError::UnsafeArchive(
+                                "archive expands too far".into(),
+                            ));
+                        }
+                        output.write_all(&buffer[..read])?;
+                        let now = consumed.get().min(total);
+                        if now - last_report >= (total / 200).max(CHUNK as u64) {
+                            last_report = now;
+                            progress(InstallProgress {
+                                stage: "extract",
+                                downloaded: now,
+                                total,
+                            });
+                        }
+                    }
+                    let output = output.into_inner().map_err(|error| error.into_error())?;
+                    Ok::<(File, ()), LocalModelError>((output, ()))
+                })?;
+            } else {
+                if let Some(parent) = destination.parent() {
+                    fs::create_dir_all(parent)?;
                 }
-                output.write_all(&buffer[..read])?;
-                let now = consumed.get().min(total);
-                if now - last_report >= (total / 200).max(CHUNK as u64) {
-                    last_report = now;
-                    progress(InstallProgress {
-                        stage: "extract",
-                        downloaded: now,
-                        total,
-                    });
+                let mut output = BufWriter::new(create_private_file(&destination)?);
+                loop {
+                    check_cancel(cancel)?;
+                    let read = match entry.read(&mut buffer) {
+                        Ok(0) => break,
+                        Ok(read) => read,
+                        Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                        Err(error) => return Err(unsafe_archive(error)),
+                    };
+                    written += read as u64;
+                    if written > budget {
+                        return Err(LocalModelError::UnsafeArchive(
+                            "archive expands too far".into(),
+                        ));
+                    }
+                    output.write_all(&buffer[..read])?;
+                    let now = consumed.get().min(total);
+                    if now - last_report >= (total / 200).max(CHUNK as u64) {
+                        last_report = now;
+                        progress(InstallProgress {
+                            stage: "extract",
+                            downloaded: now,
+                            total,
+                        });
+                    }
                 }
+                output.flush()?;
             }
-            output.flush()?;
+            #[cfg(not(unix))]
+            {
+                if let Some(parent) = destination.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                let mut output = BufWriter::new(create_private_file(&destination)?);
+                loop {
+                    check_cancel(cancel)?;
+                    let read = match entry.read(&mut buffer) {
+                        Ok(0) => break,
+                        Ok(read) => read,
+                        Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                        Err(error) => return Err(unsafe_archive(error)),
+                    };
+                    written += read as u64;
+                    if written > budget {
+                        return Err(LocalModelError::UnsafeArchive(
+                            "archive expands too far".into(),
+                        ));
+                    }
+                    output.write_all(&buffer[..read])?;
+                    let now = consumed.get().min(total);
+                    if now - last_report >= (total / 200).max(CHUNK as u64) {
+                        last_report = now;
+                        progress(InstallProgress {
+                            stage: "extract",
+                            downloaded: now,
+                            total,
+                        });
+                    }
+                }
+                output.flush()?;
+            }
         } else if kind.is_symlink() || kind.is_hard_link() {
             let target = entry
                 .link_name()
@@ -1886,6 +2578,18 @@ fn extract(
         // Device nodes, FIFOs and the like are never part of a model and are skipped.
     }
     for (destination, source) in pending {
+        #[cfg(unix)]
+        if let Some(model_directory) = model_directory {
+            if !model_path_exists_at(model_directory, &source) {
+                return Err(LocalModelError::UnsafeArchive(format!(
+                    "{} -> {}",
+                    destination.join("/"),
+                    source.join("/")
+                )));
+            }
+            copy_link_at_with_budget(model_directory, &source, &destination, &mut written, budget)?;
+            continue;
+        }
         let join = |parts: &[String]| {
             parts
                 .iter()

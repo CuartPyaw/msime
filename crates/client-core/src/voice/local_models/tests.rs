@@ -162,6 +162,129 @@ fn staging_creation_stays_in_an_open_parent_after_root_replacement() {
 
 #[cfg(unix)]
 #[test]
+fn partial_directory_creation_stays_in_an_open_root_after_replacement() {
+    use std::os::unix::fs::symlink;
+
+    let state = tempfile::tempdir().unwrap();
+    let root = state.path().join("models");
+    let outside = state.path().join("outside");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(&outside).unwrap();
+    let root_directory = crate::storage::open_private_directory(&root).unwrap();
+    let moved = state.path().join("models-moved");
+    fs::rename(&root, &moved).unwrap();
+    symlink(&outside, &root).unwrap();
+
+    partial_directory_at(&root, &root_directory, "pack").unwrap();
+
+    assert!(moved.join(".partial-pack").is_dir());
+    assert!(!outside.join(".partial-pack").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn partial_file_writes_stay_in_the_open_directory_after_root_replacement() {
+    use std::os::unix::fs::symlink;
+
+    let state = tempfile::tempdir().unwrap();
+    let root = state.path().join("models");
+    let outside = state.path().join("outside");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(&outside).unwrap();
+    let partials = partial_directory(&root, "pack").unwrap();
+    let moved = state.path().join("models-moved");
+    fs::rename(&root, &moved).unwrap();
+    symlink(&outside, &root).unwrap();
+
+    let file = pack_files()[0].clone();
+    let partial = partial_path(partials.path(), &file).unwrap();
+    let name = partial.file_name().unwrap();
+    let fetcher = pack_fetcher("", PACK_B);
+    download_from_sources(
+        &fetcher,
+        &[],
+        &file,
+        &partials,
+        name,
+        &AtomicBool::new(false),
+        &mut |_| {},
+    )
+    .unwrap();
+
+    assert_eq!(
+        fs::read(moved.join(".partial-pack").join(name)).unwrap(),
+        PACK_A
+    );
+    assert!(!outside.join(".partial-pack").join(name).exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn partial_file_reads_stay_in_the_open_directory_after_root_replacement() {
+    use std::os::unix::fs::symlink;
+
+    let state = tempfile::tempdir().unwrap();
+    let root = state.path().join("models");
+    let outside = state.path().join("outside");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(&outside).unwrap();
+    let partials = partial_directory(&root, "pack").unwrap();
+    let name = OsStr::new("partial-a");
+    fs::write(partials.path().join(name), b"synthetic partial").unwrap();
+    fs::create_dir_all(outside.join(".partial-pack")).unwrap();
+    fs::write(outside.join(".partial-pack").join(name), b"outside partial").unwrap();
+    let moved = state.path().join("models-moved");
+    fs::rename(&root, &moved).unwrap();
+    symlink(&outside, &root).unwrap();
+
+    let mut input = partials.open_read(name).unwrap();
+    let mut bytes = Vec::new();
+    input.read_to_end(&mut bytes).unwrap();
+
+    assert_eq!(bytes, b"synthetic partial");
+}
+
+#[cfg(unix)]
+#[test]
+fn partial_publish_rename_stays_in_open_directories_after_root_replacement() {
+    use std::os::unix::fs::symlink;
+
+    let state = tempfile::tempdir().unwrap();
+    let root = state.path().join("models");
+    let outside = state.path().join("outside");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(&outside).unwrap();
+    let partials = partial_directory(&root, "pack").unwrap();
+    let staging = Staging::new(root.join(".staging-pack-new")).unwrap();
+    staging.create().unwrap();
+    staging.create_model_directory().unwrap();
+    let pack_dir = staging.path.join("model");
+    let pack_directory = staging.open_model_directory().unwrap();
+    let name = OsStr::new("a.dat");
+    let partial_name = OsStr::new("partial-a");
+    fs::write(partials.path().join(partial_name), b"synthetic").unwrap();
+    let moved = state.path().join("models-moved");
+    fs::rename(&root, &moved).unwrap();
+    symlink(&outside, &root).unwrap();
+
+    move_partial_into_pack(
+        &partials,
+        partial_name,
+        &pack_dir,
+        name.to_str().unwrap(),
+        Some(&pack_directory),
+    )
+    .unwrap();
+
+    assert_eq!(
+        fs::read(moved.join(".staging-pack-new/model/a.dat")).unwrap(),
+        b"synthetic"
+    );
+    assert!(!outside.join(".staging-pack-new/model/a.dat").exists());
+}
+
+#[cfg(unix)]
+#[test]
 fn model_directory_creation_stays_in_the_open_staging_directory() {
     use std::os::unix::fs::symlink;
 
@@ -180,6 +303,136 @@ fn model_directory_creation_stays_in_the_open_staging_directory() {
 
     assert!(moved.join(".staging-pack-new/model").is_dir());
     assert!(!outside.join(".staging-pack-new").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn archive_member_creation_stays_in_the_open_model_directory() {
+    use std::os::unix::fs::symlink;
+
+    let state = tempfile::tempdir().unwrap();
+    let root = state.path().join("models");
+    let outside = state.path().join("outside");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(&outside).unwrap();
+    let staging = Staging::new(root.join(".staging-pack-new")).unwrap();
+    staging.create().unwrap();
+    staging.create_model_directory().unwrap();
+    let pack_directory = staging.open_model_directory().unwrap();
+    fs::create_dir_all(outside.join(".staging-pack-new/model")).unwrap();
+    let moved = state.path().join("models-moved");
+    fs::rename(&root, &moved).unwrap();
+    symlink(&outside, &root).unwrap();
+
+    crate::storage::write_private_file_at_with(
+        &pack_directory,
+        OsStr::new("libfixture.so"),
+        |mut output| {
+            output.write_all(b"synthetic library")?;
+            Ok::<(File, ()), io::Error>((output, ()))
+        },
+    )
+    .unwrap();
+    write_manifest_at(&pack_directory, &serde_json::json!({"synthetic": true})).unwrap();
+
+    assert_eq!(
+        fs::read(moved.join(".staging-pack-new/model/libfixture.so")).unwrap(),
+        b"synthetic library"
+    );
+    assert_eq!(
+        fs::read(moved.join(".staging-pack-new/model").join(MANIFEST_FILE)).unwrap(),
+        serde_json::to_vec_pretty(&serde_json::json!({"synthetic": true})).unwrap()
+    );
+    assert!(!outside
+        .join(".staging-pack-new/model/libfixture.so")
+        .exists());
+    assert!(!outside
+        .join(".staging-pack-new/model")
+        .join(MANIFEST_FILE)
+        .exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn adoption_rename_stays_in_open_source_and_model_directories() {
+    use std::os::unix::fs::symlink;
+
+    let state = tempfile::tempdir().unwrap();
+    let root = state.path().join("models");
+    let source = state.path().join("resources");
+    let outside_root = state.path().join("outside-root");
+    let outside_source = state.path().join("outside-source");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(&source).unwrap();
+    fs::create_dir(&outside_root).unwrap();
+    fs::create_dir(&outside_source).unwrap();
+    fs::write(source.join("a.dat"), PACK_A).unwrap();
+    fs::create_dir_all(outside_source.join("a.dat")).unwrap();
+
+    let source_directory = crate::storage::open_private_directory(&source).unwrap();
+    let staging = Staging::new(root.join(".staging-pack-new")).unwrap();
+    staging.create().unwrap();
+    staging.create_model_directory().unwrap();
+    let pack_directory = staging.open_model_directory().unwrap();
+    let moved_root = state.path().join("models-moved");
+    let moved_source = state.path().join("resources-moved");
+    fs::rename(&root, &moved_root).unwrap();
+    fs::rename(&source, &moved_source).unwrap();
+    symlink(&outside_root, &root).unwrap();
+    symlink(&outside_source, &source).unwrap();
+
+    move_adopted_file_at(&source_directory, &pack_directory, OsStr::new("a.dat")).unwrap();
+
+    assert_eq!(
+        fs::read(moved_root.join(".staging-pack-new/model/a.dat")).unwrap(),
+        PACK_A
+    );
+    assert!(!outside_root.join(".staging-pack-new/model/a.dat").exists());
+    assert!(outside_source.join("a.dat").is_dir());
+}
+
+#[cfg(unix)]
+#[test]
+fn tar_extraction_stays_in_the_open_model_directory() {
+    use std::os::unix::fs::symlink;
+
+    let archive = good_archive();
+    let state = tempfile::tempdir().unwrap();
+    let root = state.path().join("models");
+    let outside = state.path().join("outside");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(&outside).unwrap();
+    let staging = Staging::new(root.join(".staging-fixture-new")).unwrap();
+    staging.create().unwrap();
+    staging.create_model_directory().unwrap();
+    let model_dir = staging.path.join("model");
+    let model_directory = staging.open_model_directory().unwrap();
+    let archive_path = state.path().join("fixture.tar.bz2");
+    fs::write(&archive_path, &archive).unwrap();
+    let moved = state.path().join("models-moved");
+    fs::rename(&root, &moved).unwrap();
+    symlink(&outside, &root).unwrap();
+
+    let model = fixture_model(&archive);
+    extract(
+        &archive_path,
+        &model,
+        &[],
+        &model_dir,
+        Some(&model_directory),
+        None,
+        &mut |_| {},
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+
+    assert_eq!(
+        fs::read(moved.join(".staging-fixture-new/model/encoder.onnx")).unwrap(),
+        b"encoder"
+    );
+    assert!(!outside
+        .join(".staging-fixture-new/model/encoder.onnx")
+        .exists());
 }
 
 #[cfg(unix)]
@@ -461,7 +714,7 @@ fn run(
     let result = install_model(
         root,
         model,
-        mirror,
+        &[mirror],
         fetcher,
         &mut |event| events.push(event),
         cancel,
@@ -519,6 +772,68 @@ fn memory_estimates_are_read_as_bytes() {
     assert_eq!(memory_bytes("约 1.5 GB"), 1_500_000_000);
     assert_eq!(memory_bytes("300 MB"), 300_000_000);
     assert_eq!(memory_bytes("unknown"), 0);
+}
+
+#[test]
+fn a_mirror_without_the_file_falls_back_to_the_original_address() {
+    let root = tempfile::tempdir().unwrap();
+    let archive = good_archive();
+    let model = fixture_model(&archive);
+    // Only the original addresses are served, as when the mirror has not cached a model and cannot reach it.
+    let fetcher = fetcher_for(&archive, "");
+    let (result, _) = run(
+        root.path(),
+        &model,
+        "https://mirror.example.test/",
+        &fetcher,
+        &AtomicBool::new(false),
+    );
+    result.unwrap();
+    assert_eq!(
+        *fetcher.requested.lock().unwrap(),
+        vec![
+            format!("https://mirror.example.test/{ARCHIVE_URL}"),
+            ARCHIVE_URL.to_owned(),
+            format!("https://mirror.example.test/{EXTRA_URL}"),
+            EXTRA_URL.to_owned(),
+        ]
+    );
+}
+
+#[test]
+fn a_mirror_copy_with_the_wrong_digest_is_replaced_from_the_original_address() {
+    let root = tempfile::tempdir().unwrap();
+    let archive = good_archive();
+    let model = fixture_model(&archive);
+    let mirror = "https://mirror.example.test/";
+    let mut stale = archive.clone();
+    let last = stale.len() - 1;
+    stale[last] ^= 0xff;
+    let fetcher = MapFetcher::new([
+        (mirrored(mirror, ARCHIVE_URL), stale),
+        (ARCHIVE_URL.to_owned(), archive.clone()),
+        (mirrored(mirror, EXTRA_URL), EXTRA.to_vec()),
+    ]);
+    let (result, _) = run(
+        root.path(),
+        &model,
+        mirror,
+        &fetcher,
+        &AtomicBool::new(false),
+    );
+    let installed = result.unwrap();
+    assert_eq!(
+        fs::read(installed.join("encoder.onnx")).unwrap(),
+        b"encoder"
+    );
+    assert_eq!(
+        *fetcher.requested.lock().unwrap(),
+        vec![
+            format!("https://mirror.example.test/{ARCHIVE_URL}"),
+            ARCHIVE_URL.to_owned(),
+            format!("https://mirror.example.test/{EXTRA_URL}"),
+        ]
+    );
 }
 
 #[test]

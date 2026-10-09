@@ -473,6 +473,7 @@ impl ProviderRegistry {
         if destination.len() > candidates.len() {
             destination.truncate(candidates.len());
         } else {
+            destination.reserve_exact(candidates.len() - destination.len());
             destination.extend(candidates[common..].iter().map(|candidate| {
                 let mut item = WordItem::new(
                     input,
@@ -523,6 +524,7 @@ fn fill_cantonese_candidates(
     if destination.len() > source.len() {
         destination.truncate(source.len());
     } else {
+        destination.reserve_exact(source.len() - destination.len());
         destination.extend(source[common..].iter().map(|candidate| {
             let mut item = WordItem::new(
                 &input[..candidate.end],
@@ -576,6 +578,9 @@ mod tests {
             registry.query_cantonese_scheme_into(&scheme, &mut direct);
             registry.query_cantonese_into(&request, &mut requested);
             assert_eq!(direct, requested, "输入：{raw}");
+            if raw == "nei" {
+                assert_eq!(requested.capacity(), requested.len());
+            }
         }
 
         // 预热字典及候选缓冲；请求路径的备用方案仍需复制一次输入。
@@ -656,5 +661,27 @@ mod tests {
         }
         registry.activate(SchemeType::Wubi).unwrap();
         registry.set_helpcode_keymap(None);
+    }
+
+    #[test]
+    fn stroke_query_reserves_exact_capacity_when_a_batch_grows_a_short_buffer() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("msime-stroke.db");
+        crate::stroke::fixture::build(&path);
+        let mut registry = registry(SchemeSet::of(&[SchemeType::Stroke]));
+        registry.stroke_path = path;
+        registry.activate(SchemeType::Stroke).unwrap();
+        let request = QueryRequest {
+            scheme: SchemeType::Stroke,
+            raw_input: "hs".to_owned(),
+            raw_input_with_cases: "hs".to_owned(),
+            valid: true,
+            ..QueryRequest::default()
+        };
+        let mut destination = Vec::with_capacity(1);
+        destination.push(WordItem::new("", "seed", 0, CandidateSource::Database, ""));
+        registry.query_stroke_into(&request, &mut destination);
+        assert_eq!(destination.len(), 2);
+        assert_eq!(destination.capacity(), destination.len());
     }
 }

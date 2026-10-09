@@ -218,7 +218,7 @@ public final class DistributionView extends View {
 
     private void styleText(int sizeSp, int weight, int colour) {
         ViewPolicy.setTextSizeSp(text, getContext(), sizeSp);
-        text.setTypeface(Typeface.create(Typeface.DEFAULT, weight));
+        ViewPolicy.setTypeface(text, Typeface.create(Typeface.DEFAULT, weight));
         text.setColor(colour);
     }
 

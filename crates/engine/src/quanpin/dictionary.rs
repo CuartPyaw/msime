@@ -362,17 +362,33 @@ impl QuanpinDictionary {
                 rows
             };
             result.reserve(rows.len());
-            result.extend(rows.into_iter().map(|row| {
+            let mut rows = rows.into_iter();
+            if let Some(row) = rows.next() {
                 let mut item = WordItem::new(
-                    typed.clone(),
+                    typed,
                     row.value,
                     row.weight,
                     CandidateSource::Database,
                     row.key,
                 );
                 item.fuzzy = true;
-                item
-            }));
+                result.push(item);
+            }
+            for row in rows {
+                let mut item = WordItem::new(
+                    result
+                        .last()
+                        .expect("the first fuzzy row was inserted")
+                        .pinyin
+                        .clone(),
+                    row.value,
+                    row.weight,
+                    CandidateSource::Database,
+                    row.key,
+                );
+                item.fuzzy = true;
+                result.push(item);
+            }
         }
         self.fuzzy_cache.insert(
             hash,
@@ -807,8 +823,7 @@ impl QuanpinDictionary {
         segmentation: &str,
         segments: &[String],
     ) -> Vec<WordItem> {
-        let key = join_segments(segments);
-        let rows = if let Some(rows) = self.longer_row_cache.get_ref(&key) {
+        let rows = if let Some(rows) = self.longer_row_cache.get_ref_by(segmentation) {
             rows.clone()
         } else {
             let rows = self.database.query_longer_phrases(
@@ -816,7 +831,8 @@ impl QuanpinDictionary {
                 LONGER_PHRASE_EXTRA_SYLLABLES,
                 LONGER_PHRASE_LIMIT,
             );
-            self.longer_row_cache.insert(key, rows.clone());
+            self.longer_row_cache
+                .insert(segmentation.to_owned(), rows.clone());
             rows
         };
         rows.into_iter()
@@ -875,8 +891,9 @@ impl QuanpinDictionary {
             return rows;
         }
         // The segments were normalised once in `resolve_segments`, so the lookup uses the standard keys directly.
-        let key = join_segments(segments);
-        let rows = if let Some(rows) = self.segment_row_cache.get_ref(&key) {
+        let code = segmentation.is_empty().then(|| join_segments(segments));
+        let key = code.as_deref().unwrap_or(segmentation);
+        let rows = if let Some(rows) = self.segment_row_cache.get_ref_by(key) {
             rows.clone()
         } else {
             let rows = self.database.query_segments_keyed_flat(
@@ -884,15 +901,14 @@ impl QuanpinDictionary {
                 UNLIMITED_ROWS,
                 QuerySource::Quanpin,
             );
-            self.segment_row_cache.insert(key, rows.clone());
+            self.segment_row_cache.insert(key.to_owned(), rows.clone());
             rows
         };
-        if segmentation.is_empty() {
-            let code = join_segments(segments);
+        if let Some(code) = code.as_deref() {
             rows.into_iter()
                 .map(|row| {
                     WordItem::new(
-                        &code,
+                        code,
                         row.value,
                         row.weight,
                         CandidateSource::Database,
@@ -1147,7 +1163,7 @@ fn alternative_segmentations(
     resolution: &SeriesResolution,
     types: u32,
 ) -> Vec<Vec<String>> {
-    let mut alternatives: Vec<Vec<String>> = Vec::with_capacity(SYLLABLE_GRAPH_PATH_LIMIT);
+    let mut alternatives = Vec::new();
     // Seeding the costlier cuts keeps them out of the frequency-competing tier; they are appended after it.
     let mut seen: [Option<String>; ALTERNATIVE_SEGMENTATION_SEEN_CAPACITY] =
         std::array::from_fn(|_| None);
@@ -1167,6 +1183,9 @@ fn alternative_segmentations(
             && alternatives.len() < SYLLABLE_GRAPH_PATH_LIMIT
             && remember_segmentation_key(&mut seen, &mut seen_length, primary_segmentation, key)
         {
+            if alternatives.is_empty() {
+                alternatives.reserve(SYLLABLE_GRAPH_PATH_LIMIT);
+            }
             alternatives.push(candidate.to_vec());
         }
     };

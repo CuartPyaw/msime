@@ -186,11 +186,6 @@ public final class CustomSkinLibrary {
         SafePaths.ensureDirectory(directory);
     }
 
-    /** org.json's optString coerces numbers and booleans; persisted library fields are strings. */
-    static String strictString(Object value) {
-        return JsonPolicy.strictString(value);
-    }
-
     // ---- 设计参数的导出与导入（云同步与分享用；不含照片） ----
 
     /** 导出库里全部设计的设计参数，见 {@link #exportDesigns(List, long)}。 */

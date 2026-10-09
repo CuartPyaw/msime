@@ -1,4 +1,5 @@
 import app.msime.android.CandidateGlossPolicy;
+import app.msime.android.JsonPolicy;
 
 public final class CandidateGlossModelSmoke {
     public static void main(String[] args) throws Exception {
@@ -56,9 +57,9 @@ public final class CandidateGlossModelSmoke {
             "strict fallback rejects booleans");
         check(CandidateGlossPolicy.strictString("hello").equals("hello"),
             "JSON strings are accepted");
-        check(Boolean.TRUE.equals(CandidateGlossPolicy.strictBoolean(Boolean.TRUE)),
+        check(Boolean.TRUE.equals(JsonPolicy.strictBoolean(Boolean.TRUE)),
             "JSON booleans are accepted");
-        check(CandidateGlossPolicy.strictBoolean("true") == null,
+        check(JsonPolicy.strictBoolean("true") == null,
             "boolean strings are rejected instead of coerced");
         check(CandidateGlossPolicy.isApplied(Boolean.TRUE),
             "translation application accepts a JSON true flag");

@@ -48,15 +48,6 @@ public final class ClipboardHistoryPolicy {
         return timestamp < 0 ? 0 : timestamp;
     }
 
-    /** Shared-store text fields must keep their JSON type; org.json otherwise coerces values. */
-    public static String strictString(Object raw) {
-        return JsonPolicy.strictString(raw);
-    }
-
-    public static Boolean strictBoolean(Object raw) {
-        return JsonPolicy.strictBoolean(raw);
-    }
-
     /** The shared store's `reason` turned into the refusal this host words. */
     public static Rejection rejectionFor(String reason) {
         if (REASON_FULL.equals(reason)) return Rejection.FULL;

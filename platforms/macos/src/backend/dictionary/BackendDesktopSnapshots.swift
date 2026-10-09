@@ -108,7 +108,9 @@ extension BackendAccountClient: DesktopSnapshotAPI {}
   }
   func execute(_ request: NSDictionary) async throws -> [String: Any] {
     guard let operation = request["operation"] as? String else { throw BackendAccountClient.Failure(status: 400) }
-    if operation == "snapshot_status" { return ["nativeFiles":true, "request":status as Any? ?? NSNull()] }
+    if operation == "snapshot_status" {
+      return ["nativeFiles":true, "localVersion":try capture().version, "request":status as Any? ?? NSNull()]
+    }
     if operation == "snapshot_cancel" {
       // Keep the handle until the task's defer path observes cancellation and
       // releases its prepared snapshot. A synchronous staging call may still
@@ -117,6 +119,10 @@ extension BackendAccountClient: DesktopSnapshotAPI {}
       job?.cancel()
       if status?["status"] as? String == "preparing" || status?["status"] as? String == "queued" { status?["status"] = "cancelled" }
       return ["request":status as Any? ?? NSNull()]
+    }
+    if operation == "snapshot_restore_cancel" {
+      if preview?.target == nil { preview = nil }
+      return ["cancelled":true]
     }
     let token = try await authorize()
     guard !busy else { throw BackendAccountClient.Failure(status: 409) }
@@ -137,7 +143,7 @@ extension BackendAccountClient: DesktopSnapshotAPI {}
     case "snapshot_restore_preview", "snapshot_choose_restore":
       guard job == nil else { throw BackendAccountClient.Failure(status: 409) }
       preview = nil
-      guard let source = try await choose(false) else { return ["cancelled":true] }
+      guard let source = try await choose(false) else { return ["saved":false] }
       let scoped = source.startAccessingSecurityScopedResource()
       defer { if scoped { source.stopAccessingSecurityScopedResource() } }
       let frozen = try await freeze(source)

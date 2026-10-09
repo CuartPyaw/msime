@@ -132,16 +132,18 @@ pub fn parse(text: &str, max_bytes: usize) -> Result<WordbookImportReport, Wordb
         ..WordbookImportReport::default()
     };
     let mut seen = HashSet::with_capacity(row_capacity);
+    let mut examined = 0;
     for (index, line) in text.lines().enumerate() {
-        if report.entries.len() >= MAX_ROWS {
-            report.truncated = true;
-            break;
-        }
         let line = line.trim_end_matches('\r');
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
+        if examined >= MAX_ROWS {
+            report.truncated = true;
+            break;
+        }
+        examined += 1;
         match parse_row(delimiter, line) {
             Ok(entry) => {
                 if seen.insert(entry.word.clone()) {
@@ -436,6 +438,20 @@ mod tests {
         }
         let report = parse(&text, 64 * 1024 * 1024).unwrap();
         assert_eq!(report.entries.len(), MAX_ROWS);
+        assert!(report.truncated);
+    }
+
+    #[test]
+    fn invalid_rows_count_toward_the_examined_row_limit() {
+        let mut text = String::from("first,adj. 合成\n");
+        for _ in 1..MAX_ROWS {
+            text.push_str("invalid row\n");
+        }
+        text.push_str("last,adj. 合成\n");
+
+        let report = parse(&text, 64 * 1024 * 1024).unwrap();
+        assert_eq!(report.entries.len(), 1);
+        assert_eq!(report.failed, MAX_ROWS - 1);
         assert!(report.truncated);
     }
 

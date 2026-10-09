@@ -1,4 +1,5 @@
 import app.msime.android.DictionaryCollectionsStore;
+import app.msime.android.JsonPolicy;
 import java.util.List;
 
 public final class DictionaryCollectionsStoreSmoke {
@@ -35,19 +36,16 @@ public final class DictionaryCollectionsStoreSmoke {
         check(DictionaryCollectionsStore.formatForFile("a.dict.yaml", "txt").equals("rime"));
         check(DictionaryCollectionsStore.formatForFile("a.txt", "hans").equals("hans"));
         check(DictionaryCollectionsStore.binaryFormat("scel") && !DictionaryCollectionsStore.binaryFormat("txt"));
-        java.lang.reflect.Method strictBoolean = DictionaryCollectionsStore.class.getDeclaredMethod(
-            "strictBoolean", Object.class);
-        strictBoolean.setAccessible(true);
-        check(Boolean.TRUE.equals(strictBoolean.invoke(null, Boolean.TRUE)));
-        check(strictBoolean.invoke(null, "true") == null);
-        check(DictionaryCollectionsStore.strictString("synthetic") != null);
-        check(DictionaryCollectionsStore.strictString(7) == null);
-        check("synthetic export".equals(DictionaryCollectionsStore.exportPage("synthetic export")));
-        check(DictionaryCollectionsStore.exportPage(7) == null);
-        check(DictionaryCollectionsStore.strictInteger(Integer.valueOf(7)) == 7);
-        check(DictionaryCollectionsStore.strictInteger("7") == null);
-        check(DictionaryCollectionsStore.strictLong(Long.valueOf(7)) == 7L);
-        check(DictionaryCollectionsStore.strictLong(7.0) == null);
+        check(Boolean.TRUE.equals(JsonPolicy.strictBoolean(Boolean.TRUE)));
+        check(JsonPolicy.strictBoolean("true") == null);
+        check(JsonPolicy.strictString("synthetic") != null);
+        check(JsonPolicy.strictString(7) == null);
+        check("synthetic export".equals(JsonPolicy.strictString("synthetic export")));
+        check(JsonPolicy.strictString(7) == null);
+        check(JsonPolicy.strictInteger(Integer.valueOf(7)) == 7);
+        check(JsonPolicy.strictInteger("7") == null);
+        check(JsonPolicy.strictLong(Long.valueOf(7)) == 7L);
+        check(JsonPolicy.strictLong(7.0) == null);
         check(DictionaryCollectionsStore.nonNegativeInteger(Integer.valueOf(7)) == 7);
         check(DictionaryCollectionsStore.nonNegativeInteger(Integer.valueOf(-1)) == null);
         check(DictionaryCollectionsStore.nonNegativeInteger(Double.valueOf(7.5)) == null);

@@ -168,15 +168,10 @@ public final class BackendAccount {
 
     public boolean supports(String provider) {
         try {
-            return providerEnabled(providers().opt(provider));
+            return JsonPolicy.strictTrue(providers().opt(provider));
         } catch (Exception | LinkageError error) {
             return false;
         }
-    }
-
-    /** Provider availability is a typed server flag; reject org.json scalar coercion. */
-    static boolean providerEnabled(Object value) {
-        return JsonPolicy.strictTrue(value);
     }
 
     /** Start a sign-in and get the nonce the provider's SDK has to echo. */
@@ -437,7 +432,7 @@ public final class BackendAccount {
         String defaultModel = optionalStringField(response.opt("default_model"), "");
         if (!validChatModels(models, defaultModel))
             throw new IllegalStateException("invalid model catalogue");
-        return List.copyOf(models);
+        return ListPolicy.copyOrEmpty(models);
     }
 
     static boolean validChatModels(List<ChatModel> models, String defaultModel) {
@@ -757,7 +752,7 @@ public final class BackendAccount {
                 throw new IllegalStateException("invalid clipboard response");
             items.add(new ClipboardItem(id, text, updated));
         }
-        return new ClipboardPage(requiredBooleanField(response.opt("enabled")), List.copyOf(items));
+        return new ClipboardPage(requiredBooleanField(response.opt("enabled")), ListPolicy.copyOrEmpty(items));
     }
 
     /** Whether a clipboard search fits client-core's 1024-byte text contract. */

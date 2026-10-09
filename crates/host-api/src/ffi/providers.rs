@@ -5,26 +5,7 @@
 use crate::*;
 use msime_client_core::is_bounded_text;
 
-#[cfg(test)]
-mod tests {
-    use super::online_candidate_response;
-    use serde_json::json;
-
-    #[test]
-    fn online_candidate_response_carries_only_the_batch() {
-        let value =
-            online_candidate_response(vec![("first".to_owned(), 0), ("second".to_owned(), 1)]);
-
-        assert_eq!(
-            value,
-            json!({"candidates": [
-                {"text": "first", "source": 0},
-                {"text": "second", "source": 1},
-            ]})
-        );
-    }
-}
-
+#[cfg(any(unix, test))]
 fn online_candidate_response(candidates: Vec<(String, u8)>) -> Value {
     let mut rows = Vec::with_capacity(candidates.len());
     for (text, source) in candidates {
@@ -777,4 +758,24 @@ pub unsafe extern "C" fn msime_client_emoji_catalog_request(
             "items": rendered_items
         }))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::online_candidate_response;
+    use serde_json::json;
+
+    #[test]
+    fn online_candidate_response_carries_only_the_batch() {
+        let value =
+            online_candidate_response(vec![("first".to_owned(), 0), ("second".to_owned(), 1)]);
+
+        assert_eq!(
+            value,
+            json!({"candidates": [
+                {"text": "first", "source": 0},
+                {"text": "second", "source": 1},
+            ]})
+        );
+    }
 }

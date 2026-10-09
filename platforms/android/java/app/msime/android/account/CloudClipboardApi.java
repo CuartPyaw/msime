@@ -124,18 +124,4 @@ public final class CloudClipboardApi {
         return new CloudApi.Failure(500, "invalid_response", "invalid clipboard response", 0);
     }
 
-    /** org.json's optBoolean accepts string values; server response fields must keep their JSON type. */
-    static Boolean strictBoolean(Object value) {
-        return JsonPolicy.strictBoolean(value);
-    }
-
-    /** Retention days must be a JSON integer; reject strings and fractional numbers. */
-    static Integer strictInteger(Object value) {
-        return JsonPolicy.strictInteger(value);
-    }
-
-    /** Compatibility entry point retained for the host smoke contract. */
-    static String strictString(Object value) {
-        return JsonPolicy.strictString(value);
-    }
 }

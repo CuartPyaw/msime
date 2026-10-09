@@ -178,7 +178,7 @@ public final class SyncApi {
     }
 
     static Phrases parsePhrases(JSONObject root) throws CloudApi.Failure {
-        long revision = phraseRevision(root.opt("revision"));
+        long revision = preferenceRevision(root.opt("revision"));
         JSONArray raw = requiredPhrases(root.opt("phrases"));
         if (raw.length() > SyncMergePolicy.MAX_PHRASES)
             throw invalid("too many phrases");
@@ -216,11 +216,6 @@ public final class SyncApi {
             return longValue.intValue();
         }
         return fallback;
-    }
-
-    /** Common phrase revisions use the same non-negative integer CAS contract as preferences. */
-    static long phraseRevision(Object value) throws CloudApi.Failure {
-        return preferenceRevision(value);
     }
 
     // ---- 词库快照 ----
@@ -278,8 +273,14 @@ public final class SyncApi {
     public long downloadSnapshot(Path destination) throws CloudApi.Failure {
         Path partial = destination.resolveSibling(destination.getFileName() + ".partial");
         try {
-            try (OutputStream out = Files.newOutputStream(partial, StandardOpenOption.CREATE,
-                    StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE,
+            if (Files.exists(partial, LinkOption.NOFOLLOW_LINKS)
+                    && (!Files.isRegularFile(partial, LinkOption.NOFOLLOW_LINKS)
+                        || !SafePaths.isSingleLink(partial))) {
+                throw new IOException("snapshot partial file is not private");
+            }
+            Files.deleteIfExists(partial);
+            try (OutputStream out = Files.newOutputStream(partial,
+                    StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE,
                     LinkOption.NOFOLLOW_LINKS)) {
                 streamed(token -> streams.download(SNAPSHOT, token, new BoundedStream(out, MAX_SNAPSHOT_BYTES)));
             }
@@ -301,12 +302,18 @@ public final class SyncApi {
         try {
             JSONObject root = new JSONObject(new String(exchange.body(), StandardCharsets.UTF_8));
             Object next = root.opt("revision");
-            long nextRevision = snapshotRevisionValue(next);
+            long nextRevision = preferenceRevision(next);
             if (nextRevision <= revision) throw invalid("snapshot revision");
             return nextRevision;
         } catch (JSONException malformed) {
             throw invalid("malformed snapshot response");
         }
+    }
+
+    static boolean uploadable(Path file) {
+        return file != null
+            && Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
+            && SafePaths.isSingleLink(file);
     }
 
     /** 快照第一行是 `{"type":"header",…,"revision":N}`。 */
@@ -317,15 +324,10 @@ public final class SyncApi {
             JSONObject header = new JSONObject(first);
             Object revision = header.opt("revision");
             if (!"header".equals(header.opt("type"))) throw invalid("snapshot header");
-            return snapshotRevisionValue(revision);
+            return preferenceRevision(revision);
         } catch (JSONException malformed) {
             throw invalid("snapshot header");
         }
-    }
-
-    /** Snapshot headers and restore responses carry the same integer revision contract. */
-    static long snapshotRevisionValue(Object value) throws CloudApi.Failure {
-        return preferenceRevision(value);
     }
 
     /** Snapshot entry weights are positive JSON integers in the host-api range. */
@@ -494,6 +496,7 @@ public final class SyncApi {
         }
 
         @Override public Exchange upload(String path, String token, Path file, String contentType) throws IOException {
+            if (!uploadable(file)) throw new IOException("snapshot upload file is not private");
             long length = Files.size(file);
             if (length <= 0 || length > MAX_SNAPSHOT_BYTES) throw new IOException("snapshot size out of range");
             HttpsURLConnection connection = open(path, "PUT", token, "application/json");

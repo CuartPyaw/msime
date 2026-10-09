@@ -178,7 +178,7 @@ final class ImeNineKeyPanel {
             String glyphs = NineKeyPanelPolicy.glyphs(current);
             strokeReading.setText(glyphs.isEmpty() ? "笔画" : glyphs);
             strokeReading.setContentDescription(NineKeyPanelPolicy.strokesDescription(current));
-            strokeReading.setAlpha(glyphs.isEmpty() ? .5f : 1f);
+            ViewPolicy.setActiveAlpha(strokeReading, !glyphs.isEmpty(), .5f);
             return;
         }
         spellingColumn.removeAllViews();
@@ -241,15 +241,15 @@ final class ImeNineKeyPanel {
     void applySkin() {
         if (root == null) return;
         s.imeStyler.applySkinBackground(root);
-        left.setBackground(DrawablePolicy.rounded(
+        ViewPolicy.setBackground(left, DrawablePolicy.rounded(
             Color.parseColor(s.skin.sidebarBackground()), s.pixels(s.skin.cornerRadius())));
         ViewPolicy.setBackground(candidateScroll, DrawablePolicy.rounded(
             s.candidateAppearance.surface(), s.pixels(s.skin.cornerRadius())));
         int foreground = Color.parseColor(s.skin.keyForeground());
-        strokeReading.setTextColor(foreground);
+        ViewPolicy.setTextColor(strokeReading, foreground);
         for (int index = 0; index < candidateHolder.getChildCount(); index++) {
             if (candidateHolder.getChildAt(index) instanceof TextView empty)
-                empty.setTextColor(s.candidateAppearance.text());
+                ViewPolicy.setTextColor(empty, s.candidateAppearance.text());
         }
     }
 

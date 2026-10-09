@@ -202,6 +202,11 @@ public final class AndroidLocalSettingsSmoke {
             Files.delete(file);
             Files.createDirectory(file);
             check(AndroidLocalSettings.load(file).equals(AndroidLocalSettings.defaults()), "a directory reads as defaults");
+            Files.delete(file);
+            Path outside = directory.resolve("outside-settings.json");
+            Files.writeString(outside, "synthetic");
+            Files.createLink(file, outside);
+            check(!AndroidLocalSettings.privateFile(file), "a hard-linked settings file is refused");
         } finally {
             deleteTree(directory);
         }

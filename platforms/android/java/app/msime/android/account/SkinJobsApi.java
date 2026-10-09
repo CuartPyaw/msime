@@ -207,7 +207,7 @@ public final class SkinJobsApi {
                 }
             }
             if (first != null) throw first;
-            return List.copyOf(proposals);
+            return ListPolicy.copyOrEmpty(proposals);
         } finally {
             pool.shutdownNow();
         }
@@ -368,11 +368,6 @@ public final class SkinJobsApi {
             return longValue.intValue();
         }
         return null;
-    }
-
-    /** Native planner responses must keep status flags as JSON booleans. */
-    static Boolean strictBoolean(Object value) {
-        return JsonPolicy.strictBoolean(value);
     }
 
     private static JSONObject value(String response) throws CloudApi.Failure {

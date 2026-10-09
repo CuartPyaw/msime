@@ -592,8 +592,8 @@ public final class MSIMEInputService extends InputMethodService {
         new ThreadPoolExecutor.AbortPolicy());
     /** 表情目录和符号面板里的颜文字、符号目录都在这条线程上读。 */
     final ExecutorService emojiWorker = Executors.newSingleThreadExecutor();
-    // 只在 `emojiWorker` 线程上使用；`hasGlyph` 会走系统字体回退链，能判断当前设备能否画出某个表情。
-    private final Paint emojiGlyphPaint = new Paint();
+    // 只在 `emojiWorker` 线程上使用（表情目录和符号面板的符号目录都在那条线程上读）；`hasGlyph` 会走系统字体回退链，能判断当前设备能否画出某个表情或符号。
+    final Paint emojiGlyphPaint = new Paint();
     final ExecutorService cloudClipboardWorker = Executors.newSingleThreadExecutor();
     private final ExecutorService candidateGlossWorker = new ThreadPoolExecutor(
         1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(1),
@@ -2413,7 +2413,7 @@ public final class MSIMEInputService extends InputMethodService {
             KeyboardGeometry.setKeyTextSize(button, candidateFontSize);
             button.setContentDescription("英文建议 " + (slot + 1) + "：" + text);
             imeStyler.styleButton(button, false);
-            button.setTypeface(imeStyler.candidateTypeface());
+            ViewPolicy.setTypeface(button, imeStyler.candidateTypeface());
             activeCandidates.addView(button, new LinearLayout.LayoutParams(
                 candidateHorizontal ? LinearLayout.LayoutParams.WRAP_CONTENT
                     : LinearLayout.LayoutParams.MATCH_PARENT,
@@ -2698,7 +2698,7 @@ public final class MSIMEInputService extends InputMethodService {
             if (choices == null || choices.length() == 0) return texts;
             JSONObject message = choices.getJSONObject(0).optJSONObject("message");
             if (message == null) return texts;
-            String content = OnlineCandidatePolicy.strictText(message.opt("content"));
+            String content = JsonPolicy.strictString(message.opt("content"));
             if (content == null) return texts;
             if (!OnlineCandidatePolicy.acceptsAiContent(content)) return texts;
             JSONArray entries = new JSONObject(content).optJSONArray("candidates");
@@ -2707,7 +2707,7 @@ public final class MSIMEInputService extends InputMethodService {
             for (int index = 0; index < entries.length(); index++) {
                 JSONObject entry = entries.optJSONObject(index);
                 if (entry != null) {
-                    String text = OnlineCandidatePolicy.strictText(entry.opt("text"));
+                    String text = JsonPolicy.strictString(entry.opt("text"));
                     if (text != null) texts.add(text);
                 }
             }
@@ -2925,18 +2925,18 @@ public final class MSIMEInputService extends InputMethodService {
         int reserved = CandidateTranslationPolicy.reservedGlossRows(candidateGlossLineCount(), koreanHanjaRows());
         int extraRows = BoundsPolicy.nonNegative(reserved - 1);
         int line = ImeToolbar.CANDIDATE_LINE_DP + extraRows * ImeToolbar.EXTRA_GLOSS_ROW_DP;
-        setFixedHeight(candidateLine, pixels(line));
+        ViewPolicy.setFixedHeight(candidateLine, pixels(line));
         // 读音行至少是设计的 14 dp，读音字号放不下时按读音文字的实际高度加高，见 ReadingRowPolicy。
         int readingRow = readingRowHeight();
-        if (candidateHeader != null) setFixedHeight(candidateHeader, readingRow);
+        if (candidateHeader != null) ViewPolicy.setFixedHeight(candidateHeader, readingRow);
         // 空闲时的工具栏和组词时的读音行 + 候选行占同一个位置，两者同高，打字时键盘才不会变高。空闲时读音行若在显示常驻的模式标签（直接输入、准备中），它已经占了读音行那一截，工具栏只取候选行的高度，总高不变。
         boolean idleHeader = candidateHeader != null
             && candidateHeader.getVisibility() == View.VISIBLE;
         if (shortcutScroll != null)
-            setFixedHeight(shortcutScroll, (idleHeader ? 0 : readingRow) + pixels(line));
+            ViewPolicy.setFixedHeight(shortcutScroll, (idleHeader ? 0 : readingRow) + pixels(line));
         // 「最近复制」占的是工具栏那一行的位置，同高，出现和消失时键盘不跳。
         if (recentClipRow != null)
-            setFixedHeight(recentClipRow, (idleHeader ? 0 : readingRow) + pixels(line));
+            ViewPolicy.setFixedHeight(recentClipRow, (idleHeader ? 0 : readingRow) + pixels(line));
     }
 
     private int readingRowHeight() {
@@ -2945,13 +2945,6 @@ public final class MSIMEInputService extends InputMethodService {
         Paint.FontMetricsInt metrics = preedit.getPaint().getFontMetricsInt();
         return ReadingRowPolicy.heightPx(design, metrics.ascent, metrics.descent,
             preedit.getPaddingTop() + preedit.getPaddingBottom());
-    }
-
-    private static void setFixedHeight(View view, int height) {
-        android.view.ViewGroup.LayoutParams params = view.getLayoutParams();
-        if (params == null || params.height == height) return;
-        params.height = height;
-        view.setLayoutParams(params);
     }
 
     void fail() { stop(false); message = "输入连接失败：仅直接输入"; render(); }
@@ -4139,9 +4132,9 @@ public final class MSIMEInputService extends InputMethodService {
     /** 读上次的皮肤片段；没有或损坏时返回 null，键盘照旧先用内置配色。 */
     private JSONObject readSkinHint() {
         File file = new File(getFilesDir(), SKIN_HINT_FILE);
-        if (!file.isFile() || file.length() > 1_000_000) return null;
+        if (!SkinHintFilePolicy.readable(file)) return null;
         try (java.io.InputStream input = java.nio.file.Files.newInputStream(file.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-            byte[] bytes = HttpBodyPolicy.readBounded(input, 1_000_000);
+            byte[] bytes = HttpBodyPolicy.readBounded(input, SkinHintFilePolicy.MAX_BYTES);
             if (bytes == null) return null;
             String text = TextPolicy.utf8(bytes);
             writtenSkinHint = text;
@@ -4940,7 +4933,7 @@ public final class MSIMEInputService extends InputMethodService {
             return;
         }
         // 语音结果面板盖在键区上面；从面板里的「开始语音识别」进来时先收起它，键区里的聆听面板才看得见。只在面板开着时收：正在聆听时再按语音键是结束录音，这时清掉记下的输入位置会让结果无法直接上屏。
-        if (shown(voiceResultScroll)) closeVoiceResult();
+        if (ViewPolicy.isVisible(voiceResultScroll)) closeVoiceResult();
         // 键盘内识别（扩展点）接手时不再打开识别窗口。
         if (imeVoiceEntry.startInKeyboard(keyRows)) return;
         launchVoiceActivity();
@@ -6438,8 +6431,8 @@ public final class MSIMEInputService extends InputMethodService {
                 canvas.drawRoundRect(x, y, x + cellWidth, y + cellHeight, radius, radius, paint);
             }
             paint.clearShadowLayer();
-            paint.setTextSize(textSize);
-            paint.setTypeface(previewTypeface);
+            ViewPolicy.setTextSize(paint, textSize);
+            ViewPolicy.setTypeface(paint, previewTypeface);
             Paint.FontMetrics metrics = paint.getFontMetrics();
             for (int index = 0; index < labelCount; index++) {
                 String label = labels[index];
@@ -6922,16 +6915,15 @@ public final class MSIMEInputService extends InputMethodService {
         }
     }
 
-    private static boolean shown(View view) {
-        return view != null && view.getVisibility() == View.VISIBLE;
-    }
-
     /** 是否有从工具栏打开的面板（功能面板、表情、常用语、剪贴板、皮肤、方案、符号、AI、语音结果、旧的键盘设置）开着；开着时品牌键垫 accentSoft、收起键变为「返回键盘」。 */
     boolean anyToolbarPanelOpen() {
-        return shown(moreToolsScroll) || shown(emojiPanel) || shown(phraseScroll)
-            || shown(clipboardScroll) || shown(skinScroll) || shown(schemeScroll)
-            || shown(symbolPanel) || shown(aiPolishContainer) || shown(voiceResultScroll)
-            || shown(layoutSettingsScroll) || shown(layoutAdjustView) || shown(textEditPanel)
+        return ViewPolicy.isVisible(moreToolsScroll) || ViewPolicy.isVisible(emojiPanel)
+            || ViewPolicy.isVisible(phraseScroll)
+            || ViewPolicy.isVisible(clipboardScroll) || ViewPolicy.isVisible(skinScroll)
+            || ViewPolicy.isVisible(schemeScroll) || ViewPolicy.isVisible(symbolPanel)
+            || ViewPolicy.isVisible(aiPolishContainer) || ViewPolicy.isVisible(voiceResultScroll)
+            || ViewPolicy.isVisible(layoutSettingsScroll) || ViewPolicy.isVisible(layoutAdjustView)
+            || ViewPolicy.isVisible(textEditPanel)
             || replyOpen;
     }
 
@@ -7485,7 +7477,7 @@ public final class MSIMEInputService extends InputMethodService {
             preedit.setText(displayText);
             preedit.setContentDescription(offersLocalModes ? "长按打开本地输入模式" : displayText);
             preedit.setLongClickable(offersLocalModes);
-            preedit.setClickable(preeditCaretEditing != null);
+            ViewPolicy.setClickable(preedit, preeditCaretEditing != null);
             ViewPolicy.setFocusable(preedit, offersLocalModes);
         }
         if (exitLocalModeButton != null) {

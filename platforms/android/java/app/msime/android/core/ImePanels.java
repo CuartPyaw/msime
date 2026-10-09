@@ -7,6 +7,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
+import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.InsetDrawable;
@@ -32,6 +33,8 @@ final class ImePanels {
     private static final String SYMBOL_RECENTS_KEY = "items";
     private final MSIMEInputService s;
     private SharedPreferences symbolPreferences;
+    // 只在主线程上用（打开符号面板、点符号记进「常用」时）；`emojiGlyphPaint` 归 `emojiWorker`，Paint 不能跨线程共用。
+    private final Paint symbolRecentsGlyphPaint = new Paint();
     private int replyReadGeneration;
     private int replyMenuReadGeneration;
 
@@ -103,7 +106,8 @@ final class ImePanels {
             if (tab.isSelected()) {
                 GradientDrawable face = DrawablePolicy.rounded(
                     Color.parseColor(s.emojiSkin.keyBackground()), s.pixels(8));
-                tab.setBackground(new InsetDrawable(face, s.pixels(2), s.pixels(3), s.pixels(2), s.pixels(3)));
+                ViewPolicy.setBackground(tab,
+                    new InsetDrawable(face, s.pixels(2), s.pixels(3), s.pixels(2), s.pixels(3)));
                 ViewPolicy.setActiveAlpha(tab, true, .6f);
             } else {
                 ViewPolicy.clearBackground(tab);
@@ -804,19 +808,22 @@ final class ImePanels {
         int accent = Color.parseColor(s.skin.accent());
         int onAccent = Color.parseColor(s.skin.onAccent());
         Typeface base = s.skin.monospaced() ? Typeface.MONOSPACE : Typeface.DEFAULT;
-        s.replyModeControl.setBackground(replySurface(ImeStyler.fade(s.skin.keyForeground(), .08), radius));
+        ViewPolicy.setBackground(s.replyModeControl,
+            replySurface(ImeStyler.fade(s.skin.keyForeground(), .08), radius));
         for (Button segment : new Button[] {s.replyReplyModeButton, s.replyPolishModeButton}) {
             boolean selected = segment.isSelected();
-            segment.setBackground(selected ? replySurface(Color.parseColor(s.skin.keyBackground()),
+            ViewPolicy.setBackground(segment, selected ? replySurface(Color.parseColor(s.skin.keyBackground()),
                 BoundsPolicy.nonNegative(radius - s.pixels(2))) : null);
             ViewPolicy.setTextColor(segment, foreground);
-            segment.setTypeface(Typeface.create(base, selected ? Typeface.BOLD : Typeface.NORMAL));
+            ViewPolicy.setTypeface(segment,
+                Typeface.create(base, selected ? Typeface.BOLD : Typeface.NORMAL));
             ViewPolicy.clearElevation(segment);
         }
-        s.replySourceCard.setBackground(replySurface(Color.parseColor(s.skin.keyBackground()), radius));
+        ViewPolicy.setBackground(s.replySourceCard,
+            replySurface(Color.parseColor(s.skin.keyBackground()), radius));
         ViewPolicy.setTextColor(s.replySourceButton, s.replyModel.source().isEmpty()
             ? ImeStyler.fade(s.skin.keyForeground(), .55) : foreground);
-        s.replyPasteButton.setBackground(new InsetDrawable(replySurface(accent, radius),
+        ViewPolicy.setBackground(s.replyPasteButton, new InsetDrawable(replySurface(accent, radius),
             0, s.pixels(6), 0, s.pixels(6)));
         // setBackground 会把 InsetDrawable 的内边距（左右为 0）套到按钮上，冲掉前面设的左右留白，文字就贴着色块边缘；换完背景再设回来。
         KeyboardGeometry.setHorizontalPaddingDp(s.replyPasteButton, s, 12);
@@ -825,7 +832,8 @@ final class ImePanels {
         for (int index = 0; index < s.replyActions.getChildCount(); index++) {
             if (!(s.replyActions.getChildAt(index) instanceof Button action)) continue;
             boolean primary = action == s.replyPrimaryAction;
-            action.setBackground(replySurface(primary ? accent : ImeStyler.fade(s.skin.keyBackground(), .7), radius));
+            ViewPolicy.setBackground(action,
+                replySurface(primary ? accent : ImeStyler.fade(s.skin.keyBackground(), .7), radius));
             ViewPolicy.setTextColor(action, primary ? onAccent : foreground);
             ViewPolicy.clearElevation(action);
         }
@@ -929,7 +937,7 @@ final class ImePanels {
         LinearLayout header = KeyboardGeometry.row(s);
         ViewPolicy.setCenteredVertically(header);
         TextView title = aiText(s.aiOutputText.isEmpty() ? "AI 润色" : "润色结果", 15);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
+        ViewPolicy.setTypeface(title, Typeface.DEFAULT_BOLD);
         header.addView(title, KeyboardGeometry.weightedWrapParams(1));
         Button back = MSIMEInputService.role(s.button(header, "返回键盘", s::closeAiPolish), KeyboardKeyRole.GLYPH);
         ViewPolicy.setTextSizeSp(back, 13);
@@ -984,11 +992,12 @@ final class ImePanels {
         s.imeStyler.applySkin();
         // 换肤遍历之后补上卡片底色、次要字色和主操作的强调色。
         float radius = s.pixels(10);
-        content.setBackground(replySurface(Color.parseColor(s.skin.keyBackground()), radius));
+        ViewPolicy.setBackground(content,
+            replySurface(Color.parseColor(s.skin.keyBackground()), radius));
         for (TextView text : secondary) ViewPolicy.setTextColor(text, ImeStyler.fade(s.skin.keyForeground(), .6));
         if (error != null) ViewPolicy.setTextColor(error, Color.parseColor(s.skin.accent()));
         boolean busy = s.aiBusy;
-        primary.setBackground(replySurface(busy ? ImeStyler.fade(s.skin.keyBackground(), .7)
+        ViewPolicy.setBackground(primary, replySurface(busy ? ImeStyler.fade(s.skin.keyBackground(), .7)
             : Color.parseColor(s.skin.accent()), radius));
         ViewPolicy.setTextColor(primary, busy ? Color.parseColor(s.skin.keyForeground()) : Color.parseColor(s.skin.onAccent()));
         ViewPolicy.setActiveAlpha(primary, primary.isEnabled(), .45f);
@@ -1829,7 +1838,8 @@ final class ImePanels {
                 Object value = values.opt(index);
                 if (value instanceof String) stored.add((String) value);
             }
-            return SymbolPanelModel.normalizeRecents(stored);
+            return SymbolPanelModel.renderableRecents(SymbolPanelModel.normalizeRecents(stored),
+                symbolRecentsGlyphPaint::hasGlyph);
         } catch (JSONException error) {
             return List.of();
         }
@@ -1866,6 +1876,8 @@ final class ImePanels {
             SymbolCatalogPage page = null;
             try {
                 page = decodeSymbolCatalogPage(NativeClient.emojiCatalog(query, resources), offset, category.kaomoji());
+                page = new SymbolCatalogPage(SymbolPanelModel.renderableCatalogItems(page.items(),
+                    category.kaomoji(), s.emojiGlyphPaint::hasGlyph), page.nextOffset(), page.complete());
             } catch (JSONException | RuntimeException | LinkageError ignored) {
                 // 读不出目录时面板只说「暂时不可用」，不把资源路径或目录内容写进任何地方。
             }

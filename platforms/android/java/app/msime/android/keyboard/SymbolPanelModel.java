@@ -3,6 +3,7 @@ package app.msime.android;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.function.Predicate;
 
 /** Immutable symbol categories shared by the Android full-screen symbol panel. */
 public final class SymbolPanelModel {
@@ -165,6 +166,37 @@ public final class SymbolPanelModel {
             unique.add(text);
         }
         return List.copyOf(unique);
+    }
+
+    /**
+     * 去掉这台设备字体画不出来的目录符号（#6070）：「箭头」里的 ⭠⭡⭢⭣⭤⭥⮂⮃⮐⮑、「爱心」里 Unicode 15 的 🩷🩵🩶 在 Android 11 的系统字体里没有字形，格子是空白，点了上屏的也是一个看不见的字。`drawable` 在设备上是 `Paint.hasGlyph`，与表情面板的过滤相同；它只在整串能排成一个字形时才回答「能画」，所以只用在一条就是一个字形的符号上。颜文字是好几个字形拼成的，`hasGlyph` 对它一律回答「不能」，原样保留。游标照旧按目录扫过的行数前进，这里只影响显示哪些。
+     */
+    public static List<String> renderableCatalogItems(List<String> items, boolean kaomoji, Predicate<String> drawable) {
+        if (kaomoji) return List.copyOf(items);
+        ArrayList<String> kept = new ArrayList<>(items.size());
+        for (String text : items) if (drawable.test(text)) kept.add(text);
+        return List.copyOf(kept);
+    }
+
+    /**
+     * 「常用」里去掉这台设备画不出来的符号（#6070）：目录过滤上线前点过的空白格（⭠、🩷 等）已经记进了「常用」，而面板一打开就是「常用」，不过滤的话第一屏仍是空白格。「常用」里还有「http://」「@gmail.com」这类多字形的条目，`hasGlyph` 对它们一律回答「不能」，所以只判断一个码位（可带变体选择符）的条目，其余原样保留。
+     */
+    public static List<String> renderableRecents(List<String> recents, Predicate<String> drawable) {
+        ArrayList<String> kept = new ArrayList<>(recents.size());
+        for (String text : recents) if (!singleCodePoint(text) || drawable.test(text)) kept.add(text);
+        return List.copyOf(kept);
+    }
+
+    private static boolean singleCodePoint(String text) {
+        int count = 0;
+        for (int index = 0; index < text.length(); ) {
+            int codePoint = text.codePointAt(index);
+            index += Character.charCount(codePoint);
+            boolean variationSelector = (codePoint >= 0xFE00 && codePoint <= 0xFE0F)
+                || (codePoint >= 0xE0100 && codePoint <= 0xE01EF);
+            if (!variationSelector && ++count > 1) return false;
+        }
+        return count == 1;
     }
 
     /** 已显示的条数到了上限，就当作读完了，不再要下一页。 */

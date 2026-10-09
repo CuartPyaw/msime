@@ -19,8 +19,7 @@ fn activation_receipt_does_not_follow_a_fixed_temporary_symlink() {
     symlink(&outside_file, &temporary).unwrap();
     let path = root.path().join(super::ACTIVATION_RECEIPT_NAME);
 
-    super::write_activation_receipt_at(root.path(), &path, "10000000-0000-4000-8000-000000000001")
-        .unwrap();
+    super::write_activation_receipt_at(&path, "10000000-0000-4000-8000-000000000001").unwrap();
     assert_eq!(fs::read(outside_file).unwrap(), b"keep me");
     assert_eq!(
         fs::read(path).unwrap(),
@@ -56,6 +55,26 @@ fn activation_receipt_rejects_a_symlinked_receipt() {
         super::activation_receipt(&options.into_engine_options()),
         Err("snapshot activation receipt unavailable")
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn activation_receipt_rejects_a_symlinked_parent() {
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let linked = root.path().join("linked");
+    symlink(outside.path(), &linked).unwrap();
+    let path = linked.join(super::ACTIVATION_RECEIPT_NAME);
+    let outside_file = outside.path().join(super::ACTIVATION_RECEIPT_NAME);
+    fs::write(&outside_file, b"keep me").unwrap();
+
+    let result = super::write_activation_receipt_at(&path, "10000000-0000-4000-8000-000000000001");
+
+    assert!(result.is_err());
+    assert_eq!(fs::read(outside_file).unwrap(), b"keep me");
 }
 
 #[cfg(unix)]
@@ -191,6 +210,26 @@ fn inspection_rejects_a_snapshot_below_a_symlinked_parent() {
     assert!(super::inspect_snapshot(&path).is_err());
 }
 
+#[cfg(unix)]
+#[test]
+fn snapshot_publication_rejects_a_symlinked_parent() {
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let linked = root.path().join("linked");
+    symlink(outside.path(), &linked).unwrap();
+    let destination = linked.join("snapshot.ndjson");
+    let outside_file = outside.path().join("snapshot.ndjson");
+    fs::write(&outside_file, b"keep me").unwrap();
+
+    let result = super::publish_snapshot(&destination, b"synthetic snapshot");
+
+    assert!(result.is_err());
+    assert_eq!(fs::read(outside_file).unwrap(), b"keep me");
+}
+
 #[test]
 fn restore_reinspects_the_exact_file_before_upload() {
     use msime_client_core::account::AccountDictionarySnapshotRestore;
@@ -274,16 +313,22 @@ fn restore_maps_account_errors_without_exposing_snapshot_data() {
 
 #[test]
 fn activation_swaps_all_state_roots_and_consumes_handle() {
-    activation_case(false, false, 123);
-    activation_case(true, false, 123);
+    activation_case(false, false, 123, false);
+    activation_case(true, false, 123, false);
 }
 
 #[test]
 fn activation_rejects_live_session_before_swapping() {
     // The registry is process-global; use a distinct fixture handle so this
     // test can run in parallel with the successful activation cases.
-    activation_case(false, true, 125);
-    activation_case(true, true, 125);
+    activation_case(false, true, 125, false);
+    activation_case(true, true, 125, false);
+}
+
+#[cfg(unix)]
+#[test]
+fn activation_keeps_a_replaced_live_root_out_of_the_swap() {
+    activation_case(false, false, 127, true);
 }
 
 #[test]
@@ -377,7 +422,12 @@ fn discard_does_not_require_maintenance_lock_for_live_paths() {
     drop(session_access);
 }
 
-fn activation_case(nested_dictionaries: bool, hold_session: bool, handle: u64) {
+fn activation_case(
+    nested_dictionaries: bool,
+    hold_session: bool,
+    handle: u64,
+    replace_live_user: bool,
+) {
     use super::*;
     use msime_client_core::dictionary::access::DictionaryAccess;
     use msime_engine::host::EngineOptions;
@@ -561,8 +611,20 @@ fn activation_case(nested_dictionaries: bool, hold_session: bool, handle: u64) {
     fs::remove_file(&linked_backup).unwrap();
     // Other tests spawn processes concurrently, and a fork can briefly inherit the dropped session's locked file description before close-on-exec runs, so maintenance access may read busy for a moment. Same allowance as the access lock's own test.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let moved_user = active.with_file_name("moved-user");
+    let mut injected = false;
     let activated = loop {
-        match activate(handle, &expected) {
+        let result = if replace_live_user && !injected {
+            injected = true;
+            activate_with_hook(handle, &expected, || {
+                fs::rename(active.join("user"), &moved_user).unwrap();
+                fs::create_dir(active.join("user")).unwrap();
+                fs::write(active.join("user").join("marker"), b"attacker").unwrap();
+            })
+        } else {
+            activate(handle, &expected)
+        };
+        match result {
             Err("snapshot access busy") => {
                 assert!(
                     std::time::Instant::now() < deadline,
@@ -574,11 +636,30 @@ fn activation_case(nested_dictionaries: bool, hold_session: bool, handle: u64) {
         }
     };
     assert_eq!(activated, serde_json::json!({"activated": true}));
-    for name in ["user", "cache", dictionaries] {
+    for name in ["cache", dictionaries] {
         assert_eq!(fs::read(active.join(name).join("marker")).unwrap(), b"new");
     }
+    if replace_live_user {
+        assert_eq!(
+            fs::read(active.join("user").join("marker")).unwrap(),
+            b"attacker"
+        );
+        assert_eq!(fs::read(moved_user.join("marker")).unwrap(), b"new");
+    } else {
+        assert_eq!(
+            fs::read(active.join("user").join("marker")).unwrap(),
+            b"new"
+        );
+    }
+    let receipt_options = if replace_live_user {
+        let mut options = active_options.clone();
+        options.user_data = moved_user.to_str().unwrap().into();
+        options
+    } else {
+        active_options.clone()
+    };
     assert_eq!(
-        super::activation_receipt(&active_options)
+        super::activation_receipt(&receipt_options)
             .unwrap()
             .as_deref(),
         Some(activation_id)

@@ -45,6 +45,28 @@ fn texts(document: &CommonPhrases) -> Vec<&str> {
         .collect()
 }
 
+#[cfg(unix)]
+#[test]
+fn common_phrase_writes_stay_bound_to_the_locked_directory_after_replacement() {
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().join("preferences");
+    fs::create_dir(&directory).unwrap();
+    let store = CommonPhrasesStore::new(&directory);
+    let lock = store.lock().unwrap();
+
+    let moved = root.path().join("preferences-moved");
+    fs::rename(&directory, &moved).unwrap();
+    fs::create_dir(&directory).unwrap();
+
+    store
+        .write_locked(&lock, &CommonPhrases::default())
+        .unwrap();
+
+    assert!(moved.join(FILE_NAME).exists());
+    assert!(!directory.join(FILE_NAME).exists());
+    fs::remove_dir_all(moved).unwrap();
+}
+
 #[test]
 fn common_phrases_start_empty_and_keep_multiline_text() {
     let (_root, store) = fresh();
