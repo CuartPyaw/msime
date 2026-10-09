@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Android 后台执行器复用统一的命名守护线程工厂。"""
+"""Android 命名后台线程复用统一创建策略。"""
 
 from pathlib import Path
 import sys
@@ -22,6 +22,12 @@ SITES = {
 }
 DIRECT_SITES = {
     JAVA / "home/AiSkinPage.java": ("msime-ai-skin-generate",),
+}
+STARTED_SITES = {
+    JAVA / "account/BackendAccount.java": ("msime-chat-cancel",),
+    JAVA / "home/AuthRedirectActivity.java": ("msime-apple-sign-in",),
+    JAVA / "home/LoginSheet.java": ("msime-login-sheet", "msime-email-code", "msime-email-login"),
+    JAVA / "home/OnboardingActivity.java": ("msime-onboarding",),
 }
 
 
@@ -49,10 +55,19 @@ def main() -> int:
         if "setDaemon(true)" in source:
             errors.append(f"{path}: 仍在重复配置守护线程")
 
+    for path, names in STARTED_SITES.items():
+        source = path.read_text(encoding="utf-8")
+        for name in names:
+            expected = f'ThreadPolicy.startNamedThread("{name}",'
+            if expected not in source:
+                errors.append(f"{path}: {name} 未复用 ThreadPolicy")
+        if "new Thread(" in source:
+            errors.append(f"{path}: 仍在重复创建并启动命名线程")
+
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1
-    print("Android background executors use the shared named daemon thread factory")
+    print("Android named background threads use the shared thread policy")
     return 0
 
 
