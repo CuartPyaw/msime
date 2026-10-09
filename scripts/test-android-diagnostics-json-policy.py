@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""诊断接口直接复用共享 JSON 字符串、整数和引用策略。"""
+"""诊断接口直接复用共享 JSON 字符串、整数、引用和截断策略。"""
 from pathlib import Path
+import re
 import sys
 
 
@@ -27,6 +28,15 @@ def main() -> int:
     if source.count("out.append(JsonPolicy.quote(") < 6:
         print(f"{SOURCE}: 诊断请求应直接复用共享 JSON 引用策略", file=sys.stderr)
         return 1
+    if "static String clipUtf8(String value, int maxBytes)" in source:
+        print(f"{SOURCE}: 不应保留 clipUtf8 转发方法", file=sys.stderr)
+        return 1
+    if re.search(r"(?<![.\w])clipUtf8\(", source):
+        print(f"{SOURCE}: 崩溃记录仍通过 clipUtf8 转发", file=sys.stderr)
+        return 1
+    if source.count("TextPolicy.clipUtf8(") < 2:
+        print(f"{SOURCE}: 崩溃记录应直接复用共享 UTF-8 截断策略", file=sys.stderr)
+        return 1
     if "DiagnosticsApi.class.getDeclaredMethod(\"strictString\"" in smoke:
         print(f"{SMOKE}: 不应反射检查已删除的字符串转发方法", file=sys.stderr)
         return 1
@@ -39,7 +49,7 @@ def main() -> int:
     if "JsonPolicy.strictLong" not in source or "JsonPolicy.strictLong" not in smoke:
         print(f"{SMOKE}: 应直接检查 JsonPolicy.strictLong", file=sys.stderr)
         return 1
-    print("Android 诊断接口已复用共享 JSON 字符串、整数和引用策略")
+    print("Android 诊断接口已复用共享 JSON 字符串、整数、引用和截断策略")
     return 0
 
 

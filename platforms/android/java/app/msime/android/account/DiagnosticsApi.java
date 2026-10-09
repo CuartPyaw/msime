@@ -106,8 +106,9 @@ public final class DiagnosticsApi {
     /** 一条崩溃记录；摘要和堆栈按后端上限截断。 */
     public record CrashLog(String at, String message, String stack) {
         public static CrashLog of(String at, String message, String stack) {
-            return new CrashLog(at == null ? "" : at, clipUtf8(message, MAX_MESSAGE_BYTES),
-                clipUtf8(stack, MAX_STACK_BYTES));
+            return new CrashLog(at == null ? "" : at,
+                TextPolicy.clipUtf8(message, MAX_MESSAGE_BYTES),
+                TextPolicy.clipUtf8(stack, MAX_STACK_BYTES));
         }
     }
 
@@ -418,11 +419,6 @@ public final class DiagnosticsApi {
     private static String baseName(String path) {
         int slash = path.lastIndexOf('/');
         return TextPolicy.lowercase(slash < 0 ? path : path.substring(slash + 1));
-    }
-
-    /** 按 UTF-8 字节截断，不切开多字节字符和代理对。 */
-    static String clipUtf8(String value, int maxBytes) {
-        return TextPolicy.clipUtf8(value, maxBytes);
     }
 
 }
