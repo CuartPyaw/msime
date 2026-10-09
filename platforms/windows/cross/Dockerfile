@@ -40,7 +40,8 @@ RUN for dir in /usr/share/mingw-w64/include /usr/i686-w64-mingw32/include /usr/x
       done; \
     done
 
-RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+# 与仓库声明使用同一固定工具链，避免临时容器另装编译器、组件和目标标准库。
+RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.97.1 --component rustfmt --component clippy
 ENV PATH=/root/.cargo/bin:$PATH
 RUN rustup target add i686-pc-windows-gnu x86_64-pc-windows-gnu
 ENV VCPKG_DISABLE_METRICS=1
