@@ -193,12 +193,6 @@ public final class Ui {
         ViewPolicy.setPadding(view, horizontal, vertical, horizontal, vertical);
     }
 
-    /** Apply the shared bottom-sheet title-area insets to a view. */
-    public static void setSheetHeaderPadding(View view, Context context) {
-        int horizontal = dp(context, 16);
-        ViewPolicy.setPadding(view, horizontal, 0, horizontal, dp(context, 12));
-    }
-
     /** Apply symmetric padding expressed in density-independent pixels. */
     public static void setSymmetricPaddingDp(View view, Context context,
                                              float horizontalDp, float verticalDp) {
@@ -441,25 +435,6 @@ public final class Ui {
         EditText view = new EditText(context);
         style(view, sizeSp, weight, color);
         return view;
-    }
-
-    /** Create the centered title used by option-style bottom sheets. */
-    public static TextView sheetHeading(Context context, CharSequence text) {
-        TextView heading = new TextView(context);
-        heading.setText(text);
-        ViewPolicy.setCentered(heading);
-        style(heading, TEXT_SHEET_HEADER, 600, subText(context));
-        heading.setAccessibilityHeading(true);
-        return heading;
-    }
-
-    /** Create the centered subtitle used by option-style bottom sheets. */
-    public static TextView sheetSubtitle(Context context, CharSequence text) {
-        TextView subtitle = new TextView(context);
-        subtitle.setText(text);
-        ViewPolicy.setCentered(subtitle);
-        style(subtitle, TEXT_SHEET_HEADER, 400, subText(context));
-        return subtitle;
     }
 
     /** Create the standard accent-coloured group heading. */
