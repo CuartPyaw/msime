@@ -1,4 +1,5 @@
 import app.msime.android.LocalAsrPolicy;
+import app.msime.android.JsonPolicy;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -151,11 +152,9 @@ public final class LocalAsrPolicySmoke {
             check("".equals(transcript.invoke(null,
                 "a".repeat(LocalAsrPolicy.MAX_TRANSCRIPT + 1))),
                 "local ASR rejects overlong transcript text");
-            Method strictBoolean = LocalAsrPolicy.class.getDeclaredMethod("strictBoolean", Object.class);
-            strictBoolean.setAccessible(true);
-            check(Boolean.TRUE.equals(strictBoolean.invoke(null, Boolean.TRUE)),
+            check(Boolean.TRUE.equals(JsonPolicy.strictBoolean(Boolean.TRUE)),
                 "local ASR accepts JSON booleans");
-            check(strictBoolean.invoke(null, "true") == null,
+            check(JsonPolicy.strictBoolean("true") == null,
                 "local ASR rejects boolean strings instead of coercing them");
         } catch (ReflectiveOperationException error) {
             throw new AssertionError("local ASR response parser unavailable", error);
