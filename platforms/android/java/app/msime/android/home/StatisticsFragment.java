@@ -20,6 +20,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
 import app.msime.android.NativeClient;
+import app.msime.android.DrawablePolicy;
 import app.msime.android.JsonPolicy;
 import app.msime.android.BoundsPolicy;
 import app.msime.android.DictionaryCollectionsStore;
@@ -455,7 +456,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         LinearLayout tile = Ui.column(context);
         int pad = Ui.dp(context, 14);
         Ui.setSymmetricPaddingPx(tile, pad);
-        ViewPolicy.setBackground(tile, Ui.rounded(Ui.card(context), Ui.dp(context, 20)));
+        ViewPolicy.setBackground(tile, DrawablePolicy.rounded(Ui.card(context), Ui.dp(context, 20)));
         tile.addView(Ui.label(context, title, 13, Ui.text(context)));
         TextView number = Ui.label(context, figure(context, value, 24,
             "—".equals(value) ? "" : unit), 24, Ui.text(context));

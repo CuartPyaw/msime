@@ -35,8 +35,8 @@ public final class MsSlider extends SeekBar {
         int track = Ui.dp(context, Ui.SLIDER_TRACK);
         float radius = track / 2f;
 
-        GradientDrawable rest = Ui.rounded(Ui.accentSoft(context), radius);
-        GradientDrawable done = Ui.rounded(Ui.accent(context), radius);
+        GradientDrawable rest = DrawablePolicy.rounded(Ui.accentSoft(context), radius);
+        GradientDrawable done = DrawablePolicy.rounded(Ui.accent(context), radius);
         Drawable progress = new ClipDrawable(done, Gravity.START, ClipDrawable.HORIZONTAL);
         LayerDrawable layers = new LayerDrawable(new Drawable[] {rest, progress});
         layers.setId(0, android.R.id.background);

@@ -434,11 +434,6 @@ public final class Ui {
         return color(context, androidx.appcompat.R.attr.colorError);
     }
 
-    /** 纯色圆角矩形。 */
-    public static GradientDrawable rounded(@ColorInt int color, float radiusPx) {
-        return DrawablePolicy.rounded(color, radiusPx);
-    }
-
     /** 胶囊形状：GradientDrawable 会把过大的圆角夹到短边的一半，所以高度怎么变两端都是半圆。 */
     public static GradientDrawable pill(@ColorInt int color) {
         return rounded(color, 9999f);
