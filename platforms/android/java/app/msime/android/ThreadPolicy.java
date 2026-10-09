@@ -6,7 +6,8 @@ import java.util.concurrent.ThreadFactory;
 public final class ThreadPolicy {
     private ThreadPolicy() {}
 
-    private static Thread namedThread(String name, Runnable runnable) {
+    /** 创建使用固定名称且不立即启动的线程，daemon 状态沿用调用线程。 */
+    public static Thread namedThread(String name, Runnable runnable) {
         return new Thread(runnable, name);
     }
 

@@ -36,6 +36,12 @@ public final class ThreadPolicySmoke {
         check(started.isDaemon() == Thread.currentThread().isDaemon(),
             "started thread preserves inherited daemon state");
         check(startedRan.get(), "started worker task runs");
+
+        Thread unstarted = ThreadPolicy.namedThread("msime-smoke-unstarted", () -> {});
+        check("msime-smoke-unstarted".equals(unstarted.getName()), "unstarted thread name is preserved");
+        check(unstarted.getState() == Thread.State.NEW, "named thread is not started");
+        check(unstarted.isDaemon() == Thread.currentThread().isDaemon(),
+            "named thread preserves inherited daemon state");
         System.out.println("Android named thread policy passed");
     }
 }
