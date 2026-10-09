@@ -941,6 +941,9 @@ impl<E: InputEngine> Runtime<E> {
         {
             return Ok(false);
         }
+        if self.generation == u64::MAX {
+            return Err(RuntimeError::IdentityExhausted);
+        }
         let request = CommandTranslationQuery {
             session_id: query.session_id,
             text: query.text.clone(),

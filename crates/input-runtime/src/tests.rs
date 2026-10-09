@@ -4021,6 +4021,26 @@ fn the_translate_command_round_trips_through_the_runtime() {
     );
 }
 
+#[test]
+fn command_translation_does_not_change_engine_after_generation_exhaustion() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = generated_mode_runtime(directory.path());
+    character(&mut runtime, b'/');
+    for value in *b"fyhello" {
+        character(&mut runtime, value);
+    }
+    let mut query = runtime.command_translation().unwrap();
+    runtime.generation = u64::MAX;
+    query.generation = u64::MAX;
+    let before = runtime.engine.snapshot().unwrap().candidates;
+
+    assert!(matches!(
+        runtime.apply_command_translation(&query, "合成译文"),
+        Err(RuntimeError::IdentityExhausted)
+    ));
+    assert_eq!(runtime.engine.snapshot().unwrap().candidates, before);
+}
+
 // A mark on a bare `/` or `@` is punctuation on every route: the mode ends and nothing from its list is committed.
 #[test]
 fn a_mark_on_a_bare_slash_or_at_is_not_a_pick() {
