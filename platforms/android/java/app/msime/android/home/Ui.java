@@ -266,11 +266,6 @@ public final class Ui {
         ViewPolicy.hideFromAccessibility(view);
     }
 
-    /** Convert scalable text units to pixels using the context display metrics. */
-    public static float sp(Context context, float value) {
-        return KeyboardGeometry.sp(context, value);
-    }
-
     /** Layout parameters for a view that fills the parent width at its measured height. */
     public static LinearLayout.LayoutParams matchWidth() {
         return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
@@ -293,11 +288,6 @@ public final class Ui {
     /** Full-width layout parameters with an already pixel-sized height. */
     public static LinearLayout.LayoutParams matchWidthHeightPx(int heightPixels) {
         return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, heightPixels);
-    }
-
-    /** Convert a density-independent size while guaranteeing at least one physical pixel. */
-    public static int atLeastOnePx(Context context, float value) {
-        return KeyboardGeometry.atLeastOnePixel(context, value);
     }
 
     /** Return the minimum one-pixel thickness for a 0.5 dp separator. */
