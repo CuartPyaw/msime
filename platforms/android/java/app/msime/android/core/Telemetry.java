@@ -1,9 +1,9 @@
 package app.msime.android.core;
 
+import app.msime.android.AppVersionPolicy;
 import app.msime.android.TextPolicy;
 import app.msime.android.JsonPolicy;
 import android.content.Context;
-import android.content.pm.PackageInfo;
 import android.util.Log;
 import app.msime.android.NativeClient;
 import app.msime.android.ThreadPolicy;
@@ -267,8 +267,7 @@ public final class Telemetry {
     /** The real versionName (the release version build-apk.sh stamps), not a constant: crash groups and the per-version crash-free rate are keyed by it. */
     static String version(Context app) {
         try {
-            PackageInfo info = app.getPackageManager().getPackageInfo(app.getPackageName(), 0);
-            String name = TextPolicy.trimmed(info.versionName);
+            String name = TextPolicy.trimmed(AppVersionPolicy.versionName(app));
             if (!name.isEmpty() && name.length() <= 64) return name;
         } catch (Exception error) {
             Log.i(TAG, "Package version unavailable", error);
