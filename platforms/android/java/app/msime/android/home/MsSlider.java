@@ -56,7 +56,7 @@ public final class MsSlider extends SeekBar {
         ViewPolicy.clearBackground(this);
         // 左右留出半个滑块，滑块在两端时不会被裁掉。
         int inset = Ui.dp(context, Ui.SLIDER_THUMB_WIDTH);
-        Ui.setHorizontalPaddingPx(this, inset);
+        ViewPolicy.setHorizontalPadding(this, inset);
         Ui.setMinimumHeightDp(this, context, Ui.SLIDER_TOUCH_HEIGHT);
 
         setOnSeekBarChangeListener(new OnSeekBarChangeListener() {
