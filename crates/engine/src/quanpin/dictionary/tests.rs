@@ -117,6 +117,19 @@ fn path_cache_key_borrows_the_segmentation_when_present() {
 }
 
 #[test]
+fn segment_row_cache_hit_borrows_the_segmentation_key() {
+    let fixture = Fixture::new();
+    fixture.insert("ni'hao", "你好", 10);
+    let mut dictionary = QuanpinDictionary::new(&fixture.paths);
+    let segments = vec!["ni".to_owned(), "hao".to_owned()];
+    let _ = dictionary.query_database(&segments, "ni'hao");
+    let (_, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+        let _ = dictionary.query_database(&segments, "ni'hao");
+    });
+    assert_eq!(allocations, 5, "热缓存分段查询仍重建了表键: {allocations}");
+}
+
+#[test]
 fn truncating_a_joined_prefix_drops_only_the_last_segment() {
     let mut segmentation = "ni'hao'ma".to_owned();
     truncate_last_segment(&mut segmentation);
