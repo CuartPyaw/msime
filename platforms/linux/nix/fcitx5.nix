@@ -64,6 +64,7 @@ let
   python = python3.withPackages (ps: [ ps.websockets ]);
   # msime-linux-setup 的包装器追加到 XDG_DATA_DIRS 的 IBus schema 数据目录（其下是 glib-2.0/schemas）。
   ibusSchemas = glib.getSchemaDataDirPath ibus;
+  glibPath = lib.makeBinPath [ glib ];
   clipboardPath = lib.makeBinPath [
     wl-clipboard
     xclip
@@ -213,20 +214,19 @@ stdenv.mkDerivation (finalAttrs: {
     wrapProgram $out/bin/msime-linux-clipboard-monitor --prefix PATH : ${clipboardPath}
     wrapProgram $out/bin/msime-linux-setup \
       --suffix XDG_DATA_DIRS : ${ibusSchemas} \
-      --suffix PATH : ${lib.getBin glib}/bin
+      --suffix PATH : ${glibPath}
   ''
   + lib.optionalString (settingsWindow != null) ''
     wrapGApp $out/bin/msime-linux-desktop --prefix PATH : ${clipboardPath}
   '';
 
   # ctest 跑的是构建目录，看不到装出去的插件能不能加载。fixup 之后再核对一次：Fcitx5 按插件的
-  # RUNPATH 找 Host API，IBus engine 也一样，它必须落在本包自己的 lib/msime-client 里，语音运行库
-  # 同理；组件文件的 <exec> 要指向本包里能执行的启动脚本；msime-linux-setup 包装后还能运行、带着
-  # IBus 的 schema。语音运行库的依赖还要能单独解析：msime-voice-local 自己已经载入了 libstdc++，
-  # 只看它能否打开运行库发现不了缺依赖。
+  # RUNPATH 找 Host API，IBus engine 也一样，它必须落在本包自己的 lib/msime-client 里；组件文件的
+  # <exec> 要指向本包里能执行的启动脚本。语音运行库同理，另外它的依赖都要
+  # 能单独解析：msime-voice-local 自己已经载入了 libstdc++，只看它能否打开运行库发现不了缺依赖。
   # 设置窗口经 fixup 收缩过 RUNPATH，也核对一遍它的 GTK 与 WebKit 依赖都还解析得到，以及包装器给了
   # TLS 模块：缺了它 GIO 只记一条警告，设置页的 https 请求失败。THIRD_PARTY_NOTICES.txt 指向的
-  # 几份声明也要真的装进来。
+  # 几份声明也要真的装进来。msime-linux-setup 包装后还要能运行、带着 IBus 的 schema。
   doInstallCheck = true;
   installCheckPhase = ''
     runHook preInstallCheck
@@ -242,7 +242,7 @@ stdenv.mkDerivation (finalAttrs: {
     resolves $out/bin/msime-linux-ibus libmsime_host_api.so
     $out/bin/msime-linux-setup --help > /dev/null
     grep -qF ${ibusSchemas} $out/bin/msime-linux-setup
-    XDG_DATA_DIRS=${ibusSchemas} ${lib.getBin glib}/bin/gsettings list-schemas | grep -qx org.freedesktop.ibus.general
+    XDG_DATA_DIRS=${ibusSchemas} ${glibPath}/gsettings list-schemas | grep -qx org.freedesktop.ibus.general
     for component in $out/share/ibus/component/*.xml; do
       [[ -x $(sed -n 's|.*<exec>&quot;\([^&]*\)&quot;.*|\1|p' "$component") ]]
     done
