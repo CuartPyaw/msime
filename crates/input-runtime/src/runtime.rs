@@ -1608,13 +1608,24 @@ impl<E: InputEngine> Runtime<E> {
             && !self.cached.dedicated_english
             && self.cached.local_mode == "none"
             && !self.cached.editing_text.is_empty();
+        let commit_context = self.output_context();
         let result = if commits_on_blur {
             self.engine.finish(0)
         } else {
             self.discard_composition()
         };
-        self.refresh()?;
+        let may_commit = result
+            .as_ref()
+            .is_ok_and(|result| result.has_commit || (!focused && !self.phrase_prefix.is_empty()));
+        let refresh_error = match self.refresh() {
+            Ok(()) => None,
+            Err(error) if may_commit => Some(error),
+            Err(error) => return Err(error),
+        };
         let mut result = result?;
+        if let Some(error) = refresh_error {
+            result.diagnostic = format!("Candidate refresh failed: {error}");
+        }
         // Leaving the client cancels the composition, but a phrase piece being held back is text
         // the user chose and, before it was held back, would already be in the document. Send it.
         self.hold_phrase_progress(false, false, false, "", &mut result);
@@ -1625,7 +1636,11 @@ impl<E: InputEngine> Runtime<E> {
         self.ai_context.clear();
         self.engine.set_rescoring_context("");
         self.engine.reset_context();
-        Ok(self.transition(result))
+        let mut transition = self.transition(result);
+        if transition.commit.is_some() {
+            transition.commit_context = Some(commit_context);
+        }
+        Ok(transition)
     }
 
     /// 丢弃组字。Cancel 对应用户按 Esc，有些方案里第一次 Cancel 会保留组字：开着可打开的候选列表（韩文汉字列表）时只关闭列表，越南文单词和藏文音节则退回原始按键。这时再发一次 Cancel 才把组字也丢掉。

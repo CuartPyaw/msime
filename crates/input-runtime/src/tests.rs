@@ -4926,7 +4926,9 @@ impl InputEngine for FailsAfterCommit {
         self.inner.select_edge(index, edge)
     }
     fn finish(&mut self, index: usize) -> Result<EngineResult, RuntimeError> {
-        self.inner.finish(index)
+        let result = self.inner.finish(index)?;
+        self.committed = result.has_commit;
+        Ok(result)
     }
     fn punctuation(&mut self, value: u8) -> Result<EngineResult, RuntimeError> {
         self.inner.punctuation(value)
@@ -4962,6 +4964,45 @@ fn a_wubi_auto_commit_survives_a_failed_refresh() {
     let last = last.unwrap();
     assert_eq!(last.commit.as_deref(), Some("合成候选"));
     assert!(last
+        .diagnostic
+        .as_deref()
+        .is_some_and(|diagnostic| diagnostic.starts_with("Candidate refresh failed")));
+}
+
+#[test]
+fn a_blur_commit_survives_a_failed_refresh() {
+    let mut runtime = Runtime::new(
+        FailsAfterCommit {
+            inner: Fixture {
+                scheme: KOREAN_SCHEME,
+                words: vec!["合成音节".into()],
+                local_mode: "none".into(),
+                ..Fixture::default()
+            },
+            committed: false,
+        },
+        5,
+    )
+    .unwrap();
+    runtime.focus(true).unwrap();
+    runtime
+        .dispatch(Action::Character {
+            value: b'k',
+            shift: false,
+        })
+        .unwrap();
+
+    let blurred = runtime.focus(false).unwrap();
+    assert_eq!(
+        blurred.commit.as_deref(),
+        Some("合成音节-remaining-segments")
+    );
+    assert_eq!(
+        blurred.commit_context.as_ref().unwrap().scheme,
+        KOREAN_SCHEME
+    );
+    assert!(!blurred.view.focused);
+    assert!(blurred
         .diagnostic
         .as_deref()
         .is_some_and(|diagnostic| diagnostic.starts_with("Candidate refresh failed")));
