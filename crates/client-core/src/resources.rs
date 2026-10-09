@@ -312,6 +312,21 @@ impl ResourceStore {
         Self { root: root.into() }
     }
 
+    #[cfg(unix)]
+    fn ensure_root_still_current(&self, opened: &File) -> std::io::Result<()> {
+        use std::os::unix::fs::MetadataExt;
+
+        let current = crate::storage::open_private_directory(&self.root)?;
+        let opened = opened.metadata()?;
+        let current = current.metadata()?;
+        if opened.dev() != current.dev() || opened.ino() != current.ino() {
+            return Err(std::io::Error::other(
+                "resource root changed during installation",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn install(
         &self,
         specification: &ResourceSet,
@@ -319,10 +334,16 @@ impl ResourceStore {
     ) -> Result<PathBuf, ResourceError> {
         let generation = specification.generation()?;
         crate::storage::create_directory_and_check(&self.root)?;
-        let lock = crate::file_lock::open_lock_file(self.root.join("resources.lock"))?;
-        crate::file_lock::exclusive(&lock)?;
         #[cfg(unix)]
         let root_directory = crate::storage::open_private_directory(&self.root)?;
+        #[cfg(unix)]
+        let lock = crate::file_lock::open_private_lock_file_at_raw(
+            &root_directory,
+            std::ffi::OsStr::new("resources.lock"),
+        )?;
+        #[cfg(not(unix))]
+        let lock = crate::file_lock::open_lock_file(self.root.join("resources.lock"))?;
+        crate::file_lock::exclusive(&lock)?;
         #[cfg(unix)]
         sweep_abandoned_stages(&root_directory);
         #[cfg(not(unix))]
@@ -330,6 +351,8 @@ impl ResourceStore {
         let destination = self.root.join(&generation);
         if fs::symlink_metadata(&destination).is_ok() {
             self.verify(&destination, specification)?;
+            #[cfg(unix)]
+            self.ensure_root_still_current(&root_directory)?;
             return Ok(destination);
         }
         #[cfg(unix)]
@@ -352,6 +375,7 @@ impl ResourceStore {
         // Published directories are complete. Existing generations are never overwritten.
         #[cfg(unix)]
         {
+            self.ensure_root_still_current(&root_directory)?;
             publish_generation(
                 &root_directory,
                 stage
@@ -372,6 +396,8 @@ impl ResourceStore {
         }
         #[cfg(not(unix))]
         fs::rename(stage.path(), &destination)?;
+        #[cfg(unix)]
+        self.ensure_root_still_current(&root_directory)?;
         Ok(destination)
     }
 
@@ -765,7 +791,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn install_writes_artifacts_into_the_created_stage_after_root_replacement() {
+    fn install_rejects_replaced_root_without_publishing() {
         use std::os::unix::fs::symlink;
 
         let parent = tempfile::tempdir().unwrap();
@@ -778,25 +804,22 @@ mod tests {
         let generation = spec.generation().unwrap();
         let store = ResourceStore::new(&root);
 
-        store
-            .install(&spec, |_| {
-                let stage_name = fs::read_dir(&root)?
-                    .map(|entry| entry.map(|entry| entry.file_name()))
-                    .collect::<std::io::Result<Vec<_>>>()?
-                    .into_iter()
-                    .find(|name| name.to_string_lossy().starts_with("incoming-"))
-                    .expect("created stage");
-                fs::create_dir(outside.join(&stage_name))?;
-                fs::rename(&root, &moved)?;
-                symlink(&outside, &root)?;
-                Ok(source(b"fixture"))
-            })
-            .unwrap();
+        let result = store.install(&spec, |_| {
+            let stage_name = fs::read_dir(&root)?
+                .map(|entry| entry.map(|entry| entry.file_name()))
+                .collect::<std::io::Result<Vec<_>>>()?
+                .into_iter()
+                .find(|name| name.to_string_lossy().starts_with("incoming-"))
+                .expect("created stage");
+            fs::create_dir(outside.join(&stage_name))?;
+            fs::rename(&root, &moved)?;
+            symlink(&outside, &root)?;
+            Ok(source(b"fixture"))
+        });
 
-        assert_eq!(
-            fs::read(moved.join(generation).join("msime-pinyin.db")).unwrap(),
-            b"fixture"
-        );
+        assert!(matches!(result, Err(ResourceError::Io(_))));
+
+        assert!(!moved.join(generation).exists());
         assert!(!fs::read_dir(&outside)
             .unwrap()
             .any(|entry| { entry.unwrap().path().join("msime-pinyin.db").exists() }));

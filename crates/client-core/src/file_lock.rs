@@ -54,6 +54,11 @@ pub fn open_private_lock_file_at(directory: &PrivateDirectory, name: &OsStr) -> 
     )?)
 }
 
+#[cfg(unix)]
+pub(crate) fn open_private_lock_file_at_raw(directory: &File, name: &OsStr) -> io::Result<File> {
+    ensure_regular(crate::storage::open_private_lock_file_at(directory, name)?)
+}
+
 pub fn read_private_directory(directory: &PrivateDirectory) -> io::Result<Vec<std::ffi::OsString>> {
     crate::storage::read_private_directory(&directory.directory)
 }
