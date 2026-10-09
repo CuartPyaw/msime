@@ -462,20 +462,46 @@ actor BackendAccountSession {
       return (try await operation(identity.token), identity.token)
     }
   }
-  func forget() async throws {
+  func forget(removingAccount cleanup: @Sendable (String) -> Void = { _ in }) async throws {
+    try await forget(removingAccount: cleanup, fallbackAccountID: nil)
+  }
+  private func forget(removingAccount cleanup: @Sendable (String) -> Void,
+                      fallbackAccountID: String?) async throws {
+    // Keep the old identity before clearing memory. The shared lock below rechecks the account
+    // so an older sign-out cannot clear another process's replacement session. A refresh by
+    // that process rotates its token but must still allow this sign-out to finish.
+    let expected = (try? storage.load()) ?? saved
+    let accountID = expected?.tokens.user.id ?? fallbackAccountID
     generation += 1
     refreshing?.cancel(); refreshing = nil
     saved = nil; loaded = true
+    let version = generation
     // 清理必须在共享锁内完成，避免另一个进程正在刷新的 token 在注销后写回。
     // 如果暂时拿不到锁就保留持久化会话；无锁清理会让进行中的刷新重新复活已注销的会话。
-    try await refreshLock.run { try await self.clearStorage() }
+    try await refreshLock.run {
+      try await self.clearStorage(at: version, accountID: accountID, cleanup: cleanup)
+    }
   }
-  private func clearStorage() throws { try storage.clear() }
-  func logout(all: Bool = false) async throws {
+  private func clearStorage(at version: Int, accountID: String?,
+                            cleanup: @Sendable (String) -> Void) throws {
+    guard generation == version else { throw CancellationError() }
+    let current = try? storage.load()
+    if let current, current.tokens.user.id != accountID { throw CancellationError() }
+    try storage.clear()
+    if let accountID = current?.tokens.user.id ?? accountID { cleanup(accountID) }
+  }
+  func logout(all: Bool = false, removingAccount cleanup: @Sendable (String) -> Void = { _ in }) async throws {
+    let owner = try? user()?.id
+    let version = generation
     let token: String
     do { token = try await accessToken() }
-    catch { try await forget(); throw error }
-    try await forget()
+    catch {
+      guard generation == version else { throw CancellationError() }
+      try await forget(removingAccount: cleanup, fallbackAccountID: owner)
+      throw error
+    }
+    guard generation == version else { throw CancellationError() }
+    try await forget(removingAccount: cleanup, fallbackAccountID: owner)
     try await api.logout(token: token, all: all)
   }
 }
