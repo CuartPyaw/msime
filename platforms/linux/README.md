@@ -523,6 +523,17 @@ Emoji 本地 CLI 的 `msime-linux-emoji --local` 会按显式资源目录、其�
 
 `scripts/verify-local.sh` 的「compile: linux desktop shell」阶段在非 Linux 主机上用 `tests/tools/Dockerfile.desktop-check` 构建的镜像跑 `cargo check -p msime-desktop --locked --all-targets`：与编译门禁同一个固定摘要的 `rust:1.97.1-bookworm`，预装 Tauri 外壳需要的 webkit2gtk、gtk3、libsoup、javascriptcoregtk 和 cpal 需要的 ALSA 开发包，apt 只在 Dockerfile 变化后的第一次运行时执行，`--quick` 和 pre-push 钩子不再每次重装。镜像构建日志留在 `target/linux-desktop-check/image.log`，apt 失败时阶段打印其末尾并 FAIL。
 
+这两个门禁镜像同时预装 `rust-toolchain.toml` 要求的 `rustfmt` 和 `clippy`，临时容器启动时不再逐次补装。组件层放在已有系统依赖层之后，修改组件准备步骤时可复用 apt 缓存。构建或升级镜像后，在仓库根目录验证工具链就绪：
+
+```sh
+linux_gate_hash=$(printf %s "$PWD" | shasum | cut -c1-12)
+bash platforms/linux/tests/tools/check-image-toolchain.sh \
+  "msime-linux-build-gate:${linux_gate_hash}" \
+  "msime-linux-desktop-check:${linux_gate_hash}"
+```
+
+检查只读挂载真实仓库，在断网的新容器里执行 `cargo`、`cargo fmt` 和 `cargo clippy` 的版本命令。组件缺失或镜像工具链与仓库声明不匹配时无法临时下载补齐，检查失败；项目构建仍通过原有门禁验证。
+
 这两个镜像都按 checkout 路径打 tag（`msime-linux-build-gate:<哈希>`、`msime-linux-desktop-check:<哈希>`，哈希取仓库绝对路径的 SHA-1 前 12 位），每个跑过门禁的 worktree 各留一份，单个占 2.4–3.3 GB，worktree 删除后不会自动回收。清理只删这两类 tag，不要 `docker system prune`（会连带别的项目和并发会话在用的镜像）：先 `docker images 'msime-linux-*'` 看有哪些，再 `docker image rm <tag>` 删掉已不存在的 worktree 对应的那些，最后 `docker image prune` 回收失去 tag 的悬空层。当前 checkout 的哈希可用 `printf %s "$PWD" | shasum | cut -c1-12` 在仓库根目录算出；删错了也无妨，下次运行会重建。
 
 隔离验收脚本只读挂载源码，输入引擎是仓库里的 Rust crate，不再需要预先准备或借用任何 Engine 树，因此在 worktree 里也能直接跑。它的测试镜像与编译门禁一样按 checkout 路径打 tag，并发的 worktree 不会互相覆盖镜像。随包在线/语音/剪贴板 provider、凭据、豆包鉴权、翻译缓存、录音设备这一整片 Python 测试都在容器内执行。
