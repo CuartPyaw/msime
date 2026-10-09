@@ -40,11 +40,6 @@ public final class CandidateGlossPolicy {
         return (String) value;
     }
 
-    /** Read a JSON boolean without org.json's implicit string coercion. */
-    public static Boolean strictBoolean(Object value) {
-        return JsonPolicy.strictBoolean(value);
-    }
-
     /** Whether an apply-translations response carries a typed JSON success flag. */
     public static boolean isApplied(Object value) {
         return JsonPolicy.strictTrue(value);
