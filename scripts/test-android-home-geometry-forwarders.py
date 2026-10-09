@@ -56,6 +56,8 @@ def main() -> int:
 
     for path in HOME.glob("*.java"):
         source = path.read_text(encoding="utf-8")
+        if "import app.msime.android.keyboard.KeyboardGeometry;" in source:
+            errors.append(f"{path}: KeyboardGeometry 的包名应为 app.msime.android")
         if "Ui.atLeastOnePx(" in source:
             errors.append(f"{path}: 应直接调用 KeyboardGeometry.atLeastOnePixel")
         if "Ui.sp(" in source:

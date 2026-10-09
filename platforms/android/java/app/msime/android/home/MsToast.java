@@ -9,7 +9,7 @@ import android.widget.FrameLayout;
 import android.widget.TextView;
 import app.msime.android.ContextPolicy;
 import app.msime.android.ViewPolicy;
-import app.msime.android.keyboard.KeyboardGeometry;
+import app.msime.android.KeyboardGeometry;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
