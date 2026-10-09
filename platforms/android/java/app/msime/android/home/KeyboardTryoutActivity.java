@@ -373,7 +373,7 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
         setBubbleText(bubble, text, !mine);
         if (!mine) bubble.setMovementMethod(android.text.method.LinkMovementMethod.getInstance());
         ViewPolicy.setLineSpacing(bubble, Ui.dp(this, 3), 1f);
-        ViewPolicy.setBackground(bubble, Ui.rounded(mine ? Ui.accent(this) : Ui.card(this), Ui.dp(this, 18)));
+        ViewPolicy.setBackground(bubble, DrawablePolicy.rounded(mine ? Ui.accent(this) : Ui.card(this), Ui.dp(this, 18)));
         Ui.setSymmetricPaddingDp(bubble, this, 14, 10);
         bubble.setMaxWidth(Math.round(KeyboardGeometry.screenWidthPixels(this) * 0.8f));
         LinearLayout.LayoutParams params = Ui.wrap();

@@ -50,7 +50,7 @@ public final class InputDialog {
         dialog.supportRequestWindowFeature(Window.FEATURE_NO_TITLE);
 
         LinearLayout root = Ui.column(context);
-        ViewPolicy.setBackground(root, Ui.rounded(Ui.sheetBackground(context), Ui.dp(context, Ui.DIALOG_RADIUS)));
+        ViewPolicy.setBackground(root, DrawablePolicy.rounded(Ui.sheetBackground(context), Ui.dp(context, Ui.DIALOG_RADIUS)));
         root.setClipToOutline(true);
 
         TextView heading = Ui.styledLabel(context, title, Ui.TEXT_DIALOG_TITLE, 600, Ui.text(context));

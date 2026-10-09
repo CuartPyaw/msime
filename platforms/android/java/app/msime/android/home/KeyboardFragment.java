@@ -17,6 +17,7 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.widget.NestedScrollView;
 import app.msime.android.AndroidLocalSettings;
+import app.msime.android.DrawablePolicy;
 import app.msime.android.AppEdition;
 import app.msime.android.FirstRunPreparation;
 import app.msime.android.KeyboardGeometry;
@@ -61,7 +62,7 @@ public final class KeyboardFragment extends HomeTabFragment {
 
     @Override public void onViewCreated(@NonNull View view, @Nullable Bundle state) {
         View card = view.findViewById(R.id.keyboard_status_card);
-        ViewPolicy.setBackground(card, Ui.rounded(Ui.card(requireContext()),
+        ViewPolicy.setBackground(card, DrawablePolicy.rounded(Ui.card(requireContext()),
             Ui.dp(requireContext(), Ui.NAV_GROUP_RADIUS)));
 
         MaterialButton trial = view.findViewById(R.id.keyboard_try);
@@ -115,7 +116,7 @@ public final class KeyboardFragment extends HomeTabFragment {
         // Preparation is silent while it works out and while it is done; it only takes the screen
         // when the keyboard cannot reach the Engine, which is the one case the user has to know.
         TextView preparation = view.findViewById(R.id.keyboard_preparation);
-        ViewPolicy.setBackground(preparation, Ui.rounded(Ui.page(requireContext()), Ui.dp(requireContext(), 12)));
+        ViewPolicy.setBackground(preparation, DrawablePolicy.rounded(Ui.page(requireContext()), Ui.dp(requireContext(), 12)));
         ViewPolicy.bindClick(preparation, () -> FirstRunPreparation.retry(requireContext()));
         preparationListener = status -> {
             if (!isAdded()) return;

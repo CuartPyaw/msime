@@ -303,9 +303,9 @@ final class LoginSheet {
         ViewPolicy.setCentered(button);
         Ui.setMinimumHeightDp(button, activity, 50);
         GradientDrawable face = stroke == 0
-            ? Ui.rounded(fill, Ui.dp(activity, 12))
+            ? DrawablePolicy.rounded(fill, Ui.dp(activity, 12))
             : DrawablePolicy.outlined(fill, Ui.dp(activity, 12), KeyboardGeometry.atLeastOnePixel(activity, 1), stroke);
-        GradientDrawable mask = Ui.rounded(Color.WHITE, Ui.dp(activity, 12));
+        GradientDrawable mask = DrawablePolicy.rounded(Color.WHITE, Ui.dp(activity, 12));
         int pressed = ColorPolicy.withAlpha(fill == Color.BLACK ? Color.WHITE : Ui.text(activity), 0.12f);
         ViewPolicy.setBackground(button, DrawablePolicy.ripple(pressed, face, mask));
         if (icon != null) {

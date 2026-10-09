@@ -24,6 +24,7 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.Nullable;
 import app.msime.android.AppEdition;
+import app.msime.android.DrawablePolicy;
 import app.msime.android.AppVersionPolicy;
 import app.msime.android.core.InputViewValuePolicy;
 import app.msime.android.CloudApi;
@@ -217,7 +218,7 @@ public final class FeedbackPage extends DetailPage {
             BitmapFactory.Options options = new BitmapFactory.Options();
             options.inSampleSize = 4;
             image.setImageBitmap(BitmapFactory.decodeByteArray(bytes, 0, bytes.length, options));
-            ViewPolicy.setBackground(image, Ui.rounded(Ui.rowBackground(context), Ui.dp(requireContext(), 10)));
+            ViewPolicy.setBackground(image, DrawablePolicy.rounded(Ui.rowBackground(context), Ui.dp(requireContext(), 10)));
             image.setClipToOutline(true);
             image.setContentDescription("截图 " + (index + 1));
             frame.addView(image, Ui.squareFrameParams(requireContext(), Ui.THUMBNAIL_SIZE));
