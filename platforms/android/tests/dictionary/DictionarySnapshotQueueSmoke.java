@@ -1,6 +1,7 @@
 import app.msime.android.DictionarySnapshotQueue;
 import app.msime.android.DictionarySnapshotWorker;
 import app.msime.android.DictionarySnapshotPolicy;
+import app.msime.android.JsonPolicy;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -22,17 +23,11 @@ public final class DictionarySnapshotQueueSmoke {
     }
 
     public static void main(String[] args) throws Exception {
-        java.lang.reflect.Method strictBoolean = DictionarySnapshotWorker.class.getDeclaredMethod(
-            "strictBoolean", Object.class);
-        strictBoolean.setAccessible(true);
-        check(Boolean.TRUE.equals(strictBoolean.invoke(null, Boolean.TRUE)));
-        check(strictBoolean.invoke(null, "true") == null);
-        java.lang.reflect.Method strictString = DictionarySnapshotWorker.class.getDeclaredMethod(
-            "strictString", Object.class);
-        strictString.setAccessible(true);
-        check("legacy".equals(strictString.invoke(null, "legacy")));
-        check(strictString.invoke(null, 1) == null);
-        check(strictString.invoke(null, Boolean.TRUE) == null);
+        check(Boolean.TRUE.equals(JsonPolicy.strictBoolean(Boolean.TRUE)));
+        check(JsonPolicy.strictBoolean("true") == null);
+        check("legacy".equals(JsonPolicy.strictString("legacy")));
+        check(JsonPolicy.strictString(1) == null);
+        check(JsonPolicy.strictString(Boolean.TRUE) == null);
         check(DictionarySnapshotPolicy.handle(42L, -1) == 42L);
         check(DictionarySnapshotPolicy.handle(42.5, -1) == -1);
         check(DictionarySnapshotPolicy.handle(true, -1) == -1);

@@ -100,15 +100,21 @@ pub fn fuzzy_segmentations(
         let capacity = limit.min(paths.len().saturating_mul(alternatives.len()));
         let mut next = Vec::with_capacity(capacity);
         // The C++ only breaks the inner loop at the cap, which stops the product at `limit` all the same.
-        'beam: for path in &paths {
-            for alternative in &alternatives {
-                if next.len() == limit {
-                    break 'beam;
-                }
+        'beam: for mut path in paths {
+            let take = (limit - next.len()).min(alternatives.len());
+            for alternative in alternatives.iter().take(take.saturating_sub(1)) {
                 let mut extended = Vec::with_capacity(path.len() + 1);
-                extended.extend_from_slice(path);
+                extended.extend_from_slice(&path);
                 extended.push(alternative.clone());
                 next.push(extended);
+            }
+            if take == 0 {
+                break 'beam;
+            }
+            path.push(alternatives[take - 1].clone());
+            next.push(path);
+            if next.len() == limit {
+                break 'beam;
             }
         }
         paths = next;
@@ -220,5 +226,17 @@ mod tests {
             fuzzy_segmentations(&[], rules(fuzzy_rule::ALL), FUZZY_SEGMENTATION_LIMIT).is_empty()
         );
         assert!(fuzzy_segmentations(&typed, rules(fuzzy_rule::ALL), 0).is_empty());
+    }
+
+    #[test]
+    fn fuzzy_beam_reuses_a_parent_path_for_the_last_alternative() {
+        let typed = vec!["zan".to_owned(), "fa".to_owned()];
+        let _ = fuzzy_segmentations(&typed, rules(fuzzy_rule::ALL), FUZZY_SEGMENTATION_LIMIT);
+        let (paths, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            fuzzy_segmentations(&typed, rules(fuzzy_rule::ALL), FUZZY_SEGMENTATION_LIMIT)
+        });
+
+        assert_eq!(paths.len(), 7);
+        assert_eq!(allocations, 40);
     }
 }

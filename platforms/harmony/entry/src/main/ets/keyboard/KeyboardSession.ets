@@ -3180,11 +3180,15 @@ export class KeyboardSession implements HardwareKeyTarget {
     }
   }
 
-  /** Delete through the editor while reserving the asynchronous text-change echo it produces. */
+  /**
+   * 删掉光标前的 `count` 个字符，并为它在编辑器里产生的异步文本变化回声预留一笔。
+   *
+   * 鸿蒙输入法框架的方向命名与 Android 相反：`deleteForwardSync` 删光标之前的文字，`deleteBackwardSync` 删光标之后的。英文文档只写了 "Delete text forward/backward"，看不出以什么为参照，这里以设备实测为准（HarmonyOS 6.0.2 模拟器，光标在 `abc` 末尾：`deleteForward(1)` 得到 `ab`，`deleteBackward(1)` 什么也不删且照样报告成功）。以前这里调的是 `deleteBackwardSync`，于是退格、智能标点替换、AI 润色和翻译的替换在光标位于末尾时都悄无声息地什么也不删，光标在中间时删的是后面的字。
+   */
   private deleteEditorBackwardSync(count: number): void {
     const inputClient: inputMethodEngine.InputClient | undefined = this.inputClient;
     if (inputClient === undefined) return;
-    this.editEditorSync((): void => inputClient.deleteBackwardSync(count));
+    this.editEditorSync((): void => inputClient.deleteForwardSync(count));
   }
 
   /** Resume one durable cloud snapshot before a shared Engine session takes the read lock. */
@@ -3354,7 +3358,7 @@ export class KeyboardSession implements HardwareKeyTarget {
       const chinese: string | null = SmartPunctuationRepeatPolicy.chineseMark(ascii);
       if (chinese !== null) {
         try {
-          // deleteBackwardSync(1) removes the one scalar just before the caret. The preceding
+          // deleteEditorBackwardSync(1) removes the one scalar just before the caret. The preceding
           // scalar was checked above, so a replacement cannot consume unrelated text.
           this.deleteEditorBackwardSync(1);
           this.insertEditorTextSync(chinese);
