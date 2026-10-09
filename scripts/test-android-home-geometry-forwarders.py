@@ -49,6 +49,10 @@ def main() -> int:
         errors.append(f"{UI}: 不应保留 weightedHeight 转发方法")
     if re.search(r"(?<![.\w])weightedHeight\(", ui):
         errors.append(f"{UI}: 不应调用已移除的 weightedHeight")
+    if "public static FrameLayout.LayoutParams frameWrap(" in ui:
+        errors.append(f"{UI}: 不应保留 frameWrap 转发方法")
+    if re.search(r"(?<![.\w])frameWrap\(", ui):
+        errors.append(f"{UI}: 不应调用已移除的 frameWrap")
 
     for path in HOME.glob("*.java"):
         source = path.read_text(encoding="utf-8")
@@ -66,6 +70,8 @@ def main() -> int:
             errors.append(f"{path}: 应直接调用 KeyboardGeometry.weightedMatchParentParams")
         if "Ui.weightedHeight(" in source:
             errors.append(f"{path}: 应直接调用 KeyboardGeometry.weightedHeightPxParams")
+        if "Ui.frameWrap(" in source:
+            errors.append(f"{path}: 应直接调用 KeyboardGeometry.frameParamsPx")
 
     for name in EXPECTED_CALLERS:
         path = HOME / name
@@ -92,6 +98,11 @@ def main() -> int:
         "KeyboardGeometry.weightedHeightPxParams("
     ) != 2:
         errors.append(f"{input_dialog}: 未直接复用 KeyboardGeometry.weightedHeightPxParams")
+
+    for name in ("MsToast.java", "SheetOptionView.java"):
+        path = HOME / name
+        if path.read_text(encoding="utf-8").count("KeyboardGeometry.frameParamsPx(") != 1:
+            errors.append(f"{path}: 未直接复用 KeyboardGeometry.frameParamsPx")
 
     if errors:
         print("\n".join(errors), file=sys.stderr)

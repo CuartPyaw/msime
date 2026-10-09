@@ -9,6 +9,7 @@ import android.widget.FrameLayout;
 import android.widget.TextView;
 import app.msime.android.ContextPolicy;
 import app.msime.android.ViewPolicy;
+import app.msime.android.keyboard.KeyboardGeometry;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
@@ -46,7 +47,9 @@ public final class MsToast {
         ViewPolicy.setElevation(toast, Ui.dp(activity, 6));
         ViewPolicy.setPoliteLiveRegion(toast);
 
-        FrameLayout.LayoutParams params = Ui.frameWrap(Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        FrameLayout.LayoutParams params = KeyboardGeometry.frameParamsPx(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         int side = Ui.dp(activity, 32);
         params.leftMargin = side;
         params.rightMargin = side;
