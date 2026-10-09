@@ -3443,11 +3443,8 @@ test.each(["windows", "linux", "macos", "android", "ios", "harmony", undefined])
     })) as HTMLInputElement;
     // A configuration that never mentioned usage reporting reports by default.
     expect(toggle.checked).toBe(true);
-    const description = screen.getByText(/^默认开启，可随时关闭。/).textContent ?? "";
-    expect(description).toContain("https://api.msime.app/v1/telemetry/events");
-    expect(description).toContain("安装 id");
-    expect(description).toContain("不含输入内容");
-    expect(description).toContain("清空尚未发送的记录");
+    // One line under the switch; what is sent lives on its own page, one fact per row.
+    expect(screen.getByText("不含输入内容、候选和剪贴板；关闭后不再发送。")).toBeTruthy();
     fireEvent.click(toggle);
     saveSettingsNow();
     await screen.findByText("已保存");
@@ -3455,6 +3452,13 @@ test.each(["windows", "linux", "macos", "android", "ios", "harmony", undefined])
       ...initial.preferences,
       usage_reporting: false,
     });
+    fireEvent.click(screen.getByRole("button", { name: "发送哪些内容" }));
+    const details = await screen.findByRole("group", { name: "发送哪些内容" });
+    const text = details.textContent ?? "";
+    expect(text).toContain("https://api.msime.app/v1/telemetry/events");
+    expect(text).toContain("安装 id");
+    expect(text).toContain("输入内容、候选和剪贴板");
+    expect(text).toContain("清空尚未发送的记录");
   },
 );
 
