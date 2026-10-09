@@ -31,11 +31,6 @@ public final class DoubaoAsrPolicy {
         return AiProviderResponse.boundedText(value, HttpAsrPolicy.MAX_TRANSCRIPT);
     }
 
-    /** The provider envelope carries its nested result as a JSON string; reject coercion. */
-    static String strictPayload(Object value) {
-        return JsonPolicy.strictString(value);
-    }
-
     static boolean validEndpoint(String endpoint) {
         return TextPolicy.validAuthority(endpoint, "wss://", AiPolishConfiguration.MAX_ENDPOINT_LENGTH);
     }

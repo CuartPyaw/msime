@@ -91,13 +91,11 @@ public final class DoubaoAsrPolicySmoke {
                 "Doubao rejects control characters before display");
             check("".equals(strictText.invoke(null, "好\uD800")),
                 "Doubao rejects unpaired surrogates before display");
-            Method strictPayload = DoubaoAsrPolicy.class.getDeclaredMethod("strictPayload", Object.class);
-            strictPayload.setAccessible(true);
-            check("{\"result\":{}}".equals(strictPayload.invoke(null, "{\"result\":{}}")),
+            check("{\"result\":{}}".equals(JsonPolicy.strictString("{\"result\":{}}")),
                 "Doubao accepts string payloads");
-            check(strictPayload.invoke(null, 42) == null,
+            check(JsonPolicy.strictString(42) == null,
                 "Doubao rejects numeric payloads instead of coercing them");
-            check(strictPayload.invoke(null, new Object()) == null,
+            check(JsonPolicy.strictString(new Object()) == null,
                 "Doubao rejects object payloads instead of coercing them");
             check(Boolean.TRUE.equals(JsonPolicy.strictBoolean(Boolean.TRUE)),
                 "Doubao accepts JSON booleans");
