@@ -408,6 +408,13 @@ public final class Ui {
         return view;
     }
 
+    /** 创建会由辅助功能礼貌播报变化的空状态文本。 */
+    public static TextView liveStatus(Context context, int sizeSp) {
+        TextView status = styledLabel(context, "", sizeSp, 400, subText(context));
+        ViewPolicy.setPoliteLiveRegion(status);
+        return status;
+    }
+
     /**
      * 行尾的值文字：单行，最宽只占行内可用宽度的 {@link #TRAILING_VALUE_MAX_SHARE}，再长就在末尾省略。
      *

@@ -149,9 +149,8 @@ final class LoginSheet {
         }
             root.addView(options, Ui.matchWidth(activity, 0));
 
-        status = Ui.styledLabel(activity, "", 13, 400, Ui.subText(activity));
+        status = Ui.liveStatus(activity, 13);
         ViewPolicy.setCenteredHorizontally(status);
-        ViewPolicy.setPoliteLiveRegion(status);
         ViewPolicy.hide(status);
         root.addView(status, Ui.matchWidth(activity, 12));
 
