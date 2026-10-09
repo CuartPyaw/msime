@@ -67,7 +67,7 @@ public final class DownloadPage extends DetailPage {
         int iconSize = Ui.dp(context, 24);
         tile.addView(icon, Ui.squareFrameParamsPx(iconSize, Gravity.CENTER));
         int tileSize = Ui.dp(context, 44);
-        card.addView(tile, Ui.squareParamsPx(tileSize));
+        card.addView(tile, ViewPolicy.newSquareParamsPx(tileSize));
 
         LinearLayout texts = Ui.column(context);
         TextView title = Ui.styledLabel(context, "在电脑上打开", Ui.TEXT_ROW_TITLE, 600, Ui.text(context));
@@ -97,7 +97,7 @@ public final class DownloadPage extends DetailPage {
         Context context = row.view().getContext();
         ImageView image = Ui.decorativeIcon(context, icon, Ui.text(context));
         int size = Ui.dp(context, 24);
-        LinearLayout.LayoutParams params = Ui.squareParamsPx(size);
+        LinearLayout.LayoutParams params = ViewPolicy.newSquareParamsPx(size);
         params.setMarginEnd(Ui.dp(context, 18));
         ((LinearLayout) row.view()).addView(image, 0, params);
         return row;
