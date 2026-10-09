@@ -14,9 +14,12 @@ extension BackendAccountClient {
     let userID: String
     if let expected { userID = expected }
     else { userID = try await session.credentials().userID }
-    return try await session.authenticated(matchingUserID: userID) { token in
+    let catalog = try await session.authenticated(matchingUserID: userID) { token in
       try await chatModels(token: token)
     }.value
+    _ = try await session.credentials(matchingUserID: userID)
+    try Task.checkCancellation()
+    return catalog
   }
 
   func chatModels(token: String) async throws -> ChatModels {
@@ -28,6 +31,19 @@ extension BackendAccountClient {
           Set(catalog.data.map(\.id)).count == catalog.data.count else { throw Failure(status: 0) }
     return catalog
   }
+  func chat(messages: [ChatMessage], model: String, session: BackendAccountSession,
+            matchingUserID expected: String? = nil) async throws -> String {
+    let userID: String
+    if let expected { userID = expected }
+    else { userID = try await session.credentials().userID }
+    let reply = try await session.authenticated(matchingUserID: userID) { token in
+      try await chat(messages: messages, model: model, token: token)
+    }.value
+    _ = try await session.credentials(matchingUserID: userID)
+    try Task.checkCancellation()
+    return reply
+  }
+
   func chat(messages: [ChatMessage], model: String, token: String) async throws -> String {
     struct Body: Encodable { let messages: [ChatMessage]; let model: String; let max_tokens = 2048; let stream = false }
     struct Response: Decodable {
