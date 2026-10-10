@@ -204,8 +204,7 @@ public final class NativeClient {
     /** Reads bounded English completions from the packaged dictionary. Call on a worker. */
     public static String englishCompletions(String prefix, String resources) {
         if (prefix == null || prefix.isEmpty() || prefix.length() > 128
-                || !prefix.chars().allMatch(value -> value >= 'A' && value <= 'Z'
-                    || value >= 'a' && value <= 'z'))
+                || !prefix.chars().allMatch(TextPolicy::isAsciiLetter))
             throw new IllegalArgumentException("Invalid English completion prefix");
         try {
             JSONObject request = new JSONObject().put("prefix", prefix).put("limit", 12);

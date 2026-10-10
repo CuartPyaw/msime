@@ -76,8 +76,7 @@ public final class WebSocketFrames {
         if (value == null || value.isEmpty()) return false;
         for (int index = 0; index < value.length(); index++) {
             char character = value.charAt(index);
-            if (character > 0x7e || !(character >= 'a' && character <= 'z')
-                    && !(character >= 'A' && character <= 'Z')
+            if (character > 0x7e || !TextPolicy.isAsciiLetter(character)
                     && !(character >= '0' && character <= '9')
                     && !"!#$%&'*+-.^_`|~".contains(String.valueOf(character))) return false;
         }
