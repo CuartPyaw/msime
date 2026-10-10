@@ -35,13 +35,6 @@ public final class KeyboardGeometry {
     public static final int CANDIDATE_ROW_HEIGHT_DP = 48;
     public static final int NINE_KEY_HEIGHT_DP = 180;
     public static final int HANDWRITING_BODY_HEIGHT_DP = 220;
-    /** 默认键距 6 dp、行距 7 dp，与共享偏好 client-core 的 `touch_key_spacing_tenths` / `touch_row_spacing_tenths` 默认值一致：共享层总会把这两个值写进偏好，这里另取一套会让新安装和「恢复默认」先画一种间距再跳回共享的那种。要改默认值得在共享层改，各平台一起变。 */
-    public static final int DEFAULT_KEY_SPACING_TENTHS = 60;
-    public static final int DEFAULT_ROW_SPACING_TENTHS = 70;
-    public static final int MIN_KEY_SPACING_TENTHS = 30;
-    public static final int MAX_KEY_SPACING_TENTHS = 60;
-    public static final int MIN_ROW_SPACING_TENTHS = 40;
-    public static final int MAX_ROW_SPACING_TENTHS = 100;
 
     // ---- 新设计的键盘几何（N/design-tokens.md §5） ----
 
@@ -121,26 +114,6 @@ public final class KeyboardGeometry {
         return BoundsPolicy.bounded(percent, MIN_HEIGHT_PERCENT, MAX_HEIGHT_PERCENT) + "%";
     }
 
-    public static int keySpacing(int value) {
-        return clamp(value, MIN_KEY_SPACING_TENTHS, MAX_KEY_SPACING_TENTHS,
-            DEFAULT_KEY_SPACING_TENTHS);
-    }
-
-    /** Widest key spacing the Dachen keyboard takes: eleven columns leave each key a tenth less width than the 26-key rows, and a 6 dp gap would take that out of the keycap itself. */
-    public static final int ZHUYIN_MAX_KEY_SPACING_TENTHS = 40;
-
-    /** The key spacing a touch layout draws with; the Dachen rows cap the setting rather than replace it, so a narrower gap the user picked still applies. */
-    public static int layoutKeySpacing(int value, int touchLayout) {
-        int spacing = keySpacing(value);
-        return touchLayout == KeyboardLayout.ZHUYIN_LAYOUT
-            ? BoundsPolicy.atMost(spacing, ZHUYIN_MAX_KEY_SPACING_TENTHS) : spacing;
-    }
-
-    public static int rowSpacing(int value) {
-        return clamp(value, MIN_ROW_SPACING_TENTHS, MAX_ROW_SPACING_TENTHS,
-            DEFAULT_ROW_SPACING_TENTHS);
-    }
-
     public static int heightAdjustment(int value) {
         if (value == Integer.MIN_VALUE) return DEFAULT_HEIGHT_ADJUSTMENT_DP;
         return BoundsPolicy.bounded(value, MIN_HEIGHT_ADJUSTMENT_DP, MAX_HEIGHT_ADJUSTMENT_DP);
@@ -167,13 +140,5 @@ public final class KeyboardGeometry {
         return (value > 0 ? "+" : "") + value;
     }
 
-    public static int halfGapPixels(int tenths, float density) {
-        if (!Float.isFinite(density) || density <= 0) return 0;
-        return BoundsPolicy.nonNegative(Math.round(tenths * density / 20f));
-    }
 
-    private static int clamp(int value, int minimum, int maximum, int fallback) {
-        if (value < 0) return fallback;
-        return BoundsPolicy.bounded(value, minimum, maximum);
-    }
 }

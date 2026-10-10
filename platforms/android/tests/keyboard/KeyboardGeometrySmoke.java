@@ -1,3 +1,4 @@
+import app.msime.android.KeyboardSpacingPolicy;
 import app.msime.android.KeyboardTypographyPolicy;
 import app.msime.android.NumberPolicy;
 import app.msime.android.BoundsPolicy;
@@ -24,10 +25,10 @@ public final class KeyboardGeometrySmoke {
 
     public static void main(String[] args) {
         // 与 crates/client-core 的 default_touch_key_spacing_tenths / default_touch_row_spacing_tenths 同值。
-        check(KeyboardGeometry.keySpacing(-1) == 60);
+        check(KeyboardSpacingPolicy.keySpacing(-1) == 60);
         check(BoundsPolicy.nonNegative(-1) == 0 && BoundsPolicy.nonNegative(7) == 7);
         check(BoundsPolicy.nonNegative(-1L) == 0L && BoundsPolicy.nonNegative(7L) == 7L);
-        check(KeyboardGeometry.rowSpacing(-1) == 70);
+        check(KeyboardSpacingPolicy.rowSpacing(-1) == 70);
         check(KeyboardGeometry.DESIGN_KEY_GAP_DP == 5 && KeyboardGeometry.DESIGN_ROW_GAP_DP == 8);
         check(KeyboardGeometry.DESIGN_PADDING_TOP_DP == 8
             && KeyboardGeometry.DESIGN_PADDING_HORIZONTAL_DP == 6
@@ -35,7 +36,7 @@ public final class KeyboardGeometrySmoke {
         // 底行与上面的键行同高（#6354、#6472）：四行都是 52 dp 加一份行距，默认行距下键区 4 × 59 = 236 dp，与原来 3 × 63 + 46 = 235 dp 只差 1 dp。
         check(KeyboardGeometry.KEY_ROW_HEIGHT_DP == 52 && KeyboardGeometry.KEYBOARD_ROW_COUNT == 4, "four 52 dp rows");
         check(KeyboardGeometry.KEYBOARD_ROW_COUNT * (KeyboardGeometry.KEY_ROW_HEIGHT_DP
-            + KeyboardGeometry.DEFAULT_ROW_SPACING_TENTHS / 10) == 236, "default key area stays 236 dp");
+            + KeyboardSpacingPolicy.DEFAULT_ROW_SPACING_TENTHS / 10) == 236, "default key area stays 236 dp");
         // 键盘高度调整由四行均分：底行拿 floorDiv(调整量, 4)，三行键分其余部分，余数给前面的行。
         checkRows(0, 52, 52, 52, 52);       // 100%
         checkRows(-46, 41, 41, 40, 40);     // 75%
@@ -97,16 +98,16 @@ public final class KeyboardGeometrySmoke {
         check(KeyboardGeometry.adjustedRowHeight(168, 55, 1, 0) == 223);
         check(KeyboardGeometry.designKeyHeight(100) == 46 && KeyboardGeometry.designKeyHeight(127) == 58);
         check(KeyboardGeometry.displayPercent(127).equals("127%"));
-        check(KeyboardGeometry.keySpacing(29) == 30);
-        check(KeyboardGeometry.keySpacing(61) == 60);
-        check(KeyboardGeometry.rowSpacing(39) == 40);
-        check(KeyboardGeometry.rowSpacing(101) == 100);
-        check(KeyboardGeometry.keySpacing(35) == 35);
-        check(KeyboardGeometry.rowSpacing(95) == 95);
-        check(KeyboardGeometry.layoutKeySpacing(-1, KeyboardLayout.ZHUYIN_LAYOUT) == 40);
-        check(KeyboardGeometry.layoutKeySpacing(35, KeyboardLayout.ZHUYIN_LAYOUT) == 35);
-        check(KeyboardGeometry.layoutKeySpacing(-1, KeyboardLayout.STANDARD_TOUCH_LAYOUT) == 60);
-        check(KeyboardGeometry.layoutKeySpacing(61, KeyboardLayout.KOREAN_LAYOUT) == 60);
+        check(KeyboardSpacingPolicy.keySpacing(29) == 30);
+        check(KeyboardSpacingPolicy.keySpacing(61) == 60);
+        check(KeyboardSpacingPolicy.rowSpacing(39) == 40);
+        check(KeyboardSpacingPolicy.rowSpacing(101) == 100);
+        check(KeyboardSpacingPolicy.keySpacing(35) == 35);
+        check(KeyboardSpacingPolicy.rowSpacing(95) == 95);
+        check(KeyboardSpacingPolicy.layoutKeySpacing(-1, KeyboardLayout.ZHUYIN_LAYOUT) == 40);
+        check(KeyboardSpacingPolicy.layoutKeySpacing(35, KeyboardLayout.ZHUYIN_LAYOUT) == 35);
+        check(KeyboardSpacingPolicy.layoutKeySpacing(-1, KeyboardLayout.STANDARD_TOUCH_LAYOUT) == 60);
+        check(KeyboardSpacingPolicy.layoutKeySpacing(61, KeyboardLayout.KOREAN_LAYOUT) == 60);
         check(KeyboardGeometry.heightAdjustment(Integer.MIN_VALUE) == 0);
         check(KeyboardGeometry.CANDIDATE_ROW_HEIGHT_DP == 48);
         check(KeyboardGeometry.heightAdjustment(-13) == -12);
@@ -121,9 +122,9 @@ public final class KeyboardGeometrySmoke {
         check(KeyboardGeometry.displayHeight(24).equals("+24"));
         check(KeyboardGeometry.display(35).equals("3.5"));
         check(KeyboardGeometry.display(100).equals("10.0"));
-        check(KeyboardGeometry.halfGapPixels(60, 1) == 3);
-        check(KeyboardGeometry.halfGapPixels(35, 2) == 4);
-        check(KeyboardGeometry.halfGapPixels(60, Float.NaN) == 0);
+        check(KeyboardSpacingPolicy.halfGapPixels(60, 1) == 3);
+        check(KeyboardSpacingPolicy.halfGapPixels(35, 2) == 4);
+        check(KeyboardSpacingPolicy.halfGapPixels(60, Float.NaN) == 0);
         check(NumberPolicy.strictInt(45.0, -1) == -1);
         check(NumberPolicy.strictLong(45.0, -1) == -1);
         // 键距空隙归属：键帽 100x50，左右外边距 9px、上下 10px。
