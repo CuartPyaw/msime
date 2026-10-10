@@ -76,7 +76,7 @@ public final class AccountFragment extends HomeTabFragment {
             SyncSwitch.lastSyncedAt(context), CloudSync.statusLine(context)), state -> {
                 if (state == null || request != generation || getView() == null) return;
                 local = state;
-                if (!state.signedIn()) remote = null;
+                remote = null;
                 render();
                 if (state.signedIn()) reloadRemote(request);
             });
@@ -100,7 +100,7 @@ public final class AccountFragment extends HomeTabFragment {
             try {
                 profile = api.profile();
                 // 登录时没读到用户 id 的话，这里补上同步要用的账号绑定。
-                ProfilePage.bindIfNeeded(context, profile);
+                ProfilePage.bindIfNeeded(context, profile, sessionId);
             } catch (CloudApi.Failure failure) {
                 profile = null;
             }
@@ -123,6 +123,7 @@ public final class AccountFragment extends HomeTabFragment {
         }, state -> {
             if (state == null || request != generation || getView() == null) return;
             if (state.sessionId().isEmpty() || state.profile() == null
+                    || !state.sessionId().equals(new BackendAccount(requireContext()).sessionId())
                     || !state.profile().id().equals(SyncSwitch.accountId(requireContext()))) return;
             remote = state;
             Local current = local;
