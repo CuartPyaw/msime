@@ -6,6 +6,8 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.util.TypedValue;
 import android.view.View;
 import android.view.ViewGroup;
@@ -24,6 +26,7 @@ import androidx.annotation.ColorInt;
 import androidx.annotation.DrawableRes;
 import com.google.android.material.color.MaterialColors;
 import com.google.android.material.bottomsheet.BottomSheetDragHandleView;
+import java.util.function.Consumer;
 
 /**
  * 宿主界面共用的尺寸、时长和颜色读取。
@@ -490,6 +493,17 @@ public final class Ui {
         EditText view = new EditText(context);
         style(view, sizeSp, weight, color);
         return view;
+    }
+
+    /** 只在文字修改完成后回调，省去不需要的另外两个 `TextWatcher` 方法。 */
+    public static void afterTextChanged(TextView view, Consumer<Editable> listener) {
+        view.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) {}
+
+            @Override public void onTextChanged(CharSequence text, int start, int before, int count) {}
+
+            @Override public void afterTextChanged(Editable text) { listener.accept(text); }
+        });
     }
 
     /** Create the standard accent-coloured group heading. */
