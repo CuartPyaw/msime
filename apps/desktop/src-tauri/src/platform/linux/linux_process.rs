@@ -3,8 +3,10 @@ use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
 use std::ffi::OsStr;
 use std::fs;
 use std::io::{ErrorKind, Read, Write};
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 /// Whether an executable file is available in an absolute directory listed by `PATH`.
@@ -81,6 +83,7 @@ pub const STARTUP_PROBE_STDERR_BYTES: usize = 4096;
 pub fn probe_stays_running(program: &str, arguments: &[&str], window: Duration) -> StartupProbe {
     let Ok(mut child) = Command::new(program)
         .args(arguments)
+        .process_group(0)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -122,6 +125,7 @@ pub fn probe_stays_running(program: &str, arguments: &[&str], window: Duration) 
             Err(_) => break StartupProbe::Failed,
         }
     };
+    kill_process_group(&child);
     let _ = child.kill();
     let _ = child.wait();
     probe
@@ -176,6 +180,18 @@ pub fn read_text_prefix(
     read_text_bounded(program, arguments, max_bytes, timeout, true)
 }
 
+/// Helpers used for bounded commands own their process group so a child that
+/// inherits a pipe cannot survive the request and keep that pipe open forever.
+#[cfg(unix)]
+fn kill_process_group(child: &Child) {
+    if let Some(pid) = rustix::process::Pid::from_raw(child.id() as _) {
+        let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+    }
+}
+
+#[cfg(not(unix))]
+fn kill_process_group(_: &Child) {}
+
 fn read_text_bounded(
     program: &str,
     arguments: &[&str],
@@ -185,6 +201,7 @@ fn read_text_bounded(
 ) -> Option<String> {
     let mut child = Command::new(program)
         .args(arguments)
+        .process_group(0)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -244,6 +261,7 @@ fn read_text_bounded(
     // Reap the process on every path, including a full pipe, failed decoding or
     // timeout. Nonblocking reads also cover descendants holding stdout open.
     if result.is_none() || prefix {
+        kill_process_group(&child);
         let _ = child.kill();
     }
     let _ = child.wait();
@@ -422,5 +440,36 @@ mod tests {
             &path,
             Duration::from_secs(1)
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_text_does_not_leave_descendants_holding_stdout() {
+        let root = tempfile::tempdir().unwrap();
+        let started = root.path().join("started");
+        let alive = root.path().join("alive");
+        let command = format!(
+            "sleep 30 & (sleep 0.2; echo alive > {}) & echo started > {}; exit 0",
+            alive.to_str().unwrap(),
+            started.to_str().unwrap()
+        );
+        assert!(super::read_text(
+            "/bin/sh",
+            &["-c", &command],
+            1024,
+            Duration::from_millis(100)
+        )
+        .is_none());
+        assert!(started.is_file());
+        for _ in 0..100 {
+            if alive.is_file() {
+                panic!("a descendant survived read_text cleanup");
+            }
+            if !started.is_file() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!alive.is_file(), "a descendant survived read_text cleanup");
     }
 }
