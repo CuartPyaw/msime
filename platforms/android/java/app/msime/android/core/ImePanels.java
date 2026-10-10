@@ -2259,7 +2259,7 @@ final class ImePanels {
                 throw new JSONException("Invalid symbol catalog item");
             items.add((String) text);
         }
-        long nextOffset = KeyboardGeometry.strictLong(value.opt("next_offset"), -1);
+        long nextOffset = NumberPolicy.strictLong(value.opt("next_offset"), -1);
         Object complete = value.opt("complete");
         if (!(complete instanceof Boolean)
                 || !SymbolPanelModel.validCatalogCursor(offset, items.size(), nextOffset, (Boolean) complete))

@@ -202,16 +202,16 @@ public final class CustomKeyboardSkin {
     }
 
     static int colorValue(Object raw, int fallback) {
-        int value = KeyboardGeometry.strictInt(raw, fallback);
+        int value = NumberPolicy.strictInt(raw, fallback);
         return value < 0 || value > 0xFFFFFF ? fallback : value;
     }
 
     static int patternValue(Object raw) {
-        return BoundsPolicy.bounded(KeyboardGeometry.strictInt(raw, 0), 0, 3);
+        return BoundsPolicy.bounded(NumberPolicy.strictInt(raw, 0), 0, 3);
     }
 
     static double doubleValue(Object raw, double fallback) {
-        return KeyboardGeometry.strictDouble(raw, fallback);
+        return NumberPolicy.strictDouble(raw, fallback);
     }
 
     private static String oneOf(String value, String first, String second, String third, String fourth) {

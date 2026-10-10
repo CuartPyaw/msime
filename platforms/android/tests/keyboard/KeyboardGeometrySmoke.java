@@ -1,3 +1,4 @@
+import app.msime.android.NumberPolicy;
 import app.msime.android.BoundsPolicy;
 import app.msime.android.KeyboardGapPolicy;
 import app.msime.android.KeyboardGeometry;
@@ -122,8 +123,8 @@ public final class KeyboardGeometrySmoke {
         check(KeyboardGeometry.halfGapPixels(60, 1) == 3);
         check(KeyboardGeometry.halfGapPixels(35, 2) == 4);
         check(KeyboardGeometry.halfGapPixels(60, Float.NaN) == 0);
-        check(KeyboardGeometry.strictInt(45.0, -1) == -1);
-        check(KeyboardGeometry.strictLong(45.0, -1) == -1);
+        check(NumberPolicy.strictInt(45.0, -1) == -1);
+        check(NumberPolicy.strictLong(45.0, -1) == -1);
         // 键距空隙归属：键帽 100x50，左右外边距 9px、上下 10px。
         check(KeyboardGapPolicy.gapDistance(50, 25, 100, 50, 9, 10, 9, 10) == 0f);
         check(KeyboardGapPolicy.gapDistance(-4, 25, 100, 50, 9, 10, 9, 10) == 4f);

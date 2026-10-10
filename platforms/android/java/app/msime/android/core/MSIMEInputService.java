@@ -942,7 +942,7 @@ public final class MSIMEInputService extends InputMethodService {
                         reportTypingStatisticsFailure(lifecycleGeneration);
                     } else if (nothingRecorded != null) {
                         JSONObject value = result.getJSONObject("value");
-                        long recorded = KeyboardGeometry.strictLong(value.opt("recorded"), -1);
+                        long recorded = NumberPolicy.strictLong(value.opt("recorded"), -1);
                         if (recorded < 0) throw new JSONException("Invalid recorded count");
                         if (recorded == 0) main.post(nothingRecorded);
                     }
@@ -1800,16 +1800,16 @@ public final class MSIMEInputService extends InputMethodService {
         // 共享的 `candidate_layout` 是桌面候选窗的横排/竖排，默认竖排；触屏候选条只有一行高，竖排时每个候选占满整行往下排，一屏只露出第一个。和 iOS 一样，触屏键盘始终横排，更多候选在展开面板里看。
         candidateHorizontal = true;
         candidateFontSize = CandidateAppearance.fontSize(
-            KeyboardGeometry.strictInt(preferences, "candidate_font_size", 16));
+            NumberPolicy.strictInt(preferences, "candidate_font_size", 16));
         candidatePreeditFontSize = CandidateAppearance.fontSize(
-            KeyboardGeometry.strictInt(preferences, "candidate_preedit_font_size", candidateFontSize));
+            NumberPolicy.strictInt(preferences, "candidate_preedit_font_size", candidateFontSize));
     }
 
     private void applyTouchGeometry(JSONObject preferences) {
         touchKeySpacingTenths = KeyboardGeometry.keySpacing(preferences == null ? -1
-            : KeyboardGeometry.strictInt(preferences, "touch_key_spacing_tenths", -1));
+            : NumberPolicy.strictInt(preferences, "touch_key_spacing_tenths", -1));
         touchRowSpacingTenths = KeyboardGeometry.rowSpacing(preferences == null ? -1
-            : KeyboardGeometry.strictInt(preferences, "touch_row_spacing_tenths", -1));
+            : NumberPolicy.strictInt(preferences, "touch_row_spacing_tenths", -1));
         adoptSavedHeightAdjustment(heightAdjustmentFrom(preferences));
         touchVoiceShortcutEnabled = preferences != null
             && preferences.optBoolean("touch_voice_shortcut", false);
@@ -1901,7 +1901,7 @@ public final class MSIMEInputService extends InputMethodService {
                 localSettings.integer(AndroidLocalSettings.KEYBOARD_HEIGHT_ADJUSTMENT));
         }
         return KeyboardGeometry.designHeightAdjustment(preferences == null ? Integer.MIN_VALUE
-            : KeyboardGeometry.strictInt(preferences, "touch_keyboard_height_adjustment", Integer.MIN_VALUE));
+            : NumberPolicy.strictInt(preferences, "touch_keyboard_height_adjustment", Integer.MIN_VALUE));
     }
 
     /** 会话是否不学习：输入框不许个性化学习，或者隐私模式开着。 */
@@ -2197,13 +2197,13 @@ public final class MSIMEInputService extends InputMethodService {
         CandidateAppearance.Palette nextCandidateAppearance = candidateAppearanceFor(preferences);
         boolean nextHorizontal = true;
         int nextFontSize = CandidateAppearance.fontSize(
-            KeyboardGeometry.strictInt(preferences, "candidate_font_size", 16));
+            NumberPolicy.strictInt(preferences, "candidate_font_size", 16));
         int nextPreeditFontSize = CandidateAppearance.fontSize(
-            KeyboardGeometry.strictInt(preferences, "candidate_preedit_font_size", nextFontSize));
+            NumberPolicy.strictInt(preferences, "candidate_preedit_font_size", nextFontSize));
         int nextKeySpacing = KeyboardGeometry.keySpacing(
-            KeyboardGeometry.strictInt(preferences, "touch_key_spacing_tenths", -1));
+            NumberPolicy.strictInt(preferences, "touch_key_spacing_tenths", -1));
         int nextRowSpacing = KeyboardGeometry.rowSpacing(
-            KeyboardGeometry.strictInt(preferences, "touch_row_spacing_tenths", -1));
+            NumberPolicy.strictInt(preferences, "touch_row_spacing_tenths", -1));
         int savedHeightAdjustment = heightAdjustmentFrom(preferences);
         // 键盘里正在调高度时，同步或设置页写来的新快照不能把预览覆盖回去（那样点「完成」时高度已经和保存值相同，什么也不会存下）；新的保存值记为「取消」时要回到的高度。
         int nextHeightAdjustment = inlineHeightActive ? touchKeyboardHeightAdjustment : savedHeightAdjustment;
@@ -2986,7 +2986,7 @@ public final class MSIMEInputService extends InputMethodService {
             JSONObject aiQuery = new JSONObject(aiDocument);
             JSONObject aiAssistant = aiQuery.optJSONObject("ai_assistant");
             int limit = OnlineCandidatePolicy.aiCandidateLimit(
-                aiAssistant == null ? 0 : KeyboardGeometry.strictInt(aiAssistant, "candidate_limit", 0));
+                aiAssistant == null ? 0 : NumberPolicy.strictInt(aiAssistant, "candidate_limit", 0));
             if (!requestsAi(aiQuery) || limit == 0) {
                 aiComplete = true;
                 return;
@@ -4663,7 +4663,7 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     private static long nextOffset(JSONObject value) throws JSONException {
-        long offset = KeyboardGeometry.strictLong(value.opt("next_offset"), -1);
+        long offset = NumberPolicy.strictLong(value.opt("next_offset"), -1);
         if (offset < 0) throw new JSONException("Invalid emoji catalog cursor");
         return offset;
     }
@@ -5444,9 +5444,9 @@ public final class MSIMEInputService extends InputMethodService {
         JSONObject acceptedPreferences = preferencesSnapshot.optJSONObject("preferences");
         // 高度在本地设置里，间距和语音入口在共享文档里，各自只在变了时写：只调高度时不去碰共享文档，免得一次无谓的 revision 冲突让保存失败。
         boolean sharedChanged = reset || acceptedPreferences == null
-            || KeyboardGeometry.keySpacing(KeyboardGeometry.strictInt(
+            || KeyboardGeometry.keySpacing(NumberPolicy.strictInt(
                 acceptedPreferences, "touch_key_spacing_tenths", -1)) != touchKeySpacingTenths
-            || KeyboardGeometry.rowSpacing(KeyboardGeometry.strictInt(
+            || KeyboardGeometry.rowSpacing(NumberPolicy.strictInt(
                 acceptedPreferences, "touch_row_spacing_tenths", -1)) != touchRowSpacingTenths
             || acceptedPreferences.optBoolean("touch_voice_shortcut", false)
                 != touchVoiceShortcutEnabled;
