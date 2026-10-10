@@ -246,7 +246,7 @@ public final class DictionaryCollectionsStore {
                 if (page == null) return Result.failed(failureMessage(""));
                 int nextBytes = exportBytesAfterPage(bytes, page);
                 if (nextBytes < 0) return Result.failed(failureMessage("collections_too_large"));
-                if (text == null) text = new StringBuilder(Math.max(16, page.length()));
+                if (text == null) text = new StringBuilder(BoundsPolicy.atLeast(page.length(), 16));
                 text.append(page);
                 bytes = nextBytes;
                 Object rawHasMore = value.opt("has_more");
