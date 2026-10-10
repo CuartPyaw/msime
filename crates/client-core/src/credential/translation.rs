@@ -134,7 +134,11 @@ pub fn test(
             match service {
                 "translation.tencent" => {
                     let root: Value = serde_json::from_str(&body).ok()?;
-                    if root.get("Response")?.get("Error").is_some() {
+                    if root
+                        .get("Response")?
+                        .get("Error")
+                        .is_some_and(|error| !error.is_null())
+                    {
                         return None;
                     }
                     translation::parse_tencent_tmt_response(&body, 1)?
@@ -275,6 +279,12 @@ mod tests {
                 assert!(!test(service, &config(), 0, &Fake(200, &body)).ok);
             }
         }
+    }
+
+    #[test]
+    fn translation_probe_accepts_a_null_tencent_error_with_valid_text() {
+        let body = r#"{"Response":{"TargetTextList":["synthetic"],"Error":null}}"#;
+        assert!(test("translation.tencent", &config(), 0, &Fake(200, body)).ok);
     }
 
     #[test]
