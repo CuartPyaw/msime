@@ -211,10 +211,31 @@ impl PinyinDatabase {
         }
         let keys_by_table = exact_segmentations_by_table(segmentations);
         let mut rows = Vec::new();
-        for (table, keys) in &keys_by_table {
+        for (index, (table, keys)) in keys_by_table.iter().enumerate() {
             let page = self.batch_rows(table, keys, limit);
-            if !page.is_empty() && rows.capacity() == 0 {
-                rows.reserve_exact(segmentations.len().saturating_mul(limit));
+            if page.is_empty() {
+                continue;
+            }
+            if rows.is_empty() {
+                // 首个非空页直接接管，不再分配并搬移一份相同的行存储。
+                rows = page;
+                continue;
+            }
+            // 满页按剩余有效表数规划，短页仅补实际行数；不可表示的提示退回本页。
+            let planned = if page.len() == limit {
+                (keys_by_table.len() - index)
+                    .checked_mul(limit)
+                    .filter(|additional| {
+                        rows.len().checked_add(*additional).is_some_and(|total| {
+                            total <= isize::MAX as usize / size_of::<DictRow>()
+                        })
+                    })
+                    .unwrap_or(page.len())
+            } else {
+                page.len()
+            };
+            if planned > rows.capacity() - rows.len() {
+                rows.reserve_exact(planned);
             }
             rows.extend(page);
         }
@@ -336,13 +357,8 @@ impl PinyinDatabase {
             }
             key.push_str(syllable);
         }
-        // 唯一跨度没有分组与去重需求；仍走原批量 SQL 和聚合容量策略。
-        let page = self.batch_rows(&table, &[key.as_str()], span_limit);
-        let mut rows = Vec::new();
-        if !page.is_empty() {
-            rows.reserve_exact(span_limit);
-        }
-        rows.extend(page);
+        // 唯一跨度没有分组与去重需求，直接接管 SQL 页，避免复制同一份行存储。
+        let mut rows = self.batch_rows(&table, &[key.as_str()], span_limit);
         rows.sort_by_key(|row| std::cmp::Reverse(row.weight));
         rows
     }
@@ -1541,6 +1557,10 @@ mod result_key_reuse_tests;
 #[cfg(test)]
 #[path = "pinyin/lattice_span_key_plan_tests.rs"]
 mod lattice_span_key_plan_tests;
+
+#[cfg(test)]
+#[path = "pinyin/aggregate_page_reuse_tests.rs"]
+mod aggregate_page_reuse_tests;
 
 #[cfg(test)]
 #[path = "pinyin/word_key_plan_tests.rs"]

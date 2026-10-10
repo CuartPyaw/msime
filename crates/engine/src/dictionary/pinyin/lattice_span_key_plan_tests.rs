@@ -55,7 +55,7 @@ fn complete_span_skips_owned_syllables_and_single_table_groups() {
     let (new, new_count) = count(|| database.query_lattice_span(&input, 2));
     assert_eq!(new, old);
     assert_eq!(new.capacity(), old.capacity());
-    assert_eq!(new_count + 5, old_count);
+    assert_eq!(new_count + 6, old_count);
 }
 
 fn assert_results(new: &[DictRow], old: &[DictRow]) {
@@ -73,6 +73,7 @@ fn compare_hot(database: &PinyinDatabase, input: &[String], limit: usize, saved:
     let (new, new_count) = count(|| database.query_lattice_span(input, limit));
     assert_results(&new, &old);
     assert_eq!(new.capacity(), old.capacity());
+    let saved = saved + usize::from(!new.is_empty());
     assert_eq!(
         new_count + saved,
         old_count,
@@ -252,7 +253,10 @@ fn cold_queries_reduce_planning_storage_without_changing_return_storage() {
             let (new, new_heap) = cold(false);
             assert_results(&new, &old);
             assert_eq!(new.capacity(), old.capacity());
-            assert_eq!(new_heap.allocations + saved, old_heap.allocations);
+            assert_eq!(
+                new_heap.allocations + saved + usize::from(!new.is_empty()),
+                old_heap.allocations
+            );
             assert_eq!(new_heap.remaining_bytes, old_heap.remaining_bytes);
             assert_eq!(
                 new_heap.remaining_bytes,
