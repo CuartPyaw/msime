@@ -42,6 +42,12 @@ public final class TextPolicy {
             && codePoint != '\n' && codePoint != '\r' && codePoint != '\t');
     }
 
+    /** Return whether text contains an ISO control character other than line feed. */
+    public static boolean hasControlExceptNewline(String value) {
+        return value.codePoints().anyMatch(codePoint -> Character.isISOControl(codePoint)
+            && codePoint != '\n');
+    }
+
     /** Replace ISO control characters while preserving all other UTF-16 units. */
     public static String replaceControls(String value, char replacement) {
         if (value == null || value.isEmpty()) return value == null ? "" : value;
