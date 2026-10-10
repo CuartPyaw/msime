@@ -870,6 +870,8 @@ impl InputSession {
             if let Some(result) = self.move_conversion_from(Command::ConversionLeft, index) {
                 return result;
             }
+            // 高亮的那一行进不了改字时不换成首选去改，按字母光标左移。
+            return self.handle_command(Command::MoveLeft);
         }
         self.handle_command(Command::ConversionLeft)
     }
