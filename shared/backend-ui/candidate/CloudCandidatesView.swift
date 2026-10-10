@@ -123,6 +123,7 @@ struct CloudCandidatesView: View {
     } message: { Text("修改当前查询的云端状态；固定位置会替换该位置原有的词条。若其他设备已更新，需重新查询再确认。") }
   }
   @MainActor private func load(_ query: BackendAccountClient.CandidateQuery) async throws {
+    let client = self.client
     let value = try await authenticated { token in
       let result = try await client.personalCandidates(query, token: token)
       let fixed: [BackendAccountClient.FixedPosition]
@@ -135,6 +136,8 @@ struct CloudCandidatesView: View {
   }
   @MainActor private func apply(_ action: Action, page: BackendAccountClient.PersonalCandidates, query: BackendAccountClient.CandidateQuery) async throws {
     let unchangedStatus = "云端状态已更新，本机设置保持原样。"
+    let client = self.client
+    let mode = self.mode, step = self.step, trigger = self.trigger, forceTop = self.forceTop, position = self.position
     let status = try await authenticated { token in
       switch action {
       case .rank(let candidate):

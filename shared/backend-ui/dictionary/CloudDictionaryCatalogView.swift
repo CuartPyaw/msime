@@ -90,6 +90,7 @@ struct CloudDictionaryCatalogView: View {
     .onDisappear { pending?.cancel(); page = nil }
     .sheet(item: $editing) { edit in
       CloudDictionaryEditor(kind: kind, value: edit.entry.value) { value in
+        let client = self.client
         _ = try await authenticated { token in
           try await client.editCatalog(edit.entry, revision: edit.revision, replacement: value, token: token)
         }
@@ -101,6 +102,7 @@ struct CloudDictionaryCatalogView: View {
       Button("删除", role: .destructive) {
         guard let edit = deleting else { return }
         run {
+          let client = self.client
           _ = try await authenticated { token in
             try await client.editCatalog(edit.entry, revision: edit.revision, replacement: nil, token: token)
           }
@@ -111,6 +113,7 @@ struct CloudDictionaryCatalogView: View {
     } message: { Text("基础词条也可从当前账号的云端目录删除。本机词库保持原样；云端版本变化时须重新查询并确认。") }
   }
   @MainActor private func load(query: Query, offset: Int) async throws {
+    let client = self.client
     let result = try await authenticated { token in
       try await client.dictionaryCatalog(kind, code: query.code, offset: offset, scheme: query.scheme, profile: query.profile, token: token)
     }
