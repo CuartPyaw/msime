@@ -816,7 +816,7 @@ public final class BackendAccount {
     }
 
     /** Read only from the session that opened the keyboard panel. */
-    ClipboardPage clipboard(String search, String expectedSessionId) throws Exception {
+    public ClipboardPage clipboard(String search, String expectedSessionId) throws Exception {
         SessionCredential session = currentSession();
         requireSession(session, expectedSessionId);
         if (session.token().isEmpty() || !validClipboardSearch(search))
