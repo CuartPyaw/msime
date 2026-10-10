@@ -366,10 +366,6 @@ final class ImeToolbar {
 
     /** `amount` 份 `color` 混进 `base`（设计的 `mix(color amount, base)`）。 */
     static int mix(int color, int base, float amount) {
-        float t = KeyboardGeometry.bounded(amount, 0f, 1f);
-        return Color.rgb(
-            Math.round(Color.red(color) * t + Color.red(base) * (1 - t)),
-            Math.round(Color.green(color) * t + Color.green(base) * (1 - t)),
-            Math.round(Color.blue(color) * t + Color.blue(base) * (1 - t)));
+        return ColorPolicy.blendOpaque(base, color, amount);
     }
 }
