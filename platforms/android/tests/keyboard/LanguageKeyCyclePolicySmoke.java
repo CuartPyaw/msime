@@ -47,6 +47,10 @@ public final class LanguageKeyCyclePolicySmoke {
         check(is(LanguageKeyCyclePolicy.next(true, KeyboardScheme.JAPANESE, true, withOthers, back), Kind.SCHEME,
             KeyboardScheme.JAPANESE), "English entered from Japanese continues the ring");
 
+        // 方案偏好正在异步保存时，中英键不能把尚未应用的中文状态再切到英文。
+        check(is(LanguageKeyCyclePolicy.next(true, true, back, false, withOthers, back), Kind.BUSY, null),
+            "scheme save blocks a second language-key tap");
+
         // 按语言轮换：日语 9 键和 26 键都启用时只轮到一个，和中文入口同一种键盘的优先。
         List<KeyboardScheme> bothJapanese = List.of(KeyboardScheme.QUANPIN, KeyboardScheme.QUANPIN_NINE_KEY,
             KeyboardScheme.JAPANESE_NINE_KEY, KeyboardScheme.JAPANESE, KeyboardScheme.KOREAN);

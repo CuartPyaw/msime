@@ -3593,6 +3593,7 @@ public final class MSIMEInputService extends InputMethodService {
     void languageKeyTapped() {
         if (session == 0) return;
         LanguageKeyCyclePolicy.Target target = nextLanguageTarget();
+        if (target.kind() == LanguageKeyCyclePolicy.Kind.BUSY) return;
         if (target.kind() == LanguageKeyCyclePolicy.Kind.SCHEME) selectKeyboardScheme(target.scheme());
         else toggleInputLanguage();
     }
@@ -3611,8 +3612,8 @@ public final class MSIMEInputService extends InputMethodService {
         KeyboardScheme chineseReturn = LanguageKeyCyclePolicy.chineseReturn(lastChineseScheme,
             InputViewValuePolicy.textOr(preferences, "last_chinese_scheme", edition.defaultScheme()),
             visibleSchemes, edition, KeyboardScheme.fallback(edition));
-        return LanguageKeyCyclePolicy.next(languageKeyCycles(), selectedScheme, dedicatedEnglish, visibleSchemes,
-            chineseReturn);
+        return LanguageKeyCyclePolicy.next(languageKeyCycles(), schemeSaving, selectedScheme, dedicatedEnglish,
+            visibleSchemes, chineseReturn);
     }
 
     void toggleInputLanguage() {

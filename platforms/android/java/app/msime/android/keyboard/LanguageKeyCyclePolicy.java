@@ -17,6 +17,8 @@ public final class LanguageKeyCyclePolicy {
 
     /** 点一下要做的事。 */
     public enum Kind {
+        /** 方案切换正在保存，忽略再次点按。 */
+        BUSY,
         /** 打开英文直输（与原来的中英切换相同）。 */
         ENGLISH,
         /** 关掉英文直输，方案不变（与原来的中英切换相同）。 */
@@ -36,6 +38,13 @@ public final class LanguageKeyCyclePolicy {
      */
     public static Target next(boolean cycle, KeyboardScheme selected, boolean english,
             List<KeyboardScheme> available, KeyboardScheme chineseReturn) {
+        return next(cycle, false, selected, english, available, chineseReturn);
+    }
+
+    /** 与上一个点按仍在异步保存方案时保持状态不变。 */
+    public static Target next(boolean cycle, boolean busy, KeyboardScheme selected, boolean english,
+            List<KeyboardScheme> available, KeyboardScheme chineseReturn) {
+        if (busy) return new Target(Kind.BUSY, null);
         List<KeyboardScheme> others = otherLanguages(available,
             chineseReturn == null ? null : chineseReturn.touchKeyboardLayout());
         if (!cycle || others.isEmpty()) {
