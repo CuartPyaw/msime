@@ -61,6 +61,7 @@ import {
   NineKeyLayout,
   NineKey,
   NumberKeypadOrder,
+  TwentySixKeyNumberLayout,
 } from "../entry/src/main/ets/keyboard/input/NineKeyLayout";
 import {
   NineKeyPanelBackspace,
@@ -2561,6 +2562,42 @@ group("the digit layer can be laid out like a calculator", () => {
       NumberKeypadOrder.normalized(null) === NumberKeypadOrder.PHONE &&
       NumberKeypadOrder.normalized("calculator") === NumberKeypadOrder.CALCULATOR,
     "an older document without the key reads as the phone order",
+  );
+});
+
+group("the twenty-six key 123 can open the nine-key digit layer", () => {
+  const NINE = TwentySixKeyNumberLayout.NINE_KEY;
+  check(
+    TwentySixKeyNumberLayout.opensNineKeyDigits(NINE, true, true, true),
+    "nine_key on a touch 26-key digit layer draws the nine-key digits",
+  );
+  check(
+    !TwentySixKeyNumberLayout.opensNineKeyDigits(TwentySixKeyNumberLayout.ROW, true, true, true),
+    "row keeps the 1–0 page",
+  );
+  check(
+    !TwentySixKeyNumberLayout.opensNineKeyDigits(undefined, true, true, true) &&
+      !TwentySixKeyNumberLayout.opensNineKeyDigits(null, true, true, true) &&
+      !TwentySixKeyNumberLayout.opensNineKeyDigits("grid", true, true, true),
+    "an older document or an unknown value keeps the 1–0 page",
+  );
+  check(
+    !TwentySixKeyNumberLayout.opensNineKeyDigits(NINE, true, false, true),
+    "the letter layer is never replaced",
+  );
+  check(
+    !TwentySixKeyNumberLayout.opensNineKeyDigits(NINE, false, true, true),
+    "the 2in1 screen keyboard keeps its own symbol rows",
+  );
+  check(
+    !TwentySixKeyNumberLayout.opensNineKeyDigits(NINE, true, true, false),
+    "faces that are not the 26-key letter rows (nine-key, kana, zhuyin, stroke, handwriting) are left alone",
+  );
+  check(
+    TwentySixKeyNumberLayout.normalized("nine_key") === NINE &&
+      TwentySixKeyNumberLayout.normalized(undefined) === TwentySixKeyNumberLayout.ROW &&
+      TwentySixKeyNumberLayout.normalized("calculator") === TwentySixKeyNumberLayout.ROW,
+    "only nine_key reads as the grid; everything else is the row",
   );
 });
 
@@ -11662,6 +11699,7 @@ function fullPreferenceSchema(): AccountPreferenceSchema {
       "platform.harmony.custom_candidate_skin_dark",
       "platform.harmony.haptic_strength",
       "platform.harmony.number_keypad_order",
+      "platform.harmony.twenty_six_key_number_layout",
     ],
     "string",
   );
@@ -11942,6 +11980,52 @@ group("the digit order and 跟随系统 travel with the account", () => {
     refused = error instanceof AccountPreferenceError && error.message === "account_invalid";
   }
   check(refused, "an order nobody defined is refused rather than mapped");
+});
+
+group("the 26-key digit layer choice travels with the account", () => {
+  const schema = fullPreferenceSchema();
+  const uploaded = localAccountPreferences(
+    { touch_twenty_six_key_number_layout: "nine_key" },
+    syncFeedback,
+  );
+  check(
+    uploaded["platform.harmony.twenty_six_key_number_layout"] === "nine_key",
+    "the nine-key digit layer is uploaded",
+  );
+  check(
+    localAccountPreferences({}, syncFeedback)["platform.harmony.twenty_six_key_number_layout"] ===
+      "row",
+    "a document from before the setting uploads the row",
+  );
+  check(
+    localAccountPreferences({ touch_twenty_six_key_number_layout: "grid" }, syncFeedback)[
+      "platform.harmony.twenty_six_key_number_layout"
+    ] === "row",
+    "an unknown local layout is never uploaded",
+  );
+  const applied = applyAccountPreferences(
+    {},
+    { revision: 2, settings: { "platform.harmony.twenty_six_key_number_layout": "nine_key" } },
+    schema,
+    syncFeedback,
+  );
+  check(
+    applied.preferences.touch_twenty_six_key_number_layout === "nine_key",
+    "the layout is written into the document",
+  );
+  check(applied.feedback === null, "and the feedback file is left alone");
+  let refused = false;
+  try {
+    applyAccountPreferences(
+      {},
+      { revision: 3, settings: { "platform.harmony.twenty_six_key_number_layout": "grid" } },
+      schema,
+      syncFeedback,
+    );
+  } catch (error) {
+    refused = error instanceof AccountPreferenceError && error.message === "account_invalid";
+  }
+  check(refused, "a layout nobody defined is refused rather than mapped");
 });
 
 group("the shuangpin key hint switch travels with the account", () => {
