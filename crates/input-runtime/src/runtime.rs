@@ -305,6 +305,9 @@ impl Runtime<Session> {
         {
             return Ok(false);
         }
+        if self.generation == u64::MAX {
+            return Err(RuntimeError::IdentityExhausted);
+        }
         let applied = self
             .engine
             .apply_online_candidate(&query, candidate, source)
@@ -395,6 +398,9 @@ impl Runtime<Session> {
                 "invalid online candidate source".into(),
             ));
         }
+        if self.generation == u64::MAX {
+            return Err(RuntimeError::IdentityExhausted);
+        }
         self.engine
             .clear_online_candidates(source)
             .map_err(|error| RuntimeError::Engine(error.to_string()))?;
@@ -421,6 +427,9 @@ impl Runtime<Session> {
             || (source == 1 && !query.ai_eligible)
         {
             return Ok(false);
+        }
+        if self.generation == u64::MAX {
+            return Err(RuntimeError::IdentityExhausted);
         }
         let applied = self
             .engine
@@ -931,6 +940,9 @@ impl<E: InputEngine> Runtime<E> {
             || !msime_client_core::is_bounded_text(translation, 4096)
         {
             return Ok(false);
+        }
+        if self.generation == u64::MAX {
+            return Err(RuntimeError::IdentityExhausted);
         }
         let request = CommandTranslationQuery {
             session_id: query.session_id,
