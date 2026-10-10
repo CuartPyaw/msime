@@ -385,14 +385,14 @@ public final class StatisticsFragment extends HomeTabFragment {
         TextView count = Ui.label(context, text, 15, ThemeColorPolicy.text(context));
         progress.addView(count);
         View track = new View(context);
-        track.setBackground(Ui.pill(ThemeColorPolicy.hairline(context)));
+        track.setBackground(DrawablePolicy.pill(ThemeColorPolicy.hairline(context)));
         LinearLayout.LayoutParams trackParams = Ui.matchWidthHeight(context, 6);
         trackParams.topMargin = Ui.dp(context, 12);
         android.widget.FrameLayout bar = new android.widget.FrameLayout(context);
         bar.addView(track, new android.widget.FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(context, 6)));
         View fillView = new View(context);
-        fillView.setBackground(Ui.pill(ThemeColorPolicy.accent(context)));
+        fillView.setBackground(DrawablePolicy.pill(ThemeColorPolicy.accent(context)));
         bar.addView(fillView, new android.widget.FrameLayout.LayoutParams(0, Ui.dp(context, 6)));
         progress.addView(bar, trackParams);
         float share = badges.isEmpty() ? 0 : unlocked / (float) badges.size();

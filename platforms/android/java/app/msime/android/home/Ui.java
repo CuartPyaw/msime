@@ -337,11 +337,6 @@ public final class Ui {
         return new FrameLayout.LayoutParams(size, size, gravity);
     }
 
-    /** 胶囊形状：GradientDrawable 会把过大的圆角夹到短边的一半，所以高度怎么变两端都是半圆。 */
-    public static GradientDrawable pill(@ColorInt int color) {
-        return DrawablePolicy.rounded(color, 9999f);
-    }
-
     /** 主题的按压反馈（`selectableItemBackground`），行在代码里构造时用它。 */
     @androidx.annotation.Nullable public static Drawable ripple(Context context) {
         TypedValue value = new TypedValue();
