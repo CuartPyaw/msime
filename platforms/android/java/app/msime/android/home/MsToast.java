@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.DrawablePolicy;
 import app.msime.android.ThemeColorPolicy;
 import app.msime.android.LayoutPolicy;
 
@@ -44,7 +45,7 @@ public final class MsToast {
             ThemeColorPolicy.color(activity, com.google.android.material.R.attr.colorOnSurfaceInverse));
         toast.setTag(TAG);
         ViewPolicy.setMaxLines(toast, 3);
-        ViewPolicy.setBackground(toast, Ui.pill(ThemeColorPolicy.color(activity, com.google.android.material.R.attr.colorSurfaceInverse)));
+        ViewPolicy.setBackground(toast, DrawablePolicy.pill(ThemeColorPolicy.color(activity, com.google.android.material.R.attr.colorSurfaceInverse)));
         Ui.setSymmetricPaddingDp(toast, activity, 20, 10);
         ViewPolicy.setElevation(toast, Ui.dp(activity, 6));
         ViewPolicy.setPoliteLiveRegion(toast);

@@ -223,7 +223,7 @@ public final class FeedbackPage extends DetailPage {
             remove.setImageResource(R.drawable.ms_w4_me2_close);
             ImageViewPolicy.setTint(remove,
                 ThemeColorPolicy.color(context, com.google.android.material.R.attr.colorOnSurfaceInverse));
-            ViewPolicy.setBackground(remove, Ui.pill(ThemeColorPolicy.color(context, com.google.android.material.R.attr.colorSurfaceInverse)));
+            ViewPolicy.setBackground(remove, DrawablePolicy.pill(ThemeColorPolicy.color(context, com.google.android.material.R.attr.colorSurfaceInverse)));
             Ui.setSymmetricPaddingDp(remove, requireContext(), 3, 3);
             remove.setContentDescription("移除截图 " + (index + 1));
             ViewPolicy.bindClick(remove, () -> {

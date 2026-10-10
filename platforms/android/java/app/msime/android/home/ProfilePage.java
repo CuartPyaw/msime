@@ -290,7 +290,7 @@ public final class ProfilePage extends DetailPage {
         if (!kind.isEmpty()) {
             TextView chip = Ui.styledLabel(context, "通过 " + providerName(kind) + " 登录", 12, 500,
                 ThemeColorPolicy.accent(context));
-            ViewPolicy.setBackground(chip, Ui.pill(ThemeColorPolicy.accentSoft(context)));
+            ViewPolicy.setBackground(chip, DrawablePolicy.pill(ThemeColorPolicy.accentSoft(context)));
             Ui.setSymmetricPaddingDp(chip, context, 10, 3);
             LinearLayout.LayoutParams chipParams = Ui.wrap();
             chipParams.topMargin = Ui.dp(context, 8);
