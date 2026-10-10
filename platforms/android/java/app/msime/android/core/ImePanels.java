@@ -1655,7 +1655,7 @@ final class ImePanels {
         compactReplyControl(button, s.pixels(4));
         ViewPolicy.setMaxLinesEllipsized(button, 1);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-            0, LinearLayout.LayoutParams.MATCH_PARENT, Math.max(2, label.length()));
+            0, LinearLayout.LayoutParams.MATCH_PARENT, BoundsPolicy.atLeast(label.length(), 2));
         params.setMarginStart(s.pixels(3));
         params.setMarginEnd(s.pixels(3));
         button.setLayoutParams(params);
