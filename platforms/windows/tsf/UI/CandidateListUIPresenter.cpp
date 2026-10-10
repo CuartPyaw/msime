@@ -168,6 +168,26 @@ HRESULT CMetasequoiaIME::_HandleCandidateFinalize(TfEditCookie ec, _In_ ITfConte
                 return hr;
             }
         }
+        // 空格、数字上屏的是释义（Tab 预选的释义列、Ctrl+Enter 的释义页）：Server 已经取消了组字，回复是要原样上屏的完整文本，不补成对标点。以前这里没有这个分支，回复落到下面直接结束组字，上屏的是组字里原有的文字而不是释义。
+        else if (serverMsgType == Global::DataFromServerMsgType::CommitExactText)
+        {
+            GlobalIme::word_for_creating_word = L"";
+            _creatingWordRestoreHistory.clear();
+            GlobalIme::pending_create_word_preedit.clear();
+            if (!serverCandidateString.empty())
+            {
+                candidateString.Set(serverCandidateString.c_str(), serverCandidateString.length());
+                hr = _InsertTextToComposition(ec, pContext, &candidateString);
+                if (FAILED(hr))
+                {
+                    hr = _AddComposingAndChar(ec, pContext, &candidateString);
+                }
+                if (FAILED(hr))
+                {
+                    return hr;
+                }
+            }
+        }
         /* 处理造词的逻辑 */
         else if (serverMsgType == Global::DataFromServerMsgType::NeedToCreateWord)
         {

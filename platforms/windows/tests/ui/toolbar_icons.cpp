@@ -157,6 +157,15 @@ int main() {
         language.caps_lock = true;
         require(toolbar_icon(kToolbarLanguage, true, language).codepoint == 0xE7B5);
       }
+      // 发给 TIP 的模式本身就是双拼或五笔时（输入模式帧的 '8' 和 '9'），方案编号还不知道也画 双 和 五。
+      for (const auto &[mode, text] : {std::pair{scheme::InputMode::Shuangpin, L"双"},
+                                       std::pair{scheme::InputMode::Wubi, L"五"}}) {
+        ToolbarLanguageState language;
+        language.mode = mode;
+        const auto icon = toolbar_icon(kToolbarLanguage, true, language);
+        require(!icon.codepoint && std::wcscmp(icon.fallback, text) == 0);
+        require(toolbar_icon(kToolbarLanguage, false, language).codepoint == 0xE983);
+      }
       ToolbarLanguageState quanpin;
       quanpin.scheme = scheme::Quanpin;
       require(toolbar_icon(kToolbarLanguage, true, quanpin).codepoint == 0xE982);

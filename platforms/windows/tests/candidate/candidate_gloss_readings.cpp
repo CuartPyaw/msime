@@ -64,6 +64,16 @@ int main() {
       gloss_pronunciation_lines("你好", {"hello; hi", "こんにちは"}, targets, english);
   require(readings.size() == 2 && readings[0] == "/həˈləʊ/" && readings[1].empty(),
           "per-line readings");
+  // 给了日文读法时，日文行按第一个词读成罗马字；读不出来的行留空。
+  const auto japanese = [](const std::string &term) {
+    return term == "こんにちは" ? std::string("konnichiwa") : std::string{};
+  };
+  const auto with_romaji =
+      gloss_pronunciation_lines("你好", {"hello; hi", "こんにちは、やあ"}, targets, english, japanese);
+  require(with_romaji.size() == 2 && with_romaji[0] == "/həˈləʊ/" && with_romaji[1] == "konnichiwa",
+          "japanese line reading");
+  require(gloss_pronunciation_lines("猫", {"猫"}, {"ja"}, english, japanese).empty(),
+          "unreadable japanese line");
   require(gloss_pronunciation_lines("你好", {"bonjour"}, {"fr"}, english).empty(), "no reading");
   require(gloss_pronunciation_lines("hello", {"你好"}, {"en"}, english) ==
               std::vector<std::string>{"/həˈləʊ/"},

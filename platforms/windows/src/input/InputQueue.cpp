@@ -134,6 +134,15 @@ bool InputState::deactivate_terminal(uint64_t client, uint64_t token) {
     return false;
   return found->second.session->cancel_focus_token(token);
 }
+bool InputState::passthrough_key(uint64_t client, uint64_t token, uint32_t key_class) {
+  check_thread();
+  if (!client || !token || quiesced_)
+    return false;
+  const auto found = clients_.find(client);
+  if (found == clients_.end() || !found->second.session)
+    return false;
+  return found->second.session->passthrough_key(token, key_class);
+}
 void InputState::cleanup(const FocusRoute &route) {
   if (route.cleanup)
     if (auto *owner = session(route.cleanup->transport))

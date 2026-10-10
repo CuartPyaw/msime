@@ -15,6 +15,8 @@
 #include "PassthroughStatisticsQueue.h"
 #include "KeyPressStatistics.h"
 #include "KeyPressStatisticsQueue.h"
+#include "PassthroughKeySoundQueue.h"
+#include "../../common/KeySoundClass.h"
 #include "FanyDefines.h"
 #include "AltGrKeyPolicy.h"
 #include "FullwidthChordPolicy.h"
@@ -287,6 +289,14 @@ bool IsEnglishInputModeToggle(UINT code, UINT modifiers)
 bool IsTranslationCommitShortcut(UINT code, UINT modifiers)
 {
     return code == VK_RETURN && (modifiers & 0b00000111u) == 0b00000010u &&
+           (GetAsyncKeyState(VK_LWIN) & 0x8000) == 0 && (GetAsyncKeyState(VK_RWIN) & 0x8000) == 0;
+}
+
+// 释义列快捷键（Server 的 GlossColumnPolicy.h）：只按 Alt 的数字上屏那个候选的第 1 列释义，只按 Ctrl 的数字上屏第 2 列，和 macOS 的 Option/Control+数字一样。只认主键盘的 1-9：Alt+小键盘数字是 Windows 的 Alt 码输入。
+bool IsGlossColumnShortcut(UINT code, UINT modifiers)
+{
+    const UINT chord = modifiers & 0b00000111u;
+    return code >= '1' && code <= '9' && (chord == 0b00000010u || chord == 0b00000100u) &&
            (GetAsyncKeyState(VK_LWIN) & 0x8000) == 0 && (GetAsyncKeyState(VK_RWIN) & 0x8000) == 0;
 }
 
@@ -932,6 +942,18 @@ BOOL CMetasequoiaIME::_IsKeyEaten(         //
             }
             return TRUE;
         }
+        // Alt/Ctrl+数字取释义列只在候选列表打开（Server 收到 CandidateActive）时接，其余时候这些组合键照旧属于应用。和 Ctrl+Enter 一样不接 TIP 自己宿主会话组字的方案；宿主自己画候选的 UILess 场合（游戏、全屏）Server 不上屏释义，Server 连不上时也没有释义可取，这两种情况下组合键都留给应用。
+        if (!hostComposed && !freshCompositionState && _candidateMode == CANDIDATE_ORIGINAL &&
+            !_serverUnavailableFallbackActive && !Global::IsUiLessMode() &&
+            IsGlossColumnShortcut(*pCodeOut, shortcutModifiers))
+        {
+            if (pKeyState)
+            {
+                pKeyState->Category = CATEGORY_CANDIDATE;
+                pKeyState->Function = FUNCTION_SERVER_CANDIDATE_KEY;
+            }
+            return TRUE;
+        }
 
         // Other Ctrl/Alt/Windows combinations belong to the application.
         // IME-owned shortcuts are handled before this normal key classifier.
@@ -1542,6 +1564,16 @@ bool CMetasequoiaIME::_ClassifyDeferredKeyDown(_In_ ITfContext *pContext, WPARAM
 
     const bool projectedCandidateActive =
         _deferredKeyProjectionValid ? _deferredProjectedCandidateActive : (_candidateMode == CANDIDATE_ORIGINAL);
+    // 释义列快捷键，条件和 _IsKeyEaten 里的相同。
+    if (projectedImeOpen && !_IsKeyboardDisabled() && projectedCandidateActive &&
+        !_serverUnavailableFallbackActive && !Global::IsUiLessMode() &&
+        !msime::windows::scheme::AlwaysInlinePreedit(scheme) &&
+        IsGlossColumnShortcut(*classifiedCode, capturedModifiers))
+    {
+        keyState->Category = CATEGORY_CANDIDATE;
+        keyState->Function = FUNCTION_SERVER_CANDIDATE_KEY;
+        return true;
+    }
     if (projectedImeOpen && !_IsKeyboardDisabled() && projectedCandidateActive &&
         IsTranslationCommitShortcut(*classifiedCode, capturedModifiers))
     {
@@ -1948,6 +1980,60 @@ void CMetasequoiaIME::_NoteKeyPressStatistics(WPARAM wParam, LPARAM lParam)
 
 //+---------------------------------------------------------------------------
 //
+// _NotePassthroughKeySound
+//
+// 交给应用的一次按下也要出按键音、计入打字特效的连击，和 macOS 每个按键都出声一样：没有组字时的空格、回车、退格、数字和方向键都不经过 Server 的按键路径，只能在这里报。只是观察：按键吃不吃、延迟队列和编辑路径都不受影响，入队之后的管道读写在线程池上，不占按键路径的时间。哪些键出声由 passthrough_key_sound_class 决定。
+//----------------------------------------------------------------------------
+
+void CMetasequoiaIME::_NotePassthroughKeySound(WPARAM wParam, LPARAM lParam)
+{
+    // 按键音和打字特效都关着时 Server 不回 "OK"，队列停发；这时连扫描码都不必记。
+    if (PassthroughKeySoundSuppressed())
+    {
+        return;
+    }
+    // 同一次按下的 Test 探测可能来不止一次，扫描码和消息时间都相同；真正的第二次按下中间隔着一次抬起，消息时间不同。
+    const UINT physicalKey = KeyPressPhysicalKey(static_cast<std::uintptr_t>(lParam));
+    const LONG messageTime = GetMessageTime();
+    if (physicalKey == _passthroughSoundKey && messageTime == _passthroughSoundMessageTime)
+    {
+        return;
+    }
+    _passthroughSoundKey = physicalKey;
+    _passthroughSoundMessageTime = messageTime;
+    const uint64_t focusToken = GetNamedpipeFocusToken();
+    if (focusToken == 0)
+    {
+        return;
+    }
+    msime::windows::PassthroughKeyState key;
+    key.virtual_key = static_cast<uint32_t>(wParam);
+    key.auto_repeat = IsAutoRepeat(lParam);
+    const UINT modifiers = CaptureIpcModifiers();
+    key.ctrl = (modifiers & 0b00000010u) != 0;
+    key.alt = (modifiers & 0b00000100u) != 0;
+    key.win = (GetAsyncKeyState(VK_LWIN) & 0x8000) != 0 || (GetAsyncKeyState(VK_RWIN) & 0x8000) != 0;
+    key.injected = IsPanelTextSendInput(static_cast<std::uintptr_t>(GetMessageExtraInfo()));
+    // 先用不需要查询 TSF 的部分判断，修饰键、快捷键和自动重复不必再读隔间。
+    key.keyboard_open = true;
+    if (!msime::windows::passthrough_key_sound_class(key))
+    {
+        return;
+    }
+    BOOL isOpen = FALSE;
+    CCompartment CompartmentKeyboardOpen(_pThreadMgr, _tfClientId, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE);
+    CompartmentKeyboardOpen._GetCompartmentBOOL(isOpen);
+    key.keyboard_open = isOpen != FALSE;
+    key.keyboard_disabled = _IsKeyboardDisabled() != FALSE;
+    key.secure = _IsSecureMode() != FALSE;
+    if (const auto keyClass = msime::windows::passthrough_key_sound_class(key))
+    {
+        QueuePassthroughKeySound(GetNamedpipeClientId(), focusToken, *keyClass);
+    }
+}
+
+//+---------------------------------------------------------------------------
+//
 // ITfKeyEventSink::OnTestKeyDown
 //
 // Called by the system to query this service wants a potential keystroke.
@@ -2002,6 +2088,7 @@ STDAPI CMetasequoiaIME::OnTestKeyDown(ITfContext *pContext, WPARAM wParam, LPARA
             _NoteKeyForSmartPunctuation(deferredCode, deferredWch, false);
             // _ClassifyDeferredKeyDown is not reached on this exit and ConvertVKey fills the char without checking the keyboard state.
             _NotePassthroughStatistics(static_cast<UINT>(wParam), deferredWch, false);
+            _NotePassthroughKeySound(wParam, lParam);
             *pIsEaten = FALSE;
             return S_OK;
         }
@@ -2016,6 +2103,7 @@ STDAPI CMetasequoiaIME::OnTestKeyDown(ITfContext *pContext, WPARAM wParam, LPARA
         {
             // The deferred classifier fills its out-char before its own keyboard-disabled check, and not every exit runs that check, so the char proves nothing about the keyboard state.
             _NotePassthroughStatistics(static_cast<UINT>(wParam), deferredWch, false);
+            _NotePassthroughKeySound(wParam, lParam);
         }
         return S_OK;
     }
@@ -2041,6 +2129,7 @@ STDAPI CMetasequoiaIME::OnTestKeyDown(ITfContext *pContext, WPARAM wParam, LPARA
     {
         // A half-width digit, a symbol outside the tables or an English-mode letter lands here: the tip let it through, so the host inserts it outside every commit path.
         _NotePassthroughStatistics(static_cast<UINT>(wParam), wch, wch != L'\0');
+        _NotePassthroughKeySound(wParam, lParam);
     }
 
     DebugTsfIssue47(L"test-keydown-classified", FANY_IME_NO_REQUEST_ID, code, wch, KeystrokeState.Category,

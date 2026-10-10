@@ -27,6 +27,8 @@
 #include "ModeAuthority.h"
 #include "AppInputModeRules.h"
 #include "InputModeHudWindow.h"
+#include "TypingEffectOverlay.h"
+#include "TypingFeedbackPreference.h"
 #include "ShuangpinKeymapWindow.h"
 #include "ProcessImageName.h"
 #include "ModeMailbox.h"
@@ -917,6 +919,12 @@ int wmain(int argc, wchar_t **argv) {
     }
     // The user's anonymous MSIME account is registered on the first run after install, as on every other platform; once anonymous-session.json exists this is a file read. It runs off the main thread for the same reason as the telemetry event, and a failure (offline, rate limited) is simply retried on the next start.
     if (const auto account = anonymous_account_directory(); production && !account.empty()) {
+      // 选了「水杉账号」时候选释义用这个目录里的会话：设置应用登录的账号优先，没有登录时用这里注册的匿名账号。
+      {
+        const auto directory = account.u8string();
+        msime::windows::TranslationWorker::set_account_directory(
+            std::string(directory.begin(), directory.end()));
+      }
       std::thread([directory = account.u8string()] {
         std::unique_ptr<char, decltype(&msime_client_string_free)> result(
             msime_client_ensure_anonymous_account(
@@ -994,6 +1002,9 @@ int wmain(int argc, wchar_t **argv) {
     // The typing flash's strength, published the same way. The effect itself comes with each key from the input thread.
     auto effect_intensity = std::make_shared<std::atomic<unsigned>>(
         typing_effect_intensity(prepared.at("value").at("preferences")));
+    // 按键音或打字特效开着没有：Aux 管道的 KeySound 只在开着时回 "OK"，同样经原子量发布。
+    auto typing_feedback = std::make_shared<std::atomic<bool>>(
+        typing_feedback_wanted(prepared.at("value").at("preferences")));
     // 「鼠标滚轮翻页」同样经原子量发布，候选窗每轮取用，改了设置不用重启 Server。
     auto candidate_mouse_wheel = std::make_shared<std::atomic<bool>>(
         config.navigation.mouse_wheel);
@@ -1063,7 +1074,7 @@ int wmain(int argc, wchar_t **argv) {
     options.preferences_directory = config.state_root.u8string();
     options.preferences_published =
         [&, voice_config, voice_config_mutex, voice_host_options, traditional_output,
-         toolbar_enabled, follow_cursor, shuangpin_keymap_enabled, effect_intensity, candidate_mouse_wheel, voice_theme, candidate_fonts, candidate_style,
+         toolbar_enabled, follow_cursor, shuangpin_keymap_enabled, effect_intensity, typing_feedback, candidate_mouse_wheel, voice_theme, candidate_fonts, candidate_style,
          toolbar_theme, menu_theme, mode_scope_global, app_mode_rules,
          input_mode_hud_enabled, tsf_config, candidate_layout,
          tsf_config_mutex, tray_preferences, tray_preferences_mutex,
@@ -1151,6 +1162,8 @@ int wmain(int argc, wchar_t **argv) {
                                           std::memory_order_release);
           effect_intensity->store(typing_effect_intensity(preferences),
                                   std::memory_order_release);
+          typing_feedback->store(typing_feedback_wanted(preferences),
+                                 std::memory_order_release);
           candidate_mouse_wheel->store(
               preferences.value("navigation", nlohmann::json::object())
                   .value("mouse_wheel", false),
@@ -1357,6 +1370,15 @@ int wmain(int argc, wchar_t **argv) {
         });
     // 候选窗每次取快照时记下这一帧的双拼键位提示，主循环在 refresh 之后据此摆放键位图，两者看的是同一帧。
     std::optional<ShuangpinKeymapFrame> keymap_frame;
+    // 光标处的打字特效浮层：火花、Power Mode、上屏后光标行的闪光和连击徽标，由候选窗取到特效后交来。声明在候选窗之前，先于它构造、晚于它析构，候选窗活着时浮层一直在。建不出窗口时记一条诊断，卡片照旧自己画闪光和连击数。
+    std::optional<TypingEffectOverlay> typing_overlay;
+    try {
+      typing_overlay.emplace();
+    } catch (const std::exception &) {
+      typing_overlay.reset();
+      notice("Typing effect overlay unavailable; continuing without it");
+    }
+    bool typing_overlay_failure_reported = false;
     CandidateWindow candidates(
         [&] {
           auto view = server.candidate_view();
@@ -1380,6 +1402,10 @@ int wmain(int argc, wchar_t **argv) {
           server.candidate_rendered(value.lease, value.render_serial);
         },
         candidate_mouse_wheel->load(std::memory_order_acquire));
+    if (typing_overlay)
+      candidates.set_typing_effect_presenter([&typing_overlay](const TypingEffectPresentation &presentation) {
+        return typing_overlay->present(presentation);
+      });
     // The global theme colours the card, the toolbar and the menus. Each surface resolves it in its own mode, and the answers are kept until the theme, the layout or the package on disk changes, so the shared layer's disk read never runs inside a draw.
     auto current_candidate_theme = candidate_theme_values(
         prepared.at("value").at("preferences"));
@@ -1901,6 +1927,13 @@ int wmain(int argc, wchar_t **argv) {
             keys.emplace(ascii(key), count);
           record_typing_keys_async(statistics_directory, ascii(batch.day), keys);
           return true;
+        },
+        // TIP 交给应用的键：没有组字时的空格、回车、退格、数字这些不经过会话的按键路径，TIP 单独报来，排进输入队列出按键音、计入连击，不等它执行。按键音和打字特效都关着时不排、不回 "OK"，TIP 就停一阵不发。
+        [&server, typing_feedback](const AuxKeySound &key) {
+          if (!typing_feedback->load(std::memory_order_acquire))
+            return false;
+          server.passthrough_key(key.client_id, key.focus_token, key.key_class);
+          return true;
         });
     // The fifth pipe: TIP diagnostics. The TIP has always produced batches on
     // it; nothing ever listened, so enabling diagnostic logging produced
@@ -1945,11 +1978,9 @@ int wmain(int argc, wchar_t **argv) {
       case MaintenanceAction::ClearCache: {
         return server.reset_cache();
       }
-      case MaintenanceAction::OpenScreenKeyboard: {
-        const auto request =
-            shell_surface_request(TrayMenuCommand::OpenKeyboardPanel);
-        return request && launch_shell(*request);
-      }
+      // 与工具栏和托盘的键盘入口走同一条路：共享应用不在或起不来时退回系统屏幕键盘 osk.exe。
+      case MaintenanceAction::OpenScreenKeyboard:
+        return open_screen_keyboard();
       case MaintenanceAction::DeleteCandidate: {
         // Only meaningful while a candidate list is on screen; otherwise the
         // stroke belongs to the focused application and must not be eaten.
@@ -2220,6 +2251,11 @@ int wmain(int argc, wchar_t **argv) {
           follow_cursor->load(std::memory_order_acquire));
       candidates.set_effect_intensity(
           effect_intensity->load(std::memory_order_acquire));
+      if (typing_overlay && typing_overlay->failed() && !typing_overlay_failure_reported) {
+        typing_overlay_failure_reported = true;
+        notice(component_failure("Typing effect overlay", typing_overlay->failure_site()) +
+               "; continuing without it");
+      }
       candidates.set_mouse_wheel(
           candidate_mouse_wheel->load(std::memory_order_acquire));
       // 语言按钮在 Caps Lock 开着时显示 'A'，日文模式显示 日，韩文模式显示 한，粤拼、注音、越南文、藏文、笔画分别显示 粤、注、越、藏、笔，引擎自己的英文模式显示带下划线的 "En"，所以它要跟随这些状态。Caps Lock 开着时显示 中 会让用户误判下一个字母键的作用。

@@ -21,7 +21,7 @@
 
 namespace msime::windows {
 class AudioCapture;
-class LocalAsrStream;
+class OnDeviceAsrStream;
 
 struct VoiceInputConfig {
   VoiceCaptureSelection capture;
@@ -111,7 +111,7 @@ private:
   void finish(std::vector<float> samples, FocusLease lease,
               VoiceInputConfig config, uint64_t session,
               std::shared_ptr<DoubaoAsrClient> doubao,
-              std::shared_ptr<LocalAsrStream> local_stream,
+              std::shared_ptr<OnDeviceAsrStream> local_stream,
               std::shared_ptr<std::atomic_bool> cancelled,
               std::shared_ptr<VoiceReviewResult> review, HWND start_window);
   void clear_overlay();
@@ -157,9 +157,9 @@ private:
   std::optional<VoiceInputConfig> active_config_;
   std::mutex doubao_mutex_;
   std::shared_ptr<DoubaoAsrClient> doubao_;
-  // The on-device counterpart of doubao_: the capture callback feeds it, and its recognition task runs from the start of the recording.
+  // The on-device counterpart of doubao_: the capture callback feeds it, and its recognition task runs from the start of the recording. 本地模型和 Windows 系统识别都放在这里。
   std::mutex local_stream_mutex_;
-  std::shared_ptr<LocalAsrStream> local_stream_;
+  std::shared_ptr<OnDeviceAsrStream> local_stream_;
   // Set by the capture callback when the streaming local recognizer cannot
   // retain another audio chunk. The control thread turns it into a visible
   // failed recording; audio is never silently discarded.

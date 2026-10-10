@@ -16,7 +16,7 @@ Status: implemented
 
 **预留释义高度。** 横排时每行候选至少 `candidate_reserved_row_height(metrics, N)` 高：一行候选文字加 N 行释义。N 是 `reserved_gloss_lines`（候选翻译或离线英文释义打开时按目标语言数算，最多 2），韩文汉字列表再加 훈음 那一行，和 macOS 的 `reservedGlossHeightForFont` 一样。竖排不预留。
 
-**读音与逐词拆解。** 规则移植自 macOS 的 `CandidatePronunciation.h`，放在 `src/candidate/CandidateGlossReadings.h`：每行释义按第一个分隔符前的词读，有假名是日文，拉丁字母只在英文目标那一行算英文，英文候选读它自己。`TranslationWorker` 在翻译完成后（在同一条工作线程上、读本机文件）调 `msime_client_pronunciation_request` 和 `msime_client_gloss_breakdown_request`，结果放进 `Result::readings`（`CandidateReadings`，按候选文字），不进会话。`SessionController` 把它随释义交给 `CandidateMailbox::translations`；这一页没有任何释义、只有拆解时走 `CandidateMailbox::readings`，换一个 `render_serial` 让候选窗重画（`reposition` 因此也比较 `render_serial`）。偏好每次发布时 `clear_readings` 摘掉旧的。挂读音时要求候选眼下的释义与算读音时那条相同，免得旧读音跟到新释义后面；繁体输出时按繁体文字也存一份。显示为「释义  /读音/」，拆解另起最后一行，和释义同色。host-api 的翻译查询在打开读音时也带 `resources`，在线翻出来的英文释义同样能标音标。`apps/desktop/src/main.tsx` 对 Windows 打开 `candidatePronunciation`，原生「标点与翻译」页的「多语言与释义」组也加了「显示读音」，说明里只提英文音标。安装包按 macOS `stage-resources.sh` 的做法，把 `target/pronunciations`、`target/character-glosses`、`target/word-glosses` 连同授权声明装到 `server_exe` 下 resources 旁边（`Prepare-PackageFiles.ps1`）；单字和词的英文释义只给提供中文方案的版本。
+**读音与逐词拆解。** 规则移植自 macOS 的 `CandidatePronunciation.h`，放在 `src/candidate/CandidateGlossReadings.h`：每行释义按第一个分隔符前的词读，有假名是日文，拉丁字母只在英文目标那一行算英文，英文候选读它自己。`TranslationWorker` 在翻译完成后（在同一条工作线程上、读本机文件）调 `msime_client_pronunciation_request` 和 `msime_client_gloss_breakdown_request`，结果放进 `Result::readings`（`CandidateReadings`，按候选文字），不进会话。`SessionController` 把它随释义交给 `CandidateMailbox::translations`；这一页没有任何释义、只有拆解时走 `CandidateMailbox::readings`，换一个 `render_serial` 让候选窗重画（`reposition` 因此也比较 `render_serial`）。偏好每次发布时 `clear_readings` 摘掉旧的。挂读音时要求候选眼下的释义与算读音时那条相同，免得旧读音跟到新释义后面；繁体输出时按繁体文字也存一份。显示为「释义  /读音/」，拆解另起最后一行，和释义同色。host-api 的翻译查询在打开读音时也带 `resources`，在线翻出来的英文释义同样能标音标。`apps/desktop/src/main.tsx` 对 Windows 打开 `candidatePronunciation`，原生「标点与翻译」页的「多语言与释义」组也加了「显示读音」。日文行的罗马字后来由微软日语输入法的 IFELanguage 补上，见 [遗留项](2026-10-10-windows-mac-parity-leftovers.md)。安装包按 macOS `stage-resources.sh` 的做法，把 `target/pronunciations`、`target/character-glosses`、`target/word-glosses` 连同授权声明装到 `server_exe` 下 resources 旁边（`Prepare-PackageFiles.ps1`）；单字和词的英文释义只给提供中文方案的版本。
 
 **悬停提示。** 候选窗用 comctl32 的 tooltip 控件，每行候选登记一个区域（`sync_tooltips`，行和快照都没变时不重登记），文字是 `candidate_tooltip_text`：候选全文，下一行起是释义，和 macOS 候选按钮的 toolTip 相同。
 
@@ -26,12 +26,12 @@ Status: implemented
 - **第二种语言仍用 `" / "` 拼在一行** — 不用改会话里的格式，Ctrl+Enter 也不用改。但 macOS 已经按行显示，后续的按列上屏（Alt/Ctrl+数字、Tab）需要知道哪一段是哪种语言；`" / "` 也会出现在释义原文里，无法可靠地拆回来。
 - **读音单开一个工作线程，按候选窗的当前页去问** — 和 macOS 的 `_pronunciationQueue` 形状最像，翻译关掉时拆解也能单独请求。但 Windows 的翻译查询本来就带着目标语言、资源目录和读音开关，翻译线程拿到释义的同一时刻正好能算读音，单开线程要再复制一套去抖、取代和缓存失效；macOS 的拆解也只在离线英文释义打开时请求，这条前提相同。
 - **日文罗马字用 IFELanguage（MS-IME 的 GetPhonetic）** — Windows 上最接近 macOS 系统分词器的接口。但它依赖日文 IME 是否安装、在 Server 进程里要起 COM 并处理失败，读出的是假名还要再转罗马字；这次只标英文音标，日文行不标，半截读音不显示的规则与 macOS 相同。
-- **候选窗自己实现 UIA 提供者给每行加读屏名称** — macOS 每个候选都有 accessibilityLabel。Windows 的读屏已经能通过 TSF 的 `ITfCandidateListUIElement` 读到候选，缺的只是翻页箭头和页码；一套 `IRawElementProviderFragment` 树在没有 Windows 真机的情况下验证不了，这次不做。
+- **候选窗自己实现 UIA 提供者给每行加读屏名称** — macOS 每个候选都有 accessibilityLabel。Windows 的读屏已经能通过 TSF 的 `ITfCandidateListUIElement` 读到候选，缺的只是翻页箭头和页码；一套 `IRawElementProviderFragment` 树在没有 Windows 真机的情况下验证不了，这次不做；后来在 [自绘窗口的 UI Automation 读屏](2026-10-10-windows-server-window-ui-automation.md) 里做了。
 
 ## Consequences
 
 - **收益**：默认安装上翻页箭头能用；滚轮、logo、第二种语言和读音开关改了即时生效；两种目标语言各占一行，为按列上屏留好了列；横排卡片在释义到达时不再长高；打开读音后英文释义带音标，整句候选多一行逐词释义；长候选可以悬停看全文。
-- **代价**：Windows 宿主和会话之间多了一条与 macOS 相同的私有约定，读会话释义的新路径必须按 U+2028 分行，否则会看到这个字符。读音和拆解跟着翻译查询走，候选翻译和离线英文释义都关掉时不会有拆解（macOS 也是）。日文释义在 Windows 上没有罗马字，共享设置页「显示读音」的说明因此按宿主区分（`CandidatePronunciationSection` 的 `romaji`），Windows 上只说英文音标。读音和拆解加上去超过候选窗能画的 4096 字节时，`candidate_secondary_text` 只画释义，不让一条很长的释义把整个候选窗弄失败。三张读音和释义表要构建机上已经有 `target/pronunciations` 等目录才会进包，发版流程目前和 macOS 一样不负责生成它们。`show_app_logo` 的取值规则沿用共享偏好：新装为关，所以新装的 Windows 候选窗不画 logo；文档里没有这个字段的老用户读成开，外观不变，和 macOS 一致。
+- **代价**：Windows 宿主和会话之间多了一条与 macOS 相同的私有约定，读会话释义的新路径必须按 U+2028 分行，否则会看到这个字符。读音和拆解跟着翻译查询走，候选翻译和离线英文释义都关掉时不会有拆解（macOS 也是）。日文释义的罗马字依赖系统的微软日语输入法，没有它时含汉字的日文行不标（[遗留项](2026-10-10-windows-mac-parity-leftovers.md)）；共享设置页「显示读音」的说明不再按宿主区分。读音和拆解加上去超过候选窗能画的 4096 字节时，`candidate_secondary_text` 只画释义，不让一条很长的释义把整个候选窗弄失败。三张读音和释义表要构建机上已经有 `target/pronunciations` 等目录才会进包，发版流程目前和 macOS 一样不负责生成它们。`show_app_logo` 的取值规则沿用共享偏好：新装为关，所以新装的 Windows 候选窗不画 logo；文档里没有这个字段的老用户读成开，外观不变，和 macOS 一致。
 
 ## Verification
 

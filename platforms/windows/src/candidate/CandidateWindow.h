@@ -9,6 +9,7 @@
 #include "CandidateShadow.h"
 #include "CandidateSkin.h"
 #include "TypingEffectPolicy.h"
+#include "TypingEffectOverlay.h"
 #include "CandidateWindowStyle.h"
 #include "ComponentFailure.h"
 #include "FullscreenForeground.h"
@@ -27,6 +28,7 @@ namespace msime::windows {
 // Forward declared: the flyout pulls in its own window headers, and only the
 // implementation needs them.
 class CandidateFlyoutWindow;
+class AccessibleWindow;
 // 候选窗因前台呈现方式被策略隐藏的原因：游戏会话的前台处在 D3D 独占全屏，或这个游戏进程已被反应式锁存。
 enum class CandidateSuppression { ExclusiveFullscreen, Latched };
 // 一次抑制状态的变化，由主循环取出写进诊断日志。cause 是锁存触发或解除的固定标签，独占抑制没有 cause。
@@ -103,6 +105,9 @@ public:
   void set_skin_corner_radius(std::optional<float> radius) { skin_radius_ = radius; }
   // preferences.plugins.effect_intensity, 0-100: how bright the typing flash is until a session publishes its resolved effect settings. The style, the combo and those settings come with each key from the input thread (TypingEffectSignal).
   void set_effect_intensity(uint32_t intensity) { effect_intensity_ = (std::min)(intensity, 100u); }
+  // 光标处的打字特效浮层：每取到一个特效就交给它画火花、光标行闪光和连击徽标。返回 true 表示浮层在负责连击数，卡片就不在拼音行里再画一份；没有设置或返回 false 时，卡片照旧自己画计数、各样式都闪。
+  using TypingEffectPresenter = std::function<bool(const TypingEffectPresentation &)>;
+  void set_typing_effect_presenter(TypingEffectPresenter presenter) { typing_effect_presenter_ = std::move(presenter); }
   // The user's scale, opacity and corner radius. Scale changes the card's size, so the next refresh lays it out again. Invalid values leave the previous style intact.
   bool set_style(const CandidateWindowStyle &style);
   void hide();
@@ -145,6 +150,8 @@ private:
   void show_context_menu(const CandidateClick &click, POINT client_point);
   // 按刚画好的行重新登记悬停提示的区域；行的位置和快照都没变时不动，打字闪光每秒重画几十次也不会反复登记。
   void sync_tooltips();
+  // 读屏要求执行一个元素（accessible_invoke_message）：候选行等同于点它，翻页箭头等同于点箭头。`token` 对不上当前的树时丢掉。
+  void invoke_accessible(int id, LPARAM token);
   Reader reader_;
   Click click_;
   Page page_;
@@ -217,6 +224,8 @@ private:
   std::vector<RECT> tooltip_rects_;
   uint64_t tooltip_serial_ = 0;
   std::wstring tooltip_text_;
+  // 交给读屏的 UI Automation 提供者，每次画完换上新的元素树（CandidateAccessibility.h）。窗口建好后才创建，CreateWindowExW 期间为空。
+  std::unique_ptr<AccessibleWindow> accessible_;
   // The candidate the open flyout acts on, recorded afresh on every right click because the flyout itself outlives any one opening.
   CandidateMenuTarget<CandidateClick> menu_target_;
   std::vector<std::wstring> fallback_families_;
@@ -235,6 +244,16 @@ private:
   TypingEffectSettings effect_settings_{};
   uint64_t effect_started_ = 0;
   bool effect_flashing_ = false;
+  // Power Mode 的抖动还在进行（typing_shake_millis 之内）：卡片按 typing_shake_offset 横向位移着画。
+  bool effect_shaking_ = false;
+  // 浮层在画连击徽标，卡片不画计数。
+  bool effect_badge_elsewhere_ = false;
+  TypingEffectPresenter typing_effect_presenter_;
+  // 最近一次显示候选时 TSF 给的光标锚点，以及当时的前台窗口：上屏之后候选窗收起了，浮层还要知道光标在哪；前台换了就不再用它。
+  std::optional<POINT> typing_anchor_;
+  HWND typing_anchor_foreground_ = nullptr;
+  // 候选卡片（不含阴影和吉祥物那一条）此刻的屏幕矩形，候选窗不可见时为空。
+  std::optional<TypingRect> typing_effect_card() const;
   // set_foreground 记下的前台窗口、它的进程和呈现方式。
   HWND foreground_ = nullptr;
   DWORD foreground_pid_ = 0;

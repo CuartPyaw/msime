@@ -663,6 +663,14 @@ bool SessionController::deactivate_terminal(uint64_t client, uint64_t token) {
     return false;
   return submitted->get() == InputTaskStatus::Completed && result->load();
 }
+void SessionController::passthrough_key(uint64_t client, uint64_t token, uint32_t key_class) {
+  if (!client || !token || stopping_.load())
+    return;
+  // 返回的 future 来自 promise，丢掉它不会阻塞。
+  (void)input_.submit([client, token, key_class](InputState &state) {
+    (void)state.passthrough_key(client, token, key_class);
+  });
+}
 ModeRequestResult SessionController::request_mode(const FocusLease &lease,
                                                   WorkerMode mode) {
   if (input_.on_worker_thread() || active_controller == this)

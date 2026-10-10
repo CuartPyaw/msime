@@ -3,6 +3,7 @@
 #include "CandidateGlossReadings.h"
 #include "ChineseTextConversion.h"
 #include "FocusGate.h"
+#include "GlossColumnPolicy.h"
 #include "InputSchemeTraits.h"
 #include "PipeMetadata.h"
 #include "ReplyComposer.h"
@@ -143,7 +144,41 @@ struct CandidatePresentation {
   bool game_host = false;
   // 双拼组字时候选窗旁的键位提示（方案名和要高亮的键），按 view 判断，不是双拼组字时为空；开关由 Server 主循环另外看。
   std::optional<ShuangpinKeymapHint> shuangpin_keymap;
+  // Tab 预选的释义列（1 或 2），候选窗给高亮候选的那一行释义画下划线；0 表示没有预选。见 GlossColumnPolicy.h。
+  int armed_gloss_column = 0;
 };
+// 高亮候选确实有第 column 列释义时才算预选，否则为 0：释义刷新、云候选插入后高亮候选可能已经没有那一列，ReplyComposer 上屏时按同一条规则判断。
+inline int candidate_armed_gloss_column(const std::vector<PresentationCandidate> &candidates,
+                                        int column) {
+  if (column <= 0)
+    return 0;
+  for (const auto &candidate : candidates)
+    if (candidate.highlighted)
+      return candidate.gloss.empty() && !gloss_column_text(candidate.translation, column).empty()
+                 ? column
+                 : 0;
+  return 0;
+}
+// 预选的那一列释义在 candidate_secondary_text 里的位置（UTF-8 字节的起点和长度），候选窗据此画下划线。候选带 훈음 时那一段另起一行在上面，这种候选（韩文）不接释义列，不画。
+inline std::optional<std::pair<size_t, size_t>>
+candidate_gloss_column_range(const PresentationCandidate &candidate, int column) {
+  if (column <= 0 || !candidate.gloss.empty())
+    return std::nullopt;
+  const auto gloss = gloss_column_text(candidate.translation, column);
+  if (gloss.empty())
+    return std::nullopt;
+  const auto text = candidate_secondary_text(candidate);
+  size_t start = 0;
+  for (int line = 1; line < column; ++line) {
+    const auto cut = text.find('\n', start);
+    if (cut == std::string::npos)
+      return std::nullopt;
+    start = cut + 1;
+  }
+  if (text.compare(start, gloss.size(), gloss) != 0)
+    return std::nullopt;
+  return std::make_pair(start, gloss.size());
+}
 // Copy the view's page position into `output`, dropping one that is not a page of the count rather than drawing "4 / 3".
 inline void candidate_presentation_page(CandidatePresentation &output,
                                         const nlohmann::json &view) {
@@ -221,6 +256,8 @@ candidate_presentation_from_view(const FocusLease &lease,
   output.pointer_input = !scheme::KeyboardOnlyCandidateList(
       static_cast<int>(view.value("scheme", 0u)));
   output.shuangpin_keymap = shuangpin_keymap_hint(view);
+  output.armed_gloss_column =
+      candidate_armed_gloss_column(output.candidates, view.value("armed_gloss_column", 0));
   output.visible = true;
   return output;
 }
@@ -290,6 +327,8 @@ candidate_presentation(const FocusLease &lease, const PendingReply &reply,
   output.pointer_input = !scheme::KeyboardOnlyCandidateList(
       static_cast<int>(view.value("scheme", 0u)));
   output.shuangpin_keymap = shuangpin_keymap_hint(view);
+  output.armed_gloss_column =
+      candidate_armed_gloss_column(output.candidates, view.value("armed_gloss_column", 0));
   output.visible = true;
   return output;
 }

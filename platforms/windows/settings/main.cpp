@@ -3472,9 +3472,9 @@ private:
     bool_row(gloss, 0xE82D, L"显示英文释义",
              L"在候选词后面标出它的英文意思，中文候选给英文、英文候选给中文。释义来自随键盘打包的离线词库，不联网。",
              L"candidate_english_gloss", false, true);
-    // 与共享设置「标点与翻译」页的「显示读音」相同，释义打开（英文释义或候选词翻译）时才可选。Windows 只标英文音标，日文罗马音要靠系统分词器，Windows 没有对应接口。
+    // 与共享设置「标点与翻译」页的「显示读音」相同，释义打开（英文释义或候选词翻译）时才可选。日文罗马音由系统的微软日语输入法（IFELanguage）读出，没有它时只读纯假名的释义。
     bool_row(gloss, 0xE8D4, L"显示读音",
-             L"在释义后面标出英文的音标。音标来自随输入法打包的离线词表，不联网。需要先打开释义。",
+             L"在释义后面标出怎么读：英文释义给音标，日文释义给罗马音。音标来自随输入法打包的离线词表，罗马音由系统生成，都不联网。需要先打开释义。",
              L"candidate_pronunciation", false, false,
              document_.Boolean(L"candidate_english_gloss", false) ||
                  document_.Boolean(L"candidate_translations", false));
@@ -3510,7 +3510,7 @@ private:
                              glosses));
     }
     shell_row(candidates, 0xE774, L"翻译服务",
-              L"在水杉输入法应用的「标点与翻译」中选择腾讯云、小牛翻译或自定义接口并填写凭据",
+              L"在水杉输入法应用的「标点与翻译」中选择水杉账号、腾讯云、小牛翻译或自定义接口，后三种需要填写凭据",
               L"打开", nav::shell_links::expression);
   }
 

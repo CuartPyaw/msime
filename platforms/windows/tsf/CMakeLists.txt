@@ -121,6 +121,15 @@ add_executable(msime-tsf-korean-key-test tests/input/korean_key.cpp)
 target_compile_features(msime-tsf-korean-key-test PRIVATE cxx_std_17)
 target_include_directories(msime-tsf-korean-key-test PRIVATE ../../../crates/host-api/include)
 add_test(NAME msime-tsf-korean-key COMMAND msime-tsf-korean-key-test)
+# 任务栏模式图标：每个方案一个字，Caps Lock 和英文排在前面。
+add_executable(msime-tsf-mode-icon-policy-test tests/input/mode_icon_policy.cpp)
+target_compile_features(msime-tsf-mode-icon-policy-test PRIVATE cxx_std_17)
+if(MSVC)
+  target_compile_options(msime-tsf-mode-icon-policy-test PRIVATE /UNDEBUG /W4 /WX /utf-8)
+else()
+  target_compile_options(msime-tsf-mode-icon-policy-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+endif()
+add_test(NAME msime-tsf-mode-icon-policy COMMAND msime-tsf-mode-icon-policy-test)
 add_executable(msime-tsf-host-composed-key-test tests/input/host_composed_key.cpp)
 target_compile_features(msime-tsf-host-composed-key-test PRIVATE cxx_std_17)
 target_include_directories(msime-tsf-host-composed-key-test PRIVATE ../../../crates/host-api/include)
@@ -202,6 +211,7 @@ add_library(msime-tsf SHARED
   IME/ActiveLanguageProfileNotifySink.cpp IME/FunctionProviderSink.cpp
   IME/MetasequoiaIME.cpp IME/MetasequoiaIMEBaseStructure.cpp
   IPC/Ipc.cpp IPC/PassthroughStatisticsQueue.cpp IPC/KeyPressStatisticsQueue.cpp
+  IPC/PassthroughKeySoundQueue.cpp
   Key/KeyEventSink.cpp Key/KeyHandler.cpp Key/KeyHandlerEditSession.cpp
   Key/KeyStateCategory.cpp
   LanguageBar/LanguageBar.cpp
@@ -295,6 +305,17 @@ target_include_directories(msime-tsf-passthrough-statistics-test PRIVATE IPC)
 target_compile_features(msime-tsf-passthrough-statistics-test PRIVATE cxx_std_17)
 add_test(NAME msime-tsf-passthrough-statistics
   COMMAND msime-tsf-passthrough-statistics-test)
+# 交给应用的键哪些出按键音、计入连击，按哪一类。
+add_executable(msime-tsf-passthrough-key-sound-test
+  tests/passthrough_key_sound.cpp)
+target_compile_features(msime-tsf-passthrough-key-sound-test PRIVATE cxx_std_17)
+if(MSVC)
+  target_compile_options(msime-tsf-passthrough-key-sound-test PRIVATE /W4 /WX /utf-8)
+else()
+  target_compile_options(msime-tsf-passthrough-key-sound-test PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME msime-tsf-passthrough-key-sound
+  COMMAND msime-tsf-passthrough-key-sound-test)
 add_executable(msime-tsf-key-press-statistics-test
   tests/key_press_statistics.cpp)
 target_include_directories(msime-tsf-key-press-statistics-test PRIVATE IPC)

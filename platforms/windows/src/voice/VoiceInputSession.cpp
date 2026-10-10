@@ -5,6 +5,9 @@
 
 #include "LocalAsr.h"
 #include "LocalAsrAudioQueue.h"
+#include "OnDeviceAsrStream.h"
+#include "SystemAsrPolicy.h"
+#include "SystemAsrStream.h"
 #include "ReplyCodec.h"
 #include "SystemAudioMuter.h"
 #include "../../tsf/IPC/PassthroughStatistics.h"
@@ -33,6 +36,11 @@ constexpr auto kLocalModelIdle = std::chrono::seconds(120);
 
 bool is_local_asr_provider(std::string_view provider) {
   return normalize_voice_provider(provider) == "local";
+}
+
+// 「Windows 系统识别」：SAPI 进程内听写，对应 macOS 的「macOS 系统识别」。
+bool is_system_asr_provider(std::string_view provider) {
+  return normalize_voice_provider(provider) == "system";
 }
 
 // The value of a host-api response, or nothing when the call failed. Frees the returned string.
@@ -306,12 +314,12 @@ static_assert(
 } // namespace
 
 // One on-device dictation fed while it is recorded, so its text appears as the person speaks, the way Doubao's does. The capture thread appends to a bounded queue: loading a model takes seconds and decoding a finished speech segment can take longer than a capture buffer, neither of which the audio callback may wait on. run() does both on a recognition task and finish() collects the transcript from it.
-class LocalAsrStream {
+class LocalAsrStream final : public OnDeviceAsrStream {
 public:
   using Partial = msime::voice::LocalAsrSession::PartialCallback;
 
   // Capture thread. Audio arriving after the end, a cancellation or a failed load is dropped rather than queued for a worker that will never read it. An over-budget queue is reported to the session so it can fail visibly.
-  bool push(const float *samples, std::size_t count) {
+  bool push(const float *samples, std::size_t count) override {
     if (!samples || count == 0)
       return true;
     const auto result = queue_.push(samples, count);
@@ -323,7 +331,7 @@ public:
   }
 
   // Recognition task of the finished recording: no more audio is coming. Waits for run() to decode what is left and returns the transcript, hotword-corrected; rethrows what the recognizer threw.
-  std::string finish() {
+  std::string finish() override {
     queue_.finish();
     std::unique_lock lock(mutex_);
     done_wake_.wait(lock, [this] { return done_; });
@@ -333,7 +341,7 @@ public:
   }
 
   // Any thread, any number of times, also after finish(). The recognizer stops at its next check and run() returns without a transcript.
-  void cancel() {
+  void cancel() override {
     cancelled_->store(true);
     queue_.cancel();
   }
@@ -505,8 +513,10 @@ bool VoiceInputSession::start(std::shared_ptr<VoiceReviewResult> review,
   // An installed catalog model decodes as the audio arrives and reports partial text like Doubao. Any other path, such as a Whisper model file the setting held before the catalog, goes through the batch recognizer, which refuses it after the recording.
   const bool local_stream =
       local && msime::voice::is_local_model_dir(config.asr_model_path);
+  // 系统识别总是边录边识别，中间结果和本地模型一样走内联预编辑或浮层。
+  const bool system = is_system_asr_provider(config.asr_provider);
   const bool stream_inline = voice_inline_allowed(
-      review, config.stream_inline_preedit, doubao || local_stream,
+      review, config.stream_inline_preedit, doubao || local_stream || system,
       config.commit_mode);
   // Without a focused input context there is nothing to dictate into, and MSIME-Windows says nothing either.
   const auto lease = lease_provider_();
@@ -520,11 +530,15 @@ bool VoiceInputSession::start(std::shared_ptr<VoiceReviewResult> review,
   };
   const auto verdict = voice_start_verdict(
       {config.enabled, doubao, config.token, endpoint, model, config.resource_id,
-       local, config.asr_model_path});
+       local, config.asr_model_path, system});
   if (verdict.check == VoiceStartCheck::Disabled)
     return false;
   if (verdict.check == VoiceStartCheck::Rejected)
     return refuse(verdict.message);
+  // 没装这种语言的语音识别时在开始录音前就说清楚，而不是让人说完一整段才看到失败。
+  if (system)
+    if (const auto problem = system_asr_start_problem(config.language))
+      return refuse(*problem);
   // 这台主机打不开的设备选择（别的平台写下的后端或设备 id）就是所选麦克风不可用。
   if (!config.capture.supported())
     return refuse(voice_microphone_device_message);
@@ -567,8 +581,13 @@ bool VoiceInputSession::start(std::shared_ptr<VoiceReviewResult> review,
     });
   };
   // Replaced even when this recording does not stream: a stream still finishing an earlier recording belongs to that recording's task alone, and stop() must not hand it to this one.
-  const auto stream =
+  const auto local_recognizer =
       local_stream ? std::make_shared<LocalAsrStream>() : nullptr;
+  const auto system_recognizer =
+      system ? std::make_shared<SystemAsrStream>() : nullptr;
+  const std::shared_ptr<OnDeviceAsrStream> stream =
+      local_recognizer ? std::shared_ptr<OnDeviceAsrStream>(local_recognizer)
+                       : std::shared_ptr<OnDeviceAsrStream>(system_recognizer);
   {
     std::lock_guard lock(local_stream_mutex_);
     local_stream_ = stream;
@@ -619,7 +638,7 @@ bool VoiceInputSession::start(std::shared_ptr<VoiceReviewResult> review,
       std::lock_guard doubao_lock(doubao_mutex_);
       client = doubao_;
     }
-    std::shared_ptr<LocalAsrStream> local_feed;
+    std::shared_ptr<OnDeviceAsrStream> local_feed;
     if (!client) {
       std::lock_guard stream_lock(local_stream_mutex_);
       local_feed = local_stream_;
@@ -698,8 +717,13 @@ bool VoiceInputSession::start(std::shared_ptr<VoiceReviewResult> review,
                                 }),
                   tasks_.end());
     tasks_.emplace_back(std::async(
-        std::launch::async, [this, stream, config, show_partial] {
-          stream->run(config, show_partial);
+        std::launch::async,
+        [this, local_recognizer, system_recognizer, config, show_partial] {
+          if (system_recognizer) {
+            system_recognizer->run(config.language, show_partial);
+            return;
+          }
+          local_recognizer->run(config, show_partial);
           note_local_model_use();
         }));
   }
@@ -750,7 +774,7 @@ void VoiceInputSession::stop() {
     std::lock_guard lock(doubao_mutex_);
     doubao = doubao_;
   }
-  std::shared_ptr<LocalAsrStream> local_stream;
+  std::shared_ptr<OnDeviceAsrStream> local_stream;
   {
     std::lock_guard lock(local_stream_mutex_);
     local_stream = local_stream_;
@@ -839,14 +863,14 @@ void VoiceInputSession::stop() {
 void VoiceInputSession::finish(std::vector<float> samples, FocusLease lease,
                                VoiceInputConfig config, uint64_t session,
                                std::shared_ptr<DoubaoAsrClient> doubao,
-                               std::shared_ptr<LocalAsrStream> local_stream,
+                               std::shared_ptr<OnDeviceAsrStream> local_stream,
                                std::shared_ptr<std::atomic_bool> cancelled,
                                std::shared_ptr<VoiceReviewResult> review,
                                HWND start_window) {
   // However this ends, the stream's recognition task must too: a return before local_stream->finish() (a newer recording took over, the text came back empty) would otherwise leave it waiting for audio that never comes, and the destructor waiting for it.
   struct StreamRelease {
     VoiceInputSession &owner;
-    const std::shared_ptr<LocalAsrStream> &stream;
+    const std::shared_ptr<OnDeviceAsrStream> &stream;
     ~StreamRelease() {
       if (!stream)
         return;
@@ -899,6 +923,7 @@ void VoiceInputSession::finish(std::vector<float> samples, FocusLease lease,
   }
   std::string text;
   const bool local = !doubao && is_local_asr_provider(config.asr_provider);
+  const bool system = !doubao && is_system_asr_provider(config.asr_provider);
   try {
     if (local_stream) {
       text = local_stream->finish();
@@ -915,6 +940,9 @@ void VoiceInputSession::finish(std::vector<float> samples, FocusLease lease,
           report_failure(error, session);
         return;
       }
+    } else if (system) {
+      // 系统识别承诺音频不出设备：没有本机识别器接手的录音只报失败，绝不落到下面的云端上传分支。
+      throw SystemAsrError("语音识别失败");
     } else {
       const auto endpoint = resolved_asr_endpoint(config.asr_provider, config.endpoint);
       const auto model = config.model.empty()
@@ -929,7 +957,8 @@ void VoiceInputSession::finish(std::vector<float> samples, FocusLease lease,
     release_doubao();
     if (!review && !cancel_requested_.load())
       report_failure(
-          local ? std::string(voice_local_failure(
+          system ? system_asr_failure(error)
+          : local ? std::string(voice_local_failure(
                       local_asr_available(),
                       msime::voice::is_local_model_dir(config.asr_model_path)))
                 : voice_recognition_failure(error),
@@ -1127,7 +1156,7 @@ void VoiceInputSession::cancel_session(bool failed) {
   }
   if (doubao)
     doubao->Cancel();
-  std::shared_ptr<LocalAsrStream> local_stream;
+  std::shared_ptr<OnDeviceAsrStream> local_stream;
   {
     std::lock_guard lock(local_stream_mutex_);
     local_stream = std::move(local_stream_);
