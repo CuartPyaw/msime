@@ -142,7 +142,8 @@ public final class KeyboardGeometry {
         if (value <= LEGACY_MAX_DESIGN_HEIGHT_ADJUSTMENT_DP) return value;
         int windowLimit = windowHeightDp <= 0 ? 0
             : (int) ((long) windowHeightDp * WINDOW_HEIGHT_ADJUSTMENT_PERCENT / 100);
-        return Math.min(value, Math.max(LEGACY_MAX_DESIGN_HEIGHT_ADJUSTMENT_DP, windowLimit));
+        return BoundsPolicy.atMost(value,
+            BoundsPolicy.atLeast(windowLimit, LEGACY_MAX_DESIGN_HEIGHT_ADJUSTMENT_DP));
     }
 
     /** 某个高度百分比下的键高：`round(46 × p / 100)`。 */
