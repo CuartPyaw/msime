@@ -114,7 +114,7 @@ public final class NineKeySidebarPolicy {
     /** 列出时给设置页显示的摘要：最多前 `limit` 个符号，后面用「等 N 个」收尾。 */
     public static String summary(List<String> symbols, int limit) {
         if (symbols.size() <= limit) return String.join(" ", symbols);
-        List<String> head = new ArrayList<>(symbols.subList(0, Math.max(0, limit)));
+        List<String> head = new ArrayList<>(symbols.subList(0, BoundsPolicy.nonNegative(limit)));
         return String.join(" ", head) + " 等 " + symbols.size() + " 个";
     }
 }
