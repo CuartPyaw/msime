@@ -17,7 +17,7 @@ public final class CandidateGridBatchPolicy {
     public static int initialCount(int total, int previouslyBuilt, boolean sameGeneration) {
         if (total < 0 || previouslyBuilt < 0)
             throw new IllegalArgumentException("Invalid candidate grid counts");
-        int wanted = sameGeneration ? Math.max(BATCH, previouslyBuilt) : BATCH;
+        int wanted = sameGeneration ? BoundsPolicy.atLeast(previouslyBuilt, BATCH) : BATCH;
         return Math.min(total, wanted);
     }
 
