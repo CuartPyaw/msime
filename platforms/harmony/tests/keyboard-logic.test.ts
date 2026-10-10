@@ -3140,6 +3140,13 @@ group("community reply templates accept only bounded reply entries", () => {
     ).length === 0,
     "rejects control text",
   );
+  const multiline = CommunityReplyLibraryPolicy.parse(
+    '[{"id":"multiline","kind":"reply","name":"多行模板","content":{"prompt":"第一条\\n第二条\\t带缩进"}}]',
+  );
+  check(
+    multiline.length === 1 && multiline[0].prompt === "第一条\n第二条\t带缩进",
+    "keeps line breaks and tabs allowed by the community prompt contract",
+  );
   check(
     CommunityReplyLibraryPolicy.parse(
       JSON.stringify([
