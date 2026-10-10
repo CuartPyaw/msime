@@ -98,6 +98,15 @@ private final class ClipboardRetryProtocol: URLProtocol {
         status = 401
         body = #"{"error":{"code":"invalid_credentials"}}"#
       }
+    case "/v1/users/me/dictionaries/quick":
+      if authorization == "Bearer \(Self.newToken)" {
+        status = 200
+        let id = String(repeating: "b", count: 64)
+        body = "{\"revision\":2,\"previous\":null,\"replacement\":{\"id\":\"\(id)\",\"kind\":\"quick\",\"code\":\"sample\",\"word\":\"合成\",\"weight\":1,\"revision\":2}}"
+      } else {
+        status = 401
+        body = #"{"error":{"code":"invalid_credentials"}}"#
+      }
     case "/v1/auth/refresh":
       status = 200
       let refresh = String(repeating: "c", count: 64)
@@ -420,6 +429,23 @@ final class BackendAccountClientTests: XCTestCase {
 
     let page = try await client.dictionary(.pinyin, session: session)
     XCTAssertEqual(page.entries.count, 1)
+  }
+
+  func testDictionaryMutationSessionRetriesRejectedAccessToken() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [ClipboardRetryProtocol.self]
+    let client = BackendAccountClient(configuration: configuration)
+    let tokens = BackendAccountClient.Tokens(
+      access_token: ClipboardRetryProtocol.oldToken,
+      refresh_token: String(repeating: "d", count: 64), token_type: "Bearer", expires_in: 900,
+      user: .init(id: "synthetic-user", display_name: "示例", created_at: "2026-09-08"))
+    let session = BackendAccountSession(api: client,
+      storage: ClipboardRetryStorage(try BackendSavedSession.forTokens(tokens)),
+      refreshLock: BackendProcessRefreshLock())
+
+    let change = try await client.addDictionary(.quick,
+      value: .init(code: "sample", word: "合成", weight: 1), session: session)
+    XCTAssertEqual(change.revision, 2)
   }
   func testClipboardSearchRejectsOversizedAndUnsafeValues() async throws {
     for search in [String(repeating: "a", count: 1025), "safe\u{0007}query"] {
