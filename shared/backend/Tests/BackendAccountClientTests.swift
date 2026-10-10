@@ -107,6 +107,22 @@ private final class ClipboardRetryProtocol: URLProtocol {
         status = 401
         body = #"{"error":{"code":"invalid_credentials"}}"#
       }
+    case let path where path.hasSuffix("/catalog"):
+      if authorization == "Bearer \(Self.newToken)" {
+        status = 200
+        body = #"{"entries":[],"offset":0,"has_more":false,"revision":1,"normalized":""}"#
+      } else {
+        status = 401
+        body = #"{"error":{"code":"invalid_credentials"}}"#
+      }
+    case let path where path.hasSuffix("/apply"):
+      if authorization == "Bearer \(Self.newToken)" {
+        status = 200
+        body = #"{"revision":2,"imported":1,"resource_revision":1}"#
+      } else {
+        status = 401
+        body = #"{"error":{"code":"invalid_credentials"}}"#
+      }
     case "/v1/auth/refresh":
       status = 200
       let refresh = String(repeating: "c", count: 64)
@@ -446,6 +462,23 @@ final class BackendAccountClientTests: XCTestCase {
     let change = try await client.addDictionary(.quick,
       value: .init(code: "sample", word: "合成", weight: 1), session: session)
     XCTAssertEqual(change.revision, 2)
+  }
+
+  func testCommunityApplySessionRetriesRejectedAccessToken() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [ClipboardRetryProtocol.self]
+    let client = BackendAccountClient(configuration: configuration)
+    let tokens = BackendAccountClient.Tokens(
+      access_token: ClipboardRetryProtocol.oldToken,
+      refresh_token: String(repeating: "d", count: 64), token_type: "Bearer", expires_in: 900,
+      user: .init(id: "synthetic-user", display_name: "示例", created_at: "2026-09-08"))
+    let session = BackendAccountSession(api: client,
+      storage: ClipboardRetryStorage(try BackendSavedSession.forTokens(tokens)),
+      refreshLock: BackendProcessRefreshLock())
+
+    let result = try await client.applyResource(UUID(uuidString: "11111111-1111-4111-8111-111111111111")!,
+      resourceRevision: 1, dictionaryRevision: 1, session: session)
+    XCTAssertEqual(result.imported, 1)
   }
   func testClipboardSearchRejectsOversizedAndUnsafeValues() async throws {
     for search in [String(repeating: "a", count: 1025), "safe\u{0007}query"] {
