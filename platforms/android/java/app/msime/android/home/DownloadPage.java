@@ -12,6 +12,7 @@ import android.widget.TextView;
 import androidx.annotation.DrawableRes;
 import androidx.annotation.Nullable;
 import app.msime.android.CloudApi;
+import app.msime.android.BackendAccount;
 import app.msime.android.DrawablePolicy;
 import app.msime.android.DownloadLinkApi;
 import app.msime.android.R;
@@ -130,10 +131,16 @@ public final class DownloadPage extends DetailPage {
     private void send(String platform, TextView button) {
         if (sending.contains(platform) || sentPlatforms.contains(platform)) return;
         Context application = requireContext().getApplicationContext();
+        String expectedSessionId = new BackendAccount(application).sessionId();
+        if (expectedSessionId.isEmpty()) {
+            MsToast.show(requireContext(), "登录已失效，请重新打开页面");
+            return;
+        }
         sending.add(platform);
         button.setText("正在发送…");
         ViewPolicy.setEnabled(button, false);
-        AboutPage.network(this, () -> new DownloadLinkApi(new CloudApi(application)).send(platform), outcome -> {
+        AboutPage.network(this, () -> new DownloadLinkApi(
+            new CloudApi(application).forAccountSession(expectedSessionId)).send(platform), outcome -> {
             sending.remove(platform);
             if (outcome.error() != null) {
                 button.setText("发送链接");
