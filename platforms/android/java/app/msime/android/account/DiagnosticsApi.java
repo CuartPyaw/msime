@@ -379,8 +379,8 @@ public final class DiagnosticsApi {
         }
         JSONArray list = root.optJSONArray("accesses");
         int accessCount = list == null ? 0 : list.length();
-        int firstAccess = Math.max(0, accessCount - MAX_EVENTS);
-        List<Access> accesses = new ArrayList<>(Math.min(accessCount, MAX_EVENTS));
+        int firstAccess = BoundsPolicy.nonNegative(accessCount - MAX_EVENTS);
+        List<Access> accesses = new ArrayList<>(BoundsPolicy.atMost(accessCount, MAX_EVENTS));
         if (list != null) {
             for (int i = firstAccess; i < list.length(); i++) {
                 JSONObject item = list.optJSONObject(i);
