@@ -1899,6 +1899,7 @@ impl<E: InputEngine> Runtime<E> {
             // A bare `/` or `@` flushes as the literal prefix, as on the punctuation routes; finishing would commit the list's first row.
             Action::Finish if self.bare_mode_prefix() => self.engine.command(Command::CommitRaw),
             Action::Finish => self.engine.finish(self.engine_index(self.highlighted)),
+            // The key that tops the code is never lost: what the Engine commits for it goes out after the word, and a key it lets go (a capital that opens no mode, Shift+K with the K mode off) goes out as the literal letter, as `literal_mark` sends a mark behind a held phrase, since the host has already been told the key was handled.
             Action::Character { value, shift } if wubi_top_commit => self
                 .engine
                 .select(self.engine_index(0))
