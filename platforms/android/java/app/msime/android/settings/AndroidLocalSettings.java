@@ -65,8 +65,12 @@ public final class AndroidLocalSettings {
     public static final String CLIPBOARD_COLUMNS = "platform.android.clipboard_columns";
     /** 工具栏显示最近复制的文字（{@link RecentClipboardSuggestion}），默认开；剪贴板历史关着时不生效。同步字段表里没有这个键，只在本机。 */
     public static final String CLIPBOARD_SUGGESTION = "platform.android.clipboard_suggestion";
+    /** 「数字行」（#6022）：26 键和韩文键盘的字母上方多一行 1–0（{@link KeyboardLayout#drawsNumberRow}），默认关。同步字段表里没有这个键，只在本机。 */
+    public static final String NUMBER_ROW = "platform.android.number_row";
     /** 拼音九键网格键的滑动（{@link NineKeySwipePolicy}）：关闭、上滑输入数字或下滑输入数字，默认关闭，不改变原来九键的点按。和 26 键的「滑动输入符号」分开，服务端的同步字段表还没有这个键，所以先只在本机。 */
     public static final String NINE_KEY_SWIPE = "platform.android.nine_key_swipe";
+    /** 拼音九键滑动的判定距离（dp，{@link NineKeySwipePolicy#MIN_THRESHOLD_DP}..{@link NineKeySwipePolicy#MAX_THRESHOLD_DP}，默认 {@link NineKeySwipePolicy#DEFAULT_THRESHOLD_DP}），只影响 {@link #NINE_KEY_SWIPE}，26 键的滑动阈值不变。和 {@link #NINE_KEY_SWIPE} 一样只在本机。 */
+    public static final String NINE_KEY_SWIPE_DISTANCE = "platform.android.nine_key_swipe_distance";
     /** 拼音九键和笔画键盘左侧符号栏的符号（{@link NineKeySidebarPolicy}），用空格分开。服务端的同步字段表还没有这个键，所以先只在本机。 */
     public static final String NINE_KEY_SYMBOLS = "platform.android.nine_key_symbols";
     /** 拼音九键数字键面左侧符号栏的符号，格式同 {@link #NINE_KEY_SYMBOLS}，同样只在本机。 */
@@ -183,8 +187,11 @@ public final class AndroidLocalSettings {
         choice(CLIPBOARD_COLUMNS, ClipboardLayoutPolicy.ONE_COLUMN, false,
             ClipboardLayoutPolicy.ONE_COLUMN, ClipboardLayoutPolicy.TWO_COLUMNS);
         bool(CLIPBOARD_SUGGESTION, true, false);
+        bool(NUMBER_ROW, false, false);
         choice(NINE_KEY_SWIPE, NineKeySwipePolicy.OFF, false, NineKeySwipePolicy.OFF, SwipeHintPolicy.UP,
             SwipeHintPolicy.DOWN);
+        integer(NINE_KEY_SWIPE_DISTANCE, NineKeySwipePolicy.DEFAULT_THRESHOLD_DP, false,
+            NineKeySwipePolicy.MIN_THRESHOLD_DP, NineKeySwipePolicy.MAX_THRESHOLD_DP, NineKeySwipePolicy.THRESHOLD_STEP_DP);
         text(NINE_KEY_SYMBOLS, NineKeySidebarPolicy.format(NineKeySidebarPolicy.DEFAULT_LETTER_SYMBOLS), false,
             NineKeySidebarPolicy::normalize);
         text(NINE_KEY_DIGIT_SYMBOLS, NineKeySidebarPolicy.format(NineKeySidebarPolicy.DEFAULT_DIGIT_SYMBOLS), false,

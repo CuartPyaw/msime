@@ -25,6 +25,11 @@ final class ImeStyler {
         this.s = s;
     }
 
+    /** 读音行组字光标竖条的颜色：皮肤的强调色（#6110）。 */
+    int caretColor() {
+        return color(s.skin.accent());
+    }
+
     /** Skin colours repeat across every key in a render; keep the bounded palette parsed once. */
     private int color(String value) {
         Integer cached = colorCache.get(value);
@@ -463,11 +468,13 @@ final class ImeStyler {
             ViewPolicy.setTextColor(s.preedit, s.brandPillVisible
                 ? color(s.skin.accent()) : s.candidateAppearance.number());
             ViewPolicy.setTypeface(s.preedit, candidateTypeface());
-            KeyboardGeometry.setKeyTextSize(s.preedit, s.brandPillVisible ? 12 : s.candidatePreeditFontSize);
+            KeyboardGeometry.setKeyTextSize(s.preedit, s.brandPillVisible ? 12 : ReadingRowPolicy.textSizeSp(s.candidatePreeditFontSize));
             ViewPolicy.setBackground(s.preedit, s.brandPillVisible ? brandPillDrawable() : null);
             ViewPolicy.setPadding(s.preedit, s.pixels(s.brandPillVisible ? 12 : 2),
                 s.pixels(s.brandPillVisible ? 4 : 0), s.pixels(s.brandPillVisible ? 12 : 2),
                 s.pixels(s.brandPillVisible ? 4 : 0));
+            // 组字光标竖条（#6110）跟着皮肤的强调色走。
+            CompositionCaretSpan.recolor(s.preedit, caretColor());
         }
         if (s.candidateBrandMark != null) s.candidateBrandMark.invalidate();
         if (s.status != null) ViewPolicy.setTextColor(s.status, fade(s.skin.accent(), .55));

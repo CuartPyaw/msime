@@ -121,6 +121,7 @@ public final class MSIMEInputService extends InputMethodService {
     ImeDebugOverlay imeDebugOverlay;
     ImeTextEditPanel imeTextEditPanel;
     ImeCalculator imeCalculator;
+    ImeEmailSuffixes imeEmailSuffixes;
     long session;
     InputConnection connection;
     private EditorBridge bridge = new EditorBridge();
@@ -334,6 +335,8 @@ public final class MSIMEInputService extends InputMethodService {
     String oneHandedMode = "off";
     /** 本地设置「横屏分离式键盘」；实际画不画还要看设备形态、方向和布局，见 {@link #splitKeyboardDrawn}。 */
     boolean splitKeyboardEnabled;
+    /** 本地设置「数字行」；实际画不画还要看键面和布局，见 {@link #numberRowDrawn}。 */
+    boolean numberRowEnabled;
     /** 本地设置「加高底行」（#6354）：底栏和一行键同高，见 {@link KeyboardGeometry#bottomRowHeightDp}。 */
     boolean tallBottomRow;
     boolean incognitoEnabled;
@@ -1098,7 +1101,7 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     /** 删光标前 `length` 个 UTF-16 单元，并记下删完后的选区预期，免得这次删除迟到的回报把紧接着开始的新组字取消掉。有选区或组字区时删的位置由编辑器决定，追踪器会自己作废预期。 */
-    private boolean deleteBeforeCursor(int length) {
+    boolean deleteBeforeCursor(int length) {
         pairedPunctuationStack.clear();
         boolean deleted = connection.deleteSurroundingText(length, 0);
         if (deleted) {
@@ -1332,6 +1335,7 @@ public final class MSIMEInputService extends InputMethodService {
         imeDebugOverlay = new ImeDebugOverlay(this);
         imeTextEditPanel = new ImeTextEditPanel(this);
         imeCalculator = new ImeCalculator(this);
+        imeEmailSuffixes = new ImeEmailSuffixes(this);
         // 必须在 super.onCreate() 之前：InputMethodService 在那里按这个主题建输入法窗口，之后再设会抛异常。按名字查是因为 core/ 要能脱离 Gradle 生成的 R 编译（check-host.sh 的 JVM 冒烟）；res/values/themes.xml 说明了这个主题为什么存在。
         // 五笔、拼音等版本的 applicationId 带后缀，资源表的包名仍是命名空间，两个都试。
         int theme = getResources().getIdentifier("Theme.MSIME.InputMethod", "style", getPackageName());
@@ -1398,6 +1402,7 @@ public final class MSIMEInputService extends InputMethodService {
         cloudClipboardGeneration++;
         imeBottomRow.resetSpaceCursor();
         imeCalculator.clear();
+        imeEmailSuffixes.clear();
         // 也覆盖 onFinishInputView(true)：那条路径不经过 finishInputViewPresentation。
         imeVoiceEntry.cancel();
         stop(true);
@@ -1883,6 +1888,7 @@ public final class MSIMEInputService extends InputMethodService {
         }
         oneHandedMode = localSettings.choice(AndroidLocalSettings.ONE_HANDED);
         splitKeyboardEnabled = localSettings.bool(AndroidLocalSettings.SPLIT_KEYBOARD);
+        numberRowEnabled = localSettings.bool(AndroidLocalSettings.NUMBER_ROW);
         incognitoEnabled = localSettings.bool(AndroidLocalSettings.INCOGNITO);
         boolean nextTallBottomRow = localSettings.bool(AndroidLocalSettings.TALL_BOTTOM_ROW);
         if (nextTallBottomRow != tallBottomRow) {
@@ -3090,7 +3096,7 @@ public final class MSIMEInputService extends InputMethodService {
         int extraRows = BoundsPolicy.nonNegative(reserved - 1);
         int line = ImeToolbar.CANDIDATE_LINE_DP + extraRows * ImeToolbar.EXTRA_GLOSS_ROW_DP;
         ViewPolicy.setFixedHeight(candidateLine, pixels(line));
-        // 读音行至少是设计的 14 dp，读音字号放不下时按读音文字的实际高度加高，见 ReadingRowPolicy。
+        // 读音行至少是设计的 14 dp，读音字号放不下时按读音文字的实际高度加上和候选行之间的间距加高，见 ReadingRowPolicy。
         int readingRow = readingRowHeight();
         if (candidateHeader != null) ViewPolicy.setFixedHeight(candidateHeader, readingRow);
         // 空闲时的工具栏和组词时的读音行 + 候选行占同一个位置，两者同高，打字时键盘才不会变高。空闲时读音行若在显示常驻的模式标签（直接输入、准备中），它已经占了读音行那一截，工具栏只取候选行的高度，总高不变。
@@ -3107,8 +3113,11 @@ public final class MSIMEInputService extends InputMethodService {
         int design = pixels(ImeToolbar.READING_ROW_DP);
         if (preedit == null) return design;
         Paint.FontMetricsInt metrics = preedit.getPaint().getFontMetricsInt();
+        // 读音行自己的上下内边距（下边就是和候选行之间的 READING_GAP_DP）也算进去，否则字号大时间距被读音挤掉。
+        int headerPadding = candidateHeader == null ? 0
+            : candidateHeader.getPaddingTop() + candidateHeader.getPaddingBottom();
         return ReadingRowPolicy.heightPx(design, metrics.ascent, metrics.descent,
-            preedit.getPaddingTop() + preedit.getPaddingBottom());
+            preedit.getPaddingTop() + preedit.getPaddingBottom() + headerPadding);
     }
 
     void fail() { stop(false); message = "输入连接失败：仅直接输入"; render(); }
@@ -3217,9 +3226,8 @@ public final class MSIMEInputService extends InputMethodService {
         boolean punctuationKey = SmartPunctuationContext.isAsciiPunctuation(output) && !microsoftFinal;
         boolean handled = punctuationKey ? punctuation(output) : character(output);
         if (!handled) {
-            // 引擎不收的标点是一次自动上屏，先把组合按首选结束掉。The preedit is a real composing
-            // region, so committing into it would replace the pinyin instead of following it.
-            if (DeclinedKeyPolicy.finishesComposition(punctuationKey, hasEngineComposition())) {
+            // 引擎不收的标点和数字（数字行的 0、没有候选时的 1–9）是一次自动上屏，先把组合按首选结束掉。读音是真正的组字区，直接上屏会替换掉拼音，而不是跟在拼音后面。
+            if (DeclinedKeyPolicy.finishesComposition(punctuationKey, output, hasEngineComposition())) {
                 command(FINISH_COMPOSITION_COMMAND);
             }
             commitText(fullWidthOutput(String.valueOf(output)));
@@ -3548,6 +3556,12 @@ public final class MSIMEInputService extends InputMethodService {
         Configuration configuration = getResources().getConfiguration();
         return SplitKeyboardPolicy.drawn(splitKeyboardEnabled, configuration.smallestScreenWidthDp,
             configuration.orientation == Configuration.ORIENTATION_LANDSCAPE, displayedTouchLayout(view));
+    }
+
+    /** 现在字母上方要不要画数字行（#6022）：开关打开、在字母层、画的是 26 键一族或韩文键盘、窗口够高（{@link KeyboardLayout#drawsNumberRow}）。 */
+    boolean numberRowDrawn() {
+        return KeyboardLayout.drawsNumberRow(numberRowEnabled, keyboardLayer, displayedTouchLayout(view),
+            getResources().getConfiguration().screenHeightDp);
     }
 
     int displayedTouchLayout(JSONObject value) {
@@ -4099,6 +4113,8 @@ public final class MSIMEInputService extends InputMethodService {
         if (directEnglishActive()) refreshEnglishSuggestions();
         // 数字键面上打完算式（或光标挪到算式后面）时，工具栏给出计算结果。
         imeCalculator.refresh();
+        // 邮箱输入框里打到 `xxx@` 时，候选栏给出邮箱后缀（#6147）。
+        imeEmailSuffixes.refresh();
     }
 
     Button button(LinearLayout row, String label, Runnable action) {
@@ -7631,8 +7647,10 @@ public final class MSIMEInputService extends InputMethodService {
         // 旋转、设置变化或布局切换让分离式键盘该画与否变了，而键行还是按旧状态建的：先按新状态重建，下面的底行排布也会跟着换。
         // 设置页改了九键左侧符号栏的符号：同样按新的符号表重建。
         // 中文标点开关在 123 / #+= 层上切换了（工具面板、设置页、Ctrl + .）：这一层的标点按新状态重画。
+        // 设置页开关了「数字行」：按新状态重建。
         if (imeLetterRows.splitStale() || imeLayoutRows.sidebarStale()
-                || imeLetterRows.layerPunctuationStale()) imeLetterRows.rebuildKeyRows();
+                || imeLetterRows.layerPunctuationStale() || imeLetterRows.numberRowStale())
+            imeLetterRows.rebuildKeyRows();
         updateSymbolKeyFaces();
         updateShuangpinKeyHints();
         updateQuickPunctuation();
@@ -7681,13 +7699,15 @@ public final class MSIMEInputService extends InputMethodService {
         boolean handwriting = handwritingActive();
         boolean hasHandwritingResults = handwriting && !handwritingResults.isEmpty()
             && handwritingCandidateToken != null;
+        boolean hasEmailSuffixes = imeEmailSuffixes.active();
         boolean idle = view == null || (InputViewValuePolicy.editingText(view).isEmpty()
             && "none".equals(InputViewValuePolicy.textOr(view, "local_mode", "none"))
             && (visibleCandidates == null || visibleCandidates.length() == 0)
             && !hasEnglishSuggestions
+            && !hasEmailSuffixes
             && !hasHandwritingResults);
         if (preedit != null) {
-            KeyboardGeometry.setKeyTextSize(preedit, candidatePreeditFontSize);
+            // 读音的字号由 ImeStyler.applySkin 在 render 末尾统一设置，这里不再另设一份。
             String editingText = view == null ? "" : InputViewValuePolicy.editingText(view);
             boolean offersLocalModes = idle && supportsLocalTools();
             String localModeKey = view == null ? "none" : InputViewValuePolicy.textOr(view, "local_mode", "none");
@@ -7742,7 +7762,11 @@ public final class MSIMEInputService extends InputMethodService {
                 : PhrasePreeditPolicy.title(phrasePrefix, caretMark >= 0
                     ? CompositionCaretPolicy.withMark(caretSpelling, caretMark) : localModeTitle,
                     !"none".equals(localModeKey));
-            preedit.setText(displayText);
+            // 光标符画成强调色的粗竖条（#6110），文本里仍是那个字符，点读音行的下标换算不变。
+            int caretInTitle = idleTitle ? -1
+                : CompositionCaretPolicy.markInTitle(phrasePrefix, caretMark, !"none".equals(localModeKey));
+            preedit.setText(CompositionCaretSpan.mark(displayText, caretInTitle, pixels(2), pixels(2),
+                imeStyler.caretColor()));
             preedit.setContentDescription(offersLocalModes ? "长按打开本地输入模式" : displayText);
             preedit.setLongClickable(offersLocalModes);
             ViewPolicy.setClickable(preedit, preeditCaretEditing != null);
@@ -8024,6 +8048,9 @@ public final class MSIMEInputService extends InputMethodService {
         JSONArray entries = view.optJSONArray("candidates");
         if (handwriting) {
             renderSharedHandwritingCandidates(activeCandidates);
+        } else if (imeEmailSuffixes.active()) {
+            // 邮箱后缀和英文建议占同一个候选行；打到 `@` 之后英文建议本来也没有，先给后缀。
+            imeEmailSuffixes.render(activeCandidates);
         } else if (englishSuggestionsActive()) {
             renderEnglishSuggestions(activeCandidates);
         } else if (entries != null) {
