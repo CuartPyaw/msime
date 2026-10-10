@@ -57,8 +57,8 @@ public final class FloatingKeyboardPolicy {
 
     /** 拖动时的新偏移：起点加位移后钳进 0…{@code free}；位移不是有限数时停在起点。 */
     public static float dragged(float start, float delta, int free) {
-        float limit = Math.max(0, free);
+        float limit = BoundsPolicy.nonNegative(free);
         float next = Float.isFinite(delta) ? start + delta : start;
-        return Math.max(0f, Math.min(limit, next));
+        return BoundsPolicy.nonNegative(Math.min(limit, next));
     }
 }
