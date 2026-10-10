@@ -34,6 +34,11 @@ public final class TextPolicy {
         return Character.isWhitespace(codePoint) || Character.isSpaceChar(codePoint);
     }
 
+    /** Return whether a code point matches Java's whitespace predicate. */
+    public static boolean isWhitespace(int codePoint) {
+        return Character.isWhitespace(codePoint);
+    }
+
     public static boolean blank(String value) {
         if (value == null || value.isEmpty()) return true;
         return value.codePoints().allMatch(TextPolicy::isSpace);
