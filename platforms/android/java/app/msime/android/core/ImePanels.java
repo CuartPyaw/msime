@@ -1948,7 +1948,7 @@ final class ImePanels {
         int width = s.clipboardPanel.getWidth() - s.clipboardPanel.getPaddingLeft()
             - s.clipboardPanel.getPaddingRight();
         if (width <= 0) return 0f;
-        int count = Math.max(1, columns);
+        int count = BoundsPolicy.atLeast(columns, 1);
         return (width - s.pixels(6) * (count - 1)) / (float) count;
     }
 
