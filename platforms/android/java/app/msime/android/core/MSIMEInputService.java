@@ -2752,7 +2752,7 @@ public final class MSIMEInputService extends InputMethodService {
             candidateOfflineGlosses != null && candidateOfflineGlossSession == session
                 && candidateOfflineGlossGeneration == generation ? candidateOfflineGlosses : java.util.Map.of();
         JSONArray entries = view == null ? null : view.optJSONArray("candidates");
-        int textCapacity = entries == null ? 0 : Math.min(entries.length(), 32);
+        int textCapacity = entries == null ? 0 : BoundsPolicy.atMost(entries.length(), 32);
         for (java.util.Map<String, String> glosses : offline.values()) textCapacity += glosses.size();
         java.util.LinkedHashSet<String> texts = new java.util.LinkedHashSet<>(textCapacity);
         for (int index = 0; entries != null && index < BoundsPolicy.atMost(entries.length(), 32); index++) {
