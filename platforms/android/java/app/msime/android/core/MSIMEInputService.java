@@ -3180,7 +3180,7 @@ public final class MSIMEInputService extends InputMethodService {
         if (connection == null) return;
         if (directEnglishActive()) {
             char output = letterCase.usesUppercase() ? Character.toUpperCase(key) : key;
-            if (isAsciiLetter(output)) {
+            if (TextPolicy.isAsciiLetter(output)) {
                 commitEnglishLiteral(output);
                 if (letterCase.consumeLetter()) {
                     imeLetterRows.rebuildKeyRows();
@@ -3189,11 +3189,11 @@ public final class MSIMEInputService extends InputMethodService {
                 return;
             }
         }
-        if (dedicatedEnglish && !isAsciiLetter(key)) {
+        if (dedicatedEnglish && !TextPolicy.isAsciiLetter(key)) {
             commitEnglishLiteral(key);
             return;
         }
-        if (koreanSchemeActive() && isAsciiLetter(key)) {
+        if (koreanSchemeActive() && TextPolicy.isAsciiLetter(key)) {
             // Shift picks the double consonant or ㅒ ㅖ; the other keys send their lowercase letter, which types the same jamo.
             char input = KoreanKeyboardLayout.input(key, letterCase.usesUppercase());
             if (!character(input, Character.isUpperCase(input))) commitText(String.valueOf(input));
@@ -3203,7 +3203,7 @@ public final class MSIMEInputService extends InputMethodService {
             }
             return;
         }
-        if (entersHelpcode() && isAsciiLetter(key)) {
+        if (entersHelpcode() && TextPolicy.isAsciiLetter(key)) {
             character(Character.toUpperCase(key), true);
             if (letterCase.consumeLetter()) {
                 imeLetterRows.rebuildKeyRows();
@@ -3378,10 +3378,6 @@ public final class MSIMEInputService extends InputMethodService {
         } catch (Exception | LinkageError ignored) {
             clearSmartPunctuationSnapshots();
         }
-    }
-
-    private static boolean isAsciiLetter(int value) {
-        return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z');
     }
 
     private void commitEnglishLiteral(int value) {
@@ -3944,7 +3940,7 @@ public final class MSIMEInputService extends InputMethodService {
             }
             int unicode = event.getUnicodeChar();
             if (unicode >= 32 && unicode <= 126) {
-                if (isAsciiLetter(unicode)) {
+                if (TextPolicy.isAsciiLetter(unicode)) {
                     char output = letterCase.usesUppercase() || event.isShiftPressed()
                         ? Character.toUpperCase((char) unicode) : Character.toLowerCase((char) unicode);
                     commitEnglishLiteral(output);
@@ -4014,7 +4010,7 @@ public final class MSIMEInputService extends InputMethodService {
         if (keyCode == KeyEvent.KEYCODE_SPACE) return command(1) || super.onKeyDown(keyCode, event);
         if (keyCode == KeyEvent.KEYCODE_ENTER) { enter(); return true; }
         int unicode = event.getUnicodeChar();
-        if (dedicatedEnglish && unicode >= 32 && unicode <= 126 && !isAsciiLetter(unicode)) {
+        if (dedicatedEnglish && unicode >= 32 && unicode <= 126 && !TextPolicy.isAsciiLetter(unicode)) {
             commitEnglishLiteral(unicode);
             return true;
         }
