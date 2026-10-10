@@ -71,7 +71,7 @@ public final class CommunityReplyLibrary {
                 throw new IOException("Invalid community library");
             if (!TextPolicy.validUnicode(id) || !TextPolicy.validUnicode(name)
                     || !TextPolicy.validUnicode(prompt) || TextPolicy.hasControl(id)
-                    || TextPolicy.hasControl(name) || hasDisallowedPromptControl(prompt)
+                    || TextPolicy.hasControl(name) || CommunityTextPolicy.hasDisallowedControl(prompt, true)
                     || TextPolicy.utf8Length(id) > MAXIMUM_ID_BYTES
                     || !TextPolicy.withinCodePoints(name, MAXIMUM_NAME_CHARACTERS)
                     || !TextPolicy.withinCodePoints(prompt, MAXIMUM_PROMPT_CHARACTERS))
@@ -79,12 +79,6 @@ public final class CommunityReplyLibrary {
             replies.add(new Template(id, name, prompt));
         }
         return List.copyOf(replies);
-    }
-
-    /** 社区回复提示词遵循发布契约，换行和制表符属于正文内容。 */
-    private static boolean hasDisallowedPromptControl(String value) {
-        return value.codePoints().anyMatch(codePoint -> Character.isISOControl(codePoint)
-            && codePoint != '\n' && codePoint != '\t');
     }
 
     private static final class Parser {
