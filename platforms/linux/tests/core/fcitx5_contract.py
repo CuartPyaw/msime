@@ -33,10 +33,10 @@ packaging = (root / "cmake/packaging.cmake").read_text()
 assert "if(MSIME_ENABLE_FCITX5)" in packaging
 assert "fcitx5 (>= 5.0.20)" in packaging
 # IBus 和 Fcitx5 二选一（#6401）：Fcitx5 只能作为 IBus 的备选出现在 Depends 里。单独写进 Depends 会让 Ubuntu 22.04 整包装不上（#6305），写进 Recommends 会把 Fcitx5 拉进 IBus 系统；IBus 写成硬依赖则把 IBus 拉进 deepin 这类 Fcitx5 系统。dpkg-shlibdeps 从插件推出的 libfcitx5* 由 package-container.sh 重新打包时去掉。
-assert 'set(MSIME_DEBIAN_INPUT_FRAMEWORK "ibus (>= 1.5.20) | fcitx5 (>= 5.0.20)")' in packaging
+assert 'set(MSIME_DEBIAN_INPUT_FRAMEWORK "ibus (>= ${MSIME_IBUS_MIN_VERSION}) | fcitx5 (>= 5.0.20)")' in packaging
 assert 'set(CPACK_DEBIAN_PACKAGE_DEPENDS "${MSIME_DEBIAN_INPUT_FRAMEWORK}, ' in packaging
 assert not re.search(r"CPACK_DEBIAN_PACKAGE_RECOMMENDS[^\n]*fcitx5", packaging)
-assert '"(ibus >= 1.5.20 or fcitx5 >= 5.0.20), ' in packaging
+assert '"(ibus >= ${MSIME_IBUS_MIN_VERSION} or fcitx5 >= 5.0.20), ' in packaging
 assert "onnxruntime|Fcitx5[A-Za-z]+)" in packaging
 package_container = (root / "package-container.sh").read_text()
 assert 'sed -E -i "/^Depends:/s/, libfcitx5' in package_container
@@ -624,5 +624,26 @@ reset = body(source, "  void resetSessions() {", "\n  }\n")
 assert "candidate_theme_applied_.clear();" in reset and "candidate_theme_attempt_.clear();" in reset
 assert "syncCandidatePanelTheme(false);" in body(source, "  void refreshProviderSockets() {", "\n  }\n")
 assert 'fcitx::readAsIni(config, "conf/classicui.conf");' in source
+
+# 整句改字：两个入口都按 core/InputSchemes.h 的同一条 edits_sentence 决定方向键。全拼和双拼的左右键发改字命令（引擎进不了改字时自己退回字母光标），Ctrl+左右一个字母一个字母地编辑拼音，其他方案照旧按分段；改字时行内画 conversion_preedit 给出的整句并显式放光标。
+assert "edits_sentence(view_) ? MSIME_CONVERSION_LEFT : MSIME_MOVE_LEFT" in source
+assert "edits_sentence(view_) ? MSIME_CONVERSION_RIGHT : MSIME_MOVE_RIGHT" in source
+assert "sentence ? MSIME_MOVE_LEFT : MSIME_MOVE_LEFT_SEGMENT" in source
+assert "sentence ? MSIME_MOVE_RIGHT : MSIME_MOVE_RIGHT_SEGMENT" in source
+conversion_render = body(source, "  } else if (const auto conversion = msime::linux_host::conversion_preedit(view_); conversion.active) {", "  } else if (")
+assert "preedit.setCursor(static_cast<int>(conversion.caret_bytes));" in conversion_render
+assert "fcitx::TextFormatFlag::HighLight" in conversion_render
+ibus = (root / "src/core/ClientEngine.cpp").read_text()
+assert "edits_sentence(s.view) ? MSIME_CONVERSION_LEFT : MSIME_MOVE_LEFT" in ibus
+assert "edits_sentence(s.view) ? MSIME_CONVERSION_RIGHT : MSIME_MOVE_RIGHT" in ibus
+assert "(sentence ? (left ? MSIME_MOVE_LEFT : MSIME_MOVE_RIGHT)" in ibus
+assert "msime::linux_host::conversion_preedit(view)" in ibus
+# 候选列表打开（韩文汉字列表、注音列表）时，两个入口都与 Windows 的 korean_hanja_key 一样让四个方向键移高亮：←↑ 上一个、→↓ 下一个，不看导航开关。
+list_arrows = body(source, "  if (composing && openedList &&\n", "\n  }\n")
+assert "case FcitxKey_Left: case FcitxKey_KP_Left: case FcitxKey_Up: case FcitxKey_KP_Up:\n      return command(MSIME_PREVIOUS_CANDIDATE);" in list_arrows
+assert "case FcitxKey_Right: case FcitxKey_KP_Right: case FcitxKey_Down: case FcitxKey_KP_Down:\n      return command(MSIME_NEXT_CANDIDATE);" in list_arrows
+ibus_list_arrows = body(ibus, "    if (opened_list && modifiers == 0 &&\n", "\n    }\n")
+assert "backwards ? MSIME_PREVIOUS_CANDIDATE : MSIME_NEXT_CANDIDATE" in ibus_list_arrows
+assert "key == IBUS_Up || key == IBUS_KP_Up;" in ibus_list_arrows
 
 print("Fcitx5 addon metadata passed")

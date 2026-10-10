@@ -57,5 +57,6 @@ pub use text::{
 };
 pub mod translation;
 pub mod typing_statistics;
+pub mod update_check;
 pub mod vocabulary;
 pub mod voice;

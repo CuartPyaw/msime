@@ -11,7 +11,7 @@ use crate::pinyin::active_helpcode::{
 use crate::pinyin::autocorrect::{
     autocorrect_cut_detail, looks_like_syllable_with_jianpin_tail, AutocorrectCutSegment,
 };
-use crate::pinyin::segment::{is_complete_pinyin_input, join_segments, split_segments};
+use crate::pinyin::segment::is_complete_pinyin_input;
 use crate::shuangpin::query::{
     detect_active_double_helpcode_length, effective_input_length, is_complete_input,
     raw_length_for_effective_prefix, remove_manual_delimiters,
@@ -147,22 +147,27 @@ fn active_shuangpin_helpcode_length(request: &QueryRequest, profile: &ShuangpinP
     0
 }
 
-/// The canonical reading of a selected word, if it has one complete syllable per character (input_session_composition.cpp:76-96).
+/// 所选词的规范读音：撇号段数等于字符数，且每段可完整切分（input_session_composition.cpp:76-96）。
 pub(super) fn normalize_canonical_pinyin_for_word(pinyin: &str, word: &str) -> String {
+    if canonical_pinyin_is_valid_for_word(pinyin, word) {
+        pinyin.to_owned()
+    } else {
+        String::new()
+    }
+}
+
+// 只读调用直接复用校验结论；需要保存读音的调用仍由拥有型接口复制结果。
+fn canonical_pinyin_is_valid_for_word(pinyin: &str, word: &str) -> bool {
     if pinyin.is_empty() {
-        return String::new();
+        return false;
     }
-    let segments = split_segments(pinyin);
-    if segments.is_empty() || segments.len() != count_han_chars(word) {
-        return String::new();
+    let segment_count = pinyin.bytes().filter(|&byte| byte == b'\'').count() + 1;
+    if segment_count != count_han_chars(word) {
+        return false;
     }
-    if segments
-        .iter()
+    !pinyin
+        .split('\'')
         .any(|segment| segment.is_empty() || !is_complete_pinyin_input(segment))
-    {
-        return String::new();
-    }
-    join_segments(&segments)
 }
 
 /// An unknown reading anywhere makes the whole phrase unstorable, so an empty suffix empties the result.
@@ -470,19 +475,18 @@ impl InputSession {
                 can_store: false,
             };
         }
-        let selected_canonical = normalize_canonical_pinyin_for_word(
+        let selected_storable = canonical_pinyin_is_valid_for_word(
             &transition.selected_canonical_pinyin,
             selected_word,
         );
         let prior_parts_storable = current_word.is_empty() || !current_pinyin.is_empty();
-        let pinyin = if prior_parts_storable && !selected_canonical.is_empty() {
-            append_canonical_pinyin(current_pinyin, &selected_canonical)
+        let pinyin = if prior_parts_storable && selected_storable {
+            append_canonical_pinyin(current_pinyin, &transition.selected_canonical_pinyin)
         } else {
             String::new()
         };
         let completed = !transition.continues_composition;
-        let can_store =
-            completed && !normalize_canonical_pinyin_for_word(&pinyin, &word).is_empty();
+        let can_store = completed && canonical_pinyin_is_valid_for_word(&pinyin, &word);
         let mut preedit =
             String::with_capacity(word.len() + transition.current_segmentation_with_cases.len());
         preedit.push_str(&word);
@@ -613,9 +617,10 @@ impl InputSession {
                         .command_title(&item.pinyin)
                         .unwrap_or_default()
                         .to_owned(),
-                    LocalInputMode::Mention => {
-                        self.queries.mention_annotation(&item.word).to_owned()
-                    }
+                    LocalInputMode::Mention => self
+                        .queries
+                        .mention_annotation(&item.word, &item.pinyin)
+                        .to_owned(),
                     _ => String::new(),
                 })
                 .collect();
@@ -700,6 +705,14 @@ impl InputSession {
             || !self.wubi_candidates_are_native()
     }
 }
+
+#[cfg(test)]
+#[path = "composition/canonical_reading_tests.rs"]
+mod canonical_reading_tests;
+
+#[cfg(test)]
+#[path = "composition/creating_word_reading_tests.rs"]
+mod creating_word_reading_tests;
 
 #[cfg(test)]
 mod tests {
@@ -853,7 +866,7 @@ mod tests {
     #[test]
     fn helpcode_length_matches_the_composition_base() {
         let profile =
-            crate::shuangpin::profile::profile(crate::types::ShuangpinProfileKind::Xiaohe);
+            crate::shuangpin::profile::profile(crate::types::ShuangpinProfileKind::Xiaohe).unwrap();
         for (raw, raw_with_cases, enabled) in [
             ("nihcAB", "nihcAB", true),
             ("uiu", "uiu", true),
@@ -882,7 +895,7 @@ mod tests {
             ..QueryRequest::default()
         };
         let profile =
-            crate::shuangpin::profile::profile(crate::types::ShuangpinProfileKind::Xiaohe);
+            crate::shuangpin::profile::profile(crate::types::ShuangpinProfileKind::Xiaohe).unwrap();
         let base = resolve_shuangpin_composition_base(&request, profile);
         assert!(matches!(base.raw_input, std::borrow::Cow::Borrowed(_)));
         assert!(matches!(

@@ -31,6 +31,9 @@ const STATEMENT_CACHE_CAPACITY: usize = 512;
 // 错误纠正一次最多提交 96 个键；短批次用线性扫描可以省掉临时哈希表分配。
 const SMALL_QUERY_KEY_BATCH: usize = 64;
 
+// 普通九宫格简拼最多取 64 行，小页先放栈上，较大扫描继续使用原堆页预算。
+const INLINE_JIANPIN_ROWS: usize = 64;
+
 /// The C++ returned an error code without text for these writes (QD:1502-1536); callers map the failure to their own diagnostic.
 const DICTIONARY_CLOSED: &str = "Pinyin dictionary is not open";
 const INVALID_DICTIONARY_KEY: &str = "Invalid pinyin dictionary key";
@@ -292,7 +295,8 @@ impl PinyinDatabase {
                     }
                 } else {
                     let key = row.key.clone();
-                    let mut slot = Vec::with_capacity(per_key_limit);
+                    let mut slot =
+                        query_capacity(per_key_limit).map_or_else(Vec::new, Vec::with_capacity);
                     slot.push(row);
                     result.insert(key, slot);
                 }
@@ -303,7 +307,18 @@ impl PinyinDatabase {
 
     /// 按简拼查词：`codes` 是同样长度的简拼（每个音节的首字母，`mt`、`cflm`），一个字母一个音节，词条的 `jp` 等于其中任何一个就算。按首字母分表，每张表一条 `jp IN (...)` 语句（`jp` 有索引），合起来按权重从高到低取前 `limit` 行；同一个词按不同的码出现时只留第一行。九宫格用它把每个数字当成一个音节的声母来查（#5640）。
     pub fn query_jianpin_codes(&self, codes: &[String], limit: usize) -> Vec<DictRow> {
-        if self.connection.is_none() || codes.is_empty() || limit == 0 {
+        let mut rows = self.query_jianpin_codes_per_table(codes, limit);
+        rows.truncate(limit);
+        rows
+    }
+
+    /// 同 `query_jianpin_codes`，但只截每张首字母表（各取权重最高的 `table_limit` 行），合起来按权重排、去重之后不再截断，最多是表数乘 `table_limit` 行。出货词库里大量词的权重相同（默认的 100），合起来再截时同权重的行按表的先后取舍，排在后面的表里的词会被整批截掉；九宫格要从中找出用户用过的词，所以先拿到每张表各自的前 `table_limit` 行（#6185）。
+    pub fn query_jianpin_codes_per_table(
+        &self,
+        codes: &[String],
+        table_limit: usize,
+    ) -> Vec<DictRow> {
+        if self.connection.is_none() || codes.is_empty() || table_limit == 0 {
             return Vec::new();
         }
         let mut codes_by_table: BTreeMap<String, Vec<&str>> = BTreeMap::new();
@@ -319,14 +334,39 @@ impl PinyinDatabase {
                 table_codes.push(code.as_str());
             }
         }
-        let mut rows = Vec::with_capacity(limit.min(128));
+        let mut rows = Vec::new();
         for (table, table_codes) in &codes_by_table {
-            let sql = jianpin_batch_sql(table, table_codes.len(), sql_limit(limit));
-            rows.extend(self.rows(&sql, params_from_iter(table_codes), query_capacity(limit)));
+            let sql = jianpin_batch_sql(table, table_codes.len(), sql_limit(table_limit));
+            let mut inline = [const { None }; INLINE_JIANPIN_ROWS];
+            let mut inline_len = 0;
+            let mut overflow = Vec::new();
+            self.visit_rows(&sql, params_from_iter(table_codes), |item| {
+                if inline_len < INLINE_JIANPIN_ROWS {
+                    inline[inline_len] = Some(item);
+                    inline_len += 1;
+                } else {
+                    if overflow.is_empty() {
+                        overflow.reserve_exact(query_capacity(table_limit).unwrap_or(128));
+                        overflow.extend(inline.iter_mut().map(|row| row.take().unwrap()));
+                    }
+                    overflow.push(item);
+                }
+            });
+            if inline_len == 0 {
+                continue;
+            }
+            if rows.capacity() == 0 {
+                rows.reserve_exact(table_limit.min(128));
+            }
+            // 按实际页长一次追加，保持不均匀多表结果的原扩容行为。
+            if overflow.is_empty() {
+                rows.extend(inline.into_iter().take(inline_len).map(Option::unwrap));
+            } else {
+                rows.extend(overflow);
+            }
         }
         rows.sort_by_key(|row| std::cmp::Reverse(row.weight));
         deduplicate_by_value(&mut rows);
-        rows.truncate(limit);
         rows
     }
 
@@ -459,20 +499,21 @@ impl PinyinDatabase {
         if needs_mixed_jianpin_query(segments, source) {
             let scan_limit_value = build_mixed_jianpin_scan_limit(limit);
             let scan_limit = sql_limit(scan_limit_value);
-            // The scan has a minimum page of 128 rows; use it as a bounded
-            // initial buffer without turning an unbounded caller limit into
-            // an enormous allocation.
-            let mut rows = Vec::with_capacity(limit.min(128));
-            rows.extend(
-                self.rows(
-                    &jianpin_sql(&table, scan_limit),
-                    [jp.as_str()],
-                    query_capacity(scan_limit_value),
-                )
-                .into_iter()
-                .filter(|row| matches_mixed_segments(&row.key, segments, source))
-                .take(limit),
-            );
+            // 过滤扫描行时直接写入结果；首次命中才按原提示预留，避免整页临时缓冲。
+            let mut rows = Vec::new();
+            self.visit_rows_until(&jianpin_sql(&table, scan_limit), [jp.as_str()], |row| {
+                if rows.len() >= limit {
+                    return false;
+                }
+                if !matches_mixed_segments(&row.key, segments, source) {
+                    return true;
+                }
+                if rows.capacity() == 0 {
+                    rows.reserve_exact(limit.min(128));
+                }
+                rows.push(row);
+                rows.len() < limit
+            });
             if !rows.is_empty() {
                 return rows;
             }
@@ -501,35 +542,57 @@ impl PinyinDatabase {
         )
     }
 
-    /// Runs a `"key", "value", "weight"` statement. A statement that fails to prepare (the table does not exist) yields no rows, and a failed step ends the rows read so far, exactly as the reference's `while (sqlite3_step(...) == SQLITE_ROW)` loops did (QQ:584-605).
+    /// 执行 `key`、`value`、`weight` 查询；缺表返回空页，步进或转换失败时保留已读取的行。
     fn rows(
         &self,
         sql: &str,
         params: impl rusqlite::Params,
         capacity: Option<usize>,
     ) -> Vec<DictRow> {
+        let mut result = Vec::new();
+        self.visit_rows(sql, params, |item| {
+            if let (Some(capacity), 0) = (capacity, result.capacity()) {
+                result.reserve_exact(capacity);
+            }
+            result.push(item);
+        });
+        result
+    }
+
+    /// 按 SQLite 顺序交付成功转换的行，读取失败时结束本页。
+    fn visit_rows(&self, sql: &str, params: impl rusqlite::Params, mut visit: impl FnMut(DictRow)) {
+        self.visit_rows_until(sql, params, |item| {
+            visit(item);
+            true
+        });
+    }
+
+    /// 按 SQLite 顺序交付成功转换的行，读取失败或回调要求停止时结束本页。
+    fn visit_rows_until(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params,
+        mut visit: impl FnMut(DictRow) -> bool,
+    ) {
         let Some(connection) = &self.connection else {
-            return Vec::new();
+            return;
         };
         let Ok(mut statement) = connection.prepare_cached(sql) else {
-            return Vec::new();
+            return;
         };
         let Ok(mut rows) = statement.query(params) else {
-            return Vec::new();
+            return;
         };
-        let mut result = Vec::new();
         while let Ok(Some(row)) = rows.next() {
             match dict_row(row) {
                 Ok(item) => {
-                    if let (Some(capacity), 0) = (capacity, result.capacity()) {
-                        result.reserve_exact(capacity);
+                    if !visit(item) {
+                        break;
                     }
-                    result.push(item);
                 }
                 Err(_) => break,
             }
         }
-        result
     }
 }
 
@@ -1181,6 +1244,13 @@ mod tests {
         );
         assert!(database.query_jianpin_codes(&codes, 0).is_empty());
         assert!(database.query_jianpin_codes(&[], 10).is_empty());
+
+        // 只截每张表：n 表的前两行和 s 表的前两行都在，合起来不再截到两行（#6185）。
+        assert_eq!(
+            values(&database.query_jianpin_codes_per_table(&codes, 2)),
+            ["你好", "时间", "拟好", "世界"]
+        );
+        assert!(database.query_jianpin_codes_per_table(&codes, 0).is_empty());
     }
 
     #[test]
@@ -1563,5 +1633,17 @@ mod lattice_span_key_plan_tests;
 mod aggregate_page_reuse_tests;
 
 #[cfg(test)]
+#[path = "pinyin/per_key_unbounded_slot_tests.rs"]
+mod per_key_unbounded_slot_tests;
+
+#[cfg(test)]
 #[path = "pinyin/word_key_plan_tests.rs"]
 mod word_key_plan_tests;
+
+#[cfg(test)]
+#[path = "pinyin/jianpin_inline_page_tests.rs"]
+mod jianpin_inline_page_tests;
+
+#[cfg(test)]
+#[path = "pinyin/mixed_jianpin_filter_tests.rs"]
+mod mixed_jianpin_filter_tests;

@@ -12,14 +12,17 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import org.json.JSONObject;
 
-/** Device acceptance for Apple-compatible keyboard height adjustment and persistence. */
+/** 键盘高度调整与持久化（与 Apple 一致）、键区下的底部留白，以及底行与字母键同高的设备验收。 */
 public final class KeyboardHeightDeviceSmoke extends DeviceSmoke {
     /** {@code AndroidLocalSettings.FILE_NAME} 与 {@code KEYBOARD_HEIGHT_ADJUSTMENT}；设备套件不编译宿主的设置类，这里写同样的字面值。 */
     private static final String LOCAL_SETTINGS_FILE = "android-settings.json";
     private static final String HEIGHT_SETTING = "platform.android.keyboard_height_adjustment";
+    /** {@code AndroidLocalSettings.BOTTOM_BAR} 与 {@code BOTTOM_PADDING}，同样写字面值。 */
+    private static final String BOTTOM_BAR_SETTING = "platform.android.bottom_bar";
+    private static final String BOTTOM_PADDING_SETTING = "platform.android.bottom_padding";
 
     @Override protected String successDescription() {
-        return "keyboard height live preview, composition preservation, persistence and restart";
+        return "keyboard height live preview, composition preservation, persistence, restart, bottom padding and a bottom row as tall as the letter rows";
     }
 
     @Override protected void runChecks() throws Exception {
@@ -114,6 +117,39 @@ public final class KeyboardHeightDeviceSmoke extends DeviceSmoke {
             int restarted = keyHeight("n");
             if (Math.abs(restarted - resetHeight) > 2)
                 throw new AssertionError("Persisted height changed after restart");
+
+            // 底部留白（#6392）：键区下面垫 40 dp 空白，底行键整体抬高同样的距离，键本身不变高。两次都关掉键盘底栏：底栏画着时留白不叠加，手势导航的 AVD 上基线会不同。
+            stage = "bottom padding lifts the bottom row";
+            Rect unpadded = settledKeyBounds(localSettings, new JSONObject().put(BOTTOM_BAR_SETTING, false));
+            Rect padded = settledKeyBounds(localSettings, new JSONObject().put(BOTTOM_BAR_SETTING, false)
+                .put(BOTTOM_PADDING_SETTING, true));
+            int lift = unpadded.bottom - padded.bottom;
+            int expectedLift = Math.round(40 * getTargetContext().getResources().getDisplayMetrics().density);
+            if (Math.abs(lift - expectedLift) > 2)
+                throw new AssertionError("Bottom padding lifted the keys by " + lift + " px, expected " + expectedLift);
+            if (Math.abs(padded.height() - unpadded.height()) > 2)
+                throw new AssertionError("Bottom padding changed the key height: "
+                    + unpadded.height() + " -> " + padded.height());
+
+            // 底行与字母键同高（#6354、#6472）：默认、75% 和 130% 时空格键都和「n」一样高——底行和三行键一起均分高度调整，两者最多差 1 dp。默认高度时从「q」的上沿到空格的下沿是四行 52 dp 加三份行距（229 dp），与原来三行 56 dp 加 39 dp 的底栏键帽（228 dp）基本相同。同样关掉键盘底栏，排除手势导航 AVD 上的差异。
+            stage = "bottom row matches the letter rows";
+            float density = getTargetContext().getResources().getDisplayMetrics().density;
+            int tolerance = Math.round(density) + 2;
+            for (int adjustment : new int[] {0, -46, 55}) {
+                Rect letter = settledKeyBounds(localSettings, new JSONObject().put(BOTTOM_BAR_SETTING, false)
+                    .put(HEIGHT_SETTING, adjustment));
+                Rect space = keyBounds("空格");
+                if (Math.abs(space.height() - letter.height()) > tolerance)
+                    throw new AssertionError("Bottom row is not as tall as the letter rows at " + adjustment
+                        + " dp: space " + space.height() + " vs n " + letter.height());
+                if (adjustment == 0) {
+                    int span = space.bottom - keyBounds("q").top;
+                    int expected = Math.round(229 * density);
+                    if (Math.abs(span - expected) > Math.round(2 * density) + 2)
+                        throw new AssertionError("Default key area changed: " + span + " px from q to space, expected "
+                            + expected);
+                }
+            }
         } finally {
             shell("am start -W -n app.msime.android/app.msime.android.home.HomeActivity");
             if (original == null) Files.deleteIfExists(preferences.toPath());
@@ -133,6 +169,24 @@ public final class KeyboardHeightDeviceSmoke extends DeviceSmoke {
         shell("ime enable app.msime.android/.MSIMEInputService");
         shell("ime set app.msime.android/.MSIMEInputService");
         SystemClock.sleep(1000);
+    }
+
+    /** 写入这份本地设置、重新绑定输入法后，等键盘停稳再量「n」键在屏幕上的位置：键盘弹出有动画，动画中量到的位置是过渡值。 */
+    private Rect settledKeyBounds(File localSettings, JSONObject settings) throws Exception {
+        publish(localSettings, new JSONObject().put("version", 1).put("settings", settings).toString()
+            .getBytes(StandardCharsets.UTF_8));
+        rebindInputMethod();
+        openEditor();
+        Rect bounds = new Rect();
+        awaitStableBounds(key("n")).getBoundsInScreen(bounds);
+        return bounds;
+    }
+
+    /** 键盘已停稳时量一个键在屏幕上的位置。 */
+    private Rect keyBounds(String label) {
+        Rect bounds = new Rect();
+        await(key(label)).getBoundsInScreen(bounds);
+        return bounds;
     }
 
     private int keyHeight(String label) {

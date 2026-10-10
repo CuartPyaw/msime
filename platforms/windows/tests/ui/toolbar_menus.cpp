@@ -119,15 +119,17 @@ int main() {
       require(utility[find(utility, C::OpenAbout)].label == "关于水杉输入法…");
       require(utility[find(utility, C::OpenFeedback)].label == "问题反馈…");
       require(utility[find(utility, C::HideFloatingToolbar)].label == "隐藏悬浮状态栏");
-      // 使用帮助和问题反馈走设置窗口的路由，两者都落到「帮助与反馈」页；系统表情、检查更新、官网和隐藏工具栏由 Server 自己处理，不经设置窗口或共享应用的路由。
+      // 使用帮助和问题反馈走设置窗口的路由，两者都落到「帮助与反馈」页；检查更新和「关于」一样打开设置窗口的「关于」页，检查在那一页里完成；系统表情、官网和隐藏工具栏由 Server 自己处理，不经设置窗口或共享应用的路由。
       const auto help = shell_surface_request(C::OpenHelp);
       require(help && help->panel.empty() && help->page == "help");
       require(shell_route_argument(*help) == L"settings:help");
       const auto feedback = shell_surface_request(C::OpenFeedback);
       require(feedback && feedback->panel.empty() && feedback->page == "feedback");
       require(shell_route_argument(*feedback) == L"settings:feedback");
-      for (const auto command : {C::OpenSystemEmoji, C::CheckForUpdates, C::OpenWebsite,
-                                 C::HideFloatingToolbar})
+      const auto updates = shell_surface_request(C::CheckForUpdates);
+      require(updates && updates->panel.empty() && updates->page == "about");
+      require(shell_route_argument(*updates) == L"settings:about");
+      for (const auto command : {C::OpenSystemEmoji, C::OpenWebsite, C::HideFloatingToolbar})
         require(!shell_surface_request(command));
       require(tray_menu_geometry(utility, TrayMenuMetrics{}).rows.size() == utility.size());
       auto bare = all;

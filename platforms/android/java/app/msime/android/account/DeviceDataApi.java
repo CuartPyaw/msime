@@ -109,10 +109,24 @@ public final class DeviceDataApi {
         this.downloader = DeviceDataApi::httpDownload;
     }
 
+    /** A device list is owned by the login that supplied it, including its later revoke action. */
+    public DeviceDataApi(Context context, String expectedSessionId) {
+        Context application = context.getApplicationContext();
+        if (expectedSessionId == null || expectedSessionId.isEmpty())
+            throw new IllegalArgumentException("account session id required");
+        this.account = CloudApi.accountTokens(application, expectedSessionId);
+        this.cloud = new CloudApi(application, this.account);
+        this.downloader = DeviceDataApi::httpDownload;
+    }
+
     public DeviceDataApi(CloudApi cloud, CloudApi.Tokens account, Downloader downloader) {
         this.cloud = cloud;
         this.account = account;
         this.downloader = downloader;
+    }
+
+    public String currentAccountSessionId() throws CloudApi.Failure {
+        return cloud.currentAccountSessionId();
     }
 
     // ---- 个人资料 ----
@@ -368,7 +382,7 @@ public final class DeviceDataApi {
         if (value == null || value.isEmpty()) return 0L;
         try {
             return Instant.parse(value).toEpochMilli();
-        } catch (DateTimeParseException malformed) {
+        } catch (DateTimeParseException | ArithmeticException malformed) {
             return 0L;
         }
     }

@@ -1,4 +1,5 @@
 #include "../../../shared/contracts/windows_ipc.h"
+#include "../../../common/HostApiString.h"
 #include "AuxListener.h"
 #include "VoiceTheme.h"
 #include "CandidateAppearance.h"
@@ -11,6 +12,7 @@
 #include "ComponentFailure.h"
 #include "DiagnosticListener.h"
 #include "DedicatedEnglishMailbox.h"
+#include "EditPolicy.h"
 #include "DiagnosticLog.h"
 #include "FloatingToolbarVisibilityPolicy.h"
 #include "FirstRun.h"
@@ -109,10 +111,9 @@ msime::windows::CandidateThemeResolution
 resolve_theme(const nlohmann::json &request) {
   try {
     const auto body = request.dump();
-    std::unique_ptr<char, decltype(&msime_client_string_free)> owned(
+    auto owned = msime::host_api::own_string(
         msime_client_resolve_theme(
-            reinterpret_cast<const uint8_t *>(body.data()), body.size()),
-        msime_client_string_free);
+            reinterpret_cast<const uint8_t *>(body.data()), body.size()));
     if (!owned)
       return {};
     const auto document = nlohmann::json::parse(owned.get(), nullptr, false);
@@ -129,8 +130,7 @@ resolve_theme(const nlohmann::json &request) {
 // The global theme picker's ids and titles. The catalog is built into the shared layer and cannot change while the Server runs, so it is read once; an unreadable answer leaves the tray's 主题 row without a title.
 nlohmann::json theme_catalog() {
   try {
-    std::unique_ptr<char, decltype(&msime_client_string_free)> owned(
-        msime_client_theme_catalog(), msime_client_string_free);
+    auto owned = msime::host_api::own_string(msime_client_theme_catalog());
     if (owned)
       return nlohmann::json::parse(owned.get(), nullptr, false);
   } catch (const std::exception &) {
@@ -144,11 +144,10 @@ resolve_skin_assets(const std::filesystem::path &root, const std::string &id) {
     return {};
   try {
     const auto directory = root.u8string();
-    std::unique_ptr<char, decltype(&msime_client_string_free)> owned(
+    auto owned = msime::host_api::own_string(
         msime_client_skin_catalog(
             reinterpret_cast<const uint8_t *>(directory.data()),
-            directory.size()),
-        msime_client_string_free);
+            directory.size()));
     if (owned) {
       const auto catalog = nlohmann::json::parse(owned.get(), nullptr, false);
       if (!catalog.is_discarded() && catalog.value("ok", false))
@@ -277,10 +276,9 @@ bool persist_traditional_output(const std::filesystem::path &directory,
                                 std::optional<bool> desired = std::nullopt) {
   try {
     const auto root = directory.u8string();
-    std::unique_ptr<char, decltype(&msime_client_string_free)> loaded(
+    auto loaded = msime::host_api::own_string(
         msime_client_load_preferences(
-            reinterpret_cast<const uint8_t *>(root.data()), root.size()),
-        msime_client_string_free);
+            reinterpret_cast<const uint8_t *>(root.data()), root.size()));
     if (!loaded)
       return false;
     const auto response = nlohmann::json::parse(loaded.get());
@@ -297,13 +295,12 @@ bool persist_traditional_output(const std::filesystem::path &directory,
     }
     preferences["traditional_chinese_output"] = next;
     const auto serialized = snapshot.dump();
-    std::unique_ptr<char, decltype(&msime_client_string_free)> saved(
+    auto saved = msime::host_api::own_string(
         msime_client_save_preferences(
             reinterpret_cast<const uint8_t *>(root.data()), root.size(),
             revision,
             reinterpret_cast<const uint8_t *>(serialized.data()),
-            serialized.size()),
-        msime_client_string_free);
+            serialized.size()));
     if (!saved)
       return false;
     const auto saved_response = nlohmann::json::parse(saved.get());
@@ -320,10 +317,9 @@ bool persist_traditional_output(const std::filesystem::path &directory,
 void record_installer_cloud_choice(const std::filesystem::path &directory, bool enabled) {
   try {
     const auto root = directory.u8string();
-    std::unique_ptr<char, decltype(&msime_client_string_free)> loaded(
+    auto loaded = msime::host_api::own_string(
         msime_client_load_preferences(
-            reinterpret_cast<const uint8_t *>(root.data()), root.size()),
-        msime_client_string_free);
+            reinterpret_cast<const uint8_t *>(root.data()), root.size()));
     if (!loaded)
       return;
     const auto response = nlohmann::json::parse(loaded.get());
@@ -333,13 +329,12 @@ void record_installer_cloud_choice(const std::filesystem::path &directory, bool 
     const auto revision = snapshot.at("revision").get<uint64_t>();
     snapshot.at("preferences")["cloud_candidates"] = enabled;
     const auto serialized = snapshot.dump();
-    std::unique_ptr<char, decltype(&msime_client_string_free)> saved(
+    auto saved = msime::host_api::own_string(
         msime_client_save_preferences(
             reinterpret_cast<const uint8_t *>(root.data()), root.size(),
             revision,
             reinterpret_cast<const uint8_t *>(serialized.data()),
-            serialized.size()),
-        msime_client_string_free);
+            serialized.size()));
   } catch (...) {
   }
 }
@@ -350,10 +345,9 @@ std::optional<nlohmann::json>
 load_preference_block(const std::filesystem::path &directory) {
   try {
     const auto root = directory.u8string();
-    std::unique_ptr<char, decltype(&msime_client_string_free)> loaded(
+    auto loaded = msime::host_api::own_string(
         msime_client_load_preferences(
-            reinterpret_cast<const uint8_t *>(root.data()), root.size()),
-        msime_client_string_free);
+            reinterpret_cast<const uint8_t *>(root.data()), root.size()));
     if (!loaded)
       return std::nullopt;
     const auto response = nlohmann::json::parse(loaded.get());
@@ -389,10 +383,9 @@ bool toggle_stored_flag(const std::filesystem::path &directory,
                         bool &result) {
   try {
     const auto root = directory.u8string();
-    std::unique_ptr<char, decltype(&msime_client_string_free)> loaded(
+    auto loaded = msime::host_api::own_string(
         msime_client_load_preferences(
-            reinterpret_cast<const uint8_t *>(root.data()), root.size()),
-        msime_client_string_free);
+            reinterpret_cast<const uint8_t *>(root.data()), root.size()));
     if (!loaded)
       return false;
     const auto response = nlohmann::json::parse(loaded.get());
@@ -412,12 +405,11 @@ bool toggle_stored_flag(const std::filesystem::path &directory,
       preferences[field] = !current;
     }
     const auto serialized = snapshot.dump();
-    std::unique_ptr<char, decltype(&msime_client_string_free)> saved(
+    auto saved = msime::host_api::own_string(
         msime_client_save_preferences(
             reinterpret_cast<const uint8_t *>(root.data()), root.size(),
             revision, reinterpret_cast<const uint8_t *>(serialized.data()),
-            serialized.size()),
-        msime_client_string_free);
+            serialized.size()));
     if (!saved)
       return false;
     const auto saved_response = nlohmann::json::parse(saved.get());
@@ -435,10 +427,9 @@ bool store_input_scheme(const std::filesystem::path &directory,
                         const std::string &scheme) {
   try {
     const auto root = directory.u8string();
-    std::unique_ptr<char, decltype(&msime_client_string_free)> loaded(
+    auto loaded = msime::host_api::own_string(
         msime_client_load_preferences(
-            reinterpret_cast<const uint8_t *>(root.data()), root.size()),
-        msime_client_string_free);
+            reinterpret_cast<const uint8_t *>(root.data()), root.size()));
     if (!loaded)
       return false;
     const auto response = nlohmann::json::parse(loaded.get());
@@ -460,12 +451,11 @@ bool store_input_scheme(const std::filesystem::path &directory,
       preferences["last_chinese_scheme"] = current;
     preferences["scheme"] = scheme;
     const auto serialized = snapshot.dump();
-    std::unique_ptr<char, decltype(&msime_client_string_free)> saved(
+    auto saved = msime::host_api::own_string(
         msime_client_save_preferences(
             reinterpret_cast<const uint8_t *>(root.data()), root.size(),
             revision, reinterpret_cast<const uint8_t *>(serialized.data()),
-            serialized.size()),
-        msime_client_string_free);
+            serialized.size()));
     if (!saved)
       return false;
     const auto saved_response = nlohmann::json::parse(saved.get());
@@ -499,10 +489,8 @@ bool store_global_theme(const std::filesystem::path &directory,
                         const std::string &theme) {
   try {
     const auto root = directory.u8string();
-    std::unique_ptr<char, decltype(&msime_client_string_free)> loaded(
-        msime_client_load_preferences(
-            reinterpret_cast<const uint8_t *>(root.data()), root.size()),
-        msime_client_string_free);
+    auto loaded = msime::host_api::own_string(msime_client_load_preferences(
+        reinterpret_cast<const uint8_t *>(root.data()), root.size()));
     if (!loaded)
       return false;
     const auto response = nlohmann::json::parse(loaded.get());
@@ -516,12 +504,9 @@ bool store_global_theme(const std::filesystem::path &directory,
       return true;
     preferences["global_theme"] = theme;
     const auto serialized = snapshot.dump();
-    std::unique_ptr<char, decltype(&msime_client_string_free)> saved(
-        msime_client_save_preferences(
-            reinterpret_cast<const uint8_t *>(root.data()), root.size(),
-            revision, reinterpret_cast<const uint8_t *>(serialized.data()),
-            serialized.size()),
-        msime_client_string_free);
+    auto saved = msime::host_api::own_string(msime_client_save_preferences(
+        reinterpret_cast<const uint8_t *>(root.data()), root.size(), revision,
+        reinterpret_cast<const uint8_t *>(serialized.data()), serialized.size()));
     if (!saved)
       return false;
     const auto saved_response = nlohmann::json::parse(saved.get());
@@ -598,9 +583,9 @@ msime::windows::TsfLocalConfig tsf_local_config(
   config.smart_punctuation_direct_letter =
       preferences.value("smart_punctuation_direct_letter", false);
   config.paired_punctuation = preferences.value("paired_punctuation", true);
+  // 不只看方案名：自定义方案把韵母或零声母编码放在 `;` 上时，TIP 同样要把 `;` 当输入键。
   config.microsoft_shuangpin =
-      scheme == "shuangpin" &&
-      preferences.value("shuangpin_profile", std::string("xiaohe")) == "microsoft";
+      scheme == "shuangpin" && msime::windows::shuangpin_uses_semicolon_key(preferences);
   config.input_mode = msime::windows::scheme::input_mode(scheme);
   config.tsf_diagnostic_log =
       preferences.value("diagnostic_log", nlohmann::json::object())
@@ -615,6 +600,8 @@ msime::windows::TsfLocalConfig tsf_local_config(
       local_modes.value("expression", false),
       local_modes.value("command", false),
       local_modes.value("mention", false));
+  // 与按键路由读同一个字段（InputState 经 preference_navigation），TIP 和 Server 对这两个键的归类才一致。
+  config.second_third_candidate = msime::windows::preference_second_third_candidate(preferences);
   return config;
 }
 
@@ -853,10 +840,9 @@ int wmain(int argc, wchar_t **argv) {
         start_watchdog(executable_directory());
       const bool prepared_now = prepare_first_run(executable_directory(), default_state,
                        [](const std::string &request) {
-        std::unique_ptr<char, decltype(&msime_client_string_free)> response(
+        auto response = msime::host_api::own_string(
             msime_client_prepare_host(
-                reinterpret_cast<const uint8_t *>(request.data()), request.size()),
-            msime_client_string_free);
+                reinterpret_cast<const uint8_t *>(request.data()), request.size()));
         if (!response)
           throw std::runtime_error("Host preparation failed");
         return std::string(response.get());
@@ -898,11 +884,10 @@ int wmain(int argc, wchar_t **argv) {
     if constexpr (!MSIME_EDITION_IS_FULL)
       bootstrap_document["edition"] = MSIME_EDITION_ID;
     const auto bootstrap = bootstrap_document.dump();
-    std::unique_ptr<char, decltype(&msime_client_string_free)> response(
+    auto response = msime::host_api::own_string(
         msime_client_prepare_host(
             reinterpret_cast<const uint8_t *>(bootstrap.data()),
-            bootstrap.size()),
-        msime_client_string_free);
+            bootstrap.size()));
     if (!response)
       throw std::runtime_error("Host preparation failed");
     const auto prepared = nlohmann::json::parse(response.get());
@@ -926,10 +911,9 @@ int wmain(int argc, wchar_t **argv) {
             std::string(directory.begin(), directory.end()));
       }
       std::thread([directory = account.u8string()] {
-        std::unique_ptr<char, decltype(&msime_client_string_free)> result(
+        auto result = msime::host_api::own_string(
             msime_client_ensure_anonymous_account(
-                reinterpret_cast<const uint8_t *>(directory.data()), directory.size()),
-            msime_client_string_free);
+                reinterpret_cast<const uint8_t *>(directory.data()), directory.size()));
       }).detach();
     }
     diagnostic_log.server(std::string(production ? "Production" : "Preview") +
@@ -1297,10 +1281,9 @@ int wmain(int argc, wchar_t **argv) {
               {"text", normalize_clipboard_text(std::move(text))}}.dump();
           // The shared writer preserves pinned entries, timestamps and the
           // preference/history locking used by the Tauri panel.
-          std::unique_ptr<char, decltype(&msime_client_string_free)> reply(
+          auto reply = msime::host_api::own_string(
               msime_client_capture_clipboard_history(
-                  reinterpret_cast<const uint8_t *>(request.data()), request.size()),
-              msime_client_string_free);
+                  reinterpret_cast<const uint8_t *>(request.data()), request.size()));
         });
     // Clipboard history is an optional convenience, so a monitor that cannot
     // start leaves it inert rather than taking the IME down with it. Failing
@@ -1691,11 +1674,6 @@ int wmain(int argc, wchar_t **argv) {
             return open_system_emoji_panel();
           if (command == TrayMenuCommand::OpenWebsite)
             return open_web_page(toolbar_website_url);
-          // 检查更新在共享应用的关于页上，与设置窗口「关于」页的「检查更新」一样直接让 MSIME.exe 打开 settings:about。
-          if (command == TrayMenuCommand::CheckForUpdates)
-            return preview_shell &&
-                   launch_shell_surface(*preview_shell, ShellSurfaceRequest{{}, "about"},
-                                        shell_context);
           // 繁体输出和工具栏的简繁按钮、Ctrl+Shift+F 走同一个工作线程，翻转存储的 traditional_chinese_output。
           if (command == TrayMenuCommand::ToggleTraditionalOutput)
             return character_set_clicks.submit(CharacterSetClick{});
@@ -2074,10 +2052,10 @@ int wmain(int argc, wchar_t **argv) {
           theme_now >= candidate_theme_check_at) {
         candidate_theme_check_at = theme_now + 500;
         system_dark = system_prefers_dark();
-        // An edited package is resolved again: its colours through the shared layer and its artwork from the catalog.
+        // 被编辑的包重新解析：颜色经共享层，装饰图来自目录。浅色和深色两个槽位的包都监视，工具条、语音浮层和菜单按自己的明暗可能画其中任一个。
         const bool skin_resources_changed = candidate_skin_revision.changed(
             config.skin_directory,
-            candidate_theme_package(current_candidate_theme));
+            candidate_theme_packages(current_candidate_theme));
         if (skin_resources_changed) {
           resolved_themes.clear();
           skin_assets.clear();

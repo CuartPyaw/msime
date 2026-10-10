@@ -15,6 +15,8 @@ enum class ReplyPath {
   AutoCommitAndContinue,
   // A Korean key that finished a syllable. The TIP inserts that syllable from its own host session, so the reply carries at most the composition that follows it.
   SyllableCommit,
+  // 整句改字时的回车：TIP 从自己的宿主会话上屏改好的整句（MSIME_COMMIT_RAW），这边的会话做同样的事，不发回复帧。
+  ConversionCommit,
   Selection,
   Punctuation,
   CandidatePunctuationFallback,
@@ -132,6 +134,10 @@ public:
                                              const FanyImeNamedpipeData &packet,
                                              uint64_t epoch,
                                              const nlohmann::json &view);
+  // 组字时 ';' 或 '\'' 选当前页第二、第三个候选，走和数字键相同的选词回复。规则与 TIP 共用 SecondThirdCandidatePolicy.h；不归它管的键返回空，Engine 不动。
+  std::optional<PendingReply> second_third_candidate(
+      ServerSession &session, const FanyImeNamedpipeData &packet,
+      uint64_t epoch);
   // Null: not an editing key; no Engine action. Non-null may have no frame
   // because TSF completed this edit locally; still confirm it through the pump.
   std::optional<PendingReply> edit(ServerSession &session,

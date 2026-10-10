@@ -247,6 +247,7 @@
 - 设置应用的账号页不显示本机匿名账号，登录后也不弃用它。
 - TIP 进程内 host-api 的自愈失败仍写 stderr，不进 `server.log`。
 - 按方案注册多个 TSF 语言配置文件（让系统输入切换里每个方案一项）。
+- 「大写锁定时使用英文标点」（`caps_lock_ascii_punctuation`，与这一批同时在 develop 上加入）：macOS 经 `msime_client_set_caps_lock` 向会话报告大写锁定，Windows 的 TIP 和 Server 还没有接这个调用，能力位 `caps_lock_punctuation` 对 Windows 仍是 false，共享设置页在 Windows 上不显示这一项。
 - 真机验证：这一批在 macOS 上只做过 MinGW 语法检查和主机上的纯策略用例（`scripts/test-windows-native-run.py`）；徽标与特效的观感、读屏实际播报、Alt+数字是否到达按键接收器、SAPI 识别器的可用性、WinUI 设置窗口的新控件（只能用 MSBuild 编译）都还要在 Windows 上确认。
 
 ## Windows 进程与协议边界
@@ -573,7 +574,7 @@ macOS 缺后半条。`ShouldRoutePhysicalCandidateDigit` 明确把 Unicode 模�
 
 同组其余四项没有缺口，一并记下判据：候选窗的固定位置项本仓已按来源的 `#379AD3` 单独着色（`InputController.mm` 的 `candidateFixed`，与来源 `candidate_view_model.h` 同值），不与高亮合并；悬浮工具栏可见性 `configured_enabled && !fullscreen && ime_active` 与来源 `floating_toolbar_visibility_policy.h` 逐项相同（`MetasequoiaFloatingToolbarShouldShow`），`ime_active` 也与来源同义地跟随输入法的选中而不是客户端焦点：`activateServer:` 置位，用户切到别的输入源时由 `MSIMEInputSourceMonitor` 的 `switchedAway` 调 `deactivateForInputSourceSwitch` 清除（对应来源 TIP Deactivate 发出的 `WM_IMEDEACTIVATE`）；客户端失焦（IMK `deactivateServer:`）对应来源的 `ClientSuspended`，不改变工具栏可见性，所以切换应用、点桌面或没有输入框的窗口时工具栏留在原处，属主控制器被释放时立即隐藏（`dealloc` 调 `deactivateForDelegate:`），每次应用激活时 `refreshVisibility` 再检查一次属主作为兜底；`candidate_size_estimator` 是 Direct2D 的度量工具，macOS 侧由 `CandidateRowFit.h` 和原生面板用例覆盖，属实现形态差异；翻页键的六组开关（minus/equal、逗号句号、方括号、Tab、PageUp/Down、方向键）macOS 全部消费；开关关闭时，Tab/Shift+Tab、PageUp/PageDown 与 ↑/↓ 在候选可见期间照样被吞掉，不发任何命令、不结束组字，候选原样保留——来源在任何候选模式下都把这几个键交给 Server（`CompositionProcessorEngine.cpp` 的 `FUNCTION_SERVER_CANDIDATE_KEY`），Server 以 `IsCandidateNavigationKey` 认出后默认回 `NavigationIgnored`，只有对应的 `GetConfigured*Enabled()` 为真才翻页或移动（`server/src/ipc/event_listener.cpp`）；候选不可见时这些键仍交还应用。另有 Home/End 落在当前页首尾。（**这句在 2026-09-21 的第二十五批被推翻**：来源不是没有 Home/End，而是在客户端一侧把它们分类成 `FUNCTION_MOVE_PAGE_TOP/BOTTOM`，选的是整份列表的首末项。见该批。）
 
-方向键的朝向是刻意的平台适配：来源只认 ↑/↓，macOS 按候选窗朝向决定（竖排认 ↑/↓，横排认 ←/→），这是既有决定，不动。
+方向键与来源一致，不再按候选窗朝向适配：组字时 ↑/↓ 移候选高亮，←/→ 移光标（全拼和双拼里是整句改字的光标，`MSIME_CONVERSION_LEFT/RIGHT`）；韩文汉字列表或注音列表打开时四个方向键都移高亮，与 `korean_hanja_key` 相同。macOS 原来按朝向决定（竖排认 ↑/↓，横排认 ←/→），2026-10-10 起与 Windows、Linux 统一，见 [整句改字](../.agents/notes/implemented/feature/2026-10-10-sentence-conversion-edit.md)。
 
 增量记录（2026-09-20，视觉层）：文字各层比完，转到最影响「看起来一不一样」的东西——配色与度量。结论是这一层**本来就是精确移植**：
 
@@ -2059,7 +2060,7 @@ Windows 的安装位置、资源目录和用户状态目录可能包含中文、
 - **五笔剩余编码提示（`wubi_code_hint`）**：候选投影按 macOS 的 `WubiCodeHintPolicy` 规则算出每个候选在已输入前缀之后剩下的编码（仅五笔方案、严格前缀、非拼音回退、非本地模式），偏好开启时候选窗把它写成注释 `(hy)`，与 macOS 的写法相同。开关和候选排列方式放在同一个原子值里下发，所以切换它会让同一代候选重新绘制。来源没有这项设置，见上文「辅助码」一条。用例：`windows-wubi-code-hint`、`windows-candidate-layout-reload`。
 - **悬浮工具栏的中英切换按钮（`floating_toolbar.english_mode`）**：来源的中/英按钮始终显示，没有这个开关；共享设置页提供了它，macOS、Linux 和设置预览都遵守，Windows 只读另外六项。现在 Windows 也读它，缺省为显示，因此不改这项的用户看到的仍是来源的样子。用例：`windows-floating-toolbar-reload`。
 - **屏幕键盘高度（`touch_keyboard_height_adjustment`）**：Windows 的屏幕键盘是 Tauri 面板，固定按 1100×400 打开。现在按设置预览的同一算式 `400 + clamp(调整值, -12, 48)` 决定窗口高度，对设置页命令、托盘菜单启动路由和二次启动三条打开路径都生效；窗口已存在时重新打开会按新高度调整。页面本身按窗口高度伸缩，不需要另外传参。其他宿主不在本次范围内。
-- **每页候选项数量**：见上文 2026-09-21 那条的订正。共享设置页现在对所有宿主列出来源的 3–9；共享偏好仍接受 1–9，文档里存着 1 或 2 时这个值留在列表里并保持选中，保存别的改动不会把它改写掉。
+- **每页候选项数量**：见上文 2026-09-21 那条的订正。共享设置页现在对所有宿主列出来源的 3–9；共享偏好仍接受 1–9，文档里存着 1 或 2 时这个值留在列表里并保持选中，保存别的改动不会把它改写掉。（2026-10-10 更新，#6679：共享偏好放宽到 1–10，第十个候选用 0 键选。宿主能力 `max_candidate_page_size` 给出每个宿主能排的上限，共享设置页的滑块只给到它，host-api 按它截断会话的页大小。Windows 仍是 9：TSF 只把 1–9 当作选词键，候选窗口、卡片尺寸和回复编码都按最多九个校验，接上 0 键之前别处存的 10 在 Windows 上按 9 显示。原生设置窗口仍是 1–9。）
 - **候选英文释义的默认值（`candidate_english_gloss`）**：来源默认显示 `msime-english.db` 的释义，共享默认关闭。这一项**刻意保留差异**，不单独改 Windows 的默认：共享偏好没有按平台区分默认值的机制（`HostCapabilities` 只描述能力，不带偏好默认值），所有宿主都读同一份 `Preferences::default()`，而 Linux、Android、HarmonyOS 的测试和 README 都把「默认关闭」写成了约定。为 Windows 单独翻默认值需要先引入按平台的偏好默认，这属于产品取舍，留给所有者定。
 
 ### Windows 面板、托盘、悬浮工具栏与检查更新的对齐（2026-09-24）

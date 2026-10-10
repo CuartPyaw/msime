@@ -3,6 +3,7 @@
 #include "ToolbarTooltips.h"
 #include "WindowShadow.h"
 #include "msime_client.h"
+#include "../../../common/HostApiString.h"
 #include <cmath>
 #include <iterator>
 #include <memory>
@@ -38,8 +39,8 @@ std::wstring wide(const std::string &text) {
 }
 // 一张方案表：host-api 回答 {ok, value}，value 是字符串到字符串的对象；读不出来时当作空表，键帽上只剩键名。
 nlohmann::json profile_table(char *(*query)(const uint8_t *, size_t), const std::string &profile) {
-  std::unique_ptr<char, decltype(&msime_client_string_free)> raw(
-      query(reinterpret_cast<const uint8_t *>(profile.data()), profile.size()), msime_client_string_free);
+  auto raw = msime::host_api::own_string(
+      query(reinterpret_cast<const uint8_t *>(profile.data()), profile.size()));
   if (!raw)
     return nlohmann::json::object();
   const auto envelope = nlohmann::json::parse(raw.get(), nullptr, false);

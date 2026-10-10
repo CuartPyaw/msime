@@ -42,3 +42,5 @@ Status: implemented
 长词续接与精确分段批量查询的上层缓冲由[聚合空页延后预留](../../implemented/testing/2026-10-10-pinyin-empty-aggregate-storage.md)单独处理；简拼入口与混输分支仍有独立预留。本片底层测量不重复计入聚合层收益。
 
 按键分组查询的空结果 `HashMap` 由[结果表延后预留](../../implemented/testing/2026-10-10-pinyin-empty-key-map-storage.md)单独处理；两侧共用已合并的底层查询函数，结果表收益独立计量。
+
+简拼批量入口的聚合空存储和小页临时容器现由[简拼固定栈页](2026-10-10-pinyin-jianpin-inline-page-storage.md)处理；共享 `rows` 保留本篇底层预留和错误边界，其他聚合入口仍遵循各自策略。

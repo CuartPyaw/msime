@@ -6,6 +6,7 @@
 #include "TranslationDisplay.h"
 
 #include "msime_client.h"
+#include "../../../common/HostApiString.h"
 
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
@@ -57,12 +58,8 @@ int transfer_progress(void *context, curl_off_t, curl_off_t, curl_off_t,
   return cancelled && cancelled() ? 1 : 0;
 }
 
-std::unique_ptr<char, decltype(&msime_client_string_free)> owned(char *raw) {
-  return {raw, msime_client_string_free};
-}
-
 std::optional<nlohmann::json> host_value(char *raw) {
-  auto value = owned(raw);
+  auto value = msime::host_api::own_string(raw);
   if (!value)
     return std::nullopt;
   try {
@@ -314,7 +311,7 @@ std::optional<std::string> account_access_token(const std::string &directory,
   const auto ask = [&]() -> std::optional<std::string> {
     error.clear();
     const auto bytes = request.dump();
-    auto raw = owned(msime_client_account_access_token(
+    auto raw = msime::host_api::own_string(msime_client_account_access_token(
         reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()));
     if (!raw)
       return std::nullopt;
@@ -346,7 +343,7 @@ std::optional<std::string> account_access_token(const std::string &directory,
       return std::nullopt;
     last_registration = now;
   }
-  owned(msime_client_ensure_anonymous_account(
+  msime::host_api::discard_string(msime_client_ensure_anonymous_account(
       reinterpret_cast<const uint8_t *>(directory.data()), directory.size()));
   request.erase("rejected_token");
   return ask();
@@ -488,7 +485,7 @@ void persist_english_glosses(const nlohmann::json &query,
         {"target_language", "en"},
         {"translations",
          values}}.dump();
-    msime_client_string_free(msime_client_translation_gloss_save(
+    msime::host_api::discard_string(msime_client_translation_gloss_save(
         reinterpret_cast<const uint8_t *>(request.data()), request.size(),
         reinterpret_cast<const uint8_t *>(user_data.data()), user_data.size()));
   } catch (...) {

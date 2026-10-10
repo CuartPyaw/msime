@@ -33,3 +33,5 @@ Status: implemented
 按键分组查询的空结果 `HashMap` 由[结果表延后预留](../../implemented/testing/2026-10-10-pinyin-empty-key-map-storage.md)单独处理；两侧共用已合并的底层查询函数，结果表收益独立计量。
 
 固定单跨度通过[直接规范化查询键规划](2026-10-10-pinyin-lattice-span-key-plan.md)绕过临时音节与单项表分组，当时保留本篇非空聚合容量提示和空页零容量；当前单跨度与精确切分批次的非空策略均由[首个页复用](2026-10-10-pinyin-aggregate-page-reuse.md)接管。
+
+简拼批量入口的聚合空存储和小页临时容器现由[简拼固定栈页](2026-10-10-pinyin-jianpin-inline-page-storage.md)处理；共享 `rows` 保留本篇底层预留和错误边界，其他聚合入口仍遵循各自策略。

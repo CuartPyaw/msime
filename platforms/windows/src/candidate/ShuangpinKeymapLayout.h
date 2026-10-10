@@ -51,7 +51,7 @@ inline char shuangpin_keymap_highlighted_key(std::string_view editing) {
   return 0;
 }
 
-// 从 Engine 的 view 判断这一帧要不要显示键位图，条件与 macOS 的 updateKeymapPanel 相同：双拼方案（scheme 1）、没有局部模式、不在 Engine 自己的英文模式、有方案名、正在组字。开关和候选窗是否可见由调用方另外判断。
+// 从 Engine 的 view 判断这一帧要不要显示键位图，条件与 macOS 的 updateKeymapPanel 相同：双拼方案（scheme 1）、没有局部模式、不在 Engine 自己的英文模式、有方案名、正在组字。开关和候选窗是否可见由调用方另外判断。自定义方案（`custom`）不显示：键位表只按方案名从 host-api 取，`custom` 的表在偏好里，msime_client_shuangpin_key_hints 对它返回空；按小鹤画会标错键，标错比不标更糟。
 inline std::optional<ShuangpinKeymapHint> shuangpin_keymap_hint(const nlohmann::json &view) {
   if (!view.is_object())
     return std::nullopt;
@@ -64,7 +64,8 @@ inline std::optional<ShuangpinKeymapHint> shuangpin_keymap_hint(const nlohmann::
       mode == view.end() || !mode->is_string() || mode->get_ref<const std::string &>() != "none" ||
       english == view.end() || !english->is_boolean() || english->get<bool>() ||
       profile == view.end() || !profile->is_string() || profile->get_ref<const std::string &>().empty() ||
-      editing == view.end() || !editing->is_string() || editing->get_ref<const std::string &>().empty())
+      editing == view.end() || !editing->is_string() || editing->get_ref<const std::string &>().empty() ||
+      profile->get_ref<const std::string &>() == "custom")
     return std::nullopt;
   return ShuangpinKeymapHint{std::string(normalize_shuangpin_profile(profile->get_ref<const std::string &>())),
                              shuangpin_keymap_highlighted_key(editing->get_ref<const std::string &>())};

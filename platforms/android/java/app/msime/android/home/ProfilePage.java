@@ -62,22 +62,35 @@ public final class ProfilePage extends DetailPage {
         registerForActivityResult(new ActivityResultContracts.GetContent(), this::onPicked);
     @Nullable private LinearLayout column;
     @Nullable private Loaded loaded;
+    @Nullable private String avatarPickerSessionId;
     private boolean busy;
+    private long generation;
 
     /** 一次读取的结果：资料（未登录或读不到时为 null）、读不到的原因、云端数据汇总（读不到时为 null）、后端开放的登录方式、头像。 */
     private record Loaded(@Nullable DeviceDataApi.Profile profile, @Nullable CloudApi.Failure failure,
-            @Nullable DeviceDataApi.DataSummary data, CloudApi.Providers providers, @Nullable Bitmap avatar) {}
+            @Nullable DeviceDataApi.DataSummary data, CloudApi.Providers providers, @Nullable Bitmap avatar,
+            String sessionId) {}
+
+    @Override public void onDestroyView() {
+        generation++;
+        column = null;
+        loaded = null;
+        avatarPickerSessionId = null;
+        super.onDestroyView();
+    }
 
     @Override protected void buildContent(LinearLayout column, Bundle args) {
         this.column = column;
+        loaded = null;
         render();
     }
 
     @Override protected void onBecameVisible() { reload(null); }
 
     private void reload(@Nullable Consumer<Loaded> then) {
+        long request = ++generation;
         HostTask.runNetwork(this, ProfilePage::load, result -> {
-            if (result == null) return;
+            if (result == null || request != generation || column == null) return;
             loaded = result;
             render();
             if (then != null) then.accept(result);
@@ -86,12 +99,18 @@ public final class ProfilePage extends DetailPage {
 
     private static Loaded load(Context context) {
         CloudApi.Providers providers = SignIn.providers(context);
-        DeviceDataApi api = new DeviceDataApi(context);
+        String sessionId;
+        try {
+            sessionId = new DeviceDataApi(context).currentAccountSessionId();
+        } catch (CloudApi.Failure failure) {
+            return new Loaded(null, failure, null, providers, null, "");
+        }
+        DeviceDataApi api = new DeviceDataApi(context, sessionId);
         DeviceDataApi.Profile profile;
         try {
             profile = api.profile();
         } catch (CloudApi.Failure failure) {
-            return new Loaded(null, failure, null, providers, null);
+            return new Loaded(null, failure, null, providers, null, "");
         }
         bindIfNeeded(context, profile);
         DeviceDataApi.DataSummary data;
@@ -100,7 +119,7 @@ public final class ProfilePage extends DetailPage {
         } catch (CloudApi.Failure unavailable) {
             data = null;
         }
-        return new Loaded(profile, null, data, providers, avatar(profile.avatarUrl()));
+        return new Loaded(profile, null, data, providers, avatar(profile.avatarUrl()), sessionId);
     }
 
     /** 同步状态记着的账号与服务端说的不一致（登录时没读到用户 id，或换了账号）时重新绑定；绑定换账号时会关闭同步并清空游标。 */
@@ -300,13 +319,14 @@ public final class ProfilePage extends DetailPage {
 
     private void rename() {
         Loaded state = loaded;
-        if (state == null || state.profile() == null) return;
+        if (state == null || state.profile() == null || state.sessionId().isEmpty()) return;
+        String expectedSessionId = state.sessionId();
         InputDialog dialog = new InputDialog(requireContext(), "昵称", "最多 64 个字，留空恢复默认昵称");
         dialog.addField("昵称", state.profile().displayName(), 0)
             .setFilters(new InputFilter[] {new InputFilter.LengthFilter(DeviceDataApi.MAX_DISPLAY_NAME * 2)});
         dialog.setValidator(values -> DeviceDataApi.validDisplayName(values.get(0)));
         dialog.setPrimary("保存", values -> run(context -> {
-            new DeviceDataApi(context).rename(values.get(0));
+            new DeviceDataApi(context, expectedSessionId).rename(values.get(0));
             return "";
         }, "昵称已更新"));
         dialog.show();
@@ -348,11 +368,17 @@ public final class ProfilePage extends DetailPage {
 
     private void chooseAvatar() {
         if (busy) return;
+        Loaded state = loaded;
+        if (state == null || state.profile() == null || state.sessionId().isEmpty()) return;
+        avatarPickerSessionId = state.sessionId();
         picker.launch("image/*");
     }
 
     private void onPicked(@Nullable Uri uri) {
+        String expectedSessionId = avatarPickerSessionId;
+        avatarPickerSessionId = null;
         if (uri == null || getView() == null) return;
+        if (expectedSessionId == null || expectedSessionId.isEmpty()) return;
         run(context -> {
             byte[] image;
             try (InputStream input = context.getContentResolver().openInputStream(uri)) {
@@ -366,12 +392,16 @@ public final class ProfilePage extends DetailPage {
             BitmapFactory.Options size = BitmapPolicy.decodeBounds(image);
             if (size == null) return "读不到这张图片";
             if (BitmapPolicy.longestEdge(size.outWidth, size.outHeight) > MAX_AVATAR_UPLOAD_EDGE) return "图片尺寸太大，请换一张小一些的";
-            new DeviceDataApi(context).uploadAvatar(image);
+            new DeviceDataApi(context, expectedSessionId).uploadAvatar(image);
             return "";
         }, "头像已更新");
     }
 
     private void export() {
+        Loaded state = loaded;
+        if (state == null || state.profile() == null || state.sessionId().isEmpty()) return;
+        String expectedSessionId = state.sessionId();
+        long request = generation;
         String name = DeviceDataApi.exportFileName(LocalDate.now(ZoneId.systemDefault()));
         execute(context -> {
             File directory = new File(context.getCacheDir(), EXPORTS);
@@ -385,7 +415,7 @@ public final class ProfilePage extends DetailPage {
                 temporary = Files.createTempFile(directory.toPath(), name + ".", ".part");
                 try (OutputStream output = Files.newOutputStream(temporary, StandardOpenOption.WRITE,
                         StandardOpenOption.TRUNCATE_EXISTING, LinkOption.NOFOLLOW_LINKS)) {
-                    new DeviceDataApi(context).exportData(output);
+                    new DeviceDataApi(context, expectedSessionId).exportData(output);
                 }
                 try {
                     Files.move(temporary, file.toPath(), StandardCopyOption.ATOMIC_MOVE,
@@ -411,6 +441,11 @@ public final class ProfilePage extends DetailPage {
             }
             Context context = requireContext();
             File file = new File(new File(context.getCacheDir(), EXPORTS), name);
+            if (request != generation || !sameLoadedSession(expectedSessionId)) {
+                FilePolicy.deleteQuietly(file);
+                MsToast.show(context, "登录已改变，请重新打开页面");
+                return;
+            }
             Uri uri = FileProvider.getUriForFile(context, context.getPackageName() + ".files", file);
             Intent send = new Intent(Intent.ACTION_SEND).setType("application/zip").putExtra(Intent.EXTRA_STREAM, uri)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
@@ -420,33 +455,40 @@ public final class ProfilePage extends DetailPage {
 
     private void confirmDeleteData() {
         Loaded state = loaded;
+        if (state == null || state.profile() == null || state.sessionId().isEmpty()) return;
+        String expectedSessionId = state.sessionId();
         String size = state == null || state.data() == null ? "" : "（约 " + DeviceDataApi.formatBytes(state.data().bytes()) + "）";
         new OptionSheet(requireContext(), "删除云端数据" + size,
             "删除云端的设置、词库、常用语和云剪贴板，账号和社区作品保留，本机数据不受影响")
-            .destructive("删除云端数据", () -> recentLogin(context -> {
-                new DeviceDataApi(context).deleteData(DeviceDataApi.DELETABLE_SECTIONS);
+            .destructive("删除云端数据", () -> recentLogin(sessionId -> context -> {
+                new DeviceDataApi(context, sessionId).deleteData(DeviceDataApi.DELETABLE_SECTIONS);
                 return "";
-            }, "云端数据已删除", false))
+            }, expectedSessionId, "云端数据已删除", false))
             .show();
     }
 
     private void confirmSignOut() {
+        Loaded state = loaded;
+        if (state == null || state.profile() == null || state.sessionId().isEmpty()) return;
+        String expectedSessionId = state.sessionId();
         new OptionSheet(requireContext(), "退出登录", "本机的词库和设置会保留，云同步随之关闭")
             .destructive("退出登录", () -> run(context -> {
-                SignIn.signOut(context);
-                return "";
+                return SignIn.signOut(context, expectedSessionId) ? "" : "登录已改变，请重新打开页面";
             }, "已退出登录", true))
             .show();
     }
 
     private void confirmDeleteAccount() {
+        Loaded state = loaded;
+        if (state == null || state.profile() == null || state.sessionId().isEmpty()) return;
+        String expectedSessionId = state.sessionId();
         new OptionSheet(requireContext(), "注销账号", "云端的词库、皮肤、设置和社区作品会立即永久删除")
             .destructive("继续注销", () -> new OptionSheet(requireContext(), "确定注销？", "这一步无法撤销")
-                .destructive("永久注销账号", () -> recentLogin(context -> {
-                    new DeviceDataApi(context).deleteAccount();
-                    SignIn.signOut(context);
+                .destructive("永久注销账号", () -> recentLogin(sessionId -> context -> {
+                    new DeviceDataApi(context, sessionId).deleteAccount();
+                    if (!SignIn.signOut(context, sessionId)) return "登录已改变，请重新打开页面";
                     return "";
-                }, "账号已注销", true))
+                }, expectedSessionId, "账号已注销", true))
                 .show())
             .show();
     }
@@ -472,12 +514,15 @@ public final class ProfilePage extends DetailPage {
     /**
      * 要求最近登录的动作：服务端说要重新登录时弹登录面板，重新登录的还是同一个账号才重试一次。
      */
-    private void recentLogin(Work work, String success, boolean leave) {
-        execute(work, outcome -> {
+    private void recentLogin(Function<String, Work> workFactory, String expectedSessionId,
+            String success, boolean leave) {
+        Loaded initial = loaded;
+        if (initial == null || initial.profile() == null || !expectedSessionId.equals(initial.sessionId())) return;
+        String before = initial.profile().id();
+        execute(workFactory.apply(expectedSessionId), outcome -> {
             if (outcome.isEmpty()) finish(success, leave);
             else MsToast.show(requireContext(), outcome);
         }, () -> {
-            String before = loaded == null || loaded.profile() == null ? "" : loaded.profile().id();
             MsToast.show(requireContext(), "为了安全，请重新登录一次");
             SignIn.start(requireActivity(), failure -> {
                 if (!isAdded()) return;
@@ -486,14 +531,20 @@ public final class ProfilePage extends DetailPage {
                     return;
                 }
                 reload(result -> {
-                    if (result.profile() == null || before.isEmpty() || !before.equals(result.profile().id())) {
+                    if (result.profile() == null || result.sessionId().isEmpty()
+                            || before.isEmpty() || !before.equals(result.profile().id())) {
                         MsToast.show(requireContext(), "登录的不是原来的账号，操作已取消");
                         return;
                     }
-                    run(work, success, leave);
+                    run(workFactory.apply(result.sessionId()), success, leave);
                 });
             });
         });
+    }
+
+    private boolean sameLoadedSession(String expectedSessionId) {
+        Loaded state = loaded;
+        return state != null && expectedSessionId.equals(state.sessionId());
     }
 
     private void execute(Work work, Consumer<String> done, @Nullable Runnable relogin) {
@@ -534,6 +585,7 @@ public final class ProfilePage extends DetailPage {
 
     static String explain(CloudApi.Failure failure) {
         if (failure.network()) return "连不上服务器，请检查网络后再试";
+        if ("session_changed".equals(failure.code)) return "登录已改变，请重新打开页面";
         if (failure.signedOut()) return "登录已失效，请重新登录";
         if (failure.status == 429) return "操作太频繁，请稍后再试";
         if (failure.status == 413) return "图片超过 1 MB，请换一张小一些的";

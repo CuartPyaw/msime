@@ -232,7 +232,7 @@ toolbar_utility_menu_items(const TrayMenuCapabilities &capabilities) {
   };
   row(TrayMenuCommand::OpenSystemEmoji, "表情与符号…", true);
   row(TrayMenuCommand::OpenSettings, "打开设置…", capabilities.settings);
-  row(TrayMenuCommand::CheckForUpdates, "检查更新…", capabilities.desktop_app);
+  row(TrayMenuCommand::CheckForUpdates, "检查更新…", capabilities.settings);
   separator();
   row(TrayMenuCommand::OpenWebsite, "访问 msime.app", true);
   row(TrayMenuCommand::OpenHelp, "使用帮助…", capabilities.settings);
