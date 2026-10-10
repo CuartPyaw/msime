@@ -523,8 +523,7 @@ public final class BackendAccount {
         int bytes = 0;
         for (ChatMessage message : messages) {
             if (message == null || !("user".equals(message.role()) || "assistant".equals(message.role())
-                    || "system".equals(message.role())) || message.content() == null
-                    || TextPolicy.trimmed(message.content()).isEmpty()
+                    || "system".equals(message.role())) || !TextPolicy.hasText(message.content())
                     || TextPolicy.utf8Length(message.content()) > 16 * 1024
                     || TextPolicy.hasControlExceptWhitespace(message.content())
                     || !TextPolicy.validUnicode(message.content())) return false;
@@ -534,14 +533,14 @@ public final class BackendAccount {
     }
 
     static boolean validChatResponse(String role, String content) {
-        return "assistant".equals(role) && content != null && !TextPolicy.trimmed(content).isEmpty()
+        return "assistant".equals(role) && TextPolicy.hasText(content)
             && TextPolicy.utf8Length(content) <= 16 * 1024
             && !TextPolicy.hasControlExceptWhitespace(content)
             && TextPolicy.validUnicode(content);
     }
 
     static boolean validChatReplyText(String content) {
-        return content != null && !TextPolicy.trimmed(content).isEmpty()
+        return TextPolicy.hasText(content)
             && TextPolicy.utf8Length(content) <= MAX_CHAT_REPLY_BYTES
             && TextPolicy.validUnicode(content);
     }
