@@ -74,7 +74,16 @@
 #include <vector>
 
 using Json = nlohmann::json;
-struct MsimeIbusEngine;
+namespace {
+struct State;
+}
+struct MsimeIbusEngine {
+  IBusEngine parent;
+  State *state;
+};
+struct MsimeIbusEngineClass {
+  IBusEngineClass parent;
+};
 namespace {
 // 主题目录由共享层发布，这个宿主不存 id 或标题的副本；菜单是这份目录加上运行配置里列出的外部皮肤。
 std::vector<msime::linux_host::ThemeChoice> theme_choices();
@@ -2281,6 +2290,12 @@ void online_schedule(IBusEngine *engine) {
   online_dispatch(engine, 1, true);
 }
 void translation_complete(GObject *source, GAsyncResult *result, gpointer) {
+  auto *self = reinterpret_cast<MsimeIbusEngine *>(source);
+  if (!self->state) {
+    msime::host_api::discard_string(static_cast<char *>(
+        g_task_propagate_pointer(G_TASK(result), nullptr)));
+    return;
+  }
   auto engine = IBUS_ENGINE(source);
   auto &s = state(engine);
   auto raw = msime::host_api::own_string(
@@ -2351,6 +2366,12 @@ void translation_complete(GObject *source, GAsyncResult *result, gpointer) {
   } catch (...) {}
 }
 void online_complete(GObject *source, GAsyncResult *result, gpointer) {
+  auto *self = reinterpret_cast<MsimeIbusEngine *>(source);
+  if (!self->state) {
+    msime::host_api::discard_string(static_cast<char *>(
+        g_task_propagate_pointer(G_TASK(result), nullptr)));
+    return;
+  }
   auto engine = IBUS_ENGINE(source);
   auto &s = state(engine);
   auto raw = msime::host_api::own_string(
@@ -2437,13 +2458,6 @@ void online_complete(GObject *source, GAsyncResult *result, gpointer) {
 }
 } // namespace
 
-struct MsimeIbusEngine {
-  IBusEngine parent;
-  State *state;
-};
-struct MsimeIbusEngineClass {
-  IBusEngineClass parent;
-};
 G_DEFINE_TYPE(MsimeIbusEngine, msime_ibus_engine, IBUS_TYPE_ENGINE)
 
 namespace {
