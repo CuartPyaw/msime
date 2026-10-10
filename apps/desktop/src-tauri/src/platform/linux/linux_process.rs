@@ -139,6 +139,7 @@ pub fn run_status_path(program: &str, argument: &Path, timeout: Duration) -> boo
 fn run_status_os(program: &OsStr, arguments: &[&OsStr], timeout: Duration) -> bool {
     let Ok(mut child) = Command::new(program)
         .args(arguments)
+        .process_group(0)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -154,6 +155,7 @@ fn run_status_os(program: &OsStr, arguments: &[&OsStr], timeout: Duration) -> bo
                 std::thread::sleep(Duration::from_millis(10));
             }
             Ok(None) | Err(_) => {
+                kill_process_group(&child);
                 let _ = child.kill();
                 let _ = child.wait();
                 return false;
@@ -272,6 +274,7 @@ fn read_text_bounded(
 pub fn write_input(program: &str, arguments: &[&str], bytes: &[u8], timeout: Duration) -> bool {
     let Ok(mut child) = Command::new(program)
         .args(arguments)
+        .process_group(0)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -312,6 +315,7 @@ pub fn write_input(program: &str, arguments: &[&str], bytes: &[u8], timeout: Dur
         }
     })();
     if result.is_none() {
+        kill_process_group(&child);
         let _ = child.kill();
     }
     let _ = child.wait();
@@ -320,7 +324,7 @@ pub fn write_input(program: &str, arguments: &[&str], bytes: &[u8], timeout: Dur
 
 #[cfg(test)]
 mod tests {
-    use super::run_status;
+    use super::{run_status, write_input};
     use std::time::Duration;
 
     #[test]
@@ -344,6 +348,46 @@ mod tests {
             &["-c", "sleep 1"],
             Duration::from_millis(20)
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_status_does_not_leave_descendants_after_timeout() {
+        let root = tempfile::tempdir().unwrap();
+        let marker = root.path().join("alive");
+        let command = format!(
+            "(sleep 0.2; echo alive > {}) & sleep 30",
+            marker.to_str().unwrap()
+        );
+        assert!(!run_status(
+            "/bin/sh",
+            &["-c", &command],
+            Duration::from_millis(50)
+        ));
+        std::thread::sleep(Duration::from_millis(400));
+        assert!(!marker.exists(), "a descendant survived run_status cleanup");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_input_does_not_leave_descendants_after_timeout() {
+        let root = tempfile::tempdir().unwrap();
+        let marker = root.path().join("alive");
+        let command = format!(
+            "cat >/dev/null; (sleep 0.2; echo alive > {}) & sleep 30",
+            marker.to_str().unwrap()
+        );
+        assert!(!write_input(
+            "/bin/sh",
+            &["-c", &command],
+            b"payload",
+            Duration::from_millis(50)
+        ));
+        std::thread::sleep(Duration::from_millis(400));
+        assert!(
+            !marker.exists(),
+            "a descendant survived write_input cleanup"
+        );
     }
 
     #[test]
