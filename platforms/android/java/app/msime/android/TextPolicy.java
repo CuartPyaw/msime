@@ -59,6 +59,11 @@ public final class TextPolicy {
         return Character.isDigit(codePoint);
     }
 
+    /** Return whether a code point is an uppercase Unicode letter. */
+    public static boolean isUpperCase(int codePoint) {
+        return Character.isUpperCase(codePoint);
+    }
+
     public static boolean hasControlExceptWhitespace(String value) {
         return value.codePoints().anyMatch(codePoint -> Character.isISOControl(codePoint)
             && codePoint != '\n' && codePoint != '\r' && codePoint != '\t');
