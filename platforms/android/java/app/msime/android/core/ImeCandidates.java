@@ -80,7 +80,7 @@ final class ImeCandidates {
         applyCandidateTypeface(button);
         ViewPolicy.setMinimumWidth(button, s.pixels(30));
         ViewPolicy.clearMinimumHeight(button);
-        KeyboardGeometry.setHorizontalPaddingDp(button, s, 11);
+        LayoutPolicy.setHorizontalPaddingDp(button, s, 11);
         ViewPolicy.setLineSpacing(button, 0, 1.0f);
         ViewPolicy.clearFontPadding(button);
         ViewPolicy.clearElevation(button);
@@ -189,7 +189,7 @@ final class ImeCandidates {
         ViewPolicy.setSelected(button, highlighted);
         expandedCells.add(button);
         ViewPolicy.setMinimumSize(button, s.pixels(64), s.pixels(44));
-        KeyboardGeometry.setHorizontalPaddingDp(button, s, 10);
+        LayoutPolicy.setHorizontalPaddingDp(button, s, 10);
         // The completed keyboard tree is styled once by MSIMEInputService.render().
         // Styling here would be repeated immediately after this button is attached.
         long index = id == null ? -1
@@ -276,7 +276,7 @@ final class ImeCandidates {
         }
         ViewPolicy.show(s.expandedCandidateScroll);
         ViewPolicy.show(s.expandedCandidates);
-        KeyboardGeometry.setSymmetricPaddingDp(s.expandedCandidates, s, 8, 6);
+        LayoutPolicy.setSymmetricPaddingDp(s.expandedCandidates, s, 8, 6);
         JSONArray entries = s.candidatePanelSnapshot.optJSONArray("candidates");
         int count = entries == null ? 0 : entries.length();
         String reading = InputViewValuePolicy.textOr(s.candidatePanelSnapshot, "reading", "");

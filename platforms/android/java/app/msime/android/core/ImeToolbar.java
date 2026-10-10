@@ -84,7 +84,7 @@ final class ImeToolbar {
     void buildCandidateHeader(LinearLayout candidateRegion) {
         LinearLayout candidateHeader = LayoutPolicy.row(s);
         ViewPolicy.setCenteredVertically(candidateHeader);
-        KeyboardGeometry.setPaddingDp(candidateHeader, s, 10, 0, 6, READING_GAP_DP);
+        LayoutPolicy.setPaddingDp(candidateHeader, s, 10, 0, 6, READING_GAP_DP);
         s.candidateHeader = candidateHeader;
         s.preedit = toolbarText(12);
         ViewPolicy.setMaxLinesEllipsized(s.preedit, 1);
@@ -116,7 +116,7 @@ final class ImeToolbar {
         s.status = toolbarText(10);
         ViewPolicy.setMaxLinesEllipsized(s.status, 1);
         ViewPolicy.setEndCenteredVertically(s.status);
-        KeyboardGeometry.setPaddingDp(s.status, s, 6, 0, 2, 0);
+        LayoutPolicy.setPaddingDp(s.status, s, 6, 0, 2, 0);
         candidateHeader.addView(s.status, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         s.candidatePage = toolbarText(10);
@@ -125,7 +125,7 @@ final class ImeToolbar {
         s.shortcutBar = LayoutPolicy.row(s);
         ViewPolicy.setCenteredVertically(s.shortcutBar);
         s.shortcutBar.setContentDescription("键盘快捷栏");
-        KeyboardGeometry.setPaddingDp(s.shortcutBar, s, 2, 0, 2, 0);
+        LayoutPolicy.setPaddingDp(s.shortcutBar, s, 2, 0, 2, 0);
         s.shortcutScroll = new HorizontalScrollView(s);
         s.shortcutScroll.setHorizontalScrollBarEnabled(false);
         s.shortcutScroll.setFillViewport(true);
@@ -175,7 +175,7 @@ final class ImeToolbar {
         ViewPolicy.hide(s.hanjaButton);
         bindToolbarAction(s.hanjaButton,
             () -> s.command(KoreanInputPolicy.CONVERT_HANJA_COMMAND));
-        KeyboardGeometry.setHorizontalPaddingDp(s.hanjaButton, s, 8);
+        LayoutPolicy.setHorizontalPaddingDp(s.hanjaButton, s, 8);
         ViewPolicy.clearMinimumHeight(s.hanjaButton);
         candidateHeader.addView(s.hanjaButton, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT));
@@ -251,7 +251,7 @@ final class ImeToolbar {
     void addRecentClipRow(LinearLayout candidateRegion) {
         LinearLayout row = LayoutPolicy.row(s);
         ViewPolicy.setCenteredVertically(row);
-        KeyboardGeometry.setPaddingDp(row, s, 2, 4, 2, 4);
+        LayoutPolicy.setPaddingDp(row, s, 2, 4, 2, 4);
         row.setContentDescription("最近复制");
         Button history = s.shortcutButton(row, "剪贴板", KeyboardShortcutIconPolicy.Icon.CLIPBOARD,
             panelToggle(() -> s.clipboardScroll, s.imePanels::showClipboardHistory));
@@ -263,7 +263,7 @@ final class ImeToolbar {
         ViewPolicy.setAllCapsFalse(paste);
         ViewPolicy.setStartCenteredTextSizeSp(paste, 15);
         ViewPolicy.setMaxLinesEllipsized(paste, 1);
-        KeyboardGeometry.setSymmetricPaddingDp(paste, s, 12, 0);
+        LayoutPolicy.setSymmetricPaddingDp(paste, s, 12, 0);
         ViewPolicy.clearMinimumSize(paste);
         ViewPolicy.clearStateListAnimator(paste);
         bindToolbarAction(paste, s::pasteRecentClip);

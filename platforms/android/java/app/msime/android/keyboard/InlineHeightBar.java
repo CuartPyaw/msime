@@ -58,7 +58,7 @@ public final class InlineHeightBar extends LinearLayout {
         setOrientation(HORIZONTAL);
         ViewPolicy.setCenteredVertically(this);
         setContentDescription(DESCRIPTION);
-        KeyboardGeometry.setHorizontalPaddingDp(this, context, 6);
+        LayoutPolicy.setHorizontalPaddingDp(this, context, 6);
         cancel = textButton(context, "取消");
         reset = textButton(context, "重置");
         done = textButton(context, "完成");

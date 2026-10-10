@@ -216,7 +216,7 @@ final class ImeNineKeyPanel {
         // 格子分批建，滚到接近底部再追加；换了一代或面板收起后重开时，网格把滚动位置拉回顶部。
         CandidateWrapLayout list = candidateGrid.build(snapshot, entries,
             "完整候选列表；" + reading + "；" + count + " 个候选");
-        KeyboardGeometry.setSymmetricPaddingDp(list, s, 4, 4);
+        LayoutPolicy.setSymmetricPaddingDp(list, s, 4, 4);
         candidateHolder.addView(list, LayoutPolicy.frameMatchWidthWrapParams());
     }
 
