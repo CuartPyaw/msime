@@ -84,13 +84,13 @@ struct CloudDictionaryView: View {
       if let userID {
         Section {
           NavigationLink(destination: CloudCandidatesView(kind: kind,
-            authorize: { try await authorizedToken(matching: userID) })) {
+            authorize: { try await authorizedToken(matching: userID) }, accountID: userID, session: session)) {
             CloudDictionaryRowLabel(
               title: "云端候选与排序", detail: "调整这个词库里候选的先后",
               symbol: "list.number")
           }
           NavigationLink(destination: CloudDictionaryCatalogView(kind: kind,
-            authorize: { try await authorizedToken(matching: userID) })) {
+            authorize: { try await authorizedToken(matching: userID) }, accountID: userID, session: session)) {
             CloudDictionaryRowLabel(
               title: "完整目录", detail: "查询与批量管理全部词条",
               symbol: "square.stack.3d.up.fill")
