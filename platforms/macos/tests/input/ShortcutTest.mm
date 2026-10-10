@@ -3607,6 +3607,106 @@ static void TestPreferenceClientGeneration() {
     }
 }
 
+// 记录控制器释放时在哪个线程收起浮动工具栏。真实的工具栏是 NSPanel，在后台线程 orderOut: 会让 AppKit 直接终止进程。
+@interface ThreadRecordingToolbar : NSObject
+@property(atomic) NSUInteger deactivations;
+@property(atomic) BOOL deactivatedOffMain;
+@property(atomic) NSUInteger completions;
+@end
+@implementation ThreadRecordingToolbar
+- (void)deactivateForDelegate:(id)delegate {
+    (void)delegate;
+    if (!NSThread.isMainThread) self.deactivatedOffMain = YES;
+    self.deactivations = self.deactivations + 1;
+}
+@end
+
+// 偏好读取完成时把次数记到工具栏桩上：控制器释放后它自己的计数读不到。
+@interface DroppedPreferencesController : AsyncPreferencesController
+@end
+@implementation DroppedPreferencesController
+- (void)completePreferenceLoad:(NSDictionary *)snapshot error:(NSError *)error generation:(uint64_t)generation
+                       session:(MSIMEClientSession *)session client:(id)client {
+    (void)snapshot; (void)error; (void)generation; (void)session; (void)client;
+    ThreadRecordingToolbar *toolbar = [self valueForKey:@"toolbar"];
+    toolbar.completions = toolbar.completions + 1;
+}
+@end
+
+// IMK 放掉控制器时，后台的偏好读取可能还握着它。最后一个强引用若在读取线程上释放，dealloc 就在那条线程上收起浮动工具栏，AppKit 以「Must only be used from the main thread」终止输入法进程（0.52.0 的崩溃报告，#6667）。
+static void DrainMainQueue();
+static void TestPreferenceReadDoesNotDeallocControllerOffMain() {
+    ThreadRecordingToolbar *toolbar = [ThreadRecordingToolbar new];
+    ControlledPreferenceRead *read = [ControlledPreferenceRead new];
+    read.snapshot = @{@"preferences":@{}};
+    @autoreleasepool {
+        DroppedPreferencesController *controller = [DroppedPreferencesController alloc];
+        controller.reads = @[read];
+        controller.appliedPreferences = [NSMutableArray array];
+        [controller setValue:[ShortcutClient new] forKey:@"activeClient"];
+        [controller setValue:@"/synthetic-preferences" forKey:@"preferencesDirectory"];
+        [controller setValue:toolbar forKey:@"toolbar"];
+        [controller reloadPreferences];
+        assert(dispatch_semaphore_wait(read.started, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)) == 0);
+    }
+    // 主线程这一侧的引用已全部放掉，读取还在进行：此后控制器只由后台读取持有。这里不再碰控制器本身，免得主线程上多出一个自动释放的引用把它留到读取之后。
+    assert(toolbar.deactivations == 0);
+    dispatch_semaphore_signal(read.released);
+    SettleWindowLayout();
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
+    while (toolbar.deactivations == 0 && deadline.timeIntervalSinceNow > 0)
+        [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+    assert(toolbar.deactivations == 1);
+    assert(!toolbar.deactivatedOffMain);
+    // 释放排在完成块之前：完成块按弱引用取控制器，取不到就不应用这份偏好，和读取开始前控制器就已释放时一样。
+    DrainMainQueue();
+    assert(toolbar.completions == 0);
+}
+
+// 打开设置应用的完成回调由 NSWorkspace 在并发队列上调用并释放。它持有的回退块若强引用控制器，IMK 在设置应用启动期间放掉控制器时，最后一次释放就落在那条队列上。这里把 NSWorkspace 换成只收下完成回调的桩，再在后台队列上放掉它。
+static void TestDesktopLaunchDoesNotDeallocControllerOffMain() {
+    Method locate = class_getInstanceMethod(NSWorkspace.class, @selector(URLForApplicationWithBundleIdentifier:));
+    Method open = class_getInstanceMethod(NSWorkspace.class, @selector(openApplicationAtURL:configuration:completionHandler:));
+    __block id pendingHandler = nil;
+    IMP originalLocate = method_setImplementation(locate, imp_implementationWithBlock(^NSURL *(id workspace, NSString *identifier) {
+        (void)workspace; (void)identifier;
+        return [NSURL fileURLWithPath:@"/Applications/synthetic.app"];
+    }));
+    IMP originalOpen = method_setImplementation(open, imp_implementationWithBlock(^(id workspace, NSURL *url, id configuration, id handler) {
+        (void)workspace; (void)url; (void)configuration;
+        // 调用方传进来的是栈上的块，按 id 收下只会 retain 不会拷贝，要显式 copy。
+        pendingHandler = [handler copy];
+    }));
+    void (^launches[])(MSIMEInputController *) = {
+        ^(MSIMEInputController *controller) { [controller showDictionary:nil]; },
+        ^(MSIMEInputController *controller) { [controller restartCurrentInputMethod]; },
+    };
+    for (auto launch : launches) {
+        ThreadRecordingToolbar *toolbar = [ThreadRecordingToolbar new];
+        @autoreleasepool {
+            MSIMEInputController *controller = [MSIMEInputController alloc];
+            [controller setValue:toolbar forKey:@"toolbar"];
+            launch(controller);
+        }
+        assert(pendingHandler);
+        // 设置应用还在启动，主线程这一侧已经放掉控制器，再转一圈主队列，让主线程上自动释放的引用都先放掉。
+        DrainMainQueue();
+        dispatch_semaphore_t released = dispatch_semaphore_create(0);
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            pendingHandler = nil;
+            dispatch_semaphore_signal(released);
+        });
+        assert(dispatch_semaphore_wait(released, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0);
+        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
+        while (toolbar.deactivations == 0 && deadline.timeIntervalSinceNow > 0)
+            [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+        assert(toolbar.deactivations == 1);
+        assert(!toolbar.deactivatedOffMain);
+    }
+    method_setImplementation(locate, originalLocate);
+    method_setImplementation(open, originalOpen);
+}
+
 @interface ReloadCountingController : ModeController
 @property(nonatomic) NSUInteger reloads;
 @end
@@ -9668,6 +9768,8 @@ int main(int argc, char **argv) {
         @autoreleasepool { TestSoundsFollowKeysCommitsAndActivation(); }
         @autoreleasepool { TestMusicIsClaimedOnceTheSessionOpens(); }
         @autoreleasepool { TestPreferenceClientGeneration(); }
+        @autoreleasepool { TestPreferenceReadDoesNotDeallocControllerOffMain(); }
+        @autoreleasepool { TestDesktopLaunchDoesNotDeallocControllerOffMain(); }
         @autoreleasepool { TestSavedPreferencesReachTheFocusedController(); }
         @autoreleasepool { TestModeSwitchReachesTheSessionBeforeTheNextKey(); }
         @autoreleasepool { TestFreshProcessActsOnTheSharedSchemeNotTheStaleLocalOne(); }
