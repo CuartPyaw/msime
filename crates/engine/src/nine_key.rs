@@ -908,8 +908,7 @@ impl NineKeySession {
         let initial = self.initial.map(|initial| initial.letter);
         let starts_right =
             |piece: &str| initial.is_none_or(|letter| piece.as_bytes().first() == Some(&letter));
-        let mut syllables = table.spellings_for(remaining, locked_length, splits.first().copied());
-        syllables.retain(|syllable| starts_right(syllable));
+        let mut syllables = Vec::new();
         let association = self.dictionary_association();
         let alternatives = if remaining.is_empty() {
             vec![Vec::new()]
@@ -920,6 +919,9 @@ impl NineKeySession {
             let prior = self
                 .prior
                 .get_or_insert_with(|| SyllablePrior::from_dictionary(dictionary, table));
+            syllables =
+                table.spellings_for(remaining, locked_length, splits.first().copied(), prior);
+            syllables.retain(|syllable| starts_right(syllable));
             let mut alternatives = table.split_paths(remaining, splits, prior);
             alternatives.retain(|path| path.first().is_none_or(|piece| starts_right(piece)));
             // Even an unfinished or invalid tail must still offer the leading syllable for partial selection.
@@ -2175,11 +2177,14 @@ impl SpellingTable {
 
     /// Complete syllables the unlocked digits can start with, or that complete them, longest covered first (NK:238-250). Coverage is counted in digits; after the first digit, a reading already spelled in full comes before a longer completion within one coverage bucket.
     /// 有切分时，只有在切分处或之前结束的音节才算。
+    ///
+    /// 覆盖数字一样多时，已打两位以上的数字先按编码长度排（正好拼完的音节在前，要补键少的在前），编码一样长的按 `prior` 给的单字频度排，频度相同才按字典序；只打了一位数字时不比编码长度，直接按频度排。原先同组只按字典序，`74` 的左列是 pi、qi、ri、si，最常用的 qi 排不到前面，要补键的 sha、shai 也排在 shi、shu 前面（#6654）。
     fn spellings_for(
         &self,
         remaining: &str,
         locked_length: usize,
         split: Option<usize>,
+        prior: &SyllablePrior,
     ) -> Vec<String> {
         if remaining.is_empty() {
             return Vec::new();
@@ -2206,6 +2211,7 @@ impl SpellingTable {
                         Ordering::Equal
                     }
                 })
+                .then_with(|| prior.syllable_score(b).total_cmp(&prior.syllable_score(a)))
                 .then_with(|| a.cmp(b))
         });
         matches.into_iter().map(|(text, _)| text.clone()).collect()
@@ -2267,10 +2273,12 @@ impl SpellingTable {
     }
 }
 
-/// 音节和音节前缀的单字频度：音节取词库里它最常用那个字的权重取对数，前缀取以它开头的音节里最高的那个。九宫格只用它决定每个位置留哪 48 条切分路径，候选本身的先后仍由词库和整句解码决定。
+/// 音节和音节前缀的单字频度：音节取词库里它最常用那个字的权重取对数，前缀取以它开头的音节里最高的那个。九宫格用它决定每个位置留哪 48 条切分路径和左列音节的先后，候选本身的先后仍由词库和整句解码决定。
 #[derive(Default)]
 struct SyllablePrior {
     scores: HashMap<String, f64>,
+    /// 完整音节自己的频度，不取以它开头的更长音节的：左列里 pin 不该沾 ping 的光。
+    syllables: HashMap<String, f64>,
 }
 
 impl SyllablePrior {
@@ -2290,10 +2298,12 @@ impl SyllablePrior {
             .map(|(syllable, _)| weights.get(syllable).copied().unwrap_or(0).max(1) as f64)
             .sum();
         let mut scores: HashMap<String, f64> = HashMap::new();
+        let mut own: HashMap<String, f64> = HashMap::with_capacity(syllables.len());
         for (syllable, _) in syllables {
             // 没有单字行的音节和权重为 0 的一样按 1 算。
             let weight = weights.get(syllable).copied().unwrap_or(0).max(1) as f64;
             let score = (weight / total).ln();
+            own.insert(syllable.clone(), score);
             for end in 1..=syllable.len() {
                 let Some(prefix) = syllable.get(..end) else {
                     continue;
@@ -2304,11 +2314,18 @@ impl SyllablePrior {
                 }
             }
         }
-        Self { scores }
+        Self {
+            scores,
+            syllables: own,
+        }
     }
 
     fn score(&self, piece: &str) -> f64 {
         self.scores.get(piece).copied().unwrap_or(0.0)
+    }
+
+    fn syllable_score(&self, syllable: &str) -> f64 {
+        self.syllables.get(syllable).copied().unwrap_or(0.0)
     }
 }
 
@@ -2491,28 +2508,59 @@ mod tests {
         let table = SpellingTable::new(&[
             "ga", "gan", "gang", "gao", "ha", "han", "hang", "hao", "ni", "a", "ai",
         ]);
+        let prior = SyllablePrior::default();
+        // 覆盖三位数字的音节里，正好三键拼完的 gan、gao、han、hao 在要补第四键的 gang、hang 前面。
         assert_eq!(
-            table.spellings_for("426", 2, None),
+            table.spellings_for("426", 2, None, &prior),
             ["gan", "gao", "han", "hao", "gang", "hang", "ga", "ha"]
         );
         // With 31 digits already locked, only a one-digit completion still fits in 32.
-        assert_eq!(table.spellings_for("2", 31, None), ["a"]);
-        assert!(table.spellings_for("", 0, None).is_empty());
+        assert_eq!(table.spellings_for("2", 31, None, &prior), ["a"]);
+        assert!(table.spellings_for("", 0, None, &prior).is_empty());
         // 在两个数字之后切开，就排除了所有跨过这个位置的音节。
-        assert_eq!(table.spellings_for("426", 0, Some(2)), ["ga", "ha"]);
+        assert_eq!(table.spellings_for("426", 0, Some(2), &prior), ["ga", "ha"]);
+    }
+
+    #[test]
+    fn spellings_put_exact_syllables_first_then_frequent_ones() {
+        // #6654：`74` 下正好两键的 qi、si、ri、pi 先列，按单字频度排；要补键的排在后面，补一键的 shi、pie、pin、qia 在补两键的 pian、qian、ping、piao 前面，同样长的按频度排。
+        let table = SpellingTable::new(&[
+            "pi", "pian", "piao", "pie", "pin", "ping", "qi", "qia", "qian", "ri", "shi", "si",
+        ]);
+        let weights: HashMap<String, i64> = [
+            ("shi", 9_000),
+            ("qi", 5_000),
+            ("si", 3_000),
+            ("ri", 2_000),
+            ("pi", 1_000),
+            ("pian", 800),
+            ("qian", 700),
+            ("ping", 600),
+        ]
+        .into_iter()
+        .map(|(syllable, weight)| (syllable.to_owned(), weight))
+        .collect();
+        let prior = SyllablePrior::from_weights(&table.syllables, &weights);
+        assert_eq!(
+            table.spellings_for("74", 0, None, &prior),
+            ["qi", "si", "ri", "pi", "shi", "pie", "pin", "qia", "pian", "qian", "ping", "piao"]
+        );
     }
 
     #[test]
     fn complete_two_digit_readings_precede_longer_completions() {
         let table = SpellingTable::new(&["pi", "pian", "piao", "pie", "qi", "ri", "shi", "si"]);
-        let choices = table.spellings_for("74", 0, None);
+        let choices = table.spellings_for("74", 0, None, &SyllablePrior::default());
         assert_eq!(&choices[..4], ["pi", "qi", "ri", "si"]);
     }
 
     #[test]
     fn one_digit_keeps_predictive_readings_ahead_of_single_letter_syllables() {
         let table = SpellingTable::new(&["ma", "mi", "o"]);
-        assert_eq!(table.spellings_for("6", 0, None), ["ma", "mi", "o"]);
+        assert_eq!(
+            table.spellings_for("6", 0, None, &SyllablePrior::default()),
+            ["ma", "mi", "o"]
+        );
     }
 
     fn item(word: &str, digits: &str, weight: i64, source: CandidateSource) -> WordItem {
@@ -4893,5 +4941,40 @@ CREATE TABLE tbl_2_y(key TEXT,jp TEXT,value TEXT,weight INTEGER);INSERT INTO tbl
         assert!(!splits_into_syllables_at("mei", &[4]));
         assert!(letters_start_with("mei'guo", "meig"));
         assert!(!letters_start_with("mei", "meig"));
+    }
+
+    /// #6654：出货词库上打 `74`，左列最前面除了首选候选的读音，就是正好两键拼完的 pi、qi、ri、si，pian 这些要补键的排在它们后面。没有 `MSIME_EVAL_RESOURCES` 时跳过。
+    #[test]
+    fn real_dictionary_lists_exact_syllables_before_completions() {
+        let Some(resources) = std::env::var_os("MSIME_EVAL_RESOURCES") else {
+            eprintln!("skipped: MSIME_EVAL_RESOURCES is not set to a resource directory");
+            return;
+        };
+        let user = tempfile::tempdir().expect("user directory");
+        let resources = PathBuf::from(resources);
+        let paths = RuntimePaths {
+            resources: resources.clone(),
+            user_data: user.path().to_path_buf(),
+            cache: user.path().to_path_buf(),
+            dictionaries: resources,
+        };
+        let mut session = open(&paths, false, mixed());
+        type_digits(&mut session, "74");
+        let spellings = session.snapshot().nine_key_spellings;
+        let preferred = &spellings[0];
+        let exact: Vec<&str> = spellings[1..]
+            .iter()
+            .map(String::as_str)
+            .filter(|spelling| spelling != preferred)
+            .take_while(|spelling| encode(spelling) == "74")
+            .collect();
+        let mut expected: Vec<&str> = ["pi", "qi", "ri", "si"]
+            .into_iter()
+            .filter(|spelling| spelling != preferred)
+            .collect();
+        let mut sorted = exact.clone();
+        sorted.sort_unstable();
+        expected.sort_unstable();
+        assert_eq!(sorted, expected, "{spellings:?}");
     }
 }
