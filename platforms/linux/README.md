@@ -169,7 +169,7 @@ msime-linux-setup --update --download   # 升级之后只取回过期的那几�
 
 - **没有设置窗口。** 不带 Tauri 桌面二进制：它要 WebKitGTK 4.1 和 libsoup 3，buster 没有，Tauri 2 也不支持更旧的 WebKitGTK 4.0。于是没有 `msime-linux-settings`、应用列表里的「水杉输入法」和首次配置页；IBus 菜单里打开设置窗口的那些项（设置、词库、手写识别板、屏幕键盘、表情与符号、本地剪贴板、语音面板、云词库、云剪贴板、关于、帮助、反馈）点了没有反应。只能在设置窗口里做的事（词库管理、皮肤、账号与云同步、手写模型下载、检查更新）在这个包里没有替代入口。
 - **没有 Fcitx5 插件。** buster 没有 5.0.20 以上的 Fcitx5；UOS 20 默认的 fcitx 4 也没有水杉的前端，只能走 IBus。
-- **只有 full（水杉拼音）一个版本。** 其他版本配置时要用 `scripts/edition_linux.py` 改写脚本，它需要 Python 3.10。
+- **只有 full（水杉输入法，包名 `msime-linux`）一个版本**，全拼、双拼、五笔等方案都在里面；没有水杉拼音（`msime-linux-pinyin`）、水杉五笔等其他版本的 legacy 包。其他版本配置时要用 `scripts/edition_linux.py` 改写脚本，它需要 Python 3.10。
 - **依赖更低。** Depends 是 `ibus (>= 1.5.19), python3 (>= 3.7), procps`，加上 `dpkg-shlibdeps` 按 buster 的库算出的共享库依赖（`libc6 (>= 2.28)` 等）。这两个下限来自 CMake 缓存变量 `MSIME_IBUS_MIN_VERSION` 和 `MSIME_PYTHON_MIN_VERSION`，它们同时决定配置时检查的 IBus 版本和 `.deb`/`.rpm` 的依赖声明，发布页的包用缺省值 1.5.20 和 3.9。宿主用到的 IBus 接口里只有 `IBUS_INPUT_HINT_PRIVATE` 晚于 1.5.19（1.5.26 才进头文件），旧头文件上按协议的固定值补上（`src/core/ClientEngine.h`）；1.5.27 的 `focus_in_id` 与 `has-focus-id` 原本就按 `IBUS_CHECK_VERSION` 条件编译，旧版 IBus 不报告客户端身份，`ime_mode_scope = app` 因此退化为所有窗口共用一个中英文状态（`src/core/ClientInputModeMemory.h`）。
 - **豆包实时识别不可用。** 它要 `websockets` 15，而 `websockets` 15 需要 Python 3.9；语音服务照常启动，选用豆包时报告依赖不满足。Recommends 里的 `python3-websockets (>= 15)` 在 buster 上满足不了，apt 会跳过它。
 - **升级和卸载时不会替已登录用户处理用户服务。** postinst 和 prerm 用 `systemctl --user -M <uid>@` 联系每个用户的 systemd 管理器，这要 systemd 248，buster 是 241；联系不上时它们只打印该用户要执行的命令，安装和卸载本身不受影响。postinst 顺带为每个用户注册匿名账号的那一步也因此跳过，由在线服务之后重试。

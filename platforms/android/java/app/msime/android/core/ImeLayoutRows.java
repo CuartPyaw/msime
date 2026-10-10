@@ -8,7 +8,6 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
-import android.view.ViewConfiguration;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -855,8 +854,8 @@ final class ImeLayoutRows {
     /** 上一次连点留下的假名还原样在那里：组字没被别的输入改过，或标点仍是光标前那一个字。中间打过别的字、删过、选过候选，都从新的一个假名开始。时间窗只管「再点同一个键算不算接着切换」（`withinWindow`）；→ 是明确的意图，不受它限制。 */
     private boolean japaneseToggleCurrent(boolean withinWindow) {
         if (toggleKey == null || s.connection == null || s.view == null) return false;
-        if (withinWindow && android.os.SystemClock.uptimeMillis() - toggleAt
-                > JapaneseNineKeyLayout.TOGGLE_WINDOW_MS) return false;
+        if (withinWindow && !JapaneseNineKeyLayout.withinToggleWindow(
+                android.os.SystemClock.uptimeMillis() - toggleAt)) return false;
         String editing = InputViewValuePolicy.editingText(s.view);
         if (toggleLiteral.isEmpty()) return editing.equals(toggleEditing);
         CharSequence before = s.connection.getTextBeforeCursor(toggleLiteral.length(), 0);
@@ -932,23 +931,56 @@ final class ImeLayoutRows {
         else inputJapaneseStroke(stroke);
     }
 
-    void showJapaneseFlickPreview(Button button, JapaneseNineKeyLayout.Key key, int direction) {
-        if (s.japaneseFlickPreview != null && s.keyboardRoot != null)
-            s.japaneseFlickPreview.show(button, key, direction, s.keyboardRoot);
+    /** 上一次连点留下的键；组字已被别的输入改过时为 null，此后轻点从键面上的假名重新开始。时间窗由 {@link JapaneseNineKeyLayout#tapDirection} 判断。 */
+    private JapaneseNineKeyLayout.Key currentJapaneseToggleKey() {
+        return japaneseToggleCurrent(false) ? toggleKey : null;
     }
 
+    /** 此刻轻点 `key` 会打出的方向（{@link JapaneseNineKeyLayout#tapDirection}）。按下时的提示中间格照它显示，免得提示写着 あ、松手却打出 い。 */
+    int japaneseTapDirection(JapaneseNineKeyLayout.Key key) {
+        return JapaneseNineKeyLayout.tapDirection(key, s.keyboardLayer == KeyboardLayout.Layer.SYMBOLS,
+            currentJapaneseToggleKey(), toggleDirection, android.os.SystemClock.uptimeMillis() - toggleAt);
+    }
+
+    /** `key` 的连点时间窗还剩多少毫秒，不在连点这个键时为 -1（{@link JapaneseNineKeyLayout#toggleRemainingMillis}）。 */
+    long japaneseToggleRemainingMillis(JapaneseNineKeyLayout.Key key) {
+        return JapaneseNineKeyLayout.toggleRemainingMillis(key, s.keyboardLayer == KeyboardLayout.Layer.SYMBOLS,
+            currentJapaneseToggleKey(), android.os.SystemClock.uptimeMillis() - toggleAt);
+    }
+
+    void showJapaneseFlickPreview(Button button, JapaneseNineKeyLayout.Key key, int direction, int tapDirection) {
+        if (s.japaneseFlickPreview != null && s.keyboardRoot != null)
+            s.japaneseFlickPreview.show(button, key, direction, tapDirection);
+    }
+
+    /** 不管提示属于哪个键都收起：键盘收起、换布局时用。 */
     void hideJapaneseFlickPreview() {
         if (s.japaneseFlickPreview != null) s.japaneseFlickPreview.hide();
+    }
+
+    /** 松开或取消 `button` 时用：提示此刻画的是 `button` 才收起。两只拇指交替按时，先按的键松开不会把后按、还按着的键的提示收掉。 */
+    void hideJapaneseFlickPreview(Button button) {
+        if (s.japaneseFlickPreview != null) s.japaneseFlickPreview.hideFor(button);
+    }
+
+    /** 提示此刻是否显示着（不论属于哪个键）；没有提示浮层时当作显示着，免得按住时每次移动都去重画。 */
+    boolean japaneseFlickPreviewShown() {
+        return s.japaneseFlickPreview == null || s.japaneseFlickPreview.showing();
+    }
+
+    /** 提示此刻是否画的是 `button`。 */
+    boolean japaneseFlickPreviewShownFor(Button button) {
+        return s.japaneseFlickPreview != null && s.japaneseFlickPreview.showingFor(button);
     }
 
     void bindJapaneseFlick(Button button, JapaneseNineKeyLayout.Key key) {
         final float[] origin = new float[2];
         final int[] direction = new int[1];
-        final boolean[] previewShown = new boolean[1];
-        // 轻点只输入键面上的假名，不弹十字预览；按住到系统长按时长，或手指已经滑出方向，才显示它。
-        Runnable holdPreview = () -> {
-            previewShown[0] = true;
-            showJapaneseFlickPreview(button, key, direction[0]);
+        // 按下就显示提示（#6716）：它只占被按的键和四周几 dp（JapaneseFlickGuideGeometry），不再盖住相邻的键，所以轻点也显示，不必像原来的大十字那样等到长按时长才出来。中间格是此刻轻点会打出的假名，每次画都重新算（另一只拇指在这期间打了字，连点就断了）；连点时间窗在按住期间到期时换回键面上的假名。
+        Runnable toggleExpired = () -> {
+            // 提示此刻画的是别的键（另一只拇指后按的）就不抢回来，这个键下一次移动时再画。
+            if (japaneseFlickPreviewShownFor(button))
+                showJapaneseFlickPreview(button, key, direction[0], japaneseTapDirection(key));
         };
         button.setOnTouchListener((ignored, event) -> {
             switch (event.getActionMasked()) {
@@ -956,26 +988,27 @@ final class ImeLayoutRows {
                     origin[0] = event.getX();
                     origin[1] = event.getY();
                     direction[0] = 0;
-                    previewShown[0] = false;
                     button.setPressed(true);
-                    button.removeCallbacks(holdPreview);
-                    button.postDelayed(holdPreview, ViewConfiguration.getLongPressTimeout());
+                    button.removeCallbacks(toggleExpired);
+                    long remaining = japaneseToggleRemainingMillis(key);
+                    if (remaining >= 0) button.postDelayed(toggleExpired, remaining + 1);
+                    showJapaneseFlickPreview(button, key, direction[0], japaneseTapDirection(key));
                     return true;
                 }
                 case MotionEvent.ACTION_MOVE -> {
-                    direction[0] = JapaneseNineKeyLayout.direction(
+                    int next = JapaneseNineKeyLayout.direction(
                         event.getX() - origin[0], event.getY() - origin[1], s.pixels(12));
-                    if (previewShown[0] || direction[0] != 0) {
-                        button.removeCallbacks(holdPreview);
-                        previewShown[0] = true;
-                        showJapaneseFlickPreview(button, key, direction[0]);
+                    // 方向变了才重画；后按的键先松开、把提示收掉了时，还按着的这个键下一次移动就把自己的提示画回来。
+                    if (next != direction[0] || !japaneseFlickPreviewShown()) {
+                        direction[0] = next;
+                        showJapaneseFlickPreview(button, key, direction[0], japaneseTapDirection(key));
                     }
                     return true;
                 }
                 case MotionEvent.ACTION_UP -> {
                     button.setPressed(false);
-                    button.removeCallbacks(holdPreview);
-                    hideJapaneseFlickPreview();
+                    button.removeCallbacks(toggleExpired);
+                    hideJapaneseFlickPreview(button);
                     if (direction[0] == 0) button.performClick();
                     else {
                         s.imeKeyFeedback.playFeedback(button);
@@ -987,8 +1020,8 @@ final class ImeLayoutRows {
                 }
                 case MotionEvent.ACTION_CANCEL -> {
                     button.setPressed(false);
-                    button.removeCallbacks(holdPreview);
-                    hideJapaneseFlickPreview();
+                    button.removeCallbacks(toggleExpired);
+                    hideJapaneseFlickPreview(button);
                     return true;
                 }
                 default -> {

@@ -48,6 +48,11 @@ if rg -n 'VariantGroup|showJapaneseVariants' \
   echo "Android must not duplicate Engine-owned Japanese kana variant tables" >&2
   exit 1
 fi
+# 日语九键的五向提示按下就显示（#6716）：0.3.1 曾把它推迟到系统长按时长之后，用户感觉每个假名都慢半拍。提示已收进被按的键里，不再需要这个延迟。
+if rg -n 'getLongPressTimeout' "$repo_root/platforms/android/java/app/msime/android/core/ImeLayoutRows.java"; then
+  echo "The Japanese nine-key flick guide must show on touch-down, not after the long-press timeout" >&2
+  exit 1
+fi
 # Hangul composition is Engine state. Android labels the Dubeolsik keys and sends their ASCII letters; a syllable table here would be a second automaton that can drift from the Engine's.
 if ! rg -q '4 korean' "$repo_root/crates/host-api/include/msime_client.h" \
   || ! rg -q 'KOREAN_SCHEME = 4;' \
