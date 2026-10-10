@@ -63,7 +63,7 @@ public final class GlideTypingPolicy {
             int point = picked[index];
             if (index > 0) json.append(',');
             json.append('[').append(number(xs[point])).append(',').append(number(ys[point]))
-                .append(',').append(Math.max(0, times[point])).append(']');
+                .append(',').append(BoundsPolicy.nonNegative(times[point])).append(']');
         }
         return json.append("]}").toString();
     }
