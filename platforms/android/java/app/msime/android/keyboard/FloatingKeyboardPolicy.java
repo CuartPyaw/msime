@@ -33,7 +33,7 @@ public final class FloatingKeyboardPolicy {
         if (windowWidthDp <= 0) return MIN_WIDTH_DP;
         int preferred = (int) ((long) windowWidthDp * WIDTH_PERCENT / 100);
         int bounded = BoundsPolicy.bounded(preferred, MIN_WIDTH_DP, MAX_WIDTH_DP);
-        return Math.min(bounded, windowWidthDp);
+        return BoundsPolicy.atMost(bounded, windowWidthDp);
     }
 
     /** 千分比钳到 0–1000。 */
