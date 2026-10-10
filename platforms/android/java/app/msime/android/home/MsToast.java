@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import android.app.Activity;
 import android.content.Context;
 import android.view.Gravity;
@@ -46,7 +48,7 @@ public final class MsToast {
         ViewPolicy.setElevation(toast, Ui.dp(activity, 6));
         ViewPolicy.setPoliteLiveRegion(toast);
 
-        FrameLayout.LayoutParams params = KeyboardGeometry.frameParamsPx(
+        FrameLayout.LayoutParams params = LayoutPolicy.frameParamsPx(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
             Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         int side = Ui.dp(activity, 32);

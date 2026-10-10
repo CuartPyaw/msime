@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DimensionPolicy;
 
 import android.content.Context;
@@ -80,12 +82,12 @@ public final class InputDialog {
         TextView cancel = button("取消", 400, Ui.accent(context));
         ViewPolicy.bindClick(cancel, dialog::cancel);
         buttons.addView(cancel,
-            KeyboardGeometry.weightedHeightPxParams(Ui.dp(context, 48), 1f));
+            LayoutPolicy.weightedHeightPxParams(Ui.dp(context, 48), 1f));
         buttons.addView(Ui.divider(context, false));
         primary = button("确定", 600, Ui.text(context));
         ViewPolicy.bindClick(primary, this::submit);
         buttons.addView(primary,
-            KeyboardGeometry.weightedHeightPxParams(Ui.dp(context, 48), 1f));
+            LayoutPolicy.weightedHeightPxParams(Ui.dp(context, 48), 1f));
         root.addView(buttons, Ui.matchWidth());
 
         dialog.setContentView(root);

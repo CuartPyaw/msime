@@ -1,5 +1,7 @@
 package app.msime.android;
 
+import app.msime.android.LayoutPolicy;
+
 
 import app.msime.android.policy.HostOptionsPolicy;
 import android.app.Activity;
@@ -416,7 +418,7 @@ public final class VoiceRecognitionActivity extends Activity {
      * the wording to drift out of step with what the buttons do.
      */
     private void showRecordingControls() {
-        LinearLayout root = KeyboardGeometry.column(this);
+        LinearLayout root = LayoutPolicy.column(this);
         int pad = DimensionPolicy.pixels(this, 20);
         ViewPolicy.setPadding(root, pad, pad, pad, pad);
         TextView title = ViewPolicy.textLabel(this, "正在录音", 18);
@@ -427,7 +429,7 @@ public final class VoiceRecognitionActivity extends Activity {
         recordingHint = hint;
         ViewPolicy.setPadding(hint, 0, pad / 2, 0, pad);
         root.addView(hint);
-        LinearLayout actions = KeyboardGeometry.row(this);
+        LinearLayout actions = LayoutPolicy.row(this);
         ViewPolicy.setGravity(actions, Gravity.END);
         Button cancel = ViewPolicy.newPressButton(this);
         cancel.setText("取消");
@@ -445,7 +447,7 @@ public final class VoiceRecognitionActivity extends Activity {
             stopRecognition();
         });
         actions.addView(done);
-        root.addView(actions, KeyboardGeometry.matchWidthWrapParams());
+        root.addView(actions, LayoutPolicy.matchWidthWrapParams());
         setContentView(root);
     }
 

@@ -1,5 +1,7 @@
 package app.msime.android;
 
+import app.msime.android.LayoutPolicy;
+
 
 import android.app.Dialog;
 import android.content.res.Configuration;
@@ -45,7 +47,7 @@ final class ImeBottomBar {
 
     /** 建好底栏并叠到外框底部；每次 onCreateInputView 新建控件后调用一次。 */
     void build(MSIMEInputService.PanelSurface surface) {
-        bar = KeyboardGeometry.row(s);
+        bar = LayoutPolicy.row(s);
         ViewPolicy.setCenteredVertically(bar);
         bar.setContentDescription("键盘底栏");
         // 系统的输入法选择框，与 Android 自己画在导航栏里的切换按钮一致；只装了一个别的输入法时也能用，组字不结束，理由见 bindInputMethodPicker。
@@ -62,7 +64,7 @@ final class ImeBottomBar {
         KeyboardGeometry.setKeyTextSize(track, 12);
         track.setContentDescription("左右滑动移动光标");
         bindCursorTrack(track);
-        bar.addView(track, KeyboardGeometry.weightedMatchParentParams(1));
+        bar.addView(track, LayoutPolicy.weightedMatchParentParams(1));
         clipboardButton = new KeyboardShortcutButton(s, KeyboardShortcutIconPolicy.Icon.CLIPBOARD);
         ViewPolicy.setAllCapsFalse(clipboardButton);
         clipboardButton.setText("剪贴板");
@@ -81,7 +83,7 @@ final class ImeBottomBar {
     }
 
     private LinearLayout.LayoutParams buttonParams() {
-        LinearLayout.LayoutParams params = KeyboardGeometry.linearParamsPx(s.pixels(56),
+        LinearLayout.LayoutParams params = LayoutPolicy.linearParamsPx(s.pixels(56),
             LinearLayout.LayoutParams.MATCH_PARENT);
         params.setMarginStart(s.pixels(8));
         params.setMarginEnd(s.pixels(8));

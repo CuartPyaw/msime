@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import android.content.Context;
 import android.view.Gravity;
 import android.view.View;
@@ -27,7 +29,7 @@ final class SheetOptionView {
 
         TextView text = Ui.centeredLabel(context, nested ? label + " ›" : label,
             Ui.TEXT_SHEET_OPTION, bold ? 600 : 400, color);
-        FrameLayout.LayoutParams textParams = KeyboardGeometry.frameParamsPx(
+        FrameLayout.LayoutParams textParams = LayoutPolicy.frameParamsPx(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
             Gravity.CENTER);
         textParams.leftMargin = Ui.dp(context, Ui.SHEET_OPTION_TEXT_INSET);

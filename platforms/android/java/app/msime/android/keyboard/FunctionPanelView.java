@@ -1,5 +1,7 @@
 package app.msime.android;
 
+import app.msime.android.LayoutPolicy;
+
 
 import android.content.Context;
 import android.graphics.Canvas;
@@ -81,9 +83,9 @@ public final class FunctionPanelView extends LinearLayout {
         grid.setSpacing(ITEM_HEIGHT_DP, 16f, 4f, 4f);
         dots = new KeyboardPagerDots(context);
         grid.setOnPageChangeListener((page, count) -> dots.setActive(page, true));
-        LinearLayout.LayoutParams gridParams = KeyboardGeometry.weightedWidthParams(1f);
+        LinearLayout.LayoutParams gridParams = LayoutPolicy.weightedWidthParams(1f);
         addView(grid, gridParams);
-        LinearLayout.LayoutParams dotParams = KeyboardGeometry.wrapParams();
+        LinearLayout.LayoutParams dotParams = LayoutPolicy.wrapParams();
         dotParams.gravity = Gravity.CENTER_HORIZONTAL;
         dotParams.topMargin = DimensionPolicy.pixels(context, 8);
         addView(dots, dotParams);

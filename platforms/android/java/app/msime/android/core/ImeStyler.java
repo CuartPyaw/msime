@@ -1,5 +1,7 @@
 package app.msime.android;
 
+import app.msime.android.LayoutPolicy;
+
 
 import android.content.res.Configuration;
 import android.graphics.Color;
@@ -509,7 +511,7 @@ final class ImeStyler {
         Configuration configuration = s.getResources().getConfiguration();
         if (s.floatingDrawn()) {
             // 浮动：缩窄成圆角面板贴在根视图左上角，位置由 MSIMEInputService.positionFloatingKeyboard 用平移决定；高度包裹内容，不能是 MATCH_PARENT，否则键盘列会被撑到整屏高。
-            s.keyboardSurface.setLayoutParams(KeyboardGeometry.frameParamsPx(
+            s.keyboardSurface.setLayoutParams(LayoutPolicy.frameParamsPx(
                 s.pixels(FloatingKeyboardPolicy.widthDp(configuration.screenWidthDp)),
                 FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.LEFT));
             ViewPolicy.setElevation(s.keyboardSurface, s.pixels(10));
@@ -522,7 +524,7 @@ final class ImeStyler {
         int widthDp = KeyboardFormFactorPolicy.surfaceWidthDp(
             configuration.smallestScreenWidthDp, configuration.screenWidthDp, s.splitKeyboardDrawn());
         int width = widthDp == 0 ? FrameLayout.LayoutParams.MATCH_PARENT : s.pixels(widthDp);
-        FrameLayout.LayoutParams params = KeyboardGeometry.frameParamsPx(
+        FrameLayout.LayoutParams params = LayoutPolicy.frameParamsPx(
             width, FrameLayout.LayoutParams.MATCH_PARENT, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         s.keyboardSurface.setLayoutParams(params);
         ViewPolicy.setElevation(s.keyboardSurface, widthDp == 0 ? 0 : s.pixels(10));

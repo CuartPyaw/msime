@@ -1,5 +1,7 @@
 package app.msime.android;
 
+import app.msime.android.LayoutPolicy;
+
 
 import android.inputmethodservice.InputMethodService;
 import app.msime.android.core.Telemetry;
@@ -4146,7 +4148,7 @@ public final class MSIMEInputService extends InputMethodService {
         button.setText("更多");
         imeStyler.styleButton(button, true);
         bindAction(button, action);
-        row.addView(button, KeyboardGeometry.weightedWrapParams(1));
+        row.addView(button, LayoutPolicy.weightedWrapParams(1));
         return button;
     }
 
@@ -4159,7 +4161,7 @@ public final class MSIMEInputService extends InputMethodService {
         KeyboardGeometry.setKeyTextSize(button, 13);
         imeStyler.styleButton(button, KeyboardKeyRole.PILL, skin);
         bindAction(button, action);
-        row.addView(button, KeyboardGeometry.weightedWrapParams(1));
+        row.addView(button, LayoutPolicy.weightedWrapParams(1));
         return button;
     }
 
@@ -4169,7 +4171,7 @@ public final class MSIMEInputService extends InputMethodService {
         button.setText(label);
         imeStyler.styleButton(button, true);
         bindAction(button, action);
-        row.addView(button, KeyboardGeometry.weightedWrapParams(1));
+        row.addView(button, LayoutPolicy.weightedWrapParams(1));
         return button;
     }
 
@@ -5284,10 +5286,10 @@ public final class MSIMEInputService extends InputMethodService {
     private void renderVoiceResult() {
         if (voiceResultPanel == null) return;
         voiceResultPanel.removeAllViews();
-        LinearLayout header = KeyboardGeometry.row(this);
+        LinearLayout header = LayoutPolicy.row(this);
         TextView title = ViewPolicy.textLabel(this, "语音结果", 18);
         KeyboardGeometry.setKeyTextSize(title, 18);
-        header.addView(title, KeyboardGeometry.weightedWrapParams(1));
+        header.addView(title, LayoutPolicy.weightedWrapParams(1));
         button(header, "返回键盘", this::closeVoiceResult);
         voiceResultPanel.addView(header);
         if (voiceResultEntry == null) {
@@ -5304,11 +5306,11 @@ public final class MSIMEInputService extends InputMethodService {
             voiceResultPanel.addView(hint);
             Button insert = button(voiceResultPanel, "插入语音结果", this::insertVoiceResult);
             insert.setContentDescription("插入并清除语音结果");
-            insert.setLayoutParams(KeyboardGeometry.matchWidthWrapParams());
+            insert.setLayoutParams(LayoutPolicy.matchWidthWrapParams());
         }
         Button recognize = button(voiceResultPanel, "开始语音识别",
             this::startVoiceRecognition);
-        recognize.setLayoutParams(KeyboardGeometry.matchWidthWrapParams());
+        recognize.setLayoutParams(LayoutPolicy.matchWidthWrapParams());
         VoiceConfiguration configured = VoiceConfiguration.read(preferencesDirectory, "ime-preview");
         boolean platformRecognizerAvailable = VoiceRecognitionActivity.available(this);
         ViewPolicy.setEnabled(recognize, voiceInputEnabled
@@ -6818,7 +6820,7 @@ public final class MSIMEInputService extends InputMethodService {
             if (floatingDrawn()) positionFloatingKeyboard();
         });
         imeStyler.applyKeyboardSurfaceGeometry();
-        LinearLayout keyboard = KeyboardGeometry.column(this);
+        LinearLayout keyboard = LayoutPolicy.column(this);
         // 停靠时键盘列按系统栏留出内边距（导航栏那一截画键盘底色），手势导航下再垫一条底栏（ImeBottomBar）；浮动时面板悬在应用上面，不留，系统栏的四边只用来限制面板能拖到哪里。
         keyboard.setOnApplyWindowInsetsListener((target, insets) -> {
             imeBottomBar.readInsets(insets);
@@ -6827,19 +6829,19 @@ public final class MSIMEInputService extends InputMethodService {
             if (floatingDrawn()) positionFloatingKeyboard();
             return insets;
         });
-        keyboardSurface.addView(keyboard, KeyboardGeometry.frameMatchParentParams());
+        keyboardSurface.addView(keyboard, LayoutPolicy.frameMatchParentParams());
         imeBottomBar.build(surface);
         japaneseFlickPreview = new JapaneseFlickPreview(this);
-        keyboardSurface.addView(japaneseFlickPreview, KeyboardGeometry.frameMatchParentParams());
+        keyboardSurface.addView(japaneseFlickPreview, LayoutPolicy.frameMatchParentParams());
         quickDeleteOverlay = new QuickDeleteOverlay(this);
-        keyboardSurface.addView(quickDeleteOverlay, KeyboardGeometry.frameMatchParentParams());
+        keyboardSurface.addView(quickDeleteOverlay, LayoutPolicy.frameMatchParentParams());
         surface.fullBleed.add(quickDeleteOverlay);
         // 按键气泡的覆盖层：盖在整个键盘上、初始为空，空的 FrameLayout 不拦截触摸，由 ImeLetterRows 持有。
         surface.fullBleed.add(japaneseFlickPreview);
         imeLetterRows.keyPreviewLayer = new FrameLayout(this);
         surface.fullBleed.add(imeLetterRows.keyPreviewLayer);
-        keyboardSurface.addView(imeLetterRows.keyPreviewLayer, KeyboardGeometry.frameMatchParentParams());
-        LinearLayout candidateRegion = KeyboardGeometry.column(this);
+        keyboardSurface.addView(imeLetterRows.keyPreviewLayer, LayoutPolicy.frameMatchParentParams());
+        LinearLayout candidateRegion = LayoutPolicy.column(this);
         imeToolbar.buildCandidateHeader(candidateRegion);
         diagnosticView = ViewPolicy.textLabel(this, "", 12);
         KeyboardGeometry.setKeyTextSize(diagnosticView, 12);
@@ -6847,27 +6849,27 @@ public final class MSIMEInputService extends InputMethodService {
         // 提示原先是 Toast，读屏会念出来；改到诊断行后由实时区域念出。
         diagnosticView.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         ViewPolicy.hide(diagnosticView);
-        candidateRegion.addView(diagnosticView, KeyboardGeometry.matchWidthWrapParams());
-        candidateRegion.addView(shortcutScroll, KeyboardGeometry.matchWidthHeightPx(
+        candidateRegion.addView(diagnosticView, LayoutPolicy.matchWidthWrapParams());
+        candidateRegion.addView(shortcutScroll, LayoutPolicy.matchWidthHeightPx(
             pixels(KeyboardGeometry.DESIGN_TOOLBAR_ROW_HEIGHT_DP)));
         imeToolbar.addRecentClipRow(candidateRegion);
-        nineKeySpellings = KeyboardGeometry.row(this);
+        nineKeySpellings = LayoutPolicy.row(this);
         nineKeySpellingScroll = new HorizontalScrollView(this);
         nineKeySpellingScroll.setHorizontalScrollBarEnabled(false);
         nineKeySpellingScroll.setContentDescription("九键拼音选择");
         nineKeySpellingScroll.addView(nineKeySpellings);
         ViewPolicy.hide(nineKeySpellingScroll);
-        candidates = KeyboardGeometry.row(this);
+        candidates = LayoutPolicy.row(this);
         horizontalCandidateScroll = new HorizontalScrollView(this);
         // 和九键拼音行一样不要滚动条：候选条只有一行高，默认滚动条贴在底边，浅色皮肤上是一条细灰线（#5933 录屏里看得到）。
         horizontalCandidateScroll.setHorizontalScrollBarEnabled(false);
         horizontalCandidateScroll.addView(candidates);
-        verticalCandidates = KeyboardGeometry.column(this);
+        verticalCandidates = LayoutPolicy.column(this);
         verticalCandidateScroll = new ScrollView(this);
         verticalCandidateScroll.addView(verticalCandidates);
         candidateViewport = new FrameLayout(this);
-        candidateViewport.addView(horizontalCandidateScroll, KeyboardGeometry.frameMatchParentParams());
-        candidateViewport.addView(verticalCandidateScroll, KeyboardGeometry.frameMatchParentParams());
+        candidateViewport.addView(horizontalCandidateScroll, LayoutPolicy.frameMatchParentParams());
+        candidateViewport.addView(verticalCandidateScroll, LayoutPolicy.frameMatchParentParams());
         ViewPolicy.hide(candidateViewport);
         imeToolbar.addCandidateLine(candidateRegion, candidateViewport,
             pixels(ImeToolbar.CANDIDATE_LINE_DP));
@@ -6894,7 +6896,7 @@ public final class MSIMEInputService extends InputMethodService {
             @Override public void dock() { setFloatingKeyboard(false); }
         });
         ViewPolicy.hide(floatingBar);
-        keyboard.addView(floatingBar, KeyboardGeometry.matchWidthHeightPx(
+        keyboard.addView(floatingBar, LayoutPolicy.matchWidthHeightPx(
             pixels(FloatingKeyboardPolicy.BAR_HEIGHT_DP)));
         keyboard.addView(candidateRegion);
         // 功能面板和候选展开网格盖住键区但不盖顶部一行，设计里打开它们时工具栏或候选条仍在上面；顶部一行高度会变（读音行、释义行），所以跟着它的实际底边走。
@@ -6905,7 +6907,7 @@ public final class MSIMEInputService extends InputMethodService {
         // ordinary key rows and controls are hidden while this weighted child is visible.
         replyKeyboard = imePanels.createReplyKeyboard();
         ViewPolicy.hide(replyKeyboard);
-        keyboard.addView(replyKeyboard, KeyboardGeometry.weightedWidthParams(1));
+        keyboard.addView(replyKeyboard, LayoutPolicy.weightedWidthParams(1));
         // 键距是键的外边距；这两个容器把落在空隙里的按下交给拥有那段空隙的键，画面不变（见 KeyboardKeyArea）。
         KeyboardKeyArea letterArea = new KeyboardKeyArea(this, this::followsKeySpacing);
         letterArea.setGlideTracker(imeGlideTyping);
@@ -6916,13 +6918,13 @@ public final class MSIMEInputService extends InputMethodService {
         actionRow.setOrientation(LinearLayout.HORIZONTAL);
         actionRow.setContentDescription("键盘功能行");
         actionRowSignature = "";
-        imeFrame.wrap(actionRow, KeyboardGeometry.matchWidthHeightPx(
+        imeFrame.wrap(actionRow, LayoutPolicy.matchWidthHeightPx(
             pixels(KeyboardGeometry.KEY_ROW_HEIGHT_DP)));
         actionRow.setTag(KeyboardHeightRole.bottomRow());
         // Staging only: every control below is created here and then moved to the row that owns it.
         // The case and delete keys go to the last of the 26 key rows, the shortcut glyphs to the
         // toolbar, and what the action row keeps is whatever KeyboardActionRow lists for the surface.
-        LinearLayout controls = KeyboardGeometry.row(this);
+        LinearLayout controls = LayoutPolicy.row(this);
         shiftButton = button(controls, "⇧", () -> {
             // 韩语键面上 Shift 是双辅音那一排，不是切到英文的入口；越南语和藏文里它是字母大小写。
             if (!dedicatedEnglish && session != 0 && !helpcodeCompositionEligible()
@@ -7010,7 +7012,7 @@ public final class MSIMEInputService extends InputMethodService {
         // last of them, and they are the same long-lived instances the rest of the host talks to.
         imeLetterRows.rebuildKeyRows();
         imeBottomRow.updateActionRow();
-        expandedCandidates = KeyboardGeometry.column(this);
+        expandedCandidates = LayoutPolicy.column(this);
         ViewPolicy.setSymmetricPadding(expandedCandidates, 24, 16);
         ViewPolicy.setBackgroundColor(expandedCandidates, 0xfff5f5f5);
         expandedCandidates.setContentDescription("候选面板");
@@ -7018,52 +7020,52 @@ public final class MSIMEInputService extends InputMethodService {
         expandedCandidateScroll = new ScrollView(this);
         expandedCandidateScroll.setFillViewport(true);
         expandedCandidateScroll.addView(expandedCandidates,
-            KeyboardGeometry.scrollMatchParentParams());
+            LayoutPolicy.scrollMatchParentParams());
         ViewPolicy.hide(expandedCandidateScroll);
-        keyboardSurface.addView(expandedCandidateScroll, KeyboardGeometry.frameMatchParentParams());
-        keyboardSurface.addView(imeNineKeyPanel.build(), KeyboardGeometry.frameMatchParentParams());
-        clipboardPanel = KeyboardGeometry.column(this);
+        keyboardSurface.addView(expandedCandidateScroll, LayoutPolicy.frameMatchParentParams());
+        keyboardSurface.addView(imeNineKeyPanel.build(), LayoutPolicy.frameMatchParentParams());
+        clipboardPanel = LayoutPolicy.column(this);
         ViewPolicy.setSymmetricPadding(clipboardPanel, 24, 16);
         ViewPolicy.setBackgroundColor(clipboardPanel, Color.parseColor(skin.background()));
         clipboardPanel.setContentDescription("剪贴板历史");
         clipboardScroll = new ScrollView(this);
         // 和候选、方案面板一样撑满整个键区：原先内容少时滚动视图本身是透明的，下面的键从空白处露出来。
         clipboardScroll.setFillViewport(true);
-        clipboardScroll.addView(clipboardPanel, KeyboardGeometry.scrollMatchParentParams());
+        clipboardScroll.addView(clipboardPanel, LayoutPolicy.scrollMatchParentParams());
         ViewPolicy.hide(clipboardScroll);
-        keyboardSurface.addView(clipboardScroll, KeyboardGeometry.frameMatchParentParams());
-        schemePanel = KeyboardGeometry.column(this);
+        keyboardSurface.addView(clipboardScroll, LayoutPolicy.frameMatchParentParams());
+        schemePanel = LayoutPolicy.column(this);
         ViewPolicy.setSymmetricPadding(schemePanel, 24, 16);
         ViewPolicy.setBackgroundColor(schemePanel, Color.parseColor(skin.background()));
         schemePanel.setContentDescription("输入方案选择器");
         schemeScroll = new ScrollView(this);
-        schemeScroll.addView(schemePanel, KeyboardGeometry.scrollMatchParentParams());
+        schemeScroll.addView(schemePanel, LayoutPolicy.scrollMatchParentParams());
         schemeScroll.setFillViewport(true);
         ViewPolicy.hide(schemeScroll);
-        keyboardSurface.addView(schemeScroll, KeyboardGeometry.frameMatchParentParams());
-        skinPanel = KeyboardGeometry.column(this);
+        keyboardSurface.addView(schemeScroll, LayoutPolicy.frameMatchParentParams());
+        skinPanel = LayoutPolicy.column(this);
         ViewPolicy.setSymmetricPadding(skinPanel, 24, 16);
         ViewPolicy.setBackgroundColor(skinPanel, Color.parseColor(skin.background()));
         skinPanel.setContentDescription("键盘皮肤选择器");
         skinScroll = new ScrollView(this);
-        skinScroll.addView(skinPanel, KeyboardGeometry.scrollMatchParentParams());
+        skinScroll.addView(skinPanel, LayoutPolicy.scrollMatchParentParams());
         skinScroll.setFillViewport(true);
         ViewPolicy.hide(skinScroll);
-        keyboardSurface.addView(skinScroll, KeyboardGeometry.frameMatchParentParams());
-        layoutSettingsPanel = KeyboardGeometry.column(this);
+        keyboardSurface.addView(skinScroll, LayoutPolicy.frameMatchParentParams());
+        layoutSettingsPanel = LayoutPolicy.column(this);
         ViewPolicy.setSymmetricPadding(layoutSettingsPanel, 24, 16);
         ViewPolicy.setBackgroundColor(layoutSettingsPanel, Color.parseColor(skin.background()));
         layoutSettingsPanel.setContentDescription("键盘设置");
-        LinearLayout layoutHeader = KeyboardGeometry.row(this);
+        LinearLayout layoutHeader = LayoutPolicy.row(this);
         TextView layoutTitle = ViewPolicy.textLabel(this, "键盘设置", 18);
         KeyboardGeometry.setKeyTextSize(layoutTitle, 18);
-        layoutHeader.addView(layoutTitle, KeyboardGeometry.weightedWrapParams(1));
+        layoutHeader.addView(layoutTitle, LayoutPolicy.weightedWrapParams(1));
         Button closeLayout = button(layoutHeader, "返回键盘", this::closeLayoutSettings);
         closeLayout.setContentDescription("返回键盘");
         layoutSettingsPanel.addView(layoutHeader);
-        LinearLayout keyboardHeightHeader = KeyboardGeometry.row(this);
+        LinearLayout keyboardHeightHeader = LayoutPolicy.row(this);
         TextView keyboardHeightLabel = textView("键盘高度");
-        keyboardHeightHeader.addView(keyboardHeightLabel, KeyboardGeometry.weightedWrapParams(1));
+        keyboardHeightHeader.addView(keyboardHeightLabel, LayoutPolicy.weightedWrapParams(1));
         keyboardHeightValue = textView("");
         keyboardHeightHeader.addView(keyboardHeightValue);
         layoutSettingsPanel.addView(keyboardHeightHeader);
@@ -7071,9 +7073,9 @@ public final class MSIMEInputService extends InputMethodService {
         keyboardHeightSlider.setContentDescription("键盘高度");
         configureHeightSlider(keyboardHeightSlider);
         layoutSettingsPanel.addView(keyboardHeightSlider);
-        LinearLayout keySpacingHeader = KeyboardGeometry.row(this);
+        LinearLayout keySpacingHeader = LayoutPolicy.row(this);
         TextView keySpacingLabel = textView("按键间距");
-        keySpacingHeader.addView(keySpacingLabel, KeyboardGeometry.weightedWrapParams(1));
+        keySpacingHeader.addView(keySpacingLabel, LayoutPolicy.weightedWrapParams(1));
         keySpacingValue = textView("");
         keySpacingHeader.addView(keySpacingValue);
         layoutSettingsPanel.addView(keySpacingHeader);
@@ -7081,9 +7083,9 @@ public final class MSIMEInputService extends InputMethodService {
         keySpacingSlider.setContentDescription("按键间距");
         configureSpacingSlider(keySpacingSlider, true);
         layoutSettingsPanel.addView(keySpacingSlider);
-        LinearLayout rowSpacingHeader = KeyboardGeometry.row(this);
+        LinearLayout rowSpacingHeader = LayoutPolicy.row(this);
         TextView rowSpacingLabel = textView("行间距");
-        rowSpacingHeader.addView(rowSpacingLabel, KeyboardGeometry.weightedWrapParams(1));
+        rowSpacingHeader.addView(rowSpacingLabel, LayoutPolicy.weightedWrapParams(1));
         rowSpacingValue = textView("");
         rowSpacingHeader.addView(rowSpacingValue);
         layoutSettingsPanel.addView(rowSpacingHeader);
@@ -7110,7 +7112,7 @@ public final class MSIMEInputService extends InputMethodService {
         layoutSettingsScroll = new ScrollView(this);
         layoutSettingsScroll.addView(layoutSettingsPanel);
         ViewPolicy.hide(layoutSettingsScroll);
-        keyboardSurface.addView(layoutSettingsScroll, KeyboardGeometry.frameMatchParentParams());
+        keyboardSurface.addView(layoutSettingsScroll, LayoutPolicy.frameMatchParentParams());
         layoutAdjustView = new KeyboardLayoutAdjustView(this,
             new KeyboardLayoutAdjustView.Listener() {
                 @Override public void keySpacing(int tenths) {
@@ -7141,50 +7143,50 @@ public final class MSIMEInputService extends InputMethodService {
                 @Override public void close() { closeLayoutSettings(); }
             });
         ViewPolicy.hide(layoutAdjustView);
-        keyboardSurface.addView(layoutAdjustView, KeyboardGeometry.frameMatchParentParams());
-        voiceResultPanel = KeyboardGeometry.column(this);
+        keyboardSurface.addView(layoutAdjustView, LayoutPolicy.frameMatchParentParams());
+        voiceResultPanel = LayoutPolicy.column(this);
         ViewPolicy.setSymmetricPadding(voiceResultPanel, 24, 16);
         ViewPolicy.setBackgroundColor(voiceResultPanel, Color.parseColor(skin.background()));
         voiceResultPanel.setContentDescription("语音结果面板");
         voiceResultScroll = new ScrollView(this);
         voiceResultScroll.addView(voiceResultPanel);
         ViewPolicy.hide(voiceResultScroll);
-        keyboardSurface.addView(voiceResultScroll, KeyboardGeometry.frameMatchParentParams());
-        aiPolishContainer = KeyboardGeometry.column(this);
+        keyboardSurface.addView(voiceResultScroll, LayoutPolicy.frameMatchParentParams());
+        aiPolishContainer = LayoutPolicy.column(this);
         ViewPolicy.setBackgroundColor(aiPolishContainer, Color.parseColor(skin.background()));
-        aiPolishPanel = KeyboardGeometry.column(this);
+        aiPolishPanel = LayoutPolicy.column(this);
         ViewPolicy.setSymmetricPadding(aiPolishPanel, 24, 16);
         ViewPolicy.setBackgroundColor(aiPolishPanel, Color.parseColor(skin.background()));
         aiPolishPanel.setContentDescription("AI 润色面板");
         aiPolishScroll = new ScrollView(this);
         aiPolishScroll.setFillViewport(true);
         aiPolishScroll.addView(aiPolishPanel);
-        aiPolishContainer.addView(aiPolishScroll, KeyboardGeometry.weightedWidthParams(1));
-        aiPolishActions = KeyboardGeometry.column(this);
+        aiPolishContainer.addView(aiPolishScroll, LayoutPolicy.weightedWidthParams(1));
+        aiPolishActions = LayoutPolicy.column(this);
         ViewPolicy.setPadding(aiPolishActions, 24, 0, 24, 16);
-        aiPolishContainer.addView(aiPolishActions, KeyboardGeometry.matchWidthWrapParams());
+        aiPolishContainer.addView(aiPolishActions, LayoutPolicy.matchWidthWrapParams());
         ViewPolicy.hide(aiPolishContainer);
-        keyboardSurface.addView(aiPolishContainer, KeyboardGeometry.frameMatchParentParams());
-        moreToolsPanel = KeyboardGeometry.column(this);
+        keyboardSurface.addView(aiPolishContainer, LayoutPolicy.frameMatchParentParams());
+        moreToolsPanel = LayoutPolicy.column(this);
         ViewPolicy.setPadding(moreToolsPanel, pixels(12), 0, pixels(12), pixels(10));
         ViewPolicy.setBackgroundColor(moreToolsPanel, Color.parseColor(skin.background()));
         moreToolsScroll = new ScrollView(this);
         moreToolsScroll.setFillViewport(true);
         moreToolsScroll.setVerticalScrollBarEnabled(false);
-        moreToolsScroll.addView(moreToolsPanel, KeyboardGeometry.scrollMatchParentParams());
+        moreToolsScroll.addView(moreToolsPanel, LayoutPolicy.scrollMatchParentParams());
         ViewPolicy.hide(moreToolsScroll);
-        keyboardSurface.addView(moreToolsScroll, KeyboardGeometry.frameMatchParentParams());
-        phrasePanel = KeyboardGeometry.column(this);
+        keyboardSurface.addView(moreToolsScroll, LayoutPolicy.frameMatchParentParams());
+        phrasePanel = LayoutPolicy.column(this);
         phrasePanel.setContentDescription("常用语面板");
         phraseScroll = new ScrollView(this);
         // 与皮肤、剪贴板面板一样铺满键盘区：只按内容高度时，没有常用语的那一行提示只盖住第一排键，空白处的触摸还会穿到下面的键上。
-        phraseScroll.addView(phrasePanel, KeyboardGeometry.scrollMatchParentParams());
+        phraseScroll.addView(phrasePanel, LayoutPolicy.scrollMatchParentParams());
         phraseScroll.setFillViewport(true);
         ViewPolicy.setClickable(phraseScroll, true);
         ViewPolicy.hide(phraseScroll);
-        keyboardSurface.addView(phraseScroll, KeyboardGeometry.frameMatchParentParams());
+        keyboardSurface.addView(phraseScroll, LayoutPolicy.frameMatchParentParams());
         textEditPanel = imeTextEditPanel.build();
-        keyboardSurface.addView(textEditPanel, KeyboardGeometry.frameMatchParentParams());
+        keyboardSurface.addView(textEditPanel, LayoutPolicy.frameMatchParentParams());
         imePanels.buildEmojiPanel();
         imePanels.buildSymbolPanel();
         renderLayoutSettingsState();

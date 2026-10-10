@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DimensionPolicy;
 
 import app.msime.android.MainThreadPolicy;
@@ -485,7 +487,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         if (divider) {
             View line = new View(this);
             ViewPolicy.setBackgroundColor(line, Ui.hairline(this));
-            card.addView(line, KeyboardGeometry.matchWidthHeightPx(
+            card.addView(line, LayoutPolicy.matchWidthHeightPx(
                 BoundsPolicy.bounded(Ui.dp(this, 1) / 2, 1, Integer.MAX_VALUE)));
         }
         LinearLayout row = Ui.row(this);
@@ -511,7 +513,7 @@ public final class OnboardingActivity extends AppCompatActivity {
             Ui.setHorizontalPaddingDp(button, this, 8);
             ViewPolicy.setBackground(button, Ui.ripple(this));
             ViewPolicy.bindClick(button, fix);
-            row.addView(button, KeyboardGeometry.linearParamsPx(
+            row.addView(button, LayoutPolicy.linearParamsPx(
                 ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dp(this, 40)));
         }
         card.addView(row);

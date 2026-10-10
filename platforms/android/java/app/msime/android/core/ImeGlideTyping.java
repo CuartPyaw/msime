@@ -1,5 +1,7 @@
 package app.msime.android;
 
+import app.msime.android.LayoutPolicy;
+
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.view.MotionEvent;
@@ -199,7 +201,7 @@ final class ImeGlideTyping implements KeyboardKeyArea.GlideTracker {
         if (layer == null) return;
         if (trail == null || trail.getParent() != layer) {
             trail = new GlideTrailView(s);
-            layer.addView(trail, KeyboardGeometry.frameMatchParentParams());
+            layer.addView(trail, LayoutPolicy.frameMatchParentParams());
         }
         area.getLocationInWindow(areaLocation);
         layer.getLocationInWindow(trailLocation);

@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import android.content.Context;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
@@ -300,7 +302,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         SegmentedControl layout = new SegmentedControl(context);
         layout.setOptions(List.of("26 键", "9 键"), nine ? 1 : 0);
         ViewPolicy.setMinimumHeight(layout, Ui.dp(context, 32));
-        row.addView(layout, KeyboardGeometry.linearParamsPx(
+        row.addView(layout, LayoutPolicy.linearParamsPx(
             ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dp(context, 32)));
         LinearLayout board = card(context, content, 12);
         KeyHeatmapView heatmap = new KeyHeatmapView(context);
@@ -441,8 +443,8 @@ public final class StatisticsFragment extends HomeTabFragment {
     /** 并排两张 KPI 卡。 */
     private static void tiles(Context context, LinearLayout parent, View left, View right) {
         LinearLayout row = Ui.row(context);
-        LinearLayout.LayoutParams leftParams = KeyboardGeometry.weightedMatchParentParams(1f);
-        LinearLayout.LayoutParams rightParams = KeyboardGeometry.weightedMatchParentParams(1f);
+        LinearLayout.LayoutParams leftParams = LayoutPolicy.weightedMatchParentParams(1f);
+        LinearLayout.LayoutParams rightParams = LayoutPolicy.weightedMatchParentParams(1f);
         rightParams.setMarginStart(Ui.dp(context, 10));
         row.addView(left, leftParams);
         row.addView(right, rightParams);
