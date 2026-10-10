@@ -1773,7 +1773,7 @@ final class ImePanels {
         ViewPolicy.clearMinimumSize(trash);
         ViewPolicy.clearStateListAnimator(trash);
         // 不让删除按钮的文字高度把这一格撑得比卡片高：格高只由卡片决定。
-        trash.setPadding(0, 0, 0, 0);
+        ViewPolicy.setPadding(trash, 0, 0, 0, 0);
         bindFeedbackAction(trash, () -> {
             clipboardSwipedText = null;
             clipboardSwipedCell = null;
