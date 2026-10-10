@@ -129,8 +129,9 @@ public final class FloatingKeyboardBar extends LinearLayout {
         }
 
         @Override protected void onDraw(Canvas canvas) {
-            float size = Math.min(KeyboardGeometry.floatPixels(getContext(), ICON_DP),
-                Math.min(getWidth(), getHeight()));
+            float size = BoundsPolicy.atMost(
+                KeyboardGeometry.floatPixels(getContext(), ICON_DP),
+                BoundsPolicy.atMost(getWidth(), getHeight()));
             KeyboardIconPaths.draw(canvas, paint, KeyboardIconPaths.Icon.EXIT_ONE_HAND,
                 (getWidth() - size) / 2f, (getHeight() - size) / 2f, size, color);
         }
