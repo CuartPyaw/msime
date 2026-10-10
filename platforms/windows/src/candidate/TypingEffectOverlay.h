@@ -5,7 +5,7 @@
 #include <optional>
 #include <string>
 #include <vector>
-// windows.h first: its DrawText macro has to reach the Direct2D declarations.
+// 先包含 windows.h：它的 DrawText 宏要作用到 Direct2D 的声明上。
 #include <windows.h>
 #include <d2d1.h>
 #include <dwrite.h>

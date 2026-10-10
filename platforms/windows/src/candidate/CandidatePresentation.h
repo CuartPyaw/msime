@@ -46,6 +46,12 @@ inline bool korean_hanja_view(const nlohmann::json &view) {
          !view.value("dedicated_english", false) &&
          view.value("local_mode", std::string("none")) == "none";
 }
+// 这个 view 的候选会不会带释义，和 host-api msime_client_translation_query 的判据一样：方案显示释义（scheme::ShowsGlosses，日文、粤语、注音、笔画、越南文、藏文都不显示），且不在临时日文组字和网址模式里。
+inline bool candidate_view_shows_glosses(const nlohmann::json &view) {
+  const auto mode = view.value("local_mode", std::string("none"));
+  return scheme::ShowsGlosses(static_cast<int>(view.value("scheme", 0u))) && mode != "temporary_japanese" &&
+         mode != "url";
+}
 // Move a Hanja row's 훈음 out of the annotation run, which follows the Hanja at full size, into `gloss`, so the main text is the Hanja alone.
 inline void move_korean_hanja_gloss(PresentationCandidate &candidate) {
   candidate.gloss = std::move(candidate.annotation);
@@ -140,6 +146,8 @@ struct CandidatePresentation {
   size_t page_count = 0;
   // Whether the mouse may pick a row, page the list or open a row's menu. False for a list driven from the keyboard only (scheme::KeyboardOnlyCandidateList).
   bool pointer_input = true;
+  // 这一页的候选会不会有释义（candidate_view_shows_glosses）。为 false 时翻译查询为空，横排候选窗不为释义预留高度。
+  bool shows_glosses = true;
   // 游戏会话（包上带 PipeMetadata::GameHost）：宿主给的锚点可能不可信，候选窗允许在游戏客户区里兜底定位。
   bool game_host = false;
   // 双拼组字时候选窗旁的键位提示（方案名和要高亮的键），按 view 判断，不是双拼组字时为空；开关由 Server 主循环另外看。
@@ -255,6 +263,7 @@ candidate_presentation_from_view(const FocusLease &lease,
   candidate_presentation_page(output, view);
   output.pointer_input = !scheme::KeyboardOnlyCandidateList(
       static_cast<int>(view.value("scheme", 0u)));
+  output.shows_glosses = candidate_view_shows_glosses(view);
   output.shuangpin_keymap = shuangpin_keymap_hint(view);
   output.armed_gloss_column =
       candidate_armed_gloss_column(output.candidates, view.value("armed_gloss_column", 0));
@@ -326,6 +335,7 @@ candidate_presentation(const FocusLease &lease, const PendingReply &reply,
   candidate_presentation_page(output, view);
   output.pointer_input = !scheme::KeyboardOnlyCandidateList(
       static_cast<int>(view.value("scheme", 0u)));
+  output.shows_glosses = candidate_view_shows_glosses(view);
   output.shuangpin_keymap = shuangpin_keymap_hint(view);
   output.armed_gloss_column =
       candidate_armed_gloss_column(output.candidates, view.value("armed_gloss_column", 0));

@@ -12,11 +12,15 @@ export type AppInputModeRuleProblem =
   | "duplicate"
   | "too_many";
 
-/** 用户填的应用标识。Windows 上是进程的可执行文件名：粘贴了完整路径时只取文件名，ASCII 字母转小写，和 Server 不分大小写的比较一致；macOS 上是 bundle id，原样保留大小写。两端都去掉首尾空白（含不换行空格和全角空格）。 */
+/** 用户填的应用标识。Windows 上是进程的可执行文件名：粘贴了完整路径时只取文件名，资源管理器「复制文件地址」（Ctrl+Shift+C）给路径加的一对双引号也去掉，ASCII 字母转小写，和 Server 不分大小写的比较一致；macOS 上是 bundle id，原样保留大小写。两端都去掉首尾空白（含不换行空格和全角空格）。 */
 export function normalizeAppInputModeRuleId(raw: string, windows: boolean): string {
   const trimmed = raw.trim();
   if (!windows) return trimmed;
-  const base = trimmed.slice(Math.max(trimmed.lastIndexOf("\\"), trimmed.lastIndexOf("/")) + 1);
+  const unquoted =
+    trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')
+      ? trimmed.slice(1, -1).trim()
+      : trimmed;
+  const base = unquoted.slice(Math.max(unquoted.lastIndexOf("\\"), unquoted.lastIndexOf("/")) + 1);
   return asciiLowercase(base.trim());
 }
 

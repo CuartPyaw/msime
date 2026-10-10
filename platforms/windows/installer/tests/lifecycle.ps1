@@ -86,7 +86,7 @@ if (-not $post.Contains('if RemoveUserDataOnUninstall and OwnsDataDir(ResolvePre
     throw 'usPostUninstall does not remove the data directory captured at uninstall start, or removes it without the user choosing to'
 }
 
-# 登录会话和匿名账号的密钥在 %LOCALAPPDATA%\<用户目录>\account，设置应用自己的目录在 %LOCALAPPDATA%\<Tauri 标识>，都不在数据目录里。选了删除数据时它们也要删，否则「永久删除」之后刷新令牌还留在磁盘上；没选时一个都不碰。
+# 登录会话和匿名账号的密钥在 %LOCALAPPDATA%\<用户目录>\account，设置应用自己的目录在 %LOCALAPPDATA%\<Tauri 标识> 和 %APPDATA%\<Tauri 标识>（后者放下载的本机语音模型），都不在数据目录里。选了删除数据时它们也要删，否则「永久删除」之后刷新令牌还留在磁盘上；没选时一个都不碰。
 if (-not ($post -replace '\s+', ' ').Contains('if RemoveUserDataOnUninstall then DeleteUserProfileData;')) {
     throw 'Removing the data on uninstall leaves the account session and the settings app directory behind'
 }
@@ -95,7 +95,8 @@ foreach ($required in @(
         "UserDataDir := ExpandConstant('{localappdata}\{#MyEditionUserDataDir}');",
         "TryDeleteTree(UserDataDir + '\account');",
         'RemoveDir(UserDataDir);',
-        "TryDeleteTree(ExpandConstant('{localappdata}\{#MyEditionTauriIdentifier}'));")) {
+        "TryDeleteTree(ExpandConstant('{localappdata}\{#MyEditionTauriIdentifier}'));",
+        "TryDeleteTree(ExpandConstant('{userappdata}\{#MyEditionTauriIdentifier}'));")) {
     if (-not $profileData.Contains($required)) {
         throw "DeleteUserProfileData does not remove the per-user account and settings app data: missing '$required'"
     }
@@ -123,6 +124,11 @@ foreach ($required in @(
     if (-not $flatDecide.Contains($required)) {
         throw "DecideUserDataRemoval no longer keeps the data directory by default: missing '$required'"
     }
+}
+# 卸载删掉 HKLM 的 DataDir，重新安装只自动接上默认位置。对话框对自定义位置不能再说「重新安装后接着用」，要告诉用户重新选它或用 /DATADIR=。
+if (-not $flatDecide.Contains("if CompareText(DataDir, ExpandConstant('{localappdata}\{#MyEditionInstallDir}')) = 0 then") -or
+    -not $decide.Contains('/DATADIR=') -or -not $flatDecide.Contains("ReinstallHint + #13#10 +")) {
+    throw 'The keep-data prompt promises that a custom data directory is picked up again on reinstall'
 }
 if ($script -notmatch 'ValueName: "DataDir";[^\r\n]*Flags: uninsdeletevalue') {
     throw 'DataDir registry value is no longer removed on uninstall'

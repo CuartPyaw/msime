@@ -18,7 +18,9 @@ macOS 上候选的释义可以按列上屏：Option+数字上屏那个候选第�
 - 第 N 列是释义按 U+2028 分开的第 N 行（`gloss_column_text`），也就是第 N 种目标语言，和第一波让候选窗每种语言画一行的约定一致。上屏的是整行，和 macOS 一样，不是 Ctrl+Enter 取的第一条义项。
 - Tab / Shift+Tab 在 0 和高亮候选有释义的列之间循环（`next_armed_gloss_column`）；高亮候选两列都没有释义时返回空，Tab 照常翻页。
 
-TIP 侧 `tsf/Key/KeyEventSink.cpp` 的 `IsGlossColumnShortcut` 在候选列表打开（`CANDIDATE_ORIGINAL`，Server 收到 `CandidateActive`）时把 Alt/Ctrl+数字归为 `FUNCTION_SERVER_CANDIDATE_KEY`，普通路径和排队重放路径都判；TIP 自己宿主会话组字的方案（韩文、注音、越南文、藏文）不接，和 Ctrl+Enter 一样；宿主自己画候选的 UILess 场合（游戏、全屏）和 Server 连不上时也不接，组合键留给应用。Tab、空格、数字本来就交给 Server。
+TIP 侧 `tsf/Key/KeyEventSink.cpp` 的 `IsGlossColumnShortcut` 在候选列表打开（`_candidateMode != CANDIDATE_NONE`，和 Ctrl+Enter 相同；排队重放路径看投影里还有没有组字）时把 Alt/Ctrl+数字归为 `FUNCTION_SERVER_CANDIDATE_KEY`；TIP 自己宿主会话组字的方案（韩文、注音、越南文、藏文）不接，和 Ctrl+Enter 一样；宿主自己画候选的 UILess 场合（游戏、全屏）和 Server 连不上时也不接，组合键留给应用。Tab、空格、数字本来就交给 Server。
+
+Server 的释义列、Ctrl+Enter 和释义页都只认带 `PipeMetadata::CandidateActive` 的键。这一位原来只在 `CANDIDATE_ORIGINAL`（通配转换）时带，而普通组字的候选列表是 `CANDIDATE_INCREMENTAL`，于是第一版在普通组字里 Alt/Ctrl+数字交给了应用，Tab 只翻页，释义页上的数字和空格也到不了 `translation_page_key`。现在增量候选开着时，发给 Server 的包对这些路认的键带上这一位（`tsf/Global/CandidateActiveKeyPolicy.h` 的 `CandidateKeyReportsActiveList`：空格、数字 1–9、Tab/Shift+Tab、翻页和上下方向键、只按 Alt 或 Ctrl 的主键盘数字、Ctrl+Enter）。没有给增量候选的每个键都带：裸回车靠没有这一位按组字原文上屏，`[` `]` `-` `=` 的以词定字和 Ctrl+Backspace 恢复上一段也只在没有这一位时生效。因此 Server 的 `translation_page_key` 把不带这一位的按键（字母、退格、回车等）当作离开释义页，关掉它再照常处理；以前它对这种键什么也不做、释义页一直开着，在只给部分键带这一位之后，打开释义页再接着打字，下一个空格就会上屏旧义项（`gloss_column_keys.cpp` 断言了这一点）。用例 `msime-tsf-candidate-active-key-policy`（哪些键带）和 `msime-tsf-gloss-column-wiring`（源码接线）。
 
 Server 侧 `ReplyComposer::gloss_column_key` 排在 Ctrl+Enter 和通用修饰键规则之前：
 
@@ -27,7 +29,7 @@ Server 侧 `ReplyComposer::gloss_column_key` 排在 Ctrl+Enter 和通用修饰�
 - 预选的列 `armed_gloss_column_` 只活到下一个按键：`basic_key` 一进来就清掉，只有预选列的 Tab 再设回去；以词定字、全半角切换、鼠标点选候选和取消也清。鼠标翻页、候选菜单（置顶、删除）不清，候选窗也按新的高亮候选重新判断，两边一致，和 macOS 换页后高亮候选仍有那一列就保留预选相同。预选时回执的 view 带 `armed_gloss_column`，`candidate_presentation` 读出来（高亮候选确实有那一列才算，`candidate_armed_gloss_column`），`CandidateMailbox::refresh_view` 在释义或云候选送到时按同一条规则保留它，`CandidateWindow` 用 `IDWriteTextLayout::SetUnderline` 给高亮候选那一行释义画下划线（`candidate_gloss_column_range`）。
 - 预选后数字只在它本来就选候选时接（`digit_selects_candidate`），空格只在它不是拼写符号时接；那一列为空时照常选候选。
 
-TIP 的 `_HandleCandidateFinalize`（空格、数字、候选列表里的回车都走它）新增 `CommitExactText` 分支，把回复原样插进组字并结束组字。以前没有这个分支，Ctrl+Enter 释义页上用数字或空格挑义项时，回复落到末尾直接结束组字，上屏的是组字里原有的文字而不是释义。
+TIP 的 `_HandleCandidateFinalize`（空格、候选列表里的回车，以及没有宿主会话时的数字都走它）新增 `CommitExactText` 分支，交给 `_CommitServerExactText`：宿主会话随 Server 一起丢掉组字，把回复原样插进组字并结束组字。以前没有这个分支，Ctrl+Enter 释义页上用数字或空格挑义项时，回复落到末尾直接结束组字，上屏的是组字里原有的文字而不是释义。宿主会话拥有组字时（生产环境的常态）数字不经过它，而是在 `_HandleCandidateWorker` 里向宿主会话选词；那里现在先不中断管道地读这个键的 Server 回复，是 `CommitExactText` 就同样交给 `_CommitServerExactText`，否则照旧选词。第一版漏了这条路，预选列或释义页上的数字上屏的是候选本身。
 
 按精确文本上屏释义的几条路（释义列、Ctrl+Enter 只有一条义项、释义页上按键或点选）取消组字后，回复里的 transition 以前是把 view 本身加一个 `commit` 字段，而送达后 `candidate_presentation` 和 `confirm_ui_delivery` 都读 `transition.view`：取不到就在输入队列里抛出，队列随即停掉。现在和 Engine 的转换一样包成 `{commit, view}`，`candidate_translation_commit.cpp` 和 `gloss_column_keys.cpp` 断言了这个形状。
 
@@ -36,8 +38,8 @@ TIP 的 `_HandleCandidateFinalize`（空格、数字、候选列表里的回车�
 `TranslationWorker` 在查询带 `translation_account: true` 时走 `account_glosses`，不走翻译计划：
 
 - 本机英文释义先答，账号只问共享层标了 `online_gloss` 的中文候选里本机没答上、也不在缓存里的词，一页一个 POST，`{"texts", "source_lang": "ZH", "target_lang": 大写代码}`，最多 32 个词（`account_gloss_words`、`account_gloss_target`）。两种目标语言时上层本来就按语言各调一次，所以是两个请求，和 macOS 相同。非英文目标装了离线词典时，词典答上的候选先从查询里去掉，账号只补词典留下的空（macOS `synchronizeAccountGloss` 的顺序）；用户自己的服务仍排在词典前面，整页都问。
-- 回复按 macOS `BackendChatClient.translate` 的判据校验（`account_gloss_values`）：`code` 是 200，条数与问的词相同，每条不超过 4096 字节、不含换行回车和其他控制字符，任何一条不合格整批作废；释义等于词本身算没有释义。有释义的按「水杉账号这个服务、目标语言、词」进缓存（不分登录的是哪个账号，释义与账号无关），没有释义的记八分钟否定缓存，请求失败什么也不记。英文结果照其他服务的规矩存进本机学到的释义表。
-- 令牌经 `msime_client_account_access_token` 取，设置应用登录的账号优先，没有时用匿名账号；服务端回 401 时带上被拒的令牌再取一次，共享层强制刷新。两种会话都没有（`account_unauthorized`）时补调 `msime_client_ensure_anonymous_account` 再取，和 macOS `translationSession` 的 `ensureSignedIn` 一样；补注册失败后十分钟内不再试，免得离线时每一页都阻塞翻译线程。
+- 回复按 macOS `BackendChatClient.translate` 的判据校验（`account_gloss_values`）：`code` 是 200，条数与问的词相同，每条不超过 4096 字节、不含换行回车和其他控制字符，任何一条不合格整批作废；共享会话的 `msime_client_apply_translations` 拒收一切 `char::is_control`（一条不合格整页释义连同本机词典的一起被拒），所以 DEL 和 C1 控制字符（U+0080 到 U+009F）也拒收，macOS 放行的制表符换成空格，只有空白的释义算没有释义；释义等于词本身算没有释义。有释义的按「水杉账号这个服务、目标语言、词」进缓存（不分登录的是哪个账号，释义与账号无关），没有释义的记八分钟否定缓存，请求失败什么也不记。英文结果照其他服务的规矩存进本机学到的释义表。
+- 令牌经 `msime_client_account_access_token` 取，设置应用登录的账号优先，没有时用匿名账号；服务端回 401 时带上被拒的令牌再取一次，共享层强制刷新。两种会话都没有（`account_unauthorized`）时补调 `msime_client_ensure_anonymous_account` 再取，和 macOS `translationSession` 的 `ensureSignedIn` 一样；补注册失败后十分钟内不再试，免得离线时每一页都阻塞翻译线程。取令牌和补注册都跑在分离的线程上（`account_access_token_detached`），翻译线程每 50 毫秒看一次 Server 是否在退出：注册最多阻塞约一分钟，刷新令牌也要联网，`TranslationWorker::stop()` 的 join 不能跟着等，否则 Server 退出（注销、更新、托盘重启）会卡住这么久。
 - 请求只在 Server 退出时中止，换页不中止：macOS 也让在途的请求跑完，回答进缓存。超时 10 秒（macOS 30 秒）：Windows 只有一个翻译线程，等太久后面的页都排着。
 - 账号目录由 `server_main.cpp` 在注册匿名账号的同一处经 `TranslationWorker::set_account_directory` 设一次，只在 `--production` 下设；预览 Server 选了水杉账号也不联网。
 
@@ -63,5 +65,6 @@ TIP 的 `_HandleCandidateFinalize`（空格、数字、候选列表里的回车�
 
 - `platforms/windows/tests/input/gloss_column_policy.cpp`（修饰键选列、按行取列、Tab 循环）和 `platforms/windows/tests/candidate/account_gloss_policy.cpp`（发哪些词、目标语言代码、回复校验）在本机用 clang++ 编译运行通过，CMake 里注册为 `windows-gloss-column-policy`、`windows-account-gloss-policy`。
 - `platforms/windows/tests/input/gloss_column_keys.cpp`（`windows-gloss-column-keys`）在真实 Engine 会话上走 Tab/Shift+Tab 预选、空格和数字上屏预选列、Alt/Ctrl+数字直接上屏、没有第二种语言时的回执、其他键和鼠标点选清除预选、UILess 下 Alt+数字仍有回执；它链接 host-api，只在 Windows 构建里跑。
+- `platforms/windows/tsf/tests/input/candidate_active_key_policy.cpp`（`msime-tsf-candidate-active-key-policy`，哪些键带 `CandidateActive`）在本机用 clang++ 编译运行通过；`gloss_column_wiring.cpp`（`msime-tsf-gloss-column-wiring`）核对增量候选的吃键条件、发出的这一位、宿主会话数字路径先读回复，对改动前的源码会失败。Server 用例 `gloss_column_keys.cpp` 是手动把 `CandidateActive` 放进包里的，它本身看不出 TIP 从没发过这一位。
 - `apps/desktop/tests/settings/translation-candidate-settings.test.ts` 锁住 Windows 列出「水杉账号」和已保存的选择读回为账号。
 - 改动的 C++ 文件都用 MinGW-w64 `-fsyntax-only` 检查过；MSVC 编译、真机上的 Alt 组合键、下划线绘制和账号请求都还没有在 Windows 上跑过。

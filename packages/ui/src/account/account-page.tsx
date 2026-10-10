@@ -94,6 +94,8 @@ export interface AppIconClient {
 export interface SettingsSyncClient {
   /** 卡片上说明同步哪些设置。宿主同步的范围不同（Windows 只同步各平台共有的输入设置）时自己给，缺省是移动端的说明。 */
   description?: string;
+  /** 应用云端设置成功后的提示。缺省是移动端的说法，要用户重新打开键盘；设置当场生效的宿主（Windows 的 Server 从共享偏好里实时读到）自己给。 */
+  appliedMessage?: string;
   schema(): Promise<AccountPreferenceSchema>;
   load(): Promise<AccountPreferences>;
   upload(): Promise<AccountPreferences>;
@@ -719,7 +721,7 @@ function SettingsSyncCard({
       report(
         operation === "upload"
           ? "本机设置已上传。"
-          : "已应用云端设置。请重新打开键盘使部分设置生效。",
+          : (client.appliedMessage ?? "已应用云端设置。请重新打开键盘使部分设置生效。"),
       );
     });
   };

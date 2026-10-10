@@ -4805,6 +4805,86 @@ static void TestApplicationInputModeRulesFollowSharedDocument() {
     MSIMERemoveTestPreferenceSuite(defaults, suite);
 }
 
+// 原生窗口的规则表编辑入口，「添加应用…」、移除和行内的模式选择都经由它。
+@interface MSIMEAppearancePreferences (InputModeRuleEditing)
+- (void)setInputMode:(NSString *)mode forApplication:(NSString *)identifier;
+@end
+
+// 迁移之后在原生窗口改规则：只改那一条所在的一边，不把已经在文档里的规则挤出去换成只在本机生效的旧规则；输入法重新启动、还没载入文档时不写规则表，免得本地键里剩下的那一小部分替换掉文档的整张表；按应用查规则时不分 ASCII 大小写，和偏好库的去重一致。
+static void TestApplicationInputModeRuleEditsKeepDocumentTable() {
+    NSString *suite = [@"msime.app-rule-edits." stringByAppendingString:NSUUID.UUID.UUIDString];
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
+    NSMutableDictionary *legacy = [NSMutableDictionary dictionary];
+    for (int index = 0; index < 40; ++index) legacy[[NSString stringWithFormat:@"org.example.app%02d", index]] = @"chinese";
+    NSString *longIdentifier = [@"org.example." stringByPaddingToLength:65 withString:@"x" startingAtIndex:0];
+    legacy[longIdentifier] = @"english";
+    [defaults setObject:legacy forKey:@"MSIMEClientAppInputModeRules"];
+    MSIMEAppearancePreferences *prefs = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
+    assert([prefs sharedPreferencesByMerging:@{}][@"app_input_mode_rules"] == nil);
+    [prefs applySharedInputPreferences:@{@"default_ime_mode": @"chinese"}];
+    NSDictionary *first = [prefs sharedPreferencesByMerging:@{}][@"app_input_mode_rules"];
+    assert(first.count == 32 && first[@"org.example.app31"] != nil && first[@"org.example.app32"] == nil);
+    [prefs applySharedInputPreferences:@{@"default_ime_mode": @"chinese", @"app_input_mode_rules": first}];
+    assert([[defaults dictionaryForKey:@"MSIMEClientAppInputModeRules"] count] == 9);
+    // 共享设置页一次保存里删掉 app01、加上 org.zeta，文档仍是满的 32 条，app32 以后的旧规则继续只在本机生效。
+    NSMutableDictionary *document = [first mutableCopy];
+    [document removeObjectForKey:@"org.example.app01"];
+    document[@"org.zeta"] = @"english";
+    [prefs applySharedInputPreferences:@{@"default_ime_mode": @"chinese", @"app_input_mode_rules": document}];
+    assert(!prefs.applicationInputModeRulesAwaitPublication);
+    // 在原生窗口改一条文档里的规则：写出去的仍是文档那张表加上这次改动，org.zeta 不会被按标识排在前面的 app32 挤掉。
+    [prefs setInputMode:@"english" forApplication:@"org.example.app05"];
+    NSMutableDictionary *expected = [document mutableCopy];
+    expected[@"org.example.app05"] = @"english";
+    assert([[prefs sharedPreferencesByMerging:@{}][@"app_input_mode_rules"] isEqual:expected]);
+    [prefs activateInputModeForApplication:@"org.example.app05"];
+    assert(prefs.englishMode);
+    // 改只在本机生效的旧规则只动本机那一边，文档那张表不变。
+    [prefs setInputMode:@"chinese" forApplication:longIdentifier];
+    assert([[prefs sharedPreferencesByMerging:@{}][@"app_input_mode_rules"] isEqual:expected]);
+    [prefs activateInputModeForApplication:longIdentifier];
+    assert(!prefs.englishMode);
+    // 保存后重新载入：文档已经有的改动从本地键里删掉，收不下的旧规则带着新模式留在本地键。
+    [prefs applySharedInputPreferences:@{@"default_ime_mode": @"chinese", @"app_input_mode_rules": expected}];
+    NSDictionary *leftover = [defaults dictionaryForKey:@"MSIMEClientAppInputModeRules"];
+    assert(leftover.count == 9 && [leftover[longIdentifier] isEqual:@"chinese"] && leftover[@"org.example.app05"] == nil);
+    // 输入法重新启动、文档还没载入：本地键只剩收不下的旧规则，不能拿它替换文档的整张表。
+    MSIMEAppearancePreferences *restarted = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
+    assert([restarted sharedPreferencesByMerging:@{}][@"app_input_mode_rules"] == nil);
+    [restarted applySharedInputPreferences:@{@"default_ime_mode": @"chinese", @"app_input_mode_rules": expected}];
+    assert([[restarted sharedPreferencesByMerging:@{}][@"app_input_mode_rules"] isEqual:expected]);
+    // 移除文档里的一条规则：文档那张表少这一条，空出的位置在下一次载入时由收得下的旧规则补上，等待发布。
+    [prefs setInputMode:nil forApplication:@"org.zeta"];
+    [expected removeObjectForKey:@"org.zeta"];
+    assert([[prefs sharedPreferencesByMerging:@{}][@"app_input_mode_rules"] isEqual:expected]);
+    [prefs applySharedInputPreferences:@{@"default_ime_mode": @"chinese", @"app_input_mode_rules": expected}];
+    assert(prefs.applicationInputModeRulesAwaitPublication);
+    NSDictionary *refilled = [prefs sharedPreferencesByMerging:@{}][@"app_input_mode_rules"];
+    assert(refilled.count == 32 && [refilled[@"org.example.app32"] isEqual:@"chinese"] && refilled[@"org.zeta"] == nil);
+    // 共享设置页写下的标识大小写和 bundle id 不同：按应用查规则仍然找得到，手动切换照样让位，再次进入应用回到规则。
+    [defaults setObject:@{@"com.apple.Terminal": @"chinese"} forKey:@"MSIMEClientAppInputModeRules"];
+    [prefs applySharedInputPreferences:@{@"default_ime_mode": @"chinese", @"app_input_mode_rules": @{@"com.apple.terminal": @"english"}}];
+    assert([defaults objectForKey:@"MSIMEClientAppInputModeRules"] == nil);
+    [prefs activateInputModeForApplication:@"com.apple.Terminal"];
+    assert(prefs.englishMode);
+    prefs.englishMode = NO;
+    assert(!prefs.englishMode);
+    [prefs activateInputModeForApplication:@"org.example.other"];
+    [prefs activateInputModeForApplication:@"com.apple.Terminal"];
+    assert(prefs.englishMode);
+    // 按应用的 bundle id 改规则，改的是文档里那一条，不会多出一条只差大小写的规则让整份保存被拒。
+    [prefs setInputMode:@"chinese" forApplication:@"com.apple.Terminal"];
+    assert([[prefs sharedPreferencesByMerging:@{}][@"app_input_mode_rules"] isEqual:(@{@"com.apple.terminal": @"chinese"})]);
+    assert(!prefs.englishMode);
+    // 升级前的表里有两条只差大小写的规则：一条并进文档那边，另一条留在本机那边。改本机那一条要真的生效，不能只改到文档里那条。
+    [defaults setObject:@{@"com.example.Dup": @"chinese", @"com.example.dup": @"chinese"} forKey:@"MSIMEClientAppInputModeRules"];
+    [prefs applySharedInputPreferences:@{@"default_ime_mode": @"chinese", @"app_input_mode_rules": @{@"com.apple.terminal": @"chinese"}}];
+    [prefs setInputMode:@"english" forApplication:@"com.example.dup"];
+    [prefs activateInputModeForApplication:@"com.example.dup"];
+    assert(prefs.englishMode);
+    MSIMERemoveTestPreferenceSuite(defaults, suite);
+}
+
 static void TestInputSourceModeReset() {
     NSString *suite = [@"msime.source-reset." stringByAppendingString:NSUUID.UUID.UUIDString];
     NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
@@ -10000,6 +10080,7 @@ int main(int argc, char **argv) {
         @autoreleasepool { TestPerApplicationPunctuationAndWidth(); }
         @autoreleasepool { TestEnglishModePunctuationAndWidthOutput(); }
         @autoreleasepool { TestApplicationInputModeRulesFollowSharedDocument(); }
+        @autoreleasepool { TestApplicationInputModeRuleEditsKeepDocumentTable(); }
         @autoreleasepool { TestInputSourceModeReset(); }
         @autoreleasepool { TestRealSessionComposition(); }
         @autoreleasepool { TestModifierTaps(); }

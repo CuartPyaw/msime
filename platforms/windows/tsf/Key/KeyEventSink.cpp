@@ -20,6 +20,7 @@
 #include "FanyDefines.h"
 #include "AltGrKeyPolicy.h"
 #include "FullwidthChordPolicy.h"
+#include "CandidateActiveKeyPolicy.h"
 #include "FanyUtils.h"
 #include "FanyLog.h"
 #include "../Utils/PerfTimer.h"
@@ -954,8 +955,8 @@ BOOL CMetasequoiaIME::_IsKeyEaten(         //
             }
             return TRUE;
         }
-        // Alt/Ctrl+数字取释义列只在候选列表打开（Server 收到 CandidateActive）时接，其余时候这些组合键照旧属于应用。和 Ctrl+Enter 一样不接 TIP 自己宿主会话组字的方案；宿主自己画候选的 UILess 场合（游戏、全屏）Server 不上屏释义，Server 连不上时也没有释义可取，这两种情况下组合键都留给应用。
-        if (!hostComposed && !freshCompositionState && _candidateMode == CANDIDATE_ORIGINAL &&
+        // Alt/Ctrl+数字取释义列只在候选列表打开时接（和 Ctrl+Enter 一样看 _candidateMode != CANDIDATE_NONE：普通组字的候选列表是 CANDIDATE_INCREMENTAL，只认 CANDIDATE_ORIGINAL 会让这些组合键在普通组字里永远交给应用），其余时候这些组合键照旧属于应用；发出时带 CandidateActive，见 Global::CandidateKeyReportsActiveList。和 Ctrl+Enter 一样不接 TIP 自己宿主会话组字的方案；宿主自己画候选的 UILess 场合（游戏、全屏）Server 不上屏释义，Server 连不上时也没有释义可取，这两种情况下组合键都留给应用。
+        if (!hostComposed && !freshCompositionState && _candidateMode != CANDIDATE_NONE &&
             !_serverUnavailableFallbackActive && !Global::IsUiLessMode() &&
             IsGlossColumnShortcut(*pCodeOut, shortcutModifiers))
         {
@@ -1574,10 +1575,12 @@ bool CMetasequoiaIME::_ClassifyDeferredKeyDown(_In_ ITfContext *pContext, WPARAM
         return true;
     }
 
-    const bool projectedCandidateActive =
-        _deferredKeyProjectionValid ? _deferredProjectedCandidateActive : (_candidateMode == CANDIDATE_ORIGINAL);
+    // 候选列表开着：和 _IsKeyEaten 一样不只看 CANDIDATE_ORIGINAL，普通组字的增量候选也算。排队按键看投影里还有没有组字；宿主会话拥有组字时投影从空开始，这是数字键同样有的限制（见下面的数字选词）。
+    const bool projectedCandidateListOpen =
+        _deferredKeyProjectionValid ? (_deferredProjectedInputLength > 0 || _deferredProjectedCandidateActive)
+                                    : (_candidateMode != CANDIDATE_NONE);
     // 释义列快捷键，条件和 _IsKeyEaten 里的相同。
-    if (projectedImeOpen && !_IsKeyboardDisabled() && projectedCandidateActive &&
+    if (projectedImeOpen && !_IsKeyboardDisabled() && projectedCandidateListOpen &&
         !_serverUnavailableFallbackActive && !Global::IsUiLessMode() &&
         !msime::windows::scheme::AlwaysInlinePreedit(scheme) &&
         IsGlossColumnShortcut(*classifiedCode, capturedModifiers))
@@ -1586,7 +1589,7 @@ bool CMetasequoiaIME::_ClassifyDeferredKeyDown(_In_ ITfContext *pContext, WPARAM
         keyState->Function = FUNCTION_SERVER_CANDIDATE_KEY;
         return true;
     }
-    if (projectedImeOpen && !_IsKeyboardDisabled() && projectedCandidateActive &&
+    if (projectedImeOpen && !_IsKeyboardDisabled() && projectedCandidateListOpen &&
         IsTranslationCommitShortcut(*classifiedCode, capturedModifiers))
     {
         keyState->Category = CATEGORY_CANDIDATE;
@@ -2011,7 +2014,7 @@ void CMetasequoiaIME::_NoteKeyPressStatistics(WPARAM wParam, LPARAM lParam)
 // 交给应用的一次按下也要出按键音、计入打字特效的连击，和 macOS 每个按键都出声一样：没有组字时的空格、回车、退格、数字和方向键都不经过 Server 的按键路径，只能在这里报。只是观察：按键吃不吃、延迟队列和编辑路径都不受影响，入队之后的管道读写在线程池上，不占按键路径的时间。哪些键出声由 passthrough_key_sound_class 决定。
 //----------------------------------------------------------------------------
 
-void CMetasequoiaIME::_NotePassthroughKeySound(WPARAM wParam, LPARAM lParam)
+void CMetasequoiaIME::_NotePassthroughKeySound(WPARAM wParam, LPARAM lParam, WCHAR wch)
 {
     // 按键音和打字特效都关着时 Server 不回 "OK"，队列停发；这时连扫描码都不必记。
     if (PassthroughKeySoundSuppressed())
@@ -2036,8 +2039,10 @@ void CMetasequoiaIME::_NotePassthroughKeySound(WPARAM wParam, LPARAM lParam)
     key.virtual_key = static_cast<uint32_t>(wParam);
     key.auto_repeat = IsAutoRepeat(lParam);
     const UINT modifiers = CaptureIpcModifiers();
-    key.ctrl = (modifiers & 0b00000010u) != 0;
-    key.alt = (modifiers & 0b00000100u) != 0;
+    // AltGr 读作 Ctrl+Alt：它按出字符时是打字，照样出声、计入连击，和 macOS 的 Option 一样。这个键已经交给应用，不会选候选，所以不用 Global::CharacterModifiers 给数字键留的例外。
+    const bool altGrCharacter = Global::IsAltGrCharacter(modifiers, wch);
+    key.ctrl = !altGrCharacter && (modifiers & 0b00000010u) != 0;
+    key.alt = !altGrCharacter && (modifiers & 0b00000100u) != 0;
     key.win = (GetAsyncKeyState(VK_LWIN) & 0x8000) != 0 || (GetAsyncKeyState(VK_RWIN) & 0x8000) != 0;
     key.injected = IsPanelTextSendInput(static_cast<std::uintptr_t>(GetMessageExtraInfo()));
     // 先用不需要查询 TSF 的部分判断，修饰键、快捷键和自动重复不必再读隔间。
@@ -2114,7 +2119,7 @@ STDAPI CMetasequoiaIME::OnTestKeyDown(ITfContext *pContext, WPARAM wParam, LPARA
             _NoteKeyForSmartPunctuation(deferredCode, deferredWch, false);
             // _ClassifyDeferredKeyDown is not reached on this exit and ConvertVKey fills the char without checking the keyboard state.
             _NotePassthroughStatistics(static_cast<UINT>(wParam), deferredWch, false);
-            _NotePassthroughKeySound(wParam, lParam);
+            _NotePassthroughKeySound(wParam, lParam, deferredWch);
             *pIsEaten = FALSE;
             return S_OK;
         }
@@ -2129,7 +2134,7 @@ STDAPI CMetasequoiaIME::OnTestKeyDown(ITfContext *pContext, WPARAM wParam, LPARA
         {
             // The deferred classifier fills its out-char before its own keyboard-disabled check, and not every exit runs that check, so the char proves nothing about the keyboard state.
             _NotePassthroughStatistics(static_cast<UINT>(wParam), deferredWch, false);
-            _NotePassthroughKeySound(wParam, lParam);
+            _NotePassthroughKeySound(wParam, lParam, deferredWch);
         }
         return S_OK;
     }
@@ -2155,7 +2160,7 @@ STDAPI CMetasequoiaIME::OnTestKeyDown(ITfContext *pContext, WPARAM wParam, LPARA
     {
         // A half-width digit, a symbol outside the tables or an English-mode letter lands here: the tip let it through, so the host inserts it outside every commit path.
         _NotePassthroughStatistics(static_cast<UINT>(wParam), wch, wch != L'\0');
-        _NotePassthroughKeySound(wParam, lParam);
+        _NotePassthroughKeySound(wParam, lParam, wch);
     }
 
     DebugTsfIssue47(L"test-keydown-classified", FANY_IME_NO_REQUEST_ID, code, wch, KeystrokeState.Category,
@@ -2951,11 +2956,13 @@ CMetasequoiaIME::KeyDownDispatchResult CMetasequoiaIME::_DispatchKeyDown(
                 localCommitObservation.clear();
             }
         }
+        // CandidateActive：通配转换的候选列表（CANDIDATE_ORIGINAL）里每个键都带；普通组字的增量候选只给释义列、Ctrl+Enter 和释义页认的键带上，其他键靠没有这一位走别的路（裸回车上屏原文、以词定字），见 Global::CandidateKeyReportsActiveList。
+        const bool candidateActive =
+            _candidateMode == CANDIDATE_ORIGINAL || japaneseCandidateEnter ||
+            (_candidateMode != CANDIDATE_NONE && _pCandidateListUIPresenter != nullptr &&
+             Global::CandidateKeyReportsActiveList(code, Global::ModifiersDown));
         const UINT ipcModifiers =
-            Global::ModifiersDown |
-            (_candidateMode == CANDIDATE_ORIGINAL || japaneseCandidateEnter
-                 ? msime::windows::PipeMetadata::CandidateActive
-                 : 0u) |
+            Global::ModifiersDown | (candidateActive ? msime::windows::PipeMetadata::CandidateActive : 0u) |
             (IsAutoRepeat(lParam) ? msime::windows::PipeMetadata::AutoRepeat : 0u);
         WriteDataToNamedPipe(Global::Keycode, wch, ipcModifiers, nullptr, 0,
                              localCommitObservation,

@@ -1,4 +1,5 @@
 #include "ShuangpinKeymapWindow.h"
+#include "CandidateWindow.h"
 #include "ToolbarCoordinates.h"
 #include "ToolbarTooltips.h"
 #include "WindowShadow.h"
@@ -98,18 +99,25 @@ void ShuangpinKeymapWindow::load_profile(const std::string &profile) {
   zero_initials_ = wide(shuangpin_keymap_zero_initial_text(profile_table(msime_client_shuangpin_zero_initials, profile_)));
   title_ = toolbar_scheme_title("shuangpin", profile_, "") + L"键位";
 }
-void ShuangpinKeymapWindow::update(const std::optional<ShuangpinKeymapFrame> &frame, HWND candidate) {
+void ShuangpinKeymapWindow::update(const std::optional<ShuangpinKeymapFrame> &frame,
+                                   const CandidateWindow &candidates) {
   if (failed_ || !window_)
     return;
+  const HWND candidate = candidates.handle();
   if (!frame || !candidate || !IsWindowVisible(candidate)) {
     hide();
     return;
   }
   try {
     DpiScope dpi_scope;
-    RECT card{};
-    if (!GetWindowRect(candidate, &card))
-      throw std::runtime_error("Candidate window rectangle unavailable");
+    // 候选窗的窗口外框四周是透明的阴影边距（上 20、下 40、左 32 DIP），顶上还可能有吉祥物那一条；按外框摆，键位图会以为候选窗翻到了光标上方、盖住正在输入的那几行，还会向左错开、和卡片隔出一大段空。所以取卡片本身的矩形。
+    const auto visible_card = candidates.card_on_screen();
+    if (!visible_card) {
+      hide();
+      return;
+    }
+    const RECT card{std::lround(visible_card->left), std::lround(visible_card->top),
+                    std::lround(visible_card->right), std::lround(visible_card->bottom)};
     const HMONITOR monitor = MonitorFromRect(&card, MONITOR_DEFAULTTONEAREST);
     MONITORINFO info{};
     info.cbSize = sizeof(info);

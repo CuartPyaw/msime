@@ -34,6 +34,11 @@ test("Windows rule identifiers are lower-cased executable base names", () => {
   ).toBe("code.exe");
   // 非 ASCII 字母保持原样，和 Server 只折叠 ASCII 的比较一致。
   expect(normalizeAppInputModeRuleId("微信Ä.exe", true)).toBe("微信Ä.exe");
+  // 资源管理器「复制文件地址」给出的路径带一对双引号。
+  expect(
+    normalizeAppInputModeRuleId(' "C:\\Program Files\\Microsoft VS Code\\Code.exe" ', true),
+  ).toBe("code.exe");
+  expect(normalizeAppInputModeRuleId('"', true)).toBe('"');
   // macOS 的 bundle id 保留大小写，只去掉两侧空白。
   expect(normalizeAppInputModeRuleId(" com.apple.Terminal ", false)).toBe("com.apple.Terminal");
 });
@@ -96,6 +101,21 @@ test("a Windows host edits the rule table in the 中英文 group and saves it to
 
   fireEvent.click(screen.getByRole("button", { name: "移除 code.exe 的应用例外" }));
   expect(screen.queryByLabelText("code.exe 的输入模式")).toBeNull();
+});
+
+test("the Enter that commits an IME composition does not add a rule", async () => {
+  const save = vi.fn();
+  mount({ host: testHost({ platform: "windows", app_input_mode_rules: true }), save });
+  await settingsFormReady();
+  const input = screen.getByLabelText("程序文件名");
+  fireEvent.change(input, { target: { value: "code.exe" } });
+  fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+  fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+  expect((input as HTMLInputElement).value).toBe("code.exe");
+  expect(screen.getByRole("group", { name: "应用例外" }).textContent).toContain("还没有应用例外");
+
+  fireEvent.keyDown(input, { key: "Enter", keyCode: 13 });
+  expect(await screen.findByLabelText("code.exe 的输入模式")).toBeTruthy();
 });
 
 test("a Windows host offers the input mode badge and the Alt+Shift+H switch", async () => {

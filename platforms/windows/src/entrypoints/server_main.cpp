@@ -1005,9 +1005,10 @@ int wmain(int argc, wchar_t **argv) {
     auto candidate_style = std::make_shared<CandidateWindowStyleMailbox>();
     auto toolbar_settings = std::make_shared<FloatingToolbarMailbox>();
     auto candidate_theme = std::make_shared<CandidateThemeMailbox>();
-    // logo 开关和释义预留行数从启动时的偏好取，第一次发布之前候选卡片就按它们排版。
+    // logo 开关和释义预留行数从启动时的偏好取，第一次发布之前候选卡片就按它们排版。预留行数还要看装了哪些离线释义词典，启动时查一次。
+    const auto offline_gloss_languages = installed_offline_gloss_languages(config.resources);
     const auto stored_candidate_layout =
-        candidate_layout_settings(prepared.at("value").at("preferences"))
+        candidate_layout_settings(prepared.at("value").at("preferences"), offline_gloss_languages)
             .value_or(CandidateLayoutSettings{});
     auto candidate_layout = std::make_shared<std::atomic<unsigned>>(
         CandidateLayoutSettings{
@@ -1076,7 +1077,7 @@ int wmain(int argc, wchar_t **argv) {
             candidate_fonts->publish(snapshot.revision(), std::move(*fonts));
           if (auto style = candidate_window_style(preferences))
             candidate_style->publish(snapshot.revision(), *style);
-          if (auto layout = candidate_layout_settings(preferences))
+          if (auto layout = candidate_layout_settings(preferences, offline_gloss_languages))
             candidate_layout->store(layout->encode(), std::memory_order_release);
           traditional_output->store(
               preferences.value("traditional_chinese_output", false),
@@ -1195,6 +1196,10 @@ int wmain(int argc, wchar_t **argv) {
           next.polish_prompt_custom_1 = input.value("polish_prompt_custom_1", std::string{});
           next.polish_prompt_custom_2 = input.value("polish_prompt_custom_2", std::string{});
           next.polish_prompt_custom_3 = input.value("polish_prompt_custom_3", std::string{});
+          next.traditional_output =
+              preferences.value("traditional_chinese_output", false) &&
+              msime::windows::scheme::ScriptConversionApplies(msime::windows::scheme::scheme_from_name(
+                  running_scheme(preferences, language_dictionaries)));
           std::lock_guard lock(*voice_config_mutex);
           *voice_config = std::move(next);
         };
@@ -1592,7 +1597,6 @@ int wmain(int argc, wchar_t **argv) {
     menu_capabilities.keyboard_panel = true;
     menu_capabilities.voice_input = true;
     menu_capabilities.settings = settings_shell.has_value();
-    menu_capabilities.desktop_app = preview_shell.has_value();
     menu_capabilities.cloud_clipboard = preview_shell.has_value();
     menu_capabilities.cantonese = language_dictionaries.cantonese;
     menu_capabilities.zhuyin = language_dictionaries.zhuyin;
@@ -2110,7 +2114,7 @@ int wmain(int argc, wchar_t **argv) {
         keymap->update(shuangpin_keymap_enabled->load(std::memory_order_acquire)
                            ? keymap_frame
                            : std::nullopt,
-                       candidates.handle());
+                       candidates);
         if (keymap->failed() && !keymap_failure_reported) {
           keymap_failure_reported = true;
           notice(component_failure("Shuangpin keymap", keymap->failure_site()) +
@@ -2183,8 +2187,11 @@ int wmain(int argc, wchar_t **argv) {
       {
         const auto view = server.mode_view();
         const bool focused = view.has_value() && view->chinese.has_value();
+        const uint64_t client = focused ? view->lease.transport.client : 0;
         const uint32_t app = focused ? client_pid(view->lease.transport) : 0;
-        if (focused && (view->lease.token != mode_authority.session || app != mode_rule_pid)) {
+        // 焦点令牌是每个 TIP 线程自己数的，两个应用常拿着同一个数字，所以按客户端和令牌一起认会话。
+        if (focused && (client != mode_authority.client ||
+                        view->lease.token != mode_authority.session || app != mode_rule_pid)) {
           mode_rule_pid = app;
           mode_rule.reset();
           if (const auto process = process_image_base_name(app)) {
@@ -2194,14 +2201,16 @@ int wmain(int argc, wchar_t **argv) {
         }
         const auto decision = mode_authority_step(
             mode_authority, mode_scope_global->load(std::memory_order_acquire),
-            focused, view ? view->lease.token : 0,
+            focused, client, view ? view->lease.token : 0,
             view && view->chinese ? *view->chinese : true, app,
             focused ? mode_rule : std::nullopt);
         mode_authority = decision.next;
-        if (decision.push && view)
-          (void)server.request_mode(view->lease,
-                                    decision.push_chinese ? WorkerMode::Chinese
-                                                          : WorkerMode::English);
+        // 事务锁正忙（这个客户端的激活或按键正在处理）时 request_mode 什么也不发；记下来下一轮重推，不留着一个没发出去的「已推送」。
+        if (decision.push && view &&
+            server.request_mode(view->lease, decision.push_chinese ? WorkerMode::Chinese
+                                                                   : WorkerMode::English) !=
+                ModeRequestResult::Sent)
+          mode_authority = mode_authority_push_failed(mode_authority);
         // 用户在同一会话里切换了中英文：在光标旁显示「中」或「英」。光标先取前台线程的系统光标，没有时取这个会话最近一次组字的锚点（TSF 报来的物理像素，是文字底边的左端），都没有时放在屏幕下方居中。
         if (mode_hud && view &&
             should_show_input_mode_hud(input_mode_hud_enabled->load(std::memory_order_acquire),

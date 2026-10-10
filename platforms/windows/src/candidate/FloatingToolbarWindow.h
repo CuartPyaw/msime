@@ -126,7 +126,7 @@ private:
   ToolbarMetrics metrics() const;
   // 按钮能不能用：缺设置窗口或共享应用时，依赖它的按钮不能用。
   bool usable(int button) const;
-  // 按钮 `index` 弹出菜单用的锚点。
+  // 按钮 `index` 弹出菜单用的锚点，已换成屏幕物理像素（toolbar_physical_coordinate）。
   ToolbarMenuAnchor menu_anchor(std::optional<size_t> index, int x) const;
   // 每个按钮一个悬停提示区域，跟着按钮的位置和个数重建。
   void sync_tooltips();
@@ -189,7 +189,8 @@ private:
   // True between WM_ENTERSIZEMOVE and WM_EXITSIZEMOVE, so a programmatic
   // placement is not mistaken for one the user made.
   bool moving_ = false;
-  bool user_dragging_ = false;
+  // 这次移动循环开始时窗口的左上角；松手时和它比，动了才算用户拖到了新位置（floating_toolbar_drag_end）。
+  std::optional<POINT> move_start_;
   bool settings_available_ = true;
   bool panels_available_ = true;
   std::function<bool()> active_reader_;

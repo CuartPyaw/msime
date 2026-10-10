@@ -51,8 +51,15 @@ int main() {
     // 和词本身一样的释义等于没有，换成空；空表示账号对这个词没有释义。
     const auto values = account_gloss_values(words, {"hello", "世界"});
     REQUIRE(values && *values == (Words{"hello", ""}));
-    // 制表符可以有；换行、回车、其他控制字符和超长的释义让整批作废。
-    REQUIRE(account_gloss_values(words, {"a\tb", ""}).has_value());
+    // 制表符可以有，换成空格再交给会话：共享会话收释义时拒收一切控制字符，一条带制表符的释义会让整页释义都被拒掉。只有空白的释义等于没有。
+    const auto tabbed = account_gloss_values(words, {"to like\tto love", "\t"});
+    REQUIRE(tabbed && *tabbed == (Words{"to like to love", ""}));
+    // 换行、回车、其他控制字符（含 DEL 和 U+0080 到 U+009F 的 C1 控制字符）和超长的释义让整批作废。
+    REQUIRE(!account_gloss_values(words, {std::string("a\x7f" "b"), ""}));
+    REQUIRE(!account_gloss_values(words, {std::string("a\xC2\x85" "b"), ""}));
+    REQUIRE(!account_gloss_values(words, {std::string("a\xC2\x9F" "b"), ""}));
+    // U+00A0（0xC2 0xA0）和 U+00E9 不是控制字符，照收。
+    REQUIRE(account_gloss_values(words, {std::string("caf\xC3\xA9\xC2\xA0" "x"), ""}).has_value());
     REQUIRE(!account_gloss_values(words, {"a\nb", ""}));
     REQUIRE(!account_gloss_values(words, {"a\rb", ""}));
     REQUIRE(!account_gloss_values(words, {std::string("a\x01" "b"), ""}));

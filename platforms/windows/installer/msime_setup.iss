@@ -1356,7 +1356,7 @@ begin
   end;
 end;
 
-{ 选了删除数据时，一并删掉不在数据目录里的本用户数据：%LOCALAPPDATA%\<本版本的用户目录>\account 存着设置应用的登录会话（含刷新令牌）和本机匿名账号的密钥，%LOCALAPPDATA%\<Tauri 标识> 是设置应用自己的目录（旧版本的登录会话、词库快照暂存和 WebView2 数据）。用户目录里的其余内容（使用统计的安装 id 与事件队列）不动，用户目录空了才删。与数据目录一样只在本次卸载的 Windows 用户下。 }
+{ 选了删除数据时，一并删掉不在数据目录里的本用户数据：%LOCALAPPDATA%\<本版本的用户目录>\account 存着设置应用的登录会话（含刷新令牌）和本机匿名账号的密钥，%LOCALAPPDATA%\<Tauri 标识> 和 %APPDATA%\<Tauri 标识> 是设置应用自己的目录：前者是 Tauri 的 app_local_data_dir（旧版本的登录会话、词库快照暂存和 WebView2 数据），后者是 Tauri 的 app_data_dir（语音页下载的本机语音识别模型 voice-models，动辄几百 MB）。用户目录里的其余内容（使用统计的安装 id 与事件队列）不动，用户目录空了才删。与数据目录一样只在本次卸载的 Windows 用户下。 }
 procedure DeleteUserProfileData;
 var
   UserDataDir: String;
@@ -1365,6 +1365,7 @@ begin
   TryDeleteTree(UserDataDir + '\account');
   RemoveDir(UserDataDir);
   TryDeleteTree(ExpandConstant('{localappdata}\{#MyEditionTauriIdentifier}'));
+  TryDeleteTree(ExpandConstant('{userappdata}\{#MyEditionTauriIdentifier}'));
 end;
 
 { 卸载程序的命令行里有没有 Name 这个开关（不分大小写）。 }
@@ -1382,8 +1383,14 @@ end;
 procedure DecideUserDataRemoval;
 var
   DataDir: String;
+  ReinstallHint: String;
 begin
   DataDir := ResolvePreviousDataDir;
+  { HKLM 的 DataDir 在卸载时删掉，重新安装只会自动接上默认位置；自定义位置要在「选择数据位置」里重新选（带所有权标记的非空目录会被接受），提示里写明，免得用户以为数据丢了。 }
+  if CompareText(DataDir, ExpandConstant('{localappdata}\{#MyEditionInstallDir}')) = 0 then
+    ReinstallHint := '选择「否」保留数据目录，重新安装后自动接着用：'
+  else
+    ReinstallHint := '选择「否」保留数据目录。它不在默认位置，重新安装时请在「选择数据位置」一步重新选它（或给安装包加 /DATADIR=），才能接着用：';
   if (not OwnsDataDir(DataDir)) or UninstallSwitchGiven('/KEEPDATA') then
     RemoveUserDataOnUninstall := False
   else if UninstallSwitchGiven('/REMOVEDATA') then
@@ -1393,7 +1400,7 @@ begin
   else
     RemoveUserDataOnUninstall := SuppressibleMsgBox(
       '是否同时删除词库、学习记录和设置？' + #13#10#13#10 +
-      '选择「否」保留数据目录，重新安装后可以继续使用：' + #13#10 +
+      ReinstallHint + #13#10 +
       '   ' + DataDir + #13#10#13#10 +
       '选择「是」将永久删除其中自己加的词、学习记录、设置、皮肤、剪贴板历史，以及语音、翻译和 AI 服务的密钥，并退出本机登录的水杉账号。',
       mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES;

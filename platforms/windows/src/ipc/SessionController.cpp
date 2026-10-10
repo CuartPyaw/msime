@@ -3,10 +3,23 @@
 #include "CandidateRenderSync.h"
 #include "ReplyCodec.h"
 #include "UiSelectionDelivery.h"
+#include <thread>
 
 namespace msime::windows {
 namespace {
 thread_local const SessionController *active_controller = nullptr;
+// 外部工作线程等事务锁，直到 deadline：锁被按键、候选点击或 250 毫秒一次的英文模式读取占着时不把请求丢掉。每 5 毫秒重试一次；Server 停止时立即放弃。
+std::unique_lock<std::mutex> wait_transaction(std::mutex &transactions,
+                                              const std::atomic<bool> &stopping,
+                                              std::chrono::steady_clock::time_point deadline) {
+  std::unique_lock transaction(transactions, std::try_to_lock);
+  while (!transaction.owns_lock() && !stopping.load() &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    (void)transaction.try_lock();
+  }
+  return transaction;
+}
 }
 SessionController::SessionController(
     MainTransport &transport, RegistrationInbox &inbox, size_t clients,
@@ -509,8 +522,10 @@ bool SessionController::set_dedicated_english(const FocusLease &lease,
                                               bool enabled) {
   if (input_.on_worker_thread() || active_controller == this || stopping_.load())
     throw std::logic_error("Dedicated-English switch cannot reenter controller callbacks");
-  std::unique_lock transaction(*transactions_, std::try_to_lock);
-  if (!transaction.owns_lock()) return false;
+  // 这是用户在托盘里点的开关，只发一次、没有重试，所以锁忙时等着而不是放弃；等锁和等输入队列共用 2 秒。
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  const auto transaction = wait_transaction(*transactions_, stopping_, deadline);
+  if (!transaction.owns_lock() || stopping_.load()) return false;
   // 等待可能超时，任务之后仍会在输入队列上运行，所以结果和租约放在任务自己持有的存储里，不引用这个栈帧。
   auto applied = std::make_shared<bool>(false);
   auto submitted = input_.submit([this, lease, enabled, applied](InputState &state) {
@@ -518,7 +533,7 @@ bool SessionController::set_dedicated_english(const FocusLease &lease,
     if (auto view = state.set_dedicated_english(lease, enabled))
       *applied = view->at("dedicated_english").get<bool>() == enabled;
   });
-  if (!submitted || submitted->wait_for(std::chrono::seconds(2)) != std::future_status::ready)
+  if (!submitted || submitted->wait_until(deadline) != std::future_status::ready)
     return false;
   return submitted->get() == InputTaskStatus::Completed && *applied;
 }

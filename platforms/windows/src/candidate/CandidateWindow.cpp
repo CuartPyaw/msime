@@ -751,6 +751,9 @@ CandidateBounds CandidateWindow::card_bounds(const CandidatePresentation &value,
   input.skin_min_width = skin_min_width_;
   input.logo_visible = show_app_logo_;
   input.reserved_secondary_lines = reserved_secondary_lines(value);
+  if (horizontal_)
+    input.reserved_secondary_height =
+        reserved_secondary_height(input.reserved_secondary_lines);
   if (show_preedit_)
     input.preedit_width = measured_width(
         device_, wide(value.preedit), font_family_,
@@ -841,7 +844,21 @@ size_t CandidateWindow::reserved_secondary_lines(
   const bool hanja = std::any_of(
       value.candidates.begin(), value.candidates.end(),
       [](const PresentationCandidate &candidate) { return !candidate.gloss.empty(); });
-  return reserved_gloss_lines_ + (hanja ? 1u : 0u);
+  // 这一页的方案或模式根本不请求释义（日文、网址模式这些）时，偏好算出的释义行一行也不留。
+  return (value.shows_glosses ? reserved_gloss_lines_ : 0u) + (hanja ? 1u : 0u);
+}
+double CandidateWindow::reserved_secondary_height(size_t lines) {
+  if (lines < 2)
+    return 0.0;
+  const auto metrics =
+      candidate_card_metrics(font_size_, preedit_font_size_, show_preedit_);
+  // 和 macOS reservedGlossHeightForFont 量「X\nX」一样：每行一个 X，宽度给足，不会折行。
+  std::wstring placeholder = L"X";
+  for (size_t line = 1; line < lines; ++line)
+    placeholder += L"\nX";
+  return wrapped_height(device_, placeholder, font_family_,
+                        static_cast<float>(metrics.translation_font), 8192.0,
+                        font_fallback_.Get());
 }
 CandidateWrapMeasure
 CandidateWindow::wrap_measure(const CandidatePresentation &value) {
@@ -1205,12 +1222,12 @@ void CandidateWindow::paint() {
   const float gutter = static_cast<float>(metrics.number_and_bar);
   const size_t count = value->candidates.size();
   // Laid out at the width actually drawn, which the work area may have narrowed below what card_bounds asked for.
+  const size_t reserved_lines = horizontal_ ? reserved_secondary_lines(*value) : 0;
   auto rows = candidate_page_layout(
       measure_items(*value), frame.card_width, metrics, horizontal_,
       wrap_measure(*value),
-      horizontal_ ? candidate_reserved_row_height(metrics,
-                                                  reserved_secondary_lines(*value))
-                  : 0.0);
+      candidate_reserved_row_height(metrics, reserved_lines,
+                                    reserved_secondary_height(reserved_lines)));
   const float first_line = static_cast<float>(metrics.candidate_row);
   for (size_t i = 0; i < count; ++i) {
     const auto &row = rows[i].bounds;

@@ -16,8 +16,8 @@ namespace msime::windows {
 struct ModeAuthorityState {
   bool chinese = true;
   bool seeded = false;
-  // The focused client's session id, so a change of client is distinguishable
-  // from the same client changing its own mode.
+  // 焦点客户端（TSF 的 pid << 32 | tid）和它的焦点令牌，用来区分换了客户端和同一客户端自己换模式。令牌是每个 TIP 线程各自从 1 数起的，两个应用常常拿着同样的小数字，所以单看令牌认不出换了应用，必须连同客户端一起比。
+  uint64_t client = 0;
   uint64_t session = 0;
   // 当前这次停留所在应用的进程号。同一应用里换焦点（两个窗口、一个窗口里的几个输入框）不算新的停留。
   uint32_t app = 0;
@@ -27,6 +27,8 @@ struct ModeAuthorityState {
   std::optional<bool> reported;
   // 推给当前会话、还没看到回报的模式。回报等于它时是推送落地，不是用户切换。
   std::optional<bool> pushed;
+  // 要推给当前会话、但上一次没发出去的模式（mode_authority_push_failed）。同一会话的下一次观察重推它；在那之前会话自己换了模式就是用户切换，重推作废。
+  std::optional<bool> retry;
 };
 struct ModeAuthorityDecision {
   // Send a mode switch to the focused client.
@@ -37,18 +39,17 @@ struct ModeAuthorityDecision {
   // The authority after this observation.
   ModeAuthorityState next;
 };
-// Decide what to do with one observation of the focused client's mode.
+// 处理对焦点客户端模式的一次观察，决定要不要推送。
 //
-// `global` is the configured scope, `focused` whether a client is focused at
-// all, and `reported` the mode that client says it is in. `app` 是焦点客户端的进程号，`rule` 是这个进程的应用例外（true 为中文），没有规则时为空。
+// `global` 是配置的作用域，`focused` 表示有没有焦点客户端，`client` 和 `session` 是它的客户端号和焦点令牌，`reported` 是它报告的模式（true 为中文）。`app` 是焦点客户端的进程号，`rule` 是这个进程的应用例外（true 为中文），没有规则时为空。
 inline ModeAuthorityDecision
 mode_authority_step(const ModeAuthorityState &state, bool global, bool focused,
-                    uint64_t session, bool reported, uint32_t app = 0,
-                    std::optional<bool> rule = std::nullopt) {
+                    uint64_t client, uint64_t session, bool reported,
+                    uint32_t app = 0, std::optional<bool> rule = std::nullopt) {
   ModeAuthorityDecision decision;
   decision.next = state;
   if (!focused)
-    return decision; // Nothing focused: keep the authority, push nothing.
+    return decision; // 没有焦点客户端：权威状态不动，什么也不推。
   auto push = [&](bool chinese) {
     decision.next.pushed.reset();
     if (reported == chinese)
@@ -57,11 +58,13 @@ mode_authority_step(const ModeAuthorityState &state, bool global, bool focused,
     decision.push_chinese = chinese;
     decision.next.pushed = chinese;
   };
-  if (session != state.session) {
+  if (client != state.client || session != state.session) {
     // 换了客户端。先记下它报告的模式；进程号变了就是一次新的停留，上次的手动让位作废。
+    decision.next.client = client;
     decision.next.session = session;
     decision.next.reported = reported;
     decision.next.pushed.reset();
+    decision.next.retry.reset();
     if (app != state.app) {
       decision.next.app = app;
       decision.next.rule_yielded = false;
@@ -76,27 +79,28 @@ mode_authority_step(const ModeAuthorityState &state, bool global, bool focused,
       return decision;
     }
     if (!global) {
-      // Per-application memory. Track the session so switching the option on
-      // later does not immediately treat the current client as a new one, but
-      // never push: each application keeps its own mode, as the option says.
+      // 按应用记忆。照样记下会话，之后改成全局作用域时不会把当前客户端当成新来的；但从不推送，每个应用保留自己的模式，正如这个选项所说。
       decision.next.chinese = reported;
       decision.next.seeded = true;
       return decision;
     }
     if (!state.seeded) {
-      // First observation seeds the authority rather than fighting the client.
+      // 第一次观察用客户端的模式做初始的权威状态，不和它对着干。
       decision.next.chinese = reported;
       decision.next.seeded = true;
       return decision;
     }
-    // A different client took focus. It reports its own mode; the authority
-    // wins, and only differences are pushed so an already-correct client is
-    // left alone.
+    // 别的客户端拿到焦点，报告的是它自己的模式；以权威状态为准，只在不一致时推送，已经对的客户端不打扰。
     push(state.chinese);
     return decision;
   }
-  if (state.reported == reported)
-    return decision; // 同一会话，模式没变。
+  decision.next.retry.reset();
+  if (state.reported == reported) {
+    // 同一会话，模式没变。上一次的推送没发出去时再推一次。
+    if (state.retry)
+      push(*state.retry);
+    return decision;
+  }
   decision.next.reported = reported;
   if (state.pushed == reported) {
     // Server 推的模式落地了，不是用户的选择。
@@ -104,13 +108,18 @@ mode_authority_step(const ModeAuthorityState &state, bool global, bool focused,
     return decision;
   }
   decision.next.pushed.reset();
-  // Same client, new mode: the user changed it deliberately, so it becomes the
-  // authority and travels to the next application. 有规则的应用里手动切换，规则在这次停留里让位。
+  // 同一客户端换了模式且不是 Server 推的：用户有意切换，它成为权威状态并带到下一个应用。有规则的应用里手动切换，规则在这次停留里让位。
   decision.user_changed = state.reported.has_value();
   if (rule)
     decision.next.rule_yielded = true;
   decision.next.chinese = reported;
   decision.next.seeded = true;
   return decision;
+}
+// mode_authority_step 要求推送、但推送没发出去（事务锁正忙、租约已失效或写失败）时调用。忘掉这次推送，否则之后用户自己切到同一个模式会被当成推送落地，提示不出现、规则也不让位；同一会话的下一次观察重推，规则不会因为一次锁忙就在这次停留里失效。
+inline ModeAuthorityState mode_authority_push_failed(ModeAuthorityState state) {
+  state.retry = state.pushed;
+  state.pushed.reset();
+  return state;
 }
 } // namespace msime::windows

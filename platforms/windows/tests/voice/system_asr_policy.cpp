@@ -44,6 +44,16 @@ int main() {
     // Windows 没有粤语或韩语的听写识别器：开始录音前就说清楚，而不是悄悄换成普通话。
     REQUIRE(!system_asr_language_id("yue"));
     REQUIRE(!system_asr_language_id("ko-KR"));
+    // 共享设置把 zh-HK 显示为粤语；香港、澳门的 zh 标签和 zh-yue 都不交给台湾普通话或大陆普通话识别器。
+    REQUIRE(!system_asr_language_id("zh-HK"));
+    REQUIRE(!system_asr_language_id("zh_hk"));
+    REQUIRE(!system_asr_language_id("zh-MO"));
+    REQUIRE(!system_asr_language_id("zh-Hant-HK"));
+    REQUIRE(!system_asr_language_id("zh-yue"));
+    REQUIRE(!system_asr_language_id("yue-HK"));
+    // 只看完整子标签，不误伤别的地区。
+    REQUIRE(id_is("zh-Hant-TW", "404"));
+    REQUIRE(id_is("zh-SG", "804"));
     REQUIRE(system_asr_unsupported_language_message("yue").find("“yue”") != std::string::npos);
 
     // 缺识别器的提示写出语言和去哪里装；没给语言时写实际使用的 zh-CN。

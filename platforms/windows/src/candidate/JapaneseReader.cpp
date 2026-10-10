@@ -117,23 +117,22 @@ std::string JapaneseReader::read(const std::string &term) {
     const HRESULT hr = language_of(language_)->GetJMorphResult(kRequestReverse, kReverseMode,
                                                                static_cast<INT>(input.size()), input.c_str(),
                                                                info.data(), &result);
+    // 反查时 pwchOutput 是平假名读音，pwchRead（即 pwchComp）是原文：写法取原文、读音取输出（japanese_reverse_words）。
     std::vector<JapaneseWord> words;
-    bool complete = hr == S_OK && result && result->pwchOutput && result->pwchRead && result->pWDD &&
-                    result->cWDD > 0;
-    for (INT index = 0; complete && index < result->cWDD; ++index) {
-      const auto &word = result->pWDD[index];
-      if (word.wDispPos + word.cchDisp > result->cchOutput || word.wReadPos + word.cchRead > result->cchRead) {
-        complete = false;
-        break;
+    if (hr == S_OK && result && result->pwchOutput && result->pwchRead && result->pWDD && result->cWDD > 0) {
+      std::vector<JapaneseMorphWord> morphs;
+      morphs.reserve(static_cast<size_t>(result->cWDD));
+      for (INT index = 0; index < result->cWDD; ++index) {
+        const auto &word = result->pWDD[index];
+        morphs.push_back({word.wDispPos, word.cchDisp, word.wReadPos, word.cchRead});
       }
-      words.push_back({std::u16string(result->pwchOutput + word.wDispPos,
-                                      result->pwchOutput + word.wDispPos + word.cchDisp),
-                       std::u16string(result->pwchRead + word.wReadPos,
-                                      result->pwchRead + word.wReadPos + word.cchRead)});
+      const std::u16string comp(result->pwchRead, result->pwchRead + result->cchRead);
+      const std::u16string output(result->pwchOutput, result->pwchOutput + result->cchOutput);
+      words = japanese_reverse_words(comp, output, morphs);
     }
     if (result)
       CoTaskMemFree(result);
-    if (complete)
+    if (!words.empty())
       if (auto value = japanese_romaji(words); !value.empty())
         return value;
   }

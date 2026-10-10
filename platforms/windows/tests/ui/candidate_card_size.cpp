@@ -918,6 +918,29 @@ int main() {
     const auto rows = candidate_page_layout(reserved.items, 400.0, shape, true, {}, two);
     require(near(rows[0].bounds.bottom - rows[0].bounds.top, two) &&
             near(rows[1].bounds.bottom - rows[1].bounds.top, two));
+    // 两行释义到达后由 DirectWrite 量高（常见字体的行高约 1.33 倍字号，比 translation_line 的 1.25 倍高）：预留时用同一种测量量出的两行占位高度，释义到了卡片也不变高。
+    {
+      const double measured = 2.0 * shape.translation_font * 1.33;
+      require(measured > 2.0 * shape.translation_line);
+      require(near(candidate_reserved_row_height(shape, 2, measured), shape.candidate_row + measured));
+      // 一行释义不量，按固定行高；量出来比估算还矮或不是有限值时按估算。
+      require(near(candidate_reserved_row_height(shape, 1, measured), shape.candidate_row + shape.translation_line));
+      require(near(candidate_reserved_row_height(shape, 2, 1.0), two));
+      require(near(candidate_reserved_row_height(shape, 2, std::nan("")), two));
+      CandidateCardInput tall;
+      tall.horizontal = true;
+      tall.items = {{40.0}, {40.0}};
+      tall.reserved_secondary_lines = 2;
+      tall.reserved_secondary_height = measured;
+      const auto before = candidate_card_size(tall);
+      CandidateItemWidths arrived{40.0, 0.0, 30.0};
+      arrived.translation_lines = 2;
+      tall.items = {arrived, arrived};
+      tall.wrapped = [&](size_t, CandidateRun run, double) {
+        return run == CandidateRun::translation ? measured : shape.candidate_row;
+      };
+      require(near(candidate_card_size(tall).height, before.height));
+    }
     // 竖排不预留。
     reserved.horizontal = false;
     reserved.items = {{40.0}, {40.0}};

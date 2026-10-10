@@ -213,6 +213,30 @@ inline std::string japanese_romaji(const std::vector<JapaneseWord> &words) {
   return out;
 }
 
+// IFELanguage 反查（FELANG_REQ_REV）结果里的一个词，即 msime.h 的 WDD：输出串 pwchOutput 是转换结果，反查时就是平假名读音，wDispPos/cchDisp 指向它；原文在 pwchComp（与 pwchRead 同一个联合），wCompPos/cchComp（与 wReadPos/cchRead 同一个联合）指向它。
+struct JapaneseMorphWord {
+  size_t output_position = 0;
+  size_t output_length = 0;
+  size_t comp_position = 0;
+  size_t comp_length = 0;
+};
+
+// 把反查结果拆成词：写法取原文 comp 里的一段，读音取输出 output 里的一段。正向转换（假名转汉字）时两者正好反过来，这里只用于反查。有一段越界或为空就返回空列表，整行不标。
+inline std::vector<JapaneseWord> japanese_reverse_words(std::u16string_view comp, std::u16string_view output,
+                                                        const std::vector<JapaneseMorphWord> &morphs) {
+  std::vector<JapaneseWord> words;
+  words.reserve(morphs.size());
+  for (const auto &morph : morphs) {
+    if (morph.comp_length == 0 || morph.comp_position > comp.size() ||
+        morph.comp_length > comp.size() - morph.comp_position || morph.output_position > output.size() ||
+        morph.output_length > output.size() - morph.output_position)
+      return {};
+    words.push_back({std::u16string(comp.substr(morph.comp_position, morph.comp_length)),
+                     std::u16string(output.substr(morph.output_position, morph.output_length))});
+  }
+  return words;
+}
+
 // UTF-8 和 UTF-16 之间的转换，释义行是 UTF-8，IFELanguage 收发 UTF-16。不合法的 UTF-8 转出空串。
 inline std::u16string japanese_utf16(std::string_view utf8) {
   std::u16string out;

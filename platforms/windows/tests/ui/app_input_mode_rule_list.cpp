@@ -25,6 +25,10 @@ int main() {
         "narrow no-break, math and ogham spaces are trimmed");
   check(normalize_app_input_mode_rule(L"\u2028code.exe\u2029\x0085") == L"code.exe", "line and paragraph separators are trimmed");
   check(normalize_app_input_mode_rule(L"C:\\Tools\\\u2003Code.exe") == L"code.exe", "the file name after a path is trimmed too");
+  // 资源管理器「复制文件地址」给出的路径带一对双引号。
+  check(normalize_app_input_mode_rule(L" \"C:\\Program Files\\Microsoft VS Code\\Code.exe\" ") == L"code.exe",
+        "quotes from Copy as path are removed");
+  check(normalize_app_input_mode_rule(L"\"") == L"\"", "a lone quote is kept and later rejected");
 
   const std::vector<std::wstring> none;
   check(validate_app_input_mode_rule(L"", none) == AppInputModeRuleError::Empty, "empty");

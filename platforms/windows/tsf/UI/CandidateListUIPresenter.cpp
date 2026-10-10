@@ -168,25 +168,10 @@ HRESULT CMetasequoiaIME::_HandleCandidateFinalize(TfEditCookie ec, _In_ ITfConte
                 return hr;
             }
         }
-        // 空格、数字上屏的是释义（Tab 预选的释义列、Ctrl+Enter 的释义页）：Server 已经取消了组字，回复是要原样上屏的完整文本，不补成对标点。以前这里没有这个分支，回复落到下面直接结束组字，上屏的是组字里原有的文字而不是释义。
+        // 空格、数字上屏的是释义（Tab 预选的释义列、Ctrl+Enter 的释义页）：Server 已经取消了组字，回复是要原样上屏的完整文本，不补成对标点。以前这里没有这个分支，回复落到下面直接结束组字，上屏的是组字里原有的文字而不是释义。宿主会话拥有组字时，数字不经过这里，由 _HandleCandidateWorker 先读同一种回复。
         else if (serverMsgType == Global::DataFromServerMsgType::CommitExactText)
         {
-            GlobalIme::word_for_creating_word = L"";
-            _creatingWordRestoreHistory.clear();
-            GlobalIme::pending_create_word_preedit.clear();
-            if (!serverCandidateString.empty())
-            {
-                candidateString.Set(serverCandidateString.c_str(), serverCandidateString.length());
-                hr = _InsertTextToComposition(ec, pContext, &candidateString);
-                if (FAILED(hr))
-                {
-                    hr = _AddComposingAndChar(ec, pContext, &candidateString);
-                }
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-            }
+            return _CommitServerExactText(ec, pContext, serverCandidateString);
         }
         /* 处理造词的逻辑 */
         else if (serverMsgType == Global::DataFromServerMsgType::NeedToCreateWord)
@@ -268,6 +253,37 @@ NoPresenter:
     _OpenCandidateCommitPair(candidatePairedOpening, candidatePairedClosing);
 
     return hr;
+}
+
+//+---------------------------------------------------------------------------
+//
+// _CommitServerExactText
+//
+//----------------------------------------------------------------------------
+
+HRESULT CMetasequoiaIME::_CommitServerExactText(TfEditCookie ec, _In_ ITfContext *pContext, const std::wstring &text)
+{
+    GlobalIme::word_for_creating_word = L"";
+    _creatingWordRestoreHistory.clear();
+    GlobalIme::pending_create_word_preedit.clear();
+    // Server 取消了它的组字；TIP 的宿主会话还留着同一段拼音和候选，不丢掉的话下一个字母会接着它组字。
+    (void)_CancelHostComposition();
+    if (!text.empty())
+    {
+        CStringRange exactText;
+        exactText.Set(text.c_str(), text.length());
+        HRESULT hr = _InsertTextToComposition(ec, pContext, &exactText);
+        if (FAILED(hr))
+        {
+            hr = _AddComposingAndChar(ec, pContext, &exactText);
+        }
+        if (FAILED(hr))
+        {
+            return hr;
+        }
+    }
+    _HandleCompleteCommitFirst(ec, pContext);
+    return S_OK;
 }
 
 //+---------------------------------------------------------------------------
@@ -379,6 +395,17 @@ HRESULT CMetasequoiaIME::_HandleCandidateWorker(TfEditCookie ec, _In_ ITfContext
 
     if (auto *host = _pCompositionProcessorEngine->GetHostEngineAdapter(); host && host->valid())
     {
+        // 数字在预选的释义列（Tab）或 Ctrl+Enter 的释义页上是上屏释义：Server 已经取消了自己的组字，回 CommitExactText。宿主会话不知道这两种状态，所以先读这个键的回复；读不到（不中断管道，和 _HandleConversionKey 一样）或是别的回复时，照旧向宿主会话选词。以前这里不读回复，上屏的是宿主会话的候选而不是释义，Server 记下的上屏文字也和文档不一致。
+        if (requestId != FANY_IME_NO_REQUEST_ID)
+        {
+            const FanyImeNamedpipeDataToTsf *reply =
+                TryReadDataFromServerPipeWithTimeout(requestId, /*abortTransportOnTimeout=*/false);
+            if (reply->msg_type == Global::DataFromServerMsgType::CommitExactText)
+            {
+                const std::wstring exactText(reply->candidate_string);
+                return _CommitServerExactText(ec, pContext, exactText);
+            }
+        }
         std::string viewRaw, error;
         msime::tsf::EngineResult view;
         CCandidateListItem displayed;
@@ -399,10 +426,23 @@ HRESULT CMetasequoiaIME::_HandleCandidateWorker(TfEditCookie ec, _In_ ITfContext
                     std::wstring commit(static_cast<size_t>(n > 0 ? n : 0), L'\0');
                     if (n > 0) MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, selected.commit.data(),
                                                    static_cast<int>(selected.commit.size()), commit.data(), n);
+                    // 和空格、回车、点选一样：数字选中的符号候选恰好是一个左半边时补上右半边，上屏之后记下这一对并把光标移回两半之间。
+                    const WCHAR pairedClosing = _CandidateCommitPairedClosing(commit);
+                    const WCHAR pairedOpening = pairedClosing != 0 ? commit.front() : L'\0';
+                    if (pairedClosing != 0)
+                    {
+                        commit.push_back(pairedClosing);
+                    }
                     CStringRange selectedText;
                     selectedText.Set(commit.c_str(), commit.size());
                     hrReturn = _AddCharAndFinalize(ec, pContext, &selectedText);
                     _DeleteCandidateList(FALSE, pContext);
+                    if (SUCCEEDED(hrReturn) && pairedClosing != 0)
+                    {
+                        // 移回光标的是合成给应用的左方向键，和按标点键补全时一样要在组字结束之后再发，否则它落在还开着的组字里。
+                        _HandleCompleteCommitFirst(ec, pContext);
+                        _OpenCandidateCommitPair(pairedOpening, pairedClosing);
+                    }
                     return hrReturn;
                 }
                 if (selected.handled)

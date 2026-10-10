@@ -6,7 +6,7 @@
 #include <optional>
 
 namespace msime::windows {
-// The class msime_client_key_sound plays for a key the Server handled: 1 space, 2 enter, 3 backspace, 0 any other key. A key that reaches the Server is typing; the exceptions are a bare modifier, which the TIP forwards to cancel a composition, and a chord with Ctrl or Alt, which is a shortcut. Neither makes a sound. The keys the TIP hands to the application sound through the Aux pipe instead (passthrough_key_sound_class), with the same table.
+// Server 处理的键交给 msime_client_key_sound 的类别：1 空格、2 回车、3 退格、0 其他键。到达 Server 的键都是打字，例外是 TIP 为取消组字转发的单独修饰键和带 Ctrl、Alt 的快捷键，它们不出声。TIP 交给应用的键经 Aux 管道出声（passthrough_key_sound_class），共用同一张表。
 inline std::optional<uint32_t> key_sound_class(const FanyImeNamedpipeData &packet) {
   if (packet.event_type != FanyImePipeEventType::KeyEvent)
     return std::nullopt;

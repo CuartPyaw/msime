@@ -16,11 +16,11 @@ TIP 原本分不出双拼和五笔：`InputModeChanged` 帧给全拼、双拼、
 
 十四个 ICO（`tsf/assets/{shuangpin,wubi,cantonese,zhuyin,vietnamese,tibetan,stroke}-{light,dark}.ico`）由 `platforms/windows/scripts/render_tsf_mode_icons.swift` 生成，在 macOS 上运行，同样的输入得到逐字节相同的输出。字形取自思源黑体 SC Regular 2.005（SIL Open Font License 1.1，adobe-fonts/source-han-sans 的 `2.005R` 发布里的 `09_SourceHanSansSC.zip`，脚本核对 OTF 的 SHA-256），按墨迹框把长边撑到图块的 15/16，摆法与 `render_menu_icon.swift` 一样。最初用的是 macOS 菜单图标同款的 PingFang SC，审查时改掉了：PingFang 是 Apple 随系统授权的字体，它的字形渲染成图标放进 Windows 安装包分发，授权上站不住；OFL 字体渲染出的图像可以随任何产品分发。字重用 Regular：任务栏上并排的中、英、日是上游原图，笔画细，同一个指示器换方案时字不该忽粗忽细。尺寸与 jp、kr 相同，16 到 48 每隔 4 再加 64；每个尺寸是 32 位 BMP 条目加 AND 掩码。浅色任务栏用黑字，深色用白字。资源号 37 到 50（`tsf/Header/resource.h`），导出检查 `tsf/tests/exports/verify.cmake` 要求的图标组从 15 个变成 29 个，`tsf/assets/README.md` 记来源。
 
-**日文释义行的罗马字来自微软日语输入法。** `src/candidate/JapaneseReader.cpp` 在翻译工作线程上用 IFELanguage（ProgID `MSIME.Japan`）的 `GetJMorphResult(FELANG_REQ_REV, …)` 分词，并取每个词的平假名读音。`src/candidate/JapaneseRomaji.h` 把读音按平文式转成罗马字，词与词之间一个空格。助词 は、へ、を 和 こんにちは、こんばんは 按发音读。有一个词读不出来，整行就不标，和 macOS 的 `MSIMEJapaneseRomaji` 一样。
+**日文释义行的罗马字来自微软日语输入法。** `src/candidate/JapaneseReader.cpp` 在翻译工作线程上用 IFELanguage（ProgID `MSIME.Japan`）的 `GetJMorphResult(FELANG_REQ_REV, …)` 分词，并取每个词的平假名读音。反查时转换结果 `pwchOutput`（`wDispPos`/`cchDisp`）是平假名读音，原文在 `pwchComp`（与 `pwchRead` 同一个联合，`wCompPos`/`cchComp` 同理），所以写法取原文、读音取输出（`japanese_reverse_words`）；最初的实现把两者取反了，含汉字的行一律读不出来，只有纯假名的行靠退路读出，因为这条路在 Windows 上没有跑过，评审才发现。`src/candidate/JapaneseRomaji.h` 把读音按平文式转成罗马字，词与词之间一个空格。助词 は、へ、を 和 こんにちは、こんばんは 按发音读。有一个词读不出来，整行就不标，和 macOS 的 `MSIMEJapaneseRomaji` 一样。
 
 接口声明照抄 Windows SDK 的 `msime.h`，因为 MinGW 不带这个头文件。该头文件整个用 `#pragma pack(1)`，布局由 `static_assert` 钉住。COM 在工作线程上按单线程套间初始化，线程已经是多线程套间时沿用。`TranslationWorker::run` 在工作线程的栈上持有一个 `JapaneseReader`，经一个 `thread_local` 指针交给本线程的读音查询，所以创建、使用、关闭都在同一线程上；结果按词缓存，最多 1024 条。关闭由读音器在 `run` 返回时的栈析构完成，不用 `thread_local` 对象：那种析构在线程退出回调里持着加载器锁运行（MSVC 和 MinGW 都是），在那里 `CoUninitialize` 或让 COM 卸载日语输入法的 DLL，可能让 Server 退出时卡在等翻译线程上。最初的写法是 `thread_local JapaneseReader` 加 `run` 返回前显式 `close()`，门禁在 Wine 下跑 `windows-translation-worker` 时它在线程退出时跳到空地址崩溃（MinGW 构建的 `thread_local` 析构），改成栈上实例后通过。
 
-系统里没有这个组件时不报错：纯假名的释义仍按假名直接读，含汉字的行不标读音。`CandidateGlossReadings.h` 的 `gloss_pronunciation_lines` 多一个可选的 `japanese` 读法；不传时行为和以前一样。共享设置页「显示读音」不再按宿主区分说明（`expression-page.tsx` 不再传 `candidatePronunciationRomaji={!windowsPlatform}`），原生设置窗口的同一行也改成「英文释义给音标，日文释义给罗马音」。
+系统里没有这个组件时不报错：纯假名的释义仍按假名直接读，含汉字的行不标读音。`CandidateGlossReadings.h` 的 `gloss_pronunciation_lines` 多一个可选的 `japanese` 读法；不传时行为和以前一样。共享设置页「显示读音」不再按宿主区分说明（`expression-page.tsx` 不再传 `candidatePronunciationRomaji={!windowsPlatform}`，`CandidatePronunciationSection` 的 `romaji` 属性和那句只讲音标的说明也一并删掉，没有宿主再缺罗马音），原生设置窗口的同一行也改成「英文释义给音标，日文释义给罗马音」。
 
 **「取消置顶」这次不做，先定共享机制。** 不做的原因是证据指向 Engine，而改 Engine 要做产品决定。
 
@@ -67,7 +67,7 @@ macOS 的「取消置顶」只撤掉宿主自己按编码记的顺序表（NSUse
 - `tests/input/input_scheme_traits.cpp`：新码的往返、`mode_scheme` 仍是全拼、旧码和未知码读成中文。
 - `tests/runtime/tsf_config_frames.cpp`：帧里发 `'8'`、`'9'`。
 - `tests/ui/toolbar_icons.cpp`：模式码直接画双、五。
-- `tests/candidate/japanese_romaji.cpp`：平文式、拗音、促音、拨音、长音、外来音、逐词与助词、读不全不标。
+- `tests/candidate/japanese_romaji.cpp`：平文式、拗音、促音、拨音、长音、外来音、逐词与助词、读不全不标，以及按反查结果的方向拆词（写法取原文、读音取输出）。Windows 真机上仍要用「今日は天気がいいですね」确认读出 kyou wa tenki ga ii desu ne。
 - `tests/candidate/candidate_gloss_readings.cpp`：日文行接上罗马字读法。
 - `apps/desktop/tests/settings/settings.test.tsx`：Windows 的「显示读音」说明。
 

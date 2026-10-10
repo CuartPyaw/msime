@@ -44,6 +44,8 @@ struct CandidateCardInput {
   bool logo_visible = true;
   // 横排时每行候选预留的释义行数，见 candidate_reserved_row_height：释义几秒后才到，先留出高度，卡片就不会在用户打字时突然变高。竖排不预留。
   size_t reserved_secondary_lines = 0;
+  // 这几行释义用释义字体量出来的高度：窗口拿同一个 DirectWrite 格式量 reserved_secondary_lines 行占位文字，和释义到达后多行释义的测量（CandidateWrapMeasure）同一条路，预留的和画出来的才一样高。0 时按 translation_line 估算。
+  double reserved_secondary_height = 0.0;
 };
 struct CandidateCardSize {
   double width, height;
@@ -337,13 +339,14 @@ candidate_single_line_columns(const std::vector<CandidateItemWidths> &items,
     natural[index] = firm[index] + (natural[index] - firm[index]) * keep;
   return natural;
 }
-// 横排候选在释义到达前就留出的行高：一行候选文字加 `lines` 行释义，和 macOS 的 reservedGlossHeightForFont 一样。lines 为 0 时不预留。
+// 横排候选在释义到达前就留出的行高：一行候选文字加 `lines` 行释义，和 macOS 的 reservedGlossHeightForFont 一样。lines 为 0 时不预留。释义到达后，一行的释义按 translation_line 算高，多行的总是用 DirectWrite 量（candidate_item_layout 的 run_height，不矮于 translation_line 乘行数）；所以多行时用 `measured`（窗口用同一种测量量出的 lines 行占位文字的高度），规则与 run_height 相同，预留的和到达后的一样高。measured 为 0 或不是有限值时按 translation_line 估算。
 inline double candidate_reserved_row_height(const CandidateCardMetrics &metrics,
-                                            size_t lines) {
+                                            size_t lines, double measured = 0.0) {
   if (lines == 0)
     return 0.0;
-  return metrics.candidate_row +
-         metrics.translation_line * static_cast<double>(lines);
+  const double estimated = metrics.translation_line * static_cast<double>(lines);
+  const double gloss = lines > 1 && std::isfinite(measured) ? (std::max)(measured, estimated) : estimated;
+  return metrics.candidate_row + gloss;
 }
 // One laid out row: its rectangle in card coordinates and the runs inside it.
 struct CandidateRowLayout {
@@ -504,7 +507,8 @@ inline CandidateCardSize candidate_card_size(const CandidateCardInput &input) {
   // Heights come from the width the card will actually get: a capped card wraps the runs that no longer fit, and grows by exactly what the painter will draw.
   const double reserved =
       input.horizontal
-          ? candidate_reserved_row_height(shape, input.reserved_secondary_lines)
+          ? candidate_reserved_row_height(shape, input.reserved_secondary_lines,
+                                          input.reserved_secondary_height)
           : 0.0;
   const auto rows = candidate_page_layout(input.items, width, shape,
                                           input.horizontal, input.wrapped, reserved);

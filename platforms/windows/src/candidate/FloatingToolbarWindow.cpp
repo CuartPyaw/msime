@@ -10,6 +10,7 @@
 #include "ToolbarTooltips.h"
 #include "ServerResources.h"
 #include "WindowShadow.h"
+#include "WaveOverlayUtils.h"
 #include "IconFont.h"
 #include <algorithm>
 #include <cmath>
@@ -80,8 +81,15 @@ bool FloatingToolbarWindow::usable(int button) const {
 }
 ToolbarMenuAnchor FloatingToolbarWindow::menu_anchor(std::optional<size_t> index,
                                                      int x) const {
+  // 工具栏不感知 DPI，这里（它的窗口过程里）量到的外框和点击坐标都是逻辑坐标；弹出菜单在每显示器感知的上下文里按物理像素摆放，所以在每显示器感知的上下文里再量一次同一个外框，把锚点换过去。缩放不是 100% 时不换的话，菜单会开到离按钮很远的地方，副屏旁边还可能开到另一块屏上。
   RECT window{};
   GetWindowRect(window_, &window);
+  RECT physical = window;
+  {
+    WaveOverlayDpiScope dpi_scope;
+    if (!GetWindowRect(window_, &physical))
+      physical = window;
+  }
   const auto layout = metrics();
   const double unit = toolbar_pixel_unit(GetDpiForWindow(window_), scale_);
   const auto card = toolbar_card(slots().size(), layout);
@@ -90,9 +98,17 @@ ToolbarMenuAnchor FloatingToolbarWindow::menu_anchor(std::optional<size_t> index
     const auto cell = toolbar_cell(*index, layout);
     centre = (cell.left + cell.right) / 2.0 * unit;
   }
-  return {window.left + static_cast<int>(std::lround(centre)),
-          window.top + static_cast<int>(std::lround(card.top * unit)),
-          window.top + static_cast<int>(std::lround(card.bottom * unit))};
+  const auto horizontal = [&](int value) {
+    return toolbar_physical_coordinate(value, window.left, window.right, physical.left,
+                                       physical.right);
+  };
+  const auto vertical = [&](int value) {
+    return toolbar_physical_coordinate(value, window.top, window.bottom, physical.top,
+                                       physical.bottom);
+  };
+  return {horizontal(window.left + static_cast<int>(std::lround(centre))),
+          vertical(window.top + static_cast<int>(std::lround(card.top * unit))),
+          vertical(window.top + static_cast<int>(std::lround(card.bottom * unit)))};
 }
 void FloatingToolbarWindow::sync_tooltips() {
   if (!tooltip_)
@@ -187,9 +203,7 @@ void FloatingToolbarWindow::run(size_t position, const ModePresentation &value, 
     return;
   const int slot = active[position];
   if (!usable(slot)) {
-    // Nothing to open, so the press is not an action. Reported the same
-    // way the tray reports it: by doing nothing visible, not by looking
-    // pressed and then dropping the command.
+    // 没有可打开的界面，按下不算动作：和托盘一样什么都不做，不显示按下再丢掉命令。
   }
   else if (slot <= kToolbarPunctuation) {
     if (auto command = toolbar_mode_command(
@@ -451,9 +465,7 @@ void FloatingToolbarWindow::paint() {
     // a missing mark costs nothing, a placeholder box would look like a bug.
     const auto mark = toolbar_logo(layout);
     if (layout_.show_logo) {
-      // Loaded at the size it is drawn at, in real pixels rather than Direct2D's
-      // DIPs: msime.ico carries frames from 16 to 256, and asking for the right
-      // one is the difference between a crisp mark and a resampled one.
+      // 按画出来的实际像素尺寸加载，而不是 Direct2D 的 DIP：msime.ico 带 16 到 256 的各档图像，取对那一档图标才清晰，取错就是重新采样过的模糊图标。
       const double pixels = (mark.right - mark.left) *
                             toolbar_pixel_unit(GetDpiForWindow(window_), scale_);
       if (auto *logo = logo_bitmap(static_cast<int>(std::lround(pixels))))
@@ -612,9 +624,14 @@ LRESULT CALLBACK FloatingToolbarWindow::procedure(HWND window, UINT message,
       if (self->shown_) self->refresh(true);
       return 0;
     case WM_PAINT: self->paint(); return 0;
-    case WM_ENTERSIZEMOVE:
+    case WM_ENTERSIZEMOVE: {
       self->moving_ = true;
+      RECT rect{};
+      self->move_start_.reset();
+      if (GetWindowRect(window, &rect))
+        self->move_start_ = POINT{rect.left, rect.top};
       return 0;
+    }
     case WM_MOVE:
       // Only a move the user drove counts. refresh()'s own SetWindowPos raises
       // WM_MOVE too, and treating that as a drag would record the default
@@ -626,9 +643,10 @@ LRESULT CALLBACK FloatingToolbarWindow::procedure(HWND window, UINT message,
       // The window rect, not lParam: WM_MOVE reports the client area's origin,
       // so persisting that shifted the toolbar up and left by the frame on
       // every restart.
+      // 移动循环里的每一帧都记下来，这样拖动途中有 refresh 也按拖到的位置摆，不会把工具栏拽回角上。
       {
         RECT rect{};
-        if (self->user_dragging_ && GetWindowRect(window, &rect))
+        if (GetWindowRect(window, &rect))
           self->dragged_position_ = POINT{rect.left, rect.top};
       }
       return 0;
@@ -637,6 +655,21 @@ LRESULT CALLBACK FloatingToolbarWindow::procedure(HWND window, UINT message,
       // of the drag, and the listener rewrites the whole configuration file, so
       // persisting there rewrote it dozens of times per second on the UI thread.
       self->moving_ = false;
+      // 松手时按窗口实际的位置再判一次：系统设置成拖动时只画轮廓的话，窗口要到松手才移动；第一次拖动之前没有记过位置，也要在这里记下，否则生产 Server 永远写不出位置文件。只按了一下没动时保留原来的记录。
+      {
+        RECT rect{};
+        if (self->move_start_ && GetWindowRect(window, &rect)) {
+          std::optional<FloatingToolbarPlacement> stored;
+          if (self->dragged_position_)
+            stored = FloatingToolbarPlacement{self->dragged_position_->x, self->dragged_position_->y};
+          const auto ended = floating_toolbar_drag_end(
+              stored, FloatingToolbarPlacement{self->move_start_->x, self->move_start_->y},
+              FloatingToolbarPlacement{rect.left, rect.top});
+          if (ended)
+            self->dragged_position_ = POINT{ended->x, ended->y};
+        }
+        self->move_start_.reset();
+      }
       // 拖动时系统的移动循环占着 UI 线程，空闲计时在此期间没有机会重置；按下时记的那次输入到松开时可能已经超过 10 秒，所以松开时再记一次，免得工具栏一放下就隐藏。与 macOS 拖动工具栏会重新计时一致。
       if (self->activity_action_)
         self->activity_action_();

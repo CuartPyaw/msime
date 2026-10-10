@@ -523,7 +523,7 @@ pub unsafe extern "C" fn msime_client_restore_default_preferences(
     })
 }
 
-/// 「导出设置」：读出偏好目录里的当前偏好，返回设置文件的全文（字符串，见 `msime_client_core::settings_document`）。语音、AI 辅助和翻译服务的配置与密钥、诊断日志和使用统计开关不写进文件。宿主负责让用户选位置并写盘。
+/// 「导出设置」：读出偏好目录里的当前偏好，返回设置文件的全文（字符串，见 `msime_client_core::settings_document`）。语音、AI 辅助和翻译服务的配置与密钥、诊断日志、使用统计和剪贴板历史开关不写进文件。宿主负责让用户选位置并写盘。
 /// # Safety
 /// `directory` 必须指向 `length` 个可读字节，空指针被拒绝。
 /// 返回的响应必须交给 `msime_client_string_free` 释放。
@@ -552,7 +552,7 @@ pub unsafe extern "C" fn msime_client_export_settings(
     })
 }
 
-/// 「导入设置」：把用户选的设置文件换算成偏好（本机的服务配置与密钥、诊断日志和使用统计开关保留，按本目录所属的版本收窄输入方案），再按 `expected_revision` 比较并交换写回，返回新的快照。失败时的错误是 `settings_document_invalid`（不是设置文件）、`settings_document_macos`（macOS 原生设置窗口导出的文件）、`settings_document_unsupported`（更新版本的文件或读不懂的设置）、`settings_conflict`（设置已在别处更新）之一，或者存储错误的说明；失败时什么也不写。
+/// 「导入设置」：把用户选的设置文件换算成偏好（本机的服务配置与密钥、诊断日志、使用统计和剪贴板历史开关保留，按本目录所属的版本收窄输入方案），再按 `expected_revision` 比较并交换写回，返回新的快照。剪贴板历史开关不随文件变，所以导入不会像保存偏好那样清空已存的剪贴板历史，保存成功就是整个导入成功。失败时的错误是 `settings_document_invalid`（不是设置文件）、`settings_document_macos`（macOS 原生设置窗口导出的文件）、`settings_document_unsupported`（更新版本的文件或读不懂的设置）、`settings_conflict`（设置已在别处更新）之一，或者存储错误的说明；失败时什么也不写。
 /// # Safety
 /// `directory` 必须指向 `directory_length` 个可读字节，`document` 必须指向 `document_length` 个可读字节，空指针被拒绝。
 /// 返回的响应必须交给 `msime_client_string_free` 释放。
@@ -598,11 +598,6 @@ pub unsafe extern "C" fn msime_client_import_settings(
                 }
                 error => error.to_string(),
             })?;
-        if !saved.preferences.clipboard_history {
-            store
-                .clear_disabled_clipboard_history()
-                .map_err(|e| e.to_string())?;
-        }
         serde_json::to_value(saved).map_err(|e| e.to_string())
     })
 }

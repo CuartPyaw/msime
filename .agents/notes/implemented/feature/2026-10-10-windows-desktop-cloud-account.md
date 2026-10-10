@@ -24,7 +24,7 @@ Windows 的设置应用（Tauri）已经能登录水杉账号，但账号之外�
 
 ### 设置同步
 
-`settings_sync.rs` 把 Android 映射里各平台共有的 `input.*` 部分抽成 `insert_input_settings` / `apply_input_settings`，新增 `export_desktop_settings` / `apply_desktop_settings` 只用这一部分。`platform/windows/windows_settings_sync.rs` 注册与移动端同名的四个命令；应用时按读到时的修订号经 `save_preferences_impl` 写入，期间本机设置变过就拒绝，并同步进运行时选项。卡片的说明文字由 `SettingsSyncClient.description` 给出，Windows 写明只同步输入设置。
+`settings_sync.rs` 把 Android 映射里各平台共有的 `input.*` 部分抽成 `insert_input_settings` / `apply_input_settings`，新增 `export_desktop_settings` / `apply_desktop_settings` 只用这一部分。`platform/windows/windows_settings_sync.rs` 注册与移动端同名的四个命令；应用时按读到时的修订号经 `save_preferences_impl` 写入，期间本机设置变过就拒绝，并同步进运行时选项。卡片的说明文字由 `SettingsSyncClient.description` 给出，Windows 写明只同步输入设置；应用成功后的提示由 `appliedMessage` 给出，Windows 只说「已应用云端设置。」，不沿用移动端「请重新打开键盘」那半句，因为 Server 从共享偏好里当场读到新设置。
 
 ### 与输入法共用账号会话
 
@@ -50,7 +50,7 @@ char *msime_client_account_access_token(const uint8_t *request, size_t length);
 
 - **收益**：Windows 用户能用云词库面板的全部功能，包括完整备份、恢复和把云端快照替换本机词库；能浏览、收藏、发布词包与回复模板并把词包导入云端或本机词库；能上传和应用输入设置。输入法 Server 有了取账号令牌的接口，「水杉账号」候选翻译可以直接用用户登录的账号。
 - **代价与已知上限**：
-  - 「应用到本机」激活时输入会暂停，长短取决于准备整份词库的时间；Server 在最后一次 `DictionaryQuiesce` 之后 30 秒自己交还会话，所以处理队列期间每 10 秒续一次放开，准备再久也不会中途把会话交回去；激活没完成时请求留在 `preparing`，每 60 秒在面板轮询时重试一次。面板关着时没有人处理队列，下次打开云词库面板才继续。真实 Windows 上大词库的准备耗时、以及改名换入时有没有别的进程握着词库文件，都还没有在真机上量过。
+  - 「应用到本机」激活时输入会暂停，长短取决于准备整份词库的时间；Server 在最后一次 `DictionaryQuiesce` 之后 30 秒自己交还会话，所以处理队列期间每 10 秒续一次放开，准备再久也不会中途把会话交回去；激活没完成时请求留在 `preparing`，每 60 秒在面板轮询时重试一次。面板关着时没有人处理队列，下次打开云词库面板才继续。共享面板因此按 `snapshotAppliesInPanel` 换掉移动端「输入法将在下一次空闲边界应用」的说法：确认框说替换马上进行、输入会暂停、要保持面板打开；没能当场应用时提示保持面板打开等重试，面板轮询时重试成功或作废就把这句换成结局（结束的结果在下一次轮询时被取走，不能指望处理结果一节一直在），待应用期间在处理结果里写明关掉面板就停在待应用、之后输入改了本机词库会因冲突作废。真实 Windows 上大词库的准备耗时、以及改名换入时有没有别的进程握着词库文件，都还没有在真机上量过。
   - 回复模板在 Windows 上只能收藏、评分、举报、发布，不能用于输入：桌面没有「高情商回复」键盘。
   - 设置同步只覆盖 `input.*`，候选窗口、快捷键、皮肤等桌面设置不跨机器同步。
   - 设置应用的账号页还不显示本机匿名账号（macOS 原生账号窗口的「本机账号」标记和登录后弃用匿名账号）。Server 的翻译线程用 `msime_client_account_access_token` 取令牌做「水杉账号」候选释义，见 [Windows 的释义列快捷键与「水杉账号」候选释义](2026-10-10-windows-gloss-columns-and-account-glosses.md)。

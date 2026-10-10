@@ -115,6 +115,8 @@ public:
   // 第一次失败的位置，只有固定标签和数字，可以写进诊断日志。
   const std::optional<ComponentFailureSite> &failure_site() const { return failure_site_; }
   HWND handle() const { return window_; }
+  // 候选卡片（不含四周的透明阴影边距和顶上吉祥物那一条）此刻的屏幕矩形，物理像素，候选窗不可见时为空。调用方要在每显示器 DPI 感知的线程上下文里，双拼键位图贴着它摆放。
+  std::optional<TypingRect> card_on_screen() const { return typing_effect_card(); }
 
 private:
   static LRESULT CALLBACK procedure(HWND, UINT, WPARAM, LPARAM) noexcept;
@@ -131,8 +133,10 @@ private:
   // Each candidate's runs measured the way paint() draws them, and their wrapped heights. card_bounds and paint share both, so the card is sized for exactly the rows that get drawn.
   std::vector<CandidateItemWidths> measure_items(const CandidatePresentation &value);
   CandidateWrapMeasure wrap_measure(const CandidatePresentation &value);
-  // 横排候选为还没到的释义预留几行：偏好算出的目标语言行数，韩文汉字列表再加 훈음 那一行。card_bounds 和 paint 都读它，量出来的尺寸和画出来的行才一致。
+  // 横排候选为还没到的释义预留几行：偏好算出的有释义来源的目标语言行数（这一页不请求释义时为 0），韩文汉字列表再加 훈음 那一行。card_bounds 和 paint 都读它，量出来的尺寸和画出来的行才一致。
   size_t reserved_secondary_lines(const CandidatePresentation &value) const;
+  // 预留的 lines 行释义用释义字体量出的高度（lines 行占位文字，和 wrap_measure 量多行释义同一种格式），交给 candidate_reserved_row_height。不到两行时为 0：一行释义按固定行高算，不用量。
+  double reserved_secondary_height(size_t lines);
   void paint();
   // UI thread: adopt the waiting typing effect and start its flash and combo timers.
   void take_typing_effect();

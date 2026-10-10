@@ -24,6 +24,8 @@ int main() {
     require(toolbar_scheme_title("shuangpin", "ziranma", "wubi86") == L"自然码双拼");
     require(toolbar_scheme_title("shuangpin", "shoudao", "wubi86") == L"首道双拼");
     require(toolbar_scheme_title("shuangpin", "microsoft", "wubi86") == L"微软双拼");
+    // 用户自己定义的键位不说成小鹤双拼。
+    require(toolbar_scheme_title("shuangpin", "custom", "wubi86") == L"自定义双拼");
     // 不认识的键位按 macOS 的规范化落到小鹤。
     require(toolbar_scheme_title("shuangpin", "unknown", "wubi86") == L"小鹤双拼");
     require(toolbar_scheme_title("wubi", "xiaohe", "wubi86") == L"五笔 86");

@@ -40,7 +40,6 @@ int main() {
     all.floating_toolbar = all.emoji_panel = all.handwriting_panel = true;
     all.keyboard_panel = all.voice_input = all.settings = true;
     all.cantonese = all.zhuyin = all.stroke = true;
-    all.desktop_app = true;
     all.schemes = scheme::all_schemes();
     all.product_name = "水杉输入法";
     TrayMenuState state;
@@ -90,7 +89,7 @@ int main() {
       require(tray_menu_scheme_items(pinyin, state).empty());
     }
 
-    // 右键菜单照搬 macOS 设置按钮的实用菜单：行和顺序一致；缺设置窗口或共享应用时对应的行不可用，系统表情、官网和隐藏总是可用。
+    // 右键菜单照搬 macOS 设置按钮的实用菜单：行和顺序一致；缺设置窗口时依赖它的行（含检查更新）不可用，系统表情、官网和隐藏总是可用。
     {
       using K = TrayMenuRowKind;
       using C = TrayMenuCommand;
@@ -134,7 +133,6 @@ int main() {
       require(tray_menu_geometry(utility, TrayMenuMetrics{}).rows.size() == utility.size());
       auto bare = all;
       bare.settings = false;
-      bare.desktop_app = false;
       const auto offline = toolbar_utility_menu_items(bare);
       for (const auto command : {C::OpenSettings, C::CheckForUpdates, C::OpenHelp,
                                  C::OpenAbout, C::OpenFeedback})

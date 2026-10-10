@@ -1,10 +1,11 @@
 #pragma once
 
 #include <cstddef>
+#include <exception>
 #include <string>
 
 namespace msime::windows {
-// 边录边识别、在本机完成的识别器：本地模型（LocalAsrStream）和 Windows 系统识别（SystemAsrStream）。VoiceInputSession 只通过这三个调用和它打交道，识别任务本身由各实现的 run() 在录音开始时启动。
+// 边录边识别、在本机完成的识别器：本地模型（LocalAsrStream）和 Windows 系统识别（SystemAsrStream）。VoiceInputSession 只通过这几个调用和它打交道，识别任务本身由各实现的 run() 在录音开始时启动。
 class OnDeviceAsrStream {
 public:
   virtual ~OnDeviceAsrStream() = default;
@@ -14,5 +15,7 @@ public:
   virtual std::string finish() = 0;
   // 任意线程、任意次数，finish() 之后也可以。识别器在下一次检查时停下，run() 不再给出文字。
   virtual void cancel() = 0;
+  // 控制线程在录音中每轮调用，不阻塞：识别任务已经因出错结束时返回那个异常（finish() 会重新抛出的同一个），否则为空。取消和队列溢出造成的停止不算失败，由调用方各自处理。
+  virtual std::exception_ptr failure() = 0;
 };
 } // namespace msime::windows

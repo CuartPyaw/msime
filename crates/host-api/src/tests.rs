@@ -2511,7 +2511,14 @@ fn exported_settings_import_as_a_compare_and_swap_that_keeps_local_services() {
     let target_store = PreferencesStore::new(target.path());
     let mut local = Preferences::default();
     local.voice_input.asr_token = "fixture-local-token".into();
+    // 本机开着剪贴板历史、存着记录；导出的文件里剪贴板历史是默认的关闭，导入后本机仍开着，记录也还在。
+    local.clipboard_history = true;
     let saved = target_store.save(0, local).unwrap();
+    assert!(target_store
+        .capture_clipboard_text("synthetic local history".into())
+        .unwrap());
+    let history = target.path().join("clipboard_history.json");
+    let original_history = std::fs::read(&history).unwrap();
     let target_path = target.path().to_str().unwrap();
     let import = |revision: u64, bytes: &[u8]| {
         read(unsafe {
@@ -2540,6 +2547,8 @@ fn exported_settings_import_as_a_compare_and_swap_that_keeps_local_services() {
         loaded.preferences.voice_input.asr_token,
         "fixture-local-token"
     );
+    assert!(loaded.preferences.clipboard_history);
+    assert_eq!(std::fs::read(&history).unwrap(), original_history);
 }
 
 #[test]
@@ -4498,9 +4507,7 @@ fn translation_queries_use_latest_preferences_without_resetting_composition() {
     );
     assert_eq!(secondary_gloss["value"]["english_gloss"], true);
 
-    // With the gloss off, only the user path needed to persist successful
-    // English-target provider results is carried. Packaged resources stay
-    // private to offline lookup.
+    // 离线英文释义关着、只开候选翻译时：用户目录照旧带上，存成功的英文翻译；英文目标下整句候选仍要逐词拆解（和 macOS currentGlossRequest 一样不要求离线释义开着），所以带 gloss_breakdown 和拆解表所在的资源目录。
     preferences.candidate_english_gloss = false;
     preferences.translation_target_language =
         msime_client_core::preferences::TranslationTargetLanguage::En;
@@ -4509,8 +4516,18 @@ fn translation_queries_use_latest_preferences_without_resetting_composition() {
     update(handle, 9, &preferences);
     let online = read(msime_client_translation_query(handle));
     assert_eq!(online["value"]["english_gloss"], false);
-    assert!(online["value"]["resources"].is_null());
+    assert_eq!(online["value"]["gloss_breakdown"], true);
+    assert!(online["value"]["resources"].is_string());
     assert!(online["value"]["user_data"].is_string());
+
+    // 目标语言里没有英文时没有拆解，资源目录也不带。
+    preferences.translation_target_language =
+        msime_client_core::preferences::TranslationTargetLanguage::Ja;
+    preferences.translation_secondary_language = None;
+    update(handle, 10, &preferences);
+    let japanese = read(msime_client_translation_query(handle));
+    assert!(japanese["value"].get("gloss_breakdown").is_none());
+    assert!(japanese["value"]["resources"].is_null());
     read(msime_client_destroy(handle));
 }
 

@@ -17,8 +17,10 @@ pub const MAX_DOCUMENT_BYTES: usize = 1 << 20;
 /// macOS 原生设置窗口「导出设置…」写出的格式名，内容是 Apple 云同步的键值，不是共享偏好。
 const MACOS_NATIVE_FORMAT: &str = "app.msime.client.settings";
 
-/// 只属于本机、不随设置文件走的偏好：语音、AI 辅助和翻译服务的整组配置（里面有服务密钥，地址、模型和密钥要成对才有意义，本地语音模型的路径也只在这台电脑上成立）、诊断日志开关，以及匿名使用统计的同意与否。导出时不写，导入时保留本机的值。
-pub const LOCAL_SECTIONS: [&str; 7] = [
+/// 只属于本机、不随设置文件走的偏好：语音、AI 辅助和翻译服务的整组配置（里面有服务密钥，地址、模型和密钥要成对才有意义，本地语音模型的路径也只在这台电脑上成立）、诊断日志开关、匿名使用统计的同意与否，以及剪贴板历史开关。导出时不写，导入时保留本机的值。
+///
+/// 剪贴板历史开关跟着本机走有两层原因：记不记录这台电脑复制过的内容是本机的隐私选择；它默认关闭，大多数文件里都是关的，如果跟着文件走，导入时会把本机开着的历史关掉，而关掉就会清空已存的历史，这些记录找不回来。
+pub const LOCAL_SECTIONS: [&str; 8] = [
     "voice_input",
     "ai_assistant",
     "custom_translation",
@@ -26,6 +28,7 @@ pub const LOCAL_SECTIONS: [&str; 7] = [
     "niutrans",
     "diagnostic_log",
     "usage_reporting",
+    "clipboard_history",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,10 +59,6 @@ pub fn export_document(preferences: &Preferences) -> Result<String, serde_json::
         for section in LOCAL_SECTIONS {
             object.remove(section);
         }
-        // 一次性的种子记录，不是用户的设置；见下面导入时的处理。
-        if let Some(Value::Object(fuzzy)) = object.get_mut("fuzzy_pinyin") {
-            fuzzy.remove("seeded");
-        }
     }
     let mut document = Map::new();
     document.insert("format".into(), Value::String(FORMAT.into()));
@@ -68,7 +67,7 @@ pub fn export_document(preferences: &Preferences) -> Result<String, serde_json::
     serde_json::to_string_pretty(&Value::Object(document))
 }
 
-/// 把设置文件换算成要保存的偏好：文件里的设置覆盖 `current`，[`LOCAL_SECTIONS`] 保留 `current` 的值，`fuzzy_pinyin.seeded` 只会从假变真（本机种过，或文件里模糊音开着）；文件里的输入方案本版本不提供时保留本机的方案（与账号同步下载时的规则一样，见 `edition::filter_downloaded_account_settings`），只有一个方案的版本根本不从文件里取方案。
+/// 把设置文件换算成要保存的偏好：文件里的设置覆盖 `current`，[`LOCAL_SECTIONS`] 保留 `current` 的值，`fuzzy_pinyin.seeded` 只会从假变真（本机种过、文件里标着种过，或文件里模糊音开着）；文件里的输入方案本版本不提供时保留本机的方案（与账号同步下载时的规则一样，见 `edition::filter_downloaded_account_settings`），只有一个方案的版本根本不从文件里取方案。
 pub fn import_document(
     bytes: &[u8],
     current: &Preferences,
@@ -104,9 +103,10 @@ pub fn import_document(
     }
     let mut preferences: Preferences = serde_json::from_value(Value::Object(imported))
         .map_err(|_| SettingsDocumentError::Unsupported)?;
-    // 记录一次性种子已经做过；文件里的值不能让本机重新种下用户关掉的规则。文件里模糊音是开着的时候，规则就是用户在另一台电脑上定下的，标成已种过，保存时不再被盖成全部规则（PreferencesStore::save 的首次打开种子）。
-    preferences.fuzzy_pinyin.seeded =
-        current.fuzzy_pinyin.seeded || preferences.fuzzy_pinyin.enabled;
+    // 记录一次性种子已经做过；文件里的值不能让本机重新种下用户关掉的规则。文件里标着种过（导出时随文件写出），或者模糊音开着，规则就是用户在另一台电脑上定下的（包括有意清空），标成已种过，本机以后第一次打开模糊音时不再被盖成全部规则（PreferencesStore::save、Windows 设置窗口和共享设置页的首次打开种子都看这个标记）。
+    preferences.fuzzy_pinyin.seeded = current.fuzzy_pinyin.seeded
+        || preferences.fuzzy_pinyin.seeded
+        || preferences.fuzzy_pinyin.enabled;
     narrow_to_edition(&mut preferences, current, edition);
     preferences
         .validate()
@@ -173,6 +173,7 @@ mod tests {
         exported.chinese_punctuation = !exported.chinese_punctuation;
         exported.scheme = InputScheme::Shuangpin;
         exported.usage_reporting = false;
+        exported.clipboard_history = false;
         exported.voice_input.asr_model_path = "/elsewhere/model".into();
         let text = export_document(&exported).unwrap();
 
@@ -180,6 +181,7 @@ mod tests {
         current.voice_input.asr_token = "synthetic-local-token".into();
         current.ai_assistant.token = "synthetic-local-token".into();
         current.usage_reporting = true;
+        current.clipboard_history = true;
         current.voice_input.asr_model_path = "/here/model".into();
         current.fuzzy_pinyin.seeded = true;
         let imported = import_document(text.as_bytes(), &current, Edition::full()).unwrap();
@@ -188,6 +190,7 @@ mod tests {
         assert_eq!(imported.chinese_punctuation, exported.chinese_punctuation);
         assert_eq!(imported.scheme, InputScheme::Shuangpin);
         assert!(imported.usage_reporting);
+        assert!(imported.clipboard_history);
         assert_eq!(imported.voice_input, current.voice_input);
         assert_eq!(imported.ai_assistant, current.ai_assistant);
         assert_eq!(imported.custom_translation, current.custom_translation);
@@ -298,13 +301,39 @@ mod tests {
             [FuzzyPinyinRule::ZZh].into_iter().collect()
         );
 
-        // 文件里模糊音关着时不替本机标记，本机以后第一次打开仍按原来的规则种一次。
+        // 文件来自一台从没种过的电脑、模糊音关着时不替本机标记，本机以后第一次打开仍按原来的规则种一次。
         let mut disabled = exported.clone();
         disabled.fuzzy_pinyin.enabled = false;
         let text = export_document(&disabled).unwrap();
         let imported =
             import_document(text.as_bytes(), &Preferences::default(), Edition::full()).unwrap();
         assert!(!imported.fuzzy_pinyin.seeded);
+
+        // 另一台电脑上种过、挑过规则（包括全部清空）再关掉模糊音，导出的文件带着种过的标记；导入后第一次打开模糊音，仍是文件里挑的规则。
+        for rules in [
+            [FuzzyPinyinRule::ZZh].into_iter().collect(),
+            std::collections::BTreeSet::new(),
+        ] {
+            let mut chosen = Preferences::default();
+            chosen.fuzzy_pinyin.seeded = true;
+            chosen.fuzzy_pinyin.rules = rules;
+            let text = export_document(&chosen).unwrap();
+
+            let directory = tempfile::tempdir().unwrap();
+            let store = PreferencesStore::new(directory.path());
+            let current = store.save(0, Preferences::default()).unwrap();
+            let imported =
+                import_document(text.as_bytes(), &current.preferences, Edition::full()).unwrap();
+            assert!(imported.fuzzy_pinyin.seeded);
+            let saved = store.save(current.revision, imported).unwrap();
+            let mut enabled = saved.preferences.clone();
+            enabled.fuzzy_pinyin.enabled = true;
+            let enabled = store.save(saved.revision, enabled).unwrap();
+            assert_eq!(
+                enabled.preferences.fuzzy_pinyin.rules,
+                chosen.fuzzy_pinyin.rules
+            );
+        }
     }
 
     #[test]

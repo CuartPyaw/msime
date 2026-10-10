@@ -144,6 +144,8 @@ export function createDesktopSettingsSync(invoke: Invoke): SettingsSyncClient {
   return {
     description:
       "同步输入方案、繁体输出、双拼和五笔版本、词库学习、调频和标点。凭据、联网授权及输入内容不会随设置上传。",
+    // 设置存进共享偏好后 Server 当场读到，没有要重新打开的键盘。
+    appliedMessage: "已应用云端设置。",
     schema: () => invoke("account_preferences_schema"),
     load: () => invoke("account_preferences_load"),
     upload: () => invoke("account_preferences_upload"),

@@ -237,7 +237,8 @@
 - 英文候选模式在 TIP 英文状态下不可用；托盘切方案要先翻到「输入方案」页，比 macOS 多点一次。
 - 回复模板只能收藏、评分、举报、发布，不能用于输入：桌面没有「高情商回复」键盘。
 - 外部语音识别服务接入点（`voice_provider_socket`）不移植：Windows Server 自己录音、识别、持有凭据，没有 IBus/Fcitx 那样的需要。
-- 本机翻译模型补齐候选释义不移植：macOS 用 Apple 的 Translation 框架，Windows 没有可比的公开本机机器翻译接口，共享设置页在 Windows 上不提供 `SettingsClient.onDeviceTranslation`，下载语言的提示也不出现。
+- 本机翻译模型补齐候选释义不移植：macOS 用 Apple 的 Translation 框架，Windows 没有可比的公开本机机器翻译接口，下载语言的提示只在 macOS 上出现：桌面应用在每个平台都给 `SettingsClient.onDeviceTranslation`，是共享设置页按平台只在 macOS 上用它（`use-macos-settings.ts` 只在 macOS 上查可下载的语言，`use-translation-settings.ts` 只在 macOS 上列出缺的语言，「打开语言与地区」按钮在这条提示里，随之只在 macOS 上出现），Windows 上不会调 `on_device_translation_downloadable_languages` 和 `open_translation_language_settings`。
+- 横排候选只为有释义来源的目标语言预留释义行：macOS 打开候选翻译就预留，空着的那行由默认的本机翻译补上；Windows 没有本机翻译，只在离线英文释义（英文目标）、装在 resources 旁的离线释义词典、或能回答的在线服务（水杉账号、凭据可用的腾讯与小牛、填了地址的自定义翻译）存在时预留，日文、网址模式等不请求释义的页也不预留。新装的 Windows 横排卡片因此没有预留行，打开离线英文释义或配好翻译服务后才有（[候选窗](../.agents/notes/implemented/feature/2026-10-10-windows-candidate-window-mac-parity.md)）。
 - 输入法没有加入当前用户的键盘列表时，提示由 WinUI 设置窗口的横幅给出（`EnumEnabledLayoutOrTip` 检测，「去添加」调 `InstallLayoutOrTip`），共享设置页不重复做 macOS 的输入源启动提示。
 
 **还没做的。**

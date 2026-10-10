@@ -35,7 +35,7 @@
 
 ## 设置文件、数据目录与许可声明
 
-「维护与诊断」页的「设置文件」组导出和导入设置。「导出…」用系统的保存对话框选位置，`msime_client_export_settings` 读出已保存的偏好并换算成设置文件（`app.msime.client.preferences`，规则在 `crates/client-core/src/settings_document.rs`），再先写临时文件后改名写到所选位置。「导入…」用打开对话框选文件，读入（上限 1 MiB）后交给 `msime_client_import_settings`：它保留本机的语音、AI 辅助和翻译服务配置与密钥、诊断日志和使用统计开关，文件里的方案本版本不提供时保留本机的方案，然后按本窗口读到的修订号比较并交换写回。导入成功或被拒都会重新读取设置；错误码换成说明的规则在 `SettingsDocumentFile.h`，由 `tests/ui/settings_document_file.cpp` 核对。
+「维护与诊断」页的「设置文件」组导出和导入设置。「导出…」用系统的保存对话框选位置，`msime_client_export_settings` 读出已保存的偏好并换算成设置文件（`app.msime.client.preferences`，规则在 `crates/client-core/src/settings_document.rs`），再先写临时文件后改名写到所选位置。「导入…」用打开对话框选文件，读入（上限 1 MiB）后交给 `msime_client_import_settings`：它保留本机的语音、AI 辅助和翻译服务配置与密钥、诊断日志、使用统计和剪贴板历史开关（所以也不会清空已存的剪贴板历史），文件里的方案本版本不提供时保留本机的方案，然后按本窗口读到的修订号比较并交换写回。导入成功或被拒都会重新读取设置；错误码换成说明的规则在 `SettingsDocumentFile.h`，由 `tests/ui/settings_document_file.cpp` 核对。
 
 同一页的「数据目录」行显示状态根并可在资源管理器中打开。移到其他磁盘要重新运行完整安装包：数据目录登记在 HKLM 的 `DataDir`，改它要管理员权限，安装器的「选择数据位置」一步已经负责复制、切换和删除旧目录，本窗口只说明这条路径。
 

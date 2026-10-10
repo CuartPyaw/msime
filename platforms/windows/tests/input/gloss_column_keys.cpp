@@ -210,5 +210,22 @@ int main() {
           "a UILess Alt+1 was not acknowledged without a commit");
   require(session.view().at("editing_text") != "", "a UILess Alt+1 dropped the composition");
   composer.confirm_delivery(42, epoch, chord.request_id);
+
+  // Ctrl+Enter 打开释义页之后按了不带 CandidateActive 的键：普通组字里 TIP 只给释义页认的键带这一位，字母、退格、回车都不带。释义页随之关闭，之后的空格不再上屏旧义项。
+  composer.cancel();
+  session.cancel_composition(epoch);
+  compose("hello; hi");
+  auto translation = key(0x0D, 2u);
+  reply = composer.configured_key(session, translation, epoch, TsfPreeditStyle::Pinyin, {});
+  require(reply.has_value() && reply->encoded && *reply->encoded &&
+              reply->encoded->packet.msg_type == FanyImeReplyType::NavigationIgnored &&
+              reply->source.transition.at("view").at("candidates").size() == 2u,
+          "Ctrl+Enter did not open the sense page");
+  composer.confirm_delivery(42, epoch, translation.request_id);
+  auto plain_letter = key('A', 0, u'a');
+  plain_letter.modifiers_down = 0;
+  require(!composer.translation_page_key(session, plain_letter, epoch), "the sense page took a letter");
+  require(!composer.translation_page_key(session, key(0x20, 0, u' '), epoch),
+          "a key without CandidateActive left the sense page open");
   return EXIT_SUCCESS;
 }

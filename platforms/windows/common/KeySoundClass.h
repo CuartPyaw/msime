@@ -7,12 +7,12 @@ namespace msime::windows {
 inline std::optional<uint32_t> key_sound_class_for_virtual_key(uint32_t virtual_key) {
   switch (virtual_key) {
   case 0:
-  case 0x10: // Shift
-  case 0x11: // Ctrl
-  case 0x12: // Alt
-  case 0x14: // Caps Lock
-  case 0x5B: // left Windows
-  case 0x5C: // right Windows
+  case 0x10: // Shift 键
+  case 0x11: // Ctrl 键
+  case 0x12: // Alt 键
+  case 0x14: // 大写锁定
+  case 0x5B: // 左 Windows 键
+  case 0x5C: // 右 Windows 键
   case 0xA0:
   case 0xA1:
   case 0xA2:

@@ -133,4 +133,6 @@ test("Windows settings sync invokes the same four commands as the mobile hosts",
     ["account_preferences_upload"],
     ["account_preferences_apply", { userId: "synthetic-user", preferences }],
   ]);
+  // Windows 没有要重新打开的键盘，应用后的提示不能沿用移动端的说法。
+  expect(sync.appliedMessage).toBe("已应用云端设置。");
 });

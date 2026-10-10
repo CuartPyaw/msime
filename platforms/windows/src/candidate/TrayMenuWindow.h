@@ -110,6 +110,8 @@ private:
   // 交给读屏的 UI Automation 提供者；窗口建好后才创建，CreateWindowExW 期间为空。
   std::unique_ptr<AccessibleWindow> accessible_;
   unsigned dpi_ = 96;
+  // place() 正在挪动卡片：挪到 DPI 不同的显示器时系统同步发来 WM_DPICHANGED，这时尺寸已经按目标显示器的 DPI 算好，不能当作显示环境变了把刚打开的卡片收起。
+  bool placing_ = false;
   bool failed_ = false;
 };
 } // namespace msime::windows

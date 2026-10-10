@@ -16,7 +16,7 @@ inline constexpr std::string_view account_gloss_url = "https://api.msime.app/v1/
 inline constexpr size_t account_gloss_maximum_words = 32;
 inline constexpr size_t account_gloss_maximum_word_bytes = 2048;
 inline constexpr size_t account_gloss_maximum_value_bytes = 4096;
-// 取不到任何会话时补注册本机匿名账号（macOS 的 BackendAnonymousAccount.ensureSignedIn），失败后隔多久再试。注册会阻塞翻译线程最多约一分钟，离线时不能每一页都试一次。
+// 取不到任何会话时补注册本机匿名账号（macOS 的 BackendAnonymousAccount.ensureSignedIn），失败后隔多久再试。注册最多阻塞约一分钟，它跑在分离的线程上（Server 退出时不等它），但翻译线程平时要等它的结果，离线时不能每一页都试一次。
 inline constexpr auto account_registration_retry = std::chrono::minutes(10);
 
 // 一个候选是否可以问账号：共享层给每个候选算好的 online_gloss（只有中文候选，且不是表情、颜文字）。
@@ -62,20 +62,29 @@ inline std::optional<std::string> account_gloss_target(std::string_view language
   return target;
 }
 
-// 校验一次回复的 data 并换成每个词的释义，和 macOS BackendChatClient.translate 的判据相同：条数必须和问的词一样多，每条不超过 4096 字节，不含换行、回车和制表符以外的控制字符（另外拒收 DEL：共享会话收释义时遇到控制字符会把整批拒掉），任何一条不合格整批作废（返回空），这一页的词留到下次再问。释义和词本身一样时等于没有释义，换成空字符串；空字符串表示账号对这个词没有释义，调用方据此记一条否定缓存。
+// 校验一次回复的 data 并换成每个词的释义，和 macOS BackendChatClient.translate 的判据相同：条数必须和问的词一样多，每条不超过 4096 字节，不含换行、回车和制表符以外的控制字符，任何一条不合格整批作废（返回空），这一页的词留到下次再问。共享会话收释义时（msime_client_apply_translations 的 is_bounded_text）拒收一切 char::is_control，一条不合格就把整页连同本机词典的释义一起拒掉，所以这里另外拒收 DEL 和 C1 控制字符（U+0080 到 U+009F），macOS 放行的制表符换成空格（format_translation_gloss 也是这样折的）再缓存和交给会话。释义和词本身一样或只有空白时等于没有释义，换成空字符串；空字符串表示账号对这个词没有释义，调用方据此记一条否定缓存。
 inline std::optional<std::vector<std::string>> account_gloss_values(
     const std::vector<std::string> &words, std::vector<std::string> values) {
   if (values.size() != words.size())
     return std::nullopt;
   for (size_t index = 0; index < values.size(); ++index) {
-    const auto &value = values[index];
-    if (value.size() > account_gloss_maximum_value_bytes ||
-        std::any_of(value.begin(), value.end(), [](unsigned char ch) {
-          return ch == '\n' || ch == '\r' || (ch < 0x20 && ch != '\t') || ch == 0x7f;
-        }))
+    auto &value = values[index];
+    if (value.size() > account_gloss_maximum_value_bytes)
       return std::nullopt;
-    if (value == words[index])
-      values[index].clear();
+    for (size_t offset = 0; offset < value.size(); ++offset) {
+      const auto ch = static_cast<unsigned char>(value[offset]);
+      // UTF-8 里 C1 控制字符是 0xC2 后跟 0x80 到 0x9F。
+      const bool c1 = ch == 0xC2 && offset + 1 < value.size() &&
+                      static_cast<unsigned char>(value[offset + 1]) <= 0x9F &&
+                      static_cast<unsigned char>(value[offset + 1]) >= 0x80;
+      if ((ch < 0x20 && ch != '\t') || ch == 0x7f || c1)
+        return std::nullopt;
+      if (ch == '\t')
+        value[offset] = ' ';
+    }
+    // 只有空白的释义和词本身一样，等于没有。
+    if (value == words[index] || value.find_first_not_of(' ') == std::string::npos)
+      value.clear();
   }
   return values;
 }

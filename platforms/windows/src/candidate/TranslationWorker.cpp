@@ -16,6 +16,7 @@
 #include <ctime>
 #include <memory>
 #include <stdexcept>
+#include <system_error>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -349,6 +350,35 @@ std::optional<std::string> account_access_token(const std::string &directory,
   return ask();
 }
 
+// 在一条分离的线程上取账号令牌（account_access_token），翻译线程每 50 毫秒看一次 stopping：补注册匿名账号会阻塞约一分钟，刷新令牌也要联网，都不能让 TranslationWorker::stop() 的 join 跟着等，Server 退出时不等它，由那条线程自己跑完后退出，和 server_main 启动时注册匿名账号的线程一样。线程起不来时这一页不问账号。
+std::optional<std::string> account_access_token_detached(const std::string &directory,
+                                                         const std::string &rejected,
+                                                         const std::function<bool()> &stopping) {
+  struct Pending {
+    std::mutex mutex;
+    std::condition_variable done;
+    bool finished = false;
+    std::optional<std::string> token;
+  };
+  auto pending = std::make_shared<Pending>();
+  try {
+    std::thread([pending, directory, rejected] {
+      auto token = account_access_token(directory, rejected);
+      std::lock_guard lock(pending->mutex);
+      pending->token = std::move(token);
+      pending->finished = true;
+      pending->done.notify_all();
+    }).detach();
+  } catch (const std::system_error &) {
+    return std::nullopt;
+  }
+  std::unique_lock lock(pending->mutex);
+  while (!pending->done.wait_for(lock, std::chrono::milliseconds(50), [&] { return pending->finished; }))
+    if (stopping())
+      return std::nullopt;
+  return std::move(pending->token);
+}
+
 void persist_english_glosses(const nlohmann::json &query,
                              const std::string &translations) noexcept;
 
@@ -400,7 +430,7 @@ std::optional<std::string> account_glosses(
   });
   if (words.empty() || cancelled())
     return cancelled() ? std::nullopt : std::optional<std::string>(output.dump());
-  auto token = account_access_token(directory, {});
+  auto token = account_access_token_detached(directory, {}, stopping);
   if (!token)
     return output.dump();
   const nlohmann::json body{{"texts", words}, {"source_lang", "ZH"}, {"target_lang", *target}};
@@ -415,7 +445,7 @@ std::optional<std::string> account_glosses(
     // 服务端以 401 拒绝了这个令牌（过期、被吊销）：带上它再取一次，共享层会强制刷新，刷新不了时退回匿名账号。
     if (response || status != 401 || stopping())
       break;
-    token = account_access_token(directory, *token);
+    token = account_access_token_detached(directory, *token, stopping);
   }
   if (!response || stopping())
     return cancelled() ? std::nullopt : std::optional<std::string>(output.dump());
@@ -515,7 +545,7 @@ void flatten_single_target(const std::string &query_bytes,
 }
 // 日文行的罗马字由本线程上的 IFELanguage 读出（JapaneseReader.h）：TranslationWorker::run 在工作线程的栈上持有一个读音器，经这个指针交给本线程上的读音查询，run 返回时它随栈析构关闭，COM 套间跟着线程。不在工作线程上（指针为空）时不读罗马字。这里不放 thread_local 的读音器对象本身：它的析构要等线程退出回调，那时持着加载器锁，不能 CoUninitialize；MinGW 构建的 thread_local 析构在 Wine 下还会跳到空地址崩溃（windows-translation-worker 测试）。
 thread_local JapaneseReader *active_japanese_reader = nullptr;
-// 这一页候选的读音和整句逐词拆解，和 macOS 的 synchronizePronunciation、synchronizeGlossBreakdowns 一样：读音只在打开「显示读音」时问，英文释义行（英文候选则是它自己）整行发给共享读音表，日文释义行的第一个词交给本机的微软日语输入法读成罗马字；拆解只在离线英文释义打开时问，2 到 32 个汉字的候选发给共享拆解表。两张表都装在资源目录旁边，没装时共享层回答空列表，不是错误。都在本线程上读本机文件，不联网。
+// 这一页候选的读音和整句逐词拆解，和 macOS 的 synchronizePronunciation、synchronizeGlossBreakdowns 一样：读音只在打开「显示读音」时问，英文释义行（英文候选则是它自己）整行发给共享读音表，日文释义行的第一个词交给本机的微软日语输入法读成罗马字；拆解在查询带 gloss_breakdown 时问（候选翻译或离线英文释义打开、目标语言里有英文，和 macOS 的 currentGlossRequest 一样），2 到 32 个汉字的候选发给共享拆解表。两张表都装在资源目录旁边，没装时共享层回答空列表，不是错误。都在本线程上读本机文件，不联网。
 CandidateReadings candidate_readings(const std::string &query_bytes,
                                      const std::string &translations,
                                      const std::function<bool()> &cancelled) {
@@ -599,7 +629,7 @@ CandidateReadings candidate_readings(const std::string &query_bytes,
       reading.pronunciation = std::move(joined);
     }
   }
-  if (query->value("english_gloss", false) && !cancelled()) {
+  if (query->value("gloss_breakdown", false) && !cancelled()) {
     auto sentences = nlohmann::json::array();
     std::unordered_set<std::string> asked;
     for (const auto &[text, translation] : page)

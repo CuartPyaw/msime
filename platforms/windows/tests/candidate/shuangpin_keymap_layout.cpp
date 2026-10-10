@@ -145,6 +145,15 @@ void placement() {
   input.candidate.left = 1800;
   placed = shuangpin_keymap_placement(input);
   require(placed.x == 1920 - 16 - 620 - 18);
+  // 候选卡片被往上推了几像素、顶边略高于锚点：卡片大半在光标下方，仍算在下方，键位图接在卡片下面，不跳到光标上方去盖住正在输入的行。
+  input.anchor_y = 300;
+  input.candidate = {100, 296, 400, 500};
+  placed = shuangpin_keymap_placement(input);
+  require(placed.x == 100 - 18 && placed.y == 500 + 8 - 16);
+  // 候选窗口的外框带着透明阴影边距（上 20、下 40、左 32），顶边在锚点上方。按中线判断仍认得出卡片在光标下方；摆放用的是卡片本身的矩形，这里只确认方向不会因外框而翻转。
+  input.candidate = {100 - 32, 303 - 20, 400 + 32, 500 + 40};
+  placed = shuangpin_keymap_placement(input);
+  require(placed.y > input.anchor_y);
 }
 } // namespace
 

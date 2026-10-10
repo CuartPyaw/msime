@@ -60,8 +60,6 @@ struct TrayMenuCapabilities {
   bool cantonese = false;
   bool zhuyin = false;
   bool stroke = false;
-  // 共享应用 MSIME.exe 装在 Server 旁边。工具栏右键菜单的「检查更新…」在它的关于页上。
-  bool desktop_app = false;
   // 本版本提供的方案。不在其中的方案行不出现，而不是显示为不可用：那个方案在这个版本里根本不存在。full 提供全部方案。
   scheme::OfferedSchemes schemes = scheme::edition_schemes();
   // 卡片标题和「关于」行里的产品名（UTF-8），按版本取；full 是「水杉输入法」。
@@ -212,7 +210,7 @@ tray_menu_scheme_items(const TrayMenuCapabilities &capabilities,
   scheme_row(TrayMenuCommand::SelectStroke, "笔画", capabilities.stroke);
   return items;
 }
-// 悬浮工具栏的右键菜单，行和顺序照搬 macOS 工具栏设置按钮的实用菜单（CreateMetasequoiaFloatingToolbarUtilityMenu）。打开设置、帮助、关于和反馈要设置窗口，检查更新要共享应用；缺哪个，对应的行显示为不可用。表情与符号打开系统自带的表情面板，访问官网和隐藏工具栏不依赖外壳，总是可用。
+// 悬浮工具栏的右键菜单，行和顺序照搬 macOS 工具栏设置按钮的实用菜单（CreateMetasequoiaFloatingToolbarUtilityMenu）。打开设置、检查更新、帮助、关于和反馈都要设置窗口（检查更新在设置窗口的「关于」页里完成）；没有设置窗口时这几行显示为不可用。表情与符号打开系统自带的表情面板，访问官网和隐藏工具栏不依赖外壳，总是可用。
 inline std::vector<TrayMenuItem>
 toolbar_utility_menu_items(const TrayMenuCapabilities &capabilities) {
   std::vector<TrayMenuItem> items;

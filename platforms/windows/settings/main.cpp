@@ -2604,7 +2604,7 @@ private:
       show_notice(msime::settings::settings_import_error_message(code));
       return;
     }
-    show_notice(L"设置已导入并立即生效。本机的服务配置与密钥、诊断日志和使用统计开关保持不变。",
+    show_notice(L"设置已导入并立即生效。本机的服务配置与密钥、诊断日志、使用统计和剪贴板历史开关保持不变。",
                 InfoBarSeverity::Success);
   }
 
@@ -3858,10 +3858,10 @@ private:
 
     auto settings_file = add_group(page, L"设置文件");
     add_row(settings_file, 0xEDE1, L"导出设置",
-            L"把当前设置保存为文件，换电脑或重装后可以导入。语音、AI 辅助和翻译服务的配置与密钥、诊断日志和使用统计开关只属于本机，不写进文件；词库和学习记录也不在其中。",
+            L"把当前设置保存为文件，换电脑或重装后可以导入。语音、AI 辅助和翻译服务的配置与密钥、诊断日志、使用统计和剪贴板历史开关只属于本机，不写进文件；词库和学习记录也不在其中。",
             button_control(L"导出…", [this] { export_settings(); }, loaded_));
     add_row(settings_file, 0xE8B5, L"导入设置",
-            L"用导出的设置文件替换当前设置，立即生效。本机的服务配置与密钥、诊断日志和使用统计开关保持不变。",
+            L"用导出的设置文件替换当前设置，立即生效。本机的服务配置与密钥、诊断日志、使用统计和剪贴板历史开关保持不变。",
             button_control(L"导入…", [this] { import_settings(); }, loaded_));
 
     auto mcp = add_group(page, L"连接 AI 助手");

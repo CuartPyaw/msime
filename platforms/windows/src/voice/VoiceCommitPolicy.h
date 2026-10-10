@@ -31,10 +31,12 @@ constexpr bool voice_delivery_target_current(bool target_in_foreground,
   return target_in_foreground && lease_current;
 }
 
-// TSF 路线没送达时是否退回 SendInput。focus_rejected 表示 TSF 路线报告焦点租约已经失效（焦点去了别的输入框或别的窗口），这时文字一律丢弃；只有事务锁忙或管道写失败、而目标仍然有效（voice_delivery_target_current，含租约仍是当前焦点）时才退回，避免整段识别结果打进无关窗口或同一窗口的另一个输入框。
+// TSF 路线没送达时是否退回 SendInput。focus_rejected 表示 TSF 路线报告焦点租约已经失效（焦点去了别的输入框或别的窗口），这时文字一律丢弃。其余情况前台必须仍是录音目标（foreground_matches，即 voice_target_in_foreground）。事务锁忙或编码失败时 TSF 路线没验租约就返回了，还要租约仍是当前焦点（lease_current）才退回，避免整段识别结果打进同一窗口的另一个输入框。管道写失败（write_failed）时不看租约：Server 刚在焦点闸门里核对过这份租约是当前焦点才去写，写失败后是它自己作废了租约并停下控制器，再验租约必然失败，整段录音会被白白丢掉；之后 SendInput 每 16 个单元也只核对前台。
 constexpr bool voice_tsf_refusal_falls_back(bool focus_rejected,
-                                            bool target_in_foreground) {
-  return !focus_rejected && target_in_foreground;
+                                            bool write_failed,
+                                            bool foreground_matches,
+                                            bool lease_current) {
+  return !focus_rejected && foreground_matches && (write_failed || lease_current);
 }
 
 // 原生语音在录音或识别、润色期间焦点租约失效就取消，不做「停止后转写」，和 macOS MSIMEDeactivateVoice 一样：失焦绝不提交语音。面板的审阅录音由 VoiceControllerDispatch 自己按租约收回，不在这里处理。

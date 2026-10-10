@@ -985,6 +985,32 @@ test("settings sync requires confirmation and preserves a remote conflict error"
   expect(await screen.findByText("云端设置已被其他设备更新，请刷新后重新确认。")).not.toBeNull();
 });
 
+test("settings sync shows the host's own message after applying cloud settings", async () => {
+  const apply = vi.fn().mockResolvedValue(undefined);
+  const client = account({
+    status: vi.fn().mockResolvedValue({ user }),
+    settingsSync: {
+      appliedMessage: "已应用云端设置。",
+      schema: vi.fn().mockResolvedValue({
+        fields: { "input.schema": { type: "string" } },
+        maximumBytes: 65536,
+        updateMode: "replace",
+        revisionRequired: true,
+      }),
+      load: vi.fn().mockResolvedValue({ revision: 7, settings: { "input.schema": "quanpin" } }),
+      upload: vi.fn(),
+      apply,
+    },
+  });
+  render(<AccountPage client={client} />);
+  expect(await screen.findByText("云端版本：7")).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "下载并应用云端设置" }));
+  fireEvent.click(screen.getByRole("button", { name: "确认应用" }));
+  await waitFor(() => expect(apply).toHaveBeenCalledTimes(1));
+  expect(await screen.findByText("已应用云端设置。")).not.toBeNull();
+  expect(screen.queryByText(/重新打开键盘/)).toBeNull();
+});
+
 test("ignores a second settings upload while the first is pending", async () => {
   let resolveUpload!: (value: { revision: number; settings: Record<string, string> }) => void;
   const upload = vi.fn(

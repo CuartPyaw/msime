@@ -15,8 +15,6 @@ export interface InputLanguageOptionsSectionProps {
   showCandidatePronunciation?: boolean;
   candidatePronunciation?: boolean;
   candidatePronunciationDisabled?: boolean;
-  /** 见 `CandidatePronunciationSection` 的 `romaji`。 */
-  candidatePronunciationRomaji?: boolean;
   showEnglishSuggestions?: boolean;
   englishSuggestions?: boolean;
   betweenMixedAndCandidates?: ReactNode;
@@ -39,7 +37,6 @@ export function InputLanguageOptionsSection({
   showCandidatePronunciation = false,
   candidatePronunciation,
   candidatePronunciationDisabled,
-  candidatePronunciationRomaji,
   showEnglishSuggestions = false,
   englishSuggestions,
   betweenMixedAndCandidates,
@@ -66,7 +63,6 @@ export function InputLanguageOptionsSection({
         <CandidatePronunciationSection
           value={candidatePronunciation}
           disabled={candidatePronunciationDisabled}
-          romaji={candidatePronunciationRomaji}
           onChange={onCandidatePronunciationChange}
         />
       )}

@@ -3,6 +3,7 @@
 #include "IconFont.h"
 #include "TrayMenuAccessibility.h"
 #include "ServerResources.h"
+#include "WaveOverlayUtils.h"
 #include <bitset>
 #include <cmath>
 #include <stdexcept>
@@ -234,9 +235,8 @@ void TrayMenuWindow::place(int icon_center_x, int icon_top,
   anchor_bottom_ = anchor_bottom;
   MONITORINFO monitor{};
   monitor.cbSize = sizeof(monitor);
-  if (!GetMonitorInfoW(MonitorFromPoint({icon_center_x, icon_top},
-                                        MONITOR_DEFAULTTONEAREST),
-                       &monitor))
+  const HMONITOR target = MonitorFromPoint({icon_center_x, icon_top}, MONITOR_DEFAULTTONEAREST);
+  if (!GetMonitorInfoW(target, &monitor))
     throw std::runtime_error("Tray menu monitor unavailable");
   // Read the state once per opening: the rows show what the Server reports now, not what a click later assumed.
   refresh_items();
@@ -248,7 +248,8 @@ void TrayMenuWindow::place(int icon_center_x, int icon_top,
     return;
   }
   const auto &work = monitor.rcWork;
-  dpi_ = GetDpiForWindow(window_);
+  // 尺寸按卡片要去的那块显示器的 DPI 算，而不是窗口上次所在的显示器：工具栏在缩放不同的副屏上时，按旧 DPI 算的卡片挪过去后大小不对。
+  dpi_ = monitor_effective_dpi(target);
   metrics_ = tray_menu_fitted_metrics(
       items_, TrayMenuMetrics{},
       static_cast<double>(work.bottom - work.top) * 96.0 /
@@ -261,9 +262,15 @@ void TrayMenuWindow::place(int icon_center_x, int icon_top,
                                 geometry_.size)
           : tray_menu_bounds(icon_center_x, icon_top, work.left, work.top,
                              work.right, work.bottom, dpi_, geometry_.size);
-  if (!SetWindowPos(window_, HWND_TOPMOST, bounds.x, bounds.y, bounds.width,
-                    bounds.height, SWP_NOACTIVATE | SWP_SHOWWINDOW))
+  placing_ = true;
+  const BOOL moved = SetWindowPos(window_, HWND_TOPMOST, bounds.x, bounds.y, bounds.width,
+                                  bounds.height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+  placing_ = false;
+  if (!moved)
     throw std::runtime_error("Tray menu positioning failed");
+  // 挪动期间的消息（显示环境变化、失去焦点）可能已经把卡片收起；收起的卡片不能装键盘钩子，否则导航键在所有程序里都被吞掉。
+  if (!visible())
+    return;
   start_keyboard();
   InvalidateRect(window_, nullptr, FALSE);
   sync_accessibility();
@@ -318,6 +325,11 @@ LRESULT CALLBACK TrayMenuWindow::keyboard_procedure(int code, WPARAM wparam,
     }
     return CallNextHookEx(nullptr, code, wparam, lparam);
   }
+  // 卡片已经看不见时钩子不再导航，按下原样交给应用；正常情况下 hide() 会先卸掉钩子，这里兜住没卸掉的情况。
+  if (!IsWindowVisible(keyboard_owner->window_)) {
+    swallowed_keys.reset(virtual_key);
+    return CallNextHookEx(nullptr, code, wparam, lparam);
+  }
   // 读屏的命令原样交给读屏，卡片不导航也不收起；读屏在读这张卡片，算作在用它，不按闲置收起。
   const bool reader_key_down =
       caps_lock_held || insert_held ||
@@ -327,8 +339,9 @@ LRESULT CALLBACK TrayMenuWindow::keyboard_procedure(int code, WPARAM wparam,
     swallowed_keys.reset(virtual_key);
     return CallNextHookEx(nullptr, code, wparam, lparam);
   }
+  // Shift 也算修饰键：Shift+方向键之类不是菜单导航，和原生菜单一样收起卡片并交给应用。吞掉它们会让 TIP 只看到 Shift 的按下和松开，把这次 Shift 当成单按，切换中英文。
   const bool modified =
-      ((GetAsyncKeyState(VK_CONTROL) | GetAsyncKeyState(VK_MENU) |
+      ((GetAsyncKeyState(VK_CONTROL) | GetAsyncKeyState(VK_MENU) | GetAsyncKeyState(VK_SHIFT) |
         GetAsyncKeyState(VK_LWIN) | GetAsyncKeyState(VK_RWIN)) &
        0x8000) != 0;
   const auto &owner = *keyboard_owner;
@@ -688,6 +701,15 @@ LRESULT CALLBACK TrayMenuWindow::procedure(HWND window, UINT message,
       case WM_KILLFOCUS:
         self->hide();
         return 0;
+      case WM_DPICHANGED:
+        // place() 把卡片挪到另一块 DPI 不同的显示器时同步收到这条消息：尺寸已经按那块显示器算好，只丢掉按旧 DPI 建的绘制目标，不采用系统建议的矩形，也不收起刚打开的卡片。
+        if (self->placing_) {
+          self->device_.DiscardTarget();
+          return 0;
+        }
+        self->device_.DiscardTarget();
+        self->hide();
+        return 0;
       case WM_POWERBROADCAST:
         if (wparam != PBT_APMRESUMEAUTOMATIC &&
             wparam != PBT_APMRESUMECRITICAL && wparam != PBT_APMRESUMESUSPEND)
@@ -695,7 +717,6 @@ LRESULT CALLBACK TrayMenuWindow::procedure(HWND window, UINT message,
         [[fallthrough]];
       case WM_DISPLAYCHANGE:
       case WM_DWMCOMPOSITIONCHANGED:
-      case WM_DPICHANGED:
         // This transient menu does not retain the tray icon anchor needed to
         // place itself again. Close it and discard the display-bound target;
         // the next click reopens from the current icon, DPI and work area.

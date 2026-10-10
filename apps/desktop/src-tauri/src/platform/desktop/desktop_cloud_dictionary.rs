@@ -60,16 +60,33 @@ pub(crate) struct CloudDictionaryState {
 }
 
 impl CloudDictionaryState {
-    /// 上次运行没来得及删的预览在这里清掉。清不掉不影响启动：下一次预览照样写新文件。
+    /// 上次运行没来得及删的预览、导出与恢复的中转文件在这里清掉。清不掉不影响启动：下一次照样写新文件。
     pub(crate) fn new(directory: PathBuf) -> Self {
         let _ = prepare_snapshot_directory(&directory)
-            .and_then(|()| cleanup_stale_snapshot_previews(&directory));
+            .and_then(|()| cleanup_stale_snapshot_previews(&directory))
+            .and_then(|()| cleanup_stale_scratch_files(&directory));
         Self {
             directory,
             previews: Arc::default(),
             last_process: Arc::default(),
         }
     }
+}
+
+/// 删掉上次运行被打断时留下的导出、恢复中转文件（`export-*.ndjson`、`restore-*.ndjson`）和原子写入没来得及换入的临时文件（`.tmp*`）。这个目录在 `%LOCALAPPDATA%` 下长期存在，导出的中转文件是用户整份云词库的明文，不能一直留着。设置应用单实例，构造状态时本进程还没有导出或恢复在进行，所以这些文件都是上次留下的。
+fn cleanup_stale_scratch_files(directory: &Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(directory)? {
+        let entry = entry?;
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+        let scratch = ((file_name.starts_with("export-") || file_name.starts_with("restore-"))
+            && file_name.ends_with(".ndjson"))
+            || file_name.starts_with(".tmp");
+        if scratch && entry.file_type()?.is_file() {
+            let _ = remove_snapshot_file(&entry.path());
+        }
+    }
+    Ok(())
 }
 
 /// 记下这一次处理队列；距上一次不到 `interval` 时返回假，调用方这次不处理。
@@ -785,6 +802,30 @@ mod tests {
         request(session, state, json!({}), action)
             .await
             .map_err(|error| error.code)
+    }
+
+    #[test]
+    fn startup_removes_scratch_files_left_by_an_interrupted_run() {
+        let directory = tempfile::tempdir().unwrap();
+        let snapshots = directory.path().join("dictionary-snapshots");
+        std::fs::create_dir_all(&snapshots).unwrap();
+        for name in [
+            "download-old.ndjson",
+            "export-old.ndjson",
+            "restore-old.ndjson",
+            ".tmpA1b2C3",
+            "export-in-progress",
+            "notes.ndjson",
+        ] {
+            std::fs::write(snapshots.join(name), b"stale").unwrap();
+        }
+        let _state = CloudDictionaryState::new(snapshots.clone());
+        let mut left: Vec<_> = std::fs::read_dir(&snapshots)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["export-in-progress", "notes.ndjson"]);
     }
 
     #[test]

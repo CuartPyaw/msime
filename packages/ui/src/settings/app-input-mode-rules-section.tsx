@@ -99,6 +99,8 @@ export function AppInputModeRulesSection({
             setProblem(null);
           }}
           onKeyDown={(event) => {
+            // 输入法组字时按回车是把组字串上屏，不是提交；WKWebView 在 compositionend 之后才送这个回车，keyCode 为 229。
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
             if (event.key === "Enter") add();
           }}
         />

@@ -4,7 +4,7 @@
 #include "FloatingToolbarSettings.h"
 #include "InputModeHudLayout.h"
 #include <optional>
-// windows.h first: its DrawText macro has to reach the Direct2D declarations.
+// 先包含 windows.h：它的 DrawText 宏要在 Direct2D 的声明之前生效。
 #include <windows.h>
 #include <msimeui/DeviceResources.h>
 

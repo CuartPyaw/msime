@@ -53,6 +53,22 @@ int main() {
   require(japanese_romaji({{u"猫", u"ねこ"}, {u"犬", u"犬"}}).empty(), "partial reading is not shown");
   require(japanese_romaji({}).empty() && japanese_romaji({{u"、", u"、"}}).empty(), "nothing to read");
 
+  // IFELanguage 反查的结果：写法取原文（pwchComp），读音取输出（pwchOutput）。取反了的话写法是假名、读音是汉字，含汉字的行一律读不出来。
+  {
+    const std::u16string comp = u"今日は天気がいいですね";
+    const std::u16string output = u"きょうはてんきがいいですね";
+    const std::vector<JapaneseMorphWord> morphs = {{0, 3, 0, 2}, {3, 1, 2, 1},  {4, 3, 3, 2},  {7, 1, 5, 1},
+                                                   {8, 2, 6, 2}, {10, 2, 8, 2}, {12, 1, 10, 1}};
+    const auto words = japanese_reverse_words(comp, output, morphs);
+    require(words.size() == morphs.size() && words.front().surface == u"今日" && words.front().reading == u"きょう",
+            "reverse conversion: surface from comp, reading from output");
+    require(japanese_romaji(words) == "kyou wa tenki ga ii desu ne", "reverse conversion sentence");
+    // 越界的段整行作废。
+    require(japanese_reverse_words(comp, output, {{0, 3, 10, 2}}).empty(), "comp out of range");
+    require(japanese_reverse_words(comp, output, {{12, 2, 0, 1}}).empty(), "output out of range");
+    require(japanese_reverse_words(comp, output, {{0, 3, 0, 0}}).empty(), "empty surface");
+  }
+
   require(japanese_utf16("今日は") == u"今日は", "utf8 to utf16");
   require(japanese_utf16("\xF0\x9F\x98\x80") == u"\U0001F600", "supplementary plane");
   require(japanese_utf16("\xE4\xBB").empty(), "truncated utf8");

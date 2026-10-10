@@ -43,6 +43,9 @@ int main(int argc, char **argv) {
     expect(presenter, "_CandidateCommitPairedClosing(serverCandidateString)", true, "a selected opening mark is paired");
     expect(presenter, "_OpenCandidateCommitPair(committed.front(), pairedClosing)", true, "a clicked pair is tracked and the caret moved");
     expect(presenter, "_OpenCandidateCommitPair(candidatePairedOpening, candidatePairedClosing)", true, "a selected pair is tracked and the caret moved");
+    // 宿主会话拥有组字时数字选词不经过 _HandleCandidateFinalize，而是在 _HandleCandidateWorker 里向宿主会话选词，那条路也要补全。
+    expect(presenter, "_CandidateCommitPairedClosing(commit)", true, "a digit-selected opening mark from the host session is paired");
+    expect(presenter, "_OpenCandidateCommitPair(pairedOpening, pairedClosing)", true, "a digit-selected pair is tracked and the caret moved");
     const std::string composition = read(root + "/Composition/Composition.cpp");
     expect(composition, "_QueuePairedPunctuationCaretMove(-1)", true, "the candidate pair moves the caret through the focus token");
 

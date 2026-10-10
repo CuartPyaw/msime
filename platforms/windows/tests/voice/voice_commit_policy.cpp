@@ -44,14 +44,18 @@ int main() {
     REQUIRE(!voice_delivery_target_current(true, false));
     REQUIRE(!voice_delivery_target_current(false, true));
     REQUIRE(!voice_delivery_target_current(false, false));
-    // 事务锁忙时 TSF 路线不验租约就返回，退路要靠这一条拦住换了输入框的情况。
-    REQUIRE(!voice_tsf_refusal_falls_back(false, voice_delivery_target_current(true, false)));
+    // 事务锁忙时 TSF 路线不验租约就返回，退路要靠租约核对拦住换了输入框的情况。
+    REQUIRE(!voice_tsf_refusal_falls_back(false, false, true, false));
+    REQUIRE(voice_tsf_refusal_falls_back(false, false, true, true));
+    REQUIRE(!voice_tsf_refusal_falls_back(false, false, false, true));
 
-    // TSF 被拒：焦点租约失效时整段丢弃，哪怕前台看起来还是同一个进程（焦点去了同一应用的另一个输入框）；锁忙或写失败时，前台仍是目标才退回 SendInput。
-    REQUIRE(!voice_tsf_refusal_falls_back(true, true));
-    REQUIRE(!voice_tsf_refusal_falls_back(true, false));
-    REQUIRE(voice_tsf_refusal_falls_back(false, true));
-    REQUIRE(!voice_tsf_refusal_falls_back(false, false));
+    // TSF 被拒：焦点租约失效时整段丢弃，哪怕前台看起来还是同一个进程（焦点去了同一应用的另一个输入框）。
+    REQUIRE(!voice_tsf_refusal_falls_back(true, false, true, true));
+    REQUIRE(!voice_tsf_refusal_falls_back(true, false, false, false));
+
+    // 管道写失败：Server 自己作废了租约并停下控制器，此刻租约核对必然失败（lease_current 为 false），前台仍是目标就照样退回 SendInput，不丢整段录音；前台换了仍然丢弃。
+    REQUIRE(voice_tsf_refusal_falls_back(false, true, true, false));
+    REQUIRE(!voice_tsf_refusal_falls_back(false, true, false, false));
 
     // 原生语音在录音或识别中失焦就取消；租约仍有效、没有进行中的会话或面板审阅录音都不在这里取消。
     REQUIRE(voice_focus_loss_cancels(true, true, false));

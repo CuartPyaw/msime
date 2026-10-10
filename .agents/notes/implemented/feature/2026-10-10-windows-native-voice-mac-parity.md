@@ -22,7 +22,7 @@ Windows Server 的原生语音（热键或托盘启动，`platforms/windows/src/
 - **失焦取消**：`VoiceInputSession` 构造时多注入一个 `FocusValidator`（Server 传 `server.focus_current`）。`maintain()` 在原生语音录音中、或停止后 `finish()` 仍在识别和润色时（`finishing_session_` 等于当前代次），每轮核对开始录音时的焦点租约；租约失效就 `cancel_session(false)`，录音不转写，进行中的识别和润色请求被取消。面板的审阅录音不走这里，`VoiceControllerDispatch::maintain()` 本来就按租约收回。空闲时不验租约，免得每轮都去拿焦点闸门的锁。
 - **投递目标**：前台进程是焦点租约的 TSF 客户端进程 `client_pid(lease.transport)`（PipeTicket 的高 32 位，管道握手时已核对过对端 pid），或者前台窗口仍是开始录音时记下的那一个，都算目标在前台。只比进程不够：UWP 应用的前台窗口属于 ApplicationFrameHost，传统控制台窗口报告的是控制台程序而 TSF 跑在 conhost 里，这些应用里 `sendinput` / `ctrl_v` 的语音会被整段丢掉。开始录音时前台若是 Server 自己（从托盘菜单或浮动工具栏开始），就不记窗口，只按进程核对。`sendinput` 每 16 个 UTF-16 单元前核对一次，不在代理对中间停下；`ctrl_v` 在写剪贴板前、粘贴前各核对一次。前台既不是目标进程也不是录音时的窗口，或者是 Server 自己时，文字丢弃，和 macOS 的 stale 一样不提示。
 - **投递时再验租约**：前台核对只看进程和窗口，同一窗口里点了另一个输入框它看不出来，而 `maintain()` 约 50 ms 才验一次租约。所以每次前台核对（`sendinput` 每 16 个单元、`ctrl_v` 的两次、TSF 退路）都同时用 `FocusValidator` 核对开始录音时的焦点租约仍是当前焦点（`voice_delivery_target_current`），失效就丢弃，与 macOS 投递前核对输入上下文一致。`focus_current` 会等正在进行的焦点事务结束，点击造成的焦点切换因此不会被事务锁忙掩盖。
-- **TSF 被拒后的退路**：`send_voice_composition` 返回 `Rejected`（租约失效）时整段丢弃，哪怕前台还是同一个进程（焦点去了同一应用的另一个输入框）。事务锁忙、编码失败或管道写失败时（锁忙时 TSF 路线没验租约就返回），目标仍在前台、租约也仍是当前焦点才退回 `SendInput`，保住整段录音。
+- **TSF 被拒后的退路**：`send_voice_composition` 返回 `Rejected`（租约失效）时整段丢弃，哪怕前台还是同一个进程（焦点去了同一应用的另一个输入框）。事务锁忙或编码失败时（锁忙时 TSF 路线没验租约就返回），目标仍在前台、租约也仍是当前焦点才退回 `SendInput`。管道写失败（`Failed`）时只核对前台：`SessionController::send_voice_composition` 在焦点闸门里确认租约是当前焦点才去写，写失败后它自己作废租约、关掉连接并 `request_stop()`，此时再验租约必然失败，按租约核对会把整段录音无声丢掉；所以 `voice_tsf_refusal_falls_back` 对写失败不要求租约，退回的 `SendInput` 每 16 个单元也只核对前台，写失败到退回之间的几毫秒里换输入框这一种情况不再拦。
 
 ### 剪贴板排除标记
 
@@ -32,7 +32,7 @@ Windows Server 的原生语音（热键或托盘启动，`platforms/windows/src/
 
 ### 打字统计
 
-构造时注入 `CommitRecorder`，Server 传入的实现调 `record_typing_statistics_async(..., TypingSource::Voice, 全屏时安静)`。三条路线确实送出文字后记一次，包括 TSF 被拒后退回的 `SendInput`；审阅录音由设置应用的面板自己记。`SendInput` 注入的按键带面板注入标记 `PanelTextSendInputExtraInfo`（`tsf/IPC/PassthroughStatistics.h`），tip 的直通统计跳过它们，不会再记一次 unknown。
+构造时注入 `CommitRecorder`，Server 传入的实现调 `record_typing_statistics_async(..., TypingSource::Voice, 全屏时安静)`。三条路线确实送出文字后记一次，包括 TSF 被拒后退回的 `SendInput`；只记实际送出的那一段：`send_text_via_send_input` 返回送出的 UTF-16 单元数，中途因前台换了而停下时只把前面一段换回 UTF-8 记下。审阅录音由设置应用的面板自己记。`SendInput` 注入的按键带面板注入标记 `PanelTextSendInputExtraInfo`（`tsf/IPC/PassthroughStatistics.h`），tip 的直通统计跳过它们，不会再记一次 unknown。
 
 ### 反馈与其余对齐
 
@@ -40,7 +40,8 @@ Windows Server 的原生语音（热键或托盘启动，`platforms/windows/src/
 - 识别正常结束却没有文字时提示 `voice_no_speech_message`（「未识别到语音，请重试」）；不足 0.25 秒的短录音照旧静默，取消或新会话接手时不提示。
 - `AudioCapture` 记下最近一次启动失败的原因（`AudioCaptureFailure`）：miniaudio 的 `MA_ACCESS_DENIED`（WASAPI `E_ACCESSDENIED`，Windows 隐私设置关掉了桌面应用的麦克风）提示到「设置 › 隐私和安全性 › 麦克风」，设置里选定的设备 id 格式不对、找不到或有歧义，以及别的平台写下的设备选择，提示「所选麦克风不可用，请重新选择录音设备」（与 macOS 同一句），其余仍是「无法启动麦克风。」。
 - 识别或润色中点浮层的 ✓ 调 `dismiss_processing()`：收起浮层并记下代次，`finish()` 不再为润色弹出它，结果照常上屏，失败提示照常显示。
-- `CuePlayer` 的提示音文件缺失、解码失败或音频引擎起不来时，开始退回 `MessageBeep(MB_ICONASTERISK)`，结束退回 `MessageBeep(MB_OK)`。
+- `CuePlayer` 的提示音文件缺失、解码失败或音频引擎起不来时，开始退回 `MessageBeep(MB_ICONASTERISK)`，结束退回 `MessageBeep(MB_OK)`。开始提示音在静音其他声音之前放；`MessageBeep` 走系统声音会话，会被「静音其他声音」一起静掉，所以退回系统声音时静音推迟约 1 秒，由 `maintain()` 到点补上（`MessageBeep` 不报告何时放完），对应 macOS 等开始提示音放完再静音的 `deferredMute`。停止或取消时清掉推迟中的静音。
+- 繁体输出：`traditional_chinese_output` 打开、正在运行的方案做简繁转换（`scheme::ScriptConversionApplies`，与候选的 `traditional_projection` 同一规则）时，`finish()` 在投递前用共享 OpenCC 转换（`simplified_to_traditional`）把识别和润色后的文字转成繁体，三条路线都上屏繁体、统计也记繁体，对应 macOS `applyVoiceResult` 和 TSF 路线经 `displayTransition` 的转换。开关在投递时经 `config_provider_()` 读最新值（Server 发布偏好时把它算进 `VoiceInputConfig::traditional_output`）。识别中的中间结果和面板的审阅录音不转换。
 - `SystemAudioMuter` 静音期间注册 `IMMNotificationClient`，回调只在 `eRender` / `eMultimedia` 的默认设备变化时置一个原子标记；控制线程在 `maintain()` 里调 `follow_default_system_audio_output()`，把新的默认设备也静音并监听它的新会话。之前设备上已静音的会话留在记录里，恢复时一并取消静音；崩溃后的恢复改为在所有活动输出设备上找记录过的会话。
 
 ## Alternatives considered
@@ -61,7 +62,7 @@ Windows Server 的原生语音（热键或托盘启动，`platforms/windows/src/
 
 ## Verification
 
-- `platforms/windows/tests/voice/voice_commit_policy.cpp`（`windows-voice-commit-policy`）：提交路线、前台目标核对（含目标为 0 或 Server 自己，以及前台窗口仍是录音开始时那一个但属于别的进程）、投递时租约失效即不投、TSF 被拒后只在非焦点失效且目标仍有效时退回、失焦取消只针对进行中的原生语音、剪贴板标记的格式名和值。
+- `platforms/windows/tests/voice/voice_commit_policy.cpp`（`windows-voice-commit-policy`）：提交路线、前台目标核对（含目标为 0 或 Server 自己，以及前台窗口仍是录音开始时那一个但属于别的进程）、投递时租约失效即不投、TSF 被拒后只在非焦点失效且目标仍有效时退回、管道写失败时租约已被 Server 作废也照样按前台退回、失焦取消只针对进行中的原生语音、剪贴板标记的格式名和值。
 - `crates/host-windows/tests/clipboard_privacy_policy.rs`：面板语音的标记名单与 `VoiceCommitPolicy.h` 的 `voice_clipboard_markers` 逐项相同且值都是 0。
 - `platforms/windows/tests/voice/voice_session_policy.cpp`：启动失败原因到文案的映射、无语音文案、润色超时。
 - `platforms/windows/tests/voice/audio_capture.cpp`：格式不对的设备 id 报 `DeviceUnavailable`，没有回调报 `Failed`。

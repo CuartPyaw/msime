@@ -212,7 +212,7 @@ struct ShuangpinKeymapScreenRect {
   long left = 0, top = 0, right = 0, bottom = 0;
 };
 struct ShuangpinKeymapPlacementInput {
-  // 候选窗口在屏幕上的矩形和光标所在行的左下角（TSF 报的锚点，候选窗也从它摆起）。
+  // 候选卡片在屏幕上的矩形（不含透明的阴影边距，CandidateWindow::card_on_screen）和光标所在行的左下角（TSF 报的锚点，候选窗也从它摆起）。
   ShuangpinKeymapScreenRect candidate;
   long anchor_x = 0, anchor_y = 0;
   // 光标所在显示器的工作区。
@@ -231,14 +231,14 @@ inline long shuangpin_keymap_clamp(long value, long minimum, long maximum) {
   return maximum < minimum ? minimum : std::clamp(value, minimum, maximum);
 }
 
-// 键位图放在候选窗离光标远的那一侧，和 macOS 一样不挡住正在输入的那一行：候选窗在光标下方时放在候选窗下面，放不下就放到光标所在行的上方；候选窗翻到光标上方时放在候选窗上面，放不下就放到光标下方。左边与候选窗对齐，再收进工作区。返回窗口左上角（已减去阴影边距）。
+// 键位图放在候选窗离光标远的那一侧，和 macOS 一样不挡住正在输入的那一行：候选窗在光标下方时放在候选窗下面，放不下就放到光标所在行的上方；候选窗翻到光标上方时放在候选窗上面，放不下就放到光标下方。候选窗在光标哪一侧按卡片的竖直中线判断，卡片被工作区底边往上推了几像素、顶边略高于锚点时仍算在下方。左边与候选窗对齐，再收进工作区。返回窗口左上角（已减去阴影边距）。
 inline ShuangpinKeymapPoint shuangpin_keymap_placement(const ShuangpinKeymapPlacementInput &input) {
   const long min_x = input.work.left + input.margin;
   const long max_x = input.work.right - input.margin - input.card_width;
   const long min_y = input.work.top + input.margin;
   const long max_y = input.work.bottom - input.margin - input.card_height;
   long y = 0;
-  if (input.candidate.top >= input.anchor_y) {
+  if (input.candidate.top + input.candidate.bottom >= 2 * input.anchor_y) {
     const long below = input.candidate.bottom + input.gap;
     y = below + input.card_height <= input.work.bottom - input.margin
             ? below

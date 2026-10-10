@@ -322,7 +322,8 @@ if call[:2] == ["info", "--format"]:
         self.assertIn(f"{self.windows / 'src'}:/src:ro", wine)
         for name in ("msime-tsf-paired-punctuation-wiring-test",
                      "msime-tsf-smart-punctuation-focus-wiring-test",
-                     "msime-tsf-japanese-conversion-wiring-test"):
+                     "msime-tsf-japanese-conversion-wiring-test",
+                     "msime-tsf-gloss-column-wiring-test"):
             self.assertIn(f'"$name" = {name} ] && argument="$MSIME_TSF_SOURCE"', command)
 
 

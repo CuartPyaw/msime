@@ -1,4 +1,5 @@
 // 日语空格「変換」横跨 TIP 和 Server：Server 的 ReplyComposer 执行转换并回导航回执，TIP 读到回执时保留组字并记下转换开始，回车时改走上屏高亮候选的路径。这几处都要整个 TIP 或 Server 才能构建，所以这里核对源码里的接线；决定本身由 japanese_conversion_policy 和 Server 的 windows-japanese-space-policy 验证。从仓库根目录运行，或传入 TSF 源码目录。
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -16,7 +17,10 @@ std::string read(const std::string &path) {
     }
     std::ostringstream text;
     text << file.rdbuf();
-    return text.str();
+    // 下面有跨行的锚点：Git for Windows 默认 autocrlf 检出成 CRLF，读进来时去掉回车，换行一律按 LF 比较。
+    std::string content = text.str();
+    content.erase(std::remove(content.begin(), content.end(), '\r'), content.end());
+    return content;
 }
 
 void expect(const std::string &text, const char *needle, bool present, const char *what) {

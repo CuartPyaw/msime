@@ -969,9 +969,16 @@ std::optional<PendingReply> ReplyComposer::translation_page_key(
     uint64_t epoch) {
   if (!translation_page_active_)
     return std::nullopt;
-  if (packet.event_type != FanyImePipeEventType::KeyEvent ||
-      (packet.modifiers_down & PipeMetadata::CandidateActive) == 0 ||
-      PipeMetadata::key_modifiers(packet.modifiers_down) != 0)
+  if (packet.event_type != FanyImePipeEventType::KeyEvent)
+    return std::nullopt;
+  // 普通组字的增量候选里 TIP 只给释义页认的键（空格、数字、翻页和上下方向键）带 CandidateActive（tsf/Global/CandidateActiveKeyPolicy.h），所以不带这一位的键（字母、退格、回车）都不是翻看释义页的键。释义页就此关闭，和通配转换里每个键都带这一位时一样，免得它活到下一次组字，让那时的空格、数字上屏旧义项。
+  if ((packet.modifiers_down & PipeMetadata::CandidateActive) == 0) {
+    translation_page_active_ = false;
+    translation_page_items_.clear();
+    translation_page_view_ = {};
+    return std::nullopt;
+  }
+  if (PipeMetadata::key_modifiers(packet.modifiers_down) != 0)
     return std::nullopt;
   const auto key = normalize_digit_key(packet.keycode);
   const bool navigation = packet.keycode == 0x21 || packet.keycode == 0x22 ||

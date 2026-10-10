@@ -280,7 +280,8 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
     void _NoteKeyForSmartPunctuation(UINT code, WCHAR wch, bool isEaten);
     void _NotePassthroughStatistics(UINT virtualKey, WCHAR wch, bool keyboardKnownEnabled);
     void _NoteKeyPressStatistics(WPARAM wParam, LPARAM lParam);
-    void _NotePassthroughKeySound(WPARAM wParam, LPARAM lParam);
+    // wch 是分类时布局按出的字符，用来认出 AltGr 打字（见 Global::IsAltGrCharacter）。
+    void _NotePassthroughKeySound(WPARAM wParam, LPARAM lParam, WCHAR wch);
     void _ResetSmartPunctuationHistory();
     // Focus-loss counterpart of the reference's _ClearSmartPunctuationAction: forgets the armed space/revert history and drops a queued repeated-punctuation rewrite, whose Backspace would otherwise land in whatever gains focus next.
     void _ClearSmartPunctuationAction();
@@ -298,6 +299,8 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
     HRESULT _HandleCandidateFinalize(TfEditCookie ec, _In_ ITfContext *pContext, uint64_t requestId,
                                      const std::wstring &prefetchedText);
     HRESULT _HandleCandidateFinalizeForVKReturn(TfEditCookie ec, _In_ ITfContext *pContext);
+    // Server 回了 CommitExactText（预选的释义列、Ctrl+Enter 的释义页）：它已经取消了自己的组字，text 是要原样上屏的完整文本。宿主会话也丢掉组字，再把 text 写进组字并结束组字，不补成对标点。
+    HRESULT _CommitServerExactText(TfEditCookie ec, _In_ ITfContext *pContext, const std::wstring &text);
     HRESULT _HandleCandidateConvert(TfEditCookie ec, _In_ ITfContext *pContext, uint64_t requestId,
                                     const std::wstring &prefetchedText);
     HRESULT _HandleCandidateArrowKey(TfEditCookie ec, _In_ ITfContext *pContext, _In_ KEYSTROKE_FUNCTION keyFunction,

@@ -22,7 +22,7 @@ inline std::wstring app_rule_ascii_lowercase(std::wstring_view value) {
   return result;
 }
 
-// 用户填的程序名：去掉首尾空白；粘贴了完整路径时只取文件名；再转 ASCII 小写。空白取 Unicode White_Space 全集（与 Rust 的 str::trim 相同，含不换行空格、全角空格、U+2000–U+200A 这些从网页或聊天里粘贴常带的空格），偏好库按 `id.trim() != id` 拒绝的标识在这里都会被去掉，不会落到那句笼统的保存失败提示上。
+// 用户填的程序名：去掉首尾空白；去掉包住整个名字的一对双引号；粘贴了完整路径时只取文件名；再转 ASCII 小写。空白取 Unicode White_Space 全集（与 Rust 的 str::trim 相同，含不换行空格、全角空格、U+2000–U+200A 这些从网页或聊天里粘贴常带的空格），偏好库按 `id.trim() != id` 拒绝的标识在这里都会被去掉，不会落到那句笼统的保存失败提示上。
 inline std::wstring normalize_app_input_mode_rule(std::wstring_view raw) {
   constexpr std::wstring_view blanks = L" \t\n\v\f\r\x0085\u00A0\u1680"
                                        L"\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A"
@@ -35,6 +35,9 @@ inline std::wstring normalize_app_input_mode_rule(std::wstring_view raw) {
     return value.substr(first, last - first + 1);
   };
   auto name = trim(raw);
+  // 资源管理器「复制文件地址」（Ctrl+Shift+C）总给路径加一对双引号。
+  if (name.size() >= 2 && name.front() == L'"' && name.back() == L'"')
+    name = trim(name.substr(1, name.size() - 2));
   const auto separator = name.find_last_of(L"\\/");
   if (separator != std::wstring_view::npos)
     name = trim(name.substr(separator + 1));

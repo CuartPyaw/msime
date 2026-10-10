@@ -289,7 +289,7 @@ std::string recognize_dictation(const std::shared_ptr<LocalAsrAudioQueue> &queue
   if (FAILED(dictation.grammar->LoadDictation(nullptr, SPLO_STATIC)))
     throw SystemAsrError(system_asr_missing_language_message(language));
   require(dictation.grammar->SetDictationState(SPRS_ACTIVE));
-  // 识别器没进入活动状态就不会读音频，录音只会在队列里攒到溢出、被误报成录音中断，所以这里失败要直接报出来。
+  // 识别器没进入活动状态就不会读音频，录音只会在队列里攒到溢出、被误报成录音中断，所以这里失败要抛出来，由控制线程在录音中经 failure() 立即报出。
   require(dictation.recognizer->SetRecoState(SPRST_ACTIVE));
 
   std::string committed;
@@ -369,6 +369,13 @@ void SystemAsrStream::cancel() {
   queue_->cancel();
 }
 
+std::exception_ptr SystemAsrStream::failure() {
+  if (cancelled_->load())
+    return nullptr;
+  std::lock_guard lock(mutex_);
+  return done_ ? error_ : nullptr;
+}
+
 void SystemAsrStream::run(const std::string &language, const Partial &on_partial) {
   std::string text;
   std::exception_ptr error;
@@ -377,7 +384,7 @@ void SystemAsrStream::run(const std::string &language, const Partial &on_partial
   } catch (...) {
     error = std::current_exception();
   }
-  // 识别器已经停下：之后采集推来的音频直接丢掉，不在队列里攒到溢出，失败原因留到 finish() 再说。
+  // 识别器已经停下：之后采集推来的音频直接丢掉，不在队列里攒到溢出。出错时控制线程在录音中经 failure() 看到它，立即结束录音并报出原因。
   queue_->cancel();
   {
     std::lock_guard lock(mutex_);

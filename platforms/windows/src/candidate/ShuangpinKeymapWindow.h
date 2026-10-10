@@ -4,11 +4,12 @@
 #include "ShuangpinKeymapLayout.h"
 #include <optional>
 #include <string>
-// windows.h first: its DrawText macro has to reach the Direct2D declarations.
+// 先包含 windows.h：它的 DrawText 宏要在 Direct2D 的声明之前生效。
 #include <windows.h>
 #include <msimeui/DeviceResources.h>
 
 namespace msime::windows {
+class CandidateWindow;
 // 一帧键位提示和它要跟随的光标锚点（TSF 报来的光标所在行左下角，物理像素）。
 struct ShuangpinKeymapFrame {
   ShuangpinKeymapHint hint;
@@ -25,8 +26,8 @@ public:
   ShuangpinKeymapWindow &operator=(const ShuangpinKeymapWindow &) = delete;
   // 与候选窗同一份调色板，主题和皮肤换了跟着换。
   void set_palette(CandidatePalette palette);
-  // 主循环每轮在候选窗 refresh 之后调用：`frame` 为空（开关关着、不在双拼组字）或候选窗不可见时隐藏，否则贴着候选窗显示。
-  void update(const std::optional<ShuangpinKeymapFrame> &frame, HWND candidate);
+  // 主循环每轮在候选窗 refresh 之后调用：`frame` 为空（开关关着、不在双拼组字）或候选窗不可见时隐藏，否则贴着候选卡片显示。贴的是卡片本身（CandidateWindow::card_on_screen），不是带透明阴影边距的窗口外框。
+  void update(const std::optional<ShuangpinKeymapFrame> &frame, const CandidateWindow &candidates);
   void hide();
   bool failed() const { return failed_; }
   const std::optional<ComponentFailureSite> &failure_site() const { return failure_site_; }

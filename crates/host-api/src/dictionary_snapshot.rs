@@ -1857,7 +1857,8 @@ pub unsafe extern "C" fn msime_client_snapshot_queue(
     length: usize,
 ) -> *mut c_char {
     response(|| {
-        if request.is_null() {
+        // 先限长再建切片：宿主传错长度（比如 size_t 下溢）时直接拒绝，不让 from_raw_parts 拿越界的长度建切片。
+        if request.is_null() || length == 0 || length > REQUEST_LIMIT {
             return Err("snapshot_invalid".to_owned());
         }
         snapshot_queue_json(unsafe { std::slice::from_raw_parts(request, length) })

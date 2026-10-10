@@ -24,6 +24,7 @@ public:
   bool push(const float *samples, std::size_t count) override;
   std::string finish() override;
   void cancel() override;
+  std::exception_ptr failure() override;
 
   // 录音开始时启动的识别任务：在这个线程上初始化 COM、创建识别器并一直处理识别事件，直到音频结束、取消或识别器出错。
   void run(const std::string &language, const Partial &on_partial);
