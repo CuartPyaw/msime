@@ -1467,7 +1467,7 @@ impl NineKeySession {
         };
         let prefixes = letter_prefixes(&digits, ENGLISH_PREFIX_BUDGET);
         let capacity = prefixes.len().saturating_mul(ENGLISH_LIMIT);
-        let mut words = Vec::with_capacity(capacity);
+        let mut words = Vec::new();
         for prefix in prefixes {
             for word in english.query_prefix(&prefix, ENGLISH_LIMIT) {
                 // Only a whole code that starts with the digits counts; otherwise letters beyond the expanded prefix leak in.
@@ -1476,6 +1476,9 @@ impl NineKeySession {
                 // the custom entry `dont` displayed as `don't`).
                 if !word_matches_digits(&word.pinyin, &digits) {
                     continue;
+                }
+                if words.capacity() == 0 {
+                    words.reserve_exact(capacity);
                 }
                 words.push(word);
             }
@@ -3457,6 +3460,17 @@ mod tests {
             allocations <= plain_allocations,
             "九键选择带切分的音节分配多于无切分路径：{allocations} > {plain_allocations}"
         );
+    }
+
+    #[test]
+    fn english_t9_empty_matches_do_not_reserve_prefix_capacity() {
+        let fixture = fixture();
+        let mut session = open(&fixture.paths, false, EnglishInputOptions::default());
+        session.set_english_only(true);
+        session.digits = "999999".into();
+        let words = session.english_candidates(false);
+        assert!(words.is_empty());
+        assert_eq!(words.capacity(), 0);
     }
 
     #[test]
