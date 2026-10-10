@@ -24,7 +24,11 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   /// first shared-preferences sync; starting at zero discarded the user's height on every load.
   private var sharedKeyboardHeightAdjustment =
     CGFloat(KeyboardLayoutPreference.heightAdjustment)
+  /// 建引擎会话之前的内存读数。存储属性按声明顺序初始化，所以它紧挨在 `session` 上面：前面几个属性（皮肤背景视图、读 App Group 的键盘高度）算进它自己，`keyboard_loaded` 把它记成 `base=`，与 `session=` 之差只有引擎会话。
+  private let launchMemory = DiagnosticLog.MemorySample.current()
   private let session = MetasequoiaInputSessionBridge()
+  /// 引擎会话刚建好时的内存读数，紧跟在 `session` 后面声明，`keyboard_loaded` 记成 `session=`。
+  private let sessionMemory = DiagnosticLog.MemorySample.current()
   /// 「全角输入」 for the running keyboard: starts from the shared `character_width`, then the 全角 card switches it.
   private var fullWidthInput = false
   /// The document's `character_width` as last applied, so a reload replaces the card's switch only when that field changed.
@@ -540,6 +544,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
 
   override func viewDidLoad() {
     super.viewDidLoad()
+    // 先读数再做别的：与 `sessionMemory` 之差是 `session` 之后声明的存储属性和 `loadView` 的开销，与下面 `keyboard_built` 之差是建键盘界面的开销。
+    let loadedMemory = DiagnosticLog.MemorySample.current()
     translations.onArrival = { [weak self] in self?.renderCandidateStrip() }
     // 方案以共享文档为准。会话在本控制器创建时已经同步读过一次文档，先把其中记的方案抄进 App Group 镜像再按镜像行事，不额外读盘；否则在 `viewWillAppear` 的后台重载回来之前，键盘会先按镜像里的旧方案（比如双拼）画出来并开始接收按键。
     InputSchemePreference.mirror(session.sharedPreferences)
@@ -555,7 +561,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     incognito = KeyboardPrivacyPreference.incognito
     readGesturePreferences()
     configureDiagnosticLog()
-    DiagnosticLog.shared.write("keyboard_loaded full_access=\(hasFullAccess ? 1 : 0) idiom=\(UIDevice.current.userInterfaceIdiom == .pad ? "pad" : "phone")")
+    DiagnosticLog.shared.write("keyboard_loaded full_access=\(hasFullAccess ? 1 : 0) idiom=\(UIDevice.current.userInterfaceIdiom == .pad ? "pad" : "phone") base=\(DiagnosticLog.MemorySample.mebibytes(launchMemory.footprint)) session=\(DiagnosticLog.MemorySample.mebibytes(sessionMemory.footprint)) \(loadedMemory.fields)")
     if session.initializationFailed { DiagnosticLog.shared.write("runtime_initialization_failed") }
     glossLineCount = currentGlossLines()
     // 简繁与方案同理以共享文档为准：先把会话创建时读到的文档里记的字形抄进镜像，否则在后台重载回来之前（文档没有更新时它根本不会抄），键盘按镜像里的旧字形转换上屏文字。
@@ -594,10 +600,13 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     // The host going to the background may end the extension without a viewWillDisappear.
     NotificationCenter.default.addObserver(
       self, selector: #selector(flushKeyPresses), name: .NSExtensionHostWillResignActive, object: nil)
+    DiagnosticLog.shared.write("keyboard_built \(DiagnosticLog.MemorySample.current().fields)")
   }
 
   override func viewDidAppear(_ animated: Bool) {
     super.viewDidAppear(animated)
+    // 到这里键盘已经画出第一帧，视图的位图缓冲和皮肤图片都已分配；`keyboard_built` 之前的几行量不到这部分。
+    DiagnosticLog.shared.write("keyboard_shown \(DiagnosticLog.MemorySample.current().fields)")
     // UIKit may publish the document identifier and keyboard type one run-loop turn after the
     // extension appears. Refresh the first frame once those host traits are available.
     DispatchQueue.main.async { [weak self] in
@@ -636,7 +645,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     applyOneHanded()
     // 隐私模式和输入框都可能在两次出现之间变了，日志开不开要重新判断。
     configureDiagnosticLog()
-    DiagnosticLog.shared.write("focus_in")
+    DiagnosticLog.shared.write("focus_in \(DiagnosticLog.MemorySample.current().fields)")
     KeyboardUsageReporting.presented(fullAccess: hasFullAccess)
     do { try session.resumeDictionarySession() }
     catch {
@@ -662,7 +671,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       // Not applied also covers a document no newer than the one the session has, which is not a failure.
       guard loaded else { DiagnosticLog.shared.write("preferences_not_applied"); return }
       self.configureDiagnosticLog()
-      DiagnosticLog.shared.write("preferences_applied")
+      DiagnosticLog.shared.write("preferences_applied \(DiagnosticLog.MemorySample.current().fields)")
       // A candidate skin, theme or colour synced from the desktop arrives with the document.
       self.refreshCandidatePalette()
       self.applyKeyboardAppearance()
@@ -694,7 +703,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   /// iOS ends a keyboard extension that keeps using too much memory, so a warning is worth a line when a report says the keyboard vanished.
   override func didReceiveMemoryWarning() {
     super.didReceiveMemoryWarning()
-    DiagnosticLog.shared.write("memory_warning")
+    DiagnosticLog.shared.write("memory_warning \(DiagnosticLog.MemorySample.current().fields)")
     // 收到警告后仍占着可选面板、释义结果或引擎候选缓存的键盘扩展很快会被系统结束。能重建的都丢掉，正在进行的组字和会话保留。
     closeKeyboardPicker()
     closeKeyboardService()
@@ -705,13 +714,17 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     translations.clearCacheForMemoryPressure()
     onlineCandidates.cancel()
     // 引擎清缓存后会为当前组字重查一遍候选（`reset_cache` 末尾的 `refresh_candidates`），返回的快照才是此后点选序号所对应的列表。组字中清缓存却丢掉快照，候选条和引擎是否一致就只能靠重查碰巧排出同样的结果；照「清除候选缓存」那样重画，又要在内存最紧的时候重查词图、重置候选条。组字中的缓存多半正是这次组字要用的行，清掉马上又查回来，省不下多少。所以没有组字时当场清：这时引擎没有候选，候选条上的英文联想和手写结果不归引擎管，快照里没有要画的东西；组字中只记下来，等这次组字结束（上屏或取消）时由 `render` 补清，长句组字攒下的缓存不会一直留到下一次空闲时的警告。
+    let engineCache: String
     if hasComposition {
       engineCacheResetPending = true
+      engineCache = "deferred"
     } else {
       engineCacheResetPending = false
       _ = session.resetCache()
+      engineCache = "reset"
     }
     ResolvedTheme.clearCacheForMemoryPressure()
+    DiagnosticLog.shared.write("memory_released engine_cache=\(engineCache) \(DiagnosticLog.MemorySample.current().fields)")
   }
 
   /// 补上组字中那次内存警告没清的引擎缓存。只在组字刚结束时由 `render` 调用：引擎这时没有候选，清缓存返回的快照没有要画的东西，丢掉它和空闲时的警告是同一个道理。
@@ -719,6 +732,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     guard engineCacheResetPending, !hasComposition else { return }
     engineCacheResetPending = false
     _ = session.resetCache()
+    DiagnosticLog.shared.write("engine_cache_reset \(DiagnosticLog.MemorySample.current().fields)")
   }
 
   /// `diagnostic_log.server` 开着时让诊断日志写到共享目录，关掉后停写；隐私模式和凭据输入框里同样停写（`KeyboardPrivacyGate` 的 `diagnosticLog`）。
