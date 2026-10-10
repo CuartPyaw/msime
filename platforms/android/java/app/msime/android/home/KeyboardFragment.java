@@ -85,7 +85,7 @@ public final class KeyboardFragment extends HomeTabFragment {
         scroll.setOnScrollChangeListener(
             (NestedScrollView.OnScrollChangeListener) (scrolled, x, y, oldX, oldY) -> {
                 boolean collapsed = y > threshold;
-                if (collapsed == (bar.getVisibility() == View.VISIBLE)) return;
+                if (collapsed == ViewPolicy.isVisible(bar)) return;
                 bar.animate().cancel();
                 if (collapsed) {
                     ViewPolicy.show(bar);

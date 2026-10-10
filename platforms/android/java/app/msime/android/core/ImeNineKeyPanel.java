@@ -257,7 +257,7 @@ final class ImeNineKeyPanel {
         mode = NineKeyPanelPolicy.Mode.SPELLING;
         renderedGeneration = -1;
         if (candidateGrid != null) candidateGrid.reset();
-        if (root != null && root.getVisibility() != View.GONE) ViewPolicy.hide(root);
+        if (!ViewPolicy.isGone(root)) ViewPolicy.hide(root);
         if (filterResetPending || !filtered()) return;
         // 同一代只清一次：清除的响应会再走到这里，引擎万一没清掉也不会每次重画都再发一遍。
         long generation = CandidateGlossPolicy.strictOr(s.view.opt("generation"), -1);
