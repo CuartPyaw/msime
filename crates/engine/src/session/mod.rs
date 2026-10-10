@@ -7,6 +7,7 @@ mod chain;
 mod clock;
 mod commit;
 mod composition;
+mod conversion;
 mod editing;
 mod glide;
 mod input;
@@ -146,10 +147,24 @@ impl Session {
 
     pub fn command(&mut self, command: Command) -> KeyResult {
         if self.nine_key.active() {
+            // 九宫格没有整句改字，改字的光标键就是它的光标键。
+            let command = match command {
+                Command::ConversionLeft => Command::MoveLeft,
+                Command::ConversionRight => Command::MoveRight,
+                other => other,
+            };
             let result = self.nine_key.command(command);
             return self.after_nine_key(result);
         }
         self.input.handle_command(command)
+    }
+
+    /// 整句改字的左移，进入改字时从第 `index` 个候选（宿主高亮的那一行）开始；已在改字里时与 `command(ConversionLeft)` 相同。九宫格和进不了改字时按 `MoveLeft` 处理。
+    pub fn conversion_left_from(&mut self, index: usize) -> KeyResult {
+        if self.nine_key.active() {
+            return self.command(Command::MoveLeft);
+        }
+        self.input.conversion_left_from(index)
     }
 
     /// `1`..`9` select the first nine candidates.
@@ -421,6 +436,15 @@ impl Session {
                 })
                 .collect(),
             candidate_list_open: input.candidate_list_open(),
+            conversion: input
+                .conversion
+                .as_ref()
+                .map(|edit| edit.text())
+                .unwrap_or_default(),
+            conversion_focus: input
+                .conversion
+                .as_ref()
+                .map_or((0, 0), |edit| edit.focus_span()),
             candidates,
         }
     }

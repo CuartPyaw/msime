@@ -2655,14 +2655,25 @@ static void TestSegmentEditingChords(MSIMEAppearancePreferences *appearance) {
                                  @"candidates": @[@{@"text": @"你好"}] };
     [controller setValue:composing forKey:@"view"];
 
-    for (NSArray *entry in @[@[@51, @(MSIME_BACKSPACE_SEGMENT)], @[@123, @(MSIME_MOVE_LEFT_SEGMENT)],
-                             @[@124, @(MSIME_MOVE_RIGHT_SEGMENT)]]) {
+    // 全拼（视图不带方案时按全拼读）的左右键是整句改字，Ctrl+左右一个字母一个字母地编辑拼音。
+    for (NSArray *entry in @[@[@51, @(MSIME_BACKSPACE_SEGMENT)], @[@123, @(MSIME_MOVE_LEFT)],
+                             @[@124, @(MSIME_MOVE_RIGHT)]]) {
         const unsigned short code = [entry[0] unsignedShortValue];
         session.lastCommand = UINT32_MAX;
         assert([controller handleEvent:ModeKey(code, NSEventModifierFlagControl, NO) client:client]);
         assert(session.lastCommand == [entry[1] unsignedIntValue]);
         [controller setValue:composing forKey:@"view"];
     }
+    // 没有整句改字的方案（五笔）里 Ctrl+左右照旧按分段移动。
+    NSMutableDictionary *wubi = [composing mutableCopy];
+    wubi[@"scheme"] = @2;
+    for (NSArray *entry in @[@[@123, @(MSIME_MOVE_LEFT_SEGMENT)], @[@124, @(MSIME_MOVE_RIGHT_SEGMENT)]]) {
+        [controller setValue:wubi forKey:@"view"];
+        session.lastCommand = UINT32_MAX;
+        assert([controller handleEvent:ModeKey([entry[0] unsignedShortValue], NSEventModifierFlagControl, NO) client:client]);
+        assert(session.lastCommand == [entry[1] unsignedIntValue]);
+    }
+    [controller setValue:composing forKey:@"view"];
 
     // Only the bare Ctrl chord. With anything else held the key is the application's, and this host
     // finishes the composition on the way out rather than editing it.
@@ -2688,7 +2699,7 @@ static void TestSegmentEditingChords(MSIMEAppearancePreferences *appearance) {
                   forKey:@"view"];
     session.lastCommand = UINT32_MAX;
     assert([controller handleEvent:ModeKey(123, NSEventModifierFlagControl, NO) client:client]);
-    assert(session.lastCommand == MSIME_MOVE_LEFT_SEGMENT);
+    assert(session.lastCommand == MSIME_MOVE_LEFT);
 
     // A Ctrl+Backspace that emptied the reading of a half-chosen phrase leaves only the chosen piece, as the reference's `keep_creating_word_after_empty_raw` does. That is still a composition: the next Ctrl+Backspace deletes the piece instead of going to the application.
     NSDictionary *heldOnly = @{ @"focused": @YES, @"editing_text": @"", @"candidates": @[], @"phrase_prefix": @"海滩" };
@@ -8638,11 +8649,11 @@ int main(int argc, char **argv) {
             client.committed = nil;
             client.marked = @"ceshi";
             assert([controller handleEvent:event client:client]);
-            assert(session.lastCommand == (key.unsignedShortValue == 123 ? MSIME_MOVE_LEFT : MSIME_MOVE_RIGHT));
+            assert(session.lastCommand == (key.unsignedShortValue == 123 ? MSIME_CONVERSION_LEFT : MSIME_CONVERSION_RIGHT));
             panel.visible = NO;
             session.lastCommand = UINT32_MAX;
             assert([controller handleEvent:event client:client]);
-            assert(session.lastCommand == (key.unsignedShortValue == 123 ? MSIME_MOVE_LEFT : MSIME_MOVE_RIGHT));
+            assert(session.lastCommand == (key.unsignedShortValue == 123 ? MSIME_CONVERSION_LEFT : MSIME_CONVERSION_RIGHT));
         }
         appearance.vertical = arrowVertical;
         HiddenCandidatePanel *layoutPanel = [[HiddenCandidatePanel alloc] initWithContentRect:NSZeroRect styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel backing:NSBackingStoreBuffered defer:NO];
@@ -9290,8 +9301,27 @@ int main(int argc, char **argv) {
             session.lastCommand = UINT32_MAX;
             NSEvent *event = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:0 context:nil characters:@"" charactersIgnoringModifiers:@"" isARepeat:NO keyCode:key.unsignedShortValue];
             assert([controller handleEvent:event client:client]);
-            uint32_t expected = key.unsignedShortValue == 123 ? MSIME_PREVIOUS_CANDIDATE : key.unsignedShortValue == 124 ? MSIME_NEXT_CANDIDATE : UINT32_MAX;
+            // 全拼的横排候选：左右键是整句改字，上下键移动高亮。
+            const unsigned short code = key.unsignedShortValue;
+            uint32_t expected = code == 123 ? MSIME_CONVERSION_LEFT : code == 124 ? MSIME_CONVERSION_RIGHT
+                                : code == 126 ? MSIME_PREVIOUS_CANDIDATE : MSIME_NEXT_CANDIDATE;
             assert(session.lastCommand == expected);
+        }
+        {
+            // 没有整句改字的方案（五笔）照旧：横排候选的左右键移动高亮，上下键被吞掉。
+            NSDictionary *saved = [controller valueForKey:@"view"];
+            NSMutableDictionary *wubi = [saved mutableCopy];
+            wubi[@"scheme"] = @2;
+            for (NSNumber *key in @[@123, @124, @125, @126]) {
+                [controller setValue:wubi forKey:@"view"];
+                layoutPanel.requestedVisible = YES;
+                session.lastCommand = UINT32_MAX;
+                NSEvent *event = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:0 context:nil characters:@"" charactersIgnoringModifiers:@"" isARepeat:NO keyCode:key.unsignedShortValue];
+                assert([controller handleEvent:event client:client]);
+                uint32_t expected = key.unsignedShortValue == 123 ? MSIME_PREVIOUS_CANDIDATE : key.unsignedShortValue == 124 ? MSIME_NEXT_CANDIDATE : UINT32_MAX;
+                assert(session.lastCommand == expected);
+            }
+            [controller setValue:saved forKey:@"view"];
         }
         CheckMenu([controller menu], controller);
         // Pairing sends a shifted `{` down the paired-punctuation route; this loop is about page keys versus typed keys only.

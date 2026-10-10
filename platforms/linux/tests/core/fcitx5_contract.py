@@ -625,4 +625,18 @@ assert "candidate_theme_applied_.clear();" in reset and "candidate_theme_attempt
 assert "syncCandidatePanelTheme(false);" in body(source, "  void refreshProviderSockets() {", "\n  }\n")
 assert 'fcitx::readAsIni(config, "conf/classicui.conf");' in source
 
+# 整句改字：两个入口都按 core/InputSchemes.h 的同一条 edits_sentence 决定方向键。全拼和双拼的左右键发改字命令（引擎进不了改字时自己退回字母光标），Ctrl+左右一个字母一个字母地编辑拼音，其他方案照旧按分段；改字时行内画 conversion_preedit 给出的整句并显式放光标。
+assert "edits_sentence(view_) ? MSIME_CONVERSION_LEFT : MSIME_MOVE_LEFT" in source
+assert "edits_sentence(view_) ? MSIME_CONVERSION_RIGHT : MSIME_MOVE_RIGHT" in source
+assert "sentence ? MSIME_MOVE_LEFT : MSIME_MOVE_LEFT_SEGMENT" in source
+assert "sentence ? MSIME_MOVE_RIGHT : MSIME_MOVE_RIGHT_SEGMENT" in source
+conversion_render = body(source, "  } else if (const auto conversion = msime::linux_host::conversion_preedit(view_); conversion.active) {", "  } else if (")
+assert "preedit.setCursor(static_cast<int>(conversion.caret_bytes));" in conversion_render
+assert "fcitx::TextFormatFlag::HighLight" in conversion_render
+ibus = (root / "src/core/ClientEngine.cpp").read_text()
+assert "edits_sentence(s.view) ? MSIME_CONVERSION_LEFT : MSIME_MOVE_LEFT" in ibus
+assert "edits_sentence(s.view) ? MSIME_CONVERSION_RIGHT : MSIME_MOVE_RIGHT" in ibus
+assert "(sentence ? (left ? MSIME_MOVE_LEFT : MSIME_MOVE_RIGHT)" in ibus
+assert "msime::linux_host::conversion_preedit(view)" in ibus
+
 print("Fcitx5 addon metadata passed")

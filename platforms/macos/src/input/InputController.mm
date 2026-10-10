@@ -5704,9 +5704,11 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         !MSIMESchemeTrait(_view, msime::mac::scheme::LocksCaret) && _session && _activeClient && ([_view[@"editing_text"] length] || [_view[@"candidates"] count] ||
                                       [_view[@"phrase_prefix"] length])) {
         uint32_t segment = UINT32_MAX;
+        // 全拼和双拼的左右键是整句改字，Ctrl+左右就是一个字母一个字母地编辑拼音。
+        const BOOL sentence = MSIMESchemeTrait(_view, msime::mac::scheme::EditsSentence);
         if (event.keyCode == 51) segment = MSIME_BACKSPACE_SEGMENT;
-        else if (event.keyCode == 123) segment = MSIME_MOVE_LEFT_SEGMENT;
-        else if (event.keyCode == 124) segment = MSIME_MOVE_RIGHT_SEGMENT;
+        else if (event.keyCode == 123) segment = sentence ? MSIME_MOVE_LEFT : MSIME_MOVE_LEFT_SEGMENT;
+        else if (event.keyCode == 124) segment = sentence ? MSIME_MOVE_RIGHT : MSIME_MOVE_RIGHT_SEGMENT;
         if (segment != UINT32_MAX) {
             NSDictionary *transition = [_session command:segment error:nil];
             // An Engine failure leaves the composition alone rather than finishing it below: the
@@ -5829,7 +5831,9 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     if (_panel.isVisible && [_appearance navigationEnabled:@"arrows"] && event.keyCode >= 123 && event.keyCode <= 126) {
         const BOOL horizontal = event.keyCode == 123 || event.keyCode == 124;
         // A vertical panel leaves Left/Right to the composition caret below, as Windows maps VK_LEFT/VK_RIGHT to FUNCTION_MOVE_LEFT/RIGHT while candidates are shown; the Engine answers the move with candidates for the new caret. Up/Down in a horizontal panel are still consumed so they never reach the host.
-        if (horizontal != _appearance.vertical) {
+        // 全拼和双拼里左右键不论候选横排竖排都留给下面的整句改字，高亮一律由上下键移动，与 Windows 和 Linux 相同。
+        const BOOL highlightKey = MSIMESchemeTrait(_view, msime::mac::scheme::EditsSentence) ? !horizontal : horizontal != _appearance.vertical;
+        if (highlightKey) {
             const BOOL backwards = event.keyCode == 123 || event.keyCode == 126;
             [self apply:[_session command:backwards ? MSIME_PREVIOUS_CANDIDATE : MSIME_NEXT_CANDIDATE error:nil]];
             return YES;
@@ -5927,8 +5931,8 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         case 36: case 76: command = MSIMECandidateListOpen(_view) ? MSIME_COMMIT_CANDIDATE : MSIME_COMMIT_RAW; break;
         case 53: [self flushPendingPairedClosing]; _pairedPunctuation.clear(); command = MSIME_CANCEL; break;
         case 49: if (!spaceIsSpelling) command = MSIME_COMMIT_CANDIDATE; break;
-        case 123: command = MSIME_MOVE_LEFT; break;
-        case 124: command = MSIME_MOVE_RIGHT; break;
+        case 123: command = MSIMESchemeTrait(_view, msime::mac::scheme::EditsSentence) ? MSIME_CONVERSION_LEFT : MSIME_MOVE_LEFT; break;
+        case 124: command = MSIMESchemeTrait(_view, msime::mac::scheme::EditsSentence) ? MSIME_CONVERSION_RIGHT : MSIME_MOVE_RIGHT; break;
         case 115: command = _panel.isVisible ? MSIME_FIRST_CANDIDATE : MSIME_MOVE_HOME; break;
         case 119: command = _panel.isVisible ? MSIME_LAST_CANDIDATE : MSIME_MOVE_END; break;
         case 117: command = MSIME_DELETE_FORWARD; break;

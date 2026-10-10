@@ -201,6 +201,16 @@ ReplyComposer::stage(const KeyResult &result, ReplyPath path, bool uiless,
     if (!output_delta.empty())
       next.committed_text = output_delta;
     break;
+  case ReplyPath::ConversionCommit:
+    // 改好的整句已经由 TIP 写进文档，和本地回车（LocalCommit）一样不发回复帧，这里只清掉前缀并计数；整句上屏后没有剩下的组字。
+    if (!raw.empty()) {
+      invalid();
+      break;
+    }
+    next.next_prefix.clear();
+    if (!output_delta.empty())
+      next.committed_text = output_delta;
+    break;
   case ReplyPath::AutoCommitAndContinue: {
     // Two Wubi commits take this path: the fourth letter of a unique code, which leaves nothing to compose, and a letter typed after a complete code (顶字), which commits the first candidate and leaves that letter composing. The worker frame tells the TIP to consume the four letters of the committed code from its own buffer and keep whatever follows, so the key reply only has to show the composition the Engine now holds. `continue_consumed` is that count (wubi_continue_consumed): a capital the Engine does not take after a complete code goes out with the first candidate and leaves nothing composing, so the TIP drops it too.
     const auto &context = result.transition.at("commit_context");
@@ -321,8 +331,10 @@ std::optional<PendingReply> ReplyComposer::basic_key(
   if (action.kind == KeyKind::LocalReset) {
     // 越南文词或藏文音节串上的第一次 Esc 重新显示原文并继续组字，所以没有被清空的组字要报告；TIP 带着同样的按键继续组字。
     const auto current = session.view();
+    // 整句改字时的 Esc 同样只退出改字、拼音继续组字。
     const bool restores_raw = packet.keycode == kVirtualKeyEscape && session.input_enabled() &&
-                              scheme::CancelRestoresRaw(view_scheme(current)) &&
+                              (scheme::CancelRestoresRaw(view_scheme(current)) ||
+                               !current.value("conversion", std::string{}).empty()) &&
                               !current.at("editing_text").get<std::string>().empty();
     return dispatch(session, packet, epoch, restores_raw ? ReplyPath::NoReply : ReplyPath::LocalCancel, uiless);
   }
@@ -355,6 +367,9 @@ std::optional<PendingReply> ReplyComposer::basic_key(
                          // cancel.
   if (action.kind == KeyKind::Command && action.value == MSIME_COMMIT_RAW) {
     const auto current = session.view();
+    // 整句改字时回车上屏改好的整句：不选高亮的候选，也不按 TIP 本地的拼音核对。
+    if (session.input_enabled() && !current.value("conversion", std::string{}).empty())
+      return dispatch(session, packet, epoch, ReplyPath::ConversionCommit, uiless);
     const bool candidate_active =
         (packet.modifiers_down & PipeMetadata::CandidateActive) != 0;
     const bool has_candidates = candidate_active && !current.at("candidates").empty();

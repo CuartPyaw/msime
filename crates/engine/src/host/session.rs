@@ -30,7 +30,7 @@ fn temporary_japanese_word(commit: &str) -> String {
     word
 }
 
-/// The host's command numbering. `CommitRawWithoutLearning` has no engine counterpart, and took 11 before the engine's `ConvertHanja` existed, so that one is 12 here and mapped by name rather than by ordinal.
+/// The host's command numbering. `CommitRawWithoutLearning` has no engine counterpart, and took 11 before the engine's `ConvertHanja` existed, so that one is 12 here and mapped by name rather than by ordinal. 整句改字的两条命令同样按名字映射，宿主编号比引擎多一。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Command {
@@ -49,6 +49,10 @@ pub enum Command {
     CommitRawWithoutLearning = 11,
     /// Open or close the active scheme's candidate list (the Korean Hanja list, the Zhuyin conversion list); unhandled in a scheme without one. Hosts may call it `MSIME_OPEN_CANDIDATE_LIST`.
     ConvertHanja = 12,
+    /// 整句改字的光标左移一个字（`crate::types::Command::ConversionLeft`）。
+    ConversionLeft = 13,
+    /// 整句改字的光标右移一个字（`crate::types::Command::ConversionRight`）。
+    ConversionRight = 14,
 }
 
 /// Every `candidate_*` vector has `candidates.len()` elements; the runtime's reorderings require it.
@@ -88,6 +92,12 @@ pub struct EngineSnapshot {
     pub candidate_answers_key: Vec<bool>,
     /// The scheme's openable candidate list is showing (the Korean Hanja list, the Zhuyin conversion list); candidates are its rows while it is.
     pub candidate_list_open: bool,
+    /// 整句改字时改好的整句，否则为空（`SessionSnapshot::conversion`）。
+    pub conversion: String,
+    /// 整句改字的光标在第几个字之前，按 `conversion` 的 Unicode 标量计。
+    pub conversion_focus_start: usize,
+    /// 光标处那一段（候选所替换的字）的结尾，同样按标量计；光标在句末时等于 `conversion_focus_start`。
+    pub conversion_focus_end: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -208,6 +218,9 @@ impl Session {
             candidate_corrected: Vec::with_capacity(count),
             candidate_answers_key: Vec::with_capacity(count),
             candidate_list_open: value.candidate_list_open,
+            conversion: value.conversion,
+            conversion_focus_start: value.conversion_focus.0,
+            conversion_focus_end: value.conversion_focus.1,
         };
         for (index, candidate) in value.candidates.into_iter().enumerate() {
             let mut annotation = value
@@ -479,6 +492,12 @@ impl Session {
             Command::ConvertHanja => Ok(result_for(
                 self.inner.command(crate::types::Command::ConvertHanja),
             )),
+            Command::ConversionLeft => Ok(result_for(
+                self.inner.command(crate::types::Command::ConversionLeft),
+            )),
+            Command::ConversionRight => Ok(result_for(
+                self.inner.command(crate::types::Command::ConversionRight),
+            )),
             _ => {
                 // The other host codes are the engine's ordinals one for one (bridge.cpp:1302-1319).
                 let engine = crate::types::Command::from_u8(command as u8)
@@ -486,6 +505,11 @@ impl Session {
                 Ok(result_for(self.inner.command(engine)))
             }
         }
+    }
+
+    /// 整句改字的左移，进入改字时从第 `index` 个候选开始（`crate::session::Session::conversion_left_from`）。
+    pub fn conversion_left_from(&mut self, index: usize) -> Result<EngineResult> {
+        Ok(result_for(self.inner.conversion_left_from(index)))
     }
 
     pub fn select(&mut self, index: usize) -> Result<EngineResult> {
@@ -587,7 +611,9 @@ impl Session {
             !segmentation.is_empty() && is_complete_pinyin_input(segmentation)
         };
         // 计算、指令和名单模式里是算式、触发词或键，网址也不是英文单词，都不是用户拼出的词，不进英文词库。
-        let should_learn = !before.local_mode.generates_text()
+        // 整句改字时回车上屏的是改好的汉字，不是拼出来的字母。
+        let should_learn = before.conversion.is_empty()
+            && !before.local_mode.generates_text()
             && before.local_mode != LocalInputMode::Url
             && (before.dedicated_english
                 || before.local_mode != LocalInputMode::None

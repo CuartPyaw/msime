@@ -17,7 +17,9 @@ use crate::dictionary::pinyin::{PinyinDatabase, INSERTED_WEIGHT};
 use crate::dictionary::DictRow;
 use crate::error::{EngineError, Result};
 use crate::ime::online_batch::replace_online_candidate_batch;
-use crate::lattice::decode::{make_sentence_lattice_options, BigramMemo};
+use crate::lattice::decode::{
+    decode_pinned, make_sentence_lattice_options, BigramMemo, PinnedSpan,
+};
 use crate::lattice::merge::{merge_lattice_candidates, whole_sentence_insert_position};
 use crate::lattice::neural::{
     shared_sentence_model, NeuralReranker, CONTEXT_CHARACTERS, MAX_RERANK_PATHS,
@@ -480,6 +482,28 @@ impl QuanpinDictionary {
             .into_iter()
             .filter_map(|(key, rows)| rows.first().map(|row| (key, row.weight)))
             .collect()
+    }
+
+    /// 整句改字的候选：读音恰为 `span`（完整音节）的词条，按权重从高到低，至多 `limit` 条。
+    pub fn conversion_rows(&mut self, span: &[String], limit: usize) -> Vec<DictRow> {
+        self.validate_row_caches();
+        cached_lattice_span(&self.database, &mut self.lattice_span_cache, span, limit)
+    }
+
+    /// 整句改字的重新转换：与整句候选同一套词网格、n 元表和个人模型，钉住的段原样保留（`decode_pinned`）。
+    pub fn convert_pinned(&mut self, syllables: &[String], pins: &[PinnedSpan]) -> Vec<PinnedSpan> {
+        self.validate_row_caches();
+        let personal = Arc::clone(&self.personal);
+        let model = personal.model();
+        let mut options = make_sentence_lattice_options(&self.paths, false);
+        options.personal = Some(&*model);
+        options.bigram_memo = Some(&self.bigram_memo);
+        let span_limit = options.span_limit;
+        let database = &self.database;
+        let lattice_spans = &mut self.lattice_span_cache;
+        let mut lookup =
+            |span: &[String]| cached_lattice_span(database, lattice_spans, span, span_limit);
+        decode_pinned(syllables, &mut lookup, &options, pins)
     }
 
     /// Umlaut-normalised canonical key, one complete syllable per Han character, no re-cut; an existing row is OK without a journal write (QD:1215-1268).

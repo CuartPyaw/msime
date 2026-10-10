@@ -145,4 +145,8 @@ pub struct SessionSnapshot {
     pub candidate_answers_key: Vec<bool>,
     /// The scheme's openable candidate list is showing (the Korean Hanja list). Hosts read this instead of inferring it from the scheme and a non-empty list.
     pub candidate_list_open: bool,
+    /// 整句改字时改好的整句，否则为空。宿主在它非空时把它画在行内代替拼音。
+    pub conversion: String,
+    /// 整句改字的光标和光标处那一段，按 `conversion` 的字（Unicode 标量）计：光标在第 `.0` 个字之前，`.0..1` 是候选所替换的那一段；光标在句末时两者都等于字数。不在改字时为 `(0, 0)`。
+    pub conversion_focus: (usize, usize),
 }
