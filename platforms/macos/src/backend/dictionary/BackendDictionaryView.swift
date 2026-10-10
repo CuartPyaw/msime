@@ -133,6 +133,8 @@ final class MacDictionaryModel: ObservableObject {
     }
   }
   func close() { closed = true; pending?.cancel(); panel?.cancel(nil); panel = nil; page = nil; importText = nil; search = "" }
+  var cloudAccountID: String { accountID }
+  var cloudAccountSession: BackendAccountSession { account }
 }
 
 struct MacCloudDictionaryView: View {
@@ -200,8 +202,13 @@ struct MacCloudDictionaryView: View {
           Text(selected == .catalog ? "完整词库目录" : "云端候选与排序").font(.title2)
           Spacer(); Button("关闭") { management = nil }
         }.padding()
-        if selected == .catalog { CloudDictionaryCatalogView(kind: model.kind, authorize: { try await model.authorize() }) }
-        else { CloudCandidatesView(kind: model.kind, authorize: { try await model.authorize() }) }
+        if selected == .catalog {
+          CloudDictionaryCatalogView(kind: model.kind, authorize: { try await model.authorize() },
+                                     accountID: model.cloudAccountID, session: model.cloudAccountSession)
+        } else {
+          CloudCandidatesView(kind: model.kind, authorize: { try await model.authorize() },
+                              accountID: model.cloudAccountID, session: model.cloudAccountSession)
+        }
       }.frame(width: 650, height: 650)
     }
     .sheet(isPresented: $editing) {
