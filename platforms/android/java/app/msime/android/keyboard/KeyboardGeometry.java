@@ -7,8 +7,6 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.view.ViewGroup;
-import java.math.BigDecimal;
-import org.json.JSONObject;
 
 /** Apple-compatible touch-keyboard spacing contract; input algorithms remain in Engine. */
 public final class KeyboardGeometry {
@@ -148,38 +146,6 @@ public final class KeyboardGeometry {
     public static int heightAdjustment(int value) {
         if (value == Integer.MIN_VALUE) return DEFAULT_HEIGHT_ADJUSTMENT_DP;
         return BoundsPolicy.bounded(value, MIN_HEIGHT_ADJUSTMENT_DP, MAX_HEIGHT_ADJUSTMENT_DP);
-    }
-
-    /** 读取整数值，拒绝 JSONObject 的小数截断、布尔转换和非有限数。 */
-    public static int strictInt(JSONObject object, String key, int fallback) {
-        return strictInt(object == null ? null : object.opt(key), fallback);
-    }
-
-    public static int strictInt(Object raw, int fallback) {
-        if (!(raw instanceof Number) || raw instanceof Boolean) return fallback;
-        if (raw instanceof Double || raw instanceof Float) return fallback;
-        try {
-            return new BigDecimal(raw.toString()).intValueExact();
-        } catch (NumberFormatException | ArithmeticException error) {
-            return fallback;
-        }
-    }
-
-    public static long strictLong(Object raw, long fallback) {
-        if (!(raw instanceof Number) || raw instanceof Boolean) return fallback;
-        if (raw instanceof Double || raw instanceof Float) return fallback;
-        try {
-            return new BigDecimal(raw.toString()).longValueExact();
-        } catch (NumberFormatException | ArithmeticException error) {
-            return fallback;
-        }
-    }
-
-    /** Read a finite JSON number without accepting numeric strings or booleans. */
-    public static double strictDouble(Object raw, double fallback) {
-        if (!(raw instanceof Number) || raw instanceof Boolean) return fallback;
-        double value = ((Number) raw).doubleValue();
-        return Double.isFinite(value) ? value : fallback;
     }
 
     /**

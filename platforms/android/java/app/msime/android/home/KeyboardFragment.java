@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.NumberPolicy;
+
 import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.os.Bundle;
@@ -349,7 +351,7 @@ public final class KeyboardFragment extends HomeTabFragment {
         int percent = KeyboardGeometry.heightAdjustmentToPercent(
             local.has(AndroidLocalSettings.KEYBOARD_HEIGHT_ADJUSTMENT)
                 ? local.integer(AndroidLocalSettings.KEYBOARD_HEIGHT_ADJUSTMENT)
-                : KeyboardGeometry.strictInt(preferences, "touch_keyboard_height_adjustment", Integer.MIN_VALUE));
+                : NumberPolicy.strictInt(preferences, "touch_keyboard_height_adjustment", Integer.MIN_VALUE));
         String layout = "nine_key".equals(InputViewValuePolicy.textOr(preferences, "touch_keyboard_layout", "twenty_six_key"))
             ? "九键" : "全键盘";
         return percent == KeyboardGeometry.DEFAULT_HEIGHT_PERCENT

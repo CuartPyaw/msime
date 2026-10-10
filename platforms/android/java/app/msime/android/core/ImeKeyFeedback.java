@@ -126,7 +126,7 @@ final class ImeKeyFeedback {
 
     /** 共享偏好里的音量必须是 JSON 整数；异常值按 100% 处理。 */
     static int volumePreference(Object raw) {
-        return KeyboardGeometry.strictInt(raw, 100);
+        return NumberPolicy.strictInt(raw, 100);
     }
 
     private void refreshPreferences() {

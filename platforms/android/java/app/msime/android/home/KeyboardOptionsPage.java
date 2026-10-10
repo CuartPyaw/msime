@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.NumberPolicy;
+
 import app.msime.android.LayoutPolicy;
 
 import android.content.Context;
@@ -138,16 +140,16 @@ public final class KeyboardOptionsPage extends DetailPage {
         int height = KeyboardGeometry.heightAdjustmentToPercent(
             settings.has(AndroidLocalSettings.KEYBOARD_HEIGHT_ADJUSTMENT)
                 ? settings.integer(AndroidLocalSettings.KEYBOARD_HEIGHT_ADJUSTMENT)
-                : KeyboardGeometry.strictInt(preferences, "touch_keyboard_height_adjustment", Integer.MIN_VALUE));
+                : NumberPolicy.strictInt(preferences, "touch_keyboard_height_adjustment", Integer.MIN_VALUE));
         layout.slider("键盘高度", KeyboardGeometry.MIN_HEIGHT_PERCENT, KeyboardGeometry.MAX_HEIGHT_PERCENT, 1, height,
             KeyboardGeometry::displayPercent,
             percent -> saveLocal(AndroidLocalSettings.KEYBOARD_HEIGHT_ADJUSTMENT,
                 KeyboardGeometry.heightPercentToAdjustment(percent)));
         layout.slider("按键间距", KeyboardGeometry.MIN_KEY_SPACING_TENTHS, KeyboardGeometry.MAX_KEY_SPACING_TENTHS, 1,
-            KeyboardGeometry.keySpacing(KeyboardGeometry.strictInt(preferences, "touch_key_spacing_tenths", -1)),
+            KeyboardGeometry.keySpacing(NumberPolicy.strictInt(preferences, "touch_key_spacing_tenths", -1)),
             KeyboardGeometry::display, value -> savePreference("touch_key_spacing_tenths", value));
         layout.slider("行间距", KeyboardGeometry.MIN_ROW_SPACING_TENTHS, KeyboardGeometry.MAX_ROW_SPACING_TENTHS, 1,
-            KeyboardGeometry.rowSpacing(KeyboardGeometry.strictInt(preferences, "touch_row_spacing_tenths", -1)),
+            KeyboardGeometry.rowSpacing(NumberPolicy.strictInt(preferences, "touch_row_spacing_tenths", -1)),
             KeyboardGeometry::display, value -> savePreference("touch_row_spacing_tenths", value));
         layout.toggle("数字行", "26 键和韩文键盘的字母上方多一行 1–0，键盘整体高出一行；手机横屏时放不下，不显示",
             settings.bool(AndroidLocalSettings.NUMBER_ROW),

@@ -44,7 +44,7 @@ public final class ClipboardHistoryPolicy {
     }
 
     public static long timestampValue(Object raw) {
-        long timestamp = KeyboardGeometry.strictLong(raw, 0);
+        long timestamp = NumberPolicy.strictLong(raw, 0);
         return timestamp < 0 ? 0 : timestamp;
     }
 
