@@ -2,8 +2,9 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct CloudDictionaryFilesView: View {
+  let accountID: String
   let kind: BackendAccountClient.DictionaryKind
-  let authorize: () async throws -> String
+  let session: BackendAccountSession
   let imported: () async throws -> Void
   @State private var format = BackendAccountClient.DictionaryFileFormat.standard
   @State private var choosing = false
@@ -110,9 +111,8 @@ struct CloudDictionaryFilesView: View {
           let url = try result.get()
           run {
             let prepared = try await BackendPreparedSnapshot.prepareDocument(url)
-            let token = try await authorize()
-            let current = try await client.dictionaryCatalog(.quick, code: "", token: token)
-            _ = try await authorize(); try Task.checkCancellation()
+            let current = try await client.dictionaryCatalog(.quick, code: "", session: session,
+              matchingUserID: accountID)
             preparedSnapshot = prepared; restoreRevision = current.revision
           }
         } catch { message = "未选择可读取的快照文件。" }
@@ -134,8 +134,8 @@ struct CloudDictionaryFilesView: View {
       Button("上传") {
         guard let text else { return }
         run {
-          let token = try await authorize()
-          let result = try await client.importDictionary(kind, text: text, format: format, token: token)
+          let result = try await client.importDictionary(kind, text: text, format: format, session: session,
+            matchingUserID: accountID)
           self.text = nil
           message = "云端已导入 \(result.imported) 条；需要下载到本机后才会影响本机输入。"
           try await imported()
@@ -147,9 +147,9 @@ struct CloudDictionaryFilesView: View {
       Button("替换云词库", role: .destructive) {
         guard let snapshot = preparedSnapshot, let revision = restoreRevision else { return }
         run {
-          let token = try await authorize()
           let result = try await client.restoreDictionarySnapshot(file: snapshot.url,
-            expectedSHA256: snapshot.envelope.sha256, revision: revision, token: token)
+            expectedSHA256: snapshot.envelope.sha256, revision: revision, session: session,
+            matchingUserID: accountID)
           preparedSnapshot = nil; restoreRevision = nil
           message = "云词库已恢复，版本 \(result.revision)。本机词库尚未更新。"
           try await imported()
@@ -174,17 +174,16 @@ struct CloudDictionaryFilesView: View {
   }
 
   @MainActor private func exportSnapshot() async throws {
-    let token = try await authorize()
-    let snapshot = try await client.dictionarySnapshot(token: token)
-    do { _ = try await authorize(); try Task.checkCancellation() }
+    let snapshot = try await client.dictionarySnapshot(session: session, matchingUserID: accountID)
+    do { try Task.checkCancellation() }
     catch { try? FileManager.default.removeItem(at: snapshot.url.deletingLastPathComponent()); throw error }
     message = "备份文件摘要已校验：云端版本 \(snapshot.envelope.revision)，共 \(snapshot.envelope.records) 条记录。"
     exported = Export(url: snapshot.url)
   }
   @MainActor private func export() async throws {
-    let token = try await authorize()
-    let url = try await client.exportDictionary(kind, format: format, token: token)
-    do { _ = try await authorize(); try Task.checkCancellation() }
+    let url = try await client.exportDictionary(kind, format: format, session: session,
+      matchingUserID: accountID)
+    do { try Task.checkCancellation() }
     catch { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()); throw error }
     exported = Export(url: url)
   }
