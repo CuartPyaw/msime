@@ -3657,46 +3657,62 @@ void render(IBusEngine *engine, const Json &view) {
     state(engine).wave_overlay_surface->hide();
     state(engine).wave_overlay_visible = false;
   }
-  // 韩文、注音、越南文或藏文的组字是用户已经写下的文字，所以不论预编辑样式如何，都按拼音样式内嵌显示，光标在末尾：在候选列表打开之前没有候选窗可以显示它。客户端失焦时 IBus 会自己上屏 COMMIT 模式的预编辑，打开的组字就是这样到达被离开的客户端的（见 focus_out）。
-  const int rules_scheme = msime::linux_host::scheme_rules(view);
-  const bool always_inline = rules_scheme >= 0 && msime::linux_host::scheme::AlwaysInlinePreedit(rules_scheme);
-  auto text = style == "pinyin" || always_inline ? view.at("preedit").get<std::string>()
-                                                 : view.at("editing_text").get<std::string>();
-  auto caret = view.at("caret_position").get<size_t>();
-  // The check is about the letters the Engine produced, so it runs before the kana replace them
-  // below; run after, it rejected every Japanese composition in the raw style. An inline composition is not the raw letters (a Vietnamese word is not ASCII).
-  if (style == "raw" && !always_inline && (caret > text.size() ||
-      std::any_of(text.begin(), text.end(),
-                  [](unsigned char c) { return c < 0x20 || c > 0x7e; })))
-    throw std::runtime_error("Invalid editing text");
-  // A Japanese composition is かな, not the letters that produced it; see PhrasePreedit.h for the
-  // one case that keeps the letters.
-  const auto reading = view.value("reading", std::string{});
-  if (msime::linux_host::composition_shows_reading(
-          reading, caret, view.value("editing_text", std::string{}).size())) {
-    text = reading;
-    caret = reading.size();
+  // 整句改字：不管预编辑样式，行内显示已选的词加改好的整句，光标在焦点字前；焦点那一段用双下划线，其余单下划线，IBus 按 Unicode 标量计位置。
+  const auto conversion = msime::linux_host::conversion_preedit(view);
+  if (conversion.active) {
+    auto conversion_text = ibus_text_new_from_string(conversion.text.c_str());
+    const auto length = static_cast<guint>(msime::linux_host::utf8_scalar_count(conversion.text));
+    const auto focus_start = static_cast<guint>(conversion.caret_scalars);
+    const auto focus_end = static_cast<guint>(conversion.focus_end_scalars);
+    if (focus_start > 0)
+      ibus_text_append_attribute(conversion_text, IBUS_ATTR_TYPE_UNDERLINE, IBUS_ATTR_UNDERLINE_SINGLE, 0, static_cast<gint>(focus_start));
+    if (focus_end > focus_start)
+      ibus_text_append_attribute(conversion_text, IBUS_ATTR_TYPE_UNDERLINE, IBUS_ATTR_UNDERLINE_DOUBLE, static_cast<gint>(focus_start), static_cast<gint>(focus_end));
+    if (length > focus_end)
+      ibus_text_append_attribute(conversion_text, IBUS_ATTR_TYPE_UNDERLINE, IBUS_ATTR_UNDERLINE_SINGLE, static_cast<gint>(focus_end), static_cast<gint>(length));
+    ibus_engine_update_preedit_text_with_mode(engine, conversion_text, focus_start, TRUE, IBUS_ENGINE_PREEDIT_CLEAR);
+  } else {
+    // 韩文、注音、越南文或藏文的组字是用户已经写下的文字，所以不论预编辑样式如何，都按拼音样式内嵌显示，光标在末尾：在候选列表打开之前没有候选窗可以显示它。客户端失焦时 IBus 会自己上屏 COMMIT 模式的预编辑，打开的组字就是这样到达被离开的客户端的（见 focus_out）。
+    const int rules_scheme = msime::linux_host::scheme_rules(view);
+    const bool always_inline = rules_scheme >= 0 && msime::linux_host::scheme::AlwaysInlinePreedit(rules_scheme);
+    auto text = style == "pinyin" || always_inline ? view.at("preedit").get<std::string>()
+                                                   : view.at("editing_text").get<std::string>();
+    auto caret = view.at("caret_position").get<size_t>();
+    // The check is about the letters the Engine produced, so it runs before the kana replace them
+    // below; run after, it rejected every Japanese composition in the raw style. An inline composition is not the raw letters (a Vietnamese word is not ASCII).
+    if (style == "raw" && !always_inline && (caret > text.size() ||
+        std::any_of(text.begin(), text.end(),
+                    [](unsigned char c) { return c < 0x20 || c > 0x7e; })))
+      throw std::runtime_error("Invalid editing text");
+    // A Japanese composition is かな, not the letters that produced it; see PhrasePreedit.h for the
+    // one case that keeps the letters.
+    const auto reading = view.value("reading", std::string{});
+    if (msime::linux_host::composition_shows_reading(
+            reading, caret, view.value("editing_text", std::string{}).size())) {
+      text = reading;
+      caret = reading.size();
+    }
+    // A phrase being assembled leads the reading, exactly as the reference draws
+    // `word_for_creating_word`, so the piece the user has already picked is on screen instead of
+    // being committed into the document a fragment at a time. It is prepended after the check above,
+    // which is about the reading the Engine produced: the piece is Han text and asking it to be
+    // printable ASCII would reject every phrase.
+    const auto composed = msime::linux_host::compose_phrase_preedit(
+        view.value("phrase_prefix", std::string{}), text, caret);
+    text = composed.text;
+    // IBus counts the cursor in Unicode scalars, and the piece is not ASCII.
+    auto preedit_text = ibus_text_new_from_string(text.c_str());
+    if (style != "empty" || always_inline)
+      underline_preedit(preedit_text, static_cast<guint>(
+                                          msime::linux_host::utf8_scalar_count(text)));
+    ibus_engine_update_preedit_text_with_mode(
+        engine, preedit_text,
+        static_cast<guint>(style == "raw" && !always_inline
+                               ? composed.caret_scalars
+                               : msime::linux_host::utf8_scalar_count(text)),
+        (style != "empty" || always_inline) && !text.empty(),
+        always_inline ? IBUS_ENGINE_PREEDIT_COMMIT : IBUS_ENGINE_PREEDIT_CLEAR);
   }
-  // A phrase being assembled leads the reading, exactly as the reference draws
-  // `word_for_creating_word`, so the piece the user has already picked is on screen instead of
-  // being committed into the document a fragment at a time. It is prepended after the check above,
-  // which is about the reading the Engine produced: the piece is Han text and asking it to be
-  // printable ASCII would reject every phrase.
-  const auto composed = msime::linux_host::compose_phrase_preedit(
-      view.value("phrase_prefix", std::string{}), text, caret);
-  text = composed.text;
-  // IBus counts the cursor in Unicode scalars, and the piece is not ASCII.
-  auto preedit_text = ibus_text_new_from_string(text.c_str());
-  if (style != "empty" || always_inline)
-    underline_preedit(preedit_text, static_cast<guint>(
-                                        msime::linux_host::utf8_scalar_count(text)));
-  ibus_engine_update_preedit_text_with_mode(
-      engine, preedit_text,
-      static_cast<guint>(style == "raw" && !always_inline
-                             ? composed.caret_scalars
-                             : msime::linux_host::utf8_scalar_count(text)),
-      (style != "empty" || always_inline) && !text.empty(),
-      always_inline ? IBUS_ENGINE_PREEDIT_COMMIT : IBUS_ENGINE_PREEDIT_CLEAR);
   const auto &candidates = view.at("candidates");
   if (candidates.empty()) {
     auto &s = state(engine);
@@ -6675,12 +6691,15 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
     if (!locks_caret && ctrl_only && segment_edit_key &&
         (!active_editing.empty() ||
          (active_candidates.is_array() && !active_candidates.empty()))) {
+      // 全拼和双拼的左右键是整句改字，Ctrl+左右就是一个字母一个字母地编辑拼音。
+      const bool sentence = msime::linux_host::edits_sentence(s.view);
+      const bool left = key == IBUS_Left || key == IBUS_KP_Left;
       const uint32_t segment_command =
           key == IBUS_BackSpace
               ? MSIME_BACKSPACE_SEGMENT
-              : (key == IBUS_Left || key == IBUS_KP_Left
-                     ? MSIME_MOVE_LEFT_SEGMENT
-                     : MSIME_MOVE_RIGHT_SEGMENT);
+              : (sentence ? (left ? MSIME_MOVE_LEFT : MSIME_MOVE_RIGHT)
+                          : (left ? MSIME_MOVE_LEFT_SEGMENT
+                                  : MSIME_MOVE_RIGHT_SEGMENT));
       handled = apply(engine,
                       msime_client_command(s.session, segment_command));
       return;
@@ -7176,13 +7195,14 @@ gboolean process_key(IBusEngine *engine, guint key, guint keycode, guint flags) 
       }
       command = MSIME_COMMIT_CANDIDATE;
       break;
+    // 全拼和双拼里左右键是整句改字的光标键，引擎进不了改字时自己按字母光标处理。
     case IBUS_Left:
     case IBUS_KP_Left:
-      command = MSIME_MOVE_LEFT;
+      command = msime::linux_host::edits_sentence(s.view) ? MSIME_CONVERSION_LEFT : MSIME_MOVE_LEFT;
       break;
     case IBUS_Right:
     case IBUS_KP_Right:
-      command = MSIME_MOVE_RIGHT;
+      command = msime::linux_host::edits_sentence(s.view) ? MSIME_CONVERSION_RIGHT : MSIME_MOVE_RIGHT;
       break;
     case IBUS_Home:
     case IBUS_KP_Home:

@@ -91,6 +91,31 @@ int main() {
   assert(!candidate_list_composition(zhuyin_mode));
   assert(!candidate_list_composition(nullptr));
 
+  // 整句改字：只有全拼和双拼的普通组字把左右键交给改字命令，本地模式、专用英文和其他方案照旧移字母光标或分段。
+  assert(scheme::EditsSentence(scheme::Quanpin) && scheme::EditsSentence(scheme::Shuangpin));
+  for (int number : {2, 3, 4, 5, 6, 7, 8, 9, 10, -1})
+    assert(!scheme::EditsSentence(number));
+  assert(edits_sentence(quanpin));
+  assert(edits_sentence(Json{{"scheme", 1}, {"local_mode", "none"}}));
+  assert(!edits_sentence(stroke));
+  assert(!edits_sentence(Json{{"scheme", 0}, {"local_mode", "expression"}}));
+  assert(!edits_sentence(Json{{"scheme", 0}, {"dedicated_english", true}}));
+  assert(!edits_sentence(Json::object()));
+
+  // 改字时的行内文字：已选的词加整句，光标在焦点字前；位置按标量给出，换成字节和标量两种单位（𠮷 是四个字节的一个标量）。
+  assert(!conversion_preedit(quanpin).active);
+  assert(!conversion_preedit(Json{{"conversion", ""}}).active);
+  const auto converted = conversion_preedit(Json{{"phrase_prefix", "𠮷"}, {"conversion", "我去背景"},
+                                                 {"conversion_focus_start", 2}, {"conversion_focus_end", 4}});
+  assert(converted.active && converted.text == "𠮷我去背景");
+  assert(converted.caret_bytes == 4 + 6 && converted.caret_scalars == 3);
+  assert(converted.focus_end_bytes == 4 + 12 && converted.focus_end_scalars == 5);
+  // 光标在句末：焦点段为空；越界或缺少的位置取末尾，结尾不早于光标。
+  const auto at_end = conversion_preedit(Json{{"conversion", "我去北京"}, {"conversion_focus_start", 4}, {"conversion_focus_end", 4}});
+  assert(at_end.caret_bytes == 12 && at_end.focus_end_bytes == 12 && at_end.caret_scalars == 4);
+  const auto clamped = conversion_preedit(Json{{"conversion", "我去"}, {"conversion_focus_start", 9}, {"conversion_focus_end", 1}});
+  assert(clamped.caret_bytes == 6 && clamped.focus_end_bytes == 6 && clamped.caret_scalars == 2);
+
   // Cantonese, Zhuyin and Stroke are available only when their dictionary is a file in the language_dictionaries directory; every other known scheme always is.
   char pattern[] = "/tmp/msime-input-schemes-XXXXXX";
   assert(mkdtemp(pattern) != nullptr);

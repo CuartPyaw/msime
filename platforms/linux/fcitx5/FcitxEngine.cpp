@@ -6677,6 +6677,22 @@ void FcitxState::render() {
       ic_.inputPanel().setClientPreedit(preedit);
     else
       ic_.inputPanel().setPreedit(preedit);
+  } else if (const auto conversion = msime::linux_host::conversion_preedit(view_); conversion.active) {
+    // 整句改字：不管预编辑样式，内嵌显示已选的词加改好的整句，光标在焦点字前；焦点那一段高亮，其余加下划线。fcitx5 的光标和分段都按字节计。
+    fcitx::Text preedit;
+    const auto &text = conversion.text;
+    if (conversion.caret_bytes > 0)
+      preedit.append(text.substr(0, conversion.caret_bytes), fcitx::TextFormatFlag::Underline);
+    if (conversion.focus_end_bytes > conversion.caret_bytes)
+      preedit.append(text.substr(conversion.caret_bytes, conversion.focus_end_bytes - conversion.caret_bytes),
+                     fcitx::TextFormatFlags{fcitx::TextFormatFlag::Underline, fcitx::TextFormatFlag::HighLight});
+    if (text.size() > conversion.focus_end_bytes)
+      preedit.append(text.substr(conversion.focus_end_bytes), fcitx::TextFormatFlag::Underline);
+    preedit.setCursor(static_cast<int>(conversion.caret_bytes));
+    if (ic_.capabilityFlags().test(fcitx::CapabilityFlag::Preedit))
+      ic_.inputPanel().setClientPreedit(preedit);
+    else
+      ic_.inputPanel().setPreedit(preedit);
   } else if (style != "empty" || alwaysInline) {
     // 韩文音节、注音转换、越南文单词或藏文音节串是用户正在写的文字，所以不论预编辑样式如何都内嵌显示：列表打开之前没有候选窗可以显示它（core/InputSchemeTraits.h 的 AlwaysInlinePreedit）。
     auto reading = style == "pinyin" || alwaysInline ? view_.value("preedit", editing) : editing;
@@ -7281,10 +7297,12 @@ bool FcitxState::key(fcitx::KeyEvent &event) {
   // 只按 Ctrl 的分段编辑与 IBus 和 Windows 组字编辑器保持一致。实际的分段边界由共享运行时决定，局部模式下也能安全退回。韩文音节、注音转换、越南文单词和藏文音节串没有分段，所以这些组合键在下面结束组字，并仍然作为应用的快捷键。
   if (ctrl && !alt && !shift && composing && !commitsOnBlur()) {
     if (sym == FcitxKey_BackSpace) return command(MSIME_BACKSPACE_SEGMENT);
+    // 全拼和双拼的左右键是整句改字，Ctrl+左右就是一个字母一个字母地编辑拼音。
+    const bool sentence = msime::linux_host::edits_sentence(view_);
     if (sym == FcitxKey_Left || sym == FcitxKey_KP_Left)
-      return command(MSIME_MOVE_LEFT_SEGMENT);
+      return command(sentence ? MSIME_MOVE_LEFT : MSIME_MOVE_LEFT_SEGMENT);
     if (sym == FcitxKey_Right || sym == FcitxKey_KP_Right)
-      return command(MSIME_MOVE_RIGHT_SEGMENT);
+      return command(sentence ? MSIME_MOVE_RIGHT : MSIME_MOVE_RIGHT_SEGMENT);
   }
   if (states.testAny(fcitx::KeyStates{fcitx::KeyState::Ctrl, fcitx::KeyState::Alt,
                                       fcitx::KeyState::Super, fcitx::KeyState::Hyper,
@@ -7397,8 +7415,11 @@ bool FcitxState::key(fcitx::KeyEvent &event) {
     case FcitxKey_Return: case FcitxKey_KP_Enter:
       return command(openedList ? MSIME_COMMIT_CANDIDATE : MSIME_COMMIT_RAW);
     case FcitxKey_space: return command(MSIME_COMMIT_CANDIDATE);
-    case FcitxKey_Left: case FcitxKey_KP_Left: return command(MSIME_MOVE_LEFT);
-    case FcitxKey_Right: case FcitxKey_KP_Right: return command(MSIME_MOVE_RIGHT);
+    // 全拼和双拼里左右键是整句改字的光标键，引擎进不了改字时自己按字母光标处理。
+    case FcitxKey_Left: case FcitxKey_KP_Left:
+      return command(msime::linux_host::edits_sentence(view_) ? MSIME_CONVERSION_LEFT : MSIME_MOVE_LEFT);
+    case FcitxKey_Right: case FcitxKey_KP_Right:
+      return command(msime::linux_host::edits_sentence(view_) ? MSIME_CONVERSION_RIGHT : MSIME_MOVE_RIGHT);
     case FcitxKey_Home: case FcitxKey_KP_Home:
       return command(MSIME_FIRST_CANDIDATE);
     case FcitxKey_End: case FcitxKey_KP_End:
