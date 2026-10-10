@@ -22,10 +22,14 @@ public final class TextPolicy {
         return isAsciiLetter(codePoint) || (codePoint >= '0' && codePoint <= '9');
     }
 
+    /** Return whether a code point is Unicode whitespace or a Unicode space character. */
+    public static boolean isSpace(int codePoint) {
+        return Character.isWhitespace(codePoint) || Character.isSpaceChar(codePoint);
+    }
+
     public static boolean blank(String value) {
         if (value == null || value.isEmpty()) return true;
-        return value.codePoints().allMatch(codePoint -> Character.isWhitespace(codePoint)
-            || Character.isSpaceChar(codePoint));
+        return value.codePoints().allMatch(TextPolicy::isSpace);
     }
 
     public static boolean hasControl(String value) {
@@ -156,13 +160,13 @@ public final class TextPolicy {
         int start = 0;
         while (start < value.length()) {
             int codePoint = value.codePointAt(start);
-            if (!Character.isWhitespace(codePoint) && !Character.isSpaceChar(codePoint)) break;
+            if (!isSpace(codePoint)) break;
             start += Character.charCount(codePoint);
         }
         int end = value.length();
         while (end > start) {
             int codePoint = value.codePointBefore(end);
-            if (!Character.isWhitespace(codePoint) && !Character.isSpaceChar(codePoint)) break;
+            if (!isSpace(codePoint)) break;
             end -= Character.charCount(codePoint);
         }
         return value.substring(start, end);

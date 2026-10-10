@@ -43,7 +43,7 @@ public final class NineKeySidebarPolicy {
         int index = 0;
         while (index <= text.length()) {
             int codePoint = index < text.length() ? text.codePointAt(index) : ' ';
-            if (Character.isWhitespace(codePoint) || Character.isSpaceChar(codePoint)) {
+            if (TextPolicy.isSpace(codePoint)) {
                 if (token.length() > 0) {
                     symbols.add(token.toString());
                     token.setLength(0);
