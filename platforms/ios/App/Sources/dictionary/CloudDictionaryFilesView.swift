@@ -19,6 +19,7 @@ struct CloudDictionaryFilesView: View {
   @State private var message: String?
   @State private var pending: Task<Void, Never>?
   @State private var exported: Export?
+  @State private var sessionID: UUID?
   private let client = BackendAccountClient()
   private struct Export: Identifiable { let id = UUID(); let url: URL }
   private var lines: [String] { (text ?? "").components(separatedBy: .newlines).filter { !$0.isEmpty } }
@@ -112,7 +113,7 @@ struct CloudDictionaryFilesView: View {
           run {
             let prepared = try await BackendPreparedSnapshot.prepareDocument(url)
             let current = try await client.dictionaryCatalog(.quick, code: "", session: session,
-              matchingUserID: accountID)
+              matchingUserID: accountID, matchingSessionID: sessionID)
             preparedSnapshot = prepared; restoreRevision = current.revision
           }
         } catch { message = "未选择可读取的快照文件。" }
@@ -135,7 +136,7 @@ struct CloudDictionaryFilesView: View {
         guard let text else { return }
         run {
           let result = try await client.importDictionary(kind, text: text, format: format, session: session,
-            matchingUserID: accountID)
+            matchingUserID: accountID, matchingSessionID: sessionID)
           self.text = nil
           message = "云端已导入 \(result.imported) 条；需要下载到本机后才会影响本机输入。"
           try await imported()
@@ -149,7 +150,7 @@ struct CloudDictionaryFilesView: View {
         run {
           let result = try await client.restoreDictionarySnapshot(file: snapshot.url,
             expectedSHA256: snapshot.envelope.sha256, revision: revision, session: session,
-            matchingUserID: accountID)
+            matchingUserID: accountID, matchingSessionID: sessionID)
           preparedSnapshot = nil; restoreRevision = nil
           message = "云词库已恢复，版本 \(result.revision)。本机词库尚未更新。"
           try await imported()
@@ -174,7 +175,8 @@ struct CloudDictionaryFilesView: View {
   }
 
   @MainActor private func exportSnapshot() async throws {
-    let snapshot = try await client.dictionarySnapshot(session: session, matchingUserID: accountID)
+    let snapshot = try await client.dictionarySnapshot(session: session, matchingUserID: accountID,
+                                                       matchingSessionID: sessionID)
     do { try Task.checkCancellation() }
     catch { try? FileManager.default.removeItem(at: snapshot.url.deletingLastPathComponent()); throw error }
     message = "备份文件摘要已校验：云端版本 \(snapshot.envelope.revision)，共 \(snapshot.envelope.records) 条记录。"
@@ -182,7 +184,7 @@ struct CloudDictionaryFilesView: View {
   }
   @MainActor private func export() async throws {
     let url = try await client.exportDictionary(kind, format: format, session: session,
-      matchingUserID: accountID)
+      matchingUserID: accountID, matchingSessionID: sessionID)
     do { try Task.checkCancellation() }
     catch { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()); throw error }
     exported = Export(url: url)
@@ -192,7 +194,11 @@ struct CloudDictionaryFilesView: View {
     busy = true; message = nil
     pending = Task {
       defer { busy = false }
-      do { try await action() }
+      do {
+        let identity = try await session.credentials(matchingUserID: accountID, matchingSessionID: sessionID)
+        sessionID = identity.sessionID
+        try await action()
+      }
       catch is CancellationError { }
       catch { message = error.localizedDescription }
     }
