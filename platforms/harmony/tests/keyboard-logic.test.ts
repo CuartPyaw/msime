@@ -11234,6 +11234,76 @@ group("the account bridge sends multi-line clipboard text the shared client acce
     });
 });
 
+group("a keyboard bridge rejects a replaced stored login", () => {
+  const session = (user: string, refresh: string): string =>
+    JSON.stringify({
+      access_token: "a".repeat(64),
+      refresh_token: refresh.repeat(64),
+      token_type: "Bearer",
+      expires_at: Date.now() + 600_000,
+      user: { id: user, display_name: "Test", created_at: "2026-01-01" },
+    });
+  let stored: string | null = session("synthetic-A", "b");
+  const store: AccountSessionStore = {
+    load: () => stored,
+    save: (value) => {
+      stored = value;
+    },
+    clear: () => {
+      stored = null;
+    },
+  };
+  const bridge = new AccountCloudBridge(
+    { request: async () => ({ status: 200, body: "{}" }) },
+    store,
+  );
+  check(bridge.matchesStoredSession(), "the bridge initially matches its stored login");
+  stored = session("synthetic-B", "c");
+  check(!bridge.matchesStoredSession(), "a different account invalidates the bridge");
+  stored = session("synthetic-A", "d");
+  check(!bridge.matchesStoredSession(), "relogging into the same account also invalidates it");
+  stored = null;
+  check(!bridge.matchesStoredSession(), "signing out invalidates it");
+});
+
+group("a keyboard send refuses a same-account login adopted during refresh", () => {
+  const session = (refresh: string, expires: number): string =>
+    JSON.stringify({
+      access_token: "a".repeat(64),
+      refresh_token: refresh.repeat(64),
+      token_type: "Bearer",
+      expires_at: expires,
+      user: { id: "synthetic-A", display_name: "Test", created_at: "2026-01-01" },
+    });
+  let stored: string | null = session("b", Date.now() - 1);
+  const paths: string[] = [];
+  const bridge = new AccountCloudBridge(
+    {
+      request: async (_method, path) => {
+        paths.push(path);
+        return { status: 200, body: "{}" };
+      },
+    },
+    {
+      load: () => stored,
+      save: (value) => {
+        stored = value;
+      },
+      clear: () => {
+        stored = null;
+      },
+      exclusive: async (body) => {
+        stored = session("c", Date.now() + 600_000);
+        return await body();
+      },
+    },
+  );
+  void bridge.addClipboardForCurrentSession("synthetic clipboard text").then((reply) => {
+    check(JSON.parse(reply).error === "account_cancelled", "the adopted login cancels the send");
+    check(paths.length === 0, "no clipboard upload reaches the transport");
+  });
+});
+
 group("the account bridge accepts the shared clipboard search bound", () => {
   let stored: string | null = JSON.stringify({
     access_token: "a".repeat(64),

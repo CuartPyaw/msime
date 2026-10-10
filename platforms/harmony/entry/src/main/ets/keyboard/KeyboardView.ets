@@ -82,9 +82,10 @@ import { SurfaceRoutingPolicy } from './SurfaceRoutingPolicy';
 import { ClipboardHistoryItem, ClipboardFailure } from './clipboard/ClipboardHistoryStore';
 import { ClipboardHistoryPolicy } from './clipboard/ClipboardHistoryPolicy';
 import {
-  CLOUD_CLIPBOARD_SEND, CLOUD_CLIPBOARD_TAB, CloudClipboardItem, CloudClipboardListing, CloudClipboardPolicy,
+  CLOUD_CLIPBOARD_SEND, CLOUD_CLIPBOARD_TAB, CloudClipboardItem, CloudClipboardPolicy,
   CloudClipboardSendOutcome, CloudClipboardState
 } from './clipboard/CloudClipboardPolicy';
+import { CloudClipboardBoundListing } from './clipboard/CloudClipboardClient';
 import componentSnapshot from '@ohos.arkui.componentSnapshot';
 import { image } from '@kit.ImageKit';
 import { textRecognition } from '@kit.CoreVisionKit';
@@ -520,6 +521,8 @@ struct KeyboardView {
   private cloudSendRequest: number = 0;
   /** The editor the cloud listing on screen was fetched for. */
   private cloudEditor: number = -1;
+  /** Digest of the login that supplied the visible rows; never a credential. */
+  private cloudBinding: string = '';
   // Every item of a panel with its keywords, read once per panel the first time it is searched.
   private emojiSearchIndex: Map<string, EmojiItem[]> = new Map<string, EmojiItem[]>();
   // The keywords of every item the panel has read, so a 2in1 hover can name it; recents that were never read show no name.
@@ -4963,20 +4966,35 @@ struct KeyboardView {
       return;
     }
     const request: number = ++this.cloudRequest;
+    const previousBinding: string = this.cloudBinding;
     this.cloudEditor = KeyboardSession.shared.cloudClipboardEditor();
+    this.cloudBinding = '';
+    this.cloudClips = [];
+    this.cloudStateKnown = false;
     this.cloudLoading = true;
-    KeyboardSession.shared.cloudClipboardItems().then((listing: CloudClipboardListing | null): void => {
+    KeyboardSession.shared.cloudClipboardItems().then((listing: CloudClipboardBoundListing | null): void => {
       if (request !== this.cloudRequest) {
         return;
       }
       this.cloudLoading = false;
       if (listing === null) {
-        // The field changed while the request was out; what came back was fetched for another one.
+        // The editor or login changed while the request was out; never show its rows here.
         this.cloudClips = [];
-        this.cloudStateKnown = false;
+        this.cloudState = CloudClipboardState.FAILED;
+        this.cloudStateKnown = this.cloudEditor === KeyboardSession.shared.cloudClipboardEditor()
+          && this.cloudVisible;
+        if (previousBinding.length > 0) {
+          this.clipSendTarget = '';
+          this.invalidateCloudSend();
+        }
         return;
       }
+      if (previousBinding.length > 0 && listing.binding !== previousBinding) {
+        this.clipSendTarget = '';
+        this.invalidateCloudSend();
+      }
       this.cloudClips = listing.items;
+      this.cloudBinding = listing.binding ?? '';
       this.cloudState = listing.state;
       this.cloudStateKnown = true;
     });
@@ -4986,6 +5004,7 @@ struct KeyboardView {
   private dropCloudClipboard(): void {
     this.cloudRequest++;
     this.invalidateCloudSend();
+    this.cloudBinding = '';
     this.cloudClips = [];
     this.cloudStateKnown = false;
     this.cloudLoading = false;
@@ -5044,17 +5063,18 @@ struct KeyboardView {
   }
 
   private insertCloudClip(text: string): void {
-    if (KeyboardSession.shared.insertCloudClipboard(text, this.cloudEditor)) {
-      return;
-    }
-    // The listing was fetched for a field that no longer has focus; fetch again for this one rather than paste into it.
-    this.cloudVisible = KeyboardSession.shared.cloudClipboardVisible();
-    this.dropCloudClipboard();
-    if (this.cloudVisible) {
-      this.refreshCloudClipboard();
-    } else {
-      this.clipboardTab = CLIPBOARD_TAB_LOCAL;
-    }
+    const request: number = this.cloudRequest;
+    const editor: number = this.cloudEditor;
+    const binding: string = this.cloudBinding;
+    KeyboardSession.shared.cloudClipboardBindingCurrent(binding).then((current: boolean): void => {
+      if (request !== this.cloudRequest || !this.clipboardShowing() || binding !== this.cloudBinding) return;
+      if (current && KeyboardSession.shared.insertCloudClipboard(text, editor)) return;
+      // The editor or account changed while the row was visible; replace the old listing.
+      this.cloudVisible = KeyboardSession.shared.cloudClipboardVisible();
+      this.dropCloudClipboard();
+      if (this.cloudVisible) this.refreshCloudClipboard();
+      else this.clipboardTab = CLIPBOARD_TAB_LOCAL;
+    });
   }
 
   /** A long press on a local entry offers it to the cloud clipboard; nothing is sent until the user taps the action. */
@@ -5087,16 +5107,18 @@ struct KeyboardView {
 
   private sendClipToCloud(): void {
     const text: string = this.clipSendTarget;
-    if (this.cloudSending || text.length === 0 || this.cloudSendBlock() !== null) {
+    const binding: string = this.cloudBinding;
+    if (this.cloudSending || text.length === 0 || binding.length === 0 || this.cloudSendBlock() !== null) {
       return;
     }
     const request: number = ++this.cloudSendRequest;
     this.cloudSending = true;
-    KeyboardSession.shared.sendToCloudClipboard(text).then((outcome: CloudClipboardSendOutcome): void => {
+    KeyboardSession.shared.sendToCloudClipboard(text, binding).then((outcome: CloudClipboardSendOutcome): void => {
       if (!CloudClipboardPolicy.sendCurrent(request, this.cloudSendRequest)) {
         return;
       }
       this.cloudSending = false;
+      if (binding !== this.cloudBinding) return;
       if (this.clipSendTarget === text) {
         this.clipSendTarget = '';
       }
