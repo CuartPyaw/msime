@@ -975,7 +975,7 @@ impl NineKeySession {
             .row_cache_batch();
         let mut queried = (alternatives.len() > SMALL_QUERY_KEY_BATCH)
             .then(|| HashSet::with_capacity(alternatives.len()));
-        // 接管会话已有候选缓冲，刷新时保留其容量和候选词字段的存储。
+        // 接管已清空的会话候选向量，刷新时复用行容器容量。
         let mut candidates = std::mem::take(&mut self.candidates);
         candidates.clear();
         let mut key = String::with_capacity(locked_key.len() + self.digits.len() * 4 + 1);
@@ -1467,15 +1467,17 @@ impl NineKeySession {
         };
         let prefixes = letter_prefixes(&digits, ENGLISH_PREFIX_BUDGET);
         let capacity = prefixes.len().saturating_mul(ENGLISH_LIMIT);
-        let mut words = Vec::with_capacity(capacity);
+        let mut words = Vec::new();
         for prefix in prefixes {
             for word in english.query_prefix(&prefix, ENGLISH_LIMIT) {
-                // Only a whole code that starts with the digits counts; otherwise letters beyond the expanded prefix leak in.
-                // The database lookup key is the lowercase spelling in `pinyin`; `word` is the
-                // display form and may intentionally contain punctuation or spaces (for example
-                // the custom entry `dont` displayed as `don't`).
+                // 词条必须覆盖全部输入数字，防止展开前缀后面的字母读出不匹配的词。
+                // 对照 `pinyin` 中的小写查询键；`word` 是展示形式，可以带标点或空格，
+                // 例如查询键 `dont` 可以显示为 `don't`。
                 if !word_matches_digits(&word.pinyin, &digits) {
                     continue;
+                }
+                if words.capacity() == 0 {
+                    words.reserve_exact(capacity);
                 }
                 words.push(word);
             }
@@ -3457,6 +3459,62 @@ mod tests {
             allocations <= plain_allocations,
             "九键选择带切分的音节分配多于无切分路径：{allocations} > {plain_allocations}"
         );
+    }
+
+    #[test]
+    fn english_t9_empty_matches_do_not_reserve_prefix_capacity() {
+        let fixture = fixture();
+        let mut session = open(&fixture.paths, false, EnglishInputOptions::default());
+        session.set_english_only(true);
+        session.digits = "999999".into();
+        let words = session.english_candidates(false);
+        assert!(words.is_empty());
+        assert_eq!(words.capacity(), 0);
+    }
+
+    #[test]
+    fn english_t9_filtered_matches_do_not_reserve_prefix_capacity() {
+        let fixture = fixture();
+        Connection::open(fixture.paths.dictionary(assets::ENGLISH_DICTIONARY))
+            .unwrap()
+            .execute(
+                "INSERT INTO english_words(word, display, weight) VALUES ('wwwa', '合成展示', 100)",
+                [],
+            )
+            .unwrap();
+        let mut session = open(&fixture.paths, false, EnglishInputOptions::default());
+        session.set_english_only(true);
+        session.digits = "999999".into();
+        assert!(!session
+            .open_english()
+            .unwrap()
+            .query_prefix("www", ENGLISH_LIMIT)
+            .is_empty());
+        let words = session.english_candidates(false);
+        assert!(words.is_empty());
+        assert_eq!(words.capacity(), 0);
+    }
+
+    #[test]
+    fn english_t9_hits_keep_the_original_prefix_capacity() {
+        let fixture = fixture();
+        let mut session = open(&fixture.paths, false, EnglishInputOptions::default());
+        session.set_english_only(true);
+        session.digits = "3668".into();
+        let capacity =
+            letter_prefixes(&session.digits, ENGLISH_PREFIX_BUDGET).len() * ENGLISH_LIMIT;
+        Connection::open(fixture.paths.dictionary(assets::ENGLISH_DICTIONARY))
+            .unwrap()
+            .execute(
+                "INSERT INTO english_words(word, display, weight) VALUES ('dont', '合成展示', 100)",
+                [],
+            )
+            .unwrap();
+        let words = session.english_candidates(false);
+        assert!(words
+            .iter()
+            .any(|word| word.word == "合成展示" && word.pinyin == "dont"));
+        assert_eq!(words.capacity(), capacity);
     }
 
     #[test]
