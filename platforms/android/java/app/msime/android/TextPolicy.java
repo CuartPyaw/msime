@@ -22,6 +22,13 @@ public final class TextPolicy {
         return isAsciiLetter(codePoint) || (codePoint >= '0' && codePoint <= '9');
     }
 
+    /** Return whether text is exactly a fixed number of lower-case hexadecimal digits. */
+    public static boolean isLowerHex(String value, int length) {
+        return value != null && value.length() == length
+            && value.chars().allMatch(codePoint -> codePoint >= '0' && codePoint <= '9'
+                || codePoint >= 'a' && codePoint <= 'f');
+    }
+
     /** Return whether a code point is Unicode whitespace or a Unicode space character. */
     public static boolean isSpace(int codePoint) {
         return Character.isWhitespace(codePoint) || Character.isSpaceChar(codePoint);
