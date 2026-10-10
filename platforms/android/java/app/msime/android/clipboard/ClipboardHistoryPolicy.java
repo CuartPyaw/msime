@@ -106,7 +106,7 @@ public final class ClipboardHistoryPolicy {
      */
     public static String editKey(long timestamp, String text) {
         if (text == null) throw new IllegalArgumentException("No clipboard text");
-        return Math.max(0, timestamp) + ":" + Integer.toHexString(text.hashCode()) + ":" + text.length();
+        return BoundsPolicy.nonNegative(timestamp) + ":" + Integer.toHexString(text.hashCode()) + ":" + text.length();
     }
 
     /** What to tell the user, naming the action that would let the save succeed. */
