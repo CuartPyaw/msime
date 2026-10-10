@@ -11122,6 +11122,22 @@ group("cloud clipboard items stay out of password fields and stale editors", () 
     !CloudClipboardPolicy.current(Number.NaN, Number.NaN),
     "a non-integer generation is refused",
   );
+  check(
+    CloudClipboardPolicy.canUseRows(true, CloudClipboardState.READY, "session-a", "session-a"),
+    "cloud rows remain usable for the loaded account session",
+  );
+  check(
+    !CloudClipboardPolicy.canUseRows(true, CloudClipboardState.READY, "session-a", "session-b"),
+    "stale cloud rows are unusable after an account session change",
+  );
+  check(
+    !CloudClipboardPolicy.canUseRows(true, CloudClipboardState.FAILED, "session-a", "session-a"),
+    "failed cloud listings never make rows usable",
+  );
+  check(
+    !CloudClipboardPolicy.canUseRows(false, CloudClipboardState.READY, "session-a", "session-a"),
+    "cloud rows are unusable when the editor no longer permits them",
+  );
   check(CloudClipboardPolicy.sendCurrent(4, 4), "the active send result is current");
   check(!CloudClipboardPolicy.sendCurrent(4, 5), "a cancelled send result is dropped");
   check(!CloudClipboardPolicy.sendCurrent(-1, -1), "an invalid send generation is dropped");
