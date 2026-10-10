@@ -248,7 +248,7 @@
 - TIP 进程内 host-api 的自愈失败仍写 stderr，不进 `server.log`。
 - 按方案注册多个 TSF 语言配置文件（让系统输入切换里每个方案一项）。
 - 「大写锁定时使用英文标点」（`caps_lock_ascii_punctuation`，与这一批同时在 develop 上加入）：macOS 经 `msime_client_set_caps_lock` 向会话报告大写锁定，Windows 的 TIP 和 Server 还没有接这个调用，能力位 `caps_lock_punctuation` 对 Windows 仍是 false，共享设置页在 Windows 上不显示这一项。
-- 真机验证：这一批在 macOS 上只做过 MinGW 语法检查和主机上的纯策略用例（`scripts/test-windows-native-run.py`）；徽标与特效的观感、读屏实际播报、Alt+数字是否到达按键接收器、SAPI 识别器的可用性、WinUI 设置窗口的新控件（只能用 MSBuild 编译）都还要在 Windows 上确认。
+- 真机验证：这一批的证据是 x64 GNU 交叉构建（`build-cross-container.sh`）链接通过、Wine 下的 Windows 测试除 `scripts/known-failures.txt` 登记的两项外全部通过、i686 语法检查，以及主机上的纯策略用例（`scripts/test-windows-native-run.py`），没有装到 Windows 上运行过；徽标与特效的观感、读屏实际播报、Alt+数字是否到达按键接收器、SAPI 识别器的可用性、WinUI 设置窗口的新控件（只能用 MSBuild 编译）都还要在 Windows 上确认。
 
 ## Windows 进程与协议边界
 
