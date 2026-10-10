@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.ImageViewPolicy;
 import app.msime.android.ThemeColorPolicy;
 import android.content.Context;
 import android.os.Bundle;
@@ -66,7 +67,7 @@ public final class DownloadPage extends DetailPage {
 
         FrameLayout tile = new FrameLayout(context);
         ViewPolicy.setBackground(tile, DrawablePolicy.rounded(ThemeColorPolicy.accent(context), Ui.dp(context, 12)));
-        ImageView icon = Ui.decorativeIcon(context, R.drawable.ic_ms_link, ThemeColorPolicy.onAccent(context));
+        ImageView icon = ImageViewPolicy.decorative(context, R.drawable.ic_ms_link, ThemeColorPolicy.onAccent(context));
         int iconSize = Ui.dp(context, 24);
         tile.addView(icon, Ui.squareFrameParamsPx(iconSize, Gravity.CENTER));
         int tileSize = Ui.dp(context, 44);
@@ -98,7 +99,7 @@ public final class DownloadPage extends DetailPage {
     private static GroupCard.Row row(GroupCard group, @DrawableRes int icon, String title, String subtitle) {
         GroupCard.Row row = group.value(title, subtitle, null);
         Context context = row.view().getContext();
-        ImageView image = Ui.decorativeIcon(context, icon, ThemeColorPolicy.text(context));
+        ImageView image = ImageViewPolicy.decorative(context, icon, ThemeColorPolicy.text(context));
         int size = Ui.dp(context, 24);
         LinearLayout.LayoutParams params = ViewPolicy.newSquareParamsPx(size);
         params.setMarginEnd(Ui.dp(context, 18));

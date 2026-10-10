@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.ImageViewPolicy;
 import app.msime.android.ThemeColorPolicy;
 import android.content.Context;
 import android.view.View;
@@ -333,7 +334,7 @@ final class KeyboardSheets {
             subtitle == null ? Ui.COMPACT_ROW_MIN_HEIGHT : Ui.ROW_MIN_HEIGHT);
         Ui.setRowPadding(row, context);
 
-        ImageView glyph = Ui.decorativeIcon(context, icon, ThemeColorPolicy.subText(context));
+        ImageView glyph = ImageViewPolicy.decorative(context, icon, ThemeColorPolicy.subText(context));
         LinearLayout.LayoutParams glyphParams = Ui.squareParams(context, 22);
         glyphParams.setMarginEnd(Ui.dp(context, 18));
         row.addView(glyph, glyphParams);

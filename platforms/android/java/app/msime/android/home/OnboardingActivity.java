@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.ImageViewPolicy;
 import app.msime.android.ThemeColorPolicy;
 import app.msime.android.LayoutPolicy;
 
@@ -457,7 +458,7 @@ public final class OnboardingActivity extends AppCompatActivity {
     /** Glyph, kicker, title and body: the design's 48dp glyph box, 13sp accent kicker, 32sp regular title and 16sp body, 14dp apart. */
     private void header(LinearLayout column, @DrawableRes int icon, String kicker, String title,
             String body) {
-        ImageView glyph = Ui.decorativeIcon(this, icon, ThemeColorPolicy.accent(this));
+        ImageView glyph = ImageViewPolicy.decorative(this, icon, ThemeColorPolicy.accent(this));
         glyph.setScaleType(ImageView.ScaleType.FIT_START);
         Ui.hideFromAccessibility(glyph);
         column.addView(glyph, Ui.squareParams(this, 36));
@@ -562,7 +563,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         ViewPolicy.setCenteredVertically(row);
         Ui.setSymmetricPaddingDp(row, this, 14, 12);
         ViewPolicy.setBackground(row, DrawablePolicy.rounded(ThemeColorPolicy.card(this), Ui.dp(this, 20)));
-        ImageView badge = Ui.decorativeIcon(this, icon, ThemeColorPolicy.accent(this));
+        ImageView badge = ImageViewPolicy.decorative(this, icon, ThemeColorPolicy.accent(this));
         Ui.setSymmetricPaddingDp(badge, this, 7, 7);
         ViewPolicy.setBackground(badge, DrawablePolicy.rounded(ThemeColorPolicy.accentSoft(this), Ui.dp(this, 9)));
         Ui.hideFromAccessibility(badge);

@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.ImageViewPolicy;
 import app.msime.android.ThemeColorPolicy;
 import android.content.Context;
 import android.content.Intent;
@@ -257,7 +258,7 @@ public final class ProfilePage extends DetailPage {
 
         FrameLayout avatar = new FrameLayout(context);
         avatar.addView(avatarView(context, 88, profile.displayName(), image));
-        ImageView camera = Ui.decorativeIcon(context, app.msime.android.R.drawable.ms_w5_me_camera,
+        ImageView camera = ImageViewPolicy.decorative(context, app.msime.android.R.drawable.ms_w5_me_camera,
             ThemeColorPolicy.text(context));
         GradientDrawable badge = DrawablePolicy.circle(ThemeColorPolicy.card(context));
         ViewPolicy.setBackground(camera, badge);

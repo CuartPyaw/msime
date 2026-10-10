@@ -27,7 +27,6 @@ import app.msime.android.ThemeColorPolicy;
 import app.msime.android.ViewPolicy;
 import app.msime.android.WindowInsetsPolicy;
 import androidx.annotation.ColorInt;
-import androidx.annotation.DrawableRes;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
@@ -543,32 +542,6 @@ public final class Ui {
         button.setLayoutParams(ViewPolicy.newSquareParamsPx(size));
         setSymmetricPaddingPx(button, size / 5);
         return button;
-    }
-
-    /** Create a non-interactive, accessibility-hidden image tinted for a surrounding surface. */
-    public static ImageView decorativeIcon(Context context, @DrawableRes int icon,
-                                           @ColorInt int tint) {
-        ImageView view = new ImageView(context);
-        view.setImageResource(icon);
-        ImageViewPolicy.setTint(view, tint);
-        hideFromAccessibility(view);
-        return view;
-    }
-
-    /** Create a decorative image without applying a tint. */
-    public static ImageView decorativeIcon(Context context, @DrawableRes int icon) {
-        ImageView view = new ImageView(context);
-        view.setImageResource(icon);
-        hideFromAccessibility(view);
-        return view;
-    }
-
-    /** Create a decorative image from a runtime drawable without applying a tint. */
-    public static ImageView decorativeIcon(Context context, Drawable icon) {
-        ImageView view = new ImageView(context);
-        view.setImageDrawable(icon);
-        hideFromAccessibility(view);
-        return view;
     }
 
     /** 去掉名称首尾空白后返回第一个 Unicode 码点；名称为空时返回后备值。 */
