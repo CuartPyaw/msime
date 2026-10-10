@@ -1,5 +1,7 @@
 package app.msime.android;
 
+import app.msime.android.LayoutPolicy;
+
 import android.content.Context;
 import java.io.IOException;
 import java.io.InputStream;

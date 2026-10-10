@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DimensionPolicy;
 
 import android.content.Context;
@@ -148,7 +150,7 @@ public final class SkinsPage extends ReloadingDetailPage {
         swatch.setSkin(card.skin());
         Ui.hideFromAccessibility(swatch);
         tile.addView(swatch,
-            KeyboardGeometry.frameMatchWidthHeightPx(Ui.dp(context, 76)));
+            LayoutPolicy.frameMatchWidthHeightPx(Ui.dp(context, 76)));
         cell.addView(tile, Ui.matchWidth());
 
         TextView name = Ui.centeredLabel(context, card.selected() ? "✓ " + card.title() : card.title(),
@@ -181,7 +183,7 @@ public final class SkinsPage extends ReloadingDetailPage {
         tile.addView(spark);
         TextView hint = Ui.centeredLabel(context, "描述一句话生成", 12, 400, Ui.accent(context));
         tile.addView(hint);
-        cell.addView(tile, KeyboardGeometry.matchWidthHeightPx(Ui.dp(context, 76) + Ui.dp(context, 6)));
+        cell.addView(tile, LayoutPolicy.matchWidthHeightPx(Ui.dp(context, 76) + Ui.dp(context, 6)));
         TextView name = Ui.centeredLabel(context, "AI 设计皮肤", Ui.TEXT_ROW_SUBTITLE + 1, 500,
             Ui.accent(context));
         LinearLayout.LayoutParams nameParams = Ui.matchWidth();

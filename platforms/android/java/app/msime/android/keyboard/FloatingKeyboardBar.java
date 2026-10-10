@@ -1,5 +1,7 @@
 package app.msime.android;
 
+import app.msime.android.LayoutPolicy;
+
 
 import android.annotation.SuppressLint;
 import android.content.Context;
@@ -40,8 +42,8 @@ public final class FloatingKeyboardBar extends LinearLayout {
         ViewPolicy.setCenteredVertically(this);
         grip = new Grip(context, this);
         dock = new DockButton(context);
-        addView(grip, KeyboardGeometry.weightedMatchParentParams(1f));
-        addView(dock, KeyboardGeometry.linearParamsPx(DimensionPolicy.pixels(context, 40),
+        addView(grip, LayoutPolicy.weightedMatchParentParams(1f));
+        addView(dock, LayoutPolicy.linearParamsPx(DimensionPolicy.pixels(context, 40),
             LayoutParams.MATCH_PARENT));
         ViewPolicy.bindClick(dock, () -> { if (listener != null) listener.dock(); });
     }

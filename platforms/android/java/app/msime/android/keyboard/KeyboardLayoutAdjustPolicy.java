@@ -1,5 +1,7 @@
 package app.msime.android;
 
+import app.msime.android.LayoutPolicy;
+
 /** Pure drag math for the transparent keyboard-layout adjustment surface. */
 public final class KeyboardLayoutAdjustPolicy {
     public enum Axis { HORIZONTAL, VERTICAL }

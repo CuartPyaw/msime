@@ -1,5 +1,7 @@
 package app.msime.android;
 
+import app.msime.android.LayoutPolicy;
+
 
 import android.os.SystemClock;
 import android.view.KeyEvent;
@@ -379,7 +381,7 @@ final class ImeBottomRow {
             else if (role == KeyboardKeyRole.ACCENT)
                 KeyboardGeometry.setKeyTextSize(key, 15);
             ViewPolicy.show(key);
-            s.actionRow.addView(key, KeyboardGeometry.weightedMatchParentParams(entry.weight()));
+            s.actionRow.addView(key, LayoutPolicy.weightedMatchParentParams(entry.weight()));
         }
         // The quick punctuation key hides itself when the scheme has no punctuation to offer, and
         // the loop above just told every slot it was visible.

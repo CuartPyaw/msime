@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import android.content.Context;
 import android.view.View;
 import android.view.ViewGroup;
@@ -37,7 +39,7 @@ public final class OptionSheet {
         scroll.addView(options, new ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         // 选项多到一屏放不下时，这一段滚动，标题和「取消」留在原处。
-        root.addView(scroll, KeyboardGeometry.weightedWidthParams(1f));
+        root.addView(scroll, LayoutPolicy.weightedWidthParams(1f));
 
         // 「取消」与选项之间一条页面底色的带子，代替设计里分开的两块卡片。
         root.addView(Ui.sheetSeparator(context));

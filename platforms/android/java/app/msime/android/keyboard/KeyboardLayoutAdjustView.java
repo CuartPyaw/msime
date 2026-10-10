@@ -1,5 +1,7 @@
 package app.msime.android;
 
+import app.msime.android.LayoutPolicy;
+
 
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
@@ -59,7 +61,7 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
         setContentDescription("键盘布局调整；键盘上左右拖动调整按键间距，上下拖动调整行间距");
         ViewPolicy.setBackgroundColor(this, Color.TRANSPARENT);
 
-        bar = KeyboardGeometry.row(context);
+        bar = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(bar);
         KeyboardGeometry.setSymmetricPaddingDp(bar, getContext(), 8, 4);
         bar.setContentDescription("键盘高度调整工具栏");
@@ -68,22 +70,22 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
         addView(bar, barParams());
 
         resetButton = button("恢复默认", "恢复键盘布局默认值", listener::reset);
-        bar.addView(resetButton, KeyboardGeometry.wrapMatchParentParams());
+        bar.addView(resetButton, LayoutPolicy.wrapMatchParentParams());
 
         hint = ViewPolicy.centeredText(context, null, 13);
         KeyboardGeometry.setKeyTextSize(hint, 13);
         ViewPolicy.setMaxLines(hint, 2);
         hint.setContentDescription("布局调整说明");
-        bar.addView(hint, KeyboardGeometry.weightedMatchParentParams(1));
+        bar.addView(hint, LayoutPolicy.weightedMatchParentParams(1));
 
         voiceShortcut = new Switch(context);
         voiceShortcut.setText("语音");
         voiceShortcut.setContentDescription("顶部语音入口");
         voiceShortcut.setOnCheckedChangeListener((ignored, checked) -> listener.voiceShortcut(checked));
-        bar.addView(voiceShortcut, KeyboardGeometry.wrapMatchParentParams());
+        bar.addView(voiceShortcut, LayoutPolicy.wrapMatchParentParams());
 
         Button close = button("完成", "返回键盘", listener::close);
-        bar.addView(close, KeyboardGeometry.wrapMatchParentParams());
+        bar.addView(close, LayoutPolicy.wrapMatchParentParams());
         update(KeyboardGeometry.DEFAULT_KEY_SPACING_TENTHS,
             KeyboardGeometry.DEFAULT_ROW_SPACING_TENTHS,
             KeyboardGeometry.DEFAULT_HEIGHT_ADJUSTMENT_DP, false);
@@ -215,7 +217,7 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
     }
 
     private FrameLayout.LayoutParams barParams() {
-        FrameLayout.LayoutParams params = KeyboardGeometry.frameMatchWidthHeightPx(
+        FrameLayout.LayoutParams params = LayoutPolicy.frameMatchWidthHeightPx(
             DimensionPolicy.pixels(getContext(), BAR_HEIGHT_DP));
         params.setMargins(DimensionPolicy.pixels(getContext(), SPACING_MARGIN_DP),
             DimensionPolicy.pixels(getContext(), 4), DimensionPolicy.pixels(getContext(), SPACING_MARGIN_DP), 0);

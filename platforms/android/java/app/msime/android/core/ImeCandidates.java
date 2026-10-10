@@ -1,5 +1,7 @@
 package app.msime.android;
 
+import app.msime.android.LayoutPolicy;
+
 import android.graphics.Typeface;
 import android.os.Build;
 import android.util.TypedValue;
@@ -285,9 +287,9 @@ final class ImeCandidates {
             expandedGrid = new ImeCandidateGrid(s, s.expandedCandidateScroll, true);
         CandidateWrapLayout list = expandedGrid.build(s.candidatePanelSnapshot, entries,
             "完整候选列表；" + compositionText + "；" + count + " 个候选");
-        s.expandedCandidates.addView(list, KeyboardGeometry.weightedWidthParams(1));
+        s.expandedCandidates.addView(list, LayoutPolicy.weightedWidthParams(1));
         // 底部 返回 + ⌫，各 40 dp 高、功能键底色。
-        LinearLayout footer = KeyboardGeometry.row(s);
+        LinearLayout footer = LayoutPolicy.row(s);
         KeyboardPressButton close = expandedActionButton("返回", 15, "收起候选面板", () -> {
             s.closeCandidatePanel();
             s.render();
@@ -296,12 +298,12 @@ final class ImeCandidates {
             s.closeCandidatePanel();
             s.deleteFromHandwriting();
         });
-        LinearLayout.LayoutParams closeParams = KeyboardGeometry.weightedHeightParams(s, 40, 1);
-        LinearLayout.LayoutParams deleteParams = KeyboardGeometry.weightedHeightParams(s, 40, 1);
+        LinearLayout.LayoutParams closeParams = LayoutPolicy.weightedHeightParams(s, 40, 1);
+        LinearLayout.LayoutParams deleteParams = LayoutPolicy.weightedHeightParams(s, 40, 1);
         deleteParams.setMarginStart(s.pixels(6));
         footer.addView(close, closeParams);
         footer.addView(delete, deleteParams);
-        LinearLayout.LayoutParams footerParams = KeyboardGeometry.matchWidthWrapParams();
+        LinearLayout.LayoutParams footerParams = LayoutPolicy.matchWidthWrapParams();
         footerParams.topMargin = s.pixels(6);
         s.expandedCandidates.addView(footer, footerParams);
     }

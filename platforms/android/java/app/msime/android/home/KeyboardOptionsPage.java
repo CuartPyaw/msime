@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import android.content.Context;
 import android.graphics.Color;
 import android.os.Bundle;

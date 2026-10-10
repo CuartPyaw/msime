@@ -1,5 +1,7 @@
 package app.msime.android;
 
+import app.msime.android.LayoutPolicy;
+
 import android.graphics.Color;
 import android.os.Build;
 import android.util.TypedValue;
@@ -57,21 +59,21 @@ final class ImeFunctionPanel {
     void appendMoreToolsSection(MoreToolsLayout.Section section, Button... cards) {
         if (!section.title().isEmpty()) {
             TextView label = ViewPolicy.centeredText(s, section.title(), 11);
-            s.moreToolsPanel.addView(label, KeyboardGeometry.matchWidthHeightPx(s.pixels(20)));
+            s.moreToolsPanel.addView(label, LayoutPolicy.matchWidthHeightPx(s.pixels(20)));
         }
         int columns = section.columns();
         for (int start = 0; start < cards.length; start += columns) {
-            LinearLayout row = KeyboardGeometry.row(s);
+            LinearLayout row = LayoutPolicy.row(s);
             row.setWeightSum(columns);
             for (int column = 0; column < columns; column++) {
                 int index = start + column;
                 View child = index < cards.length ? cards[index] : new View(s);
-                LinearLayout.LayoutParams params = KeyboardGeometry.weightedHeightPxParams(
+                LinearLayout.LayoutParams params = LayoutPolicy.weightedHeightPxParams(
                     s.pixels(section.height()), 1);
                 if (column > 0) params.setMarginStart(s.pixels(MoreToolsLayout.CARD_SPACING_DP));
                 row.addView(child, params);
             }
-        LinearLayout.LayoutParams rowParams = KeyboardGeometry.matchWidthHeightPx(
+        LinearLayout.LayoutParams rowParams = LayoutPolicy.matchWidthHeightPx(
             s.pixels(section.height()));
             rowParams.bottomMargin = s.pixels(MoreToolsLayout.ROW_SPACING_DP);
             s.moreToolsPanel.addView(row, rowParams);
@@ -116,7 +118,7 @@ final class ImeFunctionPanel {
         KeyboardSkin skin = s.skin;
         panel.setColors(Color.parseColor(skin.keyForeground()), Color.parseColor(skin.accent()),
             Color.parseColor(skin.background()), Color.parseColor(skin.hairline()));
-        s.moreToolsPanel.addView(panel, KeyboardGeometry.matchParentParams());
+        s.moreToolsPanel.addView(panel, LayoutPolicy.matchParentParams());
         s.imeStyler.applySkin();
     }
 
@@ -285,7 +287,7 @@ final class ImeFunctionPanel {
                     s.aiAssistChooserOpen = false;
                     renderMoreTools();
                 }));
-        LinearLayout segments = KeyboardGeometry.row(s);
+        LinearLayout segments = LayoutPolicy.row(s);
         segments.setContentDescription("AI 回复与润色");
         Button reply = segment("回复", "生成高情商回复", true, () -> {
             s.closeMoreTools();
@@ -297,14 +299,14 @@ final class ImeFunctionPanel {
                 s.imePanels.showAiPolish();
                 s.render();
             });
-        LinearLayout.LayoutParams first = KeyboardGeometry.weightedHeightPxParams(
+        LinearLayout.LayoutParams first = LayoutPolicy.weightedHeightPxParams(
             s.pixels(MoreToolsLayout.CARD_HEIGHT_DP), 1);
-        LinearLayout.LayoutParams second = KeyboardGeometry.weightedHeightPxParams(
+        LinearLayout.LayoutParams second = LayoutPolicy.weightedHeightPxParams(
             s.pixels(MoreToolsLayout.CARD_HEIGHT_DP), 1);
         second.setMarginStart(s.pixels(MoreToolsLayout.CARD_SPACING_DP));
         segments.addView(reply, first);
         segments.addView(polish, second);
-        s.moreToolsPanel.addView(segments, KeyboardGeometry.matchWidthWrapParams());
+        s.moreToolsPanel.addView(segments, LayoutPolicy.matchWidthWrapParams());
         TextView hint = ViewPolicy.textLabel(s,
             "回复：粘贴对方的话，生成几种语气的回复。润色：先选中要改的文字。", 12);
         KeyboardGeometry.setKeyTextSize(hint, 12);

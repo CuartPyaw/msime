@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DimensionPolicy;
 
 import app.msime.android.DrawablePolicy;
@@ -272,7 +274,7 @@ public final class Ui {
         View view = ViewPolicy.newColorView(context, hairline(context));
         int thin = DimensionPolicy.atLeastOnePixel(context, 0.5f);
         view.setLayoutParams(horizontal
-            ? KeyboardGeometry.matchWidthHeightPx(thin)
+            ? LayoutPolicy.matchWidthHeightPx(thin)
             : new LinearLayout.LayoutParams(thin, ViewGroup.LayoutParams.MATCH_PARENT));
         return view;
     }

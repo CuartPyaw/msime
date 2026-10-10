@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import android.content.Context;
 import android.os.Bundle;
 import android.text.InputType;
@@ -131,11 +133,11 @@ public final class ClipboardEditPage extends DetailPage {
         TextView cancel = Ui.textButton(context, editing ? "取消" : "返回", 16, 600, Ui.accent(context),
             Ui.rippleOn(context, Ui.rowBackground(context), Ui.dp(context, Ui.GROUP_RADIUS)),
             Ui.ACTION_BUTTON_MIN_HEIGHT, this::leave);
-        buttons.addView(cancel, KeyboardGeometry.weightedHeightPxParams(Ui.dp(context, Ui.ACTION_BUTTON_MIN_HEIGHT), 1f));
+        buttons.addView(cancel, LayoutPolicy.weightedHeightPxParams(Ui.dp(context, Ui.ACTION_BUTTON_MIN_HEIGHT), 1f));
         if (editing) {
             TextView primary = Ui.textButton(context, "保存", 16, 600, Ui.onAccent(context), null,
                 Ui.ACTION_BUTTON_MIN_HEIGHT, this::submit);
-            LinearLayout.LayoutParams primaryParams = KeyboardGeometry.weightedHeightPxParams(Ui.dp(context, Ui.ACTION_BUTTON_MIN_HEIGHT), 1f);
+            LinearLayout.LayoutParams primaryParams = LayoutPolicy.weightedHeightPxParams(Ui.dp(context, Ui.ACTION_BUTTON_MIN_HEIGHT), 1f);
             primaryParams.setMarginStart(Ui.dp(context, 12));
             buttons.addView(primary, primaryParams);
             save = primary;

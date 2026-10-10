@@ -1,5 +1,7 @@
 package app.msime.android;
 
+import app.msime.android.LayoutPolicy;
+
 
 import android.content.Context;
 import android.graphics.Color;
@@ -77,27 +79,27 @@ public final class KeyboardSchemeCard extends FrameLayout {
         int checkSize = DimensionPolicy.pixels(getContext(), CHECK_SIZE_DP);
         int top = DimensionPolicy.pixels(getContext(), OVERHANG_TOP_DP);
 
-        FrameLayout.LayoutParams glyphParams = KeyboardGeometry.squareFrameParamsPx(glyphSize);
+        FrameLayout.LayoutParams glyphParams = LayoutPolicy.squareFrameParamsPx(glyphSize);
         glyphParams.topMargin = top;
         cluster.addView(glyph, glyphParams);
 
-        FrameLayout.LayoutParams badgeParams = KeyboardGeometry.frameParamsPx(badgeWidth, badgeHeight);
+        FrameLayout.LayoutParams badgeParams = LayoutPolicy.frameParamsPx(badgeWidth, badgeHeight);
         badgeParams.leftMargin = glyphSize + DimensionPolicy.pixels(getContext(), 4) - badgeWidth;
         badgeParams.topMargin = top + glyphSize + DimensionPolicy.pixels(getContext(), OVERHANG_BOTTOM_DP) - badgeHeight;
         cluster.addView(badge, badgeParams);
 
-        FrameLayout.LayoutParams checkParams = KeyboardGeometry.squareFrameParamsPx(checkSize);
+        FrameLayout.LayoutParams checkParams = LayoutPolicy.squareFrameParamsPx(checkSize);
         checkParams.leftMargin = glyphSize + DimensionPolicy.pixels(getContext(), 1);
         checkCornerParams = checkParams;
-        checkBadgeParams = KeyboardGeometry.squareFrameParamsPx(checkSize);
+        checkBadgeParams = LayoutPolicy.squareFrameParamsPx(checkSize);
         checkBadgeParams.leftMargin = glyphSize + DimensionPolicy.pixels(getContext(), 4) - checkSize;
         checkBadgeParams.topMargin = top + glyphSize + DimensionPolicy.pixels(getContext(), OVERHANG_BOTTOM_DP) - checkSize;
         cluster.addView(check, checkParams);
 
-        LinearLayout column = KeyboardGeometry.column(context);
+        LinearLayout column = LayoutPolicy.column(context);
         ViewPolicy.setCenteredHorizontally(column);
 
-        LinearLayout.LayoutParams clusterParams = KeyboardGeometry.linearParamsPx(
+        LinearLayout.LayoutParams clusterParams = LayoutPolicy.linearParamsPx(
             glyphSize + DimensionPolicy.pixels(getContext(), 1) + checkSize,
             top + glyphSize + DimensionPolicy.pixels(getContext(), OVERHANG_BOTTOM_DP));
         clusterParams.gravity = Gravity.CENTER_HORIZONTAL;
@@ -105,13 +107,13 @@ public final class KeyboardSchemeCard extends FrameLayout {
         clusterParams.topMargin = DimensionPolicy.pixels(getContext(), 8) - top;
         column.addView(cluster, clusterParams);
 
-        LinearLayout.LayoutParams titleParams = KeyboardGeometry.matchWidthWrapParams();
+        LinearLayout.LayoutParams titleParams = LayoutPolicy.matchWidthWrapParams();
         titleParams.topMargin = DimensionPolicy.pixels(getContext(), 6) - DimensionPolicy.pixels(getContext(), OVERHANG_BOTTOM_DP);
         titleParams.leftMargin = DimensionPolicy.pixels(getContext(), 2);
         titleParams.rightMargin = DimensionPolicy.pixels(getContext(), 2);
         column.addView(title, titleParams);
 
-        FrameLayout.LayoutParams columnParams = KeyboardGeometry.frameMatchWidthWrapParams();
+        FrameLayout.LayoutParams columnParams = LayoutPolicy.frameMatchWidthWrapParams();
         columnParams.gravity = Gravity.CENTER_VERTICAL;
         addView(column, columnParams);
 

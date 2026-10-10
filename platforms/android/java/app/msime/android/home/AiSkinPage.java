@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DimensionPolicy;
 
 import app.msime.android.MainThreadPolicy;
@@ -306,7 +308,7 @@ public final class AiSkinPage extends DetailPage {
         preview = new KeyboardPreview(context);
         preview.setContentDescription("皮肤预览");
         stage.addView(preview,
-            KeyboardGeometry.frameMatchWidthHeightPx(Ui.dp(context, 200)));
+            LayoutPolicy.frameMatchWidthHeightPx(Ui.dp(context, 200)));
         LinearLayout overlay = Ui.column(context);
         ViewPolicy.setCentered(overlay);
         ProgressBar spinner = new ProgressBar(context);

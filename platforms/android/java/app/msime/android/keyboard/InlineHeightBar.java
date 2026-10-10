@@ -1,5 +1,7 @@
 package app.msime.android;
 
+import app.msime.android.LayoutPolicy;
+
 
 import android.annotation.SuppressLint;
 import android.content.Context;
@@ -64,12 +66,12 @@ public final class InlineHeightBar extends LinearLayout {
         KeyboardGeometry.setKeyTextSize(done, 14);
         handle = new Handle(context, this);
         int pill = DimensionPolicy.pixels(context, 32);
-        addView(cancel, KeyboardGeometry.linearParamsPx(LayoutParams.WRAP_CONTENT, pill));
-        addView(handle, KeyboardGeometry.weightedMatchParentParams(1f));
-        LinearLayout.LayoutParams resetParams = KeyboardGeometry.linearParamsPx(LayoutParams.WRAP_CONTENT, pill);
+        addView(cancel, LayoutPolicy.linearParamsPx(LayoutParams.WRAP_CONTENT, pill));
+        addView(handle, LayoutPolicy.weightedMatchParentParams(1f));
+        LinearLayout.LayoutParams resetParams = LayoutPolicy.linearParamsPx(LayoutParams.WRAP_CONTENT, pill);
         resetParams.rightMargin = DimensionPolicy.pixels(context, 4);
         addView(reset, resetParams);
-        addView(done, KeyboardGeometry.linearParamsPx(LayoutParams.WRAP_CONTENT, pill));
+        addView(done, LayoutPolicy.linearParamsPx(LayoutParams.WRAP_CONTENT, pill));
         ViewPolicy.bindClick(cancel, () -> { if (listener != null) listener.onCancel(); });
         ViewPolicy.bindClick(done, () -> { if (listener != null) listener.onDone(); });
         ViewPolicy.bindClick(reset, () -> {
