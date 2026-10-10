@@ -130,6 +130,35 @@ public final class CloudApiSmoke {
         check(sameLoginRetry.send("GET", "/v1/users/me", null, CloudApi.Auth.ACCOUNT).status() == 204,
             "a token refresh in the same login still retries");
 
+        AtomicReference<String> clipboardLogin = new AtomicReference<>("synthetic-login-a");
+        AtomicInteger clipboardDeletes = new AtomicInteger();
+        CloudApi.Tokens clipboardTokens = new CloudApi.Tokens() {
+            @Override public String token(String rejected) { return stale; }
+            @Override public String sessionId() { return clipboardLogin.get(); }
+        };
+        CloudApi clipboardTransport = new CloudApi((method, path, headers, body) -> {
+            if ("DELETE".equals(method)) clipboardDeletes.incrementAndGet();
+            return new CloudApi.Exchange(204, null, null, new byte[0]);
+        }, clipboardTokens, rejected -> "");
+        CloudApi boundClipboard = clipboardTransport.forAccountSession(
+            clipboardTransport.currentAccountSessionId());
+        CloudClipboardApi clipboardPage = new CloudClipboardApi(boundClipboard);
+        boundClipboard.send("GET", CloudClipboardApi.PATH + "?q=", null, CloudApi.Auth.ACCOUNT);
+        clipboardLogin.set("synthetic-login-b");
+        try {
+            clipboardPage.requireCurrentSession();
+            throw new AssertionError("an old clipboard row must not be copied after a new login");
+        } catch (CloudApi.Failure failure) {
+            check("session_changed".equals(failure.code), "old clipboard row rejects a new login");
+        }
+        try {
+            clipboardPage.clear();
+            throw new AssertionError("an old clipboard page must not clear the new account");
+        } catch (CloudApi.Failure failure) {
+            check("session_changed".equals(failure.code), "old clipboard page rejects a new login");
+            check(clipboardDeletes.get() == 0, "the new account receives no old-page delete");
+        }
+
         CloudApi denied = new CloudApi((method, path, headers, body) ->
             new CloudApi.Exchange(401, null, null, new byte[0]), rejected -> stale, rejected -> "");
         try {

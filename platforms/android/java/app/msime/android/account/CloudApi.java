@@ -163,6 +163,32 @@ public final class CloudApi {
         this.anonymous = anonymous;
     }
 
+    /** Identity of the currently signed-in account, captured on the calling worker thread. */
+    public String currentAccountSessionId() throws Failure {
+        String sessionId = credential(Auth.ACCOUNT, null).sessionId();
+        if (sessionId == null || sessionId.isEmpty()) throw sessionChanged();
+        return sessionId;
+    }
+
+    /** Keep every request and 401 retry on the login that supplied a settings page. */
+    public CloudApi forAccountSession(String expectedSessionId) {
+        if (expectedSessionId == null || expectedSessionId.isEmpty())
+            throw new IllegalArgumentException("account session id required");
+        Tokens bound = new Tokens() {
+            @Override public String token(String rejected) throws Exception {
+                return snapshot(rejected).token();
+            }
+
+            @Override public TokenSnapshot snapshot(String rejected) throws Exception {
+                TokenSnapshot current = account.snapshot(rejected);
+                if (!expectedSessionId.equals(current.sessionId()))
+                    throw new java.util.concurrent.CancellationException("account session changed");
+                return current;
+            }
+        };
+        return new CloudApi(transport, bound, anonymous);
+    }
+
     static Tokens accountTokens(Context application) {
         return new Tokens() {
             @Override public String token(String rejected) throws Exception {
