@@ -20,6 +20,11 @@ public final class InputSchemeTraits {
 
     private InputSchemeTraits() {}
 
+    /** Whether the expected Engine scheme owns key input outside dedicated English mode. */
+    public static boolean active(int scheme, int expectedScheme, boolean dedicatedEnglish) {
+        return scheme == expectedScheme && !dedicatedEnglish;
+    }
+
     // `is_chinese`: a Chinese scheme, the kind `last_chinese_scheme` remembers.
     public static boolean isChinese(int scheme) { return scheme == QUANPIN || scheme == SHUANGPIN || scheme == WUBI || scheme == CANTONESE || scheme == ZHUYIN || scheme == STROKE; }
 
