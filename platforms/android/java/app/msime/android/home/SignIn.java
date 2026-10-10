@@ -249,6 +249,19 @@ final class SignIn {
         GoogleSignInFlow.clearCredentialState(context);
     }
 
+    /** Clears the local login only when it is still the session that a page loaded. */
+    static boolean signOut(Context context, String expectedSessionId) {
+        synchronized (SyncSwitch.bindingLock()) {
+            try {
+                if (!expectedSessionId.equals(new BackendAccount(context).sessionId())) return false;
+                signOut(context);
+                return true;
+            } catch (Exception | LinkageError error) {
+                return false;
+            }
+        }
+    }
+
 
     /** 账号退出或替换时取消仍待激活的云端词库快照，避免下一位账号继承旧账号的词库。 */
     static void cancelPendingSnapshot(Context context, String accountId) {
