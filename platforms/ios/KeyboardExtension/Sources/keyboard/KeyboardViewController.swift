@@ -232,6 +232,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   private var backspaceRepeatTimer: Timer?
   private var didRepeatBackspace = false
   private var hasComposition = false
+  /// 组字中收到内存警告、引擎缓存还没清，等这次组字结束时清（见 `didReceiveMemoryWarning`）。
+  private var engineCacheResetPending = false
   private var pairedPunctuation = PairedPunctuationStack()
   /// Japanese conversion keeps the selected candidate in the strip until Return commits it.
   private var japaneseConversionIndex: Int?
@@ -693,9 +695,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   override func didReceiveMemoryWarning() {
     super.didReceiveMemoryWarning()
     DiagnosticLog.shared.write("memory_warning")
-    // Keyboard extensions are terminated shortly after a warning if they keep their optional
-    // panels, translation results, or Engine candidate caches. Drop everything that can be
-    // recreated while keeping the active composition and session alive.
+    // 收到警告后仍占着可选面板、释义结果或引擎候选缓存的键盘扩展很快会被系统结束。能重建的都丢掉，正在进行的组字和会话保留。
     closeKeyboardPicker()
     closeKeyboardService()
     handwriting.deactivate()
@@ -704,8 +704,21 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     candidateGlossRequestedGeneration = nil
     translations.clearCacheForMemoryPressure()
     onlineCandidates.cancel()
-    session.resetCache()
+    // 引擎清缓存后会为当前组字重查一遍候选（`reset_cache` 末尾的 `refresh_candidates`），返回的快照才是此后点选序号所对应的列表。组字中清缓存却丢掉快照，候选条和引擎是否一致就只能靠重查碰巧排出同样的结果；照「清除候选缓存」那样重画，又要在内存最紧的时候重查词图、重置候选条。组字中的缓存多半正是这次组字要用的行，清掉马上又查回来，省不下多少。所以没有组字时当场清：这时引擎没有候选，候选条上的英文联想和手写结果不归引擎管，快照里没有要画的东西；组字中只记下来，等这次组字结束（上屏或取消）时由 `render` 补清，长句组字攒下的缓存不会一直留到下一次空闲时的警告。
+    if hasComposition {
+      engineCacheResetPending = true
+    } else {
+      engineCacheResetPending = false
+      _ = session.resetCache()
+    }
     ResolvedTheme.clearCacheForMemoryPressure()
+  }
+
+  /// 补上组字中那次内存警告没清的引擎缓存。只在组字刚结束时由 `render` 调用：引擎这时没有候选，清缓存返回的快照没有要画的东西，丢掉它和空闲时的警告是同一个道理。
+  private func releaseDeferredEngineCache() {
+    guard engineCacheResetPending, !hasComposition else { return }
+    engineCacheResetPending = false
+    _ = session.resetCache()
   }
 
   /// `diagnostic_log.server` 开着时让诊断日志写到共享目录，关掉后停写；隐私模式和凭据输入框里同样停写（`KeyboardPrivacyGate` 的 `diagnosticLog`）。
@@ -5276,6 +5289,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     updateSpellingStrip()
     scheduleCandidateGlosses()
     onlineCandidates.refresh(allowed: hasFullAccess && hasComposition && !isInLocalMode)
+    if !hasComposition { releaseDeferredEngineCache() }
   }
 
   // A diagnostic means the key was handled but something behind it failed, so input keeps working
