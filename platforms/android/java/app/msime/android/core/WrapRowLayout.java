@@ -47,9 +47,9 @@ final class WrapRowLayout extends ViewGroup {
                 x = 0;
                 rowHeight = 0;
             }
-            widest = Math.max(widest, x + width);
+            widest = BoundsPolicy.atLeast(widest, x + width);
             x += width + horizontalGap;
-            rowHeight = Math.max(rowHeight, child.getMeasuredHeight());
+            rowHeight = BoundsPolicy.atLeast(rowHeight, child.getMeasuredHeight());
         }
         int width = widthMode == MeasureSpec.EXACTLY ? MeasureSpec.getSize(widthMeasureSpec)
             : widest + getPaddingLeft() + getPaddingRight();
@@ -76,7 +76,7 @@ final class WrapRowLayout extends ViewGroup {
             int childTop = getPaddingTop() + y;
             child.layout(childLeft, childTop, childLeft + width, childTop + height);
             x += width + horizontalGap;
-            rowHeight = Math.max(rowHeight, height);
+            rowHeight = BoundsPolicy.atLeast(rowHeight, height);
         }
     }
 }
