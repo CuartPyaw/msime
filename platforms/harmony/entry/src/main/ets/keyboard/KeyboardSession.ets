@@ -5483,6 +5483,11 @@ export class KeyboardSession implements HardwareKeyTarget {
         }
       }
       this.writeCommonPhrasesMarker(marker, seeded);
+      // Seeding is deliberately a sequence of independently locked native operations. The settings
+      // process may edit the document between them, so do not return the last add response as if it
+      // were the complete current list; publish a fresh locked snapshot instead.
+      document = KeyboardSession.commonPhrasesDocument(
+        await KeyboardSession.commonPhrasesCall(directory, { operation: 'load' }));
     }
     const texts: string[] = [];
     for (const phrase of document.phrases ?? []) {
