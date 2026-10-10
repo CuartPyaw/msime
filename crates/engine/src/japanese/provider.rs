@@ -114,7 +114,7 @@ impl Rows<'_> {
 }
 
 impl JapaneseProvider {
-    /// Shares the model at `model` on the first query, so sessions that never type Japanese never read the 66 MB file; a missing model leaves only the kana rows.
+    /// 构造时不读模型：完整版的每个会话都会构造这个 provider，不管用户加没加日文键盘。模型在方案切到日文时由 [`JapaneseProvider::warm_up_in_background`] 在后台读，最晚在第一个查询时读，所以从不打日文的会话不会碰这个 66 MB 的文件；模型缺失时只出假名行。
     pub fn new(model: &Path) -> Self {
         Self {
             model: model.to_path_buf(),
@@ -298,6 +298,13 @@ impl JapaneseProvider {
     /// Clears the dynamic rows and keeps the model: it is immutable and shared process-wide.
     pub fn reset_cache(&mut self) {
         self.dynamic.clear();
+    }
+
+    /// 方案切到日文时调用：本 provider 还没拿到模型，就在后台线程把它读进进程级缓存，第一个假名不必在按键线程上等它。
+    pub fn warm_up_in_background(&self) {
+        if self.dictionary.is_none() {
+            JapaneseDictionary::warm_up_in_background(&self.model);
+        }
     }
 
     fn dictionary(&mut self) -> Option<Arc<JapaneseDictionary>> {

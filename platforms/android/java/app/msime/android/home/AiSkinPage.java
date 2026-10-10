@@ -25,6 +25,7 @@ import androidx.annotation.Nullable;
 import androidx.lifecycle.ViewModel;
 import androidx.lifecycle.ViewModelProvider;
 import app.msime.android.CloudApi;
+import app.msime.android.BackendAccount;
 import app.msime.android.BitmapPolicy;
 import app.msime.android.BoundsPolicy;
 import app.msime.android.ColorPolicy;
@@ -103,6 +104,7 @@ public final class AiSkinPage extends DetailPage {
         void start(Context application, String text) {
             prompt = text;
             busy = true;
+            String expectedSessionId = new BackendAccount(application).sessionId();
             AtomicBoolean flag = new AtomicBoolean(false);
             cancelled = flag;
             // 一次生成可能要几分钟，不能占用设置页共用的那条 HostTask 线程。
@@ -110,7 +112,9 @@ public final class AiSkinPage extends DetailPage {
                 List<Result> generated = new ArrayList<>(SkinJobsApi.MAX_DESIGNS);
                 CloudApi.Failure failure = null;
                 try {
-                    for (SkinJobsApi.Proposal proposal : new SkinJobsApi(new CloudApi(application)).generate(text, flag)) {
+                    CloudApi cloud = new CloudApi(application);
+                    if (!expectedSessionId.isEmpty()) cloud = cloud.forAccountSession(expectedSessionId);
+                    for (SkinJobsApi.Proposal proposal : new SkinJobsApi(cloud).generate(text, flag)) {
                         generated.add(new Result(proposal.name(), proposal.description(), withPhoto(proposal)));
                     }
                 } catch (CloudApi.Failure error) {

@@ -23,7 +23,7 @@ public final class KoreanInputPolicy {
 
     /** Whether the Engine is composing Hangul: the Korean scheme outside dedicated English. Korean has no local modes. */
     public static boolean active(int scheme, boolean dedicatedEnglish) {
-        return scheme == KOREAN_SCHEME && !dedicatedEnglish;
+        return InputSchemeTraits.active(scheme, KOREAN_SCHEME, dedicatedEnglish);
     }
 
     /**

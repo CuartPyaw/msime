@@ -112,7 +112,7 @@ impl ProviderRegistry {
         }
     }
 
-    /// Opens what `scheme` reads before it becomes active, once per session: `msime-cantonese.db` for Cantonese, `msime-zhuyin.db` for Zhuyin and `msime-stroke.db` for Stroke, failing as `language_dictionary::open_read_only` does when the file is missing or of an unknown version. Nothing for the other schemes. The caller does not activate Zhuyin while a Zhuyin scheme holds the connection, which would open the file again. 不在 `enabled` 里的方案报 `INPUT_SCHEME_NOT_ENABLED`，什么也不打开。
+    /// Opens what `scheme` reads before it becomes active, once per session: `msime-cantonese.db` for Cantonese, `msime-zhuyin.db` for Zhuyin and `msime-stroke.db` for Stroke, failing as `language_dictionary::open_read_only` does when the file is missing or of an unknown version. 日文不打开任何东西，只在后台预热 `msime-japanese.dat`，读不到也不报错（与第一个查询读不到时一样只出假名行）。Nothing for the other schemes. The caller does not activate Zhuyin while a Zhuyin scheme holds the connection, which would open the file again. 不在 `enabled` 里的方案报 `INPUT_SCHEME_NOT_ENABLED`，什么也不打开。
     pub fn activate(&mut self, scheme: SchemeType) -> Result<()> {
         if !self.enabled.contains(scheme) {
             return Err(EngineError::invalid(diagnostics::INPUT_SCHEME_NOT_ENABLED));
@@ -127,6 +127,12 @@ impl ProviderRegistry {
         }
         if scheme == SchemeType::Stroke && self.stroke.is_none() {
             self.stroke = Some(language_dictionary::open_read_only(&self.stroke_path)?);
+        }
+        // 日文模型在后台读，不在这里等：激活发生在建会话和切方案的调用里，Android 上就是主线程。只在真切到日文时预热，构造 provider 时不读，完整版的每个用户都有这个 provider。
+        if scheme == SchemeType::JapaneseRomaji {
+            if let Some(japanese) = &self.japanese {
+                japanese.warm_up_in_background();
+            }
         }
         Ok(())
     }
@@ -900,6 +906,41 @@ mod tests {
             PathBuf::new(),
             PathBuf::new(),
         )
+    }
+
+    fn japanese_registry(enabled: SchemeSet, model: PathBuf) -> ProviderRegistry {
+        ProviderRegistry::new(
+            enabled,
+            crate::shuangpin::profile::default_profile(),
+            &RuntimePaths::default(),
+            PathBuf::new(),
+            PathBuf::new(),
+            PathBuf::new(),
+            model,
+        )
+    }
+
+    /// 切到日文时模型在后台读进进程级缓存；完整版构造 registry、激活别的方案都不碰模型文件。
+    #[test]
+    fn activating_japanese_warms_the_model_and_other_schemes_do_not() {
+        use crate::japanese::decoder::{test_model, JapaneseDictionary, SHARED_CACHE_TEST_LOCK};
+
+        let _serial = SHARED_CACHE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let directory = tempfile::tempdir().unwrap();
+        let model = directory.path().join("msime-japanese.dat");
+        std::fs::write(&model, test_model::single("甲")).unwrap();
+
+        let mut registry = japanese_registry(SchemeSet::ALL, model.clone());
+        assert!(registry.japanese.is_some());
+        registry.activate(SchemeType::Quanpin).unwrap();
+        JapaneseDictionary::wait_until_warmed(&model);
+        assert!(!JapaneseDictionary::is_shared(&model));
+
+        registry.activate(SchemeType::JapaneseRomaji).unwrap();
+        JapaneseDictionary::wait_until_warmed(&model);
+        assert!(JapaneseDictionary::is_shared(&model));
     }
 
     /// 全部方案时四个 provider 都在；只有五笔时只有五笔和混拼要用的全拼，双拼和日文都不构造；只有全拼时没有五笔。

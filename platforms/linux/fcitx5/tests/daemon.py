@@ -13,6 +13,9 @@ import dbus
 import dbus.mainloop.glib
 from gi.repository import GLib
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from host_api import ResponseDecoder
+
 
 def wait(predicate):
     deadline = time.monotonic() + 15
@@ -38,20 +41,41 @@ def main():
         host = ctypes.CDLL(str(library))
         host.msime_client_prepare_host.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
         host.msime_client_prepare_host.restype = ctypes.c_void_p
-        host.msime_client_string_free.argtypes = [ctypes.c_void_p]
+        responses = ResponseDecoder(host)
         request = json.dumps({"resources": str(resources), "state_root": str(root / "state")}).encode()
         raw = host.msime_client_prepare_host(request, len(request))
-        assert raw, "Host preparation returned no result"
-        try:
-            result = json.loads(ctypes.string_at(raw))
-        finally:
-            host.msime_client_string_free(raw)
+        result = responses.decode(raw)
         assert result["ok"], "Host preparation failed"
         options = result["value"]
+        for name in ("msime_client_load_preferences", "msime_client_save_preferences"):
+            getattr(host, name).restype = ctypes.c_void_p
+        host.msime_client_load_preferences.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
+        host.msime_client_save_preferences.argtypes = [
+            ctypes.c_char_p, ctypes.c_size_t, ctypes.c_uint64, ctypes.c_char_p, ctypes.c_size_t]
+
+        def call(raw):
+            assert raw, "Host API returned no result"
+            try:
+                reply = json.loads(ctypes.string_at(raw))
+            finally:
+                host.msime_client_string_free(raw)
+            assert reply["ok"], "Host API request failed"
+            return reply["value"]
+
+        def publish():
+            # 设置页的做法：先写偏好存储，再把同一份偏好抄进 runtime options。插件新建会话时以存储为准，只改文件的偏好不会生效。
+            store = options["preferences_directory"].encode()
+            snapshot = call(host.msime_client_load_preferences(store, len(store)))
+            revision = snapshot["revision"]
+            snapshot["preferences"] = options["preferences"]
+            document = json.dumps(snapshot).encode()
+            call(host.msime_client_save_preferences(store, len(store), revision, document, len(document)))
+            (root / "options.json").write_text(json.dumps(options))
+
         options["preferences"].update(learning=False, cloud_candidates=False)
         if "--wayland-punctuation" in sys.argv[4:]:
             options["preferences"]["usage_reporting"] = False
-        (root / "options.json").write_text(json.dumps(options))
+        publish()
         config = root / "config" / "fcitx5"
         config.mkdir(parents=True)
         (config / "profile").write_text(
@@ -128,7 +152,7 @@ def main():
                             options["preferences"].pop("show_candidate_page_number", None)
                         else:
                             options["preferences"]["show_candidate_page_number"] = show_page
-                        (root / "options.json").write_text(json.dumps(options))
+                        publish()
                         control.ReloadAddonConfig("msime")
                         panels.clear()
                         for character in "nihao":

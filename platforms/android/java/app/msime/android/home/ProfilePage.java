@@ -20,6 +20,7 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.Nullable;
 import androidx.core.content.FileProvider;
 import app.msime.android.BitmapPolicy;
+import app.msime.android.BackendAccount;
 import app.msime.android.CloudApi;
 import app.msime.android.DeviceDataApi;
 import app.msime.android.DrawablePolicy;
@@ -112,7 +113,7 @@ public final class ProfilePage extends DetailPage {
         } catch (CloudApi.Failure failure) {
             return new Loaded(null, failure, null, providers, null, "");
         }
-        bindIfNeeded(context, profile);
+        bindIfNeeded(context, profile, sessionId);
         DeviceDataApi.DataSummary data;
         try {
             data = api.dataSummary();
@@ -123,8 +124,10 @@ public final class ProfilePage extends DetailPage {
     }
 
     /** 同步状态记着的账号与服务端说的不一致（登录时没读到用户 id，或换了账号）时重新绑定；绑定换账号时会关闭同步并清空游标。 */
-    static void bindIfNeeded(Context context, DeviceDataApi.Profile profile) {
+    static void bindIfNeeded(Context context, DeviceDataApi.Profile profile, String expectedSessionId) {
         synchronized (SyncSwitch.bindingLock()) {
+            if (expectedSessionId == null || expectedSessionId.isEmpty()
+                    || !expectedSessionId.equals(new BackendAccount(context).sessionId())) return;
             String currentKind = SyncSwitch.loginKind(context);
             String kind = SyncSwitch.validLoginKind(currentKind) ? currentKind : profile.loginKind();
             if (kind.isEmpty()) return;

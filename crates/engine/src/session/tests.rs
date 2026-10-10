@@ -996,7 +996,7 @@ fn typing_at_a_caret_reuses_the_editing_text_length() {
 
     assert!(result.handled);
     assert_eq!(
-        allocations, 207,
+        allocations, 206,
         "caret insertion allocations: {allocations}"
     );
 }
@@ -1015,7 +1015,7 @@ fn selecting_a_quanpin_candidate_clones_only_needed_request_fields() {
         crate::ime::personal_rerank::allocations::count(|| session.select(index));
 
     assert_eq!(result.commit.as_deref(), Some("你好"));
-    assert_eq!(allocations, 15, "候选选择分配次数：{allocations}");
+    assert_eq!(allocations, 14, "候选选择分配次数：{allocations}");
 }
 
 #[test]
@@ -1075,7 +1075,7 @@ fn selecting_a_shuangpin_candidate_does_not_clone_the_full_request() {
         crate::ime::personal_rerank::allocations::count(|| session.select(index));
 
     assert_eq!(result.commit.as_deref(), Some("你好"));
-    assert_eq!(allocations, 24, "双拼候选选择分配次数：{allocations}");
+    assert_eq!(allocations, 23, "双拼候选选择分配次数：{allocations}");
 }
 
 #[test]
@@ -2392,6 +2392,42 @@ fn sessions_on_different_roots_stay_isolated() {
     type_text(&mut b, "kana");
     assert_eq!(words(&a)[0], "甲");
     assert_eq!(words(&b)[0], "乙");
+}
+
+/// 切到日文时模型在后台读进进程级缓存，下一个会话（Android 每个输入框一个）直接拿它；宿主清缓存（iOS 内存告警）把它放掉。
+#[test]
+fn japanese_model_outlives_sessions_until_the_host_resets_caches() {
+    use crate::japanese::decoder::{JapaneseDictionary, SHARED_CACHE_TEST_LOCK};
+
+    let _serial = SHARED_CACHE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let root = isolation_root("你", "甲");
+    let model = root.path().join(assets::JAPANESE_MODEL);
+    let mut first = root.session();
+    first.switch_scheme(SchemeType::JapaneseRomaji).unwrap();
+    JapaneseDictionary::wait_until_warmed(&model);
+    assert!(JapaneseDictionary::is_shared(&model));
+    drop(first);
+    assert!(JapaneseDictionary::is_shared(&model));
+
+    let mut second = root.session();
+    second.switch_scheme(SchemeType::JapaneseRomaji).unwrap();
+    type_text(&mut second, "kana");
+    assert_eq!(words(&second)[0], "甲");
+    second.reset_cache();
+    assert!(!JapaneseDictionary::is_shared(&model));
+    second.command(Command::Cancel);
+    type_text(&mut second, "kana");
+    assert_eq!(words(&second)[0], "甲");
+
+    // 清缓存时第二个会话还拿着模型：下一个会话拿回同一份，整个过程只读过一遍文件。
+    let mut third = root.session();
+    third.switch_scheme(SchemeType::JapaneseRomaji).unwrap();
+    JapaneseDictionary::wait_until_warmed(&model);
+    type_text(&mut third, "kana");
+    assert_eq!(words(&third)[0], "甲");
+    assert_eq!(JapaneseDictionary::load_count(&model), 1);
 }
 
 /// test_runtime_isolation.cpp:367-413: twenty threads, each with its own session on one of two roots, read only their own root's dictionary.

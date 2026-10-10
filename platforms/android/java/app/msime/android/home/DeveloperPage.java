@@ -9,6 +9,7 @@ import androidx.annotation.Nullable;
 import androidx.core.content.FileProvider;
 import app.msime.android.AndroidLocalSettings;
 import app.msime.android.AppVersionPolicy;
+import app.msime.android.BackendAccount;
 import app.msime.android.CloudApi;
 import app.msime.android.DiagnosticsApi;
 import app.msime.android.FilePolicy;
@@ -58,9 +59,14 @@ public final class DeveloperPage extends DetailPage {
     private boolean cloudLoaded;
     private boolean confirming;
     private boolean busy;
+    private long generation;
+    private String cloudAccountId = "";
+    private String cloudSessionId = "";
     /** 本次会话里拿到的完整令牌；只在内存里，离开页面就丢。 */
     @Nullable private String freshToken;
     private final Set<Integer> expanded = new HashSet<>();
+
+    private record LoadedCloud(DiagnosticsApi.State state, String accountId, String sessionId) {}
 
     @Override protected void buildContent(LinearLayout column, Bundle args) {
         this.column = column;
@@ -73,14 +79,24 @@ public final class DeveloperPage extends DetailPage {
     }
 
     @Override public void onDestroyView() {
+        generation++;
         column = null;
+        cloudAccountId = "";
+        cloudSessionId = "";
         super.onDestroyView();
     }
 
     private void reload() {
         if (getView() == null) return;
+        long request = ++generation;
+        cloud = DiagnosticsApi.State.EMPTY;
+        cloudLoaded = false;
+        cloudAccountId = "";
+        cloudSessionId = "";
+        render();
         HostTask.run(this, context -> new Object[] {HostStore.loadPreferences(context),
             AndroidLocalSettings.load(context)}, loaded -> {
+            if (request != generation || getView() == null) return;
             snapshot = loaded[0] instanceof JSONObject value ? value : null;
             if (loaded[1] instanceof AndroidLocalSettings.Snapshot settings) local = settings;
             render();
@@ -88,15 +104,41 @@ public final class DeveloperPage extends DetailPage {
         // 读云端状态是一次 HTTP 请求，走网络线程；放在共享存储的串行线程上时，网络慢的那几十秒里开关的保存都排在它后面。
         HostTask.runNetwork(this, context -> {
             try {
-                return new DiagnosticsApi(new CloudApi(context)).state();
+                String accountId = SyncSwitch.accountId(context);
+                String sessionId = new BackendAccount(context).sessionId();
+                DiagnosticsApi.State state = new DiagnosticsApi(pageCloud(context, accountId, sessionId)).state();
+                return new LoadedCloud(state, accountId, sessionId);
             } catch (CloudApi.Failure failure) {
                 return null;
             }
-        }, state -> {
-            cloudLoaded = state != null;
-            if (state != null) cloud = state;
+        }, result -> {
+            if (request != generation || getView() == null) return;
+            LoadedCloud loaded = result;
+            cloudLoaded = loaded != null;
+            if (loaded != null) {
+                cloud = loaded.state();
+                cloudAccountId = loaded.accountId();
+                cloudSessionId = loaded.sessionId();
+            }
             render();
         });
+    }
+
+    /** 把诊断页的每个请求限制在加载页面时的账号；匿名页也拒绝账号后来变成真实账号。 */
+    private static CloudApi pageCloud(Context context, String expectedAccountId, String expectedSessionId)
+            throws CloudApi.Failure {
+        String currentAccountId = SyncSwitch.accountId(context);
+        if (!expectedAccountId.isEmpty() && !expectedAccountId.equals(currentAccountId))
+            throw new CloudApi.Failure(409, "session_changed", "account changed", 0);
+        String currentSessionId = new BackendAccount(context).sessionId();
+        if (expectedSessionId.isEmpty()) {
+            if (!currentSessionId.isEmpty())
+                throw new CloudApi.Failure(409, "session_changed", "account changed", 0);
+        } else if (!expectedSessionId.equals(currentSessionId)) {
+            throw new CloudApi.Failure(409, "session_changed", "account changed", 0);
+        }
+        CloudApi cloud = new CloudApi(context);
+        return expectedSessionId.isEmpty() ? cloud : cloud.forAccountSession(expectedSessionId);
     }
 
     // ---- 渲染 ----
@@ -231,13 +273,15 @@ public final class DeveloperPage extends DetailPage {
         if (!include.any()) return;
         busy = true;
         render();
+        String expectedAccountId = cloudAccountId;
+        String expectedSessionId = cloudSessionId;
         HostTask.runNetwork(this, context -> {
             File zip = new File(diagnosticsCache(context), UPLOAD_BUNDLE);
             try {
                 String path = writeBundle(context, include, zip);
                 if (path == null) return new UploadResult(null, null, "诊断包生成失败，请重试");
                 DiagnosticsApi.Sections sections = DiagnosticsApi.readBundle(new File(path), include);
-                DiagnosticsApi api = new DiagnosticsApi(new CloudApi(context));
+                DiagnosticsApi api = new DiagnosticsApi(pageCloud(context, expectedAccountId, expectedSessionId));
                 DiagnosticsApi.Created created = api.upload(
                     PLATFORM, AppVersionPolicy.versionName(context, ""), sections, retention);
                 DiagnosticsApi.State state;
@@ -278,6 +322,8 @@ public final class DeveloperPage extends DetailPage {
             @Nullable String error) {}
 
     private void confirmDelete() {
+        String expectedAccountId = cloudAccountId;
+        String expectedSessionId = cloudSessionId;
         new MaterialAlertDialogBuilder(requireContext())
             .setTitle("删除云端日志")
             .setMessage("云端快照和访问令牌会立即删除，开发者无法再读取。")
@@ -288,7 +334,7 @@ public final class DeveloperPage extends DetailPage {
                 render();
                 HostTask.runNetwork(this, context -> {
                     try {
-                        new DiagnosticsApi(new CloudApi(context)).delete();
+                        new DiagnosticsApi(pageCloud(context, expectedAccountId, expectedSessionId)).delete();
                         return "";
                     } catch (CloudApi.Failure failure) {
                         return failureMessage(failure);
@@ -322,9 +368,11 @@ public final class DeveloperPage extends DetailPage {
     private void regenerate(Consumer<String> then) {
         busy = true;
         render();
+        String expectedAccountId = cloudAccountId;
+        String expectedSessionId = cloudSessionId;
         HostTask.runNetwork(this, context -> {
             try {
-                String token = new DiagnosticsApi(new CloudApi(context)).regenerateToken();
+                String token = new DiagnosticsApi(pageCloud(context, expectedAccountId, expectedSessionId)).regenerateToken();
                 return new String[] {token, null};
             } catch (CloudApi.Failure failure) {
                 return new String[] {null, failureMessage(failure)};

@@ -26,6 +26,10 @@ public final class TextPolicySmoke {
         check(TextPolicy.initial("", "?").equals("?")
                 && TextPolicy.initial(null, "?").equals("?"),
             "initial must use the fallback for missing or empty text");
+        check(TextPolicy.isAsciiLetter('A') && TextPolicy.isAsciiLetter('z'),
+            "ASCII letters must be recognized");
+        check(!TextPolicy.isAsciiLetter('0') && !TextPolicy.isAsciiLetter(0xff21),
+            "digits and full-width letters are not ASCII letters");
         System.out.println("Android shared text policy passed");
     }
 }

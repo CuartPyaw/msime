@@ -3180,7 +3180,7 @@ public final class MSIMEInputService extends InputMethodService {
         if (connection == null) return;
         if (directEnglishActive()) {
             char output = letterCase.usesUppercase() ? Character.toUpperCase(key) : key;
-            if (isAsciiLetter(output)) {
+            if (TextPolicy.isAsciiLetter(output)) {
                 commitEnglishLiteral(output);
                 if (letterCase.consumeLetter()) {
                     imeLetterRows.rebuildKeyRows();
@@ -3189,11 +3189,11 @@ public final class MSIMEInputService extends InputMethodService {
                 return;
             }
         }
-        if (dedicatedEnglish && !isAsciiLetter(key)) {
+        if (dedicatedEnglish && !TextPolicy.isAsciiLetter(key)) {
             commitEnglishLiteral(key);
             return;
         }
-        if (koreanSchemeActive() && isAsciiLetter(key)) {
+        if (koreanSchemeActive() && TextPolicy.isAsciiLetter(key)) {
             // Shift picks the double consonant or ㅒ ㅖ; the other keys send their lowercase letter, which types the same jamo.
             char input = KoreanKeyboardLayout.input(key, letterCase.usesUppercase());
             if (!character(input, Character.isUpperCase(input))) commitText(String.valueOf(input));
@@ -3203,7 +3203,7 @@ public final class MSIMEInputService extends InputMethodService {
             }
             return;
         }
-        if (entersHelpcode() && isAsciiLetter(key)) {
+        if (entersHelpcode() && TextPolicy.isAsciiLetter(key)) {
             character(Character.toUpperCase(key), true);
             if (letterCase.consumeLetter()) {
                 imeLetterRows.rebuildKeyRows();
@@ -3378,10 +3378,6 @@ public final class MSIMEInputService extends InputMethodService {
         } catch (Exception | LinkageError ignored) {
             clearSmartPunctuationSnapshots();
         }
-    }
-
-    private static boolean isAsciiLetter(int value) {
-        return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z');
     }
 
     private void commitEnglishLiteral(int value) {
@@ -3944,7 +3940,7 @@ public final class MSIMEInputService extends InputMethodService {
             }
             int unicode = event.getUnicodeChar();
             if (unicode >= 32 && unicode <= 126) {
-                if (isAsciiLetter(unicode)) {
+                if (TextPolicy.isAsciiLetter(unicode)) {
                     char output = letterCase.usesUppercase() || event.isShiftPressed()
                         ? Character.toUpperCase((char) unicode) : Character.toLowerCase((char) unicode);
                     commitEnglishLiteral(output);
@@ -4014,7 +4010,7 @@ public final class MSIMEInputService extends InputMethodService {
         if (keyCode == KeyEvent.KEYCODE_SPACE) return command(1) || super.onKeyDown(keyCode, event);
         if (keyCode == KeyEvent.KEYCODE_ENTER) { enter(); return true; }
         int unicode = event.getUnicodeChar();
-        if (dedicatedEnglish && unicode >= 32 && unicode <= 126 && !isAsciiLetter(unicode)) {
+        if (dedicatedEnglish && unicode >= 32 && unicode <= 126 && !TextPolicy.isAsciiLetter(unicode)) {
             commitEnglishLiteral(unicode);
             return true;
         }
@@ -6625,19 +6621,15 @@ public final class MSIMEInputService extends InputMethodService {
         return true;
     }
 
-    /** Non-interactive overlay showing the five choices while a Japanese key is being flicked. */
+    /**
+     * 日语九键按下时的五向提示，不拦截触摸、读屏不念。只画在被按的键上、比键大一圈的方框里（{@link JapaneseFlickGuideGeometry}）：中间是此刻轻点会打出的假名，左上右下四格是滑动方向上的假名，当前方向那格用强调色填满。原先五格各有一个键大、拼成的十字盖住周围 3×3 个键（#6716）。
+     */
     final class JapaneseFlickPreview extends View {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private static final int[] X_OFFSETS = {0, -1, 0, 1, 0};
-        private static final int[] Y_OFFSETS = {0, 0, -1, 0, 1};
         private final String[] labels = new String[5];
-        private int labelCount;
         private int selectedDirection;
-        private float centerX;
-        private float centerY;
-        private float cellWidth;
-        private float cellHeight;
-        private float gap;
+        private int anchorWidth;
+        private int anchorHeight;
         private String paletteKey;
         private int keyColor;
         private int accentColor;
@@ -6645,44 +6637,59 @@ public final class MSIMEInputService extends InputMethodService {
         private int onAccentColor;
         private int foregroundColor;
         private Typeface previewTypeface;
-        private final int[] rootLocation = new int[2];
+        private final int[] overlayLocation = new int[2];
         private final int[] anchorLocation = new int[2];
+        /** 提示此刻画的是哪个键；收起时为 null。 */
+        private Button owner;
 
         JapaneseFlickPreview(android.content.Context context) {
             super(context);
-            ViewPolicy.hide(this);
+            // 收起时是 INVISIBLE 不是 GONE：每个假名键按下、松开都要显隐一次，GONE 和 VISIBLE 之间切换会让整个键区重新布局，INVISIBLE 只重画。浮层铺满键区，大小不随显隐变化。
+            ViewPolicy.setInvisible(this);
             ViewPolicy.setNonInteractive(this);
             ViewPolicy.hideFromAccessibility(this);
         }
 
-        void show(Button anchor, JapaneseNineKeyLayout.Key key, int direction, FrameLayout root) {
+        /** `direction` 是手指当前的方向（0 为没滑出阈值），`tapDirection` 是此刻轻点会打出的方向，决定中间格写哪个假名。 */
+        void show(Button anchor, JapaneseNineKeyLayout.Key key, int direction, int tapDirection) {
             java.util.List<String> kana = key.kana();
-            labelCount = Math.min(labels.length, kana.size());
-            for (int index = 0; index < labelCount; index++) labels[index] = kana.get(index);
-            for (int index = labelCount; index < labels.length; index++) labels[index] = null;
-            selectedDirection = KeyboardGeometry.bounded(direction, 0, labelCount - 1);
-            root.getLocationOnScreen(rootLocation);
+            for (int index = 0; index < labels.length; index++)
+                labels[index] = index < kana.size() ? kana.get(index) : "";
+            if (tapDirection > 0 && tapDirection < kana.size() && !kana.get(tapDirection).isEmpty())
+                labels[0] = kana.get(tapDirection);
+            selectedDirection = KeyboardGeometry.bounded(direction, 0, labels.length - 1);
             anchor.getLocationOnScreen(anchorLocation);
-            centerX = anchorLocation[0] - rootLocation[0] + anchor.getWidth() / 2f;
-            centerY = anchorLocation[1] - rootLocation[1] + anchor.getHeight() / 2f;
-            cellWidth = BoundsPolicy.atLeast(anchor.getWidth(), KeyboardGeometry.pixels(getContext(), 40));
-            cellHeight = BoundsPolicy.atLeast(anchor.getHeight(), KeyboardGeometry.pixels(getContext(), 36));
-            // 五格紧挨着拼成一个十字浮层；原先各隔 6 dp、和底下的键同色同大，看起来像键盘被挤乱了，而不是一个弹框。
-            gap = 0;
-            root.bringChildToFront(this);
+            anchorWidth = anchor.getWidth();
+            anchorHeight = anchor.getHeight();
+            owner = anchor;
             ViewPolicy.show(this);
             invalidate();
         }
 
-        void hide() { ViewPolicy.hide(this); }
+        void hide() {
+            owner = null;
+            ViewPolicy.setInvisible(this);
+        }
+
+        /** 提示画的是 `anchor` 时才收起。 */
+        void hideFor(Button anchor) {
+            if (owner == anchor) hide();
+        }
+
+        boolean showing() { return getVisibility() == VISIBLE; }
+
+        boolean showingFor(Button anchor) { return owner == anchor && showing(); }
 
         @Override protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
+            if (anchorWidth <= 0 || anchorHeight <= 0) return;
             float density = KeyboardGeometry.density(getContext());
-            float textSize = KeyboardGeometry.keySp(getContext(), 24);
-            float radius = KeyboardGeometry.floatPixels(10, density);
-            float stepX = cellWidth + gap;
-            float stepY = cellHeight + gap;
+            // 位置在这里按这一帧的布局算，不在 `show` 时算：浮层原先隐藏时是 GONE、没有布局，`show` 那一刻读到的位置是 0，第一次按下时提示画到了左上角；现在隐藏是 INVISIBLE，但键区换布局、浮动键盘拖动之后仍以这一帧为准。坐标取相对浮层自己，它铺满键区，浮动键盘时键区在外框里有偏移。
+            getLocationOnScreen(overlayLocation);
+            JapaneseFlickGuideGeometry.Guide guide = JapaneseFlickGuideGeometry.layout(
+                anchorLocation[0] - overlayLocation[0], anchorLocation[1] - overlayLocation[1],
+                anchorWidth, anchorHeight, getWidth(), getHeight(),
+                KeyboardGeometry.floatPixels(4, density), KeyboardGeometry.floatPixels(18, density));
             KeyboardSkin previewSkin = imeStyler.themed(skin);
             String nextPaletteKey = previewSkin.key();
             if (!nextPaletteKey.equals(paletteKey)) {
@@ -6694,38 +6701,44 @@ public final class MSIMEInputService extends InputMethodService {
                 foregroundColor = Color.parseColor(previewSkin.keyForeground());
                 previewTypeface = previewSkin.monospaced() ? Typeface.MONOSPACE : Typeface.DEFAULT;
             }
-            // 先整体画一层投影，再盖上格子：浮层要看得出是压在键盘上面的，而不是键盘本身的一部分。
+            float radius = KeyboardGeometry.floatPixels(10, density);
+            // 底板带投影，看得出是浮在键上的提示，而不是键面本身变了样。
             paint.setStyle(Paint.Style.FILL);
             paint.setColor(keyColor);
-            paint.setShadowLayer(KeyboardGeometry.floatPixels(10, density), 0,
-                KeyboardGeometry.floatPixels(3, density), 0x40000000);
-            for (int index = 0; index < labelCount; index++) {
-                if (labels[index] == null || labels[index].isEmpty()) continue;
-                float x = centerX + X_OFFSETS[index] * stepX - cellWidth / 2;
-                float y = centerY + Y_OFFSETS[index] * stepY - cellHeight / 2;
-                canvas.drawRoundRect(x, y, x + cellWidth, y + cellHeight, radius, radius, paint);
-            }
+            paint.setShadowLayer(KeyboardGeometry.floatPixels(8, density), 0,
+                KeyboardGeometry.floatPixels(2, density), 0x40000000);
+            canvas.drawRoundRect(guide.left(), guide.top(), guide.right(), guide.bottom(), radius, radius, paint);
             paint.clearShadowLayer();
-            ViewPolicy.setTextSize(paint, textSize);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(BoundsPolicy.bounded(density, 1f, Float.MAX_VALUE));
+            paint.setColor(hairlineColor);
+            canvas.drawRoundRect(guide.left(), guide.top(), guide.right(), guide.bottom(), radius, radius, paint);
+            float cellWidth = guide.cellWidth();
+            float cellHeight = guide.cellHeight();
+            float inset = KeyboardGeometry.floatPixels(1, density);
+            float cellRadius = KeyboardGeometry.floatPixels(6, density);
+            // 方向格的字比键面小，中间格接近键面字号；都不超过格高，免得相邻两格的字挤在一起。
+            float directionSize = Math.min(KeyboardGeometry.keySp(getContext(), 15), cellHeight * 0.8f);
+            float centerSize = Math.min(KeyboardGeometry.keySp(getContext(), 22), cellHeight * 1.1f);
             ViewPolicy.setTypeface(paint, previewTypeface);
-            Paint.FontMetrics metrics = paint.getFontMetrics();
-            for (int index = 0; index < labelCount; index++) {
+            for (int index = 0; index < labels.length; index++) {
                 String label = labels[index];
                 if (label == null || label.isEmpty()) continue;
                 boolean selected = index == selectedDirection;
-                float x = centerX + X_OFFSETS[index] * stepX - cellWidth / 2;
-                float y = centerY + Y_OFFSETS[index] * stepY - cellHeight / 2;
-                paint.setStyle(Paint.Style.FILL);
-                paint.setColor(selected ? accentColor : keyColor);
-                canvas.drawRoundRect(x, y, x + cellWidth, y + cellHeight, radius, radius, paint);
-                paint.setStyle(Paint.Style.STROKE);
-                paint.setStrokeWidth(BoundsPolicy.bounded(density, 1f, Float.MAX_VALUE));
-                paint.setColor(hairlineColor);
-                canvas.drawRoundRect(x, y, x + cellWidth, y + cellHeight, radius, radius, paint);
+                float x = guide.cellLeft(index);
+                float y = guide.cellTop(index);
+                if (selected) {
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setColor(accentColor);
+                    canvas.drawRoundRect(x + inset, y + inset, x + cellWidth - inset, y + cellHeight - inset,
+                        cellRadius, cellRadius, paint);
+                }
                 paint.setStyle(Paint.Style.FILL);
                 paint.setColor(selected ? onAccentColor : foregroundColor);
                 paint.setFakeBoldText(selected);
-                // 字身中线对准格子中线。原式多减了一次 top，字整体下移大半个字高，落到格子下沿、被下一格盖住。
+                ViewPolicy.setTextSize(paint, index == 0 ? centerSize : directionSize);
+                Paint.FontMetrics metrics = paint.getFontMetrics();
+                // 字身中线对准格子中线。
                 float baseline = y + cellHeight / 2 - (metrics.ascent + metrics.descent) / 2;
                 float textWidth = paint.measureText(label);
                 canvas.drawText(label, x + (cellWidth - textWidth) / 2, baseline, paint);
