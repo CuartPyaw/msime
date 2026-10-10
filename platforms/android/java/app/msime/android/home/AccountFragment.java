@@ -41,10 +41,18 @@ public final class AccountFragment extends HomeTabFragment {
 
     /** 联网读到的：资料（读不到为 null）、头像、设备数与云剪贴板条数（读不到为 -1）、是否绑定了真实账号。 */
     private record Remote(@Nullable DeviceDataApi.Profile profile, @Nullable Bitmap avatar, int devices,
-            int clipboard, boolean realAccount) {}
+            int clipboard, boolean realAccount, String sessionId) {}
 
     @Nullable private Local local;
     @Nullable private Remote remote;
+    private long generation;
+
+    @Override public void onDestroyView() {
+        generation++;
+        local = null;
+        remote = null;
+        super.onDestroyView();
+    }
 
     @Override public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup parent,
                                        @Nullable Bundle state) {
@@ -62,14 +70,15 @@ public final class AccountFragment extends HomeTabFragment {
     @Override protected void onBecameVisible() { reload(); }
 
     private void reload() {
+        long request = ++generation;
         HostTask.run(this, context -> new Local(snapshotPreferences(context), new BackendAccount(context).signedIn(),
             SyncSwitch.enabled(context), SyncSwitch.validLoginKind(SyncSwitch.loginKind(context)),
             SyncSwitch.lastSyncedAt(context), CloudSync.statusLine(context)), state -> {
-                if (state == null) return;
+                if (state == null || request != generation || getView() == null) return;
                 local = state;
                 if (!state.signedIn()) remote = null;
                 render();
-                if (state.signedIn()) reloadRemote();
+                if (state.signedIn()) reloadRemote(request);
             });
     }
 
@@ -78,9 +87,15 @@ public final class AccountFragment extends HomeTabFragment {
         return snapshot == null ? null : snapshot.optJSONObject("preferences");
     }
 
-    private void reloadRemote() {
+    private void reloadRemote(long request) {
         HostTask.runNetwork(this, context -> {
-            DeviceDataApi api = new DeviceDataApi(context);
+            String sessionId;
+            try {
+                sessionId = new DeviceDataApi(context).currentAccountSessionId();
+            } catch (CloudApi.Failure unavailable) {
+                return new Remote(null, null, -1, -1, false, "");
+            }
+            DeviceDataApi api = new DeviceDataApi(context, sessionId);
             DeviceDataApi.Profile profile;
             try {
                 profile = api.profile();
@@ -97,16 +112,18 @@ public final class AccountFragment extends HomeTabFragment {
             }
             int clipboard;
             try {
-                BackendAccount.ClipboardPage page = new BackendAccount(context).clipboard("");
+                BackendAccount.ClipboardPage page = new BackendAccount(context).clipboard("", sessionId);
                 clipboard = page.enabled() ? page.items().size() : -1;
             } catch (Exception unavailable) {
                 clipboard = -1;
             }
             Bitmap avatar = profile == null ? null : ProfilePage.avatar(profile.avatarUrl());
             return new Remote(profile, avatar, devices, clipboard,
-                SyncSwitch.validLoginKind(SyncSwitch.loginKind(context)));
+                SyncSwitch.validLoginKind(SyncSwitch.loginKind(context)), sessionId);
         }, state -> {
-            if (state == null) return;
+            if (state == null || request != generation || getView() == null) return;
+            if (state.sessionId().isEmpty() || state.profile() == null
+                    || !state.profile().id().equals(SyncSwitch.accountId(requireContext()))) return;
             remote = state;
             Local current = local;
             if (current != null && state.realAccount() != current.realAccount()) {
