@@ -196,7 +196,7 @@ final class ImeBottomBar {
         if (window == null || !(window.peekDecorView() instanceof ViewGroup decor)) return false;
         for (int index = 0; index < decor.getChildCount(); index++) {
             View child = decor.getChildAt(index);
-            if (child.getVisibility() == View.VISIBLE
+            if (ViewPolicy.isVisible(child)
                     && "NavigationBarFrame".equals(child.getClass().getSimpleName())) return true;
         }
         return false;
@@ -239,7 +239,7 @@ final class ImeBottomBar {
             button.setIconColors(iconColor, activeIconColor);
         }
         ViewPolicy.setSelected(clipboardButton,
-            s.clipboardScroll != null && s.clipboardScroll.getVisibility() == View.VISIBLE);
+            ViewPolicy.isVisible(s.clipboardScroll));
         ViewPolicy.setTextColor(track, Color.argb(160, Color.red(iconColor), Color.green(iconColor),
             Color.blue(iconColor)));
     }
