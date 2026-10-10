@@ -36,11 +36,8 @@ public final class VoicePolishPolicy {
     /** Whether this host can run the request as configured. Same scheme rule as transcription. */
     public static boolean usable(String endpoint, String model, String token, String prompt) {
         return TextPolicy.validAuthority(endpoint, "https://", AiPolishConfiguration.MAX_ENDPOINT_LENGTH)
-            && model != null && !TextPolicy.trimmed(model).isEmpty() && TextPolicy.utf8Length(model) <= 512
-            && !TextPolicy.hasControl(model) && TextPolicy.validUnicode(model)
-            && token != null && !TextPolicy.trimmed(token).isEmpty()
-            && TextPolicy.utf8Length(token) <= 16 * 1024
-            && !TextPolicy.hasControl(token) && TextPolicy.validUnicode(token)
+            && TextPolicy.boundedNonBlank(model, 512)
+            && TextPolicy.boundedNonBlank(token, 16 * 1024)
             && prompt != null && !TextPolicy.trimmed(prompt).isEmpty()
             && TextPolicy.utf8Length(prompt) <= MAX_PROMPT_BYTES
             && !TextPolicy.hasControlExceptWhitespace(prompt)
