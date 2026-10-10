@@ -32,13 +32,13 @@ public final class FloatingKeyboardPolicy {
     public static int widthDp(int windowWidthDp) {
         if (windowWidthDp <= 0) return MIN_WIDTH_DP;
         int preferred = (int) ((long) windowWidthDp * WIDTH_PERCENT / 100);
-        int bounded = Math.max(MIN_WIDTH_DP, Math.min(MAX_WIDTH_DP, preferred));
+        int bounded = BoundsPolicy.bounded(preferred, MIN_WIDTH_DP, MAX_WIDTH_DP);
         return Math.min(bounded, windowWidthDp);
     }
 
     /** 千分比钳到 0–1000。 */
     public static int fraction(int value) {
-        return Math.max(0, Math.min(MAX_FRACTION, value));
+        return BoundsPolicy.bounded(value, 0, MAX_FRACTION);
     }
 
     /**
