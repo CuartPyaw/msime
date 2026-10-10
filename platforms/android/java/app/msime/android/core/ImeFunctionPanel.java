@@ -24,7 +24,7 @@ final class ImeFunctionPanel {
 
     /** 品牌键：面板关着时打开，开着时回到键盘。 */
     void toggleFunctionPanel() {
-        if (s.moreToolsScroll != null && s.moreToolsScroll.getVisibility() == View.VISIBLE) {
+        if (ViewPolicy.isVisible(s.moreToolsScroll)) {
             s.closeMoreTools();
             s.render();
             return;

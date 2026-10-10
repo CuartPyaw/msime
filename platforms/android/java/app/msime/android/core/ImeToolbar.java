@@ -234,7 +234,7 @@ final class ImeToolbar {
     Runnable panelToggle(java.util.function.Supplier<View> panel, Runnable show) {
         return () -> {
             View current = panel.get();
-            boolean open = current != null && current.getVisibility() == View.VISIBLE;
+            boolean open = ViewPolicy.isVisible(current);
             s.closeToolbarPanels();
             if (!open) show.run();
             s.render();
