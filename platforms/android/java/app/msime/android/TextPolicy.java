@@ -49,6 +49,11 @@ public final class TextPolicy {
         return Character.isISOControl(codePoint);
     }
 
+    /** Return whether a code point is a Unicode letter or digit. */
+    public static boolean isLetterOrDigit(int codePoint) {
+        return Character.isLetterOrDigit(codePoint);
+    }
+
     public static boolean hasControlExceptWhitespace(String value) {
         return value.codePoints().anyMatch(codePoint -> Character.isISOControl(codePoint)
             && codePoint != '\n' && codePoint != '\r' && codePoint != '\t');
