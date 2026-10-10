@@ -43,7 +43,7 @@ public class KeyHintButton extends KeyboardPressButton {
         hintText = next;
         // 键帽的上下内边距和字体留白在构造时已归零（KeyboardGeometry.normalizeKeyCap）；有提示时下边只留提示那一行，字母在剩下的高度里居中。
         boolean hinted = !hintText.isEmpty();
-        setPadding(getPaddingLeft(), hinted ? 0 : basePaddingTop, getPaddingRight(),
+        ViewPolicy.setPadding(this, getPaddingLeft(), hinted ? 0 : basePaddingTop, getPaddingRight(),
             hinted ? KeyboardGeometry.pixels(getContext(), 11) : basePaddingBottom);
         invalidate();
     }
