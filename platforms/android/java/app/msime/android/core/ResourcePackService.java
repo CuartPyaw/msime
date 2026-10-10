@@ -57,7 +57,7 @@ public final class ResourcePackService extends Service {
         }
 
         public int percent() {
-            return total <= 0 ? 0 : (int) Math.min(100, done * 100 / total);
+            return total <= 0 ? 0 : (int) BoundsPolicy.atMost(done * 100 / total, 100L);
         }
     }
 
