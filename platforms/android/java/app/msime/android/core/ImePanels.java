@@ -1781,7 +1781,7 @@ final class ImePanels {
             s.removeClipboardItem(item);
         });
         // 删除按钮比让开的距离窄一点，和卡片之间留出与卡片间距相同的空隙。
-        int trashWidth = Math.max(1, Math.round(reveal) - s.pixels(6));
+        int trashWidth = BoundsPolicy.atLeast(Math.round(reveal) - s.pixels(6), 1);
         FrameLayout.LayoutParams trashParams = new FrameLayout.LayoutParams(trashWidth,
             FrameLayout.LayoutParams.MATCH_PARENT, Gravity.END);
         cell.addView(trash, trashParams);
