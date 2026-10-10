@@ -174,6 +174,12 @@ void ApplyDeferredKeyState(DeferredShadowState &shadow, const _KEYSTROKE_STATE &
         clearComposition();
         break;
     case FUNCTION_MOVE_LEFT:
+        // 全拼和双拼的左右键可能进入整句改字，之后的空格和数字是钉住一段而不是上屏，这里推算不出来，交回真实状态。
+        if (msime::windows::scheme::EditsSentence(Global::InputModeScheme.load(std::memory_order_relaxed)))
+        {
+            shadow.projectionValid = false;
+            break;
+        }
         if (shadow.caret > 0)
         {
             --shadow.caret;
@@ -196,6 +202,11 @@ void ApplyDeferredKeyState(DeferredShadowState &shadow, const _KEYSTROKE_STATE &
         }
         break;
     case FUNCTION_MOVE_RIGHT:
+        if (msime::windows::scheme::EditsSentence(Global::InputModeScheme.load(std::memory_order_relaxed)))
+        {
+            shadow.projectionValid = false;
+            break;
+        }
         if (shadow.caret < shadow.rawInput.size())
         {
             ++shadow.caret;

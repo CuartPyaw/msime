@@ -197,6 +197,18 @@ int main() {
       confirm(prefixed);
       require(prefixed.selected_prefix().empty());
     }
+    {
+      // 整句改字的回车：TIP 已经从自己的宿主会话写出改好的整句，这里不发回复帧，只清前缀并按写进文档的那句计数；还剩组字就是坏的回复。
+      ReplyComposer conversion(42, 7);
+      const auto &reply = conversion.stage(result(1, "", "", "我去北京"), ReplyPath::ConversionCommit);
+      require(!reply.encoded && reply.next_prefix.empty());
+      require(reply.committed_text == "我去北京");
+      confirm(conversion);
+      const auto &invalid_reply =
+          conversion.stage(result(2, "jing", "jing", "北"), ReplyPath::ConversionCommit);
+      require(invalid_reply.encoded && !*invalid_reply.encoded);
+      conversion.cancel();
+    }
     ReplyComposer composer(42, 7);
     auto first = result(1, "haoma", "hao ma", "你");
     require(payload(composer.stage(first, ReplyPath::Selection)) ==

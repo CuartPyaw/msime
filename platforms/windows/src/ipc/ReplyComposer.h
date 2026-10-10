@@ -14,6 +14,8 @@ enum class ReplyPath {
   AutoCommitAndContinue,
   // A Korean key that finished a syllable. The TIP inserts that syllable from its own host session, so the reply carries at most the composition that follows it.
   SyllableCommit,
+  // 整句改字时的回车：TIP 从自己的宿主会话上屏改好的整句（MSIME_COMMIT_RAW），这边的会话做同样的事，不发回复帧。
+  ConversionCommit,
   Selection,
   Punctuation,
   CandidatePunctuationFallback,
