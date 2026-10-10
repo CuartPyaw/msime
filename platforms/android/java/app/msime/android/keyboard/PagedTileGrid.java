@@ -62,7 +62,7 @@ public final class PagedTileGrid extends ViewGroup {
     /** 页数：至少一页。 */
     public static int pageCount(int items, int perPage) {
         if (items <= 0) return 1;
-        int capacity = Math.max(1, perPage);
+        int capacity = BoundsPolicy.atLeast(perPage, 1);
         return items / capacity + (items % capacity == 0 ? 0 : 1);
     }
 
