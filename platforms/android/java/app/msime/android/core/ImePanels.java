@@ -1920,7 +1920,8 @@ final class ImePanels {
 
         /** 删除按钮只在卡片让开时显示：收着时 `INVISIBLE`，既不会在按压动画缩小卡片时从边上露出来，也点不到、读屏读不到。 */
         void showTrash(boolean shown) {
-            trash.setVisibility(shown ? View.VISIBLE : View.INVISIBLE);
+            if (shown) ViewPolicy.show(trash);
+            else ViewPolicy.setInvisible(trash);
         }
 
         private void stopSettling() {
