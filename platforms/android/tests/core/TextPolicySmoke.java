@@ -19,6 +19,9 @@ public final class TextPolicySmoke {
             "lowercase-trimmed text must use the root locale after ASCII trimming");
         check(TextPolicy.lowercaseTrimmed(null).isEmpty(),
             "lowercase-trimmed text must treat a missing value as empty");
+        check(!TextPolicy.hasText(null) && !TextPolicy.hasText("  \n\t")
+                && TextPolicy.hasText(" synthetic "),
+            "hasText must reject blank text and accept non-blank text");
         check(TextPolicy.initial("词库", "?").equals("词"),
             "initial must return the first basic-plane code point");
         check(TextPolicy.initial("\ud840\udc00字", "?").equals("\ud840\udc00"),

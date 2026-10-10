@@ -129,6 +129,11 @@ public final class TextPolicy {
         return value == null ? "" : value.trim();
     }
 
+    /** Return whether text contains at least one non-whitespace character. */
+    public static boolean hasText(String value) {
+        return !trimmed(value).isEmpty();
+    }
+
     /** Return text with Unicode whitespace stripped, treating null as empty. */
     public static String stripped(String value) {
         return value == null ? "" : value.strip();
