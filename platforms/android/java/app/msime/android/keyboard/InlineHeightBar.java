@@ -37,9 +37,9 @@ public final class InlineHeightBar extends LinearLayout {
         void onDone();
     }
 
-    public static final int MIN_PERCENT = KeyboardGeometry.MIN_HEIGHT_PERCENT;
-    public static final int MAX_PERCENT = KeyboardGeometry.MAX_HEIGHT_PERCENT;
-    public static final int DEFAULT_PERCENT = KeyboardGeometry.DEFAULT_HEIGHT_PERCENT;
+    public static final int MIN_PERCENT = KeyboardHeightPolicy.MIN_HEIGHT_PERCENT;
+    public static final int MAX_PERCENT = KeyboardHeightPolicy.MAX_HEIGHT_PERCENT;
+    public static final int DEFAULT_PERCENT = KeyboardHeightPolicy.DEFAULT_HEIGHT_PERCENT;
     public static final int ACCESSIBILITY_STEP = 5;
     public static final String DESCRIPTION = "键盘布局调整";
 

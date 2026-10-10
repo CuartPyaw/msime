@@ -157,7 +157,7 @@ final class ImeStyler {
     }
 
     void applyKeyboardHeight(View node) {
-        applyKeyboardHeight(node, KeyboardGeometry.windowHeightAdjustment(
+        applyKeyboardHeight(node, KeyboardHeightPolicy.windowHeightAdjustment(
             s.touchKeyboardHeightAdjustment, s.getResources().getConfiguration().screenHeightDp));
     }
 
@@ -169,10 +169,10 @@ final class ImeStyler {
             // 调整量由键区四行均分：底行拿它那一份，底行以上的键行和三行高的键块分摊其余部分，连底行一起占四行的整块（日语、注音九键）拿整份，各布局的总高都等于四行键高加整份调整。
             int heightDp;
             if (role.bottomRow) {
-                heightDp = role.baseHeight + KeyboardGeometry.bottomRowAdjustment(adjustment);
+                heightDp = role.baseHeight + KeyboardHeightPolicy.bottomRowAdjustment(adjustment);
             } else {
-                int share = role.withBottomRow ? adjustment : KeyboardGeometry.keyRowsAdjustment(adjustment);
-                heightDp = KeyboardGeometry.adjustedRowHeight(role.baseHeight, share, role.rowCount, role.rowIndex);
+                int share = role.withBottomRow ? adjustment : KeyboardHeightPolicy.keyRowsAdjustment(adjustment);
+                heightDp = KeyboardHeightPolicy.adjustedRowHeight(role.baseHeight, share, role.rowCount, role.rowIndex);
             }
             int height = s.pixels(heightDp);
             height += s.halfSpacingPixels(s.touchRowSpacingTenths) * 2 * role.rowSpacings;

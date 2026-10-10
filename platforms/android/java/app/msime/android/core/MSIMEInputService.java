@@ -244,7 +244,7 @@ public final class MSIMEInputService extends InputMethodService {
         CandidateAppearance.fromSkin(KeyboardSkin.system(false));
     int touchKeySpacingTenths = KeyboardSpacingPolicy.DEFAULT_KEY_SPACING_TENTHS;
     int touchRowSpacingTenths = KeyboardSpacingPolicy.DEFAULT_ROW_SPACING_TENTHS;
-    int touchKeyboardHeightAdjustment = KeyboardGeometry.DEFAULT_HEIGHT_ADJUSTMENT_DP;
+    int touchKeyboardHeightAdjustment = KeyboardHeightPolicy.DEFAULT_HEIGHT_ADJUSTMENT_DP;
     private boolean touchVoiceShortcutEnabled;
     /** 九键数字键面用计算器顺序（7 8 9 在上），来自共享偏好 `touch_number_keypad_order`。 */
     boolean numberKeypadCalculator;
@@ -545,8 +545,8 @@ public final class MSIMEInputService extends InputMethodService {
 
         /** 三行键加底行的整块：四行键高、四份行距，拿整份高度调整，总高和三行键加一条底行的布局相同。 */
         static KeyboardHeightRole threeRowsWithBottomRow() {
-            return new KeyboardHeightRole(KeyboardGeometry.KEY_ROW_HEIGHT_DP * KeyboardGeometry.KEYBOARD_ROW_COUNT,
-                1, 0, KeyboardGeometry.KEYBOARD_ROW_COUNT, false, true);
+            return new KeyboardHeightRole(KeyboardGeometry.KEY_ROW_HEIGHT_DP * KeyboardHeightPolicy.KEYBOARD_ROW_COUNT,
+                1, 0, KeyboardHeightPolicy.KEYBOARD_ROW_COUNT, false, true);
         }
     }
     private ScrollView voiceResultScroll;
@@ -1897,10 +1897,10 @@ public final class MSIMEInputService extends InputMethodService {
     /** 键盘高度：本地设置里有设计范围（-46..110）的值就用它，否则沿用共享偏好的 `touch_keyboard_height_adjustment`（-12..48）。 */
     private int heightAdjustmentFrom(JSONObject preferences) {
         if (localSettings.has(AndroidLocalSettings.KEYBOARD_HEIGHT_ADJUSTMENT)) {
-            return KeyboardGeometry.designHeightAdjustment(
+            return KeyboardHeightPolicy.designHeightAdjustment(
                 localSettings.integer(AndroidLocalSettings.KEYBOARD_HEIGHT_ADJUSTMENT));
         }
-        return KeyboardGeometry.designHeightAdjustment(preferences == null ? Integer.MIN_VALUE
+        return KeyboardHeightPolicy.designHeightAdjustment(preferences == null ? Integer.MIN_VALUE
             : NumberPolicy.strictInt(preferences, "touch_keyboard_height_adjustment", Integer.MIN_VALUE));
     }
 
@@ -5337,9 +5337,9 @@ public final class MSIMEInputService extends InputMethodService {
             voiceShortcutSwitch.setChecked(touchVoiceShortcutEnabled);
             ViewPolicy.setEnabled(voiceShortcutSwitch, settingsEditable);
             ViewPolicy.setEnabled(resetLayoutSettingsButton, settingsEditable);
-            keySpacingValue.setText(KeyboardGeometry.display(touchKeySpacingTenths) + " dp");
-            rowSpacingValue.setText(KeyboardGeometry.display(touchRowSpacingTenths) + " dp");
-            keyboardHeightValue.setText(KeyboardGeometry.displayHeight(
+            keySpacingValue.setText(KeyboardSpacingPolicy.display(touchKeySpacingTenths) + " dp");
+            rowSpacingValue.setText(KeyboardSpacingPolicy.display(touchRowSpacingTenths) + " dp");
+            keyboardHeightValue.setText(KeyboardHeightPolicy.displayHeight(
                 touchKeyboardHeightAdjustment) + " dp");
         }
         if (layoutAdjustView != null) {
@@ -5361,7 +5361,7 @@ public final class MSIMEInputService extends InputMethodService {
 
     private void previewTouchHeight(int value) {
         if (touchGeometrySaving || traditionalOutputSaving) return;
-        touchKeyboardHeightAdjustment = KeyboardGeometry.heightAdjustment(value);
+        touchKeyboardHeightAdjustment = KeyboardHeightPolicy.heightAdjustment(value);
         renderLayoutSettingsState();
         imeStyler.applyKeyboardGeometry();
     }
@@ -5384,8 +5384,8 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     private void configureHeightSlider(SeekBar slider) {
-        slider.setMin(KeyboardGeometry.MIN_HEIGHT_ADJUSTMENT_DP);
-        slider.setMax(KeyboardGeometry.MAX_HEIGHT_ADJUSTMENT_DP);
+        slider.setMin(KeyboardHeightPolicy.MIN_HEIGHT_ADJUSTMENT_DP);
+        slider.setMax(KeyboardHeightPolicy.MAX_HEIGHT_ADJUSTMENT_DP);
         slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar source, int progress, boolean fromUser) {
                 if (fromUser) {
@@ -5431,7 +5431,7 @@ public final class MSIMEInputService extends InputMethodService {
                 || preferencesSnapshot == null || preferencesDirectory.isEmpty()) return;
         touchKeySpacingTenths = KeyboardSpacingPolicy.DEFAULT_KEY_SPACING_TENTHS;
         touchRowSpacingTenths = KeyboardSpacingPolicy.DEFAULT_ROW_SPACING_TENTHS;
-        touchKeyboardHeightAdjustment = KeyboardGeometry.DEFAULT_HEIGHT_ADJUSTMENT_DP;
+        touchKeyboardHeightAdjustment = KeyboardHeightPolicy.DEFAULT_HEIGHT_ADJUSTMENT_DP;
         touchVoiceShortcutEnabled = false;
         imeStyler.applyKeyboardGeometry();
         saveTouchGeometry(true);
@@ -6881,7 +6881,7 @@ public final class MSIMEInputService extends InputMethodService {
 
             @Override public void onCancel() { finishInlineHeight(false); }
 
-            @Override public void onReset() { previewInlineHeight(KeyboardGeometry.DEFAULT_HEIGHT_PERCENT); }
+            @Override public void onReset() { previewInlineHeight(KeyboardHeightPolicy.DEFAULT_HEIGHT_PERCENT); }
 
             @Override public void onDone() { finishInlineHeight(true); }
         });
@@ -7254,15 +7254,15 @@ public final class MSIMEInputService extends InputMethodService {
         inlineHeightOriginal = touchKeyboardHeightAdjustment;
         inlineHeightActive = true;
         inlineHeightBar.setPercent(
-            KeyboardGeometry.heightAdjustmentToPercent(touchKeyboardHeightAdjustment));
+            KeyboardHeightPolicy.heightAdjustmentToPercent(touchKeyboardHeightAdjustment));
         render();
         inlineHeightBar.requestFocus();
     }
 
     private void previewInlineHeight(int percent) {
         if (!inlineHeightActive || touchGeometrySaving || traditionalOutputSaving) return;
-        touchKeyboardHeightAdjustment = KeyboardGeometry.designHeightAdjustment(
-            KeyboardGeometry.heightPercentToAdjustment(percent));
+        touchKeyboardHeightAdjustment = KeyboardHeightPolicy.designHeightAdjustment(
+            KeyboardHeightPolicy.heightPercentToAdjustment(percent));
         imeStyler.applyKeyboardGeometry();
     }
 
