@@ -6720,7 +6720,7 @@ public final class MSIMEInputService extends InputMethodService {
             float inset = KeyboardGeometry.floatPixels(1, density);
             float cellRadius = KeyboardGeometry.floatPixels(6, density);
             // 方向格的字比键面小，中间格接近键面字号；都不超过格高，免得相邻两格的字挤在一起。
-            float directionSize = Math.min(KeyboardGeometry.keySp(getContext(), 15), cellHeight * 0.8f);
+            float directionSize = BoundsPolicy.atMost(KeyboardGeometry.keySp(getContext(), 15), cellHeight * 0.8f);
             float centerSize = Math.min(KeyboardGeometry.keySp(getContext(), 22), cellHeight * 1.1f);
             ViewPolicy.setTypeface(paint, previewTypeface);
             for (int index = 0; index < labels.length; index++) {
