@@ -13,6 +13,9 @@ import dbus
 import dbus.mainloop.glib
 from gi.repository import GLib
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from host_api import ResponseDecoder
+
 
 def wait(predicate):
     deadline = time.monotonic() + 15
@@ -38,14 +41,10 @@ def main():
         host = ctypes.CDLL(str(library))
         host.msime_client_prepare_host.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
         host.msime_client_prepare_host.restype = ctypes.c_void_p
-        host.msime_client_string_free.argtypes = [ctypes.c_void_p]
+        responses = ResponseDecoder(host)
         request = json.dumps({"resources": str(resources), "state_root": str(root / "state")}).encode()
         raw = host.msime_client_prepare_host(request, len(request))
-        assert raw, "Host preparation returned no result"
-        try:
-            result = json.loads(ctypes.string_at(raw))
-        finally:
-            host.msime_client_string_free(raw)
+        result = responses.decode(raw)
         assert result["ok"], "Host preparation failed"
         options = result["value"]
         for name in ("msime_client_load_preferences", "msime_client_save_preferences"):
