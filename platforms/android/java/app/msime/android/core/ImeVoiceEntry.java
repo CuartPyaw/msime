@@ -470,7 +470,7 @@ final class ImeVoiceEntry {
         hidden.ensureCapacity(keyArea.getChildCount());
         for (int index = 0; index < keyArea.getChildCount(); index++) {
             View child = keyArea.getChildAt(index);
-            if (child.getVisibility() == View.VISIBLE) {
+            if (ViewPolicy.isVisible(child)) {
                 hidden.add(child);
                 ViewPolicy.setInvisible(child);
             }
