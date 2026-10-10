@@ -98,7 +98,12 @@ inline ConversionPreedit conversion_preedit(const nlohmann::json &view) {
   // 把标量下标换成字节偏移；超出范围时取末尾。
   const auto scalar_index = [&](const char *key) -> std::pair<std::size_t, std::size_t> {
     const auto value = view.find(key);
-    std::size_t wanted = value != view.end() && value->is_number_unsigned() ? value->get<std::size_t>() : static_cast<std::size_t>(-1);
+    // 解析出来的非负整数是无符号的，宿主自己构造的视图里是有符号的，两种都认；负数和非整数取末尾。
+    std::size_t wanted = static_cast<std::size_t>(-1);
+    if (value != view.end() && value->is_number_unsigned())
+      wanted = value->get<std::size_t>();
+    else if (value != view.end() && value->is_number_integer() && value->get<int64_t>() >= 0)
+      wanted = static_cast<std::size_t>(value->get<int64_t>());
     std::size_t bytes = 0, scalars = 0;
     while (bytes < sentence.size() && scalars < wanted) {
       ++bytes;
