@@ -2486,7 +2486,7 @@ impl Preferences {
         {
             return Err(PreferencesError::InvalidFrequency);
         }
-        if !(1..=9).contains(&self.candidate_page_size) {
+        if !(1..=MAX_CANDIDATE_PAGE_SIZE).contains(&self.candidate_page_size) {
             return Err(PreferencesError::InvalidPageSize);
         }
         if !(30..=60).contains(&self.touch_key_spacing_tenths)
@@ -2592,7 +2592,7 @@ pub enum PreferencesError {
     InvalidTencentTmt,
     #[error("NiuTrans translation credentials are invalid")]
     InvalidNiuTrans,
-    #[error("candidate page size must be between 1 and 9")]
+    #[error("candidate page size must be between 1 and 10")]
     InvalidPageSize,
     #[error("touch keyboard key spacing must be 3.0-6.0 and row spacing must be 4.0-10.0")]
     InvalidTouchKeyboardSpacing,
@@ -3247,6 +3247,9 @@ fn sweep_stale_temporaries(directory: &Path) {
 
 /// 诊断快照里替换凭据的值，与服务端校验要求的写法相同。
 pub const REDACTED: &str = "<redacted>";
+
+/// 每页候选数的上限。数字键 1–9 选前九个，第十个由 0 键选（宿主各自按键位映射）。
+pub const MAX_CANDIDATE_PAGE_SIZE: u8 = 10;
 
 /// [`Preferences::credential_slots`] 里的一个凭据字段。
 pub enum CredentialSlot<'a> {

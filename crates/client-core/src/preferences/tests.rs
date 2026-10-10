@@ -2809,7 +2809,7 @@ fn invalid_values_do_not_change_disk() {
     let dir = tempfile::tempdir().unwrap();
     let store = PreferencesStore::new(dir.path());
     let initial = store.save(0, Preferences::default()).unwrap();
-    for size in [0, 10, 255] {
+    for size in [0, 11, 255] {
         assert!(matches!(
             store.save(
                 1,
@@ -3515,7 +3515,7 @@ fn error_wordings_the_harmony_host_matches_on() {
     );
     assert_eq!(
         PreferencesError::InvalidPageSize.to_string(),
-        "candidate page size must be between 1 and 9"
+        "candidate page size must be between 1 and 10"
     );
     assert_eq!(
         PreferencesError::InvalidFrequency.to_string(),

@@ -8,19 +8,20 @@ use crate::*;
 #[no_mangle]
 pub extern "C" fn msime_client_set_candidate_page_size(handle: u64, size: u8) -> *mut c_char {
     response(|| {
-        if !(1..=9).contains(&size) {
-            return Err("candidate page size must be between 1 and 9".into());
+        if !(1..=msime_client_core::preferences::MAX_CANDIDATE_PAGE_SIZE).contains(&size) {
+            return Err("candidate page size must be between 1 and 10".into());
         }
+        let applied = host_page_size(size);
         with_session(handle, |session| {
             if session.runtime.is_idle() {
                 session
                     .runtime
-                    .set_page_size(size)
+                    .set_page_size(applied)
                     .map_err(|e| e.to_string())?;
             }
             session.page_size_override = Some(size);
             let view = session.runtime.view();
-            Ok(json!({"deferred": view.page_size != usize::from(size), "view": view}))
+            Ok(json!({"deferred": view.page_size != usize::from(applied), "view": view}))
         })
     })
 }

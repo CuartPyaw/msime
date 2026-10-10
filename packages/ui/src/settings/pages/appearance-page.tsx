@@ -78,7 +78,12 @@ export function AppearanceSettingsPage() {
           orientation: layoutFixed ? (draft.candidate_layout ?? "vertical") : ("vertical" as const),
           count: pageSizeFixed
             ? draft.candidate_page_size
-            : Math.max(...offeredCandidatePageSizes(draft.candidate_page_size)),
+            : Math.max(
+                ...offeredCandidatePageSizes(
+                  draft.candidate_page_size,
+                  host?.max_candidate_page_size,
+                ),
+              ),
         };
   return (
     <SettingsPageFieldset disabled={busy} hidden={page !== "appearance"} ariaLabel="候选窗口">
@@ -115,6 +120,7 @@ export function AppearanceSettingsPage() {
           <CandidatePageSizeSection
             value={draft.candidate_page_size}
             fixed={host?.fixed_candidate_page_size !== undefined}
+            max={host?.max_candidate_page_size}
             onChange={(candidate_page_size) =>
               appearanceActions.onPreferencesChange({ candidate_page_size })
             }

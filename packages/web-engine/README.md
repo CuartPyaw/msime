@@ -105,7 +105,7 @@ const engine = await createMsimeEngine({ scheme: "quanpin", assetBase: "/msime/a
 - `assetBase`：资源目录的 URL，相对地址按页面解析。
 - `model`：拼音方案是否下载整句模型，默认 `true`。
 - `helpcode`：辅助码方案（`HELPCODES` 里的一个名字），默认 `null`，即关闭。只对全拼和双拼起作用，其他方案忽略它、也不下载表。
-- `pageSize`：每页候选数，默认 9。
+- `pageSize`：每页候选数，1–10，默认 9。数字键 1–9 选前九个，0 选第十个。
 - `onProgress(loaded, total)`：下载进度。
 - `worker`：自定义 Worker，例如 CSP 不允许 `blob:` 时自己托管 `worker.js`。
 
