@@ -110,6 +110,17 @@ extension BackendAccountClient {
           result.revision - dictionaryRevision == Int64(result.imported) else { throw Failure(status: 502) }
     return result
   }
+  func applyResource(_ id: UUID, resourceRevision: Int, dictionaryRevision: Int64,
+                     session: BackendAccountSession,
+                     matchingUserID expected: String? = nil,
+                     matchingSessionID expectedSessionID: UUID? = nil) async throws -> ResourceApplication {
+    let identity = try await session.credentials(matchingUserID: expected, matchingSessionID: expectedSessionID)
+    return try await session.authenticated(matchingUserID: identity.userID,
+                                           matchingSessionID: identity.sessionID) { token in
+      try await applyResource(id, resourceRevision: resourceRevision,
+                              dictionaryRevision: dictionaryRevision, token: token)
+    }.value
+  }
   func saveResource(_ id: UUID, saved: Bool, token: String) async throws {
     guard Self.validResourceID(id) else { throw Failure(status: 400) }
     struct Body: Codable { let saved: Bool }
