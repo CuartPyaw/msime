@@ -151,7 +151,8 @@ pub fn test(
                 _ => translation::parse_translation_response(&body),
             }
         })
-        .filter(|text| !text.trim().is_empty());
+        .and_then(|text| translation::format_translation_gloss(&text))
+        .filter(|text| text.len() <= 4096);
     ProbeResult {
         ok: translated.is_some(),
         message: if translated.is_some() {
@@ -166,8 +167,8 @@ pub fn test(
 #[cfg(test)]
 mod tests {
     use super::*;
-    struct Fake(u16, &'static str);
-    impl Transport for Fake {
+    struct Fake<'a>(u16, &'a str);
+    impl Transport for Fake<'_> {
         fn post(&self, _: &Request) -> Option<(u16, String)> {
             Some((self.0, self.1.into()))
         }
@@ -249,6 +250,31 @@ mod tests {
             )
             .ok
         );
+    }
+
+    #[test]
+    fn translation_probe_rejects_glosses_the_host_cannot_apply() {
+        let response = |service: &str, gloss: &str| {
+            match service {
+                "translation.tencent" => json!({"Response":{"TargetTextList":[gloss]}}),
+                "translation.niutrans" => json!({"tgtText":gloss}),
+                "translation.custom" => json!({"data":gloss}),
+                _ => unreachable!(),
+            }
+            .to_string()
+        };
+        for service in [
+            "translation.tencent",
+            "translation.niutrans",
+            "translation.custom",
+        ] {
+            let at_limit = response(service, &"x".repeat(4096));
+            assert!(test(service, &config(), 0, &Fake(200, &at_limit)).ok);
+            for unusable in ["synthetic\u{0}gloss".to_owned(), "好".repeat(1366)] {
+                let body = response(service, &unusable);
+                assert!(!test(service, &config(), 0, &Fake(200, &body)).ok);
+            }
+        }
     }
 
     #[test]
