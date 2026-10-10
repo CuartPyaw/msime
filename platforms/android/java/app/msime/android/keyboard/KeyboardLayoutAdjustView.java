@@ -88,14 +88,14 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
         bar.addView(close, LayoutPolicy.wrapMatchParentParams());
         update(KeyboardSpacingPolicy.DEFAULT_KEY_SPACING_TENTHS,
             KeyboardSpacingPolicy.DEFAULT_ROW_SPACING_TENTHS,
-            KeyboardGeometry.DEFAULT_HEIGHT_ADJUSTMENT_DP, false);
+            KeyboardHeightPolicy.DEFAULT_HEIGHT_ADJUSTMENT_DP, false);
     }
 
     public void update(int keySpacing, int rowSpacing, int heightAdjustment,
             boolean voiceShortcutEnabled) {
         this.keySpacing = KeyboardSpacingPolicy.keySpacing(keySpacing);
         this.rowSpacing = KeyboardSpacingPolicy.rowSpacing(rowSpacing);
-        this.heightAdjustment = KeyboardGeometry.heightAdjustment(heightAdjustment);
+        this.heightAdjustment = KeyboardHeightPolicy.heightAdjustment(heightAdjustment);
         if (voiceShortcut.isChecked() != voiceShortcutEnabled)
             voiceShortcut.setChecked(voiceShortcutEnabled);
         updateHint(null);
@@ -154,12 +154,12 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
                     keySpacing = KeyboardLayoutAdjustPolicy.keySpacingFromDrag(
                         baseKeySpacing, translationX);
                     listener.keySpacing(keySpacing);
-                    updateHint("按键间距 " + KeyboardGeometry.display(keySpacing));
+                    updateHint("按键间距 " + KeyboardSpacingPolicy.display(keySpacing));
                 } else if (axis == KeyboardLayoutAdjustPolicy.Axis.VERTICAL) {
                     rowSpacing = KeyboardLayoutAdjustPolicy.rowSpacingFromDrag(
                         baseRowSpacing, translationY);
                     listener.rowSpacing(rowSpacing);
-                    updateHint("行间距 " + KeyboardGeometry.display(rowSpacing));
+                    updateHint("行间距 " + KeyboardSpacingPolicy.display(rowSpacing));
                 }
                 return true;
             }
@@ -185,7 +185,7 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
                     getContext(), event.getY() - downY);
                 heightAdjustment = KeyboardLayoutAdjustPolicy.heightFromDrag(baseHeight, translationY);
                 listener.height(heightAdjustment);
-                updateHint("键盘高度 " + KeyboardGeometry.displayHeight(heightAdjustment));
+                updateHint("键盘高度 " + KeyboardHeightPolicy.displayHeight(heightAdjustment));
                 return true;
             }
             case MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -247,9 +247,9 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
     }
 
     private boolean adjustHeight(int value) {
-        heightAdjustment = KeyboardGeometry.heightAdjustment(value);
+        heightAdjustment = KeyboardHeightPolicy.heightAdjustment(value);
         listener.height(heightAdjustment);
-        updateHint("键盘高度 " + KeyboardGeometry.displayHeight(heightAdjustment));
+        updateHint("键盘高度 " + KeyboardHeightPolicy.displayHeight(heightAdjustment));
         // Repeated steps coalesce into one save, the way a drag saves once when the finger lifts.
         // Saving on every step loses saves instead: a save already in flight makes the next
         // request a no-op, so the last steps -- and a reset tapped straight afterwards -- vanish.
@@ -271,8 +271,8 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
         info.setClassName("android.widget.SeekBar");
         info.setRangeInfo(AccessibilityNodeInfo.RangeInfo.obtain(
             AccessibilityNodeInfo.RangeInfo.RANGE_TYPE_INT,
-            KeyboardGeometry.MIN_HEIGHT_ADJUSTMENT_DP,
-            KeyboardGeometry.MAX_HEIGHT_ADJUSTMENT_DP,
+            KeyboardHeightPolicy.MIN_HEIGHT_ADJUSTMENT_DP,
+            KeyboardHeightPolicy.MAX_HEIGHT_ADJUSTMENT_DP,
             heightAdjustment));
     }
 }

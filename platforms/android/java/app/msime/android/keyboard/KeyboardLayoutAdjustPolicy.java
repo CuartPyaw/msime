@@ -32,10 +32,10 @@ public final class KeyboardLayoutAdjustPolicy {
     }
 
     public static int heightFromDrag(int baseAdjustment, float translationDp) {
-        if (!Float.isFinite(translationDp)) return KeyboardGeometry.heightAdjustment(baseAdjustment);
+        if (!Float.isFinite(translationDp)) return KeyboardHeightPolicy.heightAdjustment(baseAdjustment);
         int delta = Math.round(translationDp);
-        return BoundsPolicy.bounded(KeyboardGeometry.heightAdjustment(baseAdjustment) - delta,
-            KeyboardGeometry.MIN_HEIGHT_ADJUSTMENT_DP,
-            KeyboardGeometry.MAX_HEIGHT_ADJUSTMENT_DP);
+        return BoundsPolicy.bounded(KeyboardHeightPolicy.heightAdjustment(baseAdjustment) - delta,
+            KeyboardHeightPolicy.MIN_HEIGHT_ADJUSTMENT_DP,
+            KeyboardHeightPolicy.MAX_HEIGHT_ADJUSTMENT_DP);
     }
 }

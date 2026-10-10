@@ -306,7 +306,7 @@ final class ImeToolbar {
     void addInlineHeightBar(LinearLayout candidateRegion) {
         InlineHeightBar bar = new InlineHeightBar(s);
         ViewPolicy.hide(bar);
-        bar.setBasePixels(s.pixels(KeyboardGeometry.HEIGHT_PERCENT_BASE_DP));
+        bar.setBasePixels(s.pixels(KeyboardHeightPolicy.HEIGHT_PERCENT_BASE_DP));
         s.inlineHeightBar = bar;
         candidateRegion.addView(bar, LayoutPolicy.matchWidthHeightPx(
             s.pixels(KeyboardGeometry.DESIGN_TOOLBAR_ROW_HEIGHT_DP)));

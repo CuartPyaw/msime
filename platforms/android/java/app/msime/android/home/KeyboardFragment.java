@@ -348,15 +348,15 @@ public final class KeyboardFragment extends HomeTabFragment {
 
     private static String keysSummary(JSONObject preferences, AndroidLocalSettings.Snapshot local) {
         // 和键盘页一样按百分比显示：存的是 dp 调整量，MIN_VALUE 表示没有设置（即 100 %），超出范围的旧值先夹紧再换算。
-        int percent = KeyboardGeometry.heightAdjustmentToPercent(
+        int percent = KeyboardHeightPolicy.heightAdjustmentToPercent(
             local.has(AndroidLocalSettings.KEYBOARD_HEIGHT_ADJUSTMENT)
                 ? local.integer(AndroidLocalSettings.KEYBOARD_HEIGHT_ADJUSTMENT)
                 : NumberPolicy.strictInt(preferences, "touch_keyboard_height_adjustment", Integer.MIN_VALUE));
         String layout = "nine_key".equals(InputViewValuePolicy.textOr(preferences, "touch_keyboard_layout", "twenty_six_key"))
             ? "九键" : "全键盘";
-        return percent == KeyboardGeometry.DEFAULT_HEIGHT_PERCENT
+        return percent == KeyboardHeightPolicy.DEFAULT_HEIGHT_PERCENT
             ? layout + " · 标准高度"
-            : layout + " · 高度 " + KeyboardGeometry.displayPercent(percent);
+            : layout + " · 高度 " + KeyboardHeightPolicy.displayPercent(percent);
     }
 
     private static String voiceLanguage(JSONObject preferences) {

@@ -32,6 +32,10 @@ public final class KeyboardSpacingPolicy {
             DEFAULT_ROW_SPACING_TENTHS);
     }
 
+    public static String display(int tenths) {
+        return NumberPolicy.decimal1(tenths / 10.0);
+    }
+
     public static int halfGapPixels(int tenths, float density) {
         if (!Float.isFinite(density) || density <= 0) return 0;
         return BoundsPolicy.nonNegative(Math.round(tenths * density / 20f));

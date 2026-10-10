@@ -139,14 +139,14 @@ public final class KeyboardOptionsPage extends DetailPage {
                 preferences.optBoolean(ShuangpinKeyHintPolicy.PREFERENCE_KEY, true),
                 checked -> savePreference(ShuangpinKeyHintPolicy.PREFERENCE_KEY, checked));
         }
-        int height = KeyboardGeometry.heightAdjustmentToPercent(
+        int height = KeyboardHeightPolicy.heightAdjustmentToPercent(
             settings.has(AndroidLocalSettings.KEYBOARD_HEIGHT_ADJUSTMENT)
                 ? settings.integer(AndroidLocalSettings.KEYBOARD_HEIGHT_ADJUSTMENT)
                 : NumberPolicy.strictInt(preferences, "touch_keyboard_height_adjustment", Integer.MIN_VALUE));
-        layout.slider("键盘高度", KeyboardGeometry.MIN_HEIGHT_PERCENT, KeyboardGeometry.MAX_HEIGHT_PERCENT, 1, height,
+        layout.slider("键盘高度", KeyboardHeightPolicy.MIN_HEIGHT_PERCENT, KeyboardHeightPolicy.MAX_HEIGHT_PERCENT, 1, height,
             KeyboardGeometry::displayPercent,
             percent -> saveLocal(AndroidLocalSettings.KEYBOARD_HEIGHT_ADJUSTMENT,
-                KeyboardGeometry.heightPercentToAdjustment(percent)));
+                KeyboardHeightPolicy.heightPercentToAdjustment(percent)));
         layout.slider("按键间距", KeyboardSpacingPolicy.MIN_KEY_SPACING_TENTHS, KeyboardSpacingPolicy.MAX_KEY_SPACING_TENTHS, 1,
             KeyboardSpacingPolicy.keySpacing(NumberPolicy.strictInt(preferences, "touch_key_spacing_tenths", -1)),
             KeyboardGeometry::display, value -> savePreference("touch_key_spacing_tenths", value));
