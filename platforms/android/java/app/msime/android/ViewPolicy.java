@@ -224,6 +224,11 @@ public final class ViewPolicy {
         return view != null && view.getVisibility() == View.VISIBLE;
     }
 
+    /** 判断视图是否已从布局中隐藏。 */
+    public static boolean isGone(View view) {
+        return view != null && view.getVisibility() == View.GONE;
+    }
+
     /** Announce changing view content to accessibility services without interrupting the user. */
     public static void setPoliteLiveRegion(View view) {
         view.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
