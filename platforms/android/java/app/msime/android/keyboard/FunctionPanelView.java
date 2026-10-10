@@ -203,7 +203,7 @@ public final class FunctionPanelView extends LinearLayout {
         }
 
         private void configureLabelPaint(boolean on) {
-            ViewPolicy.setTextSize(textPaint, KeyboardGeometry.keySp(getContext(), LABEL_SP));
+            ViewPolicy.setTextSize(textPaint, KeyboardTypographyPolicy.keySp(getContext(), LABEL_SP));
             ViewPolicy.setTypeface(textPaint, on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
         }
 
@@ -233,7 +233,7 @@ public final class FunctionPanelView extends LinearLayout {
                 float radius = DimensionPolicy.floatPixels(getContext(), GLYPH_RADIUS_DP);
                 canvas.drawRoundRect(rect, radius, radius, boxPaint);
                 Paint glyph = textPaint;
-                ViewPolicy.setTextSize(glyph, KeyboardGeometry.keySp(getContext(), GLYPH_SP));
+                ViewPolicy.setTextSize(glyph, KeyboardTypographyPolicy.keySp(getContext(), GLYPH_SP));
                 ViewPolicy.setTypeface(glyph, Typeface.DEFAULT_BOLD);
                 glyph.setColor(color);
                 Paint.FontMetrics metrics = glyph.getFontMetrics();

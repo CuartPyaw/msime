@@ -170,7 +170,7 @@ final class ImeToolbar {
         s.hanjaButton = hanja;
         ViewPolicy.setAllCapsFalse(s.hanjaButton);
         s.hanjaButton.setText("漢");
-        KeyboardGeometry.setKeyTextSize(s.hanjaButton, 12);
+        KeyboardTypographyPolicy.setKeyTextSize(s.hanjaButton, 12);
         s.hanjaButton.setContentDescription("转换为汉字");
         ViewPolicy.hide(s.hanjaButton);
         bindToolbarAction(s.hanjaButton,
@@ -182,7 +182,7 @@ final class ImeToolbar {
         s.exitLocalModeButton = new KeyboardBorderlessButton(s);
         ViewPolicy.setAllCapsFalse(s.exitLocalModeButton);
         s.exitLocalModeButton.setText("×");
-        KeyboardGeometry.setKeyTextSize(s.exitLocalModeButton, 14);
+        KeyboardTypographyPolicy.setKeyTextSize(s.exitLocalModeButton, 14);
         s.exitLocalModeButton.setContentDescription("退出本地模式");
         ViewPolicy.clearPadding(s.exitLocalModeButton);
         s.imeStyler.styleButton(s.exitLocalModeButton, true);
@@ -203,7 +203,7 @@ final class ImeToolbar {
 
     private TextView toolbarText(float sizeSp) {
         TextView text = ViewPolicy.textLabel(s, null, sizeSp);
-        KeyboardGeometry.setKeyTextSize(text, sizeSp);
+        KeyboardTypographyPolicy.setKeyTextSize(text, sizeSp);
         ViewPolicy.clearFontPadding(text);
         return text;
     }
@@ -272,7 +272,7 @@ final class ImeToolbar {
         dismiss.setKeyboardRole(KeyboardKeyRole.GLYPH);
         ViewPolicy.setAllCapsFalse(dismiss);
         dismiss.setText("×");
-        KeyboardGeometry.setKeyTextSize(dismiss, 18);
+        KeyboardTypographyPolicy.setKeyTextSize(dismiss, 18);
         ViewPolicy.clearMinimumSize(dismiss);
         ViewPolicy.clearPadding(dismiss);
         dismiss.setContentDescription("不再显示这条复制的内容");

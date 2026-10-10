@@ -71,7 +71,7 @@ final class ImeLayoutRows {
         cancelPendingInk();
         handwritingPreferences = readHandwritingPreferences();
         s.handwritingStatus = ViewPolicy.centeredText(s, "在此手写，停笔后选字", 13);
-        KeyboardGeometry.setKeyTextSize(s.handwritingStatus, 13);
+        KeyboardTypographyPolicy.setKeyTextSize(s.handwritingStatus, 13);
         s.handwritingStatus.setContentDescription("手写状态");
         ViewPolicy.setNonInteractive(s.handwritingStatus);
 
@@ -109,7 +109,7 @@ final class ImeLayoutRows {
 
         s.handwritingDownload = new Button(s);
         ViewPolicy.setAllCapsFalse(s.handwritingDownload);
-        KeyboardGeometry.setKeyTextSize(s.handwritingDownload, KeyboardGeometry.DEFAULT_KEY_TEXT_SP);
+        KeyboardTypographyPolicy.setKeyTextSize(s.handwritingDownload, KeyboardTypographyPolicy.DEFAULT_KEY_TEXT_SP);
         ViewPolicy.setSingleLine(s.handwritingDownload);
         bindFeedbackAction(s.handwritingDownload, s::downloadHandwritingModel);
         FrameLayout.LayoutParams downloadParams = LayoutPolicy.frameMatchWidthHeightPx(s.pixels(48));
@@ -446,7 +446,7 @@ final class ImeLayoutRows {
                     StrokeKeyboardLayout.accessibilityLabel(key), () -> strokeKey(key));
                 keyButton.setContentDescription(StrokeKeyboardLayout.accessibilityLabel(key));
                 // 笔画本身的墨迹很细（一、丨、丶），按普通键面字号排只剩一道短线，字形放大，下面的名称仍是一半大小。
-                KeyboardGeometry.setKeyTextSize(keyButton, 26);
+                KeyboardTypographyPolicy.setKeyTextSize(keyButton, 26);
                 twoLineFace(keyButton, StrokeKeyboardLayout.face(key));
                 if (keyButton instanceof KeyboardPressButton press)
                     press.setKeyboardRole(KeyboardKeyRole.KEY);
@@ -498,7 +498,7 @@ final class ImeLayoutRows {
         if (key.getParent() instanceof android.view.ViewGroup previous) previous.removeView(key);
         if (key instanceof KeyboardPressButton press) press.setKeyboardRole(role);
         s.imeStyler.styleButton(key, role, s.skin);
-        if (role == KeyboardKeyRole.ACCENT) KeyboardGeometry.setKeyTextSize(key, 15);
+        if (role == KeyboardKeyRole.ACCENT) KeyboardTypographyPolicy.setKeyTextSize(key, 15);
         ViewPolicy.show(key);
         addNineKey(parent, key);
     }
@@ -526,7 +526,7 @@ final class ImeLayoutRows {
             }), tone.keyId());
             key.setContentDescription(label);
             // 声调符号本身只是一道短笔画，按默认字号画出来几乎看不见。
-            KeyboardGeometry.setKeyTextSize(key, 20);
+            KeyboardTypographyPolicy.setKeyTextSize(key, 20);
             CenteredGlyphSpan.apply(key, tone.face(), 1f);
             if (key instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.KEY);
             addNineKey(tones, key);
@@ -1226,7 +1226,7 @@ final class ImeLayoutRows {
     Button spellingColumnButton(LinearLayout column, Runnable action) {
         Button key = s.button(column, "", action);
         if (key instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.PLAIN);
-        KeyboardGeometry.setKeyTextSize(key, 14);
+        KeyboardTypographyPolicy.setKeyTextSize(key, 14);
         ViewPolicy.setSingleLine(key);
         // 最长的拼音（zhuang、shuang）在窄侧栏里等比缩小字号放下，而不是被侧栏边缘切掉（#5591）。
         ViewPolicy.setAutoSizeSp(key, 9, 14, 1);

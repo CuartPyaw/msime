@@ -25,7 +25,7 @@ public final class SpaceKeyFace extends KeyboardPressButton {
 
     public SpaceKeyFace(Context context) {
         super(context);
-        KeyboardGeometry.normalizeKeyCap(this);
+        KeyboardTypographyPolicy.normalizeKeyCap(this);
         setAllCaps(false);
         label.setTextAlign(Paint.Align.LEFT);
     }
@@ -100,7 +100,7 @@ public final class SpaceKeyFace extends KeyboardPressButton {
 
     @Override protected void onDraw(Canvas canvas) {
         if (getWidth() <= 0 || getHeight() <= 0) return;
-        ViewPolicy.setTextSize(label, KeyboardGeometry.keySp(getContext(), LABEL_SP));
+        ViewPolicy.setTextSize(label, KeyboardTypographyPolicy.keySp(getContext(), LABEL_SP));
         label.setColor(faceColor);
         boolean overlay = !transientLabel.isEmpty();
         float mic = (showsMic && !overlay)

@@ -1008,7 +1008,7 @@ final class ImePanels {
 
     private TextView aiText(CharSequence text, float sizeSp) {
         TextView view = ViewPolicy.textLabel(s, text, sizeSp);
-        KeyboardGeometry.setKeyTextSize(view, sizeSp);
+        KeyboardTypographyPolicy.setKeyTextSize(view, sizeSp);
         return view;
     }
 
@@ -1335,7 +1335,7 @@ final class ImePanels {
                 : items == null ? null : items.size();
             TextView counter = ViewPolicy.centeredText(s,
                 CloudClipboardPanelPolicy.countLabel(s.clipboardTab, count), 12);
-            KeyboardGeometry.setKeyTextSize(counter, 12);
+            KeyboardTypographyPolicy.setKeyTextSize(counter, 12);
             ViewPolicy.setMaxLinesEllipsized(counter, 1);
             String description = CloudClipboardPanelPolicy.countDescription(s.clipboardTab, count);
             if (description.isEmpty()) ViewPolicy.hideFromAccessibility(counter);
@@ -1351,7 +1351,7 @@ final class ImePanels {
         } else if (confirmingClear) {
             // 确认画在面板顶行里，不弹对话框：对话框会让输入法进程崩掉或抢走编辑器焦点，键盘随之收起（#5605）。
             TextView question = ViewPolicy.textLabel(s, "清空全部历史（含固定项）？", 13);
-            KeyboardGeometry.setKeyTextSize(question, 13);
+            KeyboardTypographyPolicy.setKeyTextSize(question, 13);
             ViewPolicy.setMaxLinesEllipsized(question, 1);
             LayoutPolicy.setHorizontalPaddingDp(question, s, 6);
             header.addView(question, LayoutPolicy.weightedZeroParams(1));
@@ -1582,7 +1582,7 @@ final class ImePanels {
             renderClipboardHistory();
         }).setContentDescription("取消分词，回到剪贴板历史");
         clipboardSegmentStatus = ViewPolicy.textLabel(s, "", 13);
-        KeyboardGeometry.setKeyTextSize(clipboardSegmentStatus, 13);
+        KeyboardTypographyPolicy.setKeyTextSize(clipboardSegmentStatus, 13);
         ViewPolicy.setMaxLinesEllipsized(clipboardSegmentStatus, 1);
         LayoutPolicy.setHorizontalPaddingDp(clipboardSegmentStatus, s, 6);
         bar.addView(clipboardSegmentStatus, LayoutPolicy.weightedZeroParams(1));
@@ -1683,7 +1683,7 @@ final class ImePanels {
 
     private TextView centeredNote(String text, float sizeSp) {
         TextView note = ViewPolicy.centeredText(s, text, sizeSp);
-        KeyboardGeometry.setKeyTextSize(note, sizeSp);
+        KeyboardTypographyPolicy.setKeyTextSize(note, sizeSp);
         return note;
     }
 

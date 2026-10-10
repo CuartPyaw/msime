@@ -63,7 +63,7 @@ public final class InlineHeightBar extends LinearLayout {
         reset = textButton(context, "重置");
         done = textButton(context, "完成");
         ViewPolicy.setTypefaceStyle(done, Typeface.BOLD);
-        KeyboardGeometry.setKeyTextSize(done, 14);
+        KeyboardTypographyPolicy.setKeyTextSize(done, 14);
         handle = new Handle(context, this);
         int pill = DimensionPolicy.pixels(context, 32);
         addView(cancel, LayoutPolicy.linearParamsPx(LayoutParams.WRAP_CONTENT, pill));
@@ -283,7 +283,7 @@ public final class InlineHeightBar extends LinearLayout {
         }
 
         @Override protected void onDraw(Canvas canvas) {
-            ViewPolicy.setTextSize(text, KeyboardGeometry.keySp(getContext(), LABEL_SP));
+            ViewPolicy.setTextSize(text, KeyboardTypographyPolicy.keySp(getContext(), LABEL_SP));
             float gap = DimensionPolicy.floatPixels(getContext(), 6);
             String caption = label(bar.percent(), bar.heightPixels);
             float scale = fitScale(text.measureText(caption), getWidth() - 2 * gap);

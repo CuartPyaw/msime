@@ -42,7 +42,7 @@ final class ImeFunctionPanel {
         boolean navigates = section == MoreToolsLayout.Section.LOCAL_INPUT_BACK;
         String label = MoreToolsLayout.icon(title) + "  " + title;
         ViewPolicy.setTextSizeLabel(card, navigates ? label + "  ›" : label, 14);
-        KeyboardGeometry.setKeyTextSize(card, 14);
+        KeyboardTypographyPolicy.setKeyTextSize(card, 14);
         if (navigates) ViewPolicy.setStartCenteredVertically(card);
         else ViewPolicy.setCentered(card);
         LayoutPolicy.setPaddingDp(card, s, 12, 5, 12, 5);
@@ -309,7 +309,7 @@ final class ImeFunctionPanel {
         s.moreToolsPanel.addView(segments, LayoutPolicy.matchWidthWrapParams());
         TextView hint = ViewPolicy.textLabel(s,
             "回复：粘贴对方的话，生成几种语气的回复。润色：先选中要改的文字。", 12);
-        KeyboardGeometry.setKeyTextSize(hint, 12);
+        KeyboardTypographyPolicy.setKeyTextSize(hint, 12);
         LayoutPolicy.setPaddingDp(hint, s, 4, 10, 4, 0);
         s.moreToolsPanel.addView(hint);
     }
@@ -317,7 +317,7 @@ final class ImeFunctionPanel {
     private Button segment(String label, String description, boolean enabled, Runnable action) {
         KeyboardPressButton button = toolButton();
         button.setText(label);
-        KeyboardGeometry.setKeyTextSize(button, 15);
+        KeyboardTypographyPolicy.setKeyTextSize(button, 15);
         button.setContentDescription(description);
         button.setKeyboardRole(KeyboardKeyRole.ACCENT);
         ViewPolicy.setEnabled(button, enabled);

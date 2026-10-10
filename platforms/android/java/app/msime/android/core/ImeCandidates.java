@@ -185,7 +185,7 @@ final class ImeCandidates {
         int labelLines = MSIMEInputService.candidateLabelLines(annotation);
         ViewPolicy.setFixedLines(button, labelLines);
         s.configureCandidateTextLayout(button, labelLines);
-        KeyboardGeometry.setKeyTextSize(button, 17);
+        KeyboardTypographyPolicy.setKeyTextSize(button, 17);
         ViewPolicy.setSelected(button, highlighted);
         expandedCells.add(button);
         ViewPolicy.setMinimumSize(button, s.pixels(64), s.pixels(44));
@@ -227,7 +227,7 @@ final class ImeCandidates {
         KeyboardPressButton button = candidateButton();
         button.setKeyboardRole(KeyboardKeyRole.ACCENT);
         ViewPolicy.setTextSizeLabel(button, label, sizeSp);
-        KeyboardGeometry.setKeyTextSize(button, sizeSp);
+        KeyboardTypographyPolicy.setKeyTextSize(button, sizeSp);
         button.setContentDescription(description);
         ViewPolicy.bindClick(button, () -> {
             s.imeKeyFeedback.playFeedback(button);

@@ -61,7 +61,7 @@ final class ImeNineKeyPanel {
         strokeColumn = LayoutPolicy.column(s);
         strokeColumn.setContentDescription("笔画筛选");
         strokeReading = ViewPolicy.centeredText(s, "", 15);
-        KeyboardGeometry.setKeyTextSize(strokeReading, 15);
+        KeyboardTypographyPolicy.setKeyTextSize(strokeReading, 15);
         ViewPolicy.setSingleLine(strokeReading);
         strokeReading.setEllipsize(TextUtils.TruncateAt.START);
         ViewPolicy.setNonInteractive(strokeReading);
@@ -118,10 +118,10 @@ final class ImeNineKeyPanel {
     private Button pressButton(String label, float sizeSp, KeyboardKeyRole role, String description,
                                Runnable action) {
         KeyboardPressButton button = ViewPolicy.newPressButton(s);
-        KeyboardGeometry.normalizeKeyCap(button);
+        KeyboardTypographyPolicy.normalizeKeyCap(button);
         button.setKeyboardRole(role);
         ViewPolicy.setTextSizeLabel(button, label, sizeSp);
-        KeyboardGeometry.setKeyTextSize(button, sizeSp);
+        KeyboardTypographyPolicy.setKeyTextSize(button, sizeSp);
         ViewPolicy.setSingleLine(button);
         button.setContentDescription(description);
         ViewPolicy.bindClick(button, () -> {
@@ -207,7 +207,7 @@ final class ImeNineKeyPanel {
         if (count == 0) {
             // 筛选可能一个候选也不剩；面板仍开着，好让用户撤掉一笔或换回全部。
             TextView empty = ViewPolicy.centeredText(s, "没有符合筛选的候选", 14);
-            KeyboardGeometry.setKeyTextSize(empty, 14);
+            KeyboardTypographyPolicy.setKeyTextSize(empty, 14);
             ViewPolicy.setNonInteractive(empty);
             candidateHolder.addView(empty, LayoutPolicy.frameMatchWidthWrapParams(Gravity.CENTER));
             return;
