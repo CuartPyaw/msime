@@ -196,6 +196,17 @@ test("the system recognizer only offers Mandarin and is given it as a locale", a
   expect(save).not.toHaveBeenCalled();
 });
 
+test("the settings scroller contains the hidden controls behind picker rows", async () => {
+  renderSettings({
+    page: "voice",
+    preferences: { voice_input: { enabled: true, language: "", asr_provider: "doubao" } },
+  });
+  await settingsFormReady();
+  // 选择行背后的原生控件是 `sr-only`（绝对定位）。滚动容器不是定位元素时，它们相对文档定位、把文档撑得比窗口高，长页面滚到底再上滑会把整个应用滑出屏幕。jsdom 不做布局，只能检查容器是定位元素。
+  const scroller = screen.getByRole("group", { name: "语音输入" }).closest("main");
+  expect(scroller?.classList.contains("relative")).toBe(true);
+});
+
 test("automatic punctuation is Doubao's and is greyed out with the reason elsewhere", async () => {
   const { save } = renderSettings({
     page: "voice",
