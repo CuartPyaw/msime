@@ -245,7 +245,7 @@ final class ImeCandidates {
             // The normal keyboard render reaches this method on every keystroke. The panel is
             // normally already hidden by closeCandidatePanel(); avoid traversing and clearing an
             // empty subtree until the next open actually needs to rebuild it.
-            if (s.expandedCandidates.getVisibility() != View.GONE) {
+            if (!ViewPolicy.isGone(s.expandedCandidates)) {
                 ViewPolicy.hide(s.expandedCandidates);
                 ViewPolicy.hide(s.expandedCandidateScroll);
             }
@@ -255,7 +255,7 @@ final class ImeCandidates {
         }
         // 全拼九键的三栏面板：选拼音、⌫、筛选换了一代候选时不收起，重新取完整候选再画；组字结束时 eligible 为假，落到下面按代次收起。
         if (s.imeNineKeyPanel.eligible() && s.imeNineKeyPanel.refreshSnapshot()) {
-            if (s.expandedCandidates.getVisibility() != View.GONE) {
+            if (!ViewPolicy.isGone(s.expandedCandidates)) {
                 s.expandedCandidates.removeAllViews();
                 ViewPolicy.hide(s.expandedCandidates);
                 ViewPolicy.hide(s.expandedCandidateScroll);

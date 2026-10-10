@@ -55,7 +55,7 @@ final class ImeFrame {
             boolean anyVisible = false;
             if (keys != null) {
                 for (int index = 0; index < keys.getChildCount(); index++) {
-                    if (keys.getChildAt(index).getVisibility() != View.GONE) {
+                    if (!ViewPolicy.isGone(keys.getChildAt(index))) {
                         anyVisible = true;
                         break;
                     }

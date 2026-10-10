@@ -240,7 +240,7 @@ final class ImeLetterRows {
     /** 一个子视图在分离计算里的份额：按渲染后的最终可见状态计，隐藏的记 0；微软双拼的 `;` 键在建行时还没被渲染校正，按 {@link #microsoftTenKeys} 计。 */
     private float splitWeight(View child) {
         if (child == s.microsoftFinalKey) return microsoftTenKeys() ? 1f : 0f;
-        if (child.getVisibility() == View.GONE) return 0f;
+        if (ViewPolicy.isGone(child)) return 0f;
         return child.getLayoutParams() instanceof LinearLayout.LayoutParams params ? params.weight : 0f;
     }
 
