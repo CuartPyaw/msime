@@ -324,6 +324,11 @@ public enum KeyboardScheme {
         return new PreferenceMapping(scheme, lastChinese, profile, touchKeyboardLayout);
     }
 
+    /** 中文以外的语言键盘：日语、韩语、越南语和藏文。手写跑的是中文方案，不算。中英键开了「轮换其他语言」时按启用顺序轮到它们（{@link LanguageKeyCyclePolicy}）。 */
+    public boolean otherLanguage() {
+        return this != HANDWRITING && !isChineseScheme(engineScheme);
+    }
+
     private static boolean isChineseScheme(String value) {
         return "quanpin".equals(value) || "shuangpin".equals(value) || "wubi".equals(value)
             || "cantonese".equals(value) || "zhuyin".equals(value) || "stroke".equals(value);
