@@ -1812,17 +1812,9 @@ bool CMetasequoiaIME::_ClassifyDeferredKeyDown(_In_ ITfContext *pContext, WPARAM
         case VK_ESCAPE:
             return setKeyState(CATEGORY_CANDIDATE, FUNCTION_CANCEL);
         case VK_LEFT:
-        case VK_RIGHT: {
-            // 与普通路径（CompositionProcessorEngine::IsVirtualKeyNeed）一致：横排候选时 ←/→ 移动候选高亮。普通路径在组字时（增量候选也算）就把 ↑/↓ 交给 Server，这里的 ↑/↓ 同样只看是否在组字，所以 ←/→ 也不看 candidateKey（它只在展开候选列表时为真），否则排队的 ←/→ 会和立即处理的走不同的路。
-            const auto *host = _pCompositionProcessorEngine->GetHostEngineAdapter();
-            if (Global::ArrowKeyMovesCandidateHighlight(*classifiedCode, true,
-                                                        host && host->horizontal_candidate_arrows(),
-                                                        msime::windows::scheme::AlwaysInlinePreedit(scheme)))
-            {
-                return setKeyState(CATEGORY_CANDIDATE, FUNCTION_SERVER_CANDIDATE_KEY);
-            }
-            return setKeyState(CATEGORY_COMPOSING, *classifiedCode == VK_LEFT ? FUNCTION_MOVE_LEFT : FUNCTION_MOVE_RIGHT);
-        }
+            return setKeyState(CATEGORY_COMPOSING, FUNCTION_MOVE_LEFT);
+        case VK_RIGHT:
+            return setKeyState(CATEGORY_COMPOSING, FUNCTION_MOVE_RIGHT);
         case VK_HOME:
             return setKeyState(CATEGORY_CANDIDATE, FUNCTION_MOVE_PAGE_TOP);
         case VK_END:
@@ -2896,9 +2888,7 @@ CMetasequoiaIME::KeyDownDispatchResult CMetasequoiaIME::_DispatchKeyDown(
             KeystrokeState.Category = CATEGORY_CANDIDATE;
             KeystrokeState.Function = FUNCTION_FINALIZE_CANDIDATELIST;
         }
-        // 移动候选高亮的 ←/→ 按 ↑/↓ 发给 Server（Global/CandidateArrowKeyPolicy.h）；只有横排候选时它们才会被归为 FUNCTION_SERVER_CANDIDATE_KEY。
-        Global::Keycode = Global::CandidateNavigationWireKey(
-            code, KeystrokeState.Function == FUNCTION_SERVER_CANDIDATE_KEY);
+        Global::Keycode = code;
         Global::wch = wch;
         // The modifiers the key was classified with: an AltGr character goes without Ctrl+Alt, or the Server would cancel it as a shortcut.
         Global::ModifiersDown = Global::CharacterModifiers(capturedModifiers, wch, code);

@@ -105,10 +105,6 @@ add_test(NAME msime-tsf-engine-response COMMAND msime-tsf-engine-response-test)
 add_executable(msime-tsf-punctuation-key-policy-test tests/input/punctuation_key_policy.cpp)
 target_compile_features(msime-tsf-punctuation-key-policy-test PRIVATE cxx_std_17)
 add_test(NAME msime-tsf-punctuation-key-policy COMMAND msime-tsf-punctuation-key-policy-test)
-# 横排候选时 ←/→ 移动候选高亮，并按 ↑/↓ 发给 Server。
-add_executable(msime-tsf-candidate-arrow-key-policy-test tests/input/candidate_arrow_key_policy.cpp)
-target_compile_features(msime-tsf-candidate-arrow-key-policy-test PRIVATE cxx_std_17)
-add_test(NAME msime-tsf-candidate-arrow-key-policy COMMAND msime-tsf-candidate-arrow-key-policy-test)
 # 日语空格「変換」在 TIP 这边：哪些空格回执保留组字，回车什么时候上屏高亮候选。
 add_executable(msime-tsf-japanese-conversion-policy-test tests/input/japanese_conversion_policy.cpp)
 target_compile_features(msime-tsf-japanese-conversion-policy-test PRIVATE cxx_std_17)

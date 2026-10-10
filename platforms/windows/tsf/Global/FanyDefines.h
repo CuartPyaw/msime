@@ -1,5 +1,4 @@
 #pragma once
-#include "CandidateArrowKeyPolicy.h"
 #include "CandidatePunctuationKeyPolicy.h"
 #include "LocalModeKeyPolicy.h"
 #include "PairedPunctuationHostPolicy.h"

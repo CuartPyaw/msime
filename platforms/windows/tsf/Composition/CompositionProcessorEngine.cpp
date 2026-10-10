@@ -2264,16 +2264,10 @@ BOOL CCompositionProcessorEngine::IsVirtualKeyNeed( //
 
     if (candidateMode != CANDIDATE_NONE && (uCode == VK_LEFT || uCode == VK_RIGHT))
     {
-        // 横排候选时 ←/→ 沿候选方向移动高亮，交给 Server 按 ↑/↓ 处理；竖排或方向键翻选关闭时照旧移动组字光标。
-        const bool movesHighlight = Global::ArrowKeyMovesCandidateHighlight(
-            uCode, true, _hostEngineAdapter && _hostEngineAdapter->horizontal_candidate_arrows(),
-            msime::windows::scheme::AlwaysInlinePreedit(Global::InputModeScheme.load(std::memory_order_relaxed)));
         if (pKeyState)
         {
-            pKeyState->Category = movesHighlight ? CATEGORY_CANDIDATE : CATEGORY_COMPOSING;
-            pKeyState->Function = movesHighlight            ? FUNCTION_SERVER_CANDIDATE_KEY
-                                  : uCode == VK_LEFT ? FUNCTION_MOVE_LEFT
-                                                     : FUNCTION_MOVE_RIGHT;
+            pKeyState->Category = CATEGORY_COMPOSING;
+            pKeyState->Function = uCode == VK_LEFT ? FUNCTION_MOVE_LEFT : FUNCTION_MOVE_RIGHT;
         }
         return TRUE;
     }

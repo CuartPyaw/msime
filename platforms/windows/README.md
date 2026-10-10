@@ -368,8 +368,6 @@ key_bindings 可选对象示例：
 
 对象提供时七个字段必须完整且无未知字段，前六项仅接受布尔值，分别控制减号/等号、逗号/句号、方括号、Tab、PageUp/Down、上下箭头；word_character 仅 disabled/brackets/minus_equal。显式对象覆盖共享设置，修改启动文件需重启。未提供对象时使用共享 preferences.json 的 navigation 和 word_character，并通过现有监听器动态发布；旧设置缺省采用 Windows 默认值（除方括号外全部开启，以词定字关闭、键组为方括号）。共享设置禁止以词定字与同键翻页同时开启；UI 切换会同时关闭冲突项。绑定在输入队列更新，不读盘、不解析每次按键；它独立于延迟中的 Engine 方案。显式启动配置仍按以词定字优先处理同键绑定，Microsoft 分号及 Unicode 编辑优先级不变。这份配置只决定这一个 Server 实例怎么分流按键，不改变 TSF 同步契约：接在它上面的客户端必须使用匹配的吃键配置。
 
-候选横排（`candidate_layout = "horizontal"`）且打开了上下箭头翻选时，←/→ 沿候选方向移动高亮，与 macOS 一致；竖排时 ←/→ 仍移动组字光标。这个判断在 TIP：它每次载入共享偏好时记下候选排列与 `navigation.arrows`（`tsf/Global/CandidateArrowKeyPolicy.h`），候选窗开着时把 ←/→ 归为 Server 候选键，并按 ↑/↓ 发给 Server，Server 照上下箭头处理，不需要新的协议帧。韩语、注音、越南语和藏语的组合一直写在行内，←/→ 不变。↑/↓ 在横排时仍移动高亮（macOS 横排时吞掉 ↑/↓，这里保留 Windows 原有的行为）。
-
 #### 托盘菜单与共享界面
 
 托盘菜单七项与成品一致：悬浮工具栏开关由 Server 自己处理；设置和关于在独立的 WinUI 3 `msime-client-settings.exe` 中打开，表情/符号面板、手写识别板和屏幕键盘仍在共享桌面面板宿主（Tauri）中打开。两类窗口与 Linux 的 IBus 属性菜单共用同一套路由契约——用 `--route=<面板>` 指定面板，`--route=settings:<分类>` 指定设置分类（关于用 `settings:about`），只接受小写 ASCII 标识符；同一路由也写进子进程的 `MSIME_CLIENT_ROUTE`，进程自身继承到的同名变量会被丢弃，不会盖过实际点击的那一行。Windows 语音输入由 Server 内置的 VoiceInputSession 和波形浮层负责录音、识别及 TSF 提交；共享外壳的语音入口通过固定 Aux 管道发送 `ToggleVoiceInput`，由 Server 主线程消费，避免让 Tauri 伪造一个无法录音的面板。
