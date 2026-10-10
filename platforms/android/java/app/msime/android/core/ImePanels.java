@@ -522,7 +522,7 @@ final class ImePanels {
     /** 皮肤保存回来（成功或失败）后清掉临时选中态，下次按偏好画。 */
     void finishSkinPick() {
         pendingSkinKey = null;
-        if (s.skinScroll != null && s.skinScroll.getVisibility() == View.VISIBLE) renderSkinPicker();
+        if (ViewPolicy.isVisible(s.skinScroll)) renderSkinPicker();
     }
 
     private void styleSkinPicker(java.util.List<KeyboardSkinCard> cards) {
@@ -892,7 +892,7 @@ final class ImePanels {
     void finishAiPolish(long generation, String result, AiPolishClient.Failure failure) {
         if (s.aiOperation == null || s.aiOperation.generation() != generation
                 || s.aiPolishContainer == null
-                || s.aiPolishContainer.getVisibility() != View.VISIBLE) return;
+                || !ViewPolicy.isVisible(s.aiPolishContainer)) return;
         s.aiOperation = null;
         s.aiBusy = false;
         if (!s.aiTargetMatches() || s.aiRequestConfiguration == null
@@ -1128,7 +1128,7 @@ final class ImePanels {
     }
 
     boolean clipboardPanelOpen() {
-        return s.clipboardScroll != null && s.clipboardScroll.getVisibility() == View.VISIBLE;
+        return ViewPolicy.isVisible(s.clipboardScroll);
     }
 
     boolean cloudClipboardAllowed() {
@@ -2040,8 +2040,7 @@ final class ImePanels {
             }
             final String note = message;
             s.main.post(() -> {
-                if (generation != phraseGeneration || s.phraseScroll == null
-                        || s.phraseScroll.getVisibility() != View.VISIBLE) return;
+                if (generation != phraseGeneration || !ViewPolicy.isVisible(s.phraseScroll)) return;
                 renderCommonPhrases(phrases, note);
             });
         };
