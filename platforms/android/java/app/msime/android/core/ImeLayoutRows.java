@@ -364,9 +364,9 @@ final class ImeLayoutRows {
                     : KeyPressIds.forNineKeyDigit(key.digit()));
                 // 字母键面上印着它送进引擎的数字；数字键面本身就是那个数字，不必再印一次。
                 // 1 键在拼音键面上是「@#」，打开符号面板而不是送 1，所以它没有可印的数字。
-                keyButton.setDigitText(digits || !Character.isDigit(key.input())
+                keyButton.setDigitText(digits || !TextPolicy.isDigit(key.input())
                     ? "" : NineKeyLayout.digitInput(key));
-                if (!digits && Character.isDigit(key.input()) && key.label().length() > 1) {
+                if (!digits && TextPolicy.isDigit(key.input()) && key.label().length() > 1) {
                     keyButton.setContentDescription("按键 " + description + "；长按输入数字或字母");
                     keyButton.setOnLongClickListener(ignored -> {
                         // The hold is this cell's press; picking from the popup is not another key.
@@ -679,10 +679,10 @@ final class ImeLayoutRows {
         // 1 键的键面随组字状态在「@#」和「分词」之间换（updateNineKeySymbolKey），所以滑动开始时才记下当时的键面，松手后还原成它，而不是建键时的那个。
         final String[] face = {keyButton.getText().toString()};
         final String digit = NineKeyLayout.digitInput(key);
-        final boolean hasLetters = Character.isDigit(key.input()) && key.label().length() > 1;
+        final boolean hasLetters = TextPolicy.isDigit(key.input()) && key.label().length() > 1;
         Runnable restoreFace = () -> {
             keyButton.setText(face[0]);
-            keyButton.setDigitText(Character.isDigit(key.input()) ? digit : "");
+        keyButton.setDigitText(TextPolicy.isDigit(key.input()) ? digit : "");
         };
         keyButton.setOnTouchListener((view, event) -> {
             switch (event.getActionMasked()) {
