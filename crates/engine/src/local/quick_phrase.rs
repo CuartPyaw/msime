@@ -60,10 +60,13 @@ fn read(connection: &Connection, prefix: &str, limit: usize) -> rusqlite::Result
             ))
         },
     )?;
-    let mut candidates = Vec::with_capacity(limit);
+    let mut candidates = Vec::new();
     for row in rows {
         // A NULL key or value is skipped and a NULL weight reads as 0, as `sqlite3_column_*` did.
         if let (Some(key), Some(value), weight) = row? {
+            if candidates.capacity() == 0 {
+                candidates.reserve_exact(limit);
+            }
             candidates.push(WordItem::new(
                 key,
                 value,
@@ -218,6 +221,12 @@ mod tests {
         );
         assert_eq!(rows.candidates[0].source, CandidateSource::QuickPhrase);
         assert_eq!(rows.candidates[0].weight, 20);
+        assert_eq!(rows.candidates.capacity(), 10);
+
+        let empty = query_quick_phrases_with_limit("z", &path, 10);
+        assert!(empty.diagnostic.is_none());
+        assert!(empty.candidates.is_empty());
+        assert_eq!(empty.candidates.capacity(), 0);
 
         let limited = query_quick_phrases_with_limit("a", &path, 2);
         assert_eq!(limited.diagnostic, None);
