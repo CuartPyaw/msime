@@ -14,7 +14,7 @@ Status: implemented
 
 TIP 原本分不出双拼和五笔：`InputModeChanged` 帧给全拼、双拼、五笔发同一个码 `'0'`。`common/InputSchemeTraits.h` 给它们各加一个码，`InputMode::Shuangpin` 是 `'8'`，`InputMode::Wubi` 是 `'9'`，Server 用 `input_mode(scheme)` 照常算出并发送。`mode_scheme` 把这两个码仍映射成 `Quanpin`，所以 TIP 的键入不变（`Global::InputModeScheme` 照旧）；码只存进新的 `Global::InputModeIndicator`，只有 `CLangBarItemButton::GetIcon` 读它。TIP 激活时先按偏好里正在运行的方案填一次，Server 的帧到了再覆盖。悬浮工具栏的 `toolbar_icon` 也认这两个码，直接画「双」「五」。
 
-十四个 ICO（`tsf/assets/{shuangpin,wubi,cantonese,zhuyin,vietnamese,tibetan,stroke}-{light,dark}.ico`）由 `platforms/windows/scripts/render_tsf_mode_icons.swift` 生成，在 macOS 上运行，同样的输入得到逐字节相同的输出。字形来源和 macOS 输入菜单图标相同：取 PingFang SC 的轮廓，按墨迹框把长边撑到图块的 15/16，与 `render_menu_icon.swift` 一样。字重用 Regular：任务栏上并排的中、英、日是上游原图，笔画细，同一个指示器换方案时字不该忽粗忽细。尺寸与 jp、kr 相同，16 到 48 每隔 4 再加 64；每个尺寸是 32 位 BMP 条目加 AND 掩码。浅色任务栏用黑字，深色用白字。资源号 37 到 50（`tsf/Header/resource.h`），导出检查 `tsf/tests/exports/verify.cmake` 要求的图标组从 15 个变成 29 个，`tsf/assets/README.md` 记来源。
+十四个 ICO（`tsf/assets/{shuangpin,wubi,cantonese,zhuyin,vietnamese,tibetan,stroke}-{light,dark}.ico`）由 `platforms/windows/scripts/render_tsf_mode_icons.swift` 生成，在 macOS 上运行，同样的输入得到逐字节相同的输出。字形取自思源黑体 SC Regular 2.005（SIL Open Font License 1.1，adobe-fonts/source-han-sans 的 `2.005R` 发布里的 `09_SourceHanSansSC.zip`，脚本核对 OTF 的 SHA-256），按墨迹框把长边撑到图块的 15/16，摆法与 `render_menu_icon.swift` 一样。最初用的是 macOS 菜单图标同款的 PingFang SC，审查时改掉了：PingFang 是 Apple 随系统授权的字体，它的字形渲染成图标放进 Windows 安装包分发，授权上站不住；OFL 字体渲染出的图像可以随任何产品分发。字重用 Regular：任务栏上并排的中、英、日是上游原图，笔画细，同一个指示器换方案时字不该忽粗忽细。尺寸与 jp、kr 相同，16 到 48 每隔 4 再加 64；每个尺寸是 32 位 BMP 条目加 AND 掩码。浅色任务栏用黑字，深色用白字。资源号 37 到 50（`tsf/Header/resource.h`），导出检查 `tsf/tests/exports/verify.cmake` 要求的图标组从 15 个变成 29 个，`tsf/assets/README.md` 记来源。
 
 **日文释义行的罗马字来自微软日语输入法。** `src/candidate/JapaneseReader.cpp` 在翻译工作线程上用 IFELanguage（ProgID `MSIME.Japan`）的 `GetJMorphResult(FELANG_REQ_REV, …)` 分词，并取每个词的平假名读音。`src/candidate/JapaneseRomaji.h` 把读音按平文式转成罗马字，词与词之间一个空格。助词 は、へ、を 和 こんにちは、こんばんは 按发音读。有一个词读不出来，整行就不标，和 macOS 的 `MSIMEJapaneseRomaji` 一样。
 
@@ -56,7 +56,7 @@ macOS 的「取消置顶」只撤掉宿主自己按编码记的顺序表（NSUse
   - 罗马字在 Windows 上依赖系统的日语输入法组件。没有它时含汉字的日文行不标，设置页的说明不区分这种情况。
   - 长音写成重复元音（koohii），不加长音符号；macOS 系统分词器的写法没有在本机核对过，两边在长音上可能不同。
   - IFELanguage 在 Server 进程里起 COM，首次使用有加载开销，所以只在打开「显示读音」并且出现日文释义行时才发生。
-  - 十四个图标依赖 macOS 自带的 PingFang SC，重新生成必须在 macOS 上做。
+  - 重新生成十四个图标要在 macOS 上运行脚本（CoreText），并且要先下载那份固定版本的思源黑体 OTF 作为参数传入；换了版本的字体会被脚本拒绝。
   - 置顶切换仍缺，Windows 的「置顶」仍是单向的。
 
 ## Verification
