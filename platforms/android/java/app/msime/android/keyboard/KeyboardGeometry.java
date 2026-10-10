@@ -174,28 +174,6 @@ public final class KeyboardGeometry {
         return BoundsPolicy.nonNegative(Math.round(tenths * density / 20f));
     }
 
-    /** Apply symmetric horizontal and vertical padding expressed in dp. */
-    public static void setSymmetricPaddingDp(View view, Context context, float horizontalDp,
-            float verticalDp) {
-        int horizontal = DimensionPolicy.pixels(context, horizontalDp);
-        int vertical = DimensionPolicy.pixels(context, verticalDp);
-        ViewPolicy.setSymmetricPadding(view, horizontal, vertical);
-    }
-
-    /** Apply equal horizontal dp padding with no vertical padding. */
-    public static void setHorizontalPaddingDp(View view, Context context, float horizontalDp) {
-        int horizontal = DimensionPolicy.pixels(context, horizontalDp);
-        ViewPolicy.setHorizontalPadding(view, horizontal);
-    }
-
-    /** Apply four-sided padding expressed in density-independent pixels. */
-    public static void setPaddingDp(View view, Context context, float leftDp, float topDp,
-            float rightDp, float bottomDp) {
-        ViewPolicy.setPadding(view, DimensionPolicy.pixels(context, leftDp),
-            DimensionPolicy.pixels(context, topDp), DimensionPolicy.pixels(context, rightDp),
-            DimensionPolicy.pixels(context, bottomDp));
-    }
-
     /** 键盘里的文字最多跟随系统字体放大到这个倍数。 */
     public static final float MAX_KEYBOARD_FONT_SCALE = 1.15f;
 

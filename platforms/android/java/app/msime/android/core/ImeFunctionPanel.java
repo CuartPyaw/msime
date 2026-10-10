@@ -45,7 +45,7 @@ final class ImeFunctionPanel {
         KeyboardGeometry.setKeyTextSize(card, 14);
         if (navigates) ViewPolicy.setStartCenteredVertically(card);
         else ViewPolicy.setCentered(card);
-        KeyboardGeometry.setPaddingDp(card, s, 12, 5, 12, 5);
+        LayoutPolicy.setPaddingDp(card, s, 12, 5, 12, 5);
         card.setContentDescription(title);
         ViewPolicy.setSelected(card, active);
         ViewPolicy.setEnabled(card, enabled);
@@ -310,7 +310,7 @@ final class ImeFunctionPanel {
         TextView hint = ViewPolicy.textLabel(s,
             "回复：粘贴对方的话，生成几种语气的回复。润色：先选中要改的文字。", 12);
         KeyboardGeometry.setKeyTextSize(hint, 12);
-        KeyboardGeometry.setPaddingDp(hint, s, 4, 10, 4, 0);
+        LayoutPolicy.setPaddingDp(hint, s, 4, 10, 4, 0);
         s.moreToolsPanel.addView(hint);
     }
 

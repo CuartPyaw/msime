@@ -77,7 +77,7 @@ public final class FunctionPanelView extends LinearLayout {
         super(context);
         setOrientation(VERTICAL);
         setContentDescription("更多工具");
-        KeyboardGeometry.setPaddingDp(this, context, 0, 10, 0, 4);
+        LayoutPolicy.setPaddingDp(this, context, 0, 10, 0, 4);
         grid = new PagedTileGrid(context);
         grid.setGrid(4, 2);
         grid.setSpacing(ITEM_HEIGHT_DP, 16f, 4f, 4f);
