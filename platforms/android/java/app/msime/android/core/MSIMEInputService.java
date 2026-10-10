@@ -5832,8 +5832,29 @@ public final class MSIMEInputService extends InputMethodService {
         android.os.Bundle args = new android.os.Bundle();
         args.putString(ClipboardHistoryPolicy.EDIT_ENTRY_ARG,
             ClipboardHistoryPolicy.editKey(item.timestamp(), item.text()));
+        putReturnToCaller(args);
         closeClipboardHistory();
         openHostPage(ClipboardHistoryPolicy.EDIT_PAGE, args);
+    }
+
+    /**
+     * 面板顶行的「搜索」（#5973）：打开应用里可搜索的剪贴板历史页，在那里输入查询、复制、编辑或删除。键盘里没有可输入的文本框，查询框放在应用里，和编辑（#5971）一样；页面读的是同一份共享存储。
+     *
+     * <p>打开之前和「编辑」一样把系统剪贴板当前那一条记为已处理：用户可能在那一页把它删掉或改掉，已处理身份存在本进程（`:ime`）的 SharedPreferences 里，应用进程写不了；不记的话回来一打开面板，补读又把它记了回来。
+     */
+    void openClipboardSearch() {
+        forgetCurrentClip();
+        android.os.Bundle args = new android.os.Bundle();
+        putReturnToCaller(args);
+        closeClipboardHistory();
+        openHostPage(ClipboardSearchPolicy.SEARCH_PAGE, args);
+    }
+
+    /** 编辑页、剪贴板历史页做完之后要不要回到原来的应用：当前输入框属于别的应用才要；在水杉自己的输入框里打开时留在应用里（{@link ClipboardHistoryPolicy#RETURN_TO_CALLER_ARG}）。 */
+    private void putReturnToCaller(android.os.Bundle args) {
+        EditorInfo info = getCurrentInputEditorInfo();
+        if (ClipboardHistoryPolicy.returnsToCaller(info == null ? null : info.packageName, getPackageName()))
+            args.putBoolean(ClipboardHistoryPolicy.RETURN_TO_CALLER_ARG, true);
     }
 
     /**
