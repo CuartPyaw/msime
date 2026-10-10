@@ -3,6 +3,7 @@
 #include "TrayMenuLayout.h"
 #include <cstdint>
 #include <functional>
+#include <memory>
 // windows.h first: its DrawText macro has to reach the Direct2D declarations,
 // and NOMINMAX keeps its min/max macros away from the standard library.
 #ifndef NOMINMAX
@@ -12,6 +13,7 @@
 #include <msimeui/DeviceResources.h>
 
 namespace msime::windows {
+class AccessibleWindow;
 // The tray menu the shipped language bar opens: a composed card of commands, shown on request and dismissed as soon as it loses the pointer or focus. It owns no input state and never takes focus from the application being typed into, so the mode rows still address the focused TIP.
 class TrayMenuWindow final {
 public:
@@ -67,6 +69,10 @@ private:
   void show_page(TrayMenuPage page, bool from_keyboard);
   // Rebuild the rows and their geometry from the live state.
   void refresh_items();
+  // 按现在的行和高亮发布读屏的元素树（TrayMenuAccessibility.h）；卡片不可见时发布一棵空树。
+  void sync_accessibility();
+  // 读屏要求执行一行（accessible_invoke_message），等同于用键盘执行它。`token` 对不上当前的树时丢掉。
+  void invoke_accessible(int id, LPARAM token);
   // The product mark for the header, loaded from the Server's resources at the size it is drawn. Null when the module carries no mark, as in the test executables; the header then shows its name alone.
   ID2D1Bitmap *logo_bitmap(int pixels);
   // 按锚点摆放卡片；`anchor_bottom` 为空时按托盘的规则只往上开。
@@ -99,6 +105,10 @@ private:
   int logo_pixels_ = 0;
   HWND window_ = nullptr;
   size_t hovered_ = static_cast<size_t>(-1);
+  // 高亮是键盘导航停上去的（而不是鼠标悬停）：只有这时才把那一行报告为读屏的键盘焦点。
+  bool keyboard_highlight_ = false;
+  // 交给读屏的 UI Automation 提供者；窗口建好后才创建，CreateWindowExW 期间为空。
+  std::unique_ptr<AccessibleWindow> accessible_;
   unsigned dpi_ = 96;
   bool failed_ = false;
 };

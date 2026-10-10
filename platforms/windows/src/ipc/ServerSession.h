@@ -115,6 +115,11 @@ public:
     check_thread();
     return typing_effect_settings_;
   }
+  // 同一份设置里特效包的全部颜色和火花数，光标处的火花用它；和设置一起读，按键路径只发布。
+  const TypingEffectPalette &typing_effect_palette() const {
+    check_thread();
+    return typing_effect_palette_;
+  }
   // Whether background music may play: true while this client holds the focus. Remembered, so a preference update can repeat it and destroying the session stops music it started.
   void set_music_active(bool active);
 
@@ -133,6 +138,7 @@ private:
   nlohmann::json preferences_ = nlohmann::json::object();
   bool music_active_ = false;
   TypingEffectSettings typing_effect_settings_{};
+  TypingEffectPalette typing_effect_palette_{};
   void refresh_typing_effect_settings();
 };
 } // namespace msime::windows

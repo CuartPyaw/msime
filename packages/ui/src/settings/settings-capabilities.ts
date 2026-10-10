@@ -26,7 +26,8 @@ export function settingsCapabilities({
   canInstallInputSource,
   canListVoiceCaptureDevices,
 }: SettingsCapabilitiesInput) {
-  const nativeVoicePlatform = macos || harmony || android;
+  // 宿主自带不需要 API Key 的系统识别器：macOS 的 Speech、HarmonyOS 的 CoreSpeechKit、Android 的 SpeechRecognizer、Windows 的 SAPI 听写。
+  const nativeVoicePlatform = macos || harmony || android || windows;
   const showModeScope = host ? host.ime_mode_scope : false;
   const showModeSwitchShortcuts = host ? host.mode_switch_shortcuts : false;
   const showPanelShortcuts = host ? host.panel_shortcuts : false;
@@ -78,8 +79,8 @@ export function settingsCapabilities({
   const showTypingEffectStyles = showTypingEffects && !linux;
   // An effect pack only sets a drawn style's parameters, so it is offered wherever a style is.
   const showTypingEffectPacks = showTypingEffectStyles;
-  // Windows and HarmonyOS have no particle overlay: every style is a flash of the candidate card, brighter for sparks and Power Mode, so the style descriptions must not promise sparks there.
-  const typingEffectsFlashOnly = showTypingEffectStyles && (windows || harmony);
+  // HarmonyOS has no particle overlay: every style is a flash of the candidate card, brighter for sparks and Power Mode, so the style descriptions must not promise sparks there. Windows draws the sparks at the caret as macOS does.
+  const typingEffectsFlashOnly = showTypingEffectStyles && harmony;
   const showWordbookPacks = host ? host.wordbook_packs : false;
   const showSymbolSetPacks = host ? host.symbol_set_packs : false;
   return {

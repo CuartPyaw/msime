@@ -53,7 +53,7 @@ char *msime_client_account_access_token(const uint8_t *request, size_t length);
   - 「应用到本机」激活时输入会暂停，长短取决于准备整份词库的时间；Server 在最后一次 `DictionaryQuiesce` 之后 30 秒自己交还会话，所以处理队列期间每 10 秒续一次放开，准备再久也不会中途把会话交回去；激活没完成时请求留在 `preparing`，每 60 秒在面板轮询时重试一次。面板关着时没有人处理队列，下次打开云词库面板才继续。真实 Windows 上大词库的准备耗时、以及改名换入时有没有别的进程握着词库文件，都还没有在真机上量过。
   - 回复模板在 Windows 上只能收藏、评分、举报、发布，不能用于输入：桌面没有「高情商回复」键盘。
   - 设置同步只覆盖 `input.*`，候选窗口、快捷键、皮肤等桌面设置不跨机器同步。
-  - 设置应用的账号页还不显示本机匿名账号（macOS 原生账号窗口的「本机账号」标记和登录后弃用匿名账号）；Server 还没有调用 `msime_client_account_access_token`，「水杉账号」候选翻译由 Server 侧接入。
+  - 设置应用的账号页还不显示本机匿名账号（macOS 原生账号窗口的「本机账号」标记和登录后弃用匿名账号）。Server 的翻译线程用 `msime_client_account_access_token` 取令牌做「水杉账号」候选释义，见 [Windows 的释义列快捷键与「水杉账号」候选释义](2026-10-10-windows-gloss-columns-and-account-glosses.md)。
   - Linux 与 macOS 的 Tauri 应用没有社区词包与设置同步；要在 Linux 打开时，把 `community_resources` 和设置同步命令的目标条件加上 Linux 并在 `main.tsx` 同步打开。
 
 ## Verification

@@ -35,6 +35,8 @@ public:
 
   explicit TranslationWorker(Completed completed);
   TranslationWorker(Completed completed, Translator translator);
+  // 「水杉账号」候选释义用的账号目录（UTF-8 绝对路径）：设置应用登录的 account-session.json 和本机匿名账号都在这里，见 server_main.cpp 的 anonymous_account_directory。整个进程一份，Server 启动时设一次；没有设时选了水杉账号也不联网。
+  static void set_account_directory(std::string directory);
   ~TranslationWorker();
   TranslationWorker(const TranslationWorker &) = delete;
   TranslationWorker &operator=(const TranslationWorker &) = delete;

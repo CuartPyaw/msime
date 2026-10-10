@@ -86,9 +86,9 @@ void FocusedSession::record_commit(const std::optional<Commit> &delivered) {
     (void)session_.commit_sound();
   // The commit flash, on the session's current combo: a commit counts nothing and only reports the state.
   if (session_.input_enabled()) {
-    TypingEffectSignal::instance().publish_settings(pack_typing_effect_settings(session_.typing_effect_settings()));
+    publish_typing_effect_settings();
     TypingEffectSignal::instance().publish(
-        session_.typing_effect(typing_effect_commit(allowed)));
+        typing_effect_mark_commit(session_.typing_effect(typing_effect_commit(allowed))));
   }
   if (!delivered->typing)
     return;
@@ -580,19 +580,39 @@ std::optional<PendingReply> FocusedSession::configured_key(
                                        word_binding);
     // After the Engine, so only a key the input method took sounds (with input off, in English mode, the Server answers keys without taking them), and before the online queries are built, so they add no delay to it.
     if (result && session_.input_enabled()) {
-      if (const auto key_class = key_sound_class(packet)) {
-        const bool allowed = sound_allowed();
-        if (allowed)
-          (void)session_.key_sound(*key_class);
-        // The same keys drive the typing effect and its combo, which keep counting in a full-screen application but stay silent there. The candidate window draws it on the UI thread; this only posts the packed value.
-        const bool auto_repeat = (packet.modifiers_down & PipeMetadata::AutoRepeat) != 0;
-        TypingEffectSignal::instance().publish_settings(pack_typing_effect_settings(session_.typing_effect_settings()));
-        TypingEffectSignal::instance().publish(
-            session_.typing_effect(typing_effect_key_event(*key_class, allowed, auto_repeat)));
-      }
+      if (const auto key_class = key_sound_class(packet))
+        sound_key(*key_class, (packet.modifiers_down & PipeMetadata::AutoRepeat) != 0);
     }
     attach_online_query(lease, result);
   });
   return result;
+}
+void FocusedSession::sound_key(uint32_t key_class, bool auto_repeat) {
+  const bool allowed = sound_allowed();
+  if (allowed)
+    (void)session_.key_sound(key_class);
+  // The same keys drive the typing effect and its combo, which keep counting in a full-screen application but stay silent there. The candidate window draws it on the UI thread; this only posts the packed value.
+  publish_typing_effect_settings();
+  TypingEffectSignal::instance().publish(
+      session_.typing_effect(typing_effect_key_event(key_class, allowed, auto_repeat)));
+}
+void FocusedSession::publish_typing_effect_settings() {
+  TypingEffectSignal::instance().publish_settings(pack_typing_effect_settings(session_.typing_effect_settings()));
+  TypingEffectSignal::instance().publish_palette(session_.typing_effect_palette());
+}
+bool FocusedSession::passthrough_key(uint64_t token, uint32_t key_class) {
+  check_thread();
+  // 只认此刻持有焦点的那次激活：令牌对不上的是已经离开的会话，或者别的线程。
+  if (!token || !lease_ || lease_->token != token || !prepared(*lease_))
+    return false;
+  bool sounded = false;
+  gate_.with_active(*lease_, [&] {
+    // 英文模式不出声，和 Server 处理的键一样。交给应用的键没有自动重复：TIP 已经把它们滤掉了。
+    if (!session_.input_enabled())
+      return;
+    sound_key(key_class, false);
+    sounded = true;
+  });
+  return sounded;
 }
 } // namespace msime::windows

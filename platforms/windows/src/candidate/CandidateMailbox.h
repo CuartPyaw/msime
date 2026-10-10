@@ -135,10 +135,14 @@ private:
           latest_->preedit.substr(0, latest_->preedit.size() - text.size());
       // 视图来自 Engine，不带包元数据；游戏会话标记和坐标一样属于原有的展示。
       const bool game_host = latest_->game_host;
+      // Tab 预选的释义列在 ReplyComposer 里活到下一个按键，释义或云候选在这之间送到时下划线不能丢；高亮候选已经没有那一列时就不画了，上屏时 ReplyComposer 也按这条规则判断。
+      const int armed_gloss_column = latest_->armed_gloss_column;
       latest_ =
           candidate_presentation_from_view(lease, view, latest_->x, latest_->y,
                                            prefix, latest_->traditional_output);
       latest_->game_host = game_host;
+      latest_->armed_gloss_column =
+          candidate_armed_gloss_column(latest_->candidates, armed_gloss_column);
       attach_candidate_readings(latest_->candidates, readings_);
       latest_->render_serial = ++render_serial_;
       pending_hide_.reset();

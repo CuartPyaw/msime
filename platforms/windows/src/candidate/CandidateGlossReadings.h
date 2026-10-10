@@ -7,7 +7,7 @@
 #include <vector>
 
 namespace msime::windows {
-// 候选释义每一行后面画的读音和整句的逐词拆解，只用于显示，从不上屏。规则移植自 macOS 的 platforms/macos/src/candidate/CandidatePronunciation.h：释义每种目标语言一行，每行按它的第一个词读；英文走共享的离线读音表（msime_client_pronunciation_request），日文罗马字在 macOS 上来自系统分词器，Windows 没有对应的系统接口，所以日文行不标读音。
+// 候选释义每一行后面画的读音和整句的逐词拆解，只用于显示，从不上屏。规则移植自 macOS 的 platforms/macos/src/candidate/CandidatePronunciation.h：释义每种目标语言一行，每行按它的第一个词读；英文走共享的离线读音表（msime_client_pronunciation_request），日文行读罗马字，macOS 的来自系统分词器，Windows 的来自微软日语输入法的 IFELanguage（JapaneseReader.cpp），没有它时只读纯假名的行。
 
 namespace gloss_reading_detail {
 // 从 `index` 处解出一个 UTF-8 码位并前移；不合法的字节当作 U+FFFD 前移一个字节。
@@ -137,11 +137,12 @@ inline std::vector<std::string> gloss_english_texts(const std::string &candidate
   return texts;
 }
 
-// 一个候选每行释义的读音，和释义逐行对应；没有一行有读音时返回空。`english` 给出发给共享读音表的文本对应的 "/…/"，查不到返回空串。日文行在 Windows 上不标读音，理由见文件开头。
+// 一个候选每行释义的读音，和释义逐行对应；没有一行有读音时返回空。`english` 给出发给共享读音表的文本对应的 "/…/"，查不到返回空串；`japanese` 给出日文行第一个词的罗马字，读不全时返回空串，不给时日文行不标读音。
 inline std::vector<std::string>
 gloss_pronunciation_lines(const std::string &candidate_text, const std::vector<std::string> &lines,
                           const std::vector<std::string> &targets,
-                          const std::function<std::string(const std::string &)> &english) {
+                          const std::function<std::string(const std::string &)> &english,
+                          const std::function<std::string(const std::string &)> &japanese = {}) {
   std::vector<std::string> readings;
   readings.reserve(lines.size());
   bool any = false;
@@ -152,8 +153,10 @@ gloss_pronunciation_lines(const std::string &candidate_text, const std::vector<s
     const bool english_line = index < targets.size() ? targets[index] == "en" : index == 0;
     if (english_candidate && !line.empty() && english_line)
       reading = english(candidate_text);
-    else if (gloss_line_language(line, index, targets) == "en")
+    else if (const auto language = gloss_line_language(line, index, targets); language == "en")
       reading = english(line);
+    else if (language == "ja" && japanese)
+      reading = japanese(gloss_first_term(line));
     any = any || !reading.empty();
     readings.push_back(std::move(reading));
   }

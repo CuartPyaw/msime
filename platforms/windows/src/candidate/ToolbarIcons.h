@@ -83,6 +83,10 @@ inline ToolbarIcon toolbar_icon(int button, std::optional<bool> state,
       return {0, L"藏"};
     case scheme::InputMode::Stroke:
       return {0, L"笔"};
+    case scheme::InputMode::Shuangpin:
+      return {0, L"双"};
+    case scheme::InputMode::Wubi:
+      return {0, L"五"};
     case scheme::InputMode::Chinese:
       // 双拼和五笔同属中文模式，图标字体没有对应的字形，直接画字。
       if (language.scheme == scheme::Shuangpin)

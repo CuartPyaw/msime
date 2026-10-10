@@ -33,7 +33,7 @@ macOS 输入菜单有「英文候选模式」（⌃⇧E）、「繁体输出」�
   - 切方案从一次点击变成两次（先点「输入方案」翻页）；悬浮工具栏的方案按钮仍是一次。
   - 英文候选模式在 TIP 英文状态下不可用，与 macOS 不同；组字中点击什么也不做（卡片照常收起）。
   - 低级键盘钩子只在卡片可见时（最长 30 秒）装着，但这段时间里系统所有按键都要等 UI 线程处理钩子回调；UI 线程卡住超过 `LowLevelHooksTimeout` 时按键会延迟，Windows 也可能在多次超时后静默移除钩子，之后这次打开就没有键盘导航。
-  - 卡片仍没有 UI Automation 提供者，读屏软件读不出各行；这是 `win-tray-keyboard-navigation` 剩下的一半。
+  - 读屏支持（`win-tray-keyboard-navigation` 的另一半）不在这里，见 [自绘窗口的 UI Automation 读屏](2026-10-10-windows-server-window-ui-automation.md)。
   - 密码框判断依赖目标程序如实报告 IsPassword；没有在 250 毫秒内回答时照常打开（只能复制时面板不会把内容输入别处）。每次点击（Win32 样式位没认出密码框时）都起一个短命线程，目标程序挂起时它会等到 UI Automation 自己超时才退出。
   - 主题页只写 `global_theme`，和 macOS 一样不动 `custom_theme`；从托盘选「自定义」会用上次留下的自定义主题。
 

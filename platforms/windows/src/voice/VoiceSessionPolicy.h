@@ -84,6 +84,8 @@ struct VoiceStartConfig {
   // The on-device provider: recognition needs `model_path` (an installed model directory) and nothing the cloud providers need.
   bool local = false;
   std::string_view model_path{};
+  // Windows 系统识别（SAPI）：不需要 Token、接口地址、模型名，也不需要下载模型；识别器和语言是否可用在开始录音前另行检查（system_asr_start_problem）。
+  bool system = false;
 };
 
 enum class VoiceStartCheck { Ready, Disabled, Rejected };
@@ -97,6 +99,8 @@ struct VoiceStartVerdict {
 constexpr VoiceStartVerdict voice_start_verdict(const VoiceStartConfig &config) {
   if (!config.enabled)
     return {VoiceStartCheck::Disabled, {}};
+  if (config.system)
+    return {};
   if (config.local)
     return config.model_path.empty()
                ? VoiceStartVerdict{VoiceStartCheck::Rejected, voice_missing_local_model_message}

@@ -107,6 +107,12 @@ public:
   std::optional<PendingReply> translation_page_key(
       ServerSession &session, const FanyImeNamedpipeData &packet,
       uint64_t epoch);
+  // 释义列快捷键（GlossColumnPolicy.h）：Alt/Ctrl+数字上屏对应候选的第 1/2 列释义，Tab/Shift+Tab 预选高亮候选的释义列，预选之后数字和空格上屏那一列。armed 是这次按键之前预选的列。不是这些键、或者那一列没有释义时返回空，按键照常处理。
+  std::optional<PendingReply> gloss_column_key(
+      ServerSession &session, const FanyImeNamedpipeData &packet,
+      uint64_t epoch, int armed);
+  // 眼下预选的释义列，0 表示没有预选。只活到下一个按键：Server 收到的任何按键都会先清掉它，只有预选列的 Tab 再设回去。
+  int armed_gloss_column() const { return armed_gloss_column_; }
   PendingReply translation_page_reply(const FanyImeNamedpipeData &packet,
                                      uint64_t epoch,
                                      const nlohmann::json &view);
@@ -159,6 +165,7 @@ private:
   std::optional<PendingReply> pending_;
   bool traditional_output_ = false;
   bool translation_page_active_ = false;
+  int armed_gloss_column_ = 0;
   std::vector<std::string> translation_page_items_;
   nlohmann::json translation_page_view_;
   std::vector<PendingReply::SegmentRestore> segment_restore_history_;

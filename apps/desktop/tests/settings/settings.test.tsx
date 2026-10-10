@@ -510,7 +510,7 @@ test("candidate pronunciation is host-enabled, defaults off, persists and needs 
   expect(screen.queryByRole("switch", { name: "显示读音" })).toBeNull();
 });
 
-test("Windows describes candidate pronunciation as English phonetics only", async () => {
+test("Windows describes candidate pronunciation for English and Japanese glosses", async () => {
   render(
     <SettingsPage
       client={{
@@ -524,8 +524,7 @@ test("Windows describes candidate pronunciation as English phonetics only", asyn
   );
   fireEvent.click(await screen.findByRole("button", { name: "标点与翻译" }));
   expect(screen.getByRole("switch", { name: "显示读音" })).toBeDefined();
-  expect(screen.getByText(/在释义后面标出英文的音标/)).toBeDefined();
-  expect(screen.queryByText(/日文释义给罗马音/)).toBeNull();
+  expect(screen.getByText(/英文释义给音标，日文释义给罗马音/)).toBeDefined();
 });
 
 test("Android English suggestions default on and persist independently", async () => {

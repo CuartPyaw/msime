@@ -276,6 +276,7 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
     void _NoteKeyForSmartPunctuation(UINT code, WCHAR wch, bool isEaten);
     void _NotePassthroughStatistics(UINT virtualKey, WCHAR wch, bool keyboardKnownEnabled);
     void _NoteKeyPressStatistics(WPARAM wParam, LPARAM lParam);
+    void _NotePassthroughKeySound(WPARAM wParam, LPARAM lParam);
     void _ResetSmartPunctuationHistory();
     // Focus-loss counterpart of the reference's _ClearSmartPunctuationAction: forgets the armed space/revert history and drops a queued repeated-punctuation rewrite, whose Backspace would otherwise land in whatever gains focus next.
     void _ClearSmartPunctuationAction();
@@ -624,6 +625,9 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
     // The key press last counted by _NoteKeyPressStatistics (scan code plus extended bit) and its message time; the Test and Key probes of one press share both.
     UINT _keyPressStatsKey = 0;
     LONG _keyPressStatsMessageTime = 0;
+    // _NotePassthroughKeySound 上一次报给 Server 的按下（扫描码加扩展位）和它的消息时间：同一次按下可能被探测不止一次。
+    UINT _passthroughSoundKey = 0;
+    LONG _passthroughSoundMessageTime = 0;
     WCHAR _smartPunctuationKey = 0;
     WCHAR _smartPunctuationPrecedingChar = 0;
     bool _smartPunctuationCommittedAscii = false;

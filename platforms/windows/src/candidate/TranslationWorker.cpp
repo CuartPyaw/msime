@@ -1,6 +1,8 @@
+#include "AccountGlossPolicy.h"
 #include "CandidateTranslationPolicy.h"
 #include "TranslationWorker.h"
 #include "CandidateHttpPolicy.h"
+#include "JapaneseReader.h"
 #include "TranslationDisplay.h"
 
 #include "msime_client.h"
@@ -25,6 +27,8 @@ constexpr size_t kMaximumResponseBytes = 1024 * 1024;
 constexpr long kCustomTranslationTimeoutMs = 2500;
 constexpr long kTencentTranslationTimeoutMs = 2000;
 constexpr long kNiuTransTranslationTimeoutMs = 2500;
+// 账号释义由服务端的模型回答，比机器翻译接口慢；macOS 等 30 秒，这里只有一个翻译线程，等太久会让后面的页都排着，所以取 10 秒。
+constexpr long kAccountTranslationTimeoutMs = 10000;
 constexpr auto kTranslationBatchBudget = std::chrono::seconds(6);
 constexpr auto kNegativeTranslationTtl = std::chrono::minutes(8);
 constexpr size_t kMaximumTranslationCacheEntries = 4096;
@@ -99,7 +103,10 @@ std::optional<nlohmann::json> query_document(const std::string &query) {
 
 std::optional<std::string> http_request(const nlohmann::json &descriptor,
                                         const std::function<bool()> &cancelled,
-                                        bool allow_http, long timeout_ms) {
+                                        bool allow_http, long timeout_ms,
+                                        long *status_out = nullptr) {
+  if (status_out)
+    *status_out = 0;
   try {
     if (!descriptor.is_object() || !descriptor.at("url").is_string())
       return std::nullopt;
@@ -164,6 +171,8 @@ std::optional<std::string> http_request(const nlohmann::json &descriptor,
     const auto result = curl_easy_perform(curl.get());
     long status = 0;
     curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE, &status);
+    if (status_out && result == CURLE_OK)
+      *status_out = status;
     if (result != CURLE_OK || status < 200 || status >= 300 ||
         (cancelled && cancelled()))
       return std::nullopt;
@@ -278,6 +287,192 @@ void append_niutrans_item(const nlohmann::json &config,
   }
 }
 
+std::mutex &account_directory_mutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+std::string &account_directory_storage() {
+  static std::string directory;
+  return directory;
+}
+
+std::string account_directory() {
+  std::lock_guard lock(account_directory_mutex());
+  return account_directory_storage();
+}
+
+// 取账号令牌：设置应用登录的账号优先，没有登录时用本机匿名账号（msime_client_account_access_token）。两种会话都没有时（安装后首次注册失败、文件被删）补注册匿名账号再取一次，和 macOS BackendCandidateGloss.translationSession 一样；补注册失败后 account_registration_retry 之内不再试。令牌只在内存里交给请求头，不写日志。
+std::optional<std::string> account_access_token(const std::string &directory,
+                                                const std::string &rejected) {
+  static std::mutex registration_mutex;
+  static std::optional<std::chrono::steady_clock::time_point> last_registration;
+  auto request = nlohmann::json{{"directory", directory}};
+  if (!rejected.empty())
+    request["rejected_token"] = rejected;
+  std::string error;
+  const auto ask = [&]() -> std::optional<std::string> {
+    error.clear();
+    const auto bytes = request.dump();
+    auto raw = owned(msime_client_account_access_token(
+        reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()));
+    if (!raw)
+      return std::nullopt;
+    try {
+      const auto document = nlohmann::json::parse(raw.get());
+      if (!document.value("ok", false)) {
+        if (document.contains("error") && document.at("error").is_string())
+          error = document.at("error").get<std::string>();
+        return std::nullopt;
+      }
+      const auto &value = document.at("value");
+      if (!value.is_object() || !value.contains("access_token") ||
+          !value.at("access_token").is_string() ||
+          value.at("access_token").get<std::string>().empty())
+        return std::nullopt;
+      return value.at("access_token").get<std::string>();
+    } catch (...) {
+      return std::nullopt;
+    }
+  };
+  if (auto token = ask())
+    return token;
+  if (error != "account_unauthorized")
+    return std::nullopt;
+  {
+    std::lock_guard lock(registration_mutex);
+    const auto now = std::chrono::steady_clock::now();
+    if (last_registration && now < *last_registration + account_registration_retry)
+      return std::nullopt;
+    last_registration = now;
+  }
+  owned(msime_client_ensure_anonymous_account(
+      reinterpret_cast<const uint8_t *>(directory.data()), directory.size()));
+  request.erase("rejected_token");
+  return ask();
+}
+
+void persist_english_glosses(const nlohmann::json &query,
+                             const std::string &translations) noexcept;
+
+// 「水杉账号」的候选释义（macOS BackendCandidateGloss + InputController synchronizeAccountGloss）：translations 是本机词典已经答上的结果，账号只问它们留下的、共享层标了 online_gloss 的中文候选，一次一个 POST，一种目标语言（两种目标语言时上层按语言各调一次）。回复按语言和词缓存，账号没有释义的词记否定缓存，八分钟内不再问；请求失败（离线、限流）什么也不记，下一页再问。请求只在 Server 退出时中止，换页不中止：macOS 也让在途的请求跑完，它的回答进缓存，用户退回这一页或再打这个词时直接用。返回空表示这一页已被更新的请求取代。
+std::optional<std::string> account_glosses(
+    const nlohmann::json &query, std::string translations,
+    std::unordered_map<std::string, std::string> &cache,
+    std::unordered_map<std::string, std::chrono::steady_clock::time_point> &negative,
+    const std::function<bool()> &cancelled, const std::function<bool()> &stopping) {
+  const auto directory = account_directory();
+  const auto language = query.at("target_language").get<std::string>();
+  const auto target = account_gloss_target(language);
+  if (directory.empty() || !target)
+    return translations;
+  auto output = nlohmann::json::parse(translations);
+  if (!output.is_array())
+    return translations;
+  std::vector<std::pair<std::string, std::string>> answered;
+  for (const auto &entry : output)
+    if (entry.is_object())
+      answered.emplace_back(entry.value("text", std::string{}),
+                            entry.value("translation", std::string{}));
+  std::vector<AccountGlossCandidate> candidates;
+  for (const auto &candidate : query.at("candidates"))
+    candidates.push_back({candidate.at("text").get<std::string>(),
+                          candidate.value("online_gloss", false)});
+  const auto cache_id = [&](const std::string &word) {
+    return nlohmann::json{{"provider", "account"}, {"target_language", language}, {"key", word}}
+        .dump();
+  };
+  // 缓存里已有的释义先放进去，不等网络。
+  for (const auto &candidate : candidates) {
+    if (!candidate.online_gloss)
+      continue;
+    const bool local = std::any_of(answered.begin(), answered.end(), [&](const auto &entry) {
+      return entry.first == candidate.text && !entry.second.empty();
+    });
+    if (local)
+      continue;
+    if (const auto cached = cache.find(cache_id(candidate.text)); cached != cache.end()) {
+      output.push_back({{"text", candidate.text}, {"translation", cached->second}});
+      answered.emplace_back(candidate.text, cached->second);
+    }
+  }
+  const auto now = std::chrono::steady_clock::now();
+  const auto words = account_gloss_words(candidates, answered, [&](const std::string &word) {
+    const auto found = negative.find(cache_id(word));
+    return found != negative.end() && found->second > now;
+  });
+  if (words.empty() || cancelled())
+    return cancelled() ? std::nullopt : std::optional<std::string>(output.dump());
+  auto token = account_access_token(directory, {});
+  if (!token)
+    return output.dump();
+  const nlohmann::json body{{"texts", words}, {"source_lang", "ZH"}, {"target_lang", *target}};
+  long status = 0;
+  std::optional<std::string> response;
+  for (int attempt = 0; attempt < 2 && token; ++attempt) {
+    const nlohmann::json descriptor{
+        {"url", std::string(account_gloss_url)},
+        {"headers", {{"Authorization", "Bearer " + *token}, {"Content-Type", "application/json"}}},
+        {"body", body}};
+    response = http_request(descriptor, stopping, false, kAccountTranslationTimeoutMs, &status);
+    // 服务端以 401 拒绝了这个令牌（过期、被吊销）：带上它再取一次，共享层会强制刷新，刷新不了时退回匿名账号。
+    if (response || status != 401 || stopping())
+      break;
+    token = account_access_token(directory, *token);
+  }
+  if (!response || stopping())
+    return cancelled() ? std::nullopt : std::optional<std::string>(output.dump());
+  std::optional<std::vector<std::string>> values;
+  try {
+    const auto document = nlohmann::json::parse(*response);
+    const auto code = document.is_object() ? document.value("code", nlohmann::json(nullptr))
+                                           : nlohmann::json(nullptr);
+    const bool ok = (code.is_number_integer() && code.get<int64_t>() == 200) ||
+                    (code.is_string() && code.get<std::string>() == "200");
+    if (ok && document.contains("data") && document.at("data").is_array()) {
+      std::vector<std::string> data;
+      bool strings = true;
+      for (const auto &value : document.at("data")) {
+        if (!value.is_string()) {
+          strings = false;
+          break;
+        }
+        data.push_back(value.get<std::string>());
+      }
+      if (strings)
+        values = account_gloss_values(words, std::move(data));
+    }
+  } catch (...) {
+  }
+  if (!values)
+    return cancelled() ? std::nullopt : std::optional<std::string>(output.dump());
+  auto learned = nlohmann::json::array();
+  for (size_t index = 0; index < words.size(); ++index) {
+    const auto id = cache_id(words[index]);
+    const auto &value = (*values)[index];
+    if (value.empty()) {
+      if (cache.find(id) == cache.end()) {
+        if (negative.size() >= kMaximumTranslationCacheEntries)
+          negative.clear();
+        negative[id] = std::chrono::steady_clock::now() + kNegativeTranslationTtl;
+      }
+      continue;
+    }
+    if (cache.size() >= kMaximumTranslationCacheEntries)
+      cache.clear();
+    cache[id] = value;
+    negative.erase(id);
+    output.push_back({{"text", words[index]}, {"translation", value}});
+    learned.push_back({{"text", words[index]}, {"translation", value}});
+  }
+  // 英文释义存进本机学到的释义表，和其他服务一样（persist_english_glosses 只在目标语言是英文、查询带着用户目录时写）。问账号的都是本机词典没答上的词，存进去不会盖掉随包的释义。
+  if (!learned.empty())
+    persist_english_glosses(query, learned.dump());
+  if (cancelled())
+    return std::nullopt;
+  return output.dump();
+}
+
 void persist_english_glosses(const nlohmann::json &query,
                              const std::string &translations) noexcept {
   try {
@@ -321,7 +516,12 @@ void flatten_single_target(const std::string &query_bytes,
           flatten_translation_line(value.at("translation").get<std::string>());
   result.translations = values.dump();
 }
-// 这一页候选的读音和整句逐词拆解，和 macOS 的 synchronizePronunciation、synchronizeGlossBreakdowns 一样：读音只在打开「显示读音」时问，英文释义行（英文候选则是它自己）整行发给共享读音表；拆解只在离线英文释义打开时问，2 到 32 个汉字的候选发给共享拆解表。两张表都装在资源目录旁边，没装时共享层回答空列表，不是错误。都在本线程上读本机文件，不联网。
+// 日文行的罗马字由本线程上的 IFELanguage 读出（JapaneseReader.h）：每个工作线程一个，在这个线程上创建、使用，由 TranslationWorker::run 返回前关闭，COM 套间跟着线程。
+JapaneseReader &japanese_reader() {
+  thread_local JapaneseReader reader;
+  return reader;
+}
+// 这一页候选的读音和整句逐词拆解，和 macOS 的 synchronizePronunciation、synchronizeGlossBreakdowns 一样：读音只在打开「显示读音」时问，英文释义行（英文候选则是它自己）整行发给共享读音表，日文释义行的第一个词交给本机的微软日语输入法读成罗马字；拆解只在离线英文释义打开时问，2 到 32 个汉字的候选发给共享拆解表。两张表都装在资源目录旁边，没装时共享层回答空列表，不是错误。都在本线程上读本机文件，不联网。
 CandidateReadings candidate_readings(const std::string &query_bytes,
                                      const std::string &translations,
                                      const std::function<bool()> &cancelled) {
@@ -384,8 +584,12 @@ CandidateReadings candidate_readings(const std::string &query_bytes,
       const auto found = answered.find(text);
       return found == answered.end() ? std::string{} : found->second;
     };
+    const auto japanese = [&](const std::string &term) {
+      return cancelled() ? std::string{} : japanese_reader().romaji(term);
+    };
     for (const auto &[text, translation] : page) {
-      const auto lines = gloss_pronunciation_lines(text, translation_lines(translation), targets, english);
+      const auto lines =
+          gloss_pronunciation_lines(text, translation_lines(translation), targets, english, japanese);
       if (lines.empty())
         continue;
       std::string joined;
@@ -452,6 +656,11 @@ TranslationWorker::TranslationWorker(Completed completed, Translator translator)
 }
 
 TranslationWorker::~TranslationWorker() { stop(); }
+
+void TranslationWorker::set_account_directory(std::string directory) {
+  std::lock_guard lock(account_directory_mutex());
+  account_directory_storage() = std::move(directory);
+}
 
 bool TranslationWorker::submit(const FocusLease &lease, std::string query) {
   if (!lease.epoch || !lease.token || query.empty() ||
@@ -654,8 +863,22 @@ TranslationWorker::translate(const FocusLease &lease, const std::string &query_b
                   target) != offline_languages.end()) {
       auto online_query = query;
       online_query.erase("offline_gloss_languages");
-      const auto online = translate(lease, online_query.dump(), cancelled);
       const auto offline = packaged_glosses(target);
+      // 水杉账号只补本机词典留下的空（macOS synchronizeAccountGloss）：词典已经答上的候选不再发给账号。用户自己的翻译服务排在词典前面，照旧整页都问。
+      if (query.value("translation_account", false) && offline && offline->is_array()) {
+        std::unordered_set<std::string> known;
+        for (const auto &entry : *offline)
+          if (entry.is_object() && !entry.value("translation", std::string{}).empty())
+            known.insert(entry.value("text", std::string{}));
+        auto remaining = nlohmann::json::array();
+        for (const auto &candidate : query.at("candidates"))
+          if (known.find(candidate.at("text").get<std::string>()) == known.end())
+            remaining.push_back(candidate);
+        online_query["candidates"] = std::move(remaining);
+      }
+      std::optional<TranslationWorker::Result> online;
+      if (!online_query.at("candidates").empty())
+        online = translate(lease, online_query.dump(), cancelled);
       if (cancelled())
         return std::nullopt;
       std::vector<std::pair<std::string, std::string>> answered;
@@ -703,6 +926,16 @@ TranslationWorker::translate(const FocusLease &lease, const std::string &query_b
         translations = glossed->dump();
       // No gloss for this page. Fall through: an online provider may still be
       // configured, and a page with no dictionary entry is not a failure.
+    }
+    // 用户选了「水杉账号」（共享层已经判过候选释义开着、没有用户自己的服务在前）：本机英文释义之外的中文候选问账号。不走下面的翻译计划：账号只翻译中文候选，英文候选的反向翻译是用户自己服务的事。
+    if (query.value("translation_account", false)) {
+      auto answered = account_glosses(query, translations, translation_cache_,
+                                      translation_negative_cache_, cancelled, [this] {
+                                        return stopping_.load(std::memory_order_acquire);
+                                      });
+      if (!answered || cancelled() || *answered == "[]")
+        return std::nullopt;
+      return TranslationWorker::Result{lease, generation, std::move(*answered)};
     }
     const auto plan_request = nlohmann::json{
         {"target_language", query.at("target_language")},
@@ -907,6 +1140,10 @@ TranslationWorker::translate(const FocusLease &lease, const std::string &query_b
 }
 
 void TranslationWorker::run() noexcept {
+  // 线程函数返回前关掉日文读音用的 IFELanguage 和本线程的 COM：留给 thread_local 的析构，就会在持着加载器锁的线程退出回调里 CoUninitialize。
+  struct CloseJapaneseReader {
+    ~CloseJapaneseReader() { japanese_reader().close(); }
+  } close_japanese_reader;
   for (;;) {
     Request request;
     {

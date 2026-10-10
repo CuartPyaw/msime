@@ -660,7 +660,7 @@ function DesktopSettings() {
             ...client,
             host,
             dictionary: isMobileHost(host.platform) ? mobileDictionary : dictionary,
-            // Windows 和 macOS 在各自的原生候选控制器里查离线释义，所以释义设置在两边都生效。读音也是这两个宿主画在释义后面（Windows 只标英文音标：日文罗马音靠系统分词器，Windows 没有对应接口）；其他宿主不动这个值。
+            // Windows 和 macOS 在各自的原生候选控制器里查离线释义，所以释义设置在两边都生效。读音也是这两个宿主画在释义后面（日文罗马音在 macOS 来自系统分词器，在 Windows 来自系统的微软日语输入法）；其他宿主不动这个值。
             candidatePronunciation: host.platform === "macos" || host.platform === "windows",
             candidateEnglishGloss:
               host.platform === "linux" ||

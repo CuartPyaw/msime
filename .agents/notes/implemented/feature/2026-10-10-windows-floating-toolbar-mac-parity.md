@@ -35,8 +35,8 @@ WinUI 设置窗口的「工具栏组件」加入切换输入方案、手写识�
   - 老用户的共享偏好里 `input_scheme` 缺省为开、`show_app_logo` 缺省为关，升级后工具栏多出方案按钮、logo 换成握把，与 macOS 新装时一样；想要原样的用户在设置里改回。
   - 空闲 10 秒自动隐藏是 Windows 上的新行为，与 macOS 一致但没有单独的开关；用户反馈不需要时要重访，可能加一个偏好。
   - 系统表情面板靠合成 Win+.，Windows 没有给 Win32 进程的公开接口；系统改了这个快捷键就失效。
-  - 提示只是 tooltip 控件，还没有 UIA 片段提供者，读屏软件读不出各个按钮的名字。
-  - 任务栏语言栏图标仍只有中、英、日、한、大写五种，双拼、五笔、粤拼等方案在那里都显示「中」；按方案注册多个 TSF 语言配置文件没有做。
+  - 提示只是 tooltip 控件；读屏读到的按钮名字（与提示同一段文字）由 UI Automation 提供者给出，见 [自绘窗口的 UI Automation 读屏](2026-10-10-windows-server-window-ui-automation.md)。
+  - 任务栏语言栏图标按方案画一个字，Ctrl+Shift+Win+K 也退回 `osk.exe`，见 [遗留项](2026-10-10-windows-mac-parity-leftovers.md)；按方案注册多个 TSF 语言配置文件没有做。
   - 藏文在工具栏仍画「藏」，macOS 画「ཀ」；Windows 的托盘和语言栏都用「藏」，这里保持一致。
 
 ## Verification

@@ -77,6 +77,12 @@ int main() {
             voice_missing_local_model_message);
     // Disabled still wins, silently.
     REQUIRE(voice_start_verdict({false, false, "", "", "", "", true, ""}).check == VoiceStartCheck::Disabled);
+    // Windows 系统识别不需要 Token、接口地址、模型名或本地模型；关掉语音时照样静默。
+    const auto system_ready = voice_start_verdict({true, false, "", "", "", "", false, "", true});
+    REQUIRE(system_ready.check == VoiceStartCheck::Ready);
+    REQUIRE(system_ready.message.empty());
+    REQUIRE(voice_start_verdict({false, false, "", "", "", "", false, "", true}).check ==
+            VoiceStartCheck::Disabled);
     // A cloud provider is unaffected by a model path.
     REQUIRE(voice_start_verdict({true, false, "", "https://synthetic", "m", "", false, "C:\\model"}).message ==
             voice_missing_token_message);

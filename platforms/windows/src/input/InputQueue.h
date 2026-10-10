@@ -32,6 +32,8 @@ public:
   // that client is not focused under that token - which is what the DLL is
   // waiting to hear, and is already so when it never was.
   bool deactivate_terminal(uint64_t client, uint64_t token);
+  // TIP 经 Aux 管道报来的一次交给应用的按下：交给那个客户端的会话出按键音、计入连击。客户端不在或没有以 `token` 持有焦点时什么都不做。
+  bool passthrough_key(uint64_t client, uint64_t token, uint32_t key_class);
   // Dictionary maintenance runs in another process and needs the exclusive
   // file lock that every Engine session holds a share of. Dropping the
   // sessions is what releases it: the Engine has the dictionary files open,

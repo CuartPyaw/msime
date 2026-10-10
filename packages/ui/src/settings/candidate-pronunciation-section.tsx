@@ -3,7 +3,7 @@ import { Row, Switch } from "../core/platform-controls";
 export interface CandidatePronunciationSectionProps {
   value?: boolean;
   disabled?: boolean;
-  /** 宿主能不能给日文释义标罗马音：macOS 用系统分词器生成，Windows 没有对应接口，只标英文音标。缺省为能。 */
+  /** 宿主能不能给日文释义标罗马音：macOS 用系统分词器生成，Windows 用系统的微软日语输入法（IFELanguage）生成。缺省为能。 */
   romaji?: boolean;
   onChange: (value: boolean) => void;
 }

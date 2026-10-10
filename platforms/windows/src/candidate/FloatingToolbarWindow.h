@@ -6,6 +6,7 @@
 #include "ToolbarLayout.h"
 #include "ComponentFailure.h"
 #include <functional>
+#include <memory>
 #include <array>
 #include <optional>
 #include <string>
@@ -15,6 +16,7 @@
 #include <msimeui/DeviceResources.h>
 
 namespace msime::windows {
+class AccessibleWindow;
 // Null toggles the stored value for the toolbar. A value is the Server
 // session's explicit target, so a delayed preference write cannot invert a
 // newer state that was already persisted by another surface.
@@ -67,7 +69,14 @@ public:
     shown_character_set_.reset();
   }
   // 语言按钮提示里的方案名（toolbar_scheme_title），随存储的方案和键位变化。
-  void set_scheme_title(std::wstring title) { scheme_title_ = std::move(title); }
+  void set_scheme_title(std::wstring title) {
+    if (title == scheme_title_)
+      return;
+    scheme_title_ = std::move(title);
+    // 方案名也是语言按钮交给读屏的名字，读屏的树在重画时更新；只换双拼、五笔键位时方案和模式都没变，不重画的话读屏读到的还是旧方案名。
+    if (window_)
+      InvalidateRect(window_, nullptr, FALSE);
+  }
   void set_position(std::optional<POINT> position) { dragged_position_ = position; }
   void set_position_changed(PositionChanged callback) { position_changed_ = std::move(callback); }
   // Tells a busy read apart from a client that is gone; see refresh().
@@ -123,6 +132,14 @@ private:
   void sync_tooltips();
   // 按钮 `index` 的提示文字，提示控件来要的时候现算，所以总是当前状态。
   std::wstring tooltip_text(size_t index);
+  // 按钮的提示文字，也是读屏读到的名字。`value` 是 reader_ 读到的模式，没有时只给按钮的名字。
+  std::wstring button_name(int button, const std::optional<ModePresentation> &value) const;
+  // 执行第 `position` 个按钮，鼠标点击和读屏执行共用。`x` 是点击的横坐标，只在没有按钮位置时用来摆菜单。
+  void run(size_t position, const ModePresentation &value, int x);
+  // 按刚画好的按钮发布读屏的元素树（ToolbarAccessibility.h）。
+  void sync_accessibility(const std::optional<ModePresentation> &value);
+  // 读屏要求执行一个按钮（accessible_invoke_message）。`token` 对不上当前的树时丢掉。
+  void invoke_accessible(int id, LPARAM token);
   // 记下第一次失败并隐藏；error 由 catch 现场先取，免得隐藏窗口时被改写。
   void fail(ComponentFailureSite site);
   // The product mark, at `pixels` square, or nothing when the executable has
@@ -158,6 +175,8 @@ private:
   size_t tooltip_tools_ = 0;
   // 交给提示控件的文字要活到它画完，所以放在这里。
   std::wstring tooltip_text_;
+  // 交给读屏的 UI Automation 提供者；窗口建好后才创建，CreateWindowExW 期间为空。
+  std::unique_ptr<AccessibleWindow> accessible_;
   std::wstring scheme_title_;
   // The icon the mark is drawn from, and the size it was loaded at. Reloaded
   // when the DPI or the user's scale changes, so the mark is never resampled

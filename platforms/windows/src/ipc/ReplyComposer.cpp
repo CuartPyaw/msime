@@ -1,6 +1,7 @@
 #include "ReplyComposer.h"
 #include "CandidateTranslationPolicy.h"
 #include "TranslationDisplay.h"
+#include "GlossColumnPolicy.h"
 #include "ChineseTextConversion.h"
 #include "InputSchemeTraits.h"
 #include "KoreanHanjaKey.h"
@@ -8,6 +9,7 @@
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 
 namespace msime::windows {
 namespace {
@@ -310,6 +312,8 @@ std::optional<PendingReply> ReplyComposer::basic_key(
   if (style != TsfPreeditStyle::Local && style != TsfPreeditStyle::Pinyin &&
       style != TsfPreeditStyle::Empty)
     throw std::invalid_argument("Invalid TSF preedit style");
+  // 预选的释义列只活到下一个按键，见 armed_gloss_column。
+  const int armed_gloss = std::exchange(armed_gloss_column_, 0);
   if (auto restored = restore_segment(session, packet, epoch))
     return restored;
   if (translation_page_active_) {
@@ -343,6 +347,9 @@ std::optional<PendingReply> ReplyComposer::basic_key(
   }
   if (auto korean = korean_syllable_end(session, packet, epoch))
     return korean;
+  // 释义列的快捷键要排在通用修饰键规则前面：那条规则把其他 Ctrl、Alt 组合交还给应用。
+  if (auto gloss = gloss_column_key(session, packet, epoch, armed_gloss))
+    return gloss;
   // Control+Enter is a candidate-only translation action. It must be checked
   // before the generic modifier fallback, which intentionally forwards other
   // Control combinations to the host application.
@@ -419,6 +426,7 @@ std::optional<PendingReply> ReplyComposer::toggle_character_set(
       packet.event_type != FanyImePipeEventType::KeyEvent ||
       !packet.request_id || packet.request_id == FANY_IME_NO_REQUEST_ID)
     throw std::logic_error("Invalid Windows character-set shortcut route");
+  armed_gloss_column_ = 0;
   const bool desired = !session.traditional_output();
   const bool apply = enabled && session.input_enabled() &&
                      (!persist || persist(desired));
@@ -557,6 +565,8 @@ std::optional<PendingReply> ReplyComposer::select_candidate(ServerSession &sessi
   // A pick made here would leave the TIP's own host session behind (scheme::KeyboardOnlyCandidateList).
   if (scheme::KeyboardOnlyCandidateList(view_scheme(view)))
     return std::nullopt;
+  // 鼠标点选上屏的是候选本身，预选的释义列随之作废：选中后送达的 view 不带列号，候选窗不再画下划线，留着它会让下一个空格、数字上屏用户看不到的那一列。
+  armed_gloss_column_ = 0;
   const auto raw_before = view.at("editing_text").get<std::string>();
   if (translation_page_active_) {
     if (index >= translation_page_items_.size())
@@ -564,8 +574,8 @@ std::optional<PendingReply> ReplyComposer::select_candidate(ServerSession &sessi
     const auto text = simplified_to_traditional(translation_page_items_[index],
                                                 traditional_output_);
     session.cancel_composition(epoch_);
-    auto transition = session.view();
-    transition["commit"] = nullptr;
+    // 送达后候选窗和 confirm_ui_delivery 都读 transition 的 view，所以和 Engine 的转换一样包成 {commit, view}。
+    nlohmann::json transition{{"commit", nullptr}, {"view", session.view()}};
     PendingReply next;
     next.source = {client_, epoch_, 0, true, std::move(transition)};
     next.next_prefix.clear();
@@ -684,8 +694,8 @@ std::optional<PendingReply> ReplyComposer::commit_candidate_translation(
   const auto output = simplified_to_traditional(
       first_translation_sense(translation), traditional_output_);
   session.cancel_composition(epoch);
-  auto transition = session.view();
-  transition["commit"] = nullptr;
+  // 送达后候选窗从 transition 的 view 收起（candidate_presentation），所以和 Engine 的转换一样包成 {commit, view}。
+  const nlohmann::json transition{{"commit", nullptr}, {"view", session.view()}};
   PendingReply next;
   next.source = {client_, epoch_, packet.request_id, true, transition};
   next.encoded = exact_commit(packet.request_id, prefix_ + output);
@@ -695,6 +705,112 @@ std::optional<PendingReply> ReplyComposer::commit_candidate_translation(
   session_ = expected_session;
   pending_ = std::move(next);
   return pending_;
+}
+
+std::optional<PendingReply> ReplyComposer::gloss_column_key(
+    ServerSession &session, const FanyImeNamedpipeData &packet,
+    uint64_t epoch, int armed) {
+  if (packet.event_type != FanyImePipeEventType::KeyEvent ||
+      (packet.modifiers_down & PipeMetadata::CandidateActive) == 0)
+    return std::nullopt;
+  const auto key = normalize_digit_key(packet.keycode);
+  const auto modifiers = PipeMetadata::key_modifiers(packet.modifiers_down);
+  const bool digit = key >= '1' && key <= '9';
+  const bool tab = key == 0x09 && (modifiers == 0 || modifiers == gloss_modifier_shift);
+  // 和 TIP 的 IsGlossColumnShortcut 一样只认主键盘的数字：Alt+小键盘数字是 Windows 的 Alt 码。
+  const auto direct = packet.keycode >= '1' && packet.keycode <= '9'
+                          ? gloss_column_for_digit_modifiers(modifiers)
+                          : std::nullopt;
+  const bool armed_digit = digit && modifiers == 0 && armed > 0;
+  const bool armed_space = key == 0x20 && modifiers == 0 && armed > 0;
+  if (!direct && !tab && !armed_digit && !armed_space)
+    return std::nullopt;
+  const bool uiless = (packet.modifiers_down & FanyImePipeFlags::UiLess) != 0;
+  const auto view = session.view();
+  // 不上屏、只回一个导航回执：候选窗跟着送达的 view 走。
+  const auto acknowledge = [&](nlohmann::json shown) {
+    KeyResult result{client_, epoch_, packet.request_id, true,
+                     nlohmann::json{{"handled", true},
+                                    {"commit", nullptr},
+                                    {"diagnostic", nullptr},
+                                    {"view", std::move(shown)}}};
+    return stage(result, ReplyPath::IgnoredNavigation, uiless);
+  };
+  // Ctrl+Enter 打开的释义页上按 Alt/Ctrl+数字：释义页就此关闭，按真实候选处理，免得关不掉的释义页让下一次组字的空格、数字上屏旧义项。
+  if (direct && translation_page_active_) {
+    translation_page_active_ = false;
+    translation_page_items_.clear();
+    translation_page_view_ = {};
+  }
+  const auto &candidates = view.at("candidates");
+  // 韩文、注音、越南文和藏文在 TIP 自己的宿主会话里组字，这里上屏会让那个会话落后，和 Ctrl+Enter 一样不接；TIP 自己绘制候选的 UILess 宿主（游戏、全屏）也不接。Alt/Ctrl+数字例外地要回执：TIP 在候选列表打开时已经吃掉了它（KeyEventSink 的 IsGlossColumnShortcut），返回空会让 SessionPump 当作分派失败断开这个客户端。
+  if (uiless || !session.input_enabled() || !view.at("focused").get<bool>() ||
+      candidates.empty() || view.at("editing_text").get_ref<const std::string &>().empty() ||
+      scheme::AlwaysInlinePreedit(view_scheme(view)))
+    return direct ? std::optional<PendingReply>(acknowledge(view)) : std::nullopt;
+  const auto translation_at = [&](size_t index) -> std::string {
+    return index < candidates.size()
+               ? candidates.at(index).value("translation", std::string{})
+               : std::string{};
+  };
+  size_t highlighted = 0;
+  for (size_t index = 0; index < candidates.size(); ++index)
+    if (candidates.at(index).value("highlighted", false))
+      highlighted = index;
+  // 和 Ctrl+Enter 只有一条释义时一样：释义按繁体输出开关转换后原样上屏，组字整个取消。
+  const auto commit = [&](const std::string &gloss) {
+    const auto output = simplified_to_traditional(gloss, traditional_output_);
+    const auto expected_session = view.at("session").get<uint64_t>();
+    session.cancel_composition(epoch);
+    // 送达后候选窗从 transition 的 view 收起（candidate_presentation），所以和 Engine 的转换一样包成 {commit, view}。
+    const nlohmann::json transition{{"commit", nullptr}, {"view", session.view()}};
+    PendingReply next;
+    next.source = {client_, epoch_, packet.request_id, true, transition};
+    next.encoded = exact_commit(packet.request_id, prefix_ + output);
+    next.next_prefix.clear();
+    next.committed_text = prefix_ + output;
+    next.traditional_output = traditional_output_;
+    session_ = expected_session;
+    pending_ = std::move(next);
+    return pending_;
+  };
+  if (tab) {
+    const auto next = next_armed_gloss_column(armed, translation_at(highlighted),
+                                              modifiers == gloss_modifier_shift);
+    // 高亮候选没有释义：Tab 照常翻页。
+    if (!next)
+      return std::nullopt;
+    armed_gloss_column_ = *next;
+    auto shown = view;
+    if (*next > 0)
+      shown["armed_gloss_column"] = *next;
+    return acknowledge(std::move(shown));
+  }
+  if (direct) {
+    const auto gloss = gloss_column_text(translation_at(static_cast<size_t>(key - '1')), *direct);
+    // TIP 已经把这个组合键吃掉了，交还不了应用；没有那一列释义时什么也不做。
+    if (gloss.empty())
+      return acknowledge(view);
+    return commit(gloss);
+  }
+  if (armed_digit) {
+    // 数字在这个状态下是输入（V 模式的数字、U 模式的十六进制）时不接。
+    if (!digit_selects_candidate(view.at("local_mode").get<std::string>(),
+                                 view.value("spelling_symbols", std::string{}),
+                                 static_cast<uint32_t>(packet.wch), modifiers))
+      return std::nullopt;
+    const auto gloss = gloss_column_text(translation_at(static_cast<size_t>(key - '1')), armed);
+    if (gloss.empty())
+      return std::nullopt;
+    return commit(gloss);
+  }
+  // 空格在这个状态下是拼写符号（注音的一声）时不接。
+  if (view.value("spelling_symbols", std::string{}).find(' ') != std::string::npos)
+    return std::nullopt;
+  const auto gloss = gloss_column_text(translation_at(highlighted), armed);
+  if (gloss.empty())
+    return std::nullopt;
+  return commit(gloss);
 }
 
 PendingReply ReplyComposer::translation_page_reply(
@@ -870,8 +986,8 @@ std::optional<PendingReply> ReplyComposer::translation_page_key(
   const auto text = simplified_to_traditional(translation_page_items_[index],
                                               traditional_output_);
   session.cancel_composition(epoch);
-  auto transition = session.view();
-  transition["commit"] = nullptr;
+  // 送达后候选窗从 transition 的 view 收起（candidate_presentation），所以和 Engine 的转换一样包成 {commit, view}。
+  const nlohmann::json transition{{"commit", nullptr}, {"view", session.view()}};
   PendingReply next;
   next.source = {client_, epoch, packet.request_id, true, transition};
   next.encoded = exact_commit(packet.request_id, prefix_ + text);
@@ -905,6 +1021,7 @@ void ReplyComposer::confirm_ui_delivery(uint64_t client, uint64_t epoch,
 }
 void ReplyComposer::cancel() {
   pending_.reset();
+  armed_gloss_column_ = 0;
   japanese_conversion_.reset();
   prefix_.clear();
   segment_restore_history_.clear();
@@ -922,10 +1039,12 @@ std::optional<PendingReply> ReplyComposer::configured_key(
   if (style != TsfPreeditStyle::Local && style != TsfPreeditStyle::Pinyin &&
       style != TsfPreeditStyle::Empty)
     throw std::invalid_argument("Invalid TSF preedit style");
-  if (auto word = session.word_character(packet, epoch, word_binding))
+  if (auto word = session.word_character(packet, epoch, word_binding)) {
+    armed_gloss_column_ = 0;
     return stage(word->key, word->exact
                                 ? ReplyPath::Punctuation
                                 : ReplyPath::CandidatePunctuationFallback);
+  }
   if (auto basic =
           basic_key(session, packet, epoch, style, std::move(local_text)))
     return basic;

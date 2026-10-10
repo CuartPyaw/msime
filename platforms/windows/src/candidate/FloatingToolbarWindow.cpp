@@ -1,5 +1,7 @@
 #include "FloatingToolbarWindow.h"
+#include "AccessibleWindow.h"
 #include "FloatingToolbarPlacement.h"
+#include "ToolbarAccessibility.h"
 #include "ToolbarIcons.h"
 #include "ToolbarLayout.h"
 #include "ToolbarCoordinates.h"
@@ -42,6 +44,20 @@ std::optional<POINT> clamp_position(POINT position, int width, int height) {
 bool same(const FocusLease &a, const FocusLease &b) {
   return a.epoch == b.epoch && a.token == b.token &&
          same_ticket(a.transport, b.transport);
+}
+// 按钮名字交给读屏时用 UTF-8（AccessibleElement 的约定）。
+std::string utf8(const std::wstring &text) {
+  if (text.empty())
+    return {};
+  const int count = WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()),
+                                        nullptr, 0, nullptr, nullptr);
+  if (count <= 0)
+    return {};
+  std::string result(static_cast<size_t>(count), '\0');
+  if (WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), result.data(),
+                          count, nullptr, nullptr) != count)
+    return {};
+  return result;
 }
 } // namespace
 
@@ -114,9 +130,12 @@ std::wstring FloatingToolbarWindow::tooltip_text(size_t index) {
   const auto active = slots();
   if (index >= active.size())
     return {};
-  const int button = active[index];
+  return button_name(active[index], reader_());
+}
+std::wstring FloatingToolbarWindow::button_name(int button,
+                                                const std::optional<ModePresentation> &value) const {
   std::optional<bool> state;
-  if (const auto value = reader_(); value && button <= kToolbarCharacterSet) {
+  if (value && button <= kToolbarCharacterSet) {
     switch (button) {
     case kToolbarLanguage:
       state = value->chinese;
@@ -135,6 +154,65 @@ std::wstring FloatingToolbarWindow::tooltip_text(size_t index) {
   return toolbar_tooltip(button, state, language_, scheme_title_, panels_available_,
                          MSIME_EDITION_DISPLAY_NAME);
 }
+void FloatingToolbarWindow::sync_accessibility(const std::optional<ModePresentation> &value) {
+  if (!accessible_)
+    return;
+  std::vector<ToolbarAccessibleButton> buttons;
+  for (const int button : slots())
+    buttons.push_back({button, utf8(button_name(button, value)), usable(button)});
+  accessible_->publish(toolbar_accessible_tree(
+      buttons, metrics(), toolbar_pixel_unit(GetDpiForWindow(window_), scale_), layout_.show_logo,
+      MSIME_EDITION_DISPLAY_NAME_UTF8));
+}
+void FloatingToolbarWindow::invoke_accessible(int id, LPARAM token) {
+  if (!accessible_ || !accessible_->current(token) || !IsWindowVisible(window_))
+    return;
+  // 与鼠标点击同样的条件：按钮画出来时的焦点租约还是当前的。
+  const auto value = reader_();
+  if (!value || !shown_ || !same(value->lease, shown_->lease))
+    return;
+  const auto active = slots();
+  const auto found = std::find_if(active.begin(), active.end(), [id](int button) {
+    return toolbar_accessible_id(button) == id;
+  });
+  if (found == active.end())
+    return;
+  if (activity_action_)
+    activity_action_();
+  run(static_cast<size_t>(found - active.begin()), *value, 0);
+}
+void FloatingToolbarWindow::run(size_t position, const ModePresentation &value, int x) {
+  const auto active = slots();
+  if (position >= active.size())
+    return;
+  const int slot = active[position];
+  if (!usable(slot)) {
+    // Nothing to open, so the press is not an action. Reported the same
+    // way the tray reports it: by doing nothing visible, not by looking
+    // pressed and then dropping the command.
+  }
+  else if (slot <= kToolbarPunctuation) {
+    if (auto command = toolbar_mode_command(
+            slot, value.chinese, value.fullwidth, value.chinese_punctuation))
+      click_(ModeClick{value.lease, *command});
+  }
+  else if (slot == 3 && character_set_action_)
+    character_set_action_();
+  else if (slot == 4 && emoji_action_)
+    emoji_action_();
+  else if (slot == 5 && keyboard_action_)
+    keyboard_action_();
+  else if (slot == 6 && settings_action_)
+    settings_action_();
+  else if (slot == kToolbarHandwriting && handwriting_action_)
+    handwriting_action_();
+  else if (slot == kToolbarVoice && voice_action_)
+    voice_action_();
+  else if (slot == kToolbarInputScheme && input_scheme_action_)
+    input_scheme_action_(menu_anchor(position, x));
+  else if (slot == 10 && hide_action_)
+    hide_action_();
+}
 
 FloatingToolbarWindow::FloatingToolbarWindow(Reader reader, Click click)
     : reader_(std::move(reader)), click_(std::move(click)) {
@@ -152,6 +230,8 @@ FloatingToolbarWindow::FloatingToolbarWindow(Reader reader, Click click)
                             kWidth, kHeight, nullptr, nullptr, type.hInstance,
                             this);
   if (!window_) throw std::runtime_error("Toolbar window unavailable");
+  // 与 macOS 工具栏每个按钮的 accessibilityLabel 对应：读屏通过 UI Automation 读到按钮的名字和状态，也能执行按钮。
+  accessible_ = std::make_unique<AccessibleWindow>(window_);
   // 悬停提示，与 macOS 每个按钮的 toolTip 对应。建不出来不算工具栏失败，只是没有提示。
   INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_BAR_CLASSES};
   if (InitCommonControlsEx(&controls))
@@ -163,6 +243,8 @@ FloatingToolbarWindow::FloatingToolbarWindow(Reader reader, Click click)
 }
 FloatingToolbarWindow::~FloatingToolbarWindow() {
   hide();
+  // 先断开读屏拿着的提供者，再销毁窗口。
+  accessible_.reset();
   if (logo_) DestroyIcon(logo_);
   if (tooltip_) DestroyWindow(tooltip_);
   if (window_) DestroyWindow(window_);
@@ -191,6 +273,8 @@ void FloatingToolbarWindow::hide() {
   shown_character_set_.reset();
   // 提示是工具栏拥有的弹出窗口，工具栏隐藏时它不会跟着消失，正开着的提示要收起来。
   if (tooltip_) SendMessageW(tooltip_, TTM_POP, 0, 0);
+  // 隐藏的工具栏没有可读的东西。
+  if (accessible_) accessible_->publish({AccessibleContainer::ToolBar, toolbar_accessible_name, {}});
   if (window_) ShowWindow(window_, SW_HIDE);
 }
 void FloatingToolbarWindow::refresh(bool enabled) {
@@ -480,6 +564,9 @@ void FloatingToolbarWindow::paint() {
   }
   if (FAILED(drawn))
     throw std::runtime_error("Toolbar drawing failed");
+  // 名字按刚画出来的状态取。这次没读到模式（输入队列正忙）或租约不是画面上那个时按钮没有重画，读屏的树也留着上一棵，免得名字在带状态和不带状态之间来回跳、作废读屏刚发出的执行请求。
+  if (value && shown_ && same(value->lease, shown_->lease))
+    sync_accessibility(value);
 }
 LRESULT CALLBACK FloatingToolbarWindow::procedure(HWND window, UINT message,
                                                     WPARAM w, LPARAM l) noexcept {
@@ -677,36 +764,8 @@ LRESULT CALLBACK FloatingToolbarWindow::procedure(HWND window, UINT message,
               same(value->lease, *self->pressed_lease_) &&
               same(value->lease, self->shown_->lease));
       self->pressed_lease_.reset();
-      if (valid_click) {
-        const size_t position = *position_at;
-        const int slot = active[position];
-        if (!self->usable(slot)) {
-          // Nothing to open, so the press is not an action. Reported the same
-          // way the tray reports it: by doing nothing visible, not by looking
-          // pressed and then dropping the command.
-        }
-        else if (slot <= kToolbarPunctuation) {
-          if (auto command = toolbar_mode_command(
-                  slot, value->chinese, value->fullwidth, value->chinese_punctuation))
-            self->click_(ModeClick{value->lease, *command});
-        }
-        else if (slot == 3 && self->character_set_action_)
-          self->character_set_action_();
-        else if (slot == 4 && self->emoji_action_)
-          self->emoji_action_();
-        else if (slot == 5 && self->keyboard_action_)
-          self->keyboard_action_();
-        else if (slot == 6 && self->settings_action_)
-          self->settings_action_();
-        else if (slot == kToolbarHandwriting && self->handwriting_action_)
-          self->handwriting_action_();
-        else if (slot == kToolbarVoice && self->voice_action_)
-          self->voice_action_();
-        else if (slot == kToolbarInputScheme && self->input_scheme_action_)
-          self->input_scheme_action_(self->menu_anchor(position, x));
-        else if (slot == 10 && self->hide_action_)
-          self->hide_action_();
-      }
+      if (valid_click)
+        self->run(*position_at, *value, x);
       return 0;
     }
     case WM_RBUTTONDOWN:
@@ -722,6 +781,18 @@ LRESULT CALLBACK FloatingToolbarWindow::procedure(HWND window, UINT message,
         self->context_menu_action_(self->menu_anchor(std::nullopt, x));
       return 0;
     }
+    case WM_GETOBJECT:
+      if (self->accessible_)
+        if (const auto answer = self->accessible_->answer(w, l))
+          return *answer;
+      break;
+    case accessible_invoke_message:
+      self->invoke_accessible(static_cast<int>(w), l);
+      return 0;
+    case WM_DESTROY:
+      if (self->accessible_)
+        self->accessible_->disconnect();
+      break;
     case WM_NOTIFY: {
       auto *header = reinterpret_cast<NMHDR *>(l);
       if (header && self->tooltip_ && header->hwndFrom == self->tooltip_ &&
