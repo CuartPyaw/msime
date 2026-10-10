@@ -975,7 +975,9 @@ impl NineKeySession {
             .row_cache_batch();
         let mut queried = (alternatives.len() > SMALL_QUERY_KEY_BATCH)
             .then(|| HashSet::with_capacity(alternatives.len()));
-        let mut candidates = Vec::with_capacity(CANDIDATE_LIMIT);
+        // 接管会话已有候选缓冲，刷新时保留其容量和候选词字段的存储。
+        let mut candidates = std::mem::take(&mut self.candidates);
+        candidates.clear();
         let mut key = String::with_capacity(locked_key.len() + self.digits.len() * 4 + 1);
         // 各条切分的前缀组彼此大量重复，一次刷新会推入上万行，见 `push_ranked`。
         let mut leading: HashMap<String, RankKey> = HashMap::with_capacity(CANDIDATE_LIMIT);
@@ -3410,6 +3412,20 @@ mod tests {
             allocations <= 149,
             "candidate pinyin normalization allocated {allocations} buffers"
         );
+    }
+
+    #[test]
+    fn refresh_reuses_candidate_vector_storage() {
+        let fixture = fixture();
+        let mut session = open(&fixture.paths, false, EnglishInputOptions::default());
+        session.digits = "64".into();
+        session.refresh();
+        let pointer = session.candidates.as_ptr();
+        let capacity = session.candidates.capacity();
+        assert!(capacity > 0);
+        session.refresh();
+        assert_eq!(session.candidates.as_ptr(), pointer);
+        assert_eq!(session.candidates.capacity(), capacity);
     }
 
     #[test]
