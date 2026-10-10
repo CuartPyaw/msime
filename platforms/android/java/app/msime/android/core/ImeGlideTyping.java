@@ -186,7 +186,7 @@ final class ImeGlideTyping implements KeyboardKeyArea.GlideTracker {
         }
         xs[count] = x;
         ys[count] = y;
-        times[count] = Math.max(0, eventTime - downTime);
+        times[count] = BoundsPolicy.nonNegative(eventTime - downTime);
         count++;
         if (gliding && trail != null) trail.lineTo(x + trailOffsetX, y + trailOffsetY);
     }
