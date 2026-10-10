@@ -278,7 +278,7 @@ public final class BadgeGridView extends View {
                 scale = frame(WIGGLE, wiggle, 2);
             } else if (popStart >= 0) {
                 long local = popStart - POP_DELAY - POP_STAGGER * index;
-                float t = KeyboardGeometry.bounded(local / (float) POP_MILLIS, 0f, 1f);
+                float t = BoundsPolicy.bounded(local / (float) POP_MILLIS, 0f, 1f);
                 scale = frame(POP, t, 1);
             }
             int[] colours = colours(badge.group());

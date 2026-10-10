@@ -165,7 +165,7 @@ public final class KeyboardSkinKeyDrawable extends Drawable {
     }
 
     @Override public void setAlpha(int value) {
-        alpha = KeyboardGeometry.bounded(value, 0, 255);
+        alpha = BoundsPolicy.bounded(value, 0, 255);
         invalidateSelf();
     }
 

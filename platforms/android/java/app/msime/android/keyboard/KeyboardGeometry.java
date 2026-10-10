@@ -110,7 +110,7 @@ public final class KeyboardGeometry {
 
     /** 键盘高度百分比对应的高度调整 dp：`round(184 × (p − 100) / 100)`，范围外先钳到 75–160（向远离零的方向取整）。 */
     public static int heightPercentToAdjustment(int percent) {
-        int clamped = bounded(percent, MIN_HEIGHT_PERCENT, MAX_HEIGHT_PERCENT);
+        int clamped = BoundsPolicy.bounded(percent, MIN_HEIGHT_PERCENT, MAX_HEIGHT_PERCENT);
         int scaled = HEIGHT_PERCENT_BASE_DP * (clamped - DEFAULT_HEIGHT_PERCENT);
         return (scaled + Integer.signum(scaled) * 50) / 100;
     }
@@ -126,7 +126,7 @@ public final class KeyboardGeometry {
     /** 新设计下的高度调整：缺省（{@link Integer#MIN_VALUE}）为 0，其余钳到 −46…110。 */
     public static int designHeightAdjustment(int value) {
         if (value == Integer.MIN_VALUE) return DEFAULT_HEIGHT_ADJUSTMENT_DP;
-        return bounded(value, MIN_DESIGN_HEIGHT_ADJUSTMENT_DP, MAX_DESIGN_HEIGHT_ADJUSTMENT_DP);
+        return BoundsPolicy.bounded(value, MIN_DESIGN_HEIGHT_ADJUSTMENT_DP, MAX_DESIGN_HEIGHT_ADJUSTMENT_DP);
     }
 
     /**
@@ -148,13 +148,13 @@ public final class KeyboardGeometry {
 
     /** 某个高度百分比下的键高：`round(46 × p / 100)`。 */
     public static int designKeyHeight(int percent) {
-        int clamped = bounded(percent, MIN_HEIGHT_PERCENT, MAX_HEIGHT_PERCENT);
+        int clamped = BoundsPolicy.bounded(percent, MIN_HEIGHT_PERCENT, MAX_HEIGHT_PERCENT);
         return (DESIGN_KEY_HEIGHT_DP * clamped + 50) / 100;
     }
 
     /** 内联高度条上显示的百分比文字，如「100%」。 */
     public static String displayPercent(int percent) {
-        return bounded(percent, MIN_HEIGHT_PERCENT, MAX_HEIGHT_PERCENT) + "%";
+        return BoundsPolicy.bounded(percent, MIN_HEIGHT_PERCENT, MAX_HEIGHT_PERCENT) + "%";
     }
 
     public static int keySpacing(int value) {
@@ -179,7 +179,7 @@ public final class KeyboardGeometry {
 
     public static int heightAdjustment(int value) {
         if (value == Integer.MIN_VALUE) return DEFAULT_HEIGHT_ADJUSTMENT_DP;
-        return bounded(value, MIN_HEIGHT_ADJUSTMENT_DP, MAX_HEIGHT_ADJUSTMENT_DP);
+        return BoundsPolicy.bounded(value, MIN_HEIGHT_ADJUSTMENT_DP, MAX_HEIGHT_ADJUSTMENT_DP);
     }
 
     /** 读取整数值，拒绝 JSONObject 的小数截断、布尔转换和非有限数。 */
@@ -502,28 +502,8 @@ public final class KeyboardGeometry {
         ViewPolicy.clearMinimumSize(key);
     }
 
-    public static int bounded(int value, int minimum, int maximum) {
-        return BoundsPolicy.bounded(value, minimum, maximum);
-    }
-
-    public static long bounded(long value, long minimum, long maximum) {
-        return BoundsPolicy.bounded(value, minimum, maximum);
-    }
-
-    public static double bounded(double value, double minimum, double maximum) {
-        return BoundsPolicy.bounded(value, minimum, maximum);
-    }
-
-    public static double bounded(double value, double minimum, double maximum, double fallback) {
-        return Double.isFinite(value) ? bounded(value, minimum, maximum) : fallback;
-    }
-
-    public static float bounded(float value, float minimum, float maximum) {
-        return BoundsPolicy.bounded(value, minimum, maximum);
-    }
-
     private static int clamp(int value, int minimum, int maximum, int fallback) {
         if (value < 0) return fallback;
-        return bounded(value, minimum, maximum);
+        return BoundsPolicy.bounded(value, minimum, maximum);
     }
 }

@@ -176,7 +176,7 @@ public final class KeyboardSkinBackgroundDrawable extends Drawable {
     }
 
     @Override public void setAlpha(int value) {
-        alpha = KeyboardGeometry.bounded(value, 0, 255);
+        alpha = BoundsPolicy.bounded(value, 0, 255);
         background.setAlpha(alpha);
         pattern.setAlpha(Math.round(patternAlpha * alpha / 255f));
         photoPaint.setAlpha(alpha);

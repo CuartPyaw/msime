@@ -338,7 +338,7 @@ final class ImeStyler {
     static int fade(String color, double opacity) {
         int value = Color.parseColor(color);
         return ColorPolicy.withAlpha(value,
-            (float) KeyboardGeometry.bounded(opacity, 0, 1));
+            (float) BoundsPolicy.bounded(opacity, 0, 1));
     }
 
     /** The outlined badge the keyboard wears while nothing is being composed. */

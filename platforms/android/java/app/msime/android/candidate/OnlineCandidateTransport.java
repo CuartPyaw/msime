@@ -76,9 +76,9 @@ public final class OnlineCandidateTransport {
             connection = (HttpURLConnection) AiEndpointPolicy.open(target);
             HttpConnectionPolicy.rejectRedirects(connection);
             connection.setRequestMethod("POST");
-            HttpConnectionPolicy.setTimeouts(connection, KeyboardGeometry.bounded(
+            HttpConnectionPolicy.setTimeouts(connection, BoundsPolicy.bounded(
                 KeyboardGeometry.strictInt(descriptor, "connect_timeout_ms", CONNECT_TIMEOUT_MILLIS),
-                1_000, 10_000), KeyboardGeometry.bounded(
+                1_000, 10_000), BoundsPolicy.bounded(
                 KeyboardGeometry.strictInt(descriptor, "timeout_ms", READ_TIMEOUT_MILLIS),
                 1_000, 10_000));
             connection.setDoOutput(true);

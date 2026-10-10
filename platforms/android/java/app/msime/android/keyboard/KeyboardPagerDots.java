@@ -49,7 +49,7 @@ public final class KeyboardPagerDots extends View {
         int next = BoundsPolicy.nonNegative(value);
         if (count == next) return;
         count = next;
-        active = KeyboardGeometry.bounded(active, 0, BoundsPolicy.nonNegative(count - 1));
+        active = BoundsPolicy.bounded(active, 0, BoundsPolicy.nonNegative(count - 1));
         previous = active;
         progress = 1f;
         ViewPolicy.setVisible(this, count > 1);
@@ -62,7 +62,7 @@ public final class KeyboardPagerDots extends View {
     public int active() { return active; }
 
     public void setActive(int value, boolean animate) {
-        int next = KeyboardGeometry.bounded(value, 0, BoundsPolicy.nonNegative(count - 1));
+        int next = BoundsPolicy.bounded(value, 0, BoundsPolicy.nonNegative(count - 1));
         if (next == active) return;
         previous = active;
         active = next;
@@ -109,7 +109,7 @@ public final class KeyboardPagerDots extends View {
             float weight = index == active ? progress : index == previous ? 1f - progress : 0f;
             float width = dot + (wide - dot) * weight;
             paint.setColor(ColorPolicy.blend(inactiveColor, activeColor,
-                KeyboardGeometry.bounded(weight, 0f, 1f)));
+                BoundsPolicy.bounded(weight, 0f, 1f)));
             rect.set(x, top, x + width, top + dot);
             canvas.drawRoundRect(rect, dot / 2f, dot / 2f, paint);
             x += width + gap;
