@@ -11,6 +11,12 @@ import java.util.Locale;
 public final class TextPolicy {
     private TextPolicy() {}
 
+    /** Return whether a code point is one of the 52 ASCII Latin letters. */
+    public static boolean isAsciiLetter(int codePoint) {
+        return (codePoint >= 'A' && codePoint <= 'Z')
+            || (codePoint >= 'a' && codePoint <= 'z');
+    }
+
     public static boolean blank(String value) {
         if (value == null || value.isEmpty()) return true;
         return value.codePoints().allMatch(codePoint -> Character.isWhitespace(codePoint)
