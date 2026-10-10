@@ -203,6 +203,9 @@ public final class MSIMEInputService extends InputMethodService {
     private boolean englishSuggestionsEnabled = true;
     private java.util.List<String> candidateTranslationTargets = java.util.List.of("en");
     private CandidateTranslationStore candidateTranslationStore;
+    private long candidateTranslationBindingEpoch;
+    private long candidateTranslationVerifiedGeneration = -1L;
+    private long candidateTranslationAppliedGeneration = -1L;
     private boolean wubiCodeHint = true;
     private boolean wubiMixedPinyin;
     // 五笔版本只决定方案卡片和工具栏上的「86」「98」字样；选表由引擎按同一份偏好里的 `wubi_profile` 决定。
@@ -1525,6 +1528,9 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     private void stop(boolean finish) {
+        candidateTranslationBindingEpoch++;
+        candidateTranslationVerifiedGeneration = -1L;
+        candidateTranslationAppliedGeneration = -1L;
         imeLetterRows.cancelBackspaceRepeat();
         imeDebugOverlay.clearDiagnostic();
         clearSmartPunctuationSnapshots();
@@ -2000,6 +2006,44 @@ public final class MSIMEInputService extends InputMethodService {
             candidateTranslationStore = new CandidateTranslationStore(
                 this, candidateTranslationWorker, main,
                 generation -> applyCandidateTranslations(generation));
+        }
+    }
+
+    private void verifyCandidateTranslationBinding(long generation,
+            java.util.function.Consumer<Boolean> onVerified) {
+        long epoch = ++candidateTranslationBindingEpoch;
+        long expectedSession = session;
+        candidateTranslationVerifiedGeneration = -1L;
+        try {
+            candidateTranslationWorker.execute(() -> {
+                app.msime.android.SyncSwitch.Binding binding = SyncSignals.binding(this);
+                main.post(() -> {
+                    if (epoch != candidateTranslationBindingEpoch || session != expectedSession
+                            || view == null || CandidateGlossPolicy.strictOr(view.opt("generation"), -1) != generation
+                            || candidateTranslationStore == null) return;
+                    // Signed-out users may use the anonymous translation endpoint, but an
+                    // unavailable provider cannot prove which account owns cached rows.
+                    String key = binding == null ? null
+                        : binding.accountId() == null ? null
+                        : binding.generation() + ":" + binding.accountId();
+                    boolean hadEntries = candidateTranslationStore.hasEntries();
+                    boolean same = candidateTranslationStore.bindTo(key);
+                    if (!same) candidateTranslationAppliedGeneration = -1L;
+                    if (key == null) {
+                        if (hadEntries) applyVerifiedCandidateTranslations(generation, true);
+                        onVerified.accept(null);
+                        return;
+                    }
+                    candidateTranslationVerifiedGeneration = generation;
+                    if (!same && hadEntries) {
+                        applyVerifiedCandidateTranslations(generation, true);
+                        return;
+                    }
+                    onVerified.accept(same);
+                });
+            });
+        } catch (RuntimeException ignored) {
+            candidateTranslationStore.bindTo(null);
         }
     }
 
@@ -2552,7 +2596,7 @@ public final class MSIMEInputService extends InputMethodService {
             candidateOfflineGlosses = offline;
             candidateOfflineGlossSession = token.session();
             candidateOfflineGlossGeneration = token.generation();
-            translations = mergedCandidateGlosses(token.generation()).toString();
+            translations = mergedCandidateGlosses(token.generation(), false).toString();
         }
         try {
             JSONObject applied = value(NativeClient.applyTranslations(
@@ -2562,6 +2606,7 @@ public final class MSIMEInputService extends InputMethodService {
             if (CandidateGlossPolicy.strictOr(next.opt("session"), Long.MIN_VALUE) != token.session()
                     || CandidateGlossPolicy.strictOr(next.opt("generation"), -1) != token.generation()) return;
             view = next;
+            if (offline != null) candidateTranslationAppliedGeneration = -1L;
             if (candidatePanelOpen) {
                 JSONObject snapshot = value(NativeClient.allCandidates(token.session()));
                 if (CandidateGlossPolicy.strictOr(snapshot.opt("session"), Long.MIN_VALUE) == token.session()
@@ -2596,16 +2641,35 @@ public final class MSIMEInputService extends InputMethodService {
             JSONObject candidate = entries.optJSONObject(index);
             if (candidate != null) words.add(InputViewValuePolicy.textOr(candidate, "text", ""));
         }
-        candidateTranslationStore.refresh(words, candidateTranslationTargets, generation);
+        verifyCandidateTranslationBinding(generation, same -> {
+            if (same != null) {
+                candidateTranslationStore.refresh(words, candidateTranslationTargets, generation);
+                if (same && candidateTranslationStore.hasEntries()
+                        && candidateTranslationAppliedGeneration != generation)
+                    applyVerifiedCandidateTranslations(generation);
+            }
+        });
     }
 
     private void applyCandidateTranslations(long generation) {
         if (!candidateTranslationAccount || session == 0 || view == null
                 || CandidateGlossPolicy.strictOr(view.opt("generation"), -1) != generation) return;
+        verifyCandidateTranslationBinding(generation, same -> {
+            if (same == null) return;
+            if (same) applyVerifiedCandidateTranslations(generation);
+            else scheduleCandidateTranslations();
+        });
+    }
+
+    private void applyVerifiedCandidateTranslations(long generation) {
+        applyVerifiedCandidateTranslations(generation, false);
+    }
+
+    private void applyVerifiedCandidateTranslations(long generation, boolean allowEmpty) {
         JSONArray entries = view.optJSONArray("candidates");
         if (entries == null || entries.length() == 0) return;
-        JSONArray translations = mergedCandidateGlosses(generation);
-        if (translations.length() == 0) return;
+        JSONArray translations = mergedCandidateGlosses(generation, true);
+        if (translations.length() == 0 && !allowEmpty) return;
         try {
             JSONObject applied = value(NativeClient.applyTranslations(session, generation,
                 translations.toString()));
@@ -2614,6 +2678,7 @@ public final class MSIMEInputService extends InputMethodService {
             if (CandidateGlossPolicy.strictOr(next.opt("session"), Long.MIN_VALUE) != session
                     || CandidateGlossPolicy.strictOr(next.opt("generation"), -1) != generation) return;
             view = next;
+            candidateTranslationAppliedGeneration = generation;
             render();
         } catch (JSONException | RuntimeException | LinkageError ignored) {
             // Online translations are optional display state.
@@ -2625,7 +2690,7 @@ public final class MSIMEInputService extends InputMethodService {
      *
      * <p>Without an installed non-English dictionary this is the account translations of the first 32 candidates, as before; with one it also covers every candidate the offline dictionaries answered, since the payload replaces the one applied before it.
      */
-    private JSONArray mergedCandidateGlosses(long generation) {
+    private JSONArray mergedCandidateGlosses(long generation, boolean includeAccount) {
         java.util.Map<String, java.util.Map<String, String>> offline =
             candidateOfflineGlosses != null && candidateOfflineGlossSession == session
                 && candidateOfflineGlossGeneration == generation ? candidateOfflineGlosses : java.util.Map.of();
@@ -2638,7 +2703,8 @@ public final class MSIMEInputService extends InputMethodService {
             if (candidate != null) texts.add(InputViewValuePolicy.textOr(candidate, "text", ""));
         }
         for (java.util.Map<String, String> glosses : offline.values()) texts.addAll(glosses.keySet());
-        boolean account = candidateTranslationAccount && candidateTranslationStore != null;
+        boolean account = includeAccount && candidateTranslationAccount && candidateTranslationStore != null
+            && candidateTranslationVerifiedGeneration == generation;
         JSONArray translations = new JSONArray();
         for (String text : texts) {
             java.util.HashMap<String, String> offlineRows =
