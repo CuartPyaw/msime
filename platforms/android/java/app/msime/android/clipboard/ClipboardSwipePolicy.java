@@ -42,7 +42,7 @@ public final class ClipboardSwipePolicy {
      */
     public static boolean claims(float dx, float dy, float touchSlop, boolean open) {
         float horizontal = Math.abs(dx);
-        if (horizontal <= Math.max(0f, touchSlop)) return false;
+        if (horizontal <= BoundsPolicy.nonNegative(touchSlop)) return false;
         if (horizontal < Math.abs(dy) * HORIZONTAL_DOMINANCE) return false;
         return open || dx < 0;
     }
