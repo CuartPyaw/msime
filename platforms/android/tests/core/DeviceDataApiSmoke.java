@@ -94,6 +94,24 @@ public final class DeviceDataApiSmoke {
         } catch (IllegalArgumentException expected) {
             check(requests.size() == 1, "no request for an unsafe id");
         }
+        AtomicReference<String> account = new AtomicReference<>("session-a");
+        CloudApi.Tokens switching = new CloudApi.Tokens() {
+            @Override public String token(String rejected) { return token; }
+            @Override public String sessionId() { return account.get(); }
+        };
+        CloudApi bound = new CloudApi((method, path, sent, body) -> {
+            requests.add(method + " " + path);
+            return new CloudApi.Exchange(204, null, null, new byte[0]);
+        }, switching, rejected -> "");
+        DeviceDataApi staleApi = new DeviceDataApi(bound.forAccountSession("session-a"), switching,
+            (path, bearer, out) -> { throw new AssertionError("no download expected"); });
+        account.set("session-b");
+        try {
+            staleApi.revokeSession("abc123");
+            throw new AssertionError("old device page must not revoke a new login");
+        } catch (CloudApi.Failure failure) {
+            check("session_changed".equals(failure.code), "old device page rejects a new login");
+        }
         api.deleteAvatar();
         check("DELETE /v1/users/me/avatar".equals(requests.get(1)), "avatar delete path");
         api.deleteAccount();

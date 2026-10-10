@@ -190,6 +190,10 @@ public final class CloudApi {
     }
 
     static Tokens accountTokens(Context application) {
+        return accountTokens(application, null);
+    }
+
+    static Tokens accountTokens(Context application, String expectedSessionId) {
         return new Tokens() {
             @Override public String token(String rejected) throws Exception {
                 return new BackendAccount(application).currentAccessToken(rejected);
@@ -197,7 +201,10 @@ public final class CloudApi {
 
             @Override public TokenSnapshot snapshot(String rejected) throws Exception {
                 BackendAccount.SessionCredential session = new BackendAccount(application).currentSession(rejected);
-                return new TokenSnapshot(session.token(), session.sessionId());
+                TokenSnapshot result = new TokenSnapshot(session.token(), session.sessionId());
+                if (expectedSessionId != null && !expectedSessionId.equals(result.sessionId()))
+                    throw new java.util.concurrent.CancellationException("account session changed");
+                return result;
             }
         };
     }

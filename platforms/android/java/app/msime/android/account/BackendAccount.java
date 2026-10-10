@@ -463,6 +463,15 @@ public final class BackendAccount {
 
     public boolean signedIn() { return !accessToken().isEmpty(); }
 
+    /** Stable local login identity for UI actions that must not outlive an account switch. */
+    public String sessionId() {
+        try {
+            return currentSession().sessionId();
+        } catch (Exception | LinkageError error) {
+            return "";
+        }
+    }
+
     /** Loads the bounded model catalogue used by the keyboard tryout chat. */
     public List<ChatModel> chatModels() throws Exception {
         SessionCredential session = currentSession();

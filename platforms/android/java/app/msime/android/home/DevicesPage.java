@@ -13,7 +13,17 @@ import java.util.List;
  * <p>设备名、平台和版本由服务端从登录时的 User-Agent 解析，解析不出时显示「未知设备」。移除当前这台就是退出登录：服务端撤销会话后再清掉本机会话与同步状态（{@link SignIn#signOut}），然后回到「我的」。
  */
 public final class DevicesPage extends DetailPage {
+    private record Loaded(String sessionId, List<DeviceDataApi.Session> sessions) {}
     @Nullable private LinearLayout column;
+    @Nullable private String loadedSessionId;
+    private long generation;
+
+    @Override public void onDestroyView() {
+        generation++;
+        loadedSessionId = null;
+        column = null;
+        super.onDestroyView();
+    }
 
     @Override protected void buildContent(LinearLayout column, Bundle args) {
         this.column = column;
@@ -24,25 +34,33 @@ public final class DevicesPage extends DetailPage {
     @Override protected void onBecameVisible() { reload(); }
 
     private void reload() {
+        long request = ++generation;
+        loadedSessionId = null;
+        if (column != null) {
+            column.removeAllViews();
+            GroupCard.add(column, null).note("正在读取…");
+        }
         HostTask.runNetwork(this, context -> {
             try {
-                return (Object) new DeviceDataApi(context).sessions();
+                String sessionId = new DeviceDataApi(context).currentAccountSessionId();
+                return (Object) new Loaded(sessionId, new DeviceDataApi(context, sessionId).sessions());
             } catch (CloudApi.Failure failure) {
                 return failure;
             }
         }, result -> {
-            if (column == null) return;
+            if (column == null || request != generation) return;
             column.removeAllViews();
             if (result instanceof CloudApi.Failure failure) {
                 GroupCard.add(column, null).note(failure.signedOut() ? "登录后可以在这里查看和移除登录过的设备。"
                     : failure.network() ? "连不上服务器，请检查网络后再试。" : "设备列表暂时读不到，请稍后再试。");
                 return;
             }
-            if (!(result instanceof List<?> sessions)) {
+            if (!(result instanceof Loaded loaded)) {
                 GroupCard.add(column, null).note("设备列表暂时读不到，请稍后再试。");
                 return;
             }
-            render(column, sessions);
+            loadedSessionId = loaded.sessionId();
+            render(column, loaded.sessions());
         });
     }
 
@@ -70,15 +88,20 @@ public final class DevicesPage extends DetailPage {
     }
 
     private void remove(DeviceDataApi.Session session) {
+        String sessionId = loadedSessionId;
+        if (sessionId == null) return;
+        long request = ++generation;
+        loadedSessionId = null;
         HostTask.runNetwork(this, context -> {
             try {
-                new DeviceDataApi(context).revokeSession(session.id());
-                if (session.current()) SignIn.signOut(context);
+                new DeviceDataApi(context, sessionId).revokeSession(session.id());
+                if (session.current()) return SignIn.signOut(context, sessionId) ? "" : "登录已改变，请重新打开设备列表";
                 return "";
             } catch (CloudApi.Failure failure) {
                 return failure.network() ? "连不上服务器，请检查网络后再试" : "没有移除，请稍后再试";
             }
         }, failure -> {
+            if (request != generation) return;
             if (failure == null) {
                 MsToast.show(requireContext(), "没有移除，请稍后再试");
             } else if (!failure.isEmpty()) {
