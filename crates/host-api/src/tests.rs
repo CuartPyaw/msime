@@ -10046,6 +10046,60 @@ fn voice_local_models_list_install_cancel_and_remove_validate_their_requests() {
 }
 
 #[test]
+fn voice_local_model_install_from_files_validates_the_paths_and_names_what_is_missing() {
+    let root = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let unrelated = downloads.path().join("unrelated.bin");
+    std::fs::write(&unrelated, b"synthetic, matches no catalog file").unwrap();
+    let listed = read(unsafe {
+        let request = json!({ "root": root.path() }).to_string();
+        msime_client_voice_local_models(request.as_ptr(), request.len())
+    });
+    // 不用默认模型：别的测试会并行地对默认模型发起安装，同一个 id 的登记是进程内共享的。
+    let id = "sense-voice-small";
+    let model = listed["value"]["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|model| model["id"] == id)
+        .unwrap()
+        .clone();
+    let archive_name = model["import_files"][0]["name"].as_str().unwrap();
+    assert!(model["import_files"][0]["url"]
+        .as_str()
+        .unwrap()
+        .starts_with("https://"));
+
+    let install = |request: serde_json::Value| {
+        let request = request.to_string();
+        read(unsafe {
+            msime_client_voice_local_model_install(
+                request.as_ptr(),
+                request.len(),
+                None,
+                std::ptr::null_mut(),
+            )
+        })
+    };
+    let missing = install(json!({ "root": root.path(), "id": id, "files": [unrelated] }));
+    assert_eq!(missing["ok"], false, "{missing}");
+    assert_eq!(
+        missing["error"],
+        format!("local_model_import_missing: {archive_name}")
+    );
+    for files in [
+        json!(["relative/model.tar.bz2"]),
+        json!(vec![unrelated.to_str().unwrap(); 17]),
+    ] {
+        let refused = install(json!({ "root": root.path(), "id": id, "files": files }));
+        assert_eq!(refused["error"], "invalid local model import", "{refused}");
+    }
+    let unknown = install(json!({ "root": root.path(), "id": "no-such-model", "files": [] }));
+    assert_eq!(unknown["error"], "local_model_unknown", "{unknown}");
+    assert!(!root.path().join(id).exists());
+}
+
+#[test]
 fn mcp_status_and_install_check_their_requests_before_touching_a_file() {
     let status =
         |request: &[u8]| read(unsafe { msime_client_mcp_status(request.as_ptr(), request.len()) });
