@@ -6659,7 +6659,7 @@ public final class MSIMEInputService extends InputMethodService {
                 labels[index] = index < kana.size() ? kana.get(index) : "";
             if (tapDirection > 0 && tapDirection < kana.size() && !kana.get(tapDirection).isEmpty())
                 labels[0] = kana.get(tapDirection);
-            selectedDirection = KeyboardGeometry.bounded(direction, 0, labels.length - 1);
+            selectedDirection = BoundsPolicy.bounded(direction, 0, labels.length - 1);
             anchor.getLocationOnScreen(anchorLocation);
             anchorWidth = anchor.getWidth();
             anchorHeight = anchor.getHeight();

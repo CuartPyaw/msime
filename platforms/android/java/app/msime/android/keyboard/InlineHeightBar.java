@@ -91,7 +91,7 @@ public final class InlineHeightBar extends LinearLayout {
 
     /** 把百分比夹进 75–160。 */
     public static int clamp(int value) {
-        return KeyboardGeometry.bounded(value, MIN_PERCENT, MAX_PERCENT);
+        return BoundsPolicy.bounded(value, MIN_PERCENT, MAX_PERCENT);
     }
 
     /**
