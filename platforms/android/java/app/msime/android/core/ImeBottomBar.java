@@ -153,8 +153,8 @@ final class ImeBottomBar {
         Window window = dialog == null ? null : dialog.getWindow();
         if (window != null) {
             WindowInsets screen = window.getWindowManager().getCurrentWindowMetrics().getWindowInsets();
-            navigation = Math.max(navigation, screen.getInsets(WindowInsets.Type.navigationBars()).bottom);
-            gesture = Math.max(gesture, screen.getInsets(WindowInsets.Type.mandatorySystemGestures()).bottom);
+            navigation = BoundsPolicy.atLeast(navigation, screen.getInsets(WindowInsets.Type.navigationBars()).bottom);
+            gesture = BoundsPolicy.atLeast(gesture, screen.getInsets(WindowInsets.Type.mandatorySystemGestures()).bottom);
             // 只有视图的 inset 时同样分不出三键导航，窗口还没建好就先不画。
             navigationKnown = true;
         }
