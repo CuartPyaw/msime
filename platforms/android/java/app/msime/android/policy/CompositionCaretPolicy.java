@@ -71,7 +71,7 @@ public final class CompositionCaretPolicy {
         int offset = tapped - BoundsPolicy.nonNegative(prefixLength);
         if (offset <= 0) return 0;
         if (caretMark >= 0 && offset > caretMark) offset--;
-        return map[Math.min(offset, display.length())];
+        return map[BoundsPolicy.atMost(offset, display.length())];
     }
 
     /** 光标 {@code caret} 该画在读音的哪个下标前；光标在末尾或对不上时返回 -1。同一个光标位置对应好几处时（中间隔着显示用的分隔）画在最后一处，也就是分隔后面：引擎的退格先删光标前的切分。 */
